@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
+  Download,
   Flame,
   Pencil,
   Plus,
@@ -25,6 +26,7 @@ import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
 import { AiKnowledgeShell } from './AiKnowledgeShell'
+import { AiMemoryImportModal } from './AiMemoryImportModal'
 import {
   type AiKnowledgeScope,
   memoryScopeName,
@@ -76,6 +78,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   const [bearbeitet, setBearbeitet] = useState<AiMemoryEntry | null>(null)
   const [serverNamen, setServerNamen] = useState<Map<number, string>>(new Map())
   const [busy, setBusy] = useState(false)
+  const [importOffen, setImportOffen] = useState(false)
 
   // Accordion-Zustand: Standardmäßig alle eingeklappt
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
@@ -339,6 +342,12 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
               <span className="hidden sm:inline">
                 {allExpanded ? t('ai.memory.collapseAll') : t('ai.memory.expandAll')}
               </span>
+            </Button>
+          )}
+          {darfAendern && (
+            <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={() => setImportOffen(true)}>
+              <Download className="h-4 w-4" aria-hidden="true" />
+              {t('ai.memory.import.button')}
             </Button>
           )}
           {darfAendern && entries.length > 0 && (
@@ -605,6 +614,15 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
           </p>
         )}
       </div>
+
+      {darfAendern && (
+        <AiMemoryImportModal
+          open={importOffen}
+          onOpenChange={setImportOffen}
+          scope={scope}
+          onImported={() => laden(1).catch(() => toast.error(t('ai.memory.errors.load')))}
+        />
+      )}
 
       <Pagination
         page={seite}

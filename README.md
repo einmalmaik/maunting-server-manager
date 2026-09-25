@@ -1,156 +1,191 @@
 ![Status](https://img.shields.io/badge/Status-WIP-orange)
 
 > [!IMPORTANT]
-> Dieses Panel befindet sich in aktiver Entwicklung. Der Einsatz in produktiven Umgebungen ohne vorheriges Backup wird nicht empfohlen.
+> MSM wird gerade aktiv entwickelt. Setz es bitte nicht produktiv ein, ohne vorher ein Backup zu machen.
 
 # Maunting Service Manager (MSM)
 
-Maunting Service Manager (MSM) ist eine selbstgehostete Plattform für Infrastruktur und persönliche Organisation. Sie verbindet die Verwaltung von Game-Servern, Anwendungen und Linux-Workloads mit einer KI-gestützten Kommandozentrale, Kalendern, Recherche und regionalen Lageinformationen. Der Betreiber behält dabei die Kontrolle: Zugriffe, Werkzeuge und jede schreibende Aktion werden serverseitig geprüft.
+MSM ist ein Panel, das du selbst hostest. Damit verwaltest du Game-Server, Anwendungen und Linux-Dienste an einem Ort. Dazu kommen ein KI-Assistent, Kalender, Notizen, ein Messenger und Recherche-Werkzeuge.
+
+Die Kontrolle bleibt bei dir: Wer was darf, welche Werkzeuge die KI benutzen kann und jede Änderung prüft der Server selbst, nicht der Browser.
+
+![MSM-Dashboard mit laufenden Game-Servern, Node-Kapazität und Systemstatus](docs/images/dashboard.png)
+*Das Dashboard: Welche Server laufen, wie voll deine Nodes sind und ob alles in Ordnung ist.*
+
+![KI-Assistent beantwortet eine Frage zur Serverlage mit Werkzeugaufrufen und Tabelle](docs/images/ki-assistent.png)
+*Der KI-Assistent: Er schaut sich Status, Logs und freien Platz selbst an und antwortet dir in Klartext.*
+
+<sub>Die Bilder zeigen Demodaten.</sub>
 
 ---
 
 ## Was ist MSM?
 
-MSM trennt die Benutzeroberfläche (Control Plane) von den eigentlichen Ausführungsservern (Nodes). Sämtliche Anwendungen und Game-Server laufen isoliert in Rootless-Docker-Containern.
+MSM trennt zwei Dinge: das **Panel**, das du im Browser bedienst, und die **Nodes**, also die Server, auf denen deine Spiele und Anwendungen wirklich laufen. Alles läuft dort in abgeschotteten Docker-Containern ohne Root-Rechte.
 
-### Anwendungsbereiche
-- **Game-Server**: Verwaltung, Start, Stopp, Neustart und automatische Portvergabe für unterstützte Titel (z. B. Conan Exiles, DayZ, Minecraft, ARK).
-- **Linux-Anwendungen & Workloads**: Bereitstellung generischer Serverdienste, Datenbanken oder Web-Tools über das flexible Blueprint-System.
-- **Multi-Node-Betrieb**: Steuerung mehrerer physischer Server oder VPS über ein einziges Dashboard.
+### Wofür du MSM nutzen kannst
+- **Game-Server**: anlegen, starten, stoppen, neu starten. Ports vergibt MSM automatisch. Unterstützt werden unter anderem Conan Exiles, DayZ, Minecraft und ARK.
+- **Linux-Anwendungen**: Datenbanken, Web-Tools oder andere Dienste über Blueprints bereitstellen.
+- **Mehrere Server**: beliebig viele eigene Server oder VPS über ein einziges Dashboard steuern.
 
-### Abgrenzung
-- Kein Game-Server-Hosting-Anbieter: MSM setzt eigene Linux-Server voraus (z. B. bei Hetzner, OVH, netcup oder eigener Hardware).
-- Kein Windows-Tool: Die Control Plane und die Nodes setzen ein Linux-Betriebssystem voraus.
-- Kein Ersatz für Root-Rechte bei der Erstinstallation: Der Bootstrapper benötigt einmalig Root-Rechte zur Systemeinrichtung. Im regulären Betrieb laufen Panel und Container unprivilegiert.
-
----
-
-## Kernfunktionen
-
-### 1. Multinode System (Multi-Node-Architektur)
-Eine zentrale Control Plane steuert beliebig viele Nodes. Neue Nodes werden über ein mTLS-Verfahren mit HMAC-Challenge und expliziter Bestätigung durch den Administrator eingebunden.
-
-### 2. Guardian Engine (Autonomes Self-Healing)
-Auf jedem Node läuft die Guardian Engine als lokaler Hintergrunddienst. Sie überwacht Container-Zustände sowie HTTP-, TCP- und Regex-Probes. Bei Ausfällen führt der Node selbstständig definierte Recovery-Aktionen (z. B. Container-Neustart oder Quarantäne) durch, auch wenn die zentrale Control Plane offline oder nicht erreichbar ist. Incidents und Statusänderungen werden lokal protokolliert und synchronisiert, sobald die Verbindung wieder steht.
-
-### 3. Blueprint Integration
-Anwendungen werden nicht über starre Skripte, sondern über deklarative Blueprint-Dateien (YAML/JSON) definiert. Ein Blueprint legt Umgebungsvariablen, Ports, Docker-Images, Lautstärken-Mounts, Konfigurations-Templates und Guardian-Healthchecks fest. MSM ist dadurch nicht auf Game-Server beschränkt.
-
-### 4. Steam Workshop Integration
-Integrierte Mod- und Workshop-Verwaltung für unterstützte Spiele. Der Agent lädt Workshop-Objekte über SteamCMD direkt auf den Node herunter, aktualisiert diese und bindet die Pfade in die Container-Struktur ein.
-
-### 5. Rootless Docker Isolation
-Sämtliche Container laufen über den Rootless-Docker-Daemon des unprivilegierten `msm`-Benutzers (`unix:///run/user/<uid>/docker.sock`). Der Panel-Benutzer besitzt keine Mitgliedschaft in der globalen `docker`-Gruppe. Game-Server-Ports liegen oberhalb von 1024, wodurch keine Root-Rechte oder `setcap`-Rechteerweiterungen erforderlich sind.
-
-### 6. Zero-Knowledge Backups via DIS (`@msdis/shield`)
-Verschlüsselung von Server- und Datenbank-Backups über den DIS Cryptographic Shield. Daten werden lokal mit AES-256-GCM und Argon2id verschlüsselt, bevor ein Streaming-Upload zu S3-kompatiblem Object Storage erfolgt. Schlüssel und S3-Zugangsdaten liegen niemals im Klartext vor.
-
-### 7. Komponenten-Migration (`migrate-panel-components.sh`)
-Integrierter CLI-Assistent zum Verschieben von Control Plane, externem Frontend oder einzelnen Server-Instanzen zwischen Nodes inklusive atomarem Cutover und Rollback-Schutz.
-
-### 8. Hoster- und Shop-Anbindung (optional)
-Ein externer Shop kann Server über eine idempotente Desired-State-API bestellen, sperren und kündigen. Die Anbindung verwendet dieselbe Provisionierungs- und Lifecycle-Logik wie das Panel: Es gibt keinen zweiten Weg, einen Server anzulegen. Kunden gelangen über einen signierten Einmal-Link direkt ins Panel und benötigen kein zweites Passwort. **Ohne angelegte Integration ändert sich am Self-Hosted-Betrieb nichts.** Einrichtung und Betrieb in [`docs/self-hosting.md`](docs/self-hosting.md#hoster--und-shop-anbindung-optional-phase-6), die vollständige Endpunkt-, Webhook- und Signaturreferenz in [`docs/hoster-api.md`](docs/hoster-api.md) (im Panel auch unter **Hilfe → Hoster-API**).
-
-### 9. Sprachmodus (optional)
-Der Betreiber kann zwischen zwei Wegen wählen. Ohne OpenAI Realtime bleibt der bestehende Ablauf aus Transkription, Chatmodell, Pipecat und ElevenLabs unverändert. Ein panelweit aktivierter OpenAI-Realtime-Zugang führt Sprache dagegen direkt per WebRTC zwischen Browser beziehungsweise Desktop-App und OpenAI; das Backend hält über einen Sideband-Kanal Werkzeuge, RBAC, Guardian, Worker und Abrechnung unter Kontrolle. API-Schlüssel erreichen den Client nie. Der Realtime-Weg speichert keine Abschriften oder gesprochenen Antworten im Chat und fällt bei einem Fehler nicht still auf ElevenLabs zurück. Einrichtung und Netzwerkvoraussetzungen stehen in [`docs/self-hosting.md`](docs/self-hosting.md#sprachmodus-mit-der-ki-reden).
-
-### 10. Getrennte Zugangsdaten und Kubernetes
-GitHub-Token und Steam-Konten können panelweit, pro Benutzer oder pro Server hinterlegt werden. Ein Server verweist auf Zugangsdaten, statt deren Werte zu kopieren. Der Klartext ist nach dem Speichern nicht mehr auslesbar. Der Betreiber entscheidet, ob ein Server ohne eigene Zuordnung den zentralen Zugang nutzen darf. Für den Cluster-Betrieb liegen Kubernetes-Manifeste unter [`deploy/kubernetes/`](deploy/kubernetes/README.md) bereit (sie betreiben die Control Plane; Gameserver bleiben Docker-Container auf den angebundenen Nodes). **Der Standard-Self-Hosted-Betrieb funktioniert ohne beides.**
-
-### 11. KI-Kommandozentrale, Recherche und persönliche Organisation
-MSM ist mehr als ein Server-Panel. Der KI-Chat und der Sprachmodus nutzen einen zentralen, serverseitig kontrollierten Werkzeugkatalog. Die KI kann, abhängig von den erteilten Berechtigungen, Serverzustände, Logs, Dateien und Backups auswerten, Erinnerungen und Kalenderdaten einbeziehen, Webrecherchen durchführen und Aufgaben vorbereiten. Schreibende Änderungen werden als prüfbare Vorschläge ausgeführt oder benötigen eine bewusst aktivierte serverseitige Autonomie-Policy.
-
-Für regionale Fragen kombiniert die KI Geocoding, Wetter, ein Bild der Region (mit Copernicus-Zugang die neueste Sentinel-2-Szene, ohne ihn ein schlüsselfreies Kartenbild) sowie verfügbare Verkehrs-, Nachrichten- und öffentliche soziale Signale. Die Ergebnisse erscheinen im Chat und Sprachmodus in einer interaktiven Karten- beziehungsweise Globusansicht. Satelliten- und Anbieterzugänge bleiben verschlüsselt im Backend; Rohdaten und Schlüssel werden nicht an den Browser gegeben.
-
-Mit einem aktiven OpenAI-Realtime-Zugang kann Audio direkt per WebRTC zwischen Browser oder Desktop-App und OpenAI laufen. MSM behält über einen serverseitigen Sideband-Kanal die Hoheit über Werkzeuge, RBAC, Bestätigungen, Guardian und Abrechnung. API-Schlüssel erreichen den Client nicht. Details zu Datenflüssen, Berechtigungen und den verfügbaren Werkzeugen stehen in [`docs/ai-system-architecture.md`](docs/ai-system-architecture.md).
+### Was MSM nicht ist
+- **Kein Hoster**: Du brauchst eigene Linux-Server, zum Beispiel bei Hetzner, OVH, netcup oder zu Hause.
+- **Kein Windows-Programm**: Panel und Nodes laufen nur unter Linux.
+- **Nicht ganz ohne Root**: Für die Installation braucht der Installer einmal Root-Rechte. Danach laufen Panel und Container ohne.
 
 ---
 
-## Vergleich: MSM vs. Pelican Panel vs. Klassische Panels
+## Was MSM kann
 
-Die folgende Tabelle vergleicht verifizierte technische Eigenschaften von MSM mit **Pelican Panel** (dem modernen Nachfolger von Pterodactyl) und **Klassischen Panels** (wie Pterodactyl v1 oder AMP).
+### 1. Mehrere Nodes
+Ein Panel steuert beliebig viele Nodes. Neue Nodes meldest du über ein gesichertes Verfahren an (mTLS mit HMAC-Challenge), und du bestätigst jeden Node als Administrator selbst.
 
-| Eigenschaft / Funktion | Maunting Service Manager (MSM) | Pelican Panel | Klassische Panels (z. B. Pterodactyl v1, AMP) |
+### 2. Guardian: Server reparieren sich selbst
+Auf jedem Node passt die Guardian Engine auf deine Container auf. Sie prüft Zustand, HTTP, TCP und Log-Muster. Fällt etwas aus, startet sie den Container neu oder nimmt ihn aus dem Verkehr, auch wenn das Panel gerade nicht erreichbar ist. Was passiert ist, schreibt sie mit und meldet es, sobald das Panel wieder da ist.
+
+### 3. Blueprints statt Skripte
+Jede Anwendung beschreibst du in einer Blueprint-Datei (YAML oder JSON): Image, Ports, Umgebungsvariablen, Ordner, Konfigurationsvorlagen und Guardian-Prüfungen. Deshalb ist MSM nicht auf Game-Server beschränkt.
+
+### 4. Steam Workshop
+Mods aus dem Steam Workshop lädt der Node direkt per SteamCMD herunter, hält sie aktuell und bindet sie in den Server ein.
+
+### 5. Container ohne Root
+Alle Container laufen im Rootless-Docker des Benutzers `msm` (`unix:///run/user/<uid>/docker.sock`). Das Panel ist nicht in der `docker`-Gruppe. Game-Server-Ports liegen über 1024, deshalb braucht es weder Root noch `setcap`.
+
+### 6. Verschlüsselte Backups (DIS)
+Backups von Servern und Datenbank werden verschlüsselt, bevor sie deinen Rechner verlassen (AES-256-GCM, Schlüssel per Argon2id). Erst dann gehen sie zu einem S3-kompatiblen Speicher. Schlüssel und S3-Zugangsdaten liegen nie im Klartext herum.
+
+### 7. Umziehen mit einem Assistenten
+Mit `migrate-panel-components.sh` ziehst du Panel, Frontend oder einzelne Server auf einen anderen Node um. Der Wechsel passiert in einem Schritt, und wenn etwas schiefgeht, geht es zurück zum alten Stand.
+
+### 8. Shop-Anbindung (optional)
+Ein eigener Shop kann über eine API Server bestellen, sperren und kündigen. Doppelt gesendete Aufträge schaden nicht (idempotent). Er nutzt dabei genau denselben Weg wie das Panel, es gibt keinen zweiten. Kunden kommen über einen signierten Einmal-Link direkt ins Panel, ohne zweites Passwort. **Solange du keine Anbindung anlegst, ändert sich nichts.** Einrichtung in [`docs/self-hosting.md`](docs/self-hosting.md#hoster--und-shop-anbindung-optional-phase-6), alle Endpunkte, Webhooks und Signaturen in [`docs/hoster-api.md`](docs/hoster-api.md) (im Panel unter **Hilfe → Hoster-API**).
+
+### 9. Mit der KI sprechen (optional)
+Du hast zwei Wege. Ohne OpenAI Realtime läuft Sprache wie bisher über Transkription, Chatmodell, Pipecat und ElevenLabs. Schaltest du OpenAI Realtime für das Panel ein, geht die Sprache direkt per WebRTC zwischen Browser oder Desktop-App und OpenAI. Das Backend behält dabei über einen eigenen Kanal Werkzeuge, Rechte, Bestätigungen, Guardian, Worker und Abrechnung im Griff. Der API-Schlüssel landet nie beim Client. Dieser Weg speichert weder Abschriften noch gesprochene Antworten im Chat und fällt bei einem Fehler nicht heimlich auf ElevenLabs zurück. Einrichtung und Netzwerk in [`docs/self-hosting.md`](docs/self-hosting.md#sprachmodus-mit-der-ki-reden).
+
+### 10. Zugangsdaten an einem Ort, Kubernetes möglich
+GitHub-Token und Steam-Konten hinterlegst du für das ganze Panel, für einen Benutzer oder für einen einzelnen Server. Ein Server verweist nur darauf, statt sie zu kopieren. Nach dem Speichern kann niemand den Klartext mehr auslesen. Du entscheidest, ob Server ohne eigene Zuordnung den zentralen Zugang nutzen dürfen. Für Kubernetes liegen Manifeste unter [`deploy/kubernetes/`](deploy/kubernetes/README.md). Sie betreiben das Panel; die Game-Server bleiben Docker-Container auf den Nodes. **Für den normalen Betrieb brauchst du beides nicht.**
+
+### 11. KI-Assistent, Recherche und Organisation
+Der KI-Assistent im Chat und per Sprache arbeitet mit einem festen Satz Werkzeuge, den der Server kontrolliert. Je nachdem, was du ihm erlaubst, liest er Serverstatus, Logs, Dateien und Backups, nutzt Erinnerungen und deinen Kalender, sucht im Web und bereitet Aufgaben vor. Ändern darf er nur mit deiner Bestätigung, außer du schaltest bewusst die Autonomie ein.
+
+Fragst du nach einem Ort, holt er Koordinaten, Wetter, ein Bild der Gegend (mit Copernicus-Zugang das neueste Sentinel-2-Satellitenbild, sonst ein Kartenbild) und verfügbare Verkehrs-, Nachrichten- und öffentliche Social-Media-Signale. Das Ergebnis siehst du auf einer Karte oder einem Globus. Zugangsdaten und Rohdaten bleiben verschlüsselt im Backend und erreichen den Browser nie.
+
+Mehr zu Datenflüssen, Rechten und Werkzeugen steht in [`docs/ai-system-architecture.md`](docs/ai-system-architecture.md).
+
+---
+
+## MSM im Vergleich
+
+Hier siehst du MSM neben **Pelican Panel** (dem Nachfolger von Pterodactyl) und **klassischen Panels** wie Pterodactyl v1 oder AMP.
+
+| | MSM | Pelican Panel | Klassische Panels (Pterodactyl v1, AMP) |
 |---|---|---|---|
-| **Architektur** | Central Control Plane + Multi-Node (Multinode System) | Panel + Node-Architektur (Wings) | Monolithisch oder Panel + Daemon (Wings/AMP Instance) |
-| **Container-Sicherheit** | Standardmäßig Rootless Docker pro Node-User (`unix:///run/user/...`) | Standardmäßig privilegierter Root-Docker-Daemon | Standardmäßig privilegierter Root-Docker-Daemon |
-| **Autonomes Self-Healing** | **Ja (Guardian Engine)**: Lokale Probes und Recovery auf dem Agenten, voll funktionsfähig auch bei Ausfall der Control Plane | **Nein**: Statusüberwachung hängt an Panel-Verbindung und Daemon-Heartbeats | **Nein**: Daemon führt Befehle der zentralen Steuerung aus |
-| **Anwendungs-Deklaration** | **Blueprints (YAML/JSON)**: Flexible Schemas für Game-Server, Web-Apps, Datenbanken & Custom Guardian Probes | **Egg-System**: JSON-Templates für Pterodactyl/Pelican-Container | **Egg-System / Feste Module**: Spezifische Skripte oder fest verdrahtete Anwendungsmodule |
-| **Steam Workshop Manager** | **Nativ im Agenten**: Automatische Downloads, Updates und Struktur-Mapping via SteamCMD | **Teilweise**: Abhängig von Community-Eggs oder externen Zusatzskripten | **Teilweise**: Über Community-Addons oder manuelle Skripte |
-| **Backup-Verschlüsselung** | **Zero-Knowledge (DIS)**: Clientseitige AES-256-GCM + Argon2id Verschlüsselung vor S3-Streaming | **Standard S3**: Unverschlüsselte Uploads oder providerseitige S3-Verschlüsselung | **Standard S3 / Lokal**: Unverschlüsseltes Tar/Zip auf S3 oder lokaler Speicher |
-| **Komponenten-Migration** | **Ja**: Interaktiver Assistent (`migrate-panel-components.sh`) für Cutover von Frontend, Servern & Control Plane | **Manuell**: CLI-Befehle, manuelle Dateiverlagerung und Datenbankanpassungen | **Manuell**: SSH-Kopiervorgänge, Dumps und manuelle Pfadkorrekturen |
-| **Installation & HTTPS** | Ein-Befehl-Bootstrap mit Caddy Auto-HTTPS (Let's Encrypt) & PostgreSQL | CLI-Installer oder Docker-Compose-Setup | Manuelle Webserver- (Nginx/Apache) und Datenbank-Einrichtung oder Skripte |
+| **Aufbau** | Ein Panel, beliebig viele Nodes | Panel und Nodes (Wings) | Ein Programm, oder Panel und Daemon |
+| **Container-Sicherheit** | Rootless Docker je Node-Benutzer | Docker mit Root-Rechten | Docker mit Root-Rechten |
+| **Selbstheilung** | **Ja (Guardian)**: prüft und repariert auf dem Node selbst, auch wenn das Panel ausfällt | **Nein**: hängt an der Verbindung zum Panel | **Nein**: der Daemon führt nur Befehle aus |
+| **Anwendungen beschreiben** | **Blueprints (YAML/JSON)** für Spiele, Web-Apps, Datenbanken und eigene Prüfungen | **Eggs** (JSON-Vorlagen) | **Eggs oder feste Module** |
+| **Steam Workshop** | **Eingebaut**: Downloads und Updates per SteamCMD | **Teilweise**, über Community-Eggs oder Zusatzskripte | **Teilweise**, über Addons oder Handarbeit |
+| **Backups verschlüsseln** | **Ja, vor dem Upload** (AES-256-GCM, Argon2id) | Unverschlüsselt oder vom S3-Anbieter verschlüsselt | Unverschlüsselt, auf S3 oder lokal |
+| **Umziehen** | **Assistent** für Frontend, Server und Panel | Von Hand per Befehlszeile | Von Hand per SSH und Dumps |
+| **Installation und HTTPS** | Ein Befehl, HTTPS automatisch per Caddy, PostgreSQL inklusive | Installer oder Docker Compose | Webserver und Datenbank von Hand |
 
 ---
 
-## Systemanforderungen & Betriebssysteme
+## Was du brauchst
 
-### Hardware & Netzwerk
-1. **Root-Zugang**: SSH-Zugriff mit Root-Rechten für die Erstinstallation.
-2. **Domain**: FQDN (z. B. `panel.example.com`) mit A/AAAA-Record auf die Server-IP für automatische HTTPS-Zertifikate.
-3. **Hardware**: Mindestens 2 CPU-Kerne, 2 GB RAM für die Control Plane. Ressourcen für Game-Server kommen hinzu.
+### Vorher bereitlegen
+1. **Root-Zugang** per SSH für die Installation.
+2. **Eine Domain** (z. B. `panel.example.com`), deren A- oder AAAA-Eintrag auf deinen Server zeigt. Darüber bekommt das Panel automatisch ein HTTPS-Zertifikat.
+3. **Genug Leistung**, siehe unten. Die Werte gelten nur für das Panel; deine Game-Server brauchen ihre Ressourcen zusätzlich.
 
-### Betriebssystem-Kompatibilität
+### Hardware für das Panel
 
-MSM erfordert ein Linux-Betriebssystem mit Systemd und Docker-Unterstützung.
-
-| Betriebssystem / Distribution | Status | Anmerkung |
+| | Minimum | Empfohlen |
 |---|---|---|
-| **Ubuntu 24.04.4 LTS** | 🟢 **Offiziell unterstützt** | Haupt-Entwicklungs- und primäres Testsystem |
-| **Ubuntu 22.04 LTS** | 🟡 **Unsicher** | Bisher ungetestet, noch keine Community-Rückmeldung vorliegend |
-| **Debian 12 (Bookworm)** | 🟡 **Unsicher** | Bisher ungetestet, noch keine Community-Rückmeldung vorliegend |
-| **Debian 11 (Bullseye)** | 🟡 **Unsicher** | Bisher ungetestet, noch keine Community-Rückmeldung vorliegend |
-| **AlmaLinux 9** | 🟡 **Unsicher** | Bisher ungetestet, noch keine Community-Rückmeldung vorliegend |
-| **Rocky Linux 9** | 🟡 **Unsicher** | Bisher ungetestet, noch keine Community-Rückmeldung vorliegend |
-| **Fedora Server (40+)** | 🟡 **Unsicher** | Bisher ungetestet, noch keine Community-Rückmeldung vorliegend |
-| **Arch Linux** | 🟡 **Unsicher** | Bisher ungetestet, noch keine Community-Rückmeldung vorliegend |
-| **Alpine Linux** | 🔴 **Funktioniert nicht** | Inkompatibel (kein Standard-Systemd, glibc-Abweichungen) |
-| **Windows / Windows Server** | 🔴 **Funktioniert nicht** | Inkompatibel (setzt nativen Linux-Kernel & Systemd voraus) |
+| **CPU** | 2 vCPU | 4 vCPU |
+| **RAM** | 4 GB | 8 GB |
+| **Speicher** | 15 GB SSD | 40 GB SSD |
 
-**Status-Kategorien:**
-- 🟢 **Offiziell unterstützt**: Auf diesem Betriebssystem (Ubuntu 24.04.4 LTS) wird MSM entwickelt, aktiv gepflegt und getestet.
-- 🟡 **Unsicher**: Noch nicht vom Entwickler oder der Community getestet (Status offen, Rückmeldungen willkommen).
-- 🔴 **Funktioniert nicht**: Aus architektonischen Gründen inkompatibel oder nicht unterstützt.
+**Warum 4 GB RAM?** Das meiste braucht das KI-Gedächtnis. Es rechnet mit einem kleinen Sprachmodell direkt auf deinem Server, damit deine Notizen nicht zu einem fremden Dienst müssen. Gemessen:
+
+| Was | Arbeitsspeicher |
+|---|---|
+| Backend, wenn nichts los ist | ca. 0,25 GB |
+| Backend, sobald das KI-Gedächtnis benutzt wird | ca. 1,3 GB (beim Laden kurz 1,7 GB) |
+| Verschlüsselungsdienst (DIS) | ca. 0,18 GB, plus 128 MB pro gleichzeitiger Anmeldung |
+| Datenbank (PostgreSQL, klein) | ca. 0,06 GB |
+| Frontend bauen bei Installation und Update | kurz bis 1,1 GB. Das Panel ist dabei aus, beides fällt also nicht zusammen. |
+
+Dazu kommen Linux selbst, Caddy, Redis und der Node-Agent. **Mit 2 GB** läuft das Panel nur, wenn du das KI-Gedächtnis nie benutzt, und zum Bauen brauchst du dann Swap. Die Empfehlung lässt Luft für Anrufe (LiveKit), Websuche (SearXNG), mehrere Benutzer gleichzeitig und eine wachsende Datenbank.
+
+**Speicherplatz:** Python-Umgebung ca. 0,7 GB, Sprachmodell ca. 0,5 GB, Bau-Werkzeuge fürs Frontend ca. 0,3 GB, dazu Linux, Datenbank und die Container-Images der Zusatzdienste. Bei jedem Update legt `update.sh` eine Sicherung und einen Datenbank-Dump in `/opt/msm/backups` ab und löscht alte **nicht** von selbst. Schau dort ab und zu rein, wenn du oft aktualisierst.
+
+**CPU:** Im Ruhezustand braucht das Backend etwa 1,5 % eines Kerns. Kurz mehr ist es beim ersten Laden des Sprachmodells (ca. 6 Sekunden) und beim Bauen des Frontends (auf einem schnellen Desktop-Prozessor etwa eine Minute, auf einem kleinen VPS länger).
+
+<sub>Gemessen am 25.09.2026 auf einem Entwicklungsrechner (AMD Ryzen 7 5800X, Windows, Python 3.13, Node 22). Unter Linux weichen die Werte leicht ab.</sub>
+
+### Betriebssystem
+
+MSM braucht Linux mit systemd und Docker.
+
+| Betriebssystem | Status | Hinweis |
+|---|---|---|
+| **Ubuntu 24.04.4 LTS** | 🟢 **Unterstützt** | Darauf wird entwickelt und getestet |
+| **Ubuntu 22.04 LTS** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
+| **Debian 12 (Bookworm)** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
+| **Debian 11 (Bullseye)** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
+| **AlmaLinux 9** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
+| **Rocky Linux 9** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
+| **Fedora Server (40+)** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
+| **Arch Linux** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
+| **Alpine Linux** | 🔴 **Geht nicht** | Kein Standard-systemd, andere glibc |
+| **Windows / Windows Server** | 🔴 **Geht nicht** | Braucht einen Linux-Kernel und systemd |
+
+- 🟢 **Unterstützt**: Hier wird MSM entwickelt, gepflegt und getestet.
+- 🟡 **Ungetestet**: Hat noch niemand ausprobiert. Rückmeldungen sind willkommen.
+- 🔴 **Geht nicht**: Passt vom Aufbau her nicht zu MSM.
 
 ---
 
 ## Installation
 
-### Erstinstallation per Bootstrap
+### Mit einem Befehl installieren
 
-Verbinde dich per SSH auf deinen Server:
+Verbinde dich per SSH mit deinem Server:
 
 ```bash
 ssh root@DEINE-SERVER-IP
 ```
 
-Führe den Installationsbefehl aus:
+Starte dann die Installation:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh | sudo bash -s -- --domain panel.example.com
 ```
 
-Ersetze `panel.example.com` durch deine eigene Domain. 
+Ersetze `panel.example.com` durch deine eigene Domain.
 
-Der Installer richtet automatisch folgende Komponenten ein:
-- PostgreSQL-Datenbank und Redis-Cache
-- Rootless Docker für den `msm`-Benutzer
-- DIS-Cryptographic-Sidecar
-- LiveKit-Sidecar für Sprach-, Video- und Gruppenanrufe im Messenger
-- Lokaler Node-Agent und Guardian Engine
-- Caddy Webserver mit automatischem HTTPS-Zertifikat
-- Systemd-Dienste und Aktualisierungstimer
+Der Installer richtet das alles für dich ein:
+- PostgreSQL als Datenbank und Redis als Cache
+- Rootless Docker für den Benutzer `msm`
+- den Verschlüsselungsdienst (DIS)
+- LiveKit für Sprach-, Video- und Gruppenanrufe im Messenger
+- den lokalen Node-Agenten mit Guardian
+- Caddy als Webserver mit automatischem HTTPS
+- die systemd-Dienste und den Update-Timer
 
-### Nach der Installation
+### Danach
 
-1. Rufe die angezeigte Panel-URL im Browser auf.
-2. Schließe den Ersteinrichtungs-Assistenten ab.
-3. Erstelle das Administrator-Konto (Owner).
-4. Erstelle den ersten Server oder binde weitere Nodes ein.
+1. Öffne die angezeigte Adresse im Browser.
+2. Geh die Ersteinrichtung durch.
+3. Leg dein Administrator-Konto (Owner) an.
+4. Erstell deinen ersten Server oder binde weitere Nodes ein.
 
 ---
 
-## Architektur
+## So hängt alles zusammen
 
 ```
 ┌─────────────────────────────────────────┐
@@ -183,35 +218,35 @@ Der Installer richtet automatisch folgende Komponenten ein:
 
 ## Sicherheit
 
-- **HTTPS**: Automatische Zertifikate von Let's Encrypt via Caddy Proxy.
-- **Netzwerk-Isolation**: UFW-Firewall-Regeln beschränken Zugriffe auf SSH (22), Web (80/443) und definierte Game-Ports.
-- **Fail2ban**: Schutz vor Brute-Force-Angriffen auf SSH und Panel-Endpunkte.
-- **Authentifizierung**: JWT mit kurzlebigen Access-Tokens (15 Min.) und Refresh-Tokens (30 Tage).
-- **Zwei-Faktor-Authentifizierung (2FA)**: TOTP mit Wiederherstellungscodes.
-- **Container-Isolation**: Rootless Docker ohne globale Root-Rechte.
-- **Ressourcenbegrenzung**: CPU-, Arbeitsspeicher- und Disk-Limits pro Container konfigurierbar.
+- **HTTPS**: Zertifikate kommen automatisch von Let's Encrypt über Caddy.
+- **Firewall**: UFW lässt nur SSH (22), Web (80/443) und die Game-Ports durch.
+- **Fail2ban**: bremst Brute-Force-Angriffe auf SSH und das Panel aus.
+- **Anmeldung**: kurzlebige Zugangstoken (15 Minuten) und Refresh-Token (30 Tage).
+- **Zwei-Faktor-Anmeldung**: per TOTP-App, mit Wiederherstellungscodes.
+- **Container**: laufen per Rootless Docker ohne Root-Rechte.
+- **Grenzen pro Container**: CPU, Arbeitsspeicher und Speicherplatz einstellbar.
 
 ---
 
-## Update & Wartung
+## Updates
 
-### Manuelles Update
+### Von Hand aktualisieren
 
 ```bash
 sudo bash /opt/msm/update.sh
 ```
 
-Der Updater erstellt vor Schema-Änderungen einen PostgreSQL-Dump, versetzt das Panel kurzzeitig in den Wartungsmodus und prüft die Erreichbarkeit der Dienste. Laufende Game-Server auf den Nodes werden während des Updates nicht unterbrochen.
+Vor jeder Änderung an der Datenbank sichert der Updater sie. Das Panel ist kurz im Wartungsmodus, danach prüft er, ob alles wieder läuft. Deine Game-Server auf den Nodes laufen währenddessen einfach weiter.
 
-### Automatisches Update (Optional)
+### Automatisch aktualisieren (optional)
 
-In der Konfigurationsdatei `/opt/msm/backend/.env` aktivieren:
+Schalte es in `/opt/msm/backend/.env` ein:
 
 ```env
 MSM_AUTO_UPDATE=true
 ```
 
-Anschließend den Systemd-Timer starten:
+Und starte dann den Timer:
 
 ```bash
 sudo systemctl start msm-update.timer
@@ -221,40 +256,40 @@ sudo systemctl start msm-update.timer
 
 ## Wichtige Befehle
 
-| Befehl | Zweck |
+| Befehl | Wofür |
 |--------|-------|
-| `sudo systemctl status msm-panel` | Status des Panel-Dienstes anzeigen |
+| `sudo systemctl status msm-panel` | Läuft das Panel? |
 | `sudo systemctl restart msm-panel` | Panel neu starten |
-| `sudo journalctl -u msm-panel -f` | Live-Logs des Backend-Dienstes verfolgen |
-| `sudo bash /opt/msm/update.sh --check-only` | Verfügbare Updates prüfen |
-| `sudo /opt/msm/helper-scripts/migrate-panel-components.sh` | Komponenten-Migrationsassistent starten |
+| `sudo journalctl -u msm-panel -f` | Logs live mitlesen |
+| `sudo bash /opt/msm/update.sh --check-only` | Gibt es ein Update? |
+| `sudo /opt/msm/helper-scripts/migrate-panel-components.sh` | Umzugs-Assistent starten |
 
 ---
 
 ## Ports
 
-| Port / Range | Protokoll | Zweck |
-|--------------|-----------|-------|
-| 80 | TCP | HTTP (Weiterleitung auf HTTPS) |
-| 443 | TCP | HTTPS (Panel-Webinterface) |
-| 27015-27999 | UDP/TCP | Game-Server-Ports (automatische Vergabe ab Port 1024) |
+| Port | Protokoll | Wofür |
+|------|-----------|-------|
+| 80 | TCP | HTTP, leitet auf HTTPS weiter |
+| 443 | TCP | Das Panel im Browser |
+| 27015-27999 | UDP/TCP | Game-Server (automatisch vergeben, ab Port 1024) |
 
 ---
 
-## Dokumentation & Support
+## Hilfe und Doku
 
-- **Dokumentation**: Ausführliche Anleitungen stehen in [`docs/self-hosting.md`](docs/self-hosting.md) sowie direkt im Panel unter **Dokumentation**.
-- **Issue Tracker**: [GitHub Issues](https://github.com/einmalmaik/maunting-server-manager/issues)
+- **Anleitungen**: in [`docs/self-hosting.md`](docs/self-hosting.md) und im Panel unter **Dokumentation**.
+- **Fehler melden**: [GitHub Issues](https://github.com/einmalmaik/maunting-server-manager/issues)
 
 ---
 
-## Discord Rich Presence (Optional)
+## Discord-Status (optional)
 
-Die Desktop-App (*Maunting Smart System* / MSS) unterstützt Discord Rich Presence (RPC). Wenn Discord auf Ihrem Rechner läuft, wird Ihr Status im Discord-Profil angezeigt (Standard: „Security needs trust“ / „Sicherheit braucht Vertrauen“).
+Die Desktop-App (*Maunting Smart System*, kurz MSS) kann deinen Status in Discord anzeigen (Rich Presence). Läuft Discord auf deinem Rechner, steht in deinem Profil standardmäßig „Security needs trust“ bzw. „Sicherheit braucht Vertrauen“.
 
-- **Lokale Verbindung**: Die Kommunikation erfolgt rein lokal über die Windows Named Pipe (`\\.\pipe\discord-ipc-0`). Es werden keine externen Anfragen an Discord-Server gesendet und keine Server-Adressen, Kennwörter oder Chat-Inhalte übertragen.
-- **Standard**: Die Standard-Anwendungs-ID (`1512525013155057735`) ist fest hinterlegt.
-- **Texte und Application-ID anpassen**: Sie können die Discord-Texte und die Client-ID nach eigenen Wünschen anpassen. Entweder über die `konfig.json` der Desktop-App:
+- **Bleibt auf deinem Rechner**: Die App spricht Discord nur lokal über die Windows Named Pipe (`\\.\pipe\discord-ipc-0`) an. Sie schickt nichts an Discord-Server, keine Serveradressen, keine Passwörter und keine Chats.
+- **Standard**: Die App-ID `1512525013155057735` ist fest hinterlegt.
+- **Eigene Texte oder eigene App-ID**: in der `konfig.json` der Desktop-App,
   ```json
   {
     "discord_rpc_aktiv": true,
@@ -263,11 +298,11 @@ Die Desktop-App (*Maunting Smart System* / MSS) unterstützt Discord Rich Presen
     "discord_state": "Eigener Statustext Zeile 2"
   }
   ```
-  Oder direkt im Quellcode in [`smart-system/src-tauri/src/discord.rs`](smart-system/src-tauri/src/discord.rs).
-- **Deaktivieren**: Rich Presence lässt sich in der `konfig.json` der Desktop-App mit `"discord_rpc_aktiv": false` jederzeit vollständig abschalten.
+  oder direkt im Code in [`smart-system/src-tauri/src/discord.rs`](smart-system/src-tauri/src/discord.rs).
+- **Ausschalten**: `"discord_rpc_aktiv": false` in der `konfig.json`.
 
 ---
 
 ## Lizenz
 
-Dieses Projekt steht unter der [MIT-Lizenz](LICENSE).
+MSM steht unter der [MIT-Lizenz](LICENSE).

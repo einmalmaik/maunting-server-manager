@@ -323,8 +323,14 @@ export function PermissionEditor({
         Jetzt steht die Beschreibung in der Zeile. Damit ist das Erklärfeld
         ersatzlos entfallen — es war nie eine Funktion, sondern der Ausgleich
         für fehlenden Platz.
+
+        Die Höhe folgt dem Fenster. Bis 09/2026 stand hier fest 380 px: rund
+        sechs Zeilen, auch auf einem großen Bildschirm — eine Kategorie mit
+        mehr Rechten war nie auf einen Blick zu sehen. Ab `sm` ist es das
+        Fenster abzüglich Kopf und Formular, nie weniger als früher; auf dem
+        Telefon 60 % der Höhe, damit Speichern erreichbar bleibt.
       */}
-      <div className="max-h-[380px] overflow-y-auto pr-1">
+      <div className="max-h-[60vh] overflow-y-auto overscroll-contain pr-1 sm:max-h-[max(380px,calc(100vh-16rem))]">
         {zeilen.length === 0 ? (
           <div className="p-8 text-center text-on-surface-variant bg-surface-container-low/40 rounded-lg border border-outline-variant/30 font-body-md text-sm">
             {t('permissionEditor.empty')}
