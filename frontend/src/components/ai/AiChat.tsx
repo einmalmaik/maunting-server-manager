@@ -48,6 +48,7 @@ import { applyGeoCameraCommand, normalizeGeoCameraCommand, normalizeRegionalAnal
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { starteAufnahme, type Aufnahme } from './voice/audioAufnahme'
+import { AI_IS_BETA } from './AiBetaBanner'
 
 import { Spinner } from '@/components/ui/Spinner'
 interface ServerOption {
@@ -1263,9 +1264,16 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
           {empty && (
             <div className="py-16 text-center">
               <Sparkles className="mx-auto h-10 w-10 text-primary/70" aria-hidden="true" />
-              <h2 className="mt-4 font-headline text-xl font-semibold text-on-surface">
-                {t('ai.chat.emptyTitle')}
-              </h2>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <h2 className="font-headline text-xl font-semibold text-on-surface">
+                  {t('ai.chat.emptyTitle')}
+                </h2>
+                {AI_IS_BETA && (
+                  <span className="px-1.5 py-0.5 rounded bg-status-warning/15 text-status-warning border border-status-warning/30 text-label-sm font-bold uppercase tracking-wider">
+                    {t('ai.betaBadge', 'Beta')}
+                  </span>
+                )}
+              </div>
               <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-on-surface-variant">
                 {t('ai.chat.emptyDescription')}
               </p>

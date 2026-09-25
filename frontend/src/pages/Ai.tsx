@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { aiApi, type AiVoiceConfig } from '@/api/ai'
 import { api } from '@/api/client'
 import { AiAutonomyButton } from '@/components/ai/AiAutonomyButton'
+import { AiBetaBanner } from '@/components/ai/AiBetaBanner'
 import { AiChat } from '@/components/ai/AiChat'
 import { AufgabenAnsicht } from '@/components/ai/AufgabenAnsicht'
 import { GuardianAnsicht } from '@/components/ai/GuardianAnsicht'
@@ -236,6 +237,7 @@ export function Ai() {
 
   return (
     <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
+      <AiBetaBanner />
       {ansicht !== 'text' && (
         <div className="flex shrink-0 items-center justify-between sm:justify-end gap-1.5 sm:gap-2 px-3 py-2 border-b border-outline-variant/30 bg-surface-container-low/40">
           <div className="flex items-center justify-between w-full sm:w-auto gap-2">

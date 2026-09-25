@@ -311,6 +311,9 @@
     }
   },
   "ai": {
+    "betaBadge": "Beta",
+    "betaNotice": "Beta-Version: Es können noch Fehler auftreten.",
+    "betaNoticeMobile": "Beta: Fehler möglich",
     "providers": {
       "title": "KI-Provider",
       "description": "Unterstützten Anbieter und ein Modell aus dessen Katalog wählen. Anbieter und API-Key sind nur für Panel-Administratoren sichtbar.",

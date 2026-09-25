@@ -311,6 +311,9 @@
     }
   },
   "ai": {
+    "betaBadge": "Beta",
+    "betaNotice": "Beta version: Errors may still occur.",
+    "betaNoticeMobile": "Beta: errors possible",
     "providers": {
       "title": "AI providers",
       "description": "Pick a supported provider and a model from its catalog. Provider and API key are visible to panel administrators only.",
