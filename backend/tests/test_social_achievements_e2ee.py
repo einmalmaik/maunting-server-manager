@@ -4,6 +4,7 @@ import base64
 from datetime import datetime, timezone
 import pytest
 from sqlalchemy.orm import Session
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from uuid import uuid4
@@ -167,6 +168,61 @@ def test_blockieren_laesst_keine_freundschaftszeile_stehen(db: Session):
     zeilen = db.query(UserFriend).filter(UserFriend.user_id.in_([a.id, b.id])).all()
     assert [(z.user_id, z.friend_id, z.status) for z in zeilen] == [(a.id, b.id, "blocked")]
     assert SocialService.is_confirmed_friend(db, a.id, b.id) is False
+
+
+def _sperre(db: Session, name_a: str, name_b: str) -> tuple[User, User]:
+    """Zwei Konten; das erste hat das zweite blockiert."""
+    a = User(username=name_a, password_hash="hash", is_active=True)
+    b = User(username=name_b, password_hash="hash", is_active=True)
+    db.add_all([a, b])
+    db.commit()
+    SocialService.block_user(db, a.id, b.id)
+    return a, b
+
+
+def test_blockierter_hebt_sperre_nicht_ueber_freund_entfernen_auf(db: Session):
+    a, b = _sperre(db, "anna_sperrt_1", "bert_gesperrt_1")
+
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.remove_friend(db, b.id, a.id)
+    assert fehler.value.status_code == 404
+    sperre = db.query(UserFriend).filter_by(user_id=a.id, friend_id=b.id).one()
+    # Auch über die Zeilenkennung, die `remove_friend` ebenfalls annimmt.
+    with pytest.raises(HTTPException):
+        SocialService.remove_friend(db, b.id, sperre.id)
+    assert SocialService.is_blocked(db, a.id, b.id) is True
+
+
+def test_blockierter_hebt_sperre_nicht_ueber_anfrage_ablehnen_auf(db: Session):
+    a, b = _sperre(db, "anna_sperrt_2", "bert_gesperrt_2")
+    sperre = db.query(UserFriend).filter_by(user_id=a.id, friend_id=b.id).one()
+
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.decline_or_cancel_request(db, b.id, sperre.id)
+    assert fehler.value.status_code == 404
+    assert SocialService.is_blocked(db, a.id, b.id) is True
+
+
+def test_gegensperre_zieht_die_fremde_sperre_nicht_an_sich(db: Session):
+    """Blockiert der Blockierte zurück und hebt seine Sperre wieder auf,
+    bleibt die ursprüngliche Sperre stehen."""
+    a, b = _sperre(db, "anna_sperrt_3", "bert_gesperrt_3")
+
+    SocialService.block_user(db, b.id, a.id)
+    SocialService.unblock_user(db, b.id, a.id)
+
+    assert SocialService.is_blocked(db, a.id, b.id) is True
+    assert [r["user_id"] for r in SocialService.get_blocked_users(db, a.id)] == [b.id]
+    with pytest.raises(HTTPException):
+        SocialService.send_friend_request(db, b.id, a.username)
+
+
+def test_blockierender_hebt_eigene_sperre_auf(db: Session):
+    a, b = _sperre(db, "anna_sperrt_4", "bert_gesperrt_4")
+
+    assert SocialService.unblock_user(db, b.id, a.id) is False
+    assert SocialService.unblock_user(db, a.id, b.id) is True
+    assert SocialService.is_blocked(db, a.id, b.id) is False
 
 
 def test_privacy_three_tier_model(db: Session):

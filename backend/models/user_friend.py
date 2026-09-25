@@ -40,5 +40,5 @@ class UserFriend(Base):
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
 
-    user: Mapped["User"] = relationship("User", foreign_keys=[user_id], backref="friendships_sent")
-    friend: Mapped["User"] = relationship("User", foreign_keys=[friend_id], backref="friendships_received")
+    user: Mapped["User"] = relationship("User", foreign_keys=[user_id])
+    friend: Mapped["User"] = relationship("User", foreign_keys=[friend_id])

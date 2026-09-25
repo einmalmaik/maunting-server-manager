@@ -265,7 +265,11 @@ def zugangstoken(
             "canPublish": darf_veroeffentlichen,
             "canSubscribe": True,
             "canPublishData": True,
-            "canUpdateOwnMetadata": True,
+            # Name und Metadaten (Kennung, Profilbild) setzt allein der Server
+            # hier im Token. Dürfte der Teilnehmer sie ändern, gäbe er sich im
+            # Anruf als ein anderes Mitglied aus, und Stummschalten oder
+            # Entfernen durch einen Moderator träfe den Falschen.
+            "canUpdateOwnMetadata": False,
         },
     }
     if metadata is not None:

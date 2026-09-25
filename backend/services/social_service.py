@@ -37,6 +37,16 @@ logger = logging.getLogger(__name__)
 #: Schützt vor Datenanhäufung bei Datenlecks und erzwingt das Zero-Knowledge-Prinzip.
 E2EE_ENVELOPE_RETENTION_DAYS: int = 30
 
+#: Wie viel ein Konto am Tag ins Relais schreiben darf, in KiB. Die Größe je
+#: Umschlag begrenzt das Schema; ohne Tagesbudget füllte ein Konto die Platte
+#: trotzdem, nur in vielen Nachrichten statt einer. 256 MiB am Tag sind weit
+#: über dem, was Text, Steuerpakete und Schlüsselverteilung je erreichen.
+E2EE_RELAY_KIB_PRO_TAG: int = 256 * 1024
+
+#: Stories je Konto, die gleichzeitig laufen dürfen. Jede trägt bis zu 8 MB
+#: Bild; ohne Grenze füllte ein Konto die Platte in 24 Stunden.
+MAX_AKTIVE_STORIES: int = 20
+
 
 #: Alle Rechte, die eine Gruppenrolle tragen kann. Wer hier nichts stehen hat,
 #: kann nicht gesetzt werden — siehe ``SocialService.assert_known_permissions``.
@@ -317,9 +327,11 @@ class SocialService:
             )
             .first()
         )
+        # Eigens gefragt: bei gegenseitiger Sperre liegen zwei Zeilen im
+        # Bestand, und `.first()` sähe womöglich nur eine davon.
+        if cls.is_blocked(db, user_id, target.id):
+            raise HTTPException(status_code=400, detail="Aktion nicht möglich: Benutzer ist blockiert")
         if existing:
-            if existing.status == "blocked":
-                raise HTTPException(status_code=400, detail="Aktion nicht möglich: Benutzer ist blockiert")
             if existing.status == "accepted":
                 raise HTTPException(status_code=400, detail="Sie sind bereits mit diesem Benutzer befreundet")
             if existing.status == "pending":
@@ -385,7 +397,7 @@ class SocialService:
     @classmethod
     def decline_or_cancel_request(cls, db: Session, user_id: int, request_id: int) -> bool:
         """Lehnt eine Anfrage ab oder zieht eine eigene zurück."""
-        req = db.query(UserFriend).filter_by(id=request_id).first()
+        req = db.query(UserFriend).filter_by(id=request_id, status="pending").first()
         if not req or (req.user_id != user_id and req.friend_id != user_id):
             raise HTTPException(status_code=404, detail="Anfrage nicht gefunden")
 
@@ -396,6 +408,9 @@ class SocialService:
     @classmethod
     def remove_friend(cls, db: Session, user_id: int, target_user_id: int) -> bool:
         """Entfernt eine bestehende Freundschaft (unterstützt Ziel-Benutzer-ID oder Beziehungs-ID)."""
+        # Sperrzeilen bleiben außen vor: Sonst höbe der Blockierte die Sperre
+        # mit einem einzigen "Freund entfernen" selbst auf. Aufheben kann sie
+        # nur, wer sie gesetzt hat (`unblock_user`).
         rel = (
             db.query(UserFriend)
             .filter(
@@ -406,7 +421,8 @@ class SocialService:
                         UserFriend.id == target_user_id,
                         or_(UserFriend.user_id == user_id, UserFriend.friend_id == user_id),
                     ),
-                )
+                ),
+                UserFriend.status != "blocked",
             )
             .first()
         )
@@ -421,7 +437,8 @@ class SocialService:
             or_(
                 and_(UserFriend.user_id == user_id, UserFriend.friend_id == other_id),
                 and_(UserFriend.user_id == other_id, UserFriend.friend_id == user_id),
-            )
+            ),
+            UserFriend.status != "blocked",
         ).delete(synchronize_session=False)
         db.commit()
 
@@ -433,43 +450,43 @@ class SocialService:
 
     @classmethod
     def block_user(cls, db: Session, user_id: int, target_user_id: int) -> bool:
-        """Blockiert einen Benutzer und löscht ggf. bestehende Freundschaft."""
-        rel = (
+        """Blockiert einen Benutzer und löscht ggf. bestehende Freundschaft.
+
+        Jede Sperre ist eine eigene Zeile ``(blockierender, blockierter)``.
+        Eine Sperre der Gegenseite wird nie umgeschrieben: Sonst könnte der
+        Blockierte sie erst an sich ziehen und dann per ``unblock_user``
+        löschen. Sperren sich beide, liegen zwei Zeilen im Bestand.
+        """
+        if target_user_id == user_id:
+            raise HTTPException(status_code=400, detail="Sie können sich nicht selbst blockieren")
+        if not db.query(User.id).filter(User.id == target_user_id).first():
+            raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+        # Freundschaft und offene Anfragen fallen weg, in beiden Richtungen:
+        # bliebe eine Zeile auf "accepted" stehen, wäre der Blockierte weiter
+        # ein bestätigter Freund, und `social_privacy="friends"` gäbe ihm
+        # weiter Einblick.
+        db.query(UserFriend).filter(
+            or_(
+                and_(UserFriend.user_id == user_id, UserFriend.friend_id == target_user_id),
+                and_(UserFriend.user_id == target_user_id, UserFriend.friend_id == user_id),
+            ),
+            UserFriend.status != "blocked",
+        ).delete(synchronize_session=False)
+        eigene = (
             db.query(UserFriend)
-            .filter(
-                or_(
-                    and_(UserFriend.user_id == user_id, UserFriend.friend_id == target_user_id),
-                    and_(UserFriend.user_id == target_user_id, UserFriend.friend_id == user_id),
-                )
-            )
+            .filter_by(user_id=user_id, friend_id=target_user_id, status="blocked")
             .first()
         )
-        if rel:
-            # Erst die Spiegelzeilen derselben Beziehung entfernen: bliebe eine
-            # davon auf "accepted" stehen, wäre der Blockierte weiterhin ein
-            # bestätigter Freund, und `social_privacy="friends"` gäbe ihm
-            # weiter Einblick. Das Löschen geht der Umschreibung voraus, sonst
-            # stößt sie auf die Eindeutigkeit von (user_id, friend_id).
-            db.query(UserFriend).filter(
-                UserFriend.id != rel.id,
-                or_(
-                    and_(UserFriend.user_id == user_id, UserFriend.friend_id == target_user_id),
-                    and_(UserFriend.user_id == target_user_id, UserFriend.friend_id == user_id),
-                ),
-            ).delete(synchronize_session=False)
-            rel.user_id = user_id
-            rel.friend_id = target_user_id
-            rel.status = "blocked"
-            rel.updated_at = _now()
-        else:
-            rel = UserFriend(
-                user_id=user_id,
-                friend_id=target_user_id,
-                status="blocked",
-                created_at=_now(),
-                updated_at=_now(),
+        if not eigene:
+            db.add(
+                UserFriend(
+                    user_id=user_id,
+                    friend_id=target_user_id,
+                    status="blocked",
+                    created_at=_now(),
+                    updated_at=_now(),
+                )
             )
-            db.add(rel)
         db.commit()
         return True
 
@@ -1437,6 +1454,21 @@ class SocialService:
                 detail="Replay-Angriff erkannt: Dieser verschlüsselte Umschlag wurde bereits übertragen.",
             )
 
+        # Erst hier gezählt: ein Retry mit derselben client_uuid ist oben schon
+        # beantwortet und kostet kein zweites Mal.
+        if sender_user_id:
+            from limits import parse
+            from middleware.rate_limit import limiter
+
+            kib = len(clean_envelope) // 1024 + 1
+            if not limiter.limiter.hit(
+                parse(f"{E2EE_RELAY_KIB_PRO_TAG}/day"), f"e2ee-relay-kib:{sender_user_id}", cost=kib
+            ):
+                raise HTTPException(
+                    status_code=429,
+                    detail="Tageslimit für Nachrichten erreicht. Bitte morgen erneut versuchen.",
+                )
+
         envelope = E2eeBlindEnvelope(
             blind_mailbox_id=clean_mailbox,
             ciphertext_envelope=clean_envelope,
@@ -1648,9 +1680,17 @@ class SocialService:
           sie registrieren will, muss nach den heutigen Regeln dazugehören.
           Das ist der Weg für den Bestand: eine gewachsene Gruppe bekommt
           ihren Nachweis von einem echten Mitglied.
-        - **Eine leere, aber ableitbare Kennung ist ebenfalls tabu.** Gruppe 5
-          hat eine ausrechenbare Mailbox; wäre sie nur leer genug, könnte ein
-          Fremder sie mit einem Nachweis belegen und die Gruppe aussperren.
+        - **Eine ableitbare Kennung trägt nie einen Nachweis**, auch nicht von
+          einem Mitglied. Dort entscheidet die Teilnahme, und der Client
+          registriert sie nie (`sichereBesitznachweis` in
+          `gruppenSchluessel.ts`). Ein Nachweis dort sperrte nur die übrigen
+          Teilnehmer aus.
+
+          Was der Server hier nicht prüfen kann, sind Kennungen von Konten,
+          Gruppen und Paaren, die es noch nicht gibt: `msm:devices:<n+1>` ist
+          heute ausrechenbar, gehört aber noch niemandem. Belegt sie jemand,
+          fällt der Nachweis in `assert_mailbox_token`, sobald ein echtes
+          Konto die Kennung ohne ihn anfasst.
 
         Was übrig bleibt, ist der Normalfall der Stufe 3: eine unableitbare,
         leere Kennung aus einem frisch erzeugten Gruppengeheimnis. Die darf,
@@ -1670,11 +1710,13 @@ class SocialService:
                 status_code=409, detail="Für diese Mailbox ist bereits ein Besitznachweis hinterlegt."
             )
 
+        if cls._ist_ableitbar_fuer(db, user_id, clean):
+            raise HTTPException(status_code=403, detail="Keine Berechtigung für diese Mailbox.")
         hat_umschlaege = (
             db.query(E2eeBlindEnvelope.id).filter(E2eeBlindEnvelope.blind_mailbox_id == clean).first()
             is not None
         )
-        if hat_umschlaege or cls._mailbox_ist_ableitbar(db, clean):
+        if hat_umschlaege:
             cls.assert_mailbox_participant(db, user_id, clean)
 
         db.add(
@@ -1699,7 +1741,22 @@ class SocialService:
                 )
 
     @classmethod
-    def assert_mailbox_token(cls, db: Session, mailbox_id: str, auth_token: str | None) -> None:
+    def _ist_ableitbar_fuer(cls, db: Session, user_id: int, mailbox_id: str) -> bool:
+        """Kann der Server diese Kennung ausrechnen, aus Sicht dieses Kontos?
+
+        `_mailbox_ist_ableitbar` kennt Geräte-, Gruppen- und hinterlegte
+        Direktchat-Kennungen. Dazu kommt das Paar aus diesem Konto und jedem
+        anderen: ein Erstkontakt hat noch keine Zeile in `direct_chats`.
+        """
+        return (
+            cls._mailbox_ist_ableitbar(db, mailbox_id)
+            or cls.gegenueber_aus_mailbox(db, user_id, mailbox_id) is not None
+        )
+
+    @classmethod
+    def assert_mailbox_token(
+        cls, db: Session, mailbox_id: str, auth_token: str | None, user_id: int | None = None
+    ) -> None:
         """Prüft den Besitznachweis, falls für diese Mailbox einer hinterlegt ist.
 
         Ohne hinterlegten Nachweis tut diese Prüfung nichts — der Bestand läuft
@@ -1718,10 +1775,19 @@ class SocialService:
         eintrag = db.get(E2eeBlindMailbox, clean)
         if eintrag is None:
             return
-        if not auth_token or not secrets.compare_digest(
-            eintrag.auth_verifier, cls._verifier_von(auth_token)
-        ):
-            raise HTTPException(status_code=403, detail="Kein gültiger Besitznachweis für diese Mailbox.")
+        if auth_token and secrets.compare_digest(eintrag.auth_verifier, cls._verifier_von(auth_token)):
+            return
+        # Ein Nachweis auf einer ausrechenbaren Kennung ist angemaßt: der
+        # Client registriert dort nie (siehe `register_blind_mailbox`). Belegt
+        # hat sie jemand, als es Konto, Gruppe oder Paar noch nicht gab, um
+        # die späteren Teilnehmer auszusperren. Er fällt hier weg; ob der
+        # Anfragende hinein darf, prüft danach wie immer die Teilnahme.
+        if user_id is not None and cls._ist_ableitbar_fuer(db, user_id, clean):
+            logger.warning("Angemaßten Besitznachweis auf einer ableitbaren Mailbox entfernt.")
+            db.delete(eintrag)
+            db.commit()
+            return
+        raise HTTPException(status_code=403, detail="Kein gültiger Besitznachweis für diese Mailbox.")
 
     @classmethod
     def hat_gueltigen_nachweis(
@@ -1779,7 +1845,7 @@ class SocialService:
             # Eine Mailbox mit hinterlegtem Nachweis öffnet sich nicht allein
             # durch Mitgliedschaft — sonst wäre der eine Weg die Hintertür
             # neben der verschlossenen Vordertür des anderen.
-            cls.assert_mailbox_token(db, mid, token)
+            cls.assert_mailbox_token(db, mid, token, user_id)
         except HTTPException:
             return False
         return True
@@ -1909,6 +1975,20 @@ class SocialService:
                 deleted,
                 days,
             )
+        return deleted
+
+    @classmethod
+    def cleanup_expired_stories(cls, db: Session) -> int:
+        """Löscht abgelaufene Stories. Angezeigt werden sie nach 24 Stunden
+        nicht mehr, gespeichert blieben sie ohne das für immer."""
+        deleted = (
+            db.query(ChatStory)
+            .filter(ChatStory.expires_at <= _now())
+            .delete(synchronize_session=False)
+        )
+        if deleted > 0:
+            db.commit()
+            logger.info("Stories: %d abgelaufene bereinigt.", deleted)
         return deleted
 
     @classmethod
@@ -2411,32 +2491,48 @@ class SocialService:
     @classmethod
     def leave_group(cls, db: Session, user: User, group_id: int) -> None:
         cls.assert_social_enabled(db)
+        cls.trage_mitglied_aus(db, group_id, user.id)
+        db.commit()
+
+    @classmethod
+    def trage_mitglied_aus(cls, db: Session, group_id: int, user_id: int) -> None:
+        """Nimmt jemanden aus einer Gruppe, ohne zu committen.
+
+        Bleibt niemand übrig, fällt die Gruppe weg. Geht der Eigentümer, erbt
+        ein Admin, sonst das am längsten beigetretene Mitglied. Auch die
+        Kontolöschung läuft hier durch: `chat_groups.owner_user_id` kaskadiert,
+        ohne Nachfolger nähme das Löschen eines Eigentümers seine Gruppen
+        allen anderen Mitgliedern weg.
+        """
+        group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+        if not group:
+            return
         member = (
             db.query(ChatGroupMember)
-            .filter(ChatGroupMember.group_id == group_id, ChatGroupMember.user_id == user.id)
+            .filter(ChatGroupMember.group_id == group_id, ChatGroupMember.user_id == user_id)
             .first()
         )
-        if not member:
-            return
+        was_owner = group.owner_user_id == user_id or (member is not None and member.role == "owner")
+        if member:
+            db.delete(member)
+            db.flush()
 
-        was_owner = member.role == "owner"
-        db.delete(member)
-        db.flush()
-
-        # Wenn keine Mitglieder mehr da sind, Gruppe entfernen
-        remaining = db.query(ChatGroupMember).filter(ChatGroupMember.group_id == group_id).all()
+        remaining = (
+            db.query(ChatGroupMember)
+            .filter(ChatGroupMember.group_id == group_id)
+            .order_by(
+                (ChatGroupMember.role == "admin").desc(),
+                ChatGroupMember.joined_at,
+                ChatGroupMember.id,
+            )
+            .all()
+        )
         if not remaining:
-            group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
-            if group:
-                db.delete(group)
+            db.delete(group)
         elif was_owner:
-            # Nachfolge für Eigentümer bestimmen
-            new_owner = remaining[0]
-            new_owner.role = "owner"
-            group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
-            if group:
-                group.owner_user_id = new_owner.user_id
-        db.commit()
+            remaining[0].role = "owner"
+            group.owner_user_id = remaining[0].user_id
+        db.flush()
 
     @classmethod
     def delete_group(cls, db: Session, user: User, group_id: int) -> None:
@@ -2815,6 +2911,17 @@ class SocialService:
         clean_content = content.strip()
         if not clean_content:
             raise HTTPException(status_code=422, detail="Story-Inhalt darf nicht leer sein.")
+
+        aktive = (
+            db.query(func.count(ChatStory.id))
+            .filter(ChatStory.user_id == user.id, ChatStory.expires_at > _now())
+            .scalar()
+        )
+        if aktive >= MAX_AKTIVE_STORIES:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Mehr als {MAX_AKTIVE_STORIES} Stories gleichzeitig gehen nicht. Ältere laufen nach 24 Stunden ab.",
+            )
 
         if media_url:
             from services.chat_media_validator import validate_story_media_url, ChatMediaSecurityError

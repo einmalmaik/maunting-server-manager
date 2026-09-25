@@ -177,3 +177,99 @@ def test_die_selbstloeschung_nimmt_denselben_weg(
     assert fehler.value.status_code == 409
     db.rollback()
     assert db.query(User).filter(User.id == regular_user.id).first() is not None
+
+
+def _messenger_spuren(db: Session, user: User) -> User:
+    """Was fast jedes Konto im Messenger hinterlässt: Anwesenheit beim
+    Verbinden, Nutzungszeit, Meilensteine, Freundschaften, eine Story."""
+    from datetime import datetime, timedelta, timezone
+
+    from models import ChatStory, UserAchievement, UserActivityTime, UserFriend, UserPresence
+
+    freund = AuthService.create_user(db, "freund_des_kandidaten", "freund@test.de", "UserPass123!")
+    db.add_all(
+        [
+            UserPresence(user_id=user.id),
+            UserActivityTime(user_id=user.id, category="general", seconds=60),
+            UserAchievement(user_id=user.id, achievement_id="starter_first_step"),
+            UserFriend(user_id=user.id, friend_id=freund.id, status="accepted"),
+            UserFriend(user_id=freund.id, friend_id=user.id, status="accepted"),
+            ChatStory(
+                user_id=user.id,
+                content="x",
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            ),
+        ]
+    )
+    db.commit()
+    return freund
+
+
+def test_admin_loescht_ein_konto_mit_messenger_spuren(
+    client: TestClient, db: Session, owner_user: User, owner_cookies: dict
+) -> None:
+    """Jede dieser Zeilen ließ `db.delete(user)` auf NULL setzen statt sie der
+    Kaskade zu überlassen: 500, und das Konto blieb bestehen."""
+    from models import UserFriend
+
+    kandidat = _kandidat(db)
+    freund = _messenger_spuren(db, kandidat)
+    kandidat_id = kandidat.id
+
+    antwort = client.delete(
+        f"/api/admin/users/{kandidat_id}",
+        cookies=owner_cookies,
+        headers=_csrf(owner_cookies),
+    )
+
+    assert antwort.status_code == 200
+    db.expire_all()
+    assert db.query(User).filter(User.id == kandidat_id).first() is None
+    assert db.query(User).filter(User.id == freund.id).first() is not None
+    assert db.query(UserFriend).filter(UserFriend.friend_id == kandidat_id).count() == 0
+
+
+def test_die_selbstloeschung_mit_messenger_spuren(db: Session, regular_user: User) -> None:
+    _messenger_spuren(db, regular_user)
+    user_id = regular_user.id
+
+    AuthService.delete_account_atomically(db, regular_user)
+
+    db.expire_all()
+    assert db.query(User).filter(User.id == user_id).first() is None
+
+
+def test_geloeschter_gruppeneigentuemer_nimmt_die_gruppe_nicht_mit(
+    db: Session, regular_user: User
+) -> None:
+    """`chat_groups.owner_user_id` kaskadiert. Ohne Nachfolger verschwände die
+    Gruppe für alle Mitglieder mit dem Konto ihres Eigentümers."""
+    from models import ChatGroup, ChatGroupMember
+
+    mitglied = AuthService.create_user(db, "gruppen_mitglied", "mitglied@test.de", "UserPass123!")
+    admin = AuthService.create_user(db, "gruppen_admin", "gadmin@test.de", "UserPass123!")
+    gruppe = ChatGroup(owner_user_id=regular_user.id)
+    allein = ChatGroup(owner_user_id=regular_user.id)
+    db.add_all([gruppe, allein])
+    db.flush()
+    db.add_all(
+        [
+            ChatGroupMember(group_id=gruppe.id, user_id=regular_user.id, role="owner"),
+            ChatGroupMember(group_id=gruppe.id, user_id=mitglied.id, role="member"),
+            ChatGroupMember(group_id=gruppe.id, user_id=admin.id, role="admin"),
+            ChatGroupMember(group_id=allein.id, user_id=regular_user.id, role="owner"),
+        ]
+    )
+    db.commit()
+    gruppe_id, allein_id = gruppe.id, allein.id
+
+    AuthService.delete_account_atomically(db, regular_user)
+
+    db.expire_all()
+    gruppe = db.query(ChatGroup).filter(ChatGroup.id == gruppe_id).first()
+    assert gruppe is not None
+    assert gruppe.owner_user_id == admin.id
+    rollen = {m.user_id: m.role for m in db.query(ChatGroupMember).filter_by(group_id=gruppe_id)}
+    assert rollen == {mitglied.id: "member", admin.id: "owner"}
+    # Eine Gruppe, in der sonst niemand ist, fällt mit ihrem Eigentümer weg.
+    assert db.query(ChatGroup).filter(ChatGroup.id == allein_id).first() is None

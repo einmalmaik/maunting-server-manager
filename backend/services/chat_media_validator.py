@@ -30,6 +30,9 @@ from typing import BinaryIO
 # gaebe es also nur um den Preis, ihm den Anhangtyp zu verraten.
 MAX_MEDIA_BYTES = 60 * 1024 * 1024  # 60 MB fuer Anhaenge
 MAX_IMAGE_BYTES = 8 * 1024 * 1024   # 8 MB fuer Bilder
+#: Laengste Story-Media-URL: ein Bild von MAX_IMAGE_BYTES als Base64 samt
+#: Data-URI-Kopf. Alles darueber waere Fuellmaterial, das mitgespeichert wird.
+MAX_STORY_MEDIA_URL_CHARS = (MAX_IMAGE_BYTES + 2) // 3 * 4 + 256
 MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB fuer Sprachnachrichten
 MAX_ZIP_UNCOMPRESSED_BYTES = 50 * 1024 * 1024  # 50 MB maximal entpackt
 MAX_ZIP_RATIO = 25.0  # Max. 25:1 Kompressionsrate (Schutz vor Zip-Bombs)
@@ -653,6 +656,10 @@ def validate_story_media_url(media_url: str | None) -> str | None:
         return None
 
     clean_url = media_url.strip()
+    if len(clean_url) > MAX_STORY_MEDIA_URL_CHARS:
+        raise StorageLimitExceededError(
+            f"Story-Bild ueberschreitet Maximalgroesse von {MAX_IMAGE_BYTES // (1024*1024)}MB"
+        )
     lower = clean_url.lower()
 
     # 1. Blockiere offensichtlich gefährliche Schemata
@@ -688,7 +695,9 @@ def validate_story_media_url(media_url: str | None) -> str | None:
         if ";base64" in header.lower():
             import base64
             try:
-                raw_bytes = base64.b64decode(payload)
+                # validate=True: sonst ueberliest b64decode fremde Zeichen, und
+                # ein kleines Bild traegt beliebig viel Fuellmaterial mit.
+                raw_bytes = base64.b64decode(payload, validate=True)
             except Exception as e:
                 raise ChatMediaSecurityError("CHAT_MEDIA_INVALID_BASE64", f"Ungueltiges Base64 in Data-URI: {e}")
 

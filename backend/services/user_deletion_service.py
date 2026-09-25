@@ -37,12 +37,15 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from models import (
+    ChatGroup,
+    ChatGroupMember,
     HosterIntegration,
     ServerCredentialBinding,
     Team,
     User,
     UserCredential,
 )
+from services.social_service import SocialService
 
 
 def prepare_user_deletion(db: Session, user: User) -> None:
@@ -112,6 +115,16 @@ def prepare_user_deletion(db: Session, user: User) -> None:
                 "unbemerkt auf den Panel-Zugang zurueckfallen."
             ),
         )
+
+    # Chat-Gruppen verlaesst der Benutzer wie per "Gruppe verlassen". Als
+    # Eigentuemer uebergibt er sie so an einen Nachfolger; sonst naehme das
+    # CASCADE auf `chat_groups.owner_user_id` die Gruppe allen Mitgliedern weg.
+    group_ids = {
+        row[0]
+        for row in db.query(ChatGroupMember.group_id).filter(ChatGroupMember.user_id == user.id)
+    } | {row[0] for row in db.query(ChatGroup.id).filter(ChatGroup.owner_user_id == user.id)}
+    for group_id in sorted(group_ids):
+        SocialService.trage_mitglied_aus(db, group_id, user.id)
 
     # Ueber die Instanz und nicht per `query(...).delete()`: nur so raeumt
     # SQLAlchemy die Mitgliedschaften und Server-Wuensche des Teams mit ab.

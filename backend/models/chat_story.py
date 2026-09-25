@@ -30,4 +30,4 @@ class ChatStory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    user: Mapped["User"] = relationship("User", backref="stories")
+    user: Mapped["User"] = relationship("User")

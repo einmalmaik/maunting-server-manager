@@ -342,7 +342,12 @@ function sammleTeilnehmer(room: Room, bekannte: Bekannte, sprechend: Set<string>
         meta = JSON.parse(teilnehmer.metadata)
       } catch {}
     }
-    const rawUserId = meta?.user_id ?? benutzerIdAusIdentity(teilnehmer.identity)
+    // Die Kennung kommt allein aus der vom Server signierten Identität.
+    // Metadaten, die einen anderen Benutzer behaupten, zählen nicht: sonst
+    // trüge eine gefälschte Kachel Name und Bild eines Mitglieds, und ein
+    // Moderator schaltete den Falschen stumm.
+    const rawUserId = benutzerIdAusIdentity(teilnehmer.identity)
+    if (meta && meta.user_id !== undefined && meta.user_id !== rawUserId) meta = null
     const userId = rawUserId ?? 0
     const stammdaten = rawUserId ? bekannte.get(rawUserId) : undefined
     const istSelbst = teilnehmer.identity === room.localParticipant.identity

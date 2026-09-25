@@ -32,4 +32,4 @@ class UserAchievement(Base):
         DateTime(timezone=True), default=_now, nullable=False
     )
 
-    user: Mapped["User"] = relationship("User", backref="achievements")
+    user: Mapped["User"] = relationship("User")

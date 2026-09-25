@@ -34,4 +34,4 @@ class UserActivityTime(Base):
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
 
-    user: Mapped["User"] = relationship("User", backref="activity_times")
+    user: Mapped["User"] = relationship("User")

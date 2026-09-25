@@ -554,7 +554,7 @@ def relay_e2ee_message(
     current_user: User = Depends(get_current_user),
     nachweis: str | None = Depends(mailbox_token),
 ) -> dict:
-    SocialService.assert_mailbox_token(db, req.blind_mailbox_id, nachweis)
+    SocialService.assert_mailbox_token(db, req.blind_mailbox_id, nachweis, current_user.id)
     envelope = SocialService.relay_blind_envelope(
         db,
         blind_mailbox_id=req.blind_mailbox_id,
@@ -593,7 +593,7 @@ def upload_chat_media(
 
     Der Server nimmt ausschliesslich verschluesselte Blobs entgegen (Zero-Knowledge).
     """
-    SocialService.assert_mailbox_token(db, req.blind_mailbox_id, nachweis)
+    SocialService.assert_mailbox_token(db, req.blind_mailbox_id, nachweis, current_user.id)
     media = ChatMediaService.upload_encrypted_media(
         db,
         uploader=current_user,
@@ -831,7 +831,7 @@ def send_e2ee_typing_signal(
     user: User = Depends(get_current_user),
     nachweis: str | None = Depends(mailbox_token),
 ) -> dict:
-    SocialService.assert_mailbox_token(db, req.blind_mailbox_id, nachweis)
+    SocialService.assert_mailbox_token(db, req.blind_mailbox_id, nachweis, user.id)
     SocialService.broadcast_typing_signal(
         blind_mailbox_id=req.blind_mailbox_id,
         status=req.status,
@@ -1328,7 +1328,7 @@ async def social_websocket(
                         # der WebSocket die offene Hintertür neben der
                         # verschlossenen Vordertür.
                         SocialService.assert_mailbox_token(
-                            db, blind_mailbox_id, data.get("mailbox_token")
+                            db, blind_mailbox_id, data.get("mailbox_token"), user_id
                         )
                         SocialService.broadcast_typing_signal(
                             blind_mailbox_id=blind_mailbox_id,
@@ -1348,7 +1348,7 @@ async def social_websocket(
                 try:
                     with SessionLocal() as db:
                         SocialService.assert_mailbox_token(
-                            db, blind_mailbox_id, data.get("mailbox_token")
+                            db, blind_mailbox_id, data.get("mailbox_token"), user_id
                         )
                         envelope = SocialService.relay_blind_envelope(
                             db,

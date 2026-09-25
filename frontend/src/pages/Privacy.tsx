@@ -10,8 +10,8 @@ export function Privacy() {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-09-24',
-    version: '3.4',
+    lastUpdated: '2026-09-26',
+    version: '3.5',
     meta: 'Maunting Studios — Sicherheit braucht Vertrauen',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
@@ -63,6 +63,7 @@ export function Privacy() {
           // Server kann es nicht: er liest den Inhalt nicht.
           t('privacyPolicy.sections.messenger.items.mentions'),
           t('privacyPolicy.sections.messenger.items.attachments'),
+          t('privacyPolicy.sections.messenger.items.stories'),
           // Was beim Loeschen wirklich passiert. Steht hier, weil die Antwort
           // frueher "nichts" war: die Zeile verschwand aus der Anzeige, der
           // Umschlag blieb im Postfach und der Anhang auf der Platte.

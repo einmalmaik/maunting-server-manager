@@ -194,17 +194,20 @@ def test_leere_aber_ableitbare_gruppenmailbox_ist_fuer_fremde_tabu(
     assert db.get(E2eeBlindMailbox, mid) is None
 
 
-def test_mitglied_darf_die_eigene_gruppenmailbox_registrieren(
+def test_auch_ein_mitglied_belegt_die_gruppenmailbox_nicht(
     db: Session, owner_user: User, regular_user: User
 ) -> None:
-    # Der Weg fuer den Bestand: eine gewachsene Gruppe bekommt ihren Nachweis
-    # von einem echten Mitglied.
+    # Auf einer ableitbaren Kennung entscheidet die Teilnahme. Ein Nachweis
+    # dort sperrte nur die übrigen Mitglieder aus; der Client registriert
+    # deshalb nur Kennungen aus einem Gruppengeheimnis.
     gruppe = _gruppe(db, owner_user, regular_user)
     mid = SocialService.derive_group_blind_mailbox_id(gruppe.id)
 
-    SocialService.register_blind_mailbox(db, regular_user.id, mid, _token("bestand"))
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.register_blind_mailbox(db, regular_user.id, mid, _token("bestand"))
 
-    assert db.get(E2eeBlindMailbox, mid) is not None
+    assert fehler.value.status_code == 403
+    assert db.get(E2eeBlindMailbox, mid) is None
 
 
 def test_fremde_geraetemailbox_ist_tabu(db: Session, owner_user: User) -> None:
@@ -284,7 +287,10 @@ def test_richtiges_token_macht_aus_einem_fremden_kein_mitglied(
     """
     gruppe = _gruppe(db, owner_user, regular_user)
     mid = SocialService.derive_group_blind_mailbox_id(gruppe.id)
-    SocialService.register_blind_mailbox(db, owner_user.id, mid, _token("zwei-schloesser"))
+    # Ein Nachweis aus der Zeit, als Mitglieder die Gruppenmailbox noch
+    # registrieren durften.
+    db.add(E2eeBlindMailbox(mailbox_id=mid, auth_verifier=SocialService._verifier_von(_token("zwei-schloesser"))))
+    db.commit()
     fremder = _fremder(db)
 
     # Das Token stimmt — der Fremde hat es sich besorgt.
@@ -319,8 +325,9 @@ def test_lesen_ohne_nachweis_bleibt_verschlossen(
     damit nicht zu lesen, ob es diese Mailbox gibt oder ob sie einen Nachweis
     traegt — sonst liesse sich von aussen abfragen, welche Gruppen es gibt.
     """
-    gruppe = _gruppe(db, owner_user, regular_user)
-    mid = SocialService.derive_group_blind_mailbox_id(gruppe.id)
+    # Eine geheime Kennung: auf einer ableitbaren gibt es seit 09/2026 keinen
+    # Nachweis mehr, dort entscheidet die Teilnahme.
+    mid = _kennung("lesen")
     _registriere_ueber_http(client, owner_cookies, mid, _token("lesen"))
 
     ohne = client.get(f"/api/social/e2ee/mailbox/{mid}", cookies=owner_cookies)
@@ -352,8 +359,9 @@ def test_senden_ohne_nachweis_ist_403(
     # Die zweite Tuer: Senden laeuft ueber `resolve_mailbox_target`, nicht
     # ueber `assert_mailbox_participant`. Wer nur eine der beiden absichert,
     # hat nichts abgesichert.
-    gruppe = _gruppe(db, owner_user, regular_user)
-    mid = SocialService.derive_group_blind_mailbox_id(gruppe.id)
+    # Eine geheime Kennung: auf einer ableitbaren gibt es seit 09/2026 keinen
+    # Nachweis mehr, dort entscheidet die Teilnahme.
+    mid = _kennung("senden")
     _registriere_ueber_http(client, owner_cookies, mid, _token("senden"))
 
     nutzlast = {
@@ -380,8 +388,9 @@ def test_loeschen_ohne_nachweis_bleibt_verschlossen(
     client: TestClient, db: Session, owner_user: User, regular_user: User, owner_cookies: dict
 ) -> None:
     # Wie beim Lesen: eine Antwort fuer jeden Grund.
-    gruppe = _gruppe(db, owner_user, regular_user)
-    mid = SocialService.derive_group_blind_mailbox_id(gruppe.id)
+    # Eine geheime Kennung: auf einer ableitbaren gibt es seit 09/2026 keinen
+    # Nachweis mehr, dort entscheidet die Teilnahme.
+    mid = _kennung("loeschen")
     _registriere_ueber_http(client, owner_cookies, mid, _token("loeschen"))
     kopf = {"X-CSRF-Token": owner_cookies.get("__Secure-csrf_token", "")}
 
@@ -401,8 +410,9 @@ def test_loeschen_ohne_nachweis_bleibt_verschlossen(
 def test_tippen_ohne_nachweis_ist_403(
     client: TestClient, db: Session, owner_user: User, regular_user: User, owner_cookies: dict
 ) -> None:
-    gruppe = _gruppe(db, owner_user, regular_user)
-    mid = SocialService.derive_group_blind_mailbox_id(gruppe.id)
+    # Eine geheime Kennung: auf einer ableitbaren gibt es seit 09/2026 keinen
+    # Nachweis mehr, dort entscheidet die Teilnahme.
+    mid = _kennung("tippen")
     _registriere_ueber_http(client, owner_cookies, mid, _token("tippen"))
     kopf = {"X-CSRF-Token": owner_cookies.get("__Secure-csrf_token", "")}
 
@@ -580,3 +590,91 @@ def test_loeschen_ohne_nachweis_geht_dort_nicht(
 
     assert antwort.status_code == 403
     assert db.query(E2eeBlindEnvelope).filter_by(blind_mailbox_id=UNABLEITBAR).count() == 1
+
+
+# ── Vorab belegte Kennungen ─────────────────────────────────────────────────
+#
+# Geräte-, Gruppen- und Direktchat-Kennungen sind aus kleinen Ganzzahlen
+# ausrechenbar, auch für Konten, Gruppen und Paare, die es noch nicht gibt.
+# Wer eine davon vorab mit einem Nachweis belegte, sperrte die späteren
+# Teilnehmer dauerhaft aus.
+
+
+def _neues_konto(db: Session, name: str) -> User:
+    from services.auth_service import AuthService
+
+    user = AuthService.create_user(db, name, f"{name}@test.de", "NeuPass123!")
+    user.social_privacy = "public"
+    db.commit()
+    return user
+
+
+def test_vorab_belegte_geraetemailbox_sperrt_das_spaetere_konto_nicht_aus(
+    db: Session, owner_user: User
+) -> None:
+    naechste_id = max(u.id for u in db.query(User).all()) + 1
+    mid = SocialService.derive_user_device_mailbox_id(naechste_id)
+    # Heute kann der Server das nicht verhindern: das Konto gibt es noch nicht.
+    SocialService.register_blind_mailbox(db, owner_user.id, mid, _token("vorab"))
+
+    neu = _neues_konto(db, "spaeter_angemeldet")
+    assert neu.id == naechste_id
+
+    SocialService.assert_mailbox_zugang(db, neu.id, mid, None)
+    assert db.get(E2eeBlindMailbox, mid) is None
+    # Und das Token des Angreifers öffnet nichts mehr.
+    assert SocialService.hat_gueltigen_nachweis(db, mid, _token("vorab")) is False
+    with pytest.raises(HTTPException):
+        SocialService.assert_mailbox_zugang(db, owner_user.id, mid, _token("vorab"))
+
+
+def test_vorab_belegte_direktchat_kennung_blockiert_den_erstkontakt_nicht(
+    db: Session, owner_user: User
+) -> None:
+    anna = _neues_konto(db, "anna_erstkontakt")
+    bert = _neues_konto(db, "bert_erstkontakt")
+    mid = SocialService.derive_blind_mailbox_id(anna.id, bert.id)
+    SocialService.register_blind_mailbox(db, owner_user.id, mid, _token("paar"))
+
+    # Derselbe Weg wie `POST /social/e2ee/relay`: erst der Nachweis, dann das Relais.
+    SocialService.assert_mailbox_token(db, mid, None, anna.id)
+    umschlag = SocialService.relay_blind_envelope(
+        db,
+        blind_mailbox_id=mid,
+        ciphertext_envelope="sv-e2ee-group-v1:a1b2c3d4e5f60789."
+        + "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5",
+        sender_user_id=anna.id,
+        client_uuid="erstkontakt-1",
+    )
+    assert umschlag.id
+    assert db.get(E2eeBlindMailbox, mid) is None
+
+
+def test_vorab_belegte_gruppenmailbox_sperrt_die_gruppe_nicht_aus(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    from models import ChatGroup
+
+    naechste = (max((g.id for g in db.query(ChatGroup).all()), default=0)) + 1
+    mid = SocialService.derive_group_blind_mailbox_id(naechste)
+    fremder = _fremder(db)
+    SocialService.register_blind_mailbox(db, fremder.id, mid, _token("gruppe"))
+
+    gruppe = _gruppe(db, owner_user, regular_user)
+    assert gruppe.id == naechste
+
+    SocialService.assert_mailbox_zugang(db, regular_user.id, mid, None)
+    assert db.get(E2eeBlindMailbox, mid) is None
+
+
+def test_falsches_token_auf_geheimer_kennung_bleibt_403_auch_mit_konto(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Der Wegfall gilt nur für ausrechenbare Kennungen, nie für geheime."""
+    mid = _kennung("bleibt-zu")
+    SocialService.register_blind_mailbox(db, owner_user.id, mid, _token("bleibt-zu"))
+
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.assert_mailbox_token(db, mid, None, regular_user.id)
+    assert fehler.value.status_code == 403
+    assert db.get(E2eeBlindMailbox, mid) is not None

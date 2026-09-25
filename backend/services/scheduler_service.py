@@ -1216,6 +1216,13 @@ async def _e2ee_envelope_cleanup_task() -> None:
         ChatMediaService.cleanup_expired_media(db)
     except Exception as e:
         logger.error("Fehler bei Anhang-Bereinigung: %s", e)
+        db.rollback()
+    # Stories nach ihren 24 Stunden. Angezeigt wurden sie danach nicht mehr,
+    # gespeichert blieben sie samt Bild fuer immer.
+    try:
+        SocialService.cleanup_expired_stories(db)
+    except Exception as e:
+        logger.error("Fehler bei Story-Bereinigung: %s", e)
     finally:
         db.close()
 

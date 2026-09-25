@@ -39,4 +39,4 @@ class UserPresence(Base):
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
 
-    user: Mapped["User"] = relationship("User", backref="presence")
+    user: Mapped["User"] = relationship("User")

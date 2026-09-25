@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_serializer, field_validator
+from services.chat_media_validator import MAX_STORY_MEDIA_URL_CHARS
 
 
 class AchievementResponse(BaseModel):
@@ -230,12 +231,24 @@ def validate_ecdsa_public_key_jwk(key_str: str) -> dict:
     return data
 
 
+#: Obergrenze für einen einzelnen E2EE-Umschlag. Anhänge reisen nie im
+#: Umschlag, sondern als eigener Upload (`/social/media/upload`); im Umschlag
+#: stehen Text, ein Verweis und die Schlüssel je Gerät. 1 MiB lässt dafür viel
+#: Luft und hält trotzdem niemanden davon ab, die Platte mit einer einzigen
+#: Nachricht zu füllen. Der Server kann den Inhalt nicht beurteilen, also
+#: begrenzt er die Menge.
+MAX_E2EE_ENVELOPE_CHARS = 1024 * 1024
+
+
 def validate_e2ee_envelope_format(envelope_str: str) -> None:
     """Validiert, dass ein Umschlag ein gültiges DIS E2EE-Format besitzt und kein Plaintext ist."""
     import base64
 
     if not isinstance(envelope_str, str) or not envelope_str.strip():
         raise ValueError("Umschlag darf nicht leer sein.")
+    # Vor dem Dekodieren: das kostet sonst ein Vielfaches der Größe an Speicher.
+    if len(envelope_str) > MAX_E2EE_ENVELOPE_CHARS:
+        raise ValueError("Die Nachricht ist zu groß.")
 
     trimmed = envelope_str.strip()
     matched_prefix = None
@@ -366,10 +379,10 @@ class E2eeBlindEnvelopeCreate(BaseModel):
     """
 
     blind_mailbox_id: str = Field(..., min_length=16, max_length=64)
-    ciphertext_envelope: str = Field(..., min_length=10)
+    ciphertext_envelope: str = Field(..., min_length=10, max_length=MAX_E2EE_ENVELOPE_CHARS)
     client_uuid: str | None = Field(None, max_length=64, description="Client-UUID zur Idempotenz und Deduplizierung")
     is_control: bool = Field(False, description="Markiert interne Steuernachrichten (z. B. Lesequittungen, Quittungen)")
-    control_type: str | None = Field(None, description="Typ des Steuersignals (read_receipt, delivery_receipt, edit, delete)")
+    control_type: str | None = Field(None, max_length=64, description="Typ des Steuersignals (read_receipt, delivery_receipt, edit, delete)")
     push_ausnahme: str | None = Field(
         None,
         min_length=64,
@@ -795,7 +808,7 @@ class GroupCallRoomJoinRequest(BaseModel):
 
 class ChatStoryCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000)
-    media_url: str | None = None
+    media_url: str | None = Field(None, max_length=MAX_STORY_MEDIA_URL_CHARS)
     background: str = Field("gradient-1", max_length=64)
 
 

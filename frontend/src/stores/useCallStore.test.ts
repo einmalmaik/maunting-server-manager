@@ -328,6 +328,28 @@ describe('Teilnehmer', () => {
     expect(useCallStore.getState().participants.find((t) => t.userId === 1)?.isSelf).toBe(true)
   })
 
+  it('glaubt fremden Metadaten keine andere Kennung als die der Identität', async () => {
+    await verbundenerAnruf()
+    aktuellerRaum.tritt_bei(
+      'u2',
+      'bob',
+      JSON.stringify({ user_id: 2, username: 'bob', avatar_url: '/avatar/bob.png' }),
+    )
+    aktuellerRaum.tritt_bei(
+      'u7',
+      'mallory',
+      JSON.stringify({ user_id: 2, username: 'bob', avatar_url: '/avatar/bob.png' }),
+    )
+
+    const mallory = useCallStore.getState().participants.find((t) => t.identity === 'u7')
+    expect(mallory?.userId).toBe(7)
+    expect(mallory?.username).not.toBe('bob')
+    expect(mallory?.avatarUrl).toBeNull()
+    const bob = useCallStore.getState().participants.find((t) => t.identity === 'u2')
+    expect(bob?.userId).toBe(2)
+    expect(bob?.avatarUrl).toBe('/avatar/bob.png')
+  })
+
   it('markiert, wer gerade spricht', async () => {
     await verbundenerAnruf()
     const bob = aktuellerRaum.tritt_bei('u2', 'bob')

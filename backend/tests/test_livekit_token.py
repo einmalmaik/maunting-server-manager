@@ -34,6 +34,9 @@ def test_zugangstoken_traegt_genau_die_noetigen_rechte() -> None:
     assert video["roomJoin"] is True
     assert video["canPublish"] is True
     assert video["canSubscribe"] is True
+    # Name und Metadaten kommen allein vom Server; sonst könnte sich ein
+    # Teilnehmer als ein anderes Mitglied ausgeben.
+    assert video["canUpdateOwnMetadata"] is False
     # Kein Verwaltungsrecht: ein Teilnehmertoken darf keine fremden Raeume sehen
     # und niemanden hinauswerfen.
     assert "roomAdmin" not in video

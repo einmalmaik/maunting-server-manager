@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import uuid
 from fastapi import HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -71,6 +72,12 @@ def _ist_blockiert(db: Session, user_a_id: int, user_b_id: int) -> bool:
 # mitziehen. `test_medien_aufbewahrung_deckt_laengste_verfallsfrist` haelt das
 # fest.
 MEDIEN_AUFBEWAHRUNG_TAGE = 90
+
+# Wie viel ein Konto gleichzeitig an Anhaengen liegen haben darf. Ohne Grenze
+# fuellte ein einzelnes Konto mit 60-MB-Uploads die Platte. 2 GiB sind bei
+# 90 Tagen Aufbewahrung weit mehr, als Fotos, Sprachnachrichten und Dateien im
+# Alltag brauchen; abgelaufene Anhaenge raeumt der Stundenjob ab.
+MEDIEN_KONTINGENT_BYTES = 2 * 1024 * 1024 * 1024
 
 
 class ChatMediaService:
@@ -222,6 +229,19 @@ class ChatMediaService:
         validate_encrypted_blob_payload(ciphertext_blob, max_bytes=MAX_MEDIA_BYTES)
 
         blob_bytes = ciphertext_blob.encode("utf-8")
+        belegt = (
+            db.query(func.coalesce(func.sum(ChatMedia.size_bytes), 0))
+            .filter(ChatMedia.uploader_user_id == uploader.id)
+            .scalar()
+        )
+        if belegt + len(blob_bytes) > MEDIEN_KONTINGENT_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    "Speicher für Anhänge voll (2 GB). Ältere Anhänge werden nach "
+                    f"{MEDIEN_AUFBEWAHRUNG_TAGE} Tagen frei oder lassen sich löschen."
+                ),
+            )
         blob_sha256 = hashlib.sha256(blob_bytes).hexdigest()
         media_id = str(uuid.uuid4())
 
