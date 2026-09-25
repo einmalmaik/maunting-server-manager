@@ -150,6 +150,19 @@ def _finalize_stream(
             # Ohne Verbrauchszeile gibt es nichts mehr abzurechnen.
             logger.warning("AI usage event missing at finalization message_id=%s", message_id)
             return
+        # Schon abgerechnet — von jemand anderem. Der Fall vom 25.09.2026: ein
+        # zweites Backend auf derselben Datenbank schloss beim Start die
+        # Reservierung dieses noch laufenden Segments
+        # (`reconcile_interrupted_ai_streams`). Ein zweites Buchen wiese
+        # `fail_ai_usage` ab, und die Ausnahme riss den Abschluss des Laufs mit:
+        # kein Fehlerereignis, kein Ende, der Chat wartete zehn Minuten. Die
+        # erste Buchung gilt; die Nachricht bekommt trotzdem ihren Text.
+        abgerechnet = usage_event.status != "reserved"
+        if abgerechnet:
+            logger.info(
+                "AI usage event already closed at finalization message_id=%s status=%s",
+                message_id, usage_event.status,
+            )
         if message is not None:
             # **Die Antwort wird nicht geschwärzt — und das ist Absicht.**
             #
@@ -201,9 +214,9 @@ def _finalize_stream(
             # sonst bliebe sie dauerhaft "reserved" und wuerde Kontingent sowie
             # einen Nebenlaeufigkeitsplatz des Benutzers permanent blockieren.
             logger.warning("AI message missing at finalization message_id=%s", message_id)
-        if failed and not had_output:
+        if failed and not had_output and not abgerechnet:
             ai_stream.fail_ai_usage(db, usage_event)
-        else:
+        elif not abgerechnet:
             # Nach partieller Ausgabe darf Verbrauch nicht als null verbucht
             # werden — auch dann nicht, wenn der Lauf gescheitert ist.
             accounted_tokens, accounted_cost, herkunft = ai_stream.abrechnung(
