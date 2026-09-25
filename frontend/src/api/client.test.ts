@@ -527,5 +527,21 @@ describe('api client', () => {
       expect(headers['Authorization']).toBeUndefined()
       expect(headers['X-CSRF-Token']).toBeUndefined()
     })
+
+    it('does not send tokens to frontend origin when explicit backend URL is set', async () => {
+      const { setRuntimeApiUrl } = await import('@/config/api')
+      const { isInternalApiUrl } = await import('./client')
+      try {
+        setRuntimeApiUrl('https://api.my-backend.com')
+        // Explicit backend URL is allowed
+        expect(isInternalApiUrl('https://api.my-backend.com/api/test')).toBe(true)
+        // Frontend static host is NOT the API backend in decoupled mode
+        expect(isInternalApiUrl(`${window.location.origin}/test`)).toBe(false)
+        // External URLs are not allowed
+        expect(isInternalApiUrl('https://evil.com/test')).toBe(false)
+      } finally {
+        setRuntimeApiUrl(null)
+      }
+    })
   })
 })

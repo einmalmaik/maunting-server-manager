@@ -29,19 +29,17 @@ export function isInternalApiUrl(url: string): boolean {
   try {
     const parsed = new URL(trimmed)
     const allowed = new Set<string>()
-    if (typeof window !== 'undefined' && window.location?.origin) {
-      allowed.add(window.location.origin.toLowerCase())
-    }
     const effective = getEffectiveApiUrl()
     if (effective) {
+      // Wenn eine explizite Backend-URL konfiguriert ist (z. B. Desktop-App,
+      // Android-App oder getrenntes Hosting), ist NUR diese Backend-URL der API-Server.
       try {
         allowed.add(new URL(effective).origin.toLowerCase())
       } catch {}
-    }
-    if (API_ORIGIN) {
-      try {
-        allowed.add(new URL(API_ORIGIN).origin.toLowerCase())
-      } catch {}
+    } else if (typeof window !== 'undefined' && window.location?.origin) {
+      // Im Same-Origin-Modus (Standard-Webdeployment) liefert das Backend
+      // das Frontend selbst aus — die Web-Domain ist also der API-Server.
+      allowed.add(window.location.origin.toLowerCase())
     }
     return allowed.has(parsed.origin.toLowerCase())
   } catch {
