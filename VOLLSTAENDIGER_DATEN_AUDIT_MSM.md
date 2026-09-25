@@ -24,7 +24,7 @@ Dieser Audit liefert eine lückenlose, bis ins kleinste Detail reichende Gesamta
 * **`device_notifications`** (`Boolean`): Schalter für native Pop-up-/Push-Benachrichtigungen auf Windows und Android.
 * **`time_zone`** (`String(64)`): IANA-Zeitzone des Benutzers (z. B. `Europe/Berlin`) für Lageblock, Chat-Zeitstempel und APScheduler-Tasks.
 * **`location_sharing_enabled`** (`Boolean`): Reine Einwilligung für Standortzugriff (Koordinaten werden zu keinem Zeitpunkt im Benutzerkonto persistiert).
-* **`agent_name`** (`String(32)`): Vom Benutzer frei gewählter Rufname des Assistenten (z. B. „Jarvis“; Standard `Singra`). Fließt in den Lageblock der KI ein.
+* **`agent_name`** (`String(32)`): Vom Benutzer frei gewählter Rufname des Assistenten (z. B. „Jarvis“; Standard `Assistent`). Fließt in den Lageblock der KI ein.
 * **`ai_provider_id`** (`Integer`, FK `ai_providers.id`, ondelete `SET NULL`): Vom Benutzer gewählter bevorzugter KI-Anbieter für Text und Sprache.
 * **`ai_desktop_systembereich`** (`String(16)`): Erlaubte Verzeichnisgrenze der KI auf dem PC des Nutzers (`aus`, `lesen`, `schreiben`).
 * **`password_reset_token`** (`String(255)`): Aktives Einmal-Token für die Passwortrücksetzung.

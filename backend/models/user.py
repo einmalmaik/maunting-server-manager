@@ -108,7 +108,7 @@ class User(Base):
     )
 
     # Rufname des Assistenten für dieses Konto (Panel und Smart System).
-    # NULL heisst: Standardname 'Singra' (services/ai_lage.py). Der Wert fliesst
+    # NULL heisst: Standardname 'Assistent' (services/ai_lage.py). Der Wert fliesst
     # in den Lageblock als späte system-Nachricht, nie in den statischen
     # Systemprompt — ein Name im Prompt wäre je Benutzer verschieden und
     # entwertete das Prompt-Caching des Anbieters an erster Stelle.

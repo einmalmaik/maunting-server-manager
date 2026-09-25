@@ -11,7 +11,7 @@ import { toast } from '@/stores/toastStore'
  * Der Rufname des Assistenten — die eine Personalisierung, die dem Benutzer
  * gehört und nicht dem Betreiber.
  *
- * Leer heißt Standardname „Singra“; was als Name erlaubt ist, entscheidet
+ * Leer heißt Standardname „Assistent“; was als Name erlaubt ist, entscheidet
  * allein das Backend (schemas/user.py), das Frontend rät nicht mit. Der Name
  * landet dort im Lageblock des Assistenten und gilt damit überall zugleich:
  * im Panel-Chat, im Sprachmodus und in der Desktop-App.

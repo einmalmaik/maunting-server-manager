@@ -15,7 +15,7 @@ export interface User {
   time_zone?: string | null
   /** Explizite Einwilligung für ortsbezogene KI-Anfragen; keine Koordinaten. */
   location_sharing_enabled?: boolean
-  /** Rufname des KI-Assistenten; null heißt Standardname 'Singra'. */
+  /** Rufname des KI-Assistenten; null heißt Standardname 'Assistent'. */
   agent_name?: string | null
   /** Gewählter KI-Zugang — am Konto, damit App und Overlay dieselbe Wahl sehen. */
   ai_provider_id?: number | null
