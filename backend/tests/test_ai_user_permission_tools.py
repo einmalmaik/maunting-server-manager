@@ -188,7 +188,31 @@ def test_der_umweg_ueber_execute_server_action_reicht_keine_rechte_weiter(
             "parameters": {"user_id": ziel.id, "permissions": ["server.view"]},
         },
     )
-    assert fehler == "Aktion nicht verfügbar"
+    # Kein Ersatzwerkzeug, sondern der Weg dorthin: der Name des richtigen
+    # Werkzeugs und `worker_start`.
+    assert fehler == "Nur über einen Worker"
+    assert wert["tool_name"] == "propose_user_server_permission"
+    assert "worker_start" in wert["error"]
+    assert vorschlaege == []
+    assert db.query(AiActionProposal).count() == 0
+
+
+def test_die_suche_im_umweg_findet_das_rollenwerkzeug_statt_eines_ersatzes(
+    db: Session, owner_user: User
+) -> None:
+    """Betreibertest vom 25.09.2026: "leg eine Rolle an" per Stimme.
+
+    Die Rechtewerkzeuge fehlten der Suche des Dispatchers ganz. Sie fand
+    deshalb, was es sonst gab — Tarif-Rolle, Portliste, Server löschen. Jetzt
+    sucht sie über sie mit und verweist auf den Worker.
+    """
+    from services.ai_voice.voice_dispatcher import dispatch_voice_action
+
+    wert, fehler, _, vorschlaege = dispatch_voice_action(
+        owner_user.id, {"action": "Rolle Moderator erstellen"},
+    )
+    assert fehler == "Nur über einen Worker"
+    assert wert["tool_name"] == "propose_role_set"
     assert vorschlaege == []
     assert db.query(AiActionProposal).count() == 0
 

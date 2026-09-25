@@ -235,7 +235,12 @@ def _zuweisungen(db: Session, role_id: int) -> int:
 def _eigene_rolle(db: Session, role_id: int) -> Role:
     rolle = role_service.get_role(db, role_id)
     if rolle is None:
-        raise AiActionValidationError("Rolle nicht gefunden")
+        # Der Hinweis gehört in die Meldung: ein Modell, das eine erfundene
+        # Kennung mitschickt, versucht es sonst mit der nächsten.
+        raise AiActionValidationError(
+            f"Eine Rolle mit role_id {role_id} gibt es nicht. Zum Anlegen role_id "
+            "weglassen; vorhandene Rollen liefert list_roles."
+        )
     if rolle.is_system:
         raise AiActionValidationError(
             f"'{rolle.name}' ist eine Systemrolle; die ändert die KI nicht."

@@ -534,6 +534,54 @@ def test_das_gehirn_schreibt_nie(db: Session) -> None:
     assert "AI_GEHIRN_READONLY" in ergebnisse[0]["content"]
 
 
+def test_das_gehirn_liest_ohne_freigabe_ueber_karten(db: Session) -> None:
+    """Ohne autonomen Modus kommen auch Lesen und `worker_start` hierher.
+
+    Die Engine schickt dann jeden Aufruf in die Schreibrunde, damit er eine
+    Karte bekommt ("autonom aus heißt alles bestätigen"). Bis zum 25.09.2026
+    wies der Gehirn-Zweig dort alles ab, was nicht Kalender oder Mail war —
+    ohne Freigabe konnte das Gehirn weder lesen noch einen Worker starten
+    (Betreibertest "Rolle anlegen": beide Aufrufe `AI_GEHIRN_READONLY`).
+    """
+    usage = StreamUsage()
+    usage.tool_calls = [
+        ProviderToolCall(id="l1", name="list_roles", arguments={}),
+        ProviderToolCall(id="w1", name="worker_start", arguments={"auftrag": "Rolle anlegen"}),
+    ]
+    provider_messages: list[dict] = []
+    angelegt: list[str] = []
+
+    def _karten(*, tool_calls, **kwargs):
+        angelegt.extend(call.name for call in tool_calls)
+        return [
+            {"id": f"p-{call.id}", "tool_name": call.name, "status": "proposed", "autonomous": False}
+            for call in tool_calls
+        ]
+
+    with patch.object(ai_run_broker, "lauf_status", lambda run_id: "running"),          patch.object(ai_stream_service, "_persist_write_proposals", _karten):
+        asyncio.run(ai_stream_service._schreibrunde_ausfuehren(
+            run_id="r1",
+            user_id=1,
+            conversation_id="c1",
+            vorbereitung=_vorbereitung(),
+            guardian=None,
+            aufgabe=None,
+            unbeaufsichtigt=False,
+            rolle="gehirn",
+            rundendeckel=48,
+            rundentext="",
+            current_usage=usage,
+            provider_messages=provider_messages,
+            zustand={},
+            chunks=[],
+            thoughts=[],
+            denknaht="",
+        ))
+
+    assert angelegt == ["list_roles", "worker_start"]
+    assert "AI_GEHIRN_READONLY" not in json.dumps(provider_messages, ensure_ascii=False)
+
+
 # ── wait_until: die dritte Parkstelle ─────────────────────────────────────
 
 

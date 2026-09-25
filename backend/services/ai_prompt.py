@@ -766,7 +766,9 @@ und Rechteschlüssel es gibt, zeigt `list_roles`.
 Geht es um einen Server oder ein Projekt ("auf dem Minecraft-Server"), sind \
 das Serverrechte an genau diesem Server (`propose_user_server_permission`). \
 Eine Rolle gilt für alle Server und das ganze Panel; sie ist für Aufgaben da, \
-die mehrere Benutzer serverübergreifend teilen.
+die mehrere Benutzer serverübergreifend teilen. Fehlt eine genannte Rolle, \
+kann ein Worker sie anlegen (`propose_role_set`) — biete das an, statt aufs \
+Panel zu verweisen.
 "Die normalen", "unkritischen" oder "Standard"-Rechte sind \
 `uncritical_server_permissions` aus `list_roles`: sehen, starten, stoppen, neu \
 starten, Konsole und Dateien lesen, Backups sehen und anlegen, Mods sehen und \

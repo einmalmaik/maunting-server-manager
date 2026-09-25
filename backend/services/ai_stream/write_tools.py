@@ -671,10 +671,16 @@ async def _schreibrunde_ausfuehren(
     # Worker vorbehalten — dieser Zweig ist der Spiegel dazu im Vorschlagspfad,
     # denn der Katalogschnitt ist eine Bitte und keine Zusage. Kommunikations-
     # und Dialogvorschlaege (E-Mail, Kalender, Pop-up) legt das Gehirn direkt an.
+    #
+    # Abgewiesen wird nur, was schreibt. Lesen und `worker_start` kommen
+    # ohne Freigabe ebenfalls hier an — als Karte zum Bestaetigen (Engine,
+    # "autonom aus heisst alles bestaetigen"). Bis zum 25.09.2026 wies dieser
+    # Zweig sie mit ab: ohne Freigabe konnte das Gehirn weder lesen noch
+    # einen Worker starten (Betreibertest "Rolle anlegen").
     if rolle == "gehirn":
         unzulässig = [
             call for call in current_usage.tool_calls
-            if call.name not in (CHAT_INTERACTION_TOOLS & WRITE_TOOLS)
+            if call.name in WRITE_TOOLS and call.name not in CHAT_INTERACTION_TOOLS
         ]
         if unzulässig:
             provider_messages.extend(_rundenfehler_nachrichten(

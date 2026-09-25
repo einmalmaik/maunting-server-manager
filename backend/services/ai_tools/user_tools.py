@@ -94,7 +94,7 @@ def _user_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_user_server_permission",
-            "Ändert die Rechte eines Benutzers auf einem Server.",
+            "Serverrechte eines Benutzers vergeben, ändern oder entziehen.",
             {
                 **_SERVER_ID_SCHEMA,
                 "user_id": {"type": "integer", "minimum": 1},
@@ -106,7 +106,7 @@ def _user_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_role_set",
-            "Legt eine Rolle an oder ändert sie (mit role_id).",
+            "Rolle erstellen bzw. anlegen oder ändern (mit role_id).",
             {
                 "role_id": {"type": "integer", "minimum": 1},
                 "name": {"type": "string", "maxLength": 64},
@@ -118,7 +118,7 @@ def _user_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_user_roles",
-            "Ändert die globalen Rollen eines Benutzers.",
+            "Einem Benutzer Rollen zuweisen oder entziehen.",
             {
                 "user_id": {"type": "integer", "minimum": 1},
                 "role_ids": {
@@ -133,7 +133,7 @@ def _user_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_role_delete",
-            "Löscht eine Rolle, die niemandem mehr zugewiesen ist.",
+            "Rolle löschen, die niemandem mehr zugewiesen ist.",
             {"role_id": {"type": "integer", "minimum": 1}, **_RATIONALE_SCHEMA},
             ["role_id", *_RATIONALE_REQUIRED],
         ),

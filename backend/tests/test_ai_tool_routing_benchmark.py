@@ -68,3 +68,40 @@ def test_routing_is_deterministic():
     a = router.select("Server neu starten", ALLOWED, top_k=5)
     b = router.select("Server neu starten", ALLOWED, top_k=5)
     assert a == b
+
+
+# ── Rechte und Rollen: Betreibertest vom 25.09.2026 ─────────────────────
+
+def test_ein_treffer_zieht_seine_gruppe_nach():
+    """Die Suche fand ein Rollenwerkzeug, der Auftrag brauchte ein anderes.
+
+    "Gib GamerXYZ die Rolle Moderator" traf `propose_role_delete`; gebraucht
+    werden `list_users` und `propose_user_roles`. Ein Worker hatte deshalb
+    kein Werkzeug, um die Rolle anzulegen.
+    """
+    from services.semantic_tool_router_adapter import MAX_GRUPPEN_NACHZUG, gruppen_nachbarn
+
+    nachbarn = gruppen_nachbarn(["propose_role_delete"], ALLOWED)
+    assert {"list_users", "propose_user_roles", "propose_role_set"} <= set(nachbarn)
+    assert "propose_role_delete" not in nachbarn
+    # Nur, was angeboten ist, und nie über die Grenze.
+    assert gruppen_nachbarn(["propose_role_delete"], frozenset({"list_users"})) == ["list_users"]
+    alle_gruppen = [n for n, w in WERKZEUGE.items() if w.gruppe]
+    assert len(gruppen_nachbarn(alle_gruppen[:1] + alle_gruppen, ALLOWED)) <= MAX_GRUPPEN_NACHZUG
+    # Werkzeuge ohne Gruppe ziehen nichts nach.
+    assert gruppen_nachbarn(["read_server_ports"], ALLOWED) == []
+
+
+def test_gebeugte_und_zusammengesetzte_woerter_treffen():
+    """ "Rechte" findet "Serverrechte", "erstelle" findet "erstellen".
+
+    Vorher zählte nur das genaue Wort, und die Bitte des Betreibers fand
+    keines der Rechtewerkzeuge.
+    """
+    router = SemanticToolRouterAdapter()
+    treffer = router.select(
+        "gib dem Kollegen GamerXYZ die unkritischen Rechte auf dem Minecraft-Server",
+        ALLOWED, top_k=5,
+    )
+    assert {"read_user_permissions", "list_roles", "propose_user_server_permission"} & set(treffer)
+    assert router.select("Erstelle eine Rolle Moderator", ALLOWED, top_k=3)[0] == "propose_role_set"

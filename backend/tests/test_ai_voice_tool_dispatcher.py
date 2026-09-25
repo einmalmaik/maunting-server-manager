@@ -132,7 +132,35 @@ def test_im_chat_fragt_der_umweg_beim_loeschen_trotzdem(db: Session, regular_use
     mock_exec.assert_not_called()
 
 
+def test_die_suche_allein_schreibt_nie(db: Session, regular_user: User):
+    """Eine gefundene Schreibaktion kommt als Auswahl zurück, nicht als Karte.
+
+    Die Suche nach Textähnlichkeit trifft oft daneben. Beim Betreibertest vom
+    25.09.2026 wurde aus "Rolle" das Löschen eines Servers; im autonomen Modus
+    hätte ein anderer Fehlgriff sofort gehandelt. Geschrieben wird erst, wenn
+    das Modell den Namen aus der Liste nennt.
+    """
+    with patch("services.ai_voice.voice_dispatcher.ai_action_service.angebotene_werkzeuge") as mock_angebot:
+        mock_angebot.return_value = frozenset({"propose_backup", "list_my_servers"})
+        with patch(
+            "services.ai_stream.write_tools._persist_write_proposals",
+            side_effect=AssertionError("ein Vorschlag aus der Suche allein"),
+        ):
+            wert, fehler, anzeige, vorschlaege = dispatch_voice_action(
+                user_id=regular_user.id,
+                arguments={"action": "Mach ein Backup von Server 2", "server_id": 2},
+                conversation_id="conv-456",
+            )
+
+    assert fehler is None
+    assert wert["status"] == "choose_tool"
+    assert [k["tool_name"] for k in wert["candidates"]] == ["propose_backup"]
+    assert wert["candidates"][0]["description"]
+    assert vorschlaege == []
+
+
 def test_dispatch_voice_action_routes_write_tool_as_proposal(db: Session, regular_user: User):
+    """Mit genanntem Namen wird aus der Schreibaktion eine Karte."""
     with patch("services.ai_voice.voice_dispatcher.ai_action_service.angebotene_werkzeuge") as mock_angebot:
         mock_angebot.return_value = frozenset({"propose_backup", "list_my_servers"})
         with patch("services.ai_stream.write_tools._persist_write_proposals") as mock_persist:
@@ -140,7 +168,10 @@ def test_dispatch_voice_action_routes_write_tool_as_proposal(db: Session, regula
 
             wert, fehler, anzeige, vorschlaege = dispatch_voice_action(
                 user_id=regular_user.id,
-                arguments={"action": "Mach ein Backup von Server 2", "server_id": 2},
+                arguments={
+                    "action": "Mach ein Backup von Server 2", "server_id": 2,
+                    "tool_name": "propose_backup",
+                },
                 conversation_id="conv-456",
             )
 
@@ -149,6 +180,49 @@ def test_dispatch_voice_action_routes_write_tool_as_proposal(db: Session, regula
             assert wert.get("status") == "proposal_created"
             assert len(vorschlaege) == 1
             assert vorschlaege[0]["id"] == "prop-1"
+
+
+def test_ein_genannter_name_wird_nie_ersetzt(db: Session, regular_user: User):
+    """Ein Name, den es hier nicht gibt, fällt nicht auf die Suche zurück.
+
+    Bis zum 25.09.2026 suchte der Dispatcher dann über ``action`` weiter —
+    und fand irgendein anderes Werkzeug.
+    """
+    with patch("services.ai_voice.voice_dispatcher.ai_action_service.angebotene_werkzeuge") as mock_angebot:
+        mock_angebot.return_value = frozenset({"read_server_ports", "list_my_servers"})
+        with patch("services.ai_stream.read_tools._werkzeug_ausfuehren") as mock_exec:
+            wert, fehler, _, vorschlaege = dispatch_voice_action(
+                user_id=regular_user.id,
+                arguments={"tool_name": "propose_gibt_es_nicht", "action": "Welche Ports nutzt Server 3?"},
+            )
+
+    assert fehler == "Aktion nicht verfügbar"
+    assert "propose_gibt_es_nicht" in wert["error"]
+    mock_exec.assert_not_called()
+    assert vorschlaege == []
+
+
+def test_die_stimme_erreicht_ueber_den_umweg_nichts_schweres(db: Session, regular_user: User):
+    """Was die Sprachsitzung nicht anbietet, erreicht sie auch hier nicht.
+
+    `propose_server_delete` steht in `REALTIME_SCHWER` und fehlt dem
+    Sprachkatalog. Über den Dispatcher kam die Stimme bis zum 25.09.2026
+    trotzdem hin. Der Chat (``stimme=False``) behält das Werkzeug.
+    """
+    with patch("services.ai_voice.voice_dispatcher.ai_action_service.angebotene_werkzeuge") as mock_angebot:
+        mock_angebot.return_value = frozenset({"propose_server_delete", "list_my_servers"})
+        with patch("services.ai_stream.write_tools._persist_write_proposals") as mock_persist:
+            mock_persist.return_value = [{"id": "prop-del", "tool_name": "propose_server_delete", "status": "proposed"}]
+            aufruf = {"tool_name": "propose_server_delete", "server_id": 2}
+            wert, fehler, _, _ = dispatch_voice_action(regular_user.id, aufruf, conversation_id="conv-1")
+            assert fehler == "Aktion nicht verfügbar"
+            mock_persist.assert_not_called()
+
+            wert, fehler, _, vorschlaege = dispatch_voice_action(
+                regular_user.id, aufruf, conversation_id="conv-1", stimme=False,
+            )
+    assert fehler is None
+    assert [v["id"] for v in vorschlaege] == ["prop-del"]
 
 
 def test_dispatch_voice_action_explicit_tool_name(db: Session, regular_user: User):

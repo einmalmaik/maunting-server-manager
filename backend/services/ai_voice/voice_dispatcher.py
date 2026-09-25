@@ -12,6 +12,77 @@ from services.ai_tool_registry import RECHTE_SCHREIBEN, WERKZEUGE, WRITE_TOOLS
 from services.semantic_tool_router_adapter import SemanticToolRouterAdapter
 
 
+#: Was der Umweg nie erreicht: sich selbst, die Worker-Steuerung und die
+#: Werkzeuge, die einen Gesprächszustand brauchen, den er nicht hat.
+_NIE_UEBER_DEN_UMWEG = frozenset({
+    "execute_server_action", "worker_start", "worker_cancel", "worker_antwort",
+    "ask_user", "wait_until",
+})
+#: So viele Treffer der Suche sieht das Modell, wenn es wählen soll.
+_KANDIDATEN = 5
+
+
+def _schreibt(name: str) -> bool:
+    """Ob ein Werkzeug handelt — dann wählt es nie die Textsuche allein.
+
+    Dazu zählt, was immer bestätigt werden muss (`forget_memory` ist der
+    Art nach ein Lesewerkzeug, löscht aber).
+    """
+    spec = WERKZEUGE.get(name)
+    if spec is None:
+        return False
+    return (
+        spec.art in {"server_write", "global_write"}
+        or name in WRITE_TOOLS
+        or spec.immer_bestaetigen
+    )
+
+
+def _beschreibung(name: str) -> str:
+    from services import ai_action_service as katalog
+
+    for eintrag in katalog.provider_tool_definitions():
+        funktion = eintrag.get("function", eintrag) if isinstance(eintrag, dict) else {}
+        if funktion.get("name") == name:
+            text = " ".join(str(funktion.get("description") or "").split())
+            return text[:160]
+    return ""
+
+
+def _rueckfrage(action: str, kandidaten: list[str]) -> tuple[dict, None, dict, list]:
+    """Die Treffer der Suche zur Auswahl, statt den ersten auszuführen.
+
+    Kein Fehler: das Modell ruft `execute_server_action` noch einmal mit
+    `tool_name` auf — oder merkt, dass keiner passt, und sagt es.
+    """
+    wert = {
+        "status": "choose_tool",
+        "message": (
+            "Nichts ausgeführt. Die Suche nach der Aktion ist nicht eindeutig. "
+            "Wähle das passende Werkzeug und rufe execute_server_action erneut mit "
+            "tool_name und parameters auf. Passt keines, sag das dem Benutzer."
+        ),
+        "action": action[:200],
+        "candidates": [
+            {"tool_name": name, "description": _beschreibung(name)} for name in kandidaten
+        ],
+    }
+    return wert, None, {"tool_name": "execute_server_action"}, []
+
+
+def _an_den_worker(name: str) -> tuple[dict, str, dict, list]:
+    """Rechte anderer Benutzer: der Weg dorthin, statt eines Ersatzwerkzeugs."""
+    wert = {
+        "error": (
+            f"Das passende Werkzeug ist {name}. Rechte und Rollen anderer Benutzer "
+            "ändert nur ein Worker. Im Gespräch oder per Stimme: worker_start mit dem "
+            f"Auftrag. Als Worker: {name} direkt aufrufen."
+        ),
+        "tool_name": name,
+    }
+    return wert, "Nur über einen Worker", {"tool_name": "execute_server_action", "failed": True}, []
+
+
 def _unterhaltung(user_id: int, conversation_id: str | None) -> str | None:
     """Die Unterhaltung, an der die Karte eines Sprachvorschlags hängt."""
     if conversation_id:
@@ -46,6 +117,7 @@ def dispatch_voice_action(
     herkunft: str = "panel",
     familie: str | None = None,
     schon_freigegeben: bool = False,
+    stimme: bool = True,
 ) -> tuple[object, str | None, dict, list[dict]]:
     """Löst eine per Sprache gewünschte Aktion semantisch über die gesamte Tool-Registry auf.
 
@@ -60,6 +132,12 @@ def dispatch_voice_action(
     Vorhaben ließe den bestätigten Aufruf nie laufen (Review vom 23.09.2026).
     Die Stimme ruft den Dispatcher ohne vorherige Frage auf
     (`voice_werkzeug_ausfuehren`); dort ist seine die einzige.
+
+    ``stimme``: der Aufruf kommt aus einer Sprachsitzung. Dann fehlt hier,
+    was die Sitzung selbst nicht anbietet (`realtime_session.REALTIME_SCHWER`,
+    darunter `propose_server_delete`). Bis zum 25.09.2026 erreichte die Stimme
+    über diesen Umweg genau die Werkzeuge, die ihr Katalog weglässt — beim
+    Betreibertest schlug die Suche für "Rolle" das Löschen eines Servers vor.
     """
     from services.ai_stream.read_tools import _anzeigeeintrag, _werkzeug_ausfuehren
     from services.ai_stream.write_tools import _persist_write_proposals
@@ -79,25 +157,40 @@ def dispatch_voice_action(
         if user is None:
             wert = {"error": "Benutzer nicht gefunden"}
             return wert, "Benutzer nicht gefunden", {"tool_name": "execute_server_action", "failed": True}, []
-        # Rechte anderer Benutzer aendert nur ein Worker: Gehirn und Stimme
-        # uebergeben sie mit `worker_start` (`ai_tool_registry.RECHTE_SCHREIBEN`).
-        # Ohne diese Zeile waere dieser Umweg der eine Pfad, auf dem sie es
-        # doch selbst tun.
-        allowed = (
-            ai_action_service.angebotene_werkzeuge(db, user)
-            - {"execute_server_action", "worker_start", "worker_cancel", "worker_antwort", "ask_user", "wait_until"}
-            - RECHTE_SCHREIBEN
-        )
+        angeboten = ai_action_service.angebotene_werkzeuge(db, user) - _NIE_UEBER_DEN_UMWEG
+    if stimme:
+        from services.ai_voice.realtime_session import REALTIME_SCHWER
 
-    target_tool: str | None = None
-    if isinstance(explicit_tool, str) and explicit_tool in allowed:
-        target_tool = explicit_tool
-    elif action:
+        angeboten = angeboten - REALTIME_SCHWER
+    # Rechte anderer Benutzer aendert nur ein Worker: Gehirn und Stimme
+    # uebergeben sie mit `worker_start` (`ai_tool_registry.RECHTE_SCHREIBEN`).
+    # Gesucht wird trotzdem ueber sie mit — sonst landet "leg eine Rolle an"
+    # beim naechstbesten Werkzeug, das es noch gibt (am 25.09.2026 beim
+    # Betreibertest: Tarif-Rolle, Portliste, Server loeschen).
+    allowed = angeboten - RECHTE_SCHREIBEN
+
+    if isinstance(explicit_tool, str) and explicit_tool.strip():
+        # Ein genannter Name wird genommen oder abgelehnt, nie ersetzt. Bis
+        # zum 25.09.2026 fiel ein unbekannter Name still auf die Suche ueber
+        # `action` zurueck — und die fand irgendetwas.
+        target_tool = explicit_tool.strip()
+        if target_tool in RECHTE_SCHREIBEN and target_tool in angeboten:
+            return _an_den_worker(target_tool)
+        if target_tool not in allowed:
+            wert = {"error": f"Werkzeug '{target_tool}' ist hier nicht verfügbar oder nicht berechtigt."}
+            return wert, "Aktion nicht verfügbar", {"tool_name": "execute_server_action", "failed": True}, []
+    else:
         router = SemanticToolRouterAdapter()
-        router.warm(allowed)
-        candidates = router.select(action, allowed, top_k=1)
-        if candidates:
-            target_tool = candidates[0]
+        router.warm(angeboten)
+        kandidaten = router.select(action, angeboten, top_k=_KANDIDATEN)
+        target_tool = kandidaten[0] if kandidaten else None
+        if target_tool in RECHTE_SCHREIBEN:
+            return _an_den_worker(target_tool)
+        # Eine Suche nach Textaehnlichkeit trifft oft daneben, und ein
+        # Schreibwerkzeug handelt dann. Lesen darf sie sofort; geschrieben
+        # wird erst, wenn das Modell den Namen aus der Liste nennt.
+        if target_tool is not None and _schreibt(target_tool):
+            return _rueckfrage(action, kandidaten)
 
     if not target_tool or target_tool not in allowed:
         wert = {"error": f"Keine passende Aktion für '{action}' verfügbar oder berechtigt."}

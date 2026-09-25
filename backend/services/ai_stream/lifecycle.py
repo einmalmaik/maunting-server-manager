@@ -843,7 +843,7 @@ async def _werkzeuge_und_grenze(
         if str(eintrag.get("function", {}).get("name")) in erlaubt
     ]
     try:
-        from services.semantic_tool_router_adapter import SemanticToolRouterAdapter
+        from services.semantic_tool_router_adapter import SemanticToolRouterAdapter, gruppen_nachbarn
         from services.tool_selection_port import HOTSET
         import logging
         _log = logging.getLogger(__name__)
@@ -881,7 +881,7 @@ async def _werkzeuge_und_grenze(
                 router.warm(frozenset(erlaubt))
                 routed = router.select(letzte, frozenset(erlaubt), top_k=5)
             hot = [n for n in HOTSET if n in erlaubt]
-            keep = set(hot) | set(routed)
+            keep = set(hot) | set(routed) | set(gruppen_nachbarn(routed, frozenset(erlaubt)))
             tools = [e for e in tools if str(e.get("function", {}).get("name")) in keep]
             _log.info("Tool-Routing: erlaubt=%d keep=%d routed=%s query=%.80s", len(erlaubt), len(keep), routed, letzte)
     except Exception as exc:

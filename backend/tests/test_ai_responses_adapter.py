@@ -65,8 +65,26 @@ def test_tools_lose_their_wrapper() -> None:
     }])
     assert flach == [{
         "type": "function", "name": "read_server_status", "description": "Status",
-        "parameters": {"type": "object", "properties": {}},
+        "parameters": {"type": "object", "properties": {}}, "strict": False,
     }]
+
+
+def test_optionale_felder_bleiben_optional() -> None:
+    """Ohne ``strict: False`` macht die Responses-API jedes Feld zur Pflicht.
+
+    Gemessen am 25.09.2026: `propose_role_set` kam für eine neue Rolle mit
+    ``role_id: 1`` zurück — der admin-Rolle —, weil das Modell ein Pflichtfeld
+    füllen musste, das es gar nicht gibt.
+    """
+    flach = _werkzeuge_uebersetzen([{
+        "type": "function",
+        "function": {"name": "propose_role_set", "description": "Rolle",
+                     "parameters": {"type": "object", "properties": {
+                         "role_id": {"type": "integer"}, "name": {"type": "string"},
+                     }, "required": ["name"]}},
+    }])
+    assert flach[0]["strict"] is False
+    assert flach[0]["parameters"]["required"] == ["name"]
 
 
 def test_an_already_flat_catalog_is_left_alone() -> None:

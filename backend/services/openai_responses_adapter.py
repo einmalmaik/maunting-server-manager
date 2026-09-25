@@ -84,6 +84,14 @@ def _werkzeuge_uebersetzen(tools: list[dict] | None) -> list[dict] | None:
             "name": funktion.get("name"),
             "description": funktion.get("description"),
             "parameters": funktion.get("parameters"),
+            # Ausdruecklich nicht streng. Ohne das Feld macht die Responses-API
+            # das Schema selbst streng und setzt dabei **jedes** Feld auf
+            # Pflicht: das Modell musste fuer "leg die Rolle Supporter an" eine
+            # `role_id` erfinden (gemessen am 25.09.2026 mit gpt-6-luna: 1,
+            # die admin-Rolle), und jedes andere Werkzeug fuellte seine
+            # optionalen Felder ebenso mit Ratewerten. Der Katalog ist fuer
+            # optionale Felder gebaut, wie ihn jeder andere Anbieter liest.
+            "strict": False,
         })
     return flach or None
 
