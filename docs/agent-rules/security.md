@@ -65,6 +65,9 @@ Regeln:
 - Dev-Testaccount nur per server-only Env und trusted Node-Script.
 - Keine produktiven Secrets in Agenten-Konfiguration, MCP-Server, Shell-History, Logs oder Prompts.
 - Keine Secrets in Fehlermeldungen, Stacktraces, Serialisierungen oder Snapshots.
+- Git-Tokens (wie Personal Access Tokens) dürfen **niemals** in Git-Remote-URLs (`https://token@github.com/...`) eingebettet werden. Git persistiert solche URLs im Klartext in `.git/config`. Authentifizierung an Git erfolgt ausschließlich flüchtig über Prozess-Environment (`http.https://github.com/.extraheader`).
+- Automatisch gerenderte Medien im Chat dürfen **niemals** beliebige externe HTTP/HTTPS-Ressourcen von Fremdservern nachladen (Schutz vor IP- und Zeitstempel-Tracking beim bloßen Betrachten). Nur `data:`, `blob:` und interne `/api/`-Ressourcen auf demselben Ursprung sind zulässig.
+- WebPush-Endpunkte müssen auf autorisierte Browser-Push-Provider (`*.googleapis.com`, `*.push.services.mozilla.com`, `*.push.apple.com`, `*.notify.windows.com`, `*.push.microsoft.com`) beschränkt sein, um Tarpit- und DoS-Angriffe gegen Server-Worker zu verhindern.
 
 Schlecht:
 
