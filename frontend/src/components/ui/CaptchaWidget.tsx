@@ -91,10 +91,23 @@ export function CaptchaWidget({ onVerify, onStatusChange, resetKey }: CaptchaWid
     if (resetKey === undefined || !containerRef.current) return
     if (config?.provider === 'altcha') {
       const widget = containerRef.current.querySelector('altcha-widget') as any
-      if (widget && typeof widget.reset === 'function') {
-        widget.reset()
-        onVerifyRef.current('')
-        melde('ready')
+      if (widget) {
+        api<Record<string, unknown>>('/auth/captcha-challenge')
+          .then((fresh) => {
+            widget.setAttribute('challenge', JSON.stringify(fresh))
+            if (typeof widget.reset === 'function') {
+              widget.reset()
+            }
+            onVerifyRef.current('')
+            melde('ready')
+          })
+          .catch(() => {
+            if (typeof widget.reset === 'function') {
+              widget.reset()
+            }
+            onVerifyRef.current('')
+            melde('ready')
+          })
       }
     } else if (widgetIdRef.current !== null) {
       if (config?.provider === 'turnstile' && window.turnstile?.remove) {
@@ -121,16 +134,15 @@ export function CaptchaWidget({ onVerify, onStatusChange, resetKey }: CaptchaWid
 
     if (provider === 'altcha') {
       let active = true
-      import('altcha')
-        .then(() => {
+      Promise.all([
+        import('altcha'),
+        api<Record<string, unknown>>('/auth/captcha-challenge'),
+      ])
+        .then(([_, challengeData]) => {
           if (!active || !containerRef.current) return
           containerRef.current.innerHTML = ''
           const widget = document.createElement('altcha-widget')
-          const challengeUrl = typeof window !== 'undefined' && window.location?.origin
-            ? new URL('/api/auth/captcha-challenge', window.location.origin).href
-            : '/api/auth/captcha-challenge'
-          widget.setAttribute('challenge', challengeUrl)
-          widget.setAttribute('challengeurl', challengeUrl)
+          widget.setAttribute('challenge', JSON.stringify(challengeData))
           widget.setAttribute('auto', 'onload')
           const lang = (i18n.language || 'de').startsWith('de') ? 'de' : 'en'
           widget.setAttribute('language', lang)
@@ -172,6 +184,12 @@ export function CaptchaWidget({ onVerify, onStatusChange, resetKey }: CaptchaWid
           const handleExpired = () => {
             onVerifyRef.current('')
             melde('ready')
+            api<Record<string, unknown>>('/auth/captcha-challenge')
+              .then((fresh) => {
+                widget.setAttribute('challenge', JSON.stringify(fresh))
+                if (typeof widget.reset === 'function') widget.reset()
+              })
+              .catch(() => {})
           }
           const handleError = () => {
             onVerifyRef.current('')
@@ -189,6 +207,7 @@ export function CaptchaWidget({ onVerify, onStatusChange, resetKey }: CaptchaWid
         })
         .catch((err) => {
           console.error('Failed to load ALTCHA widget:', err)
+          if (!active) return
           setLoadFailed(true)
           melde('failed')
         })
