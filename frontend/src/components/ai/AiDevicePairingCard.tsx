@@ -7,6 +7,8 @@ import { formatRelativeTime } from '@/utils/timeFormat'
 import { api } from '@/api/client'
 import { getE2eeGeraete } from '@/api/social'
 import { API_ORIGIN } from '@/config/api'
+import { Input } from '@/components/ui/Input'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { SecretOnce } from '@/components/ui/SecretOnce'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { Button } from '@/Singra/UI'
@@ -292,12 +294,14 @@ export function AiDevicePairingCard() {
           {t('ai.profile.devicesApiAddress')}
         </label>
         <div className="flex items-center gap-2">
-          <input
-            id="mss-api-adresse"
-            className="msm-input flex-1 cursor-not-allowed opacity-70"
-            value={hostOnly}
-            readOnly
-          />
+          <div className="flex-1">
+            <Input
+              id="mss-api-adresse"
+              className="cursor-not-allowed opacity-70"
+              value={hostOnly}
+              readOnly
+            />
+          </div>
           <Button
             variant="secondary"
             onClick={() => {
@@ -371,32 +375,38 @@ export function AiDevicePairingCard() {
       ) : (
         <div className="max-w-xl space-y-1">
           <div className="flex flex-wrap items-end gap-3">
-            <label className="min-w-[10rem] flex-1">
-              <span className="mb-1 block text-xs font-medium text-on-surface-variant">
-                {t('ai.profile.devicesNameLabel')}
-              </span>
-              <input
-                className="msm-input"
+            <div className="min-w-[10rem] flex-1">
+              <Input
+                id="kopplung-name"
+                label={t('ai.profile.devicesNameLabel')}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t('ai.profile.devicesNamePlaceholder')}
                 maxLength={64}
               />
-            </label>
-            <label className="min-w-[10rem] flex-1">
-              <span className="mb-1 block text-xs font-medium text-on-surface-variant">
-                {t(mitZweiFaktor ? 'ai.profile.devicesProofOtp' : 'ai.profile.devicesProofPassword')}
-              </span>
-              <input
-                className="msm-input"
-                type={mitZweiFaktor ? 'text' : 'password'}
-                inputMode={mitZweiFaktor ? 'numeric' : undefined}
-                autoComplete={mitZweiFaktor ? 'one-time-code' : 'current-password'}
-                value={nachweis}
-                onChange={(e) => setNachweis(e.target.value)}
-                maxLength={mitZweiFaktor ? 16 : 256}
-              />
-            </label>
+            </div>
+            <div className="min-w-[10rem] flex-1">
+              {mitZweiFaktor ? (
+                <Input
+                  id="kopplung-nachweis"
+                  label={t('ai.profile.devicesProofOtp')}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={nachweis}
+                  onChange={(e) => setNachweis(e.target.value)}
+                  maxLength={16}
+                />
+              ) : (
+                <PasswordInput
+                  id="kopplung-nachweis"
+                  label={t('ai.profile.devicesProofPassword')}
+                  autoComplete="current-password"
+                  value={nachweis}
+                  onChange={(e) => setNachweis(e.target.value)}
+                  maxLength={256}
+                />
+              )}
+            </div>
             <Button onClick={koppeln} disabled={busy || !nachweis.trim()}>
               {t('ai.profile.devicesPair')}
             </Button>
