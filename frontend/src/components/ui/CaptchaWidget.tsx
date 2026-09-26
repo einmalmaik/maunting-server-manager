@@ -6,6 +6,7 @@ declare global {
   interface Window {
     turnstile?: {
       render: (container: HTMLElement, options: any) => any
+      reset?: (id: any) => void
       remove: (id: any) => void
     }
     hcaptcha?: {
