@@ -1,7 +1,7 @@
 {
   "captcha": {
     "altcha": {
-      "label": "I am humans",
+      "label": "I am human",
       "verifying": "Security check in progress …",
       "verified": "Verified",
       "error": "Security check failed"

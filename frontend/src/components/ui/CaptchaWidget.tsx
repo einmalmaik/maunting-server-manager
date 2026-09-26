@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
+import { DisBadge } from '@/components/DisBadge'
 
 declare global {
   interface Window {
@@ -106,7 +107,7 @@ export function CaptchaWidget({ onVerify, resetKey }: CaptchaWidgetProps) {
           widget.setAttribute(
             'strings',
             JSON.stringify({
-              label: t('captcha.altcha.label', 'Ich bin ein Mensch (DIS Shield)'),
+              label: t('captcha.altcha.label', 'Ich bin ein Mensch'),
               verifying: t('captcha.altcha.verifying', 'Sicherheitsprüfung läuft …'),
               verified: t('captcha.altcha.verified', 'Verifiziert'),
               error: t('captcha.altcha.error', 'Sicherheitsprüfung fehlgeschlagen'),
@@ -267,6 +268,11 @@ export function CaptchaWidget({ onVerify, resetKey }: CaptchaWidgetProps) {
   }
 
   return (
-    <div className="flex justify-center my-4" ref={containerRef} />
+    <div className="flex flex-col items-center justify-center my-4 gap-2">
+      <div ref={containerRef} />
+      {config.provider === 'altcha' && (
+        <DisBadge size={14} className="py-0.5 px-2" />
+      )}
+    </div>
   )
 }
