@@ -796,6 +796,9 @@ app.add_middleware(
         "Idempotency-Key",
         "X-Task-Retry-Of",
         "X-Provider-Api-Key",
+        # Der Besitznachweis einer Mailbox (Chatgeheimnis, Gruppengeheimnis).
+        # Fehlte er hier, scheiterte in der App jede Vorabfrage mit 400.
+        "X-Mailbox-Token",
     ],
     expose_headers=["X-CSRF-Token"],
 )
