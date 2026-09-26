@@ -281,3 +281,21 @@ def test_notes_client_e2ee_opaque_storage(db_session, test_user):
     assert replay_note["id"] == note_with_uid["id"]
 
 
+
+
+@pytest.mark.parametrize("order,expected", [
+    ("asc", ["Pinned", "alpha", "Zulu"]),
+    ("desc", ["Pinned", "Zulu", "alpha"]),
+])
+def test_titelsortierung_nach_entschluesselung(db_session, test_user, monkeypatch, order, expected):
+    from services import notes_service
+    for title, pinned in [("Zulu", False), ("alpha", False), ("Pinned", True)]:
+        NotesService.create_note(db_session, user=test_user, title=title, content="", is_pinned=pinned)
+    rows = db_session.query(Note).all()
+    titles = {row.id: title for row, title in zip(rows, ["Zulu", "alpha", "Pinned"])}
+    for row, encrypted in zip(rows, ["cipher-a", "cipher-z", "cipher-m"]):
+        row.title = encrypted
+    db_session.commit()
+    monkeypatch.setattr(NotesService, "_decrypt_or_migrate", lambda _db, row: (titles[row.id], ""))
+    result = NotesService.get_notes(db_session, test_user, sort_by="title", order=order)
+    assert [row["title"] for row in result] == expected

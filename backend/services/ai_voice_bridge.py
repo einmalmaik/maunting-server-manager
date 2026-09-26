@@ -624,7 +624,13 @@ class Sprachbruecke:
         offene = self._offene_vorschlaege
         if ist_zustimmung(wortlaut):
             letzter, verworfene = offene[-1], offene[:-1]
-            stand, klick = await asyncio.to_thread(self._vorschlagslage, letzter)
+            try:
+                stand, klick = await asyncio.to_thread(self._vorschlagslage, letzter)
+            except Exception:
+                self._offene_vorschlaege = []
+                await self._senden({"art": "stoerung"})
+                await self._zustand_melden(ZUSTAND_BEREIT)
+                return True
             if stand is not None:
                 # Schon entschieden, meist per Knopf auf der Karte. Ein
                 # zweites Ausführen gäbe nur eine Störung.

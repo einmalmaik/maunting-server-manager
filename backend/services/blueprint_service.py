@@ -35,6 +35,8 @@ import json
 import logging
 import os
 import re
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -144,7 +146,6 @@ def save_community_blueprint(raw: dict[str, Any]) -> str:
             ),
         )
 
-    ensure_community_dir()
     try:
         ziel = community_blueprint_path(blueprint.meta.id)
     except ValueError as exc:
@@ -152,45 +153,20 @@ def save_community_blueprint(raw: dict[str, Any]) -> str:
 
     nutzlast = blueprint.model_dump(mode="json", by_alias=True)
     content = json.dumps(nutzlast, indent=2, ensure_ascii=False) + "\n"
-    if ziel.exists():
-        try:
-            ziel.chmod(0o666)
-        except OSError:
-            pass
-
-    temp_ziel = ziel.parent / f".{ziel.name}.{os.getpid()}.tmp"
+    temp_ziel = None
     try:
-        try:
-            temp_ziel.write_text(content, encoding="utf-8")
-        except PermissionError:
-            try:
-                ziel.parent.chmod(0o775)
-            except OSError:
-                pass
-            try:
-                ziel.parent.parent.chmod(0o775)
-            except OSError:
-                pass
-            temp_ziel.write_text(content, encoding="utf-8")
-
-        try:
-            temp_ziel.chmod(0o664)
-        except OSError:
-            pass
-
-        try:
-            temp_ziel.replace(ziel)
-        except PermissionError:
-            try:
-                if ziel.exists():
-                    try:
-                        ziel.chmod(0o666)
-                    except OSError:
-                        pass
-                    ziel.unlink(missing_ok=True)
-                temp_ziel.replace(ziel)
-            except Exception:
-                ziel.write_text(content, encoding="utf-8")
+        ensure_community_dir()
+        # Ein eindeutiger Name je Aufruf; konkurrierende Threads duerfen
+        # weder die Nutzlast noch die Aufraeumdatei des anderen verwenden.
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=ziel.parent,
+            prefix=f".{ziel.name}.", suffix=".tmp", delete=False,
+        ) as temporary:
+            temp_ziel = Path(temporary.name)
+            temporary.write(content)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        temp_ziel.replace(ziel)
     except PermissionError as exc:
         logger.error(
             "Konnte Blueprint %s nicht schreiben (Permission denied): %s. "
@@ -212,7 +188,7 @@ def save_community_blueprint(raw: dict[str, Any]) -> str:
             status_code=500, detail="Blueprint konnte nicht gespeichert werden."
         ) from exc
     finally:
-        if temp_ziel.exists():
+        if temp_ziel is not None and temp_ziel.exists():
             try:
                 temp_ziel.unlink(missing_ok=True)
             except OSError:
@@ -291,25 +267,16 @@ def delete_community_blueprint(blueprint_id: str, db: Session) -> None:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        if ziel.exists():
-            try:
-                ziel.chmod(0o666)
-            except OSError:
-                pass
         ziel.unlink(missing_ok=True)
     except PermissionError as exc:
-        try:
-            ziel.parent.chmod(0o775)
-            ziel.unlink(missing_ok=True)
-        except Exception:
-            logger.error("Konnte Blueprint %s nicht loeschen (Permission denied): %s", ziel.name, exc)
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    f"Blueprint-Datei '{ziel.name}' konnte wegen fehlender Dateirechte nicht gelöscht werden (Permission denied). "
-                    f"Bitte Dateibesitz von '{ziel.parent}' für den Panel-Benutzer prüfen oder 'scripts/fix-server-permissions.sh' ausführen."
-                ),
-            ) from exc
+        logger.error("Konnte Blueprint %s nicht loeschen (Permission denied): %s", ziel.name, exc)
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Blueprint-Datei '{ziel.name}' konnte wegen fehlender Dateirechte nicht gelöscht werden (Permission denied). "
+                f"Bitte Dateibesitz von '{ziel.parent}' für den Panel-Benutzer prüfen oder 'scripts/fix-server-permissions.sh' ausführen."
+            ),
+        ) from exc
     except OSError as exc:
         logger.error("Konnte Blueprint %s nicht loeschen: %s", ziel.name, exc)
         raise HTTPException(

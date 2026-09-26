@@ -360,6 +360,12 @@ def encode_ueber_anbieter(
             return None
 
         data = resp.json().get("data", [])
+        if not isinstance(data, list) or len(data) != len(texts):
+            return None
+        indices = [item.get("index") if isinstance(item, dict) else None for item in data]
+        if any(type(index) is not int for index in indices) or set(indices) != set(range(len(texts))):
+            return None
+        data = sorted(data, key=lambda item: item["index"])
         raw_vectors = []
         for item in data:
             vec = item.get("embedding", [])

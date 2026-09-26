@@ -525,10 +525,12 @@ export async function uploadChatMedia(payload: {
 
 export async function getChatMediaSignedUrl(
   mediaId: string,
-  ttl: number = 900
+  ttl: number = 900,
+  blindMailboxId?: string,
 ): Promise<{ media_id: string; signed_url: string; expires_at: string }> {
   return api<{ media_id: string; signed_url: string; expires_at: string }>(
-    `/social/media/${mediaId}/signed-url?ttl=${ttl}`
+    `/social/media/${mediaId}/signed-url?ttl=${ttl}`,
+    { headers: blindMailboxId ? nachweisKopf(blindMailboxId) : undefined },
   )
 }
 
@@ -563,10 +565,10 @@ export async function loescheBlindeUmschlaege(
   )
 }
 
-export async function downloadChatMedia(signedUrl: string): Promise<string> {
+export async function downloadChatMedia(signedUrl: string, blindMailboxId?: string): Promise<string> {
   const res = await apiStream(signedUrl, {
     method: 'GET',
-    headers: { Accept: '*/*' },
+    headers: { Accept: '*/*', ...(blindMailboxId ? nachweisKopf(blindMailboxId) : {}) },
   })
   if (!res.ok) {
     throw new Error(i18n.t('chat.errors.mediaDownloadFailed', { status: res.status }))
@@ -624,8 +626,8 @@ export async function ladeAnhangHerunter(
   bindung: { absenderId: number; blindMailboxId: string }
 ): Promise<string> {
   const { entschluesselePaket } = await import('@/services/medienKrypto')
-  const { signed_url } = await getChatMediaSignedUrl(zeiger.mediaId)
-  const blob = await downloadChatMedia(signed_url)
+  const { signed_url } = await getChatMediaSignedUrl(zeiger.mediaId, 900, bindung.blindMailboxId)
+  const blob = await downloadChatMedia(signed_url, bindung.blindMailboxId)
   return entschluesselePaket(blob, zeiger.paketSchluessel, {
     absenderId: bindung.absenderId,
     blindMailboxId: bindung.blindMailboxId,

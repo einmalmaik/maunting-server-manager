@@ -37,15 +37,13 @@ from services.ai_tool_registry import (
     DESKTOP_TOOLS,
     GEHIRN_TOOLS,
     GUARDIAN_HEILUNG_TOOLS,
-    NUR_WORKER,
     READ_TOOLS,
     SERVER_READ_TOOLS,
     SKILL_TOOLS,
     WERKZEUGE,
-    WORKER_STEUERUNG,
     WRITE_TOOLS,
     aufgaben_tools,
-    worker_ausschluss,
+    rollen_ausschluss,
 )
 from services.openai_compatible_adapter import StreamUsage
 
@@ -870,13 +868,13 @@ async def _tool_followup_messages(
         )
     else:
         if rolle == "worker":
-            rollen_gesperrt = worker_ausschluss()
+            rollen_gesperrt = rollen_ausschluss(rolle)
             rollen_grund = (
                 "Dieses Werkzeug steht einem Worker nicht zur Verfügung. "
                 "Der Aufruf lief nicht — arbeite ohne ihn weiter."
             )
         else:
-            rollen_gesperrt = WORKER_STEUERUNG | NUR_WORKER
+            rollen_gesperrt = rollen_ausschluss(rolle)
             rollen_grund = (
                 "Dieses Werkzeug gehört zum Hintergrund-Betrieb und steht in "
                 "diesem Lauf nicht zur Verfügung. Der Aufruf lief nicht — "

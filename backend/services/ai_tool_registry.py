@@ -1479,3 +1479,11 @@ GUARDIAN_BACKUP_PFLICHT_TOOLS = frozenset({
 
 def bekannt(name: str) -> bool:
     return name in WERKZEUGE
+
+
+def rollen_ausschluss(rolle: str) -> frozenset[str]:
+    """Gemeinsame Schranke fuer direkte Aufrufe und Bestaetigungsvorschlaege.
+
+    Gehirn-Leseaufrufe prueft der jeweilige Pfad gesondert gegen GEHIRN_TOOLS.
+    """
+    return worker_ausschluss() if rolle == "worker" else WORKER_STEUERUNG | NUR_WORKER

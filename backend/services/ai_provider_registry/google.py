@@ -4,8 +4,8 @@ Alles, was MSM über Google AI Studio weiß, steht in dieser Datei: Adressen,
 Wortschatz, Katalogleser und Modellmerkmale.
 
 Katalog:
-Über die OpenAI-kompatible Schnittstelle von Google AI Studio
-(``GET https://generativelanguage.googleapis.com/v1beta/openai/models``)
+Über die native REST-Schnittstelle von Google AI Studio
+(``GET https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000``)
 liefert Google alle freigegebenen Gemini-, Gemma- und Einbettungsmodelle.
 Gemini-Modelle sind multimodal (Bild, Audio, Text), unterstützen hohe
 Kontextfenster (bis zu 1M+ Tokens) und besitzen bei 2.0/2.5 Thinking-Stufen.
@@ -23,7 +23,7 @@ ANBIETER = Anbieter(
     kind="google",
     label="Google AI Studio",
     base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-    catalog_url="https://generativelanguage.googleapis.com/v1beta/models",
+    catalog_url="https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
     key_url="https://aistudio.google.com/app/apikey",
     key_prefix=None,
     katalog_braucht_schluessel=True,
@@ -109,17 +109,8 @@ def katalog_lesen(rohdaten: dict) -> Modell | None:
     elif api_thinking is False:
         ist_denkend = False
     else:
-        # Fallback-Heuristik wenn das Flag nicht in den Rohdaten vorliegt
-        if "embedding" in model_lower:
-            ist_denkend = False
-        elif "gemma" in model_lower:
-            ist_denkend = True
-        elif "gemini" in model_lower:
-            ist_denkend = any(
-                t in model_lower for t in ("2.5", "2.0-flash-thinking", "thinking")
-            )
-        else:
-            ist_denkend = False
+        # Ohne Anbieterangabe bleibt diese Faehigkeit unbekannt.
+        ist_denkend = None
 
     # Denkstufen ermitteln
     raw_levels = (
