@@ -2,6 +2,7 @@ import base64
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 import hashlib
+import logging
 import secrets
 
 from jose import jwt, JWTError
@@ -16,6 +17,8 @@ from services.dis_client import DisClient
 # Wird entfernt sobald alle User mindestens einmal eingeloggt waren
 # und ihre Hashes im msm-pw-v1: Format vorliegen.
 _pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+
+logger = logging.getLogger("msm.auth_service")
 
 
 class AuthService:
@@ -187,6 +190,7 @@ class AuthService:
             RefreshToken.revoked_at.is_(None),
         ).update({"revoked_at": datetime.now(timezone.utc)})
         db.commit()
+        AuthService._sitzung_abraeumen(db, user_id, None)
 
     @staticmethod
     def revoke_refresh_family(db: Session, user_id: int, family: str) -> int:
@@ -204,7 +208,31 @@ class AuthService:
             RefreshToken.revoked_at.is_(None),
         ).update({"revoked_at": datetime.now(timezone.utc)})
         db.commit()
+        AuthService._sitzung_abraeumen(db, user_id, family)
         return int(getroffen)
+
+    @staticmethod
+    def _sitzung_abraeumen(db: Session, user_id: int, family: str | None) -> None:
+        """Was nach dem Sperren noch am Geraet haengt: offene Verbindungen und Push.
+
+        Das Sperren der Familie haelt nur **neue** Anfragen auf. Bis 09/2026
+        lief ein offener Echtzeitstrom weiter, und die Push-Adresse des
+        Geraets bekam weiter Benachrichtigungen. ``family=None`` heisst alle
+        Sitzungen des Kontos.
+
+        Scheitert das Abraeumen der Push-Adressen, bleibt die Sperre
+        trotzdem stehen; sie ist schon festgeschrieben.
+        """
+        # Lokale Importe: beide Dienste haengen mittelbar an diesem Modul.
+        from services import webpush_service
+        from services.sync_event_service import SyncEventService
+
+        SyncEventService.trenne(user_id, family)
+        try:
+            webpush_service.austragen_familie(db, user_id, family)
+        except Exception:
+            db.rollback()
+            logger.warning("Push-Adressen nach Sperre nicht entfernt (User %s).", user_id)
 
     # ── CSRF Token ──
     @staticmethod

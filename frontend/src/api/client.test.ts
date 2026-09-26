@@ -528,6 +528,25 @@ describe('api client', () => {
       expect(headers['X-CSRF-Token']).toBeUndefined()
     })
 
+    it('gibt das Token nur an /api/ des Backends, nicht an LiveKit auf derselben Herkunft', async () => {
+      const { setRuntimeApiUrl } = await import('@/config/api')
+      const { registriereNativeSitzung } = await import('./client')
+      registriereNativeSitzung({ token: () => 'secret_jwt_token', erneuern: async () => true })
+      try {
+        setRuntimeApiUrl('https://api.my-backend.com')
+        fetchSpy.mockReturnValueOnce(Promise.resolve(new Response('ok', { status: 200 })))
+        await apiStream('https://api.my-backend.com/livekit/bild.png', { method: 'GET' })
+        fetchSpy.mockReturnValueOnce(Promise.resolve(new Response('ok', { status: 200 })))
+        await apiStream('https://api.my-backend.com/api/auth/avatar/a.png', { method: 'GET' })
+
+        const kopf = (i: number) => (fetchSpy.mock.calls[i][1] as RequestInit).headers as Record<string, string>
+        expect(kopf(0)['Authorization']).toBeUndefined()
+        expect(kopf(1)['Authorization']).toBe('Bearer secret_jwt_token')
+      } finally {
+        setRuntimeApiUrl(null)
+      }
+    })
+
     it('does not send tokens to frontend origin when explicit backend URL is set', async () => {
       const { setRuntimeApiUrl } = await import('@/config/api')
       const { isInternalApiUrl } = await import('./client')

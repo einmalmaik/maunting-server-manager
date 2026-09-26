@@ -16,6 +16,7 @@ import {
   type KopplungsStatus,
   type UebergabeZiel,
 } from '@/services/verlaufsUebergabe'
+import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 
 interface Geraet {
@@ -58,6 +59,10 @@ export function AiDevicePairingCard() {
   const { t } = useTranslation()
   const [geraete, setGeraete] = useState<Geraet[]>([])
   const [name, setName] = useState('')
+  // Ein gekoppeltes Gerät ist ein Zugang ohne Ablauf. Deshalb fragt der Server
+  // vorher nach dem Passwort, bei 2FA nach dem aktuellen Code.
+  const mitZweiFaktor = useAuthStore((s) => Boolean(s.user?.two_factor_enabled))
+  const [nachweis, setNachweis] = useState('')
   const [code, setCode] = useState<string | null>(null)
   const [qrDataUri, setQrDataUri] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -155,11 +160,16 @@ export function AiDevicePairingCard() {
     try {
       const antwort = await api<{ code: string; qr_data_uri?: string | null }>('/auth/devices/pairing', {
         method: 'POST',
-        body: JSON.stringify({ label: name.trim() }),
+        body: JSON.stringify(
+          mitZweiFaktor
+            ? { label: name.trim(), otp_code: nachweis.trim() }
+            : { label: name.trim(), password: nachweis },
+        ),
       })
       setCode(antwort.code)
       setQrDataUri(antwort.qr_data_uri || null)
       setName('')
+      setNachweis('')
     } catch (err: any) {
       toast.error(err.message || t('common.error'))
     } finally {
@@ -359,22 +369,39 @@ export function AiDevicePairingCard() {
           }}
         />
       ) : (
-        <div className="flex max-w-xl items-end gap-3">
-          <label className="flex-1">
-            <span className="mb-1 block text-xs font-medium text-on-surface-variant">
-              {t('ai.profile.devicesNameLabel')}
-            </span>
-            <input
-              className="msm-input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t('ai.profile.devicesNamePlaceholder')}
-              maxLength={64}
-            />
-          </label>
-          <Button onClick={koppeln} disabled={busy}>
-            {t('ai.profile.devicesPair')}
-          </Button>
+        <div className="max-w-xl space-y-1">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="min-w-[10rem] flex-1">
+              <span className="mb-1 block text-xs font-medium text-on-surface-variant">
+                {t('ai.profile.devicesNameLabel')}
+              </span>
+              <input
+                className="msm-input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={t('ai.profile.devicesNamePlaceholder')}
+                maxLength={64}
+              />
+            </label>
+            <label className="min-w-[10rem] flex-1">
+              <span className="mb-1 block text-xs font-medium text-on-surface-variant">
+                {t(mitZweiFaktor ? 'ai.profile.devicesProofOtp' : 'ai.profile.devicesProofPassword')}
+              </span>
+              <input
+                className="msm-input"
+                type={mitZweiFaktor ? 'text' : 'password'}
+                inputMode={mitZweiFaktor ? 'numeric' : undefined}
+                autoComplete={mitZweiFaktor ? 'one-time-code' : 'current-password'}
+                value={nachweis}
+                onChange={(e) => setNachweis(e.target.value)}
+                maxLength={mitZweiFaktor ? 16 : 256}
+              />
+            </label>
+            <Button onClick={koppeln} disabled={busy || !nachweis.trim()}>
+              {t('ai.profile.devicesPair')}
+            </Button>
+          </div>
+          <p className="msm-field-help">{t('ai.profile.devicesProofHint')}</p>
         </div>
       )}
 

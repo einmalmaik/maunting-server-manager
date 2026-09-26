@@ -48,6 +48,23 @@ export function isInternalApiUrl(url: string): boolean {
 }
 
 /**
+ * Bekommt diese Adresse das Zugangstoken? Nur die API selbst, nicht alles auf
+ * ihrer Herkunft. Beim lokalen LiveKit und beim Same-Origin-Hosting liegen dort
+ * auch `/livekit/…` und die Oberfläche; die brauchen kein Token.
+ */
+export function bekommtAnmeldung(url: string): boolean {
+  if (!isInternalApiUrl(url)) return false
+  try {
+    const basis =
+      getEffectiveApiUrl() || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost')
+    const pfad = new URL(url.trim(), basis).pathname
+    return pfad === '/api' || pfad.startsWith('/api/')
+  } catch {
+    return false
+  }
+}
+
+/**
  * Error thrown by the API client for failures that originated from a
  * processed backend HTTP response (non-2xx status, 429, session-expired
  * refresh failure). The backend is the authority for sanitizing these
@@ -308,7 +325,7 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const isInternal = isInternalApiUrl(url)
 
   if (isInternal) {
-    const bearer = nativesToken()
+    const bearer = bekommtAnmeldung(url) ? nativesToken() : null
     if (bearer) {
       headers['Authorization'] = `Bearer ${bearer}`
     }
@@ -373,7 +390,7 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     if (refreshed) {
       // Header neu bauen (CSRF und Bearer koennten sich geaendert haben)
       const newHeaders = { ...headers }
-      const neuesBearer = nativesToken()
+      const neuesBearer = bekommtAnmeldung(url) ? nativesToken() : null
       if (neuesBearer) {
         newHeaders['Authorization'] = `Bearer ${neuesBearer}`
       }
@@ -466,7 +483,7 @@ export async function apiStream(path: string, options: RequestInit): Promise<Res
   const isInternal = isInternalApiUrl(url)
 
   if (isInternal) {
-    const bearer = nativesToken()
+    const bearer = bekommtAnmeldung(url) ? nativesToken() : null
     if (bearer) headers['Authorization'] = `Bearer ${bearer}`
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
       const csrf = getCsrfToken()
@@ -502,7 +519,7 @@ export async function apiStream(path: string, options: RequestInit): Promise<Res
 
     if (refreshed) {
       const retryHeaders = { ...headers }
-      const neuesBearer = nativesToken()
+      const neuesBearer = bekommtAnmeldung(url) ? nativesToken() : null
       if (neuesBearer) retryHeaders['Authorization'] = `Bearer ${neuesBearer}`
       const csrf = getCsrfToken()
       if (csrf) retryHeaders['X-CSRF-Token'] = csrf

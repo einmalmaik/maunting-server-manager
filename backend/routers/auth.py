@@ -425,7 +425,11 @@ async def login(
 # auf Kopplungscodes zu verhindern.
 
 
-@router.post("/devices/pairing", response_model=PairingCreated)
+@router.post(
+    "/devices/pairing",
+    response_model=PairingCreated,
+    dependencies=[Depends(auth_rate_limit)],
+)
 def create_device_pairing(
     req: PairingCreateRequest,
     user: User = Depends(require_global("ai.chat.use")),
@@ -436,7 +440,19 @@ def create_device_pairing(
 
     `ai.chat.use` als Schranke: ohne dieses Recht kann die App nichts, was sie
     ausmacht. Wer es nicht hat, soll erst gar keinen Zugang erzeugen koennen.
+
+    Dazu ein frischer Nachweis: bei 2FA der aktuelle Code, sonst das Passwort.
+    Ein gekoppeltes Geraet ist ein Zugang ohne Ablauf; bis 26.09.2026 genuegte
+    dafuer ein Zugangstoken mit 15 Minuten Laufzeit. Wer eines abgriff, etwa
+    ueber ein Anrufbild in der Desktop-App, machte daraus einen dauerhaften
+    Zugang, bei einem Admin auf das ganze Panel. `auth_rate_limit`, weil der
+    Endpunkt damit auch ein Passwort prueft.
     """
+    if user.two_factor_enabled:
+        if not req.otp_code or not AuthService.verify_current_2fa_code(user, req.otp_code):
+            raise HTTPException(status_code=403, detail="Bitte den aktuellen 2FA-Code eingeben.")
+    elif not req.password or not AuthService.verify_password(req.password, user.password_hash):
+        raise HTTPException(status_code=403, detail="Bitte dein Passwort bestätigen.")
     einladung, code = device_pairing_service.anlegen(db, user, req.label)
     return {
         "code": code,
@@ -566,10 +582,11 @@ def revoke_device(
 ) -> dict:
     """Sperrt ein Geraet aus und vergisst seinen Namen.
 
-    Zwei Schritte, und der erste zaehlt: die Refresh-Familie wird widerrufen,
-    damit das Geraet keine neue Sitzung mehr holen kann. Das laufende
-    Access-Token bleibt bis zu seinem Ablauf gueltig — dieselbe Regel wie
-    ueberall sonst; ein Widerruf wirkt spaetestens beim naechsten Erneuern.
+    Zwei Schritte, und der erste zaehlt: die Refresh-Familie wird widerrufen.
+    Damit faellt sofort alles, was an diesem Geraet haengt: jede Anfrage mit
+    seinem Access-Token (`dependencies._familie_gesperrt`), seine offenen
+    Echtzeitverbindungen und seine Push-Adressen
+    (`AuthService._sitzung_abraeumen`).
     """
     AuthService.revoke_refresh_family(db, user.id, family)
     if device_pairing_service.vergessen(db, user, family) is None:

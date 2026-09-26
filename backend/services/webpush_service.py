@@ -341,7 +341,9 @@ def endpunkt_abdruck(endpoint: str) -> str:
     return hashlib.sha256((endpoint or "").strip().encode("utf-8")).hexdigest()
 
 
-def eintragen(db: Session, user: User, *, endpoint: str, p256dh: str, auth: str) -> PushSubscription:
+def eintragen(
+    db: Session, user: User, *, endpoint: str, p256dh: str, auth: str, familie: str | None = None
+) -> PushSubscription:
     """Legt die Zustelladresse dieses Browsers an oder uebernimmt sie.
 
     Uebernimmt, nicht verdoppelt: eine Endpunkt-Adresse gehoert zu einer
@@ -356,6 +358,7 @@ def eintragen(db: Session, user: User, *, endpoint: str, p256dh: str, auth: str)
         vorhanden.user_id = user.id
         vorhanden.p256dh = sauberer_p256dh
         vorhanden.auth = sauberes_auth
+        vorhanden.auth_family = familie
         db.commit()
         return vorhanden
 
@@ -364,6 +367,7 @@ def eintragen(db: Session, user: User, *, endpoint: str, p256dh: str, auth: str)
         endpoint=sauber,
         p256dh=sauberer_p256dh,
         auth=sauberes_auth,
+        auth_family=familie,
         created_at=datetime.now(timezone.utc),
     )
     db.add(abo)
@@ -374,10 +378,33 @@ def eintragen(db: Session, user: User, *, endpoint: str, p256dh: str, auth: str)
         vorhanden = db.query(PushSubscription).filter_by(endpoint=sauber).first()
         if vorhanden:
             vorhanden.user_id = user.id
+            vorhanden.auth_family = familie
             db.commit()
             return vorhanden
         raise
     return abo
+
+
+def austragen_familie(db: Session, user_id: int, familie: str | None) -> int:
+    """Entfernt die Zustelladressen einer gesperrten Sitzung. Gibt deren Zahl zurueck.
+
+    Der Weg beim Aussperren eines Geraets: bis 09/2026 blieb seine Adresse
+    stehen, und ein gestohlenes Geraet bekam weiter Benachrichtigungen. Mit
+    der Kontozeile fallen auch die Mailbox-Zustellungen derselben Adresse;
+    die kennen kein Konto, haengen aber am selben Browser.
+
+    Ohne ``familie`` fallen alle Adressen des Kontos: das ist das Sperren
+    aller Sitzungen (Passwort zurueckgesetzt, Abmelden ohne Familie).
+    """
+    abfrage = db.query(PushSubscription).filter(PushSubscription.user_id == user_id)
+    if familie:
+        abfrage = abfrage.filter(PushSubscription.auth_family == familie)
+    zeilen = abfrage.all()
+    for abo in zeilen:
+        austragen_mailboxen(db, abo.endpoint)
+        db.delete(abo)
+    db.commit()
+    return len(zeilen)
 
 
 def austragen(db: Session, user: User, endpoint: str) -> bool:

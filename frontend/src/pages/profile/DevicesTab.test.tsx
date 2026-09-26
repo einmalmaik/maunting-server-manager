@@ -64,12 +64,13 @@ describe('DevicesTab', () => {
 
     const feld = await screen.findByLabelText('Name des Geräts')
     fireEvent.change(feld, { target: { value: 'Arbeitsrechner' } })
+    fireEvent.change(screen.getByLabelText('Dein Passwort'), { target: { value: 'mein-passwort' } })
     fireEvent.click(screen.getByRole('button', { name: 'Code erzeugen' }))
 
     await waitFor(() =>
       expect(api).toHaveBeenCalledWith('/auth/devices/pairing', {
         method: 'POST',
-        body: JSON.stringify({ label: 'Arbeitsrechner' }),
+        body: JSON.stringify({ label: 'Arbeitsrechner', password: 'mein-passwort' }),
       }),
     )
 

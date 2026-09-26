@@ -236,5 +236,45 @@ describe('Calendar Page Component', () => {
       ).toBe(1)
     })
   })
+
+  it('behaelt beim Bearbeiten eine unlesbare Wiederholungsregel', async () => {
+    // Auf einem Geraet ohne Schluessel ist die Regel ein Umschlag. Das
+    // Formular zeigt dann "keine Wiederholung"; wer nur den Titel aendert,
+    // darf die Serie damit nicht loeschen oder doppelt verschluesseln.
+    grundbestandZuruecksetzen()
+    localStorage.clear()
+    const umschlag = 'sv-cal-v1:unlesbar-auf-diesem-geraet'
+    const heute = new Date()
+    const start = new Date(heute.getFullYear(), heute.getMonth(), heute.getDate(), 12).toISOString()
+    const ende = new Date(heute.getFullYear(), heute.getMonth(), heute.getDate(), 13).toISOString()
+    vi.mocked(client.api).mockImplementation(async (pfad: string) => {
+      if (pfad.startsWith('/calendar/events')) {
+        return [
+          {
+            id: 1, event_id: 'evt-serie', title: 'Jour fixe', start, end: ende,
+            recurrence: umschlag, event_type: 'personal', can_edit: true,
+          },
+        ] as any
+      }
+      return {} as any
+    })
+
+    render(
+      <MemoryRouter>
+        <Calendar />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getAllByText('Jour fixe').length).toBeGreaterThan(0))
+    fireEvent.click(screen.getAllByText('Jour fixe')[0])
+    fireEvent.click(await screen.findByRole('button', { name: 'Speichern' }))
+
+    await waitFor(() => {
+      const geschrieben = vi
+        .mocked(client.api)
+        .mock.calls.filter(([p, o]) => p === '/calendar/events/evt-serie' && (o as any)?.method === 'PUT')
+      expect(geschrieben).toHaveLength(1)
+      expect(JSON.parse(String((geschrieben[0][1] as any).body)).recurrence).toBe(umschlag)
+    })
+  })
 })
 

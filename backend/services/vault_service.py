@@ -363,8 +363,22 @@ def get_vault_salt(db: Session, user_id: int) -> VaultSaltResponse:
     )
 
 
-def set_vault_salt(db: Session, user_id: int, kdf_salt: str, bucket_id: str) -> VaultSaltResponse:
-    """Hinterlegt den initialen KDF-Salt und Bucket-ID für Multi-Device Synchronisation."""
+def set_vault_salt(
+    db: Session,
+    user_id: int,
+    kdf_salt: str,
+    bucket_id: str,
+    auth_token: str | None = None,
+) -> VaultSaltResponse:
+    """Hinterlegt den initialen KDF-Salt und Bucket-ID für Multi-Device Synchronisation.
+
+    Ein Bucket ohne Kontobesitzer, der schon blind registriert ist oder schon
+    Eintraege traegt, geht nur an den, der den blinden Besitznachweis
+    mitbringt. Bis 26.09.2026 genuegte die Kennung: wer sie kannte, wurde hier
+    Besitzer und las danach ueber `/sync` jeden Eintrag. Solche Buckets
+    entstehen, wenn der erste Abgleich ohne `/salt` lief oder das Konto des
+    Besitzers geloescht wurde.
+    """
     clean_bucket = bucket_id.strip().lower()
     clean_salt = kdf_salt.strip()
 
@@ -379,6 +393,18 @@ def set_vault_salt(db: Session, user_id: int, kdf_salt: str, bucket_id: str) -> 
         raise VaultBucketAccessDenied("Der angegebene Tresor-Bucket ist bereits vergeben.")
 
     setting = db.get(VaultUserSetting, user_id)
+    eigener = setting is not None and setting.bucket_id == clean_bucket
+    if not eigener:
+        blind = db.get(VaultBlindBucket, clean_bucket)
+        belegt = blind is not None or _bucket_hat_eintraege(db, clean_bucket)
+        nachweis = bool(auth_token) and blind is not None and secrets.compare_digest(
+            blind.auth_verifier,
+            hashlib.sha256(auth_token.lower().encode("utf-8")).hexdigest(),
+        )
+        if belegt and not nachweis:
+            # Derselbe Wortlaut wie oben: die Antwort verraet nicht, ob es den
+            # Bucket gibt.
+            raise VaultBucketAccessDenied("Der angegebene Tresor-Bucket ist bereits vergeben.")
     if not setting:
         setting = VaultUserSetting(
             user_id=user_id,

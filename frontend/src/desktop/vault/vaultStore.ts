@@ -576,7 +576,9 @@ export const useVaultStore = create<VaultState>((set, get) => {
       try {
         await api('/api/vault/salt', {
           method: 'POST',
-          body: JSON.stringify({ kdf_salt: saltHex, bucket_id: bucketId }),
+          // Der Besitznachweis zaehlt nur, wenn der Bucket schon blind
+          // registriert ist; sonst ignoriert der Server ihn.
+          body: JSON.stringify({ kdf_salt: saltHex, bucket_id: bucketId, auth_token: bucketAuthToken }),
         })
       } catch {}
 

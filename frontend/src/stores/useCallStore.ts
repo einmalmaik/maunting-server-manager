@@ -206,6 +206,13 @@ export function setzeAnrufIdentitaet(werte: Identitaet | null): void {
 /** Außerhalb des Stores: React soll das LiveKit-Objekt nie neu rendern. */
 let verbindung: RaumVerbindung | null = null
 let raumSchluessel: Uint8Array | null = null
+/**
+ * Wer im laufenden Gruppenanruf die Gruppe verlassen hat oder hinausgeworfen
+ * wurde. Er bekommt keinen Schlüssel mehr und zählt bei der Frage, wer
+ * Schlüsselhalter ist, nicht mit. Sein LiveKit-Token gilt noch bis zu einer
+ * Stunde; ohne Schlüssel hört und sieht er damit nichts.
+ */
+let entfernte = new Set<number>()
 /** Zählt Verbindungsversuche, damit späte Rückläufer aus einem alten Anruf verpuffen. */
 let generation = 0
 let heartbeatTimer: number | null = null
@@ -316,13 +323,16 @@ function quellenNummer(quelle: Track.Source): number {
   }
 }
 
+/**
+ * Profilbilder liegen immer auf dem eigenen Server (`/api/auth/avatar/…`).
+ * Eine absolute Adresse kann nur von jemandem stammen, der sie untergeschoben
+ * hat. Bis 26.09.2026 ging sie durch, und die Desktop-App holte das Bild samt
+ * Zugangstoken ab: so kam jeder im Anruf an das Token des anderen.
+ */
 export function sanitizeAvatarUrl(url: unknown): string | null {
   if (typeof url !== 'string') return null
   const trimmed = url.trim()
   if (!trimmed) return null
-  if (/^https?:\/\//i.test(trimmed)) {
-    return trimmed
-  }
   // Safe relative paths (e.g. /media/avatar.png, /avatar/dana.png), not protocol-relative //
   if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
     return trimmed
@@ -528,14 +538,38 @@ export const useCallStore = create<UseCallState>((set, get) => {
     })
   }
 
+  /** Die Benutzerkennungen im Raum, ohne Entfernte. */
+  const anwesendeIds = (room: Room): number[] =>
+    [room.localParticipant, ...room.remoteParticipants.values()]
+      .map((t) => benutzerIdAusIdentity(t.identity))
+      .filter((id): id is number => id !== null && !entfernte.has(id))
+
+  /**
+   * Jemand ist aus der Gruppe raus, der Anruf läuft weiter: neuer Schlüssel.
+   * Den tauscht genau einer, der Schlüsselhalter unter den Verbliebenen; die
+   * anderen nehmen ihn nach derselben Regel an (`acceptRoomKey`).
+   */
+  const tauscheSchluesselNachAustritt = async (weg: number) => {
+    const room = verbindung?.room
+    const zustand = get()
+    if (!room || !identitaet || !zustand.raum || zustand.kind !== 'gruppe') return
+    entfernte.add(weg)
+    const anwesende = anwesendeIds(room)
+    if (!istSchluesselhalter(identitaet.userId, anwesende, weg)) return
+    const neuer = erzeugeRaumSchluessel()
+    raumSchluessel = neuer
+    if (verbindung) await setzeRaumSchluessel(verbindung, alsArrayBuffer(neuer))
+    const ziele = anwesende.filter((id) => id !== identitaet!.userId)
+    if (ziele.length) void verteileAnAlle(zustand.raum, neuer, ziele, identitaet.publicKeyJwk)
+  }
+
   const schickeSchluesselNach = async (neuer: Participant) => {
     const zustand = get()
     const neueId = benutzerIdAusIdentity(neuer.identity)
     const room = verbindung?.room
     if (!room || !raumSchluessel || !identitaet || !zustand.raum || neueId === null) return
-    const anwesende = [room.localParticipant, ...room.remoteParticipants.values()]
-      .map((t) => benutzerIdAusIdentity(t.identity))
-      .filter((id): id is number => id !== null)
+    if (entfernte.has(neueId)) return
+    const anwesende = anwesendeIds(room)
     if (!istSchluesselhalter(identitaet.userId, anwesende, neueId)) return
     await verteileAn(zustand.raum, raumSchluessel, neueId, identitaet.publicKeyJwk)
   }
@@ -635,6 +669,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
     const room = verbindung?.room
     verbindung = null
     raumSchluessel = null
+    entfernte = new Set<number>()
     sprechend = new Set<string>()
     bekannte.clear()
     set({ hinweise: [], audioBlockiert: false, serverStumm: false })
@@ -1014,11 +1049,8 @@ export const useCallStore = create<UseCallState>((set, get) => {
         } else {
           // Im Gruppenanruf gilt die istSchluesselhalter-Regel über alle anwesenden Teilnehmer.
           const room = verbindung?.room
-          const anwesende = room
-            ? [room.localParticipant, ...room.remoteParticipants.values()]
-                .map((t) => benutzerIdAusIdentity(t.identity))
-                .filter((id): id is number => id !== null)
-            : []
+          if (entfernte.has(fromUserId)) return
+          const anwesende = room ? anwesendeIds(room) : []
           const liste = anwesende.length > 0 ? anwesende : [identitaet.userId, fromUserId]
           zustaendig = istSchluesselhalter(fromUserId, liste, identitaet.userId)
         }
@@ -1324,6 +1356,17 @@ export const useCallStore = create<UseCallState>((set, get) => {
               ],
             }
           })
+        }
+      } else if (ev.type === 'group_call_member_removed') {
+        const call = get()
+        const weg = Number(ev.user_id)
+        if (!ev.room_token || call.raum !== String(ev.room_token) || call.kind !== 'gruppe') return
+        if (weg === Number(currentUserId)) {
+          // Ich bin raus: der Anruf endet auch hier.
+          call.endCall()
+          toast.info(i18n.t('calls.removedFromGroupCall'))
+        } else {
+          void tauscheSchluesselNachAustritt(weg)
         }
       } else if (ev.type === 'group_call_ended') {
         if (ev.group_id && ev.room_token) {

@@ -1518,6 +1518,132 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
       expect(personalMutation).toBeDefined()
       expect((personalMutation!.payload as any).title.startsWith(CALENDAR_CIPHERTEXT_PREFIX)).toBe(true)
     })
+
+    it('speichert Server- und Node-Termine im Klartext, denn auch sie sehen andere', async () => {
+      for (const [art, extra] of [
+        ['server', { server_id: 7 }],
+        ['node', {}],
+      ] as const) {
+        await saveCalendarEventOffline({
+          title: `Wartung ${art}`,
+          start_time: '2026-06-03T10:00:00.000Z',
+          end_time: '2026-06-03T11:00:00.000Z',
+          event_type: art,
+          ...extra,
+        })
+        const mutation = getOutbox().find((m) => (m.payload as any)?.event_type === art)
+        expect((mutation!.payload as any).title).toBe(`Wartung ${art}`)
+      }
+    })
+
+    it('verschluesselt eine Team-Notiz, die persoenlich wird', async () => {
+      const bisher = {
+        id: 1, note_uid: 'n-wechsel', title: 'Alt', content: 'Alt', category: 'personal',
+        color: 'primary', is_pinned: false, is_archived: false, note_type: 'team',
+        user_id: KONTO, team_id: 42, created_at: '', updated_at: '',
+      }
+      await saveNoteOffline(
+        { title: 'Jetzt privat', content: 'Nur fuer mich', note_type: 'personal', team_id: null },
+        bisher,
+      )
+      const mutation = getOutbox().find((m) => m.entityId === 'n-wechsel')
+      expect((mutation!.payload as any).title.startsWith(NOTE_CIPHERTEXT_PREFIX)).toBe(true)
+      expect((mutation!.payload as any).content.startsWith(NOTE_CIPHERTEXT_PREFIX)).toBe(true)
+    })
+
+  })
+
+  describe('Geteilte Eintraege aus der Zeit vor 09/2026', () => {
+    // Bis 09/2026 verschluesselte der Client auch Team-Eintraege mit dem
+    // Kontoschluessel des Verfassers. Lesen konnte sie nur er. Beim Laden
+    // stellt er sie jetzt auf Klartext um; der Server legt sie mit DIS ab.
+    const KONTO = 2002
+
+    beforeEach(() => {
+      clearNotesKeyCache()
+      localStorage.clear()
+      grundbestandZuruecksetzen()
+      useAuthStore.setState({ user: { id: KONTO, username: 'verfasser' } as any })
+    })
+
+    afterEach(() => {
+      useAuthStore.setState({ user: null })
+      localStorage.clear()
+      clearNotesKeyCache()
+    })
+
+    async function alterTermin(eventId: string, userId: number, eventType: string) {
+      const feld = (text: string, name: 'title' | 'description' | 'location' | 'recurrence') =>
+        encryptCalendarField(text, eventId, name, undefined, userId)
+      return {
+        id: 1,
+        event_id: eventId,
+        title: await feld('Sprint Review', 'title'),
+        description: await feld('Demo', 'description'),
+        location: await feld('Raum 3', 'location'),
+        recurrence: await feld('{"rrule":"FREQ=WEEKLY"}', 'recurrence'),
+        start: '2026-06-01T10:00:00.000Z',
+        end: '2026-06-01T11:00:00.000Z',
+        event_type: eventType,
+        team_id: eventType === 'team' ? 42 : null,
+        user_id: userId,
+      }
+    }
+
+    function geschriebenAn(pfad: string) {
+      return vi
+        .mocked(client.api)
+        .mock.calls.filter(([p, o]) => p === pfad && (o as any)?.method === 'PUT')
+        .map(([, o]) => JSON.parse(String((o as any).body)))
+    }
+
+    it('stellt eigene Team-Termine auf Klartext um, fremde und persoenliche nicht', async () => {
+      const eigenerTeam = await alterTermin('alt-team', KONTO, 'team')
+      const eigenerPrivat = await alterTermin('alt-privat', KONTO, 'personal')
+      const fremderTeam = await alterTermin('alt-fremd', KONTO + 1, 'team')
+      vi.mocked(client.api).mockImplementation(async (pfad: string) => {
+        if (pfad.startsWith('/calendar/events')) {
+          return [eigenerTeam, eigenerPrivat, fremderTeam] as any
+        }
+        return {} as any
+      })
+
+      await loadCalendarEventsOfflineFirst(
+        '2026-06-01T00:00:00.000Z', '2026-06-30T00:00:00.000Z', undefined, KONTO,
+      )
+
+      await vi.waitFor(() => expect(geschriebenAn('/calendar/events/alt-team')).toHaveLength(1))
+      expect(geschriebenAn('/calendar/events/alt-team')[0]).toEqual({
+        title: 'Sprint Review',
+        description: 'Demo',
+        location: 'Raum 3',
+        recurrence: '{"rrule":"FREQ=WEEKLY"}',
+      })
+      expect(geschriebenAn('/calendar/events/alt-privat')).toHaveLength(0)
+      expect(geschriebenAn('/calendar/events/alt-fremd')).toHaveLength(0)
+    })
+
+    it('stellt eigene Team-Notizen auf Klartext um', async () => {
+      const notiz = {
+        id: 1, note_uid: 'alt-notiz', category: 'personal', color: 'primary',
+        is_pinned: false, is_archived: false, note_type: 'team', user_id: KONTO,
+        team_id: 42, created_at: '', updated_at: '',
+        title: await encryptNoteTitle('Protokoll', 'alt-notiz', undefined, KONTO),
+        content: await encryptNoteContent('Beschluesse', 'alt-notiz', undefined, KONTO),
+      }
+      vi.mocked(client.api).mockImplementation(async (pfad: string) => {
+        if (pfad.startsWith('/notes?')) return [notiz] as any
+        return {} as any
+      })
+
+      await loadNotesOfflineFirst({ userId: KONTO })
+
+      await vi.waitFor(() => expect(geschriebenAn('/notes/alt-notiz')).toHaveLength(1))
+      expect(geschriebenAn('/notes/alt-notiz')[0]).toEqual({
+        title: 'Protokoll',
+        content: 'Beschluesse',
+      })
+    })
   })
 })
 

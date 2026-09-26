@@ -59,6 +59,12 @@ class PushSubscription(Base):
     # RFC 8291 die Nutzlast verschluesselt.
     p256dh: Mapped[str] = mapped_column(String(255), nullable=False)
     auth: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Die Refresh-Familie der Sitzung, die die Adresse gemeldet hat. Wird die
+    # Familie gesperrt (Gerät entfernt, Abmelden, Replay), fällt die Zeile mit
+    # (`webpush_service.austragen_familie`). NULL heisst: gemeldet vor 09/2026
+    # oder von einem Token ohne Familie; solche Zeilen fallen nur beim
+    # Sperren aller Sitzungen.
+    auth_family: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False

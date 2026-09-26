@@ -622,3 +622,44 @@ def test_eine_lesequittung_loest_keinen_versand_aus(
     )
 
     assert abgefangener_versand == []
+
+
+def test_austragen_familie_nimmt_adresse_und_mailboxen_des_geraets_mit(
+    db: Session, owner_user: User
+):
+    """Ein gesperrtes Geraet bekommt keine Benachrichtigung mehr.
+
+    Weder ueber das Konto noch ueber seine Mailboxen: die Mailbox-Zeilen
+    kennen kein Konto, haengen aber an derselben Adresse.
+    """
+    from models import E2eeMailboxPush
+
+    zweite = "https://fcm.googleapis.com/fcm/send/beispiel-zwei"
+    webpush_service.eintragen(
+        db, owner_user, endpoint=ENDPUNKT, p256dh=GUELTIGER_PUNKT, auth=GUELTIGES_AUTH,
+        familie="fam-weg",
+    )
+    webpush_service.eintragen(
+        db, owner_user, endpoint=zweite, p256dh=GUELTIGER_PUNKT, auth=GUELTIGES_AUTH,
+        familie="fam-bleibt",
+    )
+    for adresse in (ENDPUNKT, zweite):
+        webpush_service.eintragen_mailbox(
+            db, mailbox_id="m" * 64, endpoint=adresse, p256dh=GUELTIGER_PUNKT, auth=GUELTIGES_AUTH
+        )
+
+    assert webpush_service.austragen_familie(db, owner_user.id, "fam-weg") == 1
+
+    assert [a.endpoint for a in db.query(PushSubscription).all()] == [zweite]
+    assert [z.endpoint for z in db.query(E2eeMailboxPush).all()] == [zweite]
+
+
+def test_austragen_familie_trifft_kein_fremdes_konto(
+    db: Session, owner_user: User, regular_user: User
+):
+    webpush_service.eintragen(
+        db, regular_user, endpoint=ENDPUNKT, p256dh=GUELTIGER_PUNKT, auth=GUELTIGES_AUTH,
+        familie="fam-weg",
+    )
+    assert webpush_service.austragen_familie(db, owner_user.id, "fam-weg") == 0
+    assert db.query(PushSubscription).count() == 1

@@ -395,3 +395,83 @@ def test_medienserver_fehler_wird_ehrlich_gemeldet(
         headers=_header(owner_cookies),
     )
     assert antwort.status_code == 503
+
+
+# ── Aus der Gruppe heisst aus dem Anruf ─────────────────────────────────────
+
+
+def test_rauswurf_aus_der_gruppe_nimmt_aus_dem_laufenden_anruf(
+    client: TestClient,
+    db: Session,
+    owner_user: User,
+    regular_user: User,
+    owner_cookies: dict,
+    twirp_aufrufe: list,
+) -> None:
+    """Bis 26.09.2026 blieb ein Hinausgeworfener im Gruppenanruf."""
+    from services.sync_event_service import SyncEventService
+
+    gid, raum = _gruppe_mit_raum(db, owner_user, regular_user, "join_group_calls")
+    conn_id, schlange = SyncEventService.subscribe(owner_user.id)
+    try:
+        antwort = client.delete(
+            f"/api/social/groups/{gid}/members/{regular_user.id}",
+            cookies=owner_cookies,
+            headers=_header(owner_cookies),
+        )
+        assert antwort.status_code == 200, antwort.text
+        assert ("RemoveParticipant", {"room": raum, "identity": f"u{regular_user.id}"}) in twirp_aufrufe
+        ereignisse = []
+        while not schlange.empty():
+            ereignisse.append(schlange.get_nowait())
+        # Die Verbliebenen erfahren es und tauschen den Raumschluessel.
+        assert any(
+            e.get("type") == "group_call_member_removed"
+            and e.get("room_token") == raum
+            and e.get("user_id") == regular_user.id
+            for e in ereignisse
+        )
+    finally:
+        SyncEventService.unsubscribe(conn_id)
+
+
+def test_rauswurf_gilt_auch_ohne_medienserver(
+    client: TestClient,
+    db: Session,
+    owner_user: User,
+    regular_user: User,
+    owner_cookies: dict,
+    monkeypatch,
+    twirp_aufrufe: list,
+) -> None:
+    gid, _raum = _gruppe_mit_raum(db, owner_user, regular_user, "join_group_calls")
+
+    def _kaputt(*_a, **_k):
+        raise RuntimeError("LiveKit weg")
+
+    monkeypatch.setattr(livekit_service, "_twirp", _kaputt)
+    antwort = client.delete(
+        f"/api/social/groups/{gid}/members/{regular_user.id}",
+        cookies=owner_cookies,
+        headers=_header(owner_cookies),
+    )
+    assert antwort.status_code == 200
+    assert SocialService.get_group_member(db, gid, regular_user.id) is None
+
+
+def test_gruppe_loeschen_beendet_ihren_anruf(
+    client: TestClient,
+    db: Session,
+    owner_user: User,
+    regular_user: User,
+    owner_cookies: dict,
+    twirp_aufrufe: list,
+) -> None:
+    gid, raum = _gruppe_mit_raum(db, owner_user, regular_user, "join_group_calls")
+    antwort = client.delete(
+        f"/api/social/groups/{gid}",
+        cookies=owner_cookies,
+        headers=_header(owner_cookies),
+    )
+    assert antwort.status_code in (200, 204), antwort.text
+    assert GroupCallRoomRegistry.get(raum) is None

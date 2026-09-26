@@ -82,10 +82,11 @@ async function fetchImageBlobUrl(url: string): Promise<string | null> {
 
   const promise = (async () => {
     try {
-      const isInternal = isInternalApiUrl(url)
-      const res = isInternal
-        ? await apiStream(url, { method: 'GET', headers: { Accept: 'image/*' } })
-        : await fetch(url, { method: 'GET', credentials: 'omit', headers: { Accept: 'image/*' } })
+      // Nur das eigene Backend. Ein fremdes Bild bleibt ein `<img>` ohne
+      // Anmeldung; es hier abzuholen hiess bis 26.09.2026, es mit dem
+      // Zugangstoken der App abzuholen.
+      if (!isInternalApiUrl(url)) return null
+      const res = await apiStream(url, { method: 'GET', headers: { Accept: 'image/*' } })
       if (!res.ok) return null
       const blob = await res.blob()
       if (!blob || blob.size === 0) return null

@@ -442,14 +442,17 @@ Harte Invarianten:
   Gerät im Verzeichnis des Kontos auch über die Geräte-Mailbox
   (`notes_key_request`/`notes_key_sync`), bestätigt oder nicht, und das
   Entfernen erneuert ihn nicht. Seit die Übergabe dort überhaupt ankommt (siehe
-  unten, 64 Zeichen), ist das keine Theorie mehr. Das Entfernen hat drei
-  weitere Grenzen: ein schon ausgestelltes Zugangstoken gilt bis zu 15 Minuten
-  weiter (`access_token_expire_minutes`) — in der Zeit kann sich das Gerät
-  wieder eintragen, abrufen und selbst einen neuen Kopplungscode einlösen —;
-  die Geräte der Kontakte verschlüsseln bis zu zehn Minuten weiter an seinen
-  Schlüssel (`CACHE_FRIST_MS`); und welcher Verzeichniseintrag fällt, wählt
-  `neue_geraete` nach der Zeit, nicht nach der widerrufenen Anmeldung — eine
-  Verbindung zwischen beiden führt das Verzeichnis nicht. Alle vier schließt
+  unten, 64 Zeichen), ist das keine Theorie mehr. Die Anmeldung selbst fällt
+  sofort: das Zugangstoken wird ab der nächsten Anfrage abgelehnt
+  (`dependencies._familie_gesperrt`), offene Echtzeitverbindungen werden
+  getrennt und Push-Adressen gelöscht (`AuthService._sitzung_abraeumen`). Einen
+  neuen Kopplungscode erzeugt nur, wer Passwort oder 2FA-Code nachweist; ein
+  abgegriffenes Zugangstoken reicht dafür nicht. Das Entfernen hat zwei
+  weitere Grenzen: die Geräte der Kontakte verschlüsseln bis zu zehn Minuten
+  weiter an seinen Schlüssel (`CACHE_FRIST_MS`); und welcher Verzeichniseintrag
+  fällt, wählt `neue_geraete` nach der Zeit, nicht nach der widerrufenen
+  Anmeldung — eine Verbindung zwischen beiden führt das Verzeichnis nicht. Alle
+  drei schließt
   erst die Freigabe neuer Geräte durch ein vorhandenes (Stufe „mittel") samt
   Token, die an ihre Anmeldung gebunden sind.
 - **Ein Sitzungsaufbau trägt eine Unterschrift, und angewandt wird nur ein

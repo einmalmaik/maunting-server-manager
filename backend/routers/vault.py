@@ -156,6 +156,7 @@ def set_vault_salt(
             current_user.id,
             payload.kdf_salt,
             payload.bucket_id,
+            payload.auth_token,
         )
     except vault_service.VaultBucketAccessDenied as exc:
         raise HTTPException(

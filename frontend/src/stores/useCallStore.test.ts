@@ -159,6 +159,7 @@ vi.mock('@/components/calling/anrufToene', () => toene)
 // Nach den Mocks importieren, sonst greifen sie nicht.
 const { useCallStore, setzeAnrufIdentitaet } = await import('./useCallStore')
 const { getDeviceId } = await import('@/lib/deviceIdentity')
+const { useAuthStore } = await import('@/stores/authStore')
 
 const FRISCH = useCallStore.getState()
 
@@ -348,6 +349,18 @@ describe('Teilnehmer', () => {
     const bob = useCallStore.getState().participants.find((t) => t.identity === 'u2')
     expect(bob?.userId).toBe(2)
     expect(bob?.avatarUrl).toBe('/avatar/bob.png')
+  })
+
+  it('nimmt keine fremde Bildadresse aus den Metadaten', async () => {
+    // Die Desktop-App holte ein solches Bild mit ihrem Zugangstoken ab.
+    await verbundenerAnruf()
+    aktuellerRaum.tritt_bei(
+      'u2',
+      'bob',
+      JSON.stringify({ user_id: 2, username: 'bob', avatar_url: 'https://evil.example/x.png' }),
+    )
+    const bob = useCallStore.getState().participants.find((t) => t.identity === 'u2')
+    expect(bob?.avatarUrl).toBeNull()
   })
 
   it('markiert, wer gerade spricht', async () => {
@@ -543,6 +556,46 @@ describe('Gruppenanruf', () => {
       .joinGroupCall({ ...GRUPPE, canModerate: false }, 'grp_xyz')
     useCallStore.getState().endCall()
     expect(api.beendeGruppenanruf).not.toHaveBeenCalled()
+  })
+
+  it('tauscht den Schlüssel, wenn jemand aus der Gruppe fliegt, und schickt ihm keinen mehr', async () => {
+    // Bis 26.09.2026 blieb ein Hinausgeworfener im Anruf und hörte weiter mit.
+    await useCallStore.getState().joinGroupCall(GRUPPE, 'grp_abc')
+    aktuellerRaum.feuere(RoomEvent.Connected)
+    aktuellerRaum.tritt_bei('u2')
+    aktuellerRaum.tritt_bei('u5')
+    livekit.setzeRaumSchluessel.mockClear()
+    schluessel.verteileAn.mockClear()
+
+    useCallStore.getState().handleCallSyncEvent({
+      type: 'group_call_member_removed',
+      group_id: 3,
+      room_token: 'grp_abc',
+      user_id: 5,
+    })
+    await vi.waitFor(() => expect(livekit.setzeRaumSchluessel).toHaveBeenCalled())
+    expect(schluessel.verteileAnAlle).toHaveBeenCalledWith('grp_abc', expect.anything(), [2], expect.any(String))
+
+    // Kommt er mit seinem alten Token zurück, bekommt er nichts.
+    aktuellerRaum.tritt_bei('u5')
+    await Promise.resolve()
+    expect(schluessel.verteileAn).not.toHaveBeenCalledWith('grp_abc', expect.anything(), 5, expect.any(String))
+    expect(useCallStore.getState().state).toBe('active')
+  })
+
+  it('beendet den eigenen Anruf, wenn man selbst aus der Gruppe raus ist', async () => {
+    useAuthStore.setState({ user: { id: 1, username: 'ich' } as any })
+    await useCallStore.getState().joinGroupCall(GRUPPE, 'grp_abc')
+    aktuellerRaum.feuere(RoomEvent.Connected)
+
+    useCallStore.getState().handleCallSyncEvent({
+      type: 'group_call_member_removed',
+      group_id: 3,
+      room_token: 'grp_abc',
+      user_id: 1,
+    })
+    expect(useCallStore.getState().state).toBe('idle')
+    useAuthStore.setState({ user: null })
   })
 
   it('hält den Raum offen, wenn ein einzelner Teilnehmer geht', async () => {

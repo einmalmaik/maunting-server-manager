@@ -1640,12 +1640,15 @@ export function Calendar() {
                       </div>
 
                       {/* Die E-Mail-Erinnerung braucht die Regel, und die kann
-                          der Server bei einem hier angelegten Termin nicht
-                          lesen. Das gehört an die Stelle, an der die Serie
+                          der Server nur bei einem persönlichen Termin nicht
+                          lesen. Geteilte Termine legt er selbst mit DIS
+                          verschlüsselt ab und kann sie lesen. Das gehört an die Stelle, an der die Serie
                           entsteht — nicht in eine Dokumentation. */}
-                      <p className="text-xs text-on-surface-variant border-t border-outline-variant/30 pt-2">
-                        {t('calendar.recurrence.reminderHint')}
-                      </p>
+                      {formEventType === 'personal' && (
+                        <p className="text-xs text-on-surface-variant border-t border-outline-variant/30 pt-2">
+                          {t('calendar.recurrence.reminderHint')}
+                        </p>
+                      )}
                     </>
                   )}
                 </div>

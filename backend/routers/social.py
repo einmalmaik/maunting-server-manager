@@ -5,7 +5,14 @@ from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
-from dependencies import get_current_user, verify_csrf, get_current_user_for_ws, session_familie, ws_subprotokoll
+from dependencies import (
+    get_current_user,
+    get_current_user_for_ws,
+    session_familie,
+    verify_csrf,
+    ws_session_familie,
+    ws_subprotokoll,
+)
 from models import ChatGroup, ChatGroupConfig, User
 from schemas.chat_media import (
     ChatMediaUploadRequest,
@@ -418,6 +425,7 @@ def subscribe_push(
     req: PushSubscriptionCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    familie: str | None = Depends(session_familie),
 ) -> dict:
     """Trägt die Zustelladresse *dieses* Browsers ein.
 
@@ -426,7 +434,7 @@ def subscribe_push(
     Konto unterzuschieben ist damit kein Weg.
     """
     webpush_service.eintragen(
-        db, user, endpoint=req.endpoint, p256dh=req.p256dh, auth=req.auth
+        db, user, endpoint=req.endpoint, p256dh=req.p256dh, auth=req.auth, familie=familie
     )
     return {"ok": True}
 
@@ -1249,7 +1257,9 @@ async def social_websocket(
     subprotocol = ws_subprotokoll(websocket)
     await websocket.accept(subprotocol=subprotocol)
 
-    conn_id, queue = SyncEventService.subscribe(user_id=user_id)
+    conn_id, queue = SyncEventService.subscribe(
+        user_id=user_id, familie=ws_session_familie(websocket)
+    )
     ws_lock = asyncio.Lock()
 
     async def _send_loop():

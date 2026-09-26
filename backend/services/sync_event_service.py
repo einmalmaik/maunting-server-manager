@@ -33,7 +33,7 @@ MAX_MAILBOXES = 200
 class _Subscriber:
     __slots__ = (
         "conn_id", "user_id", "team_ids", "is_admin", "queue", "loop", "created_at",
-        "mailboxes",
+        "mailboxes", "familie",
     )
 
     def __init__(
@@ -44,8 +44,13 @@ class _Subscriber:
         is_admin: bool,
         queue: asyncio.Queue[dict[str, Any]],
         loop: asyncio.AbstractEventLoop | None = None,
+        familie: str | None = None,
     ) -> None:
         self.conn_id = conn_id
+        #: Die Refresh-Familie des Tokens, mit dem die Verbindung aufgebaut
+        #: wurde. Daran findet `trenne` die Verbindungen eines gesperrten
+        #: Geraets.
+        self.familie = familie
         self.user_id = user_id
         self.team_ids = team_ids
         self.is_admin = is_admin
@@ -76,6 +81,7 @@ class SyncEventService:
         user_id: int,
         team_ids: list[int] | set[int] | None = None,
         is_admin: bool = False,
+        familie: str | None = None,
     ) -> tuple[str, asyncio.Queue[dict[str, Any]]]:
         """Registriert einen neuen SSE-Client und gibt eine Event-Queue zurück."""
         conn_id = f"conn-{uuid.uuid4().hex[:12]}"
@@ -91,6 +97,7 @@ class SyncEventService:
             is_admin=is_admin,
             queue=queue,
             loop=loop,
+            familie=familie,
         )
         cls._subscribers[conn_id] = sub
         _log.debug("SSE-Client verbunden: %s (User %d, Teams %s)", conn_id, user_id, sub.team_ids)
@@ -137,6 +144,64 @@ class SyncEventService:
             sauber = set(sorted(sauber)[:MAX_MAILBOXES])
         sub.mailboxes = sauber
         return len(sauber)
+
+    @classmethod
+    def trenne(cls, user_id: int, familie: str | None = None) -> int:
+        """Beendet die offenen Verbindungen einer gesperrten Sitzung.
+
+        Bis 09/2026 sperrte das Entfernen eines Geraets nur neue Anfragen. Ein
+        schon offener Strom lief weiter, denn das Token wird nur beim
+        Verbindungsaufbau geprueft: ein gestohlenes Geraet las mit, bis es
+        selbst auflegte.
+
+        Mit ``familie`` trifft es genau dieses Geraet, ohne alle Verbindungen
+        des Kontos. Eine Verbindung, deren Token keine Familie trug, laesst
+        sich keinem Geraet zuordnen und bleibt dann stehen. Ohne ``familie``
+        faellt jede Verbindung des Kontos; der Weg beim Sperren aller
+        Sitzungen. Legitime Clients bauen danach mit ihrem gueltigen Token
+        neu auf.
+
+        Die Verbindung wird sofort aus der Verteilung genommen und bekommt
+        das Signal zum Schliessen. Gibt die Zahl der getroffenen Verbindungen
+        zurueck.
+        """
+        payload = {"type": "shutdown", "reason": "session_revoked", "timestamp": _iso_now()}
+        getroffen = [
+            sub for sub in cls._subscribers.values()
+            if sub.user_id == user_id and (familie is None or sub.familie == familie)
+        ]
+        for sub in getroffen:
+            cls._subscribers.pop(sub.conn_id, None)
+            cls._signal(sub, payload)
+        if getroffen:
+            _log.info("SyncEventService: %d Verbindung(en) nach Sperre getrennt.", len(getroffen))
+        return len(getroffen)
+
+    @staticmethod
+    def _signal(sub: _Subscriber, payload: dict[str, Any]) -> None:
+        """Legt ein Signal in die Queue eines Abonnenten, auch aus fremden Threads."""
+        def _enqueue(s: _Subscriber, p: dict[str, Any]):
+            if s.queue.full():
+                try:
+                    s.queue.get_nowait()
+                except Exception:
+                    pass
+            try:
+                s.queue.put_nowait(p)
+            except Exception:
+                pass
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        try:
+            if sub.loop and sub.loop.is_running() and current_loop is not sub.loop:
+                sub.loop.call_soon_threadsafe(_enqueue, sub, payload)
+            else:
+                _enqueue(sub, payload)
+        except Exception:
+            pass
 
     @classmethod
     def close_all(cls) -> None:

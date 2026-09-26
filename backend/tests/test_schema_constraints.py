@@ -1833,7 +1833,11 @@ def test_die_migration_legt_die_zustelladressen_an(tmp_path: Path) -> None:
         assert "push_subscriptions" in inspector.get_table_names()
 
         spalten = {s["name"]: s for s in inspector.get_columns("push_subscriptions")}
-        assert set(spalten) == {"id", "user_id", "endpoint", "p256dh", "auth", "created_at"}
+        assert set(spalten) == {
+            "id", "user_id", "endpoint", "p256dh", "auth", "created_at", "auth_family",
+        }
+        # Die Familie ist optional: Bestandszeilen tragen keine.
+        assert spalten["auth_family"]["nullable"] is True
 
         # Dieselbe Zusage wie am Modell: ein geloeschtes Konto hinterlaesst keine
         # Adresse, und dieselbe Adresse gibt es nur einmal.

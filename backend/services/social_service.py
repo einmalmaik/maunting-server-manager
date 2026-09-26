@@ -28,7 +28,7 @@ from services.panel_settings_service import PanelSettingsService
 from services.sync_event_service import SyncEventService
 from services.achievement_service import AchievementService
 from services.notification_service import NotificationService
-from services.call_room_service import GroupCallRoomRegistry
+from services.call_room_service import GroupCallRoomRegistry, UserActiveCallRegistry
 from services import webpush_service
 
 logger = logging.getLogger(__name__)
@@ -2495,6 +2495,43 @@ class SocialService:
         cls.assert_social_enabled(db)
         cls.trage_mitglied_aus(db, group_id, user.id)
         db.commit()
+        cls._aus_gruppenanruf_nehmen(db, group_id, user.id)
+
+    @classmethod
+    def _aus_gruppenanruf_nehmen(cls, db: Session, group_id: int, user_id: int) -> None:
+        """Wer die Gruppe verlässt oder hinausfliegt, verlässt auch ihren Anruf.
+
+        Bis 26.09.2026 blieb er drin und hörte und sah weiter mit. Der Server
+        wirft ihn aus dem Medienraum; die Verbliebenen bekommen ein Ereignis,
+        und der Schlüsselhalter tauscht daraufhin den Raumschlüssel
+        (`useCallStore`). Das ist die eigentliche Sperre: das LiveKit-Token
+        läuft noch bis zu einer Stunde und lässt sich nicht widerrufen, einen
+        neuen Schlüssel bekommt er aber nicht mehr (`/calls/{raum}/key` prüft
+        die Mitgliedschaft).
+        """
+        raum = GroupCallRoomRegistry.find_for_group(group_id)
+        if not raum:
+            return
+        UserActiveCallRegistry.leave(user_id, raum=raum)
+        from services import livekit_service
+
+        try:
+            livekit_service.entferne_teilnehmer(raum, f"u{user_id}", db)
+        except livekit_service.LivekitNichtErreichbar:
+            # Der Austritt selbst gilt trotzdem; der Schlüsseltausch sperrt ihn aus.
+            logger.warning("Teilnehmer nach Gruppenaustritt nicht aus dem Anruf entfernt")
+        ereignis = {
+            "type": "group_call_member_removed",
+            "group_id": group_id,
+            "room_token": raum,
+            "user_id": user_id,
+        }
+        empfaenger = {
+            mid for (mid,) in db.query(ChatGroupMember.user_id).filter(ChatGroupMember.group_id == group_id)
+        }
+        empfaenger.add(user_id)
+        for mid in empfaenger:
+            SyncEventService.publish(ereignis, user_id=mid)
 
     @classmethod
     def trage_mitglied_aus(cls, db: Session, group_id: int, user_id: int) -> None:
@@ -2554,8 +2591,21 @@ class SocialService:
             )
             if not mem:
                 raise HTTPException(status_code=403, detail="Nur der Eigentümer kann die Gruppe löschen.")
+        mitglieder = [
+            mid for (mid,) in db.query(ChatGroupMember.user_id).filter(ChatGroupMember.group_id == group_id)
+        ]
         db.delete(group)
         db.commit()
+        # Ohne Gruppe kein Anruf: der Raum endet für alle.
+        raum = GroupCallRoomRegistry.find_for_group(group_id)
+        if raum:
+            GroupCallRoomRegistry.discard(raum)
+            UserActiveCallRegistry.remove_room(raum)
+            for mid in mitglieder:
+                SyncEventService.publish(
+                    {"type": "group_call_ended", "group_id": group_id, "room_token": raum, "ended_by": user.id},
+                    user_id=mid,
+                )
 
     @classmethod
     def update_member_role_permissions(
@@ -2685,6 +2735,7 @@ class SocialService:
             },
             user_id=target_user_id,
         )
+        cls._aus_gruppenanruf_nehmen(db, group_id, target_user_id)
         return group
 
     @classmethod

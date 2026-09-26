@@ -83,6 +83,9 @@ const NEUES_GERAET = {
 async function codeErzeugenUndEinloesen(neueGeraete: unknown[]) {
   lage.status = { exists: true, redeemed: false, expired: false }
   render(<AiDevicePairingCard />)
+  fireEvent.change(screen.getByLabelText(i18n.t('ai.profile.devicesProofPassword')), {
+    target: { value: 'mein-passwort' },
+  })
   fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.profile.devicesPair') }))
   await screen.findByText(CODE)
   lage.status = {
@@ -95,6 +98,24 @@ async function codeErzeugenUndEinloesen(neueGeraete: unknown[]) {
     verlauf_abgelegt: false,
   }
 }
+
+describe('AiDevicePairingCard — Nachweis vor dem Code', () => {
+  it('erzeugt ohne Passwort keinen Code und schickt es mit', async () => {
+    const { api } = await import('@/api/client')
+    render(<AiDevicePairingCard />)
+    const knopf = screen.getByRole('button', { name: i18n.t('ai.profile.devicesPair') })
+    expect(knopf).toBeDisabled()
+    fireEvent.change(screen.getByLabelText(i18n.t('ai.profile.devicesProofPassword')), {
+      target: { value: 'mein-passwort' },
+    })
+    fireEvent.click(knopf)
+    await screen.findByText(CODE)
+    expect(api).toHaveBeenCalledWith(
+      '/auth/devices/pairing',
+      expect.objectContaining({ body: JSON.stringify({ label: '', password: 'mein-passwort' }) }),
+    )
+  })
+})
 
 describe('AiDevicePairingCard — Rückfrage vor der Übergabe', () => {
   beforeEach(() => {

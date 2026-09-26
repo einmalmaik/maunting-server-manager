@@ -159,8 +159,11 @@ Was die App zum Betrieb braucht:
 
 **Anmelden geht nur über Kopplung.** Die App kennt weder Passwort noch
 2FA-Code. Wer angemeldet ist, öffnet im Panel **Profil → KI → Geräte koppeln**,
-erzeugt dort einen Code (zwölf Zeichen, zehn Minuten, genau einmal einlösbar)
-und trägt ihn in der App ein. Der Grund ist nicht Bequemlichkeit: bei
+bestätigt dort mit dem Passwort (bei aktiver 2FA mit dem aktuellen 2FA-Code),
+erzeugt einen Code (zwölf Zeichen, zehn Minuten, genau einmal einlösbar)
+und trägt ihn in der App ein. Die Bestätigung ist nötig, weil ein gekoppeltes
+Gerät dauerhaft angemeldet bleibt: ein abgegriffenes Access-Token allein
+reicht damit nicht, um ein eigenes Gerät an das Konto zu hängen. Der Grund ist nicht Bequemlichkeit: bei
 aktiviertem Captcha verlangt `/api/auth/login` einen Turnstile-Token, und ein
 Captcha-Widget in einem Tauri-Fenster scheitert daran, dass Cloudflare-Schlüssel
 an Domains gebunden sind. Passwort, 2FA und Captcha bleiben damit vollständig
@@ -169,9 +172,9 @@ im Browser.
 In der Datenbank steht nur der SHA-256 des Codes. Gekoppelte Geräte stehen
 unter demselben Punkt im Profil; **Zugang entziehen** widerruft die
 Refresh-Familie genau dieses Geräts und lässt alle anderen Sitzungen laufen.
-Das gerade gültige Access-Token bleibt bis zu seinem Ablauf brauchbar —
-dieselbe Regel wie überall sonst, ein Widerruf wirkt spätestens beim nächsten
-Erneuern.
+Der Widerruf wirkt sofort: Anfragen mit dem Access-Token des Geräts werden
+abgelehnt, seine offenen Echtzeitverbindungen getrennt und seine
+Push-Zustelladressen gelöscht.
 
 **Der Messenger-Verlauf zieht über dieselbe Kopplung mit.** Ein frisch
 gekoppeltes Gerät hat keine Ratchet-Sitzungen und holt vom Server nichts

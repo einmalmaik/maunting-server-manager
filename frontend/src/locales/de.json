@@ -481,6 +481,9 @@
       "devicesApiAddressHint": "Domain genügt (z. B. panel.example.com).",
       "devicesNameLabel": "Name des Geräts",
       "devicesNamePlaceholder": "Arbeitsrechner",
+      "devicesProofPassword": "Dein Passwort",
+      "devicesProofOtp": "Aktueller 2FA-Code",
+      "devicesProofHint": "Ein gekoppeltes Gerät bleibt angemeldet, bis du es hier entfernst. Deshalb bestätigst du vorher, dass du es bist.",
       "devicesPair": "Code erzeugen",
       "devicesCodeLabel": "Kopplungscode",
       "devicesOnceHint": "10 Minuten gültig. Einmalig nutzbar über Code oder QR-Scan.",
@@ -4127,7 +4130,7 @@
       },
       "pairing": {
         "title": "Anmelden per Kopplung",
-        "body": "Die App kennt weder Passwort noch 2FA-Code. Im Panel unter Profil → KI wird ein zehn Minuten gültiger Einmalcode erzeugt und in der App eingegeben. Gespeichert wird nur der Hash. So verbleiben Passwort, 2FA und Captcha vollständig im Browser. Gekoppelte Geräte können im Panel einzeln widerrufen werden. Über dieselbe Kopplung zieht der Messenger-Verlauf mit: das bereits eingerichtete Gerät versiegelt ihn gegen den Schlüssel des neuen, der Server reicht ihn einmal durch und löscht ihn dabei. Lesen kann er ihn nicht, und Schlüsselmaterial wandert nicht mit."
+        "body": "Die App kennt weder Passwort noch 2FA-Code. Im Panel unter Profil → KI wird nach Bestätigung mit Passwort oder 2FA-Code ein zehn Minuten gültiger Einmalcode erzeugt und in der App eingegeben. Gespeichert wird nur der Hash. So verbleiben Passwort, 2FA und Captcha vollständig im Browser. Gekoppelte Geräte können im Panel einzeln widerrufen werden; der Widerruf trennt auch ihre offenen Verbindungen und löscht ihre Push-Adresse. Über dieselbe Kopplung zieht der Messenger-Verlauf mit: das bereits eingerichtete Gerät versiegelt ihn gegen den Schlüssel des neuen, der Server reicht ihn einmal durch und löscht ihn dabei. Lesen kann er ihn nicht, und Schlüsselmaterial wandert nicht mit."
       },
       "uninstall": {
         "title": "Deinstallation",
@@ -4494,7 +4497,7 @@
           "retention": "Verschwindende Nachrichten stellst du je Chat ein, und die Frist gilt für alle darin: im Einzelchat dürfen beide Seiten umstellen, in einer Gruppe nur, wer das Recht dazu hat. Ob der Absender es hatte, prüft jedes empfangende Gerät selbst; die Instanz kann die Umstellung nicht lesen. Die Geräte der anderen übernehmen die Frist, zeigen die Umstellung im Verlauf, und ab da verfallen auch ihre Nachrichten. Ist die Zeit um, nimmt jedes Gerät die Zeile aus seinem Verlauf, und jede Seite entfernt ihre eigenen Umschläge und Anhänge vom Server. Unabhängig davon löscht der Server alle verschlüsselten Umschläge nach 30 Tagen automatisch aus dem Postfach. War ein Gerät länger als 30 Tage offline, verpasst es ältere Umschläge; der Verlauf auf bereits synchronisierten Geräten bleibt erhalten.",
           "receipts": "Zustell- und Lesebestätigungen laufen als verschlüsselte Steuernachrichten über denselben Weg. Kann eine Bestätigung nicht verschlüsselt werden, unterbleibt sie, statt ungeschützt zu gehen.",
           "push": "Hast du Benachrichtigungen eingeschaltet und die Anwendung geschlossen, meldet dein Browser eine Zustelladresse bei dem Push-Dienst seines Herstellers an — je nach Browser Google, Mozilla oder Apple. Diese Adresse speichert die Instanz, um dich erreichen zu können. Was sie dorthin schickt, ist für deinen Browser verschlüsselt und enthält ohnehin keinen Inhalt: weder Text noch Absender, nur „Neue Nachricht“.",
-          "pushMetadata": "Der Push-Dienst sieht dabei, dass deine Zustelladresse zu diesem Zeitpunkt etwas bekommen hat. Das lässt sich auf diesem Weg nicht vermeiden, deshalb steht es hier. Schaltest du Benachrichtigungen im Profil ab oder meldest dich ab, wird die Adresse gelöscht und es geht nichts mehr hinaus. Ist ein Fenster geöffnet, unterbleibt der Versand: dann meldet sich die Anwendung selbst.",
+          "pushMetadata": "Der Push-Dienst sieht dabei, dass deine Zustelladresse zu diesem Zeitpunkt etwas bekommen hat. Das lässt sich auf diesem Weg nicht vermeiden, deshalb steht es hier. Schaltest du Benachrichtigungen im Profil ab oder meldest dich ab, wird die Adresse gelöscht und es geht nichts mehr hinaus. Dasselbe gilt, wenn du ein Gerät entfernst: dafür merkt sich die Instanz, mit welcher Anmeldung die Adresse hinterlegt wurde. Ist ein Fenster geöffnet, unterbleibt der Versand: dann meldet sich die Anwendung selbst.",
           "calls": "Sprach-, Video- und Gruppenanrufe laufen über einen Medienserver. Ton und Bild werden auf deinem Gerät verschlüsselt und erst beim Gegenüber wieder geöffnet; der Medienserver leitet weiter, was er nicht öffnen kann. Standardmäßig läuft er auf dieser Instanz. Trägt der Betreiber einen externen Anbieter ein, laufen die verschlüsselten Ströme über dessen Server.",
           "callMetadata": "Der Medienserver sieht allerdings, welche Kontokennungen wann und wie lange in welchem Raum waren. Diese Angaben leben nur, solange der Anruf läuft: gespeichert werden sie nicht, es gibt keinen Anrufverlauf und keine Gesprächsdauer in der Datenbank. Bei einem externen Anbieter entstehen sie dort und unterliegen dessen Aufbewahrung.",
           "callModeration": "Schaltet ein Moderator jemanden im Gruppenanruf stumm oder entfernt ihn, wird das im Prüfprotokoll festgehalten: wer die Handlung ausgelöst hat, gegen wen sie ging und in welcher Gruppe. Der Raum und alles Gesprochene bleiben außen vor. Das ist die einzige Spur, die ein Anruf hinterlässt."
@@ -6329,6 +6332,7 @@
     "audioBlockedHint": "Dein Browser lässt den Ton erst nach einem Klick zu.",
     "nobodyAnswered": "Niemand hat abgenommen.",
     "callMissed": "Anruf verpasst.",
+    "removedFromGroupCall": "Du bist nicht mehr in der Gruppe und damit auch nicht mehr im Anruf.",
     "missedWhileBusy": "{{name}} hat angerufen, während du im Gespräch warst.",
     "moderatorMuted": "Ein Moderator hat dich stummgeschaltet. Nur die Moderation kann das aufheben.",
     "screenshareFailed": "Die Bildschirmfreigabe konnte nicht gestartet werden.",

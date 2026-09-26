@@ -684,6 +684,92 @@ if (typeof window !== 'undefined') {
   })
 }
 
+// ── Geteilte Einträge: Klartext für den Server, nie der Kontoschlüssel ──
+
+/**
+ * Gehört der Termin mehr als einem Konto?
+ *
+ * Team-, Server- und Node-Termine sieht jeder, der das Team, den Server oder
+ * die Nodes sieht (`calendar_service`, Sichtbarkeitsfilter). Mit dem
+ * Kontoschlüssel des Verfassers verschlüsselt, konnte sie bis 09/2026 nur
+ * der Verfasser lesen. Sie gehen deshalb im Klartext an den Server, der sie
+ * mit DIS verschlüsselt ablegt; nur persönliche Termine bleiben E2EE.
+ */
+function terminIstGeteilt(ev: { event_type?: string | null; team_id?: number | null }): boolean {
+  return (ev.event_type || (ev.team_id ? 'team' : 'personal')) !== 'personal'
+}
+
+function notizIstGeteilt(n: { note_type?: string | null; team_id?: number | null }): boolean {
+  return (n.note_type || (n.team_id ? 'team' : 'personal')) === 'team'
+}
+
+/**
+ * Einträge, die in dieser Sitzung schon auf Klartext umgestellt wurden.
+ *
+ * Ohne diese Liste stellte jeder Ladevorgang denselben Eintrag erneut in die
+ * Warteschlange, solange der Server die Änderung noch nicht bestätigt hat.
+ */
+const aufKlartextUmgestellt = new Set<string>()
+
+function istUmschlag(wert: unknown, praefix: string): boolean {
+  return typeof wert === 'string' && wert.startsWith(praefix)
+}
+
+/**
+ * Stellt geteilte Termine aus der Zeit vor 09/2026 auf Klartext um.
+ *
+ * Nur der Verfasser kann das: nur er hat den Schlüssel, mit dem sie damals
+ * verschlüsselt wurden. Umgestellt wird erst, wenn **jedes** Feld lesbar
+ * war; sonst ginge ein Feld als Umschlag an den Server zurück und bliebe für
+ * alle anderen so unlesbar wie vorher.
+ */
+function geteilteTermineUmstellen(
+  roh: CalendarEventItem[],
+  lesbar: CalendarEventItem[],
+  effectiveUid: number,
+): void {
+  const felder = ['title', 'description', 'location', 'recurrence'] as const
+  roh.forEach((ev, i) => {
+    const klar = lesbar[i]
+    if (!klar || !terminIstGeteilt(ev) || ev.user_id !== effectiveUid) return
+    if (aufKlartextUmgestellt.has(ev.event_id)) return
+    if (!felder.some((f) => istUmschlag(ev[f], CALENDAR_CIPHERTEXT_PREFIX))) return
+    if (felder.some((f) => istUmschlag(klar[f], CALENDAR_CIPHERTEXT_PREFIX))) return
+    if (getOutbox().some((m) => m.entityId === ev.event_id)) return
+    aufKlartextUmgestellt.add(ev.event_id)
+    enqueueMutation({
+      entity: 'calendar',
+      action: 'update',
+      entityId: ev.event_id,
+      payload: {
+        title: klar.title,
+        description: klar.description ?? '',
+        location: klar.location ?? '',
+        recurrence: klar.recurrence || LEERES_DOKUMENT,
+      },
+    })
+  })
+}
+
+/** Dasselbe für Team-Notizen. */
+function geteilteNotizenUmstellen(roh: NoteItem[], lesbar: NoteItem[], effectiveUid: number): void {
+  roh.forEach((n, i) => {
+    const klar = lesbar[i]
+    if (!klar || !notizIstGeteilt(n) || n.user_id !== effectiveUid) return
+    if (aufKlartextUmgestellt.has(n.note_uid)) return
+    if (!istUmschlag(n.title, NOTE_CIPHERTEXT_PREFIX) && !istUmschlag(n.content, NOTE_CIPHERTEXT_PREFIX)) return
+    if (istUmschlag(klar.title, NOTE_CIPHERTEXT_PREFIX) || istUmschlag(klar.content, NOTE_CIPHERTEXT_PREFIX)) return
+    if (getOutbox().some((m) => m.entityId === n.note_uid)) return
+    aufKlartextUmgestellt.add(n.note_uid)
+    enqueueMutation({
+      entity: 'note',
+      action: 'update',
+      entityId: n.note_uid,
+      payload: { title: klar.title, content: klar.content ?? '' },
+    })
+  })
+}
+
 // ── Public Offline-First Notes API ──
 
 export async function loadNotesOfflineFirst(_options?: {
@@ -736,6 +822,7 @@ export async function loadNotesOfflineFirst(_options?: {
         })
       )
       localNotes = mergeNotesWithServer(decryptedData)
+      geteilteNotizenUmstellen(data, decryptedData, effectiveUid)
     }
   } catch {
     isOffline = true
@@ -769,11 +856,13 @@ export async function saveNoteOffline(
   // getrennt mitgegeben, sonst greift der Vorgabewert 1 und der Schlüssel
   // landet unter dem falschen Konto. Siehe ALTSCHLUESSEL_KENNUNG.
   const kennung = getEffectiveUserId()
-  const isTeam =
-    payload.note_type === 'team' ||
-    Boolean(payload.team_id) ||
-    editingNote?.note_type === 'team' ||
-    Boolean(editingNote?.team_id)
+  // Was die Notiz **nach** dem Speichern ist, entscheidet. Die frühere Fassung
+  // fragte auch die alte Art ab, und eine Team-Notiz, die persönlich wurde,
+  // blieb dadurch unverschlüsselt.
+  const isTeam = notizIstGeteilt({
+    note_type: payload.note_type ?? editingNote?.note_type,
+    team_id: payload.team_id !== undefined ? payload.team_id : editingNote?.team_id,
+  })
 
   let encryptedTitle = payload.title
   let encryptedContent = payload.content !== undefined ? payload.content : ''
@@ -1067,6 +1156,7 @@ async function holeGrundbestand(effectiveUid: number): Promise<CalendarEventItem
     data.map((ev) => entschluesselterTermin(ev, ev.user_id || effectiveUid)),
   )
   const zusammengefuehrt = mergeCalendarWithServer(entschluesselt)
+  geteilteTermineUmstellen(data, entschluesselt, effectiveUid)
   grundbestandGeholt = true
   return zusammengefuehrt
 }
@@ -1117,6 +1207,7 @@ export async function loadCalendarEventsOfflineFirst(
         data.map((ev) => entschluesselterTermin(ev, ev.user_id || effectiveUid)),
       )
       localEvents = mergeCalendarWithServer(decryptedData)
+      geteilteTermineUmstellen(data, decryptedData, effectiveUid)
     }
   } catch {
     isOffline = true
@@ -1187,7 +1278,7 @@ export async function saveCalendarEventOffline(
   // getrennt mitgegeben, sonst greift der Vorgabewert 1 und der Schlüssel
   // landet unter dem falschen Konto. Siehe ALTSCHLUESSEL_KENNUNG.
   const kennung = getEffectiveUserId()
-  const isTeam = payload.event_type === 'team' || Boolean(payload.team_id)
+  const isTeam = terminIstGeteilt(payload)
   const klartextSerie = payload.recurrence || LEERES_DOKUMENT
 
   let encryptedTitle = payload.title

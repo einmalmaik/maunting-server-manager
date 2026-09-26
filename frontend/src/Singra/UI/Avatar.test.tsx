@@ -64,3 +64,21 @@ describe('Avatar Component', () => {
     expect(img).toHaveAttribute('src', 'https://panel.example.com/api/auth/avatar/avatar_1_test.png')
   })
 })
+
+describe('Avatar in der Desktop-App', () => {
+  it('holt ein fremdes Bild nicht mit dem Zugangstoken ab', async () => {
+    // Bis 26.09.2026 holte die App jedes Bild als Blob über `apiStream`, auch
+    // von fremden Servern. Im Anruf kam so jeder an das Token des anderen.
+    const { setRuntimeApiUrl } = await import('@/config/api')
+    const holen = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('x', { status: 200 }))
+    try {
+      setRuntimeApiUrl('https://api.my-backend.com')
+      render(<Avatar src="https://evil.example/x.png" name="Mallory" />)
+      await new Promise((fertig) => setTimeout(fertig, 20))
+      expect(holen).not.toHaveBeenCalledWith('https://evil.example/x.png', expect.anything())
+    } finally {
+      setRuntimeApiUrl(null)
+      holen.mockRestore()
+    }
+  })
+})

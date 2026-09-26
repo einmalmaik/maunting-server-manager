@@ -480,6 +480,9 @@
       "devicesApiAddress": "Enter this address in the app",
       "devicesApiAddressHint": "Domain is sufficient (e.g. panel.example.com).",
       "devicesNameLabel": "Device name",
+      "devicesProofPassword": "Your password",
+      "devicesProofOtp": "Current 2FA code",
+      "devicesProofHint": "A paired device stays signed in until you remove it here. That is why you confirm it is you first.",
       "devicesNamePlaceholder": "Work computer",
       "devicesPair": "Create code",
       "devicesCodeLabel": "Pairing code",
@@ -4127,7 +4130,7 @@
       },
       "pairing": {
         "title": "Signing in by pairing",
-        "body": "The app knows neither password nor 2FA code. In the panel under Profile → AI a one-time code is generated (ten minutes, exactly once) and entered into the app; only its hash is stored. Password, 2FA, and captcha stay entirely in the browser. Paired devices can be locked out individually from the same place. The messenger history travels along the same pairing: the device you already use seals it for the new device's key, and the server passes it through once and deletes it in the process. It cannot read the blob, and no key material travels with it."
+        "body": "The app knows neither password nor 2FA code. In the panel under Profile → AI you confirm with your password or 2FA code, then a one-time code is generated (ten minutes, exactly once) and entered into the app; only its hash is stored. Password, 2FA, and captcha stay entirely in the browser. Paired devices can be locked out individually from the same place; locking one out also closes its open connections and deletes its push address. The messenger history travels along the same pairing: the device you already use seals it for the new device's key, and the server passes it through once and deletes it in the process. It cannot read the blob, and no key material travels with it."
       },
       "uninstall": {
         "title": "Uninstalling",
@@ -4494,7 +4497,7 @@
           "retention": "Disappearing messages are set per chat, and the time limit applies to everyone in it: in a one-to-one chat both sides may change it, in a group only those with the right to do so. Whether the sender had that right is checked by each receiving device itself; the instance cannot read the change. The other devices adopt the time limit, show the change in the conversation, and from then on their messages expire too. Once the time is up, every device drops the entry from its history, and each side removes its own envelopes and attachments from the server. Independently, the server automatically purges all encrypted envelopes after 30 days. If a device was offline for more than 30 days, it misses older envelopes; existing history on synced devices remains intact.",
           "receipts": "Delivery and read receipts travel as encrypted control messages over the same path. If a receipt cannot be encrypted, it is not sent rather than sent unprotected.",
           "push": "If you have notifications switched on and the application closed, your browser registers a delivery address with its vendor's push service — Google, Mozilla or Apple, depending on the browser. The instance stores that address so it can reach you. What it sends there is encrypted for your browser and carries no content anyway: no text, no sender, only “New message”.",
-          "pushMetadata": "The push service does see that your delivery address received something at that moment. There is no way around this on this route, which is why it is stated here. Turn notifications off in your profile or sign out and the address is deleted, after which nothing leaves the instance. While a window is open nothing is sent at all: the application notifies you itself.",
+          "pushMetadata": "The push service does see that your delivery address received something at that moment. There is no way around this on this route, which is why it is stated here. Turn notifications off in your profile or sign out and the address is deleted, after which nothing leaves the instance. The same happens when you remove a device: for that, the instance remembers which sign-in registered the address. While a window is open nothing is sent at all: the application notifies you itself.",
           "calls": "Voice, video and group calls run through a media server. Audio and video are encrypted on your device and only opened again on the other end; the media server forwards what it cannot open. By default it runs on this instance. If the operator configures an external provider, the encrypted streams travel over that provider's servers.",
           "callMetadata": "The media server does however see which account identifiers were in which room, when and for how long. That information only lives while the call is running: it is not stored, and there is no call history or call duration in the database. With an external provider it arises there and is subject to that provider's retention.",
           "callModeration": "If a moderator mutes or removes someone during a group call, the audit log records who acted, against whom, and in which group. The room itself and anything said stay out of it. This is the only trace a call leaves behind."
@@ -6329,6 +6332,7 @@
     "audioBlockedHint": "Your browser only allows sound after a click.",
     "nobodyAnswered": "Nobody answered.",
     "callMissed": "Call missed.",
+    "removedFromGroupCall": "You are no longer in the group, so you have left the call.",
     "missedWhileBusy": "{{name}} called while you were on a call.",
     "moderatorMuted": "A moderator muted you. Only moderation can unmute you.",
     "screenshareFailed": "Screen sharing could not be started.",

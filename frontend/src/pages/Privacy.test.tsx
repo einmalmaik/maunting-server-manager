@@ -141,19 +141,20 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.4 vom 2026-09-24 aus (Geraetefreigabe mit Unterschrift, Entfernen sperrt sofort, Anhaenge nach 90 Tagen)', () => {
+  it('weist die Fassung 3.6 vom 2026-09-26 aus (ein entferntes Geraet verliert auch seine Push-Adresse)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.4`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.6`)),
     ).toBeInTheDocument();
+    expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-09-24');
-    expect(stand).toHaveTextContent('2026-09-24');
+    expect(stand).toHaveAttribute('datetime', '2026-09-26');
+    expect(stand).toHaveTextContent('2026-09-26');
   });
 
   /**

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import re
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -126,6 +126,18 @@ class VaultSaltResponse(BaseModel):
 class VaultSaltSetRequest(BaseModel):
     kdf_salt: str = Field(..., min_length=16, max_length=128, description="Base64- oder Hex-kodierter KDF-Salt")
     bucket_id: str = Field(..., min_length=64, max_length=64, description="64-Hex Bucket-ID")
+    # Nur noetig, wenn der Bucket schon blind registriert ist (erster Abgleich
+    # lief ohne `/salt`). Dann belegt er den Besitz.
+    auth_token: Optional[str] = Field(default=None, min_length=64, max_length=64, description="Blinder Besitznachweis (SHA-256 Hex)")
+
+    @field_validator("auth_token")
+    @classmethod
+    def validate_auth_token(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if not HEX_64_REGEX.match(v):
+            raise ValueError("auth_token must be a 64-character hex string")
+        return v.lower()
 
     @field_validator("bucket_id")
     @classmethod

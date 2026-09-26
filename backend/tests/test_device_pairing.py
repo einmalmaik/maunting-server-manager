@@ -48,7 +48,7 @@ def _kopf(cookies: dict) -> dict:
 def _code_erzeugen(client: TestClient, cookies: dict, label: str = "Arbeitsrechner") -> dict:
     antwort = client.post(
         "/api/auth/devices/pairing",
-        json={"label": label},
+        json={"label": label, "password": "UserPass123!"},
         cookies=cookies,
         headers=_kopf(cookies),
     )
@@ -93,6 +93,51 @@ class TestCodeErzeugen:
             headers=_kopf(user_cookies),
         )
         assert antwort.status_code == 403
+
+
+class TestNachweis:
+    """Ein Zugangstoken allein macht noch kein Geraet.
+
+    Bis 26.09.2026 genuegte es: wer im Anruf das Token der Desktop-App abgriff,
+    koppelte damit ein eigenes Geraet und hatte das Konto auf Dauer.
+    """
+
+    def test_ohne_passwort_kein_code(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        _mit_chatrecht(db, regular_user)
+        for rumpf in ({"label": "x"}, {"label": "x", "password": "falsch-geraten-1"}):
+            antwort = client.post(
+                "/api/auth/devices/pairing",
+                json=rumpf,
+                cookies=user_cookies,
+                headers=_kopf(user_cookies),
+            )
+            assert antwort.status_code == 403, rumpf
+
+    def test_mit_2fa_zaehlt_der_code(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict, monkeypatch
+    ):
+        _mit_chatrecht(db, regular_user)
+        regular_user.two_factor_enabled = True
+        db.commit()
+        monkeypatch.setattr(
+            AuthService, "verify_current_2fa_code", staticmethod(lambda _u, code: code == "123456")
+        )
+        ohne = client.post(
+            "/api/auth/devices/pairing",
+            json={"label": "x", "password": "UserPass123!"},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        mit = client.post(
+            "/api/auth/devices/pairing",
+            json={"label": "x", "otp_code": "123456"},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        assert ohne.status_code == 403
+        assert mit.status_code == 200, mit.text
 
 
 class TestEinloesen:
@@ -358,6 +403,68 @@ class TestGeraeteliste:
 
         uebrig = client.get("/api/auth/devices", cookies=user_cookies).json()
         assert [g["label"] for g in uebrig] == ["Zwei"]
+
+    def test_entziehen_trennt_offene_verbindung_und_push_des_geraets(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        """Das Sperren muss auch treffen, was schon offen ist.
+
+        Bis 09/2026 lief der Echtzeitstrom eines entfernten Geraets weiter,
+        und seine Push-Adresse bekam weiter Benachrichtigungen. Das Token wird
+        nur beim Verbindungsaufbau geprueft; ein gestohlenes Geraet hielt die
+        Verbindung einfach offen.
+        """
+        from models import PushSubscription
+
+        _mit_chatrecht(db, regular_user)
+        eins = client.post(
+            "/api/auth/devices/redeem",
+            json={"code": _code_erzeugen(client, user_cookies, label="Eins")["code"]},
+        ).json()
+        zwei = client.post(
+            "/api/auth/devices/redeem",
+            json={"code": _code_erzeugen(client, user_cookies, label="Zwei")["code"]},
+        ).json()
+        punkt = "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4"
+        for name, sitzung in (("eins", eins), ("zwei", zwei)):
+            gemeldet = client.post(
+                "/api/social/push/subscribe",
+                headers={"Authorization": f"Bearer {sitzung['access_token']}"},
+                json={
+                    "endpoint": f"https://fcm.googleapis.com/fcm/send/geraet-{name}",
+                    "p256dh": punkt,
+                    "auth": "BTBZMqHH6r4Tts7J_aSIgg",
+                },
+            )
+            assert gemeldet.status_code == 200
+
+        liste = client.get("/api/auth/devices", cookies=user_cookies).json()
+        familie_eins = next(g["family"] for g in liste if g["label"] == "Eins")
+
+        with client.websocket_connect(
+            "/api/events/ws", subprotocols=["msm.bearer", eins["access_token"]]
+        ) as strom_eins, client.websocket_connect(
+            "/api/events/ws", subprotocols=["msm.bearer", zwei["access_token"]]
+        ) as strom_zwei:
+            assert strom_eins.receive_json()["type"] == "ready"
+            assert strom_zwei.receive_json()["type"] == "ready"
+
+            antwort = client.delete(
+                f"/api/auth/devices/{familie_eins}", cookies=user_cookies, headers=_kopf(user_cookies)
+            )
+            assert antwort.status_code == 200
+
+            # Das entfernte Geraet bekommt das Schlusssignal …
+            signal = strom_eins.receive_json()
+            assert signal["type"] == "shutdown"
+            assert signal["reason"] == "session_revoked"
+            # … das andere bleibt verbunden und antwortet weiter.
+            strom_zwei.send_json({"type": "ping"})
+            assert strom_zwei.receive_json()["type"] == "pong"
+
+        db.expire_all()
+        uebrig = [a.endpoint for a in db.query(PushSubscription).all()]
+        assert uebrig == ["https://fcm.googleapis.com/fcm/send/geraet-zwei"]
 
     def test_eine_fremde_familie_ist_nicht_zu_treffen(
         self, client: TestClient, db: Session, regular_user: User, owner_user: User,

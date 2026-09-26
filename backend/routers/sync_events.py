@@ -17,7 +17,14 @@ from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
-from dependencies import get_current_user, get_current_user_for_ws, verify_csrf, ws_subprotokoll
+from dependencies import (
+    get_current_user,
+    get_current_user_for_ws,
+    session_familie,
+    verify_csrf,
+    ws_session_familie,
+    ws_subprotokoll,
+)
 from models.user import User
 from schemas.social import StreamMailboxAbos
 from services import team_service
@@ -40,6 +47,7 @@ async def _event_stream(
         user_id=user_id,
         team_ids=team_ids,
         is_admin=is_admin,
+        familie=session_familie(request),
     )
     try:
         # 1. Initiales Begrüßungs-Signal
@@ -176,6 +184,7 @@ async def sync_events_ws(
         user_id=user_id,
         team_ids=team_ids,
         is_admin=is_admin,
+        familie=ws_session_familie(websocket),
     )
     ws_lock = asyncio.Lock()
 

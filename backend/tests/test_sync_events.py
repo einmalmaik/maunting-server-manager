@@ -347,3 +347,34 @@ def test_sync_event_service_close_all(test_user):
 
 
 
+def test_trenne_trifft_nur_das_gesperrte_geraet(test_user):
+    """Eine gesperrte Familie schliesst genau ihre Verbindungen.
+
+    Die anderen Geraete desselben Kontos und fremde Konten laufen weiter;
+    eine Verbindung ohne Familie laesst sich keinem Geraet zuordnen.
+    """
+    weg, q_weg = SyncEventService.subscribe(user_id=test_user.id, familie="fam-weg")
+    bleibt, q_bleibt = SyncEventService.subscribe(user_id=test_user.id, familie="fam-bleibt")
+    alt, q_alt = SyncEventService.subscribe(user_id=test_user.id)
+    fremd, q_fremd = SyncEventService.subscribe(user_id=test_user.id + 1, familie="fam-weg")
+
+    assert SyncEventService.trenne(test_user.id, "fam-weg") == 1
+
+    signal = q_weg.get_nowait()
+    assert signal["type"] == "shutdown" and signal["reason"] == "session_revoked"
+    assert q_bleibt.empty() and q_alt.empty() and q_fremd.empty()
+    # Aus der Verteilung genommen, bevor der Handler die Queue geleert hat.
+    SyncEventService.publish({"type": "neu"}, user_id=test_user.id)
+    assert q_weg.empty()
+    assert q_bleibt.get_nowait()["type"] == "neu"
+
+
+def test_trenne_ohne_familie_trifft_jede_verbindung_des_kontos(test_user):
+    _, q_a = SyncEventService.subscribe(user_id=test_user.id, familie="fam-a")
+    _, q_b = SyncEventService.subscribe(user_id=test_user.id)
+    _, q_fremd = SyncEventService.subscribe(user_id=test_user.id + 1)
+
+    assert SyncEventService.trenne(test_user.id) == 2
+    assert q_a.get_nowait()["type"] == "shutdown"
+    assert q_b.get_nowait()["type"] == "shutdown"
+    assert q_fremd.empty()

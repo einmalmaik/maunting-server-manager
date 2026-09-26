@@ -242,6 +242,68 @@ def test_sync_laesst_den_eigenen_bucket_weiter_zu(test_db):
     assert len(res.json()["entries"]) == 1
 
 
+def test_salt_beansprucht_keinen_blind_registrierten_fremdbucket(test_db, anonym):
+    """Exploit bis 26.09.2026: `/salt` pruefte nur, ob ein anderes Konto den
+    Bucket schon traegt. Ein blind registrierter Bucket ohne Kontobesitzer ging
+    an den, der die Kennung kannte, und `/sync` lieferte ihm danach alles.
+    """
+    session, _, angreifer = test_db
+    bucket = "e" * 64
+    token = "7" * 64
+    erster = anonym.post(
+        "/api/vault/blind-sync",
+        json={
+            "bucket_id": bucket,
+            "auth_token": token,
+            "since_revision": 0,
+            "mutations": [{"id": "blind-1", "ciphertext": "sv-vault-v1:nur_fuer_den_besitzer", "revision": 1, "is_deleted": False}],
+        },
+    )
+    assert erster.status_code == 200
+
+    with _als(session, angreifer) as client:
+        salz = client.post("/api/vault/salt", json={"kdf_salt": "11" * 16, "bucket_id": bucket})
+        lesen = client.post("/api/vault/sync", json={"bucket_id": bucket, "since_revision": 0, "mutations": []})
+    app.dependency_overrides.clear()
+
+    assert salz.status_code == 403
+    assert lesen.status_code == 403
+    assert session.get(VaultUserSetting, angreifer.id) is None
+
+    # Wer den Besitznachweis hat, bindet den Bucket weiter an sein Konto.
+    with _als(session, angreifer) as client:
+        mit_nachweis = client.post(
+            "/api/vault/salt",
+            json={"kdf_salt": "11" * 16, "bucket_id": bucket, "auth_token": token},
+        )
+    app.dependency_overrides.clear()
+    assert mit_nachweis.status_code == 200
+
+
+def test_salt_beansprucht_keine_verwaisten_eintraege(test_db):
+    """Das Konto des Besitzers ist geloescht, die Eintraege liegen noch da."""
+    session, _, angreifer = test_db
+    bucket = "9" * 64
+    session.add(VaultEntry(id="waise-1", bucket_id=bucket, ciphertext="sv-vault-v1:waise", revision=1, is_deleted=False))
+    session.commit()
+
+    with _als(session, angreifer) as client:
+        salz = client.post("/api/vault/salt", json={"kdf_salt": "11" * 16, "bucket_id": bucket})
+    app.dependency_overrides.clear()
+    assert salz.status_code == 403
+
+
+def test_salt_fuer_einen_neuen_tresor_geht_weiter(test_db):
+    """Gegenprobe: die Einrichtung schickt `/salt` zuerst, vor jedem Abgleich."""
+    session, opfer, _ = test_db
+    with _als(session, opfer) as client:
+        salz = client.post("/api/vault/salt", json={"kdf_salt": "22" * 16, "bucket_id": "8" * 64})
+        nochmal = client.post("/api/vault/salt", json={"kdf_salt": "22" * 16, "bucket_id": "8" * 64})
+    app.dependency_overrides.clear()
+    assert salz.status_code == 200
+    assert nochmal.status_code == 200
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # V3 — Authentifizierter Migrationspfad (Ersatz fuer die blinde Uebernahme)
 # ─────────────────────────────────────────────────────────────────────────────
