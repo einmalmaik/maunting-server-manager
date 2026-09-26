@@ -56,7 +56,7 @@ import {
 import { CircularVideoNotePlayer } from '@/components/social/CircularVideoNotePlayer'
 import { GruppenEinladungsKarte, findeEinladung } from '@/components/social/GruppenEinladungsKarte'
 import { STORY_GRADIENTS } from '@/components/social/CreateStoryModal'
-import { sanitizeSvg } from '@/lib/sanitizeSvg'
+import { sanitizeSvg, getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
 import { useLangdruck } from '@/hooks/useLangdruck'
 import { erkenneWischen, rueckmeldung, wischWeg, WISCH_SCHWELLE_PX } from '@/lib/gesten'
 import { reaktionsknoepfe, type Reaktionen } from '@/services/reaktionen'
@@ -822,21 +822,24 @@ function ChatMessageBubbleContent({
                 {msg.storyReply.storyContent || t('social.story.fallbackContent')}
               </p>
             </div>
-            {msg.storyReply.storyMediaUrl ? (
-              <img
-                src={msg.storyReply.storyMediaUrl}
-                alt="Status"
-                className="w-11 h-11 rounded-lg object-cover shrink-0 border border-white/10"
-              />
-            ) : (
-              <div
-                className={`w-11 h-11 rounded-lg shrink-0 flex items-center justify-center text-label-sm font-bold text-white shadow-sm ${
-                  STORY_GRADIENTS[msg.storyReply.storyBackground || 'gradient-1']?.class || 'bg-surface-container-high'
-                }`}
-              >
-                Status
-              </div>
-            )}
+            {(() => {
+              const safeMediaUrl = getSafeAttachmentUrl(msg.storyReply.storyMediaUrl)
+              return safeMediaUrl ? (
+                <img
+                  src={safeMediaUrl}
+                  alt="Status"
+                  className="w-11 h-11 rounded-lg object-cover shrink-0 border border-white/10"
+                />
+              ) : (
+                <div
+                  className={`w-11 h-11 rounded-lg shrink-0 flex items-center justify-center text-label-sm font-bold text-white shadow-sm ${
+                    STORY_GRADIENTS[msg.storyReply.storyBackground || 'gradient-1']?.class || 'bg-surface-container-high'
+                  }`}
+                >
+                  Status
+                </div>
+              )
+            })()}
           </div>
         )}
 

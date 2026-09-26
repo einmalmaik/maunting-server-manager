@@ -332,4 +332,28 @@ describe('Formularhilfen', () => {
       }),
     ).toBe('jährlich, ohne Ende, 1 ausgenommen, 1 verschoben')
   })
+
+  it('bricht Serien mit COUNT sofort nach Überschreitung von fensterBis ab', () => {
+    const start = new Date('2026-01-01T10:00:00Z')
+    const ende = new Date('2026-01-01T11:00:00Z')
+    const fensterBis = new Date('2026-01-10T00:00:00Z')
+
+    const serie: Serie = { rrule: 'FREQ=DAILY;COUNT=10000', ausnahmen: [], abweichungen: {} }
+    const res = ausbreiten(serie, start, ende, {
+      ganztaegig: false,
+      zeitzone: 'UTC',
+      fensterBis,
+    })
+    expect(res).toHaveLength(9)
+    expect(res.every((v) => v.start < fensterBis)).toBe(true)
+
+    const serieWoche: Serie = { rrule: 'FREQ=WEEKLY;COUNT=10000;BYDAY=MO,WE,FR', ausnahmen: [], abweichungen: {} }
+    const resWoche = ausbreiten(serieWoche, start, ende, {
+      ganztaegig: false,
+      zeitzone: 'UTC',
+      fensterBis,
+    })
+    expect(resWoche.every((v) => v.start < fensterBis)).toBe(true)
+  })
 })
+

@@ -480,10 +480,7 @@ def _lokale_kandidaten(
             return True
         if regel.count is not None and geliefert >= regel.count:
             return True
-        # Das Fenster begrenzt nur, wenn kein COUNT mitzaehlt: bei COUNT muss
-        # bis zum letzten Vorkommen gezaehlt werden, auch weit hinter dem
-        # sichtbaren Bereich, sonst stimmt die Zahl nicht.
-        if regel.count is None and d > grenze_lokal:
+        if d > grenze_lokal:
             return True
         return False
 
@@ -499,7 +496,7 @@ def _lokale_kandidaten(
                     woche = wochenanfang + timedelta(days=n * 7 * regel.interval)
                 except OverflowError:
                     return
-                if regel.count is None and woche > grenze_lokal:
+                if woche > grenze_lokal:
                     return
                 for wtag in gewuenscht:
                     d = woche + timedelta(days=wtag)
@@ -554,7 +551,7 @@ def _lokale_kandidaten(
                 # Den 31. gibt es im Februar nicht. RFC 5545: ueberspringen,
                 # nicht verschieben — sonst stuende die Miete im Februar am
                 # 28. und im Maerz wieder am 31.
-                if regel.count is None and date(jahr, monat, letzter) > grenze_lokal:
+                if date(jahr, monat, letzter) > grenze_lokal:
                     return
                 continue
             d = date(jahr, monat, tag)
@@ -573,7 +570,7 @@ def _lokale_kandidaten(
         letzter = _kalender.monthrange(jahr, monat)[1]
         if tag > letzter:
             # Der 29. Februar, ausserhalb der Schaltjahre.
-            if regel.count is None and date(jahr, monat, letzter) > grenze_lokal:
+            if date(jahr, monat, letzter) > grenze_lokal:
                 return
             continue
         d = date(jahr, monat, tag)

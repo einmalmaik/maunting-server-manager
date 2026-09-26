@@ -469,7 +469,7 @@ function* lokaleKandidaten(
       if (!datumKleinerGleich([jahr, monat, tag], [uj, um, ut])) return true
     }
     if (regel.count !== null && geliefert >= regel.count) return true
-    if (regel.count === null && grenze && !datumKleinerGleich([jahr, monat, tag], grenze)) return true
+    if (grenze && !datumKleinerGleich([jahr, monat, tag], grenze)) return true
     return false
   }
 
@@ -481,7 +481,7 @@ function* lokaleKandidaten(
       const [aj, am, at] = tagPlus(startUhr.jahr, startUhr.monat, startUhr.tag, -versatz)
       for (let n = 0; n < MAX_SCHRITTE; n++) {
         const [wj, wm, wt] = tagPlus(aj, am, at, n * 7 * regel.interval)
-        if (regel.count === null && grenze && !datumKleinerGleich([wj, wm, wt], grenze)) return
+        if (grenze && !datumKleinerGleich([wj, wm, wt], grenze)) return
         if (wj > 9999) return
         for (const tagNr of gewuenscht) {
           const [j, m, t] = tagPlus(wj, wm, wt, tagNr)
@@ -537,7 +537,7 @@ function* lokaleKandidaten(
         // Den 31. gibt es im Februar nicht. RFC 5545: überspringen, nicht
         // verschieben — sonst stünde die Miete im Februar am 28. und im März
         // wieder am 31.
-        if (regel.count === null && grenze && !datumKleinerGleich([jahr, monat, letzter], grenze)) return
+        if (grenze && !datumKleinerGleich([jahr, monat, letzter], grenze)) return
         continue
       }
       if (fertig(jahr, monat, tag)) return
@@ -555,7 +555,7 @@ function* lokaleKandidaten(
     const letzter = tageImMonat(jahr, monat)
     if (tag > letzter) {
       // Der 29. Februar, außerhalb der Schaltjahre.
-      if (regel.count === null && grenze && !datumKleinerGleich([jahr, monat, letzter], grenze)) return
+      if (grenze && !datumKleinerGleich([jahr, monat, letzter], grenze)) return
       continue
     }
     if (fertig(jahr, monat, tag)) return

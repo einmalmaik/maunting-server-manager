@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Loader2, Users } from 'lucide-react'
 import { Button } from '@/Singra/UI'
 import { apiUrl } from '@/config/api'
+import { getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
 import { getGroupInviteInfo, type ChatGroupInvitePublic } from '@/api/social'
 import { lieseEinladungsKarte, type EinladungsInhalt } from '@/services/einladungsKarte'
 
@@ -141,7 +142,8 @@ export const GruppenEinladungsKarte: React.FC<GruppenEinladungsKarteProps> = ({
    * sich eine Einladung gerade ansieht.
    */
   const name = karte?.name ?? info.name ?? null
-  const logo = karte?.logo ?? (info.avatar_url ? apiUrl(info.avatar_url) : null)
+  const rohesLogo = karte?.logo ?? (info.avatar_url ? apiUrl(info.avatar_url) : null)
+  const logo = getSafeAttachmentUrl(rohesLogo)
 
   return (
     <div className={`mt-2 overflow-hidden rounded-xl border ${rahmen}`}>

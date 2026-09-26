@@ -663,3 +663,83 @@ def test_austragen_familie_trifft_kein_fremdes_konto(
     )
     assert webpush_service.austragen_familie(db, owner_user.id, "fam-weg") == 0
     assert db.query(PushSubscription).count() == 1
+
+
+def test_ziel_ist_erlaubt_nur_fuer_autorisierte_anbieter(monkeypatch):
+    """Nur autorisierte WebPush-Provider und globale IPs werden zugelassen."""
+    # Mock DNS resolution to return a global public IP
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda host, port, proto=0: [(2, 1, 6, "", ("93.184.216.34", 443))],
+    )
+
+    assert webpush_service._ziel_ist_erlaubt("https://fcm.googleapis.com/fcm/send/abc")
+    assert webpush_service._ziel_ist_erlaubt("https://updates.push.services.mozilla.com/wpush/v2/abc")
+    assert webpush_service._ziel_ist_erlaubt("https://web.push.apple.com/send/xyz")
+    assert webpush_service._ziel_ist_erlaubt("https://bn1.notify.windows.com/w/?token=abc")
+    assert webpush_service._ziel_ist_erlaubt("https://client.push.microsoft.com/push/v1")
+
+    # Unautorisierte Domains abgewiesen
+    assert not webpush_service._ziel_ist_erlaubt("https://evil-tarpit.com/push")
+    assert not webpush_service._ziel_ist_erlaubt("https://attacker.org/sinkhole")
+    assert not webpush_service._ziel_ist_erlaubt("http://fcm.googleapis.com/fcm/send/abc")  # kein HTTPS
+
+
+def test_zustellen_entfernt_nicht_erlaubtes_ziel(monkeypatch):
+    """Nicht erlaubte Ziele liefern in _zustellen False, damit sie aus der DB entfernt werden."""
+    monkeypatch.setattr(webpush_service, "_ziel_ist_erlaubt", lambda ep: False)
+    client = httpx.Client()
+    pem, oeffentlich = webpush_service._neues_paar()
+
+    ergebnis = webpush_service._zustellen(
+        client, "https://evil.com/push", GUELTIGER_PUNKT, GUELTIGES_AUTH, b"{}", pem, oeffentlich
+    )
+    assert ergebnis is False
+
+
+def test_max_abos_pro_benutzer_verdraengt_aelteste(db: Session, owner_user: User, monkeypatch):
+    """Maximal 10 Abonnements pro Benutzer; ältere werden verdrängt."""
+    monkeypatch.setattr(webpush_service, "_ziel_ist_erlaubt", lambda ep: True)
+
+    for i in range(12):
+        webpush_service.eintragen(
+            db,
+            owner_user,
+            endpoint=f"https://fcm.googleapis.com/fcm/send/device-{i}",
+            p256dh=GUELTIGER_PUNKT,
+            auth=GUELTIGES_AUTH,
+        )
+
+    abos = db.query(PushSubscription).filter_by(user_id=owner_user.id).all()
+    assert len(abos) == 10
+    # Die beiden ältesten (device-0 und device-1) wurden verdrängt
+    endpoints = {a.endpoint for a in abos}
+    assert "https://fcm.googleapis.com/fcm/send/device-0" not in endpoints
+    assert "https://fcm.googleapis.com/fcm/send/device-1" not in endpoints
+    assert "https://fcm.googleapis.com/fcm/send/device-11" in endpoints
+
+
+def test_max_abos_pro_mailbox_verdraengt_aelteste(db: Session, monkeypatch):
+    """Maximal 50 Abonnements pro Mailbox; ältere werden verdrängt."""
+    from models import E2eeMailboxPush
+
+    monkeypatch.setattr(webpush_service, "_ziel_ist_erlaubt", lambda ep: True)
+    mb_id = "mb_test_limit"
+
+    for i in range(53):
+        webpush_service.eintragen_mailbox(
+            db,
+            mailbox_id=mb_id,
+            endpoint=f"https://fcm.googleapis.com/fcm/send/mb-dev-{i}",
+            p256dh=GUELTIGER_PUNKT,
+            auth=GUELTIGES_AUTH,
+        )
+
+    abos = db.query(E2eeMailboxPush).filter_by(mailbox_id=mb_id).all()
+    assert len(abos) == 50
+    endpoints = {a.endpoint for a in abos}
+    assert "https://fcm.googleapis.com/fcm/send/mb-dev-0" not in endpoints
+    assert "https://fcm.googleapis.com/fcm/send/mb-dev-1" not in endpoints
+    assert "https://fcm.googleapis.com/fcm/send/mb-dev-2" not in endpoints
+    assert "https://fcm.googleapis.com/fcm/send/mb-dev-52" in endpoints
+

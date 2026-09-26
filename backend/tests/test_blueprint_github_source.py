@@ -60,38 +60,44 @@ def test_resolve_startup_profile(tmp_path):
     assert resolve_startup_template(bp, None) == "node index.js"
 
 
-def test_clone_url_uses_none_when_no_token(monkeypatch):
-    """Ohne ENV/Setting wird die Public-URL ohne Token gebaut."""
-    monkeypatch.delenv("MSM_GITHUB_CLONE_TOKEN", raising=False)
-    from services import github_token_service
-    import importlib
-
-    importlib.reload(github_token_service)
-    from services.panel_settings_service import PanelSettingsService
-    PanelSettingsService.invalidate_cache()
-    PanelSettingsService.set("github_clone_token", "")
-
+def test_clone_url_never_contains_token(monkeypatch):
+    """Clone-URL ist stets rein oeffentlich, selbst wenn ein Token konfiguriert ist."""
     from blueprints.github_source import _clone_url
 
     assert _clone_url("octocat/Hello-World") == "https://github.com/octocat/Hello-World.git"
+    assert _clone_url("octocat/Hello-World", token="secret_ghp_12345") == "https://github.com/octocat/Hello-World.git"
 
 
-def test_clone_url_uses_panel_token(monkeypatch):
-    """Panel-Token (DB) fliesst in die Clone-URL ein."""
+def test_build_git_env_with_token_sets_extraheader(monkeypatch, tmp_path):
+    """Authentifizierung wird als GIT_CONFIG_KEY_* extraheader im Environment uebergeben."""
+    import base64
+    from blueprints.github_source import _build_git_env
+
+    token = "ghp_securetoken999"
+    env = _build_git_env(cwd=tmp_path, token=token)
+
+    assert env.get("GIT_CONFIG_COUNT") == "2"
+    assert env.get("GIT_CONFIG_KEY_0") == "safe.directory"
+    assert env.get("GIT_CONFIG_VALUE_0") == "*"
+    assert env.get("GIT_CONFIG_KEY_1") == "http.https://github.com/.extraheader"
+    expected_basic = base64.b64encode(f"x-access-token:{token}".encode("utf-8")).decode("ascii")
+    assert env.get("GIT_CONFIG_VALUE_1") == f"AUTHORIZATION: basic {expected_basic}"
+
+
+def test_build_git_env_without_token_only_sets_safe_directory(tmp_path, monkeypatch):
+    """Ohne Token wird nur safe.directory gesetzt."""
     monkeypatch.delenv("MSM_GITHUB_CLONE_TOKEN", raising=False)
-    from services import github_token_service
-    import importlib
-
-    importlib.reload(github_token_service)
     from services.panel_settings_service import PanelSettingsService
     PanelSettingsService.invalidate_cache()
-    PanelSettingsService.set("github_clone_token", "***")
-
-    from blueprints.github_source import _clone_url
-
-    url = _clone_url("octocat/Hello-World")
-    assert url == "https://x-access-token:***@github.com/octocat/Hello-World.git"
     PanelSettingsService.set("github_clone_token", "")
+
+    from blueprints.github_source import _build_git_env
+
+    env = _build_git_env(cwd=tmp_path, token=None)
+    assert env.get("GIT_CONFIG_COUNT") == "1"
+    assert env.get("GIT_CONFIG_KEY_0") == "safe.directory"
+    assert env.get("GIT_CONFIG_VALUE_0") == "*"
+    assert "GIT_CONFIG_KEY_1" not in env
 
 
 # ── TAR_ENTRY_ERROR Retry-Logik ────────────────────────────────────────────────
@@ -552,21 +558,27 @@ def test_pull_tolerates_local_branch_already_exists_race(tmp_path, monkeypatch):
 
 
 def test_remote_branch_sha_with_explicit_token(monkeypatch):
-    """Prüft, dass remote_branch_sha einen übergebenen Token in der Clone-URL nutzt."""
+    """Prüft, dass remote_branch_sha einen übergebenen Token via Git-Config-Env nutzt und die URL sauber bleibt."""
     from blueprints.github_source import remote_branch_sha
     import subprocess
 
     captured_url = []
+    captured_env = []
 
     def mock_run(cmd, *args, **kwargs):
         captured_url.append(cmd[2])
+        captured_env.append(kwargs.get("env") or {})
         return _FakeProc(0, stdout="abcdef1234567890\trefs/heads/main\n")
 
     monkeypatch.setattr(subprocess, "run", mock_run)
     sha = remote_branch_sha("test/repo", "main", token="my_secret_token_123")
     assert sha == "abcdef1234567890"
     assert len(captured_url) == 1
-    assert "https://x-access-token:my_secret_token_123@github.com/test/repo.git" in captured_url[0]
+    assert captured_url[0] == "https://github.com/test/repo.git"
+    assert "my_secret_token_123" not in captured_url[0]
+    assert captured_env[0].get("GIT_CONFIG_KEY_0") == "http.https://github.com/.extraheader"
+    assert "AUTHORIZATION: basic " in captured_env[0].get("GIT_CONFIG_VALUE_0", "")
+
 
 
 def test_pull_switches_branch_and_updates_working_tree(tmp_path, monkeypatch):
@@ -655,15 +667,16 @@ def test_check_server_file_update_uses_server_token(monkeypatch, tmp_path):
 def test_clone_url_and_remote_branch_sha_token_stripping(monkeypatch):
     from blueprints.github_source import _clone_url, remote_branch_sha
 
-    # Whitespace token gets stripped
-    assert _clone_url("owner/repo", "  ghp_token123  ") == "https://x-access-token:ghp_token123@github.com/owner/repo.git"
-    # Empty token falls back to public url
+    # URL enthält niemals Tokens
+    assert _clone_url("owner/repo", "  ghp_token123  ") == "https://github.com/owner/repo.git"
     assert _clone_url("owner/repo", "") == "https://github.com/owner/repo.git"
     assert _clone_url("owner/repo", "   ") == "https://github.com/owner/repo.git"
 
     captured_urls = []
+    captured_envs = []
     def mock_run(cmd, **kwargs):
         captured_urls.append(cmd[2])
+        captured_envs.append(kwargs.get("env") or {})
         m = MagicMock()
         m.returncode = 0
         m.stdout = "sha123 refs/heads/main\n"
@@ -674,8 +687,10 @@ def test_clone_url_and_remote_branch_sha_token_stripping(monkeypatch):
     monkeypatch.setattr(subprocess, "run", mock_run)
 
     remote_branch_sha("owner/repo", "main", token="  ghp_token123  ")
-    assert "ghp_token123" in captured_urls[0]
-    assert " " not in captured_urls[0]
+    assert "ghp_token123" not in captured_urls[0]
+    assert captured_envs[0].get("GIT_CONFIG_KEY_0") == "http.https://github.com/.extraheader"
+    assert "AUTHORIZATION: basic " in captured_envs[0].get("GIT_CONFIG_VALUE_0", "")
+
 
 
 def test_run_git_timeout_sanitizes_token(monkeypatch):
