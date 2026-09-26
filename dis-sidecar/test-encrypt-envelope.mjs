@@ -11,6 +11,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
+import http from 'node:http';
 
 const PORT = 19198;
 const TOKEN = 'test-envelope-token';
@@ -142,4 +143,44 @@ test('blind-index is deterministic, keyed and distinct per value', async () => {
   // Keyed: a plain SHA-256 of the value must not reproduce it.
   const plain = crypto.createHash('sha256').update('user:1\nzeitzone').digest('hex');
   assert.notEqual(a, plain);
+});
+
+// Sends the body in two writes, split inside a multi-byte character. Until
+// 27.09.2026 readJson appended each chunk as its own string, and an umlaut
+// cut at a chunk boundary came back as two U+FFFD. The ciphertext then held
+// the damaged text, and nothing reported it.
+function sendSplit(path, body, splitAt) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: '127.0.0.1', port: PORT, path, method: 'POST',
+        headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      },
+      (res) => {
+        let text = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => { text += c; });
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }));
+      },
+    );
+    req.on('error', reject);
+    req.write(body.subarray(0, splitAt));
+    setTimeout(() => req.end(body.subarray(splitAt)), 50);
+  });
+}
+
+test('a multi-byte character split across chunks survives', async () => {
+  const plaintext = 'Grüße aus Köln';
+  const body = Buffer.from(JSON.stringify({ plaintext, aad: 'msm:test' }));
+  const cut = body.indexOf(Buffer.from('ü')) + 1;
+  const enc = await sendSplit('/encrypt', body, cut);
+  assert.equal(enc.status, 200);
+  const dec = await call('/decrypt', { ciphertext: enc.body.ciphertext, aad: 'msm:test' });
+  assert.equal(dec.body.plaintext, plaintext);
+});
+
+test('an oversized body is reported as such, not as invalid json', async () => {
+  const res = await call('/encrypt', { plaintext: 'x'.repeat(9 * 1024 * 1024), aad: 'msm:test' });
+  assert.equal(res.status, 413);
+  assert.equal(res.body.error, 'PayloadTooLarge');
 });

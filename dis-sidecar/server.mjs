@@ -269,16 +269,29 @@ const MAX_JSON_BODY = 8 * 1024 * 1024; // 8 MiB
 
 /** @param {import('node:http').IncomingMessage} req @returns {Promise<any>} */
 async function readJson(req) {
-  let body = '';
+  // Chunks are collected as bytes and decoded once. Decoding each chunk on its
+  // own turned a multi-byte character cut at a chunk boundary into U+FFFD, and
+  // /encrypt then encrypted the damaged text.
+  const chunks = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
     if (size > MAX_JSON_BODY) {
-      throw new Error('PayloadTooLarge');
+      const e = new Error('request body too large');
+      e.name = 'PayloadTooLarge';
+      throw e;
     }
-    body += chunk;
+    chunks.push(chunk);
   }
-  return JSON.parse(body);
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+/** Reply for a body readJson refused. Too large is not the same as broken. */
+function bodyError(res, e) {
+  if (e instanceof Error && e.name === 'PayloadTooLarge') {
+    return jsonReply(res, 413, { error: 'PayloadTooLarge' });
+  }
+  return jsonReply(res, 400, { error: 'invalid json' });
 }
 
 const server = http.createServer(async (req, res) => {
@@ -320,8 +333,8 @@ const server = http.createServer(async (req, res) => {
   let data;
   try {
     data = await readJson(req);
-  } catch {
-    return jsonReply(res, 400, { error: 'invalid json' });
+  } catch (e) {
+    return bodyError(res, e);
   }
 
   try {
@@ -585,8 +598,8 @@ async function handleDeriveRawKey(req, res) {
   let body;
   try {
     body = await readJson(req);
-  } catch {
-    return jsonReply(res, 400, { error: 'invalid json' });
+  } catch (e) {
+    return bodyError(res, e);
   }
   const password = body?.password;
   const salt = body?.salt;
@@ -628,8 +641,8 @@ async function handleInitKey(req, res) {
   let body;
   try {
     body = await readJson(req);
-  } catch {
-    return jsonReply(res, 400, { error: 'invalid json' });
+  } catch (e) {
+    return bodyError(res, e);
   }
   const password = body?.password;
   const salt = body?.salt;
@@ -674,8 +687,8 @@ async function handleInvalidateKey(req, res) {
   let body;
   try {
     body = await readJson(req);
-  } catch {
-    return jsonReply(res, 400, { error: 'invalid json' });
+  } catch (e) {
+    return bodyError(res, e);
   }
   const keyId = body?.key_id;
   if (typeof keyId !== 'string' || keyId.length === 0) {

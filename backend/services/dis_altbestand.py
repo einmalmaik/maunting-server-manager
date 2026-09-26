@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 
 from database import Base
 from models.dis_text import DisText
-from services.dis_client import DisClient
+from services.dis_client import DisClient, DisZuGross
 
 logger = logging.getLogger(__name__)
 
@@ -64,26 +64,40 @@ def nachziehen(db: Session) -> dict[str, int]:
                 f"UPDATE {tabelle.name} SET {spalte.name} = :neu "
                 f"WHERE {schluessel.name} = :id AND {spalte.name} = :alt"
             )
+            # Werte ueber der Grenze des Sidecars bleiben stehen, statt alles
+            # dahinter aufzuhalten, und kommen im naechsten Stapel nicht wieder.
+            zu_gross: list = []
             while True:
-                zeilen = db.execute(
-                    select(schluessel, roh)
-                    .where(roh.is_not(None), ~roh.startswith(DisClient.PRAEFIX, autoescape=True))
-                    .limit(STAPEL)
-                ).all()
+                abfrage = select(schluessel, roh).where(
+                    roh.is_not(None), ~roh.startswith(DisClient.PRAEFIX, autoescape=True)
+                )
+                if zu_gross:
+                    abfrage = abfrage.where(schluessel.not_in(zu_gross))
+                zeilen = db.execute(abfrage.limit(STAPEL)).all()
                 if not zeilen:
                     break
                 geschrieben = 0
+                vorher_zu_gross = len(zu_gross)
                 for zeilen_id, alt in zeilen:
-                    neu = DisClient.encrypt(alt, aad=spalte.type.aad)
+                    try:
+                        neu = DisClient.encrypt(alt, aad=spalte.type.aad)
+                    except DisZuGross:
+                        zu_gross.append(zeilen_id)
+                        continue
                     geschrieben += db.execute(aendern, {"neu": neu, "id": zeilen_id, "alt": alt}).rowcount
                 db.commit()
                 if geschrieben:
                     je_tabelle[tabelle.name] = je_tabelle.get(tabelle.name, 0) + geschrieben
-                if not geschrieben:
+                if not geschrieben and len(zu_gross) == vorher_zu_gross:
                     # Kein einziger Treffer heisst: dieselben Zeilen kaemen
                     # beim naechsten Stapel wieder. Lieber aufhoeren als kreisen.
                     logger.warning("DIS-Altbestand %s.%s: Stapel ohne Treffer, abgebrochen.", tabelle.name, spalte.name)
                     break
+            if zu_gross:
+                logger.warning(
+                    "DIS-Altbestand %s.%s: %d Werte ueber 8 MiB bleiben unverschluesselt.",
+                    tabelle.name, spalte.name, len(zu_gross),
+                )
     if je_tabelle:
         logger.info("DIS-Altbestand: %d Werte verschluesselt.", sum(je_tabelle.values()))
     return je_tabelle

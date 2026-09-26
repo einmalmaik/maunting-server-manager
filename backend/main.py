@@ -582,10 +582,13 @@ async def lifespan(app: FastAPI):
                 await _asyncio.to_thread(_run)
             except Exception as exc:
                 import logging
-                # Nur der Typ: eine SQL-Fehlermeldung traegt ihre Parameter,
-                # und das waere hier genau der Klartext.
+                from services.dis_client import DisSidecarError
+                # Bei SQL-Fehlern nur der Typ: ihre Meldung traegt die
+                # Parameter, und das waere hier genau der Klartext. Eine
+                # Sidecar-Meldung nennt nur Fehlername oder HTTP-Status.
                 logging.getLogger(__name__).warning(
-                    "DIS-Altbestand nicht nachgezogen: %s", type(exc).__name__,
+                    "DIS-Altbestand nicht nachgezogen: %s",
+                    exc if isinstance(exc, DisSidecarError) else type(exc).__name__,
                 )
 
         _asyncio.create_task(_bg_dis_altbestand())

@@ -101,6 +101,45 @@ def test_altbestand_bleibt_lesbar_und_wird_nachgezogen(db: Session, regular_user
     assert nachziehen(db) == {}
 
 
+def test_ein_zu_grosser_wert_haelt_den_rest_nicht_auf(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bis 27.09.2026 brach der ganze Nachzug am ersten Wert ab, den der
+    Sidecar als zu gross ablehnte. Alles dahinter blieb Klartext, bei jedem
+    Start aufs Neue."""
+    from services.dis_altbestand import nachziehen
+    from services.dis_client import DisZuGross
+
+    riesig = "RIESIG " + GEHEIM
+    gespraech = _gespraech(db, regular_user)
+    zeilen = [
+        AiMessage(id=str(uuid4()), conversation_id=gespraech.id, role="user", content="neu")
+        for _ in range(3)
+    ]
+    db.add_all(zeilen)
+    db.commit()
+    db.execute(text("UPDATE ai_messages SET content = :k WHERE id = :id"), {"k": riesig, "id": zeilen[0].id})
+    db.execute(text("UPDATE ai_messages SET content = :k WHERE id = :id"), {"k": GEHEIM, "id": zeilen[1].id})
+    db.execute(text("UPDATE ai_messages SET reasoning = :k WHERE id = :id"), {"k": GEHEIM, "id": zeilen[2].id})
+    db.commit()
+
+    echt = DisClient.encrypt
+
+    def encrypt(klartext, aad=None):
+        if klartext == riesig:
+            raise DisZuGross("zu gross")
+        return echt(klartext, aad=aad)
+
+    monkeypatch.setattr(DisClient, "encrypt", staticmethod(encrypt))
+
+    assert nachziehen(db) == {"ai_messages": 2}
+    assert DisClient.ist_verschluesselt(_roh(db, "ai_messages", "content", zeilen[1].id))
+    assert DisClient.ist_verschluesselt(_roh(db, "ai_messages", "reasoning", zeilen[2].id))
+    assert _roh(db, "ai_messages", "content", zeilen[0].id) == riesig
+    # Der zweite Lauf kreist nicht um den einen Wert.
+    assert nachziehen(db) == {}
+
+
 def test_nachzug_ueberschreibt_keine_gleichzeitige_aenderung(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -283,3 +322,19 @@ def test_vacuum_nur_auf_postgres() -> None:
     from services.dis_altbestand import klartextreste_entfernen
 
     assert klartextreste_entfernen(create_engine("sqlite://"), {"ai_messages"}) is True
+
+
+def test_der_client_erkennt_die_grenze_des_sidecars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Der Sidecar meldete Zu-gross bis 27.09.2026 als "invalid json"."""
+    import httpx
+
+    from services import dis_client as dis_client_modul
+    from services.dis_client import DisZuGross
+
+    class Antwort413:
+        def post(self, url, json=None, headers=None):
+            return httpx.Response(413, json={"error": "PayloadTooLarge"})
+
+    monkeypatch.setattr(dis_client_modul, "_client", Antwort413())
+    with pytest.raises(DisZuGross):
+        dis_client_modul.DisClient._post("/encrypt", {"plaintext": "x"})

@@ -22,6 +22,10 @@ class DisSidecarError(Exception):
     """Sidecar nicht erreichbar oder Fehler bei der Krypto-Operation."""
 
 
+class DisZuGross(DisSidecarError):
+    """Der Sidecar nimmt hoechstens 8 MiB JSON je Anfrage (`MAX_JSON_BODY`)."""
+
+
 class DisDecryptionError(DisSidecarError):
     """Entschluesselung fehlgeschlagen (wrong key / tamper / AAD mismatch).
 
@@ -89,6 +93,8 @@ class DisClient:
             ):
                 raise DisDecryptionError("Entschluesselung fehlgeschlagen")
             raise DisSidecarError(f"DIS Sidecar Fehler: {err or resp.status_code}")
+        if resp.status_code == 413:
+            raise DisZuGross("DIS Sidecar: Anfrage groesser als 8 MiB")
         if resp.status_code != 200:
             raise DisSidecarError(f"DIS Sidecar Fehler: HTTP {resp.status_code}")
         return resp.json()
