@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
+import { DisBadge } from '@/components/DisBadge'
 
 declare global {
   interface Window {
     turnstile?: {
       render: (container: HTMLElement, options: any) => any
-      remove: (id: any) => void
       reset?: (id: any) => void
+      remove: (id: any) => void
     }
     hcaptcha?: {
       render: (container: HTMLElement, options: any) => any
@@ -135,6 +136,16 @@ export function CaptchaWidget({ onVerify, onStatusChange, resetKey }: CaptchaWid
           widget.setAttribute('language', lang)
           const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
           widget.setAttribute('theme', isDark ? 'dark' : 'auto')
+          widget.setAttribute('hidefooter', 'true')
+          widget.setAttribute(
+            'strings',
+            JSON.stringify({
+              label: t('captcha.altcha.label', 'Ich bin ein Mensch'),
+              verifying: t('captcha.altcha.verifying', 'Sicherheitsprüfung läuft …'),
+              verified: t('captcha.altcha.verified', 'Verifiziert'),
+              error: t('captcha.altcha.error', 'Sicherheitsprüfung fehlgeschlagen'),
+            }),
+          )
 
           const handleStateChange = (ev: Event) => {
             const customEv = ev as CustomEvent
@@ -316,6 +327,11 @@ export function CaptchaWidget({ onVerify, onStatusChange, resetKey }: CaptchaWid
   if (!config || !config.enabled) return null
 
   return (
-    <div className="flex justify-center my-4" ref={containerRef} />
+    <div className="flex flex-col items-center justify-center my-4 gap-2">
+      <div ref={containerRef} />
+      {config.provider === 'altcha' && (
+        <DisBadge size={14} className="py-0.5 px-2" />
+      )}
+    </div>
   )
 }

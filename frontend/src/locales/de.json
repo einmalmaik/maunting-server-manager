@@ -1,4 +1,12 @@
 {
+  "captcha": {
+    "altcha": {
+      "label": "Ich bin ein Mensch",
+      "verifying": "Sicherheitsprüfung läuft …",
+      "verified": "Verifiziert",
+      "error": "Sicherheitsprüfung fehlgeschlagen"
+    }
+  },
   "nav": {
     "dashboard": "Dashboard",
     "calendar": "Kalender",
