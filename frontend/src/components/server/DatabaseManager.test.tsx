@@ -33,8 +33,8 @@ vi.mock('@/stores/toastStore', () => ({
 
 // Das Studio selbst hat eigene Tests; hier zählt nur, welche Datenbank es bekommt.
 vi.mock('@/components/postgres/PostgresStudio', () => ({
-  PostgresStudio: ({ databaseId, databaseName }: { databaseId: number; databaseName: string }) => (
-    <div data-testid="studio">{`${databaseId}:${databaseName}`}</div>
+  PostgresStudio: ({ ziel, databaseName }: { ziel: { databaseId: number }; databaseName: string }) => (
+    <div data-testid="studio">{`${ziel.databaseId}:${databaseName}`}</div>
   ),
 }))
 

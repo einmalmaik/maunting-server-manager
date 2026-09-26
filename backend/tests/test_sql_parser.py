@@ -58,30 +58,3 @@ def test_split_handles_parentheses_with_semicolons():
     # Semicolon in CASE-WHEN ist syntaktisch falsch, aber unser Parser darf nicht
     # fälschlich splitten — wir respektieren Klammern.
     assert len(out) == 1
-
-
-def test_is_read_only_select():
-    assert postgres_service._is_read_only("SELECT 1")
-    assert postgres_service._is_read_only("  select 1")
-    assert postgres_service._is_read_only("-- comment\nSELECT 1")
-
-
-def test_is_read_only_with():
-    assert postgres_service._is_read_only("WITH x AS (SELECT 1) SELECT * FROM x")
-
-
-def test_is_read_only_write_keywords():
-    assert not postgres_service._is_read_only("INSERT INTO t VALUES (1)")
-    assert not postgres_service._is_read_only("UPDATE t SET a=1")
-    assert not postgres_service._is_read_only("DELETE FROM t")
-    assert not postgres_service._is_read_only("CREATE TABLE x (id int)")
-    assert not postgres_service._is_read_only("DROP TABLE x")
-    assert not postgres_service._is_read_only("ALTER TABLE x ADD COLUMN y int")
-    assert not postgres_service._is_read_only("TRUNCATE t")
-    assert not postgres_service._is_read_only("VACUUM")
-    assert not postgres_service._is_read_only("EXPLAIN ANALYZE INSERT INTO t VALUES (1)")
-
-
-def test_is_read_only_show_explain():
-    assert postgres_service._is_read_only("EXPLAIN SELECT 1")
-    assert postgres_service._is_read_only("SHOW search_path")

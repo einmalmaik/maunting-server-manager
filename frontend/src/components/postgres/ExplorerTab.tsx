@@ -24,7 +24,7 @@ const RELATION_ICONS = {
 
 export function ExplorerTab() {
   const { t, i18n } = useTranslation()
-  const { api, overview, canAdmin, revision, runOperation } = useStudio()
+  const { api, overview, canStructure, revision, runOperation } = useStudio()
   const [schema, setSchema] = useState(() => (overview.schemas.some((s) => s.name === 'public') ? 'public' : overview.schemas[0]?.name || 'public'))
   const [selection, setSelection] = useState<Selection>(null)
   const [filters, setFilters] = useState<RowFilter[] | undefined>(undefined)
@@ -107,7 +107,7 @@ export function ExplorerTab() {
             className="min-w-0 flex-1"
             aria-label={t('postgresStudio.schemas.label')}
           />
-          {canAdmin && (
+          {canStructure && (
             <ActionMenu
               compact
               label={t('postgresStudio.schemas.actions')}
@@ -119,7 +119,7 @@ export function ExplorerTab() {
           )}
         </div>
         <Input prefix={<Search className="h-3.5 w-3.5" />} value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('postgresStudio.explorer.search')} aria-label={t('postgresStudio.explorer.search')} />
-        {canAdmin && (
+        {canStructure && (
           <ActionMenu
             label={t('postgresStudio.explorer.new')}
             icon={<Plus className="h-4 w-4" />}
@@ -197,7 +197,7 @@ export function ExplorerTab() {
         {!selection && objects.data && (
           <div className="msm-card p-8 text-center">
             <p className="text-sm text-on-surface-variant">{t('postgresStudio.explorer.nothingSelected')}</p>
-            {canAdmin && (
+            {canStructure && (
               <Button className="mt-4" onClick={() => setDialog('table')}>
                 <Plus className="h-4 w-4" />
                 {t('postgresStudio.designer.title')}
@@ -228,7 +228,7 @@ function RelationView({ schema, name, relation, relations, enums, filters, view,
   onDropped: () => void
 }) {
   const { t, i18n } = useTranslation()
-  const { api, revision, canAdmin, canWrite, runOperation } = useStudio()
+  const { api, revision, canStructure, canWrite, runOperation } = useStudio()
   const details = useLoad(() => api.table(schema, name), [api, schema, name, revision])
   const table = details.data
 
@@ -260,7 +260,7 @@ function RelationView({ schema, name, relation, relations, enums, filters, view,
               { key: 'reindex', label: t('postgresStudio.maintenance.reindex'), onSelect: () => void runOperation({ op: 'reindex', target: 'table', schema_name: schema, name, concurrently: true }, { title: t('postgresStudio.maintenance.reindex') }) },
             ]
           : []),
-        ...(canAdmin ? [{ key: 'drop', label: t('postgresStudio.explorer.drop'), destructive: true, separatorBefore: true, onSelect: () => void drop() }] : []),
+        ...(canStructure ? [{ key: 'drop', label: t('postgresStudio.explorer.drop'), destructive: true, separatorBefore: true, onSelect: () => void drop() }] : []),
       ]
     : []
 
@@ -308,7 +308,7 @@ function RelationView({ schema, name, relation, relations, enums, filters, view,
 
 function SequenceView({ schema, sequence }: { schema: string; sequence: { name: string; last_value: number | null; start_value: number; increment_by: number; min_value: number; max_value: number; cycle: boolean } }) {
   const { t, i18n } = useTranslation()
-  const { runOperation, canAdmin } = useStudio()
+  const { runOperation, canStructure } = useStudio()
   if (!sequence) return null
   const restart = async () => {
     const value = await prompt({ title: t('postgresStudio.sequences.restart'), message: t('postgresStudio.sequences.restartMessage'), defaultValue: String(sequence.start_value) })
@@ -329,7 +329,7 @@ function SequenceView({ schema, sequence }: { schema: string; sequence: { name: 
     <Section
       title={<span className="font-mono">{sequence.name}</span>}
       actions={
-        canAdmin ? (
+        canStructure ? (
           <>
             <Button size="sm" variant="secondary" onClick={() => void restart()}>{t('postgresStudio.sequences.restart')}</Button>
             <Button size="sm" variant="destructive" onClick={() => void runOperation({ op: 'drop_sequence', schema_name: schema, name: sequence.name }, { title: t('postgresStudio.sequences.drop') })}>
@@ -353,7 +353,7 @@ function SequenceView({ schema, sequence }: { schema: string; sequence: { name: 
 
 function EnumView({ schema, enumType }: { schema: string; enumType: { name: string; values: string[] } }) {
   const { t } = useTranslation()
-  const { runOperation, canAdmin } = useStudio()
+  const { runOperation, canStructure } = useStudio()
   if (!enumType) return null
   const add = async () => {
     const value = await prompt({ title: t('postgresStudio.enums.addValue'), message: t('postgresStudio.enums.addValueMessage') })
@@ -367,7 +367,7 @@ function EnumView({ schema, enumType }: { schema: string; enumType: { name: stri
     <Section
       title={<span className="font-mono">{enumType.name}</span>}
       actions={
-        canAdmin ? (
+        canStructure ? (
           <>
             <Button size="sm" variant="secondary" onClick={() => void add()}>
               <Plus className="h-3.5 w-3.5" />
@@ -388,7 +388,7 @@ function EnumView({ schema, enumType }: { schema: string; enumType: { name: stri
               <span className="mr-2 text-on-surface-variant">{index + 1}.</span>
               {value}
             </span>
-            {canAdmin && (
+            {canStructure && (
               <Button size="sm" variant="ghost" onClick={() => void rename(value)}>
                 {t('postgresStudio.enums.renameValue')}
               </Button>

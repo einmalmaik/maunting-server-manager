@@ -209,8 +209,7 @@ export function DatabaseManager({ serverId, dedicated = false }: Props) {
       {selected && (
         <PostgresStudio
           key={`${selected.id}:${studioKey}`}
-          serverId={serverId}
-          databaseId={selected.id}
+          ziel={{ art: 'server', serverId, databaseId: selected.id }}
           databaseName={selected.name}
           onResourcesChanged={() => void run(fetchResources)}
           onBootstrap={dedicated && canAdmin ? bootstrapInstance : undefined}

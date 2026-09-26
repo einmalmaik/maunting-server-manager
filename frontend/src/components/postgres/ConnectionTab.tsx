@@ -31,9 +31,13 @@ type Where = 'internal' | 'external'
  * Verbindungs-Hub: Endpunkte, Zugangsdaten (abrufbar mit Admin-Recht),
  * Snippets für gängige Treiber, Netzfreigaben der eigenen Instanz.
  */
-export function ConnectionTab({ onResourcesChanged }: { onResourcesChanged: () => void }) {
+export function ConnectionTab({ serverId, databaseId, onResourcesChanged }: {
+  serverId: number
+  databaseId: number
+  onResourcesChanged: () => void
+}) {
   const { t } = useTranslation()
-  const { serverId, databaseId, canAdmin } = useStudio()
+  const { canAdmin } = useStudio()
   const info = useLoad(() => api<ConnectionInfo>(`/servers/${serverId}/databases/connection`), [serverId])
   const [where, setWhere] = useState<Where>('internal')
   const [who, setWho] = useState<string>('owner')
@@ -270,7 +274,7 @@ export function ConnectionTab({ onResourcesChanged }: { onResourcesChanged: () =
       </Section>
 
       {info.data.kind === 'dedicated' && external && canAdmin && (
-        <NetworkSection external={external} onSaved={() => void info.reload()} />
+        <NetworkSection serverId={serverId} external={external} onSaved={() => void info.reload()} />
       )}
     </div>
   )
@@ -311,9 +315,12 @@ function CredentialRow({ label, username, password, canReveal, revealHint, onRev
   )
 }
 
-function NetworkSection({ external, onSaved }: { external: { ssl_required: boolean; allowed_cidrs: string[] }; onSaved: () => void }) {
+function NetworkSection({ serverId, external, onSaved }: {
+  serverId: number
+  external: { ssl_required: boolean; allowed_cidrs: string[] }
+  onSaved: () => void
+}) {
   const { t } = useTranslation()
-  const { serverId } = useStudio()
   const [cidrs, setCidrs] = useState(external.allowed_cidrs.join('\n'))
   const [ssl, setSsl] = useState(external.ssl_required)
   const [error, setError] = useState<string | null>(null)

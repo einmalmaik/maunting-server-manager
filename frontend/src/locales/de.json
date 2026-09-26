@@ -138,14 +138,8 @@
   "panelDatabase": {
     "title": "Panel-Datenbank",
     "subtitle": "PostgreSQL-Datenbank des Panels ohne Terminal-Zugriff verwalten.",
-    "workspace": "Datenbank-Explorer",
-    "workspaceSubtitle": "Tabellen, Zeilen und Datenbankstatistiken einsehen.",
     "admin": "Admin-Zugriff",
-    "readOnly": "Nur lesen",
-    "importExecuted": "Panel-DB-Import ausgeführt",
-    "rowUpdated": "Zeile erfolgreich aktualisiert",
-    "rowsDeleted": "{{count}} Zeile(n) gelöscht",
-    "rowInserted": "Zeile erfolgreich eingefügt"
+    "readOnly": "Nur lesen"
   },
   "notes": {
     "title": "Notizen",
@@ -2411,11 +2405,11 @@
     },
     "panel_database_read": {
       "title": "Panel-Datenbank lesen",
-      "desc": "System-Datenbanktabellen zu Diagnosezwecken einsehen."
+      "desc": "Struktur, Daten, Rollen und Zustand der Panel-Datenbank im PostgreSQL-Studio einsehen."
     },
     "panel_database_admin": {
       "title": "Panel-Datenbank verwalten",
-      "desc": "Administrative SQL-Abfragen und Datenbankoperationen ausführen."
+      "desc": "Zeilen bearbeiten, SQL ausführen, Wartung starten und Sitzungen beenden. Die Struktur legen die Migrationen fest."
     },
     "servers_create": {
       "title": "Server erstellen",
@@ -3758,148 +3752,6 @@
     "connectionUrl": "Connection-URL",
     "host": "Host",
     "port": "Port"
-  },
-  "databaseConsole": {
-    "breadcrumbServer": "Server",
-    "database": "Datenbank",
-    "selectDatabase": "Datenbank auswählen",
-    "deleteDatabase": "Datenbank löschen",
-    "connectDatabase": "Datenbank verbinden",
-    "rowsUnit": "Zeilen",
-    "rowNotAddressable": "Zeile ohne Primärschlüssel ist nicht eindeutig adressierbar. Löschen und Bearbeiten sind gesperrt.",
-    "metrics": {
-      "database": "Datenbank",
-      "status": "Status",
-      "statusHealthy": "Gesund",
-      "statusUnknown": "Unklar",
-      "statusHint": "Backend-geprüft",
-      "tables": "Tabellen",
-      "tablesHint": "In dieser Datenbank",
-      "storage": "Speicher",
-      "storageHint": "Gesamte Datengröße",
-      "connections": "Verbindungen",
-      "connectionsHint": "Aktive / maximale",
-      "latency": "Latenz",
-      "latencyHint": "Backend-Verbindung"
-    },
-    "tabs": {
-      "tables": "Tabellen",
-      "sql": "SQL-Konsole",
-      "users": "Benutzer"
-    },
-    "sql": {
-      "title": "SQL-Konsole",
-      "subtitle": "Interaktive SQL-Befehle ausführen, formatieren und als Favorit speichern.",
-      "saveFavorite": "Favorit speichern",
-      "saveFavoriteTitle": "Als Favorit speichern",
-      "import": "Import",
-      "export": "Export",
-      "run": "Ausführen",
-      "format": "Formatieren",
-      "hint": "Ctrl+Enter · Max. 500 Zeilen im Ergebnis",
-      "favorites": "SQL-Favoriten",
-      "removeFavorite": "Favorit entfernen",
-      "noFavorites": "Keine Favoriten gespeichert.",
-      "untitledFavorite": "Abfrage",
-      "history": "Abfrageverlauf",
-      "clearHistory": "Leeren",
-      "noHistory": "Noch keine Abfragen im Verlauf."
-    },
-    "favoriteModal": {
-      "title": "Abfrage als Favorit speichern",
-      "titleLabel": "Titel / Bezeichnung",
-      "titlePlaceholder": "z. B. Aktive Benutzer suchen",
-      "sqlLabel": "SQL-Befehl"
-    },
-    "tables": {
-      "searchPlaceholder": "Tabellen suchen …",
-      "create": "Neue Tabelle erstellen",
-      "current": "Tabelle:",
-      "drop": "Tabelle löschen",
-      "selected": "gewählt"
-    },
-    "rows": {
-      "insert": "+ Zeile",
-      "insertTitle": "Neue Zeile einfügen",
-      "edit": "Bearbeiten",
-      "editTitle": "Zeile bearbeiten",
-      "delete": "Löschen",
-      "deleteTitle": "Ausgewählte Zeilen löschen",
-      "searchPlaceholder": "Suchen …",
-      "selectTable": "Tabelle auswählen.",
-      "noData": "Keine Daten."
-    },
-    "toolbar": {
-      "filter": "Filter",
-      "sort": "Sortieren",
-      "columns": "Spalten"
-    },
-    "filter": {
-      "column": "Spalte",
-      "columnPlaceholder": "-- Spalte wählen --",
-      "valueContains": "Wert enthält",
-      "valuePlaceholder": "Text …"
-    },
-    "sort": {
-      "direction": "Richtung",
-      "ascending": "Aufsteigend",
-      "descending": "Absteigend"
-    },
-    "schema": {
-      "noTable": "Keine Tabelle",
-      "heading": "Schema & Indizes",
-      "empty": "Keine Schema-Details geladen.",
-      "estimatedRows": "Geschätzte Zeilen",
-      "dataSize": "Datengröße",
-      "columns": "Spalten",
-      "primaryKey": "Primärschlüssel",
-      "indexes": "Indizes",
-      "foreignKeys": "Fremdschlüssel"
-    },
-    "powerUser": {
-      "title": "Power-User",
-      "active": "Owner-Zugang aktiv (kein Cluster-SUPERUSER).",
-      "inactive": "Power-User nur für bewusste Admin-Arbeiten aktivieren.",
-      "rotate": "Rotieren",
-      "demote": "Entziehen",
-      "enable": "Aktivieren"
-    },
-    "users": {
-      "title": "Datenbank-Benutzer",
-      "subtitle": "Zusätzliche Benutzer mit Zugriff auf die Datenbanken dieses Servers.",
-      "create": "Benutzer erstellen",
-      "empty": "Keine Datenbank-Benutzer vorhanden.",
-      "username": "Benutzername",
-      "password": "Passwort",
-      "createdAt": "Erstellt",
-      "lastRotated": "Zuletzt rotiert",
-      "actions": "Aktionen",
-      "rotate": "Rotieren",
-      "delete": "Benutzer löschen"
-    },
-    "editRow": {
-      "title": "Zeile bearbeiten",
-      "subtitle": "Werte für die ausgewählte Tabellenzeile anpassen.",
-      "saveError": "Fehler beim Speichern der Zeile",
-      "saving": "Speichert …",
-      "submit": "Änderungen speichern"
-    },
-    "insertRow": {
-      "title": "Neue Zeile hinzufügen",
-      "subtitle": "Werte für eine neue Tabellenzeile eingeben.",
-      "valuePlaceholder": "Wert eingeben …",
-      "emptyError": "Mindestens ein Feld muss ausgefüllt werden.",
-      "saveError": "Fehler beim Einfügen der Zeile",
-      "saving": "Einfügen …",
-      "submit": "Zeile einfügen"
-    },
-    "deleteRows": {
-      "title": "Zeile(n) löschen",
-      "question": "Möchtest du die {{anzahl}} ausgewählte(n) Zeile(n) wirklich unwiderruflich aus der Tabelle löschen?",
-      "deleteError": "Fehler beim Löschen der Zeilen",
-      "deleting": "Löscht …",
-      "submit": "Unwiderruflich löschen"
-    }
   },
   "language": {
     "label": "Sprache",
@@ -7180,6 +7032,7 @@
   },
   "postgresStudio": {
     "title": "PostgreSQL-Studio",
+    "panelHint": "Die Datenbank des Panels selbst: Daten lesen und bearbeiten, SQL und Wartung wie in jeder anderen Datenbank. Tabellen, Spalten und Rechte legen die Migrationen fest, Sicherungen macht „Panel-Backups“.",
     "tabs": {
       "backup": "Sicherung",
       "connection": "Verbindung",
@@ -7408,6 +7261,7 @@
       "remove": "„{{name}}\" entfernen",
       "search": "Erweiterungen suchen …",
       "sharedHint": "Gemeinsamer Cluster: Nur vertrauenswürdige Erweiterungen lassen sich installieren.",
+      "panelHint": "Panel-Datenbank: Erweiterungen legen die Migrationen fest. Sie werden hier nur angezeigt.",
       "title": "Erweiterungen",
       "update": "Aktualisieren"
     },
@@ -7567,6 +7421,7 @@
     "preview": {
       "asAdmin": "als Instanz-Admin",
       "asOwner": "als Owner",
+      "asPanel": "als Panel-Benutzer",
       "autocommit": "Ohne Transaktion",
       "autocommitHint": "Diese Befehle laufen außerhalb einer Transaktion. Bricht einer ab, bleiben die vorigen bestehen.",
       "compiling": "SQL wird erzeugt …",
@@ -7616,6 +7471,7 @@
       "passwordKeep": "Leer lassen, um das Passwort zu behalten.",
       "pickRoles": "Rollen wählen",
       "sharedHint": "Im gemeinsamen Cluster verwaltest du Benutzer im Reiter „Verbindung\". Eigene Rollen gibt es auf einem Datenbankserver.",
+      "panelHint": "Die Rollen der Panel-Datenbank gehören der Installation. Sie werden hier nur angezeigt.",
       "system": "System",
       "title": "Rollen"
     },
@@ -7659,6 +7515,7 @@
       "autocommit": "Ohne Transaktion",
       "duration": "{{ms}} ms",
       "hint": "Strg+Enter führt aus. Läuft als Owner der Datenbank.",
+      "panelHint": "Strg+Enter führt aus. Läuft als Panel-Benutzer, mit allen Rechten des Panels.",
       "history": "Verlauf",
       "noHistory": "Noch nichts ausgeführt.",
       "rollback": "Nur testen (Rollback)",

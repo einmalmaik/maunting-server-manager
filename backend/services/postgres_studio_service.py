@@ -1,7 +1,10 @@
 """PostgreSQL-Studio: Katalog, Daten-Grid, Überwachung, Ausführung.
 
 Alles läuft über ``postgres_service.run`` — der Agent führt nur fertige
-Anweisungen aus. Identitäten:
+Anweisungen aus. Die Panel-Datenbank ist ein drittes Ziel desselben Studios
+(``panel_kontext``): dort führt ``panel_database_service.run`` aus, und die
+Struktur gehört den Migrationen — nur Wartung (``PANEL_OPS``) läuft als
+Operation. Identitäten:
 
 - **owner** (Standard): Rolle der gewählten Datenbank. Alles, was ein Mensch
   geschrieben hat, läuft so.
@@ -25,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from models import PostgresDatabase, PostgresUser, Server
 from schemas import postgres_studio as s
-from services import postgres_ddl, postgres_service
+from services import panel_database_service, postgres_ddl, postgres_service
 from services.node_client import NodeClientError
 from services.postgres_ddl import Plan, ident, literal, qualified
 
@@ -36,13 +39,18 @@ EXPORT_MAX_ROWS = 200_000
 COUNT_ESTIMATE_FROM = 100_000
 IMPORT_CHUNK = 500
 IMPORT_MAX_PARAMS = 60_000
+#: Operationen, die an der Panel-Datenbank laufen dürfen: Wartung, keine Struktur.
+#: Tabellen, Spalten, Funktionen und Trigger des Panels legt Alembic an.
+PANEL_OPS = frozenset({"vacuum", "analyze", "reindex", "refresh_materialized_view"})
 
 
 @dataclass
 class Kontext:
-    server: Server
-    database: PostgresDatabase
+    server: Server | None
+    database: PostgresDatabase | None
     dedicated: bool
+    database_name: str
+    panel: bool = False
 
 
 def kontext(db: Session, server_id: int, database_id: int) -> Kontext:
@@ -50,7 +58,17 @@ def kontext(db: Session, server_id: int, database_id: int) -> Kontext:
     if server is None:
         raise ValueError("Server nicht gefunden.")
     database = postgres_service._database_row(db, server_id, database_id)
-    return Kontext(server=server, database=database, dedicated=postgres_service.is_database_server(server))
+    return Kontext(
+        server=server,
+        database=database,
+        dedicated=postgres_service.is_database_server(server),
+        database_name=database.name,
+    )
+
+
+def panel_kontext() -> Kontext:
+    """Die eigene Datenbank des Panels — gefiltert wie ein geteilter Cluster."""
+    return Kontext(server=None, database=None, dedicated=False, database_name=panel_database_service.database_name(), panel=True)
 
 
 def _run(
@@ -64,10 +82,15 @@ def _run(
     row_limit: int = 5000,
     timeout_ms: int | None = None,
 ) -> dict[str, Any]:
+    if k.panel:
+        # Eine Verbindung, eine Identität: die des Panels.
+        return panel_database_service.run(
+            statements, mode=mode, rollback=rollback, row_limit=row_limit, timeout_ms=timeout_ms
+        )
     return postgres_service.run(
         db,
         k.server,
-        database_name=k.database.name,
+        database_name=k.database_name,
         statements=statements,
         identity=identity,
         database=k.database,
@@ -118,7 +141,7 @@ def overview(db: Session, k: Kontext) -> dict[str, Any]:
         ],
     )
     return {
-        "kind": "dedicated" if k.dedicated else "shared",
+        "kind": "panel" if k.panel else "dedicated" if k.dedicated else "shared",
         "server": info[0] if info else {},
         "schemas": schemas,
     }
@@ -396,12 +419,12 @@ def extensions(db: Session, k: Kontext) -> list[dict[str, Any]]:
     for row in rows:
         # Geteilter Cluster: der Owner installiert, PostgreSQL erlaubt ihm nur
         # „trusted". Eigene Instanz: der Admin installiert alles Verfügbare.
-        row["installable"] = bool(k.dedicated or row["trusted"] or not row["superuser"])
+        row["installable"] = not k.panel and bool(k.dedicated or row["trusted"] or not row["superuser"])
     return rows
 
 
 def roles(db: Session, k: Kontext) -> list[dict[str, Any]]:
-    managed = managed_roles(db, k.server.id)
+    managed = set() if k.panel else managed_roles(db, k.server.id)
     base = (
         "SELECT r.rolname::text AS name, r.rolsuper AS superuser, r.rolinherit AS inherit, "
         "r.rolcreaterole AS createrole, r.rolcreatedb AS createdb, r.rolcanlogin AS login, "
@@ -411,7 +434,7 @@ def roles(db: Session, k: Kontext) -> list[dict[str, Any]]:
         " WHERE m.member = r.oid ORDER BY 1) AS member_of "
         "FROM pg_roles r "
     )
-    if k.dedicated:
+    if k.dedicated or k.panel:
         statement = (base + "WHERE r.rolname !~ '^pg_' ORDER BY r.rolname", None)
     else:
         # Im geteilten Cluster nur die eigenen Rollen — fremde Namen gehen
@@ -484,7 +507,7 @@ def parameters(db: Session, k: Kontext) -> list[dict[str, Any]]:
 def _datenbankfilter(k: Kontext) -> list[Any]:
     # Geteilter Cluster: nur Sitzungen der eigenen Datenbank. Eigene Instanz:
     # alle — sie gehört ganz diesem Server.
-    name = None if k.dedicated else k.database.name
+    name = None if k.dedicated else k.database_name
     return [name, name]
 
 
@@ -683,6 +706,8 @@ def _pruefe_parameter(db: Session, k: Kontext, plan: Plan) -> None:
 
 
 def plan_for(db: Session, k: Kontext, op: Any) -> Plan:
+    if k.panel and op.op not in PANEL_OPS:
+        raise ValueError("Die Struktur der Panel-Datenbank legen die Migrationen fest — hier nur Wartung.")
     plan = postgres_ddl.compile_operation(op, dedicated=k.dedicated)
     if plan.scope == "instance":
         _nur_instanz(k)
@@ -1006,7 +1031,13 @@ def _sql_wert(value: Any) -> str:
 # ── Sicherung einer Datenbank ──────────────────────────────────────────────
 
 
+def _nur_server(k: Kontext) -> None:
+    if k.panel:
+        raise ValueError("Die Panel-Datenbank sichert „Panel-Backups“, nicht das Studio.")
+
+
 def _agent(k: Kontext, db: Session, call: str, payload: dict[str, Any], *, admin: bool = False) -> Any:
+    _nur_server(k)
     verbindung = postgres_service._verbindung(db, k.server, postgres_service._client_for_server_id(db, k.server.id))
     if admin:
         payload = {**payload, "admin_password": verbindung.admin_password}
@@ -1025,12 +1056,13 @@ def _agent(k: Kontext, db: Session, call: str, payload: dict[str, Any], *, admin
 
 
 def dump(db: Session, k: Kontext, req: s.StudioDumpRequest) -> tuple[bytes, str]:
+    _nur_server(k)
     result = _agent(
         k,
         db,
         "postgres_dump_db",
         {
-            "database_name": k.database.name,
+            "database_name": k.database_name,
             "format": req.format,
             "schema_only": req.schema_only,
             "data_only": req.data_only,
@@ -1044,7 +1076,8 @@ def dump(db: Session, k: Kontext, req: s.StudioDumpRequest) -> tuple[bytes, str]
 
 
 def restore(db: Session, k: Kontext, req: s.StudioRestoreRequest) -> dict[str, Any]:
-    if req.confirm_name != k.database.name:
+    _nur_server(k)
+    if req.confirm_name != k.database_name:
         raise ValueError("Bestätigungsname stimmt nicht mit der Datenbank überein.")
     try:
         data = base64.b64decode(req.data_b64, validate=True)
@@ -1055,7 +1088,7 @@ def restore(db: Session, k: Kontext, req: s.StudioRestoreRequest) -> dict[str, A
         db,
         "postgres_restore_db",
         {
-            "database_name": k.database.name,
+            "database_name": k.database_name,
             "owner_role": k.database.owner_role,
             "owner_password": postgres_service._owner_password(k.database),
             "format": req.format,
@@ -1066,17 +1099,19 @@ def restore(db: Session, k: Kontext, req: s.StudioRestoreRequest) -> dict[str, A
 
 
 def pending(db: Session, k: Kontext) -> list[dict[str, Any]]:
+    _nur_server(k)
     rows = _agent(k, db, "postgres_pending", {"server_id": k.server.id})
-    return [row for row in rows or [] if row.get("database") == k.database.name]
+    return [row for row in rows or [] if row.get("database") == k.database_name]
 
 
 def apply_pending(db: Session, k: Kontext) -> dict[str, Any]:
+    _nur_server(k)
     return _agent(
         k,
         db,
         "postgres_restore_db",
         {
-            "database_name": k.database.name,
+            "database_name": k.database_name,
             "owner_role": k.database.owner_role,
             "owner_password": postgres_service._owner_password(k.database),
             "pending_server_id": k.server.id,
@@ -1085,4 +1120,5 @@ def apply_pending(db: Session, k: Kontext) -> dict[str, Any]:
 
 
 def discard_pending(db: Session, k: Kontext) -> None:
-    _agent(k, db, "postgres_pending_discard", {"server_id": k.server.id, "database_name": k.database.name})
+    _nur_server(k)
+    _agent(k, db, "postgres_pending_discard", {"server_id": k.server.id, "database_name": k.database_name})

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -66,124 +66,11 @@ class PostgresDatabaseRequest(BaseModel):
     database_id: int
 
 
-class PostgresTableRequest(BaseModel):
-    database_id: int
-    schema_name: str = Field("public", min_length=1, max_length=63)
-    table_name: str = Field(..., min_length=1, max_length=63)
-
-
-class PostgresRowsRequest(PostgresTableRequest):
-    limit: int = Field(500, ge=1, le=500)
-    offset: int = Field(0, ge=0)
-    search: str | None = Field(None, max_length=128)
-
-
-class PostgresUpdateRowRequest(BaseModel):
-    database_id: int | None = None
-    schema_name: str = Field("public", min_length=1, max_length=63)
-    table_name: str = Field(..., min_length=1, max_length=63)
-    key_conditions: dict[str, Any] = Field(..., min_length=1)
-    updates: dict[str, Any] = Field(..., min_length=1)
-
-
-class PostgresDeleteRowsRequest(BaseModel):
-    database_id: int | None = None
-    schema_name: str = Field("public", min_length=1, max_length=63)
-    table_name: str = Field(..., min_length=1, max_length=63)
-    row_conditions: list[dict[str, Any]] = Field(..., min_length=1)
-
-
-class PostgresInsertRowRequest(BaseModel):
-    database_id: int | None = None
-    schema_name: str = Field("public", min_length=1, max_length=63)
-    table_name: str = Field(..., min_length=1, max_length=63)
-    row_data: dict[str, Any] = Field(..., min_length=1)
-
-
-class PostgresSqlRequest(BaseModel):
-    database_id: int
-    sql: str = Field(..., min_length=1, max_length=20000)
-    limit: int = Field(500, ge=1, le=500)
-
-
-class PostgresRowsResponse(BaseModel):
-    columns: list[str]
-    rows: list[dict[str, Any]]
-    limit: int | None = None
-    offset: int | None = None
-    row_count: int | None = None
-    status: str | None = None
-
-
-class PostgresTableListItem(BaseModel):
-    schema: str
-    name: str
-    row_estimate: int | None = None
-    size_bytes: int | None = None
-
-
-class PostgresDatabaseStats(BaseModel):
-    status: str
-    latency_ms: int | None = None
-    size_bytes: int | None = None
-    table_count: int = 0
-    active_connections: int | None = None
-    max_connections: int | None = None
-    database_name: str
-    engine: str = "PostgreSQL"
-
-
-class PostgresColumnInfo(BaseModel):
-    name: str
-    data_type: str
-    nullable: bool
-    default: str | None = None
-    primary_key: bool = False
-
-
-class PostgresIndexInfo(BaseModel):
-    name: str
-    definition: str
-
-
-class PostgresForeignKeyInfo(BaseModel):
-    name: str
-    column_name: str
-    foreign_table: str
-    foreign_column: str
-
-
-class PostgresTableInfo(BaseModel):
-    schema: str
-    name: str
-    columns: list[PostgresColumnInfo]
-    indexes: list[PostgresIndexInfo]
-    foreign_keys: list[PostgresForeignKeyInfo]
-    size_bytes: int | None = None
-    row_estimate: int | None = None
-
-
-class PostgresSqlStatementResult(BaseModel):
-    statement: str
-    columns: list[str] = []
-    rows: list[dict[str, Any]] = []
-    row_count: int | None = None
-    status: str | None = None
-    error: str | None = None
-    duration_ms: int | None = None
-
-
 class PostgresRotatePasswordResponse(BaseModel):
     username: str
     password: str
     host: str
     port: int
-
-
-class PostgresSqlResponse(BaseModel):
-    statements: list[PostgresSqlStatementResult]
-    total_duration_ms: int
-    statement_timeout_ms: int
 
 
 class PostgresPowerUserResponse(BaseModel):

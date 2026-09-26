@@ -138,14 +138,8 @@
   "panelDatabase": {
     "title": "Panel database",
     "subtitle": "Manage the panel PostgreSQL database without terminal access.",
-    "workspace": "Database explorer",
-    "workspaceSubtitle": "Inspect tables, rows, and database statistics.",
     "admin": "Admin access",
-    "readOnly": "Read only",
-    "importExecuted": "Panel DB import executed",
-    "rowUpdated": "Row updated successfully",
-    "rowsDeleted": "{{count}} row(s) deleted",
-    "rowInserted": "Row inserted successfully"
+    "readOnly": "Read only"
   },
   "notes": {
     "title": "Notes",
@@ -2411,11 +2405,11 @@
     },
     "panel_database_read": {
       "title": "Read panel database",
-      "desc": "Inspect system database tables for diagnostics."
+      "desc": "View the structure, data, roles and health of the panel database in the PostgreSQL studio."
     },
     "panel_database_admin": {
       "title": "Administer panel database",
-      "desc": "Execute administrative database operations and SQL queries."
+      "desc": "Edit rows, run SQL, start maintenance and end sessions. The structure comes from the migrations."
     },
     "servers_create": {
       "title": "Create servers",
@@ -3758,148 +3752,6 @@
     "connectionUrl": "Connection URL",
     "host": "Host",
     "port": "Port"
-  },
-  "databaseConsole": {
-    "breadcrumbServer": "Server",
-    "database": "Database",
-    "selectDatabase": "Select database",
-    "deleteDatabase": "Delete database",
-    "connectDatabase": "Connect database",
-    "rowsUnit": "rows",
-    "rowNotAddressable": "Row without a primary key cannot be addressed uniquely. Deleting and editing are disabled.",
-    "metrics": {
-      "database": "Database",
-      "status": "Status",
-      "statusHealthy": "Healthy",
-      "statusUnknown": "Unclear",
-      "statusHint": "Checked by the backend",
-      "tables": "Tables",
-      "tablesHint": "In this database",
-      "storage": "Storage",
-      "storageHint": "Total data size",
-      "connections": "Connections",
-      "connectionsHint": "Active / maximum",
-      "latency": "Latency",
-      "latencyHint": "Backend connection"
-    },
-    "tabs": {
-      "tables": "Tables",
-      "sql": "SQL console",
-      "users": "Users"
-    },
-    "sql": {
-      "title": "SQL console",
-      "subtitle": "Run, format and bookmark interactive SQL statements.",
-      "saveFavorite": "Save favourite",
-      "saveFavoriteTitle": "Save as favourite",
-      "import": "Import",
-      "export": "Export",
-      "run": "Run",
-      "format": "Format",
-      "hint": "Ctrl+Enter · max. 500 rows in the result",
-      "favorites": "SQL favourites",
-      "removeFavorite": "Remove favourite",
-      "noFavorites": "No favourites saved.",
-      "untitledFavorite": "Query",
-      "history": "Query history",
-      "clearHistory": "Clear",
-      "noHistory": "No queries in the history yet."
-    },
-    "favoriteModal": {
-      "title": "Save query as favourite",
-      "titleLabel": "Title / label",
-      "titlePlaceholder": "e.g. find active users",
-      "sqlLabel": "SQL statement"
-    },
-    "tables": {
-      "searchPlaceholder": "Search tables …",
-      "create": "Create new table",
-      "current": "Table:",
-      "drop": "Drop table",
-      "selected": "selected"
-    },
-    "rows": {
-      "insert": "+ row",
-      "insertTitle": "Insert new row",
-      "edit": "Edit",
-      "editTitle": "Edit row",
-      "delete": "Delete",
-      "deleteTitle": "Delete selected rows",
-      "searchPlaceholder": "Search …",
-      "selectTable": "Select a table.",
-      "noData": "No data."
-    },
-    "toolbar": {
-      "filter": "Filter",
-      "sort": "Sort",
-      "columns": "Columns"
-    },
-    "filter": {
-      "column": "Column",
-      "columnPlaceholder": "-- select column --",
-      "valueContains": "Value contains",
-      "valuePlaceholder": "Text …"
-    },
-    "sort": {
-      "direction": "Direction",
-      "ascending": "Ascending",
-      "descending": "Descending"
-    },
-    "schema": {
-      "noTable": "No table",
-      "heading": "Schema & indexes",
-      "empty": "No schema details loaded.",
-      "estimatedRows": "Estimated rows",
-      "dataSize": "Data size",
-      "columns": "Columns",
-      "primaryKey": "Primary key",
-      "indexes": "Indexes",
-      "foreignKeys": "Foreign keys"
-    },
-    "powerUser": {
-      "title": "Power user",
-      "active": "Owner access active (no cluster SUPERUSER).",
-      "inactive": "Only enable the power user for deliberate admin work.",
-      "rotate": "Rotate",
-      "demote": "Revoke",
-      "enable": "Enable"
-    },
-    "users": {
-      "title": "Database users",
-      "subtitle": "Additional users with access to this server's databases.",
-      "create": "Create user",
-      "empty": "No database users exist.",
-      "username": "Username",
-      "password": "Password",
-      "createdAt": "Created",
-      "lastRotated": "Last rotated",
-      "actions": "Actions",
-      "rotate": "Rotate",
-      "delete": "Delete user"
-    },
-    "editRow": {
-      "title": "Edit row",
-      "subtitle": "Adjust the values of the selected table row.",
-      "saveError": "Failed to save the row",
-      "saving": "Saving …",
-      "submit": "Save changes"
-    },
-    "insertRow": {
-      "title": "Add new row",
-      "subtitle": "Enter the values for a new table row.",
-      "valuePlaceholder": "Enter value …",
-      "emptyError": "At least one field must be filled in.",
-      "saveError": "Failed to insert the row",
-      "saving": "Inserting …",
-      "submit": "Insert row"
-    },
-    "deleteRows": {
-      "title": "Delete row(s)",
-      "question": "Do you really want to permanently delete the {{anzahl}} selected row(s) from the table?",
-      "deleteError": "Failed to delete the rows",
-      "deleting": "Deleting …",
-      "submit": "Delete permanently"
-    }
   },
   "language": {
     "label": "Language",
@@ -7180,6 +7032,7 @@
   },
   "postgresStudio": {
     "title": "PostgreSQL studio",
+    "panelHint": "The panel's own database: read and edit data, run SQL and maintenance like in any other database. Tables, columns and privileges come from the migrations; backups are handled by “Panel backups”.",
     "tabs": {
       "backup": "Backup",
       "connection": "Connection",
@@ -7408,6 +7261,7 @@
       "remove": "Remove \"{{name}}\"",
       "search": "Search extensions …",
       "sharedHint": "Shared cluster: only trusted extensions can be installed.",
+      "panelHint": "Panel database: extensions come from the migrations. They are only shown here.",
       "title": "Extensions",
       "update": "Update"
     },
@@ -7567,6 +7421,7 @@
     "preview": {
       "asAdmin": "as instance admin",
       "asOwner": "as owner",
+      "asPanel": "as the panel user",
       "autocommit": "Without transaction",
       "autocommitHint": "These statements run outside a transaction. If one fails, the previous ones stay applied.",
       "compiling": "Generating SQL …",
@@ -7616,6 +7471,7 @@
       "passwordKeep": "Leave empty to keep the password.",
       "pickRoles": "Choose roles",
       "sharedHint": "In the shared cluster, manage users in the \"Connection\" tab. Custom roles are available on a database server.",
+      "panelHint": "The roles of the panel database belong to the installation. They are only shown here.",
       "system": "System",
       "title": "Roles"
     },
@@ -7659,6 +7515,7 @@
       "autocommit": "Without transaction",
       "duration": "{{ms}} ms",
       "hint": "Ctrl+Enter runs. Executes as the database owner.",
+      "panelHint": "Ctrl+Enter runs. Executes as the panel user, with all of the panel's privileges.",
       "history": "History",
       "noHistory": "Nothing run yet.",
       "rollback": "Test only (rollback)",

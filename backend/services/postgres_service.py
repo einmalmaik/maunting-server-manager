@@ -41,12 +41,6 @@ ADMIN_USER = "msm_admin"
 CONTROL_DB = "msm_control"
 ADMIN_PASSWORD_KEY = "managed_postgres.admin_password_encrypted"
 IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
-_WRITE_KEYWORDS = (
-    "insert", "update", "delete", "create", "drop", "alter", "truncate",
-    "grant", "revoke", "copy", "vacuum", "analyze", "cluster", "reindex",
-    "set", "reset", "begin", "commit", "rollback", "savepoint", "lock",
-    "call", "do", "notify", "listen", "unlisten", "refresh", "checkpoint",
-)
 
 
 class PostgresServiceError(RuntimeError):
@@ -792,7 +786,7 @@ def drop_server_resources(db: Session, server_id: int) -> None:
 
 
 def _split_sql_statements(text: str) -> list[str]:
-    """Split a SQL script into individual statements (panel_database_service + tests)."""
+    """Split a SQL script into individual statements (SQL-Editor des Studios)."""
     statements: list[str] = []
     buf: list[str] = []
     i = 0
@@ -922,28 +916,6 @@ def _split_sql_statements(text: str) -> list[str]:
         i += 1
     flush()
     return statements
-
-
-def _is_read_only(stmt: str) -> bool:
-    stripped = stmt.lstrip()
-    if not stripped:
-        return True
-    while stripped.startswith("--") or stripped.startswith("/*"):
-        if stripped.startswith("--"):
-            nl = stripped.find("\n")
-            stripped = stripped[nl + 1 :].lstrip() if nl != -1 else ""
-        else:
-            end = stripped.find("*/")
-            stripped = stripped[end + 2 :].lstrip() if end != -1 else ""
-    tokens = stripped.split()
-    if not tokens:
-        return True
-    head = tokens[0].lower()
-    if head == "explain":
-        if len(tokens) >= 2 and tokens[1].lower().split("(")[0] in _WRITE_KEYWORDS:
-            return False
-        return True
-    return head not in _WRITE_KEYWORDS
 
 
 def promote_owner_to_power_user(db: Session, server_id: int, database_id: int) -> dict[str, Any]:

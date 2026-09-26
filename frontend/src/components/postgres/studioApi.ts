@@ -22,7 +22,8 @@ export interface StudioSchema {
 }
 
 export interface StudioOverview {
-  kind: 'shared' | 'dedicated'
+  /** `panel`: die eigene Datenbank des Panels — Struktur gehört den Migrationen. */
+  kind: 'shared' | 'dedicated' | 'panel'
   server: { version_num: number; version: string; role: string; database: string; size_bytes: number }
   schemas: StudioSchema[]
   permissions: StudioPermissions
@@ -376,8 +377,15 @@ export type StudioOperation = { op: string } & Record<string, unknown>
 
 export const CTID_KEY = '__msm_ctid'
 
-export function studioApi(serverId: number, databaseId: number) {
-  const base = `/servers/${serverId}/databases/${databaseId}/studio`
+/** Wo die Datenbank liegt: an einem Server oder das Panel selbst. */
+export type StudioZiel = { art: 'server'; serverId: number; databaseId: number } | { art: 'panel' }
+
+export function studioBase(ziel: StudioZiel) {
+  return ziel.art === 'panel' ? '/panel/database/studio' : `/servers/${ziel.serverId}/databases/${ziel.databaseId}/studio`
+}
+
+export function studioApi(ziel: StudioZiel) {
+  const base = studioBase(ziel)
   const post = <T>(path: string, body: unknown) =>
     api<T>(`${base}${path}`, { method: 'POST', body: JSON.stringify(body ?? {}) })
   const q = (params: Record<string, string>) => `?${new URLSearchParams(params).toString()}`

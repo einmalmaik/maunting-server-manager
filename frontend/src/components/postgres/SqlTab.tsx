@@ -5,12 +5,12 @@ import { Badge, Button, Switch, Textarea } from '@/Singra/UI'
 import { useStudio } from './StudioContext'
 import { PlanTree } from './PlanTree'
 import { Empty, ErrorBox, Section } from './shared'
-import { cellText, type Json, type StudioRunResult, type StudioSqlResponse } from './studioApi'
+import { cellText, type Json, type StudioRunResult, type StudioSqlResponse, type StudioZiel } from './studioApi'
 
 const HISTORY_LIMIT = 30
 
-function historyKey(serverId: number, databaseId: number) {
-  return `msm-pg-studio:verlauf:${serverId}:${databaseId}`
+function historyKey(ziel: StudioZiel) {
+  return ziel.art === 'panel' ? 'msm-pg-studio:verlauf:panel' : `msm-pg-studio:verlauf:${ziel.serverId}:${ziel.databaseId}`
 }
 
 function readHistory(key: string): string[] {
@@ -22,11 +22,11 @@ function readHistory(key: string): string[] {
   }
 }
 
-/** SQL-Editor: läuft als Owner, in einer Transaktion oder mit Rollback (Funktionstest). */
+/** SQL-Editor: läuft als Owner (Panel: als Panel-Benutzer), in einer Transaktion oder mit Rollback (Funktionstest). */
 export function SqlTab({ initialSql = '', initialRollback = false }: { initialSql?: string; initialRollback?: boolean }) {
   const { t } = useTranslation()
-  const { api, serverId, databaseId, bump } = useStudio()
-  const key = historyKey(serverId, databaseId)
+  const { api, ziel, panel, bump } = useStudio()
+  const key = historyKey(ziel)
   const [sql, setSql] = useState(initialSql || 'SELECT now();')
   const [rollback, setRollback] = useState(initialRollback)
   const [autocommit, setAutocommit] = useState(false)
@@ -117,7 +117,7 @@ export function SqlTab({ initialSql = '', initialRollback = false }: { initialSq
               <Switch checked={autocommit} onCheckedChange={(v) => { setAutocommit(v); if (v) setRollback(false) }} />
               {t('postgresStudio.sql.autocommit')}
             </label>
-            <span className="text-xs text-on-surface-variant">{t('postgresStudio.sql.hint')}</span>
+            <span className="text-xs text-on-surface-variant">{t(panel ? 'postgresStudio.sql.panelHint' : 'postgresStudio.sql.hint')}</span>
           </div>
         </Section>
         <ErrorBox message={error} />

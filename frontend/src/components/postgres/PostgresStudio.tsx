@@ -13,24 +13,27 @@ import { MonitorTab } from './MonitorTab'
 import { SecurityTab } from './SecurityTab'
 import { SqlTab } from './SqlTab'
 import { ErrorBox, Loading, useLoad } from './shared'
-import { studioApi } from './studioApi'
+import { studioApi, type StudioZiel } from './studioApi'
 
 type TabId = 'explorer' | 'sql' | 'logic' | 'security' | 'monitor' | 'backup' | 'instance' | 'connection'
 
 /**
- * PostgreSQL-Studio einer Datenbank. Jeder Reiter ist ein eigenes Modul;
- * Strukturänderungen laufen über `StudioProvider.runOperation` (SQL-Vorschau).
+ * PostgreSQL-Studio einer Datenbank — an einem Server oder die des Panels.
+ * Jeder Reiter ist ein eigenes Modul; Strukturänderungen laufen über
+ * `StudioProvider.runOperation` (SQL-Vorschau).
  */
-export function PostgresStudio({ serverId, databaseId, databaseName, onResourcesChanged, onBootstrap }: {
-  serverId: number
-  databaseId: number
-  databaseName: string
-  onResourcesChanged: () => void
+export function PostgresStudio({ ziel, databaseName, onResourcesChanged, onBootstrap }: {
+  ziel: StudioZiel
+  /** Standard: der Name, den PostgreSQL meldet. */
+  databaseName?: string
+  onResourcesChanged?: () => void
   /** Eigene Instanz: Einrichtung nachholen, wenn die Datenbank noch fehlt. */
   onBootstrap?: () => Promise<void>
 }) {
   const { t } = useTranslation()
-  const api = useMemo(() => studioApi(serverId, databaseId), [serverId, databaseId])
+  const zielKey = ziel.art === 'panel' ? 'panel' : `${ziel.serverId}:${ziel.databaseId}`
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- zielKey trägt das Ziel
+  const api = useMemo(() => studioApi(ziel), [zielKey])
   const overview = useLoad(() => api.overview(), [api])
   const [tab, setTab] = useState<TabId>('explorer')
   const [sqlDraft, setSqlDraft] = useState<{ sql: string; rollback: boolean; key: number } | null>(null)
@@ -68,15 +71,18 @@ export function PostgresStudio({ serverId, databaseId, databaseName, onResources
 
   const data = overview.data
   const admin = data.permissions.admin
+  // Panel-Datenbank: Sicherung macht „Panel-Backups“, Instanz und Zugang
+  // gehören der Installation.
+  const server = ziel.art === 'server'
   const tabs: TabDef<TabId>[] = [
     { id: 'explorer', labelKey: 'postgresStudio.tabs.explorer', icon: Table2 },
     ...(admin ? [{ id: 'sql' as const, labelKey: 'postgresStudio.tabs.sql', icon: TerminalSquare }] : []),
     { id: 'logic', labelKey: 'postgresStudio.tabs.logic', icon: Braces },
     { id: 'security', labelKey: 'postgresStudio.tabs.security', icon: Shield },
     { id: 'monitor', labelKey: 'postgresStudio.tabs.monitor', icon: Activity },
-    ...(admin ? [{ id: 'backup' as const, labelKey: 'postgresStudio.tabs.backup', icon: Archive }] : []),
+    ...(admin && server ? [{ id: 'backup' as const, labelKey: 'postgresStudio.tabs.backup', icon: Archive }] : []),
     ...(admin && data.kind === 'dedicated' ? [{ id: 'instance' as const, labelKey: 'postgresStudio.tabs.instance', icon: Settings2 }] : []),
-    { id: 'connection', labelKey: 'postgresStudio.tabs.connection', icon: Plug },
+    ...(server ? [{ id: 'connection' as const, labelKey: 'postgresStudio.tabs.connection', icon: Plug }] : []),
   ]
   const active = tabs.some((entry) => entry.id === tab) ? tab : 'explorer'
 
@@ -86,8 +92,13 @@ export function PostgresStudio({ serverId, databaseId, databaseName, onResources
   }
 
   return (
-    <StudioProvider serverId={serverId} databaseId={databaseId} databaseName={databaseName} api={api} overview={data}>
+    <StudioProvider ziel={ziel} databaseName={databaseName ?? data.server.database ?? ''} api={api} overview={data}>
       <div className="space-y-4" data-testid="postgres-studio">
+        {data.kind === 'panel' && (
+          <p className="rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 text-xs text-on-surface-variant" data-testid="studio-panel-hint">
+            {t('postgresStudio.panelHint')}
+          </p>
+        )}
         <TabBar tabs={tabs} active={active} onChange={setTab} ariaLabel={t('postgresStudio.title')} />
         {active === 'explorer' && <ExplorerTab />}
         {active === 'sql' && <SqlTab key={sqlDraft?.key ?? 0} initialSql={sqlDraft?.sql} initialRollback={sqlDraft?.rollback} />}
@@ -96,7 +107,9 @@ export function PostgresStudio({ serverId, databaseId, databaseName, onResources
         {active === 'monitor' && <MonitorTab />}
         {active === 'backup' && <BackupTab />}
         {active === 'instance' && <InstanceTab />}
-        {active === 'connection' && <ConnectionTab onResourcesChanged={onResourcesChanged} />}
+        {active === 'connection' && ziel.art === 'server' && (
+          <ConnectionTab serverId={ziel.serverId} databaseId={ziel.databaseId} onResourcesChanged={onResourcesChanged ?? (() => {})} />
+        )}
       </div>
     </StudioProvider>
   )

@@ -521,7 +521,7 @@ Privilegierte Aktionen schreiben in `audit_logs` (wer / wann / action / Ziel,
 Details ohne Secrets):
 
 - `postgres.admin.rotate`, `postgres.database.*`, `postgres.user.*`, `postgres.power_user.*`, `postgres.credential.reveal`, `postgres.instance.*`
-- PostgreSQL-Studio: `postgres.studio.execute` (Strukturänderung, ohne SQL im Eintrag), `postgres.studio.dump`, `postgres.studio.restore`, `postgres.studio.session_*`; Änderungen der KI zusätzlich `postgres.studio.rows_*` und `postgres.studio.sql` mit `via: ai`
+- PostgreSQL-Studio: `postgres.studio.execute` (Strukturänderung, ohne SQL im Eintrag), `postgres.studio.dump`, `postgres.studio.restore`, `postgres.studio.session_*`; Änderungen der KI zusätzlich `postgres.studio.rows_*` und `postgres.studio.sql` mit `via: ai`; an der Panel-Datenbank (`target_type: panel_database`) alle Änderungen, auch Zeilen und SQL
 - `nodes.token.update`, `nodes.enrollment.approve`
 
 **Im Panel:** Administration → **Audit** (`/admin/audit`, Permission `system.audit.read`).  
@@ -840,6 +840,15 @@ Spiel- und Anwendungsserver haben **dasselbe Studio** wie ein Datenbankserver.
 Im gemeinsamen Cluster fehlen nur die Teile, die andere Kunden träfen: Rollen
 und Instanz-Einstellungen, und Erweiterungen gibt es dort nur, wenn PostgreSQL
 sie als *trusted* führt (der Owner installiert sie, kein Superuser).
+
+Auch die **Panel-Datenbank** (Seite *Panel-Datenbank*) öffnet dieses Studio,
+über `/api/panel/database/studio` statt über den Agent: das Backend verbindet
+sich selbst mit `MSM_DATABASE_URL`. Lesen braucht `panel.database.read`;
+Zeilen bearbeiten, SQL, Wartung (VACUUM, ANALYZE, REINDEX) und Sitzungen
+beenden brauchen `panel.database.admin`. Tabellen, Spalten, Rechte, Rollen und
+Erweiterungen ändert das Studio hier nicht — die Struktur legen die
+Alembic-Migrationen fest. Gesichert wird über *Panel-Backups*, nicht im Studio.
+Jede Änderung landet im Audit-Log, SQL ohne seinen Text.
 
 ### Was die KI an einem Blueprint ändern kann
 

@@ -50,6 +50,11 @@ const ABGELOESTE_SCHLUESSEL = [
   'ai.providers.recommendationApply',
   'mss.wakeword.zuruecksetzen',
   'databaseConsole.reset',
+  // 09/2026: die Panel-Datenbank öffnet das PostgreSQL-Studio
+  // (`postgresStudio.*`); die eigene Konsole ist mit ihren Texten entfallen.
+  'databaseConsole',
+  'panelDatabase.workspace',
+  'panelDatabase.rowsDeleted',
   'ai.memory.title',
   'ai.memory.description',
   'ai.memory.teamTitle',

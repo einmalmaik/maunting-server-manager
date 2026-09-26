@@ -10,11 +10,7 @@ from .postgres import (
     PostgresDatabaseRequest,
     PostgresOneTimeCredential,
     PostgresResourcesResponse,
-    PostgresRowsRequest,
-    PostgresRowsResponse,
     PostgresRotatePasswordResponse,
-    PostgresSqlRequest,
-    PostgresTableRequest,
     PostgresUserResponse,
 )
 from .permission import PermissionCatalogResponse, PermissionDefResponse, MePermissionsResponse

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { AlertTriangle, Play, ShieldAlert } from 'lucide-react'
 import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
-import type { StudioApi, StudioOperation, StudioOverview, StudioPlan } from './studioApi'
+import type { StudioApi, StudioOperation, StudioOverview, StudioPlan, StudioZiel } from './studioApi'
 
 interface RunOptions {
   /** Überschrift der Vorschau, z. B. „Tabelle anlegen". */
@@ -13,14 +13,17 @@ interface RunOptions {
 }
 
 interface StudioContextValue {
-  serverId: number
-  databaseId: number
+  ziel: StudioZiel
   databaseName: string
   api: StudioApi
   overview: StudioOverview
   dedicated: boolean
+  /** Die Panel-Datenbank: Struktur gehört den Migrationen, Sicherung den Panel-Backups. */
+  panel: boolean
   canWrite: boolean
   canAdmin: boolean
+  /** Tabellen, Funktionen, Rechte, Rollen ändern — nie an der Panel-Datenbank. */
+  canStructure: boolean
   /** Zeigt die SQL-Vorschau und führt nach Bestätigung aus. `true` = ausgeführt. */
   runOperation: (operation: StudioOperation, options: RunOptions) => Promise<boolean>
   /** Wird nach jeder Strukturänderung erhöht — Listen laden dann neu. */
@@ -47,15 +50,13 @@ interface PendingRun {
 }
 
 export function StudioProvider({
-  serverId,
-  databaseId,
+  ziel,
   databaseName,
   api,
   overview,
   children,
 }: {
-  serverId: number
-  databaseId: number
+  ziel: StudioZiel
   databaseName: string
   api: StudioApi
   overview: StudioOverview
@@ -110,35 +111,39 @@ export function StudioProvider({
 
   const value = useMemo<StudioContextValue>(
     () => ({
-      serverId,
-      databaseId,
+      ziel,
       databaseName,
       api,
       overview,
       dedicated: overview.kind === 'dedicated',
+      panel: overview.kind === 'panel',
       canWrite: overview.permissions.write,
       canAdmin: overview.permissions.admin,
+      canStructure: overview.permissions.admin && overview.kind !== 'panel',
       runOperation,
       revision,
       bump,
     }),
-    [serverId, databaseId, databaseName, api, overview, runOperation, revision, bump],
+    [ziel, databaseName, api, overview, runOperation, revision, bump],
   )
 
   return (
     <StudioContext.Provider value={value}>
       {children}
-      <SqlPreviewDialog pending={pending} onCancel={() => close(false)} onExecute={() => void execute()} />
+      <SqlPreviewDialog pending={pending} panel={overview.kind === 'panel'} onCancel={() => close(false)} onExecute={() => void execute()} />
     </StudioContext.Provider>
   )
 }
 
 function SqlPreviewDialog({
   pending,
+  panel,
   onCancel,
   onExecute,
 }: {
   pending: PendingRun | null
+  /** Panel-Datenbank: eine Verbindung, eine Identität — die des Panels. */
+  panel: boolean
   onCancel: () => void
   onExecute: () => void
 }) {
@@ -157,8 +162,12 @@ function SqlPreviewDialog({
               <Badge variant={plan.mode === 'tx' ? 'success' : 'warning'}>
                 {plan.mode === 'tx' ? t('postgresStudio.preview.transactional') : t('postgresStudio.preview.autocommit')}
               </Badge>
-              <Badge variant={plan.identity === 'admin' ? 'warning' : 'info'}>
-                {plan.identity === 'admin' ? t('postgresStudio.preview.asAdmin') : t('postgresStudio.preview.asOwner')}
+              <Badge variant={!panel && plan.identity === 'admin' ? 'warning' : 'info'}>
+                {panel
+                  ? t('postgresStudio.preview.asPanel')
+                  : plan.identity === 'admin'
+                    ? t('postgresStudio.preview.asAdmin')
+                    : t('postgresStudio.preview.asOwner')}
               </Badge>
               {plan.scope === 'instance' && <Badge variant="warning">{t('postgresStudio.preview.instanceWide')}</Badge>}
             </div>

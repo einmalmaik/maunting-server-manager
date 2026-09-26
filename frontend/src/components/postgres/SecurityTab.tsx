@@ -34,9 +34,9 @@ export function SecurityTab() {
 
 function RolesSection({ roles, error, loading }: { roles: StudioRole[] | null; error: string | null; loading: boolean }) {
   const { t } = useTranslation()
-  const { dedicated, canAdmin, runOperation } = useStudio()
+  const { dedicated, panel, canStructure, runOperation } = useStudio()
   const [dialog, setDialog] = useState<{ mode: 'create' } | { mode: 'edit'; role: StudioRole } | null>(null)
-  const editable = dedicated && canAdmin
+  const editable = dedicated && canStructure
   return (
     <Section
       title={t('postgresStudio.roles.title')}
@@ -49,7 +49,7 @@ function RolesSection({ roles, error, loading }: { roles: StudioRole[] | null; e
         ) : undefined
       }
     >
-      {!dedicated && <p className="mb-3 text-xs text-on-surface-variant">{t('postgresStudio.roles.sharedHint')}</p>}
+      {!dedicated && <p className="mb-3 text-xs text-on-surface-variant">{t(panel ? 'postgresStudio.roles.panelHint' : 'postgresStudio.roles.sharedHint')}</p>}
       <ErrorBox message={error} />
       {loading && !roles && <Loading />}
       <div className="overflow-x-auto">
@@ -172,7 +172,7 @@ function RoleDialog({ roles, role, onClose }: { roles: StudioRole[]; role: Studi
 
 function GrantsMatrix({ schema, roles }: { schema: string; roles: StudioRole[] }) {
   const { t } = useTranslation()
-  const { api, canAdmin, revision, runOperation } = useStudio()
+  const { api, canStructure, revision, runOperation } = useStudio()
   const grants = useLoad(() => api.grants(schema), [api, schema, revision])
   const [edit, setEdit] = useState<{ object: string | null; kind: string; role: string; held: string[] } | null>(null)
   const roleNames = useMemo(() => ['PUBLIC', ...roles.filter((r) => !r.system && !r.superuser).map((r) => r.name)], [roles])
@@ -203,7 +203,7 @@ function GrantsMatrix({ schema, roles }: { schema: string; roles: StudioRole[] }
       <td key={role} className="px-2 py-1.5">
         <button
           type="button"
-          disabled={!canAdmin}
+          disabled={!canStructure}
           onClick={() => setEdit({ object, kind, role, held: list })}
           className="min-h-7 w-full rounded-md border border-outline-variant px-2 py-1 text-left font-mono text-label-sm text-on-surface hover:border-secondary/50 disabled:cursor-default"
           aria-label={t('postgresStudio.grants.editCell', { object: object || schema, role })}
@@ -289,7 +289,7 @@ const POLICY_TEMPLATES = {
 
 function RlsStudio({ schema, roles }: { schema: string; roles: StudioRole[] }) {
   const { t } = useTranslation()
-  const { api, canAdmin, revision, runOperation } = useStudio()
+  const { api, canStructure, revision, runOperation } = useStudio()
   const objects = useLoad(() => api.objects(schema), [api, schema, revision])
   const tables = (objects.data?.relations || []).filter((r) => r.kind === 'table' || r.kind === 'partitioned_table')
   const [table, setTable] = useState<string | null>(null)
@@ -316,7 +316,7 @@ function RlsStudio({ schema, roles }: { schema: string; roles: StudioRole[] }) {
             <label className="flex items-center gap-2 text-sm text-on-surface">
               <Switch
                 checked={current.rls_enabled}
-                disabled={!canAdmin}
+                disabled={!canStructure}
                 onCheckedChange={(enabled) => void runOperation({ op: 'set_rls', schema_name: schema, table: current.table, enabled, forced: enabled && current.rls_forced }, { title: t('postgresStudio.rls.toggle') })}
                 data-testid="rls-enabled"
               />
@@ -325,7 +325,7 @@ function RlsStudio({ schema, roles }: { schema: string; roles: StudioRole[] }) {
             <label className="flex items-center gap-2 text-sm text-on-surface">
               <Switch
                 checked={current.rls_forced}
-                disabled={!canAdmin || !current.rls_enabled}
+                disabled={!canStructure || !current.rls_enabled}
                 onCheckedChange={(forced) => void runOperation({ op: 'set_rls', schema_name: schema, table: current.table, enabled: true, forced }, { title: t('postgresStudio.rls.toggle') })}
               />
               {t('postgresStudio.rls.forced')}
@@ -348,7 +348,7 @@ function RlsStudio({ schema, roles }: { schema: string; roles: StudioRole[] }) {
                     {policy.using && <p className="break-words font-mono text-label-sm text-on-surface-variant">USING {policy.using}</p>}
                     {policy.with_check && <p className="break-words font-mono text-label-sm text-on-surface-variant">WITH CHECK {policy.with_check}</p>}
                   </div>
-                  {canAdmin && (
+                  {canStructure && (
                     <Button size="icon" variant="ghost" aria-label={t('postgresStudio.rls.drop')} onClick={() => void runOperation({ op: 'drop_policy', schema_name: schema, table: current.table, name: policy.name }, { title: t('postgresStudio.rls.drop') })}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -357,7 +357,7 @@ function RlsStudio({ schema, roles }: { schema: string; roles: StudioRole[] }) {
               ))}
             </ul>
           )}
-          {canAdmin && (
+          {canStructure && (
             <Button size="sm" variant="secondary" onClick={() => setDialog(true)} data-testid="new-policy">
               <Plus className="h-3.5 w-3.5" />
               {t('postgresStudio.rls.create')}

@@ -37,11 +37,11 @@ from routers import (
     oauth_router,
     databases_router,
     postgres_studio_router,
+    panel_database_studio_router,
     webhooks_outbound_router,
     singra_webhook_router,
     backup_config_router,
     panel_backups_router,
-    panel_database_router,
     nodes_router,
     incidents_router,
     change_timeline_router,
@@ -929,6 +929,7 @@ app.include_router(permissions_router)
 app.include_router(blueprints_router)
 app.include_router(databases_router)
 app.include_router(postgres_studio_router)
+app.include_router(panel_database_studio_router)
 # Ausgehende Webhooks (MSM → Drittsystem wie Discord-Bot): per-Server
 # Subscriptions mit Secret-Auth ueber X-Webhook-Secret-Header.
 app.include_router(webhooks_outbound_router)
@@ -943,7 +944,6 @@ app.include_router(oauth_router)
 # CSRF auf allen Write-Endpunkten. Credentials verschluesselt via DIS.
 app.include_router(backup_config_router)
 app.include_router(panel_backups_router)
-app.include_router(panel_database_router)
 app.include_router(incidents_router)
 app.include_router(change_timeline_router)
 app.include_router(guardian_router)

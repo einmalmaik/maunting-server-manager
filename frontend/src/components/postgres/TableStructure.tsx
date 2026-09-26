@@ -15,7 +15,7 @@ export function TableStructure({ table, relations, enums, onOpenTable }: {
   onOpenTable: (schema: string, name: string) => void
 }) {
   const { t, i18n } = useTranslation()
-  const { runOperation, canAdmin } = useStudio()
+  const { runOperation, canStructure } = useStudio()
   const [dialog, setDialog] = useState<
     | { kind: 'column' }
     | { kind: 'type'; column: string }
@@ -54,7 +54,7 @@ export function TableStructure({ table, relations, enums, onOpenTable }: {
       <Section
         title={t('postgresStudio.structure.columns')}
         actions={
-          canAdmin && isTable ? (
+          canStructure && isTable ? (
             <>
               <Button size="sm" onClick={() => setDialog({ kind: 'column' })} data-testid="add-column-button">
                 <Plus className="h-3.5 w-3.5" />
@@ -105,7 +105,7 @@ export function TableStructure({ table, relations, enums, onOpenTable }: {
                     <td className="py-2 pr-3">
                       <Switch
                         checked={!column.nullable}
-                        disabled={!canAdmin || !isTable || pk}
+                        disabled={!canStructure || !isTable || pk}
                         onCheckedChange={(checked) => void alter([{ action: 'set_nullable', column: column.name, nullable: !checked }], t('postgresStudio.columns.notNull'))}
                         aria-label={t('postgresStudio.columns.notNull')}
                       />
@@ -113,7 +113,7 @@ export function TableStructure({ table, relations, enums, onOpenTable }: {
                     <td className="max-w-48 truncate py-2 pr-3 font-mono text-on-surface-variant">{column.default || '–'}</td>
                     <td className="max-w-48 truncate py-2 pr-3 text-on-surface-variant">{column.comment || ''}</td>
                     <td className="py-2 text-right">
-                      {canAdmin && isTable && (
+                      {canStructure && isTable && (
                         <ActionMenu
                           compact
                           label={t('postgresStudio.structure.columnActions', { column: column.name })}
@@ -145,7 +145,7 @@ export function TableStructure({ table, relations, enums, onOpenTable }: {
         <Section
           title={t('postgresStudio.structure.constraints')}
           actions={
-            canAdmin ? (
+            canStructure ? (
               <ActionMenu
                 label={t('postgresStudio.structure.addConstraint')}
                 items={(['primary_key', 'unique', 'check', 'foreign_key'] as ConstraintKind[])
@@ -181,7 +181,7 @@ export function TableStructure({ table, relations, enums, onOpenTable }: {
                           {constraint.ref_table}
                         </Button>
                       )}
-                      {canAdmin && (
+                      {canStructure && (
                         <Button
                           size="icon"
                           variant="ghost"
@@ -216,7 +216,7 @@ export function TableStructure({ table, relations, enums, onOpenTable }: {
         <Section
           title={t('postgresStudio.indexes.title')}
           actions={
-            canAdmin ? (
+            canStructure ? (
               <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: 'index' })} data-testid="create-index-button">
                 <Plus className="h-3.5 w-3.5" />
                 {t('postgresStudio.indexes.create')}
@@ -243,7 +243,7 @@ export function TableStructure({ table, relations, enums, onOpenTable }: {
                     </div>
                     <p className="mt-1 break-words font-mono text-xs text-on-surface-variant">{index.definition}</p>
                   </div>
-                  {canAdmin && !index.primary && (
+                  {canStructure && !index.primary && (
                     <ActionMenu
                       compact
                       label={t('postgresStudio.indexes.actions', { name: index.name })}
@@ -264,7 +264,7 @@ export function TableStructure({ table, relations, enums, onOpenTable }: {
         <Section
           title={t('postgresStudio.partitions.title')}
           actions={
-            canAdmin ? (
+            canStructure ? (
               <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: 'partition' })}>
                 <Plus className="h-3.5 w-3.5" />
                 {t('postgresStudio.partitions.create')}
@@ -284,7 +284,7 @@ export function TableStructure({ table, relations, enums, onOpenTable }: {
                     <span className="ml-2 font-mono text-xs text-on-surface-variant">{partition.bound}</span>
                     <span className="ml-2 text-xs text-on-surface-variant">~{formatNumber(partition.estimated_rows, i18n.language)}</span>
                   </button>
-                  {canAdmin && (
+                  {canStructure && (
                     <Button
                       size="sm"
                       variant="ghost"

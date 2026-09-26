@@ -46,7 +46,7 @@ export function LogicTab({ onOpenSql }: { onOpenSql: (sql: string, rollback: boo
 
 function FunctionsSection({ schema, functions, onOpenSql }: { schema: string; functions: StudioFunction[]; onOpenSql: (sql: string, rollback: boolean) => void }) {
   const { t } = useTranslation()
-  const { api, canAdmin, runOperation } = useStudio()
+  const { api, canStructure, runOperation } = useStudio()
   const [selected, setSelected] = useState<StudioFunction | null>(null)
   const [definition, setDefinition] = useState<string | null>(null)
   const [editor, setEditor] = useState<'plpgsql' | 'trigger' | null>(null)
@@ -72,7 +72,7 @@ function FunctionsSection({ schema, functions, onOpenSql }: { schema: string; fu
     <Section
       title={t('postgresStudio.functions.title')}
       actions={
-        canAdmin ? (
+        canStructure ? (
           <>
             <Button size="sm" onClick={() => setEditor('plpgsql')} data-testid="new-function">
               <Plus className="h-3.5 w-3.5" />
@@ -119,13 +119,13 @@ function FunctionsSection({ schema, functions, onOpenSql }: { schema: string; fu
                     <FlaskConical className="h-3.5 w-3.5" />
                     {t('postgresStudio.functions.test')}
                   </Button>
-                  {canAdmin && definition && (
+                  {canStructure && definition && (
                     <Button size="sm" variant="secondary" onClick={() => onOpenSql(definition, false)}>
                       <Pencil className="h-3.5 w-3.5" />
                       {t('postgresStudio.functions.editInSql')}
                     </Button>
                   )}
-                  {canAdmin && (
+                  {canStructure && (
                     <Button
                       size="sm"
                       variant="destructive"
@@ -216,13 +216,13 @@ function FunctionEditor({ schema, template, onClose }: { schema: string; templat
 
 function TriggersSection({ schema, objects }: { schema: string; objects: { relations: { name: string; kind: string }[]; functions: StudioFunction[]; triggers: { name: string; table?: string; enabled: boolean; definition: string }[] } }) {
   const { t } = useTranslation()
-  const { canAdmin, runOperation } = useStudio()
+  const { canStructure, runOperation } = useStudio()
   const [open, setOpen] = useState(false)
   return (
     <Section
       title={t('postgresStudio.triggers.title')}
       actions={
-        canAdmin ? (
+        canStructure ? (
           <Button size="sm" variant="secondary" onClick={() => setOpen(true)} data-testid="new-trigger">
             <Plus className="h-3.5 w-3.5" />
             {t('postgresStudio.triggers.create')}
@@ -241,7 +241,7 @@ function TriggersSection({ schema, objects }: { schema: string; objects: { relat
                 <span className="ml-2 text-xs text-on-surface-variant">{trigger.table}</span>
                 <p className="mt-1 break-words font-mono text-label-sm text-on-surface-variant">{trigger.definition}</p>
               </div>
-              {canAdmin && (
+              {canStructure && (
                 <div className="flex shrink-0 items-center gap-2">
                   <Switch
                     checked={trigger.enabled}
@@ -310,7 +310,7 @@ function TriggerDialog({ schema, tables, functions, onClose }: { schema: string;
 
 function ExtensionStore() {
   const { t } = useTranslation()
-  const { api, canAdmin, dedicated, revision, runOperation } = useStudio()
+  const { api, canStructure, dedicated, panel, revision, runOperation } = useStudio()
   const extensions = useLoad(() => api.extensions(), [api, revision])
   const [search, setSearch] = useState('')
   const [onlyInstalled, setOnlyInstalled] = useState(false)
@@ -330,7 +330,7 @@ function ExtensionStore() {
         </>
       }
     >
-      <p className="mb-3 text-xs text-on-surface-variant">{dedicated ? t('postgresStudio.extensions.dedicatedHint') : t('postgresStudio.extensions.sharedHint')}</p>
+      <p className="mb-3 text-xs text-on-surface-variant">{t(panel ? 'postgresStudio.extensions.panelHint' : dedicated ? 'postgresStudio.extensions.dedicatedHint' : 'postgresStudio.extensions.sharedHint')}</p>
       <ErrorBox message={extensions.error} />
       {extensions.loading && !extensions.data && <Loading />}
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -345,7 +345,7 @@ function ExtensionStore() {
               </div>
               <p className="mt-1 text-xs text-on-surface-variant">{extension.comment}</p>
             </div>
-            {canAdmin && (
+            {canStructure && (
               <div className="flex gap-2">
                 {!extension.installed_version && (
                   <Button size="sm" disabled={!extension.installable} onClick={() => void runOperation({ op: 'create_extension', name: extension.name }, { title: t('postgresStudio.extensions.install', { name: extension.name }) })}>

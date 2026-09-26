@@ -13,12 +13,12 @@ from .permissions import router as permissions_router
 from .blueprints import router as blueprints_router
 from .oauth import router as oauth_router
 from .databases import router as databases_router
+from .postgres_studio import panel_router as panel_database_studio_router
 from .postgres_studio import router as postgres_studio_router
 from .webhooks_outbound import router as webhooks_outbound_router
 from .singra_webhook import router as singra_webhook_router
 from .backup_config import router as backup_config_router
 from .panel_backups import router as panel_backups_router
-from .panel_database import router as panel_database_router
 from .nodes import router as nodes_router
 from .incidents import router as incidents_router
 from .change_timeline import router as change_timeline_router
@@ -66,11 +66,11 @@ __all__ = [
     "oauth_router",
     "databases_router",
     "postgres_studio_router",
+    "panel_database_studio_router",
     "webhooks_outbound_router",
     "singra_webhook_router",
     "backup_config_router",
     "panel_backups_router",
-    "panel_database_router",
     "nodes_router",
     "incidents_router",
     "change_timeline_router",
