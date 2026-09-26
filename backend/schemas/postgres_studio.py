@@ -719,5 +719,32 @@ class StudioExportRequest(BaseModel):
     sort: list[RowSort] = Field(default_factory=list, max_length=8)
 
 
+class StudioTableRef(BaseModel):
+    schema_name: Ident
+    name: Ident
+
+
+class StudioDumpRequest(BaseModel):
+    format: Literal["plain", "custom", "tar"] = "plain"
+    schema_only: bool = False
+    data_only: bool = False
+    schemas: list[Ident] = Field(default_factory=list, max_length=100)
+    tables: list[StudioTableRef] = Field(default_factory=list, max_length=500)
+
+    @model_validator(mode="after")
+    def _nicht_beides(self) -> "StudioDumpRequest":
+        if self.schema_only and self.data_only:
+            raise ValueError("Nur Schema und nur Daten schließen sich aus.")
+        return self
+
+
+class StudioRestoreRequest(BaseModel):
+    format: Literal["plain", "custom", "tar"] = "plain"
+    data_b64: str = Field(..., min_length=4, max_length=280_000_000)
+    # Nur custom/tar: vorhandene Objekte vorher entfernen.
+    clean: bool = False
+    confirm_name: str = Field(..., min_length=1, max_length=63)
+
+
 class StudioSessionActionRequest(BaseModel):
     action: Literal["cancel", "terminate"]

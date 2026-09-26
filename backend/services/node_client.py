@@ -855,6 +855,19 @@ class NodeClient:
         """Studio: Anweisungen ausfuehren. Payload traegt Passwoerter — nie loggen."""
         return self._request("POST", "/postgres/run", json=payload, timeout=_LONG_TIMEOUT)
 
+    def postgres_dump_db(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Studio: eine Datenbank als Datei (Base64). Payload traegt Passwoerter."""
+        return self._request("POST", "/postgres/dump-db", json=payload, timeout=_LONG_TIMEOUT)
+
+    def postgres_restore_db(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/postgres/restore-db", json=payload, timeout=_LONG_TIMEOUT)
+
+    def postgres_pending(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request("POST", "/postgres/pending", json=payload)
+
+    def postgres_pending_discard(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/postgres/pending/discard", json=payload)
+
     @property
     def bearer_token(self) -> str:
         """In-memory token for WS upgrade only — caller must not log/store."""

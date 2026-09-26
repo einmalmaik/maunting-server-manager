@@ -12,7 +12,10 @@ Anweisungen aus. Identitäten:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import csv
+import hashlib
 import io
 import json
 from dataclasses import dataclass
@@ -23,6 +26,7 @@ from sqlalchemy.orm import Session
 from models import PostgresDatabase, PostgresUser, Server
 from schemas import postgres_studio as s
 from services import postgres_ddl, postgres_service
+from services.node_client import NodeClientError
 from services.postgres_ddl import Plan, ident, literal, qualified
 
 ADMIN_ROLE = "msm_admin"
@@ -986,3 +990,88 @@ def _sql_wert(value: Any) -> str:
     if isinstance(value, (dict, list)):
         return literal(json.dumps(value, ensure_ascii=False))
     return literal(value)
+
+
+# ── Sicherung einer Datenbank ──────────────────────────────────────────────
+
+
+def _agent(k: Kontext, db: Session, call: str, payload: dict[str, Any], *, admin: bool = False) -> Any:
+    verbindung = postgres_service._verbindung(db, k.server, postgres_service._client_for_server_id(db, k.server.id))
+    if admin:
+        payload = {**payload, "admin_password": verbindung.admin_password}
+    try:
+        return getattr(verbindung.client, call)(verbindung.mit_ziel(payload))
+    except NodeClientError as exc:
+        status = getattr(exc, "status_code", None)
+        # FastAPI antwortet auf eine unbekannte Route mit genau "Not Found".
+        if status == 404 and (exc.message or "").strip() == "Not Found":
+            raise postgres_service.PostgresServiceError(
+                "Der Agent dieses Nodes kennt diese Funktion noch nicht — bitte den Agent aktualisieren."
+            ) from exc
+        if status in {400, 404}:
+            raise ValueError(exc.message or "PostgreSQL-Fehler") from exc
+        raise postgres_service.PostgresServiceError(exc.message or "Agent-Aufruf fehlgeschlagen") from exc
+
+
+def dump(db: Session, k: Kontext, req: s.StudioDumpRequest) -> tuple[bytes, str]:
+    result = _agent(
+        k,
+        db,
+        "postgres_dump_db",
+        {
+            "database_name": k.database.name,
+            "format": req.format,
+            "schema_only": req.schema_only,
+            "data_only": req.data_only,
+            "schemas": list(req.schemas),
+            "tables": [t.model_dump() for t in req.tables],
+        },
+        admin=True,
+    )
+    data = base64.b64decode(result.get("data_b64") or "")
+    return data, hashlib.sha256(data).hexdigest()
+
+
+def restore(db: Session, k: Kontext, req: s.StudioRestoreRequest) -> dict[str, Any]:
+    if req.confirm_name != k.database.name:
+        raise ValueError("Bestätigungsname stimmt nicht mit der Datenbank überein.")
+    try:
+        data = base64.b64decode(req.data_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("Datei ist nicht lesbar (Base64).") from exc
+    return _agent(
+        k,
+        db,
+        "postgres_restore_db",
+        {
+            "database_name": k.database.name,
+            "owner_role": k.database.owner_role,
+            "owner_password": postgres_service._owner_password(k.database),
+            "format": req.format,
+            "clean": req.clean,
+            "data_b64": req.data_b64,
+        },
+    ) | {"sha256": hashlib.sha256(data).hexdigest()}
+
+
+def pending(db: Session, k: Kontext) -> list[dict[str, Any]]:
+    rows = _agent(k, db, "postgres_pending", {"server_id": k.server.id})
+    return [row for row in rows or [] if row.get("database") == k.database.name]
+
+
+def apply_pending(db: Session, k: Kontext) -> dict[str, Any]:
+    return _agent(
+        k,
+        db,
+        "postgres_restore_db",
+        {
+            "database_name": k.database.name,
+            "owner_role": k.database.owner_role,
+            "owner_password": postgres_service._owner_password(k.database),
+            "pending_server_id": k.server.id,
+        },
+    )
+
+
+def discard_pending(db: Session, k: Kontext) -> None:
+    _agent(k, db, "postgres_pending_discard", {"server_id": k.server.id, "database_name": k.database.name})

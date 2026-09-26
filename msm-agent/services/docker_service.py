@@ -829,8 +829,13 @@ def exec_in_managed(
     timeout: int = 180,
     *,
     environment: dict[str, str] | None = None,
+    binary: bool = False,
 ) -> dict[str, Any]:
-    """exec in msm-postgres or a database server's own instance."""
+    """exec in msm-postgres or a database server's own instance.
+
+    ``binary``: stdout zusaetzlich unveraendert als ``stdout_bytes``
+    (pg_dump im Custom-/Tar-Format).
+    """
     assert_postgres_exec_target(name)
     if not command:
         raise ValueError("command is required")
@@ -850,15 +855,18 @@ def exec_in_managed(
         exit_code = int(getattr(result, "exit_code", 1))
         output = getattr(result, "output", (b"", b""))
         stdout_b, stderr_b = output if isinstance(output, tuple) else (output, b"")
-        stdout = _decode(stdout_b)
+        stdout = "" if binary else _decode(stdout_b)
         stderr = _decode(stderr_b)
-        return {
+        result = {
             "ok": exit_code == 0,
             "exit_code": exit_code,
             "stdout": stdout,
             "stderr": stderr,
             "error": "" if exit_code == 0 else (stderr or stdout or f"exit {exit_code}")[:500],
         }
+        if binary:
+            result["stdout_bytes"] = bytes(stdout_b or b"")
+        return result
     except NotFound:
         return {"ok": False, "error": "Container not found", "stdout": "", "stderr": ""}
     except (DockerException, OSError) as exc:
@@ -869,11 +877,11 @@ def exec_in_managed(
 def exec_in_managed_stdin(
     name: str,
     command: list[str],
-    stdin_data: str,
+    stdin_data: str | bytes,
     *,
     environment: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Exec in managed Postgres with SQL over stdin instead of process argv."""
+    """Exec in managed Postgres with SQL (oder einem Archiv) ueber stdin."""
     assert_postgres_exec_target(name)
     if not command:
         raise ValueError("command is required")
@@ -888,21 +896,24 @@ def exec_in_managed_stdin(
         docker_args.extend(["-e", key])
     docker_args.extend([name, *command])
     try:
+        as_text = isinstance(stdin_data, str)
         result = subprocess.run(
             docker_args,
             input=stdin_data,
             capture_output=True,
-            text=True,
-            timeout=190,
+            text=as_text,
+            timeout=600,
             check=False,
             env=env,
         )
+        stdout = result.stdout if as_text else _decode(result.stdout)
+        stderr = result.stderr if as_text else _decode(result.stderr)
         return {
             "ok": result.returncode == 0,
             "exit_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "error": "" if result.returncode == 0 else (result.stderr or result.stdout or f"exit {result.returncode}")[:500],
+            "stdout": stdout,
+            "stderr": stderr,
+            "error": "" if result.returncode == 0 else (stderr or stdout or f"exit {result.returncode}")[:500],
         }
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
         logger.warning("managed postgres stdin exec failed")

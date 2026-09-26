@@ -19,6 +19,8 @@ from dependencies import get_current_user, require_server_permission, verify_csr
 from models import User
 from routers.databases import _audit_db, _service_error
 from schemas.postgres_studio import (
+    StudioDumpRequest,
+    StudioRestoreRequest,
     StudioExecuteResponse,
     StudioExplainRequest,
     StudioExportRequest,
@@ -349,3 +351,95 @@ def export_rows(
             "Cache-Control": "no-store",
         },
     )
+
+
+# ── Sicherung (admin) ──────────────────────────────────────────────────────
+
+
+@router.post("/backup/dump")
+def backup_dump(
+    server_id: int,
+    database_id: int,
+    body: StudioDumpRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> Response:
+    k = _kontext(db, user, server_id, database_id, ADMIN)
+    payload, sha = _call(studio.dump, db, k, body)
+    from datetime import datetime, timezone
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    extension = {"plain": "sql", "custom": "dump", "tar": "tar"}[body.format]
+    _audit_db(
+        db,
+        user,
+        action="postgres.studio.dump",
+        server_id=server_id,
+        details={"database_id": database_id, "format": body.format, "size_bytes": len(payload), "sha256": sha},
+    )
+    return Response(
+        content=payload,
+        media_type="application/sql; charset=utf-8" if body.format == "plain" else "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{k.database.name}-{stamp}.{extension}"',
+            "X-MSM-Dump-SHA256": sha,
+            "X-MSM-Dump-Size": str(len(payload)),
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.post("/backup/restore")
+def backup_restore(
+    server_id: int,
+    database_id: int,
+    body: StudioRestoreRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    k = _kontext(db, user, server_id, database_id, ADMIN)
+    result = _call(studio.restore, db, k, body)
+    _audit_db(
+        db,
+        user,
+        action="postgres.studio.restore",
+        server_id=server_id,
+        details={"database_id": database_id, "format": body.format, "sha256": result.get("sha256")},
+    )
+    return result
+
+
+@router.get("/backup/pending")
+def backup_pending(server_id: int, database_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    k = _kontext(db, user, server_id, database_id, ADMIN)
+    return _call(studio.pending, db, k)
+
+
+@router.post("/backup/pending/apply")
+def backup_pending_apply(
+    server_id: int,
+    database_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    k = _kontext(db, user, server_id, database_id, ADMIN)
+    result = _call(studio.apply_pending, db, k)
+    _audit_db(db, user, action="postgres.studio.restore_pending", server_id=server_id, details={"database_id": database_id})
+    return result
+
+
+@router.post("/backup/pending/discard")
+def backup_pending_discard(
+    server_id: int,
+    database_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    k = _kontext(db, user, server_id, database_id, ADMIN)
+    _call(studio.discard_pending, db, k)
+    _audit_db(db, user, action="postgres.studio.discard_pending", server_id=server_id, details={"database_id": database_id})
+    return {"ok": True}

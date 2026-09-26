@@ -17,7 +17,9 @@ import pytest
 
 from services.postgres_service import (
     PostgresAgentError,
+    dump_database,
     dump_databases,
+    restore_database,
     run_statements,
     ziel,
 )
@@ -180,3 +182,78 @@ def test_dump_laeuft_in_der_eigenen_instanz(instanz):
     with ziel(instanz):
         dumps = dump_databases(admin_password=ADMIN_PW, database_names=["msm_control"])
     assert "dump_probe" in dumps["msm_control"]
+
+
+EIGNER_PW = "eigner-" + "passwort-" + "1"
+
+
+@pytest.fixture
+def quelle_und_ziel(instanz):
+    """Quelle mit Daten, leere Ziel-DB, die einem Owner ohne Sonderrechte gehoert."""
+    _run(instanz, [("DROP DATABASE IF EXISTS ziel", None)], mode="autocommit")
+    _run(instanz, [("DROP DATABASE IF EXISTS quelle", None)], mode="autocommit")
+    _run(instanz, [("DROP ROLE IF EXISTS eigner", None)], mode="autocommit")
+    _run(instanz, [
+        (f"CREATE ROLE eigner LOGIN PASSWORD '{EIGNER_PW}'", None),
+    ], mode="autocommit")
+    _run(instanz, [("CREATE DATABASE quelle", None)], mode="autocommit")
+    _run(instanz, [("CREATE DATABASE ziel OWNER eigner", None)], mode="autocommit")
+    with ziel(instanz):
+        run_statements(
+            database_name="quelle", identity="admin", owner_role="", owner_password="",
+            admin_password=ADMIN_PW, mode="tx", row_limit=10, timeout_ms=5000,
+            statements=[
+                {"sql": 'CREATE TABLE "Kunden %" (id int PRIMARY KEY, name text)'},
+                {"sql": "INSERT INTO \"Kunden %\" VALUES (1, 'Anna'), (2, 'Bert')"},
+                {"sql": "CREATE TABLE andere (x int)"},
+            ],
+        )
+    return instanz
+
+
+def _zaehle(target, table):
+    with ziel(target):
+        return run_statements(
+            database_name="ziel", identity="owner", owner_role="eigner", owner_password=EIGNER_PW,
+            admin_password="", mode="read", row_limit=10, timeout_ms=5000,
+            statements=[{"sql": f"SELECT count(*) FROM {table}"}],
+        )["results"][0]["rows"][0][0]
+
+
+@pytest.mark.parametrize("fmt", ["plain", "custom", "tar"])
+def test_dump_und_restore_je_format_als_owner(quelle_und_ziel, fmt):
+    target = quelle_und_ziel
+    with ziel(target):
+        data = dump_database(admin_password=ADMIN_PW, database_name="quelle", fmt=fmt,
+                             tables=[("public", "Kunden %")])
+        if fmt == "custom":
+            assert data.startswith(b"PGDMP")
+        restore_database(database_name="ziel", owner_role="eigner", owner_password=EIGNER_PW,
+                         fmt=fmt, data=data)
+    assert _zaehle(target, '"Kunden %"') == 2
+    # Nur die gewaehlte Tabelle kam mit.
+    with pytest.raises(PostgresAgentError, match="42P01"):
+        _zaehle(target, "andere")
+
+
+def test_nur_schema_ohne_daten(quelle_und_ziel):
+    target = quelle_und_ziel
+    with ziel(target):
+        data = dump_database(admin_password=ADMIN_PW, database_name="quelle", schema_only=True)
+        assert b"Anna" not in data
+        restore_database(database_name="ziel", owner_role="eigner", owner_password=EIGNER_PW,
+                         fmt="plain", data=data)
+    assert _zaehle(target, '"Kunden %"') == 0
+
+
+def test_restore_ist_alles_oder_nichts_und_ohne_psql_befehle(quelle_und_ziel):
+    target = quelle_und_ziel
+    with ziel(target):
+        with pytest.raises(PostgresAgentError):
+            restore_database(database_name="ziel", owner_role="eigner", owner_password=EIGNER_PW, fmt="plain",
+                             data=b"CREATE TABLE halb (x int);\nSELECT * FROM gibt_es_nicht;\n")
+        with pytest.raises(PostgresAgentError, match="meta-commands"):
+            restore_database(database_name="ziel", owner_role="eigner", owner_password=EIGNER_PW, fmt="plain",
+                             data=b"\\! id\n")
+    with pytest.raises(PostgresAgentError, match="42P01"):
+        _zaehle(target, "halb")

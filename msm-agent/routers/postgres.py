@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+import base64
+import binascii
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -18,10 +21,14 @@ from services.postgres_service import (
     demote_owner,
     dispatch_query,
     drop_databases_and_roles,
+    dump_database,
     dump_databases,
     ensure_internal_postgres,
+    pending_dump_path,
+    pending_dumps,
     promote_owner,
     provision,
+    restore_database,
     restore_sql,
     rotate_admin_password,
     rotate_role_password,
@@ -334,3 +341,103 @@ def postgres_run(body: RunIn) -> dict[str, Any]:
             )
     except PostgresAgentError as exc:
         raise _http(exc) from exc
+
+
+class TableRefIn(BaseModel):
+    schema_name: str = Field(..., min_length=1, max_length=63)
+    name: str = Field(..., min_length=1, max_length=63)
+
+
+class DumpDbIn(_Zielbar):
+    admin_password: str = Field(..., min_length=1)
+    database_name: str = Field(..., min_length=1, max_length=63)
+    format: Literal["plain", "custom", "tar"] = "plain"
+    schema_only: bool = False
+    data_only: bool = False
+    schemas: list[str] = Field(default_factory=list, max_length=100)
+    tables: list[TableRefIn] = Field(default_factory=list, max_length=500)
+
+
+@router.post("/dump-db")
+def postgres_dump_db(body: DumpDbIn) -> dict[str, Any]:
+    """Eine Datenbank als Datei (Base64), fuer das Studio."""
+    try:
+        with ziel(body.ziel_dict()):
+            data = dump_database(
+                admin_password=body.admin_password,
+                database_name=body.database_name,
+                fmt=body.format,
+                schema_only=body.schema_only,
+                data_only=body.data_only,
+                schemas=body.schemas,
+                tables=[(t.schema_name, t.name) for t in body.tables],
+            )
+    except PostgresAgentError as exc:
+        raise _http(exc) from exc
+    return {"data_b64": base64.b64encode(data).decode("ascii"), "size_bytes": len(data)}
+
+
+class RestoreDbIn(_Zielbar):
+    database_name: str = Field(..., min_length=1, max_length=63)
+    owner_role: str = Field(..., min_length=1, max_length=63)
+    owner_password: str = Field(..., min_length=1)
+    format: Literal["plain", "custom", "tar"] = "plain"
+    clean: bool = False
+    data_b64: str | None = Field(None, max_length=300_000_000)
+    # Liegengebliebener Dump eines Datenbankserver-Restores statt Upload.
+    pending_server_id: int | None = Field(None, ge=1)
+
+
+@router.post("/restore-db")
+def postgres_restore_db(body: RestoreDbIn) -> dict[str, Any]:
+    try:
+        pending = None
+        if body.pending_server_id is not None:
+            pending = pending_dump_path(body.pending_server_id, body.database_name)
+            data, fmt = pending.read_bytes(), "plain"
+        else:
+            try:
+                data = base64.b64decode(body.data_b64 or "", validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="data_b64 is not valid base64") from exc
+            fmt = body.format
+        if not data:
+            raise HTTPException(status_code=400, detail="Empty dump")
+        with ziel(body.ziel_dict()):
+            result = restore_database(
+                database_name=body.database_name,
+                owner_role=body.owner_role,
+                owner_password=body.owner_password,
+                fmt=fmt,
+                data=data,
+                clean=body.clean,
+            )
+        if pending is not None:
+            pending.unlink(missing_ok=True)
+        return result
+    except PostgresAgentError as exc:
+        raise _http(exc) from exc
+
+
+class PendingIn(BaseModel):
+    server_id: int = Field(..., ge=1)
+    database_name: str | None = Field(None, min_length=1, max_length=63)
+
+
+@router.post("/pending")
+def postgres_pending(body: PendingIn) -> list[dict[str, Any]]:
+    try:
+        return pending_dumps(body.server_id)
+    except PostgresAgentError as exc:
+        raise _http(exc) from exc
+
+
+@router.post("/pending/discard")
+def postgres_pending_discard(body: PendingIn) -> dict[str, Any]:
+    if not body.database_name:
+        raise HTTPException(status_code=400, detail="database_name required")
+    try:
+        pending_dump_path(body.server_id, body.database_name).unlink(missing_ok=True)
+    except PostgresAgentError as exc:
+        raise _http(exc) from exc
+    return {"ok": True}

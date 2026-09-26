@@ -1529,16 +1529,145 @@ def dump_databases(*, admin_password: str, database_names: list[str]) -> dict[st
                 f"pg_dump failed for database: {(exec_result.get('error') or '')[:200]}",
                 status_code=500,
             )
-        dump_text = exec_result.get("stdout") or ""
         # PostgreSQL 17 may wrap plain dumps in psql's \restrict commands.
         # Remove only these tool-generated guards. User-controlled restore SQL
         # is still rejected below if any psql meta-command remains.
-        result[name] = "\n".join(
-            line
-            for line in dump_text.splitlines()
-            if not re.match(r"^[ \t]*\\(?:un)?restrict(?:[ \t]|$)", line)
-        )
+        result[name] = _ohne_restrict(exec_result.get("stdout") or "")
     return result
+
+
+def _ohne_restrict(text: str) -> str:
+    return "\n".join(
+        line
+        for line in text.splitlines()
+        if not re.match(r"^[ \t]*\\(?:un)?restrict(?:[ \t]|$)", line)
+    )
+
+
+DUMP_FORMATS = {"plain": "p", "custom": "c", "tar": "t"}
+PENDING_DIR = Path(".msm") / "postgres"
+
+
+def _muster(*teile: str) -> str:
+    """pg_dump-Muster: in doppelten Anfuehrungszeichen gilt jedes Zeichen woertlich."""
+    return ".".join('"' + teil.replace('"', '""') + '"' for teil in teile)
+
+
+def dump_database(
+    *,
+    admin_password: str,
+    database_name: str,
+    fmt: str = "plain",
+    schema_only: bool = False,
+    data_only: bool = False,
+    schemas: list[str] | None = None,
+    tables: list[tuple[str, str]] | None = None,
+) -> bytes:
+    """pg_dump einer Datenbank. Argumente als argv, nie durch eine Shell."""
+    name = validate_identifier(database_name)
+    if fmt not in DUMP_FORMATS:
+        raise PostgresAgentError("Invalid dump format")
+    if schema_only and data_only:
+        raise PostgresAgentError("schema_only and data_only exclude each other")
+    ensure_internal_postgres(admin_password)
+    command = [
+        "pg_dump", f"--format={DUMP_FORMATS[fmt]}", "--no-owner", "--no-acl",
+        f"--dbname={name}", f"--port={_internal_port()}", f"--username={ADMIN_USER}",
+    ]
+    if fmt == "plain":
+        # INSERT statt COPY: COPY-Daten enden auf "\." und koennen mit "\"
+        # beginnen — der Restore lehnt jede solche Zeile als psql-Befehl ab.
+        command.append("--rows-per-insert=500")
+        if not data_only:
+            command += ["--clean", "--if-exists"]
+    if schema_only:
+        command.append("--schema-only")
+    if data_only:
+        command.append("--data-only")
+    for schema in schemas or []:
+        command.append(f"--schema={_muster(schema)}")
+    for schema, table in tables or []:
+        command.append(f"--table={_muster(schema, table)}")
+    result = docker_service.exec_in_managed(
+        _container(), command, timeout=600, environment={"PGPASSWORD": admin_password}, binary=True,
+    )
+    if not result.get("ok"):
+        raise PostgresAgentError(f"pg_dump failed: {(result.get('error') or '')[:300]}", status_code=500)
+    data = result.get("stdout_bytes") or b""
+    if fmt == "plain":
+        data = _ohne_restrict(data.decode("utf-8", errors="replace")).encode("utf-8")
+    return data
+
+
+def restore_database(
+    *,
+    database_name: str,
+    owner_role: str,
+    owner_password: str,
+    fmt: str,
+    data: bytes,
+    clean: bool = False,
+) -> dict[str, Any]:
+    """Spielt einen Dump als Owner ein — alles oder nichts."""
+    name = validate_identifier(database_name)
+    role = validate_identifier(owner_role)
+    if fmt not in DUMP_FORMATS:
+        raise PostgresAgentError("Invalid dump format")
+    started = time.monotonic()
+    port = str(_internal_port())
+    if fmt == "plain":
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise PostgresAgentError("SQL dump is not UTF-8", status_code=400) from exc
+        text = _ohne_restrict(text)
+        _reject_psql_meta_commands(text)
+        command = [
+            "psql", "--no-psqlrc", "--set", "ON_ERROR_STOP=1", "--single-transaction",
+            "--username", role, "--dbname", name, "--port", port,
+        ]
+        result = docker_service.exec_in_managed_stdin(
+            _container(), command, text, environment={"PGPASSWORD": owner_password}
+        )
+    else:
+        command = [
+            "pg_restore", "--no-owner", "--no-acl", "--single-transaction", "--exit-on-error",
+            "--username", role, "--dbname", name, "--port", port,
+        ]
+        if clean:
+            command += ["--clean", "--if-exists"]
+        result = docker_service.exec_in_managed_stdin(
+            _container(), command, data, environment={"PGPASSWORD": owner_password}
+        )
+    if not result.get("ok"):
+        raise PostgresAgentError(f"restore failed: {(result.get('error') or '')[:300]}", status_code=400)
+    return {"ok": True, "database": name, "duration_ms": int((time.monotonic() - started) * 1000)}
+
+
+def _pending_dir(server_id: int | str) -> Path:
+    from services.file_service import server_root
+
+    return server_root(server_id) / PENDING_DIR
+
+
+def pending_dumps(server_id: int | str) -> list[dict[str, Any]]:
+    """Dumps, die ein Backup-Restore eines Datenbankservers liegen liess."""
+    folder = _pending_dir(server_id)
+    if not folder.is_dir():
+        return []
+    return [
+        {"database": path.stem, "size_bytes": path.stat().st_size, "modified": path.stat().st_mtime}
+        for path in sorted(folder.glob("*.sql"))
+        if path.is_file() and IDENTIFIER_RE.fullmatch(path.stem)
+    ]
+
+
+def pending_dump_path(server_id: int | str, database_name: str) -> Path:
+    name = validate_identifier(database_name)
+    path = _pending_dir(server_id) / f"{name}.sql"
+    if not path.is_file():
+        raise PostgresAgentError("No pending dump for this database", status_code=404)
+    return path
 
 
 def _reject_psql_meta_commands(sql_text: str) -> None:
