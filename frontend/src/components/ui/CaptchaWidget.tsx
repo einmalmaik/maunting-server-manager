@@ -101,6 +101,16 @@ export function CaptchaWidget({ onVerify, resetKey }: CaptchaWidgetProps) {
           widget.setAttribute('language', lang)
           const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
           widget.setAttribute('theme', isDark ? 'dark' : 'auto')
+          widget.setAttribute('hidefooter', 'true')
+          widget.setAttribute(
+            'strings',
+            JSON.stringify({
+              label: t('captcha.altcha.label', 'Ich bin ein Mensch (DIS Shield)'),
+              verifying: t('captcha.altcha.verifying', 'Sicherheitsprüfung läuft …'),
+              verified: t('captcha.altcha.verified', 'Verifiziert'),
+              error: t('captcha.altcha.error', 'Sicherheitsprüfung fehlgeschlagen'),
+            }),
+          )
 
           const handleStateChange = (ev: Event) => {
             const customEv = ev as CustomEvent

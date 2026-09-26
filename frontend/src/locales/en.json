@@ -1,4 +1,12 @@
 {
+  "captcha": {
+    "altcha": {
+      "label": "I am humans",
+      "verifying": "Security check in progress …",
+      "verified": "Verified",
+      "error": "Security check failed"
+    }
+  },
   "nav": {
     "dashboard": "Dashboard",
     "calendar": "Calendar",

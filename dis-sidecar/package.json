@@ -8,6 +8,6 @@
     "node": ">=20.19.0"
   },
   "dependencies": {
-    "@msdis/shield": "0.2.2"
+    "@msdis/shield": "0.3.0"
   }
 }
