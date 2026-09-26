@@ -716,47 +716,40 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_server_create",
-            "Schlaegt die Erstellung eines neuen Servers zur manuellen Bestaetigung vor. "
-            "Ports, Installationsverzeichnis und Host werden von MSM vergeben. "
-            "Wenn ein Modpack mitgegeben wird (modpack_mod_id), wird es nach der "
-            "Servererstellung automatisch installiert — ein separater propose_modpack_install "
-            "ist dann NICHT noetig.",
+            "Schlaegt einen neuen Server zur Bestaetigung vor; Ports und Verzeichnis vergibt MSM. "
+            "server_kind 'database' legt eine eigene PostgreSQL-Instanz an (ohne game_type). "
+            "modpack_mod_id wird danach automatisch installiert.",
             {
-                "name": {"type": "string", "maxLength": 128, "description": "Servername."},
-                "game_type": {
-                    "type": "string",
-                    "maxLength": 64,
-                    "description": "Blueprint-ID oder Spieltyp (z. B. 'minecraft_vanilla', 'minecraft_forge', 'valheim', 'palworld', 'rust').",
+                "name": {"type": "string", "maxLength": 128},
+                "server_kind": {"type": "string", "enum": ["application", "database"]},
+                "game_type": {"type": "string", "maxLength": 64, "description": "Blueprint-ID, z. B. 'valheim'."},
+                "ram_limit_mb": {"type": "integer", "minimum": 512, "maximum": 4_194_304},
+                "cpu_limit_percent": {"type": "integer", "minimum": 10, "maximum": 3_200, "description": "100 = 1 Kern."},
+                "disk_limit_gb": {"type": "integer", "minimum": 1, "maximum": 1_048_576},
+                "node_id": {"type": ["integer", "null"]},
+                "public_bind_ip": {"type": ["string", "null"], "maxLength": 64},
+                "postgres_database_count": {
+                    "type": ["integer", "null"], "minimum": 1, "maximum": 20,
+                    "description": "Anwendung: Datenbanken im gemeinsamen Cluster.",
                 },
-                "ram_limit_mb": {"type": "integer", "minimum": 512, "maximum": 4_194_304, "description": "RAM in MB (z. B. 6144 fuer 6 GB)."},
-                "cpu_limit_percent": {"type": "integer", "minimum": 10, "maximum": 3_200, "description": "CPU-Limit in Prozent (z. B. 200 fuer 2 Kerne)."},
-                "disk_limit_gb": {"type": "integer", "minimum": 1, "maximum": 1_048_576, "description": "Festplatten-Limit in GB (z. B. 20)."},
-                "node_id": {"type": ["integer", "null"], "description": "Optional: Node-ID aus advise_node_placement oder read_node_capacity."},
-                "public_bind_ip": {
-                    "type": ["string", "null"],
-                    "maxLength": 64,
-                    "description": "Optional: Konkrete Host-/Bind-IP der Ziel-Node. Wähle die öffentliche IP oder die empfohlene Default-Bind-IP des Nodes.",
+                "database": {
+                    "type": ["object", "null"],
+                    "description": "Datenbankserver. Das Passwort erzeugt das Panel.",
+                    "properties": {
+                        "database_name": {"type": "string", "maxLength": 63},
+                        "username": {"type": "string", "maxLength": 59},
+                        "allowed_cidrs": {"type": "array", "items": {"type": "string"}, "description": "Leer: nur intern."},
+                        "ssl_required": {"type": "boolean"},
+                        "port": {"type": ["integer", "null"], "minimum": 1024, "maximum": 65535},
+                    },
                 },
-                "modpack_mod_id": {
-                    "type": ["string", "null"],
-                    "maxLength": 32,
-                    "description": "Optional: CurseForge Modpack-ID. Wird nach der Servererstellung automatisch installiert.",
-                },
-                "modpack_name": {
-                    "type": ["string", "null"],
-                    "maxLength": 128,
-                    "description": "Optional: Name des Modpacks (z. B. 'Cobblemon GG').",
-                },
-                "modpack_file_id": {
-                    "type": ["string", "null"],
-                    "maxLength": 32,
-                    "description": "Optional: File-ID der Modpack-Version (neueste, wenn leer).",
-                },
+                "modpack_mod_id": {"type": ["string", "null"], "maxLength": 32, "description": "CurseForge-Modpack-ID."},
+                "modpack_name": {"type": ["string", "null"], "maxLength": 128},
+                "modpack_file_id": {"type": ["string", "null"], "maxLength": 32},
                 **_RATIONALE_SCHEMA,
             },
             [
                 "name",
-                "game_type",
                 "ram_limit_mb",
                 "cpu_limit_percent",
                 "disk_limit_gb",
@@ -1092,6 +1085,29 @@ def provider_tool_definitions() -> list[dict]:
         _server_function(
             "read_server_backups",
             "Liest die vorhandenen Backups mit Groesse und Zeitpunkt.",
+        ),
+        # Anleitung (Ansichten, Ablauf) in `ai_prompt.DATENBANK_STUDIO` — der
+        # Katalog geht jede Runde ungecacht mit.
+        _server_function(
+            "read_database",
+            "Liest eine PostgreSQL-Datenbank des Servers wie das Studio.",
+            {
+                "database": {"type": "string", "maxLength": 63},
+                "view": {
+                    "type": "string",
+                    "enum": [
+                        "overview", "objects", "table", "rows", "function", "extensions", "roles",
+                        "grants", "health", "parameters", "sessions", "locks", "operations",
+                        "operation_schema",
+                    ],
+                },
+                "schema": {"type": "string", "maxLength": 63},
+                "name": {"type": "string", "maxLength": 63},
+                "oid": {"type": "integer"},
+                "filters": {"type": "array", "items": {"type": "object"}},
+                "limit": {"type": "integer", "enum": [25, 50, 100, 500]},
+            },
+            ["view"],
         ),
         _server_function(
             "read_guardian_incidents",
@@ -1529,6 +1545,19 @@ def provider_tool_definitions() -> list[dict]:
                 **_RATIONALE_SCHEMA,
             },
             ["path", *_RATIONALE_REQUIRED],
+        ),
+        _server_function(
+            "propose_database_change",
+            "Aendert eine PostgreSQL-Datenbank wie das Studio: genau eines von operation, rows, sql.",
+            {
+                "database": {"type": "string", "maxLength": 63},
+                "operation": {"type": "object"},
+                "rows": {"type": "object"},
+                "sql": {"type": "string"},
+                "rollback": {"type": "boolean"},
+                **_RATIONALE_SCHEMA,
+            },
+            list(_RATIONALE_REQUIRED),
         ),
         *_desktop_tool_definitions(),
     ]
@@ -2372,6 +2401,11 @@ def _execute_server_context_tool(
         if not permission_service.has_server_permission(db, user, server.id, "server.mods.read"):
             raise AiActionValidationError("Mod-Lesezugriff ist nicht erlaubt")
         return _execute_mod_tool(db, server=server, tool_name=tool_name, arguments=arguments)
+
+    if tool_name == "read_database":
+        from services.ai_tools.database_tools import read_database
+
+        return read_database(db, user=user, server=server, arguments=arguments)
 
     if tool_name == "read_server_backups":
         _require_no_arguments(tool_name, arguments)

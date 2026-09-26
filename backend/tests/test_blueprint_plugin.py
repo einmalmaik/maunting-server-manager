@@ -980,3 +980,27 @@ def test_conan_post_install_copy_falls_back_on_copy2_permission_error(tmp_path, 
     assert res == {}
     copied = tmp_path / "ConanSandbox" / "Mods" / "Perm.pak"
     assert copied.read_bytes() == b"pak-bytes"
+
+
+def _postgres_plugin() -> BlueprintPlugin:
+    native_dir = Path(__file__).resolve().parents[1] / "blueprints" / "native"
+    return BlueprintPlugin(load_blueprint_file(native_dir / "postgres.blueprint.json"))
+
+
+def test_postgres_laeuft_nie_als_root_ohne_capabilities():
+    """Laeuft das Panel als root (oder auf Windows, wo es keine UID gibt), war der
+    Datenbankserver ``0:0`` — ohne Capabilities. Der Entrypoint von ``postgres:17``
+    will dann ``pgdata`` an ``postgres`` uebergeben und per ``gosu`` wechseln; beides
+    scheitert (``chown: Operation not permitted``), der Container endet mit Exit 1.
+    Der Benutzer des Images ist die Rueckfallebene: ihm gehoeren nach dem
+    Rechte-Repair pgdata, Schluessel und pg_hba.conf, und er braucht keine
+    Capability."""
+    plugin = _postgres_plugin()
+    with patch("services.docker_service.container_runtime_uid_gid", return_value=(0, 0)):
+        assert plugin.container_uid_gid(_FakeServer()) == (999, 999)
+
+
+def test_postgres_behaelt_die_runtime_uid_wenn_sie_nicht_root_ist():
+    plugin = _postgres_plugin()
+    with patch("services.docker_service.container_runtime_uid_gid", return_value=(1001, 1001)):
+        assert plugin.container_uid_gid(_FakeServer()) == (1001, 1001)

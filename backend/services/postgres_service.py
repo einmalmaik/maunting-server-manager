@@ -14,7 +14,6 @@ eines anderen Servers liegen.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 import secrets
@@ -22,12 +21,11 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
 from config import settings
-from models import Node, PostgresDatabase, PostgresGrant, PostgresInstance, PostgresUser, Server
+from models import Node, PostgresDatabase, PostgresGrant, PostgresUser, Server
 from services.auth_service import AuthService
 from services.node_client import NodeClient, NodeClientError
 from services.node_service import (
@@ -43,16 +41,6 @@ ADMIN_USER = "msm_admin"
 CONTROL_DB = "msm_control"
 ADMIN_PASSWORD_KEY = "managed_postgres.admin_password_encrypted"
 IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
-ALLOWED_COLUMN_TYPES = {
-    "text": "text",
-    "varchar": "varchar(255)",
-    "integer": "integer",
-    "bigint": "bigint",
-    "boolean": "boolean",
-    "timestamp": "timestamp",
-    "jsonb": "jsonb",
-}
-
 _WRITE_KEYWORDS = (
     "insert", "update", "delete", "create", "drop", "alter", "truncate",
     "grant", "revoke", "copy", "vacuum", "analyze", "cluster", "reindex",
@@ -500,27 +488,6 @@ def _owner_password(database: PostgresDatabase) -> str:
     )
 
 
-def _owner_query(
-    db: Session,
-    server_id: int,
-    database: PostgresDatabase,
-    action: str,
-    **extra: Any,
-) -> Any:
-    verbindung = _verbindung_fuer(db, server_id)
-    payload = {
-        "action": action,
-        "database_name": database.name,
-        "owner_role": database.owner_role,
-        "owner_password": _owner_password(database),
-        **extra,
-    }
-    try:
-        return verbindung.client.postgres_query(verbindung.mit_ziel(payload))
-    except NodeClientError as exc:
-        raise PostgresServiceError(exc.message or "Agent query failed") from exc
-
-
 def provision_server_databases(
     db: Session,
     server: Server,
@@ -824,160 +791,6 @@ def drop_server_resources(db: Session, server_id: int) -> None:
     db.commit()
 
 
-def list_tables(db: Session, server_id: int, database_id: int) -> list[dict[str, Any]]:
-    database = _database_row(db, server_id, database_id)
-    result = _owner_query(db, server_id, database, "list_tables")
-    return result if isinstance(result, list) else []
-
-
-def database_stats(db: Session, server_id: int, database_id: int) -> dict[str, Any]:
-    database = _database_row(db, server_id, database_id)
-    result = _owner_query(db, server_id, database, "stats")
-    return result if isinstance(result, dict) else {}
-
-
-def describe_table(
-    db: Session,
-    server_id: int,
-    database_id: int,
-    schema_name: str,
-    table_name: str,
-) -> dict[str, Any]:
-    database = _database_row(db, server_id, database_id)
-    return _owner_query(
-        db,
-        server_id,
-        database,
-        "describe_table",
-        schema_name=schema_name or "public",
-        table_name=table_name,
-    )
-
-
-def create_table(
-    db: Session,
-    server_id: int,
-    database_id: int,
-    schema_name: str,
-    table_name: str,
-    columns: list[dict[str, Any]],
-) -> None:
-    database = _database_row(db, server_id, database_id)
-    _owner_query(
-        db,
-        server_id,
-        database,
-        "create_table",
-        schema_name=schema_name or "public",
-        table_name=table_name,
-        columns=columns,
-    )
-
-
-def drop_table(
-    db: Session,
-    server_id: int,
-    database_id: int,
-    schema_name: str,
-    table_name: str,
-) -> None:
-    database = _database_row(db, server_id, database_id)
-    _owner_query(
-        db,
-        server_id,
-        database,
-        "drop_table",
-        schema_name=schema_name or "public",
-        table_name=table_name,
-    )
-
-
-def read_rows(
-    db: Session,
-    server_id: int,
-    database_id: int,
-    schema_name: str,
-    table_name: str,
-    limit: int,
-    offset: int,
-    search: str | None = None,
-) -> dict[str, Any]:
-    database = _database_row(db, server_id, database_id)
-    return _owner_query(
-        db,
-        server_id,
-        database,
-        "read_rows",
-        schema_name=schema_name or "public",
-        table_name=table_name,
-        limit=limit,
-        offset=offset,
-        search=search,
-    )
-
-
-def update_row(
-    db: Session,
-    server_id: int,
-    database_id: int,
-    schema_name: str,
-    table_name: str,
-    key_conditions: dict[str, Any],
-    updates: dict[str, Any],
-) -> dict[str, Any]:
-    database = _database_row(db, server_id, database_id)
-    return _owner_query(
-        db,
-        server_id,
-        database,
-        "update_row",
-        schema_name=schema_name or "public",
-        table_name=table_name,
-        key_conditions=key_conditions,
-        updates=updates,
-    )
-
-
-def delete_rows(
-    db: Session,
-    server_id: int,
-    database_id: int,
-    schema_name: str,
-    table_name: str,
-    row_conditions: list[dict[str, Any]],
-) -> dict[str, Any]:
-    database = _database_row(db, server_id, database_id)
-    return _owner_query(
-        db,
-        server_id,
-        database,
-        "delete_rows",
-        schema_name=schema_name or "public",
-        table_name=table_name,
-        row_conditions=row_conditions,
-    )
-
-
-def insert_row(
-    db: Session,
-    server_id: int,
-    database_id: int,
-    schema_name: str,
-    table_name: str,
-    row_data: dict[str, Any],
-) -> dict[str, Any]:
-    database = _database_row(db, server_id, database_id)
-    return _owner_query(
-        db,
-        server_id,
-        database,
-        "insert_row",
-        schema_name=schema_name or "public",
-        table_name=table_name,
-        row_data=row_data,
-    )
-
-
 def _split_sql_statements(text: str) -> list[str]:
     """Split a SQL script into individual statements (panel_database_service + tests)."""
     statements: list[str] = []
@@ -1133,47 +946,6 @@ def _is_read_only(stmt: str) -> bool:
     return head not in _WRITE_KEYWORDS
 
 
-def execute_sql(
-    db: Session, server_id: int, database_id: int, statement: str, limit: int
-) -> dict[str, Any]:
-    database = _database_row(db, server_id, database_id)
-    return _owner_query(
-        db,
-        server_id,
-        database,
-        "execute_sql",
-        sql=statement,
-        limit=limit,
-    )
-
-
-def _validate_extension_name(name: str) -> str:
-    cleaned = (name or "").strip().lower()
-    if not IDENTIFIER_RE.fullmatch(cleaned):
-        raise ValueError("Ungueltiger Extension-Name.")
-    if cleaned not in settings.trusted_postgres_extensions:
-        raise ValueError(f"Extension '{cleaned}' ist nicht erlaubt.")
-    return cleaned
-
-
-def list_extensions(db: Session, server_id: int, database_id: int) -> list[dict[str, Any]]:
-    database = _database_row(db, server_id, database_id)
-    result = _owner_query(db, server_id, database, "list_extensions")
-    return result if isinstance(result, list) else []
-
-
-def install_extension(db: Session, server_id: int, database_id: int, name: str) -> None:
-    database = _database_row(db, server_id, database_id)
-    ext = _validate_extension_name(name)
-    _owner_query(db, server_id, database, "install_extension", name=ext)
-
-
-def drop_extension(db: Session, server_id: int, database_id: int, name: str) -> None:
-    database = _database_row(db, server_id, database_id)
-    ext = _validate_extension_name(name)
-    _owner_query(db, server_id, database, "drop_extension", name=ext)
-
-
 def promote_owner_to_power_user(db: Session, server_id: int, database_id: int) -> dict[str, Any]:
     """Issue elevated owner credentials for this database only (not cluster SUPERUSER)."""
     database = _database_row(db, server_id, database_id)
@@ -1283,72 +1055,6 @@ def _restore_owners(db: Session, server_id: int) -> dict[str, dict[str, str]]:
             "owner_password": _owner_password(row),
         }
         for row in rows
-    }
-
-
-def dump_server_databases(db: Session, server_id: int) -> tuple[str, list[str], int, str, int]:
-    sql_text, names, size, sha, dur = _pg_dump_server_dbs(db, server_id)
-    return sql_text, names, size, sha, dur
-
-
-def _pg_dump_server_dbs(db: Session, server_id: int) -> tuple[str, list[str], int, str, int]:
-    db_names = _server_database_names(db, server_id)
-    if not db_names:
-        raise ValueError("Server hat keine Postgres-Datenbanken.")
-    started = time.monotonic()
-    verbindung = _verbindung_fuer(db, server_id)
-    try:
-        resp = verbindung.client.postgres_dump(
-            admin_password=verbindung.admin_password,
-            database_names=db_names,
-            target=verbindung.target,
-        )
-    except NodeClientError as exc:
-        raise PostgresServiceError(exc.message or "pg_dump failed") from exc
-    dumps = resp.get("dumps") or {}
-    out_parts: list[str] = [
-        "-- MSM Postgres Dump\n",
-        f"-- Server ID: {server_id}\n",
-        f"-- Databases: {', '.join(db_names)}\n",
-        f"-- Generated: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n",
-        "-- Format: pg_dump --format=plain --no-owner --no-acl --clean (RESTORE via psql)\n",
-        "\n",
-    ]
-    for db_name in db_names:
-        body = dumps.get(db_name) or ""
-        if not body.strip():
-            continue
-        out_parts.append(f"\n-- ===== Database: {db_name} =====\n")
-        out_parts.append(body)
-        if not body.endswith("\n"):
-            out_parts.append("\n")
-    sql_text = "".join(out_parts)
-    raw_bytes = sql_text.encode("utf-8")
-    sha = hashlib.sha256(raw_bytes).hexdigest()
-    duration_ms = int((time.monotonic() - started) * 1000)
-    return sql_text, db_names, len(raw_bytes), sha, duration_ms
-
-
-def restore_sql_to_server_dbs(db: Session, server_id: int, sql_text: str) -> dict[str, Any]:
-    db_names = _server_database_names(db, server_id)
-    if not db_names:
-        raise ValueError("Server hat keine Postgres-Datenbanken.")
-    dumps = {name: sql_text for name in db_names}
-    verbindung = _verbindung_fuer(db, server_id)
-    try:
-        result = verbindung.client.postgres_restore(
-            admin_password=verbindung.admin_password,
-            dumps=dumps,
-            owners=_restore_owners(db, server_id),
-            target=verbindung.target,
-        )
-    except NodeClientError as exc:
-        raise PostgresServiceError(exc.message or "Restore failed") from exc
-    return {
-        "ok": True,
-        "databases": result.get("databases") or db_names,
-        "bytes": len(sql_text.encode("utf-8")),
-        "duration_ms": result.get("duration_ms") or 0,
     }
 
 
@@ -1492,6 +1198,18 @@ def run(
 # ── Verbindungs-Hub ────────────────────────────────────────────────────────
 
 
+def _is_loopback_bind(bind_ip: str | None) -> bool:
+    import ipaddress
+
+    text = (bind_ip or "").strip()
+    if not text:
+        return True
+    try:
+        return ipaddress.ip_address(text).is_loopback
+    except ValueError:
+        return text == "localhost"
+
+
 def connection_info(db: Session, server: Server) -> dict[str, Any]:
     """Alles, was ein Client zum Verbinden braucht — ohne Passwoerter."""
     from services import postgres_instance_service
@@ -1531,13 +1249,22 @@ def connection_info(db: Session, server: Server) -> dict[str, Any]:
     }
     if dedicated:
         instance = server.postgres_instance
-        bind = (server.public_bind_ip or "").strip()
+        cidrs = postgres_instance_service.cidrs_of(instance)
+        # Von aussen kommt nur herein, wer beides hat: einen Port an einer
+        # erreichbaren IP und ein Netz in pg_hba.conf. Der Grund steht dabei,
+        # damit der Hub nicht zum Falschen raet.
+        blocked_by = (
+            "loopback" if _is_loopback_bind(server.public_bind_ip)
+            else "no_networks" if not cidrs
+            else None
+        )
         result["external"] = {
             "host": postgres_instance_service.public_host(server),
             "port": database_port(server) or 5432,
-            "reachable": bool(bind) and bind != "127.0.0.1",
+            "reachable": blocked_by is None,
+            "blocked_by": blocked_by,
             "ssl_required": bool(instance.ssl_required),
-            "allowed_cidrs": postgres_instance_service.cidrs_of(instance),
+            "allowed_cidrs": cidrs,
         }
         result["ssl_certificate"] = postgres_instance_service.read_certificate(db, server)
         if server.status == "running":

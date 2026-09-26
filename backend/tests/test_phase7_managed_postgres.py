@@ -26,7 +26,9 @@ def test_node_client_postgres_methods_exist():
     assert hasattr(NodeClient, "postgres_provision")
     assert hasattr(NodeClient, "postgres_dump")
     assert hasattr(NodeClient, "postgres_restore")
-    assert hasattr(NodeClient, "postgres_query")
+    # Der Studio-Weg; der alte Abfrageweg (`postgres_query`) ist entfernt.
+    assert hasattr(NodeClient, "postgres_run")
+    assert not hasattr(NodeClient, "postgres_query")
 
 
 def test_rotate_user_password_proxies(db, test_server):
@@ -57,36 +59,6 @@ def test_rotate_user_password_proxies(db, test_server):
     # plaintext password only in response, not stored as plain on user row
     db.refresh(user)
     assert user.password_mask.startswith("****")
-
-
-def test_list_tables_owner_query(db, test_server):
-    from models import PostgresDatabase
-
-    pg = PostgresDatabase(
-        server_id=test_server.id,
-        name="msm_s1_db1",
-        owner_role="msm_s1_o1",
-        owner_password_encrypted="enc",
-    )
-    db.add(pg)
-    db.commit()
-    db.refresh(pg)
-
-    mock_client = MagicMock()
-    mock_client.postgres_query.return_value = [
-        {"schema": "public", "name": "players", "row_estimate": 0, "size_bytes": 0}
-    ]
-
-    with patch.object(postgres_service, "_client_for_server_id", return_value=mock_client), \
-         patch.object(postgres_service, "_owner_password", return_value="owner-pw"):
-        tables = postgres_service.list_tables(db, test_server.id, pg.id)
-
-    assert len(tables) == 1
-    assert tables[0]["name"] == "players"
-    call = mock_client.postgres_query.call_args[0][0]
-    assert call["action"] == "list_tables"
-    assert call["owner_password"] == "owner-pw"
-    assert call["database_name"] == "msm_s1_db1"
 
 
 def test_drop_server_resources_calls_agent(db, test_server):

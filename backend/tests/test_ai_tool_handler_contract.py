@@ -420,6 +420,18 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     Benutzer liest oder Rechte verwaltet (`angebot`); ein Kunde zahlt davon
     nichts. Die Luft beträgt **213 Zeichen**. Fällt die Rechteverwaltung
     wieder weg, geht die Grenze auf 92.000 zurück.
+
+    **Nachtrag 26.09.2026: Datenbanken, Grenze 98.000.** Die KI soll im
+    PostgreSQL-Studio alles können, was der Benutzer kann (Betreiber,
+    26.09.): Datenbankserver anlegen, Tabellen, Funktionen, Trigger und
+    Erweiterungen bauen, Zeilen pflegen. Zwei Werkzeuge (`read_database`,
+    `propose_database_change`) und die Datenbankfelder an
+    `propose_server_create`. Zusammengelegt ist schon, was ging: die gut
+    vierzig Studio-Operationen stehen **nicht** im Katalog, das Modell holt
+    ihr Schema bei Bedarf (`read_database view=operation_schema`), und die
+    Anleitung steht in `ai_prompt.DATENBANK_STUDIO`. Nachgemessen: aus der App
+    **97.353** Zeichen; aus dem Panel **91.873**. Die Luft beträgt **647
+    Zeichen**. Angeboten wird beides nur, wer Datenbankrechte hat.
      """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(
@@ -433,7 +445,7 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
             ],
             ensure_ascii=False,
         )
-        assert len(katalog) < 96_000, (
+        assert len(katalog) < 98_000, (
             f"Der Werkzeugkatalog der Herkunft '{herkunft}' ist auf "
             f"{len(katalog)} Zeichen gewachsen. Er geht in jeder Runde mit und "
             "taucht in keiner Budgetrechnung auf."
@@ -495,6 +507,9 @@ OHNE_RAUCHTEST = {
 BEISPIELARGUMENTE: dict[str, dict] = {
     "read_config": {"path": "server.cfg"},
     "search_server_files": {"query": "hostname"},
+    # Der Rauchserver hat keine Datenbank; die Operationsliste braucht keine
+    # und laeuft trotzdem durch den Handler.
+    "read_database": {"view": "operations"},
 }
 
 

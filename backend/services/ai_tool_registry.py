@@ -149,6 +149,10 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "list_server_files": Werkzeug("server_read", angebot=("server.files.read",)),
     "search_server_files": Werkzeug("server_read", angebot=("server.files.read",)),
     "read_server_backups": Werkzeug("server_read", angebot=("server.backups.read",)),
+    # Das PostgreSQL-Studio lesend — dieselben Funktionen wie die Studio-Reiter
+    # (`ai_tools.database_tools`). Parameter, Sitzungen und Sperren verlangen
+    # dort zusaetzlich `server.databases.admin`, wie an der Route.
+    "read_database": Werkzeug("server_read", angebot=("server.databases.read",)),
     "read_guardian_incidents": Werkzeug("server_read"),
     "read_ai_action_history": Werkzeug("server_read"),
 
@@ -656,6 +660,14 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "propose_file_delete": Werkzeug(
         "server_write", immer_bestaetigen=True, recht="server.files.delete"
     ),
+    # Was das PostgreSQL-Studio schreibt: Struktur (auch Funktionen, Trigger,
+    # Erweiterungen), Zeilen und freies SQL (`ai_proposals.database_proposals`).
+    # `recht` ist die Untergrenze; Operationen mit Admin-Plan und freies SQL
+    # pruefen dort zusaetzlich `server.databases.admin`, wie die Studio-Route.
+    # Kein `immer_bestaetigen`: eine neue Funktion oder ein Trigger ist wie eine
+    # neue Konfigzeile. Gefragt wird am Aufruf (`always_confirm`), wo Daten
+    # verschwinden koennen — destruktiver Plan, Zeilen loeschen, freies SQL.
+    "propose_database_change": Werkzeug("server_write", recht="server.databases.write"),
 
     # ── Shop-Anbindung einrichten ─────────────────────────────────────
     #

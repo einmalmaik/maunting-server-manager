@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Blocks, Bot, CalendarClock, ChevronDown, Eye, FilePenLine, FileX, Globe, HardDriveDownload, HardDriveUpload, Mail, Network, Package, Plug, Power, ServerCog, ShieldCheck, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
+import { Activity, AlertTriangle, Blocks, Bot, CalendarClock, ChevronDown, Database, Eye, FilePenLine, FileX, Globe, HardDriveDownload, HardDriveUpload, Mail, Network, Package, Plug, Power, ServerCog, ShieldCheck, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -106,6 +106,11 @@ const TATSACHEN: readonly string[] = [
   'roles_after',
   'roles_added',
   'roles_removed',
+  // Datenbankänderung: wo, und ob der Plan Daten entfernt. Das SQL selbst
+  // steht als `diff` im Codeblock darunter.
+  'database',
+  'table',
+  'destructive',
 ]
 
 function tatsachenZeilen(preview: Record<string, unknown>): [string, string][] {
@@ -188,6 +193,9 @@ export function AiActionProposalCard({
   const path = previewText(proposal.preview.path)
   const diff = previewText(proposal.preview.diff)
   const tatsachen = tatsachenZeilen(proposal.preview as Record<string, unknown>)
+  // Ein Werkzeug kann beides sein: `propose_database_change` legt eine Funktion
+  // an oder löscht eine Tabelle. Dann sagt es die Vorschau (`destructive`).
+  const unumkehrbar = UNUMKEHRBAR.includes(proposal.tool_name) || proposal.preview.destructive === true
   const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
     propose_config_update: FilePenLine,
     propose_config_patch: FilePenLine,
@@ -218,6 +226,8 @@ export function AiActionProposalCard({
     // es repariert nichts — der `Wrench` daneben wuerde genau das behaupten.
     propose_guardian_tuning: SlidersHorizontal,
     propose_file_delete: FileX,
+    propose_database_change: Database,
+    read_database: Database,
     // Ein stehender Auftrag ist eine Uhr, kein Serververhalten — deshalb
     // dasselbe Symbol fuers Anlegen wie fuers Loeschen, aber ein anderes als
     // fuer alles, was einen Server anfasst.
@@ -268,7 +278,7 @@ export function AiActionProposalCard({
     // Bei unumkehrbaren, destruktiven Aktionen (z. B. Server oder Backups löschen) fragen wir
     // zur Sicherheit einmal per Bestätigungsdialog nach.
     // Bei allen regulären Vorschlägen genügt der Klick auf "Ausführen" direkt auf der Karte.
-    if (UNUMKEHRBAR.includes(proposal.tool_name)) {
+    if (unumkehrbar) {
       const message = [
         t(`ai.actions.tools.${proposal.tool_name}`),
         t(`ai.actions.confirm.${proposal.tool_name}`, { operation, path }),
@@ -404,7 +414,7 @@ export function AiActionProposalCard({
             <Button
               type="button"
               size="sm"
-              variant={UNUMKEHRBAR.includes(proposal.tool_name) ? 'destructive' : 'primary'}
+              variant={unumkehrbar ? 'destructive' : 'primary'}
               disabled={busy}
               onClick={() => void execute()}
             >

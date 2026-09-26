@@ -14,12 +14,31 @@ import { Badge } from '@/components/ui/Badge'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { TabBar } from '@/components/ui/TabBar'
 import { PageHeader } from '@/Singra/UI/PageHeader'
-import { Button, Checkbox } from '@/Singra/UI'
+import { Button, Checkbox, Input, Switch } from '@/Singra/UI'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Spinner } from '@/components/ui/Spinner'
+type ServerKind = 'application' | 'database'
+
+const POSTGRES_BLUEPRINT = 'postgres'
+
+const DB_DEFAULTS = {
+  db_name: 'app',
+  db_user: 'app_owner',
+  db_password: '',
+  db_external: false,
+  db_cidrs: '',
+  db_ssl: true,
+}
+
+function splitCidrs(text: string): string[] {
+  return text.split(/[\s,;]+/).map((part) => part.trim()).filter(Boolean)
+}
+
 export function Servers() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const canCreateServer = useHasPermission('servers.create')
+  const canCreateDatabaseServer = useHasPermission('servers.create.database')
   const [servers, setServers] = useState<Server[]>([])
   const [games, setGames] = useState<GameInfo[]>([])
   const [nodes, setNodes] = useState<Node[]>([])
@@ -34,6 +53,7 @@ export function Servers() {
   const [oneTimeCredentials, setOneTimeCredentials] = useState<PostgresCredential[]>([])
   const [form, setForm] = useState({
     name: '',
+    server_kind: 'application' as ServerKind,
     game_type: 'conan_exiles_ue5',
     cpu_limit_percent: '',
     ram_limit_mb: '',
@@ -46,7 +66,12 @@ export function Servers() {
     postgres_enabled: false,
     postgres_database_count: '1',
     node_id: '' as string,
+    ...DB_DEFAULTS,
   })
+  const isDatabaseServer = form.server_kind === 'database'
+  // Der Blueprint, dessen Ports das Formular zeigt: beim Datenbankserver immer
+  // PostgreSQL, egal was im Spiele-Feld stehen geblieben ist.
+  const blueprintId = isDatabaseServer ? POSTGRES_BLUEPRINT : form.game_type
   const { interfaces, defaultBindIp, loading: interfacesLoading } = useHostInterfaces(form.node_id)
 
   useEffect(() => {
@@ -213,7 +238,7 @@ export function Servers() {
       }
 
       const portsPayload: Record<string, number | null> = {}
-      const selectedGame = safeGames.find((g) => g.id === form.game_type)
+      const selectedGame = safeGames.find((g) => g.id === blueprintId)
       const portDefs = selectedGame?.ports ?? [
         { name: 'game', protocol: 'udp' },
         { name: 'query', protocol: 'udp' },
@@ -232,7 +257,8 @@ export function Servers() {
 
       const body: Record<string, unknown> = {
         name: form.name,
-        game_type: form.game_type,
+        server_kind: form.server_kind,
+        game_type: isDatabaseServer ? null : form.game_type,
         cpu_limit_percent: form.cpu_limit_percent ? parseInt(form.cpu_limit_percent) : null,
         ram_limit_mb: form.ram_limit_mb ? parseInt(form.ram_limit_mb) : null,
         disk_limit_gb: form.disk_limit_gb ? parseInt(form.disk_limit_gb) : null,
@@ -241,8 +267,18 @@ export function Servers() {
         rcon_port: form.rcon_port ? parseInt(form.rcon_port) : null,
         ports: portsPayload,
         public_bind_ip: effectiveBindIp || null,
-        postgres_enabled: form.postgres_enabled,
-        postgres_database_count: form.postgres_enabled ? parseInt(form.postgres_database_count || '1') : null,
+        postgres_enabled: !isDatabaseServer && form.postgres_enabled,
+        postgres_database_count: !isDatabaseServer && form.postgres_enabled ? parseInt(form.postgres_database_count || '1') : null,
+      }
+      if (isDatabaseServer) {
+        body.database = {
+          database_name: form.db_name.trim(),
+          username: form.db_user.trim(),
+          // Leer: das Panel erzeugt eins, abrufbar im Verbindungs-Hub.
+          password: form.db_password || null,
+          allowed_cidrs: form.db_external ? splitCidrs(form.db_cidrs) : [],
+          ssl_required: form.db_ssl,
+        }
       }
       // Ziel-Node mitschicken (Default = Local, sobald Nodes geladen)
       if (form.node_id) {
@@ -261,6 +297,7 @@ export function Servers() {
       const defaultNode = safeNodes.find((n) => n.is_local) || safeNodes[0]
       setForm({
         name: '',
+        server_kind: 'application',
         game_type: 'conan_exiles_ue5',
         cpu_limit_percent: '',
         ram_limit_mb: '',
@@ -273,8 +310,10 @@ export function Servers() {
         postgres_enabled: false,
         postgres_database_count: '1',
         node_id: defaultNode ? String(defaultNode.id) : '',
+        ...DB_DEFAULTS,
       })
       fetchServers()
+      if (isDatabaseServer && created.id) navigate(`/servers/${created.id}?tab=databases`)
     } catch (err: any) {
       const msg = t(err.message) || err.message || t('common.error')
       toast.error(msg)
@@ -305,6 +344,8 @@ export function Servers() {
     }
   }
 
+  // PostgreSQL entsteht über „Datenbankserver", nicht als Spiel in der Liste.
+  const applicationGames = (Array.isArray(games) ? games : []).filter((g) => g.category !== 'database')
   const gameName = (id: string) => (Array.isArray(games) ? games : []).find((g) => g.id === id)?.name || id
 
   // Datengetrieben statt rechtegetrieben: das Backend liefert Kundenserver nur
@@ -415,6 +456,12 @@ export function Servers() {
                     {server.node_name}
                   </Badge>
                 )}
+                {server.server_kind === 'database' && (
+                  <Badge variant="info" className="shrink-0">
+                    <Database className="w-3 h-3 mr-1 inline" />
+                    {t('servers.kind.database')}
+                  </Badge>
+                )}
                 {server.is_hoster_managed && (
                   <Badge variant="info" className="shrink-0" title={t('servers.customerBadge')}>
                     <Store className="w-3 h-3 mr-1 inline" />
@@ -464,6 +511,24 @@ export function Servers() {
               {t('servers.createDescription')}
             </p>
             <form onSubmit={handleCreate} className="space-y-4">
+              {canCreateDatabaseServer && (
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={t('servers.kind.label')}>
+                {(['application', 'database'] as const).map((kind) => (
+                  <Button
+                    key={kind}
+                    type="button"
+                    role="radio"
+                    aria-checked={form.server_kind === kind}
+                    variant={form.server_kind === kind ? 'primary' : 'secondary'}
+                    onClick={() => setForm({ ...form, server_kind: kind, game_port: '', query_port: '', rcon_port: '', ports: {} })}
+                    data-testid={`create-server-kind-${kind}`}
+                  >
+                    {kind === 'database' ? <Database className="w-4 h-4" /> : <ServerIcon className="w-4 h-4" />}
+                    {t(`servers.kind.${kind}`)}
+                  </Button>
+                ))}
+              </div>
+              )}
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t('servers.name')}
@@ -476,6 +541,7 @@ export function Servers() {
                   required
                 />
               </div>
+              {!isDatabaseServer && (
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t('servers.game')}
@@ -483,16 +549,70 @@ export function Servers() {
                 <Dropdown
                   value={form.game_type || null}
                   onChange={(value) => setForm({ ...form, game_type: value })}
-                  options={games.map((g) => ({
+                  options={applicationGames.map((g) => ({
                     value: g.id,
                     label: g.name,
                   }))}
-                  searchable={games.length > 5}
+                  searchable={applicationGames.length > 5}
                   placeholder={t('servers.game')}
                   aria-label={t('servers.game')}
                   data-testid="create-server-game"
                 />
               </div>
+              )}
+              {isDatabaseServer && (
+                <div className="space-y-4 rounded-lg border border-outline-variant bg-surface-container/50 p-4" data-testid="create-database-fields">
+                  <div className="grid grid-cols-2 gap-3">
+                    <Input
+                      label={t('servers.database.name')}
+                      value={form.db_name}
+                      onChange={(e) => setForm({ ...form, db_name: e.target.value })}
+                      required
+                      data-testid="create-db-name"
+                    />
+                    <Input
+                      label={t('servers.database.user')}
+                      value={form.db_user}
+                      onChange={(e) => setForm({ ...form, db_user: e.target.value })}
+                      required
+                      data-testid="create-db-user"
+                    />
+                  </div>
+                  <PasswordInput
+                    label={t('servers.database.password')}
+                    value={form.db_password}
+                    onChange={(e) => setForm({ ...form, db_password: e.target.value })}
+                    minLength={12}
+                    autoComplete="new-password"
+                    placeholder={t('servers.database.passwordAuto')}
+                  />
+                  <label className="flex items-center justify-between gap-3 text-sm text-on-surface">
+                    <span>
+                      <span className="block font-label-md text-label-md">{t('servers.database.external')}</span>
+                      <span className="mt-1 block text-xs text-on-surface-variant">{t('servers.database.externalHint')}</span>
+                    </span>
+                    <Switch checked={form.db_external} onCheckedChange={(v) => setForm({ ...form, db_external: v })} />
+                  </label>
+                  {form.db_external && (
+                    <>
+                      <Input
+                        label={t('servers.database.cidrs')}
+                        value={form.db_cidrs}
+                        onChange={(e) => setForm({ ...form, db_cidrs: e.target.value })}
+                        placeholder="203.0.113.0/24, 198.51.100.7/32"
+                        data-testid="create-db-cidrs"
+                      />
+                      <label className="flex items-center justify-between gap-3 text-sm text-on-surface">
+                        <span>
+                          <span className="block font-label-md text-label-md">{t('servers.database.ssl')}</span>
+                          <span className="mt-1 block text-xs text-on-surface-variant">{t('servers.database.sslHint')}</span>
+                        </span>
+                        <Switch checked={form.db_ssl} onCheckedChange={(v) => setForm({ ...form, db_ssl: v })} />
+                      </label>
+                    </>
+                  )}
+                </div>
+              )}
               {/* Ziel-Node: sichtbar sobald Nodes geladen; Pflichtfeld bei Anzeige */}
               {showNodePicker && (
                 <div>
@@ -596,7 +716,7 @@ export function Servers() {
               </div>
 
               {(() => {
-                const selectedGame = (Array.isArray(games) ? games : []).find((g) => g.id === form.game_type)
+                const selectedGame = (Array.isArray(games) ? games : []).find((g) => g.id === blueprintId)
                 const portDefs = selectedGame?.ports ?? [
                   { name: 'game', protocol: 'udp' },
                   { name: 'query', protocol: 'udp' },
@@ -622,6 +742,8 @@ export function Servers() {
                         ? t('servers.queryPort')
                         : baseRole === 'rcon'
                         ? t('servers.rconPort')
+                        : baseRole === 'database'
+                        ? t('servers.databasePort')
                         : `${role.replace('_', ' ').toUpperCase()} (${p.protocol.toUpperCase()})`
 
                       return (
@@ -658,6 +780,7 @@ export function Servers() {
                   </div>
                 )
               })()}
+              {!isDatabaseServer && (
               <div className="rounded-lg border border-outline-variant bg-surface-container/50 p-4">
                 <label className="flex items-center justify-between gap-3">
                   <span className="flex items-center gap-2">
@@ -698,6 +821,7 @@ export function Servers() {
                   </div>
                 )}
               </div>
+              )}
               <div className="flex gap-3 pt-2">
                 <Button variant="secondary"
                   type="button"

@@ -90,6 +90,7 @@ const SUBGROUPS = [
     id: 'infrastructure',
     keys: [
       'servers.create',
+      'servers.create.database',
       'servers.delete',
       'servers.hoster_customers.view',
       'blueprints.manage',

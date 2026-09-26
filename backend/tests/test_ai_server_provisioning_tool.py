@@ -503,3 +503,104 @@ def test_server_create_resolves_blueprint_and_type_aliases(
     assert preview["cpu_limit_percent"] == 200
     assert preview["disk_limit_gb"] == 20
 
+
+
+# ── Datenbankserver ───────────────────────────────────────────────────────
+
+
+def _db_arguments(**database) -> dict:
+    return _arguments(
+        name="Shop DB",
+        game_type=None,
+        server_kind="database",
+        database={"database_name": "shop", "username": "shop_owner", **database},
+    )
+
+
+def test_a_database_server_goes_through_the_shared_path(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dieselben Felder wie im Anlegedialog, derselbe `provision_server`."""
+    import json
+    from dataclasses import dataclass
+
+    _role(db, regular_user, ("ai.chat.use", "servers.create", "servers.create.database"))
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=_conversation(db, regular_user),
+        tool_name="propose_server_create",
+        arguments=_db_arguments(allowed_cidrs=["203.0.113.0/24"], ssl_required=True, port=25432),
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+    preview = json.loads(proposal.preview_json)
+    assert preview["server_kind"] == "database"
+    assert preview["database"]["password"] == "erzeugt das Panel"
+    assert preview["ports"] == {"database": 25432}
+
+    angelegt = Server(
+        name="Shop DB", game_type="postgres", install_dir="/tmp/shop-db",
+        status="installing", container_name="msm-shop-db",
+    )
+    db.add(angelegt)
+    db.commit()
+    captured: dict = {}
+
+    @dataclass
+    class _Task:
+        id: str = "task-db"
+
+    @dataclass
+    class _Result:
+        server: Server
+        task: _Task
+
+    def fake_provision(db_arg, request, actor, *, idempotency_key=None, retry_of_id=None):
+        captured["request"] = request
+        return _Result(server=angelegt, task=_Task())
+
+    monkeypatch.setattr("services.server_provisioning_service.provision_server", fake_provision)
+    _, token = ai_proposal_service.confirm_proposal(db, proposal_id=proposal.id, user=regular_user)
+    ai_proposal_service.execute_proposal(
+        db, proposal_id=proposal.id, user=regular_user, confirmation_token=token
+    )
+
+    request = captured["request"]
+    assert request.server_kind == "database"
+    # Die Blueprint setzt das Schema selbst — wie beim Anlegen im Panel.
+    assert request.game_type == "postgres"
+    assert request.database.database_name == "shop"
+    assert request.database.username == "shop_owner"
+    assert request.database.allowed_cidrs == ["203.0.113.0/24"]
+    # Kein Passwort aus dem Chat: das Panel erzeugt es.
+    assert request.database.password is None
+    assert request.ports == {"database": 25432}
+
+
+def test_a_database_server_needs_its_own_permission(db: Session, regular_user: User) -> None:
+    _role(db, regular_user, ("ai.chat.use", "servers.create"))
+    with pytest.raises(ai_action_errors.AiActionValidationError, match="servers.create.database"):
+        ai_proposal_service.create_proposal(
+            db,
+            user=regular_user,
+            conversation=_conversation(db, regular_user),
+            tool_name="propose_server_create",
+            arguments=_db_arguments(),
+            correlation_id=str(uuid4()),
+        )
+    assert db.query(AiActionProposal).count() == 0
+
+
+def test_the_ai_never_takes_a_database_password(db: Session, regular_user: User) -> None:
+    _role(db, regular_user, ("ai.chat.use", "servers.create", "servers.create.database"))
+    with pytest.raises(ai_action_errors.AiActionValidationError, match="Passwort"):
+        ai_proposal_service.create_proposal(
+            db,
+            user=regular_user,
+            conversation=_conversation(db, regular_user),
+            tool_name="propose_server_create",
+            arguments=_db_arguments(password="Geheim-" + "9" * 10),
+            correlation_id=str(uuid4()),
+        )
+    assert db.query(AiActionProposal).count() == 0

@@ -55,6 +55,7 @@ const SCHREIBWERKZEUGE = [
   // entscheidet, wie gefragt wird.
   'propose_server_repair',
   'propose_file_delete',
+  'propose_database_change',
   // Guardian je Server anders einstellen. Steht hier, seit die Reparatur den
   // Fall „der Blueprint erwartet etwas, das diese Node nicht leisten kann"
   // beheben darf, ohne die Vorlage für alle Server dieses Spiels zu ändern.

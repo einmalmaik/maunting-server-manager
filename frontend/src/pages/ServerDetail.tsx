@@ -285,8 +285,12 @@ export function ServerDetail() {
   /** Steam / HTTP / GitHub: manueller Datei-Update-Check (nicht Workshop-Mods). */
   const showServerFileUpdates = !!gameInfo?.supports_server_file_updates;
 
+  const isDatabaseServer = server?.server_kind === "database";
+
   const tabs = useMemo(() => {
     const list: { key: TabKey; label: string; icon: typeof FileText }[] = [
+      // Beim Datenbankserver ist die Datenbank der Server: ihr Reiter steht vorn.
+      ...(isDatabaseServer ? [{ key: "databases" as TabKey, label: t("tabs.databases"), icon: Database }] : []),
       { key: "files", label: t("tabs.files"), icon: FileText },
       { key: "console", label: t("tabs.console"), icon: Terminal },
     ];
@@ -308,7 +312,7 @@ export function ServerDetail() {
       icon: RotateCcw,
     });
     list.push({ key: "backups", label: t("tabs.backups"), icon: HardDrive });
-    list.push({ key: "databases", label: t("tabs.databases"), icon: Database });
+    if (!isDatabaseServer) list.push({ key: "databases", label: t("tabs.databases"), icon: Database });
     list.push({
       key: "webhooks",
       label: t("tabs.webhooks", { defaultValue: "Webhooks" }),
@@ -329,9 +333,10 @@ export function ServerDetail() {
       });
     }
     return list;
-  }, [t, showModTab, showMemoryTab, gameInfo?.enable_exec, server?.guardian_enabled]);
+  }, [t, showModTab, showMemoryTab, gameInfo?.enable_exec, server?.guardian_enabled, isDatabaseServer]);
 
-  const rawTab = (searchParams.get("tab") || "files") as TabKey;
+  const defaultTab: TabKey = isDatabaseServer ? "databases" : "files";
+  const rawTab = (searchParams.get("tab") || defaultTab) as TabKey;
   const activeTab: TabKey =
     VALID_TABS.includes(rawTab)
       && (rawTab !== "mods" || showModTab)
@@ -340,7 +345,7 @@ export function ServerDetail() {
       // Rechteentzug, der Reiter nicht.
       && (rawTab !== "memory" || showMemoryTab)
       ? rawTab
-      : "files";
+      : defaultTab;
 
   const setActiveTab = (next: TabKey) => {
     if (next === "files") setMobileOverviewOpen(false);
@@ -1117,7 +1122,7 @@ export function ServerDetail() {
           />
         )}
         {activeTab === "backups" && <Backups serverId={serverId} />}
-        {activeTab === "databases" && <DatabaseManager serverId={serverId} />}
+        {activeTab === "databases" && <DatabaseManager serverId={serverId} dedicated={isDatabaseServer} />}
         {activeTab === "webhooks" && <OutgoingWebhooksPanel serverId={serverId} />}
         {activeTab === "memory" && showMemoryTab && (
           <AiMemoryManager

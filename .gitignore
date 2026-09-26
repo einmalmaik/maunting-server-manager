@@ -1,7 +1,11 @@
 backend-dev.log
 backend-dev.err
 PATCHNOTES-ms-oauth-feature.md
-postgres/
+# Datenverzeichnis der managed PostgreSQL (MSM_MANAGED_POSTGRES_DATA_DIR=./postgres).
+# Verankert: ungebunden verschluckte `postgres/` auch frontend/src/components/postgres.
+/postgres/
+/backend/postgres/
+/msm-agent/postgres/
 /dis-sidecar/node_modules
 .factory-test-env
 /.cache

@@ -377,3 +377,67 @@ describe('AUFGABE 1-3 + 4+5: Real component coverage for Backups immediate/timer
     })
   })
 })
+
+describe('Servers — Datenbankserver anlegen', () => {
+  const POSTGRES: GameInfo = {
+    id: 'postgres',
+    name: 'PostgreSQL',
+    platform: 'linux',
+    mod_support: false,
+    supports_steam_workshop: false,
+    category: 'database',
+    ports: [{ name: 'database', protocol: 'tcp' }],
+    source: 'native',
+  } as GameInfo
+
+  beforeEach(async () => {
+    vi.mocked(client.api).mockReset()
+    await i18n.changeLanguage('en')
+  })
+
+  it('schickt server_kind database mit Spezifikation und ohne Spiel; PostgreSQL steht nicht in der Spieleliste', async () => {
+    mockApi([...GAMES, POSTGRES])
+    renderServers()
+    await waitFor(() => expect(vi.mocked(client.api)).toHaveBeenCalledWith('/system/games'))
+    fireEvent.click((await screen.findAllByRole('button', { name: /server erstellen|create server/i }))[0])
+
+    fireEvent.click(screen.getByTestId('create-server-game'))
+    expect(screen.queryByRole('option', { name: /postgresql/i })).toBeNull()
+
+    fireEvent.click(screen.getByTestId('create-server-kind-database'))
+    expect(screen.queryByTestId('create-server-game')).toBeNull()
+    expect(within(screen.getByTestId('port-fields')).getByText('Database port')).toBeInTheDocument()
+
+    fireEvent.change(screen.getAllByRole('textbox')[0], { target: { value: 'Shop DB' } })
+    fireEvent.change(screen.getByTestId('create-db-name'), { target: { value: 'shop' } })
+    fireEvent.click(screen.getByRole('switch'))
+    fireEvent.change(screen.getByTestId('create-db-cidrs'), { target: { value: '203.0.113.0/24, 198.51.100.7/32' } })
+
+    // Absenden erst, wenn der Knopf frei ist: Solange die Nodes laden, bricht
+    // handleCreate ab und schickt nichts.
+    const submit = screen.getAllByRole('button', { name: /server erstellen|create server/i })
+    const absenden = submit[submit.length - 1]
+    await waitFor(() => expect(absenden).toBeEnabled())
+    fireEvent.submit(absenden.closest('form')!)
+
+    await waitFor(() => {
+      const call = vi.mocked(client.api).mock.calls.find(([p, o]) => p === '/servers' && (o as any)?.method === 'POST')
+      expect(call).toBeTruthy()
+      const body = JSON.parse(String((call![1] as any).body))
+      expect(body).toMatchObject({
+        name: 'Shop DB',
+        server_kind: 'database',
+        game_type: null,
+        postgres_enabled: false,
+        ports: { database: null },
+        database: {
+          database_name: 'shop',
+          username: 'app_owner',
+          password: null,
+          allowed_cidrs: ['203.0.113.0/24', '198.51.100.7/32'],
+          ssl_required: true,
+        },
+      })
+    })
+  })
+})

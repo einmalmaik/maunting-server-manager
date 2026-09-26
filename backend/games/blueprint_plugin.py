@@ -156,6 +156,14 @@ def _start_install_worker(server_id: int, name: str, body) -> None:
 
 
 WORKSHOP_BATCH_SIZE = 25
+
+# Datenbankserver: der Benutzer ``postgres`` im Image ``postgres:17``. Laeuft der
+# Container als root, will der Entrypoint pgdata umschreiben und per ``gosu``
+# wechseln — unter ``cap_drop=ALL`` beides verboten, Exit 1. Mit Capabilities
+# waeren dagegen Schluessel und pg_hba.conf nach dem Rechte-Repair root-eigen und
+# fuer ``postgres`` unlesbar. Also nie root: dieser Benutzer ist die Rueckfallebene.
+POSTGRES_BLUEPRINT_ID = "postgres"
+POSTGRES_IMAGE_UID_GID = (999, 999)
 """Max Workshop-Items pro SteamCMD-Aufruf.
 
 Begruendung: SteamCMD-CLI-Limit + getestete Stabilitaet. Groessere Batches
@@ -463,7 +471,10 @@ class BlueprintPlugin(GamePlugin):
         image = self._blueprint.runtime.image.lower()
         if self._runtime_data_dir() == "/home/container" or "ptero-eggs/yolks" in image:
             return 1000, 1000
-        return super().container_uid_gid(server)
+        uid, gid = super().container_uid_gid(server)
+        if uid == 0 and self.game_id == POSTGRES_BLUEPRINT_ID:
+            return POSTGRES_IMAGE_UID_GID
+        return uid, gid
 
     def _uses_windows_compat_runtime(self) -> bool:
         bp = self._blueprint

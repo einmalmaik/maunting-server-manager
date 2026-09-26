@@ -65,24 +65,12 @@ class Settings(BaseSettings):
     managed_postgres_data_dir: str = "/opt/msm/postgres"
     managed_postgres_statement_timeout_ms: int = 5000
     managed_postgres_row_limit: int = 500
-    # Trusted extensions (must match panel allowlist for owner CREATE EXTENSION)
-    trusted_postgres_extensions: str = (
-        "pgcrypto,uuid-ossp,citext,btree_gin,btree_gist,fuzzystrmatch,"
-        "hstore,pg_trgm,tablefunc,unaccent,isn,lo,ltree,tcn"
-    )
 
     def servers_path(self) -> Path:
         return Path(self.servers_dir).resolve(strict=False)
 
     def guardian_path(self) -> Path:
         return Path(self.guardian_state_dir).resolve(strict=False)
-
-    def trusted_extensions_set(self) -> set[str]:
-        return {
-            part.strip().lower()
-            for part in (self.trusted_postgres_extensions or "").split(",")
-            if part.strip()
-        }
 
 
 settings = Settings()

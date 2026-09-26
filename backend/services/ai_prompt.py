@@ -468,6 +468,38 @@ Beweise nach dem Start den Erfolg: \
 Erst wenn der Server nachweislich läuft und die Logs dies beweisen, melde den Auftrag als erfolgreich abgeschlossen!"""
 
 
+# Datenbankserver: dieselben Einstellungen wie der Anlegedialog im Panel. Die
+# Anleitung steht hier (gecacht) statt im Werkzeugkatalog, der keine Luft hat.
+DATENBANKSERVER = """\
+Datenbankserver: Will jemand eine eigene PostgreSQL-Datenbank (nicht fuer einen bestimmten Spielserver), \
+lege per `propose_server_create` mit `server_kind: "database"` einen Datenbankserver an — ohne `game_type`. \
+Im Objekt `database` stehen `database_name` (Standard app), `username` (Master-Benutzer, Standard app_owner), \
+`allowed_cidrs` (Netze, die von aussen zugreifen duerfen; leer heisst nur intern, `public_bind_ip` muss dann \
+eine erreichbare IP sein, nicht 127.0.0.1), `ssl_required` (Standard true) und `port` (leer: MSM vergibt). \
+Ein Passwort nimmst du nie entgegen und gibst nie eins aus: das Panel erzeugt es, der Benutzer ruft es im Reiter \
+Verbindung ab. Braucht nur ein Spielserver ein paar Datenbanken, nimm stattdessen `postgres_database_count` \
+am Anwendungsserver (gemeinsamer Cluster). Datenbankserver brauchen das Recht servers.create.database."""
+
+# Dieselben Funktionen wie das Studio im Panel (`ai_tools.database_tools`,
+# `ai_proposals.database_proposals`). Steht hier und nicht im Katalog: der
+# geht jede Runde ungecacht mit.
+DATENBANK_STUDIO = """\
+PostgreSQL-Studio: Datenbanken eines Servers liest `read_database` (mehrere auf dem Server: `database` = Name). \
+Ansichten: overview, objects (Tabellen, Views, Funktionen mit oid, Trigger, Sequenzen, Typen eines `schema`), \
+table und rows (`name` = Tabelle; rows mit `filters` [{column, operator, value}] und `limit`), function (`oid`), \
+extensions (installiert und verfuegbar), roles, grants, health; parameters, sessions und locks nur mit Admin-Recht. \
+Geaendert wird mit `propose_database_change` und genau einem von: `operation` — dieselben Operationen wie im Studio \
+(create_table, alter_table, create_index, create_view, create_function, create_trigger, create_extension, grant, \
+create_role, set_parameter, vacuum …); welche es gibt und ihre Pflichtfelder zeigt view=operations, alle Felder \
+view=operation_schema name=<op> — erst nachlesen, nie raten. `rows` — {action: insert|update|delete|import, \
+schema, table, …} wie das Daten-Grid; update und delete brauchen den Schluessel (`key`) aus view=rows. \
+`sql` — freies SQL wie der SQL-Editor, nur mit Admin-Recht und nur, wenn keine Operation passt. \
+Ein Trigger braucht zuerst seine Funktion (create_function, returns 'trigger', language plpgsql), dann \
+create_trigger mit function_name. Jede Operation wird beim Vorschlag in einer verworfenen Transaktion geprobt: \
+scheitert sie, steht der PostgreSQL-Fehler in der Antwort — korrigieren und neu vorschlagen. Datenbank-, Spiel- \
+und Anwendungsserver haben dasselbe Studio; im gemeinsamen Cluster eines Spielservers fehlen nur Rollen und \
+Instanz-Einstellungen. Ein Rollenpasswort nimmst du nie entgegen: das setzt der Benutzer selbst im Studio."""
+
 # Der Fehler aus dem Betrieb: die KI lehnte wegen Platzmangel ab, obwohl die
 # Node leer lief — sie sah nur die Buchung, nicht den Verbrauch.
 KAPAZITAET = """\
@@ -1562,6 +1594,8 @@ BLOECKE = (
     AGENTIC_LOOP_SELF_HEALING,
     AUFTRAEGE,
     KAPAZITAET,
+    DATENBANKSERVER,
+    DATENBANK_STUDIO,
     SERVERBEZUG,
     WERKZEUGE,
     DOKUMENTATION,

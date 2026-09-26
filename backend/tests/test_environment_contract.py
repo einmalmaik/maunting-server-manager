@@ -50,9 +50,7 @@ def _assert_every_value_is_explained(path: Path) -> None:
 
 def test_backend_example_covers_all_runtime_settings_and_uses_postgres() -> None:
     example = ROOT / "backend" / ".env.example"
-    assert _settings_fields(
-        ROOT / "backend" / "config.py", excluded={"trusted_postgres_extensions"}
-    ) <= _env_keys(example)
+    assert _settings_fields(ROOT / "backend" / "config.py") <= _env_keys(example)
     assert "MSM_LOCAL_AGENT_TOKEN" in _env_keys(example)
     text = example.read_text(encoding="utf-8")
     assert "MSM_DATABASE_URL=\"postgresql+psycopg2://" in text

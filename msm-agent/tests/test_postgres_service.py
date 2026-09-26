@@ -9,7 +9,6 @@ import pytest
 
 from services.postgres_service import (
     PostgresAgentError,
-    dispatch_query,
     ensure_internal_postgres,
     provision,
     promote_owner,
@@ -142,11 +141,6 @@ def test_promote_owner_remains_database_scoped():
     assert "NOCREATEROLE" in ddl
     assert "WITH SUPERUSER" not in ddl
     assert result["scope"] == "database"
-
-
-def test_dispatch_query_unknown_action():
-    with pytest.raises(PostgresAgentError, match="Unknown"):
-        dispatch_query("not_an_action", {})
 
 
 def test_managed_postgres_name_guard():

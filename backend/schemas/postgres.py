@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -66,28 +66,10 @@ class PostgresDatabaseRequest(BaseModel):
     database_id: int
 
 
-class PostgresCreateTableColumn(BaseModel):
-    name: str = Field(..., min_length=1, max_length=63)
-    type: str = Field(..., min_length=1, max_length=32)
-    primary_key: bool = False
-    not_null: bool = False
-
-
-class PostgresCreateTableRequest(BaseModel):
-    database_id: int
-    schema_name: str = Field("public", min_length=1, max_length=63)
-    table_name: str = Field(..., min_length=1, max_length=63)
-    columns: list[PostgresCreateTableColumn] = Field(..., min_length=1, max_length=64)
-
-
 class PostgresTableRequest(BaseModel):
     database_id: int
     schema_name: str = Field("public", min_length=1, max_length=63)
     table_name: str = Field(..., min_length=1, max_length=63)
-
-
-class PostgresDropTableRequest(PostgresTableRequest):
-    confirm_name: str = Field(..., min_length=1, max_length=63)
 
 
 class PostgresRowsRequest(PostgresTableRequest):
@@ -204,22 +186,6 @@ class PostgresSqlResponse(BaseModel):
     statement_timeout_ms: int
 
 
-class PostgresExtensionInfo(BaseModel):
-    name: str
-    version: str | None = None
-    trusted: bool = True
-
-
-class PostgresExtensionRequest(BaseModel):
-    database_id: int = Field(..., ge=1)
-    name: str = Field(..., min_length=1, max_length=63)
-
-
-class PostgresExtensionDropRequest(BaseModel):
-    database_id: int = Field(..., ge=1)
-    confirm_name: str = Field(..., min_length=1, max_length=63)
-
-
 class PostgresPowerUserResponse(BaseModel):
     username: str
     password: str
@@ -232,31 +198,6 @@ class PostgresPowerUserDemoteRequest(BaseModel):
     database_id: int = Field(..., ge=1)
     username: str = Field(..., min_length=1, max_length=63)
     confirm_name: str = Field(..., min_length=1, max_length=63)
-
-
-class PostgresDumpRequest(BaseModel):
-    """Auswahl des Dump-Umfangs fuer ``pg_dump``.
-
-    Default: ``scope=all_dbs`` erfasst alle DBs des Servers. ``scope=database``
-    ist deprecated -- der Server hat genau einen Postgres-Container mit allen
-    DBs drin, daher macht ``scope=all_dbs`` immer Sinn.
-    """
-    confirm_text: str | None = Field(
-        None,
-        max_length=128,
-        description="Sicherheits-Bestaetigung -- muss mit Server-Namen uebereinstimmen wenn Dump loeschend wirkt.",
-    )
-
-
-class PostgresRestoreRequest(BaseModel):
-    """Restore-Request fuer ``psql``-Restore aus hochgeladenem SQL-Dump.
-
-    Verhalten: SQL wird IMMER in ALLE DBs des Servers geschrieben
-    (alle existierenden Tabellen werden vorher gedroppt, damit ein sauberer
-    Restore gelingt). Wenn der Server nur eine DB hat, ist der Effekt identisch.
-    """
-    sql: str = Field(..., min_length=1, max_length=200_000_000)
-    confirm_text: str | None = Field(None, max_length=128)
 
 
 class PostgresDumpResponse(BaseModel):
@@ -296,8 +237,10 @@ class PostgresHubEndpoint(BaseModel):
 
 
 class PostgresHubExternal(PostgresHubEndpoint):
-    # False: Port liegt auf 127.0.0.1 — von aussen nicht erreichbar.
     reachable: bool
+    # Warum nicht: "loopback" (Port liegt auf 127.0.0.1) oder "no_networks"
+    # (kein erlaubtes Netz in pg_hba.conf). None, wenn erreichbar.
+    blocked_by: Literal["loopback", "no_networks"] | None = None
     ssl_required: bool
     allowed_cidrs: list[str]
 

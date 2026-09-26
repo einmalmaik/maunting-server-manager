@@ -145,13 +145,14 @@ def _existing_result(db: Session, task: OperationTask) -> ProvisioningResult:
 
 
 def _start_database_server(db: Session, server: Server) -> None:
-    """Erster Start einer eigenen Instanz, danach die erste Datenbank.
+    """Erster Start einer eigenen Instanz; die erste Datenbank folgt danach.
 
     Beides laeuft im Hintergrund: Docker zieht beim ersten Mal das Image, und
-    ``initdb`` braucht Zeit. Scheitert der Start, bleibt der Server angelegt;
-    Starten und ``instance/bootstrap`` holen es nach.
+    ``initdb`` braucht Zeit. Die Einrichtung stoesst der erfolgreiche Start an
+    (``server_lifecycle_service._datenbank_einrichtung_nachziehen``) — auch jeder
+    spaetere, falls dieser hier scheitert. ``instance/bootstrap`` wiederholt sie
+    von Hand.
     """
-    from services import postgres_instance_service
     from services.server_lifecycle_service import queue_lifecycle_operation
 
     db.refresh(server)
@@ -159,8 +160,6 @@ def _start_database_server(db: Session, server: Server) -> None:
         queue_lifecycle_operation(db, server, "start")
     except Exception:
         logger.warning("Erster Start des Datenbankservers %s nicht moeglich", server.id)
-        return
-    postgres_instance_service.bootstrap_in_background(server.id)
 
 
 def provision_server(
@@ -192,6 +191,14 @@ def provision_server(
     )
     if not permission_service.has_global_permission(db, principal, "servers.create"):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
+    # Panel, KI und Shop kommen alle hier vorbei — eine Stelle genuegt.
+    if req.server_kind == "database" and not permission_service.has_global_permission(
+        db, principal, "servers.create.database"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "database_server_forbidden", "message": "errors.database_server_forbidden"},
+        )
 
     task, created = create_or_reuse_task(
         db,

@@ -141,12 +141,15 @@ def test_spielserver_bleibt_im_geteilten_cluster(db, test_server):
 
 
 def test_owner_abfrage_traegt_das_ziel(db, db_server):
+    """Der Weg des Studios (und der KI): `run` als Owner geht an die eigene Instanz."""
     client = MagicMock()
-    client.postgres_query.return_value = []
+    client.postgres_run.return_value = {"results": []}
     database = db_server.postgres_databases[0]
     with patch.object(postgres_service, "_client_for_server_id", return_value=client):
-        postgres_service.list_tables(db, db_server.id, database.id)
-    payload = client.postgres_query.call_args[0][0]
+        postgres_service.run(
+            db, db_server, database_name=database.name, statements=[("SELECT 1", None)], database=database,
+        )
+    payload = client.postgres_run.call_args[0][0]
     assert payload["target"]["port"] == 25432
     assert payload["owner_password"] == OWNER_PW
 
@@ -267,6 +270,34 @@ def test_hub_zeigt_verbindungen_ohne_passwoerter(client, owner_cookies, db_serve
     assert OWNER_PW not in response.text and APP_PW not in response.text
 
 
+def test_hub_nennt_den_grund_wenn_von_aussen_niemand_herankommt(client, owner_cookies, db, db_server):
+    """„Von außen erreichbar" hing nur an der Bind-IP. Ohne erlaubtes Netz laesst
+    pg_hba.conf aber nur Docker-Netze herein — der Hub meldete „Erreichbar" fuer
+    eine Instanz, an die von aussen niemand kommt. Und an 127.0.0.1 gebunden
+    riet er, Netze einzutragen, obwohl das nichts geaendert haette."""
+
+    def hub() -> dict:
+        with patch.object(postgres_instance_service, "read_certificate", return_value="CERT"),              patch.object(postgres_instance_service, "needs_bootstrap", return_value=False):
+            response = client.get(f"/api/servers/{db_server.id}/databases/connection", cookies=owner_cookies)
+        assert response.status_code == 200, response.text
+        return response.json()["external"]
+
+    assert hub()["blocked_by"] == "loopback"
+
+    db_server.public_bind_ip = "192.0.2.10"
+    db_server.postgres_instance.allowed_cidrs = ""
+    db.commit()
+    extern = hub()
+    assert extern["reachable"] is False
+    assert extern["blocked_by"] == "no_networks"
+
+    db_server.postgres_instance.allowed_cidrs = "203.0.113.0/24"
+    db.commit()
+    extern = hub()
+    assert extern["reachable"] is True
+    assert extern["blocked_by"] is None
+
+
 def test_passwort_abrufen_braucht_admin_und_csrf_und_wird_auditiert(
     client, owner_cookies, csrf_token, db, db_server
 ):
@@ -332,3 +363,24 @@ def test_netzwerk_aendern_schreibt_hba_und_laedt_neu(client, owner_cookies, csrf
     assert response.status_code == 200, response.text
     assert "host    all  all  198.51.100.0/24" in geschrieben[postgres_instance_service.HBA_FILE]
     assert any("pg_reload_conf" in call.kwargs["statements"][0][0] for call in run.call_args_list)
+
+
+def test_datenbankserver_braucht_das_eigene_recht(db, owner_user):
+    """`servers.create` allein reicht nicht: ein Datenbankserver ist ein eigener
+    Dienst mit Port nach aussen. Geprueft wird im gemeinsamen Provisionierungs-
+    pfad — Panel, KI und Shop kommen dort alle vorbei."""
+    from fastapi import HTTPException
+
+    from schemas.server import ServerCreate
+    from services.actor_context import ActorContext
+    from services.server_provisioning_service import provision_server
+
+    rechte = {"servers.create"}
+    req = ServerCreate(name="db", server_kind="database")
+    with patch(
+        "services.permission_service.has_global_permission",
+        side_effect=lambda _db, _user, key: key in rechte,
+    ), pytest.raises(HTTPException) as fehler:
+        provision_server(db, req, ActorContext.for_user(owner_user, origin="test"))
+    assert fehler.value.status_code == 403
+    assert fehler.value.detail["code"] == "database_server_forbidden"

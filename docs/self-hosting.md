@@ -520,7 +520,8 @@ Antwort und Audit enthalten **nie** das Passwort.
 Privilegierte Aktionen schreiben in `audit_logs` (wer / wann / action / Ziel,
 Details ohne Secrets):
 
-- `postgres.admin.rotate`, `postgres.database.*`, `postgres.user.*`, `postgres.power_user.*`, `postgres.dump`, `postgres.restore`
+- `postgres.admin.rotate`, `postgres.database.*`, `postgres.user.*`, `postgres.power_user.*`, `postgres.credential.reveal`, `postgres.instance.*`
+- PostgreSQL-Studio: `postgres.studio.execute` (Strukturänderung, ohne SQL im Eintrag), `postgres.studio.dump`, `postgres.studio.restore`, `postgres.studio.session_*`; Änderungen der KI zusätzlich `postgres.studio.rows_*` und `postgres.studio.sql` mit `via: ai`
 - `nodes.token.update`, `nodes.enrollment.approve`
 
 **Im Panel:** Administration → **Audit** (`/admin/audit`, Permission `system.audit.read`).  
@@ -796,6 +797,49 @@ Die Servererstellung läuft über denselben `server_provisioning_service` wie ei
 Klick im Panel und eine Shop-Bestellung. Blueprintprüfung, Kapazität, Portvergabe,
 Installation und Rollback sind identisch — es gibt bewusst keinen zweiten Weg,
 einen Server anzulegen.
+
+### Datenbanken: Datenbankserver und PostgreSQL-Studio
+
+Die KI legt auch **Datenbankserver** an (`propose_server_create` mit
+`server_kind: "database"`): eine eigene PostgreSQL-Instanz mit denselben
+Feldern wie im Anlegedialog — Datenbankname, Master-Benutzer, erlaubte Netze
+(leer: nur intern), SSL-Pflicht und Port. Dafür braucht der Benutzer zusätzlich
+zu `servers.create` das Recht `servers.create.database`; `provision_server`
+prüft es für Panel, KI und Shop an einer Stelle. **Ein Passwort nimmt die KI
+nie entgegen** und gibt keines aus: das Panel erzeugt es, abrufbar im Reiter
+*Verbindung*. Braucht nur ein Spielserver ein paar Datenbanken, nimmt sie
+`postgres_database_count` am Anwendungsserver (gemeinsamer Cluster).
+
+In einer Datenbank kann die KI, was das Studio kann — über dieselben
+Funktionen, nicht über eine zweite Umsetzung:
+
+- **`read_database`** liest wie die Studio-Reiter: Übersicht, Objekte eines
+  Schemas (Tabellen, Views, Funktionen, Trigger, Sequenzen, Typen), Tabelle,
+  Zeilen, Funktionsquelltext, Erweiterungen, Rollen, Rechte, Zustand;
+  Parameter, Sitzungen und Sperren nur mit `server.databases.admin`. Gehirn
+  und Worker dürfen lesen.
+- **`propose_database_change`** schreibt — **nur der Worker**, das Gehirn
+  delegiert. Genau eine von drei Formen: eine Studio-*Operation* (Tabelle,
+  Index, View, Funktion, Trigger, Erweiterung, Rechte, Rolle, Parameter,
+  Wartung — kompiliert von `postgres_ddl` wie die SQL-Vorschau im Studio),
+  Zeilen wie im Daten-Grid, oder freies SQL wie im SQL-Editor.
+
+Das Recht kommt wie im Studio aus dem Plan: Strukturänderungen und freies SQL
+verlangen `server.databases.admin`, Zeilen und Wartung `server.databases.write`.
+Eine Operation wird schon beim Vorschlag **geprobt** — derselbe Plan läuft in
+einer Transaktion, die verworfen wird. Ein kaputter Funktionskörper, eine
+fehlende Triggerfunktion oder eine im gemeinsamen Cluster nicht erlaubte
+Erweiterung scheitern damit am Vorschlag, mit der PostgreSQL-Meldung, und nicht
+nach dem Klick. Freies SQL wird nicht geprobt: es liefe vor der Bestätigung.
+Die Karte zeigt das SQL, das laufen wird. **Immer gefragt** wird, auch im
+autonomen Modus, bei allem, was Daten entfernt (Löschen von Tabellen, Spalten,
+Funktionen, Erweiterungen, Zeilen) und bei freiem SQL. Ein Rollenpasswort nimmt
+die KI nicht an; das setzt der Benutzer im Studio.
+
+Spiel- und Anwendungsserver haben **dasselbe Studio** wie ein Datenbankserver.
+Im gemeinsamen Cluster fehlen nur die Teile, die andere Kunden träfen: Rollen
+und Instanz-Einstellungen, und Erweiterungen gibt es dort nur, wenn PostgreSQL
+sie als *trusted* führt (der Owner installiert sie, kein Superuser).
 
 ### Was die KI an einem Blueprint ändern kann
 

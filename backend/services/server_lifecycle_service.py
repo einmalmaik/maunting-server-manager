@@ -946,6 +946,21 @@ def _run_start(
     db.commit()
     from services.change_timeline_service import log_change_event
     log_change_event(db, server.id, "start", "Server gestartet.")
+    _datenbank_einrichtung_nachziehen(server)
+
+
+def _datenbank_einrichtung_nachziehen(server: Server) -> None:
+    """Eigene PostgreSQL-Instanz: fehlende Datenbanken nach jedem Start anlegen.
+
+    Scheitert der erste Start, laeuft die Einrichtung sonst nie — die Instanz
+    bliebe ohne Datenbank und Rollen. ``bootstrap`` ist wiederholbar und prueft
+    zuerst, was schon da ist.
+    """
+    if getattr(server, "postgres_instance", None) is None:
+        return
+    from services import postgres_instance_service
+
+    postgres_instance_service.bootstrap_in_background(server.id)
 
 
 def _run_stop(db: Session, server: Server, plugin) -> None:
@@ -1090,6 +1105,7 @@ def _run_restart(
     db.commit()
     from services.change_timeline_service import log_change_event
     log_change_event(db, server.id, "restart", "Server neugestartet.")
+    _datenbank_einrichtung_nachziehen(server)
 
 
 def _restart_server_sync(server_id: int) -> dict:

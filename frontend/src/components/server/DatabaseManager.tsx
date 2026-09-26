@@ -1,141 +1,68 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Shield } from 'lucide-react'
-import { api, getCsrfToken } from '@/api/client'
-import { apiUrl } from '@/config/api'
-import { DatabaseConsole } from '@/Singra/UI/DatabaseConsole'
+import { Database, Plus, Shield } from 'lucide-react'
+import { api } from '@/api/client'
+import { PostgresStudio } from '@/components/postgres/PostgresStudio'
 import { PostgresCredentialsDialog } from '@/components/server/PostgresCredentialsDialog'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { confirm } from '@/stores/confirmStore'
 import { prompt } from '@/stores/promptStore'
 import { toast } from '@/stores/toastStore'
-import type {
-  PostgresCredential,
-  PostgresDatabase,
-  PostgresDatabaseStats,
-  PostgresPowerUserCredential,
-  PostgresResources,
-  PostgresRowsResult,
-  PostgresSqlResult,
-  PostgresTable,
-  PostgresTableInfo,
-} from '@/types'
-import { Button } from '@/Singra/UI'
+import type { PostgresCredential, PostgresDatabase, PostgresPowerUserCredential, PostgresResources } from '@/types'
+import { ActionMenu, Badge, Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Dropdown } from '@/Singra/UI'
 
 interface Props {
   serverId: number
+  /** Datenbankserver (eigene Instanz): Datenbanknamen frei wählbar, kein Power-User. */
+  dedicated?: boolean
 }
 
-const DEFAULT_SQL = 'SELECT *\nFROM public.users\nLIMIT 50;'
-
-export function DatabaseManager({ serverId }: Props) {
+/**
+ * Datenbanken eines Servers: Auswahl, Anlegen, Löschen — und darunter das
+ * PostgreSQL-Studio der gewählten Datenbank.
+ */
+export function DatabaseManager({ serverId, dedicated = false }: Props) {
   const { t } = useTranslation()
-  const canWrite = useHasPermission('server.databases.write', serverId)
   const canAdmin = useHasPermission('server.databases.admin', serverId)
   const [resources, setResources] = useState<PostgresResources>({ databases: [], users: [] })
+  const [loaded, setLoaded] = useState(false)
   const [selectedDbId, setSelectedDbId] = useState<number | null>(null)
-  const [stats, setStats] = useState<PostgresDatabaseStats | null>(null)
-  const [tables, setTables] = useState<PostgresTable[]>([])
-  const [selectedTable, setSelectedTable] = useState<PostgresTable | null>(null)
-  const [tableInfo, setTableInfo] = useState<PostgresTableInfo | null>(null)
-  const [rows, setRows] = useState<PostgresRowsResult | null>(null)
-  const [sqlText, setSqlText] = useState(DEFAULT_SQL)
-  const [sqlResult, setSqlResult] = useState<PostgresSqlResult | null>(null)
-  const [history, setHistory] = useState<string[]>([])
   const [credentials, setCredentials] = useState<PostgresCredential[]>([])
   const [powerDialog, setPowerDialog] = useState<{ db: PostgresDatabase; password: string } | null>(null)
-  const [busy, setBusy] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  // Neu einhängen erzwingt, dass das Studio nach der Einrichtung frisch lädt.
+  const [studioKey, setStudioKey] = useState(0)
 
-  const selectedDatabase = useMemo(
-    () => (Array.isArray(resources?.databases) ? resources.databases : []).find((database) => database.id === selectedDbId) || null,
-    [resources?.databases, selectedDbId],
-  )
-
-  const run = async (key: string, action: () => Promise<void>) => {
-    setBusy(key)
-    setError(null)
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true)
     try {
       await action()
-    } catch (err: any) {
-      const message = err.message || t('common.error')
-      setError(message)
-      toast.error(message)
+    } catch (err) {
+      toast.error((err as Error).message || t('common.error'))
     } finally {
-      setBusy(null)
+      setBusy(false)
     }
   }
 
   const fetchResources = async () => {
     const data = await api<PostgresResources>(`/servers/${serverId}/databases`)
     setResources(data)
+    setLoaded(true)
     // Die gemerkte Kennung wird nicht geglaubt, sondern gegen die frische Liste
     // geprüft. Sonst bleibt nach dem Löschen die verschwundene Datenbank
-    // ausgewählt und ihre Tabellen und Zeilen stehen weiter in der Anzeige.
-    setSelectedDbId((current) =>
-      data.databases.some((db) => db.id === current) ? current : data.databases[0]?.id ?? null,
-    )
-  }
-
-  const fetchDatabaseData = async (databaseId: number) => {
-    const [statsData, tableData] = await Promise.all([
-      api<PostgresDatabaseStats>(`/servers/${serverId}/databases/stats`, {
-        method: 'POST',
-        body: JSON.stringify({ database_id: databaseId }),
-      }),
-      api<{ tables: PostgresTable[] }>(`/servers/${serverId}/databases/tables/list`, {
-        method: 'POST',
-        body: JSON.stringify({ database_id: databaseId }),
-      }),
-    ])
-    setStats(statsData)
-    setTables(tableData.tables)
-    const nextTable = tableData.tables[0] || null
-    setSelectedTable(nextTable)
-    if (nextTable) {
-      await selectTable(nextTable, databaseId)
-    } else {
-      setRows(null)
-      setTableInfo(null)
-    }
-  }
-
-  const selectTable = async (table: PostgresTable, databaseId = selectedDbId, search?: string) => {
-    if (!databaseId) return
-    setSelectedTable(table)
-    const [infoData, rowsData] = await Promise.all([
-      api<PostgresTableInfo>(`/servers/${serverId}/databases/tables/info`, {
-        method: 'POST',
-        body: JSON.stringify({ database_id: databaseId, schema_name: table.schema, table_name: table.name }),
-      }),
-      api<PostgresRowsResult>(`/servers/${serverId}/databases/rows`, {
-        method: 'POST',
-        body: JSON.stringify({
-          database_id: databaseId,
-          schema_name: table.schema,
-          table_name: table.name,
-          search: search || null,
-          limit: 500,
-          offset: 0,
-        }),
-      }),
-    ])
-    setTableInfo(infoData)
-    setRows(rowsData)
+    // ausgewählt und das Studio fragt weiter nach ihr.
+    setSelectedDbId((current) => (data.databases.some((db) => db.id === current) ? current : data.databases[0]?.id ?? null))
   }
 
   useEffect(() => {
-    void run('load', fetchResources)
+    void run(fetchResources)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverId])
 
-  useEffect(() => {
-    if (selectedDbId) {
-      void run('database', () => fetchDatabaseData(selectedDbId))
-    }
-  }, [selectedDbId])
+  const databases = Array.isArray(resources?.databases) ? resources.databases : []
+  const selected = databases.find((database) => database.id === selectedDbId) || null
 
   const bootstrap = () =>
-    run('bootstrap', async () => {
+    run(async () => {
       const result = await api<{ credentials: PostgresCredential[] }>(`/servers/${serverId}/databases/bootstrap`, {
         method: 'POST',
         body: JSON.stringify({ database_count: 1 }),
@@ -144,78 +71,33 @@ export function DatabaseManager({ serverId }: Props) {
       await fetchResources()
     })
 
-  const createTable = () =>
-    run('create-table', async () => {
-      if (!selectedDbId) return
-      const name = await prompt({
-        title: 'Neue Tabelle',
-        message: 'Tabellenname eingeben:',
-        placeholder: 'z.B. users',
-        confirmText: 'Erstellen',
-      })
-      if (!name) return
-      await api(`/servers/${serverId}/databases/tables`, {
+  const createDatabase = () =>
+    run(async () => {
+      let name: string | null = null
+      if (dedicated) {
+        name = await prompt({ title: t('databaseManager.newDatabase'), message: t('databaseManager.newDatabaseMessage'), placeholder: 'shop' })
+        if (!name) return
+      }
+      const result = await api<{ credential: PostgresCredential }>(`/servers/${serverId}/databases`, {
         method: 'POST',
-        body: JSON.stringify({
-          database_id: selectedDbId,
-          schema_name: 'public',
-          table_name: name,
-          columns: [
-            { name: 'id', type: 'bigint', primary_key: true, not_null: true },
-            { name: 'created_at', type: 'timestamp', primary_key: false, not_null: true },
-          ],
-        }),
+        body: JSON.stringify({ name }),
       })
-      await fetchDatabaseData(selectedDbId)
-    })
-
-  const dropTable = () =>
-    run('drop-table', async () => {
-      if (!selectedDbId || !selectedTable) return
-      const ok = await confirm({
-        title: 'Tabelle löschen',
-        message: t('databaseManager.deleteTablePrompt', { schema: selectedTable.schema, name: selectedTable.name }),
-        confirmText: t('common.delete'),
-        danger: true,
-      })
-      if (!ok) return
-      const typed = await prompt({
-        title: 'Tabelle löschen',
-        message: t('databaseManager.deleteTableConfirm', { schema: selectedTable.schema, name: selectedTable.name }),
-        expectedValue: selectedTable.name,
-        confirmText: 'Löschen',
-        danger: true,
-      })
-      if (!typed) return
-      await api(`/servers/${serverId}/databases/tables/drop`, {
-        method: 'POST',
-        headers: csrfHeader(),
-        body: JSON.stringify({ database_id: selectedDbId, schema_name: selectedTable.schema, table_name: selectedTable.name }),
-      })
-      await selectTable(null as any, selectedDbId)
+      setCredentials([result.credential])
       await fetchResources()
-      toast.success(t('databaseManager.tableDeleted'))
     })
 
   const deleteDatabase = () =>
-    run('delete-db', async () => {
-      if (!selectedDbId || !selectedDatabase) return
-      const ok = await confirm({
-        title: 'Datenbank löschen',
-        message: `Datenbank "${selectedDatabase.name}" wirklich unwiderruflich löschen?`,
+    run(async () => {
+      if (!selected) return
+      const typed = await prompt({
+        title: t('databaseManager.deleteDatabase'),
+        message: t('databaseManager.deleteDatabaseMessage', { name: selected.name }),
+        expectedValue: selected.name,
         confirmText: t('common.delete'),
         danger: true,
       })
-      if (!ok) return
-      const typed = await prompt({
-        title: 'Datenbank löschen',
-        message: `Datenbank "${selectedDatabase.name}" wirklich unwiderruflich löschen?`,
-        expectedValue: selectedDatabase.name,
-        confirmText: 'Löschen',
-        danger: true,
-      })
       if (!typed) return
-      await api(`/servers/${serverId}/databases/${selectedDbId}`, {
+      await api(`/servers/${serverId}/databases/${selected.id}`, {
         method: 'DELETE',
         body: JSON.stringify({ confirm_name: typed }),
       })
@@ -223,65 +105,32 @@ export function DatabaseManager({ serverId }: Props) {
       toast.success(t('databaseManager.databaseDeleted'))
     })
 
-  const runSql = () =>
-    run('sql', async () => {
-      if (!selectedDbId) return
-      const result = await api<PostgresSqlResult>(`/servers/${serverId}/databases/sql`, {
-        method: 'POST',
-        body: JSON.stringify({ database_id: selectedDbId, sql: sqlText, limit: 500 }),
-      })
-      setSqlResult(result)
-      setHistory((current) => [sqlText, ...current.filter((entry) => entry !== sqlText)].slice(0, 20))
-      await fetchDatabaseData(selectedDbId)
-    })
-
-  const importSql = (file: File) =>
-    run('import', async () => {
-      const sql = await file.text()
-      await api(`/servers/${serverId}/databases/import`, {
-        method: 'POST',
-        body: JSON.stringify({ sql, confirm_text: selectedDatabase?.name || null }),
-      })
-      if (selectedDbId) await fetchDatabaseData(selectedDbId)
-      toast.success('Import abgeschlossen')
-    })
-
-  const exportSql = () =>
-    run('export', async () => {
-      const res = await fetch(apiUrl(`/servers/${serverId}/databases/export`), {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          ...csrfHeader(),
-        } as Record<string, string>,
-        body: JSON.stringify({ confirm_text: selectedDatabase?.name || null }),
-      })
-      if (!res.ok) throw new Error(await res.text())
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `msm-server-${serverId}-postgres.sql`
-      link.click()
-      URL.revokeObjectURL(url)
-    })
+  const bootstrapInstance = async () => {
+    try {
+      const result = await api<{ created: string[] }>(`/servers/${serverId}/databases/instance/bootstrap`, { method: 'POST' })
+      toast.success(t('postgresStudio.connection.bootstrapDone', { count: result.created.length }))
+      await fetchResources()
+      setStudioKey((key) => key + 1)
+    } catch (err) {
+      toast.error((err as Error).message || t('common.error'))
+    }
+  }
 
   const powerAction = (kind: 'enable' | 'rotate' | 'demote') =>
-    run(`power-${kind}`, async () => {
-      if (!selectedDbId || !selectedDatabase) return
+    run(async () => {
+      if (!selected) return
       if (kind === 'demote') {
         const typed = await prompt({
-          title: 'Power-User entziehen',
-          message: `Power-User-Zugang von "${selectedDatabase.owner_role}" für diese Datenbank entfernen?`,
-          expectedValue: selectedDatabase.owner_role,
-          confirmText: 'Entziehen',
+          title: t('databaseManager.powerUserDemote'),
+          message: t('databaseManager.powerUserDemoteMessage', { role: selected.owner_role }),
+          expectedValue: selected.owner_role,
+          confirmText: t('databaseManager.powerUserDemote'),
           danger: true,
         })
         if (!typed) return
         await api(`/servers/${serverId}/databases/power-user/demote`, {
           method: 'DELETE',
-          body: JSON.stringify({ database_id: selectedDbId, username: selectedDatabase.owner_role, confirm_name: typed }),
+          body: JSON.stringify({ database_id: selected.id, username: selected.owner_role, confirm_name: typed }),
         })
         await fetchResources()
         return
@@ -289,213 +138,113 @@ export function DatabaseManager({ serverId }: Props) {
       const endpoint = kind === 'enable' ? 'power-user' : 'power-user/rotate'
       const credential = await api<PostgresPowerUserCredential>(`/servers/${serverId}/databases/${endpoint}`, {
         method: 'POST',
-        body: JSON.stringify({ database_id: selectedDbId }),
+        body: JSON.stringify({ database_id: selected.id }),
       })
-      setPowerDialog({ db: selectedDatabase, password: credential.password })
+      setPowerDialog({ db: selected, password: credential.password })
       await fetchResources()
     })
 
-  const createUser = () =>
-    run('create-user', async () => {
-      if (!selectedDbId) return
-      const username = await prompt({
-        title: 'Datenbank-Benutzer',
-        message: t('databaseManager.enterUsernamePrompt'),
-        placeholder: 'z.B. app_user',
-        confirmText: 'Erstellen',
-      })
-      if (!username) return
-      const result = await api<{ credential: PostgresCredential }>(`/servers/${serverId}/databases/users`, {
-        method: 'POST',
-        body: JSON.stringify({ database_id: selectedDbId, username }),
-      })
-      setCredentials((prev) => [...prev, result.credential])
-      await fetchResources()
-      toast.success(t('databaseManager.userCreated'))
-    })
-
-  const rotateUser = (userId: number) =>
-    run(`rotate-user-${userId}`, async () => {
-      const result = await api<{ username: string; password: string; host: string; port: number }>(
-        `/servers/${serverId}/databases/users/${userId}/rotate`,
-        { method: 'POST' },
-      )
-      setCredentials((prev) => [...prev, {
-        database_name: selectedDatabase?.name || '',
-        username: result.username,
-        password: result.password,
-        host: result.host,
-        port: result.port,
-      }])
-      await fetchResources()
-      toast.success(t('databaseManager.passwordRotated'))
-    })
-
-  const deleteUser = (userId: number) =>
-    run(`delete-user-${userId}`, async () => {
-      const user = (Array.isArray(resources?.users) ? resources.users : []).find((u) => u.id === userId)
-      if (!user) return
-      const ok = await confirm({
-        title: 'Datenbank-User löschen',
-        message: `User "${user.username}" wirklich löschen?`,
-        confirmText: t('common.delete'),
-        danger: true,
-      })
-      if (!ok) return
-      const typed = await prompt({
-        title: 'Datenbank-User löschen',
-        message: `User "${user.username}" wirklich löschen?`,
-        expectedValue: user.username,
-        confirmText: 'Löschen',
-        danger: true,
-      })
-      if (!typed) return
-      await api(`/servers/${serverId}/databases/users/${userId}`, {
-        method: 'DELETE',
-        body: JSON.stringify({ confirm_name: typed }),
-      })
-      await fetchResources()
-      toast.success(t('databaseManager.userDeleted'))
-    })
-
-  const handleUpdateRow = (schema: string, table: string, keyConditions: Record<string, any>, updates: Record<string, any>) =>
-    run('update-row', async () => {
-      if (!selectedDbId) return
-      await api(`/servers/${serverId}/databases/rows/update`, {
-        method: 'POST',
-        headers: csrfHeader(),
-        body: JSON.stringify({ database_id: selectedDbId, schema_name: schema, table_name: table, key_conditions: keyConditions, updates }),
-      })
-      toast.success(t('databaseManager.rowUpdated'))
-      if (selectedTable) {
-        await selectTable(selectedTable, selectedDbId)
-      }
-    })
-
-  const handleDeleteRows = (schema: string, table: string, rowConditions: Array<Record<string, any>>) =>
-    run('delete-rows', async () => {
-      if (!selectedDbId) return
-      // Die Zahl aus der Antwort, nicht die angeforderte: eine Bedingung kann
-      // mehr als eine Zeile treffen, und das muss der Benutzer sehen.
-      const res = await api<{ deleted_count?: number }>(`/servers/${serverId}/databases/rows/delete`, {
-        method: 'POST',
-        headers: csrfHeader(),
-        body: JSON.stringify({ database_id: selectedDbId, schema_name: schema, table_name: table, row_conditions: rowConditions }),
-      })
-      toast.success(t('databaseManager.rowsDeleted', { count: res?.deleted_count ?? rowConditions.length }))
-      if (selectedTable) {
-        await selectTable(selectedTable, selectedDbId)
-      }
-    })
-
-  const handleInsertRow = (schema: string, table: string, rowData: Record<string, any>) =>
-    run('insert-row', async () => {
-      if (!selectedDbId) return
-      await api(`/servers/${serverId}/databases/rows/insert`, {
-        method: 'POST',
-        headers: csrfHeader(),
-        body: JSON.stringify({ database_id: selectedDbId, schema_name: schema, table_name: table, row_data: rowData }),
-      })
-      toast.success(t('databaseManager.rowInserted'))
-      if (selectedTable) {
-        await selectTable(selectedTable, selectedDbId)
-      }
-    })
-
-  if (resources.databases.length === 0) {
+  if (loaded && databases.length === 0) {
     return (
       <div className="msm-card p-8 text-center">
-        <h3 className="font-headline text-xl text-on-surface">Keine PostgreSQL-Datenbank</h3>
-        <p className="mt-2 text-sm text-on-surface-variant">Erstelle eine servergebundene Datenbank, bevor du Tabellen verwaltest.</p>
-        <Button className="mt-5 inline-flex items-center gap-2" onClick={bootstrap} disabled={busy === 'bootstrap'}>
-          Datenbank erstellen
-        </Button>
+        <Database className="mx-auto h-8 w-8 text-on-surface-variant" />
+        <h3 className="mt-3 font-headline text-xl text-on-surface">{t('databaseManager.emptyTitle')}</h3>
+        <p className="mt-2 text-sm text-on-surface-variant">{t('databaseManager.emptyHint')}</p>
+        {canAdmin && (
+          <Button className="mt-5" onClick={() => void bootstrap()} disabled={busy}>
+            <Plus className="h-4 w-4" />
+            {t('databaseManager.createDatabase')}
+          </Button>
+        )}
         <PostgresCredentialsDialog credentials={credentials} onClose={() => setCredentials([])} />
       </div>
     )
   }
 
+  const adminItems = canAdmin
+    ? [
+        { key: 'create', label: t('databaseManager.newDatabase'), onSelect: () => void createDatabase() },
+        ...(!dedicated && selected && !selected.is_power_user
+          ? [{ key: 'power', label: t('databaseManager.powerUserEnable'), onSelect: () => void powerAction('enable') }]
+          : []),
+        ...(!dedicated && selected?.is_power_user
+          ? [
+              { key: 'power-rotate', label: t('databaseManager.powerUserRotate'), onSelect: () => void powerAction('rotate') },
+              { key: 'power-demote', label: t('databaseManager.powerUserDemote'), onSelect: () => void powerAction('demote') },
+            ]
+          : []),
+        { key: 'delete', label: t('databaseManager.deleteDatabase'), destructive: true, separatorBefore: true, disabled: !selected, onSelect: () => void deleteDatabase() },
+      ]
+    : []
+
   return (
-    <>
-      <DatabaseConsole
-        title="Datenbanken"
-        subtitle={t('databaseManager.subtitle')}
-        databases={resources.databases}
-        selectedDatabaseId={selectedDbId}
-        stats={stats}
-        tables={tables}
-        selectedTable={selectedTable}
-        tableInfo={tableInfo}
-        rows={rows}
-        sqlText={sqlText}
-        sqlResult={sqlResult}
-        history={history}
-        storageScope={`server-${serverId}`}
-        canAdmin={canAdmin}
-        canManagePowerUser={canAdmin}
-        powerUserActive={Boolean(selectedDatabase?.is_power_user)}
-        busy={busy}
-        error={error}
-        onSelectDatabase={(id) => {
-          setSelectedDbId(id)
-          setRows(null)
-          setTableInfo(null)
-        }}
-        onSelectTable={(table) => void run('table', () => selectTable(table))}
-        onSearchRows={(search) => selectedTable && void run('rows', () => selectTable(selectedTable, selectedDbId, search))}
-        onSqlTextChange={setSqlText}
-        onRunSql={runSql}
-        onCreateDatabase={canAdmin ? bootstrap : undefined}
-        onDeleteDatabase={canAdmin ? deleteDatabase : undefined}
-        onCreateTable={canWrite ? createTable : undefined}
-        onDropTable={canWrite ? dropTable : undefined}
-        onImport={canAdmin ? importSql : undefined}
-        onExport={canAdmin ? exportSql : undefined}
-        onEnablePowerUser={canAdmin ? () => powerAction('enable') : undefined}
-        onRotatePowerUser={canAdmin ? () => powerAction('rotate') : undefined}
-        onDemotePowerUser={canAdmin ? () => powerAction('demote') : undefined}
-        onRefresh={() => selectedDbId && void run('refresh', () => fetchDatabaseData(selectedDbId))}
-        dbUsers={resources.users}
-        onCreateUser={canAdmin ? createUser : undefined}
-        onRotateUser={canAdmin ? rotateUser : undefined}
-        onDeleteUser={canAdmin ? deleteUser : undefined}
-        onUpdateRow={canWrite ? handleUpdateRow : undefined}
-        onDeleteRows={canWrite ? handleDeleteRows : undefined}
-        onInsertRow={canWrite ? handleInsertRow : undefined}
-      />
+    <div className="space-y-4">
+      <div className="msm-card flex flex-wrap items-center justify-between gap-3 p-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <Database className="h-5 w-5 text-secondary" />
+          <div className="min-w-0">
+            <h2 className="font-headline text-lg font-semibold text-on-surface">{t('databaseManager.title')}</h2>
+            <p className="text-xs text-on-surface-variant">{dedicated ? t('databaseManager.subtitleDedicated') : t('databaseManager.subtitleShared')}</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Dropdown
+            value={selectedDbId != null ? String(selectedDbId) : null}
+            onChange={(value) => setSelectedDbId(Number(value))}
+            options={databases.map((database) => ({ value: String(database.id), label: database.name, hint: database.owner_role }))}
+            className="w-64"
+            aria-label={t('databaseManager.pickDatabase')}
+            data-testid="database-switcher"
+          />
+          {selected?.is_power_user && !dedicated && (
+            <Badge variant="warning">
+              <Shield className="mr-1 h-3 w-3" />
+              {t('databaseManager.powerUserActive')}
+            </Badge>
+          )}
+          {adminItems.length > 0 && <ActionMenu label={t('databaseManager.actions')} items={adminItems} disabled={busy} />}
+        </div>
+      </div>
+
+      {selected && (
+        <PostgresStudio
+          key={`${selected.id}:${studioKey}`}
+          serverId={serverId}
+          databaseId={selected.id}
+          databaseName={selected.name}
+          onResourcesChanged={() => void run(fetchResources)}
+          onBootstrap={dedicated && canAdmin ? bootstrapInstance : undefined}
+        />
+      )}
       <PostgresCredentialsDialog credentials={credentials} onClose={() => setCredentials([])} />
       <PowerUserDialog state={powerDialog} onClose={() => setPowerDialog(null)} />
-    </>
+    </div>
   )
-}
-
-function csrfHeader(): Record<string, string> {
-  const csrf = getCsrfToken()
-  return csrf ? { 'X-CSRF-Token': csrf } : {}
 }
 
 function PowerUserDialog({ state, onClose }: { state: { db: PostgresDatabase; password: string } | null; onClose: () => void }) {
   const { t } = useTranslation()
-  if (!state) return null
-  const connectionUrl = `postgresql://${state.db.owner_role}:${state.password}@msm-postgres:5432/${state.db.name}`
   return (
-    <div className="msm-modal-overlay" onClick={onClose}>
-      <div className="msm-card w-full max-w-2xl p-6" onClick={(event) => event.stopPropagation()}>
-        <div className="mb-3 flex items-center gap-2">
-          <Shield className="h-5 w-5 text-status-warning" />
-          <h3 className="font-headline text-xl font-semibold text-on-surface">{t('databaseManager.powerUserTitle')}</h3>
-        </div>
-        <p className="mb-4 rounded-lg border border-status-warning/40 bg-status-warning/10 p-3 text-sm text-status-warning">
-          {t('databaseManager.powerUserWarning')}
-        </p>
-        <div className="space-y-2 font-mono text-sm">
-          <div>database: {state.db.name}</div>
-          <div>username: {state.db.owner_role}</div>
-          <div className="break-all rounded bg-status-destructive/10 p-2 text-status-destructive">password: {state.password}</div>
-          <div className="break-all rounded border border-outline-variant bg-surface-container-high p-2 text-on-surface-variant">psql "{connectionUrl}"</div>
-        </div>
-        <Button className="mt-5 w-full" onClick={onClose}>{t('common.close')}</Button>
-      </div>
-    </div>
+    <Dialog open={Boolean(state)} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{t('databaseManager.powerUserTitle')}</DialogTitle>
+        </DialogHeader>
+        {state && (
+          <div className="space-y-3 p-6">
+            <p className="rounded-lg border border-status-warning/40 bg-status-warning/10 p-3 text-sm text-status-warning">{t('databaseManager.powerUserWarning')}</p>
+            <div className="space-y-2 font-mono text-sm text-on-surface">
+              <div>database: {state.db.name}</div>
+              <div>username: {state.db.owner_role}</div>
+              <div className="break-all rounded bg-status-destructive/10 p-2 text-status-destructive">password: {state.password}</div>
+            </div>
+            <p className="text-xs text-on-surface-variant">{t('databaseManager.powerUserHub')}</p>
+          </div>
+        )}
+        <DialogFooter>
+          <Button onClick={onClose}>{t('common.close')}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

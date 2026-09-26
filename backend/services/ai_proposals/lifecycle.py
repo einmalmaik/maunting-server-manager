@@ -138,6 +138,10 @@ from services.ai_proposals.user_proposals import (
     _ausfuehren_user_roles,
     _ausfuehren_user_server_permission,
 )
+from services.ai_proposals.database_proposals import (
+    _database_change_payload,
+    _ausfuehren_database_change,
+)
 from services.ai_proposals.task_proposals import (
     _popup_set_payload,
     _task_set_payload,
@@ -220,7 +224,7 @@ _GLOBALE_PAYLOADS: dict = {
         _blueprint_delete_payload(db, rest)
     ),
     "propose_server_create": lambda db, user, rest, arguments, guardian: (
-        _server_create_payload(db, arguments)
+        _server_create_payload(db, arguments, user=user)
     ),
     "propose_hoster_integration": lambda db, user, rest, arguments, guardian: (
         _hoster_integration_payload(db, user, rest)
@@ -565,6 +569,9 @@ def create_proposal(
         elif tool_name == "propose_user_server_permission":
             payload, preview = _user_server_permission_payload(db, user, server, rest)
             expected_revision = None
+        elif tool_name == "propose_database_change":
+            payload, preview = _database_change_payload(db, user, server, rest)
+            expected_revision = None
         elif tool_name in SERVER_READ_TOOLS:
             _require_tool_permission(db, user, server.id, tool_name, rest)
             payload = dict(rest)
@@ -831,6 +838,7 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_restart_schedule_set": _ausfuehren_restart_schedule_set,
     "propose_backup_schedule_set": _ausfuehren_backup_schedule_set,
     "propose_file_delete": _ausfuehren_file_delete,
+    "propose_database_change": _ausfuehren_database_change,
     "propose_server_create": _ausfuehren_server_create,
     "propose_blueprint_change": _ausfuehren_blueprint_change,
     "propose_blueprint_delete": _ausfuehren_blueprint_delete,

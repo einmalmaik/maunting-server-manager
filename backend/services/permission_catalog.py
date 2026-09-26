@@ -34,6 +34,9 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("panel.database.read",       "panel",   "Panel-Datenbank lesen"),
     PermissionDef("panel.database.admin",      "panel",   "Panel-Datenbank verwalten"),
     PermissionDef("servers.create",            "servers", "Neuen Server anlegen"),
+    # Zusaetzlich zu `servers.create`: eine eigene PostgreSQL-Instanz ist ein
+    # eigener Dienst mit Port nach aussen, kein Spielserver.
+    PermissionDef("servers.create.database",   "servers", "Datenbankserver (eigene PostgreSQL-Instanz) anlegen"),
     PermissionDef("servers.delete",            "servers", "Server löschen (global, nicht delegierbar)"),
     # Server aus Shop-Verträgen sind Kundendaten. Pauschale Rollenrechte
     # (server.view, server.console.read, ...) greifen auf ihnen nur, wenn die

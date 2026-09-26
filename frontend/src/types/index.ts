@@ -32,6 +32,8 @@ export interface Server {
   id: number
   name: string
   game_type: string
+  /** Eigener PostgreSQL-Datenbankserver oder Anwendung (Spiel, Bot …). Berechnet aus der Blueprint. */
+  server_kind?: 'application' | 'database'
   // install_dir + container_name entfernt (Security/data-min per review): waren in allen Responses inkl. view-only User.
   // Keine Verwendung im FE-Code (nur hier); interne Pfade bleiben server-only in DB/audit/owner flows.
   status: string

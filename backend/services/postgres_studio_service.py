@@ -702,17 +702,28 @@ def plan_response(plan: Plan) -> dict[str, Any]:
     }
 
 
-def execute(db: Session, k: Kontext, op: Any) -> dict[str, Any]:
+def execute(db: Session, k: Kontext, op: Any, *, dry_run: bool = False) -> dict[str, Any]:
+    """Führt eine Operation aus — oder probt sie (``dry_run``).
+
+    Die Probe ist derselbe Lauf in einer Transaktion, die am Ende verworfen
+    wird: ein kaputter Funktionskörper, eine fehlende Triggerfunktion oder eine
+    nicht installierbare Erweiterung fällt dann schon beim Vorschlag auf.
+    Autocommit-Pläne (VACUUM, CONCURRENTLY) lassen sich nicht verwerfen; sie
+    werden nur kompiliert (``probed: False``).
+    """
     plan = plan_for(db, k, op)
+    if dry_run and plan.mode != "tx":
+        return {"plan": plan_response(plan), "results": [], "probed": False}
     result = _run(
         db,
         k,
         [(text, None) for text in plan.statements],
         identity=plan.identity,
         mode=plan.mode,
+        rollback=dry_run,
         row_limit=100,
     )
-    return {"plan": plan_response(plan), **result}
+    return {"plan": plan_response(plan), **result, **({"probed": True} if dry_run else {})}
 
 
 # ── Daten-Grid ─────────────────────────────────────────────────────────────

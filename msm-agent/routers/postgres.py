@@ -19,7 +19,6 @@ from services.postgres_service import (
     alter_owner_password,
     create_user,
     demote_owner,
-    dispatch_query,
     drop_databases_and_roles,
     dump_database,
     dump_databases,
@@ -97,27 +96,6 @@ class DropIn(_Zielbar):
     databases: list[str] = Field(default_factory=list)
     owners: list[str] = Field(default_factory=list)
     users: list[str] = Field(default_factory=list)
-
-
-class QueryIn(_Zielbar):
-    action: str = Field(..., min_length=1, max_length=64)
-    database_name: str = ""
-    owner_role: str = ""
-    owner_password: str = ""
-    schema_name: str | None = None
-    table_name: str | None = None
-    columns: list[dict[str, Any]] | None = None
-    limit: int | None = None
-    offset: int | None = None
-    search: str | None = None
-    sql: str | None = None
-    name: str | None = None
-    # Daten-Grid: ohne diese Felder verwarf Pydantic sie still, und jedes
-    # Aendern/Loeschen/Einfuegen endete in "Key conditions ... required".
-    key_conditions: dict[str, Any] | None = None
-    updates: dict[str, Any] | None = None
-    row_conditions: list[dict[str, Any]] | None = None
-    row_data: dict[str, Any] | None = None
 
 
 class PromoteIn(_Zielbar):
@@ -226,16 +204,6 @@ def postgres_drop(body: DropIn) -> dict[str, Any]:
 def postgres_delete_database(body: DropIn) -> dict[str, Any]:
     """Alias for drop (phase-7 DELETE /postgres/database)."""
     return postgres_drop(body)
-
-
-@router.post("/query")
-def postgres_query(body: QueryIn) -> Any:
-    try:
-        with ziel(body.ziel_dict()):
-            payload = body.model_dump()
-            return dispatch_query(body.action, payload)
-    except PostgresAgentError as exc:
-        raise _http(exc) from exc
 
 
 @router.post("/roles/promote")

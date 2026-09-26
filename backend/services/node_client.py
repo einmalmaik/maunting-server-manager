@@ -809,14 +809,6 @@ class NodeClient:
     def postgres_drop(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/postgres/drop", json=payload)
 
-    def postgres_query(self, payload: dict[str, Any]) -> Any:
-        return self._request(
-            "POST",
-            "/postgres/query",
-            json=payload,
-            timeout=_LONG_TIMEOUT,
-        )
-
     def postgres_promote(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/postgres/roles/promote", json=payload)
 
