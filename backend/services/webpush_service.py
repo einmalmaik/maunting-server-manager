@@ -708,9 +708,19 @@ def _zustellen(
     Stoerung zu loeschen waere der teuerste moegliche Fehler: der Benutzer
     bekaeme nie wieder etwas und saehe nirgends warum.
     """
-    if not _ziel_ist_erlaubt(endpunkt):
+    try:
+        teile = urlsplit(endpunkt)
+        gueltig = teile.scheme == "https" and _host_ist_autorisiert(teile.hostname or "")
+        # Auch syntaktisch ungueltige Ports sind dauerhafte Adressfehler.
+        teile.port
+    except ValueError:
+        gueltig = False
+    if not gueltig:
         logger.warning("webpush: Zustelladresse abgelehnt (kein erlaubtes Push-Ziel)")
         return False
+    if not _ziel_ist_erlaubt(endpunkt):
+        logger.warning("webpush: Push-Ziel derzeit nicht sicher aufloesbar, Versand uebersprungen")
+        return True
 
     try:
         verschluesselt = _verschluesseln(koerper, p256dh, auth)

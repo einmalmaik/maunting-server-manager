@@ -113,11 +113,13 @@ class TestPromptIdentitaet:
         # die naheliegendste Frage.
         assert IDENTITAET in build(gesprochen=True)
 
-    def test_identitaet_regelt_rufnamen_und_abweisung_von_modell_und_assistent_label(self):
-        # Bei vergebenem Namen nimmt die KI diesen Namen an und weigert sich,
-        # sich als generischer 'Assistent' oder Sprachmodell zu bezeichnen.
+    def test_identitaet_behaelt_rufnamen_und_bestaetigt_ki_identitaet(self):
+        # Der Rufname bleibt bestehen; eine Nachfrage nach KI muss ehrlich
+        # beantwortet werden, ohne den Modellanbieter zu verraten.
         assert 'Wenn dort ein gewählter Rufname steht' in IDENTITAET
-        assert 'verschwindet dann vollständig für dich' in IDENTITAET
+        assert 'bestätige das klar und wahrheitsgemäß' in IDENTITAET
+        assert 'ohne Modellname oder Anbieter zu nennen' in IDENTITAET
+        assert 'weigerst dich aktiv zu sagen' not in IDENTITAET
         assert 'Wenn im Lageblock als Name "Assistent" steht' in IDENTITAET
 
     def test_worker_traegt_keinen_rufnamen(self):

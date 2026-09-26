@@ -257,15 +257,12 @@ def test_import_handles_permission_denied_cleanly(
     patched_blueprints_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from pathlib import Path
-    orig_write = Path.write_text
+    from services import blueprint_service
 
-    def mock_write(self, *args, **kwargs):
-        if "perm_fail" in str(self):
-            raise PermissionError(13, "Permission denied")
-        return orig_write(self, *args, **kwargs)
+    def fail_creation(*args, **kwargs):
+        raise PermissionError(13, "Permission denied")
 
-    monkeypatch.setattr(Path, "write_text", mock_write)
+    monkeypatch.setattr(blueprint_service.tempfile, "NamedTemporaryFile", fail_creation)
     payload = {
         "version": 1,
         "meta": {"id": "perm_fail", "name": "Perm Fail", "category": "bot"},
@@ -373,3 +370,57 @@ def test_import_overwrites_readonly_existing_blueprint(
     assert resp.status_code == 201
     assert "Readonly Updated" in ziel.read_text(encoding="utf-8")
 
+
+
+def test_gescheiterter_atomarer_austausch_bewahrt_datei_und_rechte(patched_blueprints_dir, monkeypatch):
+    from fastapi import HTTPException
+    from services import blueprint_service
+    ziel = patched_blueprints_dir / "atomic.blueprint.json"
+    original = '{"version":1,"meta":{"id":"atomic","name":"Old","category":"bot"},"runtime":{"image":"alpine","startup":"echo 1"},"ports":[],"source":{"type":"dockerOnly"}}'
+    ziel.write_text(original)
+    ziel.chmod(0o640)
+    old_mode = ziel.stat().st_mode
+    directory_mode = ziel.parent.stat().st_mode
+    blueprint_service.reload_registry()
+    import json
+    payload = json.loads(original)
+    payload["meta"]["name"] = "New"
+    def fail_replace(*args):
+        raise PermissionError("synthetic replace denial")
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(HTTPException) as error:
+        blueprint_service.save_community_blueprint(payload)
+    assert error.value.status_code == 500
+    assert ziel.read_text() == original
+    assert ziel.stat().st_mode == old_mode
+    assert ziel.parent.stat().st_mode == directory_mode
+    assert list(ziel.parent.glob(".*.tmp")) == []
+
+
+def test_parallele_blueprints_nutzen_eigene_tempdateien(patched_blueprints_dir, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    import json
+    import threading
+    from services import blueprint_service
+    rendezvous = threading.Barrier(2)
+    temporary = []
+    replace = Path.replace
+    def concurrent_replace(source, target):
+        temporary.append(source)
+        rendezvous.wait(timeout=5)
+        return replace(source, target)
+    monkeypatch.setattr(Path, "replace", concurrent_replace)
+    monkeypatch.setattr(blueprint_service, "reload_registry", lambda: None)
+    def save(name):
+        return blueprint_service.save_community_blueprint({
+            "version": 1, "meta": {"id": "parallel", "name": name, "category": "bot"},
+            "runtime": {"image": "alpine", "startup": "echo 1"}, "ports": [],
+            "source": {"type": "dockerOnly"},
+        })
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert list(pool.map(save, ["First", "Second"])) == ["parallel", "parallel"]
+    assert len(set(temporary)) == 2
+    target = patched_blueprints_dir / "parallel.blueprint.json"
+    assert json.loads(target.read_text())["meta"]["name"] in {"First", "Second"}
+    assert target.stat().st_mode & 0o022 == 0
+    assert list(target.parent.glob(".*.tmp")) == []

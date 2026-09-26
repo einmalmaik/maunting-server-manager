@@ -347,3 +347,16 @@ async def test_ein_nein_lehnt_die_juengste_karte_ab(monkeypatch) -> None:
     assert entschieden is True
     assert abgelehnt == ["juengste"]
     assert bruecke._offene_vorschlaege == []
+
+
+@pytest.mark.asyncio
+async def test_entzogener_vorschlag_leert_die_sprachbestaetigung(monkeypatch):
+    bruecke = _Attrappe()
+    bruecke._offene_vorschlaege = ["entzogen"]
+    def entzogen(_kennung):
+        raise PermissionError("synthetic access denial")
+    monkeypatch.setattr(bruecke, "_vorschlagslage", entzogen)
+    assert await bruecke._entscheidung("Ja") is True
+    assert bruecke._offene_vorschlaege == []
+    assert bruecke.zustaende()[-1] == "bereit"
+    assert {"art": "stoerung"} in bruecke.ereignisse

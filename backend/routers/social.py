@@ -678,13 +678,14 @@ def get_chat_media_signed_url(
     ttl: int = Query(900, ge=60, le=86400),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    nachweis: str | None = Depends(mailbox_token),
 ) -> dict:
     """Erzeugt eine zeitlich begrenzte signierte URL fuer einen Medienblob.
 
     Fremde ohne Chat-Mitgliedschaft werden mit 403 Forbidden abgewiesen.
     """
     signed_url, expires_at = ChatMediaService.generate_signed_url(
-        db, user=current_user, media_id=media_id, ttl_seconds=ttl
+        db, user=current_user, media_id=media_id, ttl_seconds=ttl, mailbox_token=nachweis
     )
     return {
         "media_id": media_id,
@@ -703,13 +704,14 @@ def download_chat_media_blob(
     expires: int = Query(...),
     user_id: int = Query(...),
     db: Session = Depends(get_db),
+    nachweis: str | None = Depends(mailbox_token),
 ) -> Response:
     """Liefert den verschluesselten Medienblob anhand einer signierten URL aus.
 
     Validiert Signatur, Ablaufzeit und Chat-Mitgliedschaft.
     """
     media = ChatMediaService.get_media_by_signed_url(
-        db, media_id=media_id, token=token, expires=expires, user_id=user_id
+        db, media_id=media_id, token=token, expires=expires, user_id=user_id, mailbox_token=nachweis
     )
     safe_name = sanitize_attachment_filename(media.file_name)
     return Response(
@@ -1449,4 +1451,3 @@ async def social_websocket(
         recv_task.cancel()
         await asyncio.gather(send_task, recv_task, return_exceptions=True)
         SyncEventService.unsubscribe(conn_id)
-

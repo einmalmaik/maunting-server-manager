@@ -20,6 +20,8 @@ einen Ausweis erst brauchbar machen:
 5. Entziehen trifft genau ein Geraet — nie ein fremdes, nie alle.
 """
 
+import pytest
+
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -904,3 +906,26 @@ class TestVerlaufsErstabgleich:
             headers=_kopf(user_cookies),
         )
         assert ablegen.status_code == 400
+
+
+@pytest.mark.parametrize("evict_cache", [True, False])
+def test_refresh_retry_erzeugt_keinen_neuen_nachfolger(client, db, regular_user, user_cookies, monkeypatch, evict_cache):
+    from routers import auth
+    monkeypatch.setattr(auth, "_recent_rotations", {})
+    _mit_chatrecht(db, regular_user)
+    code = _code_erzeugen(client, user_cookies, label="RetryTest")["code"]
+    initial = client.post("/api/auth/devices/redeem", json={"code": code}).json()["refresh_token"]
+    first = client.post("/api/auth/refresh", json={"refresh_token": initial})
+    assert first.status_code == 200
+    valid = first.json()["refresh_token"]
+    if evict_cache:
+        auth._recent_rotations.clear()
+    else:
+        second = client.post("/api/auth/refresh", json={"refresh_token": valid})
+        assert second.status_code == 200
+        valid = second.json()["refresh_token"]
+    count = db.query(RefreshToken).count()
+    retry = client.post("/api/auth/refresh", json={"refresh_token": initial})
+    assert retry.status_code == 401
+    assert db.query(RefreshToken).count() == count
+    assert client.post("/api/auth/refresh", json={"refresh_token": valid}).status_code == 200

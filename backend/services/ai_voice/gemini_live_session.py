@@ -798,17 +798,17 @@ class GeminiLiveSitzung:
                 timeout=MAX_SITZUNGSSEKUNDEN,
                 return_when=asyncio.FIRST_COMPLETED,
             )
+            if not done:
+                self.lage.abgelaufen = True
             watchdog_task.cancel()
             self._beendet = True
             for task in pending:
                 task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
+            await asyncio.gather(watchdog_task, *pending, return_exceptions=True)
+            if not done:
+                await self._panel_senden({"art": "abgelaufen"})
             for task in done:
                 task.result()
-        except asyncio.TimeoutError:
-            self.lage.abgelaufen = True
-            await self._panel_senden({"art": "abgelaufen"})
         except WebSocketDisconnect:
             pass
         except Exception as exc:

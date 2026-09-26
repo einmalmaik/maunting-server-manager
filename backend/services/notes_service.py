@@ -192,8 +192,6 @@ class NotesService:
         sort_col = Note.updated_at
         if sort_by == "created_at":
             sort_col = Note.created_at
-        elif sort_by == "title":
-            sort_col = Note.title
 
         if order.lower() == "asc":
             query = query.order_by(Note.is_pinned.desc(), sort_col.asc())
@@ -210,6 +208,9 @@ class NotesService:
                 if (s in n["title"].lower()) or (s in n["content"].lower())
             ]
 
+        if sort_by == "title":
+            formatted_list.sort(key=lambda note: note["title"].casefold(), reverse=order.lower() != "asc")
+            formatted_list.sort(key=lambda note: not note["is_pinned"])
         return formatted_list
 
     @classmethod
