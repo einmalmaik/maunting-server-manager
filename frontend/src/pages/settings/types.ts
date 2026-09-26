@@ -44,7 +44,7 @@ export interface PanelSettings {
   vault_enabled: boolean
   social_enabled: boolean
   captcha_enabled: boolean
-  captcha_provider: 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
+  captcha_provider: 'altcha' | 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
   captcha_site_key: string
   captcha_secret_key: string
   cloudflare_enabled: boolean
@@ -110,8 +110,8 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   notes_enabled: true,
   vault_enabled: true,
   social_enabled: true,
-  captcha_enabled: false,
-  captcha_provider: 'none',
+  captcha_enabled: true,
+  captcha_provider: 'altcha',
   captcha_site_key: '',
   captcha_secret_key: '',
   cloudflare_enabled: true,

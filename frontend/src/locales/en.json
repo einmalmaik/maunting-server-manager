@@ -3202,6 +3202,8 @@
       "description": "Protect registration, login, and password recovery from spam and brute-force attacks.",
       "enable": "Enable CAPTCHA",
       "provider": "Provider",
+      "altchaTitle": "100% local & GDPR compliant",
+      "altchaInfo": "Runs entirely on your server via DIS. No external requests, no tracking, no cookies, and no API keys required.",
       "siteKey": "Site key",
       "siteKeyHint": "Public key to display the widget in the browser.",
       "secretKey": "Secret key",

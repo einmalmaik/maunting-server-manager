@@ -13,6 +13,7 @@ export function ForgotPassword() {
   const { t } = useTranslation()
   const [email, setEmail] = useState('')
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaResetKey, setCaptchaResetKey] = useState(0)
   const [status, setStatus] = useState<'idle' | 'submitting' | 'sent'>('idle')
   const [error, setError] = useState('')
 
@@ -30,6 +31,8 @@ export function ForgotPassword() {
     } catch (err: any) {
       setError(err.message || t('forgotPassword.error'))
       setStatus('idle')
+      setCaptchaToken(null)
+      setCaptchaResetKey((k) => k + 1)
     }
   }
 
@@ -90,7 +93,7 @@ export function ForgotPassword() {
                 />
               </div>
 
-              <CaptchaWidget onVerify={setCaptchaToken} />
+              <CaptchaWidget onVerify={setCaptchaToken} resetKey={captchaResetKey} />
 
               <ErrorMessage message={error} className="text-sm" />
 

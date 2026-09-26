@@ -26,7 +26,12 @@ import {
   argon2idRaw,
 } from '@msdis/shield/kdf';
 import { randomBytes } from '@msdis/shield/random';
-import { constantTimeEqual } from '@msdis/shield/integrity';
+import {
+  constantTimeEqual,
+  importHmacSha256Key,
+  hmacSha256WithKey,
+  sha256Bytes,
+} from '@msdis/shield/integrity';
 import {
   generateTotpSecret,
   verifyTotpCode,
@@ -68,9 +73,32 @@ const rawKey = await deriveHkdfSha256Bits(secretKeyBytes, {
 });
 const encKey = await importAesGcmKey(rawKey);
 rawKey.fill(0);
+
+const altchaKeyBytes = await deriveHkdfSha256Bits(secretKeyBytes, {
+  info: encoder.encode('MSM-ALTCHA-HMAC-v1'),
+  salt: saltBytes,
+  lengthBits: 256,
+});
+const altchaHmacKey = await importHmacSha256Key(altchaKeyBytes, ['sign', 'verify']);
+altchaKeyBytes.fill(0);
 secretKeyBytes.fill(0);
 
 console.log(`[DIS Sidecar] Encryption key derived (HKDF-SHA-256, 256-bit)`);
+console.log(`[DIS Sidecar] ALTCHA HMAC key derived (HKDF-SHA-256, 256-bit)`);
+
+// ── ALTCHA CAPTCHA state ──────────────────────────────────────────────────
+// Map of signature -> expiresAtMillis. Prevents replay attacks.
+const altchaReplayCache = new Map();
+const MAX_ALTCHA_CACHE_SIZE = 50000;
+
+function cleanAltchaReplayCache() {
+  const now = Date.now();
+  for (const [sig, exp] of altchaReplayCache.entries()) {
+    if (exp <= now) {
+      altchaReplayCache.delete(sig);
+    }
+  }
+}
 
 // ── Password hashing params (DIS KDF v2) ─────────────────────────────────
 const PW_SALT_LEN = 16;
@@ -310,6 +338,125 @@ const server = http.createServer(async (req, res) => {
           }),
         };
         break;
+
+      case '/altcha/challenge': {
+        cleanAltchaReplayCache();
+        const maxnumber = 50000;
+        const expiresInSeconds = 300; // 5 minutes
+        const expiresAt = Math.floor(Date.now() / 1000) + expiresInSeconds;
+        const saltHex = Buffer.from(randomBytes(16)).toString('hex');
+        const salt = `${saltHex}?expires=${expiresAt}`;
+        const targetNumber = crypto.randomInt(0, maxnumber + 1);
+
+        const challengeBytes = await sha256Bytes(encoder.encode(salt + targetNumber));
+        const challenge = Buffer.from(challengeBytes).toString('hex');
+
+        const sigBytes = await hmacSha256WithKey(altchaHmacKey, encoder.encode(challenge));
+        const signature = Buffer.from(sigBytes).toString('hex');
+
+        result = {
+          algorithm: 'SHA-256',
+          challenge,
+          maxnumber,
+          maxNumber: maxnumber,
+          salt,
+          signature,
+        };
+        break;
+      }
+
+      case '/altcha/verify': {
+        cleanAltchaReplayCache();
+        const payload = data?.payload;
+        if (typeof payload !== 'string' || !payload.trim()) {
+          result = { valid: false };
+          break;
+        }
+
+        let parsed;
+        try {
+          const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+          const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+          const jsonStr = Buffer.from(padded, 'base64').toString('utf8');
+          parsed = JSON.parse(jsonStr);
+        } catch {
+          result = { valid: false };
+          break;
+        }
+
+        if (
+          !parsed ||
+          parsed.algorithm !== 'SHA-256' ||
+          typeof parsed.challenge !== 'string' ||
+          typeof parsed.salt !== 'string' ||
+          typeof parsed.signature !== 'string' ||
+          typeof parsed.number !== 'number' ||
+          !Number.isInteger(parsed.number) ||
+          parsed.number < 0
+        ) {
+          result = { valid: false };
+          break;
+        }
+
+        // Check expiry in salt (reject expired or absurd future timestamps)
+        const qIndex = parsed.salt.indexOf('?');
+        if (qIndex === -1) {
+          result = { valid: false };
+          break;
+        }
+        const params = new URLSearchParams(parsed.salt.slice(qIndex + 1));
+        const expiresStr = params.get('expires');
+        if (!expiresStr) {
+          result = { valid: false };
+          break;
+        }
+        const expiresSec = parseInt(expiresStr, 10);
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (isNaN(expiresSec) || expiresSec < nowSec || expiresSec > nowSec + 600) {
+          result = { valid: false };
+          break;
+        }
+
+        // Replay check
+        if (altchaReplayCache.has(parsed.signature)) {
+          result = { valid: false };
+          break;
+        }
+
+        // Verify HMAC signature in constant time
+        const expectedSigBytes = await hmacSha256WithKey(altchaHmacKey, encoder.encode(parsed.challenge));
+        const expectedSig = Buffer.from(expectedSigBytes).toString('hex');
+
+        const expectedSigBuf = Buffer.from(expectedSig, 'utf8');
+        const suppliedSigBuf = Buffer.from(parsed.signature, 'utf8');
+        if (
+          expectedSigBuf.length !== suppliedSigBuf.length ||
+          !constantTimeEqual(new Uint8Array(expectedSigBuf), new Uint8Array(suppliedSigBuf))
+        ) {
+          result = { valid: false };
+          break;
+        }
+
+        // Verify Proof-of-Work
+        const computedChallengeBytes = await sha256Bytes(encoder.encode(parsed.salt + parsed.number));
+        const computedChallenge = Buffer.from(computedChallengeBytes).toString('hex');
+        if (computedChallenge.toLowerCase() !== parsed.challenge.toLowerCase()) {
+          result = { valid: false };
+          break;
+        }
+
+        // Record in replay cache with FIFO eviction guarantee to prevent replay bypass under load
+        if (altchaReplayCache.size >= MAX_ALTCHA_CACHE_SIZE) {
+          const oldestKey = altchaReplayCache.keys().next().value;
+          if (oldestKey !== undefined) {
+            altchaReplayCache.delete(oldestKey);
+          }
+        }
+        altchaReplayCache.set(parsed.signature, expiresSec * 1000);
+
+        result = { valid: true };
+        break;
+      }
 
       default:
         return jsonReply(res, 404, { error: 'not found' });

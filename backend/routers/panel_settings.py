@@ -151,8 +151,8 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "notes_enabled": all_db.get("notes_enabled", "true") != "false",
         "vault_enabled": all_db.get("vault_enabled", "true") != "false",
         "social_enabled": all_db.get("social_enabled", "true") != "false",
-        "captcha_enabled": all_db.get("captcha_enabled", "false") == "true",
-        "captcha_provider": all_db.get("captcha_provider", "none"),
+        "captcha_enabled": all_db.get("captcha_enabled", "true") == "true",
+        "captcha_provider": all_db.get("captcha_provider", "altcha"),
         "captcha_site_key": all_db.get("captcha_site_key", ""),
         "captcha_secret_key": _mask_secret(
             AuthService.decrypt_secret(
@@ -260,7 +260,7 @@ def update_settings(
             value = "true" if bool(value) else "false"
         if key == "captcha_provider":
             mode = str(value).strip().lower()
-            if mode not in ("none", "turnstile", "hcaptcha", "recaptcha"):
+            if mode not in ("none", "altcha", "turnstile", "hcaptcha", "recaptcha"):
                 raise HTTPException(status_code=400, detail="Ungueltiger CAPTCHA-Anbieter")
             value = mode
         if key == "support_widget_mode":

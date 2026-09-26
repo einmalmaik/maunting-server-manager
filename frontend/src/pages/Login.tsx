@@ -25,6 +25,7 @@ export function Login() {
   const [error, setError] = useState('')
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const [captchaStatus, setCaptchaStatus] = useState<CaptchaStatus>('loading')
+  const [captchaResetKey, setCaptchaResetKey] = useState(0)
   const [form, setForm] = useState({ username: '', password: '', otp: '' })
   const [requires2FA, setRequires2FA] = useState(false)
   // Solange die Sicherheitsabfrage nicht bestanden ist, bleiben Formular und
@@ -107,6 +108,8 @@ export function Login() {
     } catch (err: any) {
       setError(err.message || t('auth.loginFailed'))
       setSubmitting(false)
+      setCaptchaToken(null)
+      setCaptchaResetKey((k) => k + 1)
     }
   }
 
@@ -353,7 +356,7 @@ export function Login() {
               )}
 
               {!requires2FA && (
-                <CaptchaWidget onVerify={setCaptchaToken} onStatusChange={setCaptchaStatus} />
+                <CaptchaWidget onVerify={setCaptchaToken} onStatusChange={setCaptchaStatus} resetKey={captchaResetKey} />
               )}
 
               <ErrorMessage message={error} className="text-sm" />

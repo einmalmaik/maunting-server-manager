@@ -7,6 +7,7 @@ declare global {
     turnstile?: {
       render: (container: HTMLElement, options: any) => any
       remove: (id: any) => void
+      reset?: (id: any) => void
     }
     hcaptcha?: {
       render: (container: HTMLElement, options: any) => any
@@ -36,16 +37,17 @@ export function captchaSperrt(status: CaptchaStatus): boolean {
 interface CaptchaWidgetProps {
   onVerify: (token: string) => void
   onStatusChange?: (status: CaptchaStatus) => void
+  resetKey?: any
 }
 
 interface CaptchaConfig {
   enabled: boolean
-  provider: 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
+  provider: 'altcha' | 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
   site_key: string
 }
 
-export function CaptchaWidget({ onVerify, onStatusChange }: CaptchaWidgetProps) {
-  const { t } = useTranslation()
+export function CaptchaWidget({ onVerify, onStatusChange, resetKey }: CaptchaWidgetProps) {
+  const { t, i18n } = useTranslation()
   const [config, setConfig] = useState<CaptchaConfig | null>(null)
   // Ohne diesen Zustand endet ein geblocktes Anbieterskript in einem leeren
   // Kasten: der Benutzer sendet ohne Token, das Backend lehnt ab, und der
@@ -85,10 +87,108 @@ export function CaptchaWidget({ onVerify, onStatusChange }: CaptchaWidgetProps) 
   }, [])
 
   useEffect(() => {
+    if (resetKey === undefined || !containerRef.current) return
+    if (config?.provider === 'altcha') {
+      const widget = containerRef.current.querySelector('altcha-widget') as any
+      if (widget && typeof widget.reset === 'function') {
+        widget.reset()
+        onVerifyRef.current('')
+        melde('ready')
+      }
+    } else if (widgetIdRef.current !== null) {
+      if (config?.provider === 'turnstile' && window.turnstile?.remove) {
+        window.turnstile.reset?.(widgetIdRef.current)
+        onVerifyRef.current('')
+        melde('ready')
+      } else if (config?.provider === 'hcaptcha' && window.hcaptcha?.reset) {
+        window.hcaptcha.reset(widgetIdRef.current)
+        onVerifyRef.current('')
+        melde('ready')
+      } else if (config?.provider === 'recaptcha' && window.grecaptcha?.reset) {
+        window.grecaptcha.reset(widgetIdRef.current)
+        onVerifyRef.current('')
+        melde('ready')
+      }
+    }
+  }, [resetKey, config?.provider])
+
+  useEffect(() => {
     if (!config || !config.enabled || !containerRef.current) return
 
     const provider = config.provider
     const siteKey = config.site_key
+
+    if (provider === 'altcha') {
+      let active = true
+      import('altcha')
+        .then(() => {
+          if (!active || !containerRef.current) return
+          containerRef.current.innerHTML = ''
+          const widget = document.createElement('altcha-widget')
+          const challengeUrl = typeof window !== 'undefined' && window.location?.origin
+            ? new URL('/api/auth/captcha-challenge', window.location.origin).href
+            : '/api/auth/captcha-challenge'
+          widget.setAttribute('challenge', challengeUrl)
+          widget.setAttribute('challengeurl', challengeUrl)
+          widget.setAttribute('auto', 'onload')
+          const lang = (i18n.language || 'de').startsWith('de') ? 'de' : 'en'
+          widget.setAttribute('language', lang)
+          const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+          widget.setAttribute('theme', isDark ? 'dark' : 'auto')
+
+          const handleStateChange = (ev: Event) => {
+            const customEv = ev as CustomEvent
+            const st = customEv.detail?.state
+            if (st === 'verified' && customEv.detail?.payload) {
+              onVerifyRef.current(customEv.detail.payload)
+              melde('verified')
+            } else if (st === 'expired' || st === 'unverified') {
+              onVerifyRef.current('')
+              melde('ready')
+            } else if (st === 'error') {
+              onVerifyRef.current('')
+              setLoadFailed(true)
+              melde('failed')
+            }
+          }
+          const handleVerified = (ev: Event) => {
+            const customEv = ev as CustomEvent
+            if (customEv.detail?.payload) {
+              onVerifyRef.current(customEv.detail.payload)
+              melde('verified')
+            }
+          }
+          const handleExpired = () => {
+            onVerifyRef.current('')
+            melde('ready')
+          }
+          const handleError = () => {
+            onVerifyRef.current('')
+            setLoadFailed(true)
+            melde('failed')
+          }
+
+          widget.addEventListener('statechange', handleStateChange)
+          widget.addEventListener('verified', handleVerified)
+          widget.addEventListener('expired', handleExpired)
+          widget.addEventListener('error', handleError)
+          containerRef.current.appendChild(widget)
+          // Das Widget steht; gesperrt bleibt es, bis es `verified` meldet.
+          melde('ready')
+        })
+        .catch((err) => {
+          console.error('Failed to load ALTCHA widget:', err)
+          setLoadFailed(true)
+          melde('failed')
+        })
+
+      return () => {
+        active = false
+        if (containerRef.current) {
+          containerRef.current.innerHTML = ''
+        }
+      }
+    }
 
     let scriptUrl = ''
     let checkGlobal = ''

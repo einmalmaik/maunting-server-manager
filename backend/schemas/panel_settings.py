@@ -53,8 +53,8 @@ class PanelSettingsResponse(BaseModel):
     notes_enabled: bool = True
     vault_enabled: bool = True
     social_enabled: bool = True
-    captcha_enabled: bool = False
-    captcha_provider: str = "none"
+    captcha_enabled: bool = True
+    captcha_provider: str = "altcha"
     captcha_site_key: str = ""
     captcha_secret_key: str = ""
     cloudflare_enabled: bool = True

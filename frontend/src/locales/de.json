@@ -3202,6 +3202,8 @@
       "description": "Schütze Registrierung, Anmeldung und Passwortwiederherstellung vor Spam und Bruteforce.",
       "enable": "CAPTCHA aktivieren",
       "provider": "Anbieter",
+      "altchaTitle": "100 % lokal & DSGVO-konform",
+      "altchaInfo": "Läuft vollständig auf deinem Server über DIS. Keine externen Anfragen, kein Tracking, keine Cookies und keine API-Schlüssel notwendig.",
       "siteKey": "Site Key (Website-Schlüssel)",
       "siteKeyHint": "Öffentlicher Schlüssel zur Anzeige des Widgets im Browser.",
       "secretKey": "Secret Key (Geheimer Schlüssel)",

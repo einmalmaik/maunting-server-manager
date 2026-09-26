@@ -157,6 +157,22 @@ class DisClient:
         """Baut die otpauth://-URI fuer QR-Code-Generierung."""
         return DisClient._post("/totp/build-uri", {"issuer": issuer, "label": label, "secret": secret})["uri"]
 
+    # ── ALTCHA (Proof-of-Work CAPTCHA) ──────────────────────────────────
+
+    @staticmethod
+    def create_altcha_challenge() -> dict:
+        """Erzeugt eine frische ALTCHA Proof-of-Work Challenge ueber den DIS Sidecar."""
+        return DisClient._post("/altcha/challenge", {})
+
+    @staticmethod
+    def verify_altcha(payload: str) -> bool:
+        """Verifiziert eine geloeste ALTCHA Challenge ueber den DIS Sidecar."""
+        try:
+            resp = DisClient._post("/altcha/verify", {"payload": payload})
+            return bool(resp.get("valid", False))
+        except DisSidecarError:
+            raise
+
     # ── Health ───────────────────────────────────────────────────────────
 
     @staticmethod

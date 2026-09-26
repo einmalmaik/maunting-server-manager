@@ -18,6 +18,7 @@ export function ResetPassword() {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaResetKey, setCaptchaResetKey] = useState(0)
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
 
@@ -53,6 +54,8 @@ export function ResetPassword() {
     } catch (err: any) {
       setStatus('error')
       setMessage(err.message || t('resetPassword.error'))
+      setCaptchaToken(null)
+      setCaptchaResetKey((k) => k + 1)
     }
   }
 
@@ -133,7 +136,7 @@ export function ResetPassword() {
                 required
               />
 
-              <CaptchaWidget onVerify={setCaptchaToken} />
+              <CaptchaWidget onVerify={setCaptchaToken} resetKey={captchaResetKey} />
 
               <ErrorMessage message={message} className="text-sm" />
 
