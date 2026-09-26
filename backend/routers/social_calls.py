@@ -244,7 +244,10 @@ def einladung_ablehnen(
         },
         user_id=anrufer_id,
     )
-    _melde_anrufzustand([user.id, anrufer_id], None)
+    _melde_anrufzustand(anrufer_id, None)
+    # Wer ablehnt, kann gerade in einem anderen Gespräch sein (besetzt). Seine
+    # anderen Geräte behalten dann dessen Anzeige, statt sie zu verlieren.
+    _melde_anrufzustand(user.id, UserActiveCallRegistry.get(user.id))
     return {"ok": True}
 
 

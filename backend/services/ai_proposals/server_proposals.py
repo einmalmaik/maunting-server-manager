@@ -705,7 +705,7 @@ def _blueprint_change_payload(
     auf dem der Wachmann blind waere.
 
     Das kann die Ableitung nicht selbst verschulden: `AENDERBARE_PFADE` kennt
-    fuenf Pfade, alle unter `meta` und `runtime`, und alles uebrige wird aus der
+    nur Pfade unter `meta`, `runtime` und `source`, und alles uebrige wird aus der
     Vorlage tief kopiert â€” ein abgeleiteter Blueprint traegt die Guardian-Bloecke
     seiner Vorlage immer. Was diese Zeilen abfangen, ist deshalb die
     **guardianlose Vorlage**: leitet ein Reparaturlauf von ihr ab und stellt den
@@ -740,6 +740,7 @@ def _blueprint_change_payload(
         )
 
     quelle = blueprint_service.blueprint_view(str(arguments["source_id"]))["blueprint"]
+    ueberschreibt = blueprint_service.get_registry().get(str(arguments["new_id"])) is not None
     payload = {"blueprint": nutzlast}
     preview = {
         "operation": "blueprint_change",
@@ -762,9 +763,39 @@ def _blueprint_change_payload(
         # nie zu sehen bekommen hat.
         "startup_before": (quelle.get("runtime") or {}).get("startup"),
         "startup_after": (nutzlast.get("runtime") or {}).get("startup"),
+        # Die Installationsquelle entscheidet, welcher Code geholt wird. Bei
+        # GitHub laufen ihre `setupCommands` (npm, pip) auf dem lokalen Node im
+        # Panelprozess; ein anderes Repo ist fremder Code auf dem Panelserver.
+        "source_before": _quelle_kurz(quelle.get("source")),
+        "source_after": _quelle_kurz(nutzlast.get("source")),
+        # `derived_payload` laesst einen Community-Blueprint ohne Server
+        # ueberschreiben. Was dort vorher stand, ist danach weg. Nur gesetzt,
+        # wenn es so ist; die Karte zeigt dann die ID.
+        "overwrites_blueprint": arguments["new_id"] if ueberschreibt else None,
         "restart_required": False,
     }
+    # Quellwechsel und Ueberschreiben fragen auch im autonomen Modus
+    # (`ai_tool_registry.verlangt_klick`). Bis 26.09.2026 liefen beide ohne
+    # Klick, und die Karte zeigte die Quelle nicht.
+    if ueberschreibt or quelle.get("source") != nutzlast.get("source"):
+        preview["always_confirm"] = True
     return payload, preview
+
+
+def _quelle_kurz(quelle: object) -> dict | None:
+    """Die Installationsquelle so, wie sie auf der Karte steht."""
+    if not isinstance(quelle, dict):
+        return None
+    art = quelle.get("type")
+    angaben = quelle.get(art) if isinstance(art, str) else None
+    if not isinstance(angaben, dict):
+        return {"type": art}
+    kurz: dict = {"type": art}
+    for feld in ("repo", "url", "branch", "subPath", "appId"):
+        wert = angaben.get(feld)
+        if wert not in (None, ""):
+            kurz[feld] = redact_sensitive_text(str(wert))[:200]
+    return kurz
 
 def _blueprint_delete_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
     """Prueft das Loeschen eines Community-Blueprints schon beim Vorschlagen."""

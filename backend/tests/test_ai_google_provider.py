@@ -4,14 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import quote_plus
+from uuid import uuid4
+
 import httpx
 import pytest
 from sqlalchemy.orm import Session
 
-from models import AiProvider, User
-from services import ai_embedding_service, ai_provider_registry, ai_provider_service
+from models import AiProvider, AiUsageEvent, User
+from services import (
+    ai_embedding_service,
+    ai_limit_service,
+    ai_provider_registry,
+    ai_provider_service,
+    ai_usage_service,
+)
 from services.ai_provider_registry.google import ANBIETER, katalog_lesen
 from services.ai_voice.gemini_live_session import (
     GeminiLiveSitzung,
@@ -829,53 +838,141 @@ async def test_gemini_live_session_text_streaming() -> None:
     assert antwort_frames[0]["text"] == "Guten Tag, wie kann ich helfen?"
 
 
-def test_gemini_live_session_incremental_usage(db: Session) -> None:
-    """Prüft, dass wiederholte kumulative usageMetadata nur die Deltas verbucht."""
+def _gemini_zugang(db: Session, user: User, **preise: int) -> RealtimeVorbereitung:
     prov = ai_provider_service.create_provider(
         db,
         name="Google Live Usage",
         provider_kind="google",
         enabled=True,
         requires_api_key=True,
-        operator_api_key="AIzaSyTestKey123456",
+        operator_api_key="AIza" + "SyTestKey123456",
         realtime_default=True,
         realtime_model="gemini-2.5-flash",
         realtime_voice="Puck",
     )
-    vorb = RealtimeVorbereitung(
+    for feld, wert in preise.items():
+        setattr(prov, feld, wert)
+    event = ai_usage_service.reserve_ai_usage(
+        db,
+        user,
+        request_id=uuid4(),
+        estimated_tokens=0,
+        provider_id=prov.id,
+        model="gemini-2.5-flash",
+        realtime=True,
+    )
+    db.commit()
+    return RealtimeVorbereitung(
         provider_id=prov.id,
         provider_kind="google",
         model="gemini-2.5-flash",
         voice="Puck",
-        api_key="AIzaSyTestKey",
-        usage_event_id=1,
+        api_key="AIza" + "SyTestKey",
+        usage_event_id=event.id,
     )
-    sitzung = GeminiLiveSitzung(
-        websocket=MagicMock(),
-        vorbereitung=vorb,
-        user_id=1,
-        http_client=MagicMock(),
+
+
+def _gemini_buchung(vorb: RealtimeVorbereitung, panel: MagicMock | None = None) -> GeminiLiveSitzung:
+    if panel is None:
+        panel = MagicMock()
+        panel.send_json = AsyncMock()
+    return GeminiLiveSitzung(websocket=panel, vorbereitung=vorb, user_id=1, http_client=MagicMock())
+
+
+def _gemini_zeile(db: Session, event_id: int) -> AiUsageEvent:
+    db.expire_all()
+    return db.get(AiUsageEvent, event_id)
+
+
+# So meldet die Live API ihren Verbrauch (ai.google.dev/api/live, UsageMetadata).
+def _gemini_runde(ein: int, aus: int, *, audio_ein: int = 0, audio_aus: int = 0, denken: int = 0) -> dict:
+    return {
+        "promptTokenCount": ein,
+        "responseTokenCount": aus,
+        "thoughtsTokenCount": denken,
+        "totalTokenCount": ein + aus,
+        "promptTokensDetails": [
+            {"modality": "TEXT", "tokenCount": ein - audio_ein},
+            {"modality": "AUDIO", "tokenCount": audio_ein},
+        ],
+        "responseTokensDetails": [{"modality": "AUDIO", "tokenCount": audio_aus}],
+    }
+
+
+def test_gemini_live_bucht_jede_runde_mit_ausgabe_und_audio(db: Session, owner_user: User) -> None:
+    """Gemini meldet je Runde. Die Ausgabe heisst `responseTokenCount`, der
+    Audioanteil steht in den Details und kostet den Audiopreis."""
+    vorb = _gemini_zugang(
+        db, owner_user,
+        realtime_text_input_price_micro_usd_per_million=1_000_000,
+        realtime_text_output_price_micro_usd_per_million=2_000_000,
+        realtime_audio_input_price_micro_usd_per_million=10_000_000,
+        realtime_audio_output_price_micro_usd_per_million=20_000_000,
     )
-    with patch.object(sitzung, "_preise_laden", return_value=(0, 0, 0, 0)), \
-         patch("services.ai_voice.gemini_live_session.SessionLocal"), \
-         patch("services.ai_usage_service.realtime_verbrauch_ergaenzen") as mock_ergaenzen:
-        # Erste Meldung: 100 Tokens Input, 50 Tokens Output
-        sitzung._verbrauch({"promptTokenCount": 100, "candidatesTokenCount": 50})
-        assert mock_ergaenzen.call_count == 1
-        _, kwargs1 = mock_ergaenzen.call_args
-        assert kwargs1["text_input"] == 100
-        assert kwargs1["text_output"] == 50
+    sitzung = _gemini_buchung(vorb)
 
-        # Zweite Meldung mit identischen kumulativen Zahlen -> Kein zusätzlicher Verbrauch
-        sitzung._verbrauch({"promptTokenCount": 100, "candidatesTokenCount": 50})
-        assert mock_ergaenzen.call_count == 1
+    sitzung._verbrauch(_gemini_runde(334, 56, audio_ein=30, audio_aus=50, denken=44))
+    # Die zweite Runde enthaelt den Verlauf der ersten erneut; Google berechnet ihn neu.
+    sitzung._verbrauch(_gemini_runde(432, 78, audio_ein=4, audio_aus=70))
 
-        # Dritte Meldung: kumulativ 150 Tokens Input, 80 Tokens Output -> Delta 50 und 30
-        sitzung._verbrauch({"promptTokenCount": 150, "candidatesTokenCount": 80})
-        assert mock_ergaenzen.call_count == 2
-        _, kwargs2 = mock_ergaenzen.call_args
-        assert kwargs2["text_input"] == 50
-        assert kwargs2["text_output"] == 30
+    zeile = _gemini_zeile(db, vorb.usage_event_id)
+    assert zeile.realtime_text_input_tokens == (334 - 30) + (432 - 4)
+    assert zeile.realtime_audio_input_tokens == 30 + 4
+    # Denken ist Ausgabe; der Rest der Antwort ohne Audioangabe zaehlt als Text.
+    assert zeile.realtime_text_output_tokens == (56 + 44 - 50) + (78 - 70)
+    assert zeile.realtime_audio_output_tokens == 50 + 70
+    assert zeile.accounted_cost_microunits == (
+        732 * 1_000_000 + 58 * 2_000_000 + 34 * 10_000_000 + 120 * 20_000_000
+    ) // 1_000_000
+    assert zeile.provider_requests == 2
+
+
+def test_gemini_live_ueberspringt_leere_und_kaputte_meldungen(db: Session, owner_user: User) -> None:
+    vorb = _gemini_zugang(db, owner_user)
+    sitzung = _gemini_buchung(vorb)
+
+    sitzung._verbrauch({})
+    sitzung._verbrauch({"promptTokenCount": -5, "responseTokenCount": "viel", "promptTokensDetails": "x"})
+
+    zeile = _gemini_zeile(db, vorb.usage_event_id)
+    assert not zeile.realtime_text_input_tokens
+    assert not zeile.realtime_text_output_tokens
+    assert not zeile.accounted_cost_microunits
+
+
+@pytest.mark.asyncio
+async def test_gemini_live_grenze_beendet_die_sitzung_ohne_die_kosten_zu_verschweigen(
+    db: Session, owner_user: User, monkeypatch
+) -> None:
+    # Ein Cent Realtime-Budget; die eine Runde kostet 2 Cent.
+    monkeypatch.setattr(
+        ai_usage_service,
+        "resolve_effective_limits",
+        lambda _db, _user: replace(ai_limit_service.UNLIMITED_AI_LIMITS, monthly_realtime_cost_limit_cents=1),
+    )
+    vorb = _gemini_zugang(db, owner_user, realtime_audio_output_price_micro_usd_per_million=200_000_000)
+    panel = MagicMock()
+    panel.send_json = AsyncMock()
+    sitzung = _gemini_buchung(vorb, panel)
+    google_ws = AsyncMock()
+    danach = {"serverContent": {"modelTurn": {"parts": [{"text": "darf nicht mehr ankommen"}]}}}
+    google_ws.__aiter__.return_value = [
+        json.dumps({"usageMetadata": _gemini_runde(10, 100, audio_aus=100)}),
+        json.dumps(danach),
+    ]
+    sitzung._google_ws = google_ws
+
+    await sitzung._google_lesen()
+
+    gesendet = [aufruf.args[0] for aufruf in panel.send_json.call_args_list]
+    assert {"art": "stoerung", "grund": "realtime_kontingent"} in gesendet
+    # Der Lesestrom endet an der Grenze; die naechste Antwort geht nicht mehr durch.
+    assert not any(rahmen.get("art") == "antworttext" for rahmen in gesendet)
+    # Die Kosten sind angefallen und stehen trotzdem in der Zeile. Sonst begaenne
+    # der naechste Anlauf wieder unter der Grenze.
+    zeile = _gemini_zeile(db, vorb.usage_event_id)
+    assert zeile.realtime_audio_output_tokens == 100
+    assert zeile.accounted_cost_microunits == 100 * 200_000_000 // 1_000_000
 
 
 def test_google_safety_settings_block_none() -> None:

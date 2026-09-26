@@ -62,10 +62,15 @@ ID_MUSTER = re.compile(r"^[a-z0-9_]{1,64}$")
 
 # Welche Felder `derive_from` aendern darf. Bewusst eng: eine Ableitung soll die
 # Version, das Image oder eine Umgebungsvariable anpassen, nicht die Portrollen
-# oder die Installationsquelle umbauen. Wer das braucht, laedt einen ganzen
+# umbauen. Wer das braucht, laedt einen ganzen
 # Blueprint hoch — dann sieht ein Mensch das vollstaendige Ergebnis, statt einer
 # Liste von Einzelaenderungen zustimmen zu muessen, deren Zusammenwirken er
 # nicht ueberblickt.
+#
+# Die `source.*`-Pfade stehen hier seit 13.09.2026 (Branch, Repo, Unterordner,
+# Download-Adresse). Sie tauschen aus, welcher Code geholt wird; deshalb fragt
+# ein Quellwechsel der KI auch im autonomen Modus, und die Karte zeigt die
+# Quelle vorher und nachher (`_blueprint_change_payload`).
 #
 # `runtime.startup` steht hier, seit die KI auch eine falsche Startzeile
 # korrigieren koennen soll — sie ist bei GitHub-Quellen der haeufigste Grund,

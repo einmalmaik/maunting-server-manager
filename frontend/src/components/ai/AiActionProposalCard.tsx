@@ -62,6 +62,14 @@ const TATSACHEN: readonly string[] = [
   'startup_after',
   'image_after',
   'env_after',
+  // Woraus abgeleitet wird, wohin, und ob dort schon etwas steht. Die Quelle
+  // entscheidet, welcher Code geholt wird; ein Wechsel fragt immer und steht
+  // deshalb vorher und nachher hier (seit 26.09.2026).
+  'source_id',
+  'new_id',
+  'overwrites_blueprint',
+  'source_before',
+  'source_after',
   'server_name',
   'zugriff',
   'pfad',

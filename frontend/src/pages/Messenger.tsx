@@ -1884,10 +1884,16 @@ function MessengerSeite() {
       // Zustell- oder Lesequittungen (delivery_receipt, read_receipt) an die Mailbox gesendet!
       // Dadurch verbleibt die Nachricht beim blockierten Absender dauerhaft auf genau 1 grauem Häkchen (✓).
       const isTargetBlocked = activeContact ? isBlocked(activeContact.userId) : false
+      // In einer Gruppe keine Quittungen, wie schon in `deliveryReceiptService`.
+      // Jedes Mitglied schickte je Nachricht zwei in die Gruppenmailbox; bei
+      // zehn Mitgliedern 18 Umschläge je Nachricht, und das Hundert-Fenster
+      // hielt kaum noch echte Nachrichten (bis 26.09.2026).
+      const istGruppe = Boolean(activeGroup)
       const isDocVisible = typeof document === 'undefined' || document.visibilityState === 'visible'
 
       // Sende Zustellbestätigung (delivery_receipt), sobald neue Nachrichten empfangen wurden
       const needsDelivery =
+        !istGruppe &&
         maxIncomingId > 0 &&
         maxIncomingId > highestIncomingIdDeliveredRef.current &&
         !isTargetBlocked
@@ -1923,6 +1929,7 @@ function MessengerSeite() {
 
       // Send read receipt if there are new incoming unacknowledged messages and document is visible
       const needsRead =
+        !istGruppe &&
         maxIncomingId > 0 &&
         maxIncomingId > highestIncomingIdAcknowledgedRef.current &&
         readReceiptsEnabled &&
@@ -3029,9 +3036,14 @@ function MessengerSeite() {
     } = auftrag
     // Ohne ausdrückliche Angabe gilt der Zitatkopf über der Eingabe.
     const bezug = auftrag.antwortAuf !== undefined ? auftrag.antwortAuf : antwortAuf
+    // Ein ausdrückliches Ziel (Weiterleiten, Story-Antwort) ist ein anderes
+    // Gespräch als das offene. Dessen Zustand (Bearbeiten, Rechte der offenen
+    // Gruppe, Eingabefeld) gilt dafür nicht.
+    const fremdesZiel = auftrag.ziel ?? null
+    const zielDirekt = !!fremdesZiel?.recipientId && !fremdesZiel.groupId
 
     // If currently editing a message, redirect to edit handler
-    if (editingMessage) {
+    if (editingMessage && !fremdesZiel) {
       const textToSave = customText !== undefined ? customText : inputText
       await handleEditMessage(editingMessage, textToSave)
       return
@@ -3040,8 +3052,7 @@ function MessengerSeite() {
     const rawText = customText !== undefined ? customText : inputText.trim()
     if (
       (!rawText && !note && !cal && !img && !audio && !file && !sticker && !storyReply && !videoNote) ||
-      (!activeContact && !activeGroup) ||
-      !blindMailboxId ||
+      (!fremdesZiel && ((!activeContact && !activeGroup) || !blindMailboxId)) ||
       !currentUserId
     ) {
       return
@@ -3050,11 +3061,12 @@ function MessengerSeite() {
     // Die Rechtelage der Gruppe, bevor irgendetwas verschlüsselt wird. Das
     // Eingabefeld ist bereits gesperrt; dies fängt die anderen Wege ab —
     // Weiterleiten, Sprachnachricht, Videonotiz, Sticker.
-    if (!darfSchreiben) {
+    if (!zielDirekt && !darfSchreiben) {
       toast.error(t('messenger.sendNoRight'))
       return
     }
     if (
+      !zielDirekt &&
       !darfAnhaengen &&
       (note || cal || img || audio || file || sticker || storyReply || videoNote)
     ) {
@@ -3102,7 +3114,6 @@ function MessengerSeite() {
      * 09/2026 stand hier stur `blindMailboxId`, und jede Weiterleitung landete
      * still im gerade geöffneten Chat statt beim gewählten Empfänger.
      */
-    const fremdesZiel = auftrag.ziel ?? null
     const targetBlindMailboxId = fremdesZiel?.blindMailboxId ?? blindMailboxId
     const targetUserId = fremdesZiel ? (fremdesZiel.recipientId ?? undefined) : activeContact?.userId
     const currentGroupId = fremdesZiel ? (fremdesZiel.groupId ?? undefined) : activeGroup?.id
@@ -3184,12 +3195,13 @@ function MessengerSeite() {
         return updated
       })
       ablageBereit = saveLocalMessages(targetBlindMailboxId, [optimisticMessage]).catch(() => {})
+      // Was im offenen Chat getippt steht, bleibt bei einem fremden Ziel stehen.
+      setInputText('')
+      setSelectedImage(null)
+      setStagedFile(null)
+      setAntwortAuf(null)
+      setErwaehnungsVorschlaege([])
     }
-    setInputText('')
-    setSelectedImage(null)
-    setStagedFile(null)
-    setAntwortAuf(null)
-    setErwaehnungsVorschlaege([])
     // Der Entwurf ist verschickt, also keiner mehr.
     entwuerfe.verwirf(targetBlindMailboxId)
     justSentRef.current = true
@@ -4905,16 +4917,27 @@ function MessengerSeite() {
         stories={storyAnsicht.betrachter.stories}
         initialIndex={storyAnsicht.betrachter.index}
         onDeleted={handleStoryDeleted}
-        onReply={(targetUserId, _targetUsername, text, storyContext: StoryReplyContext) => {
+        onReply={async (targetUserId, _targetUsername, text, storyContext: StoryReplyContext) => {
           const contact = contactsList.find((c) => c.userId === targetUserId)
-          if (contact) {
-            setActiveContact(contact)
-            setActiveGroup(null)
-            storyAnsicht.betrachter.setOffen(false)
-            void handleSendMessage({ text, storyReply: storyContext })
-          } else {
+          if (!contact || !currentUserId) {
             toast.error(t('messenger.replyContactMissing'))
+            return
           }
+          storyAnsicht.betrachter.setOffen(false)
+          // Das Ziel steht ausdrücklich im Auftrag. Bis 26.09.2026 wurde erst
+          // der Chat umgeschaltet und im selben Zug gesendet; der Versand sah
+          // noch das offene Gespräch, und die private Antwort samt Storyfoto
+          // ging an die gerade offene Gruppe.
+          const mailbox =
+            contactMailboxMap[contact.userId] ?? (await deriveBlindMailboxId(currentUserId, contact.userId))
+          await handleSendMessage({
+            text,
+            storyReply: storyContext,
+            antwortAuf: null,
+            ziel: { blindMailboxId: mailbox, recipientId: contact.userId, groupId: null },
+          })
+          setActiveContact(contact)
+          setActiveGroup(null)
         }}
       />
 

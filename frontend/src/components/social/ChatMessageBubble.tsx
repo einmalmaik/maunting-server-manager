@@ -1002,6 +1002,10 @@ function ChatMessageBubbleContent({
             <span title={t('messenger.stateQueued')} className="inline-flex items-center">
               <Clock className="w-3.5 h-3.5 opacity-60 animate-pulse" />
             </span>
+          ) : activeGroup ? (
+            // Gruppen verschicken keine Quittungen. Ein einzelner Haken hiesse
+            // hier „noch nicht zugestellt“, und das stimmt nicht.
+            null
           ) : msg.isRead && readReceiptsEnabled ? (
             <span title={t('messenger.stateRead')} className="inline-flex items-center">
               <CheckCheck className="w-3.5 h-3.5 text-primary" />

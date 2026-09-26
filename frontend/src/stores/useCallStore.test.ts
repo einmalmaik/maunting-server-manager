@@ -1154,6 +1154,38 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
     expect(state.raum).toBe('raum-sync-42')
   })
 
+  it('ein zweiter Anruf während eines Gesprächs lehnt ab und lässt das Gespräch stehen', async () => {
+    // Bis 26.09.2026 räumte die Einladung den laufenden Raum ab.
+    await verbundenerAnruf()
+    aktuellerRaum.tritt_bei('u2', 'bob')
+    expect(useCallStore.getState().state).toBe('active')
+
+    useCallStore.getState().handleCallSyncEvent({
+      type: 'direct_call_invitation',
+      caller_id: 42,
+      caller_username: 'Charly',
+      mode: 'audio',
+      signaling_token: 'raum-zwei',
+    })
+
+    const s = useCallStore.getState()
+    expect(s.state).toBe('active')
+    expect(s.raum).toBe('raum-1')
+    expect(s.partner?.username).toBe('bob')
+    expect(livekit.trenne).not.toHaveBeenCalled()
+    expect(api.lehneAnrufAb).toHaveBeenCalledWith('raum-zwei')
+    expect(api.lehneAnrufAb).not.toHaveBeenCalledWith('raum-1')
+  })
+
+  it('ein zweiter Anruf, während ein erster klingelt, verdrängt ihn nicht', () => {
+    useCallStore.getState().receiveCall(PARTNER, 'audio', 'raum-eins')
+    useCallStore.getState().receiveCall({ userId: 42, username: 'Charly', avatarUrl: null }, 'audio', 'raum-zwei')
+
+    expect(useCallStore.getState().raum).toBe('raum-eins')
+    expect(useCallStore.getState().partner?.username).toBe('bob')
+    expect(api.lehneAnrufAb).toHaveBeenCalledWith('raum-zwei')
+  })
+
   it('handleCallSyncEvent: verarbeitet direct_call_cancelled und schließt den Dialog', () => {
     useCallStore.getState().receiveCall(PARTNER, 'audio', 'raum-cancel-1')
     expect(useCallStore.getState().state).toBe('incoming')

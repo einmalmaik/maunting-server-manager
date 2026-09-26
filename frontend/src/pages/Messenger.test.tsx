@@ -15,6 +15,7 @@ import { signiereNutzlast } from '@/services/nutzlastSignatur'
 import { eigenesGeraet, signaturSchluesselVon } from '@/services/e2eeGeraet'
 import { decryptE2eeHybridWithKeyring } from '@/services/e2eeCrypto'
 import { verfallStand } from '@/services/nachrichtVerfall'
+import { verschluesseleFuerGruppe } from '@/services/gruppenSchluessel'
 
 /**
  * Seit 09/2026 stehen die Aktionen eines Chats im Blattmenue, nicht mehr als
@@ -302,6 +303,17 @@ const zielGeraete = () => [
 /** Konten, die laut Verzeichnis einen Signaturschlüssel führen. Je Test gesetzt. */
 let kontenMitSignatur: number[] = []
 let schluesselWarnungCallback: ((ev: any) => void) | null = null
+
+// Der Gruppenschlüssel ist in dieser Datei nicht Gegenstand. Echt verschlüsselt
+// scheitert er hier, und ein Versand in die Gruppe fiele still aus; mit dem
+// Spion sieht ein Test, **ob** in die Gruppe verschlüsselt wurde.
+vi.mock('@/services/gruppenSchluessel', async (importOriginal) => {
+  const echt = await importOriginal<typeof import('@/services/gruppenSchluessel')>()
+  return {
+    ...echt,
+    verschluesseleFuerGruppe: vi.fn(async (k: any, payload: string) => `sv-e2ee-group-v1:${k.groupId}:${payload}`),
+  }
+})
 
 vi.mock('@/services/e2eeGeraet', () => ({
   eigenesGeraet: vi.fn(async () => ({
@@ -1594,6 +1606,74 @@ describe('Messenger (Allround Chat)', () => {
     })
   })
 
+  it('schickt eine Story-Antwort an den Urheber, auch wenn gerade eine Gruppe offen ist', async () => {
+    // Bis 26.09.2026 ging die private Antwort samt Storyfoto an die offene
+    // Gruppe: der Chat wurde umgeschaltet und im selben Zug gesendet, der
+    // Versand sah noch das alte Gespräch.
+    vi.mocked(socialApi.getGroups).mockResolvedValue([
+      {
+        id: 77,
+        name: 'Dev Community',
+        description: null,
+        avatar_url: null,
+        invite_code: null,
+        owner_user_id: 1,
+        member_count: 2,
+        role: 'owner',
+        default_permissions: 'attach_media,send_messages',
+        created_at: '2026-09-07T00:00:00Z',
+        members: [
+          { user_id: 1, username: 'me', role: 'owner', permissions: null, joined_at: '2026-09-01T00:00:00Z' },
+          { user_id: 101, username: 'alice', role: 'member', permissions: null, joined_at: '2026-09-01T00:00:00Z' },
+        ],
+      },
+    ] as any)
+    vi.mocked(socialApi.getStories).mockResolvedValue([
+      {
+        id: 42,
+        user_id: 101,
+        username: 'alice',
+        user_avatar: null,
+        content: 'Urlaubsfoto',
+        media_url: '/api/social/media/urlaub.jpg',
+        background: 'gradient-1',
+        created_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 86400000).toISOString(),
+      },
+    ] as any)
+
+    render(
+      <MemoryRouter initialEntries={['/chat?groupId=77']}>
+        <Messenger />
+      </MemoryRouter>
+    )
+    await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+
+    const storyKreis = await waitFor(() => {
+      const treffer = screen.getAllByText('alice').find((el) => el.closest('.cursor-pointer'))
+      expect(treffer).toBeTruthy()
+      return treffer!.closest('.cursor-pointer') as HTMLElement
+    })
+    fireEvent.click(storyKreis)
+    const antwort = await screen.findByPlaceholderText(i18n.t('social.story.replyPlaceholder'))
+    fireEvent.change(antwort, { target: { value: 'Schön da!' } })
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('social.story.sendReply') }))
+
+    await waitFor(() => {
+      expect(socialApi.relayE2eeEnvelope).toHaveBeenCalled()
+    })
+    const ziele = vi
+      .mocked(socialApi.relayE2eeEnvelope)
+      .mock.calls.filter(([auftrag]) => !(auftrag as any)?.is_control)
+      .map(([auftrag]) => (auftrag as any).blind_mailbox_id)
+    expect(ziele).not.toContain('test-group-blind-mailbox')
+    expect(ziele).toContain('test-blind-mailbox')
+    expect(verschluesseleFuerGruppe).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining('Schön da!'),
+    )
+  })
+
   it('rendert Story-Antworten mit reichhaltiger Vorschau und sendet Typing-Signale beim Tippen', async () => {
     vi.mocked(socialApi.getFriends).mockResolvedValue([
       {
@@ -2863,6 +2943,28 @@ describe('Messenger (Allround Chat)', () => {
         name: i18n.t('messenger.retentionYou'),
         frist: i18n.t(`messenger.retentionDative.${stufe}`),
       })
+
+    it('schickt in einer Gruppe keine Zustell- oder Lesequittungen', async () => {
+      // Bis 26.09.2026 schickte jedes Mitglied je Nachricht zwei Quittungen
+      // in die Gruppenmailbox und verdrängte echte Nachrichten aus dem Fenster.
+      vi.mocked(socialApi.getGroups).mockResolvedValue([verfallsgruppe({ aliceDarf: false })])
+      gruppenpost([await danach('Hallo Gruppe')])
+      oeffneGruppe()
+
+      await screen.findByText('Hallo Gruppe')
+      // Die Lesequittung ginge 350 ms nach der Zustellquittung hinaus.
+      await act(async () => {
+        await new Promise((fertig) => setTimeout(fertig, 500))
+      })
+      const quittungen = vi
+        .mocked(socialApi.relayE2eeEnvelope)
+        .mock.calls.filter(
+          ([auftrag]) =>
+            (auftrag as any)?.blind_mailbox_id === GRUPPE &&
+            ['read_receipt', 'delivery_receipt'].includes((auftrag as any)?.control_type),
+        )
+      expect(quittungen).toEqual([])
+    })
 
     it('verwirft eine Umstellung, deren actor_id ein anderes Mitglied nennt als die Unterschrift', async () => {
       // Alice darf die Frist stellen — geprüft wird hier allein die Fälschung.

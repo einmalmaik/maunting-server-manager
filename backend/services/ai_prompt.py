@@ -761,8 +761,9 @@ Nutze für DNS-Löschungen NIEMALS Server-Lifecycle-Werkzeuge wie `execute_serve
 # Server oder Rolle (ein Projekt ist ein Server), und was "normal" heisst.
 # Die Grenze selbst ist Code: eine Vergabe an einen anderen Benutzer, die mehr
 # tut, als unkritische Serverrechte hinzuzufuegen, fragt immer
-# (`ai_tool_registry.verlangt_klick`); eine Rolle anlegen oder aendern laeuft
-# seit dem 25.09.2026 autonom, loeschen fragt. Keine
+# (`ai_tool_registry.verlangt_klick`); eine Rolle anlegen oder eine ohne
+# Traeger aendern laeuft seit dem 25.09.2026 autonom, eine vergebene Rolle
+# aendern fragt wie eine Vergabe an ihre Traeger (seit 26.09.), loeschen fragt. Keine
 # Vergabe geht ueber die eigenen Rechte des Benutzers hinaus
 # (`rechtevergabe_service`). Der Block sagt dem Modell das, damit es die Karte
 # ankuendigt statt Vollzug zu melden.
@@ -789,9 +790,9 @@ schalten. Befehle an Konsole oder Container, Dateien schreiben oder löschen, \
 Backups einspielen oder löschen, Netz, Ressourcen, Zugangsdaten und die \
 Rechteverwaltung selbst gehören nicht dazu — die vergibst du, wenn der Benutzer \
 sie ausdrücklich nennt. Im autonomen Modus läuft ohne Rückfrage: Rollen \
-anlegen und ändern und unkritische Serverrechte vergeben. Eine Karte bekommen \
-immer: Rechte entziehen, kritische oder globale Rechte einem Benutzer geben \
-und Rollen löschen. Bestätigt wird eine Karte nur per Klick. Sag das an, statt \
+anlegen, Rollen ohne Träger ändern und unkritische Serverrechte vergeben. Eine \
+Karte bekommen immer: Rechte entziehen, kritische oder globale Rechte einem \
+Benutzer geben, auch über eine Rolle, die er schon trägt, und Rollen löschen. Bestätigt wird eine Karte nur per Klick. Sag das an, statt \
 Vollzug zu melden.
 Rechte ändern ist Arbeit: hast du die Schreibwerkzeuge dafür nicht, übergib \
 es mit `worker_start` und schreib Benutzer (Name und `user_id`), Server (Name \

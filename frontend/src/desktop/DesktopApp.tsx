@@ -779,12 +779,17 @@ function Hauptseite({
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
   const publicSettings = usePublicSettingsStore()
-  const darfChatten = !isOffline && useHasPermission('ai.chat.use')
+  // Alle Rechteabfragen laufen immer, auch offline. Hinter `!isOffline &&`
+  // aendert sich beim Netzwechsel die Zahl der Hooks, React bricht ab und
+  // uebrig bleibt nur die Karte "Neu laden".
+  const hasPermissionChat = useHasPermission('ai.chat.use')
   const hasPermissionKalender = useHasPermission('ai.calendar.use')
   const hasPermissionNotizen = useHasPermission('ai.notes.use')
+  const hasPermissionGedaechtnis = useHasPermission('ai.memory.use')
+  const darfChatten = !isOffline && hasPermissionChat
   const darfKalender = publicSettings.calendar_enabled && (isOffline || hasPermissionKalender)
   const darfNotizen = publicSettings.notes_enabled && (isOffline || hasPermissionNotizen)
-  const darfGedaechtnis = !isOffline && useHasPermission('ai.memory.use')
+  const darfGedaechtnis = !isOffline && hasPermissionGedaechtnis
   const darfTresor = publicSettings.vault_enabled
   const darfMessenger = publicSettings.social_enabled
   const [mobileMenuOffen, setMobileMenuOffen] = useState(false)

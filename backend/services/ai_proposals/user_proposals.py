@@ -12,9 +12,12 @@ Panel-Router fragen. Hier steht nur, was die KI zusaetzlich braucht:
 * **`always_confirm`** entscheidet der Bestand: entzieht eine Vergabe an einen
   Benutzer etwas oder gibt sie ihm mehr als `UNCRITICAL_SERVER_PERMISSIONS`,
   fragt sie auch im autonomen Modus (`ai_tool_registry.verlangt_klick`). Eine
-  Rolle anzulegen oder zu aendern fragt dort nie, auch mit kritischen Rechten:
-  sie wirkt erst, wenn sie jemandem zugewiesen wird, und diese Zuweisung fragt
-  (Vorgabe des Betreibers vom 25.09.2026).
+  Rolle ohne Traeger anzulegen oder zu aendern fragt dort nie, auch mit
+  kritischen Rechten: sie wirkt erst, wenn sie jemandem zugewiesen wird, und
+  diese Zuweisung fragt (Vorgabe des Betreibers vom 25.09.2026). Traegt sie
+  schon jemand, ist die Aenderung eine Vergabe an diese Benutzer und fragt
+  nach derselben Grenze wie oben. Sonst liesse sich eine harmlose Rolle
+  autonom zuweisen und danach autonom um jedes Recht erweitern.
 * **Der Stand beim Vorschlagen reist mit.** Zwischen Karte und Klick liegt ein
   Zeitfenster ohne Obergrenze. Hat jemand die Rechte darin im Panel geaendert,
   fuehrt der Klick nicht den alten Plan ueber den neuen Stand aus, sondern
@@ -333,8 +336,10 @@ def _role_set_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
         "permissions_removed": sorted(weg),
         "role_users": betroffen,
     }
-    # Ohne `_vorschau`: siehe Modulkopf. Aendert die Rolle Benutzer, die sie
-    # schon tragen, sagt es die Karte trotzdem (`role_users`).
+    # Siehe Modulkopf: eine Rolle ohne Traeger fragt nicht, eine vergebene
+    # Rolle fragt wie eine Vergabe an ihre Traeger.
+    if betroffen:
+        _vorschau(preview, entzogen=bool(weg), vergeben=hinzu)
     return payload, preview
 
 

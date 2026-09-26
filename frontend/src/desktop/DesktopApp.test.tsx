@@ -73,9 +73,18 @@ vi.mock('@/components/ai/AiMemoryManager', () => ({
 vi.mock('@/components/ai/AiRunNotice', () => ({
   AiRunNotice: () => null,
 }))
-vi.mock('@/hooks/useHasPermission', () => ({
-  useHasPermission: () => true,
-}))
+// Der Ersatz muss selbst ein Hook sein: als blosse Funktion faellt nicht auf,
+// wenn die App ihn nur unter einer Bedingung aufruft. Genau das liess die
+// App bei jedem Netzwechsel abstuerzen, waehrend die Offline-Tests gruen waren.
+vi.mock('@/hooks/useHasPermission', async () => {
+  const { useRef } = await import('react')
+  return {
+    useHasPermission: () => {
+      useRef(null)
+      return true
+    },
+  }
+})
 // Der Splash wuerde jeden Test 10 Sekunden warten lassen.
 vi.mock('./Splash', () => ({
   Splash: () => null,

@@ -1,6 +1,7 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
+import i18n from '@/i18n'
 import {
   ChatMessageBubble,
   MessageErrorBoundary,
@@ -89,6 +90,45 @@ describe('ChatMessageBubble Resilienz & Fehlerbehandlung', () => {
       gewaehlt: false,
       onUmschalten: vi.fn(),
     }
+
+    it('zeigt in Gruppen keine Quittungshaken, im Direktchat schon', () => {
+      // Gruppen verschicken seit 26.09.2026 keine Quittungen mehr. Ein
+      // einzelner Haken hiesse dort „noch nicht zugestellt“.
+      const eigene: ChatMessage = {
+        id: 5,
+        senderId: 1,
+        text: 'Von mir',
+        createdAt: '2026-09-25T14:30:00.000Z',
+        isSelf: true,
+        isRead: true,
+        isDelivered: true,
+      }
+      const zeige = (kontext: typeof defaultKontext, msg: ChatMessage = eigene) =>
+        render(
+          <ChatMessageBubble
+            msg={msg}
+            kontext={kontext}
+            ton={defaultTon}
+            aktionen={defaultAktionen}
+            auswahl={defaultAuswahl}
+            medienBindung={() => ({} as any)}
+          />
+        )
+      const gruppe = { ...defaultKontext, activeGroup: { id: 77, name: 'Gruppe', members: [] } as any }
+
+      const imDirektchat = zeige(defaultKontext)
+      expect(screen.getByTitle(i18n.t('messenger.stateRead'))).toBeDefined()
+      imDirektchat.unmount()
+
+      const inDerGruppe = zeige(gruppe)
+      expect(screen.queryByTitle(i18n.t('messenger.stateRead'))).toBeNull()
+      expect(screen.queryByTitle(i18n.t('messenger.stateUndelivered'))).toBeNull()
+      inDerGruppe.unmount()
+
+      // Die Uhr für „wartet noch“ bleibt auch in der Gruppe.
+      zeige(gruppe, { ...eigene, isRead: false, status: 'queued' })
+      expect(screen.getByTitle(i18n.t('messenger.stateQueued'))).toBeDefined()
+    })
 
     it('rendert ohne Absturz bei ungueltigem createdAt Zeitstempel', () => {
       const msg: ChatMessage = {

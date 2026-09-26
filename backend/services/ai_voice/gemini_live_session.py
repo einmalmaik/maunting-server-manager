@@ -171,6 +171,24 @@ def downsample_24k_to_16k(pcm: bytes) -> bytes:
     return resampled.tobytes()
 
 
+def _anzahl(daten: dict, feld: str) -> int:
+    """Eine Tokenzahl aus der Anbieterantwort; alles andere als eine
+    nichtnegative Ganzzahl zaehlt null."""
+    wert = daten.get(feld)
+    return wert if isinstance(wert, int) and not isinstance(wert, bool) and wert > 0 else 0
+
+
+def _audioanteil(details: object) -> int:
+    """Summe der `AUDIO`-Eintraege einer `ModalityTokenCount`-Liste."""
+    if not isinstance(details, list):
+        return 0
+    return sum(
+        _anzahl(eintrag, "tokenCount")
+        for eintrag in details
+        if isinstance(eintrag, dict) and eintrag.get("modality") == "AUDIO"
+    )
+
+
 class GeminiLiveSitzung:
     """Führt eine Sprach- und Werkzeug-Sitzung über die Gemini Multimodal Live API."""
 
@@ -199,8 +217,6 @@ class GeminiLiveSitzung:
         self._vorschlaege = voice_interactions.OffeneVorschlaege()
         self._verbrauch_tokens = [0, 0, 0, 0]  # text_in, text_out, audio_in, audio_out
         self._verbrauch_kosten = 0
-        self._last_prompt_tokens = 0
-        self._last_candidates_tokens = 0
         self._gestartet: set[str] = set()
         self._beendet = False
         self._setup_fertig = asyncio.Event()
@@ -261,37 +277,57 @@ class GeminiLiveSitzung:
             )  # type: ignore[return-value]
 
     def _verbrauch(self, usage: dict) -> None:
-        prompt_tokens = usage.get("promptTokenCount", 0) or 0
-        candidates_tokens = usage.get("candidatesTokenCount", 0) or 0
-        ti = max(0, prompt_tokens - self._last_prompt_tokens)
-        to = max(0, candidates_tokens - self._last_candidates_tokens)
-        if ti == 0 and to == 0:
+        """Bucht eine `usageMetadata`-Meldung von Gemini Live.
+
+        Gemini meldet je Runde, nicht als laufende Summe: `promptTokenCount`
+        enthaelt den bisherigen Verlauf jedes Mal neu, weil Google ihn jede
+        Runde neu berechnet. So lesen es auch LiveKit und Pipecat. Jede Meldung
+        wird deshalb voll gebucht.
+
+        Die Ausgabe heisst hier `responseTokenCount`. `candidatesTokenCount`
+        gibt es nur bei `generateContent`; darunter blieb die Ausgabe ungebucht.
+        Denken und Werkzeug-Prompts berechnet Google mit, also zaehlen sie mit.
+        Den Audioanteil nennen die `...TokensDetails` nach Modalitaet; er
+        braucht die Audiopreise, sonst kostet eine Sprachsitzung nichts und
+        keine Kostengrenze greift.
+
+        Lehnt eine Grenze ab, wird wie bei GPT-Live ohne Pruefung nachgebucht
+        und die Ablehnung weitergereicht: die Sitzung endet, die schon
+        angefallenen Kosten bleiben stehen.
+        """
+        ein = _anzahl(usage, "promptTokenCount") + _anzahl(usage, "toolUsePromptTokenCount")
+        aus = _anzahl(usage, "responseTokenCount") + _anzahl(usage, "thoughtsTokenCount")
+        ai = min(ein, _audioanteil(usage.get("promptTokensDetails")))
+        ao = min(aus, _audioanteil(usage.get("responseTokensDetails")))
+        deltas = (ein - ai, aus - ao, ai, ao)
+        if not any(deltas):
             return
-        self._last_prompt_tokens = max(self._last_prompt_tokens, prompt_tokens)
-        self._last_candidates_tokens = max(self._last_candidates_tokens, candidates_tokens)
-        ai = 0
-        ao = 0
-        preise = self._preise_laden()
-        deltas = (ti, to, ai, ao)
-        for index, wert in enumerate(deltas):
-            self._verbrauch_tokens[index] += wert
+        summe = [bisher + neu for bisher, neu in zip(self._verbrauch_tokens, deltas)]
         gesamtkosten = sum(
             tokens * preis
-            for tokens, preis in zip(self._verbrauch_tokens, preise, strict=True)
+            for tokens, preis in zip(summe, self._preise_laden(), strict=True)
         ) // 1_000_000
-        kosten = max(0, gesamtkosten - self._verbrauch_kosten)
+        werte = {
+            "event_id": self.v.usage_event_id,
+            "text_input": deltas[0],
+            "text_output": deltas[1],
+            "audio_input": deltas[2],
+            "audio_output": deltas[3],
+            "cost_microunits": max(0, gesamtkosten - self._verbrauch_kosten),
+        }
         with SessionLocal() as db:
-            ai_usage_service.realtime_verbrauch_ergaenzen(
-                db,
-                event_id=self.v.usage_event_id,
-                text_input=ti,
-                text_output=to,
-                audio_input=ai,
-                audio_output=ao,
-                cost_microunits=kosten,
-            )
-            db.commit()
-        self._verbrauch_kosten = gesamtkosten
+            try:
+                ai_usage_service.realtime_verbrauch_ergaenzen(db, **werte)
+                db.commit()
+            except ai_usage_service.AiQuotaExceeded as exc:
+                db.rollback()
+                if exc.reason == "realtime_session_limit":
+                    raise
+                ai_usage_service.realtime_verbrauch_ergaenzen(db, grenzen_pruefen=False, **werte)
+                db.commit()
+                self._verbrauch_tokens, self._verbrauch_kosten = summe, gesamtkosten
+                raise
+        self._verbrauch_tokens, self._verbrauch_kosten = summe, gesamtkosten
 
     async def _tool_start(self, call_id: str, name: str) -> None:
         if call_id in self._gestartet:
@@ -593,12 +629,23 @@ class GeminiLiveSitzung:
                         break
 
                 # Nutzungsmetriken
-                usage_meta = event.get("usageMetadata") or (server_content.get("usageMetadata") if server_content else None)
-                if usage_meta:
+                usage_meta = event.get("usageMetadata")
+                if isinstance(usage_meta, dict):
                     try:
                         await asyncio.to_thread(self._verbrauch, usage_meta)
-                    except Exception:
-                        pass
+                    except ai_usage_service.AiQuotaExceeded as exc:
+                        # Die Grenze beendet die Sitzung wie bei OpenAI
+                        # Realtime. `return` statt `raise`: der Lesestrom
+                        # endet, `fuehren` schliesst und rechnet ab.
+                        grund = (
+                            "realtime_kontingent"
+                            if exc.reason == "monthly_realtime_cost_limit_cents"
+                            else "kontingent"
+                        )
+                        await self._debug_senden("REALTIME_QUOTA", hint=grund)
+                        with contextlib.suppress(Exception):
+                            await self._panel_senden({"art": "stoerung", "grund": grund})
+                        return
         except Exception as exc:
             grund = self._fremdtext(exc)
             logger.warning("Gemini Live WebSocket Fehler im Lesestrom: %s", grund)

@@ -729,6 +729,17 @@ export const useCallStore = create<UseCallState>((set, get) => {
     },
 
     receiveCall: (partner, mode, raum) => {
+      // Besetzt: ein zweiter Anruf wird abgelehnt und nur gemeldet. Bis
+      // 26.09.2026 räumte `raeumeAuf` hier den laufenden Raum ab, und wer
+      // gerade telefonierte, flog aus seinem Gespräch.
+      const jetzt = get()
+      if (jetzt.state !== 'idle') {
+        if (jetzt.raum !== raum) {
+          void lehneAnrufAb(raum).catch(() => {})
+          toast.info(i18n.t('calls.missedWhileBusy', { name: partner.username }))
+        }
+        return
+      }
       raeumeAuf()
       bekannte.set(partner.userId, { username: partner.username, avatarUrl: partner.avatarUrl })
       const currentUser = useAuthStore.getState().user

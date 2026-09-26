@@ -508,6 +508,43 @@ def test_rolle_anlegen_aendern_und_loeschen(db: Session) -> None:
     assert get_role_by_name(db, "spielleitung") is None
 
 
+def test_eine_vergebene_rolle_erweitern_fragt_wie_eine_vergabe(db: Session) -> None:
+    """Eine Rolle mit Traegern zu aendern gibt diesen Benutzern Rechte.
+
+    Bis 26.09.2026 lief das autonom: harmlose Rolle anlegen, autonom zuweisen
+    (nur unkritische Serverrechte), danach autonom um `roles.manage` erweitern.
+    Keine der drei Karten fragte.
+    """
+    verwalter = _verwalter(db, autonom=True)
+    rolle = rechtevergabe_service.create_role(db, verwalter, "spieler", None, ["server.view"])
+    ziel = _konto(db, "mitspieler")
+    set_user_roles(db, ziel, [rolle.id])
+    db.commit()
+
+    kritisch = _vorschlag(
+        db, verwalter, "propose_role_set",
+        role_id=rolle.id, permissions=["server.view", "roles.manage"],
+    )
+    vorschau = json.loads(kritisch.preview_json)
+    assert kritisch.autonomous is False
+    assert vorschau["always_confirm"] is True
+    assert vorschau["role_users"] == 1
+    assert vorschau["permissions_added"] == ["roles.manage"]
+
+    # Wegnehmen trifft die Traeger ebenso.
+    weg = _vorschlag(db, verwalter, "propose_role_set", role_id=rolle.id, permissions=[])
+    assert weg.autonomous is False
+    assert json.loads(weg.preview_json)["always_confirm"] is True
+
+    # Unkritische Serverrechte hinzu bleibt, wie bei einem einzelnen Benutzer, autonom.
+    harmlos = _vorschlag(
+        db, verwalter, "propose_role_set",
+        role_id=rolle.id, permissions=["server.view", "server.start"],
+    )
+    assert harmlos.autonomous is True
+    assert not json.loads(harmlos.preview_json).get("always_confirm")
+
+
 def test_eine_zugewiesene_rolle_wird_nicht_geloescht(db: Session) -> None:
     verwalter = _verwalter(db)
     rolle = rechtevergabe_service.create_role(db, verwalter, "belegt", None, ["server.view"])

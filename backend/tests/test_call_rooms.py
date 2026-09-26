@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from models import User, UserFriend
 from services import livekit_service
 from services.auth_service import AuthService
-from services.call_room_service import CallRoomService, GroupCallRoomRegistry
+from services.call_room_service import CallRoomService, GroupCallRoomRegistry, UserActiveCallRegistry
 from services.sync_event_service import SyncEventService
 
 API_KEY = "APItestkey01"
@@ -329,6 +329,44 @@ def test_kein_token_mehr_nach_ablehnen(db: Session, client: TestClient) -> None:
         headers=_csrf(ziel_kekse),
     )
     assert nachtraeglich.status_code == 410
+
+
+def test_besetzt_ablehnen_laesst_den_laufenden_anruf_auf_den_anderen_geraeten(
+    db: Session, client: TestClient
+) -> None:
+    """Wer im Gespraech ist und einen zweiten Anruf ablehnt, telefoniert weiter.
+
+    Bis 26.09.2026 meldete die Ablehnung allen Geraeten des Ablehnenden „kein
+    Anruf“, und die Anzeige „laeuft auf einem anderen Geraet“ verschwand.
+    """
+    anrufer = _user(db, f"anrufer_{secrets.token_hex(4)}")
+    ziel = _user(db, f"ziel_{secrets.token_hex(4)}")
+    _befreunde(db, anrufer, ziel)
+    UserActiveCallRegistry.register(ziel.id, "laufender-raum", "direkt", partner_id=999)
+    anrufer_kekse = _login(client, anrufer.username)
+    ziel_kekse = _login(client, ziel.username)
+    raum = client.post(
+        f"/api/social/calls/invite/{ziel.id}",
+        cookies=anrufer_kekse,
+        headers=_csrf(anrufer_kekse),
+    ).json()["signaling_token"]
+
+    conn_id, schlange = SyncEventService.subscribe(ziel.id)
+    try:
+        assert client.post(
+            f"/api/social/calls/{raum}/reject",
+            cookies=ziel_kekse,
+            headers=_csrf(ziel_kekse),
+        ).status_code == 200
+        ereignisse = []
+        while not schlange.empty():
+            ereignisse.append(schlange.get_nowait())
+        zustand = [e for e in ereignisse if e.get("type") == "user_call_state_changed"]
+        assert zustand, "Der Ablehnende bekommt seinen Anrufzustand"
+        assert zustand[-1]["active_call"]["raum"] == "laufender-raum"
+    finally:
+        SyncEventService.unsubscribe(conn_id)
+        UserActiveCallRegistry.remove_room("laufender-raum")
 
 
 def _raum_zwischen(db: Session, client: TestClient, anrufer: User, ziel: User) -> str:

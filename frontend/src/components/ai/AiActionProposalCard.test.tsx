@@ -215,6 +215,33 @@ describe('AiActionProposalCard', () => {
     expect(screen.getByText('50')).toBeInTheDocument()
   })
 
+  it('zeigt bei einer Blueprint-Ableitung die Quelle vorher und nachher', () => {
+    // Bis 26.09.2026 stand die Installationsquelle nicht auf der Karte.
+    render(
+      <AiActionProposalCard
+        proposal={{
+          ...proposal,
+          id: 'proposal-blueprint-1',
+          tool_name: 'propose_blueprint_change',
+          preview: {
+            source_id: 'bot_vorlage',
+            new_id: 'bot_vorlage',
+            overwrites_blueprint: 'bot_vorlage',
+            source_before: { type: 'github', repo: 'betreiber/bot', branch: 'main' },
+            source_after: { type: 'github', repo: 'fremder/bot', branch: 'main' },
+          },
+        }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Bisherige Quelle')).toBeInTheDocument()
+    expect(screen.getByText('type: github, repo: betreiber/bot, branch: main')).toBeInTheDocument()
+    expect(screen.getByText('Neue Quelle')).toBeInTheDocument()
+    expect(screen.getByText('type: github, repo: fremder/bot, branch: main')).toBeInTheDocument()
+    expect(screen.getByText('Überschreibt vorhandenen Blueprint')).toBeInTheDocument()
+  })
+
   it('renders worker proposal type badge and title preview', () => {
     const workerProposal: AiActionProposal = {
       ...proposal,
