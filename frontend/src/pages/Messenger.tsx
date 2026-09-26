@@ -1288,6 +1288,36 @@ function MessengerSeite() {
     }
   }, [queryGroupId, groups, activeContact])
 
+  /**
+   * Geht zurück zur Kontaktliste und räumt Auswahl, Speicher und URL-Parameter
+   * vollständig auf, damit spätere Aktualisierungen den Chat nicht wieder öffnen.
+   */
+  const handleZurueckZurListe = useCallback(() => {
+    try {
+      sessionStorage.removeItem('msm:active_messenger_user_id')
+      sessionStorage.removeItem('msm:active_messenger_group_id')
+    } catch {}
+    setActiveContact(null)
+    setActiveGroup(null)
+    const next = new URLSearchParams(searchParams)
+    let geaendert = false
+    if (next.has('userId')) {
+      next.delete('userId')
+      geaendert = true
+    }
+    if (next.has('contact')) {
+      next.delete('contact')
+      geaendert = true
+    }
+    if (next.has('groupId')) {
+      next.delete('groupId')
+      geaendert = true
+    }
+    if (geaendert) {
+      setSearchParams(next, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
+
   // Synchronize active conversation with search params and sessionStorage
   useEffect(() => {
     if (activeContact) {
@@ -2213,7 +2243,7 @@ function MessengerSeite() {
       const pa = pinnedChats.indexOf(a.blindMailboxId)
       const pb = pinnedChats.indexOf(b.blindMailboxId)
       if (pa !== pb) return (pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb)
-      return a.name.localeCompare(b.name)
+      return (a.name || '').localeCompare(b.name || '')
     })
   }, [groups, contactsList, groupMailboxMap, contactMailboxMap, blindMailboxId, pinnedChats])
 
@@ -3732,7 +3762,7 @@ function MessengerSeite() {
       // da. Ein Austritt, der die Überschrift stehen lässt, ist keiner.
       await vergissGruppenName(group.id).catch(() => {})
       toast.success(t('messenger.groupLeft', { name }))
-      setActiveGroup(null)
+      handleZurueckZurListe()
       await loadData()
     } catch {
       toast.error(t('messenger.groupLeaveFailed'))
@@ -3753,7 +3783,7 @@ function MessengerSeite() {
       await verwirfGruppenSchluessel(groupToDelete.id).catch(() => {})
       await vergissGruppenName(groupToDelete.id).catch(() => {})
       toast.success(t('messenger.groupDeleted', { name }))
-      setActiveGroup(null)
+      handleZurueckZurListe()
       setGroupToDelete(null)
       await loadData()
     } catch {
@@ -4461,10 +4491,7 @@ function MessengerSeite() {
                 gruppenBild={activeGroup?.avatar_url ? apiUrl(activeGroup.avatar_url) : null}
                 stumm={Boolean(blindMailboxId && isChatMuted(blindMailboxId))}
                 blockiert={Boolean(activeContact && isBlocked(activeContact.userId))}
-                onZurueck={() => {
-                  setActiveContact(null)
-                  setActiveGroup(null)
-                }}
+                onZurueck={handleZurueckZurListe}
                 gruppenanruf={
                   activeGroup
                     ? { erlaubt: groupCallPermissions.canStart, onStarten: () => handleStartGroupCall(false) }
