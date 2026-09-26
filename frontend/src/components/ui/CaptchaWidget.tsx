@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api } from '@/api/client'
+import { api, apiUrl } from '@/api/client'
 import { DisBadge } from '@/components/DisBadge'
 
 declare global {
@@ -126,10 +126,7 @@ export function CaptchaWidget({ onVerify, onStatusChange, resetKey }: CaptchaWid
           if (!active || !containerRef.current) return
           containerRef.current.innerHTML = ''
           const widget = document.createElement('altcha-widget')
-          const challengeUrl = typeof window !== 'undefined' && window.location?.origin
-            ? new URL('/api/auth/captcha-challenge', window.location.origin).href
-            : '/api/auth/captcha-challenge'
-          widget.setAttribute('challenge', challengeUrl)
+          const challengeUrl = apiUrl('/auth/captcha-challenge')
           widget.setAttribute('challengeurl', challengeUrl)
           widget.setAttribute('auto', 'onload')
           const lang = (i18n.language || 'de').startsWith('de') ? 'de' : 'en'
