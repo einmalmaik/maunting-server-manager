@@ -424,12 +424,9 @@ async def _versenden(adresse: str, auftrag: _Auftrag) -> bool:
 def _abschliessen(auftrag: _Auftrag) -> None:
     db = _sitzung()
     try:
-        zeile = db.get(AiMailOutbox, auftrag.id)
-        if zeile is None:
-            return
-        zeile.status = "zugestellt"
-        zeile.sent_at = datetime.now(timezone.utc)
-        zeile.letzter_fehler = None
+        # Zugestellt heisst erledigt: die Zeile verschwindet samt Inhalt
+        # (Begruendung am Modell `AiMailOutbox`).
+        db.query(AiMailOutbox).filter(AiMailOutbox.id == auftrag.id).delete()
         db.commit()
     finally:
         db.close()

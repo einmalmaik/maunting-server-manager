@@ -6,6 +6,7 @@ from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, St
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
+from models.dis_text import ai_text
 
 
 class AiAttachment(Base):
@@ -28,7 +29,7 @@ class AiAttachment(Base):
     # `ai_action_proposals.run_id`. Das Aufraeumen macht `truncate_from`.
     message_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    original_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    original_name: Mapped[str] = mapped_column(ai_text("ai_attachments.original_name"), nullable=False)
     media_type: Mapped[str] = mapped_column(String(64), nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)

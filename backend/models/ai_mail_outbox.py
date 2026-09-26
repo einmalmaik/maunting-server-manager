@@ -46,6 +46,13 @@ gueltige Fall.
 Kopie einer Angabe, die anderswo gepflegt wird. Wer wissen will, an welches
 Postfach etwas ging, findet es im Mailserverlog des Betreibers; MSM fuehrt
 darueber bewusst kein zweites Buch.
+
+**Warum eine zugestellte Mail verschwindet.** Bis 26.09.2026 blieb sie als
+`zugestellt` liegen, mit Betreff und Text im Klartext. Die Tabelle wurde so
+zu einem Archiv aller Berichte, das niemand brauchte: gelesen wurde eine
+zugestellte Zeile nie wieder. Heute stehen die Inhalte verschluesselt
+(`DisText`), und nach dem Versand wird die Zeile geloescht. Liegen bleibt nur,
+was noch zugestellt werden soll oder aufgegeben wurde.
 """
 
 from datetime import datetime, timezone
@@ -57,11 +64,11 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
-    Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
+from models.dis_text import ai_text
 
 
 #: Der Lebenslauf einer Zeile. Bewusst kein Zustand "laeuft gerade": ein
@@ -69,7 +76,7 @@ from database import Base
 #: danach fuer immer, weil niemand mehr da ist, der ihn zuruecksetzt. Die
 #: Uebernahme wird stattdessen ueber `naechster_versuch_at` befristet — laeuft
 #: die Frist ab, nimmt sich der naechste Arbeiter die Zeile wieder vor.
-ZUSTAENDE = ("offen", "zugestellt", "aufgegeben")
+ZUSTAENDE = ("offen", "aufgegeben")
 
 
 class AiMailOutbox(Base):
@@ -92,23 +99,23 @@ class AiMailOutbox(Base):
     #: Betreff und Text stammen vom Modell (siehe `ai_mail`), sind also bereits
     #: redigiert und maskiert, wenn sie hier ankommen. Diese Tabelle prueft das
     #: nicht nach — sie ist ein Korb, kein zweites Regelwerk.
-    betreff: Mapped[str] = mapped_column(String(255), nullable=False)
-    text_body: Mapped[str] = mapped_column(Text, nullable=False)
+    betreff: Mapped[str] = mapped_column(ai_text("ai_mail_outbox.betreff"), nullable=False)
+    text_body: Mapped[str] = mapped_column(ai_text("ai_mail_outbox.text_body"), nullable=False)
     #: Darf fehlen. Eine reine Textmail ist eine gueltige Mail; eine leere
     #: HTML-Fassung waere eine kaputte.
-    html_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    html_body: Mapped[str | None] = mapped_column(ai_text("ai_mail_outbox.html_body"), nullable=True)
 
     #: Was das Modell wissen muss, um die Mail zu schreiben — derselbe Text, den
     #: `_fakten()` in den Berichtspfaden zusammenstellt. Ausdruecklich **ohne**
     #: die Adresse des Empfaengers: wer sie gar nicht erst zeigt, muss sie
     #: hinterher nicht aus einer Modellausgabe herausfiltern.
-    fakten: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fakten: Mapped[str | None] = mapped_column(ai_text("ai_mail_outbox.fakten"), nullable=True)
     #: Was zum Rendern noetig ist, als JSON: Benutzername, Ueberschrift, der
     #: Panelanteil der Betreffzeile (samt Zustandswort), Fusszeile, der Satz des
     #: Panels und der Anbieter des Laufs. Ein JSON-Feld und keine sechs Spalten,
     #: weil dieser Inhalt zur Vorlage gehoert und nicht zur Zustellung: der
     #: Arbeiter reicht ihn nur durch, abgefragt wird davon nie etwas.
-    rahmen_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rahmen_json: Mapped[str | None] = mapped_column(ai_text("ai_mail_outbox.rahmen_json"), nullable=True)
 
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="offen", server_default="offen"
@@ -133,18 +140,15 @@ class AiMailOutbox(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-    sent_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
     #: Warum es zuletzt nicht ging. Gekuerzt gespeichert: eine Fehlermeldung aus
     #: einer fremden Bibliothek kann Kilobyte lang sein, und diese Spalte wird
-    #: bei jedem Fehlversuch neu geschrieben.
-    letzter_fehler: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    #: bei jedem Fehlversuch neu geschrieben. Verschluesselt, weil eine
+    #: SMTP-Ablehnung die Empfaengeradresse woertlich zitieren kann.
+    letzter_fehler: Mapped[str | None] = mapped_column(ai_text("ai_mail_outbox.letzter_fehler"), nullable=True)
 
     __table_args__ = (
         # Genau die Abfrage des Arbeiters. Ohne ihn liest er bei jedem Takt die
-        # ganze Tabelle — und die Tabelle waechst mit jeder zugestellten Mail,
-        # bis jemand aufraeumt.
+        # ganze Tabelle, und bei zehntausend faelligen Berichten ist sie gross.
         Index("ix_ai_mail_outbox_faellig", "status", "naechster_versuch_at"),
         CheckConstraint(
             "status IN (" + ", ".join(f"'{wert}'" for wert in ZUSTAENDE) + ")",

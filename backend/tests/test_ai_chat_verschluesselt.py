@@ -143,3 +143,72 @@ def test_vergleich_verschluesselt_den_vergleichswert_nicht(db: Session, regular_
         .all()
     )
     assert treffer == [(gespraech.id,)]
+
+
+# ── Stufe 3: was die KI ausserhalb des Chats aufschreibt ────────────────────
+
+#: Jede Spalte, in der Text eines Menschen oder des Modells steht. Neben den
+#: Chatspalten oben: Mail-Korb (auch ein Guardian-Bericht nennt Server und
+#: Stoerungen), Aufgaben, Meldungen der Worker, Guardian-Erkenntnisse,
+#: Begruendung und Vorschau eines Vorschlags und der Dateiname eines Anhangs.
+INHALTSSPALTEN = SPALTEN + [
+    ("ai_mail_outbox", "betreff"),
+    ("ai_mail_outbox", "text_body"),
+    ("ai_mail_outbox", "html_body"),
+    ("ai_mail_outbox", "fakten"),
+    ("ai_mail_outbox", "rahmen_json"),
+    ("ai_mail_outbox", "letzter_fehler"),
+    ("ai_tasks", "title"),
+    ("ai_tasks", "instruction"),
+    ("ai_meldungen", "text"),
+    ("ai_meldungen", "question_json"),
+    ("ai_guardian_repairs", "erkenntnisse"),
+    ("ai_action_proposals", "preview_json"),
+    ("ai_action_proposals", "reason"),
+    ("ai_action_proposals", "expected_effect"),
+    ("ai_attachments", "original_name"),
+]
+
+
+@pytest.mark.parametrize(("tabelle", "spalte"), INHALTSSPALTEN)
+def test_jede_inhaltsspalte_ist_dis_text(tabelle: str, spalte: str) -> None:
+    from database import Base
+    from models.dis_text import DisText
+
+    typ = Base.metadata.tables[tabelle].c[spalte].type
+    assert isinstance(typ, DisText)
+    assert typ.aad == f"msm:ai:{tabelle}.{spalte}"
+
+
+def test_mail_im_korb_ist_chiffrat(db: Session, regular_user: User) -> None:
+    from services import ai_mail
+
+    kennung = ai_mail.einreihen(
+        db, user_id=regular_user.id, anlass="ai-guardian-report",
+        betreff=GEHEIM, text=GEHEIM, html=f"<p>{GEHEIM}</p>", fakten=GEHEIM,
+        rahmen={"titel": GEHEIM},
+    )
+    assert kennung is not None
+    for spalte in ("betreff", "text_body", "html_body", "fakten", "rahmen_json"):
+        roh = _roh(db, "ai_mail_outbox", spalte, kennung)
+        assert GEHEIM not in roh, spalte
+        assert DisClient.ist_verschluesselt(roh), spalte
+
+
+def test_aufgabe_ist_chiffrat(db: Session) -> None:
+    from services import ai_task_service
+    from tests.test_ai_task_bericht import _benutzer
+
+    aufgabe = ai_task_service.anlegen(
+        db, user=_benutzer(db, "aufgabenschreiber"),
+        felder={
+            "title": "Schwager", "instruction": GEHEIM, "kind": "report",
+            "plan_kind": "daily", "time_of_day": "08:00",
+            "timezone": "Europe/Berlin", "channel": "chat",
+        },
+    )
+    db.commit()
+    for spalte in ("title", "instruction"):
+        roh = _roh(db, "ai_tasks", spalte, aufgabe.id)
+        assert "Schwager" not in roh and GEHEIM not in roh, spalte
+        assert DisClient.ist_verschluesselt(roh), spalte

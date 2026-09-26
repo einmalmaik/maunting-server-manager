@@ -152,6 +152,7 @@ describe('Privacy page', () => {
     // Datenbank, nicht der Weg durch das Panel.
     expect(i18n.t('privacyPolicy.sections.ai.items.messages')).toMatch(/nur verschlüsselt/);
     expect(i18n.t('privacyPolicy.sections.ai.items.messages')).toMatch(/das Panel selbst entschlüsselt/);
+    expect(i18n.t('privacyPolicy.sections.ai.items.messages')).toMatch(/zugestellte Berichtsmail wird aus dem Ausgangskorb gelöscht/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
