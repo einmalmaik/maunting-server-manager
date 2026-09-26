@@ -141,11 +141,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.7 vom 2026-09-26 aus (der KI-Chatverlauf liegt verschluesselt in der Datenbank)', () => {
+  it('weist die Fassung 3.8 vom 2026-09-26 aus (auch die Namen der Gedaechtniseintraege sind verschluesselt)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.7`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.8`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -153,6 +153,8 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.ai.items.messages')).toMatch(/nur verschlüsselt/);
     expect(i18n.t('privacyPolicy.sections.ai.items.messages')).toMatch(/das Panel selbst entschlüsselt/);
     expect(i18n.t('privacyPolicy.sections.ai.items.messages')).toMatch(/zugestellte Berichtsmail wird aus dem Ausgangskorb gelöscht/);
+    // 3.8: vorher war nur der Wert eines Eintrags verschluesselt, sein Name nicht.
+    expect(i18n.t('privacyPolicy.sections.ai.items.memory')).toMatch(/samt ihrem Namen verschlüsselt/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
