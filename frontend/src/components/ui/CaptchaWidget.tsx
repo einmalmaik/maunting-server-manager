@@ -144,11 +144,18 @@ export function CaptchaWidget({ onVerify, onStatusChange, resetKey }: CaptchaWid
           const widget = document.createElement('altcha-widget')
           widget.setAttribute('challenge', JSON.stringify(challengeData))
           widget.setAttribute('auto', 'onload')
+          widget.setAttribute('configuration', JSON.stringify({ hideFooter: true, hideLogo: true }))
+          widget.setAttribute('hidefooter', 'true')
+          widget.setAttribute('hidelogo', 'true')
+          widget.style.setProperty('--altcha-border-radius', '0.75rem')
+          widget.style.setProperty('--altcha-max-width', '100%')
+          if (typeof (widget as any).configure === 'function') {
+            ;(widget as any).configure({ hideFooter: true, hideLogo: true })
+          }
           const lang = (i18n.language || 'de').startsWith('de') ? 'de' : 'en'
           widget.setAttribute('language', lang)
           const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
           widget.setAttribute('theme', isDark ? 'dark' : 'auto')
-          widget.setAttribute('hidefooter', 'true')
           widget.setAttribute(
             'strings',
             JSON.stringify({
@@ -202,6 +209,9 @@ export function CaptchaWidget({ onVerify, onStatusChange, resetKey }: CaptchaWid
           widget.addEventListener('expired', handleExpired)
           widget.addEventListener('error', handleError)
           containerRef.current.appendChild(widget)
+          if (typeof (widget as any).configure === 'function') {
+            ;(widget as any).configure({ hideFooter: true, hideLogo: true })
+          }
           // Das Widget steht; gesperrt bleibt es, bis es `verified` meldet.
           melde('ready')
         })
