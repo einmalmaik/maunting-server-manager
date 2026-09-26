@@ -3459,7 +3459,7 @@
     "2faChooseMethod": "Choose your 2FA method",
     "2faMethodTotp": "Authenticator App",
     "2faMethodTotpDesc": "One-time codes via Google Authenticator, Bitwarden, 1Password, etc.",
-    "2faMethodPasskey": "Passkey / Biometrics",
+    "2faMethodPasskey": "Passkey / biometrics",
     "2faMethodPasskeyDesc": "1-touch verification with fingerprint, Face ID, Windows Hello, or Touch ID.",
     "2faPasskeySetupBtn": "Register & enable Passkey",
     "2faPasskeySuccess": "Passkey registered successfully and 2FA enabled.",
@@ -3590,7 +3590,7 @@
       "resetPassword": "Password",
       "resetButton": "Start over",
       "resetDone": "Started over. This device is now approved.",
-      "resetPasskey": "Confirm with Passkey / Biometrics",
+      "resetPasskey": "Confirm with Passkey / biometrics",
       "resetTotp": "6-digit Authenticator code",
       "resetSocialConfirmation": "Type confirmation (RESET)",
       "resetSocialHelp": "Since you signed in with an external provider (Social Login), confirm resetting by typing RESET.",
@@ -6316,12 +6316,10 @@
       "retake": "Retake",
       "use": "Use photo",
       "fromFile": "Choose photo from file",
-      "gallery": "Gallery",
       "flip": "Switch camera",
-      "flipShort": "Switch",
       "unsupported": "This browser has no camera interface.",
       "denied": "Camera access was denied. Allow camera use in your browser.",
-      "failed": "The camera could not be started. Choose a file instead."
+      "failed": "The camera could not be started."
     },
     "story": {
       "create": "Create status",

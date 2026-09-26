@@ -6316,12 +6316,10 @@
       "retake": "Wiederholen",
       "use": "Foto verwenden",
       "fromFile": "Foto aus Datei wählen",
-      "gallery": "Galerie",
       "flip": "Kamera wechseln",
-      "flipShort": "Wechseln",
       "unsupported": "Dieser Browser kennt keine Kamera-Schnittstelle.",
       "denied": "Der Kamerazugriff wurde verweigert. Erlaube die Kameranutzung im Browser.",
-      "failed": "Die Kamera ließ sich nicht starten. Wähle stattdessen eine Datei aus."
+      "failed": "Die Kamera ließ sich nicht starten."
     },
     "story": {
       "create": "Status erstellen",
