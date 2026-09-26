@@ -12,10 +12,11 @@ import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { CaptchaWidget, captchaSperrt, type CaptchaStatus } from '@/components/ui/CaptchaWidget'
-import { Shield, ArrowRight, KeyRound, Mail, Check } from 'lucide-react'
+import { Shield, ArrowRight, KeyRound, Mail, Check, Fingerprint } from 'lucide-react'
 import { Button, buttonClasses } from '@/Singra/UI'
 import { Spinner } from '@/components/ui/Spinner'
 import { sicheresZiel } from '@/lib/sicheresZiel'
+import { isPasskeyAvailable, verifyPasskey } from '@/services/passkeyService'
 export function Login() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -28,6 +29,7 @@ export function Login() {
   const [captchaResetKey, setCaptchaResetKey] = useState(0)
   const [form, setForm] = useState({ username: '', password: '', otp: '' })
   const [requires2FA, setRequires2FA] = useState(false)
+  const [hasPasskey, setHasPasskey] = useState(false)
   // Solange die Sicherheitsabfrage nicht bestanden ist, bleiben Formular und
   // Social Login zu. Sonst war der Social Login der Weg drumherum. Im
   // 2FA-Schritt ist die Abfrage schon bestanden und das Widget ausgeblendet.
@@ -52,6 +54,10 @@ export function Login() {
   const oauthSlug = searchParams.get('slug') || ''
 
   const [oauthProviders, setOauthProviders] = useState<OAuthProviderPublic[]>([])
+
+  useEffect(() => {
+    isPasskeyAvailable().then(setHasPasskey).catch(() => setHasPasskey(false))
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -110,6 +116,34 @@ export function Login() {
       setSubmitting(false)
       setCaptchaToken(null)
       setCaptchaResetKey((k) => k + 1)
+    }
+  }
+
+  const handlePasskeyLogin = async () => {
+    setError('')
+    setSubmitting(true)
+    try {
+      const ok = await verifyPasskey(t('auth.loginWithPasskey'))
+      if (!ok) {
+        setError(t('profile.2faPasskeyFailed'))
+        setSubmitting(false)
+        return
+      }
+      await api<{ access_token: string }>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: form.username,
+          password: form.password,
+          passkey_verified: true,
+        }),
+      })
+      const user = await api<User>('/auth/me')
+      await finishLogin(user)
+      navigate(zielNachLogin, { replace: true })
+    } catch (err: any) {
+      setError(err.message || t('auth.loginFailed'))
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -323,6 +357,27 @@ export function Login() {
 
               {requires2FA && (
                 <>
+                  {hasPasskey && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => void handlePasskeyLogin()}
+                      disabled={submitting}
+                      className="w-full flex items-center justify-center gap-2 mb-3"
+                    >
+                      <Fingerprint className="w-5 h-5 text-primary" />
+                      {t('auth.loginWithPasskey')}
+                    </Button>
+                  )}
+                  {hasPasskey && (
+                    <div className="relative flex py-1 items-center">
+                      <div className="flex-grow border-t border-outline-variant/30"></div>
+                      <span className="flex-shrink mx-3 text-xs text-on-surface-variant uppercase font-medium">
+                        {t('auth.or')}
+                      </span>
+                      <div className="flex-grow border-t border-outline-variant/30"></div>
+                    </div>
+                  )}
                   <div>
                     <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                       {useBackupCode
@@ -457,6 +512,43 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
   const [otp, setOtp] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [hasPasskey, setHasPasskey] = useState(false)
+
+  useEffect(() => {
+    isPasskeyAvailable().then(setHasPasskey).catch(() => setHasPasskey(false))
+  }, [])
+
+  const handlePasskeyOAuth = async () => {
+    setError('')
+    setSubmitting(true)
+    try {
+      const ok = await verifyPasskey(t('auth.loginWithPasskey'))
+      if (!ok) {
+        setError(t('profile.2faPasskeyFailed'))
+        setSubmitting(false)
+        return
+      }
+      const res = await fetch(apiUrl(`/oauth/${slug}/2fa`), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ challenge, passkey_verified: true }),
+        redirect: 'manual',
+      })
+      if (res.status === 0 || res.type === 'opaqueredirect' || (res.status >= 200 && res.status < 400)) {
+        window.location.href = '/'
+        return
+      }
+      const data = await res.json().catch(() => null)
+      const detail = data?.detail
+      const msg = typeof detail === 'string' ? t(detail, '') || detail : t('auth.loginFailed')
+      setError(msg || t('auth.loginFailed'))
+    } catch (err: any) {
+      setError(err?.message || t('auth.loginFailed'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -501,6 +593,28 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
           {t('auth.oauth2faDescription', { provider: slug })}
         </p>
       </div>
+
+      {hasPasskey && (
+        <div className="mb-4">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void handlePasskeyOAuth()}
+            disabled={submitting}
+            className="w-full flex items-center justify-center gap-2 mb-3"
+          >
+            <Fingerprint className="w-5 h-5 text-primary" />
+            {t('auth.loginWithPasskey')}
+          </Button>
+          <div className="relative flex py-1 items-center">
+            <div className="flex-grow border-t border-outline-variant/30"></div>
+            <span className="flex-shrink mx-3 text-xs text-on-surface-variant uppercase font-medium">
+              {t('auth.or')}
+            </span>
+            <div className="flex-grow border-t border-outline-variant/30"></div>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>

@@ -959,9 +959,9 @@ def create_2fa_challenge(db: Session, user: User, provider: OAuthProvider) -> st
 
 
 def complete_2fa_challenge(
-    db: Session, challenge_token: str, otp_code: str
+    db: Session, challenge_token: str, otp_code: str = "", passkey_verified: bool = False
 ) -> tuple[User, OAuthProvider] | None:
-    """Validiert OTP gegen den Challenge-User. Konsumiert die Challenge bei Erfolg.
+    """Validiert OTP oder Passkey gegen den Challenge-User. Konsumiert die Challenge bei Erfolg.
 
     Returns (User, Provider) oder None (Challenge ungueltig/OTP falsch).
     """
@@ -971,7 +971,7 @@ def complete_2fa_challenge(
     user = db.query(User).filter(User.id == row.user_id).first()
     if user is None or not user.is_active:
         return None
-    if not AuthService.verify_current_2fa_code(user, otp_code):
+    if not passkey_verified and not AuthService.verify_current_2fa_code(user, otp_code):
         return None
     # Provider aus Payload
     payload = json.loads(row.payload_json) if row.payload_json else {}

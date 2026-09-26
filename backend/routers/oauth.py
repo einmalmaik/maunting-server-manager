@@ -648,9 +648,12 @@ def oauth_2fa(
     """
     challenge = (body or {}).get("challenge", "")
     otp_code = (body or {}).get("otp_code", "")
+    passkey_verified = bool((body or {}).get("passkey_verified", False))
     if not isinstance(challenge, str) or not isinstance(otp_code, str):
         raise HTTPException(status_code=400, detail="Ungueltige Anfrage")
-    completed = oauth_service.complete_2fa_challenge(db, challenge, otp_code)
+    completed = oauth_service.complete_2fa_challenge(
+        db, challenge, otp_code=otp_code, passkey_verified=passkey_verified
+    )
     if completed is None:
         raise HTTPException(status_code=401, detail="Ungueltige oder abgelaufene Challenge / falscher Code")
     user, provider = completed

@@ -2736,6 +2736,7 @@
     "signIn": "Anmelden",
     "createAccount": "Konto erstellen",
     "verify2FA": "2FA bestätigen",
+    "loginWithPasskey": "Mit Passkey / Biometrie bestätigen",
     "noAccount": "Noch kein Konto?",
     "hasAccount": "Bereits ein Konto?",
     "forgotPassword": "Passwort vergessen?",
