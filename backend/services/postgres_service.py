@@ -1465,7 +1465,10 @@ def run(
         "rollback": rollback,
         "row_limit": row_limit,
         "timeout_ms": timeout_ms or settings.managed_postgres_statement_timeout_ms,
-        "statements": [{"sql": text, "params": list(params or [])} for text, params in statements],
+        "statements": [
+            {"sql": text, "params": None if params is None else list(params)}
+            for text, params in statements
+        ],
     }
     if identity == "owner":
         if database is None:

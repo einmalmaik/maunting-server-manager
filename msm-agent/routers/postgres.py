@@ -296,8 +296,10 @@ def postgres_restore(body: RestoreIn) -> dict[str, Any]:
 
 
 class RunStatementIn(BaseModel):
-    sql: str = Field(..., min_length=1, max_length=200_000)
-    params: list[Any] = Field(default_factory=list, max_length=500)
+    sql: str = Field(..., min_length=1, max_length=1_000_000)
+    # None: SQL wird nicht formatiert (Editor-SQL mit %). Liste: psycopg2
+    # setzt Platzhalter ein, dann muss ein woertliches % doppelt stehen.
+    params: list[Any] | None = Field(None, max_length=100_000)
 
 
 class RunIn(_Zielbar):
@@ -308,7 +310,7 @@ class RunIn(_Zielbar):
     admin_password: str = ""
     mode: Literal["read", "tx", "autocommit"] = "read"
     rollback: bool = False
-    statements: list[RunStatementIn] = Field(..., min_length=1, max_length=50)
+    statements: list[RunStatementIn] = Field(..., min_length=1, max_length=500)
     row_limit: int = Field(500, ge=1, le=5000)
     timeout_ms: int = Field(5000, ge=100, le=600_000)
 

@@ -1291,7 +1291,7 @@ def run_statements(
             cur.execute("SET statement_timeout = %s", (timeout_ms,))
             for index, statement in enumerate(statements):
                 text = str(statement.get("sql") or "")
-                params = statement.get("params") or None
+                params = statement.get("params")
                 begin = time.monotonic()
                 try:
                     cur.execute(text, params)

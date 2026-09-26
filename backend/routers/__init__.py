@@ -13,6 +13,7 @@ from .permissions import router as permissions_router
 from .blueprints import router as blueprints_router
 from .oauth import router as oauth_router
 from .databases import router as databases_router
+from .postgres_studio import router as postgres_studio_router
 from .webhooks_outbound import router as webhooks_outbound_router
 from .singra_webhook import router as singra_webhook_router
 from .backup_config import router as backup_config_router
@@ -64,6 +65,7 @@ __all__ = [
     "blueprints_router",
     "oauth_router",
     "databases_router",
+    "postgres_studio_router",
     "webhooks_outbound_router",
     "singra_webhook_router",
     "backup_config_router",

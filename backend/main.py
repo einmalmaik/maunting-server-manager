@@ -36,6 +36,7 @@ from routers import (
     blueprints_router,
     oauth_router,
     databases_router,
+    postgres_studio_router,
     webhooks_outbound_router,
     singra_webhook_router,
     backup_config_router,
@@ -927,6 +928,7 @@ app.include_router(roles_router)
 app.include_router(permissions_router)
 app.include_router(blueprints_router)
 app.include_router(databases_router)
+app.include_router(postgres_studio_router)
 # Ausgehende Webhooks (MSM → Drittsystem wie Discord-Bot): per-Server
 # Subscriptions mit Secret-Auth ueber X-Webhook-Secret-Header.
 app.include_router(webhooks_outbound_router)
