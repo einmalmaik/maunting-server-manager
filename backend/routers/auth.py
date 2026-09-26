@@ -462,11 +462,23 @@ def create_device_pairing(
     Zugang, bei einem Admin auf das ganze Panel. `auth_rate_limit`, weil der
     Endpunkt damit auch ein Passwort prueft.
     """
+    from models import OAuthUserLink
+
     if user.two_factor_enabled:
-        if not req.otp_code or not AuthService.verify_current_2fa_code(user, req.otp_code):
-            raise HTTPException(status_code=403, detail="Bitte den aktuellen 2FA-Code eingeben.")
-    elif not req.password or not AuthService.verify_password(req.password, user.password_hash):
-        raise HTTPException(status_code=403, detail="Bitte dein Passwort bestätigen.")
+        verifiziert = False
+        if req.otp_code and AuthService.verify_current_2fa_code(user, req.otp_code):
+            verifiziert = True
+        elif req.passkey_verified:
+            verifiziert = True
+        if not verifiziert:
+            raise HTTPException(status_code=403, detail="Bitte den aktuellen 2FA-Code eingeben oder per Passkey bestätigen.")
+    else:
+        has_oauth = (
+            db.query(OAuthUserLink).filter(OAuthUserLink.user_id == user.id).first() is not None
+        )
+        if not has_oauth:
+            if not req.password or not AuthService.verify_password(req.password, user.password_hash):
+                raise HTTPException(status_code=403, detail="Bitte dein Passwort bestätigen.")
     einladung, code = device_pairing_service.anlegen(db, user, req.label)
     return {
         "code": code,
@@ -1167,18 +1179,46 @@ async def enable_2fa(
     return {"message": "2FA aktiviert"}
 
 
-@router.post("/2fa/disable")
-async def disable_2fa(
-    otp_code: str,
+@router.post("/2fa/passkey/enable")
+async def enable_2fa_passkey(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """2FA deaktivieren — ERFORDERT aktuellen 2FA-Code. Backup-Codes funktionieren NICHT."""
-    if not user.two_factor_enabled or not user.two_factor_secret_encrypted:
+    """Aktiviert 2FA via Passkey / Biometrie nach erfolgreicher lokaler Verifikation."""
+    user.two_factor_enabled = True
+    db.commit()
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="auth.2fa.passkey.enable",
+        target_type="user",
+        target_id=user.id,
+        details={"username": user.username, "method": "passkey"},
+        commit=True,
+    )
+    if EmailService.is_configured() and user.email_notifications:
+        await EmailService.send_2fa_status_notification(user.email, user.username, enabled=True)
+    return {"message": "2FA via Passkey aktiviert"}
+
+
+@router.post("/2fa/disable")
+async def disable_2fa(
+    otp_code: str | None = None,
+    passkey_verified: bool = False,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """2FA deaktivieren — erfordert aktuellen 2FA-Code oder Passkey-Verifikation."""
+    if not user.two_factor_enabled:
         raise HTTPException(status_code=400, detail="2FA nicht aktiviert")
-    if not AuthService.verify_current_2fa_code(user, otp_code):
-        raise HTTPException(status_code=400, detail="Ungültiger 2FA-Code")
+    if user.two_factor_secret_encrypted:
+        if not otp_code or not AuthService.verify_current_2fa_code(user, otp_code):
+            raise HTTPException(status_code=400, detail="Ungültiger 2FA-Code")
+    else:
+        if not passkey_verified and not (otp_code and AuthService.verify_current_2fa_code(user, otp_code)):
+            raise HTTPException(status_code=400, detail="Passkey-Bestätigung erforderlich")
     user.two_factor_enabled = False
     user.two_factor_secret_encrypted = None
     BackupCodeService.clear_all_backup_codes(db, user.id)

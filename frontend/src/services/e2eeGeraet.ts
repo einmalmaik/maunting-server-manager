@@ -61,6 +61,7 @@ import {
   removeEigenesGeraet,
   resetEigeneGeraete,
   type E2eeGeraetItem,
+  type ResetEigeneGeraeteInput,
 } from '@/api/social'
 
 /** 16 Bytes hex. Bedeutungsfrei — die Kennung steht im Klartext in jedem Umschlag. */
@@ -913,9 +914,11 @@ export async function entferneGeraet(geraet: E2eeGeraetItem): Promise<void> {
  * Alle anderen Sitzungen fliegen hinaus, dieses Gerät meldet sich danach als
  * erstes wieder an, und die Kontakte bekommen eine Warnung.
  */
-export async function geraeteZuruecksetzen(passwort: string): Promise<void> {
+export async function geraeteZuruecksetzen(
+  input: string | ResetEigeneGeraeteInput,
+): Promise<void> {
   const konto = meinKonto()
-  await resetEigeneGeraete(passwort)
+  await resetEigeneGeraete(input)
   veroeffentlichtAls = null
   vergessenGeraete(konto)
   await geraetVeroeffentlichen()

@@ -338,3 +338,59 @@ def test_der_client_erkennt_die_grenze_des_sidecars(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(dis_client_modul, "_client", Antwort413())
     with pytest.raises(DisZuGross):
         dis_client_modul.DisClient._post("/encrypt", {"plaintext": "x"})
+
+
+def test_ein_alter_sidecar_ohne_praefix_scheitert_laut(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Am 27.09.2026 lief das neue Panel kurz gegen den alten Sidecar. Der
+    lieferte Chiffrat ohne Praefix, der Nachzug hielt es fuer Klartext und
+    verschluesselte es erneut, rund 40 Schichten tief, bis ein Titel 9 MB
+    hatte."""
+    import httpx
+
+    from services import dis_client as dis_client_modul
+    from services.dis_client import DisSidecarError
+    from tests.conftest import ECHTES_ENCRYPT
+
+    class AlterSidecar:
+        def post(self, url, json=None, headers=None):
+            return httpx.Response(200, json={"ciphertext": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB"})
+
+    monkeypatch.setattr(dis_client_modul, "_client", AlterSidecar())
+    with pytest.raises(DisSidecarError, match="msm-dis-v1"):
+        ECHTES_ENCRYPT("Titel", aad="msm:ai:ai_conversations.title")
+
+
+def test_nackter_dis_wert_wird_ausgepackt_statt_eingepackt(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Was das Panel mit dem alten Sidecar schrieb, ist DIS-Chiffrat ohne
+    Praefix. Nochmals verschluesselt stuende im Chat danach Base64."""
+    import base64
+    import os
+
+    from services.dis_altbestand import nachziehen
+    from services.dis_client import DisDecryptionError
+
+    nackt = base64.b64encode(os.urandom(48)).decode()
+    gespraech = _gespraech(db, regular_user)
+    nachricht = AiMessage(id=str(uuid4()), conversation_id=gespraech.id, role="user", content="neu")
+    db.add(nachricht)
+    db.commit()
+    db.execute(text("UPDATE ai_messages SET content = :k WHERE id = :id"), {"k": nackt, "id": nachricht.id})
+    db.commit()
+
+    echt = DisClient.decrypt
+
+    def decrypt(chiffrat, aad=None):
+        if chiffrat == nackt:
+            assert aad == "msm:ai:ai_messages.content"
+            return GEHEIM
+        if not DisClient.ist_verschluesselt(chiffrat):
+            raise DisDecryptionError("kein Chiffrat")
+        return echt(chiffrat, aad=aad)
+
+    monkeypatch.setattr(DisClient, "decrypt", staticmethod(decrypt))
+
+    assert nachziehen(db) == {"ai_messages": 1}
+    db.expire_all()
+    assert db.get(AiMessage, nachricht.id).content == GEHEIM

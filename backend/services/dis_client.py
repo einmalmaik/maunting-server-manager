@@ -117,7 +117,13 @@ class DisClient:
         payload: dict = {"plaintext": plaintext}
         if aad:
             payload["aad"] = aad
-        return DisClient._post("/encrypt", payload)["ciphertext"]
+        chiffrat = DisClient._post("/encrypt", payload)["ciphertext"]
+        # Ein Sidecar von vor dem 26.09.2026 liefert nacktes Base64. Das
+        # hielte der Nachzug beim Start fuer Klartext und verschluesselte es
+        # wieder und wieder; am 27.09. wuchs so ein Titel auf 9 MB.
+        if not chiffrat.startswith(DIS_PRAEFIX):
+            raise DisSidecarError("DIS Sidecar zu alt: Wert ohne msm-dis-v1:")
+        return chiffrat
 
     @staticmethod
     def decrypt(ciphertext: str, aad: str | None = None) -> str:

@@ -296,11 +296,21 @@ export async function removeEigenesGeraet(
   })
 }
 
+export interface ResetEigeneGeraeteInput {
+  password?: string | null
+  confirmation?: string | null
+  otp_code?: string | null
+  passkey_verified?: boolean
+}
+
 /** Alle Geräte verloren: Verzeichnis leeren, andere Sitzungen sperren. */
-export async function resetEigeneGeraete(password: string): Promise<{ ok: boolean; removed: number }> {
+export async function resetEigeneGeraete(
+  input: string | ResetEigeneGeraeteInput,
+): Promise<{ ok: boolean; removed: number }> {
+  const payload = typeof input === 'string' ? { password: input } : input
   return api<{ ok: boolean; removed: number }>('/social/e2ee/devices/self/reset', {
     method: 'POST',
-    body: JSON.stringify({ password }),
+    body: JSON.stringify(payload),
   })
 }
 

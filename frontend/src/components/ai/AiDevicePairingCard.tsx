@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Copy, MonitorSmartphone, Trash2 } from 'lucide-react'
+import { Copy, Fingerprint, MonitorSmartphone, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { formatRelativeTime } from '@/utils/timeFormat'
 
 import { api } from '@/api/client'
+import { oauthApi } from '@/api/oauth'
 import { getE2eeGeraete } from '@/api/social'
 import { API_ORIGIN } from '@/config/api'
 import { Input } from '@/components/ui/Input'
@@ -13,6 +14,7 @@ import { SecretOnce } from '@/components/ui/SecretOnce'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { Button } from '@/Singra/UI'
 import { entferneGeraet, gebeGeraetFrei, sicherheitsnummer } from '@/services/e2eeGeraet'
+import { isPasskeyAvailable, verifyPasskey } from '@/services/passkeyService'
 import {
   uebergebeVerlauf,
   type KopplungsStatus,
@@ -65,6 +67,8 @@ export function AiDevicePairingCard() {
   // vorher nach dem Passwort, bei 2FA nach dem aktuellen Code.
   const mitZweiFaktor = useAuthStore((s) => Boolean(s.user?.two_factor_enabled))
   const [nachweis, setNachweis] = useState('')
+  const [hasPasskey, setHasPasskey] = useState(false)
+  const [isSocialAccount, setIsSocialAccount] = useState(false)
   const [code, setCode] = useState<string | null>(null)
   const [qrDataUri, setQrDataUri] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -77,7 +81,14 @@ export function AiDevicePairingCard() {
       .catch(() => setGeraete([]))
   }
 
-  useEffect(laden, [])
+  useEffect(() => {
+    laden()
+    isPasskeyAvailable().then(setHasPasskey).catch(() => setHasPasskey(false))
+    oauthApi
+      .listMyLinks()
+      .then((links) => setIsSocialAccount(Array.isArray(links) && links.length > 0))
+      .catch(() => setIsSocialAccount(false))
+  }, [])
 
   /**
    * Wartet auf das Einlösen — und fragt dann, ob der Verlauf hinüber soll.
@@ -157,16 +168,25 @@ export function AiDevicePairingCard() {
     }
   }, [code])
 
-  const koppeln = async () => {
+  const koppeln = async (mitPasskey = false) => {
     setBusy(true)
     try {
+      const payload: Record<string, any> = { label: name.trim() }
+      if (mitZweiFaktor) {
+        if (mitPasskey) {
+          const ok = await verifyPasskey(t('ai.profile.devicesProofPasskey'))
+          if (!ok) throw new Error(t('profile.2faPasskeyFailed'))
+          payload.passkey_verified = true
+        } else {
+          payload.otp_code = nachweis.trim()
+        }
+      } else if (!isSocialAccount) {
+        payload.password = nachweis
+      }
+
       const antwort = await api<{ code: string; qr_data_uri?: string | null }>('/auth/devices/pairing', {
         method: 'POST',
-        body: JSON.stringify(
-          mitZweiFaktor
-            ? { label: name.trim(), otp_code: nachweis.trim() }
-            : { label: name.trim(), password: nachweis },
-        ),
+        body: JSON.stringify(payload),
       })
       setCode(antwort.code)
       setQrDataUri(antwort.qr_data_uri || null)
@@ -373,7 +393,7 @@ export function AiDevicePairingCard() {
           }}
         />
       ) : (
-        <div className="max-w-xl space-y-1">
+        <div className="max-w-xl space-y-3">
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-[10rem] flex-1">
               <Input
@@ -385,33 +405,62 @@ export function AiDevicePairingCard() {
                 maxLength={64}
               />
             </div>
-            <div className="min-w-[10rem] flex-1">
-              {mitZweiFaktor ? (
-                <Input
-                  id="kopplung-nachweis"
-                  label={t('ai.profile.devicesProofOtp')}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  value={nachweis}
-                  onChange={(e) => setNachweis(e.target.value)}
-                  maxLength={16}
-                />
-              ) : (
-                <PasswordInput
-                  id="kopplung-nachweis"
-                  label={t('ai.profile.devicesProofPassword')}
-                  autoComplete="current-password"
-                  value={nachweis}
-                  onChange={(e) => setNachweis(e.target.value)}
-                  maxLength={256}
-                />
-              )}
-            </div>
-            <Button onClick={koppeln} disabled={busy || !nachweis.trim()}>
-              {t('ai.profile.devicesPair')}
-            </Button>
+
+            {mitZweiFaktor ? (
+              <>
+                <div className="min-w-[10rem] flex-1">
+                  <Input
+                    id="kopplung-nachweis"
+                    label={t('ai.profile.devicesProofOtp')}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    value={nachweis}
+                    onChange={(e) => setNachweis(e.target.value)}
+                    maxLength={16}
+                  />
+                </div>
+                <Button onClick={() => void koppeln(false)} disabled={busy || !nachweis.trim()}>
+                  {t('ai.profile.devicesPair')}
+                </Button>
+                {hasPasskey && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => void koppeln(true)}
+                    disabled={busy}
+                    className="flex items-center gap-1.5"
+                  >
+                    <Fingerprint className="h-4 w-4" />
+                    {t('ai.profile.devicesProofPasskey')}
+                  </Button>
+                )}
+              </>
+            ) : isSocialAccount ? (
+              <Button onClick={() => void koppeln(false)} disabled={busy}>
+                {t('ai.profile.devicesPair')}
+              </Button>
+            ) : (
+              <>
+                <div className="min-w-[10rem] flex-1">
+                  <PasswordInput
+                    id="kopplung-nachweis"
+                    label={t('ai.profile.devicesProofPassword')}
+                    autoComplete="current-password"
+                    value={nachweis}
+                    onChange={(e) => setNachweis(e.target.value)}
+                    maxLength={256}
+                  />
+                </div>
+                <Button onClick={() => void koppeln(false)} disabled={busy || !nachweis.trim()}>
+                  {t('ai.profile.devicesPair')}
+                </Button>
+              </>
+            )}
           </div>
-          <p className="msm-field-help">{t('ai.profile.devicesProofHint')}</p>
+          <p className="msm-field-help">
+            {isSocialAccount && !mitZweiFaktor
+              ? t('ai.profile.devicesSocialHint')
+              : t('ai.profile.devicesProofHint')}
+          </p>
         </div>
       )}
 

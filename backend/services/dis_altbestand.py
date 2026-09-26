@@ -25,6 +25,7 @@ gefunden hat (etwa nach dem Einspielen eines alten Backups).
 from __future__ import annotations
 
 import logging
+import re
 
 from sqlalchemy import Text, select, text, type_coerce
 from sqlalchemy.engine import Engine
@@ -32,7 +33,7 @@ from sqlalchemy.orm import Session
 
 from database import Base
 from models.dis_text import DisText
-from services.dis_client import DisClient, DisZuGross
+from services.dis_client import DisClient, DisDecryptionError, DisZuGross
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,26 @@ MARKE_WERT = "20260926"
 #: danach kommt, wartete auf VACUUM FULL. So scheitert es nach 10 s und wird
 #: beim naechsten Start wiederholt.
 SPERRFRIST = "10s"
+
+
+# DIS-Chiffrat ohne Praefix: Base64 aus mindestens IV und Tag (28 Byte).
+_NACKTES_CHIFFRAT = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
+
+
+def _auspacken(wert: str, aad: str) -> str:
+    """Klartext hinter einem Wert ohne Praefix.
+
+    Lief das neue Panel gegen einen Sidecar von vor dem 26.09.2026, schrieb
+    es in `DisText`-Spalten Chiffrat ohne Praefix. Nochmals verschluesselt
+    stuende danach Base64 im Chat. Ob es Chiffrat ist, entscheidet der
+    Sidecar mit der AAD der Spalte; die Form allein sagt es nicht.
+    """
+    if len(wert) % 4 or not _NACKTES_CHIFFRAT.fullmatch(wert):
+        return wert
+    try:
+        return DisClient.decrypt(wert, aad=aad)
+    except DisDecryptionError:
+        return wert
 
 
 def nachziehen(db: Session) -> dict[str, int]:
@@ -80,7 +101,7 @@ def nachziehen(db: Session) -> dict[str, int]:
                 vorher_zu_gross = len(zu_gross)
                 for zeilen_id, alt in zeilen:
                     try:
-                        neu = DisClient.encrypt(alt, aad=spalte.type.aad)
+                        neu = DisClient.encrypt(_auspacken(alt, spalte.type.aad), aad=spalte.type.aad)
                     except DisZuGross:
                         zu_gross.append(zeilen_id)
                         continue

@@ -103,6 +103,8 @@ def _mock_totp_verify(secret: str, code: str, window: int = 1) -> bool:
     from tests._totp import totp_now
     return totp_now(secret) == code.strip()
 
+# Die echte Methode, fuer Tests, die ihre Pruefung des Sidecar-Ergebnisses brauchen.
+ECHTES_ENCRYPT = DisClient.encrypt
 DisClient.encrypt = staticmethod(_mock_encrypt)
 DisClient.decrypt = staticmethod(_mock_decrypt)
 # Woran `DisText` Chiffrat von Altbestand unterscheidet: die Form von

@@ -18,8 +18,8 @@ import { sha256Hex } from '@msdis/shield/integrity'
 import {
   biometrieSpeicherVerfuegbar,
   pruefeBiometrieVerfuegbar,
-  verifiziereBiometrie,
 } from '../tauri'
+import { verifyPasskey } from '@/services/passkeyService'
 
 export { SecureBuffer }
 
@@ -294,28 +294,6 @@ async function checkAndroidBiometric(): Promise<boolean> {
   }
 }
 
-async function promptAndroidBiometric(title?: string): Promise<boolean> {
-  try {
-    const { authenticate } = await import('@tauri-apps/plugin-biometric')
-    await authenticate(title || 'Tresor entsperren', {
-      allowDeviceCredential: true,
-    })
-    return true
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    if (
-      msg.includes('cancel') ||
-      msg.includes('Cancel') ||
-      msg.includes('abgebrochen') ||
-      msg.includes('User canceled') ||
-      msg.includes('NegativeButton')
-    ) {
-      throw new Error('Biometrische Authentifizierung abgebrochen.')
-    }
-    return false
-  }
-}
-
 export async function isBiometricsAvailable(): Promise<boolean> {
   // Ein Schnelleinstieg braucht zweierlei: eine Bestätigung **und** einen Platz
   // für das Geheimnis. Bis 09/2026 wurde hier nur das erste geprüft. Auf
@@ -346,67 +324,11 @@ export async function isBiometricsAvailable(): Promise<boolean> {
 }
 
 /**
- * Fordert Benutzer-Verifikation über den nativen Plattform-Authenticator an (Windows Hello, BiometricPrompt).
+ * Fordert Benutzer-Verifikation über den nativen Plattform-Authenticator an (Windows Hello, BiometricPrompt, WebAuthn).
  * Schlägt bei Nicht-Verifikation oder unzureichenden Rechten fehl (Fail-Closed).
  */
 export async function promptBiometricVerification(title?: string): Promise<boolean> {
-  // 1. In Tauri / Desktop: Nutze native Windows Hello API falls auf diesem System verfügbar
-  try {
-    const isWindowsHelloAvailable = await pruefeBiometrieVerfuegbar()
-    if (isWindowsHelloAvailable) {
-      const verified = await verifiziereBiometrie(title || 'Tresor entsperren')
-      return verified
-    }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    if (msg.includes('abgebrochen') || msg.includes('Canceled') || msg.includes('Fehler')) {
-      throw new Error('Biometrische Authentifizierung abgebrochen.')
-    }
-    return false
-  }
-
-  // 2. In Tauri / Mobile (Android): Nutze BiometricPrompt falls auf Android verfügbar
-  try {
-    const isAndroidAvailable = await checkAndroidBiometric()
-    if (isAndroidAvailable) {
-      return await promptAndroidBiometric(title)
-    }
-  } catch (err: unknown) {
-    throw err
-  }
-
-  // 3. WebAuthn Plattform-Authenticator: Fail-Closed (SEC-CRIT-01)
-  if (typeof window === 'undefined' || !window.PublicKeyCredential || !navigator.credentials) {
-    return false
-  }
-
-  try {
-    const challenge = new Uint8Array(32)
-    window.crypto.getRandomValues(challenge)
-
-    const credential = await navigator.credentials.get({
-      publicKey: {
-        challenge,
-        timeout: 60000,
-        userVerification: 'required',
-        rpId: window.location.hostname || undefined,
-      },
-    })
-    return !!credential
-  } catch (err) {
-    const errorName = (err && typeof err === 'object' && 'name' in err) ? String(err.name) : ''
-    const errorMsg = err instanceof Error ? err.message : String(err)
-    if (
-      errorName === 'NotAllowedError' ||
-      errorName === 'AbortError' ||
-      errorMsg.includes('NotAllowedError') ||
-      errorMsg.toLowerCase().includes('cancel') ||
-      errorMsg.toLowerCase().includes('abort')
-    ) {
-      throw new Error('Biometrische Authentifizierung abgebrochen.')
-    }
-    return false
-  }
+  return await verifyPasskey(title || 'Tresor entsperren')
 }
 
 /**

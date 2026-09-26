@@ -271,3 +271,72 @@ def test_neustart_nur_mit_passwort_und_sperrt_die_anderen(client: TestClient, db
     assert client.put("/api/social/e2ee/devices/self", headers=neu_kopf, json={
         "device_id": "neugeraet-02", "public_key": RSA_B, "signing_public_key": neu_ecdsa,
     }).json()["is_approved"] is True
+
+
+def test_neustart_social_login_mit_reset_bestaetigung(client: TestClient, db: Session, clean_db):
+    from models import OAuthProvider, OAuthUserLink
+    user = _konto(db, "social_user")
+    provider = OAuthProvider(
+        name="Google",
+        slug="google",
+        preset="google",
+        client_id="cid",
+        client_secret_encrypted="sec",
+        enabled=True,
+    )
+    db.add(provider)
+    db.commit()
+    db.refresh(provider)
+
+    link = OAuthUserLink(
+        provider_id=provider.id,
+        user_id=user.id,
+        subject=OAuthUserLink._hash_subject("sub-12345"),
+    )
+    db.add(link)
+    db.commit()
+
+    neu_kopf, neu_familie = _sitzung(db, user)
+    _, ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "alt-dev-1", RSA_A, "Alt", ecdsa, familie=neu_familie)
+
+    # Ohne Bestätigungswort -> 400
+    res = client.post("/api/social/e2ee/devices/self/reset", headers=neu_kopf, json={})
+    assert res.status_code == 400
+
+    # Falsches Bestätigungswort -> 400
+    res = client.post("/api/social/e2ee/devices/self/reset", headers=neu_kopf, json={"confirmation": "NEIN"})
+    assert res.status_code == 400
+
+    # Gültiges RESET -> 200
+    res = client.post("/api/social/e2ee/devices/self/reset", headers=neu_kopf, json={"confirmation": "RESET"})
+    assert res.status_code == 200
+    assert res.json()["removed"] == 1
+    assert e2ee_device_service.geraete(db, user.id) == []
+
+
+def test_neustart_mit_2fa_passkey_oder_otp(client: TestClient, db: Session, clean_db):
+    from services.dis_client import DisClient
+    user = _konto(db, "twofa_user")
+    user.two_factor_enabled = True
+    secret = DisClient.generate_totp_secret()
+    user.two_factor_secret_encrypted = AuthService.encrypt_secret(secret, aad=f"msm:user:{user.id}:2fa")
+    db.commit()
+
+    neu_kopf, neu_familie = _sitzung(db, user)
+    _, ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "alt-dev-2fa", RSA_A, "Alt", ecdsa, familie=neu_familie)
+
+    # Ohne 2FA-Nachweis -> 403
+    res = client.post("/api/social/e2ee/devices/self/reset", headers=neu_kopf, json={})
+    assert res.status_code == 403
+
+    # Falscher OTP -> 403
+    res = client.post("/api/social/e2ee/devices/self/reset", headers=neu_kopf, json={"otp_code": "000000"})
+    assert res.status_code == 403
+
+    # Passkey-Bestätigung -> 200
+    res = client.post("/api/social/e2ee/devices/self/reset", headers=neu_kopf, json={"passkey_verified": True})
+    assert res.status_code == 200
+    assert res.json()["removed"] == 1
+    assert e2ee_device_service.geraete(db, user.id) == []

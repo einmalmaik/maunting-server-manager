@@ -153,6 +153,9 @@ cleanup_on_failure() {
         warn "Update nicht abgeschlossen. Es wird bewusst kein Erfolg gemeldet."
         [[ -n "$DB_BACKUP_FILE" ]] && warn "PostgreSQL-Sicherung: $DB_BACKUP_FILE"
         if ${SYSTEMD_AVAILABLE:-false} && $PANEL_WAS_ACTIVE; then
+            # Sidecar zuerst: der Code ist womoeglich schon neu, und das neue
+            # Panel verweigert den Dienst mit einem alten Sidecar.
+            systemctl restart msm-dis-sidecar.service 2>/dev/null || true
             systemctl restart msm-panel.service 2>/dev/null || true
         fi
     fi

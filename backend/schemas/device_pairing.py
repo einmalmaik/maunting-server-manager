@@ -20,6 +20,7 @@ class PairingCreateRequest(BaseModel):
     label: str = Field(default="", max_length=MAX_BEZEICHNUNG)
     password: str = Field(default="", max_length=256)
     otp_code: str = Field(default="", max_length=16)
+    passkey_verified: bool = Field(default=False)
 
 
 class PairingCreated(BaseModel):

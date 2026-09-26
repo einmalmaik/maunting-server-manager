@@ -13,7 +13,7 @@ from dependencies import (
     ws_session_familie,
     ws_subprotokoll,
 )
-from models import ChatGroup, ChatGroupConfig, User
+from models import ChatGroup, ChatGroupConfig, OAuthUserLink, User
 from schemas.chat_media import (
     ChatMediaUploadRequest,
     ChatMediaUploadResponse,
@@ -418,12 +418,34 @@ def reset_own_e2ee_devices(
 ) -> dict:
     """Alle Geräte verloren: Verzeichnis leeren, alle anderen Sitzungen sperren.
 
-    Das Passwort wird hier noch einmal verlangt, damit ein offener Tab allein
-    nicht genügt. Die Kontakte sehen danach, dass alle bekannten Geräte fort
-    sind, und bekommen eine Warnung.
+    Verifikation:
+    - Bei aktivem 2FA: otp_code (TOTP) oder passkey_verified.
+    - Ohne 2FA:
+      - Social-Only Accounts (OAuthUserLink): Bestätigungswort RESET.
+      - Lokale Passwort-Accounts: Passwort-Prüfung.
     """
-    if not user.password_hash or not AuthService.verify_password(req.password, user.password_hash):
-        raise HTTPException(status_code=403, detail="Passwort falsch")
+    if user.two_factor_enabled:
+        verifiziert = False
+        if req.otp_code and AuthService.verify_current_2fa_code(user, req.otp_code):
+            verifiziert = True
+        elif req.passkey_verified:
+            verifiziert = True
+        if not verifiziert:
+            raise HTTPException(status_code=403, detail="2FA-Bestätigung erforderlich oder ungültig")
+    else:
+        has_oauth_links = (
+            db.query(OAuthUserLink)
+            .filter(OAuthUserLink.user_id == user.id)
+            .first()
+        ) is not None
+
+        if has_oauth_links:
+            if (req.confirmation or "").strip().upper() != "RESET":
+                raise HTTPException(status_code=400, detail="Bestätigung RESET erforderlich")
+        else:
+            if not req.password or not user.password_hash or not AuthService.verify_password(req.password, user.password_hash):
+                raise HTTPException(status_code=403, detail="Passwort falsch")
+
     return {"ok": True, "removed": e2ee_device_service.zuruecksetzen(db, user, familie)}
 
 

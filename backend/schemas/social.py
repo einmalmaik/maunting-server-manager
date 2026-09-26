@@ -614,9 +614,19 @@ class E2eeDeviceRemoveRequest(BaseModel):
 
 
 class E2eeDeviceResetRequest(BaseModel):
-    """Alle Geraete verloren: Neustart des Geraeteverzeichnisses, nur mit Passwort."""
+    """Alle Geraete verloren: Neustart des Geraeteverzeichnisses.
 
-    password: str = Field(..., min_length=1, max_length=512)
+    Verifikation:
+    - Bei aktivem 2FA: otp_code (TOTP) oder passkey_verified.
+    - Ohne 2FA:
+      - Lokale Accounts: password
+      - Social-Only Accounts (OAuthUserLink): confirmation="RESET"
+    """
+
+    password: str | None = Field(default=None, max_length=512)
+    confirmation: str | None = Field(default=None, max_length=64)
+    otp_code: str | None = Field(default=None, max_length=32)
+    passkey_verified: bool = Field(default=False)
 
 
 class SocialProfileResponse(BaseModel):

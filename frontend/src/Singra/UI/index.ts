@@ -57,4 +57,8 @@ export {
   type RechteAbschnittDefinition,
   type RechteZeile,
 } from './RechteAbschnitte'
+export {
+  MauntingQrCard,
+  type MauntingQrCardProps,
+} from './MauntingQrCard'
 

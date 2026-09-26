@@ -15,6 +15,12 @@ const { liste } = vi.hoisted(() => ({
   },
 }))
 
+vi.mock('@/api/oauth', () => ({
+  oauthApi: {
+    listMyLinks: vi.fn(async () => []),
+  },
+}))
+
 vi.mock('@/api/social', () => ({
   getE2eeGeraete: vi.fn(async () => {
     if (liste.fehler) throw liste.fehler
@@ -147,5 +153,59 @@ describe('E2eeGeraeteCard', () => {
     fireEvent.change(screen.getByLabelText('Passwort'), { target: { value: 'geheim' } })
     fireEvent.click(neu)
     await waitFor(() => expect(geraeteZuruecksetzen).toHaveBeenCalledWith('geheim'))
+  })
+
+  it('bietet bei Social-Login ohne 2FA eine RESET-Bestätigung statt Passwort an', async () => {
+    const { oauthApi } = await import('@/api/oauth')
+    vi.mocked(oauthApi.listMyLinks).mockResolvedValueOnce([
+      { id: 1, provider_id: 1, provider_slug: 'google', provider_name: 'Google', provider_preset: 'google', created_at: '', last_used_at: null },
+    ])
+
+    liste.inhalt = [
+      { device_id: 'dieses-geraet-0001', public_key: 'pub-1', label: '', is_approved: false },
+    ]
+    render(<E2eeGeraeteCard />)
+
+    expect(await screen.findByText(/Dieses Gerät wartet auf Freigabe/)).toBeInTheDocument()
+    // Statt "Passwort" suchen wir nach dem RESET-Eingabefeld
+    const input = await screen.findByPlaceholderText(/RESET/)
+    expect(input).toBeInTheDocument()
+
+    const neu = screen.getByRole('button', { name: 'Neu beginnen' })
+    expect(neu).toBeDisabled()
+
+    fireEvent.change(input, { target: { value: 'RESET' } })
+    expect(neu).not.toBeDisabled()
+
+    fireEvent.click(neu)
+    await waitFor(() =>
+      expect(geraeteZuruecksetzen).toHaveBeenCalledWith({ confirmation: 'RESET' }),
+    )
+  })
+
+  it('bietet bei aktiver 2FA die Eingabe des OTP-Codes an', async () => {
+    useAuthStore.setState({
+      user: { id: 10, username: 'anna', two_factor_enabled: true } as any,
+    })
+
+    liste.inhalt = [
+      { device_id: 'dieses-geraet-0001', public_key: 'pub-1', label: '', is_approved: false },
+    ]
+    render(<E2eeGeraeteCard />)
+
+    expect(await screen.findByText(/Dieses Gerät wartet auf Freigabe/)).toBeInTheDocument()
+    const otpInput = await screen.findByPlaceholderText('6-stelliger Authenticator-Code')
+    expect(otpInput).toBeInTheDocument()
+
+    const neu = screen.getByRole('button', { name: 'Neu beginnen' })
+    expect(neu).toBeDisabled()
+
+    fireEvent.change(otpInput, { target: { value: '123456' } })
+    expect(neu).not.toBeDisabled()
+
+    fireEvent.click(neu)
+    await waitFor(() =>
+      expect(geraeteZuruecksetzen).toHaveBeenCalledWith({ otp_code: '123456' }),
+    )
   })
 })
