@@ -855,12 +855,12 @@ async def security_headers_middleware(request: Request, call_next):
     docs_page = request.url.path in _API_DOCS_PATHS
     csp = (
         "default-src 'self'; "
-        f"script-src 'self' 'wasm-unsafe-eval'{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; "
-        f"style-src 'self' 'unsafe-inline'{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de; "
+        f"script-src 'self' 'wasm-unsafe-eval'{' ' + _DOCS_CDN if docs_page else ''} https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/ https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; "
+        f"style-src 'self' 'unsafe-inline'{' ' + _DOCS_CDN if docs_page else ''} https://hcaptcha.com https://*.hcaptcha.com https://singrabot.mauntingstudios.de; "
         f"img-src 'self' data: blob:{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de; "
-        f"connect-src {_csp_connect_src()} https://singrabot.mauntingstudios.de https://client.crisp.chat wss://client.relay.crisp.chat https://va.tawk.to; "
+        f"connect-src {_csp_connect_src()} https://singrabot.mauntingstudios.de https://client.crisp.chat wss://client.relay.crisp.chat https://va.tawk.to https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/; "
         "font-src 'self' data: https://singrabot.mauntingstudios.de; "
-        "frame-src 'self' https://singrabot.mauntingstudios.de; "
+        "frame-src 'self' https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/ https://singrabot.mauntingstudios.de; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self';"

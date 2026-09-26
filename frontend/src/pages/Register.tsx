@@ -8,7 +8,7 @@ import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
+import { CaptchaWidget, captchaSperrt, type CaptchaStatus } from '@/components/ui/CaptchaWidget'
 import { Shield, ArrowRight, Check, Mail } from 'lucide-react'
 import { Button } from '@/Singra/UI'
 
@@ -27,6 +27,7 @@ export function Register() {
 
   const [error, setError] = useState('')
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaStatus, setCaptchaStatus] = useState<CaptchaStatus>('loading')
   const [success, setSuccess] = useState(false)
   const [requiresVerification, setRequiresVerification] = useState(false)
   const [registeredEmail, setRegisteredEmail] = useState('')
@@ -37,6 +38,7 @@ export function Register() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (captchaSperrt(captchaStatus)) return
     setError('')
 
     if (form.password !== form.confirm) {
@@ -257,13 +259,13 @@ export function Register() {
               required
             />
 
-            <CaptchaWidget onVerify={setCaptchaToken} />
+            <CaptchaWidget onVerify={setCaptchaToken} onStatusChange={setCaptchaStatus} />
 
             <ErrorMessage message={error} className="text-sm" />
 
             <Button size="lg"
               type="submit"
-              disabled={submitting}
+              disabled={submitting || captchaSperrt(captchaStatus)}
               className="w-full flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {submitting ? (

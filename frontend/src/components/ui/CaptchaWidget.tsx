@@ -19,8 +19,23 @@ declare global {
   }
 }
 
+/**
+ * - `loading`: Konfiguration oder Anbieterskript noch nicht da
+ * - `ready`: Widget steht, wartet auf den Menschen
+ * - `verified`: gültiges Token liegt vor
+ * - `failed`: Skript oder Konfiguration nicht ladbar
+ * - `disabled`: keine Sicherheitsabfrage konfiguriert
+ */
+export type CaptchaStatus = 'loading' | 'ready' | 'verified' | 'failed' | 'disabled'
+
+/** Solange das gilt, bleiben Anmelden und Social Login gesperrt. */
+export function captchaSperrt(status: CaptchaStatus): boolean {
+  return status !== 'verified' && status !== 'disabled'
+}
+
 interface CaptchaWidgetProps {
   onVerify: (token: string) => void
+  onStatusChange?: (status: CaptchaStatus) => void
 }
 
 interface CaptchaConfig {
@@ -29,7 +44,7 @@ interface CaptchaConfig {
   site_key: string
 }
 
-export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
+export function CaptchaWidget({ onVerify, onStatusChange }: CaptchaWidgetProps) {
   const { t } = useTranslation()
   const [config, setConfig] = useState<CaptchaConfig | null>(null)
   // Ohne diesen Zustand endet ein geblocktes Anbieterskript in einem leeren
@@ -38,15 +53,31 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
   const [loadFailed, setLoadFailed] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const widgetIdRef = useRef<any>(null)
+  // Die Anbieter behalten die Rückrufe vom ersten Rendern; über Refs sehen sie
+  // trotzdem immer die aktuellen Funktionen der Seite.
+  const onVerifyRef = useRef(onVerify)
+  const onStatusRef = useRef(onStatusChange)
+  onVerifyRef.current = onVerify
+  onStatusRef.current = onStatusChange
+
+  const melde = (status: CaptchaStatus) => onStatusRef.current?.(status)
 
   useEffect(() => {
     let active = true
+    melde('loading')
     api<CaptchaConfig>('/auth/captcha-config')
       .then((data) => {
-        if (active) setConfig(data)
+        if (!active) return
+        setConfig(data)
+        if (!data.enabled || data.provider === 'none') melde('disabled')
       })
       .catch((err) => {
         console.error('Failed to load CAPTCHA config:', err)
+        // Ohne Konfiguration wissen wir nicht, ob das Backend eine Abfrage
+        // verlangt. Gesperrt bleiben ist die ehrliche Antwort.
+        if (!active) return
+        setLoadFailed(true)
+        melde('failed')
       })
     return () => {
       active = false
@@ -74,6 +105,24 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
       return
     }
 
+    // Tokens laufen ab (Turnstile nach 300 s) und gelten nur einmal. Ein
+    // abgelaufenes Token sperrt deshalb wieder, statt still weiterzugelten.
+    const options = {
+      sitekey: siteKey,
+      callback: (token: string) => {
+        onVerifyRef.current(token)
+        melde('verified')
+      },
+      'expired-callback': () => {
+        onVerifyRef.current('')
+        melde('ready')
+      },
+      'error-callback': () => {
+        onVerifyRef.current('')
+        melde('ready')
+      },
+    }
+
     const initWidget = () => {
       if (!containerRef.current) return
       containerRef.current.innerHTML = ''
@@ -82,24 +131,23 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
 
       try {
         if (provider === 'turnstile' && window.turnstile) {
-          widgetIdRef.current = window.turnstile.render(widgetDiv, {
-            sitekey: siteKey,
-            callback: onVerify,
-          })
+          widgetIdRef.current = window.turnstile.render(widgetDiv, options)
         } else if (provider === 'hcaptcha' && window.hcaptcha) {
-          widgetIdRef.current = window.hcaptcha.render(widgetDiv, {
-            sitekey: siteKey,
-            callback: onVerify,
-          })
+          widgetIdRef.current = window.hcaptcha.render(widgetDiv, options)
         } else if (provider === 'recaptcha' && window.grecaptcha) {
-          widgetIdRef.current = window.grecaptcha.render(widgetDiv, {
-            sitekey: siteKey,
-            callback: onVerify,
-          })
+          widgetIdRef.current = window.grecaptcha.render(widgetDiv, options)
         }
+        melde('ready')
       } catch (err) {
         console.error('Failed to render CAPTCHA:', err)
+        setLoadFailed(true)
+        melde('failed')
       }
+    }
+
+    const scheitern = () => {
+      setLoadFailed(true)
+      melde('failed')
     }
 
     if ((window as any)[checkGlobal]) {
@@ -114,29 +162,29 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
         document.head.appendChild(script)
       }
 
+      let checkInterval: ReturnType<typeof setInterval> | null = null
       const handleLoad = () => {
         let attempts = 0
-        const checkInterval = setInterval(() => {
+        checkInterval = setInterval(() => {
           attempts++
           if ((window as any)[checkGlobal]) {
-            clearInterval(checkInterval)
+            if (checkInterval) clearInterval(checkInterval)
             initWidget()
           } else if (attempts > 50) {
-            clearInterval(checkInterval)
-            setLoadFailed(true)
+            if (checkInterval) clearInterval(checkInterval)
+            scheitern()
           }
         }, 100)
       }
 
       // Wird das Skript geblockt, feuert `load` nie — ohne diesen Listener
       // liefe nicht einmal der Timeout oben, und es bliebe vollständig still.
-      const handleError = () => setLoadFailed(true)
-
       script.addEventListener('load', handleLoad)
-      script.addEventListener('error', handleError)
+      script.addEventListener('error', scheitern)
       return () => {
+        if (checkInterval) clearInterval(checkInterval)
         script.removeEventListener('load', handleLoad)
-        script.removeEventListener('error', handleError)
+        script.removeEventListener('error', scheitern)
       }
     }
 
@@ -157,8 +205,6 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
     }
   }, [config])
 
-  if (!config || !config.enabled) return null
-
   if (loadFailed) {
     return (
       <p role="alert" className="my-4 text-center font-body-md text-sm text-error">
@@ -166,6 +212,8 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
       </p>
     )
   }
+
+  if (!config || !config.enabled) return null
 
   return (
     <div className="flex justify-center my-4" ref={containerRef} />

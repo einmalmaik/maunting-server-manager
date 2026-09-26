@@ -19,14 +19,14 @@ import type { Plugin } from 'vite'
  */
 export const PANEL_CSP = [
   "default-src 'self'",
-  "script-src 'self' 'wasm-unsafe-eval' https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to",
-  "style-src 'self' 'unsafe-inline' https://singrabot.mauntingstudios.de",
+  "script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/ https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to",
+  "style-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com https://singrabot.mauntingstudios.de",
   "img-src 'self' data: blob: https:",
   "media-src 'self' blob: data: mediastream:",
   "worker-src 'self' blob:",
   "connect-src 'self' https: http: ws: wss: blob: data:",
   "font-src 'self' data: https://singrabot.mauntingstudios.de",
-  "frame-src 'self' https://singrabot.mauntingstudios.de",
+  "frame-src 'self' https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/ https://singrabot.mauntingstudios.de",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

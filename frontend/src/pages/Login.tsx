@@ -11,7 +11,7 @@ import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
+import { CaptchaWidget, captchaSperrt, type CaptchaStatus } from '@/components/ui/CaptchaWidget'
 import { Shield, ArrowRight, KeyRound, Mail, Check } from 'lucide-react'
 import { Button, buttonClasses } from '@/Singra/UI'
 import { Spinner } from '@/components/ui/Spinner'
@@ -24,8 +24,13 @@ export function Login() {
   const { finishLogin } = useAuthStore()
   const [error, setError] = useState('')
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaStatus, setCaptchaStatus] = useState<CaptchaStatus>('loading')
   const [form, setForm] = useState({ username: '', password: '', otp: '' })
   const [requires2FA, setRequires2FA] = useState(false)
+  // Solange die Sicherheitsabfrage nicht bestanden ist, bleiben Formular und
+  // Social Login zu. Sonst war der Social Login der Weg drumherum. Im
+  // 2FA-Schritt ist die Abfrage schon bestanden und das Widget ausgeblendet.
+  const captchaBlockiert = !requires2FA && captchaSperrt(captchaStatus)
   const [useBackupCode, setUseBackupCode] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [requiresVerification, setRequiresVerification] = useState(false)
@@ -68,6 +73,7 @@ export function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (captchaBlockiert) return
     setError('')
     setSubmitting(true)
 
@@ -347,14 +353,14 @@ export function Login() {
               )}
 
               {!requires2FA && (
-                <CaptchaWidget onVerify={setCaptchaToken} />
+                <CaptchaWidget onVerify={setCaptchaToken} onStatusChange={setCaptchaStatus} />
               )}
 
               <ErrorMessage message={error} className="text-sm" />
 
               <Button size="lg"
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || captchaBlockiert}
                 className="w-full flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {submitting ? (
@@ -377,16 +383,23 @@ export function Login() {
                   {t('auth.or')}
                 </p>
                 <div className="grid gap-2">
-                  {oauthProviders.map((p) => (
-                    <a
-                      key={p.slug}
-                      href={apiUrl(`/oauth/${p.slug}/start?next=/&cb=${Date.now().toString(36)}`)}
-                      className={buttonClasses('secondary', 'lg', 'w-full')}
-                    >
-                      <KeyRound className="w-4 h-4" />
-                      {t('auth.signInWith', { provider: p.name })}
-                    </a>
-                  ))}
+                  {oauthProviders.map((p) =>
+                    captchaBlockiert ? (
+                      <Button key={p.slug} variant="secondary" size="lg" className="w-full" disabled>
+                        <KeyRound className="w-4 h-4" />
+                        {t('auth.signInWith', { provider: p.name })}
+                      </Button>
+                    ) : (
+                      <a
+                        key={p.slug}
+                        href={apiUrl(`/oauth/${p.slug}/start?next=/&cb=${Date.now().toString(36)}`)}
+                        className={buttonClasses('secondary', 'lg', 'w-full')}
+                      >
+                        <KeyRound className="w-4 h-4" />
+                        {t('auth.signInWith', { provider: p.name })}
+                      </a>
+                    ),
+                  )}
                 </div>
               </div>
             )}
