@@ -103,6 +103,24 @@ export function sanitizeSvg(rawSvg: string): string {
           }
         }
 
+        if (tagName === 'image' || tagName === 'use') {
+          const href = (
+            node.getAttribute('href') ||
+            node.getAttribute('xlink:href') ||
+            node.getAttribute('src') ||
+            ''
+          ).toLowerCase().replace(/[\s\x00-\x1f\x7f-\x9f]/g, '')
+          if (
+            href.startsWith('http:') ||
+            href.startsWith('https:') ||
+            href.startsWith('//') ||
+            (tagName === 'image' && href.startsWith('data:') && !href.startsWith('data:image/'))
+          ) {
+            node.remove()
+            return
+          }
+        }
+
         // Check attributes
         const attributesToRemove: string[] = []
         for (let i = 0; i < node.attributes.length; i++) {
@@ -124,8 +142,12 @@ export function sanitizeSvg(rawSvg: string): string {
             attributesToRemove.push(attr.name)
           } else if (
             (name === 'href' || name === 'xlink:href' || name === 'src') &&
-            val.startsWith('data:') &&
-            !val.startsWith('data:image/')
+            (
+              val.startsWith('http:') ||
+              val.startsWith('https:') ||
+              val.startsWith('//') ||
+              (val.startsWith('data:') && !val.startsWith('data:image/'))
+            )
           ) {
             attributesToRemove.push(attr.name)
           }
@@ -155,10 +177,12 @@ export function sanitizeSvg(rawSvg: string): string {
     .replace(/<foreignobject\b[^<]*(?:(?!<\/foreignobject>)<[^<]*)*<\/foreignobject>/gi, '')
     .replace(/<(?:set|animate|animatetransform|handler|feimage|use)\b[^<]*(?:(?!<\/(?:set|animate|animatetransform|handler|feimage|use)>)<[^<]*)*<\/(?:set|animate|animatetransform|handler|feimage|use)>/gi, '')
     .replace(/<(?:set|animate|animatetransform|handler|feimage|use)\b[^>]*\/?>/gi, '')
+    .replace(/<image\b[^>]*\b(?:href|xlink:href|src)\s*=\s*["']?\s*(?:https?:|\/\/)[^>]*\/?>/gi, '')
+    .replace(/<image\b[^>]*\b(?:href|xlink:href|src)\s*=\s*["']?\s*(?:https?:|\/\/)[^<]*(?:(?!<\/image>)<[^<]*)*<\/image>/gi, '')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, (match) => (isDangerousCss(match) ? '' : match))
     .replace(/\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/\bstyle\s*=\s*["']([^"']*)["']/gi, (match, val) => (isDangerousCss(val) ? '' : match))
-    .replace(/(?:href|src|xlink:href)\s*=\s*["']?\s*(?:javascript|vbscript|data:text\/html|data:application\/javascript|data:text\/javascript):[^"'\s>]+/gi, '')
+    .replace(/(?:href|src|xlink:href)\s*=\s*(?:"(?:javascript|vbscript|data:text\/html|data:application\/javascript|data:text\/javascript|https?:|\/\/)[^"]*"|'(?:javascript|vbscript|data:text\/html|data:application\/javascript|data:text\/javascript|https?:|\/\/)[^']*'|(?:javascript|vbscript|data:text\/html|data:application\/javascript|data:text\/javascript|https?:|\/\/)[^\s>]+)/gi, '')
 
   return clean
 }
@@ -174,7 +198,8 @@ export function getSafeAttachmentUrl(url?: string | null): string | null {
     lowerHeader.startsWith('data:text/javascript') ||
     lowerHeader.startsWith('data:application/javascript') ||
     lowerHeader.startsWith('data:application/xhtml') ||
-    lowerHeader.startsWith('data:text/xml')
+    lowerHeader.startsWith('data:text/xml') ||
+    lowerHeader.startsWith('//')
   ) {
     return null
   }
@@ -187,11 +212,37 @@ export function getSafeAttachmentUrl(url?: string | null): string | null {
     lowerHeader.startsWith('data:;base64,') ||
     lowerHeader.startsWith('data:base64,') ||
     lowerHeader.startsWith('blob:') ||
-    lowerHeader.startsWith('/api/') ||
-    lowerHeader.startsWith('http://') ||
-    lowerHeader.startsWith('https://')
+    lowerHeader.startsWith('/api/')
   ) {
     return trimmed
+  }
+  if (lowerHeader.startsWith('http://') || lowerHeader.startsWith('https://')) {
+    try {
+      const parsed = new URL(trimmed)
+      if (parsed.pathname.startsWith('/api/')) {
+        const isSameOrigin = typeof window !== 'undefined' && window.location && parsed.origin === window.location.origin
+        const isPanelTest = parsed.hostname === 'panel.test' || parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1'
+        let isApiOrigin = false
+        if (typeof window !== 'undefined') {
+          const msmUrl = (window as { __MSM_API_URL?: string }).__MSM_API_URL
+          if (msmUrl && parsed.origin === msmUrl.replace(/\/+$/, '')) {
+            isApiOrigin = true
+          }
+        }
+        if (typeof import.meta !== 'undefined') {
+          const envApi = (import.meta.env?.VITE_API_URL as string | undefined)?.trim()
+          if (envApi && parsed.origin === envApi.replace(/\/+$/, '')) {
+            isApiOrigin = true
+          }
+        }
+        if (isSameOrigin || isPanelTest || isApiOrigin) {
+          return trimmed
+        }
+      }
+    } catch {
+      // Ungültige URL
+    }
+    return null
   }
   return null
 }

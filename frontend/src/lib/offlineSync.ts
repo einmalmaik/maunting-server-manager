@@ -1220,29 +1220,34 @@ export async function loadCalendarEventsOfflineFirst(
   for (const ev of localEvents) {
     if (eventType && eventType !== 'all' && ev.event_type !== eventType) continue
 
-    const serie = serieLesen(ev.recurrence)
-    const start = new Date(ev.start)
-    if (isNaN(start.getTime())) continue
-    const rohEnde = ev.end ? new Date(ev.end) : start
-    const ende = isNaN(rohEnde.getTime()) ? start : rohEnde
+    try {
+      const serie = serieLesen(ev.recurrence)
+      const start = new Date(ev.start)
+      if (isNaN(start.getTime())) continue
+      const rohEnde = ev.end ? new Date(ev.end) : start
+      const ende = isNaN(rohEnde.getTime()) ? start : rohEnde
 
-    for (const v of ausbreiten(serie, start, ende, {
-      ganztaegig: Boolean(ev.all_day),
-      zeitzone,
-      fensterVon: von,
-      fensterBis: bis,
-    })) {
-      vorkommen.push({
-        ...ev,
-        title: v.titel || ev.title,
-        start: v.start.toISOString(),
-        end: v.ende.toISOString(),
-        vorkommen: serie.rrule ? v.schluessel : '',
-        istSerie: Boolean(serie.rrule),
-        // `event_id` ist bei einer Serie für alle Vorkommen dasselbe. Als
-        // React-Schlüssel oder zum Wiederfinden taugt nur beides zusammen.
-        schluessel: serie.rrule ? `${ev.event_id}#${v.schluessel}` : ev.event_id,
-      })
+      for (const v of ausbreiten(serie, start, ende, {
+        ganztaegig: Boolean(ev.all_day),
+        zeitzone,
+        fensterVon: von,
+        fensterBis: bis,
+      })) {
+        vorkommen.push({
+          ...ev,
+          title: v.titel || ev.title,
+          start: v.start.toISOString(),
+          end: v.ende.toISOString(),
+          vorkommen: serie.rrule ? v.schluessel : '',
+          istSerie: Boolean(serie.rrule),
+          // `event_id` ist bei einer Serie für alle Vorkommen dasselbe. Als
+          // React-Schlüssel oder zum Wiederfinden taugt nur beides zusammen.
+          schluessel: serie.rrule ? `${ev.event_id}#${v.schluessel}` : ev.event_id,
+        })
+      }
+    } catch {
+      // Defensiv: Einzelner fehlerhafter Termin soll nicht den gesamten Kalender lahmlegen
+      continue
     }
   }
   vorkommen.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())

@@ -1013,3 +1013,98 @@ def test_fremder_kommt_an_die_serie_nicht_heran(db_session, test_user, fremder):
     assert meine[0]["title"] == "Geburtstag Lisa"
     assert "YEARLY" in meine[0]["recurrence"]
     assert "DAILY" not in meine[0]["recurrence"]
+
+
+def test_node_event_permission_enforced(db_session, test_user, fremder):
+    """Prüft, dass nur Nutzer mit nodes.manage oder Owner Node-Termine anlegen oder ändern dürfen."""
+    # Fremder (is_owner=False, keine Permissions) darf keinen node-Termin erstellen
+    with pytest.raises(ValueError, match="Node-Termin"):
+        CalendarService.create_event(
+            db=db_session,
+            user=fremder,
+            title="Node Wartung Fake",
+            start_time="2026-04-01 10:00",
+            end_time="2026-04-01 12:00",
+            event_type="node",
+        )
+
+    # Owner darf node-Termin erstellen
+    ev = CalendarService.create_event(
+        db=db_session,
+        user=test_user,
+        title="Echte Node Wartung",
+        start_time="2026-04-01 10:00",
+        end_time="2026-04-01 12:00",
+        event_type="node",
+    )
+    assert ev["event_type"] == "node"
+
+    # Fremder darf eigenen regulären Termin nicht zu "node" upgraden
+    user_ev = CalendarService.create_event(
+        db=db_session,
+        user=fremder,
+        title="Mein normaler Termin",
+        start_time="2026-04-02 10:00",
+        end_time="2026-04-02 12:00",
+        event_type="personal",
+    )
+    with pytest.raises(ValueError, match="Node-Termin"):
+        CalendarService.update_event(
+            db=db_session,
+            user=fremder,
+            event_id=user_ev["event_id"],
+            event_type="node",
+        )
+
+
+def test_vorkommen_im_fenster_resilience_against_malformed_event(db_session, test_user, monkeypatch):
+    """Prüft, dass ein fehlerhafter Termin nicht alle anderen Termine im Fenster blockiert."""
+    ev1 = CalendarService.create_event(
+        db=db_session,
+        user=test_user,
+        title="Gültiger Termin 1",
+        start_time="2026-05-01 10:00",
+        end_time="2026-05-01 11:00",
+    )
+    ev2 = CalendarService.create_event(
+        db=db_session,
+        user=test_user,
+        title="Gültiger Termin 2",
+        start_time="2026-05-02 10:00",
+        end_time="2026-05-02 11:00",
+    )
+
+    from services import kalender_serie
+    original_ausbreiten = kalender_serie.ausbreiten
+
+    def mock_ausbreiten(serie, start, ende, **kwargs):
+        # Wir simulieren einen Absturz beim ersten Termin
+        if "Termin 1" in getattr(serie, "_test_marker", ""):
+            raise RuntimeError("Simulation: Absturz bei fehlerhafter Serie")
+        return original_ausbreiten(serie, start, ende, **kwargs)
+
+    cal = CalendarService.get_calendar(db_session, test_user)
+    assert cal is not None
+    # Direktes Einfügen eines korrupten Eintrags in DB (ungültige Recurrence-Daten)
+    corrupt_event = CalendarEvent(
+        calendar_id=cal.id,
+        user_id=test_user.id,
+        title="Korrupt",
+        start_time=datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 5, 1, 13, 0, tzinfo=timezone.utc),
+        event_type="personal",
+        recurrence="INVALID_CORRUPTED_JSON",
+    )
+    db_session.add(corrupt_event)
+    db_session.commit()
+
+
+    von = datetime(2026, 4, 30, tzinfo=timezone.utc)
+    bis = datetime(2026, 5, 5, tzinfo=timezone.utc)
+
+    # Darf trotz korruptem Event nicht abstürzen und muss die beiden gültigen Termine liefern
+    vorkommen = CalendarService.vorkommen_im_fenster(db_session, test_user, von=von, bis=bis)
+    titles = [v["title"] for v in vorkommen]
+    assert "Gültiger Termin 1" in titles
+    assert "Gültiger Termin 2" in titles
+

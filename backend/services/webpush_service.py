@@ -94,6 +94,9 @@ TTL_SEKUNDEN = 3600
 SATZ_LAENGE = 4096
 MAX_NUTZLAST_BYTES = SATZ_LAENGE - 17  # Begrenzer (1) + GCM-Tag (16)
 
+MAX_ABOS_PRO_BENUTZER = 10
+MAX_ABOS_PRO_MAILBOX = 50
+
 # Zustellung blockiert den Nachrichtenversand nicht: `relay_blind_envelope`
 # laeuft synchron im Anfrage-Thread, und ein langsamer Push-Dienst darf den
 # Absender nicht warten lassen. Vier Faeden reichen fuer menschliches Tempo und
@@ -270,19 +273,37 @@ def _verschluesseln(nutzlast: bytes, p256dh: str, auth: str, *, salz: bytes | No
 
 # ── Zielpruefung ────────────────────────────────────────────────────────────
 
+_ALLOWED_PUSH_HOST_SUFFIXES = (
+    ".googleapis.com",
+    ".push.services.mozilla.com",
+    ".push.apple.com",
+    ".notify.windows.com",
+    ".push.microsoft.com",
+)
+_ALLOWED_PUSH_EXACT_HOSTS = {
+    "googleapis.com",
+    "push.services.mozilla.com",
+    "push.apple.com",
+    "notify.windows.com",
+    "push.microsoft.com",
+}
+
+
+def _host_ist_autorisiert(hostname: str) -> bool:
+    h = (hostname or "").lower().strip()
+    return h in _ALLOWED_PUSH_EXACT_HOSTS or any(h.endswith(suffix) for suffix in _ALLOWED_PUSH_HOST_SUFFIXES)
+
 
 def _ziel_ist_erlaubt(endpunkt: str) -> bool:
-    """`https` und eine oeffentlich geroutete Adresse — sonst nicht.
-
-    Siehe Modulkopf: die Adresse kommt von aussen, und ohne diese Pruefung
-    waere das Eintragen eines Abonnements ein Weg, das Panel gegen sein eigenes
-    Netz POSTen zu lassen.
-    """
+    """`https`, autorisierter Push-Provider und oeffentlich geroutete Adresse."""
     try:
         teile = urlsplit(endpunkt)
     except ValueError:
         return False
     if teile.scheme != "https" or not teile.hostname:
+        return False
+
+    if not _host_ist_autorisiert(teile.hostname):
         return False
 
     try:
@@ -361,6 +382,19 @@ def eintragen(
         vorhanden.auth_family = familie
         db.commit()
         return vorhanden
+
+    # Obergrenze pro Benutzer durchsetzen (älteste verdrängen)
+    bestehende = (
+        db.query(PushSubscription)
+        .filter_by(user_id=user.id)
+        .order_by(PushSubscription.created_at.asc(), PushSubscription.id.asc())
+        .all()
+    )
+    if len(bestehende) >= MAX_ABOS_PRO_BENUTZER:
+        ueberschuss = len(bestehende) - MAX_ABOS_PRO_BENUTZER + 1
+        for zu_loeschen in bestehende[:ueberschuss]:
+            austragen_mailboxen(db, zu_loeschen.endpoint)
+            db.delete(zu_loeschen)
 
     abo = PushSubscription(
         user_id=user.id,
@@ -447,6 +481,18 @@ def eintragen_mailbox(db: Session, *, mailbox_id: str, endpoint: str, p256dh: st
         vorhanden.auth = sauberes_auth
         db.commit()
         return
+
+    # Obergrenze pro Mailbox durchsetzen (älteste verdrängen)
+    bestehende_mb = (
+        db.query(E2eeMailboxPush)
+        .filter_by(mailbox_id=kennung)
+        .order_by(E2eeMailboxPush.created_at.asc(), E2eeMailboxPush.id.asc())
+        .all()
+    )
+    if len(bestehende_mb) >= MAX_ABOS_PRO_MAILBOX:
+        ueberschuss = len(bestehende_mb) - MAX_ABOS_PRO_MAILBOX + 1
+        for zu_loeschen in bestehende_mb[:ueberschuss]:
+            db.delete(zu_loeschen)
 
     db.add(
         E2eeMailboxPush(
@@ -620,7 +666,7 @@ def _zustellen_alle(
     """
     tot: list[int] = []
     try:
-        with httpx.Client(timeout=10.0) as client:
+        with httpx.Client(timeout=httpx.Timeout(4.0, connect=2.5, read=3.0)) as client:
             for abo_id, endpunkt, p256dh, auth in ziele:
                 if _zustellen(client, endpunkt, p256dh, auth, koerper, privates_pem, oeffentlich):
                     continue
@@ -663,8 +709,8 @@ def _zustellen(
     bekaeme nie wieder etwas und saehe nirgends warum.
     """
     if not _ziel_ist_erlaubt(endpunkt):
-        logger.warning("webpush: Zustelladresse abgelehnt (kein oeffentliches https-Ziel)")
-        return True
+        logger.warning("webpush: Zustelladresse abgelehnt (kein erlaubtes Push-Ziel)")
+        return False
 
     try:
         verschluesselt = _verschluesseln(koerper, p256dh, auth)

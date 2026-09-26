@@ -59,14 +59,12 @@ def _repo_slug(github_cfg) -> str:
 
 
 def _clone_url(repo: str, token: str | None = None) -> str:
-    """Clone-URL, optional mit einem bereits aufgeloesten Token.
+    """Clone-URL (ohne Authentifizierungs-Token in der URL).
 
-    Ohne `token` gilt weiterhin der panelweite Zugang — bestehende Aufrufer
-    verhalten sich unveraendert.
+    Die Authentifizierung wird niemals in die URL eingebettet, damit der Token
+    nicht im Klartext in `.git/config` landet. Git-Befehle erhalten das Token
+    stattdessen über das In-Process Environment (http.https://github.com/.extraheader).
     """
-    effective = (token.strip() if token is not None else _resolve_github_token()) or None
-    if effective:
-        return f"https://x-access-token:{effective}@github.com/{repo}.git"
     return f"https://github.com/{repo}.git"
 
 
@@ -83,56 +81,48 @@ def _git_env() -> dict[str, str]:
     return env
 
 
-def _ensure_safe_directory(cwd: Path | None) -> dict[str, str]:
-    """Bereitet die Env-Variablen vor, um Git-Dubious-Ownership zu umgehen.
+def _build_git_env(cwd: Path | None = None, token: str | None = None) -> dict[str, str]:
+    """Bereitet die Env-Variablen vor (safe.directory + Extra-Header für Auth).
 
-    Hintergrund: Git verweigert seit 2.35.2 ``fetch/reset`` in Repos, deren
-    Owner nicht der aktuelle Prozess-User ist ("detected dubious ownership").
-    MSM laeuft als gleichbleibender System-User (``msm``), aber ``install_dir``
-    kann z. B. durch fruehere root- oder Docker-Mounts einem anderen UID/GID
-    gehoeren. Per-repo ``safe.directory`` in ``.git/config`` wird von Git
-    erst NACH der Sicherheits-Pruefung gelesen, hilft also nicht.
-
-    Loesung: Wir setzen ``GIT_CONFIG_COUNT`` + ``GIT_CONFIG_KEY_0`` und
-    ``GIT_CONFIG_VALUE_0`` als Prozess-Env. Git wendet diese In-Memory-Konfig
-    vor der Sicherheits-Pruefung an. Kein dauerhafter State, idempotent,
-    robust gegen Cron-Jobs/Container-Restarts/Panel-Updates.
-
-    Optional schreiben wir zusaetzlich einen per-repo Eintrag -- der hilft
-    externen Tools (z. B. manuelles ``git fetch``), bleibt aber wirkungslos
-    fuer MSM ohne diesen Env-Trick (siehe oben). Die Schreibung schlaegt
-    stillschweigend fehl, wenn der Owner-Mismatch beim Schreiben selbst
-    blockiert; das ist okay.
-
-    Rueckgabe: das angereicherte Env-Dict (callable-sicher, kein Default-``os.environ``).
+    Authentifizierung wird per ``GIT_CONFIG_KEY_*`` / ``GIT_CONFIG_VALUE_*``
+    als ``http.https://github.com/.extraheader`` übergeben. Damit bleibt
+    ``.git/config`` frei von Klartext-Tokens.
     """
-    base = _git_env()
-    if cwd is None:
-        return base
-    # In-Memory-Config: Git liest das VOR der dubious-ownership-Pruefung.
-    # GIT_CONFIG_COUNT=1 + die zwei benannten Variablen ist die offizielle
-    # Schnittstelle dafuer (siehe ``git help config``).
-    base["GIT_CONFIG_COUNT"] = "1"
-    base["GIT_CONFIG_KEY_0"] = "safe.directory"
-    base["GIT_CONFIG_VALUE_0"] = "*"
+    import base64
 
-    # Per-Repo-Eintrag (robust gegen manuelle CLI-Aufrufe, optional).
-    # ``-c safe.directory=*`` ist noetig, weil sonst der Schreib-Befehl selbst
-    # am Ownership-Mismatch scheitert. ``capture_output=True``+``check=False``
-    # damit Fehler hier nicht eskalieren -- _run_git meldet den eigentlichen
-    # Fetch-Fehler.
-    try:
-        subprocess.run(
-            ["git", "-c", "safe.directory=*", "-C", str(cwd),
-             "config", "--local", "safe.directory", str(cwd)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            env=base,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        pass
+    base = _git_env()
+    effective_token = (token.strip() if token is not None else _resolve_github_token()) or None
+
+    entries: list[tuple[str, str]] = []
+    if cwd is not None:
+        entries.append(("safe.directory", "*"))
+    if effective_token:
+        basic = base64.b64encode(f"x-access-token:{effective_token}".encode("utf-8")).decode("ascii")
+        entries.append(("http.https://github.com/.extraheader", f"AUTHORIZATION: basic {basic}"))
+
+    if entries:
+        base["GIT_CONFIG_COUNT"] = str(len(entries))
+        for i, (k, v) in enumerate(entries):
+            base[f"GIT_CONFIG_KEY_{i}"] = k
+            base[f"GIT_CONFIG_VALUE_{i}"] = v
+
+    if cwd is not None:
+        try:
+            subprocess.run(
+                ["git", "-c", "safe.directory=*", "-C", str(cwd),
+                 "config", "--local", "safe.directory", str(cwd)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=base,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            pass
     return base
+
+
+def _ensure_safe_directory(cwd: Path | None, token: str | None = None) -> dict[str, str]:
+    return _build_git_env(cwd, token)
 
 
 def _create_local_branch_if_missing(cwd: Path, branch: str) -> None:
@@ -187,9 +177,15 @@ def _create_local_branch_if_missing(cwd: Path, branch: str) -> None:
     )
 
 
-def _run_git(args: list[str], *, cwd: Path | None = None, timeout: int = 600) -> None:
+def _run_git(
+    args: list[str],
+    *,
+    cwd: Path | None = None,
+    timeout: int = 600,
+    token: str | None = None,
+) -> None:
     cmd = ["git", *args]
-    env = _ensure_safe_directory(cwd)
+    env = _build_git_env(cwd, token)
     try:
         proc = subprocess.run(
             cmd,
@@ -206,26 +202,22 @@ def _run_git(args: list[str], *, cwd: Path | None = None, timeout: int = 600) ->
         err = (proc.stderr or proc.stdout or "").strip()
         # Token niemals leaken
         err = re.sub(r"x-access-token:[^@\s]+@", "x-access-token:***@", err)
+        err = re.sub(r"AUTHORIZATION:\s*basic\s+[A-Za-z0-9+/=]+", "AUTHORIZATION: basic ***", err, flags=re.IGNORECASE)
         raise GithubSourceError(f"git fehlgeschlagen ({proc.returncode}): {err[:500]}")
 
 
 def remote_branch_sha(repo: str, branch: str, token: str | None = None) -> str | None:
     """Liefert Commit-SHA von ``refs/heads/<branch>`` via ls-remote."""
-    effective_token = (token.strip() if token is not None else _resolve_github_token()) or None
-    if effective_token:
-        url = f"https://x-access-token:{effective_token}@github.com/{repo}.git"
-    else:
-        url = f"https://github.com/{repo}.git"
+    url = f"https://github.com/{repo}.git"
     ref = f"refs/heads/{branch}"
-    # ``ls-remote`` braucht keinen ``safe.directory``-Trick (kein lokales Repo),
-    # aber wir nutzen den Standard-Env fuer einheitliche Timeouts/Prompts.
+    env = _build_git_env(cwd=None, token=token)
     try:
         proc = subprocess.run(
             ["git", "ls-remote", url, ref],
             capture_output=True,
             text=True,
             timeout=120,
-            env=_git_env(),
+            env=env,
         )
     except subprocess.TimeoutExpired:
         return None
@@ -542,28 +534,28 @@ def install_github_source(
     has_git = (target / ".git").is_dir()
     try:
         if has_git:
-            # 1. Remote-URL immer mit aktueller clone_url abgleichen (Token-Rotation / Wechsel privat-oeffentlich)
-            _run_git(["remote", "set-url", "origin", clone_url], cwd=target)
+            # 1. Remote-URL immer mit aktueller clone_url abgleichen (Token-Rotation / Bereinigung von Klartext-Tokens in .git/config)
+            _run_git(["remote", "set-url", "origin", clone_url], cwd=target, token=token)
 
             # 2. Fetch mit explizitem Refspec: Zwingt Git, origin/<branch> atomar zu aktualisieren.
             # Ohne expliziten Refspec schreibt `git fetch origin <branch>` nur nach FETCH_HEAD
             # und laesst origin/<branch> unveraendert auf dem alten Commit stehen.
             refspec = f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
-            _run_git(["fetch", "origin", refspec, "--depth", "1", "--prune"], cwd=target)
+            _run_git(["fetch", "origin", refspec, "--depth", "1", "--prune"], cwd=target, token=token)
 
             # 3. Lokale Modifikationen getrackter Dateien verwerfen, bevor der Branch gewechselt/aktualisiert wird
             try:
-                _run_git(["reset", "--hard", "HEAD"], cwd=target)
+                _run_git(["reset", "--hard", "HEAD"], cwd=target, token=token)
             except GithubSourceError:
                 pass
 
             # 4. Branch anlegen oder forciert auf origin/<branch> binden und auschecken.
             # `-B` mit `--force` switcht auch bei Branch-Wechseln sauber und verhindert
             # Konflikte mit ungetrackten Dateien im Arbeitsverzeichnis.
-            _run_git(["checkout", "-B", branch, f"origin/{branch}", "--force"], cwd=target)
+            _run_git(["checkout", "-B", branch, f"origin/{branch}", "--force"], cwd=target, token=token)
 
             # 5. Working Tree atomar auf origin/<branch> zwingen
-            _run_git(["reset", "--hard", f"origin/{branch}"], cwd=target)
+            _run_git(["reset", "--hard", f"origin/{branch}"], cwd=target, token=token)
             # Falls das Repo Submodule hat: ebenfalls auf Origin-SHA syncen.
             # Wir nutzen ``--init --recursive --force``, damit sowohl fehlende
             # Submodule initialisiert als auch lokale Aenderungen ueberschrieben
@@ -573,6 +565,7 @@ def install_github_source(
                     _run_git(
                         ["submodule", "update", "--init", "--recursive", "--force"],
                         cwd=target,
+                        token=token,
                     )
             except GithubSourceError:
                 # Submodule-Sync darf den gesamten Pull nicht blockieren --
@@ -588,9 +581,10 @@ def install_github_source(
             # brechen mit klarer Diagnose ab -- statt stillschweigend einen
             # gemischten Stand zu bauen (das war der konkrete Bug, der zu
             # dem inkohaerenten Working-Tree-Image gefuehrt hat).
+            git_env = _build_git_env(target, token)
             verify_proc = subprocess.run(
                 ["git", "-C", str(target), "rev-parse", "HEAD"],
-                capture_output=True, text=True, env=_git_env(),
+                capture_output=True, text=True, env=git_env,
             )
             actual_head = (verify_proc.stdout or "").strip()
             # Aktuellen Origin-HEAD nochmal frisch abfragen, damit auch ein
@@ -598,7 +592,7 @@ def install_github_source(
             # seit dem reset --hard nochmal nachgewandert sein).
             origin_sha_proc = subprocess.run(
                 ["git", "-C", str(target), "rev-parse", f"origin/{branch}"],
-                capture_output=True, text=True, env=_git_env(),
+                capture_output=True, text=True, env=git_env,
             )
             expected_head = (origin_sha_proc.stdout or "").strip()
             if expected_head and actual_head != expected_head:
@@ -621,6 +615,7 @@ def install_github_source(
             _run_git(
                 ["clone", "--branch", branch, "--depth", "1", clone_url, str(target)],
                 timeout=900,
+                token=token,
             )
         # Self-healing: Dubious-Ownership + verlorene Execute-Bits normalisieren
         # BEVOR SetupCommands (npm ci / build) laufen. Siehe _ensure_install_dir_writable.

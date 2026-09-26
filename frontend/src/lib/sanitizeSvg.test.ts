@@ -83,6 +83,25 @@ describe('sanitizeSvg', () => {
     expect(sanitized).toContain('<circle')
   })
 
+  it('removes <image> tags and attributes pointing to external http, https, or protocol-relative URLs', () => {
+    const trackingSvg = '<svg xmlns="http://www.w3.org/2000/svg"><image href="https://tracking.attacker.com/pixel.png"/><rect width="10" height="10"/></svg>'
+    const sanitized = sanitizeSvg(trackingSvg)
+    expect(sanitized).not.toContain('<image')
+    expect(sanitized).not.toContain('tracking.attacker.com')
+    expect(sanitized).toContain('<rect')
+
+    const trackingProtocolRelative = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><image xlink:href="//attacker.com/track"/><circle cx="2" cy="2" r="2"/></svg>'
+    const sanitizedPR = sanitizeSvg(trackingProtocolRelative)
+    expect(sanitizedPR).not.toContain('<image')
+    expect(sanitizedPR).not.toContain('attacker.com')
+    expect(sanitizedPR).toContain('<circle')
+
+    const linkTracking = '<svg xmlns="http://www.w3.org/2000/svg"><a href="https://evil.com"><text>Click</text></a></svg>'
+    const sanitizedLink = sanitizeSvg(linkTracking)
+    expect(sanitizedLink).not.toContain('https://evil.com')
+    expect(sanitizedLink).toContain('<text>Click</text>')
+  })
+
   it('handles empty and malformed input gracefully', () => {
     expect(sanitizeSvg('')).toBe('')
     // @ts-expect-error test invalid type
@@ -113,11 +132,12 @@ describe('getSafeAttachmentUrl', () => {
     expect(getSafeAttachmentUrl('data:base64,SGVsbG8=')).toBe('data:base64,SGVsbG8=')
   })
 
-  it('allows blob, api, and https URLs', () => {
+  it('allows blob and api URLs, but rejects external http, https, and protocol-relative URLs', () => {
     expect(getSafeAttachmentUrl('blob:http://localhost:5173/uuid-123')).toBe('blob:http://localhost:5173/uuid-123')
     expect(getSafeAttachmentUrl('/api/social/media/media-1/download')).toBe('/api/social/media/media-1/download')
-    expect(getSafeAttachmentUrl('https://example.com/file.pdf')).toBe('https://example.com/file.pdf')
-    expect(getSafeAttachmentUrl('http://example.com/file.pdf')).toBe('http://example.com/file.pdf')
+    expect(getSafeAttachmentUrl('https://example.com/file.pdf')).toBeNull()
+    expect(getSafeAttachmentUrl('http://example.com/file.pdf')).toBeNull()
+    expect(getSafeAttachmentUrl('//example.com/file.pdf')).toBeNull()
   })
 
   it('blocks dangerous executable, script, and HTML URL schemes', () => {

@@ -790,30 +790,34 @@ class CalendarService:
         ergebnis: list[dict[str, Any]] = []
 
         for termin in termine:
-            serie = serie_lesen(termin.get("recurrence"))
             try:
-                start_dt = _parse_datetime(termin.get("start", ""), user=user)
-                ende_dt = _parse_datetime(termin.get("end", ""), user=user)
-            except Exception:
-                continue
+                serie = serie_lesen(termin.get("recurrence"))
+                try:
+                    start_dt = _parse_datetime(termin.get("start", ""), user=user)
+                    ende_dt = _parse_datetime(termin.get("end", ""), user=user)
+                except Exception:
+                    continue
 
-            for v in ausbreiten(
-                serie,
-                start_dt,
-                ende_dt,
-                ganztaegig=bool(termin.get("all_day")),
-                zeitzone=tz_name,
-                fenster_von=von,
-                fenster_bis=bis,
-            ):
-                eintrag = dict(termin)
-                eintrag["start"] = _iso_utc(v.start)
-                eintrag["end"] = _iso_utc(v.ende)
-                eintrag["vorkommen"] = v.schluessel
-                eintrag["ist_serie"] = serie.ist_serie
-                if v.titel:
-                    eintrag["title"] = v.titel
-                ergebnis.append(eintrag)
+                for v in ausbreiten(
+                    serie,
+                    start_dt,
+                    ende_dt,
+                    ganztaegig=bool(termin.get("all_day")),
+                    zeitzone=tz_name,
+                    fenster_von=von,
+                    fenster_bis=bis,
+                ):
+                    eintrag = dict(termin)
+                    eintrag["start"] = _iso_utc(v.start)
+                    eintrag["end"] = _iso_utc(v.ende)
+                    eintrag["vorkommen"] = v.schluessel
+                    eintrag["ist_serie"] = serie.ist_serie
+                    if v.titel:
+                        eintrag["title"] = v.titel
+                    ergebnis.append(eintrag)
+            except Exception:
+                _log.warning("Fehler beim Ausbreiten von Termin %s, wird übersprungen", termin.get("event_id"), exc_info=True)
+                continue
 
         ergebnis.sort(key=lambda e: e.get("start") or "")
         return ergebnis
@@ -861,6 +865,10 @@ class CalendarService:
             norm_type = (event_type or "personal").lower().strip()
             if norm_type not in ("personal", "team", "server", "node"):
                 norm_type = "personal"
+
+            if norm_type == "node":
+                if not (user.is_owner or permission_service.has_global_permission(db, user, "nodes.manage")):
+                    raise ValueError("Keine Berechtigung zum Erstellen von Node-Terminen.")
 
             final_team_id = None
             if norm_type == "team" and team_id:
@@ -1106,6 +1114,10 @@ class CalendarService:
 
             if not can_edit:
                 raise ValueError("Keine Berechtigung zur Bearbeitung dieses Termins.")
+
+            if ev.event_type == "node" or (event_type is not None and event_type.lower().strip() == "node"):
+                if not (user.is_owner or permission_service.has_global_permission(db, user, "nodes.manage")):
+                    raise ValueError("Keine Berechtigung zur Bearbeitung von Node-Terminen.")
 
             aad = _cal_aad(ev.user_id, ev.event_uid)
 

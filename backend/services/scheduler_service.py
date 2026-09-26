@@ -1174,13 +1174,19 @@ def _ensure_hoster_maintenance_job() -> None:
 async def _calendar_reminder_task() -> None:
     """Regelmäßiger Hintergrund-Task zur Prüfung und Versendung fälliger Kalender-Erinnerungen."""
     from services.calendar_service import CalendarService
-    db = SessionLocal()
+
+    def _sync_worker():
+        db = SessionLocal()
+        try:
+            return asyncio.run(CalendarService.check_and_send_due_reminders(db))
+        finally:
+            db.close()
+
     try:
-        await CalendarService.check_and_send_due_reminders(db)
+        await asyncio.to_thread(_sync_worker)
     except Exception as e:
         logger.error("Fehler beim Ausführen der Kalender-Erinnerungsprüfung: %s", e)
-    finally:
-        db.close()
+
 
 
 def _ensure_calendar_reminder_job() -> None:

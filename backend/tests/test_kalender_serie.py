@@ -399,3 +399,36 @@ def test_kurzform_nennt_ausnahmen_und_abweichungen() -> None:
         abweichungen={"2028-03-14": {"start": "2028-03-15T09:00:00Z"}},
     )
     assert kurzform(serie) == "jährlich, ohne Ende, 1 ausgenommen, 1 verschoben"
+
+
+def test_ausbreiten_count_beendet_sofort_nach_fenster_grenze() -> None:
+    """Prüft, dass Serien mit COUNT sofort abbrechen, sobald fenster_bis überschritten wird."""
+    start = _utc("2026-01-01T10:00:00Z")
+    ende = _utc("2026-01-01T11:00:00Z")
+    fenster_bis = _utc("2026-01-10T00:00:00Z")
+
+    # Täglich mit großem COUNT
+    serie_tag = Serie(rrule="FREQ=DAILY;COUNT=10000")
+    vorkommen_tag = list(ausbreiten(serie_tag, start, ende, fenster_bis=fenster_bis))
+    assert len(vorkommen_tag) == 9
+    assert all(v.start < fenster_bis for v in vorkommen_tag)
+
+    # Wöchentlich mit BYDAY und großem COUNT
+    serie_woche = Serie(rrule="FREQ=WEEKLY;COUNT=10000;BYDAY=MO,WE,FR")
+    vorkommen_woche = list(ausbreiten(serie_woche, start, ende, fenster_bis=fenster_bis))
+    assert all(v.start < fenster_bis for v in vorkommen_woche)
+
+    # Monatlich
+    fenster_bis_monat = _utc("2026-06-01T00:00:00Z")
+    serie_monat = Serie(rrule="FREQ=MONTHLY;COUNT=10000")
+    vorkommen_monat = list(ausbreiten(serie_monat, start, ende, fenster_bis=fenster_bis_monat))
+    assert len(vorkommen_monat) == 5
+    assert all(v.start < fenster_bis_monat for v in vorkommen_monat)
+
+    # Jährlich
+    fenster_bis_jahr = _utc("2030-01-01T00:00:00Z")
+    serie_jahr = Serie(rrule="FREQ=YEARLY;COUNT=10000")
+    vorkommen_jahr = list(ausbreiten(serie_jahr, start, ende, fenster_bis=fenster_bis_jahr))
+    assert len(vorkommen_jahr) == 4
+    assert all(v.start < fenster_bis_jahr for v in vorkommen_jahr)
+
