@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 import i18n from '@/i18n'
 import { SocialTab } from './SocialTab'
 import * as socialApi from '@/api/social'
@@ -116,7 +117,11 @@ describe('SocialTab (Profile page)', () => {
   })
 
   it('rendert Freundesliste und Meilensteine ohne Gaming-Jargon', async () => {
-    render(<SocialTab />)
+    render(
+      <MemoryRouter>
+        <SocialTab />
+      </MemoryRouter>,
+    )
 
     expect(screen.getByText(i18n.t('social.contacts.title'))).toBeInTheDocument()
     expect(screen.getByText(i18n.t('social.milestones.title'))).toBeInTheDocument()
@@ -148,7 +153,11 @@ describe('SocialTab (Profile page)', () => {
       message: 'Angenommen',
     })
 
-    render(<SocialTab />)
+    render(
+      <MemoryRouter>
+        <SocialTab />
+      </MemoryRouter>,
+    )
 
     await waitFor(() => {
       expect(screen.getByText('bob')).toBeInTheDocument()
@@ -163,7 +172,11 @@ describe('SocialTab (Profile page)', () => {
   })
 
   it('filtert Meilensteine nach Status', async () => {
-    render(<SocialTab />)
+    render(
+      <MemoryRouter>
+        <SocialTab />
+      </MemoryRouter>,
+    )
 
     await waitFor(() => {
       expect(screen.getByText('Erster Schritt')).toBeInTheDocument()
@@ -190,7 +203,11 @@ describe('SocialTab (Profile page)', () => {
       message: 'Anfrage gesendet',
     })
 
-    render(<SocialTab />)
+    render(
+      <MemoryRouter>
+        <SocialTab />
+      </MemoryRouter>,
+    )
 
     const input = screen.getByPlaceholderText(i18n.t('social.contacts.usernamePlaceholder'))
     const submitBtn = screen.getByRole('button', { name: i18n.t('social.contacts.sendRequest') })

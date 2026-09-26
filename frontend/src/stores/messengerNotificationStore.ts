@@ -12,6 +12,7 @@
 import { create } from 'zustand'
 import { api } from '@/api/client'
 import { deriveBlindMailboxId, deriveGroupBlindMailboxId } from '@/services/e2eeCrypto'
+import { useFunkenStore } from '@/stores/funkenStore'
 
 const STORAGE_MUTES_KEY = 'msm:chat_mutes'
 const STORAGE_BLOCKS_KEY = 'msm:chat_blocks'
@@ -453,6 +454,9 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
         } catch {}
         return { blockedUserIds: nextIds, blockedProfiles: nextProfiles }
       })
+      // Blockieren löscht den Funken, sofort und unwiderruflich. Aufheben
+      // bringt ihn nicht zurück.
+      void useFunkenStore.getState().vergiss(userId)
       try {
         await api(`/social/friends/${userId}/block`, { method: 'POST' })
       } catch {

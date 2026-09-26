@@ -26,6 +26,14 @@ class AchievementsOverviewResponse(BaseModel):
     prestige_score: int = 0
 
 
+class AchievementClaimRequest(BaseModel):
+    achievement_id: str = Field(min_length=1, max_length=64)
+
+
+class AchievementClaimResponse(BaseModel):
+    unlocked: bool
+
+
 class UserStatsResponse(BaseModel):
     total_achievements: int = 0
     unlocked_achievements: int = 0

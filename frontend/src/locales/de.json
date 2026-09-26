@@ -7050,7 +7050,42 @@
     "ownUnverifiedDeviceWarning": "Sicherheitswarnung: Für dein Konto ist ein Gerät eingetragen, das keines deiner Geräte freigegeben hat. Es bekommt nichts. Prüfe Profil → Geräte.",
     "ownNewDevice": "Ein neues Gerät wurde für dein Konto freigegeben.",
     "ownAccountResetWarning": "Sicherheitswarnung: Alle dir bekannten Geräte deines Kontos wurden ersetzt. Warst du das nicht, ändere sofort dein Passwort.",
-    "thisDevicePending": "Dieses Gerät wartet auf Freigabe. Bestätige es auf einem deiner anderen Geräte unter Profil → Geräte. Bis dahin bekommt es keine Nachrichten."
+    "thisDevicePending": "Dieses Gerät wartet auf Freigabe. Bestätige es auf einem deiner anderen Geräte unter Profil → Geräte. Bis dahin bekommt es keine Nachrichten.",
+    "streak": {
+      "active_one": "{{count}} Tag Funke mit {{name}}",
+      "active_other": "{{count}} Tage Funke mit {{name}}",
+      "doneToday": "Heute geschafft, der nächste Tag beginnt in {{hours}} Std.",
+      "waitingForYou": "Du bist dran: noch {{hours}} Std.",
+      "waitingForPartner": "Wartet auf {{name}}: noch {{hours}} Std.",
+      "buffer": "Puffer aktiv: Noch {{hours}} Std. Zeit, den Funken zu retten",
+      "extended": "Verlängerung: 3 Tage Frist laufen, noch {{hours}} Std.",
+      "extendedShort": "+3T",
+      "pending": "Ein Funke entsteht, wenn du und {{name}} euch innerhalb von 24 Std. je einen Augenblick schickt",
+      "expired_one": "Funke erloschen ({{count}} Tag)",
+      "expired_other": "Funke erloschen ({{count}} Tage)",
+      "restoreTitle": "Funke wiederherstellen",
+      "restoreQuestion": "Funke wiederherstellen?",
+      "restoreDesc_one": "Stellt deinen Funken von {{count}} Tag mit {{name}} wieder her. Das geht nur einmal alle 3 Monate pro Kontakt.",
+      "restoreDesc_other": "Stellt deinen Funken von {{count}} Tagen mit {{name}} wieder her. Das geht nur einmal alle 3 Monate pro Kontakt.",
+      "restoreConfirm": "Wiederherstellen",
+      "restoreCooldown_one": "Wiederherstellung erst wieder in {{count}} Tag verfügbar",
+      "restoreCooldown_other": "Wiederherstellung erst wieder in {{count}} Tagen verfügbar",
+      "restoreUnavailable": "Dieser Funke lässt sich gerade nicht wiederherstellen.",
+      "restoredSelf_one": "Du hast den Funken von {{count}} Tag wiederhergestellt",
+      "restoredSelf_other": "Du hast den Funken von {{count}} Tagen wiederhergestellt",
+      "restoredOther_one": "{{name}} hat den Funken von {{count}} Tag wiederhergestellt",
+      "restoredOther_other": "{{name}} hat den Funken von {{count}} Tagen wiederhergestellt",
+      "sheetTitle": "Funke mit {{name}}",
+      "restoreRule": "Du kannst ihn einmal alle 3 Monate wiederherstellen.",
+      "restoreRuleShort": "Einmal alle 3 Monate pro Kontakt"
+    },
+    "moment": {
+      "take": "Augenblick aufnehmen",
+      "send": "Augenblick senden",
+      "label": "Augenblick",
+      "friendsOnly": "Augenblicke gibt es nur unter Freunden.",
+      "uploadFailed": "Das Foto konnte nicht hochgeladen werden. Bitte noch einmal versuchen."
+    }
   },
   "databaseManager": {
     "subtitle": "Verwalte und bearbeite die PostgreSQL-Datenbanken dieses Servers.",

@@ -62,6 +62,7 @@ import { erkenneWischen, rueckmeldung, wischWeg, WISCH_SCHWELLE_PX } from '@/lib
 import { reaktionsknoepfe, type Reaktionen } from '@/services/reaktionen'
 import { hervorzuhebendeWorte, teileText, type Textstueck } from '@/services/erwaehnungen'
 import type { ChatGroupItem } from '@/api/social'
+import type { AugenblickMarke, RettungsMarke } from '@/services/funkenService'
 // Die Stecknadel ist rot, weil eine Stecknadel rot ist — kein Fehler, keine
 // Gefahr. Für so etwas gibt es keinen Status-Token, und genau dafür ist die
 // Palette da: der einzige Ort, an dem eine Roh-Farbe stehen darf.
@@ -157,6 +158,10 @@ export interface ChatMessage {
   istMarkiert?: boolean
   /** Ab wann diese Nachricht von selbst verschwindet (ISO). */
   verfaelltAm?: string
+  /** Ein Augenblick für den Funken. Siehe `services/funkenService.ts`. */
+  augenblick?: AugenblickMarke
+  /** Eine Wiederherstellung des Funkens; steht als schmale Zeile im Verlauf. */
+  funkenRettung?: RettungsMarke
   /**
    * Eine Zeile des Messengers selbst, kein Gesprächsbeitrag. Bisher nur für den
    * Sitzungsbruch: sie gehört mitten in den Verlauf, weil sie genau dort
@@ -516,6 +521,14 @@ function ChatMessageBubbleContent({
               </span>
             </span>
           </button>
+        )}
+
+        {/* Ein Augenblick trägt seine Marke über dem Bild: er zählt für den Funken. */}
+        {!msg.isDeleted && msg.augenblick && (
+          <div className="flex items-center gap-1 text-label-sm font-semibold text-status-warning" data-augenblick="">
+            <Sparkles className="w-3 h-3" aria-hidden="true" />
+            <span>{t('messenger.moment.label')}</span>
+          </div>
         )}
 
         {/* Image Attachment */}

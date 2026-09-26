@@ -18,12 +18,21 @@ interface CameraSnapshotModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCapture: (dataUrl: string) => void
+  /** Eigene Überschrift, etwa für einen Augenblick. */
+  titel?: string
+  /** Eigene Beschriftung des Bestätigungsknopfs. */
+  bestaetigen?: string
+  /** Ohne Galerie: ein Augenblick ist ein Foto von jetzt. Fällt die Kamera aus, bleibt die Datei. */
+  nurKamera?: boolean
 }
 
 export function CameraSnapshotModal({
   open,
   onOpenChange,
   onCapture,
+  titel,
+  bestaetigen,
+  nurKamera = false,
 }: CameraSnapshotModalProps) {
   const { t } = useTranslation()
 
@@ -156,7 +165,7 @@ export function CameraSnapshotModal({
           <div className="flex items-center gap-2">
             <Camera className="w-4 h-4 text-status-success" />
             <span className="font-headline text-body-sm font-semibold text-on-surface">
-              {capturedPhoto ? t('social.camera.preview') : t('social.camera.take')}
+              {titel ?? (capturedPhoto ? t('social.camera.preview') : t('social.camera.take'))}
             </span>
           </div>
           <button
@@ -239,12 +248,15 @@ export function CameraSnapshotModal({
                 className="text-xs gap-1.5 flex-1 justify-center py-2.5 font-semibold shadow-lg"
               >
                 <Check className="w-4 h-4" />
-                <span>{t('social.camera.use')}</span>
+                <span>{bestaetigen ?? t('social.camera.use')}</span>
               </Button>
             </div>
           ) : (
             <div className="flex items-center justify-around w-full">
               {/* Left: Gallery / Upload */}
+              {nurKamera ? (
+                <div className="w-14" />
+              ) : (
               <button
                 type="button"
                 onClick={() => fallbackFileInputRef.current?.click()}
@@ -257,6 +269,7 @@ export function CameraSnapshotModal({
                 </div>
                 <span className="text-label-sm">{t('social.camera.gallery')}</span>
               </button>
+              )}
 
               {/* Center: Big WhatsApp Shutter Button */}
               {stream ? (

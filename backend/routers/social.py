@@ -20,6 +20,8 @@ from schemas.chat_media import (
     ChatMediaSignedUrlResponse,
 )
 from schemas.social import (
+    AchievementClaimRequest,
+    AchievementClaimResponse,
     AchievementResponse,
     AchievementsOverviewResponse,
     ActivityPingRequest,
@@ -56,7 +58,7 @@ from schemas.social import (
     DirectChatResponse,
     CanMessageResponse,
 )
-from services.achievement_service import AchievementService
+from services.achievement_service import SELBST_GEMELDET, AchievementService
 from services.chat_media_service import ChatMediaService
 from services.chat_media_validator import sanitize_attachment_filename
 from services.social_service import SocialService
@@ -223,6 +225,27 @@ def get_own_achievements_list(
     user: User = Depends(get_current_user),
 ) -> list[dict]:
     return AchievementService.get_user_achievements(db, user.id)
+
+
+@router.post(
+    "/achievements/claim",
+    response_model=AchievementClaimResponse,
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def claim_own_achievement(
+    req: AchievementClaimRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Schaltet eine Errungenschaft frei, die nur der Client feststellen kann.
+
+    Nur die Kennungen aus `SELBST_GEMELDET` — die Funken-Meilensteine. Die
+    Anfrage nennt keinen Kontakt und keinen Stand; es gibt nichts, woran der
+    Server eine Beziehung ablesen könnte, und nichts, was er prüfen könnte.
+    """
+    if req.achievement_id not in SELBST_GEMELDET:
+        raise HTTPException(status_code=400, detail="Diese Errungenschaft lässt sich nicht selbst melden")
+    return {"unlocked": AchievementService.unlock_achievement(db, user.id, req.achievement_id)}
 
 
 @router.get("/stats", response_model=UserStatsResponse, dependencies=[Depends(_check_social_enabled)])

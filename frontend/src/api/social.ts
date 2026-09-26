@@ -128,6 +128,20 @@ export async function declineFriendRequest(requestId: number): Promise<{ success
   })
 }
 
+/**
+ * Meldet eine Errungenschaft, die nur dieses Gerät feststellen kann.
+ *
+ * Für die Funken-Meilensteine: der Server kennt keinen Funken und kann den
+ * Stand nicht prüfen. Er erfährt nur „dieses Konto hat 100 Tage erreicht",
+ * nie mit wem. Der Server nimmt nur die Kennungen an, die er dafür freigibt.
+ */
+export async function claimAchievement(achievementId: string): Promise<{ unlocked: boolean }> {
+  return api<{ unlocked: boolean }>('/social/achievements/claim', {
+    method: 'POST',
+    body: JSON.stringify({ achievement_id: achievementId }),
+  })
+}
+
 export async function removeFriend(friendUserId: number): Promise<{ success: boolean }> {
   return api<{ success: boolean }>(`/social/friends/${friendUserId}`, {
     method: 'DELETE',

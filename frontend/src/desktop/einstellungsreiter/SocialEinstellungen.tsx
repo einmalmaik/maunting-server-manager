@@ -34,6 +34,7 @@ import { StatusDot } from '@/components/social/StatusIndicator'
 import { formatActivityCategory } from '@/hooks/usePresenceAndActivity'
 import { Avatar, Badge, Button, Dropdown, type DropdownOption, Input, Switch } from '@/Singra/UI'
 import { useAuthStore } from '@/stores/authStore'
+import { useFunkenStore } from '@/stores/funkenStore'
 import { toast } from '@/stores/toastStore'
 
 export function SocialEinstellungen() {
@@ -185,6 +186,8 @@ export function SocialEinstellungen() {
   const handleRemoveFriend = async (friendId: number) => {
     try {
       await removeFriend(friendId)
+      // Mit der Freundschaft endet der Funke, sofort und unwiderruflich.
+      void useFunkenStore.getState().vergiss(friendId)
       toast.success(t('profile.friends.removed'))
       const fData = await getFriends()
       setFriends(fData)

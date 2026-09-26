@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import {
   Avatar,
   Button,
@@ -21,6 +22,7 @@ import {
   Clock,
 } from 'lucide-react'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
+import { FunkenAbzeichen } from '@/components/social/FunkenBadge'
 import { StatusDot } from '@/components/social/StatusIndicator'
 import { renderAchievementIcon } from '@/components/social/achievementIcons'
 import {
@@ -36,9 +38,11 @@ import {
 } from '@/api/social'
 import { toast } from '@/stores/toastStore'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
+import { useFunkenStore } from '@/stores/funkenStore'
 
 export function SocialTab() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
 
   // Friends state
   const [friends, setFriends] = useState<FriendItem[]>([])
@@ -62,6 +66,15 @@ export function SocialTab() {
   const unmuteChat = useMessengerNotificationStore((s) => s.unmuteChat)
   const mailboxDirectory = useMessengerNotificationStore((s) => s.mailboxDirectory)
   const syncBlockedFromBackend = useMessengerNotificationStore((s) => s.syncBlockedFromBackend)
+
+  // Die Funken zeigen sich nur bei Freunden, ab dem Beginn der Freundschaft.
+  useEffect(() => {
+    useFunkenStore.getState().setzeFreunde(
+      friends
+        .filter((f) => f.status === 'accepted')
+        .map((f) => ({ userId: Number(f.user_id ?? f.id), seit: f.created_at })),
+    )
+  }, [friends])
 
   const loadFriendsData = async () => {
     try {
@@ -135,6 +148,8 @@ export function SocialTab() {
   const handleRemoveFriend = async (friendId: number) => {
     try {
       await removeFriend(friendId)
+      // Mit der Freundschaft endet der Funke, sofort und unwiderruflich.
+      void useFunkenStore.getState().vergiss(friendId)
       toast.success(t('social.contacts.removed'))
       await loadFriendsData()
     } catch (err: unknown) {
@@ -394,6 +409,16 @@ export function SocialTab() {
                             <span className="text-xs font-semibold text-primary truncate">
                               {f.username}
                             </span>
+                            {/* Wiederhergestellt wird im Chat: nur dort lässt sich
+                                die Nachricht an beide Seiten verschlüsseln. */}
+                            <FunkenAbzeichen
+                              partnerId={f.user_id ?? f.id}
+                              name={f.username}
+                              interaktiv
+                              onWiederherstellen={() =>
+                                navigate(`/chat?userId=${f.user_id ?? f.id}&funke=retten`)
+                              }
+                            />
                             <DeviceBadge deviceType={f.presence?.device_type} />
                           </div>
                           {f.presence?.activity_label && (

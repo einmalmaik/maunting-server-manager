@@ -1,6 +1,6 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Lock, Mic, Shield } from 'lucide-react'
+import { Lock, Mic, Shield, Sparkles } from 'lucide-react'
 import type { ChatMessage } from '@/components/social/ChatMessageBubble'
 
 export interface PartnerAktivitaet {
@@ -104,6 +104,25 @@ export function ChatTimeline({
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/60 border border-outline-variant/30 text-label-sm text-on-surface-variant shadow-2xs">
                 <Shield className="w-3 h-3 text-status-warning shrink-0" />
                 <span>{msg.text}</span>
+              </div>
+            </div>
+          )
+        }
+
+        // Eine Wiederherstellung des Funkens reist als Nachricht, damit sie
+        // alle Geräte beider Seiten erreicht. Im Verlauf ist sie eine Meldung
+        // über den Funken, keine Sprechblase.
+        if (msg.funkenRettung) {
+          const count = msg.funkenRettung.verloren
+          return (
+            <div key={msg.id} className="py-1 text-center" data-funken-rettung="">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-status-warning/10 border border-status-warning/30 text-label-sm text-on-surface-variant shadow-2xs">
+                <Sparkles className="w-3 h-3 text-status-warning shrink-0" />
+                <span>
+                  {msg.isSelf
+                    ? t('messenger.streak.restoredSelf', { count })
+                    : t('messenger.streak.restoredOther', { count, name: msg.senderName || '' })}
+                </span>
               </div>
             </div>
           )

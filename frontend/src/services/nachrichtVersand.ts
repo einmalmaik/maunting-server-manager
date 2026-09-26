@@ -27,6 +27,7 @@ import type {
 } from '@/components/social/ChatMediaAttachments'
 import type { VideoNoteAufnahme } from '@/components/social/CircularVideoNoteRecorder'
 import type { Versandauftrag } from '@/hooks/useKonversation'
+import type { AugenblickMarke, RettungsMarke } from './funkenService'
 import { enqueueMessageMutation } from '@/lib/offlineSync'
 import { chatMediaBlobCache } from './klartextSpeicher'
 
@@ -200,6 +201,10 @@ export interface Nutzlastangaben extends HochgeladeneAnhaenge {
   cal?: CalendarAttachment
   sticker?: StickerAttachment
   storyReply?: StoryReplyAttachment
+  /** Ein Augenblick für den Funken. */
+  augenblick?: AugenblickMarke
+  /** Eine Wiederherstellung des Funkens. */
+  funkenRettung?: RettungsMarke
 }
 
 /**
@@ -226,6 +231,8 @@ export function baueNutzlast(angaben: Nutzlastangaben): Record<string, unknown> 
     finalFile,
     finalAudio,
     finalVideoNote,
+    augenblick,
+    funkenRettung,
   } = angaben
 
   const payloadObj: Record<string, unknown> = {
@@ -251,6 +258,8 @@ export function baueNutzlast(angaben: Nutzlastangaben): Record<string, unknown> 
   if (sticker) payloadObj.sticker_attachment = sticker
   if (storyReply) payloadObj.story_reply = storyReply
   if (finalVideoNote) payloadObj.video_note_attachment = finalVideoNote
+  if (augenblick) payloadObj.augenblick = augenblick
+  if (funkenRettung) payloadObj.funken_rettung = funkenRettung
 
   return payloadObj
 }

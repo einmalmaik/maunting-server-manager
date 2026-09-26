@@ -5,6 +5,7 @@ import { Avatar } from '@/Singra/UI'
 import type { ChatGroupItem } from '@/api/social'
 import { ChatZeilenGeste } from '@/components/social/ChatZeilenGeste'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
+import { FunkenAbzeichen } from '@/components/social/FunkenBadge'
 import { StatusDot, type PresenceStatus } from '@/components/social/StatusIndicator'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 
@@ -163,6 +164,7 @@ export function ContactListItem({ kontakt: c, entwurf, ...zeile }: ZeileProps & 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-semibold text-primary truncate">{c.username}</span>
+          {c.isFriend && !blockiert && <FunkenAbzeichen partnerId={c.userId} name={c.username} />}
           {blockiert && (
             <span className="text-label-sm px-1 rounded bg-status-destructive/15 text-status-destructive font-medium">
               Blockiert

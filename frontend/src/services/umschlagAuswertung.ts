@@ -28,6 +28,7 @@ import {
   type Bezugstafel,
   type Sammeltafel,
 } from './nachrichtBezug'
+import { leseAugenblickMarke, leseRettungsMarke } from './funkenService'
 import { durfteVerfallStellen, istBekannteStufe, stufenDativ, uebernehmeVerfall } from './nachrichtVerfall'
 import { pruefeNutzlast } from './nutzlastSignatur'
 import { logischeUuid } from './ratchetSitzung'
@@ -610,6 +611,10 @@ export async function werteUmschlaegeAus(
           // sondern die Rechtelage des Absenders — geprüft beim Anzeigen.
           erwaehntAlle: Boolean(parsed.erwaehnt_alle) || undefined,
           verfaelltAm: typeof parsed.verfaellt_am === 'string' ? parsed.verfaellt_am : undefined,
+          // Funken gibt es nur im Direktchat. In einer Gruppe bleibt ein
+          // Augenblick ein gewöhnliches Foto.
+          augenblick: activeContact && anhaengeErlaubt ? leseAugenblickMarke(parsed.augenblick) : undefined,
+          funkenRettung: activeContact ? leseRettungsMarke(parsed.funken_rettung) : undefined,
         })
         continue
       } catch (err) {

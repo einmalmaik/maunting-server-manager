@@ -28,7 +28,7 @@ _GRUPPEN_KEY = "00112233445566ff."
 def test_achievement_catalog_and_dynamic_rarity(db: Session, owner_user: User):
     """Prüft den Meilenstein-Katalog und die dynamische Seltenheitsberechnung."""
     catalog = AchievementService.get_catalog()
-    assert len(catalog) == 100
+    assert len(catalog) == 104
     assert any(a["id"] == "starter_first_step" for a in catalog)
     assert any(a["id"] == "social_zero_knowledge" for a in catalog)
     assert any(a["id"] == "activity_hour_500" for a in catalog)

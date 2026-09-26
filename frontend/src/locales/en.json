@@ -7050,7 +7050,42 @@
     "ownUnverifiedDeviceWarning": "Security warning: a device is registered for your account that none of your devices approved. It receives nothing. Check Profile → Devices.",
     "ownNewDevice": "A new device was approved for your account.",
     "ownAccountResetWarning": "Security warning: all devices of your account that you knew were replaced. If this wasn't you, change your password now.",
-    "thisDevicePending": "This device is waiting for approval. Confirm it on one of your other devices under Profile → Devices. Until then it receives no messages."
+    "thisDevicePending": "This device is waiting for approval. Confirm it on one of your other devices under Profile → Devices. Until then it receives no messages.",
+    "streak": {
+      "active_one": "{{count}}-day streak with {{name}}",
+      "active_other": "{{count}}-day streak with {{name}}",
+      "doneToday": "Done for today, the next day starts in {{hours}} h",
+      "waitingForYou": "Your turn: {{hours}} h left",
+      "waitingForPartner": "Waiting for {{name}}: {{hours}} h left",
+      "buffer": "Grace period: {{hours}} h left to save the streak",
+      "extended": "Extension: 3-day deadline running, {{hours}} h left",
+      "extendedShort": "+3d",
+      "pending": "A streak starts when you and {{name}} each send a moment within 24 h",
+      "expired_one": "Streak ended ({{count}} day)",
+      "expired_other": "Streak ended ({{count}} days)",
+      "restoreTitle": "Restore streak",
+      "restoreQuestion": "Restore streak?",
+      "restoreDesc_one": "Restores your {{count}}-day streak with {{name}}. You can do this only once every 3 months per contact.",
+      "restoreDesc_other": "Restores your {{count}}-day streak with {{name}}. You can do this only once every 3 months per contact.",
+      "restoreConfirm": "Restore",
+      "restoreCooldown_one": "Restore available again in {{count}} day",
+      "restoreCooldown_other": "Restore available again in {{count}} days",
+      "restoreUnavailable": "This streak can’t be restored right now.",
+      "restoredSelf_one": "You restored the {{count}}-day streak",
+      "restoredSelf_other": "You restored the {{count}}-day streak",
+      "restoredOther_one": "{{name}} restored the {{count}}-day streak",
+      "restoredOther_other": "{{name}} restored the {{count}}-day streak",
+      "sheetTitle": "Streak with {{name}}",
+      "restoreRule": "You can restore it once every 3 months.",
+      "restoreRuleShort": "Once every 3 months per contact"
+    },
+    "moment": {
+      "take": "Take a moment",
+      "send": "Send moment",
+      "label": "Moment",
+      "friendsOnly": "Moments are only available between friends.",
+      "uploadFailed": "The photo couldn’t be uploaded. Please try again."
+    }
   },
   "databaseManager": {
     "subtitle": "Manage and edit this server’s PostgreSQL databases.",

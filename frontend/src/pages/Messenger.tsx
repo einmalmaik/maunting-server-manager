@@ -146,6 +146,7 @@ import { ladeGruppenzustand, type Gruppenzustand } from '@/services/gruppenKonfi
 import { wirksameGruppenrechte } from '@/services/gruppenRollen'
 import {
   entferneLokaleNachricht,
+  isOptimisticMessage,
   loadLocalMessages,
   mischeVerlauf,
   saveLocalMessages,
@@ -193,6 +194,20 @@ import { ladeEntwurf } from '@/services/messengerLocalStore'
 import { sessionChatCache } from '@/services/klartextSpeicher'
 import { baueNutzlast, ladeAnhaengeHoch, stelleZu } from '@/services/nachrichtVersand'
 import { ErwaehnungsWache } from '@/components/social/ErwaehnungsWache'
+import { FunkenWache } from '@/components/social/FunkenWache'
+import { FunkenAbzeichen } from '@/components/social/FunkenBadge'
+import { FunkenRettungDialog } from '@/components/social/modals/FunkenRettungDialog'
+import {
+  baueAugenblickNutzlast,
+  baueWiederherstellungNutzlast,
+  ereignisAusNachricht,
+  ereignisseAusNachrichten,
+  rettungMoeglich,
+  type AugenblickMarke,
+  type FunkenEreignis,
+  type RettungsMarke,
+} from '@/services/funkenService'
+import { useFunkenStore } from '@/stores/funkenStore'
 import { NachrichtenMenue } from '@/components/social/NachrichtenMenue'
 import { WeiterleitenAnsicht } from '@/components/social/WeiterleitenAnsicht'
 import { VerlaufSuchleiste } from '@/components/social/VerlaufSuchleiste'
@@ -208,6 +223,19 @@ class E2eeIdentityLockedError extends Error {
   constructor() {
     super('Der Schlüssel dieses Kontos ist auf diesem Gerät gesperrt.')
     this.name = 'E2eeIdentityLockedError'
+  }
+}
+
+/**
+ * Das Foto eines Augenblicks kam nicht auf den Server — nicht gesendet.
+ *
+ * Ein gewöhnliches Bild fiele auf eine Zeile nur mit Dateinamen zurück. Ein
+ * Augenblick ohne Bild wäre aber ein Funke für nichts.
+ */
+class AugenblickNichtHochgeladenError extends Error {
+  constructor() {
+    super('Das Foto des Augenblicks wurde nicht hochgeladen.')
+    this.name = 'AugenblickNichtHochgeladenError'
   }
 }
 import { compressImageFile } from '@/lib/imageCompression'
@@ -279,6 +307,10 @@ interface SendeAuftrag {
   weitergeleitet?: boolean
   /** Ein anderes Ziel als der offene Chat — fürs Weiterleiten. */
   ziel?: { blindMailboxId: string; recipientId?: number | null; groupId?: number | null }
+  /** Das Bild ist ein Augenblick und zählt für den Funken. Nur unter Freunden. */
+  augenblick?: boolean
+  /** Stellt den erloschenen Funken mit der Gegenseite wieder her. */
+  funkenRettung?: boolean
 }
 
 /*
@@ -409,6 +441,12 @@ function MessengerSeite() {
 
   // Camera & Attachments
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false)
+  /** Die Kamera nimmt einen Augenblick auf: Auslösen heißt Senden. */
+  const [augenblickModus, setAugenblickModus] = useState(false)
+  /** Die offene Rückfrage vor einer Wiederherstellung des Funkens. */
+  const [funkenRettung, setFunkenRettung] = useState<{ partnerId: number; name: string; anzahl: number } | null>(
+    null,
+  )
   const [isDragOver, setIsDragOver] = useState(false)
   const [stagedFile, setStagedFile] = useState<FileAttachment | null>(null)
   const docInputRef = useRef<HTMLInputElement>(null)
@@ -738,6 +776,16 @@ function MessengerSeite() {
       active = false
     }
   }, [currentUserId, friends.length, messengerGesperrt])
+
+  // Ein Funke gibt es nur unter Freunden, und er beginnt mit der Freundschaft.
+  // Dieselbe Auswahl wie in `contactsList`.
+  useEffect(() => {
+    useFunkenStore.getState().setzeFreunde(
+      friends
+        .filter((f) => f.status === 'accepted' || (f as any).friend_user_id)
+        .map((f) => ({ userId: Number(f.user_id ?? (f as any).friend_user_id ?? f.id), seit: f.created_at })),
+    )
+  }, [friends])
 
   // Der Anruf-Store braucht dieselbe Identität, um Raumschlüssel zu verpacken
   // und auszupacken. Er hängt bewusst nicht selbst am Schlüsselbund: er soll
@@ -1813,6 +1861,20 @@ function MessengerSeite() {
        * trotzdem da.
        */
       const lokalerVerlauf = rohesLokal.map(wendeWirkungenAn)
+
+      // Augenblicke für den Funken — aus beiden Zweigen, wie jede Wirkung.
+      // Eigene optimistische Zeilen nicht: die hat der Versand schon gezählt,
+      // und ein gescheiterter nimmt sie dort wieder heraus.
+      if (activeContact?.isFriend && currentUserId) {
+        const funkenEreignisse = ereignisseAusNachrichten(
+          [...lokalerVerlauf, ...processedList].filter((m) => !(m.isSelf && isOptimisticMessage(m))),
+          currentUserId,
+          activeContact.userId,
+        )
+        if (funkenEreignisse.length) {
+          void useFunkenStore.getState().nimmAuf(activeContact.userId, funkenEreignisse)
+        }
+      }
 
       const nochZuTilgen = new Map<string, { msg: ChatMessage; geloeschtAm: string }>()
       for (const m of [...rohesLokal, ...processedList] as ChatMessage[]) {
@@ -3043,7 +3105,7 @@ function MessengerSeite() {
     const zielDirekt = !!fremdesZiel?.recipientId && !fremdesZiel.groupId
 
     // If currently editing a message, redirect to edit handler
-    if (editingMessage && !fremdesZiel) {
+    if (editingMessage && !fremdesZiel && !auftrag.augenblick && !auftrag.funkenRettung) {
       const textToSave = customText !== undefined ? customText : inputText
       await handleEditMessage(editingMessage, textToSave)
       return
@@ -3051,7 +3113,8 @@ function MessengerSeite() {
 
     const rawText = customText !== undefined ? customText : inputText.trim()
     if (
-      (!rawText && !note && !cal && !img && !audio && !file && !sticker && !storyReply && !videoNote) ||
+      (!rawText && !note && !cal && !img && !audio && !file && !sticker && !storyReply && !videoNote &&
+        !auftrag.funkenRettung) ||
       (!fremdesZiel && ((!activeContact && !activeGroup) || !blindMailboxId)) ||
       !currentUserId
     ) {
@@ -3084,6 +3147,39 @@ function MessengerSeite() {
         t('messenger.videoNoteTooLarge', { limit: Math.floor(maxAnhangBytes() / (1024 * 1024)) })
       )
       return
+    }
+
+    /*
+     * Augenblick und Wiederherstellung gibt es nur im Direktchat unter
+     * Freunden (`kernVon` gibt sonst `null`). Die Marke entsteht hier, vor der
+     * optimistischen Zeile: das Abzeichen springt sofort, und der Zeitpunkt in
+     * der Nutzlast ist derselbe, mit dem dieses Gerät selbst rechnet.
+     */
+    const funkenPartner =
+      auftrag.augenblick || auftrag.funkenRettung
+        ? Number((fremdesZiel ? fremdesZiel.recipientId : activeContact?.userId) || 0)
+        : 0
+    let augenblickMarke: AugenblickMarke | undefined
+    let rettungsMarke: RettungsMarke | undefined
+    if (auftrag.augenblick || auftrag.funkenRettung) {
+      const jetzt = Date.now()
+      const kern =
+        funkenPartner && !fremdesZiel?.groupId ? useFunkenStore.getState().kernVon(funkenPartner, jetzt) : null
+      if (!kern) {
+        toast.error(t('messenger.moment.friendsOnly'))
+        return
+      }
+      const markenZeit = new Date(jetzt).toISOString()
+      if (auftrag.funkenRettung) {
+        if (!rettungMoeglich(kern, jetzt)) {
+          toast.error(t('messenger.streak.restoreUnavailable'))
+          return
+        }
+        rettungsMarke = baueWiederherstellungNutzlast(markenZeit, kern)
+      } else {
+        if (!img) return
+        augenblickMarke = baueAugenblickNutzlast(markenZeit, kern)
+      }
     }
 
     /*
@@ -3153,10 +3249,21 @@ function MessengerSeite() {
       weitergeleitet: weitergeleitet || undefined,
       ...erwaehnungsFelder(rawText),
       verfaelltAm: berechneVerfall(verfallSekunden),
+      augenblick: augenblickMarke,
+      funkenRettung: rettungsMarke,
       isDelivered: false,
       isRead: false,
       status: 'queued',
     }
+
+    // Der eigene Augenblick zählt ab jetzt. Scheitert der Versand, nimmt der
+    // catch-Zweig ihn zurück. Der eigene Ratchet-Umschlag kommt nie zurück;
+    // dies ist die einzige Stelle, an der dieses Gerät ihn sieht.
+    const funkenEreignis: FunkenEreignis | null =
+      funkenPartner && (augenblickMarke || rettungsMarke)
+        ? ereignisAusNachricht(optimisticMessage, currentUserId, funkenPartner)
+        : null
+    if (funkenEreignis) void useFunkenStore.getState().nimmAuf(funkenPartner, [funkenEreignis])
 
     /**
      * Wann die optimistische Zeile wirklich auf der Platte liegt.
@@ -3240,6 +3347,7 @@ function MessengerSeite() {
         { img, file, audio, videoNote },
         { blindMailboxId: targetBlindMailboxId, absenderId: currentUserId, groupId: currentGroupId },
       )
+      if (augenblickMarke && !finalImg?.mediaId) throw new AugenblickNichtHochgeladenError()
 
       // Was hochgeladen wurde, gehört auch in die eigene Zeile: sonst zeigt sie
       // nach einem Neuladen auf eine Blob-URL, die es nicht mehr gibt.
@@ -3273,6 +3381,8 @@ function MessengerSeite() {
         finalFile,
         finalAudio,
         finalVideoNote,
+        augenblick: augenblickMarke,
+        funkenRettung: rettungsMarke,
       })
 
       // Der Beleg über den Absender. Im Direktchat trägt ihn schon der Ratchet,
@@ -3369,11 +3479,15 @@ function MessengerSeite() {
 
       await loadMessages()
     } catch (err: unknown) {
+      // Was nicht hinausging, zählt nicht für den Funken.
+      if (funkenEreignis) void useFunkenStore.getState().nimmZurueck(funkenPartner, funkenEreignis.kennung)
+
       const istSchluesselProblem =
         err instanceof E2eeRecipientKeyMissingError ||
         err instanceof E2eeIdentityLockedError ||
         err instanceof DrZustellungFehlgeschlagenError ||
-        err instanceof DrGeraetNichtEingetragenError
+        err instanceof DrGeraetNichtEingetragenError ||
+        err instanceof AugenblickNichtHochgeladenError
 
       if (istSchluesselProblem) {
         // Konnte nicht verschlüsselt werden: die optimistisch eingefügte
@@ -3390,7 +3504,15 @@ function MessengerSeite() {
         })
         if (rawText) setInputText(rawText)
 
-        if (err instanceof E2eeIdentityLockedError) {
+        // Auch aus der Ablage: sonst holte der nächste Abgleich die Zeile
+        // zurück, und mit ihr den Augenblick.
+        if (funkenEreignis) {
+          void ablageBereit.then(() => entferneLokaleNachricht(targetBlindMailboxId, { clientUuid }))
+        }
+
+        if (err instanceof AugenblickNichtHochgeladenError) {
+          toast.error(t('messenger.moment.uploadFailed'))
+        } else if (err instanceof E2eeIdentityLockedError) {
           // Der Schlüssel dieses Geräts war noch nicht fertig angelegt. Beim
           // nächsten Versuch steht er — es gibt nichts, was der Benutzer dafür
           // tun müsste.
@@ -3957,6 +4079,37 @@ function MessengerSeite() {
     }
   }
 
+  /** Fragt nach, bevor der Funke mit diesem Kontakt wiederhergestellt wird. */
+  const oeffneFunkenRettung = async (kontakt: ChatContact) => {
+    await useFunkenStore.getState().lade()
+    const jetzt = Date.now()
+    const kern = useFunkenStore.getState().kernVon(kontakt.userId, jetzt)
+    if (!kern || !rettungMoeglich(kern, jetzt)) {
+      toast.error(t('messenger.streak.restoreUnavailable'))
+      return
+    }
+    setFunkenRettung({ partnerId: kontakt.userId, name: kontakt.username, anzahl: kern.verloren })
+  }
+
+  // Aus der Freundesliste im Profil: `/chat?userId=<id>&funke=retten` öffnet
+  // den Chat und gleich die Rückfrage. Der Zusatz fällt danach weg, damit ein
+  // Neuladen nicht noch einmal fragt.
+  useEffect(() => {
+    if (searchParams.get('funke') !== 'retten' || !activeContact?.isFriend) return
+    if (String(activeContact.userId) !== (searchParams.get('userId') || searchParams.get('contact'))) return
+    const next = new URLSearchParams(searchParams)
+    next.delete('funke')
+    setSearchParams(next, { replace: true })
+    void oeffneFunkenRettung(activeContact)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, activeContact])
+
+  /** Öffnet die Kamera für einen Augenblick an den offenen Kontakt. */
+  const oeffneAugenblick = () => {
+    setAugenblickModus(true)
+    setIsCameraModalOpen(true)
+  }
+
   const sendeFreundschaftsanfrage = async () => {
     if (!activeContact) return
     try {
@@ -4323,6 +4476,19 @@ function MessengerSeite() {
                     : undefined
                 }
                 onSprachanruf={activeContact?.isFriend ? () => void starteAnruf('audio') : undefined}
+                funke={
+                  activeContact?.isFriend ? (
+                    <FunkenAbzeichen
+                      partnerId={activeContact.userId}
+                      name={activeContact.username}
+                      interaktiv
+                      onWiederherstellen={() => void oeffneFunkenRettung(activeContact)}
+                    />
+                  ) : null
+                }
+                onAugenblick={
+                  activeContact?.isFriend && !isBlocked(activeContact.userId) ? oeffneAugenblick : undefined
+                }
                 onFreundschaftsanfrage={
                   activeContact && !activeContact.isFriend ? () => void sendeFreundschaftsanfrage() : undefined
                 }
@@ -4802,6 +4968,32 @@ function MessengerSeite() {
         </div>
       </Blattmenue>
 
+      {/* Die Funkenwache liest Direktchats mit laufendem Funken mit, damit das
+          Abzeichen springt, ohne dass man den Chat öffnet. */}
+      <FunkenWache
+        aktiverPartner={activeContact?.userId ?? null}
+        eigeneId={currentUserId}
+        identitaetRef={identityRef}
+        aktiv={!messengerGesperrt && !!currentUserId}
+      />
+
+      <FunkenRettungDialog
+        open={funkenRettung !== null}
+        onOpenChange={(offen) => {
+          if (!offen) setFunkenRettung(null)
+        }}
+        contactName={funkenRettung?.name ?? ''}
+        anzahl={funkenRettung?.anzahl ?? 0}
+        onConfirm={async () => {
+          const ziel = funkenRettung
+          setFunkenRettung(null)
+          // Gesendet wird in den offenen Chat. Hat jemand inzwischen
+          // gewechselt, lieber nichts als eine Rettung beim Falschen.
+          if (!ziel || activeContact?.userId !== ziel.partnerId) return
+          await handleSendMessage({ text: '', funkenRettung: true, antwortAuf: null })
+        }}
+      />
+
       {/* Die Wache liest Gruppen mit, die gerade nicht offen sind — sonst
           erschiene ein @-Abzeichen erst, wenn man die Gruppe ohnehin öffnet. */}
       <ErwaehnungsWache
@@ -4944,8 +5136,25 @@ function MessengerSeite() {
       {/* Live Camera Snapshot Modal */}
       <CameraSnapshotModal
         open={isCameraModalOpen}
-        onOpenChange={setIsCameraModalOpen}
+        onOpenChange={(offen) => {
+          setIsCameraModalOpen(offen)
+          if (!offen) setAugenblickModus(false)
+        }}
+        titel={augenblickModus ? t('messenger.moment.take') : undefined}
+        bestaetigen={augenblickModus ? t('messenger.moment.send') : undefined}
+        nurKamera={augenblickModus}
         onCapture={(dataUrl) => {
+          // Ein Augenblick geht sofort, ohne Umweg über die Eingabeleiste.
+          if (augenblickModus && activeContact) {
+            void handleSendMessage({
+              text: '',
+              img: { dataUrl, name: 'augenblick.jpg' },
+              augenblick: true,
+              antwortAuf: null,
+            })
+            return
+          }
+
           // If the user took a photo while on the "Aktuelles" (updates) tab, directly open the Story Creator with the photo!
           if (mobileNavTab === 'updates') {
             storyAnsicht.erstellung.mitFoto(dataUrl)

@@ -5,7 +5,7 @@
  * browser refreshes (F5) and app restarts (Web, Desktop, Mobile) without
  * re-entering recovery keys or waiting for network round-trips.
  *
- * Database: `msm_messenger_local:konto:<id>` (v3)
+ * Database: `msm_messenger_local:konto:<id>` (v4)
  * Object Stores:
  *  - `messages`: keyed by `[blindMailboxId, id]`, indexed by `blindMailboxId`, `createdAt`, `clientUuid`
  *  - `mailboxes`: keyed by `blindMailboxId`, tracks `lastSyncedEnvelopeId` and `updatedAt`
@@ -39,6 +39,7 @@
 
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { entsiegleZeile, entsiegleZeilen, versiegleZeile } from './lokaleVersiegelung'
+import type { AugenblickMarke, RettungsMarke } from './funkenService'
 import { istSteuerzeile } from './nachrichtBezug'
 
 export interface LocalStoredMessage {
@@ -98,6 +99,10 @@ export interface LocalStoredMessage {
   istMarkiert?: boolean
   /** Ab wann diese Zeile von selbst verschwindet (ISO). */
   verfaelltAm?: string
+  /** Ein Augenblick für den Funken. Siehe `funkenService.ts`. */
+  augenblick?: AugenblickMarke
+  /** Eine Wiederherstellung des Funkens. */
+  funkenRettung?: RettungsMarke
 }
 
 export interface LocalMailboxMeta {
@@ -107,7 +112,7 @@ export interface LocalMailboxMeta {
 }
 
 const DB_PRAEFIX = 'msm_messenger_local'
-const DB_VERSION = 3
+const DB_VERSION = 4
 
 /** Die Ablage dieses Kontos. Ein anderes Konto, eine andere Datenbank. */
 function dbName(kontoId: number): string {
@@ -117,6 +122,7 @@ const STORE_MESSAGES = 'messages'
 const STORE_MAILBOXES = 'mailboxes'
 const STORE_KLARTEXTE = 'envelope_plaintexts'
 const STORE_ENTWUERFE = 'entwuerfe'
+const STORE_FUNKEN = 'funken'
 
 /**
  * Die Felder einer Nachricht, die im Klartext liegen bleiben müssen.
@@ -264,6 +270,14 @@ function openLocalDatabase(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_ENTWUERFE)) {
         db.createObjectStore(STORE_ENTWUERFE, { keyPath: 'blindMailboxId' })
       }
+      // Version 4: die Funken, eine Akte je Kontakt (`funkenService.ts`).
+      //
+      // Wer mit wem wie lange einen Funken hat, weiß nur dieses Gerät — der
+      // Server hat dafür keine Tabelle. Deshalb liegt es hier, versiegelt wie
+      // der Verlauf, und nicht offen im localStorage.
+      if (!db.objectStoreNames.contains(STORE_FUNKEN)) {
+        db.createObjectStore(STORE_FUNKEN, { keyPath: 'partnerId' })
+      }
     }
 
     req.onsuccess = () => resolve(req.result)
@@ -378,6 +392,49 @@ export async function speichereUmschlagKlartext(
 /** Bindet einen Entwurf an seinen Chat. */
 function entwurfAad(blindMailboxId: string): string {
   return `msm-entwurf:${blindMailboxId}`
+}
+
+/** Bindet eine Funkenakte an ihren Kontakt: getauschte Zeilen gehen nicht auf. */
+function funkenAad(partnerId: number): string {
+  return `msm-funke:${partnerId}`
+}
+
+/**
+ * Legt die Funkenakte eines Kontakts ab.
+ *
+ * `partnerId` bleibt als Schlüssel lesbar. Wer die Platte kopiert, sieht also,
+ * mit welchen Konten dieses Gerät eine Akte führt — nicht, ob überhaupt ein
+ * Funke läuft und wie lang er ist. Dieselbe Abwägung wie bei der Mailbox einer
+ * Nachricht.
+ */
+export async function speichereFunkenAkte(akte: { partnerId: number } & Record<string, unknown>): Promise<void> {
+  if (!Number.isSafeInteger(akte.partnerId) || akte.partnerId <= 0) return
+  const zeile = await versiegleZeile(akte, ['partnerId'], funkenAad(akte.partnerId))
+  const db = await openLocalDatabase()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_FUNKEN, 'readwrite')
+    tx.objectStore(STORE_FUNKEN).put(zeile)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/**
+ * Alle Funkenakten dieses Kontos, entsiegelt und ungeprüft.
+ *
+ * Ungeprüft heißt: der Aufrufer liest sie über `leseAkte`, das Kaputtes
+ * auslässt. Eine Zeile, die nicht aufgeht, fehlt hier einfach.
+ */
+export async function ladeFunkenAkten(): Promise<Record<string, unknown>[]> {
+  const db = await openLocalDatabase()
+  const rohe = await new Promise<Record<string, any>[]>((resolve, reject) => {
+    const tx = db.transaction(STORE_FUNKEN, 'readonly')
+    const req = tx.objectStore(STORE_FUNKEN).getAll()
+    req.onsuccess = () => resolve((req.result || []) as Record<string, any>[])
+    req.onerror = () => reject(req.error)
+  })
+  return entsiegleZeilen<Record<string, unknown>>(rohe, (z) => funkenAad(Number(z.partnerId)))
 }
 
 /**
@@ -1023,13 +1080,15 @@ export async function clearLocalMessengerStore(): Promise<void> {
       // Die Klartextablage gehört zwingend dazu: dort liegen die gelesenen
       // Nachrichten im Klartext, und nach einem Abmelden darf davon nichts
       // zurückbleiben.
+      // Die Funken ebenso: sie sind aus diesem Verlauf gerechnet.
       const tx = db.transaction(
-        [STORE_MESSAGES, STORE_MAILBOXES, STORE_KLARTEXTE],
+        [STORE_MESSAGES, STORE_MAILBOXES, STORE_KLARTEXTE, STORE_FUNKEN],
         'readwrite'
       )
       tx.objectStore(STORE_MESSAGES).clear()
       tx.objectStore(STORE_MAILBOXES).clear()
       tx.objectStore(STORE_KLARTEXTE).clear()
+      tx.objectStore(STORE_FUNKEN).clear()
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })

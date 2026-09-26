@@ -725,6 +725,41 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
         "points": 45,
         "icon": "crown",
     },
+    # Funken: nur das Gerät kennt sie, der Server hat keine Tabelle dafür.
+    # Freigeschaltet über `POST /api/social/achievements/claim`, siehe
+    # `SELBST_GEMELDET`.
+    {
+        "id": "social_streak_10",
+        "title": "Erster Funke",
+        "description": "10 Tage Funken-Serie mit einem Freund gehalten.",
+        "category": "social",
+        "points": 25,
+        "icon": "flame",
+    },
+    {
+        "id": "social_streak_100",
+        "title": "Dauerbrenner",
+        "description": "100 Tage ununterbrochene Verbindung.",
+        "category": "social",
+        "points": 50,
+        "icon": "zap",
+    },
+    {
+        "id": "social_streak_1000",
+        "title": "Unzertrennlich",
+        "description": "1.000 Tage Funken-Serie.",
+        "category": "social",
+        "points": 100,
+        "icon": "sparkles",
+    },
+    {
+        "id": "social_streak_10000",
+        "title": "Legende der Freundschaft",
+        "description": "10.000 Tage Beständigkeit.",
+        "category": "social",
+        "points": 250,
+        "icon": "crown",
+    },
 
     # =========================================================================
     # 6. TEAMS, ROLLEN & KOLLABORATION (86 - 92)
@@ -856,6 +891,15 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
 ]
 
 ACHIEVEMENTS_BY_ID = {a["id"]: a for a in ACHIEVEMENTS_CATALOG}
+
+# Errungenschaften, die nur der Client feststellen kann und deshalb selbst
+# meldet. Der Server kann sie nicht prüfen — ein Funke lebt verschlüsselt auf
+# den Geräten, und genau das ist der Sinn. Er erfährt nur „dieses Konto hat
+# 100 Tage erreicht", nie mit wem. Jede andere Kennung bleibt serverseitig
+# entschieden; wer sie meldet, bekommt 400.
+SELBST_GEMELDET = frozenset(
+    {"social_streak_10", "social_streak_100", "social_streak_1000", "social_streak_10000"}
+)
 
 
 def nur_fuer_den_inhaber(achievement: dict[str, Any]) -> bool:

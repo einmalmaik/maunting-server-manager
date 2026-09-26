@@ -69,6 +69,16 @@ describe('baueNutzlast', () => {
     expect(Object.values(nutzlast)).not.toContain(undefined)
   })
 
+  it('trägt Augenblick und Wiederherstellung unter eigenen Feldern', () => {
+    const augenblick = { zeitpunkt: '2026-09-24T10:00:00.000Z' }
+    const funkenRettung = { zeitpunkt: '2026-09-24T10:00:00.000Z', verloren: 12 }
+    expect(baueNutzlast({ ...grund, augenblick }).augenblick).toEqual(augenblick)
+    expect(baueNutzlast({ ...grund, funkenRettung }).funken_rettung).toEqual(funkenRettung)
+    // Ohne Marke kein Feld: ein gewöhnliches Foto verrät nicht, dass es
+    // Funken gibt.
+    expect(Object.keys(baueNutzlast(grund))).not.toContain('augenblick')
+  })
+
   it('nimmt den Zeitpunkt, der übergeben wurde, nicht die Uhr beim Bauen', () => {
     // Zwischen Abschicken und Bauen liegt der Upload; der kann dauern.
     vi.useFakeTimers()

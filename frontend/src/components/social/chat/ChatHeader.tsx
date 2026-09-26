@@ -1,6 +1,6 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import { BellOff, ChevronLeft, Phone, Search, UserPlus, UsersRound } from 'lucide-react'
+import { BellOff, Camera, ChevronLeft, Phone, Search, UserPlus, UsersRound } from 'lucide-react'
 import { Blattknopf } from '@/Singra/UI'
 
 interface ChatHeaderProps {
@@ -17,6 +17,10 @@ interface ChatHeaderProps {
   onSprachanruf?: () => void
   /** Nur bei Kontakten, die noch keine Freunde sind. */
   onFreundschaftsanfrage?: () => void
+  /** Das Funken-Abzeichen neben dem Namen; nur bei Freunden. */
+  funke?: React.ReactNode
+  /** Kamera für einen Augenblick; nur bei Freunden. */
+  onAugenblick?: () => void
   onSuche: () => void
   /** Der Inhalt des Chatmenüs; `schliessen` klappt das Blatt zu. */
   menue: (schliessen: () => void) => React.ReactNode
@@ -39,6 +43,8 @@ export function ChatHeader({
   gruppenanruf,
   onSprachanruf,
   onFreundschaftsanfrage,
+  funke,
+  onAugenblick,
   onSuche,
   menue,
 }: ChatHeaderProps) {
@@ -66,6 +72,7 @@ export function ChatHeader({
             <img src={gruppenBild} alt="" className="-ml-1.5 h-5 w-5 shrink-0 rounded-full object-cover" />
           )}
           <span className="text-xs font-bold text-on-surface truncate max-w-[130px] sm:max-w-xs">{titel}</span>
+          {funke}
           {stumm && (
             <span title="Stummgeschaltet" className="inline-flex items-center text-status-warning">
               <BellOff className="w-3.5 h-3.5" />
@@ -106,6 +113,18 @@ export function ChatHeader({
             aria-label={t('messenger.startVoiceCall')}
           >
             <Phone className="w-4 h-4" />
+          </button>
+        )}
+
+        {onAugenblick && (
+          <button
+            type="button"
+            onClick={onAugenblick}
+            className={`${rundknopf} text-status-warning`}
+            title={t('messenger.moment.take')}
+            aria-label={t('messenger.moment.take')}
+          >
+            <Camera className="w-4 h-4" />
           </button>
         )}
 

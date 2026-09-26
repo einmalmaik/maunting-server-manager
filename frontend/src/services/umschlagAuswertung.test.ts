@@ -505,3 +505,47 @@ describe('Altbestand und Unlesbares', () => {
     expect(maxIncomingId).toBe(decryptedList[0].id)
   })
 })
+
+describe('Augenblicke und Funken', () => {
+  const marke = { zeitpunkt: '2026-09-24T09:59:00Z' }
+
+  it('übernimmt die Marke eines Augenblicks im Direktchat', async () => {
+    const { decryptedList } = await werteUmschlaegeAus(
+      [klartext({ text: '', image_attachment: { name: 'a.jpg' }, augenblick: marke, _beleg: `geprueft:${BERT}` })],
+      kontext(),
+    )
+    expect(decryptedList).toHaveLength(1)
+    expect(decryptedList[0].augenblick).toEqual(marke)
+    expect(decryptedList[0].senderId).toBe(BERT)
+  })
+
+  it('in einer Gruppe bleibt ein Augenblick ein gewöhnliches Foto', async () => {
+    const { decryptedList } = await werteUmschlaegeAus(
+      [klartext({ text: '', sender_id: BERT, augenblick: marke, funken_rettung: { ...marke, verloren: 5 }, _beleg: `geprueft:${BERT}` })],
+      gruppenkontext({ [BERT]: ALLES }),
+    )
+    expect(decryptedList).toHaveLength(1)
+    expect(decryptedList[0].augenblick).toBeUndefined()
+    expect(decryptedList[0].funkenRettung).toBeUndefined()
+  })
+
+  it('eine Marke ohne lesbaren Zeitpunkt oder mit kaputtem Stand fällt weg', async () => {
+    const { decryptedList } = await werteUmschlaegeAus(
+      [
+        klartext({ text: '', augenblick: { zeitpunkt: 'bald' }, _beleg: `geprueft:${BERT}` }),
+        klartext({ text: '', funken_rettung: { zeitpunkt: marke.zeitpunkt, verloren: -3 }, _beleg: `geprueft:${BERT}` }),
+      ],
+      kontext(),
+    )
+    expect(decryptedList.map((m) => m.augenblick)).toEqual([undefined, undefined])
+    expect(decryptedList.map((m) => m.funkenRettung)).toEqual([undefined, undefined])
+  })
+
+  it('eine Wiederherstellung trägt den verlorenen Stand in den Verlauf', async () => {
+    const { decryptedList } = await werteUmschlaegeAus(
+      [klartext({ text: '', funken_rettung: { ...marke, verloren: 42 }, _beleg: `geprueft:${BERT}` })],
+      kontext(),
+    )
+    expect(decryptedList[0].funkenRettung).toEqual({ ...marke, verloren: 42 })
+  })
+})
