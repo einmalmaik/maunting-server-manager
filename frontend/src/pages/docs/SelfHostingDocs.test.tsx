@@ -70,6 +70,14 @@ describe('SelfHostingDocs', () => {
     expect(screen.getByText(/automatically uses the owner-confirmed node ID/i)).toBeInTheDocument()
   })
 
+  it('tells operators what the first start after the encryption update does', () => {
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Database encryption after the update' })).toBeInTheDocument()
+    expect(screen.getByText(/runs VACUUM FULL once on these tables/i)).toBeInTheDocument()
+    expect(screen.getByText(/taken before the update.*still contain the chat history in plaintext/i)).toBeInTheDocument()
+  })
+
   it('links to node administration and the documentation index', () => {
     renderPage()
 

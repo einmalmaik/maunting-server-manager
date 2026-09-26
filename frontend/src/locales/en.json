@@ -3986,6 +3986,26 @@
         "body": "An old state copy must never be active on two nodes at once. Recovery backups live below recovery-backups/<server-id>/<backup-id>/."
       }
     },
+    "encryption": {
+      "title": "Database encryption after the update",
+      "intro": "Since 26 September 2026, AI content is stored only in encrypted form, and every DIS value starts with msm-dis-v1:. The panel encrypts old plaintext in the background on the first start after the update.",
+      "backfill": {
+        "title": "First start",
+        "body": "Chats, titles, summaries, tasks, notices, report mails and memory names are encrypted. The panel stays usable meanwhile."
+      },
+      "vacuum": {
+        "title": "VACUUM FULL",
+        "body": "On PostgreSQL the panel then runs VACUUM FULL once on these tables; otherwise the old plaintext would remain in the database files. Each table is locked briefly. If the lock is not granted within 10 seconds, it tries again on the next start."
+      },
+      "backups": {
+        "title": "Old backups",
+        "body": "Backups and dumps taken before the update, as well as archived WAL files, still contain the chat history in plaintext. That includes the dump update.sh writes to /opt/msm/backups right before this update. Delete or replace them yourself."
+      },
+      "rest": {
+        "title": "Calendar and notes",
+        "body": "These mix E2EE, DIS and old plaintext values. They get the prefix the next time they are saved."
+      }
+    },
     "artifacts": {
       "title": "GitHub release artifacts",
       "file": "Artifact",

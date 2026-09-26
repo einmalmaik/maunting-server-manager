@@ -566,20 +566,18 @@ async def lifespan(app: FastAPI):
 
             _asyncio.create_task(_bg_ensure_postgres())
 
-    # Klartext aus der Zeit vor `DisText` verschluesseln. Im Hintergrund, weil
-    # es bei grossem Chatverlauf Minuten dauern kann.
+    # Klartext aus der Zeit vor `DisText` verschluesseln und seine Reste per
+    # VACUUM FULL aus den Dateien holen. Im Hintergrund, weil es bei grossem
+    # Chatverlauf Minuten dauern kann.
     if not is_testing:
         async def _bg_dis_altbestand():
             try:
                 from database import SessionLocal
-                from services.ai_memory_service import schluessel_nachziehen
-                from services.dis_altbestand import nachziehen
+                from services.dis_altbestand import beim_start
 
                 def _run():
                     with SessionLocal() as _alt_db:
-                        nachziehen(_alt_db)
-                        # Gedaechtnisnamen: verschluesselt und mit Suchindex.
-                        schluessel_nachziehen(_alt_db)
+                        beim_start(_alt_db)
 
                 await _asyncio.to_thread(_run)
             except Exception as exc:

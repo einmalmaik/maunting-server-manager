@@ -238,6 +238,8 @@ sudo bash /opt/msm/update.sh
 
 Vor jeder Änderung an der Datenbank sichert der Updater sie. Das Panel ist kurz im Wartungsmodus, danach prüft er, ob alles wieder läuft. Deine Game-Server auf den Nodes laufen währenddessen einfach weiter.
 
+Beim Update auf den Stand vom 26.09.2026 verschlüsselt das Panel beim ersten Start alte KI-Inhalte nach. Die Sicherungen in `/opt/msm/backups` von davor, auch die dieses Updates, enthalten sie noch im Klartext. Details in [docs/self-hosting.md](docs/self-hosting.md#verschlüsselung-der-datenbank-nach-dem-update).
+
 ### Automatisch aktualisieren (optional)
 
 Schalte es in `/opt/msm/backend/.env` ein:

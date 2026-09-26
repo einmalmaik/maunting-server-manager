@@ -261,6 +261,24 @@ export function SelfHostingDocs() {
         </dl>
       </section>
 
+      <section aria-labelledby="db-encryption" className="msm-card mb-10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h2 id="db-encryption" className="font-headline text-headline-md text-on-surface">{t('docsSelfHosting.encryption.title')}</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">{t('docsSelfHosting.encryption.intro')}</p>
+          </div>
+        </div>
+        <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
+          {(['backfill', 'vacuum', 'backups', 'rest'] as const).map(item => (
+            <div key={item} className="bg-surface-container p-4">
+              <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.encryption.${item}.title`)}</dt>
+              <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.encryption.${item}.body`)}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
       <section aria-labelledby="artifacts" className="mb-10">
         <div className="mb-4 flex items-center gap-2">
           <FileArchive className="h-5 w-5 text-primary" />

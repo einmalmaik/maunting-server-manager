@@ -470,6 +470,35 @@ manuellen Override aus `MSM_API_URL` abgeleitet, weil nur der API-Host sie setze
 darf. `MSM_LOCAL_AGENT_ENABLED=false` wird auf einer migrierten Backend-only-
 Control-Plane automatisch gesetzt; Betreiber müssen dafür keinen Token kopieren.
 
+## Verschlüsselung der Datenbank nach dem Update
+
+Seit dem 26.09.2026 stehen die Inhalte der KI (Chats, Titel, Zusammenfassungen,
+Werkzeugergebnisse, Aufträge, Meldungen, Berichtsmails, Gedächtnisnamen) nur
+noch verschlüsselt in der Datenbank. Jeder DIS-Wert beginnt mit `msm-dis-v1:`.
+Die Migrationen tragen den Präfix für bestehende Geheimnisse nach; Klartext kann
+nur der DIS-Sidecar verschlüsseln, deshalb geschieht das beim ersten Start.
+
+Was beim ersten Start nach dem Update passiert, im Hintergrund:
+
+1. Alter Klartext in den betroffenen Spalten wird verschlüsselt
+   (`services/dis_altbestand.py`). Das Panel ist dabei nutzbar.
+2. Gedächtnisnamen bekommen Chiffrat und Suchindex.
+3. Auf PostgreSQL läuft danach `VACUUM FULL` auf diesen Tabellen. Ohne diesen
+   Schritt stünde der alte Klartext weiter in den Datenbankdateien, als
+   überholte Zeilenversion. `VACUUM FULL` sperrt die jeweilige Tabelle,
+   solange es sie neu schreibt; bei großem Chatverlauf kann der Chat dafür
+   kurz stehen. Bekommt es die Sperre nicht binnen 10 Sekunden, wird es beim
+   nächsten Start wiederholt. Danach läuft es nur noch, wenn wieder Klartext
+   gefunden wurde, etwa nach dem Einspielen eines alten Backups.
+
+Was kein Update erreicht: **Backups und Dumps von vor dem Update** enthalten
+den Chatverlauf weiter im Klartext, ebenso archivierte WAL-Dateien. Das gilt
+auch für den Dump, den `update.sh` vor genau diesem Update in
+`/opt/msm/backups` ablegt. Die müssen Betreiber selbst löschen oder ersetzen,
+sobald das neue Panel läuft. Kalender und Notizen bekommen den
+Präfix erst beim nächsten Speichern, weil dort E2EE-, DIS- und alte
+Klartextwerte nebeneinander liegen.
+
 ## SaaS-Hosting-Betrieb: Node-Härtung, Secret-Rotation, Admin-Monitoring
 
 Wenn du **fremde Kunden** auf denselben Nodes hostest (Vermietung / SaaS), gilt

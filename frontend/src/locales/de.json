@@ -3986,6 +3986,26 @@
         "body": "Eine alte State-Kopie darf nie parallel auf zwei Nodes aktiv sein. Recovery-Backups liegen unter recovery-backups/<server-id>/<backup-id>/."
       }
     },
+    "encryption": {
+      "title": "Verschlüsselung der Datenbank nach dem Update",
+      "intro": "Seit dem 26.09.2026 stehen die Inhalte der KI nur noch verschlüsselt in der Datenbank, und jeder DIS-Wert beginnt mit msm-dis-v1:. Den alten Klartext verschlüsselt das Panel beim ersten Start nach dem Update im Hintergrund.",
+      "backfill": {
+        "title": "Erster Start",
+        "body": "Chats, Titel, Zusammenfassungen, Aufträge, Meldungen, Berichtsmails und Gedächtnisnamen werden verschlüsselt. Das Panel bleibt dabei nutzbar."
+      },
+      "vacuum": {
+        "title": "VACUUM FULL",
+        "body": "Auf PostgreSQL läuft danach einmal VACUUM FULL auf diesen Tabellen, sonst stünde der alte Klartext weiter in den Datenbankdateien. Die Tabelle ist dabei kurz gesperrt. Gibt es die Sperre nicht binnen 10 Sekunden, folgt der nächste Versuch beim nächsten Start."
+      },
+      "backups": {
+        "title": "Alte Backups",
+        "body": "Backups und Dumps von vor dem Update sowie archivierte WAL-Dateien enthalten den Chatverlauf weiter im Klartext, auch der Dump, den update.sh vor diesem Update in /opt/msm/backups ablegt. Die löschst oder ersetzt du selbst."
+      },
+      "rest": {
+        "title": "Kalender und Notizen",
+        "body": "Dort liegen E2EE-, DIS- und alte Klartextwerte nebeneinander. Sie bekommen den Präfix erst beim nächsten Speichern."
+      }
+    },
     "artifacts": {
       "title": "GitHub-Release-Artefakte",
       "file": "Artefakt",

@@ -90,7 +90,7 @@ def test_altbestand_bleibt_lesbar_und_wird_nachgezogen(db: Session, regular_user
     db.expire_all()
     assert db.get(AiMessage, nachricht.id).content == GEHEIM
 
-    assert nachziehen(db) >= 1
+    assert nachziehen(db) == {"ai_messages": 1}
 
     roh = _roh(db, "ai_messages", "content", nachricht.id)
     assert DisClient.ist_verschluesselt(roh)
@@ -98,7 +98,7 @@ def test_altbestand_bleibt_lesbar_und_wird_nachgezogen(db: Session, regular_user
     db.expire_all()
     assert db.get(AiMessage, nachricht.id).content == GEHEIM
     # Ein zweiter Lauf findet nichts mehr.
-    assert nachziehen(db) == 0
+    assert nachziehen(db) == {}
 
 
 def test_nachzug_ueberschreibt_keine_gleichzeitige_aenderung(
@@ -212,3 +212,74 @@ def test_aufgabe_ist_chiffrat(db: Session) -> None:
         roh = _roh(db, "ai_tasks", spalte, aufgabe.id)
         assert "Schwager" not in roh and GEHEIM not in roh, spalte
         assert DisClient.ist_verschluesselt(roh), spalte
+
+
+# ── VACUUM FULL nach dem Nachzug ────────────────────────────────────────────
+
+
+def _vacuum_mitschreiben(monkeypatch: pytest.MonkeyPatch, *, gelingt: bool = True) -> list[set[str]]:
+    from services import dis_altbestand
+
+    aufrufe: list[set[str]] = []
+
+    def mitschreiben(engine, tabellen):
+        aufrufe.append(set(tabellen))
+        return gelingt
+
+    monkeypatch.setattr(dis_altbestand, "klartextreste_entfernen", mitschreiben)
+    return aufrufe
+
+
+def test_der_erste_start_raeumt_jede_betroffene_tabelle(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Auch Tabellen ohne neuen Nachzug: dort liegen geloeschte Mails und
+    entfernte Spalten noch in den Dateien."""
+    from services import dis_altbestand
+
+    aufrufe = _vacuum_mitschreiben(monkeypatch)
+    dis_altbestand.beim_start(db)
+
+    assert len(aufrufe) == 1
+    assert {"ai_messages", "ai_mail_outbox", "ai_memory_entries", "ai_tasks"} <= aufrufe[0]
+
+    # Danach nur noch, wo der Nachzug wieder Klartext gefunden hat.
+    dis_altbestand.beim_start(db)
+    assert aufrufe[1] == set()
+
+
+def test_ein_gescheitertes_vacuum_wird_beim_naechsten_start_wiederholt(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from services import dis_altbestand
+
+    aufrufe = _vacuum_mitschreiben(monkeypatch, gelingt=False)
+    dis_altbestand.beim_start(db)
+    dis_altbestand.beim_start(db)
+
+    assert "ai_messages" in aufrufe[1]
+
+
+def test_neuer_klartext_nach_dem_ersten_start_wird_wieder_geraeumt(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Etwa nach dem Einspielen eines alten Backups."""
+    from services import dis_altbestand
+
+    aufrufe = _vacuum_mitschreiben(monkeypatch)
+    dis_altbestand.beim_start(db)
+    gespraech = _gespraech(db, regular_user)
+    db.execute(text("UPDATE ai_conversations SET summary = 'alt' WHERE id = :id"), {"id": gespraech.id})
+    db.commit()
+
+    dis_altbestand.beim_start(db)
+
+    assert aufrufe[1] == {"ai_conversations"}
+
+
+def test_vacuum_nur_auf_postgres() -> None:
+    from sqlalchemy import create_engine
+
+    from services.dis_altbestand import klartextreste_entfernen
+
+    assert klartextreste_entfernen(create_engine("sqlite://"), {"ai_messages"}) is True

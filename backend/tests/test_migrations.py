@@ -497,3 +497,58 @@ def test_stored_vectors_are_repacked_without_the_embedding_model(tmp_path):
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+def test_dis_praefix_wird_nur_an_reines_chiffrat_gesetzt(tmp_path):
+    """20260926_09: der Altbestand bekommt `msm-dis-v1:`, aber nur dort, wo
+    sicher DIS-Chiffrat steht.
+
+    Fernet-Werte (`gAAAAA`) muss `scripts/migrate_to_dis.py` noch erkennen,
+    und Klartext-Einstellungen in `panel_settings` sind kein Chiffrat.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, text
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+
+    db_url = f"sqlite:///{tmp_path / 'dis-praefix.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+        command.downgrade(config, "20260926_08")
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO panel_settings (key, value, updated_at) VALUES "
+                "('smtp_password_encrypted', 'QUJDREVG', '2026-09-26'), "
+                "('steam_account_password_enc', 'gAAAAAalt', '2026-09-26'), "
+                "('smtp_host', 'mail.example.org', '2026-09-26'), "
+                "('github_clone_token_enc', 'msm-dis-v1:schon', '2026-09-26')"
+            ))
+
+        command.upgrade(config, "20260926_09")
+
+        with engine.connect() as conn:
+            werte = dict(conn.execute(text("SELECT key, value FROM panel_settings")).all())
+        assert werte["smtp_password_encrypted"] == "msm-dis-v1:QUJDREVG"
+        assert werte["steam_account_password_enc"] == "gAAAAAalt"
+        assert werte["smtp_host"] == "mail.example.org"
+        assert werte["github_clone_token_enc"] == "msm-dis-v1:schon"
+
+        command.downgrade(config, "20260926_08")
+
+        with engine.connect() as conn:
+            werte = dict(conn.execute(text("SELECT key, value FROM panel_settings")).all())
+        assert werte["smtp_password_encrypted"] == "QUJDREVG"
+        assert werte["github_clone_token_enc"] == "schon"
+        assert werte["smtp_host"] == "mail.example.org"
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
