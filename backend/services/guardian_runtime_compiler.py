@@ -179,6 +179,8 @@ def _resolve_tokens(value: str, ports: dict[str, int]) -> str:
             role = "voice"
         elif placeholder == "WEB_PORT":
             role = "web"
+        elif placeholder == "DATABASE_PORT":
+            role = "database"
         elif placeholder.startswith("CUSTOM_PORT_"):
             num = placeholder[12:]
             if num.isdigit():

@@ -269,3 +269,60 @@ class PostgresDumpResponse(BaseModel):
     byte_size: int
     sha256: str
     duration_ms: int
+
+
+# ── Verbindungs-Hub ────────────────────────────────────────────────────────
+
+
+class PostgresHubUser(BaseModel):
+    id: int
+    username: str
+    # False bei Nutzern von vor 09/2026: nie gespeichert, erst Rotieren hilft.
+    password_stored: bool
+
+
+class PostgresHubDatabase(BaseModel):
+    id: int
+    name: str
+    owner_role: str
+    # Owner-Zugang abrufbar: bei eigener Instanz immer, sonst nach Power-User.
+    owner_revealable: bool
+    users: list[PostgresHubUser]
+
+
+class PostgresHubEndpoint(BaseModel):
+    host: str
+    port: int
+
+
+class PostgresHubExternal(PostgresHubEndpoint):
+    # False: Port liegt auf 127.0.0.1 — von aussen nicht erreichbar.
+    reachable: bool
+    ssl_required: bool
+    allowed_cidrs: list[str]
+
+
+class PostgresConnectionInfo(BaseModel):
+    kind: str  # "shared" | "dedicated"
+    internal: PostgresHubEndpoint
+    external: PostgresHubExternal | None = None
+    ssl_certificate: str | None = None
+    bootstrap_pending: bool = False
+    databases: list[PostgresHubDatabase]
+
+
+class PostgresRevealRequest(BaseModel):
+    database_id: int
+    # None: Owner der Datenbank.
+    user_id: int | None = None
+
+
+class PostgresRevealResponse(BaseModel):
+    username: str
+    password: str
+
+
+class PostgresInstanceNetworkRequest(BaseModel):
+    allowed_cidrs: list[str] = Field(default_factory=list, max_length=50)
+    ssl_required: bool = True
+

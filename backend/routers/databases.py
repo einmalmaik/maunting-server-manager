@@ -11,6 +11,7 @@ from models import PostgresDatabase, PostgresUser, Server, User
 from schemas.postgres import (
     PostgresBootstrapRequest,
     PostgresConfirmRequest,
+    PostgresConnectionInfo,
     PostgresCreateDatabaseRequest,
     PostgresCreateTableRequest,
     PostgresCreateUserRequest,
@@ -23,10 +24,13 @@ from schemas.postgres import (
     PostgresExtensionInfo,
     PostgresExtensionRequest,
     PostgresInsertRowRequest,
+    PostgresInstanceNetworkRequest,
     PostgresPowerUserDemoteRequest,
     PostgresPowerUserResponse,
     PostgresResourcesResponse,
     PostgresRestoreRequest,
+    PostgresRevealRequest,
+    PostgresRevealResponse,
     PostgresRotatePasswordResponse,
     PostgresRowsRequest,
     PostgresRowsResponse,
@@ -37,7 +41,7 @@ from schemas.postgres import (
     PostgresTableRequest,
     PostgresUpdateRowRequest,
 )
-from services import audit_service, postgres_service
+from services import audit_service, postgres_instance_service, postgres_service
 from services.postgres_service import PostgresServiceError
 
 router = APIRouter(prefix="/api/servers/{server_id}/databases", tags=["databases"])
@@ -690,3 +694,101 @@ def import_database(
         return result
     except Exception as exc:
         raise _service_error(exc) from exc
+
+
+# ── Verbindungs-Hub ────────────────────────────────────────────────────────
+
+
+@router.get("/connection", response_model=PostgresConnectionInfo)
+def connection(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Host, Port, Datenbanken und Rollen — ohne ein einziges Passwort."""
+    server = _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.read")
+    try:
+        return postgres_service.connection_info(db, server)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/credentials/reveal", response_model=PostgresRevealResponse)
+def reveal_credential(
+    server_id: int,
+    body: PostgresRevealRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    """Gespeichertes Passwort anzeigen. Jeder Abruf steht im Audit-Log."""
+    server = _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.admin")
+    try:
+        result = postgres_service.reveal_credential(db, server, body.database_id, body.user_id)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    _audit_db(
+        db,
+        user,
+        action="postgres.credential.reveal",
+        server_id=server_id,
+        details={"database_id": body.database_id, "username": result["username"]},
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return result
+
+
+@router.put("/instance/network", response_model=PostgresConnectionInfo)
+def update_instance_network(
+    server_id: int,
+    body: PostgresInstanceNetworkRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    """Allowlist und SSL-Pflicht einer eigenen Instanz (gilt sofort)."""
+    server = _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.admin")
+    try:
+        postgres_instance_service.update_network(
+            db, server, allowed_cidrs=body.allowed_cidrs, ssl_required=body.ssl_required
+        )
+        _audit_db(
+            db,
+            user,
+            action="postgres.instance.network",
+            server_id=server_id,
+            details={
+                "allowed_cidrs": postgres_instance_service.cidrs_of(server.postgres_instance),
+                "ssl_required": body.ssl_required,
+            },
+        )
+        return postgres_service.connection_info(db, server)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/instance/bootstrap")
+def bootstrap_instance(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    """Legt fehlende Datenbanken in der eigenen Instanz an (wiederholbar)."""
+    server = _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.admin")
+    try:
+        created = postgres_instance_service.bootstrap(db, server)
+        server.status_message = None
+        db.commit()
+        _audit_db(
+            db,
+            user,
+            action="postgres.instance.bootstrap",
+            server_id=server_id,
+            details={"created": created},
+        )
+        return {"created": created}
+    except Exception as exc:
+        raise _service_error(exc) from exc
+

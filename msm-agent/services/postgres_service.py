@@ -3,6 +3,10 @@
 Panel is source of truth for metadata + encrypted secrets.
 Agent runs msm-postgres locally, executes DDL via psycopg2 on 127.0.0.1.
 Passwords arrive only in request payload (RAM); never written to agent disk.
+
+Datenbankserver haben eine eigene Instanz (Container ``msm-srv-<id>``). Fuer
+sie traegt die Anfrage ein ``target``; der Router setzt es mit ``ziel(...)``
+fuer die Dauer der Anfrage. Ohne Ziel gilt immer der geteilte msm-postgres.
 """
 
 from __future__ import annotations
@@ -12,8 +16,13 @@ import os
 import re
 import shlex
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
+from datetime import date, datetime, time as dt_time, timedelta
+from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import psycopg2
 from psycopg2 import sql
@@ -60,7 +69,71 @@ def validate_identifier(value: str) -> str:
     return cleaned
 
 
+@dataclass(frozen=True)
+class Instanzziel:
+    """Eigene Instanz eines Datenbankservers statt des geteilten msm-postgres."""
+
+    host: str
+    port: int
+    container: str
+
+
+_ZIEL: ContextVar[Instanzziel | None] = ContextVar("postgres_instanzziel", default=None)
+
+
+def _pruefe_ziel(target: dict[str, Any]) -> Instanzziel:
+    from services.network_interfaces_service import list_host_interfaces
+
+    host = str(target.get("host") or "").strip()
+    container = str(target.get("container") or "").strip()
+    try:
+        port = int(target.get("port") or 0)
+    except (TypeError, ValueError):
+        port = 0
+    # Nur Adressen dieses Hosts: das Panel darf den Agenten nicht als Sprungbrett
+    # zu fremden Datenbanken im Netz benutzen.
+    eigene = {"127.0.0.1"} | {iface.ip for iface in list_host_interfaces()}
+    if host not in eigene:
+        raise PostgresAgentError("Instance host must be an address of this node")
+    if not 1024 <= port <= 65535:
+        raise PostgresAgentError("Invalid instance port")
+    try:
+        docker_service.assert_msm_container_name(container)
+    except Exception as exc:
+        raise PostgresAgentError("Invalid instance container") from exc
+    return Instanzziel(host=host, port=port, container=container)
+
+
+@contextmanager
+def ziel(target: dict[str, Any] | None) -> Iterator[None]:
+    """Setzt die eigene Instanz fuer die Dauer einer Anfrage (None = msm-postgres)."""
+    token = _ZIEL.set(_pruefe_ziel(target) if target else None)
+    try:
+        yield
+    finally:
+        _ZIEL.reset(token)
+
+
+def _db_port() -> int:
+    z = _ZIEL.get()
+    return z.port if z is not None else settings.managed_postgres_port
+
+
+def _container() -> str:
+    z = _ZIEL.get()
+    return z.container if z is not None else settings.managed_postgres_container_name
+
+
+def _internal_port() -> int:
+    """Port, unter dem Container im internen Netz die Instanz erreichen."""
+    z = _ZIEL.get()
+    return z.port if z is not None else 5432
+
+
 def _db_host() -> str:
+    z = _ZIEL.get()
+    if z is not None:
+        return z.host
     host = (settings.managed_postgres_host or "").strip()
     if host != "127.0.0.1":
         raise PostgresAgentError("Managed PostgreSQL may only bind to 127.0.0.1")
@@ -86,7 +159,7 @@ def _connect_with_retry(admin_password: str, database: str = CONTROL_DB):
         try:
             return psycopg2.connect(
                 host=_db_host(),
-                port=settings.managed_postgres_port,
+                port=_db_port(),
                 dbname=database,
                 user=ADMIN_USER,
                 password=admin_password,
@@ -101,7 +174,7 @@ def _connect_with_retry(admin_password: str, database: str = CONTROL_DB):
 def _owner_connect(database_name: str, owner_role: str, owner_password: str):
     return psycopg2.connect(
         host=_db_host(),
-        port=settings.managed_postgres_port,
+        port=_db_port(),
         dbname=database_name,
         user=owner_role,
         password=owner_password,
@@ -132,6 +205,10 @@ def ensure_internal_postgres(admin_password: str) -> dict[str, Any]:
     """Start or create local msm-postgres. admin_password only in memory."""
     if not admin_password:
         raise PostgresAgentError("admin_password is required", status_code=400)
+    if _ZIEL.get() is not None:
+        # Eine eigene Instanz ist ein Servercontainer; starten und stoppen
+        # gehoert dem Server, nicht diesem Aufruf.
+        return {"ok": True, "status": "instance"}
 
     network_result = docker_service.ensure_network(
         settings.managed_postgres_network, internal=True
@@ -275,8 +352,8 @@ def provision(
         "database_name": db_name,
         "owner_role": owner_role,
         "user_name": user_name,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": _container(),
+        "port": _internal_port(),
         # power_user is panel metadata only; roles always stay NOSUPERUSER.
         "power_user": power_user,
         "is_power_user": power_user,
@@ -334,8 +411,8 @@ def create_user(
         "ok": True,
         "database_name": database_name,
         "username": user_name,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": _container(),
+        "port": _internal_port(),
     }
 
 
@@ -355,8 +432,8 @@ def rotate_role_password(
     return {
         "ok": True,
         "username": role_name,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": _container(),
+        "port": _internal_port(),
     }
 
 
@@ -385,7 +462,7 @@ def rotate_admin_password(
         try:
             conn = psycopg2.connect(
                 host=_db_host(),
-                port=settings.managed_postgres_port,
+                port=_db_port(),
                 dbname=CONTROL_DB,
                 user=ADMIN_USER,
                 password=admin_password,
@@ -420,7 +497,7 @@ def rotate_admin_password(
     try:
         verify = psycopg2.connect(
             host=_db_host(),
-            port=settings.managed_postgres_port,
+            port=_db_port(),
             dbname=CONTROL_DB,
             user=ADMIN_USER,
             password=new_admin_password,
@@ -483,8 +560,8 @@ def promote_owner(
     return {
         "ok": True,
         "username": owner_role,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": _container(),
+        "port": _internal_port(),
         "scope": "database",
     }
 
@@ -522,8 +599,8 @@ def alter_owner_password(
     return {
         "ok": True,
         "username": owner_role,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": _container(),
+        "port": _internal_port(),
     }
 
 
@@ -1115,6 +1192,143 @@ def execute_sql(
     }
 
 
+# ── Studio: generisches Ausfuehren ─────────────────────────────────────────
+#
+# Katalogabfragen und DDL baut das Panel. Der Agent fuehrt nur aus: so braucht
+# eine neue Studio-Funktion kein Agent-Update auf jedem Node.
+
+RUN_MODES = {"read", "tx", "autocommit"}
+_MAX_NOTICES = 50
+
+
+def _json_wert(value: Any) -> Any:
+    """Werte so zurueckgeben, dass JSON sie ohne Genauigkeitsverlust traegt."""
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        return value if value == value and value not in (float("inf"), float("-inf")) else str(value)
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (datetime, date, dt_time)):
+        return value.isoformat()
+    if isinstance(value, timedelta):
+        return str(value)
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return "\\x" + bytes(value).hex()
+    if isinstance(value, dict):
+        return {str(k): _json_wert(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_wert(v) for v in value]
+    return str(value)
+
+
+def _pg_fehler(exc: Exception, index: int) -> PostgresAgentError:
+    diag = getattr(exc, "diag", None)
+    primary = getattr(diag, "message_primary", None) or str(exc).strip().splitlines()[0:1]
+    if isinstance(primary, list):
+        primary = primary[0] if primary else type(exc).__name__
+    detail = getattr(diag, "message_detail", None)
+    hint = getattr(diag, "message_hint", None)
+    code = getattr(exc, "pgcode", None)
+    parts = [f"[{code}] {primary}" if code else str(primary)]
+    if detail:
+        parts.append(str(detail))
+    if hint:
+        parts.append(f"Hint: {hint}")
+    message = f"Statement {index + 1}: " + " — ".join(parts)
+    return PostgresAgentError(message[:2000], status_code=400)
+
+
+def run_statements(
+    *,
+    database_name: str,
+    identity: str,
+    owner_role: str,
+    owner_password: str,
+    admin_password: str,
+    mode: str,
+    statements: list[dict[str, Any]],
+    row_limit: int,
+    timeout_ms: int,
+    rollback: bool = False,
+) -> dict[str, Any]:
+    """Fuehrt Anweisungen des Panels aus.
+
+    ``read``: nur lesende Transaktion. ``tx``: alles oder nichts in einer
+    Transaktion (``rollback`` verwirft am Ende, z. B. fuer EXPLAIN ANALYZE).
+    ``autocommit``: fuer Anweisungen, die keine Transaktion vertragen
+    (``CREATE INDEX CONCURRENTLY``, ``VACUUM``); Abbruch beim ersten Fehler.
+    """
+    database_name = validate_identifier(database_name)
+    if mode not in RUN_MODES:
+        raise PostgresAgentError("Invalid run mode")
+    if not statements:
+        raise PostgresAgentError("No statements")
+    row_limit = min(max(int(row_limit), 1), 5000)
+    timeout_ms = min(max(int(timeout_ms), 100), 600_000)
+
+    if identity not in {"admin", "owner"}:
+        raise PostgresAgentError("Invalid identity")
+    try:
+        if identity == "admin":
+            if not admin_password:
+                raise PostgresAgentError("admin_password is required")
+            conn = _admin_connect(admin_password, database_name)
+            conn.autocommit = False
+        else:
+            conn = _owner_connect(database_name, validate_identifier(owner_role), owner_password)
+    except psycopg2.OperationalError as exc:
+        raise PostgresAgentError("PostgreSQL connection failed", status_code=503) from exc
+
+    started = time.monotonic()
+    results: list[dict[str, Any]] = []
+    try:
+        if mode == "autocommit":
+            conn.autocommit = True
+        elif mode == "read":
+            conn.set_session(readonly=True)
+        with conn.cursor() as cur:
+            cur.execute("SET statement_timeout = %s", (timeout_ms,))
+            for index, statement in enumerate(statements):
+                text = str(statement.get("sql") or "")
+                params = statement.get("params") or None
+                begin = time.monotonic()
+                try:
+                    cur.execute(text, params)
+                except psycopg2.Error as exc:
+                    if not conn.autocommit:
+                        conn.rollback()
+                    raise _pg_fehler(exc, index) from exc
+                entry: dict[str, Any] = {
+                    "columns": [],
+                    "rows": [],
+                    "row_count": cur.rowcount,
+                    "status": cur.statusmessage,
+                    "truncated": False,
+                    "duration_ms": 0,
+                }
+                if cur.description:
+                    entry["columns"] = [desc[0] for desc in cur.description]
+                    fetched = cur.fetchmany(row_limit + 1)
+                    entry["truncated"] = len(fetched) > row_limit
+                    entry["rows"] = [[_json_wert(v) for v in row] for row in fetched[:row_limit]]
+                entry["duration_ms"] = int((time.monotonic() - begin) * 1000)
+                results.append(entry)
+        if not conn.autocommit:
+            if rollback or mode == "read":
+                conn.rollback()
+            else:
+                conn.commit()
+    finally:
+        notices = [n.strip() for n in list(conn.notices)[-_MAX_NOTICES:]]
+        conn.close()
+    return {
+        "results": results,
+        "notices": notices,
+        "duration_ms": int((time.monotonic() - started) * 1000),
+    }
+
+
 def dispatch_query(action: str, payload: dict[str, Any]) -> Any:
     """Dispatch owner/admin query actions. Passwords never logged."""
     act = (action or "").strip().lower()
@@ -1293,7 +1507,7 @@ def dump_databases(*, admin_password: str, database_names: list[str]) -> dict[st
     if not database_names:
         return {}
     ensure_internal_postgres(admin_password)
-    container = settings.managed_postgres_container_name
+    container = _container()
     result: dict[str, str] = {}
     for db_name in database_names:
         name = validate_identifier(db_name)
@@ -1301,6 +1515,7 @@ def dump_databases(*, admin_password: str, database_names: list[str]) -> dict[st
             "pg_dump "
             "--format=plain --no-owner --no-acl --clean --if-exists --inserts "
             f"--dbname={shlex.quote(name)} "
+            f"--port={_internal_port()} "
             f"--username={shlex.quote(ADMIN_USER)}"
         )
         exec_result = docker_service.exec_in_managed(
@@ -1356,10 +1571,11 @@ def restore_sql(
         restore_user = validate_identifier(str(owner.get("owner_role") or ADMIN_USER))
         restore_password = str(owner.get("owner_password") or admin_password)
         result = docker_service.exec_in_managed_stdin(
-            settings.managed_postgres_container_name,
+            _container(),
             [
                 "psql", "--no-psqlrc", "--set", "ON_ERROR_STOP=1",
                 "--username", restore_user, "--dbname", name,
+                "--port", str(_internal_port()),
             ],
             sql_text,
             environment={"PGPASSWORD": restore_password},

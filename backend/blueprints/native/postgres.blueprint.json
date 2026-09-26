@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "postgres",
+    "name": "PostgreSQL",
+    "category": "database",
+    "author": "Maunting Studios",
+    "description": "Eigene PostgreSQL-17-Instanz als Datenbankserver (offizielles Image, Debian). Wird ueber \"Datenbankserver erstellen\" angelegt; Admin-Passwort, pg_hba.conf und TLS-Zertifikat schreibt das Panel."
+  },
+  "runtime": {
+    "image": "postgres:17",
+    "workdir": "/data",
+    "env": {
+      "PGDATA": "/data/pgdata",
+      "POSTGRES_USER": "msm_admin",
+      "POSTGRES_DB": "msm_control",
+      "POSTGRES_PASSWORD_FILE": "/data/.msm/admin_password"
+    },
+    "startup": "sh -c \"chmod 0700 /data/pgdata 2>/dev/null; chmod 0600 /data/tls/server.key 2>/dev/null; exec docker-entrypoint.sh postgres -p {DATABASE_PORT} -c hba_file=/data/conf/pg_hba.conf -c ssl=on -c ssl_cert_file=/data/tls/server.crt -c ssl_key_file=/data/tls/server.key -c password_encryption=scram-sha-256\"",
+    "stopGracePeriodSeconds": 60,
+    "startupCheckSeconds": 5.0
+  },
+  "ports": [
+    {
+      "name": "database",
+      "protocol": "tcp"
+    }
+  ],
+  "source": {
+    "type": "dockerOnly",
+    "steam": null,
+    "http": null
+  },
+  "mods": null,
+  "health": {
+    "process": {},
+    "port": {
+      "protocol": "tcp",
+      "port": "{{DATABASE_PORT}}",
+      "interval": "30s",
+      "failure_threshold": 3
+    },
+    "startup": {
+      "grace_period_seconds": 120,
+      "success_patterns": [
+        "database system is ready to accept connections"
+      ],
+      "failure_patterns": [
+        "could not bind IPv4 address",
+        "data directory .* has invalid permissions"
+      ]
+    }
+  },
+  "backup": null
+}

@@ -382,7 +382,7 @@ class TestValFix009PerDbDumps:
 
         mock_client = MagicMock()
 
-        def capture_restore(*, admin_password, dumps, owners):
+        def capture_restore(*, admin_password, dumps, owners, target=None):
             captured["dumps"] = dict(dumps)
             captured["owners"] = owners
             return {"ok": True, "databases": list(dumps.keys()), "duration_ms": 1}
@@ -414,7 +414,7 @@ class TestValFix009PerDbDumps:
         captured: dict = {}
         mock_client = MagicMock()
 
-        def capture_restore(*, admin_password, dumps, owners):
+        def capture_restore(*, admin_password, dumps, owners, target=None):
             captured["dumps"] = dict(dumps)
             captured["owners"] = owners
             return {"ok": True, "databases": list(dumps.keys()), "duration_ms": 1}

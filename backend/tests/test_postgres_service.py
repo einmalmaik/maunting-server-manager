@@ -38,6 +38,7 @@ def test_ensure_internal_postgres_proxies_to_agent():
     mock_client.postgres_ensure.return_value = {"ok": True, "status": "running"}
     mock_db = MagicMock()
     mock_server = MagicMock()
+    mock_server.postgres_instance = None  # Spielserver: geteilter Cluster
     with patch.object(postgres_service, "_client_for_server", return_value=mock_client), \
          patch.object(postgres_service, "_admin_password", return_value="secret"):
         postgres_service.ensure_internal_postgres(mock_db, mock_server)

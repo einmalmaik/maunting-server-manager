@@ -322,7 +322,13 @@ def create_container(
         try:
             for network_name in dict.fromkeys(extra_networks or []):
                 if network_name and network_name != network:
-                    client.networks.get(network_name).connect(container)
+                    try:
+                        extra = client.networks.get(network_name)
+                    except NotFound:
+                        # Ein Datenbankserver kann der erste im internen Netz
+                        # sein, bevor msm-postgres es je angelegt hat.
+                        extra = client.networks.create(network_name, driver="bridge", internal=True)
+                    extra.connect(container)
         except (DockerException, OSError) as exc:
             try:
                 container.remove(force=True)
@@ -654,6 +660,14 @@ def assert_managed_postgres_name(name: str) -> str:
     return name
 
 
+def assert_postgres_exec_target(name: str) -> str:
+    """pg_dump/psql laufen im geteilten msm-postgres oder in der eigenen
+    Instanz eines Datenbankservers (``msm-srv-<id>``) — sonst nirgends."""
+    if name == settings.managed_postgres_container_name:
+        return name
+    return assert_msm_container_name(name)
+
+
 def ensure_network(name: str, *, internal: bool = False) -> dict[str, Any]:
     client = _get_client()
     try:
@@ -816,8 +830,8 @@ def exec_in_managed(
     *,
     environment: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """exec in managed postgres container (no msm-srv- prefix check)."""
-    assert_managed_postgres_name(name)
+    """exec in msm-postgres or a database server's own instance."""
+    assert_postgres_exec_target(name)
     if not command:
         raise ValueError("command is required")
     client = _get_client()
@@ -860,7 +874,7 @@ def exec_in_managed_stdin(
     environment: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Exec in managed Postgres with SQL over stdin instead of process argv."""
-    assert_managed_postgres_name(name)
+    assert_postgres_exec_target(name)
     if not command:
         raise ValueError("command is required")
     inherited = {

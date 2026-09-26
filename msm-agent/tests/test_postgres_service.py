@@ -179,7 +179,8 @@ def test_restore_uses_database_owner_and_stdin_not_argv():
     args = execute.call_args.args
     assert args[1] == [
         "psql", "--no-psqlrc", "--set", "ON_ERROR_STOP=1",
-        "--username", "msm_s1_o1", "--dbname", "msm_s1_db1"
+        "--username", "msm_s1_o1", "--dbname", "msm_s1_db1",
+        "--port", "5432",
     ]
     assert args[2] == "-- dump body"
     assert execute.call_args.kwargs["environment"] == {"PGPASSWORD": "owner-secret"}

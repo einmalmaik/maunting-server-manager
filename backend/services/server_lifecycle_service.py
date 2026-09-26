@@ -1198,6 +1198,18 @@ def switch_server_blueprint(db: Session, server: Server, new_blueprint_id: str, 
             },
         )
 
+    if "postgres" in {server.game_type, new_blueprint_id}:
+        # Ein Datenbankserver ist Blueprint *und* eigene Instanz. Ein Wechsel
+        # risse beides auseinander: ohne Instanzzeile liefen Datenbankaufrufe
+        # in den geteilten Cluster.
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "database_server_blueprint_locked",
+                "message": "Datenbankserver koennen den Blueprint nicht wechseln.",
+            },
+        )
+
     from blueprints import get_registry
     registry = get_registry()
     entry = registry.get(new_blueprint_id)

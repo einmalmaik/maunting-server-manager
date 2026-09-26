@@ -43,6 +43,7 @@ from .login_challenge import LoginChallenge
 from .postgres_database import PostgresDatabase
 from .postgres_user import PostgresUser
 from .postgres_grant import PostgresGrant
+from .postgres_instance import PostgresInstance
 from .webhook_subscription import WebhookSubscription
 from .webhook_delivery import WebhookDelivery
 from .singra_webhook_event import SingraWebhookEvent
@@ -100,7 +101,7 @@ __all__ = [
     "Backup", "PanelBackup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",
     "EmailVerification", "BackupCode", "PanelSetting", "ServerPort",
     "OAuthProvider", "OAuthUserLink", "LoginChallenge",
-    "PostgresDatabase", "PostgresUser", "PostgresGrant",
+    "PostgresDatabase", "PostgresUser", "PostgresGrant", "PostgresInstance",
     "WebhookSubscription", "WebhookDelivery", "SingraWebhookEvent",
     "Incident", "GuardianIncidentDelivery", "ChangeEvent",
     "HosterIntegration", "HosterProduct", "HosterIdentity", "HosterService",

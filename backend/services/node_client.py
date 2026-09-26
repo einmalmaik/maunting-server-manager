@@ -827,14 +827,16 @@ class NodeClient:
         return self._request("POST", "/postgres/roles/rotate-owner", json=payload)
 
     def postgres_dump(
-        self, *, admin_password: str, database_names: list[str]
+        self,
+        *,
+        admin_password: str,
+        database_names: list[str],
+        target: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return self._request(
-            "POST",
-            "/postgres/dump",
-            json={"admin_password": admin_password, "database_names": database_names},
-            timeout=_LONG_TIMEOUT,
-        )
+        payload: dict[str, Any] = {"admin_password": admin_password, "database_names": database_names}
+        if target:
+            payload["target"] = target
+        return self._request("POST", "/postgres/dump", json=payload, timeout=_LONG_TIMEOUT)
 
     def postgres_restore(
         self,
@@ -842,13 +844,16 @@ class NodeClient:
         admin_password: str,
         dumps: dict[str, str],
         owners: dict[str, dict[str, str]] | None = None,
+        target: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return self._request(
-            "POST",
-            "/postgres/restore",
-            json={"admin_password": admin_password, "dumps": dumps, "owners": owners or {}},
-            timeout=_LONG_TIMEOUT,
-        )
+        payload: dict[str, Any] = {"admin_password": admin_password, "dumps": dumps, "owners": owners or {}}
+        if target:
+            payload["target"] = target
+        return self._request("POST", "/postgres/restore", json=payload, timeout=_LONG_TIMEOUT)
+
+    def postgres_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Studio: Anweisungen ausfuehren. Payload traegt Passwoerter — nie loggen."""
+        return self._request("POST", "/postgres/run", json=payload, timeout=_LONG_TIMEOUT)
 
     @property
     def bearer_token(self) -> str:
