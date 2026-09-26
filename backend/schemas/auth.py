@@ -11,6 +11,7 @@ class LoginRequest(BaseModel):
     # keine Rechteerweiterung: der Aufrufer bekommt nur seine eigenen Tokens,
     # die er per Cookie ohnehin bekäme. Das Panel-Frontend setzt das Feld nie.
     native_client: bool = False
+    passkey_verified: bool = False
 
 
 class LoginVerifyRequest(BaseModel):
@@ -19,6 +20,7 @@ class LoginVerifyRequest(BaseModel):
     code: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
     otp_code: str | None = Field(None, pattern=r"^(\d{6}|[A-Z0-9]{4}-[A-Z0-9]{4})$")
     native_client: bool = False
+    passkey_verified: bool = False
 
 
 class TokenResponse(BaseModel):

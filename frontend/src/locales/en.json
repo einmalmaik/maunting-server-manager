@@ -2736,6 +2736,7 @@
     "signIn": "Sign in",
     "createAccount": "Create account",
     "verify2FA": "Verify 2FA",
+    "loginWithPasskey": "Sign in with Passkey / Biometrics",
     "noAccount": "No account?",
     "hasAccount": "Already have an account?",
     "forgotPassword": "Forgot password?",

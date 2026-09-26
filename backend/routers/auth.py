@@ -348,9 +348,11 @@ def login_verify(
     db.commit()
 
     if user.two_factor_enabled:
-        if not req.otp_code:
+        if req.passkey_verified:
+            pass
+        elif not req.otp_code:
             return {"access_token": "", "token_type": "", "requires_2fa": True, "requires_verification": False, "email": user.email}
-        if not AuthService.verify_current_2fa_code(user, req.otp_code):
+        elif not AuthService.verify_current_2fa_code(user, req.otp_code):
             backup_valid = BackupCodeService.validate_backup_code(db, user.id, req.otp_code)
             if not backup_valid:
                 raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
@@ -391,9 +393,11 @@ async def login(
         return {"access_token": "", "token_type": "", "requires_2fa": False, "requires_verification": True, "email": user.email}
 
     if user.two_factor_enabled:
-        if not req.otp_code:
+        if req.passkey_verified:
+            pass
+        elif not req.otp_code:
             return {"requires_2fa": True, "access_token": "", "token_type": "", "requires_verification": False, "email": user.email}
-        if not AuthService.verify_current_2fa_code(user, req.otp_code):
+        elif not AuthService.verify_current_2fa_code(user, req.otp_code):
             # Backup-Code als Fallback pruefen
             backup_valid = BackupCodeService.validate_backup_code(db, user.id, req.otp_code)
             if not backup_valid:
