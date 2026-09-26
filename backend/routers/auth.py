@@ -23,7 +23,7 @@ from dependencies import (
     _bearer_token,
     session_familie,
 )
-from models import User, EmailVerification, RefreshToken
+from models import User, EmailVerification
 from services.dis_client import DisClient
 from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, NativeRefreshRequest, LogoutRequest
 from schemas import ResendVerificationRequest
@@ -711,15 +711,12 @@ def refresh(
                 if cached:
                     tokens = cached["tokens"]
                 else:
-                    # Verwaiste unbenutzte Tokens in dieser Familie invalidieren, um Verzweigungen zu verhindern
-                    db.query(RefreshToken).filter(
-                        RefreshToken.family == family,
-                        RefreshToken.used_at.is_(None),
-                        RefreshToken.revoked_at.is_(None),
-                    ).update({"revoked_at": datetime.now(timezone.utc)})
-                    db.commit()
-                    tokens = issue_session(response, db, user, family=family, geraet=recent_rt.geraet)
-                    _remember_rotation(token_hash, tokens)
+                    # Ein Retry darf nur dieselbe bereits ausgestellte Antwort
+                    # wiederholen. Nach Neustart/auf einem anderen Worker ist
+                    # sie unbekannt: niemals eine zweite Tokenkette erzeugen.
+                    raise HTTPException(status_code=401, detail="Refresh-Antwort nicht mehr verfügbar")
+                if not AuthService.validate_refresh_token(db, tokens.refresh_token):
+                    raise HTTPException(status_code=401, detail="Refresh-Token bereits weiterrotiert")
 
                 _set_auth_cookies(response, tokens.access_token, tokens.refresh_token, tokens.csrf_token)
                 if body_token:

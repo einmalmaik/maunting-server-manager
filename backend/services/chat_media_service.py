@@ -84,7 +84,9 @@ class ChatMediaService:
     """Zentrale Geschaeftslogik fuer Chat-Medienanhaenge und signierte URLs."""
 
     @classmethod
-    def assert_chat_membership(cls, db: Session, user_id: int, media: ChatMedia) -> None:
+    def assert_chat_membership(
+        cls, db: Session, user_id: int, media: ChatMedia, mailbox_token: str | None = None
+    ) -> None:
         """Prueft strikt, ob der angefragte Benutzer Mitglied des Chats ist.
         
         Fremde (Nicht-Mitglieder) erhalten keine Berechtigung und duerfen
@@ -157,10 +159,7 @@ class ChatMediaService:
                 )
             return
 
-        raise HTTPException(
-            status_code=403,
-            detail="Keine Chat-Mitgliedschaft fuer diese Medienressource.",
-        )
+        SocialService.assert_mailbox_zugang(db, user_id, clean_mailbox, mailbox_token)
 
     @classmethod
     def upload_encrypted_media(
@@ -271,6 +270,7 @@ class ChatMediaService:
         user: User,
         media_id: str,
         ttl_seconds: int = 900,  # 15 Minuten Gueltigkeit
+        mailbox_token: str | None = None,
     ) -> tuple[str, datetime]:
         """Erzeugt eine signierte Medien-URL mit Ablaufzeit und Chat-Mitgliedschaftspruefung."""
         SocialService.assert_social_enabled(db)
@@ -280,7 +280,7 @@ class ChatMediaService:
             raise HTTPException(status_code=404, detail="Medienanhang nicht gefunden.")
 
         # Strikte Pruefung: Fremde duerfen keine signierten URLs fuer Chat-Medien generieren!
-        cls.assert_chat_membership(db, user.id, media)
+        cls.assert_chat_membership(db, user.id, media, mailbox_token)
 
         expires_at = _now() + timedelta(seconds=max(60, min(ttl_seconds, 86400)))
         expires_ts = int(expires_at.timestamp())
@@ -345,6 +345,7 @@ class ChatMediaService:
         token: str,
         expires: int,
         user_id: int,
+        mailbox_token: str | None = None,
     ) -> ChatMedia:
         """Validiert Signatur, Ablaufzeit und Chat-Mitgliedschaft beim Abruf eines Medien-Blobs."""
         now_ts = int(_now().timestamp())
@@ -376,6 +377,6 @@ class ChatMediaService:
             raise HTTPException(status_code=410, detail="Medienanhang ist abgelaufen.")
 
         # Strikte Pruefung beim Abruf: Auch bei gueltigem Token wird die aktuelle Chat-Mitgliedschaft geprueft!
-        cls.assert_chat_membership(db, user.id, media)
+        cls.assert_chat_membership(db, user.id, media, mailbox_token)
 
         return media

@@ -35,7 +35,7 @@ def test_google_registry_spec() -> None:
     assert spec.kind == "google"
     assert spec.label == "Google AI Studio"
     assert spec.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
-    assert spec.catalog_url == "https://generativelanguage.googleapis.com/v1beta/models"
+    assert spec.catalog_url == "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"
     assert spec.key_prefix is None
     assert spec.katalog_braucht_schluessel is True
     assert spec.schluessel_kopf == "Authorization"
@@ -52,7 +52,7 @@ def test_google_registry_spec() -> None:
 def test_google_catalog_gemini_models() -> None:
     """Prüft, dass Gemini-Modelle multimodal sind und 2.5/Thinking Denkstufen erhalten."""
     # Gemini 2.5 Flash
-    m25 = katalog_lesen({"id": "gemini-2.5-flash"})
+    m25 = katalog_lesen({"id": "gemini-2.5-flash", "thinking": True})
     assert m25 is not None
     assert m25.model_id == "gemini-2.5-flash"
     assert m25.sieht is True
@@ -62,14 +62,14 @@ def test_google_catalog_gemini_models() -> None:
     assert m25.kontext_tokens == 1_048_576
 
     # Gemini 2.0 Flash Thinking
-    m20_think = katalog_lesen({"id": "gemini-2.0-flash-thinking-exp"})
+    m20_think = katalog_lesen({"id": "gemini-2.0-flash-thinking-exp", "thinking": True})
     assert m20_think is not None
     assert m20_think.sieht is True
     assert m20_think.denkt is True
     assert m20_think.stufen == ("low", "medium", "high")
 
     # Gemini 1.5 Flash (ohne Thinking)
-    m15 = katalog_lesen({"id": "gemini-1.5-flash"})
+    m15 = katalog_lesen({"id": "gemini-1.5-flash", "thinking": False})
     assert m15 is not None
     assert m15.sieht is True
     assert m15.denkt is False
@@ -78,7 +78,7 @@ def test_google_catalog_gemini_models() -> None:
 
 def test_google_catalog_gemma_models() -> None:
     """Prüft, dass Gemma-Modelle als Textmodelle mit konfigurierbarem Thinking erkannt werden."""
-    gemma27 = katalog_lesen({"id": "gemma-2-27b-it"})
+    gemma27 = katalog_lesen({"id": "gemma-2-27b-it", "thinking": True})
     assert gemma27 is not None
     assert gemma27.model_id == "gemma-2-27b-it"
     assert gemma27.sieht is False
@@ -88,7 +88,7 @@ def test_google_catalog_gemma_models() -> None:
     assert gemma27.kontext_tokens == 32_768
     assert gemma27.max_ausgabe_tokens == 8_192
 
-    gemma9 = katalog_lesen({"id": "gemma-2-9b-it"})
+    gemma9 = katalog_lesen({"id": "gemma-2-9b-it", "thinking": True})
     assert gemma9 is not None
     assert gemma9.sieht is False
     assert gemma9.denkt is True
@@ -189,7 +189,7 @@ def test_encode_with_google_mock() -> None:
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
         "data": [
-            {"embedding": dummy_embedding}
+            {"index": 0, "embedding": dummy_embedding}
         ]
     }
 
@@ -326,7 +326,7 @@ def test_mit_openai_als_rueckfall_rechnet_openai_und_nur_openai(
 
     antwort = MagicMock()
     antwort.status_code = 200
-    antwort.json.return_value = {"data": [{"embedding": [0.5] * 256}]}
+    antwort.json.return_value = {"data": [{"index": 0, "embedding": [0.5] * 256}]}
     gesendet: list[dict] = []
 
     class Client:
@@ -1409,3 +1409,53 @@ def test_gemini_live_session_setup_payload_thinking_level() -> None:
 
 
 
+
+
+@pytest.mark.parametrize("model", ["gemini-2.5-flash", "gemini-2.0-flash-thinking-exp", "gemma-2-27b-it"])
+def test_thinking_ohne_anbieterangabe_bleibt_unbekannt(model):
+    result = katalog_lesen({"name": f"models/{model}"})
+    assert result.denkt is None
+    assert result.stufen == ()
+
+
+@pytest.mark.asyncio
+async def test_live_zeitlimit_meldet_ablauf_und_beendet_leser(monkeypatch):
+    from services.ai_voice import gemini_live_session as live
+    sitzung, panel = _gemini_sitzung()
+    beendet = []
+
+    async def lesen():
+        try:
+            await asyncio.Event().wait()
+        finally:
+            beendet.append(True)
+
+    monkeypatch.setattr(live, "MAX_SITZUNGSSEKUNDEN", 0.01)
+    monkeypatch.setattr(live.websockets, "connect", AsyncMock(return_value=AsyncMock()))
+    monkeypatch.setattr(sitzung, "_client_lesen", lesen)
+    monkeypatch.setattr(sitzung, "_google_lesen", lesen)
+    monkeypatch.setattr(sitzung, "_abschliessen", lambda: None)
+    result = await sitzung.fuehren()
+    assert result.abgelaufen is True
+    assert beendet == [True, True]
+    assert {"art": "abgelaufen"} in [c.args[0] for c in panel.send_json.call_args_list]
+
+
+@pytest.mark.parametrize("indices", [[1, 0], [0], [0, 0], [0, 2], [False, 1], [None, 1]])
+def test_embedding_antwort_ordnet_texte_eindeutig_zu(indices):
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"data": [
+        {"index": index, "embedding": [1.0, 0.0] if index == 0 else [0.0, 1.0]}
+        for index in indices
+    ]}
+    client = MagicMock()
+    client.post.return_value = response
+    result = ai_embedding_service.encode_ueber_anbieter(
+        ["erster", "zweiter"], api_key="synthetic", base_url="https://example.invalid",
+        model="test", client=client,
+    )
+    if indices == [1, 0]:
+        assert result[0][:2] == [1.0, 0.0]
+        assert result[1][:2] == [0.0, 1.0]
+    else:
+        assert result is None

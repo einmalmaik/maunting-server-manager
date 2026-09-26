@@ -49,6 +49,7 @@ from services.ai_tool_registry import (
     READ_TOOLS,
     WORKER_STEUERUNG,
     WRITE_TOOLS,
+    rollen_ausschluss,
 )
 from services.openai_compatible_adapter import StreamUsage
 
@@ -692,6 +693,19 @@ async def _schreibrunde_ausfuehren(
                     "Das Gehirn führt keine direkten Server-Aktionen aus. Der Aufruf lief nicht — "
                     "gib die Server-Arbeit mit worker_start als Auftrag in den Hintergrund."
                 ),
+            ))
+            if _runde_zaehlen(zustand, rundendeckel):
+                return _SchreibrundenErgebnis(
+                    denknaht=denknaht, budget_erschoepft=True, letzte_runde=True
+                )
+            return _SchreibrundenErgebnis(denknaht=denknaht)
+    else:
+        verboten = rollen_ausschluss(rolle)
+        unzulässig = [call for call in current_usage.tool_calls if call.name in verboten]
+        if unzulässig:
+            provider_messages.extend(_rundenfehler_nachrichten(
+                unzulässig, rundentext, code="AI_TOOL_ROLE_DENIED",
+                hinweis="Dieses Werkzeug steht dieser Rolle nicht zur Verfügung. Der Aufruf lief nicht.",
             ))
             if _runde_zaehlen(zustand, rundendeckel):
                 return _SchreibrundenErgebnis(

@@ -1088,3 +1088,31 @@ def test_upload_unauthorized_mailbox_rejection(db: Session, owner_user: User):
     assert "Keine Berechtigung" in exc_info.value.detail
 
 
+
+
+def test_geheime_mailbox_medien_brauchen_nachweis_bei_ausstellung_und_download(
+    client, db, owner_user, regular_user, user_cookies,
+):
+    from models import E2eeBlindMailbox
+    mailbox = "a" * 64
+    proof = "b" * 64
+    db.add(E2eeBlindMailbox(mailbox_id=mailbox, auth_verifier=SocialService._verifier_von(proof)))
+    media = ChatMedia(
+        id="secret-mailbox-media", uploader_user_id=owner_user.id, blind_mailbox_id=mailbox,
+        ciphertext_blob="synthetic-ciphertext", media_type="application/octet-stream",
+        file_name="encrypted.bin", size_bytes=20, sha256="c" * 64,
+    )
+    db.add(media)
+    db.commit()
+    path = f"/api/social/media/{media.id}/signed-url"
+    for headers in [{}, {"X-Mailbox-Token": "d" * 64}]:
+        assert client.get(path, cookies=user_cookies, headers=headers).status_code == 403
+    signed = client.get(path, cookies=user_cookies, headers={"X-Mailbox-Token": proof})
+    assert signed.status_code == 200
+    url = signed.json()["signed_url"]
+    assert proof not in url
+    for headers in [{}, {"X-Mailbox-Token": "d" * 64}]:
+        assert client.get(url, headers=headers).status_code == 403
+    downloaded = client.get(url, headers={"X-Mailbox-Token": proof})
+    assert downloaded.status_code == 200
+    assert downloaded.text == "synthetic-ciphertext"

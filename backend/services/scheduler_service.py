@@ -1211,26 +1211,23 @@ async def _e2ee_envelope_cleanup_task() -> None:
     """Regelmäßiger Hintergrund-Task zur Durchsetzung der 30-Tage-Vorhaltefrist für E2EE-Umschläge."""
     from services.chat_media_service import ChatMediaService
     from services.social_service import SocialService
-    db = SessionLocal()
-    try:
-        SocialService.cleanup_expired_envelopes(db)
-    except Exception as e:
-        logger.error("Fehler bei E2EE-Umschlag-Bereinigung: %s", e)
-        db.rollback()
-    # Anhaenge nach Ablauf ihrer Aufbewahrung — bis dahin lagen sie ewig.
-    try:
-        ChatMediaService.cleanup_expired_media(db)
-    except Exception as e:
-        logger.error("Fehler bei Anhang-Bereinigung: %s", e)
-        db.rollback()
-    # Stories nach ihren 24 Stunden. Angezeigt wurden sie danach nicht mehr,
-    # gespeichert blieben sie samt Bild fuer immer.
-    try:
-        SocialService.cleanup_expired_stories(db)
-    except Exception as e:
-        logger.error("Fehler bei Story-Bereinigung: %s", e)
-    finally:
-        db.close()
+    def _worker() -> None:
+        db = SessionLocal()
+        try:
+            for name, cleanup in (
+                ("E2EE-Umschlag", SocialService.cleanup_expired_envelopes),
+                ("Anhang", ChatMediaService.cleanup_expired_media),
+                ("Story", SocialService.cleanup_expired_stories),
+            ):
+                try:
+                    cleanup(db)
+                except Exception:
+                    logger.exception("Fehler bei %s-Bereinigung", name)
+                    db.rollback()
+        finally:
+            db.close()
+
+    await asyncio.to_thread(_worker)
 
 
 def _ensure_e2ee_envelope_cleanup_job() -> None:

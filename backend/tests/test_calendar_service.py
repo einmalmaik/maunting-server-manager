@@ -1108,3 +1108,25 @@ def test_vorkommen_im_fenster_resilience_against_malformed_event(db_session, tes
     assert "Gültiger Termin 1" in titles
     assert "Gültiger Termin 2" in titles
 
+
+
+def test_erinnerungsfenster_entschluesselt_nur_passende_inhalte(db_session, test_user, monkeypatch):
+    from services import calendar_service
+    for title, start, end, recurrence in [
+        ("Vergangen", "2000-01-01", "2000-01-02", None),
+        ("Geburtstag", "2000-09-26", "2000-09-27", _serie("FREQ=YEARLY")),
+        ("Aktuell", "2026-09-26", "2026-09-27", None),
+    ]:
+        CalendarService.create_event(db_session, test_user, title=title, start_time=start,
+                                     end_time=end, all_day=True, recurrence=recurrence)
+    decrypted = []
+    original = calendar_service._decrypt_or_migrate_calendar_event
+    def decrypt(db, row):
+        result = original(db, row)
+        decrypted.append(result[0])
+        return result
+    monkeypatch.setattr(calendar_service, "_decrypt_or_migrate_calendar_event", decrypt)
+    result = CalendarService.vorkommen_im_fenster(db_session, test_user,
+        von=datetime(2026, 9, 26, tzinfo=timezone.utc), bis=datetime(2026, 9, 28, tzinfo=timezone.utc))
+    assert sorted(row["title"] for row in result) == ["Aktuell", "Geburtstag"]
+    assert sorted(decrypted) == ["Aktuell", "Geburtstag"]

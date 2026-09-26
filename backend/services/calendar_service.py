@@ -556,6 +556,8 @@ class CalendarService:
         event_type: str | None = None,
         team_id: int | None = None,
         server_id: int | None = None,
+        *,
+        _vorkommen_fenster: tuple[datetime | None, datetime | None] | None = None,
     ) -> list[dict[str, Any]]:
         """Liest Termine aus dem nativen oder CalDAV-Kalender.
 
@@ -638,10 +640,33 @@ class CalendarService:
                 if ev.event_type == "team" and ev.team and ev.team.owner_user_id == user.id:
                     can_edit = True
 
-                title, desc, loc = _decrypt_or_migrate_calendar_event(db, ev)
+                # Das Serienmerkmal selbst ist verschluesselt (auch bei
+                # Einzelterminen). Deshalb muessen wir die Regel lesen, bevor
+                # wir nach dem Fenster filtern; Titel, Ort und Beschreibung
+                # brauchen dagegen nur tatsaechlich faellige Vorkommen.
                 recurrence = _wiederholung_entschluesseln(db, ev)
+                vorkommen = None
+                if _vorkommen_fenster is not None:
+                    try:
+                        serie = serie_lesen(recurrence)
+                        von, bis = _vorkommen_fenster
+                        vorkommen = list(ausbreiten(
+                            serie,
+                            _parse_datetime(_iso_utc(ev.start_time), user=user),
+                            _parse_datetime(_iso_utc(ev.end_time), user=user),
+                            ganztaegig=bool(ev.all_day),
+                            zeitzone=getattr(user, "time_zone", None),
+                            fenster_von=von,
+                            fenster_bis=bis,
+                        ))
+                    except Exception:
+                        _log.warning("Terminregel nicht ausbreitbar: %s", ev.event_uid)
+                        continue
+                    if not vorkommen:
+                        continue
+                title, desc, loc = _decrypt_or_migrate_calendar_event(db, ev)
 
-                result.append({
+                formatted = {
                     "event_id": ev.event_uid,
                     "id": ev.id,
                     "title": title,
@@ -661,7 +686,21 @@ class CalendarService:
                     "user_id": ev.user_id,
                     "can_edit": can_edit,
                     "calendar": calendar.name if calendar else "MSM Kalender",
-                })
+                }
+                if vorkommen is None:
+                    result.append(formatted)
+                else:
+                    for v in vorkommen:
+                        result.append({
+                            **formatted,
+                            "start": _iso_utc(v.start),
+                            "end": _iso_utc(v.ende),
+                            "vorkommen": v.schluessel,
+                            "ist_serie": serie.ist_serie,
+                            "title": v.titel or title,
+                        })
+            if _vorkommen_fenster is not None:
+                result.sort(key=lambda e: e.get("start") or "")
             return result
 
         # 2. Externer CalDAV-Kalender
@@ -777,50 +816,15 @@ class CalendarService:
                 server_id=server_id,
             )
 
-        termine = cls.get_events(
+        return cls.get_events(
             db,
             user,
             calendar_id=calendar_id,
             event_type=event_type,
             team_id=team_id,
             server_id=server_id,
+            _vorkommen_fenster=(von, bis),
         )
-
-        tz_name = getattr(user, "time_zone", None)
-        ergebnis: list[dict[str, Any]] = []
-
-        for termin in termine:
-            try:
-                serie = serie_lesen(termin.get("recurrence"))
-                try:
-                    start_dt = _parse_datetime(termin.get("start", ""), user=user)
-                    ende_dt = _parse_datetime(termin.get("end", ""), user=user)
-                except Exception:
-                    continue
-
-                for v in ausbreiten(
-                    serie,
-                    start_dt,
-                    ende_dt,
-                    ganztaegig=bool(termin.get("all_day")),
-                    zeitzone=tz_name,
-                    fenster_von=von,
-                    fenster_bis=bis,
-                ):
-                    eintrag = dict(termin)
-                    eintrag["start"] = _iso_utc(v.start)
-                    eintrag["end"] = _iso_utc(v.ende)
-                    eintrag["vorkommen"] = v.schluessel
-                    eintrag["ist_serie"] = serie.ist_serie
-                    if v.titel:
-                        eintrag["title"] = v.titel
-                    ergebnis.append(eintrag)
-            except Exception:
-                _log.warning("Fehler beim Ausbreiten von Termin %s, wird übersprungen", termin.get("event_id"), exc_info=True)
-                continue
-
-        ergebnis.sort(key=lambda e: e.get("start") or "")
-        return ergebnis
 
     @classmethod
     def create_event(

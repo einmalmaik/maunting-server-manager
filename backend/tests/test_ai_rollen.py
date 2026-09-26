@@ -775,3 +775,45 @@ class TestWorkerFrage:
 
         assert ergebnis is not None and ergebnis.signal == "weiter"
         assert zustand["rounds"] == 1
+
+
+@pytest.mark.parametrize("rolle,werkzeug", [("voll", "worker_start"), ("voll", "worker_frage"), ("worker", "worker_start"), ("worker", "remember")])
+def test_vorschlaege_respektieren_rollenausschluss(db: Session, rolle, werkzeug) -> None:
+    """Auch Vorschlaege duerfen den Rollenausschluss nicht umgehen."""
+    usage = StreamUsage()
+    usage.tool_calls = [ProviderToolCall(
+        id="w1", name=werkzeug,
+        arguments={"server_id": 1, "action": "restart"},
+    )]
+    provider_messages: list[dict] = []
+    zustand: dict = {}
+
+    def _niemals(*args, **kwargs):
+        raise AssertionError("Verbotene Werkzeuge duerfen keine Vorschlaege anlegen")
+
+    with patch.object(ai_run_broker, "lauf_status", lambda run_id: "running"), \
+         patch.object(ai_stream_service, "_persist_write_proposals", _niemals):
+        ergebnis = asyncio.run(ai_stream_service._schreibrunde_ausfuehren(
+            run_id="r1",
+            user_id=1,
+            conversation_id="c1",
+            vorbereitung=_vorbereitung(),
+            guardian=None,
+            aufgabe=None,
+            unbeaufsichtigt=False,
+            rolle=rolle,
+            rundendeckel=48,
+            rundentext="",
+            current_usage=usage,
+            provider_messages=provider_messages,
+            zustand=zustand,
+            chunks=[],
+            thoughts=[],
+            denknaht="",
+        ))
+
+    assert ergebnis.geparkt is False and ergebnis.abgeloest is False
+    assert zustand["rounds"] == 1
+    ergebnisse = [m for m in provider_messages if m.get("role") == "tool"]
+    assert len(ergebnisse) == 1
+    assert "AI_TOOL_ROLE_DENIED" in ergebnisse[0]["content"]

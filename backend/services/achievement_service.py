@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import logging
 from typing import Any
-from sqlalchemy import func
+from sqlalchemy import event, func
 from sqlalchemy.orm import Session
 
 from models import (
@@ -19,6 +19,42 @@ from models import (
 from services.sync_event_service import SyncEventService
 
 logger = logging.getLogger(__name__)
+
+
+_EREIGNISSE = "msm_achievement_events"
+
+
+@event.listens_for(Session, "after_commit")
+def _sende_freischaltungen(db: Session) -> None:
+    if db.in_nested_transaction():
+        return
+    for _transaction, user_id, payload in db.info.pop(_EREIGNISSE, []):
+        try:
+            SyncEventService.publish(payload, user_id=user_id)
+        except Exception as exc:
+            # Die Daten sind bereits gespeichert. Eine defekte Verbindung
+            # darf weder den Commit als Fehler melden noch weitere Events verlieren.
+            logger.warning("Achievement-Ereignis nicht zugestellt: %s", type(exc).__name__)
+
+
+@event.listens_for(Session, "after_soft_rollback")
+def _verwerfe_freischaltungen(db: Session, transaction) -> None:
+    def gehoert_dazu(queued) -> bool:
+        while queued is not None:
+            if queued is transaction:
+                return True
+            queued = queued.parent
+        return False
+
+    db.info[_EREIGNISSE] = [
+        entry for entry in db.info.get(_EREIGNISSE, []) if not gehoert_dazu(entry[0])
+    ]
+
+
+@event.listens_for(Session, "after_transaction_end")
+def _verwerfe_beim_schliessen(db: Session, transaction) -> None:
+    if transaction.parent is None:
+        db.info.pop(_EREIGNISSE, None)
 
 
 def _now() -> datetime:
@@ -1077,25 +1113,21 @@ class AchievementService:
             unlocked_at=_now(),
         )
         db.add(record)
+        ach = ACHIEVEMENTS_BY_ID[achievement_id]
+        payload = {
+            "type": "achievement_unlocked",
+            "achievement": {
+                "id": achievement_id,
+                "title": ach["title"],
+                "description": ach["description"],
+                "points": ach["points"],
+                "icon": ach["icon"],
+                "unlocked_at": record.unlocked_at.isoformat(),
+            },
+        }
+        db.info.setdefault(_EREIGNISSE, []).append((db.get_nested_transaction() or db.get_transaction(), user_id, payload))
         if commit:
             db.commit()
-
-        ach = ACHIEVEMENTS_BY_ID[achievement_id]
-        # Benachrichtigung via SSE
-        SyncEventService.publish(
-            {
-                "type": "achievement_unlocked",
-                "achievement": {
-                    "id": achievement_id,
-                    "title": ach["title"],
-                    "description": ach["description"],
-                    "points": ach["points"],
-                    "icon": ach["icon"],
-                    "unlocked_at": record.unlocked_at.isoformat(),
-                },
-            },
-            user_id=user_id,
-        )
         logger.info("Achievement '%s' für User %d freigeschaltet", achievement_id, user_id)
         return True
 
@@ -1221,3 +1253,4 @@ class AchievementService:
             db.commit()
         except Exception:
             db.rollback()
+            logger.warning("Errungenschaften konnten nicht gespeichert werden", exc_info=True)
