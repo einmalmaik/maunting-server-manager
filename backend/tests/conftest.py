@@ -353,6 +353,7 @@ def clean_db():
     # leaken Werte zwischen Tests (z. B. oauth.allow_registration=true aus
     # einem frueheren Test).
     PanelSettingsService.invalidate_cache()
+    PanelSettingsService.set("captcha_enabled", "false")
     session = db_module.SessionLocal()
     try:
         ensure_system_roles(session)

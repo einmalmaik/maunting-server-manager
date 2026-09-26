@@ -27,6 +27,7 @@ export function Register() {
 
   const [error, setError] = useState('')
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaResetKey, setCaptchaResetKey] = useState(0)
   const [success, setSuccess] = useState(false)
   const [requiresVerification, setRequiresVerification] = useState(false)
   const [registeredEmail, setRegisteredEmail] = useState('')
@@ -64,6 +65,8 @@ export function Register() {
       setForm({ username: '', email: res.email, password: '', confirm: '' })
     } catch (err: any) {
       setError(err.message || t('auth.registerFailed'))
+      setCaptchaToken(null)
+      setCaptchaResetKey((k) => k + 1)
     } finally {
       setSubmitting(false)
     }
@@ -257,7 +260,7 @@ export function Register() {
               required
             />
 
-            <CaptchaWidget onVerify={setCaptchaToken} />
+            <CaptchaWidget onVerify={setCaptchaToken} resetKey={captchaResetKey} />
 
             <ErrorMessage message={error} className="text-sm" />
 

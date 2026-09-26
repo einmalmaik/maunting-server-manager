@@ -50,14 +50,16 @@ from services.totp_qr import qr_datenuri
 
 from services.captcha_service import CaptchaService
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @router.get("/captcha-config")
 def get_captcha_config() -> dict:
     """Oeffentliche CAPTCHA-Konfiguration fuer das Frontend."""
-    enabled = PanelSettingsService.get("captcha_enabled", "false") == "true"
-    provider = PanelSettingsService.get("captcha_provider", "none")
+    enabled = PanelSettingsService.get("captcha_enabled", "true") == "true"
+    provider = PanelSettingsService.get("captcha_provider", "altcha")
     site_key = PanelSettingsService.get("captcha_site_key", "")
     return {
         "enabled": enabled,
@@ -66,7 +68,19 @@ def get_captcha_config() -> dict:
     }
 
 
-logger = logging.getLogger(__name__)
+@router.get("/captcha-challenge")
+def get_captcha_challenge() -> dict:
+    """Liefert eine ALTCHA Proof-of-Work Challenge fuer das Frontend."""
+    enabled = PanelSettingsService.get("captcha_enabled", "true") == "true"
+    provider = PanelSettingsService.get("captcha_provider", "altcha")
+    if not enabled or provider != "altcha":
+        raise HTTPException(status_code=400, detail="ALTCHA ist derzeit nicht aktiv.")
+    try:
+        from services.dis_client import DisClient, DisSidecarError
+        return DisClient.create_altcha_challenge()
+    except DisSidecarError as exc:
+        logger.error("DIS Sidecar Fehler bei ALTCHA-Challenge: %s", exc)
+        raise HTTPException(status_code=503, detail="Kryptographischer Dienst vorübergehend nicht erreichbar.")
 
 REGISTER_VERIFICATION_PURPOSE = "register"
 LOGIN_VERIFICATION_PURPOSE = "login"

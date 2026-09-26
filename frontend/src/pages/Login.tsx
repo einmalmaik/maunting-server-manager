@@ -24,6 +24,7 @@ export function Login() {
   const { finishLogin } = useAuthStore()
   const [error, setError] = useState('')
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaResetKey, setCaptchaResetKey] = useState(0)
   const [form, setForm] = useState({ username: '', password: '', otp: '' })
   const [requires2FA, setRequires2FA] = useState(false)
   const [useBackupCode, setUseBackupCode] = useState(false)
@@ -101,6 +102,8 @@ export function Login() {
     } catch (err: any) {
       setError(err.message || t('auth.loginFailed'))
       setSubmitting(false)
+      setCaptchaToken(null)
+      setCaptchaResetKey((k) => k + 1)
     }
   }
 
@@ -347,7 +350,7 @@ export function Login() {
               )}
 
               {!requires2FA && (
-                <CaptchaWidget onVerify={setCaptchaToken} />
+                <CaptchaWidget onVerify={setCaptchaToken} resetKey={captchaResetKey} />
               )}
 
               <ErrorMessage message={error} className="text-sm" />

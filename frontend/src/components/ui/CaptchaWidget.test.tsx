@@ -21,6 +21,19 @@ function skript(): HTMLScriptElement | null {
  */
 describe('CaptchaWidget', () => {
   beforeEach(async () => {
+    Object.defineProperty(window, 'isSecureContext', {
+      value: true,
+      configurable: true,
+      writable: true,
+    })
+    if (typeof (window as any).Worker === 'undefined') {
+      ;(window as any).Worker = class {
+        postMessage() {}
+        terminate() {}
+        addEventListener() {}
+        removeEventListener() {}
+      }
+    }
     vi.mocked(client.api).mockReset()
     vi.mocked(client.api).mockResolvedValue({
       enabled: true,
@@ -73,4 +86,79 @@ describe('CaptchaWidget', () => {
       vi.useRealTimers()
     }
   })
+
+  it('rendert das lokale ALTCHA-Widget und verarbeitet Verifikation', async () => {
+    vi.mocked(client.api).mockResolvedValue({
+      enabled: true,
+      provider: 'altcha',
+      site_key: '',
+    })
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          algorithm: 'SHA-256',
+          challenge: 'mock-challenge-123',
+          maxnumber: 100,
+          salt: `mock-salt?expires=${Math.floor(Date.now() / 1000) + 300}`,
+          signature: 'mock-sig',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+
+    const onVerify = vi.fn()
+    const { container, rerender } = render(<CaptchaWidget onVerify={onVerify} />)
+
+    await waitFor(() => {
+      const widget = container.querySelector('altcha-widget')
+      expect(widget).not.toBeNull()
+      expect(widget?.getAttribute('challenge')).toContain('/api/auth/captcha-challenge')
+    })
+
+    const widget = container.querySelector('altcha-widget')!
+
+    // statechange event
+    await act(async () => {
+      widget.dispatchEvent(
+        new CustomEvent('statechange', {
+          detail: { state: 'verified', payload: 'mock-altcha-payload-123' },
+        }),
+      )
+    })
+    expect(onVerify).toHaveBeenCalledWith('mock-altcha-payload-123')
+
+    // verified event
+    await act(async () => {
+      widget.dispatchEvent(
+        new CustomEvent('verified', {
+          detail: { payload: 'mock-altcha-payload-456' },
+        }),
+      )
+    })
+    expect(onVerify).toHaveBeenCalledWith('mock-altcha-payload-456')
+
+    // expired resets token
+    await act(async () => {
+      widget.dispatchEvent(
+        new CustomEvent('statechange', {
+          detail: { state: 'expired' },
+        }),
+      )
+    })
+    expect(onVerify).toHaveBeenCalledWith('')
+
+    // error resets token and shows alert
+    await act(async () => {
+      widget.dispatchEvent(
+        new CustomEvent('statechange', {
+          detail: { state: 'error' },
+        }),
+      )
+    })
+    expect(onVerify).toHaveBeenCalledWith('')
+    const errorAlert = await screen.findByRole('alert')
+    expect(errorAlert.textContent).toContain('Sicherheitsabfrage konnte nicht geladen werden')
+  })
 })
+

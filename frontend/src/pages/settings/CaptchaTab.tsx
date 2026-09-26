@@ -92,6 +92,7 @@ export function CaptchaTab() {
                   value={settings.captcha_provider}
                   onChange={(val) => setSettings({ ...settings, captcha_provider: val as any })}
                   options={[
+                    { value: 'altcha', label: 'ALTCHA (Lokal & Datenschutzfreundlich)' },
                     { value: 'turnstile', label: 'Cloudflare Turnstile' },
                     { value: 'hcaptcha', label: 'hCaptcha' },
                     { value: 'recaptcha', label: 'Google reCAPTCHA v2 (Checkbox)' },
@@ -100,46 +101,59 @@ export function CaptchaTab() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label
-                    htmlFor="captcha-site-key"
-                    className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider"
-                  >
-                    {t('settings.captcha.siteKey', { defaultValue: 'Site Key (Website-Schlüssel)' })}
-                  </label>
-                  <Input
-                    id="captcha-site-key"
-                    type="text"
-                    value={settings.captcha_site_key}
-                    onChange={(event) => setSettings({ ...settings, captcha_site_key: event.target.value })}
-                    placeholder="e.g. 0x4AAAAAA..."
-                    disabled={!canWrite}
-                  />
-                  <p className="msm-field-help">
-                    {t('settings.captcha.siteKeyHint', { defaultValue: 'Öffentlicher Schlüssel zur Anzeige des Widgets im Browser.' })}
+              {settings.captcha_provider === 'altcha' ? (
+                <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 text-body-sm text-on-surface-variant">
+                  <p className="font-semibold text-primary">
+                    {t('settings.captcha.altchaTitle', { defaultValue: '100 % lokal & DSGVO-konform' })}
+                  </p>
+                  <p className="mt-1">
+                    {t('settings.captcha.altchaInfo', {
+                      defaultValue: 'Läuft vollständig auf deinem Server über DIS. Keine externen Anfragen, kein Tracking, keine Cookies und keine API-Schlüssel notwendig.',
+                    })}
                   </p>
                 </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label
+                      htmlFor="captcha-site-key"
+                      className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider"
+                    >
+                      {t('settings.captcha.siteKey', { defaultValue: 'Site Key (Website-Schlüssel)' })}
+                    </label>
+                    <Input
+                      id="captcha-site-key"
+                      type="text"
+                      value={settings.captcha_site_key}
+                      onChange={(event) => setSettings({ ...settings, captcha_site_key: event.target.value })}
+                      placeholder="e.g. 0x4AAAAAA..."
+                      disabled={!canWrite}
+                    />
+                    <p className="msm-field-help">
+                      {t('settings.captcha.siteKeyHint', { defaultValue: 'Öffentlicher Schlüssel zur Anzeige des Widgets im Browser.' })}
+                    </p>
+                  </div>
 
-                <div>
-                  <label
-                    htmlFor="captcha-secret-key"
-                    className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider"
-                  >
-                    {t('settings.captcha.secretKey', { defaultValue: 'Secret Key (Geheimer Schlüssel)' })}
-                  </label>
-                  <PasswordInput
-                    id="captcha-secret-key"
-                    value={settings.captcha_secret_key}
-                    onChange={(event) => setSettings({ ...settings, captcha_secret_key: event.target.value })}
-                    placeholder={settings.captcha_secret_key ? '••••••••' : 'e.g. 0x4AAAAAA...'}
-                    disabled={!canWrite}
-                  />
-                  <p className="msm-field-help">
-                    {t('settings.captcha.secretKeyHint', { defaultValue: 'Privater Schlüssel zur serverseitigen Token-Validierung.' })}
-                  </p>
+                  <div>
+                    <label
+                      htmlFor="captcha-secret-key"
+                      className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider"
+                    >
+                      {t('settings.captcha.secretKey', { defaultValue: 'Secret Key (Geheimer Schlüssel)' })}
+                    </label>
+                    <PasswordInput
+                      id="captcha-secret-key"
+                      value={settings.captcha_secret_key}
+                      onChange={(event) => setSettings({ ...settings, captcha_secret_key: event.target.value })}
+                      placeholder={settings.captcha_secret_key ? '••••••••' : 'e.g. 0x4AAAAAA...'}
+                      disabled={!canWrite}
+                    />
+                    <p className="msm-field-help">
+                      {t('settings.captcha.secretKeyHint', { defaultValue: 'Privater Schlüssel zur serverseitigen Token-Validierung.' })}
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>
