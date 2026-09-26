@@ -1,0 +1,145 @@
+"""Der KI-Chat steht in der Datenbank nur verschluesselt.
+
+Bis 26.09.2026 lagen Nachrichten, Titel, Zusammenfassungen, Werkzeugergebnisse
+und Laufzustand im Klartext. Wer die Tabellen im PostgreSQL-Studio oder in
+einem Dump ansah, las jedes Gespraech mit. Geprueft wird deshalb der Rohwert
+in der Datenbank, am ORM vorbei, und nicht nur, dass der Code dasselbe
+zurueckbekommt, was er hineingab.
+"""
+
+from __future__ import annotations
+
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from models import AiConversation, AiMessage, AiRun, AiToolResult, User
+from services.dis_client import DisClient
+
+GEHEIM = "Passwort vom Schwager: Sonnenblume42"
+
+
+def _roh(db: Session, tabelle: str, spalte: str, zeilen_id: str) -> str:
+    return db.execute(
+        text(f"SELECT {spalte} FROM {tabelle} WHERE id = :id"), {"id": zeilen_id}
+    ).scalar_one()
+
+
+def _gespraech(db: Session, user: User) -> AiConversation:
+    gespraech = AiConversation(id=str(uuid4()), user_id=user.id, title=GEHEIM, summary=GEHEIM)
+    db.add(gespraech)
+    db.commit()
+    return gespraech
+
+
+SPALTEN = [
+    ("ai_conversations", "title"),
+    ("ai_conversations", "summary"),
+    ("ai_messages", "content"),
+    ("ai_messages", "reasoning"),
+    ("ai_messages", "question_json"),
+    ("ai_messages", "sections_json"),
+    ("ai_tool_results", "result_json"),
+    ("ai_runs", "state_json"),
+]
+
+
+@pytest.mark.parametrize(("tabelle", "spalte"), SPALTEN)
+def test_rohwert_ist_chiffrat(db: Session, regular_user: User, tabelle: str, spalte: str) -> None:
+    gespraech = _gespraech(db, regular_user)
+    zeilen = {
+        "ai_conversations": gespraech,
+        "ai_messages": AiMessage(
+            id=str(uuid4()), conversation_id=gespraech.id, role="assistant",
+            content=GEHEIM, reasoning=GEHEIM, question_json=GEHEIM, sections_json=GEHEIM,
+        ),
+        "ai_tool_results": AiToolResult(
+            id=str(uuid4()), conversation_id=gespraech.id, tool_name="list_servers", result_json=GEHEIM,
+        ),
+        "ai_runs": AiRun(
+            id=str(uuid4()), conversation_id=gespraech.id, user_id=regular_user.id, state_json=GEHEIM,
+        ),
+    }
+    zeile = zeilen[tabelle]
+    db.add(zeile)
+    db.commit()
+
+    roh = _roh(db, tabelle, spalte, zeile.id)
+    assert GEHEIM not in roh
+    assert DisClient.ist_verschluesselt(roh)
+    # Und die AAD gehoert zur Spalte: ein Wert laesst sich nicht in eine
+    # andere Spalte umhaengen.
+    assert DisClient.decrypt(roh, aad=f"msm:ai:{tabelle}.{spalte}") == GEHEIM
+
+    db.expire_all()
+    assert getattr(db.get(type(zeile), zeile.id), spalte) == GEHEIM
+
+
+def test_altbestand_bleibt_lesbar_und_wird_nachgezogen(db: Session, regular_user: User) -> None:
+    from services.dis_altbestand import nachziehen
+
+    gespraech = _gespraech(db, regular_user)
+    nachricht = AiMessage(id=str(uuid4()), conversation_id=gespraech.id, role="user", content="neu")
+    db.add(nachricht)
+    db.commit()
+    # So sieht eine Zeile von vor der Umstellung aus.
+    db.execute(text("UPDATE ai_messages SET content = :k WHERE id = :id"), {"k": GEHEIM, "id": nachricht.id})
+    db.commit()
+    db.expire_all()
+    assert db.get(AiMessage, nachricht.id).content == GEHEIM
+
+    assert nachziehen(db) >= 1
+
+    roh = _roh(db, "ai_messages", "content", nachricht.id)
+    assert DisClient.ist_verschluesselt(roh)
+    assert GEHEIM not in roh
+    db.expire_all()
+    assert db.get(AiMessage, nachricht.id).content == GEHEIM
+    # Ein zweiter Lauf findet nichts mehr.
+    assert nachziehen(db) == 0
+
+
+def test_nachzug_ueberschreibt_keine_gleichzeitige_aenderung(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Laufzustand eines Laufs aendert sich staendig. Schreibt das Panel
+    ihn, waehrend der Nachzug ihn gerade verschluesselt, gewinnt das Panel."""
+    from services import dis_altbestand
+
+    gespraech = _gespraech(db, regular_user)
+    lauf = AiRun(id=str(uuid4()), conversation_id=gespraech.id, user_id=regular_user.id, state_json="{}")
+    db.add(lauf)
+    db.commit()
+    db.execute(text("UPDATE ai_runs SET state_json = 'alt' WHERE id = :id"), {"id": lauf.id})
+    db.commit()
+
+    echt = DisClient.encrypt
+
+    def mit_zwischenschritt(klartext: str, aad: str | None = None) -> str:
+        if klartext == "alt":
+            db.execute(
+                text("UPDATE ai_runs SET state_json = :neu WHERE id = :id"),
+                {"neu": echt('{"schritt": 2}', aad="msm:ai:ai_runs.state_json"), "id": lauf.id},
+            )
+        return echt(klartext, aad=aad)
+
+    monkeypatch.setattr(DisClient, "encrypt", staticmethod(mit_zwischenschritt))
+    dis_altbestand.nachziehen(db)
+    monkeypatch.setattr(DisClient, "encrypt", staticmethod(echt))
+
+    db.expire_all()
+    assert db.get(AiRun, lauf.id).state_json == '{"schritt": 2}'
+
+
+def test_vergleich_verschluesselt_den_vergleichswert_nicht(db: Session, regular_user: User) -> None:
+    """Ohne ``coerce_compared_value`` wuerde SQLAlchemy das Muster eines
+    Filters mitverschluesseln, und kein Filter auf eine DisText-Spalte traefe."""
+    gespraech = _gespraech(db, regular_user)
+    treffer = (
+        db.query(AiConversation.id)
+        .filter(AiConversation.title.like(DisClient.PRAEFIX + "%"), AiConversation.id == gespraech.id)
+        .all()
+    )
+    assert treffer == [(gespraech.id,)]

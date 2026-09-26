@@ -141,13 +141,17 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.6 vom 2026-09-26 aus (ein entferntes Geraet verliert auch seine Push-Adresse)', () => {
+  it('weist die Fassung 3.7 vom 2026-09-26 aus (der KI-Chatverlauf liegt verschluesselt in der Datenbank)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.6`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.7`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
+    // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
+    // Datenbank, nicht der Weg durch das Panel.
+    expect(i18n.t('privacyPolicy.sections.ai.items.messages')).toMatch(/nur verschlüsselt/);
+    expect(i18n.t('privacyPolicy.sections.ai.items.messages')).toMatch(/das Panel selbst entschlüsselt/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

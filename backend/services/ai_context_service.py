@@ -1098,13 +1098,24 @@ def geschaetzte_belegung(
     )
     if conversation.summarized_until is not None:
         historie = historie.filter(AiMessage.created_at > conversation.summarized_until)
-    belegung += int(historie.scalar() or 0)
+    belegung += _klartext_zeichen(historie.scalar())
 
     werkzeug = db.query(
         func.coalesce(func.sum(func.length(AiToolResult.result_json)), 0)
     ).filter(AiToolResult.conversation_id == conversation.id).scalar()
-    belegung += min(int(werkzeug or 0), grenzen.werkzeug_zeichen)
+    belegung += min(_klartext_zeichen(werkzeug), grenzen.werkzeug_zeichen)
     return belegung
+
+
+def _klartext_zeichen(chiffrat_zeichen: int | None) -> int:
+    """Rechnet eine in SQL gemessene Chiffratlaenge auf Klartext zurueck.
+
+    Die Spalten sind ``DisText``, ``length()`` misst also Base64: vier Zeichen
+    fuer drei Byte. Praefix, IV und Tag (etwa 36 Zeichen je Wert) bleiben
+    drin. Die Schaetzung liegt damit leicht zu hoch, und das ist die
+    ungefaehrliche Richtung fuer einen Ring, der vor dem Falten warnt.
+    """
+    return int(chiffrat_zeichen or 0) * 3 // 4
 
 
 def _zeichen_tief(wert: Any) -> int:

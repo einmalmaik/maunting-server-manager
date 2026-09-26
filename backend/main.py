@@ -566,6 +566,29 @@ async def lifespan(app: FastAPI):
 
             _asyncio.create_task(_bg_ensure_postgres())
 
+    # Klartext aus der Zeit vor `DisText` verschluesseln. Im Hintergrund, weil
+    # es bei grossem Chatverlauf Minuten dauern kann.
+    if not is_testing:
+        async def _bg_dis_altbestand():
+            try:
+                from database import SessionLocal
+                from services.dis_altbestand import nachziehen
+
+                def _run():
+                    with SessionLocal() as _alt_db:
+                        nachziehen(_alt_db)
+
+                await _asyncio.to_thread(_run)
+            except Exception as exc:
+                import logging
+                # Nur der Typ: eine SQL-Fehlermeldung traegt ihre Parameter,
+                # und das waere hier genau der Klartext.
+                logging.getLogger(__name__).warning(
+                    "DIS-Altbestand nicht nachgezogen: %s", type(exc).__name__,
+                )
+
+        _asyncio.create_task(_bg_dis_altbestand())
+
     # Initialize scheduler and load existing schedules
     start_scheduler()
     from database import SessionLocal

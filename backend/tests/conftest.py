@@ -105,6 +105,9 @@ def _mock_totp_verify(secret: str, code: str, window: int = 1) -> bool:
 
 DisClient.encrypt = staticmethod(_mock_encrypt)
 DisClient.decrypt = staticmethod(_mock_decrypt)
+# Woran `DisText` Chiffrat von Altbestand unterscheidet: die Form von
+# `_mock_encrypt`, nicht die echte `msm-dis-v1:`.
+DisClient.PRAEFIX = "test-enc-v1:"
 DisClient.hash_password = staticmethod(_mock_hash_password)
 DisClient.verify_password = staticmethod(_mock_verify_password)
 DisClient.is_dis_hash = staticmethod(lambda h: h.startswith("msm-pw-v1:"))

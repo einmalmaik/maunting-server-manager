@@ -46,7 +46,16 @@ class DisDecryptionError(DisSidecarError):
 #
 # Nur beim Entschluesseln: derselbe Fehlername beim Verschluesseln waere ein
 # Fehler in unserem eigenen Aufruf und soll laut bleiben.
+#
+# Bewusst **nicht** hier: `DisUnsupportedFormatVersionError`, also ein Wert mit
+# `msm-dis-v2:` oder spaeter. Er stammt von einem neueren Panel und ist nicht
+# kaputt. Als DisDecryptionError gemeldet, hielten ihn einige Aufrufer fuer
+# Altbestand im Klartext und schrieben ihn verschluesselt ueber.
 _UNBRAUCHBARER_CIPHERTEXT = ("DisInvalidArgumentError", "InvalidCharacterError")
+
+#: Womit jeder Wert aus `DisClient.encrypt` beginnt. Fehlt er, ist die Zeile
+#: aelter als der Umschlag (oder gar kein DIS-Wert).
+DIS_PRAEFIX = "msm-dis-v1:"
 
 
 class DisClient:
@@ -95,7 +104,9 @@ class DisClient:
             aad: Optionaler Context (Associated Authenticated Data) zum Binden
                  des Ciphertext an einen Context (verhindert Swap-Angriffe).
 
-        Returns: Base64-codierter Ciphertext (IV + encrypted + tag).
+        Returns: ``msm-dis-v1:`` + Base64 (IV + encrypted + tag). Werte von
+        vor dem 26.09.2026 stehen ohne Praefix in der Datenbank; ``decrypt``
+        liest beide Formen.
         """
         payload: dict = {"plaintext": plaintext}
         if aad:
@@ -114,6 +125,16 @@ class DisClient:
         if aad:
             payload["aad"] = aad
         return DisClient._post("/decrypt", payload)["plaintext"]
+
+    #: Die Tests ersetzen `encrypt` durch eine eigene Form und setzen dann
+    #: auch diesen Wert um. Deshalb steht er am Client und wird nicht als
+    #: Modulkonstante gelesen.
+    PRAEFIX = DIS_PRAEFIX
+
+    @staticmethod
+    def ist_verschluesselt(wert: str) -> bool:
+        """Ob ``wert`` aus ``encrypt`` stammt und nicht Altbestand im Klartext ist."""
+        return wert.startswith(DisClient.PRAEFIX)
 
     # ── Password Hashing (Argon2id) ──────────────────────────────────────
 

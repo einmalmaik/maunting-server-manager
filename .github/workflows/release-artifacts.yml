@@ -90,7 +90,7 @@ jobs:
         working-directory: dis-sidecar
         run: |
           npm ci
-          node --test test-backup-endpoints.mjs
+          node --test test-backup-endpoints.mjs test-encrypt-envelope.mjs
 
       - name: Resolve artifact version
         id: version

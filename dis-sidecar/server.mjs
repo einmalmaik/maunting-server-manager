@@ -25,6 +25,7 @@ import {
   deriveHkdfSha256Bits,
   argon2idRaw,
 } from '@msdis/shield/kdf';
+import { formatEnvelope, parseEnvelope } from '@msdis/shield/format-versioning';
 import { randomBytes } from '@msdis/shield/random';
 import {
   constantTimeEqual,
@@ -99,6 +100,17 @@ function cleanAltchaReplayCache() {
     }
   }
 }
+
+// ── Ciphertext envelope ──────────────────────────────────────────────────
+// Every value from /encrypt carries `msm-dis-v1:` so a stored ciphertext is
+// recognisable as DIS output in any table, just like `msm-pw-v1:` for password
+// hashes. /decrypt still accepts the bare base64 written before 26.09.2026
+// (`legacy`); an unknown `msm-dis-v2:` fails loudly instead of being guessed.
+const DIS_ENVELOPE = {
+  currentPrefix: 'msm-dis-v1:',
+  familyPrefix: 'msm-dis-',
+  subject: 'panel secret',
+};
 
 // ── Password hashing params (DIS KDF v2) ─────────────────────────────────
 const PW_SALT_LEN = 16;
@@ -276,13 +288,20 @@ const server = http.createServer(async (req, res) => {
     switch (req.url) {
       case '/encrypt':
         result = {
-          ciphertext: await encryptString(data.plaintext, encKey, data.aad),
+          ciphertext: formatEnvelope(
+            DIS_ENVELOPE,
+            await encryptString(data.plaintext, encKey, data.aad),
+          ),
         };
         break;
 
       case '/decrypt':
         result = {
-          plaintext: await decryptString(data.ciphertext, encKey, data.aad),
+          plaintext: await decryptString(
+            parseEnvelope(DIS_ENVELOPE, String(data.ciphertext)).payload,
+            encKey,
+            data.aad,
+          ),
         };
         break;
 
