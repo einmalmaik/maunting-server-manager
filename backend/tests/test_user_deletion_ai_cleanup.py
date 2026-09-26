@@ -34,7 +34,7 @@ def _ai_daten_anlegen(db: Session, user: User) -> tuple[str, str]:
         owner_user_id=user.id,
         scope="user",
         scope_identity=f"user:{user.id}",
-        key="lieblingsserver",
+        key_encrypted="lieblingsserver",
         value_encrypted="test-enc-v1::74657374",
         origin="user",
     ))

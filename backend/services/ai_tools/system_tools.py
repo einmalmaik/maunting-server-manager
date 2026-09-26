@@ -487,7 +487,7 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
         # Eine Abfrage auf (Bereich, Schlüssel) reicht dagegen: sie beantwortet
         # die einzige Frage, die hier zählt — Neuanlage oder Überschreiben.
         vorhanden_schon = kennung is not None and db.query(AiMemoryEntry.id).filter(
-            AiMemoryEntry.scope_identity == kennung, AiMemoryEntry.key == key,
+            ai_memory_service.schluessel_bedingung(db, kennung, [key]),
         ).first() is not None
         if kennung and not vorhanden_schon:
             treffer = ai_memory_service.aehnlicher_eintrag(

@@ -146,7 +146,6 @@ def test_an_entry_without_a_vector_is_skipped(db: Session) -> None:
         db, user=user, scope="user", server_id=None,
         key="reply_style", value="Bevorzugt kurze, knappe Antworten.",
     )
-    row.embedding_json = None
     row.embedding_model = None
     db.flush()
 

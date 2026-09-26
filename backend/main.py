@@ -572,11 +572,14 @@ async def lifespan(app: FastAPI):
         async def _bg_dis_altbestand():
             try:
                 from database import SessionLocal
+                from services.ai_memory_service import schluessel_nachziehen
                 from services.dis_altbestand import nachziehen
 
                 def _run():
                     with SessionLocal() as _alt_db:
                         nachziehen(_alt_db)
+                        # Gedaechtnisnamen: verschluesselt und mit Suchindex.
+                        schluessel_nachziehen(_alt_db)
 
                 await _asyncio.to_thread(_run)
             except Exception as exc:

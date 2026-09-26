@@ -562,7 +562,7 @@ def execute_import(
             continue
         gesehen.add(item.key)
         vorhanden = db.query(AiMemoryEntry.id).filter(
-            AiMemoryEntry.scope_identity == identity, AiMemoryEntry.key == item.key
+            ai_memory_service.schluessel_bedingung(db, identity, [item.key])
         ).first() is not None
         if vorhanden and not item.replace_existing:
             uebersprungen.append(AiMemoryImportSkipped(key=item.key, reason="exists"))

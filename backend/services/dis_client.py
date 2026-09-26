@@ -126,6 +126,32 @@ class DisClient:
             payload["aad"] = aad
         return DisClient._post("/decrypt", payload)["plaintext"]
 
+    @staticmethod
+    def decrypt_many(items: list[tuple[str, str | None]]) -> list[str | None]:
+        """Entschluesselt viele Werte in einem Aufruf.
+
+        ``items`` sind Paare aus Ciphertext und AAD. Ein einzelner unlesbarer
+        Wert kommt als ``None`` zurueck statt den ganzen Aufruf zu kippen;
+        ein unbekanntes Format (``msm-dis-v2:``) scheitert laut wie bei
+        ``decrypt``.
+        """
+        if not items:
+            return []
+        payload = {"items": [{"ciphertext": c, "aad": a or ""} for c, a in items]}
+        return DisClient._post("/decrypt-many", payload)["plaintexts"]
+
+    @staticmethod
+    def blind_index(werte: list[str]) -> list[str]:
+        """Gibt je Wert einen geheimen, festen Suchindex zurueck (HMAC, hex).
+
+        Damit laesst sich ein verschluesselter Wert wiederfinden und eindeutig
+        halten, ohne ihn lesbar abzulegen. Ohne den Schluessel des Sidecars
+        laesst sich der Index nicht nachrechnen.
+        """
+        if not werte:
+            return []
+        return DisClient._post("/blind-index", {"values": werte})["indices"]
+
     #: Die Tests ersetzen `encrypt` durch eine eigene Form und setzen dann
     #: auch diesen Wert um. Deshalb steht er am Client und wird nicht als
     #: Modulkonstante gelesen.

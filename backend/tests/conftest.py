@@ -108,6 +108,24 @@ DisClient.decrypt = staticmethod(_mock_decrypt)
 # Woran `DisText` Chiffrat von Altbestand unterscheidet: die Form von
 # `_mock_encrypt`, nicht die echte `msm-dis-v1:`.
 DisClient.PRAEFIX = "test-enc-v1:"
+
+
+def _mock_decrypt_many(items):
+    from services.dis_client import DisDecryptionError
+
+    ergebnis = []
+    for ciphertext, aad in items:
+        try:
+            ergebnis.append(_mock_decrypt(ciphertext, aad or None))
+        except DisDecryptionError:
+            ergebnis.append(None)
+    return ergebnis
+
+
+DisClient.decrypt_many = staticmethod(_mock_decrypt_many)
+DisClient.blind_index = staticmethod(
+    lambda werte: [_hl.sha256(b"test-index:" + w.encode()).hexdigest() for w in werte]
+)
 DisClient.hash_password = staticmethod(_mock_hash_password)
 DisClient.verify_password = staticmethod(_mock_verify_password)
 DisClient.is_dis_hash = staticmethod(lambda h: h.startswith("msm-pw-v1:"))

@@ -185,7 +185,7 @@ def test_two_users_writing_the_same_key_do_not_collide(
         value="America/New_York",
     )
 
-    rows = db.query(AiMemoryEntry).filter(AiMemoryEntry.key == "zeitzone").all()
+    rows = [r for r in db.query(AiMemoryEntry).all() if r.key == "zeitzone"]
     assert len(rows) == 2
     assert {row.scope_identity for row in rows} == {
         f"user:{regular_user.id}", f"user:{other.id}",

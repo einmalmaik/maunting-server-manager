@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 import hashlib
-import json
 import logging
 import os
 import re
@@ -28,7 +27,7 @@ from services import (
     permission_service,
 )
 from services.ai_redaction import enthaelt_zugangsdaten
-from services.ai_embedding_service import EMBEDDING_BYTES, EMBEDDING_DIMENSIONS
+from services.ai_embedding_service import EMBEDDING_BYTES
 from services.dis_client import DisClient, DisDecryptionError, DisSidecarError
 
 
@@ -229,6 +228,81 @@ def _aad(row: AiMemoryEntry) -> str:
     return f"msm:ai:memory:{row.id}"
 
 
+# ── Der verschluesselte Name ────────────────────────────────────────────────
+#
+# Bis 26.09.2026 stand `key` im Klartext und war zugleich Suchschluessel und
+# Eindeutigkeit je Bereich. Heute liegt er verschluesselt in `key_encrypted`,
+# und gesucht wird ueber `key_index` (HMAC ueber Bereich und Namen, siehe
+# Modell). Die Funktionen hier sind der einzige Weg dorthin: wer nach einem
+# Namen sucht, nimmt `schluessel_bedingung`, nie einen eigenen Filter.
+
+
+def _schluessel_indizes(identity: str, keys: list[str]) -> list[str]:
+    return DisClient.blind_index([f"{identity}\n{key}" for key in keys])
+
+
+def _schluessel_laden(rows: list[AiMemoryEntry]) -> None:
+    """Entschluesselt die Namen vieler Zeilen mit einem Sidecar-Aufruf.
+
+    Danach liest `row.key` aus dem Speicher der Zeile. Ohne diesen Schritt
+    kostete jede Zeile einen eigenen Aufruf, bei 5.000 Eintraegen rund 4 s.
+    Ein unlesbarer Name wird zu ``""``; der Wert daneben entscheidet dann, ob
+    die Zeile ueberhaupt erscheint.
+    """
+    offen = [
+        row for row in rows
+        if "_key_klartext" not in row.__dict__
+        and DisClient.ist_verschluesselt(row.key_encrypted or "")
+    ]
+    klartexte = DisClient.decrypt_many([(row.key_encrypted, row.key_aad()) for row in offen])
+    for row, klar in zip(offen, klartexte):
+        row._key_klartext = klar if klar is not None else ""
+
+
+def _index_nachziehen(db: Session, identity: str) -> None:
+    """Gibt Altbestand eines Bereichs Index und verschluesselten Namen.
+
+    Laeuft vor jeder Suche nach einem Namen. So findet die Suche auch eine
+    Zeile von vor der Umstellung, bevor `schluessel_nachziehen` beim Start
+    des Panels bei ihr angekommen ist, statt einen zweiten Eintrag mit
+    demselben Namen anzulegen.
+    """
+    alt = db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == identity, AiMemoryEntry.key_index.is_(None)
+    ).all()
+    if not alt:
+        return
+    _schluessel_laden(alt)
+    for row, index in zip(alt, _schluessel_indizes(identity, [row.key for row in alt])):
+        if not DisClient.ist_verschluesselt(row.key_encrypted or ""):
+            # Altbestand: der Getter liefert den Klartext, der Setter
+            # verschluesselt ihn.
+            row.key = row.key
+        row.key_index = index
+    db.flush()
+
+
+def schluessel_bedingung(db: Session, identity: str, keys: list[str]):
+    """SQL-Bedingung fuer "diese Namen in diesem Bereich"."""
+    _index_nachziehen(db, identity)
+    return and_(
+        AiMemoryEntry.scope_identity == identity,
+        AiMemoryEntry.key_index.in_(_schluessel_indizes(identity, keys)),
+    )
+
+
+def schluessel_nachziehen(db: Session) -> int:
+    """Zieht alle Bereiche mit Altbestand nach. Laeuft beim Start des Panels."""
+    bereiche = [
+        kennung for (kennung,) in db.query(AiMemoryEntry.scope_identity)
+        .filter(AiMemoryEntry.key_index.is_(None)).distinct().all()
+    ]
+    for kennung in bereiche:
+        _index_nachziehen(db, kennung)
+        db.commit()
+    return len(bereiche)
+
+
 def scope_identity(
     db: Session, user: User, scope: str, server_id: int | None,
     team_id: int | None = None,
@@ -329,7 +403,6 @@ def _preference_row(db: Session, user_id: int) -> AiMemoryPreference:
 def set_preference(db: Session, user: User, enabled: bool) -> AiMemoryPreference:
     row = _preference_row(db, user.id)
     row.enabled = enabled
-    row.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(row)
     return row
@@ -403,8 +476,10 @@ def list_entries(
     aufmacht.
     """
     identity, _, _, _ = scope_identity(db, user, scope, server_id, team_id)
-    rows = db.query(AiMemoryEntry).filter(AiMemoryEntry.scope_identity == identity).order_by(AiMemoryEntry.key).all()
-    return _entschluesseln_lesbare(rows)
+    rows = db.query(AiMemoryEntry).filter(AiMemoryEntry.scope_identity == identity).all()
+    # Nach dem Namen sortiert wird erst hier: in der Datenbank steht er
+    # verschluesselt, eine SQL-Sortierung ordnete nach Chiffrat.
+    return sorted(_entschluesseln_lesbare(rows), key=lambda paar: paar[0].key)
 
 
 @dataclass(frozen=True)
@@ -449,7 +524,11 @@ class Gedaechtnisseite:
 _SEITENORDNUNG = (
     AiMemoryEntry.last_used_at.is_(None),
     AiMemoryEntry.last_used_at.desc(),
-    AiMemoryEntry.key,
+    # Bis 26.09.2026 stand hier der Name. Er ist seitdem verschluesselt und
+    # sortierte nach Chiffrat; das Neueste zuerst ist bei Gleichstand ohnehin
+    # die nuetzlichere Reihenfolge, und die ID macht sie eindeutig.
+    AiMemoryEntry.created_at.desc(),
+    AiMemoryEntry.id,
 )
 
 
@@ -782,9 +861,7 @@ def upsert_entry(
     )
     _assert_may_write(db, user, scope, normalized_team_id, normalized_server_id)
     safe_value = _safe_value(value)
-    row = db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity == identity, AiMemoryEntry.key == key
-    ).first()
+    row = db.query(AiMemoryEntry).filter(schluessel_bedingung(db, identity, [key])).first()
     action = "ai.memory.updated"
     if row is None:
         # Wieviel hier hineinpasst, entscheidet nicht mehr eine Konstante dieses
@@ -872,9 +949,12 @@ def upsert_entry(
         row = AiMemoryEntry(
             id=str(uuid4()), owner_user_id=owner_id, server_id=normalized_server_id,
             team_id=normalized_team_id,
-            scope=scope, scope_identity=identity, key=key, value_encrypted="",
+            scope=scope, scope_identity=identity, value_encrypted="",
             origin=origin, aad_version=2,
         )
+        # Erst jetzt: die AAD des Namens braucht ID und Bereich der Zeile.
+        row.key = key
+        row.key_index = _schluessel_indizes(identity, [key])[0]
         db.add(row)
         action = "ai.memory.created"
     elif origin == "ai" and row.origin == "user" and not replace_user_entry:
@@ -985,9 +1065,11 @@ def aehnlicher_eintrag(
     # ausgeschlossen, aber der Typpruefer sieht das nicht — und ein zweites
     # `_stored_vector` je Zeile wäre ein zweites Lesen der Vektorspalte.
     paare: list[tuple[AiMemoryEntry, Sequence[float]]] = []
+    eigener = _schluessel_indizes(scope_kennung, [key])[0]
+    _index_nachziehen(db, scope_kennung)
     for row in db.query(AiMemoryEntry).filter(
         AiMemoryEntry.scope_identity == scope_kennung,
-        AiMemoryEntry.key != key,
+        AiMemoryEntry.key_index != eigener,
     ).all():
         vektor = _stored_vector(row, kodierung.modell)
         if vektor is not None:
@@ -1047,6 +1129,7 @@ def importabgleich(
     _assert_may_write(db, user, scope, tid, sid)
 
     bestand = db.query(AiMemoryEntry).filter(AiMemoryEntry.scope_identity == identity).all()
+    _schluessel_laden(bestand)
     nach_schluessel = {row.key: row for row in bestand}
     treffer: list[tuple[AiMemoryEntry, float] | None] = [None] * len(kandidaten)
 
@@ -1475,6 +1558,9 @@ def _vorauswahl(
     """
     if len(rows) <= limit:
         return rows, False
+    # Die Wortueberlappung unten liest den Namen jeder Zeile: alle in einem
+    # Sidecar-Aufruf statt einem je Zeile.
+    _schluessel_laden(rows)
     query_tokens = _tokens(query)
     scores = _similarities(db, query, rows)
     ranked = sorted(
@@ -1543,11 +1629,13 @@ def _vektor_entschluesseln(gespeichert: bytes | None) -> bytes | None:
 def _liegt_im_klartext(row: AiMemoryEntry) -> bool:
     """Trägt diese Zeile ihren Vektor noch unverschlüsselt?
 
-    Zwei Formen aus dem Bestand: die alte Textspalte und die Bytespalte vor dem
-    23.08.2026 — dann genau `EMBEDDING_BYTES` lang, ohne Nonce und ohne Siegel,
-    und damit sauber von einer verpackten zu unterscheiden.
+    Eine Form aus dem Bestand: die Bytespalte vor dem 23.08.2026, dann genau
+    `EMBEDDING_BYTES` lang, ohne Nonce und ohne Siegel, und damit sauber von
+    einer verpackten zu unterscheiden. (Die alte Textspalte `embedding_json`
+    ist am 26.09.2026 weggefallen; Migration `20260926_08` hat ihren Rest in
+    genau diese Form umgepackt.)
 
-    Beide werden weiter **gelesen**. Sie einfach für ungültig zu erklären wäre
+    Sie wird weiter **gelesen**. Sie einfach für ungültig zu erklären wäre
     der bequemere Weg gewesen und hätte das Gedächtnis schlechter gemacht, als
     es war: in einem Bereich mit tausenden Einträgen kommen je Anfrage nur
     `MAX_CONTEXT_ROWS` Zeilen bis zum Nachziehen, und was die Vorauswahl ohne
@@ -1556,8 +1644,6 @@ def _liegt_im_klartext(row: AiMemoryEntry) -> bool:
     bisher, aber beim nächsten Abruf in den Kontext neu geschrieben, und dabei
     verpackt.
     """
-    if row.embedding_json:
-        return True
     return (
         row.embedding_bytes is not None
         and len(row.embedding_bytes) == EMBEDDING_BYTES
@@ -1572,26 +1658,14 @@ def _stored_vector(row: AiMemoryEntry, modell: str) -> Sequence[float] | None:
     lokal oder im Google-Rückfall, und ein Vektor aus dem jeweils anderen Raum
     hat dieselbe Länge, aber keine vergleichbare Bedeutung.
 
-    Zwei Spalten, eine Wahrheit. Geschrieben wird seit dem 19.08.2026 als
-    float32-Bytes — seit dem 23.08.2026 unter AES-GCM —, und von dort wird
-    zuerst gelesen; ``embedding_json`` ist der Rückfall für Bestandszeilen.
-    Beide Formen tragen dieselben Zahlen — unterschiedlich ist nur, was das
-    Lesen kostet: 4 ms gegen 381 ms bei 5.000 Einträgen, plus 10 bis 17 ms
-    fürs Entschlüsseln.
+    Geschrieben wird seit dem 19.08.2026 als float32-Bytes, seit dem
+    23.08.2026 unter AES-GCM. Das Lesen kostet 4 ms bei 5.000 Einträgen, plus
+    10 bis 17 ms fürs Entschlüsseln.
 
     Lässt sich die Bytespalte nicht öffnen, wird sie **roh** gelesen: dann ist
     es eine Bestandszeile mit unverpackten Zahlen, und `bytes_zu_vektor` erkennt
     an der Länge, ob sie das wirklich ist. Warum sie weiter gelesen wird und
     nicht einfach als fehlend gilt, steht an `_liegt_im_klartext`.
-
-    Der Rückfall bleibt, bis die Migration `20260819_01` überall gelaufen
-    ist. Zwischen dem Einspielen des Codes und diesem Lauf liegen bei jedem
-    Betreiber ein paar Sekunden, und in denen fände ein Gedächtnis ohne
-    Rückfall zu keiner Frage mehr etwas.
-
-    Dass eine beschädigte Byteszeile ebenfalls auf JSON zurückfällt, ist
-    Absicht und keine Nachlässigkeit: beide Spalten beschreiben denselben
-    Text, also ist die unversehrte von beiden die richtige Antwort.
     """
     if row.embedding_model != modell:
         return None
@@ -1599,38 +1673,18 @@ def _stored_vector(row: AiMemoryEntry, modell: str) -> Sequence[float] | None:
     vektor = ai_embedding_service.bytes_zu_vektor(
         row.embedding_bytes if geoeffnet is None else geoeffnet
     )
-    if vektor is not None:
-        return vektor
-    if not row.embedding_json:
-        return None
-    try:
-        alt = json.loads(row.embedding_json)
-    except (TypeError, ValueError):
-        return None
-    if not isinstance(alt, list) or len(alt) != EMBEDDING_DIMENSIONS:
-        return None
-    return alt
+    return vektor
 
 
 def _vektor_setzen(
     row: AiMemoryEntry, vektor: Sequence[float] | None, modell: str | None
 ) -> None:
-    """Schreibt den Vektor einer Zeile — in genau einer Form.
-
-    ``embedding_json`` wird dabei immer geleert, auch wenn gar nichts
-    geschrieben wird. Das ist dieselbe Regel, die `refresh_embedding` schon
-    für das Verwerfen begründet: eine Zeile trägt einen Vektor, und zwar den
-    zu ihrem aktuellen Text. Bliebe der alte JSON-Stand daneben stehen,
-    beschriebe er nach einer Berichtigung den *alten* Text — und der Rückfall
-    in `_stored_vector` griffe genau dann darauf zurück, wenn die Bytes einmal
-    fehlen.
-    """
+    """Schreibt den Vektor einer Zeile, verpackt, oder verwirft ihn."""
     row.embedding_bytes = (
         None
         if vektor is None
         else _vektor_verschluesseln(ai_embedding_service.vektor_zu_bytes(vektor))
     )
-    row.embedding_json = None
     row.embedding_model = None if vektor is None else modell
 
 
@@ -1803,9 +1857,11 @@ def _visible_scope_rows(
         conditions.append(
             and_(AiMemoryEntry.scope == "team", AiMemoryEntry.team_id.in_(team_ids))
         )
-    rows = db.query(AiMemoryEntry).filter(
-        or_(*conditions)
-    ).order_by(AiMemoryEntry.scope, AiMemoryEntry.key).all()
+    rows = db.query(AiMemoryEntry).filter(or_(*conditions)).all()
+    # Der Name ist verschluesselt; sortiert wird nach dem Klartext, alle Namen
+    # in einem Sidecar-Aufruf.
+    _schluessel_laden(rows)
+    rows.sort(key=lambda row: (row.scope, row.key))
 
     # Je Server einmal fragen, nicht je Zeile. Zehn Notizen zu demselben Server
     # stellten bisher zehnmal dieselbe Frage, und die ist nicht billig:
@@ -1913,6 +1969,9 @@ def _entschluesseln_nebenlaeufig(
     """
     if not rows:
         return []
+    # Wer den Wert liest, liest auch den Namen. Hier, im Hauptthread und
+    # vor dem Pool, alle Namen in einem Aufruf.
+    _schluessel_laden(rows)
     auftraege = [(row.value_encrypted, _aad(row)) for row in rows]
 
     def oeffnen(ciphertext: str, aad: str) -> str | DisSidecarError:
@@ -2437,10 +2496,7 @@ def delete_by_keys(
         return []
     rows = (
         db.query(AiMemoryEntry)
-        .filter(
-            AiMemoryEntry.scope_identity == identity,
-            AiMemoryEntry.key.in_(wanted),
-        )
+        .filter(schluessel_bedingung(db, identity, wanted))
         .all()
     )
     removed: list[str] = []

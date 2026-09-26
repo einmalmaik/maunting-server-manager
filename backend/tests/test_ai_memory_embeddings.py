@@ -17,7 +17,6 @@ Betreiber sieht ihn über die Einstellungen statt nur im Log.
 
 from __future__ import annotations
 
-import json
 import struct
 import sys
 import types
@@ -75,7 +74,6 @@ def test_without_a_model_nothing_breaks(
     row = _write(db, regular_user, "ram.bevorzugt", "8 GB fuer Minecraft")
 
     assert row.embedding_bytes is None
-    assert row.embedding_json is None
     block = ai_memory_service.provider_memory_context(
         db, regular_user, query="Wieviel RAM?"
     )
@@ -216,7 +214,6 @@ def test_a_failed_write_discards_the_old_vector(
     row = _write(db, regular_user, "lieblingsspiel", "Am liebsten spiele ich Factorio")
 
     assert row.embedding_bytes is None
-    assert row.embedding_json is None
     assert row.embedding_model is None
     assert ai_memory_service._stored_vector(row, MODEL_TAG) is None
 
@@ -251,7 +248,6 @@ def test_a_missing_vector_is_recomputed_on_the_next_recall(
     _allow_memory(db, regular_user)
     ohne_modell(monkeypatch)
     row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
-    assert row.embedding_json is None, "ohne Modell entsteht kein Vektor"
 
     # Das Modell ist wieder da — die nächste Anfrage muss aufholen.
     modell_ersetzen(monkeypatch, _vektoren_fuer)
@@ -318,7 +314,6 @@ def test_without_a_model_the_recall_leaves_the_missing_vector_alone(
 
     assert block is not None and "Europe/Berlin" in block
     db.refresh(row)
-    assert row.embedding_json is None
     assert row.embedding_model is None
 
 
@@ -351,7 +346,6 @@ def test_a_vector_with_the_wrong_length_is_ignored(
     row.embedding_bytes = ai_memory_service._vektor_verschluesseln(
         ai_embedding_service.vektor_zu_bytes([0.1, 0.2, 0.3])
     )
-    row.embedding_json = None
     row.embedding_model = MODEL_TAG
     db.commit()
 
@@ -381,37 +375,11 @@ def test_a_written_vector_lands_in_the_byte_column(
 
     row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
 
-    assert row.embedding_json is None, "die alte Form darf nicht mitgeschrieben werden"
     assert row.embedding_bytes is not None
     # Die Zahlen selbst sind es nicht mehr: Nonce und Siegel kommen dazu.
     assert len(row.embedding_bytes) > ai_embedding_service.EMBEDDING_BYTES
     vektor = ai_memory_service._stored_vector(row, MODEL_TAG)
     assert vektor is not None and len(vektor) == ai_embedding_service.EMBEDDING_DIMENSIONS
-
-
-def test_an_entry_from_before_the_migration_is_still_read(
-    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Zwischen Code-Update und Migrationslauf darf nichts blind werden.
-
-    Der Zeitraum ist kurz, aber er ist echt: der neue Code läuft schon, die
-    Migration hat die Bestandszeilen noch nicht umgerechnet. Ohne den Rückfall
-    auf ``embedding_json`` fände das Gedächtnis in diesen Sekunden zu keiner
-    Frage mehr etwas — und der Betreiber sähe nur einen Assistenten, der ihn
-    plötzlich nicht mehr kennt.
-    """
-    _allow_memory(db, regular_user)
-    modell_ersetzen(monkeypatch, _vektoren_fuer)
-    row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
-    # Der Stand vor der Migration: Vektor als Text, Byte-Spalte noch leer.
-    row.embedding_json = json.dumps(list(_vektoren_fuer(["egal"])[0]))
-    row.embedding_bytes = None
-    db.commit()
-
-    vektor = ai_memory_service._stored_vector(row, MODEL_TAG)
-
-    assert vektor is not None
-    assert len(vektor) == ai_embedding_service.EMBEDDING_DIMENSIONS
 
 
 def test_a_truncated_byte_vector_counts_as_missing(db: Session) -> None:
@@ -524,34 +492,6 @@ def test_ein_klartextvektor_aus_dem_bestand_wird_weiter_gelesen_und_ersetzt(
 
     assert row.embedding_bytes != klartext
     assert klartext not in row.embedding_bytes
-    assert ai_memory_service._stored_vector(row, MODEL_TAG) is not None
-
-
-def test_die_alte_textspalte_wird_beim_abruf_abgeraeumt(
-    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Der Rueckfall darf nicht zum Dauerzustand werden.
-
-    ``embedding_json`` ist die letzte Stelle, an der ein Vektor unverschluesselt
-    liegt. Sie beim Lesen nur zu bevorzugen hiesse, dass eine Bestandszeile ihre
-    Klartextfassung behaelt, solange sie niemand von Hand anfasst — denn
-    `_vektoren_nachziehen` sah eine lesbare Zeile und ging weiter. Der Rueckfall
-    selbst bleibt: er faengt weiterhin die Sekunden zwischen Code und Migration
-    ab (`test_an_entry_from_before_the_migration_is_still_read`).
-    """
-    _allow_memory(db, regular_user)
-    modell_ersetzen(monkeypatch, _vektoren_fuer)
-    row = _write(db, regular_user, "wartung", "Sonntags ab drei Uhr")
-    row.embedding_json = json.dumps(list(_vektoren_fuer(["egal"])[0]))
-    row.embedding_bytes = None
-    db.commit()
-
-    ai_memory_service.provider_memory_context(db, regular_user, query="Wartung?")
-    db.commit()
-    db.refresh(row)
-
-    assert row.embedding_json is None
-    assert row.embedding_bytes is not None
     assert ai_memory_service._stored_vector(row, MODEL_TAG) is not None
 
 

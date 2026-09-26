@@ -860,7 +860,7 @@ def test_die_datenbank_kennt_genau_fuenf_gedaechtnisbereiche(db: Session) -> Non
         db.execute(
             text(
                 "INSERT INTO ai_memory_entries "
-                "(id, scope, scope_identity, key, value_encrypted, origin, "
+                "(id, scope, scope_identity, key_encrypted, value_encrypted, origin, "
                 " aad_version, use_count, created_at, updated_at) "
                 "VALUES (:id, :scope, :ident, 'k', 'x', 'user', 2, 0, "
                 " '2026-08-11', '2026-08-11')"
@@ -872,7 +872,7 @@ def test_die_datenbank_kennt_genau_fuenf_gedaechtnisbereiche(db: Session) -> Non
         db.execute(
             text(
                 "INSERT INTO ai_memory_entries "
-                "(id, scope, scope_identity, key, value_encrypted, origin, "
+                "(id, scope, scope_identity, key_encrypted, value_encrypted, origin, "
                 " aad_version, use_count, created_at, updated_at) "
                 "VALUES ('id-x', 'server_share', 'ident-x', 'k', 'x', 'user', "
                 " 2, 0, '2026-08-11', '2026-08-11')"

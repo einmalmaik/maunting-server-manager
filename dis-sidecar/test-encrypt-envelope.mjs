@@ -100,3 +100,46 @@ test('an empty envelope is rejected as an unusable value', async () => {
   assert.equal(dec.status, 400);
   assert.equal(dec.body.error, 'DisInvalidArgumentError');
 });
+
+// ── /decrypt-many and /blind-index (memory keys, 26.09.2026) ──────────────
+
+test('decrypt-many returns every value in order, null for the unreadable one', async () => {
+  const a = await call('/encrypt', { plaintext: 'eins', aad: 'msm:a' });
+  const b = await call('/encrypt', { plaintext: 'zwei', aad: 'msm:b' });
+  const res = await call('/decrypt-many', {
+    items: [
+      { ciphertext: a.body.ciphertext, aad: 'msm:a' },
+      { ciphertext: b.body.ciphertext, aad: 'msm:falsch' },
+      { ciphertext: b.body.ciphertext.slice(PREFIX.length), aad: 'msm:b' },
+    ],
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.plaintexts, ['eins', null, 'zwei']);
+});
+
+test('decrypt-many fails loudly on a newer envelope version', async () => {
+  const a = await call('/encrypt', { plaintext: 'x' });
+  const res = await call('/decrypt-many', {
+    items: [{ ciphertext: 'msm-dis-v2:' + a.body.ciphertext.slice(PREFIX.length) }],
+  });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'DisUnsupportedFormatVersionError');
+});
+
+test('batches above the cap are refused', async () => {
+  const res = await call('/blind-index', { values: new Array(10001).fill('x') });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'DisBatchError');
+});
+
+test('blind-index is deterministic, keyed and distinct per value', async () => {
+  const res = await call('/blind-index', { values: ['user:1\nzeitzone', 'user:1\nzeitzone', 'user:2\nzeitzone'] });
+  assert.equal(res.status, 200);
+  const [a, b, c] = res.body.indices;
+  assert.match(a, /^[0-9a-f]{64}$/);
+  assert.equal(a, b);
+  assert.notEqual(a, c);
+  // Keyed: a plain SHA-256 of the value must not reproduce it.
+  const plain = crypto.createHash('sha256').update('user:1\nzeitzone').digest('hex');
+  assert.notEqual(a, plain);
+});

@@ -82,6 +82,17 @@ const altchaKeyBytes = await deriveHkdfSha256Bits(secretKeyBytes, {
 });
 const altchaHmacKey = await importHmacSha256Key(altchaKeyBytes, ['sign', 'verify']);
 altchaKeyBytes.fill(0);
+
+// Blind index: a keyed hash that lets the panel find and deduplicate an
+// encrypted value (e.g. a memory key) without storing it readable. Its own
+// HKDF domain, so an index can never be confused with an ALTCHA signature.
+const blindIndexKeyBytes = await deriveHkdfSha256Bits(secretKeyBytes, {
+  info: encoder.encode('MSM-DIS-blind-index-v1'),
+  salt: saltBytes,
+  lengthBits: 256,
+});
+const blindIndexKey = await importHmacSha256Key(blindIndexKeyBytes, ['sign']);
+blindIndexKeyBytes.fill(0);
 secretKeyBytes.fill(0);
 
 console.log(`[DIS Sidecar] Encryption key derived (HKDF-SHA-256, 256-bit)`);
@@ -111,6 +122,36 @@ const DIS_ENVELOPE = {
   familyPrefix: 'msm-dis-',
   subject: 'panel secret',
 };
+
+// What makes a single value unreadable (wrong key or aad, tampered, not even
+// base64). The same set the Python client maps to DisDecryptionError.
+// DisUnsupportedFormatVersionError is deliberately missing: a newer format is
+// not broken and must fail loudly.
+const UNREADABLE = new Set([
+  'DisDecryptionError',
+  'DisIntegrityError',
+  'DisInvalidArgumentError',
+  'InvalidCharacterError',
+]);
+
+// One request for many values instead of one round trip each. A memory with
+// 5,000 entries decrypts its keys in about 0.1 s this way, one by one it took
+// about 4 s. The cap keeps a single request from occupying the sidecar.
+const MAX_BATCH = 10000;
+
+function batchOf(list) {
+  if (!Array.isArray(list) || list.length > MAX_BATCH) {
+    throw new DisBatchError('invalid batch');
+  }
+  return list;
+}
+
+class DisBatchError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'DisBatchError';
+  }
+}
 
 // ── Password hashing params (DIS KDF v2) ─────────────────────────────────
 const PW_SALT_LEN = 16;
@@ -304,6 +345,37 @@ const server = http.createServer(async (req, res) => {
           ),
         };
         break;
+
+      case '/decrypt-many': {
+        // One unreadable value must not hide all the others: it comes back
+        // as null, exactly the cases /decrypt reports as DisDecryptionError.
+        const plaintexts = await Promise.all(
+          batchOf(data.items).map(async (item) => {
+            try {
+              return await decryptString(
+                parseEnvelope(DIS_ENVELOPE, String(item.ciphertext)).payload,
+                encKey,
+                item.aad || undefined,
+              );
+            } catch (e) {
+              if (e instanceof Error && UNREADABLE.has(e.name)) return null;
+              throw e;
+            }
+          }),
+        );
+        result = { plaintexts };
+        break;
+      }
+
+      case '/blind-index': {
+        const indices = [];
+        for (const value of batchOf(data.values)) {
+          const mac = await hmacSha256WithKey(blindIndexKey, encoder.encode(String(value)));
+          indices.push(Buffer.from(mac).toString('hex'));
+        }
+        result = { indices };
+        break;
+      }
 
       case '/hash-password': {
         const salt = randomBytes(PW_SALT_LEN);

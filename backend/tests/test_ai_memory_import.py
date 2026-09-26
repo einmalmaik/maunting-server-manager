@@ -351,7 +351,7 @@ def test_import_writes_encrypted_user_entries_and_reports_each_skip(
     assert werte["demografie.name"] == ("Heißt Alex", "user")
     assert werte["demografie.wohnort"][0] == "Wohnt in Hamburg"
     assert "anweisung.geheim" not in werte
-    neu = db.query(AiMemoryEntry).filter(AiMemoryEntry.key == "vorlieben.spiele").one()
+    (neu,) = [r for r in db.query(AiMemoryEntry).all() if r.key == "vorlieben.spiele"]
     assert "ARK" not in neu.value_encrypted
 
 

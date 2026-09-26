@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -37,7 +38,6 @@ class AiMemoryPreference(Base):
     # "Nicht mehr anzeigen". Schaltet den Hinweis ab, nicht das Gedaechtnis —
     # aktivieren laesst es sich danach weiterhin unter Profil > Memory.
     notice_hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
 class AiMemoryEntry(Base):
@@ -87,7 +87,7 @@ class AiMemoryEntry(Base):
             name="ck_ai_memory_entries_scope",
         ),
         CheckConstraint("origin IN ('user', 'ai')", name="ck_ai_memory_entries_origin"),
-        UniqueConstraint("scope_identity", "key", name="uq_ai_memory_scope_key"),
+        UniqueConstraint("scope_identity", "key_index", name="uq_ai_memory_scope_key_index"),
         Index("ix_ai_memory_owner_scope", "owner_user_id", "scope"),
         Index("ix_ai_memory_team", "team_id"),
     )
@@ -105,7 +105,19 @@ class AiMemoryEntry(Base):
     team_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=True)
     scope: Mapped[str] = mapped_column(String(16), nullable=False)
     scope_identity: Mapped[str] = mapped_column(String(128), nullable=False)
-    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Der Name des Eintrags ("zeitzone", "character_pairing"). Er sagt oft
+    # schon, worum es geht, und lag deshalb bis 26.09.2026 zu Unrecht im
+    # Klartext. Gelesen und gesetzt wird er ueber die Eigenschaft `key` unten;
+    # gesucht wird ueber `key_index`, ein HMAC aus dem Sidecar ueber Bereich
+    # und Namen. Der Bereich steckt mit drin, damit derselbe Name bei zwei
+    # Benutzern nicht denselben Index hat: sonst saehe man in der Tabelle, wer
+    # sich dasselbe gemerkt hat.
+    #
+    # NULL im Index heisst Altbestand von vor der Umstellung, `key_encrypted`
+    # traegt dann noch den Klartext. `ai_memory_service.schluessel_bedingung`
+    # zieht beides im betroffenen Bereich nach, bevor gesucht wird.
+    key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    key_index: Mapped[str | None] = mapped_column(String(64), nullable=True)
     value_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     # "user" = ausdruecklich hinterlegt, "ai" = von der KI gemerkt.
     origin: Mapped[str] = mapped_column(String(8), nullable=False, default="user")
@@ -149,26 +161,48 @@ class AiMemoryEntry(Base):
     # Werts statt: sie bewertet neben der Bedeutung auch die Wortüberschneidung
     # im Wert und braucht ihn dafür im Klartext.
     embedding_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    # Dieselben Zahlen in der alten Form. Sie steht hier nur noch für den
-    # Bestand: 5.000 Vektoren als Text zu lesen kostete gemessen 381 ms und
-    # 26,7 MB, als Bytes sind es 4 ms und 5,1 MB — über die Hälfte der
-    # Rechenzeit eines Chatabrufs für einen reinen Formatwechsel.
-    #
-    # Warum die Spalte trotzdem bleibt: zwischen dem Einspielen des neuen Codes
-    # und dem Durchlauf der Migration liegen bei jedem Betreiber ein paar
-    # Sekunden, und in denen darf das Gedächtnis nicht blind werden.
-    # `_stored_vector` liest deshalb bevorzugt Bytes und fällt auf diese Spalte
-    # zurück. Geschrieben wird sie nicht mehr; sie verschwindet, wenn kein
-    # unterstützter Bestand sie mehr braucht.
-    #
-    # Sie trägt ihre Zahlen unverschlüsselt, und seit dem 23.08.2026 gehören
-    # sie das nicht mehr. Deshalb räumt `_vektoren_nachziehen` eine Zeile mit
-    # JSON beim nächsten Abruf in den Kontext ab und schreibt sie neu, statt
-    # sie nur zu lesen — dieselbe Regel wie für Bestandszeilen in der
-    # Bytespalte darüber.
-    embedding_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Womit gerechnet wurde. Passt es nicht zum geladenen Modell, wird der
     # Vektor ignoriert statt falsche Aehnlichkeiten zu liefern.
     embedding_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    @hybrid_property
+    def key(self) -> str:
+        """Der Name im Klartext, einmal entschluesselt und dann gemerkt.
+
+        Fuer viele Zeilen auf einmal fuellt `ai_memory_service._schluessel_laden`
+        diesen Speicher mit einem einzigen Sidecar-Aufruf; ohne das kostete
+        jede Zeile einen eigenen.
+        """
+        klar = self.__dict__.get("_key_klartext")
+        if klar is None:
+            from services.dis_client import DisClient
+
+            roh = self.key_encrypted or ""
+            klar = DisClient.decrypt(roh, aad=self.key_aad()) if DisClient.ist_verschluesselt(roh) else roh
+            self._key_klartext = klar
+        return klar
+
+    @key.inplace.setter
+    def _key_setzen(self, wert: str) -> None:
+        from services.dis_client import DisClient
+
+        self.key_encrypted = DisClient.encrypt(wert, aad=self.key_aad())
+        self._key_klartext = wert
+
+    @key.inplace.expression
+    @classmethod
+    def _key_in_sql(cls):
+        # Mit einer schlichten `property` ergab `AiMemoryEntry.key == "x"`
+        # still `False` und damit eine leere Trefferliste. Hier scheitert es
+        # laut, und die Meldung sagt, wie es richtig geht.
+        raise AttributeError(
+            "AiMemoryEntry.key ist verschluesselt und in SQL nicht vergleichbar; "
+            "ai_memory_service.schluessel_bedingung verwenden"
+        )
+
+    def key_aad(self) -> str:
+        # An Bereich und Zeile gebunden wie der Wert (`ai_memory_service._aad`):
+        # wer den Namen in eine fremde Zeile kopiert, bekommt ihn nicht lesbar.
+        return f"msm:ai:memory:key:{self.scope_identity}:{self.id}"
