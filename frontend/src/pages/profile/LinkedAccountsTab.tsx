@@ -11,6 +11,7 @@ import { ConnectedMailboxesSection } from './ConnectedMailboxesSection'
 import { ConnectedCalendarsSection } from './ConnectedCalendarsSection'
 import { Button, buttonClasses } from '@/Singra/UI'
 import { Spinner } from '@/components/ui/Spinner'
+import { useAuthStore } from '@/stores/authStore'
 /**
  * Tab: Verknuepfte Accounts & Dienste.
  * Enthält:
@@ -42,7 +43,14 @@ export function LinkedAccountsTab() {
     }
   }, [searchParams, setSearchParams, t, reload])
 
+  const { user } = useAuthStore()
+  const isOnlyLogin = user?.has_password === false && oauthLinks.length <= 1
+
   const handleUnlink = async (link: OAuthUserLink) => {
+    if (isOnlyLogin) {
+      toast.error(t('profile.linkedAccounts.cannotUnlinkOnlyLogin'))
+      return
+    }
     const ok = await confirm({
       message: t('profile.linkedAccounts.unlinkConfirm', { provider: link.provider_name }),
       danger: true,
@@ -114,8 +122,10 @@ export function LinkedAccountsTab() {
                     </div>
                     <Button variant="secondary" size="sm"
                       type="button"
+                      disabled={isOnlyLogin}
+                      title={isOnlyLogin ? t('profile.linkedAccounts.cannotUnlinkOnlyLogin') : undefined}
                       onClick={() => handleUnlink(link)}
-                      className="inline-flex items-center gap-1.5"
+                      className="inline-flex items-center gap-1.5 disabled:opacity-50"
                     >
                       <Unlink className="w-3.5 h-3.5" />
                       {t('profile.linkedAccounts.unlink')}

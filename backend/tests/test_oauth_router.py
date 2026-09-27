@@ -635,6 +635,38 @@ class TestLinkedAccounts:
         db.expire_all()  # Cache invalidieren
         assert db.query(OAuthUserLink).filter_by(id=link_id).first() is None
 
+    def test_unlink_rejected_if_no_password_and_last_link(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict, user_csrf_token: str
+    ):
+        regular_user.has_password = False
+        db.commit()
+
+        p = _create_provider(db, slug="gh-lockout-test", preset="github")
+        link = OAuthUserLink(
+            provider_id=p.id, user_id=regular_user.id, subject=OAuthUserLink._hash_subject("sub-lockout")
+        )
+        db.add(link)
+        db.commit()
+
+        res = client.delete(
+            f"/api/oauth/me/links/{p.id}",
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert res.status_code == 400
+        assert "kein Passwort und kein Passkey" in res.json()["detail"]
+
+        # Mit Passwort darf der Link getrennt werden
+        regular_user.has_password = True
+        db.commit()
+
+        res2 = client.delete(
+            f"/api/oauth/me/links/{p.id}",
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert res2.status_code == 200
+
     def test_list_my_links_includes_provider_info(
         self, client: TestClient, user_cookies: dict,
         db: Session, regular_user: User,

@@ -6,6 +6,8 @@ export interface User {
   is_active: boolean
   email_verified: boolean
   two_factor_enabled: boolean
+  /** False, wenn das Konto rein über Social Login / OAuth registriert wurde und noch kein Passwort gesetzt hat. */
+  has_password?: boolean
   /** Der eingerichtete zweite Faktor — jede Abfrage zeigt nur diesen Weg. */
   two_factor_method?: 'totp' | 'passkey' | null
   email_notifications: boolean

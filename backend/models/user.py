@@ -74,6 +74,11 @@ class User(Base):
     email_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
 
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Hat der Benutzer ein echtes, nutzbares Passwort gesetzt?
+    # False bei Konten, die ausschließlich über OAuth / Social Login registriert wurden.
+    has_password: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=true(), nullable=False
+    )
 
     is_owner: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

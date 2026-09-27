@@ -103,6 +103,8 @@ class UserResponse(BaseModel):
     is_active: bool
     email_verified: bool
     two_factor_enabled: bool
+    # False, wenn das Konto rein über Social Login / OAuth registriert wurde und noch kein Passwort gesetzt hat.
+    has_password: bool = True
     # "totp", "passkey" oder None — damit jede Abfrage nur den Weg zeigt, den
     # das Konto eingerichtet hat.
     two_factor_method: Literal["totp", "passkey"] | None = None

@@ -737,6 +737,17 @@ async def unlink_my_account(
     user: User = Depends(get_current_user),
     _=Depends(verify_csrf),
 ) -> dict[str, str]:
+    # Schutz vor Selbst-Aussperrung: Hat das Konto kein Passwort, keine weiteren
+    # OAuth-Links und keinen Passkey, darf die letzte Verbindung nicht getrennt werden.
+    if not user.has_password:
+        links = oauth_service.list_user_links(db, user.id)
+        hat_passkeys = len(user.passkeys) > 0
+        if len(links) <= 1 and not hat_passkeys:
+            raise HTTPException(
+                status_code=400,
+                detail="Diese Verknüpfung kann nicht getrennt werden, da kein Passwort und kein Passkey für dein Konto hinterlegt ist. Bitte lege zuerst ein Passwort fest.",
+            )
+
     ok = oauth_service.unlink_user_from_provider(db, user.id, provider_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Kein Link fuer diesen Provider")
