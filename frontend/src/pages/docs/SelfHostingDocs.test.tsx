@@ -120,4 +120,16 @@ describe('SelfHostingDocs', () => {
     // aussieht statt wie eine bekannte Eigenschaft.
     expect(screen.getByText(/installer is not signed/i)).toBeInTheDocument()
   })
+
+  it('nennt die Medienadresse des Anruf-Sidecars und wie man sie vorgibt', async () => {
+    // Ohne diesen Eintrag sucht ein Betreiber hinter einem CDN nach stummen
+    // Anrufen, ohne zu wissen, dass es MSM_LIVEKIT_NODE_IP gibt.
+    renderPage()
+    expect(screen.getByText('Address for media')).toBeInTheDocument()
+    expect(screen.getByText(/MSM_LIVEKIT_NODE_IP in the backend \.env/)).toBeInTheDocument()
+
+    await i18n.changeLanguage('de')
+    renderPage()
+    expect(screen.getByText('Adresse für die Medien')).toBeInTheDocument()
+  })
 })

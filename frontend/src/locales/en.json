@@ -4155,6 +4155,10 @@
         "title": "Ports",
         "body": "7880/TCP bound to 127.0.0.1 for signalling, forwarded by Caddy under /livekit. 7882/UDP for media and 7881/TCP as a fallback when UDP is blocked. A single UDP port instead of a large range, because MSM runs Docker rootless."
       },
+      "address": {
+        "title": "Address for media",
+        "body": "The sidecar tells callers which IPv4 address to use for 7881 and 7882. install.sh and update.sh resolve the panel domain on the host and write the result as NODE_IP to livekit-sidecar/.env. LiveKit's own STUN lookup is off because it cannot resolve names under rootless Docker and aborts the start. If the server sits behind a proxy or CDN, put MSM_LIVEKIT_NODE_IP in the backend .env and run update.sh again."
+      },
       "keys": {
         "title": "Sidecar keys",
         "body": "install.sh generates them once and writes them to livekit-sidecar/.env and the backend .env. Both places must carry the same pair. If you rotate them by hand, change both files and restart msm-livekit and msm-backend, otherwise the media server rejects every token."
