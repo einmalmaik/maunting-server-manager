@@ -25,9 +25,11 @@ export interface StempelTexte {
   datumMitJahr: string
   datumKurz: string
   kurz: string
+  /** Selbst eingetippt, nie aus dem GPS: ein Ortsname braucht sonst einen Dienst, der die Koordinaten sieht. Leer: kein Ort. */
+  ort: string
 }
 
-export function stempelTexte(zeitpunkt: Date, sprache: string): StempelTexte {
+export function stempelTexte(zeitpunkt: Date, sprache: string, ort = ''): StempelTexte {
   const f = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(sprache, o).format(zeitpunkt)
   return {
     zeit: f({ hour: '2-digit', minute: '2-digit' }),
@@ -36,6 +38,7 @@ export function stempelTexte(zeitpunkt: Date, sprache: string): StempelTexte {
     datumMitJahr: f({ day: 'numeric', month: 'long', year: 'numeric' }),
     datumKurz: f({ day: '2-digit', month: '2-digit', year: '2-digit' }),
     kurz: `${f({ hour: '2-digit', minute: '2-digit' })} · ${f({ weekday: 'short', day: 'numeric', month: 'short' })}`,
+    ort: ort.trim(),
   }
 }
 
@@ -107,6 +110,35 @@ function pille(ctx: CanvasRenderingContext2D, x: number, y: number, b: number, h
   ctx.closePath()
 }
 
+/** Eine Stecknadel, deren Spitze auf der Grundlinie steht. Farbe und Schatten wie der Text. */
+function stecknadel(ctx: CanvasRenderingContext2D, x: number, grundlinie: number, px: number) {
+  const r = px * 0.26
+  ctx.beginPath()
+  ctx.arc(x, grundlinie - px * 0.52, r, Math.PI * 0.75, Math.PI * 0.25)
+  ctx.lineTo(x, grundlinie)
+  ctx.closePath()
+  ctx.fill()
+}
+
+/** Der Ort als Zeile mit Stecknadel davor, beides zusammen mittig. */
+function ortZeile(
+  ctx: CanvasRenderingContext2D,
+  ort: string,
+  mitte: number,
+  grundlinie: number,
+  schrift: (px: number) => string,
+  px: number,
+  maxBreite: number,
+) {
+  const groesse = passend(ctx, ort, schrift, px, maxBreite - px)
+  const nadel = groesse
+  const start = mitte - (ctx.measureText(ort).width + nadel) / 2
+  stecknadel(ctx, start + groesse * 0.3, grundlinie, groesse)
+  ctx.textAlign = 'left'
+  ctx.fillText(ort, start + nadel, grundlinie)
+  ctx.textAlign = 'center'
+}
+
 /** Zeichnet den Stempel auf ein Canvas, das das Foto schon trägt. */
 export function zeichneStempel(
   ctx: CanvasRenderingContext2D,
@@ -116,7 +148,8 @@ export function zeichneStempel(
   texte: StempelTexte,
   sichtSeitenverhaeltnis = b / h,
 ) {
-  if (stil === 'ohne') return
+  const ort = texte.ort
+  if (stil === 'ohne' && !ort) return
   // Breite des Teils, den der Sucher zeigt. Schneidet er oben und unten, bleibt die volle Breite.
   const sichtBreite = Math.min(b, h * sichtSeitenverhaeltnis)
   const s = Math.min(sichtBreite, h)
@@ -127,7 +160,21 @@ export function zeichneStempel(
   ctx.textBaseline = 'alphabetic'
   ctx.fillStyle = '#ffffff'
 
-  if (stil === 'gross') {
+  if (stil === 'ohne') {
+    // Nur der Ort, als helle Pille wie bei „Schlicht".
+    const y = h * 0.72
+    const px = passend(ctx, ort, (p) => `600 ${p}px Manrope, sans-serif`, s * 0.048, max * 0.8)
+    const pb = ctx.measureText(ort).width + px + px * 1.6
+    const ph = px * 2.1
+    ctx.shadowColor = 'rgba(0,0,0,0.25)'
+    ctx.shadowBlur = s * 0.02
+    ctx.fillStyle = 'rgba(255,255,255,0.92)'
+    pille(ctx, mitte - pb / 2, y - ph / 2, pb, ph)
+    ctx.fill()
+    ctx.shadowColor = 'transparent'
+    ctx.fillStyle = '#111418'
+    ortZeile(ctx, ort, mitte, y + px * 0.36, (p) => `600 ${p}px Manrope, sans-serif`, px, max * 0.8 + px)
+  } else if (stil === 'gross') {
     const y = h * 0.5
     schatten(ctx, s)
     const px = passend(ctx, texte.zeit, (p) => `400 ${p}px "Bebas Neue", sans-serif`, s * 0.36, max)
@@ -136,6 +183,7 @@ export function zeichneStempel(
     sperren(ctx, s * 0.01)
     passend(ctx, unter, (p) => `600 ${p}px Manrope, sans-serif`, s * 0.042, max)
     ctx.fillText(unter, mitte, y + px * 0.3 + s * 0.075)
+    if (ort) ortZeile(ctx, ort.toUpperCase(), mitte, y + px * 0.3 + s * 0.14, (p) => `600 ${p}px Manrope, sans-serif`, s * 0.036, max)
   } else if (stil === 'handschrift') {
     ctx.translate(mitte, h * 0.64)
     ctx.rotate((-4 * Math.PI) / 180)
@@ -145,6 +193,7 @@ export function zeichneStempel(
     ctx.fillText(oben, 0, 0)
     passend(ctx, texte.datumLang, (p) => `700 ${p}px Caveat, cursive`, px * 0.62, max)
     ctx.fillText(texte.datumLang, 0, px * 0.8)
+    if (ort) ortZeile(ctx, ort, 0, px * 1.42, (p) => `700 ${p}px Caveat, cursive`, px * 0.55, max)
   } else if (stil === 'elegant') {
     const y = h * 0.42
     schatten(ctx, s, 'rgba(0,0,0,0.35)')
@@ -161,6 +210,11 @@ export function zeichneStempel(
     ctx.shadowColor = 'transparent'
     ctx.fillRect(mitte - breite / 2 - linie - luecke, y + px * 0.35 + s * 0.058, linie, Math.max(1, s * 0.003))
     ctx.fillRect(mitte + breite / 2 + luecke, y + px * 0.35 + s * 0.058, linie, Math.max(1, s * 0.003))
+    if (ort) {
+      schatten(ctx, s, 'rgba(0,0,0,0.35)')
+      sperren(ctx, 0)
+      ortZeile(ctx, ort, mitte, y + px * 0.35 + s * 0.14, (p) => `italic 400 ${p}px "Playfair Display", serif`, s * 0.048, max)
+    }
   } else if (stil === 'digital') {
     const y = h * 0.6
     const px = passend(ctx, texte.zeit, (p) => `700 ${p}px Orbitron, monospace`, s * 0.12, max * 0.8)
@@ -178,10 +232,12 @@ export function zeichneStempel(
     sperren(ctx, s * 0.008)
     ctx.font = `700 ${Math.round(px * 0.26)}px Orbitron, monospace`
     ctx.fillText(texte.datumKurz, mitte, y + px * 0.2 + px * 0.42)
+    if (ort) ortZeile(ctx, ort.toUpperCase(), mitte, y + ph / 2 + s * 0.06, (p) => `700 ${p}px Orbitron, monospace`, px * 0.24, max)
   } else if (stil === 'schlicht') {
     const y = h * 0.72
-    const px = passend(ctx, texte.kurz, (p) => `600 ${p}px Manrope, sans-serif`, s * 0.048, max * 0.85)
-    const tb = ctx.measureText(texte.kurz).width
+    const text = ort ? `${texte.kurz} · ${ort}` : texte.kurz
+    const px = passend(ctx, text, (p) => `600 ${p}px Manrope, sans-serif`, s * 0.048, max * 0.85)
+    const tb = ctx.measureText(text).width
     const pb = tb + px * 1.6
     const ph = px * 2.1
     ctx.shadowColor = 'rgba(0,0,0,0.25)'
@@ -192,19 +248,19 @@ export function zeichneStempel(
     ctx.shadowColor = 'transparent'
     ctx.fillStyle = '#111418'
     ctx.textBaseline = 'middle'
-    ctx.fillText(texte.kurz, mitte, y + px * 0.04)
+    ctx.fillText(text, mitte, y + px * 0.04)
   }
   ctx.restore()
 }
 
-/** Das Foto mit Stempel als neues JPEG. `ohne` gibt das Foto unverändert zurück. */
+/** Das Foto mit Stempel als neues JPEG. `ohne` und kein Ort geben das Foto unverändert zurück. */
 export async function stempleFoto(
   dataUrl: string,
   stil: StempelStil,
   texte: StempelTexte,
   sichtSeitenverhaeltnis?: number,
 ): Promise<string> {
-  if (stil === 'ohne') return dataUrl
+  if (stil === 'ohne' && !texte.ort) return dataUrl
   await ladeStempelSchriften()
   const bild = new Image()
   bild.src = dataUrl

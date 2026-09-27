@@ -4,6 +4,7 @@ import {
   Dialog,
   DialogContent,
   Button,
+  Input,
 } from '@/Singra/UI'
 import {
   RefreshCw,
@@ -14,6 +15,7 @@ import {
   Upload,
   ChevronLeft,
   ChevronRight,
+  MapPin,
 } from 'lucide-react'
 import { STEMPEL_STILE, stempelTexte, stempleFoto, type StempelStil } from './augenblickStempel'
 
@@ -63,7 +65,11 @@ export function CameraSnapshotModal({
   // Der Stil bleibt über „Wiederholen" hinweg stehen; der Zeitpunkt ist der des Auslösens.
   const [stil, setStil] = useState<StempelStil>('ohne')
   const [ausgeloest, setAusgeloest] = useState<Date | null>(null)
-  const [gestempelt, setGestempelt] = useState<{ quelle: string; stil: StempelStil; bild: string } | null>(null)
+  const [gestempelt, setGestempelt] = useState<{ quelle: string; stil: StempelStil; ort: string; bild: string } | null>(null)
+  // Der Ort wird eingetippt, nie geortet. Er bleibt stehen, bis das Fenster zugeht.
+  const [ort, setOrt] = useState('')
+  const [ortEntprellt, setOrtEntprellt] = useState('')
+  const [ortOffen, setOrtOffen] = useState(false)
   const wischStart = useRef<number | null>(null)
   // Seitenverhältnis des Suchers beim Auslösen — der Stempel richtet sich danach.
   const [sicht, setSicht] = useState<number | undefined>(undefined)
@@ -130,6 +136,8 @@ export function CameraSnapshotModal({
     if (open) {
       void startCamera(facingMode)
     } else {
+      setOrt('')
+      setOrtOffen(false)
       startNummer.current++
       stopStream()
       setCapturedPhoto(null)
@@ -147,12 +155,20 @@ export function CameraSnapshotModal({
     if (videoRef.current && stream) videoRef.current.srcObject = stream
   }, [stream, capturedPhoto])
 
+  // Neu gezeichnet wird erst, wenn eine Weile nichts getippt wurde, nicht bei jedem Buchstaben.
   useEffect(() => {
-    if (!mitStempel || !capturedPhoto || stil === 'ohne' || !ausgeloest) return
+    const zeit = window.setTimeout(() => setOrtEntprellt(ort.trim()), 250)
+    return () => window.clearTimeout(zeit)
+  }, [ort])
+
+  const mitMarke = stil !== 'ohne' || ortEntprellt !== ''
+
+  useEffect(() => {
+    if (!mitStempel || !capturedPhoto || !mitMarke || !ausgeloest) return
     let aktuell = true
-    stempleFoto(capturedPhoto, stil, stempelTexte(ausgeloest, i18n.language), sicht)
+    stempleFoto(capturedPhoto, stil, stempelTexte(ausgeloest, i18n.language, ortEntprellt), sicht)
       .then((bild) => {
-        if (aktuell) setGestempelt({ quelle: capturedPhoto, stil, bild })
+        if (aktuell) setGestempelt({ quelle: capturedPhoto, stil, ort: ortEntprellt, bild })
       })
       .catch(() => {
         // Ein Stempel, der nicht gelingt, darf den Augenblick nicht aufhalten.
@@ -161,15 +177,17 @@ export function CameraSnapshotModal({
     return () => {
       aktuell = false
     }
-  }, [mitStempel, capturedPhoto, stil, ausgeloest, sicht, i18n.language])
+  }, [mitStempel, capturedPhoto, stil, ortEntprellt, mitMarke, ausgeloest, sicht, i18n.language])
 
   // Das Bild, das gezeigt und gesendet wird. `null` heisst: der Stempel wird noch gezeichnet.
   const fertigesBild =
-    !capturedPhoto || !mitStempel || stil === 'ohne'
+    !capturedPhoto || !mitStempel || !mitMarke
       ? capturedPhoto
-      : gestempelt && gestempelt.quelle === capturedPhoto && gestempelt.stil === stil
+      : gestempelt && gestempelt.quelle === capturedPhoto && gestempelt.stil === stil && gestempelt.ort === ortEntprellt
         ? gestempelt.bild
         : null
+  // Solange noch getippt wird, ginge sonst der Ort ohne die letzten Buchstaben hinaus.
+  const bereit = fertigesBild !== null && (!mitStempel || ort.trim() === ortEntprellt)
 
   const wechsleStil = (schritt: 1 | -1) => {
     setStil((vorher) => {
@@ -211,7 +229,7 @@ export function CameraSnapshotModal({
   }
 
   const handleUsePhoto = () => {
-    if (fertigesBild) {
+    if (fertigesBild && bereit) {
       onCapture(fertigesBild)
       onOpenChange(false)
     }
@@ -329,16 +347,40 @@ export function CameraSnapshotModal({
           <div className="absolute inset-x-0 bottom-0 px-4 pt-10 pb-[max(1.25rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-black/55 to-transparent">
             {capturedPhoto ? (
               <div className="space-y-3">
+                {mitStempel && ortOffen && (
+                  <Input
+                    value={ort}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setOrt(e.target.value)}
+                    prefix={<MapPin className="w-4 h-4" />}
+                    placeholder={t('messenger.moment.stamp.placePlaceholder')}
+                    aria-label={t('messenger.moment.stamp.place')}
+                    maxLength={40}
+                    enterKeyHint="done"
+                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                      if (e.key === 'Enter') setOrtOffen(false)
+                    }}
+                    autoFocus
+                  />
+                )}
                 {mitStempel && (
-                  <div className="flex items-center justify-center gap-3">
+                  <div className="relative flex items-center justify-center gap-3">
                     <button type="button" onClick={() => wechsleStil(-1)} className={bildknopf} aria-label={t('messenger.moment.stamp.prev')}>
                       <ChevronLeft className="w-5 h-5" />
                     </button>
-                    <span className="min-w-[8rem] text-center text-sm font-semibold text-white drop-shadow" aria-live="polite">
+                    <span className="min-w-[7rem] text-center text-sm font-semibold text-white drop-shadow" aria-live="polite">
                       {t(`messenger.moment.stamp.${stil}`)}
                     </span>
                     <button type="button" onClick={() => wechsleStil(1)} className={bildknopf} aria-label={t('messenger.moment.stamp.next')}>
                       <ChevronRight className="w-5 h-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOrtOffen((vorher) => !vorher)}
+                      className={`${bildknopf} absolute right-0 ${ort.trim() ? 'text-primary' : ''}`}
+                      aria-label={t('messenger.moment.stamp.place')}
+                      aria-pressed={ortOffen}
+                    >
+                      <MapPin className="w-5 h-5" />
                     </button>
                   </div>
                 )}
@@ -347,7 +389,7 @@ export function CameraSnapshotModal({
                     <RefreshCw className="w-4 h-4" />
                     <span>{t('social.camera.retake')}</span>
                   </Button>
-                  <Button type="button" variant="primary" size="lg" onClick={handleUsePhoto} disabled={!fertigesBild} className="font-semibold">
+                  <Button type="button" variant="primary" size="lg" onClick={handleUsePhoto} disabled={!bereit} className="font-semibold">
                     <Check className="w-4 h-4" />
                     <span>{bestaetigen ?? t('social.camera.use')}</span>
                   </Button>

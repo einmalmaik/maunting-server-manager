@@ -7023,7 +7023,9 @@
         "handschrift": "Handwritten",
         "elegant": "Elegant",
         "digital": "Digital",
-        "schlicht": "Simple"
+        "schlicht": "Simple",
+        "place": "Place",
+        "placePlaceholder": "Type a place, e.g. Hamburg"
       }
     }
   },

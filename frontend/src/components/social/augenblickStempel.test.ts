@@ -24,10 +24,27 @@ describe('Stempel eines Augenblicks', () => {
     expect(STEMPEL_STILE[0]).toBe('ohne')
   })
 
-  it('zeichnet bei „ohne" nichts', () => {
+  it('zeichnet bei „ohne" ohne Ort nichts', () => {
     const aufrufe: string[] = []
     const ctx = new Proxy({}, { get: (_z, name) => { aufrufe.push(String(name)); return () => {} } })
     zeichneStempel(ctx as CanvasRenderingContext2D, 100, 100, 'ohne', stempelTexte(zeitpunkt, 'de'))
     expect(aufrufe).toEqual([])
+  })
+
+  it('nimmt den eingetippten Ort ohne Ränder, und bei „ohne" steht er allein', () => {
+    expect(stempelTexte(zeitpunkt, 'de', '  Hamburg ').ort).toBe('Hamburg')
+    expect(stempelTexte(zeitpunkt, 'de').ort).toBe('')
+
+    const geschrieben: string[] = []
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (_z, name) => {
+        if (name === 'fillText') return (text: string) => geschrieben.push(text)
+        if (name === 'measureText') return (text: string) => ({ width: text.length * 5 })
+        return () => {}
+      },
+      set: () => true,
+    })
+    zeichneStempel(ctx as unknown as CanvasRenderingContext2D, 1000, 1000, 'ohne', stempelTexte(zeitpunkt, 'de', 'Hamburg'))
+    expect(geschrieben).toEqual(['Hamburg'])
   })
 })
