@@ -296,6 +296,10 @@ describe('Teams', () => {
 
     expect(await screen.findByLabelText('Wissen dieses Teams')).toBeInTheDocument()
     expect(await screen.findByLabelText('Skills')).toBeInTheDocument()
+    // Der Leertext gehörte bis zum 27.09.2026 dem persönlichen Gedächtnis —
+    // unter einem Team stand „Noch keine persönlichen Memory-Einträge".
+    expect(await screen.findByText('Für dieses Team ist noch nichts gemerkt.')).toBeInTheDocument()
+    expect(screen.queryByText(/persönlichen Memory-Einträge/)).not.toBeInTheDocument()
   })
 
   it('zeigt keine Skills ohne das Recht, sie zu benutzen', async () => {

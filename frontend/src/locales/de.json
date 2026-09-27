@@ -516,7 +516,12 @@
     },
     "memory": {
       "enabled": "Memory im KI-Kontext verwenden",
-      "empty": "Noch keine persönlichen Memory-Einträge vorhanden.",
+      "empty": {
+        "user": "Noch keine persönlichen Memory-Einträge vorhanden.",
+        "server_shared": "Für diesen Server ist noch nichts gemerkt.",
+        "team": "Für dieses Team ist noch nichts gemerkt.",
+        "panel": "Panelweit ist noch nichts gemerkt."
+      },
       "key": "Schlüssel, z. B. response.language",
       "value": "Präferenz",
       "saved": "Memory-Eintrag gespeichert.",

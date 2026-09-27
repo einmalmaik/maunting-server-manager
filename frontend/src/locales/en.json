@@ -516,7 +516,12 @@
     },
     "memory": {
       "enabled": "Use memory in AI context",
-      "empty": "No personal memory entries exist yet.",
+      "empty": {
+        "user": "No personal memory entries exist yet.",
+        "server_shared": "Nothing is remembered for this server yet.",
+        "team": "Nothing is remembered for this team yet.",
+        "panel": "Nothing is remembered panel-wide yet."
+      },
       "key": "Key, for example response.language",
       "value": "Preference",
       "saved": "Memory entry saved.",

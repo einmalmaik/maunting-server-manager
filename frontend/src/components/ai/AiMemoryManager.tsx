@@ -610,7 +610,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
 
         {sichtbar.length === 0 && (
           <p className="rounded-xl border border-dashed border-outline-variant/50 px-4 py-5 text-sm text-on-surface-variant text-center">
-            {entries.length === 0 ? t('ai.memory.empty') : t('ai.memory.noMatches')}
+            {entries.length === 0 ? t(`ai.memory.empty.${scope.kind}`) : t('ai.memory.noMatches')}
           </p>
         )}
       </div>
