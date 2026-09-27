@@ -433,7 +433,7 @@ describe('useVaultStore - Security & Operations', () => {
     expect(checkHintSpy).not.toHaveBeenCalled()
   })
 
-  it('syncWithServer preserves in-flight pending mutations and writes canary if missing', async () => {
+  it('syncWithServer sends in-flight pending mutations in a follow-up round and writes canary if missing', async () => {
     const bucketId = 'e'.repeat(64)
     const rawKey = new Uint8Array(32).fill(7)
     const userKey = await window.crypto.subtle.importKey(
@@ -456,7 +456,9 @@ describe('useVaultStore - Security & Operations', () => {
     localStorage.setItem(`mss:vault_pending_${bucketId}`, JSON.stringify([initialMutation]))
 
     // Mock blindVaultSync to simulate an in-flight mutation added while request is awaiting response
-    vi.spyOn(globalThis, 'fetch').mockImplementationOnce(async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    fetchSpy.mockClear()
+    fetchSpy.mockImplementationOnce(async () => {
       // Simulate concurrent mutation added in flight
       const inFlightMutation = { id: 'mut-2', ciphertext: 'sv-vault-v1:c2', revision: 2, is_deleted: false }
       const current = JSON.parse(localStorage.getItem(`mss:vault_pending_${bucketId}`) || '[]')
@@ -470,13 +472,22 @@ describe('useVaultStore - Security & Operations', () => {
         }),
       } as Response
     })
+    fetchSpy.mockImplementationOnce(async () => ({
+      ok: true,
+      json: async () => ({
+        server_revision: 6,
+        entries: [{ id: 'mut-2', ciphertext: 'sv-vault-v1:c2', revision: 6, is_deleted: false }],
+      }),
+    }) as Response)
 
     await useVaultStore.getState().syncWithServer()
 
-    // mut-1 was synced, but mut-2 added in flight must be preserved!
-    const pendingRemaining = JSON.parse(localStorage.getItem(`mss:vault_pending_${bucketId}`) || '[]')
-    expect(pendingRemaining).toHaveLength(1)
-    expect(pendingRemaining[0].id).toBe('mut-2')
+    // mut-2 was added in flight: it must survive the first round and go out
+    // in the second, not wait for the next save to trigger a sync.
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    const zweiteRunde = JSON.parse(String(fetchSpy.mock.calls[1][1]?.body))
+    expect(zweiteRunde.mutations.map((m: { id: string }) => m.id)).toEqual(['mut-2'])
+    expect(localStorage.getItem(`mss:vault_pending_${bucketId}`)).toBeNull()
 
     // Canary should be created since it was missing
     const canary = localStorage.getItem(`mss:vault_canary_${bucketId}`)

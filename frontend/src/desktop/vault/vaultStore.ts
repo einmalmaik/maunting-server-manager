@@ -57,6 +57,13 @@ interface StoredEncryptedEntry {
   ciphertext: string
   revision: number
   is_deleted: boolean
+  /**
+   * Der Stand aus dem Umschlag (siehe `standAus`), lokal mitgeschrieben, damit
+   * der Sync ihn ohne erneutes Entschlüsseln vergleichen kann. Fehlt bei
+   * Blobs aus der Zeit davor; dann wird er aus dem Ciphertext gelesen. Geht
+   * nie an den Server.
+   */
+  stand?: number
 }
 
 interface VaultSyncPayload {
@@ -108,6 +115,158 @@ export interface VaultBlindSyncPayload {
  * `entryId` gebunden ist.
  */
 export const VAULT_TOMBSTONE_MARKER = 'mss-vault-tombstone-v1'
+
+/**
+ * Obergrenzen eines Sync-Aufrufs — deckungsgleich mit `backend/schemas/vault.py`
+ * (`max_length=100`, `MAX_MUTATION_PAYLOAD_BYTES`). Bis 09/2026 schickte der
+ * Client die ganze Warteschlange auf einmal: ab der 101. Änderung lehnte der
+ * Server jeden Sync mit 422 ab, und die Warteschlange wurde nie wieder leer.
+ */
+const SYNC_MAX_MUTATIONEN = 100
+const SYNC_MAX_BYTES = 8 * 1024 * 1024
+/** Mehr Runden als das (5.000 Änderungen) übernimmt der nächste Anstoß. */
+const SYNC_MAX_RUNDEN = 50
+
+/** Der vordere Teil der Warteschlange, der in einen Sync-Aufruf passt. */
+export function naechstesSyncPaket(queue: StoredEncryptedEntry[]): StoredEncryptedEntry[] {
+  const paket: StoredEncryptedEntry[] = []
+  let bytes = 0
+  for (const m of queue) {
+    if (paket.length >= SYNC_MAX_MUTATIONEN) break
+    if (paket.length > 0 && bytes + m.ciphertext.length > SYNC_MAX_BYTES) break
+    paket.push(m)
+    bytes += m.ciphertext.length
+  }
+  return paket
+}
+
+/**
+ * Der Stand eines Umschlags: sein `updatedAt`, bei Tombstones aus der Zeit vor
+ * 09/2026 das `deletedAt`.
+ *
+ * Die `revision` neben dem Umschlag vergibt der Server, und er kann sie frei
+ * wählen: ein alter, gültig verschlüsselter Eintrag mit Revision 999 ging am
+ * Rücksprung-Schutz vorbei, der nur die Revision verglich. Der Stand steht
+ * **im** Umschlag — ihn kann nur ändern, wer den UserKey hat.
+ */
+function standAus(payload: Record<string, unknown> | null | undefined): number {
+  const wert = payload?.updatedAt ?? payload?.deletedAt
+  return typeof wert === 'number' && Number.isFinite(wert) ? wert : 0
+}
+
+/**
+ * Der Stand einer neuen Fassung: die Uhrzeit, aber nie kleiner als der
+ * bisherige Stand plus eins. Ein Gerät mit nachgehender Uhr schriebe sonst
+ * Fassungen, die andere Geräte als Rücksprung verwerfen.
+ */
+function naechsterStand(bisher: number | undefined): number {
+  return Math.max(Date.now(), (bisher ?? 0) + 1)
+}
+
+type SyncBefund =
+  | { art: 'canary'; ciphertext: string }
+  | { art: 'grab'; entry: VaultSyncResponse['entries'][number]; stand: number }
+  | { art: 'eintrag'; entry: VaultSyncResponse['entries'][number]; stand: number; item: VaultItem }
+
+/**
+ * Entschlüsselt und prüft eine Sync-Antwort, ohne etwas zu schreiben.
+ *
+ * Das Schreiben übernimmt der Aufrufer danach in einem Zug ohne `await`. Hier
+ * wird gewartet, und währenddessen kann der Benutzer speichern oder sperren —
+ * wer hier schon schriebe, überschriebe dessen Stand mit einer Momentaufnahme.
+ *
+ * `vorab` liefert den Stand der bekannten Blobs, die noch keinen `stand`
+ * mitführen; neue Blobs tragen ihn immer.
+ */
+async function pruefeSyncAntwort(
+  entries: VaultSyncResponse['entries'],
+  userKey: CryptoKey,
+  bekannteBlobs: StoredEncryptedEntry[],
+): Promise<{ befunde: SyncBefund[]; vorab: Map<string, number> }> {
+  const befunde: SyncBefund[] = []
+  const vorab = new Map<string, number>()
+
+  for (const entry of entries) {
+    if (entry.id === 'vault-canary') {
+      // Ein Canary, der sich nicht mit dem eigenen Schlüssel öffnen lässt,
+      // wird nicht übernommen. Sonst genügte ein ausgetauschter Prüfblock,
+      // um den Besitzer beim nächsten Entsperren mit „falsches
+      // Master-Passwort" aus seinem eigenen Tresor auszusperren.
+      try {
+        await decryptVaultEntry(entry.ciphertext, userKey, 'vault-canary')
+      } catch {
+        console.warn('Tresor-Sync: fremder Canary verworfen.')
+        continue
+      }
+      befunde.push({ art: 'canary', ciphertext: entry.ciphertext })
+      continue
+    }
+
+    const bekannt = bekannteBlobs.find((b) => b.id === entry.id)
+    if (bekannt && bekannt.stand === undefined && !vorab.has(entry.id)) {
+      let stand = 0
+      try {
+        stand = standAus(await decryptVaultEntry(bekannt.ciphertext, userKey, bekannt.id))
+      } catch {}
+      vorab.set(entry.id, stand)
+    }
+
+    let dec: Record<string, unknown>
+    try {
+      dec = await decryptVaultEntry(entry.ciphertext, userKey, entry.id)
+    } catch {
+      if (entry.is_deleted) {
+        // Gelöscht wird nur auf Vorlage eines belegten Tombstones. Ein
+        // `is_deleted` ohne passenden Umschlag stammt nicht vom Besitzer des
+        // Schlüssels und bleibt folgenlos.
+        //
+        // Der Preis, offen benannt: Tombstones aus der Zeit vor dem Audit
+        // tragen einen leeren Ciphertext. Eine solche Alt-Löschung erreicht
+        // ein frisch eingerichtetes Zweitgerät nicht mehr — der Eintrag
+        // steht dort und kann erneut gelöscht werden. Ein stehengebliebener
+        // Eintrag ist reparierbar, ein leergeräumter Tresor nicht.
+        console.warn(`Tresor-Sync: unbelegte Löschung für ${entry.id} ignoriert.`)
+      }
+      continue
+    }
+
+    // Ein Umschlag mit Tombstone-Inhalt ist nie ein Eintrag — auch dann
+    // nicht, wenn die Antwort ihn als lebendig ausgibt.
+    if (dec?.[VAULT_TOMBSTONE_MARKER] === true) {
+      befunde.push({ art: 'grab', entry, stand: standAus(dec) })
+      continue
+    }
+    if (entry.is_deleted) {
+      console.warn(`Tresor-Sync: unbelegte Löschung für ${entry.id} ignoriert.`)
+      continue
+    }
+
+    befunde.push({
+      art: 'eintrag',
+      entry,
+      stand: standAus(dec),
+      item: {
+        id: entry.id,
+        service: String(dec.service || 'Unbekannt'),
+        username: String(dec.username || ''),
+        password: String(dec.password || ''),
+        url: dec.url ? String(dec.url) : undefined,
+        notes: dec.notes ? String(dec.notes) : undefined,
+        totpSecret: dec.totpSecret ? String(dec.totpSecret) : undefined,
+        category: (dec.category as VaultItem['category']) || 'login',
+        isFavorite: !!dec.isFavorite,
+        lastUsedAt: typeof dec.lastUsedAt === 'number' ? dec.lastUsedAt : undefined,
+        attachments: Array.isArray(dec.attachments) ? (dec.attachments as VaultAttachment[]) : undefined,
+        linkedServiceId: dec.linkedServiceId ? String(dec.linkedServiceId) : undefined,
+        createdAt: Number(dec.createdAt || Date.now()),
+        updatedAt: Number(dec.updatedAt || Date.now()),
+        revision: entry.revision,
+      },
+    })
+  }
+
+  return { befunde, vorab }
+}
 
 /**
  * Führt einen anonymen Tresor-Sync über credentials: 'omit' ohne Session-Cookies oder User-Header durch.
@@ -314,6 +473,19 @@ interface VaultState {
 export const useVaultStore = create<VaultState>((set, get) => {
   runBiometricsMigration()
 
+  /**
+   * Ob die Sitzung, die `userKey` und `bucketId` gelesen hat, noch offen ist.
+   *
+   * Jedes Entsperren leitet einen neuen `CryptoKey` ab; die Objektgleichheit
+   * ist damit die Sitzungskennung. Wer nach einem `await` Klartext in den
+   * Store schreibt, fragt vorher hier — sonst stehen nach dem Sperren wieder
+   * Passwörter im Speicher, geschrieben von einer verspäteten Antwort.
+   */
+  const sitzungOffen = (userKey: CryptoKey, bucketId: string) => {
+    const jetzt = get()
+    return jetzt.userKey === userKey && jetzt.bucketId === bucketId
+  }
+
   return {
   isInitialized: typeof localStorage !== 'undefined' ? !!localStorage.getItem(VAULT_SETUP_DONE_KEY) : false,
   isUnlocked: false,
@@ -519,6 +691,10 @@ export const useVaultStore = create<VaultState>((set, get) => {
       selectedItemId: null,
       unlockError: null,
       lastActivityTime: Date.now(),
+      // Ein Sync, der gerade unterwegs ist, gehört zur alten Sitzung und
+      // verwirft seine Antwort (siehe `syncWithServer`). Bliebe hier
+      // „syncing" stehen, liefe nach dem nächsten Entsperren keiner mehr.
+      syncStatus: 'synced',
     })
   },
 
@@ -555,6 +731,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       selectedItemId: null,
       unlockError: null,
       lastActivityTime: Date.now(),
+      syncStatus: 'synced',
     })
   },
 
@@ -851,7 +1028,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
   },
 
   createQuickPasswordEntry: async (serviceName = 'Neuer Eintrag') => {
-    const { userKey, bucketId, items } = get()
+    const { userKey, bucketId } = get()
     if (!userKey || !bucketId) {
       throw new Error(i18n.t('mss.vault.errors.locked'))
     }
@@ -887,17 +1064,21 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
     // In Cache und Warteschlange ablegen
     const cachedBlobs = getStoredBlobs(bucketId)
-    cachedBlobs.push({ id: newId, ciphertext, revision: 1, is_deleted: false })
+    cachedBlobs.push({ id: newId, ciphertext, revision: 1, is_deleted: false, stand: now })
     localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
 
     const pendingQueue = getPendingQueue(bucketId)
     pendingQueue.push({ id: newId, ciphertext, revision: 1, is_deleted: false })
     localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(pendingQueue))
 
-    set({
-      items: [newItem, ...items],
-      selectedItemId: newId,
-    })
+    // Der Umschlag ist abgelegt; in den Speicher kommt der Klartext nur, wenn
+    // während des Verschlüsselns niemand gesperrt hat.
+    if (sitzungOffen(userKey, bucketId)) {
+      set({
+        items: [newItem, ...get().items],
+        selectedItemId: newId,
+      })
+    }
 
     // Im Hintergrund synchronisieren
     void get().syncWithServer()
@@ -926,7 +1107,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
     const id = itemData.id || window.crypto.randomUUID()
     const existing = items.find((i) => i.id === id)
     const revision = (existing?.revision || 0) + 1
-    const now = Date.now()
+    const now = naechsterStand(existing?.updatedAt)
 
     const updatedItem: VaultItem = {
       id,
@@ -967,7 +1148,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
     // Lokalen Cache aktualisieren
     let cachedBlobs = getStoredBlobs(bucketId)
     cachedBlobs = cachedBlobs.filter((b) => b.id !== id)
-    cachedBlobs.push({ id, ciphertext, revision, is_deleted: false })
+    cachedBlobs.push({ id, ciphertext, revision, is_deleted: false, stand: now })
     localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
 
     // Pending Queue aktualisieren
@@ -975,9 +1156,14 @@ export const useVaultStore = create<VaultState>((set, get) => {
     pendingQueue.push({ id, ciphertext, revision, is_deleted: false })
     localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(pendingQueue))
 
-    const newItems = items.some((i) => i.id === id)
-      ? items.map((i) => (i.id === id ? updatedItem : i))
-      : [updatedItem, ...items]
+    // Siehe createQuickPasswordEntry. Die Liste wird frisch gelesen: ein Sync
+    // oder ein zweites Speichern kann sie während des Verschlüsselns geändert
+    // haben.
+    if (!sitzungOffen(userKey, bucketId)) return
+    const aktuell = get().items
+    const newItems = aktuell.some((i) => i.id === id)
+      ? aktuell.map((i) => (i.id === id ? updatedItem : i))
+      : [updatedItem, ...aktuell]
 
     set({ items: newItems, selectedItemId: id })
     void get().syncWithServer()
@@ -989,20 +1175,24 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
     const existing = items.find((i) => i.id === id)
     const revision = (existing?.revision || 0) + 1
+    const stand = naechsterStand(existing?.updatedAt)
 
     // Der Tombstone wird verschlüsselt und an dieselbe `entryId` gebunden wie
     // der Eintrag, den er beerdigt. Früher stand hier `ciphertext: ''` — eine
     // Löschung ohne Absender, die jeder erfinden konnte. Siehe
     // VAULT_TOMBSTONE_MARKER.
     const tombstone = await encryptVaultEntry(
-      { [VAULT_TOMBSTONE_MARKER]: true, deletedAt: Date.now() },
+      { [VAULT_TOMBSTONE_MARKER]: true, deletedAt: Date.now(), updatedAt: stand },
       userKey,
       id,
     )
 
-    // Lokalen Cache bereinigen
+    // Im Cache bleibt der Tombstone stehen, nicht nichts: ohne ihn hielte der
+    // Sync eine zurückgespielte alte Fassung des Eintrags für einen neuen und
+    // holte das gelöschte Passwort zurück.
     let cachedBlobs = getStoredBlobs(bucketId)
     cachedBlobs = cachedBlobs.filter((b) => b.id !== id)
+    cachedBlobs.push({ id, ciphertext: tombstone, revision, is_deleted: true, stand })
     localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
 
     // Tombstone in Pending Queue
@@ -1010,7 +1200,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
     pendingQueue.push({ id, ciphertext: tombstone, revision, is_deleted: true })
     localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(pendingQueue))
 
-    const remaining = items.filter((i) => i.id !== id)
+    if (!sitzungOffen(userKey, bucketId)) return
+    const remaining = get().items.filter((i) => i.id !== id)
     set({
       items: remaining,
       selectedItemId: remaining.length > 0 ? remaining[0].id : null,
@@ -1034,7 +1225,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
   },
 
   syncWithServer: async () => {
-    const { userKey, bucketId, bucketAuthToken, syncStatus, items } = get()
+    const { userKey, bucketId, bucketAuthToken, syncStatus } = get()
     if (!userKey || !bucketId || syncStatus === 'syncing') return
 
     set({ syncStatus: 'syncing' })
@@ -1044,200 +1235,168 @@ export const useVaultStore = create<VaultState>((set, get) => {
     // die falsche Auskunft: erreichbar war er ja.
     let blindAbgewiesen = false
 
-    try {
-      const pendingQueue = getPendingQueue(bucketId)
-
-      const storedRev = localStorage.getItem(`${VAULT_REVISION_PREFIX}${bucketId}`)
-      const sinceRevision = storedRev ? parseInt(storedRev, 10) : 0
-
-      const mutations = pendingQueue.map((m) => ({
-        id: m.id,
-        ciphertext: m.ciphertext,
-        revision: m.revision,
-        is_deleted: m.is_deleted,
-      }))
-
-      let data: VaultSyncResponse
-      if (bucketAuthToken) {
-        const blind = () =>
-          blindVaultSync({
-            bucket_id: bucketId,
-            auth_token: bucketAuthToken,
-            since_revision: sinceRevision,
-            mutations,
-          })
-        try {
-          data = await blind()
-        } catch (err: unknown) {
-          // 401 heißt hier: der Bucket trägt schon Daten, aber noch keinen
-          // blinden Besitznachweis — ein Tresor aus der Zeit vor dem Audit.
-          // Den Nachweis darf nur der angemeldete Besitzer hinterlegen;
-          // unauthentifiziert nachzuregistrieren war genau die Lücke, über die
-          // sich fremde Tresore übernehmen ließen.
-          const istAuthFehler = err instanceof Error && err.message.includes('401')
-          if (!istAuthFehler) throw err
-          blindAbgewiesen = true
-          await api('/api/vault/blind-register', {
-            method: 'POST',
-            body: JSON.stringify({ bucket_id: bucketId, auth_token: bucketAuthToken }),
-          })
-          data = await blind()
-        }
-      } else {
+    const senden = async (
+      mutations: VaultSyncPayload['mutations'],
+      sinceRevision: number,
+    ): Promise<VaultSyncResponse> => {
+      if (!bucketAuthToken) {
         const payload: VaultSyncPayload = {
           bucket_id: bucketId,
           since_revision: sinceRevision,
           mutations,
         }
-        data = await api<VaultSyncResponse>('/api/vault/sync', {
+        return api<VaultSyncResponse>('/api/vault/sync', {
           method: 'POST',
           body: JSON.stringify(payload),
         })
       }
+      const blind = () =>
+        blindVaultSync({
+          bucket_id: bucketId,
+          auth_token: bucketAuthToken,
+          since_revision: sinceRevision,
+          mutations,
+        })
+      try {
+        return await blind()
+      } catch (err: unknown) {
+        // 401 heißt hier: der Bucket trägt schon Daten, aber noch keinen
+        // blinden Besitznachweis — ein Tresor aus der Zeit vor dem Audit.
+        // Den Nachweis darf nur der angemeldete Besitzer hinterlegen;
+        // unauthentifiziert nachzuregistrieren war genau die Lücke, über die
+        // sich fremde Tresore übernehmen ließen.
+        const istAuthFehler = err instanceof Error && err.message.includes('401')
+        if (!istAuthFehler) throw err
+        blindAbgewiesen = true
+        await api('/api/vault/blind-register', {
+          method: 'POST',
+          body: JSON.stringify({ bucket_id: bucketId, auth_token: bucketAuthToken }),
+        })
+        return blind()
+      }
+    }
 
-      // Server-Antwort verarbeiten (SEC-03: Monotone Revisionsverarbeitung)
-      let cachedBlobs = getStoredBlobs(bucketId)
-      let currentItems = [...items]
+    try {
+      // Die Warteschlange geht in Paketen, die der Server annimmt. Was
+      // während einer Runde dazukommt, geht in der nächsten mit: der
+      // Speichern-Aufruf, der es eingereiht hat, fand den Sync schon laufend
+      // vor und hat keinen eigenen gestartet.
+      for (let runde = 0; runde < SYNC_MAX_RUNDEN; runde++) {
+        const paket = naechstesSyncPaket(getPendingQueue(bucketId))
+        const storedRev = localStorage.getItem(`${VAULT_REVISION_PREFIX}${bucketId}`)
+        const sinceRevision = storedRev ? parseInt(storedRev, 10) : 0
 
-      for (const entry of data.entries) {
-        // Rollback-Schutz: Revisionen wachsen. Eine Antwort, die für einen
-        // bekannten Eintrag zurückgeht, ist kein Sync, sondern ein Angebot —
-        // etwa das alte, längst ersetzte Passwort eines kompromittierten
-        // Dienstes. Der Umschlag daran ist gültig (er war es ja einmal), also
-        // fällt es der Entschlüsselung nicht auf. Nur die Revision verrät es.
-        const bekannt = cachedBlobs.find((b) => b.id === entry.id)
-        if (bekannt && entry.revision < bekannt.revision) {
-          console.warn(
-            `Tresor-Sync: Rücksprung für ${entry.id} (${bekannt.revision} → ${entry.revision}) verworfen.`,
-          )
-          continue
-        }
+        const data = await senden(
+          paket.map((m) => ({
+            id: m.id,
+            ciphertext: m.ciphertext,
+            revision: m.revision,
+            is_deleted: m.is_deleted,
+          })),
+          sinceRevision,
+        )
+        // Gesperrt, während die Antwort unterwegs war: sie gehört einer
+        // Sitzung, die es nicht mehr gibt. Kein Klartext in den Store, kein
+        // Schreiben in den Cache — der nächste Sync holt dasselbe noch einmal.
+        if (!sitzungOffen(userKey, bucketId)) return
 
-        if (entry.id === 'vault-canary') {
-          // Ein Canary, der sich nicht mit dem eigenen Schlüssel öffnen lässt,
-          // wird nicht übernommen. Sonst genügte ein ausgetauschter Prüfblock,
-          // um den Besitzer beim nächsten Entsperren mit „falsches
-          // Master-Passwort" aus seinem eigenen Tresor auszusperren.
-          try {
-            await decryptVaultEntry(entry.ciphertext, userKey, 'vault-canary')
-          } catch {
-            console.warn('Tresor-Sync: fremder Canary verworfen.')
-            continue
-          }
-          if (typeof localStorage !== 'undefined') {
-            localStorage.setItem(VAULT_CANARY_KEY, entry.ciphertext)
-            localStorage.setItem(`${VAULT_CANARY_PREFIX}${bucketId}`, entry.ciphertext)
+        const { befunde, vorab } = await pruefeSyncAntwort(data.entries, userKey, getStoredBlobs(bucketId))
+        if (!sitzungOffen(userKey, bucketId)) return
+
+        // Ab hier kein `await` mehr bis zum Ende der Runde: Cache, Liste und
+        // Warteschlange werden frisch gelesen und in einem Zug geschrieben.
+        // Vorher kam die Liste aus dem Aufruf von vor der Netzanfrage, und
+        // ein zwischendurch gespeicherter Eintrag wurde mit der alten Fassung
+        // überschrieben.
+        let cachedBlobs = getStoredBlobs(bucketId)
+        let currentItems = [...get().items]
+
+        for (const befund of befunde) {
+          if (befund.art === 'canary') {
+            localStorage.setItem(VAULT_CANARY_KEY, befund.ciphertext)
+            localStorage.setItem(`${VAULT_CANARY_PREFIX}${bucketId}`, befund.ciphertext)
             localStorage.setItem(VAULT_SERVER_BUCKET_KEY, bucketId)
-          }
-          continue
-        }
-        if (entry.is_deleted) {
-          // Gelöscht wird nur auf Vorlage eines belegten Tombstones. Ein
-          // `is_deleted` ohne passenden Umschlag stammt nicht vom Besitzer des
-          // Schlüssels und bleibt folgenlos.
-          //
-          // Der Preis, offen benannt: Tombstones aus der Zeit vor dem Audit
-          // tragen einen leeren Ciphertext. Eine solche Alt-Löschung erreicht
-          // ein frisch eingerichtetes Zweitgerät nicht mehr — der Eintrag
-          // steht dort und kann erneut gelöscht werden. Ein stehengebliebener
-          // Eintrag ist reparierbar, ein leergeräumter Tresor nicht.
-          let belegt = false
-          try {
-            const beleg = await decryptVaultEntry(entry.ciphertext, userKey, entry.id)
-            belegt = beleg?.[VAULT_TOMBSTONE_MARKER] === true
-          } catch {
-            belegt = false
-          }
-          if (!belegt) {
-            console.warn(`Tresor-Sync: unbelegte Löschung für ${entry.id} ignoriert.`)
             continue
           }
+
+          const { entry, stand } = befund
+          // Rollback-Schutz: eine Fassung, die älter ist als die bekannte,
+          // ist kein Sync, sondern ein Angebot — etwa das alte, längst
+          // ersetzte Passwort eines kompromittierten Dienstes. Der Umschlag
+          // daran ist gültig (er war es ja einmal), also fällt es der
+          // Entschlüsselung nicht auf. Verglichen wird der Stand im Umschlag,
+          // nicht die Revision daneben: die setzt der Server, wie er will.
+          //
+          // Gleichstand wird übernommen. So kommt das Echo der eigenen
+          // Änderung an, und zwei Geräte, die gleichzeitig geändert haben,
+          // landen beide beim Stand des Servers.
+          const bekannt = cachedBlobs.find((b) => b.id === entry.id)
+          const bekannterStand = bekannt ? (bekannt.stand ?? vorab.get(entry.id) ?? 0) : undefined
+          if (bekannterStand !== undefined && stand < bekannterStand) {
+            console.warn(`Tresor-Sync: Rücksprung für ${entry.id} (${bekannterStand} → ${stand}) verworfen.`)
+            continue
+          }
+
           cachedBlobs = cachedBlobs.filter((b) => b.id !== entry.id)
-          currentItems = currentItems.filter((i) => i.id !== entry.id)
-        } else {
-          try {
-            const dec = await decryptVaultEntry(entry.ciphertext, userKey, entry.id)
-            // Ein Umschlag mit Tombstone-Inhalt ist nie ein Eintrag — auch dann
-            // nicht, wenn die Antwort ihn als lebendig ausgibt.
-            if (dec?.[VAULT_TOMBSTONE_MARKER] === true) {
-              cachedBlobs = cachedBlobs.filter((b) => b.id !== entry.id)
-              currentItems = currentItems.filter((i) => i.id !== entry.id)
-              continue
-            }
-            const item: VaultItem = {
-              id: entry.id,
-              service: String(dec.service || 'Unbekannt'),
-              username: String(dec.username || ''),
-              password: String(dec.password || ''),
-              url: dec.url ? String(dec.url) : undefined,
-              notes: dec.notes ? String(dec.notes) : undefined,
-              totpSecret: dec.totpSecret ? String(dec.totpSecret) : undefined,
-              category: (dec.category as VaultItem['category']) || 'login',
-              isFavorite: !!dec.isFavorite,
-              lastUsedAt: typeof dec.lastUsedAt === 'number' ? dec.lastUsedAt : undefined,
-              attachments: Array.isArray(dec.attachments) ? (dec.attachments as VaultAttachment[]) : undefined,
-              linkedServiceId: dec.linkedServiceId ? String(dec.linkedServiceId) : undefined,
-              createdAt: Number(dec.createdAt || Date.now()),
-              updatedAt: Number(dec.updatedAt || Date.now()),
-              revision: entry.revision,
-            }
+          if (befund.art === 'grab') {
+            cachedBlobs.push({ id: entry.id, ciphertext: entry.ciphertext, revision: entry.revision, is_deleted: true, stand })
+            currentItems = currentItems.filter((i) => i.id !== entry.id)
+            continue
+          }
 
-            cachedBlobs = cachedBlobs.filter((b) => b.id !== entry.id)
-            cachedBlobs.push({
-              id: entry.id,
-              ciphertext: entry.ciphertext,
-              revision: entry.revision,
-              is_deleted: false,
-            })
-
-            const idx = currentItems.findIndex((i) => i.id === entry.id)
-            if (idx >= 0) {
-              currentItems[idx] = item
-            } else {
-              currentItems.push(item)
-            }
-          } catch {
-            // Ciphertext konnte nicht entschlüsselt werden
+          cachedBlobs.push({ id: entry.id, ciphertext: entry.ciphertext, revision: entry.revision, is_deleted: false, stand })
+          const idx = currentItems.findIndex((i) => i.id === entry.id)
+          if (idx >= 0) {
+            currentItems[idx] = befund.item
+          } else {
+            currentItems.push(befund.item)
           }
         }
-      }
 
-      // Nur erfolgreich synchronisierte Mutationen aus der Warteschlange austragen
-      const syncedIds = new Set(mutations.map((m) => m.id))
-      let latestPending = getPendingQueue(bucketId).filter((m) => !syncedIds.has(m.id))
-      if (latestPending.length > 0) {
-        localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(latestPending))
-      } else {
-        localStorage.removeItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`)
+        // Ausgetragen wird nur, was genau so übertragen wurde. Früher reichte
+        // die gleiche ID: wer einen Eintrag änderte, während seine vorige
+        // Fassung unterwegs war, verlor die neue Fassung aus der
+        // Warteschlange, ohne dass sie je den Server erreichte.
+        const offen = getPendingQueue(bucketId).filter(
+          (m) => !paket.some((g) => g.id === m.id && g.ciphertext === m.ciphertext),
+        )
+        if (offen.length > 0) {
+          localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(offen))
+        } else {
+          localStorage.removeItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`)
+        }
+        localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
+        localStorage.setItem(`${VAULT_REVISION_PREFIX}${bucketId}`, String(data.server_revision))
+        set({ items: currentItems })
+
+        if (offen.length === 0) break
       }
-      localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
-      localStorage.setItem(`${VAULT_REVISION_PREFIX}${bucketId}`, String(data.server_revision))
 
       // Falls lokal noch kein Canary existiert (z. B. Multi-Device Login), jetzt absichern
-      if (typeof localStorage !== 'undefined') {
-        const hasCanary = !!localStorage.getItem(VAULT_CANARY_KEY) || !!localStorage.getItem(`${VAULT_CANARY_PREFIX}${bucketId}`)
-        if (!hasCanary) {
-          try {
-            const canary = await encryptVaultEntry(
-              { canary: 'mss-vault-initialized-v1', createdAt: Date.now() },
-              userKey,
-              'vault-canary',
-            )
-            localStorage.setItem(VAULT_CANARY_KEY, canary)
-            localStorage.setItem(`${VAULT_CANARY_PREFIX}${bucketId}`, canary)
-          } catch {}
-        }
-        if (!localStorage.getItem(VAULT_SERVER_BUCKET_KEY)) {
-          localStorage.setItem(VAULT_SERVER_BUCKET_KEY, bucketId)
-        }
+      const hasCanary = !!localStorage.getItem(VAULT_CANARY_KEY) || !!localStorage.getItem(`${VAULT_CANARY_PREFIX}${bucketId}`)
+      if (!hasCanary) {
+        try {
+          const canary = await encryptVaultEntry(
+            { canary: 'mss-vault-initialized-v1', createdAt: Date.now() },
+            userKey,
+            'vault-canary',
+          )
+          if (!sitzungOffen(userKey, bucketId)) return
+          localStorage.setItem(VAULT_CANARY_KEY, canary)
+          localStorage.setItem(`${VAULT_CANARY_PREFIX}${bucketId}`, canary)
+        } catch {}
+      }
+      if (!localStorage.getItem(VAULT_SERVER_BUCKET_KEY)) {
+        localStorage.setItem(VAULT_SERVER_BUCKET_KEY, bucketId)
       }
 
       set({
-        items: currentItems,
         syncStatus: 'synced',
         lastSyncTime: Date.now(),
       })
     } catch (err: unknown) {
+      // Der Status gehört der Sitzung, die ihn gesetzt hat.
+      if (!sitzungOffen(userKey, bucketId)) return
       // Bei 401 Unauthorized: Auth-Fehler anzeigen, sonst im Offline-Modus bleiben
       const isAuthError = blindAbgewiesen || (err instanceof Error && err.message.includes('401'))
       set({ syncStatus: isAuthError ? 'error' : 'offline' })
