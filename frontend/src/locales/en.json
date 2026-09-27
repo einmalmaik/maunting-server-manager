@@ -6653,7 +6653,6 @@
     "betaBadge": "Beta",
     "betaNotice": "Beta version: Errors may still occur.",
     "betaNoticeMobile": "Beta: errors possible",
-    "e2eeSecured": "End-to-end encrypted",
     "searchPlaceholder": "Search friends or team members …",
     "filterAll": "All chats",
     "filterGroups": "Groups ({{count}})",
@@ -7015,7 +7014,17 @@
       "send": "Send moment",
       "label": "Moment",
       "friendsOnly": "Moments are only available between friends.",
-      "uploadFailed": "The photo couldn’t be uploaded. Please try again."
+      "uploadFailed": "The photo couldn’t be uploaded. Please try again.",
+      "stamp": {
+        "prev": "Previous style",
+        "next": "Next style",
+        "ohne": "No time stamp",
+        "gross": "Big",
+        "handschrift": "Handwritten",
+        "elegant": "Elegant",
+        "digital": "Digital",
+        "schlicht": "Simple"
+      }
     }
   },
   "databaseManager": {

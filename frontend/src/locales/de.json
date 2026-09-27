@@ -6653,7 +6653,6 @@
     "betaBadge": "Beta",
     "betaNotice": "Beta-Version: Es können noch Fehler auftreten.",
     "betaNoticeMobile": "Beta: Fehler möglich",
-    "e2eeSecured": "Ende-zu-Ende verschlüsselt",
     "searchPlaceholder": "Freunde oder Teammitglieder suchen …",
     "filterAll": "Alle Chats",
     "filterGroups": "Gruppen ({{count}})",
@@ -7015,7 +7014,17 @@
       "send": "Augenblick senden",
       "label": "Augenblick",
       "friendsOnly": "Augenblicke gibt es nur unter Freunden.",
-      "uploadFailed": "Das Foto konnte nicht hochgeladen werden. Bitte noch einmal versuchen."
+      "uploadFailed": "Das Foto konnte nicht hochgeladen werden. Bitte noch einmal versuchen.",
+      "stamp": {
+        "prev": "Vorheriger Stil",
+        "next": "Nächster Stil",
+        "ohne": "Ohne Zeitstempel",
+        "gross": "Groß",
+        "handschrift": "Handschrift",
+        "elegant": "Elegant",
+        "digital": "Digital",
+        "schlicht": "Schlicht"
+      }
     }
   },
   "databaseManager": {

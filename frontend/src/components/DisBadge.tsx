@@ -4,11 +4,13 @@ export interface DisBadgeProps {
   size?: number;
   showText?: boolean;
   className?: string;
+  /** Etwa `hidden sm:inline`: am Telefon nur das Logo. */
+  textClassName?: string;
 }
 
 const cn = (...classes: any[]) => classes.filter(Boolean).join(' ');
 
-export const DisBadge = ({ size = 24, showText = true, className }: DisBadgeProps) => {
+export const DisBadge = ({ size = 24, showText = true, className, textClassName }: DisBadgeProps) => {
   const { t } = useTranslation()
   return (
     <a
@@ -38,7 +40,7 @@ export const DisBadge = ({ size = 24, showText = true, className }: DisBadgeProp
         />
       </span>
       {showText && (
-        <span className="text-label-sm font-semibold uppercase tracking-[0.18em] text-ice-200/80">
+        <span className={cn('text-label-sm font-semibold uppercase tracking-[0.18em] text-ice-200/80', textClassName)}>
           Powered by DIS
         </span>
       )}

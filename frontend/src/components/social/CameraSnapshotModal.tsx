@@ -12,7 +12,10 @@ import {
   Check,
   AlertCircle,
   Upload,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
+import { STEMPEL_STILE, stempelTexte, stempleFoto, type StempelStil } from './augenblickStempel'
 
 interface CameraSnapshotModalProps {
   open: boolean
@@ -24,6 +27,8 @@ interface CameraSnapshotModalProps {
   bestaetigen?: string
   /** Ein Augenblick ist ein Foto von jetzt: keine Datei, auch nicht, wenn die Kamera ausfällt. */
   nurKamera?: boolean
+  /** Nach dem Auslösen lassen sich Uhrzeit und Datum ins Foto stempeln. */
+  mitStempel?: boolean
 }
 
 /** Runder Knopf über dem Kamerabild — hell auf dunklem Schleier, egal was die Kamera zeigt. */
@@ -44,8 +49,9 @@ export function CameraSnapshotModal({
   titel,
   bestaetigen,
   nurKamera = false,
+  mitStempel = false,
 }: CameraSnapshotModalProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
 
   const [stream, setStream] = useState<MediaStream | null>(null)
   // Schlüssel, kein fertiger Satz: ein Sprachwechsel soll auch die
@@ -54,6 +60,14 @@ export function CameraSnapshotModal({
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null)
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user')
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false)
+  // Der Stil bleibt über „Wiederholen" hinweg stehen; der Zeitpunkt ist der des Auslösens.
+  const [stil, setStil] = useState<StempelStil>('ohne')
+  const [ausgeloest, setAusgeloest] = useState<Date | null>(null)
+  const [gestempelt, setGestempelt] = useState<{ quelle: string; stil: StempelStil; bild: string } | null>(null)
+  const wischStart = useRef<number | null>(null)
+  // Seitenverhältnis des Suchers beim Auslösen — der Stempel richtet sich danach.
+  const [sicht, setSicht] = useState<number | undefined>(undefined)
+  const sucherRef = useRef<HTMLDivElement>(null)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -133,6 +147,37 @@ export function CameraSnapshotModal({
     if (videoRef.current && stream) videoRef.current.srcObject = stream
   }, [stream, capturedPhoto])
 
+  useEffect(() => {
+    if (!mitStempel || !capturedPhoto || stil === 'ohne' || !ausgeloest) return
+    let aktuell = true
+    stempleFoto(capturedPhoto, stil, stempelTexte(ausgeloest, i18n.language), sicht)
+      .then((bild) => {
+        if (aktuell) setGestempelt({ quelle: capturedPhoto, stil, bild })
+      })
+      .catch(() => {
+        // Ein Stempel, der nicht gelingt, darf den Augenblick nicht aufhalten.
+        if (aktuell) setStil('ohne')
+      })
+    return () => {
+      aktuell = false
+    }
+  }, [mitStempel, capturedPhoto, stil, ausgeloest, sicht, i18n.language])
+
+  // Das Bild, das gezeigt und gesendet wird. `null` heisst: der Stempel wird noch gezeichnet.
+  const fertigesBild =
+    !capturedPhoto || !mitStempel || stil === 'ohne'
+      ? capturedPhoto
+      : gestempelt && gestempelt.quelle === capturedPhoto && gestempelt.stil === stil
+        ? gestempelt.bild
+        : null
+
+  const wechsleStil = (schritt: 1 | -1) => {
+    setStil((vorher) => {
+      const i = STEMPEL_STILE.indexOf(vorher)
+      return STEMPEL_STILE[(i + schritt + STEMPEL_STILE.length) % STEMPEL_STILE.length]
+    })
+  }
+
   const handleFlipCamera = () => {
     setFacingMode((vorher) => (vorher === 'user' ? 'environment' : 'user'))
   }
@@ -153,6 +198,9 @@ export function CameraSnapshotModal({
     }
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
     const dataUrl = canvas.toDataURL('image/jpeg', 0.88)
+    setAusgeloest(new Date())
+    const rahmen = sucherRef.current?.getBoundingClientRect()
+    setSicht(rahmen && rahmen.height > 0 ? rahmen.width / rahmen.height : undefined)
     setCapturedPhoto(dataUrl)
     stopStream()
   }
@@ -163,8 +211,8 @@ export function CameraSnapshotModal({
   }
 
   const handleUsePhoto = () => {
-    if (capturedPhoto) {
-      onCapture(capturedPhoto)
+    if (fertigesBild) {
+      onCapture(fertigesBild)
       onOpenChange(false)
     }
   }
@@ -188,9 +236,25 @@ export function CameraSnapshotModal({
         overlayClassName="p-0 sm:p-4"
         className="max-sm:max-w-none sm:max-w-md h-[100dvh] sm:h-auto rounded-none sm:rounded-2xl border-0 sm:border sm:border-outline-variant/40 p-0 bg-surface-container-lowest text-on-surface shadow-2xl"
       >
-        <div className="relative flex-1 min-h-0 w-full sm:flex-none sm:aspect-[3/4] sm:max-h-[85dvh] overflow-hidden select-none">
+        <div ref={sucherRef} className="relative flex-1 min-h-0 w-full sm:flex-none sm:aspect-[3/4] sm:max-h-[85dvh] overflow-hidden select-none">
           {capturedPhoto ? (
-            <img src={capturedPhoto} alt={t('social.camera.preview')} className="absolute inset-0 w-full h-full object-cover" />
+            <img
+              src={fertigesBild ?? capturedPhoto}
+              alt={t('social.camera.preview')}
+              className="absolute inset-0 w-full h-full object-cover touch-pan-y"
+              draggable={false}
+              onPointerDown={mitStempel ? (e) => (wischStart.current = e.clientX) : undefined}
+              onPointerUp={
+                mitStempel
+                  ? (e) => {
+                      const start = wischStart.current
+                      wischStart.current = null
+                      if (start === null || Math.abs(e.clientX - start) < 40) return
+                      wechsleStil(e.clientX < start ? 1 : -1)
+                    }
+                  : undefined
+              }
+            />
           ) : stream ? (
             <video
               ref={videoRef}
@@ -264,15 +328,30 @@ export function CameraSnapshotModal({
           {/* Unten: drei gleich breite Spalten, damit der Auslöser genau mittig steht. */}
           <div className="absolute inset-x-0 bottom-0 px-4 pt-10 pb-[max(1.25rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-black/55 to-transparent">
             {capturedPhoto ? (
-              <div className="grid grid-cols-2 gap-3">
-                <Button type="button" variant="secondary" size="lg" onClick={handleRetake}>
-                  <RefreshCw className="w-4 h-4" />
-                  <span>{t('social.camera.retake')}</span>
-                </Button>
-                <Button type="button" variant="primary" size="lg" onClick={handleUsePhoto} className="font-semibold">
-                  <Check className="w-4 h-4" />
-                  <span>{bestaetigen ?? t('social.camera.use')}</span>
-                </Button>
+              <div className="space-y-3">
+                {mitStempel && (
+                  <div className="flex items-center justify-center gap-3">
+                    <button type="button" onClick={() => wechsleStil(-1)} className={bildknopf} aria-label={t('messenger.moment.stamp.prev')}>
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <span className="min-w-[8rem] text-center text-sm font-semibold text-white drop-shadow" aria-live="polite">
+                      {t(`messenger.moment.stamp.${stil}`)}
+                    </span>
+                    <button type="button" onClick={() => wechsleStil(1)} className={bildknopf} aria-label={t('messenger.moment.stamp.next')}>
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                  <Button type="button" variant="secondary" size="lg" onClick={handleRetake}>
+                    <RefreshCw className="w-4 h-4" />
+                    <span>{t('social.camera.retake')}</span>
+                  </Button>
+                  <Button type="button" variant="primary" size="lg" onClick={handleUsePhoto} disabled={!fertigesBild} className="font-semibold">
+                    <Check className="w-4 h-4" />
+                    <span>{bestaetigen ?? t('social.camera.use')}</span>
+                  </Button>
+                </div>
               </div>
             ) : error ? null : (
               <div className="grid grid-cols-3 items-center justify-items-center">

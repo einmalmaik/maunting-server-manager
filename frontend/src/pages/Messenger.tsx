@@ -13,7 +13,6 @@ import {
 import {
   MessageSquare,
   Send,
-  Camera,
   Search,
   X,
   RefreshCw,
@@ -24,7 +23,6 @@ import {
   UserCheck,
   Bell,
   BellOff,
-  Phone,
   Star,
   Pin,
   PinOff,
@@ -249,7 +247,6 @@ import { GroupPermissionsModal } from '@/components/social/GroupPermissionsModal
 import { CreateGroupDialog } from '@/components/social/modals/CreateGroupDialog'
 import { NotePickerDialog } from '@/components/social/modals/NotePickerDialog'
 import { CalendarPickerDialog } from '@/components/social/modals/CalendarPickerDialog'
-import { SendPhotoDialog } from '@/components/social/modals/SendPhotoDialog'
 import { DeleteGroupDialog } from '@/components/social/modals/DeleteGroupDialog'
 import { ChatMuteDialog } from '@/components/social/modals/ChatMuteDialog'
 import { SafetyNumberDialog } from '@/components/social/modals/SafetyNumberDialog'
@@ -490,8 +487,6 @@ function MessengerSeite() {
 
   const [selectedImage, setSelectedImage] = useState<ImageAttachment | null>(null)
   const [viewingImage, setViewingImage] = useState<string | null>(null)
-  const [isSendPhotoOpen, setIsSendPhotoOpen] = useState(false)
-  const [pendingPhotoToSend, setPendingPhotoToSend] = useState<ImageAttachment | null>(null)
 
   // Stickers / Emojis
   const [isStickerPickerOpen, setIsStickerPickerOpen] = useState(false)
@@ -4140,38 +4135,11 @@ function MessengerSeite() {
               <MessageSquare className="w-4 h-4" />
             </div>
             <span className="font-headline text-body-md font-bold text-primary">Messenger</span>
-            <DisBadge size={14} className="py-0.5 px-2" />
+            <DisBadge size={14} className="py-0.5 px-0.5 sm:px-2" textClassName="hidden sm:inline" />
             <span className="text-label-sm text-on-surface-variant/60 hidden md:inline">{t('messenger.headerSubtitle')}</span>
           </div>
 
           <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setIsCameraModalOpen(true)}
-              className="h-8 w-8 text-on-surface-variant hover:text-primary"
-              title={t('social.camera.take')}
-              aria-label={t('social.camera.take')}
-            >
-              <Camera className="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => handleStartGroupCall(true)}
-              disabled={!groupCallPermissions.canJoin}
-              className="h-8 gap-1.5 bg-surface-container-high/85 px-2.5 text-xs text-primary shadow-sm hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
-              title={
-                groupCallPermissions.canJoin
-                  ? t('messenger.joinOngoingCall')
-                  : t('messenger.noJoinCallRight')
-              }
-              aria-label={t('messenger.joinOngoingCall')}
-            >
-              <Phone className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Beitreten</span>
-            </Button>
-
             <Button
               variant="ghost"
               size="icon"
@@ -5056,26 +5024,6 @@ function MessengerSeite() {
         </div>
       )}
 
-      <SendPhotoDialog
-        open={isSendPhotoOpen}
-        onOpenChange={setIsSendPhotoOpen}
-        groups={filteredGroups}
-        contacts={filteredContacts}
-        onPickGroup={(g) => {
-          setActiveGroup(g)
-          setActiveContact(null)
-          if (pendingPhotoToSend) setSelectedImage(pendingPhotoToSend)
-          setPendingPhotoToSend(null)
-          setIsSendPhotoOpen(false)
-        }}
-        onPickContact={(c) => {
-          setActiveContact(c)
-          setActiveGroup(null)
-          if (pendingPhotoToSend) setSelectedImage(pendingPhotoToSend)
-          setPendingPhotoToSend(null)
-          setIsSendPhotoOpen(false)
-        }}
-      />
 
       {/* Create Story Modal */}
       <CreateStoryModal
@@ -5127,6 +5075,7 @@ function MessengerSeite() {
         titel={augenblickModus ? t('messenger.moment.take') : undefined}
         bestaetigen={augenblickModus ? t('messenger.moment.send') : undefined}
         nurKamera={augenblickModus}
+        mitStempel={augenblickModus}
         onCapture={(dataUrl) => {
           // Ein Augenblick geht sofort, ohne Umweg über die Eingabeleiste.
           if (augenblickModus && activeContact) {
@@ -5139,19 +5088,9 @@ function MessengerSeite() {
             return
           }
 
-          // If the user took a photo while on the "Aktuelles" (updates) tab, directly open the Story Creator with the photo!
-          if (mobileNavTab === 'updates') {
-            storyAnsicht.erstellung.mitFoto(dataUrl)
-            return
-          }
-
-          const img: ImageAttachment = { dataUrl, name: 'kamera-aufnahme.jpg' }
-          if (activeContact || activeGroup) {
-            setSelectedImage(img)
-          } else {
-            setPendingPhotoToSend(img)
-            setIsSendPhotoOpen(true)
-          }
+          // Die Kamera öffnet sich nur aus einem offenen Chat: das Foto
+          // kommt in dessen Eingabeleiste.
+          setSelectedImage({ dataUrl, name: 'kamera-aufnahme.jpg' })
         }}
       />
 
