@@ -3328,6 +3328,47 @@ describe('Messenger (Allround Chat)', () => {
       })
       expect((await ladeGespraeche()).has(101)).toBe(true)
     })
+
+    it('bleibt in der Kontaktliste nach Klick auf Zurück und wird bei Listenaktualisierung nicht in den Chat zurückgezogen', async () => {
+      await merkeGespraech(101, { username: 'alice' })
+      vi.mocked(socialApi.getFriends).mockResolvedValue([
+        {
+          id: 101,
+          user_id: 101,
+          username: 'alice',
+          avatar_url: null,
+          status: 'accepted',
+          is_requester: false,
+          created_at: '2026-09-01T00:00:00Z',
+        },
+      ])
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=101']}>
+          <Messenger />
+        </MemoryRouter>
+      )
+      await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+
+      const backBtn = screen.getByLabelText(i18n.t('messenger.backToContacts'))
+      fireEvent.click(backBtn)
+
+      await waitFor(() => {
+        expect(screen.getByText(i18n.t('messenger.pickChatHint'))).toBeInTheDocument()
+      })
+
+      // Simulate contact list reload / background polling
+      const refreshBtn = screen.getByLabelText('Aktualisieren')
+      await act(async () => {
+        fireEvent.click(refreshBtn)
+        await new Promise((r) => setTimeout(r, 100))
+      })
+
+      // Wait a moment for async loadData and effects to settle
+      await waitFor(() => {
+        expect(screen.getByText(i18n.t('messenger.pickChatHint'))).toBeInTheDocument()
+        expect(screen.queryByPlaceholderText(i18n.t('messenger.writePlaceholder'))).not.toBeInTheDocument()
+      })
+    })
   })
 })
 
