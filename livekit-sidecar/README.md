@@ -31,6 +31,18 @@ eigener TURN-Dienst sind abgeschaltet.
 `install.sh` öffnet 7881/tcp und 7882/udp in UFW. Ohne diese beiden Regeln baut
 sich zwar die Signalisierung auf, aber es kommt kein Ton an.
 
+## Adresse für die Medien
+
+Der Container kennt die öffentliche Adresse seines Hosts nicht. `install.sh`
+und `update.sh` ermitteln sie mit `medienadresse.py` aus der Panel-Domain
+(`MSM_LIVEKIT_URL`, sonst `MSM_API_URL`, sonst `MSM_PANEL_URL`) und schreiben
+sie als `NODE_IP` in `.env`. LiveKits eigene Ermittlung (`use_external_ip`)
+bleibt aus: sie fragt beim Start per STUN bei Google nach und bricht ab, wenn
+der Container keinen Namen auflösen kann. Unter rootless Docker ist das so.
+
+Zeigt die Domain nicht auf den Server selbst (Proxy, CDN), in der Backend-`.env`
+`MSM_LIVEKIT_NODE_IP="<IPv4>"` setzen und `update.sh` erneut ausführen.
+
 ## Schlüssel
 
 `install.sh` erzeugt Schlüssel und Geheimnis einmalig und schreibt sie in

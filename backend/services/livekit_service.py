@@ -466,12 +466,14 @@ def status(db: Session | None = None) -> dict[str, Any]:
         # Die Adresse im Statusstreifen ist der Weg des Browsers ueber Caddy.
         # Geprueft wurde der Dienst selbst auf dem Loopback. Ohne diesen Satz
         # sucht ein Betreiber den Fehler bei seiner Domain statt beim Sidecar —
-        # genau das ist am 17.09.2026 passiert.
+        # genau das ist am 17.09.2026 passiert. Das Journal statt `systemctl
+        # status`: der Dienst ist `docker compose up` und bleibt „active“,
+        # waehrend der Container darin im Minutentakt abbricht (27.09.2026).
         meldung = (
             f"Der integrierte Medienserver antwortet nicht auf {konf.api_url}. "
             f"Geprüft wird der Dienst auf diesem Host, nicht die Adresse "
             f"{konf.client_url} — die ist nur der Weg des Browsers über den "
-            f"Reverse-Proxy. Zustand des Dienstes: systemctl status msm-livekit"
+            f"Reverse-Proxy. Warum er nicht startet, steht in: journalctl -u msm-livekit -n 30"
         )
     return {
         "modus": konf.modus,

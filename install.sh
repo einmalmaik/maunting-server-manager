@@ -1370,10 +1370,19 @@ fi
 # ohne dass irgendwo etwas kaputt aussieht.
 if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
     LIVEKIT_ENV_FILE="$MSM_DIR/livekit-sidecar/.env"
+    # Adresse fuer die Medienports, hier auf dem Host ermittelt statt per STUN
+    # im Container. Begruendung in livekit-sidecar/medienadresse.py.
+    LIVEKIT_NODE_IP=$(python3 "$MSM_DIR/livekit-sidecar/medienadresse.py" "$ENV_FILE" 2>/dev/null || true)
     cat > "$LIVEKIT_ENV_FILE" <<EOF
 # Automatisch generiert. Dokumentation: $MSM_DIR/livekit-sidecar/.env.example
 LIVEKIT_KEYS="$LIVEKIT_API_KEY: $LIVEKIT_API_SECRET"
 EOF
+    if [[ -n "$LIVEKIT_NODE_IP" ]]; then
+        echo "NODE_IP=\"$LIVEKIT_NODE_IP\"" >> "$LIVEKIT_ENV_FILE"
+    else
+        warn "Anrufe: keine Adresse fuer die Medienports gefunden. Anrufe verbinden, bleiben aber stumm."
+        warn "  MSM_LIVEKIT_NODE_IP=\"<oeffentliche IPv4>\" in $ENV_FILE eintragen und update.sh erneut ausfuehren."
+    fi
     chmod 600 "$LIVEKIT_ENV_FILE"
     chown "$MSM_USER:$MSM_USER" "$LIVEKIT_ENV_FILE"
 fi

@@ -9,10 +9,15 @@ rtc:
   # docker-compose.yml.
   udp_port: 7882
   tcp_port: 7881
-  # Der Container kennt seine oeffentliche Adresse nicht. Ohne diese Zeile
-  # wuerden ICE-Kandidaten mit der Container-IP hinausgehen, und kein
-  # Gegenueber koennte sie erreichen.
-  use_external_ip: true
+  # Der Container kennt seine oeffentliche Adresse nicht. Sie kommt als
+  # NODE_IP aus .env, ermittelt von medienadresse.py auf dem Host. Ohne sie
+  # gingen ICE-Kandidaten mit der Container-IP hinaus, und kein Gegenueber
+  # koennte sie erreichen.
+  # use_external_ip bleibt aus: es fragt bei jedem Start per STUN bei Google
+  # nach und bricht ab, wenn der Container keinen Namen aufloesen kann. Unter
+  # rootless Docker ist das der Fall (siehe medienadresse.py). Eingeschaltet
+  # wuerde es NODE_IP ausserdem uebergehen.
+  use_external_ip: false
 
 room:
   # Raeume raeumen sich selbst auf. Ohne das blieben Raeume nach dem letzten

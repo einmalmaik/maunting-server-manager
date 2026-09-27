@@ -1732,6 +1732,32 @@ handle_path /livekit/* {
 Danach `systemctl reload caddy`. Ohne diese Zeile läuft der Sidecar, aber kein
 Browser erreicht ihn, und Anrufe scheitern mit einem Verbindungsfehler.
 
+### Adresse für die Medien
+
+Der Sidecar muss Anrufern sagen, unter welcher IPv4-Adresse sie 7881 und 7882
+erreichen. Im Container kennt er sie nicht. `install.sh` und `update.sh`
+lösen deshalb auf dem Host die Panel-Domain auf (`MSM_LIVEKIT_URL`, sonst
+`MSM_API_URL`, sonst `MSM_PANEL_URL`) und schreiben das Ergebnis als
+`NODE_IP` in `livekit-sidecar/.env`. Das erledigt
+`livekit-sidecar/medienadresse.py`.
+
+LiveKits eigene Ermittlung per STUN (`use_external_ip`) ist aus. Sie fragt bei
+jedem Start einen Google-Server und bricht den Start ab, wenn der Container
+keinen Namen auflösen kann. Unter rootless Docker zeigt die Namensauflösung im
+Container auf `127.0.0.53`, das es dort nicht gibt. Im Journal steht dann
+`could not resolve external IP`, und der Container startet im Minutentakt neu,
+während `systemctl status msm-livekit` weiter `active` meldet.
+
+Zeigt die Domain nicht auf den Server selbst, etwa hinter einem CDN, gehört die
+richtige Adresse in die Backend-`.env`:
+
+```
+MSM_LIVEKIT_NODE_IP="203.0.113.10"
+```
+
+Danach `update.sh` erneut ausführen. Findet der Lauf gar keine Adresse, warnt
+er: Anrufe verbinden dann, aber es kommt kein Ton an.
+
 ### Schlüssel des integrierten Sidecars
 
 `install.sh` erzeugt bei der ersten Installation ein Paar und schreibt es an
