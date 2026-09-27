@@ -223,11 +223,12 @@ describe('Teams', () => {
   it('bietet nur die Rechte an, die der Gründer selbst direkt hält', async () => {
     renderTeams()
     await zuTeams()
-    await screen.findByText('Betrieb')
+    await screen.findByRole('heading', { name: 'Betrieb' })
 
     // Das Backend liefert für diesen Server nur zwei Schlüssel — genau die,
     // die der Gründer hält. Ein drittes Recht darf hier nicht auftauchen.
     await waitFor(() => expect(teamsApi.assignableServers).toHaveBeenCalledWith(2))
+    fireEvent.click(screen.getByRole('tab', { name: /^Server/ }))
     const select = await screen.findByLabelText('Rechte: Valheim')
     expect(select).toBeInTheDocument()
     expect(screen.queryByText('server.console.exec')).not.toBeInTheDocument()
@@ -248,29 +249,50 @@ describe('Teams', () => {
     expect(screen.queryByText('Mitglieder')).not.toBeInTheDocument()
   })
 
-  it('führt das persönliche Team nicht in der Teamauswahl', async () => {
+  it('führt das persönliche Team nicht in der Teamliste', async () => {
     renderTeams()
     await zuTeams()
 
-    // Die Auswahl aufklappen und hineinsehen: „einmalmaik" ist der Name des
-    // persönlichen Teams. In einer Liste, aus der man ein Team auswählt, hat es
-    // nichts verloren — es ist keins. (Derselbe Name steht daneben als
-    // Mitglied des echten Teams; deshalb wird hier gezielt die Liste geprüft
-    // und nicht die ganze Seite.)
-    const auswahl = (await screen.findAllByLabelText('Team'))
-      .find((element) => element.getAttribute('aria-haspopup') === 'listbox')
-    expect(auswahl).toBeDefined()
-    fireEvent.click(auswahl as HTMLElement)
+    // „einmalmaik" ist der Name des persönlichen Teams. In der Liste, aus der
+    // man ein Team auswählt, hat es nichts verloren — es ist keins. (Derselbe
+    // Name steht daneben als Mitglied des echten Teams; deshalb wird hier
+    // gezielt die Liste geprüft und nicht die ganze Seite.)
+    const liste = await screen.findByRole('list', { name: 'Deine Teams' })
+    expect(within(liste).getByRole('button', { name: /Betrieb/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(liste).queryByText('einmalmaik')).not.toBeInTheDocument()
+  })
 
-    const optionen = (await screen.findAllByRole('option')).map((element) => element.textContent)
-    expect(optionen.some((text) => text?.includes('Betrieb'))).toBe(true)
-    expect(optionen.some((text) => text?.includes('einmalmaik'))).toBe(false)
+  it('zeigt die Mitglieder zuerst — Wissen und Server erst auf Klick', async () => {
+    renderTeams()
+    await zuTeams()
+    await screen.findByRole('heading', { name: 'Betrieb' })
+
+    // Bis zum 27.09.2026 standen die Mitglieder als letzte Karte unter dem
+    // ganzen KI-Wissen. Jetzt öffnet ein Team bei ihnen.
+    expect(screen.getByRole('tab', { name: /Mitglieder/ })).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByLabelText('Skills verwalten: kollege')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Wissen dieses Teams')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Rechte: Valheim')).not.toBeInTheDocument()
+  })
+
+  it('bietet Nichtgründern keinen Server-Reiter an', async () => {
+    const alsMitglied: TeamDetail = { ...realDetail, is_owner: false, invitations: [] }
+    vi.mocked(teamsApi.list).mockResolvedValue([{ ...real, is_owner: false }, personal])
+    vi.mocked(teamsApi.get).mockImplementation(async (id: number) =>
+      (id === 1 ? personalDetail : alsMitglied))
+    renderTeams()
+    await zuTeams()
+    await screen.findByRole('heading', { name: 'Betrieb' })
+
+    expect(screen.getByRole('tab', { name: /Mitglieder/ })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: /^Server/ })).not.toBeInTheDocument()
   })
 
   it('zeigt beim echten Team beides — Gedächtnis und Skills', async () => {
     renderTeams()
     await zuTeams()
-    await screen.findByText('Betrieb')
+    await screen.findByRole('heading', { name: 'Betrieb' })
+    fireEvent.click(screen.getByRole('tab', { name: 'KI-Wissen' }))
 
     expect(await screen.findByLabelText('Wissen dieses Teams')).toBeInTheDocument()
     expect(await screen.findByLabelText('Skills')).toBeInTheDocument()
@@ -300,7 +322,7 @@ describe('Teams', () => {
     vi.mocked(teamsApi.updateMember).mockResolvedValue(anhebungDetail)
     renderTeams()
     await zuTeams()
-    await screen.findByText('Betrieb')
+    await screen.findByRole('heading', { name: 'Betrieb' })
 
     fireEvent.click(await screen.findByLabelText('Skills verwalten: kollege'))
 
@@ -318,7 +340,7 @@ describe('Teams', () => {
     // wäre die neue Meldung einfach die einzige.
     renderTeams()
     await zuTeams()
-    await screen.findByText('Betrieb')
+    await screen.findByRole('heading', { name: 'Betrieb' })
 
     fireEvent.click(await screen.findByLabelText('Memory verwalten: einmalmaik'))
 
@@ -335,7 +357,7 @@ describe('Teams', () => {
       (id === 1 ? personalDetail : { ...realDetail, invitations: [] }))
     renderTeams()
     await zuTeams()
-    await screen.findByText('Betrieb')
+    await screen.findByRole('heading', { name: 'Betrieb' })
 
     await oeffneAuswahl('Mitglied einladen')
     fireEvent.click(await screen.findByRole('option', { name: 'neuer' }))
@@ -355,7 +377,7 @@ describe('Teams', () => {
   it('bietet einen bereits Eingeladenen nicht noch einmal zur Wahl an', async () => {
     renderTeams()
     await zuTeams()
-    await screen.findByText('Betrieb')
+    await screen.findByRole('heading', { name: 'Betrieb' })
 
     // „neuer" hat eine offene Einladung, „fremde" nicht. Bliebe „neuer"
     // wählbar, klickte der Gründer dieselbe Einladung beliebig oft und sähe
@@ -369,7 +391,7 @@ describe('Teams', () => {
   it('führt Eingeladene getrennt von den Mitgliedern', async () => {
     renderTeams()
     await zuTeams()
-    await screen.findByText('Betrieb')
+    await screen.findByRole('heading', { name: 'Betrieb' })
 
     expect(await screen.findByText('Offene Einladungen')).toBeInTheDocument()
     expect(screen.getByText('neuer')).toBeInTheDocument()
@@ -388,7 +410,7 @@ describe('Teams', () => {
       (id === 1 ? personalDetail : gemischtDetail))
     renderTeams()
     await zuTeams()
-    await screen.findByText('Betrieb')
+    await screen.findByRole('heading', { name: 'Betrieb' })
 
     const einladungen = await screen.findByRole('list', { name: 'Offene Einladungen' })
     expect(within(einladungen).getByText('neuer')).toBeInTheDocument()
@@ -438,7 +460,7 @@ describe('Teams', () => {
     vi.mocked(teamsApi.removeMember).mockResolvedValue(alsMitglied)
     renderTeams()
     await zuTeams()
-    await screen.findByText('Betrieb')
+    await screen.findByRole('heading', { name: 'Betrieb' })
 
     // Fremde entlässt er nicht — nur sich selbst.
     expect(screen.queryByLabelText('Mitglied entfernen: einmalmaik')).not.toBeInTheDocument()
@@ -454,7 +476,7 @@ describe('Teams', () => {
   it('bietet dem Gründer kein Verlassen an', async () => {
     renderTeams()
     await zuTeams()
-    await screen.findByText('Betrieb')
+    await screen.findByRole('heading', { name: 'Betrieb' })
 
     // Der Gründer bleibt im Team — sein Konto ist die Obergrenze für alles,
     // was das Team weitergibt. Mitglieder entlässt er weiterhin.
@@ -496,7 +518,7 @@ describe('Teams', () => {
     })
     renderTeams()
     await zuTeams()
-    await screen.findByText('Betrieb')
+    await screen.findByRole('heading', { name: 'Betrieb' })
 
     expect(screen.queryByLabelText('Teamname')).not.toBeInTheDocument()
   })

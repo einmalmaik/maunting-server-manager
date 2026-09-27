@@ -50,4 +50,16 @@ describe('TabBar', () => {
     const danger = screen.getByRole('tab', { name: 'profile.tabs.danger' })
     expect(danger.className).toMatch(/status-destructive/)
   })
+
+  it('zeigt eine Zahl am Reiter, auch die Null', () => {
+    const gezaehlt: TabDef<'a' | 'b'>[] = [
+      { id: 'a', labelKey: 'teams.members', icon: Mail, badge: 3 },
+      { id: 'b', labelKey: 'teams.tabServers', icon: Globe, badge: 0 },
+    ]
+    render(<TabBar tabs={gezaehlt} active="a" onChange={() => {}} ariaLabel="Team" embedded />)
+
+    expect(screen.getByRole('tab', { name: /teams\.members/ })).toHaveTextContent('3')
+    expect(screen.getByRole('tab', { name: /teams\.tabServers/ })).toHaveTextContent('0')
+    expect(screen.getByRole('tablist', { name: 'Team' }).className).not.toMatch(/msm-card/)
+  })
 })
