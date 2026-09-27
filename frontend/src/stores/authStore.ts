@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { api, clearCsrfTokenMemory } from '@/api/client'
 import { isNetworkOrOfflineError } from '@/lib/networkErrors'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { leereOfflineAblage } from '@/lib/offlineAblage'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { useNodeStore } from '@/stores/nodeStore'
 import { useToastStore } from '@/stores/toastStore'
@@ -209,6 +210,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Ignorieren: das Backend hat die Cookies gelöscht, der lokale Zustand
       // fällt gleich darunter unabhängig davon.
     }
+    // Notizen, Termine und ungesendete Änderungen der Offline-Ablage fallen
+    // nur beim bewussten Abmelden. Läuft die Sitzung bloß ab (lange offline),
+    // bleiben sie an dieses Konto gebunden liegen: meldet es sich wieder an,
+    // gehen seine Änderungen hinaus, meldet sich ein anderes an, findet es die
+    // Ablage leer (`lib/offlineAblage.ts`).
+    leereOfflineAblage()
     get().clearSession()
   },
 

@@ -141,11 +141,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.8 vom 2026-09-26 aus (auch die Namen der Gedaechtniseintraege sind verschluesselt)', () => {
+  it('weist die Fassung 3.9 vom 2026-09-27 aus (Offline-Speicher gehoert dem Konto)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.8`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.9`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -155,13 +155,15 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.ai.items.messages')).toMatch(/zugestellte Berichtsmail wird aus dem Ausgangskorb gelöscht/);
     // 3.8: vorher war nur der Wert eines Eintrags verschluesselt, sein Name nicht.
     expect(i18n.t('privacyPolicy.sections.ai.items.memory')).toMatch(/samt ihrem Namen verschlüsselt/);
+    // 3.9: der Offline-Speicher war an keinen Account gebunden und ueberlebte das Abmelden.
+    expect(i18n.t('privacyPolicy.sections.storage.items.offlineNotesAndCalendar')).toMatch(/Beim Abmelden wird er gelöscht/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-09-26');
-    expect(stand).toHaveTextContent('2026-09-26');
+    expect(stand).toHaveAttribute('datetime', '2026-09-27');
+    expect(stand).toHaveTextContent('2026-09-27');
   });
 
   /**

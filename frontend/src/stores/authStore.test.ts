@@ -7,6 +7,8 @@ import { useConfirmStore } from './confirmStore'
 import { usePromptStore } from './promptStore'
 import * as client from '@/api/client'
 import { chatMediaBlobCache, sessionChatCache } from '@/services/klartextSpeicher'
+import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { STORAGE_KEYS, getStorageItem, setStorageItem } from '@/lib/offlineAblage'
 
 vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/client')>()
@@ -205,6 +207,30 @@ describe('authStore', () => {
       expect(client.api).toHaveBeenCalledWith('/auth/logout', { method: 'POST' })
       expect(useAuthStore.getState().isAuthenticated).toBe(false)
       expect(useAuthStore.getState().user).toBeNull()
+    })
+
+    it('leert beim Abmelden die Offline-Ablage', async () => {
+      vi.mocked(client.api).mockResolvedValueOnce({})
+      setzeAngemeldetesKonto(1)
+      setStorageItem(STORAGE_KEYS.CALENDAR, '[{"title":"Arzttermin"}]')
+      useAuthStore.setState({ user: { id: 1, username: 'test', is_owner: true } as any, isAuthenticated: true })
+
+      await useAuthStore.getState().logout()
+
+      expect(localStorage.getItem(STORAGE_KEYS.CALENDAR)).toBeNull()
+    })
+
+    it('behält die Offline-Ablage für dasselbe Konto, wenn die Sitzung nur abläuft', () => {
+      // Wer lange offline war, verliert seine ungesendeten Änderungen nicht,
+      // nur weil die Anmeldung inzwischen abgelaufen ist.
+      setzeAngemeldetesKonto(1)
+      setStorageItem(STORAGE_KEYS.OUTBOX, '[{"id":"m1"}]')
+
+      useAuthStore.getState().clearSession()
+      setzeAngemeldetesKonto(1)
+
+      expect(getStorageItem(STORAGE_KEYS.OUTBOX)).toBe('[{"id":"m1"}]')
+      setzeAngemeldetesKonto(null)
     })
 
     it('should clear state even if /auth/logout fails', async () => {

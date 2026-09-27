@@ -19,6 +19,8 @@ import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem, KalenderVorkommen } from '@/pages/Calendar'
 import { LEERES_DOKUMENT, ausbreiten, serieLesen } from '@/services/kalenderSerie'
 import { useAuthStore } from '@/stores/authStore'
+import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { STORAGE_KEYS, getStorageItem, leereOfflineAblage, setStorageItem } from '@/lib/offlineAblage'
 import {
   NOTE_CIPHERTEXT_PREFIX,
   CALENDAR_CIPHERTEXT_PREFIX,
@@ -37,12 +39,7 @@ import {
   altschluesselUebernehmen,
 } from '@/services/notesCalendarCrypto'
 
-export const STORAGE_KEYS = {
-  NOTES: 'msm_offline_notes',
-  CALENDAR: 'msm_offline_calendar',
-  OUTBOX: 'msm_offline_outbox',
-  LAST_SYNC: 'msm_offline_last_sync',
-} as const
+export { STORAGE_KEYS }
 
 export interface OutboxMutation {
   id: string
@@ -64,46 +61,9 @@ export interface SyncEventPayload {
   data?: any
 }
 
-// In-memory fallback if localStorage is unavailable
-let memoryStore: Record<string, string> = {}
-
-function getStorageItem(key: string): string | null {
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      return window.localStorage.getItem(key)
-    }
-  } catch {
-    // fallback
-  }
-  return memoryStore[key] ?? null
-}
-
-function setStorageItem(key: string, value: string): void {
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem(key, value)
-      return
-    }
-  } catch {
-    // fallback
-  }
-  memoryStore[key] = value
-}
-
 export function clearMemoryStoreForTesting(): void {
-  memoryStore = {}
   isReplaying = false
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.removeItem(STORAGE_KEYS.NOTES)
-      window.localStorage.removeItem(STORAGE_KEYS.CALENDAR)
-      window.localStorage.removeItem(STORAGE_KEYS.OUTBOX)
-      window.localStorage.removeItem(STORAGE_KEYS.LAST_SYNC)
-      window.localStorage.removeItem('msm_outbox_replay_lease')
-    }
-  } catch {
-    // ignore
-  }
+  leereOfflineAblage()
 }
 
 // ── Cache Accessors (Data Minimization) ──
@@ -345,9 +305,13 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
   isReplaying = true
   let processed = 0
   let failed = 0
+  // Die Warteschlange gehört dem Konto, für das sie angelegt wurde. Wechselt
+  // die Anmeldung während eines Aufrufs, geht kein weiterer Auftrag hinaus.
+  const konto = angemeldetesKonto()
 
   try {
     while (true) {
+      if (angemeldetesKonto() !== konto) break
       const currentOutbox = getOutbox()
       if (currentOutbox.length === 0) break
 

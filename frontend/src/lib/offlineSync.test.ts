@@ -44,6 +44,7 @@ import {
 import * as client from '@/api/client'
 import { deriveUserDeviceMailboxId } from '@/services/e2eeCrypto'
 import { useAuthStore } from '@/stores/authStore'
+import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 
 vi.mock('@/api/client', () => ({
   api: vi.fn(),
@@ -52,6 +53,8 @@ vi.mock('@/api/client', () => ({
 
 describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
   beforeEach(() => {
+    // Die Ablage gehört einem Konto (`lib/offlineAblage.ts`); ohne Anmeldung gibt es keine.
+    setzeAngemeldetesKonto(1)
     clearMemoryStoreForTesting()
     vi.mocked(client.api).mockReset()
     vi.mocked(client.apiStream).mockReset()

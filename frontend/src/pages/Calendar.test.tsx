@@ -5,6 +5,7 @@ import * as client from '@/api/client'
 import i18n from '@/i18n'
 import { Calendar } from './Calendar'
 import { grundbestandZuruecksetzen } from '@/lib/offlineSync'
+import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 
 vi.mock('@/api/client', () => ({
   api: vi.fn(),
@@ -12,6 +13,7 @@ vi.mock('@/api/client', () => ({
 
 describe('Calendar Page Component', () => {
   beforeEach(async () => {
+    setzeAngemeldetesKonto(null)
     vi.mocked(client.api).mockReset()
     await i18n.changeLanguage('de')
   })
@@ -243,6 +245,8 @@ describe('Calendar Page Component', () => {
     // darf die Serie damit nicht loeschen oder doppelt verschluesseln.
     grundbestandZuruecksetzen()
     localStorage.clear()
+    // Die Offline-Ablage gehört einem Konto (`lib/offlineAblage.ts`).
+    setzeAngemeldetesKonto(1)
     const umschlag = 'sv-cal-v1:unlesbar-auf-diesem-geraet'
     const heute = new Date()
     const start = new Date(heute.getFullYear(), heute.getMonth(), heute.getDate(), 12).toISOString()
