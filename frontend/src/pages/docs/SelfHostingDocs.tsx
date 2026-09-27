@@ -1,8 +1,9 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, ArrowRightLeft, BellRing, FileArchive, GitBranch, KeyRound, Mic, MonitorSmartphone, Network, PhoneCall, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRightLeft, BellRing, Database, FileArchive, GitBranch, KeyRound, Mic, MonitorSmartphone, Network, PhoneCall, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
 import { CodeBlock } from '@/components/docs/CodeBlock'
 import { PageHeader } from '@/Singra/UI/PageHeader'
+import { Sprungleiste, SPRUNGZIEL_ABSTAND } from '@/Singra/UI/Sprungleiste'
 
 import { buttonClasses } from '@/Singra/UI'
 export const PANEL_BOOTSTRAP_COMMAND = `curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh \\
@@ -63,34 +64,33 @@ export function SelfHostingDocs() {
         status={<Network className="h-6 w-6 text-primary" aria-hidden="true" />}
       />
 
-      {/* Die Sprungnavigation galt frueher nur unterhalb `lg` — auf dem Desktop,
-          wo die Seite am laengsten ist, gab es gar keine. Ausserdem fehlten die
-          beiden zuletzt ergaenzten Abschnitte, die dadurch nur durch Scrollen
-          auffindbar waren. */}
-      <nav className="sticky top-16 z-10 -mx-1 mb-6 flex gap-2 overflow-x-auto bg-surface/95 px-1 py-2 backdrop-blur" aria-label={t('docsSelfHosting.navigation.label')}>
-        {[
-          ['deployment-units', t('docsSelfHosting.units.title')],
-          ['panel-install', t('docsSelfHosting.install.title')],
-          ['topology', t('docsSelfHosting.topology.title')],
-          ['component-migration', t('docsSelfHosting.migration.title')],
-          ['enrollment', t('docsSelfHosting.enrollment.title')],
-          ['guardian-state', t('docsSelfHosting.guardian.title')],
-          ['artifacts', t('docsSelfHosting.artifacts.title')],
-          ['credentials-scoping', t('docsSelfHosting.credentials.title')],
-          ['hoster-integration', t('docsSelfHosting.hoster.title')],
-          ['voice-mode', t('docsSelfHosting.voice.title')],
-          ['messenger-calls', t('docsSelfHosting.calls.title')],
-          ['push-notifications', t('docsSelfHosting.push.title')],
-          ['smart-system', t('docsSelfHosting.smartSystem.title')],
-        ].map(([id, label]) => (
-          <a key={id} href={`#${id}`} className={buttonClasses('secondary', 'sm', 'shrink-0')}>{label}</a>
-        ))}
-      </nav>
+      {/* Jeder Abschnitt mit Überschrift steht hier. Fehlt einer, ist er nur
+          durch Scrollen zu finden (so ging es der Datenbankverschlüsselung). */}
+      <Sprungleiste
+        label={t('docsSelfHosting.navigation.label')}
+        ziele={[
+          { id: 'deployment-units', label: t('docsSelfHosting.units.title') },
+          { id: 'panel-install', label: t('docsSelfHosting.install.title') },
+          { id: 'topology', label: t('docsSelfHosting.topology.title') },
+          { id: 'component-migration', label: t('docsSelfHosting.migration.title') },
+          { id: 'enrollment', label: t('docsSelfHosting.enrollment.title') },
+          { id: 'guardian-state', label: t('docsSelfHosting.guardian.title') },
+          { id: 'db-encryption', label: t('docsSelfHosting.encryption.title') },
+          { id: 'postgres-studio', label: t('docsSelfHosting.postgres.title') },
+          { id: 'artifacts', label: t('docsSelfHosting.artifacts.title') },
+          { id: 'credentials-scoping', label: t('docsSelfHosting.credentials.title') },
+          { id: 'hoster-integration', label: t('docsSelfHosting.hoster.title') },
+          { id: 'voice-mode', label: t('docsSelfHosting.voice.title') },
+          { id: 'messenger-calls', label: t('docsSelfHosting.calls.title') },
+          { id: 'push-notifications', label: t('docsSelfHosting.push.title') },
+          { id: 'smart-system', label: t('docsSelfHosting.smartSystem.title') },
+        ]}
+      />
 
       <section aria-labelledby="deployment-units" className="mb-10">
         <div className="mb-4 flex items-center gap-2">
           <GitBranch className="h-5 w-5 text-primary" />
-          <h2 id="deployment-units" className="font-headline text-headline-md text-on-surface">
+          <h2 id="deployment-units" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>
             {t('docsSelfHosting.units.title')}
           </h2>
         </div>
@@ -119,7 +119,7 @@ export function SelfHostingDocs() {
         <div className="flex items-start gap-3">
           <Terminal className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div>
-            <h2 id="panel-install" className="font-headline text-headline-md text-on-surface">
+            <h2 id="panel-install" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>
               {t('docsSelfHosting.install.title')}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
@@ -143,7 +143,7 @@ export function SelfHostingDocs() {
       <section aria-labelledby="topology" className="mb-10">
         <div className="mb-4 flex items-center gap-2">
           <Network className="h-5 w-5 text-primary" />
-          <h2 id="topology" className="font-headline text-headline-md text-on-surface">
+          <h2 id="topology" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>
             {t('docsSelfHosting.topology.title')}
           </h2>
         </div>
@@ -178,7 +178,7 @@ export function SelfHostingDocs() {
         <div className="flex items-start gap-3">
           <ArrowRightLeft className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div>
-            <h2 id="component-migration" className="font-headline text-headline-md text-on-surface">
+            <h2 id="component-migration" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>
               {t('docsSelfHosting.migration.title')}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
@@ -216,7 +216,7 @@ export function SelfHostingDocs() {
       <section aria-labelledby="enrollment" className="mb-10">
         <div className="mb-4 flex items-center gap-2">
           <ShieldCheck className="h-5 w-5 text-primary" />
-          <h2 id="enrollment" className="font-headline text-headline-md text-on-surface">
+          <h2 id="enrollment" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>
             {t('docsSelfHosting.enrollment.title')}
           </h2>
         </div>
@@ -247,7 +247,7 @@ export function SelfHostingDocs() {
         <div className="flex items-start gap-3">
           <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div>
-            <h2 id="guardian-state" className="font-headline text-headline-md text-on-surface">{t('docsSelfHosting.guardian.title')}</h2>
+            <h2 id="guardian-state" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>{t('docsSelfHosting.guardian.title')}</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">{t('docsSelfHosting.guardian.intro')}</p>
           </div>
         </div>
@@ -265,7 +265,7 @@ export function SelfHostingDocs() {
         <div className="flex items-start gap-3">
           <KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div>
-            <h2 id="db-encryption" className="font-headline text-headline-md text-on-surface">{t('docsSelfHosting.encryption.title')}</h2>
+            <h2 id="db-encryption" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>{t('docsSelfHosting.encryption.title')}</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">{t('docsSelfHosting.encryption.intro')}</p>
           </div>
         </div>
@@ -279,10 +279,34 @@ export function SelfHostingDocs() {
         </dl>
       </section>
 
+      {/* Was das Studio kann und was nicht. Die Warnung steht, weil der
+          SQL-Editor an der Panel-Datenbank mehr darf als seine Dialoge. */}
+      <section aria-labelledby="postgres-studio" className="msm-card mb-10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <Database className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h2 id="postgres-studio" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>{t('docsSelfHosting.postgres.title')}</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">{t('docsSelfHosting.postgres.intro')}</p>
+          </div>
+        </div>
+        <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
+          {(['kinds', 'rights', 'data', 'structure', 'sql', 'superuser', 'blocked', 'limits', 'backup', 'encrypted', 'audit'] as const).map(item => (
+            <div key={item} className="bg-surface-container p-4">
+              <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.postgres.${item}.title`)}</dt>
+              <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.postgres.${item}.body`)}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-4 flex gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 p-4 text-status-warning">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <p className="text-sm leading-6">{t('docsSelfHosting.postgres.panelWarning')}</p>
+        </div>
+      </section>
+
       <section aria-labelledby="artifacts" className="mb-10">
         <div className="mb-4 flex items-center gap-2">
           <FileArchive className="h-5 w-5 text-primary" />
-          <h2 id="artifacts" className="font-headline text-headline-md text-on-surface">
+          <h2 id="artifacts" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>
             {t('docsSelfHosting.artifacts.title')}
           </h2>
         </div>
@@ -309,7 +333,7 @@ export function SelfHostingDocs() {
         <div className="flex items-start gap-3">
           <KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div>
-            <h2 id="credentials-scoping" className="font-headline text-headline-md text-on-surface">
+            <h2 id="credentials-scoping" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>
               {t('docsSelfHosting.credentials.title')}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
@@ -333,7 +357,7 @@ export function SelfHostingDocs() {
         <div className="flex items-start gap-3">
           <Plug className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div>
-            <h2 id="hoster-integration" className="font-headline text-headline-md text-on-surface">
+            <h2 id="hoster-integration" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>
               {t('docsSelfHosting.hoster.title')}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
@@ -367,7 +391,7 @@ export function SelfHostingDocs() {
         <div className="flex items-start gap-3">
           <Mic className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div>
-            <h2 id="voice-mode" className="font-headline text-headline-md text-on-surface">
+            <h2 id="voice-mode" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>
               {t('docsSelfHosting.voice.title')}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
@@ -396,7 +420,7 @@ export function SelfHostingDocs() {
         <div className="flex items-start gap-3">
           <PhoneCall className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div>
-            <h2 id="messenger-calls" className="font-headline text-headline-md text-on-surface">
+            <h2 id="messenger-calls" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>
               {t('docsSelfHosting.calls.title')}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
@@ -425,7 +449,7 @@ export function SelfHostingDocs() {
         <div className="flex items-start gap-3">
           <BellRing className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div>
-            <h2 id="push-notifications" className="font-headline text-headline-md text-on-surface">
+            <h2 id="push-notifications" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>
               {t('docsSelfHosting.push.title')}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
@@ -451,7 +475,7 @@ export function SelfHostingDocs() {
         <div className="flex items-start gap-3">
           <MonitorSmartphone className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div>
-            <h2 id="smart-system" className="font-headline text-headline-md text-on-surface">
+            <h2 id="smart-system" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>
               {t('docsSelfHosting.smartSystem.title')}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">

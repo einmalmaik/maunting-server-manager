@@ -4052,6 +4052,55 @@
         "body": "These mix E2EE, DIS and old plaintext values. They get the prefix the next time they are saved."
       }
     },
+    "postgres": {
+      "title": "PostgreSQL databases and the Studio",
+      "intro": "You manage databases in the PostgreSQL Studio: on a server in the Databases tab, and for the panel itself on the Panel database page. It reaches no other databases; there is no way to connect to an arbitrary host.",
+      "kinds": {
+        "title": "Three kinds",
+        "body": "Shared cluster: databases of a game or application server in the node's msm-postgres, without roles, instance settings or untrusted extensions. Dedicated database server: a whole instance with everything. Panel database: from MSM_DATABASE_URL, without structure dialogs, backup and connection."
+      },
+      "rights": {
+        "title": "Permissions",
+        "body": "server.databases.read reads and exports. write changes rows and may run VACUUM, ANALYZE, REINDEX. admin opens the SQL editor, structure, VACUUM FULL, sessions, parameters, dump, restore and passwords. For the panel, panel.database.read and panel.database.admin apply."
+      },
+      "data": {
+        "title": "Data",
+        "body": "Browse, filter, insert, update and delete rows (deleting asks first). Import from CSV or JSON, export as CSV, JSON or SQL. Views and tables that cannot have a key are changed through SQL only."
+      },
+      "structure": {
+        "title": "Structure",
+        "body": "Tables, columns, keys, indexes, views, functions, triggers, grants and row-level security through dialogs. Every dialog shows the SQL that will run beforehand. A table is only dropped after you type its name."
+      },
+      "sql": {
+        "title": "SQL editor",
+        "body": "In one transaction, as a test with rollback, or without a transaction (stops at the first error, earlier statements stay). EXPLAIN ANALYZE runs the query and rolls it back. No denylist and no confirmation: whatever PostgreSQL allows the owner runs."
+      },
+      "superuser": {
+        "title": "No superuser",
+        "body": "SQL runs as the database owner. COPY with a file or PROGRAM, lo_import, ALTER SYSTEM and untrusted languages therefore fail in PostgreSQL. Roles have no field for superuser or replication; msm_admin and panel-managed roles stay untouched."
+      },
+      "blocked": {
+        "title": "Blocked",
+        "body": "Parameters for archive and restore commands, preloaded libraries, data and config paths, port, addresses, log paths and SSL. System roles such as pg_read_server_files or pg_execute_server_program. Queries across databases."
+      },
+      "limits": {
+        "title": "Limits",
+        "body": "5 s per statement (MSM_MANAGED_POSTGRES_STATEMENT_TIMEOUT_MS). SQL editor: 200 statements, 500 rows per result. Import in blocks of 5,000 rows, each in its own transaction: if one block fails, the ones before it stay. Export up to 200,000 rows."
+      },
+      "backup": {
+        "title": "Backup",
+        "body": "Server databases only: dump as SQL, custom or tar. Restore only after typing the database name, in one transaction, up to about 210 MB. The panel database is backed up by Panel backups."
+      },
+      "encrypted": {
+        "title": "Encrypted values",
+        "body": "In the panel database, AI content, secrets and passwords appear as ciphertext starting with msm-dis-v1, in exports too. A value belongs to its table and column: copied or damaged, it can no longer be read."
+      },
+      "audit": {
+        "title": "Audit log",
+        "body": "Always: structure changes, terminated sessions, dump and restore. On the panel database also rows and SQL, without the SQL text. On server databases, rows and SQL only when the AI changes them. Reads and exports are never logged."
+      },
+      "panelWarning": "On the panel database the SQL editor runs with all rights of the panel's database user. Unlike the dialogs it also alters and drops tables, without asking, and a change no migration knows about breaks the next update. Give panel.database.admin only to the people who operate the panel."
+    },
     "artifacts": {
       "title": "GitHub release artifacts",
       "file": "Artifact",

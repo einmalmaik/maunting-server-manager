@@ -499,6 +499,141 @@ sobald das neue Panel läuft. Kalender und Notizen bekommen den
 Präfix erst beim nächsten Speichern, weil dort E2EE-, DIS- und alte
 Klartextwerte nebeneinander liegen.
 
+## PostgreSQL-Datenbanken und das Studio
+
+Datenbanken verwaltest du im **PostgreSQL-Studio**. Es steht an zwei Stellen:
+
+- am Server im Reiter **Datenbanken**, für die Datenbanken dieses Servers;
+- auf der Seite **Panel-Datenbank** (`/panel-database`), für die Datenbank des
+  Panels selbst.
+
+Andere Datenbanken erreicht es nicht. Eine Verbindung zu einem beliebigen Host
+gibt es nicht, und der Agent nimmt als Ziel nur den gemeinsamen Cluster auf
+`127.0.0.1:15432` oder einen Datenbankcontainer seines eigenen Nodes an.
+
+### Drei Arten von Datenbank
+
+| Art | Was sie ist | Was im Studio fehlt |
+|---|---|---|
+| Gemeinsamer Cluster | Datenbanken eines Spiel- oder Anwendungsservers im `msm-postgres` des Nodes (`postgres_database_count`). Jede hat eine eigene Eigentümerrolle ohne Superuser-Rechte; `CONNECT` ist für `PUBLIC` entzogen. | Rollen, Instanz-Einstellungen, nicht vertrauenswürdige (*untrusted*) Erweiterungen, Rechte an Rollen anderer Server |
+| Eigener Datenbankserver | Eigene PostgreSQL-Instanz (`server_kind: "database"`), Container `msm-srv-<id>` | – |
+| Panel-Datenbank | Die Datenbank aus `MSM_DATABASE_URL`. Das Backend verbindet sich selbst, ohne Agent. | Strukturdialoge, Sicherung, Verbindung, Instanz; Rollen und Erweiterungen nur zur Ansicht |
+
+### Rechte
+
+| Recht | Erlaubt |
+|---|---|
+| `server.databases.read` | Struktur ansehen, Zeilen lesen, Export, Zustand, SQL-Vorschau von Dialogen |
+| `server.databases.write` | Zeilen anlegen, ändern, löschen, importieren; `VACUUM`, `ANALYZE`, `REINDEX`, `REFRESH MATERIALIZED VIEW` |
+| `server.databases.admin` | SQL-Editor, `EXPLAIN`, Strukturänderungen, `VACUUM FULL`, Sitzungen und Sperren, Parameter, Dump und Wiederherstellung, Datenbanken und Benutzer anlegen, Passwörter abrufen |
+| `panel.database.read` | Panel-Datenbank lesen |
+| `panel.database.admin` | Panel-Datenbank ändern: Zeilen, SQL, Wartung, Sitzungen beenden |
+
+Der Owner des Panels hat alle Rechte. Die Serverrechte können auch über
+Freigaben am Server oder über Teams kommen.
+
+### Was geht
+
+- **Daten:** Zeilen blättern (25 bis 500 je Seite), filtern, sortieren,
+  anlegen, ändern und löschen. Löschen fragt nach. Ohne Primärschlüssel dient
+  die physische Zeilenkennung (`ctid`) als Schlüssel. Views, materialisierte
+  Views und Tabellen, die keinen Schlüssel haben können (partitionierte oder
+  Fremdtabellen ohne Primärschlüssel), ändert nur SQL.
+- **Import** aus CSV (Trennzeichen `,` oder `;`) oder JSON, **Export** als CSV,
+  JSON oder SQL-`INSERT`s.
+- **Struktur** über Dialoge: Schemas, Tabellen, Spalten, Schlüssel, Indizes
+  (auch `CONCURRENTLY`), Views, Sequenzen, Enums, Partitionen, Funktionen
+  (plpgsql, sql), Trigger, Rechte und Row-Level-Security. Jeder Dialog zeigt
+  vorher genau das SQL, das laufen wird, und ob es Daten entfernt. Eine
+  Tabelle oder View wird erst gelöscht, wenn ihr Name eingetippt ist.
+- **SQL-Editor** mit drei Arten: in einer Transaktion (alles oder nichts),
+  **Nur testen** (läuft und wird zurückgerollt) oder **Ohne Transaktion**
+  (bricht beim ersten Fehler ab, Vorheriges bleibt). `VACUUM` und andere
+  Befehle, die keine Transaktion vertragen, laufen nur ohne. `EXPLAIN` zeigt den
+  Plan; `EXPLAIN ANALYZE` führt die Abfrage aus und rollt sie zurück.
+- **Überwachung:** Trefferquoten, Tabellen mit vielen toten Zeilen, ungenutzte
+  Indizes; mit Admin-Recht Sitzungen und Sperren, Abbrechen und Beenden von
+  Sitzungen der eigenen Datenbank.
+- **Sicherung** (nur Serverdatenbanken): Dump als SQL, Custom oder Tar, auf
+  Wunsch nur Struktur oder nur Daten und nur ausgewählte Schemas oder Tabellen.
+  Wiederherstellen erst nach Eingabe des Datenbanknamens, in einer einzigen
+  Transaktion.
+- **Verbindung** (nur Serverdatenbanken): Adressen, SSL, erlaubte Netze,
+  Beispielcode, Anwendungsbenutzer anlegen und löschen, Passwörter abrufen.
+  Jeder Abruf eines Passworts steht im Audit-Log.
+- Am **eigenen Datenbankserver** zusätzlich: Rollen anlegen, ändern und
+  löschen, Erweiterungen aus dem ganzen Angebot der Instanz und
+  Instanz-Parameter (`ALTER SYSTEM`, danach `pg_reload_conf()`). Parameter, die
+  einen Neustart brauchen, werden als ausstehend markiert und wirken erst nach
+  dem nächsten Neustart des Servers.
+
+### Was nicht geht
+
+- **Kein Superuser.** Alles, was ein Mensch im SQL-Editor schreibt, läuft als
+  Eigentümer der Datenbank. Deshalb scheitern `COPY … TO/FROM` mit Datei oder
+  `PROGRAM`, `lo_import`/`lo_export` auf dem Server, `ALTER SYSTEM`,
+  nicht vertrauenswürdige Sprachen und Erweiterungen an PostgreSQL selbst.
+  Als Instanz-Admin laufen nur fest übersetzte Schritte: Rollen, Parameter und
+  Erweiterungen am eigenen Datenbankserver, die Anzeige von Sitzungen und
+  Sperren sowie der Dump. Die Wiederherstellung läuft als Eigentümer.
+- **Keine Superuser- oder Replikationsrolle.** Rollen haben dafür kein Feld.
+  `msm_admin` und die vom Panel verwalteten Rollen ändert das Studio nicht;
+  Namen mit `pg_` oder `msm_` sind reserviert. Mitgliedschaft in
+  Systemrollen nur aus einer festen Liste, also nie `pg_read_server_files`,
+  `pg_write_server_files` oder `pg_execute_server_program`.
+- **Gesperrte Parameter:** Archiv- und Wiederherstellungsbefehle,
+  vorgeladene Bibliotheken und Bibliothekspfade, Konfigurations- und
+  Datenpfade, Port, Adressen und Sockets, Logpfade, `password_encryption`,
+  `ssl` samt `ssl_*` und `primary_conninfo`.
+- **Keine Abfrage über Datenbanken hinweg.** PostgreSQL kennt sie nicht, und
+  `dblink` oder `postgres_fdw` sind im gemeinsamen Cluster nicht installierbar.
+- **Keine Struktur und keine Sicherung für die Panel-Datenbank** über die
+  Dialoge. Die Struktur legen die Alembic-Migrationen fest, gesichert wird über
+  *Panel-Backups*.
+
+### Grenzen
+
+| Was | Grenze |
+|---|---|
+| Laufzeit einer Anweisung | 5 s (`MSM_MANAGED_POSTGRES_STATEMENT_TIMEOUT_MS`, 100 bis 600.000 ms) |
+| SQL-Editor | 1.000.000 Zeichen, 200 Anweisungen je Lauf, 500 Zeilen je Ergebnis |
+| Import | 5.000 Zeilen je Block. Größere Dateien gehen in mehreren Blöcken, **jeder in eigener Transaktion**: scheitert Block 3, bleiben 1 und 2 stehen. |
+| Export | 200.000 Zeilen. Ohne Schlüssel oder Sortierung nur die erste Seite (5.000 Zeilen). |
+| Wiederherstellung | rund 210 MB; SQL-Dumps nur in UTF-8 und ohne psql-Metabefehle (`\…`) |
+| Erlaubte Netze | 50 Einträge je Datenbankserver |
+| SQL-Verlauf | die letzten 30 Abfragen je Datenbank im Browser, an das Konto gebunden, beim Abmelden gelöscht |
+
+### Die Panel-Datenbank
+
+Mit `panel.database.admin` läuft der SQL-Editor als Datenbankbenutzer des
+Panels (`msm`) **mit allen seinen Rechten**. Anders als die Dialoge kann er
+Tabellen und Spalten ändern und löschen, ohne Rückfrage. Eine Änderung an
+der Struktur, die keine Migration kennt, bricht das nächste Update. Dieses
+Recht gehört nur Menschen, die das Panel betreiben.
+
+Verschlüsselte Spalten zeigt das Studio so, wie sie gespeichert sind: als
+`msm-dis-v1:…`. Das gilt für KI-Inhalte, Geheimnisse und Datenbankpasswörter,
+auch im Export und im SQL-Ergebnis. Ein solcher Wert ist an seine Tabelle und
+Spalte gebunden. In eine andere Spalte kopiert, lässt er sich nicht mehr
+entschlüsseln, und ein beschädigter Wert führt beim Lesen zu Fehlern.
+Klartext, der in eine verschlüsselte Spalte geschrieben wird, verschlüsselt das
+Panel beim nächsten Start.
+
+### Audit-Log
+
+Immer protokolliert, ohne SQL-Text: Strukturänderungen
+(`postgres.studio.execute`), beendete und abgebrochene Sitzungen, Dump,
+Wiederherstellung sowie Einspielen und Verwerfen ausstehender Dumps.
+
+| | Zeilen ändern | SQL-Editor | Lesen und Export |
+|---|---|---|---|
+| Panel-Datenbank | ja | ja (Zahl der Anweisungen) | nein |
+| Serverdatenbank, von Hand | nein | nein | nein |
+| Serverdatenbank, durch die KI | ja (`via: ai`) | ja (`via: ai`) | nein |
+
+Die KI arbeitet nur mit Serverdatenbanken, nie mit der Panel-Datenbank (siehe
+[Datenbanken: Datenbankserver und PostgreSQL-Studio](#datenbanken-datenbankserver-und-postgresql-studio)).
+
 ## SaaS-Hosting-Betrieb: Node-Härtung, Secret-Rotation, Admin-Monitoring
 
 Wenn du **fremde Kunden** auf denselben Nodes hostest (Vermietung / SaaS), gilt
@@ -550,7 +685,7 @@ Privilegierte Aktionen schreiben in `audit_logs` (wer / wann / action / Ziel,
 Details ohne Secrets):
 
 - `postgres.admin.rotate`, `postgres.database.*`, `postgres.user.*`, `postgres.power_user.*`, `postgres.credential.reveal`, `postgres.instance.*`
-- PostgreSQL-Studio: `postgres.studio.execute` (Strukturänderung, ohne SQL im Eintrag), `postgres.studio.dump`, `postgres.studio.restore`, `postgres.studio.session_*`; Änderungen der KI zusätzlich `postgres.studio.rows_*` und `postgres.studio.sql` mit `via: ai`; an der Panel-Datenbank (`target_type: panel_database`) alle Änderungen, auch Zeilen und SQL
+- PostgreSQL-Studio: `postgres.studio.execute` (Strukturänderung, ohne SQL im Eintrag), `postgres.studio.dump`, `postgres.studio.restore`, `postgres.studio.restore_pending`, `postgres.studio.discard_pending`, `postgres.studio.session_*`; Änderungen der KI zusätzlich `postgres.studio.rows_*` und `postgres.studio.sql` mit `via: ai`; an der Panel-Datenbank (`target_type: panel_database`) alle Änderungen, auch Zeilen und SQL. Zeilen und SQL, die ein Mensch an einer Serverdatenbank ändert, stehen nicht im Log, Lesen und Export an keiner Datenbank (siehe [Audit-Log des Studios](#audit-log))
 - `nodes.token.update`, `nodes.enrollment.approve`
 
 **Im Panel:** Administration → **Audit** (`/admin/audit`, Permission `system.audit.read`).  
@@ -853,8 +988,9 @@ Funktionen, nicht über eine zweite Umsetzung:
   Wartung — kompiliert von `postgres_ddl` wie die SQL-Vorschau im Studio),
   Zeilen wie im Daten-Grid, oder freies SQL wie im SQL-Editor.
 
-Das Recht kommt wie im Studio aus dem Plan: Strukturänderungen und freies SQL
-verlangen `server.databases.admin`, Zeilen und Wartung `server.databases.write`.
+Das Recht kommt wie im Studio aus dem Plan: Strukturänderungen, `VACUUM FULL`
+und freies SQL verlangen `server.databases.admin`, Zeilen und die übrige
+Wartung `server.databases.write`.
 Eine Operation wird schon beim Vorschlag **geprobt** — derselbe Plan läuft in
 einer Transaktion, die verworfen wird. Ein kaputter Funktionskörper, eine
 fehlende Triggerfunktion oder eine im gemeinsamen Cluster nicht erlaubte
@@ -874,10 +1010,13 @@ Auch die **Panel-Datenbank** (Seite *Panel-Datenbank*) öffnet dieses Studio,
 über `/api/panel/database/studio` statt über den Agent: das Backend verbindet
 sich selbst mit `MSM_DATABASE_URL`. Lesen braucht `panel.database.read`;
 Zeilen bearbeiten, SQL, Wartung (VACUUM, ANALYZE, REINDEX) und Sitzungen
-beenden brauchen `panel.database.admin`. Tabellen, Spalten, Rechte, Rollen und
-Erweiterungen ändert das Studio hier nicht — die Struktur legen die
-Alembic-Migrationen fest. Gesichert wird über *Panel-Backups*, nicht im Studio.
-Jede Änderung landet im Audit-Log, SQL ohne seinen Text.
+beenden brauchen `panel.database.admin`. Die Dialoge ändern hier weder
+Tabellen, Spalten, Rechte, Rollen noch Erweiterungen — die Struktur legen die
+Alembic-Migrationen fest. Der SQL-Editor dagegen läuft mit allen Rechten des
+Panel-Benutzers und kann auch das (siehe [Die Panel-Datenbank](#die-panel-datenbank)).
+Gesichert wird über *Panel-Backups*, nicht im Studio. Jede Änderung landet im
+Audit-Log, SQL ohne seinen Text; Lesen und Export nicht. Die KI-Werkzeuge
+erreichen die Panel-Datenbank nicht.
 
 ### Was die KI an einem Blueprint ändern kann
 

@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Gauge, History, Play } from 'lucide-react'
 import { Badge, Button, Switch, Textarea } from '@/Singra/UI'
+import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { readSqlConsoleEntries, sqlVerlaufSchluessel, writeSqlConsoleEntries } from '@/lib/sqlConsoleStorage'
 import { useStudio } from './StudioContext'
 import { PlanTree } from './PlanTree'
 import { Empty, ErrorBox, Section } from './shared'
@@ -9,17 +11,11 @@ import { cellText, type Json, type StudioRunResult, type StudioSqlResponse, type
 
 const HISTORY_LIMIT = 30
 
-function historyKey(ziel: StudioZiel) {
-  return ziel.art === 'panel' ? 'msm-pg-studio:verlauf:panel' : `msm-pg-studio:verlauf:${ziel.serverId}:${ziel.databaseId}`
-}
-
-function readHistory(key: string): string[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(key) || '[]')
-    return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : []
-  } catch {
-    return []
-  }
+/** Ohne angemeldetes Konto gibt es keinen gespeicherten Verlauf, nur den der Sitzung. */
+function historyKey(ziel: StudioZiel): string | null {
+  const konto = angemeldetesKonto()
+  if (konto === null) return null
+  return sqlVerlaufSchluessel(konto, ziel.art === 'panel' ? 'panel' : `server-${ziel.serverId}-db-${ziel.databaseId}`)
 }
 
 /** SQL-Editor: läuft als Owner (Panel: als Panel-Benutzer), in einer Transaktion oder mit Rollback (Funktionstest). */
@@ -34,16 +30,12 @@ export function SqlTab({ initialSql = '', initialRollback = false }: { initialSq
   const [plan, setPlan] = useState<{ plan: Json; analyzed: boolean } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [history, setHistory] = useState<string[]>(() => readHistory(key))
+  const [history, setHistory] = useState<string[]>(() => (key ? readSqlConsoleEntries(key) : []))
 
   const remember = (text: string) => {
     const next = [text, ...history.filter((entry) => entry !== text)].slice(0, HISTORY_LIMIT)
     setHistory(next)
-    try {
-      localStorage.setItem(key, JSON.stringify(next))
-    } catch {
-      /* Speicher voll oder gesperrt: Verlauf bleibt nur in der Sitzung */
-    }
+    if (key) writeSqlConsoleEntries(key, next)
   }
 
   const run = async () => {
@@ -150,11 +142,7 @@ export function SqlTab({ initialSql = '', initialRollback = false }: { initialSq
                 variant="ghost"
                 onClick={() => {
                   setHistory([])
-                  try {
-                    localStorage.removeItem(key)
-                  } catch {
-                    /* nichts zu tun */
-                  }
+                  if (key) writeSqlConsoleEntries(key, [])
                 }}
               >
                 {t('common.clear')}

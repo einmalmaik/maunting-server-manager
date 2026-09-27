@@ -74,6 +74,9 @@ Fragst du nach einem Ort, holt er Koordinaten, Wetter, ein Bild der Gegend (mit 
 
 Mehr zu Datenflüssen, Rechten und Werkzeugen steht in [`docs/ai-system-architecture.md`](docs/ai-system-architecture.md).
 
+### 12. PostgreSQL-Studio
+Die Datenbanken deiner Server und die des Panels verwaltest du im Browser: Daten bearbeiten, importieren und exportieren, Tabellen und Indizes über Dialoge anlegen, SQL ausführen, sichern und wiederherstellen. SQL, das du selbst schreibst, läuft als Eigentümer der jeweiligen Datenbank, nie als Superuser. Was geht, was nicht und welche Grenzen gelten, steht in [`docs/self-hosting.md`](docs/self-hosting.md#postgresql-datenbanken-und-das-studio) und im Panel unter **Dokumentation → Self-Hosting**.
+
 ---
 
 ## MSM im Vergleich

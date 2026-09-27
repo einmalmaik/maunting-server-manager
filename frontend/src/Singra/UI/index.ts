@@ -62,3 +62,8 @@ export {
   type MauntingQrCardProps,
 } from './MauntingQrCard'
 
+export {
+  Sprungleiste,
+  SPRUNGZIEL_ABSTAND,
+  type Sprungziel,
+} from './Sprungleiste'

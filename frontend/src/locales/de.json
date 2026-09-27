@@ -4052,6 +4052,55 @@
         "body": "Dort liegen E2EE-, DIS- und alte Klartextwerte nebeneinander. Sie bekommen den Präfix erst beim nächsten Speichern."
       }
     },
+    "postgres": {
+      "title": "PostgreSQL-Datenbanken und das Studio",
+      "intro": "Datenbanken verwaltest du im PostgreSQL-Studio: am Server im Reiter Datenbanken und für das Panel selbst auf der Seite Panel-Datenbank. Andere Datenbanken erreicht es nicht, eine Verbindung zu einem beliebigen Host gibt es nicht.",
+      "kinds": {
+        "title": "Drei Arten",
+        "body": "Gemeinsamer Cluster: Datenbanken eines Spiel- oder Anwendungsservers im msm-postgres des Nodes, ohne Rollen, Instanz-Einstellungen und untrusted Erweiterungen. Eigener Datenbankserver: eine ganze Instanz mit allem. Panel-Datenbank: aus MSM_DATABASE_URL, ohne Strukturdialoge, Sicherung und Verbindung."
+      },
+      "rights": {
+        "title": "Rechte",
+        "body": "server.databases.read liest und exportiert. write ändert Zeilen und darf VACUUM, ANALYZE, REINDEX. admin öffnet SQL-Editor, Struktur, VACUUM FULL, Sitzungen, Parameter, Dump, Wiederherstellung und Passwörter. Für das Panel gelten panel.database.read und panel.database.admin."
+      },
+      "data": {
+        "title": "Daten",
+        "body": "Zeilen blättern, filtern, anlegen, ändern und löschen (Löschen fragt nach). Import aus CSV oder JSON, Export als CSV, JSON oder SQL. Views und Tabellen ohne möglichen Schlüssel ändert nur SQL."
+      },
+      "structure": {
+        "title": "Struktur",
+        "body": "Tabellen, Spalten, Schlüssel, Indizes, Views, Funktionen, Trigger, Rechte und Row-Level-Security über Dialoge. Jeder Dialog zeigt vorher das SQL, das laufen wird. Eine Tabelle wird erst gelöscht, wenn ihr Name eingetippt ist."
+      },
+      "sql": {
+        "title": "SQL-Editor",
+        "body": "In einer Transaktion, als Test mit Rollback oder ohne Transaktion (bricht beim ersten Fehler ab, Vorheriges bleibt). EXPLAIN ANALYZE führt die Abfrage aus und rollt sie zurück. Keine Sperrliste und keine Rückfrage: was PostgreSQL dem Eigentümer erlaubt, läuft."
+      },
+      "superuser": {
+        "title": "Kein Superuser",
+        "body": "SQL läuft als Eigentümer der Datenbank. COPY mit Datei oder PROGRAM, lo_import, ALTER SYSTEM und untrusted Sprachen scheitern deshalb an PostgreSQL. Rollen haben kein Feld für Superuser oder Replikation, msm_admin und vom Panel verwaltete Rollen bleiben unberührt."
+      },
+      "blocked": {
+        "title": "Gesperrt",
+        "body": "Parameter für Archiv- und Wiederherstellungsbefehle, vorgeladene Bibliotheken, Daten- und Konfigurationspfade, Port, Adressen, Logpfade und SSL. Systemrollen wie pg_read_server_files oder pg_execute_server_program. Abfragen über Datenbanken hinweg."
+      },
+      "limits": {
+        "title": "Grenzen",
+        "body": "5 s je Anweisung (MSM_MANAGED_POSTGRES_STATEMENT_TIMEOUT_MS). SQL-Editor: 200 Anweisungen, 500 Zeilen je Ergebnis. Import in Blöcken zu 5.000 Zeilen, jeder in eigener Transaktion: scheitert ein Block, bleiben die davor stehen. Export bis 200.000 Zeilen."
+      },
+      "backup": {
+        "title": "Sicherung",
+        "body": "Nur Serverdatenbanken: Dump als SQL, Custom oder Tar. Wiederherstellen erst nach Eingabe des Datenbanknamens, in einer Transaktion, bis rund 210 MB. Die Panel-Datenbank sichern die Panel-Backups."
+      },
+      "encrypted": {
+        "title": "Verschlüsselte Werte",
+        "body": "In der Panel-Datenbank stehen KI-Inhalte, Geheimnisse und Passwörter als Chiffrat, erkennbar am Präfix msm-dis-v1, auch im Export. Ein Wert gehört zu seiner Tabelle und Spalte: kopiert oder beschädigt lässt er sich nicht mehr lesen."
+      },
+      "audit": {
+        "title": "Audit-Log",
+        "body": "Immer: Strukturänderungen, beendete Sitzungen, Dump und Wiederherstellung. An der Panel-Datenbank auch Zeilen und SQL, ohne SQL-Text. An Serverdatenbanken Zeilen und SQL nur, wenn die KI sie ändert. Lesen und Export stehen nie im Log."
+      },
+      "panelWarning": "Auf der Panel-Datenbank läuft der SQL-Editor mit allen Rechten des Panel-Benutzers. Anders als die Dialoge ändert und löscht er auch Tabellen, ohne Rückfrage, und eine Änderung, die keine Migration kennt, bricht das nächste Update. panel.database.admin gehört nur denen, die das Panel betreiben."
+    },
     "artifacts": {
       "title": "GitHub-Release-Artefakte",
       "file": "Artefakt",

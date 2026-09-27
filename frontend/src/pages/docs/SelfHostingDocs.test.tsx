@@ -132,4 +132,30 @@ describe('SelfHostingDocs', () => {
     renderPage()
     expect(screen.getByText('Adresse für die Medien')).toBeInTheDocument()
   })
+
+  it('sagt, was das PostgreSQL-Studio kann und was nicht', () => {
+    // Der SQL-Editor an der Panel-Datenbank darf mehr als die Dialoge dort.
+    // Bis 27.09.2026 stand in der Doku nur, das Studio ändere dort keine
+    // Struktur. Das galt für die Dialoge, nicht für den Editor.
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'PostgreSQL databases and the Studio' })).toBeInTheDocument()
+    expect(screen.getByText(/runs with all rights of the panel's database user/i)).toBeInTheDocument()
+    expect(screen.getByText(/SQL runs as the database owner/i)).toBeInTheDocument()
+    expect(screen.getByText(/5 s per statement/)).toBeInTheDocument()
+    expect(screen.getByText(/Reads and exports are never logged/)).toBeInTheDocument()
+  })
+
+  it('führt jeden Abschnitt in der Sprungleiste, und jede Marke trifft einen', () => {
+    // Die Datenbankverschlüsselung stand bis 27.09.2026 auf der Seite, aber
+    // nicht in der Leiste, und war nur durch Scrollen zu finden.
+    renderPage()
+
+    const leiste = screen.getAllByRole('navigation', { name: 'Self-hosting documentation links' })[0]
+    const marken = Array.from(leiste.querySelectorAll('a')).map(a => a.getAttribute('href')!.slice(1))
+    const abschnitte = Array.from(document.querySelectorAll('section[aria-labelledby]')).map(s => s.getAttribute('aria-labelledby')!)
+
+    expect(marken.sort()).toEqual(abschnitte.sort())
+    for (const id of marken) expect(document.getElementById(id)).toBeInTheDocument()
+  })
 })

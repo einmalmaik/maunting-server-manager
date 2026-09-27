@@ -125,4 +125,17 @@ describe('HosterApiDocs', () => {
     expect(screen.getByRole('heading', { name: 'Hoster-API' })).toBeInTheDocument()
     await i18n.changeLanguage('en')
   })
+
+  it('führt jeden Abschnitt in der Sprungleiste, und jede Marke trifft einen', () => {
+    // Die Datenbankverschlüsselung stand bis 27.09.2026 auf der Seite, aber
+    // nicht in der Leiste, und war nur durch Scrollen zu finden.
+    renderPage()
+
+    const leiste = screen.getAllByRole('navigation', { name: 'Sections on this page' })[0]
+    const marken = Array.from(leiste.querySelectorAll('a')).map(a => a.getAttribute('href')!.slice(1))
+    const abschnitte = Array.from(document.querySelectorAll('section[aria-labelledby]')).map(s => s.getAttribute('aria-labelledby')!)
+
+    expect(marken.sort()).toEqual(abschnitte.sort())
+    for (const id of marken) expect(document.getElementById(id)).toBeInTheDocument()
+  })
 })

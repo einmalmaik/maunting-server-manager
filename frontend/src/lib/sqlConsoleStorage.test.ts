@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // Verdrahtung nicht mitgeprueft — und sie ist die Stelle, die brechen kann.
 import {
   readSqlConsoleEntries,
-  sqlConsoleStorageKeys,
+  sqlVerlaufSchluessel,
   writeSqlConsoleEntries,
 } from './sqlConsoleStorage'
 import { useAuthStore } from '@/stores/authStore'
@@ -22,44 +22,43 @@ describe('Speicher der SQL-Konsole', () => {
     localStorage.clear()
   })
 
-  it('trennt die Schlüssel nach Benutzer und Konsole', () => {
-    const benutzerEins = sqlConsoleStorageKeys(1, 'server-1')
-    const benutzerZwei = sqlConsoleStorageKeys(2, 'server-1')
-    const panel = sqlConsoleStorageKeys(1, 'panel')
+  it('trennt die Schlüssel nach Benutzer und Datenbank', () => {
+    const benutzerEins = sqlVerlaufSchluessel(1, 'server-1-db-1')
+    const benutzerZwei = sqlVerlaufSchluessel(2, 'server-1-db-1')
+    const panel = sqlVerlaufSchluessel(1, 'panel')
 
-    expect(new Set([benutzerEins.history, benutzerZwei.history, panel.history]).size).toBe(3)
+    expect(new Set([benutzerEins, benutzerZwei, panel]).size).toBe(3)
 
-    writeSqlConsoleEntries(benutzerEins.history, ['SELECT email FROM users'])
-    expect(readSqlConsoleEntries<string>(benutzerZwei.history)).toEqual([])
-    expect(readSqlConsoleEntries<string>(panel.history)).toEqual([])
+    writeSqlConsoleEntries(benutzerEins, ['SELECT email FROM users'])
+    expect(readSqlConsoleEntries(benutzerZwei)).toEqual([])
+    expect(readSqlConsoleEntries(panel)).toEqual([])
   })
 
-  it('räumt beim Abmelden Verlauf und Altlasten weg, behält aber Favoriten und Fremdes', async () => {
-    const schluessel = sqlConsoleStorageKeys(1, 'server-1')
-    // Altlast aus der Zeit vor der Benutzerbindung:
+  it('räumt beim Abmelden Verlauf und Altlasten weg, Fremdes bleibt', async () => {
+    const schluessel = sqlVerlaufSchluessel(1, 'server-1-db-1')
+    // Altlasten: ungebunden aus der Zeit vor der Benutzerbindung, Favoriten
+    // der alten Konsole und der Studio-Verlauf unter seinem alten Namen.
     localStorage.setItem('msm_sql_history', JSON.stringify(['SELECT totp_secret FROM users']))
-    localStorage.setItem('msm_sql_favorites', JSON.stringify([]))
-    writeSqlConsoleEntries(schluessel.history, ["UPDATE users SET password = 'geheim'"])
-    writeSqlConsoleEntries(schluessel.favorites, [
-      { id: '1', title: 'Zählen', sql: 'SELECT count(*) FROM users', createdAt: '2026-08-11T00:00:00Z' },
-    ])
+    localStorage.setItem('msm_sql:favorites:1:panel', JSON.stringify([]))
+    localStorage.setItem('msm-pg-studio:verlauf:panel', JSON.stringify(["CREATE ROLE app PASSWORD 'geheim'"]))
+    writeSqlConsoleEntries(schluessel, ["UPDATE users SET password = 'geheim'"])
     localStorage.setItem('theme', 'dark')
 
     await useAuthStore.getState().logout()
 
     expect(localStorage.getItem('msm_sql_history')).toBeNull()
-    expect(localStorage.getItem('msm_sql_favorites')).toBeNull()
-    expect(localStorage.getItem(schluessel.history)).toBeNull()
-    expect(readSqlConsoleEntries(schluessel.favorites)).toHaveLength(1)
+    expect(localStorage.getItem('msm_sql:favorites:1:panel')).toBeNull()
+    expect(localStorage.getItem('msm-pg-studio:verlauf:panel')).toBeNull()
+    expect(localStorage.getItem(schluessel)).toBeNull()
     expect(localStorage.getItem('theme')).toBe('dark')
   })
 
   it('nimmt kaputten Inhalt als leere Liste hin', () => {
-    const schluessel = sqlConsoleStorageKeys(1, 'panel')
-    localStorage.setItem(schluessel.history, '{kein json')
-    expect(readSqlConsoleEntries<string>(schluessel.history)).toEqual([])
+    const schluessel = sqlVerlaufSchluessel(1, 'panel')
+    localStorage.setItem(schluessel, '{kein json')
+    expect(readSqlConsoleEntries(schluessel)).toEqual([])
 
-    localStorage.setItem(schluessel.favorites, '"kein array"')
-    expect(readSqlConsoleEntries(schluessel.favorites)).toEqual([])
+    localStorage.setItem(schluessel, '"kein array"')
+    expect(readSqlConsoleEntries(schluessel)).toEqual([])
   })
 })

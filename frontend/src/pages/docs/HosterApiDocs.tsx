@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, KeyRound, Link2, ListChecks, Plug, Radio, ShieldCheck, Signature, Table2 } from 'lucide-react'
 import { CodeBlock } from '@/components/docs/CodeBlock'
 import { PageHeader } from '@/Singra/UI/PageHeader'
+import { Sprungleiste, SPRUNGZIEL_ABSTAND } from '@/Singra/UI/Sprungleiste'
 
 import { buttonClasses } from '@/Singra/UI'
 /**
@@ -179,13 +180,14 @@ const SECTIONS = [
   ['signature', 'signature'],
   ['handoff', 'handoff'],
   ['admin', 'admin'],
+  ['operations', 'operations'],
 ] as const
 
 function SectionHeading({ id, icon, title }: { id: string; icon: React.ReactNode; title: string }) {
   return (
     <div className="mb-4 flex items-center gap-2">
       <span className="text-primary">{icon}</span>
-      <h2 id={id} className="font-headline text-headline-md text-on-surface">{title}</h2>
+      <h2 id={id} className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>{title}</h2>
     </div>
   )
 }
@@ -227,16 +229,10 @@ export function HosterApiDocs() {
         {t('docsHosterApi.backToDocs')}
       </Link>
 
-      <nav
-        className="sticky top-16 z-10 -mx-1 mb-6 flex gap-2 overflow-x-auto bg-surface/95 px-1 py-2 backdrop-blur"
-        aria-label={t('docsHosterApi.navigationLabel')}
-      >
-        {SECTIONS.map(([id, key]) => (
-          <a key={id} href={`#${id}`} className={buttonClasses('secondary', 'sm', 'shrink-0')}>
-            {t(`docsHosterApi.${key}.title`)}
-          </a>
-        ))}
-      </nav>
+      <Sprungleiste
+        label={t('docsHosterApi.navigationLabel')}
+        ziele={SECTIONS.map(([id, key]) => ({ id, label: t(`docsHosterApi.${key}.title`) }))}
+      />
 
       {/* Ohne angelegte Integration passiert nichts von alledem — das steht
           bewusst ganz oben, weil Self-Hosting der Normalfall ist. */}
