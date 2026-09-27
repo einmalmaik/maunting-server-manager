@@ -50,7 +50,7 @@ describe('PasswordTab (Passwort ändern / festlegen)', () => {
     fireEvent.click(screen.getByRole('button', { name: t('profile.setPasswordSendLink') }))
 
     await waitFor(() => {
-      expect(api).toHaveBeenCalledWith('/auth/set-password', { method: 'POST' })
+      expect(api).toHaveBeenCalledWith('/auth/password-link', { method: 'POST' })
       expect(
         screen.getByText(i18n.t('profile.setPasswordLinkSent', { email: 'test-user@example.invalid' })),
       ).toBeInTheDocument()
@@ -89,6 +89,19 @@ describe('PasswordTab (Passwort ändern / festlegen)', () => {
           passkey: null,
         }),
       })
+    })
+  })
+
+  it('wer das aktuelle Passwort nicht kennt, bekommt ebenfalls den Link', async () => {
+    setupUser(true)
+    vi.mocked(api).mockResolvedValueOnce({ message: 'Link gesendet' })
+    render(<PasswordTab />)
+
+    expect(screen.getByText(t('profile.forgotCurrentPassword'))).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: t('profile.setPasswordSendLink') }))
+
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith('/auth/password-link', { method: 'POST' })
     })
   })
 

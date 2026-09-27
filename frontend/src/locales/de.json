@@ -3501,6 +3501,7 @@
     "setPasswordInfo": "Du meldest dich über einen externen Dienst an und hast noch kein eigenes Passwort. Wir schicken dir einen Link an deine E-Mail-Adresse, darüber legst du es fest. Danach kannst du dich auch mit Benutzername oder E-Mail und Passwort anmelden, deine verknüpften Dienste bleiben.",
     "setPasswordSendLink": "Link senden",
     "setPasswordLinkSent": "Link an {{email}} gesendet. Er gilt eine Stunde.",
+    "forgotCurrentPassword": "Aktuelles Passwort vergessen? Wir schicken dir einen Link an deine E-Mail-Adresse.",
     "currentPassword": "Aktuelles Passwort",
     "newPassword": "Neues Passwort",
     "confirmPassword": "Passwort bestätigen",

@@ -13,8 +13,8 @@ import { Spinner } from '@/components/ui/Spinner'
  * Validiert lokal (Laenge, Match), ruft /auth/change-password,
  * beruecksichtigt den eingerichteten zweiten Faktor: TOTP-Feld oder Passkey-Abfrage
  * beim Speichern — nie beides.
- * Konten ohne Passwort (Social Login) bekommen nur einen Link an ihre E-Mail:
- * ein angemeldetes Token allein setzt kein Passwort.
+ * Konten ohne Passwort (Social Login) und wer das aktuelle Passwort nicht kennt,
+ * bekommen einen Link an ihre E-Mail: ein angemeldetes Token allein setzt kein Passwort.
  */
 export function PasswordTab() {
   const { t } = useTranslation()
@@ -66,7 +66,7 @@ export function PasswordTab() {
     setSuccess('')
     setSubmitting(true)
     try {
-      await api('/auth/set-password', { method: 'POST' })
+      await api('/auth/password-link', { method: 'POST' })
       setSuccess(t('profile.setPasswordLinkSent', { email: user?.email ?? '' }))
     } catch (err: any) {
       setError(err.message)
@@ -180,6 +180,20 @@ export function PasswordTab() {
           </Button>
         </div>
       </form>
+
+      <div className="mt-6 pt-4 border-t border-outline-variant/30 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-on-surface-variant">{t('profile.forgotCurrentPassword')}</p>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={handleSendLink}
+          disabled={submitting}
+          className="inline-flex items-center gap-2 disabled:opacity-50"
+        >
+          <Mail className="w-4 h-4" />
+          {t('profile.setPasswordSendLink')}
+        </Button>
+      </div>
     </div>
   )
 }

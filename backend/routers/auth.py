@@ -1106,23 +1106,19 @@ def get_avatar(filename: str):
 
 
 
-@router.post("/set-password", dependencies=[Depends(auth_rate_limit)])
-async def set_password(
+@router.post("/password-link", dependencies=[Depends(auth_rate_limit)])
+async def password_link(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Konto ohne Passwort (Social Login): Link zum Festlegen an die bestätigte E-Mail.
+    """Link zum Festlegen oder Zurücksetzen des Passworts an die bestätigte E-Mail.
 
-    Ein Access-Token allein setzt kein Passwort, sonst wird ein abgegriffenes
-    Token zu dauerhaftem Zugang. Der Link beweist den Zugriff aufs Postfach,
-    festgelegt wird über /reset-password.
+    Für Konten ohne Passwort (Social Login) und für alle, die ihr aktuelles
+    Passwort nicht kennen. Ein Access-Token allein setzt kein Passwort, sonst
+    wird ein abgegriffenes Token zu dauerhaftem Zugang. Der Link beweist den
+    Zugriff aufs Postfach, festgelegt wird über /reset-password.
     """
-    if user.has_password:
-        raise HTTPException(
-            status_code=400,
-            detail="Konto besitzt bereits ein Passwort. Bitte 'Passwort ändern' nutzen.",
-        )
     if not user.email_verified:
         raise HTTPException(status_code=400, detail="Bitte bestätige zuerst deine E-Mail-Adresse.")
     if not EmailService.is_configured():
@@ -1133,7 +1129,7 @@ async def set_password(
     return {"message": "Link gesendet"}
 
 
-@router.post("/change-password")
+@router.post("/change-password", dependencies=[Depends(auth_rate_limit)])
 async def change_password(
     req: ChangePasswordRequest,
     user: User = Depends(get_current_user),
@@ -1163,14 +1159,25 @@ async def change_password(
     return {"message": "Passwort geändert"}
 
 
-@router.post("/change-email")
+@router.post("/change-email", dependencies=[Depends(auth_rate_limit)])
 async def change_email(
     req: ChangeEmailRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """E-Mail-Adresse ändern. Erfordert 2FA-Code wenn 2FA aktiv."""
+    """E-Mail-Adresse ändern. Erfordert aktuelles Passwort + 2FA-Code wenn 2FA aktiv.
+
+    Ohne Passwort liefe die Übernahme so: Adresse umstellen, Code im eigenen
+    Postfach bestätigen, Passwort per Link setzen. Konten ohne Passwort legen
+    deshalb zuerst eins fest.
+    """
+    if not user.has_password:
+        raise HTTPException(status_code=400, detail="Bitte lege zuerst ein Passwort fest.")
+    if not await run_in_threadpool(
+        AuthService.verify_password, req.current_password, user.password_hash
+    ):
+        raise HTTPException(status_code=401, detail="Aktuelles Passwort falsch")
     if AuthService.get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")
 

@@ -3501,6 +3501,7 @@
     "setPasswordInfo": "You sign in through an external service and don't have a password of your own yet. We'll email you a link to set one. After that you can also sign in with your username or email and password; your linked services stay connected.",
     "setPasswordSendLink": "Send link",
     "setPasswordLinkSent": "Link sent to {{email}}. It is valid for one hour.",
+    "forgotCurrentPassword": "Forgot your current password? We'll email you a link.",
     "currentPassword": "Current password",
     "newPassword": "New password",
     "confirmPassword": "Confirm password",

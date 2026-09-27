@@ -853,7 +853,7 @@ class TestCsrfProtectionOnEndpoints:
 
 
 class TestPasswordManagement:
-    """Passwort festlegen (Social Login) nur per Link an die bestätigte E-Mail."""
+    """Passwort festlegen oder vergessen: nur per Link an die bestätigte E-Mail."""
 
     def _post(self, client, cookies, path, body=None):
         return client.post(
@@ -863,7 +863,7 @@ class TestPasswordManagement:
             headers={"X-CSRF-Token": cookies.get("__Secure-csrf_token")},
         )
 
-    def test_set_password_schickt_link_und_setzt_selbst_nichts(
+    def test_password_link_schickt_link_und_setzt_selbst_nichts(
         self, client: TestClient, regular_user: User, db: Session, user_cookies: dict
     ):
         regular_user.has_password = False
@@ -871,7 +871,7 @@ class TestPasswordManagement:
         hash_vorher = regular_user.password_hash
 
         with patch("routers.auth.EmailService.is_configured", return_value=True),              patch("routers.auth.EmailService.send_password_reset_email", new_callable=AsyncMock) as send:
-            resp = self._post(client, user_cookies, "/api/auth/set-password", {"new_password": "NewSecretPass123!"})
+            resp = self._post(client, user_cookies, "/api/auth/password-link", {"new_password": "NewSecretPass123!"})
         assert resp.status_code == 200
         send.assert_awaited_once()
         assert send.await_args.args[0] == regular_user.email
@@ -893,7 +893,7 @@ class TestPasswordManagement:
         )
         assert login_resp.status_code == 200
 
-    def test_set_password_ohne_bestaetigte_email_abgelehnt(
+    def test_password_link_ohne_bestaetigte_email_abgelehnt(
         self, client: TestClient, regular_user: User, db: Session, user_cookies: dict
     ):
         regular_user.has_password = False
@@ -901,19 +901,21 @@ class TestPasswordManagement:
         db.commit()
 
         with patch("routers.auth.EmailService.is_configured", return_value=True),              patch("routers.auth.EmailService.send_password_reset_email", new_callable=AsyncMock) as send:
-            resp = self._post(client, user_cookies, "/api/auth/set-password")
+            resp = self._post(client, user_cookies, "/api/auth/password-link")
         assert resp.status_code == 400
         send.assert_not_awaited()
 
-    def test_set_password_rejected_if_already_has_password(
+    def test_password_link_auch_wer_sein_passwort_nicht_kennt(
         self, client: TestClient, regular_user: User, db: Session, user_cookies: dict
     ):
         regular_user.has_password = True
         db.commit()
 
-        resp = self._post(client, user_cookies, "/api/auth/set-password")
-        assert resp.status_code == 400
-        assert "bereits ein Passwort" in resp.json()["detail"]
+        with patch("routers.auth.EmailService.is_configured", return_value=True), \
+             patch("routers.auth.EmailService.send_password_reset_email", new_callable=AsyncMock) as send:
+            resp = self._post(client, user_cookies, "/api/auth/password-link")
+        assert resp.status_code == 200
+        assert send.await_args.args[0] == regular_user.email
 
     def test_change_password_ohne_aktuelles_passwort_setzt_nie_eins(
         self, client: TestClient, regular_user: User, db: Session, user_cookies: dict
@@ -952,3 +954,62 @@ class TestPasswordManagement:
         )
         assert resp.status_code == 200
         assert resp.json()["message"] == "Passwort geändert"
+
+
+class TestChangeEmail:
+    """Ein Access-Token allein darf die Adresse nicht umstellen (AGENTS.md Punkt 21)."""
+
+    def _post(self, client, cookies, body):
+        return client.post(
+            "/api/auth/change-email",
+            json=body,
+            cookies=cookies,
+            headers={"X-CSRF-Token": cookies.get("__Secure-csrf_token")},
+        )
+
+    def test_ohne_aktuelles_passwort_abgelehnt(
+        self, client: TestClient, regular_user: User, db: Session, user_cookies: dict
+    ):
+        resp = self._post(client, user_cookies, {"email": "fremd@example.invalid"})
+        assert resp.status_code == 422
+        db.refresh(regular_user)
+        assert regular_user.email == "user1@test.de"
+        assert regular_user.email_verified is True
+
+    def test_falsches_passwort_abgelehnt(
+        self, client: TestClient, regular_user: User, db: Session, user_cookies: dict
+    ):
+        resp = self._post(
+            client, user_cookies,
+            {"email": "fremd@example.invalid", "current_password": "WrongPassword!"},
+        )
+        assert resp.status_code == 401
+        db.refresh(regular_user)
+        assert regular_user.email == "user1@test.de"
+
+    def test_konto_ohne_passwort_legt_zuerst_eins_fest(
+        self, client: TestClient, regular_user: User, db: Session, user_cookies: dict
+    ):
+        regular_user.has_password = False
+        db.commit()
+
+        resp = self._post(
+            client, user_cookies,
+            {"email": "fremd@example.invalid", "current_password": "UserPass123!"},
+        )
+        assert resp.status_code == 400
+        db.refresh(regular_user)
+        assert regular_user.email == "user1@test.de"
+
+    def test_mit_aktuellem_passwort_geaendert(
+        self, client: TestClient, regular_user: User, db: Session, user_cookies: dict
+    ):
+        with patch("routers.auth.EmailService.is_configured", return_value=False):
+            resp = self._post(
+                client, user_cookies,
+                {"email": "neu@example.invalid", "current_password": "UserPass123!"},
+            )
+        assert resp.status_code == 200
+        db.refresh(regular_user)
+        assert regular_user.email == "neu@example.invalid"
+        assert regular_user.email_verified is False
