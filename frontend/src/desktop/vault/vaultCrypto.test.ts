@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import i18n from '@/i18n'
 import {
   SecureBuffer,
   bytesToBase64,
@@ -115,7 +116,10 @@ describe('vaultCrypto', () => {
         },
         configurable: true,
       })
-      await expect(promptBiometricVerification('Test')).rejects.toThrow(/abgebrochen/)
+      // Die Meldung folgt der Oberflächensprache; jsdom meldet `en-US`.
+      await expect(promptBiometricVerification('Test')).rejects.toThrow(
+        i18n.t('auth.passkeyErrors.biometricCancelled'),
+      )
 
       // 4. Other unexpected errors -> fails closed (returns false, not true!)
       Object.defineProperty(navigator, 'credentials', {
