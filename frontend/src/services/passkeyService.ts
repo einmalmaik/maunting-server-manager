@@ -15,6 +15,7 @@
  */
 
 import { api } from '@/api/client'
+import i18n from '@/i18n'
 import { pruefeBiometrieVerfuegbar, verifiziereBiometrie } from '@/desktop/tauri'
 
 async function checkAndroidBiometric(): Promise<boolean> {
@@ -43,7 +44,7 @@ async function promptAndroidBiometric(title?: string): Promise<boolean> {
       msg.includes('User canceled') ||
       msg.includes('NegativeButton')
     ) {
-      throw new Error('Biometrische Authentifizierung abgebrochen.')
+      throw new Error(i18n.t('auth.passkeyErrors.biometricCancelled'))
     }
     return false
   }
@@ -55,7 +56,7 @@ async function promptAndroidBiometric(title?: string): Promise<boolean> {
  * Kein Nachweis für den Server — dafür `passkeyNachweis`. Verwendet für die
  * Tresor-Entsperrung.
  */
-export async function verifyPasskey(title = 'Identität bestätigen'): Promise<boolean> {
+export async function verifyPasskey(title = i18n.t('auth.confirmIdentity')): Promise<boolean> {
   // 1. In Tauri / Desktop: Nutze native Windows Hello API
   try {
     const isWindowsHelloAvailable = await pruefeBiometrieVerfuegbar()
@@ -65,7 +66,7 @@ export async function verifyPasskey(title = 'Identität bestätigen'): Promise<b
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('abgebrochen') || msg.includes('Canceled') || msg.includes('Fehler')) {
-      throw new Error('Biometrische Authentifizierung abgebrochen.')
+      throw new Error(i18n.t('auth.passkeyErrors.biometricCancelled'))
     }
     return false
   }
@@ -108,7 +109,7 @@ export async function verifyPasskey(title = 'Identität bestätigen'): Promise<b
       errorMsg.toLowerCase().includes('cancel') ||
       errorMsg.toLowerCase().includes('abort')
     ) {
-      throw new Error('Biometrische Authentifizierung abgebrochen.')
+      throw new Error(i18n.t('auth.passkeyErrors.biometricCancelled'))
     }
     return false
   }
@@ -195,20 +196,20 @@ export function webauthnVerfuegbar(): boolean {
 function abbruchFehler(err: unknown): Error {
   const name = err && typeof err === 'object' && 'name' in err ? String((err as { name: unknown }).name) : ''
   if (name === 'NotAllowedError' || name === 'AbortError') {
-    return new Error('Passkey-Bestätigung abgebrochen.')
+    return new Error(i18n.t('auth.passkeyErrors.cancelled'))
   }
   if (name === 'InvalidStateError') {
-    return new Error('Dieser Passkey ist bereits eingerichtet.')
+    return new Error(i18n.t('auth.passkeyErrors.alreadyRegistered'))
   }
   if (name === 'SecurityError') {
-    return new Error('Passkeys gehen nur über die Adresse des Panels.')
+    return new Error(i18n.t('auth.passkeyErrors.wrongOrigin'))
   }
   return err instanceof Error ? err : new Error(String(err))
 }
 
 /** Legt einen Passkey an; die Antwort geht an `/auth/2fa/passkey/enable`. */
 export async function passkeyAnlegen(optionen: PasskeyAnlageOptionen): Promise<PasskeyAnlage> {
-  if (!webauthnVerfuegbar()) throw new Error('Passkeys werden hier nicht unterstützt.')
+  if (!webauthnVerfuegbar()) throw new Error(i18n.t('auth.passkeyErrors.unsupported'))
   let credential: PublicKeyCredential | null
   try {
     credential = (await navigator.credentials.create({
@@ -226,14 +227,14 @@ export async function passkeyAnlegen(optionen: PasskeyAnlageOptionen): Promise<P
   } catch (err) {
     throw abbruchFehler(err)
   }
-  if (!credential) throw new Error('Passkey-Erstellung lieferte kein Ergebnis.')
+  if (!credential) throw new Error(i18n.t('auth.passkeyErrors.noCreateResult'))
   const antwort = credential.response as AuthenticatorAttestationResponse
   // `getPublicKey()` liefert den Schlüssel als SPKI — damit braucht der Server
   // kein CBOR. Fehlt er, kann der Browser den Algorithmus nicht ausdrücken.
   const oeffentlich = antwort.getPublicKey?.()
   const authData = antwort.getAuthenticatorData?.()
   if (!oeffentlich || !authData) {
-    throw new Error('Dieser Browser kann den Passkey nicht übergeben. Bitte aktualisieren.')
+    throw new Error(i18n.t('auth.passkeyErrors.browserOutdated'))
   }
   return {
     id: credential.id,
@@ -251,7 +252,7 @@ export async function passkeyAnlegen(optionen: PasskeyAnlageOptionen): Promise<P
 
 /** Lässt die Server-Challenge unterschreiben. */
 export async function passkeyBestaetigen(optionen: PasskeyBestaetigungsOptionen): Promise<PasskeyNachweis> {
-  if (!webauthnVerfuegbar()) throw new Error('Passkeys werden hier nicht unterstützt.')
+  if (!webauthnVerfuegbar()) throw new Error(i18n.t('auth.passkeyErrors.unsupported'))
   let credential: PublicKeyCredential | null
   try {
     credential = (await navigator.credentials.get({
@@ -270,7 +271,7 @@ export async function passkeyBestaetigen(optionen: PasskeyBestaetigungsOptionen)
   } catch (err) {
     throw abbruchFehler(err)
   }
-  if (!credential) throw new Error('Passkey-Bestätigung lieferte kein Ergebnis.')
+  if (!credential) throw new Error(i18n.t('auth.passkeyErrors.noConfirmResult'))
   const antwort = credential.response as AuthenticatorAssertionResponse
   return {
     id: credential.id,

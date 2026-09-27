@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { Login } from './Login'
 import * as client from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
-import '@/i18n'
+import i18n from '@/i18n'
 
 vi.mock('@/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/api/client')>('@/api/client')
@@ -210,5 +210,69 @@ describe('Login — verbrauchter Zwischenschein', () => {
     await screen.findByText('Zu viele Fehlversuche. Bitte erneut anmelden.')
     expect(screen.queryByPlaceholderText('000000')).not.toBeInTheDocument()
     expect(container.querySelector('input[type="password"]')).not.toBeDisabled()
+  })
+})
+
+describe('Login — zweiter Faktor nach Social Login', () => {
+  const OAUTH_ZIEL = '/login?step=oauth_2fa&challenge=c1&slug=github'
+
+  function renderOAuth2FA() {
+    return render(
+      <MemoryRouter initialEntries={[OAUTH_ZIEL]}>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+  }
+
+  function antwort(status: number, daten: unknown = {}) {
+    return { ok: status >= 200 && status < 300, status, type: 'basic', json: async () => daten }
+  }
+
+  beforeEach(() => {
+    vi.mocked(client.api).mockReset()
+    vi.mocked(client.api).mockImplementation(async () => [] as any)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('zeigt eine gescheiterte Faktorabfrage an, statt TOTP anzunehmen', async () => {
+    // Bis 09/2026 galt nach einem 429 still TOTP: Passkey-Konten sahen nur ein Codefeld.
+    const abruf = vi.fn()
+      .mockResolvedValueOnce(antwort(429))
+      .mockResolvedValueOnce(antwort(200, { methode: 'passkey', passkey_options: PASSKEY_OPTIONEN }))
+    vi.stubGlobal('fetch', abruf)
+    renderOAuth2FA()
+
+    await screen.findByText(i18n.t('auth.oauth2faMethodRateLimited'))
+    expect(screen.queryByPlaceholderText('000000')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('common.retry') }))
+    await screen.findByRole('button', { name: i18n.t('auth.loginWithPasskey') })
+    expect(screen.getByRole('button', { name: i18n.t('auth.useBackupCode') })).toBeInTheDocument()
+    expect(abruf).toHaveBeenCalledTimes(2)
+  })
+
+  it('bietet auch TOTP-Konten den Backup-Code an', async () => {
+    const abruf = vi.fn(async (pfad: string) =>
+      pfad.endsWith('/2fa/methode') ? antwort(200, { methode: 'totp' }) : antwort(401, { detail: 'falsch' }),
+    )
+    vi.stubGlobal('fetch', abruf)
+    const { container } = renderOAuth2FA()
+
+    await screen.findByPlaceholderText('000000')
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('auth.useBackupCode') }))
+    const feld = screen.getByPlaceholderText('XXXX-XXXX')
+    expect(feld).toHaveAttribute('maxLength', '12')
+    fireEvent.change(feld, { target: { value: 'ABCD-EFGH' } })
+    fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+
+    await waitFor(() => expect(abruf).toHaveBeenCalledTimes(2))
+    const [pfad, optionen] = abruf.mock.calls[1] as unknown as [string, RequestInit]
+    expect(pfad).toContain('/oauth/github/2fa')
+    expect(JSON.parse(String(optionen.body))).toEqual({ challenge: 'c1', otp_code: 'ABCD-EFGH' })
   })
 })

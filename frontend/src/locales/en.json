@@ -2771,6 +2771,19 @@
     "errors": {
       "refreshUnavailable": "Refresh temporarily unavailable",
       "refreshFailed": "Refresh failed: HTTP {{status}}"
+    },
+    "oauth2faMethodFailed": "Couldn't load the sign-in method.",
+    "oauth2faMethodRateLimited": "Too many attempts. Wait a moment, then try again.",
+    "confirmIdentity": "Confirm your identity",
+    "passkeyErrors": {
+      "cancelled": "Passkey confirmation cancelled.",
+      "alreadyRegistered": "This passkey is already set up.",
+      "wrongOrigin": "Passkeys only work on the panel's own address.",
+      "unsupported": "Passkeys aren't supported here.",
+      "noCreateResult": "Creating the passkey returned no result.",
+      "noConfirmResult": "Passkey confirmation returned no result.",
+      "browserOutdated": "This browser can't hand over the passkey. Please update it.",
+      "biometricCancelled": "Biometric authentication cancelled."
     }
   },
   "setup": {

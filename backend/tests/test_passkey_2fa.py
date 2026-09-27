@@ -624,3 +624,50 @@ def test_migration_schaltet_den_ungeprueften_passkey_ab(tmp_path: Path) -> None:
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+def test_parallele_fehlversuche_am_zwischenschein_zaehlen_alle(client: TestClient, db: Session, owner_user: User, monkeypatch):
+    """Bis 27.09.2026 las jede Anfrage den Zaehler, pruefte den Code und schrieb
+    den Zaehler dann zurueck. Zwei Anfragen zugleich zaehlten als eine, und der
+    Schein blieb nach drei Fehlversuchen gueltig."""
+    import database as db_module
+    from fastapi import HTTPException
+    from routers import auth as auth_router
+    from schemas.auth import LoginRequest
+    from services import login_challenge_service
+    from tests._totp import totp_now
+
+    geheimnis = "JBSWY3DPEHPK3PXP"
+    owner_user.two_factor_secret_encrypted = AuthService.encrypt_secret(geheimnis, aad=f"msm:user:{owner_user.id}:2fa")
+    owner_user.two_factor_enabled = True
+    db.commit()
+    _einmal_captcha(monkeypatch)
+    schein = _anmelden(client, captcha_token="t1")["body"]["login_challenge"]
+
+    echt = AuthService.verify_current_2fa_code
+    pruefungen: list[str] = []
+
+    def pruefen(user, code):
+        pruefungen.append(code)
+        if len(pruefungen) == 1:
+            # Eine zweite Anfrage kommt an, waehrend die erste noch prueft.
+            andere = db_module.SessionLocal()
+            try:
+                zeile = login_challenge_service.lookup_valid(andere, schein, "login_2fa")
+                konto = andere.get(User, owner_user.id)
+                anfrage = LoginRequest(username="owner", password="x", otp_code="000001", login_challenge=schein)
+                try:
+                    auth_router._login_zweiter_faktor(andere, konto, anfrage, None, zeile)
+                except HTTPException:
+                    pass
+            finally:
+                andere.close()
+        return echt(user, code)
+
+    monkeypatch.setattr(AuthService, "verify_current_2fa_code", staticmethod(pruefen))
+
+    assert _anmelden(client, login_challenge=schein, otp_code="000000")["status"] == 401
+    assert _anmelden(client, login_challenge=schein, otp_code="000002")["status"] == 403
+    assert _anmelden(client, login_challenge=schein, otp_code=totp_now(geheimnis))["status"] == 403
+    # Drei Pruefungen, nicht mehr: der vierte Code wird gar nicht erst angesehen.
+    assert len(pruefungen) == 3

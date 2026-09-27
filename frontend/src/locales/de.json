@@ -2771,6 +2771,19 @@
     "errors": {
       "refreshUnavailable": "Refresh temporär nicht möglich",
       "refreshFailed": "Refresh fehlgeschlagen: HTTP {{status}}"
+    },
+    "oauth2faMethodFailed": "Der Anmeldeweg konnte nicht geladen werden.",
+    "oauth2faMethodRateLimited": "Zu viele Versuche. Warte kurz und versuch es dann erneut.",
+    "confirmIdentity": "Identität bestätigen",
+    "passkeyErrors": {
+      "cancelled": "Passkey-Bestätigung abgebrochen.",
+      "alreadyRegistered": "Dieser Passkey ist bereits eingerichtet.",
+      "wrongOrigin": "Passkeys gehen nur über die Adresse des Panels.",
+      "unsupported": "Passkeys werden hier nicht unterstützt.",
+      "noCreateResult": "Passkey-Erstellung lieferte kein Ergebnis.",
+      "noConfirmResult": "Passkey-Bestätigung lieferte kein Ergebnis.",
+      "browserOutdated": "Dieser Browser kann den Passkey nicht übergeben. Bitte aktualisieren.",
+      "biometricCancelled": "Biometrische Authentifizierung abgebrochen."
     }
   },
   "setup": {

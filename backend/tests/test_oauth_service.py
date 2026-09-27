@@ -576,6 +576,40 @@ class TestComplete2FAChallenge:
             assert oauth_service.complete_2fa_challenge(db, token, falsch) is None
         assert oauth_service.complete_2fa_challenge(db, token, totp_now(secret)) is None
 
+    def test_parallele_fehlversuche_zaehlen_alle(self, db: Session, regular_user: User, monkeypatch):
+        """Bis 27.09.2026 las jede Anfrage den Zaehler, pruefte den Code und schrieb
+        den Zaehler dann zurueck. Zwei Anfragen zugleich zaehlten als eine, und die
+        Challenge blieb nach drei Fehlversuchen gueltig."""
+        import database as db_module
+        from services import passkey_service
+        from tests._totp import totp_now
+
+        secret = "JBSWY3DPEHPK3PXP"
+        self._enable_2fa(db, regular_user, secret)
+        provider = _make_provider(db, slug="gh", preset="github")
+        token = oauth_service.create_2fa_challenge(db, regular_user, provider)
+
+        echt = passkey_service.zweiter_faktor_bestaetigt
+        pruefungen: list[str] = []
+
+        def pruefen(sitzung, user, **kw):
+            pruefungen.append(kw["otp_code"])
+            if len(pruefungen) == 1:
+                # Eine zweite Anfrage kommt an, waehrend die erste noch prueft.
+                andere = db_module.SessionLocal()
+                try:
+                    assert oauth_service.complete_2fa_challenge(andere, token, "000001") is None
+                finally:
+                    andere.close()
+            return echt(sitzung, user, **kw)
+
+        monkeypatch.setattr(passkey_service, "zweiter_faktor_bestaetigt", pruefen)
+        assert oauth_service.complete_2fa_challenge(db, token, "000000") is None
+        assert oauth_service.complete_2fa_challenge(db, token, "000002") is None
+        assert oauth_service.complete_2fa_challenge(db, token, totp_now(secret)) is None
+        # Drei Pruefungen, nicht mehr: der vierte Code wird gar nicht erst angesehen.
+        assert len(pruefungen) == 3
+
     def test_backup_code_gilt_wie_beim_passwort_login(self, db: Session, regular_user: User):
         from services.backup_code_service import BackupCodeService
         self._enable_2fa(db, regular_user)

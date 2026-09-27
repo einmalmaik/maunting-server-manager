@@ -995,16 +995,15 @@ def complete_2fa_challenge(
     if user is None or not user.is_active:
         return None
     payload = json.loads(row.payload_json) if row.payload_json else {}
+    nummer = login_challenge_service.versuch_belegen(db, row, OAUTH_2FA_VERSUCHE)
+    if nummer is None:
+        return None
     bestanden = passkey_service.zweiter_faktor_bestaetigt(
         db, user, otp_code=otp_code, passkey=passkey, zweck="oauth_2fa"
     ) or (bool(otp_code) and passkey is None and BackupCodeService.validate_backup_code(db, user.id, otp_code))
     if not bestanden:
-        versuche = int(payload.get("fehlversuche", 0)) + 1
-        if versuche >= OAUTH_2FA_VERSUCHE:
+        if nummer >= OAUTH_2FA_VERSUCHE:
             login_challenge_service.consume(db, row)
-        else:
-            row.payload_json = json.dumps({**payload, "fehlversuche": versuche})
-            db.commit()
         return None
     # Provider aus Payload
     provider_id = payload.get("provider_id")

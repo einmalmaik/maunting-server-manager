@@ -13,7 +13,7 @@ import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { CaptchaWidget, captchaSperrt, type CaptchaStatus } from '@/components/ui/CaptchaWidget'
 import { Shield, ArrowRight, KeyRound, Mail, Check, Fingerprint } from 'lucide-react'
-import { Button, buttonClasses } from '@/Singra/UI'
+import { Button, buttonClasses, Input } from '@/Singra/UI'
 import { Spinner } from '@/components/ui/Spinner'
 import { sicheresZiel } from '@/lib/sicheresZiel'
 import { passkeyBestaetigen, type PasskeyBestaetigungsOptionen } from '@/services/passkeyService'
@@ -426,11 +426,10 @@ export function Login() {
                         ? t('auth.backupCode')
                         : t('auth.otpCode')}
                     </label>
-                    <input
+                    <Input
                       type="text"
                       value={form.otp}
                       onChange={(e) => setForm({ ...form, otp: e.target.value })}
-                      className="msm-input"
                       placeholder={useBackupCode ? 'XXXX-XXXX' : '000000'}
                       required
                       maxLength={useBackupCode ? 12 : 6}
@@ -558,18 +557,28 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [methode, setMethode] = useState<'totp' | 'passkey' | null>(null)
-  // Kein Passkey zur Hand (andere Adresse, verloren): der Backup-Code gilt auch hier.
+  // Kein Authenticator oder Passkey zur Hand: der Backup-Code gilt auch hier.
   const [mitBackupCode, setMitBackupCode] = useState(false)
+  // Scheitert die Abfrage des Faktors, wird nicht geraten: bis 09/2026 galt dann
+  // TOTP, und Passkey-Konten sahen nur ein Codefeld ohne jeden anderen Weg.
+  const [ladeFehler, setLadeFehler] = useState('')
 
   /** Welcher Faktor gilt — und für Passkey-Konten eine frische Challenge. */
   const methodeLaden = async (): Promise<{ optionen: PasskeyBestaetigungsOptionen | null; hinweis: string }> => {
-    const res = await fetch(apiUrl(`/oauth/${slug}/2fa/methode`), {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ challenge }),
-    })
-    if (!res.ok) throw new Error(t('auth.loginFailed'))
+    let res: Response
+    try {
+      res = await fetch(apiUrl(`/oauth/${slug}/2fa/methode`), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ challenge }),
+      })
+    } catch {
+      throw new Error(t('auth.oauth2faMethodFailed'))
+    }
+    if (!res.ok) {
+      throw new Error(t(res.status === 429 ? 'auth.oauth2faMethodRateLimited' : 'auth.oauth2faMethodFailed'))
+    }
     const daten = (await res.json()) as {
       methode: 'totp' | 'passkey' | null
       passkey_options?: PasskeyBestaetigungsOptionen
@@ -579,10 +588,21 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
     return { optionen: daten.passkey_options ?? null, hinweis: daten.hinweis ?? '' }
   }
 
+  const faktorAbfragen = () => {
+    setLadeFehler('')
+    methodeLaden().catch((err: Error) => setLadeFehler(err.message))
+  }
+
   useEffect(() => {
-    methodeLaden().catch(() => setMethode('totp'))
+    faktorAbfragen()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, challenge])
+
+  const backupCodeUmschalten = () => {
+    setMitBackupCode(!mitBackupCode)
+    setOtp('')
+    setError('')
+  }
 
   const handlePasskeyOAuth = async () => {
     setError('')
@@ -661,9 +681,25 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
         </p>
       </div>
 
-      {methode === null && (
+      {methode === null && !ladeFehler && (
         <div className="flex justify-center py-4">
           <Spinner />
+        </div>
+      )}
+
+      {methode === null && ladeFehler && (
+        <div className="space-y-4">
+          <ErrorMessage message={ladeFehler} className="text-sm" />
+          <Button type="button" size="lg" onClick={faktorAbfragen} className="w-full">
+            {t('common.retry')}
+          </Button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="w-full text-sm text-on-surface-variant hover:text-on-surface transition-colors"
+          >
+            {t('auth.goToLogin')}
+          </button>
         </div>
       )}
 
@@ -682,10 +718,7 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
           <ErrorMessage message={error} className="text-sm" />
           <button
             type="button"
-            onClick={() => {
-              setMitBackupCode(true)
-              setError('')
-            }}
+            onClick={backupCodeUmschalten}
             className="text-xs text-secondary hover:text-mint-accent transition-colors flex items-center gap-1"
           >
             <KeyRound className="w-3 h-3" />
@@ -707,18 +740,29 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
           <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
             {mitBackupCode ? t('auth.backupCode') : t('auth.otpCode')}
           </label>
-          <input
+          <Input
             type="text"
             inputMode={mitBackupCode ? 'text' : 'numeric'}
             maxLength={mitBackupCode ? 12 : 6}
             value={otp}
             onChange={(e) => setOtp(e.target.value)}
-            className="msm-input text-center text-2xl tracking-[0.5em] font-mono"
+            className="text-center text-2xl tracking-[0.5em] font-mono"
             placeholder={mitBackupCode ? 'XXXX-XXXX' : '000000'}
             required
             autoFocus
           />
         </div>
+
+        <button
+          type="button"
+          onClick={backupCodeUmschalten}
+          className="text-xs text-secondary hover:text-mint-accent transition-colors flex items-center gap-1"
+        >
+          <KeyRound className="w-3 h-3" />
+          {mitBackupCode
+            ? methode === 'passkey' ? t('auth.usePasskeyInstead') : t('auth.use2FAInstead')
+            : t('auth.useBackupCode')}
+        </button>
 
         <ErrorMessage message={error} className="text-sm" />
 

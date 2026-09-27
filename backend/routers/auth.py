@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import time
@@ -133,17 +132,22 @@ def _zwischenschein(db: Session, req: LoginRequest | LoginVerifyRequest):
     return schein
 
 
-def _schein_fehlversuch(db: Session, schein) -> None:
-    """Zaehlt einen Fehlversuch am Schein; beim letzten wird er verbraucht (403)."""
+def _schein_versuch(db: Session, schein) -> int | None:
+    """Belegt vor der Pruefung eines Codes einen Versuch am Schein (403, wenn keiner frei ist)."""
     if schein is None:
-        return
-    daten = json.loads(schein.payload_json) if schein.payload_json else {}
-    versuche = int(daten.get("fehlversuche", 0)) + 1
-    if versuche >= _ZWISCHENSCHEIN_VERSUCHE:
-        login_challenge_service.consume(db, schein)
+        return None
+    nummer = login_challenge_service.versuch_belegen(db, schein, _ZWISCHENSCHEIN_VERSUCHE)
+    if nummer is None:
         raise HTTPException(status_code=403, detail="Zu viele Fehlversuche. Bitte erneut anmelden.")
-    schein.payload_json = json.dumps({"fehlversuche": versuche})
-    db.commit()
+    return nummer
+
+
+def _schein_fehlversuch(db: Session, schein, nummer: int | None) -> None:
+    """War es der letzte erlaubte Versuch, ist der Schein verbraucht (403)."""
+    if schein is None or nummer is None or nummer < _ZWISCHENSCHEIN_VERSUCHE:
+        return
+    login_challenge_service.consume(db, schein)
+    raise HTTPException(status_code=403, detail="Zu viele Fehlversuche. Bitte erneut anmelden.")
 
 
 def _login_zweiter_faktor(
@@ -160,10 +164,11 @@ def _login_zweiter_faktor(
     if req.passkey is not None:
         if methode != "passkey":
             raise HTTPException(status_code=401, detail="Für dieses Konto gilt kein Passkey.")
+        nummer = _schein_versuch(db, schein)
         try:
             passkey_service.bestaetigen(db, user, req.passkey.model_dump(), "login")
         except passkey_service.PasskeyFehler as e:
-            _schein_fehlversuch(db, schein)
+            _schein_fehlversuch(db, schein, nummer)
             raise HTTPException(status_code=401, detail=str(e))
         return None
     if not req.otp_code:
@@ -188,11 +193,12 @@ def _login_zweiter_faktor(
                 # Kein Passkey fuer diese Adresse: bleibt der Backup-Code.
                 pass
         return rueckfrage
+    nummer = _schein_versuch(db, schein)
     if methode == "totp" and AuthService.verify_current_2fa_code(user, req.otp_code):
         return None
     if BackupCodeService.validate_backup_code(db, user.id, req.otp_code):
         return None
-    _schein_fehlversuch(db, schein)
+    _schein_fehlversuch(db, schein, nummer)
     raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
 
 
