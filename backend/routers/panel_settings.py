@@ -343,11 +343,12 @@ async def test_email(
         raise HTTPException(status_code=503, detail="E-Mail nicht konfiguriert")
 
     body = "Dies ist eine Test-E-Mail vom Maunting Service Manager.\n\nDie E-Mail-Konfiguration funktioniert korrekt."
-    html = EmailService._base_template(
+    html = EmailService._notification_email_html(
+        "",
         "Test-E-Mail",
-        f"""<h1 class=\"headline\" style=\"margin:0 0 12px 0;font-size:24px;font-weight:700;color:{EmailService.CYAN_ACCENT};line-height:1.3;\">Test-E-Mail</h1>
-<p style=\"margin:0 0 20px 0;font-size:15px;color:{EmailService.SECONDARY_TEXT};line-height:1.6;\">Dies ist eine Test-E-Mail vom Maunting Service Manager.</p>
-<p style=\"margin:0 0 20px 0;font-size:15px;color:{EmailService.PRIMARY_TEXT};line-height:1.6;\">Die E-Mail-Konfiguration funktioniert korrekt.</p>"""
+        "dies ist eine Test-E-Mail vom Maunting Service Manager. "
+        "Die E-Mail-Konfiguration funktioniert korrekt.",
+        kategorie="Einstellungen",
     )
 
     ok = await EmailService.send_email(req.to, "Maunting Service Manager — Test", body, html)

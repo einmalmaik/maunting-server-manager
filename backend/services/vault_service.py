@@ -556,6 +556,7 @@ Maunting Service Manager
         "Passwort-Hinweis",
         "Hier ist deine persönliche Gedankenstütze für das Master-Passwort deines Passwort-Managers:",
         f"<strong>{html.escape(raw_hint)}</strong>",
+        kategorie="Passwort-Manager",
     )
 
     success = await EmailService.send_email(user.email, subject, body, html_content)
