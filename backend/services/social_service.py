@@ -145,6 +145,19 @@ def _gegenueber_vergessen(session: Session, _kontext) -> None:
         session.info.pop(_GEGENUEBER_ABLAGE, None)
 
 
+@event.listens_for(Session, "after_commit")
+@event.listens_for(Session, "after_soft_rollback")
+def _gegenueber_nach_transaktion_vergessen(session: Session, *_args) -> None:
+    session.info.pop(_GEGENUEBER_ABLAGE, None)
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _gegenueber_nach_massenaenderung_vergessen(zustand) -> None:
+    # `update(User)` (etwa ein Konto sperren) laeuft am Flush vorbei.
+    if not zustand.is_select:
+        zustand.session.info.pop(_GEGENUEBER_ABLAGE, None)
+
+
 class SocialService:
     """Verwaltet Freundschaften, Privatsphäre, Rich Presence und die blinde E2EE-Relais-Mailbox."""
 
@@ -618,7 +631,9 @@ class SocialService:
 
         Die Karte hängt an der Sitzung, lebt also höchstens eine Anfrage lang,
         und nie länger als `_GEGENUEBER_FRIST` Sekunden. Ändert die Sitzung
-        selbst ein Konto, fällt sie sofort weg (`_gegenueber_vergessen`).
+        selbst ein Konto, schreibt sie an der Einheit vorbei oder endet ihre
+        Transaktion, fällt sie sofort weg (`_gegenueber_vergessen` und
+        Nachbarn).
         """
         ablage = db.info.setdefault(_GEGENUEBER_ABLAGE, {})
         jetzt = time.monotonic()
