@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_serializer, field_validator
 from services.chat_media_validator import MAX_STORY_MEDIA_URL_CHARS
-from schemas.passkey import PasskeyNachweis
+from schemas.passkey import Zweitnachweis
 
 
 class AchievementResponse(BaseModel):
@@ -627,7 +627,7 @@ class E2eeDeviceResetRequest(BaseModel):
     password: str | None = Field(default=None, max_length=512)
     confirmation: str | None = Field(default=None, max_length=64)
     otp_code: str | None = Field(default=None, max_length=32)
-    passkey: PasskeyNachweis | None = None
+    passkey: Zweitnachweis | None = None
 
 
 class SocialProfileResponse(BaseModel):

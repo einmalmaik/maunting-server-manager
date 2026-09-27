@@ -5,7 +5,7 @@ import { Button, Input } from '@/Singra/UI'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Spinner } from '@/components/ui/Spinner'
 import { useAuthStore } from '@/stores/authStore'
-import { passkeyNachweis } from '@/services/passkeyService'
+import { inDerApp, passkeyNachweis } from '@/services/passkeyService'
 import { istOffen } from '@/services/lokaleVersiegelung'
 import type { ExportErgebnis, TresorQuelle } from '@/services/datenexport'
 
@@ -114,7 +114,9 @@ export function DatenexportKarte({ tresor }: Props) {
           />
         )}
         {methode === 'passkey' && (
-          <p className="text-xs text-on-surface-variant">{t('profile.dataExport.passkeyHint')}</p>
+          <p className="text-xs text-on-surface-variant">
+            {inDerApp() ? t('profile.dataExport.passkeyHintApp') : t('profile.dataExport.passkeyHint')}
+          </p>
         )}
         {!brauchtPasswort && !methode && (
           <p className="text-xs text-on-surface-variant">{t('profile.dataExport.withoutSecrets')}</p>

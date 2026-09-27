@@ -5,7 +5,7 @@ Die Grenzen sind grosszuegig, aber endlich: eine Credential-ID hat hoechstens
 1023 Byte, ein RSA-4096-Schluessel knapp 600 Byte DER.
 """
 
-from typing import Literal
+from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, Field
 
@@ -26,6 +26,39 @@ class PasskeyNachweis(BaseModel):
     rawId: str = Field(max_length=1400, pattern=_B64)
     type: Literal["public-key"]
     response: PasskeyNachweisInhalt
+
+
+class BrowserNachweis(BaseModel):
+    """Verweis auf eine Bestaetigung, die im Browser mit dem Passkey geschah.
+
+    Fuer die Desktop-App: ihr Passkey-Konto hat keinen Passkey fuer
+    `tauri.localhost`. Sie oeffnet das Panel im Browser, dort bestaetigt der
+    Passkey, und die App reicht hier nur die Kennung des Vorgangs weiter
+    (`passkey_service.browser_*`).
+    """
+
+    type: Literal["browser"]
+    vorgang: str = Field(min_length=20, max_length=64, pattern=_B64)
+
+
+#: Was vor einer geschuetzten Aktion als zweiter Faktor kommt, wenn das Konto
+#: einen Passkey hat: die Antwort des Browsers oder der Verweis auf eine
+#: Bestaetigung im Browser. Nur fuer angemeldete Zwecke, nie beim Login.
+Zweitnachweis = Annotated[Union[PasskeyNachweis, BrowserNachweis], Field(discriminator="type")]
+
+
+class BrowserVorgangRequest(BaseModel):
+    zweck: str = Field(max_length=32)
+
+
+class BrowserVorgangKennung(BaseModel):
+    vorgang: str = Field(min_length=20, max_length=64, pattern=_B64)
+
+
+class BrowserBestaetigungRequest(BaseModel):
+    vorgang: str = Field(min_length=20, max_length=64, pattern=_B64)
+    zahl: int = Field(ge=10, le=99)
+    passkey: PasskeyNachweis
 
 
 class PasskeyAnlageInhalt(BaseModel):
@@ -52,4 +85,4 @@ class PasskeyOptionenRequest(BaseModel):
 class TwoFactorDisableRequest(BaseModel):
     """Body von `/2fa/disable` fuer Passkey-Konten. TOTP bleibt im Query-Parameter."""
 
-    passkey: PasskeyNachweis | None = None
+    passkey: Zweitnachweis | None = None

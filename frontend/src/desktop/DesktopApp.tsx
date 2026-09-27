@@ -22,6 +22,7 @@ import { api, isNetworkOrOfflineError } from '@/api/client'
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiRunNotice } from '@/components/ai/AiRunNotice'
 import { ServerIncidentNotifier } from '@/components/notifications/ServerIncidentNotifier'
+import { BrowserBestaetigungDialog } from '@/components/BrowserBestaetigungDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { PromptDialog } from '@/components/ui/PromptDialog'
 import { ToastContainer } from '@/components/ui/ToastContainer'
@@ -559,6 +560,7 @@ export function DesktopApp() {
         <SchliessenDialog />
         <ToastContainer />
         <ConfirmDialog />
+        <BrowserBestaetigungDialog />
         <PromptDialog />
         {splash && <Splash onFertig={splashBeenden} />}
       </div>

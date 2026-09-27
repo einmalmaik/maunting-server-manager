@@ -44,7 +44,14 @@ from services import datenexport_service
 from services import device_pairing_service
 from services import passkey_service
 from services import login_challenge_service
-from schemas.passkey import PasskeyAnlage, PasskeyOptionenRequest, TwoFactorDisableRequest
+from schemas.passkey import (
+    BrowserBestaetigungRequest,
+    BrowserVorgangKennung,
+    BrowserVorgangRequest,
+    PasskeyAnlage,
+    PasskeyOptionenRequest,
+    TwoFactorDisableRequest,
+)
 from services.email_verification_service import EmailVerificationService
 from services.jwt_blacklist_service import blacklist_jwt
 from services.backup_code_service import BackupCodeService
@@ -1489,6 +1496,70 @@ def passkey_bestaetigungs_optionen(
         )
     except passkey_service.PasskeyFehler as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Passkey-Bestaetigung im Browser (Desktop-App) ───────────────────────────
+#
+# Der Ablauf steht in `passkey_service` (Abschnitt „Bestaetigen im Browser").
+# Anlegen und Stand fragt die angemeldete App, Optionen und Bestaetigen die
+# Seite `/bestaetigen` im Browser, die nicht angemeldet sein muss: den Nutzer
+# belegt dort der Passkey selbst. Bis auf die Standabfrage unter `auth_rate_limit`.
+
+
+@router.post("/passkey/browser", dependencies=[Depends(auth_rate_limit)])
+def passkey_browser_anlegen(
+    req: BrowserVorgangRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    try:
+        vorgang = passkey_service.browser_vorgang_anlegen(db, user, req.zweck)
+    except passkey_service.PasskeyFehler as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {**vorgang, "url": _panel_adresse(f"/bestaetigen#{vorgang['vorgang']}")}
+
+
+# Ohne `auth_rate_limit`: die App fragt alle 2 s, und die strenge Grenze je IP
+# sperrte sonst nach 20 s auch die Bestaetigung im Browser. Die Route liest nur
+# den eigenen Vorgang; es gilt die allgemeine API-Grenze.
+@router.post("/passkey/browser/stand")
+def passkey_browser_stand(
+    req: BrowserVorgangKennung,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    return {"stand": passkey_service.browser_stand(db, user, req.vorgang)}
+
+
+@router.post("/passkey/browser/optionen", dependencies=[Depends(auth_rate_limit)])
+def passkey_browser_optionen(
+    req: BrowserVorgangKennung,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    try:
+        return passkey_service.browser_optionen(db, req.vorgang, request.headers.get("origin"))
+    except passkey_service.PasskeyFehler as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/passkey/browser/bestaetigen", dependencies=[Depends(auth_rate_limit)])
+def passkey_browser_bestaetigen(
+    req: BrowserBestaetigungRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    try:
+        passkey_service.browser_bestaetigen(db, req.vorgang, req.zahl, req.passkey.model_dump())
+    except passkey_service.PasskeyFehler as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    return {"stand": "bestaetigt"}
+
+
+def _panel_adresse(pfad: str) -> str:
+    """Absolute Adresse der Weboberflaeche; dort gilt der Passkey (RP-ID)."""
+    return settings.panel_url.rstrip("/") + pfad
 
 
 @router.post("/2fa/disable")

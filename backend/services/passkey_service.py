@@ -29,6 +29,7 @@ import base64
 import binascii
 import hashlib
 import json
+import secrets
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlsplit
@@ -363,6 +364,8 @@ def bestaetigen(db: Session, user: User, antwort: dict | None, zweck: str) -> Us
     """
     if not isinstance(antwort, dict):
         raise PasskeyFehler("Passkey-Bestätigung fehlt.")
+    if antwort.get("type") == "browser":
+        return _browser_einloesen(db, user, antwort.get("vorgang"), zweck)
     inhalt = antwort.get("response")
     if antwort.get("type") != "public-key" or not isinstance(inhalt, dict):
         raise PasskeyFehler("Passkey-Antwort unvollständig.")
@@ -429,7 +432,128 @@ def zweiter_faktor_bestaetigt(
     return False
 
 
+# ── Bestaetigen im Browser (fuer die Desktop-App) ─────────────────────────
+#
+# Die App laeuft unter `tauri.localhost`, der Passkey gilt fuer die Adresse
+# des Panels. Die App legt deshalb einen Vorgang an und oeffnet das Panel im
+# Browser; dort bestaetigt der Passkey unter seiner eigenen Adresse. Die App
+# reicht danach nur die Kennung weiter, `bestaetigen` loest sie ein.
+#
+# Gegen Phishing (jemand mit gestohlenem Token schickt dem Opfer den Link)
+# zeigt die App eine Zahl, die im Browser aus dreien gewaehlt wird. Eine
+# falsche Wahl verbraucht den Vorgang. Die Kennung steht im Fragment der
+# Adresse und landet so in keinem Log.
+
+_ZWECK_BROWSER = "passkey_browser"
+
+
+def _browser_vorgang(db: Session, vorgang: Any) -> tuple[LoginChallenge, dict]:
+    if not isinstance(vorgang, str):
+        raise PasskeyFehler("Bestätigung abgelaufen. Bitte in der App neu starten.")
+    row = login_challenge_service.lookup_valid(db, vorgang, _ZWECK_BROWSER)
+    if row is None:
+        raise PasskeyFehler("Bestätigung abgelaufen. Bitte in der App neu starten.")
+    return row, json.loads(row.payload_json or "{}")
+
+
+def _vorgang_umschreiben(db: Session, row: LoginChallenge, werte: dict) -> bool:
+    """Schreibt nur, wenn der Vorgang noch so steht wie gelesen (ein UPDATE)."""
+    getroffen = (
+        db.query(LoginChallenge)
+        .filter(
+            LoginChallenge.id == row.id,
+            LoginChallenge.consumed_at.is_(None),
+            LoginChallenge.payload_json == row.payload_json,
+            LoginChallenge.expires_at > _jetzt(),
+        )
+        .update(werte, synchronize_session=False)
+    )
+    db.commit()
+    return getroffen == 1
+
+
+def browser_vorgang_anlegen(db: Session, user: User, zweck: str) -> dict:
+    """Legt den Vorgang an. Die Kennung und die Zahl sieht nur die App."""
+    if zweck not in ZWECKE_ANGEMELDET:
+        raise PasskeyFehler("Unbekannter Vorgang.")
+    if user.two_factor_method != "passkey":
+        raise PasskeyFehler("Dieses Konto bestätigt nicht mit Passkey.")
+    zahlen = secrets.SystemRandom().sample(range(10, 100), 3)
+    vorgang = login_challenge_service.create_challenge(
+        db,
+        purpose=_ZWECK_BROWSER,
+        user_id=user.id,
+        payload={"zweck": zweck, "zahl": zahlen[0], "auswahl": sorted(zahlen), "bestaetigt": False},
+    )
+    return {"vorgang": vorgang, "zahl": zahlen[0]}
+
+
+def browser_optionen(db: Session, vorgang: Any, origin: str | None) -> dict:
+    """Was die Seite im Browser zeigt: Zweck, drei Zahlen, WebAuthn-Optionen."""
+    row, payload = _browser_vorgang(db, vorgang)
+    if payload.get("bestaetigt"):
+        raise PasskeyFehler("Schon bestätigt. Du kannst zur App zurückkehren.")
+    user = db.get(User, row.user_id)
+    if user is None:
+        raise PasskeyFehler("Bestätigung abgelaufen. Bitte in der App neu starten.")
+    return {
+        "zweck": payload["zweck"],
+        "auswahl": payload["auswahl"],
+        "optionen": bestaetigungs_optionen(db, user, origin, payload["zweck"]),
+    }
+
+
+def browser_bestaetigen(db: Session, vorgang: Any, zahl: int, antwort: dict) -> None:
+    row, payload = _browser_vorgang(db, vorgang)
+    if payload.get("bestaetigt"):
+        raise PasskeyFehler("Schon bestätigt. Du kannst zur App zurückkehren.")
+    if zahl != payload.get("zahl"):
+        _vorgang_umschreiben(db, row, {LoginChallenge.consumed_at: _jetzt()})
+        raise PasskeyFehler("Das war nicht die Zahl aus der App. Starte den Vorgang in der App neu.")
+    user = db.get(User, row.user_id)
+    if user is None:
+        raise PasskeyFehler("Bestätigung abgelaufen. Bitte in der App neu starten.")
+    passkey = bestaetigen(db, user, antwort, payload["zweck"])
+    bestaetigt = json.dumps({**payload, "bestaetigt": True, "passkey_id": passkey.id})
+    if not _vorgang_umschreiben(db, row, {LoginChallenge.payload_json: bestaetigt}):
+        raise PasskeyFehler("Bestätigung abgelaufen. Bitte in der App neu starten.")
+
+
+def browser_stand(db: Session, user: User, vorgang: Any) -> str:
+    """`offen`, `bestaetigt` oder `verfallen` (abgelaufen, verbraucht, fremd)."""
+    try:
+        row, payload = _browser_vorgang(db, vorgang)
+    except PasskeyFehler:
+        return "verfallen"
+    if row.user_id != user.id:
+        return "verfallen"
+    return "bestaetigt" if payload.get("bestaetigt") else "offen"
+
+
+def _browser_einloesen(db: Session, user: User, vorgang: Any, zweck: str) -> UserPasskey:
+    """Loest eine Bestaetigung aus dem Browser ein: einmal, fuer dieses Konto und diesen Zweck."""
+    if zweck not in ZWECKE_ANGEMELDET:
+        raise PasskeyFehler("Diese Bestätigung gilt hier nicht.")
+    row, payload = _browser_vorgang(db, vorgang)
+    if row.user_id != user.id or payload.get("zweck") != zweck or not payload.get("bestaetigt"):
+        raise PasskeyFehler("Bitte zuerst im Browser bestätigen.")
+    if not _vorgang_umschreiben(db, row, {LoginChallenge.consumed_at: _jetzt()}):
+        raise PasskeyFehler("Bestätigung abgelaufen. Bitte in der App neu starten.")
+    passkey = (
+        db.query(UserPasskey)
+        .filter(UserPasskey.id == payload.get("passkey_id"), UserPasskey.user_id == user.id)
+        .first()
+    )
+    if passkey is None:
+        raise PasskeyFehler("Dieser Passkey gehört nicht mehr zu deinem Konto.")
+    return passkey
+
+
 __all__ = [
+    "browser_vorgang_anlegen",
+    "browser_optionen",
+    "browser_bestaetigen",
+    "browser_stand",
     "ZWECKE",
     "ZWECKE_ANGEMELDET",
     "PasskeyFehler",

@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, field_validator
 
-from schemas.passkey import PasskeyNachweis
+from schemas.passkey import PasskeyNachweis, Zweitnachweis
 
 
 class LoginRequest(BaseModel):
@@ -90,21 +90,21 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=8)
     otp_code: str | None = Field(None, pattern=r"^(\d{6}|[A-Z0-9]{4}-[A-Z0-9]{4})$")
-    passkey: PasskeyNachweis | None = None
+    passkey: Zweitnachweis | None = None
 
 
 class ChangeEmailRequest(BaseModel):
     email: str = Field(..., pattern=r"^[^@]+@[^@]+\.[^@]+$")
     current_password: str = Field(..., min_length=1)
     otp_code: str | None = Field(None, pattern=r"^(\d{6}|[A-Z0-9]{4}-[A-Z0-9]{4})$")
-    passkey: PasskeyNachweis | None = None
+    passkey: Zweitnachweis | None = None
 
 
 class DataExportRequest(BaseModel):
     """Nachweis fuer den Datenexport: Passwort oder der eingerichtete zweite Faktor."""
     password: str = Field("", max_length=256)
     otp_code: str = Field("", max_length=16)
-    passkey: PasskeyNachweis | None = None
+    passkey: Zweitnachweis | None = None
 
 
 class DeleteAccountRequest(BaseModel):
@@ -114,7 +114,7 @@ class DeleteAccountRequest(BaseModel):
     # Always required: user must type the exact word "delete". Frontend prevents paste.
     confirmation: str = Field(..., min_length=5)
     otp_code: str | None = Field(None, pattern=r"^\d{6}$")
-    passkey: PasskeyNachweis | None = None
+    passkey: Zweitnachweis | None = None
 
 
     @field_validator("password", mode="before")
