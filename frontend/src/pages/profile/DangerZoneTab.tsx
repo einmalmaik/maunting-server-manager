@@ -5,7 +5,6 @@ import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/api/client'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { AlertTriangle } from 'lucide-react'
-import { useOAuthLinks } from './useOAuthLinks'
 import { Button } from '@/Singra/UI'
 import { passkeyNachweis } from '@/services/passkeyService'
 
@@ -14,15 +13,15 @@ import { Spinner } from '@/components/ui/Spinner'
  * Tab: Gefahrenzone - Konto loeschen.
  *
  * Eigener Tab mit Danger-Variante, damit der Loesch-Workflow nicht versehentlich
- * zwischen den normalen Tabs uebersehen wird. Fuer Social-Only-Accounts
- * (mit OAuth-Links) entfaellt die Passwort-Bestaetigung; das Backend ist dabei
+ * zwischen den normalen Tabs uebersehen wird. Fuer Konten ohne eigenes Passwort
+ * (nur Social Login) entfaellt die Passwort-Bestaetigung; das Backend ist dabei
  * die einzige Wahrheitsquelle.
  */
 export function DangerZoneTab() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
-  const { isSocialOnly, loading } = useOAuthLinks()
+  const isSocialOnly = user?.has_password === false
   const methode = user?.two_factor_enabled ? (user.two_factor_method ?? 'totp') : null
 
   const [deleteState, setDeleteState] = useState<'idle' | 'first-confirmed' | 'deleting' | 'success'>('idle')
@@ -73,10 +72,6 @@ export function DangerZoneTab() {
       {user?.is_owner ? (
         <div className="msm-alert-warning text-sm mb-4">
           {t('profile.ownerCannotDelete')}
-        </div>
-      ) : loading ? (
-        <div className="flex items-center justify-center h-24">
-          <Spinner size="md" className="text-primary" />
         </div>
       ) : (
         <>

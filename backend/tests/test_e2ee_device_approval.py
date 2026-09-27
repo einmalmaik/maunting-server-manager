@@ -276,6 +276,8 @@ def test_neustart_nur_mit_passwort_und_sperrt_die_anderen(client: TestClient, db
 def test_neustart_social_login_mit_reset_bestaetigung(client: TestClient, db: Session, clean_db):
     from models import OAuthProvider, OAuthUserLink
     user = _konto(db, "social_user")
+    user.has_password = False  # Social-Login-Konto: nie ein eigenes Passwort gesetzt
+    db.commit()
     provider = OAuthProvider(
         name="Google",
         slug="google",

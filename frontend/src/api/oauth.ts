@@ -50,6 +50,12 @@ export interface OAuthTestResult {
   message: string
 }
 
+export interface OAuthLinkNachweis {
+  password: string
+  otp_code: string
+  passkey: unknown
+}
+
 export interface OAuthUserLink {
   id: number
   provider_id: number
@@ -103,6 +109,9 @@ export const oauthApi = {
     api<OAuthSwitches>('/oauth/switches', { method: 'PATCH', body: JSON.stringify(body) }),
 
   listMyLinks: () => api<OAuthUserLink[]>('/oauth/me/links'),
+  /** Verknuepfen braucht einen frischen Nachweis; die Antwort nennt die IdP-Adresse. */
+  startLink: (slug: string, nachweis: OAuthLinkNachweis) =>
+    api<{ url: string }>(`/oauth/${slug}/link/start`, { method: 'POST', body: JSON.stringify(nachweis) }),
   unlinkProvider: (providerId: number) =>
     api<{ message: string }>(`/oauth/me/links/${providerId}`, { method: 'DELETE' }),
 }

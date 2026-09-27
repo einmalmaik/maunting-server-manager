@@ -602,30 +602,15 @@ def create_device_pairing(
     Zugang, bei einem Admin auf das ganze Panel. `auth_rate_limit`, weil der
     Endpunkt damit auch ein Passwort prueft.
     """
-    from models import OAuthUserLink
-
-    if user.two_factor_enabled:
-        if not passkey_service.zweiter_faktor_bestaetigt(
-            db, user,
-            otp_code=req.otp_code,
-            passkey=req.passkey.model_dump() if req.passkey else None,
-            zweck="device_pairing",
-        ):
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    "Bitte mit deinem Passkey bestätigen."
-                    if user.two_factor_method == "passkey"
-                    else "Bitte den aktuellen 2FA-Code eingeben."
-                ),
-            )
-    else:
-        has_oauth = (
-            db.query(OAuthUserLink).filter(OAuthUserLink.user_id == user.id).first() is not None
-        )
-        if not has_oauth:
-            if not req.password or not AuthService.verify_password(req.password, user.password_hash):
-                raise HTTPException(status_code=403, detail="Bitte dein Passwort bestätigen.")
+    fehlt = passkey_service.frischer_nachweis_fehlt(
+        db, user,
+        password=req.password,
+        otp_code=req.otp_code,
+        passkey=req.passkey.model_dump() if req.passkey else None,
+        zweck="device_pairing",
+    )
+    if fehlt:
+        raise HTTPException(status_code=403, detail=fehlt)
     einladung, code = device_pairing_service.anlegen(db, user, req.label)
     return {
         "code": code,
@@ -1292,28 +1277,17 @@ def delete_account(
     """Eigenes Konto loeschen.
 
     Zentrale Logik:
-    - Lokale Accounts (keine OAuth-Links): aktuelles Passwort erforderlich.
-    - Social-Only Accounts (haben OAuthUserLink): Passwort-Schritt wird übersprungen
-      (die aktuelle Session beweist Besitz via Social-Login).
+    - Konten mit Passwort: aktuelles Passwort erforderlich, auch mit
+      Social-Verknuepfung (bis 28.09.2026 reichte dann das Token).
+    - Konten ohne Passwort (nur Social Login): Passwort-Schritt entfaellt.
     - 2FA wird **niemals** übersprungen, wenn aktiv (auch nicht bei Social).
     - Immer: exaktes Wort "delete" als confirmation (Frontend verhindert Paste).
     """
-    from models import OAuthUserLink
-
-    # Zentrale Entscheidung: braucht dieser User ein Passwort für Löschung?
-    has_oauth_links = (
-        db.query(OAuthUserLink)
-        .filter(OAuthUserLink.user_id == user.id)
-        .first()
-    ) is not None
-
-    if not has_oauth_links:
-        # Lokaler Account: Passwort zwingend
+    if user.has_password:
         if not req.password:
             raise HTTPException(status_code=400, detail="Passwort erforderlich")
         if not AuthService.verify_password(req.password, user.password_hash):
             raise HTTPException(status_code=401, detail="Passwort ungültig")
-    # else: Social-Only -> Passwort überspringen (wie gewünscht)
 
     # Immer Bestätigungswort "delete" (nicht kopierbar im Frontend)
     if (req.confirmation or "").strip().lower() != "delete":

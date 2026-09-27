@@ -454,10 +454,8 @@ class TestOAuthCallback:
         PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
         _create_provider(db, slug="gh-seq", preset="github")
 
-        # 1) Link-Flow (auth-pflichtig)
-        res_link = client.get(
-            "/api/oauth/gh-seq/link/start", cookies=user_cookies, follow_redirects=False
-        )
+        # 1) Link-Flow (auth-pflichtig, mit Nachweis)
+        res_link = _link_start(client, user_cookies, "gh-seq")
         link_cookie = res_link.cookies.get("__Secure-oauth_state")
         link_payload = oauth_service.unpack_state_cookie(link_cookie)
         assert link_payload["mode"] == oauth_service.OAUTH_MODE_LINK
@@ -688,10 +686,19 @@ class TestLinkedAccounts:
 
 # ── Link-Start (Auth-Pflicht) ─────────────────────────────────────────
 
+def _link_start(client: TestClient, cookies: dict, slug: str, body: dict | None = None):
+    return client.post(
+        f"/api/oauth/{slug}/link/start",
+        json={"password": "UserPass123!"} if body is None else body,
+        cookies=cookies,
+        headers={"X-CSRF-Token": cookies.get("__Secure-csrf_token")},
+    )
+
+
 class TestLinkStart:
     def test_link_start_requires_auth(self, client: TestClient, db: Session):
         _create_provider(db, slug="gh-noauth", preset="github")
-        res = client.get("/api/oauth/gh-noauth/link/start")
+        res = client.post("/api/oauth/gh-noauth/link/start", json={})
         assert res.status_code == 401
 
     def test_link_start_blocked_when_linking_disabled(
@@ -699,17 +706,58 @@ class TestLinkStart:
     ):
         PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "false")
         _create_provider(db, slug="gh-nolink", preset="github")
-        res = client.get("/api/oauth/gh-nolink/link/start", cookies=user_cookies)
+        res = _link_start(client, user_cookies, "gh-nolink")
         assert res.status_code == 403
+
+    def test_link_start_ohne_nachweis_kein_state(
+        self, client: TestClient, user_cookies: dict, db: Session
+    ):
+        """Ein Access-Token allein haengt kein fremdes Social-Konto an (AGENTS.md Punkt 21)."""
+        PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
+        _create_provider(db, slug="gh-bare", preset="github")
+        for body in ({}, {"password": "falsch-geraten-1"}):
+            res = _link_start(client, user_cookies, "gh-bare", body)
+            assert res.status_code == 403, body
+            assert res.cookies.get("__Secure-oauth_state") is None
+        res = client.get("/api/oauth/gh-bare/link/start", cookies=user_cookies, follow_redirects=False)
+        assert res.status_code == 405
+        assert res.cookies.get("__Secure-oauth_state") is None
+
+    def test_link_start_social_konto_ohne_passwort_legt_zuerst_eins_fest(
+        self, client: TestClient, user_cookies: dict, regular_user: User, db: Session
+    ):
+        PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
+        _create_provider(db, slug="gh-nopw", preset="github")
+        regular_user.has_password = False
+        db.commit()
+        res = _link_start(client, user_cookies, "gh-nopw", {})
+        assert res.status_code == 403
+        assert "Passwort fest" in res.json()["detail"]
+
+    def test_link_start_mit_2fa_zaehlt_der_code(
+        self, client: TestClient, user_cookies: dict, regular_user: User, db: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
+        _create_provider(db, slug="gh-2fa", preset="github")
+        regular_user.two_factor_enabled = True
+        regular_user.two_factor_secret_encrypted = "totp-geheimnis"
+        db.commit()
+        monkeypatch.setattr(
+            AuthService, "verify_current_2fa_code", staticmethod(lambda _u, code: code == "123456")
+        )
+        assert _link_start(client, user_cookies, "gh-2fa", {"password": "UserPass123!"}).status_code == 403
+        res = _link_start(client, user_cookies, "gh-2fa", {"otp_code": "123456"})
+        assert res.status_code == 200
 
     def test_link_start_succeeds_when_enabled(
         self, client: TestClient, user_cookies: dict, db: Session
     ):
         PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
         p = _create_provider(db, slug="gh-ok", preset="github")
-        res = client.get("/api/oauth/gh-ok/link/start", cookies=user_cookies, follow_redirects=False)
-        assert res.status_code == 302
-        assert "github.com/login/oauth/authorize" in res.headers["location"]
+        res = _link_start(client, user_cookies, "gh-ok")
+        assert res.status_code == 200
+        assert "github.com/login/oauth/authorize" in res.json()["url"]
         # State-Cookie traegt mode=link + user_id
         cookie = res.cookies.get("__Secure-oauth_state")
         assert cookie is not None

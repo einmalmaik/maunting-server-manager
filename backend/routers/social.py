@@ -13,7 +13,7 @@ from dependencies import (
     ws_session_familie,
     ws_subprotokoll,
 )
-from models import ChatGroup, ChatGroupConfig, OAuthUserLink, User
+from models import ChatGroup, ChatGroupConfig, User
 from schemas.chat_media import (
     ChatMediaUploadRequest,
     ChatMediaUploadResponse,
@@ -421,8 +421,8 @@ def reset_own_e2ee_devices(
     Verifikation:
     - Bei aktivem 2FA: der eingerichtete Faktor — otp_code (TOTP) oder passkey.
     - Ohne 2FA:
-      - Social-Only Accounts (OAuthUserLink): Bestätigungswort RESET.
-      - Lokale Passwort-Accounts: Passwort-Prüfung.
+      - Konten ohne Passwort (nur Social Login): Bestätigungswort RESET.
+      - Konten mit Passwort: Passwort-Prüfung, auch mit Social-Verknüpfung.
     """
     if user.two_factor_enabled:
         from services import passkey_service
@@ -435,13 +435,7 @@ def reset_own_e2ee_devices(
         ):
             raise HTTPException(status_code=403, detail="2FA-Bestätigung erforderlich oder ungültig")
     else:
-        has_oauth_links = (
-            db.query(OAuthUserLink)
-            .filter(OAuthUserLink.user_id == user.id)
-            .first()
-        ) is not None
-
-        if has_oauth_links:
+        if not user.has_password:
             if (req.confirmation or "").strip().upper() != "RESET":
                 raise HTTPException(status_code=400, detail="Bestätigung RESET erforderlich")
         else:

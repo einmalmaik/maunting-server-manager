@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from schemas.passkey import PasskeyNachweis
+
 # ── Anzeige-Presets (fuer UI-Dropdowns) ────────────────────────────────
 
 OAUTH_PRESETS: tuple[str, ...] = (
@@ -103,3 +105,13 @@ class OAuthProviderPublic(BaseModel):
 class OAuthTestResult(BaseModel):
     ok: bool
     message: str
+
+
+# ── Verknuepfen ────────────────────────────────────────────────────────
+
+class OAuthLinkStartRequest(BaseModel):
+    """Frischer Nachweis vor dem Verknuepfen: Passwort oder der eingerichtete zweite Faktor."""
+
+    password: str = Field("", max_length=256)
+    otp_code: str = Field("", max_length=16)
+    passkey: PasskeyNachweis | None = None

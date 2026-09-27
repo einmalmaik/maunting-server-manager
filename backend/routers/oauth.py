@@ -25,7 +25,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
@@ -37,6 +37,7 @@ from middleware.rate_limit import auth_rate_limit
 from models import OAuthProvider, OAuthUserLink, User
 from schemas.passkey import PasskeyNachweis
 from schemas.oauth import (
+    OAuthLinkStartRequest,
     OAuthProviderCreate,
     OAuthProviderPublic,
     OAuthProviderUpdate,
@@ -765,14 +766,19 @@ async def unlink_my_account(
     return {"message": "Verknuepfung aufgehoben"}
 
 
-@router.get("/{slug}/link/start")
+@router.post("/{slug}/link/start", dependencies=[Depends(auth_rate_limit)])
 def oauth_link_start(
     slug: str,
+    req: OAuthLinkStartRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
 ) -> Response:
     """Startet einen Linking-Flow fuer den aktuell eingeloggten User.
 
+    Eine Verknuepfung ist ein neuer Zugang ohne Ablauf, deshalb vorher ein
+    frischer Nachweis. Nur mit ihm entsteht das State-Cookie, das der Callback
+    verlangt. Die Antwort traegt die IdP-Adresse, der Browser geht selbst hin.
     Der IdP redirected am Ende auf den geteilten ``/{slug}/callback`` — der
     Mode wird ueber das (DIS-encrypted) State-Cookie transportiert.
     """
@@ -781,6 +787,15 @@ def oauth_link_start(
     provider = oauth_service.get_provider_by_slug(db, slug)
     if provider is None or not provider.enabled:
         raise HTTPException(status_code=404, detail="Provider nicht verfuegbar")
+    fehlt = passkey_service.frischer_nachweis_fehlt(
+        db, user,
+        password=req.password,
+        otp_code=req.otp_code,
+        passkey=req.passkey.model_dump() if req.passkey else None,
+        zweck="oauth_link",
+    )
+    if fehlt:
+        raise HTTPException(status_code=403, detail=fehlt)
     try:
         auth_url, encrypted = oauth_service.build_authorization_url(
             db, provider, mode=oauth_service.OAUTH_MODE_LINK, user=user
@@ -795,7 +810,8 @@ def oauth_link_start(
         "OAuth link/start (slug=%s) → IdP=%s (cookie_domain=%r, panel_url=%s)",
         slug, idp_host, cookie_domain or "(host-only)", settings.panel_url,
     )
-    resp = _no_cache_redirect(auth_url)
+    resp = JSONResponse({"url": auth_url})
+    resp.headers["Cache-Control"] = "no-store"
     _set_oauth_state_cookie(resp, encrypted)
     return resp
 

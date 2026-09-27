@@ -1,16 +1,18 @@
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
-import { useEffect } from 'react'
-import { apiUrl } from '@/config/api'
-import { oauthApi, type OAuthUserLink } from '@/api/oauth'
+import { useEffect, useState } from 'react'
+import { oauthApi, type OAuthProviderPublic, type OAuthUserLink } from '@/api/oauth'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
-import { Link2, Unlink } from 'lucide-react'
+import { Fingerprint, Link2, Unlink } from 'lucide-react'
 import { useOAuthLinks } from './useOAuthLinks'
 import { ConnectedMailboxesSection } from './ConnectedMailboxesSection'
 import { ConnectedCalendarsSection } from './ConnectedCalendarsSection'
-import { Button, buttonClasses } from '@/Singra/UI'
+import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input } from '@/Singra/UI'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Spinner } from '@/components/ui/Spinner'
+import { useAuthStore } from '@/stores/authStore'
+import { passkeyNachweis } from '@/services/passkeyService'
 /**
  * Tab: Verknuepfte Accounts & Dienste.
  * Enthält:
@@ -22,6 +24,7 @@ export function LinkedAccountsTab() {
   const { t, i18n } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const { oauthLinks, oauthAvailable, loading, reload } = useOAuthLinks()
+  const [linkZiel, setLinkZiel] = useState<OAuthProviderPublic | null>(null)
 
   // URL-Param-Auswertung fuer OAuth-Linking-Callback
   useEffect(() => {
@@ -132,14 +135,16 @@ export function LinkedAccountsTab() {
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {unlinkedProviders.map((p) => (
-                    <a
+                    <Button
                       key={p.slug}
-                      href={apiUrl(`/oauth/${p.slug}/link/start`)}
-                      className={buttonClasses('secondary')}
+                      variant="secondary"
+                      type="button"
+                      onClick={() => setLinkZiel(p)}
+                      className="inline-flex items-center gap-1.5"
                     >
                       <Link2 className="w-3.5 h-3.5" />
                       {p.name}
-                    </a>
+                    </Button>
                   ))}
                 </div>
               </div>
@@ -148,11 +153,112 @@ export function LinkedAccountsTab() {
         )}
       </div>
 
+      {linkZiel && (
+        <VerknuepfenDialog key={linkZiel.slug} provider={linkZiel} onClose={() => setLinkZiel(null)} />
+      )}
+
       {/* Connected Mailboxes for AI */}
       <ConnectedMailboxesSection />
 
       {/* Connected Calendars for AI */}
       <ConnectedCalendarsSection />
     </div>
+  )
+}
+
+/**
+ * Nachweis vor dem Verknuepfen: bei 2FA der eingerichtete Faktor, sonst das
+ * Passwort. Eine Verknuepfung ist ein Zugang ohne Ablauf, ein angemeldetes
+ * Token allein reicht dafuer nicht. Konten ohne beides legen zuerst ein
+ * Passwort fest.
+ */
+function VerknuepfenDialog({ provider, onClose }: { provider: OAuthProviderPublic; onClose: () => void }) {
+  const { t } = useTranslation()
+  const user = useAuthStore((s) => s.user)
+  const methode = user?.two_factor_enabled ? (user.two_factor_method ?? 'totp') : null
+  const ohneNachweis = !methode && user?.has_password === false
+  const [passwort, setPasswort] = useState('')
+  const [code, setCode] = useState('')
+  const [laeuft, setLaeuft] = useState(false)
+  const [fehler, setFehler] = useState('')
+
+  const starten = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setFehler('')
+    setLaeuft(true)
+    try {
+      // Der Passkey zuerst: der Browser verlangt die Abfrage nah am Klick.
+      const passkey = methode === 'passkey' ? await passkeyNachweis('oauth_link') : null
+      const { url } = await oauthApi.startLink(provider.slug, {
+        password: methode ? '' : passwort,
+        otp_code: methode === 'totp' ? code : '',
+        passkey,
+      })
+      window.location.assign(url)
+    } catch (err) {
+      setFehler(err instanceof Error ? err.message : String(err))
+      setLaeuft(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(offen) => { if (!offen) onClose() }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t('profile.linkedAccounts.linkTitle', { provider: provider.name })}</DialogTitle>
+          <DialogDescription>{t('profile.linkedAccounts.linkProofHint')}</DialogDescription>
+        </DialogHeader>
+        {ohneNachweis ? (
+          <>
+            <p className="p-6 text-sm text-on-surface-variant">{t('profile.linkedAccounts.linkNeedsPassword')}</p>
+            <DialogFooter>
+              <Button variant="secondary" type="button" onClick={onClose}>
+                {t('common.close')}
+              </Button>
+            </DialogFooter>
+          </>
+        ) : (
+          <form onSubmit={starten}>
+            <div className="p-6 space-y-4">
+              {methode === 'totp' ? (
+                <Input
+                  id="verknuepfen-otp"
+                  label={t('auth.otpCode')}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="000000"
+                  required
+                  disabled={laeuft}
+                />
+              ) : methode === 'passkey' ? (
+                <p className="text-sm text-on-surface-variant">{t('profile.linkedAccounts.linkPasskeyHint')}</p>
+              ) : (
+                <PasswordInput
+                  id="verknuepfen-passwort"
+                  label={t('profile.currentPassword')}
+                  value={passwort}
+                  onChange={(e) => setPasswort(e.target.value)}
+                  autoComplete="current-password"
+                  required
+                  disabled={laeuft}
+                />
+              )}
+              {fehler && <div className="msm-alert-error text-sm" role="alert">{fehler}</div>}
+            </div>
+            <DialogFooter>
+              <Button variant="secondary" type="button" onClick={onClose} disabled={laeuft}>
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" disabled={laeuft} className="inline-flex items-center gap-2">
+                {laeuft ? <Spinner /> : methode === 'passkey' ? <Fingerprint className="w-4 h-4" /> : <Link2 className="w-4 h-4" />}
+                {t('profile.linkedAccounts.linkContinue')}
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }

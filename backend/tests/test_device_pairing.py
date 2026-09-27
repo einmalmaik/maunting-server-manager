@@ -117,6 +117,38 @@ class TestNachweis:
             )
             assert antwort.status_code == 403, rumpf
 
+    def test_social_verknuepfung_ersetzt_das_passwort_nicht(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        """Bis 28.09.2026 uebersprang die Kopplung bei jedem Konto mit OAuth-Link
+        die Pruefung, auch wenn es ein Passwort hatte."""
+        from models import OAuthProvider, OAuthUserLink
+
+        _mit_chatrecht(db, regular_user)
+        provider = OAuthProvider(slug="gh-kopplung", name="GitHub", preset="github", client_id="cid", enabled=True)
+        db.add(provider)
+        db.commit()
+        db.add(OAuthUserLink(
+            provider_id=provider.id, user_id=regular_user.id,
+            subject=OAuthUserLink._hash_subject("sub-kopplung"),
+        ))
+        db.commit()
+
+        antwort = client.post(
+            "/api/auth/devices/pairing", json={"label": "x"},
+            cookies=user_cookies, headers=_kopf(user_cookies),
+        )
+        assert antwort.status_code == 403
+
+        regular_user.has_password = False
+        db.commit()
+        antwort = client.post(
+            "/api/auth/devices/pairing", json={"label": "x"},
+            cookies=user_cookies, headers=_kopf(user_cookies),
+        )
+        assert antwort.status_code == 403
+        assert "Passwort fest" in antwort.json()["detail"]
+
     def test_mit_2fa_zaehlt_der_code(
         self, client: TestClient, db: Session, regular_user: User, user_cookies: dict, monkeypatch
     ):

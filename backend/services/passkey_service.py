@@ -51,6 +51,7 @@ from services import login_challenge_service
 ZWECKE_ANGEMELDET = frozenset({
     "2fa_disable", "device_pairing", "e2ee_reset",
     "password_change", "email_change", "account_delete", "data_export",
+    "oauth_link",
 })
 ZWECKE = ZWECKE_ANGEMELDET | {"login", "oauth_2fa"}
 
@@ -429,6 +430,35 @@ def zweiter_faktor_bestaetigt(
     return False
 
 
+def frischer_nachweis_fehlt(
+    db: Session, user: User, *, password: str | None, otp_code: str | None,
+    passkey: dict | None, zweck: str,
+) -> str | None:
+    """Vor einem neuen Zugang (Geraetekopplung, Social-Verknuepfung): bei 2FA
+    der eingerichtete Faktor, sonst das Passwort. Liefert den Grund, wenn der
+    Nachweis fehlt, sonst None.
+
+    Eine Social-Verknuepfung ist kein Nachweis. Bis 28.09.2026 uebersprang die
+    Kopplung die Pruefung fuer jedes Konto mit OAuth-Link, auch wenn es ein
+    Passwort hatte, und das Verknuepfen fragte gar nicht. Ein abgegriffenes
+    Token wurde so zu dauerhaftem Zugang. Ein Konto ohne Passwort und ohne 2FA
+    hat nichts, womit es sich ausweisen kann: es legt zuerst ein Passwort fest.
+    """
+    from services.auth_service import AuthService
+
+    if user.two_factor_enabled:
+        if zweiter_faktor_bestaetigt(db, user, otp_code=otp_code, passkey=passkey, zweck=zweck):
+            return None
+        if user.two_factor_method == "passkey":
+            return "Bitte mit deinem Passkey bestätigen."
+        return "Bitte den aktuellen 2FA-Code eingeben."
+    if not user.has_password:
+        return "Bitte lege zuerst ein Passwort fest."
+    if not password or not AuthService.verify_password(password, user.password_hash):
+        return "Bitte dein Passwort bestätigen."
+    return None
+
+
 __all__ = [
     "ZWECKE",
     "ZWECKE_ANGEMELDET",
@@ -438,6 +468,7 @@ __all__ = [
     "anlege_optionen",
     "anlegen",
     "bestaetigungs_optionen",
+    "frischer_nachweis_fehlt",
     "bestaetigen",
     "zweiter_faktor_bestaetigt",
 ]

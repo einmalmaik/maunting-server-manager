@@ -5,7 +5,6 @@ import { useTranslation } from 'react-i18next'
 import { formatRelativeTime } from '@/utils/timeFormat'
 
 import { api } from '@/api/client'
-import { oauthApi } from '@/api/oauth'
 import { getE2eeGeraete } from '@/api/social'
 import { API_ORIGIN } from '@/config/api'
 import { Input } from '@/components/ui/Input'
@@ -70,7 +69,8 @@ export function AiDevicePairingCard() {
     s.user?.two_factor_enabled ? (s.user.two_factor_method ?? 'totp') : null,
   )
   const [nachweis, setNachweis] = useState('')
-  const [isSocialAccount, setIsSocialAccount] = useState(false)
+  // Ohne Passwort und ohne 2FA gibt es keinen Nachweis: erst ein Passwort festlegen.
+  const ohnePasswort = useAuthStore((s) => s.user?.has_password === false)
   const [code, setCode] = useState<string | null>(null)
   const [qrDataUri, setQrDataUri] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -85,10 +85,6 @@ export function AiDevicePairingCard() {
 
   useEffect(() => {
     laden()
-    oauthApi
-      .listMyLinks()
-      .then((links) => setIsSocialAccount(Array.isArray(links) && links.length > 0))
-      .catch(() => setIsSocialAccount(false))
   }, [])
 
   /**
@@ -178,7 +174,7 @@ export function AiDevicePairingCard() {
         payload.passkey = await passkeyNachweis('device_pairing')
       } else if (methode === 'totp') {
         payload.otp_code = nachweis.trim()
-      } else if (!isSocialAccount) {
+      } else {
         payload.password = nachweis
       }
 
@@ -426,11 +422,7 @@ export function AiDevicePairingCard() {
                   {t('ai.profile.devicesPair')}
                 </Button>
               </>
-            ) : isSocialAccount ? (
-              <Button onClick={() => void koppeln()} disabled={busy}>
-                {t('ai.profile.devicesPair')}
-              </Button>
-            ) : (
+            ) : ohnePasswort ? null : (
               <>
                 <div className="min-w-[10rem] flex-1">
                   <PasswordInput
@@ -449,7 +441,7 @@ export function AiDevicePairingCard() {
             )}
           </div>
           <p className="msm-field-help">
-            {isSocialAccount && !methode
+            {ohnePasswort && !methode
               ? t('ai.profile.devicesSocialHint')
               : t('ai.profile.devicesProofHint')}
           </p>

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { CheckCircle2, Clock, Fingerprint, ShieldCheck, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { oauthApi } from '@/api/oauth'
 import { getE2eeGeraete, type E2eeGeraetItem } from '@/api/social'
 import { Button } from '@/Singra/UI'
 import {
@@ -38,6 +37,8 @@ import { toast } from '@/stores/toastStore'
 export function E2eeGeraeteCard() {
   const { t } = useTranslation()
   const user = useAuthStore((s) => s.user)
+  // Ohne eigenes Passwort (nur Social Login) bestaetigt das Wort RESET.
+  const isSocialAccount = user?.has_password === false
   const eigeneId = user?.id
   const [geraete, setGeraete] = useState<E2eeGeraetItem[] | null>(null)
   const [sicherheitsnummern, setSicherheitsnummern] = useState<Record<string, string>>({})
@@ -47,7 +48,6 @@ export function E2eeGeraeteCard() {
   const [passwort, setPasswort] = useState('')
   const [confirmationWord, setConfirmationWord] = useState('')
   const [totpCode, setTotpCode] = useState('')
-  const [isSocialAccount, setIsSocialAccount] = useState(false)
 
   const laden = useCallback(async () => {
     if (!eigeneId) return
@@ -77,13 +77,6 @@ export function E2eeGeraeteCard() {
   useEffect(() => {
     void laden()
   }, [laden])
-
-  useEffect(() => {
-    oauthApi
-      .listMyLinks()
-      .then((links) => setIsSocialAccount(Array.isArray(links) && links.length > 0))
-      .catch(() => setIsSocialAccount(false))
-  }, [])
 
   useEffect(() => {
     eigenesGeraet()
