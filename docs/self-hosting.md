@@ -1713,6 +1713,15 @@ MSM betreibt Docker rootless, und rootless Docker veröffentlicht große
 Portbereiche nicht sinnvoll. Ist 7882/UDP zu, funktionieren Anrufe weiterhin
 über 7881/TCP, mit etwas mehr Verzögerung.
 
+Die Ports dürfen auf dem Host nicht schon belegt sein, etwa durch einen zweiten
+LiveKit aus einem anderen Projekt. Dann scheitert der Container beim Start mit
+`slirp_add_hostfwd failed`. `install.sh` und `update.sh` fragen nach dem Start
+`127.0.0.1:7880` ab und melden „bereit“ erst, wenn er antwortet. Antwortet er
+nicht, nennt der Lauf die Prozesse, die auf 7880 bis 7882 lauschen. Die Units
+starten den Container mit `--force-recreate` jedes Mal frisch. Ohne das startete
+ein zweiter Versuch den liegengebliebenen Container ohne Ports, und systemd
+meldete trotzdem „Started“.
+
 Der Reverse-Proxy braucht `handle_path /livekit/*` auf `localhost:7880` und
 muss dort WebSocket-Upgrades durchlassen. Die von `install.sh` erzeugte
 Caddy-Site tut das bereits.

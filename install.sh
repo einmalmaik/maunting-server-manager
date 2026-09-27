@@ -1857,6 +1857,10 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+    # --force-recreate: scheitert der Start an einem belegten Port, laesst
+    # Docker den angelegten Container liegen. Der naechste Versuch startete ihn
+    # dann ohne jede Portfreigabe, und systemd meldete „Started“ (27.09.2026).
+    # Frisch angelegt scheitert jeder Versuch sichtbar, bis der Port frei ist.
     # ── SearXNG Search Sidecar Service ──
     if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
         cat > /etc/systemd/system/msm-searxng.service <<EOF
@@ -1872,7 +1876,7 @@ Group=$MSM_USER
 WorkingDirectory=$MSM_DIR/searxng-sidecar
 Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ExecStart=/usr/bin/docker compose up
+ExecStart=/usr/bin/docker compose up --force-recreate
 ExecStop=/usr/bin/docker compose down
 Restart=on-failure
 RestartSec=5
@@ -1899,7 +1903,7 @@ Group=$MSM_USER
 WorkingDirectory=$MSM_DIR/livekit-sidecar
 Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ExecStart=/usr/bin/docker compose up
+ExecStart=/usr/bin/docker compose up --force-recreate
 ExecStop=/usr/bin/docker compose down
 Restart=on-failure
 RestartSec=5
@@ -2225,7 +2229,29 @@ if $SYSTEMD_AVAILABLE; then
         log "Starte LiveKit Media Sidecar..."
         systemctl restart msm-livekit.service 2>/dev/null \
             || systemctl start msm-livekit.service 2>/dev/null || true
-        ok "LiveKit Sidecar bereit."
+        # Erst pruefen, dann „bereit“ sagen: systemctl gelingt auch, wenn der
+        # Container darin an belegten Ports scheitert. Am 27.09.2026 hielt ein
+        # fremder LiveKit 7881/7882, und nichts im Lauf sagte das.
+        _livekit_ok=false
+        for _ in $(seq 1 15); do
+            if curl -fsS --max-time 2 http://127.0.0.1:7880 >/dev/null 2>&1; then
+                _livekit_ok=true
+                break
+            fi
+            sleep 1
+        done
+        if [[ "$_livekit_ok" == true ]]; then
+            ok "LiveKit Sidecar bereit."
+        else
+            warn "LiveKit Sidecar antwortet nicht auf 127.0.0.1:7880. Anrufe im Messenger gehen so nicht."
+            _livekit_belegt=$(ss -Hlntup '( sport = :7880 or sport = :7881 or sport = :7882 )' 2>/dev/null || true)
+            if [[ -n "$_livekit_belegt" ]]; then
+                warn "  Auf seinen Ports lauscht bereits:"
+                while IFS= read -r _zeile; do warn "    $_zeile"; done <<< "$_livekit_belegt"
+                warn "  Diesen Dienst anhalten oder auf andere Ports legen, dann: systemctl restart msm-livekit"
+            fi
+            warn "  Ursache im Journal: journalctl -u msm-livekit -n 30"
+        fi
     fi
 
     # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)

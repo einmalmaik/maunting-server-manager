@@ -4153,7 +4153,7 @@
       },
       "ports": {
         "title": "Ports",
-        "body": "7880/TCP bound to 127.0.0.1 for signalling, forwarded by Caddy under /livekit. 7882/UDP for media and 7881/TCP as a fallback when UDP is blocked. A single UDP port instead of a large range, because MSM runs Docker rootless."
+        "body": "7880/TCP bound to 127.0.0.1 for signalling, forwarded by Caddy under /livekit. 7882/UDP for media and 7881/TCP as a fallback when UDP is blocked. A single UDP port instead of a large range, because MSM runs Docker rootless. If another service already holds these ports, such as a second LiveKit, the sidecar does not start. update.sh checks this after starting and names the process."
       },
       "address": {
         "title": "Address for media",

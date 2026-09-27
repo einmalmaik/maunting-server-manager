@@ -4153,7 +4153,7 @@
       },
       "ports": {
         "title": "Ports",
-        "body": "7880/TCP nur auf 127.0.0.1 für die Signalisierung, von Caddy unter /livekit durchgereicht. 7882/UDP für die Medien und 7881/TCP als Rückfall, wenn UDP blockiert ist. Ein einzelner UDP-Port statt eines großen Bereichs, weil MSM Docker rootless betreibt."
+        "body": "7880/TCP nur auf 127.0.0.1 für die Signalisierung, von Caddy unter /livekit durchgereicht. 7882/UDP für die Medien und 7881/TCP als Rückfall, wenn UDP blockiert ist. Ein einzelner UDP-Port statt eines großen Bereichs, weil MSM Docker rootless betreibt. Belegt ein anderer Dienst diese Ports, etwa ein zweiter LiveKit, startet der Sidecar nicht. update.sh prüft das nach dem Start und nennt den Prozess."
       },
       "address": {
         "title": "Adresse für die Medien",
