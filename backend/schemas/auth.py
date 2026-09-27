@@ -86,15 +86,8 @@ class PasswordResetConfirm(BaseModel):
     captcha_token: str | None = None
 
 
-class SetPasswordRequest(BaseModel):
-    """Initiales Setzen eines Passworts für Konten ohne bisheriges Passwort (z. B. OAuth)."""
-    new_password: str = Field(..., min_length=8)
-    otp_code: str | None = Field(None, pattern=r"^(\d{6}|[A-Z0-9]{4}-[A-Z0-9]{4})$")
-    passkey: PasskeyNachweis | None = None
-
-
 class ChangePasswordRequest(BaseModel):
-    current_password: str | None = Field(None)
+    current_password: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=8)
     otp_code: str | None = Field(None, pattern=r"^(\d{6}|[A-Z0-9]{4}-[A-Z0-9]{4})$")
     passkey: PasskeyNachweis | None = None

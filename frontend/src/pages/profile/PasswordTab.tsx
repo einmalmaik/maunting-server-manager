@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/api/client'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { KeyRound, Save } from 'lucide-react'
+import { KeyRound, Mail, Save } from 'lucide-react'
 import { Button } from '@/Singra/UI'
 import { passkeyNachweis } from '@/services/passkeyService'
 
@@ -13,10 +13,12 @@ import { Spinner } from '@/components/ui/Spinner'
  * Validiert lokal (Laenge, Match), ruft /auth/change-password,
  * beruecksichtigt den eingerichteten zweiten Faktor: TOTP-Feld oder Passkey-Abfrage
  * beim Speichern — nie beides.
+ * Konten ohne Passwort (Social Login) bekommen nur einen Link an ihre E-Mail:
+ * ein angemeldetes Token allein setzt kein Passwort.
  */
 export function PasswordTab() {
   const { t } = useTranslation()
-  const { user, setUser } = useAuthStore()
+  const { user } = useAuthStore()
   const hasPassword = user?.has_password ?? true
   const methode = user?.two_factor_enabled ? (user.two_factor_method ?? 'totp') : null
   const [form, setForm] = useState({ current: '', new: '', confirm: '', otp: '' })
@@ -29,10 +31,6 @@ export function PasswordTab() {
     setError('')
     setSuccess('')
 
-    if (hasPassword && !form.current) {
-      setError(t('profile.currentPasswordRequired', t('profile.currentPassword')))
-      return
-    }
     if (form.new !== form.confirm) {
       setError(t('profile.passwordMismatch'))
       return
@@ -44,25 +42,17 @@ export function PasswordTab() {
 
     setSubmitting(true)
     try {
-      const endpoint = hasPassword ? '/auth/change-password' : '/auth/set-password'
-      const payload: Record<string, any> = {
-        new_password: form.new,
-        otp_code: methode === 'totp' ? form.otp : null,
-        passkey: methode === 'passkey' ? await passkeyNachweis('password_change') : null,
-      }
-      if (hasPassword) {
-        payload.current_password = form.current
-      }
-
-      await api(endpoint, {
+      await api('/auth/change-password', {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          current_password: form.current,
+          new_password: form.new,
+          otp_code: methode === 'totp' ? form.otp : null,
+          passkey: methode === 'passkey' ? await passkeyNachweis('password_change') : null,
+        }),
       })
-      setSuccess(hasPassword ? t('profile.passwordChanged') : t('profile.passwordSet'))
+      setSuccess(t('profile.passwordChanged'))
       setForm({ current: '', new: '', confirm: '', otp: '' })
-      if (!hasPassword && user) {
-        setUser({ ...user, has_password: true })
-      }
       setTimeout(() => setSuccess(''), 3000)
     } catch (err: any) {
       setError(err.message)
@@ -71,38 +61,67 @@ export function PasswordTab() {
     }
   }
 
+  const handleSendLink = async () => {
+    setError('')
+    setSuccess('')
+    setSubmitting(true)
+    try {
+      await api('/auth/set-password', { method: 'POST' })
+      setSuccess(t('profile.setPasswordLinkSent', { email: user?.email ?? '' }))
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (!hasPassword) {
+    return (
+      <div className="msm-card p-6">
+        <div className="flex items-center gap-2 mb-6">
+          <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('profile.setPassword')}</h2>
+        </div>
+        <p className="text-sm text-on-surface-variant mb-4">{t('profile.setPasswordInfo')}</p>
+        {error && <div className="msm-alert-error text-sm mb-4">{error}</div>}
+        {success && <div className="msm-alert-success text-sm mb-4">{success}</div>}
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            onClick={handleSendLink}
+            disabled={submitting}
+            className="inline-flex items-center gap-2 disabled:opacity-50"
+          >
+            {submitting ? <Spinner /> : <Mail className="w-4 h-4" />}
+            {t('profile.setPasswordSendLink')}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="msm-card p-6">
       <div className="flex items-center gap-2 mb-6">
         <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h2 className="font-headline text-title-lg font-semibold text-on-surface">
-          {hasPassword ? t('profile.changePassword') : t('profile.setPassword')}
-        </h2>
+        <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('profile.changePassword')}</h2>
       </div>
-
-      {!hasPassword && (
-        <div className="msm-alert-info text-sm mb-4">
-          {t('profile.setPasswordInfo')}
-        </div>
-      )}
 
       {error && <div className="msm-alert-error text-sm mb-4">{error}</div>}
       {success && <div className="msm-alert-success text-sm mb-4">{success}</div>}
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {hasPassword && (
-          <div className="md:col-span-2">
-            <label htmlFor="current_password" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-              {t('profile.currentPassword')}
-            </label>
-            <PasswordInput
-              id="current_password"
-              value={form.current}
-              onChange={(e) => setForm({ ...form, current: e.target.value })}
-              required
-            />
-          </div>
-        )}
+        <div className="md:col-span-2">
+          <label htmlFor="current_password" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+            {t('profile.currentPassword')}
+          </label>
+          <PasswordInput
+            id="current_password"
+            value={form.current}
+            onChange={(e) => setForm({ ...form, current: e.target.value })}
+            required
+          />
+        </div>
         <div>
           <label htmlFor="new_password" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
             {t('profile.newPassword')}

@@ -26,7 +26,7 @@ from dependencies import (
 )
 from models import User, EmailVerification
 from services.dis_client import DisClient
-from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, SetPasswordRequest, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, NativeRefreshRequest, LogoutRequest
+from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, NativeRefreshRequest, LogoutRequest
 from schemas import ResendVerificationRequest
 from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, LocationSharingUpdateRequest, AgentNameUpdateRequest, AiProviderChoiceRequest
 from schemas.device_pairing import (
@@ -1104,38 +1104,31 @@ def get_avatar(filename: str):
 
 
 
-@router.post("/set-password")
+@router.post("/set-password", dependencies=[Depends(auth_rate_limit)])
 async def set_password(
-    req: SetPasswordRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Initiales Passwort für Konten ohne bisheriges Passwort (z. B. OAuth / Social Login) festlegen."""
+    """Konto ohne Passwort (Social Login): Link zum Festlegen an die bestätigte E-Mail.
+
+    Ein Access-Token allein setzt kein Passwort, sonst wird ein abgegriffenes
+    Token zu dauerhaftem Zugang. Der Link beweist den Zugriff aufs Postfach,
+    festgelegt wird über /reset-password.
+    """
     if user.has_password:
         raise HTTPException(
             status_code=400,
             detail="Konto besitzt bereits ein Passwort. Bitte 'Passwort ändern' nutzen.",
         )
+    if not user.email_verified:
+        raise HTTPException(status_code=400, detail="Bitte bestätige zuerst deine E-Mail-Adresse.")
+    if not EmailService.is_configured():
+        raise HTTPException(status_code=503, detail="E-Mail-Versand ist nicht eingerichtet.")
 
-    _zweiter_faktor_pflicht(db, user, req.otp_code, req.passkey, "password_change")
-
-    await run_in_threadpool(AuthService.reset_password, db, user, req.new_password)
-    user.has_password = True
-    db.commit()
-
-    audit_service.record_privileged_action(
-        db,
-        user_id=user.id,
-        action="auth.password.set",
-        target_type="user",
-        target_id=user.id,
-        details={"username": user.username},
-        commit=True,
-    )
-    if EmailService.is_configured() and user.email_notifications:
-        await EmailService.send_password_set_notification(user.email, user.username)
-    return {"message": "Passwort festgelegt"}
+    token = await run_in_threadpool(AuthService.set_password_reset_token, db, user)
+    await EmailService.send_password_reset_email(user.email, user.username, token)
+    return {"message": "Link gesendet"}
 
 
 @router.post("/change-password")
@@ -1145,27 +1138,8 @@ async def change_password(
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Eigenes Passwort ändern. Erfordert aktuelles Passwort + 2FA-Code wenn 2FA aktiv.
-    Falls noch kein Passwort gesetzt war (z. B. OAuth-Konto), wird kein aktuelles Passwort verlangt."""
-    if not user.has_password:
-        _zweiter_faktor_pflicht(db, user, req.otp_code, req.passkey, "password_change")
-        await run_in_threadpool(AuthService.reset_password, db, user, req.new_password)
-        user.has_password = True
-        db.commit()
-        audit_service.record_privileged_action(
-            db,
-            user_id=user.id,
-            action="auth.password.set",
-            target_type="user",
-            target_id=user.id,
-            details={"username": user.username},
-            commit=True,
-        )
-        if EmailService.is_configured() and user.email_notifications:
-            await EmailService.send_password_set_notification(user.email, user.username)
-        return {"message": "Passwort festgelegt"}
-
-    if not req.current_password or not await run_in_threadpool(
+    """Eigenes Passwort ändern. Erfordert aktuelles Passwort + 2FA-Code wenn 2FA aktiv."""
+    if not await run_in_threadpool(
         AuthService.verify_password, req.current_password, user.password_hash
     ):
         raise HTTPException(status_code=401, detail="Aktuelles Passwort falsch")
@@ -1173,8 +1147,6 @@ async def change_password(
     _zweiter_faktor_pflicht(db, user, req.otp_code, req.passkey, "password_change")
 
     await run_in_threadpool(AuthService.reset_password, db, user, req.new_password)
-    user.has_password = True
-    db.commit()
     audit_service.record_privileged_action(
         db,
         user_id=user.id,

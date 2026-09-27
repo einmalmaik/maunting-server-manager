@@ -1,6 +1,6 @@
 """Tests for auth router: login, logout, refresh, CSRF, cookies."""
 import logging
-from unittest.mock import PropertyMock, patch
+from unittest.mock import AsyncMock, PropertyMock, patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -853,33 +853,57 @@ class TestCsrfProtectionOnEndpoints:
 
 
 class TestPasswordManagement:
-    """Tests für Passwort festlegen (OAuth) vs. Passwort ändern."""
+    """Passwort festlegen (Social Login) nur per Link an die bestätigte E-Mail."""
 
-    def test_set_password_for_oauth_user_without_current_password(
+    def _post(self, client, cookies, path, body=None):
+        return client.post(
+            path,
+            json=body or {},
+            cookies=cookies,
+            headers={"X-CSRF-Token": cookies.get("__Secure-csrf_token")},
+        )
+
+    def test_set_password_schickt_link_und_setzt_selbst_nichts(
         self, client: TestClient, regular_user: User, db: Session, user_cookies: dict
     ):
         regular_user.has_password = False
         db.commit()
+        hash_vorher = regular_user.password_hash
 
-        csrf = user_cookies.get("__Secure-csrf_token")
-        resp = client.post(
-            "/api/auth/set-password",
-            json={"new_password": "NewSecretPass123!"},
-            cookies=user_cookies,
-            headers={"X-CSRF-Token": csrf},
-        )
+        with patch("routers.auth.EmailService.is_configured", return_value=True),              patch("routers.auth.EmailService.send_password_reset_email", new_callable=AsyncMock) as send:
+            resp = self._post(client, user_cookies, "/api/auth/set-password", {"new_password": "NewSecretPass123!"})
         assert resp.status_code == 200
-        assert resp.json()["message"] == "Passwort festgelegt"
+        send.assert_awaited_once()
+        assert send.await_args.args[0] == regular_user.email
+        token = send.await_args.args[2]
 
+        db.refresh(regular_user)
+        assert regular_user.has_password is False
+        assert regular_user.password_hash == hash_vorher
+
+        with patch("routers.auth.CaptchaService.verify_token", new_callable=AsyncMock):
+            resp = client.post("/api/auth/reset-password", json={"token": token, "new_password": "NewSecretPass123!"})
+        assert resp.status_code == 200
         db.refresh(regular_user)
         assert regular_user.has_password is True
 
-        # User can now login with this password
         login_resp = client.post(
             "/api/auth/login",
             json={"username": regular_user.username, "password": "NewSecretPass123!"},
         )
         assert login_resp.status_code == 200
+
+    def test_set_password_ohne_bestaetigte_email_abgelehnt(
+        self, client: TestClient, regular_user: User, db: Session, user_cookies: dict
+    ):
+        regular_user.has_password = False
+        regular_user.email_verified = False
+        db.commit()
+
+        with patch("routers.auth.EmailService.is_configured", return_value=True),              patch("routers.auth.EmailService.send_password_reset_email", new_callable=AsyncMock) as send:
+            resp = self._post(client, user_cookies, "/api/auth/set-password")
+        assert resp.status_code == 400
+        send.assert_not_awaited()
 
     def test_set_password_rejected_if_already_has_password(
         self, client: TestClient, regular_user: User, db: Session, user_cookies: dict
@@ -887,34 +911,24 @@ class TestPasswordManagement:
         regular_user.has_password = True
         db.commit()
 
-        csrf = user_cookies.get("__Secure-csrf_token")
-        resp = client.post(
-            "/api/auth/set-password",
-            json={"new_password": "AnotherSecretPass123!"},
-            cookies=user_cookies,
-            headers={"X-CSRF-Token": csrf},
-        )
+        resp = self._post(client, user_cookies, "/api/auth/set-password")
         assert resp.status_code == 400
         assert "bereits ein Passwort" in resp.json()["detail"]
 
-    def test_change_password_without_current_password_for_oauth_user(
+    def test_change_password_ohne_aktuelles_passwort_setzt_nie_eins(
         self, client: TestClient, regular_user: User, db: Session, user_cookies: dict
     ):
+        """Ein Access-Token allein darf kein Passwort setzen (AGENTS.md Punkt 21)."""
         regular_user.has_password = False
         db.commit()
+        hash_vorher = regular_user.password_hash
 
-        csrf = user_cookies.get("__Secure-csrf_token")
-        resp = client.post(
-            "/api/auth/change-password",
-            json={"new_password": "OAuthToPassword123!"},
-            cookies=user_cookies,
-            headers={"X-CSRF-Token": csrf},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["message"] == "Passwort festgelegt"
+        resp = self._post(client, user_cookies, "/api/auth/change-password", {"new_password": "OAuthToPassword123!"})
+        assert resp.status_code == 422
 
         db.refresh(regular_user)
-        assert regular_user.has_password is True
+        assert regular_user.has_password is False
+        assert regular_user.password_hash == hash_vorher
 
     def test_change_password_requires_current_password_when_has_password(
         self, client: TestClient, regular_user: User, db: Session, user_cookies: dict
@@ -922,33 +936,19 @@ class TestPasswordManagement:
         regular_user.has_password = True
         db.commit()
 
-        csrf = user_cookies.get("__Secure-csrf_token")
-        # Missing current password
-        resp = client.post(
-            "/api/auth/change-password",
-            json={"new_password": "SomeNewPassword123!"},
-            cookies=user_cookies,
-            headers={"X-CSRF-Token": csrf},
+        resp = self._post(client, user_cookies, "/api/auth/change-password", {"new_password": "SomeNewPassword123!"})
+        assert resp.status_code == 422
+
+        resp = self._post(
+            client, user_cookies, "/api/auth/change-password",
+            {"current_password": "WrongPassword!", "new_password": "SomeNewPassword123!"},
         )
         assert resp.status_code == 401
         assert "Aktuelles Passwort falsch" in resp.json()["detail"]
 
-        # Wrong current password
-        resp = client.post(
-            "/api/auth/change-password",
-            json={"current_password": "WrongPassword!", "new_password": "SomeNewPassword123!"},
-            cookies=user_cookies,
-            headers={"X-CSRF-Token": csrf},
-        )
-        assert resp.status_code == 401
-        assert "Aktuelles Passwort falsch" in resp.json()["detail"]
-
-        # Correct current password
-        resp = client.post(
-            "/api/auth/change-password",
-            json={"current_password": "UserPass123!", "new_password": "SomeNewPassword123!"},
-            cookies=user_cookies,
-            headers={"X-CSRF-Token": csrf},
+        resp = self._post(
+            client, user_cookies, "/api/auth/change-password",
+            {"current_password": "UserPass123!", "new_password": "SomeNewPassword123!"},
         )
         assert resp.status_code == 200
         assert resp.json()["message"] == "Passwort geändert"

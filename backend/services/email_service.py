@@ -838,12 +838,6 @@ Maunting Service Manager
         )
 
     @staticmethod
-    async def send_password_set_notification(to: str, username: str) -> bool:
-        return await EmailService.send_security_notification(
-            to, username, "Passwort festgelegt", "Für dein Konto wurde soeben ein neues Passwort hinterlegt.",
-        )
-
-    @staticmethod
     async def send_new_device_login_notification(to: str, username: str, ip: str, user_agent: str) -> bool:
         """Nutzt die zentrale send_security_notification (KISS).
 
