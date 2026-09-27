@@ -1,20 +1,21 @@
 /**
- * Universeller Passkey- & Biometrie-Service für Web und Tauri.
+ * Passkeys — zwei verschiedene Dinge unter einem Namen.
  *
- * Unterstützt:
- * 1. Tauri Desktop (Windows): Native Windows Hello API über Tauri-Kanal.
- * 2. Tauri Mobile (Android): Native BiometricPrompt API über `@tauri-apps/plugin-biometric`.
- * 3. Web-Browser (Desktop & Mobile): W3C WebAuthn (`navigator.credentials.create` / `.get`)
- *    mit Platform-Authentikatoren (Touch ID, Face ID, Windows Hello, Android-Fingerabdruck, PIN).
+ * 1. **Zweiter Faktor gegenüber dem Server** (`passkeyAnlegen`,
+ *    `passkeyBestaetigen`, `passkeyNachweis`): echtes WebAuthn. Der Server
+ *    stellt eine Einmal-Challenge, der Authenticator unterschreibt sie, der
+ *    Server prüft die Unterschrift gegen den gespeicherten Schlüssel
+ *    (`backend/services/passkey_service.py`).
+ *
+ * 2. **Lokale Entsperrung** (`verifyPasskey`): Windows Hello, BiometricPrompt
+ *    oder eine WebAuthn-Abfrage ohne Server. Sie belegt nur *diesem Gerät*,
+ *    dass jemand davorsitzt — etwa für den Tresor. **Nie** als Nachweis an
+ *    den Server schicken: bis 09/2026 ging nach ihr `passkey_verified: true`
+ *    hinaus, und der Server glaubte es. Das Feld konnte jeder selbst setzen.
  */
 
+import { api } from '@/api/client'
 import { pruefeBiometrieVerfuegbar, verifiziereBiometrie } from '@/desktop/tauri'
-
-export interface PasskeyRegisterResult {
-  success: boolean
-  isTauri: boolean
-  credentialId?: string
-}
 
 async function checkAndroidBiometric(): Promise<boolean> {
   try {
@@ -49,137 +50,10 @@ async function promptAndroidBiometric(title?: string): Promise<boolean> {
 }
 
 /**
- * Prüft, ob Passkey bzw. biometrische Authentifizierung auf dieser Plattform verfügbar ist.
- */
-export async function isPasskeyAvailable(): Promise<boolean> {
-  // 1. Tauri Desktop (Windows Hello)
-  try {
-    if (await pruefeBiometrieVerfuegbar()) {
-      return true
-    }
-  } catch {}
-
-  // 2. Tauri Mobile (Android Biometrics)
-  try {
-    if (await checkAndroidBiometric()) {
-      return true
-    }
-  } catch {}
-
-  // 3. Web Platform Authenticator (WebAuthn)
-  if (
-    typeof window !== 'undefined' &&
-    window.PublicKeyCredential &&
-    typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function'
-  ) {
-    try {
-      const available = await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
-      if (available) return true
-    } catch {}
-  }
-
-  // Fallback: WebAuthn API grundsätzlich vorhanden
-  return typeof window !== 'undefined' && Boolean(window.PublicKeyCredential && navigator.credentials)
-}
-
-/**
- * Registriert einen neuen Passkey auf diesem Gerät (WebAuthn Platform Authenticator oder Tauri Hello).
- */
-export async function registerPasskey(user: {
-  id: number
-  username: string
-  email?: string
-}): Promise<PasskeyRegisterResult> {
-  // 1. Tauri Desktop / Mobile
-  try {
-    if (await pruefeBiometrieVerfuegbar()) {
-      const verified = await verifiziereBiometrie('Passkey für 2FA registrieren')
-      if (!verified) throw new Error('Biometrische Bestätigung fehlgeschlagen.')
-      return { success: true, isTauri: true, credentialId: `tauri-hello-${user.id}` }
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('abgebrochen')) throw err
-  }
-
-  try {
-    if (await checkAndroidBiometric()) {
-      const verified = await promptAndroidBiometric('Passkey für 2FA registrieren')
-      if (!verified) throw new Error('Biometrische Bestätigung fehlgeschlagen.')
-      return { success: true, isTauri: true, credentialId: `tauri-android-${user.id}` }
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('abgebrochen')) throw err
-  }
-
-  // 2. Web WebAuthn Platform Authenticator
-  if (typeof window === 'undefined' || !window.PublicKeyCredential || !navigator.credentials) {
-    throw new Error('WebAuthn / Passkeys werden von diesem Browser nicht unterstützt.')
-  }
-
-  try {
-    const challenge = new Uint8Array(32)
-    window.crypto.getRandomValues(challenge)
-
-    const userIdBytes = new TextEncoder().encode(String(user.id))
-
-    const credential = (await navigator.credentials.create({
-      publicKey: {
-        challenge,
-        rp: {
-          name: 'Maunting Service Manager',
-          id: window.location.hostname || undefined,
-        },
-        user: {
-          id: userIdBytes,
-          name: user.username,
-          displayName: user.username,
-        },
-        pubKeyCredParams: [
-          { alg: -7, type: 'public-key' }, // ES256
-          { alg: -257, type: 'public-key' }, // RS256
-        ],
-        authenticatorSelection: {
-          authenticatorAttachment: 'platform',
-          userVerification: 'required',
-          residentKey: 'preferred',
-        },
-        timeout: 60000,
-      },
-    })) as PublicKeyCredential | null
-
-    if (!credential) {
-      throw new Error('Passkey-Erstellung lieferte kein Ergebnis.')
-    }
-
-    return {
-      success: true,
-      isTauri: false,
-      credentialId: credential.id,
-    }
-  } catch (err: unknown) {
-    const errorName = (err && typeof err === 'object' && 'name' in err) ? String(err.name) : ''
-    const errorMsg = err instanceof Error ? err.message : String(err)
-    if (
-      errorName === 'NotAllowedError' ||
-      errorName === 'AbortError' ||
-      errorMsg.includes('NotAllowedError') ||
-      errorMsg.toLowerCase().includes('cancel') ||
-      errorMsg.toLowerCase().includes('abort')
-    ) {
-      throw new Error('Passkey-Registrierung wurde abgebrochen.')
-    }
-    throw new Error(`Passkey-Registrierung fehlgeschlagen: ${errorMsg}`)
-  }
-}
-
-/**
- * Führt eine schnelle 1-Klick-Passkey- bzw. Biometrie-Verifikation durch.
+ * Lokale Entsperrung: belegt nur diesem Gerät, dass jemand davorsitzt.
  *
- * Verwendbar für:
- * - 2FA-Bestätigung beim Login
- * - Freigabe von Geräten
- * - Geräte-Reset („Neu beginnen“)
- * - Tresor-Entsperrung
+ * Kein Nachweis für den Server — dafür `passkeyNachweis`. Verwendet für die
+ * Tresor-Entsperrung.
  */
 export async function verifyPasskey(title = 'Identität bestätigen'): Promise<boolean> {
   // 1. In Tauri / Desktop: Nutze native Windows Hello API
@@ -238,4 +112,187 @@ export async function verifyPasskey(title = 'Identität bestätigen'): Promise<b
     }
     return false
   }
+}
+
+// ── Zweiter Faktor gegenüber dem Server (WebAuthn) ─────────────────────────
+
+/** Optionen für `navigator.credentials.create()`, Binärfelder als Base64url. */
+export interface PasskeyAnlageOptionen {
+  challenge: string
+  rp: { name: string; id: string }
+  user: { id: string; name: string; displayName: string }
+  pubKeyCredParams: { type: 'public-key'; alg: number }[]
+  timeout?: number
+  attestation?: AttestationConveyancePreference
+  authenticatorSelection?: AuthenticatorSelectionCriteria
+  excludeCredentials?: { type: 'public-key'; id: string; transports?: string[] }[]
+}
+
+/** Optionen für `navigator.credentials.get()`, Binärfelder als Base64url. */
+export interface PasskeyBestaetigungsOptionen {
+  challenge: string
+  rpId: string
+  timeout?: number
+  userVerification?: UserVerificationRequirement
+  allowCredentials: { type: 'public-key'; id: string; transports?: string[] }[]
+}
+
+/** Was der Server als Nachweis annimmt (`schemas/passkey.py`). */
+export interface PasskeyNachweis {
+  id: string
+  rawId: string
+  type: 'public-key'
+  response: {
+    clientDataJSON: string
+    authenticatorData: string
+    signature: string
+    userHandle: string | null
+  }
+}
+
+export interface PasskeyAnlage {
+  id: string
+  rawId: string
+  type: 'public-key'
+  response: {
+    clientDataJSON: string
+    authenticatorData: string
+    publicKey: string
+    publicKeyAlgorithm: number
+    transports: string[]
+  }
+}
+
+/** Wofür ein Nachweis gilt — der Server bindet die Challenge daran. */
+export type PasskeyZweck =
+  | '2fa_disable'
+  | 'device_pairing'
+  | 'e2ee_reset'
+  | 'password_change'
+  | 'email_change'
+  | 'account_delete'
+
+function nachB64url(puffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(puffer)
+  let text = ''
+  for (const b of bytes) text += String.fromCharCode(b)
+  return btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function ausB64url(text: string): ArrayBuffer {
+  const b64 = text.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (text.length % 4)) % 4)
+  const roh = atob(b64)
+  const bytes = new Uint8Array(roh.length)
+  for (let i = 0; i < roh.length; i++) bytes[i] = roh.charCodeAt(i)
+  return bytes.buffer
+}
+
+/** Ob dieser Browser bzw. dieses WebView überhaupt WebAuthn kann. */
+export function webauthnVerfuegbar(): boolean {
+  return typeof window !== 'undefined' && Boolean(window.PublicKeyCredential && navigator.credentials)
+}
+
+function abbruchFehler(err: unknown): Error {
+  const name = err && typeof err === 'object' && 'name' in err ? String((err as { name: unknown }).name) : ''
+  if (name === 'NotAllowedError' || name === 'AbortError') {
+    return new Error('Passkey-Bestätigung abgebrochen.')
+  }
+  if (name === 'InvalidStateError') {
+    return new Error('Dieser Passkey ist bereits eingerichtet.')
+  }
+  if (name === 'SecurityError') {
+    return new Error('Passkeys gehen nur über die Adresse des Panels.')
+  }
+  return err instanceof Error ? err : new Error(String(err))
+}
+
+/** Legt einen Passkey an; die Antwort geht an `/auth/2fa/passkey/enable`. */
+export async function passkeyAnlegen(optionen: PasskeyAnlageOptionen): Promise<PasskeyAnlage> {
+  if (!webauthnVerfuegbar()) throw new Error('Passkeys werden hier nicht unterstützt.')
+  let credential: PublicKeyCredential | null
+  try {
+    credential = (await navigator.credentials.create({
+      publicKey: {
+        ...optionen,
+        challenge: ausB64url(optionen.challenge),
+        user: { ...optionen.user, id: ausB64url(optionen.user.id) },
+        excludeCredentials: (optionen.excludeCredentials ?? []).map((c) => ({
+          type: c.type,
+          id: ausB64url(c.id),
+          transports: c.transports as AuthenticatorTransport[] | undefined,
+        })),
+      },
+    })) as PublicKeyCredential | null
+  } catch (err) {
+    throw abbruchFehler(err)
+  }
+  if (!credential) throw new Error('Passkey-Erstellung lieferte kein Ergebnis.')
+  const antwort = credential.response as AuthenticatorAttestationResponse
+  // `getPublicKey()` liefert den Schlüssel als SPKI — damit braucht der Server
+  // kein CBOR. Fehlt er, kann der Browser den Algorithmus nicht ausdrücken.
+  const oeffentlich = antwort.getPublicKey?.()
+  const authData = antwort.getAuthenticatorData?.()
+  if (!oeffentlich || !authData) {
+    throw new Error('Dieser Browser kann den Passkey nicht übergeben. Bitte aktualisieren.')
+  }
+  return {
+    id: credential.id,
+    rawId: nachB64url(credential.rawId),
+    type: 'public-key',
+    response: {
+      clientDataJSON: nachB64url(antwort.clientDataJSON),
+      authenticatorData: nachB64url(authData),
+      publicKey: nachB64url(oeffentlich),
+      publicKeyAlgorithm: antwort.getPublicKeyAlgorithm(),
+      transports: antwort.getTransports?.() ?? [],
+    },
+  }
+}
+
+/** Lässt die Server-Challenge unterschreiben. */
+export async function passkeyBestaetigen(optionen: PasskeyBestaetigungsOptionen): Promise<PasskeyNachweis> {
+  if (!webauthnVerfuegbar()) throw new Error('Passkeys werden hier nicht unterstützt.')
+  let credential: PublicKeyCredential | null
+  try {
+    credential = (await navigator.credentials.get({
+      publicKey: {
+        challenge: ausB64url(optionen.challenge),
+        rpId: optionen.rpId,
+        timeout: optionen.timeout,
+        userVerification: optionen.userVerification,
+        allowCredentials: optionen.allowCredentials.map((c) => ({
+          type: c.type,
+          id: ausB64url(c.id),
+          transports: c.transports as AuthenticatorTransport[] | undefined,
+        })),
+      },
+    })) as PublicKeyCredential | null
+  } catch (err) {
+    throw abbruchFehler(err)
+  }
+  if (!credential) throw new Error('Passkey-Bestätigung lieferte kein Ergebnis.')
+  const antwort = credential.response as AuthenticatorAssertionResponse
+  return {
+    id: credential.id,
+    rawId: nachB64url(credential.rawId),
+    type: 'public-key',
+    response: {
+      clientDataJSON: nachB64url(antwort.clientDataJSON),
+      authenticatorData: nachB64url(antwort.authenticatorData),
+      signature: nachB64url(antwort.signature),
+      userHandle: antwort.userHandle ? nachB64url(antwort.userHandle) : null,
+    },
+  }
+}
+
+/**
+ * Der Nachweis vor einer geschützten Aktion: Challenge holen, unterschreiben.
+ * Die Challenge gilt nur für `zweck` und nur einmal.
+ */
+export async function passkeyNachweis(zweck: PasskeyZweck): Promise<PasskeyNachweis> {
+  const optionen = await api<PasskeyBestaetigungsOptionen>('/auth/passkey/options', {
+    method: 'POST',
+    body: JSON.stringify({ zweck }),
+  })
+  return passkeyBestaetigen(optionen)
 }

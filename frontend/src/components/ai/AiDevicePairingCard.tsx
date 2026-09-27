@@ -14,7 +14,7 @@ import { SecretOnce } from '@/components/ui/SecretOnce'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { Button } from '@/Singra/UI'
 import { entferneGeraet, gebeGeraetFrei, sicherheitsnummer } from '@/services/e2eeGeraet'
-import { isPasskeyAvailable, verifyPasskey } from '@/services/passkeyService'
+import { passkeyNachweis } from '@/services/passkeyService'
 import {
   uebergebeVerlauf,
   type KopplungsStatus,
@@ -64,10 +64,12 @@ export function AiDevicePairingCard() {
   const [geraete, setGeraete] = useState<Geraet[]>([])
   const [name, setName] = useState('')
   // Ein gekoppeltes Gerät ist ein Zugang ohne Ablauf. Deshalb fragt der Server
-  // vorher nach dem Passwort, bei 2FA nach dem aktuellen Code.
-  const mitZweiFaktor = useAuthStore((s) => Boolean(s.user?.two_factor_enabled))
+  // vorher nach dem Passwort, bei 2FA nach dem eingerichteten Faktor — und
+  // die Karte zeigt nur diesen einen Weg.
+  const methode = useAuthStore((s) =>
+    s.user?.two_factor_enabled ? (s.user.two_factor_method ?? 'totp') : null,
+  )
   const [nachweis, setNachweis] = useState('')
-  const [hasPasskey, setHasPasskey] = useState(false)
   const [isSocialAccount, setIsSocialAccount] = useState(false)
   const [code, setCode] = useState<string | null>(null)
   const [qrDataUri, setQrDataUri] = useState<string | null>(null)
@@ -83,7 +85,6 @@ export function AiDevicePairingCard() {
 
   useEffect(() => {
     laden()
-    isPasskeyAvailable().then(setHasPasskey).catch(() => setHasPasskey(false))
     oauthApi
       .listMyLinks()
       .then((links) => setIsSocialAccount(Array.isArray(links) && links.length > 0))
@@ -168,18 +169,15 @@ export function AiDevicePairingCard() {
     }
   }, [code])
 
-  const koppeln = async (mitPasskey = false) => {
+  const koppeln = async () => {
     setBusy(true)
     try {
       const payload: Record<string, any> = { label: name.trim() }
-      if (mitZweiFaktor) {
-        if (mitPasskey) {
-          const ok = await verifyPasskey(t('ai.profile.devicesProofPasskey'))
-          if (!ok) throw new Error(t('profile.2faPasskeyFailed'))
-          payload.passkey_verified = true
-        } else {
-          payload.otp_code = nachweis.trim()
-        }
+      if (methode === 'passkey') {
+        // Der Server prüft die Unterschrift; die Challenge gilt nur fürs Koppeln.
+        payload.passkey = await passkeyNachweis('device_pairing')
+      } else if (methode === 'totp') {
+        payload.otp_code = nachweis.trim()
       } else if (!isSocialAccount) {
         payload.password = nachweis
       }
@@ -406,7 +404,12 @@ export function AiDevicePairingCard() {
               />
             </div>
 
-            {mitZweiFaktor ? (
+            {methode === 'passkey' ? (
+              <Button onClick={() => void koppeln()} disabled={busy} className="flex items-center gap-1.5">
+                <Fingerprint className="h-4 w-4" aria-hidden="true" />
+                {t('ai.profile.devicesProofPasskey')}
+              </Button>
+            ) : methode === 'totp' ? (
               <>
                 <div className="min-w-[10rem] flex-1">
                   <Input
@@ -419,23 +422,12 @@ export function AiDevicePairingCard() {
                     maxLength={16}
                   />
                 </div>
-                <Button onClick={() => void koppeln(false)} disabled={busy || !nachweis.trim()}>
+                <Button onClick={() => void koppeln()} disabled={busy || !nachweis.trim()}>
                   {t('ai.profile.devicesPair')}
                 </Button>
-                {hasPasskey && (
-                  <Button
-                    variant="secondary"
-                    onClick={() => void koppeln(true)}
-                    disabled={busy}
-                    className="flex items-center gap-1.5"
-                  >
-                    <Fingerprint className="h-4 w-4" />
-                    {t('ai.profile.devicesProofPasskey')}
-                  </Button>
-                )}
               </>
             ) : isSocialAccount ? (
-              <Button onClick={() => void koppeln(false)} disabled={busy}>
+              <Button onClick={() => void koppeln()} disabled={busy}>
                 {t('ai.profile.devicesPair')}
               </Button>
             ) : (
@@ -450,14 +442,14 @@ export function AiDevicePairingCard() {
                     maxLength={256}
                   />
                 </div>
-                <Button onClick={() => void koppeln(false)} disabled={busy || !nachweis.trim()}>
+                <Button onClick={() => void koppeln()} disabled={busy || !nachweis.trim()}>
                   {t('ai.profile.devicesPair')}
                 </Button>
               </>
             )}
           </div>
           <p className="msm-field-help">
-            {isSocialAccount && !mitZweiFaktor
+            {isSocialAccount && !methode
               ? t('ai.profile.devicesSocialHint')
               : t('ai.profile.devicesProofHint')}
           </p>

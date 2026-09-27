@@ -138,8 +138,17 @@ def update_user(
         user.email = req.email
     if req.is_active is not None:
         user.is_active = req.is_active
+    if req.two_factor_enabled and not user.two_factor_enabled:
+        # Einschalten ohne eingerichteten Faktor sperrt das Konto aus: aktiv
+        # ohne TOTP-Geheimnis heisst Passkey, und es gibt keinen.
+        raise HTTPException(status_code=400, detail="2FA richtet der Benutzer selbst ein.")
     if req.two_factor_enabled is not None:
         user.two_factor_enabled = req.two_factor_enabled
+        if not req.two_factor_enabled:
+            # Sonst bleibt der alte Passkey in `excludeCredentials`, und der
+            # Browser verweigert, ihn fuer dasselbe Konto neu einzurichten.
+            for eintrag in list(user.passkeys):
+                db.delete(eintrag)
     if req.time_zone is not None:
         user.time_zone = req.time_zone
     db.commit()

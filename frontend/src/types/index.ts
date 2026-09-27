@@ -6,6 +6,8 @@ export interface User {
   is_active: boolean
   email_verified: boolean
   two_factor_enabled: boolean
+  /** Der eingerichtete zweite Faktor — jede Abfrage zeigt nur diesen Weg. */
+  two_factor_method?: 'totp' | 'passkey' | null
   email_notifications: boolean
   /** Hinweise der KI im Panel. Getrennt von den E-Mails — sie verschickt keine. */
   ai_notifications: boolean

@@ -958,23 +958,55 @@ def create_2fa_challenge(db: Session, user: User, provider: OAuthProvider) -> st
     )
 
 
-def complete_2fa_challenge(
-    db: Session, challenge_token: str, otp_code: str = "", passkey_verified: bool = False
-) -> tuple[User, OAuthProvider] | None:
-    """Validiert OTP oder Passkey gegen den Challenge-User. Konsumiert die Challenge bei Erfolg.
-
-    Returns (User, Provider) oder None (Challenge ungueltig/OTP falsch).
-    """
+def user_fuer_2fa_challenge(db: Session, challenge_token: str) -> User | None:
+    """Der Benutzer hinter einer offenen OAuth-2FA-Challenge — ohne sie zu verbrauchen."""
     row = login_challenge_service.lookup_valid(db, challenge_token, "oauth_2fa")
     if row is None or row.user_id is None:
         return None
     user = db.query(User).filter(User.id == row.user_id).first()
     if user is None or not user.is_active:
         return None
-    if not passkey_verified and not AuthService.verify_current_2fa_code(user, otp_code):
+    return user
+
+
+OAUTH_2FA_VERSUCHE = 3
+
+
+def complete_2fa_challenge(
+    db: Session, challenge_token: str, otp_code: str = "", passkey: dict | None = None
+) -> tuple[User, OAuthProvider] | None:
+    """Validiert den eingerichteten Faktor gegen den Challenge-User. Konsumiert die Challenge bei Erfolg.
+
+    Returns (User, Provider) oder None (Challenge ungueltig/Nachweis falsch).
+    Bis 09/2026 genuegte hier ``passkey_verified=True`` aus dem Request-Body.
+
+    Ein Backup-Code gilt wie beim Passwort-Login. Nach
+    `OAUTH_2FA_VERSUCHE` Fehlversuchen ist die Challenge verbraucht: bis
+    09/2026 blieb sie bei falschem Code fuenf Minuten offen, und der Endpunkt
+    hatte keine Ratenbegrenzung — TOTP liess sich ohne Grenze durchprobieren.
+    """
+    from services import passkey_service
+    from services.backup_code_service import BackupCodeService
+
+    row = login_challenge_service.lookup_valid(db, challenge_token, "oauth_2fa")
+    if row is None or row.user_id is None:
+        return None
+    user = db.query(User).filter(User.id == row.user_id).first()
+    if user is None or not user.is_active:
+        return None
+    payload = json.loads(row.payload_json) if row.payload_json else {}
+    bestanden = passkey_service.zweiter_faktor_bestaetigt(
+        db, user, otp_code=otp_code, passkey=passkey, zweck="oauth_2fa"
+    ) or (bool(otp_code) and passkey is None and BackupCodeService.validate_backup_code(db, user.id, otp_code))
+    if not bestanden:
+        versuche = int(payload.get("fehlversuche", 0)) + 1
+        if versuche >= OAUTH_2FA_VERSUCHE:
+            login_challenge_service.consume(db, row)
+        else:
+            row.payload_json = json.dumps({**payload, "fehlversuche": versuche})
+            db.commit()
         return None
     # Provider aus Payload
-    payload = json.loads(row.payload_json) if row.payload_json else {}
     provider_id = payload.get("provider_id")
     provider = (
         db.query(OAuthProvider).filter(OAuthProvider.id == provider_id).first()

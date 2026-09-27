@@ -2760,6 +2760,8 @@
     "backupCode": "Backup code",
     "resendFailed": "The code could not be resent.",
     "use2FAInstead": "Use a 2FA code instead",
+    "usePasskeyInstead": "Confirm with passkey instead",
+    "passkeyNotHere": "No passkey is set up for this address. Use a backup code.",
     "captchaLoadFailed": "Captcha could not be loaded. Please disable ad-blockers or reload the page.",
     "errors": {
       "refreshUnavailable": "Refresh temporarily unavailable",

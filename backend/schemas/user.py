@@ -103,6 +103,9 @@ class UserResponse(BaseModel):
     is_active: bool
     email_verified: bool
     two_factor_enabled: bool
+    # "totp", "passkey" oder None — damit jede Abfrage nur den Weg zeigt, den
+    # das Konto eingerichtet hat.
+    two_factor_method: Literal["totp", "passkey"] | None = None
     email_notifications: bool
     ai_notifications: bool = True
     device_notifications: bool = True

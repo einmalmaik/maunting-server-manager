@@ -177,6 +177,22 @@ class User(Base):
     )
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
     backup_codes: Mapped[list["BackupCode"]] = relationship("BackupCode", back_populates="user", cascade="all, delete-orphan")
+    passkeys: Mapped[list["UserPasskey"]] = relationship(
+        "UserPasskey", back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+    @property
+    def two_factor_method(self) -> str | None:
+        """Welcher zweite Faktor gilt: ``"totp"``, ``"passkey"`` oder ``None``.
+
+        Keine eigene Spalte, sondern die Regel, an die sich Ein- und Ausschalten
+        halten: ``/2fa/enable`` verlangt ein TOTP-Geheimnis, ein angelegter
+        Passkey loescht es. Aktiv mit Geheimnis heisst also App, aktiv ohne
+        heisst Passkey.
+        """
+        if not self.two_factor_enabled:
+            return None
+        return "totp" if self.two_factor_secret_encrypted else "passkey"
 
     @property
     def role_ids(self) -> list[int]:

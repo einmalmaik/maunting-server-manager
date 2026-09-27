@@ -5,16 +5,19 @@ import { api } from '@/api/client'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { KeyRound, Save } from 'lucide-react'
 import { Button } from '@/Singra/UI'
+import { passkeyNachweis } from '@/services/passkeyService'
 
 import { Spinner } from '@/components/ui/Spinner'
 /**
  * Tab: Passwort aendern.
  * Validiert lokal (Laenge, Match), ruft /auth/change-password,
- * beruecksichtigt 2FA-OTP, falls der User 2FA aktiviert hat.
+ * beruecksichtigt den eingerichteten zweiten Faktor: TOTP-Feld oder Passkey-Abfrage
+ * beim Speichern — nie beides.
  */
 export function PasswordTab() {
   const { t } = useTranslation()
   const { user } = useAuthStore()
+  const methode = user?.two_factor_enabled ? (user.two_factor_method ?? 'totp') : null
   const [form, setForm] = useState({ current: '', new: '', confirm: '', otp: '' })
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -41,7 +44,8 @@ export function PasswordTab() {
         body: JSON.stringify({
           current_password: form.current,
           new_password: form.new,
-          otp_code: user?.two_factor_enabled ? form.otp : null,
+          otp_code: methode === 'totp' ? form.otp : null,
+          passkey: methode === 'passkey' ? await passkeyNachweis('password_change') : null,
         }),
       })
       setSuccess(t('profile.passwordChanged'))
@@ -97,7 +101,7 @@ export function PasswordTab() {
             minLength={8}
           />
         </div>
-        {user?.two_factor_enabled && (
+        {methode === 'totp' && (
           <div className="md:col-span-2">
             <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
               {t('auth.otpCode')}

@@ -595,6 +595,7 @@ Regeln:
 - Registrierung und Authentifizierung bleiben die Wahrheitsquelle.
 - Passkey-Fehler dürfen nicht in unsichere Master-only- oder Recovery-Fallbacks abgleiten.
 - Tests für Erfolg, Ablehnung, Nichtunterstützung, RP-ID/Origin-Mismatch und Abbruch ergänzen, wenn betroffen.
+- Ein Passkey als zweiter Faktor wird **auf dem Server** geprüft: Einmal-Challenge je Zweck, Unterschrift gegen den gespeicherten Schlüssel (`backend/services/passkey_service.py`, ADR-0009). Eine Browser-Abfrage ohne Server-Challenge (`verifyPasskey`) ist nur lokale Entsperrung. Ihr Ergebnis geht nie als Nachweis an den Server. Bis 09/2026 genügte `passkey_verified: true`, und dieses Feld konnte jeder selbst schicken.
 
 Schlecht:
 

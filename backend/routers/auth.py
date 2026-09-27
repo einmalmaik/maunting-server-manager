@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import time
@@ -39,6 +40,9 @@ from schemas.device_pairing import (
 from services import AuthService, EmailService, audit_service
 from services import bild_upload
 from services import device_pairing_service
+from services import passkey_service
+from services import login_challenge_service
+from schemas.passkey import PasskeyAnlage, PasskeyOptionenRequest, TwoFactorDisableRequest
 from services.email_verification_service import EmailVerificationService
 from services.jwt_blacklist_service import blacklist_jwt
 from services.backup_code_service import BackupCodeService
@@ -94,6 +98,126 @@ def _log_smtp_missing(email: str) -> None:
 def _set_login_session(response: Response, db: Session, user: User) -> SessionTokens:
     """Duennes Alias auf die gemeinsame Sitzungsausstellung (siehe session_service)."""
     return issue_session(response, db, user)
+
+
+_ZWISCHENSCHEIN = "login_2fa"
+_ZWISCHENSCHEIN_SEKUNDEN = 300
+# Fehlversuche je Schein. Danach ist er verbraucht, und der naechste Versuch
+# braucht wieder Captcha und Passwort — sonst waere der Schein ein Freibrief,
+# TOTP- und Backup-Codes ohne Abfrage durchzuprobieren.
+_ZWISCHENSCHEIN_VERSUCHE = 3
+
+
+def _zwischenschein(db: Session, req: LoginRequest | LoginVerifyRequest):
+    """Der Schein aus dem ersten Login-Schritt, falls gueltig — sonst ``None``.
+
+    Warum es ihn gibt: der zweite Schritt schickte bis 09/2026 dasselbe
+    Captcha-Token noch einmal. ALTCHA-Token gelten aber nur einmal, und mit
+    eingeschalteter Sicherheitsabfrage scheiterte jede 2FA-Anmeldung am
+    zweiten Schritt mit „CAPTCHA-Verifizierung fehlgeschlagen".
+
+    Ausgestellt wird der Schein nur nach bestandener Abfrage **und** richtigem
+    Passwort, gebunden an das Konto, fuenf Minuten und hoechstens
+    `_ZWISCHENSCHEIN_VERSUCHE` Fehlversuche gueltig. Er oeffnet also keinen
+    Weg, Passwoerter oder Codes ohne Abfrage durchzuprobieren.
+
+    Ein mitgeschickter, aber ungueltiger Schein ist 403 — nicht still der
+    Captcha-Weg. Sonst scheiterte der naechste Versuch am schon verbrauchten
+    Captcha-Token, und die Seite wuesste nicht, dass sie von vorn beginnen muss.
+    """
+    if not req.login_challenge:
+        return None
+    schein = login_challenge_service.lookup_valid(db, req.login_challenge, _ZWISCHENSCHEIN)
+    if schein is None:
+        raise HTTPException(status_code=403, detail="Anmeldung abgelaufen. Bitte erneut anmelden.")
+    return schein
+
+
+def _schein_fehlversuch(db: Session, schein) -> None:
+    """Zaehlt einen Fehlversuch am Schein; beim letzten wird er verbraucht (403)."""
+    if schein is None:
+        return
+    daten = json.loads(schein.payload_json) if schein.payload_json else {}
+    versuche = int(daten.get("fehlversuche", 0)) + 1
+    if versuche >= _ZWISCHENSCHEIN_VERSUCHE:
+        login_challenge_service.consume(db, schein)
+        raise HTTPException(status_code=403, detail="Zu viele Fehlversuche. Bitte erneut anmelden.")
+    schein.payload_json = json.dumps({"fehlversuche": versuche})
+    db.commit()
+
+
+def _login_zweiter_faktor(
+    db: Session, user: User, req: LoginRequest | LoginVerifyRequest, request: Request,
+    schein=None,
+) -> dict | None:
+    """Der zweite Faktor beim Login. ``None`` heisst bestanden, sonst die Rueckfrage.
+
+    Es zaehlt genau der eingerichtete Faktor oder ein Backup-Code. Bis 09/2026
+    stand hier ``if req.passkey_verified: pass`` — ein Feld aus dem Request,
+    mit dem jeder, der das Passwort kannte, die 2FA jedes Kontos uebersprang.
+    """
+    methode = user.two_factor_method
+    if req.passkey is not None:
+        if methode != "passkey":
+            raise HTTPException(status_code=401, detail="Für dieses Konto gilt kein Passkey.")
+        try:
+            passkey_service.bestaetigen(db, user, req.passkey.model_dump(), "login")
+        except passkey_service.PasskeyFehler as e:
+            _schein_fehlversuch(db, schein)
+            raise HTTPException(status_code=401, detail=str(e))
+        return None
+    if not req.otp_code:
+        rueckfrage = {
+            "requires_2fa": True, "access_token": "", "token_type": "",
+            "requires_verification": False, "email": user.email,
+            "two_factor_method": methode,
+            # Der Zwischenschein ersetzt im zweiten Schritt die Sicherheitsabfrage.
+            # Nur wer ohne Schein kam (also mit Captcha), bekommt einen neuen —
+            # sonst liesse sich der Fehlversuchszaehler durch Nachfragen umgehen.
+            "login_challenge": "" if schein is not None else login_challenge_service.create_challenge(
+                db, purpose=_ZWISCHENSCHEIN, user_id=user.id,
+                ttl_seconds=_ZWISCHENSCHEIN_SEKUNDEN,
+            ),
+        }
+        if methode == "passkey":
+            try:
+                rueckfrage["passkey_options"] = passkey_service.bestaetigungs_optionen(
+                    db, user, request.headers.get("origin"), "login"
+                )
+            except passkey_service.PasskeyFehler:
+                # Kein Passkey fuer diese Adresse: bleibt der Backup-Code.
+                pass
+        return rueckfrage
+    if methode == "totp" and AuthService.verify_current_2fa_code(user, req.otp_code):
+        return None
+    if BackupCodeService.validate_backup_code(db, user.id, req.otp_code):
+        return None
+    _schein_fehlversuch(db, schein)
+    raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
+
+
+def _zweiter_faktor_pflicht(
+    db: Session, user: User, otp_code: str | None, passkey, zweck: str
+) -> None:
+    """Vor Kontoaenderungen: der eingerichtete Faktor, sonst 401.
+
+    Mit Passkey-2FA liessen sich Passwort, E-Mail und Konto bis 09/2026 gar
+    nicht aendern — hier galt nur der TOTP-Code, den ein solches Konto nicht hat.
+    """
+    if not user.two_factor_enabled:
+        return
+    if user.two_factor_method == "passkey":
+        if passkey is None:
+            raise HTTPException(status_code=401, detail="Passkey-Bestätigung erforderlich")
+        try:
+            passkey_service.bestaetigen(db, user, passkey.model_dump(), zweck)
+        except passkey_service.PasskeyFehler as e:
+            raise HTTPException(status_code=401, detail=str(e))
+        return
+    if not otp_code:
+        raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
+    if not AuthService.verify_current_2fa_code(user, otp_code):
+        raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
 
 
 def _native_token_body(tokens: SessionTokens) -> dict:
@@ -324,6 +448,7 @@ async def register_verify(
 def login_verify(
     req: LoginVerifyRequest,
     response: Response,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> dict:
     user = AuthService.get_user_by_username(db, req.username)
@@ -348,14 +473,9 @@ def login_verify(
     db.commit()
 
     if user.two_factor_enabled:
-        if req.passkey_verified:
-            pass
-        elif not req.otp_code:
-            return {"access_token": "", "token_type": "", "requires_2fa": True, "requires_verification": False, "email": user.email}
-        elif not AuthService.verify_current_2fa_code(user, req.otp_code):
-            backup_valid = BackupCodeService.validate_backup_code(db, user.id, req.otp_code)
-            if not backup_valid:
-                raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
+        rueckfrage = _login_zweiter_faktor(db, user, req, request)
+        if rueckfrage is not None:
+            return rueckfrage
 
     tokens = _set_login_session(response, db, user)
     if req.native_client:
@@ -371,8 +491,14 @@ async def login(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
-    await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
+    schein = _zwischenschein(db, req)
+    if schein is None:
+        await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
     user = AuthService.get_user_by_username(db, req.username)
+    # Der Schein gilt nur fuer das Konto, fuer das er ausgestellt wurde — und
+    # das wird geprueft, bevor das Passwort etwas verraet.
+    if schein is not None and (not user or schein.user_id != user.id):
+        raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten")
     if not user or not AuthService.verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten")
 
@@ -393,15 +519,11 @@ async def login(
         return {"access_token": "", "token_type": "", "requires_2fa": False, "requires_verification": True, "email": user.email}
 
     if user.two_factor_enabled:
-        if req.passkey_verified:
-            pass
-        elif not req.otp_code:
-            return {"requires_2fa": True, "access_token": "", "token_type": "", "requires_verification": False, "email": user.email}
-        elif not AuthService.verify_current_2fa_code(user, req.otp_code):
-            # Backup-Code als Fallback pruefen
-            backup_valid = BackupCodeService.validate_backup_code(db, user.id, req.otp_code)
-            if not backup_valid:
-                raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
+        rueckfrage = _login_zweiter_faktor(db, user, req, request, schein)
+        if rueckfrage is not None:
+            return rueckfrage
+    if schein is not None:
+        login_challenge_service.consume(db, schein)
 
     # Hier legte der Server bis 09/2026 einen E2EE-Schlüssel für das Konto an.
     # Das Gerät bringt seinen eigenen mit und veröffentlicht ihn selbst.
@@ -459,7 +581,8 @@ def create_device_pairing(
     `ai.chat.use` als Schranke: ohne dieses Recht kann die App nichts, was sie
     ausmacht. Wer es nicht hat, soll erst gar keinen Zugang erzeugen koennen.
 
-    Dazu ein frischer Nachweis: bei 2FA der aktuelle Code, sonst das Passwort.
+    Dazu ein frischer Nachweis: bei 2FA der eingerichtete Faktor (Code oder
+    Passkey), sonst das Passwort.
     Ein gekoppeltes Geraet ist ein Zugang ohne Ablauf; bis 26.09.2026 genuegte
     dafuer ein Zugangstoken mit 15 Minuten Laufzeit. Wer eines abgriff, etwa
     ueber ein Anrufbild in der Desktop-App, machte daraus einen dauerhaften
@@ -469,13 +592,20 @@ def create_device_pairing(
     from models import OAuthUserLink
 
     if user.two_factor_enabled:
-        verifiziert = False
-        if req.otp_code and AuthService.verify_current_2fa_code(user, req.otp_code):
-            verifiziert = True
-        elif req.passkey_verified:
-            verifiziert = True
-        if not verifiziert:
-            raise HTTPException(status_code=403, detail="Bitte den aktuellen 2FA-Code eingeben oder per Passkey bestätigen.")
+        if not passkey_service.zweiter_faktor_bestaetigt(
+            db, user,
+            otp_code=req.otp_code,
+            passkey=req.passkey.model_dump() if req.passkey else None,
+            zweck="device_pairing",
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Bitte mit deinem Passkey bestätigen."
+                    if user.two_factor_method == "passkey"
+                    else "Bitte den aktuellen 2FA-Code eingeben."
+                ),
+            )
     else:
         has_oauth = (
             db.query(OAuthUserLink).filter(OAuthUserLink.user_id == user.id).first() is not None
@@ -974,11 +1104,7 @@ async def change_password(
     if not AuthService.verify_password(req.current_password, user.password_hash):
         raise HTTPException(status_code=401, detail="Aktuelles Passwort falsch")
 
-    if user.two_factor_enabled:
-        if not req.otp_code:
-            raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
-        if not AuthService.verify_current_2fa_code(user, req.otp_code):
-            raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
+    _zweiter_faktor_pflicht(db, user, req.otp_code, req.passkey, "password_change")
 
     AuthService.reset_password(db, user, req.new_password)
     audit_service.record_privileged_action(
@@ -1006,11 +1132,7 @@ async def change_email(
     if AuthService.get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")
 
-    if user.two_factor_enabled:
-        if not req.otp_code:
-            raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
-        if not AuthService.verify_current_2fa_code(user, req.otp_code):
-            raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
+    _zweiter_faktor_pflicht(db, user, req.otp_code, req.passkey, "email_change")
 
     user.email = req.email
     user.email_verified = False
@@ -1092,11 +1214,7 @@ def delete_account(
         raise HTTPException(status_code=400, detail="Bestätigung delete erforderlich")
 
     # 2FA: niemals überspringen wenn aktiv
-    if user.two_factor_enabled:
-        if not req.otp_code:
-            raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
-        if not AuthService.verify_current_2fa_code(user, req.otp_code):
-            raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
+    _zweiter_faktor_pflicht(db, user, req.otp_code, req.passkey, "account_delete")
 
     # 3. Owner-Sperre: Owner-Account darf nicht geloescht werden
     if user.is_owner:
@@ -1183,13 +1301,49 @@ async def enable_2fa(
     return {"message": "2FA aktiviert"}
 
 
-@router.post("/2fa/passkey/enable")
-async def enable_2fa_passkey(
+@router.post("/2fa/passkey/options")
+def passkey_anlege_optionen(
+    request: Request,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Aktiviert 2FA via Passkey / Biometrie nach erfolgreicher lokaler Verifikation."""
+    """Optionen fuer `navigator.credentials.create()` — nur, solange 2FA aus ist.
+
+    Wie bei `/2fa/setup`: ein aktiver zweiter Faktor wird nicht nebenbei
+    ersetzt. Wer wechseln will, schaltet erst ab.
+    """
+    if user.two_factor_enabled:
+        raise HTTPException(status_code=400, detail="2FA ist bereits aktiv. Bitte zuerst deaktivieren.")
+    try:
+        return passkey_service.anlege_optionen(db, user, request.headers.get("origin"))
+    except passkey_service.PasskeyFehler as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/2fa/passkey/enable")
+async def enable_2fa_passkey(
+    req: PasskeyAnlage,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Aktiviert 2FA per Passkey — erst, wenn der Server den Schluessel hat.
+
+    Bis 09/2026 schaltete dieser Endpunkt 2FA ohne jeden Schluessel ein: der
+    Passkey blieb im Browser, der Server wusste nichts von ihm. Jetzt kommt die
+    Antwort von `navigator.credentials.create()` mit, und erst ein geprueftes
+    Anlegen schaltet ein. Ein von `/2fa/setup` liegengebliebenes TOTP-Geheimnis
+    faellt dabei weg: aktiv ohne Geheimnis heisst Passkey (`User.two_factor_method`).
+    """
+    if user.two_factor_enabled:
+        raise HTTPException(status_code=400, detail="2FA ist bereits aktiv. Bitte zuerst deaktivieren.")
+    try:
+        passkey_service.anlegen(db, user, req.model_dump())
+    except passkey_service.PasskeyFehler as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    user.two_factor_secret_encrypted = None
     user.two_factor_enabled = True
     db.commit()
     audit_service.record_privileged_action(
@@ -1206,25 +1360,63 @@ async def enable_2fa_passkey(
     return {"message": "2FA via Passkey aktiviert"}
 
 
-@router.post("/2fa/disable")
-async def disable_2fa(
-    otp_code: str | None = None,
-    passkey_verified: bool = False,
+@router.post("/passkey/options")
+def passkey_bestaetigungs_optionen(
+    req: PasskeyOptionenRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """2FA deaktivieren — erfordert aktuellen 2FA-Code oder Passkey-Verifikation."""
+    """Optionen fuer `navigator.credentials.get()` vor einer geschuetzten Aktion.
+
+    Die Challenge gilt nur fuer den genannten Zweck — ein Nachweis fuer das
+    Koppeln schaltet keine 2FA ab.
+    """
+    if req.zweck not in passkey_service.ZWECKE_ANGEMELDET:
+        raise HTTPException(status_code=400, detail="Unbekannter Vorgang.")
+    if user.two_factor_method != "passkey":
+        raise HTTPException(status_code=400, detail="Für dieses Konto gilt kein Passkey.")
+    try:
+        return passkey_service.bestaetigungs_optionen(
+            db, user, request.headers.get("origin"), req.zweck
+        )
+    except passkey_service.PasskeyFehler as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/2fa/disable")
+async def disable_2fa(
+    otp_code: str | None = None,
+    body: TwoFactorDisableRequest | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """2FA deaktivieren — mit dem eingerichteten Faktor, nie mit einem Backup-Code.
+
+    TOTP-Konten: der aktuelle Code (Query-Parameter, wie bisher). Passkey-Konten:
+    die Passkey-Antwort im Body. Bis 09/2026 genuegte fuer Passkey-Konten der
+    Query-Parameter ``passkey_verified=true``.
+    """
     if not user.two_factor_enabled:
         raise HTTPException(status_code=400, detail="2FA nicht aktiviert")
-    if user.two_factor_secret_encrypted:
-        if not otp_code or not AuthService.verify_current_2fa_code(user, otp_code):
-            raise HTTPException(status_code=400, detail="Ungültiger 2FA-Code")
-    else:
-        if not passkey_verified and not (otp_code and AuthService.verify_current_2fa_code(user, otp_code)):
-            raise HTTPException(status_code=400, detail="Passkey-Bestätigung erforderlich")
+    passkey = body.passkey.model_dump() if body and body.passkey else None
+    if not passkey_service.zweiter_faktor_bestaetigt(
+        db, user, otp_code=otp_code, passkey=passkey, zweck="2fa_disable"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Passkey-Bestätigung erforderlich"
+                if user.two_factor_method == "passkey"
+                else "Ungültiger 2FA-Code"
+            ),
+        )
     user.two_factor_enabled = False
     user.two_factor_secret_encrypted = None
+    for eintrag in list(user.passkeys):
+        db.delete(eintrag)
     BackupCodeService.clear_all_backup_codes(db, user.id)
     db.commit()
     audit_service.record_privileged_action(

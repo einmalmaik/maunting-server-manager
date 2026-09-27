@@ -1,11 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/api/client'
 import { Shield, Check, AlertTriangle, Download, RotateCcw, Fingerprint, QrCode } from 'lucide-react'
 import { Button, buttonClasses, MauntingQrCard } from '@/Singra/UI'
 import { Spinner } from '@/components/ui/Spinner'
-import { isPasskeyAvailable, registerPasskey, verifyPasskey } from '@/services/passkeyService'
+import {
+  passkeyAnlegen,
+  passkeyNachweis,
+  webauthnVerfuegbar,
+  type PasskeyAnlageOptionen,
+} from '@/services/passkeyService'
 
 /**
  * Tab: Zwei-Faktor-Authentifizierung (Modulares 2FA: TOTP & Passkey).
@@ -14,7 +19,12 @@ import { isPasskeyAvailable, registerPasskey, verifyPasskey } from '@/services/p
  *  - Setup-Flow mit Wahl zwischen Authenticator-App (TOTP) und Passkey (Biometrie)
  *  - Hochwertiges QR-Code-Design mit Firmen-DNA
  *  - Backup-Codes (Download + Regenerate)
- *  - Disable-Flow mit OTP- oder Passkey-Bestätigung
+ *  - Disable-Flow mit dem eingerichteten Faktor — nur dieser eine Weg wird gezeigt
+ *
+ * Der Passkey liegt seit 09/2026 auf dem Server: angelegt über
+ * `/2fa/passkey/options` + `/2fa/passkey/enable`, bestätigt über eine
+ * unterschriebene Challenge. Vorher blieb er im Browser, und der Server
+ * glaubte ein `passkey_verified=true`.
  */
 export function TwoFactorTab() {
   const { t } = useTranslation()
@@ -26,17 +36,14 @@ export function TwoFactorTab() {
   const [show2FASetup, setShow2FASetup] = useState(false)
   const [show2FADisable, setShow2FADisable] = useState(false)
   const [activeSetupTab, setActiveSetupTab] = useState<'totp' | 'passkey'>('totp')
-  const [passkeySupported, setPasskeySupported] = useState(false)
+  const passkeySupported = webauthnVerfuegbar()
+  const methode = user?.two_factor_enabled ? (user.two_factor_method ?? 'totp') : null
 
   const [otpCode, setOtpCode] = useState('')
   const [faSecret, setFaSecret] = useState('')
   const [faUri, setFaUri] = useState('')
   const [qrDataUri, setQrDataUri] = useState<string | null>(null)
   const [backupCodes, setBackupCodes] = useState<string[]>([])
-
-  useEffect(() => {
-    void isPasskeyAvailable().then(setPasskeySupported)
-  }, [])
 
   const handleSetup2FA = async () => {
     setError('')
@@ -62,9 +69,8 @@ export function TwoFactorTab() {
       await api('/auth/2fa/enable?otp_code=' + otpCode, { method: 'POST' })
       const codesRes = await api<{ codes: string[] }>('/auth/2fa/backup/generate', { method: 'POST' })
       setBackupCodes(codesRes.codes)
-      const updated = await api<{ two_factor_enabled: boolean }>('/auth/me')
-      if (user && updated) {
-        setUser({ ...user, two_factor_enabled: true })
+      if (user) {
+        setUser({ ...user, two_factor_enabled: true, two_factor_method: 'totp' })
       }
       setShow2FASetup(false)
       setOtpCode('')
@@ -85,14 +91,12 @@ export function TwoFactorTab() {
     setError('')
     setSubmitting(true)
     try {
-      await registerPasskey({ id: user.id, username: user.username, email: user.email })
-      await api('/auth/2fa/passkey/enable', { method: 'POST' })
+      const optionen = await api<PasskeyAnlageOptionen>('/auth/2fa/passkey/options', { method: 'POST' })
+      const anlage = await passkeyAnlegen(optionen)
+      await api('/auth/2fa/passkey/enable', { method: 'POST', body: JSON.stringify(anlage) })
       const codesRes = await api<{ codes: string[] }>('/auth/2fa/backup/generate', { method: 'POST' })
       setBackupCodes(codesRes.codes)
-      const updated = await api<{ two_factor_enabled: boolean }>('/auth/me')
-      if (user && updated) {
-        setUser({ ...user, two_factor_enabled: true })
-      }
+      setUser({ ...user, two_factor_enabled: true, two_factor_method: 'passkey' })
       setShow2FASetup(false)
       setFaSecret('')
       setFaUri('')
@@ -113,7 +117,7 @@ export function TwoFactorTab() {
     try {
       await api('/auth/2fa/disable?otp_code=' + otpCode, { method: 'POST' })
       if (user) {
-        setUser({ ...user, two_factor_enabled: false })
+        setUser({ ...user, two_factor_enabled: false, two_factor_method: null })
       }
       setShow2FADisable(false)
       setOtpCode('')
@@ -130,11 +134,10 @@ export function TwoFactorTab() {
     setError('')
     setSubmitting(true)
     try {
-      const verified = await verifyPasskey('2FA deaktivieren')
-      if (!verified) throw new Error('Biometrische Bestätigung fehlgeschlagen.')
-      await api('/auth/2fa/disable?passkey_verified=true', { method: 'POST' })
+      const nachweis = await passkeyNachweis('2fa_disable')
+      await api('/auth/2fa/disable', { method: 'POST', body: JSON.stringify({ passkey: nachweis }) })
       if (user) {
-        setUser({ ...user, two_factor_enabled: false })
+        setUser({ ...user, two_factor_enabled: false, two_factor_method: null })
       }
       setShow2FADisable(false)
       setSuccess(t('profile.2faDisabled'))
@@ -288,7 +291,7 @@ export function TwoFactorTab() {
               </div>
               <Button
                 onClick={handleEnablePasskey}
-                disabled={submitting}
+                disabled={submitting || !passkeySupported}
                 className="w-full sm:w-auto inline-flex items-center gap-2 justify-center"
               >
                 {submitting ? <Spinner /> : <Fingerprint className="w-4 h-4" />}
@@ -371,9 +374,11 @@ export function TwoFactorTab() {
 
       {show2FADisable && (
         <div className="mt-4 space-y-4 border-t border-outline-variant/30 pt-4">
-          <p className="font-body-md text-sm text-on-surface-variant">{t('profile.2faEnterCode')}</p>
+          {methode === 'totp' && (
+            <p className="font-body-md text-sm text-on-surface-variant">{t('profile.2faEnterCode')}</p>
+          )}
           <div className="flex flex-col sm:flex-row gap-3 items-center max-w-md">
-            {passkeySupported && (
+            {methode === 'passkey' ? (
               <Button
                 type="button"
                 variant="secondary"
@@ -384,7 +389,7 @@ export function TwoFactorTab() {
                 <Fingerprint className="w-4 h-4 text-primary" />
                 {t('profile.2faDisableWithPasskey')}
               </Button>
-            )}
+            ) : (
             <form onSubmit={handleDisable2FA} className="flex gap-2 flex-1 w-full sm:w-auto">
               <input
                 type="text"
@@ -409,6 +414,7 @@ export function TwoFactorTab() {
                 )}
               </Button>
             </form>
+            )}
           </div>
           <button
             type="button"

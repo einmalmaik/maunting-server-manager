@@ -6,6 +6,7 @@ import { api, apiStream } from './client'
 import { nachweisKopf } from '@/services/mailboxNachweis'
 import { eigenerPushAbdruck } from '@/services/mailboxPush'
 import i18n from '@/i18n'
+import type { PasskeyNachweis } from '@/services/passkeyService'
 
 export interface FriendItem {
   id: number
@@ -300,7 +301,8 @@ export interface ResetEigeneGeraeteInput {
   password?: string | null
   confirmation?: string | null
   otp_code?: string | null
-  passkey_verified?: boolean
+  /** Unterschriebene Passkey-Antwort (`passkeyNachweis('e2ee_reset')`). */
+  passkey?: PasskeyNachweis | null
 }
 
 /** Alle Geräte verloren: Verzeichnis leeren, andere Sitzungen sperren. */

@@ -315,7 +315,7 @@ def test_neustart_social_login_mit_reset_bestaetigung(client: TestClient, db: Se
     assert e2ee_device_service.geraete(db, user.id) == []
 
 
-def test_neustart_mit_2fa_passkey_oder_otp(client: TestClient, db: Session, clean_db):
+def test_neustart_mit_2fa_nur_mit_dem_eingerichteten_faktor(client: TestClient, db: Session, clean_db):
     from services.dis_client import DisClient
     user = _konto(db, "twofa_user")
     user.two_factor_enabled = True
@@ -335,8 +335,13 @@ def test_neustart_mit_2fa_passkey_oder_otp(client: TestClient, db: Session, clea
     res = client.post("/api/social/e2ee/devices/self/reset", headers=neu_kopf, json={"otp_code": "000000"})
     assert res.status_code == 403
 
-    # Passkey-Bestätigung -> 200
+    # Das alte Feld `passkey_verified` oeffnete bis 09/2026 jedes Konto -> 403
     res = client.post("/api/social/e2ee/devices/self/reset", headers=neu_kopf, json={"passkey_verified": True})
+    assert res.status_code == 403
+
+    # Aktueller Code des eingerichteten Faktors -> 200
+    from tests._totp import totp_now
+    res = client.post("/api/social/e2ee/devices/self/reset", headers=neu_kopf, json={"otp_code": totp_now(secret)})
     assert res.status_code == 200
     assert res.json()["removed"] == 1
     assert e2ee_device_service.geraete(db, user.id) == []

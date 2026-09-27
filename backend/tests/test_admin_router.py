@@ -158,16 +158,34 @@ class TestUpdateUserOwnerProtection:
         owner_cookies: dict,
         db: Session,
     ):
-        """Owner darf den eigenen Account weiterhin updaten (z. B. 2FA aktivieren)."""
+        """Owner darf den eigenen Account weiterhin updaten (z. B. die Zeitzone)."""
+        r = client.patch(
+            f"/api/admin/users/{owner_user.id}",
+            json={"time_zone": "Europe/Berlin"},
+            cookies=owner_cookies,
+            headers=_csrf(owner_cookies),
+        )
+        assert r.status_code == 200
+        db.refresh(owner_user)
+        assert owner_user.time_zone == "Europe/Berlin"
+
+    def test_2fa_einschalten_ohne_faktor_sperrt_nicht_aus(
+        self,
+        client: TestClient,
+        owner_user: User,
+        owner_cookies: dict,
+        db: Session,
+    ):
+        """Aktiv ohne TOTP-Geheimnis hiesse Passkey — ohne Passkey. Das waere ausgesperrt."""
         r = client.patch(
             f"/api/admin/users/{owner_user.id}",
             json={"two_factor_enabled": True},
             cookies=owner_cookies,
             headers=_csrf(owner_cookies),
         )
-        assert r.status_code == 200
+        assert r.status_code == 400
         db.refresh(owner_user)
-        assert owner_user.two_factor_enabled is True
+        assert owner_user.two_factor_enabled is False
 
     def test_admin_can_modify_regular_user(
         self,

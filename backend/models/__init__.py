@@ -35,6 +35,7 @@ from .refresh_token import RefreshToken
 from .jwt_blacklist import JwtBlacklist
 from .email_verification import EmailVerification
 from .backup_code import BackupCode
+from .user_passkey import UserPasskey
 from .panel_setting import PanelSetting
 from .server_port import ServerPort
 from .oauth_provider import OAuthProvider
@@ -99,7 +100,7 @@ __all__ = [
     "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",
     "Team", "TeamInvitation", "TeamMember", "TeamServerGrant",
     "Backup", "PanelBackup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",
-    "EmailVerification", "BackupCode", "PanelSetting", "ServerPort",
+    "EmailVerification", "BackupCode", "UserPasskey", "PanelSetting", "ServerPort",
     "OAuthProvider", "OAuthUserLink", "LoginChallenge",
     "PostgresDatabase", "PostgresUser", "PostgresGrant", "PostgresInstance",
     "WebhookSubscription", "WebhookDelivery", "SingraWebhookEvent",

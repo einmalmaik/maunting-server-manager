@@ -565,6 +565,26 @@ class TestComplete2FAChallenge:
         assert second is None
 
 
+    def test_drei_fehlversuche_verbrauchen_die_challenge(self, db: Session, regular_user: User):
+        """Bis 09/2026 blieb die Challenge bei falschem Code offen — TOTP ohne Grenze zu raten."""
+        from tests._totp import totp_now
+        secret = "JBSWY3DPEHPK3PXP"
+        self._enable_2fa(db, regular_user, secret)
+        provider = _make_provider(db, slug="gh", preset="github")
+        token = oauth_service.create_2fa_challenge(db, regular_user, provider)
+        for falsch in ("000000", "000001", "000002"):
+            assert oauth_service.complete_2fa_challenge(db, token, falsch) is None
+        assert oauth_service.complete_2fa_challenge(db, token, totp_now(secret)) is None
+
+    def test_backup_code_gilt_wie_beim_passwort_login(self, db: Session, regular_user: User):
+        from services.backup_code_service import BackupCodeService
+        self._enable_2fa(db, regular_user)
+        codes = BackupCodeService.generate_backup_codes(db, regular_user.id)
+        provider = _make_provider(db, slug="gh", preset="github")
+        token = oauth_service.create_2fa_challenge(db, regular_user, provider)
+        assert oauth_service.complete_2fa_challenge(db, token, codes[0]) is not None
+
+
 # ── Permission-Catalog Self-Heal ──────────────────────────────────────
 
 class TestPermissionCatalogOAuth:

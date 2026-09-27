@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_serializer, field_validator
 from services.chat_media_validator import MAX_STORY_MEDIA_URL_CHARS
+from schemas.passkey import PasskeyNachweis
 
 
 class AchievementResponse(BaseModel):
@@ -617,7 +618,7 @@ class E2eeDeviceResetRequest(BaseModel):
     """Alle Geraete verloren: Neustart des Geraeteverzeichnisses.
 
     Verifikation:
-    - Bei aktivem 2FA: otp_code (TOTP) oder passkey_verified.
+    - Bei aktivem 2FA: der eingerichtete Faktor — otp_code (TOTP) oder passkey.
     - Ohne 2FA:
       - Lokale Accounts: password
       - Social-Only Accounts (OAuthUserLink): confirmation="RESET"
@@ -626,7 +627,7 @@ class E2eeDeviceResetRequest(BaseModel):
     password: str | None = Field(default=None, max_length=512)
     confirmation: str | None = Field(default=None, max_length=64)
     otp_code: str | None = Field(default=None, max_length=32)
-    passkey_verified: bool = Field(default=False)
+    passkey: PasskeyNachweis | None = None
 
 
 class SocialProfileResponse(BaseModel):

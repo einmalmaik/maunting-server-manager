@@ -122,6 +122,8 @@ class TestNachweis:
     ):
         _mit_chatrecht(db, regular_user)
         regular_user.two_factor_enabled = True
+        # Ein TOTP-Konto: aktiv ohne Geheimnis hiesse Passkey (`two_factor_method`).
+        regular_user.two_factor_secret_encrypted = "totp-geheimnis"
         db.commit()
         monkeypatch.setattr(
             AuthService, "verify_current_2fa_code", staticmethod(lambda _u, code: code == "123456")

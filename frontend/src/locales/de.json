@@ -2760,6 +2760,8 @@
     "backupCode": "Backup-Code",
     "resendFailed": "Der Code konnte nicht erneut gesendet werden.",
     "use2FAInstead": "Stattdessen einen 2FA-Code verwenden",
+    "usePasskeyInstead": "Stattdessen mit Passkey bestätigen",
+    "passkeyNotHere": "Für diese Adresse ist kein Passkey eingerichtet. Nimm einen Backup-Code.",
     "captchaLoadFailed": "Sicherheitsabfrage konnte nicht geladen werden. Bitte Werbeblocker prüfen oder Seite neu laden.",
     "errors": {
       "refreshUnavailable": "Refresh temporär nicht möglich",

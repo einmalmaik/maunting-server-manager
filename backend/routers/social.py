@@ -419,18 +419,20 @@ def reset_own_e2ee_devices(
     """Alle Geräte verloren: Verzeichnis leeren, alle anderen Sitzungen sperren.
 
     Verifikation:
-    - Bei aktivem 2FA: otp_code (TOTP) oder passkey_verified.
+    - Bei aktivem 2FA: der eingerichtete Faktor — otp_code (TOTP) oder passkey.
     - Ohne 2FA:
       - Social-Only Accounts (OAuthUserLink): Bestätigungswort RESET.
       - Lokale Passwort-Accounts: Passwort-Prüfung.
     """
     if user.two_factor_enabled:
-        verifiziert = False
-        if req.otp_code and AuthService.verify_current_2fa_code(user, req.otp_code):
-            verifiziert = True
-        elif req.passkey_verified:
-            verifiziert = True
-        if not verifiziert:
+        from services import passkey_service
+
+        if not passkey_service.zweiter_faktor_bestaetigt(
+            db, user,
+            otp_code=req.otp_code,
+            passkey=req.passkey.model_dump() if req.passkey else None,
+            zweck="e2ee_reset",
+        ):
             raise HTTPException(status_code=403, detail="2FA-Bestätigung erforderlich oder ungültig")
     else:
         has_oauth_links = (

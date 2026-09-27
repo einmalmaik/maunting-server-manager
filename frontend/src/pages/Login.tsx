@@ -16,7 +16,7 @@ import { Shield, ArrowRight, KeyRound, Mail, Check, Fingerprint } from 'lucide-r
 import { Button, buttonClasses } from '@/Singra/UI'
 import { Spinner } from '@/components/ui/Spinner'
 import { sicheresZiel } from '@/lib/sicheresZiel'
-import { isPasskeyAvailable, verifyPasskey } from '@/services/passkeyService'
+import { passkeyBestaetigen, type PasskeyBestaetigungsOptionen } from '@/services/passkeyService'
 export function Login() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -29,7 +29,12 @@ export function Login() {
   const [captchaResetKey, setCaptchaResetKey] = useState(0)
   const [form, setForm] = useState({ username: '', password: '', otp: '' })
   const [requires2FA, setRequires2FA] = useState(false)
-  const [hasPasskey, setHasPasskey] = useState(false)
+  // Welcher Faktor gilt — der Server sagt es nach dem Passwort. Gezeigt wird
+  // nur dieser Weg (plus Backup-Code als Notausgang).
+  const [methode, setMethode] = useState<'totp' | 'passkey' | null>(null)
+  const [passkeyOptionen, setPasskeyOptionen] = useState<PasskeyBestaetigungsOptionen | null>(null)
+  // Ersetzt im zweiten Schritt das Captcha-Token: das gilt nur einmal.
+  const [zwischenschein, setZwischenschein] = useState<string | null>(null)
   // Solange die Sicherheitsabfrage nicht bestanden ist, bleiben Formular und
   // Social Login zu. Sonst war der Social Login der Weg drumherum. Im
   // 2FA-Schritt ist die Abfrage schon bestanden und das Widget ausgeblendet.
@@ -54,10 +59,6 @@ export function Login() {
   const oauthSlug = searchParams.get('slug') || ''
 
   const [oauthProviders, setOauthProviders] = useState<OAuthProviderPublic[]>([])
-
-  useEffect(() => {
-    isPasskeyAvailable().then(setHasPasskey).catch(() => setHasPasskey(false))
-  }, [])
 
   useEffect(() => {
     let active = true
@@ -85,13 +86,14 @@ export function Login() {
     setSubmitting(true)
 
     try {
-      const res = await api<{ access_token: string; requires_2fa: boolean; requires_verification: boolean; email: string }>('/auth/login', {
+      const res = await api<ZweiFaktorAntwort & { access_token: string; requires_verification: boolean; email: string }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({
           username: form.username,
           password: form.password,
           otp_code: form.otp || null,
           captcha_token: captchaToken,
+          login_challenge: zwischenschein,
         }),
       })
 
@@ -103,7 +105,7 @@ export function Login() {
       }
 
       if (res.requires_2fa) {
-        setRequires2FA(true)
+        zweiterFaktorVerlangt(res)
         setSubmitting(false)
         return
       }
@@ -116,25 +118,55 @@ export function Login() {
       setSubmitting(false)
       setCaptchaToken(null)
       setCaptchaResetKey((k) => k + 1)
+      if (requires2FA && err?.status === 403) vonVorn()
     }
   }
 
+  /**
+   * Der Zwischenschein ist verbraucht (drei Fehlversuche) oder abgelaufen: der
+   * nächste Versuch braucht wieder Sicherheitsabfrage und Passwort. Die Meldung
+   * vom Server bleibt stehen.
+   */
+  const vonVorn = () => {
+    setRequires2FA(false)
+    setMethode(null)
+    setPasskeyOptionen(null)
+    setZwischenschein(null)
+    setUseBackupCode(false)
+    setForm((f) => ({ ...f, otp: '' }))
+    setCaptchaToken(null)
+    setCaptchaResetKey((k) => k + 1)
+  }
+
+  const zweiterFaktorVerlangt = (res: ZweiFaktorAntwort) => {
+    setRequires2FA(true)
+    setMethode(res.two_factor_method ?? 'totp')
+    setPasskeyOptionen(res.passkey_options ?? null)
+    if (res.login_challenge) setZwischenschein(res.login_challenge)
+  }
+
+  /**
+   * Der Passkey unterschreibt die Challenge aus dem ersten Schritt; der Server
+   * prüft die Unterschrift. Scheitert es (abgelaufen, abgebrochen), holt ein
+   * Aufruf ohne Nachweis eine frische Challenge für den nächsten Versuch.
+   */
   const handlePasskeyLogin = async () => {
     setError('')
+    if (!passkeyOptionen) {
+      setError(t('auth.passkeyNotHere'))
+      return
+    }
     setSubmitting(true)
     try {
-      const ok = await verifyPasskey(t('auth.loginWithPasskey'))
-      if (!ok) {
-        setError(t('profile.2faPasskeyFailed'))
-        setSubmitting(false)
-        return
-      }
+      const nachweis = await passkeyBestaetigen(passkeyOptionen)
       await api<{ access_token: string }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({
           username: form.username,
           password: form.password,
-          passkey_verified: true,
+          captcha_token: captchaToken,
+          login_challenge: zwischenschein,
+          passkey: nachweis,
         }),
       })
       const user = await api<User>('/auth/me')
@@ -142,6 +174,25 @@ export function Login() {
       navigate(zielNachLogin, { replace: true })
     } catch (err: any) {
       setError(err.message || t('auth.loginFailed'))
+      if (err?.status === 403) {
+        vonVorn()
+        return
+      }
+      try {
+        const frisch = await api<ZweiFaktorAntwort>('/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({
+            username: form.username,
+            password: form.password,
+            captcha_token: captchaToken,
+            login_challenge: zwischenschein,
+          }),
+        })
+        if (frisch.requires_2fa) zweiterFaktorVerlangt(frisch)
+      } catch (nochmal: any) {
+        // Der Fehler oben steht schon da.
+        if (nochmal?.status === 403) vonVorn()
+      }
     } finally {
       setSubmitting(false)
     }
@@ -152,7 +203,7 @@ export function Login() {
     setError('')
     setSubmitting(true)
     try {
-      const res = await api<{ requires_2fa: boolean }>('/auth/login-verify', {
+      const res = await api<ZweiFaktorAntwort>('/auth/login-verify', {
         method: 'POST',
         body: JSON.stringify({
           username: form.username,
@@ -162,7 +213,7 @@ export function Login() {
         }),
       })
       if (res.requires_2fa) {
-        setRequires2FA(true)
+        zweiterFaktorVerlangt(res)
         setRequiresVerification(false)
         setVerifyCode('')
         return
@@ -357,27 +408,18 @@ export function Login() {
 
               {requires2FA && (
                 <>
-                  {hasPasskey && (
+                  {methode === 'passkey' && !useBackupCode && (
                     <Button
                       type="button"
-                      variant="secondary"
                       onClick={() => void handlePasskeyLogin()}
                       disabled={submitting}
-                      className="w-full flex items-center justify-center gap-2 mb-3"
+                      className="w-full flex items-center justify-center gap-2"
                     >
-                      <Fingerprint className="w-5 h-5 text-primary" />
+                      <Fingerprint className="w-5 h-5" />
                       {t('auth.loginWithPasskey')}
                     </Button>
                   )}
-                  {hasPasskey && (
-                    <div className="relative flex py-1 items-center">
-                      <div className="flex-grow border-t border-outline-variant/30"></div>
-                      <span className="flex-shrink mx-3 text-xs text-on-surface-variant uppercase font-medium">
-                        {t('auth.or')}
-                      </span>
-                      <div className="flex-grow border-t border-outline-variant/30"></div>
-                    </div>
-                  )}
+                  {(methode !== 'passkey' || useBackupCode) && (
                   <div>
                     <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                       {useBackupCode
@@ -394,6 +436,7 @@ export function Login() {
                       maxLength={useBackupCode ? 12 : 6}
                     />
                   </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -404,7 +447,7 @@ export function Login() {
                   >
                     <KeyRound className="w-3 h-3" />
                     {useBackupCode
-                      ? t('auth.use2FAInstead')
+                      ? methode === 'passkey' ? t('auth.usePasskeyInstead') : t('auth.use2FAInstead')
                       : t('auth.useBackupCode')}
                   </button>
                 </>
@@ -416,6 +459,7 @@ export function Login() {
 
               <ErrorMessage message={error} className="text-sm" />
 
+              {!(requires2FA && methode === 'passkey' && !useBackupCode) && (
               <Button size="lg"
                 type="submit"
                 disabled={submitting || captchaBlockiert}
@@ -433,6 +477,7 @@ export function Login() {
                   </>
                 )}
               </Button>
+              )}
             </form>
 
             {oauthProviders.length > 0 && (
@@ -512,27 +557,49 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
   const [otp, setOtp] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const [hasPasskey, setHasPasskey] = useState(false)
+  const [methode, setMethode] = useState<'totp' | 'passkey' | null>(null)
+  // Kein Passkey zur Hand (andere Adresse, verloren): der Backup-Code gilt auch hier.
+  const [mitBackupCode, setMitBackupCode] = useState(false)
+
+  /** Welcher Faktor gilt — und für Passkey-Konten eine frische Challenge. */
+  const methodeLaden = async (): Promise<{ optionen: PasskeyBestaetigungsOptionen | null; hinweis: string }> => {
+    const res = await fetch(apiUrl(`/oauth/${slug}/2fa/methode`), {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challenge }),
+    })
+    if (!res.ok) throw new Error(t('auth.loginFailed'))
+    const daten = (await res.json()) as {
+      methode: 'totp' | 'passkey' | null
+      passkey_options?: PasskeyBestaetigungsOptionen
+      hinweis?: string
+    }
+    setMethode(daten.methode ?? 'totp')
+    return { optionen: daten.passkey_options ?? null, hinweis: daten.hinweis ?? '' }
+  }
 
   useEffect(() => {
-    isPasskeyAvailable().then(setHasPasskey).catch(() => setHasPasskey(false))
-  }, [])
+    methodeLaden().catch(() => setMethode('totp'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug, challenge])
 
   const handlePasskeyOAuth = async () => {
     setError('')
     setSubmitting(true)
     try {
-      const ok = await verifyPasskey(t('auth.loginWithPasskey'))
-      if (!ok) {
-        setError(t('profile.2faPasskeyFailed'))
-        setSubmitting(false)
+      // Die Challenge wird erst beim Klick geholt: sie gilt fünf Minuten.
+      const { optionen, hinweis } = await methodeLaden()
+      if (!optionen) {
+        setError(hinweis || t('auth.passkeyNotHere'))
         return
       }
+      const nachweis = await passkeyBestaetigen(optionen)
       const res = await fetch(apiUrl(`/oauth/${slug}/2fa`), {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ challenge, passkey_verified: true }),
+        body: JSON.stringify({ challenge, passkey: nachweis }),
         redirect: 'manual',
       })
       if (res.status === 0 || res.type === 'opaqueredirect' || (res.status >= 200 && res.status < 400)) {
@@ -552,7 +619,7 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (otp.length !== 6) return
+    if (otp.trim().length < 6) return
     setSubmitting(true)
     setError('')
     try {
@@ -562,7 +629,7 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ challenge, otp_code: otp }),
+        body: JSON.stringify({ challenge, otp_code: otp.trim() }),
         redirect: 'manual',
       })
       if (res.status === 0 || res.type === 'opaqueredirect' || (res.status >= 200 && res.status < 400)) {
@@ -594,42 +661,60 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
         </p>
       </div>
 
-      {hasPasskey && (
-        <div className="mb-4">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => void handlePasskeyOAuth()}
-            disabled={submitting}
-            className="w-full flex items-center justify-center gap-2 mb-3"
-          >
-            <Fingerprint className="w-5 h-5 text-primary" />
-            {t('auth.loginWithPasskey')}
-          </Button>
-          <div className="relative flex py-1 items-center">
-            <div className="flex-grow border-t border-outline-variant/30"></div>
-            <span className="flex-shrink mx-3 text-xs text-on-surface-variant uppercase font-medium">
-              {t('auth.or')}
-            </span>
-            <div className="flex-grow border-t border-outline-variant/30"></div>
-          </div>
+      {methode === null && (
+        <div className="flex justify-center py-4">
+          <Spinner />
         </div>
       )}
 
+      {methode === 'passkey' && !mitBackupCode && (
+        <div className="space-y-4">
+          <Button
+            type="button"
+            size="lg"
+            onClick={() => void handlePasskeyOAuth()}
+            disabled={submitting}
+            className="w-full flex items-center justify-center gap-2"
+          >
+            <Fingerprint className="w-5 h-5" />
+            {t('auth.loginWithPasskey')}
+          </Button>
+          <ErrorMessage message={error} className="text-sm" />
+          <button
+            type="button"
+            onClick={() => {
+              setMitBackupCode(true)
+              setError('')
+            }}
+            className="text-xs text-secondary hover:text-mint-accent transition-colors flex items-center gap-1"
+          >
+            <KeyRound className="w-3 h-3" />
+            {t('auth.useBackupCode')}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="w-full text-sm text-on-surface-variant hover:text-on-surface transition-colors"
+          >
+            {t('auth.goToLogin')}
+          </button>
+        </div>
+      )}
+
+      {(methode === 'totp' || mitBackupCode) && (
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-            {t('auth.otpCode')}
+            {mitBackupCode ? t('auth.backupCode') : t('auth.otpCode')}
           </label>
           <input
             type="text"
-            inputMode="numeric"
-            pattern="\d{6}"
-            maxLength={6}
+            inputMode={mitBackupCode ? 'text' : 'numeric'}
+            maxLength={mitBackupCode ? 12 : 6}
             value={otp}
             onChange={(e) => setOtp(e.target.value)}
             className="msm-input text-center text-2xl tracking-[0.5em] font-mono"
-            placeholder="000000"
+            placeholder={mitBackupCode ? 'XXXX-XXXX' : '000000'}
             required
             autoFocus
           />
@@ -639,7 +724,7 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
 
         <Button size="lg"
           type="submit"
-          disabled={submitting || otp.length !== 6}
+          disabled={submitting || otp.trim().length < 6}
           className="w-full inline-flex items-center justify-center gap-2 disabled:opacity-50"
         >
           {submitting ? (
@@ -663,6 +748,15 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
           {t('auth.goToLogin')}
         </button>
       </form>
+      )}
     </div>
   )
+}
+
+/** Antwort von `/auth/login` und `/auth/login-verify`, soweit der zweite Faktor sie braucht. */
+interface ZweiFaktorAntwort {
+  requires_2fa: boolean
+  two_factor_method?: 'totp' | 'passkey' | null
+  passkey_options?: PasskeyBestaetigungsOptionen | null
+  login_challenge?: string
 }

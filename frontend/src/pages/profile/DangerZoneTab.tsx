@@ -7,6 +7,7 @@ import { PasswordInput } from '@/components/ui/PasswordInput'
 import { AlertTriangle } from 'lucide-react'
 import { useOAuthLinks } from './useOAuthLinks'
 import { Button } from '@/Singra/UI'
+import { passkeyNachweis } from '@/services/passkeyService'
 
 import { Spinner } from '@/components/ui/Spinner'
 /**
@@ -22,6 +23,7 @@ export function DangerZoneTab() {
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
   const { isSocialOnly, loading } = useOAuthLinks()
+  const methode = user?.two_factor_enabled ? (user.two_factor_method ?? 'totp') : null
 
   const [deleteState, setDeleteState] = useState<'idle' | 'first-confirmed' | 'deleting' | 'success'>('idle')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -41,7 +43,8 @@ export function DangerZoneTab() {
           // Pydantic lehnt leeren String ab, daher null statt ''.
           password: isSocialOnly ? null : confirmPassword,
           confirmation: confirmDeleteWord,
-          otp_code: user?.two_factor_enabled ? confirmOtp : null,
+          otp_code: methode === 'totp' ? confirmOtp : null,
+          passkey: methode === 'passkey' ? await passkeyNachweis('account_delete') : null,
         }),
       })
       setDeleteState('success')
@@ -135,7 +138,7 @@ export function DangerZoneTab() {
                 <p className="text-label-sm text-on-surface-variant mt-1">{t('profile.confirmDeleteWordHint')}</p>
               </div>
 
-              {user?.two_factor_enabled && (
+              {methode === 'totp' && (
                 <div>
                   <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                     {t('profile.confirmOtpLabel')}

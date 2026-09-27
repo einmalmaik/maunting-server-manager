@@ -71,7 +71,11 @@ vi.mock('@/services/e2eeGeraet', () => ({
   gebeGeraetFrei: freigegeben,
 }))
 
+const NACHWEIS = { id: 'k', rawId: 'k', type: 'public-key', response: { signatur: 'echt' } }
+vi.mock('@/services/passkeyService', () => ({ passkeyNachweis: vi.fn(async () => NACHWEIS) }))
+
 const { AiDevicePairingCard } = await import('./AiDevicePairingCard')
+const { useAuthStore } = await import('@/stores/authStore')
 
 const NEUES_GERAET = {
   device_id: 'neu-0001',
@@ -215,4 +219,38 @@ describe('AiDevicePairingCard — Rückfrage vor der Übergabe', () => {
     expect(uebergabe).not.toHaveBeenCalled()
     expect(screen.queryByText('11111 22222 33333 44444')).not.toBeInTheDocument()
   }, 15_000)
+})
+
+describe('AiDevicePairingCard — nur der eingerichtete Faktor', () => {
+  it('Passkey-Konto: kein Code-Feld, der Passkey-Nachweis geht mit', async () => {
+    const { api } = await import('@/api/client')
+    const { passkeyNachweis } = await import('@/services/passkeyService')
+    useAuthStore.setState({
+      user: { id: 10, two_factor_enabled: true, two_factor_method: 'passkey' } as never,
+    })
+    render(<AiDevicePairingCard />)
+
+    expect(screen.queryByLabelText(i18n.t('ai.profile.devicesProofOtp'))).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(i18n.t('ai.profile.devicesProofPassword'))).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.profile.devicesProofPasskey') }))
+
+    await screen.findByText(CODE)
+    expect(passkeyNachweis).toHaveBeenCalledWith('device_pairing')
+    expect(api).toHaveBeenCalledWith(
+      '/auth/devices/pairing',
+      expect.objectContaining({ body: JSON.stringify({ label: '', passkey: NACHWEIS }) }),
+    )
+  })
+
+  it('App-Konto: nur das Code-Feld, kein Passkey-Knopf', () => {
+    useAuthStore.setState({
+      user: { id: 10, two_factor_enabled: true, two_factor_method: 'totp' } as never,
+    })
+    render(<AiDevicePairingCard />)
+
+    expect(screen.getByLabelText(i18n.t('ai.profile.devicesProofOtp'))).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: i18n.t('ai.profile.devicesProofPasskey') }),
+    ).not.toBeInTheDocument()
+  })
 })

@@ -12,7 +12,7 @@ import {
   geraeteZuruecksetzen,
   sicherheitsnummer,
 } from '@/services/e2eeGeraet'
-import { isPasskeyAvailable, verifyPasskey } from '@/services/passkeyService'
+import { passkeyNachweis } from '@/services/passkeyService'
 import { useAuthStore } from '@/stores/authStore'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
@@ -47,7 +47,6 @@ export function E2eeGeraeteCard() {
   const [passwort, setPasswort] = useState('')
   const [confirmationWord, setConfirmationWord] = useState('')
   const [totpCode, setTotpCode] = useState('')
-  const [hasPasskey, setHasPasskey] = useState(false)
   const [isSocialAccount, setIsSocialAccount] = useState(false)
 
   const laden = useCallback(async () => {
@@ -80,7 +79,6 @@ export function E2eeGeraeteCard() {
   }, [laden])
 
   useEffect(() => {
-    isPasskeyAvailable().then(setHasPasskey).catch(() => setHasPasskey(false))
     oauthApi
       .listMyLinks()
       .then((links) => setIsSocialAccount(Array.isArray(links) && links.length > 0))
@@ -147,11 +145,7 @@ export function E2eeGeraeteCard() {
   const neuBeginnenMitPasskey = async () => {
     setLaeuft('reset')
     try {
-      const ok = await verifyPasskey(t('profile.e2eeDevices.resetPasskey'))
-      if (!ok) {
-        throw new Error(t('profile.2faPasskeyFailed'))
-      }
-      await geraeteZuruecksetzen({ passkey_verified: true })
+      await geraeteZuruecksetzen({ passkey: await passkeyNachweis('e2ee_reset') })
       toast.success(t('profile.e2eeDevices.resetDone'))
       await laden()
     } catch (err: any) {
@@ -219,27 +213,21 @@ export function E2eeGeraeteCard() {
             <p className="text-sm font-medium text-on-surface">{t('profile.e2eeDevices.resetTitle')}</p>
             <p className="text-sm text-on-surface-variant">{t('profile.e2eeDevices.resetHelp')}</p>
 
-            {user?.two_factor_enabled ? (
+            {user?.two_factor_enabled && user.two_factor_method === 'passkey' ? (
+              <div className="pt-2">
+                <Button
+                  variant="primary"
+                  disabled={laeuft === 'reset'}
+                  onClick={() => void neuBeginnenMitPasskey()}
+                  className="w-full sm:w-auto"
+                >
+                  <Fingerprint className="h-4 w-4 mr-2" />
+                  {t('profile.e2eeDevices.resetPasskey')}
+                </Button>
+              </div>
+            ) : user?.two_factor_enabled ? (
               <div className="space-y-3 pt-2">
-                {hasPasskey && (
-                  <div>
-                    <Button
-                      variant="primary"
-                      disabled={laeuft === 'reset'}
-                      onClick={() => void neuBeginnenMitPasskey()}
-                      className="w-full sm:w-auto"
-                    >
-                      <Fingerprint className="h-4 w-4 mr-2" />
-                      {t('profile.e2eeDevices.resetPasskey')}
-                    </Button>
-                  </div>
-                )}
                 <div className="space-y-1">
-                  {hasPasskey && (
-                    <p className="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">
-                      {t('profile.e2eeDevices.resetOr')}
-                    </p>
-                  )}
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <input
                       type="text"

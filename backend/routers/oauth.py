@@ -26,20 +26,23 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from config import settings, get_effective_cookie_domain
 from cookies import _set_auth_cookies
 from database import get_db
 from dependencies import get_current_user, require_global, verify_csrf
+from middleware.rate_limit import auth_rate_limit
 from models import OAuthProvider, OAuthUserLink, User
+from schemas.passkey import PasskeyNachweis
 from schemas.oauth import (
     OAuthProviderCreate,
     OAuthProviderPublic,
     OAuthProviderUpdate,
     OAuthTestResult,
 )
-from services import audit_service, oauth_service
+from services import audit_service, oauth_service, passkey_service
 from services.auth_service import AuthService
 from services.session_service import issue_session
 from services.email_service import EmailService
@@ -636,7 +639,7 @@ def _resolve_link_user(
     return current_user
 
 
-@router.post("/{slug}/2fa")
+@router.post("/{slug}/2fa", dependencies=[Depends(auth_rate_limit)])
 def oauth_2fa(
     slug: str,
     body: dict,
@@ -644,15 +647,22 @@ def oauth_2fa(
 ) -> Response:
     """Vervollstaendigt einen OAuth-Login, bei dem der User 2FA aktiv hat.
 
-    Body: ``{"challenge": "...", "otp_code": "123456"}``
+    Body: ``{"challenge": "...", "otp_code": "123456"}`` oder, bei Passkey-Konten,
+    ``{"challenge": "...", "passkey": {...}}`` (Antwort von ``credentials.get()``).
     """
     challenge = (body or {}).get("challenge", "")
     otp_code = (body or {}).get("otp_code", "")
-    passkey_verified = bool((body or {}).get("passkey_verified", False))
+    passkey_roh = (body or {}).get("passkey")
     if not isinstance(challenge, str) or not isinstance(otp_code, str):
         raise HTTPException(status_code=400, detail="Ungueltige Anfrage")
+    passkey = None
+    if passkey_roh is not None:
+        try:
+            passkey = PasskeyNachweis.model_validate(passkey_roh).model_dump()
+        except ValidationError:
+            raise HTTPException(status_code=400, detail="Ungueltige Anfrage")
     completed = oauth_service.complete_2fa_challenge(
-        db, challenge, otp_code=otp_code, passkey_verified=passkey_verified
+        db, challenge, otp_code=otp_code, passkey=passkey
     )
     if completed is None:
         raise HTTPException(status_code=401, detail="Ungueltige oder abgelaufene Challenge / falscher Code")
@@ -664,6 +674,35 @@ def oauth_2fa(
     _set_login_session(resp, db, user)
     _clear_oauth_state_cookie(resp)
     return resp
+
+
+@router.post("/{slug}/2fa/methode", dependencies=[Depends(auth_rate_limit)])
+def oauth_2fa_methode(
+    slug: str,
+    body: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Welcher zweite Faktor fuer diese OAuth-Anmeldung gilt — bei Passkey mit Optionen.
+
+    Die Challenge wird nur gelesen, nicht verbraucht: das erledigt `/2fa`.
+    """
+    challenge = (body or {}).get("challenge", "")
+    if not isinstance(challenge, str):
+        raise HTTPException(status_code=400, detail="Ungueltige Anfrage")
+    user = oauth_service.user_fuer_2fa_challenge(db, challenge)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Ungueltige oder abgelaufene Challenge")
+    methode = user.two_factor_method
+    antwort: dict[str, Any] = {"methode": methode}
+    if methode == "passkey":
+        try:
+            antwort["passkey_options"] = passkey_service.bestaetigungs_optionen(
+                db, user, request.headers.get("origin"), "oauth_2fa"
+            )
+        except passkey_service.PasskeyFehler as e:
+            antwort["hinweis"] = str(e)
+    return antwort
 
 
 # ── User-Self: Linked-Accounts ────────────────────────────────────────
