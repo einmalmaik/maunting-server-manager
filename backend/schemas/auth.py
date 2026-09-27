@@ -99,6 +99,13 @@ class ChangeEmailRequest(BaseModel):
     passkey: PasskeyNachweis | None = None
 
 
+class DataExportRequest(BaseModel):
+    """Nachweis fuer den Datenexport: Passwort oder der eingerichtete zweite Faktor."""
+    password: str = Field("", max_length=256)
+    otp_code: str = Field("", max_length=16)
+    passkey: PasskeyNachweis | None = None
+
+
 class DeleteAccountRequest(BaseModel):
     # password is required only for accounts without OAuth links (local password accounts).
     # For social-only accounts (created/linked via OAuth) it is skipped.

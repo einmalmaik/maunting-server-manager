@@ -87,11 +87,6 @@ const ABGELOESTE_SCHLUESSEL = [
   'verifyEmail.error',
   'verifyEmail.noToken',
   // `nav.social` ("Social & Hub") hat keine Route in navigation.tsx.
-  //
-  // `profile.tabs.vault` sieht genauso tot aus und ist es nicht: der Panel hat
-  // keinen Tresor-Tab, die Desktop-App benutzt den Schlüssel aber in
-  // desktop/Einstellungen.tsx. Er steht hier als Warnung, nicht als Eintrag —
-  // wer im Panel aufräumt, muss die Desktop-Oberfläche mitlesen.
   'nav.social',
   // `shell.openUserMenu` neben den lebenden `shell.mainNavigation` und
   // `shell.closeNavigation`.
@@ -126,10 +121,25 @@ const ABGELOESTE_SCHLUESSEL = [
   // nicht mehr; `ai.voice.vorschlag.hint` sagt jetzt das eine.
   'ai.voice.vorschlag.hintKlick',
   'ai.voice.vorschlag.hintKlickChat',
+  // 27.09.2026: Profil und App-Einstellungen haben weniger Reiter. Passwort,
+  // 2FA, Messenger-PIN und Tresor stehen unter „Sicherheit", verknüpfte
+  // Konten und Zugangsdaten unter „Verbindungen", das Wake-Word unter Audio.
+  // Die alten `?tab=`-Werte führen weiter an den neuen Ort; ihre Beschriftungen
+  // brauchte nur die Reiterleiste.
+  'profile.tabs.password',
+  'profile.tabs.setPassword',
+  'profile.tabs.2fa',
+  'profile.tabs.linked',
+  'profile.tabs.credentials',
+  'profile.tabs.messenger',
+  'profile.tabs.vault',
+  'mss.einstellungen.tab.wakeword',
 ]
 
 /** Die Nachfolger muss es geben — sonst wäre das Löschen ein Verlust. */
 const NACHFOLGER = [
+  'profile.tabs.security',
+  'profile.tabs.connections',
   'ai.memory.titles.user',
   'ai.memory.titles.team',
   'ai.memory.titles.panel',

@@ -4,23 +4,21 @@
  * wie `/settings` und `/profile` im Panel), darunter Karten. Eigene Inhalte:
  * was dieser **Rechner** tut, nicht was das Panel tut.
  *
- * Vier Reiter: Desktop-Integration (Autostart, Hotkeys, Diagnose), Wake-Word
- * (Kalibrierung, Aktiv-Schalter), Audio (Geräteauswahl, Ducking) und die
- * Gefahrenzone. `?tab=wakeword` wählt einen Reiter vor — der Weg des
- * Neukalibrierungs-Hinweises nach einer Umbenennung.
+ * Zusammengehöriges steht in einem Reiter: Messenger-PIN und Tresor unter
+ * Sicherheit, Geräte und Wake-Word unter Audio. `?tab=` wählt einen Reiter
+ * vor; frühere Reiter (`wakeword`, `messenger`, `tresor`) führen zu ihrem
+ * neuen Ort.
  *
  * Diese Datei wählt nur den Reiter; die Inhalte liegen je Reiter in
  * `einstellungsreiter/`.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
   FileSignature,
-  Lock,
-  Mic,
   MonitorCog,
-  ShieldCheck,
+  Shield,
   User,
   Users,
   Volume2,
@@ -29,7 +27,9 @@ import { useTranslation } from 'react-i18next'
 
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { MessengerSicherheitTab } from '@/pages/profile/MessengerSicherheitTab'
+import { DatenexportKarte } from '@/pages/profile/DatenexportKarte'
 import { TresorSicherheitTab } from './vault/TresorSicherheitTab'
+import { useVaultStore } from './vault/vaultStore'
 import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 import { Gefahrenzone } from './Gefahrenzone'
 import { WakewordEinrichtung } from './WakewordEinrichtung'
@@ -41,45 +41,50 @@ import {
   SocialEinstellungen,
 } from './einstellungsreiter'
 
-type EinstellungsTab = 'konto' | 'social' | 'messenger' | 'tresor' | 'desktop' | 'wakeword' | 'audio' | 'rechtliches' | 'gefahr'
+type EinstellungsTab = 'konto' | 'sicherheit' | 'social' | 'desktop' | 'audio' | 'rechtliches' | 'gefahr'
+
+const FRUEHERE_REITER: Record<string, EinstellungsTab> = {
+  profil: 'konto',
+  account: 'konto',
+  messenger: 'sicherheit',
+  tresor: 'sicherheit',
+  wakeword: 'audio',
+}
+
+const GRUPPENTITEL = 'font-headline text-title-md font-semibold text-on-surface'
 
 const isAndroidClient = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
 export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () => void }) {
   const { t } = useTranslation()
   const ort = useLocation()
+  const navigate = useNavigate()
   const publicSettings = usePublicSettingsStore()
+  const social = publicSettings.social_enabled
+  const tresorAn = publicSettings.vault_enabled
+  const tresorEntsperrt = useVaultStore((s) => s.isUnlocked)
 
   const tabs: TabDef<EinstellungsTab>[] = useMemo(() => [
     { id: 'konto', labelKey: 'profile.tabs.account', icon: User },
-    ...(publicSettings.social_enabled
-      ? [
-          { id: 'social' as const, labelKey: 'profile.tabs.social', icon: Users },
-          { id: 'messenger' as const, labelKey: 'profile.tabs.messenger', icon: Lock },
-        ]
+    ...(social || tresorAn
+      ? [{ id: 'sicherheit' as const, labelKey: 'profile.tabs.security', icon: Shield }]
       : []),
-    ...(publicSettings.vault_enabled
-      ? [{ id: 'tresor' as const, labelKey: 'profile.tabs.vault', icon: ShieldCheck }]
-      : []),
+    ...(social ? [{ id: 'social' as const, labelKey: 'profile.tabs.social', icon: Users }] : []),
     {
       id: 'desktop',
       labelKey: isAndroidClient ? 'mss.einstellungen.tab.app' : 'mss.einstellungen.tab.desktop',
       icon: MonitorCog,
     },
-    { id: 'wakeword', labelKey: 'mss.einstellungen.tab.wakeword', icon: Mic },
     { id: 'audio', labelKey: 'mss.einstellungen.tab.audio', icon: Volume2 },
     { id: 'rechtliches', labelKey: 'mss.einstellungen.tab.rechtliches', icon: FileSignature },
     { id: 'gefahr', labelKey: 'mss.einstellungen.tab.gefahr', icon: AlertTriangle, variant: 'danger' },
-  ], [publicSettings.social_enabled, publicSettings.vault_enabled])
+  ], [social, tresorAn])
 
   const tabAusSuche = useCallback((suche: string): EinstellungsTab => {
-    const wunsch = new URLSearchParams(suche).get('tab')
-    if (wunsch === 'profil' || wunsch === 'account') return 'konto'
-    if (wunsch === 'social' && !publicSettings.social_enabled) return 'desktop'
-    if (wunsch === 'messenger' && !publicSettings.social_enabled) return 'desktop'
-    if (wunsch === 'tresor' && !publicSettings.vault_enabled) return 'desktop'
-    return tabs.some((entry) => entry.id === wunsch) ? (wunsch as EinstellungsTab) : 'desktop'
-  }, [tabs, publicSettings.social_enabled, publicSettings.vault_enabled])
+    const wunsch = new URLSearchParams(suche).get('tab') ?? ''
+    const aufgeloest = FRUEHERE_REITER[wunsch] ?? wunsch
+    return tabs.some((entry) => entry.id === aufgeloest) ? (aufgeloest as EinstellungsTab) : 'desktop'
+  }, [tabs])
 
   const [tab, setTab] = useState<EinstellungsTab>(() => tabAusSuche(ort.search))
 
@@ -88,10 +93,8 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
   }, [ort.search, tabAusSuche])
 
   useEffect(() => {
-    if (tab === 'social' && !publicSettings.social_enabled) setTab('desktop')
-    if (tab === 'messenger' && !publicSettings.social_enabled) setTab('desktop')
-    if (tab === 'tresor' && !publicSettings.vault_enabled) setTab('desktop')
-  }, [tab, publicSettings.social_enabled, publicSettings.vault_enabled])
+    if (!tabs.some((entry) => entry.id === tab)) setTab('desktop')
+  }, [tab, tabs])
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
@@ -101,13 +104,44 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
         onChange={setTab}
         ariaLabel={t('mss.app.einstellungen')}
       />
-      {tab === 'konto' && <KontoEinstellungen />}
-      {tab === 'social' && publicSettings.social_enabled && <SocialEinstellungen />}
-      {tab === 'messenger' && publicSettings.social_enabled && <MessengerSicherheitTab />}
-      {tab === 'tresor' && publicSettings.vault_enabled && <TresorSicherheitTab />}
+      {tab === 'konto' && (
+        <>
+          <KontoEinstellungen />
+          <DatenexportKarte
+            tresor={tresorAn ? {
+              entsperrt: tresorEntsperrt,
+              eintraege: () => useVaultStore.getState().items,
+              entsperren: () => navigate('/tresor'),
+            } : undefined}
+          />
+        </>
+      )}
+      {tab === 'sicherheit' && (
+        <>
+          {/* Zwei Gruppen mit eigener Überschrift: sonst beginnt beim
+              Scrollen mitten in den Messenger-Karten plötzlich der Tresor. */}
+          {social && (
+            <section aria-labelledby="sicherheit-messenger" className="flex flex-col gap-3">
+              <h2 id="sicherheit-messenger" className={GRUPPENTITEL}>{t('mss.einstellungen.sicherheit.messenger')}</h2>
+              <MessengerSicherheitTab />
+            </section>
+          )}
+          {tresorAn && (
+            <section aria-labelledby="sicherheit-tresor" className="flex flex-col gap-3 pt-2">
+              <h2 id="sicherheit-tresor" className={GRUPPENTITEL}>{t('mss.einstellungen.sicherheit.tresor')}</h2>
+              <TresorSicherheitTab />
+            </section>
+          )}
+        </>
+      )}
+      {tab === 'social' && <SocialEinstellungen />}
       {tab === 'desktop' && <DesktopIntegration onKonfigAenderung={onKonfigAenderung} />}
-      {tab === 'wakeword' && <WakewordEinrichtung />}
-      {tab === 'audio' && <AudioEinstellungen />}
+      {tab === 'audio' && (
+        <>
+          <AudioEinstellungen />
+          <WakewordEinrichtung />
+        </>
+      )}
       {tab === 'rechtliches' && <RechtlichesEinstellungen />}
       {tab === 'gefahr' && <Gefahrenzone />}
     </div>

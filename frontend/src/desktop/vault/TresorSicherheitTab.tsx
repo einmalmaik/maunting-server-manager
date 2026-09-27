@@ -13,6 +13,7 @@
 
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import { Fingerprint, ShieldCheck } from 'lucide-react'
 
 import { sperrfristOptionen } from '@/services/autoSperre'
@@ -23,6 +24,7 @@ import { useVaultStore } from './vaultStore'
 
 export function TresorSicherheitTab() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
 
   const {
     isInitialized,
@@ -142,8 +144,11 @@ export function TresorSicherheitTab() {
               {t('mss.vault.nichtEingerichtet')}
             </div>
           ) : !isUnlocked ? (
-            <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
-              {t('mss.vault.gesperrt')}
+            <div className="flex flex-col items-start gap-2 p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant sm:flex-row sm:items-center sm:gap-3">
+              <span className="flex-1">{t('mss.vault.gesperrt')}</span>
+              <Button variant="secondary" size="sm" type="button" onClick={() => navigate('/tresor')}>
+                {t('profile.dataExport.vaultUnlock')}
+              </Button>
             </div>
           ) : null}
 

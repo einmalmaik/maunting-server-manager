@@ -778,8 +778,8 @@ class TestUnifiedCallback:
         )
         # Anonymer Aufruf im link-Mode → /profile?error=auth_required
         assert res.status_code == 302
-        assert "/profile" in res.headers["location"]
-        assert "auth_required" in res.headers["location"]
+        # Auf dem Reiter, der die Meldung auswertet, nicht auf „Konto".
+        assert "/profile?tab=connections&error=auth_required" in res.headers["location"]
 
     def test_link_mode_blocked_when_linking_disabled(
         self, client: TestClient, user_cookies: dict, regular_user: User, db: Session
@@ -863,7 +863,7 @@ class TestUnifiedCallback:
         assert res.status_code == 302
         loc = res.headers["location"]
         assert "/profile" in loc, f"Link-Mode muss auf /profile landen, nicht /login (war: {loc!r})"
-        assert "state_user_mismatch" in loc
+        assert "/profile?tab=connections&error=state_user_mismatch" in loc
 
     def test_login_mode_state_mismatch_redirects_to_login(
         self, client: TestClient, db: Session

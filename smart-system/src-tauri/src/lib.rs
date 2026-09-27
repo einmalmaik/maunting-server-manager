@@ -29,6 +29,7 @@ mod aufraeumen;
 mod auftrag;
 mod bildschirm;
 mod biometrie;
+mod datenexport;
 mod deinstallation;
 pub mod discord;
 mod durchklick;
@@ -857,6 +858,7 @@ pub fn run() {
             biometrie_speicher_verfuegbar,
             biometrie_speicher_fragt_selbst,
             messenger_geraetegeheimnis,
+            datenexport::export_speichern,
             updater::update_pruefen,
             updater::update_installieren,
             updater::app_neu_starten

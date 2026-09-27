@@ -141,11 +141,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.9 vom 2026-09-27 aus (Offline-Speicher gehoert dem Konto)', () => {
+  it('weist die Fassung 3.10 vom 2026-09-27 aus (Datenexport im Konto)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.9`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.10`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -157,6 +157,8 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.ai.items.memory')).toMatch(/samt ihrem Namen verschlüsselt/);
     // 3.9: der Offline-Speicher war an keinen Account gebunden und ueberlebte das Abmelden.
     expect(i18n.t('privacyPolicy.sections.storage.items.offlineNotesAndCalendar')).toMatch(/Beim Abmelden wird er gelöscht/);
+    // 3.10: der Export; was nur das Geraet oeffnen kann, geht nicht ueber den Server.
+    expect(i18n.t('privacyPolicy.sections.retention.items.export')).toMatch(/nicht über den Server/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

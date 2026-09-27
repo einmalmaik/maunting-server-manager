@@ -16,7 +16,7 @@ Die Grenze läuft in die andere Richtung: **Aus dem Panel erreicht kein Werkzeug
 
 ## Anmelden: nur per Kopplung
 
-Die App kennt weder Passwort noch 2FA-Code. Im Panel unter **Profil → KI → Geräte koppeln** entsteht ein Code (zwölf Zeichen, zehn Minuten, genau einmal), der hier eingetragen wird. Nötig ist das, weil `/api/auth/login` bei aktiviertem Captcha einen Turnstile-Token verlangt und Cloudflare-Schlüssel an Domains gebunden sind (`tauri.localhost` lässt sich dort nicht hinterlegen). So bleiben Passwort, 2FA und Captcha vollständig im Browser.
+Die App kennt weder Passwort noch 2FA-Code. Im Panel unter **Profil → Geräte → Geräte koppeln** entsteht ein Code (zwölf Zeichen, zehn Minuten, genau einmal), der hier eingetragen wird. Nötig ist das, weil `/api/auth/login` bei aktiviertem Captcha einen Turnstile-Token verlangt und Cloudflare-Schlüssel an Domains gebunden sind (`tauri.localhost` lässt sich dort nicht hinterlegen). So bleiben Passwort, 2FA und Captcha vollständig im Browser.
 
 Einzutragen ist die **Adresse der API**, nicht die der Weboberfläche. Das Panel zeigt sie unter Einstellungen → Allgemein und noch einmal beim Koppeln.
 

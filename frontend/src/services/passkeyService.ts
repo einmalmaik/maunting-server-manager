@@ -172,6 +172,7 @@ export type PasskeyZweck =
   | 'password_change'
   | 'email_change'
   | 'account_delete'
+  | 'data_export'
 
 function nachB64url(puffer: ArrayBuffer): string {
   const bytes = new Uint8Array(puffer)

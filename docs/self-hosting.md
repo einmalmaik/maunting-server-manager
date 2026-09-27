@@ -158,7 +158,7 @@ Was die App zum Betrieb braucht:
   nicht hinterlegt und muss bei Bedarf über `MSM_CORS_ALLOWED_ORIGINS` dazu.
 
 **Anmelden geht nur über Kopplung.** Die App kennt weder Passwort noch
-2FA-Code. Wer angemeldet ist, öffnet im Panel **Profil → KI → Geräte koppeln**,
+2FA-Code. Wer angemeldet ist, öffnet im Panel **Profil → Geräte → Geräte koppeln**,
 bestätigt dort mit dem Passwort (bei aktiver 2FA mit dem aktuellen 2FA-Code),
 erzeugt einen Code (zwölf Zeichen, zehn Minuten, genau einmal einlösbar)
 und trägt ihn in der App ein. Die Bestätigung ist nötig, weil ein gekoppeltes

@@ -887,7 +887,9 @@ def _login_redirect_path() -> str:
 
 
 def _profile_redirect_path() -> str:
-    return _frontend_url("/profile")
+    # Der Reiter, der `linked`/`error` auswertet. Ohne ihn landete die Meldung
+    # auf „Konto", wo niemand sie las (bis 27.09.2026).
+    return _frontend_url("/profile?tab=connections")
 
 
 def _frontend_url(path: str) -> str:
@@ -934,11 +936,11 @@ def _redirect_ok(next_path: str) -> Response:
 
 
 def _redirect_profile_error(reason: str) -> Response:
-    resp = _no_cache_redirect(f"{_profile_redirect_path()}?error={reason}")
+    resp = _no_cache_redirect(f"{_profile_redirect_path()}&error={reason}")
     _clear_oauth_state_cookie(resp)
     return resp
 
 
 def _redirect_profile_ok() -> Response:
-    resp = _no_cache_redirect(f"{_profile_redirect_path()}?linked=1")
+    resp = _no_cache_redirect(f"{_profile_redirect_path()}&linked=1")
     return resp

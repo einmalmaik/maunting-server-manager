@@ -36,7 +36,11 @@ vi.mock('./tauri', () => ({
   sandboxVerfuegbar: vi.fn().mockResolvedValue(true),
   wakewordLauschen: vi.fn().mockResolvedValue(undefined),
   wakewordStand: vi.fn().mockResolvedValue({ aufnahmen: 0, gesamt: 3, schwelle: 0.45, trainiert: false, mikrofon: null, erkannt: null }),
+  biometrieSpeicherVerfuegbar: vi.fn().mockResolvedValue(false),
 }))
+
+// Wake-Word und Messenger-PIN stehen jetzt in Reitern, die diese Tests öffnen.
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn().mockResolvedValue(() => {}) }))
 
 vi.mock('@tauri-apps/plugin-autostart', () => ({
   isEnabled: vi.fn().mockResolvedValue(false),
@@ -98,7 +102,7 @@ describe('Einstellungen Component', () => {
     expect(await screen.findByRole('tab', { name: txt('profile.tabs.account') })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: txt('profile.tabs.social') })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.desktop') })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.wakeword') })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: txt('profile.tabs.security') })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.audio') })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.rechtliches') })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.gefahr') })).toBeInTheDocument()
@@ -176,7 +180,7 @@ describe('Einstellungen Component', () => {
     })
   })
 
-  it('blendet Social-, Messenger- und Tresor-Reiter aus, wenn sie deaktiviert sind', async () => {
+  it('blendet Social- und Sicherheits-Reiter aus, wenn Social und Tresor deaktiviert sind', async () => {
     usePublicSettingsStore.setState({
       ...DEFAULT_PUBLIC_SETTINGS,
       social_enabled: false,
@@ -191,8 +195,7 @@ describe('Einstellungen Component', () => {
 
     expect(await screen.findByRole('tab', { name: txt('profile.tabs.account') })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: txt('profile.tabs.social') })).not.toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: txt('profile.tabs.messenger') })).not.toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: txt('profile.tabs.vault') })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: txt('profile.tabs.security') })).not.toBeInTheDocument()
     expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.desktop') })).toBeInTheDocument()
   })
 
@@ -213,5 +216,19 @@ describe('Einstellungen Component', () => {
     expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.desktop'), selected: true })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: txt('profile.tabs.social') })).not.toBeInTheDocument()
   })
-})
 
+  it.each([
+    ['wakeword', 'mss.einstellungen.tab.audio'],
+    ['messenger', 'profile.tabs.security'],
+    ['tresor', 'profile.tabs.security'],
+    ['profil', 'profile.tabs.account'],
+  ])('ein alter Link ?tab=%s führt zum neuen Reiter', async (alt, reiter) => {
+    render(
+      <MemoryRouter initialEntries={[`/einstellungen?tab=${alt}`]}>
+        <Einstellungen />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('tab', { name: txt(reiter), selected: true })).toBeInTheDocument()
+  })
+})

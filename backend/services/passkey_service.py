@@ -50,7 +50,7 @@ from services import login_challenge_service
 # OAuth bekommen ihre Optionen aus dem jeweiligen Anmeldeschritt.
 ZWECKE_ANGEMELDET = frozenset({
     "2fa_disable", "device_pairing", "e2ee_reset",
-    "password_change", "email_change", "account_delete",
+    "password_change", "email_change", "account_delete", "data_export",
 })
 ZWECKE = ZWECKE_ANGEMELDET | {"login", "oauth_2fa"}
 

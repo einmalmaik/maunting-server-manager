@@ -720,7 +720,7 @@ function KalibrierungsHinweis() {
             autoFocus
             onClick={() => {
               setAltesWort(null)
-              navigate('/einstellungen?tab=wakeword')
+              navigate('/einstellungen?tab=audio')
             }}
           >
             {t('mss.kalibrierung.jetzt')}

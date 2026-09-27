@@ -3409,16 +3409,45 @@
       "account": "Konto",
       "social": "Freunde & Meilensteine",
       "audio": "Audio & Video",
-      "password": "Passwort",
-      "setPassword": "Passwort festlegen",
-      "2fa": "2FA",
-      "linked": "Verknüpfte Konten",
+      "security": "Sicherheit",
+      "connections": "Verbindungen",
       "ai": "KI",
       "devices": "Geräte",
-      "danger": "Gefahrenzone",
-      "credentials": "Zugangsdaten",
-      "messenger": "Messenger-PIN",
-      "vault": "Tresor"
+      "danger": "Gefahrenzone"
+    },
+    "dataExport": {
+      "title": "Meine Daten exportieren",
+      "description": "Alles, was zu deinem Konto gespeichert ist, als eine ZIP-Datei: KI-Chats, Notizen, Termine, Einstellungen, Freunde, Verbindungen und der Messenger-Verlauf dieses Geräts. Die Daten stehen darin im Klartext.",
+      "passwordLabel": "Passwort bestätigen",
+      "otpLabel": "2FA-Code",
+      "passkeyHint": "Nach dem Klick fragt dein Passkey nach.",
+      "withoutSecrets": "Dein Konto hat weder Passwort noch 2FA. Hinterlegte Zugangsdaten (GitHub, Steam, Postfächer, Kalender) fehlen deshalb im Export. Mit Passwort oder 2FA kommen sie mit.",
+      "button": "Daten exportieren",
+      "running": "Wird zusammengestellt …",
+      "done": "Gespeichert als {{datei}}.",
+      "notesLocked_one": "{{count}} Feld aus persönlichen Notizen oder Terminen blieb verschlüsselt: auf diesem Gerät fehlt der Schlüssel.",
+      "notesLocked_other": "{{count}} Felder aus persönlichen Notizen oder Terminen blieben verschlüsselt: auf diesem Gerät fehlt der Schlüssel.",
+      "messengerLocked": "Der Messenger ist gesperrt. Entsperre ihn vorher, sonst fehlt der Verlauf im Export.",
+      "messengerMissing": "Der Messenger-Verlauf fehlt, weil der Messenger gesperrt war.",
+      "vaultLocked": "Der Tresor ist gesperrt. Entsperrt kommen deine Passwörter mit in den Export.",
+      "vaultUnlock": "Tresor entsperren",
+      "vaultMissing": "Der Tresor fehlt, weil er gesperrt war.",
+      "errors": {
+        "noAccount": "Kein Konto angemeldet."
+      },
+      "readme": {
+        "title": "Datenexport aus Maunting Server Manager",
+        "intro": "Dieses Archiv enthält die Daten deines Kontos im Klartext. Bewahre es auf wie ein Passwort.",
+        "structure": "server/ enthält je Tabelle eine JSON-Datei mit allem, was der Server zu deinem Konto speichert. geraet/ enthält, was nur dieses Gerät lesen kann (Messenger-Verlauf, Gespräche, Entwürfe). tresor/ enthält den Tresor, falls er in der App entsperrt war. dateien/ enthält Profilbild und KI-Anhänge. manifest.json listet alle Tabellen mit Zeilenzahl.",
+        "secretsIncluded": "Hinterlegte Zugangsdaten (GitHub, Steam, Postfächer, Kalender) stehen im Klartext in server/user_credentials.json, server/user_mailboxes.json und server/user_calendars.json.",
+        "secretsMissing": "Hinterlegte Zugangsdaten fehlen, weil dein Konto weder Passwort noch 2FA hat.",
+        "notesLocked_one": "{{count}} Feld aus persönlichen Notizen oder Terminen blieb verschlüsselt, weil auf dem exportierenden Gerät der Schlüssel fehlte.",
+        "notesLocked_other": "{{count}} Felder aus persönlichen Notizen oder Terminen blieben verschlüsselt, weil auf dem exportierenden Gerät der Schlüssel fehlte.",
+        "messengerLocked": "Der Messenger-Verlauf fehlt, weil der Messenger gesperrt war.",
+        "vaultLocked": "Der Tresor fehlt, weil er gesperrt war.",
+        "vaultAppOnly": "Der Tresor ist nicht enthalten. Er lässt sich nur in der Desktop-App öffnen und von dort exportieren.",
+        "excluded": "Nicht enthalten sind Sicherheitsdaten wie Passwort-Hash, 2FA-Geheimnis und Sitzungstoken sowie Daten ohne Bezug zu deinem Konto. Die Liste mit Gründen steht in manifest.json unter nicht_enthalten."
+      }
     },
     "privacyTitle": "Privatsphäre & Sichtbarkeit",
     "privacyDescription": "Bestimme, wer deinen Online-Status und deine Aktivitäten im System sehen kann.",
@@ -4137,7 +4166,7 @@
       },
       "pairing": {
         "title": "Anmelden per Kopplung",
-        "body": "Die App kennt weder Passwort noch 2FA-Code. Im Panel unter Profil → KI wird nach Bestätigung mit Passwort oder 2FA-Code ein zehn Minuten gültiger Einmalcode erzeugt und in der App eingegeben. Gespeichert wird nur der Hash. So verbleiben Passwort, 2FA und Captcha vollständig im Browser. Gekoppelte Geräte können im Panel einzeln widerrufen werden; der Widerruf trennt auch ihre offenen Verbindungen und löscht ihre Push-Adresse. Über dieselbe Kopplung zieht der Messenger-Verlauf mit: das bereits eingerichtete Gerät versiegelt ihn gegen den Schlüssel des neuen, der Server reicht ihn einmal durch und löscht ihn dabei. Lesen kann er ihn nicht, und Schlüsselmaterial wandert nicht mit."
+        "body": "Die App kennt weder Passwort noch 2FA-Code. Im Panel unter Profil → Geräte wird nach Bestätigung mit Passwort oder 2FA-Code ein zehn Minuten gültiger Einmalcode erzeugt und in der App eingegeben. Gespeichert wird nur der Hash. So verbleiben Passwort, 2FA und Captcha vollständig im Browser. Gekoppelte Geräte können im Panel einzeln widerrufen werden; der Widerruf trennt auch ihre offenen Verbindungen und löscht ihre Push-Adresse. Über dieselbe Kopplung zieht der Messenger-Verlauf mit: das bereits eingerichtete Gerät versiegelt ihn gegen den Schlüssel des neuen, der Server reicht ihn einmal durch und löscht ihn dabei. Lesen kann er ihn nicht, und Schlüsselmaterial wandert nicht mit."
       },
       "uninstall": {
         "title": "Deinstallation",
@@ -4192,7 +4221,7 @@
       },
       "vault": {
         "title": "Eigener Tresor",
-        "body": "Profil → Zugangsdaten. Werte werden verschlüsselt gespeichert und danach nicht mehr im Klartext angezeigt. Sichtbar bleiben Bezeichnung, Benutzername und die letzten 4 Zeichen."
+        "body": "Profil → Verbindungen. Werte werden verschlüsselt gespeichert und danach nicht mehr im Klartext angezeigt. Sichtbar bleiben Bezeichnung, Benutzername und die letzten 4 Zeichen."
       },
       "server": {
         "title": "Serverzuordnung",
@@ -4584,6 +4613,7 @@
         "items": {
           "operator": "Der Betreiber muss geeignete Fristen festlegen, dokumentieren und nicht mehr benötigte Daten löschen",
           "deletion": "Die Account-Löschung entfernt accountbezogene personenbezogene Daten nach dem implementierten Löschablauf aus dem aktiven Panel; Kopien können vorübergehend in geschützten Backups verbleiben",
+          "export": "Unter Profil → Konto lädt jede Person alle Daten ihres Kontos als ZIP-Datei herunter (Art. 15 und 20 DSGVO). Das Paket stellt der Browser bzw. die App zusammen: was nur das Gerät entschlüsseln kann, etwa der Messenger-Verlauf, geht dabei nicht über den Server. Selbst hinterlegte Zugangsdaten kommen nur nach Bestätigung mit Passwort oder zweitem Faktor im Klartext mit, Passwort-Hash, 2FA-Geheimnis und Sitzungstoken nie. Jeder Export steht im Prüfprotokoll.",
           "audit": "Sicherheits-Audit-Ereignisse können anonymisiert aufbewahrt werden, damit Angriffe und privilegierte Änderungen nachvollziehbar bleiben, ohne die gelöschte Account-Identität zu erhalten"
         }
       },
@@ -5990,7 +6020,7 @@
       "verbinden": "Verbinden",
       "verbundenesPanel": "Panel-Server",
       "adresseAendern": "Ändern",
-      "kopplungErklaerung": "Melde dich im Browser bei deinem Panel an und öffne Profil → Gerät koppeln. Der Code bzw. QR-Code dort gilt zehn Minuten und genau einmal.",
+      "kopplungErklaerung": "Melde dich im Browser bei deinem Panel an und öffne Profil → Geräte. Der Code bzw. QR-Code dort gilt zehn Minuten und genau einmal.",
       "codeLabel": "Kopplungscode",
       "codeHinweis": "Groß- und Kleinschreibung sind egal, die Striche kannst du weglassen.",
       "qrCodeScannen": "QR-Code per Kamera scannen",
@@ -6113,11 +6143,14 @@
         "druecken": "Taste drücken …",
         "aus": "Deaktiviert"
       },
+      "sicherheit": {
+        "messenger": "Messenger",
+        "tresor": "Tresor"
+      },
       "tab": {
         "desktop": "Desktop-Integration",
         "app": "App-Status",
-        "wakeword": "Wake-Word",
-        "audio": "Audio",
+        "audio": "Audio & Wake-Word",
         "rechtliches": "Rechtliches",
         "gefahr": "Gefahrenzone"
       },
@@ -6296,8 +6329,8 @@
     "fps30": "30 FPS — Text und Dokumente",
     "fps60": "60 FPS — Spiele und Video",
     "deviceSettingsTitle": "Audio- & Videoeinstellungen",
-    "deviceSettingsNote": "Die Wahl gilt auch für Sprachnachrichten und den Sprachmodus. Rauschunterdrückung, Echounterdrückung und der Mikrofontest stehen in Profil → Audio.",
-    "selfNote": "Das bist du. Deine eigene Lautstärke stellst du in Profil → Audio ein.",
+    "deviceSettingsNote": "Die Wahl gilt auch für Sprachnachrichten und den Sprachmodus. Rauschunterdrückung, Echounterdrückung und der Mikrofontest stehen in Profil → Audio & Video.",
+    "selfNote": "Das bist du. Deine eigene Lautstärke stellst du in Profil → Audio & Video ein.",
     "volumeLocalOnly": "Gilt nur hier bei dir. Die anderen im Anruf hören {{name}} unverändert.",
     "forEveryone": "Für alle im Anruf",
     "removeFromCall": "Aus dem Anruf entfernen",

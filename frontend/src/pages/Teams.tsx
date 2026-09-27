@@ -424,7 +424,7 @@ export function Teams() {
                 persönliches Wissen unter „Teams" auftauchte. */}
             <p className="mt-3 max-w-2xl rounded-lg border border-outline-variant/40 bg-surface-container-low/45 p-3 text-xs leading-5 text-on-surface-variant">
               {t('teams.personalMemoryElsewhere')}{' '}
-              <Link to="/profile" className="text-primary underline underline-offset-2">
+              <Link to="/profile?tab=ai" className="text-primary underline underline-offset-2">
                 {t('teams.personalMemoryLink')}
               </Link>
             </p>

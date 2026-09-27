@@ -3409,16 +3409,45 @@
       "account": "Account",
       "social": "Friends & milestones",
       "audio": "Audio & video",
-      "password": "Password",
-      "setPassword": "Set password",
-      "2fa": "2FA",
-      "linked": "Linked accounts",
+      "security": "Security",
+      "connections": "Connections",
       "ai": "AI",
       "devices": "Devices",
-      "danger": "Danger zone",
-      "credentials": "Credentials",
-      "messenger": "Messenger PIN",
-      "vault": "Vault"
+      "danger": "Danger zone"
+    },
+    "dataExport": {
+      "title": "Export my data",
+      "description": "Everything stored for your account in one ZIP file: AI chats, notes, events, settings, friends, connections and this device's messenger history. The data inside is in plain text.",
+      "passwordLabel": "Confirm password",
+      "otpLabel": "2FA code",
+      "passkeyHint": "After you click, your passkey will ask for confirmation.",
+      "withoutSecrets": "Your account has neither a password nor 2FA, so stored credentials (GitHub, Steam, mailboxes, calendars) are left out. With a password or 2FA they are included.",
+      "button": "Export data",
+      "running": "Putting it together …",
+      "done": "Saved as {{datei}}.",
+      "notesLocked_one": "{{count}} field from personal notes or events stayed encrypted: this device does not have the key.",
+      "notesLocked_other": "{{count}} fields from personal notes or events stayed encrypted: this device does not have the key.",
+      "messengerLocked": "The messenger is locked. Unlock it first, otherwise its history is missing from the export.",
+      "messengerMissing": "The messenger history is missing because the messenger was locked.",
+      "vaultLocked": "The vault is locked. Unlock it to include your passwords in the export.",
+      "vaultUnlock": "Unlock vault",
+      "vaultMissing": "The vault is missing because it was locked.",
+      "errors": {
+        "noAccount": "No account signed in."
+      },
+      "readme": {
+        "title": "Data export from Maunting Server Manager",
+        "intro": "This archive contains your account data in plain text. Keep it as safe as a password.",
+        "structure": "server/ holds one JSON file per table with everything the server stores for your account. geraet/ holds what only this device can read (messenger history, conversations, drafts). tresor/ holds the vault if it was unlocked in the app. dateien/ holds your profile picture and AI attachments. manifest.json lists every table with its row count.",
+        "secretsIncluded": "Stored credentials (GitHub, Steam, mailboxes, calendars) are in plain text in server/user_credentials.json, server/user_mailboxes.json and server/user_calendars.json.",
+        "secretsMissing": "Stored credentials are missing because your account has neither a password nor 2FA.",
+        "notesLocked_one": "{{count}} field from personal notes or events stayed encrypted because the exporting device did not have the key.",
+        "notesLocked_other": "{{count}} fields from personal notes or events stayed encrypted because the exporting device did not have the key.",
+        "messengerLocked": "The messenger history is missing because the messenger was locked.",
+        "vaultLocked": "The vault is missing because it was locked.",
+        "vaultAppOnly": "The vault is not included. It can only be opened, and exported, in the desktop app.",
+        "excluded": "Security data such as the password hash, 2FA secret and session tokens is not included, and neither is data unrelated to your account. The list with reasons is in manifest.json under nicht_enthalten."
+      }
     },
     "privacyTitle": "Privacy & visibility",
     "privacyDescription": "Control who can see your online presence and activities in the system.",
@@ -4137,7 +4166,7 @@
       },
       "pairing": {
         "title": "Signing in by pairing",
-        "body": "The app knows neither password nor 2FA code. In the panel under Profile → AI you confirm with your password or 2FA code, then a one-time code is generated (ten minutes, exactly once) and entered into the app; only its hash is stored. Password, 2FA, and captcha stay entirely in the browser. Paired devices can be locked out individually from the same place; locking one out also closes its open connections and deletes its push address. The messenger history travels along the same pairing: the device you already use seals it for the new device's key, and the server passes it through once and deletes it in the process. It cannot read the blob, and no key material travels with it."
+        "body": "The app knows neither password nor 2FA code. In the panel under Profile → Devices you confirm with your password or 2FA code, then a one-time code is generated (ten minutes, exactly once) and entered into the app; only its hash is stored. Password, 2FA, and captcha stay entirely in the browser. Paired devices can be locked out individually from the same place; locking one out also closes its open connections and deletes its push address. The messenger history travels along the same pairing: the device you already use seals it for the new device's key, and the server passes it through once and deletes it in the process. It cannot read the blob, and no key material travels with it."
       },
       "uninstall": {
         "title": "Uninstalling",
@@ -4192,7 +4221,7 @@
       },
       "vault": {
         "title": "Personal vault",
-        "body": "Profile → Credentials. Values are stored encrypted and never displayed in plain text again. Name, username, and the last four characters remain visible."
+        "body": "Profile → Connections. Values are stored encrypted and never displayed in plain text again. Name, username, and the last four characters remain visible."
       },
       "server": {
         "title": "Server assignment",
@@ -4584,6 +4613,7 @@
         "items": {
           "operator": "The operator must define and document suitable retention periods and delete data that is no longer needed",
           "deletion": "Account deletion removes account-linked personal data from the active panel according to the implemented deletion flow; copies may remain temporarily in protected backups",
+          "export": "Under Profile → Account, anyone can download all data of their account as a ZIP file (Art. 15 and 20 GDPR). The browser or the app puts the package together: whatever only the device can decrypt, such as the messenger history, never passes through the server. Stored credentials are included in plain text only after confirming with the password or second factor; the password hash, 2FA secret and session tokens never are. Every export is recorded in the audit log.",
           "audit": "Security audit events may be retained in anonymized form so attacks and privileged changes remain traceable without retaining the deleted account identity"
         }
       },
@@ -5990,7 +6020,7 @@
       "verbinden": "Connect",
       "verbundenesPanel": "Panel server",
       "adresseAendern": "Change",
-      "kopplungErklaerung": "Sign in to your panel in the browser and open Profile → Pair device. The code or QR code there is valid for ten minutes and exactly once.",
+      "kopplungErklaerung": "Sign in to your panel in the browser and open Profile → Devices. The code or QR code there is valid for ten minutes and exactly once.",
       "codeLabel": "Pairing code",
       "codeHinweis": "Case does not matter, and you can leave out the dashes.",
       "qrCodeScannen": "Scan QR code via camera",
@@ -6113,11 +6143,14 @@
         "druecken": "Press a key …",
         "aus": "Disabled"
       },
+      "sicherheit": {
+        "messenger": "Messenger",
+        "tresor": "Vault"
+      },
       "tab": {
         "desktop": "Desktop integration",
         "app": "App status",
-        "wakeword": "Wake word",
-        "audio": "Audio",
+        "audio": "Audio & wake word",
         "rechtliches": "Legal & privacy",
         "gefahr": "Danger zone"
       },
@@ -6296,8 +6329,8 @@
     "fps30": "30 FPS — text and documents",
     "fps60": "60 FPS — games and video",
     "deviceSettingsTitle": "Audio & video settings",
-    "deviceSettingsNote": "This choice also applies to voice messages and voice mode. Noise suppression, echo cancellation and the microphone test live in Profile → Audio.",
-    "selfNote": "That is you. Your own volume is set in Profile → Audio.",
+    "deviceSettingsNote": "This choice also applies to voice messages and voice mode. Noise suppression, echo cancellation and the microphone test live in Profile → Audio & video.",
+    "selfNote": "That is you. Your own volume is set in Profile → Audio & video.",
     "volumeLocalOnly": "Applies only here. Everyone else in the call hears {{name}} unchanged.",
     "forEveryone": "For everyone in the call",
     "removeFromCall": "Remove from call",

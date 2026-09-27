@@ -6,11 +6,12 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from limits import parse
 from sqlalchemy.orm import Session
 
 from config import settings
-from middleware.rate_limit import auth_rate_limit
+from middleware.rate_limit import auth_rate_limit, limiter
 # Nur noch das Loeschen der Cookies passiert hier direkt. Das Setzen laeuft
 # ausnahmslos ueber `issue_session`, damit kein Ausstellungsort die dort
 # zugesicherte `jti` erneut vergessen kann.
@@ -26,7 +27,7 @@ from dependencies import (
 )
 from models import User, EmailVerification
 from services.dis_client import DisClient
-from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, NativeRefreshRequest, LogoutRequest
+from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, DataExportRequest, NativeRefreshRequest, LogoutRequest
 from schemas import ResendVerificationRequest
 from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, LocationSharingUpdateRequest, AgentNameUpdateRequest, AiProviderChoiceRequest
 from schemas.device_pairing import (
@@ -39,6 +40,7 @@ from schemas.device_pairing import (
 )
 from services import AuthService, EmailService, audit_service
 from services import bild_upload
+from services import datenexport_service
 from services import device_pairing_service
 from services import passkey_service
 from services import login_challenge_service
@@ -1215,6 +1217,63 @@ async def reset_password(
         raise HTTPException(status_code=400, detail="Ungültiger oder abgelaufener Token")
     await run_in_threadpool(AuthService.reset_password, db, user, req.new_password)
     return {"message": "Passwort zurückgesetzt"}
+_datenexport_grenze = parse("3/hour")
+
+
+@router.post("/data-export", dependencies=[Depends(auth_rate_limit)])
+def data_export(
+    req: DataExportRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> JSONResponse:
+    """Alle Daten des Kontos, die der Server lesen kann (DSGVO Art. 15 und 20).
+
+    Nachweis wie bei der Geraetekopplung: bei 2FA der eingerichtete Faktor,
+    sonst das Passwort. Nur dann gehen die selbst hinterlegten Zugangsdaten
+    (GitHub, Steam, Postfaecher, CalDAV) im Klartext mit. Ein Social-Konto ohne
+    Passwort und ohne 2FA bekommt alles andere: das kann es mit seinem Token
+    ohnehin schon lesen. `auth_rate_limit`, weil hier ein Passwort geprueft wird.
+    """
+    if user.two_factor_enabled:
+        if not passkey_service.zweiter_faktor_bestaetigt(
+            db, user,
+            otp_code=req.otp_code,
+            passkey=req.passkey.model_dump() if req.passkey else None,
+            zweck="data_export",
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Bitte mit deinem Passkey bestätigen."
+                    if user.two_factor_method == "passkey"
+                    else "Bitte den aktuellen 2FA-Code eingeben."
+                ),
+            )
+        mit_geheimnissen = True
+    elif user.has_password:
+        if not req.password or not AuthService.verify_password(req.password, user.password_hash):
+            raise HTTPException(status_code=403, detail="Bitte dein Passwort bestätigen.")
+        mit_geheimnissen = True
+    else:
+        mit_geheimnissen = False
+
+    if not limiter.limiter.hit(_datenexport_grenze, f"data-export:{user.id}"):
+        raise HTTPException(status_code=429, detail="Höchstens drei Exporte pro Stunde.")
+
+    paket = datenexport_service.exportieren(db, user.id, mit_geheimnissen=mit_geheimnissen)
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="auth.data_export",
+        target_type="user",
+        target_id=user.id,
+        details={"zugangsdaten_enthalten": mit_geheimnissen},
+        commit=True,
+    )
+    return JSONResponse(paket, headers={"Cache-Control": "no-store"})
+
+
 @router.delete("/delete-account")
 def delete_account(
     req: DeleteAccountRequest,
