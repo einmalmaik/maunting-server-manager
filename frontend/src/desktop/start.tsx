@@ -20,7 +20,7 @@ import '@fontsource/ibm-plex-sans/600.css'
 import '@fontsource/jetbrains-mono/400.css'
 import '@fontsource/jetbrains-mono/500.css'
 
-import '@/i18n'
+import { textBereit } from '@/i18n'
 import '@/index.css'
 
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -31,10 +31,13 @@ import { DesktopRoot } from './DesktopRoot'
 transportEinrichten()
 initOfflineSync()
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <ErrorBoundary>
-      <DesktopRoot />
-    </ErrorBoundary>
-  </React.StrictMode>,
-)
+// Wie im Panel (`src/main.tsx`): erst rendern, wenn die Texte da sind.
+void textBereit.finally(() => {
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <DesktopRoot />
+      </ErrorBoundary>
+    </React.StrictMode>,
+  )
+})

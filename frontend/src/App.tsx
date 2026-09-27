@@ -51,8 +51,12 @@ function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
   const [setupEmailConfigured, setSetupEmailConfigured] = useState(false)
   const [privacyNoticeVisible, setPrivacyNoticeVisible] = useState(true)
-  const { isAuthenticated } = useAuthStore()
-  const publicSettings = usePublicSettingsStore()
+  // Einzelne Felder statt des ganzen Stores: sonst zeichnete jede Änderung am
+  // Benutzer (Avatar, Status) den ganzen Routenbaum samt Shell neu.
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const calendarEnabled = usePublicSettingsStore((s) => s.calendar_enabled)
+  const notesEnabled = usePublicSettingsStore((s) => s.notes_enabled)
+  const socialEnabled = usePublicSettingsStore((s) => s.social_enabled)
 
   useEffect(() => {
     void usePublicSettingsStore.getState().refresh()
@@ -144,12 +148,12 @@ function App() {
             }
           />
           <Route path="profile" element={<Profile />} />
-          <Route path="calendar" element={publicSettings.calendar_enabled ? <Calendar /> : <Navigate to="/" replace />} />
-          <Route path="notes" element={publicSettings.notes_enabled ? <Notes /> : <Navigate to="/" replace />} />
+          <Route path="calendar" element={calendarEnabled ? <Calendar /> : <Navigate to="/" replace />} />
+          <Route path="notes" element={notesEnabled ? <Notes /> : <Navigate to="/" replace />} />
           <Route path="social" element={<Navigate to="/profile" replace />} />
-          <Route path="chat" element={publicSettings.social_enabled ? <Messenger /> : <Navigate to="/" replace />} />
-          <Route path="chat/join/:inviteCode" element={publicSettings.social_enabled ? <Messenger /> : <Navigate to="/" replace />} />
-          <Route path="messenger" element={<Navigate to={publicSettings.social_enabled ? '/chat' : '/'} replace />} />
+          <Route path="chat" element={socialEnabled ? <Messenger /> : <Navigate to="/" replace />} />
+          <Route path="chat/join/:inviteCode" element={socialEnabled ? <Messenger /> : <Navigate to="/" replace />} />
+          <Route path="messenger" element={<Navigate to={socialEnabled ? '/chat' : '/'} replace />} />
           <Route path="ai" element={<RequirePermission routeKey="ai"><Ai /></RequirePermission>} />
           <Route path="teams" element={<Teams />} />
           <Route path="docs" element={<Docs />} />

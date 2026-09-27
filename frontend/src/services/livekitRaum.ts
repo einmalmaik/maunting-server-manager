@@ -30,26 +30,18 @@ import E2eeWorker from 'livekit-client/e2ee-worker?worker'
 import { ausgabeGeraetId } from '@/components/ai/voice/audioGeraete'
 import { getAudioTrackConstraints } from '@/lib/audioSettings'
 import { getVideoCaptureAufloesung, getVideoSendeGrenzen } from '@/lib/videoSettings'
+import { E2eeNichtUnterstuetzt, type FreigabeAufloesung, type FreigabeOptionen } from './livekitGrundlagen'
 
 export { ConnectionState, RoomEvent, Track }
 export type { RemoteParticipant }
-
-/** Auflösungen, die die Bildschirmfreigabe anbietet. */
-export type FreigabeAufloesung = '720p' | '1080p' | '1440p' | '2160p' | 'quelle'
-export type FreigabeBildrate = 30 | 60
-
-export interface FreigabeOptionen {
-  aufloesung: FreigabeAufloesung
-  bildrate: FreigabeBildrate
-  /** System- bzw. Spielton mitübertragen. Nur Chromium-Browser können das. */
-  systemton: boolean
-}
-
-export const FREIGABE_STANDARD: FreigabeOptionen = {
-  aufloesung: '1080p',
-  bildrate: 60,
-  systemton: true,
-}
+export {
+  E2eeNichtUnterstuetzt,
+  FREIGABE_STANDARD,
+  benutzerIdAusIdentity,
+  type FreigabeAufloesung,
+  type FreigabeBildrate,
+  type FreigabeOptionen,
+} from './livekitGrundlagen'
 
 /**
  * Bitraten je Auflösung. Bewusst großzügig: eine Bildschirmfreigabe zeigt oft
@@ -105,17 +97,6 @@ export function systemtonMoeglich(): boolean {
   if (!bildschirmfreigabeMoeglich()) return false
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
   return /Chrome|Chromium|Edg/.test(ua) && !/Firefox/.test(ua)
-}
-
-export class E2eeNichtUnterstuetzt extends Error {
-  constructor() {
-    super(
-      'Dieser Browser kann verschlüsselte Anrufe nicht. MSM überträgt Gespräche nur ' +
-        'verschlüsselt, deshalb ist der Anruf hier nicht möglich. Aktuelles Chrome, ' +
-        'Edge, Firefox oder Safari ab 15.4 funktionieren.',
-    )
-    this.name = 'E2eeNichtUnterstuetzt'
-  }
 }
 
 export interface RaumVerbindung {
@@ -383,10 +364,4 @@ export async function erlaubeWiedergabe(room: Room): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-/** `u42` → 42. Gibt `null`, wenn die Kennung nicht von MSM stammt. */
-export function benutzerIdAusIdentity(identity: string): number | null {
-  const treffer = /^u(\d+)$/.exec(identity)
-  return treffer ? Number(treffer[1]) : null
 }

@@ -46,17 +46,13 @@ export default defineConfig({
         entryFileNames: 'assets/[name].[hash].js',
         chunkFileNames: 'assets/[name].[hash].js',
         assetFileNames: 'assets/[name].[hash][extname]',
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
-              return 'vendor-react';
-            }
-            if (id.includes('lucide-react') || id.includes('clsx') || id.includes('tailwind-merge')) {
-              return 'vendor-ui';
-            }
-            return 'vendor-utils';
-          }
-        }
+        // Kein `manualChunks`. Die alte Regel steckte jedes nicht erkannte
+        // Paket in `vendor-utils` und alles mit „react" im Pfad in
+        // `vendor-react`. Beide lud schon die Anmeldeseite: 3,6 MB mit
+        // maplibre, livekit, argon2, CodeMirror und Markdown, obwohl die
+        // Seiten dafür per `lazy()`/`import()` nachgeladen werden. Die
+        // Standardaufteilung legt ein Paket in den Chunk der Seiten, die es
+        // wirklich importieren.
       }
     }
   },

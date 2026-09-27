@@ -1,7 +1,5 @@
-import type { ResourceLanguage } from 'i18next'
+import type { BackendModule, ResourceKey } from 'i18next'
 
-import de from '../locales/de.json'
-import en from '../locales/en.json'
 import type { PanelLanguageCode } from './panelLocales'
 
 /**
@@ -17,8 +15,27 @@ import type { PanelLanguageCode } from './panelLocales'
  * Jetzt sind es zwei benannte Importe. Eine neue Sprache kostet damit eine
  * Zeile hier und eine in `panelLocales.ts` — und genau dort fällt auf, dass
  * eine Sprache auch jemanden braucht, der sie übersetzt.
+ *
+ * Geladen wird nur die Sprache, die angezeigt wird. Beide zusammen sind über
+ * 700 kB und lagen bis 27.09.2026 in jedem ersten Seitenaufruf.
  */
-export const localeResources: Record<PanelLanguageCode, ResourceLanguage> = {
-  de: { translation: de },
-  en: { translation: en },
+const textbuendel: Record<PanelLanguageCode, () => Promise<{ default: ResourceKey }>> = {
+  de: () => import('../locales/de.json'),
+  en: () => import('../locales/en.json'),
+}
+
+export const localeBackend: BackendModule = {
+  type: 'backend',
+  init() {},
+  read(language, _namespace, callback) {
+    const laden = textbuendel[language as PanelLanguageCode]
+    if (!laden) {
+      callback(null, {})
+      return
+    }
+    laden().then(
+      (modul) => callback(null, modul.default),
+      (fehler: unknown) => callback(fehler instanceof Error ? fehler : new Error(String(fehler)), null),
+    )
+  },
 }

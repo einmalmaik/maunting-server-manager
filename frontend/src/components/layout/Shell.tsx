@@ -6,7 +6,7 @@ import { VersionFooter } from '@/components/VersionFooter'
 import { AiRunNotice } from '@/components/ai/AiRunNotice'
 import { ServerIncidentNotifier } from '@/components/notifications/ServerIncidentNotifier'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
-import { CallOverlay } from '@/components/calling/CallOverlay'
+import { AnrufEbene } from '@/components/calling/AnrufEbene'
 import { CrossDeviceCallBanner } from '@/components/calling/CrossDeviceCallBanner'
 import { api } from '@/api/client'
 import { useMessengerSperreBereitschaft } from '@/hooks/useMessengerSperre'
@@ -146,7 +146,7 @@ export function Shell() {
       <PanelPopupModal />
 
       {/* Anruf-Overlay für Direkt- und Gruppenanrufe (global im Shell verfügbar) */}
-      <CallOverlay />
+      <AnrufEbene />
     </div>
   )
 }

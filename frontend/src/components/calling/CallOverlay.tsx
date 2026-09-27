@@ -178,18 +178,6 @@ export const CallOverlay: React.FC = () => {
     if (gewaehlterTeilnehmer && !menueTeilnehmer) setGewaehlterTeilnehmer(null)
   }, [gewaehlterTeilnehmer, menueTeilnehmer])
 
-  // Globaler Empfang von Anrufereignissen über msm:sync-event (auch außerhalb des Chats)
-  useEffect(() => {
-    const onSyncEvent = (e: Event) => {
-      const custom = e as CustomEvent<{ type?: string; [key: string]: unknown }>
-      if (custom.detail) {
-        useCallStore.getState().handleCallSyncEvent(custom.detail)
-      }
-    }
-    window.addEventListener('msm:sync-event', onSyncEvent)
-    return () => window.removeEventListener('msm:sync-event', onSyncEvent)
-  }, [])
-
   const stoppeKlingelton = () => {
     const aktuell = klingeltonRef.current
     if (!aktuell) return

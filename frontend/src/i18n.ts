@@ -1,7 +1,7 @@
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
-import { localeResources } from './config/locales'
+import { localeBackend } from './config/locales'
 import { panelLanguageCodes } from './config/panelLocales'
 import { getPersistedLocale, setPersistedLocale } from './utils/localePersistence'
 
@@ -16,12 +16,18 @@ detector.addDetector({
   },
 })
 
-i18n
+/**
+ * Erfüllt, sobald die Texte der angezeigten Sprache geladen sind. `main.tsx`
+ * rendert erst danach, sonst stünden für einen Moment Schlüssel statt Text da.
+ */
+export const textBereit = i18n
+  .use(localeBackend)
   .use(detector)
   .use(initReactI18next)
   .init({
-    resources: localeResources,
-    fallbackLng: 'en',
+    // Deutsch lädt kein Englisch nach: `check:i18n` hält beide Dateien
+    // schlüsselgleich, der Rückfall träfe also nie etwas und kostete 400 kB.
+    fallbackLng: { de: [], default: ['en'] },
     // Alles ausser DE/EN landet auf Englisch. i18next prüft eine erkannte
     // Sprache gegen diese Liste, bevor es sie übernimmt — ein Browser, der
     // `ar-SA` meldet, bekommt damit `fallbackLng` und nicht eine Sprache, für

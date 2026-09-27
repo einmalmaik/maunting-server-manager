@@ -34,23 +34,11 @@ import { getDeviceId, getDeviceType } from '@/lib/deviceIdentity'
 import {
   E2eeNichtUnterstuetzt,
   FREIGABE_STANDARD,
-  RoomEvent,
-  Track,
-  beendeBildschirmfreigabe,
   benutzerIdAusIdentity,
-  erlaubeWiedergabe,
-  setzeKamera,
-  setzeLautstaerke,
-  setzeMikrofon,
-  setzeRaumSchluessel,
-  setzeTaub,
-  starteBildschirmfreigabe,
-  trenne,
-  verbinde,
-  wechsleGeraet,
   type FreigabeOptionen,
-  type RaumVerbindung,
-} from '@/services/livekitRaum'
+} from '@/services/livekitGrundlagen'
+import type * as LivekitRaum from '@/services/livekitRaum'
+import type { RaumVerbindung } from '@/services/livekitRaum'
 import {
   alsArrayBuffer,
   entpacke,
@@ -62,7 +50,7 @@ import {
 import { toneAbgang, toneAufgelegt, toneBeitritt, toneUebergabe } from '@/components/calling/anrufToene'
 import { getAudioSettings, saveAudioSettings } from '@/lib/audioSettings'
 import { toast } from '@/stores/toastStore'
-import type { Participant, Room } from 'livekit-client'
+import type { Participant, Room, Track } from 'livekit-client'
 
 export type CallState = 'idle' | 'outgoing' | 'incoming' | 'connecting' | 'active' | 'ended'
 export type CallMode = 'audio' | 'video'
@@ -262,6 +250,24 @@ export function aktiverRaum(): Room | null {
   return verbindung?.room ?? null
 }
 
+/**
+ * `livekit-client` ist über 500 kB groß und steckte bis 27.09.2026 in jeder
+ * Seite, auch in der Anmeldung. Jetzt lädt es der erste Verbindungsaufbau.
+ * Alles andere hier fasst LiveKit nur an, wenn schon ein Raum besteht; dann
+ * ist das Modul auch da, und `lk()` darf es voraussetzen.
+ */
+let livekitModul: typeof LivekitRaum | null = null
+
+async function ladeLivekit(): Promise<typeof LivekitRaum> {
+  livekitModul ??= await import('@/services/livekitRaum')
+  return livekitModul
+}
+
+function lk(): typeof LivekitRaum {
+  if (!livekitModul) throw new Error('LiveKit ist noch nicht geladen')
+  return livekitModul
+}
+
 // ── Hilfen zum Übersetzen von LiveKit-Zustand in Store-Zustand ──────────────
 
 function anzeigename(teilnehmer: Participant): string {
@@ -276,17 +282,17 @@ function nameVon(teilnehmer: Participant, bekannte: Bekannte): string {
 }
 
 function videospur(teilnehmer: Participant): Track | null {
-  const veroeffentlichung = teilnehmer.getTrackPublication(Track.Source.Camera)
+  const veroeffentlichung = teilnehmer.getTrackPublication(lk().Track.Source.Camera)
   return veroeffentlichung?.track ?? null
 }
 
 function kameraAus(teilnehmer: Participant): boolean {
-  const veroeffentlichung = teilnehmer.getTrackPublication(Track.Source.Camera)
+  const veroeffentlichung = teilnehmer.getTrackPublication(lk().Track.Source.Camera)
   return !veroeffentlichung || veroeffentlichung.isMuted || !veroeffentlichung.track
 }
 
 function mikrofonAus(teilnehmer: Participant): boolean {
-  const veroeffentlichung = teilnehmer.getTrackPublication(Track.Source.Microphone)
+  const veroeffentlichung = teilnehmer.getTrackPublication(lk().Track.Source.Microphone)
   return !veroeffentlichung || veroeffentlichung.isMuted
 }
 
@@ -310,13 +316,13 @@ function darfSenden(teilnehmer: Participant, quelle: Track.Source): boolean {
 /** Die Nummern aus LiveKits `TrackSource`-Aufzählung. */
 function quellenNummer(quelle: Track.Source): number {
   switch (quelle) {
-    case Track.Source.Camera:
+    case lk().Track.Source.Camera:
       return 1
-    case Track.Source.Microphone:
+    case lk().Track.Source.Microphone:
       return 2
-    case Track.Source.ScreenShare:
+    case lk().Track.Source.ScreenShare:
       return 3
-    case Track.Source.ScreenShareAudio:
+    case lk().Track.Source.ScreenShareAudio:
       return 4
     default:
       return 0
@@ -391,8 +397,8 @@ function sammleTeilnehmer(room: Room, bekannte: Bekannte, sprechend: Set<string>
       // der Zustand direkt nach dem Beitreten, bevor der Schlüssel da ist.
       isPending:
         !istSelbst &&
-        teilnehmer.getTrackPublication(Track.Source.Microphone) === undefined &&
-        teilnehmer.getTrackPublication(Track.Source.Camera) === undefined,
+        teilnehmer.getTrackPublication(lk().Track.Source.Microphone) === undefined &&
+        teilnehmer.getTrackPublication(lk().Track.Source.Camera) === undefined,
       videoTrack: videospur(teilnehmer),
       volume: 1,
     }
@@ -403,7 +409,7 @@ function sammleFreigaben(room: Room, bekannte: Bekannte): CallScreenShare[] {
   const freigaben: CallScreenShare[] = []
   const alle: Participant[] = [room.localParticipant, ...room.remoteParticipants.values()]
   for (const teilnehmer of alle) {
-    const veroeffentlichung = teilnehmer.getTrackPublication(Track.Source.ScreenShare)
+    const veroeffentlichung = teilnehmer.getTrackPublication(lk().Track.Source.ScreenShare)
     const spur = veroeffentlichung?.track
     if (!spur) continue
     const userId = benutzerIdAusIdentity(teilnehmer.identity) ?? 0
@@ -426,7 +432,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
   const spiegele = () => {
     const room = verbindung?.room
     if (!room) return
-    const serverStumm = !darfSenden(room.localParticipant, Track.Source.Microphone)
+    const serverStumm = !darfSenden(room.localParticipant, lk().Track.Source.Microphone)
     set((s) => ({
       participants: sammleTeilnehmer(room, bekannte, sprechend),
       screenShares: sammleFreigaben(room, bekannte),
@@ -458,20 +464,20 @@ export const useCallStore = create<UseCallState>((set, get) => {
       if (eigeneGeneration === generation) fn()
     }
 
-    room.on(RoomEvent.Connected, wennAktuell(() => {
+    room.on(lk().RoomEvent.Connected, wennAktuell(() => {
       set({ state: 'active', reconnecting: false, errorMessage: null })
       spiegele()
     }))
-    room.on(RoomEvent.Reconnecting, wennAktuell(() => set({ reconnecting: true })))
-    room.on(RoomEvent.Reconnected, wennAktuell(() => {
+    room.on(lk().RoomEvent.Reconnecting, wennAktuell(() => set({ reconnecting: true })))
+    room.on(lk().RoomEvent.Reconnected, wennAktuell(() => {
       set({ reconnecting: false })
       spiegele()
     }))
-    room.on(RoomEvent.Disconnected, wennAktuell(() => {
+    room.on(lk().RoomEvent.Disconnected, wennAktuell(() => {
       if (get().state !== 'idle') get().endCall()
     }))
 
-    room.on(RoomEvent.ParticipantConnected, (teilnehmer) => {
+    room.on(lk().RoomEvent.ParticipantConnected, (teilnehmer) => {
       if (eigeneGeneration !== generation) return
       partnerTransferring = false
       partnerAngenommen = true
@@ -484,7 +490,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
       // Nachzügler brauchen den Raumschlüssel. Genau ein Anwesender schickt ihn.
       void schickeSchluesselNach(teilnehmer)
     })
-    room.on(RoomEvent.ParticipantDisconnected, (teilnehmer) => {
+    room.on(lk().RoomEvent.ParticipantDisconnected, (teilnehmer) => {
       if (eigeneGeneration !== generation) return
       spiegele()
       // Zweiergespräch: geht der andere, ist das Gespräch vorbei.
@@ -513,25 +519,25 @@ export const useCallStore = create<UseCallState>((set, get) => {
 
     // Ein Moderator hat die erlaubten Quellen geändert. Ohne diese Zeile bliebe
     // der Mikrofonknopf bedienbar und täte nichts.
-    room.on(RoomEvent.ParticipantPermissionsChanged, wennAktuell(spiegele))
-    room.on(RoomEvent.ParticipantMetadataChanged, wennAktuell(spiegele))
+    room.on(lk().RoomEvent.ParticipantPermissionsChanged, wennAktuell(spiegele))
+    room.on(lk().RoomEvent.ParticipantMetadataChanged, wennAktuell(spiegele))
 
     // Der Browser hat die Wiedergabe freigegeben oder verweigert.
-    room.on(RoomEvent.AudioPlaybackStatusChanged, wennAktuell(() => {
+    room.on(lk().RoomEvent.AudioPlaybackStatusChanged, wennAktuell(() => {
       set({ audioBlockiert: !room.canPlaybackAudio })
     }))
 
     const beiSpur = wennAktuell(spiegele)
-    room.on(RoomEvent.TrackSubscribed, beiSpur)
-    room.on(RoomEvent.TrackUnsubscribed, beiSpur)
-    room.on(RoomEvent.TrackPublished, beiSpur)
-    room.on(RoomEvent.TrackUnpublished, beiSpur)
-    room.on(RoomEvent.TrackMuted, beiSpur)
-    room.on(RoomEvent.TrackUnmuted, beiSpur)
-    room.on(RoomEvent.LocalTrackPublished, beiSpur)
-    room.on(RoomEvent.LocalTrackUnpublished, beiSpur)
+    room.on(lk().RoomEvent.TrackSubscribed, beiSpur)
+    room.on(lk().RoomEvent.TrackUnsubscribed, beiSpur)
+    room.on(lk().RoomEvent.TrackPublished, beiSpur)
+    room.on(lk().RoomEvent.TrackUnpublished, beiSpur)
+    room.on(lk().RoomEvent.TrackMuted, beiSpur)
+    room.on(lk().RoomEvent.TrackUnmuted, beiSpur)
+    room.on(lk().RoomEvent.LocalTrackPublished, beiSpur)
+    room.on(lk().RoomEvent.LocalTrackUnpublished, beiSpur)
 
-    room.on(RoomEvent.ActiveSpeakersChanged, (redner) => {
+    room.on(lk().RoomEvent.ActiveSpeakersChanged, (redner) => {
       if (eigeneGeneration !== generation) return
       sprechend = new Set(redner.map((r) => r.identity))
       spiegele()
@@ -558,7 +564,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
     if (!istSchluesselhalter(identitaet.userId, anwesende, weg)) return
     const neuer = erzeugeRaumSchluessel()
     raumSchluessel = neuer
-    if (verbindung) await setzeRaumSchluessel(verbindung, alsArrayBuffer(neuer))
+    if (verbindung) await lk().setzeRaumSchluessel(verbindung, alsArrayBuffer(neuer))
     const ziele = anwesende.filter((id) => id !== identitaet!.userId)
     if (ziele.length) void verteileAnAlle(zustand.raum, neuer, ziele, identitaet.publicKeyJwk)
   }
@@ -602,23 +608,23 @@ export const useCallStore = create<UseCallState>((set, get) => {
     if (eigeneGeneration !== generation) return
 
     try {
-      verbindung = await verbinde(zugang.url, zugang.token, alsArrayBuffer(raumSchluessel))
+      verbindung = await (await ladeLivekit()).verbinde(zugang.url, zugang.token, alsArrayBuffer(raumSchluessel))
     } catch (fehler) {
       meldeFehler(fehler, 'verbindung')
       throw fehler
     }
     if (eigeneGeneration !== generation) {
-      await trenne(verbindung.room)
+      await lk().trenne(verbindung.room)
       verbindung = null
       return
     }
 
     haengeEreignisseAn(verbindung.room, eigeneGeneration)
-    set({ audioBlockiert: !(await erlaubeWiedergabe(verbindung.room)) })
+    set({ audioBlockiert: !(await lk().erlaubeWiedergabe(verbindung.room)) })
 
     try {
-      await setzeMikrofon(verbindung.room, true)
-      if (mode === 'video') await setzeKamera(verbindung.room, true)
+      await lk().setzeMikrofon(verbindung.room, true)
+      if (mode === 'video') await lk().setzeKamera(verbindung.room, true)
     } catch (fehler) {
       // Verbunden, aber ohne eigenes Mikrofon: hörbar bleibt der Anruf trotzdem.
       // Der Benutzer soll wissen, warum ihn niemand hört.
@@ -673,7 +679,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
     sprechend = new Set<string>()
     bekannte.clear()
     set({ hinweise: [], audioBlockiert: false, serverStumm: false })
-    if (room) void trenne(room)
+    if (room) void lk().trenne(room)
   }
 
   return {
@@ -916,19 +922,19 @@ export const useCallStore = create<UseCallState>((set, get) => {
       }
       const naechster = !get().isMuted
       const room = verbindung?.room
-      if (room) void setzeMikrofon(room, !naechster).catch(() => {})
+      if (room) void lk().setzeMikrofon(room, !naechster).catch(() => {})
       // Aus der Taubheit heraus das Mikrofon einzuschalten hebt sie auf: alles
       // andere wäre ein Zustand, in dem man spricht und nichts hört.
       set(naechster ? { isMuted: true } : { isMuted: false, isDeafened: false })
-      if (!naechster && room) setzeTaub(room, false)
+      if (!naechster && room) lk().setzeTaub(room, false)
     },
 
     toggleDeafen: () => {
       const naechster = !get().isDeafened
       const room = verbindung?.room
       if (room) {
-        setzeTaub(room, naechster)
-        void setzeMikrofon(room, !naechster).catch(() => {})
+        lk().setzeTaub(room, naechster)
+        void lk().setzeMikrofon(room, !naechster).catch(() => {})
       }
       set({ isDeafened: naechster, isMuted: naechster })
     },
@@ -940,7 +946,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
         set({ isCameraOff: naechster })
         return
       }
-      void setzeKamera(room, !naechster)
+      void lk().setzeKamera(room, !naechster)
         .then(() => {
           set({ isCameraOff: naechster, mode: naechster ? get().mode : 'video' })
           spiegele()
@@ -953,7 +959,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
       if (!room) return
       set({ screenShareOptions: optionen })
       try {
-        await starteBildschirmfreigabe(room, optionen)
+        await lk().starteBildschirmfreigabe(room, optionen)
         set({ isScreenSharing: true })
         spiegele()
       } catch (fehler) {
@@ -967,7 +973,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
     stopScreenShare: async () => {
       const room = verbindung?.room
       if (!room) return
-      await beendeBildschirmfreigabe(room).catch(() => {})
+      await lk().beendeBildschirmfreigabe(room).catch(() => {})
       set({ isScreenSharing: false })
       spiegele()
     },
@@ -976,7 +982,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
 
     setParticipantVolume: (identity, wert) => {
       const room = verbindung?.room
-      if (room) setzeLautstaerke(room, identity, wert)
+      if (room) lk().setzeLautstaerke(room, identity, wert)
       set((s) => ({
         participants: s.participants.map((t) =>
           t.identity === identity ? { ...t, volume: wert } : t,
@@ -996,9 +1002,9 @@ export const useCallStore = create<UseCallState>((set, get) => {
     setDevices: (audioIn, videoIn, audioOut) => {
       const room = verbindung?.room
       if (room) {
-        if (audioIn) void wechsleGeraet(room, 'audioinput', audioIn).catch(() => {})
-        if (videoIn) void wechsleGeraet(room, 'videoinput', videoIn).catch(() => {})
-        if (audioOut) void wechsleGeraet(room, 'audiooutput', audioOut).catch(() => {})
+        if (audioIn) void lk().wechsleGeraet(room, 'audioinput', audioIn).catch(() => {})
+        if (videoIn) void lk().wechsleGeraet(room, 'videoinput', videoIn).catch(() => {})
+        if (audioOut) void lk().wechsleGeraet(room, 'audiooutput', audioOut).catch(() => {})
       }
       // Dieselbe Ablage wie Profil → Audio. Ein Anruf, der sein Gerät nur für
       // sich merkt, wäre die zweite Wahrheit neben dem Mikrofontest.
@@ -1020,7 +1026,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
     erlaubeTon: async () => {
       const room = verbindung?.room
       if (!room) return
-      set({ audioBlockiert: !(await erlaubeWiedergabe(room)) })
+      set({ audioBlockiert: !(await lk().erlaubeWiedergabe(room)) })
     },
 
     verwirfHinweis: (id) => set((s) => ({ hinweise: s.hinweise.filter((h) => h.id !== id) })),
@@ -1069,7 +1075,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
       try {
         const schluessel = await entpacke(ciphertext, identitaet.decryptionKeys)
         raumSchluessel = schluessel
-        if (verbindung) await setzeRaumSchluessel(verbindung, alsArrayBuffer(schluessel))
+        if (verbindung) await lk().setzeRaumSchluessel(verbindung, alsArrayBuffer(schluessel))
         spiegele()
       } catch {
         // Ein Umschlag, den wir nicht öffnen können, ist nicht für uns. Der

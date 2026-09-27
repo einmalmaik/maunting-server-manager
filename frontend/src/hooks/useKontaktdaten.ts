@@ -8,7 +8,7 @@
  * `laden`. Bis 09/2026 stand das in `Messenger.tsx`.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
   getFriends,
@@ -27,8 +27,19 @@ import { benenneGruppen } from '@/services/gruppenName'
 
 const CONTACTS_CACHE_KEY = 'msm:chat_contacts_cache'
 const TAKT_MS = 15000
+/** Teammitglieder ändern sich selten; je Team eine Abfrage kostet am Server Dutzende. */
+const TEAM_TAKT_MS = 60000
 
 export type TeamKontakt = { member: TeamMember; teamName: string }
+
+/**
+ * Behält den bisherigen Stand, wenn der neue gleich aussieht. Sonst zeichnete
+ * jeder Takt die ganze Messenger-Seite neu, auch wenn sich nichts geändert hat.
+ */
+function behalteGleiches<T>(neu: T): (bisher: T) => T {
+  const abdruck = JSON.stringify(neu)
+  return (bisher) => (JSON.stringify(bisher) === abdruck ? bisher : neu)
+}
 
 function loadInitialContactsCache(): {
   friends: FriendItem[]
@@ -72,6 +83,7 @@ export function useKontaktdaten(currentUserId: number, messengerGesperrt: boolea
   const [publicUsers, setPublicUsers] = useState<PublicProfileResponse[]>(initialCache.publicUsers)
   const [directChats, setDirectChats] = useState<DirectChatItem[]>(initialCache.directChats)
   const [stories, setStories] = useState<ChatStoryItem[]>(initialCache.stories)
+  const teamStand = useRef<{ abdruck: string; geholt: number; mitglieder: TeamKontakt[] } | null>(null)
 
   const laden = async () => {
     try {
@@ -85,16 +97,21 @@ export function useKontaktdaten(currentUserId: number, messengerGesperrt: boolea
         // dieses Konto schreibt. Die Liste liegt versiegelt auf diesem Gerät.
         gespraechsListe().catch(() => []),
       ])
-      setFriends(friendsData)
+      setFriends(behalteGleiches(friendsData))
       // Der Server liefert für Gruppen seit Stufe 6 keinen Namen mehr. Diese
       // eine Zeile setzt ihn aus dem versiegelten örtlichen Speicher wieder
       // ein — bewusst hier an der Liste und nicht an jeder Anzeige einzeln.
-      setGroups(await benenneGruppen(groupsData).catch(() => groupsData))
-      setStories(storiesData)
-      setPublicUsers(publicData)
-      setDirectChats(directChatsData)
+      setGroups(behalteGleiches(await benenneGruppen(groupsData).catch(() => groupsData)))
+      setStories(behalteGleiches(storiesData))
+      setPublicUsers(behalteGleiches(publicData))
+      setDirectChats(behalteGleiches(directChatsData))
 
-      const teamDetails = await Promise.all(
+      // Die Mitglieder je Team nur jede Minute oder wenn sich die Teams ändern.
+      const teamAbdruck = JSON.stringify(teamsData.map((t) => [t.id, t.name]))
+      const bisher = teamStand.current
+      const teamsFrisch =
+        bisher !== null && bisher.abdruck === teamAbdruck && Date.now() - bisher.geholt < TEAM_TAKT_MS
+      const teamDetails = teamsFrisch ? [] : await Promise.all(
         teamsData.map(async (t) => {
           try {
             const detail = await teamsApi.get(t.id)
@@ -105,17 +122,22 @@ export function useKontaktdaten(currentUserId: number, messengerGesperrt: boolea
         })
       )
 
-      const membersList: TeamKontakt[] = []
-      for (const { team, detail } of teamDetails) {
-        if (detail && detail.members) {
-          for (const m of detail.members) {
-            if (m.user_id !== currentUserId) {
-              membersList.push({ member: m, teamName: team.name })
+      let membersList: TeamKontakt[] = []
+      if (teamsFrisch) {
+        membersList = bisher.mitglieder
+      } else {
+        for (const { team, detail } of teamDetails) {
+          if (detail && detail.members) {
+            for (const m of detail.members) {
+              if (m.user_id !== currentUserId) {
+                membersList.push({ member: m, teamName: team.name })
+              }
             }
           }
         }
+        teamStand.current = { abdruck: teamAbdruck, geholt: Date.now(), mitglieder: membersList }
       }
-      setTeamMembers(membersList)
+      setTeamMembers(behalteGleiches(membersList))
 
       // Lokalen Cache für sofortiges 0ms-Laden beim nächsten Aufruf speichern
       try {
@@ -146,9 +168,22 @@ export function useKontaktdaten(currentUserId: number, messengerGesperrt: boolea
   }
 
   useEffect(() => {
+    // Ein neues Konto oder Entsperren liest die Teams frisch.
+    teamStand.current = null
     laden()
-    const interval = setInterval(laden, TAKT_MS)
-    return () => clearInterval(interval)
+    // Im Hintergrund nicht takten; beim Zurückkommen sofort laden.
+    const sichtbar = () => typeof document === 'undefined' || document.visibilityState === 'visible'
+    const interval = setInterval(() => {
+      if (sichtbar()) laden()
+    }, TAKT_MS)
+    const beiSichtbar = () => {
+      if (sichtbar()) laden()
+    }
+    document.addEventListener('visibilitychange', beiSichtbar)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', beiSichtbar)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserId, messengerGesperrt])
 

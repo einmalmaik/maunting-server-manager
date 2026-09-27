@@ -26,7 +26,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { PromptDialog } from '@/components/ui/PromptDialog'
 import { ToastContainer } from '@/components/ui/ToastContainer'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
-import { CallOverlay } from '@/components/calling/CallOverlay'
+import { AnrufEbene } from '@/components/calling/AnrufEbene'
 import { CrossDeviceCallBanner } from '@/components/calling/CrossDeviceCallBanner'
 import { Avatar, BenachrichtigungsGlocke, Button, ProfileDropdown, type ProfileDropdownItem } from '@/Singra/UI'
 import { useHasPermission } from '@/hooks/useHasPermission'
@@ -548,7 +548,7 @@ export function DesktopApp() {
             <AiRunNotice />
             <ServerIncidentNotifier />
             <PanelPopupModal />
-            {publicSettings.social_enabled && <CallOverlay />}
+            {publicSettings.social_enabled && <AnrufEbene />}
             {isAndroid && <OverlayFenster inApp={true} />}
           </>
         )}

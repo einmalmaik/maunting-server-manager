@@ -177,8 +177,44 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
     // sie wird gesetzt, nicht angehängt. Eine Dublette kann so nicht entstehen,
     // und es gibt nichts abzugleichen.
 
+    /*
+     * Text- und Denkstücke gehen gesammelt einmal je Bild in den Verlauf.
+     *
+     * Bis 27.09.2026 löste jedes Stück ein eigenes Rendern aus, und
+     * `AiMarkdown` las dabei den ganzen bisherigen Text neu: eine lange Antwort
+     * kostete quadratisch viel. Jedes andere Ereignis spült zuerst, damit die
+     * Reihenfolge im Verlauf dieselbe bleibt wie auf der Leitung.
+     */
+    let gesammelt: { id: string; stuecke: { art: 'text' | 'denken'; inhalt: string }[] } | null = null
+    let rahmen: number | null = null
+    const spuele = () => {
+      if (rahmen !== null) {
+        cancelAnimationFrame(rahmen)
+        rahmen = null
+      }
+      const offen = gesammelt
+      gesammelt = null
+      if (!offen || !mountedRef.current) return
+      aendere(offen.id, (message) => {
+        let content = message.content
+        let sections = message.sections
+        for (const stueck of offen.stuecke) {
+          if (stueck.art === 'text') content += stueck.inhalt
+          sections = mitStueck(sections, stueck.art, stueck.inhalt)
+        }
+        return { ...message, content, sections }
+      })
+    }
+    const sammle = (id: string, art: 'text' | 'denken', inhalt: string) => {
+      if (gesammelt && gesammelt.id !== id) spuele()
+      gesammelt ??= { id, stuecke: [] }
+      gesammelt.stuecke.push({ art, inhalt })
+      rahmen ??= requestAnimationFrame(spuele)
+    }
+
     const verarbeite = ({ event: name, data }: AiStreamEvent) => {
       if (!mountedRef.current) return
+      if (name !== 'delta' && name !== 'reasoning') spuele()
       // Ganz oben und nicht bei den anderen Zweigen: das Leeren muss auch dann
       // geschehen, wenn `aktuell` noch leer ist und der `tool`-Zweig weiter
       // unten deshalb gar nicht erreicht wird. Sonst bliebe „Ich lese die
@@ -336,20 +372,14 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
         // Verschiedenes sind: der reine Text und seine Gliederung. Die
         // Gliederung erbt hier ihre eigentliche Aufgabe — ein Werkzeug, das
         // zwischen zwei Absätzen lief, trennt sie in zwei Abschnitte.
-        aendere(aktuell!, (message) => ({
-          ...message,
-          content: message.content + data.content,
-          sections: mitStueck(message.sections, 'text', data.content),
-        }))
+        sammle(aktuell!, 'text', data.content)
       } else if (name === 'reasoning') {
         // In die Gliederung, an ihre Stelle — nicht in ein flaches Feld
         // daneben. `message.reasoning` bleibt dabei leer und wird erst durch
         // einen Abzug gesetzt; gezeichnet wird ohnehin aus den Abschnitten,
         // und zwei mitgeführte Fassungen desselben Textes liefen früher oder
         // später auseinander.
-        aendere(aktuell!, (message) => ({
-          ...message, sections: mitStueck(message.sections, 'denken', data.content),
-        }))
+        sammle(aktuell!, 'denken', data.content)
       } else if (name === 'question') {
         // Die Frage gehört an die Antwort, nicht neben sie. Als eigener
         // Eintrag stand sie früher VOR der noch leeren Assistentenblase,
@@ -422,7 +452,7 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
         toast.error(erklaerung)
       }
     }
-    return { verarbeite, istGescheitert: () => gescheitert }
+    return { verarbeite, spuele, istGescheitert: () => gescheitert }
   }, [aendere, canAttach, ladeKontext, merkeVorschlag, providerId, setAttachments, t])
 
   /**
@@ -438,7 +468,7 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
   ) => {
     const controller = new AbortController()
     abortRef.current = controller
-    const { verarbeite, istGescheitert } = machVerarbeiter(optimistischeId, optimistischeBenutzerId)
+    const { verarbeite, spuele, istGescheitert } = machVerarbeiter(optimistischeId, optimistischeBenutzerId)
     // Zwei Wege enden im selben Bild: der Wurf aus dem Strom und der
     // `error`-Rahmen, hinter dem der Strom regulär ausläuft. In beiden Fällen
     // behauptet die halb geschriebene Blase sonst eine Antwort, die nie fertig
@@ -462,6 +492,8 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
       }
     } finally {
       abortRef.current = null
+      // Der letzte Rest aus `sammle`, bevor irgendetwas die Blase abschließt.
+      spuele()
       if (mountedRef.current && !abgebrochen) {
         setStreaming(false)
         // Der Rückhalt für den Strom, der einfach abreißt: dann kommt kein

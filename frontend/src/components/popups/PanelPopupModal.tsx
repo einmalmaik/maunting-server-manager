@@ -1,10 +1,12 @@
-import { useEffect, useState, useRef } from 'react'
+import { Suspense, lazy, useEffect, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Megaphone, X, ExternalLink, Check, EyeOff } from 'lucide-react'
 import { getActivePopup, dismissPopup, type PanelPopup } from '@/api/popups'
-import { AiMarkdown } from '@/components/ai/AiMarkdown'
 import { Button } from '@/components/ui/Button'
 import { useAuthStore } from '@/stores/authStore'
+
+// Markdown erst laden, wenn ein Pop-up erscheint, nicht auf jeder Seite.
+const AiMarkdown = lazy(() => import('@/components/ai/AiMarkdown').then((m) => ({ default: m.AiMarkdown })))
 
 interface PanelPopupModalProps {
   popup?: PanelPopup | null
@@ -123,7 +125,9 @@ export function PanelPopupModal({ popup: initialPopup, isPreview = false, onClos
 
         {/* Body Content */}
         <div className="p-6 overflow-y-auto space-y-4 flex-1">
-          <AiMarkdown content={popup.content_markdown} />
+          <Suspense fallback={null}>
+            <AiMarkdown content={popup.content_markdown} />
+          </Suspense>
 
           {/* Optionaler Aktions-Button */}
           {popup.button_text && popup.button_url && (

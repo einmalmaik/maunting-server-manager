@@ -43,8 +43,10 @@ import {
 import {
   ChatMessageBubble,
   type AntwortBezug,
+  type BlasenAktionen,
   type CalendarAttachment,
   type ChatMessage,
+  type TonZustand,
   type NoteAttachment,
   type StickerAttachment,
   type StoryReplyAttachment,
@@ -2932,7 +2934,12 @@ function MessengerSeite() {
       void loadMessages(true)
       fasseWarteschlangeNach()
       const interval = setInterval(() => {
-        void loadMessages(false)
+        // Im Hintergrund nicht: jeder Durchgang entschlüsselt und versiegelt
+        // den ganzen Verlauf neu. Neue Nachrichten holt dann das Sync-Ereignis
+        // oben, und `visibilitychange` lädt beim Zurückkommen sofort.
+        if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+          void loadMessages(false)
+        }
         fasseWarteschlangeNach()
       }, 5000)
       const beiNetz = () => fasseWarteschlangeNach()
@@ -4145,6 +4152,125 @@ function MessengerSeite() {
     }
   }
 
+  /*
+   * Der Verlauf zeichnet nur neu, wenn sich etwas ändert, das er zeigt.
+   *
+   * Bis 27.09.2026 zeichnete jeder Tastendruck im Eingabefeld alle
+   * Nachrichtenblasen neu: `inputText` liegt hier in der Seite, und die Blasen
+   * bekamen bei jedem Durchlauf neue Handler. Die Handler laufen jetzt über
+   * `blasenHandler`, das in jedem Durchlauf die neueste Fassung bekommt. Der
+   * gemerkte Verlauf ruft also nie einen Handler mit altem Zustand auf.
+   *
+   * Wer der Blase etwas Neues zeigt, trägt es in die Liste unter `useMemo`
+   * ein. Sonst bleibt die Blase beim alten Stand stehen.
+   */
+  const blasenHandler = useRef<{ aktionen: BlasenAktionen; ton: TonZustand; umschalten: (m: ChatMessage) => void }>(null!)
+  blasenHandler.current = {
+    aktionen: {
+      onViewImage: setViewingImage,
+      onEdit: (m) => {
+        setEditingMessage(m)
+        setInputText(m.text)
+      },
+      onDelete: (m) => void handleDeleteMessage(m),
+      onImportNote: (note, schluessel) => void handleImportNote(note, schluessel),
+      onImportCalendar: (cal, schluessel) => void handleImportCalendar(cal, schluessel),
+      onJoinByInviteCode: handleJoinByInviteCode,
+      onMenue: setMenueNachricht,
+      onAntworten: handleAntworten,
+      onReaktion: (m, emoji) => void handleReaktion(m, emoji),
+      onSpringeZu: springeZu,
+    },
+    ton: tonWiedergabe,
+    umschalten: handleAuswahlUmschalten,
+  }
+  const blasenAktionen = useMemo<BlasenAktionen>(
+    () => ({
+      onViewImage: (url) => blasenHandler.current.aktionen.onViewImage(url),
+      onEdit: (m) => blasenHandler.current.aktionen.onEdit(m),
+      onDelete: (m) => blasenHandler.current.aktionen.onDelete(m),
+      onImportNote: (note, schluessel) => blasenHandler.current.aktionen.onImportNote(note, schluessel),
+      onImportCalendar: (cal, schluessel) => blasenHandler.current.aktionen.onImportCalendar(cal, schluessel),
+      onJoinByInviteCode: (code) => blasenHandler.current.aktionen.onJoinByInviteCode(code),
+      onMenue: (m) => blasenHandler.current.aktionen.onMenue(m),
+      onAntworten: (m) => blasenHandler.current.aktionen.onAntworten(m),
+      onReaktion: (m, emoji) => blasenHandler.current.aktionen.onReaktion(m, emoji),
+      onSpringeZu: (uuid) => blasenHandler.current.aktionen.onSpringeZu(uuid),
+    }),
+    [],
+  )
+  const { playingAudioId, audioCurrentTime, audioPlaybackRate } = tonWiedergabe
+  const verlauf = useMemo(() => {
+    const ton: TonZustand = {
+      playingAudioId,
+      audioCurrentTime,
+      audioPlaybackRate,
+      onTogglePlay: (id, anhang, bindung) => blasenHandler.current.ton.onTogglePlay(id, anhang, bindung),
+      onCycleRate: (e) => blasenHandler.current.ton.onCycleRate(e),
+      onSeek: (id, anhang, bindung, e) => blasenHandler.current.ton.onSeek(id, anhang, bindung, e),
+    }
+    const umschalten = (m: ChatMessage) => blasenHandler.current.umschalten(m)
+    return (
+      <ChatTimeline
+        scrollRef={scrollContainerRef}
+        endeRef={messagesEndRef}
+        nachrichten={messages}
+        laedt={loadingMessages}
+        trennerId={trennerId}
+        aktivitaet={partnerActivity}
+        istGruppe={Boolean(activeGroup)}
+        zeichneNachricht={(msg) => (
+          <ChatMessageBubble
+            msg={msg}
+            kontext={{
+              activeGroup,
+              activeContact,
+              eigeneId: currentUserId,
+              eigenerName: user?.username || 'Ich',
+              eigenesBild: user?.avatar_url,
+              readReceiptsEnabled,
+              importedAttachmentIds,
+              // Die Rechteprüfung für `@everyone` steht hier, beim
+              // Empfänger: der Server kann den Inhalt nicht lesen
+              // und die Regel deshalb nicht durchsetzen.
+              michGemeint: binIchGemeint(msg, currentUserId, activeGroup),
+              hervorgehoben: Boolean(msg.clientUuid && hervorgehoben === msg.clientUuid),
+            }}
+            ton={ton}
+            aktionen={blasenAktionen}
+            auswahl={{
+              aktiv: auswahlModus,
+              gewaehlt: gewaehlteUuids.includes(msg.clientUuid || `#${msg.id}`),
+              onUmschalten: umschalten,
+            }}
+            medienBindung={medienBindung}
+          />
+        )}
+      />
+    )
+  }, [
+    messages,
+    loadingMessages,
+    trennerId,
+    partnerActivity,
+    activeGroup,
+    activeContact,
+    currentUserId,
+    user?.username,
+    user?.avatar_url,
+    readReceiptsEnabled,
+    importedAttachmentIds,
+    hervorgehoben,
+    playingAudioId,
+    audioCurrentTime,
+    audioPlaybackRate,
+    auswahlModus,
+    gewaehlteUuids,
+    // `medienBindung` liest nur diese beiden.
+    blindMailboxId,
+    blasenAktionen,
+  ])
+
   return (
     <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
       <MessengerBetaBanner />
@@ -4527,59 +4653,7 @@ function MessengerSeite() {
                 />
               )}
 
-              <ChatTimeline
-                scrollRef={scrollContainerRef}
-                endeRef={messagesEndRef}
-                nachrichten={messages}
-                laedt={loadingMessages}
-                trennerId={trennerId}
-                aktivitaet={partnerActivity}
-                istGruppe={Boolean(activeGroup)}
-                zeichneNachricht={(msg) => (
-                  <ChatMessageBubble
-                    msg={msg}
-                    kontext={{
-                      activeGroup,
-                      activeContact,
-                      eigeneId: currentUserId,
-                      eigenerName: user?.username || 'Ich',
-                      eigenesBild: user?.avatar_url,
-                      readReceiptsEnabled,
-                      importedAttachmentIds,
-                      // Die Rechteprüfung für `@everyone` steht hier, beim
-                      // Empfänger: der Server kann den Inhalt nicht lesen
-                      // und die Regel deshalb nicht durchsetzen.
-                      michGemeint: binIchGemeint(msg, currentUserId, activeGroup),
-                      hervorgehoben: Boolean(
-                        msg.clientUuid && hervorgehoben === msg.clientUuid,
-                      ),
-                    }}
-                    ton={tonWiedergabe}
-                    aktionen={{
-                      onViewImage: setViewingImage,
-                      onEdit: (m) => {
-                        setEditingMessage(m)
-                        setInputText(m.text)
-                      },
-                      onDelete: (m) => void handleDeleteMessage(m),
-                      onImportNote: (note, schluessel) => void handleImportNote(note, schluessel),
-                      onImportCalendar: (cal, schluessel) =>
-                        void handleImportCalendar(cal, schluessel),
-                      onJoinByInviteCode: handleJoinByInviteCode,
-                      onMenue: setMenueNachricht,
-                      onAntworten: handleAntworten,
-                      onReaktion: (m, emoji) => void handleReaktion(m, emoji),
-                      onSpringeZu: springeZu,
-                    }}
-                    auswahl={{
-                      aktiv: auswahlModus,
-                      gewaehlt: gewaehlteUuids.includes(msg.clientUuid || `#${msg.id}`),
-                      onUmschalten: handleAuswahlUmschalten,
-                    }}
-                    medienBindung={medienBindung}
-                  />
-                )}
-              />
+              {verlauf}
 
               {selectedImage && <StagedImageBar bild={selectedImage} onEntfernen={() => setSelectedImage(null)} />}
               {stagedFile && <StagedFileBar datei={stagedFile} onEntfernen={() => setStagedFile(null)} />}

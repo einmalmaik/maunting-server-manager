@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RoomEvent, Track } from 'livekit-client'
 import type { ActiveCallInfo } from '@/api/calls'
+import { E2eeNichtUnterstuetzt } from '@/services/livekitGrundlagen'
 import i18n from '@/i18n'
 
 // ── Gefälschter Raum ────────────────────────────────────────────────────────
@@ -85,17 +86,11 @@ const livekit = {
   verbinde: vi.fn(),
 }
 
-class E2eeNichtUnterstuetzt extends Error {}
-
 vi.mock('@/services/livekitRaum', async () => {
   const echt = await vi.importActual<typeof import('livekit-client')>('livekit-client')
   return {
     RoomEvent: echt.RoomEvent,
     Track: echt.Track,
-    FREIGABE_STANDARD: { aufloesung: '1080p', bildrate: 60, systemton: true },
-    E2eeNichtUnterstuetzt,
-    benutzerIdAusIdentity: (identity: string) =>
-      /^u\d+$/.test(identity) ? Number(identity.slice(1)) : null,
     ...livekit,
   }
 })
@@ -252,13 +247,11 @@ describe('Anruf aufbauen', () => {
   })
 
   it('meldet fehlende E2EE-Unterstützung im Klartext statt still zu scheitern', async () => {
-    livekit.verbinde.mockRejectedValueOnce(
-      new E2eeNichtUnterstuetzt('Dieser Browser kann keine verschlüsselten Anrufe.'),
-    )
+    livekit.verbinde.mockRejectedValueOnce(new E2eeNichtUnterstuetzt())
 
     await useCallStore.getState().initiateCall(PARTNER, 'audio')
 
-    expect(toastFehler).toHaveBeenCalledWith('Dieser Browser kann keine verschlüsselten Anrufe.')
+    expect(toastFehler).toHaveBeenCalledWith(new E2eeNichtUnterstuetzt().message)
     expect(useCallStore.getState().state).toBe('idle')
   })
 
