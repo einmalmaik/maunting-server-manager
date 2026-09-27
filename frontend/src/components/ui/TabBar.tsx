@@ -14,6 +14,8 @@ export interface TabDef<TId extends string> {
   icon: LucideIcon
   /** Wird in der Tabs-Reihenfolge zuerst versteckt (z.B. fuer Danger-Zone). */
   variant?: 'default' | 'danger'
+  /** Optionale Zahl hinter dem Namen, etwa die Mitglieder eines Teams. */
+  badge?: number
 }
 
 interface TabBarProps<TId extends string> {
@@ -22,6 +24,11 @@ interface TabBarProps<TId extends string> {
   onChange: (id: TId) => void
   /** Optionaler a11y-Label fuer die umschliessende Tab-Liste. */
   ariaLabel?: string
+  /**
+   * Innerhalb einer Karte ohne eigene Karte darum — sonst stünde eine Karte in
+   * der Karte.
+   */
+  embedded?: boolean
 }
 
 /**
@@ -29,11 +36,15 @@ interface TabBarProps<TId extends string> {
  * damit beide Seiten dasselbe Verhalten, dieselben i18n-Keys und dasselbe Design
  * teilen. Die Auswahl der Tabs liegt weiterhin in der jeweiligen Orchestrator-Komponente.
  */
-export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel }: TabBarProps<TId>) {
+export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel, embedded = false }: TabBarProps<TId>) {
   const { t } = useTranslation()
 
   return (
-    <div role="tablist" aria-label={ariaLabel} className="msm-card p-2 inline-flex flex-wrap gap-1">
+    <div
+      role="tablist"
+      aria-label={ariaLabel}
+      className={`${embedded ? 'rounded-lg bg-surface-container-low/50 p-1' : 'msm-card p-2'} inline-flex flex-wrap gap-1`}
+    >
       {tabs.map((tab) => {
         const Icon = tab.icon
         const isActive = active === tab.id
@@ -57,6 +68,11 @@ export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel }
           >
             <Icon className="w-4 h-4" />
             {t(tab.labelKey)}
+            {tab.badge !== undefined && (
+              <span className="min-w-[1.25rem] rounded-full bg-surface-container-high px-1.5 text-center text-xs tabular-nums">
+                {tab.badge}
+              </span>
+            )}
           </button>
         )
       })}

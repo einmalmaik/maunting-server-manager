@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, LogOut, Mail, Plus, Server, Trash2, User, UserPlus, Users, UsersRound, X } from 'lucide-react'
+import {
+  Brain, Check, Crown, LogOut, Mail, Plus, Server, Trash2, User, UserPlus, Users, UsersRound, X,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 
@@ -16,7 +18,7 @@ import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiSkillManager } from '@/components/ai/AiSkillManager'
 import type { AiKnowledgeScope, AiSkillScope } from '@/components/ai/knowledgeScope'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
-import { Avatar, Button, Dropdown, MultiSelect, Switch } from '@/Singra/UI'
+import { Avatar, Button, Dropdown, Input, MultiSelect, Switch } from '@/Singra/UI'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { useAuthStore } from '@/stores/authStore'
@@ -35,6 +37,14 @@ const BEREICHE: TabDef<Bereich>[] = [
   { id: 'personal', labelKey: 'teams.areaPersonal', icon: User },
   { id: 'teams', labelKey: 'teams.areaTeams', icon: UsersRound },
 ]
+
+/**
+ * Die Reiter eines ausgewählten Teams. Mitglieder stehen vorn: sie sind das,
+ * weswegen man ein Team öffnet. Bis zum 27.09.2026 standen sie als letzte
+ * Karte unter dem ganzen KI-Wissen, und wer jemanden einladen wollte, musste
+ * erst an Gedächtnis und Skills vorbei.
+ */
+type TeamReiter = 'members' | 'servers' | 'knowledge'
 
 /**
  * Erinnerungen eines **echten** Teams.
@@ -84,6 +94,7 @@ export function Teams() {
   const benutzerId = useAuthStore((state) => state.user?.id ?? null)
 
   const [bereich, setBereich] = useState<Bereich>('personal')
+  const [reiter, setReiter] = useState<TeamReiter>('members')
   const [teams, setTeams] = useState<Team[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [detail, setDetail] = useState<TeamDetail | null>(null)
@@ -204,7 +215,9 @@ export function Teams() {
       await teamsApi.remove(team.id)
       setSelectedId(null)
       const rows = await reloadTeams()
-      setSelectedId(rows[0]?.id ?? null)
+      // Nicht `rows[0]`: das kann das persönliche Team sein, und das gehört
+      // nicht in die Teamliste.
+      setSelectedId(rows.find((row) => !row.is_personal)?.id ?? null)
     }, 'teams.removed')
   }
 
@@ -352,6 +365,26 @@ export function Teams() {
   const meineBeitritte = einladungen.filter((row) => !meinTeam(row))
   const meineAnhebungen = einladungen.filter(meinTeam)
 
+  // Das ausgewählte echte Team — erst, wenn sein Stand auch geladen ist. Beim
+  // Wechsel stünde sonst für einen Augenblick der Name des neuen Teams über den
+  // Mitgliedern des alten.
+  const team = detail && !detail.is_personal && detail.id === selectedId ? detail : null
+
+  // Server vergibt nur der Gründer; für alle anderen gibt es den Reiter nicht.
+  // Wer bei einem Team auf „Server" stand und zu einem wechselt, dem er nur
+  // angehört, landet bei den Mitgliedern statt auf einem leeren Reiter.
+  const teamReiter: TabDef<TeamReiter>[] = [
+    { id: 'members', labelKey: 'teams.members', icon: Users, badge: team?.members.length },
+    ...(team?.is_owner
+      ? [{ id: 'servers' as const, labelKey: 'teams.tabServers', icon: Server, badge: team.servers.length }]
+      : []),
+    { id: 'knowledge', labelKey: 'teams.knowledge', icon: Brain },
+  ]
+  const aktiverReiter: TeamReiter = teamReiter.some((row) => row.id === reiter) ? reiter : 'members'
+  // Ohne Teams und ohne das Recht zu gründen hätte die linke Spalte nichts zu
+  // zeigen — dann gibt es sie nicht.
+  const mitListe = echte.length > 0 || canCreate
+
   return (
     <div className="msm-page space-y-5">
       <PageHeader
@@ -434,254 +467,415 @@ export function Teams() {
         </>
       )}
 
-      {bereich === 'teams' && canCreate && (
-        <section className="msm-card p-6" aria-labelledby="team-create">
-          <h2 id="team-create" className="mb-3 font-headline text-title-lg font-semibold text-on-surface">
-            {t('teams.create')}
-          </h2>
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="min-w-[16rem] flex-1 space-y-1.5">
-              <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                {t('teams.name')}
-              </span>
-              <input
-                className="msm-input"
-                maxLength={64}
-                value={newName}
-                disabled={busy}
-                onChange={(event) => setNewName(event.target.value)}
-                aria-label={t('teams.name')}
-              />
-            </label>
-            <Button type="button" disabled={busy || newName.trim().length < 2} onClick={() => void createTeam()}>
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              {t('teams.create')}
-            </Button>
-          </div>
-        </section>
-      )}
-
-      {bereich === 'teams' && echte.length === 0 && (
-        <section className="msm-card p-6 text-sm text-on-surface-variant">
-          {t('teams.noTeams')}
-        </section>
-      )}
-
-      {bereich === 'teams' && echte.length > 0 && (
-        <section className="msm-card p-6" aria-labelledby="team-select">
-          <label className="block w-full max-w-sm space-y-1.5">
-            <span id="team-select" className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-              {t('teams.select')}
-            </span>
-            <Dropdown
-              value={selectedId === null ? null : String(selectedId)}
-              onChange={(value) => setSelectedId(Number(value))}
-              options={echte.map((team) => ({
-                value: String(team.id),
-                label: team.name,
-                hint: t('teams.memberCount', { count: team.member_count }),
-              }))}
-              disabled={busy}
-              aria-label={t('teams.select')}
-            />
-          </label>
-        </section>
-      )}
-
-      {/* ── Das geteilte KI-Wissen dieses Teams ───────────────────────
-          Erinnerungen und Skills des Teams, nicht die des Benutzers. Dieselben
-          Panels wie im Profil bzw. unter „Persönlich", nur mit anderem
-          Bereich — eine zweite Ansicht daneben wäre auseinandergelaufen,
-          sobald jemand nur eine davon anfasst. */}
-      {bereich === 'teams' && detail && !detail.is_personal && (
-        <section className="space-y-4" aria-labelledby="team-knowledge">
-          <div className="msm-card p-6">
-            <h2 id="team-knowledge" className="font-headline text-title-lg font-semibold text-on-surface">
-              {t('teams.knowledge')}
-            </h2>
-            <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">{t('teams.knowledgeHint')}</p>
-          </div>
-          <AiMemoryManager scope={memoryScope(detail)} />
-          {canUseSkills && <AiSkillManager scope={skillScope(detail)} />}
-        </section>
-      )}
-
-      {bereich === 'teams' && detail && !detail.is_personal && (
-        <>
-          <section className="msm-card p-6" aria-labelledby="team-members">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <Users className="h-5 w-5 text-primary" aria-hidden="true" />
-                <h2 id="team-members" className="font-headline text-title-lg font-semibold text-on-surface">
-                  {t('teams.members')}
-                </h2>
-              </div>
-              {detail.is_owner && (
-                <Button type="button" variant="destructive" size="sm" disabled={busy} onClick={() => void removeTeam(detail)}>
-                  <Trash2 className="h-4 w-4" aria-hidden="true" />
-                  {t('teams.remove')}
-                </Button>
-              )}
-            </div>
-
-            <ul className="space-y-2">
-              {detail.members.map((member) => (
-                <li
-                  key={member.user_id}
-                  className="flex flex-wrap items-center gap-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4"
+      {bereich === 'teams' && (
+        <div
+          className={`msm-card grid min-w-0 overflow-hidden ${mitListe ? 'lg:grid-cols-[19rem_minmax(0,1fr)]' : ''}`}
+          data-testid="team-workspace"
+        >
+          {/* ── Die Teamliste ─────────────────────────────────────────────
+              Vorher ein Dropdown in einer eigenen Karte: man sah nie, wie viele
+              Teams es gibt und wo man überall Gründer ist. Als Liste steht beides
+              auf einen Blick da, und das Gründen gehört ans Ende derselben
+              Liste — dorthin, wo das neue Team gleich stehen wird. */}
+          {mitListe && (
+            <aside className="flex min-w-0 flex-col gap-3 border-b border-outline-variant/50 bg-surface-container-low/35 p-4 lg:border-b-0 lg:border-r">
+              {/* Ohne Teams bleibt links nur das Gründen; dass es noch keins
+                  gibt, sagt die rechte Seite — nicht beide. */}
+              {echte.length > 0 && (
+                <h2
+                  id="team-list"
+                  className="font-label-md text-xs font-semibold uppercase tracking-wider text-on-surface-variant"
                 >
-                  <div className="flex min-w-[8rem] flex-1 items-center gap-3">
-                    <Avatar src={member.avatar_url} name={member.username} size="sm" />
-                    <span className="text-sm font-medium text-on-surface">
-                      {member.username}
-                      {member.role === 'owner' && (
-                        <span className="ml-2 text-xs text-on-surface-variant">{t('teams.founder')}</span>
-                      )}
-                    </span>
+                  {t('teams.yourTeams')}
+                </h2>
+              )}
+
+              {echte.length > 0 && (
+                <ul
+                  className="flex max-h-72 flex-col gap-1.5 overflow-y-auto pr-1 lg:max-h-[32rem]"
+                  aria-labelledby="team-list"
+                >
+                  {echte.map((eintrag) => {
+                    const ausgewaehlt = eintrag.id === selectedId
+                    return (
+                      <li key={eintrag.id}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedId(eintrag.id)}
+                          disabled={busy}
+                          aria-pressed={ausgewaehlt}
+                          aria-current={ausgewaehlt ? 'true' : undefined}
+                          className={`grid min-h-14 w-full grid-cols-[2rem_minmax(0,1fr)] items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 ${
+                            ausgewaehlt
+                              ? 'border-primary/35 bg-primary/10 text-primary'
+                              : 'border-transparent text-on-surface hover:border-outline-variant/50 hover:bg-surface-container-high/60'
+                          }`}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="grid h-8 w-8 place-items-center rounded-lg border border-outline-variant/40 bg-surface-container-high/60 font-headline text-sm font-semibold uppercase"
+                          >
+                            {eintrag.name.slice(0, 1)}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-semibold leading-5">{eintrag.name}</span>
+                            <span className="mt-0.5 flex items-center gap-1.5 text-xs text-on-surface-variant">
+                              {t('teams.memberCount', { count: eintrag.member_count })}
+                              {eintrag.is_owner && (
+                                <>
+                                  <span aria-hidden="true">·</span>
+                                  <Crown className="h-3 w-3" aria-hidden="true" />
+                                  {t('teams.founder')}
+                                </>
+                              )}
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+
+              {canCreate && (
+                <form
+                  className={`flex flex-col gap-2 ${echte.length > 0 ? 'mt-auto border-t border-outline-variant/40 pt-3' : ''}`}
+                  aria-labelledby="team-create"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    void createTeam()
+                  }}
+                >
+                  <h3
+                    id="team-create"
+                    className="font-label-md text-xs font-semibold uppercase tracking-wider text-on-surface-variant"
+                  >
+                    {t('teams.create')}
+                  </h3>
+                  <Input
+                    maxLength={64}
+                    value={newName}
+                    disabled={busy}
+                    placeholder={t('teams.name')}
+                    onChange={(event) => setNewName(event.target.value)}
+                    aria-label={t('teams.name')}
+                  />
+                  <Button type="submit" size="sm" disabled={busy || newName.trim().length < 2}>
+                    <Plus className="h-4 w-4" aria-hidden="true" />
+                    {t('teams.create')}
+                  </Button>
+                </form>
+              )}
+            </aside>
+          )}
+
+          <div className="min-w-0">
+            {team ? (
+              <>
+                {/* ── Kopf: welches Team, wie viele, meine Rolle ────────────
+                    Löschen und Verlassen stehen hier und nicht in einer
+                    Mitgliederzeile: beides betrifft das ganze Team. Der Gründer
+                    verlässt sein Team nicht — sein Konto ist die Obergrenze für
+                    alles, was das Team weitergibt. Ohne den Austritt käme
+                    niemand mehr heraus: hinein führt seit dem 23.08.2026 nur
+                    die eigene Zusage. */}
+                <header className="flex min-w-0 flex-wrap items-start gap-3 border-b border-outline-variant/40 px-4 py-4 sm:px-6">
+                  <span className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-primary/20 bg-primary/5 text-primary">
+                    <UsersRound aria-hidden="true" className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-[12rem] flex-1">
+                    <h2 className="break-words font-headline text-title-lg font-semibold leading-7 text-on-surface">
+                      {team.name}
+                    </h2>
+                    <p className="mt-0.5 text-sm text-on-surface-variant">
+                      {team.is_owner ? t('teams.youFounder') : t('teams.youMember')}
+                      {' · '}
+                      {t('teams.memberCount', { count: team.members.length })}
+                    </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-on-surface-variant">{t('teams.manageSkills')}</span>
-                    <Switch
-                      checked={member.can_manage_skills}
-                      disabled={!detail.is_owner || busy}
-                      onCheckedChange={(next) => void setMemberSwitches(member, {
-                        can_manage_skills: next, can_manage_memory: member.can_manage_memory,
-                      })}
-                      aria-label={`${t('teams.manageSkills')}: ${member.username}`}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-on-surface-variant">{t('teams.manageMemory')}</span>
-                    <Switch
-                      checked={member.can_manage_memory}
-                      disabled={!detail.is_owner || busy}
-                      onCheckedChange={(next) => void setMemberSwitches(member, {
-                        can_manage_skills: member.can_manage_skills, can_manage_memory: next,
-                      })}
-                      aria-label={`${t('teams.manageMemory')}: ${member.username}`}
-                    />
-                  </div>
-                  {/* Derselbe Platz, zwei Bedeutungen: der Gründer entlässt
-                      hier ein Mitglied, jedes Mitglied geht hier selbst.
-                      Ausgenommen bleibt nur der Gründer — sein Konto ist die
-                      Obergrenze für alles, was das Team weitergibt. Ohne den
-                      Austritt käme niemand mehr heraus: hinein führt seit dem
-                      23.08.2026 nur die eigene Zusage, und die gilt für
-                      immer. */}
-                  {member.user_id === benutzerId && member.role !== 'owner' && (
+                  {team.is_owner ? (
+                    <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void removeTeam(team)}>
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      {t('teams.remove')}
+                    </Button>
+                  ) : (
                     <Button
                       type="button" variant="ghost" size="sm" disabled={busy}
-                      onClick={() => void leaveTeam(detail)}
+                      onClick={() => void leaveTeam(team)}
                       aria-label={t('teams.leave')}
                     >
                       <LogOut className="h-4 w-4" aria-hidden="true" />
                       {t('teams.leave')}
                     </Button>
                   )}
-                  {detail.is_owner && member.user_id !== benutzerId && member.role !== 'owner' && (
+                </header>
+
+                <div className="px-4 pt-4 sm:px-6">
+                  <TabBar
+                    tabs={teamReiter}
+                    active={aktiverReiter}
+                    onChange={setReiter}
+                    ariaLabel={t('teams.sections')}
+                    embedded
+                  />
+                </div>
+
+                <div className="p-4 sm:p-6">
+                  {aktiverReiter === 'members' && (
+                    <MitgliederReiter
+                      team={team}
+                      benutzerId={benutzerId}
+                      kandidaten={memberCandidates}
+                      newMemberId={newMemberId}
+                      busy={busy}
+                      offeneBeitritte={offeneBeitritte}
+                      offeneAnhebungen={offeneAnhebungen}
+                      onKandidat={setNewMemberId}
+                      onEinladen={() => void inviteMember()}
+                      onSchalter={(member, next) => void setMemberSwitches(member, next)}
+                      onEntfernen={(member) => void removeMember(member)}
+                    />
+                  )}
+
+                  {aktiverReiter === 'servers' && (
+                    <section className="space-y-4" aria-labelledby="team-servers">
+                      <div>
+                        <h3 id="team-servers" className="font-headline text-base font-semibold text-on-surface">
+                          {t('teams.servers')}
+                        </h3>
+                        <p className="mt-1 max-w-3xl text-sm text-on-surface-variant">{t('teams.serversHint')}</p>
+                      </div>
+
+                      {assignable.length === 0 ? (
+                        <p className="rounded-xl border border-dashed border-outline-variant/50 p-4 text-sm text-on-surface-variant">
+                          {t('teams.noAssignableServers')}
+                        </p>
+                      ) : (
+                        <ul className="divide-y divide-outline-variant/30 rounded-xl border border-outline-variant/40">
+                          {assignable.map((server) => {
+                            const current = team.servers.find((item) => item.server_id === server.server_id)
+                            return (
+                              <li
+                                key={server.server_id}
+                                className="grid items-center gap-2 p-4 md:grid-cols-[minmax(0,14rem)_minmax(0,1fr)] md:gap-4"
+                              >
+                                <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-on-surface">
+                                  <Server className="h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
+                                  <span className="truncate">{server.server_name}</span>
+                                </span>
+                                <MultiSelect
+                                  options={server.permission_keys.map((key) => ({
+                                    value: key,
+                                    label: t(`permissionDetails.${key.replace(/\./g, '_')}.title`, { defaultValue: key }),
+                                  }))}
+                                  values={current?.permission_keys ?? []}
+                                  onChange={(keys) => void setServerKeys(server.server_id, keys)}
+                                  disabled={busy}
+                                  placeholder={t('teams.noAccess')}
+                                  aria-label={`${t('teams.permissions')}: ${server.server_name}`}
+                                />
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      )}
+                    </section>
+                  )}
+
+                  {/* ── Das geteilte KI-Wissen dieses Teams ───────────────
+                      Erinnerungen und Skills des Teams, nicht die des
+                      Benutzers. Dieselben Panels wie im Profil bzw. unter
+                      „Persönlich", nur mit anderem Bereich — eine zweite
+                      Ansicht daneben wäre auseinandergelaufen, sobald jemand
+                      nur eine davon anfasst. */}
+                  {aktiverReiter === 'knowledge' && (
+                    <section className="space-y-4" aria-labelledby="team-knowledge">
+                      <div>
+                        <h3 id="team-knowledge" className="font-headline text-base font-semibold text-on-surface">
+                          {t('teams.knowledge')}
+                        </h3>
+                        <p className="mt-1 max-w-3xl text-sm text-on-surface-variant">{t('teams.knowledgeHint')}</p>
+                      </div>
+                      <AiMemoryManager scope={memoryScope(team)} />
+                      {canUseSkills && <AiSkillManager scope={skillScope(team)} />}
+                    </section>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="grid min-h-48 place-items-center p-6 text-center text-sm text-on-surface-variant">
+                <div className="flex flex-col items-center gap-2">
+                  <Users className="h-6 w-6" aria-hidden="true" />
+                  {echte.length === 0 ? t('teams.noTeams') : t('teams.chooseTeam')}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Der Mitglieder-Reiter: einladen oben, die Mitglieder als eine Tabelle, die
+ * offenen Angebote darunter.
+ *
+ * Die Einladung steht vorn, weil sie die häufigste Handlung des Gründers ist —
+ * bis zum 27.09.2026 lag sie unter der Liste am Seitenende. Die Schalter
+ * stehen als Spalten, damit man über alle Mitglieder hinweg sieht, wer was
+ * verwaltet; auf dem Handy trägt jede Zeile ihre Beschriftung selbst.
+ */
+function MitgliederReiter({
+  team, benutzerId, kandidaten, newMemberId, busy, offeneBeitritte, offeneAnhebungen,
+  onKandidat, onEinladen, onSchalter, onEntfernen,
+}: {
+  team: TeamDetail
+  benutzerId: number | null
+  kandidaten: UserOption[]
+  newMemberId: string | null
+  busy: boolean
+  offeneBeitritte: TeamInvitation[]
+  offeneAnhebungen: TeamInvitation[]
+  onKandidat: (id: string | null) => void
+  onEinladen: () => void
+  onSchalter: (member: TeamMember, next: { can_manage_skills: boolean; can_manage_memory: boolean }) => void
+  onEntfernen: (member: TeamMember) => void
+}) {
+  const { t } = useTranslation()
+  const spalten = 'md:grid-cols-[minmax(0,1fr)_9rem_9rem_2.75rem]'
+
+  return (
+    <section className="space-y-5" aria-labelledby="team-members">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <h3 id="team-members" className="font-headline text-base font-semibold text-on-surface">
+          {t('teams.members')}
+        </h3>
+        {team.is_owner && kandidaten.length > 0 && (
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <div className="min-w-[12rem] flex-1 sm:w-56 sm:flex-none">
+              <Dropdown
+                value={newMemberId}
+                onChange={onKandidat}
+                options={kandidaten.map((user) => ({ value: String(user.id), label: user.username }))}
+                placeholder={t('teams.selectUser')}
+                disabled={busy}
+                aria-label={t('teams.inviteMember')}
+              />
+            </div>
+            <Button type="button" size="sm" disabled={busy || !newMemberId} onClick={onEinladen}>
+              <UserPlus className="h-4 w-4" aria-hidden="true" />
+              {t('teams.inviteMember')}
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-outline-variant/40">
+        <div
+          aria-hidden="true"
+          className={`hidden gap-4 border-b border-outline-variant/40 bg-surface-container-low/35 px-4 py-2.5 font-label-md text-label-sm uppercase tracking-wider text-on-surface-variant md:grid ${spalten}`}
+        >
+          <span>{t('teams.member')}</span>
+          <span>{t('teams.manageSkills')}</span>
+          <span>{t('teams.manageMemory')}</span>
+          <span />
+        </div>
+        <ul className="divide-y divide-outline-variant/30">
+          {team.members.map((member) => {
+            const ich = member.user_id === benutzerId
+            return (
+              <li
+                key={member.user_id}
+                className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 py-3 md:gap-4 ${spalten}`}
+              >
+                {/* Rolle und „du" in einer zweiten Zeile: in derselben Zeile
+                    wie der Name schnitten sie ihn schon bei 1024 px ab. */}
+                <div className="flex min-w-0 items-center gap-3">
+                  <Avatar src={member.avatar_url} name={member.username} size="sm" />
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-on-surface">{member.username}</span>
+                    <span className="mt-0.5 flex items-center gap-1.5 text-xs text-on-surface-variant">
+                      {member.role === 'owner' ? (
+                        <span className="inline-flex items-center gap-1 text-primary">
+                          <Crown className="h-3 w-3" aria-hidden="true" />
+                          {t('teams.founder')}
+                        </span>
+                      ) : t('teams.member')}
+                      {ich && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          {t('teams.you')}
+                        </>
+                      )}
+                    </span>
+                  </span>
+                </div>
+                {/* Auf dem Handy steht der Papierkorb rechts neben dem Namen,
+                    ab md in seiner eigenen Spalte ganz hinten. */}
+                <div className="flex justify-end md:order-last">
+                  {team.is_owner && !ich && member.role !== 'owner' && (
                     <Button
                       type="button" variant="ghost" size="sm" disabled={busy}
-                      onClick={() => void removeMember(member)}
+                      onClick={() => onEntfernen(member)}
                       aria-label={`${t('teams.removeMember')}: ${member.username}`}
                     >
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </Button>
                   )}
-                </li>
-              ))}
-            </ul>
-
-            {/* Offene Angebote stehen sichtbar neben den Mitgliedern, aber
-                nicht in derselben Liste. Die gestrichelte Linie sagt das ohne
-                Worte — bei den Eingeladenen, weil sie noch keine Mitglieder
-                sind, bei den Anhebungen, weil der Schalter noch nicht gilt.
-                Zurücknehmen kann der Gründer beides nicht: die Entscheidung
-                gehört dem, den sie betrifft. */}
-            {detail.is_owner && (
-              <>
-                <OffeneGruppe
-                  kennung="team-pending-invitations"
-                  titel={t('teams.pendingInvitations')}
-                  status={t('teams.invitationPending')}
-                  hinweis={t('teams.pendingInvitationsHint')}
-                  einladungen={offeneBeitritte}
-                />
-                <OffeneGruppe
-                  kennung="team-pending-upgrades"
-                  titel={t('teams.pendingUpgrades')}
-                  status={t('teams.upgradePending')}
-                  hinweis={t('teams.pendingUpgradesHint')}
-                  einladungen={offeneAnhebungen}
-                />
-              </>
-            )}
-
-            {detail.is_owner && memberCandidates.length > 0 && (
-              <div className="mt-4 flex flex-wrap items-end gap-3">
-                <label className="min-w-[14rem] flex-1 space-y-1.5">
-                  <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                    {t('teams.inviteMember')}
-                  </span>
-                  <Dropdown
-                    value={newMemberId}
-                    onChange={setNewMemberId}
-                    options={memberCandidates.map((user) => ({ value: String(user.id), label: user.username }))}
-                    placeholder={t('teams.selectUser')}
-                    disabled={busy}
-                    aria-label={t('teams.inviteMember')}
+                </div>
+                <label className="col-span-2 flex items-center justify-between gap-2 md:col-span-1 md:justify-start">
+                  <span className="text-xs text-on-surface-variant md:hidden">{t('teams.manageSkills')}</span>
+                  <Switch
+                    checked={member.can_manage_skills}
+                    disabled={!team.is_owner || busy}
+                    onCheckedChange={(next) => onSchalter(member, {
+                      can_manage_skills: next, can_manage_memory: member.can_manage_memory,
+                    })}
+                    aria-label={`${t('teams.manageSkills')}: ${member.username}`}
                   />
                 </label>
-                <Button type="button" disabled={busy || !newMemberId} onClick={() => void inviteMember()}>
-                  <UserPlus className="h-4 w-4" aria-hidden="true" />
-                  {t('teams.inviteMember')}
-                </Button>
-              </div>
-            )}
-          </section>
+                <label className="col-span-2 flex items-center justify-between gap-2 md:col-span-1 md:justify-start">
+                  <span className="text-xs text-on-surface-variant md:hidden">{t('teams.manageMemory')}</span>
+                  <Switch
+                    checked={member.can_manage_memory}
+                    disabled={!team.is_owner || busy}
+                    onCheckedChange={(next) => onSchalter(member, {
+                      can_manage_skills: member.can_manage_skills, can_manage_memory: next,
+                    })}
+                    aria-label={`${t('teams.manageMemory')}: ${member.username}`}
+                  />
+                </label>
+              </li>
+            )
+          })}
+        </ul>
+      </div>
 
-          {detail.is_owner && (
-            <section className="msm-card p-6" aria-labelledby="team-servers">
-              <div className="mb-2 flex items-center gap-2">
-                <Server className="h-5 w-5 text-secondary" aria-hidden="true" />
-                <h2 id="team-servers" className="font-headline text-title-lg font-semibold text-on-surface">
-                  {t('teams.servers')}
-                </h2>
-              </div>
-              <p className="mb-4 max-w-3xl text-sm text-on-surface-variant">{t('teams.serversHint')}</p>
-
-              {assignable.length === 0 && (
-                <p className="text-sm text-on-surface-variant">{t('teams.noAssignableServers')}</p>
-              )}
-
-              <div className="space-y-3">
-                {assignable.map((server) => {
-                  const current = detail.servers.find((item) => item.server_id === server.server_id)
-                  return (
-                    <div
-                      key={server.server_id}
-                      className="space-y-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4"
-                    >
-                      <span className="block text-sm font-medium text-on-surface">{server.server_name}</span>
-                      <MultiSelect
-                        options={server.permission_keys.map((key) => ({
-                          value: key,
-                          label: t(`permissionDetails.${key.replace(/\./g, '_')}.title`, { defaultValue: key }),
-                        }))}
-                        values={current?.permission_keys ?? []}
-                        onChange={(keys) => void setServerKeys(server.server_id, keys)}
-                        disabled={busy}
-                        placeholder={t('teams.noAccess')}
-                        aria-label={`${t('teams.permissions')}: ${server.server_name}`}
-                      />
-                    </div>
-                  )
-                })}
-              </div>
-            </section>
-          )}
+      {/* Offene Angebote stehen sichtbar neben den Mitgliedern, aber nicht in
+          derselben Liste. Die gestrichelte Linie sagt das ohne Worte — bei den
+          Eingeladenen, weil sie noch keine Mitglieder sind, bei den
+          Anhebungen, weil der Schalter noch nicht gilt. Zurücknehmen kann der
+          Gründer beides nicht: die Entscheidung gehört dem, den sie betrifft. */}
+      {team.is_owner && (
+        <>
+          <OffeneGruppe
+            kennung="team-pending-invitations"
+            titel={t('teams.pendingInvitations')}
+            status={t('teams.invitationPending')}
+            hinweis={t('teams.pendingInvitationsHint')}
+            einladungen={offeneBeitritte}
+          />
+          <OffeneGruppe
+            kennung="team-pending-upgrades"
+            titel={t('teams.pendingUpgrades')}
+            status={t('teams.upgradePending')}
+            hinweis={t('teams.pendingUpgradesHint')}
+            einladungen={offeneAnhebungen}
+          />
         </>
       )}
-    </div>
+    </section>
   )
 }
 
