@@ -16,7 +16,8 @@ import { Spinner } from '@/components/ui/Spinner'
  */
 export function PasswordTab() {
   const { t } = useTranslation()
-  const { user } = useAuthStore()
+  const { user, setUser } = useAuthStore()
+  const hasPassword = user?.has_password ?? true
   const methode = user?.two_factor_enabled ? (user.two_factor_method ?? 'totp') : null
   const [form, setForm] = useState({ current: '', new: '', confirm: '', otp: '' })
   const [error, setError] = useState('')
@@ -28,6 +29,10 @@ export function PasswordTab() {
     setError('')
     setSuccess('')
 
+    if (hasPassword && !form.current) {
+      setError(t('profile.currentPasswordRequired', t('profile.currentPassword')))
+      return
+    }
     if (form.new !== form.confirm) {
       setError(t('profile.passwordMismatch'))
       return
@@ -39,17 +44,25 @@ export function PasswordTab() {
 
     setSubmitting(true)
     try {
-      await api('/auth/change-password', {
+      const endpoint = hasPassword ? '/auth/change-password' : '/auth/set-password'
+      const payload: Record<string, any> = {
+        new_password: form.new,
+        otp_code: methode === 'totp' ? form.otp : null,
+        passkey: methode === 'passkey' ? await passkeyNachweis('password_change') : null,
+      }
+      if (hasPassword) {
+        payload.current_password = form.current
+      }
+
+      await api(endpoint, {
         method: 'POST',
-        body: JSON.stringify({
-          current_password: form.current,
-          new_password: form.new,
-          otp_code: methode === 'totp' ? form.otp : null,
-          passkey: methode === 'passkey' ? await passkeyNachweis('password_change') : null,
-        }),
+        body: JSON.stringify(payload),
       })
-      setSuccess(t('profile.passwordChanged'))
+      setSuccess(hasPassword ? t('profile.passwordChanged') : t('profile.passwordSet'))
       setForm({ current: '', new: '', confirm: '', otp: '' })
+      if (!hasPassword && user) {
+        setUser({ ...user, has_password: true })
+      }
       setTimeout(() => setSuccess(''), 3000)
     } catch (err: any) {
       setError(err.message)
@@ -62,28 +75,40 @@ export function PasswordTab() {
     <div className="msm-card p-6">
       <div className="flex items-center gap-2 mb-6">
         <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('profile.changePassword')}</h2>
+        <h2 className="font-headline text-title-lg font-semibold text-on-surface">
+          {hasPassword ? t('profile.changePassword') : t('profile.setPassword')}
+        </h2>
       </div>
+
+      {!hasPassword && (
+        <div className="msm-alert-info text-sm mb-4">
+          {t('profile.setPasswordInfo')}
+        </div>
+      )}
 
       {error && <div className="msm-alert-error text-sm mb-4">{error}</div>}
       {success && <div className="msm-alert-success text-sm mb-4">{success}</div>}
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="md:col-span-2">
-          <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-            {t('profile.currentPassword')}
-          </label>
-          <PasswordInput
-            value={form.current}
-            onChange={(e) => setForm({ ...form, current: e.target.value })}
-            required
-          />
-        </div>
+        {hasPassword && (
+          <div className="md:col-span-2">
+            <label htmlFor="current_password" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+              {t('profile.currentPassword')}
+            </label>
+            <PasswordInput
+              id="current_password"
+              value={form.current}
+              onChange={(e) => setForm({ ...form, current: e.target.value })}
+              required
+            />
+          </div>
+        )}
         <div>
-          <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+          <label htmlFor="new_password" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
             {t('profile.newPassword')}
           </label>
           <PasswordInput
+            id="new_password"
             value={form.new}
             onChange={(e) => setForm({ ...form, new: e.target.value })}
             required
@@ -91,10 +116,11 @@ export function PasswordTab() {
           />
         </div>
         <div>
-          <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+          <label htmlFor="confirm_password" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
             {t('profile.confirmPassword')}
           </label>
           <PasswordInput
+            id="confirm_password"
             value={form.confirm}
             onChange={(e) => setForm({ ...form, confirm: e.target.value })}
             required
@@ -103,10 +129,11 @@ export function PasswordTab() {
         </div>
         {methode === 'totp' && (
           <div className="md:col-span-2">
-            <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+            <label htmlFor="otp_code" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
               {t('auth.otpCode')}
             </label>
             <input
+              id="otp_code"
               type="text"
               inputMode="numeric"
               pattern="\d{6}"

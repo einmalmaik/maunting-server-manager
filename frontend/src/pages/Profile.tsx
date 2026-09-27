@@ -17,6 +17,7 @@ import { MessengerSicherheitTab } from './profile/MessengerSicherheitTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
+import { useAuthStore } from '@/stores/authStore'
 
 type TabId = 'account' | 'social' | 'audio' | 'messenger' | 'password' | '2fa' | 'linked' | 'credentials' | 'ai' | 'devices' | 'danger'
 
@@ -34,6 +35,7 @@ type TabId = 'account' | 'social' | 'audio' | 'messenger' | 'password' | '2fa' |
  */
 export function Profile() {
   const { t } = useTranslation()
+  const { user } = useAuthStore()
   const [searchParams] = useSearchParams()
   const canUseAi = useHasPermission('ai.chat.use')
   const publicSettings = usePublicSettingsStore()
@@ -66,7 +68,7 @@ export function Profile() {
         ]
       : []),
     { id: 'audio', labelKey: 'profile.tabs.audio', icon: Volume2 },
-    { id: 'password', labelKey: 'profile.tabs.password', icon: KeyRound },
+    { id: 'password', labelKey: user?.has_password === false ? 'profile.tabs.setPassword' : 'profile.tabs.password', icon: KeyRound },
     { id: '2fa', labelKey: 'profile.tabs.2fa', icon: Shield },
     { id: 'linked', labelKey: 'profile.tabs.linked', icon: Link2 },
     { id: 'credentials', labelKey: 'profile.tabs.credentials', icon: Wallet },

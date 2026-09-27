@@ -325,6 +325,7 @@ class AuthService:
     @staticmethod
     def reset_password(db: Session, user: User, new_password: str) -> None:
         user.password_hash = AuthService.hash_password(new_password)
+        user.has_password = True
         user.password_reset_token = None
         user.password_reset_expires = None
         # Sicherheit: Bei Passwort-Aenderung alle Refresh-Tokens revozieren

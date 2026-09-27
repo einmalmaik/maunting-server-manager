@@ -867,6 +867,7 @@ def register_user_from_oauth(
         # genug fuer diesen Zweck — wir leaken das Plain eh nie.
         password_hash=AuthService.hash_password(secrets.token_urlsafe(32)),
         email_verified=profile.email_verified or False,
+        has_password=False,
     )
     db.add(user)
     db.commit()
