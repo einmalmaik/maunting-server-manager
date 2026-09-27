@@ -17,6 +17,7 @@ import uuid
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from models.dis_text import gebuendelt_entschluesseln
 from models.note import Note
 from models.user import User
 from services import team_service
@@ -50,8 +51,15 @@ class NotesService:
         return db.scalar(select(Note).where(Note.note_uid == target))
 
     @classmethod
-    def _decrypt_or_migrate(cls, db: Session, note: Note) -> tuple[str, str]:
-        """Entschluesselt title und content bei Altdaten; E2EE-Ciphertexte (sv-note-v1:) bleiben unangetastet."""
+    def _decrypt_or_migrate(
+        cls, db: Session, note: Note, klartexte: dict[tuple[str, str], str] | None = None
+    ) -> tuple[str, str]:
+        """Entschluesselt title und content bei Altdaten; E2EE-Ciphertexte (sv-note-v1:) bleiben unangetastet.
+
+        ``klartexte`` sind vorab gebuendelt entschluesselte Werte (``get_notes``).
+        Was dort fehlt, wird wie bisher einzeln entschluesselt oder migriert.
+        """
+        klartexte = klartexte or {}
         raw_title = note.title or ""
         raw_content = note.content or ""
 
@@ -61,7 +69,7 @@ class NotesService:
         else:
             aad = _note_aad(note.user_id, note.note_uid)
             try:
-                title = DisClient.decrypt(raw_title, aad=aad)
+                title = klartexte.get((raw_title, aad)) or DisClient.decrypt(raw_title, aad=aad)
             except DisDecryptionError:
                 # Klartext-Altdaten: sofort verschluesseln
                 title = raw_title
@@ -80,7 +88,7 @@ class NotesService:
         else:
             aad = _note_aad(note.user_id, note.note_uid)
             try:
-                content = DisClient.decrypt(raw_content, aad=aad)
+                content = klartexte.get((raw_content, aad)) or DisClient.decrypt(raw_content, aad=aad)
             except DisDecryptionError:
                 content = raw_content
                 note.content = DisClient.encrypt(content, aad=aad)
@@ -94,13 +102,19 @@ class NotesService:
         return title, content
 
     @classmethod
-    def _format_note(cls, note: Note, current_user: User, db: Session | None = None) -> dict[str, Any]:
+    def _format_note(
+        cls,
+        note: Note,
+        current_user: User,
+        db: Session | None = None,
+        klartexte: dict[tuple[str, str], str] | None = None,
+    ) -> dict[str, Any]:
         can_edit = (note.user_id == current_user.id) or current_user.is_owner
         if note.note_type == "team" and note.team and note.team.owner_user_id == current_user.id:
             can_edit = True
 
         if db is not None:
-            title, content = cls._decrypt_or_migrate(db, note)
+            title, content = cls._decrypt_or_migrate(db, note, klartexte)
         else:
             # Best-effort Entschluesselung ohne DB-Persistierung
             raw_title = note.title or ""
@@ -199,7 +213,14 @@ class NotesService:
             query = query.order_by(Note.is_pinned.desc(), sort_col.desc())
 
         rows = db.scalars(query).all()
-        formatted_list = [cls._format_note(n, user, db=db) for n in rows]
+        # Ein Aufruf beim Sidecar fuer die ganze Liste statt zwei je Notiz.
+        klartexte = gebuendelt_entschluesseln([
+            (wert, _note_aad(n.user_id, n.note_uid))
+            for n in rows
+            for wert in (n.title, n.content)
+            if wert and not wert.startswith(NOTE_CIPHERTEXT_PREFIX)
+        ])
+        formatted_list = [cls._format_note(n, user, db=db, klartexte=klartexte) for n in rows]
 
         if search:
             s = search.strip().lower()

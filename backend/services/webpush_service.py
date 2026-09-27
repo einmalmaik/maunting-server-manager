@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import http.cookiejar
 import ipaddress
 import json
 import logging
@@ -103,6 +104,31 @@ MAX_ABOS_PRO_MAILBOX = 50
 # setzen zugleich eine Obergrenze — unbegrenzt viele waeren eine Fadenlawine bei
 # einer grossen Gruppe.
 _versender = ThreadPoolExecutor(max_workers=4, thread_name_prefix="webpush")
+
+# Die Warteschlange des Pools hat selbst keine Grenze. Haengt ein Push-Dienst,
+# wuchs sie bis 27.09.2026 mit jeder Nachricht, und Pushes kamen Minuten zu
+# spaet. Darueber wird verworfen: ein Push ist ein Hinweis, die Nachricht
+# selbst liegt in der Mailbox.
+MAX_WARTENDE_ZUSTELLUNGEN = 200
+
+# Ein Client fuer alle Zustellungen statt einem je Auftrag: sonst kostete jede
+# Nachricht einen neuen TLS-Aufbau zu FCM, Mozilla oder Apple. httpx.Client
+# ist threadsicher.
+# Ohne Keksdose: der Client ist fuer alle Konten derselbe, und ein Keks, den
+# ein Push-Dienst setzt, ginge sonst bei jeder spaeteren Zustellung mit,
+# egal an wen. So koennte der Dienst die Empfaenger miteinander verknuepfen.
+_push_client = httpx.Client(
+    timeout=httpx.Timeout(4.0, connect=2.5, read=3.0),
+    cookies=http.cookiejar.CookieJar(policy=http.cookiejar.DefaultCookiePolicy(allowed_domains=[])),
+)
+
+
+def _einreihen(*auftrag) -> None:
+    # `_work_queue` ist die Warteschlange des Pools (CPython, seit 3.2 so).
+    if _versender._work_queue.qsize() >= MAX_WARTENDE_ZUSTELLUNGEN:
+        logger.warning("webpush: Warteschlange voll, Zustellung verworfen")
+        return
+    _versender.submit(_zustellen_alle, *auftrag)
 
 
 # ── Base64url ohne Polster ──────────────────────────────────────────────────
@@ -606,7 +632,7 @@ def sende_an_mailbox(
         return 0
 
     ziele = [(a.id, a.endpoint, a.p256dh, a.auth) for a in abos]
-    _versender.submit(_zustellen_alle, ziele, koerper, privates_pem, oeffentlich, True)
+    _einreihen(ziele, koerper, privates_pem, oeffentlich, True)
     return len(ziele)
 
 
@@ -646,7 +672,7 @@ def sende_an_konto(db: Session, user_id: int, nutzlast: dict[str, Any]) -> int:
     # Reine Werte ueber die Fadengrenze, keine ORM-Objekte: die gehoeren zu
     # dieser Sitzung und waeren drueben abgeloest.
     ziele = [(a.id, a.endpoint, a.p256dh, a.auth) for a in abos]
-    _versender.submit(_zustellen_alle, ziele, koerper, privates_pem, oeffentlich, False)
+    _einreihen(ziele, koerper, privates_pem, oeffentlich, False)
     return len(ziele)
 
 
@@ -666,11 +692,10 @@ def _zustellen_alle(
     """
     tot: list[int] = []
     try:
-        with httpx.Client(timeout=httpx.Timeout(4.0, connect=2.5, read=3.0)) as client:
-            for abo_id, endpunkt, p256dh, auth in ziele:
-                if _zustellen(client, endpunkt, p256dh, auth, koerper, privates_pem, oeffentlich):
-                    continue
-                tot.append(abo_id)
+        for abo_id, endpunkt, p256dh, auth in ziele:
+            if _zustellen(_push_client, endpunkt, p256dh, auth, koerper, privates_pem, oeffentlich):
+                continue
+            tot.append(abo_id)
     except Exception:
         logger.exception("webpush: Versand abgebrochen")
 

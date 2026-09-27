@@ -43,7 +43,10 @@ class VoicePrefetch:
         from services.ai_latency_metrics import metrics
 
         started_at = time.perf_counter()
-        prediction = classify_streaming_intent(text_chunk)
+        # Im Thread: die Einordnung rechnet ein Embedding, und das je
+        # Teiltranskript mehrmals pro Sekunde. Auf der Ereignisschleife
+        # ruckelte davon der Ton jeder laufenden Sprachsitzung (bis 27.09.2026).
+        prediction = await asyncio.to_thread(classify_streaming_intent, text_chunk)
         metrics.record(
             "voice",
             "intent_classification",

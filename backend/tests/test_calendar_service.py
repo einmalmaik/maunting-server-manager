@@ -1121,8 +1121,8 @@ def test_erinnerungsfenster_entschluesselt_nur_passende_inhalte(db_session, test
                                      end_time=end, all_day=True, recurrence=recurrence)
     decrypted = []
     original = calendar_service._decrypt_or_migrate_calendar_event
-    def decrypt(db, row):
-        result = original(db, row)
+    def decrypt(db, row, klartexte=None):
+        result = original(db, row, klartexte)
         decrypted.append(result[0])
         return result
     monkeypatch.setattr(calendar_service, "_decrypt_or_migrate_calendar_event", decrypt)
@@ -1130,3 +1130,28 @@ def test_erinnerungsfenster_entschluesselt_nur_passende_inhalte(db_session, test
         von=datetime(2026, 9, 26, tzinfo=timezone.utc), bis=datetime(2026, 9, 28, tzinfo=timezone.utc))
     assert sorted(row["title"] for row in result) == ["Aktuell", "Geburtstag"]
     assert sorted(decrypted) == ["Aktuell", "Geburtstag"]
+
+
+def test_erinnerungsfenster_entschluesselt_gebuendelt(db_session, test_user, monkeypatch):
+    """Die Erinnerungsschleife fragt jede Minute: vier Einzelaufrufe je Termin
+    beim Sidecar waren es bis 27.09.2026, jetzt je Schritt einer fuer alle."""
+    from services.dis_client import DisClient
+
+    for i in range(4):
+        CalendarService.create_event(db_session, test_user, title=f"Termin {i}", start_time="2026-09-26 10:00",
+                                     end_time="2026-09-26 11:00", description="Text", location="Ort")
+    db_session.expire_all()
+    einzeln = []
+    echt = DisClient.decrypt
+
+    def zaehle(ciphertext, aad=None):
+        einzeln.append(ciphertext)
+        return echt(ciphertext, aad)
+
+    monkeypatch.setattr(DisClient, "decrypt", staticmethod(zaehle))
+    result = CalendarService.vorkommen_im_fenster(db_session, test_user,
+        von=datetime(2026, 9, 26, tzinfo=timezone.utc), bis=datetime(2026, 9, 27, tzinfo=timezone.utc))
+
+    assert sorted(row["title"] for row in result) == [f"Termin {i}" for i in range(4)]
+    assert {row["location"] for row in result} == {"Ort"}
+    assert einzeln == []

@@ -1330,6 +1330,20 @@ async def social_websocket(
         except Exception:
             pass
 
+    async def _mit_sitzung(arbeit):
+        """Datenbankarbeit im Thread, nie auf der Ereignisschleife.
+
+        Bis 27.09.2026 lief sie hier direkt. Die Mailbox-Pruefung rechnet je
+        aktivem Konto zwei SHA-256, und ein Abo mit 200 Mailboxen hielt so bei
+        jedem Neuverbinden das ganze Panel an: Stimme, Konsole, alle Stroeme.
+        """
+
+        def _lauf():
+            with SessionLocal() as db:
+                return arbeit(db)
+
+        return await asyncio.to_thread(_lauf)
+
     async def _recv_loop():
         while True:
             data = await websocket.receive_json()
@@ -1342,8 +1356,9 @@ async def social_websocket(
                 # WebSocket Join Event:
                 # Ghost-Mode & Privacy-Schutz delegiert an SocialService
                 try:
-                    with SessionLocal() as db:
-                        SocialService.broadcast_user_joined(db, user_id, user_username)
+                    await _mit_sitzung(
+                        lambda db: SocialService.broadcast_user_joined(db, user_id, user_username)
+                    )
                     async with ws_lock:
                         await websocket.send_json({"type": "joined", "status": "ok", "user_id": user_id})
                 except Exception as exc:
@@ -1360,17 +1375,15 @@ async def social_websocket(
                 eintraege = data.get("eintraege")
                 erlaubt: list[str] = []
                 if isinstance(eintraege, list):
+                    wunsch = [
+                        (str(e.get("mailbox_id") or ""), e.get("mailbox_token"))
+                        for e in eintraege[:MAX_MAILBOXES]
+                        if isinstance(e, dict)
+                    ]
                     try:
-                        with SessionLocal() as db:
-                            erlaubt = SocialService.erlaubte_mailboxen(
-                                db,
-                                user_id,
-                                (
-                                    (str(e.get("mailbox_id") or ""), e.get("mailbox_token"))
-                                    for e in eintraege[:MAX_MAILBOXES]
-                                    if isinstance(e, dict)
-                                ),
-                            )
+                        erlaubt = await _mit_sitzung(
+                            lambda db: SocialService.erlaubte_mailboxen(db, user_id, wunsch)
+                        )
                     except Exception as exc:
                         logger.debug("Fehler beim Setzen der Mailbox-Abos: %s", exc)
                 anzahl = SyncEventService.set_mailboxes(conn_id, erlaubt, user_id=user_id)
@@ -1378,28 +1391,29 @@ async def social_websocket(
                     await websocket.send_json({"type": "mailboxes_ok", "count": anzahl})
             elif msg_type == "presence":
                 try:
-                    with SessionLocal() as db:
-                        SocialService.update_presence(db, user_id, data)
+                    await _mit_sitzung(lambda db: SocialService.update_presence(db, user_id, data))
                 except Exception as exc:
                     logger.debug("Fehler bei update_presence: %s", exc)
             elif msg_type == "typing":
                 blind_mailbox_id = data.get("blind_mailbox_id", "")
                 status = data.get("status", "idle")
+                def _tippen(db, blind_mailbox_id=blind_mailbox_id, status=status, data=data):
+                    # Derselbe Nachweis wie auf dem HTTP-Weg. Ohne ihn wäre
+                    # der WebSocket die offene Hintertür neben der
+                    # verschlossenen Vordertür.
+                    SocialService.assert_mailbox_token(
+                        db, blind_mailbox_id, data.get("mailbox_token"), user_id
+                    )
+                    SocialService.broadcast_typing_signal(
+                        blind_mailbox_id=blind_mailbox_id,
+                        status=status,
+                        sender_id=user_id,
+                        sender_username=user_username,
+                        db=db,
+                    )
+
                 try:
-                    with SessionLocal() as db:
-                        # Derselbe Nachweis wie auf dem HTTP-Weg. Ohne ihn wäre
-                        # der WebSocket die offene Hintertür neben der
-                        # verschlossenen Vordertür.
-                        SocialService.assert_mailbox_token(
-                            db, blind_mailbox_id, data.get("mailbox_token"), user_id
-                        )
-                        SocialService.broadcast_typing_signal(
-                            blind_mailbox_id=blind_mailbox_id,
-                            status=status,
-                            sender_id=user_id,
-                            sender_username=user_username,
-                            db=db,
-                        )
+                    await _mit_sitzung(_tippen)
                 except Exception as exc:
                     logger.debug("Fehler bei broadcast_typing_signal: %s", exc)
             elif msg_type == "relay":
@@ -1408,21 +1422,31 @@ async def social_websocket(
                 is_control = bool(data.get("is_control", False))
                 control_type = data.get("control_type")
                 client_uuid = data.get("client_uuid")
+                def _weiterleiten(
+                    db,
+                    blind_mailbox_id=blind_mailbox_id,
+                    ciphertext_envelope=ciphertext_envelope,
+                    client_uuid=client_uuid,
+                    is_control=is_control,
+                    control_type=control_type,
+                    data=data,
+                ):
+                    SocialService.assert_mailbox_token(
+                        db, blind_mailbox_id, data.get("mailbox_token"), user_id
+                    )
+                    return SocialService.relay_blind_envelope(
+                        db,
+                        blind_mailbox_id=blind_mailbox_id,
+                        ciphertext_envelope=ciphertext_envelope,
+                        sender_user_id=user_id,
+                        client_uuid=client_uuid,
+                        is_control=is_control,
+                        control_type=control_type,
+                        mailbox_token=data.get("mailbox_token"),
+                    )
+
                 try:
-                    with SessionLocal() as db:
-                        SocialService.assert_mailbox_token(
-                            db, blind_mailbox_id, data.get("mailbox_token"), user_id
-                        )
-                        envelope = SocialService.relay_blind_envelope(
-                            db,
-                            blind_mailbox_id=blind_mailbox_id,
-                            ciphertext_envelope=ciphertext_envelope,
-                            sender_user_id=user_id,
-                            client_uuid=client_uuid,
-                            is_control=is_control,
-                            control_type=control_type,
-                            mailbox_token=data.get("mailbox_token"),
-                        )
+                    envelope = await _mit_sitzung(_weiterleiten)
                     # Sofortige Bestätigung an den WebSocket-Sender (Acknowledge zur Queue-Bereinigung)
                     async with ws_lock:
                         await websocket.send_json({

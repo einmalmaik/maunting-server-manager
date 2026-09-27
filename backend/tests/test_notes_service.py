@@ -296,6 +296,29 @@ def test_titelsortierung_nach_entschluesselung(db_session, test_user, monkeypatc
     for row, encrypted in zip(rows, ["cipher-a", "cipher-z", "cipher-m"]):
         row.title = encrypted
     db_session.commit()
-    monkeypatch.setattr(NotesService, "_decrypt_or_migrate", lambda _db, row: (titles[row.id], ""))
+    monkeypatch.setattr(NotesService, "_decrypt_or_migrate", lambda _db, row, _klartexte=None: (titles[row.id], ""))
     result = NotesService.get_notes(db_session, test_user, sort_by="title", order=order)
     assert [row["title"] for row in result] == expected
+
+
+def test_liste_entschluesselt_gebuendelt(db_session, test_user, monkeypatch):
+    """Die Liste fragt den Sidecar einmal, nicht zweimal je Notiz (bis 27.09.2026)."""
+    from services.dis_client import DisClient
+
+    for i in range(5):
+        NotesService.create_note(db_session, user=test_user, title=f"Titel {i}", content=f"Inhalt {i}")
+    db_session.expire_all()
+    einzeln = []
+    echt = DisClient.decrypt
+
+    def zaehle(ciphertext, aad=None):
+        einzeln.append(ciphertext)
+        return echt(ciphertext, aad)
+
+    monkeypatch.setattr(DisClient, "decrypt", staticmethod(zaehle))
+
+    notes = NotesService.get_notes(db_session, user=test_user)
+
+    assert sorted(n["title"] for n in notes) == [f"Titel {i}" for i in range(5)]
+    assert sorted(n["content"] for n in notes) == [f"Inhalt {i}" for i in range(5)]
+    assert einzeln == []

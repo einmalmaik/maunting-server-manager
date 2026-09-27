@@ -12,6 +12,7 @@ from dependencies import require_global, verify_csrf
 from models import AiActionProposal, AiConversation, AiRun, User
 from models.ai_conversation import ARTEN
 from models.ai_run import BEENDET
+from models.dis_text import vorab_entschluesselt
 from schemas.ai_action import (
     AiActionConfirmationResponse,
     AiActionExecuteRequest,
@@ -40,6 +41,10 @@ router = APIRouter(prefix="/api/ai", tags=["ai-actions"])
 #: Vorschlag verfällt nicht von selbst; ohne Grenze stünde jede nie
 #: angeklickte Sprachkarte für immer in der Sprachansicht.
 OFFEN_OHNE_LAUF = timedelta(hours=1)
+
+#: Wie viele Vorschlaege die Liste hoechstens liefert, die juengsten zuerst
+#: abgeschnitten. Die Chatseite zeigt 200 Nachrichten.
+MAX_VORSCHLAEGE = 300
 
 
 def _state_error(exc: ai_action_errors.AiActionStateError) -> HTTPException:
@@ -166,7 +171,7 @@ def list_conversation_actions(
         # Mitgeliefert wird nur, worauf gerade wirklich jemand wartet — in
         # seinem eigenen Fenster bleibt der Vorschlag sichtbar.
         lebende = db.query(AiRun.conversation_id).filter(
-            AiRun.status.notin_(BEENDET)
+            AiRun.user_id == user.id, AiRun.status.notin_(BEENDET)
         )
         eigene_worker = db.query(AiConversation.id).filter(
             AiConversation.user_id == user.id,
@@ -181,7 +186,9 @@ def list_conversation_actions(
             ),
         )
     if offen:
-        lebende_laeufe = db.query(AiRun.id).filter(AiRun.status.notin_(BEENDET))
+        lebende_laeufe = db.query(AiRun.id).filter(
+            AiRun.user_id == user.id, AiRun.status.notin_(BEENDET)
+        )
         frisch = datetime.now(timezone.utc) - OFFEN_OHNE_LAUF
         bedingung = and_(
             bedingung,
@@ -194,11 +201,24 @@ def list_conversation_actions(
                 ),
             ),
         )
-    rows = db.query(AiActionProposal).filter(
-        bedingung,
-        AiActionProposal.user_id == user.id,
-    ).order_by(AiActionProposal.created_at.asc()).all()
-    return [proposal_response(row) for row in rows]
+    # Die juengsten `MAX_VORSCHLAEGE`, aelteste zuerst. Der Dauerchat laeuft
+    # fuer immer, und bis 27.09.2026 kam hier jede Karte seit seinem Anfang
+    # zurueck, jede mit drei verschluesselten Feldern, alle 20 Sekunden.
+    seite = (
+        db.query(AiActionProposal)
+        .filter(bedingung, AiActionProposal.user_id == user.id)
+        .order_by(AiActionProposal.created_at.desc())
+        .limit(MAX_VORSCHLAEGE)
+    )
+    with vorab_entschluesselt(
+        db,
+        seite,
+        AiActionProposal.preview_json,
+        AiActionProposal.reason,
+        AiActionProposal.expected_effect,
+    ):
+        rows = seite.all()
+    return [proposal_response(row) for row in reversed(rows)]
 
 
 @router.get("/actions/{proposal_id}", response_model=AiActionProposalResponse)

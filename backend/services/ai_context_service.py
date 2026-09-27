@@ -10,9 +10,10 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from models import AiConversation, AiMessage, User
+from models.dis_text import vorab_entschluesselt
 from services import ai_lage, ai_prompt
 from services.ai_redaction import redact_sensitive_text
 
@@ -389,7 +390,7 @@ def _recent_tool_results(
 
     if grenzen is None:
         grenzen = _teilbudgets(MAX_CONTEXT_CHARS)
-    rows = (
+    seite = (
         db.query(AiToolResult)
         .filter(
             AiToolResult.conversation_id == conversation_id,
@@ -397,8 +398,9 @@ def _recent_tool_results(
         )
         .order_by(AiToolResult.created_at.desc())
         .limit(grenzen.werkzeug_anzahl)
-        .all()
     )
+    with vorab_entschluesselt(db, seite, AiToolResult.result_json):
+        rows = seite.all()
     if not rows:
         return None
     # Zeilen aus der Zeit vor der Spalte tragen `None` und bilden damit einen
@@ -581,12 +583,14 @@ def build_provider_messages(
         query_set = query_set.filter(
             AiMessage.created_at > conversation.summarized_until
         )
-    rows = (
-        query_set
-        .order_by(AiMessage.created_at.desc(), AiMessage.id.desc())
-        .limit(grenzen.historie_zeilen)
-        .all()
+    # Bis zu 2.000 Zeilen: gebuendelt entschluesselt, und ohne Denktext und
+    # Gliederung, die der Kontext nie liest. Beide waren bis 27.09.2026 je
+    # Zeile ein eigener Sidecar-Aufruf vor dem ersten Token.
+    seite = query_set.order_by(AiMessage.created_at.desc(), AiMessage.id.desc()).limit(
+        grenzen.historie_zeilen
     )
+    with vorab_entschluesselt(db, seite, AiMessage.content, AiMessage.question_json):
+        rows = seite.options(defer(AiMessage.reasoning), defer(AiMessage.sections_json)).all()
     if user is not None:
         from services import permission_service
 

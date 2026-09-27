@@ -5,12 +5,13 @@ from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 from fastapi import HTTPException
-from sqlalchemy import or_, and_, func
+from sqlalchemy import and_, event, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import hashlib
 import secrets
+import time
 from models import (
     User,
     UserFriend,
@@ -127,6 +128,21 @@ GROUP_PERMISSION_ALIASES: dict[str, tuple[str, ...]] = {
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+#: Unter diesem Schlüssel liegt in `Session.info` die Karte aus
+#: `SocialService._gegenueber_karte`.
+_GEGENUEBER_ABLAGE = "msm_gegenueber"
+_GEGENUEBER_FRIST = 30.0
+
+
+@event.listens_for(Session, "after_flush")
+def _gegenueber_vergessen(session: Session, _kontext) -> None:
+    """Ein neues oder geändertes Konto in dieser Sitzung macht die Karte ungültig."""
+    if _GEGENUEBER_ABLAGE not in session.info:
+        return
+    if any(isinstance(o, User) for o in (*session.new, *session.dirty, *session.deleted)):
+        session.info.pop(_GEGENUEBER_ABLAGE, None)
 
 
 class SocialService:
@@ -590,15 +606,33 @@ class SocialService:
         clean = (blind_mailbox_id or "").strip()
         if not clean:
             return None
+        return cls._gegenueber_karte(db, user_id).get(clean)
+
+    @classmethod
+    def _gegenueber_karte(cls, db: Session, user_id: int) -> dict[str, int]:
+        """Jede ableitbare Direktkennung dieses Kontos, je Kennung das Gegenüber.
+
+        Gerechnet wird wie immer für jedes aktive Konto, aber einmal je Sitzung
+        und nicht einmal je gefragter Mailbox. Ein Abo mit 200 Mailboxen
+        rechnete bis 27.09.2026 zweihundertmal über alle Konten.
+
+        Die Karte hängt an der Sitzung, lebt also höchstens eine Anfrage lang,
+        und nie länger als `_GEGENUEBER_FRIST` Sekunden. Ändert die Sitzung
+        selbst ein Konto, fällt sie sofort weg (`_gegenueber_vergessen`).
+        """
+        ablage = db.info.setdefault(_GEGENUEBER_ABLAGE, {})
+        jetzt = time.monotonic()
+        gemerkt = ablage.get(user_id)
+        if gemerkt is not None and jetzt - gemerkt[0] < _GEGENUEBER_FRIST:
+            return gemerkt[1]
+        karte: dict[str, int] = {}
         for (kandidat,) in (
             db.query(User.id).filter(User.is_active == True, User.id != user_id).all()  # noqa: E712
         ):
-            if (
-                cls.derive_blind_mailbox_id(user_id, kandidat) == clean
-                or cls.derive_legacy_direct_mailbox_id(user_id, kandidat) == clean
-            ):
-                return kandidat
-        return None
+            karte.setdefault(cls.derive_blind_mailbox_id(user_id, kandidat), kandidat)
+            karte.setdefault(cls.derive_legacy_direct_mailbox_id(user_id, kandidat), kandidat)
+        ablage[user_id] = (jetzt, karte)
+        return karte
 
     @classmethod
     def _direktchat_zeile(cls, db: Session, user_a_id: int, user_b_id: int) -> DirectChat | None:
@@ -686,19 +720,15 @@ class SocialService:
         # die Kandidatensuche auch, nur ohne dass jemand aufschreiben müsste,
         # wer mit wem schreibt.
         #
-        # Kandidatensuche über aktive Benutzer (O(N)).
-        candidates = db.query(User.id).filter(User.is_active == True, User.id != sender_user_id).all()
-        for (cand_id,) in candidates:
-            if (
-                cls.derive_blind_mailbox_id(sender_user_id, cand_id) == clean_mailbox
-                or cls.derive_legacy_direct_mailbox_id(sender_user_id, cand_id) == clean_mailbox
-            ):
-                if cls.is_blocked(db, sender_user_id, cand_id):
-                    raise HTTPException(status_code=403, detail="Benutzer ist blockiert.")
-                if not lege_chat_an:
-                    return cand_id, None
-                chat = cls.ensure_direct_chat(db, sender_user_id, cand_id)
-                return cand_id, chat
+        # Kandidatensuche über aktive Benutzer, einmal je Sitzung gerechnet.
+        cand_id = cls.gegenueber_aus_mailbox(db, sender_user_id, clean_mailbox)
+        if cand_id is not None:
+            if cls.is_blocked(db, sender_user_id, cand_id):
+                raise HTTPException(status_code=403, detail="Benutzer ist blockiert.")
+            if not lege_chat_an:
+                return cand_id, None
+            chat = cls.ensure_direct_chat(db, sender_user_id, cand_id)
+            return cand_id, chat
 
         return None, None
 
@@ -1209,9 +1239,19 @@ class SocialService:
 
     @classmethod
     def get_profile(
-        cls, db: Session, viewer_user_id: int | None, target_user: User
+        cls,
+        db: Session,
+        viewer_user_id: int | None,
+        target_user: User,
+        *,
+        mit_erfolgen: bool = True,
     ) -> dict[str, Any]:
-        """Liefert das Benutzerprofil unter Berücksichtigung des 3-Stufen-Modells."""
+        """Liefert das Benutzerprofil unter Berücksichtigung des 3-Stufen-Modells.
+
+        ``mit_erfolgen=False`` laesst Zahlen und Erfolge weg (``None``). Die
+        Liste der oeffentlichen Profile zeigt nur Name, Bild und Status, und
+        die Erfolge kosteten dort je Profil mehrere Abfragen, alle 15 Sekunden.
+        """
         is_self = viewer_user_id is not None and viewer_user_id == target_user.id
         privacy = getattr(target_user, "social_privacy", "friends")
         is_friend = cls.is_confirmed_friend(db, viewer_user_id, target_user.id) if viewer_user_id else False
@@ -1262,10 +1302,13 @@ class SocialService:
             }
 
         pres_data = cls.get_presence_for_viewer(db, viewer_user_id, target_user)
-        stats = AchievementService.get_user_stats(db, target_user.id, fuer_fremde=not is_self)
-        achievements = AchievementService.get_user_achievements(
-            db, target_user.id, fuer_fremde=not is_self
-        )
+        stats = None
+        achievements = None
+        if mit_erfolgen:
+            stats = AchievementService.get_user_stats(db, target_user.id, fuer_fremde=not is_self)
+            achievements = AchievementService.get_user_achievements(
+                db, target_user.id, fuer_fremde=not is_self
+            )
 
         return {
             "user_id": target_user.id,
@@ -1317,7 +1360,7 @@ class SocialService:
         users = query.order_by(User.username.asc()).offset(offset).limit(limit).all()
         results = []
         for u in users:
-            results.append(cls.get_profile(db, viewer_user_id, u))
+            results.append(cls.get_profile(db, viewer_user_id, u, mit_erfolgen=False))
         return results
 
     # --- DIS Zero-Knowledge E2EE Blind Relay ---
@@ -1596,18 +1639,6 @@ class SocialService:
         if clean == cls.derive_user_device_mailbox_id(user_id):
             return
 
-        # Der Direktchat: bis Stufe 6b ein Nachschlag in `direct_chats`, jetzt
-        # eine Rechnung. `gegenueber_aus_mailbox` leitet die Kennung für jedes
-        # aktive Konto ab und vergleicht — dieselbe Antwort, ohne dass jemand
-        # aufschreiben müsste, wer mit wem schreibt.
-        #
-        # Die Zeile wird zusätzlich verlangt: eine abgeleitete Kennung passt
-        # rechnerisch zu jedem Paar, auch zu einem, das nie miteinander zu tun
-        # hatte. Ohne sie wäre jede Konto-Kombination eine offene Tür.
-        gegenueber = cls.gegenueber_aus_mailbox(db, user_id, clean)
-        if gegenueber is not None and cls._direktchat_zeile(db, user_id, gegenueber):
-            return
-
         for (gid,) in (
             db.query(ChatGroupMember.group_id).filter(ChatGroupMember.user_id == user_id).all()
         ):
@@ -1626,6 +1657,19 @@ class SocialService:
             other = f.friend_id if f.user_id == user_id else f.user_id
             if cls.derive_blind_mailbox_id(user_id, other) == clean:
                 return
+
+        # Zuletzt, weil am teuersten: der Direktchat. Bis Stufe 6b ein
+        # Nachschlag in `direct_chats`, jetzt eine Rechnung.
+        # `gegenueber_aus_mailbox` leitet die Kennung für jedes aktive Konto ab
+        # und vergleicht — dieselbe Antwort, ohne dass jemand aufschreiben
+        # müsste, wer mit wem schreibt.
+        #
+        # Die Zeile wird zusätzlich verlangt: eine abgeleitete Kennung passt
+        # rechnerisch zu jedem Paar, auch zu einem, das nie miteinander zu tun
+        # hatte. Ohne sie wäre jede Konto-Kombination eine offene Tür.
+        gegenueber = cls.gegenueber_aus_mailbox(db, user_id, clean)
+        if gegenueber is not None and cls._direktchat_zeile(db, user_id, gegenueber):
+            return
 
         raise HTTPException(status_code=403, detail="Keine Berechtigung für diese Mailbox.")
 
@@ -2382,12 +2426,19 @@ class SocialService:
                 "joined_at": mem.joined_at,
             })
 
-        user_role_by_group = {m.group_id: m.role for m in memberships}
+        mein_eintrag = {m.group_id: m for m in memberships}
 
         results = []
         for g in groups:
             mems = members_by_group.get(g.id, [])
             offener_raum = GroupCallRoomRegistry.find_for_group(g.id)
+            # Dieselbe Regel wie `has_group_permission` und `darf_einladen`,
+            # nur aus den schon geladenen Zeilen. Bis 27.09.2026 fragte jede
+            # Marke die Datenbank einzeln: neun bis achtzehn Abfragen je
+            # Gruppe, alle 15 Sekunden je offenem Messenger.
+            ich = mein_eintrag[g.id]
+            darf = cls.effective_permissions(ich.permissions, g.default_permissions, ich.role)
+            darf_einladen = ich.role in ("owner", "admin") or "invite_members" in darf
             results.append({
                 "id": g.id,
                 # Seit Stufe 6 leer, und zwar an der Quelle: die Spalten sind
@@ -2399,9 +2450,7 @@ class SocialService:
                 # Nur für die, die einladen dürfen. Der Code ist ein Geheimnis,
                 # das Zugang gewährt — er hat in der Antwort an ein Mitglied
                 # ohne dieses Recht nichts verloren.
-                "invite_code": (
-                    g.invite_code if cls.darf_einladen(db, g.id, user_id) else None
-                ),
+                "invite_code": g.invite_code if darf_einladen else None,
                 "owner_user_id": g.owner_user_id,
                 "default_permissions": ",".join(
                     sorted(
@@ -2411,31 +2460,21 @@ class SocialService:
                     )
                 ),
                 "member_count": len(mems),
-                "role": user_role_by_group.get(g.id, "member"),
+                "role": ich.role,
                 # Dieselbe Entscheidung, die der Anruf-Endpunkt trifft. Ohne sie
                 # muesste das Frontend die Regel nachbauen und wuerde einen Knopf
                 # zeigen, den das Backend danach mit 403 beantwortet.
-                "can_start_call": cls.has_group_permission(
-                    db, g.id, user_id, "start_group_calls"
-                ),
-                "can_join_call": cls.has_group_permission(
-                    db, g.id, user_id, "join_group_calls"
-                ),
-                "can_share_screen": cls.has_group_permission(db, g.id, user_id, "share_screen"),
-                "can_mute_others": cls.has_group_permission(db, g.id, user_id, "mute_in_calls"),
-                "can_kick_from_call": cls.has_group_permission(
-                    db, g.id, user_id, "kick_from_calls"
-                ),
+                "can_start_call": "start_group_calls" in darf,
+                "can_join_call": "join_group_calls" in darf,
+                "can_share_screen": "share_screen" in darf,
+                "can_mute_others": "mute_in_calls" in darf,
+                "can_kick_from_call": "kick_from_calls" in darf,
                 # Ob **ich** den Knopf sehe. Die Schranke sitzt beim Empfaenger,
                 # das hier ist nur die Bequemlichkeit: eine Auswahl anzubieten,
                 # die beim Gegenueber folgenlos verpufft, waere irrefuehrend.
-                "can_mention_everyone": cls.has_group_permission(
-                    db, g.id, user_id, "mention_everyone"
-                ),
-                "can_pin_messages": cls.has_group_permission(db, g.id, user_id, "pin_messages"),
-                "can_set_disappearing_messages": cls.has_group_permission(
-                    db, g.id, user_id, "set_disappearing_messages"
-                ),
+                "can_mention_everyone": "mention_everyone" in darf,
+                "can_pin_messages": "pin_messages" in darf,
+                "can_set_disappearing_messages": "set_disappearing_messages" in darf,
                 "created_at": g.created_at,
                 "members": mems,
                 "room_token": offener_raum,

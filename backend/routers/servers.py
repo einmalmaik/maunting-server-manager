@@ -707,8 +707,11 @@ async def restart_server(
 
 
 @router.post("/{server_id}/auth-setup/cancel")
-async def cancel_auth_setup(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+def cancel_auth_setup(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     """Bricht einen laufenden Auth-Setup-Recovery-Vorgang ab.
+
+    ``def`` wie ``kill_server``: ``docker_service.stop`` wartet bis zu 10 s an
+    der Node und hielt bis 27.09.2026 dabei die Ereignisschleife an.
 
     Wird aufgerufen, wenn der User den interaktiven Auth-Flow manuell abbrechen
     will (z.B. weil er das Spiel doch nicht neu authentifizieren moechte oder

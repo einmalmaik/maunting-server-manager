@@ -273,6 +273,20 @@ def abgefangener_versand(monkeypatch):
     return uebergeben
 
 
+def test_volle_warteschlange_verwirft_statt_zu_wachsen(
+    db: Session, owner_user: User, abgefangener_versand, monkeypatch
+):
+    """Haengt ein Push-Dienst, darf die Warteschlange nicht mit jeder Nachricht
+    wachsen. Die Nachricht selbst liegt in der Mailbox, der Push ist nur ein
+    Hinweis darauf."""
+    _abo_anlegen(db, owner_user)
+    monkeypatch.setattr(webpush_service, "MAX_WARTENDE_ZUSTELLUNGEN", 0)
+
+    webpush_service.sende_an_konto(db, owner_user.id, {"title": "Neue Nachricht"})
+
+    assert abgefangener_versand == []
+
+
 def test_ohne_abonnement_geht_nichts_hinaus(db: Session, owner_user: User, abgefangener_versand):
     assert webpush_service.sende_an_konto(db, owner_user.id, {"title": "Neue Nachricht"}) == 0
     assert abgefangener_versand == []
@@ -435,7 +449,7 @@ def test_ein_totes_abo_wird_aus_der_tabelle_entfernt(
     abo = _abo_anlegen(db, owner_user)
     pem, oeff = webpush_service._neues_paar()
 
-    monkeypatch.setattr(webpush_service.httpx, "Client", lambda **_: _AlsKontext(_client_der(410)))
+    monkeypatch.setattr(webpush_service, "_push_client", _client_der(410))
     webpush_service._zustellen_alle(
         [(abo.id, abo.endpoint, abo.p256dh, abo.auth)], b'{"title":"x"}', pem, oeff
     )
@@ -448,26 +462,13 @@ def test_eine_stoerung_laesst_die_tabelle_in_ruhe(db: Session, owner_user: User,
     abo = _abo_anlegen(db, owner_user)
     pem, oeff = webpush_service._neues_paar()
 
-    monkeypatch.setattr(webpush_service.httpx, "Client", lambda **_: _AlsKontext(_client_der(503)))
+    monkeypatch.setattr(webpush_service, "_push_client", _client_der(503))
     webpush_service._zustellen_alle(
         [(abo.id, abo.endpoint, abo.p256dh, abo.auth)], b'{"title":"x"}', pem, oeff
     )
 
     db.expire_all()
     assert db.query(PushSubscription).count() == 1
-
-
-class _AlsKontext:
-    """`httpx.Client` wird als `with`-Block benutzt."""
-
-    def __init__(self, inner):
-        self._inner = inner
-
-    def __enter__(self):
-        return self._inner
-
-    def __exit__(self, *_):
-        return False
 
 
 # ── Der Weg durch die echten Routen ─────────────────────────────────────────
@@ -742,4 +743,24 @@ def test_max_abos_pro_mailbox_verdraengt_aelteste(db: Session, monkeypatch):
     assert "https://fcm.googleapis.com/fcm/send/mb-dev-1" not in endpoints
     assert "https://fcm.googleapis.com/fcm/send/mb-dev-2" not in endpoints
     assert "https://fcm.googleapis.com/fcm/send/mb-dev-52" in endpoints
+
+
+def test_gemeinsamer_client_behaelt_keine_kekse(monkeypatch):
+    """Der Client ist fuer alle Konten derselbe. Ein Keks des Push-Dienstes
+    darf nicht bei der naechsten Zustellung an ein anderes Konto mitgehen."""
+    import httpx
+
+    gesendet = []
+
+    def dienst(anfrage):
+        gesendet.append(anfrage.headers.get("cookie"))
+        return httpx.Response(201, headers={"set-cookie": "sid=verknuepft; Path=/"}, request=anfrage)
+
+    client = webpush_service._push_client
+    monkeypatch.setattr(client, "_transport", httpx.MockTransport(dienst))
+    client.post("https://fcm.googleapis.com/fcm/send/a")
+    client.post("https://fcm.googleapis.com/fcm/send/b")
+
+    assert gesendet == [None, None]
+    assert len(client.cookies.jar) == 0
 

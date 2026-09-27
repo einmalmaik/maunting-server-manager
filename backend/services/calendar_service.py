@@ -25,6 +25,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from models.calendar_event import CalendarEvent
+from models.dis_text import gebuendelt_entschluesseln
 from models.user import User
 from models.user_calendar import UserCalendar
 from services.dis_client import DisClient, DisDecryptionError
@@ -121,7 +122,23 @@ def _cal_aad(user_id: int, event_uid: str) -> str:
     return f"msm:cal:{user_id}:{event_uid}"
 
 
-def _feld_entschluesseln(db: Session, ev: CalendarEvent, spalte: str, aad: str) -> str:
+def _dis_paare(events: list[CalendarEvent], spalten: tuple[str, ...]) -> list[tuple[str, str]]:
+    """Chiffrat und AAD der DIS-Felder, fuer `gebuendelt_entschluesseln`."""
+    return [
+        (roh, _cal_aad(ev.user_id, ev.event_uid))
+        for ev in events
+        for spalte in spalten
+        if (roh := getattr(ev, spalte)) and not roh.startswith(CALENDAR_CIPHERTEXT_PREFIX)
+    ]
+
+
+def _feld_entschluesseln(
+    db: Session,
+    ev: CalendarEvent,
+    spalte: str,
+    aad: str,
+    klartexte: dict[tuple[str, str], str] | None = None,
+) -> str:
     """Ein einzelnes Feld lesen, Altbestand dabei nachziehen.
 
     Drei Faelle, in dieser Reihenfolge:
@@ -130,6 +147,8 @@ def _feld_entschluesseln(db: Session, ev: CalendarEvent, spalte: str, aad: str) 
       2. DIS-Ciphertext — wird entschluesselt.
       3. Klartext aus der Zeit vor der Verschluesselung — wird gelesen **und**
          gleich verschluesselt zurueckgeschrieben.
+
+    `klartexte` haelt vorab gebuendelt Entschluesseltes; was fehlt, geht einzeln.
     """
     roh = getattr(ev, spalte) or ""
     if roh.startswith(CALENDAR_CIPHERTEXT_PREFIX):
@@ -137,7 +156,7 @@ def _feld_entschluesseln(db: Session, ev: CalendarEvent, spalte: str, aad: str) 
     if not roh:
         return ""
     try:
-        return DisClient.decrypt(roh, aad=aad)
+        return (klartexte or {}).get((roh, aad)) or DisClient.decrypt(roh, aad=aad)
     except DisDecryptionError:
         setattr(ev, spalte, DisClient.encrypt(roh, aad=aad))
         try:
@@ -154,7 +173,9 @@ def _feld_entschluesseln(db: Session, ev: CalendarEvent, spalte: str, aad: str) 
         return roh
 
 
-def _wiederholung_entschluesseln(db: Session, ev: CalendarEvent) -> str:
+def _wiederholung_entschluesseln(
+    db: Session, ev: CalendarEvent, klartexte: dict[tuple[str, str], str] | None = None
+) -> str:
     """Liest das Wiederholungsdokument und legt es bei Altbestand erst an.
 
     Anders als Titel oder Ort darf dieses Feld **nie** leer bleiben: eine leere
@@ -184,7 +205,7 @@ def _wiederholung_entschluesseln(db: Session, ev: CalendarEvent) -> str:
         return LEERES_DOKUMENT
 
     try:
-        return DisClient.decrypt(roh, aad=aad)
+        return (klartexte or {}).get((roh, aad)) or DisClient.decrypt(roh, aad=aad)
     except DisDecryptionError:
         # Klartext aus einer aelteren Fassung — lesen und verschluesselt
         # zurueckschreiben, wie bei den uebrigen Feldern.
@@ -244,13 +265,15 @@ def _wiederholung_verschluesseln(roh: str | None, aad: str) -> str:
     return DisClient.encrypt(text, aad=aad)
 
 
-def _decrypt_or_migrate_calendar_event(db: Session, ev: CalendarEvent) -> tuple[str, str, str]:
+def _decrypt_or_migrate_calendar_event(
+    db: Session, ev: CalendarEvent, klartexte: dict[tuple[str, str], str] | None = None
+) -> tuple[str, str, str]:
     """Entschluesselt title, description und location eines nativen Termins bei Altdaten; E2EE-Ciphertexte bleiben unangetastet."""
     aad = _cal_aad(ev.user_id, ev.event_uid)
     return (
-        _feld_entschluesseln(db, ev, "title", aad),
-        _feld_entschluesseln(db, ev, "description", aad),
-        _feld_entschluesseln(db, ev, "location", aad),
+        _feld_entschluesseln(db, ev, "title", aad, klartexte),
+        _feld_entschluesseln(db, ev, "description", aad, klartexte),
+        _feld_entschluesseln(db, ev, "location", aad, klartexte),
     )
 
 
@@ -590,8 +613,8 @@ class CalendarService:
             user_teams = team_service.list_user_teams(db, user)
             user_team_ids = [t.id for t in user_teams]
 
-            visible_servers = permission_service.list_visible_servers(db, user)
-            user_server_ids = [s.id for s in visible_servers]
+            # Nur die IDs: die volle Serverliste samt Ports braucht hier niemand.
+            user_server_ids = permission_service.list_visible_server_ids(db, user)
 
             has_nodes_access = user.is_owner or permission_service.has_global_permission(db, user, "nodes.read")
 
@@ -604,7 +627,12 @@ class CalendarService:
                     (CalendarEvent.event_type == "team") & (CalendarEvent.team_id.in_(user_team_ids))
                 )
             # 3. Server-Termine für Server, auf die der User Zugriff hat
-            if user_server_ids:
+            # (`None` heisst: alle Server; verwaiste Termine ohne Server nicht)
+            if user_server_ids is None:
+                visibility_filters.append(
+                    (CalendarEvent.event_type == "server") & CalendarEvent.server_id.is_not(None)
+                )
+            elif user_server_ids:
                 visibility_filters.append(
                     (CalendarEvent.event_type == "server") & (CalendarEvent.server_id.in_(user_server_ids))
                 )
@@ -631,20 +659,17 @@ class CalendarService:
             query = query.order_by(CalendarEvent.start_time.asc())
             rows = db.scalars(query).all()
 
-            result: list[dict[str, Any]] = []
+            # Das Serienmerkmal selbst ist verschluesselt (auch bei
+            # Einzelterminen). Deshalb muessen wir die Regel lesen, bevor
+            # wir nach dem Fenster filtern; Titel, Ort und Beschreibung
+            # brauchen dagegen nur tatsaechlich faellige Vorkommen. Beides
+            # geht je in einem Aufruf zum Sidecar, nicht einzeln je Termin:
+            # die Erinnerungsschleife fragt jede Minute alle Kalender ab.
+            klartexte = gebuendelt_entschluesseln(_dis_paare(rows, ("recurrence",)))
+            behalten: list[tuple[CalendarEvent, str, Serie | None, list | None]] = []
             for ev in rows:
-                ev_type = ev.event_type or "personal"
-                ev_color = ev.color or _default_color_for_type(ev_type)
-
-                can_edit = (ev.user_id == user.id) or user.is_owner
-                if ev.event_type == "team" and ev.team and ev.team.owner_user_id == user.id:
-                    can_edit = True
-
-                # Das Serienmerkmal selbst ist verschluesselt (auch bei
-                # Einzelterminen). Deshalb muessen wir die Regel lesen, bevor
-                # wir nach dem Fenster filtern; Titel, Ort und Beschreibung
-                # brauchen dagegen nur tatsaechlich faellige Vorkommen.
-                recurrence = _wiederholung_entschluesseln(db, ev)
+                recurrence = _wiederholung_entschluesseln(db, ev, klartexte)
+                serie = None
                 vorkommen = None
                 if _vorkommen_fenster is not None:
                     try:
@@ -664,7 +689,21 @@ class CalendarService:
                         continue
                     if not vorkommen:
                         continue
-                title, desc, loc = _decrypt_or_migrate_calendar_event(db, ev)
+                behalten.append((ev, recurrence, serie, vorkommen))
+
+            klartexte.update(gebuendelt_entschluesseln(
+                _dis_paare([ev for ev, *_ in behalten], ("title", "description", "location"))
+            ))
+            result: list[dict[str, Any]] = []
+            for ev, recurrence, serie, vorkommen in behalten:
+                ev_type = ev.event_type or "personal"
+                ev_color = ev.color or _default_color_for_type(ev_type)
+
+                can_edit = (ev.user_id == user.id) or user.is_owner
+                if ev.event_type == "team" and ev.team and ev.team.owner_user_id == user.id:
+                    can_edit = True
+
+                title, desc, loc = _decrypt_or_migrate_calendar_event(db, ev, klartexte)
 
                 formatted = {
                     "event_id": ev.event_uid,

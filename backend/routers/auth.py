@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -397,7 +398,7 @@ async def register(
         raise HTTPException(status_code=400, detail="Username bereits vergeben")
     if AuthService.get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")
-    user = AuthService.create_user(db, req.username, req.email, req.password)
+    user = await run_in_threadpool(AuthService.create_user, db, req.username, req.email, req.password)
     # Sicherer Default: System-Rolle `user`. Konsistent mit der Lifespan-
     # Migration und dem Admin-Create-Pfad. Verhindert Accounts mit role_id=NULL.
     default_role = get_role_by_name(db, SYSTEM_ROLE_USER)
@@ -505,7 +506,11 @@ async def login(
     # das wird geprueft, bevor das Passwort etwas verraet.
     if schein is not None and (not user or schein.user_id != user.id):
         raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten")
-    if not user or not AuthService.verify_password(req.password, user.password_hash):
+    # Argon2 dauert gewollt lange. Im Threadpool, sonst hielte jeder
+    # Anmeldeversuch die Ereignisschleife des ganzen Panels an.
+    if not user or not await run_in_threadpool(
+        AuthService.verify_password, req.password, user.password_hash
+    ):
         raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten")
 
     if not user.is_active:
@@ -1107,12 +1112,14 @@ async def change_password(
     _: None = Depends(verify_csrf),
 ) -> dict:
     """Eigenes Passwort ändern. Erfordert aktuelles Passwort + 2FA-Code wenn 2FA aktiv."""
-    if not AuthService.verify_password(req.current_password, user.password_hash):
+    if not await run_in_threadpool(
+        AuthService.verify_password, req.current_password, user.password_hash
+    ):
         raise HTTPException(status_code=401, detail="Aktuelles Passwort falsch")
 
     _zweiter_faktor_pflicht(db, user, req.otp_code, req.passkey, "password_change")
 
-    AuthService.reset_password(db, user, req.new_password)
+    await run_in_threadpool(AuthService.reset_password, db, user, req.new_password)
     audit_service.record_privileged_action(
         db,
         user_id=user.id,
@@ -1179,7 +1186,7 @@ async def reset_password(
     ).first()
     if not user:
         raise HTTPException(status_code=400, detail="Ungültiger oder abgelaufener Token")
-    AuthService.reset_password(db, user, req.new_password)
+    await run_in_threadpool(AuthService.reset_password, db, user, req.new_password)
     return {"message": "Passwort zurückgesetzt"}
 @router.delete("/delete-account")
 def delete_account(

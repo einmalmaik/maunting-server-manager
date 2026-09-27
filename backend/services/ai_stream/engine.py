@@ -727,27 +727,42 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             1,
             (message_character_count(provider_messages) + len(complete_content) + 3) // 4,
         )
-        ai_stream._finalize_stream(
-            message_id=message_id,
-            usage_event_id=vorbereitung.usage_event_id,
-            content=complete_content,
-            usage=usage,
-            estimated_actual_tokens=estimated_actual,
-            failed=False,
-            # Eine Rueckfrage ist eine vollwertige Antwort, und ein Vorschlag
-            # ebenso — und ein geplantes Parken (`wait_until`) auch. Ohne das
-            # galten sie als "nichts geliefert" — genau der Fall, in dem der
-            # Chat "Keine Antwort erhalten" anzeigte.
-            had_output=(
-                bool(chunks) or gestellte_frage is not None or geparkt
-                or wecker is not None
-            ),
-            token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
-            reasoning="".join(thoughts),
-            abschnitte=ai_run_broker.abschnitte(run_id),
-            question=gestellte_frage,
-        )
+        # Im Thread: der Abschluss verschluesselt Antwort, Denktext und
+        # Gliederung beim Sidecar und bucht den Verbrauch. Auf der
+        # Ereignisschleife hielt das bei jedem Laufende alle anderen Stroeme
+        # und den Ton laufender Sprachsitzungen an (bis 27.09.2026). Die
+        # Abschnitte liest der Vermittler vorher hier, er gehoert der Schleife.
+        #
+        # `abgerechnet` steht schon vor dem Warten: trifft ein Abbruch das
+        # Warten, bucht der Faden trotzdem zu Ende, und der Abbruchzweig darf
+        # nicht ein zweites Mal buchen. Scheitert die Buchung, gilt sie wie
+        # bisher als nicht geschehen.
         abgerechnet = True
+        try:
+            await asyncio.to_thread(
+                ai_stream._finalize_stream,
+                message_id=message_id,
+                usage_event_id=vorbereitung.usage_event_id,
+                content=complete_content,
+                usage=usage,
+                estimated_actual_tokens=estimated_actual,
+                failed=False,
+                # Eine Rueckfrage ist eine vollwertige Antwort, und ein Vorschlag
+                # ebenso — und ein geplantes Parken (`wait_until`) auch. Ohne das
+                # galten sie als "nichts geliefert" — genau der Fall, in dem der
+                # Chat "Keine Antwort erhalten" anzeigte.
+                had_output=(
+                    bool(chunks) or gestellte_frage is not None or geparkt
+                    or wecker is not None
+                ),
+                token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
+                reasoning="".join(thoughts),
+                abschnitte=ai_run_broker.abschnitte(run_id),
+                question=gestellte_frage,
+            )
+        except Exception:
+            abgerechnet = False
+            raise
         ai_run_broker.veroeffentlichen(run_id, "done", {"message_id": message_id})
 
         if geparkt:

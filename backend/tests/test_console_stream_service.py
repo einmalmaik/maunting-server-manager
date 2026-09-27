@@ -238,3 +238,78 @@ async def test_stream_service_broadcasts_to_all_clients():
     task1.cancel()
     task2.cancel()
 
+
+
+@pytest.mark.asyncio
+async def test_rueckblick_liest_nur_das_ende_der_logdatei(tmp_path, monkeypatch):
+    """Die Logdatei wird nie rotiert. Der Rueckblick liest nur ihr Ende und
+    bricht dabei keine Zeile an der Grenze durch."""
+    import services.console_stream_service as konsole
+
+    monkeypatch.setattr(konsole, "BACKLOG_BYTES", 4096)
+    log = tmp_path / "console.log"
+    log.write_text(
+        "".join(f"2026-09-27T10:00:00Z\tZeile {i:05d}\n" for i in range(5000)),
+        encoding="utf-8",
+    )
+    state = _ServerState()
+    await konsole._read_initial_backlog(str(log), state, server_id=7)
+
+    texte = [zeile.text for zeile in state.lines]
+    assert texte[-1] == "Zeile 04999"
+    assert all(t.startswith("Zeile ") and len(t) == len("Zeile 00000") for t in texte)
+    assert len(texte) < 5000
+    assert state.file_pos == log.stat().st_size
+
+
+@pytest.mark.asyncio
+async def test_wer_waehrend_des_rueckblicks_verbindet_bekommt_ihn_auch(tmp_path, monkeypatch):
+    """Der Rueckblick wird im Thread gelesen. Ein zweiter Client, der in dieser
+    Zeit verbindet, wartet auf dasselbe Ergebnis; sonst saehe er einen leeren
+    Verlauf, denn gelesen wird nur fuer den ersten."""
+    import threading
+
+    import services.console_stream_service as konsole
+
+    log = tmp_path / "console.log"
+    log.write_text("2026-09-27T10:00:00Z\tAlte Zeile\n", encoding="utf-8")
+    freigabe = threading.Event()
+    echt = konsole._backlog_zeilen
+
+    def langsam(pfad):
+        freigabe.wait(5)
+        return echt(pfad)
+
+    monkeypatch.setattr(konsole, "_backlog_zeilen", langsam)
+
+    class MockWebSocket:
+        def __init__(self):
+            self.client_state = WebSocketState.CONNECTED
+            self.sent_messages = []
+            self.disconnect_event = asyncio.Event()
+
+        async def accept(self):
+            pass
+
+        async def send_text(self, text):
+            self.sent_messages.append(text)
+
+        async def receive_text(self):
+            await self.disconnect_event.wait()
+            self.client_state = WebSocketState.DISCONNECTED
+            raise WebSocketDisconnect()
+
+    erster, zweiter = MockWebSocket(), MockWebSocket()
+    task1 = asyncio.create_task(connect(erster, 91, "c", str(log)))
+    await asyncio.sleep(0.05)
+    task2 = asyncio.create_task(connect(zweiter, 91, "c", str(log)))
+    await asyncio.sleep(0.05)
+    freigabe.set()
+    await asyncio.sleep(0.2)
+
+    for ws in (erster, zweiter):
+        texte = [json.loads(m).get("text") for m in ws.sent_messages]
+        assert "Alte Zeile" in texte
+        ws.disconnect_event.set()
+    await asyncio.gather(task1, task2)
+
