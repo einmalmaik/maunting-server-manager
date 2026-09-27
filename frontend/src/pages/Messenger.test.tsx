@@ -857,15 +857,17 @@ describe('Messenger (Allround Chat)', () => {
     expect(screen.getByText('alice')).toBeInTheDocument()
   })
 
-  it('bietet eine Schnellkamera-Schaltfläche in der Kopfzeile an', () => {
+  it('hält die Kopfzeile der Übersicht frei von Kamera und Anrufbeitritt', () => {
+    // Ohne offenen Chat gibt es nichts zu fotografieren und keinen Anruf zum
+    // Beitreten — „Beitreten" lief ohne offene Gruppe ins Leere.
     render(
       <MemoryRouter>
         <Messenger />
       </MemoryRouter>
     )
 
-    const cameraBtn = screen.getByRole('button', { name: 'Foto aufnehmen' })
-    expect(cameraBtn).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Foto aufnehmen' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Laufendem Gruppenanruf beitreten' })).not.toBeInTheDocument()
   })
 
   it('erlaubt dem Gruppen-Eigentümer das Löschen der Gruppe', async () => {
