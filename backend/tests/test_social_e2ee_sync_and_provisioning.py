@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
 
 from main import app
-from dependencies import get_current_user, verify_csrf
+from dependencies import get_current_user, session_familie, verify_csrf
 from fastapi import HTTPException
 
 from models import (
@@ -320,6 +320,7 @@ def test_geraet_veroeffentlicht_und_frischt_auf(client: TestClient, db: Session,
     """Dasselbe Gerät meldet sich bei jedem Start — und bleibt eine Zeile."""
     app.dependency_overrides[get_current_user] = lambda: owner_user
     app.dependency_overrides[verify_csrf] = lambda: None
+    app.dependency_overrides[session_familie] = lambda: "fam-arbeitsrechner"
     try:
         erst = client.put("/api/social/e2ee/devices/self", json={
             "device_id": "a1b2c3d4e5f60718",
@@ -329,9 +330,9 @@ def test_geraet_veroeffentlicht_und_frischt_auf(client: TestClient, db: Session,
         assert erst.status_code == 200, erst.text
         assert erst.json()["device_id"] == "a1b2c3d4e5f60718"
 
-        # Neuer Schlüssel unter derselben Kennung: das Gerät hat seine lokale
-        # Ablage verloren. Es muss sich neu melden können, sonst käme es nie
-        # wieder in ein Gespräch hinein.
+        # Neuer Schlüssel unter derselben Kennung aus derselben Sitzung: das
+        # Gerät darf ihn ablegen. Eine fremde oder unbekannte Sitzung darf es
+        # nicht (`test_geraet_ohne_familie_nimmt_keinen_fremden_schluessel`).
         zweit = client.put("/api/social/e2ee/devices/self", json={
             "device_id": "a1b2c3d4e5f60718",
             "public_key": _valid_rsa_jwk("B"),
@@ -345,6 +346,7 @@ def test_geraet_veroeffentlicht_und_frischt_auf(client: TestClient, db: Session,
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         app.dependency_overrides.pop(verify_csrf, None)
+        app.dependency_overrides.pop(session_familie, None)
 
 
 def test_geraetekennung_mit_punkt_wird_abgewiesen(client: TestClient, owner_user: User):
@@ -412,7 +414,7 @@ def test_voller_geraetedeckel_weist_ab_statt_zu_verdraengen(db: Session, owner_u
     # Ein Gerät, das schon drinsteht, meldet sich weiterhin ohne Murren — der
     # Deckel gilt für Neuzugänge, nicht für den Start jedes Morgens.
     e2ee_device_service.veroeffentlichen(
-        db, owner_user, device_id="geraet000000000000", public_key_jwk=_valid_rsa_jwk("B")
+        db, owner_user, device_id="geraet000000000000", public_key_jwk=_valid_rsa_jwk("A")
     )
 
 
@@ -565,7 +567,8 @@ def test_gleichzeitige_veroeffentlichung_desselben_geraets(db: Session, owner_us
 
     # Der Gewinner des Wettlaufs hat schon geschrieben.
     e2ee_device_service.veroeffentlichen(
-        db, owner_user, device_id=kennung, public_key_jwk=_valid_rsa_jwk("A"), label="Gewinner"
+        db, owner_user, device_id=kennung, public_key_jwk=_valid_rsa_jwk("A"), label="Gewinner",
+        familie="fam-gleichzeitig",
     )
 
     class BlinderErstblick:
@@ -589,7 +592,8 @@ def test_gleichzeitige_veroeffentlichung_desselben_geraets(db: Session, owner_us
     db.query = query
     try:
         ergebnis = e2ee_device_service.veroeffentlichen(
-            db, owner_user, device_id=kennung, public_key_jwk=schluessel, label="Verlierer"
+            db, owner_user, device_id=kennung, public_key_jwk=schluessel, label="Verlierer",
+            familie="fam-gleichzeitig",
         )
     finally:
         db.query = echte_query

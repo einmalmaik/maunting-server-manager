@@ -168,19 +168,29 @@ def _auffrischen(
     ablegen. Gaelte die alte Freigabe weiter, schriebe ihm jedes Gegenueber.
     Dazu zaehlt auch ein nachgereichter Signaturschluessel: die Freigabe
     unterschreibt beide Schluessel, und ein neuer ist durch sie nicht gedeckt.
-    Ohne ein anderes freigegebenes Geraet bleibt die Freigabe — sonst kaeme
-    das einzige Geraet eines Kontos nie wieder hinein; die Gegenueber sehen
-    den Wechsel dann als Warnung.
+    Einen neuen Schluessel legt nur die Sitzung ab, an die das Geraet
+    gebunden ist. Ohne ein anderes freigegebenes Geraet bleibt die Freigabe —
+    sonst kaeme das einzige Geraet eines Kontos nie wieder hinein; die
+    Gegenueber sehen den Wechsel dann als Warnung.
     """
     neuer_schluessel = bestand.public_key_jwk != public_key_jwk or (
         bool(signatur) and (bestand.signing_public_key_jwk or "") != signatur
     )
-    if neuer_schluessel and bestand.auth_family and familie and bestand.auth_family != familie:
+    if neuer_schluessel and (not bestand.auth_family or bestand.auth_family != familie):
         # Ein neuer Schluessel aus einer fremden Sitzung. Das echte Geraet
         # behaelt Kennung und Schluessel in derselben Ablage — verliert es sie,
         # zieht es eine neue Kennung. Unter einer bekannten Kennung einen
         # anderen Schluessel ablegen will nur, wer das Geraet kapern oder
         # stilllegen moechte.
+        #
+        # Unbekannte Familie heisst fremd, nicht egal. Bis 29.09.2026 liess
+        # eine Zeile ohne `auth_family` (Bestand vor `20260924_01`, oder
+        # angelegt mit einem Token ohne Familie) jeden Wechsel durch; war sie
+        # das einzige freigegebene Geraet, blieb die Freigabe stehen. Ein
+        # abgegriffenes Access-Token genuegte, um dort eigene Schluessel
+        # abzulegen und das echte Geraet an die eigene Familie zu binden.
+        # Mit unveraenderten Schluesseln uebernimmt das echte Geraet seine
+        # Familie weiter unten wie bisher.
         raise FremdeSitzungError()
     if neuer_schluessel:
         bestand.approved_by = None

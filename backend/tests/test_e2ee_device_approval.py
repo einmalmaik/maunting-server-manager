@@ -166,6 +166,50 @@ def test_fremde_sitzung_ueberschreibt_kein_geraet(db: Session, clean_db):
     e2ee_device_service.veroeffentlichen(db, user, "telefon-0001", RSA_A, "Telefon", tel_ecdsa, familie="fam-neu")
 
 
+def test_geraet_ohne_familie_nimmt_keinen_fremden_schluessel(db: Session, clean_db):
+    """Unbekannte Familie heisst fremd: kein Schluesselwechsel, keine geerbte Freigabe.
+
+    Altbestand vor `20260924_01` und Zeilen aus Tokens ohne Familie haben keine
+    `auth_family`. Ist so ein Geraet das einzige freigegebene, behielt ein
+    fremder Schluessel darunter bis 29.09.2026 die Freigabe.
+    """
+    user = _konto(db, "freigabe5b")
+    _, tel_ecdsa = _ecdsa_paar()
+    _, dieb_ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "altgeraet-01", RSA_A, "Telefon", tel_ecdsa)
+    alt = e2ee_device_service._geraet(db, user.id, "altgeraet-01")
+    assert alt.is_approved is True and alt.auth_family is None
+
+    versuche = (
+        (RSA_X, tel_ecdsa, "fam-dieb"),  # neuer RSA-Schluessel
+        (RSA_A, dieb_ecdsa, "fam-dieb"),  # neuer Signaturschluessel
+        (RSA_X, tel_ecdsa, None),  # Token ohne Familie
+    )
+    for rsa, ecdsa, familie in versuche:
+        try:
+            e2ee_device_service.veroeffentlichen(db, user, "altgeraet-01", rsa, "Dieb", ecdsa, familie=familie)
+        except e2ee_device_service.FremdeSitzungError:
+            pass
+        else:
+            raise AssertionError(f"Wechsel ohne bekannte Familie durchgelassen: {familie}")
+        db.expire_all()
+        alt = e2ee_device_service._geraet(db, user.id, "altgeraet-01")
+        assert alt.public_key_jwk == RSA_A and alt.signing_public_key_jwk == tel_ecdsa
+        assert alt.auth_family is None and alt.is_approved is True
+
+    # Das echte Geraet meldet sich mit seinen Schluesseln und bindet seine Familie.
+    echt = e2ee_device_service.veroeffentlichen(db, user, "altgeraet-01", RSA_A, "Telefon", tel_ecdsa, familie="fam-echt")
+    assert echt.auth_family == "fam-echt" and echt.is_approved is True
+
+    # Gebundene Familie, Anfrage ohne Familie: ebenfalls kein Wechsel.
+    try:
+        e2ee_device_service.veroeffentlichen(db, user, "altgeraet-01", RSA_X, "Dieb", tel_ecdsa, familie=None)
+    except e2ee_device_service.FremdeSitzungError:
+        pass
+    else:
+        raise AssertionError("Wechsel aus einem Token ohne Familie durchgelassen")
+
+
 def test_freigegebenes_geraet_entfernt_nur_ein_freigegebenes(db: Session, clean_db):
     user = _konto(db, "freigabe6")
     tel_priv, _, lap_priv, _ = _zwei_geraete(db, user)
