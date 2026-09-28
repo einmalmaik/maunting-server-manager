@@ -31,6 +31,19 @@ jobs:
   build-linux-artifacts:
     name: Build Linux deployment units
     runs-on: ubuntu-latest
+    # Die Backend-Suite laeuft nur auf PostgreSQL (wie in ci.yml).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,6 +72,8 @@ jobs:
 
       - name: Test backend
         working-directory: backend
+        env:
+          MSM_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:5432/postgres
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -333,7 +348,12 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --verify-tag --title "MSM $TAG" \
-              --notes "Einheitlicher Release: Panel, Frontend, Node-Agent sowie Maunting Smart System Desktop- (Windows) und Mobile-Installer (Android APK)."
+            notes="docs/patchnotes/${TAG}-release-notes.md"
+            if [ -f "$notes" ]; then
+              gh release create "$TAG" --verify-tag --title "MSM $TAG" --notes-file "$notes"
+            else
+              gh release create "$TAG" --verify-tag --title "MSM $TAG" \
+                --notes "Einheitlicher Release: Panel, Frontend, Node-Agent sowie Maunting Smart System Desktop- (Windows) und Mobile-Installer (Android APK)."
+            fi
           fi
           gh release upload "$TAG" final-release/* --clobber
