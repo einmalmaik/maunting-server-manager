@@ -4414,7 +4414,8 @@
       "rule5": "Hat ein User 2FA aktiv, wird der OAuth-Login in einer 5-Minuten-Challenge pausiert. Der User muss den 2FA-Code explizit bestätigen.",
       "rule6": "E-Mail-Verifikation wird standardmäßig erzwungen: User mit nicht-verifizierter IdP-E-Mail werden abgelehnt (Schalter im UI).",
       "rule7": "Auto-Registrierung ist standardmäßig AUS: nur bekannte User können sich einloggen. Im UI global aktivierbar.",
-      "rule8": "Account-Linking ist standardmäßig AUS: User können OAuth-Provider nicht eigenmächtig mit ihrem Passwort-Account verknüpfen. Admins können es global erlauben."
+      "rule8": "Account-Linking ist standardmäßig AUS: User können OAuth-Provider nicht eigenmächtig mit ihrem Passwort-Account verknüpfen. Admins können es global erlauben.",
+      "rule9": "Den Benutzernamen wählt jede Person selbst: beim ersten Login über einen Anbieter erscheint dafür eine eigene Seite, und im Profil lässt er sich jederzeit ändern. Der Name beim Anbieter ist nur ein Vorschlag, eine E-Mail-Adresse wird nie zum Benutzernamen."
     },
     "troubleshooting": {
       "err1Title": "Redirect-URI stimmt nicht",
@@ -4524,7 +4525,7 @@
         "heading": "2. Accounts, Anmeldung und Berechtigungen",
         "body": "Das Panel verarbeitet die Account- und Sicherheitsdaten, die zur Anmeldung, Durchsetzung von Berechtigungen und Untersuchung sicherheitsrelevanter Aktivitäten erforderlich sind.",
         "items": {
-          "identity": "Benutzername und E-Mail-Adresse zur Account-Zuordnung und Anmeldung",
+          "identity": "Benutzername (selbst gewählt, im Profil änderbar) und E-Mail-Adresse zur Account-Zuordnung und Anmeldung. Die E-Mail-Adresse liegt verschlüsselt in der Datenbank, das Passwort nur als Argon2id-Prüfwert.",
           "security": "Passwort-Prüfdaten, Sitzungen, optionale Zwei-Faktor-Daten und Wiederherstellungsstatus",
           "rbac": "Rollen, globale Berechtigungen, serverspezifische Berechtigungen und Eigentümerstatus",
           "audit": "Sicherheits- und Audit-Ereignisse wie Anmeldungen, Berechtigungsänderungen und administrative Aktionen"
@@ -7797,5 +7798,17 @@
       "query": "Abfrage (SELECT …)",
       "refresh": "Aktualisieren"
     }
+  },
+  "benutzername": {
+    "titel": "Wähle deinen Benutzernamen",
+    "hinweis": "Mit diesem Namen meldest du dich an, und unter ihm finden dich andere im Panel und im Messenger. Du kannst ihn später im Profil ändern.",
+    "label": "Benutzername",
+    "regel": "3–32 Zeichen: Buchstaben, Ziffern, Unterstrich, Punkt oder Bindestrich",
+    "weiter": "Weiter",
+    "gespeichert": "Benutzername gespeichert.",
+    "fehlerForm": "3–32 Zeichen: Buchstaben, Ziffern, Unterstrich, Punkt oder Bindestrich. Punkt und Bindestrich nicht am Anfang oder Ende.",
+    "fehlerReserviert": "„{{name}}“ ist reserviert.",
+    "profilTitel": "Benutzername",
+    "profilHinweis": "Damit meldest du dich an, und so sehen dich andere. Ältere Erwähnungen behalten den alten Namen."
   }
 }

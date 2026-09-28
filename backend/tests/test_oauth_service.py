@@ -194,7 +194,8 @@ class TestNormalizeProfile:
         assert profile.subject == "12345"
         assert profile.email == "a@b.com"
         assert profile.email_verified is True
-        assert profile.username == "a@b.com"  # Google fallback
+        # Google hat keinen Benutzernamen; die E-Mail ist keiner.
+        assert profile.username is None
 
     def test_github_always_verified(self):
         preset = get_preset("github")

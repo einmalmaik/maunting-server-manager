@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Re
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from limits import parse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -26,10 +27,11 @@ from dependencies import (
     session_familie,
 )
 from models import User, EmailVerification
+from models.team import Team
 from services.dis_client import DisClient
 from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, DataExportRequest, NativeRefreshRequest, LogoutRequest
 from schemas import ResendVerificationRequest
-from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, LocationSharingUpdateRequest, AgentNameUpdateRequest, AiProviderChoiceRequest
+from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, LocationSharingUpdateRequest, AgentNameUpdateRequest, AiProviderChoiceRequest, UsernameUpdateRequest
 from schemas.device_pairing import (
     PairedDevice,
     PairingCreated,
@@ -300,7 +302,7 @@ def setup_status(db: Session = Depends(get_db)) -> dict:
 async def setup_owner(req: OwnerSetupRequest, db: Session = Depends(get_db)) -> dict:
     if AuthService.is_owner_exists(db):
         raise HTTPException(status_code=400, detail="Setup bereits abgeschlossen")
-    if AuthService.get_user_by_username(db, req.username):
+    if AuthService.benutzername_belegt(db, req.username):
         raise HTTPException(status_code=400, detail="Username bereits vergeben")
     if AuthService.get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")
@@ -403,7 +405,7 @@ async def register(
     db: Session = Depends(get_db)
 ) -> dict:
     await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
-    if AuthService.get_user_by_username(db, req.username):
+    if AuthService.benutzername_belegt(db, req.username):
         raise HTTPException(status_code=400, detail="Username bereits vergeben")
     if AuthService.get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")
@@ -521,6 +523,9 @@ async def login(
         AuthService.verify_password, req.password, user.password_hash
     ):
         raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten")
+    # Umhuellte und passlib-Hashes werden hier zu frischen DIS-Hashes. Bis
+    # 09/2026 geschah das nur in /login-verify, also fast nie.
+    await run_in_threadpool(AuthService.rehash_password_if_needed, db, user, req.password)
 
     if not user.is_active:
         raise HTTPException(status_code=401, detail="Account deaktiviert")
@@ -992,6 +997,49 @@ def update_agent_name(
     user.agent_name = req.agent_name
     db.commit()
     return {"agent_name": user.agent_name}
+
+
+@router.patch("/me/username", response_model=UserResponse, dependencies=[Depends(auth_rate_limit)])
+def update_username(
+    req: UsernameUpdateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> User:
+    """Waehlt oder aendert den eigenen Benutzernamen.
+
+    Ohne Passwortabfrage (Entscheidung des Betreibers, 28.09.2026), aber im
+    Audit-Log. Die Sitzung bleibt: Tokens finden das Konto ueber `user_id`
+    (dependencies.py). Wo der alte Name nur abgeschrieben steht (Audit,
+    Passkey-Anzeige, alte @Erwaehnungen), bleibt er stehen.
+    """
+    alt = user.username
+    if req.username != alt and AuthService.benutzername_belegt(db, req.username, ausser_id=user.id):
+        raise HTTPException(status_code=409, detail="Benutzername bereits vergeben")
+    user.username = req.username
+    user.username_gewaehlt = True
+    # Das persoenliche Team heisst nach seinem Besitzer, solange es niemand
+    # umbenannt hat.
+    team = db.query(Team).filter(Team.personal_for_user_id == user.id).first()
+    if team is not None and team.name == alt:
+        team.name = req.username
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Benutzername bereits vergeben")
+    if alt != req.username:
+        audit_service.record_privileged_action(
+            db,
+            user_id=user.id,
+            action="auth.username.change",
+            target_type="user",
+            target_id=user.id,
+            details={"alt": alt, "neu": req.username},
+        )
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 @router.patch("/me/ai-provider")

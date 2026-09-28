@@ -222,7 +222,7 @@ async def create_user_admin(
     # Accounts mit dem gewuenschten Username.
     if req.is_owner and not actor.is_owner:
         raise HTTPException(status_code=403, detail="Nur Owner kann is_owner setzen")
-    if AuthService.get_user_by_username(db, req.username):
+    if AuthService.benutzername_belegt(db, req.username):
         raise HTTPException(status_code=400, detail="Username bereits vergeben")
     if AuthService.get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")

@@ -153,6 +153,13 @@ class DisBatchError extends Error {
   }
 }
 
+class DisLegacyHashError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'DisLegacyHashError';
+  }
+}
+
 // ── Password hashing params (DIS KDF v2) ─────────────────────────────────
 const PW_SALT_LEN = 16;
 const PW_PARAMS = {
@@ -161,6 +168,39 @@ const PW_PARAMS = {
   parallelism: 4,
   hashLength: 32,
 };
+
+// ── Umhuellte passlib-Hashes ─────────────────────────────────────────────
+// Konten von vor DIS tragen `$argon2id$v=19$m=…,t=…,p=…$salz$digest`. Neu
+// hashen geht ohne Klartext nicht, also wird der alte Digest selbst mit DIS
+// gehasht: `msm-pw-v1:<salz>:<hash>:alt.<m>.<t>.<p>.<laenge>.<altes salz>`.
+// Beim Pruefen entsteht der alte Digest aus Passwort und alten Parametern neu.
+// argon2idRaw nimmt nur Strings, darum geht der Digest als Base64 hinein.
+const LEGACY_ARGON2 = /^\$argon2id\$v=19\$m=(\d+),t=(\d+),p=(\d+)\$([A-Za-z0-9+/]+)\$([A-Za-z0-9+/]+)$/;
+const ALT_PARAMS = /^alt\.(\d+)\.(\d+)\.(\d+)\.(\d+)\.([A-Za-z0-9+/]+)$/;
+
+function b64Bytes(text) {
+  return new Uint8Array(Buffer.from(text, 'base64'));
+}
+
+function b64Ohne(bytes) {
+  return Buffer.from(bytes).toString('base64').replace(/=+$/, '');
+}
+
+async function altenDigestRechnen(password, altParams) {
+  const m = ALT_PARAMS.exec(altParams);
+  if (!m) return null;
+  const digest = await argon2idRaw({
+    password,
+    salt: b64Bytes(m[5]),
+    memorySize: Number(m[1]),
+    iterations: Number(m[2]),
+    parallelism: Number(m[3]),
+    hashLength: Number(m[4]),
+  });
+  const text = b64Ohne(digest);
+  digest.fill(0);
+  return text;
+}
 
 // ── Backup streaming encryption ──────────────────────────────────────────
 // In-memory store of backup encryption keys (key_id -> CryptoKey).
@@ -404,6 +444,28 @@ const server = http.createServer(async (req, res) => {
         break;
       }
 
+      case '/wrap-legacy-password': {
+        const m = LEGACY_ARGON2.exec(String(data.hash));
+        if (!m) {
+          throw new DisLegacyHashError('kein passlib-Argon2id-Hash (v=19)');
+        }
+        const [, mem, iter, par, altSalz, altDigest] = m;
+        const digestBytes = b64Bytes(altDigest);
+        const altParams = `alt.${mem}.${iter}.${par}.${digestBytes.length}.${b64Ohne(b64Bytes(altSalz))}`;
+        const salt = randomBytes(PW_SALT_LEN);
+        const hash = await argon2idRaw({
+          password: b64Ohne(digestBytes),
+          salt,
+          ...PW_PARAMS,
+        });
+        digestBytes.fill(0);
+        result = {
+          hash: `msm-pw-v1:${Buffer.from(salt).toString('base64')}:${Buffer.from(hash).toString('base64')}:${altParams}`,
+        };
+        hash.fill(0);
+        break;
+      }
+
       case '/verify-password': {
         const parts = String(data.hash).split(':');
         if (parts.length !== 4 || parts[0] !== 'msm-pw-v1') {
@@ -411,10 +473,18 @@ const server = http.createServer(async (req, res) => {
           result = { valid: false, legacy: true };
           break;
         }
+        let password = data.password;
+        if (parts[3] !== 'v2') {
+          password = await altenDigestRechnen(password, parts[3]);
+          if (password === null) {
+            result = { valid: false };
+            break;
+          }
+        }
         const salt = new Uint8Array(Buffer.from(parts[1], 'base64'));
         const storedHash = new Uint8Array(Buffer.from(parts[2], 'base64'));
         const computed = await argon2idRaw({
-          password: data.password,
+          password,
           salt,
           ...PW_PARAMS,
         });

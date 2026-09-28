@@ -48,7 +48,8 @@ PRESETS: dict[str, OAuthPreset] = {
             "id": "sub",
             "email": "email",
             "email_verified": "email_verified",
-            "username": "email",  # Fallback: E-Mail als Username-Basis
+            # Kein "username": Google hat keinen. Bis 09/2026 stand hier
+            # "email", und aus name@gmail.com wurde der Name namegmailcom.
             "name": "name",
             "avatar": "picture",
         },

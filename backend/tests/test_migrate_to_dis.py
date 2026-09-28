@@ -137,7 +137,7 @@ def test_migrate_all_secrets(monkeypatch):
         assert plaintext_2fa == "secrettotp"
         
         # E-Mail must be DIS-encrypted and email_plain must contain the hash
-        assert user_migrated.email_encrypted.startswith("test-enc-v1:")
+        assert user_migrated.email_encrypted.startswith("msm-email-v1:")
         assert user_migrated.email_hash == User._email_hash("user@example.com")
         assert user_migrated.email_plain == user_migrated.email_hash
         assert user_migrated.email == "user@example.com"
@@ -311,7 +311,7 @@ def test_user_email_property_post_migration():
     # Setzen über den Setter (verschlüsselt und hasht automatisch)
     user.email = "post@example.com"
     
-    assert user.email_encrypted.startswith("test-enc-v1:")
+    assert user.email_encrypted.startswith("msm-email-v1:")
     assert user.email_plain == User._email_hash("post@example.com")
     assert user.email == "post@example.com"
 

@@ -4414,7 +4414,8 @@
       "rule5": "If a user has 2FA enabled, the OAuth login is paused with a 5-minute challenge. The user must explicitly confirm the 2FA code.",
       "rule6": "Email verification is enforced by default: users with an unverified IdP email are rejected (toggle in the UI).",
       "rule7": "Auto-registration is OFF by default: only known users can sign in. Can be enabled globally in the UI.",
-      "rule8": "Account linking is OFF by default: users cannot link OAuth providers to their password account on their own. Admins can enable it globally."
+      "rule8": "Account linking is OFF by default: users cannot link OAuth providers to their password account on their own. Admins can enable it globally.",
+      "rule9": "Everyone chooses their own username: on the first sign-in through a provider a separate page asks for it, and it can be changed in the profile at any time. The provider's name is only a suggestion; an email address never becomes the username."
     },
     "troubleshooting": {
       "err1Title": "Redirect URI does not match",
@@ -4524,7 +4525,7 @@
         "heading": "2. accounts, authentication, and authorization",
         "body": "The panel processes the account and security data needed to authenticate users, enforce permissions, and investigate security-relevant activity.",
         "items": {
-          "identity": "Username and email address for account identification and sign-in",
+          "identity": "Username (chosen by the person, changeable in the profile) and email address for account identification and sign-in. The email address is stored encrypted in the database, the password only as an Argon2id check value.",
           "security": "Password verification data, sessions, optional two-factor authentication data, and recovery state",
           "rbac": "Roles, global permissions, server-specific permissions, and ownership status",
           "audit": "Security and audit events such as sign-ins, permission changes, and administrative actions"
@@ -7797,5 +7798,17 @@
       "query": "Query (SELECT …)",
       "refresh": "Refresh"
     }
+  },
+  "benutzername": {
+    "titel": "Choose your username",
+    "hinweis": "You sign in with this name, and others find you by it in the panel and the messenger. You can change it later in your profile.",
+    "label": "Username",
+    "regel": "3–32 characters: letters, digits, underscore, dot or hyphen",
+    "weiter": "Continue",
+    "gespeichert": "Username saved.",
+    "fehlerForm": "3–32 characters: letters, digits, underscore, dot or hyphen. No dot or hyphen at the start or end.",
+    "fehlerReserviert": "“{{name}}” is reserved.",
+    "profilTitel": "Username",
+    "profilHinweis": "You sign in with it, and this is how others see you. Older mentions keep the old name."
   }
 }

@@ -1,6 +1,11 @@
 export interface User {
   id: number
   username: string
+  /**
+   * False, solange ein Konto aus Social Login oder Hoster-Shop seinen
+   * vorläufigen Namen trägt. Dann steht statt des Panels die Namenswahl.
+   */
+  username_gewaehlt?: boolean
   email: string
   is_owner: boolean
   is_active: boolean

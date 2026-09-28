@@ -139,9 +139,22 @@ def _mock_decrypt(ciphertext: str, aad: str | None = None) -> str:
     raise DisDecryptionError("DIS Decryption failed")
 
 def _mock_hash_password(password: str) -> str:
-    return "msm-pw-v1:test:" + _hl.sha256(password.encode()).hexdigest()
+    return "msm-pw-v1:test:" + _hl.sha256(password.encode()).hexdigest() + ":v2"
+
+def _mock_wrap_legacy_password(passlib_hash: str) -> str:
+    # Wie der Sidecar: nur passlib-Argon2id, sonst DisKeinAltHash.
+    from services.dis_client import DisKeinAltHash
+
+    if not passlib_hash.startswith("$argon2id$v=19$"):
+        raise DisKeinAltHash("Kein passlib-Argon2id-Hash")
+    return "msm-pw-v1:test-alt:" + passlib_hash.replace(":", "") + ":alt.test"
 
 def _mock_verify_password(password: str, stored_hash: str) -> bool:
+    if stored_hash.startswith("msm-pw-v1:test-alt:"):
+        from passlib.context import CryptContext
+
+        alt = stored_hash[len("msm-pw-v1:test-alt:"):-len(":alt.test")]
+        return CryptContext(schemes=["argon2"]).verify(password, alt)
     return stored_hash == _mock_hash_password(password)
 
 def _mock_totp_verify(secret: str, code: str, window: int = 1) -> bool:
@@ -175,6 +188,7 @@ DisClient.blind_index = staticmethod(
 )
 DisClient.hash_password = staticmethod(_mock_hash_password)
 DisClient.verify_password = staticmethod(_mock_verify_password)
+DisClient.wrap_legacy_password = staticmethod(_mock_wrap_legacy_password)
 DisClient.is_dis_hash = staticmethod(lambda h: h.startswith("msm-pw-v1:"))
 DisClient.generate_totp_secret = staticmethod(lambda: _b64.b32encode(_sec.token_bytes(20)).decode().rstrip("="))
 DisClient.verify_totp = staticmethod(_mock_totp_verify)

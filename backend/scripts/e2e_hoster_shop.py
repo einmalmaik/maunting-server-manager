@@ -100,7 +100,7 @@ def _dec(ciphertext: str, aad: str | None = None) -> str:
 
 
 def _hash(passwort: str) -> str:
-    return "msm-pw-v1:test:" + _hl.sha256(passwort.encode()).hexdigest()
+    return "msm-pw-v1:test:" + _hl.sha256(passwort.encode()).hexdigest() + ":v2"
 
 
 DisClient.encrypt = staticmethod(_enc)

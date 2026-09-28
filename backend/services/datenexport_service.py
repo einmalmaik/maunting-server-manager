@@ -239,12 +239,16 @@ def _aad_je_spalte(tabelle: Table, mit_geheimnissen: bool) -> dict[str, Callable
 
 def _entschluesseln(zeilen: list[dict], aad: dict[str, Callable[[dict], str]]) -> int:
     """Ersetzt Chiffrat durch Klartext, gebuendelt. Gibt die Zahl unlesbarer Werte zurueck."""
+    from models.user import EMAIL_PRAEFIX, email_chiffrat_fuer_dis
     from services.dis_client import DisClient
 
     offen: list[tuple[dict, str, tuple[str, str]]] = []
     for zeile in zeilen:
         for spalte, aad_von in aad.items():
             wert = zeile.get(spalte)
+            # `users.email_encrypted` traegt ein eigenes Praefix vor dem DIS-Chiffrat.
+            if isinstance(wert, str) and wert.startswith(EMAIL_PRAEFIX):
+                wert = email_chiffrat_fuer_dis(wert)
             if isinstance(wert, str) and DisClient.ist_verschluesselt(wert):
                 offen.append((zeile, spalte, (wert, aad_von(zeile))))
     klartexte = gebuendelt_entschluesseln([paar for _, _, paar in offen])

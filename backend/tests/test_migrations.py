@@ -166,3 +166,71 @@ def test_dis_praefix_wird_nur_an_reines_chiffrat_gesetzt(pg_wegwerf):
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+def test_email_praefix_und_namenswahl_fuer_den_altbestand(pg_wegwerf):
+    """20260928_01/02: jede E-Mail traegt `msm-email-v1:`, und Konten aus dem
+    Social Login muessen ihren Namen einmal selbst waehlen.
+
+    Fernet-Werte (`gAAAAA`) bleiben stehen, damit `scripts/migrate_to_dis.py`
+    sie noch erkennt. Konten aus Registrierung oder Admin bleiben unberuehrt.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import Session
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+    from models import User
+    from models.audit_log import AuditLog
+
+    db_url = pg_wegwerf("email-praefix")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as db:
+            for name in ("dis", "nackt", "fernet", "sozial"):
+                db.add(User(username=name, password_hash="msm-pw-v1:x:y:v2"))
+            db.flush()
+            sozial = db.query(User).filter(User.username == "sozial").one()
+            db.add(AuditLog(user_id=sozial.id, action="oauth_user.registered"))
+            db.commit()
+        command.stamp(config, "head")
+        command.downgrade(config, "20260927_02")
+        with engine.begin() as conn:
+            for name, wert in (("dis", "msm-dis-v1:QUJD"), ("nackt", "REVG"), ("fernet", "gAAAAAalt")):
+                conn.execute(
+                    text("UPDATE users SET email_encrypted = :w WHERE username = :n"),
+                    {"w": wert, "n": name},
+                )
+
+        command.upgrade(config, "20260928_02")
+
+        with engine.connect() as conn:
+            zeilen = {
+                name: (email, gewaehlt)
+                for name, email, gewaehlt in conn.execute(
+                    text("SELECT username, email_encrypted, username_gewaehlt FROM users")
+                )
+            }
+        assert zeilen["dis"] == ("msm-email-v1:QUJD", True)
+        assert zeilen["nackt"] == ("msm-email-v1:REVG", True)
+        assert zeilen["fernet"] == ("gAAAAAalt", True)
+        assert zeilen["sozial"][1] is False
+
+        command.downgrade(config, "20260927_02")
+
+        with engine.connect() as conn:
+            emails = dict(conn.execute(text("SELECT username, email_encrypted FROM users")).all())
+        assert emails["dis"] == "msm-dis-v1:QUJD"
+        assert emails["nackt"] == "msm-dis-v1:REVG"
+        assert emails["fernet"] == "gAAAAAalt"
+    finally:
+        engine.dispose()
+        settings.database_url = vorher

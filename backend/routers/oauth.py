@@ -845,7 +845,10 @@ def _handle_login_callback(
         if EmailService.is_configured() and user.email_notifications:
             background_tasks.add_task(
                 EmailService.send_account_registered_notification,
-                user.email, user.username
+                # Der Benutzername ist hier noch vorlaeufig (`user_<hex8>`);
+                # gewaehlt wird er erst im Panel. Anrede also mit dem Namen
+                # beim Anbieter.
+                user.email, profile.name or user.username
             )
 
         result = oauth_service._post_resolve(user)  # type: ignore[attr-defined]

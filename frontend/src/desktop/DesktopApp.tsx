@@ -74,6 +74,7 @@ import { stillAnmeldenDetail } from './transport'
 import { useAuftragsschleife } from './useAuftragsschleife'
 
 import { Spinner } from '@/components/ui/Spinner'
+import { BenutzernameWaehlen } from '@/pages/BenutzernameWaehlen'
 type Phase = 'laedt' | 'einrichtung' | 'kopplung' | 'sandbox' | 'bereit'
 
 const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
@@ -129,6 +130,7 @@ export function DesktopApp() {
     }
   })
   const angemeldet = useAuthStore((s) => s.isAuthenticated)
+  const mussNamenWaehlen = useAuthStore((s) => s.user?.username_gewaehlt === false)
   const sitzungSteht = phase === 'bereit' || phase === 'sandbox'
   const offeneUebernahme = useAuftragsschleife(sitzungSteht && !isAndroid)
 
@@ -398,6 +400,9 @@ export function DesktopApp() {
         onFertig={fertig}
       />
     )
+  } else if (angemeldet && mussNamenWaehlen && !isOffline) {
+    // Wie im Panel (`ProtectedRoute`): erst der eigene Name, dann die App.
+    inhalt = <BenutzernameWaehlen />
   } else {
     inhalt = (
       <Routes>

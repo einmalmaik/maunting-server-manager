@@ -7,6 +7,7 @@ import secrets
 
 from jose import jwt, JWTError
 from passlib.context import CryptContext
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -40,11 +41,12 @@ class AuthService:
 
     @staticmethod
     def rehash_password_if_needed(db: Session, user: User, plain_password: str) -> None:
-        """Re-hasht ein Passwort mit DIS wenn der Hash noch im legacy Format ist.
+        """Re-hasht ein Passwort mit DIS, wenn der Hash kein frischer DIS-Hash ist.
 
-        Wird nach erfolgreichem Login aufgerufen (lazy Migration passlib -> DIS).
+        Wird nach erfolgreichem Login aufgerufen. Betrifft passlib-Hashes und
+        die beim Start umhuellten (services/passwort_altbestand.py).
         """
-        if not DisClient.is_dis_hash(user.password_hash):
+        if DisClient.braucht_neuen_hash(user.password_hash):
             user.password_hash = DisClient.hash_password(plain_password)
             db.commit()
 
@@ -257,6 +259,19 @@ class AuthService:
     @staticmethod
     def get_user_by_username(db: Session, username: str) -> User | None:
         return db.query(User).filter(User.username == username).first()
+
+    @staticmethod
+    def benutzername_belegt(db: Session, username: str, ausser_id: int | None = None) -> bool:
+        """Ob ``username`` schon vergeben ist, ohne Ruecksicht auf Gross/klein.
+
+        ``Max`` neben ``max`` saehe in Profil, Suche und Erwaehnung wie
+        dieselbe Person aus. ``ausser_id`` nimmt das eigene Konto aus, damit
+        man die Schreibweise des eigenen Namens aendern kann.
+        """
+        abfrage = db.query(User.id).filter(func.lower(User.username) == username.lower())
+        if ausser_id is not None:
+            abfrage = abfrage.filter(User.id != ausser_id)
+        return abfrage.first() is not None
 
     @staticmethod
     def get_user_by_email(db: Session, email: str) -> User | None:

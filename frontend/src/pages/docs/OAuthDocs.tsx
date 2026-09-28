@@ -142,6 +142,7 @@ export function OAuthDocs() {
               <li>{t('docsOAuth.security.rule6')}</li>
               <li>{t('docsOAuth.security.rule7')}</li>
               <li>{t('docsOAuth.security.rule8')}</li>
+              <li>{t('docsOAuth.security.rule9')}</li>
             </ul>
           </section>
 

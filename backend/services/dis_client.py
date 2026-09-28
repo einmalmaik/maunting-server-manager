@@ -26,6 +26,10 @@ class DisZuGross(DisSidecarError):
     """Der Sidecar nimmt hoechstens 8 MiB JSON je Anfrage (`MAX_JSON_BODY`)."""
 
 
+class DisKeinAltHash(DisSidecarError):
+    """``/wrap-legacy-password`` kennt die Form nicht (nur passlib-Argon2id, v=19)."""
+
+
 class DisDecryptionError(DisSidecarError):
     """Entschluesselung fehlgeschlagen (wrong key / tamper / AAD mismatch).
 
@@ -92,6 +96,8 @@ class DisClient:
                 endpoint == "/decrypt" and err in _UNBRAUCHBARER_CIPHERTEXT
             ):
                 raise DisDecryptionError("Entschluesselung fehlgeschlagen")
+            if err == "DisLegacyHashError":
+                raise DisKeinAltHash("Kein passlib-Argon2id-Hash")
             raise DisSidecarError(f"DIS Sidecar Fehler: {err or resp.status_code}")
         if resp.status_code == 413:
             raise DisZuGross("DIS Sidecar: Anfrage groesser als 8 MiB")
@@ -198,6 +204,25 @@ class DisClient:
     def is_dis_hash(stored_hash: str) -> bool:
         """Prueft ob ein Hash im DIS-Format (msm-pw-v1:) ist."""
         return stored_hash.startswith("msm-pw-v1:")
+
+    @staticmethod
+    def wrap_legacy_password(passlib_hash: str) -> str:
+        """Umhuellt einen passlib-Hash (``$argon2id$v=19$...``) mit DIS.
+
+        Das Ergebnis beginnt mit ``msm-pw-v1:`` und endet auf
+        ``:alt.<m>.<t>.<p>.<laenge>.<salz>``. Es prueft dasselbe Passwort wie
+        der alte Hash, ohne dass der Klartext bekannt sein muss.
+        """
+        return DisClient._post("/wrap-legacy-password", {"hash": passlib_hash})["hash"]
+
+    @staticmethod
+    def braucht_neuen_hash(stored_hash: str) -> bool:
+        """Ob der Hash beim naechsten Login neu erzeugt werden soll.
+
+        Wahr fuer passlib-Hashes und fuer umhuellte (``:alt....``): nur ein
+        frischer DIS-Hash endet auf ``:v2``.
+        """
+        return not (DisClient.is_dis_hash(stored_hash) and stored_hash.endswith(":v2"))
 
     # ── TOTP (2FA) ───────────────────────────────────────────────────────
 

@@ -29,6 +29,35 @@ SYSTEMBEREICHE = ("aus", "lesen", "schreiben")
 #: Betreiber selbst gehen, und zwar sichtbar in den Einstellungen.
 SYSTEMBEREICH_STANDARD = "lesen"
 
+#: Womit ``users.email_encrypted`` beginnt. Dahinter steht dasselbe DIS-Chiffrat
+#: wie hinter ``msm-dis-v1:`` (AES-256-GCM, AAD ``msm:user:email``); nur das
+#: Praefix sagt in der Tabelle, was es ist. Bis 09/2026 stand dort
+#: ``msm-dis-v1:`` oder gar nichts (Migration 20260928_01).
+EMAIL_PRAEFIX = "msm-email-v1:"
+
+
+def email_chiffrat_speichern(dis_chiffrat: str) -> str:
+    """Aus ``DisClient.encrypt`` die Form fuer ``email_encrypted``."""
+    from services.dis_client import DisClient
+
+    return EMAIL_PRAEFIX + dis_chiffrat.removeprefix(DisClient.PRAEFIX)
+
+
+def email_chiffrat_fuer_dis(gespeichert: str) -> str:
+    """Aus ``email_encrypted`` die Form, die ``DisClient.decrypt`` liest.
+
+    Altbestand mit ``msm-dis-v1:`` oder ohne Praefix geht unveraendert durch.
+    Eine spaetere Fassung (``msm-email-v2:``) ist nicht kaputt, sondern von
+    einem neueren Panel: sie meldet sich laut und nicht als falscher Schluessel.
+    """
+    from services.dis_client import DisClient, DisSidecarError
+
+    if gespeichert.startswith(EMAIL_PRAEFIX):
+        return DisClient.PRAEFIX + gespeichert[len(EMAIL_PRAEFIX):]
+    if gespeichert.startswith("msm-email-"):
+        raise DisSidecarError("E-Mail in unbekannter Fassung")
+    return gespeichert
+
 
 def systembereich_des_benutzers(user: "User") -> str:
     """Was dieses Konto der KI im Systembereich erlaubt — nie mehr als hinterlegt.
@@ -64,8 +93,15 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    # Hat der Mensch den Namen selbst gewaehlt? False bei Social Login und
+    # Hoster-Shop: dort vergibt das Panel einen vorlaeufigen Namen, und das
+    # Frontend fragt einmal nach dem richtigen (PATCH /api/auth/me/username).
+    username_gewaehlt: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=true(), nullable=False
+    )
 
-    # E-Mail: verschluesselt mit DIS (AES-256-GCM, AAD msm:user:email).
+    # E-Mail: verschluesselt mit DIS (AES-256-GCM, AAD msm:user:email),
+    # gespeichert als ``msm-email-v1:...`` (siehe EMAIL_PRAEFIX).
     # email_hash (SHA-256 mit Pepper) fuer SQL-Lookup (WHERE email_hash = ?).
     # email_plain ist die Legacy-Spalte (DB-Name "email"), nach Migration
     # nur noch Platzhalter (der Hash-Wert), keine Klartext-E-Mail mehr.
@@ -219,7 +255,7 @@ class User(Base):
     def email(self) -> str | None:
         if self.email_encrypted:
             from services.dis_client import DisClient
-            return DisClient.decrypt(self.email_encrypted, aad="msm:user:email")
+            return DisClient.decrypt(email_chiffrat_fuer_dis(self.email_encrypted), aad="msm:user:email")
         if self.email_plain:
             # Echte Pre-Migration Erkennung: falls email_plain ein SHA-256 Hash ist, handelt es sich
             # um eine bereits migrierte Zeile, bei der aber email_encrypted fehlt (Datenkorruption/Fehler).
@@ -233,7 +269,7 @@ class User(Base):
     def email(self, value: str | None) -> None:
         if value:
             from services.dis_client import DisClient
-            self.email_encrypted = DisClient.encrypt(value, aad="msm:user:email")
+            self.email_encrypted = email_chiffrat_speichern(DisClient.encrypt(value, aad="msm:user:email"))
             self.email_hash = self._email_hash(value)
             # Platzhalter in Legacy-Spalte (NOT NULL in alten Schemas).
             # Nach Migration steht hier der Hash, keine Klartext-E-Mail.

@@ -154,13 +154,17 @@ def klartextreste_entfernen(engine: Engine, tabellen: set[str]) -> bool:
 
 
 def beim_start(db: Session) -> None:
-    """Nachzug, Gedaechtnisnamen und, wo noetig, VACUUM FULL. Laeuft beim Start."""
+    """Nachzug, Gedaechtnisnamen, Passwort-Hashes und, wo noetig, VACUUM FULL. Laeuft beim Start."""
+    from services import passwort_altbestand
     from services.ai_memory_service import schluessel_nachziehen
     from services.panel_settings_service import PanelSettingsService
 
     betroffen = set(nachziehen(db))
     if schluessel_nachziehen(db):
         betroffen.add("ai_memory_entries")
+    # Die alten passlib-Hashes laegen sonst weiter in toten Zeilenversionen.
+    if passwort_altbestand.umhuellen(db):
+        betroffen.add("users")
     erstes_mal = PanelSettingsService.get(MARKE, "", db) != MARKE_WERT
     if erstes_mal:
         betroffen |= dis_tabellen()

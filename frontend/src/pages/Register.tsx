@@ -14,6 +14,7 @@ import { Button } from '@/Singra/UI'
 
 import { Spinner } from '@/components/ui/Spinner'
 import { sicheresZiel } from '@/lib/sicheresZiel'
+import { benutzernameFehler } from '@/lib/benutzername'
 export function Register() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -42,6 +43,11 @@ export function Register() {
     if (captchaSperrt(captchaStatus)) return
     setError('')
 
+    const namensfehler = benutzernameFehler(form.username)
+    if (namensfehler) {
+      setError(t(namensfehler.schluessel, namensfehler))
+      return
+    }
     if (form.password !== form.confirm) {
       setError(t('auth.passwordMismatch'))
       return
@@ -228,6 +234,7 @@ export function Register() {
                 placeholder="admin"
                 required
                 minLength={3}
+                maxLength={32}
               />
             </div>
 

@@ -18,7 +18,7 @@ def _user_from_token(token: str | None, db: Session) -> User:
     if not token:
         raise HTTPException(status_code=401, detail="Nicht authentifiziert")
     payload = AuthService.decode_token(token)
-    if not payload or "sub" not in payload or payload.get("type") != "access":
+    if not payload or not isinstance(payload.get("user_id"), int) or payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Ungültiges Token")
     # Ein Access-Token ohne `jti` ist ein Blindgaenger: der Logout kann es nicht
     # blacklisten, und die Pruefung unten findet nichts, was sie pruefen koennte.
@@ -34,7 +34,10 @@ def _user_from_token(token: str | None, db: Session) -> User:
         raise HTTPException(status_code=401, detail="Token widerrufen")
     if _familie_gesperrt(db, payload.get("familie")):
         raise HTTPException(status_code=401, detail="Token widerrufen")
-    user = AuthService.get_user_by_username(db, payload["sub"])
+    # Ueber die Kennung, nicht ueber `sub` (den Namen): seit 09/2026 laesst
+    # sich der Benutzername aendern. Ueber `sub` verloere jedes laufende
+    # Token sein Konto, und wer den alten Namen uebernimmt, erbte es.
+    user = db.get(User, payload["user_id"])
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User nicht gefunden oder inaktiv")
     return user

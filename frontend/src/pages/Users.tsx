@@ -15,6 +15,7 @@ import { PageHeader } from '@/Singra/UI/PageHeader'
 import { MultiSelect } from '@/Singra/UI/MultiSelect'
 import { Button, Avatar, Checkbox } from '@/Singra/UI'
 import { Spinner } from '@/components/ui/Spinner'
+import { benutzernameFehler } from '@/lib/benutzername'
 export function Users() {
   const { t } = useTranslation()
   const currentUser = useAuthStore((s) => s.user)
@@ -89,6 +90,11 @@ export function Users() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
+    const namensfehler = benutzernameFehler(createForm.username)
+    if (namensfehler) {
+      toast.error(t(namensfehler.schluessel, namensfehler))
+      return
+    }
     setCreating(true)
     try {
       await api('/admin/users', {
@@ -151,6 +157,7 @@ export function Users() {
                 className="msm-input"
                 required
                 minLength={3}
+                maxLength={32}
               />
             </div>
             <div>

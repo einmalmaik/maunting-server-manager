@@ -768,18 +768,31 @@ def _fetch_userinfo(url: str, access_token: str, timeout: float = 4.0) -> dict[s
 
 # ── User-Resolution, Registration, Linking ────────────────────────────
 
-def _generate_unique_username(db: Session, base: str) -> str:
-    """Erzeugt einen eindeutigen Username aus 'base' (Fallback 'user')."""
+def _generate_unique_username(db: Session, base: str | None) -> str:
+    """Ein freier, vorlaeufiger Benutzername aus ``base``.
+
+    Vorlaeufig, weil das Konto ``username_gewaehlt=False`` bekommt und der
+    Mensch beim ersten Oeffnen seinen Namen selbst waehlt. ``base`` mit ``@``
+    wird verworfen: bis 09/2026 wurde hier aus ``name@gmail.com`` der Name
+    ``namegmailcom``. Ohne brauchbare Grundlage entsteht ``user_<hex8>``.
+    """
     import re
-    base_clean = re.sub(r"[^a-zA-Z0-9_-]", "", (base or "").strip())[:48] or "user"
-    candidate = base_clean
+    from schemas.user import BENUTZERNAME_GESPERRT
+
+    roh = (base or "").strip()
+    if "@" in roh:
+        roh = ""
+    base_clean = re.sub(r"[^A-Za-z0-9_.-]", "", roh)[:26].strip(".-")
+    if len(base_clean) < 3 or base_clean.lower() in BENUTZERNAME_GESPERRT:
+        base_clean = ""
+    candidate = base_clean or f"user_{secrets.token_hex(4)}"
     n = 0
-    while db.query(User).filter(User.username == candidate).first() is not None:
+    while AuthService.benutzername_belegt(db, candidate):
         n += 1
-        candidate = f"{base_clean}_{n}"
+        candidate = f"{base_clean}_{n}" if base_clean else f"user_{secrets.token_hex(4)}"
         if n > 9999:
             # Hard-cap, sollte nie passieren
-            candidate = f"{base_clean}_{secrets.token_hex(4)}"
+            candidate = f"user_{secrets.token_hex(4)}"
             break
     return candidate
 
@@ -857,10 +870,11 @@ def register_user_from_oauth(
         raise ValueError("OAuth-Profil enthaelt keine E-Mail")
     if db.query(User).filter(User.email_hash == User._email_hash(profile.email)).first():
         raise ValueError("E-Mail ist bereits vergeben")
-    username_base = profile.username or profile.email.split("@", 1)[0]
-    username = _generate_unique_username(db, username_base)
+    # Nie aus der E-Mail: der Name ist vorlaeufig, gewaehlt wird er im Panel.
+    username = _generate_unique_username(db, profile.username)
     user = User(
         username=username,
+        username_gewaehlt=False,
         email=profile.email,
         # Random-Passwort, da OAuth-User sich nicht lokal einloggen sollen
         # (Aenderung ueber "Passwort setzen"-Flow). SHA-argon2 ist deterministisch

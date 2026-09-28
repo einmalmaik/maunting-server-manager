@@ -8,6 +8,7 @@ import { api } from '@/api/client'
 import { Button } from '@/Singra/UI'
 
 import { Spinner } from '@/components/ui/Spinner'
+import { benutzernameFehler } from '@/lib/benutzername'
 interface SetupWizardProps {
   onComplete: () => void
   emailConfigured: boolean
@@ -32,6 +33,11 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
     e.preventDefault()
     setError('')
 
+    const namensfehler = benutzernameFehler(form.username)
+    if (namensfehler) {
+      setError(t(namensfehler.schluessel, namensfehler))
+      return
+    }
     if (form.password !== form.confirm) {
       setError(t('auth.passwordMismatch'))
       return
@@ -223,6 +229,7 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
                     placeholder="admin"
                     required
                     minLength={3}
+                    maxLength={32}
                   />
                 </div>
 

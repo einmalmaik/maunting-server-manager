@@ -1,11 +1,12 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
-import { Mail, AlertTriangle, Clock, Globe, MapPin, Phone, Save, ShieldCheck, Trash2, Camera, Loader2, Shield } from 'lucide-react'
+import { AtSign, Mail, AlertTriangle, Clock, Globe, MapPin, Phone, Save, ShieldCheck, Trash2, Camera, Loader2, Shield } from 'lucide-react'
 import { Avatar, Button, Dropdown, type DropdownOption } from '@/Singra/UI'
 import { api } from '@/api/client'
 import { updatePrivacy } from '@/api/social'
 import { toast } from '@/stores/toastStore'
+import { BenutzernameFeld } from '@/components/BenutzernameFeld'
 
 import { getAvailableTimezones } from '@/utils/timeFormat'
 
@@ -196,6 +197,18 @@ export function AccountTab() {
 
   return (
     <div className="space-y-6">
+      {/* Benutzername */}
+      <section className="msm-card p-6 space-y-4" aria-labelledby="benutzername-titel">
+        <div className="flex items-center gap-2">
+          <AtSign className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 id="benutzername-titel" className="font-headline text-title-lg font-semibold text-on-surface">
+            {t('benutzername.profilTitel')}
+          </h2>
+        </div>
+        <p className="max-w-3xl text-sm text-on-surface-variant">{t('benutzername.profilHinweis')}</p>
+        <BenutzernameFeld key={user?.username} start={user?.username ?? ''} />
+      </section>
+
       {/* Account Info & Profilbild */}
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">

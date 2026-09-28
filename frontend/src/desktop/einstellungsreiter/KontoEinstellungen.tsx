@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Camera, Clock, Globe, MapPin, Save, Trash2, User } from 'lucide-react'
+import { AlertTriangle, AtSign, Camera, Clock, Globe, MapPin, Save, Trash2, User } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { api } from '@/api/client'
+import { BenutzernameFeld } from '@/components/BenutzernameFeld'
 import { Avatar, Badge, Button, Dropdown, type DropdownOption, Switch } from '@/Singra/UI'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
@@ -154,6 +155,20 @@ export function KontoEinstellungen() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Benutzername */}
+      <div className="msm-card p-5 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <AtSign className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-on-surface">{t('benutzername.profilTitel')}</h2>
+            <p className="text-xs text-on-surface-variant">{t('benutzername.profilHinweis')}</p>
+          </div>
+        </div>
+        <BenutzernameFeld key={user?.username} start={user?.username ?? ''} />
+      </div>
+
       {/* 1. Konto & Profilbild */}
       <div className="msm-card p-5 space-y-4">
         <div className="flex items-center gap-3">
