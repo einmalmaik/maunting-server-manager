@@ -67,10 +67,9 @@ msm-agent/servers/
 msm-agent/servers-node-2/
 msm-agent/postgres-node-2/
 
-# Databases (production runs on Postgres per .env; this protects SQLite dev/test DBs)
+# Local database files (the panel runs on PostgreSQL only; this keeps stray
+# files such as an old msm.db out of the repository)
 *.db
-*.db.migrated
-*.db.migration-complete
 *.sqlite
 *.sqlite3
 

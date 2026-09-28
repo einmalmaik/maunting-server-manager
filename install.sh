@@ -302,11 +302,7 @@ show_current_config() {
         fi
     fi
     echo -e "  ${BOLD}SMTP-From:${NC}       ${CURRENT_SMTP_FROM:-<nicht gesetzt>}"
-    if $CURRENT_USE_POSTGRES; then
-        echo -e "  ${BOLD}Datenbank:${NC}       PostgreSQL"
-    else
-        echo -e "  ${BOLD}Datenbank:${NC}       Legacy-SQLite (wird nach PostgreSQL migriert)"
-    fi
+    echo -e "  ${BOLD}Datenbank:${NC}       PostgreSQL"
     if [[ -n "$CURRENT_REDIS_URL" ]]; then
         echo -e "  ${BOLD}Redis:${NC}           Aktiviert"
     else
@@ -508,7 +504,6 @@ REINSTALL_MODE=false
 KEEP_SETTINGS=false
 CHANGED_DOMAIN=false
 CHANGED_EMAIL=false
-CHANGED_DB=false
 CHANGED_REDIS=false
 CHANGED_AUTO_UPDATE=false
 NEED_FULL_REBUILD=false
@@ -521,6 +516,9 @@ fi
 if [[ -f "$MSM_DIR/backend/.env" ]]; then
     REINSTALL_MODE=true
     load_current_env
+    if ! $CURRENT_USE_POSTGRES; then
+        err "Die bestehende Installation nutzt keine PostgreSQL-Datenbank (MSM_DATABASE_URL in backend/.env). SQLite wird nicht mehr unterstützt — zuerst mit einer älteren MSM-Version nach PostgreSQL umziehen."
+    fi
     show_current_config
 
     if $SIMPLE_INSTALL; then
@@ -847,7 +845,6 @@ SMTP_PASS=""
 SMTP_FROM=""
 RESEND_API_KEY=""
 USE_POSTGRES=true
-MIGRATE_LEGACY_SQLITE=false
 PG_PASSWORD=""
 MSM_AUTO_UPDATE="false"
 
@@ -861,11 +858,6 @@ if $REINSTALL_MODE && $KEEP_SETTINGS; then
     SMTP_PASS="$CURRENT_SMTP_PASS"
     SMTP_FROM="$CURRENT_SMTP_FROM"
     RESEND_API_KEY="$CURRENT_RESEND_API_KEY"
-    if ! $CURRENT_USE_POSTGRES; then
-        MIGRATE_LEGACY_SQLITE=true
-        CHANGED_DB=true
-        warn "Legacy-SQLite erkannt — der geprüfte PostgreSQL-Import wird automatisch ausgeführt."
-    fi
     MSM_AUTO_UPDATE="$CURRENT_AUTO_UPDATE"
 
 elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
@@ -947,13 +939,7 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
     # ── 3/4 PostgreSQL ──
     echo ""
     echo -e "${BOLD}Schritt 3/4: Datenbank${NC}"
-    if $CURRENT_USE_POSTGRES; then
-        ok "PostgreSQL bleibt als Panel-Datenbank aktiv."
-    else
-        MIGRATE_LEGACY_SQLITE=true
-        CHANGED_DB=true
-        warn "Legacy-SQLite erkannt — MSM migriert die Daten automatisch nach PostgreSQL."
-    fi
+    ok "PostgreSQL bleibt als Panel-Datenbank aktiv."
 
     # ── 4/4 Auto-Update ──
     echo ""
@@ -977,7 +963,7 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
     fi
 
     # Bestimme ob Full Rebuild nötig
-    if $CODE_CHANGED || $CHANGED_DB; then
+    if $CODE_CHANGED; then
         NEED_FULL_REBUILD=true
     fi
 
@@ -1070,8 +1056,8 @@ if ! command -v psql &>/dev/null; then
     apt-get install -y -qq postgresql postgresql-contrib libpq-dev python3-dev 2>&1 | tee -a "$LOG_FILE"
 fi
 
-# Nur bei frischer Installation oder Legacy-SQLite-Migration: Passwort + User/DB erstellen
-if ! $REINSTALL_MODE || $CHANGED_DB; then
+# Nur bei frischer Installation: Passwort + User/DB erstellen
+if ! $REINSTALL_MODE; then
     PG_PASSWORD=$(python3 -c "import secrets, string; a=string.ascii_letters+string.digits+'_-'; print(''.join(secrets.choice(a) for _ in range(32)))")
 
     log "Richte PostgreSQL-User und Datenbank ein..."
@@ -1149,7 +1135,7 @@ if [[ -n "$PG_HBA" ]]; then
         fi
 fi
 
-if ! $REINSTALL_MODE || $CHANGED_DB; then
+if ! $REINSTALL_MODE; then
     ok "PostgreSQL installiert (DB: msm, User: msm)"
 fi
 
@@ -1224,7 +1210,7 @@ existing_env_value() {
 }
 
 # Datenbank-URL bestimmen
-if ! $REINSTALL_MODE || $CHANGED_DB; then
+if ! $REINSTALL_MODE; then
     # Frische PostgreSQL-URL generieren
     PG_PASSWORD_ENCODED=$(printf '%s' "$PG_PASSWORD" | python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=''))")
     DB_URL="postgresql+psycopg2://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
@@ -1395,7 +1381,7 @@ if ! $REINSTALL_MODE; then
     RUN_BACKEND_SETUP=true
 elif $KEEP_SETTINGS; then
     RUN_BACKEND_SETUP=true
-elif $REINSTALL_MODE && ! $KEEP_SETTINGS && ($CODE_CHANGED || $CHANGED_DB); then
+elif $REINSTALL_MODE && ! $KEEP_SETTINGS && $CODE_CHANGED; then
     RUN_BACKEND_SETUP=true
 fi
 
@@ -1448,29 +1434,6 @@ fi
 # ═══════════════════════════════════════════════════════════════
 # 8. Datenbank initialisieren / Phase-8-Schema (immer idempotent)
 # ═══════════════════════════════════════════════════════════════
-RUN_DB_INIT=false
-if ! $REINSTALL_MODE; then
-    RUN_DB_INIT=true
-elif $MIGRATE_LEGACY_SQLITE; then
-    RUN_DB_INIT=true
-elif $REINSTALL_MODE && ! $KEEP_SETTINGS && $CHANGED_DB; then
-    RUN_DB_INIT=true
-fi
-
-if $MIGRATE_LEGACY_SQLITE; then
-    LEGACY_SQLITE="$MSM_DIR/backend/msm.db"
-    [[ -f "$LEGACY_SQLITE" ]] || err "Legacy-SQLite-Datei fehlt: $LEGACY_SQLITE"
-    log "Migriere Legacy-SQLite einmalig nach PostgreSQL..."
-    su - "$MSM_USER" -c "
-        set -euo pipefail
-        cd $MSM_DIR/backend
-        source venv/bin/activate
-        python3 scripts/migrate_sqlite_to_postgres.py \\
-            --sqlite '$LEGACY_SQLITE'
-    " 2>&1 | tee -a "$LOG_FILE" || err "SQLite-nach-PostgreSQL-Import fehlgeschlagen"
-    ok "Legacy-SQLite vollständig importiert und verifiziert"
-fi
-
 # KEEP_SETTINGS reinstall previously skipped schema work → missing servers.node_id
 # crashed the panel on multi-node startup. Always bridge/stamp (idempotent).
 log "Bereite PostgreSQL-Schema vor (Phase 8 / Multi-Node)..."
@@ -1480,18 +1443,6 @@ su - "$MSM_USER" -c "
     source venv/bin/activate
     python3 scripts/prepare_phase8_schema.py
 " 2>&1 | tee -a "$LOG_FILE" || err "PostgreSQL-Schema konnte nicht vorbereitet werden"
-
-if $MIGRATE_LEGACY_SQLITE; then
-    su - "$MSM_USER" -c "
-        set -euo pipefail
-        cd $MSM_DIR/backend
-        source venv/bin/activate
-        python3 scripts/migrate_sqlite_to_postgres.py \\
-            --sqlite '$LEGACY_SQLITE' \\
-            --archive-source
-    " 2>&1 | tee -a "$LOG_FILE" || err "SQLite-Archivierung nach erfolgreicher Migration fehlgeschlagen"
-    ok "Legacy-SQLite als Migrationsarchiv gesichert"
-fi
 ok "Datenbank/Schema bereit"
 
 # ═══════════════════════════════════════════════════════════════
@@ -2331,7 +2282,6 @@ if $REINSTALL_MODE; then
     else
         if $CHANGED_DOMAIN; then     echo -e "    ${YELLOW}•${NC} Domain geändert";       else echo -e "    ${CYAN}•${NC} Domain unverändert"; fi
         if $CHANGED_EMAIL; then       echo -e "    ${YELLOW}•${NC} Email geändert";         else echo -e "    ${CYAN}•${NC} Email unverändert"; fi
-        if $CHANGED_DB; then         echo -e "    ${YELLOW}•${NC} Datenbank geändert";     else echo -e "    ${CYAN}•${NC} Datenbank unverändert"; fi
         if $CHANGED_REDIS; then      echo -e "    ${YELLOW}•${NC} Redis geändert";          else echo -e "    ${CYAN}•${NC} Redis unverändert"; fi
         if $CHANGED_AUTO_UPDATE; then echo -e "    ${YELLOW}•${NC} Auto-Update geändert";   else echo -e "    ${CYAN}•${NC} Auto-Update unverändert"; fi
         if $CODE_CHANGED; then       echo -e "    ${GREEN}•${NC} Quellcode aktualisiert";  else echo -e "    ${CYAN}•${NC} Quellcode unverändert"; fi

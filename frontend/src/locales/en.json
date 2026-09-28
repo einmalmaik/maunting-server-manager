@@ -4205,7 +4205,7 @@
     },
     "compatibility": {
       "title": "PostgreSQL only for new installations",
-      "description": "PostgreSQL is the only supported panel runtime database. SQLite code exists solely for a one-time, verified migration of legacy installations. A first install interrupted after role and database creation can be validated and continued without deletion using --resume-partial; foreign PostgreSQL state remains blocked."
+      "description": "PostgreSQL is the only supported panel database. SQLite is not supported: installer and update stop on a SQLite configuration, and a legacy installation first moves with an older MSM release. A first install interrupted after role and database creation can be validated and continued without deletion using --resume-partial; foreign PostgreSQL state remains blocked."
     },
     "navigation": {
       "label": "Self-hosting documentation links",

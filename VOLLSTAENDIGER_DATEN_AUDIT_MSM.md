@@ -447,7 +447,7 @@ Das Modul [`hoster.py`](file:///C:/Users/einma/.gemini/antigravity/worktrees/mau
 * **`/opt/msm/data/avatars/`**: Profil- und Gruppenbilder (`avatar_<id>_<hash>.png/jpg/webp`).
 * **`/opt/msm/servers/<id>/`**: Sämtliche Game-Server-Dateien, Spielstände, Konfigurationen, Chatprotokolle und Logdateien (z. B. ASA, Minecraft, Palworld).
 * **`/opt/msm/backups/`**: Lokale Archive der Gameserver (.tar.gz / verschlüsselte .enc-Dateien).
-* **`/opt/msm/backups/panel/`**: Vollständige Panel-Backups inklusive SQLite/Postgres-Datenbank-Dump (enthält sämtliche Benutzerdaten, Hashes, Chats) und `.env`-Konfiguration ([`panel_backup_service.py`](file:///C:/Users/einma/.gemini/antigravity/worktrees/maunting-server-manager/audit_stored_user_data/backend/services/panel_backup_service.py)).
+* **`/opt/msm/backups/panel/`**: Vollständige Panel-Backups inklusive PostgreSQL-Datenbank-Dump (enthält sämtliche Benutzerdaten, Hashes, Chats) und `.env`-Konfiguration ([`panel_backup_service.py`](file:///C:/Users/einma/.gemini/antigravity/worktrees/maunting-server-manager/audit_stored_user_data/backend/services/panel_backup_service.py)).
 
 ---
 

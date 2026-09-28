@@ -145,7 +145,6 @@ FORCE=false
 UPDATE_SUCCEEDED=false
 PANEL_WAS_ACTIVE=false
 DB_BACKUP_FILE=""
-LEGACY_SQLITE_UPDATE=false
 
 cleanup_on_failure() {
     local exit_code=$?
@@ -349,36 +348,28 @@ tar -czf "$BACKUP_FILE" \
     || err "Code-/Konfigurationsbackup fehlgeschlagen."
 [[ -s "$BACKUP_FILE" ]] || err "Code-/Konfigurationsbackup ist leer."
 
-# PostgreSQL is the only runtime database after Phase 8. Existing SQLite is
-# copied byte-for-byte here and migrated only after the target code is ready.
+# PostgreSQL is the only panel database. A remaining SQLite installation has to
+# move with an older MSM release first; this version no longer carries the import.
 CURRENT_DATABASE_URL=$(grep -E '^MSM_DATABASE_URL=' "$ENV_FILE" | head -1 | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-if [[ "$CURRENT_DATABASE_URL" == sqlite* ]]; then
-    LEGACY_SQLITE_UPDATE=true
-    LEGACY_SQLITE_FILE="$MSM_DIR/backend/msm.db"
-    [[ -s "$LEGACY_SQLITE_FILE" ]] || err "Legacy-SQLite-Datenbank fehlt oder ist leer."
-    DB_BACKUP_FILE="$BACKUP_DIR/msm-sqlite-pre-phase8-$(date +%Y%m%d-%H%M%S).db"
-    cp -p "$LEGACY_SQLITE_FILE" "$DB_BACKUP_FILE" \
-        || err "Legacy-SQLite-Sicherung fehlgeschlagen."
-    cmp -s "$LEGACY_SQLITE_FILE" "$DB_BACKUP_FILE" \
-        || err "Legacy-SQLite-Sicherung konnte nicht verifiziert werden."
-else
-    DB_BACKUP_FILE="$BACKUP_DIR/msm-postgres-$(date +%Y%m%d-%H%M%S).dump"
-    DB_BACKUP_HELPER="/tmp/msm-update-db-backup.py"
-    if [[ "$UPDATE_MODE" == "git" ]]; then
-        git show "${REMOTE_SHA}:backend/scripts/update_database_backup.py" > "$DB_BACKUP_HELPER" \
-            || err "PostgreSQL-Backuphelfer der Zielversion fehlt."
-    elif [[ -f "$MSM_DIR/backend/scripts/update_database_backup.py" ]]; then
-        cp "$MSM_DIR/backend/scripts/update_database_backup.py" "$DB_BACKUP_HELPER"
-    else
-        curl -fsSL \
-            "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/$LATEST_TAG/backend/scripts/update_database_backup.py" \
-            -o "$DB_BACKUP_HELPER" || err "PostgreSQL-Backuphelfer konnte nicht geladen werden."
-    fi
-    python3 -m py_compile "$DB_BACKUP_HELPER" \
-        || err "PostgreSQL-Backuphelfer ist ungültig."
-    python3 "$DB_BACKUP_HELPER" --env-file "$ENV_FILE" --output "$DB_BACKUP_FILE" \
-        2>&1 | tee -a "$LOG_FILE" || err "PostgreSQL-Sicherung fehlgeschlagen. Update abgebrochen."
+if [[ "$CURRENT_DATABASE_URL" != postgresql* ]]; then
+    err "Die Panel-Datenbank ist keine PostgreSQL-Datenbank (MSM_DATABASE_URL). SQLite wird nicht mehr unterstützt — zuerst mit einer älteren MSM-Version nach PostgreSQL umziehen."
 fi
+DB_BACKUP_FILE="$BACKUP_DIR/msm-postgres-$(date +%Y%m%d-%H%M%S).dump"
+DB_BACKUP_HELPER="/tmp/msm-update-db-backup.py"
+if [[ "$UPDATE_MODE" == "git" ]]; then
+    git show "${REMOTE_SHA}:backend/scripts/update_database_backup.py" > "$DB_BACKUP_HELPER" \
+        || err "PostgreSQL-Backuphelfer der Zielversion fehlt."
+elif [[ -f "$MSM_DIR/backend/scripts/update_database_backup.py" ]]; then
+    cp "$MSM_DIR/backend/scripts/update_database_backup.py" "$DB_BACKUP_HELPER"
+else
+    curl -fsSL \
+        "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/$LATEST_TAG/backend/scripts/update_database_backup.py" \
+        -o "$DB_BACKUP_HELPER" || err "PostgreSQL-Backuphelfer konnte nicht geladen werden."
+fi
+python3 -m py_compile "$DB_BACKUP_HELPER" \
+    || err "PostgreSQL-Backuphelfer ist ungültig."
+python3 "$DB_BACKUP_HELPER" --env-file "$ENV_FILE" --output "$DB_BACKUP_FILE" \
+    2>&1 | tee -a "$LOG_FILE" || err "PostgreSQL-Sicherung fehlgeschlagen. Update abgebrochen."
 
 ok "Code-/Konfigurationsbackup erstellt: $BACKUP_FILE"
 ok "Datenbank-Backup erstellt und verifiziert: $DB_BACKUP_FILE"
@@ -573,12 +564,6 @@ if $SYSTEMD_AVAILABLE && systemctl is-active --quiet msm-panel.service; then
     PANEL_WAS_ACTIVE=true
     log "Nehme Panel für das Schema-Upgrade kurz in Wartung..."
     systemctl stop msm-panel.service || err "Panel konnte nicht in Wartung genommen werden."
-fi
-if $LEGACY_SQLITE_UPDATE; then
-    log "Migriere bestehende Panel-Datenbank einmalig nach PostgreSQL..."
-    MSM_DIR="$MSM_DIR" MSM_USER="$MSM_USER" \
-        bash "$MSM_DIR/helper-scripts/migrate-db-to-postgres.sh" 2>&1 | tee -a "$LOG_FILE" \
-        || err "SQLite-nach-PostgreSQL-Migration fehlgeschlagen."
 fi
 log "Führe geprüfte PostgreSQL-Schemamigration durch..."
 su - msm -c "
@@ -1060,7 +1045,7 @@ if $SYSTEMD_AVAILABLE; then
     fi
 
     # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)
-    if [[ -f "$MSM_DIR/backend/msm.db" ]] || grep -q '^MSM_DATABASE_URL=.*postgresql' "$ENV_FILE" 2>/dev/null; then
+    if grep -q '^MSM_DATABASE_URL=.*postgresql' "$ENV_FILE" 2>/dev/null; then
         log "Pruefe DIS-Migration (Fernet -> DIS)..."
         su - "$MSM_USER" -c "
             cd $MSM_DIR/backend

@@ -5,7 +5,9 @@ als es ist:
 
 ECHT
   - die vollstaendige FastAPI-Anwendung ueber HTTP (ASGI, keine Direktaufrufe)
-  - eine frische Datenbank; die beiden neuen Hoster-Migrationen fahren echt
+  - eine frische PostgreSQL-Datenbank (`msm_test_e2e_…` auf dem Server aus
+    `MSM_TEST_DATABASE_URL`, danach geloescht); die beiden neuen
+    Hoster-Migrationen fahren echt
     rueckwaerts und wieder vorwaerts (die Basisrevision der Kette ist
     PostgreSQL-spezifisch, das Grundschema kommt deshalb aus den Modellen —
     dieselbe Technik wie in tests/test_schema_constraints.py)
@@ -27,6 +29,8 @@ nicht hat:
   - PostgreSQL            → Serverdatenbanken anlegen/verwerfen
 
 Aufruf:  python scripts/e2e_hoster_shop.py
+         mit MSM_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:15499/postgres
+         (einen passenden Wegwerf-Server startet scripts/test-postgres.sh)
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ import os
 import shutil
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):  # Windows-Konsole ist cp1252
@@ -43,13 +48,28 @@ if hasattr(sys.stdout, "reconfigure"):  # Windows-Konsole ist cp1252
 BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND))
 
+from sqlalchemy import create_engine, text  # noqa: E402
+from sqlalchemy.engine import make_url  # noqa: E402
+from sqlalchemy.pool import NullPool  # noqa: E402
+
+ADMIN_URL = os.environ.get("MSM_TEST_DATABASE_URL", "").strip()
+if not ADMIN_URL.startswith(("postgresql://", "postgresql+psycopg2://")):
+    sys.exit(
+        "MSM_TEST_DATABASE_URL fehlt: ein PostgreSQL-Server mit dem Recht CREATEDB "
+        "(scripts/test-postgres.sh startet einen)."
+    )
+DB_NAME = f"msm_test_e2e_{uuid.uuid4().hex[:8]}"
+_admin = create_engine(ADMIN_URL, isolation_level="AUTOCOMMIT", poolclass=NullPool)
+with _admin.connect() as _verbindung:
+    _verbindung.execute(text(f'CREATE DATABASE "{DB_NAME}"'))
+DB_URL = make_url(ADMIN_URL).set(database=DB_NAME).render_as_string(hide_password=False)
+
 ARBEIT = Path(tempfile.mkdtemp(prefix="msm-e2e-"))
-DB_DATEI = ARBEIT / "panel.db"
 SERVER_DIR = ARBEIT / "servers"
 SERVER_DIR.mkdir()
 
 # Muss vor jedem Import stehen, der die Settings liest.
-os.environ["MSM_DATABASE_URL"] = f"sqlite:///{DB_DATEI.as_posix()}"
+os.environ["MSM_DATABASE_URL"] = DB_URL
 os.environ["MSM_SECRET_KEY"] = "e2e-secret-key-32-chars-long!!!!"
 os.environ["MSM_DEBUG"] = "true"
 os.environ["MSM_TESTING"] = "true"
@@ -63,20 +83,7 @@ from unittest.mock import patch  # noqa: E402
 
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
-from sqlalchemy import create_engine, event as sa_event  # noqa: E402
-from sqlalchemy.orm import sessionmaker  # noqa: E402
-
 import database as db_module  # noqa: E402
-
-db_module.engine = create_engine(
-    os.environ["MSM_DATABASE_URL"], connect_args={"check_same_thread": False}
-)
-db_module.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_module.engine)
-
-
-@sa_event.listens_for(db_module.engine, "connect")
-def _fremdschluessel_scharf(dbapi_connection, _record) -> None:
-    dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
 
 from services.dis_client import DisClient  # noqa: E402
@@ -239,7 +246,7 @@ def main() -> int:
     config.set_main_option("script_location", str(BACKEND / "migrations"))
     Base.metadata.create_all(db_module.engine)
     command.stamp(config, "head")
-    print(f"  {GRAU}Datenbank: {DB_DATEI}{AUS}")
+    print(f"  {GRAU}Datenbank: {DB_NAME}{AUS}")
     print(f"  {GRAU}Serververzeichnis: {SERVER_DIR}{AUS}")
 
     # Die beiden neuen Revisionen wirklich fahren — rueckwaerts und wieder vor.
@@ -760,4 +767,7 @@ if __name__ == "__main__":
         code = main()
     finally:
         shutil.rmtree(ARBEIT, ignore_errors=True)
+        db_module.engine.dispose()
+        with _admin.connect() as _verbindung:
+            _verbindung.execute(text(f'DROP DATABASE IF EXISTS "{DB_NAME}" WITH (FORCE)'))
     sys.exit(code)

@@ -65,9 +65,10 @@ Datenbanken. Er erzeugt ein neues Passwort, überträgt es ausschließlich über
 `stdin` an PostgreSQL und schreibt es anschließend in die geschützte `.env`.
 Abweichende oder fremde PostgreSQL-Zustände werden nicht verändert.
 
-PostgreSQL ist die einzige unterstützte Panel-Runtime-Datenbank. SQLite-Code im
-Installer dient ausschließlich dazu, bestehende Altinstallationen einmalig und
-geprüft nach PostgreSQL zu migrieren; neue SQLite-Installationen gibt es nicht.
+PostgreSQL ist die einzige unterstützte Panel-Runtime-Datenbank. SQLite wird nicht
+unterstützt: Installer und Update brechen bei einer SQLite-Konfiguration ab. Eine
+Altinstallation auf SQLite muss zuerst mit einer älteren MSM-Version nach
+PostgreSQL umziehen.
 
 ## Getrennte GitHub-Release-Artefakte
 

@@ -115,18 +115,6 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-if exist "backend\msm.db" (
-    echo Migriere lokale Legacy-SQLite-Daten einmalig nach PostgreSQL...
-    pushd backend
-    venv\Scripts\python.exe scripts\migrate_sqlite_to_postgres.py --sqlite msm.db
-    if !errorlevel! neq 0 (
-        popd
-        echo [FEHLER] Lokale SQLite-Migration fehlgeschlagen. Die Quelldatei blieb erhalten.
-        pause
-        exit /b 1
-    )
-    popd
-)
 echo Pruefe PostgreSQL-Schema...
 pushd backend
 venv\Scripts\python.exe scripts\manage_schema.py
@@ -135,15 +123,6 @@ if !errorlevel! neq 0 (
     echo [FEHLER] PostgreSQL-Schema ist nicht bereit. Dienste werden nicht gestartet.
     pause
     exit /b 1
-)
-if exist msm.db.migration-complete (
-    venv\Scripts\python.exe scripts\migrate_sqlite_to_postgres.py --sqlite msm.db --archive-source
-    if !errorlevel! neq 0 (
-        popd
-        echo [FEHLER] SQLite-Archivierung nach erfolgreicher Migration fehlgeschlagen.
-        pause
-        exit /b 1
-    )
 )
 popd
 echo.
