@@ -92,7 +92,11 @@ export async function geraeteGeheimnis(erzeugen = false): Promise<Uint8Array | n
   return frisch
 }
 
-/** Nimmt das Gerätegeheimnis zurück. Nur beim Abschalten des PIN. */
+/**
+ * Nimmt das Gerätegeheimnis zurück. Nur beim Abschalten des PIN, und nur wenn
+ * kein anderes Konto dieses Geräts noch daran hängt: das Fach gibt es einmal je
+ * Gerät (siehe `anderesKontoGebunden` in `messengerSperre.ts`).
+ */
 export async function vergissGeraeteGeheimnis(): Promise<void> {
   await biometrieLoeschen(FACH_MESSENGER_GERAET)
 }

@@ -176,6 +176,31 @@ const BIOMETRIE = 'pin_biometrie'
 const VERSUCHE = 'pin_versuche'
 const GESPERRT_BIS = 'pin_gesperrt_bis'
 
+/**
+ * Hängt noch ein anderes Konto dieses Geräts am Gerätegeheimnis?
+ *
+ * Das Geheimnis liegt einmal je Gerät im Schlüsselfach, nicht je Konto: es
+ * bindet an das Gerät, und jedes Konto hat ohnehin eigenes Salz und eigenen
+ * PIN. Bis 09/2026 löschte `abschalten` es trotzdem, und ein zweites Konto auf
+ * derselben Installation kam danach nie wieder an seinen Verlauf.
+ *
+ * Im Zweifel `true`: ein liegen gebliebenes Geheimnis ohne Nutzer schadet
+ * nicht, ein zu früh gelöschtes kostet einen Verlauf.
+ */
+function anderesKontoGebunden(kontoId: number): boolean {
+  const praefix = `mss:messenger_${BINDUNG}:konto:`
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k === null || k === `${praefix}${kontoId}` || !k.startsWith(praefix)) continue
+      if (localStorage.getItem(k) === 'true') return true
+    }
+    return false
+  } catch {
+    return true
+  }
+}
+
 function liesVersuchsstand(): { fehlversuche: number; gesperrtBis: number } {
   const fehlversuche = Number(lies(VERSUCHE) ?? 0)
   const gesperrtBis = Number(lies(GESPERRT_BIS) ?? 0)
@@ -616,7 +641,7 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
       }
 
       await get().biometrieAusschalten()
-      await vergissGeraeteGeheimnis()
+      if (!anderesKontoGebunden(kontoId)) await vergissGeraeteGeheimnis()
       schreibe(UMSCHLAG, null)
       schreibe(SALZ, null)
       schreibe(BINDUNG, null)

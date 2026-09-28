@@ -60,6 +60,10 @@ function installiereAblage() {
     setItem: (k: string, v: string) => daten.set(k, v),
     removeItem: (k: string) => daten.delete(k),
     clear: () => daten.clear(),
+    get length() {
+      return daten.size
+    },
+    key: (i: number) => [...daten.keys()][i] ?? null,
   }
 }
 
@@ -393,6 +397,46 @@ describe('messengerSperre', () => {
         // damit einen Umschlag, der nie wieder aufgeht.
         expect(fach.geraeteGeheimnis).toHaveBeenCalledWith(false)
         expect(fach.geraeteGeheimnis).not.toHaveBeenCalledWith(true)
+      },
+      FRIST,
+    )
+
+    it(
+      'lässt das Gerätegeheimnis liegen, solange ein anderes Konto daran hängt',
+      async () => {
+        // Das Schlüsselfach gibt es einmal je Gerät, nicht je Konto.
+        let imFach: Uint8Array | null = null
+        fach.geraeteGeheimnis.mockImplementation(async (erzeugen?: boolean) => {
+          if (!imFach && erzeugen) imFach = new Uint8Array(32).fill(9)
+          return imFach
+        })
+        fach.vergissGeraeteGeheimnis.mockImplementation(async () => {
+          imFach = null
+        })
+        const sperre = () => useMessengerSperre.getState()
+
+        await sperre().einrichten(PIN)
+        sperre().sperren()
+
+        setzeAngemeldetesKonto(2)
+        await sperre().initialisiere()
+        await sperre().einrichten('anderer-pin')
+        sperre().sperren()
+
+        // Konto 1 schaltet ab; Konto 2 muss seinen Verlauf danach noch öffnen.
+        setzeAngemeldetesKonto(1)
+        await sperre().initialisiere()
+        await sperre().abschalten(PIN)
+
+        setzeAngemeldetesKonto(2)
+        await sperre().initialisiere()
+        expect(await sperre().entsperren('anderer-pin')).toBe(true)
+        expect(fach.vergissGeraeteGeheimnis).not.toHaveBeenCalled()
+
+        // Das letzte gebundene Konto räumt das Fach dann auf.
+        await sperre().abschalten('anderer-pin')
+        expect(fach.vergissGeraeteGeheimnis).toHaveBeenCalledTimes(1)
+        expect(imFach).toBeNull()
       },
       FRIST,
     )
