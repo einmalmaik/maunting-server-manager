@@ -546,16 +546,24 @@ async def test_cloudflare_token(
 async def list_cloudflare_zones(
     _=Depends(require_global("panel.settings.read")),
 ) -> dict:
-    from services.cloudflare_service import list_zones
-    from services import permission_service
-    from database import get_db as _get_db
-    from dependencies import get_current_user
+    import httpx
 
+    from services.cloudflare_service import CloudflareApiUnavailable, list_zones
+
+    # Fehlender oder abgelehnter Token ist eine Einstellungsfrage (400), ein
+    # stummes Cloudflare ein Fehler dahinter (502). Alles andere ist ein Fehler
+    # im Panel und bleibt ein protokollierter 500.
     try:
         zones = await list_zones()
-        return {"zones": [{"id": z.get("id"), "name": z.get("name"), "status": z.get("status")} for z in zones]}
-    except Exception:
-        raise HTTPException(status_code=500, detail="Cloudflare Zonen konnten nicht geladen werden")
+    except CloudflareApiUnavailable as exc:
+        if exc.code == "cloudflare_api_token_missing":
+            raise HTTPException(status_code=400, detail="Kein Cloudflare-API-Token hinterlegt.")
+        if exc.code == "cloudflare_api_token_invalid":
+            raise HTTPException(status_code=400, detail="Cloudflare hat den API-Token abgelehnt.")
+        raise
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Cloudflare ist gerade nicht erreichbar.")
+    return {"zones": [{"id": z.get("id"), "name": z.get("name"), "status": z.get("status")} for z in zones]}
 
 
 @router.post("/curseforge-key/test", status_code=200)

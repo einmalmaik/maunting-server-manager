@@ -346,10 +346,16 @@ def _accept_desired_state_locked(
 
 
 def observed_state(server_id: int) -> dict[str, Any]:
-    desired = _load_desired(server_id)
-    if desired is None:
-        raise FileNotFoundError("Guardian desired state not found")
-    runtime = _load_runtime(server_id, desired)
+    # A corrupted file is retained aside by the store; the incident makes it
+    # visible to the panel, the caller answers with a clear rejection.
+    try:
+        desired = _load_desired(server_id)
+        if desired is None:
+            raise FileNotFoundError("Guardian desired state not found")
+        runtime = _load_runtime(server_id, desired)
+    except CorruptedGuardianStateError as exc:
+        _record_state_corruption(server_id, exc)
+        raise
     try:
         container = docker_service.inspect_container_state(
             f"{settings.container_name_prefix}{server_id}"

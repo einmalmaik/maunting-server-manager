@@ -18,6 +18,7 @@ from services.guardian_contract import (
     GUARDIAN_SCHEMA_VERSION,
     PROBE_TYPES,
 )
+from services.guardian_state_store import CorruptedGuardianStateError
 from services.guardian_service import (
     DesiredStateRejected,
     accept_desired_state,
@@ -78,6 +79,14 @@ def get_guardian_state(name: str) -> dict[str, Any]:
         raise HTTPException(
             status_code=404,
             detail={"code": "guardian_state_not_found", "message": "Guardian state not found"},
+        ) from exc
+    except CorruptedGuardianStateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "stored_state_corrupted",
+                "message": "stored Guardian state is corrupted and requires administrator inspection",
+            },
         ) from exc
 
 
