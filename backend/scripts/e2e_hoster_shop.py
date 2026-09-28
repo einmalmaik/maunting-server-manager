@@ -51,6 +51,7 @@ sys.path.insert(0, str(BACKEND))
 from sqlalchemy import create_engine, text  # noqa: E402
 from sqlalchemy.engine import make_url  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
+from sqlalchemy.orm import close_all_sessions  # noqa: E402
 
 ADMIN_URL = os.environ.get("MSM_TEST_DATABASE_URL", "").strip()
 if not ADMIN_URL.startswith(("postgresql://", "postgresql+psycopg2://")):
@@ -124,6 +125,7 @@ from models import (  # noqa: E402
 )
 from services.ai_limit_service import resolve_effective_limits  # noqa: E402
 from services.auth_service import AuthService  # noqa: E402
+from services.panel_settings_service import PanelSettingsService  # noqa: E402
 from services.role_service import (  # noqa: E402
     effective_user_role_ids,
     ensure_system_roles,
@@ -300,6 +302,9 @@ def main() -> int:
     set_user_roles(db, dienstbenutzer, [dienstrolle.id])
     db.commit()
 
+    # Das Captcha (ALTCHA, seit 26.09. standardmaessig an) prueft hier niemand;
+    # abgeschaltet wie in tests/conftest.py.
+    PanelSettingsService.set("captcha_enabled", "false")
     client = TestClient(app)
 
     anmeldung = client.post(
@@ -767,6 +772,9 @@ if __name__ == "__main__":
         code = main()
     finally:
         shutil.rmtree(ARBEIT, ignore_errors=True)
+        # Offene Sitzungen zuerst schliessen: sonst raeumt der Pool sie erst beim
+        # Beenden auf, nach dem DROP, und meldet eine abgerissene Verbindung.
+        close_all_sessions()
         db_module.engine.dispose()
         with _admin.connect() as _verbindung:
             _verbindung.execute(text(f'DROP DATABASE IF EXISTS "{DB_NAME}" WITH (FORCE)'))
