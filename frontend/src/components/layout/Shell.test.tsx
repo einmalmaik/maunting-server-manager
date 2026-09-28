@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
+import i18n from '@/i18n'
 import { Shell } from './Shell'
 import { useAuthStore } from '@/stores/authStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
@@ -75,14 +76,14 @@ describe('Shell', () => {
     useAuthStore.setState({ user: { username: 'owner', email: 'owner@example.invalid', is_owner: true } as never })
     usePermissionsStore.setState({ me: { is_owner: true, role_id: null, role_name: null, global_keys: [], server_keys: {} }, isLoading: false, error: null })
     renderShell()
-    const trigger = screen.getByRole('button', { name: 'Open navigation' })
+    const trigger = screen.getByRole('button', { name: i18n.t('shell.openNavigation') })
     fireEvent.click(trigger)
-    const navigation = screen.getByRole('dialog', { name: 'Main navigation' })
+    const navigation = screen.getByRole('dialog', { name: i18n.t('shell.mainNavigation') })
     expect(navigation).toHaveClass('h-[100dvh]', 'w-full')
     expect(screen.getByTestId('mobile-navigation-layer')).toHaveClass('h-[100dvh]', 'w-screen', 'overflow-hidden')
     expect(document.body.style.overflow).toBe('hidden')
     fireEvent.keyDown(document, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Main navigation' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: i18n.t('shell.mainNavigation') })).toBeNull())
     await waitFor(() => expect(trigger).toHaveFocus())
     expect(document.body.style.overflow).toBe('')
   })
