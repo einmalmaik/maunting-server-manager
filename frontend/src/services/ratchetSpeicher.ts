@@ -87,7 +87,11 @@ export function sitzungsId(
 
 export interface RatchetAblage {
   lies(id: string): Promise<string | null>
-  schreibe(id: string, zustand: string): Promise<void>
+  /**
+   * Legt `zustand` unter `id` ab. Ist `marke` gesetzt, liegt sie danach
+   * ebenfalls da, in derselben Transaktion: beide oder keines.
+   */
+  schreibe(id: string, zustand: string, marke?: string): Promise<void>
   loesche(id: string): Promise<void>
   /** Alle abgelegten Kennungen. Nur die einmalige Umbenennung braucht das. */
   alleIds(): Promise<string[]>
@@ -127,19 +131,27 @@ const indexedDbAblage: RatchetAblage = {
     const zeile = await entsiegleZeile<{ zustand?: unknown }>(roh, ratchetAad(id))
     return typeof zeile?.zustand === 'string' ? zeile.zustand : null
   },
-  async schreibe(id, zustand) {
+  async schreibe(id, zustand, marke) {
     const db = await oeffneDatenbank()
+    const jetzt = new Date().toISOString()
     // Versiegeln vor der Transaktion — ein `await` mitten drin bricht sie ab.
-    const zeile = await versiegleZeile(
-      { sitzungsId: id, zustand, aktualisiertAm: new Date().toISOString() },
-      ['sitzungsId'],
-      ratchetAad(id),
-    )
+    const versiegle = (platz: string, wert: string) =>
+      versiegleZeile(
+        { sitzungsId: platz, zustand: wert, aktualisiertAm: jetzt },
+        ['sitzungsId'],
+        ratchetAad(platz),
+      )
+    const zeilen = [await versiegle(id, zustand)]
+    if (marke) zeilen.push(await versiegle(marke, MARKE_WERT))
+    // Fertig erst mit `oncomplete`: bis dahin kann die Transaktion noch
+    // abbrechen (Kontingent), und dann liegt keine der Zeilen da. Ein
+    // gescheitertes `put` bricht sie ebenfalls ab und landet in `onabort`.
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE, 'readwrite')
-      const req = tx.objectStore(STORE).put(zeile)
-      req.onsuccess = () => resolve()
-      req.onerror = () => reject(req.error)
+      const store = tx.objectStore(STORE)
+      for (const zeile of zeilen) store.put(zeile)
+      tx.oncomplete = () => resolve()
+      tx.onabort = () => reject(tx.error ?? new Error('Transaktion abgebrochen'))
     })
   },
   async loesche(id) {
@@ -249,6 +261,12 @@ async function imSchloss<T>(id: string, arbeit: () => Promise<T>): Promise<T> {
 export interface SchrittErgebnis<T> {
   /** Der Nachfolgezustand. Fehlt er, bleibt der gespeicherte unverändert. */
   naechster?: RatchetState
+  /**
+   * Eine Marke, die mit `naechster` in derselben Transaktion abgelegt wird.
+   * Scheitert das Ablegen, fehlen beide, und der nächste Versuch findet die
+   * Arbeit noch offen. Ohne `naechster` wird sie nicht geschrieben.
+   */
+  marke?: { bereich: Markenbereich; kennung: string }
   ergebnis: T
 }
 
@@ -283,7 +301,8 @@ export async function schritt<T>(
 
     if (ausgang.naechster) {
       try {
-        await ablage.schreibe(id, serializeRatchetState(ausgang.naechster))
+        const marke = ausgang.marke && `${ausgang.marke.bereich}:${ausgang.marke.kennung}`
+        await ablage.schreibe(id, serializeRatchetState(ausgang.naechster), marke)
       } catch (fehler) {
         // Der Nachfolger liegt jetzt nirgends und wird nie gebraucht, der
         // Vorgänger liegt unverändert in der Ablage. Beide RAM-Kopien können
@@ -345,6 +364,8 @@ export async function verwirfSitzung(id: string): Promise<void> {
  */
 export type Markenbereich = 'aufbau' | 'bruch' | 'abgewiesen'
 
+const MARKE_WERT = '1'
+
 /**
  * Schreibt jede Zeile dieser Ablage einmal neu — der Umstellungsdurchlauf für
  * Sitzungen und Marken. Siehe `schreibeNachrichtenBestandNeu`.
@@ -367,5 +388,5 @@ export async function kennstMarke(bereich: Markenbereich, kennung: string): Prom
 
 /** Hält die Marke fest. Erst rufen, wenn das Erledigen geglückt ist. */
 export async function merkeMarke(bereich: Markenbereich, kennung: string): Promise<void> {
-  await ablage.schreibe(`${bereich}:${kennung}`, '1')
+  await ablage.schreibe(`${bereich}:${kennung}`, MARKE_WERT)
 }

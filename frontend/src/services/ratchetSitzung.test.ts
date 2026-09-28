@@ -67,7 +67,7 @@ vi.mock('./e2eeGeraet', async (importOriginal) => {
 
 import { erzeugeSignaturPaar, signiere, type SignaturPaar } from './absenderSignatur'
 import { clearGeraeteMemory, freigabeDaten, geraeteVon, verlangeGeraeteVon } from './e2eeGeraet'
-import { setzeAblageFuerTest, type RatchetAblage } from './ratchetSpeicher'
+import { setzeAblageFuerTest, sitzungsId, type RatchetAblage } from './ratchetSpeicher'
 import {
   DR_PREFIX,
   DrGeraetNichtEingetragenError,
@@ -91,8 +91,9 @@ function neueAblage(): RatchetAblage {
     async lies(id) {
       return daten.get(id) ?? null
     },
-    async schreibe(id, zustand) {
+    async schreibe(id, zustand, marke) {
       daten.set(id, zustand)
+      if (marke) daten.set(marke, '1')
     },
     async loesche(id) {
       daten.delete(id)
@@ -526,6 +527,36 @@ describe('ratchetSitzung', () => {
     expect(antwort.bootstrap).toBeNull()
   })
 
+  it('wendet einen Aufbau erneut an, wenn das Ablegen der Sitzung scheiterte', async () => {
+    // Von einem Reviewer gefunden, am Code bestätigt. Die Aufbau-Marke lag in
+    // einer eigenen Transaktion vor dem Sitzungszustand. Scheiterte danach das
+    // Ablegen der Sitzung (volle Platte, Tab geschlossen), stand die Marke
+    // ohne Sitzung da: jeder weitere Abruf hielt den Aufbau für erledigt, und
+    // jede Nachricht dieses Geräts lief als Bruch ins Leere, bis dieses Gerät
+    // selbst wieder etwas sendete.
+    const kB = kontextVon(BOB, ALICE)
+    aktiviere(alice)
+    const [z] = await baueZustellungen(kontextVon(ALICE, BOB), 'kommt trotzdem an', 'u1')
+
+    aktiviere(bob)
+    const platz = sitzungsId(bob.kennung, ALICE, alice.kennung)
+    const echt = bob.ablage.schreibe
+    bob.ablage.schreibe = async (id, zustand, marke) => {
+      if (id === platz) throw new Error('QuotaExceededError')
+      return echt(id, zustand, marke)
+    }
+    const klartext = oeffneHybrid(z.bootstrap!)
+    await expect(verarbeiteBootstrap(kB, klartext)).rejects.toThrow('QuotaExceededError')
+    bob.ablage.schreibe = echt
+
+    // Der nächste Abruf holt denselben Aufbau wieder und muss ihn anwenden.
+    expect(await verarbeiteBootstrap(kB, klartext)).toMatchObject({ istAufbau: true })
+    expect(await liesDrUmschlag(kB, z.nachricht, verwerfen)).toMatchObject({
+      art: 'klartext',
+      text: 'kommt trotzdem an',
+    })
+  })
+
   it('öffnet denselben Umschlag zweimal, ohne die Sitzung dafür zu töten', async () => {
     // Vom Betreiber gemeldet: jede gesendete Nachricht wurde beim Gegenüber zu
     // „Die Sicherheitssitzung mit diesem Gerät wurde neu aufgebaut."
@@ -580,9 +611,9 @@ describe('ratchetSitzung', () => {
     aktiviere(bob)
     const geschrieben: string[] = []
     const echt = bob.ablage.schreibe
-    bob.ablage.schreibe = async (id, zustand) => {
+    bob.ablage.schreibe = async (id, zustand, marke) => {
       geschrieben.push(id)
-      return echt(id, zustand)
+      return echt(id, zustand, marke)
     }
 
     const klartext = oeffneHybrid(z.bootstrap!)

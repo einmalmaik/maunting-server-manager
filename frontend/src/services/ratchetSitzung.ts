@@ -570,12 +570,11 @@ export async function verarbeiteBootstrap(
    * Sendekette, beide Seiten bauen neu auf, und im Verlauf erscheint ein
    * Sitzungsbruch, den niemand ausgelöst hat.
    *
-   * Gemerkt wird **vor** dem Fortschreiben, weil nur so beides im selben
-   * Schloss liegt. Scheitert das Schreiben des Zustands danach, bleibt eine
-   * Marke ohne Sitzung zurück: die nächste Nachricht dieses Geräts meldet dann
-   * einen sichtbaren Bruch, und der nächste Sendevorgang der Gegenstelle baut
-   * mit einem neuen Aufbau — also einer neuen Marke — wieder auf. Sichtbar und
-   * selbstheilend; die umgekehrte Reihenfolge wäre still und dauerhaft.
+   * Marke und Sitzung legt `schritt` in einer Transaktion ab. Bis 09/2026
+   * stand die Marke vorher in einer eigenen: scheiterte danach das Ablegen der
+   * Sitzung, galt der Aufbau bei jedem Abruf als erledigt, und jede Nachricht
+   * dieses Geräts lief als Bruch ins Leere. Die Gegenstelle sendet mit ihrem
+   * Zustand weiter und baut von sich aus nicht neu auf.
    */
   const ersetzt = await schritt<boolean | null>(id, async (alterZustand) => {
     if (await kennstMarke('aufbau', aufbauKennung)) return { ergebnis: null }
@@ -584,9 +583,12 @@ export async function verarbeiteBootstrap(
       dhKeyPair: paar,
       associatedData: gebundeneDaten(kontext, inhalt.vonGeraet, meins.kennung),
     })
-    await merkeMarke('aufbau', aufbauKennung)
     // `alterZustand` räumt `schritt` selbst ab; hier zählt nur, ob es ihn gab.
-    return { naechster: neu, ergebnis: alterZustand !== null }
+    return {
+      naechster: neu,
+      marke: { bereich: 'aufbau', kennung: aufbauKennung },
+      ergebnis: alterZustand !== null,
+    }
   })
   paar.privateKey.fill(0)
 

@@ -22,6 +22,7 @@ import { randomBytes } from '@msdis/shield/random'
 import {
   schritt,
   hatSitzung,
+  kennstMarke,
   verwirfSitzung,
   sitzungsId,
   setzeAblageFuerTest,
@@ -40,9 +41,10 @@ function speicherAblage() {
     async lies(id) {
       return daten.get(id) ?? null
     },
-    async schreibe(id, zustand) {
+    async schreibe(id, zustand, marke) {
       daten.set(id, zustand)
       schreibfolge.push(id)
+      if (marke) daten.set(marke, '1')
     },
     async loesche(id) {
       daten.delete(id)
@@ -256,6 +258,37 @@ describe('ratchetSpeicher', () => {
     // weitergereicht: eine Fälschung darf eine Sitzung weder vorspulen noch
     // verklemmen.
     expect(umgebung.daten.get(id)).toBe(vorher)
+  })
+
+  it('legt eine Marke nur zusammen mit ihrem Zustand ab', async () => {
+    // Eine Marke sagt „erledigt". Ohne den Zustand, der das Erledigte trägt,
+    // wäre sie eine Lüge, die jeden weiteren Versuch verhindert.
+    const { alice } = await paarAufbauen()
+    const id = 'bob:geraet1'
+    const mitMarke = () =>
+      schritt(id, async () => ({
+        naechster: alice,
+        marke: { bereich: 'aufbau' as const, kennung: 'QUJD' },
+        ergebnis: null,
+      }))
+
+    const echt = umgebung.ablage.schreibe
+    umgebung.ablage.schreibe = async () => {
+      throw new Error('QuotaExceededError')
+    }
+    await expect(mitMarke()).rejects.toThrow('QuotaExceededError')
+    umgebung.ablage.schreibe = echt
+    expect(await kennstMarke('aufbau', 'QUJD')).toBe(false)
+    expect(await hatSitzung(id)).toBe(false)
+
+    const { alice: nochEiner } = await paarAufbauen()
+    await schritt(id, async () => ({
+      naechster: nochEiner,
+      marke: { bereich: 'aufbau' as const, kennung: 'QUJD' },
+      ergebnis: null,
+    }))
+    expect(await kennstMarke('aufbau', 'QUJD')).toBe(true)
+    expect(await hatSitzung(id)).toBe(true)
   })
 
   it('meldet und entfernt Sitzungen', async () => {
