@@ -105,6 +105,56 @@ def test_index_concurrently_laeuft_ohne_transaktion():
         plan({"op": "drop_index", "name": "i", "concurrently": True, "cascade": True})
 
 
+@pytest.mark.parametrize(
+    "spec",
+    [
+        # Die Probe läuft in einer Transaktion mit Rollback — ein COMMIT darin
+        # machte alles Folgende dauerhaft, vor dem Klick.
+        {"op": "create_view", "name": "v", "query": "SELECT 1; COMMIT; DROP TABLE opfer"},
+        {"op": "create_index", "table": "t", "name": "i", "columns": [{"column": "a"}],
+         "where": "true; COMMIT; DROP TABLE opfer"},
+        {"op": "create_table", "name": "t", "checks": [{"expression": "a > 0) ; DROP TABLE opfer; --"}],
+         "columns": [{"name": "a", "type": "int"}]},
+        # Aus der Klammer ausbrechen: zweite, destruktive Änderung im selben ALTER TABLE.
+        {"op": "alter_table", "name": "t", "actions": [
+            {"action": "add_check", "constraint": {"expression": "true), DROP COLUMN geheim, ADD CHECK (true"}}]},
+        # Offenes Hochkomma zieht den nächsten Ausdruck samt `;` in einen String — und wieder hinaus.
+        {"op": "create_table", "name": "t", "columns": [
+            {"name": "a", "type": "text", "default": "'x"},
+            {"name": "b", "type": "text", "default": "'; DROP TABLE opfer; SELECT '"}]},
+        {"op": "create_policy", "table": "t", "name": "p", "command": "select", "using": "true /* x */"},
+        {"op": "create_policy", "table": "t", "name": "p", "command": "select", "using": "true -- x"},
+        {"op": "create_view", "name": "v", "query": "SELECT $$ '$$ ; DROP TABLE opfer; SELECT $$ ' $$"},
+        {"op": "create_view", "name": "v", "query": "SELECT E'\\'; DROP TABLE opfer; SELECT '"},
+    ],
+)
+def test_ausdruck_bleibt_eine_anweisung(spec):
+    with pytest.raises(ValueError, match="Ausdruck"):
+        plan(spec)
+
+
+def test_default_und_using_bleiben_in_ihrer_klammer():
+    p = plan({"op": "alter_table", "name": "t", "actions": [
+        {"action": "set_default", "column": "id", "default": "1, DROP COLUMN geheim"},
+        {"action": "add_column", "column": {"name": "n", "type": "int", "default": "1, DROP COLUMN geheim"}},
+        {"action": "alter_column_type", "column": "n", "type": "bigint", "using": "n::bigint, DROP COLUMN geheim"},
+    ]})
+    assert p.statements[0].endswith('SET DEFAULT (1, DROP COLUMN geheim)')
+    assert p.statements[1].endswith('"n" int DEFAULT (1, DROP COLUMN geheim)')
+    assert p.statements[2].endswith('USING (n::bigint, DROP COLUMN geheim)')
+
+
+def test_gewoehnliche_ausdruecke_bleiben_erlaubt():
+    p = plan({"op": "create_table", "name": "t", "columns": [
+        {"name": "a", "type": "text", "default": "'a;b -- /* $ '''"},
+        {"name": "b", "type": "text", "default": "now()::text"},
+    ], "checks": [{"expression": "a ~ '^\\d+[a-z]*$' AND \"we;ird\" > 0"}]})
+    assert "DEFAULT ('a;b -- /* $ ''')" in p.statements[0]
+    assert "CHECK (a ~ '^\\d+[a-z]*$' AND \"we;ird\" > 0)" in p.statements[0]
+    view = plan({"op": "create_view", "name": "v", "query": " SELECT 1 AS x;\n ; "})
+    assert view.statements[0].endswith("AS\nSELECT 1 AS x")
+
+
 def test_funktionskoerper_bekommt_freien_dollar_tag():
     p = plan({"op": "create_function", "name": "f", "returns": "trigger",
               "body": "BEGIN RETURN $fn$x$fn$; END", "security_definer": True})

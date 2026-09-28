@@ -161,9 +161,52 @@ def type_name(value: str) -> str:
 
 
 def expression(value: str) -> str:
+    """Ein frei geschriebener Ausdruck, der seinen Platz nicht verlassen kann.
+
+    psycopg2 schickt eine Anweisung ohne Parameter als einfache Abfrage, und
+    PostgreSQL führt dann jedes ``;``-Stück aus: ``SELECT 1; COMMIT; DROP …``
+    in einer View beendete die Probe-Transaktion und lief dauerhaft, bevor
+    jemand bestätigt hatte. Eine Klammer oder ein Anführungszeichen, das offen
+    bleibt, zieht den Text dahinter in den Ausdruck oder schiebt fremdes SQL
+    hinaus (``1, DROP COLUMN x`` hinter ``SET DEFAULT``).
+
+    Deshalb: Strings (``'…'``) und Namen (``"…"``) müssen geschlossen sein,
+    Klammern ausgeglichen. Außerhalb davon kein ``;``, kein Kommentar, kein
+    ``$`` (Dollar-Quoting) und kein Backslash. ``\\'`` ist auch in Strings
+    verboten: ob der Backslash das Zeichen schützt, hängt an ``E'…'`` und
+    ``standard_conforming_strings`` — beide Lesarten müssen dasselbe Ende sehen.
+    """
     value = value.strip()
     if not value or "\x00" in value:
         raise ValueError("Leerer oder ungültiger Ausdruck.")
+    if "\\'" in value:
+        raise ValueError("Ausdruck: \\' ist nicht erlaubt, ein Hochkomma im Text wird verdoppelt ('').")
+    quote = ""
+    depth = 0
+    i = 0
+    while i < len(value):
+        ch = value[i]
+        if quote:
+            if ch == quote:
+                if value[i + 1 : i + 2] == quote:
+                    i += 1  # verdoppelt: bleibt im String bzw. Namen
+                else:
+                    quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif ch == ";" or ch in "$\\" or value[i : i + 2] in ("--", "/*"):
+            raise ValueError("Ausdruck: ';', Kommentare, '$' und '\\' sind außerhalb von Text nicht erlaubt.")
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:
+                raise ValueError("Ausdruck: Klammern sind nicht ausgeglichen.")
+        i += 1
+    if quote:
+        raise ValueError("Ausdruck: Anführungszeichen nicht geschlossen.")
+    if depth:
+        raise ValueError("Ausdruck: Klammern sind nicht ausgeglichen.")
     return value
 
 
@@ -200,7 +243,9 @@ def _column_def(col: s.ColumnSpec) -> str:
     if not col.nullable:
         parts.append("NOT NULL")
     if col.default:
-        parts.append(f"DEFAULT {expression(col.default)}")
+        # In Klammern: sonst hängt ``1, DROP COLUMN x`` hinter ADD COLUMN eine
+        # zweite, destruktive Änderung an denselben ALTER TABLE.
+        parts.append(f"DEFAULT ({expression(col.default)})")
     return " ".join(parts)
 
 
@@ -312,14 +357,14 @@ def _alter_table(op: s.AlterTableOp, _d: bool) -> Plan:
             statements.append(f"ALTER TABLE {table} RENAME COLUMN {ident(action.column)} TO {ident(action.new_name)}")
         elif kind == "alter_column_type":
             destructive = True
-            using = f" USING {expression(action.using)}" if action.using else ""
+            using = f" USING ({expression(action.using)})" if action.using else ""
             statements.append(
                 f"ALTER TABLE {table} ALTER COLUMN {ident(action.column)} TYPE {type_name(action.type)}{using}"
             )
         elif kind == "set_default":
             if action.default:
                 statements.append(
-                    f"ALTER TABLE {table} ALTER COLUMN {ident(action.column)} SET DEFAULT {expression(action.default)}"
+                    f"ALTER TABLE {table} ALTER COLUMN {ident(action.column)} SET DEFAULT ({expression(action.default)})"
                 )
             else:
                 statements.append(f"ALTER TABLE {table} ALTER COLUMN {ident(action.column)} DROP DEFAULT")
@@ -411,7 +456,8 @@ def _drop_index(op: s.DropIndexOp, _d: bool) -> Plan:
 
 
 def _create_view(op: s.CreateViewOp, _d: bool) -> Plan:
-    query = expression(op.query).rstrip().rstrip(";").rstrip()
+    # Ein abschließendes ``;`` (wie aus pg_get_viewdef) ist keine zweite Anweisung.
+    query = expression(re.sub(r"[\s;]+$", "", op.query))
     view = qualified(op.schema_name, op.name)
     if op.materialized:
         if op.or_replace:
