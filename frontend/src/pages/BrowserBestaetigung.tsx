@@ -4,7 +4,7 @@ import type { TFunction } from 'i18next'
 import { Check, KeyRound, ShieldAlert } from 'lucide-react'
 import { api } from '@/api/client'
 import { Logo } from '@/components/Logo'
-import { Button } from '@/Singra/UI'
+import { Zahlenwahl } from '@/Singra/UI'
 import { passkeyBestaetigen, type PasskeyBestaetigungsOptionen } from '@/services/passkeyService'
 
 /**
@@ -107,21 +107,12 @@ export function BrowserBestaetigung() {
                 {t('auth.browserBestaetigung.forAction', { aktion: zweckText(t, vorgang.zweck) })}
               </p>
               <p className="text-sm text-on-surface-variant">{t('auth.browserBestaetigung.pickNumber')}</p>
-              <div className="grid grid-cols-3 gap-3">
-                {vorgang.auswahl.map((zahl) => (
-                  <Button
-                    key={zahl}
-                    type="button"
-                    variant="secondary"
-                    size="lg"
-                    className="h-16 font-headline text-2xl font-extrabold tabular-nums"
-                    disabled={stand === 'sendet'}
-                    onClick={() => void waehlen(zahl)}
-                  >
-                    {zahl}
-                  </Button>
-                ))}
-              </div>
+              <Zahlenwahl
+                zahlen={vorgang.auswahl}
+                onWaehlen={(zahl) => void waehlen(zahl)}
+                label={t('auth.browserBestaetigung.pickNumber')}
+                disabled={stand === 'sendet'}
+              />
               <p className="text-xs text-on-surface-variant">{t('auth.browserBestaetigung.notYou')}</p>
             </div>
           )}

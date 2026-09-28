@@ -67,3 +67,10 @@ export {
   SPRUNGZIEL_ABSTAND,
   type Sprungziel,
 } from './Sprungleiste'
+
+export {
+  Abgleichzahl,
+  Zahlenwahl,
+  type AbgleichzahlProps,
+  type ZahlenwahlProps,
+} from './Zahlenabgleich'

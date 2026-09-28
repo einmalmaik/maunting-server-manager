@@ -1,7 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Globe } from 'lucide-react'
-import { Button, Dialog, DialogContent } from '@/Singra/UI'
-import { Spinner } from '@/components/ui/Spinner'
+import { Abgleichzahl, Button, Dialog, DialogContent } from '@/Singra/UI'
 import { oeffneBrowser } from '@/desktop/tauri'
 import { useBrowserBestaetigung } from '@/stores/browserBestaetigung'
 
@@ -23,13 +22,7 @@ export function BrowserBestaetigungDialog() {
             {t('auth.browserBestaetigung.appTitle')}
           </h2>
           <p className="mt-2 text-sm text-on-surface-variant">{t('auth.browserBestaetigung.appText')}</p>
-          <p className="my-5 font-headline text-5xl font-extrabold tabular-nums text-primary" aria-live="polite">
-            {offen.zahl}
-          </p>
-          <p className="flex items-center justify-center gap-2 text-xs text-on-surface-variant" role="status">
-            <Spinner />
-            {t('auth.browserBestaetigung.appWaiting')}
-          </p>
+          <Abgleichzahl zahl={offen.zahl} warteText={t('auth.browserBestaetigung.appWaiting')} />
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
             <Button variant="secondary" type="button" onClick={() => void oeffneBrowser(offen.adresse)}>
               {t('auth.browserBestaetigung.reopen')}
