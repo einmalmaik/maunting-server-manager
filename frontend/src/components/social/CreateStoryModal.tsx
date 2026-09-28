@@ -17,6 +17,11 @@ import {
 import { createStory, type ChatStoryItem } from '@/api/social'
 import { CameraSnapshotModal } from './CameraSnapshotModal'
 import { toast } from '@/stores/toastStore'
+import { compressImageFile } from '@/lib/imageCompression'
+
+// Base64 von 3 MiB, wie `MAX_STORY_IMAGE_BYTES` im Backend: verschluesselt
+// muss das Bild noch unter die Grenze des DIS-Sidecars passen.
+const MAX_STORY_BILD_ZEICHEN = 4 * 1024 * 1024
 
 export const STORY_GRADIENTS: Record<string, { labelKey: string; class: string }> = {
   'gradient-1': { labelKey: 'social.story.gradients.violet', class: 'bg-gradient-to-tr from-purple-700 via-indigo-600 to-violet-900 text-white' },
@@ -66,16 +71,11 @@ export function CreateStoryModal({
 
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setPhotoDataUrl(reader.result)
-      }
-    }
-    reader.readAsDataURL(file)
+    const { dataUrl } = await compressImageFile(file)
+    setPhotoDataUrl(dataUrl)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -83,6 +83,10 @@ export function CreateStoryModal({
     const trimmed = content.trim()
     if (!trimmed && !photoDataUrl) {
       toast.error(t('social.story.needContent'))
+      return
+    }
+    if (photoDataUrl && photoDataUrl.length > MAX_STORY_BILD_ZEICHEN) {
+      toast.error(t('social.story.imageTooLarge'))
       return
     }
 
@@ -164,11 +168,6 @@ export function CreateStoryModal({
                   <p className="font-headline text-base sm:text-lg font-bold break-words drop-shadow-md max-h-40 overflow-y-auto no-scrollbar">
                     {content || (photoDataUrl ? '' : t('social.story.tapForText'))}
                   </p>
-                </div>
-
-                {/* Bottom tag */}
-                <div className="relative z-10 text-label-sm opacity-75 text-center truncate">
-                  {t('social.story.encrypted')}
                 </div>
               </div>
             </div>

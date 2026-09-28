@@ -17,8 +17,8 @@ export function Privacy() {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-09-28',
-    version: '3.11',
+    lastUpdated: '2026-09-29',
+    version: '3.12',
     meta: 'Maunting Studios — Sicherheit braucht Vertrauen',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },

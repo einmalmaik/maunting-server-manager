@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
+from models.dis_text import DisText
 
 
 def _now() -> datetime:
@@ -24,8 +25,12 @@ class ChatStory(Base):
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    media_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Nicht Ende-zu-Ende verschluesselt: das Backend liest Text und Bild, um
+    # sie Freunden bzw. bei oeffentlichem Profil allen Konten zu zeigen. In
+    # der Datenbank stehen sie trotzdem nur als Chiffrat (bis 29.09.2026
+    # Klartext, waehrend der Editor "Ende-zu-Ende verschluesselt" anzeigte).
+    content: Mapped[str] = mapped_column(DisText(aad="msm:social:chat_stories.content"), nullable=False)
+    media_url: Mapped[str | None] = mapped_column(DisText(aad="msm:social:chat_stories.media_url"), nullable=True)
     background: Mapped[str] = mapped_column(String(64), default="gradient-1", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

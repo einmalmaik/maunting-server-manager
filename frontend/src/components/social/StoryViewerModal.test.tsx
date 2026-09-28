@@ -91,4 +91,13 @@ describe('StoryViewerModal', () => {
     expect(onZu).toHaveBeenCalledTimes(1)
     expect(fehler).not.toHaveBeenCalled()
   })
+
+  it('behauptet keine Ende-zu-Ende-Verschlüsselung', () => {
+    // Bis 29.09.2026 stand im Kopf „Ende-zu-Ende“ mit Schloss. Stories liest
+    // das Backend aber mit, die Datenschutzerklärung sagt das auch so.
+    render(<Seite stories={[story(1, 'eine Story')]} onZu={vi.fn()} />)
+    fireEvent.click(screen.getByText('öffnen'))
+    expect(screen.getByText('eine Story')).toBeInTheDocument()
+    expect(screen.queryByText(/Ende-zu-Ende|verschlüsselt/i)).not.toBeInTheDocument()
+  })
 })

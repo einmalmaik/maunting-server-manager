@@ -25,6 +25,7 @@ from models import (
     DirectChat,
 )
 from models.chat_group import generate_invite_code
+from models.dis_text import vorab_entschluesselt
 from services.panel_settings_service import PanelSettingsService
 from services.sync_event_service import SyncEventService
 from services.achievement_service import AchievementService
@@ -3107,7 +3108,9 @@ class SocialService:
         if blocked_ids:
             stories_query = stories_query.filter(ChatStory.user_id.notin_(blocked_ids))
 
-        stories = stories_query.order_by(ChatStory.created_at.desc()).all()
+        stories_query = stories_query.order_by(ChatStory.created_at.desc())
+        with vorab_entschluesselt(db, stories_query, ChatStory.content, ChatStory.media_url):
+            stories = stories_query.all()
 
         return [
             {

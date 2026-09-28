@@ -43,7 +43,9 @@ STAPEL = 500
 #: Wert erzwingt sie noch einmal, etwa wenn eine spaetere Migration wieder
 #: Klartext entfernt.
 MARKE = "dis.klartext_bereinigt"
-MARKE_WERT = "20260926"
+#: 20260929: Stories (`chat_stories`) sind seither DisText. Abgelaufene und
+#: geloeschte Stories liegen als tote Zeilen noch im Klartext in der Datei.
+MARKE_WERT = "20260929"
 
 #: Ohne Frist wartete VACUUM FULL auf jede laufende Anfrage, und alles, was
 #: danach kommt, wartete auf VACUUM FULL. So scheitert es nach 10 s und wird

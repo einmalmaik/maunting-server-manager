@@ -10,7 +10,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
-  Lock,
   Send,
 } from 'lucide-react'
 import { type ChatStoryItem, deleteStory } from '@/api/social'
@@ -208,9 +207,6 @@ export function StoryViewerModal({
                 <div className="text-label-sm opacity-80 flex items-center gap-1">
                   <Clock className="w-2.5 h-2.5" />
                   <span>{formatRelativeTime(currentStory.created_at, t)}</span>
-                  <span>•</span>
-                  <Lock className="w-2.5 h-2.5 text-status-success" />
-                  <span>Ende-zu-Ende</span>
                 </div>
               </div>
             </div>

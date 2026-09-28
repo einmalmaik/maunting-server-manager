@@ -30,9 +30,15 @@ from typing import BinaryIO
 # gaebe es also nur um den Preis, ihm den Anhangtyp zu verraten.
 MAX_MEDIA_BYTES = 60 * 1024 * 1024  # 60 MB fuer Anhaenge
 MAX_IMAGE_BYTES = 8 * 1024 * 1024   # 8 MB fuer Bilder
-#: Laengste Story-Media-URL: ein Bild von MAX_IMAGE_BYTES als Base64 samt
+#: Story-Bilder stehen als Data-URI in einer ``DisText``-Spalte. Verschluesselt
+#: waechst der Wert noch einmal um ein Drittel und muss unter die 8 MiB des
+#: Sidecars passen (``MAX_JSON_BODY``) und in einen Stapel von
+#: ``vorab_entschluesselt`` (6 MiB). 3 MiB Bild ergeben rund 5,6 MB Chiffrat.
+#: Das Frontend verkleinert Fotos vorher (``compressImageFile``).
+MAX_STORY_IMAGE_BYTES = 3 * 1024 * 1024
+#: Laengste Story-Media-URL: ein Bild von MAX_STORY_IMAGE_BYTES als Base64 samt
 #: Data-URI-Kopf. Alles darueber waere Fuellmaterial, das mitgespeichert wird.
-MAX_STORY_MEDIA_URL_CHARS = (MAX_IMAGE_BYTES + 2) // 3 * 4 + 256
+MAX_STORY_MEDIA_URL_CHARS = (MAX_STORY_IMAGE_BYTES + 2) // 3 * 4 + 256
 MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB fuer Sprachnachrichten
 MAX_ZIP_UNCOMPRESSED_BYTES = 50 * 1024 * 1024  # 50 MB maximal entpackt
 MAX_ZIP_RATIO = 25.0  # Max. 25:1 Kompressionsrate (Schutz vor Zip-Bombs)
@@ -648,7 +654,7 @@ def validate_story_media_url(media_url: str | None) -> str | None:
     - Sichere HTTP(S)-URLs (http://, https://) ohne bösartige Sonderzeichen / Steuerzeichen
     - Relative API-Pfade auf Chat-Medien (/api/social/media/...)
     - Inline Data-URIs fuer Bilder (PNG, JPEG, WebP, GIF, SVG):
-      * Base64-Prüfung und Längenbeschränkung auf MAX_IMAGE_BYTES (8 MB)
+      * Base64-Prüfung und Längenbeschränkung auf MAX_STORY_IMAGE_BYTES (3 MB)
       * Magic Bytes Prüfung bei Binärbildern
       * Vollständige SVG-Sanitization gegen XSS (<script>, onerror, javascript:, etc.)
     """
@@ -658,7 +664,7 @@ def validate_story_media_url(media_url: str | None) -> str | None:
     clean_url = media_url.strip()
     if len(clean_url) > MAX_STORY_MEDIA_URL_CHARS:
         raise StorageLimitExceededError(
-            f"Story-Bild ueberschreitet Maximalgroesse von {MAX_IMAGE_BYTES // (1024*1024)}MB"
+            f"Story-Bild ueberschreitet Maximalgroesse von {MAX_STORY_IMAGE_BYTES // (1024*1024)}MB"
         )
     lower = clean_url.lower()
 
@@ -701,8 +707,8 @@ def validate_story_media_url(media_url: str | None) -> str | None:
             except Exception as e:
                 raise ChatMediaSecurityError("CHAT_MEDIA_INVALID_BASE64", f"Ungueltiges Base64 in Data-URI: {e}")
 
-            if len(raw_bytes) > MAX_IMAGE_BYTES:
-                raise StorageLimitExceededError(f"Story-Bild ueberschreitet Maximalgroesse von {MAX_IMAGE_BYTES // (1024*1024)}MB")
+            if len(raw_bytes) > MAX_STORY_IMAGE_BYTES:
+                raise StorageLimitExceededError(f"Story-Bild ueberschreitet Maximalgroesse von {MAX_STORY_IMAGE_BYTES // (1024*1024)}MB")
 
             if is_svg:
                 sanitize_svg_content(raw_bytes)
@@ -717,7 +723,7 @@ def validate_story_media_url(media_url: str | None) -> str | None:
                 raise MimeTypeSpoofingError("Nicht-Base64 Data-URIs sind nur fuer SVG zulaessig")
             import urllib.parse
             unquoted = urllib.parse.unquote(payload)
-            if len(unquoted.encode("utf-8")) > MAX_IMAGE_BYTES:
+            if len(unquoted.encode("utf-8")) > MAX_STORY_IMAGE_BYTES:
                 raise StorageLimitExceededError("Story-SVG ueberschreitet Maximalgroesse")
             sanitize_svg_content(unquoted)
 

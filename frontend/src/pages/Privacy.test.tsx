@@ -141,11 +141,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.10 vom 2026-09-27 aus (Datenexport im Konto)', () => {
+  it('weist die Fassung 3.12 vom 2026-09-29 aus (Stories verschluesselt gespeichert)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.10`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.12`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -159,13 +159,16 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.storage.items.offlineNotesAndCalendar')).toMatch(/Beim Abmelden wird er gelöscht/);
     // 3.10: der Export; was nur das Geraet oeffnen kann, geht nicht ueber den Server.
     expect(i18n.t('privacyPolicy.sections.retention.items.export')).toMatch(/nicht über den Server/);
+    // 3.12: Stories lagen im Klartext in der Datenbank; lesen kann die Instanz sie weiterhin.
+    expect(i18n.t('privacyPolicy.sections.messenger.items.stories')).toMatch(/nicht Ende-zu-Ende/);
+    expect(i18n.t('privacyPolicy.sections.messenger.items.stories')).toMatch(/Datenbank stehen Text und Bild verschlüsselt/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-09-27');
-    expect(stand).toHaveTextContent('2026-09-27');
+    expect(stand).toHaveAttribute('datetime', '2026-09-29');
+    expect(stand).toHaveTextContent('2026-09-29');
   });
 
   /**
