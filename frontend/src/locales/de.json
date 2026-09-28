@@ -7809,7 +7809,6 @@
     "gespeichert": "Benutzername gespeichert.",
     "fehlerForm": "3–32 Zeichen: Buchstaben, Ziffern, Unterstrich, Punkt oder Bindestrich. Punkt und Bindestrich nicht am Anfang oder Ende.",
     "fehlerReserviert": "„{{name}}“ ist reserviert.",
-    "profilTitel": "Benutzername",
-    "profilHinweis": "Damit meldest du dich an, und so sehen dich andere. Ältere Erwähnungen behalten den alten Namen."
+    "aendern": "Benutzernamen ändern"
   }
 }

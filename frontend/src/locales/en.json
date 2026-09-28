@@ -7809,7 +7809,6 @@
     "gespeichert": "Username saved.",
     "fehlerForm": "3–32 characters: letters, digits, underscore, dot or hyphen. No dot or hyphen at the start or end.",
     "fehlerReserviert": "“{{name}}” is reserved.",
-    "profilTitel": "Username",
-    "profilHinweis": "You sign in with it, and this is how others see you. Older mentions keep the old name."
+    "aendern": "Change username"
   }
 }

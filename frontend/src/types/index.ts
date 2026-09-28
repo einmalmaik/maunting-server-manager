@@ -3,7 +3,8 @@ export interface User {
   username: string
   /**
    * False, solange ein Konto aus Social Login oder Hoster-Shop seinen
-   * vorläufigen Namen trägt. Dann steht statt des Panels die Namenswahl.
+   * vorläufigen Namen trägt. Dann steht im Panel statt der Seiten die
+   * Namenswahl; die App fragt nicht.
    */
   username_gewaehlt?: boolean
   email: string

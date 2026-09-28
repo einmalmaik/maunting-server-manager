@@ -7,11 +7,13 @@ import { benutzernameVorschlag } from '@/lib/benutzername'
 import { useAuthStore } from '@/stores/authStore'
 
 /**
- * Einmalige Namenswahl für Konten aus Social Login und Hoster-Shop.
+ * Einmalige Namenswahl für Konten aus Social Login und Hoster-Shop, nur im
+ * Panel. Sie ersetzt für diese Konten das Registrierformular, das sie nie
+ * gesehen haben. Die App fragt nicht; dort koppelt man nur.
  *
  * Solche Konten bekommen einen vorläufigen Namen (`username_gewaehlt=false`).
- * Bis 09/2026 war das die E-Mail ohne Sonderzeichen. `ProtectedRoute` und die
- * App zeigen diese Seite statt des Panels, bis ein Name gewählt ist. Danach
+ * Bis 09/2026 war das die E-Mail ohne Sonderzeichen. `ProtectedRoute` zeigt
+ * diese Seite statt des Panels, bis ein Name gewählt ist. Danach
  * steht im Store `username_gewaehlt=true`, und das Panel erscheint an
  * derselben Adresse. Eine Umleitung braucht es dafür nicht.
  */
@@ -38,12 +40,7 @@ export function BenutzernameWaehlen() {
             <h2 className="font-headline text-headline-sm text-on-surface">{t('benutzername.titel')}</h2>
           </div>
           <p className="text-sm text-on-surface-variant">{t('benutzername.hinweis')}</p>
-          <BenutzernameFeld
-            start={benutzernameVorschlag(vorlaeufig, email)}
-            knopf={t('benutzername.weiter')}
-            unveraendertErlaubt
-            autoFocus
-          />
+          <BenutzernameFeld start={benutzernameVorschlag(vorlaeufig, email)} />
         </div>
       </div>
     </div>
