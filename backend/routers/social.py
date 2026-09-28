@@ -895,7 +895,12 @@ def send_e2ee_typing_signal(
     user: User = Depends(get_current_user),
     nachweis: str | None = Depends(mailbox_token),
 ) -> dict:
-    SocialService.assert_mailbox_token(db, req.blind_mailbox_id, nachweis, user.id)
+    # Dieselbe Tür wie beim Lesen: Besitznachweis oder Teilnahme. Bis
+    # 29.09.2026 stand hier nur `assert_mailbox_token`, und das tut nichts,
+    # solange kein Nachweis hinterlegt ist, auf ableitbaren Kennungen also
+    # nie. Jedes Konto konnte so „tippt gerade" samt Namen in fremde Gruppen,
+    # an fremde Geräte und an Konten nur für Freunde schicken.
+    SocialService.assert_mailbox_zugang(db, user.id, req.blind_mailbox_id, nachweis)
     SocialService.broadcast_typing_signal(
         blind_mailbox_id=req.blind_mailbox_id,
         status=req.status,
@@ -1401,11 +1406,11 @@ async def social_websocket(
                 blind_mailbox_id = data.get("blind_mailbox_id", "")
                 status = data.get("status", "idle")
                 def _tippen(db, blind_mailbox_id=blind_mailbox_id, status=status, data=data):
-                    # Derselbe Nachweis wie auf dem HTTP-Weg. Ohne ihn wäre
+                    # Dieselbe Prüfung wie auf dem HTTP-Weg. Ohne sie wäre
                     # der WebSocket die offene Hintertür neben der
                     # verschlossenen Vordertür.
-                    SocialService.assert_mailbox_token(
-                        db, blind_mailbox_id, data.get("mailbox_token"), user_id
+                    SocialService.assert_mailbox_zugang(
+                        db, user_id, blind_mailbox_id, data.get("mailbox_token")
                     )
                     SocialService.broadcast_typing_signal(
                         blind_mailbox_id=blind_mailbox_id,
