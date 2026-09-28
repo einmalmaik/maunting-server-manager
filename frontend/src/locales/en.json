@@ -2784,6 +2784,28 @@
       "noConfirmResult": "Passkey confirmation returned no result.",
       "browserOutdated": "This browser can't hand over the passkey. Please update it.",
       "biometricCancelled": "Biometric authentication cancelled."
+    },
+    "browserBestaetigung": {
+      "title": "Confirm with passkey",
+      "forAction": "The MSM app wants to: {{aktion}}",
+      "pickNumber": "Tap the number the app is showing right now. Your passkey will ask next.",
+      "notYou": "Didn't start anything in the app? Close this page.",
+      "done": "Confirmed. You can go back to the app.",
+      "expired": "This confirmation has expired or was already used. Start it again in the app.",
+      "appTitle": "Confirm in your browser",
+      "appText": "Your browser opened the panel. Tap this number there and confirm with your passkey:",
+      "appWaiting": "Waiting for the browser …",
+      "reopen": "Open browser again",
+      "purpose": {
+        "data_export": "Export data",
+        "e2ee_reset": "Reset messenger devices",
+        "device_pairing": "Pair a device",
+        "password_change": "Change password",
+        "email_change": "Change email address",
+        "account_delete": "Delete account",
+        "2fa_disable": "Turn off two-factor sign-in",
+        "oauth_link": "Link a social account"
+      }
     }
   },
   "setup": {
@@ -3421,6 +3443,7 @@
       "passwordLabel": "Confirm password",
       "otpLabel": "2FA code",
       "passkeyHint": "After you click, your passkey will ask for confirmation.",
+      "passkeyHintApp": "After the click your browser opens. Confirm there with your passkey.",
       "withoutSecrets": "Your account has neither a password nor 2FA, so stored credentials (GitHub, Steam, mailboxes, calendars) are left out. With a password or 2FA they are included.",
       "button": "Export data",
       "running": "Putting it together …",

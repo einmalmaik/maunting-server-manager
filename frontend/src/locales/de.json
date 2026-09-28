@@ -2784,6 +2784,28 @@
       "noConfirmResult": "Passkey-Bestätigung lieferte kein Ergebnis.",
       "browserOutdated": "Dieser Browser kann den Passkey nicht übergeben. Bitte aktualisieren.",
       "biometricCancelled": "Biometrische Authentifizierung abgebrochen."
+    },
+    "browserBestaetigung": {
+      "title": "Passkey bestätigen",
+      "forAction": "Die MSM-App möchte: {{aktion}}",
+      "pickNumber": "Tippe die Zahl an, die dir die App gerade zeigt. Danach fragt dein Passkey.",
+      "notYou": "Du hast in der App nichts gestartet? Dann schließ diese Seite.",
+      "done": "Bestätigt. Du kannst zur App zurückkehren.",
+      "expired": "Diese Bestätigung ist abgelaufen oder schon verwendet. Starte sie in der App neu.",
+      "appTitle": "Im Browser bestätigen",
+      "appText": "Dein Browser hat das Panel geöffnet. Tippe dort diese Zahl an und bestätige mit deinem Passkey:",
+      "appWaiting": "Warte auf den Browser …",
+      "reopen": "Browser erneut öffnen",
+      "purpose": {
+        "data_export": "Daten exportieren",
+        "e2ee_reset": "Messenger-Geräte zurücksetzen",
+        "device_pairing": "Gerät koppeln",
+        "password_change": "Passwort ändern",
+        "email_change": "E-Mail-Adresse ändern",
+        "account_delete": "Konto löschen",
+        "2fa_disable": "Zwei-Faktor-Anmeldung abschalten",
+        "oauth_link": "Social-Konto verknüpfen"
+      }
     }
   },
   "setup": {
@@ -3421,6 +3443,7 @@
       "passwordLabel": "Passwort bestätigen",
       "otpLabel": "2FA-Code",
       "passkeyHint": "Nach dem Klick fragt dein Passkey nach.",
+      "passkeyHintApp": "Nach dem Klick öffnet sich dein Browser. Dort bestätigst du mit deinem Passkey.",
       "withoutSecrets": "Dein Konto hat weder Passwort noch 2FA. Hinterlegte Zugangsdaten (GitHub, Steam, Postfächer, Kalender) fehlen deshalb im Export. Mit Passwort oder 2FA kommen sie mit.",
       "button": "Daten exportieren",
       "running": "Wird zusammengestellt …",

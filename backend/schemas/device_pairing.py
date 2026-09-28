@@ -10,7 +10,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from schemas.passkey import PasskeyNachweis
+from schemas.passkey import Zweitnachweis
 from services.device_pairing_service import MAX_BEZEICHNUNG, MAX_VERLAUF_BYTES
 
 
@@ -21,7 +21,7 @@ class PairingCreateRequest(BaseModel):
     label: str = Field(default="", max_length=MAX_BEZEICHNUNG)
     password: str = Field(default="", max_length=256)
     otp_code: str = Field(default="", max_length=16)
-    passkey: PasskeyNachweis | None = None
+    passkey: Zweitnachweis | None = None
 
 
 class PairingCreated(BaseModel):

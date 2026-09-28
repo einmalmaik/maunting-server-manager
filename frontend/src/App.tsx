@@ -16,6 +16,7 @@ const Register = lazy(() => import('./pages/Register').then(module => ({ default
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword').then(module => ({ default: module.ForgotPassword })))
 const ResetPassword = lazy(() => import('./pages/ResetPassword').then(module => ({ default: module.ResetPassword })))
 const AiFreigabe = lazy(() => import('./pages/AiFreigabe').then(module => ({ default: module.AiFreigabe })))
+const BrowserBestaetigung = lazy(() => import('./pages/BrowserBestaetigung').then(module => ({ default: module.BrowserBestaetigung })))
 const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })))
 const Servers = lazy(() => import('./pages/Servers').then(module => ({ default: module.Servers })))
 const Teams = lazy(() => import('./pages/Teams').then(module => ({ default: module.Teams })))
@@ -113,6 +114,9 @@ function App() {
             noch eine Sitzung offen ist. Das Token im Pfad ist die ganze
             Berechtigung. */}
         <Route path="/ai/freigabe/:token" element={<AiFreigabe />} />
+        {/* Passkey-Bestaetigung fuer die App. Ohne Anmeldung, den Menschen
+            belegt der Passkey; die Kennung steht im Fragment. */}
+        <Route path="/bestaetigen" element={<BrowserBestaetigung />} />
         <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
         
         {/* Oeffentliche Datenschutz-Route, wenn nicht eingeloggt */}

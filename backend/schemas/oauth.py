@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from schemas.passkey import PasskeyNachweis
+from schemas.passkey import Zweitnachweis
 
 # ── Anzeige-Presets (fuer UI-Dropdowns) ────────────────────────────────
 
@@ -114,4 +114,4 @@ class OAuthLinkStartRequest(BaseModel):
 
     password: str = Field("", max_length=256)
     otp_code: str = Field("", max_length=16)
-    passkey: PasskeyNachweis | None = None
+    passkey: Zweitnachweis | None = None

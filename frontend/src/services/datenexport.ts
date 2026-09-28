@@ -12,7 +12,7 @@ import { api } from '@/api/client'
 import i18n from '@/i18n'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { zipSchreiben, type ZipEintrag } from '@/lib/zipSchreiben'
-import type { PasskeyNachweis } from '@/services/passkeyService'
+import { inDerApp, type Zweitnachweis } from '@/services/passkeyService'
 import {
   CALENDAR_CIPHERTEXT_PREFIX,
   NOTE_CIPHERTEXT_PREFIX,
@@ -35,7 +35,7 @@ import { istOffen } from '@/services/lokaleVersiegelung'
 export interface ExportNachweis {
   password?: string
   otp_code?: string
-  passkey?: PasskeyNachweis | null
+  passkey?: Zweitnachweis | null
 }
 
 /** Nur in der App: der Tresor, falls entsperrt. */
@@ -222,10 +222,6 @@ export async function exportErstellen(nachweis: ExportNachweis, tresor?: TresorQ
   if (tresor?.entsperrt) eintraege.push(json('tresor/eintraege.json', tresor.eintraege()))
 
   return { blob: zipSchreiben(eintraege), dateiname: `msm-datenexport-${datum}.zip`, ...ergebnis }
-}
-
-function inDerApp(): boolean {
-  return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window)
 }
 
 /** Legt das Zip ab. `false` heißt: der Mensch hat den Speichern-Dialog abgebrochen. */

@@ -14,9 +14,10 @@
  *    hinaus, und der Server glaubte es. Das Feld konnte jeder selbst setzen.
  */
 
-import { api } from '@/api/client'
+import { api, isNetworkOrOfflineError } from '@/api/client'
 import i18n from '@/i18n'
-import { pruefeBiometrieVerfuegbar, verifiziereBiometrie } from '@/desktop/tauri'
+import { oeffneBrowser, pruefeBiometrieVerfuegbar, verifiziereBiometrie } from '@/desktop/tauri'
+import { useBrowserBestaetigung } from '@/stores/browserBestaetigung'
 
 async function checkAndroidBiometric(): Promise<boolean> {
   try {
@@ -150,6 +151,15 @@ export interface PasskeyNachweis {
     userHandle: string | null
   }
 }
+
+/** Eine im Browser bestätigte Kennung (nur App), siehe `imBrowserBestaetigen`. */
+export interface BrowserNachweis {
+  type: 'browser'
+  vorgang: string
+}
+
+/** Was eine geschützte Aktion als Passkey-Nachweis annimmt. */
+export type Zweitnachweis = PasskeyNachweis | BrowserNachweis
 
 export interface PasskeyAnlage {
   id: string
@@ -288,11 +298,70 @@ export async function passkeyBestaetigen(optionen: PasskeyBestaetigungsOptionen)
   }
 }
 
+/** Läuft in der MSS-App (Tauri) statt im Browser. */
+export function inDerApp(): boolean {
+  return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window)
+}
+
+const STAND_TAKT_MS = 2000
+
+/**
+ * Passkey-Bestätigung für die App über den Standardbrowser.
+ *
+ * Ein Passkey gilt nur für die Adresse des Panels, die App läuft unter
+ * `tauri.localhost` und findet dort keinen. Also öffnet sie das Panel im
+ * Browser, zeigt eine Zahl, die man dort antippt (gegen zugeschickte Links),
+ * und wartet, bis der Server den Vorgang als bestätigt meldet. Eingelöst wird
+ * er erst mit der eigentlichen Aktion, einmal und nur für `zweck`.
+ */
+async function imBrowserBestaetigen(zweck: PasskeyZweck): Promise<BrowserNachweis> {
+  const { vorgang, zahl, url } = await api<{ vorgang: string; zahl: number; url: string }>('/auth/passkey/browser', {
+    method: 'POST',
+    body: JSON.stringify({ zweck }),
+  })
+  await oeffneBrowser(url)
+
+  return new Promise<BrowserNachweis>((resolve, reject) => {
+    let fertig = false
+    let takt: ReturnType<typeof setTimeout> | undefined
+    const ende = (fehler?: Error) => {
+      if (fertig) return
+      fertig = true
+      clearTimeout(takt)
+      useBrowserBestaetigung.getState().setzen(null)
+      if (fehler) reject(fehler)
+      else resolve({ type: 'browser', vorgang })
+    }
+    const fragen = async () => {
+      try {
+        const { stand } = await api<{ stand: 'offen' | 'bestaetigt' | 'verfallen' }>('/auth/passkey/browser/stand', {
+          method: 'POST',
+          body: JSON.stringify({ vorgang }),
+        })
+        if (stand === 'bestaetigt') return ende()
+        if (stand === 'verfallen') return ende(new Error(i18n.t('auth.browserBestaetigung.expired')))
+      } catch (err) {
+        // Kurz ohne Netz: weiter fragen, der Vorgang verfällt ohnehin nach 5 Minuten.
+        if (!isNetworkOrOfflineError(err)) return ende(err instanceof Error ? err : new Error(String(err)))
+      }
+      if (!fertig) takt = setTimeout(fragen, STAND_TAKT_MS)
+    }
+    useBrowserBestaetigung.getState().setzen({
+      zahl,
+      adresse: url,
+      abbrechen: () => ende(new Error(i18n.t('auth.passkeyErrors.cancelled'))),
+    })
+    takt = setTimeout(fragen, STAND_TAKT_MS)
+  })
+}
+
 /**
  * Der Nachweis vor einer geschützten Aktion: Challenge holen, unterschreiben.
- * Die Challenge gilt nur für `zweck` und nur einmal.
+ * Die Challenge gilt nur für `zweck` und nur einmal. In der App geht es über
+ * den Browser (`imBrowserBestaetigen`).
  */
-export async function passkeyNachweis(zweck: PasskeyZweck): Promise<PasskeyNachweis> {
+export async function passkeyNachweis(zweck: PasskeyZweck): Promise<Zweitnachweis> {
+  if (inDerApp()) return imBrowserBestaetigen(zweck)
   const optionen = await api<PasskeyBestaetigungsOptionen>('/auth/passkey/options', {
     method: 'POST',
     body: JSON.stringify({ zweck }),
