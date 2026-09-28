@@ -944,6 +944,108 @@ def test_caldav_import_ohne_rrule_bleibt_wie_bisher():
     assert events[0]["title"] == "Geburtstag Lisa"
 
 
+# ── CalDAV-Schreiben ──────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def caldav_puts(monkeypatch):
+    """Ein angebundener CalDAV-Kalender; gesammelt wird, was per PUT hinausgeht."""
+    gesendet: list[str] = []
+    calendar = SimpleNamespace(
+        id=78, provider_type="caldav", caldav_url="https://calendar.invalid/dav/",
+        caldav_username="user", name="Extern", get_credentials=lambda: "synthetic-secret",
+    )
+
+    class FakeClient:
+        def put(self, _url, **kwargs):
+            gesendet.append(kwargs["content"])
+            return SimpleNamespace(status_code=201, text="")
+
+    monkeypatch.setattr(CalendarService, "get_calendar", lambda *_args, **_kwargs: calendar)
+    monkeypatch.setattr("services.calendar_service._caldav_http_client", lambda: FakeClient())
+    return gesendet
+
+
+def test_caldav_serie_kommt_als_regel_beim_anbieter_an(db_session, test_user, caldav_puts):
+    """Bis zum 29.09.2026 fiel `recurrence` auf dem CalDAV-Weg weg.
+
+    Eine woechentliche Serie, die die KI im angebundenen Kalender anlegte,
+    stand beim Anbieter als ein einziger Termin. Der Termin liegt im Winter
+    (09:00 Berlin = 08:00Z), die Ausnahme im Sommer (09:00 Berlin = 07:00Z).
+    """
+    from services.calendar_service import _parse_vevents
+
+    test_user.time_zone = "Europe/Berlin"
+    db_session.commit()
+    CalendarService.create_event(
+        db=db_session, user=test_user,
+        title="Wochentermin", start_time="2026-01-05 09:00", end_time="2026-01-05 10:00",
+        recurrence=_serie("FREQ=WEEKLY;BYDAY=MO", ausnahmen=["2026-07-06"]),
+    )
+
+    assert len(caldav_puts) == 1
+    ics = caldav_puts[0]
+    assert "\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\n" in ics
+    assert "\r\nDTSTART:20260105T080000Z\r\n" in ics, "09:00 Berlin ist im Winter 08:00Z"
+    assert "\r\nEXDATE:20260706T070000Z\r\n" in ics, "09:00 Berlin ist im Sommer 07:00Z"
+
+    # Was hinausgeht, liest der eigene CalDAV-Import wieder als dieselbe Serie.
+    vorkommen = [
+        e["vorkommen"]
+        for e in _parse_vevents(
+            ics,
+            von=datetime(2026, 6, 29, tzinfo=timezone.utc),
+            bis=datetime(2026, 7, 20, tzinfo=timezone.utc),
+            tz_name="Europe/Berlin",
+        )
+    ]
+    assert vorkommen == ["2026-06-29", "2026-07-13"], "der 06.07. ist ausgenommen"
+
+
+def test_caldav_bearbeiten_schreibt_die_regel_mit(db_session, test_user, caldav_puts):
+    CalendarService.update_event(
+        db=db_session, user=test_user, event_id="abc123",
+        title="Geburtstag", start_time="2026-03-14T09:00:00Z", end_time="2026-03-14T10:00:00Z",
+        recurrence=_serie("FREQ=YEARLY"),
+    )
+    assert len(caldav_puts) == 1
+    assert "\r\nRRULE:FREQ=YEARLY\r\n" in caldav_puts[0]
+
+
+def test_caldav_einzeltermin_bleibt_ohne_regel(db_session, test_user, caldav_puts):
+    CalendarService.create_event(
+        db=db_session, user=test_user,
+        title="Einmal", start_time="2026-03-14T09:00:00Z", end_time="2026-03-14T10:00:00Z",
+        recurrence=_serie(None),
+    )
+    assert len(caldav_puts) == 1
+    assert "RRULE" not in caldav_puts[0]
+
+
+def test_caldav_weist_unbrauchbare_regel_ab_statt_sie_zu_verwerfen(db_session, test_user, caldav_puts):
+    """Eine Regel, die nicht passt, darf nicht still zum Einzeltermin werden."""
+    from services.kalender_serie import SerienRegelFehler
+
+    with pytest.raises(SerienRegelFehler):
+        CalendarService.create_event(
+            db=db_session, user=test_user,
+            title="Letzter Werktag", start_time="2026-03-31T09:00:00Z", end_time="2026-03-31T10:00:00Z",
+            recurrence=_serie("FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1"),
+        )
+    assert caldav_puts == [], "nichts geht hinaus, wenn die Regel nicht stimmt"
+
+
+def test_caldav_e2ee_regel_bleibt_ein_einzeltermin(db_session, test_user, caldav_puts):
+    """Einen Umschlag kann der Server nicht lesen; wie im Export fehlt die Regel."""
+    CalendarService.create_event(
+        db=db_session, user=test_user,
+        title="Termin", start_time="2026-03-14T09:00:00Z", end_time="2026-03-14T10:00:00Z",
+        recurrence="sv-cal-v1:dummy-umschlag",
+    )
+    assert len(caldav_puts) == 1
+    assert "RRULE" not in caldav_puts[0]
+
+
 
 
 

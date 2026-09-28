@@ -11,6 +11,7 @@ Sicherheitsinvariante:
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+import json
 import logging
 import re
 import threading
@@ -31,6 +32,7 @@ from models.user_calendar import UserCalendar
 from services.dis_client import DisClient, DisDecryptionError
 from services.email_service import EmailService
 from services.kalender_serie import (
+    LEERE_SERIE,
     LEERES_DOKUMENT,
     Serie,
     SerienRegelFehler,
@@ -393,6 +395,71 @@ def _ical_zeit_schreiben(dt: datetime, ganztaegig: bool, tz: timezone | ZoneInfo
     if ganztaegig:
         return dt.astimezone(tz).strftime("%Y%m%d")
     return dt.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _ical_serienzeilen(
+    serie: Serie, start_dt: datetime, ganztaegig: bool, tz: timezone | ZoneInfo
+) -> list[str]:
+    """RRULE und EXDATE eines Serientermins, fuer den Export und fuer CalDAV.
+
+    Die Serie geht als Regel hinaus, nicht als Liste von Vorkommen: das
+    empfangende Programm rechnet selbst, und ein Geburtstag ohne Ende braucht
+    so keine kuenstliche Grenze.
+
+    Der Ausnahmetag ist ein **lokales** Datum, die Uhrzeit steht am Start.
+    Beides muss in der Benutzerzone zusammengesetzt und erst dann nach UTC
+    gerechnet werden. Lokales Datum mit UTC-Uhrzeit zu verkleben geht ueber
+    die Sommerzeit um eine Stunde daneben, bei Terminen um Mitternacht um
+    einen ganzen Tag. Das empfangende Programm findet das Vorkommen dann
+    nicht und zeigt den abgesagten Termin trotzdem an.
+    """
+    if not serie.ist_serie:
+        return []
+    zeilen = [f"RRULE:{serie.rrule}"]
+    start_lokal = start_dt.astimezone(tz)
+    for tag in sorted(serie.ausnahmen):
+        if ganztaegig:
+            zeilen.append(f"EXDATE;VALUE=DATE:{tag.replace('-', '')}")
+            continue
+        try:
+            datum = date.fromisoformat(tag)
+        except ValueError:
+            continue
+        treffer = datetime.combine(datum, start_lokal.time()).replace(tzinfo=tz)
+        zeilen.append(f"EXDATE:{treffer.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}")
+    return zeilen
+
+
+def _serie_fuer_caldav(recurrence: str | None) -> Serie:
+    """Das Wiederholungsdokument eines Termins, der zum CalDAV-Anbieter geht.
+
+    Bis zum 29.09.2026 fiel es dort einfach weg: eine Serie, die die KI in
+    einem angebundenen Kalender anlegte, stand beim Anbieter als ein einziger
+    Termin.
+
+    Ein E2EE-Umschlag bleibt ein Einzeltermin, wie im Export: die Regel kann
+    der Server nicht lesen. Eine lesbare Regel, die nicht passt, wird dagegen
+    abgewiesen statt verworfen, sonst stuende eine Serie unter ihrem Namen
+    als Einzeltermin beim Anbieter. Abweichende Einzeltermine kann dieser
+    Weg nicht schreiben, auch sie werden abgewiesen.
+    """
+    text = (recurrence or "").strip()
+    if not text or text.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+        return LEERE_SERIE
+    try:
+        roh = json.loads(text)
+    except ValueError as e:
+        raise SerienRegelFehler("Die Wiederholung ist kein lesbares Dokument.") from e
+    if not isinstance(roh, dict):
+        raise SerienRegelFehler("Die Wiederholung ist kein lesbares Dokument.")
+    if roh.get("rrule"):
+        regel_lesen(str(roh["rrule"]))
+    serie = serie_lesen(text)
+    if serie.abweichungen:
+        raise SerienRegelFehler(
+            "Abweichende Einzeltermine lassen sich nicht in einen CalDAV-Kalender schreiben."
+        )
+    return serie
 
 
 def _parse_vevents(
@@ -1049,10 +1116,18 @@ class CalendarService:
         if not secret:
             raise ValueError(f"Keine Zugangsdaten für Kalender {calendar.name}")
 
+        serie = _serie_fuer_caldav(recurrence)
         event_uid = str(uuid.uuid4())
         dt_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        dt_start = _format_ical_date(start_time)
-        dt_end = _format_ical_date(end_time)
+        # Ohne Zeitzone gilt die Eingabe als Ortszeit des Benutzers, wie im
+        # nativen Kalender und beim Bearbeiten. Die Ausnahmen der Serie werden
+        # an diesem Start ausgerichtet.
+        start_dt = _parse_datetime(start_time, user=user)
+        dt_start = start_dt.strftime("%Y%m%dT%H%M%SZ")
+        dt_end = _format_ical_date(end_time, user=user)
+        serien_zeilen = "".join(
+            f"{z}\r\n" for z in _ical_serienzeilen(serie, start_dt, False, _user_timezone(user))
+        )
 
         ical_payload = (
             "BEGIN:VCALENDAR\r\n"
@@ -1063,6 +1138,7 @@ class CalendarService:
             f"DTSTAMP:{dt_stamp}\r\n"
             f"DTSTART:{dt_start}\r\n"
             f"DTEND:{dt_end}\r\n"
+            f"{serien_zeilen}"
             f"SUMMARY:{title}\r\n"
             f"DESCRIPTION:{description or ''}\r\n"
             f"LOCATION:{location or ''}\r\n"
@@ -1281,9 +1357,15 @@ class CalendarService:
         if not secret:
             raise ValueError(f"Keine Zugangsdaten für Kalender {calendar.name}")
 
-        dt_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        dt_start = _format_ical_date(start_time, user=user) if start_time else dt_stamp
+        serie = _serie_fuer_caldav(recurrence)
+        jetzt = datetime.now(timezone.utc)
+        dt_stamp = jetzt.strftime("%Y%m%dT%H%M%SZ")
+        start_dt = _parse_datetime(start_time, user=user) if start_time else jetzt
+        dt_start = start_dt.strftime("%Y%m%dT%H%M%SZ")
         dt_end = _format_ical_date(end_time, user=user) if end_time else dt_stamp
+        serien_zeilen = "".join(
+            f"{z}\r\n" for z in _ical_serienzeilen(serie, start_dt, False, _user_timezone(user))
+        )
 
         ical_payload = (
             "BEGIN:VCALENDAR\r\n"
@@ -1294,6 +1376,7 @@ class CalendarService:
             f"DTSTAMP:{dt_stamp}\r\n"
             f"DTSTART:{dt_start}\r\n"
             f"DTEND:{dt_end}\r\n"
+            f"{serien_zeilen}"
             f"SUMMARY:{title or 'Termin'}\r\n"
             f"DESCRIPTION:{description or ''}\r\n"
             f"LOCATION:{location or ''}\r\n"
@@ -1507,43 +1590,13 @@ class CalendarService:
                 if loc:
                     event_lines.append(f"LOCATION:{loc}")
 
-                # Die Serie geht als Regel hinaus, nicht als Liste von
-                # Vorkommen — das abonnierende Programm rechnet selbst, und ein
-                # Geburtstag ohne Ende braucht so keine kuenstliche Grenze.
-                #
                 # Nur fuer Serien, deren Regel der Server lesen kann. Bei
                 # E2EE-Terminen fehlt sie, so wie dort schon heute der Titel
                 # fehlt: der Feed ist fuer sie ohnehin unbrauchbar, weil in
                 # SUMMARY der Umschlag steht.
-                serie = serie_lesen(ev.get("recurrence"))
-                if serie.ist_serie:
-                    event_lines.append(f"RRULE:{serie.rrule}")
-                    if serie.ausnahmen:
-                        # Der Ausnahmetag ist ein **lokales** Datum, die
-                        # Uhrzeit steht am Start. Beides muss in der
-                        # Benutzerzone zusammengesetzt und erst dann nach UTC
-                        # gerechnet werden. Lokales Datum mit UTC-Uhrzeit zu
-                        # verkleben geht ueber die Sommerzeit um eine Stunde
-                        # daneben — und bei Terminen um Mitternacht um einen
-                        # ganzen Tag. Das abonnierende Programm findet das
-                        # Vorkommen dann nicht und zeigt den abgesagten Termin
-                        # trotzdem an.
-                        start_lokal = start_dt.astimezone(tz)
-                        for tag in sorted(serie.ausnahmen):
-                            kompakt = tag.replace("-", "")
-                            if is_all_day:
-                                event_lines.append(f"EXDATE;VALUE=DATE:{kompakt}")
-                                continue
-                            try:
-                                datum = date.fromisoformat(tag)
-                            except ValueError:
-                                continue
-                            treffer = datetime.combine(
-                                datum, start_lokal.time()
-                            ).replace(tzinfo=tz)
-                            event_lines.append(
-                                f"EXDATE:{treffer.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
-                            )
+                event_lines.extend(
+                    _ical_serienzeilen(serie_lesen(ev.get("recurrence")), start_dt, is_all_day, tz)
+                )
 
                 event_lines.append("END:VEVENT")
 
