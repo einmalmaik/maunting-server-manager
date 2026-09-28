@@ -1,20 +1,13 @@
 """Unit tests for NotesService."""
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from database import Base
 from models import User, Note, Team, TeamMember
 from services.notes_service import NotesService
 
 
 @pytest.fixture
-def db_session():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(bind=engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
+def db_session(db):
+    """Die gemeinsame Test-Datenbank aus conftest.py."""
+    return db
 
 
 @pytest.fixture
@@ -177,7 +170,7 @@ def test_notes_automatic_migration_of_legacy_plaintext(db_session, test_user):
     db_session.execute(
         text(
             "INSERT INTO notes (user_id, note_uid, title, content, category, color, is_pinned, is_archived, note_type, created_at, updated_at) "
-            "VALUES (:uid, :nuid, :title, :content, 'personal', 'primary', 0, 0, 'personal', datetime('now'), datetime('now'))"
+            "VALUES (:uid, :nuid, :title, :content, 'personal', 'primary', false, false, 'personal', now(), now())"
         ),
         {
             "uid": test_user.id,
@@ -291,7 +284,8 @@ def test_titelsortierung_nach_entschluesselung(db_session, test_user, monkeypatc
     from services import notes_service
     for title, pinned in [("Zulu", False), ("alpha", False), ("Pinned", True)]:
         NotesService.create_note(db_session, user=test_user, title=title, content="", is_pinned=pinned)
-    rows = db_session.query(Note).all()
+    # In Anlagereihenfolge: ohne ORDER BY verspricht die Datenbank keine.
+    rows = db_session.query(Note).order_by(Note.id).all()
     titles = {row.id: title for row, title in zip(rows, ["Zulu", "alpha", "Pinned"])}
     for row, encrypted in zip(rows, ["cipher-a", "cipher-z", "cipher-m"]):
         row.title = encrypted

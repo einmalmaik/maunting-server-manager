@@ -464,7 +464,7 @@ def test_a_queued_mail_does_not_outlive_its_recipient(db: Session) -> None:
     assert db.get(AiMailOutbox, kennung) is None
 
 
-def test_the_migration_carries_the_same_on_delete_as_the_model(tmp_path) -> None:
+def test_the_migration_carries_the_same_on_delete_as_the_model(tmp_path, pg_wegwerf) -> None:
     """Modell und Migration muessen dasselbe `ON DELETE` tragen.
 
     Die Testsuite baut ihr Schema mit `create_all` aus den Modellen, der Betrieb
@@ -476,7 +476,7 @@ def test_the_migration_carries_the_same_on_delete_as_the_model(tmp_path) -> None
 
     Auch dieser Test gehoert perspektivisch nach `test_schema_constraints.py`.
     """
-    db_url = f"sqlite:///{tmp_path / 'outbox.db'}"
+    db_url = pg_wegwerf("outbox")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -560,8 +560,8 @@ async def test_ten_thousand_due_mails_stay_within_the_allowed_concurrency(
     wieder fort — `aufraeumen` wartet ihn aus.
 
     **Und die Datenbank wird währenddessen nicht von hier aus gelesen.** Der
-    Fortschritt kommt aus den Vermerken des Arbeiters. Die Testsuite bindet eine
-    einzige SQLite-Verbindung (`StaticPool` in conftest); sie zugleich aus
+    Fortschritt kommt aus den Vermerken des Arbeiters. Die Testsuite bindet je
+    Worker eine einzige Verbindung (`StaticPool` in conftest); sie zugleich aus
     diesem Test und aus dem Datenbankthread des Arbeiters anzufassen wäre kein
     Nebeneinander, sondern ein Datenfehler. Geprüft wird die Tabelle am Ende,
     wenn der Arbeiter steht.
@@ -601,10 +601,12 @@ async def test_ten_thousand_due_mails_stay_within_the_allowed_concurrency(
         laufend += 1
         hoechststand = max(hoechststand, laufend)
         threads_hoechststand = max(threads_hoechststand, threading.active_count())
-        # Ein echter Versand wartet auf die Gegenseite. Ohne diesen
-        # Aufgabenwechsel liefe jede Zustellung am Stueck durch und der
-        # Hoechststand waere immer 1 — der Test saehe dann nichts.
-        await asyncio.sleep(0)
+        # Ein echter Versand wartet auf die Gegenseite. Ohne dieses Warten
+        # liefe jede Zustellung am Stueck durch und der Hoechststand waere
+        # immer 1 — der Test saehe dann nichts. Ein blosser Aufgabenwechsel
+        # (`sleep(0)`) reicht nicht: die Adressabfrage davor dauert auf
+        # PostgreSQL laenger als ein Schleifendurchlauf.
+        await asyncio.sleep(0.002)
         laufend -= 1
         zugestellt += 1
         return True
@@ -933,7 +935,7 @@ async def test_a_restart_between_queueing_and_sending_loses_nothing(
     assert ai_mail_outbox.arbeiter_starten() is True
     try:
         # Gewartet wird auf den Vermerk des Arbeiters und nicht auf die Tabelle:
-        # solange er läuft, gehört die eine SQLite-Verbindung der Testsuite
+        # solange er läuft, gehört die eine Verbindung der Testsuite
         # seinem Datenbankthread. `aufraeumen` wartet ihn aus, danach liest
         # dieser Test wieder selbst.
         for _ in range(500):
@@ -1004,7 +1006,7 @@ async def test_ten_thousand_mails_with_facts_stay_within_the_same_limit(
         # Ein echter Modellaufruf wartet auf die Gegenseite, und zwar laenger
         # als ein SMTP-Versand. Ohne diesen Aufgabenwechsel saehe der Test die
         # Gleichzeitigkeit nicht.
-        await asyncio.sleep(0)
+        await asyncio.sleep(0.002)
         laufend -= 1
         verfasst += 1
         return ai_mail_text.Mailtext(betreff="Kurz", absaetze=["Alles ruhig."])
@@ -1014,7 +1016,7 @@ async def test_ten_thousand_mails_with_facts_stay_within_the_same_limit(
         laufend += 1
         hoechststand = max(hoechststand, laufend)
         threads_hoechststand = max(threads_hoechststand, threading.active_count())
-        await asyncio.sleep(0)
+        await asyncio.sleep(0.002)
         laufend -= 1
         zugestellt += 1
         return True

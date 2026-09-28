@@ -42,7 +42,7 @@ class Team(Base):
     ist es gesetzt, handelt es sich um das Ein-Mann-Team dieses Benutzers, und
     die UNIQUE-Bedingung stellt sicher, dass es davon genau eines gibt. Ist es
     NULL, ist es ein echtes Team — und weil NULL-Werte in einer
-    UNIQUE-Bedingung nicht kollidieren (Postgres wie SQLite), darf derselbe
+    UNIQUE-Bedingung nicht kollidieren, darf derselbe
     Benutzer beliebig viele echte Teams gruenden.
 
     Ein separates `is_personal`-Flag waere die naheliegendere Loesung gewesen,

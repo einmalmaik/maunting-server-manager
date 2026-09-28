@@ -106,11 +106,13 @@ def _langsamer_anlauf_ohne_sitzung(monkeypatch: pytest.MonkeyPatch) -> dict:
     gilt fuer genau einen Fall: zwei **verschiedene** Unterhaltungen laufen
     wirklich gleichzeitig, das ist ja die Zusage. `_anlauf_im_thread` oeffnet
     aber vor `lauf_beginnen` eine eigene Sitzung und holt Benutzer,
-    Unterhaltung und Anbieter — auf SQLite teilen sich alle Sitzungen eine
-    Verbindung, und zwei Threads darauf sind kein langsamer Zugriff, sondern
-    ein Datenfehler (`IndexError` aus dem Zeilenbau von SQLAlchemy). Genau das
-    haelt `test_auf_sqlite_laeuft_genau_ein_anlauf` weiter unten fest, und
-    dieser Test hebelt es per `_anlauf_nebenlaeufigkeit` bewusst aus.
+    Unterhaltung und Anbieter — auf der geteilten Testverbindung (StaticPool)
+    teilen sich alle Sitzungen eines Workers eine Verbindung, und zwei Threads
+    darauf sind kein langsamer Zugriff, sondern ein Datenfehler. Genau das
+    haelt `test_auf_der_geteilten_testverbindung_laeuft_genau_ein_anlauf`
+    weiter unten fest (den Betrieb
+    `test_im_betrieb_laufen_acht_anlaeufe_nebeneinander`), und dieser Test
+    hebelt es per `_anlauf_nebenlaeufigkeit` bewusst aus.
 
     Bei derselben Unterhaltung faellt das nicht auf: dort reiht das Schloss die
     Threads ohnehin, sie kommen nie gleichzeitig an die Verbindung. Deshalb
@@ -359,15 +361,18 @@ async def test_das_schloss_verschwindet_wieder(
     assert conversation.id not in ai_stream_service._ANLAUF_WARTENDE
 
 
-def test_auf_sqlite_laeuft_genau_ein_anlauf() -> None:
-    """Die Breite haengt an der Datenbank, und das ist kein Detail.
+@pytest.mark.echte_nebenlaeufigkeit
+def test_im_betrieb_laufen_acht_anlaeufe_nebeneinander() -> None:
+    """Jeder Laufbeginn holt sich im Betrieb eine eigene Verbindung aus dem Pool."""
+    assert ai_stream_service._anlauf_nebenlaeufigkeit() == 8
 
-    Auf SQLite teilen sich alle Sitzungen eine Verbindung. Zwei Transaktionen
-    gleichzeitig darauf sind keine Nebenlaeufigkeit, sondern ein Datenfehler:
-    der Commit der einen schliesst die offene Arbeit der anderen mit ab.
 
-    Der Test steht hier, damit niemand die Zahl spaeter "vereinheitlicht". Die
-    Testsuite selbst laeuft auf SQLite — eine Aenderung an dieser Stelle waere
-    also gerade dort gefaehrlich, wo sie am wenigsten auffiele.
+def test_auf_der_geteilten_testverbindung_laeuft_genau_ein_anlauf() -> None:
+    """Die Breite haengt an der Verbindung, und das ist kein Detail.
+
+    Die Testsuite teilt je Worker eine Verbindung (`StaticPool`). Zwei
+    Transaktionen gleichzeitig darauf sind keine Nebenlaeufigkeit, sondern ein
+    Datenfehler: der Commit der einen schliesst die offene Arbeit der anderen
+    mit ab. `conftest.py` drosselt deshalb auf eins.
     """
     assert ai_stream_service._anlauf_nebenlaeufigkeit() == 1

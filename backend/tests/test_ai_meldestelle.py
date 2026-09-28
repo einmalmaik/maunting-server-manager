@@ -737,8 +737,8 @@ def _frisch(engine):
     return inspect(engine)
 
 
-def test_die_migration_traegt_die_meldungstabelle(tmp_path: Path) -> None:
-    db_url = f"sqlite:///{tmp_path / 'meldungen.db'}"
+def test_die_migration_traegt_die_meldungstabelle(tmp_path: Path, pg_wegwerf) -> None:
+    db_url = pg_wegwerf("meldungen")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent

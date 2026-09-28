@@ -265,8 +265,8 @@ def provision_server(
 
         set_phase(db, task, "allocating")
         # Die Node-Zeile serialisiert Kapazitäts- und Portvergabe über mehrere
-        # Backend-Prozesse. SQLite ignoriert FOR UPDATE in Tests; PostgreSQL
-        # hält den Lock bis Server und Ports gemeinsam committed sind.
+        # Backend-Prozesse. PostgreSQL hält den Lock, bis Server und Ports
+        # gemeinsam committed sind.
         if target_node is not None:
             target_node = (
                 db.query(Node)

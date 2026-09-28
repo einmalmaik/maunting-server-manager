@@ -141,9 +141,9 @@ class TestEinmalverbrauch:
     def test_der_zweite_klick_findet_nichts_mehr(self, db: Session, lage) -> None:
         """Zwei Klicks auf denselben Link sind nicht zwei Ausfuehrungen.
 
-        Verbraucht wird per bedingtem UPDATE auf ``consumed_at IS NULL`` — auf
-        SQLite gibt es kein ``SELECT ... FOR UPDATE``, und die Zeilenzahl der
-        Antwort ist die Sperre.
+        Verbraucht wird per bedingtem UPDATE auf ``consumed_at IS NULL`` — ohne
+        vorheriges ``SELECT ... FOR UPDATE``; die Zeilenzahl der Antwort ist die
+        Sperre.
         """
         vorschlag = _vorschlag(db, lage)
         _, token = _freigabe(db, lage, vorschlag)
@@ -513,8 +513,10 @@ class TestAnfordern:
         bis zu drei Worker plus die Guardian-Heilung —, und jeder fragt in einer
         eigenen Sitzung. Ohne Sperre sähen zwei davon beide "keine offene
         Freigabe" und schrieben beide eine Mail. Echte Nebenläufigkeit ist auf
-        SQLite nicht herstellbar — ``FOR UPDATE`` ist dort eine leere Anweisung
-        —, deshalb hält dieser Test die Reihenfolge statt des Rennens.
+        der geteilten Testverbindung (StaticPool) nicht herstellbar — alle
+        Sitzungen stecken dort in derselben Transaktion, ``FOR UPDATE`` sperrt
+        niemanden aus —, deshalb hält dieser Test die Reihenfolge statt des
+        Rennens.
         """
         user, _, _, run = lage
         vorschlag = _vorschlag(db, lage)

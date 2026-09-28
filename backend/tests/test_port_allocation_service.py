@@ -2,7 +2,7 @@
 
 Wir mocken den Host-Check (``is_port_available``), damit die Tests reproduzier-
 bar und unabhaengig von echten Listenern laufen. Die DB-Logik laeuft real
-gegen das In-Memory-SQLite aus der conftest.
+gegen die PostgreSQL-Testdatenbank aus der conftest.
 """
 
 from __future__ import annotations

@@ -1,10 +1,6 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-from database import Base
 from models import User, UserCalendar, CalendarEvent
 from services.calendar_service import CalendarService
 
@@ -32,13 +28,9 @@ def test_caldav_read_adds_time_range_and_reuses_short_cache(monkeypatch, db_sess
 
 
 @pytest.fixture
-def db_session():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
+def db_session(db):
+    """Die gemeinsame Test-Datenbank aus conftest.py."""
+    return db
 
 
 @pytest.fixture
@@ -183,7 +175,7 @@ def test_calendar_events_automatic_migration_of_legacy_plaintext(db_session, tes
     db_session.execute(
         text(
             "INSERT INTO calendar_events (calendar_id, user_id, event_uid, title, description, location, start_time, end_time, all_day, color, event_type, created_at, updated_at) "
-            "VALUES (:cal_id, :uid, :euid, :title, :desc, :loc, datetime('now'), datetime('now', '+1 hour'), 0, 'primary', 'personal', datetime('now'), datetime('now'))"
+            "VALUES (:cal_id, :uid, :euid, :title, :desc, :loc, now(), now() + interval '1 hour', false, 'primary', 'personal', now(), now())"
         ),
         {
             "cal_id": cal.id,
@@ -631,7 +623,7 @@ def test_altbestand_bekommt_sein_wiederholungsfeld_nachgetragen(db_session, test
             "INSERT INTO calendar_events "
             "(calendar_id, user_id, event_uid, title, start_time, end_time, all_day, "
             " event_type, color, recurrence, created_at, updated_at) "
-            "VALUES (:cid, :uid_user, :uid, :title, :start, :end, 0, 'personal', 'blue', '', "
+            "VALUES (:cid, :uid_user, :uid, :title, :start, :end, false, 'personal', 'blue', '', "
             " :now, :now)"
         ),
         {

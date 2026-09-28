@@ -1,12 +1,72 @@
 """Pytest fixtures for MSM backend tests.
 
-Patches in-memory SQLite with StaticPool BEFORE any app imports
-so that all DB connections share the same database.
+Die Suite laeuft auf PostgreSQL — derselben Datenbank wie der Betrieb. Jeder
+xdist-Worker legt sich eine eigene, leere Datenbank an, bevor irgendein Modul
+des Panels geladen wird, und alle Sitzungen eines Workers teilen sich ueber
+``StaticPool`` **eine** Verbindung dorthin: Anfragen des TestClient,
+Hintergrundthreads und der Lifespan sehen damit dieselben Zeilen wie der Test.
 """
+import atexit
 import os
+import re
+import uuid
+
+import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.pool import NullPool, StaticPool
+
+# ── Test-Datenbank ─────────────────────────────────────────────────────
+# `MSM_TEST_DATABASE_URL` zeigt auf einen PostgreSQL-Server, auf dem die Suite
+# Datenbanken anlegen darf (Recht CREATEDB) — nie auf die Panel-Datenbank.
+# Angelegt und geloescht werden ausschliesslich Datenbanken `msm_test_…`; in
+# die Datenbank der URL selbst wird nichts geschrieben. Es gibt bewusst keinen
+# Rueckfall: eine Suite, die ohne PostgreSQL still auf etwas anderes auswiche,
+# pruefte wieder gegen eine Datenbank, die der Betrieb nicht hat.
+_ADMIN_URL = os.environ.get("MSM_TEST_DATABASE_URL", "").strip()
+if not _ADMIN_URL.startswith(("postgresql://", "postgresql+psycopg2://")):
+    pytest.exit(
+        "MSM_TEST_DATABASE_URL fehlt oder ist keine PostgreSQL-URL. Die Tests "
+        "brauchen einen PostgreSQL-Server mit dem Recht CREATEDB, z. B. "
+        "postgresql://postgres@127.0.0.1:15499/postgres — scripts/test-postgres.sh "
+        "startet einen passenden Wegwerf-Container.",
+        returncode=4,
+    )
+
+_admin_engine = create_engine(_ADMIN_URL, isolation_level="AUTOCOMMIT", poolclass=NullPool)
+_LAUF = (os.environ.get("PYTEST_XDIST_TESTRUNUID") or uuid.uuid4().hex)[:8].lower()
+_WORKER = os.environ.get("PYTEST_XDIST_WORKER", "main").lower()
+
+
+def _testdatenbank_name(*teile: str) -> str:
+    """Der Schutzriegel: nur Namen `msm_test_…` gehen je an CREATE/DROP."""
+    name = "msm_test_" + "_".join(teile)
+    if not re.fullmatch(r"msm_test_[a-z0-9_]{1,54}", name):
+        raise RuntimeError(f"Unzulaessiger Name fuer eine Test-Datenbank: {name!r}")
+    return name
+
+
+def testdatenbank_anlegen(*teile: str) -> tuple[str, str]:
+    """Legt eine leere Test-Datenbank an und gibt ``(name, url)`` zurueck."""
+    name = _testdatenbank_name(_LAUF, _WORKER, *teile)
+    with _admin_engine.connect() as conn:
+        conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        conn.execute(text(f'CREATE DATABASE "{name}"'))
+    url = make_url(_ADMIN_URL).set(database=name).render_as_string(hide_password=False)
+    return name, url
+
+
+def testdatenbank_loeschen(name: str) -> None:
+    name = _testdatenbank_name(name.removeprefix("msm_test_"))
+    with _admin_engine.connect() as conn:
+        conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+
+
+_TESTDB_NAME, _TESTDB_URL = testdatenbank_anlegen()
+atexit.register(testdatenbank_loeschen, _TESTDB_NAME)
 
 # Must set env BEFORE any module imports that read settings
-os.environ["MSM_DATABASE_URL"] = "sqlite:///:memory:"
+os.environ["MSM_DATABASE_URL"] = _TESTDB_URL
 os.environ["MSM_SECRET_KEY"] = "test-secret-key-32-chars-long!!!"
 os.environ["MSM_DEBUG"] = "true"
 os.environ["MSM_TESTING"] = "true"
@@ -19,41 +79,26 @@ os.environ["MSM_ACCESS_TOKEN_EXPIRE_MINUTES"] = "15"
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event as sa_event
 from sqlalchemy.orm import Session
-from sqlalchemy.pool import StaticPool
 
 # Patch database engine BEFORE app imports anything
 import database as db_module
+from config import settings as _settings_fuer_db
+
+# Eine `backend/.env` darf die Test-Datenbank nicht ueberstimmen: wer die URL
+# aus den Einstellungen liest (Backup, Alembic), muss hier landen.
+_settings_fuer_db.database_url = _TESTDB_URL
 db_module.engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
+    _TESTDB_URL,
     poolclass=StaticPool,
+    # Zeitstempel kommen im Betrieb als UTC zurueck; der Test soll nicht von
+    # der Zeitzone des Rechners abhaengen, auf dem der Server laeuft.
+    connect_args={"options": "-c timezone=UTC"},
 )
 db_module.SessionLocal = db_module.sessionmaker(
     autocommit=False, autoflush=False, bind=db_module.engine
 )
-
-
-@sa_event.listens_for(db_module.engine, "connect")
-def _fremdschluessel_scharfstellen(dbapi_connection, _record) -> None:
-    """SQLite prueft Fremdschluessel nur, wenn man es ausdruecklich verlangt.
-
-    Ohne diese drei Zeilen konnte die Testsuite **kein einziges**
-    ``ON DELETE CASCADE`` beobachten, waehrend PostgreSQL im Betrieb jedes
-    erzwingt. Genau in dieser Luecke lebte der Fehler, wegen dem das hier steht:
-    ``ai_action_proposals.server_id`` kaskadierte auf ``servers.id``, das Loeschen
-    eines Servers vernichtete den Vorschlag, der es angeordnet hatte — und das
-    Panel meldete den gelungenen Vorgang als "Aktionsvorschlag nicht gefunden".
-    2519 gruene Tests konnten das nicht sehen.
-
-    Dieselbe Technik benutzt ``scripts/migrate_sqlite_to_postgres.py`` bereits,
-    dort aus demselben Grund: eine SQLite-Datei, deren Fremdschluessel nie
-    geprueft wurden, laesst sich nicht ohne Weiteres nach PostgreSQL heben.
-    """
-    dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
 # ── DIS Sidecar mock (tests use local crypto, no Node required) ────────
 # Production code calls DisClient for all crypto. In tests we patch the
@@ -341,22 +386,114 @@ from services.permission_catalog import SERVER_KEYS
 # Create tables AFTER models are imported and registered in Base.metadata
 db_module.Base.metadata.create_all(bind=db_module.engine)
 
+# Das Leeren zwischen den Tests laeuft als eine Funktion in der Datenbank:
+# ein Aufruf statt einer Anweisung je Tabelle. `TRUNCATE` ueber alle Tabellen
+# kostete gemessen 248 ms je Test (es legt jede Tabelle und jeden Index neu
+# an), diese Funktion rund 6 ms. Kinder vor Eltern, damit kein Fremdschluessel
+# im Weg steht; die Sequenzen gehen auf 1 zurueck wie nach `RESTART IDENTITY`,
+# aber nur die, die seit dem letzten Leeren benutzt wurden. Kommt doch ein
+# Fremdschluessel quer, faellt sie auf das langsame `TRUNCATE` zurueck.
+_TABELLEN_KINDER_ZUERST = [t.name for t in reversed(db_module.Base.metadata.sorted_tables)]
+# Roh ueber den Treiber: ohne Parameter formatiert psycopg2 die `%I` nicht um.
+_roh = db_module.engine.raw_connection()
+with _roh.driver_connection.cursor() as _cursor:
+    _cursor.execute(
+        """
+        CREATE FUNCTION msm_test_leeren(tabellen text[]) RETURNS void
+        LANGUAGE plpgsql AS $$
+        DECLARE
+            tabelle text;
+            sequenz record;
+        BEGIN
+            BEGIN
+                FOREACH tabelle IN ARRAY tabellen LOOP
+                    EXECUTE format('DELETE FROM %I', tabelle);
+                END LOOP;
+            EXCEPTION WHEN foreign_key_violation THEN
+                EXECUTE 'TRUNCATE ' || (
+                    SELECT string_agg(format('%I', t), ', ') FROM unnest(tabellen) AS t
+                ) || ' CASCADE';
+            END;
+            FOR sequenz IN
+                SELECT schemaname, sequencename FROM pg_sequences WHERE last_value IS NOT NULL
+            LOOP
+                PERFORM setval(format('%I.%I', sequenz.schemaname, sequenz.sequencename), 1, false);
+            END LOOP;
+        END $$;
+        """
+    )
+_roh.driver_connection.commit()
+_roh.close()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _testdatenbank_aufraeumen():
+    """Die Worker-Datenbank ueberlebt den Lauf nicht (`atexit` ist der Rueckfall)."""
+    yield
+    db_module.engine.dispose()
+    testdatenbank_loeschen(_TESTDB_NAME)
+
+
+@pytest.fixture
+def pg_wegwerf():
+    """Leere Wegwerf-Datenbanken fuer Tests, die ein eigenes Schema bauen.
+
+    Migrationstests brauchen eine Datenbank, die nur ihnen gehoert: sie legen
+    das Schema mit `create_all` an, stempeln, fahren Alembic ab- und aufwaerts.
+    ``pg_wegwerf("kette")`` gibt die URL einer frischen Datenbank zurueck; nach
+    dem Test wird jede so angelegte wieder geloescht, auch wenn der Test noch
+    Verbindungen offen haelt.
+    """
+    angelegt: list[str] = []
+
+    def anlegen(zweck: str = "db") -> str:
+        name, url = testdatenbank_anlegen(re.sub(r"[^a-z0-9]+", "_", zweck.lower())[:16], uuid.uuid4().hex[:8])
+        angelegt.append(name)
+        return url
+
+    yield anlegen
+    for name in angelegt:
+        testdatenbank_loeschen(name)
+
+
+@pytest.fixture(autouse=True)
+def _eine_verbindung_kein_nebenlauf(request, monkeypatch):
+    """Die Suite teilt je Worker eine Verbindung — Nebenlauf darauf ist keiner.
+
+    Im Betrieb holt sich jeder Laufbeginn und jedes Lesewerkzeug eine eigene
+    Verbindung aus dem Pool und darf deshalb zu acht nebeneinander laufen. Hier
+    teilen sich alle Sitzungen eine Verbindung (`StaticPool`); zwei Transaktionen
+    darauf waeren kein Nebenlauf, sondern ein Datenfehler. Tests, die genau die
+    Breite pruefen, tragen `@pytest.mark.echte_nebenlaeufigkeit`.
+    """
+    if request.node.get_closest_marker("echte_nebenlaeufigkeit"):
+        return
+    # Ueber den Wrapper: er setzt Paket und eigene Kopie zugleich.
+    from services import ai_stream_service
+    from services.ai_voice import realtime_session
+
+    monkeypatch.setattr(ai_stream_service, "_anlauf_nebenlaeufigkeit", lambda: 1)
+    monkeypatch.setattr(ai_stream_service, "_werkzeug_nebenlaeufigkeit", lambda: 1)
+    monkeypatch.setattr(realtime_session, "_werkzeug_nebenlaeufigkeit", lambda: 1)
+
 
 @pytest.fixture(scope="function", autouse=True)
 def clean_db():
     """Clean all tables and rate limit store before each test."""
     from sqlalchemy.orm import close_all_sessions
     close_all_sessions()
-    # SQLite erfordert, dass PRAGMA foreign_keys ausserhalb einer Transaktion gesetzt wird.
-    # Ueber driver_connection direkt am raw DBAPI Connection Objekt ausfuehren.
+    # Alle Tabellen leeren und die Sequenzen zuruecksetzen, damit jeder Test
+    # bei denselben IDs beginnt, egal was vor ihm lief (`msm_test_leeren`
+    # oben). Das `rollback()` davor raeumt eine Transaktion ab, die ein
+    # vorheriger Test nach einem SQL-Fehler abgebrochen liegen liess — auf der
+    # geteilten Verbindung wuerde sonst jede weitere Anweisung scheitern.
     raw_conn = db_module.engine.raw_connection()
     try:
-        raw_dbapi = getattr(raw_conn, "driver_connection", getattr(raw_conn, "connection", raw_conn))
-        raw_dbapi.execute("PRAGMA foreign_keys=OFF")
-        for table in reversed(db_module.Base.metadata.sorted_tables):
-            raw_dbapi.execute(f"DELETE FROM {table.name}")
+        raw_dbapi = raw_conn.driver_connection
+        raw_dbapi.rollback()
+        with raw_dbapi.cursor() as cursor:
+            cursor.execute("SELECT msm_test_leeren(%s)", (_TABELLEN_KINDER_ZUERST,))
         raw_dbapi.commit()
-        raw_dbapi.execute("PRAGMA foreign_keys=ON")
     finally:
         raw_conn.close()
     # Reset slowapi in-memory storage between tests

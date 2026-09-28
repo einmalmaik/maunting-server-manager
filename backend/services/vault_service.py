@@ -79,12 +79,8 @@ def _sperre_bucket(db: Session, bucket_id: str) -> None:
     angeboten — stiller Datenverlust in einem Passwort-Manager.
 
     PostgreSQL haelt die Sperre bis zum Ende der Transaktion, also bis zum
-    ``commit`` des Aufrufers. SQLite braucht sie nicht: dort serialisiert
-    ohnehin ein datenbankweites Schreib-Lock.
+    ``commit`` des Aufrufers.
     """
-    bind = db.get_bind()
-    if bind is None or bind.dialect.name != "postgresql":
-        return
     schluessel = int.from_bytes(
         hashlib.sha256(bucket_id.encode("utf-8")).digest()[:8], "big", signed=True
     )

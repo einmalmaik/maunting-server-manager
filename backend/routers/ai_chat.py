@@ -679,8 +679,8 @@ async def stream_message(
         # Request-Thread und wird von ihm geschlossen.
         user_id, conversation_id, provider_id = user.id, conversation.id, provider.id
         # Und sie darf auch keine offene Transaktion ueber die Grenze tragen.
-        # Unter SQLite teilen sich beide Sitzungen eine Verbindung; der Commit
-        # der einen schloesse die offene Arbeit der anderen mit ab. Frueher
+        # Die Sitzung im Thread saehe ungesicherte Arbeit dieser Sitzung nicht,
+        # und in der Testsuite teilen sich beide sogar eine Verbindung. Frueher
         # endete `lauf_beginnen` selbst mit genau diesem Commit — es ist also
         # derselbe Zeitpunkt wie bisher, nur eine Zeile frueher.
         db.commit()

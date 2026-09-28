@@ -27,8 +27,8 @@ Benutzer und wird hier ausdruecklich geloescht. Sein ``personal_for_user_id``
 kaskadiert zwar, aber dieselbe Zeile haengt zugleich per RESTRICT an
 ``owner_user_id`` — welcher der beiden Fremdschluessel auf PostgreSQL zuerst
 greift, ist nicht zugesichert. Ein ausdrueckliches DELETE davor macht die Frage
-gegenstandslos, statt sich auf eine Reihenfolge zu verlassen, die nur auf
-SQLite nachgewiesen ist.
+gegenstandslos, statt sich auf eine Reihenfolge zu verlassen, die nirgends
+zugesichert ist.
 """
 
 from __future__ import annotations

@@ -7,9 +7,9 @@ lief in den Fremdschluessel, die ``IntegrityError`` fiel ungefangen aus
 bestehen, ohne dass irgendwo stand, warum. Wer einmal ein Team gegruendet hatte,
 war dauerhaft nicht mehr loeschbar.
 
-Die Tests haengen an der scharfen Fremdschluesselpruefung aus ``conftest.py``.
-Ohne sie wuerde SQLite jeden dieser Faelle stumm durchwinken und die Datei waere
-gruen, ohne etwas zu belegen — die Zusage darueber steht ausdruecklich in
+Die Tests haengen daran, dass die Testdatenbank (PostgreSQL) Fremdschluessel
+durchsetzt. Ohne das wuerde jeder dieser Faelle stumm durchgewunken und die Datei
+waere gruen, ohne etwas zu belegen — die Zusage darueber steht ausdruecklich in
 ``test_schema_constraints.py``.
 """
 
@@ -132,7 +132,7 @@ def test_das_persoenliche_team_haelt_niemanden_fest(
 ) -> None:
     """Gegenprobe: die Vorpruefung darf nicht jeden Benutzer unloeschbar machen.
 
-    Dieser Fall ginge auch ohne den Fix durch (auf SQLite greift das CASCADE
+    Dieser Fall ginge auch ohne den Fix durch (dort greift das CASCADE
     ueber ``personal_for_user_id``). Er steht hier trotzdem, weil er die andere
     Haelfte der Zusage haelt: das Ein-Mann-Team gehoert nur diesem Benutzer und
     darf ihn nicht blockieren.

@@ -145,7 +145,7 @@ class TestAutoRestartTaskSafeExecution:
         assert test_server.last_auto_restart_status == "success"
 
         audit = db.query(AuditLog).filter(
-            AuditLog.target_id == test_server.id,
+            AuditLog.target_id == str(test_server.id),
             AuditLog.action == "auto_restart"
         ).first()
         assert audit is not None

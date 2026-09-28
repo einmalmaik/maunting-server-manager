@@ -3,7 +3,8 @@
 Die Löschung läuft über `ON DELETE CASCADE` der Datenbank, nicht über
 Anwendungscode (services/user_deletion_service.py räumt nur RESTRICT-Blocker).
 Genau deshalb braucht es diesen Test: niemand liest die Kaskade im Code, und
-SQLite prüft Fremdschlüssel nur mit scharfgestelltem Pragma (conftest.py).
+nur eine Datenbank, die Fremdschlüssel durchsetzt, zeigt sie überhaupt — die
+Testsuite läuft deshalb auf PostgreSQL (conftest.py).
 
 Was **bewusst nicht** gelöscht wird, sichern andere Tests als Invariante ab:
 Team-, Server-Shared- und Panel-Memories überleben ihren Verfasser

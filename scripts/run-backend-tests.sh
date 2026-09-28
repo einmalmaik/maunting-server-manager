@@ -15,13 +15,24 @@
 # Das Skript legt die Datei fuer die Dauer des Laufs beiseite und stellt sie
 # per `trap` zurueck — auch bei Abbruch mit Strg-C oder wenn pytest scheitert.
 #
+# Die Tests laufen auf PostgreSQL. `MSM_TEST_DATABASE_URL` zeigt auf einen
+# Server, auf dem die Suite eigene Datenbanken `msm_test_…` anlegen und wieder
+# loeschen darf (Rolle mit CREATEDB) — nie auf die Panel-Datenbank. Die Rolle
+# `msm` des Panels hat dieses Recht bewusst nicht.
+#
 # Aufruf:
+#   MSM_TEST_DATABASE_URL=postgresql://... scripts/run-backend-tests.sh
 #   scripts/run-backend-tests.sh                 # alles
 #   scripts/run-backend-tests.sh tests/test_x.py # gezielt
 #   scripts/run-backend-tests.sh tests/ -q       # mit pytest-Argumenten
 set -uo pipefail
 
 cd /opt/msm/backend || exit 1
+
+if [ -z "${MSM_TEST_DATABASE_URL:-}" ]; then
+    echo "[run-backend-tests] MSM_TEST_DATABASE_URL fehlt (PostgreSQL mit CREATEDB, nie die Panel-Datenbank)." >&2
+    exit 4
+fi
 
 ENVDATEI=".env"
 BEISEITE=".env.testlauf-beiseite"
@@ -41,9 +52,8 @@ if [ -f "$ENVDATEI" ]; then
     echo "[run-backend-tests] .env beiseite gelegt (Produktivwerte)"
 fi
 
-# Dieselben Werte, die die CI setzt. Getrennte Datenbank, eigener Schluessel —
-# nichts davon zeigt auf den Produktivbestand.
-export MSM_DATABASE_URL="sqlite:///:memory:"
+# Dieselben Werte, die die CI setzt. Eigene Test-Datenbanken, eigener
+# Schluessel — nichts davon zeigt auf den Produktivbestand.
 export MSM_SECRET_KEY="test-secret-key-32-chars-long!!!"
 export MSM_DEBUG="true"
 

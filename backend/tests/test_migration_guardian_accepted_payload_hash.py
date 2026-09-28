@@ -2,25 +2,22 @@ import pytest
 from sqlalchemy import text
 from alembic.config import Config
 from alembic import command
-import os
 from pathlib import Path
 from sqlalchemy import create_engine
 from database import Base
 import models  # noqa: F401
 
 
-def test_guardian_accepted_payload_hash_migration(tmp_path):
+def test_guardian_accepted_payload_hash_migration(pg_wegwerf, monkeypatch):
     """
     Testet das Upgrade von Revision 20260720_02 zu beef3761b732.
     Prüft, ob die Spalte 'guardian_accepted_payload_hash' vor dem Upgrade
     nicht existiert und nach dem Upgrade existiert.
     """
-    db_path = tmp_path / "test_migration.db"
-    db_url = f"sqlite:///{db_path}"
-    os.environ["DATABASE_URL"] = db_url
+    db_url = pg_wegwerf("payload_hash")
 
     from config import settings
-    settings.database_url = db_url
+    monkeypatch.setattr(settings, "database_url", db_url)
 
     engine = create_engine(db_url)
 
@@ -39,7 +36,7 @@ def test_guardian_accepted_payload_hash_migration(tmp_path):
     command.stamp(alembic_cfg, "20260720_02")
 
     # Column should NOT exist at revision 20260720_02
-    with engine.begin() as conn:
+    with engine.connect() as conn:
         with pytest.raises(Exception):
             conn.execute(text("SELECT guardian_accepted_payload_hash FROM servers LIMIT 1"))
 
@@ -49,3 +46,4 @@ def test_guardian_accepted_payload_hash_migration(tmp_path):
     # Column DOES exist now
     with engine.begin() as conn:
         conn.execute(text("SELECT guardian_accepted_payload_hash FROM servers LIMIT 1"))
+    engine.dispose()

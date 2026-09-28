@@ -198,7 +198,7 @@ def test_funktion_und_trigger_entstehen_wie_im_studio(db, owner_user, tmp_path, 
     # Wie an der Studio-Route: ein Audit ohne SQL, erkennbar als KI-Weg.
     audit = (
         db.query(AuditLog)
-        .filter(AuditLog.action == "postgres.studio.execute", AuditLog.target_id == server.id)
+        .filter(AuditLog.action == "postgres.studio.execute", AuditLog.target_id == str(server.id))
         .order_by(AuditLog.id.desc())
         .first()
     )

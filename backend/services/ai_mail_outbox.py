@@ -27,12 +27,10 @@ mitten im Versand ab, faellt die Zeile nach Ablauf der Frist von selbst zurueck
 in die Warteschlange. Ein Zustand "laeuft gerade" haette den Absturz ueberlebt
 und die Zeile fuer immer blockiert.
 
-`SELECT ... FOR UPDATE SKIP LOCKED` kommt zusaetzlich dazu, wo die Datenbank es
-kann. Heute laeuft das Panel als ein Prozess (`uvicorn --workers 1`), also
-braeuchte es das nicht — aber der Tag, an dem jemand einen zweiten Prozess
-startet, soll nicht der Tag sein, an dem jeder Kunde alles doppelt bekommt.
-SQLite kennt beides nicht; dort traegt die befristete Uebernahme allein, und das
-genuegt, weil SQLite ohnehin nur einen Schreiber zulaesst.
+`SELECT ... FOR UPDATE SKIP LOCKED` kommt zusaetzlich dazu. Heute laeuft das
+Panel als ein Prozess (`uvicorn --workers 1`), also braeuchte es das nicht —
+aber der Tag, an dem jemand einen zweiten Prozess startet, soll nicht der Tag
+sein, an dem jeder Kunde alles doppelt bekommt.
 
 **Wiederholen mit wachsendem Abstand, dann aufgeben — aber laut.** Ein Anbieter,
 der gerade drosselt, ist in einer Minute vielleicht wieder da; ein falsches
@@ -66,8 +64,8 @@ Vorgang, den kein Benutzer angestoßen hat. Jetzt gehen sie über
 `_in_der_datenbank`, und die Schleife bleibt frei.
 
 Dass es **ein** Thread ist und nicht der Vorratsausführer hinter
-`asyncio.to_thread`, hat zwei Gründe. Erstens teilen sich auf SQLite alle
-Sitzungen eine einzige Verbindung; zwei Transaktionen gleichzeitig darauf sind
+`asyncio.to_thread`, hat zwei Gründe. Erstens teilt sich die Testsuite je
+Worker eine einzige Verbindung; zwei Transaktionen gleichzeitig darauf sind
 keine Nebenläufigkeit, sondern ein Datenfehler — dieselbe Rechnung wie in
 `ai_stream_service._werkzeug_nebenlaeufigkeit`. Zweitens hält `aufraeumen` sein
 Versprechen nur, wenn danach wirklich niemand mehr schreibt: einen Ausführer,
@@ -160,7 +158,7 @@ class _Auftrag:
 
 #: Die Sitzungsfabrik. Wird sie nicht gesetzt, kommt sie aus `database` — aber
 #: erst beim Aufruf und nicht beim Import, denn die Testsuite tauscht
-#: `database.SessionLocal` nach dem Import gegen eine SQLite-Fabrik aus.
+#: `database.SessionLocal` nach dem Import gegen ihre eigene Fabrik aus.
 _SITZUNGEN: Callable[[], Session] | None = None
 #: Die eine laufende Arbeiteraufgabe. Der Verweis liegt hier, damit sie nicht
 #: vom Aufraeumer der Ereignisschleife eingesammelt wird — `create_task` allein
@@ -231,22 +229,6 @@ def _db_thread_leeren() -> None:
         ausfuehrer.shutdown(wait=True)
 
 
-def _kann_ueberspringen(db: Session) -> bool:
-    """Beherrscht diese Datenbank ``FOR UPDATE SKIP LOCKED``?
-
-    PostgreSQL ja, SQLite nein. Die Frage wird gestellt, statt sich auf das
-    stille Weglassen im SQLite-Dialekt zu verlassen: eine Klausel, von der man
-    glaubt, sie wirke, waehrend sie verschwindet, ist schlimmer als eine, die
-    man bewusst nicht setzt. Ohne sie traegt die befristete Uebernahme allein —
-    was in SQLite ausreicht, weil dort ohnehin nur ein Schreiber zugleich
-    arbeitet.
-    """
-    try:
-        return db.get_bind().dialect.name == "postgresql"
-    except Exception:  # noqa: BLE001 - eine unbekannte Bindung kann es nicht
-        return False
-
-
 def _rahmen_lesen(roh: Any, zeilen_id: str) -> dict | None:
     """Den gespeicherten Rahmen entpacken. ``None`` heisst „kein Rahmen“.
 
@@ -282,9 +264,8 @@ def _uebernehmen(grenze: int) -> list[_Auftrag]:
             )
             .order_by(AiMailOutbox.naechster_versuch_at)
             .limit(grenze)
+            .with_for_update(skip_locked=True)
         )
-        if _kann_ueberspringen(db):
-            abfrage = abfrage.with_for_update(skip_locked=True)
         zeilen = abfrage.all()
         auftraege: list[_Auftrag] = []
         for zeile in zeilen:

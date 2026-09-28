@@ -43,7 +43,7 @@ TEST_PASSWORD = "*********************!"
 TEST_S3_ENDPOINT = ""
 TEST_NEW_BUCKET = "msm-panel-sched-bucket-2"
 
-_FAKE_SQLITE_DUMP = b"BEGIN TRANSACTION;\nCREATE TABLE users (id INTEGER PRIMARY KEY);\nCOMMIT;\n"
+_FAKE_DUMP = b"BEGIN TRANSACTION;\nCREATE TABLE users (id INTEGER PRIMARY KEY);\nCOMMIT;\n"
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────
@@ -442,7 +442,7 @@ class TestPanelBackupScheduledTask:
         _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(tmp_path / "config", [".env"])
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             with patch("services.scheduler_service.SessionLocal") as sl:
                 sl.return_value = db
                 original_close = db.close
@@ -502,7 +502,7 @@ class TestPanelBackupScheduledTask:
                 assert db.query(PanelBackup).count() == 0
 
                 # Zweiter Tick: erfolgreich (echter create_panel_backup, DB-Dump gemockt)
-                with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+                with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                     asyncio.run(_panel_backup_task())
                 assert db.query(PanelBackup).count() == 1
             finally:
@@ -524,7 +524,7 @@ class TestPanelBackupScheduledS3:
         _setup_backup_password()
         _create_moto_bucket()
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             with patch("services.scheduler_service.SessionLocal") as sl:
                 sl.return_value = db
                 original_close = db.close
@@ -555,7 +555,7 @@ class TestPanelBackupScheduledS3:
         # Retention auf 2
         PanelSettingsService.set("backup.panel_retention_count", "2")
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             with patch("services.scheduler_service.SessionLocal") as sl:
                 sl.return_value = db
                 original_close = db.close
@@ -577,7 +577,7 @@ class TestPanelBackupScheduledS3:
         _write_config_files(tmp_path / "config", [".env"])
         # Kein S3 konfiguriert
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             with patch("services.scheduler_service.SessionLocal") as sl:
                 sl.return_value = db
                 original_close = db.close
@@ -645,7 +645,7 @@ class TestPanelBackupSchedulerRestart:
         # Backup mit Bucket A erstellen
         with mock_aws():
             _create_moto_bucket(TEST_BUCKET)
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 backup = pbs.create_panel_backup(db, name="pre-restart")
             assert backup.s3_bucket == TEST_BUCKET
             old_s3_key = backup.s3_key
@@ -673,7 +673,7 @@ class TestPanelBackupSchedulerRestart:
         # Neues Backup geht in neuen Bucket
         with mock_aws():
             _create_moto_bucket(TEST_NEW_BUCKET)
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 new_backup = pbs.create_panel_backup(db, name="post-restart")
             assert new_backup.s3_bucket == TEST_NEW_BUCKET
             assert new_backup.s3_bucket != old_s3_bucket

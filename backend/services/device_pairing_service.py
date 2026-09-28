@@ -59,7 +59,7 @@ def normalisieren(eingabe: str) -> str:
 
 
 def _jetzt(bezug: datetime | None = None) -> datetime:
-    """Vergleichbare Zeit — SQLite liefert naive, PostgreSQL bewusste Stempel."""
+    """Vergleichbare Zeit — passend zu einem naiven oder bewussten Bezug."""
     jetzt = datetime.now(timezone.utc)
     if bezug is not None and bezug.tzinfo is None:
         return jetzt.replace(tzinfo=None)

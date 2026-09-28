@@ -465,7 +465,7 @@ def test_database_bootstrap_writes_audit(
         db.query(AuditLog)
         .filter(
             AuditLog.action == "postgres.database.provision",
-            AuditLog.target_id == test_server.id,
+            AuditLog.target_id == str(test_server.id),
         )
         .order_by(AuditLog.id.desc())
         .first()

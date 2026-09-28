@@ -86,9 +86,9 @@ _GUARDIAN_NOT_ANSWERING = ("degraded", "unhealthy", "quarantined", "recovering")
 def _as_utc(value: datetime | None) -> datetime | None:
     """Zeitstempel als UTC lesen.
 
-    SQLite gibt `DateTime(timezone=True)` ohne Zone zurueck. Geschrieben wird die
-    Spalte ausschliesslich aus UTC-Zeiten (`guardian_sync_service`), deshalb ist
-    das Nachtragen der Zone hier eine Wiederherstellung und keine Annahme.
+    Geschrieben wird die Spalte ausschliesslich aus UTC-Zeiten
+    (`guardian_sync_service`), deshalb ist das Nachtragen einer fehlenden Zone
+    hier eine Wiederherstellung und keine Annahme.
     """
     if value is None:
         return None

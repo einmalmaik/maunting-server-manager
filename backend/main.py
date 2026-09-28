@@ -216,9 +216,8 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_hash VARCHAR(64)"))
                 conn.execute(text("CREATE INDEX ix_users_email_hash ON users (email_hash)"))
 
-        # Bestehende Klartext-E-Mails immer nachziehen. Das ist auch fuer den
-        # SQLite->PostgreSQL-Import noetig: das Zielschema besitzt die neuen
-        # Spalten bereits, die importierten Legacy-Zeilen aber noch nicht.
+        # Bestehende Klartext-E-Mails immer nachziehen: Zeilen aus der Zeit vor
+        # den verschluesselten Spalten tragen sie noch nicht.
         from database import SessionLocal as _SL
         from models import User as _U
         _db = _SL()

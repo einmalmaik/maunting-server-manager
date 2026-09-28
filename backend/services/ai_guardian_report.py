@@ -42,9 +42,9 @@ ERFOLG = ("completed",)
 
 
 def _utc(wert: datetime) -> datetime:
-    """SQLite gibt zeitzonenlose Werte zurueck, PostgreSQL zeitzonenbehaftete.
+    """Naive Zeitwerte (etwa frisch im Speicher gesetzt) als UTC lesen.
 
-    Ein Vergleich zwischen beiden wirft `TypeError` — hier ausgerechnet im
+    Ein Vergleich zwischen naiv und zeitzonenbehaftet wirft `TypeError` — hier ausgerechnet im
     Berichtspfad, also dort, wo ein Fehler bedeutet, dass der Betreiber gar
     nichts erfaehrt.
     """

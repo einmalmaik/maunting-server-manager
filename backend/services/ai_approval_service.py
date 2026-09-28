@@ -50,7 +50,7 @@ def _jetzt() -> datetime:
 
 
 def _utc(wert: datetime | None) -> datetime | None:
-    """SQLite gibt naive Zeitstempel zurueck — hier wird wieder UTC daraus."""
+    """Ein naiver Zeitstempel (etwa frisch im Speicher gesetzt) wird UTC."""
     if wert is None:
         return None
     return wert if wert.tzinfo else wert.replace(tzinfo=timezone.utc)
@@ -212,8 +212,8 @@ def _anspruch_nehmen(db: Session, zeile: AiActionApproval, entscheidung: str) ->
     """Verbraucht die Zeile — atomar, per bedingtem UPDATE.
 
     Zwei gleichzeitige Klicks auf denselben Link duerfen nicht zwei
-    Ausfuehrungen ergeben. Auf SQLite gibt es kein ``SELECT ... FOR UPDATE``;
-    die Bedingung ``consumed_at IS NULL`` im UPDATE ist die Sperre, und die
+    Ausfuehrungen ergeben. Die Bedingung ``consumed_at IS NULL`` im UPDATE
+    ist die Sperre, und die
     Zeilenzahl der Antwort sagt, wer gewonnen hat.
     """
     jetzt = _jetzt()

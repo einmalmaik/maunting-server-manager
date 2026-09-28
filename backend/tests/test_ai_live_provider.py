@@ -259,8 +259,8 @@ def test_die_dauer_ist_keine_weitere_anfrage(db: Session, owner_user) -> None:
     assert event.accounted_cost_microunits == 22_500
 
 
-def test_gpt_live_migration_traegt_backend_modell_und_minutenpreis(tmp_path: Path) -> None:
-    db_url = f"sqlite:///{tmp_path / 'live.db'}"
+def test_gpt_live_migration_traegt_backend_modell_und_minutenpreis(tmp_path: Path, pg_wegwerf) -> None:
+    db_url = pg_wegwerf("live")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent

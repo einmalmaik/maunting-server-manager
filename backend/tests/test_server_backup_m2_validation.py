@@ -220,9 +220,9 @@ class TestCrossKeyLifecycle:
     ):
         """VAL-CROSS-007: Threading-konkurrent: jeder Thread bekommt eigenen key_id.
 
-        Hinweis: SQLite in-memory mit StaticPool wird vom GIL + Check_same_thread=False
-        serialisiert; aber die Key-Init-Logik im Orchestrator laeuft trotzdem
-        pro Aufruf einmal durch. Wir verifizieren, dass die BackupCryptoService.init_key
+        Hinweis: die geteilte Testverbindung (StaticPool) vertraegt keine
+        parallelen Threads, die Aufrufe laufen deshalb nacheinander; aber die
+        Key-Init-Logik im Orchestrator laeuft trotzdem pro Aufruf einmal durch. Wir verifizieren, dass die BackupCryptoService.init_key
         ueber mehrere Aufrufe hinweg distinct key_ids liefert (was die
         underlying thread-safety-Invariante des Orchestrators garantiert).
         """
@@ -251,7 +251,8 @@ class TestCrossKeyLifecycle:
         from tests.test_backup_orchestrator import _patch_run_backup
 
         # 3 sequenzielle Backup-Calls mit dem gespyeten init_key.
-        # Da SQLite nicht thread-safe ist, fuehren wir sie sequenziell aus;
+        # Da die geteilte Testverbindung (StaticPool) keine parallelen Threads
+        # vertraegt, fuehren wir sie sequenziell aus;
         # aber die key_id-Vergabe prueft die thread-safe-Eigenschaft des
         # BackupCryptoService.init_key (welches ueber httpx.post
         # den in-process _dis_streaming_keys-Set fuellt).
@@ -314,7 +315,8 @@ class TestCrossConcurrentBackups:
     """Concurrent POST /api/backups/{server_id} ueber die HTTP-Schicht.
 
     Der bestehende Test test_concurrent_backups_distinct_keys_and_s3keys
-    verwendet sequenzielle Aufrufe (SQLite in-memory ist nicht thread-safe).
+    verwendet sequenzielle Aufrufe (die geteilte Testverbindung (StaticPool)
+    vertraegt keine parallelen Threads).
     Dieser Test versucht, moeglichst nahe an echte Concurrency heranzukommen
     und verifiziert, dass zwei parallele TestClient-Aufrufe jeweils einen
     eigenen Backup-Record mit eindeutigen Feldern produzieren.
@@ -326,8 +328,8 @@ class TestCrossConcurrentBackups:
     ):
         """VAL-CROSS-012: 2 parallele POST → distinct records + S3 objects.
 
-        Da SQLite in-memory + StaticPool nicht thread-safe ist, serialisiert
-        sich der Zugriff ueber das GIL automatisch. Wir verifizieren den
+        Da die geteilte Testverbindung (StaticPool) keine parallelen Threads
+        vertraegt, laufen die beiden Aufrufe nacheinander. Wir verifizieren den
         VAL-CROSS-012-Vertrag: zwei Aufrufe erzeugen distinct Backups mit
         distinct s3_keys (kein Collision). Wir rufen create_server_backup
         direkt mit verschiedenen DB-Sessions auf, was das gleiche Backend-

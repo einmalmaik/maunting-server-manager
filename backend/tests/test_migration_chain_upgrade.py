@@ -56,9 +56,9 @@ def _config(backend_dir: Path) -> Config:
     return config
 
 
-def test_every_branch_migration_runs_both_ways(tmp_path: Path) -> None:
+def test_every_branch_migration_runs_both_ways(tmp_path: Path, pg_wegwerf) -> None:
     """Downgrade auf den Stand von main und wieder hoch — echte DDL, kein Stempel."""
-    db_url = f"sqlite:///{tmp_path / 'chain.db'}"
+    db_url = pg_wegwerf("chain")
     previous = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -169,9 +169,9 @@ def test_every_revision_is_reachable_from_the_head() -> None:
     )
 
 
-def test_downgrade_of_the_newest_revision_is_reversible(tmp_path: Path) -> None:
+def test_downgrade_of_the_newest_revision_is_reversible(tmp_path: Path, pg_wegwerf) -> None:
     """Ein Rollback muss moeglich sein, sonst ist ein Fehlschlag endgueltig."""
-    db_url = f"sqlite:///{tmp_path / 'downgrade.db'}"
+    db_url = pg_wegwerf("downgrade")
     previous = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent

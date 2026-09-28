@@ -22,10 +22,7 @@ class AiAttachment(Base):
     # hochgeladen, aber noch nicht gesendet — er haengt dann als Chip ueber dem
     # Eingabefeld und wartet.
     #
-    # **Bewusst ohne Fremdschluessel.** SQLite kann kein `ADD CONSTRAINT`; die
-    # Tests bauen das Schema mit `create_all`, die Produktion mit Alembic. Ein
-    # Fremdschluessel nur hier hiesse, dass die beiden Wege verschiedene
-    # Tabellen erzeugen. Dieselbe Entscheidung wie bei
+    # **Bewusst ohne Fremdschluessel** — dieselbe Entscheidung wie bei
     # `ai_action_proposals.run_id`. Das Aufraeumen macht `truncate_from`.
     message_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)

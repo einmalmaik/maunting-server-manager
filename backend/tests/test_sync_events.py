@@ -3,11 +3,6 @@
 import asyncio
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from database import Base
 from dependencies import get_db, get_current_user
 from main import app
 from models import User
@@ -17,17 +12,9 @@ from services.sync_event_service import SyncEventService
 
 
 @pytest.fixture
-def db_session():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(bind=engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
+def db_session(db):
+    """Die gemeinsame Test-Datenbank aus conftest.py."""
+    return db
 
 
 @pytest.fixture

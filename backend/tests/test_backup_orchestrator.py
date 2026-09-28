@@ -793,7 +793,8 @@ class TestConcurrentBackups:
     def test_concurrent_backups_distinct_keys_and_s3keys(self, db, test_server, tmp_path):
         """VAL-CROSS-012: Zwei Backups → distinct filenames + s3_keys.
 
-        Verwendet sequenzielle Erstellung (SQLite In-Memory ist nicht thread-safe),
+        Verwendet sequenzielle Erstellung (die geteilte Testverbindung (StaticPool)
+        vertraegt keine parallelen Threads),
         aber verifiziert dass jeder Aufruf einen eigenen key_id und s3_key bekommt.
         """
         _setup_s3_config()

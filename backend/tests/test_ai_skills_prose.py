@@ -809,8 +809,9 @@ def test_the_index_selection_crosses_the_language_barrier(
 #
 # Diese drei Tests gehen absichtlich direkt an `_overlay` statt ueber
 # `visible_skills`. Der Fehler lag in der Reihenfolge, in der die Zeilen aus
-# der Datenbank kommen — und die laesst sich nicht bestellen: SQLite liefert
-# die globale Zeile zufaellig zuerst, also genau die guenstige Ordnung.
+# der Datenbank kommen — und die laesst sich nicht bestellen: ohne ORDER BY
+# liefert die Testdatenbank die globale Zeile zufaellig zuerst, also genau die
+# guenstige Ordnung.
 # Ein Test ueber die Abfrage waere auch ohne den Fix gruen gewesen.
 
 

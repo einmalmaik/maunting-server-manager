@@ -239,12 +239,13 @@ class TestWorkerStart:
         Das Gehirn ruft die Werkzeuge einer Welle nebenläufig auf, jedes in
         einer eigenen Sitzung: ohne Sperre sähen zwei `worker_start` derselben
         Runde denselben freien Platz und belegten ihn beide. Echte
-        Nebenläufigkeit ist auf SQLite nicht herstellbar — dort ist
-        ``FOR UPDATE`` eine leere Anweisung —, deshalb hält dieser Test die
+        Nebenläufigkeit ist auf der geteilten Testverbindung (StaticPool) nicht
+        herstellbar — alle Sitzungen stecken dort in derselben Transaktion,
+        ``FOR UPDATE`` sperrt niemanden aus —, deshalb hält dieser Test die
         Invariante statt des Rennens: die Zeilensperre auf den Benutzer steht
         **vor** der Zählung, und zwischen Zählung und Lauf liegt kein Commit,
-        der sie vorzeitig wieder lösen würde. Das echte Rennen bleibt eine
-        PostgreSQL-Frage.
+        der sie vorzeitig wieder lösen würde. Das echte Rennen braucht getrennte
+        Verbindungen und bleibt eine Frage des Betriebs.
         """
         user = _benutzer(db, "gesperrt")
         _provider(db)

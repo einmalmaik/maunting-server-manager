@@ -2,26 +2,14 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from database import Base
 from dependencies import get_current_user, get_db, verify_csrf
 from main import app
 from models import User, VaultEntry, VaultUserSetting
 
 
 @pytest.fixture
-def test_db():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(bind=engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
+def test_db(db):
+    session = db
 
     user = User(
         id=1,

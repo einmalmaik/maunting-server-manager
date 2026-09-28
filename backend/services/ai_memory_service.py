@@ -516,11 +516,8 @@ class Gedaechtnisseite:
 #: bekommt eine Seite in einer anderen Reihenfolge angezeigt, als sie
 #: geschnitten wurde.
 #:
-#: ``last_used_at IS NULL`` als erstes Kriterium statt ``NULLS LAST``: das ist
-#: auf SQLite wie auf PostgreSQL dasselbe Ergebnis, während die beiden ohne
-#: Angabe entgegengesetzt sortieren (PostgreSQL stellt NULL bei DESC nach vorn,
-#: SQLite nach hinten). Bei einer Seiteneinteilung wäre das nicht Kosmetik,
-#: sondern eine andere Seite je Datenbank.
+#: ``last_used_at IS NULL`` als erstes Kriterium: ohne Angabe stellt PostgreSQL
+#: NULL bei DESC nach vorn, und die nie benutzten Einträge sollen ans Ende.
 _SEITENORDNUNG = (
     AiMemoryEntry.last_used_at.is_(None),
     AiMemoryEntry.last_used_at.desc(),
@@ -801,9 +798,8 @@ def _sperrzeile(db: Session, identity: str) -> Query:
     selbst durch diese Sperre gegangen ist — die Reihenfolge ist deshalb kein
     Schmuck, sondern die Zusage.
 
-    Zwei Grenzen, unverändert zu vorher: ein **leerer** Bereich hat keine Zeile
-    zum Sperren, dort können zwei erste Einträge nebeneinander entstehen. Und
-    auf SQLite (Testsuite) ist `FOR UPDATE` ein No-Op.
+    Eine Grenze, unverändert zu vorher: ein **leerer** Bereich hat keine Zeile
+    zum Sperren, dort können zwei erste Einträge nebeneinander entstehen.
     """
     return (
         db.query(AiMemoryEntry.id)

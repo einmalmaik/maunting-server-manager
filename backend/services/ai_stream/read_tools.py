@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 
-from database import SessionLocal, engine
+from database import SessionLocal
 from models import AiMessage, AiToolResult, User
 import services.ai_stream as ai_stream
 from services import ai_run_broker, ai_run_service, audit_service
@@ -146,26 +146,21 @@ def werkzeugergebnis_umschlag(tool_name: str, wert: object) -> dict:
 def _werkzeug_nebenlaeufigkeit() -> int:
     """Wieviele Lesewerkzeuge gleichzeitig laufen duerfen.
 
-    Auf **PostgreSQL** — der einzigen unterstuetzten Betriebsdatenbank
-    (`database_policy.validate_panel_database_url`) — holt sich jeder Aufruf
-    seine eigene Verbindung aus dem Pool. Acht gleichzeitig passen bequem neben
-    den gewoehnlichen Anfragen des Panels; der Rest wartet kurz, statt den Pool
-    leerzuraeumen.
+    Jeder Aufruf holt sich seine eigene Verbindung aus dem Pool. Acht
+    gleichzeitig passen bequem neben den gewoehnlichen Anfragen des Panels; der
+    Rest wartet kurz, statt den Pool leerzuraeumen.
 
-    Auf **SQLite** teilen sich alle Sitzungen eine einzige Verbindung
-    (`StaticPool` in der Testsuite, `SingletonThreadPool` sonst). Zwei
-    Transaktionen gleichzeitig darauf sind keine Nebenlaeufigkeit, sondern ein
-    Datenfehler: der Commit der einen schliesst die offene Arbeit der anderen
-    mit ab. Dort laeuft deshalb einer nach dem anderen.
+    Die Testsuite teilt je Worker eine einzige Verbindung und drosselt deshalb
+    in `tests/conftest.py` auf eins: zwei Transaktionen gleichzeitig auf einer
+    Verbindung sind keine Nebenlaeufigkeit, sondern ein Datenfehler.
 
-    **Der wichtigere Teil geht dabei nicht verloren.** Auch bei eins laufen die
-    Aufrufe durch `asyncio.to_thread`, und genau das war das eigentliche
-    Problem: sie hingen bisher *auf* der Ereignisschleife. Neun Aufrufe zu drei
-    Sekunden legten den ganzen Prozess siebenundzwanzig Sekunden lahm —
-    gemessen, nicht vermutet. Die Gleichzeitigkeit ist der zweite Gewinn, nicht
-    der erste.
+    **Der wichtigere Teil ist ohnehin der Thread.** Die Aufrufe laufen durch
+    `asyncio.to_thread`, und genau das war das eigentliche Problem: sie hingen
+    bisher *auf* der Ereignisschleife. Neun Aufrufe zu drei Sekunden legten den
+    ganzen Prozess siebenundzwanzig Sekunden lahm — gemessen, nicht vermutet.
+    Die Gleichzeitigkeit ist der zweite Gewinn, nicht der erste.
     """
-    return 1 if str(engine.url).startswith("sqlite") else 8
+    return 8
 
 
 def _servernummer(call) -> int | None:
@@ -1076,9 +1071,8 @@ async def _tool_followup_messages(
     #
     # Eine Welle ist so breit wie die Nebenlaeufigkeit. Der Normalfall — bis zu
     # acht Aufrufe — laeuft damit vollstaendig gleichzeitig, und ein
-    # durchgedrehtes Modell wird nach der ersten Welle gebremst. Auf SQLite ist
-    # die Breite eins; dort ergibt sich exakt das alte Verhalten, was die
-    # bestehenden Zusagen der Testsuite unangetastet laesst.
+    # durchgedrehtes Modell wird nach der ersten Welle gebremst. In der
+    # Testsuite ist die Breite eins; dort ergibt sich exakt das alte Verhalten.
     while offen:
         if erledigt and spent >= ai_stream.MAX_TOOL_RESULT_CHARS_PER_ROUND:
             for call in offen:

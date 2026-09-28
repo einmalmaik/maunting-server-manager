@@ -9,8 +9,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Datenbank
-    # PostgreSQL is the only supported panel runtime database. SQLite is read
-    # only by the explicit legacy import tool (and isolated unit tests).
+    # PostgreSQL is the only supported panel database (see database_policy.py).
     database_url: str = ""
     database_url_async: str = ""
 

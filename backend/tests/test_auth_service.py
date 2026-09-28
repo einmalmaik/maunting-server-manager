@@ -93,7 +93,8 @@ class TestRefreshToken:
         assert rt.token_hash != plain  # Must be hashed
         assert rt.revoked_at is None
         assert rt.used_at is None
-        # SQLite returns naive datetimes; make comparison robust
+        # PostgreSQL returns aware datetimes; the naive branch only guards objects
+        # that were not reloaded from the database
         now = datetime.now(timezone.utc)
         if rt.expires_at.tzinfo is None:
             assert rt.expires_at.replace(tzinfo=timezone.utc) > now

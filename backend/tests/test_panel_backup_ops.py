@@ -31,7 +31,7 @@ TEST_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLE"
 TEST_SECRET_KEY = "****************************************"
 TEST_PASSWORD = "********************!"
 
-_FAKE_SQLITE_DUMP = b"BEGIN TRANSACTION;\nCREATE TABLE users (id INTEGER PRIMARY KEY);\nCOMMIT;\n"
+_FAKE_DUMP = b"BEGIN TRANSACTION;\nCREATE TABLE users (id INTEGER PRIMARY KEY);\nCOMMIT;\n"
 
 
 # ── Helper (analog test_panel_backup_service.py) ────────────────────────
@@ -82,7 +82,7 @@ def _create_moto_bucket() -> None:
 def _create_backups(db, n: int, *, names: list[str] | None = None) -> list[PanelBackup]:
     """Erstellt n Panel-Backups (mit gemocktem DB-Dump). Gibt die Records zurueck."""
     created: list[PanelBackup] = []
-    with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+    with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
         for i in range(n):
             name = names[i] if names else f"backup-{i}"
             b = pbs.create_panel_backup(db, name=name)
@@ -169,7 +169,7 @@ class TestPanelBackupList:
 
         with mock_aws():
             _create_moto_bucket()
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 pbs.create_panel_backup(db, name="cloud-bkp")
 
             resp = _get(client, owner_cookies)
@@ -220,7 +220,7 @@ class TestPanelBackupDelete:
 
         with mock_aws():
             _create_moto_bucket()
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 backup = pbs.create_panel_backup(db, name="del-me")
 
             bid = backup.id
@@ -288,7 +288,7 @@ class TestPanelBackupDelete:
 
         with mock_aws():
             _create_moto_bucket()
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 backup = pbs.create_panel_backup(db, name="s3-fail")
 
             bid = backup.id
@@ -352,7 +352,7 @@ class TestPanelBackupRetentionOps:
         # Retention auf 2 setzen
         PanelSettingsService.set("backup.panel_retention_count", "2")
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             ids = []
             for i in range(4):
                 b = pbs.create_panel_backup(db, name=f"b-{i}")
@@ -368,7 +368,7 @@ class TestPanelBackupRetentionOps:
         _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(tmp_path / "config", [".env"])
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             backups = _create_backups(db, 5)
 
         # Alle 5 vorhanden
@@ -403,7 +403,7 @@ class TestPanelBackupRetentionOps:
 
         with mock_aws():
             _create_moto_bucket()
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 backups = _create_backups(db, 4)
 
             s3 = boto3.client("s3", region_name=TEST_REGION)
@@ -428,7 +428,7 @@ class TestPanelBackupRetentionOps:
 
         with mock_aws():
             _create_moto_bucket()
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 backups = _create_backups(db, 4)
 
             # S3 delete fuer die ersten beiden Loeschungen fehlschlagen lassen
@@ -507,7 +507,7 @@ class TestPanelBackupRBAC:
         csrf = owner_cookies.get("__Secure-csrf_token")
         headers = {"X-CSRF-Token": csrf}
         if method == "POST":
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 resp = client.post(path, json={}, cookies=owner_cookies, headers=headers)
         else:
             resp = client.get(path, cookies=owner_cookies, headers=headers)
@@ -538,7 +538,7 @@ class TestPanelBackupNoSecretsOps:
 
         with mock_aws():
             _create_moto_bucket()
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 pbs.create_panel_backup(db, name="secret-test")
 
         resp = _get(client, owner_cookies)
@@ -561,7 +561,7 @@ class TestPanelBackupNoSecretsOps:
 
         with mock_aws():
             _create_moto_bucket()
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 backup = pbs.create_panel_backup(db, name="del-secret")
 
             resp = _delete(client, owner_cookies, backup.id)
@@ -583,7 +583,7 @@ class TestPanelBackupNoSecretsOps:
 
         with mock_aws():
             _create_moto_bucket()
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 backup = pbs.create_panel_backup(db, name="log-test")
 
             with patch("services.s3_service.S3Service.delete_object", side_effect=RuntimeError("S3 boom")):

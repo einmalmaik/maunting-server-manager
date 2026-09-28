@@ -306,14 +306,14 @@ def _frisch(engine):
     return inspect(engine)
 
 
-def test_die_migration_traegt_die_worker_spalten(tmp_path: Path) -> None:
+def test_die_migration_traegt_die_worker_spalten(tmp_path: Path, pg_wegwerf) -> None:
     """Rueckbau auf 20260818_01 beweist: die Spalten stammen aus der Kette.
 
-    Dieselbe Lektion wie bei allen Schema-Zusagen (SQLite-
-    Fremdschluesselblindheit): ein create_all-Test bliebe gruen, waehrend eine
+    Dieselbe Lektion wie bei allen Schema-Zusagen (die Fremdschluesselblindheit
+    der frueheren SQLite-Suite): ein create_all-Test bliebe gruen, waehrend eine
     echte Anlage die Spalten nie bekaeme.
     """
-    db_url = f"sqlite:///{tmp_path / 'worker_spalten.db'}"
+    db_url = pg_wegwerf("worker_spalten")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent

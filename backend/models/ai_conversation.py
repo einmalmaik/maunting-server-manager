@@ -87,9 +87,6 @@ class AiConversation(Base):
             "user_id",
             "kind",
             unique=True,
-            sqlite_where=text(
-                "kind IN (" + ", ".join(f"'{art}'" for art in EINZELFENSTER) + ")"
-            ),
             postgresql_where=text(
                 "kind IN (" + ", ".join(f"'{art}'" for art in EINZELFENSTER) + ")"
             ),

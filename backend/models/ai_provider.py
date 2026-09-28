@@ -43,7 +43,6 @@ class AiProvider(Base):
             "uq_ai_providers_realtime_default",
             "realtime_default",
             unique=True,
-            sqlite_where=text("realtime_default = 1"),
             postgresql_where=text("realtime_default"),
         ),
     )

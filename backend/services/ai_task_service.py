@@ -56,9 +56,9 @@ def _jetzt() -> datetime:
 
 
 def utc(wert: datetime | None) -> datetime | None:
-    """SQLite gibt zeitzonenlose Werte zurueck, PostgreSQL zeitzonenbehaftete.
+    """Naive Zeitwerte (etwa frisch im Speicher gesetzt) als UTC lesen.
 
-    Ein Vergleich zwischen beiden wirft `TypeError` — hier ausgerechnet in der
+    Ein Vergleich zwischen naiv und zeitzonenbehaftet wirft `TypeError` — hier ausgerechnet in der
     Faelligkeitspruefung, also an der Stelle, an der ein Fehler bedeutet, dass
     ueberhaupt keine Aufgabe mehr laeuft. Dieselbe Funktion steht aus demselben
     Grund in `ai_guardian_report`.

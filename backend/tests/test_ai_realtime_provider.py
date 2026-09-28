@@ -1127,8 +1127,8 @@ def test_eine_geklickte_karte_haelt_keine_meldung_mehr_auf(
     assert not stapel.leer
 
 
-def test_realtime_migration_carries_provider_and_usage_columns(tmp_path: Path) -> None:
-    db_url = f"sqlite:///{tmp_path / 'realtime.db'}"
+def test_realtime_migration_carries_provider_and_usage_columns(tmp_path: Path, pg_wegwerf) -> None:
+    db_url = pg_wegwerf("realtime")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent

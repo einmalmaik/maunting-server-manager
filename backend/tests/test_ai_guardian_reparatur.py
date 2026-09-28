@@ -56,10 +56,12 @@ def _jetzt() -> datetime:
 
 
 def _utc(wert: datetime) -> datetime:
-    """SQLite gibt zeitzonenlose Werte zurueck, PostgreSQL zeitzonenbehaftete.
+    """Macht einen zeitzonenlosen Wert zu UTC, laesst behaftete stehen.
 
-    Ein Vergleich zwischen beiden wirft `TypeError` — und zwar erst hier in der
-    Testsuite, nie im Dienst, der ueberall seine eigene Umrechnung hat.
+    PostgreSQL liefert fuer `DateTime(timezone=True)` zeitzonenbehaftete Werte;
+    zeitzonenlos ist hoechstens, was ein Test selbst baut oder noch nicht aus
+    der Datenbank zurueckgelesen hat. Ein Vergleich zwischen beiden wirft
+    `TypeError`. Frueher lief die Suite auf SQLite, das naive Werte lieferte.
     """
     return wert.replace(tzinfo=timezone.utc) if wert.tzinfo is None else wert
 

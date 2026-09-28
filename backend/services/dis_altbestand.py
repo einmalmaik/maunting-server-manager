@@ -137,8 +137,8 @@ def dis_tabellen() -> set[str]:
 
 
 def klartextreste_entfernen(engine: Engine, tabellen: set[str]) -> bool:
-    """VACUUM FULL auf ``tabellen``. Nur PostgreSQL; gibt zurueck, ob alles lief."""
-    if engine.dialect.name != "postgresql" or not tabellen:
+    """VACUUM FULL auf ``tabellen``; gibt zurueck, ob alles lief."""
+    if not tabellen:
         return True
     alles = True
     # VACUUM laeuft nicht in einer Transaktion, daher AUTOCOMMIT.

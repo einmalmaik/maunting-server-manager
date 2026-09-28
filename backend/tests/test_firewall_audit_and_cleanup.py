@@ -30,7 +30,7 @@ def test_open_ports_creates_audit_log(db: Session) -> None:
 
     audit = db.query(AuditLog).filter(
         AuditLog.action == "server.firewall_opened",
-        AuditLog.target_id == server.id,
+        AuditLog.target_id == str(server.id),
     ).first()
 
     assert audit is not None
@@ -61,7 +61,7 @@ def test_close_ports_creates_audit_log(db: Session) -> None:
 
     audit = db.query(AuditLog).filter(
         AuditLog.action == "server.firewall_closed",
-        AuditLog.target_id == server.id,
+        AuditLog.target_id == str(server.id),
     ).first()
 
     assert audit is not None
@@ -127,7 +127,7 @@ def test_guardian_sync_detects_crash_and_closes_ports(db: Session) -> None:
 
     audit = db.query(AuditLog).filter(
         AuditLog.action == "server.firewall_closed",
-        AuditLog.target_id == server.id,
+        AuditLog.target_id == str(server.id),
     ).first()
 
     assert audit is not None
@@ -150,7 +150,7 @@ def test_reconcile_firewall_rules_cleans_stray_rules(db: Session) -> None:
 
     audit = db.query(AuditLog).filter(
         AuditLog.action == "server.firewall_closed",
-        AuditLog.target_id == server.id,
+        AuditLog.target_id == str(server.id),
     ).first()
 
     assert audit is not None
@@ -182,7 +182,7 @@ def test_reconcile_firewall_rules_schweigt_ohne_ports(db: Session) -> None:
     assert mock_ufw.call_count == 0
     assert db.query(AuditLog).filter(
         AuditLog.action == "server.firewall_closed",
-        AuditLog.target_id == server.id,
+        AuditLog.target_id == str(server.id),
     ).count() == 0
 
 
@@ -212,7 +212,7 @@ def test_reconcile_firewall_rules_schweigt_wenn_regel_schon_weg_ist(db: Session)
     assert mock_ufw.call_count >= 1
     assert db.query(AuditLog).filter(
         AuditLog.action == "server.firewall_closed",
-        AuditLog.target_id == server.id,
+        AuditLog.target_id == str(server.id),
     ).count() == 0
 
 

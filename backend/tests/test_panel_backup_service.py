@@ -42,7 +42,7 @@ TEST_SECRET_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 TEST_PASSWORD = "SuperSecretBackup123!"
 
 _FAKE_PG_DUMP = b"-- PostgreSQL database dump\n-- pg_dump version 17\n\nCREATE TABLE users ();\n"
-_FAKE_SQLITE_DUMP = b"BEGIN TRANSACTION;\nCREATE TABLE users (id INTEGER PRIMARY KEY);\nCOMMIT;\n"
+_FAKE_DUMP = b"BEGIN TRANSACTION;\nCREATE TABLE users (id INTEGER PRIMARY KEY);\nCOMMIT;\n"
 
 
 @pytest.fixture(autouse=True)
@@ -175,7 +175,7 @@ class TestPanelBackupConfigFiles:
                      "msm-update.timer", "update.sh"]
         _write_config_files(config_dir, all_names)
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             backup = pbs.create_panel_backup(db)
 
         files = _extract_archive(backup.local_path)
@@ -188,7 +188,7 @@ class TestPanelBackupConfigFiles:
         # Nur .env und install.sh existieren, Rest fehlt
         _write_config_files(config_dir, [".env", "install.sh"])
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             with caplog.at_level("WARNING"):
                 backup = pbs.create_panel_backup(db)
 
@@ -213,7 +213,7 @@ class TestPanelBackupConfigFiles:
         _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(tmp_path / "config", [".env"])
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             backup = pbs.create_panel_backup(db)
 
         files = _extract_archive(backup.local_path)
@@ -244,7 +244,7 @@ class TestPanelBackupS3Upload:
 
         with mock_aws():
             _create_moto_bucket()
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 backup = pbs.create_panel_backup(db)
 
             assert backup.s3_key is not None
@@ -268,7 +268,7 @@ class TestPanelBackupS3Upload:
 
         with mock_aws():
             # KEIN Bucket erstellen → S3-Upload schlaegt fehl
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 backup = pbs.create_panel_backup(db)
 
             # Lokales Backup existiert
@@ -290,7 +290,7 @@ class TestPanelBackupS3Upload:
             from services.backup_crypto_service import BackupCryptoError
             with patch("services.backup_crypto_service.BackupCryptoService.init_key",
                        side_effect=BackupCryptoError("DIS down")):
-                with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+                with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                     backup = pbs.create_panel_backup(db)
 
             assert os.path.exists(backup.local_path)
@@ -302,7 +302,7 @@ class TestPanelBackupS3Upload:
         _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(tmp_path / "config", [".env"])
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             backup = pbs.create_panel_backup(db)
 
         assert backup.s3_key is None
@@ -318,7 +318,7 @@ class TestPanelBackupS3Upload:
 
         with mock_aws():
             _create_moto_bucket()
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 with patch("services.backup_crypto_service.BackupCryptoService.invalidate_key") as inv:
                     pbs.create_panel_backup(db)
 
@@ -334,7 +334,7 @@ class TestPanelBackupS3Upload:
 
         with mock_aws():
             # KEIN Bucket → S3-Fehler
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 with patch("services.backup_crypto_service.BackupCryptoService.invalidate_key") as inv:
                     pbs.create_panel_backup(db)
 
@@ -414,7 +414,7 @@ class TestPanelBackupRetention:
         _prepare_dirs(tmp_path, monkeypatch)
         # Keine Retention-Setting
         assert PanelSettingsService.get("backup.panel_retention_count") == ""
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             for i in range(3):
                 pbs.create_panel_backup(db, name=f"b-{i}")
 
@@ -431,7 +431,7 @@ class TestPanelBackupRetention:
 
         with mock_aws():
             _create_moto_bucket()
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 for i in range(4):
                     pbs.create_panel_backup(db, name=f"b-{i}")
 
@@ -460,7 +460,7 @@ class TestPanelBackupRouter:
         _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(tmp_path / "config", [".env", "install.sh"])
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             resp = _post_panel_backup(client, owner_cookies, name="test-backup")
 
         assert resp.status_code == 201, resp.text
@@ -481,7 +481,7 @@ class TestPanelBackupRouter:
         _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(tmp_path / "config", [".env"])
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             resp = _post_panel_backup(client, owner_cookies)
 
         assert resp.status_code == 201, resp.text
@@ -492,7 +492,7 @@ class TestPanelBackupRouter:
         _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(tmp_path / "config", [".env"])
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             resp = _post_panel_backup(client, user_cookies)
 
         assert resp.status_code == 403
@@ -502,7 +502,7 @@ class TestPanelBackupRouter:
         _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(tmp_path / "config", [".env"])
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             resp = client.post("/api/panel-backups", json={}, headers={})
 
         assert resp.status_code == 401
@@ -512,7 +512,7 @@ class TestPanelBackupRouter:
         _prepare_dirs(tmp_path, monkeypatch)
         _write_config_files(tmp_path / "config", [".env"])
 
-        with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+        with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
             resp = client.post("/api/panel-backups", json={}, cookies=owner_cookies)
 
         # CSRF-Fehler → 403 (verify_csrf wirft)
@@ -541,7 +541,7 @@ class TestPanelBackupRouter:
 
         with mock_aws():
             # KEIN Bucket → S3-Fehler, aber lokales Backup + 201
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 resp = _post_panel_backup(client, owner_cookies)
 
         assert resp.status_code == 201, resp.text
@@ -564,7 +564,7 @@ class TestPanelBackupNoSecrets:
 
         with mock_aws():
             # KEIN Bucket → S3-Fehler
-            with patch.object(pbs, "_dump_database", return_value=_FAKE_SQLITE_DUMP):
+            with patch.object(pbs, "_dump_database", return_value=_FAKE_DUMP):
                 with caplog.at_level("WARNING"):
                     pbs.create_panel_backup(db)
 

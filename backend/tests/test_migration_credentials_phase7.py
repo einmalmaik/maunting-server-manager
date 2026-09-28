@@ -14,8 +14,8 @@ from database import Base
 CREDENTIAL_TABLES = {"user_credentials", "server_credential_bindings"}
 
 
-def test_scoped_credentials_migration_roundtrip(tmp_path: Path) -> None:
-    db_url = f"sqlite:///{tmp_path / 'credentials-phase7.db'}"
+def test_scoped_credentials_migration_roundtrip(tmp_path: Path, pg_wegwerf) -> None:
+    db_url = pg_wegwerf("credentials-phase7")
     previous_database_url = settings.database_url
     settings.database_url = db_url
     engine = create_engine(db_url)

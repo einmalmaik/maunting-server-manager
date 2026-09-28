@@ -9,8 +9,8 @@ etwas laufen lassen, dessen Ziel MSM nicht mehr kennt.
 Geprüft wird deshalb beides: dass ein OpenRouter-Zugang **weiterläuft** und dass
 alles andere **sichtbar abgeschaltet, aber nicht gelöscht** wird.
 
-Die Tests laufen auf SQLite, das Panel auf PostgreSQL. Geprüft wird deshalb nur,
-was auf beiden gleich sein muss.
+Die Tests laufen wie das Panel auf PostgreSQL, jeder auf einer
+Wegwerfdatenbank (`pg_wegwerf`).
 """
 
 from pathlib import Path
@@ -39,9 +39,9 @@ def _spalten(engine, tabelle: str) -> set[str]:
 
 
 def test_provider_kind_migration_keeps_openrouter_and_parks_the_rest(
-    tmp_path: Path,
+    tmp_path: Path, pg_wegwerf,
 ) -> None:
-    db_url = f"sqlite:///{tmp_path / 'provider-kind.db'}"
+    db_url = pg_wegwerf("provider-kind")
     previous_database_url = settings.database_url
     settings.database_url = db_url
     engine = create_engine(db_url)
@@ -72,7 +72,7 @@ def test_provider_kind_migration_keeps_openrouter_and_parks_the_rest(
                         "INSERT INTO ai_providers "
                         "(id, name, base_url, default_model, enabled, requires_api_key, "
                         " allow_private_network, operator_api_key_hint, created_at, updated_at) "
-                        "VALUES (:id, :name, :url, 'model-a', 1, 1, 0, '****abcd', "
+                        "VALUES (:id, :name, :url, 'model-a', true, true, false, '****abcd', "
                         " '2026-08-11 00:00:00', '2026-08-11 00:00:00')"
                     ),
                     {"id": zeile_id, "name": name, "url": url},

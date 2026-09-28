@@ -79,7 +79,6 @@ def upgrade() -> None:
         "ai_conversations",
         ["user_id", "kind"],
         unique=True,
-        sqlite_where=sa.text(_EINZELFENSTER),
         postgresql_where=sa.text(_EINZELFENSTER),
     )
 

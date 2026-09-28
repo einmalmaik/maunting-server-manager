@@ -191,8 +191,10 @@ class TestAbholen:
         COMMITTED denselben Auftrag, und der Rechner fuehrt ihn zweimal aus.
 
         Geprueft wird das an der **erzeugten Abfrage** und nicht am Verhalten:
-        SQLite kennt `FOR UPDATE` nicht und serialisiert Schreibzugriffe
-        ohnehin — genau deshalb ist der Fehler in den Tests nie aufgefallen.
+        auf der geteilten Testverbindung (StaticPool) stecken alle Sitzungen in
+        derselben Transaktion, `FOR UPDATE` sperrt dort niemanden aus — und die
+        fruehere SQLite-Suite kannte `FOR UPDATE` gar nicht; genau deshalb ist
+        der Fehler in den Tests nie aufgefallen.
         """
         run = _lauf(db, regular_user)
         desktop_job_service.anlegen(

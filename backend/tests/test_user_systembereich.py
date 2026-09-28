@@ -15,8 +15,8 @@ koennen still kaputtgehen, und jedes davon hat hier einen Test:
   gegen einen direkten Datenbankzugriff oder eine spaetere Migration wehrlos
   (derselbe Grund wie in `test_schema_constraints.py`).
 
-Anders als bei Fremdschluesseln setzt SQLite CHECK-Bedingungen von sich aus
-durch; der Test misst hier also dieselbe Zusage wie der Betrieb.
+Die Testsuite laeuft wie der Betrieb auf PostgreSQL, das CHECK-Bedingungen
+durchsetzt; der Test misst hier also dieselbe Zusage wie der Betrieb.
 """
 
 from pathlib import Path
@@ -42,11 +42,11 @@ from models.user import (
 def _frisch(engine):
     """Ein Inspector auf einer **neuen** Verbindung.
 
-    Die Migration baut ``users`` auf SQLite komplett neu auf
-    (``batch_alter_table``). Eine Verbindung aus dem Pool, die vorher geoeffnet
-    wurde, behaelt dabei ihren alten Schema-Cache und meldet die Spalte je nach
-    Frage einmal so und einmal anders. Woertlich uebernommen aus
-    `test_schema_constraints._frisch`, wo dieselbe Falle ausfuehrlich steht.
+    Alembic faehrt die Migration ueber eine eigene Engine; eine Verbindung aus
+    dem Pool, die vorher geoeffnet wurde, hat womoeglich noch den alten Stand
+    im Blick und meldet die Spalte je nach Frage einmal so und einmal anders.
+    Woertlich uebernommen aus `test_schema_constraints._frisch`, wo dieselbe
+    Falle ausfuehrlich steht.
     """
     engine.dispose()
     return inspect(engine)
@@ -140,7 +140,7 @@ def test_die_datenbank_weist_eine_vierte_zone_ab(db: Session, regular_user: User
     db.rollback()
 
 
-def test_die_migration_traegt_den_systembereich(tmp_path: Path) -> None:
+def test_die_migration_traegt_den_systembereich(tmp_path: Path, pg_wegwerf) -> None:
     """Modell und Migration duerfen nicht auseinanderlaufen.
 
     Die Tests oben pruefen das `create_all`-Schema aus den Modellen; ein
@@ -150,10 +150,10 @@ def test_die_migration_traegt_den_systembereich(tmp_path: Path) -> None:
 
     Der Kern ist die **Bestandszeile**: ein Konto, das vor dem Update angelegt
     wurde, muss danach ``lesen`` tragen. Eine Migration ohne ``server_default``
-    liefe auf SQLite noch durch und liesse dort ``NULL`` stehen — auf
-    PostgreSQL scheiterte sie am ``NOT NULL``, und zwar erst beim Betreiber.
+    scheiterte auf PostgreSQL am ``NOT NULL`` — ohne diesen Test erst beim
+    Betreiber (die fruehere SQLite-Suite liess dort still ``NULL`` stehen).
     """
-    db_url = f"sqlite:///{tmp_path / 'systembereich.db'}"
+    db_url = pg_wegwerf("systembereich")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -175,7 +175,7 @@ def test_die_migration_traegt_den_systembereich(tmp_path: Path) -> None:
                     "INSERT INTO users (username, password_hash, is_owner, is_active,"
                     " email_verified, two_factor_enabled, email_notifications,"
                     " ai_notifications, created_at)"
-                    " VALUES ('bestand', 'x', 0, 1, 1, 0, 1, 1, '2026-08-22')"
+                    " VALUES ('bestand', 'x', false, true, true, false, true, true, '2026-08-22')"
                 )
             )
 

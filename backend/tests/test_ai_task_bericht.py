@@ -71,7 +71,7 @@ def _lauf(db: Session, user: User, aufgabe: AiTask, *, status: str = "completed"
     db.add(conversation)
     db.flush()
     run = AiRun(
-        id=f"run-{aufgabe.id}",
+        id=aufgabe.id,  # eine UUID; die Spalte fasst 36 Zeichen
         user_id=user.id,
         conversation_id=conversation.id,
         status=status,
@@ -79,7 +79,7 @@ def _lauf(db: Session, user: User, aufgabe: AiTask, *, status: str = "completed"
     db.add(run)
     if antwort is not None:
         db.add(AiMessage(
-            id=f"msg-{aufgabe.id}",
+            id=aufgabe.id,
             conversation_id=conversation.id,
             role="assistant",
             content=antwort,
@@ -498,14 +498,14 @@ def _lauf_mit_gliederung(
     db.add(conversation)
     db.flush()
     run = AiRun(
-        id=f"run-{aufgabe.id}",
+        id=aufgabe.id,  # eine UUID; die Spalte fasst 36 Zeichen
         user_id=user.id,
         conversation_id=conversation.id,
         status="completed",
     )
     db.add(run)
     db.add(AiMessage(
-        id=f"msg-{aufgabe.id}",
+        id=aufgabe.id,
         conversation_id=conversation.id,
         role="assistant",
         content=content,

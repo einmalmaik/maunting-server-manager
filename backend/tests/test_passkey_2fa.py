@@ -557,13 +557,13 @@ def test_passkey_login_mit_zwischenschein(client: TestClient, db: Session, owner
 # ── Altbestand ───────────────────────────────────────────────────────────
 
 
-def test_migration_schaltet_den_ungeprueften_passkey_ab(tmp_path: Path) -> None:
+def test_migration_schaltet_den_ungeprueften_passkey_ab(tmp_path: Path, pg_wegwerf) -> None:
     """Konten mit dem alten Browser-„Passkey" verlieren die 2FA, TOTP-Konten nicht.
 
     Das Passkey-Konto hat ein liegengebliebenes TOTP-Geheimnis (das Profil rief
     vor jeder Einrichtung `/2fa/setup` auf) — erkannt wird es am Audit-Log.
     """
-    db_url = f"sqlite:///{tmp_path / 'passkey.db'}"
+    db_url = pg_wegwerf("passkey")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -587,7 +587,7 @@ def test_migration_schaltet_den_ungeprueften_passkey_ab(tmp_path: Path) -> None:
                         "email_verified, two_factor_enabled, two_factor_secret_encrypted, "
                         "email_notifications, ai_notifications, device_notifications, "
                         "location_sharing_enabled, ai_desktop_systembereich, created_at) VALUES "
-                        "(:id, :n, 'x', 0, 1, 1, 1, :g, 1, 1, 1, 0, 'lesen', '2026-09-01')"
+                        "(:id, :n, 'x', false, true, true, true, :g, true, true, true, false, 'lesen', '2026-09-01')"
                     ),
                     {"id": uid, "n": name, "g": geheimnis},
                 )

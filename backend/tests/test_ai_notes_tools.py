@@ -1,8 +1,5 @@
 """Tests for AI Tools related to Notes."""
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from database import Base
 from models import User, Note
 from services.ai_action_service import _execute_global_read_tool
 from services.ai_proposal_service import (
@@ -17,11 +14,8 @@ from services.ai_proposal_service import (
 
 
 @pytest.fixture
-def db_session():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(bind=engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
+def db_session(db):
+    session = db
 
     user = User(
         id=1,

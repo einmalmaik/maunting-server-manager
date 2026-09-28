@@ -11,8 +11,8 @@ from config import settings
 from database import Base
 
 
-def test_ai_phase4_migration_roundtrip(tmp_path: Path) -> None:
-    db_url = f"sqlite:///{tmp_path / 'ai-phase4.db'}"
+def test_ai_phase4_migration_roundtrip(tmp_path: Path, pg_wegwerf) -> None:
+    db_url = pg_wegwerf("ai-phase4")
     previous_database_url = settings.database_url
     settings.database_url = db_url
     engine = create_engine(db_url)
@@ -21,7 +21,10 @@ def test_ai_phase4_migration_roundtrip(tmp_path: Path) -> None:
     config.set_main_option("script_location", str(backend_dir / "migrations"))
     try:
         Base.metadata.create_all(engine)
-        command.stamp(config, "20260801_05")
+        # Von `head` aus zurueck statt auf den alten Stand zu stempeln: PostgreSQL
+        # verweigert das Loeschen einer Tabelle, auf die eine spaetere noch zeigt.
+        command.stamp(config, "head")
+        command.downgrade(config, "20260801_05")
         command.downgrade(config, "20260801_04")
         assert "ai_action_proposals" not in inspect(engine).get_table_names()
 

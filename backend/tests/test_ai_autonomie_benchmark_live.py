@@ -139,7 +139,7 @@ class AutonomieErgebnis:
 
 
 def _setup_test_environment(db: Session) -> tuple[User, AiProvider, Server]:
-    """Erstellt Testbenutzer, Provider und ASA-Server in SQLite."""
+    """Erstellt Testbenutzer, Provider und ASA-Server in der Testdatenbank."""
     user = db.query(User).filter(User.username == "bench_autonomie_owner").first()
     if user is None:
         user = User(

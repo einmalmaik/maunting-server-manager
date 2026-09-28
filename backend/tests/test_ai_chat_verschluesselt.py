@@ -316,12 +316,13 @@ def test_neuer_klartext_nach_dem_ersten_start_wird_wieder_geraeumt(
     assert aufrufe[1] == {"ai_conversations"}
 
 
-def test_vacuum_nur_auf_postgres() -> None:
-    from sqlalchemy import create_engine
+def test_vacuum_laeuft_ausserhalb_einer_transaktion() -> None:
+    import database
 
     from services.dis_altbestand import klartextreste_entfernen
 
-    assert klartextreste_entfernen(create_engine("sqlite://"), {"ai_messages"}) is True
+    assert klartextreste_entfernen(database.engine, {"ai_messages"}) is True
+    assert klartextreste_entfernen(database.engine, set()) is True
 
 
 def test_der_client_erkennt_die_grenze_des_sidecars(monkeypatch: pytest.MonkeyPatch) -> None:

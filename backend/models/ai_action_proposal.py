@@ -95,10 +95,7 @@ class AiActionProposal(Base):
     # Bewusst **ohne** Fremdschluessel. Die Tests bauen ihr Schema mit
     # `Base.metadata.create_all`, der Betrieb mit Alembic; eine Beziehung, die
     # nur eine der beiden Seiten kennt, waere ein Unterschied zwischen Test und
-    # Betrieb — die unangenehmste Sorte Fehler. Ein Fremdschluessel liesse sich
-    # nachtraeglich auch nur durch eine Kopie der gesamten Vorschlagstabelle
-    # anlegen (SQLite kennt kein ADD CONSTRAINT), und das ist die Tabelle mit
-    # den verschluesselten Nutzlasten. Beide Seiten kaskadieren ohnehin ueber
+    # Betrieb — die unangenehmste Sorte Fehler. Beide Seiten kaskadieren ohnehin ueber
     # `conversation_id`, ein verwaister Verweis ist damit praktisch ausgeschlossen.
     run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(

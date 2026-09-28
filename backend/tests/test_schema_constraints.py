@@ -7,13 +7,15 @@ der das Loeschen angeordnet hatte. Der Aufruf stolperte danach ueber die eigene,
 verschwundene Zeile und meldete "Aktionsvorschlag nicht gefunden" — fuer einen
 Vorgang, der tatsaechlich gelungen war.
 
-Die Testsuite konnte das nicht bemerken, weil SQLite Fremdschluessel nur auf
-Verlangen prueft und niemand danach verlangt hatte. Ein Verhalten, das die
+Die Testsuite konnte das damals nicht bemerken, weil sie auf SQLite lief, das
+Fremdschluessel nur auf Verlangen prueft. Seit sie auf PostgreSQL laeuft,
+setzt die Datenbank sie wie im Betrieb durch. Ein Verhalten, das die
 Datenbank durchsetzt, gehoert deshalb hierher und nicht in die Tests des
 jeweiligen Dienstes: dort wuerde es niemand vermissen, wenn es wieder verschwindet.
 """
 
 import io
+import re
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,35 +44,33 @@ def _frisch(engine):
 
     Alembic faehrt seine Migrationen ueber eine eigene Engine; der Pool der
     Engine, mit der hier geprueft wird, haelt daneben Verbindungen, die vor der
-    Migration geoeffnet wurden. Fuer ein blosses ALTER faellt das nicht auf —
-    aber wenn eine Migration eine Tabelle **loescht und neu anlegt**, behaelt
-    eine solche Verbindung ihren alten, in sich zusammengefallenen Schema-Cache:
-    `SELECT sql FROM sqlite_master` liefert den frischen Text, waehrend
-    `PRAGMA foreign_key_list` leer bleibt.
-
-    Die Reflexion in SQLAlchemy braucht **beides** und meldet die Abweichung nur
-    als Warnung ("SQL-parsed foreign key constraint could not be located in
-    PRAGMA foreign_keys"); `get_foreign_keys` gibt danach eine leere Liste
-    zurueck. Ein Test, der darauf prueft, meldet dann "die Migration hat den
-    Fremdschluessel vergessen" — fuer eine Migration, die ihn korrekt anlegt.
-    Genau diese Fehldiagnose ist beim Bau von `ai_tasks` einmal passiert.
-
-    `dispose()` wirft den Pool weg; die naechste Verbindung liest das Schema neu.
+    Migration geoeffnet wurden. `dispose()` wirft den Pool weg, damit die
+    Reflexion das Schema nach der Migration liest und nicht einen Stand, den
+    eine alte Verbindung noch im Blick hat.
     """
     engine.dispose()
     return inspect(engine)
 
 
 def test_fremdschluessel_sind_im_test_scharf(db: Session) -> None:
-    """Ohne diesen Schalter ist jede Aussage ueber ON DELETE hier wertlos.
+    """Ohne durchgesetzte Fremdschluessel ist jede Aussage ueber ON DELETE wertlos.
 
     Der Test prueft nicht ein Verhalten des Panels, sondern eine Eigenschaft des
-    Pruefstands. Faellt der Listener in `conftest.py` irgendwann heraus, laufen
-    alle nachfolgenden Kaskadentests weiterhin gruen — sie pruefen dann nur
-    nichts mehr. Das ist die gefaehrlichere Sorte Fehlschlag, deshalb steht sie
-    hier ausdruecklich.
+    Pruefstands: die Suite laeuft auf PostgreSQL und nicht auf einer Datenbank,
+    die verwaiste Verweise stillschweigend annimmt. Ginge das je verloren,
+    liefen alle nachfolgenden Kaskadentests weiterhin gruen — sie pruefen dann
+    nur nichts mehr. Das ist die gefaehrlichere Sorte Fehlschlag, deshalb steht
+    sie hier ausdruecklich.
     """
-    assert db.execute(text("PRAGMA foreign_keys")).scalar() == 1
+    assert db.get_bind().dialect.name == "postgresql"
+    with pytest.raises(IntegrityError):
+        db.execute(
+            text(
+                "INSERT INTO server_permissions (user_id, server_id, permission_key) "
+                "VALUES (987654, 987654, 'server.view')"
+            )
+        )
+    db.rollback()
 
 
 def test_ein_vorschlag_ueberlebt_seinen_server(db: Session) -> None:
@@ -238,9 +238,9 @@ def test_eine_guardian_notiz_verschwindet_mit_ihrem_vorfall(
 
     Das steht hier und nicht in den Tests des Guardian-Dienstes, weil es
     ausschliesslich die Datenbank durchsetzt. Die Testsuite konnte
-    ``ON DELETE`` lange gar nicht beobachten, weil SQLite Fremdschluessel nur auf
-    Verlangen prueft — verschwindet der Listener aus `conftest.py`, faellt das
-    oben auf und nicht hier.
+    ``ON DELETE`` lange gar nicht beobachten, weil sie auf SQLite lief, das
+    Fremdschluessel nur auf Verlangen prueft — dass sie heute durchgesetzt
+    werden, prueft `test_fremdschluessel_sind_im_test_scharf` oben.
     """
     inspector = inspect(db.get_bind())
     assert _fremdschluessel(inspector, "ai_guardian_notices", "incident_id")[
@@ -356,8 +356,8 @@ def test_die_datenbank_kennt_genau_zwei_arten_von_notiz(
     einem Wartungsskript soll nicht stillschweigend als eine durchgehen: der
     Ausloeser entschiede dann anders, ohne dass irgendwo etwas fehlschluege.
 
-    Anders als bei den Fremdschluesseln nebenan setzt SQLite CHECK-Bedingungen
-    von sich aus durch — der Test misst hier also dieselbe Zusage wie im Betrieb.
+    Die Suite laeuft auf PostgreSQL — der Test misst hier also dieselbe
+    Zusage wie im Betrieb.
     """
     incident_id = _vorfall(db, test_server.id)
     zweiter = _vorfall(db, test_server.id)
@@ -391,7 +391,7 @@ def _aufgabe_anlegen(
             " time_zone, channel, enabled, next_run_at, last_run_id, "
             " created_at, updated_at) "
             "VALUES (:id, :user_id, 'Serverbericht', 'Sieh nach den Servern.', "
-            " :kind, :plan_kind, '08:00', 'Europe/Berlin', :channel, 1, "
+            " :kind, :plan_kind, '08:00', 'Europe/Berlin', :channel, true, "
             " '2026-08-14 06:00:00', :last_run_id, '2026-08-13', '2026-08-13')"
         ),
         {
@@ -509,7 +509,7 @@ def test_ein_backup_kann_seinen_nachweis_tragen(db: Session) -> None:
     assert spalten["verified_at"]["nullable"] is True
 
 
-def test_die_migration_traegt_backupnachweis_und_notiztabelle(tmp_path: Path) -> None:
+def test_die_migration_traegt_backupnachweis_und_notiztabelle(tmp_path: Path, pg_wegwerf) -> None:
     """Modell und Migration duerfen auch hier nicht auseinanderlaufen.
 
     Die Tests bauen das Schema mit `create_all` aus den Modellen, die Produktion
@@ -525,7 +525,7 @@ def test_die_migration_traegt_backupnachweis_und_notiztabelle(tmp_path: Path) ->
     Ausloeser nach dem naechsten Aufraeumen alter Laeufe auf laengst behandelten
     Vorfaellen von vorne an.
     """
-    db_url = f"sqlite:///{tmp_path / 'guardian_constraint.db'}"
+    db_url = pg_wegwerf("guardian_constraint")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -680,7 +680,7 @@ def test_die_datenbank_kennt_genau_drei_unterhaltungsarten(db: Session) -> None:
     db.rollback()
 
 
-def test_die_migration_traegt_die_unterhaltungsart(tmp_path: Path) -> None:
+def test_die_migration_traegt_die_unterhaltungsart(tmp_path: Path, pg_wegwerf) -> None:
     """Modell und Migration duerfen auch hier nicht auseinanderlaufen.
 
     Der Rueckbau bis **vor** `20260816_11` beweist, dass die Spalte aus der
@@ -690,7 +690,7 @@ def test_die_migration_traegt_die_unterhaltungsart(tmp_path: Path) -> None:
     Eindeutigkeit da, und `get_or_create_primary_conversation` legte bei jedem
     Rennen einen weiteren Chat an.
     """
-    db_url = f"sqlite:///{tmp_path / 'fenster_constraint.db'}"
+    db_url = pg_wegwerf("fenster_constraint")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -766,7 +766,7 @@ def test_die_laufzustaende_kennen_waiting_wake(db: Session) -> None:
             "INSERT INTO ai_runs (id, conversation_id, user_id, status, wake_at, "
             "reasoning, created_at, updated_at) "
             "VALUES ('rw-1', 'kw-1', :uid, 'waiting_wake', '2026-08-18 12:00:00', "
-            "0, '2026-08-18', '2026-08-18')"
+            "false, '2026-08-18', '2026-08-18')"
         ),
         {"uid": user.id},
     )
@@ -776,24 +776,24 @@ def test_die_laufzustaende_kennen_waiting_wake(db: Session) -> None:
             text(
                 "INSERT INTO ai_runs (id, conversation_id, user_id, status, "
                 "reasoning, created_at, updated_at) "
-                "VALUES ('rw-2', 'kw-1', :uid, 'waiting_wak', 0, '2026-08-18', '2026-08-18')"
+                "VALUES ('rw-2', 'kw-1', :uid, 'waiting_wak', false, '2026-08-18', '2026-08-18')"
             ),
             {"uid": user.id},
         )
     db.rollback()
 
 
-def test_die_migration_traegt_worker_und_waiting_wake(tmp_path: Path) -> None:
+def test_die_migration_traegt_worker_und_waiting_wake(tmp_path: Path, pg_wegwerf) -> None:
     """Modell und Migration 20260818_01 tragen dasselbe.
 
     Der Rueckbau auf ``20260817_01`` beweist, dass ``wake_at`` und der
     partielle Index aus der Kette stammen und nicht bloss aus ``create_all``
-    (die Lektion der SQLite-Fremdschluesselblindheit: create_all-Tests waeren
-    gruen, waehrend eine echte Anlage ``waiting_wake`` am alten CHECK
+    (die Lektion der frueheren SQLite-Fremdschluesselblindheit: create_all-Tests
+    waeren gruen, waehrend eine echte Anlage ``waiting_wake`` am alten CHECK
     abwiese). Das Downgrade muss den vollen Unique-Index wiederherstellen und
     die Spalte entfernen.
     """
-    db_url = f"sqlite:///{tmp_path / 'worker_constraint.db'}"
+    db_url = pg_wegwerf("worker_constraint")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -813,7 +813,7 @@ def test_die_migration_traegt_worker_und_waiting_wake(tmp_path: Path) -> None:
             index["name"]: index for index in inspector.get_indexes("ai_conversations")
         }
         assert indizes["uq_ai_conversations_user_kind"]["unique"]
-        assert "sqlite_where" not in indizes["uq_ai_conversations_user_kind"].get(
+        assert "postgresql_where" not in indizes["uq_ai_conversations_user_kind"].get(
             "dialect_options", {}
         )
 
@@ -828,7 +828,7 @@ def test_die_migration_traegt_worker_und_waiting_wake(tmp_path: Path) -> None:
         }
         assert indizes["uq_ai_conversations_user_kind"]["unique"]
         praedikat = indizes["uq_ai_conversations_user_kind"]["dialect_options"][
-            "sqlite_where"
+            "postgresql_where"
         ]
         assert "'primary'" in str(praedikat) and "'guardian'" in str(praedikat)
         assert "'worker'" not in str(praedikat)
@@ -852,8 +852,8 @@ def test_die_datenbank_kennt_genau_fuenf_gedaechtnisbereiche(db: Session) -> Non
     oder einen direkten Datenbankzugriff wehrlos: `scope='server_share'` waere
     ein Eintrag, den niemand mehr sieht und niemand mehr loeschen kann.
 
-    Anders als bei den Fremdschluesseln nebenan setzt SQLite CHECK-Bedingungen
-    von sich aus durch, der Test misst hier also dieselbe Zusage wie im Betrieb.
+    Die Suite laeuft auf PostgreSQL, der Test misst hier also dieselbe Zusage
+    wie im Betrieb.
     """
     gueltig = ("user", "server", "server_shared", "team", "panel")
     for scope in gueltig:
@@ -880,16 +880,12 @@ def test_die_datenbank_kennt_genau_fuenf_gedaechtnisbereiche(db: Session) -> Non
         )
     db.rollback()
 
-    assert set(gueltig) == {
-        wert.strip().strip("'")
-        for wert in _scope_check(inspect(db.get_bind()))
-        .split("(", 1)[1]
-        .rsplit(")", 1)[0]
-        .split(",")
-    }
+    # PostgreSQL gibt die Bedingung als `scope::text = ANY (ARRAY['user'::…])`
+    # zurueck; gezaehlt werden die Literale, nicht die Schreibweise.
+    assert set(gueltig) == set(re.findall(r"'([^']*)'", _scope_check(inspect(db.get_bind()))))
 
 
-def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path) -> None:
+def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path, pg_wegwerf) -> None:
     """Modell und Migration duerfen nicht auseinanderlaufen.
 
     Die Tests bauen das Schema mit `create_all` aus den Modellen, die Produktion
@@ -898,7 +894,7 @@ def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path) -> None:
     der dieser Fehler kam. Der Test faehrt deshalb die echte Migration und
     vergleicht das Ergebnis mit dem Modell.
     """
-    db_url = f"sqlite:///{tmp_path / 'constraint.db'}"
+    db_url = pg_wegwerf("constraint")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -977,8 +973,7 @@ def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path) -> None:
         assert "ai_tasks" not in _frisch(engine).get_table_names()
         command.upgrade(config, "head")
         # `_frisch` und nicht `inspect`: diese Tabelle wird von der Migration
-        # ganz geloescht und neu angelegt, und darauf reagiert eine schon
-        # geoeffnete SQLite-Verbindung anders als auf ein ALTER (siehe dort).
+        # ganz geloescht und neu angelegt (siehe dort).
         assert _fremdschluessel(_frisch(engine), "ai_tasks", "user_id")["options"] == {
             "ondelete": "CASCADE"
         }
@@ -998,8 +993,7 @@ def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path) -> None:
         }
         command.upgrade(config, "head")
         # `_frisch` wie bei `ai_tasks`: die Spalte kommt ueber einen
-        # Batch-Umbau, und den beantwortet SQLite je nach Alter der Verbindung
-        # aus einem Schema-Cache, der die Tabelle noch ohne sie kennt.
+        # Batch-Umbau, den eine aeltere Verbindung noch nicht kennt.
         gewandert = {
             spalte["name"]: spalte
             for spalte in _frisch(engine).get_columns("role_ai_limits")
@@ -1016,7 +1010,7 @@ def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path) -> None:
 
 
 def test_das_downgrade_bleibt_nicht_am_ersten_uuid_ziel_haengen() -> None:
-    """Der Rueckbau muss auf PostgreSQL laufen, nicht nur auf SQLite.
+    """Der Rueckbau darf nicht an der ersten UUID in der Spalte scheitern.
 
     `20260809_02` hat `audit_logs.target_id` zu Text gemacht, weil Memory und
     Skills dort UUIDs eintragen. Das Downgrade castete sie ungefiltert mit
@@ -1025,11 +1019,10 @@ def test_das_downgrade_bleibt_nicht_am_ersten_uuid_ziel_haengen() -> None:
     als **erste** Anweisung, wodurch die gesamte Kette an dieser Revision
     haengen bleibt.
 
-    Kein bestehender Test konnte das sehen: `test_migration_chain_upgrade.py`
-    faehrt die Downgrades auf SQLite, wo `postgresql_using` gar nicht angewandt
-    wird. Dieser Test erzeugt die DDL deshalb im Offline-Modus fuer den
-    PostgreSQL-Dialekt — dafuer braucht es keine laufende Datenbank, nur den
-    Dialektnamen in der URL.
+    Die Kette in `test_migration_chain_upgrade.py` faehrt leere Tabellen ab und
+    sieht den Cast deshalb nie scheitern. Dieser Test prueft die erzeugte DDL
+    im Offline-Modus fuer den PostgreSQL-Dialekt — dafuer braucht es keine
+    laufende Datenbank, nur den Dialektnamen in der URL.
     """
     backend_dir = Path(__file__).resolve().parent.parent
     config = Config(str(backend_dir / "alembic.ini"))
@@ -1255,7 +1248,7 @@ def test_die_datenbank_kennt_genau_sieben_reparaturphasen(
     db.rollback()
 
 
-def test_die_migration_traegt_den_reparaturauftrag(tmp_path: Path) -> None:
+def test_die_migration_traegt_den_reparaturauftrag(tmp_path: Path, pg_wegwerf) -> None:
     """Modell und Migration duerfen nicht auseinanderlaufen.
 
     Der Rueckbau bis **vor** `20260816_12` beweist, dass die Tabelle aus der
@@ -1268,7 +1261,7 @@ def test_die_migration_traegt_den_reparaturauftrag(tmp_path: Path) -> None:
     finden, keinen Server sehen und den Auftrag ordentlich als ``abgebrochen``
     beenden. Ein CASCADE haette dieselbe Wirkung ohne Spur.
     """
-    db_url = f"sqlite:///{tmp_path / 'reparatur_constraint.db'}"
+    db_url = pg_wegwerf("reparatur_constraint")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -1332,14 +1325,14 @@ def test_das_audit_log_traegt_den_dedupe_index(db: Session) -> None:
     ]
 
 
-def test_die_migration_traegt_den_dedupe_index(tmp_path: Path) -> None:
+def test_die_migration_traegt_den_dedupe_index(tmp_path: Path, pg_wegwerf) -> None:
     """Modell und Migration `20260821_05` tragen denselben Index.
 
     Der Rueckbau bis vor die Revision beweist, dass er aus der Kette stammt
     und nicht bloss aus `create_all` — sonst haette ihn nur die Testdatenbank,
     waehrend jede echte Anlage weiter scannt.
     """
-    db_url = f"sqlite:///{tmp_path / 'audit_index_constraint.db'}"
+    db_url = pg_wegwerf("audit_index_constraint")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -1371,7 +1364,7 @@ def test_die_migration_traegt_den_dedupe_index(tmp_path: Path) -> None:
         settings.database_url = vorher
 
 
-def test_die_migration_traegt_die_guardian_uebersteuerung(tmp_path: Path) -> None:
+def test_die_migration_traegt_die_guardian_uebersteuerung(tmp_path: Path, pg_wegwerf) -> None:
     """Die Uebersteuerung muss aus der Kette kommen, nicht aus ``create_all``.
 
     Eine Spalte, die nur das Modell kennt, faellt im Test nie auf und im Betrieb
@@ -1385,7 +1378,7 @@ def test_die_migration_traegt_die_guardian_uebersteuerung(tmp_path: Path) -> Non
     zaehlen, ohne JSON zu parsen — und `routers/guardian.reset_overrides`
     entscheidet genau daran, ob es ueberhaupt etwas zu tun gibt.
     """
-    db_url = f"sqlite:///{tmp_path / 'uebersteuerung_constraint.db'}"
+    db_url = pg_wegwerf("uebersteuerung_constraint")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -1426,7 +1419,7 @@ def test_die_modellwahl_ueberlebt_ihren_zugang_nicht_aber_das_konto(db: Session)
     }
 
 
-def test_die_migration_traegt_die_modellwahl(tmp_path: Path) -> None:
+def test_die_migration_traegt_die_modellwahl(tmp_path: Path, pg_wegwerf) -> None:
     """Modell und Migration duerfen auch hier nicht auseinanderlaufen.
 
     Der Test oben prueft das `create_all`-Schema aus den Modellen; die
@@ -1435,7 +1428,7 @@ def test_die_migration_traegt_die_modellwahl(tmp_path: Path) -> None:
     stammen — eine Migration ohne das `ondelete` fiele sonst erst im Betrieb
     auf, wenn das Loeschen eines Zugangs an einer blossen Vorliebe scheitert.
     """
-    db_url = f"sqlite:///{tmp_path / 'modellwahl_constraint.db'}"
+    db_url = pg_wegwerf("modellwahl_constraint")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -1505,7 +1498,7 @@ def test_eine_einladung_haengt_am_team_und_am_eingeladenen(
     assert db.query(TeamInvitation).count() == 0
 
 
-def test_die_migration_traegt_die_einladungstabelle(tmp_path: Path) -> None:
+def test_die_migration_traegt_die_einladungstabelle(tmp_path: Path, pg_wegwerf) -> None:
     """Modell und Migration muessen dieselbe Tabelle meinen.
 
     Fehlte sie in der Kette, liefe der Betrieb in einen 500er, sobald jemand
@@ -1514,7 +1507,7 @@ def test_die_migration_traegt_die_einladungstabelle(tmp_path: Path) -> None:
     sammelten sich Einladungen desselben Teams an denselben Menschen, und die
     Annahme haette die Wahl zwischen zwei Angeboten.
     """
-    db_url = f"sqlite:///{tmp_path / 'einladung_constraint.db'}"
+    db_url = pg_wegwerf("einladung_constraint")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -1548,7 +1541,7 @@ def test_die_migration_traegt_die_einladungstabelle(tmp_path: Path) -> None:
         settings.database_url = vorher
 
 
-def test_vault_entries_node_id_migration(tmp_path: Path) -> None:
+def test_vault_entries_node_id_migration(tmp_path: Path, pg_wegwerf) -> None:
     """Migration 20260903_01 ergaenzt vault_entries.node_id und index.
     
     Verifiziert, dass der Upgrade-Pfad von 20260902_03 auf head die Spalte
@@ -1556,7 +1549,7 @@ def test_vault_entries_node_id_migration(tmp_path: Path) -> None:
     """
     from services.schema_manager import initialize_or_upgrade_schema
 
-    db_url = f"sqlite:///{tmp_path / 'vault_node_migration.db'}"
+    db_url = pg_wegwerf("vault_node_migration")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -1593,7 +1586,7 @@ def test_vault_entries_node_id_migration(tmp_path: Path) -> None:
         settings.database_url = vorher
 
 
-def test_vault_blind_buckets_and_composite_pk_migration(tmp_path: Path) -> None:
+def test_vault_blind_buckets_and_composite_pk_migration(tmp_path: Path, pg_wegwerf) -> None:
     """Migrationen 20260906_01 und 20260906_02 sind vollstaendig idempotent.
     
     Verifiziert:
@@ -1605,7 +1598,7 @@ def test_vault_blind_buckets_and_composite_pk_migration(tmp_path: Path) -> None:
     """
     from services.schema_manager import initialize_or_upgrade_schema
 
-    db_url = f"sqlite:///{tmp_path / 'vault_blind_buckets.db'}"
+    db_url = pg_wegwerf("vault_blind_buckets")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -1618,13 +1611,17 @@ def test_vault_blind_buckets_and_composite_pk_migration(tmp_path: Path) -> None:
 
         # Tabelle vault_blind_buckets existiert bereits durch create_all.
         # Migration auf head fuehrt 20260906_01 und 20260906_02 aus, ohne abzustuerzen.
-        command.upgrade(config, "head")
+        command.upgrade(config, "20260906_02")
         inspector = _frisch(engine)
         assert "vault_blind_buckets" in inspector.get_table_names()
 
         pk = inspector.get_pk_constraint("vault_entries")
         assert set(pk.get("constrained_columns", [])) == {"bucket_id", "id"}
 
+        # Alles danach traegt `create_all` schon; es erneut anzuwenden hiesse,
+        # Spalten ein zweites Mal anzulegen. Der Betrieb kommt nie in diese
+        # Lage: eine frische Datenbank wird gebaut und auf `head` gestempelt.
+        command.stamp(config, "head")
         status = initialize_or_upgrade_schema(engine)
         assert status == "upgraded"
     finally:
@@ -1632,7 +1629,7 @@ def test_vault_blind_buckets_and_composite_pk_migration(tmp_path: Path) -> None:
         settings.database_url = vorher
 
 
-def test_e2ee_blind_envelopes_client_uuid_migration(tmp_path: Path) -> None:
+def test_e2ee_blind_envelopes_client_uuid_migration(tmp_path: Path, pg_wegwerf) -> None:
     """Migration 20260907_07 ergaenzt e2ee_blind_envelopes.client_uuid, Indizes und UniqueConstraint.
 
     Verifiziert:
@@ -1642,7 +1639,7 @@ def test_e2ee_blind_envelopes_client_uuid_migration(tmp_path: Path) -> None:
     """
     from services.schema_manager import initialize_or_upgrade_schema
 
-    db_url = f"sqlite:///{tmp_path / 'e2ee_client_uuid_migration.db'}"
+    db_url = pg_wegwerf("e2ee_client_uuid_migration")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -1805,7 +1802,7 @@ def test_dieselbe_zustelladresse_gibt_es_nur_einmal(db: Session, owner_user) -> 
     db.rollback()
 
 
-def test_die_migration_legt_die_zustelladressen_an(tmp_path: Path) -> None:
+def test_die_migration_legt_die_zustelladressen_an(tmp_path: Path, pg_wegwerf) -> None:
     """Modell und Migration duerfen auch hier nicht auseinanderlaufen.
 
     Die Tests bauen das Schema mit `create_all` aus den Modellen, die Produktion
@@ -1814,7 +1811,7 @@ def test_die_migration_legt_die_zustelladressen_an(tmp_path: Path) -> None:
     bis **vor** die Revision und wieder vor beweist, dass sie tatsaechlich in der
     Kette steht und nicht bloss aus `create_all` stammt.
     """
-    db_url = f"sqlite:///{tmp_path / 'push_constraint.db'}"
+    db_url = pg_wegwerf("push_constraint")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -1857,7 +1854,7 @@ def test_die_migration_legt_die_zustelladressen_an(tmp_path: Path) -> None:
         settings.database_url = vorher
 
 
-def test_die_blinde_mailbox_zeigt_auf_keinen_menschen(tmp_path: Path) -> None:
+def test_die_blinde_mailbox_zeigt_auf_keinen_menschen(tmp_path: Path, pg_wegwerf) -> None:
     """Die eine Zusage dieser Tabelle, und sie ist eine Zusage ans Schema.
 
     `e2ee_blind_mailboxes` traegt den Besitznachweis einer Mailbox. Ihr ganzer
@@ -1870,7 +1867,7 @@ def test_die_blinde_mailbox_zeigt_auf_keinen_menschen(tmp_path: Path) -> None:
     die Tabelle in der Alembic-Kette steht und nicht bloss aus `create_all`
     stammt.
     """
-    db_url = f"sqlite:///{tmp_path / 'blinde_mailbox.db'}"
+    db_url = pg_wegwerf("blinde_mailbox")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent

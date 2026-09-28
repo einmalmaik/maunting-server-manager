@@ -4,7 +4,7 @@ Dieselben Endpunkte wie das Studio eines Servers; hier zählt, was das Ziel
 Panel anders macht: globale Rechte, keine Strukturänderung (die gehört den
 Migrationen), keine Sicherung (die macht „Panel-Backups“), Audit auch für
 Daten und SQL. Ausgeführt wird nichts — ``panel_database_service.run`` ist
-ersetzt, die Testdatenbank ist SQLite.
+ersetzt, geprüft wird nur, was vor der Ausführung liegt.
 """
 
 from unittest.mock import patch

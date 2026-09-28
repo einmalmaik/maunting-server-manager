@@ -234,8 +234,8 @@ def _overlay(by_key: dict[str, SkillView], rows: list[AiSkill]) -> None:
     """Legt die Datenbankzeilen ueber die mitgelieferten Dateien.
 
     Eine eigene Funktion, weil die Reihenfolge sonst nicht pruefbar waere:
-    unter SQLite kommt die globale Zeile zufaellig zuerst, unter PostgreSQL
-    nicht zwingend. Ein Test gegen die Abfrage haette den Fehler also nie
+    ohne ``ORDER BY`` kommt die globale Zeile mal zuerst, mal nicht. Ein Test
+    gegen die Abfrage haette den Fehler also nur zufaellig
     gesehen — gegen diese Funktion sieht er ihn, weil die Zeilen als Liste
     hereinkommen und der Test die unguenstige Reihenfolge selbst waehlen kann.
     """
@@ -897,9 +897,8 @@ def approve(db: Session, *, user: User, skill_id: str, fingerprint: str) -> AiSk
     # Committet ein paralleler `upsert_skill` dazwischen, machte die Freigabe
     # einen nie gelesenen Text panelweit wirksam — dieselbe persistente
     # Prompt-Injection, gegen die der Abdruck gebaut ist, nur eine Ebene tiefer.
-    # Unter PostgreSQL wartet der parallele Schreiber jetzt bis zum Commit der
-    # Freigabe und läuft danach in seine eigenen Schranken; SQLite kennt kein
-    # FOR UPDATE und lässt die Klausel weg, dort bleibt es beim frischen Lesen.
+    # Der parallele Schreiber wartet jetzt bis zum Commit der Freigabe und
+    # läuft danach in seine eigenen Schranken.
     db.refresh(row, with_for_update=True)
     if fingerprint != content_fingerprint(row):
         raise HTTPException(
