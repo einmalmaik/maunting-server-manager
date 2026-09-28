@@ -257,6 +257,13 @@ export function ServerIncidentNotifier() {
           })
           toast.success(t('notifications.friendRequestToast', { name: senderName }))
         }
+      } else if (detail?.type === 'achievement_unlocked') {
+        // Bis 09/2026 verschickte das Backend dieses Ereignis, und niemand
+        // hörte zu: neue Abzeichen sah nur, wer die Liste selbst öffnete.
+        const ach = detail.achievement
+        if (ach?.title) {
+          toast.success(t('notifications.achievementUnlockedToast', { title: ach.title, points: ach.points ?? 0 }))
+        }
       } else if (detail?.type === 'e2ee_blind_message') {
         const mid = detail.blind_mailbox_id
         if (!mid) return

@@ -11,6 +11,7 @@ from models import Backup, Server, User
 from schemas import BackupResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
 from services import audit_service
+from services.achievement_service import AchievementService
 from services.actor_context import ActorContext
 from services.backup_restore_service import restore_server_backup
 from config import settings
@@ -193,6 +194,8 @@ def update_backup_settings(server_id: int, body: BackupSettingsRequest, db: Sess
             db.rollback()
             logger.warning("Backup-Zeitplan-Sync fehlgeschlagen (Server %s)", server_id)
             raise HTTPException(status_code=500, detail="Zeitplan konnte nicht übernommen werden")
+    if body.backup_retention_count is not None:
+        AchievementService.melde(db, user.id, "backup_retention_cleaner")
     db.commit()
     audit_service.record_privileged_action(
         db,

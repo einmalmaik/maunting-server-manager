@@ -10,6 +10,7 @@ from models import Mod, Server, User
 from schemas import ModResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
 from games import get_plugin, updater, _append_console_log
+from services.achievement_service import AchievementService
 from services.install_update_lock_service import (
     release_install_update_lock,
     acquire_install_update_lock_blocking,
@@ -236,6 +237,7 @@ def subscribe_mod(
         update_reason="missing" if plugin and plugin.supports_mods else None,
     )
     db.add(mod)
+    AchievementService.melde(db, user.id, "server_modpack_installer")
     db.commit()
     db.refresh(mod)
 

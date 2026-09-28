@@ -275,6 +275,7 @@ import { toast } from '@/stores/toastStore'
 import { useMessengerNotificationStore, PINS_MAX } from '@/stores/messengerNotificationStore'
 import { MessengerBetaBanner } from '@/components/social/MessengerBetaBanner'
 import { DisBadge } from '@/components/DisBadge'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 /**
  * Was gesendet werden soll.
@@ -310,6 +311,18 @@ interface SendeAuftrag {
   augenblick?: boolean
   /** Stellt den erloschenen Funken mit der Gegenseite wieder her. */
   funkenRettung?: boolean
+}
+
+/**
+ * Abzeichen für das, was nur dieses Gerät sieht: den Inhalt der Nachricht.
+ * Gemeldet wird nur die Art, nie Empfänger oder Gruppe.
+ */
+function meldeInhaltsErrungenschaften(auftrag: SendeAuftrag, text: string): void {
+  if (auftrag.audio || auftrag.videoNote) meldeErrungenschaft('social_voice_memo')
+  if (auftrag.augenblick || auftrag.img?.name === 'kamera-aufnahme.jpg') meldeErrungenschaft('social_camera_moment')
+  if (auftrag.sticker || /\p{Extended_Pictographic}/u.test(text)) meldeErrungenschaft('social_sticker_fun')
+  if (auftrag.note) meldeErrungenschaft('social_note_share')
+  if (auftrag.cal) meldeErrungenschaft('social_event_share')
 }
 
 /*
@@ -3474,6 +3487,7 @@ function MessengerSeite() {
       }
 
       if (niedrigsteId > 0) {
+        if (!weitergeleitet) meldeInhaltsErrungenschaften(auftrag, rawText)
         const serverId = niedrigsteId
         const isRead = maxPartnerReadIdRef.current >= serverId
         const isDelivered = isRead || maxPartnerDeliveredIdRef.current >= serverId

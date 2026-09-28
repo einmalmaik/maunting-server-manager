@@ -39,6 +39,7 @@ import {
 import { toast } from '@/stores/toastStore'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 import { useFunkenStore } from '@/stores/funkenStore'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 export function SocialTab() {
   const { t } = useTranslation()
@@ -236,6 +237,9 @@ export function SocialTab() {
   const handleToggleReadReceipts = () => {
     const nextVal = !readReceiptsEnabled
     setReadReceiptsEnabled(nextVal)
+    // Gewählt ist gewählt — an oder aus. Der Standard ist an, und wer ihn
+    // nie anfasst, hat nichts gewählt.
+    meldeErrungenschaft('social_read_receipts')
     try {
       localStorage.setItem('msm_read_receipts_enabled', String(nextVal))
       toast.success(nextVal ? t('social.privacy.receiptsOn') : t('social.privacy.receiptsOff'))

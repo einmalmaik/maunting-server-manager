@@ -34,6 +34,7 @@ from services import webpush_service
 
 logger = logging.getLogger(__name__)
 
+
 #: Vorhaltefrist für E2EE-Umschläge auf dem Relais-Server (30 Tage).
 #: Schützt vor Datenanhäufung bei Datenlecks und erzwingt das Zero-Knowledge-Prinzip.
 E2EE_ENVELOPE_RETENTION_DAYS: int = 30
@@ -1322,7 +1323,7 @@ class SocialService:
         if mit_erfolgen:
             stats = AchievementService.get_user_stats(db, target_user.id, fuer_fremde=not is_self)
             achievements = AchievementService.get_user_achievements(
-                db, target_user.id, fuer_fremde=not is_self
+                db, target_user.id, fuer_fremde=not is_self, pruefen=False
             )
 
         return {
@@ -1631,6 +1632,15 @@ class SocialService:
                     nutzlast,
                     ausser_abdruck=push_ausnahme,
                 )
+
+        if sender_user_id and not is_control:
+            # Nach der Zustellung: das Abzeichen-Ereignis darf der Nachricht
+            # nicht vorauslaufen. Der Server weiß ohnehin, wer einwirft
+            # (Anmeldung, Tageslimit) — es verrät nichts über die Gegenseite.
+            if AchievementService.melde(db, sender_user_id, "social_zero_knowledge", commit=True):
+                # Der Commit ließ den Umschlag verfallen; der WebSocket-Weg
+                # liest ihn erst, wenn die Sitzung schon zu ist.
+                db.refresh(envelope)
 
         return envelope
 
@@ -3047,6 +3057,8 @@ class SocialService:
             expires_at=now + timedelta(hours=24),
         )
         db.add(story)
+        # Stories verfallen nach 24 Stunden; die Zustandsprüfung sähe sie nur so lange.
+        AchievementService.melde(db, user.id, "social_status_story")
         db.commit()
         db.refresh(story)
         return story

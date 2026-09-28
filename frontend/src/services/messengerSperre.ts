@@ -75,6 +75,7 @@ import {
 } from './lokaleVersiegelung'
 import { schreibeNachrichtenBestandNeu } from './messengerLocalStore'
 import { schreibeRatchetBestandNeu } from './ratchetSpeicher'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 /**
  * Sechs Zeichen, Buchstaben erlaubt.
@@ -339,11 +340,13 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
 
   setzeSperrfrist: (minuten: number) => {
     schreibeSperrfrist(SPERR_PRAEFIX, minuten)
+    if (minuten > 0) meldeErrungenschaft('starter_autolock')
     set({ sperrfrist: minuten, letzteAktivitaet: Date.now() })
   },
 
   setzeFensterwechsel: (an: boolean) => {
     schreibeFensterwechsel(SPERR_PRAEFIX, an)
+    if (an) meldeErrungenschaft('starter_autolock')
     set({ sperrtBeiFensterwechsel: an })
   },
 
@@ -649,6 +652,7 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
       await verwahrePin(pin)
       schreibe(BIOMETRIE, 'true')
       set({ biometrieAktiv: true })
+      meldeErrungenschaft('starter_biometrics')
     } catch (err) {
       // Ein falscher PIN kam hier bis 09/2026 als rohes „Decryption failed"
       // der Bibliothek an. Andere Fehler, etwa aus dem Fach, tragen ihre

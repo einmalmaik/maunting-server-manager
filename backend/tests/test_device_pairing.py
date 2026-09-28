@@ -494,7 +494,12 @@ class TestGeraeteliste:
             signal = strom_eins.receive_json()
             assert signal["type"] == "shutdown"
             assert signal["reason"] == "session_revoked"
-            # … das andere bleibt verbunden und antwortet weiter.
+            # … das andere bleibt verbunden und antwortet weiter. Vorher kommt
+            # dort das Abzeichen fürs Aufräumen an — das Konto hat ja
+            # tatsächlich ein Gerät abgemeldet.
+            abzeichen = strom_zwei.receive_json()
+            assert abzeichen["type"] == "achievement_unlocked"
+            assert abzeichen["achievement"]["id"] == "starter_session_hygiene"
             strom_zwei.send_json({"type": "ping"})
             assert strom_zwei.receive_json()["type"] == "pong"
 

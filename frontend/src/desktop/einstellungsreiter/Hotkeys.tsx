@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Button, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { hotkeysSetzen, konfigLaden } from '../tauri'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 /**
  * Baut aus einem Tastendruck die Kombination im Format der Registrierung
@@ -60,6 +61,7 @@ export function Hotkeys() {
   async function anwenden(neu: Record<HotkeyArt, string | null>) {
     try {
       await hotkeysSetzen(neu.fenster, neu.sprache)
+      meldeErrungenschaft('starter_hotkeys')
       if (neu.fenster) zuletzt.current.fenster = neu.fenster
       if (neu.sprache) zuletzt.current.sprache = neu.sprache
       setWerte(neu)

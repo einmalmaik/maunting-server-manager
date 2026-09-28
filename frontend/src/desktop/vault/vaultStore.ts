@@ -25,6 +25,7 @@ import {
   biometrieSpeichern,
   biometrieSpeicherFragtSelbst,
 } from '../tauri'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 export interface VaultAttachment {
   id: string
@@ -516,11 +517,13 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
   setAutoLockMinutes: (minutes: number) => {
     schreibeSperrfrist(VAULT_SPERR_PRAEFIX, minutes)
+    if (minutes > 0) meldeErrungenschaft('starter_autolock')
     set({ autoLockMinutes: minutes })
   },
 
   setLockOnWindowBlur: (enabled: boolean) => {
     schreibeFensterwechsel(VAULT_SPERR_PRAEFIX, enabled)
+    if (enabled) meldeErrungenschaft('starter_autolock')
     set({ lockOnWindowBlur: enabled })
   },
 
@@ -643,6 +646,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
         localStorage.setItem(VAULT_BIOMETRICS_ENABLED_KEY, 'true')
       }
       set({ isBiometricsEnabled: true })
+      meldeErrungenschaft('starter_biometrics')
       return true
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : i18n.t('mss.vault.errors.biometricsActivationFailed')

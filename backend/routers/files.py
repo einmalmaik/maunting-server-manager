@@ -36,6 +36,7 @@ from database import get_db
 from models import Server, User
 from dependencies import get_current_user, verify_csrf, require_server_permission
 from services import audit_service
+from services.achievement_service import AchievementService
 from services import docker_service
 from services import file_edit_service
 from services import file_history_service
@@ -493,6 +494,7 @@ def write_file(
         create_only=body.create_only,
         repair_permissions=_repair_install_permissions,
     )
+    AchievementService.melde(db, user.id, "server_file_manager", commit=True)
     return {"message": "Datei gespeichert", **result}
 
 

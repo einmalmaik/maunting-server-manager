@@ -32,6 +32,7 @@ from services.role_service import (
     set_user_roles,
 )
 from services import audit_service, postgres_service, rechtevergabe_service
+from services.achievement_service import AchievementService
 from services.postgres_service import PostgresServiceError
 from services.user_deletion_service import prepare_user_deletion
 
@@ -418,13 +419,16 @@ class ManagedPostgresAdminRotateOut(BaseModel):
 @router.get("/audit-logs", response_model=list[AuditLogOut])
 def list_admin_audit_logs(
     db: Session = Depends(get_db),
-    _: User = Depends(require_global("system.audit.read")),
+    user: User = Depends(require_global("system.audit.read")),
     limit: int = Query(50, ge=1, le=200),
     action: str | None = Query(None, max_length=64),
     target_type: str | None = Query(None, max_length=64),
     target_id: str | None = Query(None, max_length=64),
 ) -> list[AuditLog]:
     """Listet privilegierte Operator-Aktionen. Unberechtigt: 403 (kein leeres OK)."""
+    if action or target_type or target_id:
+        # Vor der Abfrage: ein Commit danach ließe die gelesenen Zeilen verfallen.
+        AchievementService.melde(db, user.id, "security_audit_inspector", commit=True)
     try:
         return audit_service.list_audit_logs(
             db,

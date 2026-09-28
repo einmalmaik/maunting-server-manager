@@ -1,8 +1,9 @@
 """Funken-Errungenschaften: der Client meldet, der Server erfährt nur die Stufe.
 
 Ein Funke lebt verschlüsselt auf den Geräten; der Server hat keine Tabelle
-dafür und kann ihn nicht prüfen. Freischalten lässt er deshalb nur die vier
-Funken-Stufen auf Zuruf — jede andere Kennung bleibt seine Entscheidung.
+dafür und kann ihn nicht prüfen. Freischalten lässt er deshalb die
+Funken-Stufen auf Zuruf — und seit 09/2026 die übrigen Abzeichen, die nur das
+Gerät sieht. Jede andere Kennung bleibt seine Entscheidung.
 """
 
 from __future__ import annotations
@@ -34,9 +35,32 @@ def test_katalog_fuehrt_die_vier_stufen() -> None:
     assert len({a["id"] for a in ACHIEVEMENTS_CATALOG}) == len(ACHIEVEMENTS_CATALOG)
 
 
-def test_selbst_gemeldet_sind_genau_die_funkenstufen() -> None:
+def test_selbst_gemeldet_ist_eine_bewusste_liste() -> None:
     # Wer hier eine Kennung ergänzt, lässt Clients sie ungeprüft freischalten.
-    assert SELBST_GEMELDET == frozenset(_STUFEN)
+    # Seit 09/2026 stehen neben den Funken die Abzeichen, die nur das Gerät
+    # sieht (siehe test_achievement_ausloeser.py).
+    assert frozenset(_STUFEN) <= SELBST_GEMELDET
+    assert SELBST_GEMELDET == frozenset(
+        {
+            *_STUFEN,
+            "starter_biometrics",
+            "starter_autolock",
+            "starter_privacy_pledge",
+            "starter_hotkeys",
+            "starter_audio_tuned",
+            "starter_audio_ducking",
+            "starter_wakeword_tuned",
+            "server_log_analyzer",
+            "server_resource_watcher",
+            "social_voice_memo",
+            "social_camera_moment",
+            "social_sticker_fun",
+            "social_note_share",
+            "social_event_share",
+            "social_read_receipts",
+            "social_role_architect",
+        }
+    )
 
 
 def test_meldung_schaltet_frei_und_nur_einmal(

@@ -81,6 +81,11 @@ def execute_realtime_region_initial(
     analysis = ai_geo_service.analyze_region_initial(safe_location)
     if analysis.get("status") == "success":
         analysis["camera"] = {"mode": camera, "command_id": str(uuid4())}
+        # Sprachwege hinterlassen kein Werkzeugergebnis, an dem die
+        # Zustandsprüfung das Abzeichen ablesen könnte.
+        from services.achievement_service import AchievementService
+
+        AchievementService.melde(db, user.id, "ai_satellite_eye", commit=True)
     return analysis
 
 def execute_realtime_region_enrichment(

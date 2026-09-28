@@ -36,6 +36,7 @@ import { Avatar, Badge, Button, Dropdown, type DropdownOption, Input, Switch } f
 import { useAuthStore } from '@/stores/authStore'
 import { useFunkenStore } from '@/stores/funkenStore'
 import { toast } from '@/stores/toastStore'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 export function SocialEinstellungen() {
   const { t } = useTranslation()
@@ -82,6 +83,9 @@ export function SocialEinstellungen() {
   const handleToggleReadReceipts = () => {
     const nextVal = !readReceiptsEnabled
     setReadReceiptsEnabled(nextVal)
+    // Gewählt ist gewählt — an oder aus. Der Standard ist an, und wer ihn
+    // nie anfasst, hat nichts gewählt.
+    meldeErrungenschaft('social_read_receipts')
     try {
       localStorage.setItem('msm_read_receipts_enabled', String(nextVal))
       toast.success(nextVal ? 'Lesebestätigungen aktiv' : 'Lesebestätigungen aus')

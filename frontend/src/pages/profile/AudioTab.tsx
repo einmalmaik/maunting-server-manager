@@ -15,6 +15,7 @@ import {
   registriereAudioGeraete,
   registriereAudioVerarbeitung,
 } from '@/components/ai/voice/audioGeraete'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 export function AudioTab() {
   const { t } = useTranslation()
@@ -268,12 +269,14 @@ export function AudioTab() {
   const handleToggleAutoGain = (val: boolean) => {
     setAutoGainControl(val)
     saveAudioSettings({ autoGainControl: val })
+    meldeErrungenschaft('starter_audio_tuned')
     registriereAudioVerarbeitung({ autogain: val })
   }
 
   const handleGainChange = (percent: number) => {
     setGainPercent(percent)
     saveAudioSettings({ micGain: percent / 100 })
+    meldeErrungenschaft('starter_audio_tuned')
     registriereAudioVerarbeitung({ verstaerkung: percent / 100 })
   }
 
