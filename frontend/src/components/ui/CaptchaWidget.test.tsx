@@ -8,6 +8,11 @@ vi.mock('@/api/client', () => ({
   api: vi.fn(),
 }))
 
+// Die echte Bibliothek prüft die Test-Challenge sofort (`auto="onload"`),
+// scheitert und nimmt das Widget wieder weg. Geprüft wird hier nur, wie das
+// Widget auf ihre Ereignisse antwortet.
+vi.mock('altcha', () => ({}))
+
 const TURNSTILE_SRC = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
 
 function skript(): HTMLScriptElement | null {
@@ -137,24 +142,18 @@ describe('CaptchaWidget', () => {
   })
 
   it('rendert das lokale ALTCHA-Widget und verarbeitet Verifikation', async () => {
-    vi.mocked(client.api).mockResolvedValue({
-      enabled: true,
-      provider: 'altcha',
-      site_key: '',
-    })
-
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({
+    vi.mocked(client.api).mockImplementation(async (pfad: string) => {
+      if (pfad === '/auth/captcha-challenge') {
+        return {
           algorithm: 'SHA-256',
           challenge: 'mock-challenge-123',
           maxnumber: 100,
           salt: `mock-salt?expires=${Math.floor(Date.now() / 1000) + 300}`,
           signature: 'mock-sig',
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ),
-    )
+        }
+      }
+      return { enabled: true, provider: 'altcha', site_key: '' }
+    })
 
     const onVerify = vi.fn()
     const status: CaptchaStatus[] = []
@@ -163,7 +162,7 @@ describe('CaptchaWidget', () => {
     await waitFor(() => {
       const widget = container.querySelector('altcha-widget')
       expect(widget).not.toBeNull()
-      expect(widget?.getAttribute('challenge')).toContain('/api/auth/captcha-challenge')
+      expect(widget?.getAttribute('challenge')).toContain('mock-challenge-123')
     })
 
     const widget = container.querySelector('altcha-widget')!

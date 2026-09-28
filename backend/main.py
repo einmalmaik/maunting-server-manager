@@ -822,7 +822,16 @@ app.add_middleware(
         # Fehlte er hier, scheiterte in der App jede Vorabfrage mit 400.
         "X-Mailbox-Token",
     ],
-    expose_headers=["X-CSRF-Token"],
+    # Was das Frontend aus einer Antwort liest. Die App spricht von fremder
+    # Herkunft und sähe alles andere als `null` (Dateiname und Prüfsumme der
+    # Studio-Downloads, Hinweis auf einen gekürzten Export).
+    expose_headers=[
+        "X-CSRF-Token",
+        "Content-Disposition",
+        "X-MSM-Dump-Size",
+        "X-MSM-Dump-SHA256",
+        "X-MSM-Export-Truncated",
+    ],
 )
 
 

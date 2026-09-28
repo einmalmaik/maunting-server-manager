@@ -217,11 +217,10 @@ def test_panel_settings_audit_logging(client: TestClient, db: Session, owner_coo
     assert "default_language" in audit_entry.details
 
 
-def test_auth_password_and_2fa_audit_logging(client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
-    """Prueft, dass Passwortaenderung und 2FA-Statusänderungen auditiert werden."""
+def test_auth_password_audit_logging(client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
+    """Prueft, dass eine Passwortaenderung auditiert wird."""
     headers = _csrf(owner_cookies)
 
-    # 1. Password change
     resp = client.post(
         "/api/auth/change-password",
         json={"current_password": "OwnerPass123!", "new_password": "NewOwnerPass123!"},
@@ -233,10 +232,16 @@ def test_auth_password_and_2fa_audit_logging(client: TestClient, db: Session, ow
     audit_pw = db.query(AuditLog).filter(AuditLog.action == "auth.password.change", AuditLog.target_id == str(owner_user.id)).first()
     assert audit_pw is not None
 
-    # Reset password back
-    AuthService.reset_password(db, owner_user, "OwnerPass123!")
 
-    # 2. 2FA setup & enable
+def test_auth_2fa_audit_logging(client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
+    """Prueft, dass 2FA-Statusänderungen auditiert werden.
+
+    Eigener Test, weil die Passwortaenderung die Sitzung beendet: danach waeren
+    die Cookies ungueltig.
+    """
+    headers = _csrf(owner_cookies)
+
+    # 1. 2FA setup & enable
     resp_setup = client.post("/api/auth/2fa/setup", cookies=owner_cookies, headers=headers)
     assert resp_setup.status_code == 200
     secret = resp_setup.json()["secret"]
@@ -248,7 +253,7 @@ def test_auth_password_and_2fa_audit_logging(client: TestClient, db: Session, ow
     audit_2fa_en = db.query(AuditLog).filter(AuditLog.action == "auth.2fa.enable", AuditLog.target_id == str(owner_user.id)).first()
     assert audit_2fa_en is not None
 
-    # 3. 2FA disable
+    # 2. 2FA disable
     valid_code2 = totp_now(secret)
     resp_disable = client.post(f"/api/auth/2fa/disable?otp_code={valid_code2}", cookies=owner_cookies, headers=headers)
     assert resp_disable.status_code == 200

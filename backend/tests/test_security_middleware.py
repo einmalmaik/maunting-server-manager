@@ -99,10 +99,15 @@ class TestCors:
 
             pytest.skip("Frontend liegt nicht daneben")
         koepfe: set[str] = set()
+        gelesen: set[str] = set()
         for datei in quelle.rglob("*.ts*"):
             if ".test." in datei.name:
                 continue
-            koepfe.update(re.findall(r"""['"](X-[A-Za-z-]+)['"]""", datei.read_text(encoding="utf-8")))
+            text = datei.read_text(encoding="utf-8")
+            koepfe.update(re.findall(r"""['"](X-[A-Za-z0-9-]+)['"]""", text))
+            gelesen.update(re.findall(r"""headers\.get\(['"]([A-Za-z0-9-]+)['"]\)""", text))
+        # Was aus einer Antwort gelesen wird, schickt das Frontend nicht mit.
+        koepfe -= gelesen
         assert koepfe, "keine eigenen Köpfe gefunden — Muster veraltet?"
 
         response = client.options("/api/health", headers={
@@ -111,6 +116,33 @@ class TestCors:
             "Access-Control-Request-Headers": ",".join(sorted(k.lower() for k in koepfe)),
         })
         assert response.status_code == 200, (sorted(koepfe), response.text)
+
+    def test_jeder_gelesene_kopf_einer_antwort_ist_freigegeben(self, client: TestClient):
+        """Liest das Frontend einen Kopf aus der Antwort, muss er in `expose_headers` stehen.
+
+        Sonst sieht die App (fremde Herkunft) `null`: bis 29.09.2026 fehlten
+        Dateiname, Größe und Prüfsumme der Studio-Downloads und der Hinweis auf
+        einen gekürzten Export.
+        """
+        import re
+        from pathlib import Path
+
+        quelle = Path(__file__).resolve().parents[2] / "frontend" / "src"
+        if not quelle.is_dir():
+            import pytest
+
+            pytest.skip("Frontend liegt nicht daneben")
+        gelesen: set[str] = set()
+        for datei in quelle.rglob("*.ts*"):
+            if ".test." in datei.name:
+                continue
+            gelesen.update(re.findall(r"""headers\.get\(['"]([A-Za-z0-9-]+)['"]\)""", datei.read_text(encoding="utf-8")))
+        assert gelesen, "keine gelesenen Köpfe gefunden — Muster veraltet?"
+
+        response = client.get("/api/health", headers={"Origin": "tauri://localhost"})
+        freigegeben = {k.strip().lower() for k in response.headers.get("access-control-expose-headers", "").split(",")}
+        fehlend = sorted(k for k in gelesen if k.lower() not in freigegeben)
+        assert not fehlend, fehlend
 
     def test_cors_origin_reflected(self, client: TestClient):
         response = client.get("/api/health", headers={
