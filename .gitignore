@@ -70,6 +70,9 @@ msm-agent/postgres-node-2/
 # Local database files (the panel runs on PostgreSQL only; this keeps stray
 # files such as an old msm.db out of the repository)
 *.db
+# Archiv früherer Umzüge von SQLite nach PostgreSQL (msm.db.migrated) auf Altrechnern
+*.db.migrated
+*.db.migration-complete
 *.sqlite
 *.sqlite3
 
