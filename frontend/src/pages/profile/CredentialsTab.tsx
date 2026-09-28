@@ -204,7 +204,7 @@ export function CredentialsTab() {
           )}
           <label className="space-y-1.5">
             <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-              {t('credentials.secret')}
+              {t(`credentials.secrets.${kind}`)}
             </span>
             <input
               className="msm-input"
@@ -216,7 +216,7 @@ export function CredentialsTab() {
             />
           </label>
         </div>
-        <p className="text-xs text-on-surface-variant">{t('credentials.secretHint')}</p>
+        <p className="text-xs text-on-surface-variant">{t(`credentials.secretHints.${kind}`)}</p>
         <div className="flex justify-end">
           <Button
             type="submit"

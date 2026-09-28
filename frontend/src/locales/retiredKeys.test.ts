@@ -134,10 +134,19 @@ const ABGELOESTE_SCHLUESSEL = [
   'profile.tabs.messenger',
   'profile.tabs.vault',
   'mss.einstellungen.tab.wakeword',
+  // 28.09.2026: Das Geheimnisfeld der eigenen Zugangsdaten heißt je Art
+  // anders (Steam-Passwort, GitHub-Token); ein neutrales „Geheimnis" ließ
+  // offen, was hineingehört.
+  'credentials.secret',
+  'credentials.secretHint',
 ]
 
 /** Die Nachfolger muss es geben — sonst wäre das Löschen ein Verlust. */
 const NACHFOLGER = [
+  'credentials.secrets.steam_account',
+  'credentials.secrets.github_token',
+  'credentials.secretHints.steam_account',
+  'credentials.secretHints.github_token',
   'profile.tabs.security',
   'profile.tabs.connections',
   'ai.memory.titles.user',

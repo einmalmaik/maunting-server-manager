@@ -46,8 +46,8 @@ describe('CredentialsTab', () => {
     await screen.findByText(/Hauptkonto/)
 
     fireEvent.change(screen.getByLabelText('Bezeichnung'), { target: { value: 'Zweitkonto' } })
-    fireEvent.change(screen.getByLabelText('Benutzername'), { target: { value: 'kunde43' } })
-    const secretInput = screen.getByLabelText('Geheimnis')
+    fireEvent.change(screen.getByLabelText('Steam-Benutzername'), { target: { value: 'kunde43' } })
+    const secretInput = screen.getByLabelText('Steam-Passwort')
     fireEvent.change(secretInput, { target: { value: 'neues-geheimnis' } })
     fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
 
@@ -62,8 +62,20 @@ describe('CredentialsTab', () => {
     await screen.findByText(/Hauptkonto/)
 
     fireEvent.change(screen.getByLabelText('Bezeichnung'), { target: { value: 'Ohne Name' } })
-    fireEvent.change(screen.getByLabelText('Geheimnis'), { target: { value: 'geheim' } })
+    fireEvent.change(screen.getByLabelText('Steam-Passwort'), { target: { value: 'geheim' } })
 
     expect(screen.getByRole('button', { name: 'Speichern' })).toBeDisabled()
+  })
+
+  it('names the secret field after the chosen kind', async () => {
+    render(<CredentialsTab />)
+    await screen.findByText(/Hauptkonto/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Art' }))
+    fireEvent.click(screen.getByRole('option', { name: /GitHub-Token/ }))
+
+    expect(screen.getByLabelText('GitHub-Token (Personal Access Token)')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Steam-Passwort')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Steam-Benutzername')).not.toBeInTheDocument()
   })
 })

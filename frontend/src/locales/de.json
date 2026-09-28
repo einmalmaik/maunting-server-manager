@@ -5402,9 +5402,15 @@
     "add": "Zugangsdaten hinzufügen",
     "kind": "Art",
     "label": "Bezeichnung",
-    "username": "Benutzername",
-    "secret": "Geheimnis",
-    "secretHint": "Verschlüsselt gespeichert. Nur die letzten 4 Zeichen bleiben sichtbar.",
+    "username": "Steam-Benutzername",
+    "secrets": {
+      "steam_account": "Steam-Passwort",
+      "github_token": "GitHub-Token (Personal Access Token)"
+    },
+    "secretHints": {
+      "steam_account": "Anmeldename und Passwort deines Steam-Kontos, nicht der Anzeigename. Verschlüsselt gespeichert; sichtbar bleiben nur die letzten 4 Zeichen.",
+      "github_token": "Klassisches Token (ghp_ …) mit 'repo'-Scope oder Fine-grained (github_pat_ …) mit 'Contents: read'. Verschlüsselt gespeichert; sichtbar bleiben nur die letzten 4 Zeichen."
+    },
     "save": "Speichern",
     "saved": "Zugangsdaten gespeichert",
     "deleted": "Zugangsdaten entfernt",
