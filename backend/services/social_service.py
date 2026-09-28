@@ -1333,6 +1333,8 @@ class SocialService:
             "privacy": privacy,
             "restricted": False,
             "is_friend": is_friend,
+            # Nur der Tag: die Uhrzeit der Registrierung sagt niemandem etwas.
+            "member_since": target_user.created_at.date() if target_user.created_at else None,
             "presence": pres_data,
             "stats": stats,
             "achievements": achievements,

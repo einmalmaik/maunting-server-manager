@@ -8,7 +8,7 @@
  */
 
 import { createRef } from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
@@ -25,6 +25,7 @@ function menue(teil: Partial<Parameters<typeof ChatActionsMenu>[0]> = {}) {
   const aktionen = {
     schliessen: vi.fn(),
     onStumm: vi.fn(),
+    onProfil: vi.fn(),
     onSicherheitsnummer: vi.fn(),
     onVerfall: vi.fn(),
     onVideoanruf: vi.fn(),
@@ -90,6 +91,15 @@ describe('ChatActionsMenu', () => {
     expect(zeigt('messenger.videoCall')).toBe(false)
     expect(zeigt('messenger.verifySafetyNumber')).toBe(true)
     expect(zeigt('messenger.blockContact')).toBe(true)
+  })
+
+  it('öffnet im Direktchat das Profil, in der Gruppe gibt es keins', () => {
+    const aktionen = menue({ kontakt: { istFreund: false, blockiert: false } })
+    fireEvent.click(screen.getByText(i18n.t('social.profile.show')))
+    expect(aktionen.onProfil).toHaveBeenCalledTimes(1)
+    cleanup()
+    menue({ gruppe: gruppe({}) })
+    expect(zeigt('social.profile.show')).toBe(false)
   })
 
   it('zeigt bei einem Blockierten „Blockierung aufheben"', () => {

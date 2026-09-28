@@ -40,6 +40,7 @@ const Ai = lazy(() => import('./pages/Ai').then(module => ({ default: module.Ai 
 const Calendar = lazy(() => import('./pages/Calendar').then(module => ({ default: module.Calendar })))
 const Notes = lazy(() => import('./pages/Notes').then(module => ({ default: module.Notes })))
 const Messenger = lazy(() => import('./pages/Messenger').then(module => ({ default: module.Messenger })))
+const Benutzerprofil = lazy(() => import('./pages/Benutzerprofil').then(module => ({ default: module.Benutzerprofil })))
 import { apiUrl } from '@/config/api'
 import { useAuthStore } from '@/stores/authStore'
 import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
@@ -158,6 +159,7 @@ function App() {
           <Route path="chat" element={socialEnabled ? <Messenger /> : <Navigate to="/" replace />} />
           <Route path="chat/join/:inviteCode" element={socialEnabled ? <Messenger /> : <Navigate to="/" replace />} />
           <Route path="messenger" element={<Navigate to={socialEnabled ? '/chat' : '/'} replace />} />
+          <Route path="user/:userId" element={socialEnabled ? <Benutzerprofil /> : <Navigate to="/" replace />} />
           <Route path="ai" element={<RequirePermission routeKey="ai"><Ai /></RequirePermission>} />
           <Route path="teams" element={<Teams />} />
           <Route path="docs" element={<Docs />} />

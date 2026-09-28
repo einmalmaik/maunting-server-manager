@@ -105,11 +105,12 @@ export function AccountTab() {
     }
   }
 
-  const privacyOptions: DropdownOption[] = [
-    { value: 'friends', label: 'Nur Freunde (Status für Kontakte)' },
-    { value: 'public', label: 'Öffentlich (Status für alle Panel-Benutzer)' },
-    { value: 'private', label: 'Privat (Unsichtbar / Status verborgen)' },
-  ]
+  // Die Sichtbarkeit regelt auch das Profil: bei „Privat" ist es für alle
+  // anderen nicht erreichbar, Freunde eingeschlossen (Server: 404).
+  const privacyOptions: DropdownOption[] = (['friends', 'public', 'private'] as const).map((value) => ({
+    value,
+    label: t(`social.visibility.options.${value}`),
+  }))
 
   useEffect(() => {
     if (user?.time_zone) {
@@ -443,11 +444,7 @@ export function AccountTab() {
             />
           </div>
           <p className="text-xs text-on-surface-variant/70">
-            {privacyLevel === 'private'
-              ? 'Im privaten Modus wird dein Status für andere als offline angezeigt.'
-              : privacyLevel === 'friends'
-              ? 'Nur bestätigte Freunde sehen dein Gerät und deinen aktuellen Status.'
-              : 'Jedes Mitglied im Panel kann deinen Status sehen.'}
+            {t(`social.visibility.hints.${privacyLevel}`)}
           </p>
           {/* Die Sichtbarkeit regelt Status und Profil, nie das Klingeln. Wer
               hier „Öffentlich" wählt, soll nicht vermuten müssen, dass er damit

@@ -3473,7 +3473,7 @@
       }
     },
     "privacyTitle": "Privatsphäre & Sichtbarkeit",
-    "privacyDescription": "Bestimme, wer deinen Online-Status und deine Aktivitäten im System sehen kann.",
+    "privacyDescription": "Bestimme, wer dein Profil, deinen Online-Status und deine Aktivitäten sehen kann.",
     "privacyVisibility": "Profil-Sichtbarkeit",
     "privacyCallsFriendsOnly": "Anrufe bleiben davon unberührt: Sprach- und Videoanrufe kann dir nur schicken, wer als Freund bestätigt ist — auch bei einem öffentlichen Profil.",
     "privacySaved": "Privatsphäre-Einstellungen gespeichert.",
@@ -6262,10 +6262,9 @@
     },
     "social": {
       "freundPlatzhalter": "Benutzername für Freundschaftsanfrage …",
-      "sichtbarkeitFrage": "Wer darf deine Präsenz und Aktivitäten sehen?",
+      "sichtbarkeitFrage": "Wer darf dein Profil und deinen Status sehen?",
       "lesebestaetigungenLang": "Lesebestätigungen (Gelesen-Häkchen)",
       "lesebestaetigungen": "Lesebestätigungen",
-      "gesamtaktivitaet": "Gesamtaktivität",
       "kontakteHinweis": "Verwalte deine Kontakte, blockierte Personen und stummgeschaltete Unterhaltungen.",
       "privatsphaereTitel": "Privatsphäre & Sichtbarkeit"
     }
@@ -6627,15 +6626,10 @@
     "milestones": {
       "title": "Meilensteine & Fortschritt",
       "description": "Dokumentiert deine Erfolge bei der Systemverwaltung und deine Aktivität.",
-      "platformActivity": "Plattform-Aktivitäten",
       "points_one": "{{count}} Punkt",
       "points_other": "{{count}} Punkte",
       "pointsShort": "+{{count}} Pkt",
-      "progress": "{{unlocked}} von {{total}} ({{percent}} %)",
       "statActivity": "Aktivitätszeit",
-      "statAi": "KI-Dialoge",
-      "statAdmin": "Administration",
-      "statCommands": "Befehle",
       "durationMinutes": "{{minutes}} min",
       "durationHours": "{{hours}} h {{minutes}} min",
       "filterAll": "Alle ({{count}})",
@@ -6644,7 +6638,8 @@
       "rare": "Selten",
       "unlockedOn": "Freigeschaltet am {{date}}",
       "loadMore_one": "Weitere Erfolge anzeigen ({{count}} verbleibt)",
-      "loadMore_other": "Weitere Erfolge anzeigen ({{count}} verbleiben)"
+      "loadMore_other": "Weitere Erfolge anzeigen ({{count}} verbleiben)",
+      "none": "Keine Errungenschaften in dieser Ansicht."
     },
     "groupRoles": {
       "title": "Gruppen-Rollen & Rechte",
@@ -6795,6 +6790,38 @@
           "title": "Rollen zuweisen & verwalten",
           "desc": "Mitgliedern Rollen zuweisen und die Standard-Gruppenrechte anpassen. Eigentümer und Administratoren tragen „Alle auf einmal erwähnen“, „Nachricht anheften“ und „Verschwindende Nachrichten einstellen“ ohnehin, weil sie sie sich mit zwei Klicks selbst geben könnten."
         }
+      }
+    },
+    "profile": {
+      "open": "Profil von {{name}} öffnen",
+      "show": "Profil anzeigen",
+      "activityTitle": "Nutzungs- & Spielzeit",
+      "achievementsTitle": "Errungenschaften",
+      "memberSince": "Mitglied seit {{date}}",
+      "friend": "Ihr seid befreundet",
+      "chat": "Chat öffnen",
+      "call": "Anrufen",
+      "requestSent": "Anfrage gesendet",
+      "unavailableTitle": "Profil nicht verfügbar",
+      "unavailableHint": "Dieses Profil gibt es nicht, oder es ist nicht für dich sichtbar.",
+      "loadFailed": "Das Profil konnte nicht geladen werden."
+    },
+    "activityCategory": {
+      "ai_chat": "KI-Chat",
+      "general": "Allgemein",
+      "server_admin": "Server-Verwaltung",
+      "command_exec": "Befehlsausführung"
+    },
+    "visibility": {
+      "options": {
+        "friends": "Nur Freunde",
+        "public": "Öffentlich",
+        "private": "Privat"
+      },
+      "hints": {
+        "friends": "Nur bestätigte Freunde sehen dein Profil, deinen Status und dein Gerät.",
+        "public": "Alle Konten in diesem Panel sehen dein Profil und deinen Status.",
+        "private": "Niemand sieht dein Profil, auch deine Freunde nicht. Freunde sehen weiter deinen Status, alle anderen nur, ob du online bist."
       }
     }
   },

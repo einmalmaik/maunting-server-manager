@@ -139,6 +139,15 @@ const ABGELOESTE_SCHLUESSEL = [
   // offen, was hineingehört.
   'credentials.secret',
   'credentials.secretHint',
+  // 28.09.2026: Die Nutzungszeit hat eine Fassung (`Nutzungszeit.tsx`) für
+  // Browser, App und fremdes Profil. Das tote `AchievementsModal` trug die
+  // übrigen Kacheltexte; die Gesamtzeit heißt jetzt `statActivity`.
+  'social.milestones.platformActivity',
+  'social.milestones.progress',
+  'social.milestones.statAi',
+  'social.milestones.statAdmin',
+  'social.milestones.statCommands',
+  'mss.social.gesamtaktivitaet',
 ]
 
 /** Die Nachfolger muss es geben — sonst wäre das Löschen ein Verlust. */

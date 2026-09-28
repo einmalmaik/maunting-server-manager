@@ -262,6 +262,21 @@ def get_own_stats(
 # oder einem Profil, und jeder konnte Nutzernamen und Konto-IDs durchprobieren.
 # "Öffentlich" heißt: sichtbar für alle Konten dieses Panels, nicht fürs Netz.
 
+
+def _sichtbares_profil(db: Session, betrachter: User, ziel: User | None) -> dict:
+    """Ein Profil, das der Betrachter nicht sehen darf, gibt es für ihn nicht.
+
+    Privat, nur für Freunde oder blockiert: dieselbe 404 wie für ein Konto,
+    das nie existierte. Sonst verriete die Antwort, dass hinter der ID oder dem
+    Namen jemand steht — auch über einen kopierten Link.
+    """
+    if not ziel or not ziel.is_active:
+        raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+    profil = SocialService.get_profile(db, betrachter.id, ziel)
+    if profil["restricted"]:
+        raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+    return profil
+
 @router.get("/profile/user/{target_user_id}", response_model=SocialProfileResponse, dependencies=[Depends(_check_social_enabled)])
 @router.get("/profile/{target_user_id}", response_model=SocialProfileResponse, dependencies=[Depends(_check_social_enabled)])
 def get_user_profile(
@@ -270,10 +285,7 @@ def get_user_profile(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     target = db.query(User).filter_by(id=target_user_id).first()
-    if not target or not target.is_active:
-        raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
-    viewer_id = current_user.id
-    return SocialService.get_profile(db, viewer_id, target)
+    return _sichtbares_profil(db, current_user, target)
 
 
 @router.get("/profiles/public", response_model=list[SocialProfileResponse], dependencies=[Depends(_check_social_enabled)])
@@ -297,10 +309,7 @@ def get_public_profile(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     target = db.query(User).filter(User.username.ilike(username.strip())).first()
-    if not target or not target.is_active:
-        raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
-    viewer_id = current_user.id
-    return SocialService.get_profile(db, viewer_id, target)
+    return _sichtbares_profil(db, current_user, target)
 
 
 # --- E2EE Zero-Knowledge Blind Relais Mailbox ---

@@ -4622,6 +4622,7 @@ function MessengerSeite() {
                 onFreundschaftsanfrage={
                   activeContact && !activeContact.isFriend ? () => void sendeFreundschaftsanfrage() : undefined
                 }
+                onProfil={activeContact ? () => navigate(`/user/${activeContact.userId}`) : undefined}
                 onSuche={chatSuche.oeffne}
                 menue={(schliessen) => (
                   <ChatActionsMenu
@@ -4645,6 +4646,7 @@ function MessengerSeite() {
                     verfallStufe={stufenLabel(verfallSekunden > 0 ? verfallSekunden : 0, t)}
                     verfallErlaubt={darfVerfallStellen}
                     onStumm={() => setIsMuteModalOpen(true)}
+                    onProfil={() => activeContact && navigate(`/user/${activeContact.userId}`)}
                     onSicherheitsnummer={() => sicherheitsnummern.setOffen(true)}
                     onVerfall={() => setVerfallOffen(true)}
                     onVideoanruf={() => void starteAnruf('video')}

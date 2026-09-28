@@ -86,13 +86,22 @@ export interface UserStatsResponse {
   rarity_summary?: Record<string, unknown>
 }
 
+/**
+ * Ein fremdes Profil, wie `GET /social/profile/user/{id}` es liefert.
+ *
+ * Wer es nicht sehen darf (privat, nur Freunde, blockiert), bekommt 404 wie
+ * für ein Konto, das es nie gab. `restricted` taucht nur noch in der Liste
+ * der öffentlichen Profile auf.
+ */
 export interface PublicProfileResponse {
   user_id: number
   username: string
   avatar_url?: string | null
-  social_privacy: 'private' | 'friends' | 'public'
+  privacy: 'private' | 'friends' | 'public'
   is_friend?: boolean
-  presence?: PresenceItem | null
+  /** Tag der Registrierung (`YYYY-MM-DD`), ohne Uhrzeit. */
+  member_since?: string | null
+  presence?: Omit<PresenceItem, 'user_id' | 'username'> | null
   achievements?: AchievementItem[] | null
   stats?: UserStatsResponse | null
   restricted?: boolean

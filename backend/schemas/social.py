@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pydantic import BaseModel, Field, field_serializer, field_validator
 from services.chat_media_validator import MAX_STORY_MEDIA_URL_CHARS
 from schemas.passkey import Zweitnachweis
@@ -637,6 +637,7 @@ class SocialProfileResponse(BaseModel):
     privacy: str
     restricted: bool = False
     is_friend: bool = False
+    member_since: date | None = None
     presence: PresenceInfo | None = None
     stats: UserStatsResponse | None = None
     achievements: list[AchievementResponse] | None = None

@@ -5,7 +5,6 @@ import {
   Avatar,
   Button,
   Input,
-  Badge,
 } from '@/Singra/UI'
 import {
   Users,
@@ -13,10 +12,8 @@ import {
   Check,
   X,
   UserMinus,
-  Trophy,
   Search,
   Lock,
-  CheckCircle2,
   Ban,
   BellOff,
   Clock,
@@ -24,10 +21,12 @@ import {
 import { DeviceBadge } from '@/components/social/DeviceBadge'
 import { FunkenAbzeichen } from '@/components/social/FunkenBadge'
 import { StatusDot } from '@/components/social/StatusIndicator'
-import { renderAchievementIcon } from '@/components/social/achievementIcons'
+import { Meilensteine } from '@/components/social/Meilensteine'
+import { Nutzungszeit } from '@/components/social/Nutzungszeit'
 import {
   type FriendItem,
   type AchievementsOverview,
+  type UserStatsResponse,
   getFriends,
   getFriendRequests,
   sendFriendRequest,
@@ -35,6 +34,7 @@ import {
   declineFriendRequest,
   removeFriend,
   getAchievements,
+  getStats,
 } from '@/api/social'
 import { toast } from '@/stores/toastStore'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
@@ -56,8 +56,7 @@ export function SocialTab() {
 
   // Milestones state
   const [overview, setOverview] = useState<AchievementsOverview | null>(null)
-  const [milestoneFilter, setMilestoneFilter] = useState<'all' | 'unlocked' | 'locked'>('all')
-  const [visibleMilestonesCount, setVisibleMilestonesCount] = useState(12)
+  const [stats, setStats] = useState<UserStatsResponse | null>(null)
 
   // Notification Store for Mute & Block
   const blockedUserIds = useMessengerNotificationStore((s) => s.blockedUserIds)
@@ -92,8 +91,12 @@ export function SocialTab() {
 
   const loadMilestonesData = async () => {
     try {
-      const ovData = await getAchievements().catch(() => null)
+      const [ovData, statsData] = await Promise.all([
+        getAchievements().catch(() => null),
+        getStats().catch(() => null),
+      ])
       setOverview(ovData)
+      setStats(statsData)
     } catch {
       // Non-blocking
     }
@@ -214,17 +217,6 @@ export function SocialTab() {
     }
     return list
   }, [mutedChats, mailboxDirectory])
-
-  const filteredMilestones = useMemo(() => {
-    const list = overview?.achievements || []
-    if (milestoneFilter === 'unlocked') return list.filter((m) => m.unlocked)
-    if (milestoneFilter === 'locked') return list.filter((m) => !m.unlocked)
-    return list
-  }, [overview?.achievements, milestoneFilter])
-
-  const progressPercent = overview
-    ? Math.round((overview.total_unlocked / Math.max(overview.total_available, 1)) * 100)
-    : 0
 
   const [readReceiptsEnabled, setReadReceiptsEnabled] = useState(() => {
     try {
@@ -400,19 +392,29 @@ export function SocialTab() {
                       className="flex items-center justify-between p-3 rounded-xl bg-surface-container-low border border-outline-variant/30 hover:border-outline-variant/60 transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="relative shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/user/${f.user_id ?? f.id}`)}
+                          className="relative shrink-0 rounded-full"
+                          aria-label={t('social.profile.open', { name: f.username })}
+                          title={t('social.profile.open', { name: f.username })}
+                        >
                           <Avatar src={f.avatar_url} name={f.username} size="sm" />
                           <StatusDot
                             status={f.presence?.status || 'invisible'}
                             size="sm"
                             className="absolute bottom-0 right-0"
                           />
-                        </div>
+                        </button>
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-semibold text-primary truncate">
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/user/${f.user_id ?? f.id}`)}
+                              className="text-xs font-semibold text-primary truncate hover:underline"
+                            >
                               {f.username}
-                            </span>
+                            </button>
                             {/* Wiederhergestellt wird im Chat: nur dort lässt sich
                                 die Nachricht an beide Seiten verschlüsseln. */}
                             <FunkenAbzeichen
@@ -603,149 +605,26 @@ export function SocialTab() {
         </div>
       </section>
 
-      {/* 3. Meilensteine & Fortschritt (Mit Lazy-Load) */}
-      <section className="msm-card p-6" aria-labelledby="milestones-title">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-          <div className="flex items-center gap-2">
-            <Trophy className="h-5 w-5 text-secondary" aria-hidden="true" />
-            <div>
-              <h2 id="milestones-title" className="font-headline text-title-lg font-semibold text-on-surface">
-                {t('social.milestones.title')}
-              </h2>
-              <p className="font-body-md text-xs text-on-surface-variant mt-0.5">
-                {t('social.milestones.description')}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 self-start sm:self-auto">
-            <div className="text-right">
-              <span className="text-xs font-bold text-primary font-mono block">
-                {overview?.total_unlocked || 0} / {overview?.total_available || 0}
-              </span>
-              <span className="text-label-sm text-on-surface-variant font-mono">
-                {t('social.milestones.points', { count: overview?.prestige_score || 0 })}
-              </span>
-            </div>
-            <div className="w-24 h-2 bg-surface-container-high rounded-full overflow-hidden border border-outline-variant/30">
-              <div
-                className="h-full bg-primary transition-all duration-500 rounded-full"
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
-          </div>
+      {/* 3. Nutzungszeit — stand bis 09/2026 nur in der App. */}
+      <section className="msm-card p-6" aria-labelledby="activity-time-title">
+        <div className="flex items-center gap-2 mb-4">
+          <Clock className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 id="activity-time-title" className="font-headline text-title-lg font-semibold text-on-surface">
+            {t('social.profile.activityTitle')}
+          </h2>
         </div>
-
-        {/* Filter Buttons */}
-        <div className="flex items-center gap-1.5 mb-4 pt-1 border-t border-outline-variant/20">
-          <Button
-            variant={milestoneFilter === 'all' ? 'primary' : 'ghost'}
-            size="sm"
-            onClick={() => {
-              setMilestoneFilter('all')
-              setVisibleMilestonesCount(12)
-            }}
-            className="text-xs h-7 px-3"
-          >
-            {t('social.milestones.filterAll', { count: overview?.achievements.length || 0 })}
-          </Button>
-          <Button
-            variant={milestoneFilter === 'unlocked' ? 'primary' : 'ghost'}
-            size="sm"
-            onClick={() => {
-              setMilestoneFilter('unlocked')
-              setVisibleMilestonesCount(12)
-            }}
-            className="text-xs h-7 px-3"
-          >
-            {t('social.milestones.filterUnlocked', { count: overview?.total_unlocked || 0 })}
-          </Button>
-          <Button
-            variant={milestoneFilter === 'locked' ? 'primary' : 'ghost'}
-            size="sm"
-            onClick={() => {
-              setMilestoneFilter('locked')
-              setVisibleMilestonesCount(12)
-            }}
-            className="text-xs h-7 px-3"
-          >
-            {t('social.milestones.filterLocked', { count: (overview?.total_available || 0) - (overview?.total_unlocked || 0) })}
-          </Button>
-        </div>
-
-        {/* Milestones Grid mit Lazy-Load */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {filteredMilestones.slice(0, visibleMilestonesCount).map((m) => {
-            const rarity = m.rarity_percent ?? m.global_unlocked_percentage ?? 0
-            const isRare = rarity > 0 && rarity <= 10
-
-            return (
-              <div
-                key={m.id}
-                className={`flex items-start gap-3.5 p-3.5 rounded-xl border transition-all ${
-                  m.unlocked
-                    ? 'bg-surface-container-low border-outline-variant/40 shadow-sm'
-                    : 'bg-surface-container-lowest/40 border-outline-variant/20 opacity-55'
-                }`}
-              >
-                <div
-                  className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
-                    m.unlocked
-                      ? isRare
-                        ? 'bg-status-warning/20 border-status-warning/40 text-status-warning'
-                        : 'bg-primary/15 border-primary/30 text-primary'
-                      : 'bg-surface-container-high/50 border-outline-variant/20 text-on-surface-variant/40'
-                  }`}
-                >
-                  {m.unlocked ? renderAchievementIcon(m.icon, 'w-5 h-5') : <Lock className="w-4 h-4" />}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-headline text-xs font-bold text-primary truncate">
-                      {m.title}
-                    </span>
-                    <span className="text-label-sm font-mono text-status-warning/90 font-semibold">
-                      {t('social.milestones.pointsShort', { count: m.points })}
-                    </span>
-                    {isRare && (
-                      <Badge variant="warning" className="text-label-sm px-1 py-0 uppercase font-bold">
-                        {t('social.milestones.rare')}
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="font-body text-xs text-on-surface-variant mt-0.5 leading-relaxed">
-                    {m.description}
-                  </p>
-                  <div className="flex items-center gap-3 mt-1.5 text-label-sm text-on-surface-variant/70 flex-wrap">
-                    {m.rarity_text && <span>{m.rarity_text}</span>}
-                    {m.unlocked && m.unlocked_at && (
-                      <span className="inline-flex items-center gap-1 text-status-success">
-                        <CheckCircle2 className="w-3 h-3" />
-                        <span>{t('social.milestones.unlockedOn', { date: new Date(m.unlocked_at).toLocaleDateString() })}</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-
-        {/* Lazy-Load Button für Erfolge */}
-        {filteredMilestones.length > visibleMilestonesCount && (
-          <div className="pt-3 flex justify-center">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setVisibleMilestonesCount((prev) => prev + 12)}
-              className="text-xs gap-1.5 px-4"
-            >
-              <span>{t('social.milestones.loadMore', { count: filteredMilestones.length - visibleMilestonesCount })}</span>
-            </Button>
-          </div>
-        )}
+        <Nutzungszeit stats={stats} />
       </section>
+
+      {/* 4. Meilensteine & Fortschritt */}
+      <Meilensteine
+        achievements={overview?.achievements ?? []}
+        freigeschaltet={overview?.total_unlocked ?? 0}
+        gesamt={overview?.total_available ?? 0}
+        punkte={overview?.prestige_score ?? 0}
+        titel={t('social.milestones.title')}
+        beschreibung={t('social.milestones.description')}
+      />
     </div>
   )
 }

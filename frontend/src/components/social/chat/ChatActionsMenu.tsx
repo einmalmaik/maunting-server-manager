@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Timer,
   Trash2,
+  UserRound,
   Video,
 } from 'lucide-react'
 import { Blatteintrag } from '@/Singra/UI'
@@ -40,6 +41,7 @@ interface ChatActionsMenuProps {
   verfallStufe: string
   verfallErlaubt: boolean
   onStumm: () => void
+  onProfil: () => void
   onSicherheitsnummer: () => void
   onVerfall: () => void
   onVideoanruf: () => void
@@ -81,6 +83,13 @@ export function ChatActionsMenu({
           icon={stumm ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
           label={stumm ? t('messenger.unmute') : t('messenger.mute')}
           onClick={tu(aktion.onStumm)}
+        />
+      )}
+      {kontakt && (
+        <Blatteintrag
+          icon={<UserRound className="w-4 h-4" />}
+          label={t('social.profile.show')}
+          onClick={tu(aktion.onProfil)}
         />
       )}
       {kontakt && (

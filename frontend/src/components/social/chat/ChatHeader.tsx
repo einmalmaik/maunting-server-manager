@@ -17,6 +17,8 @@ interface ChatHeaderProps {
   onSprachanruf?: () => void
   /** Nur bei Kontakten, die noch keine Freunde sind. */
   onFreundschaftsanfrage?: () => void
+  /** Öffnet das Profil des Gegenübers; nur im Direktchat. */
+  onProfil?: () => void
   /** Das Funken-Abzeichen neben dem Namen; nur bei Freunden. */
   funke?: React.ReactNode
   /** Kamera für einen Augenblick; nur bei Freunden. */
@@ -43,6 +45,7 @@ export function ChatHeader({
   gruppenanruf,
   onSprachanruf,
   onFreundschaftsanfrage,
+  onProfil,
   funke,
   onAugenblick,
   onSuche,
@@ -71,7 +74,20 @@ export function ChatHeader({
           {gruppenBild && (
             <img src={gruppenBild} alt="" className="-ml-1.5 h-5 w-5 shrink-0 rounded-full object-cover" />
           )}
-          <span className="text-xs font-bold text-on-surface truncate max-w-[130px] sm:max-w-xs">{titel}</span>
+          {/* Nur der Name ist der Knopf: das Funken-Abzeichen daneben ist selbst
+              einer, und Knopf in Knopf gibt es nicht. */}
+          {onProfil ? (
+            <button
+              type="button"
+              onClick={onProfil}
+              className="text-xs font-bold text-on-surface truncate max-w-[130px] sm:max-w-xs hover:underline"
+              title={t('social.profile.open', { name: titel })}
+            >
+              {titel}
+            </button>
+          ) : (
+            <span className="text-xs font-bold text-on-surface truncate max-w-[130px] sm:max-w-xs">{titel}</span>
+          )}
           {funke}
           {stumm && (
             <span title="Stummgeschaltet" className="inline-flex items-center text-status-warning">

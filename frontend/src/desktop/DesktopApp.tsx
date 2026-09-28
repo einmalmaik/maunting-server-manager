@@ -33,6 +33,7 @@ import { Avatar, BenachrichtigungsGlocke, Button, ProfileDropdown, type ProfileD
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Ai } from '@/pages/Ai'
 import { Messenger } from '@/pages/Messenger'
+import { Benutzerprofil } from '@/pages/Benutzerprofil'
 import { Calendar } from '@/pages/Calendar'
 import { Notes } from '@/pages/Notes'
 import { Privacy } from '@/pages/Privacy'
@@ -446,6 +447,24 @@ export function DesktopApp() {
           }
         />
         <Route path="/messenger" element={<Navigate to={publicSettings.social_enabled ? '/chat' : fallbackRoute} replace />} />
+        {/* Ein fremdes Profil, geöffnet aus Chat oder Freundesliste. Keine
+            Startseite: steht deshalb nicht in ERLAUBTE_ROUTEN. */}
+        <Route
+          path="/user/:userId"
+          element={
+            publicSettings.social_enabled ? (
+              <Hauptseite
+                bereich="profil"
+                konfig={konfig}
+                offeneUebernahme={offeneUebernahme}
+                onKonfigAenderung={ladeKonfigNeu}
+                isOffline={isOffline}
+              />
+            ) : (
+              <Navigate to={fallbackRoute} replace />
+            )
+          }
+        />
         <Route
           path="/kalender"
           element={
@@ -770,7 +789,7 @@ function Hauptseite({
   onKonfigAenderung,
   isOffline = false,
 }: {
-  bereich: 'ki' | 'chat' | 'kalender' | 'notizen' | 'gedaechtnis' | 'tresor' | 'einstellungen'
+  bereich: 'ki' | 'chat' | 'profil' | 'kalender' | 'notizen' | 'gedaechtnis' | 'tresor' | 'einstellungen'
   konfig: AppKonfig | null
   offeneUebernahme: string | null
   onKonfigAenderung?: () => void
@@ -814,7 +833,7 @@ function Hauptseite({
     if (!darfTresor && bereich === 'tresor') {
       navigate(fallbackRoute, { replace: true })
     }
-    if (!darfMessenger && bereich === 'chat') {
+    if (!darfMessenger && (bereich === 'chat' || bereich === 'profil')) {
       navigate(fallbackRoute, { replace: true })
     }
     if (!darfKalender && bereich === 'kalender') {
@@ -1149,6 +1168,10 @@ function Hauptseite({
           ) : bereich === 'chat' ? (
             <div className="flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden bg-surface">
               <Messenger />
+            </div>
+          ) : bereich === 'profil' ? (
+            <div className="w-full flex-1 min-h-0 overflow-y-auto">
+              <Benutzerprofil />
             </div>
           ) : bereich === 'kalender' ? (
             <div className="mx-auto w-full max-w-6xl flex-1 min-h-0 overflow-y-auto pb-8">

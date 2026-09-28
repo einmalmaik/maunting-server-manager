@@ -3473,7 +3473,7 @@
       }
     },
     "privacyTitle": "Privacy & visibility",
-    "privacyDescription": "Control who can see your online presence and activities in the system.",
+    "privacyDescription": "Control who can see your profile, your online presence and your activities.",
     "privacyVisibility": "Profile visibility",
     "privacyCallsFriendsOnly": "Calls are not affected: only confirmed friends can call you by voice or video — even with a public profile.",
     "privacySaved": "Privacy settings saved.",
@@ -6262,10 +6262,9 @@
     },
     "social": {
       "freundPlatzhalter": "Username for the friend request …",
-      "sichtbarkeitFrage": "Who may see your presence and activity?",
+      "sichtbarkeitFrage": "Who may see your profile and your status?",
       "lesebestaetigungenLang": "Read receipts (read ticks)",
       "lesebestaetigungen": "Read receipts",
-      "gesamtaktivitaet": "Total activity",
       "kontakteHinweis": "Manage your contacts, blocked people and muted conversations.",
       "privatsphaereTitel": "Privacy & visibility"
     }
@@ -6627,15 +6626,10 @@
     "milestones": {
       "title": "Milestones & progress",
       "description": "Records what you have achieved running the system, and how active you are.",
-      "platformActivity": "Platform activity",
       "points_one": "{{count}} point",
       "points_other": "{{count}} points",
       "pointsShort": "+{{count}} pts",
-      "progress": "{{unlocked}} of {{total}} ({{percent}}%)",
       "statActivity": "Active time",
-      "statAi": "AI conversations",
-      "statAdmin": "Administration",
-      "statCommands": "Commands",
       "durationMinutes": "{{minutes}} min",
       "durationHours": "{{hours}} h {{minutes}} min",
       "filterAll": "All ({{count}})",
@@ -6644,7 +6638,8 @@
       "rare": "Rare",
       "unlockedOn": "Unlocked on {{date}}",
       "loadMore_one": "Show more achievements ({{count}} left)",
-      "loadMore_other": "Show more achievements ({{count}} left)"
+      "loadMore_other": "Show more achievements ({{count}} left)",
+      "none": "No achievements in this view."
     },
     "groupRoles": {
       "title": "Group roles & rights",
@@ -6795,6 +6790,38 @@
           "title": "Assign & manage roles",
           "desc": "Assign roles to members and adjust the default group rights. Owners and administrators carry “Mention everyone at once”, “Pin a message” and “Set disappearing messages” anyway, because they could grant them to themselves in two clicks."
         }
+      }
+    },
+    "profile": {
+      "open": "Open {{name}}'s profile",
+      "show": "View profile",
+      "activityTitle": "Usage & play time",
+      "achievementsTitle": "Achievements",
+      "memberSince": "Member since {{date}}",
+      "friend": "You are friends",
+      "chat": "Open chat",
+      "call": "Call",
+      "requestSent": "Request sent",
+      "unavailableTitle": "Profile not available",
+      "unavailableHint": "This profile doesn't exist, or it isn't visible to you.",
+      "loadFailed": "Couldn't load the profile."
+    },
+    "activityCategory": {
+      "ai_chat": "AI chat",
+      "general": "General",
+      "server_admin": "Server management",
+      "command_exec": "Command execution"
+    },
+    "visibility": {
+      "options": {
+        "friends": "Friends only",
+        "public": "Public",
+        "private": "Private"
+      },
+      "hints": {
+        "friends": "Only confirmed friends can see your profile, your status and your device.",
+        "public": "Every account on this panel can see your profile and your status.",
+        "private": "Nobody can see your profile, not even your friends. Friends still see your status; everyone else only sees whether you are online."
       }
     }
   },

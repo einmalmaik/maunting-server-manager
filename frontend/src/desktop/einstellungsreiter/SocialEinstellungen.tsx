@@ -13,6 +13,7 @@ import {
   BellOff,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 import {
@@ -31,7 +32,7 @@ import {
 } from '@/api/social'
 import { renderAchievementIcon } from '@/components/social/achievementIcons'
 import { StatusDot } from '@/components/social/StatusIndicator'
-import { formatActivityCategory } from '@/hooks/usePresenceAndActivity'
+import { Nutzungszeit } from '@/components/social/Nutzungszeit'
 import { Avatar, Badge, Button, Dropdown, type DropdownOption, Input, Switch } from '@/Singra/UI'
 import { useAuthStore } from '@/stores/authStore'
 import { useFunkenStore } from '@/stores/funkenStore'
@@ -40,6 +41,7 @@ import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 export function SocialEinstellungen() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const updateUser = useAuthStore((s) => s.updateUser)
 
@@ -92,11 +94,12 @@ export function SocialEinstellungen() {
     } catch {}
   }
 
-  const privacyOptions: DropdownOption[] = [
-    { value: 'friends', label: 'Freunde (Status sichtbar für Kontakte)' },
-    { value: 'public', label: 'Öffentlich (Für alle sichtbar)' },
-    { value: 'private', label: 'Privat (Unsichtbar / verborgen)' },
-  ]
+  // Die Sichtbarkeit regelt auch das Profil: bei „Privat" ist es für alle
+  // anderen nicht erreichbar, Freunde eingeschlossen (Server: 404).
+  const privacyOptions: DropdownOption[] = (['friends', 'public', 'private'] as const).map((value) => ({
+    value,
+    label: t(`social.visibility.options.${value}`),
+  }))
 
   // 2. Spielzeit & Aktivität
   const [stats, setStats] = useState<UserStatsResponse | null>(null)
@@ -267,14 +270,6 @@ export function SocialEinstellungen() {
     ? Math.round((overview.total_unlocked / Math.max(overview.total_available, 1)) * 100)
     : 0
 
-  const formatHours = (seconds?: number) => {
-    if (!seconds || seconds <= 0) return '0 Std.'
-    const h = Math.floor(seconds / 3600)
-    const m = Math.floor((seconds % 3600) / 60)
-    if (h === 0) return `${m} Min.`
-    return `${h} Std. ${m} Min.`
-  }
-
   return (
     <div className="flex flex-col gap-6">
       {/* 1. Freunde & Kontakte (Direkt ganz oben!) */}
@@ -414,7 +409,12 @@ export function SocialEinstellungen() {
                       key={f.id}
                       className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/30"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/user/${f.user_id ?? f.id}`)}
+                        className="flex items-center gap-2.5 min-w-0 text-left"
+                        title={t('social.profile.open', { name: f.username })}
+                      >
                         <div className="relative shrink-0">
                           <Avatar src={f.avatar_url} name={f.username} size="sm" />
                           <StatusDot
@@ -433,7 +433,7 @@ export function SocialEinstellungen() {
                             </p>
                           )}
                         </div>
-                      </div>
+                      </button>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -572,7 +572,7 @@ export function SocialEinstellungen() {
         <div className="space-y-4 pt-2 border-t border-outline-variant/30">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <span className="text-xs font-medium text-on-surface">Profil-Sichtbarkeit & Status</span>
+              <span className="text-xs font-medium text-on-surface">{t('profile.privacyVisibility')}</span>
               <p className="text-label-sm text-on-surface-variant">{t('mss.social.sichtbarkeitFrage')}</p>
             </div>
             <div className="w-full sm:w-64">
@@ -581,10 +581,11 @@ export function SocialEinstellungen() {
                 value={privacyLevel}
                 disabled={savingPrivacy}
                 onChange={(val) => void handleSavePrivacy(val as 'public' | 'friends' | 'private')}
-                aria-label="Profil-Sichtbarkeit"
+                aria-label={t('profile.privacyVisibility')}
               />
             </div>
           </div>
+          <p className="text-label-sm text-on-surface-variant">{t(`social.visibility.hints.${privacyLevel}`)}</p>
 
           {/* Dieselbe Zusage wie im Panel: die Sichtbarkeit öffnet den Status,
               nie das Klingeln. */}
@@ -616,32 +617,13 @@ export function SocialEinstellungen() {
             </div>
             <div>
               <h2 id="social-time-title" className="text-sm font-semibold text-on-surface">
-                Nutzungs- & Spielzeit
+                {t('social.profile.activityTitle')}
               </h2>
             </div>
           </div>
-          <div className="text-right">
-            <span className="text-xs font-bold text-primary font-mono block">
-              {formatHours(stats?.active_time_seconds ?? stats?.total_activity_seconds)}
-            </span>
-            <span className="text-label-sm text-on-surface-variant">{t('mss.social.gesamtaktivitaet')}</span>
-          </div>
         </div>
 
-        {stats?.active_time_by_category && Object.keys(stats.active_time_by_category).length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-2 border-t border-outline-variant/30">
-            {Object.entries(stats.active_time_by_category).map(([cat, secs]) => (
-              <div key={cat} className="p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/30">
-                <span className="text-label-sm font-bold text-on-surface-variant tracking-wider block truncate">
-                  {formatActivityCategory(cat)}
-                </span>
-                <span className="text-xs font-semibold text-on-surface font-mono">
-                  {formatHours(secs)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+        <Nutzungszeit stats={stats} />
       </section>
 
       {/* 4. Meilensteine & Erfolge (Mit Lazy-Load) */}
