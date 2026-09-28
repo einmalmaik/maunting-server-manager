@@ -1,6 +1,6 @@
 # Agentic Framework — Konzept „Jarvis-Prinzip" (v3: Gehirn und Worker)
 
-Stand: 18.08.2026 · Status: Konzept, nicht umgesetzt · Ersetzt v2 (Mund/Gehirn als zwei Luna-Instanzen)
+Stand: 18.08.2026 · Status: umgesetzt (21c473b2) · Ersetzt v2 (Mund/Gehirn als zwei Luna-Instanzen)
 
 **Was sich gegenüber v2 geändert hat:** Die beiden Rollen sind neu geschnitten. Der v2-„Mund" und die
 Orchestrierung verschmelzen zum **Gehirn** (das Modell, mit dem der Nutzer dauerhaft redet — Charakter

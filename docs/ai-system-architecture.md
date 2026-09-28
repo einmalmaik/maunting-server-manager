@@ -404,4 +404,4 @@ Autonomiepolitik entsteht.
 | Intent und Prefetch | `backend/services/ai_intent_classifier.py` |
 | Geo/Satellit/Region | `backend/services/ai_geo_service.py`, `backend/services/ai_satellite_service.py`, `backend/services/ai_regional_connectors_service.py` |
 | Frontend Voice | `frontend/src/components/ai/voice/useSprachsitzung.ts` |
-| Konzeptstand | `docs/agentic-framework.md`, `docs/ai-engine-planning.md` |
+| Konzeptstand | `docs/agentic-framework.md` |

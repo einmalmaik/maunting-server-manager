@@ -112,3 +112,7 @@ mcps/
 scratch/
 git_log.txt
 /.agents
+
+# Laufprotokolle und persoenliche Editor-Arbeitsbereiche
+*.log
+*.code-workspace

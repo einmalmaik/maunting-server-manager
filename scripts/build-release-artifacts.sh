@@ -37,8 +37,7 @@ archive_tracked "$PANEL_ROOT" \
     msm-update.service msm-update.timer msm.service.template \
     backend blueprints dis-sidecar docs frontend msm-agent scripts helper-scripts
 rm -rf "$PANEL_ROOT/backend/tests" "$PANEL_ROOT/msm-agent/tests"
-rm -f "$PANEL_ROOT/dis-sidecar/test-backup-endpoints.mjs" \
-    "$PANEL_ROOT/dis-sidecar/_isolated_test_deferred.mjs"
+rm -f "$PANEL_ROOT/dis-sidecar/test-backup-endpoints.mjs"
 rm -rf "$PANEL_ROOT/frontend/dist"
 mkdir -p "$PANEL_ROOT/frontend/dist"
 cp -a frontend/dist/. "$PANEL_ROOT/frontend/dist/"
