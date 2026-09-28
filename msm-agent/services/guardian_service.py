@@ -168,7 +168,7 @@ def _transition(runtime: dict[str, Any], new_state: str, reason: str) -> None:
     runtime["state_entered_at"] = now
     history = runtime.setdefault("transition_history", [])
     history.append({"from": previous, "to": new_state, "at": now, "reason": reason[:64]})
-    # The complete incident attempt history is durable in SQLite.  Runtime
+    # The complete incident attempt history is durable in the incident store.  Runtime
     # keeps only a bounded operational tail to prevent an unbounded JSON file.
     runtime["transition_history"] = history[-200:]
 
