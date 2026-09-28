@@ -14,10 +14,11 @@ Server gelesen hat.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
+from models.dis_text import ai_text
 
 
 #: Was eine Meldung sein kann. ``ergebnis`` ist der Abschlussbericht eines
@@ -75,10 +76,10 @@ class AiMeldung(Base):
     kanal: Mapped[str] = mapped_column(String(16), nullable=False, default="chat")
     # Bereits geschwaerzt (siehe Modul-Docstring). Der Kurztext, den das Gehirn
     # liefert — die Meldung ist das Ergebnis, nie der Prozess.
-    text: Mapped[str] = mapped_column(Text, nullable=False)
+    text: Mapped[str] = mapped_column(ai_text("ai_meldungen.text"), nullable=False)
     # Bei ``art='frage'``: die geprueften Frage-Daten ({"question", "options"}),
     # dasselbe Format wie `AiMessage.question_json`.
-    question_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    question_json: Mapped[str | None] = mapped_column(ai_text("ai_meldungen.question_json"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

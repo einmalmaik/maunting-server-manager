@@ -20,6 +20,8 @@ einen Ausweis erst brauchbar machen:
 5. Entziehen trifft genau ein Geraet — nie ein fremdes, nie alle.
 """
 
+import pytest
+
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -48,7 +50,7 @@ def _kopf(cookies: dict) -> dict:
 def _code_erzeugen(client: TestClient, cookies: dict, label: str = "Arbeitsrechner") -> dict:
     antwort = client.post(
         "/api/auth/devices/pairing",
-        json={"label": label},
+        json={"label": label, "password": "UserPass123!"},
         cookies=cookies,
         headers=_kopf(cookies),
     )
@@ -93,6 +95,85 @@ class TestCodeErzeugen:
             headers=_kopf(user_cookies),
         )
         assert antwort.status_code == 403
+
+
+class TestNachweis:
+    """Ein Zugangstoken allein macht noch kein Geraet.
+
+    Bis 26.09.2026 genuegte es: wer im Anruf das Token der Desktop-App abgriff,
+    koppelte damit ein eigenes Geraet und hatte das Konto auf Dauer.
+    """
+
+    def test_ohne_passwort_kein_code(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        _mit_chatrecht(db, regular_user)
+        for rumpf in ({"label": "x"}, {"label": "x", "password": "falsch-geraten-1"}):
+            antwort = client.post(
+                "/api/auth/devices/pairing",
+                json=rumpf,
+                cookies=user_cookies,
+                headers=_kopf(user_cookies),
+            )
+            assert antwort.status_code == 403, rumpf
+
+    def test_social_verknuepfung_ersetzt_das_passwort_nicht(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        """Bis 28.09.2026 uebersprang die Kopplung bei jedem Konto mit OAuth-Link
+        die Pruefung, auch wenn es ein Passwort hatte."""
+        from models import OAuthProvider, OAuthUserLink
+
+        _mit_chatrecht(db, regular_user)
+        provider = OAuthProvider(slug="gh-kopplung", name="GitHub", preset="github", client_id="cid", enabled=True)
+        db.add(provider)
+        db.commit()
+        db.add(OAuthUserLink(
+            provider_id=provider.id, user_id=regular_user.id,
+            subject=OAuthUserLink._hash_subject("sub-kopplung"),
+        ))
+        db.commit()
+
+        antwort = client.post(
+            "/api/auth/devices/pairing", json={"label": "x"},
+            cookies=user_cookies, headers=_kopf(user_cookies),
+        )
+        assert antwort.status_code == 403
+
+        regular_user.has_password = False
+        db.commit()
+        antwort = client.post(
+            "/api/auth/devices/pairing", json={"label": "x"},
+            cookies=user_cookies, headers=_kopf(user_cookies),
+        )
+        assert antwort.status_code == 403
+        assert "Passwort fest" in antwort.json()["detail"]
+
+    def test_mit_2fa_zaehlt_der_code(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict, monkeypatch
+    ):
+        _mit_chatrecht(db, regular_user)
+        regular_user.two_factor_enabled = True
+        # Ein TOTP-Konto: aktiv ohne Geheimnis hiesse Passkey (`two_factor_method`).
+        regular_user.two_factor_secret_encrypted = "totp-geheimnis"
+        db.commit()
+        monkeypatch.setattr(
+            AuthService, "verify_current_2fa_code", staticmethod(lambda _u, code: code == "123456")
+        )
+        ohne = client.post(
+            "/api/auth/devices/pairing",
+            json={"label": "x", "password": "UserPass123!"},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        mit = client.post(
+            "/api/auth/devices/pairing",
+            json={"label": "x", "otp_code": "123456"},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        assert ohne.status_code == 403
+        assert mit.status_code == 200, mit.text
 
 
 class TestEinloesen:
@@ -193,9 +274,13 @@ class TestGeraeteliste:
         code = _code_erzeugen(client, user_cookies, label="AltesGeraet")["code"]
         client.post("/api/auth/devices/redeem", json={"code": code})
 
-        # Token revoken
+        # Nur die Sitzung des gekoppelten Geraets sperren. Wer alle sperrt,
+        # sperrt auch die Browsersitzung, die gleich die Liste abfragt — und die
+        # faellt seit 09/2026 sofort, nicht erst nach Ablauf ihres Tokens.
         from models import RefreshToken
-        db.query(RefreshToken).filter(RefreshToken.user_id == regular_user.id).update(
+        db.query(RefreshToken).filter(
+            RefreshToken.user_id == regular_user.id, RefreshToken.geraet == "desktop"
+        ).update(
             {"revoked_at": datetime.now(timezone.utc)}
         )
         db.commit()
@@ -240,6 +325,36 @@ class TestGeraeteliste:
         rot_retry = client.post("/api/auth/refresh", json={"refresh_token": initial_refresh})
         assert rot_retry.status_code == 200
         assert rot_retry.json()["access_token"]
+        # Keine Verzweigung (Bifurkation): Erneute Anfragen innerhalb der Grace Period erhalten exakt dasselbe Token
+        assert rot_retry.json()["refresh_token"] == rot1_data["refresh_token"]
+
+    def test_gekoppeltes_geraet_erhaelt_dauerhaftes_refresh_token(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        """Refresh-Tokens für gekoppelte Geräte verfallen nicht nach 30 Tagen, sondern sind dauerhaft (10 Jahre) gültig."""
+        _mit_chatrecht(db, regular_user)
+        code = _code_erzeugen(client, user_cookies, label="DauerhaftesGeraet")["code"]
+        redeem_res = client.post("/api/auth/devices/redeem", json={"code": code}).json()
+        initial_refresh = redeem_res["refresh_token"]
+
+        token_hash = AuthService._hash_token(initial_refresh)
+        rt_db = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
+        assert rt_db is not None
+        expires_at = rt_db.expires_at.replace(tzinfo=timezone.utc) if rt_db.expires_at.tzinfo is None else rt_db.expires_at
+        rest_tage = (expires_at - datetime.now(timezone.utc)).days
+        assert rest_tage >= 3600
+
+        # Auch nach Rotation muss das neue Refresh-Token dauerhafte Gültigkeit haben
+        rot1 = client.post("/api/auth/refresh", json={"refresh_token": initial_refresh})
+        assert rot1.status_code == 200
+        rot1_refresh = rot1.json()["refresh_token"]
+
+        rot_hash = AuthService._hash_token(rot1_refresh)
+        rt_rot = db.query(RefreshToken).filter(RefreshToken.token_hash == rot_hash).first()
+        assert rt_rot is not None
+        expires_at_rot = rt_rot.expires_at.replace(tzinfo=timezone.utc) if rt_rot.expires_at.tzinfo is None else rt_rot.expires_at
+        rest_tage_rot = (expires_at_rot - datetime.now(timezone.utc)).days
+        assert rest_tage_rot >= 3600
 
     def test_wiederverwendung_ausserhalb_grace_period_revoziert_familie(
         self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
@@ -324,6 +439,73 @@ class TestGeraeteliste:
 
         uebrig = client.get("/api/auth/devices", cookies=user_cookies).json()
         assert [g["label"] for g in uebrig] == ["Zwei"]
+
+    def test_entziehen_trennt_offene_verbindung_und_push_des_geraets(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        """Das Sperren muss auch treffen, was schon offen ist.
+
+        Bis 09/2026 lief der Echtzeitstrom eines entfernten Geraets weiter,
+        und seine Push-Adresse bekam weiter Benachrichtigungen. Das Token wird
+        nur beim Verbindungsaufbau geprueft; ein gestohlenes Geraet hielt die
+        Verbindung einfach offen.
+        """
+        from models import PushSubscription
+
+        _mit_chatrecht(db, regular_user)
+        eins = client.post(
+            "/api/auth/devices/redeem",
+            json={"code": _code_erzeugen(client, user_cookies, label="Eins")["code"]},
+        ).json()
+        zwei = client.post(
+            "/api/auth/devices/redeem",
+            json={"code": _code_erzeugen(client, user_cookies, label="Zwei")["code"]},
+        ).json()
+        punkt = "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4"
+        for name, sitzung in (("eins", eins), ("zwei", zwei)):
+            gemeldet = client.post(
+                "/api/social/push/subscribe",
+                headers={"Authorization": f"Bearer {sitzung['access_token']}"},
+                json={
+                    "endpoint": f"https://fcm.googleapis.com/fcm/send/geraet-{name}",
+                    "p256dh": punkt,
+                    "auth": "BTBZMqHH6r4Tts7J_aSIgg",
+                },
+            )
+            assert gemeldet.status_code == 200
+
+        liste = client.get("/api/auth/devices", cookies=user_cookies).json()
+        familie_eins = next(g["family"] for g in liste if g["label"] == "Eins")
+
+        with client.websocket_connect(
+            "/api/events/ws", subprotocols=["msm.bearer", eins["access_token"]]
+        ) as strom_eins, client.websocket_connect(
+            "/api/events/ws", subprotocols=["msm.bearer", zwei["access_token"]]
+        ) as strom_zwei:
+            assert strom_eins.receive_json()["type"] == "ready"
+            assert strom_zwei.receive_json()["type"] == "ready"
+
+            antwort = client.delete(
+                f"/api/auth/devices/{familie_eins}", cookies=user_cookies, headers=_kopf(user_cookies)
+            )
+            assert antwort.status_code == 200
+
+            # Das entfernte Geraet bekommt das Schlusssignal …
+            signal = strom_eins.receive_json()
+            assert signal["type"] == "shutdown"
+            assert signal["reason"] == "session_revoked"
+            # … das andere bleibt verbunden und antwortet weiter. Vorher kommt
+            # dort das Abzeichen fürs Aufräumen an — das Konto hat ja
+            # tatsächlich ein Gerät abgemeldet.
+            abzeichen = strom_zwei.receive_json()
+            assert abzeichen["type"] == "achievement_unlocked"
+            assert abzeichen["achievement"]["id"] == "starter_session_hygiene"
+            strom_zwei.send_json({"type": "ping"})
+            assert strom_zwei.receive_json()["type"] == "pong"
+
+        db.expire_all()
+        uebrig = [a.endpoint for a in db.query(PushSubscription).all()]
+        assert uebrig == ["https://fcm.googleapis.com/fcm/send/geraet-zwei"]
 
     def test_eine_fremde_familie_ist_nicht_zu_treffen(
         self, client: TestClient, db: Session, regular_user: User, owner_user: User,
@@ -465,3 +647,324 @@ class TestPairingStatus:
         assert st2.json()["exists"] is True
         assert st2.json()["redeemed"] is True
 
+
+
+def _valid_rsa_jwk(marker: str = "A") -> str:
+    """Ein oeffentlicher Schluessel, der `validate_rsa_public_key_jwk` besteht."""
+    import json
+
+    return json.dumps(
+        {"kty": "RSA", "n": marker * 350, "e": "AQAB", "alg": "RSA-OAEP", "use": "enc"}
+    )
+
+
+def _geraet_melden(client: TestClient, token: str, kennung: str, marker: str = "A") -> None:
+    """Das frisch gekoppelte Geraet veroeffentlicht seinen E2EE-Schluessel."""
+    antwort = client.put(
+        "/api/social/e2ee/devices/self",
+        json={"device_id": kennung, "public_key": _valid_rsa_jwk(marker), "label": "Neu"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert antwort.status_code == 200, antwort.text
+
+
+class TestVerlaufsErstabgleich:
+    """Der Verlauf zieht auf das frisch gekoppelte Geraet um.
+
+    Ein neues Geraet hat keine Ratchet-Sitzungen und liest nichts
+    Rueckwirkendes aus der Mailbox. Ohne diesen Weg staende es vor einem leeren
+    Gespraech, obwohl daneben ein Geraet desselben Kontos alles hat. Der Server
+    reicht dabei einen versiegelten Textblock durch — er kann ihn nicht oeffnen
+    und soll ihn nicht aufbewahren.
+    """
+
+    def test_der_verlauf_geht_einmal_hinueber_und_ist_danach_weg(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        _mit_chatrecht(db, regular_user)
+        code = _code_erzeugen(client, user_cookies)["code"]
+        tokens = client.post("/api/auth/devices/redeem", json={"code": code}).json()
+        _geraet_melden(client, tokens["access_token"], "a1b2c3d4e5f60718")
+
+        # Das Panel sieht jetzt, fuer wen es versiegeln muss.
+        status = client.get(
+            f"/api/auth/devices/pairing/{code}/status",
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        ).json()
+        assert status["redeemed"] is True
+        assert [g["device_id"] for g in status["neue_geraete"]] == ["a1b2c3d4e5f60718"]
+        assert status["verlauf_abgelegt"] is False
+        # Name und Zeitpunkt gehen mit: das Panel zeigt sie neben der
+        # Sicherheitsnummer, bevor es den Verlauf hergibt. Ohne sie hiesse die
+        # Rueckfrage nur „ein Geraet" — und welches, wuesste niemand.
+        neu = status["neue_geraete"][0]
+        assert neu["label"] == "Neu"
+        assert neu["created_at"]
+
+        ablegen = client.put(
+            f"/api/auth/devices/pairing/{code}/verlauf",
+            json={"blob": "sv-e2ee-hybrid-v1:versiegelt"},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        assert ablegen.status_code == 200, ablegen.text
+
+        # Das Geraet holt ab — mit seiner eigenen Sitzung.
+        kopf = {"Authorization": f"Bearer {tokens['access_token']}"}
+        erst = client.get(f"/api/auth/devices/pairing/{code}/verlauf", headers=kopf)
+        assert erst.status_code == 200
+        assert erst.json()["blob"] == "sv-e2ee-hybrid-v1:versiegelt"
+
+        # Und danach liegt hier nichts mehr. Liegenzubleiben waere der einzige
+        # Weg, wie der Blob doch noch in ein Backup geraet.
+        zweit = client.get(f"/api/auth/devices/pairing/{code}/verlauf", headers=kopf)
+        assert zweit.status_code == 200
+        assert zweit.json()["blob"] is None
+        einladung = db.query(DevicePairing).filter_by(user_id=regular_user.id).first()
+        db.refresh(einladung)
+        assert einladung.verlauf_blob is None
+
+    def test_vor_dem_einloesen_wird_nichts_abgelegt(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        # Vorher gibt es kein Geraet, fuer das versiegelt werden koennte. Ein
+        # Blob an einem offenen Code waere eine Ablage ohne Abnehmer.
+        _mit_chatrecht(db, regular_user)
+        code = _code_erzeugen(client, user_cookies)["code"]
+
+        antwort = client.put(
+            f"/api/auth/devices/pairing/{code}/verlauf",
+            json={"blob": "sv-e2ee-hybrid-v1:zu-frueh"},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        assert antwort.status_code == 400
+
+    def test_nur_geraete_von_nach_dem_einloesen_zaehlen(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        """Ein Geraet, das schon vorher da war, ist nicht das neue.
+
+        Es braucht den Erstabgleich auch nicht — sein Verlauf liegt noch bei
+        ihm. Waere es hier gelistet, versiegelte das Panel gegen das falsche
+        Geraet und das neue bekaeme nichts.
+        """
+        _mit_chatrecht(db, regular_user)
+        from models import UserE2eeDevice
+
+        db.add(
+            UserE2eeDevice(
+                user_id=regular_user.id,
+                device_id="altesgeraet000000",
+                public_key_jwk=_valid_rsa_jwk("Z"),
+                label="Alt",
+                created_at=datetime.now(timezone.utc) - timedelta(days=3),
+            )
+        )
+        db.commit()
+
+        code = _code_erzeugen(client, user_cookies)["code"]
+        tokens = client.post("/api/auth/devices/redeem", json={"code": code}).json()
+        _geraet_melden(client, tokens["access_token"], "neuesgeraet000000", "B")
+
+        status = client.get(
+            f"/api/auth/devices/pairing/{code}/status",
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        ).json()
+        assert [g["device_id"] for g in status["neue_geraete"]] == ["neuesgeraet000000"]
+
+    def test_ein_fremdes_konto_kommt_nicht_an_den_blob(
+        self,
+        client: TestClient,
+        db: Session,
+        regular_user: User,
+        user_cookies: dict,
+        owner_user: User,
+        owner_cookies: dict,
+    ):
+        _mit_chatrecht(db, regular_user)
+        _mit_chatrecht(db, owner_user)
+        code = _code_erzeugen(client, user_cookies)["code"]
+        tokens = client.post("/api/auth/devices/redeem", json={"code": code}).json()
+        _geraet_melden(client, tokens["access_token"], "a1b2c3d4e5f60718")
+        client.put(
+            f"/api/auth/devices/pairing/{code}/verlauf",
+            json={"blob": "sv-e2ee-hybrid-v1:versiegelt"},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+
+        # Der Code gehoert einem anderen Konto: die Einladung wird gar nicht
+        # erst gefunden.
+        fremd = client.get(
+            f"/api/auth/devices/pairing/{code}/verlauf",
+            cookies=owner_cookies,
+            headers=_kopf(owner_cookies),
+        )
+        assert fremd.status_code == 200
+        assert fremd.json()["blob"] is None
+
+        fremd_ablegen = client.put(
+            f"/api/auth/devices/pairing/{code}/verlauf",
+            json={"blob": "sv-e2ee-hybrid-v1:untergeschoben"},
+            cookies=owner_cookies,
+            headers=_kopf(owner_cookies),
+        )
+        assert fremd_ablegen.status_code == 400
+
+        # Und der echte Blob liegt unveraendert fuer sein Geraet bereit.
+        eigen = client.get(
+            f"/api/auth/devices/pairing/{code}/verlauf",
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        assert eigen.json()["blob"] == "sv-e2ee-hybrid-v1:versiegelt"
+
+    def test_zu_gross_wird_abgewiesen(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        _mit_chatrecht(db, regular_user)
+        code = _code_erzeugen(client, user_cookies)["code"]
+        tokens = client.post("/api/auth/devices/redeem", json={"code": code}).json()
+        _geraet_melden(client, tokens["access_token"], "a1b2c3d4e5f60718")
+
+        antwort = client.put(
+            f"/api/auth/devices/pairing/{code}/verlauf",
+            json={"blob": "x" * (device_pairing_service.MAX_VERLAUF_BYTES + 1)},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        assert antwort.status_code == 422
+
+    def test_der_blob_stirbt_mit_der_uebergabe(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        """Eingeloeste Zeilen bleiben liegen — ihr Verlaufsblob darf das nicht.
+
+        Hat das neue Geraet ihn bis zum Ende der Uebergabe nicht geholt, ist
+        der Erstabgleich gescheitert und der Blob hat keinen Zweck mehr.
+        """
+        _mit_chatrecht(db, regular_user)
+        code = _code_erzeugen(client, user_cookies)["code"]
+        tokens = client.post("/api/auth/devices/redeem", json={"code": code}).json()
+        _geraet_melden(client, tokens["access_token"], "a1b2c3d4e5f60718")
+        client.put(
+            f"/api/auth/devices/pairing/{code}/verlauf",
+            json={"blob": "sv-e2ee-hybrid-v1:versiegelt"},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+
+        einladung = db.query(DevicePairing).filter_by(user_id=regular_user.id).first()
+        jetzt = datetime.now(timezone.utc)
+        einladung.expires_at = jetzt - timedelta(minutes=5)
+        einladung.redeemed_at = jetzt - timedelta(
+            minutes=device_pairing_service.FRIST_MINUTEN, seconds=1
+        )
+        db.commit()
+
+        device_pairing_service.aufraeumen(db)
+
+        db.refresh(einladung)
+        # Die Zeile bleibt — an ihr haengt die Geraetefamilie.
+        assert einladung.redeemed_at is not None
+        assert einladung.verlauf_blob is None
+        assert einladung.verlauf_abgelegt_am is None
+
+    def _eingeloest_und_gemeldet(
+        self, client: TestClient, db: Session, user: User, cookies: dict
+    ) -> tuple[str, dict, DevicePairing]:
+        _mit_chatrecht(db, user)
+        code = _code_erzeugen(client, cookies)["code"]
+        tokens = client.post("/api/auth/devices/redeem", json={"code": code}).json()
+        _geraet_melden(client, tokens["access_token"], "a1b2c3d4e5f60718")
+        einladung = db.query(DevicePairing).filter_by(user_id=user.id).first()
+        return code, {"Authorization": f"Bearer {tokens['access_token']}"}, einladung
+
+    def test_die_uebergabe_laeuft_ab_dem_einloesen(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        """Zwischen Einloesen und Uebergabe liegt eine Rueckfrage.
+
+        Im Panel vergleicht ein Mensch die Sicherheitsnummer, bevor der Verlauf
+        hinuebergeht — das dauert Minuten. Galt dafuer die Frist des Codes,
+        scheiterte eine Kopplung, die kurz vor Ablauf eingeloest wurde, am
+        Ablegen: Code um 12:00, eingeloest um 12:08, bestaetigt um 12:10:30.
+        Das Geraet wartete danach bis 12:18 auf einen Verlauf, der nie kam.
+        """
+        code, bearer, einladung = self._eingeloest_und_gemeldet(
+            client, db, regular_user, user_cookies
+        )
+        jetzt = datetime.now(timezone.utc)
+        einladung.expires_at = jetzt - timedelta(seconds=30)
+        einladung.redeemed_at = jetzt - timedelta(minutes=2, seconds=30)
+        db.commit()
+
+        ablegen = client.put(
+            f"/api/auth/devices/pairing/{code}/verlauf",
+            json={"blob": "sv-e2ee-hybrid-v1:versiegelt"},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        assert ablegen.status_code == 200, ablegen.text
+
+        # Das Aufraeumen richtet sich nach derselben Frist.
+        device_pairing_service.aufraeumen(db)
+
+        abholen = client.get(f"/api/auth/devices/pairing/{code}/verlauf", headers=bearer)
+        assert abholen.status_code == 200
+        assert abholen.json()["blob"] == "sv-e2ee-hybrid-v1:versiegelt"
+
+    def test_die_uebergabe_endet_nach_der_frist_ab_dem_einloesen(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        # Ein eingeloester Code ist kein Dauerauftrag: nach der Frist nimmt der
+        # Server nichts mehr an und gibt nichts mehr heraus.
+        code, bearer, einladung = self._eingeloest_und_gemeldet(
+            client, db, regular_user, user_cookies
+        )
+        client.put(
+            f"/api/auth/devices/pairing/{code}/verlauf",
+            json={"blob": "sv-e2ee-hybrid-v1:versiegelt"},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        jetzt = datetime.now(timezone.utc)
+        einladung.redeemed_at = jetzt - timedelta(
+            minutes=device_pairing_service.FRIST_MINUTEN, seconds=1
+        )
+        db.commit()
+
+        abholen = client.get(f"/api/auth/devices/pairing/{code}/verlauf", headers=bearer)
+        assert abholen.json()["blob"] is None
+        ablegen = client.put(
+            f"/api/auth/devices/pairing/{code}/verlauf",
+            json={"blob": "sv-e2ee-hybrid-v1:zu-spaet"},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        assert ablegen.status_code == 400
+
+
+@pytest.mark.parametrize("evict_cache", [True, False])
+def test_refresh_retry_erzeugt_keinen_neuen_nachfolger(client, db, regular_user, user_cookies, monkeypatch, evict_cache):
+    from routers import auth
+    monkeypatch.setattr(auth, "_recent_rotations", {})
+    _mit_chatrecht(db, regular_user)
+    code = _code_erzeugen(client, user_cookies, label="RetryTest")["code"]
+    initial = client.post("/api/auth/devices/redeem", json={"code": code}).json()["refresh_token"]
+    first = client.post("/api/auth/refresh", json={"refresh_token": initial})
+    assert first.status_code == 200
+    valid = first.json()["refresh_token"]
+    if evict_cache:
+        auth._recent_rotations.clear()
+    else:
+        second = client.post("/api/auth/refresh", json={"refresh_token": valid})
+        assert second.status_code == 200
+        valid = second.json()["refresh_token"]
+    count = db.query(RefreshToken).count()
+    retry = client.post("/api/auth/refresh", json={"refresh_token": initial})
+    assert retry.status_code == 401
+    assert db.query(RefreshToken).count() == count
+    assert client.post("/api/auth/refresh", json={"refresh_token": valid}).status_code == 200

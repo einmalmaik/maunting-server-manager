@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field, field_validator
 
+from schemas.passkey import PasskeyNachweis, Zweitnachweis
+
 
 class LoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
@@ -11,6 +13,12 @@ class LoginRequest(BaseModel):
     # keine Rechteerweiterung: der Aufrufer bekommt nur seine eigenen Tokens,
     # die er per Cookie ohnehin bekäme. Das Panel-Frontend setzt das Feld nie.
     native_client: bool = False
+    # Zwischenschein aus dem ersten Schritt (requires_2fa) — ersetzt im zweiten
+    # Schritt das Captcha-Token, das nur einmal gilt.
+    login_challenge: str | None = Field(None, max_length=128)
+    # Die unterschriebene Antwort des Passkeys. Bis 09/2026 stand hier
+    # `passkey_verified: bool` — ein Feld, das jeder selbst setzen konnte.
+    passkey: PasskeyNachweis | None = None
 
 
 class LoginVerifyRequest(BaseModel):
@@ -19,6 +27,12 @@ class LoginVerifyRequest(BaseModel):
     code: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
     otp_code: str | None = Field(None, pattern=r"^(\d{6}|[A-Z0-9]{4}-[A-Z0-9]{4})$")
     native_client: bool = False
+    # Zwischenschein aus dem ersten Schritt (requires_2fa) — ersetzt im zweiten
+    # Schritt das Captcha-Token, das nur einmal gilt.
+    login_challenge: str | None = Field(None, max_length=128)
+    # Die unterschriebene Antwort des Passkeys. Bis 09/2026 stand hier
+    # `passkey_verified: bool` — ein Feld, das jeder selbst setzen konnte.
+    passkey: PasskeyNachweis | None = None
 
 
 class TokenResponse(BaseModel):
@@ -27,6 +41,11 @@ class TokenResponse(BaseModel):
     requires_2fa: bool = False
     requires_verification: bool = False
     email: str = ""
+    # Nur bei requires_2fa: welcher Faktor gilt ("totp" / "passkey"), und für
+    # Passkey-Konten gleich die Optionen für `navigator.credentials.get()`.
+    two_factor_method: str | None = None
+    passkey_options: dict | None = None
+    login_challenge: str = ""
     # Nur für native Clients gefüllt (native_client=True im Request); der
     # Browser-Flow bekommt weiterhin ausschliesslich Cookies und leere Strings.
     refresh_token: str = ""
@@ -71,11 +90,21 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=8)
     otp_code: str | None = Field(None, pattern=r"^(\d{6}|[A-Z0-9]{4}-[A-Z0-9]{4})$")
+    passkey: Zweitnachweis | None = None
 
 
 class ChangeEmailRequest(BaseModel):
     email: str = Field(..., pattern=r"^[^@]+@[^@]+\.[^@]+$")
+    current_password: str = Field(..., min_length=1)
     otp_code: str | None = Field(None, pattern=r"^(\d{6}|[A-Z0-9]{4}-[A-Z0-9]{4})$")
+    passkey: Zweitnachweis | None = None
+
+
+class DataExportRequest(BaseModel):
+    """Nachweis fuer den Datenexport: Passwort oder der eingerichtete zweite Faktor."""
+    password: str = Field("", max_length=256)
+    otp_code: str = Field("", max_length=16)
+    passkey: Zweitnachweis | None = None
 
 
 class DeleteAccountRequest(BaseModel):
@@ -85,6 +114,7 @@ class DeleteAccountRequest(BaseModel):
     # Always required: user must type the exact word "delete". Frontend prevents paste.
     confirmation: str = Field(..., min_length=5)
     otp_code: str | None = Field(None, pattern=r"^\d{6}$")
+    passkey: Zweitnachweis | None = None
 
 
     @field_validator("password", mode="before")

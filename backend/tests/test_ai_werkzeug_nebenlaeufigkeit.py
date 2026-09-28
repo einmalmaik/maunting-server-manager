@@ -12,8 +12,11 @@ Zusage gehoert in die normale Suite.
 Die zweite kann der Benchmark grundsaetzlich nicht sehen. Die Nebenlaeufigkeit
 haengt an der Datenbank: auf PostgreSQL — der einzigen unterstuetzten
 Betriebsdatenbank — hat jeder Aufruf seine eigene Verbindung und es laufen acht
-gleichzeitig; auf SQLite teilen sich alle Sitzungen **eine** Verbindung, und
-dort laeuft einer nach dem anderen. Die Testsuite ist SQLite. Ohne diese Datei
+gleichzeitig. Die Testsuite laeuft zwar auch auf PostgreSQL, aber auf der
+geteilten Testverbindung (StaticPool): alle Sitzungen eines Workers teilen sich
+**eine** Verbindung, und dort laeuft einer nach dem anderen
+(`test_auf_der_geteilten_testverbindung_laeuft_genau_einer`, fuer den Betrieb
+`test_im_betrieb_laufen_acht_nebeneinander`). Ohne diese Datei
 waere die Gleichzeitigkeit also eine Behauptung, die nirgends nachgesehen wird —
 und die erste Aenderung, die `gather` gegen eine Schleife tauscht, faellt
 niemandem auf.
@@ -138,7 +141,8 @@ async def test_werkzeuge_einer_runde_laufen_nebeneinander(
 ) -> None:
     """Vier Aufrufe zu 0,2 s dauern zusammen 0,2 s, nicht 0,8 s.
 
-    Das ist die Zusage, die auf SQLite absichtlich **nicht** gilt und die der
+    Das ist die Zusage, die auf der geteilten Testverbindung (StaticPool)
+    absichtlich **nicht** gilt und die der
     Benchmark deshalb nie zu sehen bekommt. Hier wird die Breite gesetzt, statt
     sie aus der Datenbank zu lesen — geprueft wird die Ablaufsteuerung, nicht
     die Entscheidung darueber.
@@ -263,16 +267,19 @@ def test_die_zeitgrenze_liegt_ueber_den_eigenen_fristen() -> None:
     assert ai_stream_service.WERKZEUG_ZEITGRENZE > node_client._DEFAULT_TIMEOUT
 
 
-def test_auf_sqlite_laeuft_genau_einer(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Die Breite haengt an der Datenbank, und das ist kein Detail.
+@pytest.mark.echte_nebenlaeufigkeit
+def test_im_betrieb_laufen_acht_nebeneinander() -> None:
+    """Jedes Lesewerkzeug holt sich im Betrieb eine eigene Verbindung aus dem Pool."""
+    assert ai_stream_service._werkzeug_nebenlaeufigkeit() == 8
 
-    Auf SQLite teilen sich alle Sitzungen eine Verbindung (`StaticPool` in der
-    Testsuite). Zwei Transaktionen gleichzeitig darauf sind keine
-    Nebenlaeufigkeit, sondern ein Datenfehler: der Commit der einen schliesst die
-    offene Arbeit der anderen mit ab.
 
-    Der Test steht hier, damit niemand die Zahl spaeter "vereinheitlicht". Die
-    Testsuite selbst laeuft auf SQLite — eine Aenderung an dieser Stelle waere
-    also gerade dort gefaehrlich, wo sie am wenigsten auffiele.
+def test_auf_der_geteilten_testverbindung_laeuft_genau_einer() -> None:
+    """Die Breite haengt an der Verbindung, und das ist kein Detail.
+
+    Die Testsuite teilt je Worker eine Verbindung (`StaticPool`). Zwei
+    Transaktionen gleichzeitig darauf sind keine Nebenlaeufigkeit, sondern ein
+    Datenfehler: der Commit der einen schliesst die offene Arbeit der anderen
+    mit ab. `conftest.py` drosselt deshalb auf eins — faellt das heraus, wird
+    die Suite nicht rot, sondern unzuverlaessig.
     """
     assert ai_stream_service._werkzeug_nebenlaeufigkeit() == 1

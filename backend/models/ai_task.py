@@ -60,11 +60,11 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
-    Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
+from models.dis_text import ai_text
 
 
 #: Was ein faelliger Lauf darf. ``act`` ist nicht "mehr Rechte", sondern
@@ -96,12 +96,12 @@ class AiTask(Base):
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    title: Mapped[str] = mapped_column(ai_text("ai_tasks.title"), nullable=False)
     # Der Auftragstext, so wie er beim Anlegen redigiert wurde. Er wird bei jeder
     # Faelligkeit zur Benutzernachricht des Laufs — also an die Stelle mit dem
     # meisten Gewicht. Deshalb wird er **einmal** beim Anlegen geschwaerzt und
     # nicht bei jedem Lauf erneut: was hier steht, hat ein Mensch bestaetigt.
-    instruction: Mapped[str] = mapped_column(Text, nullable=False)
+    instruction: Mapped[str] = mapped_column(ai_text("ai_tasks.instruction"), nullable=False)
 
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     plan_kind: Mapped[str] = mapped_column(String(16), nullable=False)

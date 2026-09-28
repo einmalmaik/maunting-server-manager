@@ -756,7 +756,23 @@ def _naechste_phase_setzen(db: Session, auftrag: AiGuardianRepair, run: AiRun) -
     — das ist ein Grund fuer den naechsten Anlauf und kein Ergebnis. Und
     ``superseded`` heisst, dass jemand dazwischengefunkt hat; auch das sagt
     nichts ueber den Server.
+
+    **Mit einer Ausnahme, und sie steht noch vor der Frage nach der Wirkung:**
+    hat die Sicherheitsueberwachung des Anbieters den Lauf angehalten
+    (`openai_compatible_adapter.SICHERHEITSSTOPP`), endet der Auftrag. OpenAI
+    verlangt dann, dass ein Mensch prueft, was der Agent bereits getan hat, und
+    untersagt die automatische Wiederholung ausdruecklich — ein naechster Anlauf
+    im Takt waere genau diese Wiederholung. Ein Server, der inzwischen wieder
+    laeuft, beantwortet die Frage des Menschen nicht, deshalb zaehlt auch
+    ``belegt`` hier nicht. ``eskaliert`` und nicht ``aufgegeben``: es haengt an
+    einem Menschen, nicht an der Anlage.
     """
+    from services.openai_compatible_adapter import SICHERHEITSSTOPP
+
+    if str(run.stop_reason or "") == SICHERHEITSSTOPP:
+        _abschliessen(db, auftrag, phase="eskaliert", grund="sicherheitsstopp")
+        return
+
     jetzt = _jetzt()
     belegt, grund = wirkung_belegt(db, auftrag)
 

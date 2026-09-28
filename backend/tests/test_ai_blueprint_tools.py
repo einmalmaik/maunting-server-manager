@@ -874,6 +874,63 @@ def test_a_community_blueprint_with_servers_on_it_cannot_be_overwritten(
         _blueprint_entfernen("inbetrieb_bp")
 
 
+def test_a_source_swap_or_an_overwrite_always_asks_and_shows_the_source(db: Session) -> None:
+    """Die Installationsquelle entscheidet, welcher Code geholt wird.
+
+    Bis 26.09.2026 tauschte eine Ableitung das Repo ohne Klick aus, und die
+    Karte zeigte die Quelle nicht. Auf dem lokalen Node laufen die
+    `setupCommands` des Repos im Panelprozess: fremder Code auf dem
+    Panelserver. Ebenso still ueberschrieb sie einen vorhandenen
+    Community-Blueprint ohne Server.
+    """
+    from services import ai_tool_registry
+    from services.ai_proposals.server_proposals import _blueprint_change_payload
+
+    for kennung in ("bot_vorlage", "bot_fremd", "bot_version"):
+        _blueprint_entfernen(kennung)
+    blueprint_service.save_community_blueprint({
+        "version": 1,
+        "meta": {"id": "bot_vorlage", "name": "Bot", "category": "bot"},
+        "runtime": {"image": "node:22", "startup": "node index.js"},
+        "ports": [],
+        "source": {"type": "github", "github": {"repo": "betreiber/bot", "branch": "main", "setupCommands": []}},
+    })
+    reload_registry()
+    try:
+        _, getauscht = _blueprint_change_payload(db, {
+            "source_id": "bot_vorlage",
+            "new_id": "bot_fremd",
+            "changes": {"source.github.repo": "fremder/bot"},
+        })
+        assert getauscht["always_confirm"] is True
+        assert ai_tool_registry.verlangt_klick("propose_blueprint_change", getauscht)
+        assert getauscht["source_before"]["repo"] == "betreiber/bot"
+        assert getauscht["source_after"]["repo"] == "fremder/bot"
+        assert getauscht["overwrites_blueprint"] is None
+
+        # Nur die Umgebung: bleibt autonom, wie vom Betreiber am 02.09. gewollt.
+        _, version = _blueprint_change_payload(db, {
+            "source_id": "bot_vorlage",
+            "new_id": "bot_version",
+            "changes": {"runtime.env": {"NODE_ENV": "production"}},
+        })
+        assert not version.get("always_confirm")
+        assert not ai_tool_registry.verlangt_klick("propose_blueprint_change", version)
+        assert version["source_before"] == version["source_after"]
+
+        # Dieselbe harmlose Aenderung auf eine vorhandene ID ueberschreibt sie.
+        _, ueber = _blueprint_change_payload(db, {
+            "source_id": "bot_vorlage",
+            "new_id": "bot_vorlage",
+            "changes": {"runtime.env": {"NODE_ENV": "production"}},
+        })
+        assert ueber["always_confirm"] is True
+        assert ueber["overwrites_blueprint"] == "bot_vorlage"
+    finally:
+        for kennung in ("bot_vorlage", "bot_fremd", "bot_version"):
+            _blueprint_entfernen(kennung)
+
+
 def test_a_startup_change_is_refused_where_profiles_decide(db: Session) -> None:
     """Eine Korrektur, die folgenlos bliebe, wird abgesagt statt zugesagt.
 

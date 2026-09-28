@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { Shell } from './components/layout/Shell'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { PublicOnlyRoute } from './components/PublicOnlyRoute'
@@ -16,6 +16,7 @@ const Register = lazy(() => import('./pages/Register').then(module => ({ default
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword').then(module => ({ default: module.ForgotPassword })))
 const ResetPassword = lazy(() => import('./pages/ResetPassword').then(module => ({ default: module.ResetPassword })))
 const AiFreigabe = lazy(() => import('./pages/AiFreigabe').then(module => ({ default: module.AiFreigabe })))
+const BrowserBestaetigung = lazy(() => import('./pages/BrowserBestaetigung').then(module => ({ default: module.BrowserBestaetigung })))
 const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })))
 const Servers = lazy(() => import('./pages/Servers').then(module => ({ default: module.Servers })))
 const Teams = lazy(() => import('./pages/Teams').then(module => ({ default: module.Teams })))
@@ -38,8 +39,11 @@ const Privacy = lazy(() => import('./pages/Privacy').then(module => ({ default: 
 const Ai = lazy(() => import('./pages/Ai').then(module => ({ default: module.Ai })))
 const Calendar = lazy(() => import('./pages/Calendar').then(module => ({ default: module.Calendar })))
 const Notes = lazy(() => import('./pages/Notes').then(module => ({ default: module.Notes })))
+const Messenger = lazy(() => import('./pages/Messenger').then(module => ({ default: module.Messenger })))
+const Benutzerprofil = lazy(() => import('./pages/Benutzerprofil').then(module => ({ default: module.Benutzerprofil })))
 import { apiUrl } from '@/config/api'
 import { useAuthStore } from '@/stores/authStore'
+import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 import { PrivacyAcknowledgementNotice } from './components/ui/PrivacyAcknowledgementNotice'
 import { PrivacyNoticeVisibilityContext } from './components/ui/PrivacyNoticeVisibility'
 import { SupportWidgetLoader } from './components/SupportWidgetLoader'
@@ -49,9 +53,15 @@ function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
   const [setupEmailConfigured, setSetupEmailConfigured] = useState(false)
   const [privacyNoticeVisible, setPrivacyNoticeVisible] = useState(true)
-  const { isAuthenticated } = useAuthStore()
+  // Einzelne Felder statt des ganzen Stores: sonst zeichnete jede Änderung am
+  // Benutzer (Avatar, Status) den ganzen Routenbaum samt Shell neu.
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const calendarEnabled = usePublicSettingsStore((s) => s.calendar_enabled)
+  const notesEnabled = usePublicSettingsStore((s) => s.notes_enabled)
+  const socialEnabled = usePublicSettingsStore((s) => s.social_enabled)
 
   useEffect(() => {
+    void usePublicSettingsStore.getState().refresh()
     return initOfflineSync()
   }, [])
 
@@ -105,6 +115,9 @@ function App() {
             noch eine Sitzung offen ist. Das Token im Pfad ist die ganze
             Berechtigung. */}
         <Route path="/ai/freigabe/:token" element={<AiFreigabe />} />
+        {/* Passkey-Bestaetigung fuer die App. Ohne Anmeldung, den Menschen
+            belegt der Passkey; die Kennung steht im Fragment. */}
+        <Route path="/bestaetigen" element={<BrowserBestaetigung />} />
         <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
         
         {/* Oeffentliche Datenschutz-Route, wenn nicht eingeloggt */}
@@ -140,8 +153,13 @@ function App() {
             }
           />
           <Route path="profile" element={<Profile />} />
-          <Route path="calendar" element={<Calendar />} />
-          <Route path="notes" element={<Notes />} />
+          <Route path="calendar" element={calendarEnabled ? <Calendar /> : <Navigate to="/" replace />} />
+          <Route path="notes" element={notesEnabled ? <Notes /> : <Navigate to="/" replace />} />
+          <Route path="social" element={<Navigate to="/profile" replace />} />
+          <Route path="chat" element={socialEnabled ? <Messenger /> : <Navigate to="/" replace />} />
+          <Route path="chat/join/:inviteCode" element={socialEnabled ? <Messenger /> : <Navigate to="/" replace />} />
+          <Route path="messenger" element={<Navigate to={socialEnabled ? '/chat' : '/'} replace />} />
+          <Route path="user/:userId" element={socialEnabled ? <Benutzerprofil /> : <Navigate to="/" replace />} />
           <Route path="ai" element={<RequirePermission routeKey="ai"><Ai /></RequirePermission>} />
           <Route path="teams" element={<Teams />} />
           <Route path="docs" element={<Docs />} />

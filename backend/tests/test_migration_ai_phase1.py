@@ -11,9 +11,9 @@ from config import settings
 from database import Base
 
 
-def test_ai_phase1_migration_upgrades_existing_schema(tmp_path: Path) -> None:
+def test_ai_phase1_migration_upgrades_existing_schema(tmp_path: Path, pg_wegwerf) -> None:
     """Vorgänger-Schema und alte Audit-Zeilen bleiben beim Upgrade verwendbar."""
-    db_url = f"sqlite:///{tmp_path / 'ai-phase1.db'}"
+    db_url = pg_wegwerf("ai-phase1")
     previous_database_url = settings.database_url
     settings.database_url = db_url
     engine = create_engine(db_url)

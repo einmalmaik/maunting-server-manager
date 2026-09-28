@@ -1,0 +1,137 @@
+/**
+ * Reaktionen auf eine Nachricht.
+ *
+ * Im E2EE-Modell ist eine Reaktion nur ein weiterer Steuerumschlag, der über
+ * die logische Kennung auf seine Zielnachricht zeigt. Der ganze Rest ist
+ * Rechnen mit einer kleinen Tabelle — und die steht hier, ohne React und ohne
+ * Netz, damit sie prüfbar bleibt.
+ *
+ * **Warum das Ergebnis in die lokale Zeile muss.** Die Mailbox gibt die
+ * letzten hundert Umschläge her. Reaktionen teilen sich dieses Fenster mit den
+ * Nachrichten. Wer sie bei jedem Abruf neu aus den Umschlägen zusammensetzt,
+ * verliert sie, sobald hundert neue Umschläge darüber gelaufen sind — die
+ * Nachricht bliebe stehen, die Reaktion wäre weg. Siehe
+ * [nachrichtBezug.ts](./nachrichtBezug.ts).
+ *
+ * **Warum der Zeitpunkt entscheidet und nicht die Reihenfolge.** Umschläge
+ * kommen nicht zwingend in der Reihenfolge an, in der sie entstanden sind. Wer
+ * ein Zeichen setzt und gleich wieder wegnimmt, dessen letzter Wille gilt —
+ * auch wenn die beiden Umschläge vertauscht eintreffen.
+ */
+
+/** Was aus einem `reaction`-Umschlag herausfällt. */
+export interface RohReaktion {
+  emoji: string
+  actorId: number
+  /** `true` = wegnehmen, `false` = setzen. */
+  nehmen: boolean
+  /** ISO-Zeitpunkt aus dem Paket, ersatzweise der des Umschlags. */
+  zeitpunkt: string
+}
+
+/** Zeichen → wer damit reagiert hat. Die Reihenfolge ist die des Eintreffens. */
+export type Reaktionen = Record<string, number[]>
+
+/** Eine Zeile der Leiste unter der Blase. */
+export interface Reaktionsknopf {
+  emoji: string
+  anzahl: number
+  /** Ob das eigene Konto dabei ist. */
+  eigene: boolean
+  wer: number[]
+}
+
+/** Mehr als das passt nicht unter eine Blase, ohne sie zu erdrücken. */
+export const REAKTIONEN_SICHTBAR = 6
+
+/** Die Schnellauswahl beim langen Drücken. */
+export const SCHNELLREAKTIONEN = ['👍', '❤️', '😂', '😮', '😢', '🙏'] as const
+
+function ohne(wer: readonly number[], actorId: number): number[] {
+  return wer.filter((id) => id !== actorId)
+}
+
+/**
+ * Trägt die Meldungen aus den Umschlägen in eine vorhandene Tabelle ein.
+ *
+ * `vorhanden` ist der Stand aus der lokalen Zeile, `roh` das, was diesmal in
+ * der Mailbox lag. Beides zusammen ergibt den neuen Stand.
+ */
+export function wendeReaktionenAn(
+  vorhanden: Reaktionen | undefined,
+  roh: readonly RohReaktion[],
+): Reaktionen | undefined {
+  if (!roh.length) return vorhanden
+
+  // Je (Konto, Zeichen) zählt allein die jüngste Meldung.
+  const juengste = new Map<string, RohReaktion>()
+  for (const r of roh) {
+    if (!r.emoji || !r.actorId) continue
+    const schluessel = `${r.actorId}\u0000${r.emoji}`
+    const bisher = juengste.get(schluessel)
+    if (!bisher || bisher.zeitpunkt <= r.zeitpunkt) juengste.set(schluessel, r)
+  }
+
+  const neu: Reaktionen = {}
+  for (const [emoji, wer] of Object.entries(vorhanden || {})) neu[emoji] = [...wer]
+
+  for (const r of juengste.values()) {
+    const wer = neu[r.emoji] || []
+    if (r.nehmen) {
+      const uebrig = ohne(wer, r.actorId)
+      if (uebrig.length) neu[r.emoji] = uebrig
+      else delete neu[r.emoji]
+    } else if (!wer.includes(r.actorId)) {
+      neu[r.emoji] = [...wer, r.actorId]
+    }
+  }
+
+  return Object.keys(neu).length ? neu : undefined
+}
+
+/**
+ * Der eigene Tipper: dasselbe Zeichen noch einmal nimmt die Reaktion zurück.
+ *
+ * Liefert den neuen Stand **und** was der Gegenseite gemeldet werden muss.
+ * Beides zusammen, weil das Umschalten sonst an zwei Stellen entschieden würde
+ * und irgendwann auseinanderliefe.
+ */
+export function schalteReaktion(
+  vorhanden: Reaktionen | undefined,
+  emoji: string,
+  actorId: number,
+): { reaktionen: Reaktionen | undefined; aktion: 'setzen' | 'nehmen' } {
+  const wer = vorhanden?.[emoji] || []
+  const aktion = wer.includes(actorId) ? 'nehmen' : 'setzen'
+  return {
+    reaktionen: wendeReaktionenAn(vorhanden, [
+      { emoji, actorId, nehmen: aktion === 'nehmen', zeitpunkt: new Date().toISOString() },
+    ]),
+    aktion,
+  }
+}
+
+/**
+ * Macht aus der Tabelle die Leiste: das meistgenutzte Zeichen zuerst.
+ *
+ * Bei Gleichstand gewinnt, was zuerst kam — sonst springen die Knöpfe bei
+ * jeder neuen Reaktion durcheinander.
+ */
+export function reaktionsknoepfe(
+  reaktionen: Reaktionen | undefined,
+  eigeneId: number,
+  hoechstens: number = REAKTIONEN_SICHTBAR,
+): Reaktionsknopf[] {
+  if (!reaktionen) return []
+  const reihenfolge = Object.keys(reaktionen)
+  return reihenfolge
+    .map((emoji) => ({
+      emoji,
+      wer: reaktionen[emoji],
+      anzahl: reaktionen[emoji].length,
+      eigene: reaktionen[emoji].includes(eigeneId),
+    }))
+    .filter((k) => k.anzahl > 0)
+    .sort((a, b) => b.anzahl - a.anzahl || reihenfolge.indexOf(a.emoji) - reihenfolge.indexOf(b.emoji))
+    .slice(0, hoechstens)
+}

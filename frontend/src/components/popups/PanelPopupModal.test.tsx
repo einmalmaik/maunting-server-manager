@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PanelPopupModal } from './PanelPopupModal'
 import * as popupsApi from '@/api/popups'
 import { useAuthStore } from '@/stores/authStore'
@@ -10,6 +10,12 @@ vi.mock('@/api/popups', () => ({
 }))
 
 describe('PanelPopupModal', () => {
+  // Der Markdown-Teil lädt nach (`lazy`). Vorab geladen, damit der erste
+  // Test nicht an der Umwandlung von react-markdown vorbeiwartet.
+  beforeAll(async () => {
+    await import('@/components/ai/AiMarkdown')
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     useAuthStore.setState({ isAuthenticated: true })
@@ -32,7 +38,8 @@ describe('PanelPopupModal', () => {
     render(<PanelPopupModal />)
 
     expect(await screen.findByText('Wartungsarbeiten angekündigt')).toBeInTheDocument()
-    expect(screen.getByText('Wartungsarbeiten')).toBeInTheDocument()
+    // Der Markdown-Teil lädt nach (`lazy`), deshalb `findBy`.
+    expect(await screen.findByText('Wartungsarbeiten')).toBeInTheDocument()
     expect(screen.getByText('Statusseite')).toBeInTheDocument()
   })
 

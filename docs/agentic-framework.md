@@ -173,6 +173,51 @@ interne ethische Reflexions- und Urteilsinstanz bei folgenreichen Systementschei
   4. `off`: Vollständig deaktiviert (0 ms Latenz).
 - **Echte Sicherheit bleibt mechanisch:** Bestätigungskarten, RBAC, Dateisnapshots und
   Ausführungsbeschränkungen bleiben unberührt und verbindlich.
+- **Wo sie berät:** im Chat vor der Schreibrunde und vor den Lesewerkzeugen einer Runde (über
+  diesen Weg laufen mit Autonomie-Freigabe die Desktop-Werkzeuge und `worker_start`, ohne Karte).
+  In der Stimme vor jedem Werkzeug, auf allen Wegen: Realtime, GPT-Live und Gemini Live über
+  `voice_werkzeug_ausfuehren`, den Umweg `execute_server_action` und die Regionsanalyse, die
+  Pipeline-Stimme über den Chatlauf (`ai_ethics_service.beraten`, im Sprachthread
+  `beraten_im_thread`). Ob sie urteilt, entscheidet der Trigger nach `ethics_mode`.
+- **Was das Gehirn erfährt:** Urteilt sie `review` oder `critical`, hängt am Werkzeugergebnis ein
+  Feld `ethik` mit Einschätzung, Empfehlung, Begründung, Bedenken und Alternative. Es ist
+  geschwärzt und als `untrusted` markiert, weil das Ethikmodell die Werkzeugargumente gelesen hat
+  und die aus einer Logzeile stammen können. `UNTRUSTED` im Systemprompt sagt, was das Modell damit
+  tut: abwägen und dem Menschen die Bedenken in eigenen Worten nennen, bei einem wartenden
+  Vorschlag vor seiner Entscheidung. Ein `low` und der Rückfall (`fallback_evaluation`) gehen nicht
+  ans Modell, die Anzeige im Panel bekommt nie etwas davon.
+- **Was sie kostet:** einen Modellaufruf je beratenem Werkzeug. Der Chat wartet darauf höchstens
+  15 Sekunden je Aufruf (`BERATUNG_ZEITGRENZE_SEKUNDEN`), vor der Runde. Die Stimme berät neben dem
+  Werkzeug statt davor und wartet danach höchstens, bis 5 Sekunden seit dem Start um sind
+  (`BERATUNG_ZEITGRENZE_STIMME`), weil ihre Werkzeuge nach 12 Sekunden aufgeben. Danach geht der
+  Aufruf ohne Rat weiter. Wem das bei Desktop-Steuerung zu langsam ist, der stellt `critical`.
+  Beraten wird in eigenen Threads mit eigener Schleife und eigenem HTTP-Client: der Schlüssel kommt
+  synchron vom DIS-Sidecar, und auf der Hauptschleife stünde dabei das ganze Panel still. Nach der
+  Frist oder mit dem Ende des Laufs wird die Beurteilung abgebrochen; ein Urteil über einen Aufruf,
+  der längst weiter ist, stünde nur im Audit. Es gilt die Engine des Anbieters, über den der Lauf
+  spricht, sonst die des ersten eingeschalteten Anbieters mit Engine.
+- **Wer sie bezahlt:** seit dem 24.09.2026 steht jede Beurteilung als eigene Verbrauchszeile beim
+  Benutzer, dessen Lauf sie ausgelöst hat, mit dem Ethikmodell als Modell und `zweck = 'ethik'`
+  (`ai_usage_service.nachtraeglich_buchen`). Der Betrag kommt, wenn der Anbieter ihn meldet, vom
+  Anbieter; sonst aus den Ethikpreisen des Zugangs, Eingabe, Ausgabe und gelesener Cache getrennt;
+  fehlt Eingabe- oder Ausgabepreis, aus dem gepflegten Rückfallpreis wie im Chat. Gebucht wird auch
+  eine unbrauchbare Antwort und eine nach der Frist abgebrochene; ein Aufruf, der nie eine Antwort
+  bekam, kostet nichts. Zum Kontingent: gebucht wird **nachträglich und ohne Prüfung** der
+  Grenzen, denn eine Reservierung davor fiele bei *gleichzeitigen Vorgängen* = 1 immer durch (der
+  Lauf hält seinen Platz selbst), und ein ausgeschöpftes Kontingent darf weder den Rat verhindern
+  noch den Lauf beenden. Die Zeile zählt danach in Tokens und Kosten wie jede andere, auch gegen
+  die Grenzen der **nächsten** Anfrage: angefallene Kosten zu verschweigen hiesse, dass der nächste
+  Anlauf wieder darunter beginnt. Als *Anfrage pro Minute* zählt sie nicht, sonst beendete bei
+  einem Limit von fünf die Engine den Lauf, den sie nur berät. Ein Fehler beim Buchen kostet die
+  Buchung, nie den Rat. Beleg: `backend/tests/test_ai_ethik_buchung.py`.
+- **Was sie sieht:** Werkzeug und Argumente, die Argumente geschwärzt. Kein Gedächtnis: das
+  Ethikmodell kann bei einem anderen Anbieter liegen als das Chatmodell, ein Worker sieht keine
+  persönlichen Erinnerungen (§7), und wem `ai.memory.use` fehlt, dessen Einträge gingen sonst
+  trotzdem hinaus.
+- **Befund vom 23.09.2026:** Bis dahin hat die Engine kein einziges Mal geurteilt. Die Schreibrunde
+  rief sie seit dem Einbau (`de133bcb`, 25.08.2026) mit einem `client`, den es dort nicht gab, und
+  der NameError verschwand im `except`. Die Sprachwege kannten sie gar nicht, und ein Urteil hätte
+  nur im Log gestanden. Beleg: `backend/tests/test_ai_ethik_beratung.py`.
 
 
 ### Diagramm
@@ -299,8 +344,11 @@ verbaler Rückweg Promptregel.
 | Kontingente/Kosten | Jeder Lauf bucht regulär; Betreiber-Deckel (N Worker, Rundenbudget, feste Worker-Denkstufe); max. 1 Wiederanlauf, max. 1 Kontingent-Park-Retry je Worker. |
 | Audit | Worker-Verläufe und Audit-Einträge überleben das UI-Aufräumen nach Aufbewahrungsregel — Remote-Befehle bleiben nachvollziehbar. |
 | Datenminimierung | Gedächtnisblock raus aus geparktem `state_json`; Meldungen tragen geschwärzten Kurztext plus Verweis; Worker sehen keine persönlichen Memories. |
-| Destruktives | Nie ohne Bestätigung — im Worker exakt wie überall. |
-| Rechner des Benutzers | Innerhalb des freigegebenen Ordners wird durchgearbeitet (der Ordner *ist* die Freigabe). Außerhalb — `desktop_aufraeumen`, seit 23.08.2026 — gilt die Regel des Betreibers wörtlich: **autonomer Modus an → kein Klick, autonomer Modus aus → immer eine Karte.** Berechnet wird das im Panel (`_desktop_argumente` → `autonomy_allows`), gezeigt auf dem Rechner (`Aufraeumkarte.tsx`), weil nur er die Liste mit Größen und Zonen füllen kann. Die App bekommt das Urteil als Argument und kann es nicht drehen: `autonom` und `systembereich` werden aus den Modellargumenten **entfernt** und vom Panel gesetzt; fehlt das Feld, wird gefragt. Windows selbst bleibt zusätzlich hinter einer Kontoeinstellung (`aus`/`lesen`/`schreiben`, Standard `lesen`), und die Zonengrenze selbst liegt kanonisiert in Rust (`zonen.rs`). |
+| Destruktives | Was Server, Dateien, Backups, Blueprints oder Rollen vernichtet, fragt auch im autonomen Modus (`immer_bestaetigen`); im Worker exakt wie überall. Die eigenen Daten des Benutzers — Notizen, Termine, Aufgaben, DNS-Einträge, Erinnerungen, Skills — löscht die KI seit 25.09.2026 mit Freigabe ohne Rückfrage (`EIGENE_DATEN_LOESCHEN`; vom 23. bis 25.09. fragte jedes Löschen). Jedes Löschwerkzeug steht in genau einer der beiden Mengen (`test_jedes_loeschwerkzeug_ist_entschieden`). |
+| Bestätigung | Seit 25.09.2026 nur per Klick auf die Karte, im Chat wie in der Stimme; ein gesprochenes Ja führt nichts aus (`voice_interactions.klick_noetig`), ein Nein lehnt ab. Die Sprachansicht listet jede offene Karte über `GET /conversation/actions?offen=true` — eigene und die lebender Worker —, das Worker-Fenster zeigt sie ohne Knöpfe. |
+| Rechte anderer Benutzer | Seit 25.09.2026 (Betreiberplan vom 24.09.): Gehirn und Stimme lesen Benutzer, Rollen und Delegationen selbst (`list_users`, `read_user_permissions`, `list_roles`); ändern kann sie nur ein Worker (`RECHTE_SCHREIBEN`, auch nicht über den Umweg `execute_server_action`). Realtime bekommt dafür wieder `worker_start`, sofern der Benutzer `ai.background.use` hat. Alle vier Schreibwerkzeuge rufen `rechtevergabe_service`, dieselben Grenzen wie die Panel-Router: keine Vergabe über die eigenen dauerhaften Rechte hinaus, Owner und Systemrollen unantastbar, `admin` nur durch den Owner. Bei einem Benutzer (`propose_user_server_permission`, `propose_user_roles`) läuft autonom nur, was ausschließlich `UNCRITICAL_SERVER_PERMISSIONS` hinzufügt; jedes Entziehen, jedes kritische oder globale Recht setzt `always_confirm` und fragt auch mit Freigabe (`verlangt_klick`). Eine Rolle anlegen oder eine Rolle ohne Träger ändern (`propose_role_set`) fragt seit 25.09.2026 nie, auch mit kritischen Rechten — gefragt wird bei der Zuweisung. Trägt jemand die Rolle schon, ist ihre Änderung eine Vergabe an diese Benutzer und fragt seit 26.09.2026 nach derselben Grenze (`_vorschau`); vorher ließ sich eine harmlose Rolle autonom zuweisen und danach autonom um jedes Recht erweitern. `propose_role_delete` trägt `immer_bestaetigen`. |
+| Werkzeugwahl | Seit 25.09.2026 (Betreibertest: aus „Rolle“ wurde „Server löschen“): Die Textsuche des Umwegs `execute_server_action` führt nur Lesewerkzeuge selbst aus. Trifft sie ein Schreib- oder Löschwerkzeug, kommt `status: choose_tool` mit fünf Kandidaten zurück, und geschrieben wird erst mit genanntem `tool_name`. Ein genannter Name wird nie ersetzt. Aus der Stimme erreicht der Umweg nichts aus `REALTIME_SCHWER`. Der Werkzeugzuschnitt je Lauf zieht die Gruppe eines Treffers nach (`gruppen_nachbarn`), und die OpenAI-Responses-API bekommt `strict: false`, weil sie sonst jedes optionale Feld zur Pflicht macht. Ohne Freigabe landen Lesen und `worker_start` des Gehirns als Karte, nicht als `AI_GEHIRN_READONLY`. |
+| Rechner des Benutzers | Innerhalb des freigegebenen Ordners wird durchgearbeitet (der Ordner *ist* die Freigabe). Außerhalb — `desktop_aufraeumen`, seit 23.08.2026 — gilt die Regel des Betreibers, seit 25.09.2026 in dieser Fassung: **autonomer Modus aus → immer eine Karte, autonomer Modus an → kein Klick, auch beim Löschen** (vom 23. bis 25.09. fragte das Löschen trotzdem; Gelöschtes geht in den Papierkorb). Berechnet wird das im Panel (`_desktop_argumente` → `autonomy_allows`), gezeigt auf dem Rechner (`Aufraeumkarte.tsx`), weil nur er die Liste mit Größen und Zonen füllen kann. Die App bekommt das Urteil als Argument und kann es nicht drehen: `autonom` und `systembereich` werden aus den Modellargumenten **entfernt** und vom Panel gesetzt; fehlt das Feld, wird gefragt. Windows selbst bleibt zusätzlich hinter einer Kontoeinstellung (`aus`/`lesen`/`schreiben`, Standard `lesen`), und die Zonengrenze selbst liegt kanonisiert in Rust (`zonen.rs`). |
 
 ## 8. Was bewusst nicht gebaut wird
 

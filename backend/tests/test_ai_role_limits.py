@@ -153,9 +153,10 @@ def test_service_rejects_invalid_internal_limit_values(db: Session) -> None:
 def test_erlaubte_maxima_passen_in_die_spaltenbreite() -> None:
     """Kein erlaubtes Maximum darf breiter sein als die Spalte, die es aufnimmt.
 
-    Die Tests laufen auf SQLite, wo INTEGER acht Byte hat — dort fällt ein zu
-    großes Maximum nie auf. In Produktion (PostgreSQL) endet INTEGER bei
-    2^31-1, und ein darüber liegender Wert bricht erst beim Speichern ab.
+    In PostgreSQL endet INTEGER bei 2^31-1, und ein darüber liegender Wert
+    bricht erst beim Speichern ab — ein Verhaltenstest fände das nur, wenn er
+    zufällig genau das Maximum schreibt. Deshalb wird die Spaltenbreite hier
+    direkt gegen jedes erlaubte Maximum gehalten.
     """
     for feld, maximum in LIMIT_MAXIMA.items():
         spalte = RoleAiLimit.__table__.columns[feld]
@@ -1238,8 +1239,9 @@ def test_die_bestandszaehlung_sperrt_den_bereich_bis_zum_commit(
     (scope_identity, key) und greift bei verschiedenen Schlüsseln gar nicht.
 
     Geprüft wird das erzeugte SQL und nicht das Verhalten, und das gehört
-    ehrlich gesagt: SQLite kennt keine Zeilensperre, `FOR UPDATE` ist dort ein
-    No-Op. Ein Verhaltenstest wäre hier grün, egal was der Code tut. Die Zusage,
+    ehrlich gesagt: auf der geteilten Testverbindung (StaticPool) stecken alle
+    Sitzungen in derselben Transaktion, `FOR UPDATE` sperrt dort niemanden aus.
+    Ein Verhaltenstest wäre hier grün, egal was der Code tut. Die Zusage,
     die wirklich trägt, ist die gegen den PostgreSQL-Dialekt kompilierte
     Abfrage — fällt die Sperre weg, wird dieser Test rot.
     """

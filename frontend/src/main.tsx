@@ -2,7 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
-import './i18n'
+import { textBereit } from './i18n'
 
 /*
  * Schriften: lokal aus dem Build, nicht von Google.
@@ -45,10 +45,14 @@ import { registerServiceWorker } from './utils/pwa'
 // Initialize PWA
 registerServiceWorker()
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </React.StrictMode>
-)
+// Erst rendern, wenn die Texte da sind. Scheitert das Laden, trotzdem: dann
+// stehen Schlüssel da, aber die Seite bleibt nicht leer.
+void textBereit.finally(() => {
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </React.StrictMode>
+  )
+})

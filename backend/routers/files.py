@@ -26,6 +26,7 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -35,6 +36,7 @@ from database import get_db
 from models import Server, User
 from dependencies import get_current_user, verify_csrf, require_server_permission
 from services import audit_service
+from services.achievement_service import AchievementService
 from services import docker_service
 from services import file_edit_service
 from services import file_history_service
@@ -492,6 +494,7 @@ def write_file(
         create_only=body.create_only,
         repair_permissions=_repair_install_permissions,
     )
+    AchievementService.melde(db, user.id, "server_file_manager", commit=True)
     return {"message": "Datei gespeichert", **result}
 
 
@@ -605,22 +608,32 @@ async def upload_file(
     _: None = Depends(verify_csrf),
 ) -> dict:
     """Single-Shot-Upload (≤ ``MAX_UPLOAD_SIZE``). Fuer groessere Dateien die
-    Chunked-Upload-Routen nutzen."""
-    require_server_permission(user, server_id, db, "server.files.write")
-    server = _get_server(server_id, db)
+    Chunked-Upload-Routen nutzen.
 
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="Kein Dateiname")
-    _ensure_allowed_extension(file.filename)
+    Die Route ist ``async``, weil sie den Upload streamt. Alles Synchrone darin
+    (Rechte, Datenbank, Node-Token beim Sidecar, der Upload zum Agent mit bis
+    zu 600 s) laeuft deshalb im Threadpool. Bis 27.09.2026 lief es auf der
+    Ereignisschleife und hielt fuer die Dauer des Uploads das ganze Panel an.
+    """
 
-    agent = _agent_client(server, db)
+    def _vorbereiten() -> tuple[Server, NodeClient | None]:
+        require_server_permission(user, server_id, db, "server.files.write")
+        server = _get_server(server_id, db)
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="Kein Dateiname")
+        _ensure_allowed_extension(file.filename)
+        return server, _agent_client(server, db)
+
+    server, agent = await run_in_threadpool(_vorbereiten)
     if agent is not None:
         data = await file.read(MAX_UPLOAD_SIZE + 1)
         if len(data) > MAX_UPLOAD_SIZE:
             raise HTTPException(status_code=413, detail="Datei zu gross für Direkt-Upload")
         rel_path = os.path.join(path, file.filename).replace("\\", "/")
         try:
-            agent.files_upload(_agent_files_key(server), rel_path, data, filename=file.filename)
+            await run_in_threadpool(
+                agent.files_upload, _agent_files_key(server), rel_path, data, filename=file.filename
+            )
         except NodeClientError as exc:
             raise _map_agent_error(exc) from exc
         return {"message": "Datei hochgeladen", "name": file.filename, "size": len(data)}
@@ -749,20 +762,26 @@ async def chunked_upload_chunk(
     """Haengt einen Chunk an die Tempdatei. Idempotent ist das NICHT — der
     Client muss die Chunks in Reihenfolge senden; bei Wiederaufnahme nach
     Verbindungsabbruch liest er ``/upload/{id}/status`` und schickt ab Offset
-    weiter (siehe ``/status``)."""
-    require_server_permission(user, server_id, db, "server.files.write")
-    server = _get_server(server_id, db)
+    weiter (siehe ``/status``).
 
-    if not upload_id.isalnum() or len(upload_id) != 32:
-        raise HTTPException(status_code=400, detail="Ungueltige Upload-ID")
+    Synchrones im Threadpool, aus demselben Grund wie bei ``upload_file``."""
 
-    agent = _agent_client(server, db)
+    def _vorbereiten() -> tuple[Server, NodeClient | None]:
+        require_server_permission(user, server_id, db, "server.files.write")
+        server = _get_server(server_id, db)
+        if not upload_id.isalnum() or len(upload_id) != 32:
+            raise HTTPException(status_code=400, detail="Ungueltige Upload-ID")
+        return server, _agent_client(server, db)
+
+    server, agent = await run_in_threadpool(_vorbereiten)
     if agent is not None:
         data = await chunk.read(64 * 1024 * 1024 + 1)
         if len(data) > 64 * 1024 * 1024:
             raise HTTPException(status_code=413, detail="Chunk zu gross (max 64 MB)")
         try:
-            return agent.files_upload_chunk(_agent_files_key(server), upload_id, data)
+            return await run_in_threadpool(
+                agent.files_upload_chunk, _agent_files_key(server), upload_id, data
+            )
         except NodeClientError as exc:
             raise _map_agent_error(exc) from exc
 

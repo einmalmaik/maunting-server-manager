@@ -74,6 +74,48 @@ def test_every_global_read_tool_is_named_in_its_dispatch() -> None:
     assert fehlend == []
 
 
+def test_eine_binaerdatei_wird_auch_ohne_nullbyte_erkannt() -> None:
+    """Die zweite Haelfte von `is_binary_text` war stillschweigend tot.
+
+    Die Funktion hat zwei Wege: das Nullbyte und die Quote der Ersatzzeichen,
+    die `errors="replace"` aus undekodierbaren Bytes macht. Der zweite zaehlte
+    bis zum 21.09.2026 nicht `U+FFFD`, sondern die **drei** Zeichen `Ã¯Â¿Â½` —
+    den Mojibake davon, entstanden, als der Quelltext einmal falsch umkodiert
+    wurde. Eine solche Folge erzeugt kein Dekodierer, also traf die Zaehlung
+    nie zu, und uebrig blieb allein das Nullbyte.
+
+    Das ist keine Kosmetik: `is_binary_text` steht vor sechs Aufrufen, unter
+    anderem vor dem **Schreiben** von Serverdateien. Eine Binaerdatei ohne
+    Nullbyte im dekodierten Text ging seitdem als Textdatei durch — die KI
+    haette sie lesen und als Text zurueckschreiben koennen.
+
+    Der bestehende Test in `test_file_delete_rueckweg.py` sagt in seinem
+    Kommentar ausdruecklich, dass ihm das Nullbyte genuegt und er "die
+    U+FFFD-Quote gar nicht erst" braucht. Genau deshalb fiel es niemandem auf.
+    """
+    from services.ai_tools.base import is_binary_text
+
+    # Was `read_text(errors="replace")` aus undekodierbaren Bytes macht.
+    verdorben = b"\xff\xfe\x81\x8d\x8f" * 40
+    inhalt = verdorben.decode("utf-8", errors="replace")
+    assert "\x00" not in inhalt, "Der Nullbyte-Weg darf hier nicht mithelfen"
+    assert is_binary_text(inhalt) is True
+
+    # Eine echte Konfigurationsdatei mit einer einzigen kaputten Umlautstelle
+    # bleibt Text — das ist die Zusage des Docstrings. Sie gilt allerdings nur
+    # fuer eine Datei von echter Laenge: die Schwelle ist eine **Quote**, und in
+    # einer sehr kurzen Zeichenkette reisst ein einzelnes Ersatzzeichen sie
+    # rechnerisch (1 von 37 sind 2,7 Prozent). Der Fall hat keine Bedeutung im
+    # Betrieb — er steht hier, damit der Naechste nicht dasselbe fuer einen
+    # Fehler haelt, den er beheben soll.
+    konfig = "port=2302\nname=Serv�r\nmaxPlayers=40\n" + "verbose=0\n" * 30
+    assert len(konfig) > 300
+    assert is_binary_text(konfig) is False
+    assert is_binary_text("port=2302\nmaxPlayers=40\n") is False
+    assert is_binary_text("") is False
+    assert is_binary_text("text\x00mit-nullbyte") is True
+
+
 def test_every_write_tool_has_its_own_payload_branch() -> None:
     """Kein Schreibwerkzeug darf die Nutzlast eines anderen bekommen.
 
@@ -275,6 +317,121 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     **Nachtrag 01.09.2026 / 02.09.2026: Installer- & System-Werkzeuge** —
     aus der App rund **88.044** Zeichen, aus dem Panel **82.500**.
     Die Grenze steht deshalb bei **92.000**.
+
+    **Nachtrag 09.09.2026: Messenger- und Social-Werkzeuge** —
+    aus der App rund **93.312** Zeichen, aus dem Panel rund **87.800**.
+    Die fünf Werkzeuge (`search_messenger_contacts`, `search_messenger_groups`,
+    `propose_message_contact`, `propose_message_friend`, `propose_message_group`)
+    bringen zusammen rund 5.300 Zeichen.
+    Die Grenze steht deshalb bei **96.000**.
+
+    **Nachtrag 18.09.2026: alle fünf sind wieder weg** — aus der App
+    **89.777** Zeichen, aus dem Panel **84.288**. Die KI hat keinen Zugang mehr
+    zum Messenger, und mit dem Zugang fällt auch sein Platz im Katalog.
+    **Die Grenze geht deshalb auf 92.000 zurück, nicht weiter mit.** Ein einmal
+    angehobener Deckel, den niemand wieder senkt, macht freigewordenen Platz
+    stillschweigend zum Budget des nächsten Werkzeugs — und genau dagegen steht
+    dieser Test.
+
+    **Nachtrag 21.09.2026: `popups_read`, und die Grenze bleibt bei 92.000.**
+    Die KI konnte ein Pop-up anlegen und danach nie wieder ansehen oder ändern;
+    auf „nimm den Hinweis auf Mac und Linux raus" antwortete sie, ihr fehle das
+    Lese- und Aktualisierungswerkzeug. Beides fehlte wirklich. Zwei neue
+    Werkzeuge hätten rund 2.150 Zeichen gekostet — mehr, als übrig war.
+    Stattdessen ist `propose_popup_create` zu `propose_popup_set` geworden
+    (Muster `propose_task_set`: eine optionale `popup_id` entscheidet zwischen
+    anlegen und ändern), und nur das Lesewerkzeug kam dazu. Nachgemessen: aus
+    der App **90.469** Zeichen, 89 Werkzeuge; aus dem Panel **84.980** Zeichen,
+    83 Werkzeuge. Der Zuwachs beträgt 692 Zeichen für zwei Fähigkeiten, die
+    Luft **1.531**. Der Hebel bleibt derselbe: zusammenlegen, nicht kürzen.
+
+    **Nachtrag 21.09.2026, zweiter Teil: ein dritter Hebel, der vorher niemandem
+    aufgefallen ist — die Kodierung.** Der deutsche Text in
+    `backend/services/ai_tools/` stand doppelt kodiert im Quelltext: jemand hatte
+    UTF-8 als **cp1252** gelesen und erneut als UTF-8 geschrieben. Die Dateien
+    waren gültiges UTF-8 und fielen deshalb nie auf, enthielten aber `Ã¤` statt
+    `ä` und `â€”` statt `—`. Das Modell las seit jeher "SchlÃ¤gt das Erstellen
+    einer neuen Notiz vor", und **jeder Umlaut zählte zwei Zeichen statt einem**.
+
+    404 Zeilen in sechs Dateien repariert (`zeile.encode('cp1252').decode('utf-8')`,
+    zeilenweise — `server_tools.py`, `base.py` und `personal_tools.py` waren
+    gemischt). Nachgemessen: aus der App **90.244** Zeichen, aus dem Panel
+    **84.771**; gewonnen 225 beziehungsweise 209 Zeichen, Luft jetzt **1.756**.
+
+    Der Gewinn ist kleiner als die 404 Zeilen vermuten lassen, und das ist der
+    Punkt, den der Nächste wissen muss: die meisten davon sind **Kommentare und
+    Docstrings**, und die gehen nie über die Leitung. Bezahlt wurden nur die
+    Umlaute in den Beschreibungen selbst. Wer hier Platz sucht, findet ihn
+    nicht in der Kodierung — der Hebel bleibt das Zusammenlegen.
+
+    **Nachtrag 22.09.2026: Serientermine, und die Grenze bleibt bei 92.000.**
+    Kein neues Werkzeug — `propose_calendar_event_create` und
+    `propose_calendar_event_update` haben ein Feld `recurrence` bekommen.
+    Nachgemessen: aus der App **91.182** Zeichen, 89 Werkzeuge; aus dem Panel
+    **85.709** Zeichen, 83 Werkzeuge. Die Luft beträgt **818 Zeichen**.
+
+    Hier steckt ein vierter Hebel, der vorher nicht benannt war: **wohin eine
+    Auskunft gehört.** Die erste Fassung des Schemas beschrieb jedes Feld
+    ordentlich — Pflichtangabe, "jedes wievielte Mal", "nur bei
+    takt=woechentlich" — und kostete 1.664 Zeichen. Der Katalog stand damit bei
+    91.908, also 92 Zeichen unter der Grenze. Dieselbe Auskunft steht jetzt in
+    `ai_prompt._KALENDER_WIEDERHOLUNG`: 938 Zeichen im Katalog, der Rest im
+    Systemprompt.
+
+    Der Unterschied ist nicht Länge, sondern Häufigkeit. Der Katalog geht in
+    **jeder** Runde ungecacht mit; der Systemprompt wird zwischengespeichert
+    und in derselben Unterhaltung nur einmal bezahlt. Wer das nächste Mal
+    Platz sucht: erst prüfen, ob die Beschreibung überhaupt in den Katalog
+    gehört, dann zusammenlegen, und kürzen zuletzt.
+
+    **Nachtrag 23.09.2026: die Regionsanalyse steht immer im Katalog, und die
+    Grenze bleibt bei 92.000.** Bis hierhin kamen `analyze_region` und
+    `control_region_camera` nur mit hinterlegtem Copernicus-Zugang dazu — und
+    den hat die Testumgebung nicht. Dieser Test hat die beiden deshalb nie
+    gesehen: eine Installation mit Copernicus lag schon bei **92.818** Zeichen.
+    Jetzt gibt es auch ohne Zugang ein Bild (das schlüsselfreie Kartenbild),
+    und beide stehen immer im Katalog. Ihre Beschreibungen sind dafür auf einen
+    Satz geschrumpft (1.636 → 735 Zeichen); Kameramodi und die Regel zu
+    `location` stehen in `ai_prompt.REGIONSANALYSE` und im Sprachmodus in
+    `REGION_ANWEISUNGEN`. Nachgemessen: aus der App **91.917** Zeichen, 91
+    Werkzeuge; aus dem Panel **86.444** Zeichen, 85 Werkzeuge. Die Luft beträgt
+    **83 Zeichen** — das nächste Werkzeug muss Platz mitbringen.
+
+    **Nachtrag 25.09.2026: Benutzer- und Rechteverwaltung, Grenze 96.000.**
+    Sieben Werkzeuge (`list_users`, `read_user_permissions`, `list_roles`,
+    `propose_user_server_permission`, `propose_role_set`,
+    `propose_user_roles`, `propose_role_delete`), bestellt im Betreiberplan
+    vom 24.09.: "gib dem Kollegen die normalen Rechte auf dem Server", auch
+    per Stimme. Nachgemessen: aus der App **95.787** Zeichen, 98 Werkzeuge;
+    aus dem Panel **90.307** Zeichen, 92 Werkzeuge. Die sieben kosten
+    zusammen 3.870 Zeichen, davon gut 1.300 allein für `reason` und
+    `expected_effect` der vier Schreibwerkzeuge.
+
+    Kein Platz ließ sich woanders freimachen, der nicht einen Betriebsanlass
+    kostet, und gekürzt ist schon: jede Beschreibung ist ein Satz, die
+    Anleitung (wen suchen, Server vor Rolle, was "unkritisch" heißt) steht in
+    `ai_prompt.BENUTZER_UND_RECHTE`, wo sie gecacht wird. Zusammengelegt ist,
+    was dasselbe Schema trägt (anlegen und ändern einer Rolle in
+    `propose_role_set`). Das Löschen bleibt ein eigenes Werkzeug, weil es
+    `immer_bestaetigen` trägt und die Namensregel
+    (`test_jedes_loeschwerkzeug_ist_entschieden`) es nur so erfasst.
+
+    Dieselbe Rechnung wie am 09.09.: angeboten werden die sieben nur, wer
+    Benutzer liest oder Rechte verwaltet (`angebot`); ein Kunde zahlt davon
+    nichts. Die Luft beträgt **213 Zeichen**. Fällt die Rechteverwaltung
+    wieder weg, geht die Grenze auf 92.000 zurück.
+
+    **Nachtrag 26.09.2026: Datenbanken, Grenze 98.000.** Die KI soll im
+    PostgreSQL-Studio alles können, was der Benutzer kann (Betreiber,
+    26.09.): Datenbankserver anlegen, Tabellen, Funktionen, Trigger und
+    Erweiterungen bauen, Zeilen pflegen. Zwei Werkzeuge (`read_database`,
+    `propose_database_change`) und die Datenbankfelder an
+    `propose_server_create`. Zusammengelegt ist schon, was ging: die gut
+    vierzig Studio-Operationen stehen **nicht** im Katalog, das Modell holt
+    ihr Schema bei Bedarf (`read_database view=operation_schema`), und die
+    Anleitung steht in `ai_prompt.DATENBANK_STUDIO`. Nachgemessen: aus der App
+    **97.353** Zeichen; aus dem Panel **91.873**. Die Luft beträgt **647
+    Zeichen**. Angeboten wird beides nur, wer Datenbankrechte hat.
      """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(
@@ -288,7 +445,7 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
             ],
             ensure_ascii=False,
         )
-        assert len(katalog) < 92_000, (
+        assert len(katalog) < 98_000, (
             f"Der Werkzeugkatalog der Herkunft '{herkunft}' ist auf "
             f"{len(katalog)} Zeichen gewachsen. Er geht in jeder Runde mit und "
             "taucht in keiner Budgetrechnung auf."
@@ -350,6 +507,9 @@ OHNE_RAUCHTEST = {
 BEISPIELARGUMENTE: dict[str, dict] = {
     "read_config": {"path": "server.cfg"},
     "search_server_files": {"query": "hostname"},
+    # Der Rauchserver hat keine Datenbank; die Operationsliste braucht keine
+    # und laeuft trotzdem durch den Handler.
+    "read_database": {"view": "operations"},
 }
 
 

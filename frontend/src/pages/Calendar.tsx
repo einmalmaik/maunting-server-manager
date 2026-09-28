@@ -11,6 +11,7 @@ import {
   MapPin,
   Network,
   Plus,
+  Repeat,
   Server,
   Trash2,
   User,
@@ -18,19 +19,33 @@ import {
   X,
 } from 'lucide-react'
 import { api } from '@/api/client'
+import { FARB_PALETTE, farbwahl } from '@/config/farbpalette'
 import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
-import { DateTimePicker, Dropdown } from '@/Singra/UI'
+import { DateTimePicker, Dropdown, NumberStepper } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
 import {
   loadCalendarEventsOfflineFirst,
   saveCalendarEventOffline,
   deleteCalendarEventOffline,
+  getOfflineCalendarEvents,
   useEntitySync,
 } from '@/lib/offlineSync'
+import {
+  LEERE_SERIE,
+  type Frequenz,
+  type Serie,
+  kurzform,
+  regelZerlegen,
+  serieBauen,
+  serieLesen,
+  serieSchreiben,
+  WOCHENTAG_KUERZEL,
+} from '@/services/kalenderSerie'
+import { useAuthStore } from '@/stores/authStore'
 
 export type EventCategoryType = 'personal' | 'team' | 'server' | 'node'
 
@@ -42,6 +57,11 @@ export interface CalendarEventItem {
   end: string
   description?: string
   location?: string
+  /**
+   * Das Wiederholungsdokument — Klartext-JSON, oder ein `sv-cal-v1:`-Umschlag,
+   * solange es noch nicht entschlüsselt wurde. `serieLesen` verträgt beides.
+   */
+  recurrence?: string
   all_day?: boolean
   color?: string
   calendar?: string
@@ -55,25 +75,25 @@ export interface CalendarEventItem {
   can_edit?: boolean
 }
 
+/**
+ * Ein einzelnes Vorkommen, wie die Ansicht es zeigt.
+ *
+ * Der Server liefert Serienköpfe, keine Vorkommen (`CalendarService.get_events`
+ * kann die Regel eines E2EE-Termins nicht lesen). Ausgebreitet wird hier.
+ */
+export interface KalenderVorkommen extends CalendarEventItem {
+  /** Lokales Datum des ursprünglichen Vorkommens, `''` bei Einzelterminen. */
+  vorkommen: string
+  istSerie: boolean
+  /** Zusammengesetzt aus Termin und Vorkommen — eindeutig, anders als `event_id`. */
+  schluessel: string
+}
+
 type ViewMode = 'month' | 'week' | 'day'
 
-const COLOR_PALETTE = [
-  { id: 'primary', label: 'Blau (Standard)', bg: 'bg-primary/20', text: 'text-primary', border: 'border-primary/40' },
-  { id: 'emerald', label: 'Grün', bg: 'bg-emerald-500/20', text: 'text-emerald-400', border: 'border-emerald-500/40' },
-  { id: 'amber', label: 'Gelb / Orange', bg: 'bg-amber-500/20', text: 'text-amber-400', border: 'border-amber-500/40' },
-  { id: 'rose', label: 'Rot / Rose', bg: 'bg-rose-500/20', text: 'text-rose-400', border: 'border-rose-500/40' },
-  { id: 'purple', label: 'Lila / Violett', bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/40' },
-  { id: 'cyan', label: 'Cyan', bg: 'bg-cyan-500/20', text: 'text-cyan-400', border: 'border-cyan-500/40' },
-]
-
-function getColorClass(colorId?: string) {
-  // Mapping von Backend-Farbnamen (blue -> primary, green -> emerald, etc.)
-  let normalizedId = colorId
-  if (colorId === 'blue') normalizedId = 'primary'
-  if (colorId === 'green') normalizedId = 'emerald'
-  const found = COLOR_PALETTE.find((c) => c.id === normalizedId)
-  return found || COLOR_PALETTE[0]
-}
+// Ein Server-Termin sieht im Filter aus wie im Kalender: beide nehmen den
+// Lila-Ton aus der Auswahlpalette, den `getDefaultColorForType` ihm ohnehin gibt.
+const SERVER_TON = farbwahl('purple')
 
 function getDefaultColorForType(type: EventCategoryType): string {
   switch (type) {
@@ -102,7 +122,9 @@ export function Calendar() {
   const [currentDate, setCurrentDate] = useState(() => new Date())
   const [viewMode, setViewMode] = useState<ViewMode>('month')
   const [selectedCategory, setSelectedCategory] = useState<'all' | EventCategoryType>('all')
-  const [events, setEvents] = useState<CalendarEventItem[]>([])
+  // Vorkommen, nicht Termine: der Server liefert Serienköpfe, ausgebreitet
+  // wird im Client (siehe `loadCalendarEventsOfflineFirst`).
+  const [events, setEvents] = useState<KalenderVorkommen[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isFeedModalOpen, setIsFeedModalOpen] = useState(false)
 
@@ -123,6 +145,29 @@ export function Calendar() {
   const [formTeamId, setFormTeamId] = useState<number | null>(null)
   const [formServerId, setFormServerId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
+
+  // Serientermine. `formSerie` ist das Dokument des Termins, wie es gespeichert
+  // ist; die Einzelfelder darunter sind seine zerlegte Form fürs Formular.
+  const [formSerie, setFormSerie] = useState<Serie>(LEERE_SERIE)
+  const [formRawRecurrence, setFormRawRecurrence] = useState<string>('')
+  const [formTakt, setFormTakt] = useState<Frequenz | null>(null)
+  const [formIntervall, setFormIntervall] = useState(1)
+  const [formWochentage, setFormWochentage] = useState<string[]>([])
+  const [formEndeArt, setFormEndeArt] = useState<'nie' | 'bis' | 'anzahl'>('nie')
+  const [formBis, setFormBis] = useState('')
+  const [formAnzahl, setFormAnzahl] = useState(10)
+  /** Welches Vorkommen angeklickt wurde; leer, wenn es keine Serie ist. */
+  const [formVorkommen, setFormVorkommen] = useState('')
+  /**
+   * Vorgabe ist **einzeln**, nicht die Serie.
+   *
+   * Wer einen Geburtstag anklickt, um die Uhrzeit zu korrigieren, soll damit
+   * nicht dreißig Jahre umstellen. Die weiter reichende Wahl kostet einen
+   * bewussten Klick — und die Zeile daneben sagt, was sie bedeutet.
+   */
+  const [formUmfang, setFormUmfang] = useState<'einzeln' | 'serie'>('einzeln')
+  /** Der Termin selbst, wenn ein Vorkommen bearbeitet wird. */
+  const [formKopf, setFormKopf] = useState<CalendarEventItem | null>(null)
 
   const locale = i18n.language.startsWith('de') ? 'de-DE' : 'en-US'
 
@@ -156,15 +201,21 @@ export function Calendar() {
     }
   }, [currentDate, viewMode])
 
+  // Die Zeitzone des Kontos, nicht die des Browsers: eine Serie wiederholt
+  // sich nach der Uhr, unter der sie angelegt wurde. Der Erinnerungslauf im
+  // Backend rechnet mit derselben Angabe, sonst zeigt die Ansicht etwas
+  // anderes an, als die Erinnerung meldet.
+  const kontoZeitzone = useAuthStore((s) => s.user?.time_zone) || null
+
   const fetchEvents = useCallback(() => {
-    loadCalendarEventsOfflineFirst(rangeStart, rangeEnd, selectedCategory)
+    loadCalendarEventsOfflineFirst(rangeStart, rangeEnd, selectedCategory, undefined, kontoZeitzone)
       .then(({ events: data }) => {
         setEvents(Array.isArray(data) ? data : [])
       })
       .catch(() => {
         setEvents([])
       })
-  }, [rangeStart, rangeEnd, selectedCategory])
+  }, [rangeStart, rangeEnd, selectedCategory, kontoZeitzone])
 
   useEffect(() => {
     // Lade Teams, Server und Nodes für Zuordnungs-Dropdowns
@@ -239,16 +290,16 @@ export function Calendar() {
       })
 
       if (res.email_sent) {
-        toast.success(t('calendar.testReminderSentEmail', 'Test-Erinnerung per Push und E-Mail versendet!'))
+        toast.success(t('calendar.testReminderSentEmail'))
       } else if (sent) {
-        toast.success(t('calendar.testReminderSent', 'Test-Erinnerung per Push ausgelöst!'))
+        toast.success(t('calendar.testReminderSent'))
       } else {
         toast.error(
           'Test-Erinnerung generiert. Falls kein Pop-up erscheint, bitte Benachrichtigungen für diese App in den Smartphone-Einstellungen erlauben.'
         )
       }
     } catch {
-      toast.error(t('calendar.testReminderError', 'Fehler beim Senden der Test-Erinnerung'))
+      toast.error(t('calendar.testReminderError'))
     } finally {
       setTestingPush(false)
     }
@@ -336,10 +387,37 @@ export function Calendar() {
     setFormTeamId(null)
     setFormServerId(null)
     setFormColor(getDefaultColorForType(targetType))
+    setzeSerienFelder(LEERE_SERIE)
+    setFormRawRecurrence('')
+    setFormVorkommen('')
+    setFormUmfang('einzeln')
+    setFormKopf(null)
     setIsModalOpen(true)
   }
 
-  const openEditModal = (ev: CalendarEventItem) => {
+  /** Zerlegt das gespeicherte Dokument in die Formularfelder. */
+  const setzeSerienFelder = (serie: Serie) => {
+    setFormSerie(serie)
+    const teile = regelZerlegen(serie)
+    setFormTakt(teile.takt)
+    setFormIntervall(teile.intervall)
+    setFormWochentage(teile.wochentage)
+    if (teile.bis) {
+      setFormEndeArt('bis')
+      setFormBis(teile.bis)
+      setFormAnzahl(10)
+    } else if (teile.anzahl) {
+      setFormEndeArt('anzahl')
+      setFormAnzahl(teile.anzahl)
+      setFormBis('')
+    } else {
+      setFormEndeArt('nie')
+      setFormBis('')
+      setFormAnzahl(10)
+    }
+  }
+
+  const openEditModal = (ev: KalenderVorkommen) => {
     const rawType = (ev.event_type as EventCategoryType) || 'personal'
     const evType: EventCategoryType = ['personal', 'team', 'server', 'node'].includes(rawType)
       ? rawType
@@ -356,22 +434,76 @@ export function Calendar() {
     setFormTeamId(ev.team_id || null)
     setFormServerId(ev.server_id || null)
     setFormColor(ev.color ? (ev.color === 'blue' ? 'primary' : ev.color === 'green' ? 'emerald' : ev.color) : getDefaultColorForType(evType))
+
+    setFormRawRecurrence(ev.recurrence || '')
+    const serie = serieLesen(ev.recurrence)
+    setzeSerienFelder(serie)
+    setFormVorkommen(ev.istSerie ? ev.vorkommen : '')
+    setFormUmfang('einzeln')
+    // Der Termin selbst, nicht das angeklickte Vorkommen: wer nur dieses
+    // Vorkommen verschiebt, darf Start und Titel des Termins nicht mitnehmen.
+    setFormKopf(ev.istSerie ? findeKopf(ev.event_id) : null)
     setIsModalOpen(true)
   }
+
+  /** Der gespeicherte Termin zu einem Vorkommen, aus dem lokalen Spiegel. */
+  const findeKopf = (eventId: string): CalendarEventItem | null =>
+    getOfflineCalendarEvents().find((e) => e.event_id === eventId) || null
+
+  /**
+   * Ob gerade ein einzelnes Vorkommen bearbeitet wird und nicht die Serie.
+   *
+   * Drei Bedingungen, alle nötig: es gibt eine Serie, ein Vorkommen ist
+   * angeklickt, und der Umfang steht auf "einzeln". Fehlt eine davon, ist es
+   * ein gewöhnlicher Termin oder die ganze Serie.
+   */
+  const bearbeitetEinzelnesVorkommen = Boolean(
+    formEventId && formVorkommen && formSerie.rrule && formUmfang === 'einzeln',
+  )
 
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!formTitle.trim()) {
-      toast.error('Bitte gib einen Termintitel an')
+      toast.error(t('calendar.titleRequired'))
       return
     }
 
     setSaving(true)
     try {
+      // Ein einzelnes Vorkommen zu ändern heißt **nicht**, den Termin zu
+      // ändern: Start, Titel und Zeiten des Termins bleiben stehen, und die
+      // Abweichung wird ins Wiederholungsdokument geschrieben. Sonst würde ein
+      // verschobenes Standup die ganze Serie verschieben.
+      const einzelnesVorkommen = bearbeitetEinzelnesVorkommen
+
+      const neueSerie: Serie = einzelnesVorkommen
+        ? {
+            ...formSerie,
+            abweichungen: {
+              ...formSerie.abweichungen,
+              [formVorkommen]: {
+                start: new Date(formStart).toISOString(),
+                ende: new Date(formEnd).toISOString(),
+                ...(formTitle.trim() !== (formKopf?.title || '') ? { titel: formTitle.trim() } : {}),
+              },
+            },
+          }
+        : serieBauen(formTakt, {
+            intervall: formIntervall,
+            wochentage: formWochentage,
+            bis: formEndeArt === 'bis' ? formBis || null : null,
+            anzahl: formEndeArt === 'anzahl' ? formAnzahl : null,
+          }, formSerie)
+
+      let recurrenceString: string | null = serieSchreiben(neueSerie)
+      if (formRawRecurrence && formRawRecurrence.startsWith('sv-cal-v1:') && !neueSerie.rrule && formTakt === null) {
+        recurrenceString = formRawRecurrence
+      }
+
       const payload = {
-        title: formTitle.trim(),
-        start_time: formStart,
-        end_time: formEnd,
+        title: einzelnesVorkommen ? (formKopf?.title ?? formTitle.trim()) : formTitle.trim(),
+        start_time: einzelnesVorkommen ? (formKopf?.start ?? formStart) : formStart,
+        end_time: einzelnesVorkommen ? (formKopf?.end ?? formEnd) : formEnd,
         description: formDescription.trim() || null,
         location: formLocation.trim() || null,
         all_day: formAllDay,
@@ -379,13 +511,14 @@ export function Calendar() {
         event_type: formEventType,
         team_id: formEventType === 'team' ? formTeamId : null,
         server_id: formEventType === 'server' ? formServerId : null,
+        recurrence: recurrenceString,
       }
 
       await saveCalendarEventOffline(payload, formEventId)
       if (formEventId) {
-        toast.success('Termin aktualisiert')
+        toast.success(t('calendar.updated'))
       } else {
-        toast.success('Termin erfolgreich erstellt')
+        toast.success(t('calendar.created'))
       }
       setIsModalOpen(false)
       fetchEvents()
@@ -399,19 +532,53 @@ export function Calendar() {
 
   const handleDeleteEvent = async () => {
     if (!formEventId) return
+
+    const einzelnesVorkommen = bearbeitetEinzelnesVorkommen
     const ok = await confirm({
-      title: 'Termin löschen',
-      message: 'Möchtest du diesen Termin wirklich unwiderruflich aus deinem Kalender löschen?',
-      confirmText: 'Löschen',
-      cancelText: 'Abbrechen',
+      title: einzelnesVorkommen
+        ? t('calendar.recurrence.deleteOccurrenceTitle')
+        : t('calendar.deleteConfirmTitle'),
+      message: einzelnesVorkommen
+        ? t('calendar.recurrence.deleteOccurrenceMessage')
+        : formSerie.rrule
+          ? t('calendar.recurrence.deleteSeriesMessage')
+          : t('calendar.deleteConfirmMessage'),
+      confirmText: t('common.delete'),
+      cancelText: t('common.cancel'),
       danger: true,
     })
     if (!ok) return
 
     setSaving(true)
     try {
-      await deleteCalendarEventOffline(formEventId)
-      toast.success('Termin gelöscht')
+      if (einzelnesVorkommen) {
+        // Ein einzelnes Vorkommen abzusagen löscht den Termin nicht, es trägt
+        // das Datum als Ausnahme ins Dokument ein. Der Rest der Serie bleibt.
+        const ohneDieses: Serie = {
+          ...formSerie,
+          ausnahmen: [...new Set([...formSerie.ausnahmen, formVorkommen])].sort(),
+        }
+        await saveCalendarEventOffline(
+          {
+            title: formKopf?.title ?? formTitle.trim(),
+            start_time: formKopf?.start ?? formStart,
+            end_time: formKopf?.end ?? formEnd,
+            description: formDescription.trim() || null,
+            location: formLocation.trim() || null,
+            all_day: formAllDay,
+            color: formColor,
+            event_type: formEventType,
+            team_id: formEventType === 'team' ? formTeamId : null,
+            server_id: formEventType === 'server' ? formServerId : null,
+            recurrence: serieSchreiben(ohneDieses),
+          },
+          formEventId,
+        )
+        toast.success(t('calendar.recurrence.occurrenceDeleted'))
+      } else {
+        await deleteCalendarEventOffline(formEventId)
+        toast.success(t('calendar.deleted'))
+      }
       setIsModalOpen(false)
       fetchEvents()
       window.dispatchEvent(new Event('msm:calendar-updated'))
@@ -465,6 +632,19 @@ export function Calendar() {
   }, [currentDate, viewMode])
 
   // Events für einen bestimmten Tag filtern
+  /**
+   * Welche Vorkommen gehören in die Zelle eines Tages.
+   *
+   * Das Ende ist **exklusiv**: ein Termin, der um Mitternacht endet, gehört
+   * nicht mehr zum folgenden Tag. Genau so speichert MSM einen ganztägigen
+   * Termin — der 14. März läuft von Mitternacht bis Mitternacht des 15. —, und
+   * genau so schreibt `export_ical` ihn als `DTEND;VALUE=DATE:` heraus, wie es
+   * RFC 5545 verlangt. Mit `>=` erschien jeder Geburtstag auf zwei Tagen.
+   *
+   * Ausnahme ist der punktuelle Termin ohne Dauer (`end === start`, etwa ein
+   * Meilenstein): der hat kein Ende, das nach dem Tagesbeginn liegen könnte,
+   * und würde sonst nirgends erscheinen.
+   */
   const getEventsForDay = (day: Date) => {
     const dayStart = new Date(day)
     dayStart.setHours(0, 0, 0, 0)
@@ -474,7 +654,9 @@ export function Calendar() {
     return events.filter((ev) => {
       const evStart = new Date(ev.start)
       const evEnd = new Date(ev.end)
-      return evStart <= dayEnd && evEnd >= dayStart
+      if (evStart > dayEnd) return false
+      if (evEnd.getTime() === evStart.getTime()) return evStart >= dayStart
+      return evEnd > dayStart
     })
   }
 
@@ -503,7 +685,7 @@ export function Calendar() {
     if (viewMode === 'month') {
       return currentDate.toLocaleDateString(locale, { month: 'long', year: 'numeric' })
     } else if (viewMode === 'week') {
-      return `${t('calendar.week', 'Woche')} (${currentDate.toLocaleDateString(locale, { month: 'short', year: 'numeric' })})`
+      return `${t('calendar.week')} (${currentDate.toLocaleDateString(locale, { month: 'short', year: 'numeric' })})`
     } else {
       return currentDate.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
     }
@@ -540,8 +722,8 @@ export function Calendar() {
       return (
         <span
           title={ev.team_name ? `Team: ${ev.team_name}` : 'Team-Termin'}
-          className={`inline-flex items-center gap-1 rounded font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 ${
-            isCompact ? 'text-[9px] px-1 py-0.5' : 'text-[10px] px-1.5 py-0.5'
+          className={`inline-flex items-center gap-1 rounded font-semibold bg-status-success/20 text-status-success border border-status-success/30 ${
+            isCompact ? 'text-label-sm px-1 py-0.5' : 'text-label-sm px-1.5 py-0.5'
           }`}
         >
           <Users className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
@@ -552,9 +734,9 @@ export function Calendar() {
     if (ev.event_type === 'server') {
       return (
         <span
-          title={ev.server_name ? `Server: ${ev.server_name}` : 'Server-Wartung'}
-          className={`inline-flex items-center gap-1 rounded font-semibold bg-purple-500/20 text-purple-400 border border-purple-500/30 ${
-            isCompact ? 'text-[9px] px-1 py-0.5' : 'text-[10px] px-1.5 py-0.5'
+          title={ev.server_name ? `Server: ${ev.server_name}` : t('calendar.filterServer')}
+          className={`inline-flex items-center gap-1 rounded font-semibold ${SERVER_TON.flaecheStark} ${SERVER_TON.text} border ${SERVER_TON.rand} ${
+            isCompact ? 'text-label-sm px-1 py-0.5' : 'text-label-sm px-1.5 py-0.5'
           }`}
         >
           <Server className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
@@ -566,8 +748,8 @@ export function Calendar() {
       return (
         <span
           title="Node / Infrastruktur"
-          className={`inline-flex items-center gap-1 rounded font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 ${
-            isCompact ? 'text-[9px] px-1 py-0.5' : 'text-[10px] px-1.5 py-0.5'
+          className={`inline-flex items-center gap-1 rounded font-semibold bg-status-warning/20 text-status-warning border border-status-warning/30 ${
+            isCompact ? 'text-label-sm px-1 py-0.5' : 'text-label-sm px-1.5 py-0.5'
           }`}
         >
           <Network className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
@@ -581,7 +763,7 @@ export function Calendar() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={t('calendar.title', 'Kalender')}
+        title={t('calendar.title')}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -592,7 +774,7 @@ export function Calendar() {
               className="gap-1.5"
             >
               <BellRing className={`w-4 h-4 ${testingPush ? 'animate-spin' : ''}`} />
-              {t('calendar.testPush', 'Push testen')}
+              {t('calendar.testPush')}
             </Button>
             <Button
               variant="secondary"
@@ -601,7 +783,7 @@ export function Calendar() {
               className="gap-1.5"
             >
               <Download className="w-4 h-4" />
-              {t('calendar.subscribe', 'Abonnieren')}
+              {t('calendar.subscribe')}
             </Button>
           </div>
         }
@@ -619,8 +801,8 @@ export function Calendar() {
           }`}
         >
           <CalendarIcon className="w-3.5 h-3.5" />
-          <span>{t('calendar.filterAll', 'Alle')}</span>
-          <span className="text-[10px] opacity-80 font-mono">({events.length})</span>
+          <span>{t('calendar.filterAll')}</span>
+          <span className="text-label-sm opacity-80 font-mono">({events.length})</span>
         </button>
         <button
           type="button"
@@ -632,8 +814,8 @@ export function Calendar() {
           }`}
         >
           <User className="w-3.5 h-3.5 text-primary" />
-          <span>{t('calendar.filterPersonal', 'Persönlich')}</span>
-          <span className="text-[10px] opacity-80 font-mono">
+          <span>{t('calendar.filterPersonal')}</span>
+          <span className="text-label-sm opacity-80 font-mono">
             ({events.filter((e) => !e.event_type || e.event_type === 'personal').length})
           </span>
         </button>
@@ -642,13 +824,13 @@ export function Calendar() {
           onClick={() => setSelectedCategory('team')}
           className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
             selectedCategory === 'team'
-              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/60 shadow-sm ring-1 ring-emerald-500/40'
+              ? 'bg-status-success/20 text-status-success border-status-success/60 shadow-sm ring-1 ring-status-success/40'
               : 'bg-surface-container/60 text-on-surface-variant border-outline-variant/40 hover:bg-surface-container hover:text-on-surface'
           }`}
         >
-          <Users className="w-3.5 h-3.5 text-emerald-400" />
-          <span>{t('calendar.filterTeam', 'Team')}</span>
-          <span className="text-[10px] opacity-80 font-mono">
+          <Users className="w-3.5 h-3.5 text-status-success" />
+          <span>{t('calendar.filterTeam')}</span>
+          <span className="text-label-sm opacity-80 font-mono">
             ({events.filter((e) => e.event_type === 'team').length})
           </span>
         </button>
@@ -657,13 +839,13 @@ export function Calendar() {
           onClick={() => setSelectedCategory('server')}
           className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
             selectedCategory === 'server'
-              ? 'bg-purple-500/20 text-purple-400 border-purple-500/60 shadow-sm ring-1 ring-purple-500/40'
+              ? `${SERVER_TON.flaecheStark} ${SERVER_TON.text} ${SERVER_TON.rand} shadow-sm ring-1 ring-primary/40`
               : 'bg-surface-container/60 text-on-surface-variant border-outline-variant/40 hover:bg-surface-container hover:text-on-surface'
           }`}
         >
-          <Server className="w-3.5 h-3.5 text-purple-400" />
-          <span>{t('calendar.filterServer', 'Server-Wartung')}</span>
-          <span className="text-[10px] opacity-80 font-mono">
+          <Server className={`w-3.5 h-3.5 ${SERVER_TON.text}`} />
+          <span>{t('calendar.filterServer')}</span>
+          <span className="text-label-sm opacity-80 font-mono">
             ({events.filter((e) => e.event_type === 'server').length})
           </span>
         </button>
@@ -672,13 +854,13 @@ export function Calendar() {
           onClick={() => setSelectedCategory('node')}
           className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
             selectedCategory === 'node'
-              ? 'bg-amber-500/20 text-amber-400 border-amber-500/60 shadow-sm ring-1 ring-amber-500/40'
+              ? 'bg-status-warning/20 text-status-warning border-status-warning/60 shadow-sm ring-1 ring-status-warning/40'
               : 'bg-surface-container/60 text-on-surface-variant border-outline-variant/40 hover:bg-surface-container hover:text-on-surface'
           }`}
         >
-          <Network className="w-3.5 h-3.5 text-amber-400" />
-          <span>{t('calendar.filterNode', 'Node')}</span>
-          <span className="text-[10px] opacity-80 font-mono">
+          <Network className="w-3.5 h-3.5 text-status-warning" />
+          <span>{t('calendar.filterNode')}</span>
+          <span className="text-label-sm opacity-80 font-mono">
             ({events.filter((e) => e.event_type === 'node').length})
           </span>
         </button>
@@ -687,16 +869,16 @@ export function Calendar() {
       {/* Kalender Steuerleiste */}
       <div className="msm-card p-4 flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={handlePrev} aria-label="Zurück">
+          <Button variant="secondary" size="sm" onClick={handlePrev} aria-label={t('common.back')}>
             <ChevronLeft className="w-4 h-4" />
           </Button>
           <Button variant="secondary" size="sm" onClick={handleToday}>
-            {t('calendar.today', 'Heute')}
+            {t('calendar.today')}
           </Button>
           <Button variant="secondary" size="sm" onClick={handleNext} aria-label="Vor">
             <ChevronRight className="w-4 h-4" />
           </Button>
-          <span className="font-headline text-lg font-bold text-on-surface ml-3">
+          <span className="font-headline text-title-lg font-bold text-on-surface ml-3">
             {headerTitle}
           </span>
         </div>
@@ -712,7 +894,7 @@ export function Calendar() {
                 : 'text-on-surface-variant hover:text-on-surface'
             }`}
           >
-            {t('calendar.viewMonth', 'Monat')}
+            {t('calendar.viewMonth')}
           </button>
           <button
             type="button"
@@ -723,7 +905,7 @@ export function Calendar() {
                 : 'text-on-surface-variant hover:text-on-surface'
             }`}
           >
-            {t('calendar.viewWeek', 'Woche')}
+            {t('calendar.viewWeek')}
           </button>
           <button
             type="button"
@@ -734,7 +916,7 @@ export function Calendar() {
                 : 'text-on-surface-variant hover:text-on-surface'
             }`}
           >
-            {t('calendar.viewDay', 'Tag')}
+            {t('calendar.viewDay')}
           </button>
         </div>
       </div>
@@ -785,7 +967,7 @@ export function Calendar() {
                       {date.getDate()}
                     </span>
                     {dayEvents.length > 0 && (
-                      <span className="text-[10px] text-on-surface-variant px-1 font-mono">
+                      <span className="text-label-sm text-on-surface-variant px-1 font-mono">
                         {dayEvents.length}
                       </span>
                     )}
@@ -794,30 +976,30 @@ export function Calendar() {
                   {/* Event Chips */}
                   <div className="space-y-1 overflow-hidden">
                     {dayEvents.slice(0, 3).map((ev) => {
-                      const colorStyle = getColorClass(ev.color)
+                      const colorStyle = farbwahl(ev.color)
                       const timeStr = new Date(ev.start).toLocaleTimeString(locale, {
                         hour: '2-digit',
                         minute: '2-digit',
                       })
                       return (
                         <div
-                          key={ev.event_id}
+                          key={ev.schluessel}
                           onClick={(e) => {
                             e.stopPropagation()
                             openEditModal(ev)
                           }}
-                          className={`text-[11px] leading-tight px-1.5 py-0.5 rounded border truncate flex items-center gap-1 ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border} hover:brightness-110`}
+                          className={`text-label-sm leading-tight px-1.5 py-0.5 rounded border truncate flex items-center gap-1 ${colorStyle.flaecheStark} ${colorStyle.text} ${colorStyle.rand} hover:brightness-110`}
                         >
-                          {ev.event_type === 'team' && <Users className="w-2.5 h-2.5 shrink-0 opacity-90 text-emerald-400" />}
-                          {ev.event_type === 'server' && <Server className="w-2.5 h-2.5 shrink-0 opacity-90 text-purple-400" />}
-                          {ev.event_type === 'node' && <Network className="w-2.5 h-2.5 shrink-0 opacity-90 text-amber-400" />}
+                          {ev.event_type === 'team' && <Users className="w-2.5 h-2.5 shrink-0 opacity-90 text-status-success" />}
+                          {ev.event_type === 'server' && <Server className={`w-2.5 h-2.5 shrink-0 opacity-90 ${SERVER_TON.text}`} />}
+                          {ev.event_type === 'node' && <Network className="w-2.5 h-2.5 shrink-0 opacity-90 text-status-warning" />}
                           <span className="font-semibold shrink-0">{timeStr}</span>
                           <span className="truncate">{ev.title}</span>
                         </div>
                       )
                     })}
                     {dayEvents.length > 3 && (
-                      <div className="text-[10px] text-primary/80 font-medium px-1">
+                      <div className="text-label-sm text-primary/80 font-medium px-1">
                         +{dayEvents.length - 3} weitere
                       </div>
                     )}
@@ -837,7 +1019,7 @@ export function Calendar() {
             <div className="grid grid-cols-7 border-b border-outline-variant/40 bg-surface-container/50 text-center py-2.5">
               {weekDays.map(({ date, isToday }, idx) => (
                 <div key={idx} className="flex flex-col items-center">
-                  <span className="text-[11px] font-label-md uppercase text-on-surface-variant">
+                  <span className="text-label-sm font-label-md uppercase text-on-surface-variant">
                     {date.toLocaleDateString(locale, { weekday: 'short' })}
                   </span>
                   <span
@@ -868,7 +1050,7 @@ export function Calendar() {
                       </div>
                     ) : (
                       dayEvents.map((ev) => {
-                        const colorStyle = getColorClass(ev.color)
+                        const colorStyle = farbwahl(ev.color)
                         const startStr = new Date(ev.start).toLocaleTimeString(locale, {
                           hour: '2-digit',
                           minute: '2-digit',
@@ -879,23 +1061,23 @@ export function Calendar() {
                         })
                         return (
                           <div
-                            key={ev.event_id}
+                            key={ev.schluessel}
                             onClick={(e) => {
                               e.stopPropagation()
                               openEditModal(ev)
                             }}
-                            className={`p-2 rounded-lg border text-xs ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border} hover:brightness-110`}
+                            className={`p-2 rounded-lg border text-xs ${colorStyle.flaecheStark} ${colorStyle.text} ${colorStyle.rand} hover:brightness-110`}
                           >
                             <div className="flex items-start justify-between gap-1">
                               <div className="font-semibold text-sm truncate flex-1">{ev.title}</div>
                               {renderCategoryBadge(ev, true)}
                             </div>
-                            <div className="flex items-center gap-1 text-[10px] opacity-80 mt-1">
+                            <div className="flex items-center gap-1 text-label-sm opacity-80 mt-1">
                               <Clock className="w-3 h-3" />
                               <span>{startStr} – {endStr}</span>
                             </div>
                             {ev.location && (
-                              <div className="flex items-center gap-1 text-[10px] opacity-80 mt-0.5 truncate">
+                              <div className="flex items-center gap-1 text-label-sm opacity-80 mt-0.5 truncate">
                                 <MapPin className="w-3 h-3" />
                                 <span className="truncate">{ev.location}</span>
                               </div>
@@ -936,7 +1118,7 @@ export function Calendar() {
                         {weekdayStr}, {dateStr}
                       </span>
                       {isToday && (
-                        <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-primary/15 text-primary">
+                        <span className="text-label-sm font-semibold uppercase px-1.5 py-0.5 rounded bg-primary/15 text-primary">
                           Heute
                         </span>
                       )}
@@ -945,7 +1127,7 @@ export function Calendar() {
                       type="button"
                       onClick={() => openCreateModal(date)}
                       className="p-1 rounded-md text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors"
-                      title="Termin hinzufügen"
+                      title={t('calendar.addEvent')}
                     >
                       <Plus className="w-4 h-4" />
                     </button>
@@ -956,12 +1138,12 @@ export function Calendar() {
                       onClick={() => openCreateModal(date)}
                       className="py-2 px-3 rounded-lg border border-dashed border-outline-variant/40 text-xs text-on-surface-variant/50 hover:bg-surface-container/20 cursor-pointer text-center"
                     >
-                      Keine Termine — Tippen zum Erstellen
+                      {t('calendar.emptyDayTapToCreate')}
                     </div>
                   ) : (
                     <div className="space-y-1.5">
                       {dayEvents.map((ev) => {
-                        const colorStyle = getColorClass(ev.color)
+                        const colorStyle = farbwahl(ev.color)
                         const startStr = new Date(ev.start).toLocaleTimeString(locale, {
                           hour: '2-digit',
                           minute: '2-digit',
@@ -972,16 +1154,16 @@ export function Calendar() {
                         })
                         return (
                           <div
-                            key={ev.event_id}
+                            key={ev.schluessel}
                             onClick={() => openEditModal(ev)}
-                            className={`p-2.5 rounded-lg border text-xs cursor-pointer flex items-center justify-between gap-2 ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border} hover:brightness-110`}
+                            className={`p-2.5 rounded-lg border text-xs cursor-pointer flex items-center justify-between gap-2 ${colorStyle.flaecheStark} ${colorStyle.text} ${colorStyle.rand} hover:brightness-110`}
                           >
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center justify-between gap-2">
                                 <div className="font-semibold text-sm truncate">{ev.title}</div>
                                 {renderCategoryBadge(ev, true)}
                               </div>
-                              <div className="flex items-center gap-3 text-[11px] opacity-80 mt-1">
+                              <div className="flex items-center gap-3 text-label-sm opacity-80 mt-1">
                                 <span className="flex items-center gap-1">
                                   <Clock className="w-3.5 h-3.5" />
                                   {startStr} – {endStr}
@@ -1011,7 +1193,7 @@ export function Calendar() {
         <div className="msm-card p-6 max-w-2xl mx-auto space-y-4">
           <div className="flex items-center justify-between border-b border-outline-variant/40 pb-4">
             <div>
-              <h3 className="font-headline text-lg font-bold text-on-surface">
+              <h3 className="font-headline text-title-lg font-bold text-on-surface">
                 {currentDate.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
               </h3>
               <p className="text-xs text-on-surface-variant">
@@ -1028,7 +1210,7 @@ export function Calendar() {
             {getEventsForDay(currentDate).length === 0 ? (
               <div className="py-12 text-center text-on-surface-variant">
                 <CalendarIcon className="w-10 h-10 mx-auto opacity-30 mb-2" />
-                <p className="text-sm">Keine Termine für diesen Tag vorhanden.</p>
+                <p className="text-sm">{t('calendar.noEventsToday')}</p>
                 <Button
                   variant="secondary"
                   size="sm"
@@ -1041,7 +1223,7 @@ export function Calendar() {
               </div>
             ) : (
               getEventsForDay(currentDate).map((ev) => {
-                const colorStyle = getColorClass(ev.color)
+                const colorStyle = farbwahl(ev.color)
                 const startStr = new Date(ev.start).toLocaleTimeString(locale, {
                   hour: '2-digit',
                   minute: '2-digit',
@@ -1052,9 +1234,9 @@ export function Calendar() {
                 })
                 return (
                   <div
-                    key={ev.event_id}
+                    key={ev.schluessel}
                     onClick={() => openEditModal(ev)}
-                    className={`p-4 rounded-xl border cursor-pointer transition-all hover:scale-[1.01] ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border}`}
+                    className={`p-4 rounded-xl border cursor-pointer transition-all hover:scale-[1.01] ${colorStyle.flaecheStark} ${colorStyle.text} ${colorStyle.rand}`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
@@ -1087,26 +1269,68 @@ export function Calendar() {
 
       {/* MODAL: Termin anlegen / bearbeiten */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-fade-in">
+        <div className="msm-modal-overlay animate-fade-in">
           <div className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-outline-variant/30 pb-3">
-              <h3 className="font-headline text-lg font-bold text-on-surface">
-                {formEventId ? t('calendar.editEvent', 'Termin bearbeiten') : t('calendar.createEvent', 'Neuer Termin')}
+              <h3 className="font-headline text-title-lg font-bold text-on-surface">
+                {formEventId ? t('calendar.editEvent') : t('calendar.createEvent')}
               </h3>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
                 className="text-on-surface-variant hover:text-on-surface p-1 rounded-md"
-                aria-label="Schließen"
+                aria-label={t('common.close')}
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSaveEvent} className="space-y-4">
+              {/* Umfang zuerst: wer eine Serie anklickt, soll vor allem
+                  anderen sehen, wie weit seine Änderung reicht. Die Vorgabe
+                  ist das einzelne Vorkommen — die weiter reichende Wahl kostet
+                  einen bewussten Klick. */}
+              {formEventId && formVorkommen && formSerie.rrule && (
+                <div className="rounded-lg border border-outline-variant/40 bg-surface-container-low p-3 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-label-md font-semibold text-on-surface-variant uppercase">
+                    <Repeat className="w-3.5 h-3.5" />
+                    {t('calendar.recurrence.scopeLabel')}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormUmfang('einzeln')}
+                      className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                        formUmfang === 'einzeln'
+                          ? 'bg-primary/20 text-primary border-primary ring-1 ring-primary'
+                          : 'bg-surface-container text-on-surface-variant border-outline-variant/40 hover:bg-surface-container-high'
+                      }`}
+                    >
+                      {t('calendar.recurrence.scopeSingle')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormUmfang('serie')}
+                      className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                        formUmfang === 'serie'
+                          ? 'bg-primary/20 text-primary border-primary ring-1 ring-primary'
+                          : 'bg-surface-container text-on-surface-variant border-outline-variant/40 hover:bg-surface-container-high'
+                      }`}
+                    >
+                      {t('calendar.recurrence.scopeSeries')}
+                    </button>
+                  </div>
+                  <p className="text-xs text-on-surface-variant">
+                    {formUmfang === 'einzeln'
+                      ? t('calendar.recurrence.scopeSingleHint')
+                      : t('calendar.recurrence.scopeSeriesHint', { regel: kurzform(formSerie) })}
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                  {t('calendar.category', 'Kategorie')} *
+                  {t('calendar.category')} *
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <button
@@ -1122,7 +1346,7 @@ export function Calendar() {
                     }`}
                   >
                     <User className="w-3.5 h-3.5 text-primary" />
-                    Persönlich
+                    {t('calendar.typePersonal')}
                   </button>
                   <button
                     type="button"
@@ -1132,11 +1356,11 @@ export function Calendar() {
                     }}
                     className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
                       formEventType === 'team'
-                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500 ring-1 ring-emerald-500'
+                        ? 'bg-status-success/20 text-status-success border-status-success ring-1 ring-status-success'
                         : 'bg-surface-container-low text-on-surface-variant border-outline-variant/40 hover:bg-surface-container'
                     }`}
                   >
-                    <Users className="w-3.5 h-3.5 text-emerald-400" />
+                    <Users className="w-3.5 h-3.5 text-status-success" />
                     Team
                   </button>
                   <button
@@ -1147,11 +1371,11 @@ export function Calendar() {
                     }}
                     className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
                       formEventType === 'server'
-                        ? 'bg-purple-500/20 text-purple-400 border-purple-500 ring-1 ring-purple-500'
+                        ? `${SERVER_TON.flaecheStark} ${SERVER_TON.text} ${SERVER_TON.rand} ring-1 ring-primary/40`
                         : 'bg-surface-container-low text-on-surface-variant border-outline-variant/40 hover:bg-surface-container'
                     }`}
                   >
-                    <Server className="w-3.5 h-3.5 text-purple-400" />
+                    <Server className={`w-3.5 h-3.5 ${SERVER_TON.text}`} />
                     Server
                   </button>
                   <button
@@ -1162,11 +1386,11 @@ export function Calendar() {
                     }}
                     className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
                       formEventType === 'node'
-                        ? 'bg-amber-500/20 text-amber-400 border-amber-500 ring-1 ring-amber-500'
+                        ? 'bg-status-warning/20 text-status-warning border-status-warning ring-1 ring-status-warning'
                         : 'bg-surface-container-low text-on-surface-variant border-outline-variant/40 hover:bg-surface-container'
                     }`}
                   >
-                    <Network className="w-3.5 h-3.5 text-amber-400" />
+                    <Network className="w-3.5 h-3.5 text-status-warning" />
                     Node
                   </button>
                 </div>
@@ -1175,18 +1399,18 @@ export function Calendar() {
               {formEventType === 'team' && (
                 <div>
                   <label htmlFor="cal-form-team" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                    {t('calendar.teamSelect', 'Team zuordnen')}
+                    {t('calendar.teamSelect')}
                   </label>
                   <Dropdown
                     id="cal-form-team"
                     value={formTeamId ? String(formTeamId) : ''}
                     onChange={(val) => setFormTeamId(val ? Number(val) : null)}
                     options={[
-                      { value: '', label: `-- ${t('calendar.selectTeamOptional', 'Team wählen (optional)')} --` },
+                      { value: '', label: `-- ${t('calendar.selectTeamOptional')} --` },
                       ...teamsList.map((tm) => ({ value: String(tm.id), label: tm.name })),
                     ]}
                     searchable={teamsList.length > 5}
-                    placeholder={t('calendar.selectTeamOptional', 'Team wählen (optional)')}
+                    placeholder={t('calendar.selectTeamOptional')}
                     className="w-full"
                   />
                 </div>
@@ -1195,18 +1419,18 @@ export function Calendar() {
               {formEventType === 'server' && (
                 <div>
                   <label htmlFor="cal-form-server" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                    {t('calendar.serverSelect', 'Server zuordnen')}
+                    {t('calendar.serverSelect')}
                   </label>
                   <Dropdown
                     id="cal-form-server"
                     value={formServerId ? String(formServerId) : ''}
                     onChange={(val) => setFormServerId(val ? Number(val) : null)}
                     options={[
-                      { value: '', label: `-- ${t('calendar.selectServerOptional', 'Server wählen (optional)')} --` },
+                      { value: '', label: `-- ${t('calendar.selectServerOptional')} --` },
                       ...serversList.map((srv) => ({ value: String(srv.id), label: srv.name })),
                     ]}
                     searchable={serversList.length > 5}
-                    placeholder={t('calendar.selectServerOptional', 'Server wählen (optional)')}
+                    placeholder={t('calendar.selectServerOptional')}
                     className="w-full"
                   />
                 </div>
@@ -1215,18 +1439,18 @@ export function Calendar() {
               {formEventType === 'node' && nodesList.length > 1 && (
                 <div>
                   <label htmlFor="cal-form-node" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                    {t('calendar.nodeSelect', 'Node zuordnen')}
+                    {t('calendar.nodeSelect')}
                   </label>
                   <Dropdown
                     id="cal-form-node"
                     value={formLocation || ''}
                     onChange={(val) => setFormLocation(val)}
                     options={[
-                      { value: '', label: `-- ${t('calendar.allNodesOrLocal', 'Lokale Node (Standard)')} --` },
+                      { value: '', label: `-- ${t('calendar.allNodesOrLocal')} --` },
                       ...nodesList.map((nd) => ({ value: nd.name, label: nd.name })),
                     ]}
                     searchable={nodesList.length > 5}
-                    placeholder={t('calendar.selectNodeOptional', 'Node wählen (optional)')}
+                    placeholder={t('calendar.selectNodeOptional')}
                     className="w-full"
                   />
                 </div>
@@ -1234,7 +1458,7 @@ export function Calendar() {
 
               <div>
                 <label htmlFor="cal-form-title" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                  {t('calendar.eventTitle', 'Titel / Anlass')} *
+                  {t('calendar.eventTitle')} *
                 </label>
                 <input
                   id="cal-form-title"
@@ -1242,7 +1466,7 @@ export function Calendar() {
                   required
                   value={formTitle}
                   onChange={(e) => setFormTitle(e.target.value)}
-                  placeholder={t('calendar.eventTitlePlaceholder', 'z. B. Team-Meeting, Wartung Server 1')}
+                  placeholder={t('calendar.eventTitlePlaceholder')}
                   className="msm-input w-full"
                 />
               </div>
@@ -1250,56 +1474,210 @@ export function Calendar() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                    {t('calendar.start', 'Beginn')} *
+                    {t('calendar.start')} *
                   </label>
                   <DateTimePicker
                     value={formStart}
                     onChange={(val) => setFormStart(val)}
                     locale={i18n.language.startsWith('de') ? 'de' : 'en'}
-                    placeholder={t('calendar.selectStart', 'Beginn wählen')}
-                    aria-label={t('calendar.start', 'Beginn')}
+                    placeholder={t('calendar.selectStart')}
+                    aria-label={t('calendar.start')}
                     className="w-full"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                    {t('calendar.end', 'Ende')} *
+                    {t('calendar.end')} *
                   </label>
                   <DateTimePicker
                     value={formEnd}
                     onChange={(val) => setFormEnd(val)}
                     locale={i18n.language.startsWith('de') ? 'de' : 'en'}
-                    placeholder={t('calendar.selectEnd', 'Ende wählen')}
-                    aria-label={t('calendar.end', 'Ende')}
+                    placeholder={t('calendar.selectEnd')}
+                    aria-label={t('calendar.end')}
                     className="w-full"
                   />
                 </div>
               </div>
 
+              {/* Wiederholung. Beim Bearbeiten eines einzelnen Vorkommens
+                  ausgeblendet: dort wird die Regel nicht geändert, sondern
+                  eine Ausnahme von ihr geschrieben. */}
+              {!bearbeitetEinzelnesVorkommen && (
+                <div className="rounded-lg border border-outline-variant/40 p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <label
+                      htmlFor="cal-form-takt"
+                      className="flex items-center gap-1.5 text-xs font-label-md font-semibold text-on-surface-variant uppercase"
+                    >
+                      <Repeat className="w-3.5 h-3.5" />
+                      {t('calendar.recurrence.label')}
+                    </label>
+                    {formTakt && (
+                      <span className="text-xs text-primary font-semibold">
+                        {kurzform(
+                          serieBauen(formTakt, {
+                            intervall: formIntervall,
+                            wochentage: formWochentage,
+                            bis: formEndeArt === 'bis' ? formBis || null : null,
+                            anzahl: formEndeArt === 'anzahl' ? formAnzahl : null,
+                          }, formSerie),
+                        )}
+                      </span>
+                    )}
+                  </div>
+
+                  <Dropdown
+                    id="cal-form-takt"
+                    value={formTakt ?? ''}
+                    onChange={(val) => setFormTakt((val || null) as Frequenz | null)}
+                    options={[
+                      { value: '', label: t('calendar.recurrence.none') },
+                      { value: 'DAILY', label: t('calendar.recurrence.daily') },
+                      { value: 'WEEKLY', label: t('calendar.recurrence.weekly') },
+                      { value: 'MONTHLY', label: t('calendar.recurrence.monthly') },
+                      { value: 'YEARLY', label: t('calendar.recurrence.yearly') },
+                    ]}
+                    placeholder={t('calendar.recurrence.none')}
+                    className="w-full"
+                  />
+
+                  {formTakt && (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <label htmlFor="cal-form-intervall" className="text-xs text-on-surface-variant">
+                          {t('calendar.recurrence.everyNth')}
+                        </label>
+                        <NumberStepper
+                          id="cal-form-intervall"
+                          min={1}
+                          max={99}
+                          value={formIntervall}
+                          onValueChange={(val) => setFormIntervall(Math.max(1, Number(val) || 1))}
+                          size="sm"
+                          className="w-24"
+                        />
+                        <span className="text-xs text-on-surface-variant">
+                          {t(`calendar.recurrence.unit.${formTakt}`, { count: formIntervall })}
+                        </span>
+                      </div>
+
+                      {formTakt === 'WEEKLY' && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {WOCHENTAG_KUERZEL.map((kuerzel) => {
+                            const aktiv = formWochentage.includes(kuerzel)
+                            return (
+                              <button
+                                key={kuerzel}
+                                type="button"
+                                aria-pressed={aktiv}
+                                onClick={() =>
+                                  setFormWochentage((vorher) =>
+                                    vorher.includes(kuerzel)
+                                      ? vorher.filter((k) => k !== kuerzel)
+                                      : [...vorher, kuerzel],
+                                  )
+                                }
+                                className={`w-10 h-10 rounded-lg border text-xs font-semibold transition-all ${
+                                  aktiv
+                                    ? 'bg-primary/20 text-primary border-primary'
+                                    : 'bg-surface-container-low text-on-surface-variant border-outline-variant/40 hover:bg-surface-container'
+                                }`}
+                              >
+                                {t(`calendar.recurrence.weekday.${kuerzel}`)}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        <span className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase">
+                          {t('calendar.recurrence.endsLabel')}
+                        </span>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-on-surface">
+                          <Dropdown
+                            id="cal-form-ende-art"
+                            value={formEndeArt}
+                            onChange={(val) => setFormEndeArt(val as typeof formEndeArt)}
+                            options={[
+                              { value: 'nie', label: t('calendar.recurrence.endsNever') },
+                              { value: 'bis', label: t('calendar.recurrence.endsOn') },
+                              { value: 'anzahl', label: t('calendar.recurrence.endsAfter') },
+                            ]}
+                            aria-label={t('calendar.recurrence.endsLabel')}
+                            className="w-44"
+                          />
+                          {formEndeArt === 'bis' && (
+                            <DateTimePicker
+                              value={formBis}
+                              onChange={setFormBis}
+                              dateOnly
+                              locale={i18n.language.startsWith('de') ? 'de' : 'en'}
+                              /* Ein Serienende vor dem Beginn ergibt eine Regel,
+                                 die endet, bevor sie anfängt. Der Termin wäre
+                                 dann in keinem Zeitraum mehr zu sehen — die
+                                 Ausbreitung fängt das ab, aber ein vertipptes
+                                 Jahr soll gar nicht erst durchgehen. */
+                              min={formStart ? formStart.slice(0, 10) : undefined}
+                              placeholder={t('calendar.recurrence.endsOn')}
+                              aria-label={t('calendar.recurrence.endsOn')}
+                              className="flex-1 min-w-[10rem]"
+                            />
+                          )}
+                          {formEndeArt === 'anzahl' && (
+                            <NumberStepper
+                              min={1}
+                              max={999}
+                              value={formAnzahl}
+                              onValueChange={(val) => setFormAnzahl(Math.max(1, Number(val) || 1))}
+                              size="sm"
+                              className="w-24"
+                              aria-label={t('calendar.recurrence.endsAfter')}
+                            />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Die E-Mail-Erinnerung braucht die Regel, und die kann
+                          der Server nur bei einem persönlichen Termin nicht
+                          lesen. Geteilte Termine legt er selbst mit DIS
+                          verschlüsselt ab und kann sie lesen. Das gehört an die Stelle, an der die Serie
+                          entsteht — nicht in eine Dokumentation. */}
+                      {formEventType === 'personal' && (
+                        <p className="text-xs text-on-surface-variant border-t border-outline-variant/30 pt-2">
+                          {t('calendar.recurrence.reminderHint')}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label htmlFor="cal-form-location" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                  {t('calendar.location', 'Ort / Meeting-Link')}
+                  {t('calendar.location')}
                 </label>
                 <input
                   id="cal-form-location"
                   type="text"
                   value={formLocation}
                   onChange={(e) => setFormLocation(e.target.value)}
-                  placeholder={t('calendar.locationPlaceholder', 'z. B. Konferenzraum A oder Teams / Zoom')}
+                  placeholder={t('calendar.locationPlaceholder')}
                   className="msm-input w-full"
                 />
               </div>
 
               <div>
                 <label htmlFor="cal-form-description" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                  {t('calendar.descriptionLabel', 'Beschreibung / Notizen')}
+                  {t('calendar.descriptionLabel')}
                 </label>
                 <textarea
                   id="cal-form-description"
                   rows={3}
                   value={formDescription}
                   onChange={(e) => setFormDescription(e.target.value)}
-                  placeholder={t('calendar.descriptionPlaceholder', 'Agenda, Vorbereitungspunkte oder Details...')}
+                  placeholder={t('calendar.descriptionPlaceholder')}
                   className="msm-input w-full resize-none text-xs"
                 />
               </div>
@@ -1307,19 +1685,19 @@ export function Calendar() {
               {/* Farbwahl */}
               <div>
                 <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-2">
-                  {t('calendar.color', 'Farbkennzeichnung')}
+                  {t('calendar.color')}
                 </label>
                 <div className="flex flex-wrap items-center gap-2">
-                  {COLOR_PALETTE.map((c) => (
+                  {FARB_PALETTE.map((c) => (
                     <button
                       key={c.id}
                       type="button"
                       onClick={() => setFormColor(c.id)}
-                      className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-all ${c.bg} ${c.text} ${
-                        formColor === c.id ? `ring-2 ring-primary ${c.border}` : 'opacity-70 hover:opacity-100'
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-all ${c.flaecheStark} ${c.text} ${
+                        formColor === c.id ? `ring-2 ring-primary ${c.rand}` : 'opacity-70 hover:opacity-100'
                       }`}
                     >
-                      {c.label}
+                      {t(c.labelKey)}
                     </button>
                   ))}
                 </div>
@@ -1335,7 +1713,7 @@ export function Calendar() {
                     className="text-error border-error/40 hover:bg-error/10 gap-1.5"
                   >
                     <Trash2 className="w-4 h-4" />
-                    {t('common.delete', 'Löschen')}
+                    {t('common.delete')}
                   </Button>
                 ) : <div />}
 
@@ -1346,10 +1724,10 @@ export function Calendar() {
                     onClick={() => setIsModalOpen(false)}
                     disabled={saving}
                   >
-                    {t('common.cancel', 'Abbrechen')}
+                    {t('common.cancel')}
                   </Button>
                   <Button type="submit" disabled={saving}>
-                    {saving ? t('calendar.saving', 'Speichern...') : t('common.save', 'Speichern')}
+                    {saving ? t('calendar.saving') : t('common.save')}
                   </Button>
                 </div>
               </div>
@@ -1360,39 +1738,36 @@ export function Calendar() {
 
       {/* MODAL: Kalender-Abonnement & Feed */}
       {isFeedModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-fade-in">
+        <div className="msm-modal-overlay animate-fade-in">
           <div className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in">
             <div className="flex items-center justify-between border-b border-outline-variant/30 pb-3">
-              <h3 className="font-headline text-lg font-bold text-on-surface">
-                {t('calendar.feedModalTitle', 'Kalender abonnieren & exportieren')}
+              <h3 className="font-headline text-title-lg font-bold text-on-surface">
+                {t('calendar.feedModalTitle')}
               </h3>
               <button
                 type="button"
                 onClick={() => setIsFeedModalOpen(false)}
                 className="text-on-surface-variant hover:text-on-surface p-1 rounded-md"
-                aria-label={t('common.close', 'Schließen')}
+                aria-label={t('common.close')}
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <p className="text-xs leading-relaxed text-on-surface-variant">
-              {t(
-                'calendar.feedModalDescription',
-                'Du kannst deinen MSM-Kalender in jeder gängigen Kalender-App (Windows Kalender, Microsoft Outlook, Thunderbird, Apple Calendar, Google Calendar) synchronisieren oder als .ics-Datei herunterladen.'
-              )}
+              {t('calendar.feedModalDescription')}
             </p>
 
             <div className="space-y-2">
               <label htmlFor="cal-feed-url-input" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase">
-                {t('calendar.feedUrlLabel', 'iCal / Webcal Feed-URL')}
+                {t('calendar.feedUrlLabel')}
               </label>
               <div className="flex items-center gap-2">
                 <input
                   id="cal-feed-url-input"
                   type="text"
                   readOnly
-                  value={loadingFeedUrl ? t('calendar.loadingFeedUrl', 'Lade Feed-URL...') : feedUrl}
+                  value={loadingFeedUrl ? t('calendar.loadingFeedUrl') : feedUrl}
                   className="msm-input flex-1 font-mono text-xs select-all"
                 />
                 <Button
@@ -1401,12 +1776,12 @@ export function Calendar() {
                   disabled={loadingFeedUrl || !feedUrl}
                   onClick={() => {
                     navigator.clipboard.writeText(feedUrl)
-                    toast.success(t('calendar.feedUrlCopied', 'URL in die Zwischenablage kopiert'))
+                    toast.success(t('calendar.feedUrlCopied'))
                   }}
                   className="gap-1"
                 >
                   <Link className="w-4 h-4" />
-                  {t('common.copy', 'Kopieren')}
+                  {t('common.copy')}
                 </Button>
               </div>
             </div>
@@ -1418,10 +1793,10 @@ export function Calendar() {
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-surface-container border border-outline-variant/60 text-xs font-semibold text-on-surface hover:bg-surface-container-high"
               >
                 <Download className="w-4 h-4" />
-                {t('calendar.downloadIcs', '.ics-Datei herunterladen')}
+                {t('calendar.downloadIcs')}
               </a>
               <Button onClick={() => setIsFeedModalOpen(false)}>
-                {t('common.close', 'Schließen')}
+                {t('common.close')}
               </Button>
             </div>
           </div>

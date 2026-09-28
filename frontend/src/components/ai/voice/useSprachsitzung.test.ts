@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { installFakeAudio, type FakeAudioContext } from '@/test/fakeAudio'
+import { FakeMediaStream, installFakeAudio, type FakeAudioContext } from '@/test/fakeAudio'
 import { FakeWebSocket, installFakeWebSocket } from '@/test/fakeWebSocket'
 import { useSprachsitzung } from './useSprachsitzung'
 
@@ -136,6 +136,116 @@ describe('useSprachsitzung', () => {
       if (originalPeer) globalThis.RTCPeerConnection = originalPeer
       else delete (globalThis as { RTCPeerConnection?: unknown }).RTCPeerConnection
     }
+  })
+
+  describe('GPT-Live', () => {
+    /**
+     * Ein Peer, dessen ICE-Sammlung der Test beendet. GPT-Live nimmt genau ein
+     * Angebot und kein Nachreichen von Kandidaten — das Browserbeispiel der
+     * Dokumentation wartet deshalb auf `complete`, mit zehn Sekunden Frist.
+     */
+    class IcePeer extends EventTarget {
+      static instances: IcePeer[] = []
+      localDescription: RTCSessionDescriptionInit | null = null
+      remoteDescription: RTCSessionDescriptionInit | null = null
+      iceGatheringState: RTCIceGatheringState = 'new'
+      ontrack: ((event: RTCTrackEvent) => void) | null = null
+
+      constructor() {
+        super()
+        IcePeer.instances.push(this)
+      }
+
+      addTrack() {}
+      createDataChannel() { return {} }
+      async createOffer() { return { type: 'offer' as const, sdp: 'v=0\r\nlive-offer' } }
+      async setLocalDescription(value: RTCSessionDescriptionInit) {
+        this.localDescription = value
+        this.iceGatheringState = 'gathering'
+      }
+      async setRemoteDescription(value: RTCSessionDescriptionInit) { this.remoteDescription = value }
+      close() {}
+
+      sammlungFertig() {
+        this.localDescription = { type: 'offer', sdp: 'v=0\r\nlive-offer\r\na=candidate:1 1 udp 1 192.0.2.1 5000 typ host' }
+        this.iceGatheringState = 'complete'
+        this.dispatchEvent(new Event('icegatheringstatechange'))
+      }
+    }
+
+    let originalPeer: typeof RTCPeerConnection | undefined
+
+    beforeEach(() => {
+      IcePeer.instances = []
+      originalPeer = globalThis.RTCPeerConnection
+      ;(globalThis as { RTCPeerConnection?: unknown }).RTCPeerConnection = IcePeer
+    })
+
+    afterEach(() => {
+      if (originalPeer) globalThis.RTCPeerConnection = originalPeer
+      else delete (globalThis as { RTCPeerConnection?: unknown }).RTCPeerConnection
+    })
+
+    async function liveSitzung() {
+      const haken = renderHook(() => useSprachsitzung(undefined, 'openai_live'))
+      await act(() => haken.result.current.starten())
+      await act(async () => {
+        leitung().simulateOpen()
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      return haken
+    }
+
+    it('schickt das Angebot erst mit den gesammelten Kandidaten', async () => {
+      await liveSitzung()
+
+      expect(IcePeer.instances).toHaveLength(1)
+      // Noch in der Sammlung: ein Angebot ohne Kandidaten wäre für GPT-Live
+      // ein Angebot, das nie zu einer Verbindung wird.
+      expect(leitung().sent).toHaveLength(0)
+
+      await act(async () => {
+        IcePeer.instances[0].sammlungFertig()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(leitung().sent).toHaveLength(1)
+      expect(JSON.parse(leitung().sent[0])).toEqual({
+        art: 'webrtc_offer',
+        sdp: 'v=0\r\nlive-offer\r\na=candidate:1 1 udp 1 192.0.2.1 5000 typ host',
+      })
+    })
+
+    it('gibt nach zehn Sekunden ohne fertige Sammlung auf und meldet die Verbindung', async () => {
+      const haken = await liveSitzung()
+
+      await act(async () => {
+        vi.advanceTimersByTime(10_000)
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      await waitFor(() => expect(haken.result.current.fehler).toBe('ai.voice.errors.connection'))
+      expect(haken.result.current.fehlerCode).toBe('ICE_TIMEOUT')
+      expect(leitung().sent).toHaveLength(0)
+    })
+  })
+
+  it.each([
+    ['AI_PROVIDER_SAFETY_STOPPED', 'ai.voice.errors.safety'],
+    ['REALTIME_CONTENT_STOPPED', 'ai.voice.errors.content'],
+    ['REALTIME_CONNECTION_LOST', 'ai.voice.errors.connection'],
+    ['REALTIME_HANDSHAKE_FAILED', 'ai.voice.errors.provider'],
+  ])('übersetzt den Endcode %s in %s', async (code, text) => {
+    // Ein Sicherheitsstopp ist keine Netzstörung, und „hat nicht geklappt"
+    // verschweigt, dass niemand es still noch einmal versucht.
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'fehler', code }))
+
+    expect(haken.result.current.fehler).toBe(text)
+    expect(haken.result.current.fehlerCode).toBe(code)
   })
 
   it('uebernimmt den Zustand vom Server', async () => {
@@ -372,64 +482,29 @@ describe('useSprachsitzung', () => {
     }])
   })
 
-  it('zeigt den Vorschlag an, auf den ein Ja fehlt', async () => {
+  it('nimmt eine gemeldete Karte nur als Anstoss zum Neuladen', async () => {
+    // Seit dem 25.09.2026 zeigt die Ansicht die Karte aus der Vorschlagsliste
+    // des Panels und bestätigt nur per Klick (`OffeneKarten`). Aus dem Rahmen
+    // übernimmt die Sitzung deshalb nichts, keinen Werkzeugnamen und keine
+    // Kennung — nur, dass es etwas Neues gibt.
     const haken = await sitzung()
-
-    act(() => {
-      leitung().simulateMessage({
-        art: 'vorschlag',
-        vorschlag: {
-          id: 'proposal-1',
-          tool_name: 'propose_server_delete',
-          expected_effect: 'Der Server „Kreativ" und seine Dateien werden entfernt.',
-        },
-      })
-    })
-
-    expect(haken.result.current.vorschlag).toEqual({
-      werkzeug: 'propose_server_delete',
-      wirkung: 'Der Server „Kreativ" und seine Dateien werden entfernt.',
-    })
-  })
-
-  it('nimmt den Vorschlag weg, sobald der Mensch etwas sagt', async () => {
-    const haken = await sitzung()
+    expect(haken.result.current.kartenImpuls).toBe(0)
 
     act(() => {
       leitung().simulateMessage({
         art: 'vorschlag',
         vorschlag: { id: 'p1', tool_name: 'propose_backup', expected_effect: '' },
+        klick: true,
       })
     })
-    expect(haken.result.current.vorschlag).not.toBeNull()
+    expect(haken.result.current.kartenImpuls).toBe(1)
 
+    // Ein Rahmen ohne Karte meldet nichts Neues, ein gesprochenes Ja auch nicht.
     act(() => {
+      leitung().simulateMessage({ art: 'vorschlag', vorschlag: null })
       leitung().simulateMessage({ art: 'gehoert', text: 'Ja, mach das' })
     })
-
-    // Die Bruecke raeumt ihre offenen Vorschlaege auf jedem Weg weg — Ja, Nein
-    // und „etwas ganz anderes". Eine Karte, die waehrend der laufenden Loeschung
-    // noch „wartet auf dich" sagt, ist die gefaehrlichste Art von falsch.
-    expect(haken.result.current.vorschlag).toBeNull()
-  })
-
-  it('glaubt keinen Werkzeugnamen, der ein Uebersetzungspfad sein koennte', async () => {
-    const haken = await sitzung()
-
-    act(() => {
-      // `tool_name` wird als Schluessel `ai.actions.tools.<name>` benutzt. Ein
-      // Name mit Punkten liesse den Menschen anderswo in `de.json` landen — und
-      // dort steht Text, den er fuer die Beschreibung der Aktion hielte.
-      leitung().simulateMessage({
-        art: 'vorschlag',
-        vorschlag: { id: 'p1', tool_name: '../../permissionDetails.ai_voice_use.title' },
-      })
-      leitung().simulateMessage({ art: 'vorschlag', vorschlag: { id: 'p2' } })
-      leitung().simulateMessage({ art: 'vorschlag', vorschlag: 'propose_backup' })
-      leitung().simulateMessage({ art: 'vorschlag' })
-    })
-
-    expect(haken.result.current.vorschlag).toBeNull()
+    expect(haken.result.current.kartenImpuls).toBe(1)
   })
 
   it('ueberspringt Rahmen, die kein JSON sind', async () => {
@@ -597,7 +672,7 @@ describe('useSprachsitzung', () => {
     expect(haken.result.current.pegel()).toBe(1)
 
     // Wer gerade redet, bestimmt die Quelle. Ein Maximum ueber beide waere
-    // bequemer und falsch — dann atmete die Blase auch dann, wenn nur ein
+    // bequemer und falsch — dann atmete der Schwarm auch dann, wenn nur ein
     // Luefter neben dem Mikrofon steht.
     act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'hoert' }))
     expect(haken.result.current.pegel()).toBeCloseTo(0.3, 5)
@@ -628,6 +703,137 @@ describe('useSprachsitzung', () => {
 
     act(() => leitung().simulateMessage({ art: 'tool_start', tool_name: 'read_server_status' }))
     expect(haken.result.current.werkzeug).toBe('read_server_status')
+  })
+
+  it('haelt den Werkzeuglauf bis zum Ende des Zugs, auch wenn die KI dazwischen spricht', async () => {
+    const haken = await sitzung()
+    expect(haken.result.current.werkzeugLaeuft).toBe(false)
+    expect(haken.result.current.werkzeugStarts).toBe(0)
+
+    act(() => leitung().simulateMessage({ art: 'werkzeug_gestartet', name: 'list_my_servers' }))
+    expect(haken.result.current.werkzeugLaeuft).toBe(true)
+    expect(haken.result.current.werkzeugStarts).toBe(1)
+
+    // „Ich sehe nach" mitten im Zug und das Ergebnis des Werkzeugs beenden
+    // den Zug nicht. Der Schwarm bliebe sonst nicht beim Logo, sondern
+    // spränge zwischen Logo und Globus hin und her.
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'spricht' }))
+    act(() => leitung().simulateMessage({ art: 'werkzeug', name: 'list_my_servers' }))
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'denkt' }))
+    expect(haken.result.current.werkzeugLaeuft).toBe(true)
+
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'bereit' }))
+    expect(haken.result.current.werkzeugLaeuft).toBe(false)
+  })
+
+  it('zaehlt jeden Werkzeugstart, auch zweimal dasselbe Werkzeug', async () => {
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'werkzeug_gestartet', name: 'read_server_status' }))
+    act(() => leitung().simulateMessage({ art: 'tool_start', tool_name: 'read_server_status' }))
+    // Ein Ergebnis ist kein Start — es schickt keinen zweiten Lichtring.
+    act(() => leitung().simulateMessage({ art: 'werkzeug', name: 'read_server_status' }))
+
+    expect(haken.result.current.werkzeugStarts).toBe(2)
+  })
+
+  it('beendet den Werkzeuglauf, sobald der Mensch wieder spricht oder auflegt', async () => {
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'werkzeug_gestartet', name: 'list_my_servers' }))
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'hoert' }))
+    expect(haken.result.current.werkzeugLaeuft).toBe(false)
+
+    act(() => leitung().simulateMessage({ art: 'werkzeug_gestartet', name: 'list_my_servers' }))
+    act(() => haken.result.current.beenden())
+    expect(haken.result.current.werkzeugLaeuft).toBe(false)
+  })
+
+  it('meldet die abgelaufene Sitzung, bis die neue ihren ersten Zustand schickt', async () => {
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'abgelaufen' }))
+    expect(haken.result.current.abgelaufen).toBe(true)
+    act(() => leitung().simulateClose(1000))
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+    })
+    // Neu verbunden, aber noch ohne Nachricht: der Schwarm liegt noch flach.
+    expect(sockets.instances).toHaveLength(2)
+    expect(haken.result.current.abgelaufen).toBe(true)
+
+    // Realtime und GPT-Live melden sich mit `zustand: bereit` — nicht mit
+    // `bereit`. Stand hier nur `bereit`, blieb „abgelaufen" für immer stehen.
+    act(() => leitung(1).simulateOpen())
+    act(() => leitung(1).simulateMessage({ art: 'zustand', zustand: 'bereit' }))
+    expect(haken.result.current.abgelaufen).toBe(false)
+  })
+
+  it('nimmt „abgelaufen" zurueck, wenn das Neuverbinden scheitert', async () => {
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'abgelaufen' }))
+    act(() => leitung().simulateClose(1000))
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+    })
+    act(() => leitung(1).simulateClose(1006))
+
+    // Aus ist aus: eine Sitzung, die nicht wiederkommt, ist nicht abgelaufen.
+    expect(haken.result.current.zustand).toBe('aus')
+    expect(haken.result.current.abgelaufen).toBe(false)
+  })
+
+  it('misst per WebRTC beim Sprechen die Stimme der KI und beim Zuhoeren das Mikrofon', async () => {
+    class StimmPeer {
+      static instances: StimmPeer[] = []
+      localDescription: RTCSessionDescriptionInit | null = null
+      ontrack: ((event: RTCTrackEvent) => void) | null = null
+      constructor() {
+        StimmPeer.instances.push(this)
+      }
+      addTrack() {}
+      createDataChannel() { return {} }
+      async createOffer() { return { type: 'offer' as const, sdp: 'v=0\r\noffer' } }
+      async setLocalDescription(value: RTCSessionDescriptionInit) { this.localDescription = value }
+      async setRemoteDescription() {}
+      close() {}
+    }
+    const originalPeer = globalThis.RTCPeerConnection
+    ;(globalThis as { RTCPeerConnection?: unknown }).RTCPeerConnection = StimmPeer
+    // jsdom spielt nichts ab; `play()` muss nur gelingen.
+    const abspielen = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    try {
+      const haken = renderHook(() => useSprachsitzung(undefined, 'openai_realtime'))
+      await act(() => haken.result.current.starten())
+      await act(async () => {
+        leitung().simulateOpen()
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      act(() => {
+        StimmPeer.instances[0].ontrack?.({ streams: [new FakeMediaStream()] } as unknown as RTCTrackEvent)
+      })
+      const kontext = audio.kontexte[audio.kontexte.length - 1]
+      // Der erste Messpunkt hängt am Mikrofon, der zweite an der Stimme.
+      expect(kontext.messer).toHaveLength(2)
+      kontext.messer[0].welle = 8
+      kontext.messer[1].welle = 32
+
+      // Vorher lief die Stimme per WebRTC an keinem Messpunkt vorbei: beim
+      // Sprechen fiel der Pegel auf die Wiedergabe zurück, die es auf diesem
+      // Weg gar nicht gibt — der Schwarm stand still, während die KI sprach.
+      act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'spricht' }))
+      expect(haken.result.current.pegel()).toBe(1)
+      act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'hoert' }))
+      expect(haken.result.current.pegel()).toBeCloseTo(0.25, 5)
+      act(() => haken.result.current.beenden())
+    } finally {
+      abspielen.mockRestore()
+      if (originalPeer) globalThis.RTCPeerConnection = originalPeer
+      else delete (globalThis as { RTCPeerConnection?: unknown }).RTCPeerConnection
+    }
   })
 
   it('normalisiert Geodaten aus alten Werkzeugereignissen vor der Anzeige', async () => {

@@ -49,11 +49,13 @@ const SCHREIBWERKZEUGE = [
   'propose_task_set',
   'propose_task_delete',
   // Die Guardian-Kopplung. `propose_file_delete` steht im Bestätigungsdialog
-  // rot (`UNUMKEHRBAR` in AiActionProposalCard.tsx), obwohl es in der Registry
-  // nicht `immer_bestaetigen` ist — die Registry entscheidet, ob eine Freigabe
-  // übersprungen werden darf, die Farbe entscheidet, wie gefragt wird.
+  // rot (`UNUMKEHRBAR` in AiActionProposalCard.tsx). Seit dem 23.09.2026 ist es
+  // in der Registry auch `immer_bestaetigen`, wie jedes Löschen — die Registry
+  // entscheidet, ob eine Freigabe übersprungen werden darf, die Farbe
+  // entscheidet, wie gefragt wird.
   'propose_server_repair',
   'propose_file_delete',
+  'propose_database_change',
   // Guardian je Server anders einstellen. Steht hier, seit die Reparatur den
   // Fall „der Blueprint erwartet etwas, das diese Node nicht leisten kann"
   // beheben darf, ohne die Vorlage für alle Server dieses Spiels zu ändern.
@@ -64,16 +66,33 @@ const SCHREIBWERKZEUGE = [
   'propose_restart_schedule_set',
   'propose_backup_schedule_set',
   'propose_email_send',
+  // `propose_message_friend`, `propose_message_contact` und
+  // `propose_message_group` standen hier bis 09/2026. Sie sind entfernt, weil
+  // ihre Ausführer serverseitig verschlüsselt haben: der Schlüssel ergab sich
+  // aus den beiden Benutzerkennungen, die in der Datenbank stehen, also konnte
+  // der Server jede so verschickte Nachricht wieder öffnen. Kurz darauf fielen
+  // auch die beiden Messenger-Suchen — die KI hat seitdem gar kein Werkzeug
+  // mehr, das den Messenger anfasst.
   'propose_calendar_event_create',
   'propose_calendar_event_update',
   'propose_calendar_event_delete',
   'propose_note_create',
   'propose_note_update',
   'propose_note_delete',
-  'propose_popup_create',
+  // Anlegen und Aendern in einem Werkzeug, wie `propose_task_set`: eine
+  // `popup_id` aus `popups_read` entscheidet, welcher der beiden Faelle
+  // gemeint ist. Zwei Werkzeuge waeren zweimal dasselbe Schema im Katalog.
+  'propose_popup_set',
   'propose_cloudflare_dns_record',
   'propose_cloudflare_dns_delete',
   'propose_modpack_install',
+  // Rechte anderer Benutzer. Alle vier rufen dieselben Grenzen wie das Panel
+  // (`rechtevergabe_service`); die Karte zeigt Hinzugefuegtes und Entzogenes
+  // getrennt, damit niemand einer Liste zustimmt, deren Unterschied er raten muss.
+  'propose_user_server_permission',
+  'propose_role_set',
+  'propose_user_roles',
+  'propose_role_delete',
 ] as const
 
 const SPRACHEN = { de, en } as Record<string, typeof de>

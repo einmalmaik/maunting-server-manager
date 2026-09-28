@@ -45,9 +45,14 @@ const KI_PUNKTE = [
   'usage',
   'memory',
   'memoryConsent',
+  'memorySearch',
   'attachments',
   'autonomy',
   'tools',
+  // Seit 09/2026: die KI hat kein Werkzeug mehr, das den Messenger anfasst.
+  // Steht bewusst direkt hinter `tools` — der eine Punkt sagt, was die
+  // Werkzeuge erreichen, der andere, was sie ausdruecklich nicht erreichen.
+  'noMessenger',
   'voice',
   'guardian',
   'tasks',
@@ -136,19 +141,83 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die zur Desktop-App und Postfächern gehoerende Fassung 3.0 vom 2026-09-02 aus', () => {
+  it('weist die Fassung 3.10 vom 2026-09-27 aus (Datenexport im Konto)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.0`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.10`)),
     ).toBeInTheDocument();
+    expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
+    // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
+    // Datenbank, nicht der Weg durch das Panel.
+    expect(i18n.t('privacyPolicy.sections.ai.items.messages')).toMatch(/nur verschlüsselt/);
+    expect(i18n.t('privacyPolicy.sections.ai.items.messages')).toMatch(/das Panel selbst entschlüsselt/);
+    expect(i18n.t('privacyPolicy.sections.ai.items.messages')).toMatch(/zugestellte Berichtsmail wird aus dem Ausgangskorb gelöscht/);
+    // 3.8: vorher war nur der Wert eines Eintrags verschluesselt, sein Name nicht.
+    expect(i18n.t('privacyPolicy.sections.ai.items.memory')).toMatch(/samt ihrem Namen verschlüsselt/);
+    // 3.9: der Offline-Speicher war an keinen Account gebunden und ueberlebte das Abmelden.
+    expect(i18n.t('privacyPolicy.sections.storage.items.offlineNotesAndCalendar')).toMatch(/Beim Abmelden wird er gelöscht/);
+    // 3.10: der Export; was nur das Geraet oeffnen kann, geht nicht ueber den Server.
+    expect(i18n.t('privacyPolicy.sections.retention.items.export')).toMatch(/nicht über den Server/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-09-02');
-    expect(stand).toHaveTextContent('2026-09-02');
+    expect(stand).toHaveAttribute('datetime', '2026-09-27');
+    expect(stand).toHaveTextContent('2026-09-27');
+  });
+
+  /**
+   * Ablehnen heisst beim Koppeln nur „kein Verlauf". Das Gerät bleibt ein Gerät
+   * des Kontos und bekommt jede neue Nachricht und den Notizschlüssel — wer das
+   * nicht will, muss es entfernen. Das gehört in die Erklärung, nicht erst in
+   * die Meldung nach dem Klick.
+   */
+  it('sagt, was nach dem Ablehnen beim Koppeln weiterläuft und wie man ein Gerät loswird', () => {
+    const de = i18n.t('privacyPolicy.sections.messenger.items.deviceHistory', { lng: 'de' })
+    expect(de).toMatch(/nur mit der Unterschrift des übergebenden Geräts/)
+    expect(de).toMatch(/bleibt das Gerät gekoppelt, aber ohne Freigabe/)
+    const en = i18n.t('privacyPolicy.sections.messenger.items.deviceHistory', { lng: 'en' })
+    expect(en).toMatch(/only accepts with the signature of the handing-over device/)
+    expect(en).toMatch(/the device stays paired but unapproved/)
+  });
+
+  /**
+   * Seit 24.09. sperrt Entfernen die Sitzung sofort; die 15 Minuten eines
+   * schon ausgestellten Zugangs sind weg. Was bleibt: der Notizschlüssel, den
+   * ein freigegebenes Gerät schon hatte, wird nicht erneuert. Und die
+   * Webversion schützt nicht gegen ihren eigenen Server — das steht dabei.
+   */
+  it('verspricht vom Entfernen nicht mehr, als es hält', () => {
+    const de = i18n.t('privacyPolicy.sections.messenger.items.deviceHistory', { lng: 'de' })
+    expect(de).toMatch(/gilt ab der nächsten Anfrage nicht mehr/)
+    expect(de).toMatch(/beim Entfernen wird er nicht erneuert/)
+    expect(de).toMatch(/Gegen einen Betreiber, der ihn verändert/)
+    expect(de).not.toMatch(/15 Minuten/)
+    const en = i18n.t('privacyPolicy.sections.messenger.items.deviceHistory', { lng: 'en' })
+    expect(en).toMatch(/stops working with its next request/)
+    expect(en).toMatch(/removing it does not replace that key/)
+    expect(en).toMatch(/an operator who changes it/)
+    expect(en).not.toMatch(/15 minutes/)
+    for (const lng of ['de', 'en']) {
+      expect(i18n.t('ai.profile.devicePairRemoved', { lng })).not.toMatch(/15/)
+    }
+  });
+
+  /**
+   * Die Download-Hinweise in der Seitenleiste sind der einzige Ort, an dem das Panel auf
+   * einen Fremdserver verweist, den der Betreiber nicht selbst eingetragen hat. Wer darauf
+   * klickt, gibt GitHub seine IP-Adresse — das gehoert benannt, und zwar bevor jemand klickt.
+   */
+  it('benennt, dass ein Klick auf die Download-Hinweise GitHub erreicht', () => {
+    renderPrivacy();
+
+    const punkt = i18n.t('privacyPolicy.sections.providers.items.downloads');
+    expect(punkt).not.toBe('privacyPolicy.sections.providers.items.downloads');
+    expect(punkt).toMatch(/GitHub/);
+    expect(punkt).toMatch(/IP-Adresse/);
+    expect(screen.getByText(punkt)).toBeInTheDocument();
   });
 
   /**
@@ -170,8 +239,10 @@ describe('Privacy page', () => {
     );
     // Ausdruecklich als Zahl festgehalten: neun Punkte vor der
     // Guardian-Kopplung, zehn danach, elf seit den stehenden KI-Aufgaben,
-    // dreizehn seit verknüpften Postfächern und Kalendern, vierzehn mit Sprachmodus.
-    expect(gerendert).toHaveLength(14);
+    // dreizehn seit verknüpften Postfächern und Kalendern, vierzehn mit
+    // Sprachmodus, fuenfzehn seit die KI den Messenger nicht mehr erreicht,
+    // sechzehn seit dem Google-Rückfall der Bedeutungssuche (24.09.2026).
+    expect(gerendert).toHaveLength(16);
   });
 });
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -11,33 +10,19 @@ from models import PostgresDatabase, PostgresUser, Server, User
 from schemas.postgres import (
     PostgresBootstrapRequest,
     PostgresConfirmRequest,
+    PostgresConnectionInfo,
     PostgresCreateDatabaseRequest,
-    PostgresCreateTableRequest,
     PostgresCreateUserRequest,
     PostgresDatabaseRequest,
-    PostgresDatabaseStats,
-    PostgresDeleteRowsRequest,
-    PostgresDropTableRequest,
-    PostgresDumpRequest,
-    PostgresExtensionDropRequest,
-    PostgresExtensionInfo,
-    PostgresExtensionRequest,
-    PostgresInsertRowRequest,
+    PostgresInstanceNetworkRequest,
     PostgresPowerUserDemoteRequest,
     PostgresPowerUserResponse,
     PostgresResourcesResponse,
-    PostgresRestoreRequest,
+    PostgresRevealRequest,
+    PostgresRevealResponse,
     PostgresRotatePasswordResponse,
-    PostgresRowsRequest,
-    PostgresRowsResponse,
-    PostgresSqlRequest,
-    PostgresSqlResponse,
-    PostgresTableInfo,
-    PostgresTableListItem,
-    PostgresTableRequest,
-    PostgresUpdateRowRequest,
 )
-from services import audit_service, postgres_service
+from services import audit_service, postgres_instance_service, postgres_service
 from services.postgres_service import PostgresServiceError
 
 router = APIRouter(prefix="/api/servers/{server_id}/databases", tags=["databases"])
@@ -257,246 +242,6 @@ def delete_user(
         raise _service_error(exc) from exc
 
 
-@router.post("/tables/list")
-def list_tables(
-    server_id: int,
-    body: PostgresDatabaseRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> dict[str, list[PostgresTableListItem]]:
-    _ensure_server(db, server_id)
-    require_server_permission(user, server_id, db, "server.databases.read")
-    try:
-        return {"tables": postgres_service.list_tables(db, server_id, body.database_id)}
-    except Exception as exc:
-        raise _service_error(exc) from exc
-
-
-@router.post("/stats", response_model=PostgresDatabaseStats)
-def database_stats(
-    server_id: int,
-    body: PostgresDatabaseRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    _ensure_server(db, server_id)
-    require_server_permission(user, server_id, db, "server.databases.read")
-    try:
-        return postgres_service.database_stats(db, server_id, body.database_id)
-    except Exception as exc:
-        raise _service_error(exc) from exc
-
-
-@router.post("/tables/info", response_model=PostgresTableInfo)
-def describe_table(
-    server_id: int,
-    body: PostgresTableRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    _ensure_server(db, server_id)
-    require_server_permission(user, server_id, db, "server.databases.read")
-    try:
-        return postgres_service.describe_table(db, server_id, body.database_id, body.schema_name, body.table_name)
-    except Exception as exc:
-        raise _service_error(exc) from exc
-
-
-@router.post("/tables")
-def create_table(
-    server_id: int,
-    body: PostgresCreateTableRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-    _: None = Depends(verify_csrf),
-):
-    _ensure_server(db, server_id)
-    require_server_permission(user, server_id, db, "server.databases.write")
-    try:
-        postgres_service.create_table(
-            db,
-            server_id,
-            body.database_id,
-            body.schema_name,
-            body.table_name,
-            [column.model_dump() for column in body.columns],
-        )
-        return {"message": "Tabelle erstellt"}
-    except Exception as exc:
-        raise _service_error(exc) from exc
-
-
-@router.post("/tables/drop")
-def drop_table(
-    server_id: int,
-    body: PostgresDropTableRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-    _: None = Depends(verify_csrf),
-):
-    _ensure_server(db, server_id)
-    require_server_permission(user, server_id, db, "server.databases.write")
-    if body.confirm_name != body.table_name:
-        raise HTTPException(status_code=400, detail="Bestätigungsname stimmt nicht überein")
-    try:
-        postgres_service.drop_table(db, server_id, body.database_id, body.schema_name, body.table_name)
-        return {"message": "Tabelle gelöscht"}
-    except Exception as exc:
-        raise _service_error(exc) from exc
-
-
-@router.post("/rows", response_model=PostgresRowsResponse)
-def read_rows(
-    server_id: int,
-    body: PostgresRowsRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    _ensure_server(db, server_id)
-    require_server_permission(user, server_id, db, "server.databases.read")
-    try:
-        return postgres_service.read_rows(
-            db,
-            server_id,
-            body.database_id,
-            body.schema_name,
-            body.table_name,
-            body.limit,
-            body.offset,
-            body.search,
-        )
-    except Exception as exc:
-        raise _service_error(exc) from exc
-
-
-@router.post("/rows/update")
-def update_row(
-    server_id: int,
-    body: PostgresUpdateRowRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-    _: None = Depends(verify_csrf),
-):
-    _ensure_server(db, server_id)
-    require_server_permission(user, server_id, db, "server.databases.write")
-    if body.database_id is None:
-        raise HTTPException(status_code=400, detail="database_id ist erforderlich")
-    try:
-        return postgres_service.update_row(
-            db,
-            server_id,
-            body.database_id,
-            body.schema_name,
-            body.table_name,
-            body.key_conditions,
-            body.updates,
-        )
-    except Exception as exc:
-        raise _service_error(exc) from exc
-
-
-@router.post("/rows/delete")
-def delete_rows(
-    server_id: int,
-    body: PostgresDeleteRowsRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-    _: None = Depends(verify_csrf),
-):
-    _ensure_server(db, server_id)
-    require_server_permission(user, server_id, db, "server.databases.write")
-    if body.database_id is None:
-        raise HTTPException(status_code=400, detail="database_id ist erforderlich")
-    try:
-        return postgres_service.delete_rows(
-            db,
-            server_id,
-            body.database_id,
-            body.schema_name,
-            body.table_name,
-            body.row_conditions,
-        )
-    except Exception as exc:
-        raise _service_error(exc) from exc
-
-
-@router.post("/rows/insert")
-def insert_row(
-    server_id: int,
-    body: PostgresInsertRowRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-    _: None = Depends(verify_csrf),
-):
-    _ensure_server(db, server_id)
-    require_server_permission(user, server_id, db, "server.databases.write")
-    if body.database_id is None:
-        raise HTTPException(status_code=400, detail="database_id ist erforderlich")
-    try:
-        return postgres_service.insert_row(
-            db,
-            server_id,
-            body.database_id,
-            body.schema_name,
-            body.table_name,
-            body.row_data,
-        )
-    except Exception as exc:
-        raise _service_error(exc) from exc
-
-
-@router.post("/extensions", response_model=list[PostgresExtensionInfo])
-def install_extension(
-    server_id: int,
-    body: PostgresExtensionRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-    _: None = Depends(verify_csrf),
-):
-    _ensure_server(db, server_id)
-    require_server_permission(user, server_id, db, "server.databases.write")
-    try:
-        postgres_service.install_extension(db, server_id, body.database_id, body.name)
-        return postgres_service.list_extensions(db, server_id, body.database_id)
-    except Exception as exc:
-        raise _service_error(exc) from exc
-
-
-@router.post("/extensions/list", response_model=list[PostgresExtensionInfo])
-def list_installed_extensions(
-    server_id: int,
-    body: PostgresDatabaseRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    _ensure_server(db, server_id)
-    require_server_permission(user, server_id, db, "server.databases.read")
-    try:
-        return postgres_service.list_extensions(db, server_id, body.database_id)
-    except Exception as exc:
-        raise _service_error(exc) from exc
-
-
-@router.delete("/extensions/{extension_name}", response_model=list[PostgresExtensionInfo])
-def drop_installed_extension(
-    server_id: int,
-    extension_name: str,
-    body: PostgresExtensionDropRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-    _: None = Depends(verify_csrf),
-):
-    _ensure_server(db, server_id)
-    require_server_permission(user, server_id, db, "server.databases.write")
-    if body.confirm_name != extension_name:
-        raise HTTPException(status_code=400, detail="Bestaetigungsname stimmt nicht ueberein")
-    try:
-        postgres_service.drop_extension(db, server_id, body.database_id, extension_name)
-        return postgres_service.list_extensions(db, server_id, body.database_id)
-    except Exception as exc:
-        raise _service_error(exc) from exc
-
-
 @router.post("/power-user", response_model=PostgresPowerUserResponse)
 def promote_to_power_user(
     server_id: int,
@@ -585,108 +330,102 @@ def demote_from_power_user(
         raise _service_error(exc) from exc
 
 
-@router.post("/sql", response_model=PostgresSqlResponse)
-def execute_sql(
+# ── pg_dump / psql round-trip fuer phpMyAdmin-aehnlichen Export/Import ──────
+
+
+# ── Verbindungs-Hub ────────────────────────────────────────────────────────
+
+
+@router.get("/connection", response_model=PostgresConnectionInfo)
+def connection(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Host, Port, Datenbanken und Rollen — ohne ein einziges Passwort."""
+    server = _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.read")
+    try:
+        return postgres_service.connection_info(db, server)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/credentials/reveal", response_model=PostgresRevealResponse)
+def reveal_credential(
     server_id: int,
-    body: PostgresSqlRequest,
+    body: PostgresRevealRequest,
+    response: Response,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
     _: None = Depends(verify_csrf),
 ):
-    _ensure_server(db, server_id)
+    """Gespeichertes Passwort anzeigen. Jeder Abruf steht im Audit-Log."""
+    server = _ensure_server(db, server_id)
     require_server_permission(user, server_id, db, "server.databases.admin")
     try:
-        return postgres_service.execute_sql(db, server_id, body.database_id, body.sql, body.limit)
+        result = postgres_service.reveal_credential(db, server, body.database_id, body.user_id)
     except Exception as exc:
         raise _service_error(exc) from exc
-
-
-# ── pg_dump / psql round-trip fuer phpMyAdmin-aehnlichen Export/Import ──────
-
-
-@router.post("/export")
-def export_databases(
-    server_id: int,
-    body: PostgresDumpRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-    _: None = Depends(verify_csrf),
-) -> Response:
-    """Streamt ein ``pg_dump``-SQL aller Server-DBs als ``application/sql``.
-
-    Dateiname: ``msm-server-<id>-<created_at>.sql``. SHA256 in ``X-MSM-Dump-SHA256``
-    Header (UI/CLI kann Integritaet pruefen). Permission: ``server.databases.admin``.
-
-    KISS: das SQL wird als Memory-String gebaut (nicht Streaming), weil die
-    Stripe-Groesse bei Server-DBs im einstelligen MB-Bereich bleibt -- Backup-
-    Streaming waere ein anderer Patch, kommt mit v1.5.x.
-    """
-    _ensure_server(db, server_id)
-    require_server_permission(user, server_id, db, "server.databases.admin")
-    try:
-        sql_text, db_names, size_bytes, sha, dur_ms = (
-            postgres_service.dump_server_databases(db, server_id)
-        )
-    except Exception as exc:
-        raise _service_error(exc) from exc
-
-    if not db_names:
-        raise HTTPException(status_code=400, detail="Server hat keine Postgres-Datenbanken.")
-
-    from datetime import datetime, timezone
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    filename = f"msm-server-{server_id}-{timestamp}.sql"
-    payload = sql_text.encode("utf-8")
-    headers = {
-        "Content-Disposition": f'attachment; filename="{filename}"',
-        "Content-Length": str(len(payload)),
-        "X-MSM-Dump-SHA256": sha,
-        "X-MSM-Dump-Duration-MS": str(dur_ms),
-        "X-MSM-Dump-DB-Names": ",".join(db_names),
-        "X-MSM-Dump-Size": str(size_bytes),
-    }
-    # Kein SQL-Inhalt im Audit — nur Metadaten.
     _audit_db(
         db,
         user,
-        action="postgres.dump",
+        action="postgres.credential.reveal",
         server_id=server_id,
-        details={"database_count": len(db_names), "size_bytes": size_bytes, "sha256": sha},
+        details={"database_id": body.database_id, "username": result["username"]},
     )
-    return Response(content=payload, media_type="application/sql; charset=utf-8", headers=headers)
+    response.headers["Cache-Control"] = "no-store"
+    return result
 
 
-@router.post("/import")
-def import_database(
+@router.put("/instance/network", response_model=PostgresConnectionInfo)
+def update_instance_network(
     server_id: int,
-    body: PostgresRestoreRequest,
+    body: PostgresInstanceNetworkRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
     _: None = Depends(verify_csrf),
-) -> dict:
-    """Stellt ein uebermitteltes ``application/sql``-Dump wieder her.
-
-    Verhalten: SQL wird in ALLE DBs des Servers geschrieben (DROP+CREATE via
-    ``--clean``-Semantik). Permission: ``server.databases.admin``.
-
-    Sicherheit: kein SQL-Pass-through, das ist psycopg2-verifiziertes DDL/DML
-    auf bereits-authentifizierten Server-eigenen DBs. Groessen-Limit von
-    200MB schuetzt vor Memory-Bomben (im PostgresRestoreRequest-Schema).
-    """
-    _ensure_server(db, server_id)
+):
+    """Allowlist und SSL-Pflicht einer eigenen Instanz (gilt sofort)."""
+    server = _ensure_server(db, server_id)
     require_server_permission(user, server_id, db, "server.databases.admin")
     try:
-        result = postgres_service.restore_sql_to_server_dbs(db, server_id, body.sql)
+        postgres_instance_service.update_network(
+            db, server, allowed_cidrs=body.allowed_cidrs, ssl_required=body.ssl_required
+        )
         _audit_db(
             db,
             user,
-            action="postgres.restore",
+            action="postgres.instance.network",
             server_id=server_id,
             details={
-                "database_count": len(result.get("databases") or []),
-                "bytes": result.get("bytes"),
+                "allowed_cidrs": postgres_instance_service.cidrs_of(server.postgres_instance),
+                "ssl_required": body.ssl_required,
             },
         )
-        return result
+        return postgres_service.connection_info(db, server)
     except Exception as exc:
         raise _service_error(exc) from exc
+
+
+@router.post("/instance/bootstrap")
+def bootstrap_instance(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+):
+    """Legt fehlende Datenbanken in der eigenen Instanz an (wiederholbar)."""
+    server = _ensure_server(db, server_id)
+    require_server_permission(user, server_id, db, "server.databases.admin")
+    try:
+        created = postgres_instance_service.bootstrap(db, server)
+        server.status_message = None
+        db.commit()
+        _audit_db(
+            db,
+            user,
+            action="postgres.instance.bootstrap",
+            server_id=server_id,
+            details={"created": created},
+        )
+        return {"created": created}
+    except Exception as exc:
+        raise _service_error(exc) from exc
+

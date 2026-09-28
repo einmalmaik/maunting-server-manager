@@ -110,6 +110,34 @@ describe('useAiLauf', () => {
     ])
   })
 
+  it('behält die Reihenfolge, obwohl Textstücke gesammelt eingetragen werden', async () => {
+    // Text und Denken gehen je Bild einmal in den Verlauf. Ein Werkzeug
+    // dazwischen muss trotzdem genau dort landen, wo es auf der Leitung kam,
+    // und der letzte Rest ohne `done` darf nicht verloren gehen.
+    vi.mocked(streamAiMessage).mockImplementation(async (_payload, onEvent) => {
+      onEvent({ event: 'message', data: { message_id: 'msg-a', request_id: 'r-1' } })
+      onEvent({ event: 'reasoning', data: { content: 'Erst ' } })
+      onEvent({ event: 'reasoning', data: { content: 'nachdenken.' } })
+      onEvent({ event: 'delta', data: { content: 'Ich ' } })
+      onEvent({ event: 'delta', data: { content: 'schaue.' } })
+      onEvent({ event: 'tool', data: werkzeug })
+      onEvent({ event: 'delta', data: { content: 'Fertig' } })
+      onEvent({ event: 'delta', data: { content: '.' } })
+    })
+    const { result } = baueLauf()
+
+    await act(async () => { await result.current.sendContent('Was ist los?') })
+
+    const [antwort] = antworten(result.current.entries)
+    expect(antwort.content).toBe('Ich schaue.Fertig.')
+    expect(antwort.sections).toEqual([
+      { art: 'denken', inhalt: 'Erst nachdenken.' },
+      { art: 'text', inhalt: 'Ich schaue.' },
+      { art: 'tool', werkzeug },
+      { art: 'text', inhalt: 'Fertig.' },
+    ])
+  })
+
   it('verwirft Textstücke, solange keine Nachricht läuft', async () => {
     // Beim Anhängen gibt es keine optimistische Blase. Käme ein `delta` vor
     // dem Abzug, wüsste niemand, an welche Antwort es gehört — eine erfundene

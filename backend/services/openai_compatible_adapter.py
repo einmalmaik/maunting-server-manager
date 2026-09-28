@@ -7,6 +7,7 @@ import json
 import logging
 import time
 from typing import Any, AsyncIterator
+import uuid
 
 import httpx
 
@@ -149,6 +150,7 @@ class ProviderToolCall:
     id: str
     name: str
     arguments: dict
+    thought_signature: str | None = None
 
 
 def schluesselkopf(
@@ -386,6 +388,74 @@ def _error_code(status_code: int) -> str:
     return "AI_PROVIDER_REQUEST_REJECTED"
 
 
+#: Der Code, unter dem ein Anbieter einen Lauf **aus Sicherheitsgruenden**
+#: angehalten hat. Heute sendet ihn nur OpenAIs Misalignment-Ueberwachung
+#: (GPT-6-Familie, Responses-API ueber WebSocket, mit persistiertem Denken oder
+#: mit Kompaktierung — genau der Weg, den MSM fuer OpenAI geht).
+#:
+#: Er ist der einzige Fehler, bei dem ein zweiter Versuch nicht bloss nutzlos,
+#: sondern **untersagt** ist. OpenAI schreibt dazu: „Stop dispatching further
+#: actions for the affected conversation. Do not automatically retry the blocked
+#: workflow." Ein Mensch vergleicht erst, was der Agent getan hat, mit dem, was
+#: er tun sollte — die Ueberwachung laeuft nebenher, eine Handlung kann also
+#: schon geschehen sein, bevor der Stopp kommt. Wer diesen Code liest, darf
+#: deshalb nirgends einen Rueckfall, eine Wiederholung oder einen naechsten
+#: Anlauf daraus machen: `openai_responses_adapter.stream_responses`
+#: (kein Wechsel von WebSocket auf HTTP), `ai_guardian_repair_service` (kein
+#: naechster Heilungsversuch) und `ai_meldestelle` (das Gehirn erfaehrt es).
+SICHERHEITSSTOPP = "AI_PROVIDER_SAFETY_STOPPED"
+
+#: Was OpenAI in ``error.code`` nennt, und welcher Satz fuer den Betreiber
+#: daraus wird. **Eine** Tabelle fuer alle Wege, auf denen ein solcher Fehler
+#: ankommt: als Status mit Koerper (`fehler_der_antwort`), als Ereignis im
+#: Strom und als Rahmen auf der WebSocket-Verbindung
+#: (`openai_responses_websocket.fehler_im_rahmen`) und am Ende eines
+#: Hintergrundauftrags. Bis zum 22.09.2026 stand sie zweimal da, und der
+#: Statusweg las den Code gar nicht: ein Sicherheitsstopp kommt als HTTP 403 und
+#: hiess dort „der API-Key wurde abgelehnt", ein leeres Guthaben kommt als 429
+#: und hiess „der Anbieter drosselt gerade — versuche es in einem Moment erneut".
+#:
+#: Was hier nicht steht, faellt auf die Marke zurueck, die der Aufrufer nennt —
+#: beim Status die aus `_error_code`. Die Tabelle ergaenzt, sie raet nicht.
+#:
+#: Quelle: developers.openai.com/api/docs/guides/error-codes und
+#: …/guides/safety-checks/misalignment-monitoring, gelesen am 22.09.2026.
+ANBIETER_FEHLERCODES: dict[str, str] = {
+    "rate_limit_exceeded": "AI_PROVIDER_RATE_LIMITED",
+    # Die Anfragerate stieg schneller, als der Dienst mitkommt — laut OpenAI
+    # auch dann, wenn sie innerhalb der eigenen Grenzen liegt. Dieselbe
+    # Handlung wie oben: warten.
+    "slow_down": "AI_PROVIDER_RATE_LIMITED",
+    "insufficient_quota": "AI_PROVIDER_PAYMENT_REQUIRED",
+    "billing_hard_limit_reached": "AI_PROVIDER_PAYMENT_REQUIRED",
+    # Vier Zahlungsgrenzen, die OpenAI als 429 meldet. Warten hilft bei keiner:
+    # „Retrying billing, spend, or quota errors won't restore API access."
+    "credit_balance_exhausted": "AI_PROVIDER_PAYMENT_REQUIRED",
+    "organization_spend_limit_exceeded": "AI_PROVIDER_PAYMENT_REQUIRED",
+    "project_spend_limit_exceeded": "AI_PROVIDER_PAYMENT_REQUIRED",
+    "organization_usage_limit_exceeded": "AI_PROVIDER_PAYMENT_REQUIRED",
+    "invalid_api_key": "AI_PROVIDER_AUTH_FAILED",
+    "authentication_error": "AI_PROVIDER_AUTH_FAILED",
+    "model_not_found": "AI_PROVIDER_ENDPOINT_NOT_FOUND",
+    "server_error": "AI_PROVIDER_UNAVAILABLE",
+    # Das Modell hat gerade keine Kapazitaet (503).
+    "server_is_overloaded": "AI_PROVIDER_UNAVAILABLE",
+    "misalignment_policy_violation": SICHERHEITSSTOPP,
+}
+
+
+def anbieter_fehlercode(code: object, rueckfall: str) -> str:
+    """Die MSM-Marke zu einem ``error.code`` des Anbieters, sonst ``rueckfall``.
+
+    ``code`` ist bei OpenAI ein Wort, bei OpenRouter manchmal eine Zahl, und
+    bei einem kaputten Rahmen irgendetwas. Nur ein bekanntes Wort aendert die
+    Marke; alles andere laesst den Rueckfall stehen.
+    """
+    if isinstance(code, str):
+        return ANBIETER_FEHLERCODES.get(code, rueckfall)
+    return rueckfall
+
+
 def _kurzfassung(message: str) -> str | None:
     """Fremdtext zu einer Zeile, die man einem Betreiber zeigen kann.
 
@@ -448,12 +518,35 @@ async def _error_detail(response: httpx.Response) -> str | None:
     Der Body wird nur bei einem Fehlerstatus gelesen und nie gestreamt. Alles
     daran ist Fremdtext: er wird redigiert, auf eine Zeile gebracht und gekuerzt.
     """
+    return (await _fehlerkoerper(response))[1]
+
+
+async def fehler_der_antwort(response: httpx.Response) -> tuple[str, str | None]:
+    """Marke und Wortlaut zu einer Antwort mit Fehlerstatus.
+
+    Der Code im Koerper schlaegt den Status, wo die Tabelle ihn kennt
+    (`ANBIETER_FEHLERCODES`). Derselbe Status traegt bei OpenAI naemlich
+    verschiedene Sachverhalte: 429 heisst „zu schnell" oder „kein Guthaben
+    mehr", 403 heisst „Land nicht unterstuetzt" oder „Sicherheitsstopp" — und
+    fuer den Betreiber ist das jedesmal eine andere Handlung.
+    """
+    code, detail = await _fehlerkoerper(response)
+    return anbieter_fehlercode(code, _error_code(response.status_code)), detail
+
+
+async def _fehlerkoerper(response: httpx.Response) -> tuple[object, str | None]:
+    """``error.code`` und die aufbereitete Meldung aus einem Fehler-Body.
+
+    Ein Lesevorgang fuer beides: der Koerper laesst sich nur einmal lesen, und
+    zwei Helfer, die ihn je fuer sich holen, bekaemen beim zweiten nichts mehr.
+    """
     try:
         raw = await response.aread()
     except (httpx.HTTPError, RuntimeError):
-        return None
+        return None, None
     text = raw[: MAX_PROVIDER_ERROR_BODY_BYTES].decode("utf-8", "replace")
     message: str | None = None
+    code: object = None
     try:
         parsed = json.loads(text)
     except (TypeError, json.JSONDecodeError):
@@ -461,6 +554,8 @@ async def _error_detail(response: httpx.Response) -> str | None:
     else:
         if isinstance(parsed, dict):
             error = parsed.get("error")
+            if isinstance(error, dict):
+                code = error.get("code")
             if isinstance(error, dict) and isinstance(error.get("message"), str):
                 message = error["message"]
             elif isinstance(error, str):
@@ -469,7 +564,87 @@ async def _error_detail(response: httpx.Response) -> str | None:
                 message = parsed["message"]
         if message is None:
             message = text
-    return _kurzfassung(message)
+    return code, _kurzfassung(message)
+
+
+def extract_thought_signature(data: Any) -> str | None:
+    """Extrahiert einen Google-Gemini thought_signature aus beliebigen Dict-Strukturen."""
+    if not isinstance(data, dict):
+        return None
+    for key in ("thought_signature", "thoughtSignature"):
+        sig = data.get(key)
+        if isinstance(sig, str) and sig.strip():
+            return sig.strip()
+    ec = data.get("extra_content")
+    if isinstance(ec, dict):
+        g = ec.get("google")
+        if isinstance(g, dict):
+            for key in ("thought_signature", "thoughtSignature"):
+                sig = g.get(key)
+                if isinstance(sig, str) and sig.strip():
+                    return sig.strip()
+        for key in ("thought_signature", "thoughtSignature"):
+            sig = ec.get(key)
+            if isinstance(sig, str) and sig.strip():
+                return sig.strip()
+    psf = data.get("provider_specific_fields")
+    if isinstance(psf, dict):
+        for key in ("thought_signature", "thoughtSignature"):
+            sig = psf.get(key)
+            if isinstance(sig, str) and sig.strip():
+                return sig.strip()
+    func = data.get("function")
+    if isinstance(func, dict):
+        for key in ("thought_signature", "thoughtSignature"):
+            sig = func.get(key)
+            if isinstance(sig, str) and sig.strip():
+                return sig.strip()
+    return None
+
+
+def ensure_google_thought_signatures(messages: list[dict]) -> list[dict]:
+    """Stellt sicher, dass Google Gemini-3-Modelle den verpflichtenden thought_signature
+    an jedem Tool-Call vorfinden. Fehlt die Signatur (z. B. Rundenuebergang, Migration),
+    wird der offizielle Google-Sentinel 'skip_thought_signature_validator' eingesetzt,
+    um HTTP 400 Bad Request zu verhindern.
+    """
+    angepasst: list[dict] = []
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            angepasst.append(msg)
+            continue
+        tool_calls = msg.get("tool_calls")
+        if not isinstance(tool_calls, list) or not tool_calls:
+            angepasst.append(msg)
+            continue
+
+        neue_calls: list[dict] = []
+        for tc in tool_calls:
+            if not isinstance(tc, dict):
+                neue_calls.append(tc)
+                continue
+            tc_copy = dict(tc)
+            sig = extract_thought_signature(tc_copy) or "skip_thought_signature_validator"
+            tc_copy["thought_signature"] = sig
+            if isinstance(tc_copy.get("function"), dict):
+                func_copy = dict(tc_copy["function"])
+                func_copy["thought_signature"] = sig
+                tc_copy["function"] = func_copy
+            ec = dict(tc_copy.get("extra_content")) if isinstance(tc_copy.get("extra_content"), dict) else {}
+            g = dict(ec.get("google")) if isinstance(ec.get("google"), dict) else {}
+            g["thought_signature"] = sig
+            ec["google"] = g
+            tc_copy["extra_content"] = ec
+            neue_calls.append(tc_copy)
+
+        msg_copy = dict(msg)
+        msg_copy["tool_calls"] = neue_calls
+        if neue_calls and "extra_content" not in msg_copy:
+            first_sig = neue_calls[0].get("thought_signature")
+            if first_sig:
+                msg_copy["extra_content"] = {"google": {"thought_signature": first_sig}}
+        angepasst.append(msg_copy)
+    return angepasst
 
 
 async def stream_chat_completion(
@@ -487,7 +662,6 @@ async def stream_chat_completion(
     cache_marke: bool = False,
     previous_response_id: str | None = None,
     use_websocket: bool = True,
-    compaction: bool = False,
     background: bool = False,
     **kwargs: Any,
 ) -> AsyncIterator[StreamChunk]:
@@ -640,7 +814,6 @@ async def stream_chat_completion(
             cache_marke=cache_marke,
             previous_response_id=previous_response_id,
             use_websocket=use_websocket,
-            compaction=compaction,
             background=background,
             **kwargs,
         ):
@@ -669,6 +842,33 @@ async def stream_chat_completion(
 
     spec = ai_provider_registry.anbieter(provider.provider_kind)
     headers = schluesselkopf(spec, api_key)
+
+    # **Wer Googles Signaturzwang bedienen muss, sagt der Zugang — nicht der
+    # Modellname.** Hier standen fuenf Bedingungen, von denen drei nie zutrafen
+    # und zwei zu oft:
+    #
+    # * ``provider_kind == "google_ai_studio"`` gibt es nicht. Der Schluessel
+    #   heisst ``"google"`` (`ai_provider_registry.google.ANBIETER.kind`), und
+    #   jede andere Stelle im Panel fragt genau so (`ai_provider_service`,
+    #   `routers/ai_voice`).
+    # * ``spec.name`` gibt es nicht. `Anbieter` hat ``kind`` und ``label``; das
+    #   ``getattr(…, "")`` verdeckte den Tippfehler und lieferte immer ``False``.
+    # * ``"gemini-2.5" in model_name`` traf dagegen auch ``google/gemini-2.5-pro``
+    #   **bei OpenRouter**. Dort ging damit an jedem Werkzeugaufruf ein
+    #   ``thought_signature: "skip_thought_signature_validator"`` mit hinaus —
+    #   ein Google-Sentinel in der Nutzlast eines fremden Anbieters, in einem
+    #   Feld, das dessen strenge Validierung ablehnen darf.
+    #
+    # Getragen hat das Ganze allein die Adressprüfung, und die bleibt: sie ist
+    # die ehrliche Frage („spreche ich mit Google?") und stammt aus dem
+    # Programm, nicht aus einem Formular.
+    target_base = provider_base_url(provider).lower()
+    is_google = (
+        provider.provider_kind == "google"
+        or "generativelanguage.googleapis.com" in target_base
+    )
+    sende_nachrichten = ensure_google_thought_signatures(messages) if (is_google and messages) else messages
+
     request_body = {
         # ``model`` uebersteuert das Standardmodell des Zugangs. Es gibt genau
         # einen Aufrufer dafuer, und der begruendet den Parameter: das Gehoer
@@ -677,7 +877,7 @@ async def stream_chat_completion(
         # dieselbe Adresse anzulegen waere die Alternative gewesen — mit zwei
         # Schluesseln, zwei Kontingenten und zwei Stellen zum Vergessen.
         "model": model or provider.default_model,
-        "messages": messages,
+        "messages": sende_nachrichten,
         "stream": True,
     }
     if tools:
@@ -722,7 +922,7 @@ async def stream_chat_completion(
             json=request_body,
         ) as response:
             if response.status_code != 200:
-                detail = await _error_detail(response)
+                marke, detail = await fehler_der_antwort(response)
                 logger.warning(
                     # Das Modell gehoert dazu: dieselbe Anlage bedient mehrere,
                     # und „abgelehnt" ohne den Namen zwingt zum Raten, welches.
@@ -731,9 +931,7 @@ async def stream_chat_completion(
                     model or provider.default_model,
                     response.status_code,
                 )
-                raise AiProviderRequestError(
-                    _error_code(response.status_code), detail
-                )
+                raise AiProviderRequestError(marke, detail)
 
             # Ab hier ist die Anfrage beim Anbieter angekommen und wird von ihm
             # abgerechnet — auch wenn der Strom gleich abbricht. Gezaehlt wird
@@ -741,22 +939,44 @@ async def stream_chat_completion(
             # stirbt, hat trotzdem stattgefunden.
             usage.anfragen += 1
             saw_done = False
-            tool_buffers: dict[int, dict[str, str]] = {}
+            tool_buffers: dict[int, dict[str, Any]] = {}
             seen_tool_starts: set[int] = set()
             emitted_tool_calls: set[int] = set()
+            last_seen_thought_signature: str | None = None
 
             def fertiger_aufruf(index: int) -> ProviderToolCall:
                 item = tool_buffers[index]
-                if not item["id"] or not item["name"]:
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
-                try:
-                    arguments = json.loads(item["arguments"] or "{}")
-                except json.JSONDecodeError as exc:
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR") from exc
+                name = item.get("name")
+                if not name:
+                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR", detail="Tool-Call ohne Namen empfangen")
+                call_id = item.get("id") or f"call_{index}_{uuid.uuid4().hex[:8]}"
+                raw_args = item.get("arguments") or "{}"
+                if isinstance(raw_args, dict):
+                    arguments = raw_args
+                else:
+                    try:
+                        arguments = json.loads(raw_args)
+                    except json.JSONDecodeError as exc:
+                        # Durch `_kurzfassung` wie jeder andere Fremdtext auch.
+                        # Werkzeugname **und** Argumente stammen aus der Ausgabe
+                        # des Modells, und das Modell hat in derselben Runde
+                        # Logzeilen, Dateiinhalte oder Websuchtreffer gelesen.
+                        # Hier gingen beide roh in `detail` — an der Redaktion
+                        # vorbei, die die Klasse in ihrem eigenen Namen zusagt.
+                        raise AiProviderRequestError(
+                            "AI_PROVIDER_PROTOCOL_ERROR",
+                            detail=_kurzfassung(
+                                f"Ungültige JSON-Argumente für {name}: {str(raw_args)[:100]}"
+                            ),
+                        ) from exc
                 if not isinstance(arguments, dict):
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
+                    raise AiProviderRequestError(
+                        "AI_PROVIDER_PROTOCOL_ERROR",
+                        detail=_kurzfassung(f"Tool-Argumente für {name} sind kein Objekt"),
+                    )
+                thought_sig = item.get("thought_signature") or last_seen_thought_signature
                 return ProviderToolCall(
-                    id=item["id"], name=item["name"], arguments=arguments
+                    id=call_id, name=name, arguments=arguments, thought_signature=thought_sig
                 )
             async for line in _iter_sse_lines(response, deadline=deadline):
                 if time.monotonic() > deadline:
@@ -778,14 +998,22 @@ async def stream_chat_completion(
                 if frames > MAX_STREAM_FRAMES:
                     raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
                 payload = line[5:].strip()
+                if not payload:
+                    continue
                 if payload == "[DONE]":
                     saw_done = True
                     break
                 try:
                     frame = json.loads(payload)
                 except (TypeError, json.JSONDecodeError) as exc:
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR") from exc
+                    raise AiProviderRequestError(
+                        "AI_PROVIDER_PROTOCOL_ERROR",
+                        detail=_kurzfassung(f"Ungültiger SSE-Frame: {payload[:100]}"),
+                    ) from exc
                 usage_uebernehmen(usage, frame.get("usage"))
+                frame_sig = extract_thought_signature(frame)
+                if frame_sig:
+                    last_seen_thought_signature = frame_sig
                 # Vor `choices`, denn ein Fehlerrahmen bringt beides mit: das
                 # `error`-Feld und ein leeres Delta mit `finish_reason: "error"`.
                 # Wer zuerst auf `choices` schaut, sieht nur das leere Delta,
@@ -802,29 +1030,73 @@ async def stream_chat_completion(
                 choices = frame.get("choices")
                 if not isinstance(choices, list) or not choices:
                     continue
-                delta = choices[0].get("delta") if isinstance(choices[0], dict) else None
+                c0 = choices[0] if isinstance(choices[0], dict) else {}
+                c0_sig = extract_thought_signature(c0)
+                if c0_sig:
+                    last_seen_thought_signature = c0_sig
+                delta = c0.get("delta") if isinstance(c0, dict) else None
+                if isinstance(delta, dict):
+                    delta_sig = extract_thought_signature(delta)
+                    if delta_sig:
+                        last_seen_thought_signature = delta_sig
                 tool_deltas = delta.get("tool_calls") if isinstance(delta, dict) else None
                 if isinstance(tool_deltas, list):
-                    for item in tool_deltas:
-                        if not isinstance(item, dict) or not isinstance(item.get("index"), int):
-                            raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
-                        idx = item["index"]
+                    for default_idx, item in enumerate(tool_deltas):
+                        if not isinstance(item, dict):
+                            raise AiProviderRequestError(
+                                "AI_PROVIDER_PROTOCOL_ERROR",
+                                detail=f"Tool-Call-Eintrag ist kein Objekt: {type(item).__name__}",
+                            )
+                        raw_idx = item.get("index")
+                        idx = raw_idx if isinstance(raw_idx, int) else default_idx
                         buffer = tool_buffers.setdefault(
-                            idx, {"id": "", "name": "", "arguments": ""}
+                            idx, {"id": "", "name": "", "arguments": "", "thought_signature": ""}
                         )
+                        item_sig = extract_thought_signature(item)
+                        if item_sig:
+                            buffer["thought_signature"] = item_sig
+                            last_seen_thought_signature = item_sig
+                        elif last_seen_thought_signature and not buffer.get("thought_signature"):
+                            buffer["thought_signature"] = last_seen_thought_signature
                         if isinstance(item.get("id"), str):
                             buffer["id"] += item["id"]
                         function = item.get("function")
                         if isinstance(function, dict):
                             if isinstance(function.get("name"), str):
                                 buffer["name"] += function["name"]
-                            if isinstance(function.get("arguments"), str):
-                                buffer["arguments"] += function["arguments"]
+                            raw_args = function.get("arguments")
+                            if isinstance(raw_args, dict):
+                                buffer["arguments"] = json.dumps(raw_args)
+                            elif isinstance(raw_args, str):
+                                buffer["arguments"] += raw_args
                                 if len(buffer["arguments"]) > MAX_TOOL_ARGUMENT_CHARS:
                                     raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
                         if idx not in seen_tool_starts and buffer["name"]:
                             seen_tool_starts.add(idx)
                             yield StreamChunk("tool_start", buffer["name"])
+                legacy_call = delta.get("function_call") if isinstance(delta, dict) else None
+                if isinstance(legacy_call, dict):
+                    buffer = tool_buffers.setdefault(
+                        0, {"id": "", "name": "", "arguments": "", "thought_signature": ""}
+                    )
+                    leg_sig = extract_thought_signature(legacy_call)
+                    if leg_sig:
+                        buffer["thought_signature"] = leg_sig
+                        last_seen_thought_signature = leg_sig
+                    elif last_seen_thought_signature and not buffer.get("thought_signature"):
+                        buffer["thought_signature"] = last_seen_thought_signature
+                    if isinstance(legacy_call.get("name"), str):
+                        buffer["name"] += legacy_call["name"]
+                    raw_args = legacy_call.get("arguments")
+                    if isinstance(raw_args, dict):
+                        buffer["arguments"] = json.dumps(raw_args)
+                    elif isinstance(raw_args, str):
+                        buffer["arguments"] += raw_args
+                        if len(buffer["arguments"]) > MAX_TOOL_ARGUMENT_CHARS:
+                            raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
+                    if 0 not in seen_tool_starts and buffer["name"]:
+                        seen_tool_starts.add(0)
+                        yield StreamChunk("tool_start", buffer["name"])
                 if isinstance(delta, dict):
                     # `reasoning` ist OpenRouter, `reasoning_content` der in
                     # OpenAI-kompatiblen Servern verbreitete Name. Beide sind

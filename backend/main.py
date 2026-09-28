@@ -7,6 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import Response
+from starlette.types import Scope
 
 from limits import parse
 from slowapi import _rate_limit_exceeded_handler
@@ -32,11 +36,12 @@ from routers import (
     blueprints_router,
     oauth_router,
     databases_router,
+    postgres_studio_router,
+    panel_database_studio_router,
     webhooks_outbound_router,
     singra_webhook_router,
     backup_config_router,
     panel_backups_router,
-    panel_database_router,
     nodes_router,
     incidents_router,
     change_timeline_router,
@@ -66,6 +71,9 @@ from routers import (
     vault_router,
     sync_events_router,
     sync_alias_router,
+    social_router,
+    social_calls_router,
+    livekit_admin_router,
 )
 from middleware.rate_limit import limiter, auth_rate_limit
 from services.steam_service import close_steam_service
@@ -161,6 +169,14 @@ async def lifespan(app: FastAPI):
             "ohne DIS nicht operieren."
         )
 
+    # Klartext-Adressen aus der alten Spalte users.email verschluesseln, bevor
+    # Migration 20260928_03 die Spalte entfernt. Sie bricht sonst ab, statt
+    # Adressen zu verlieren. Braucht den Sidecar, der oben geprueft ist.
+    if not is_testing:
+        from services.email_altbestand import klartext_verschluesseln
+        with engine.begin() as _conn:
+            klartext_verschluesseln(_conn)
+
     # Ensure database schema is up-to-date (automatically apply pending migrations in production)
     if not is_testing:
         from services.schema_manager import initialize_or_upgrade_schema
@@ -207,20 +223,6 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_encrypted VARCHAR(4096)"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_hash VARCHAR(64)"))
                 conn.execute(text("CREATE INDEX ix_users_email_hash ON users (email_hash)"))
-
-        # Bestehende Klartext-E-Mails immer nachziehen. Das ist auch fuer den
-        # SQLite->PostgreSQL-Import noetig: das Zielschema besitzt die neuen
-        # Spalten bereits, die importierten Legacy-Zeilen aber noch nicht.
-        from database import SessionLocal as _SL
-        from models import User as _U
-        _db = _SL()
-        try:
-            for _u in _db.query(_U).filter(_U.email_encrypted.is_(None)).all():
-                if _u.email_plain:
-                    _u.email = _u.email_plain  # setter verschluesselt + hasht
-            _db.commit()
-        finally:
-            _db.close()
 
     # Migration: webhook_subscriptions.secret_encrypted Spalte hinzufuegen
     if legacy_schema_bridge and 'webhook_subscriptions' in inspector.get_table_names():
@@ -524,22 +526,66 @@ async def lifespan(app: FastAPI):
             )
 
     # Managed PostgreSQL: on local node agent only (Phase 7 — no panel psycopg2).
+    # Wird in Produktion im Hintergrund ausgefuehrt, damit Port 8000 sofort oeffnet
+    # und der Backend-Neustart nicht auf Docker-Netzwerke oder Container des Agenten wartet.
     if settings.local_agent_enabled:
-        try:
-            from database import SessionLocal
-            from services.postgres_service import ensure_internal_postgres
-
-            _pg_db = SessionLocal()
+        if is_testing:
             try:
-                ensure_internal_postgres(_pg_db)
-            finally:
-                _pg_db.close()
-        except Exception as exc:
-            import logging
+                from database import SessionLocal
+                from services.postgres_service import ensure_internal_postgres
 
-            logging.getLogger(__name__).warning(
-                "Managed-PostgreSQL beim Panel-Start nicht bereit: %s", exc,
-            )
+                with SessionLocal() as _pg_db:
+                    ensure_internal_postgres(_pg_db)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Managed-PostgreSQL beim Panel-Start nicht bereit: %s", exc,
+                )
+        else:
+            async def _bg_ensure_postgres():
+                try:
+                    from database import SessionLocal
+                    from services.postgres_service import ensure_internal_postgres
+
+                    def _run():
+                        with SessionLocal() as _pg_db:
+                            ensure_internal_postgres(_pg_db)
+
+                    await _asyncio.to_thread(_run)
+                except Exception as exc:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Managed-PostgreSQL beim Panel-Start nicht bereit: %s", exc,
+                    )
+
+            _asyncio.create_task(_bg_ensure_postgres())
+
+    # Klartext aus der Zeit vor `DisText` verschluesseln und seine Reste per
+    # VACUUM FULL aus den Dateien holen. Im Hintergrund, weil es bei grossem
+    # Chatverlauf Minuten dauern kann.
+    if not is_testing:
+        async def _bg_dis_altbestand():
+            try:
+                from database import SessionLocal
+                from services.dis_altbestand import beim_start
+
+                def _run():
+                    with SessionLocal() as _alt_db:
+                        beim_start(_alt_db)
+
+                await _asyncio.to_thread(_run)
+            except Exception as exc:
+                import logging
+                from services.dis_client import DisSidecarError
+                # Bei SQL-Fehlern nur der Typ: ihre Meldung traegt die
+                # Parameter, und das waere hier genau der Klartext. Eine
+                # Sidecar-Meldung nennt nur Fehlername oder HTTP-Status.
+                logging.getLogger(__name__).warning(
+                    "DIS-Altbestand nicht nachgezogen: %s",
+                    exc if isinstance(exc, DisSidecarError) else type(exc).__name__,
+                )
+
+        _asyncio.create_task(_bg_dis_altbestand())
 
     # Initialize scheduler and load existing schedules
     start_scheduler()
@@ -577,6 +623,16 @@ async def lifespan(app: FastAPI):
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE oauth_providers ADD COLUMN client_secret_mask VARCHAR(64)"))
 
+    if legacy_schema_bridge and 'user_e2ee_devices' in inspector.get_table_names():
+        cols = [c['name'] for c in inspector.get_columns('user_e2ee_devices')]
+        if 'is_approved' not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE user_e2ee_devices ADD COLUMN is_approved BOOLEAN NOT NULL DEFAULT TRUE"))
+        for spalte, typ in (("approved_by", "VARCHAR(64)"), ("approval_signature", "TEXT"), ("auth_family", "VARCHAR(64)")):
+            if spalte not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE user_e2ee_devices ADD COLUMN {spalte} {typ}"))
+
     # OAuth: abgelaufene Login-Challenges aufraeumen (idempotent, low-cost).
     # Kein Hard-Fail, wenn der Cleanup scheitert — der naechste Startup macht
     # es wieder.
@@ -607,6 +663,18 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         import logging
         logging.getLogger(__name__).warning("KI-Freigaben-Cleanup fehlgeschlagen: %s", exc)
+    # E2EE: Abgelaufene blinde Umschläge (> 30 Tage) auf dem Relais-Server aufräumen
+    try:
+        from database import SessionLocal as _SessionLocalEnv
+        from services.social_service import SocialService
+        _env_db = _SessionLocalEnv()
+        try:
+            SocialService.cleanup_expired_envelopes(_env_db)
+        finally:
+            _env_db.close()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("E2EE-Envelope-Cleanup fehlgeschlagen: %s", exc)
 
 
     from services.ai_proposal_service import reconcile_interrupted_actions
@@ -667,6 +735,15 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     #
+    # Aktive SSE- und WebSocket-Verbindungen geordnet trennen, damit
+    # Uvicorn den Shutdown ohne blockierende Verbindungen vollziehen kann.
+    try:
+        from services.sync_event_service import SyncEventService
+        SyncEventService.close_all()
+    except Exception as _exc:
+        import logging
+        logging.getLogger(__name__).debug("SyncEventService.close_all bei Shutdown: %s", _exc)
+
     # Der Modellkatalog zuerst, und zwar **vor** den Clients: eine noch laufende
     # Auffrischung benutzt `ai_http_client`. Wird der geschlossen, waehrend sie
     # laeuft, endet sie in einem RuntimeError auf einem geschlossenen Client —
@@ -693,12 +770,16 @@ async def lifespan(app: FastAPI):
     from services.ai_geo_service import shutdown_http_client as shutdown_geo_http_client
     from services.ai_regional_connectors_service import shutdown_http_client as shutdown_regional_connectors_http_client
     from services.ai_satellite_service import shutdown_http_client as shutdown_satellite_http_client
+    from services.ai_geo_image_service import shutdown_http_client as shutdown_geo_image_http_client
+    from services.oauth_service import close_http_client as shutdown_oauth_http_client
 
     shutdown_caldav_client()
     shutdown_http_client()
     shutdown_geo_http_client()
     shutdown_regional_connectors_http_client()
     shutdown_satellite_http_client()
+    shutdown_geo_image_http_client()
+    shutdown_oauth_http_client()
     stop_scheduler()
     await close_steam_service()
 
@@ -736,6 +817,10 @@ app.add_middleware(
         "X-CSRF-Token",
         "Idempotency-Key",
         "X-Task-Retry-Of",
+        "X-Provider-Api-Key",
+        # Der Besitznachweis einer Mailbox (Chatgeheimnis, Gruppengeheimnis).
+        # Fehlte er hier, scheiterte in der App jede Vorabfrage mit 400.
+        "X-Mailbox-Token",
     ],
     expose_headers=["X-CSRF-Token"],
 )
@@ -763,6 +848,18 @@ def _csp_connect_src() -> str:
             parts.append("wss://" + origin[len("https://") :])
         elif origin.startswith("http://"):
             parts.append("ws://" + origin[len("http://") :])
+    # Ein externer LiveKit liegt auf einer fremden Herkunft. Ohne diesen Eintrag
+    # blockiert der Browser die Verbindung, und der Anruf endet wortlos, bevor er
+    # beginnt. Im integrierten Modus faellt das weg: der Sidecar liegt hinter
+    # Caddy auf derselben Herkunft und ist von 'self' gedeckt.
+    try:
+        from services.livekit_service import csp_origin as _livekit_csp_origin
+
+        livekit = _livekit_csp_origin()
+    except Exception:
+        livekit = ""
+    if livekit:
+        parts.extend(teil for teil in livekit.split() if teil not in parts)
     return " ".join(parts)
 
 
@@ -780,12 +877,12 @@ async def security_headers_middleware(request: Request, call_next):
     docs_page = request.url.path in _API_DOCS_PATHS
     csp = (
         "default-src 'self'; "
-        f"script-src 'self'{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; "
-        f"style-src 'self' 'unsafe-inline'{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de; "
-        f"img-src 'self' data:{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de; "
-        f"connect-src {_csp_connect_src()} https://singrabot.mauntingstudios.de https://client.crisp.chat wss://client.relay.crisp.chat https://va.tawk.to; "
-        "font-src 'self' https://singrabot.mauntingstudios.de; "
-        "frame-src 'self' https://singrabot.mauntingstudios.de; "
+        f"script-src 'self' 'wasm-unsafe-eval'{' ' + _DOCS_CDN if docs_page else ''} https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/ https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; "
+        f"style-src 'self' 'unsafe-inline'{' ' + _DOCS_CDN if docs_page else ''} https://hcaptcha.com https://*.hcaptcha.com https://singrabot.mauntingstudios.de; "
+        f"img-src 'self' data: blob:{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de; "
+        f"connect-src {_csp_connect_src()} https://singrabot.mauntingstudios.de https://client.crisp.chat wss://client.relay.crisp.chat https://va.tawk.to https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/; "
+        "font-src 'self' data: https://singrabot.mauntingstudios.de; "
+        "frame-src 'self' https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/ https://singrabot.mauntingstudios.de; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self';"
@@ -803,14 +900,30 @@ async def security_headers_middleware(request: Request, call_next):
     # gewinnt jetzt; wo keiner gesetzt ist, gilt weiterhin die Vorgabe.
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
 
-    # ── Cache-Control: Vite erzeugt content-gehashte Asset-Pfade ──
-    # /assets/* → 1 Jahr immutable (Hash aendert sich bei jeder neuen Version)
-    # /index.html und alle HTML-Routen → kein Cache (Browser fragt immer beim Server nach)
+    # ── Cache-Control ──
+    # /api/* und jeder Fehler → `no-store`, sofern die Route nichts Eigenes
+    # setzt (das Bild der Regionsanalyse etwa `private, max-age=900`). Bis
+    # 09/2026 fiel beides unter die Tagesregel ganz unten: `/api/auth/me`, jede
+    # 401 — und `public` erlaubt ausgerechnet geteilten Caches, die Antwort auf
+    # eine angemeldete Anfrage anderen auszuliefern (RFC 9111 §3.5). `no-store`
+    # statt `private, no-cache`: Die API liefert kein ETag, eine Nachfrage
+    # spart also nichts, und so bleibt auch die Platte des Browsers leer.
+    # /assets/* → 1 Jahr immutable (Vite hasht den Inhalt in den Namen). Ein
+    # 404 dort nicht: Nach einem Zurückrollen gibt es den Chunk wieder.
+    # HTML → kein Cache, erkannt auch am Inhaltstyp, damit ein SPA-Fallback
+    # unter `/ai` genauso nachfragt wie `/`.
     # Alles andere (Icons, Fonts, etc.) → 1 Tag
     path = request.url.path
-    if path.startswith("/assets/"):
+    html = (
+        path == "/"
+        or path.endswith(".html")
+        or response.headers.get("content-type", "").startswith("text/html")
+    )
+    if path.startswith("/api/") or response.status_code >= 400:
+        response.headers.setdefault("Cache-Control", "no-store")
+    elif path.startswith("/assets/"):
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-    elif path == "/" or path.endswith(".html"):
+    elif html:
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -836,6 +949,8 @@ app.include_router(roles_router)
 app.include_router(permissions_router)
 app.include_router(blueprints_router)
 app.include_router(databases_router)
+app.include_router(postgres_studio_router)
+app.include_router(panel_database_studio_router)
 # Ausgehende Webhooks (MSM → Drittsystem wie Discord-Bot): per-Server
 # Subscriptions mit Secret-Auth ueber X-Webhook-Secret-Header.
 app.include_router(webhooks_outbound_router)
@@ -850,7 +965,6 @@ app.include_router(oauth_router)
 # CSRF auf allen Write-Endpunkten. Credentials verschluesselt via DIS.
 app.include_router(backup_config_router)
 app.include_router(panel_backups_router)
-app.include_router(panel_database_router)
 app.include_router(incidents_router)
 app.include_router(change_timeline_router)
 app.include_router(guardian_router)
@@ -887,6 +1001,9 @@ app.include_router(notes_router)
 app.include_router(vault_router)
 app.include_router(sync_events_router)
 app.include_router(sync_alias_router)
+app.include_router(social_router)
+app.include_router(social_calls_router)
+app.include_router(livekit_admin_router)
 
 
 
@@ -934,16 +1051,52 @@ def health():
 # /assets/* ohne html-Fallback: fehlende JS-Chunks liefern 404 (text/plain),
 # nicht index.html — verhindert „MIME type text/html“ bei veralteten Lazy-Chunks.
 _FRONTEND_DIST = "/opt/msm/frontend/dist"
-_FRONTEND_ASSETS = f"{_FRONTEND_DIST}/assets"
-if settings.serve_frontend and os.path.exists(_FRONTEND_DIST):
-    app.mount(
+#: Hier fällt nichts auf die Startseite zurück: ein fehlender Chunk muss ein
+#: 404 bleiben (siehe unten), eine unbekannte API-Route auch.
+_OHNE_RUECKFALL = frozenset({"api", "ws", "assets"})
+
+
+class _OberflaecheMitRueckfall(StaticFiles):
+    """Das gebaute Frontend, mit der index.html für jede Unterseite.
+
+    Die Oberfläche routet im Browser (`BrowserRouter`): `/ai`, `/servers/12`
+    oder der Freigabelink aus einer Mail sind keine Dateien. Hinter Caddy
+    fängt `try_files {path} /index.html` das ab. Liefert das Panel die
+    Oberfläche selbst aus (Kubernetes), endete ein Neuladen dort bis 09/2026
+    in 404.
+
+    Zurück fällt nur, was ein Browser als Seite anfragt (`Accept: text/html`).
+    Ein fehlendes Bild, Skript oder Manifest bleibt 404 — HTML an seiner
+    Stelle hielte der Browser für den Inhalt. Am Punkt im Pfad lässt sich das
+    nicht ablesen: auch eine Unterseite darf einen tragen.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            erstes = path.replace(os.sep, "/").split("/", 1)[0]
+            seite = "text/html" in Headers(scope=scope).get("accept", "")
+            if exc.status_code != 404 or erstes in _OHNE_RUECKFALL or not seite:
+                raise
+        return await super().get_response("index.html", scope)
+
+
+def _frontend_einhaengen(ziel: FastAPI, dist: str) -> None:
+    """Hängt das gebaute Frontend ein. Eigene Funktion, damit die Tests genau
+    diese Einhängung gegen ein eigenes `dist` prüfen können."""
+    ziel.mount(
         "/assets",
         # Der Mount entfernt `/assets` vor der Dateisuche. Vite legt seine
         # Chunks aber in `dist/assets` ab; `dist` würde daher nach
         # `dist/<chunk>.js` statt nach `dist/assets/<chunk>.js` suchen.
         # Fehlende Chunks dürfen nie als SPA-HTML zurückkommen, weil das den
         # laufenden Client (unter anderem die Realtime-WebRTC-Sitzung) stoppt.
-        StaticFiles(directory=_FRONTEND_ASSETS, html=False),
+        StaticFiles(directory=f"{dist}/assets", html=False),
         name="frontend-assets",
     )
-    app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")
+    ziel.mount("/", _OberflaecheMitRueckfall(directory=dist, html=True), name="frontend")
+
+
+if settings.serve_frontend and os.path.exists(_FRONTEND_DIST):
+    _frontend_einhaengen(app, _FRONTEND_DIST)

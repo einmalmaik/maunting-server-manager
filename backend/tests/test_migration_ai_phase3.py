@@ -14,48 +14,9 @@ from database import Base
 from models import AiUsageEvent, User
 
 
-def _create_historic_user_credentials(engine) -> None:
-    """Legt eine Tabelle an, die es im ORM nicht mehr gibt.
-
-    Dieser Test stellt den Stand von Revision ``20260801_04`` mit
-    ``create_all`` nach — also mit den **heutigen** Modellen. Das geht nur so
-    lange gut, wie keine Tabelle aus dieser Revision spaeter wieder
-    verschwindet. ``ai_user_credentials`` ist die erste, die das tut:
-    ``20260810_04`` hat sie entfernt, weil Nutzerschluessel abgeschafft wurden.
-
-    Ohne diese Zeilen scheitert der ``downgrade`` an ``DROP INDEX`` auf einer
-    Tabelle, die es nie gab — und der Test haette einen Migrationsfehler
-    gemeldet, wo in Wahrheit nur seine eigene Nachstellung unvollstaendig war.
-    Der ``downgrade`` selbst bleibt unangetastet: fuer eine Datenbank, die
-    tatsaechlich auf ``20260801_04`` steht, ist er richtig.
-    """
-    with engine.begin() as connection:
-        connection.execute(text(
-            "CREATE TABLE ai_user_credentials ("
-            " id INTEGER NOT NULL PRIMARY KEY,"
-            " user_id INTEGER NOT NULL,"
-            " provider_id INTEGER NOT NULL,"
-            " api_key_encrypted VARCHAR(4096) NOT NULL,"
-            " api_key_hint VARCHAR(64) NOT NULL,"
-            " created_at DATETIME NOT NULL,"
-            " updated_at DATETIME NOT NULL,"
-            " CONSTRAINT uq_ai_user_credentials_user_provider UNIQUE (user_id, provider_id),"
-            " FOREIGN KEY(provider_id) REFERENCES ai_providers (id) ON DELETE CASCADE,"
-            " FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE)"
-        ))
-        connection.execute(text(
-            "CREATE INDEX ix_ai_user_credentials_user_id"
-            " ON ai_user_credentials (user_id)"
-        ))
-        connection.execute(text(
-            "CREATE INDEX ix_ai_user_credentials_provider_id"
-            " ON ai_user_credentials (provider_id)"
-        ))
-
-
-def test_ai_phase3_migration_upgrades_phase2_schema(tmp_path: Path) -> None:
+def test_ai_phase3_migration_upgrades_phase2_schema(tmp_path: Path, pg_wegwerf) -> None:
     """Bestehende Usage-Zeilen bleiben erhalten und erhalten NULL-Metadaten."""
-    db_url = f"sqlite:///{tmp_path / 'ai-phase3.db'}"
+    db_url = pg_wegwerf("ai-phase3")
     previous_database_url = settings.database_url
     settings.database_url = db_url
     engine = create_engine(db_url)
@@ -64,12 +25,10 @@ def test_ai_phase3_migration_upgrades_phase2_schema(tmp_path: Path) -> None:
     config.set_main_option("script_location", str(backend_dir / "migrations"))
     try:
         Base.metadata.create_all(engine)
-        _create_historic_user_credentials(engine)
         request_id = str(uuid4())
         with Session(engine) as db:
             user = User(
                 username="migration-user",
-                email_plain="migration@example.invalid",
                 password_hash="disabled",
                 is_active=True,
             )
@@ -88,7 +47,10 @@ def test_ai_phase3_migration_upgrades_phase2_schema(tmp_path: Path) -> None:
             )
             db.commit()
 
-        command.stamp(config, "20260801_04")
+        # Von `head` aus zurueck statt auf den alten Stand zu stempeln: PostgreSQL
+        # verweigert das Loeschen einer Tabelle, auf die eine spaetere noch zeigt.
+        command.stamp(config, "head")
+        command.downgrade(config, "20260801_04")
         command.downgrade(config, "20260801_03")
         phase2_inspector = inspect(engine)
         assert "ai_providers" not in phase2_inspector.get_table_names()

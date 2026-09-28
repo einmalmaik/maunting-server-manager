@@ -252,19 +252,33 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         Parameterlos und unmittelbar neben den Zählern, aus denen sie liest.
         Braucht sie einmal ein Argument, ist die Dopplung die ehrlichere
         Fassung — dann gehört sie zurück an ihre drei Stellen.
+
+        **Sie wirft nicht, und sie läuft nur einmal.** Alle drei Aufrufer
+        stehen unmittelbar vor dem Abschluss des Laufs — dem Fehlerereignis und
+        `_lauf_abschliessen`. Warf die Abrechnung, fiel beides aus: am
+        25.09.2026 lehnte `fail_ai_usage` eine Reservierung ab, die ein zweites
+        Backend schon geschlossen hatte, der Fehlerzweig rief diese Funktion ein
+        zweites Mal und scheiterte ebenso, und der Chat wartete zehn Minuten
+        auf ein Ende, das nie kam. Eine offene Reservierung schließt der
+        nächste Startabgleich; einen Zuschauer ohne Ende erlöst niemand.
         """
-        ai_stream._finalize_stream(
-            message_id=message_id,
-            usage_event_id=vorbereitung.usage_event_id,
-            content="".join(chunks),
-            usage=usage,
-            estimated_actual_tokens=0,
-            failed=True,
-            had_output=bool(chunks),
-            token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
-            reasoning="".join(thoughts),
-            abschnitte=ai_run_broker.abschnitte(run_id),
-        )
+        nonlocal abgerechnet
+        abgerechnet = True
+        try:
+            ai_stream._finalize_stream(
+                message_id=message_id,
+                usage_event_id=vorbereitung.usage_event_id,
+                content="".join(chunks),
+                usage=usage,
+                estimated_actual_tokens=0,
+                failed=True,
+                had_output=bool(chunks),
+                token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
+                reasoning="".join(thoughts),
+                abschnitte=ai_run_broker.abschnitte(run_id),
+            )
+        except Exception:
+            logger.exception("Abrechnung des abgebrochenen AI-Laufs gescheitert run_id=%s", run_id)
 
     try:
         tools, cache_marke, kontextgrenze, denken, denkstufe = await ai_stream._werkzeuge_und_grenze(
@@ -702,7 +716,6 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             # bei einer reinen Schreibrunde der Normalfall, gibt `had_output`
             # False und die Reserve wird freigegeben.
             _abbruch_abrechnen()
-            abgerechnet = True
             # Schreibt nichts um: `_lauf_abschliessen` laesst Endzustaende stehen
             # und meldet der Oberflaeche den tatsaechlichen.
             ai_stream._lauf_abschliessen(run_id, status="cancelled", stop_reason="superseded")
@@ -714,27 +727,42 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             1,
             (message_character_count(provider_messages) + len(complete_content) + 3) // 4,
         )
-        ai_stream._finalize_stream(
-            message_id=message_id,
-            usage_event_id=vorbereitung.usage_event_id,
-            content=complete_content,
-            usage=usage,
-            estimated_actual_tokens=estimated_actual,
-            failed=False,
-            # Eine Rueckfrage ist eine vollwertige Antwort, und ein Vorschlag
-            # ebenso — und ein geplantes Parken (`wait_until`) auch. Ohne das
-            # galten sie als "nichts geliefert" — genau der Fall, in dem der
-            # Chat "Keine Antwort erhalten" anzeigte.
-            had_output=(
-                bool(chunks) or gestellte_frage is not None or geparkt
-                or wecker is not None
-            ),
-            token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
-            reasoning="".join(thoughts),
-            abschnitte=ai_run_broker.abschnitte(run_id),
-            question=gestellte_frage,
-        )
+        # Im Thread: der Abschluss verschluesselt Antwort, Denktext und
+        # Gliederung beim Sidecar und bucht den Verbrauch. Auf der
+        # Ereignisschleife hielt das bei jedem Laufende alle anderen Stroeme
+        # und den Ton laufender Sprachsitzungen an (bis 27.09.2026). Die
+        # Abschnitte liest der Vermittler vorher hier, er gehoert der Schleife.
+        #
+        # `abgerechnet` steht schon vor dem Warten: trifft ein Abbruch das
+        # Warten, bucht der Faden trotzdem zu Ende, und der Abbruchzweig darf
+        # nicht ein zweites Mal buchen. Scheitert die Buchung, gilt sie wie
+        # bisher als nicht geschehen.
         abgerechnet = True
+        try:
+            await asyncio.to_thread(
+                ai_stream._finalize_stream,
+                message_id=message_id,
+                usage_event_id=vorbereitung.usage_event_id,
+                content=complete_content,
+                usage=usage,
+                estimated_actual_tokens=estimated_actual,
+                failed=False,
+                # Eine Rueckfrage ist eine vollwertige Antwort, und ein Vorschlag
+                # ebenso — und ein geplantes Parken (`wait_until`) auch. Ohne das
+                # galten sie als "nichts geliefert" — genau der Fall, in dem der
+                # Chat "Keine Antwort erhalten" anzeigte.
+                had_output=(
+                    bool(chunks) or gestellte_frage is not None or geparkt
+                    or wecker is not None
+                ),
+                token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
+                reasoning="".join(thoughts),
+                abschnitte=ai_run_broker.abschnitte(run_id),
+                question=gestellte_frage,
+            )
+        except Exception:
+            abgerechnet = False
+            raise
         ai_run_broker.veroeffentlichen(run_id, "done", {"message_id": message_id})
 
         if geparkt:

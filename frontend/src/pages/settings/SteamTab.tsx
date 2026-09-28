@@ -6,7 +6,9 @@ import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
+import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function SteamTab() {
   const { t } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
@@ -68,7 +70,7 @@ export function SteamTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -79,7 +81,7 @@ export function SteamTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Gamepad2 className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.steamApiKey')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('settings.steamApiKey')}</h2>
         </div>
 
         <div className="space-y-4">
@@ -120,7 +122,7 @@ export function SteamTab() {
                     setClearSteamKey(true)
                     setNewSteamKey('')
                   }}
-                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-destructive transition-colors"
                   title={t('settings.steamDeleteKey', { defaultValue: 'Schlüssel entfernen' })}
                   aria-label={t('settings.steamDeleteKey', { defaultValue: 'Schlüssel entfernen' })}
                 >
@@ -157,7 +159,7 @@ export function SteamTab() {
           </div>
 
           <div className="flex gap-3 justify-end flex-wrap pt-2">
-            <button
+            <Button variant="secondary"
               type="button"
               onClick={async () => {
                 setTestingSteam(true)
@@ -177,16 +179,16 @@ export function SteamTab() {
                 }
               }}
               disabled={testingSteam || !settings.steam_api_configured}
-              className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {testingSteam ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Send className="w-4 h-4" />
               )}
               {t('settings.steamTest')}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={async () => {
                 if (!newSteamKey.trim() && !clearSteamKey) return
@@ -215,15 +217,15 @@ export function SteamTab() {
                 }
               }}
               disabled={savingSteam || (!newSteamKey.trim() && !clearSteamKey) || !canWrite}
-              className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {savingSteam ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Save className="w-4 h-4" />
               )}
               {t('settings.steamSaveKey')}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -232,11 +234,11 @@ export function SteamTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Gamepad2 className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.steamAccountTitle')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('settings.steamAccountTitle')}</h2>
         </div>
 
         <div className="space-y-4">
-          <div className="p-3 bg-status-error/10 border border-status-error/30 rounded-md text-sm text-status-error flex items-start gap-2">
+          <div className="p-3 bg-status-destructive/10 border border-status-destructive/30 rounded-md text-sm text-status-destructive flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
             <span>{t('settings.steamAccountWarning')}</span>
           </div>
@@ -277,28 +279,28 @@ export function SteamTab() {
 
           <div className="flex gap-3 justify-end">
             {settings.steam_account_configured && (
-              <button
+              <Button variant="secondary"
                 type="button"
                 onClick={handleRemoveSteamAccount}
                 disabled={!canWrite}
-                className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+                className="inline-flex items-center gap-2 disabled:opacity-50"
               >
                 {t('settings.steamAccountRemove')}
-              </button>
+              </Button>
             )}
-            <button
+            <Button
               type="button"
               onClick={handleSaveSteamAccount}
               disabled={savingSteamAccount || !steamAccountUsername.trim() || !steamAccountPassword || !canWrite}
-              className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {savingSteamAccount ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Save className="w-4 h-4" />
               )}
               {t('settings.steamAccountSave')}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

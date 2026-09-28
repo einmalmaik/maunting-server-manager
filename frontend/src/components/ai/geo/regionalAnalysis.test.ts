@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { applyGeoCameraCommand, normalizeRegionalAnalysis } from './regionalAnalysis'
+import { applyGeoCameraCommand, normalizeRegionalAnalysis, regionalbildPfad } from './regionalAnalysis'
 
 describe('normalizeRegionalAnalysis', () => {
   it('überführt eine alte Koordinatenform in den stabilen Kartenvertrag', () => {
@@ -29,6 +29,61 @@ describe('normalizeRegionalAnalysis', () => {
 
     expect(analysis?.weather).toBeUndefined()
     expect(analysis?.satellite?.scenes).toEqual([])
+  })
+
+  it('behält Art, Ausschnitt und Quelle des Bildes — und woher das Panel es holt', () => {
+    const analysis = normalizeRegionalAnalysis({
+      location: 'Berlin',
+      coordinates: { latitude: 52.52, longitude: 13.405 },
+      satellite: {
+        available: true,
+        scenes: [],
+        layers: {
+          latest_imagery: {
+            id: 'latest_imagery',
+            kind: 'map',
+            name: 'Kartenbild',
+            url: 'https://server.arcgisonline.com/export',
+            bbox: [13.0883, 52.3382, 13.7611, 52.6755],
+            // Ein Kartenbild hat keinen Zeitpunkt und keine Szene, auch wenn einer mitkommt.
+            captured_at: '2026-09-12T10:15:59Z',
+            scene_id: 'S2_fremd',
+            attribution: 'Esri, Vantor, Earthstar Geographics, and the GIS User Community',
+          },
+        },
+      },
+    })
+
+    const ebene = analysis?.satellite?.layers?.latest_imagery
+    expect(ebene).toMatchObject({
+      kind: 'map',
+      bbox: [13.0883, 52.3382, 13.7611, 52.6755],
+      attribution: 'Esri, Vantor, Earthstar Geographics, and the GIS User Community',
+    })
+    expect(ebene?.captured_at).toBeUndefined()
+    expect(ebene?.scene_id).toBeUndefined()
+    expect(regionalbildPfad(ebene!)).toBe('/ai/geo/image?kind=map&bbox=13.0883,52.3382,13.7611,52.6755')
+  })
+
+  it('holt eine Szene über ihre ID und nimmt keinen unbrauchbaren Ausschnitt an', () => {
+    const szene = normalizeRegionalAnalysis({
+      coordinates: { latitude: 52.52, longitude: 13.405 },
+      satellite: {
+        available: true,
+        scenes: [],
+        layers: { latest_imagery: { id: 'latest_imagery', kind: 'scene', name: 'Satellitenszene', url: 'https://x.test/q', scene_id: 'S2B/+?&' } },
+      },
+    })?.satellite?.layers?.latest_imagery
+    expect(regionalbildPfad(szene!)).toBe('/ai/geo/image?kind=scene&scene_id=S2B%2F%2B%3F%26')
+
+    for (const bbox of [[13.7, 52.3, 13.0, 52.6], [1, 2, 3], ['a', 1, 2, 3], [0, -91, 1, 1]]) {
+      const karte = normalizeRegionalAnalysis({
+        coordinates: { latitude: 52.52, longitude: 13.405 },
+        satellite: { available: true, scenes: [], layers: { l: { id: 'l', kind: 'map', name: 'Kartenbild', url: 'https://x.test', bbox } } },
+      })?.satellite?.layers?.l
+      expect(karte?.bbox).toBeUndefined()
+      expect(regionalbildPfad(karte!)).toBeNull()
+    }
   })
 
   it('übernimmt nur den definierten Verkehrs- und öffentlichen Beitragsvertrag', () => {

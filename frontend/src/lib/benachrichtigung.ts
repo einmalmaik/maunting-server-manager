@@ -138,13 +138,19 @@ export async function sendeGeraeteBenachrichtigung({
           try {
             const reg = await navigator.serviceWorker.getRegistration() || await navigator.serviceWorker.ready
             if (reg && typeof reg.showNotification === 'function') {
+              // Höchste Priorität für WhatsApp-ähnliche Heads-up-Banner auf Android
               await reg.showNotification(titel, {
                 body: text,
                 icon: '/favicon.ico',
                 badge: '/favicon.ico',
-                vibrate: [200, 100, 200],
-                tag: 'msm-push-alert',
-              } as NotificationOptions)
+                vibrate: [200, 100, 200, 100, 200],
+                tag: 'msm-high-priority-alert',
+                renotify: true,
+                requireInteraction: true,
+                silent: false,
+                urgency: 'high',
+                timestamp: Date.now(),
+              } as NotificationOptions & { urgency?: string })
               return true
             }
           } catch {
@@ -160,12 +166,22 @@ export async function sendeGeraeteBenachrichtigung({
     if ('Notification' in window) {
       try {
         if (Notification.permission === 'granted') {
-          new Notification(titel, { body: text })
+          new Notification(titel, {
+            body: text,
+            icon: '/favicon.ico',
+            requireInteraction: true,
+            tag: 'msm-high-priority-alert',
+          })
           return true
         } else if (Notification.permission !== 'denied') {
           const permission = await Notification.requestPermission()
           if (permission === 'granted') {
-            new Notification(titel, { body: text })
+            new Notification(titel, {
+              body: text,
+              icon: '/favicon.ico',
+              requireInteraction: true,
+              tag: 'msm-high-priority-alert',
+            })
             return true
           }
         }

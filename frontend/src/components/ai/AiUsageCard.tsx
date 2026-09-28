@@ -48,7 +48,7 @@ export function AiUsageCard() {
     <section className="msm-card space-y-4 p-6" aria-labelledby="ai-usage-mine-title">
       <div className="flex items-center gap-2">
         <Gauge className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h2 id="ai-usage-mine-title" className="font-headline text-lg font-semibold text-on-surface">
+        <h2 id="ai-usage-mine-title" className="font-headline text-title-lg font-semibold text-on-surface">
           {t('ai.usage.mineTitle')}
         </h2>
       </div>
@@ -95,7 +95,7 @@ export function AiUsageCard() {
                     // Der volle rote Balken allein bliebe zweideutig — er sieht aus
                     // wie „heute aufgebraucht, morgen wieder da“. Der Satz nennt den
                     // Unterschied: hier war nie etwas freigegeben.
-                    <p className="text-xs text-status-error">{t('ai.usage.blocked')}</p>
+                    <p className="text-xs text-status-destructive">{t('ai.usage.blocked')}</p>
                   )}
                 </>
               )}

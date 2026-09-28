@@ -18,7 +18,9 @@ import pytest
 from sqlalchemy.orm import Session
 
 from models import AiConversation, AiSkill, Role, RolePermission, Team, User
-from services import ai_action_service, ai_learning_policy, ai_skill_service, team_service
+from services import (
+    ai_action_service, ai_embedding_service, ai_learning_policy, ai_skill_service, team_service,
+)
 from services.ai_action_errors import AiActionValidationError
 from services.ai_context_service import build_provider_messages
 from services.auth_service import AuthService
@@ -253,6 +255,37 @@ def test_learning_needs_no_user_interaction(db: Session, regular_user: User) -> 
     assert "valheim-ram" in {
         view.skill_key for view in ai_skill_service.visible_skills(db, regular_user)
     }
+
+
+def test_ohne_lokales_modell_bleibt_das_persoenliche_team_stehen(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Rückfall der Bedeutungssuche darf die offene Arbeit nicht zurückrollen.
+
+    Fehlt das lokale Modell, sucht `encode` einen Google-Zugang in der
+    Datenbank. Früher in einer eigenen Sitzung — und die liegt in dieser Suite
+    auf derselben Verbindung. Ihr Schließen rollte das eben angelegte
+    persönliche Team zurück, der Skill zeigte auf ein Team, das es nicht mehr
+    gab, und `learn_skill` meldete „parallel geändert". Ob das geschah, hing
+    davon ab, ob auf dem Rechner zufällig das Modell lag; deshalb wird das
+    Fehlen hier erzwungen.
+    """
+    monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
+    _allow(db, regular_user, "ai.skills.use")
+
+    result = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="learn_skill",
+        arguments={
+            "skill_key": "valheim-ram", "name": "Valheim braucht 6 GB",
+            "description": "Wenn ein Valheim-Server still endet, zuerst den RAM pruefen.",
+            "body": "Exit code 137 heisst OOM-Kill.", "scope": "team",
+        },
+    )
+
+    assert result["learned"] is True
+    row = db.query(AiSkill).filter(AiSkill.skill_key == "valheim-ram").one()
+    team = db.get(Team, row.team_id)
+    assert team is not None and team.personal_for_user_id == regular_user.id
 
 
 def test_learning_lands_in_the_single_real_team(db: Session, regular_user: User) -> None:

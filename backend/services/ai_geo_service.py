@@ -403,53 +403,72 @@ def get_current_weather(latitude: float, longitude: float) -> dict[str, Any] | N
         return None
 
 
+def _sentinel_attribution(captured_at: str) -> str:
+    """Copernicus verlangt die Nennung mit dem Jahr der Aufnahme."""
+    year = captured_at[:4] if re.fullmatch(r"\d{4}", captured_at[:4]) else ""
+    return f"Copernicus Sentinel data {year}".strip()
+
+
 def _region_result(
     geo: dict[str, Any],
     weather: dict[str, Any] | None,
     satellite_data: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Baut den sofort nutzbaren, vollständigen Karten- und Wetterstand."""
+    """Baut den sofort nutzbaren, vollständigen Karten- und Wetterstand.
+
+    Das Bild der Region ist eine Ebene mit ihrer Art: ``scene`` ist die
+    neueste Sentinel-2-Szene mit Aufnahmezeitpunkt, ``map`` das Kartenbild —
+    ein Mosaik aus vielen Aufnahmen, kein Überflug und ohne Zeitpunkt. Das
+    Kartenbild braucht keinen Schlüssel; eine Region hat deshalb immer eins.
+    Neben einer Szene steht es als zweite Ebene: Ohne MapTiler ist es das
+    Bild, auf das die Kamera zoomt — eine Szenenvorschau hat nur einen
+    Ausschnitt. Szenen stehen nur in ``scenes``, wenn es wirklich welche gibt:
+    ein Kartenbild als Szene ohne Datum sähe aus wie ein Überflug.
+    """
+    from services import ai_geo_image_service
+
     lat = geo["latitude"]
     lon = geo["longitude"]
     bbox = geo["bbox"]
     weather = weather or {}
-    min_lon, min_lat, max_lon, max_lat = bbox
 
-    true_color_url = (
-        f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?"
-        f"bbox={min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}&bboxSR=4326&imageSR=4326&size=1600,1200&format=jpg&f=image"
-    )
-    preview_scene = next((scene for scene in satellite_data if scene.get("preview_url")), None)
-    if preview_scene:
-        preview_url = str(preview_scene["preview_url"])
-        source_name = str(preview_scene.get("mission") or "Copernicus")
-        source_resolution = "gemäß Szene"
-        source_description = "Neueste in Copernicus gefundene Szene. Zeitpunkt und Bewölkung stehen unten."
-    else:
-        preview_url = true_color_url
-        source_name = "ArcGIS World Imagery"
-        source_resolution = "anbieterabhängig"
-        source_description = "Kartenbild für den abgefragten Bereich; eine Sentinel-Szene war nicht verfügbar."
-        satellite_data = [{
-            "id": f"world-imagery-{lat:.4f}-{lon:.4f}",
-            "mission": source_name,
-            "datetime": "",
-            "cloud_cover_percent": None,
-            "preview_url": preview_url,
-        }]
-
-    layers: dict[str, dict[str, Any]] = {
-        "latest_imagery": {
-            "id": "latest_imagery",
-            "name": "Kartenbild",
-            "url": preview_url,
-            "resolution": source_resolution,
-            "mission": source_name,
-            "description": source_description,
-        },
+    # Der Ausschnitt geht mit: das Panel holt das Bild über
+    # `/api/ai/geo/image?kind=map&bbox=…` genau für ihn.
+    ausschnitt = ai_geo_image_service.image_bbox(bbox, lat, lon)
+    kartenbild: dict[str, Any] = {
+        "id": "map_imagery",
+        "kind": "map",
+        "name": "Kartenbild",
+        "scene_id": None,
+        "bbox": list(ausschnitt),
+        "captured_at": None,
+        "cloud_cover_percent": None,
+        "url": ai_geo_image_service.map_export_url(ausschnitt),
+        "resolution": "anbieterabhängig",
+        "mission": "ArcGIS World Imagery",
+        "attribution": ai_geo_image_service.ARCGIS_ATTRIBUTION,
+        "description": "Mosaik aus vielen Aufnahmen, kein einzelner Überflug und ohne Aufnahmezeitpunkt.",
     }
-    for scene in satellite_data:
-        scene["layers"] = layers
+    scene = next((item for item in satellite_data if item.get("preview_url")), None)
+    if scene:
+        captured_at = str(scene.get("datetime") or "")
+        szene: dict[str, Any] = {
+            "id": "latest_imagery",
+            "kind": "scene",
+            "name": "Satellitenszene",
+            "scene_id": str(scene["id"]),
+            "bbox": None,
+            "captured_at": captured_at,
+            "cloud_cover_percent": scene.get("cloud_cover_percent"),
+            "url": str(scene["preview_url"]),
+            "resolution": "10 m",
+            "mission": str(scene.get("mission") or "Sentinel-2"),
+            "attribution": _sentinel_attribution(captured_at),
+            "description": "Neueste Sentinel-2-Szene über dem Gebiet; Aufnahmezeitpunkt und Bewölkung stehen dabei.",
+        }
+        layers = {"latest_imagery": szene, "map_imagery": kartenbild}
+    else:
+        layers = {"latest_imagery": {**kartenbild, "id": "latest_imagery"}}
 
     loc_name = geo["name"]
     loc_country = geo["country"]
@@ -464,8 +483,8 @@ def _region_result(
         },
         "weather": weather,
         "satellite": {
-            "available": len(satellite_data) > 0,
-            "scenes": satellite_data,
+            "available": True,
+            "scenes": [item for item in satellite_data if item.get("preview_url")],
             "layers": layers,
         },
         # Nachrichten und externe Regionalsignale ergänzt der aufrufende Pfad.
@@ -486,7 +505,6 @@ def analyze_region_initial(location_name: str) -> dict[str, Any]:
 
     lat = geo["latitude"]
     lon = geo["longitude"]
-    bbox = geo["bbox"]
 
     satellite_configured = ai_satellite_service.is_configured()
 
@@ -494,7 +512,7 @@ def analyze_region_initial(location_name: str) -> dict[str, Any]:
         if not satellite_configured:
             return []
         try:
-            return ai_satellite_service.search_satellite_imagery(bbox=bbox, limit=2)
+            return ai_satellite_service.search_satellite_imagery(latitude=lat, longitude=lon, limit=2)
         except Exception as exc:
             logger.info("Satellitenbildsuche nicht erfolgreich error=%s", type(exc).__name__)
             return []

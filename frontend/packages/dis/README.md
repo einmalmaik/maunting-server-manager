@@ -89,6 +89,7 @@ import { deriveRawKey } from '@msdis/shield/kdf';
 | `@msdis/shield/key-management` | Content-key wrap / unwrap / rotation |
 | `@msdis/shield/post-quantum` | ML-KEM-768 + RSA-4096 hybrid key wrapping (sharing / emergency access) |
 | `@msdis/shield/integrity` | SHA-256, constant-time compare, verification |
+| `@msdis/shield/messaging` | Double Ratchet: forward secrecy + post-compromise security for a message stream |
 | `@msdis/shield/migrations` | Ordered, explicit payload migrations |
 
 ## Security

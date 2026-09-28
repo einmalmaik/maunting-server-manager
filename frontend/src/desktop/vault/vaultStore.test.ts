@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import i18n from '@/i18n'
 import {
   useVaultStore,
   blindVaultSync,
@@ -6,13 +7,29 @@ import {
   cleanseVulnerableBiometricData,
   runBiometricsMigration,
 } from './vaultStore'
-import { biometrieLoeschen, pruefeBiometrieVerfuegbar } from '../tauri'
+import {
+  biometrieLoeschen,
+  biometrieSpeichern,
+  biometrieSpeicherFragtSelbst,
+  pruefeBiometrieVerfuegbar,
+  verifiziereBiometrie,
+} from '../tauri'
 
 vi.mock('../tauri', () => ({
+  FACH_TRESOR: 'vault_biometric_key',
   biometrieSpeichern: vi.fn().mockResolvedValue(undefined),
   biometrieEntsperren: vi.fn().mockImplementation(async () => 'super-strong-master-password-2026'),
   biometrieLoeschen: vi.fn().mockResolvedValue(undefined),
   pruefeBiometrieVerfuegbar: vi.fn().mockResolvedValue(true),
+  // Seit 09/2026 fragt `isBiometricsAvailable` zweierlei: ob sich jemand
+  // bestätigen lässt **und** ob ein Geheimnis verwahrt werden kann. Auf Android
+  // gilt nur das erste, und der Tresor bot dort einen Schnelleinstieg an, der
+  // beim Einrichten scheiterte.
+  biometrieSpeicherVerfuegbar: vi.fn().mockResolvedValue(true),
+  // Windows-Verhalten: der Credential Store fragt beim Ablegen nicht von sich
+  // aus, also muss die Anwendung vorher bestätigen lassen. Auf Android ist das
+  // umgekehrt — dafür der Test weiter unten.
+  biometrieSpeicherFragtSelbst: vi.fn().mockResolvedValue(false),
   verifiziereBiometrie: vi.fn().mockResolvedValue(true),
   setzeTresorSchutz: vi.fn().mockResolvedValue(undefined),
 }))
@@ -117,6 +134,29 @@ describe('useVaultStore - Security & Operations', () => {
     expect(state.userKey).toBe(fakeKey)
   })
 
+  it('startet die Untätigkeitsfrist beim Entsperren neu, nicht beim Laden der Seite', async () => {
+    const masterPassword = 'super-strong-master-password-2026'
+    await useVaultStore.getState().initializeVault(masterPassword)
+    useVaultStore.getState().lock()
+
+    // Der Sperrbildschirm stand eine halbe Stunde, bevor jemand sein Passwort
+    // eingetippt hat.
+    useVaultStore.setState({
+      autoLockMinutes: 15,
+      lastActivityTime: Date.now() - 30 * 60 * 1000,
+    })
+
+    expect(await useVaultStore.getState().unlock(masterPassword)).toBe(true)
+
+    // Ohne das Nachstellen der Uhr gilt der Tresor im selben Moment als „seit
+    // 30 Minuten untätig": er geht auf und beim nächsten Takt sofort wieder zu.
+    expect(useVaultStore.getState().checkAutoLock()).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(true)
+
+    useVaultStore.getState().recordActivity()
+    expect(useVaultStore.getState().isUnlocked).toBe(true)
+  })
+
   it('enforces payload attachment limit (<500 KB) in saveItem (SEC-08)', async () => {
     const fakeKey = {} as CryptoKey
     useVaultStore.setState({
@@ -209,7 +249,7 @@ describe('useVaultStore - Security & Operations', () => {
       const store = useVaultStore.getState()
       await store.initializeVault('master-password-123')
 
-      await expect(store.enableBiometrics('master-password-123')).rejects.toThrow(/nicht unterstützt/)
+      await expect(store.enableBiometrics('master-password-123')).rejects.toThrow(i18n.t('mss.vault.errors.biometricsNotSupported'))
     } finally {
       vi.mocked(pruefeBiometrieVerfuegbar).mockResolvedValue(true)
     }
@@ -222,7 +262,7 @@ describe('useVaultStore - Security & Operations', () => {
 
       const ok = await store.unlockWithBiometrics()
       expect(ok).toBe(false)
-      expect(useVaultStore.getState().unlockError).toMatch(/nicht unterstützt/)
+      expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.biometricsNotSupportedShort'))
     } finally {
       vi.mocked(pruefeBiometrieVerfuegbar).mockResolvedValue(true)
     }
@@ -262,6 +302,38 @@ describe('useVaultStore - Security & Operations', () => {
     }
   })
 
+  it('fragt vor dem Ablegen, wenn der Schlüsselspeicher es nicht selbst tut (Windows)', async () => {
+    const masterPassword = 'super-strong-master-password-2026'
+    const store = useVaultStore.getState()
+    await store.initializeVault(masterPassword)
+    vi.mocked(verifiziereBiometrie).mockClear()
+
+    await store.enableBiometrics(masterPassword)
+
+    // Der Credential Store nimmt ein Geheimnis wortlos entgegen. Ohne diese
+    // Abfrage könnte jemand an einem unbeaufsichtigten Rechner seinen eigenen
+    // Finger an ein fremdes Master-Passwort binden.
+    expect(verifiziereBiometrie).toHaveBeenCalledOnce()
+    expect(biometrieSpeichern).toHaveBeenCalledWith(masterPassword, 'vault_biometric_key')
+  })
+
+  it('fragt nicht doppelt, wenn der Schlüsselspeicher selbst fragt (Android)', async () => {
+    const masterPassword = 'super-strong-master-password-2026'
+    const store = useVaultStore.getState()
+    await store.initializeVault(masterPassword)
+    vi.mocked(verifiziereBiometrie).mockClear()
+    vi.mocked(biometrieSpeicherFragtSelbst).mockResolvedValueOnce(true)
+
+    await store.enableBiometrics(masterPassword)
+
+    // Der Android-Keystore verlangt die Bestätigung schon zum Verschlüsseln.
+    // Eine zusätzliche davor wäre derselbe Fingerabdruck zweimal hintereinander
+    // — das sieht nicht nach Sorgfalt aus, sondern nach einem Fehler.
+    expect(verifiziereBiometrie).not.toHaveBeenCalled()
+    expect(biometrieSpeichern).toHaveBeenCalledWith(masterPassword, 'vault_biometric_key')
+    expect(useVaultStore.getState().isBiometricsEnabled).toBe(true)
+  })
+
   it('enableBiometrics rejects wrong password even when canary is missing from localStorage', async () => {
     const store = useVaultStore.getState()
     await store.initializeVault('correct-password-123')
@@ -273,7 +345,7 @@ describe('useVaultStore - Security & Operations', () => {
     localStorage.removeItem(`mss:vault_canary_${currentBucket}`)
 
     // Attempting to enable biometrics with wrong password must throw and not save to keyring
-    await expect(store.enableBiometrics('wrong-password-456')).rejects.toThrow(/Falsches Master-Passwort/)
+    await expect(store.enableBiometrics('wrong-password-456')).rejects.toThrow(i18n.t('mss.vault.errors.wrongMasterPassword'))
     expect(useVaultStore.getState().isBiometricsEnabled).toBe(false)
   })
 
@@ -320,7 +392,7 @@ describe('useVaultStore - Security & Operations', () => {
 
     const success = await useVaultStore.getState().unlock('master-password-123')
     expect(success).toBe(false)
-    expect(useVaultStore.getState().unlockError).toMatch(/Falsches Master-Passwort/)
+    expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.wrongMasterPassword'))
   })
 
   it('blindVaultSync sends POST to /api/vault/blind-sync with credentials: omit and auth_token', async () => {
@@ -361,7 +433,7 @@ describe('useVaultStore - Security & Operations', () => {
     expect(checkHintSpy).not.toHaveBeenCalled()
   })
 
-  it('syncWithServer preserves in-flight pending mutations and writes canary if missing', async () => {
+  it('syncWithServer sends in-flight pending mutations in a follow-up round and writes canary if missing', async () => {
     const bucketId = 'e'.repeat(64)
     const rawKey = new Uint8Array(32).fill(7)
     const userKey = await window.crypto.subtle.importKey(
@@ -384,7 +456,9 @@ describe('useVaultStore - Security & Operations', () => {
     localStorage.setItem(`mss:vault_pending_${bucketId}`, JSON.stringify([initialMutation]))
 
     // Mock blindVaultSync to simulate an in-flight mutation added while request is awaiting response
-    vi.spyOn(globalThis, 'fetch').mockImplementationOnce(async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    fetchSpy.mockClear()
+    fetchSpy.mockImplementationOnce(async () => {
       // Simulate concurrent mutation added in flight
       const inFlightMutation = { id: 'mut-2', ciphertext: 'sv-vault-v1:c2', revision: 2, is_deleted: false }
       const current = JSON.parse(localStorage.getItem(`mss:vault_pending_${bucketId}`) || '[]')
@@ -398,13 +472,22 @@ describe('useVaultStore - Security & Operations', () => {
         }),
       } as Response
     })
+    fetchSpy.mockImplementationOnce(async () => ({
+      ok: true,
+      json: async () => ({
+        server_revision: 6,
+        entries: [{ id: 'mut-2', ciphertext: 'sv-vault-v1:c2', revision: 6, is_deleted: false }],
+      }),
+    }) as Response)
 
     await useVaultStore.getState().syncWithServer()
 
-    // mut-1 was synced, but mut-2 added in flight must be preserved!
-    const pendingRemaining = JSON.parse(localStorage.getItem(`mss:vault_pending_${bucketId}`) || '[]')
-    expect(pendingRemaining).toHaveLength(1)
-    expect(pendingRemaining[0].id).toBe('mut-2')
+    // mut-2 was added in flight: it must survive the first round and go out
+    // in the second, not wait for the next save to trigger a sync.
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    const zweiteRunde = JSON.parse(String(fetchSpy.mock.calls[1][1]?.body))
+    expect(zweiteRunde.mutations.map((m: { id: string }) => m.id)).toEqual(['mut-2'])
+    expect(localStorage.getItem(`mss:vault_pending_${bucketId}`)).toBeNull()
 
     // Canary should be created since it was missing
     const canary = localStorage.getItem(`mss:vault_canary_${bucketId}`)
@@ -441,12 +524,10 @@ describe('useVaultStore - Security & Operations', () => {
   })
 
   it('unlock succeeds and does not lock out user when canary is valid but a cached blob is corrupted', async () => {
-    const salt = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'
-    localStorage.setItem('mss:vault_salt', salt)
     const masterPassword = 'correct-master-password-123'
 
-    // First unlock initializes canary and derives bucketId
-    await useVaultStore.getState().unlock(masterPassword)
+    // Initialize vault with canary and derives bucketId
+    await useVaultStore.getState().initializeVault(masterPassword)
     const bucketId = useVaultStore.getState().bucketId!
     expect(useVaultStore.getState().isUnlocked).toBe(true)
 
@@ -476,11 +557,9 @@ describe('useVaultStore - Security & Operations', () => {
   })
 
   it('unlock succeeds when cached blobs contain corrupted non-JSON data', async () => {
-    const salt = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'
-    localStorage.setItem('mss:vault_salt', salt)
     const masterPassword = 'correct-master-password-456'
 
-    await useVaultStore.getState().unlock(masterPassword)
+    await useVaultStore.getState().initializeVault(masterPassword)
     const bucketId = useVaultStore.getState().bucketId!
     useVaultStore.getState().lock()
 
@@ -499,5 +578,138 @@ describe('useVaultStore - Security & Operations', () => {
     const queue = getPendingQueue(bucketId)
     expect(queue).toEqual([])
   })
+
+  it('rejects unlock with wrong password and does not open empty vault after initializeVault', async () => {
+    const store = useVaultStore.getState()
+    const initialized = await store.initializeVault('my-correct-master-password')
+    expect(initialized).toBe(true)
+
+    await store.saveItem({ service: 'RealService', username: 'realuser', password: 'realpassword' })
+    expect(useVaultStore.getState().items).toHaveLength(1)
+
+    // Lock the vault
+    store.lock()
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(useVaultStore.getState().items).toHaveLength(0)
+
+    // Attempting unlock with wrong password (e.g. 1 2 3) must be rejected and MUST NOT open empty vault!
+    const wrongSuccess = await store.unlock('123')
+    expect(wrongSuccess).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(useVaultStore.getState().items).toHaveLength(0)
+    expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.wrongMasterPassword'))
+
+    // Also misspellings must be rejected
+    const typoSuccess = await store.unlock('my-correct-master-passwrd')
+    expect(typoSuccess).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(useVaultStore.getState().items).toHaveLength(0)
+    expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.wrongMasterPassword'))
+
+    // Unlocking with the actual correct password must succeed and restore items
+    const correctSuccess = await store.unlock('my-correct-master-password')
+    expect(correctSuccess).toBe(true)
+    expect(useVaultStore.getState().isUnlocked).toBe(true)
+    expect(useVaultStore.getState().items).toHaveLength(1)
+    expect(useVaultStore.getState().items[0].service).toBe('RealService')
+  })
+
+  it('rejects unlock when vault has not been initialized yet and does not create phantom vault', async () => {
+    const store = useVaultStore.getState()
+    expect(store.isInitialized).toBe(false)
+    expect(localStorage.getItem('mss:vault_setup_done')).toBeNull()
+    expect(localStorage.getItem('mss:vault_salt')).toBeNull()
+
+    const success = await store.unlock('123')
+    expect(success).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.notSetup'))
+
+    // Crucial: unlock must NOT have created a salt or marked vault as set up
+    expect(localStorage.getItem('mss:vault_setup_done')).toBeNull()
+    expect(localStorage.getItem('mss:vault_salt')).toBeNull()
+    expect(localStorage.getItem('mss:vault_canary')).toBeNull()
+  })
+
+  it('rejects wrong password on legacy canary and migrates on correct password', async () => {
+    const { deriveVaultKeys, encryptVaultEntry } = await import('./vaultCrypto')
+    const salt = new Uint8Array(32).fill(9)
+    const saltHex = Array.from(salt).map((b) => b.toString(16).padStart(2, '0')).join('')
+    localStorage.setItem('mss:vault_salt', saltHex)
+    localStorage.setItem('mss:vault_setup_done', 'true')
+
+    const { userKey, bucketId } = await deriveVaultKeys('legacy-correct-password', salt)
+    const legacyCanary = await encryptVaultEntry(
+      { canary: 'mss-vault-initialized-v1', createdAt: Date.now() },
+      userKey,
+      'vault-canary',
+    )
+    localStorage.setItem(`mss:vault_canary_${bucketId}`, legacyCanary)
+    localStorage.setItem('mss:vault_server_bucket', bucketId)
+
+    const store = useVaultStore.getState()
+
+    // Wrong password must be rejected
+    const wrongSuccess = await store.unlock('wrong-master-password')
+    expect(wrongSuccess).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.wrongMasterPassword'))
+    expect(localStorage.getItem('mss:vault_canary')).toBeNull()
+
+    // Correct password must unlock and migrate canary
+    const correctSuccess = await store.unlock('legacy-correct-password')
+    expect(correctSuccess).toBe(true)
+    expect(useVaultStore.getState().isUnlocked).toBe(true)
+    expect(localStorage.getItem('mss:vault_canary')).toBe(legacyCanary)
+  })
+
+  it('rejects unlock when salt exists in localStorage but vault is not initialized', async () => {
+    // Simulate leftover or pre-seeded salt without initialized vault
+    localStorage.setItem('mss:vault_salt', 'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899')
+    const store = useVaultStore.getState()
+    expect(store.isInitialized).toBe(false)
+    expect(localStorage.getItem('mss:vault_setup_done')).toBeNull()
+
+    const success = await store.unlock('123')
+    expect(success).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.notSetup'))
+    expect(localStorage.getItem('mss:vault_setup_done')).toBeNull()
+    expect(localStorage.getItem('mss:vault_canary')).toBeNull()
+  })
+
+  it('rejects wrong password on newly initialized vault with 0 items and keeps canary intact', async () => {
+    const store = useVaultStore.getState()
+    const initialized = await store.initializeVault('real-master-password-123')
+    expect(initialized).toBe(true)
+    expect(store.items).toHaveLength(0)
+
+    const originalCanary = localStorage.getItem('mss:vault_canary')
+    expect(originalCanary).not.toBeNull()
+
+    store.lock()
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+
+    // Entering 123 when vault has 0 items must NOT unlock an empty vault
+    const wrongSuccess = await store.unlock('123')
+    expect(wrongSuccess).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.wrongMasterPassword'))
+    expect(localStorage.getItem('mss:vault_canary')).toBe(originalCanary)
+  })
+
+  it('queues vault-canary in pendingQueue upon initializeVault for server sync', async () => {
+    const store = useVaultStore.getState()
+    const initialized = await store.initializeVault('sync-canary-password-999')
+    expect(initialized).toBe(true)
+
+    const bucketId = useVaultStore.getState().bucketId
+    expect(bucketId).toBeTruthy()
+
+    const { getPendingQueue } = await import('./vaultStore')
+    const queue = getPendingQueue(bucketId!)
+    expect(queue.some((entry) => entry.id === 'vault-canary')).toBe(true)
+  })
 })
+
 

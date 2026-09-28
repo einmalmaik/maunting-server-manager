@@ -529,4 +529,160 @@ describe('AiMemoryManager', () => {
     expect(screen.queryByRole('navigation', { name: 'Seitennavigation' })).toBeNull()
     expect(screen.getByLabelText('Erinnerungen durchsuchen')).toBeInTheDocument()
   })
+
+  it('formatiert technische Schlüssel automatisch in lesbaren Logbuch-Text', async () => {
+    const eintraege: AiMemoryEntry[] = [
+      {
+        ...entry,
+        id: '...-301',
+        key: 'vorliebe-getraenke',
+        value: 'Kaffee schwarz',
+      },
+      {
+        ...entry,
+        id: '...-302',
+        key: 'response.language',
+        value: 'Deutsch',
+      },
+    ]
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite(eintraege))
+    render(<AiMemoryManager />)
+
+    // Formatiert mit Vorliebe-Präfix und Umlauten
+    expect(await screen.findByText('Vorliebe: Getränke')).toBeInTheDocument()
+    // Formatiert mit Dotted-Category
+    expect(screen.getByText('Response: Language')).toBeInTheDocument()
+  })
+
+  it('klappt Einträge standardmäßig ein und öffnet sie beim Anklicken (Accordion)', async () => {
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([entry]))
+    render(<AiMemoryManager />)
+
+    // Standardmäßig eingeklappt: aria-expanded ist false
+    const toggleButton = await screen.findByRole('button', { expanded: false })
+    expect(toggleButton).toBeInTheDocument()
+    // Im eingeklappten Zustand steht der Rohschlüssel noch nicht in den Detail-Metadaten
+    expect(screen.queryByText('Schlüssel: response.language')).toBeNull()
+
+    // Beim Klick aufklappen
+    fireEvent.click(toggleButton)
+    expect(toggleButton).toHaveAttribute('aria-expanded', 'true')
+    // Nun sind die Detail-Metadaten sichtbar
+    expect(screen.getByText('Schlüssel: response.language')).toBeInTheDocument()
+    expect(screen.getByText(/Gemerkt:/)).toBeInTheDocument()
+
+    // Erneuter Klick schließt wieder
+    fireEvent.click(toggleButton)
+    expect(toggleButton).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('Schlüssel: response.language')).toBeNull()
+  })
+
+  it('unterstützt das gemeinsame Auf- und Zuklappen aller Einträge', async () => {
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite(viele))
+    render(<AiMemoryManager />)
+
+    expect(await screen.findByText('Europe/Berlin')).toBeInTheDocument()
+    const alleAufklappenBtn = screen.getByRole('button', { name: 'Alle aufklappen' })
+    fireEvent.click(alleAufklappenBtn)
+
+    // Jetzt sind alle 4 Einträge aufgeklappt
+    expect(screen.getAllByRole('button', { expanded: true })).toHaveLength(4)
+    expect(screen.getByText('Schlüssel: response.language')).toBeInTheDocument()
+    expect(screen.getByText('Schlüssel: ram.bevorzugt')).toBeInTheDocument()
+
+    // Klick auf "Alle einklappen"
+    const alleEinklappenBtn = screen.getByRole('button', { name: 'Alle einklappen' })
+    fireEvent.click(alleEinklappenBtn)
+    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(4)
+  })
+
+  it('findet Einträge über die Suche anhand des formatierten Schlüssels mit Umlauten', async () => {
+    const eintraege: AiMemoryEntry[] = [
+      {
+        ...entry,
+        id: '...-401',
+        key: 'vorliebe-getraenke',
+        value: 'Kaffee schwarz',
+      },
+      {
+        ...entry,
+        id: '...-402',
+        key: 'zeitzone',
+        value: 'Europe/Berlin',
+      },
+      {
+        ...entry,
+        id: '...-403',
+        key: 'editor-theme',
+        value: 'Dark',
+      },
+      {
+        ...entry,
+        id: '...-404',
+        key: 'anrede',
+        value: 'Du',
+      },
+    ]
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite(eintraege))
+    render(<AiMemoryManager />)
+
+    expect(await screen.findByText('Kaffee schwarz')).toBeInTheDocument()
+
+    // Der Benutzer sucht nach "getränke" (mit Umlaut, wie in der UI angezeigt)
+    const suchFeld = screen.getByLabelText('Erinnerungen durchsuchen')
+    fireEvent.change(suchFeld, { target: { value: 'getränke' } })
+
+    // Der Eintrag mit Schlüssel "vorliebe-getraenke" muss gefunden werden
+    expect(screen.getByText('Vorliebe: Getränke')).toBeInTheDocument()
+    expect(screen.queryByText('Europe/Berlin')).toBeNull()
+    expect(screen.queryByText('Dark')).toBeNull()
+  })
+
+  it('begrenzt die Anzeige bei vielen Einträgen initial und lädt per Klick progressiv nach (Lazy Loading)', async () => {
+    const vieleEintraege: AiMemoryEntry[] = Array.from({ length: 45 }, (_, i) => ({
+      ...entry,
+      id: `item-${i + 1}`,
+      key: `schluessel-${i + 1}`,
+      value: `Wert ${i + 1}`,
+    }))
+
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite(vieleEintraege))
+    render(<AiMemoryManager />)
+
+    expect(await screen.findByText('30 von 45 geladen')).toBeInTheDocument()
+    // Initial sind genau 30 Elemente gerendert
+    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(30)
+
+    // Klick auf "Mehr laden"
+    const mehrLadenBtn = screen.getByRole('button', { name: 'Mehr laden' })
+    fireEvent.click(mehrLadenBtn)
+
+    // Jetzt sind alle 45 Elemente sichtbar
+    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(45)
+    expect(screen.queryByRole('button', { name: 'Mehr laden' })).toBeNull()
+  })
+
+  it('übernimmt bei Klick auf Bearbeiten die Daten in das Schnellerfassungsformular', async () => {
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([entry]))
+    render(<AiMemoryManager />)
+
+    expect(await screen.findByText('Synthetic test preference')).toBeInTheDocument()
+
+    // Klick auf Bearbeiten-Button
+    const editBtn = screen.getByRole('button', { name: 'Erinnerung bearbeiten: response.language' })
+    fireEvent.click(editBtn)
+
+    // Formular zeigt "Eintrag bearbeiten" und hat vorbelegte Werte
+    expect(screen.getByText('Eintrag bearbeiten')).toBeInTheDocument()
+    const keyInput = screen.getByLabelText('Schlüssel, z. B. response.language')
+    const valInput = screen.getByLabelText('Präferenz')
+    expect(keyInput).toHaveValue('response.language')
+    expect(valInput).toHaveValue('Synthetic test preference')
+
+    // Schließen / Abbrechen
+    const cancelBtn = screen.getByRole('button', { name: 'Abbrechen' })
+    fireEvent.click(cancelBtn)
+    expect(screen.getByText('Neuer Eintrag')).toBeInTheDocument()
+  })
 })
+

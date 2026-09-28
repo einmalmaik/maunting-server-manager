@@ -3,16 +3,24 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/api/client'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { KeyRound, Save } from 'lucide-react'
+import { KeyRound, Mail, Save } from 'lucide-react'
+import { Button } from '@/Singra/UI'
+import { passkeyNachweis } from '@/services/passkeyService'
 
+import { Spinner } from '@/components/ui/Spinner'
 /**
  * Tab: Passwort aendern.
  * Validiert lokal (Laenge, Match), ruft /auth/change-password,
- * beruecksichtigt 2FA-OTP, falls der User 2FA aktiviert hat.
+ * beruecksichtigt den eingerichteten zweiten Faktor: TOTP-Feld oder Passkey-Abfrage
+ * beim Speichern — nie beides.
+ * Konten ohne Passwort (Social Login) und wer das aktuelle Passwort nicht kennt,
+ * bekommen einen Link an ihre E-Mail: ein angemeldetes Token allein setzt kein Passwort.
  */
 export function PasswordTab() {
   const { t } = useTranslation()
   const { user } = useAuthStore()
+  const hasPassword = user?.has_password ?? true
+  const methode = user?.two_factor_enabled ? (user.two_factor_method ?? 'totp') : null
   const [form, setForm] = useState({ current: '', new: '', confirm: '', otp: '' })
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -39,7 +47,8 @@ export function PasswordTab() {
         body: JSON.stringify({
           current_password: form.current,
           new_password: form.new,
-          otp_code: user?.two_factor_enabled ? form.otp : null,
+          otp_code: methode === 'totp' ? form.otp : null,
+          passkey: methode === 'passkey' ? await passkeyNachweis('password_change') : null,
         }),
       })
       setSuccess(t('profile.passwordChanged'))
@@ -52,11 +61,50 @@ export function PasswordTab() {
     }
   }
 
+  const handleSendLink = async () => {
+    setError('')
+    setSuccess('')
+    setSubmitting(true)
+    try {
+      await api('/auth/password-link', { method: 'POST' })
+      setSuccess(t('profile.setPasswordLinkSent', { email: user?.email ?? '' }))
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (!hasPassword) {
+    return (
+      <div className="msm-card p-6">
+        <div className="flex items-center gap-2 mb-6">
+          <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('profile.setPassword')}</h2>
+        </div>
+        <p className="text-sm text-on-surface-variant mb-4">{t('profile.setPasswordInfo')}</p>
+        {error && <div className="msm-alert-error text-sm mb-4">{error}</div>}
+        {success && <div className="msm-alert-success text-sm mb-4">{success}</div>}
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            onClick={handleSendLink}
+            disabled={submitting}
+            className="inline-flex items-center gap-2 disabled:opacity-50"
+          >
+            {submitting ? <Spinner /> : <Mail className="w-4 h-4" />}
+            {t('profile.setPasswordSendLink')}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="msm-card p-6">
       <div className="flex items-center gap-2 mb-6">
         <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h2 className="font-headline text-lg font-semibold text-on-surface">{t('profile.changePassword')}</h2>
+        <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('profile.changePassword')}</h2>
       </div>
 
       {error && <div className="msm-alert-error text-sm mb-4">{error}</div>}
@@ -64,20 +112,22 @@ export function PasswordTab() {
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="md:col-span-2">
-          <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+          <label htmlFor="current_password" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
             {t('profile.currentPassword')}
           </label>
           <PasswordInput
+            id="current_password"
             value={form.current}
             onChange={(e) => setForm({ ...form, current: e.target.value })}
             required
           />
         </div>
         <div>
-          <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+          <label htmlFor="new_password" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
             {t('profile.newPassword')}
           </label>
           <PasswordInput
+            id="new_password"
             value={form.new}
             onChange={(e) => setForm({ ...form, new: e.target.value })}
             required
@@ -85,22 +135,24 @@ export function PasswordTab() {
           />
         </div>
         <div>
-          <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+          <label htmlFor="confirm_password" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
             {t('profile.confirmPassword')}
           </label>
           <PasswordInput
+            id="confirm_password"
             value={form.confirm}
             onChange={(e) => setForm({ ...form, confirm: e.target.value })}
             required
             minLength={8}
           />
         </div>
-        {user?.two_factor_enabled && (
+        {methode === 'totp' && (
           <div className="md:col-span-2">
-            <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+            <label htmlFor="otp_code" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
               {t('auth.otpCode')}
             </label>
             <input
+              id="otp_code"
               type="text"
               inputMode="numeric"
               pattern="\d{6}"
@@ -114,20 +166,34 @@ export function PasswordTab() {
           </div>
         )}
         <div className="md:col-span-2 flex justify-end">
-          <button
+          <Button
             type="submit"
             disabled={submitting}
-            className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+            className="inline-flex items-center gap-2 disabled:opacity-50"
           >
             {submitting ? (
-              <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+              <Spinner />
             ) : (
               <Save className="w-4 h-4" />
             )}
             {t('common.save')}
-          </button>
+          </Button>
         </div>
       </form>
+
+      <div className="mt-6 pt-4 border-t border-outline-variant/30 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-on-surface-variant">{t('profile.forgotCurrentPassword')}</p>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={handleSendLink}
+          disabled={submitting}
+          className="inline-flex items-center gap-2 disabled:opacity-50"
+        >
+          <Mail className="w-4 h-4" />
+          {t('profile.setPasswordSendLink')}
+        </Button>
+      </div>
     </div>
   )
 }

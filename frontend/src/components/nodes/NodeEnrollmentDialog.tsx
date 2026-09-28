@@ -9,6 +9,7 @@ import {
   type PendingNodeEnrollment,
 } from '@/services/nodeEnrollmentService'
 import { toast } from '@/stores/toastStore'
+import { Button } from '@/Singra/UI'
 
 interface NodeEnrollmentDialogProps {
   onClose: () => void
@@ -164,7 +165,7 @@ export function NodeEnrollmentDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-3 backdrop-blur-sm sm:p-6"
+      className="msm-modal-overlay overflow-y-auto sm:p-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
@@ -186,15 +187,15 @@ export function NodeEnrollmentDialog({
               {t('nodes.enrollment.subtitle')}
             </p>
           </div>
-          <button
+          <Button variant="secondary" size="icon"
             ref={closeButtonRef}
             type="button"
-            className="msm-btn-secondary shrink-0 p-2"
+            className="shrink-0"
             aria-label={t('common.close')}
             onClick={onClose}
           >
             <X className="h-4 w-4" />
-          </button>
+          </Button>
         </header>
 
         <div className="max-h-[calc(100vh-9rem)] space-y-6 overflow-y-auto px-5 py-5 sm:px-6">
@@ -221,23 +222,23 @@ export function NodeEnrollmentDialog({
                 <Loader2 className="mx-auto h-5 w-5 animate-spin text-primary" aria-label={t('common.loading')} />
               ) : commandError ? (
                 <div className="flex w-full flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-sm text-status-error">{commandError}</p>
-                  <button
+                  <p className="text-sm text-status-destructive">{commandError}</p>
+                  <Button variant="secondary"
                     type="button"
-                    className="msm-btn-secondary shrink-0 px-3 py-2 text-sm"
+                    className="shrink-0"
                     onClick={() => void loadCommand()}
                   >
                     {t('nodes.enrollment.retryCommand')}
-                  </button>
+                  </Button>
                 </div>
               ) : (
                 <>
                   <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-sm leading-6 text-on-surface">
                     {command}
                   </code>
-                  <button
+                  <Button variant="secondary"
                     type="button"
-                    className="msm-btn-secondary inline-flex shrink-0 items-center gap-2 px-3 py-2"
+                    className="inline-flex shrink-0 items-center gap-2"
                     aria-label={copied ? t('nodes.enrollment.copied') : t('nodes.enrollment.copy')}
                     onClick={() => void copyCommand()}
                   >
@@ -245,7 +246,7 @@ export function NodeEnrollmentDialog({
                     <span className="hidden sm:inline">
                       {copied ? t('nodes.enrollment.copied') : t('nodes.enrollment.copy')}
                     </span>
-                  </button>
+                  </Button>
                   <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
                     {copied ? t('nodes.enrollment.copied') : ''}
                   </span>
@@ -273,7 +274,7 @@ export function NodeEnrollmentDialog({
                   <Loader2 className="h-5 w-5 animate-spin text-primary" aria-label={t('common.loading')} />
                 </div>
               ) : pendingError ? (
-                <div className="p-4 text-sm text-status-error">{pendingError}</div>
+                <div className="p-4 text-sm text-status-destructive">{pendingError}</div>
               ) : pending.length === 0 ? (
                 <div className="p-5 text-center">
                   <p className="text-sm font-medium text-on-surface">{t('nodes.enrollment.pendingEmpty')}</p>
@@ -294,15 +295,15 @@ export function NodeEnrollmentDialog({
                         {t('nodes.enrollment.expiresAt', { time: formatExpiry(enrollment.expires_at) })}
                       </p>
                     </div>
-                    <button
+                    <Button
                       type="button"
-                      className="msm-btn-primary inline-flex items-center justify-center gap-2 px-4 py-2 sm:shrink-0"
+                      className="inline-flex items-center justify-center gap-2 sm:shrink-0"
                       disabled={approvingId !== null}
                       onClick={() => void approve(enrollment)}
                     >
                       {approvingId === enrollment.id && <Loader2 className="h-4 w-4 animate-spin" />}
                       {t('nodes.enrollment.approve')}
-                    </button>
+                    </Button>
                   </div>
                 ))
               )}
@@ -312,9 +313,9 @@ export function NodeEnrollmentDialog({
 
         <footer className="flex items-center justify-between gap-3 border-t border-outline-variant px-5 py-3 sm:px-6">
           <p className="hidden text-xs text-on-surface-variant sm:block">{t('nodes.enrollment.manualHint')}</p>
-          <button type="button" className="msm-btn-secondary ml-auto px-3 py-2 text-sm" onClick={onManualSetup}>
+          <Button variant="secondary" type="button" className="ml-auto" onClick={onManualSetup}>
             {t('nodes.enrollment.manual')}
-          </button>
+          </Button>
         </footer>
       </section>
     </div>

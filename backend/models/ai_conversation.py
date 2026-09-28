@@ -10,13 +10,13 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
-    Text,
     false,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
+from models.dis_text import ai_text
 
 
 #: Die Arten von Unterhaltungen, die es geben darf.
@@ -87,9 +87,6 @@ class AiConversation(Base):
             "user_id",
             "kind",
             unique=True,
-            sqlite_where=text(
-                "kind IN (" + ", ".join(f"'{art}'" for art in EINZELFENSTER) + ")"
-            ),
             postgresql_where=text(
                 "kind IN (" + ", ".join(f"'{art}'" for art in EINZELFENSTER) + ")"
             ),
@@ -107,9 +104,9 @@ class AiConversation(Base):
     server_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    title: Mapped[str] = mapped_column(ai_text("ai_conversations.title"), nullable=False)
     # Nur eine spaetere, explizit minimierte Zusammenfassung; nie Provider-Interna.
-    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary: Mapped[str | None] = mapped_column(ai_text("ai_conversations.summary"), nullable=True)
     # Bis hierhin ist die Historie in `summary` zusammengefasst. Nachrichten
     # davor fliessen nicht mehr einzeln in eine Anfrage (Kontextkompression).
     summarized_until: Mapped[datetime | None] = mapped_column(
@@ -147,12 +144,12 @@ class AiMessage(Base):
         index=True,
     )
     role: Mapped[str] = mapped_column(String(16), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(ai_text("ai_messages.content"), nullable=False)
     # Denkschritte des Modells, falls es welche geliefert hat. Bewusst eine
     # eigene Spalte: sie sind eine Nebenausgabe, die der Benutzer aufklappen
     # kann, und duerfen nicht in eine Folgeanfrage zurueckfliessen. In `content`
     # waeren sie von der eigentlichen Antwort nicht mehr unterscheidbar.
-    reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reasoning: Mapped[str | None] = mapped_column(ai_text("ai_messages.reasoning"), nullable=True)
     # Die Rueckfrage, die diese Nachricht gestellt hat — bereits geprueft und
     # redigiert durch `question_payload()`, als {"question": ..., "options": [...]}.
     #
@@ -161,7 +158,7 @@ class AiMessage(Base):
     # Antwort erhalten", nach einem Neuladen war die Frage weg, und — das
     # Schwerste — **das Modell sah seine eigene Frage in der Historie nicht**.
     # Auf die Antwort "Server.properties" folgte deshalb dieselbe Frage erneut.
-    question_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    question_json: Mapped[str | None] = mapped_column(ai_text("ai_messages.question_json"), nullable=True)
     # Die Gliederung dieser Antwort: Text, Werkzeuge und Denkschritte in der
     # Reihenfolge, in der sie entstanden sind, als [{"art": "text", "inhalt":
     # ...}, {"art": "tool", "werkzeug": {...}}, {"art": "denken", "inhalt":
@@ -185,7 +182,7 @@ class AiMessage(Base):
     #
     # `None` heisst "aus der Zeit vor dieser Spalte", nicht "keine Abschnitte".
     # Der Verlauf zeigt solche Nachrichten weiterhin als reinen Text.
-    sections_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sections_json: Mapped[str | None] = mapped_column(ai_text("ai_messages.sections_json"), nullable=True)
     # Ob diese Nachricht **Maschinerie** ist und nicht Gespraech.
     #
     # Vier Stellen schreiben eine Zeile in den Chat, die kein Mensch getippt

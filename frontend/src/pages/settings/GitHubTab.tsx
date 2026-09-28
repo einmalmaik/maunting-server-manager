@@ -6,7 +6,9 @@ import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
+import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function GitHubTab() {
   const { t } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
@@ -72,7 +74,7 @@ export function GitHubTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -85,11 +87,11 @@ export function GitHubTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Github className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.githubTokenTitle')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('settings.githubTokenTitle')}</h2>
         </div>
 
         <form onSubmit={handleSave} className="space-y-4">
-          <div className="p-3 bg-status-info/10 border border-status-info/30 rounded-md text-sm text-on-surface flex items-start gap-2">
+          <div className="p-3 bg-primary/10 border border-primary/30 rounded-md text-sm text-on-surface flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
             <span>{t('settings.githubWhyNeeded')}</span>
           </div>
@@ -137,7 +139,7 @@ export function GitHubTab() {
                     setClearToken(true)
                     setNewToken('')
                   }}
-                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-destructive transition-colors"
                   title={t('settings.githubRemove')}
                   aria-label={t('settings.githubRemove')}
                 >
@@ -179,31 +181,31 @@ export function GitHubTab() {
           </div>
 
           <div className="flex gap-3 justify-end flex-wrap pt-2">
-            <button
+            <Button variant="secondary"
               type="button"
               onClick={handleTest}
               disabled={testing || !settings.github_token_configured}
-              className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {testing ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Send className="w-4 h-4" />
               )}
               {t('settings.githubTest')}
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={saving || !hasChanges || !canWrite}
-              className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {saving ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Save className="w-4 h-4" />
               )}
               {t('settings.githubSave')}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

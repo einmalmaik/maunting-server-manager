@@ -2,9 +2,11 @@ import { useEffect } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 import { Loader } from '@/components/ui/Loader'
+import { BenutzernameWaehlen } from '@/pages/BenutzernameWaehlen'
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore()
+  const mussNamenWaehlen = useAuthStore((s) => s.user?.username_gewaehlt === false)
   const location = useLocation()
 
   useEffect(() => {
@@ -18,9 +20,20 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isAuthenticated) {
-    // Mit den Suchparametern, damit nach der Anmeldung auch der Reiter
-    // aus /servers/7?tab=console wieder stimmt.
-    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />
+    const target = location.pathname + location.search
+    return (
+      <Navigate
+        to={`/login?redirect=${encodeURIComponent(target)}`}
+        replace
+        state={{ from: target }}
+      />
+    )
+  }
+
+  // Kein Umweg über eine eigene Route: die Adresse bleibt, und nach der Wahl
+  // erscheint an ihr das Panel.
+  if (mussNamenWaehlen) {
+    return <BenutzernameWaehlen />
   }
 
   return <>{children}</>

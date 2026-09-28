@@ -4,6 +4,7 @@
  */
 import { create } from 'zustand'
 import { api } from '@/api/client'
+import i18n from '@/i18n'
 import type { Node } from '@/types'
 
 let latestFetchRequest = 0
@@ -76,7 +77,7 @@ export const useNodeStore = create<NodeState>((set, get) => ({
       }
     } catch (err: unknown) {
       if (requestId !== latestFetchRequest) return
-      const message = err instanceof Error ? err.message : 'Nodes konnten nicht geladen werden'
+      const message = err instanceof Error ? err.message : i18n.t('nodes.loadFailed')
       set({ error: message, loading: false })
       throw err
     }

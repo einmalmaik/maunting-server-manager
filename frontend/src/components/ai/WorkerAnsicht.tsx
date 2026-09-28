@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { aiApi, type AiActionProposal, type AiRunInfo } from '@/api/ai'
+import { aiApi, type AiRunInfo } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
 import { Button } from '@/Singra/UI'
+import { ChatHintergrund } from '@/features/chatHintergrund'
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
 import { toast } from '@/stores/toastStore'
 import { AiVerlauf, mergeEntries } from './AiVerlauf'
@@ -24,9 +25,11 @@ const NACHSEHEN_MS = 20_000
  * geht an das Gehirn, das `worker_cancel` ruft
  * (docs/agentic-framework.md, §6).
  *
- * Vorschlagskarten bleiben bedienbar: eine Karte zu bestätigen ist keine
- * Nachricht, sie löst nichts ab, sondern weckt den geparkten Lauf dort, wo
- * er steht.
+ * Auch die Vorschlagskarten sind hier nur zu sehen (Betreiber, 25.09.2026:
+ * „Der Worker-Chat ist eigentlich nur zum Nachschauen"). Bestätigt wird im
+ * Chat oder in der Sprachansicht; beide zeigen die offenen Karten lebender
+ * Worker mit Knöpfen. Der Klick dort weckt den geparkten Lauf, und dieses
+ * Fenster hängt sich beim nächsten Nachsehen an.
  */
 export function WorkerAnsicht({ conversationId }: { conversationId: string }) {
   const { t } = useTranslation()
@@ -118,17 +121,6 @@ export function WorkerAnsicht({ conversationId }: { conversationId: string }) {
     if (bereich) bereich.scrollTop = bereich.scrollHeight
   }, [amEnde, entries, laufendeWerkzeuge])
 
-  const aufVorschlag = useCallback((updated: AiActionProposal) => {
-    merkeVorschlag(updated)
-    // Der geparkte Auftrag wartet auf genau diese Entscheidung — ohne das
-    // Anhängen bliebe es hier still, bis jemand die Seite neu lädt.
-    const id = updated.run_id ?? lauf?.id
-    if (id && updated.status !== 'proposed') {
-      angehaengtRef.current = id
-      void haengeAn(id)
-    }
-  }, [haengeAn, lauf?.id, merkeVorschlag])
-
   /** Die Status-Pille des Kopfes — vier Zustände, ruhig erzählt. */
   const statusPille = () => {
     const status = streaming ? 'running' : lauf?.status
@@ -172,8 +164,11 @@ export function WorkerAnsicht({ conversationId }: { conversationId: string }) {
   const leer = entries.length === 0
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest">
-      <header className="flex shrink-0 items-center gap-2 border-b border-outline-variant/40 px-4 py-3">
+    <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest">
+      {/* Derselbe Hintergrund wie im KI-Chat — eine Wahl für den Bereich. */}
+      <ChatHintergrund bereich="ki" />
+
+      <header className="relative flex shrink-0 items-center gap-2 border-b border-outline-variant/40 px-4 py-3">
         <Bot className="h-4 w-4 shrink-0 text-secondary" aria-hidden="true" />
         <div className="min-w-0">
           <h2 className="truncate font-headline text-sm font-semibold text-on-surface">
@@ -198,7 +193,7 @@ export function WorkerAnsicht({ conversationId }: { conversationId: string }) {
 
       <div
         ref={verlaufRef}
-        className="min-h-0 flex-1 overflow-y-auto"
+        className="relative min-h-0 flex-1 overflow-y-auto"
         aria-live="polite"
         onScroll={(event) => {
           const { scrollTop, scrollHeight, clientHeight } = event.currentTarget
@@ -209,7 +204,7 @@ export function WorkerAnsicht({ conversationId }: { conversationId: string }) {
           {verschwunden && !laedt && (
             <div className="py-16 text-center">
               <Sparkles className="mx-auto h-10 w-10 text-primary/70" aria-hidden="true" />
-              <h3 className="mt-4 font-headline text-lg font-semibold text-on-surface">
+              <h3 className="mt-4 font-headline text-title-lg font-semibold text-on-surface">
                 {t('ai.worker.notFoundTitle')}
               </h3>
               <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-on-surface-variant">
@@ -220,7 +215,7 @@ export function WorkerAnsicht({ conversationId }: { conversationId: string }) {
           {!verschwunden && leer && !laedt && (
             <div className="py-16 text-center">
               <Sparkles className="mx-auto h-10 w-10 text-primary/70" aria-hidden="true" />
-              <h3 className="mt-4 font-headline text-lg font-semibold text-on-surface">
+              <h3 className="mt-4 font-headline text-title-lg font-semibold text-on-surface">
                 {t('ai.worker.emptyTitle')}
               </h3>
               <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-on-surface-variant">
@@ -232,7 +227,8 @@ export function WorkerAnsicht({ conversationId }: { conversationId: string }) {
             <AiVerlauf
               entries={entries}
               laufendeWerkzeuge={laufendeWerkzeuge}
-              onProposalChange={aufVorschlag}
+              onProposalChange={merkeVorschlag}
+              nurAnsicht
             />
           )}
         </div>
@@ -240,7 +236,7 @@ export function WorkerAnsicht({ conversationId }: { conversationId: string }) {
 
       {/* Kein Eingabefeld und kein Abbruch-Knopf — der Hinweis steht dort, wo
           man das Feld suchte, und sagt auch, wie man stattdessen steuert. */}
-      <p className="shrink-0 border-t border-outline-variant/40 px-4 py-3 text-xs text-on-surface-variant">
+      <p className="relative shrink-0 border-t border-outline-variant/40 px-4 py-3 text-xs text-on-surface-variant">
         {t('ai.worker.readOnly')}
       </p>
     </section>

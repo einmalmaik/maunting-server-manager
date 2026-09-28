@@ -1,4 +1,5 @@
 import { Logo } from '@/components/Logo'
+import { Spinner, type SpinnerSize } from '@/components/ui/Spinner'
 
 interface LoaderProps {
   label?: string
@@ -6,17 +7,19 @@ interface LoaderProps {
   fullScreen?: boolean
 }
 
-const spinnerSizes = {
-  sm: 'h-4 w-4 border',
-  md: 'h-8 w-8 border-2',
-  lg: 'h-10 w-10 border-2',
-} as const
+// Der Ring selbst steht in `Spinner` — hier nur die Zuordnung der drei
+// Stufen, die der Lader kennt.
+const RING: Record<NonNullable<LoaderProps['size']>, SpinnerSize> = {
+  sm: 'sm',
+  md: 'lg',
+  lg: 'xl',
+}
 
 export function Loader({ label, size = 'md', fullScreen = false }: LoaderProps) {
   const content = (
     <div className="flex flex-col items-center justify-center gap-4 text-on-surface-variant" role="status" aria-live="polite">
       {fullScreen && <Logo size="md" />}
-      <span className={`${spinnerSizes[size]} rounded-full border-primary border-t-transparent animate-spin`} aria-hidden="true" />
+      <Spinner size={RING[size]} className="text-primary" />
       {label && <span className="font-body-md text-sm">{label}</span>}
     </div>
   )

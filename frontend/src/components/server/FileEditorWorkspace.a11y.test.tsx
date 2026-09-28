@@ -125,7 +125,7 @@ describe('FileEditorWorkspace tabs', () => {
     fireEvent.click(screen.getByTestId('code-editor'))
     fireEvent.click(screen.getByRole('button', { name: 'Suchen und ersetzen' }))
 
-    const findInput = await screen.findByPlaceholderText('Suchen…')
+    const findInput = await screen.findByPlaceholderText(/Suchen/)
     await waitFor(() => expect(findInput).toHaveFocus())
     fireEvent.change(findInput, { target: { value: 'Alpha' } })
     expect(findInput).toHaveFocus()
@@ -134,7 +134,7 @@ describe('FileEditorWorkspace tabs', () => {
     fireEvent.keyDown(findInput, { key: 'Enter', shiftKey: true })
     expect(findInput).toHaveFocus()
 
-    const replacementInput = screen.getByPlaceholderText('Ersetzen durch…')
+    const replacementInput = screen.getByPlaceholderText(/Ersetzen durch/)
     replacementInput.focus()
     fireEvent.change(replacementInput, { target: { value: 'Beta' } })
     expect(replacementInput).toHaveFocus()

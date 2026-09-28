@@ -1,0 +1,29 @@
+services:
+  livekit:
+    image: livekit/livekit-server:v1.9
+    container_name: msm-livekit-sidecar
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    ports:
+      # Signalisierung nur lokal. Nach aussen geht sie ueber Caddy als
+      # wss://<domain>/livekit — damit gilt fuer den Anrufweg dasselbe
+      # Zertifikat und dieselbe Herkunft wie fuer das Panel.
+      - "127.0.0.1:7880:7880"
+      # Medien. Ein einzelner UDP-Port statt des sonst ueblichen Bereichs
+      # 50000-60000: MSM faehrt rootless Docker, und dort ist das
+      # Veroeffentlichen von zehntausend Ports nicht praktikabel. LiveKit
+      # multiplext alle Teilnehmer ueber diesen einen Port (udp_port in
+      # livekit.yaml). 7881/tcp ist der Rueckfall fuer Netze, die UDP sperren.
+      - "7881:7881"
+      - "7882:7882/udp"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    env_file:
+      - .env
+    cap_drop:
+      - ALL
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "2m"
+        max-file: "1"

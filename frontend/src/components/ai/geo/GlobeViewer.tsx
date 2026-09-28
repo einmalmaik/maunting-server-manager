@@ -3,7 +3,9 @@ import { CircleDashed, Compass, MapPin, Satellite } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { AiRegionalAnalysis } from '@/api/ai'
-import { MapTilerDetailMap } from './MapTilerDetailMap'
+import { Kartenbildbuehne, useKartenbildAusschnitt } from './Kartenbildbuehne'
+import { MapTilerDetailMap, type MapUnavailableReason } from './MapTilerDetailMap'
+import { kartenbildEbene } from './regionalAnalysis'
 
 interface GlobeViewerProps {
   latitude?: number | null
@@ -65,15 +67,21 @@ export function GlobeViewer({
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [mapUnavailable, setMapUnavailable] = useState(false)
+  // Ohne Schlüssel oder mit abgewiesenem hilft kein neuer Ort; nur ein
+  // vorübergehender Fehler ist einen neuen Versuch wert.
+  const mapTilerEndgueltig = useRef(false)
   const [mapReady, setMapReady] = useState(false)
   const [sights, setSights] = useState<Sight[]>([])
   const lastMainRef = useRef<string | null>(null)
 
   const resolvedLatitude = latitude ?? data?.coordinates?.latitude
   const resolvedLongitude = longitude ?? data?.coordinates?.longitude
-  const resolvedLocation = locationName ?? data?.location ?? t('ai.geo.region', 'Region')
+  const resolvedLocation = locationName ?? data?.location ?? t('ai.geo.region')
   const hasCoordinates = Number.isFinite(resolvedLatitude) && Number.isFinite(resolvedLongitude)
   const scene = data?.satellite?.scenes?.[0]
+  const kartenbild = kartenbildEbene(data)
+  const ausschnitt = useKartenbildAusschnitt(kartenbild?.bbox, data?.camera, data?.coordinates)
+  const bildbuehne = mapUnavailable && kartenbild && ausschnitt ? { kartenbild, ausschnitt } : null
 
   useEffect(() => {
     if (!data?.coordinates) {
@@ -107,8 +115,13 @@ export function GlobeViewer({
   }, [data, resolvedLocation])
 
   useEffect(() => {
-    setMapUnavailable(false)
+    if (!mapTilerEndgueltig.current) setMapUnavailable(false)
   }, [resolvedLatitude, resolvedLongitude])
+
+  const mapTilerFehlt = (grund: MapUnavailableReason) => {
+    if (grund !== 'failed') mapTilerEndgueltig.current = true
+    setMapUnavailable(true)
+  }
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -151,7 +164,7 @@ export function GlobeViewer({
   const detailZoom = bbox && Math.max(Math.abs(bbox[2] - bbox[0]), Math.abs(bbox[3] - bbox[1])) > 25 ? 5 : 10
 
   return (
-    <section className={`relative h-full min-h-[320px] overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-lowest ${className}`} aria-label={t('ai.geo.globeTitle', 'Regionale Karte')}>
+    <section className={`relative h-full min-h-[320px] overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-lowest ${className}`} aria-label={t('ai.geo.globeTitle')}>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-hidden="true" />
 
       {hasCoordinates && !mapUnavailable && (
@@ -165,7 +178,7 @@ export function GlobeViewer({
           cameraAction={data?.camera?.action}
           cameraCommandId={data?.camera?.command_id}
           sights={sights}
-          onUnavailable={() => setMapUnavailable(true)}
+          onUnavailable={mapTilerFehlt}
           onReady={() => setMapReady(true)}
         />
       )}
@@ -176,30 +189,39 @@ export function GlobeViewer({
             <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
             <span className="truncate">{resolvedLocation}</span>
           </div>
-          {hasCoordinates && <p className="mt-1 text-[11px] text-on-surface-variant">{coordinateLabel(resolvedLatitude as number, resolvedLongitude as number)}</p>}
+          {hasCoordinates && <p className="mt-1 text-label-sm text-on-surface-variant">{coordinateLabel(resolvedLatitude as number, resolvedLongitude as number)}</p>}
         </div>
-        <div className="rounded-xl border border-outline-variant/30 bg-surface-container-low/90 px-2.5 py-2 text-[11px] text-on-surface-variant shadow-sm backdrop-blur-md">
-          <span className="flex items-center gap-1.5">
-            <Compass className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-            {mapReady ? t('ai.geo.mapInteractive', 'Karte aktiv') : t('ai.geo.mapLoading', 'Karte wird geladen')}
-          </span>
-        </div>
+        {/* Ohne Karte gibt es nichts zu laden: dann sagt die Bildbühne
+            selbst, woran sie ist, oder die Meldung in der Mitte. */}
+        {!mapUnavailable && (
+          <div className="rounded-xl border border-outline-variant/30 bg-surface-container-low/90 px-2.5 py-2 text-label-sm text-on-surface-variant shadow-sm backdrop-blur-md">
+            <span className="flex items-center gap-1.5">
+              <Compass className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+              {mapReady ? t('ai.geo.mapInteractive') : t('ai.geo.mapLoading')}
+            </span>
+          </div>
+        )}
       </div>
 
       {!hasCoordinates && (
-        <MapStatus icon={CircleDashed} title={t('ai.geo.coordinatesMissingTitle', 'Keine bestätigten Koordinaten')} body={t('ai.geo.coordinatesMissingBody', 'Die Karte wird angezeigt, sobald der Dienst einen Ort bestätigt hat.')} />
+        <MapStatus icon={CircleDashed} title={t('ai.geo.coordinatesMissingTitle')} body={t('ai.geo.coordinatesMissingBody')} />
       )}
-      {mapUnavailable && (
-        <MapStatus icon={Satellite} title={t('ai.geo.mapUnavailableTitle', 'Karte nicht verfügbar')} body={t('ai.geo.mapUnavailableBody', 'MapTiler ist für diese Instanz nicht eingerichtet oder derzeit nicht erreichbar.')} />
+      {bildbuehne && (
+        <Kartenbildbuehne layer={bildbuehne.kartenbild} ausschnitt={bildbuehne.ausschnitt} location={resolvedLocation} />
+      )}
+      {mapUnavailable && !bildbuehne && (
+        <MapStatus icon={Satellite} title={t('ai.geo.mapUnavailableTitle')} body={t('ai.geo.mapUnavailableBody')} />
       )}
 
-      {scene && (
-        <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-xl border border-outline-variant/30 bg-surface-container-low/90 px-3 py-2 text-[11px] shadow-sm backdrop-blur-md">
+      {/* Die Szene gehört zur Karte; unter dem Kartenbild gäbe sie es als
+          Überflug aus. */}
+      {scene && !bildbuehne && (
+        <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-xl border border-outline-variant/30 bg-surface-container-low/90 px-3 py-2 text-label-sm shadow-sm backdrop-blur-md">
           <div className="flex items-center gap-1.5 font-medium text-on-surface">
             <Satellite className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
             {scene.mission}
           </div>
-          <p className="mt-0.5 text-on-surface-variant">{t('ai.geo.sceneMetadata', 'Szenenmetadaten verfügbar')}</p>
+          <p className="mt-0.5 text-on-surface-variant">{t('ai.geo.sceneMetadata')}</p>
         </div>
       )}
     </section>

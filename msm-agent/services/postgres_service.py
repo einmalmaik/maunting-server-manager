@@ -3,6 +3,10 @@
 Panel is source of truth for metadata + encrypted secrets.
 Agent runs msm-postgres locally, executes DDL via psycopg2 on 127.0.0.1.
 Passwords arrive only in request payload (RAM); never written to agent disk.
+
+Datenbankserver haben eine eigene Instanz (Container ``msm-srv-<id>``). Fuer
+sie traegt die Anfrage ein ``target``; der Router setzt es mit ``ziel(...)``
+fuer die Dauer der Anfrage. Ohne Ziel gilt immer der geteilte msm-postgres.
 """
 
 from __future__ import annotations
@@ -12,8 +16,13 @@ import os
 import re
 import shlex
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
+from datetime import date, datetime, time as dt_time, timedelta
+from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import psycopg2
 from psycopg2 import sql
@@ -27,23 +36,7 @@ logger = logging.getLogger(__name__)
 ADMIN_USER = "msm_admin"
 CONTROL_DB = "msm_control"
 IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
-ALLOWED_COLUMN_TYPES = {
-    "text": "text",
-    "varchar": "varchar(255)",
-    "integer": "integer",
-    "bigint": "bigint",
-    "boolean": "boolean",
-    "timestamp": "timestamp",
-    "jsonb": "jsonb",
-}
 _PG_CAPS = ["CHOWN", "FOWNER", "SETUID", "SETGID", "DAC_OVERRIDE", "DAC_READ_SEARCH"]
-
-_WRITE_KEYWORDS = (
-    "insert", "update", "delete", "create", "drop", "alter", "truncate",
-    "grant", "revoke", "copy", "vacuum", "analyze", "cluster", "reindex",
-    "set", "reset", "begin", "commit", "rollback", "savepoint", "lock",
-    "call", "do", "notify", "listen", "unlisten", "refresh", "checkpoint",
-)
 
 
 class PostgresAgentError(RuntimeError):
@@ -60,7 +53,71 @@ def validate_identifier(value: str) -> str:
     return cleaned
 
 
+@dataclass(frozen=True)
+class Instanzziel:
+    """Eigene Instanz eines Datenbankservers statt des geteilten msm-postgres."""
+
+    host: str
+    port: int
+    container: str
+
+
+_ZIEL: ContextVar[Instanzziel | None] = ContextVar("postgres_instanzziel", default=None)
+
+
+def _pruefe_ziel(target: dict[str, Any]) -> Instanzziel:
+    from services.network_interfaces_service import list_host_interfaces
+
+    host = str(target.get("host") or "").strip()
+    container = str(target.get("container") or "").strip()
+    try:
+        port = int(target.get("port") or 0)
+    except (TypeError, ValueError):
+        port = 0
+    # Nur Adressen dieses Hosts: das Panel darf den Agenten nicht als Sprungbrett
+    # zu fremden Datenbanken im Netz benutzen.
+    eigene = {"127.0.0.1"} | {iface.ip for iface in list_host_interfaces()}
+    if host not in eigene:
+        raise PostgresAgentError("Instance host must be an address of this node")
+    if not 1024 <= port <= 65535:
+        raise PostgresAgentError("Invalid instance port")
+    try:
+        docker_service.assert_msm_container_name(container)
+    except Exception as exc:
+        raise PostgresAgentError("Invalid instance container") from exc
+    return Instanzziel(host=host, port=port, container=container)
+
+
+@contextmanager
+def ziel(target: dict[str, Any] | None) -> Iterator[None]:
+    """Setzt die eigene Instanz fuer die Dauer einer Anfrage (None = msm-postgres)."""
+    token = _ZIEL.set(_pruefe_ziel(target) if target else None)
+    try:
+        yield
+    finally:
+        _ZIEL.reset(token)
+
+
+def _db_port() -> int:
+    z = _ZIEL.get()
+    return z.port if z is not None else settings.managed_postgres_port
+
+
+def _container() -> str:
+    z = _ZIEL.get()
+    return z.container if z is not None else settings.managed_postgres_container_name
+
+
+def _internal_port() -> int:
+    """Port, unter dem Container im internen Netz die Instanz erreichen."""
+    z = _ZIEL.get()
+    return z.port if z is not None else 5432
+
+
 def _db_host() -> str:
+    z = _ZIEL.get()
+    if z is not None:
+        return z.host
     host = (settings.managed_postgres_host or "").strip()
     if host != "127.0.0.1":
         raise PostgresAgentError("Managed PostgreSQL may only bind to 127.0.0.1")
@@ -86,7 +143,7 @@ def _connect_with_retry(admin_password: str, database: str = CONTROL_DB):
         try:
             return psycopg2.connect(
                 host=_db_host(),
-                port=settings.managed_postgres_port,
+                port=_db_port(),
                 dbname=database,
                 user=ADMIN_USER,
                 password=admin_password,
@@ -101,7 +158,7 @@ def _connect_with_retry(admin_password: str, database: str = CONTROL_DB):
 def _owner_connect(database_name: str, owner_role: str, owner_password: str):
     return psycopg2.connect(
         host=_db_host(),
-        port=settings.managed_postgres_port,
+        port=_db_port(),
         dbname=database_name,
         user=owner_role,
         password=owner_password,
@@ -132,6 +189,10 @@ def ensure_internal_postgres(admin_password: str) -> dict[str, Any]:
     """Start or create local msm-postgres. admin_password only in memory."""
     if not admin_password:
         raise PostgresAgentError("admin_password is required", status_code=400)
+    if _ZIEL.get() is not None:
+        # Eine eigene Instanz ist ein Servercontainer; starten und stoppen
+        # gehoert dem Server, nicht diesem Aufruf.
+        return {"ok": True, "status": "instance"}
 
     network_result = docker_service.ensure_network(
         settings.managed_postgres_network, internal=True
@@ -275,8 +336,8 @@ def provision(
         "database_name": db_name,
         "owner_role": owner_role,
         "user_name": user_name,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": _container(),
+        "port": _internal_port(),
         # power_user is panel metadata only; roles always stay NOSUPERUSER.
         "power_user": power_user,
         "is_power_user": power_user,
@@ -334,8 +395,8 @@ def create_user(
         "ok": True,
         "database_name": database_name,
         "username": user_name,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": _container(),
+        "port": _internal_port(),
     }
 
 
@@ -355,8 +416,8 @@ def rotate_role_password(
     return {
         "ok": True,
         "username": role_name,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": _container(),
+        "port": _internal_port(),
     }
 
 
@@ -385,7 +446,7 @@ def rotate_admin_password(
         try:
             conn = psycopg2.connect(
                 host=_db_host(),
-                port=settings.managed_postgres_port,
+                port=_db_port(),
                 dbname=CONTROL_DB,
                 user=ADMIN_USER,
                 password=admin_password,
@@ -420,7 +481,7 @@ def rotate_admin_password(
     try:
         verify = psycopg2.connect(
             host=_db_host(),
-            port=settings.managed_postgres_port,
+            port=_db_port(),
             dbname=CONTROL_DB,
             user=ADMIN_USER,
             password=new_admin_password,
@@ -483,8 +544,8 @@ def promote_owner(
     return {
         "ok": True,
         "username": owner_role,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": _container(),
+        "port": _internal_port(),
         "scope": "database",
     }
 
@@ -522,770 +583,149 @@ def alter_owner_password(
     return {
         "ok": True,
         "username": owner_role,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": _container(),
+        "port": _internal_port(),
     }
 
 
 # ── Owner-scoped query actions ──────────────────────────────────────────────
 
 
-def list_tables(
-    database_name: str, owner_role: str, owner_password: str
-) -> list[dict[str, Any]]:
-    with _owner_connect(database_name, owner_role, owner_password) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT n.nspname, c.relname,
-                       GREATEST(c.reltuples::bigint, 0) AS row_estimate,
-                       pg_total_relation_size(c.oid) AS size_bytes
-                FROM pg_class c
-                JOIN pg_namespace n ON n.oid = c.relnamespace
-                WHERE c.relkind = 'r'
-                  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-                ORDER BY n.nspname, c.relname
-                """
-            )
-            return [
-                {
-                    "schema": row[0],
-                    "name": row[1],
-                    "row_estimate": row[2],
-                    "size_bytes": row[3],
-                }
-                for row in cur.fetchall()
-            ]
+# ── Studio: generisches Ausfuehren ─────────────────────────────────────────
+#
+# Katalogabfragen und DDL baut das Panel. Der Agent fuehrt nur aus: so braucht
+# eine neue Studio-Funktion kein Agent-Update auf jedem Node.
+
+RUN_MODES = {"read", "tx", "autocommit"}
+_MAX_NOTICES = 50
 
 
-def database_stats(
-    database_name: str, owner_role: str, owner_password: str
-) -> dict[str, Any]:
-    started = time.monotonic()
-    with _owner_connect(database_name, owner_role, owner_password) as conn:
-        latency_ms = int((time.monotonic() - started) * 1000)
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                  pg_database_size(current_database()) AS size_bytes,
-                  (SELECT count(*) FROM information_schema.tables
-                    WHERE table_type = 'BASE TABLE'
-                      AND table_schema NOT IN ('pg_catalog', 'information_schema')) AS table_count,
-                  (SELECT count(*) FROM pg_stat_activity
-                    WHERE datname = current_database()) AS active_connections,
-                  current_setting('max_connections')::int AS max_connections,
-                  current_database() AS database_name
-                """
-            )
-            row = cur.fetchone()
-    return {
-        "status": "healthy",
-        "latency_ms": latency_ms,
-        "size_bytes": row[0],
-        "table_count": row[1],
-        "active_connections": row[2],
-        "max_connections": row[3],
-        "database_name": row[4],
-        "engine": "PostgreSQL",
-    }
+def _json_wert(value: Any) -> Any:
+    """Werte so zurueckgeben, dass JSON sie ohne Genauigkeitsverlust traegt."""
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        return value if value == value and value not in (float("inf"), float("-inf")) else str(value)
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (datetime, date, dt_time)):
+        return value.isoformat()
+    if isinstance(value, timedelta):
+        return str(value)
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return "\\x" + bytes(value).hex()
+    if isinstance(value, dict):
+        return {str(k): _json_wert(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_wert(v) for v in value]
+    return str(value)
 
 
-def describe_table(
+def _pg_fehler(exc: Exception, index: int) -> PostgresAgentError:
+    diag = getattr(exc, "diag", None)
+    primary = getattr(diag, "message_primary", None) or str(exc).strip().splitlines()[0:1]
+    if isinstance(primary, list):
+        primary = primary[0] if primary else type(exc).__name__
+    detail = getattr(diag, "message_detail", None)
+    hint = getattr(diag, "message_hint", None)
+    code = getattr(exc, "pgcode", None)
+    parts = [f"[{code}] {primary}" if code else str(primary)]
+    if detail:
+        parts.append(str(detail))
+    if hint:
+        parts.append(f"Hint: {hint}")
+    message = f"Statement {index + 1}: " + " — ".join(parts)
+    return PostgresAgentError(message[:2000], status_code=400)
+
+
+def run_statements(
+    *,
     database_name: str,
+    identity: str,
     owner_role: str,
     owner_password: str,
-    schema_name: str,
-    table_name: str,
+    admin_password: str,
+    mode: str,
+    statements: list[dict[str, Any]],
+    row_limit: int,
+    timeout_ms: int,
+    rollback: bool = False,
 ) -> dict[str, Any]:
-    schema_name = validate_identifier(schema_name or "public")
-    table_name = validate_identifier(table_name)
-    with _owner_connect(database_name, owner_role, owner_password) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT kcu.column_name
-                FROM information_schema.table_constraints tc
-                JOIN information_schema.key_column_usage kcu
-                  ON tc.constraint_name = kcu.constraint_name
-                 AND tc.table_schema = kcu.table_schema
-                WHERE tc.constraint_type = 'PRIMARY KEY'
-                  AND tc.table_schema = %s
-                  AND tc.table_name = %s
-                """,
-                (schema_name, table_name),
-            )
-            pk_cols = {row[0] for row in cur.fetchall()}
+    """Fuehrt Anweisungen des Panels aus.
 
-            cur.execute(
-                """
-                SELECT column_name, data_type, is_nullable, column_default
-                FROM information_schema.columns
-                WHERE table_schema = %s AND table_name = %s
-                ORDER BY ordinal_position
-                """,
-                (schema_name, table_name),
-            )
-            columns = [
-                {
-                    "name": row[0],
-                    "data_type": row[1],
-                    "nullable": row[2] == "YES",
-                    "default": row[3],
-                    "primary_key": row[0] in pk_cols,
-                }
-                for row in cur.fetchall()
-            ]
-            if not columns:
-                raise PostgresAgentError("Table not found")
-            cur.execute(
-                """
-                SELECT indexname, indexdef FROM pg_indexes
-                WHERE schemaname = %s AND tablename = %s ORDER BY indexname
-                """,
-                (schema_name, table_name),
-            )
-            indexes = [{"name": row[0], "definition": row[1]} for row in cur.fetchall()]
-            cur.execute(
-                """
-                SELECT tc.constraint_name, kcu.column_name, ccu.table_name, ccu.column_name
-                FROM information_schema.table_constraints tc
-                JOIN information_schema.key_column_usage kcu
-                  ON tc.constraint_name = kcu.constraint_name
-                 AND tc.table_schema = kcu.table_schema
-                JOIN information_schema.constraint_column_usage ccu
-                  ON ccu.constraint_name = tc.constraint_name
-                 AND ccu.table_schema = tc.table_schema
-                WHERE tc.constraint_type = 'FOREIGN KEY'
-                  AND tc.table_schema = %s AND tc.table_name = %s
-                ORDER BY tc.constraint_name
-                """,
-                (schema_name, table_name),
-            )
-            foreign_keys = [
-                {
-                    "name": row[0],
-                    "column_name": row[1],
-                    "foreign_table": row[2],
-                    "foreign_column": row[3],
-                }
-                for row in cur.fetchall()
-            ]
-            cur.execute(
-                """
-                SELECT pg_total_relation_size(%s::regclass),
-                       GREATEST(c.reltuples::bigint, 0)
-                FROM pg_class c
-                JOIN pg_namespace n ON n.oid = c.relnamespace
-                WHERE n.nspname = %s AND c.relname = %s
-                """,
-                (f"{schema_name}.{table_name}", schema_name, table_name),
-            )
-            size_row = cur.fetchone()
-    return {
-        "schema": schema_name,
-        "name": table_name,
-        "columns": columns,
-        "indexes": indexes,
-        "foreign_keys": foreign_keys,
-        "size_bytes": size_row[0] if size_row else None,
-        "row_estimate": size_row[1] if size_row else None,
-    }
-
-
-def create_table(
-    database_name: str,
-    owner_role: str,
-    owner_password: str,
-    schema_name: str,
-    table_name: str,
-    columns: list[dict[str, Any]],
-) -> dict[str, Any]:
-    schema_name = validate_identifier(schema_name or "public")
-    table_name = validate_identifier(table_name)
-    if not columns:
-        raise PostgresAgentError("At least one column is required")
-    column_sql = []
-    for column in columns:
-        name = validate_identifier(str(column.get("name") or ""))
-        type_key = str(column.get("type") or "").lower()
-        if type_key not in ALLOWED_COLUMN_TYPES:
-            raise PostgresAgentError("Invalid column type")
-        part = sql.SQL("{} {}").format(
-            sql.Identifier(name), sql.SQL(ALLOWED_COLUMN_TYPES[type_key])
-        )
-        if column.get("primary_key"):
-            part = part + sql.SQL(" PRIMARY KEY")
-        if column.get("not_null"):
-            part = part + sql.SQL(" NOT NULL")
-        column_sql.append(part)
-    with _owner_connect(database_name, owner_role, owner_password) as conn:
-        conn.autocommit = True
-        with conn.cursor() as cur:
-            cur.execute(
-                sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema_name))
-            )
-            cur.execute(
-                sql.SQL("CREATE TABLE {}.{} ({})").format(
-                    sql.Identifier(schema_name),
-                    sql.Identifier(table_name),
-                    sql.SQL(", ").join(column_sql),
-                )
-            )
-    return {"ok": True}
-
-
-def drop_table(
-    database_name: str,
-    owner_role: str,
-    owner_password: str,
-    schema_name: str,
-    table_name: str,
-) -> dict[str, Any]:
-    with _owner_connect(database_name, owner_role, owner_password) as conn:
-        conn.autocommit = True
-        with conn.cursor() as cur:
-            cur.execute(
-                sql.SQL("DROP TABLE {}.{}").format(
-                    sql.Identifier(validate_identifier(schema_name or "public")),
-                    sql.Identifier(validate_identifier(table_name)),
-                )
-            )
-    return {"ok": True}
-
-
-def read_rows(
-    database_name: str,
-    owner_role: str,
-    owner_password: str,
-    schema_name: str,
-    table_name: str,
-    limit: int,
-    offset: int,
-    search: str | None = None,
-) -> dict[str, Any]:
-    limit = min(max(limit, 1), settings.managed_postgres_row_limit)
-    offset = max(offset, 0)
-    schema_name = validate_identifier(schema_name or "public")
-    table_name = validate_identifier(table_name)
-    with _owner_connect(database_name, owner_role, owner_password) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT column_name FROM information_schema.columns
-                WHERE table_schema = %s AND table_name = %s
-                ORDER BY ordinal_position
-                """,
-                (schema_name, table_name),
-            )
-            columns = [row[0] for row in cur.fetchall()]
-            if not columns:
-                raise PostgresAgentError("Table not found")
-            query = sql.SQL("SELECT * FROM {}.{}").format(
-                sql.Identifier(schema_name), sql.Identifier(table_name)
-            )
-            params: list[Any] = []
-            if search:
-                like = f"%{search[:128]}%"
-                clauses = [
-                    sql.SQL("CAST({} AS TEXT) ILIKE %s").format(sql.Identifier(column))
-                    for column in columns
-                ]
-                query += sql.SQL(" WHERE ") + sql.SQL(" OR ").join(clauses)
-                params.extend([like] * len(columns))
-            query += sql.SQL(" LIMIT %s OFFSET %s")
-            params.extend([limit, offset])
-            cur.execute(query, tuple(params))
-            rows = [dict(zip(columns, row, strict=False)) for row in cur.fetchall()]
-            return {"columns": columns, "rows": rows, "limit": limit, "offset": offset}
-
-
-def _validate_extension_name(name: str) -> str:
-    cleaned = (name or "").strip().lower()
-    if not IDENTIFIER_RE.fullmatch(cleaned):
-        raise PostgresAgentError("Invalid extension name")
-    if cleaned not in settings.trusted_extensions_set():
-        raise PostgresAgentError(f"Extension '{cleaned}' is not allowed")
-    return cleaned
-
-
-def list_extensions(
-    database_name: str, owner_role: str, owner_password: str
-) -> list[dict[str, Any]]:
-    conn = _owner_connect(database_name, owner_role, owner_password)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT e.extname, e.extversion, c.relname IS NOT NULL AS is_default
-                FROM pg_extension e
-                LEFT JOIN pg_depend d ON d.objid = e.oid AND d.deptype = 'e'
-                LEFT JOIN pg_class c ON c.oid = d.refobjid AND c.relname = 'pg_available_extensions'
-                ORDER BY e.extname
-                """
-            )
-            return [
-                {"name": name, "version": version, "trusted": bool(is_default)}
-                for name, version, is_default in cur.fetchall()
-            ]
-    finally:
-        conn.close()
-
-
-def install_extension(
-    database_name: str, owner_role: str, owner_password: str, name: str
-) -> dict[str, Any]:
-    ext = _validate_extension_name(name)
-    conn = _owner_connect(database_name, owner_role, owner_password)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                sql.SQL("CREATE EXTENSION IF NOT EXISTS {}").format(sql.Identifier(ext))
-            )
-        conn.commit()
-    finally:
-        conn.close()
-    return {"ok": True}
-
-
-def drop_extension(
-    database_name: str, owner_role: str, owner_password: str, name: str
-) -> dict[str, Any]:
-    ext = _validate_extension_name(name)
-    conn = _owner_connect(database_name, owner_role, owner_password)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                sql.SQL("DROP EXTENSION IF EXISTS {}").format(sql.Identifier(ext))
-            )
-        conn.commit()
-    finally:
-        conn.close()
-    return {"ok": True}
-
-
-def _split_sql_statements(text: str) -> list[str]:
-    statements: list[str] = []
-    buf: list[str] = []
-    i = 0
-    n = len(text)
-    in_single = in_double = in_line_comment = in_block_comment = False
-    dollar_tag: str | None = None
-    paren_depth = 0
-
-    def flush() -> None:
-        stmt = "".join(buf).strip()
-        while stmt:
-            if stmt.startswith("--"):
-                nl = stmt.find("\n")
-                if nl == -1:
-                    stmt = ""
-                    break
-                stmt = stmt[nl + 1 :].lstrip()
-                continue
-            if stmt.startswith("/*"):
-                end = stmt.find("*/")
-                if end == -1:
-                    stmt = ""
-                    break
-                stmt = stmt[end + 2 :].lstrip()
-                continue
-            break
-        if stmt:
-            statements.append(stmt)
-        buf.clear()
-
-    while i < n:
-        ch = text[i]
-        nxt = text[i + 1] if i + 1 < n else ""
-        if in_line_comment:
-            buf.append(ch)
-            if ch == "\n":
-                in_line_comment = False
-            i += 1
-            continue
-        if in_block_comment:
-            buf.append(ch)
-            if ch == "*" and nxt == "/":
-                buf.append(nxt)
-                i += 2
-                in_block_comment = False
-                continue
-            i += 1
-            continue
-        if in_single:
-            buf.append(ch)
-            if ch == "'":
-                if nxt == "'":
-                    buf.append(nxt)
-                    i += 2
-                    continue
-                in_single = False
-            i += 1
-            continue
-        if in_double:
-            buf.append(ch)
-            if ch == '"':
-                in_double = False
-            i += 1
-            continue
-        if dollar_tag is not None:
-            buf.append(ch)
-            if text.startswith(dollar_tag, i):
-                buf.extend(dollar_tag[1:])
-                i += len(dollar_tag)
-                dollar_tag = None
-            else:
-                i += 1
-            continue
-        if ch == "-" and nxt == "-":
-            in_line_comment = True
-            buf.append(ch)
-            i += 1
-            continue
-        if ch == "/" and nxt == "*":
-            in_block_comment = True
-            buf.append(ch)
-            i += 1
-            continue
-        if ch == "'":
-            in_single = True
-            buf.append(ch)
-            i += 1
-            continue
-        if ch == '"':
-            in_double = True
-            buf.append(ch)
-            i += 1
-            continue
-        if ch == "$":
-            j = i + 1
-            if j < n and text[j] == "$":
-                dollar_tag = "$$"
-                buf.append("$$")
-                i = j + 1
-                continue
-            tag_start = j
-            while j < n and (text[j].isalnum() or text[j] == "_"):
-                j += 1
-            if j < n and text[j] == "$" and j > tag_start:
-                dollar_tag = text[i : j + 1]
-                buf.append(dollar_tag)
-                i = j + 1
-                continue
-            buf.append(ch)
-            i += 1
-            continue
-        if ch == "(":
-            paren_depth += 1
-            buf.append(ch)
-            i += 1
-            continue
-        if ch == ")":
-            paren_depth = max(0, paren_depth - 1)
-            buf.append(ch)
-            i += 1
-            continue
-        if ch == ";" and paren_depth == 0:
-            flush()
-            i += 1
-            continue
-        buf.append(ch)
-        i += 1
-    flush()
-    return statements
-
-
-def _is_read_only(stmt: str) -> bool:
-    stripped = stmt.lstrip()
-    if not stripped:
-        return True
-    while stripped.startswith("--") or stripped.startswith("/*"):
-        if stripped.startswith("--"):
-            nl = stripped.find("\n")
-            stripped = stripped[nl + 1 :].lstrip() if nl != -1 else ""
-        else:
-            end = stripped.find("*/")
-            stripped = stripped[end + 2 :].lstrip() if end != -1 else ""
-    tokens = stripped.split()
-    if not tokens:
-        return True
-    head = tokens[0].lower()
-    if head == "explain":
-        if len(tokens) >= 2 and tokens[1].lower().split("(")[0] in _WRITE_KEYWORDS:
-            return False
-        return True
-    return head not in _WRITE_KEYWORDS
-
-
-def execute_sql(
-    database_name: str,
-    owner_role: str,
-    owner_password: str,
-    statement: str,
-    limit: int,
-) -> dict[str, Any]:
-    cleaned = (statement or "").strip()
-    if not cleaned:
-        raise PostgresAgentError("SQL must not be empty")
-    statements = _split_sql_statements(cleaned)
+    ``read``: nur lesende Transaktion. ``tx``: alles oder nichts in einer
+    Transaktion (``rollback`` verwirft am Ende, z. B. fuer EXPLAIN ANALYZE).
+    ``autocommit``: fuer Anweisungen, die keine Transaktion vertragen
+    (``CREATE INDEX CONCURRENTLY``, ``VACUUM``); Abbruch beim ersten Fehler.
+    """
+    database_name = validate_identifier(database_name)
+    if mode not in RUN_MODES:
+        raise PostgresAgentError("Invalid run mode")
     if not statements:
-        raise PostgresAgentError("No executable SQL statements found")
-    row_limit = min(max(limit, 1), settings.managed_postgres_row_limit)
-    timeout_ms = settings.managed_postgres_statement_timeout_ms
-    has_write = any(not _is_read_only(s) for s in statements)
-    results: list[dict[str, Any]] = []
+        raise PostgresAgentError("No statements")
+    row_limit = min(max(int(row_limit), 1), 5000)
+    timeout_ms = min(max(int(timeout_ms), 100), 600_000)
 
-    conn = _owner_connect(database_name, owner_role, owner_password)
+    if identity not in {"admin", "owner"}:
+        raise PostgresAgentError("Invalid identity")
     try:
-        if has_write:
-            with conn.cursor() as cur:
-                cur.execute("SET statement_timeout = %s", (timeout_ms,))
-                for stmt in statements:
-                    start = time.monotonic()
-                    entry: dict[str, Any] = {
-                        "statement": stmt,
-                        "columns": [],
-                        "rows": [],
-                        "row_count": None,
-                        "status": None,
-                        "error": None,
-                        "duration_ms": None,
-                    }
-                    try:
-                        cur.execute(stmt)
-                        if cur.description:
-                            entry["columns"] = [desc[0] for desc in cur.description]
-                            entry["rows"] = [
-                                dict(zip(entry["columns"], row, strict=False))
-                                for row in cur.fetchmany(row_limit)
-                            ]
-                        entry["row_count"] = cur.rowcount
-                        entry["status"] = cur.statusmessage
-                    except Exception as exc:  # noqa: BLE001
-                        conn.rollback()
-                        entry["error"] = f"{type(exc).__name__}: {exc}"
-                        results.append(entry)
-                        break
-                    else:
-                        entry["duration_ms"] = int((time.monotonic() - start) * 1000)
-                        results.append(entry)
-                conn.commit()
+        if identity == "admin":
+            if not admin_password:
+                raise PostgresAgentError("admin_password is required")
+            conn = _admin_connect(admin_password, database_name)
+            conn.autocommit = False
         else:
-            conn.set_session(readonly=True, autocommit=False)
-            with conn.cursor() as cur:
-                cur.execute("SET statement_timeout = %s", (timeout_ms,))
-                for stmt in statements:
-                    start = time.monotonic()
-                    entry = {
-                        "statement": stmt,
-                        "columns": [],
-                        "rows": [],
-                        "row_count": None,
-                        "status": None,
-                        "error": None,
-                        "duration_ms": None,
-                    }
-                    try:
-                        cur.execute(stmt)
-                        if cur.description:
-                            entry["columns"] = [desc[0] for desc in cur.description]
-                            entry["rows"] = [
-                                dict(zip(entry["columns"], row, strict=False))
-                                for row in cur.fetchmany(row_limit)
-                            ]
-                        entry["row_count"] = cur.rowcount
-                        entry["status"] = cur.statusmessage
-                    except Exception as exc:  # noqa: BLE001
+            conn = _owner_connect(database_name, validate_identifier(owner_role), owner_password)
+    except psycopg2.OperationalError as exc:
+        raise PostgresAgentError("PostgreSQL connection failed", status_code=503) from exc
+
+    started = time.monotonic()
+    results: list[dict[str, Any]] = []
+    try:
+        if mode == "autocommit":
+            conn.autocommit = True
+        elif mode == "read":
+            conn.set_session(readonly=True)
+        with conn.cursor() as cur:
+            cur.execute("SET statement_timeout = %s", (timeout_ms,))
+            for index, statement in enumerate(statements):
+                text = str(statement.get("sql") or "")
+                params = statement.get("params")
+                begin = time.monotonic()
+                try:
+                    cur.execute(text, params)
+                except psycopg2.Error as exc:
+                    if not conn.autocommit:
                         conn.rollback()
-                        entry["error"] = f"{type(exc).__name__}: {exc}"
-                        results.append(entry)
-                        break
-                    else:
-                        entry["duration_ms"] = int((time.monotonic() - start) * 1000)
-                        results.append(entry)
+                    raise _pg_fehler(exc, index) from exc
+                entry: dict[str, Any] = {
+                    "columns": [],
+                    "rows": [],
+                    "row_count": cur.rowcount,
+                    "status": cur.statusmessage,
+                    "truncated": False,
+                    "duration_ms": 0,
+                }
+                if cur.description:
+                    entry["columns"] = [desc[0] for desc in cur.description]
+                    fetched = cur.fetchmany(row_limit + 1)
+                    entry["truncated"] = len(fetched) > row_limit
+                    entry["rows"] = [[_json_wert(v) for v in row] for row in fetched[:row_limit]]
+                entry["duration_ms"] = int((time.monotonic() - begin) * 1000)
+                results.append(entry)
+        if not conn.autocommit:
+            if rollback or mode == "read":
+                conn.rollback()
+            else:
                 conn.commit()
     finally:
+        notices = [n.strip() for n in list(conn.notices)[-_MAX_NOTICES:]]
         conn.close()
-
     return {
-        "statements": results,
-        "total_duration_ms": sum((r.get("duration_ms") or 0) for r in results),
-        "statement_timeout_ms": timeout_ms,
+        "results": results,
+        "notices": notices,
+        "duration_ms": int((time.monotonic() - started) * 1000),
     }
-
-
-def dispatch_query(action: str, payload: dict[str, Any]) -> Any:
-    """Dispatch owner/admin query actions. Passwords never logged."""
-    act = (action or "").strip().lower()
-    dbn = payload.get("database_name") or ""
-    owner = payload.get("owner_role") or ""
-    opw = payload.get("owner_password") or ""
-
-    if act == "list_tables":
-        return list_tables(dbn, owner, opw)
-    if act == "stats":
-        return database_stats(dbn, owner, opw)
-    if act == "describe_table":
-        return describe_table(
-            dbn, owner, opw,
-            payload.get("schema_name") or "public",
-            payload.get("table_name") or "",
-        )
-    if act == "create_table":
-        return create_table(
-            dbn, owner, opw,
-            payload.get("schema_name") or "public",
-            payload.get("table_name") or "",
-            payload.get("columns") or [],
-        )
-    if act == "drop_table":
-        return drop_table(
-            dbn, owner, opw,
-            payload.get("schema_name") or "public",
-            payload.get("table_name") or "",
-        )
-    if act == "read_rows":
-        return read_rows(
-            dbn, owner, opw,
-            payload.get("schema_name") or "public",
-            payload.get("table_name") or "",
-            int(payload.get("limit") or 50),
-            int(payload.get("offset") or 0),
-            payload.get("search"),
-        )
-    if act == "update_row":
-        return update_row(
-            dbn, owner, opw,
-            payload.get("schema_name") or "public",
-            payload.get("table_name") or "",
-            payload.get("key_conditions") or {},
-            payload.get("updates") or {},
-        )
-    if act == "delete_rows":
-        return delete_rows(
-            dbn, owner, opw,
-            payload.get("schema_name") or "public",
-            payload.get("table_name") or "",
-            payload.get("row_conditions") or [],
-        )
-    if act == "insert_row":
-        return insert_row(
-            dbn, owner, opw,
-            payload.get("schema_name") or "public",
-            payload.get("table_name") or "",
-            payload.get("row_data") or {},
-        )
-    if act == "execute_sql":
-        return execute_sql(
-            dbn, owner, opw,
-            payload.get("sql") or "",
-            int(payload.get("limit") or 100),
-        )
-    if act == "list_extensions":
-        return list_extensions(dbn, owner, opw)
-    if act == "install_extension":
-        return install_extension(dbn, owner, opw, payload.get("name") or "")
-    if act == "drop_extension":
-        return drop_extension(dbn, owner, opw, payload.get("name") or "")
-    raise PostgresAgentError(f"Unknown query action: {act}")
-
-
-def update_row(
-    database_name: str,
-    owner_role: str,
-    owner_password: str,
-    schema_name: str,
-    table_name: str,
-    key_conditions: dict[str, Any],
-    updates: dict[str, Any],
-) -> dict[str, Any]:
-    if not key_conditions or not updates:
-        raise PostgresAgentError("Key conditions and updates required")
-    schema_name = validate_identifier(schema_name or "public")
-    table_name = validate_identifier(table_name)
-    with _owner_connect(database_name, owner_role, owner_password) as conn:
-        with conn.cursor() as cur:
-            set_clauses = [sql.SQL("{} = %s").format(sql.Identifier(k)) for k in updates]
-            where_clauses = [sql.SQL("{} = %s").format(sql.Identifier(k)) for k in key_conditions]
-            params = list(updates.values()) + list(key_conditions.values())
-            query = (
-                sql.SQL("UPDATE {}.{} SET ")
-                .format(sql.Identifier(schema_name), sql.Identifier(table_name))
-                + sql.SQL(", ").join(set_clauses)
-                + sql.SQL(" WHERE ")
-                + sql.SQL(" AND ").join(where_clauses)
-            )
-            cur.execute(query, tuple(params))
-            count = cur.rowcount
-            conn.commit()
-    return {"updated_count": count, "message": f"{count} Zeile(n) aktualisiert"}
-
-
-def delete_rows(
-    database_name: str,
-    owner_role: str,
-    owner_password: str,
-    schema_name: str,
-    table_name: str,
-    row_conditions: list[dict[str, Any]],
-) -> dict[str, Any]:
-    if not row_conditions:
-        raise PostgresAgentError("Row conditions required")
-    schema_name = validate_identifier(schema_name or "public")
-    table_name = validate_identifier(table_name)
-    deleted_count = 0
-    with _owner_connect(database_name, owner_role, owner_password) as conn:
-        with conn.cursor() as cur:
-            for cond in row_conditions:
-                if not cond:
-                    continue
-                where_clauses = [sql.SQL("{} = %s").format(sql.Identifier(k)) for k in cond]
-                params = list(cond.values())
-                query = (
-                    sql.SQL("DELETE FROM {}.{} WHERE ")
-                    .format(sql.Identifier(schema_name), sql.Identifier(table_name))
-                    + sql.SQL(" AND ").join(where_clauses)
-                )
-                cur.execute(query, tuple(params))
-                deleted_count += max(cur.rowcount, 0)
-            conn.commit()
-    return {"deleted_count": deleted_count, "message": f"{deleted_count} Zeile(n) gelöscht"}
-
-
-def insert_row(
-    database_name: str,
-    owner_role: str,
-    owner_password: str,
-    schema_name: str,
-    table_name: str,
-    row_data: dict[str, Any],
-) -> dict[str, Any]:
-    if not row_data:
-        raise PostgresAgentError("Row data required")
-    schema_name = validate_identifier(schema_name or "public")
-    table_name = validate_identifier(table_name)
-    columns = list(row_data.keys())
-    values = list(row_data.values())
-    with _owner_connect(database_name, owner_role, owner_password) as conn:
-        with conn.cursor() as cur:
-            col_sql = [sql.Identifier(col) for col in columns]
-            val_sql = [sql.Placeholder() for _ in values]
-            query = sql.SQL("INSERT INTO {}.{} ({}) VALUES ({}) RETURNING *").format(
-                sql.Identifier(schema_name),
-                sql.Identifier(table_name),
-                sql.SQL(", ").join(col_sql),
-                sql.SQL(", ").join(val_sql),
-            )
-            cur.execute(query, tuple(values))
-            inserted_row = None
-            if cur.description:
-                cols = [desc[0] for desc in cur.description]
-                fetched = cur.fetchone()
-                if fetched:
-                    inserted_row = dict(zip(cols, fetched, strict=False))
-            conn.commit()
-    return {"inserted_row": inserted_row, "message": "Zeile eingefügt"}
 
 
 def dump_databases(*, admin_password: str, database_names: list[str]) -> dict[str, str]:
@@ -1293,7 +733,7 @@ def dump_databases(*, admin_password: str, database_names: list[str]) -> dict[st
     if not database_names:
         return {}
     ensure_internal_postgres(admin_password)
-    container = settings.managed_postgres_container_name
+    container = _container()
     result: dict[str, str] = {}
     for db_name in database_names:
         name = validate_identifier(db_name)
@@ -1301,6 +741,7 @@ def dump_databases(*, admin_password: str, database_names: list[str]) -> dict[st
             "pg_dump "
             "--format=plain --no-owner --no-acl --clean --if-exists --inserts "
             f"--dbname={shlex.quote(name)} "
+            f"--port={_internal_port()} "
             f"--username={shlex.quote(ADMIN_USER)}"
         )
         exec_result = docker_service.exec_in_managed(
@@ -1314,16 +755,145 @@ def dump_databases(*, admin_password: str, database_names: list[str]) -> dict[st
                 f"pg_dump failed for database: {(exec_result.get('error') or '')[:200]}",
                 status_code=500,
             )
-        dump_text = exec_result.get("stdout") or ""
         # PostgreSQL 17 may wrap plain dumps in psql's \restrict commands.
         # Remove only these tool-generated guards. User-controlled restore SQL
         # is still rejected below if any psql meta-command remains.
-        result[name] = "\n".join(
-            line
-            for line in dump_text.splitlines()
-            if not re.match(r"^[ \t]*\\(?:un)?restrict(?:[ \t]|$)", line)
-        )
+        result[name] = _ohne_restrict(exec_result.get("stdout") or "")
     return result
+
+
+def _ohne_restrict(text: str) -> str:
+    return "\n".join(
+        line
+        for line in text.splitlines()
+        if not re.match(r"^[ \t]*\\(?:un)?restrict(?:[ \t]|$)", line)
+    )
+
+
+DUMP_FORMATS = {"plain": "p", "custom": "c", "tar": "t"}
+PENDING_DIR = Path(".msm") / "postgres"
+
+
+def _muster(*teile: str) -> str:
+    """pg_dump-Muster: in doppelten Anfuehrungszeichen gilt jedes Zeichen woertlich."""
+    return ".".join('"' + teil.replace('"', '""') + '"' for teil in teile)
+
+
+def dump_database(
+    *,
+    admin_password: str,
+    database_name: str,
+    fmt: str = "plain",
+    schema_only: bool = False,
+    data_only: bool = False,
+    schemas: list[str] | None = None,
+    tables: list[tuple[str, str]] | None = None,
+) -> bytes:
+    """pg_dump einer Datenbank. Argumente als argv, nie durch eine Shell."""
+    name = validate_identifier(database_name)
+    if fmt not in DUMP_FORMATS:
+        raise PostgresAgentError("Invalid dump format")
+    if schema_only and data_only:
+        raise PostgresAgentError("schema_only and data_only exclude each other")
+    ensure_internal_postgres(admin_password)
+    command = [
+        "pg_dump", f"--format={DUMP_FORMATS[fmt]}", "--no-owner", "--no-acl",
+        f"--dbname={name}", f"--port={_internal_port()}", f"--username={ADMIN_USER}",
+    ]
+    if fmt == "plain":
+        # INSERT statt COPY: COPY-Daten enden auf "\." und koennen mit "\"
+        # beginnen — der Restore lehnt jede solche Zeile als psql-Befehl ab.
+        command.append("--rows-per-insert=500")
+        if not data_only:
+            command += ["--clean", "--if-exists"]
+    if schema_only:
+        command.append("--schema-only")
+    if data_only:
+        command.append("--data-only")
+    for schema in schemas or []:
+        command.append(f"--schema={_muster(schema)}")
+    for schema, table in tables or []:
+        command.append(f"--table={_muster(schema, table)}")
+    result = docker_service.exec_in_managed(
+        _container(), command, timeout=600, environment={"PGPASSWORD": admin_password}, binary=True,
+    )
+    if not result.get("ok"):
+        raise PostgresAgentError(f"pg_dump failed: {(result.get('error') or '')[:300]}", status_code=500)
+    data = result.get("stdout_bytes") or b""
+    if fmt == "plain":
+        data = _ohne_restrict(data.decode("utf-8", errors="replace")).encode("utf-8")
+    return data
+
+
+def restore_database(
+    *,
+    database_name: str,
+    owner_role: str,
+    owner_password: str,
+    fmt: str,
+    data: bytes,
+    clean: bool = False,
+) -> dict[str, Any]:
+    """Spielt einen Dump als Owner ein — alles oder nichts."""
+    name = validate_identifier(database_name)
+    role = validate_identifier(owner_role)
+    if fmt not in DUMP_FORMATS:
+        raise PostgresAgentError("Invalid dump format")
+    started = time.monotonic()
+    port = str(_internal_port())
+    if fmt == "plain":
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise PostgresAgentError("SQL dump is not UTF-8", status_code=400) from exc
+        text = _ohne_restrict(text)
+        _reject_psql_meta_commands(text)
+        command = [
+            "psql", "--no-psqlrc", "--set", "ON_ERROR_STOP=1", "--single-transaction",
+            "--username", role, "--dbname", name, "--port", port,
+        ]
+        result = docker_service.exec_in_managed_stdin(
+            _container(), command, text, environment={"PGPASSWORD": owner_password}
+        )
+    else:
+        command = [
+            "pg_restore", "--no-owner", "--no-acl", "--single-transaction", "--exit-on-error",
+            "--username", role, "--dbname", name, "--port", port,
+        ]
+        if clean:
+            command += ["--clean", "--if-exists"]
+        result = docker_service.exec_in_managed_stdin(
+            _container(), command, data, environment={"PGPASSWORD": owner_password}
+        )
+    if not result.get("ok"):
+        raise PostgresAgentError(f"restore failed: {(result.get('error') or '')[:300]}", status_code=400)
+    return {"ok": True, "database": name, "duration_ms": int((time.monotonic() - started) * 1000)}
+
+
+def _pending_dir(server_id: int | str) -> Path:
+    from services.file_service import server_root
+
+    return server_root(server_id) / PENDING_DIR
+
+
+def pending_dumps(server_id: int | str) -> list[dict[str, Any]]:
+    """Dumps, die ein Backup-Restore eines Datenbankservers liegen liess."""
+    folder = _pending_dir(server_id)
+    if not folder.is_dir():
+        return []
+    return [
+        {"database": path.stem, "size_bytes": path.stat().st_size, "modified": path.stat().st_mtime}
+        for path in sorted(folder.glob("*.sql"))
+        if path.is_file() and IDENTIFIER_RE.fullmatch(path.stem)
+    ]
+
+
+def pending_dump_path(server_id: int | str, database_name: str) -> Path:
+    name = validate_identifier(database_name)
+    path = _pending_dir(server_id) / f"{name}.sql"
+    if not path.is_file():
+        raise PostgresAgentError("No pending dump for this database", status_code=404)
+    return path
 
 
 def _reject_psql_meta_commands(sql_text: str) -> None:
@@ -1356,10 +926,11 @@ def restore_sql(
         restore_user = validate_identifier(str(owner.get("owner_role") or ADMIN_USER))
         restore_password = str(owner.get("owner_password") or admin_password)
         result = docker_service.exec_in_managed_stdin(
-            settings.managed_postgres_container_name,
+            _container(),
             [
                 "psql", "--no-psqlrc", "--set", "ON_ERROR_STOP=1",
                 "--username", restore_user, "--dbname", name,
+                "--port", str(_internal_port()),
             ],
             sql_text,
             environment={"PGPASSWORD": restore_password},

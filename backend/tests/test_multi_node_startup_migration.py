@@ -12,9 +12,9 @@ from services.multi_node_migration_service import migrate_multi_node_schema
 
 
 def test_legacy_database_gets_node_columns_and_matching_local_token(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, pg_wegwerf, monkeypatch
 ) -> None:
-    engine = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
+    engine = create_engine(pg_wegwerf("legacy"))
     with engine.begin() as connection:
         connection.execute(
             text(
@@ -62,8 +62,8 @@ def test_legacy_database_gets_node_columns_and_matching_local_token(
     )
 
 
-def test_missing_local_token_fails_closed(tmp_path: Path, monkeypatch) -> None:
-    engine = create_engine(f"sqlite:///{tmp_path / 'empty.db'}")
+def test_missing_local_token_fails_closed(tmp_path: Path, pg_wegwerf, monkeypatch) -> None:
+    engine = create_engine(pg_wegwerf("empty"))
     Base.metadata.tables["nodes"].create(engine)
     monkeypatch.setattr(
         "services.multi_node_migration_service.settings.local_agent_env_file",
@@ -78,8 +78,8 @@ def test_missing_local_token_fails_closed(tmp_path: Path, monkeypatch) -> None:
         migrate_multi_node_schema(engine, sessions)
 
 
-def test_backend_only_mode_does_not_create_a_local_node(tmp_path: Path) -> None:
-    engine = create_engine(f"sqlite:///{tmp_path / 'backend-only.db'}")
+def test_backend_only_mode_does_not_create_a_local_node(tmp_path: Path, pg_wegwerf) -> None:
+    engine = create_engine(pg_wegwerf("backend-only"))
     Base.metadata.create_all(engine)
     sessions = sessionmaker(bind=engine)
 
@@ -96,8 +96,8 @@ def test_backend_only_mode_does_not_create_a_local_node(tmp_path: Path) -> None:
         db.close()
 
 
-def test_backend_only_mode_rejects_a_stale_local_node(tmp_path: Path) -> None:
-    engine = create_engine(f"sqlite:///{tmp_path / 'stale-local.db'}")
+def test_backend_only_mode_rejects_a_stale_local_node(tmp_path: Path, pg_wegwerf) -> None:
+    engine = create_engine(pg_wegwerf("stale-local"))
     Base.metadata.create_all(engine)
     sessions = sessionmaker(bind=engine)
     db = sessions()

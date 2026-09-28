@@ -18,7 +18,7 @@ def _user_from_token(token: str | None, db: Session) -> User:
     if not token:
         raise HTTPException(status_code=401, detail="Nicht authentifiziert")
     payload = AuthService.decode_token(token)
-    if not payload or "sub" not in payload or payload.get("type") != "access":
+    if not payload or not isinstance(payload.get("user_id"), int) or payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Ungültiges Token")
     # Ein Access-Token ohne `jti` ist ein Blindgaenger: der Logout kann es nicht
     # blacklisten, und die Pruefung unten findet nichts, was sie pruefen koennte.
@@ -32,10 +32,35 @@ def _user_from_token(token: str | None, db: Session) -> User:
         raise HTTPException(status_code=401, detail="Ungültiges Token")
     if is_jwt_blacklisted(db, jti):
         raise HTTPException(status_code=401, detail="Token widerrufen")
-    user = AuthService.get_user_by_username(db, payload["sub"])
+    if _familie_gesperrt(db, payload.get("familie")):
+        raise HTTPException(status_code=401, detail="Token widerrufen")
+    # Ueber die Kennung, nicht ueber `sub` (den Namen): seit 09/2026 laesst
+    # sich der Benutzername aendern. Ueber `sub` verloere jedes laufende
+    # Token sein Konto, und wer den alten Namen uebernimmt, erbte es.
+    user = db.get(User, payload["user_id"])
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User nicht gefunden oder inaktiv")
     return user
+
+
+def _familie_gesperrt(db: Session, familie: object) -> bool:
+    """Ist die Sitzungskette dieses Access-Tokens gesperrt?
+
+    Bis 09/2026 galt ein Access-Token nach dem Sperren seiner Familie noch bis
+    zu seinem Ablauf weiter — ein entferntes Geraet las eine Viertelstunde
+    lang mit. Gesperrt heisst: es gibt Zeilen der Familie, aber keine ohne
+    `revoked_at`. Eine Rotation setzt nur `used_at`, laesst die Familie also
+    offen; eine Familie ganz ohne Zeilen (abgelaufen und aufgeraeumt) sperrt
+    hier nichts — dafuer ist der Ablauf des Access-Tokens da.
+    """
+    if not familie:
+        return False
+    from models.refresh_token import RefreshToken
+
+    basis = db.query(RefreshToken.id).filter(RefreshToken.family == str(familie))
+    if basis.filter(RefreshToken.revoked_at.is_(None)).first() is not None:
+        return False
+    return basis.first() is not None
 
 
 def _bearer_token(request: Request) -> str | None:
@@ -63,6 +88,17 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     return _user_from_token(token, db)
 
 
+def get_optional_user(request: Request, db: Session = Depends(get_db)) -> User | None:
+    """Liefert den authentifizierten Benutzer oder None, wenn keine gültige Sitzung vorliegt."""
+    token = _bearer_token(request) or request.cookies.get("__Secure-access_token")
+    if not token:
+        return None
+    try:
+        return _user_from_token(token, db)
+    except HTTPException:
+        return None
+
+
 #: Das Subprotokoll, unter dem ein nativer Client sein Access-Token in den
 #: WS-Handshake legt: ``Sec-WebSocket-Protocol: msm.bearer, <token>``.
 #:
@@ -83,7 +119,7 @@ def _ws_bearer_token(ws: WebSocket) -> str | None:
     (WebSockets kennen kein CORS), aber nicht fuellen: ohne das Token des
     Opfers steht dort nichts, was `_user_from_token` gelten laesst — anders
     als beim Cookie, das der Browser ungefragt mitschickt (dafuer gibt es den
-    Origin-Check der Endpunkte).
+    Origin-Check in `get_current_user_for_ws`).
     """
     roh = ws.headers.get("sec-websocket-protocol", "")
     eintraege = [teil.strip() for teil in roh.split(",") if teil.strip()]
@@ -102,17 +138,42 @@ def ws_subprotokoll(ws: WebSocket) -> str | None:
     return WS_BEARER_PROTOKOLL if _ws_bearer_token(ws) is not None else None
 
 
+def ws_origin_erlaubt(origin: str | None) -> bool:
+    """Steht die Herkunft eines WS-Upgrades auf der CORS-Allowlist?
+
+    Dieselbe Liste wie fuer CORS (panel_url + MSM_CORS_ALLOWED_ORIGINS +
+    Desktop/Dev). Ohne Origin-Header ist die Antwort nein.
+    """
+    from config import get_cors_origins
+
+    if not origin:
+        return False
+    return origin.rstrip("/") in {o.rstrip("/") for o in get_cors_origins()}
+
+
 def get_current_user_for_ws(ws: WebSocket, db: Session) -> User:
-    """Auth fuer WebSocket-Endpoints. Wirft HTTPException(401) wie der HTTP-Pfad,
-    muss im Endpoint aber in einen sauberen WS-Close (1008) umgesetzt werden.
+    """Auth fuer WebSocket-Endpoints. Wirft HTTPException(401/403) wie der
+    HTTP-Pfad, muss im Endpoint aber in einen sauberen WS-Close (1008)
+    umgesetzt werden.
 
     Zwei Wege, dieselbe Rangfolge wie bei HTTP (`get_current_user`): erst das
     Bearer-Token aus dem Subprotokoll (native Clients, die kein Cookie haben),
     dann das Access-Token-Cookie (Browser senden es beim WS-Upgrade von
-    selbst). Keine CSRF-Pruefung noetig, weil WS-Frames keine "simple requests"
-    sind und der Origin-Header im Endpoint explizit geprueft wird.
+    selbst).
+
+    Beim Cookie-Weg ist die Herkunft Pflicht. WebSockets kennen kein CORS:
+    Oeffnet eine fremde Seite `new WebSocket("wss://panel/api/events/ws")`,
+    schickt der Browser das Cookie mit, sofern SameSite es zulaesst. Mit
+    getrenntem Frontend (`--external-frontend`, SameSite=None) tut Chrome das
+    fuer jede Seite, im Standardaufbau fuer jede Nachbar-Subdomain. Ohne
+    diese Pruefung laese die fremde Seite dann den Live-Strom mit. Ein
+    Bearer-Token dagegen kann keine fremde Seite beilegen.
     """
-    token = _ws_bearer_token(ws) or ws.cookies.get("__Secure-access_token")
+    token = _ws_bearer_token(ws)
+    if token is None:
+        if not ws_origin_erlaubt(ws.headers.get("origin")):
+            raise HTTPException(status_code=403, detail="Herkunft nicht erlaubt.")
+        token = ws.cookies.get("__Secure-access_token")
     return _user_from_token(token, db)
 
 

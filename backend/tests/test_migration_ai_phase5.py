@@ -11,8 +11,8 @@ from config import settings
 from database import Base
 
 
-def test_ai_phase5_migration_roundtrip(tmp_path: Path) -> None:
-    db_url = f"sqlite:///{tmp_path / 'ai-phase5.db'}"
+def test_ai_phase5_migration_roundtrip(tmp_path: Path, pg_wegwerf) -> None:
+    db_url = pg_wegwerf("ai-phase5")
     previous_database_url = settings.database_url
     settings.database_url = db_url
     engine = create_engine(db_url)

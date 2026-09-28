@@ -12,6 +12,8 @@ from __future__ import annotations
 import ipaddress
 from datetime import datetime
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
 
 from schemas.postgres import PostgresOneTimeCredential
@@ -84,9 +86,53 @@ class ServerPortResponse(BaseModel):
         from_attributes = True
 
 
+_PG_IDENTIFIER = r"^[a-z][a-z0-9_]{0,62}$"
+POSTGRES_GAME_TYPE = "postgres"
+
+
+class DatabaseServerSpec(BaseModel):
+    """Erste Datenbank eines Datenbankservers (eigene PostgreSQL-Instanz)."""
+
+    database_name: str = Field("app", pattern=_PG_IDENTIFIER)
+    # Owner der Datenbank: darf Struktur aendern. Dazu entsteht ``<name>_app``
+    # mit Lese-/Schreibrechten fuer Anwendungen.
+    username: str = Field("app_owner", pattern=_PG_IDENTIFIER, max_length=59)
+    # Leer: das Panel erzeugt eins. Abrufbar bleibt es im Verbindungs-Hub.
+    password: str | None = Field(None, min_length=12, max_length=128)
+    allowed_cidrs: list[str] = Field(default_factory=list, max_length=50)
+    ssl_required: bool = True
+
+    @field_validator("password")
+    @classmethod
+    def _check_password(cls, v: str | None) -> str | None:
+        if v is not None and (chr(0) in v or v.strip() != v):
+            raise ValueError("Passwort darf keine Nullbytes und keine Leerzeichen am Rand enthalten.")
+        return v
+
+    @field_validator("allowed_cidrs")
+    @classmethod
+    def _check_cidrs(cls, v: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for item in v:
+            text = (item or "").strip()
+            if not text:
+                continue
+            try:
+                net = ipaddress.ip_network(text, strict=False)
+            except ValueError as exc:
+                raise ValueError(f"'{text}' ist kein gueltiges Netz (CIDR).") from exc
+            if str(net) not in normalized:
+                normalized.append(str(net))
+        return normalized
+
+
 class ServerCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
-    game_type: str = Field(..., pattern=r"^[a-z0-9_]+$")
+    # ``database``: eigene PostgreSQL-Instanz; ``game_type`` ist dann immer
+    # ``postgres`` und kommt nicht vom Client.
+    server_kind: Literal["application", "database"] = "application"
+    game_type: str | None = Field(None, pattern=r"^[a-z0-9_]+$")
+    database: DatabaseServerSpec | None = None
     auto_restart: bool = False
     restart_interval_hours: int | None = Field(None, ge=1, le=168)
     restart_time_utc: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
@@ -119,6 +165,25 @@ class ServerCreate(BaseModel):
     @classmethod
     def _check_restart_times(cls, v: str | None) -> str | None:
         return _validate_restart_times(v)
+
+    @model_validator(mode="after")
+    def _check_kind(self) -> "ServerCreate":
+        if self.server_kind == "database":
+            self.game_type = POSTGRES_GAME_TYPE
+            if self.database is None:
+                self.database = DatabaseServerSpec()
+            # Eine eigene Instanz braucht keine Datenbanken im geteilten Cluster.
+            self.postgres_enabled = False
+            return self
+        if not self.game_type:
+            raise ValueError("game_type ist fuer Anwendungsserver erforderlich.")
+        if self.game_type == POSTGRES_GAME_TYPE:
+            # Ohne Instanzzeile wuerde der Server Datenbankaufrufe in den
+            # geteilten Cluster schicken.
+            raise ValueError("PostgreSQL-Server bitte als Datenbankserver anlegen.")
+        if self.database is not None:
+            raise ValueError("database gilt nur fuer Datenbankserver.")
+        return self
 
     @model_validator(mode="after")
     def _check_postgres_count(self) -> "ServerCreate":
@@ -168,6 +233,7 @@ class ServerResponse(BaseModel):
     id: int
     name: str
     game_type: str
+    server_kind: str = "application"
     # install_dir / container_name entfernt (Security + data min): interne Host-Pfade nicht an view-only User leaken.
     # Früher in allen Responses (auch server.view). Nur noch intern in DB/audit/owner-flows.
     # Kein FE-Usage außer types (entfernt); Router-Responses bleiben kompatibel.

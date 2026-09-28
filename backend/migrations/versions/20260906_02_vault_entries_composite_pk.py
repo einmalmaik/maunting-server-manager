@@ -33,9 +33,7 @@ def _vorhandener_pk_name(default_fallback: str) -> str:
 
 
 def upgrade() -> None:
-    dialect = op.get_context().dialect.name
-    fallback = "vault_entries_pkey" if dialect == "postgresql" else "pk_vault_entries"
-    pk_name = _vorhandener_pk_name(fallback)
+    pk_name = _vorhandener_pk_name("vault_entries_pkey")
     naming = {"pk": "pk_%(table_name)s"}
     with op.batch_alter_table("vault_entries", naming_convention=naming) as batch:
         batch.drop_constraint(pk_name, type_="primary")

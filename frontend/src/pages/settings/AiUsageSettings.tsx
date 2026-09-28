@@ -55,7 +55,7 @@ export function AiUsageSettings() {
     <section className="msm-card space-y-4 p-6" aria-labelledby="ai-usage-title">
       <div className="flex items-center gap-2">
         <BarChart3 className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h3 id="ai-usage-title" className="font-headline text-lg font-semibold text-on-surface">
+        <h3 id="ai-usage-title" className="font-headline text-title-lg font-semibold text-on-surface">
           {t('ai.usage.title')}
         </h3>
       </div>

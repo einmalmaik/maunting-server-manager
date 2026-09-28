@@ -9,7 +9,7 @@ Abgedeckte Assertions:
 - VAL-PANEL-RESTORE-005: Anweisungen mit deutscher Warnung und sudo bash
 - VAL-PANEL-RESTORE-006: Script ausfuehrbar mit Shebang und strict mode
 - VAL-PANEL-RESTORE-007: Script stoppt Panel-Service und sichert .env
-- VAL-PANEL-RESTORE-008: Script stellt Datenbank wieder her (PostgreSQL und SQLite)
+- VAL-PANEL-RESTORE-008: Script stellt Datenbank wieder her (PostgreSQL)
 - VAL-PANEL-RESTORE-009: Script stellt Configs wieder her und startet Panel neu
 - VAL-PANEL-RESTORE-010: Script enthaelt keine Plaintext-Secrets
 - VAL-PANEL-RESTORE-011: Script ist idempotent
@@ -41,7 +41,6 @@ TEST_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLE"
 TEST_SECRET_KEY = "****************************************"
 TEST_PASSWORD = "********************!"
 
-_FAKE_SQLITE_DUMP = b"BEGIN TRANSACTION;\nCREATE TABLE users (id INTEGER PRIMARY KEY);\nCOMMIT;\n"
 _FAKE_PG_DUMP = b"-- PostgreSQL database dump\n-- pg_dump version 17\n\nCREATE TABLE users ();\n"
 
 
@@ -86,15 +85,9 @@ def _create_backup(db, *, name: str = "test", db_type: str = "postgresql",
     """Erstellt ein Panel-Backup mit gemocktem DB-Dump."""
     if config_names is None:
         config_names = [".env", "install.sh"]
-    if db_type == "postgresql":
-        dump = _FAKE_PG_DUMP
-        monkeypatch_db = "postgresql://msm:pw@127.0.0.1:15432/msm"
-    else:
-        dump = _FAKE_SQLITE_DUMP
-        monkeypatch_db = "sqlite:///./msm.db"
-
-    with patch.object(pbs, "_dump_database", return_value=dump):
-        with patch.object(settings, "database_url", monkeypatch_db):
+    assert db_type == "postgresql", "Panel-Backups gibt es nur noch von PostgreSQL"
+    with patch.object(pbs, "_dump_database", return_value=_FAKE_PG_DUMP):
+        with patch.object(settings, "database_url", "postgresql://msm:pw@127.0.0.1:15432/msm"):
             return pbs.create_panel_backup(db, name=name)
 
 

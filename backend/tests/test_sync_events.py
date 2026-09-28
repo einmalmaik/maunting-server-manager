@@ -3,11 +3,6 @@
 import asyncio
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from database import Base
 from dependencies import get_db, get_current_user
 from main import app
 from models import User
@@ -17,17 +12,9 @@ from services.sync_event_service import SyncEventService
 
 
 @pytest.fixture
-def db_session():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(bind=engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
+def db_session(db):
+    """Die gemeinsame Test-Datenbank aus conftest.py."""
+    return db
 
 
 @pytest.fixture
@@ -328,3 +315,53 @@ def test_personal_notes_privacy_isolation(db_session, test_user):
     assert q_admin.empty()
 
 
+def test_sync_event_service_close_all(test_user):
+    """Prüft, dass close_all ein shutdown-Event an alle offenen Verbindungen sendet und die Subscriber leert."""
+    conn1, q1 = SyncEventService.subscribe(user_id=test_user.id)
+    conn2, q2 = SyncEventService.subscribe(user_id=test_user.id)
+
+    SyncEventService.close_all()
+
+    # Beide Queues müssen das shutdown-Event erhalten haben
+    assert not q1.empty()
+    evt1 = q1.get_nowait()
+    assert evt1.get("type") == "shutdown"
+
+    assert not q2.empty()
+    evt2 = q2.get_nowait()
+    assert evt2.get("type") == "shutdown"
+
+
+
+
+def test_trenne_trifft_nur_das_gesperrte_geraet(test_user):
+    """Eine gesperrte Familie schliesst genau ihre Verbindungen.
+
+    Die anderen Geraete desselben Kontos und fremde Konten laufen weiter;
+    eine Verbindung ohne Familie laesst sich keinem Geraet zuordnen.
+    """
+    weg, q_weg = SyncEventService.subscribe(user_id=test_user.id, familie="fam-weg")
+    bleibt, q_bleibt = SyncEventService.subscribe(user_id=test_user.id, familie="fam-bleibt")
+    alt, q_alt = SyncEventService.subscribe(user_id=test_user.id)
+    fremd, q_fremd = SyncEventService.subscribe(user_id=test_user.id + 1, familie="fam-weg")
+
+    assert SyncEventService.trenne(test_user.id, "fam-weg") == 1
+
+    signal = q_weg.get_nowait()
+    assert signal["type"] == "shutdown" and signal["reason"] == "session_revoked"
+    assert q_bleibt.empty() and q_alt.empty() and q_fremd.empty()
+    # Aus der Verteilung genommen, bevor der Handler die Queue geleert hat.
+    SyncEventService.publish({"type": "neu"}, user_id=test_user.id)
+    assert q_weg.empty()
+    assert q_bleibt.get_nowait()["type"] == "neu"
+
+
+def test_trenne_ohne_familie_trifft_jede_verbindung_des_kontos(test_user):
+    _, q_a = SyncEventService.subscribe(user_id=test_user.id, familie="fam-a")
+    _, q_b = SyncEventService.subscribe(user_id=test_user.id)
+    _, q_fremd = SyncEventService.subscribe(user_id=test_user.id + 1)
+
+    assert SyncEventService.trenne(test_user.id) == 2
+    assert q_a.get_nowait()["type"] == "shutdown"
+    assert q_b.get_nowait()["type"] == "shutdown"
+    assert q_fremd.empty()

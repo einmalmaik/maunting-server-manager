@@ -14,11 +14,17 @@
         # getUserMedia auf der eigenen Herkunft. microphone=() blockierte ihn
         # vollstaendig — der Browser fragte nicht einmal. Fremde iframes
         # bleiben mit (self) weiterhin ausgesperrt.
-        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        # camera=(self) und display-capture=(self) aus demselben Grund: der
+        # Messenger kann Video- und Bildschirmanrufe. Mit camera=() fragte der
+        # Browser auch hier nicht, und die Kamera blieb im Gespraech tot.
+        Permissions-Policy "accelerometer=(), camera=(self), display-capture=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/ https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; style-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com https://singrabot.mauntingstudios.de; img-src 'self' data: blob: https:; media-src 'self' blob: data: mediastream:; worker-src 'self' blob:; connect-src 'self' https: http: ws: wss: blob: data:; font-src 'self' data: https://singrabot.mauntingstudios.de; frame-src 'self' https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/ https://singrabot.mauntingstudios.de; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
     }
 
+    # Ohne eigenen Cache-Kopf: Das Backend setzt ihn selbst (`no-store`, sofern
+    # eine Route nichts anderes sagt). Ein Kopf hier kaeme als zweiter hinzu
+    # und uebertrumpfte etwa das Regionsbild (`private, max-age=900`).
     handle /api/* {
-        header Cache-Control "no-store"
         reverse_proxy localhost:8000
     }
 
@@ -26,13 +32,38 @@
         reverse_proxy localhost:8000
     }
 
+    # LiveKit-Sidecar: Signalisierung fuer Anrufe. handle_path schneidet das
+    # Praefix ab, damit /livekit/rtc beim Medienserver als /rtc ankommt.
+    # Der Sidecar hoert nur auf 127.0.0.1; dies ist sein einziger Weg nach
+    # aussen, und er traegt damit dasselbe Zertifikat wie das Panel.
+    handle_path /livekit/* {
+        reverse_proxy localhost:7880
+    }
+
+    # Die gehashten Assets tragen ihren Inhalt im Namen: ein Jahr, ohne
+    # Nachfrage. Nur was es gibt; ein fehlender Chunk bleibt ein 404 und wird
+    # nie zur index.html, sonst stoppt der laufende Client mit
+    # "MIME type text/html".
     handle /assets/* {
-        header Cache-Control "public, max-age=31536000, immutable"
+        @vorhanden file
+        header @vorhanden Cache-Control "public, max-age=31536000, immutable"
         file_server
     }
 
+    # Die Seite selbst (/, jede .html und jede Unterseite, die try_files auf
+    # die index.html lenkt) fragt immer nach. Eine alte index.html zeigte nach
+    # einem Update auf Chunks, die es nicht mehr gibt, und die Oberflaeche
+    # bliebe leer. Icons, Manifest und die Erdtextur duerfen einen Tag bleiben.
     handle {
-        header Cache-Control "no-cache, no-store, must-revalidate"
+        @seite not file
+        @html path / *.html
+        @datei {
+            file
+            not path / *.html
+        }
+        header @seite Cache-Control "no-cache, no-store, must-revalidate"
+        header @html Cache-Control "no-cache, no-store, must-revalidate"
+        header @datei Cache-Control "public, max-age=86400"
         try_files {path} /index.html
         file_server
     }

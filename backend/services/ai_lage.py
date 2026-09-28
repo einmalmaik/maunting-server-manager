@@ -44,11 +44,11 @@ WOCHENTAGE = (
 TYPISCHE_ZEICHEN = 475
 
 #: Standardname des Assistenten, wenn der Benutzer keinen vergeben hat.
-STANDARD_NAME = "Singra"
+STANDARD_NAME = "Assistent"
 
 
 def name_des_assistenten(user: User) -> str:
-    """Der Rufname dieses Assistenten — vom Benutzer vergeben oder der Standard.
+    """Der Rufname dieses Assistenten — vom Benutzer vergeben oder der Standard ('Assistent').
 
     Abgeflacht auf eine Zeile, wie die Worker-Titel in `_worker_zeile`: der
     Lageblock ist zeilenbasiert, und ein Name mit Umbruch könnte darin eine
@@ -407,8 +407,10 @@ def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
         )
         sofortlauf = (
             "Schreibvorschläge im Gespräch laufen damit sofort, ohne Klick des "
-            "Benutzers; nur Unumkehrbares (Löschen, Backup einspielen) fragt "
-            "weiterhin."
+            "Benutzers, auch das Löschen eigener Notizen, Termine, Aufgaben "
+            "und Erinnerungen. Eine Karte bekommt nur, was Server, Dateien, "
+            "Backups, Blueprints, Rollen oder die Rechte anderer trifft; ob "
+            "ein Vorschlag wartet, sagt sein Ergebnis."
         )
         if ai_autonomy_service.hat_engere_server_freigabe(
             db, user_id=user.id, panelweit=freigabe

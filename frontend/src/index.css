@@ -5,8 +5,8 @@
 
 @layer base {
   html {
-    background-color: #071013;
-    color: #e7f4f7;
+    background-color: hsl(var(--dna-background));
+    color: hsl(var(--dna-foreground));
     color-scheme: dark;
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -17,7 +17,12 @@
 
   body {
     height: 100%;
+    /* `dvh` folgt der wirklich sichtbaren Höhe. Am Telefon wächst und schrumpft
+       sie mit der Adressleiste des Browsers; `vh` kennt nur den größeren der
+       beiden Zustände und schiebt alles, was unten klebt, aus dem Bild. Die
+       `vh`-Zeile bleibt als Rückfall für Browser ohne `dvh` stehen. */
     min-height: 100vh;
+    min-height: 100dvh;
     margin: 0;
     padding: 0;
     overscroll-behavior: none;
@@ -27,21 +32,17 @@
   }
 
   ::selection {
-    background: hsl(190 92% 62% / 0.28);
-    color: #e7f4f7;
+    background: hsl(var(--dna-focus) / 0.28);
+    color: hsl(var(--dna-foreground));
   }
 
   :focus-visible {
-    outline: 2px solid hsl(190 92% 62%);
+    outline: 2px solid hsl(var(--dna-focus));
     outline-offset: 2px;
   }
 
-  input[type='checkbox'] {
-    accent-color: #67e8f9;
-  }
-
   * {
-    scrollbar-color: #284147 #071013;
+    scrollbar-color: #284147 hsl(var(--dna-background));
     scrollbar-width: thin;
   }
 
@@ -51,7 +52,7 @@
   }
 
   *::-webkit-scrollbar-track {
-    background: #071013;
+    background: hsl(var(--dna-background));
   }
 
   *::-webkit-scrollbar-thumb {
@@ -155,7 +156,8 @@
            active:scale-[0.98] transition-all duration-200;
   }
 
-  .msm-btn-tertiary {
+  /* Ghost Button - nur Text, bis die Maus kommt */
+  .msm-btn-ghost {
     @apply bg-transparent border border-transparent text-on-surface-variant
            hover:text-primary hover:bg-primary/10 hover:border-primary/20
            font-label-md text-label-md rounded-md
@@ -165,15 +167,11 @@
 
   /* Destructive Button - red only for destructive actions */
   .msm-btn-destructive {
-    @apply border border-status-destructive text-error
+    @apply border border-status-destructive text-status-destructive
            hover:bg-status-destructive hover:text-on-error
            font-label-md text-label-md rounded-md
            disabled:pointer-events-none disabled:opacity-50
            active:scale-[0.98] transition-all duration-200;
-  }
-
-  .msm-btn-danger {
-    @apply msm-btn-destructive;
   }
 
   /* Input Field - dark recessed surface */
@@ -207,6 +205,14 @@
 
   .msm-badge-info {
     @apply msm-badge bg-cyan-glow text-primary-fixed border border-primary-fixed/30;
+  }
+
+  /* Ruhender Zustand: abgeschaltet, abgelaufen, nicht zutreffend. Kein Erfolg,
+     keine Warnung — und deshalb auch keine Farbe, die zum Hinsehen auffordert.
+     PopupTab benutzte diesen Namen, bevor es ihn gab: die Marke „Inaktiv"
+     stand dort als nackter Text zwischen lauter farbigen Pillen. */
+  .msm-badge-neutral {
+    @apply msm-badge bg-surface-variant/60 text-on-surface-variant border border-outline-variant;
   }
 
   /* Sidebar Navigation */
@@ -349,6 +355,29 @@
   100% {
     opacity: 0;
     transform: scale(1.02);
+  }
+}
+
+/* Dialoge und Blattmenues. `fadeIn` wurde seit jeher von `Dialog.tsx`
+   angefordert und war nirgends definiert — die Verdunkelung erschien hart. */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Das Blatt faehrt von unten herein. Kurz genug, um nicht im Weg zu sein:
+   wer ein Menue oeffnet, hat sich schon entschieden. */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Wer Bewegung abbestellt hat, bekommt sie auch hier nicht. */
+  .animate-\[slideUp_\.16s_ease-out\],
+  .animate-\[fadeIn_\.12s_ease-out\],
+  .animate-\[fadeIn_\.15s_ease-out\] {
+    animation: none;
   }
 }
 

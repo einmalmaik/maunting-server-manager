@@ -6,6 +6,7 @@ from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, In
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
+from models.dis_text import ai_text
 
 
 class AiActionProposal(Base):
@@ -60,7 +61,7 @@ class AiActionProposal(Base):
     # Tool-Payload kann Config-Inhalt enthalten und ist deshalb immer DIS-
     # verschluesselt. Preview enthaelt nur redigierte Metadaten/Diff-Zeilen.
     payload_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
-    preview_json: Mapped[str] = mapped_column(Text, nullable=False)
+    preview_json: Mapped[str] = mapped_column(ai_text("ai_action_proposals.preview_json"), nullable=False)
     expected_revision: Mapped[str | None] = mapped_column(String(80), nullable=True)
     requires_confirmation: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # `autonomous` haelt fest, dass niemand zugestimmt hat. Das ist eine andere
@@ -69,8 +70,8 @@ class AiActionProposal(Base):
     # Zielpunkt 3.6: warum geaendert wird und welche Folgen erwartet werden.
     # Vom Modell geliefert, redigiert und laengenbegrenzt — eine Begruendung,
     # keine Zusicherung.
-    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    expected_effect: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason: Mapped[str | None] = mapped_column(ai_text("ai_action_proposals.reason"), nullable=True)
+    expected_effect: Mapped[str | None] = mapped_column(ai_text("ai_action_proposals.expected_effect"), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="proposed", nullable=False, index=True)
     confirmation_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     confirmation_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -94,10 +95,7 @@ class AiActionProposal(Base):
     # Bewusst **ohne** Fremdschluessel. Die Tests bauen ihr Schema mit
     # `Base.metadata.create_all`, der Betrieb mit Alembic; eine Beziehung, die
     # nur eine der beiden Seiten kennt, waere ein Unterschied zwischen Test und
-    # Betrieb — die unangenehmste Sorte Fehler. Ein Fremdschluessel liesse sich
-    # nachtraeglich auch nur durch eine Kopie der gesamten Vorschlagstabelle
-    # anlegen (SQLite kennt kein ADD CONSTRAINT), und das ist die Tabelle mit
-    # den verschluesselten Nutzlasten. Beide Seiten kaskadieren ohnehin ueber
+    # Betrieb — die unangenehmste Sorte Fehler. Beide Seiten kaskadieren ohnehin ueber
     # `conversation_id`, ein verwaister Verweis ist damit praktisch ausgeschlossen.
     run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(

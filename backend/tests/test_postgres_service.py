@@ -14,30 +14,12 @@ def test_identifier_validation_rejects_unsafe_names():
         postgres_service._validate_identifier("../secret")
 
 
-def test_extension_whitelist_allows_pgcrypto():
-    assert postgres_service._validate_extension_name("pgcrypto") == "pgcrypto"
-    assert postgres_service._validate_extension_name("  PGCrypto  ") == "pgcrypto"
-
-
-def test_extension_whitelist_rejects_unknown():
-    with pytest.raises(ValueError):
-        postgres_service._validate_extension_name("postgis")
-    with pytest.raises(ValueError):
-        postgres_service._validate_extension_name("pg_stat_statements")
-
-
-def test_extension_whitelist_rejects_unsafe_names():
-    with pytest.raises(ValueError):
-        postgres_service._validate_extension_name("pgcrypto; DROP DATABASE postgres")
-    with pytest.raises(ValueError):
-        postgres_service._validate_extension_name("")
-
-
 def test_ensure_internal_postgres_proxies_to_agent():
     mock_client = MagicMock()
     mock_client.postgres_ensure.return_value = {"ok": True, "status": "running"}
     mock_db = MagicMock()
     mock_server = MagicMock()
+    mock_server.postgres_instance = None  # Spielserver: geteilter Cluster
     with patch.object(postgres_service, "_client_for_server", return_value=mock_client), \
          patch.object(postgres_service, "_admin_password", return_value="secret"):
         postgres_service.ensure_internal_postgres(mock_db, mock_server)

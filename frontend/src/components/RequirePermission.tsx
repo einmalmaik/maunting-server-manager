@@ -45,19 +45,16 @@ function RouteAccessMessage({ state }: { state: 'forbidden' | 'notFound' | 'erro
   const { t } = useTranslation()
   const copy = {
     forbidden: {
-      title: t('routes.forbiddenTitle', 'Kein Zugriff'),
-      body: t('routes.forbiddenBody', 'Dir fehlt die Berechtigung für diese Seite.'),
+      title: t('routes.forbiddenTitle'),
+      body: t('routes.forbiddenBody'),
     },
     notFound: {
-      title: t('routes.notFoundTitle', 'Seite nicht gefunden'),
-      body: t('routes.notFoundBody', 'Diese Route ist im Panel nicht registriert.'),
+      title: t('routes.notFoundTitle'),
+      body: t('routes.notFoundBody'),
     },
     error: {
-      title: t('routes.errorTitle', 'Berechtigungen konnten nicht geladen werden'),
-      body: t(
-        'routes.errorBody',
-        'Bitte lade die Seite erneut. Wenn das Problem bleibt, prüfe die Verbindung zum Panel.',
-      ),
+      title: t('routes.errorTitle'),
+      body: t('routes.errorBody'),
     },
   }[state]
 

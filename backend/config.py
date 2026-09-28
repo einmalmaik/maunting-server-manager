@@ -1,5 +1,5 @@
+import ipaddress
 from pathlib import Path
-from typing import ClassVar
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -9,8 +9,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Datenbank
-    # PostgreSQL is the only supported panel runtime database. SQLite is read
-    # only by the explicit legacy import tool (and isolated unit tests).
+    # PostgreSQL is the only supported panel database (see database_policy.py).
     database_url: str = ""
     database_url_async: str = ""
 
@@ -19,6 +18,7 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 15  # 15 Min — kurzlebig fuer Rotation
     refresh_token_expire_days: int = 30  # 30 Tage Refresh-Token
+    paired_device_refresh_token_expire_days: int = 3650  # 10 Jahre Refresh-Token fuer gekoppelte Geraete (dauerhaft)
     csrf_token_expire_minutes: int = 60 * 24  # 24h CSRF-Token
 
     # DIS Sidecar (lokaler Node-Prozess, wrappt @msdis/shield)
@@ -78,6 +78,18 @@ class Settings(BaseSettings):
     # Redis (fuer verteiltes Rate-Limiting via slowapi)
     redis_url: str = ""
 
+    # LiveKit — Medienserver fuer Sprach-, Video- und Gruppenanrufe.
+    # install.sh erzeugt Schluessel und Geheimnis einmalig und schreibt sie
+    # hierher und in livekit-sidecar/.env; beide Seiten muessen dasselbe Paar
+    # kennen. Sind sie leer, meldet der Admin-Bereich den integrierten Modus als
+    # nicht eingerichtet — der Betreiber kann dann auf einen externen LiveKit
+    # umstellen. `livekit_url` ueberschreibt die aus panel_url abgeleitete
+    # Adresse und ist nur fuer Sonderaufbauten gedacht (getrennter Reverse
+    # Proxy, eigener Hostname fuer den Sidecar).
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
+    livekit_url: str = ""
+
     # Server-Verzeichnis (Install-Dir pro Server)
     # Produktion: /opt/msm/servers  |  Dev: ./servers
     servers_dir: str = "/opt/msm/servers"
@@ -121,6 +133,9 @@ class Settings(BaseSettings):
     # Weg, weil sich jemand vertippt hat. Siehe `ai_stt.weg_fuer`.
     ai_stt_weg: str = ""
 
+    # SearXNG Search Sidecar (lokaler Docker-Prozess, lauscht per Default auf Port 8888)
+    searxng_url: str = "http://127.0.0.1:8888"
+
     # Verwaltetes PostgreSQL fuer Game-Server-Datenbanken.
     # Der Host-Port ist absichtlich nur an Loopback gebunden. Game-Container
     # erreichen PostgreSQL ueber das interne Docker-Netz und msm-postgres:5432.
@@ -133,29 +148,6 @@ class Settings(BaseSettings):
     managed_postgres_statement_timeout_ms: int = 5000
     managed_postgres_row_limit: int = 500
 
-    # Trusted Postgres extensions, die Game-Server-Owner in ihrer DB selbst
-    # installieren duerfen (pgcrypto fuer UUID/Crypto, pg_trgm fuer Volltextsuche,
-    # citext fuer case-insensitive Vergleiche, ...). Diese Liste ist statisch im
-    # Code -- Erweiterung erfordert Code-Change + Review, damit kein User ueber
-    # eine dynamische Allowlist an eine nicht-trusted Extension kommt.
-    # Alle hier gelisteten Extensions sind in Postgres 17 als ``trusted`` markiert,
-    # d. h. der Owner einer DB darf sie ohne Superuser mit CREATE-Privileg installieren.
-    trusted_postgres_extensions: ClassVar[set[str]] = {
-        "pgcrypto",        # UUID-Gen, Digest, Symmetric Encryption (haeufig gebraucht)
-        "uuid-ossp",       # alternative UUID-Implementierung
-        "citext",          # case-insensitive Text
-        "btree_gin",       # GIN-Index auf B-Tree-Typen
-        "btree_gist",      # GiST-Index auf B-Tree-Typen
-        "fuzzystrmatch",   # Levenshtein, Soundex, Metaphone
-        "hstore",          # Key/Value-Spalten
-        "pg_trgm",         # Trigramm-Index fuer LIKE/ILIKE-Suche
-        "tablefunc",       # crosstab() u. a.
-        "unaccent",        # Akzent-unabhaengige Textsuche
-        "isn",             # ISBN/ISSN/EAN-Validierung
-        "lo",              # Large Objects (Bilder, Bloobs in der DB)
-        "ltree",           # hierarchische Baumstrukturen
-        "tcn",             # Trigger-basiertes Change Notification
-    }
 
     # Rootless Docker. Produktion: unix:///run/user/<msm_uid>/docker.sock
     # Leer = docker_service berechnet den Rootless-Default fuer den laufenden User.
@@ -196,10 +188,14 @@ settings = Settings()
 
 # Harte Fail-Fast für schwachen Default (Security-Finding #14): verhindert JWT-Forgery in Prod bei vergessener .env.
 # Dev (debug=True) erlaubt Default für schnellen Start; Prod (debug=False) bricht sofort.
-if settings.secret_key == "change-me-in-production-please-use-a-256-bit-key" and not settings.debug:
+if (
+    not settings.secret_key
+    or len(settings.secret_key) < 32
+    or settings.secret_key == "change-me-in-production-please-use-a-256-bit-key"
+) and not settings.debug:
     raise RuntimeError(
         "CRITICAL SECURITY: MSM_SECRET_KEY (or secret_key) must be overridden with a strong >=32 char value in production. "
-        "Default placeholder allows JWT forgery. Set in .env or env (prefixed MSM_)."
+        "Empty, weak or default placeholder allows JWT forgery. Set in .env or env (prefixed MSM_)."
     )
 
 # Harte Fail-Fast für unkonfigurierten panel_url in Production.
@@ -280,8 +276,18 @@ def get_cors_origins() -> list[str]:
     return result
 
 
+def _is_ip_address(val: str) -> bool:
+    """Prueft ob val eine IPv4- oder IPv6-Adresse ist (auch mit Klammern oder fuehrendem Punkt)."""
+    cleaned = val.strip("[]").lstrip(".")
+    try:
+        ipaddress.ip_address(cleaned)
+        return True
+    except (ValueError, AttributeError):
+        return False
+
+
 def get_effective_cookie_domain() -> str:
-    """Return the cookie domain to use for OAuth state cookie.
+    """Return the cookie domain to use for OAuth state cookie and auth cookies.
 
     If MSM_COOKIE_DOMAIN is explicitly set in .env / env, use it (override).
     Otherwise derive from MSM_API_URL (falling back to MSM_PANEL_URL for legacy
@@ -293,11 +299,20 @@ def get_effective_cookie_domain() -> str:
 
     Special cases:
     - localhost / 127.0.0.1 (any port): return "" → no Domain attr (host-only cookie)
+    - IPv4 / IPv6 addresses: return "" → no Domain attr (RFC 6265: Domain on IP is invalid and rejected by browsers)
     - ports are always stripped (Domain= must not contain :port)
+    - single-label hostnames without dot: return "" (host-only)
     """
     explicit = getattr(settings, "cookie_domain", None)
     if explicit:
-        return explicit
+        explicit_clean = explicit.strip()
+        if (
+            explicit_clean in ("localhost", "127.0.0.1", "::1", "none", "")
+            or _is_ip_address(explicit_clean)
+            or "." not in explicit_clean.lstrip(".")
+        ):
+            return ""
+        return explicit_clean
 
     public_api_url: str = (
         getattr(settings, "api_url", "")
@@ -317,9 +332,13 @@ def get_effective_cookie_domain() -> str:
     if not host:
         return ""
 
-    # loopback / local dev: never set Domain (browsers + TestClient are strict;
-    # host-only cookie is correct and makes res.cookies visible in tests)
-    if host in ("localhost", "127.0.0.1", "::1"):
+    # loopback / local dev or any IP address: never set Domain (browsers + TestClient are strict;
+    # host-only cookie is correct and prevents cookie rejection on IP hosts per RFC 6265)
+    if host in ("localhost", "127.0.0.1", "::1") or _is_ip_address(host):
+        return ""
+
+    # single-label hostnames (e.g. "intranet" without dots): host-only cookie
+    if "." not in host:
         return ""
 
     # parent domain logic (mirrors original install.sh derivation):

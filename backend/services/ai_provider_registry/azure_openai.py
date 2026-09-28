@@ -142,7 +142,9 @@ ANBIETER = Anbieter(
     # ``/responses`` an, was ``…/openai/v1/responses`` ergibt — wortgleich mit
     # Microsofts cURL-Beispiel zur v1-API.
     protokoll_chat="responses",
-    realtime_tauglich=True,
+    # Nur die Realtime-API: GPT-Live ist bei Azure nicht dokumentiert, und ein
+    # Weg, den niemand belegt, wird hier nicht versprochen.
+    sprachwege=("openai_realtime",),
     # **Kein Gehör.** Azure hat ``/openai/v1/audio/transcriptions``, aber nur
     # unter ``?api-version=preview`` — und für einen Query-Parameter hat weder
     # diese Registry ein Feld noch `ai_stt_endpunkt` einen Weg. Leer heisst

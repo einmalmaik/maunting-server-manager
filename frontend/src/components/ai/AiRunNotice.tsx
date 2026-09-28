@@ -283,7 +283,7 @@ export function AiRunNotice() {
   return (
     <div
       role="status"
-      className="fixed bottom-4 right-4 z-[9998] flex max-w-[min(calc(100vw-2rem),24rem)] items-start gap-3 rounded-xl border border-outline-variant bg-surface-container-high p-3 shadow-panel"
+      className="fixed bottom-4 right-4 lg:bottom-4 lg:right-6 z-[9998] flex max-w-[min(calc(100vw-2rem),24rem)] items-start gap-3 rounded-xl border border-outline-variant bg-surface-container-high p-3 shadow-panel"
     >
       <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
         <Bot className="h-4 w-4" aria-hidden="true" />
@@ -295,14 +295,14 @@ export function AiRunNotice() {
           className="mt-1 text-xs font-medium text-primary hover:underline"
           onClick={() => { setMeldung(null); navigate(meldung.ziel ?? ZIEL[meldung.kind]) }}
         >
-          {t('ai.notice.open', 'Zum Assistenten')}
+          {t('ai.notice.open')}
         </button>
       </div>
       <button
         type="button"
         className="rounded-md p-1 text-on-surface-variant hover:bg-surface-container-highest"
         onClick={() => setMeldung(null)}
-        aria-label={t('common.close', 'Schließen')}
+        aria-label={t('common.close')}
       >
         <X className="h-4 w-4" aria-hidden="true" />
       </button>

@@ -37,7 +37,7 @@ class Note(Base):
         String(64), default=_gen_uid, nullable=False, unique=True, index=True
     )
 
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     # Semantische Kategorie: personal, shopping, todo, work, idea, meeting

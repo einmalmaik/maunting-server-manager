@@ -46,16 +46,30 @@ class Werkzeug:
     Symbol statt des allgemeinen Werkzeugsymbols.
 
     ``immer_bestaetigen`` schliesst ein Werkzeug vom autonomen Modus aus, auch
-    bei erteilter Freigabe. Das Kriterium ist **Unumkehrbarkeit**, nicht Risiko:
-    was die KI selbst wieder zurueckstellen kann, darf sie im autonomen Modus
-    tun; was Daten vernichtet, die niemand zurueckholt, fragt immer.
+    bei erteilter Freigabe. Die Liste ist eine Vorgabe des Betreibers vom
+    25.09.2026, woertlich: nur noch Server loeschen, zuruecksetzen oder neu
+    installieren, Dateien loeschen, Backup einspielen, Blueprint oder Rolle
+    loeschen, Rechte anderer Benutzer (die stehen am Aufruf, `verlangt_klick`),
+    Shop-Anbindung, Tarif-Rolle und Zugangsdaten. Was nur die eigenen Daten des
+    Benutzers loescht — Notiz, Termin, Aufgabe, DNS-Eintrag, Erinnerung, Skill —
+    laeuft autonom (`EIGENE_DATEN_LOESCHEN`).
 
-    Die Unterscheidung ist ausdrueckliche Vorgabe des Betreibers ("im autonomen
-    Modus wird alles automatisch bestaetigt, ausser Loeschvorgaenge") und
-    ersetzt eine frueher gefuehlte Einteilung nach "das klingt heikel". Nach
-    Gefuehl standen Blueprint-Wechsel und Bind-IP-Aenderung in der Sperre,
-    obwohl beide umkehrbar sind — der Wechsel legt sogar zwingend ein Backup an,
-    bevor er etwas anfasst.
+    Dazwischen lag die Regel vom 23.09.2026, "jedes Loeschen fragt", nachdem
+    das Modell dem Betreiber im autonomen Modus fast seinen Discord-Bot geloescht
+    haette. Der Betreiber hat sie zwei Tage spaeter zurueckgenommen: autonom
+    heisst autonom, und gefragt wird dort, wo sich ein Fehlgriff nicht mehr
+    auffangen laesst. Bestaetigt wird in jedem Fall per Klick auf die Karte, nie
+    per gesprochenem Ja (`ai_voice.interactions.klick_noetig`).
+
+    Umgekehrt fragt nicht, was nur heikel klingt: eine falsche Bind-IP stellt
+    derselbe Aufruf zurueck. Eine bewusste Ausnahme ist der Blueprint-Wechsel.
+    Er leert das Serververzeichnis, der Betreiber hat ihn aber am 02.09.2026
+    ausdruecklich fuer den autonomen Modus freigegeben; davor legt er zwingend
+    ein Backup an.
+
+    Desktop-Werkzeuge tragen das Feld nicht, weil sie `delegation` sind. Seit
+    dem 25.09.2026 loeschen sie im autonomen Modus auch ohne Karte; ob sie
+    fragen, entscheidet allein die Freigabe (`ai_stream.interactions`).
 
     ``recht`` ist der Permission-Key, den ein Schreibwerkzeug verlangt. Er stand
     frueher in einer if-Kette in `ai_proposal_service._permission_for` — ein
@@ -135,6 +149,10 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "list_server_files": Werkzeug("server_read", angebot=("server.files.read",)),
     "search_server_files": Werkzeug("server_read", angebot=("server.files.read",)),
     "read_server_backups": Werkzeug("server_read", angebot=("server.backups.read",)),
+    # Das PostgreSQL-Studio lesend — dieselben Funktionen wie die Studio-Reiter
+    # (`ai_tools.database_tools`). Parameter, Sitzungen und Sperren verlangen
+    # dort zusaetzlich `server.databases.admin`, wie an der Route.
+    "read_database": Werkzeug("server_read", angebot=("server.databases.read",)),
     "read_guardian_incidents": Werkzeug("server_read"),
     "read_ai_action_history": Werkzeug("server_read"),
 
@@ -160,8 +178,9 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "cloudflare_list_zones": Werkzeug("global_read", gruppe="domains", angebot=("cloudflare.manage",)),
     "cloudflare_list_dns_records": Werkzeug("global_read", gruppe="domains", angebot=("cloudflare.manage",)),
 
-    # Satelliten- und Regionsanalyse ueber Copernicus / Sentinel & Open-Meteo.
-    # Steht ohne hinterlegte Zugangsdaten gar nicht erst im Katalog.
+    # Regionsanalyse: Geocoding, Open-Meteo und ein Bild der Region — mit
+    # Copernicus-Zugang die neueste Sentinel-2-Szene, ohne ihn das
+    # schluesselfreie Kartenbild (ArcGIS-Mosaik). Steht deshalb immer im Katalog.
     "analyze_region": Werkzeug(
         "global_read", gruppe="geo", angebot=("ai.satellite.use",)
     ),
@@ -205,6 +224,10 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # Lesewerkzeugen. Der Unterschied zwischen den Mengen ist nicht "aendert
     # etwas", sondern "fasst einen Server an und braucht deshalb eine
     # Bestaetigung". Ein gemerkter Satz im Profil des Benutzers tut das nicht.
+    #
+    # Vergessen laeuft im autonomen Modus ohne Karte: es loescht nur das eigene
+    # Gedaechtnis (`EIGENE_DATEN_LOESCHEN`). Ohne Freigabe geht es wie jedes
+    # Werkzeug als Karte zur Bestaetigung.
     "remember": Werkzeug("global_read", gruppe="memory", angebot=("ai.memory.use",)),
     "search_memory": Werkzeug(
         "global_read", gruppe="memory", angebot=("ai.memory.use",)
@@ -243,7 +266,31 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "notes_read": Werkzeug(
         "global_read", gruppe="notes", angebot=("ai.notes.use",)
     ),
+    # Ohne dieses Werkzeug konnte die KI nur neue Ankuendigungen anlegen. Ein
+    # "nimm den Hinweis auf Mac und Linux aus dem Pop-up raus" war damit nicht
+    # zu erfuellen: sie kannte weder die Kennung noch den Text, den sie haette
+    # aendern sollen — und sagte das auch so.
+    "popups_read": Werkzeug(
+        "global_read", gruppe="popup", angebot=("ai.popups.manage",)
+    ),
     "execute_server_action": Werkzeug("global_read"),
+
+    # Benutzer und Rollen, lesend. Dieselben Rechte wie die Panel-Routen:
+    # die Benutzerliste `users.read` (`GET /api/admin/users`), die
+    # Delegationen eines Benutzers `users.permissions.manage`
+    # (`GET /api/admin/users/{id}/server-permissions`). Die Rollenliste steht
+    # im Panel jedem offen; angeboten wird sie trotzdem nur, wer Rollen oder
+    # Rechte verwaltet — sonst braucht sie niemand, und der Katalog geht in
+    # jeder Runde mit.
+    "list_users": Werkzeug("global_read", gruppe="users", angebot=("users.read",)),
+    "read_user_permissions": Werkzeug(
+        "global_read", gruppe="users", angebot=("users.permissions.manage",)
+    ),
+    "list_roles": Werkzeug(
+        "global_read",
+        gruppe="users",
+        angebot=("roles.manage", "users.permissions.manage"),
+    ),
 
     # ── Rueckfrage ────────────────────────────────────────────────────
     "ask_user": Werkzeug("ask"),
@@ -404,7 +451,15 @@ WERKZEUGE: dict[str, Werkzeug] = {
     ),
     # Der Wechsel des Spiels bzw. Blueprints eines bestehenden Servers.
     #
-    # **`immer_bestaetigen`, seit jemand nachgesehen hat, was dabei passiert.**
+    # **Seit dem 02.09.2026 wieder ohne `immer_bestaetigen`**, auf ausdrueckliche
+    # Vorgabe des Betreibers: im autonomen Modus laeuft der Wechsel ohne
+    # Rueckfrage, obwohl er das Serververzeichnis leert. Die Begruendung
+    # darunter, warum er vorher gesperrt war, bleibt stehen, denn sie beschreibt,
+    # was der Wechsel tut. Aus der Guardian-Heilung und den Aufgaben bleibt er
+    # ausgeschlossen, dort sitzt niemand davor.
+    #
+    # **`immer_bestaetigen` trug er, seit jemand nachgesehen hatte, was dabei
+    # passiert.**
     #
     # Hier stand: "autonomiefaehig auf ausdrueckliche Vorgabe des Betreibers —
     # und es passt zum Kriterium: `switch_server_blueprint` legt zwingend ein
@@ -480,7 +535,10 @@ WERKZEUGE: dict[str, Werkzeug] = {
         "global_write", gruppe="tasks", recht="ai.tasks.manage", recht_global=True
     ),
     "propose_task_delete": Werkzeug(
-        "global_write", gruppe="tasks", recht="ai.tasks.manage", recht_global=True
+        "global_write",
+        gruppe="tasks",
+        recht="ai.tasks.manage",
+        recht_global=True,
     ),
 
     # ── Heilung: Reparatur der Anlage, nicht des Spielstands ──────────
@@ -562,15 +620,17 @@ WERKZEUGE: dict[str, Werkzeug] = {
     ),
     # Loeschen einer **einzelnen** Datei unterhalb des Serververzeichnisses.
     #
-    # Warum kein `immer_bestaetigen`, obwohl Loeschen sonst immer bestaetigt
-    # wird: das Kriterium der Registry ist Unumkehrbarkeit (siehe oben), nicht
-    # gefuehltes Risiko. `propose_server_delete` und `propose_backup_restore`
-    # stehen dort, weil danach **kein** Backup mehr hilft — das eine loescht die
-    # Backups mit, das andere ueberschreibt einen Stand, von dem es nie einen
-    # gab.
+    # `immer_bestaetigen` seit dem 23.09.2026, obwohl es einen Rueckweg gibt.
+    # Bis dahin fehlte die Sperre genau mit dieser Begruendung, und der
+    # autonome Modus loeschte Dateien ohne Rueckfrage. Die Vorgabe des
+    # Betreibers war "alles automatisch ausser Loeschvorgaenge", nicht
+    # "ausser Unumkehrbarem"; seit dem 25.09.2026 fragt das Loeschen nur noch,
+    # wo es Server, Dateien und Backups trifft (siehe `Werkzeug`). Eine Guardian-Heilung, die eine
+    # Datei loeschen will, loescht deshalb nicht selbst. Sie fragt per Mail
+    # (`ai_approval_service`), und ohne hinterlegte Adresse endet sie.
     #
-    # Hier ist es anders herum, und zwar aus zwei Gruenden, die beide
-    # nachpruefbar sein muessen:
+    # Der Rueckweg bleibt trotzdem Pflicht, fuer den Fall, dass ein Mensch
+    # zugestimmt und sich geirrt hat. Er ist doppelt gebaut:
     #
     # 1. **Im Guardian-Lauf** laeuft das Werkzeug ueberhaupt nur, wenn ein
     #    nachweislich geglecktes Backup vorliegt, das juenger ist als der Beginn
@@ -582,8 +642,8 @@ WERKZEUGE: dict[str, Werkzeug] = {
     #    Archiv abgeraeumt haben kann. Als die zweite Pruefung hier noch
     #    behauptet und nicht gebaut war, war genau das der Weg zu einer
     #    geloeschten Datei ohne Backup.
-    # 2. **Im gewoehnlichen Chat** gibt es diese Schranke nicht — dort
-    #    entscheidet der Mensch. Der Weg zurueck ist dann der
+    # 2. **Im gewoehnlichen Chat** gibt es diese Schranke nicht, dort
+    #    entscheidet allein der Mensch. Der Weg zurueck ist dann der
     #    Versionsschnappschuss aus `file_history_service`, und er ist eine
     #    **Vorbedingung**: `delete_server_text` wertet seinen Rueckgabewert aus
     #    und loescht nicht, wenn er ausbleibt. Deshalb weist schon der Vorschlag
@@ -598,8 +658,16 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # nennt Loeschen nicht. Mit `write` hier waere der Chat der Umweg, auf dem
     # ein Benutzer ohne Loeschrecht doch loescht — eine Handlung, zwei Rechte.
     "propose_file_delete": Werkzeug(
-        "server_write", recht="server.files.delete"
+        "server_write", immer_bestaetigen=True, recht="server.files.delete"
     ),
+    # Was das PostgreSQL-Studio schreibt: Struktur (auch Funktionen, Trigger,
+    # Erweiterungen), Zeilen und freies SQL (`ai_proposals.database_proposals`).
+    # `recht` ist die Untergrenze; Operationen mit Admin-Plan und freies SQL
+    # pruefen dort zusaetzlich `server.databases.admin`, wie die Studio-Route.
+    # Kein `immer_bestaetigen`: eine neue Funktion oder ein Trigger ist wie eine
+    # neue Konfigzeile. Gefragt wird am Aufruf (`always_confirm`), wo Daten
+    # verschwinden koennen — destruktiver Plan, Zeilen loeschen, freies SQL.
+    "propose_database_change": Werkzeug("server_write", recht="server.databases.write"),
 
     # ── Shop-Anbindung einrichten ─────────────────────────────────────
     #
@@ -659,6 +727,9 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="ai.calendar.use",
         recht_global=True,
     ),
+    # Die persoenlichen Loeschwerkzeuge laufen im autonomen Modus ohne Karte
+    # (`EIGENE_DATEN_LOESCHEN`), aber mit Stundenbudget: die Abkuerzung in
+    # `autonomy_allows` gilt nur fuer Anlegen und Aendern.
     "propose_calendar_event_delete": Werkzeug(
         "global_write",
         gruppe="calendar",
@@ -683,7 +754,13 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="ai.notes.use",
         recht_global=True,
     ),
-    "propose_popup_create": Werkzeug(
+    # Anlegen **und** aendern in einem Werkzeug, nach dem Vorbild von
+    # `propose_task_set`: beide tragen dasselbe Schema, und eine `popup_id`
+    # entscheidet, welcher der beiden Faelle gemeint ist. Zwei Werkzeuge waeren
+    # hier rund 1.700 Zeichen Katalog fuer ein zweites Mal dieselben acht
+    # Felder gewesen — der Katalog geht in jeder Runde mit
+    # (`test_ai_tool_handler_contract`).
+    "propose_popup_set": Werkzeug(
         "global_write",
         gruppe="popup",
         recht="ai.popups.manage",
@@ -705,6 +782,56 @@ WERKZEUGE: dict[str, Werkzeug] = {
         "server_write",
         gruppe="mods",
         recht="server.mods.write",
+    ),
+
+    # ── Rechte anderer Benutzer ─────────────────────────────────────────
+    #
+    # Dieselben Rechte und dieselben Schranken wie im Panel: alle vier rufen
+    # `rechtevergabe_service`, wo auch die Router ihre Grenzen holen. Die KI
+    # kann damit nie mehr vergeben, als der Benutzer selbst dauerhaft haelt.
+    #
+    # Die Bestaetigung haengt hier am **Aufruf**, nicht am Werkzeug: im
+    # autonomen Modus laeuft ohne Rueckfrage nur, was ausschliesslich
+    # unkritische Serverrechte **hinzufuegt** (`UNCRITICAL_SERVER_PERMISSIONS`).
+    # Jedes Entziehen, jedes kritische und jedes globale Recht fragt immer —
+    # der Payload-Bau setzt dafuer `always_confirm` in die Vorschau
+    # (`verlangt_klick`). Das ist die Linie, die `GEPLANT_IMMER_BESTAETIGEN`
+    # fuer Rechteaenderungen gezogen hatte ("eine Autonomie, die ihren eigenen
+    # Rahmen verschiebt"), enger geschnitten: "gib ihm die normalen Rechte auf
+    # dem Minecraft-Server" soll unterwegs per Stimme gehen (Betreiberplan
+    # vom 24.09.2026), und sehen, starten und Logs lesen verschiebt keinen
+    # Rahmen.
+    #
+    # Serverbezogen, weil eine Delegation an genau einem Server haengt;
+    # `_resolve_server` prueft vorher, dass der Benutzer ihn sieht. Das Recht
+    # selbst ist global wie am Panel-Endpunkt.
+    "propose_user_server_permission": Werkzeug(
+        "server_write",
+        gruppe="users",
+        recht="users.permissions.manage",
+        recht_global=True,
+    ),
+    # Anlegen und aendern in einem Werkzeug, Muster `propose_task_set`: eine
+    # `role_id` entscheidet. Systemrollen (`admin`, `user`) fasst die KI nie
+    # an, auch dort nicht, wo das Panel dem Owner die `user`-Rolle oeffnet.
+    "propose_role_set": Werkzeug(
+        "global_write",
+        gruppe="users",
+        recht="roles.manage",
+        recht_global=True,
+    ),
+    "propose_user_roles": Werkzeug(
+        "global_write",
+        gruppe="users",
+        recht="users.permissions.manage",
+        recht_global=True,
+    ),
+    "propose_role_delete": Werkzeug(
+        "global_write",
+        gruppe="users",
+        immer_bestaetigen=True,
+        recht="roles.manage",
+        recht_global=True,
     ),
 
     # ── Der Rechner des Benutzers (Smart System) ────────────────────────────
@@ -792,15 +919,19 @@ WERKZEUGE: dict[str, Werkzeug] = {
 # autonomiefaehig zu sein.
 #
 # Die ersten beiden vernichten Daten und fallen damit unter dasselbe Kriterium
-# wie Loeschen und Einspielen. Die letzten beiden aus einem anderen Grund: eine
-# Rechteaenderung oder eine Schluesselrotation wirkt auf die Grenzen, innerhalb
-# derer die KI selbst arbeitet. Autonom ausgefuehrt waere das eine Autonomie,
-# die ihren eigenen Rahmen verschiebt — und die kann niemand mehr erteilen oder
-# entziehen.
+# wie Loeschen und Einspielen. Die Schluesselrotation aus einem anderen Grund:
+# sie wirkt auf die Grenzen, innerhalb derer die KI selbst arbeitet. Autonom
+# ausgefuehrt waere das eine Autonomie, die ihren eigenen Rahmen verschiebt —
+# und die kann niemand mehr erteilen oder entziehen.
+#
+# Hier stand auch `propose_permission_change`. Seit 09/2026 gibt es die
+# Rechtewerkzeuge wirklich (`propose_user_server_permission` und die drei
+# Rollenwerkzeuge), und die Grenze steht am Aufruf statt am Namen: was mehr
+# tut, als unkritische Serverrechte hinzuzufuegen, fragt immer
+# (`verlangt_klick`).
 GEPLANT_IMMER_BESTAETIGEN = frozenset({
     "propose_server_wipe",
     "propose_server_reinstall",
-    "propose_permission_change",
     "propose_secret_rotation",
 })
 
@@ -851,6 +982,10 @@ CALENDAR_TOOLS = _mit_gruppe("calendar")
 POPUP_TOOLS = _mit_gruppe("popup")
 TASK_TOOLS = _mit_gruppe("tasks")
 NOTES_TOOLS = _mit_gruppe("notes")
+# Eine Gruppe "social" gab es hier bis 09/2026. Sie trug die beiden
+# Messenger-Suchen; beide sind entfernt, und die KI hat seitdem gar kein
+# Werkzeug mehr, das den Messenger anfasst. Siehe docs/agent-rules/security.md,
+# Abschnitt 5.1.
 CHAT_INTERACTION_TOOLS = (
     MAIL_TOOLS | CALENDAR_TOOLS | POPUP_TOOLS | TASK_TOOLS | NOTES_TOOLS
 )
@@ -864,6 +999,51 @@ ALWAYS_CONFIRM_TOOLS = (
     {name for name, spec in WERKZEUGE.items() if spec.immer_bestaetigen}
     | set(GEPLANT_IMMER_BESTAETIGEN)
 )
+
+#: Was loescht und trotzdem im autonomen Modus ohne Karte laeuft: nur die
+#: eigenen Daten des Benutzers (Vorgabe des Betreibers vom 25.09.2026). Eine
+#: ausdrueckliche Aufzaehlung, keine Regel — ein neues Loeschwerkzeug muss hier
+#: oder bei `immer_bestaetigen` stehen
+#: (`test_jedes_loeschwerkzeug_ist_entschieden`).
+EIGENE_DATEN_LOESCHEN = frozenset({
+    "forget_memory",
+    "forget_skill",
+    "propose_note_delete",
+    "propose_calendar_event_delete",
+    "propose_task_delete",
+    "propose_cloudflare_dns_delete",
+})
+
+#: Was die Rechte anderer Benutzer aendert. Nur ein Worker (oder ein Chat ohne
+#: Gehirn/Worker-Teilung) ruft diese Werkzeuge selbst; das Gehirn und die
+#: Stimme uebergeben sie mit `worker_start`. Der Umweg ueber
+#: `execute_server_action` reicht sie deshalb nicht weiter
+#: (`ai_voice.voice_dispatcher`).
+RECHTE_SCHREIBEN = frozenset({
+    "propose_user_server_permission",
+    "propose_role_set",
+    "propose_user_roles",
+    "propose_role_delete",
+})
+
+
+def verlangt_klick(name: object, vorschau: object = None) -> bool:
+    """Ob dieser eine Vorschlag auch im autonomen Modus bestaetigt werden muss.
+
+    Das Gegenstueck zu `ALWAYS_CONFIRM_TOOLS` fuer Werkzeuge, bei denen es am
+    Aufruf haengt: eine Rechtevergabe an einen Benutzer fragt, sobald sie etwas
+    entzieht oder mehr als unkritische Serverrechte vergibt. Entschieden hat das
+    der Payload-Bau, und zwar aus dem Bestand, nicht aus Modelltext — er setzt
+    `always_confirm` in die Vorschau.
+
+    Der Name stammt aus der Zeit, als die Stimme manches per Ja und manches nur
+    per Klick bestaetigte. Seit dem 25.09.2026 ist jede Bestaetigung ein Klick
+    (`ai_voice.interactions.klick_noetig`); die Frage hier ist nur noch, ob
+    ueberhaupt eine Karte kommt.
+    """
+    if name in ALWAYS_CONFIRM_TOOLS:
+        return True
+    return isinstance(vorschau, dict) and vorschau.get("always_confirm") is True
 
 
 # ── Gehirn und Worker (docs/agentic-framework.md, Abschnitt 3) ────────────
@@ -1157,11 +1337,12 @@ AUFGABEN_LESEN = frozenset({
 #   `propose_server_blueprint_switch` — Reichweite ueber den Auftrag hinaus. Der
 #   Wechsel loescht zudem das gesamte Serververzeichnis; ein nachts angestossener
 #   Blueprintwechsel ist nichts, was jemand mit "mach das taeglich" gemeint hat.
-# * `propose_file_delete` — im Guardian-Lauf steht davor ein nachgewiesenes
-#   Backup als Schranke. Diesen Anker gibt es hier nicht: eine Aufgabe hat
-#   keinen Vorfall, ab dem gerechnet wuerde. Ohne ihn bliebe als Rueckweg nur
-#   der Versionsschnappschuss, und eine stehende Anweisung, die Nacht fuer Nacht
-#   Dateien loescht, ist genau der Fall, fuer den jemand davorsitzen soll.
+# * `propose_file_delete` — steht seit dem 23.09.2026 in `ALWAYS_CONFIRM_TOOLS`
+#   wie jedes Loeschen. Es fehlte hier schon vorher, mit eigenem Grund: im
+#   Guardian-Lauf steht davor ein nachgewiesenes Backup als Schranke. Diesen
+#   Anker gibt es hier nicht, denn eine Aufgabe hat keinen Vorfall, ab dem
+#   gerechnet wuerde. Eine stehende Anweisung, die Nacht fuer Nacht Dateien
+#   loescht, ist genau der Fall, fuer den jemand davorsitzen soll.
 # * die Hoster- und Aufgabenwerkzeuge — Rechte, Schluessel, und ein Auftrag, der
 #   Auftraege anlegt, waere ein Auftrag ohne Ende.
 # * `propose_blueprint_delete` — steht wie `propose_backup_restore` und
@@ -1270,13 +1451,14 @@ def aufgaben_tools(kind: str) -> frozenset[str]:
 # heute eine vierte Liste, die niemand pflegt — und die beim naechsten neuen
 # Werkzeug still veraltet.
 #
-# Mit ihnen ist der Parameter ``sprache`` aus `create_proposal` gefallen. Das
-# ist die eine Verschaerfung, die dieser Umbau **zuruecknimmt**, und der
-# Betreiber hat sie ausdruecklich verlangt: eine gesprochene Zustimmung fuehrt
-# jetzt auch aus, was in `ALWAYS_CONFIRM_TOOLS` steht. Alles andere bleibt —
-# `confirm_proposal` prueft die Rechte erneut, `execute_proposal` ein drittes
-# Mal, der Einmal-Token wird atomar entwertet, das Audit vermerkt den Vorgang.
-# Ersetzt ist genau ein Schritt: der Klick.
+# Mit ihnen ist der Parameter ``sprache`` aus `create_proposal` gefallen. Ob
+# ein gesprochenes Ja reicht, entscheidet seitdem `ai_voice.interactions`: es
+# reicht fuer alles ausser `ALWAYS_CONFIRM_TOOLS`. Dort verlangt die Stimme den
+# Klick auf die Karte, Betreiberwahl vom 23.09.2026 ("Klick auf die Karte"):
+# ein Ja koennte das Modell auch aus einer Webseite oder Mail "gehoert" haben.
+# Alles andere bleibt: `confirm_proposal` prueft die Rechte erneut,
+# `execute_proposal` ein drittes Mal, der Einmal-Token wird atomar entwertet,
+# das Audit vermerkt den Vorgang.
 
 
 # `propose_mod_toggle` fehlt hier mit Absicht, obwohl es in
@@ -1297,3 +1479,11 @@ GUARDIAN_BACKUP_PFLICHT_TOOLS = frozenset({
 
 def bekannt(name: str) -> bool:
     return name in WERKZEUGE
+
+
+def rollen_ausschluss(rolle: str) -> frozenset[str]:
+    """Gemeinsame Schranke fuer direkte Aufrufe und Bestaetigungsvorschlaege.
+
+    Gehirn-Leseaufrufe prueft der jeweilige Pfad gesondert gegen GEHIRN_TOOLS.
+    """
+    return worker_ausschluss() if rolle == "worker" else WORKER_STEUERUNG | NUR_WORKER

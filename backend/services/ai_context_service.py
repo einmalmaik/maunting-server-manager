@@ -10,9 +10,10 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from models import AiConversation, AiMessage, User
+from models.dis_text import vorab_entschluesselt
 from services import ai_lage, ai_prompt
 from services.ai_redaction import redact_sensitive_text
 
@@ -21,7 +22,8 @@ from services.ai_redaction import redact_sensitive_text
 # `_teilbudgets`): `MAX_CONTEXT_CHARS` ist der **Rueckfall**, wenn ueber das
 # Modell nichts bekannt ist, die uebrigen sind **Sockel** fuer die Teilbudgets.
 # Beides zusammen ergibt: ohne Katalogwissen verhaelt sich der Kontextaufbau
-# wortwoertlich wie vorher.
+# wortwoertlich wie vorher. Mit einer Ausnahme: der Rueckfall gilt dem
+# Gespraech neben dem Systemprompt, nicht dem Prompt mit (`gesamtgrenze`).
 MAX_CONTEXT_CHARS = 24_000
 MAX_HISTORY_MESSAGES = 20
 MAX_SUMMARY_CHARS = 4_000
@@ -173,6 +175,38 @@ def teilbudgets(context_chars: int | None) -> Teilbudgets:
     Dataclass-Objekt nicht taete.
     """
     return _teilbudgets(context_chars if context_chars else MAX_CONTEXT_CHARS)
+
+
+def gesamtgrenze(
+    context_chars: int | None,
+    nachrichten: list[dict[str, Any]],
+    *,
+    katalog_zeichen: int = 0,
+) -> int:
+    """Wieviel eine Anfrage an Nachrichten tragen darf, den Systemprompt eingeschlossen.
+
+    Ein bekanntes Fenster ist eine Grenze des Modells: alles, was über die
+    Leitung geht, muss hinein, auch der mitfahrende Werkzeugkatalog — er wird
+    abgezogen, sonst folgt keine knappere Antwort, sondern eine Absage.
+
+    Ohne Fensterangabe ist ``MAX_CONTEXT_CHARS`` keine Grenze des Modells,
+    sondern die alte Zusage an das Gespräch. Sie stammt aus der Zeit, als der
+    Systemprompt 12.001 Zeichen hatte; am 24.09.2026 hatte er 55.995 und lag
+    damit allein über ihr. Als Gesamtgrenze gelesen blieb einem unbekannten
+    Modell nur noch ``MIN_HISTORY_CHARS``: gemessen vier von zwölf
+    Verlaufszeilen, jede auf 200 Zeichen gekürzt, und ein gelesener Log als
+    200-Zeichen-Stummel. „Unbekannt" heißt nicht „klein" — deshalb bekommt das
+    Gespräch seine 24.000 Zeichen **neben** dem Prompt, wie es der Prompt
+    beim Festlegen der Zahl auch bekam. Der Katalog wird hier nicht
+    abgezogen: er schützt ein bekanntes Fenster vor der Absage, und bei einem
+    unbekannten gibt es keine Zahl, vor der er schützen könnte. Ein bekannt
+    kleines Fenster läuft durch den ersten Zweig und wird nie angehoben.
+    """
+    if context_chars:
+        return teilbudgets(context_chars).gesamt - katalog_zeichen
+    kopf = nachrichten[0] if nachrichten else {}
+    prompt = kopf.get("content") if kopf.get("role") == "system" else None
+    return MAX_CONTEXT_CHARS + (len(prompt) if isinstance(prompt, str) else 0)
 
 
 def _skill_index_block(
@@ -356,7 +390,7 @@ def _recent_tool_results(
 
     if grenzen is None:
         grenzen = _teilbudgets(MAX_CONTEXT_CHARS)
-    rows = (
+    seite = (
         db.query(AiToolResult)
         .filter(
             AiToolResult.conversation_id == conversation_id,
@@ -364,8 +398,9 @@ def _recent_tool_results(
         )
         .order_by(AiToolResult.created_at.desc())
         .limit(grenzen.werkzeug_anzahl)
-        .all()
     )
+    with vorab_entschluesselt(db, seite, AiToolResult.result_json):
+        rows = seite.all()
     if not rows:
         return None
     # Zeilen aus der Zeit vor der Spalte tragen `None` und bilden damit einen
@@ -548,12 +583,14 @@ def build_provider_messages(
         query_set = query_set.filter(
             AiMessage.created_at > conversation.summarized_until
         )
-    rows = (
-        query_set
-        .order_by(AiMessage.created_at.desc(), AiMessage.id.desc())
-        .limit(grenzen.historie_zeilen)
-        .all()
+    # Bis zu 2.000 Zeilen: gebuendelt entschluesselt, und ohne Denktext und
+    # Gliederung, die der Kontext nie liest. Beide waren bis 27.09.2026 je
+    # Zeile ein eigener Sidecar-Aufruf vor dem ersten Token.
+    seite = query_set.order_by(AiMessage.created_at.desc(), AiMessage.id.desc()).limit(
+        grenzen.historie_zeilen
     )
+    with vorab_entschluesselt(db, seite, AiMessage.content, AiMessage.question_json):
+        rows = seite.options(defer(AiMessage.reasoning), defer(AiMessage.sections_json)).all()
     if user is not None:
         from services import permission_service
 
@@ -639,7 +676,11 @@ def build_provider_messages(
     # ohne die Frage, zu der er gehoert. Der Sockel kostet im schlimmsten Fall
     # `MIN_HISTORY_CHARS` ueber dem Ziel — neben einem Bildanhang faellt das
     # nicht ins Gewicht, eine Frage ohne Frage dagegen schon.
-    budget = max(grenzen.gesamt - used, MIN_HISTORY_CHARS)
+    #
+    # `gesamtgrenze` und nicht `grenzen.gesamt`: ohne bekanntes Fenster frass
+    # der Systemprompt allein die 24.000 Zeichen, und jede Anfrage lief auf
+    # den Sockel (Docstring dort).
+    budget = max(gesamtgrenze(context_chars, result) - used, MIN_HISTORY_CHARS)
     user_zone = ai_lage.zone_des_benutzers(user) if user else "UTC"
     for row in rows:
         if budget <= 0:
@@ -1061,13 +1102,24 @@ def geschaetzte_belegung(
     )
     if conversation.summarized_until is not None:
         historie = historie.filter(AiMessage.created_at > conversation.summarized_until)
-    belegung += int(historie.scalar() or 0)
+    belegung += _klartext_zeichen(historie.scalar())
 
     werkzeug = db.query(
         func.coalesce(func.sum(func.length(AiToolResult.result_json)), 0)
     ).filter(AiToolResult.conversation_id == conversation.id).scalar()
-    belegung += min(int(werkzeug or 0), grenzen.werkzeug_zeichen)
+    belegung += min(_klartext_zeichen(werkzeug), grenzen.werkzeug_zeichen)
     return belegung
+
+
+def _klartext_zeichen(chiffrat_zeichen: int | None) -> int:
+    """Rechnet eine in SQL gemessene Chiffratlaenge auf Klartext zurueck.
+
+    Die Spalten sind ``DisText``, ``length()`` misst also Base64: vier Zeichen
+    fuer drei Byte. Praefix, IV und Tag (etwa 36 Zeichen je Wert) bleiben
+    drin. Die Schaetzung liegt damit leicht zu hoch, und das ist die
+    ungefaehrliche Richtung fuer einen Ring, der vor dem Falten warnt.
+    """
+    return int(chiffrat_zeichen or 0) * 3 // 4
 
 
 def _zeichen_tief(wert: Any) -> int:

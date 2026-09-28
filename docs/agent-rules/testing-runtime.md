@@ -43,8 +43,10 @@ Bei Änderungen an Vault/Auth/DeviceKey/Passkey/Recovery/Quarantäne/Integrity z
 - keine Secrets in serialisierten Fehlern
 - keine Secrets in Logs, Toasts, URLs oder Fixtures
 
-Bei Datenbank- und Backend-Tests (SQLite StaticPool):
-- In `clean_db` zwingend vor und nach dem Tabellen-Truncate `from sqlalchemy.orm import close_all_sessions; close_all_sessions()` ausführen, um Leaks und `InvalidRequestError` zu vermeiden.
+Bei Datenbank- und Backend-Tests (PostgreSQL, `StaticPool` je Worker):
+- Die Suite braucht `MSM_TEST_DATABASE_URL` (PostgreSQL mit CREATEDB; `scripts/test-postgres.sh` startet einen Wegwerf-Container). Ohne sie bricht pytest ab — es gibt keinen Rückfall auf SQLite.
+- Tests, die ein eigenes Schema bauen (Migrationen), holen sich mit der Fixture `pg_wegwerf` eine eigene leere Datenbank, nie `sqlite://`.
+- In `clean_db` zwingend vor und nach dem Leeren der Tabellen `from sqlalchemy.orm import close_all_sessions; close_all_sessions()` ausführen, um Leaks und `InvalidRequestError` zu vermeiden.
 - In-Memory-Caches von Singletons/Services (`PanelSettingsService.invalidate_cache()`, `reset_port_cache_for_tests()`, etc.) vor jedem Test explizit zurücksetzen.
 
 Bei Desktop-/Tauri- und UI-Popover-Komponenten:

@@ -33,7 +33,10 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 import re
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -61,10 +64,15 @@ ID_MUSTER = re.compile(r"^[a-z0-9_]{1,64}$")
 
 # Welche Felder `derive_from` aendern darf. Bewusst eng: eine Ableitung soll die
 # Version, das Image oder eine Umgebungsvariable anpassen, nicht die Portrollen
-# oder die Installationsquelle umbauen. Wer das braucht, laedt einen ganzen
+# umbauen. Wer das braucht, laedt einen ganzen
 # Blueprint hoch — dann sieht ein Mensch das vollstaendige Ergebnis, statt einer
 # Liste von Einzelaenderungen zustimmen zu muessen, deren Zusammenwirken er
 # nicht ueberblickt.
+#
+# Die `source.*`-Pfade stehen hier seit 13.09.2026 (Branch, Repo, Unterordner,
+# Download-Adresse). Sie tauschen aus, welcher Code geholt wird; deshalb fragt
+# ein Quellwechsel der KI auch im autonomen Modus, und die Karte zeigt die
+# Quelle vorher und nachher (`_blueprint_change_payload`).
 #
 # `runtime.startup` steht hier, seit die KI auch eine falsche Startzeile
 # korrigieren koennen soll — sie ist bei GitHub-Quellen der haeufigste Grund,
@@ -80,6 +88,11 @@ AENDERBARE_PFADE = (
     "runtime.image",
     "runtime.env",
     "runtime.startup",
+    "source.github.branch",
+    "source.github.repo",
+    "source.github.subPath",
+    "source.steam.branch",
+    "source.http.url",
 )
 
 
@@ -133,23 +146,53 @@ def save_community_blueprint(raw: dict[str, Any]) -> str:
             ),
         )
 
-    ensure_community_dir()
     try:
         ziel = community_blueprint_path(blueprint.meta.id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     nutzlast = blueprint.model_dump(mode="json", by_alias=True)
+    content = json.dumps(nutzlast, indent=2, ensure_ascii=False) + "\n"
+    temp_ziel = None
     try:
-        ziel.write_text(
-            json.dumps(nutzlast, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
+        ensure_community_dir()
+        # Ein eindeutiger Name je Aufruf; konkurrierende Threads duerfen
+        # weder die Nutzlast noch die Aufraeumdatei des anderen verwenden.
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=ziel.parent,
+            prefix=f".{ziel.name}.", suffix=".tmp", delete=False,
+        ) as temporary:
+            temp_ziel = Path(temporary.name)
+            temporary.write(content)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        temp_ziel.replace(ziel)
+    except PermissionError as exc:
+        logger.error(
+            "Konnte Blueprint %s nicht schreiben (Permission denied): %s. "
+            "Besitz oder Schreibrechte des Verzeichnisses '%s' fehlerhaft.",
+            ziel.name,
+            exc,
+            ziel.parent,
         )
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Blueprint-Datei '{ziel.name}' konnte wegen fehlender Dateirechte nicht gespeichert werden (Permission denied). "
+                f"Bitte Dateibesitz von '{ziel.parent}' für den Panel-Benutzer prüfen oder 'scripts/fix-server-permissions.sh' ausführen."
+            ),
+        ) from exc
     except OSError as exc:
         logger.error("Konnte Blueprint %s nicht schreiben: %s", ziel.name, exc)
         raise HTTPException(
             status_code=500, detail="Blueprint konnte nicht gespeichert werden."
         ) from exc
+    finally:
+        if temp_ziel is not None and temp_ziel.exists():
+            try:
+                temp_ziel.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     reload_registry()
     return blueprint.meta.id
@@ -225,6 +268,15 @@ def delete_community_blueprint(blueprint_id: str, db: Session) -> None:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         ziel.unlink(missing_ok=True)
+    except PermissionError as exc:
+        logger.error("Konnte Blueprint %s nicht loeschen (Permission denied): %s", ziel.name, exc)
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Blueprint-Datei '{ziel.name}' konnte wegen fehlender Dateirechte nicht gelöscht werden (Permission denied). "
+                f"Bitte Dateibesitz von '{ziel.parent}' für den Panel-Benutzer prüfen oder 'scripts/fix-server-permissions.sh' ausführen."
+            ),
+        ) from exc
     except OSError as exc:
         logger.error("Konnte Blueprint %s nicht loeschen: %s", ziel.name, exc)
         raise HTTPException(

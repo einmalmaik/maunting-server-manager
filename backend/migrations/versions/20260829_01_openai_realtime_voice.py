@@ -32,7 +32,6 @@ def upgrade() -> None:
         "ai_providers",
         ["realtime_default"],
         unique=True,
-        sqlite_where=sa.text("realtime_default = 1"),
         postgresql_where=sa.text("realtime_default"),
     )
     with op.batch_alter_table("ai_usage_events") as batch:

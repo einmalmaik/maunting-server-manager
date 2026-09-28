@@ -90,7 +90,7 @@ jobs:
         working-directory: dis-sidecar
         run: |
           npm ci
-          node --test test-backup-endpoints.mjs
+          node --test test-backup-endpoints.mjs test-encrypt-envelope.mjs
 
       - name: Resolve artifact version
         id: version
@@ -115,6 +115,8 @@ jobs:
         run: |
           sha256sum --check SHA256SUMS
           tar -tzf "msm-panel-${{ steps.version.outputs.value }}.tar.gz" | grep -q '/backend/main.py$'
+          tar -tzf "msm-panel-${{ steps.version.outputs.value }}.tar.gz" | grep -q '/livekit-sidecar/docker-compose.yml$'
+          tar -tzf "msm-panel-${{ steps.version.outputs.value }}.tar.gz" | grep -q '/searxng-sidecar/docker-compose.yml$'
           tar -tzf "msm-frontend-${{ steps.version.outputs.value }}.tar.gz" | grep -q '/dist/index.html$'
           tar -tzf "msm-agent-${{ steps.version.outputs.value }}.tar.gz" | grep -q '/msm-agent/main.py$'
 

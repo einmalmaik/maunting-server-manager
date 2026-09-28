@@ -78,7 +78,7 @@ export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', pla
       if (feld === 'email') setNotificationsEnabled(vorher)
       else if (feld === 'ai') setAiNotificationsEnabled(vorher)
       else setDeviceNotificationsEnabled(vorher)
-      toast.error(t('notifications.updateFailed', 'Einstellung konnte nicht gespeichert werden.'))
+      toast.error(t('notifications.updateFailed'))
     }
   }
 
@@ -150,8 +150,8 @@ export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', pla
         onClick={toggleBell}
         aria-expanded={bellOpen}
         aria-haspopup="menu"
-        title={irgendwasAn ? t('notifications.activeLabel', 'Benachrichtigungen aktiv') : t('notifications.inactiveLabel', 'Benachrichtigungen stummgeschaltet')}
-        aria-label={irgendwasAn ? t('notifications.activeLabel', 'Benachrichtigungen aktiv') : t('notifications.inactiveLabel', 'Benachrichtigungen stummgeschaltet')}
+        title={irgendwasAn ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
+        aria-label={irgendwasAn ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
         className="p-2 rounded-full transition-colors active:scale-95 relative hover:bg-surface-variant/50 text-on-surface-variant hover:text-primary"
       >
         <div className="relative inline-flex">
@@ -172,55 +172,55 @@ export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', pla
         >
           <div className="p-3 border-b border-outline-variant/30">
             <p className="font-label-md text-sm text-on-surface font-medium">
-              {t('notifications.title', 'Benachrichtigungen')}
+              {t('notifications.title')}
             </p>
           </div>
           <label className="flex items-start gap-3 px-3 py-2.5 hover:bg-surface-container-highest transition-colors cursor-pointer">
             <Mail className="mt-0.5 h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
             <span className="min-w-0 flex-1">
               <span className="block text-sm text-on-surface">
-                {t('notifications.emailLabel', 'E-Mail-Benachrichtigungen')}
+                {t('notifications.emailLabel')}
               </span>
               <span className="block text-xs text-on-surface-variant">
-                {t('notifications.emailHint', 'Anmeldungen, Server-Ereignisse, Updates.')}
+                {t('notifications.emailHint')}
               </span>
             </span>
             <Switch
               checked={notificationsEnabled}
               onCheckedChange={(wert) => void schalte('email', wert)}
-              aria-label={t('notifications.emailLabel', 'E-Mail-Benachrichtigungen')}
+              aria-label={t('notifications.emailLabel')}
             />
           </label>
           <label className="flex items-start gap-3 px-3 py-2.5 hover:bg-surface-container-highest transition-colors cursor-pointer border-t border-outline-variant/20">
             <Bot className="mt-0.5 h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
             <span className="min-w-0 flex-1">
               <span className="block text-sm text-on-surface">
-                {t('notifications.aiLabel', 'KI-Meldungen im Panel')}
+                {t('notifications.aiLabel')}
               </span>
               <span className="block text-xs text-on-surface-variant">
-                {t('notifications.aiHint', 'Hinweis, wenn ein Auftrag fertig ist oder wartet. Keine E-Mails.')}
+                {t('notifications.aiHint')}
               </span>
             </span>
             <Switch
               checked={aiNotificationsEnabled}
               onCheckedChange={(wert) => void schalte('ai', wert)}
-              aria-label={t('notifications.aiLabel', 'KI-Meldungen im Panel')}
+              aria-label={t('notifications.aiLabel')}
             />
           </label>
           <label className="flex items-start gap-3 px-3 py-2.5 hover:bg-surface-container-highest transition-colors cursor-pointer border-t border-outline-variant/20">
             <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
             <span className="min-w-0 flex-1">
               <span className="block text-sm text-on-surface">
-                {t('notifications.deviceLabel', 'Geräte-Benachrichtigungen')}
+                {t('notifications.deviceLabel')}
               </span>
               <span className="block text-xs text-on-surface-variant">
-                {t('notifications.deviceHint', 'Pop-up-Meldungen auf Windows- und Android-Geräten bei Server-Vorfällen, Terminen und KI-Aufträgen.')}
+                {t('notifications.deviceHint')}
               </span>
             </span>
             <Switch
               checked={deviceNotificationsEnabled}
               onCheckedChange={(wert) => void schalte('device', wert)}
-              aria-label={t('notifications.deviceLabel', 'Geräte-Benachrichtigungen')}
+              aria-label={t('notifications.deviceLabel')}
             />
           </label>
         </div>

@@ -21,7 +21,7 @@ def _isolate_background_notification_worker(
 
     Die Benachrichtigung besitzt unten einen eigenen Integrationstest. Alle
     anderen Tests prüfen Ingestion/Grouping/ACK und dürfen deshalb keinen
-    zweiten DB-Thread auf derselben In-Memory-SQLite-Verbindung starten.
+    zweiten DB-Thread auf der geteilten Testverbindung (StaticPool) starten.
     """
     if request.node.name != "test_notify_guardian_incident_triggers_webhook_and_email":
         monkeypatch.setattr(
@@ -228,8 +228,8 @@ def test_grouped_incident_uuid_retry_does_not_increment_occurrence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Notification delivery ist ein separater Post-Commit-Pfad. Ein echter
-    # Hintergrundthread darf in diesem StaticPool-SQLite-Test nicht dieselbe
-    # Verbindung parallel verwenden, sonst kann er die Incident-Transaktion
+    # Hintergrundthread darf die geteilte Testverbindung (StaticPool) nicht
+    # parallel verwenden, sonst kann er die Incident-Transaktion
     # nondeterministisch beeinflussen.
     monkeypatch.setattr(
         "services.guardian_incident_service._notify_guardian_incident",
@@ -369,7 +369,7 @@ def test_notify_guardian_incident_triggers_webhook_and_email(db: Session, monkey
     from services.guardian_incident_service import _notify_guardian_incident
 
     class ImmediateThread:
-        """Führt den Worker deterministisch ohne parallelen SQLite-Zugriff aus."""
+        """Führt den Worker ohne parallelen Zugriff auf die Testverbindung aus."""
 
         def __init__(self, *, target, daemon: bool = False):
             self._target = target

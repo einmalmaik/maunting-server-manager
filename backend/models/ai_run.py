@@ -27,10 +27,11 @@ was fehlt (``console_stream_service``).
 
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
+from models.dis_text import ai_text
 
 
 # Ein Lauf, der wartet, haelt keine Ressourcen — er ist eine Zeile.
@@ -109,7 +110,13 @@ class AiRun(Base):
     # Es wird bewusst *nicht* aus der Unterhaltung neu abgeleitet: eine
     # Fortsetzung muss dieselben Werkzeugergebnisse sehen wie der abgebrochene
     # Zug, sonst faengt die KI von vorn an zu lesen.
-    state_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #
+    # `deferred`: der Zustand ist oft Hunderte KB gross und verschluesselt. Die
+    # Statusabfragen (alle 2 bis 8 Sekunden) lesen nur Status und Kennungen und
+    # entschluesselten ihn bis 27.09.2026 trotzdem jedes Mal mit.
+    state_json: Mapped[str | None] = mapped_column(
+        ai_text("ai_runs.state_json"), nullable=True, deferred=True
+    )
 
     # Nachdenken fuer diesen Lauf angefordert? Gehoert zum Lauf und nicht zur
     # Nachricht, weil die Fortsetzung dieselbe Einstellung braucht.

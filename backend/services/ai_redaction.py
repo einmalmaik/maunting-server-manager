@@ -172,8 +172,32 @@ _AUTHORIZATION_BEARER_RE = re.compile(
     r"(?i)\bauthorization\b\s*[:=]\s*bearer\s+[A-Za-z0-9._~+\-/]+=*"
 )
 _BEARER_RE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+\-/]+=*")
+#: Schluessel, die man an ihrer **Form** erkennt — ohne einen Schluesselnamen
+#: daneben. Sie sind der zweite Weg neben der Zuweisung oben, und der wichtigere,
+#: wo gar kein ``key =`` steht: in einer Adresse (``?key=AIza…``), in einer
+#: Fehlermeldung eines Anbieters, in einem Satz, den ein Benutzer in den Chat
+#: tippt ("nimm mal AIzaSy…").
+#:
+#: Hier standen drei Muster — OpenAI, GitHub, AWS —, und die Luecke war
+#: ausgerechnet der Anbieter, gegen den dieses Panel gerade geprueft wurde:
+#:
+#: * ``AIza…`` ist die Form **jedes** Google-AI-Studio-Schluessels (39 Zeichen).
+#:   Sie traegt kein ``sk-`` und kein ``_``, also griff keines der alten Muster,
+#:   und ``key`` allein ist in `_GEHEIM_KERN` bewusst kein Geheimniswort — sonst
+#:   wuerde jedes ``server_key`` in einer Spielkonfiguration unlesbar.
+#: * ``ya29.…`` und ``AQ.…`` sind Googles OAuth-Zugangsmarken. Sie stehen in
+#:   ``Authorization``-Koepfen und in Antworten von Google selbst.
+#: * ``xox…`` (Slack) und JWTs kommen ueber Webhooks und Sitzungsmarken in
+#:   Konfigurationen und Logs — dieselbe Klasse, dieselbe Behandlung.
+#:
+#: Die Grenze vor den punktierten Formen ist ein Lookbehind und kein ``\b``: nach
+#: einem Punkt und vor einem ``-`` steht keine Wortgrenze, und mit ``\b`` waeren
+#: genau die Marken durchgerutscht, die auf einem Bindestrich enden.
 _KNOWN_TOKEN_RE = re.compile(
-    r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})\b"
+    r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}"
+    r"|xox[baprs]-[A-Za-z0-9-]{10,})\b"
+    r"|(?<![A-Za-z0-9._-])(?:AIza[0-9A-Za-z_-]{35,}|(?:ya29|AQ)\.[A-Za-z0-9_-]{18,})"
+    r"|\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
 )
 _PRIVATE_KEY_RE = re.compile(
     r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",

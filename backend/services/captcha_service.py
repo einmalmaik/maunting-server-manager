@@ -15,11 +15,30 @@ class CaptchaService:
         Raises HTTPException(400) if validation fails.
         """
         # 1. Check if CAPTCHA is enabled
-        enabled = PanelSettingsService.get("captcha_enabled", "false") == "true"
+        enabled = PanelSettingsService.get("captcha_enabled", "true") == "true"
         if not enabled:
             return
 
-        provider = PanelSettingsService.get("captcha_provider", "none")
+        provider = PanelSettingsService.get("captcha_provider", "altcha")
+        if provider == "altcha":
+            if not token:
+                raise HTTPException(status_code=400, detail="CAPTCHA-Verifizierung erforderlich.")
+            from services.dis_client import DisClient, DisSidecarError
+            try:
+                is_valid = DisClient.verify_altcha(token)
+            except DisSidecarError as exc:
+                logger.error("DIS Sidecar Fehler bei ALTCHA-Verifikation: %s", exc)
+                raise HTTPException(
+                    status_code=503,
+                    detail="Kryptographischer Dienst vorübergehend nicht erreichbar.",
+                )
+            if not is_valid:
+                raise HTTPException(
+                    status_code=400,
+                    detail="CAPTCHA-Verifizierung fehlgeschlagen. Bitte erneut versuchen.",
+                )
+            return
+
         verify_urls = {
             "turnstile": "https://challenges.cloudflare.com/turnstile/v0/siteverify",
             "hcaptcha": "https://hcaptcha.com/siteverify",

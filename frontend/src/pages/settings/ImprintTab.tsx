@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/Switch'
 import { publishPublicLegalSettings } from '@/hooks/usePublicLegalSettings'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function ImprintTab() {
   const { t } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
@@ -52,7 +53,7 @@ export function ImprintTab() {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -114,7 +115,7 @@ export function ImprintTab() {
           <div className="flex justify-end">
             <Button type="submit" disabled={saving} className="px-6">
               {saving ? (
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-on-primary border-t-transparent" />
+                <Spinner />
               ) : (
                 <Save className="h-4 w-4" />
               )}

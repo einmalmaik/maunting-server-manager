@@ -26,7 +26,7 @@ def _display_code() -> str:
 
 
 def is_expired(enrollment: NodeEnrollment) -> bool:
-    """Compare UTC timestamps from both PostgreSQL and SQLite-backed tests."""
+    """Compare UTC timestamps, whether the stored value is naive or aware."""
     expires_at = enrollment.expires_at
     now = datetime.now(timezone.utc)
     if expires_at.tzinfo is None:

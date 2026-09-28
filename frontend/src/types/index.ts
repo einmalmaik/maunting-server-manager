@@ -1,11 +1,21 @@
 export interface User {
   id: number
   username: string
+  /**
+   * False, solange ein Konto aus Social Login oder Hoster-Shop seinen
+   * vorläufigen Namen trägt. Dann steht im Panel statt der Seiten die
+   * Namenswahl; die App fragt nicht.
+   */
+  username_gewaehlt?: boolean
   email: string
   is_owner: boolean
   is_active: boolean
   email_verified: boolean
   two_factor_enabled: boolean
+  /** False, wenn das Konto rein über Social Login / OAuth registriert wurde und noch kein Passwort gesetzt hat. */
+  has_password?: boolean
+  /** Der eingerichtete zweite Faktor — jede Abfrage zeigt nur diesen Weg. */
+  two_factor_method?: 'totp' | 'passkey' | null
   email_notifications: boolean
   /** Hinweise der KI im Panel. Getrennt von den E-Mails — sie verschickt keine. */
   ai_notifications: boolean
@@ -15,7 +25,7 @@ export interface User {
   time_zone?: string | null
   /** Explizite Einwilligung für ortsbezogene KI-Anfragen; keine Koordinaten. */
   location_sharing_enabled?: boolean
-  /** Rufname des KI-Assistenten; null heißt Standardname 'Singra'. */
+  /** Rufname des KI-Assistenten; null heißt Standardname 'Assistent'. */
   agent_name?: string | null
   /** Gewählter KI-Zugang — am Konto, damit App und Overlay dieselbe Wahl sehen. */
   ai_provider_id?: number | null
@@ -24,6 +34,7 @@ export interface User {
   role_ids?: number[]
   /** URL zum hochgeladenen Profilbild */
   avatar_url?: string | null
+  social_privacy?: 'private' | 'friends' | 'public'
   created_at: string
 }
 
@@ -31,6 +42,8 @@ export interface Server {
   id: number
   name: string
   game_type: string
+  /** Eigener PostgreSQL-Datenbankserver oder Anwendung (Spiel, Bot …). Berechnet aus der Blueprint. */
+  server_kind?: 'application' | 'database'
   // install_dir + container_name entfernt (Security/data-min per review): waren in allen Responses inkl. view-only User.
   // Keine Verwendung im FE-Code (nur hier); interne Pfade bleiben server-only in DB/audit/owner flows.
   status: string
@@ -223,86 +236,7 @@ export interface PostgresResources {
   users: PostgresUser[]
 }
 
-export interface PostgresTable {
-  schema: string
-  name: string
-  row_estimate?: number | null
-  size_bytes?: number | null
-}
-
-export interface PostgresDatabaseStats {
-  status: string
-  latency_ms?: number | null
-  size_bytes?: number | null
-  table_count: number
-  active_connections?: number | null
-  max_connections?: number | null
-  database_name: string
-  engine: string
-}
-
-export interface PostgresColumnInfo {
-  name: string
-  data_type: string
-  nullable: boolean
-  default?: string | null
-  primary_key?: boolean
-}
-
-export interface PostgresIndexInfo {
-  name: string
-  definition: string
-}
-
-export interface PostgresForeignKeyInfo {
-  name: string
-  column_name: string
-  foreign_table: string
-  foreign_column: string
-}
-
-export interface PostgresTableInfo {
-  schema: string
-  name: string
-  columns: PostgresColumnInfo[]
-  indexes: PostgresIndexInfo[]
-  foreign_keys: PostgresForeignKeyInfo[]
-  size_bytes?: number | null
-  row_estimate?: number | null
-}
-
-export interface PostgresRowsResult {
-  columns: string[]
-  rows: Array<Record<string, unknown>>
-  limit?: number | null
-  offset?: number | null
-  row_count?: number | null
-  status?: string | null
-}
-
-export interface PostgresSqlStatementResult {
-  statement: string
-  columns: string[]
-  rows: Array<Record<string, unknown>>
-  row_count: number | null
-  status: string | null
-  error: string | null
-  duration_ms: number | null
-}
-
-export interface PostgresSqlResult {
-  statements: PostgresSqlStatementResult[]
-  total_duration_ms: number
-  statement_timeout_ms: number
-}
-
-export interface PostgresExtension {
-  name: string
-  version?: string | null
-  trusted?: boolean
-}
-
-export type BlueprintPortRole = 'game' | 'query' | 'rcon' | 'voice' | 'web' | 'peer' | 'custom'
+export type BlueprintPortRole = 'game' | 'query' | 'rcon' | 'voice' | 'web' | 'peer' | 'database' | 'custom'
 export type BlueprintPortProtocol = 'tcp' | 'udp'
 
 export interface BlueprintPortDef {

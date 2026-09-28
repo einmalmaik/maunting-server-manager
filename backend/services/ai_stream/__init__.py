@@ -91,6 +91,7 @@ from services.ai_stream.read_tools import (
     _werkzeug_ausfuehren,
     _werkzeug_nebenlaeufigkeit,
     _werkzeuge_ansagen,
+    werkzeugergebnis_umschlag,
 )
 
 from services.ai_stream.write_tools import (
@@ -210,6 +211,7 @@ __all__ = [
     # Lese-Werkzeuge
     "_serverbezug",
     "_ergebnis_schwaerzen",
+    "werkzeugergebnis_umschlag",
     "_werkzeug_nebenlaeufigkeit",
     "_servernummer",
     "_werkzeuge_ansagen",

@@ -1,12 +1,13 @@
 import { useEffect } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProtectedRoute } from './ProtectedRoute'
 import { PublicOnlyRoute } from './PublicOnlyRoute'
 import { useAuthStore } from '@/stores/authStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import * as client from '@/api/client'
+import i18n from '@/i18n'
 
 vi.mock('@/api/client', () => ({
   api: vi.fn(),
@@ -119,6 +120,62 @@ describe('ProtectedRoute', () => {
     })
     expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument()
     expect(leitungGeschlossen).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('ProtectedRoute: Namenswahl', () => {
+  beforeEach(() => {
+    resetStore()
+    vi.mocked(client.api).mockReset()
+  })
+
+  it('zeigt statt des Panels die Namenswahl und danach das Panel an derselben Stelle', async () => {
+    // Konten aus dem Social Login trugen bis 09/2026 die E-Mail ohne
+    // Sonderzeichen als Namen. Jetzt waehlen sie einmal selbst.
+    useAuthStore.setState({
+      user: { id: 1, username: 'user_0a1b2c3d', username_gewaehlt: false, is_owner: false } as any,
+      isAuthenticated: true,
+      isLoading: false,
+    })
+    vi.mocked(client.api).mockResolvedValue({
+      id: 1, username: 'maunting', username_gewaehlt: true, is_owner: false,
+    } as any)
+
+    render(<TestApp initialPath="/servers" />)
+
+    expect(await screen.findByText(i18n.t('benutzername.titel'))).toBeInTheDocument()
+    expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument()
+    // Ein Platzhalter ist kein Vorschlag.
+    const feld = screen.getByLabelText(i18n.t('benutzername.label')) as HTMLInputElement
+    expect(feld.value).toBe('')
+
+    fireEvent.change(feld, { target: { value: 'maunting' } })
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('benutzername.weiter') }))
+
+    await screen.findByTestId('protected-content')
+    expect(client.api).toHaveBeenCalledWith('/auth/me/username', {
+      method: 'PATCH',
+      body: JSON.stringify({ username: 'maunting' }),
+    })
+  })
+
+  it('laesst einen Namen mit @ gar nicht erst abschicken', async () => {
+    useAuthStore.setState({
+      user: { id: 1, username: 'Alice.GH', username_gewaehlt: false, is_owner: false } as any,
+      isAuthenticated: true,
+      isLoading: false,
+    })
+
+    render(<TestApp />)
+
+    const feld = (await screen.findByLabelText(i18n.t('benutzername.label'))) as HTMLInputElement
+    // Ein brauchbarer Anbietername steht als Vorschlag im Feld.
+    expect(feld.value).toBe('Alice.GH')
+    fireEvent.change(feld, { target: { value: 'max@web.de' } })
+
+    expect(screen.getByText(i18n.t('benutzername.fehlerForm'))).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: i18n.t('benutzername.weiter') })).toBeDisabled()
+    expect(client.api).not.toHaveBeenCalled()
   })
 })
 

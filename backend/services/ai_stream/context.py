@@ -205,26 +205,12 @@ def _denken_am_modell(
     Schweigt der Katalog, bleibt alles wie eingefroren. Eine Stufe wegen einer
     Netzstörung fallen zu lassen wäre dieselbe stille Verteuerung, gegen die
     `ai_reasoning._aus` geschrieben ist.
+
+    Die Regel selbst steht in `ai_reasoning.eingefroren_pruefen` — dieselbe
+    Frage stellt die GPT-Live-Sitzung an ihr Backend-Modell.
     """
-    aktiv, stufe = vorbereitung.reasoning, vorbereitung.reasoning_effort
-    if modell is None:
-        return aktiv, stufe
-    if not modell.denkt:
-        # Getauscht gegen ein Modell ohne Denkvermögen: dort ist jedes
-        # ``reasoning_effort`` ein ``400``, ``none`` eingeschlossen.
-        return False, None
-    if stufe is None or stufe in modell.stufen:
-        return aktiv, stufe
-    if stufe == ai_reasoning.AUS_STUFE:
-        # „Aus“ ist selbst nur ein Wort, und nicht jedes Modell führt es. Beim
-        # neuen Modell heißt dasselbe womöglich „gar kein Feld“ — oder, bei
-        # Denkzwang, „so flach wie es geht“. Ein Deckel von ``MIN_RANG`` sagt
-        # genau das, und zwar in derselben Funktion wie überall sonst.
-        return ai_reasoning.klemmen(
-            modell, wunsch=None, aktiv=False, deckel=ai_reasoning.MIN_RANG
-        )
-    return ai_reasoning.klemmen(
-        modell, wunsch=stufe, aktiv=aktiv, deckel=ai_reasoning.rang(stufe)
+    return ai_reasoning.eingefroren_pruefen(
+        modell, aktiv=vorbereitung.reasoning, stufe=vorbereitung.reasoning_effort
     )
 
 
@@ -251,7 +237,16 @@ def _rolle_ableiten(
     kind = str(getattr(conversation, "kind", "primary") or "primary")
     if kind == "worker":
         return "worker"
-    if kind == "primary" and not unbeaufsichtigt and provider.worker_model:
+    worker_da = bool(provider.worker_model and getattr(provider, "worker_enabled", True))
+    if not worker_da:
+        from models import AiProvider
+        worker_da = db.query(AiProvider).filter(
+            AiProvider.enabled.is_(True),
+            AiProvider.worker_enabled.is_(True),
+            AiProvider.worker_model.isnot(None),
+        ).first() is not None
+
+    if kind == "primary" and not unbeaufsichtigt and worker_da:
         from services import permission_service
 
         if permission_service.has_global_permission(db, user, "ai.background.use"):

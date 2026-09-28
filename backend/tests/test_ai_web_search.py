@@ -437,3 +437,62 @@ def test_the_server_list_no_longer_carries_a_search_verdict(
     assert liste["servers"]
     for row in liste["servers"]:
         assert "docs_searchable" not in row
+
+
+# ── SearXNG Sidecar & Default-Endpunkt ──────────────────────────────────────
+
+def test_searxng_defaults_to_local_sidecar_when_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ai_web_search_service, "_panel_searxng_url", lambda: None)
+    monkeypatch.setattr(ai_web_search_service, "is_sidecar_running", lambda *_: True)
+
+    assert ai_web_search_service.default_searxng_url() == "http://127.0.0.1:8888"
+    assert ai_web_search_service.searxng_url() == "http://127.0.0.1:8888"
+    assert ai_web_search_service.is_default_searxng() is True
+    assert ai_web_search_service.is_configured() is True
+
+
+def test_searxng_custom_url_overrides_default_sidecar(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ai_web_search_service, "_panel_searxng_url", lambda: "http://searxng.internal:8080")
+    monkeypatch.setattr(ai_web_search_service, "is_sidecar_running", lambda *_: True)
+
+    assert ai_web_search_service.custom_searxng_url() == "http://searxng.internal:8080"
+    assert ai_web_search_service.searxng_url() == "http://searxng.internal:8080"
+    assert ai_web_search_service.is_default_searxng() is False
+
+
+def test_searxng_search_parses_json_results(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = {}
+
+    def fake_get(url, *, params=None, headers=None):
+        seen["url"] = url
+        seen["params"] = params
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Minecraft Server Guide",
+                        "url": "https://example.com/mc",
+                        "content": "Default port is 25565.",
+                    }
+                ]
+            },
+        )
+
+    class FakeClient:
+        get = staticmethod(fake_get)
+
+    ai_web_search_service.shutdown_http_client()
+    monkeypatch.setattr(ai_web_search_service, "_http_client", lambda: FakeClient())
+    monkeypatch.setattr(ai_web_search_service, "api_key", lambda: None)
+    monkeypatch.setattr(ai_web_search_service, "searxng_url", lambda: "http://127.0.0.1:8888")
+
+    hits = ai_web_search_service.search("minecraft port")
+
+    assert seen["url"] == "http://127.0.0.1:8888/search"
+    assert seen["params"]["q"] == "minecraft port"
+    assert seen["params"]["format"] == "json"
+    assert len(hits) == 1
+    assert hits[0]["title"] == "Minecraft Server Guide"
+    assert hits[0]["url"] == "https://example.com/mc"
+    assert "25565" in hits[0]["snippet"]

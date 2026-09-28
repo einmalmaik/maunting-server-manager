@@ -50,11 +50,18 @@ export const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputPro
           </label>
         )}
         <div className="relative w-full">
+          {/*
+            Die drei `::`-Regeln nehmen dem Browser sein eigenes Auge (Edge und
+            Chrome) und Safaris Schlüsselsymbol weg. Ohne sie stehen zwei Augen
+            nebeneinander: unseres und seins — und das des Browsers hält sich
+            nicht an die 30 Sekunden, nach denen hier wieder zugeht.
+          */}
           <input
             ref={ref}
             type={showPassword ? 'text' : 'password'}
             className={`
               msm-input h-10 pr-10
+              [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden
               disabled:cursor-not-allowed disabled:opacity-50
               ${error ? 'border-status-destructive focus:ring-status-destructive' : ''}
               ${className}
@@ -75,7 +82,7 @@ export const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputPro
           </button>
         </div>
         {error && (
-          <span className="text-xs text-destructive">{error}</span>
+          <span className="text-xs text-status-destructive">{error}</span>
         )}
       </div>
     )

@@ -222,7 +222,7 @@ BENCH_TIMEOUT = float(os.environ.get("MSM_BENCH_TIMEOUT", "180"))
 #: Kuenstliche Dauer je Werkzeugaufruf, in Sekunden. Voreingestellt aus.
 #:
 #: **Warum das ueberhaupt noetig ist.** In der Testumgebung sind alle Werkzeuge
-#: sofort fertig: die Datenbank liegt in SQLite, es gibt keinen Node, keinen
+#: sofort fertig: die Datenbank ist lokal, es gibt keinen Node, keinen
 #: Docker, keine SSH-Verbindung. Der erste Baseline-Lauf mass deshalb 0,3
 #: Sekunden Werkzeugzeit ueber saemtliche Szenarien — und die Frage, die der
 #: Betreiber gestellt hat ("ich habe von jedem Server ein Backup erstellen
@@ -1969,19 +1969,15 @@ async def test_ai_benchmark(
 #   * die Ereignisschleife selbst.
 #
 # **Was diese Messung nicht sehen kann, und warum das im Bericht stehen muss.**
-# Die Testsuite haengt an einer SQLite-Datenbank im Arbeitsspeicher mit einer
-# einzigen geteilten Verbindung (`conftest.py`, StaticPool). Ein erschoepfter
-# Verbindungspool ist hier per Konstruktion unmoeglich, und `with_for_update`
-# in `reserve_ai_usage` ist unter SQLite eine leere Anweisung. Beide Grenzen
-# sind damit **ungemessen**, nicht etwa unproblematisch. Der Bericht sagt das
-# ausdruecklich, statt eine gruene Zeile fuer eine Zusage auszugeben.
+# Die Testsuite teilt je Worker eine einzige Verbindung (`conftest.py`,
+# StaticPool). Ein erschoepfter Verbindungspool ist dort per Konstruktion
+# unmoeglich; die Lastmessung arbeitet deshalb auf einer eigenen
+# PostgreSQL-Datenbank mit echtem Pool (`_lastdatenbank`).
 
 import logging as _logging
-import shutil
-import tempfile
 
 import database as _database
-from sqlalchemy import create_engine, event as _sa_event
+from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import TimeoutError as SaTimeoutError
 
@@ -2181,48 +2177,29 @@ def _p90(werte: list[float]) -> float:
     return statistics.quantiles(werte, n=10)[-1]
 
 
-def _lastdatenbank(ordner: Path):
+def _lastdatenbank(url: str):
     """Eine eigene Datenbank fuer die Lastmessung — mit **echtem** Pool.
 
-    **Warum das sein muss.** Die Testsuite haengt an einer SQLite im
-    Arbeitsspeicher, deren ``StaticPool`` allen Sitzungen *dieselbe* Verbindung
-    gibt. Der erste Messversuch scheiterte daran sichtbar: ab zehn
-    gleichzeitigen Laeufen meldete jeder fuenfte einen
-    ``sqlite3.InterfaceError: bad parameter or other API misuse`` — zwei
-    Sitzungen, ein Cursor. Das ist kein Befund ueber MSM, sondern einer ueber
-    den Messaufbau, und ``ai_stream_service._leseplaetze`` beschreibt genau
-    diese Eigenschaft bereits im Quelltext.
+    **Warum das sein muss.** Die Testsuite teilt je Worker eine Verbindung
+    (``StaticPool``), die allen Sitzungen *dieselbe* Verbindung gibt. Der erste
+    Messversuch scheiterte daran sichtbar: ab zehn gleichzeitigen Laeufen
+    meldete jeder fuenfte einen Fehler — zwei Sitzungen, ein Cursor. Das ist
+    kein Befund ueber MSM, sondern einer ueber den Messaufbau.
 
     Eine Messung, deren Ausfaelle vom Messgeraet stammen, beantwortet die
-    gestellte Frage nicht. Deshalb bekommt die Lastmessung eine Datei-Datenbank
-    mit den Poolwerten aus ``database.py`` — jede Sitzung ihre eigene
-    Verbindung, ``pool_size`` und ``max_overflow`` als echte Schranke. Damit
-    ist die Frage "greift der Verbindungspool zuerst?" ueberhaupt erst
-    stellbar.
-
-    Was das **nicht** herstellt: PostgreSQL. SQLite kennt keinen echten
-    Schreibnebenlauf, ``with_for_update`` ist eine leere Anweisung, und
-    ``_leseplaetze`` liefert unter SQLite bewusst 1 statt 8. Der Bericht sagt
-    das dazu, statt die Zahlen fuer mehr auszugeben, als sie sind.
+    gestellte Frage nicht. Deshalb bekommt die Lastmessung eine eigene
+    PostgreSQL-Datenbank mit den Poolwerten aus ``database.py`` — jede Sitzung
+    ihre eigene Verbindung, ``pool_size`` und ``max_overflow`` als echte
+    Schranke. Damit ist die Frage "greift der Verbindungspool zuerst?"
+    ueberhaupt erst stellbar.
     """
-    pfad = ordner / "last.sqlite"
     engine = create_engine(
-        f"sqlite:///{pfad.as_posix()}",
-        connect_args={"check_same_thread": False, "timeout": 30},
+        url,
         pool_size=POOL_SIZE,
         max_overflow=POOL_MAX_OVERFLOW,
         pool_timeout=POOL_TIMEOUT,
         pool_pre_ping=True,
     )
-
-    @_sa_event.listens_for(engine, "connect")
-    def _pragmas(verbindung, _record) -> None:
-        # WAL, damit ein Leser einen Schreiber nicht aussperrt — sonst misst
-        # die Stufe die Sperrstrategie von SQLite und nicht den KI-Pfad.
-        verbindung.execute("PRAGMA journal_mode=WAL")
-        verbindung.execute("PRAGMA busy_timeout=30000")
-        verbindung.execute("PRAGMA foreign_keys=ON")
-
     _database.Base.metadata.create_all(engine)
     return engine
 
@@ -2584,20 +2561,17 @@ def _engpassbericht(stufen: list[Stufe]) -> list[str]:
         "abloest. Sie zaehlt fuer Aufgaben- und Guardian-Laeufe."
     )
     zeilen.append(
-        "  VORBEHALT: gemessen auf SQLite (Datei, WAL, eigener Pool). "
-        "PostgreSQL bringt echten Schreibnebenlauf, ein wirksames "
-        "'SELECT ... FOR UPDATE' in reserve_ai_usage und laut "
-        "ai_stream_service._leseplaetze 8 statt 1 Werkzeugplatz. Die Zahlen "
-        "hier sind eine Untergrenze fuer den Durchsatz und eine Obergrenze "
-        "fuer die Sperrkosten."
+        "  GEMESSEN auf einer eigenen PostgreSQL-Datenbank mit den Poolwerten "
+        "aus database.py (nicht auf der geteilten Verbindung der Suite)."
     )
     return zeilen
 
 
 @NUR_MIT_STUFEN
 @pytest.mark.asyncio
+@pytest.mark.echte_nebenlaeufigkeit
 async def test_ai_last_gleichzeitigkeit(
-    db: Session, monkeypatch: pytest.MonkeyPatch
+    db: Session, monkeypatch: pytest.MonkeyPatch, pg_wegwerf
 ) -> None:
     """Misst, wo der KI-Pfad unter vielen gleichzeitigen Laeufen kippt.
 
@@ -2622,8 +2596,7 @@ async def test_ai_last_gleichzeitigkeit(
     # `_lastdatenbank`), und dieselbe Sitzung fuer beides zu nehmen waere genau
     # der Fehler, den der eigene Pool vermeiden soll.
     del db
-    ordner = Path(tempfile.mkdtemp(prefix="msm-last-"))
-    lastengine = _lastdatenbank(ordner)
+    lastengine = _lastdatenbank(pg_wegwerf("last"))
     alte_bindung = _database.SessionLocal.kw.get("bind")
 
     from services import ai_model_catalog
@@ -2713,7 +2686,6 @@ async def test_ai_last_gleichzeitigkeit(
         # Datenbank, die es gleich nicht mehr gibt.
         _database.SessionLocal.configure(bind=alte_bindung)
         lastengine.dispose()
-        shutil.rmtree(ordner, ignore_errors=True)
 
     # **Erst sichern, dann darstellen** — dieselbe Lehre wie oben: eine Messung,
     # die nur im Terminal existiert, ist eine Messung, die man verlieren kann.
@@ -2731,8 +2703,8 @@ async def test_ai_last_gleichzeitigkeit(
                 "latenz_je_runde": BENCH_PARALLEL_LATENZ,
                 "auftrag": PARALLEL_AUFTRAG,
                 "datenbank": (
-                    "eigene SQLite-Datei mit WAL und den Poolwerten aus "
-                    "database.py; nicht die geteilte Speicherdatenbank der Suite"
+                    "eigene PostgreSQL-Datenbank mit den Poolwerten aus "
+                    "database.py; nicht die geteilte Verbindung der Suite"
                 ),
                 "grenzen_im_code": {
                     "ai_run_broker.MAX_KANAELE": MAX_KANAELE,
@@ -2740,9 +2712,7 @@ async def test_ai_last_gleichzeitigkeit(
                     "database.pool_size": POOL_SIZE,
                     "database.max_overflow": POOL_MAX_OVERFLOW,
                     "database.pool_timeout": POOL_TIMEOUT,
-                    "ai_stream_service._leseplaetze": (
-                        "1 unter SQLite, 8 unter PostgreSQL"
-                    ),
+                    "ai_stream_service._leseplaetze": 8,
                     "ai_limit_service.concurrent_operations": (
                         "im Chatpfad wirkungslos, da ein Benutzer eine "
                         "Unterhaltung hat und der Vorgaenger abgeloest wird"

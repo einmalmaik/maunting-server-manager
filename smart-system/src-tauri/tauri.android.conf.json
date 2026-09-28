@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "devUrl": "http://localhost:1430"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "MSS — Maunting Smart System",
+        "url": "desktop.html",
+        "resizable": true
+      }
+    ]
+  }
+}

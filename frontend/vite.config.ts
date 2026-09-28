@@ -2,10 +2,11 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 
+import { panelCsp } from './vite.csp'
 import { fontsourceWoff2Only } from './vite.fontsource'
 
 export default defineConfig({
-  plugins: [fontsourceWoff2Only(), react()],
+  plugins: [fontsourceWoff2Only(), react(), panelCsp()],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
@@ -45,17 +46,13 @@ export default defineConfig({
         entryFileNames: 'assets/[name].[hash].js',
         chunkFileNames: 'assets/[name].[hash].js',
         assetFileNames: 'assets/[name].[hash][extname]',
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
-              return 'vendor-react';
-            }
-            if (id.includes('lucide-react') || id.includes('clsx') || id.includes('tailwind-merge')) {
-              return 'vendor-ui';
-            }
-            return 'vendor-utils';
-          }
-        }
+        // Kein `manualChunks`. Die alte Regel steckte jedes nicht erkannte
+        // Paket in `vendor-utils` und alles mit „react" im Pfad in
+        // `vendor-react`. Beide lud schon die Anmeldeseite: 3,6 MB mit
+        // maplibre, livekit, argon2, CodeMirror und Markdown, obwohl die
+        // Seiten dafür per `lazy()`/`import()` nachgeladen werden. Die
+        // Standardaufteilung legt ein Paket in den Chunk der Seiten, die es
+        // wirklich importieren.
       }
     }
   },

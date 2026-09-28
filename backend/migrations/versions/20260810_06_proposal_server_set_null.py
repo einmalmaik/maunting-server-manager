@@ -24,12 +24,9 @@ Recht, `server_id` ist nur ein Bezug. Deshalb `SET NULL`: der Bezug faellt, der
 Beleg bleibt. Welcher Server gemeint war, steht weiterhin in `preview_json` — und
 dort als Name, den ein Mensch lesen kann.
 
-Zum Vorgehen: der Constraintname wird **ermittelt**, nicht geraten. Im Betrieb
-laeuft ausschliesslich PostgreSQL (`database_policy.py`), das den Namen selbst
-vergibt (`ai_action_proposals_server_id_fkey`); die Kette laeuft aber zusaetzlich
-in `tests/test_migration_chain_upgrade.py` auf SQLite, wo der Constraint namenlos
-ist und nur ueber `batch_alter_table` mit `naming_convention` angefasst werden
-kann. Vorbild fuers Inspizieren statt Annehmen: `20260730_01`.
+Zum Vorgehen: der Constraintname wird **ermittelt**, nicht geraten. PostgreSQL
+vergibt ihn selbst (`ai_action_proposals_server_id_fkey`). Vorbild fuers
+Inspizieren statt Annehmen: `20260730_01`.
 """
 
 from __future__ import annotations
@@ -48,9 +45,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 TABELLE = "ai_action_proposals"
 SPALTE = "server_id"
-# Nur fuer den namenlosen SQLite-Fall. Alembic braucht einen Namen, um einen
-# Constraint ansprechen zu koennen; unter PostgreSQL wird der echte benutzt.
-BENENNUNG = {"fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s"}
+# Nur falls die Inspektion keinen Namen findet; sonst wird der echte benutzt.
 ERSATZNAME = "fk_ai_action_proposals_server_id_servers"
 
 
@@ -63,34 +58,10 @@ def _vorhandener_name() -> str | None:
 
 
 def _umhaengen(ondelete: str) -> None:
-    """Haengt den Fremdschluessel auf ein anderes `ON DELETE` um.
-
-    Das Unterscheidungsmerkmal ist ausdruecklich der **Dialekt** und nicht, ob
-    der Constraint einen Namen hat. Ein erster Entwurf hat auf den Namen
-    verzweigt und ging beim zweiten Lauf schief: `batch_alter_table` baut die
-    Tabelle neu und vergibt dabei einen Namen aus der Benennungsregel — beim
-    naechsten Aufruf sah die Migration diesen Namen und nahm den
-    PostgreSQL-Zweig, den SQLite nicht kennt ("No support for ALTER of
-    constraints"). Der Name sagt eben nichts darueber, ob eine Datenbank
-    Constraints aendern kann; der Dialekt tut es.
-    """
-    name = _vorhandener_name()
-    if op.get_bind().dialect.name != "sqlite":
-        # PostgreSQL benennt selbst (`ai_action_proposals_server_id_fkey`) und
-        # kann den Constraint direkt austauschen.
-        op.drop_constraint(name or ERSATZNAME, TABELLE, type_="foreignkey")
-        op.create_foreign_key(
-            name or ERSATZNAME, TABELLE, "servers", [SPALTE], ["id"], ondelete=ondelete
-        )
-        return
-    # SQLite kann nur kopieren-und-umbenennen. Die Benennungsregel ist noetig,
-    # damit sich ein aus `create_all` stammender, namenloser Constraint
-    # ueberhaupt ansprechen laesst.
-    with op.batch_alter_table(TABELLE, naming_convention=BENENNUNG) as batch:
-        batch.drop_constraint(name or ERSATZNAME, type_="foreignkey")
-        batch.create_foreign_key(
-            ERSATZNAME, "servers", [SPALTE], ["id"], ondelete=ondelete
-        )
+    """Haengt den Fremdschluessel auf ein anderes `ON DELETE` um."""
+    name = _vorhandener_name() or ERSATZNAME
+    op.drop_constraint(name, TABELLE, type_="foreignkey")
+    op.create_foreign_key(name, TABELLE, "servers", [SPALTE], ["id"], ondelete=ondelete)
 
 
 def upgrade() -> None:

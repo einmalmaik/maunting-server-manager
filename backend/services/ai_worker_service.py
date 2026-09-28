@@ -149,9 +149,8 @@ def worker_start(
     # einer Welle nebenläufig auf, bis zu acht gleichzeitig und jedes in einer
     # eigenen Sitzung: zwei `worker_start` derselben Runde sähen ohne diese
     # Zeile beide denselben freien Platz und belegten ihn beide. Dieselbe
-    # Zeilensperre wie in `ai_usage_service.reserve_ai_usage` — auf PostgreSQL
-    # serialisiert sie den Abschnitt, auf SQLite ist sie wirkungslos, und dort
-    # läuft die Welle ohnehin nacheinander.
+    # Zeilensperre wie in `ai_usage_service.reserve_ai_usage` — sie
+    # serialisiert den Abschnitt.
     db.query(User.id).filter(User.id == user.id).with_for_update().one()
     deckel = ai_worker_limits.max_worker_je_benutzer()
     laufend = aktive_worker(db, user_id=user.id)
@@ -179,6 +178,9 @@ def worker_start(
                 "Gespräch oder bitte den Betreiber, einen Zugang einzurichten."
             ),
         }
+
+    # Der Auftrag behaelt den gewaehlten Anbieter. Ohne Worker-Modell
+    # verwendet der Sendepfad dessen default_model.
     if anbieter.requires_api_key and not anbieter.operator_api_key_encrypted:
         return {
             "started": False,

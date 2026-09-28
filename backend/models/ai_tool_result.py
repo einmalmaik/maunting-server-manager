@@ -19,10 +19,11 @@ in jeden folgenden Zug.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
+from models.dis_text import ai_text
 
 
 class AiToolResult(Base):
@@ -43,7 +44,7 @@ class AiToolResult(Base):
         String(36), ForeignKey("ai_runs.id", ondelete="SET NULL"), nullable=True
     )
     tool_name: Mapped[str] = mapped_column(String(64), nullable=False)
-    result_json: Mapped[str] = mapped_column(Text, nullable=False)
+    result_json: Mapped[str] = mapped_column(ai_text("ai_tool_results.result_json"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

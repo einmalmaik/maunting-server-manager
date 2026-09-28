@@ -11,7 +11,7 @@ viele Nodes:
 
 | Rolle | Enthält | Benötigt das vollständige Repository? |
 | --- | --- | --- |
-| Panel/Control Plane | Backend, DIS-Sidecar, Panel-PostgreSQL, Frontend und lokaler Agent | Nein, das Panel-Release enthält nur die benötigten Projektteile. |
+| Panel/Control Plane | Backend, DIS-Sidecar, LiveKit-Sidecar, Panel-PostgreSQL, Frontend und lokaler Agent | Nein, das Panel-Release enthält nur die benötigten Projektteile. |
 | Separates Frontend | Fertig gebautes statisches Vite-Bundle | Nein, `msm-frontend-<VERSION>.tar.gz` genügt. |
 | Remote-Node | Agent, Rootless Docker, TLS und node-eigene Serverdaten | Nein, der Node lädt sein Agent-Paket direkt vom Panel. |
 
@@ -65,9 +65,10 @@ Datenbanken. Er erzeugt ein neues Passwort, überträgt es ausschließlich über
 `stdin` an PostgreSQL und schreibt es anschließend in die geschützte `.env`.
 Abweichende oder fremde PostgreSQL-Zustände werden nicht verändert.
 
-PostgreSQL ist die einzige unterstützte Panel-Runtime-Datenbank. SQLite-Code im
-Installer dient ausschließlich dazu, bestehende Altinstallationen einmalig und
-geprüft nach PostgreSQL zu migrieren; neue SQLite-Installationen gibt es nicht.
+PostgreSQL ist die einzige unterstützte Panel-Runtime-Datenbank. SQLite wird nicht
+unterstützt: Installer und Update brechen bei einer SQLite-Konfiguration ab. Eine
+Altinstallation auf SQLite muss zuerst mit einer älteren MSM-Version nach
+PostgreSQL umziehen.
 
 ## Getrennte GitHub-Release-Artefakte
 
@@ -146,7 +147,9 @@ Was die App zum Betrieb braucht:
   Zwischenablage, Protected Client aktiv) bereitgestellt.
 - **Autonomie-Freigabefluss**: Bei deaktiviertem autonomen Modus lehnt die KI Werkzeugaufrufe
   nicht textuell ab, sondern erzeugt standardisierte Bestätigungskarten (`AiActionProposalCard`)
-  mit dem passenden `proposal_type` (`read`, `worker`, `write`).
+  mit dem passenden `proposal_type` (`read`, `worker`, `write`). Löschen auf dem Rechner
+  (`desktop_aufraeumen`, `desktop_dateien` mit `loeschen`) zeigt die Karte in der App auch im
+  autonomen Modus.
 - **Discord Rich Presence (RPC, optional)**: Die App meldet bei geöffnetem Discord den Status lokal über die Windows-Pipe (`\\.\pipe\discord-ipc-0`). Eigene Application-IDs und Statustexte können in der Konfigurationsdatei (`konfig.json`) über `"discord_client_id"`, `"discord_details"` und `"discord_state"` hinterlegt oder mit `"discord_rpc_aktiv": false` deaktiviert werden.
 - Panelseitig müssen `tauri://localhost`, `http://tauri.localhost` und
   `https://tauri.localhost` als Origins erlaubt sein. Das ist in
@@ -156,9 +159,12 @@ Was die App zum Betrieb braucht:
   nicht hinterlegt und muss bei Bedarf über `MSM_CORS_ALLOWED_ORIGINS` dazu.
 
 **Anmelden geht nur über Kopplung.** Die App kennt weder Passwort noch
-2FA-Code. Wer angemeldet ist, öffnet im Panel **Profil → KI → Geräte koppeln**,
-erzeugt dort einen Code (zwölf Zeichen, zehn Minuten, genau einmal einlösbar)
-und trägt ihn in der App ein. Der Grund ist nicht Bequemlichkeit: bei
+2FA-Code. Wer angemeldet ist, öffnet im Panel **Profil → Geräte → Geräte koppeln**,
+bestätigt dort mit dem Passwort (bei aktiver 2FA mit dem aktuellen 2FA-Code),
+erzeugt einen Code (zwölf Zeichen, zehn Minuten, genau einmal einlösbar)
+und trägt ihn in der App ein. Die Bestätigung ist nötig, weil ein gekoppeltes
+Gerät dauerhaft angemeldet bleibt: ein abgegriffenes Access-Token allein
+reicht damit nicht, um ein eigenes Gerät an das Konto zu hängen. Der Grund ist nicht Bequemlichkeit: bei
 aktiviertem Captcha verlangt `/api/auth/login` einen Turnstile-Token, und ein
 Captcha-Widget in einem Tauri-Fenster scheitert daran, dass Cloudflare-Schlüssel
 an Domains gebunden sind. Passwort, 2FA und Captcha bleiben damit vollständig
@@ -167,9 +173,28 @@ im Browser.
 In der Datenbank steht nur der SHA-256 des Codes. Gekoppelte Geräte stehen
 unter demselben Punkt im Profil; **Zugang entziehen** widerruft die
 Refresh-Familie genau dieses Geräts und lässt alle anderen Sitzungen laufen.
-Das gerade gültige Access-Token bleibt bis zu seinem Ablauf brauchbar —
-dieselbe Regel wie überall sonst, ein Widerruf wirkt spätestens beim nächsten
-Erneuern.
+Der Widerruf wirkt sofort: Anfragen mit dem Access-Token des Geräts werden
+abgelehnt, seine offenen Echtzeitverbindungen getrennt und seine
+Push-Zustelladressen gelöscht.
+
+**Der Messenger-Verlauf zieht über dieselbe Kopplung mit.** Ein frisch
+gekoppeltes Gerät hat keine Ratchet-Sitzungen und holt vom Server nichts
+Zurückliegendes: die Umschläge in der Mailbox sind gegen andere Geräte
+versiegelt. Es bekommt den Verlauf deshalb vom bereits eingerichteten Gerät.
+Der Ablauf läuft ohne Zutun: die App veröffentlicht nach dem Einlösen ihren
+Geräteschlüssel, das Panel sieht ihn im Status des Codes, versiegelt seinen
+lokalen Verlauf dagegen und legt ihn unter dem Code ab
+(`PUT /api/auth/devices/pairing/{code}/verlauf`); die App holt ihn einmal ab,
+der Server löscht ihn dabei. Ungeholt stirbt der Blob mit dem Code, spätestens
+nach zehn Minuten.
+
+Der Server reicht dabei nur durch — er kann den Blob nicht öffnen, und der
+Betreiber auch nicht. **Schlüssel wandern nicht mit:** übertragen wird der
+gelesene Verlauf, nicht die Fähigkeit, ihn zu lesen. Jedes Gerät behält sein
+eigenes Paar. Übergeben werden je Gespräch die jüngsten Nachrichten, begrenzt
+auf 25 MB; ist mehr da, bleibt das Älteste zurück. Schlägt der Umzug fehl,
+beginnt das neue Gerät mit einem leeren Verlauf — die Kopplung selbst steht
+davon unberührt.
 
 **Die Oberfläche der App ist die des Panels.** Seit dem 21.08.2026 gibt es
 keine zweite Chat-Implementierung mehr: die App rendert dieselbe KI-Seite wie
@@ -225,7 +250,16 @@ Die Kosten: 63 Dateien, rund 660 KB im Build. Ein Aufruf zieht davon nur, was
 `unicode-range` verlangt — eine deutschsprachige Oberfläche lädt zehn Dateien
 mit zusammen etwa 200 KB, eine russische zusätzlich die kyrillischen Schnitte.
 Die Caddy-Site liefert `/assets/*` mit `max-age=31536000, immutable` aus; ein
-Besucher lädt sie damit einmal pro Release, nicht einmal pro Seitenaufruf.
+Besucher lädt sie damit einmal pro Release, nicht einmal pro Seitenaufruf. Ein
+fehlender Chunk bleibt dort ein 404. Die Seite selbst (`/`, jede `.html` und
+jede Unterseite, die auf die `index.html` fällt) trägt `no-cache, no-store`,
+alles andere im `dist` (Icons, Manifest, Erdtextur) einen Tag. Das gilt seit
+09/2026. Vorher setzte die Site gar keinen Cache-Kopf. Ein Browser durfte eine
+alte `index.html` dann nach eigener Schätzung weiterverwenden, und einen
+fehlenden Chunk beantwortete Caddy mit der `index.html`: Die Oberfläche konnte
+nach einem Update leer bleiben. `update.sh` schreibt die Site nicht neu,
+sondern meldet eine ohne diese Regeln. `install.sh` erneut auszuführen behält
+die vorhandenen Werte und schreibt die Site neu.
 
 Prüfen lässt sich das am gebauten Frontend. Die Ausgabe muss leer bleiben:
 
@@ -233,23 +267,29 @@ Prüfen lässt sich das am gebauten Frontend. Die Ausgabe muss leer bleiben:
 grep -rl "fonts.googleapis.com\|fonts.gstatic.com" frontend/dist/
 ```
 
-Was das **nicht** heißt: der Browser spricht deshalb mit niemandem sonst. Drei
-Ausnahmen bleiben, und alle drei sind sichtbar:
+Was das **nicht** heißt: der Browser spricht deshalb mit niemandem sonst. Externe
+Verbindungen existieren nur dort, wo sie technisch unvermeidbar oder bewusst vom
+Betreiber aktiviert sind:
 
 - Das **Support-Widget** (Crisp, Tawk.to oder Singra) lädt ein fremdes Skript,
   sobald ein Betreiber es unter *Einstellungen → Support-Widget* einschaltet.
   Ohne diese Einstellung wird nichts geladen; die erlaubten Herkünfte stehen im
   Code und in der CSP, nicht in einem Eingabefeld.
-- Die **Versionsanzeige** fragt `api.github.com` nach dem neuesten Release —
-  aus dem Browser, ohne Einstellung und auch auf der Loginseite, also bevor
-  jemand angemeldet ist. Wer das nicht möchte, gehört mit dieser Information in
-  die eigene Datenschutzerklärung.
-- **KI und Sprachmodus** reden mit OpenRouter, OpenAI, ElevenLabs oder Azure,
-  sobald ein Betreiber Zugänge hinterlegt. Bei Azure ist die Gegenstelle
-  `https://<deine-ressource>.services.ai.azure.com` — der einzige Fall, in dem
-  ein Stück der Zieladresse aus einer Einstellung kommt und nicht aus dem Code.
-  Was dabei übertragen wird, steht unter *Was an den Anbieter geht* weiter
-  unten.
+- Die **Detailkarte** (MapTiler / MapLibre) lädt Kartenkacheln nur dann im
+  Browser nach, wenn der Betreiber optional einen eigenen origin-beschränkten
+  MapTiler-Browser-Key hinterlegt hat. Ohne Key bleibt die Ansicht lokal.
+- Die **Versionsanzeige** fragt ausschließlich das eigene Backend
+  (`/api/system/version`) ab. Der Browser spricht niemals mit GitHub; eventuelle
+  Versionsprüfungen und Release-Caches laufen rein serverseitig.
+- **KI, Websuche und Umgebungssignale** (OpenAI, Anthropic, TomTom, Open-Meteo,
+  Copernicus, Brave Search etc.) laufen ausnahmslos über das Backend. Drittanbieter
+  sehen ausschließlich die IP-Adresse des Servers, niemals die des Endnutzers.
+- Das **Bild einer Regionsanalyse** (Sentinel-2-Vorschau oder das schlüsselfreie
+  ArcGIS-Kartenbild, auch jeder Ausschnitt, auf den die Kamera ohne MapTiler
+  zoomt) holt ebenfalls das Backend (`/api/ai/geo/image`); der
+  Browser lädt es von dort. Einen Link zum Anbieter gibt es weder zum
+  Kartenbild noch zu einer Szene; der Browser spricht nie selbst mit Esri,
+  Copernicus oder CREODIAS.
 
 ## Bestehende All-in-one-Installation aufteilen
 
@@ -387,6 +427,7 @@ bewusste Sicherheitsgrenze.
 - Frontend: `frontend/.env.example`
 - Agent/Node: `msm-agent/.env.example`
 - DIS-Sidecar: `dis-sidecar/.env.example`
+- LiveKit-Sidecar (Messenger-Anrufe): `livekit-sidecar/.env.example`
 
 Jede Vorlage erklärt Status, Zweck, Herkunft und Format aller Betreiberwerte.
 Automatisch erzeugte `.env`-Dateien dürfen niemals committed werden.
@@ -429,6 +470,170 @@ Bei einer All-in-one-Installation sind beide identisch. Cookies werden ohne
 manuellen Override aus `MSM_API_URL` abgeleitet, weil nur der API-Host sie setzen
 darf. `MSM_LOCAL_AGENT_ENABLED=false` wird auf einer migrierten Backend-only-
 Control-Plane automatisch gesetzt; Betreiber müssen dafür keinen Token kopieren.
+
+## Verschlüsselung der Datenbank nach dem Update
+
+Seit dem 26.09.2026 stehen die Inhalte der KI (Chats, Titel, Zusammenfassungen,
+Werkzeugergebnisse, Aufträge, Meldungen, Berichtsmails, Gedächtnisnamen) nur
+noch verschlüsselt in der Datenbank. Jeder DIS-Wert beginnt mit `msm-dis-v1:`.
+Die Migrationen tragen den Präfix für bestehende Geheimnisse nach; Klartext kann
+nur der DIS-Sidecar verschlüsseln, deshalb geschieht das beim ersten Start.
+
+Was beim ersten Start nach dem Update passiert, im Hintergrund:
+
+1. Alter Klartext in den betroffenen Spalten wird verschlüsselt
+   (`services/dis_altbestand.py`). Das Panel ist dabei nutzbar.
+2. Gedächtnisnamen bekommen Chiffrat und Suchindex.
+3. Auf PostgreSQL läuft danach `VACUUM FULL` auf diesen Tabellen. Ohne diesen
+   Schritt stünde der alte Klartext weiter in den Datenbankdateien, als
+   überholte Zeilenversion. `VACUUM FULL` sperrt die jeweilige Tabelle,
+   solange es sie neu schreibt; bei großem Chatverlauf kann der Chat dafür
+   kurz stehen. Bekommt es die Sperre nicht binnen 10 Sekunden, wird es beim
+   nächsten Start wiederholt. Danach läuft es nur noch, wenn wieder Klartext
+   gefunden wurde, etwa nach dem Einspielen eines alten Backups.
+
+Was kein Update erreicht: **Backups und Dumps von vor dem Update** enthalten
+den Chatverlauf weiter im Klartext, ebenso archivierte WAL-Dateien. Das gilt
+auch für den Dump, den `update.sh` vor genau diesem Update in
+`/opt/msm/backups` ablegt. Die müssen Betreiber selbst löschen oder ersetzen,
+sobald das neue Panel läuft. Kalender und Notizen bekommen den
+Präfix erst beim nächsten Speichern, weil dort E2EE-, DIS- und alte
+Klartextwerte nebeneinander liegen.
+
+## PostgreSQL-Datenbanken und das Studio
+
+Datenbanken verwaltest du im **PostgreSQL-Studio**. Es steht an zwei Stellen:
+
+- am Server im Reiter **Datenbanken**, für die Datenbanken dieses Servers;
+- auf der Seite **Panel-Datenbank** (`/panel-database`), für die Datenbank des
+  Panels selbst.
+
+Andere Datenbanken erreicht es nicht. Eine Verbindung zu einem beliebigen Host
+gibt es nicht, und der Agent nimmt als Ziel nur den gemeinsamen Cluster auf
+`127.0.0.1:15432` oder einen Datenbankcontainer seines eigenen Nodes an.
+
+### Drei Arten von Datenbank
+
+| Art | Was sie ist | Was im Studio fehlt |
+|---|---|---|
+| Gemeinsamer Cluster | Datenbanken eines Spiel- oder Anwendungsservers im `msm-postgres` des Nodes (`postgres_database_count`). Jede hat eine eigene Eigentümerrolle ohne Superuser-Rechte; `CONNECT` ist für `PUBLIC` entzogen. | Rollen, Instanz-Einstellungen, nicht vertrauenswürdige (*untrusted*) Erweiterungen, Rechte an Rollen anderer Server |
+| Eigener Datenbankserver | Eigene PostgreSQL-Instanz (`server_kind: "database"`), Container `msm-srv-<id>` | – |
+| Panel-Datenbank | Die Datenbank aus `MSM_DATABASE_URL`. Das Backend verbindet sich selbst, ohne Agent. | Strukturdialoge, Sicherung, Verbindung, Instanz; Rollen und Erweiterungen nur zur Ansicht |
+
+### Rechte
+
+| Recht | Erlaubt |
+|---|---|
+| `server.databases.read` | Struktur ansehen, Zeilen lesen, Export, Zustand, SQL-Vorschau von Dialogen |
+| `server.databases.write` | Zeilen anlegen, ändern, löschen, importieren; `VACUUM`, `ANALYZE`, `REINDEX`, `REFRESH MATERIALIZED VIEW` |
+| `server.databases.admin` | SQL-Editor, `EXPLAIN`, Strukturänderungen, `VACUUM FULL`, Sitzungen und Sperren, Parameter, Dump und Wiederherstellung, Datenbanken und Benutzer anlegen, Passwörter abrufen |
+| `panel.database.read` | Panel-Datenbank lesen |
+| `panel.database.admin` | Panel-Datenbank ändern: Zeilen, SQL, Wartung, Sitzungen beenden |
+
+Der Owner des Panels hat alle Rechte. Die Serverrechte können auch über
+Freigaben am Server oder über Teams kommen.
+
+### Was geht
+
+- **Daten:** Zeilen blättern (25 bis 500 je Seite), filtern, sortieren,
+  anlegen, ändern und löschen. Löschen fragt nach. Ohne Primärschlüssel dient
+  die physische Zeilenkennung (`ctid`) als Schlüssel. Views, materialisierte
+  Views und Tabellen, die keinen Schlüssel haben können (partitionierte oder
+  Fremdtabellen ohne Primärschlüssel), ändert nur SQL.
+- **Import** aus CSV (Trennzeichen `,` oder `;`) oder JSON, **Export** als CSV,
+  JSON oder SQL-`INSERT`s.
+- **Struktur** über Dialoge: Schemas, Tabellen, Spalten, Schlüssel, Indizes
+  (auch `CONCURRENTLY`), Views, Sequenzen, Enums, Partitionen, Funktionen
+  (plpgsql, sql), Trigger, Rechte und Row-Level-Security. Jeder Dialog zeigt
+  vorher genau das SQL, das laufen wird, und ob es Daten entfernt. Eine
+  Tabelle oder View wird erst gelöscht, wenn ihr Name eingetippt ist.
+- **SQL-Editor** mit drei Arten: in einer Transaktion (alles oder nichts),
+  **Nur testen** (läuft und wird zurückgerollt) oder **Ohne Transaktion**
+  (bricht beim ersten Fehler ab, Vorheriges bleibt). `VACUUM` und andere
+  Befehle, die keine Transaktion vertragen, laufen nur ohne. `EXPLAIN` zeigt den
+  Plan; `EXPLAIN ANALYZE` führt die Abfrage aus und rollt sie zurück.
+- **Überwachung:** Trefferquoten, Tabellen mit vielen toten Zeilen, ungenutzte
+  Indizes; mit Admin-Recht Sitzungen und Sperren, Abbrechen und Beenden von
+  Sitzungen der eigenen Datenbank.
+- **Sicherung** (nur Serverdatenbanken): Dump als SQL, Custom oder Tar, auf
+  Wunsch nur Struktur oder nur Daten und nur ausgewählte Schemas oder Tabellen.
+  Wiederherstellen erst nach Eingabe des Datenbanknamens, in einer einzigen
+  Transaktion.
+- **Verbindung** (nur Serverdatenbanken): Adressen, SSL, erlaubte Netze,
+  Beispielcode, Anwendungsbenutzer anlegen und löschen, Passwörter abrufen.
+  Jeder Abruf eines Passworts steht im Audit-Log.
+- Am **eigenen Datenbankserver** zusätzlich: Rollen anlegen, ändern und
+  löschen, Erweiterungen aus dem ganzen Angebot der Instanz und
+  Instanz-Parameter (`ALTER SYSTEM`, danach `pg_reload_conf()`). Parameter, die
+  einen Neustart brauchen, werden als ausstehend markiert und wirken erst nach
+  dem nächsten Neustart des Servers.
+
+### Was nicht geht
+
+- **Kein Superuser.** Alles, was ein Mensch im SQL-Editor schreibt, läuft als
+  Eigentümer der Datenbank. Deshalb scheitern `COPY … TO/FROM` mit Datei oder
+  `PROGRAM`, `lo_import`/`lo_export` auf dem Server, `ALTER SYSTEM`,
+  nicht vertrauenswürdige Sprachen und Erweiterungen an PostgreSQL selbst.
+  Als Instanz-Admin laufen nur fest übersetzte Schritte: Rollen, Parameter und
+  Erweiterungen am eigenen Datenbankserver, die Anzeige von Sitzungen und
+  Sperren sowie der Dump. Die Wiederherstellung läuft als Eigentümer.
+- **Keine Superuser- oder Replikationsrolle.** Rollen haben dafür kein Feld.
+  `msm_admin` und die vom Panel verwalteten Rollen ändert das Studio nicht;
+  Namen mit `pg_` oder `msm_` sind reserviert. Mitgliedschaft in
+  Systemrollen nur aus einer festen Liste, also nie `pg_read_server_files`,
+  `pg_write_server_files` oder `pg_execute_server_program`.
+- **Gesperrte Parameter:** Archiv- und Wiederherstellungsbefehle,
+  vorgeladene Bibliotheken und Bibliothekspfade, Konfigurations- und
+  Datenpfade, Port, Adressen und Sockets, Logpfade, `password_encryption`,
+  `ssl` samt `ssl_*` und `primary_conninfo`.
+- **Keine Abfrage über Datenbanken hinweg.** PostgreSQL kennt sie nicht, und
+  `dblink` oder `postgres_fdw` sind im gemeinsamen Cluster nicht installierbar.
+- **Keine Struktur und keine Sicherung für die Panel-Datenbank** über die
+  Dialoge. Die Struktur legen die Alembic-Migrationen fest, gesichert wird über
+  *Panel-Backups*.
+
+### Grenzen
+
+| Was | Grenze |
+|---|---|
+| Laufzeit einer Anweisung | 5 s (`MSM_MANAGED_POSTGRES_STATEMENT_TIMEOUT_MS`, 100 bis 600.000 ms) |
+| SQL-Editor | 1.000.000 Zeichen, 200 Anweisungen je Lauf, 500 Zeilen je Ergebnis |
+| Import | 5.000 Zeilen je Block. Größere Dateien gehen in mehreren Blöcken, **jeder in eigener Transaktion**: scheitert Block 3, bleiben 1 und 2 stehen. |
+| Export | 200.000 Zeilen. Ohne Schlüssel oder Sortierung nur die erste Seite (5.000 Zeilen). |
+| Wiederherstellung | rund 210 MB; SQL-Dumps nur in UTF-8 und ohne psql-Metabefehle (`\…`) |
+| Erlaubte Netze | 50 Einträge je Datenbankserver |
+| SQL-Verlauf | die letzten 30 Abfragen je Datenbank im Browser, an das Konto gebunden, beim Abmelden gelöscht |
+
+### Die Panel-Datenbank
+
+Mit `panel.database.admin` läuft der SQL-Editor als Datenbankbenutzer des
+Panels (`msm`) **mit allen seinen Rechten**. Anders als die Dialoge kann er
+Tabellen und Spalten ändern und löschen, ohne Rückfrage. Eine Änderung an
+der Struktur, die keine Migration kennt, bricht das nächste Update. Dieses
+Recht gehört nur Menschen, die das Panel betreiben.
+
+Verschlüsselte Spalten zeigt das Studio so, wie sie gespeichert sind: als
+`msm-dis-v1:…`. Das gilt für KI-Inhalte, Geheimnisse und Datenbankpasswörter,
+auch im Export und im SQL-Ergebnis. Ein solcher Wert ist an seine Tabelle und
+Spalte gebunden. In eine andere Spalte kopiert, lässt er sich nicht mehr
+entschlüsseln, und ein beschädigter Wert führt beim Lesen zu Fehlern.
+Klartext, der in eine verschlüsselte Spalte geschrieben wird, verschlüsselt das
+Panel beim nächsten Start.
+
+### Audit-Log
+
+Immer protokolliert, ohne SQL-Text: Strukturänderungen
+(`postgres.studio.execute`), beendete und abgebrochene Sitzungen, Dump,
+Wiederherstellung sowie Einspielen und Verwerfen ausstehender Dumps.
+
+| | Zeilen ändern | SQL-Editor | Lesen und Export |
+|---|---|---|---|
+| Panel-Datenbank | ja | ja (Zahl der Anweisungen) | nein |
+| Serverdatenbank, von Hand | nein | nein | nein |
+| Serverdatenbank, durch die KI | ja (`via: ai`) | ja (`via: ai`) | nein |
+
+Die KI arbeitet nur mit Serverdatenbanken, nie mit der Panel-Datenbank (siehe
+[Datenbanken: Datenbankserver und PostgreSQL-Studio](#datenbanken-datenbankserver-und-postgresql-studio)).
 
 ## SaaS-Hosting-Betrieb: Node-Härtung, Secret-Rotation, Admin-Monitoring
 
@@ -480,7 +685,8 @@ Antwort und Audit enthalten **nie** das Passwort.
 Privilegierte Aktionen schreiben in `audit_logs` (wer / wann / action / Ziel,
 Details ohne Secrets):
 
-- `postgres.admin.rotate`, `postgres.database.*`, `postgres.user.*`, `postgres.power_user.*`, `postgres.dump`, `postgres.restore`
+- `postgres.admin.rotate`, `postgres.database.*`, `postgres.user.*`, `postgres.power_user.*`, `postgres.credential.reveal`, `postgres.instance.*`
+- PostgreSQL-Studio: `postgres.studio.execute` (Strukturänderung, ohne SQL im Eintrag), `postgres.studio.dump`, `postgres.studio.restore`, `postgres.studio.restore_pending`, `postgres.studio.discard_pending`, `postgres.studio.session_*`; Änderungen der KI zusätzlich `postgres.studio.rows_*` und `postgres.studio.sql` mit `via: ai`; an der Panel-Datenbank (`target_type: panel_database`) alle Änderungen, auch Zeilen und SQL. Zeilen und SQL, die ein Mensch an einer Serverdatenbank ändert, stehen nicht im Log, Lesen und Export an keiner Datenbank (siehe [Audit-Log des Studios](#audit-log))
 - `nodes.token.update`, `nodes.enrollment.approve`
 
 **Im Panel:** Administration → **Audit** (`/admin/audit`, Permission `system.audit.read`).  
@@ -757,6 +963,62 @@ Klick im Panel und eine Shop-Bestellung. Blueprintprüfung, Kapazität, Portverg
 Installation und Rollback sind identisch — es gibt bewusst keinen zweiten Weg,
 einen Server anzulegen.
 
+### Datenbanken: Datenbankserver und PostgreSQL-Studio
+
+Die KI legt auch **Datenbankserver** an (`propose_server_create` mit
+`server_kind: "database"`): eine eigene PostgreSQL-Instanz mit denselben
+Feldern wie im Anlegedialog — Datenbankname, Master-Benutzer, erlaubte Netze
+(leer: nur intern), SSL-Pflicht und Port. Dafür braucht der Benutzer zusätzlich
+zu `servers.create` das Recht `servers.create.database`; `provision_server`
+prüft es für Panel, KI und Shop an einer Stelle. **Ein Passwort nimmt die KI
+nie entgegen** und gibt keines aus: das Panel erzeugt es, abrufbar im Reiter
+*Verbindung*. Braucht nur ein Spielserver ein paar Datenbanken, nimmt sie
+`postgres_database_count` am Anwendungsserver (gemeinsamer Cluster).
+
+In einer Datenbank kann die KI, was das Studio kann — über dieselben
+Funktionen, nicht über eine zweite Umsetzung:
+
+- **`read_database`** liest wie die Studio-Reiter: Übersicht, Objekte eines
+  Schemas (Tabellen, Views, Funktionen, Trigger, Sequenzen, Typen), Tabelle,
+  Zeilen, Funktionsquelltext, Erweiterungen, Rollen, Rechte, Zustand;
+  Parameter, Sitzungen und Sperren nur mit `server.databases.admin`. Gehirn
+  und Worker dürfen lesen.
+- **`propose_database_change`** schreibt — **nur der Worker**, das Gehirn
+  delegiert. Genau eine von drei Formen: eine Studio-*Operation* (Tabelle,
+  Index, View, Funktion, Trigger, Erweiterung, Rechte, Rolle, Parameter,
+  Wartung — kompiliert von `postgres_ddl` wie die SQL-Vorschau im Studio),
+  Zeilen wie im Daten-Grid, oder freies SQL wie im SQL-Editor.
+
+Das Recht kommt wie im Studio aus dem Plan: Strukturänderungen, `VACUUM FULL`
+und freies SQL verlangen `server.databases.admin`, Zeilen und die übrige
+Wartung `server.databases.write`.
+Eine Operation wird schon beim Vorschlag **geprobt** — derselbe Plan läuft in
+einer Transaktion, die verworfen wird. Ein kaputter Funktionskörper, eine
+fehlende Triggerfunktion oder eine im gemeinsamen Cluster nicht erlaubte
+Erweiterung scheitern damit am Vorschlag, mit der PostgreSQL-Meldung, und nicht
+nach dem Klick. Freies SQL wird nicht geprobt: es liefe vor der Bestätigung.
+Die Karte zeigt das SQL, das laufen wird. **Immer gefragt** wird, auch im
+autonomen Modus, bei allem, was Daten entfernt (Löschen von Tabellen, Spalten,
+Funktionen, Erweiterungen, Zeilen) und bei freiem SQL. Ein Rollenpasswort nimmt
+die KI nicht an; das setzt der Benutzer im Studio.
+
+Spiel- und Anwendungsserver haben **dasselbe Studio** wie ein Datenbankserver.
+Im gemeinsamen Cluster fehlen nur die Teile, die andere Kunden träfen: Rollen
+und Instanz-Einstellungen, und Erweiterungen gibt es dort nur, wenn PostgreSQL
+sie als *trusted* führt (der Owner installiert sie, kein Superuser).
+
+Auch die **Panel-Datenbank** (Seite *Panel-Datenbank*) öffnet dieses Studio,
+über `/api/panel/database/studio` statt über den Agent: das Backend verbindet
+sich selbst mit `MSM_DATABASE_URL`. Lesen braucht `panel.database.read`;
+Zeilen bearbeiten, SQL, Wartung (VACUUM, ANALYZE, REINDEX) und Sitzungen
+beenden brauchen `panel.database.admin`. Die Dialoge ändern hier weder
+Tabellen, Spalten, Rechte, Rollen noch Erweiterungen — die Struktur legen die
+Alembic-Migrationen fest. Der SQL-Editor dagegen läuft mit allen Rechten des
+Panel-Benutzers und kann auch das (siehe [Die Panel-Datenbank](#die-panel-datenbank)).
+Gesichert wird über *Panel-Backups*, nicht im Studio. Jede Änderung landet im
+Audit-Log, SQL ohne seinen Text; Lesen und Export nicht. Die KI-Werkzeuge
+erreichen die Panel-Datenbank nicht.
+
 ### Was die KI an einem Blueprint ändern kann
 
 Änderbar ist eine **bewusst kurze Liste** von Punktpfaden (`AENDERBARE_PFADE` in
@@ -803,14 +1065,16 @@ einer Karte. Führt die Quelle Profile, weist der Dienst eine Änderung an
 Das Recht ist `blueprints.manage`, und es ist panelweit: wer keine Blueprints
 verwalten darf, kommt an diesen Weg nicht heran. Wirksam wird eine so geänderte
 Vorlage außerdem erst, wenn ein Server auf ihr liegt — entweder weil er neu
-darauf angelegt wird, oder über `propose_server_blueprint_switch`, und der
-wischt das Serververzeichnis und will bestätigt werden.
+darauf angelegt wird, oder über `propose_server_blueprint_switch`. Der wischt
+das Serververzeichnis nach einem Pflicht-Backup und will ohne autonomen Modus
+bestätigt werden.
 
 ### Autonomer Modus
 
 Standard ist der unterstützte Modus: die KI analysiert, schlägt vor, wartet. Gemäß dem Grundsatz **„Sicherheit braucht Vertrauen“ / „Schutz braucht Vertrauen“** gilt:
 - **Autonomie-Modus AUS (Standard):** Jede Handlung und jedes Werkzeug der KI (ausnahmslos: Lesewerkzeuge wie `read_server_status`, `web_search`, das Deklarieren von Hintergrund-Workern `worker_start` sowie Schreib- und Verwaltungswerkzeuge) erfordert eine manuelle Bestätigung durch den Benutzer über eine Bestätigungskarte (mit „Bestätigen“ und „Ablehnen“).
-- **Autonomie-Modus AN:** Die KI darf Werkzeuge eigenständig und ohne Bestätigung im Chat und Hintergrund ausführen (ausgenommen unumkehrbare Löschvorgänge).
+- **Autonomie-Modus AN:** Die KI darf Werkzeuge eigenständig und ohne Bestätigung im Chat und Hintergrund ausführen. Nachgefragt wird nur noch, wo ein Fehler den Server, seine Daten oder fremde Rechte trifft: Server löschen, zurücksetzen oder neu installieren, Dateien löschen, Backup einspielen, Blueprint oder Rolle löschen, Rechte anderer Benutzer entziehen oder kritisch bzw. global vergeben, Shop-Anbindung, Shop-Produkte, Tarif-Rolle und neue Zugangsdaten. Eigene Notizen, Termine, Aufgaben, DNS-Einträge, Erinnerungen und Skills löscht die KI ohne Rückfrage, ebenso auf dem eigenen Rechner (dort geht Gelöschtes in den Papierkorb). Eine Rolle anlegen oder eine Rolle ändern, die noch niemand trägt, fragt nicht, auch mit kritischen Rechten; gefragt wird, wenn sie einem Benutzer zugewiesen wird. Trägt sie schon jemand, fragt ihre Änderung wie eine Vergabe an diese Benutzer. Das gilt im Chat, in der Stimme, in Hintergrund-Workern und auf dem Rechner.
+- **Bestätigt wird immer per Klick auf die Karte**, im Chat wie in der Sprachansicht; ein gesprochenes „Ja" führt nichts aus, ein „Nein" lehnt ab. Die Sprachansicht zeigt jede offene Karte, auch die eines Hintergrund-Workers. Im Worker-Fenster sind Karten nur zu sehen.
 - **Hintergrund-Aufgaben & Guardian-Heilung:** Geplante Aufgaben (`ai_tasks`) und automatische Guardian-Reparaturläufe können im Hintergrund nur dann eigenständig arbeiten, wenn der Autonomie-Modus für den betreffenden Benutzer bzw. Server aktiv freigegeben ist.
 
 Autonomie verlangt **vier** Bedingungen gleichzeitig:
@@ -823,23 +1087,41 @@ Autonomie verlangt **vier** Bedingungen gleichzeitig:
    im Code `ALWAYS_CONFIRM_TOOLS` (`services/ai_tool_registry.py`) und ist dort
    keine eigene Aufzählung, sondern die Ableitung aus der Spalte
    `immer_bestaetigen` der Werkzeugtabelle. Gebaut und gesperrt sind heute:
-   `propose_server_delete`, `propose_blueprint_delete`, `propose_backup_restore`,
-   `propose_hoster_integration`, `propose_hoster_product` und
-   `propose_ai_tarif_role`. Dazu kommen vier Namen aus dem Zielbild, die es noch
-   nicht gibt und die vorsorglich gesperrt sind, damit ein künftiges Werkzeug
-   sich einordnen muss statt stillschweigend autonomiefähig zu sein:
-   `propose_server_wipe`, `propose_server_reinstall`,
-   `propose_permission_change` und `propose_secret_rotation`.
 
-   Das Kriterium ist **Unumkehrbarkeit, nicht Risiko** — ausdrückliche Vorgabe
-   des Betreibers, und sie ersetzt eine frühere Einteilung nach „das klingt
-   heikel". Was die KI selbst wieder zurückstellen kann, darf sie autonom tun;
-   was Daten vernichtet, die niemand zurückholt, fragt immer. Deshalb steht der
-   Blueprint-*Wechsel* trotz seiner Reichweite nicht auf der Liste (er legt
-   zwingend ein Backup an, bevor er etwas anfasst), das Blueprint-*Löschen*
-   dagegen schon: `unlink` ohne Schnappschuss. Die Rechte- und
-   Schlüsselwerkzeuge stehen aus einem anderen Grund darauf — sie wirken auf die
-   Grenzen, innerhalb derer die KI selbst arbeitet;
+   - **Server und seine Daten**: `propose_server_delete`,
+     `propose_blueprint_delete`, `propose_file_delete` und
+     `propose_backup_restore`;
+   - **Rollen löschen**: `propose_role_delete`;
+   - **der Rahmen der KI**: `propose_hoster_integration`,
+     `propose_hoster_product` und `propose_ai_tarif_role`. Sie ändern Rechte
+     oder erzeugen Schlüssel, also die Grenzen, innerhalb derer die KI selbst
+     arbeitet.
+
+   Dazu kommen drei Namen aus dem Zielbild, die es noch nicht gibt und die
+   vorsorglich gesperrt sind, damit ein künftiges Werkzeug sich einordnen muss
+   statt stillschweigend autonomiefähig zu sein: `propose_server_wipe`,
+   `propose_server_reinstall` und `propose_secret_rotation`. Die Rechte
+   anderer Benutzer (`propose_user_server_permission`, `propose_user_roles`)
+   fragen je nach Aufruf: autonom läuft nur, was ausschließlich unkritische
+   Serverrechte hinzufügt. Die Desktop-Werkzeuge tragen die Spalte nicht; auf
+   dem eigenen Rechner entscheidet allein die Freigabe.
+
+   Das Kriterium ist die Vorgabe des Betreibers vom 25.09.2026: „autonomer
+   Modus bedeutet ja, dass er autonom arbeiten soll". Vom 23. bis 25.09.2026
+   fragte jedes Löschen, nachdem das Modell dem Betreiber im autonomen Modus
+   fast einen Discord-Bot gelöscht hätte. Seitdem fragt nur noch, was den
+   Server, seine Daten oder fremde Rechte trifft; die eigenen Daten des
+   Benutzers (`EIGENE_DATEN_LOESCHEN`) löscht die KI mit Freigabe selbst. Ein
+   neues Löschwerkzeug muss in eine der beiden Mengen, sonst schlägt
+   `test_jedes_loeschwerkzeug_ist_entschieden` an. Was nur heikel klingt,
+   fragt nicht. Der Blueprint-*Wechsel* steht nicht auf der Liste, obwohl er das
+   Serververzeichnis leert: der Betreiber hat ihn am 02.09.2026 ausdrücklich
+   für den autonomen Modus freigegeben, und er legt vorher zwingend ein Backup
+   an.
+
+   Ein unbeaufsichtigter Lauf (Guardian-Heilung, geplante Aufgabe), der etwas
+   von dieser Liste will, fragt per E-Mail. Ohne hinterlegte Adresse endet er,
+   statt zu warten;
 4. freies Stundenbudget (Standard 10 Aktionen). Ist es erschöpft, **schlägt
    nichts fehl** — die KI fragt einfach wieder nach.
 
@@ -917,11 +1199,11 @@ angefasst — auch dann nicht, wenn der Lauf nur an seinem Rundenbudget endete.
   (`server.config.write`). Nimmt der Agent die Konfiguration nicht an, wird die
   Übersteuerung zurückgerollt — sonst hinge die Synchronisation dieses Servers
   dauerhaft in einem gespeicherten Fehler.
-- **Blueprints ableiten ja, wechseln nur mit Zustimmung.** Eine Ableitung legt
-  eine neue Datei an und rührt keinen Server an. Der *Wechsel* eines Servers auf
-  einen anderen Blueprint löscht dagegen das gesamte Serververzeichnis — Welt,
-  Konfigurationen, Mods — und installiert frisch; er verlangt deshalb immer eine
-  menschliche Bestätigung.
+- **Blueprints ableiten ja, wechseln nicht.** Eine Ableitung legt eine neue
+  Datei an und rührt keinen Server an. Den *Wechsel* eines Servers auf einen
+  anderen Blueprint kann eine Heilung gar nicht vorschlagen: er löscht das
+  gesamte Serververzeichnis — Welt, Konfigurationen, Mods — und installiert
+  frisch. Er steht nur im Chat zur Verfügung.
 - **Vor jedem schreibenden Eingriff muss ein Backup nachgewiesen sein.** Nicht
   „angestoßen", sondern nachgewiesen: `backups.verified_at` ist gesetzt, das
   Archiv ist nicht leer, seine sha256 wurde gerechnet, und es ist jünger als der
@@ -939,8 +1221,9 @@ angefasst — auch dann nicht, wenn der Lauf nur an seinem Rundenbudget endete.
   „behoben" steht nur dort, wenn die Anlage es zeigt.
 - **Bestätigungspflichtige Schritte fragen per E-Mail**, statt den Lauf zu
   beenden. Trifft eine Reparatur auf etwas, das der autonome Modus nie ohne
-  Klick tut — Serverlöschung, Wipe, Neuinstallation, Blueprint-Wechsel,
-  Backup-Wiederherstellung —, geht ein Freigabelink an den Freigeber; der Lauf
+  Klick tut — in einer Heilung ist das seit dem 23.09.2026 das Löschen einer
+  Datei (`propose_file_delete`), wie jedes Löschen —, geht ein Freigabelink an
+  den Freigeber; der Lauf
   parkt und wird geweckt, sobald entschieden wurde. Der Link zeigt eine Seite
   (`GET`), entschieden wird per `POST` von dort: Mailscanner klicken Links. Er
   gilt 24 Stunden, lässt sich genau einmal verwenden, und **umgeht keine
@@ -1336,16 +1619,39 @@ notiert.
 
 ### Bestätigen per Stimme
 
-Soll etwas geändert werden, entsteht **derselbe Vorschlag wie im Chat** — hier
-aber als Kasten ohne Knopf, der nur den Namen der Aktion nennt. Entschieden wird
-gesprochen: die KI sagt, was sie vorhat, und fragt nach. Ein klares „Ja" führt
-aus, ein klares „Nein" lässt es.
+Es gilt dieselbe Regel wie im Chat (Betreiberentscheid vom 23.09.2026):
+
+- **Autonomer Modus aus:** jedes Werkzeug fragt vorher, auch das blosse
+  Nachsehen wie Wetter oder Dokumentation.
+- **Autonomer Modus an:** nichts fragt, **ausser Löschvorgängen**. Sie fragen
+  immer.
+
+Soll etwas geschehen, entsteht **derselbe Vorschlag wie im Chat** — hier als
+Kasten, der den Namen der Aktion nennt. Entschieden wird gesprochen: die KI sagt,
+was sie vorhat, und fragt nach. Ein klares „Ja" führt aus, ein klares „Nein"
+lässt es.
+
+**Ein Löschen bestätigt nur der Klick.** Der Kasten bekommt dann die Knöpfe
+„Ausführen" und „Ablehnen", und ein gesprochenes Ja führt nichts aus; die KI
+sagt das auch so. Der Grund: ein „Ja" stellt das Sprachmodell fest, und das kann
+es auch aus einer Webseite, einer Mail oder einer Logzeile „gehört" haben. Der
+Knopf geht denselben Weg wie „Ausführen" auf der Karte im Chat. Dasselbe gilt
+für das Einspielen eines Backups und die Hoster- und Tarifwerkzeuge: alles, was
+in der Registry `immer_bestaetigen` trägt.
+
+**Ein Ja gilt genau einem Vorschlag**, dem zuletzt gezeigten. Legt die KI
+mehrere auf einmal vor, verfallen die übrigen in der Stimme, sobald über diesen
+einen entschieden ist, auf jedem Sprachweg. Die KI sagt das an; bestätigen
+lassen sie sich auf ihrer Karte im Chat. So trifft auch ein doppelt geschicktes
+Ja oder das Ja zum Wiederholen einer gescheiterten Aktion nie einen Vorschlag,
+nach dem niemand gefragt hat. Wer einen Löschkasten per Knopf erledigt und
+danach noch „ja" sagt, hört, dass es schon erledigt ist.
 
 „Klar" heisst hier wörtlich: die Äusserung muss **nichts als** eine Zustimmung
 sein. „Ja, aber schau vorher nochmal in die Logs" ist keine — das ist ein neuer
 Auftrag, und als Zustimmung gelesen täte die KI das Gegenteil des Gesagten.
 
-Das gesprochene Ja ersetzt genau einen Schritt: den Klick. Alles andere bleibt —
+Wo es gilt, ersetzt das gesprochene Ja genau einen Schritt: den Klick. Alles andere bleibt —
 die Rechte werden beim Bestätigen erneut geprüft, beim Ausführen ein drittes
 Mal, der Einmal-Token wird atomar entwertet, der Server-Mutex greift, das Audit
 vermerkt den Vorgang.
@@ -1359,11 +1665,15 @@ vermerkt den Vorgang.
 
 Hier stand bis zum 16.08.2026, dass Löschen, Backup-Restore sowie Schlüssel und
 Rollen per Stimme **nicht** bestätigbar sind — mit der Begründung, eine
-gesprochene Zustimmung sei schwächer als ein Klick. Der Betreiber hat das
-ausdrücklich anders entschieden: er will „lösch den Server" sagen, „ist das in
-Ordnung?" hören und „ja" antworten können. Die Einschränkung ist deshalb
-entfallen. Das Restrisiko bleibt beschreibbar und steht hier: im Audit steht
-danach eine gesprochene Zustimmung, und wer im Raum mithört, kann sie
+gesprochene Zustimmung sei schwächer als ein Klick. Der Betreiber hat das damals
+anders entschieden: er wollte „lösch den Server" sagen, „ist das in Ordnung?"
+hören und „ja" antworten können. Am 23.09.2026 hat er es zurückgenommen, nachdem
+im autonomen Modus beinahe sein Discord-Bot gelöscht worden wäre, weil das
+Modell einen Löschvorgang aus Versehen angestossen hatte. Seitdem bestätigt ein
+Löschen wieder nur der Klick, in jedem Kanal.
+
+Das Restrisiko der übrigen Aktionen bleibt beschreibbar und steht hier: im Audit
+steht danach eine gesprochene Zustimmung, und wer im Raum mithört, kann sie
 aussprechen. Wem das zu weit geht, nimmt `ai.voice.use` aus der Rolle.
 
 **Rückfragen** funktionieren wie im Chat — dieselbe Logik, andere Ausgabe: statt
@@ -1482,13 +1792,277 @@ WebSocket-Upgrades unter `/api/` durchlassen — das tut er bereits für die
 Server-Konsole.
 
 **Permissions-Policy am Reverse-Proxy:** Die von `install.sh` erzeugte
-Caddy-Site setzt `microphone=(self)` — die eigene Herkunft darf ans Mikrofon,
-fremde iframes nicht. Installationen von vor dem 22.08.2026 tragen noch
-`microphone=()`: damit blockiert der Browser `getUserMedia` vollständig
-(es erscheint nicht einmal eine Freigabefrage, der Sprachmodus meldet nur
-einen Verbindungsfehler). Wer nicht neu installieren will, ändert die Zeile
-in der eigenen Caddy-Site von Hand auf `microphone=(self)` und lädt Caddy neu
-(`systemctl reload caddy`).
+Caddy-Site setzt `microphone=(self)`, `camera=(self)` und
+`display-capture=(self)` — die eigene Herkunft darf ans Mikrofon, an die Kamera
+und an die Bildschirmaufnahme, fremde iframes nicht. Installationen von vor dem
+22.08.2026 tragen noch `microphone=()`, ältere als das Anruf-Update zusätzlich
+`camera=()`: damit blockiert der Browser `getUserMedia` bzw. `getDisplayMedia`
+vollständig — es erscheint nicht einmal eine Freigabefrage, der Sprachmodus
+meldet nur einen Verbindungsfehler und die Kamera im Messenger lässt sich nicht
+einschalten. Wer nicht neu installieren will, ändert die Zeile in der eigenen
+Caddy-Site von Hand und lädt Caddy neu (`systemctl reload caddy`).
+
+---
+
+## Messenger: Sprach-, Video- und Gruppenanrufe
+
+Anrufe im Messenger laufen über einen Medienserver (LiveKit). Er nimmt die
+Ströme entgegen und verteilt sie an die übrigen Teilnehmer, statt jedes Paar
+direkt zu verbinden. Das ist der Grund für den Umbau: eine direkte Verbindung
+hängt am NAT beider Gegenstellen und scheiterte in der Praxis zu oft; ein
+Gruppenanruf mit acht Personen bräuchte bei jedem Teilnehmer sieben getrennte
+Verbindungen.
+
+**Der Ton bleibt dabei verschlüsselt.** Der Raumschlüssel entsteht im Browser
+des Anrufenden und wird gegen den veröffentlichten Schlüssel jedes Teilnehmers
+verpackt zugestellt. Der Medienserver leitet weiter, was er nicht öffnen kann.
+Was er sehr wohl sieht, steht weiter unten unter *Was der Betreiber sieht*.
+
+### Integriert oder extern
+
+Die Auswahl liegt im Panel unter **Einstellungen → Messenger**.
+
+| | Integriert (Standard) | Externer Server |
+| --- | --- | --- |
+| Wo er läuft | `livekit-sidecar` auf dem Panel-Server | LiveKit Cloud oder eine eigene Installation |
+| Einrichtung | keine, `install.sh` erledigt sie | Adresse, API-Key und API-Secret eintragen |
+| Erreichbarkeit | über Caddy unter `/livekit` | direkt beim Anbieter |
+| Wer die Raumdaten hält | der eigene Server | der Anbieter |
+
+Der Knopf **Verbindung testen** prüft die eingetippten Werte, ohne sie zu
+speichern: ein falsches Geheimnis erreicht die Datenbank gar nicht erst. Bleiben
+Schlüssel oder Geheimnis leer, gilt der bereits gespeicherte Stand — die
+Oberfläche zeigt beide nur maskiert und schickt sie nie zurück.
+
+Das API-Secret liegt DIS-verschlüsselt in den Panel-Einstellungen und verlässt
+den Prozess nie im Klartext.
+
+### Ports und Firewall
+
+`install.sh` öffnet sie mit; bei einer Firewall vor dem Server müssen sie von
+Hand nach:
+
+| Port | Protokoll | Wofür |
+| --- | --- | --- |
+| 7880 | TCP, nur `127.0.0.1` | Signalisierung, von Caddy unter `/livekit` durchgereicht |
+| 7881 | TCP | Medien-Rückfall, wenn UDP blockiert ist |
+| 7882 | UDP | Medien (ein einziger Mux-Port) |
+
+Ein einzelner UDP-Port statt des bei LiveKit üblichen Bereichs 50000–60000:
+MSM betreibt Docker rootless, und rootless Docker veröffentlicht große
+Portbereiche nicht sinnvoll. Ist 7882/UDP zu, funktionieren Anrufe weiterhin
+über 7881/TCP, mit etwas mehr Verzögerung.
+
+Die Ports dürfen auf dem Host nicht schon belegt sein, etwa durch einen zweiten
+LiveKit aus einem anderen Projekt. Dann scheitert der Container beim Start mit
+`slirp_add_hostfwd failed`. `install.sh` und `update.sh` fragen nach dem Start
+`127.0.0.1:7880` ab und melden „bereit“ erst, wenn er antwortet. Antwortet er
+nicht, nennt der Lauf die Prozesse, die auf 7880 bis 7882 lauschen. Die Units
+starten den Container mit `--force-recreate` jedes Mal frisch. Ohne das startete
+ein zweiter Versuch den liegengebliebenen Container ohne Ports, und systemd
+meldete trotzdem „Started“.
+
+Der Reverse-Proxy braucht `handle_path /livekit/*` auf `localhost:7880` und
+muss dort WebSocket-Upgrades durchlassen. Die von `install.sh` erzeugte
+Caddy-Site tut das bereits.
+
+**Bestehende Installationen:** `update.sh` richtet Sidecar, Schlüssel und
+systemd-Dienst ein, fasst die Caddy-Site aber nicht an — sie gehört
+`install.sh`. Fehlt die Weiterleitung, sagt der Updatelauf das und nennt die
+Zeile. Sie gehört neben `handle /ws/*` in `/etc/caddy/conf.d/msm.caddy`
+(je nach Installation `msm.conf`):
+
+```
+handle_path /livekit/* {
+    reverse_proxy localhost:7880
+}
+```
+
+Danach `systemctl reload caddy`. Ohne diese Zeile läuft der Sidecar, aber kein
+Browser erreicht ihn, und Anrufe scheitern mit einem Verbindungsfehler.
+
+### Adresse für die Medien
+
+Der Sidecar muss Anrufern sagen, unter welcher IPv4-Adresse sie 7881 und 7882
+erreichen. Im Container kennt er sie nicht. `install.sh` und `update.sh`
+lösen deshalb auf dem Host die Panel-Domain auf (`MSM_LIVEKIT_URL`, sonst
+`MSM_API_URL`, sonst `MSM_PANEL_URL`) und schreiben das Ergebnis als
+`NODE_IP` in `livekit-sidecar/.env`. Das erledigt
+`livekit-sidecar/medienadresse.py`.
+
+LiveKits eigene Ermittlung per STUN (`use_external_ip`) ist aus. Sie fragt bei
+jedem Start einen Google-Server und bricht den Start ab, wenn der Container
+keinen Namen auflösen kann. Unter rootless Docker zeigt die Namensauflösung im
+Container auf `127.0.0.53`, das es dort nicht gibt. Im Journal steht dann
+`could not resolve external IP`, und der Container startet im Minutentakt neu,
+während `systemctl status msm-livekit` weiter `active` meldet.
+
+Zeigt die Domain nicht auf den Server selbst, etwa hinter einem CDN, gehört die
+richtige Adresse in die Backend-`.env`:
+
+```
+MSM_LIVEKIT_NODE_IP="203.0.113.10"
+```
+
+Danach `update.sh` erneut ausführen. Findet der Lauf gar keine Adresse, warnt
+er: Anrufe verbinden dann, aber es kommt kein Ton an.
+
+### Schlüssel des integrierten Sidecars
+
+`install.sh` erzeugt bei der ersten Installation ein Paar und schreibt es an
+zwei Stellen, die zusammenpassen müssen:
+
+- `livekit-sidecar/.env` als `LIVEKIT_KEYS="<key>: <secret>"`
+- die Backend-`.env` als `MSM_LIVEKIT_API_KEY` und `MSM_LIVEKIT_API_SECRET`
+
+Eine Neuinstallation über eine bestehende Installation behält vorhandene Werte.
+Wer sie von Hand rotiert, muss beide Dateien ändern und
+`systemctl restart msm-livekit msm-backend` ausführen — sonst weist der
+Medienserver jedes Token ab und Anrufe brechen sofort ab.
+
+Der Dienst heißt `msm-livekit.service` und wird wie die übrigen Sidecars von
+systemd gestartet.
+
+### Was der Betreiber sieht
+
+Ehrlich gesagt, weil es gegenüber dem früheren blinden Rendezvous ein
+Rückschritt ist: der Medienserver kennt **Räume, Teilnehmerkennungen und
+Zeiten**. Er weiß, dass `u12` und `u47` um 21:40 Uhr vierzig Minuten lang im
+selben Raum waren. Gesprächsinhalte kennt er nicht.
+
+Im integrierten Modus bleiben diese Metadaten auf dem eigenen Server. Im
+externen Modus liegen sie beim Anbieter. Das ist der eigentliche Unterschied
+zwischen den beiden Optionen und der Grund, warum der integrierte Modus der
+Standard ist.
+
+In der Datenbank landet davon nichts: MSM führt keinen Anrufverlauf, keine
+Dauer und keine Gegenstelle. Die Raumzuordnung lebt im Prozess und ist nach dem
+Auflegen weg.
+
+Eine Ausnahme gibt es: eine Moderationshandlung im Gruppenanruf schreibt einen
+Eintrag ins Prüfprotokoll (`social.call.mute`, `social.call.unmute`,
+`social.call.kick`). Er nennt den Handelnden, den Betroffenen und die Gruppe —
+nicht den Raum und nichts Gesprochenes. Wer anderen das Wort nehmen kann, soll
+dafür nachvollziehbar sein.
+
+### Rechte im Gruppenanruf
+
+Fünf Gruppenrechte steuern, wer was darf. Sie stehen im Rechte-Dialog einer
+Gruppe unter „Standardrechte" und je Rolle:
+
+| Recht | Wirkung |
+| --- | --- |
+| `start_group_calls` | Öffnet einen Gruppenanruf und darf ihn für alle beenden |
+| `join_group_calls` | Tritt bei. Ohne dieses Recht bleibt ein laufender Anruf unsichtbar |
+| `share_screen` | Gibt einen Bildschirm frei |
+| `mute_in_calls` | Nimmt anderen im Anruf das Mikrofon |
+| `kick_from_calls` | Wirft andere aus dem Anruf |
+
+Eigentümer und Administratoren haben alle fünf ohne Eintrag — sie könnten sie
+sich ohnehin jederzeit selbst geben.
+
+Zwei Regeln, die dem Verhalten von Discord folgen und bewusst so gewählt sind:
+
+- **Serverstumm hebt nur die Moderation auf.** Der Entzug wirkt am Medienserver
+  über die erlaubten Quellen des Teilnehmers, nicht in dessen Browser. Kamera
+  und Bildschirmfreigabe bleiben ihm — ein Wortentzug bricht keine laufende
+  Präsentation ab.
+- **Ein Rauswurf ist kein Ausschluss.** Die Gruppenmitgliedschaft bleibt
+  bestehen; wer `join_group_calls` hat, kann sofort wiederkommen. Dauerhaft
+  ausschließen lässt sich nur über die Gruppenrechte.
+
+Gegen den Eigentümer greift keine der beiden Handlungen, und gegen einen
+Administrator nur der Eigentümer — dieselbe Rangregel wie beim Entfernen aus
+der Gruppe.
+
+Ältere Installationen haben unter Umständen `call_start`, `call_join`,
+`call_share` oder `call_moderate` gespeichert. Diese Namen werden beim Lesen
+übersetzt (`call_moderate` ergibt `mute_in_calls` **und** `kick_from_calls`);
+eine Datenmigration ist nicht nötig. Gespeichert wird ab sofort nur noch das
+neue Vokabular, und ein unbekannter Name wird mit HTTP 422 abgewiesen, statt
+wirkungslos in der Datenbank zu landen.
+
+### Grenzen
+
+- **Die Verschlüsselung schließt Browser aus.** Sie braucht Insertable Streams;
+  wo der Browser das nicht kann, lehnt MSM den Anruf mit einer Meldung ab,
+  statt unverschlüsselt weiterzulaufen. Chrome, Edge und aktuelle Firefox-
+  Versionen können es.
+- **Systemton bei der Bildschirmfreigabe** gibt es nur in Chromium-Browsern.
+  Der Auswahldialog sagt das, statt eine Möglichkeit anzubieten, die nichts
+  liefert.
+- **2K mit 60 Bildern** ist der teuerste Pfad, weil jedes Einzelbild durch die
+  Verschlüsselung läuft. Ruckelt es beim Gegenüber, sind 1080p oder 30 Bilder
+  die bessere Wahl.
+- Ein Gruppenraum fasst 16 Teilnehmer.
+
+---
+
+## Benachrichtigungen bei geschlossener Anwendung
+
+Solange ein Fenster offen ist, meldet sich das Panel selbst: das Ereignis kommt
+über den Social-WebSocket, und die Oberfläche erzeugt die Meldung. Dafür ist
+nichts einzurichten.
+
+Ist die Anwendung geschlossen, geht dieser Weg nicht mehr. Dann bleibt nur
+WebPush: der Browser hat eine Zustelladresse beim Push-Dienst seines
+Herstellers, und das Panel schickt dorthin.
+
+### Was der Betreiber einrichten muss
+
+Nichts. Das VAPID-Schlüsselpaar entsteht beim ersten Gebrauch und liegt in
+`panel_settings` (`webpush_vapid_public` im Klartext, weil es öffentlich ist;
+`webpush_vapid_private_encrypted` über DIS verschlüsselt). Es gibt keinen
+Installationsschritt und keine Environment-Variable.
+
+Eine Abhängigkeit besteht trotzdem: **`MSM_PANEL_URL` muss stimmen.** Die
+Adresse steht als Absenderangabe (`sub`) im VAPID-Token, das RFC 8292
+vorschreibt. Sie ist ohnehin fail-fast-geprüft, falls sie in Produktion auf dem
+Vorgabewert steht.
+
+### Was hinausgeht und was nicht
+
+| Wer | Sieht |
+| --- | --- |
+| Push-Dienst (Google, Mozilla, Apple) | Dass diese Zustelladresse zu diesem Zeitpunkt etwas bekommen hat. Sonst nichts. |
+| Browser des Empfängers | „Neue Nachricht". Kein Text, kein Absendername. |
+
+Der Körper ist nach RFC 8291 gegen den öffentlichen Schlüssel des Empfängers
+verschlüsselt; der Push-Dienst leitet weiter, was er nicht öffnen kann. Darüber
+hinaus streicht `NotificationService.sanitize_push_payload` jeden Inhalt schon
+vor dem Verschlüsseln — Text, Chiffrat, Schlüssel und Anhänge kommen nicht
+einmal in den verschlüsselten Körper. Die zweite Schranke ist Absicht: sie hält
+auch dann, wenn an der ersten etwas schiefgeht.
+
+Nicht wegzubauen ist der Zeitpunkt. Dass eine bestimmte Adresse jetzt etwas
+bekommen hat, erfährt der Push-Dienst zwangsläufig; das steht deshalb so in der
+Datenschutzerklärung.
+
+### Wann nichts hinausgeht
+
+- Der Schalter „Gerätebenachrichtigungen" im Profil steht auf aus. Er wirkt für
+  beide Wege, nicht nur für die Anzeige im offenen Fenster.
+- Ein Fenster ist im Vordergrund. Geprüft wird das zweimal — vor dem Absenden
+  und noch einmal im Service Worker, weil der Benutzer zwischen beidem den Tab
+  öffnen kann.
+- Die Nachricht ist ein Steuersignal (Lese- oder Zustellbestätigung, Tippen).
+- Der Empfänger ist zugleich der Absender.
+
+### Grenzen
+
+- **Eine Zustelladresse gehört einem Browser, nicht einem Konto.** Meldet sich
+  in einem geteilten Browser ein anderes Konto an, übernimmt es die Adresse.
+  Andernfalls bekäme der neue Benutzer die Benachrichtigungen des vorherigen.
+- **Abmelden trägt die Adresse aus.** Wer den Browser wegwirft, ohne sich
+  abzumelden, hinterlässt eine Zeile; sie verschwindet, sobald der Push-Dienst
+  sie beim nächsten Versuch mit 404 oder 410 für tot erklärt.
+- **Eine Störung des Push-Dienstes löscht nichts.** Eine 500 oder ein
+  Netzwerkaussetzer sagen nichts über das Abonnement aus. Nur 404 und 410 tun
+  das.
+- **Zurückgehalten wird eine Stunde** (`TTL`). Wer länger offline war, liest die
+  Nachricht beim Öffnen im Verlauf.
+- **Der Tauri-Desktop und die Android-App brauchen das nicht.** Sie melden über
+  ihren eigenen Weg und laufen gar nicht erst durch den Service Worker.
 
 ---
 
@@ -1515,6 +2089,20 @@ Zwei Punkte, die man nicht ändern sollte, ohne die Folgen zu kennen:
   Zustellung der Hintergrund-Aufträge verliert dadurch bei einem Neustart
   nichts — Meldungen stehen in der Datenbank, die Oberfläche pollt und lädt
   die persistierte Chat-Nachricht nach; nur das Live-Zusehen reisst kurz ab.
+
+Ohne Caddy davor liefert das Panel die Oberfläche selbst aus. Jede Unterseite
+wie `/ai` oder ein Freigabelink aus einer Mail bekommt dann die `index.html`,
+sofern der Browser eine Seite anfragt (`Accept: text/html`). Ein fehlendes
+Bild oder Skript bleibt 404, ebenso alles unter `/api/`, `/ws/` und
+`/assets/`. Bis 09/2026 endete dort jedes Neuladen einer Unterseite in 404.
+Die Cache-Köpfe setzt dann ebenfalls das Panel: `/assets/*` ein Jahr
+`immutable`, HTML `no-cache, no-store`, übrige Dateien einen Tag.
+API-Antworten tragen in jeder Installationsart `no-store`, sofern eine Route
+nichts anderes setzt, ebenso jeder Fehler. Ein vorgeschalteter Cache oder ein
+CDN darf sie also nicht speichern. Bis 09/2026 stand dort `public,
+max-age=86400`, auch für `/api/auth/me` und jede 401 — und `public` erlaubt
+einem geteilten Cache ausdrücklich, die Antwort auf eine angemeldete Anfrage
+anderen auszuliefern.
 
 ---
 

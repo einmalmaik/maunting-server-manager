@@ -25,6 +25,9 @@ from services.stream_crypto import (
 
 logger = logging.getLogger(__name__)
 
+# Datenverzeichnis einer eigenen PostgreSQL-Instanz (Blueprint ``postgres``).
+INSTANCE_DATA_DIR = "pgdata"
+
 
 class AgentBackupError(Exception):
     def __init__(self, message: str, status_code: int = 500) -> None:
@@ -86,16 +89,27 @@ def create_encrypted_s3_backup(
 
         postgres_dumps: dict[str, str] = {}
         if postgres:
-            from services.postgres_service import dump_databases
+            from services.postgres_service import dump_databases, ziel
 
-            postgres_dumps = dump_databases(
-                admin_password=str(postgres.get("admin_password") or ""),
-                database_names=list(postgres.get("database_names") or []),
-            )
+            with ziel(postgres.get("target")):
+                postgres_dumps = dump_databases(
+                    admin_password=str(postgres.get("admin_password") or ""),
+                    database_names=list(postgres.get("database_names") or []),
+                )
 
         # Full tree plus node-local managed PostgreSQL dumps.
+        # Datenbankserver: das Datenverzeichnis ihrer laufenden Instanz waere als
+        # Dateikopie nicht konsistent. Es bleibt draussen; die Daten stecken im
+        # Dump daneben.
+        own_instance = bool(postgres and postgres.get("target"))
+
+        def ohne_pgdata(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
+            # Path("./pgdata").parts == ("pgdata",); ein ausgelassenes
+            # Verzeichnis nimmt seinen Inhalt mit.
+            return None if Path(info.name).parts[:1] == (INSTANCE_DATA_DIR,) else info
+
         with tarfile.open(tar_path, "w:gz") as tar:
-            tar.add(str(root), arcname=".")
+            tar.add(str(root), arcname=".", filter=ohne_pgdata if own_instance else None)
             for database_name, sql_text in postgres_dumps.items():
                 import io
 
@@ -204,10 +218,17 @@ def restore_encrypted_s3_backup(
     tar_path = os.path.join(tmp_dir, "backup.tar.gz")
     backup_old = root.parent / f"{root.name}_pre_restore"
 
+    own_instance = bool(postgres and postgres.get("target"))
+
     def rollback_files() -> None:
         if not backup_old.exists():
             return
         try:
+            # Das Datenverzeichnis wurde fuer den Restore nach vorn geholt; es
+            # muss zurueck, bevor der halbe neue Stand geloescht wird.
+            moved = root / INSTANCE_DATA_DIR
+            if own_instance and moved.is_dir() and not (backup_old / INSTANCE_DATA_DIR).exists():
+                shutil.move(str(moved), str(backup_old / INSTANCE_DATA_DIR))
             if root.exists():
                 shutil.rmtree(root)
             shutil.move(str(backup_old), str(root))
@@ -238,6 +259,11 @@ def restore_encrypted_s3_backup(
             shutil.move(str(root), str(backup_old))
         root.mkdir(parents=True, exist_ok=True)
 
+        if own_instance and (backup_old / INSTANCE_DATA_DIR).is_dir():
+            # Das Backup enthaelt kein Datenverzeichnis (siehe oben) — das
+            # vorhandene bleibt, sonst stuende die Instanz danach leer da.
+            shutil.move(str(backup_old / INSTANCE_DATA_DIR), str(root / INSTANCE_DATA_DIR))
+
         with tarfile.open(tar_path, "r:gz") as tar:
             # Safe extract: refuse absolute paths / path escape
             for member in tar.getmembers():
@@ -249,7 +275,9 @@ def restore_encrypted_s3_backup(
             else:
                 tar.extractall(path=str(root))
 
-        if postgres:
+        # Eine eigene Instanz ist waehrend des Restores gestoppt: ihre Dumps
+        # bleiben unter .msm/postgres/ liegen und werden im Studio eingespielt.
+        if postgres and not own_instance:
             dump_dir = root / ".msm" / "postgres"
             dumps = (
                 {
@@ -261,13 +289,14 @@ def restore_encrypted_s3_backup(
                 else {}
             )
             if dumps:
-                from services.postgres_service import restore_sql
+                from services.postgres_service import restore_sql, ziel
 
-                restore_sql(
-                    admin_password=str(postgres.get("admin_password") or ""),
-                    dumps=dumps,
-                    owners=dict(postgres.get("owners") or {}),
-                )
+                with ziel(postgres.get("target")):
+                    restore_sql(
+                        admin_password=str(postgres.get("admin_password") or ""),
+                        dumps=dumps,
+                        owners=dict(postgres.get("owners") or {}),
+                    )
             shutil.rmtree(dump_dir, ignore_errors=True)
 
         # cleanup pre_restore on success

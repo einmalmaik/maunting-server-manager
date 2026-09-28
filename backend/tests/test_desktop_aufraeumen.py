@@ -9,7 +9,9 @@ gefragt werden?" **im Panel** entsteht und nirgends sonst:
 1. Das Modell kann sie nicht setzen. Schickt es `autonom` oder `systembereich`
    in den Werkzeugargumenten mit, fliegen sie raus — sonst waere es eine
    Selbstermaechtigung, die genau einmal funktionieren muesste.
-2. Ohne Autonomiefreigabe ist die Antwort `False`, mit Freigabe `True`.
+2. Ohne Autonomiefreigabe ist die Antwort `False`, mit Freigabe `True` —
+   auch beim Loeschen. Vom 23. bis 25.09.2026 blieb sie dort `False`, bis der
+   Betreiber das fuer den eigenen Rechner zuruecknahm.
 3. Der Systembereich kommt aus dem Konto, nicht aus dem Aufruf.
 4. Ein Auftrag, der auf einen Menschen warten kann, bekommt die lange Frist —
    und seit dem Zusammenlegen von `desktop_takeover_control` in
@@ -71,13 +73,38 @@ class TestDasModellSetztSichNichtSelbstFrei:
         assert argumente["grund"] == "Aufraeumen"
 
     def test_mit_freigabe_steht_autonom_auf_wahr(self, db: Session, regular_user: User):
+        """Mit Freigabe laeuft auf dem Rechner ohne Karte, was nichts loescht."""
         _mit_autonomie(db, regular_user)
-        argumente = _desktop_argumente(
-            db,
-            user_id=regular_user.id,
-            call=_aufruf("desktop_aufraeumen", {"aktion": "papierkorb", "grund": "x"}),
-        )
-        assert argumente["autonom"] is True
+        for name, werkzeugargumente in (
+            ("desktop_dateien", {"aktion": "verschieben", "pfad": "a.txt", "ziel": "b.txt"}),
+            ("desktop_dateien", {"aktion": "schreiben", "pfad": "a.txt", "inhalt": "x"}),
+            ("desktop_system", {"aktion": "verzeichnis", "pfad": "C:\\"}),
+        ):
+            argumente = _desktop_argumente(
+                db, user_id=regular_user.id, call=_aufruf(name, werkzeugargumente)
+            )
+            assert argumente["autonom"] is True, (name, werkzeugargumente["aktion"])
+
+    def test_loeschen_laeuft_mit_freigabe_ohne_karte(self, db: Session, regular_user: User):
+        """Die Vorgabe vom 25.09.2026: auf dem eigenen Rechner fragt nichts mehr.
+
+        Vom 23.09.2026 an fragte das Loeschen hier auch mit Freigabe ("alles
+        automatisch ausser Loeschvorgaenge"). Zwei Tage spaeter hat der
+        Betreiber die Ausnahme auf Server und Rechte beschraenkt; Geloeschtes
+        geht auf dem Rechner ohnehin in den Papierkorb. Die Gegenprobe ohne
+        Freigabe steht in `test_mitgeschicktes_autonom_wird_verworfen`.
+        """
+        _mit_autonomie(db, regular_user)
+        for name, werkzeugargumente in (
+            ("desktop_aufraeumen", {"aktion": "papierkorb", "grund": "x"}),
+            ("desktop_aufraeumen", {"aktion": "endgueltig", "grund": "x"}),
+            ("desktop_aufraeumen", {"aktion": "papierkorb_leeren", "grund": "x"}),
+            ("desktop_dateien", {"aktion": "loeschen", "pfad": "a.txt"}),
+        ):
+            argumente = _desktop_argumente(
+                db, user_id=regular_user.id, call=_aufruf(name, werkzeugargumente)
+            )
+            assert argumente["autonom"] is True, (name, werkzeugargumente["aktion"])
 
     def test_der_systembereich_kommt_aus_dem_konto(self, db: Session, regular_user: User):
         regular_user.ai_desktop_systembereich = "schreiben"
@@ -250,3 +277,53 @@ class TestKlickenFolgtDemAutonomenModus:
         assert desktop_job_service._wartet_auf_menschen(
             "desktop_steuern", {"aktion": "freigabe", "autonom": False}
         )
+
+
+class TestDasBildNachDemHandgriff:
+    """Die App schickt nach jedem Klick gleich ein Bildschirmfoto mit.
+
+    Das spart eine Runde beim Anbieter je Handgriff (rund drei Sekunden).
+    Ob ein Bild mitkommt, entscheidet das Panel: ein Modell, das keine Bilder
+    lesen kann, bekaeme sonst eines in den Verlauf, das der Anbieter abweist.
+    """
+
+    def test_ein_sehendes_modell_bekommt_das_bild(self, db: Session, regular_user: User):
+        for sieht in (True, None):  # None heisst "unbekannt" — dann faehrt es mit
+            argumente = _desktop_argumente(
+                db,
+                user_id=regular_user.id,
+                call=_aufruf("desktop_steuern", {"aktion": "klick", "x": 1, "y": 1}),
+                sieht=sieht,
+            )
+            assert argumente["bild"] is True
+
+    def test_ein_blindes_modell_bekommt_keines(self, db: Session, regular_user: User):
+        argumente = _desktop_argumente(
+            db,
+            user_id=regular_user.id,
+            call=_aufruf("desktop_steuern", {"aktion": "klick", "bild": True}),
+            sieht=False,
+        )
+        # Auch nicht, wenn das Modell selbst eines verlangt.
+        assert argumente["bild"] is False
+
+    def test_andere_werkzeuge_bekommen_kein_bildfeld(self, db: Session, regular_user: User):
+        argumente = _desktop_argumente(
+            db,
+            user_id=regular_user.id,
+            call=_aufruf("desktop_system", {"aktion": "laufwerke", "bild": True}),
+            sieht=True,
+        )
+        assert "bild" not in argumente
+
+    def test_eine_folge_steht_im_katalog(self):
+        from services.ai_tools.system_tools import _desktop_tool_definitions
+
+        steuern = next(
+            eintrag["function"]
+            for eintrag in _desktop_tool_definitions()
+            if eintrag["function"]["name"] == "desktop_steuern"
+        )
+        felder = steuern["parameters"]["properties"]
+        assert "folge" in felder["aktion"]["enum"]
+        assert felder["schritte"]["maxItems"] == 20  # uebernahme::MAX_SCHRITTE

@@ -105,3 +105,85 @@ class AiMemoryClearResponse(BaseModel):
     """
 
     removed: int
+
+
+#: Was die Vorschau über einen erkannten Fakt sagt.
+#:
+#: * ``new``              — der Bereich kennt nichts Vergleichbares.
+#: * ``exact_duplicate``  — unter diesem Schlüssel steht schon etwas; übernommen
+#:   wird nur mit ``replace_existing``.
+#: * ``similar_existing`` — ein anderer Schlüssel sagt vermutlich dasselbe.
+#: * ``has_secret``       — sieht nach Zugangsdaten aus und wird nie gespeichert.
+MemoryImportStatus = Literal["new", "exact_duplicate", "similar_existing", "has_secret"]
+
+#: Wieviele Fakten ein Import höchstens trägt. Jeder kostet beim Übernehmen
+#: eine Verschlüsselung im DIS-Sidecar und eine Einbettung.
+MAX_IMPORT_ITEMS = 200
+
+
+class AiMemoryImportPreviewItem(BaseModel):
+    key: str
+    value: str
+    category: str
+    evidence: str | None = None
+    status: MemoryImportStatus
+    existing_key: str | None = None
+    #: ``None`` auch dann, wenn der Schlüssel belegt, sein Inhalt aber nicht
+    #: mehr lesbar ist.
+    existing_value: str | None = None
+    similarity: float | None = None
+
+
+class AiMemoryImportPreviewRequest(BaseModel):
+    raw_text: str = Field(min_length=1, max_length=100_000)
+    scope: MemoryScope = "user"
+    server_id: int | None = Field(default=None, ge=1)
+    team_id: int | None = Field(default=None, ge=1)
+    source_provider: str | None = Field(default=None, max_length=40)
+
+
+class AiMemoryImportPreviewResponse(BaseModel):
+    detected_source: str | None
+    items: list[AiMemoryImportPreviewItem]
+    #: Alles, was der Text hergab — auch jenseits von ``MAX_IMPORT_ITEMS``.
+    total_detected: int
+    total_valid: int
+    total_conflicts: int
+    total_secrets_blocked: int
+    #: Wieviele **neue** Schlüssel der Bereich noch fasst. Überschreiben kostet
+    #: keinen Platz.
+    available_slots: int
+    #: Ob die KI persönliche Einträge heute überhaupt liest. Ein Import in ein
+    #: ausgeschaltetes Gedächtnis ist erlaubt — er bleibt nur liegen, bis der
+    #: Schalter umgelegt wird, und das soll niemand erst hinterher merken.
+    memory_enabled: bool = True
+
+
+class AiMemoryImportItem(BaseModel):
+    key: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
+    value: str = Field(min_length=1, max_length=2000)
+    replace_existing: bool = False
+
+
+class AiMemoryImportRequest(BaseModel):
+    items: list[AiMemoryImportItem] = Field(min_length=1, max_length=MAX_IMPORT_ITEMS)
+    scope: MemoryScope = "user"
+    server_id: int | None = Field(default=None, ge=1)
+    team_id: int | None = Field(default=None, ge=1)
+    source_provider: str | None = Field(default=None, max_length=40)
+
+
+class AiMemoryImportSkipped(BaseModel):
+    key: str
+    #: ``exists`` (Schlüssel belegt, Ersetzen nicht gewählt), ``full``
+    #: (Bereich voll), ``rejected`` (ungültig oder Zugangsdaten), ``duplicate``
+    #: (derselbe Schlüssel zweimal in einer Anfrage), ``conflict`` (gleichzeitig
+    #: geändert).
+    reason: Literal["exists", "full", "rejected", "duplicate", "conflict"]
+
+
+class AiMemoryImportResponse(BaseModel):
+    imported_count: int
+    updated_count: int
+    skipped_count: int
+    skipped: list[AiMemoryImportSkipped] = []

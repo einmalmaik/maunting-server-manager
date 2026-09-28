@@ -46,6 +46,13 @@ describe('SelfHostingDocs', () => {
     expect(screen.getByText(/without replacing an existing Caddyfile/i)).toBeInTheDocument()
   })
 
+  it('tells operators of existing installs how they get the cache rules', () => {
+    renderPage()
+
+    expect(screen.getByText(/update\.sh does not rewrite an existing site; it reports one without these rules/i)).toBeInTheDocument()
+    expect(screen.getByText(/Run install\.sh again in that case: it keeps the existing settings/i)).toBeInTheDocument()
+  })
+
   it('documents safe continuation of a partial PostgreSQL setup', () => {
     renderPage()
 
@@ -61,6 +68,14 @@ describe('SelfHostingDocs', () => {
     expect(screen.getByText(/DNS A\/AAAA record.*one-time owner approval/i)).toBeInTheDocument()
     expect(screen.getByText(/saves, mods, workshop files, backups and assigned PostgreSQL databases/i)).toBeInTheDocument()
     expect(screen.getByText(/automatically uses the owner-confirmed node ID/i)).toBeInTheDocument()
+  })
+
+  it('tells operators what the first start after the encryption update does', () => {
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Database encryption after the update' })).toBeInTheDocument()
+    expect(screen.getByText(/runs VACUUM FULL once on these tables/i)).toBeInTheDocument()
+    expect(screen.getByText(/taken before the update.*still contain the chat history in plaintext/i)).toBeInTheDocument()
   })
 
   it('links to node administration and the documentation index', () => {
@@ -96,8 +111,51 @@ describe('SelfHostingDocs', () => {
     expect(document.querySelector('a[href="#smart-system"]')).toBeInTheDocument()
     expect(screen.getByText(/knows neither password nor 2FA code/i)).toBeInTheDocument()
     expect(screen.getByText(/From the browser it never gets them/i)).toBeInTheDocument()
+    // Seit dem Verlaufs-Erstabgleich traegt die Kopplung mehr als die Sitzung.
+    // Beide Zusagen stehen im sichtbaren Text, also gehoeren sie hierher: der
+    // Server reicht den Verlauf nur durch, und Schluesselmaterial bleibt am
+    // Geraet. Wer das eines Tages umdreht, muss an dieser Stelle vorbei.
+    expect(screen.getByText(/no key material travels with it/i)).toBeInTheDocument()
     // Und der unsignierte Installer, weil SmartScreen sonst wie ein Fehler
     // aussieht statt wie eine bekannte Eigenschaft.
     expect(screen.getByText(/installer is not signed/i)).toBeInTheDocument()
+  })
+
+  it('nennt die Medienadresse des Anruf-Sidecars und wie man sie vorgibt', async () => {
+    // Ohne diesen Eintrag sucht ein Betreiber hinter einem CDN nach stummen
+    // Anrufen, ohne zu wissen, dass es MSM_LIVEKIT_NODE_IP gibt.
+    renderPage()
+    expect(screen.getByText('Address for media')).toBeInTheDocument()
+    expect(screen.getByText(/MSM_LIVEKIT_NODE_IP in the backend \.env/)).toBeInTheDocument()
+
+    await i18n.changeLanguage('de')
+    renderPage()
+    expect(screen.getByText('Adresse für die Medien')).toBeInTheDocument()
+  })
+
+  it('sagt, was das PostgreSQL-Studio kann und was nicht', () => {
+    // Der SQL-Editor an der Panel-Datenbank darf mehr als die Dialoge dort.
+    // Bis 27.09.2026 stand in der Doku nur, das Studio ändere dort keine
+    // Struktur. Das galt für die Dialoge, nicht für den Editor.
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'PostgreSQL databases and the Studio' })).toBeInTheDocument()
+    expect(screen.getByText(/runs with all rights of the panel's database user/i)).toBeInTheDocument()
+    expect(screen.getByText(/SQL runs as the database owner/i)).toBeInTheDocument()
+    expect(screen.getByText(/5 s per statement/)).toBeInTheDocument()
+    expect(screen.getByText(/Reads and exports are never logged/)).toBeInTheDocument()
+  })
+
+  it('führt jeden Abschnitt in der Sprungleiste, und jede Marke trifft einen', () => {
+    // Die Datenbankverschlüsselung stand bis 27.09.2026 auf der Seite, aber
+    // nicht in der Leiste, und war nur durch Scrollen zu finden.
+    renderPage()
+
+    const leiste = screen.getAllByRole('navigation', { name: 'Self-hosting documentation links' })[0]
+    const marken = Array.from(leiste.querySelectorAll('a')).map(a => a.getAttribute('href')!.slice(1))
+    const abschnitte = Array.from(document.querySelectorAll('section[aria-labelledby]')).map(s => s.getAttribute('aria-labelledby')!)
+
+    expect(marken.sort()).toEqual(abschnitte.sort())
+    for (const id of marken) expect(document.getElementById(id)).toBeInTheDocument()
   })
 })

@@ -3,19 +3,21 @@
  * Unterstützt HMAC-SHA1, HMAC-SHA256, HMAC-SHA512 mit variablen Stellen und Zeitfenstern.
  */
 
+import i18n from '@/i18n'
+
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
 
 export function base32Decode(input: string): Uint8Array {
   const cleaned = input.toUpperCase().replace(/[\s=-]/g, '')
   if (cleaned.length === 0) {
-    throw new Error('Leeres Base32 TOTP-Secret')
+    throw new Error(i18n.t('mss.vault.errors.emptyTotpSecret'))
   }
 
   let bits = ''
   for (let i = 0; i < cleaned.length; i++) {
     const val = BASE32_ALPHABET.indexOf(cleaned.charAt(i))
     if (val === -1) {
-      throw new Error(`Ungültiges Base32-Zeichen '${cleaned.charAt(i)}' an Position ${i}`)
+      throw new Error(i18n.t('mss.vault.errors.invalidBase32Char', { char: cleaned.charAt(i), pos: i }))
     }
     bits += val.toString(2).padStart(5, '0')
   }
@@ -68,7 +70,7 @@ export async function generateTotpCode(
 
   const keyBytes = base32Decode(secretBase32)
   if (keyBytes.byteLength === 0) {
-    throw new Error('Ungültiges Base32 TOTP-Secret')
+    throw new Error(i18n.t('mss.vault.errors.invalidTotpSecret'))
   }
 
   const epochSeconds = Math.floor(timestampMs / 1000)

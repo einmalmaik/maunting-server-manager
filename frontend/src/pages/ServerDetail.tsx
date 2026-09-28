@@ -50,7 +50,10 @@ import { AiMemoryManager } from "@/components/ai/AiMemoryManager";
 import type { GameInfo, Server } from "@/types";
 import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
 import { UptimeDisplay } from "@/components/server/UptimeDisplay";
+import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
+import { meldeErrungenschaft } from "@/lib/errungenschaft";
 type TabKey =
   | "files"
   | "console"
@@ -116,9 +119,9 @@ function statusClasses(s: string | undefined): string {
     case "awaiting_files":
       return "bg-status-warning/10 border-status-warning/30 text-status-warning";
     case "failed":
-      return "bg-status-error/10 border-status-error/30 text-status-error";
+      return "bg-status-destructive/10 border-status-destructive/30 text-status-destructive";
     default:
-      return "bg-status-error/10 border-status-error/30 text-status-error";
+      return "bg-status-destructive/10 border-status-destructive/30 text-status-destructive";
   }
 }
 
@@ -129,6 +132,10 @@ export function ServerDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [server, setServer] = useState<Server | null>(null);
   const [status, setStatus] = useState<ServerStatus | null>(null);
+  const liveMetriken = status?.cpu_percent != null && status?.ram_mb != null;
+  useEffect(() => {
+    if (liveMetriken) meldeErrungenschaft("server_resource_watcher");
+  }, [liveMetriken]);
   const [games, setGames] = useState<GameInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -283,8 +290,12 @@ export function ServerDetail() {
   /** Steam / HTTP / GitHub: manueller Datei-Update-Check (nicht Workshop-Mods). */
   const showServerFileUpdates = !!gameInfo?.supports_server_file_updates;
 
+  const isDatabaseServer = server?.server_kind === "database";
+
   const tabs = useMemo(() => {
     const list: { key: TabKey; label: string; icon: typeof FileText }[] = [
+      // Beim Datenbankserver ist die Datenbank der Server: ihr Reiter steht vorn.
+      ...(isDatabaseServer ? [{ key: "databases" as TabKey, label: t("tabs.databases"), icon: Database }] : []),
       { key: "files", label: t("tabs.files"), icon: FileText },
       { key: "console", label: t("tabs.console"), icon: Terminal },
     ];
@@ -306,7 +317,7 @@ export function ServerDetail() {
       icon: RotateCcw,
     });
     list.push({ key: "backups", label: t("tabs.backups"), icon: HardDrive });
-    list.push({ key: "databases", label: t("tabs.databases"), icon: Database });
+    if (!isDatabaseServer) list.push({ key: "databases", label: t("tabs.databases"), icon: Database });
     list.push({
       key: "webhooks",
       label: t("tabs.webhooks", { defaultValue: "Webhooks" }),
@@ -327,9 +338,10 @@ export function ServerDetail() {
       });
     }
     return list;
-  }, [t, showModTab, showMemoryTab, gameInfo?.enable_exec, server?.guardian_enabled]);
+  }, [t, showModTab, showMemoryTab, gameInfo?.enable_exec, server?.guardian_enabled, isDatabaseServer]);
 
-  const rawTab = (searchParams.get("tab") || "files") as TabKey;
+  const defaultTab: TabKey = isDatabaseServer ? "databases" : "files";
+  const rawTab = (searchParams.get("tab") || defaultTab) as TabKey;
   const activeTab: TabKey =
     VALID_TABS.includes(rawTab)
       && (rawTab !== "mods" || showModTab)
@@ -338,7 +350,7 @@ export function ServerDetail() {
       // Rechteentzug, der Reiter nicht.
       && (rawTab !== "memory" || showMemoryTab)
       ? rawTab
-      : "files";
+      : defaultTab;
 
   const setActiveTab = (next: TabKey) => {
     if (next === "files") setMobileOverviewOpen(false);
@@ -518,7 +530,7 @@ export function ServerDetail() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <span className="w-6 h-6 border-2 border-secondary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="md" className="text-secondary" />
       </div>
     );
   }
@@ -529,13 +541,13 @@ export function ServerDetail() {
         <p className="font-body-md text-on-surface-variant">
           {t("servers.notFound")}
         </p>
-        <button
-          className="msm-btn-secondary mt-4 inline-flex items-center gap-2 px-4 py-2"
+        <Button variant="secondary"
+          className="mt-4 inline-flex items-center gap-2"
           onClick={() => navigate("/servers")}
         >
           <ArrowLeft className="w-4 h-4" />
           {t("servers.backToList")}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -654,7 +666,7 @@ export function ServerDetail() {
     <div className="msm-page">
       <div className={activeTab === "files" ? "hidden md:block" : "block"}>
       <PageHeader
-        eyebrow={t("pageContext.infrastructure", "Infrastructure")}
+        eyebrow={t("pageContext.infrastructure")}
         title={server.name}
         description={`${gameName(server.game_type)}${server.node_name ? ` · ${t("servers.node")}: ${server.node_name}` : ""}`}
         status={(
@@ -667,31 +679,31 @@ export function ServerDetail() {
         )}
         actions={(
           <div className="flex flex-wrap gap-2">
-          <button
-            className="msm-btn-secondary inline-flex min-h-11 items-center gap-2 px-3 py-2"
+          <Button variant="secondary"
+            className="inline-flex min-h-11 items-center gap-2"
             onClick={() => navigate("/servers")}
-            aria-label={t("servers.backToList", "Back to servers")}
+            aria-label={t("servers.backToList")}
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>{t("common.back", "Back")}</span>
-          </button>
+            <span>{t("common.back")}</span>
+          </Button>
           {/* Der KI-Chat lebt seit dem Einzelchat ausschliesslich unter /ai.
               Der Verweis bleibt hier, damit der Weg dorthin nicht verloren
               geht — die KI findet den Server dann selbst ueber list_my_servers. */}
           {canUseAi && (
-            <button
+            <Button variant="secondary"
               type="button"
-              className="msm-btn-secondary inline-flex min-h-11 items-center gap-2 px-3 py-2"
+              className="inline-flex min-h-11 items-center gap-2"
               onClick={() => navigate("/ai")}
               aria-label={t("tabs.ai")}
             >
               <Bot className="w-4 h-4" />
               <span>{t("tabs.ai")}</span>
-            </button>
+            </Button>
           )}
-          <button
+          <Button variant="secondary"
             type="button"
-            className="msm-btn-secondary inline-flex min-h-11 max-w-full items-center gap-2 px-3 py-2 text-left"
+            className="inline-flex min-h-11 max-w-full items-center gap-2 text-left"
             aria-label={t("servers.copyDockerContainerName")}
             title={t("servers.dockerContainerInstallDirHint")}
             onClick={() => {
@@ -699,11 +711,11 @@ export function ServerDetail() {
               toast.success(t("servers.dockerContainerNameCopied"));
             }}
           >
-            <span className="font-label-md text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant">
+            <span className="font-label-md text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">
               {t("servers.dockerContainerLabel")}
             </span>
             <span className="font-mono text-xs">msm-srv-{server.id}</span>
-          </button>
+          </Button>
           </div>
         )}
       />
@@ -713,21 +725,21 @@ export function ServerDetail() {
         <section className="rounded-xl border border-outline-variant/80 bg-surface-container-low/75 p-4 md:hidden">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="font-label-md text-[10px] font-semibold uppercase tracking-[0.12em] text-secondary">{t("pageContext.infrastructure", "Infrastructure")}</p>
+              <p className="font-label-md text-label-sm font-semibold uppercase tracking-[0.12em] text-secondary">{t("pageContext.infrastructure")}</p>
               <h1 className="mt-1 truncate font-headline text-xl font-semibold text-on-surface">{server.name}</h1>
               <p className="mt-1 truncate text-xs text-on-surface-variant">{gameName(server.game_type)} · {server.node_name || t("servers.nodeUnknown", { defaultValue: "—" })}</p>
             </div>
-            <span className={`shrink-0 rounded-full border px-2.5 py-1 font-mono text-[10px] ${statusClasses(effectiveStatus)}`}>
+            <span className={`shrink-0 rounded-full border px-2.5 py-1 font-mono text-label-sm ${statusClasses(effectiveStatus)}`}>
               {t(`servers.status.${effectiveStatus}`, { defaultValue: effectiveStatus })}
             </span>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
-            <button type="button" onClick={() => navigate("/servers")} className="msm-btn-secondary inline-flex min-h-11 items-center gap-2 px-3 text-xs">
-              <ArrowLeft className="h-4 w-4" />{t("common.back", "Back")}
-            </button>
-            <button type="button" onClick={() => setMobileOverviewOpen((value) => !value)} aria-expanded={mobileOverviewOpen} className="msm-btn-secondary inline-flex min-h-11 items-center px-3 text-xs">
+            <Button variant="secondary" size="sm" type="button" onClick={() => navigate("/servers")} className="inline-flex min-h-11 items-center gap-2">
+              <ArrowLeft className="h-4 w-4" />{t("common.back")}
+            </Button>
+            <Button variant="secondary" size="sm" type="button" onClick={() => setMobileOverviewOpen((value) => !value)} aria-expanded={mobileOverviewOpen} className="inline-flex min-h-11 items-center">
               {mobileOverviewOpen ? t("serverDetail.hideServerOverview") : t("serverDetail.showServerOverview")}
-            </button>
+            </Button>
           </div>
         </section>
       )}
@@ -750,18 +762,17 @@ export function ServerDetail() {
               {t("servers.bindIp.startBlockedBody")}
             </p>
           </div>
-          <button
+          <Button size="sm"
             onClick={() => setShowEditNetwork(true)}
-            className="msm-btn-primary px-3 py-1.5 text-sm"
           >
             {t("servers.bindIp.assignNow")}
-          </button>
+          </Button>
         </div>
       )}
 
       {isNodeUnreachable && (
-        <div className="msm-card p-4 border-status-error/40 bg-status-error/5 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-status-error flex-shrink-0 mt-0.5" />
+        <div className="msm-card p-4 border-status-destructive/40 bg-status-destructive/5 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-status-destructive flex-shrink-0 mt-0.5" />
           <p className="font-body-md text-sm text-on-surface-variant">
             {t("servers.nodeUnreachableHint")}
           </p>
@@ -769,8 +780,8 @@ export function ServerDetail() {
       )}
 
       {guardianSyncError && (
-        <div className="msm-card p-4 border-status-error/40 bg-status-error/5 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-status-error flex-shrink-0 mt-0.5" />
+        <div className="msm-card p-4 border-status-destructive/40 bg-status-destructive/5 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-status-destructive flex-shrink-0 mt-0.5" />
           <div>
             <p className="font-headline text-body-md text-on-surface mb-1">
               {t("servers.guardian.syncErrorTitle")}
@@ -786,10 +797,10 @@ export function ServerDetail() {
       {/* Actions */}
       <div className="flex gap-3 flex-wrap">
         {effectiveStatus !== "running" && effectiveStatus !== "installing" && effectiveStatus !== "starting" && effectiveStatus !== "stopping" && effectiveStatus !== "restarting" && effectiveStatus !== "queued" && (
-          <button
+          <Button
             onClick={() => doAction("start")}
             disabled={!!actionLoading || !server.public_bind_ip || isNodeUnreachable}
-            className="msm-btn-primary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="flex items-center gap-2 disabled:opacity-50"
             title={
               isNodeUnreachable
                 ? t("servers.nodeUnreachableHint")
@@ -802,73 +813,73 @@ export function ServerDetail() {
             {actionLoading === "start"
               ? t("common.loading")
               : t("servers.start")}
-          </button>
+          </Button>
         )}
         {effectiveStatus === "running" && (
-          <button
+          <Button variant="destructive"
             onClick={() => doAction("stop")}
             disabled={!!actionLoading || isNodeUnreachable}
-            className="msm-btn-danger flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="flex items-center gap-2 disabled:opacity-50"
           >
             <Square className="w-4 h-4" />
             {actionLoading === "stop" ? t("common.loading") : t("servers.stop")}
-          </button>
+          </Button>
         )}
-        <button
+        <Button variant="secondary"
           onClick={() => doAction("restart")}
           disabled={!!actionLoading || isNodeUnreachable || ["installing", "starting", "stopping", "restarting", "queued"].includes(effectiveStatus)}
-          className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+          className="flex items-center gap-2 disabled:opacity-50"
         >
           <RefreshCw className="w-4 h-4" />
           {actionLoading === "restart"
             ? t("common.loading")
             : t("servers.restart")}
-        </button>
-        {/* AUFGABE 5: Kill-Button nur bei running|stopping|restarting (msm-btn-danger per DNA), mit confirm */}
+        </Button>
+        {/* AUFGABE 5: Kill-Button nur bei running|stopping|restarting (destructive-Variante), mit confirm */}
         {["starting", "running", "stopping", "restarting"].includes(effectiveStatus) && (
-          <button
+          <Button variant="destructive"
             onClick={handleKill}
             disabled={!!actionLoading || isNodeUnreachable}
-            className="msm-btn-danger flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="flex items-center gap-2 disabled:opacity-50"
           >
             {actionLoading === "kill" ? t("common.loading") : t("servers.kill")}
-          </button>
+          </Button>
         )}
         {effectiveStatus !== "installing" && effectiveStatus !== "queued" && (
-          <button
+          <Button variant="secondary"
             onClick={handleInstall}
             disabled={!!actionLoading || isNodeUnreachable}
-            className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="flex items-center gap-2 disabled:opacity-50"
           >
             <Download className="w-4 h-4" />
             {actionLoading === "install" ? t("common.loading") : installLabel}
-          </button>
+          </Button>
         )}
 
         {effectiveStatus !== "installing" && effectiveStatus !== "queued" && (
-          <button
+          <Button variant="secondary"
             onClick={() => setShowSwitchBlueprint(true)}
             disabled={!!actionLoading || isNodeUnreachable || effectiveStatus !== "stopped"}
-            className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
-            title={effectiveStatus !== "stopped" ? t("servers.mustStopToSwitch", "Der Server muss gestoppt sein, um das Spiel zu wechseln.") : undefined}
+            className="flex items-center gap-2 disabled:opacity-50"
+            title={effectiveStatus !== "stopped" ? t("servers.mustStopToSwitch") : undefined}
           >
             <RefreshCw className="w-4 h-4 text-primary" />
-            {t("servers.switchBlueprintAction", "Spiel / Blueprint wechseln")}
-          </button>
+            {t("servers.switchBlueprintAction")}
+          </Button>
         )}
 
         {hasServerFiles && showServerFileUpdates && (
-          <button
+          <Button variant="secondary"
             type="button"
             onClick={() => void checkServerFileUpdates()}
             disabled={!!actionLoading || serverUpdateCheckLoading || isNodeUnreachable}
-            className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="flex items-center gap-2 disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 ${serverUpdateCheckLoading ? "animate-spin" : ""}`} />
             {serverUpdateCheckLoading
               ? t("common.loading")
               : t("servers.checkServerFileUpdates")}
-          </button>
+          </Button>
         )}
 
         {/* Clean Update Badge: nur Server-Datei-/Blueprint-Updates (Blueprint-driven, nie Mods).
@@ -887,14 +898,14 @@ export function ServerDetail() {
           </div>
         )}
 
-        <button
+        <Button variant="destructive"
           onClick={handleDelete}
           disabled={!!actionLoading}
-          className="msm-btn-danger flex items-center gap-2 px-4 py-2 disabled:opacity-50 ml-auto"
+          className="flex items-center gap-2 disabled:opacity-50 ml-auto"
         >
           <Trash2 className="w-4 h-4" />
           {t("common.delete")}
-        </button>
+        </Button>
       </div>
 
       {/* Stats (CPU / RAM / Disk) — Player-Stat ist absichtlich entfernt (KISS, kein A2S) */}
@@ -911,14 +922,14 @@ export function ServerDetail() {
                   {t("serverDetail.resourceEditor.lifecycleBusy")}
                 </span>
               )}
-              <button
+              <Button variant="secondary" size="sm"
                 onClick={openResourceEditor}
                 disabled={isLifecycleBusy || !!actionLoading}
-                className="msm-btn-secondary px-3 py-1.5 text-sm disabled:opacity-50"
+                className="disabled:opacity-50"
                 data-testid="resource-edit-btn"
               >
                 {t("common.edit")}
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -967,18 +978,16 @@ export function ServerDetail() {
               {t("servers.network")}
             </h3>
           </div>
-          <button
+          <Button variant="secondary" size="sm"
             onClick={() => setShowEditNetwork(true)}
             disabled={effectiveStatus === "running" || !!actionLoading}
             title={effectiveStatus === "running" ? t("servers.networkEditRequiresStopped") : undefined}
-            className={`px-3 py-1.5 text-sm ${
-              effectiveStatus === "running" || !!actionLoading
-                ? "msm-btn-secondary opacity-50 cursor-not-allowed"
-                : "msm-btn-secondary"
-            }`}
+            className={
+              effectiveStatus === "running" || !!actionLoading ? "opacity-50 cursor-not-allowed" : ""
+            }
           >
             {t("common.edit")}
-          </button>
+          </Button>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <div>
@@ -1078,7 +1087,7 @@ export function ServerDetail() {
       <ServerCredentialsPanel serverId={serverId} canManage={canManageCredentials} />
 
       {/* Tabs */}
-      <div className="sticky top-14 z-20 -mb-px overflow-x-auto border-b border-outline bg-background/95 backdrop-blur-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:static md:bg-transparent md:backdrop-blur-none">
+      <div className="sticky top-12 z-20 -mb-px overflow-x-auto border-b border-outline bg-background/95 backdrop-blur-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:static md:bg-transparent md:backdrop-blur-none">
         <div className="flex gap-1 min-w-max">
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -1118,7 +1127,7 @@ export function ServerDetail() {
           />
         )}
         {activeTab === "backups" && <Backups serverId={serverId} />}
-        {activeTab === "databases" && <DatabaseManager serverId={serverId} />}
+        {activeTab === "databases" && <DatabaseManager serverId={serverId} dedicated={isDatabaseServer} />}
         {activeTab === "webhooks" && <OutgoingWebhooksPanel serverId={serverId} />}
         {activeTab === "memory" && showMemoryTab && (
           <AiMemoryManager
@@ -1136,7 +1145,7 @@ export function ServerDetail() {
 
       {/* Edit-Network Modal */}
       {showEditNetwork && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
+        <div className="msm-modal-overlay overflow-y-auto">
           <div className="msm-card w-full max-w-lg p-6 my-8">
             <h2 className="font-headline text-headline-md text-primary mb-1">
               {t("servers.editNetworkTitle")}
@@ -1278,20 +1287,20 @@ export function ServerDetail() {
                 );
               })()}
               <div className="flex gap-3 pt-2">
-                <button
+                <Button variant="secondary"
                   type="button"
-                  className="msm-btn-secondary flex-1 py-2"
+                  className="flex-1"
                   onClick={() => setShowEditNetwork(false)}
                 >
                   {t("common.cancel")}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  className="msm-btn-primary flex-1 py-2 disabled:opacity-50"
+                  className="flex-1 disabled:opacity-50"
                   disabled={savingNetwork || effectiveStatus === "running"}
                 >
                   {savingNetwork ? t("common.loading") : t("common.save")}
-                </button>
+                </Button>
               </div>
             </form>
           </div>

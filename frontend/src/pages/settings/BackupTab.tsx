@@ -5,7 +5,9 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PasswordInput } from '@/components/ui/PasswordInput'
+import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 /** S3-Konfiguration aus GET /api/backup-config (Credentials maskiert). */
 interface S3Config {
   endpoint: string
@@ -161,7 +163,7 @@ export function BackupTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -172,7 +174,7 @@ export function BackupTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-4">
           <ShieldCheck className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.backup.statusTitle')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('settings.backup.statusTitle')}</h2>
         </div>
         <div className="flex flex-wrap gap-4">
           <span className={`px-3 py-1.5 rounded-full text-sm font-medium border ${
@@ -196,7 +198,7 @@ export function BackupTab() {
       <form onSubmit={handleSaveS3} className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Cloud className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.backup.s3Title')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('settings.backup.s3Title')}</h2>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -271,31 +273,31 @@ export function BackupTab() {
         </div>
 
         <div className="flex flex-wrap gap-3 justify-end mt-6">
-          <button
+          <Button variant="secondary"
             type="button"
             onClick={handleTestConnection}
             disabled={testing || !status.s3_configured}
-            className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+            className="inline-flex items-center gap-2 disabled:opacity-50"
           >
             {testing ? (
-              <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+              <Spinner />
             ) : (
               <Send className="w-4 h-4" />
             )}
             {t('settings.backup.testConnection')}
-          </button>
-          <button
+          </Button>
+          <Button
             type="submit"
             disabled={savingS3 || !canWrite}
-            className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+            className="inline-flex items-center gap-2 disabled:opacity-50"
           >
             {savingS3 ? (
-              <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+              <Spinner />
             ) : (
               <Save className="w-4 h-4" />
             )}
             {t('settings.backup.saveS3')}
-          </button>
+          </Button>
         </div>
       </form>
 
@@ -303,7 +305,7 @@ export function BackupTab() {
       <form onSubmit={handleSavePassword} className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.backup.passwordTitle')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('settings.backup.passwordTitle')}</h2>
         </div>
 
         <div className="flex items-center gap-2 mb-4">
@@ -329,18 +331,18 @@ export function BackupTab() {
         </div>
 
         <div className="flex justify-end mt-4">
-          <button
+          <Button
             type="submit"
             disabled={savingPassword || !newPassword.trim() || !canWrite}
-            className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+            className="inline-flex items-center gap-2 disabled:opacity-50"
           >
             {savingPassword ? (
-              <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+              <Spinner />
             ) : (
               <Save className="w-4 h-4" />
             )}
             {t('settings.backup.savePassword')}
-          </button>
+          </Button>
         </div>
       </form>
     </fieldset>

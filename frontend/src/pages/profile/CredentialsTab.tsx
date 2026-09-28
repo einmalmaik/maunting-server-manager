@@ -20,6 +20,7 @@ import { Button, Dropdown } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
+import { Spinner } from '@/components/ui/Spinner'
 const KINDS: CredentialKind[] = ['steam_account', 'github_token']
 
 export function CredentialsTab() {
@@ -100,7 +101,7 @@ export function CredentialsTab() {
   if (loading) {
     return (
       <div className="flex h-32 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -110,7 +111,7 @@ export function CredentialsTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2">
           <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h3 id="credentials-title" className="font-headline text-lg font-semibold text-on-surface">
+          <h3 id="credentials-title" className="font-headline text-title-lg font-semibold text-on-surface">
             {t('credentials.title')}
           </h3>
         </div>
@@ -203,7 +204,7 @@ export function CredentialsTab() {
           )}
           <label className="space-y-1.5">
             <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-              {t('credentials.secret')}
+              {t(`credentials.secrets.${kind}`)}
             </span>
             <input
               className="msm-input"
@@ -215,7 +216,7 @@ export function CredentialsTab() {
             />
           </label>
         </div>
-        <p className="text-xs text-on-surface-variant">{t('credentials.secretHint')}</p>
+        <p className="text-xs text-on-surface-variant">{t(`credentials.secretHints.${kind}`)}</p>
         <div className="flex justify-end">
           <Button
             type="submit"

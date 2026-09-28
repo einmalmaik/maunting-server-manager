@@ -1423,7 +1423,7 @@ async def stream_logs(name: str, tail: int = 200, *, node: Any | None = None) ->
     if node is not None:
         return
 
-    if not is_available() or not exists(name):
+    if not await asyncio.to_thread(lambda: is_available() and exists(name)):
         return
 
     host = resolve_docker_host()

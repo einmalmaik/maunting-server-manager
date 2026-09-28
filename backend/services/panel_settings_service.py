@@ -62,7 +62,25 @@ class PanelSettingsService:
         return dict(cls._cache)
 
     @classmethod
+    def delete(cls, key: str, db: Session | None = None) -> None:
+        cls._cache.pop(key, None)
+        if db is not None:
+            row = db.query(PanelSetting).filter_by(key=key).first()
+            if row:
+                db.delete(row)
+            return
+        db_session = SessionLocal()
+        try:
+            row = db_session.query(PanelSetting).filter_by(key=key).first()
+            if row:
+                db_session.delete(row)
+                db_session.commit()
+        finally:
+            db_session.close()
+
+    @classmethod
     def invalidate_cache(cls) -> None:
         cls._cache_loaded = False
         cls._cache.clear()
+
 

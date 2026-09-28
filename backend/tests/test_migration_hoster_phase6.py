@@ -21,8 +21,8 @@ HOSTER_TABLES = {
 }
 
 
-def test_hoster_phase6_migration_roundtrip(tmp_path: Path) -> None:
-    db_url = f"sqlite:///{tmp_path / 'hoster-phase6.db'}"
+def test_hoster_phase6_migration_roundtrip(tmp_path: Path, pg_wegwerf) -> None:
+    db_url = pg_wegwerf("hoster-phase6")
     previous_database_url = settings.database_url
     settings.database_url = db_url
     engine = create_engine(db_url)

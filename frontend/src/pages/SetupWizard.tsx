@@ -5,7 +5,10 @@ import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { api } from '@/api/client'
+import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
+import { benutzernameFehler } from '@/lib/benutzername'
 interface SetupWizardProps {
   onComplete: () => void
   emailConfigured: boolean
@@ -30,6 +33,11 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
     e.preventDefault()
     setError('')
 
+    const namensfehler = benutzernameFehler(form.username)
+    if (namensfehler) {
+      setError(t(namensfehler.schluessel, namensfehler))
+      return
+    }
     if (form.password !== form.confirm) {
       setError(t('auth.passwordMismatch'))
       return
@@ -180,13 +188,13 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
               <p className="font-body-md text-body-md text-on-surface-variant mb-8 max-w-sm mx-auto">
                 {t('setup.welcomeDesc')}
               </p>
-              <button
+              <Button size="lg"
                 onClick={() => setStep(2)}
-                className="msm-btn-primary px-8 py-3 inline-flex items-center gap-2"
+                className="inline-flex items-center gap-2"
               >
                 {t('setup.start')}
                 <ChevronRight className="w-4 h-4" />
-              </button>
+              </Button>
             </div>
           )}
 
@@ -210,7 +218,7 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label htmlFor="setup-username" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t('auth.username', 'Benutzername')}
+                    {t('auth.username')}
                   </label>
                   <input
                     type="text"
@@ -221,12 +229,13 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
                     placeholder="admin"
                     required
                     minLength={3}
+                    maxLength={32}
                   />
                 </div>
 
                 <div>
                   <label htmlFor="setup-owner-email" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t('auth.email', 'E-Mail')}
+                    {t('auth.email')}
                   </label>
                   <input
                     type="email"
@@ -241,7 +250,7 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
 
                 <PasswordInput
                   id="setup-owner-password"
-                  label={t('auth.password', 'Passwort') || 'Passwort'}
+                  label={t('auth.password') || 'Passwort'}
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
                   placeholder="••••••••"
@@ -251,7 +260,7 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
 
                 <PasswordInput
                   id="setup-owner-password-confirm"
-                  label={t('auth.confirmPassword', 'Passwort bestätigen') || 'Passwort bestätigen'}
+                  label={t('auth.confirmPassword') || 'Passwort bestätigen'}
                   value={form.confirm}
                   onChange={(e) => setForm({ ...form, confirm: e.target.value })}
                   placeholder="••••••••"
@@ -309,27 +318,27 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
                 )}
 
                 <div className="flex gap-3 pt-2">
-                  <button
+                  <Button variant="secondary" size="lg"
                     type="button"
                     onClick={() => setStep(1)}
-                    className="msm-btn-secondary flex-1 py-3"
+                    className="flex-1"
                   >
                     {t('common.back')}
-                  </button>
-                  <button
+                  </Button>
+                  <Button size="lg"
                     type="submit"
                     disabled={submitting}
-                    className="msm-btn-primary flex-1 py-3 disabled:opacity-50"
+                    className="flex-1 disabled:opacity-50"
                   >
                     {submitting ? (
                       <span className="inline-flex items-center gap-2">
-                        <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                        <Spinner />
                         {t('common.loading')}
                       </span>
                     ) : (
                       t('setup.createOwner')
                     )}
-                  </button>
+                  </Button>
                 </div>
               </form>
             </div>
@@ -375,20 +384,20 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
                   </div>
                 )}
 
-                <button
+                <Button size="lg"
                   type="submit"
                   disabled={submitting || form.code.length !== 6}
-                  className="msm-btn-primary w-full py-3 disabled:opacity-50"
+                  className="w-full disabled:opacity-50"
                 >
                   {submitting ? (
                     <span className="inline-flex items-center gap-2">
-                      <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                      <Spinner />
                       {t('common.loading')}
                     </span>
                   ) : (
                     t('setup.verify')
                   )}
-                </button>
+                </Button>
 
                 <button
                   type="button"

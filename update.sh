@@ -63,12 +63,16 @@ restore_panel_ownership() {
     # git clean loescht untracked Dirs. Die .gitignore schuetzt jetzt die Daten-Pfade,
     # aber manuelle "Sauberkeit" Befehle sind riskant. Immer --dry-run zuerst.
     # Es gibt helper-scripts/recover-docker-storage.sh als Recovery (für den Docker-Store-Corruption-Fall).
-    for sub in backend frontend docs dis-sidecar searxng-sidecar msm-agent scripts helper-scripts; do
+    mkdir -p "$MSM_DIR/blueprints/community" 2>/dev/null || true
+    for sub in backend frontend docs dis-sidecar searxng-sidecar livekit-sidecar msm-agent scripts helper-scripts blueprints; do
         if [[ -d "$MSM_DIR/$sub" ]]; then
             # Hard fail for code trees used by venv setup — silent || true left
             # root-owned msm-agent after git pull and caused PEP 668 cascades.
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$sub" \
                 || err "chown $MSM_USER:$MSM_USER auf $MSM_DIR/$sub fehlgeschlagen"
+            if [[ "$sub" == "blueprints" ]]; then
+                chmod -R u+rwX,g+rwX "$MSM_DIR/$sub" 2>/dev/null || true
+            fi
         fi
     done
     # npm-Cache des msm-Users (HOME=/opt/msm). Falls ein frueherer fehlge-
@@ -141,7 +145,6 @@ FORCE=false
 UPDATE_SUCCEEDED=false
 PANEL_WAS_ACTIVE=false
 DB_BACKUP_FILE=""
-LEGACY_SQLITE_UPDATE=false
 
 cleanup_on_failure() {
     local exit_code=$?
@@ -149,6 +152,9 @@ cleanup_on_failure() {
         warn "Update nicht abgeschlossen. Es wird bewusst kein Erfolg gemeldet."
         [[ -n "$DB_BACKUP_FILE" ]] && warn "PostgreSQL-Sicherung: $DB_BACKUP_FILE"
         if ${SYSTEMD_AVAILABLE:-false} && $PANEL_WAS_ACTIVE; then
+            # Sidecar zuerst: der Code ist womoeglich schon neu, und das neue
+            # Panel verweigert den Dienst mit einem alten Sidecar.
+            systemctl restart msm-dis-sidecar.service 2>/dev/null || true
             systemctl restart msm-panel.service 2>/dev/null || true
         fi
     fi
@@ -342,36 +348,28 @@ tar -czf "$BACKUP_FILE" \
     || err "Code-/Konfigurationsbackup fehlgeschlagen."
 [[ -s "$BACKUP_FILE" ]] || err "Code-/Konfigurationsbackup ist leer."
 
-# PostgreSQL is the only runtime database after Phase 8. Existing SQLite is
-# copied byte-for-byte here and migrated only after the target code is ready.
+# PostgreSQL is the only panel database. A remaining SQLite installation has to
+# move with an older MSM release first; this version no longer carries the import.
 CURRENT_DATABASE_URL=$(grep -E '^MSM_DATABASE_URL=' "$ENV_FILE" | head -1 | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
-if [[ "$CURRENT_DATABASE_URL" == sqlite* ]]; then
-    LEGACY_SQLITE_UPDATE=true
-    LEGACY_SQLITE_FILE="$MSM_DIR/backend/msm.db"
-    [[ -s "$LEGACY_SQLITE_FILE" ]] || err "Legacy-SQLite-Datenbank fehlt oder ist leer."
-    DB_BACKUP_FILE="$BACKUP_DIR/msm-sqlite-pre-phase8-$(date +%Y%m%d-%H%M%S).db"
-    cp -p "$LEGACY_SQLITE_FILE" "$DB_BACKUP_FILE" \
-        || err "Legacy-SQLite-Sicherung fehlgeschlagen."
-    cmp -s "$LEGACY_SQLITE_FILE" "$DB_BACKUP_FILE" \
-        || err "Legacy-SQLite-Sicherung konnte nicht verifiziert werden."
-else
-    DB_BACKUP_FILE="$BACKUP_DIR/msm-postgres-$(date +%Y%m%d-%H%M%S).dump"
-    DB_BACKUP_HELPER="/tmp/msm-update-db-backup.py"
-    if [[ "$UPDATE_MODE" == "git" ]]; then
-        git show "${REMOTE_SHA}:backend/scripts/update_database_backup.py" > "$DB_BACKUP_HELPER" \
-            || err "PostgreSQL-Backuphelfer der Zielversion fehlt."
-    elif [[ -f "$MSM_DIR/backend/scripts/update_database_backup.py" ]]; then
-        cp "$MSM_DIR/backend/scripts/update_database_backup.py" "$DB_BACKUP_HELPER"
-    else
-        curl -fsSL \
-            "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/$LATEST_TAG/backend/scripts/update_database_backup.py" \
-            -o "$DB_BACKUP_HELPER" || err "PostgreSQL-Backuphelfer konnte nicht geladen werden."
-    fi
-    python3 -m py_compile "$DB_BACKUP_HELPER" \
-        || err "PostgreSQL-Backuphelfer ist ungültig."
-    python3 "$DB_BACKUP_HELPER" --env-file "$ENV_FILE" --output "$DB_BACKUP_FILE" \
-        2>&1 | tee -a "$LOG_FILE" || err "PostgreSQL-Sicherung fehlgeschlagen. Update abgebrochen."
+if [[ "$CURRENT_DATABASE_URL" != postgresql* ]]; then
+    err "Die Panel-Datenbank ist keine PostgreSQL-Datenbank (MSM_DATABASE_URL). SQLite wird nicht mehr unterstützt — zuerst mit einer älteren MSM-Version nach PostgreSQL umziehen."
 fi
+DB_BACKUP_FILE="$BACKUP_DIR/msm-postgres-$(date +%Y%m%d-%H%M%S).dump"
+DB_BACKUP_HELPER="/tmp/msm-update-db-backup.py"
+if [[ "$UPDATE_MODE" == "git" ]]; then
+    git show "${REMOTE_SHA}:backend/scripts/update_database_backup.py" > "$DB_BACKUP_HELPER" \
+        || err "PostgreSQL-Backuphelfer der Zielversion fehlt."
+elif [[ -f "$MSM_DIR/backend/scripts/update_database_backup.py" ]]; then
+    cp "$MSM_DIR/backend/scripts/update_database_backup.py" "$DB_BACKUP_HELPER"
+else
+    curl -fsSL \
+        "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/$LATEST_TAG/backend/scripts/update_database_backup.py" \
+        -o "$DB_BACKUP_HELPER" || err "PostgreSQL-Backuphelfer konnte nicht geladen werden."
+fi
+python3 -m py_compile "$DB_BACKUP_HELPER" \
+    || err "PostgreSQL-Backuphelfer ist ungültig."
+python3 "$DB_BACKUP_HELPER" --env-file "$ENV_FILE" --output "$DB_BACKUP_FILE" \
+    2>&1 | tee -a "$LOG_FILE" || err "PostgreSQL-Sicherung fehlgeschlagen. Update abgebrochen."
 
 ok "Code-/Konfigurationsbackup erstellt: $BACKUP_FILE"
 ok "Datenbank-Backup erstellt und verifiziert: $DB_BACKUP_FILE"
@@ -567,12 +565,6 @@ if $SYSTEMD_AVAILABLE && systemctl is-active --quiet msm-panel.service; then
     log "Nehme Panel für das Schema-Upgrade kurz in Wartung..."
     systemctl stop msm-panel.service || err "Panel konnte nicht in Wartung genommen werden."
 fi
-if $LEGACY_SQLITE_UPDATE; then
-    log "Migriere bestehende Panel-Datenbank einmalig nach PostgreSQL..."
-    MSM_DIR="$MSM_DIR" MSM_USER="$MSM_USER" \
-        bash "$MSM_DIR/helper-scripts/migrate-db-to-postgres.sh" 2>&1 | tee -a "$LOG_FILE" \
-        || err "SQLite-nach-PostgreSQL-Migration fehlgeschlagen."
-fi
 log "Führe geprüfte PostgreSQL-Schemamigration durch..."
 su - msm -c "
     cd $MSM_DIR/backend
@@ -606,6 +598,23 @@ fi
 if ! grep -q '^MSM_DIS_SIDECAR_URL=' "$ENV_FILE"; then
     echo 'MSM_DIS_SIDECAR_URL="http://127.0.0.1:9100"' >> "$ENV_FILE"
 fi
+
+# LiveKit (Anrufe im Messenger). Bestandsinstallationen kennen die beiden
+# Werte noch nicht; sie werden hier einmalig ergaenzt und danach nie wieder
+# angefasst. Ein Wechsel wuerde laufende Gespraeche abreissen lassen.
+LIVEKIT_API_KEY=$(grep -E '^MSM_LIVEKIT_API_KEY=' "$ENV_FILE" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+LIVEKIT_API_SECRET=$(grep -E '^MSM_LIVEKIT_API_SECRET=' "$ENV_FILE" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+LIVEKIT_API_KEY="${LIVEKIT_API_KEY:-}"
+LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET:-}"
+if [[ -z "$LIVEKIT_API_KEY" ]]; then
+    LIVEKIT_API_KEY="API$(python3 -c "import secrets; print(secrets.token_hex(6))")"
+    echo "MSM_LIVEKIT_API_KEY=\"$LIVEKIT_API_KEY\"" >> "$ENV_FILE"
+fi
+if [[ -z "$LIVEKIT_API_SECRET" ]]; then
+    LIVEKIT_API_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+    echo "MSM_LIVEKIT_API_SECRET=\"$LIVEKIT_API_SECRET\"" >> "$ENV_FILE"
+fi
+
 chmod 600 "$ENV_FILE"
 chown "$MSM_USER:$MSM_USER" "$ENV_FILE"
 
@@ -635,6 +644,66 @@ EOF
         chown "$MSM_USER:$MSM_USER" "$SEARXNG_ENV_FILE"
     fi
 fi
+
+# LiveKit-Sidecar Environment. Wird bei jedem Lauf neu geschrieben, damit
+# Sidecar und Backend garantiert dasselbe Schluesselpaar tragen.
+if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
+    LIVEKIT_ENV_FILE="$MSM_DIR/livekit-sidecar/.env"
+    # Adresse fuer die Medienports, hier auf dem Host ermittelt statt per STUN
+    # im Container. Begruendung in livekit-sidecar/medienadresse.py.
+    LIVEKIT_NODE_IP=$(python3 "$MSM_DIR/livekit-sidecar/medienadresse.py" "$ENV_FILE" 2>/dev/null || true)
+    cat > "$LIVEKIT_ENV_FILE" <<EOF
+# Automatisch generiert. Dokumentation: $MSM_DIR/livekit-sidecar/.env.example
+LIVEKIT_KEYS="$LIVEKIT_API_KEY: $LIVEKIT_API_SECRET"
+EOF
+    if [[ -n "$LIVEKIT_NODE_IP" ]]; then
+        echo "NODE_IP=\"$LIVEKIT_NODE_IP\"" >> "$LIVEKIT_ENV_FILE"
+    else
+        warn "Anrufe: keine Adresse fuer die Medienports gefunden. Anrufe verbinden, bleiben aber stumm."
+        warn "  MSM_LIVEKIT_NODE_IP=\"<oeffentliche IPv4>\" in $ENV_FILE eintragen und update.sh erneut ausfuehren."
+    fi
+    chmod 600 "$LIVEKIT_ENV_FILE"
+    chown "$MSM_USER:$MSM_USER" "$LIVEKIT_ENV_FILE"
+
+    # Die Caddy-Site gehoert install.sh; ein Update fasst sie nicht an. Ohne
+    # diese beiden Zeilen laeuft der Sidecar aber ins Leere: der Browser kaeme
+    # nicht an die Signalisierung und bekaeme nicht einmal eine Freigabefrage
+    # fuer Kamera und Bildschirm. Deshalb hier nachsehen und es sagen, statt
+    # eine fremde Konfiguration umzuschreiben.
+    # install.sh legt die Site je nach vorhandenem Import als .caddy oder .conf ab.
+    _msm_caddy_site=""
+    for _kandidat in /etc/caddy/conf.d/msm.caddy /etc/caddy/conf.d/msm.conf; do
+        [[ -f "$_kandidat" ]] && _msm_caddy_site="$_kandidat" && break
+    done
+    if [[ -n "$_msm_caddy_site" ]]; then
+        if ! grep -q "handle_path /livekit/\*" "$_msm_caddy_site" 2>/dev/null; then
+            warn "Caddy reicht /livekit noch nicht an den Medienserver durch — Anrufe im Messenger bleiben aus."
+            warn "  In $_msm_caddy_site neben 'handle /ws/*' ergaenzen:"
+            warn "      handle_path /livekit/* { reverse_proxy localhost:7880 }"
+        fi
+        if grep -q "camera=()" "$_msm_caddy_site" 2>/dev/null; then
+            warn "Caddy setzt noch camera=() — Kamera und Bildschirmfreigabe bleiben im Browser gesperrt."
+            warn "  In $_msm_caddy_site auf camera=(self), display-capture=(self) aendern."
+        fi
+        # Beides ohne Neustart: systemctl reload caddy genuegt.
+    fi
+fi
+
+# Cache-Regeln der Oberflaeche (seit 09/2026) stehen ebenfalls in der
+# Caddy-Site, die ein Update nicht anfasst. Ohne sie haelt ein Browser die
+# index.html von vor diesem Update fest. Die zeigt auf Chunks, die es jetzt
+# nicht mehr gibt, und Caddy beantwortete jeden fehlenden Chunk mit der
+# index.html — die Oberflaeche bleibt leer, bis der Cache verfaellt.
+for _kandidat in /etc/caddy/conf.d/msm.caddy /etc/caddy/conf.d/msm.conf; do
+    [[ -f "$_kandidat" ]] || continue
+    if grep -q "root \* /opt/msm/frontend/dist" "$_kandidat" 2>/dev/null \
+            && ! grep -q "handle /assets/\*" "$_kandidat" 2>/dev/null; then
+        warn "Caddy liefert die Oberflaeche noch ohne Cache-Regeln aus — ein Browser kann nach diesem Update eine alte, leere Seite festhalten."
+        warn "  $MSM_DIR/install.sh erneut ausfuehren (behaelt die vorhandenen Werte und schreibt die Site neu)"
+        warn "  oder in $_kandidat die Bloecke 'handle /assets/*' und 'handle' aus $MSM_DIR/Caddyfile.template uebernehmen."
+    fi
+    break
+done
 
 # ── DIS Sidecar Abhängigkeiten installieren ──
 log "Installiere DIS Sidecar-Abhängigkeiten..."
@@ -677,6 +746,10 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+    # --force-recreate: scheitert der Start an einem belegten Port, laesst
+    # Docker den angelegten Container liegen. Der naechste Versuch startete ihn
+    # dann ohne jede Portfreigabe, und systemd meldete „Started“ (27.09.2026).
+    # Frisch angelegt scheitert jeder Versuch sichtbar, bis der Port frei ist.
     # SearXNG Search Sidecar Service
     if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
         cat > /etc/systemd/system/msm-searxng.service <<EOF
@@ -692,7 +765,7 @@ Group=$MSM_USER
 WorkingDirectory=$MSM_DIR/searxng-sidecar
 Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ExecStart=/usr/bin/docker compose up
+ExecStart=/usr/bin/docker compose up --force-recreate
 ExecStop=/usr/bin/docker compose down
 Restart=on-failure
 RestartSec=5
@@ -702,6 +775,39 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
+    fi
+
+    # LiveKit Media Sidecar Service (Anrufe im Messenger)
+    if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
+        cat > /etc/systemd/system/msm-livekit.service <<EOF
+[Unit]
+Description=MSM LiveKit Media Sidecar
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=$MSM_USER
+Group=$MSM_USER
+WorkingDirectory=$MSM_DIR/livekit-sidecar
+Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/usr/bin/docker compose up --force-recreate
+ExecStop=/usr/bin/docker compose down
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        # Bestandsinstallationen haben die beiden Medienports noch nicht offen.
+        # Ohne sie kommt ein Anruf zustande und bleibt stumm.
+        if command -v ufw &>/dev/null; then
+            ufw allow 7881/tcp comment 'MSM LiveKit media (TCP fallback)' 2>/dev/null || true
+            ufw allow 7882/udp comment 'MSM LiveKit media' 2>/dev/null || true
+        fi
     fi
 
     # Panel Service
@@ -719,9 +825,10 @@ Group=msm
 WorkingDirectory=/opt/msm/backend
 Environment="PATH=/opt/msm/backend/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
-ExecStart=/opt/msm/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
+ExecStart=/opt/msm/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1 --timeout-graceful-shutdown 2
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=10
 StandardOutput=journal
 StandardError=journal
 
@@ -769,6 +876,9 @@ EOF
     systemctl enable msm-dis-sidecar.service
     if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
         systemctl enable msm-searxng.service 2>/dev/null || true
+    fi
+    if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
+        systemctl enable msm-livekit.service 2>/dev/null || true
     fi
     systemctl enable msm-panel.service
     if [[ -f /etc/systemd/system/msm-agent.service ]]; then
@@ -905,8 +1015,37 @@ if $SYSTEMD_AVAILABLE; then
         ok "SearXNG Sidecar bereit."
     fi
 
+    if [[ -f /etc/systemd/system/msm-livekit.service ]]; then
+        log "Starte LiveKit Media Sidecar..."
+        systemctl restart msm-livekit.service 2>/dev/null \
+            || systemctl start msm-livekit.service 2>/dev/null || true
+        # Erst pruefen, dann „bereit“ sagen: systemctl gelingt auch, wenn der
+        # Container darin an belegten Ports scheitert. Am 27.09.2026 hielt ein
+        # fremder LiveKit 7881/7882, und nichts im Lauf sagte das.
+        _livekit_ok=false
+        for _ in $(seq 1 15); do
+            if curl -fsS --max-time 2 http://127.0.0.1:7880 >/dev/null 2>&1; then
+                _livekit_ok=true
+                break
+            fi
+            sleep 1
+        done
+        if [[ "$_livekit_ok" == true ]]; then
+            ok "LiveKit Sidecar bereit."
+        else
+            warn "LiveKit Sidecar antwortet nicht auf 127.0.0.1:7880. Anrufe im Messenger gehen so nicht."
+            _livekit_belegt=$(ss -Hlntup '( sport = :7880 or sport = :7881 or sport = :7882 )' 2>/dev/null || true)
+            if [[ -n "$_livekit_belegt" ]]; then
+                warn "  Auf seinen Ports lauscht bereits:"
+                while IFS= read -r _zeile; do warn "    $_zeile"; done <<< "$_livekit_belegt"
+                warn "  Diesen Dienst anhalten oder auf andere Ports legen, dann: systemctl restart msm-livekit"
+            fi
+            warn "  Ursache im Journal: journalctl -u msm-livekit -n 30"
+        fi
+    fi
+
     # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)
-    if [[ -f "$MSM_DIR/backend/msm.db" ]] || grep -q '^MSM_DATABASE_URL=.*postgresql' "$ENV_FILE" 2>/dev/null; then
+    if grep -q '^MSM_DATABASE_URL=.*postgresql' "$ENV_FILE" 2>/dev/null; then
         log "Pruefe DIS-Migration (Fernet -> DIS)..."
         su - "$MSM_USER" -c "
             cd $MSM_DIR/backend

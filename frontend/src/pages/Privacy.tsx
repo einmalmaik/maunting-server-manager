@@ -1,17 +1,24 @@
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { LegalDocumentViewer, type LegalDocumentData } from '@/components/ui/LegalDocumentViewer'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 export function Privacy() {
   const { isAuthenticated } = useAuthStore()
   const { t } = useTranslation()
 
+  useEffect(() => {
+    // Ohne Anmeldung kennt der Helfer kein Konto und meldet nichts.
+    if (isAuthenticated) meldeErrungenschaft('starter_privacy_pledge')
+  }, [isAuthenticated])
+
   const document: LegalDocumentData = {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-09-02',
-    version: '3.0',
+    lastUpdated: '2026-09-28',
+    version: '3.11',
     meta: 'Maunting Studios — Sicherheit braucht Vertrauen',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
@@ -44,6 +51,47 @@ export function Privacy() {
         ],
       },
       {
+        // Der Messenger ist der einzige Bereich, in dem die Instanz Inhalte
+        // weiterleitet, die sie selbst nicht lesen kann. Dazu gehoert auch die
+        // Kehrseite: der Schluessel gehoert dem Geraet, und wer alle Geraete
+        // verliert, verliert den Verlauf. Niemand kann ihn zurueckholen, auch
+        // der Betreiber nicht.
+        heading: t('privacyPolicy.sections.messenger.heading'),
+        body: t('privacyPolicy.sections.messenger.body'),
+        items: [
+          t('privacyPolicy.sections.messenger.items.envelopes'),
+          t('privacyPolicy.sections.messenger.items.deviceKey'),
+          t('privacyPolicy.sections.messenger.items.deviceFanout'),
+          t('privacyPolicy.sections.messenger.items.deviceHistory'),
+          t('privacyPolicy.sections.messenger.items.devicePin'),
+          t('privacyPolicy.sections.messenger.items.ratchet'),
+          t('privacyPolicy.sections.messenger.items.groups'),
+          // Wer alle wecken darf, entscheidet das empfangende Geraet. Der
+          // Server kann es nicht: er liest den Inhalt nicht.
+          t('privacyPolicy.sections.messenger.items.mentions'),
+          t('privacyPolicy.sections.messenger.items.attachments'),
+          t('privacyPolicy.sections.messenger.items.stories'),
+          // Was beim Loeschen wirklich passiert. Steht hier, weil die Antwort
+          // frueher "nichts" war: die Zeile verschwand aus der Anzeige, der
+          // Umschlag blieb im Postfach und der Anhang auf der Platte.
+          t('privacyPolicy.sections.messenger.items.deletion'),
+          // Verschwindende Nachrichten samt der Grenze: beim Server loeschen
+          // kann nur, wer hochgeladen hat.
+          t('privacyPolicy.sections.messenger.items.retention'),
+          t('privacyPolicy.sections.messenger.items.receipts'),
+          // Anrufe sind die eine Stelle, an der die Instanz mehr erfaehrt als
+          // bei Nachrichten: der Inhalt bleibt verschluesselt, aber wer wann
+          // mit wem in einem Raum war, sieht der Medienserver. Das gehoert
+          // hierher und nicht in eine Fussnote.
+          t('privacyPolicy.sections.messenger.items.calls'),
+          t('privacyPolicy.sections.messenger.items.callMetadata'),
+          // Die eine Ausnahme von "kein Anruf wird gespeichert": eine
+          // Moderationshandlung hinterlaesst einen Eintrag. Wer anderen das
+          // Wort nehmen kann, muss dafuer nachvollziehbar sein.
+          t('privacyPolicy.sections.messenger.items.callModeration'),
+        ],
+      },
+      {
         heading: t('privacyPolicy.sections.providers.heading'),
         body: t('privacyPolicy.sections.providers.body'),
         items: [
@@ -52,6 +100,9 @@ export function Privacy() {
           t('privacyPolicy.sections.providers.items.oauth'),
           t('privacyPolicy.sections.providers.items.support'),
           t('privacyPolicy.sections.providers.items.s3'),
+          // Die Download-Hinweise in der Seitenleiste sind der einzige Ort, an dem das Panel
+          // auf einen Fremdserver verweist, ohne dass der Betreiber ihn konfiguriert hat.
+          t('privacyPolicy.sections.providers.items.downloads'),
         ],
       },
       {
@@ -68,11 +119,17 @@ export function Privacy() {
           // der Verschluesselung — sie schuetzt die Datenbank, nicht die
           // Uebertragung an den Modellanbieter.
           t('privacyPolicy.sections.ai.items.memoryConsent'),
+          t('privacyPolicy.sections.ai.items.memorySearch'),
           t('privacyPolicy.sections.ai.items.attachments'),
           // Zielpunkt 17: der autonome Modus veraendert, wer eine Aktion
           // ausloest. Das gehoert ausdruecklich in den Datenschutzhinweis.
           t('privacyPolicy.sections.ai.items.autonomy'),
           t('privacyPolicy.sections.ai.items.tools'),
+          // Die Gegenrichtung zum Punkt darueber: was die Werkzeuge erreichen,
+          // steht dort, und der Messenger gehoert seit 09/2026 ausdruecklich
+          // nicht dazu. Das ist keine Selbstverstaendlichkeit, sondern ein
+          // Rueckbau — es gab Werkzeuge dafuer.
+          t('privacyPolicy.sections.ai.items.noMessenger'),
           t('privacyPolicy.sections.ai.items.voice'),
           // Die Kopplung an die Guardian-Engine: seit ihr kann eine
           // Verarbeitung beginnen, ohne dass jemand am Panel sitzt. Das ist die
@@ -156,6 +213,7 @@ export function Privacy() {
         items: [
           t('privacyPolicy.sections.retention.items.operator'),
           t('privacyPolicy.sections.retention.items.deletion'),
+          t('privacyPolicy.sections.retention.items.export'),
           t('privacyPolicy.sections.retention.items.audit'),
         ],
       },

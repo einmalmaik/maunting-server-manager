@@ -51,7 +51,7 @@ export const GuardianBadge: React.FC<GuardianBadgeProps> = ({ server }) => {
 
   if (observedState === "quarantined") {
     return (
-      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-status-error/30 bg-status-error/10 text-status-error font-mono-sm text-xs font-medium">
+      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-status-destructive/30 bg-status-destructive/10 text-status-destructive font-mono-sm text-xs font-medium">
         <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
         {t("servers.guardian.badge.quarantined")}
       </span>
@@ -74,7 +74,7 @@ export const GuardianBadge: React.FC<GuardianBadgeProps> = ({ server }) => {
   if (observedState !== "healthy") {
     const Icon = observedState === "offline" ? WifiOff : observedState === "error" ? AlertTriangle : CircleHelp;
     return (
-      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border font-mono-sm text-xs font-medium ${observedState === "error" ? "border-status-error/30 bg-status-error/10 text-status-error" : "border-outline-variant bg-surface-container-low text-on-surface-variant"}`}>
+      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border font-mono-sm text-xs font-medium ${observedState === "error" ? "border-status-destructive/30 bg-status-destructive/10 text-status-destructive" : "border-outline-variant bg-surface-container-low text-on-surface-variant"}`}>
         <Icon className="w-3.5 h-3.5 flex-shrink-0" />
         {t(`servers.guardian.badge.${observedState}`)}
       </span>

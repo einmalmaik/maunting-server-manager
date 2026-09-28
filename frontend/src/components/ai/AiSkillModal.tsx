@@ -32,14 +32,14 @@ export function AiSkillModal({ open, onClose }: AiSkillModalProps) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="skills-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm animate-fade-in"
+      className="msm-modal-overlay sm:p-6 animate-fade-in"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
     >
       <div
         ref={modalRef}
-        className="relative flex flex-col w-full max-w-3xl max-h-[85vh] rounded-2xl border border-outline-variant/40 bg-surface shadow-2xl overflow-hidden animate-content-show"
+        className="relative flex flex-col w-full max-w-3xl max-h-[85vh] rounded-2xl border border-outline-variant/40 bg-surface shadow-2xl overflow-hidden animate-scale-in"
       >
         <header className="flex items-center justify-between px-5 py-3.5 border-b border-outline-variant/30 bg-surface-container-high/40">
           <div className="flex items-center gap-2">
@@ -53,7 +53,7 @@ export function AiSkillModal({ open, onClose }: AiSkillModalProps) {
             variant="ghost"
             size="sm"
             onClick={onClose}
-            aria-label={t('common.close', 'Schließen')}
+            aria-label={t('common.close')}
             className="h-9 w-9 rounded-full p-0 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/80 transition-colors"
           >
             <X className="h-5 w-5" aria-hidden="true" />

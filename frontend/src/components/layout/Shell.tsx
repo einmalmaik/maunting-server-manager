@@ -6,11 +6,31 @@ import { VersionFooter } from '@/components/VersionFooter'
 import { AiRunNotice } from '@/components/ai/AiRunNotice'
 import { ServerIncidentNotifier } from '@/components/notifications/ServerIncidentNotifier'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
+import { AnrufEbene } from '@/components/calling/AnrufEbene'
+import { CrossDeviceCallBanner } from '@/components/calling/CrossDeviceCallBanner'
+import { api } from '@/api/client'
+import { useMessengerSperreBereitschaft } from '@/hooks/useMessengerSperre'
+import { usePresenceAndActivity } from '@/hooks/usePresenceAndActivity'
 
 export function Shell() {
+  useMessengerSperreBereitschaft()
+
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false)
   const [sidebarHidden, setSidebarHidden] = useState(false)
+  const [socialEnabled, setSocialEnabled] = useState(true)
   const mobileNavigationTriggerRef = useRef<HTMLButtonElement>(null)
+
+  const { status: presenceStatus, changeStatus: handlePresenceChange } = usePresenceAndActivity(socialEnabled, true)
+
+  useEffect(() => {
+    api<{ social_enabled?: boolean }>('/settings/public')
+      .then((res) => {
+        if (typeof res.social_enabled === 'boolean') {
+          setSocialEnabled(res.social_enabled)
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     const handleToggle = (e: Event) => {
@@ -49,6 +69,8 @@ export function Shell() {
 
   const location = useLocation()
   const isAiPage = location.pathname === '/ai' || location.pathname.startsWith('/ai')
+  const isChatPage = location.pathname === '/chat' || location.pathname.startsWith('/chat')
+  const isFullHeightPage = isAiPage || isChatPage
 
   return (
     // `overflow-x-clip` statt `overflow-x-hidden`: `hidden` auf einer Achse
@@ -57,12 +79,24 @@ export function Shell() {
     // — und jedes `position: sticky` darunter, allen voran `.msm-topbar`,
     // bekommt dadurch nie einen Versatz. `clip` klemmt den waagerechten
     // Überlauf genauso ab, erzeugt aber keinen Scroll-Container.
-    <div className={`bg-background text-on-surface flex relative overflow-x-clip ${isAiPage ? 'h-screen max-h-screen overflow-hidden' : 'min-h-screen'}`}>
+    //
+    // `100dvh` statt `h-screen` auf den Vollhöhen-Seiten: `vh` rechnet am
+    // Telefon mit der Höhe **ohne** eingefahrene Adressleiste und ist damit
+    // größer als das, was man sieht. Im Messenger hieß das, dass die
+    // Eingabeleiste unter den Bildschirmrand rutschte, sobald der Browser seine
+    // Leiste einblendet — also genau beim Tippen. `dvh` folgt dem wirklich
+    // sichtbaren Bereich. Die mobile Navigation unten macht es schon so.
+    <div className={`bg-background text-on-surface flex relative overflow-x-clip ${isFullHeightPage ? 'h-[100dvh] max-h-[100dvh] overflow-hidden' : 'min-h-screen'}`}>
       {/* Deep Grid Background */}
       <div className="absolute inset-0 msm-deep-grid opacity-30 pointer-events-none" />
 
       {/* Sidebar */}
-      {!sidebarHidden && <Sidebar />}
+      {!sidebarHidden && (
+        <Sidebar
+          presenceStatus={presenceStatus}
+          onPresenceChange={handlePresenceChange}
+        />
+      )}
 
       {mobileNavigationOpen && (
         <div className="fixed inset-0 z-50 h-[100dvh] w-screen overflow-hidden lg:hidden" role="presentation" data-testid="mobile-navigation-layer">
@@ -71,25 +105,31 @@ export function Shell() {
             aria-hidden="true"
             onClick={closeMobileNavigation}
           />
-          <Sidebar mobile onNavigate={closeMobileNavigation} />
+          <Sidebar
+            mobile
+            onNavigate={closeMobileNavigation}
+            presenceStatus={presenceStatus}
+            onPresenceChange={handlePresenceChange}
+          />
         </div>
       )}
 
       {/* Main Content Area */}
-      <div className={`flex-1 ${sidebarHidden ? 'ml-0' : 'lg:ml-64'} flex flex-col min-w-0 relative z-10 transition-all duration-300 ${isAiPage ? 'h-screen max-h-screen overflow-hidden' : ''}`}>
+      <div className={`flex-1 ${sidebarHidden ? 'ml-0' : 'lg:ml-64'} flex flex-col min-w-0 relative z-10 transition-all duration-300 ${isFullHeightPage ? 'h-[100dvh] max-h-[100dvh] overflow-hidden' : ''}`}>
         <Topbar menuButtonRef={mobileNavigationTriggerRef} onOpenNavigation={() => setMobileNavigationOpen(true)} />
+        <CrossDeviceCallBanner />
         {/* Ohne `overflow-auto`: `main` hat als `flex-1` in einer Spalte ohne
             feste Höhe immer genau seine Inhaltshöhe, lief also nie über. Die
             Klasse hat nur einen Scroll-Container erzeugt, an dem sich die
             Klebeelemente der Seiten (Reiterleiste, Inhaltsverzeichnisse)
             vergeblich ausgerichtet haben. Breite Inhalte bringen ihr eigenes
             `overflow-x-auto` mit. */}
-        <main className={`flex-1 relative flex flex-col min-h-0 ${isAiPage ? 'p-0 overflow-hidden h-[calc(100dvh-3rem)] max-h-[calc(100dvh-3rem)] lg:h-[100dvh] lg:max-h-[100dvh]' : 'p-margin-mobile md:p-margin-desktop'}`}>
-          <div className={`relative z-10 flex-1 w-full flex flex-col min-h-0 ${isAiPage ? 'h-full overflow-hidden' : ''}`}>
+        <main className={`flex-1 relative flex flex-col min-h-0 ${isFullHeightPage ? 'p-0 overflow-hidden h-[calc(100dvh-3rem)] max-h-[calc(100dvh-3rem)] lg:h-[100dvh] lg:max-h-[100dvh]' : 'p-margin-mobile md:p-margin-desktop'}`}>
+          <div className={`relative z-10 flex-1 w-full flex flex-col min-h-0 ${isFullHeightPage ? 'h-full overflow-hidden' : ''}`}>
             <Outlet />
           </div>
 
-          {!isAiPage && <VersionFooter />}
+          {!isFullHeightPage && <VersionFooter />}
         </main>
       </div>
 
@@ -104,6 +144,9 @@ export function Shell() {
 
       {/* Aktive Pop-ups / Ankündigungen des Panels */}
       <PanelPopupModal />
+
+      {/* Anruf-Overlay für Direkt- und Gruppenanrufe (global im Shell verfügbar) */}
+      <AnrufEbene />
     </div>
   )
 }

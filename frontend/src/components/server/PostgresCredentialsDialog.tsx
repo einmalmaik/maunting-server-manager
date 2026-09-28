@@ -1,6 +1,7 @@
 import { Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { PostgresCredential } from "@/types";
+import { Button } from '@/Singra/UI'
 
 interface Props {
   credentials: PostgresCredential[];
@@ -12,7 +13,7 @@ export function PostgresCredentialsDialog({ credentials, onClose }: Props) {
   if (!credentials.length) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div className="msm-modal-overlay">
       <div className="msm-card w-full max-w-2xl p-6">
         <h2 className="font-headline text-headline-sm text-primary mb-2">
           {t("servers.postgres.credentialsTitle")}
@@ -35,22 +36,22 @@ export function PostgresCredentialsDialog({ credentials, onClose }: Props) {
                     {t("databases.connectionUrl")}: {dsn}
                   </div>
                 </div>
-                <button
+                <Button variant="secondary"
                   type="button"
-                  className="msm-btn-secondary mt-3 inline-flex items-center gap-2 px-3 py-2"
+                  className="mt-3 inline-flex items-center gap-2"
                   onClick={() => navigator.clipboard.writeText(dsn)}
                 >
                   <Copy className="w-4 h-4" />
                   {t("servers.postgres.copyDsn")}
-                </button>
+                </Button>
               </div>
             );
           })}
         </div>
         <div className="flex justify-end mt-5">
-          <button type="button" className="msm-btn-primary px-4 py-2" onClick={onClose}>
+          <Button type="button" onClick={onClose}>
             {t("common.close")}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

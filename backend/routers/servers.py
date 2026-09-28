@@ -9,7 +9,6 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
-from config import get_cors_origins
 from database import SessionLocal
 from database import get_db
 from models import Server, User
@@ -20,12 +19,14 @@ from dependencies import (
     get_current_user_for_ws,
     require_server_permission,
     verify_csrf,
+    ws_origin_erlaubt,
 )
 from services import audit_service, permission_service, postgres_service
 from games import get_plugin
 from games.base import container_name_for, _console_log_path, _append_console_log
 from services import EmailService, docker_service
 from services import exec_service
+from services.achievement_service import AchievementService
 from services.docker_iptables_service import accept_server as iptables_accept_server
 from services.docker_iptables_service import revoke_server as iptables_revoke_server
 from services.firewall_service import close_ports, open_ports
@@ -586,6 +587,11 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
 
             mark_guardian_configuration_changed(server)
 
+        if changed_ports:
+            AchievementService.melde(db, user.id, "server_port_forwarder")
+        if payload.get("auto_restart"):
+            AchievementService.melde(db, user.id, "server_auto_restart")
+
         db.commit()
         db.refresh(server)
     except HTTPException:
@@ -707,8 +713,11 @@ async def restart_server(
 
 
 @router.post("/{server_id}/auth-setup/cancel")
-async def cancel_auth_setup(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+def cancel_auth_setup(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
     """Bricht einen laufenden Auth-Setup-Recovery-Vorgang ab.
+
+    ``def`` wie ``kill_server``: ``docker_service.stop`` wartet bis zu 10 s an
+    der Node und hielt bis 27.09.2026 dabei die Ereignisschleife an.
 
     Wird aufgerufen, wenn der User den interaktiven Auth-Flow manuell abbrechen
     will (z.B. weil er das Spiel doch nicht neu authentifizieren moechte oder
@@ -1031,11 +1040,11 @@ def unlock_server(
 def _ws_origin_allowed(origin: str | None) -> bool:
     """Prueft den Origin-Header des WS-Upgrade-Requests. SameSite-Cookie + Origin-Check
     ersetzen die fehlende CSRF-Pruefung (WS sind keine 'simple requests').
+
+    Die Konsole verlangt die Herkunft auch beim Bearer-Weg; die Pruefung selbst
+    steht in `dependencies.ws_origin_erlaubt`.
     """
-    if not origin:
-        return False
-    allowed = {o.rstrip("/") for o in get_cors_origins()}
-    return origin.rstrip("/") in allowed
+    return ws_origin_erlaubt(origin)
 
 
 @router.websocket("/{server_id}/console/ws")
@@ -1155,6 +1164,7 @@ def server_console_input(
     if not result["ok"]:
         # Generische Fehlermeldung - keine Container-Internas leaken.
         raise HTTPException(status_code=500, detail="Eingabe konnte nicht zugestellt werden")
+    AchievementService.melde(db, user.id, "terminal_commander", commit=True)
     return {"ok": True}
 
 
@@ -1249,6 +1259,7 @@ def server_exec(
         # Generische Fehlermeldung -- keine Container-Internas leaken.
         raise HTTPException(status_code=500, detail="Exec fehlgeschlagen")
 
+    AchievementService.melde(db, user.id, "terminal_commander", commit=True)
     return {
         "ok": True,
         "stdout": result["stdout"],

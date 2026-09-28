@@ -26,7 +26,7 @@ export function AiTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2">
           <Bot className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 id="ai-profile-title" className="font-headline text-lg font-semibold text-on-surface">
+          <h2 id="ai-profile-title" className="font-headline text-title-lg font-semibold text-on-surface">
             {t('ai.profile.title')}
           </h2>
         </div>

@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { aiApi, type AiActionProposal, type AiRunInfo } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
 import { Button } from '@/Singra/UI'
+import { ChatHintergrund } from '@/features/chatHintergrund'
 import { toast } from '@/stores/toastStore'
 import { AiVerlauf, mergeEntries } from './AiVerlauf'
 import { useAiLauf } from './useAiLauf'
@@ -166,8 +167,12 @@ export function GuardianAnsicht() {
   const leer = entries.length === 0
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest">
-      <header className="flex shrink-0 items-center gap-2 border-b border-outline-variant/40 px-4 py-3">
+    <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest">
+      {/* Derselbe Hintergrund wie im KI-Chat: eine Wahl für den ganzen
+          Bereich, eingestellt wird sie drüben im Chat. */}
+      <ChatHintergrund bereich="ki" />
+
+      <header className="relative flex shrink-0 items-center gap-2 border-b border-outline-variant/40 px-4 py-3">
         <ShieldAlert className="h-4 w-4 shrink-0 text-secondary" aria-hidden="true" />
         <div className="min-w-0">
           <h2 className="truncate font-headline text-sm font-semibold text-on-surface">
@@ -215,7 +220,7 @@ export function GuardianAnsicht() {
 
       <div
         ref={verlaufRef}
-        className="min-h-0 flex-1 overflow-y-auto"
+        className="relative min-h-0 flex-1 overflow-y-auto"
         aria-live="polite"
         onScroll={(event) => {
           const { scrollTop, scrollHeight, clientHeight } = event.currentTarget
@@ -226,7 +231,7 @@ export function GuardianAnsicht() {
           {leer && !laedt && (
             <div className="py-16 text-center">
               <Sparkles className="mx-auto h-10 w-10 text-primary/70" aria-hidden="true" />
-              <h3 className="mt-4 font-headline text-lg font-semibold text-on-surface">
+              <h3 className="mt-4 font-headline text-title-lg font-semibold text-on-surface">
                 {t('ai.guardian.emptyTitle')}
               </h3>
               <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-on-surface-variant">
@@ -244,7 +249,7 @@ export function GuardianAnsicht() {
 
       {/* Kein Eingabefeld — siehe der Kommentar über dieser Komponente. Der
           Hinweis steht dort, wo sonst das Feld wäre: sonst sucht man es. */}
-      <p className="shrink-0 border-t border-outline-variant/40 px-4 py-3 text-xs text-on-surface-variant">
+      <p className="relative shrink-0 border-t border-outline-variant/40 px-4 py-3 text-xs text-on-surface-variant">
         {t('ai.guardian.readOnly')}
       </p>
     </section>

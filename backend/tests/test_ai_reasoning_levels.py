@@ -155,6 +155,26 @@ def test_a_mandatory_model_never_pretends_to_be_off() -> None:
     assert aktiv is True
 
 
+def test_a_model_the_catalog_is_silent_about_gets_nothing_sent() -> None:
+    """``denkt is None`` heißt „unbekannt" — gesendet wird wie bei „denkt nicht".
+
+    Die Oberfläche unterscheidet die beiden, der Sendepfad nicht: ein
+    ``reasoning_effort`` an ein Modell, das keines kennt, ist ein ``400``, und
+    ohne Katalogauskunft ist „nichts senden" die einzige Wahl ohne Risiko.
+    ``darf_abschalten`` bleibt dabei ein Wahrheitswert — die Antwort geht als
+    ``can_disable`` in die API, und ein ``None`` dort wäre ein drittes Wort für
+    etwas, das nur zwei kennt.
+    """
+    modell = _modell(model_id="gpt-6-luna", denkt=None, stufen=(), standard_stufe=None)
+    assert ai_reasoning.darf_abschalten(modell) is False
+    assert ai_reasoning.darf_nachdenken(modell, None) is False
+    assert ai_reasoning.waehlbare_stufen(modell, None) == []
+    assert ai_reasoning.klemmen(modell, wunsch="high", aktiv=True, deckel=None) == (
+        False,
+        None,
+    )
+
+
 def test_a_mandatory_model_still_obeys_the_cap_for_its_depth() -> None:
     """Nicht abschaltbar heißt nicht unbegrenzt tief."""
     modell = _modell(model_id="qwen/qwen3.8-max", zwingend=True)

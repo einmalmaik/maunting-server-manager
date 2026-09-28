@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { api, clearCsrfTokenMemory } from '@/api/client'
 import { isNetworkOrOfflineError } from '@/lib/networkErrors'
+import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { leereOfflineAblage } from '@/lib/offlineAblage'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { useNodeStore } from '@/stores/nodeStore'
 import { useToastStore } from '@/stores/toastStore'
@@ -8,6 +10,17 @@ import { useConfirmStore } from '@/stores/confirmStore'
 import { usePromptStore } from '@/stores/promptStore'
 import { clearSqlConsoleHistory } from '@/lib/sqlConsoleStorage'
 import { useVaultStore } from '@/desktop/vault/vaultStore'
+import { clearMemoryKeyStore } from '@/services/e2eeCrypto'
+import { clearGeraeteMemory } from '@/services/e2eeGeraet'
+import { clearNotesKeyCache } from '@/services/notesCalendarCrypto'
+import { leereAntwortSperren, leereGeraeteStand, leereUmzuege } from '@/services/gruppenSchluessel'
+import { leereMailboxAbos } from '@/services/mailboxAbo'
+import { leereGruppenNamen } from '@/services/gruppenName'
+import { leereGespraeche } from '@/services/gespraechsListe'
+import { leereMailboxNachweise } from '@/services/mailboxNachweis'
+import { leereKlartextSpeicher } from '@/services/klartextSpeicher'
+import { kuendigeMailboxPush, leereMailboxPush } from '@/services/mailboxPush'
+import { kuendige } from '@/services/pushAbo'
 import type { User } from '@/types'
 
 const CACHED_USER_KEY = 'msm_cached_user'
@@ -27,6 +40,10 @@ function loadCachedUser(): User | null {
 }
 
 function saveCachedUser(user: User | null): void {
+  // Der Geräteschlüssel des Messengers hängt am Konto und wird hier bekannt
+  // gegeben. Diese Zeile steht vor dem `try`: ein gesperrter localStorage darf
+  // nicht dazu führen, dass `e2eeGeraet` beim vorigen Konto bleibt.
+  setzeAngemeldetesKonto(user?.id ?? null)
   try {
     if (user) {
       localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user))
@@ -61,6 +78,10 @@ interface AuthState {
 let raeumungen = 0
 
 const initialCachedUser = loadCachedUser()
+// Der Start aus dem Zwischenspeicher geht nicht durch `saveCachedUser`, also
+// hier. Ohne diese Zeile stünde der Messenger nach einem Neuladen ohne Konto da
+// und fände seinen Geräteschlüssel nicht.
+setzeAngemeldetesKonto(initialCachedUser?.id ?? null)
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: initialCachedUser,
@@ -116,6 +137,42 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     usePermissionsStore.getState().reset()
     // Tresor sperren und alle Klartext-Einträge sowie CryptoKeys aus dem RAM entfernen (SEC-05)
     useVaultStore.getState().lock()
+    // E2EE In-Memory-Schlüssel aus dem RAM leeren. Der Schlüsselbund in der
+    // IndexedDB bleibt wie bisher liegen — er ist an das Gerät gebunden, nicht
+    // an die Sitzung, und ein erneutes Anmelden soll nicht wieder nach dem
+    // Wiederherstellungsschlüssel fragen.
+    clearMemoryKeyStore()
+    clearGeraeteMemory()
+    clearNotesKeyCache()
+    leereUmzuege()
+    leereAntwortSperren()
+    // Die Besitznachweise der Mailboxen liegen nur im Arbeitsspeicher und sind
+    // aus dem Gruppengeheimnis jederzeit nachrechenbar. Hier stehenzulassen
+    // hiesse, dem naechsten Menschen an diesem Geraet fertige Nachweise zu
+    // hinterlassen.
+    leereMailboxNachweise()
+    // Und die Abos: was der Strom melden soll, gehoert dem angemeldeten Konto.
+    leereMailboxAbos()
+    // Die Gruppennamen. Sie liegen versiegelt, aber sie liegen da — und wie
+    // eine Gruppe heisst, sagt ueber ihren Besitzer oft mehr als jede einzelne
+    // Nachricht darin. Der naechste Mensch an diesem Geraet erbt sie nicht.
+    leereGruppenNamen()
+    // Und die Gespraechsliste. Seit Stufe 6b fuehrt sie der Client, weil der
+    // Server nicht mehr wissen soll, wer mit wem schreibt — dann darf sie auch
+    // keinen Abmeldevorgang ueberleben.
+    leereGespraeche()
+    // Dasselbe fuer die Push-Adresse. Die Zeilen im Panel raeumt `logout()`
+    // weg, solange die Sitzung noch gilt; hier faellt nur der gemerkte Stand,
+    // damit der naechste Anmelder nicht auf eine Meldung wartet, die diese
+    // Datei fuer laengst abgeschickt haelt.
+    leereMailboxPush()
+    // Und der Lesestand der eigenen Geräte-Mailbox. Er ist je Konto getrennt,
+    // aber stehenzulassen hiesse, dem nächsten Konto in diesem Tab zu
+    // verschweigen, was vor seiner Anmeldung dort ankam.
+    leereGeraeteStand()
+    // Entschlüsselte Verläufe, Anhänge und die Suche darüber. Sie lagen bis
+    // 09/2026 nach dem Abmelden bis zum Neuladen des Tabs im Speicher.
+    leereKlartextSpeicher()
     // Die Knotenliste hält Name, Adresse und Port des Agenten sowie den
     // TLS-Fingerabdruck. Ohne dieses clear() bliebe sie bis zum nächsten
     // Neuladen der Seite im Speicher des Tabs liegen.
@@ -131,12 +188,34 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    // Vor dem Abmelden, solange die Sitzung noch gilt: sonst lehnt das Panel
+    // das Austragen ab und das Gerät bekäme weiter Benachrichtigungen für ein
+    // Konto, das sich hier abgemeldet hat.
+    //
+    // Zweimal, weil es zwei Tabellen sind: `kuendigeMailboxPush` trägt die
+    // mailboxgebundenen Zeilen aus, `kuendige` die kontogebundene Adresse. Die
+    // ersten kennen kein Konto — sie können deshalb auch nicht mit einem
+    // wegfallen, und sie stehenzulassen hiesse, dass dieses Gerät weiter
+    // Meldungen über Mailboxen bekommt, deren Schlüssel gerade aus dem
+    // Speicher gefallen sind.
+    //
+    // **In dieser Reihenfolge.** `kuendige` beendet am Ende das Abonnement im
+    // Browser, und danach findet `kuendigeMailboxPush` keine Adresse mehr, die
+    // es austragen könnte. Andersherum bliebe die Zeile für immer stehen.
+    await kuendigeMailboxPush()
+    await kuendige()
     try {
       await api('/auth/logout', { method: 'POST' })
     } catch {
       // Ignorieren: das Backend hat die Cookies gelöscht, der lokale Zustand
       // fällt gleich darunter unabhängig davon.
     }
+    // Notizen, Termine und ungesendete Änderungen der Offline-Ablage fallen
+    // nur beim bewussten Abmelden. Läuft die Sitzung bloß ab (lange offline),
+    // bleiben sie an dieses Konto gebunden liegen: meldet es sich wieder an,
+    // gehen seine Änderungen hinaus, meldet sich ein anderes an, findet es die
+    // Ablage leer (`lib/offlineAblage.ts`).
+    leereOfflineAblage()
     get().clearSession()
   },
 

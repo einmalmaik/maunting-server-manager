@@ -214,12 +214,22 @@ class Server(Base):
     postgres_users: Mapped[list["PostgresUser"]] = relationship(
         "PostgresUser", back_populates="server", cascade="all, delete-orphan"
     )
+    postgres_instance: Mapped["PostgresInstance | None"] = relationship(
+        "PostgresInstance", back_populates="server", cascade="all, delete-orphan", uselist=False
+    )
     incidents: Mapped[list["Incident"]] = relationship(
         "Incident", back_populates="server", cascade="all, delete-orphan"
     )
     change_events: Mapped[list["ChangeEvent"]] = relationship(
         "ChangeEvent", back_populates="server", cascade="all, delete-orphan"
     )
+
+    @property
+    def server_kind(self) -> str:
+        """``database`` fuer Datenbankserver (Blueprint ``postgres`` mit eigener
+        Instanz), sonst ``application``. Beides entsteht nur zusammen
+        (``ServerCreate`` erzwingt es, der Blueprint-Wechsel sperrt es)."""
+        return "database" if self.game_type == "postgres" else "application"
 
     @property
     def started_at(self) -> datetime | None:

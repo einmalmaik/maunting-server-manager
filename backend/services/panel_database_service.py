@@ -1,354 +1,158 @@
+"""Ausführung für das PostgreSQL-Studio an der Panel-Datenbank.
+
+Das Studio (`postgres_studio_service`) baut Katalogabfragen, Datenänderungen
+und SQL für jede Datenbank gleich. An einer Server-Datenbank führt der Agent
+sie aus (`msm-agent/services/postgres_service.run_statements`); die
+Panel-Datenbank erreicht nur das Backend selbst. Diese Datei ist das
+Gegenstück dazu — dieselben Modi, dieselbe Ergebnisform, keine eigene
+Tabellen- oder Zeilenlogik.
+
+Eigene Verbindung je Aufruf statt einer aus dem SQLAlchemy-Pool: ein
+``readonly`` oder ``statement_timeout`` bliebe sonst an einer Poolverbindung
+hängen und träfe die nächste Anfrage des Panels.
+"""
+
 from __future__ import annotations
 
 import time
+from datetime import date, datetime, time as dt_time, timedelta
+from decimal import Decimal
 from typing import Any
 
-from psycopg2 import sql
+import psycopg2
 from sqlalchemy.engine.url import make_url
 
 from config import settings
-from database import engine
-from services.postgres_service import _is_read_only, _split_sql_statements
+from services.postgres_service import PostgresServiceError
 
-ROW_LIMIT = 500
-STATEMENT_TIMEOUT_MS = 5000
+RUN_MODES = {"read", "tx", "autocommit"}
+_MAX_NOTICES = 50
 
 
-def _ensure_postgresql() -> None:
-    backend = make_url(settings.database_url).get_backend_name()
-    if not backend.startswith("postgresql"):
+class PanelDatabaseError(PostgresServiceError):
+    """Nicht erreichbar — wie ein Agent, der nicht antwortet (503)."""
+
+
+def _url():
+    url = make_url(settings.database_url)
+    if not url.get_backend_name().startswith("postgresql"):
         raise ValueError("Panel-Datenbankverwaltung ist nur für PostgreSQL-Konfigurationen verfügbar.")
+    return url
+
+
+def database_name() -> str:
+    return str(_url().database or "")
 
 
 def _connect():
-    _ensure_postgresql()
-    conn = engine.raw_connection()
+    url = _url()
+    optionen = {k: v for k, v in url.query.items() if isinstance(v, str)}
     try:
-        conn.autocommit = False
-    except Exception:
-        pass
-    return conn
+        return psycopg2.connect(
+            host=url.host,
+            port=url.port,
+            user=url.username,
+            password=url.password,
+            dbname=url.database,
+            connect_timeout=5,
+            **optionen,
+        )
+    except psycopg2.OperationalError as exc:
+        raise PanelDatabaseError("Verbindung zur Panel-Datenbank fehlgeschlagen.") from exc
 
 
-def stats() -> dict[str, Any]:
-    started = time.monotonic()
-    conn = _connect()
-    try:
-        latency_ms = int((time.monotonic() - started) * 1000)
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                  pg_database_size(current_database()) AS size_bytes,
-                  (SELECT count(*)
-                     FROM information_schema.tables
-                    WHERE table_type = 'BASE TABLE'
-                      AND table_schema NOT IN ('pg_catalog', 'information_schema')) AS table_count,
-                  (SELECT count(*)
-                     FROM pg_stat_activity
-                    WHERE datname = current_database()) AS active_connections,
-                  current_setting('max_connections')::int AS max_connections,
-                  current_database() AS database_name
-                """
-            )
-            row = cur.fetchone()
-    finally:
-        conn.close()
-    return {
-        "status": "healthy",
-        "latency_ms": latency_ms,
-        "size_bytes": row[0],
-        "table_count": row[1],
-        "active_connections": row[2],
-        "max_connections": row[3],
-        "database_name": row[4],
-        "engine": "PostgreSQL",
-    }
+def _json_wert(value: Any) -> Any:
+    """Wie im Agent: JSON trägt jeden Wert ohne Genauigkeitsverlust."""
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        return value if value == value and value not in (float("inf"), float("-inf")) else str(value)
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (datetime, date, dt_time)):
+        return value.isoformat()
+    if isinstance(value, timedelta):
+        return str(value)
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return "\\x" + bytes(value).hex()
+    if isinstance(value, dict):
+        return {str(k): _json_wert(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_wert(v) for v in value]
+    return str(value)
 
 
-def list_tables() -> list[dict[str, Any]]:
-    conn = _connect()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT n.nspname,
-                       c.relname,
-                       GREATEST(c.reltuples::bigint, 0) AS row_estimate,
-                       pg_total_relation_size(c.oid) AS size_bytes
-                FROM pg_class c
-                JOIN pg_namespace n ON n.oid = c.relnamespace
-                WHERE c.relkind = 'r'
-                  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-                ORDER BY n.nspname, c.relname
-                """
-            )
-            return [
-                {"schema": row[0], "name": row[1], "row_estimate": row[2], "size_bytes": row[3]}
-                for row in cur.fetchall()
-            ]
-    finally:
-        conn.close()
+def _fehler(exc: psycopg2.Error, index: int) -> ValueError:
+    diag = getattr(exc, "diag", None)
+    primary = getattr(diag, "message_primary", None) or (str(exc).strip().splitlines() or [type(exc).__name__])[0]
+    parts = [f"[{exc.pgcode}] {primary}" if exc.pgcode else str(primary)]
+    if getattr(diag, "message_detail", None):
+        parts.append(str(diag.message_detail))
+    if getattr(diag, "message_hint", None):
+        parts.append(f"Hint: {diag.message_hint}")
+    return ValueError((f"Statement {index + 1}: " + " — ".join(parts))[:2000])
 
 
-def describe_table(schema_name: str, table_name: str) -> dict[str, Any]:
-    conn = _connect()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT kcu.column_name
-                FROM information_schema.table_constraints tc
-                JOIN information_schema.key_column_usage kcu
-                  ON tc.constraint_name = kcu.constraint_name
-                 AND tc.table_schema = kcu.table_schema
-                WHERE tc.constraint_type = 'PRIMARY KEY'
-                  AND tc.table_schema = %s
-                  AND tc.table_name = %s
-                """,
-                (schema_name, table_name),
-            )
-            pk_cols = {row[0] for row in cur.fetchall()}
-
-            cur.execute(
-                """
-                SELECT column_name, data_type, is_nullable, column_default
-                FROM information_schema.columns
-                WHERE table_schema = %s AND table_name = %s
-                ORDER BY ordinal_position
-                """,
-                (schema_name, table_name),
-            )
-            columns = [
-                {
-                    "name": row[0],
-                    "data_type": row[1],
-                    "nullable": row[2] == "YES",
-                    "default": row[3],
-                    "primary_key": row[0] in pk_cols,
-                }
-                for row in cur.fetchall()
-            ]
-            if not columns:
-                raise ValueError("Tabelle wurde nicht gefunden.")
-            cur.execute(
-                """
-                SELECT indexname, indexdef
-                FROM pg_indexes
-                WHERE schemaname = %s AND tablename = %s
-                ORDER BY indexname
-                """,
-                (schema_name, table_name),
-            )
-            indexes = [{"name": row[0], "definition": row[1]} for row in cur.fetchall()]
-            cur.execute(
-                """
-                SELECT tc.constraint_name, kcu.column_name, ccu.table_name, ccu.column_name
-                FROM information_schema.table_constraints tc
-                JOIN information_schema.key_column_usage kcu
-                  ON tc.constraint_name = kcu.constraint_name
-                 AND tc.table_schema = kcu.table_schema
-                JOIN information_schema.constraint_column_usage ccu
-                  ON ccu.constraint_name = tc.constraint_name
-                 AND ccu.table_schema = tc.table_schema
-                WHERE tc.constraint_type = 'FOREIGN KEY'
-                  AND tc.table_schema = %s
-                  AND tc.table_name = %s
-                ORDER BY tc.constraint_name
-                """,
-                (schema_name, table_name),
-            )
-            foreign_keys = [
-                {"name": row[0], "column_name": row[1], "foreign_table": row[2], "foreign_column": row[3]}
-                for row in cur.fetchall()
-            ]
-            cur.execute(
-                """
-                SELECT pg_total_relation_size((quote_ident(%s) || '.' || quote_ident(%s))::regclass),
-                       GREATEST(c.reltuples::bigint, 0)
-                FROM pg_class c
-                JOIN pg_namespace n ON n.oid = c.relnamespace
-                WHERE n.nspname = %s AND c.relname = %s
-                """,
-                (schema_name, table_name, schema_name, table_name),
-            )
-            size_row = cur.fetchone()
-    finally:
-        conn.close()
-    return {
-        "schema": schema_name,
-        "name": table_name,
-        "columns": columns,
-        "indexes": indexes,
-        "foreign_keys": foreign_keys,
-        "size_bytes": size_row[0] if size_row else None,
-        "row_estimate": size_row[1] if size_row else None,
-    }
-
-
-def read_rows(schema_name: str, table_name: str, limit: int, offset: int, search: str | None = None) -> dict[str, Any]:
-    limit = min(max(limit, 1), ROW_LIMIT)
-    offset = max(offset, 0)
-    table = describe_table(schema_name, table_name)
-    columns = [column["name"] for column in table["columns"]]
-    conn = _connect()
-    try:
-        with conn.cursor() as cur:
-            query = sql.SQL("SELECT * FROM {}.{}").format(sql.Identifier(schema_name), sql.Identifier(table_name))
-            params: list[Any] = []
-            if search:
-                clauses = [sql.SQL("CAST({} AS TEXT) ILIKE %s").format(sql.Identifier(col)) for col in columns]
-                query += sql.SQL(" WHERE ") + sql.SQL(" OR ").join(clauses)
-                params.extend([f"%{search[:128]}%"] * len(columns))
-            query += sql.SQL(" LIMIT %s OFFSET %s")
-            cur.execute(query, tuple(params + [limit, offset]))
-            rows = [dict(zip(columns, row, strict=False)) for row in cur.fetchall()]
-    finally:
-        conn.close()
-    return {"columns": columns, "rows": rows, "limit": limit, "offset": offset, "row_count": table["row_estimate"]}
-
-
-def execute_sql(statement: str, limit: int) -> dict[str, Any]:
-    cleaned = (statement or "").strip()
-    if not cleaned:
-        raise ValueError("SQL darf nicht leer sein.")
-    statements = _split_sql_statements(cleaned)
+def run(
+    statements: list[tuple[str, list[Any] | None]],
+    *,
+    mode: str = "read",
+    rollback: bool = False,
+    row_limit: int = 500,
+    timeout_ms: int | None = None,
+) -> dict[str, Any]:
+    """``read``: nur lesend. ``tx``: alles oder nichts (``rollback`` verwirft).
+    ``autocommit``: für VACUUM und Co.; Abbruch beim ersten Fehler."""
+    if mode not in RUN_MODES:
+        raise ValueError("Ungültiger Ausführungsmodus.")
     if not statements:
-        raise ValueError("Keine ausfuehrbaren SQL-Statements gefunden.")
-    row_limit = min(max(limit, 1), ROW_LIMIT)
-    has_write = any(not _is_read_only(s) for s in statements)
-    results: list[dict[str, Any]] = []
-    started_total = time.monotonic()
+        raise ValueError("Keine Anweisung.")
+    row_limit = min(max(int(row_limit), 1), 5000)
+    timeout_ms = min(max(int(timeout_ms or settings.managed_postgres_statement_timeout_ms), 100), 600_000)
+
     conn = _connect()
+    started = time.monotonic()
+    results: list[dict[str, Any]] = []
     try:
-        if not has_write:
-            conn.set_session(readonly=True, autocommit=False)
+        if mode == "autocommit":
+            conn.autocommit = True
+        elif mode == "read":
+            conn.set_session(readonly=True)
         with conn.cursor() as cur:
-            cur.execute("SET statement_timeout = %s", (STATEMENT_TIMEOUT_MS,))
-            for stmt in statements:
-                started = time.monotonic()
+            cur.execute("SET statement_timeout = %s", (timeout_ms,))
+            for index, (text, params) in enumerate(statements):
+                begin = time.monotonic()
+                try:
+                    cur.execute(text, params)
+                except psycopg2.Error as exc:
+                    if not conn.autocommit:
+                        conn.rollback()
+                    raise _fehler(exc, index) from exc
                 entry: dict[str, Any] = {
-                    "statement": stmt,
                     "columns": [],
                     "rows": [],
-                    "row_count": None,
-                    "status": None,
-                    "error": None,
-                    "duration_ms": None,
+                    "row_count": cur.rowcount,
+                    "status": cur.statusmessage,
+                    "truncated": False,
+                    "duration_ms": 0,
                 }
-                try:
-                    cur.execute(stmt)
-                    if cur.description:
-                        entry["columns"] = [desc[0] for desc in cur.description]
-                        entry["rows"] = [
-                            dict(zip(entry["columns"], row, strict=False))
-                            for row in cur.fetchmany(row_limit)
-                        ]
-                    entry["row_count"] = cur.rowcount
-                    entry["status"] = cur.statusmessage
-                    entry["duration_ms"] = int((time.monotonic() - started) * 1000)
-                except Exception as exc:  # noqa: BLE001
-                    conn.rollback()
-                    entry["error"] = f"{type(exc).__name__}: {exc}"
-                    results.append(entry)
-                    break
+                if cur.description:
+                    entry["columns"] = [desc[0] for desc in cur.description]
+                    fetched = cur.fetchmany(row_limit + 1)
+                    entry["truncated"] = len(fetched) > row_limit
+                    entry["rows"] = [[_json_wert(v) for v in row] for row in fetched[:row_limit]]
+                entry["duration_ms"] = int((time.monotonic() - begin) * 1000)
                 results.append(entry)
-            conn.commit()
+        if not conn.autocommit:
+            if rollback or mode == "read":
+                conn.rollback()
+            else:
+                conn.commit()
     finally:
+        notices = [n.strip() for n in list(conn.notices)[-_MAX_NOTICES:]]
         conn.close()
     return {
-        "statements": results,
-        "total_duration_ms": int((time.monotonic() - started_total) * 1000),
-        "statement_timeout_ms": STATEMENT_TIMEOUT_MS,
+        "results": results,
+        "notices": notices,
+        "duration_ms": int((time.monotonic() - started) * 1000),
     }
-
-
-def update_row(
-    schema_name: str,
-    table_name: str,
-    key_conditions: dict[str, Any],
-    updates: dict[str, Any],
-) -> dict[str, Any]:
-    if not key_conditions or not updates:
-        raise ValueError("Key conditions und Updates dürfen nicht leer sein.")
-    conn = _connect()
-    try:
-        with conn.cursor() as cur:
-            set_clauses = [sql.SQL("{} = %s").format(sql.Identifier(col)) for col in updates]
-            where_clauses = [sql.SQL("{} = %s").format(sql.Identifier(col)) for col in key_conditions]
-            params = list(updates.values()) + list(key_conditions.values())
-            query = (
-                sql.SQL("UPDATE {}.{} SET ")
-                .format(sql.Identifier(schema_name), sql.Identifier(table_name))
-                + sql.SQL(", ").join(set_clauses)
-                + sql.SQL(" WHERE ")
-                + sql.SQL(" AND ").join(where_clauses)
-            )
-            cur.execute(query, tuple(params))
-            updated_count = cur.rowcount
-            conn.commit()
-    finally:
-        conn.close()
-    return {"updated_count": updated_count, "message": f"{updated_count} Zeile(n) aktualisiert"}
-
-
-def delete_rows(
-    schema_name: str,
-    table_name: str,
-    row_conditions: list[dict[str, Any]],
-) -> dict[str, Any]:
-    if not row_conditions:
-        raise ValueError("Row conditions dürfen nicht leer sein.")
-    deleted_count = 0
-    conn = _connect()
-    try:
-        with conn.cursor() as cur:
-            for cond in row_conditions:
-                if not cond:
-                    continue
-                where_clauses = [sql.SQL("{} = %s").format(sql.Identifier(col)) for col in cond]
-                params = list(cond.values())
-                query = (
-                    sql.SQL("DELETE FROM {}.{} WHERE ")
-                    .format(sql.Identifier(schema_name), sql.Identifier(table_name))
-                    + sql.SQL(" AND ").join(where_clauses)
-                )
-                cur.execute(query, tuple(params))
-                deleted_count += max(cur.rowcount, 0)
-            conn.commit()
-    finally:
-        conn.close()
-    return {"deleted_count": deleted_count, "message": f"{deleted_count} Zeile(n) gelöscht"}
-
-
-def insert_row(
-    schema_name: str,
-    table_name: str,
-    row_data: dict[str, Any],
-) -> dict[str, Any]:
-    if not row_data:
-        raise ValueError("Row data darf nicht leer sein.")
-    columns = list(row_data.keys())
-    values = list(row_data.values())
-    conn = _connect()
-    try:
-        with conn.cursor() as cur:
-            col_sql = [sql.Identifier(col) for col in columns]
-            val_sql = [sql.Placeholder() for _ in values]
-            query = sql.SQL("INSERT INTO {}.{} ({}) VALUES ({}) RETURNING *").format(
-                sql.Identifier(schema_name),
-                sql.Identifier(table_name),
-                sql.SQL(", ").join(col_sql),
-                sql.SQL(", ").join(val_sql),
-            )
-            cur.execute(query, tuple(values))
-            inserted_row = None
-            if cur.description:
-                cols = [desc[0] for desc in cur.description]
-                fetched = cur.fetchone()
-                if fetched:
-                    inserted_row = dict(zip(cols, fetched, strict=False))
-            conn.commit()
-    finally:
-        conn.close()
-    return {"inserted_row": inserted_row, "message": "Zeile eingefügt"}

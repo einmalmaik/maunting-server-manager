@@ -3,15 +3,22 @@
 Source of truth for metadata + DIS-encrypted secrets remains the panel DB.
 All SQL and msm-postgres container ops run on the node agent via NodeClient.
 No psycopg2 and no direct docker for managed Postgres in this module.
+
+Zwei Arten von Zielen: der geteilte ``msm-postgres`` des Nodes (Datenbanken von
+Spielservern) und die eigene Instanz eines Datenbankservers
+(``PostgresInstance``). Jeder Agent-Aufruf bekommt sein Ziel aus
+``_verbindung(db, server)`` — nie aus Annahmen. Ein fehlendes Ziel hiesse: der
+Aufruf landet im geteilten Cluster, und dort kann eine gleichnamige Datenbank
+eines anderen Servers liegen.
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 import secrets
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -34,22 +41,6 @@ ADMIN_USER = "msm_admin"
 CONTROL_DB = "msm_control"
 ADMIN_PASSWORD_KEY = "managed_postgres.admin_password_encrypted"
 IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
-ALLOWED_COLUMN_TYPES = {
-    "text": "text",
-    "varchar": "varchar(255)",
-    "integer": "integer",
-    "bigint": "bigint",
-    "boolean": "boolean",
-    "timestamp": "timestamp",
-    "jsonb": "jsonb",
-}
-
-_WRITE_KEYWORDS = (
-    "insert", "update", "delete", "create", "drop", "alter", "truncate",
-    "grant", "revoke", "copy", "vacuum", "analyze", "cluster", "reindex",
-    "set", "reset", "begin", "commit", "rollback", "savepoint", "lock",
-    "call", "do", "notify", "listen", "unlisten", "refresh", "checkpoint",
-)
 
 
 class PostgresServiceError(RuntimeError):
@@ -285,8 +276,97 @@ def _client_for_server(db: Session, server: Server) -> NodeClient:
     )
 
 
+@dataclass(frozen=True)
+class _Verbindung:
+    """Wohin ein Agent-Aufruf fuer diesen Server geht und womit."""
+
+    client: NodeClient
+    admin_password: str
+    # None: geteilter msm-postgres. Sonst die eigene Instanz des Datenbankservers.
+    target: dict[str, Any] | None
+
+    def mit_ziel(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {**payload, "target": self.target} if self.target else payload
+
+
+def instance_aad(server_id: int) -> str:
+    return f"msm:pg:instance:{server_id}"
+
+
+def user_password_aad(server_id: int, username: str) -> str:
+    return f"msm:pg:user:{server_id}:{username}"
+
+
+def is_database_server(server: Server) -> bool:
+    return server.postgres_instance is not None
+
+
+def database_port(server: Server) -> int | None:
+    for port in server.ports:
+        if port.role == "database":
+            return port.port
+    return None
+
+
+def instance_target(server: Server) -> dict[str, Any]:
+    """Wie der Agent die eigene Instanz erreicht: ueber die Bind-Adresse des Ports.
+
+    ``0.0.0.0`` schliesst Loopback ein; der Agent nimmt nur Adressen seines
+    eigenen Hosts an.
+    """
+    from games.base import container_name_for
+
+    port = database_port(server)
+    if port is None:
+        raise PostgresServiceError("Datenbankserver hat keinen Datenbank-Port.")
+    bind = (server.public_bind_ip or "").strip()
+    host = bind if bind and bind != "0.0.0.0" else "127.0.0.1"
+    return {"host": host, "port": port, "container": container_name_for(server.id)}
+
+
+def internal_address(server: Server | None) -> tuple[str, int]:
+    """Adresse fuer Container im internen Netz ``msm-internal``."""
+    if server is not None and is_database_server(server):
+        from games.base import container_name_for
+
+        return container_name_for(server.id), database_port(server) or 5432
+    return settings.managed_postgres_container_name, 5432
+
+
+def instance_admin_password(server: Server) -> str:
+    instance = server.postgres_instance
+    if instance is None:
+        raise PostgresServiceError("Server hat keine eigene PostgreSQL-Instanz.")
+    return AuthService.decrypt_secret(
+        instance.admin_password_encrypted, aad=instance_aad(server.id)
+    )
+
+
+def _verbindung(db: Session, server: Server, client: NodeClient | None = None) -> _Verbindung:
+    client = client or _client_for_server(db, server)
+    if is_database_server(server):
+        return _Verbindung(
+            client=client,
+            admin_password=instance_admin_password(server),
+            target=instance_target(server),
+        )
+    return _Verbindung(client=client, admin_password=_admin_password(), target=None)
+
+
+def _verbindung_fuer(db: Session, server_id: int) -> _Verbindung:
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise ValueError("Server nicht gefunden.")
+    return _verbindung(db, server, _client_for_server_id(db, server_id))
+
+
 def ensure_internal_postgres(db: Session | None = None, server: Server | None = None) -> None:
-    """Ensure msm-postgres on the target node via agent (no local psycopg2)."""
+    """Ensure msm-postgres on the target node via agent (no local psycopg2).
+
+    Datenbankserver: nichts zu tun — ihre Instanz ist der Servercontainer.
+    """
+    if server is not None and is_database_server(server):
+        return
     try:
         if server is not None and db is not None:
             client = _client_for_server(db, server)
@@ -308,12 +388,36 @@ def ensure_internal_postgres(db: Session | None = None, server: Server | None = 
 
 
 def server_extra_networks(db: Session, server_id: int) -> list[str]:
+    """Wer ins interne Netz ``msm-internal`` kommt.
+
+    Server mit eigenen Datenbanken (geteilter Cluster), Datenbankserver selbst
+    und Server auf einem Node, auf dem ein Datenbankserver laeuft — sonst
+    koennte ein Spielserver die Instanz nebenan nur ueber das Internet
+    erreichen. Das Netz ist ``internal``: nach draussen fuehrt es nicht.
+    """
+    network = [settings.managed_postgres_network]
     exists = (
         db.query(PostgresDatabase.id)
         .filter(PostgresDatabase.server_id == server_id)
         .first()
     )
-    return [settings.managed_postgres_network] if exists else []
+    if exists:
+        return network
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if server is None:
+        return []
+    if server.game_type == "postgres":
+        return network
+    nachbar = (
+        db.query(Server.id)
+        .filter(
+            Server.node_id == server.node_id,
+            Server.game_type == "postgres",
+            Server.id != server.id,
+        )
+        .first()
+    )
+    return network if nachbar else []
 
 
 def _database_row(db: Session, server_id: int, database_id: int) -> PostgresDatabase:
@@ -357,6 +461,14 @@ def backup_context(db: Session, server_id: int) -> dict[str, Any] | None:
         }
         for row in rows
     }
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if server is not None and is_database_server(server):
+        return {
+            "admin_password": instance_admin_password(server),
+            "database_names": databases,
+            "owners": owners,
+            "target": instance_target(server),
+        }
     return {
         "admin_password": _admin_password(),
         "database_names": databases,
@@ -368,27 +480,6 @@ def _owner_password(database: PostgresDatabase) -> str:
     return AuthService.decrypt_secret(
         database.owner_password_encrypted, aad="msm:pg:db:owner"
     )
-
-
-def _owner_query(
-    db: Session,
-    server_id: int,
-    database: PostgresDatabase,
-    action: str,
-    **extra: Any,
-) -> Any:
-    client = _client_for_server_id(db, server_id)
-    payload = {
-        "action": action,
-        "database_name": database.name,
-        "owner_role": database.owner_role,
-        "owner_password": _owner_password(database),
-        **extra,
-    }
-    try:
-        return client.postgres_query(payload)
-    except NodeClientError as exc:
-        raise PostgresServiceError(exc.message or "Agent query failed") from exc
 
 
 def provision_server_databases(
@@ -419,14 +510,16 @@ def provision_server_databases(
         return credentials
     except Exception:
         try:
-            client = _client_for_server(db, server)
-            client.postgres_drop(
-                {
-                    "admin_password": _admin_password(),
-                    "databases": [item[0] for item in attempted_resources],
-                    "owners": [item[1] for item in attempted_resources],
-                    "users": [item[2] for item in attempted_resources],
-                }
+            verbindung = _verbindung(db, server)
+            verbindung.client.postgres_drop(
+                verbindung.mit_ziel(
+                    {
+                        "admin_password": verbindung.admin_password,
+                        "databases": [item[0] for item in attempted_resources],
+                        "owners": [item[1] for item in attempted_resources],
+                        "users": [item[2] for item in attempted_resources],
+                    }
+                )
             )
         except Exception:
             logger.warning("PostgreSQL compensation failed for server_id=%s", server.id)
@@ -442,24 +535,27 @@ def _create_database_and_user(
     user_name: str,
     *,
     power_user: bool = False,
+    user_password: str | None = None,
 ) -> dict[str, Any]:
     db_name = _validate_identifier(db_name)
     owner_role = _validate_identifier(owner_role)
     user_name = _validate_identifier(user_name)
     owner_password = _generate_password()
-    user_password = _generate_password()
-    client = _client_for_server(db, server)
+    user_password = user_password or _generate_password()
+    verbindung = _verbindung(db, server)
     try:
-        client.postgres_provision(
-            {
-                "admin_password": _admin_password(),
-                "db_name": db_name,
-                "owner_role": owner_role,
-                "owner_password": owner_password,
-                "user_name": user_name,
-                "user_password": user_password,
-                "power_user": power_user,
-            }
+        verbindung.client.postgres_provision(
+            verbindung.mit_ziel(
+                {
+                    "admin_password": verbindung.admin_password,
+                    "db_name": db_name,
+                    "owner_role": owner_role,
+                    "owner_password": owner_password,
+                    "user_name": user_name,
+                    "user_password": user_password,
+                    "power_user": power_user,
+                }
+            )
         )
     except NodeClientError as exc:
         raise PostgresServiceError(exc.message or "Provision failed") from exc
@@ -475,7 +571,12 @@ def _create_database_and_user(
         power_credentials_issued_at=datetime.now(timezone.utc) if power_user else None,
     )
     user = PostgresUser(
-        server_id=server.id, username=user_name, password_mask=_mask_secret(user_password)
+        server_id=server.id,
+        username=user_name,
+        password_mask=_mask_secret(user_password),
+        password_encrypted=AuthService.encrypt_secret(
+            user_password, aad=user_password_aad(server.id, user_name)
+        ),
     )
     db.add(database)
     db.add(user)
@@ -489,13 +590,14 @@ def _create_database_and_user(
         )
     )
     db.flush()
+    host, port = internal_address(server)
     return {
         "database_id": database.id,
         "database_name": db_name,
         "username": user_name,
         "password": user_password,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": host,
+        "port": port,
         "is_power_user": power_user,
     }
 
@@ -524,20 +626,27 @@ def create_user(
     next_index = db.query(PostgresUser).filter(PostgresUser.server_id == server_id).count() + 1
     user_name = _validate_identifier(username or f"msm_s{server_id}_u{next_index}")
     password = _generate_password()
-    client = _client_for_server_id(db, server_id)
+    verbindung = _verbindung_fuer(db, server_id)
     try:
-        client.postgres_create_user(
-            {
-                "admin_password": _admin_password(),
-                "database_name": database.name,
-                "user_name": user_name,
-                "user_password": password,
-            }
+        verbindung.client.postgres_create_user(
+            verbindung.mit_ziel(
+                {
+                    "admin_password": verbindung.admin_password,
+                    "database_name": database.name,
+                    "user_name": user_name,
+                    "user_password": password,
+                }
+            )
         )
     except NodeClientError as exc:
         raise PostgresServiceError(exc.message or "Create user failed") from exc
     user = PostgresUser(
-        server_id=server_id, username=user_name, password_mask=_mask_secret(password)
+        server_id=server_id,
+        username=user_name,
+        password_mask=_mask_secret(password),
+        password_encrypted=AuthService.encrypt_secret(
+            password, aad=user_password_aad(server_id, user_name)
+        ),
     )
     db.add(user)
     db.flush()
@@ -550,13 +659,14 @@ def create_user(
         )
     )
     db.commit()
+    host, port = internal_address(database.server)
     return {
         "database_id": database.id,
         "database_name": database.name,
         "username": user_name,
         "password": password,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": host,
+        "port": port,
     }
 
 
@@ -569,25 +679,31 @@ def rotate_user_password(db: Session, server_id: int, user_id: int) -> dict[str,
     if not user:
         raise ValueError("Datenbank-User wurde fuer diesen Server nicht gefunden.")
     password = _generate_password()
-    client = _client_for_server_id(db, server_id)
+    verbindung = _verbindung_fuer(db, server_id)
     try:
-        client.postgres_rotate_user(
-            {
-                "admin_password": _admin_password(),
-                "role_name": user.username,
-                "new_password": password,
-            }
+        verbindung.client.postgres_rotate_user(
+            verbindung.mit_ziel(
+                {
+                    "admin_password": verbindung.admin_password,
+                    "role_name": user.username,
+                    "new_password": password,
+                }
+            )
         )
     except NodeClientError as exc:
         raise PostgresServiceError(exc.message or "Rotate failed") from exc
     user.password_mask = _mask_secret(password)
+    user.password_encrypted = AuthService.encrypt_secret(
+        password, aad=user_password_aad(server_id, user.username)
+    )
     user.last_rotated_at = datetime.now(timezone.utc)
     db.commit()
+    host, port = internal_address(user.server)
     return {
         "username": user.username,
         "password": password,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": host,
+        "port": port,
     }
 
 
@@ -629,15 +745,17 @@ def _drop_database_and_roles(
 ) -> None:
     if not databases and not owners and not users:
         return
-    client = _client_for_server_id(db, server_id)
+    verbindung = _verbindung_fuer(db, server_id)
     try:
-        client.postgres_drop(
-            {
-                "admin_password": _admin_password(),
-                "databases": databases,
-                "owners": owners,
-                "users": users,
-            }
+        verbindung.client.postgres_drop(
+            verbindung.mit_ziel(
+                {
+                    "admin_password": verbindung.admin_password,
+                    "databases": databases,
+                    "owners": owners,
+                    "users": users,
+                }
+            )
         )
     except NodeClientError as exc:
         raise PostgresServiceError(exc.message or "Drop failed") from exc
@@ -648,7 +766,12 @@ def drop_server_resources(db: Session, server_id: int) -> None:
     databases = [item.name for item in resources["databases"]]
     owners = [item.owner_role for item in resources["databases"]]
     users = [item.username for item in resources["users"]]
-    if databases or owners or users:
+    server = db.query(Server).filter(Server.id == server_id).first()
+    # Eine eigene Instanz verschwindet mit Container und Serververzeichnis.
+    # Sie vorher leerzuraeumen hiesse: ein gestoppter Datenbankserver liesse
+    # sich nicht loeschen.
+    own_instance = server is not None and is_database_server(server)
+    if (databases or owners or users) and not own_instance:
         _drop_database_and_roles(db, server_id, databases, owners, users)
     db.query(PostgresGrant).filter(PostgresGrant.server_id == server_id).delete(
         synchronize_session=False
@@ -662,162 +785,8 @@ def drop_server_resources(db: Session, server_id: int) -> None:
     db.commit()
 
 
-def list_tables(db: Session, server_id: int, database_id: int) -> list[dict[str, Any]]:
-    database = _database_row(db, server_id, database_id)
-    result = _owner_query(db, server_id, database, "list_tables")
-    return result if isinstance(result, list) else []
-
-
-def database_stats(db: Session, server_id: int, database_id: int) -> dict[str, Any]:
-    database = _database_row(db, server_id, database_id)
-    result = _owner_query(db, server_id, database, "stats")
-    return result if isinstance(result, dict) else {}
-
-
-def describe_table(
-    db: Session,
-    server_id: int,
-    database_id: int,
-    schema_name: str,
-    table_name: str,
-) -> dict[str, Any]:
-    database = _database_row(db, server_id, database_id)
-    return _owner_query(
-        db,
-        server_id,
-        database,
-        "describe_table",
-        schema_name=schema_name or "public",
-        table_name=table_name,
-    )
-
-
-def create_table(
-    db: Session,
-    server_id: int,
-    database_id: int,
-    schema_name: str,
-    table_name: str,
-    columns: list[dict[str, Any]],
-) -> None:
-    database = _database_row(db, server_id, database_id)
-    _owner_query(
-        db,
-        server_id,
-        database,
-        "create_table",
-        schema_name=schema_name or "public",
-        table_name=table_name,
-        columns=columns,
-    )
-
-
-def drop_table(
-    db: Session,
-    server_id: int,
-    database_id: int,
-    schema_name: str,
-    table_name: str,
-) -> None:
-    database = _database_row(db, server_id, database_id)
-    _owner_query(
-        db,
-        server_id,
-        database,
-        "drop_table",
-        schema_name=schema_name or "public",
-        table_name=table_name,
-    )
-
-
-def read_rows(
-    db: Session,
-    server_id: int,
-    database_id: int,
-    schema_name: str,
-    table_name: str,
-    limit: int,
-    offset: int,
-    search: str | None = None,
-) -> dict[str, Any]:
-    database = _database_row(db, server_id, database_id)
-    return _owner_query(
-        db,
-        server_id,
-        database,
-        "read_rows",
-        schema_name=schema_name or "public",
-        table_name=table_name,
-        limit=limit,
-        offset=offset,
-        search=search,
-    )
-
-
-def update_row(
-    db: Session,
-    server_id: int,
-    database_id: int,
-    schema_name: str,
-    table_name: str,
-    key_conditions: dict[str, Any],
-    updates: dict[str, Any],
-) -> dict[str, Any]:
-    database = _database_row(db, server_id, database_id)
-    return _owner_query(
-        db,
-        server_id,
-        database,
-        "update_row",
-        schema_name=schema_name or "public",
-        table_name=table_name,
-        key_conditions=key_conditions,
-        updates=updates,
-    )
-
-
-def delete_rows(
-    db: Session,
-    server_id: int,
-    database_id: int,
-    schema_name: str,
-    table_name: str,
-    row_conditions: list[dict[str, Any]],
-) -> dict[str, Any]:
-    database = _database_row(db, server_id, database_id)
-    return _owner_query(
-        db,
-        server_id,
-        database,
-        "delete_rows",
-        schema_name=schema_name or "public",
-        table_name=table_name,
-        row_conditions=row_conditions,
-    )
-
-
-def insert_row(
-    db: Session,
-    server_id: int,
-    database_id: int,
-    schema_name: str,
-    table_name: str,
-    row_data: dict[str, Any],
-) -> dict[str, Any]:
-    database = _database_row(db, server_id, database_id)
-    return _owner_query(
-        db,
-        server_id,
-        database,
-        "insert_row",
-        schema_name=schema_name or "public",
-        table_name=table_name,
-        row_data=row_data,
-    )
-
-
 def _split_sql_statements(text: str) -> list[str]:
-    """Split a SQL script into individual statements (panel_database_service + tests)."""
+    """Split a SQL script into individual statements (SQL-Editor des Studios)."""
     statements: list[str] = []
     buf: list[str] = []
     i = 0
@@ -949,83 +918,22 @@ def _split_sql_statements(text: str) -> list[str]:
     return statements
 
 
-def _is_read_only(stmt: str) -> bool:
-    stripped = stmt.lstrip()
-    if not stripped:
-        return True
-    while stripped.startswith("--") or stripped.startswith("/*"):
-        if stripped.startswith("--"):
-            nl = stripped.find("\n")
-            stripped = stripped[nl + 1 :].lstrip() if nl != -1 else ""
-        else:
-            end = stripped.find("*/")
-            stripped = stripped[end + 2 :].lstrip() if end != -1 else ""
-    tokens = stripped.split()
-    if not tokens:
-        return True
-    head = tokens[0].lower()
-    if head == "explain":
-        if len(tokens) >= 2 and tokens[1].lower().split("(")[0] in _WRITE_KEYWORDS:
-            return False
-        return True
-    return head not in _WRITE_KEYWORDS
-
-
-def execute_sql(
-    db: Session, server_id: int, database_id: int, statement: str, limit: int
-) -> dict[str, Any]:
-    database = _database_row(db, server_id, database_id)
-    return _owner_query(
-        db,
-        server_id,
-        database,
-        "execute_sql",
-        sql=statement,
-        limit=limit,
-    )
-
-
-def _validate_extension_name(name: str) -> str:
-    cleaned = (name or "").strip().lower()
-    if not IDENTIFIER_RE.fullmatch(cleaned):
-        raise ValueError("Ungueltiger Extension-Name.")
-    if cleaned not in settings.trusted_postgres_extensions:
-        raise ValueError(f"Extension '{cleaned}' ist nicht erlaubt.")
-    return cleaned
-
-
-def list_extensions(db: Session, server_id: int, database_id: int) -> list[dict[str, Any]]:
-    database = _database_row(db, server_id, database_id)
-    result = _owner_query(db, server_id, database, "list_extensions")
-    return result if isinstance(result, list) else []
-
-
-def install_extension(db: Session, server_id: int, database_id: int, name: str) -> None:
-    database = _database_row(db, server_id, database_id)
-    ext = _validate_extension_name(name)
-    _owner_query(db, server_id, database, "install_extension", name=ext)
-
-
-def drop_extension(db: Session, server_id: int, database_id: int, name: str) -> None:
-    database = _database_row(db, server_id, database_id)
-    ext = _validate_extension_name(name)
-    _owner_query(db, server_id, database, "drop_extension", name=ext)
-
-
 def promote_owner_to_power_user(db: Session, server_id: int, database_id: int) -> dict[str, Any]:
     """Issue elevated owner credentials for this database only (not cluster SUPERUSER)."""
     database = _database_row(db, server_id, database_id)
     if database.is_power_user:
         raise ValueError("Owner-Rolle hat bereits Power-User-Zugang fuer diese Datenbank.")
     new_password = _generate_password()
-    client = _client_for_server_id(db, server_id)
+    verbindung = _verbindung_fuer(db, server_id)
     try:
-        client.postgres_promote(
-            {
-                "admin_password": _admin_password(),
-                "owner_role": database.owner_role,
-                "new_password": new_password,
-            }
+        verbindung.client.postgres_promote(
+            verbindung.mit_ziel(
+                {
+                    "admin_password": verbindung.admin_password,
+                    "owner_role": database.owner_role,
+                    "new_password": new_password,
+                }
+            )
         )
     except NodeClientError as exc:
         raise PostgresServiceError(exc.message or "Promote failed") from exc
@@ -1035,11 +943,12 @@ def promote_owner_to_power_user(db: Session, server_id: int, database_id: int) -
     )
     database.power_credentials_issued_at = datetime.now(timezone.utc)
     db.commit()
+    host, port = internal_address(database.server)
     return {
         "username": database.owner_role,
         "password": new_password,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": host,
+        "port": port,
         "database_name": database.name,
     }
 
@@ -1051,14 +960,16 @@ def rotate_power_user_password(db: Session, server_id: int, database_id: int) ->
             "Owner-Rolle ist kein Power-User -- erst promote_owner_to_power_user aufrufen."
         )
     new_password = _generate_password()
-    client = _client_for_server_id(db, server_id)
+    verbindung = _verbindung_fuer(db, server_id)
     try:
-        client.postgres_rotate_owner(
-            {
-                "admin_password": _admin_password(),
-                "owner_role": database.owner_role,
-                "new_password": new_password,
-            }
+        verbindung.client.postgres_rotate_owner(
+            verbindung.mit_ziel(
+                {
+                    "admin_password": verbindung.admin_password,
+                    "owner_role": database.owner_role,
+                    "new_password": new_password,
+                }
+            )
         )
     except NodeClientError as exc:
         raise PostgresServiceError(exc.message or "Rotate owner failed") from exc
@@ -1067,11 +978,12 @@ def rotate_power_user_password(db: Session, server_id: int, database_id: int) ->
     )
     database.power_credentials_issued_at = datetime.now(timezone.utc)
     db.commit()
+    host, port = internal_address(database.server)
     return {
         "username": database.owner_role,
         "password": new_password,
-        "host": settings.managed_postgres_container_name,
-        "port": 5432,
+        "host": host,
+        "port": port,
         "database_name": database.name,
     }
 
@@ -1080,13 +992,15 @@ def demote_owner_from_power_user(db: Session, server_id: int, database_id: int) 
     database = _database_row(db, server_id, database_id)
     if not database.is_power_user:
         raise ValueError("Owner-Rolle ist kein Power-User.")
-    client = _client_for_server_id(db, server_id)
+    verbindung = _verbindung_fuer(db, server_id)
     try:
-        client.postgres_demote(
-            {
-                "admin_password": _admin_password(),
-                "owner_role": database.owner_role,
-            }
+        verbindung.client.postgres_demote(
+            verbindung.mit_ziel(
+                {
+                    "admin_password": verbindung.admin_password,
+                    "owner_role": database.owner_role,
+                }
+            )
         )
     except NodeClientError as exc:
         raise PostgresServiceError(exc.message or "Demote failed") from exc
@@ -1116,77 +1030,16 @@ def _restore_owners(db: Session, server_id: int) -> dict[str, dict[str, str]]:
     }
 
 
-def dump_server_databases(db: Session, server_id: int) -> tuple[str, list[str], int, str, int]:
-    sql_text, names, size, sha, dur = _pg_dump_server_dbs(db, server_id)
-    return sql_text, names, size, sha, dur
-
-
-def _pg_dump_server_dbs(db: Session, server_id: int) -> tuple[str, list[str], int, str, int]:
-    db_names = _server_database_names(db, server_id)
-    if not db_names:
-        raise ValueError("Server hat keine Postgres-Datenbanken.")
-    started = time.monotonic()
-    client = _client_for_server_id(db, server_id)
-    try:
-        resp = client.postgres_dump(
-            admin_password=_admin_password(), database_names=db_names
-        )
-    except NodeClientError as exc:
-        raise PostgresServiceError(exc.message or "pg_dump failed") from exc
-    dumps = resp.get("dumps") or {}
-    out_parts: list[str] = [
-        "-- MSM Postgres Dump\n",
-        f"-- Server ID: {server_id}\n",
-        f"-- Databases: {', '.join(db_names)}\n",
-        f"-- Generated: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n",
-        "-- Format: pg_dump --format=plain --no-owner --no-acl --clean (RESTORE via psql)\n",
-        "\n",
-    ]
-    for db_name in db_names:
-        body = dumps.get(db_name) or ""
-        if not body.strip():
-            continue
-        out_parts.append(f"\n-- ===== Database: {db_name} =====\n")
-        out_parts.append(body)
-        if not body.endswith("\n"):
-            out_parts.append("\n")
-    sql_text = "".join(out_parts)
-    raw_bytes = sql_text.encode("utf-8")
-    sha = hashlib.sha256(raw_bytes).hexdigest()
-    duration_ms = int((time.monotonic() - started) * 1000)
-    return sql_text, db_names, len(raw_bytes), sha, duration_ms
-
-
-def restore_sql_to_server_dbs(db: Session, server_id: int, sql_text: str) -> dict[str, Any]:
-    db_names = _server_database_names(db, server_id)
-    if not db_names:
-        raise ValueError("Server hat keine Postgres-Datenbanken.")
-    dumps = {name: sql_text for name in db_names}
-    client = _client_for_server_id(db, server_id)
-    try:
-        result = client.postgres_restore(
-            admin_password=_admin_password(),
-            dumps=dumps,
-            owners=_restore_owners(db, server_id),
-        )
-    except NodeClientError as exc:
-        raise PostgresServiceError(exc.message or "Restore failed") from exc
-    return {
-        "ok": True,
-        "databases": result.get("databases") or db_names,
-        "bytes": len(sql_text.encode("utf-8")),
-        "duration_ms": result.get("duration_ms") or 0,
-    }
-
-
 def backup_pg_dump_for_archive(db: Session, server_id: int) -> dict[str, bytes]:
     db_names = _server_database_names(db, server_id)
     if not db_names:
         return {}
-    client = _client_for_server_id(db, server_id)
+    verbindung = _verbindung_fuer(db, server_id)
     try:
-        resp = client.postgres_dump(
-            admin_password=_admin_password(), database_names=db_names
+        resp = verbindung.client.postgres_dump(
+            admin_password=verbindung.admin_password,
+            database_names=db_names,
+            target=verbindung.target,
         )
     except NodeClientError as exc:
         raise PostgresServiceError(exc.message or "pg_dump failed") from exc
@@ -1240,12 +1093,14 @@ def restore_pg_dump_from_archive(
         restored.append(db_name)
 
     if text_dumps:
-        restore_client = client or _client_for_server_id(db, server_id)
+        verbindung = _verbindung_fuer(db, server_id)
+        restore_client = client or verbindung.client
         try:
             restore_client.postgres_restore(
-                admin_password=_admin_password(),
+                admin_password=verbindung.admin_password,
                 dumps=text_dumps,
                 owners=_restore_owners(db, server_id),
+                target=verbindung.target,
             )
         except NodeClientError as exc:
             raise PostgresServiceError(exc.message or "Restore failed") from exc
@@ -1255,3 +1110,165 @@ def restore_pg_dump_from_archive(
         "databases": restored,
         "duration_ms": int((time.monotonic() - started) * 1000),
     }
+
+
+# ── Studio: Anweisungen ueber den Agenten ausfuehren ───────────────────────
+
+
+def run(
+    db: Session,
+    server: Server,
+    *,
+    database_name: str,
+    statements: list[tuple[str, list[Any] | None]],
+    identity: str = "owner",
+    database: PostgresDatabase | None = None,
+    mode: str = "read",
+    rollback: bool = False,
+    row_limit: int = 500,
+    timeout_ms: int | None = None,
+) -> dict[str, Any]:
+    """Fuehrt fertige Anweisungen auf dem Agenten aus.
+
+    ``identity="owner"`` braucht ``database`` (Owner-Rolle und -Passwort).
+    ``identity="admin"`` ist der Superuser des Ziels: im geteilten Cluster nur
+    fuer feste, auf die eigene Datenbank gefilterte Abfragen des Panels — nie
+    fuer SQL, das ein Mensch geschrieben hat.
+    """
+    verbindung = _verbindung(db, server, _client_for_server_id(db, server.id))
+    payload: dict[str, Any] = {
+        "database_name": database_name,
+        "identity": identity,
+        "mode": mode,
+        "rollback": rollback,
+        "row_limit": row_limit,
+        "timeout_ms": timeout_ms or settings.managed_postgres_statement_timeout_ms,
+        "statements": [
+            {"sql": text, "params": None if params is None else list(params)}
+            for text, params in statements
+        ],
+    }
+    if identity == "owner":
+        if database is None:
+            raise ValueError("Owner-Ausfuehrung braucht die Datenbank.")
+        payload["owner_role"] = database.owner_role
+        payload["owner_password"] = _owner_password(database)
+    else:
+        payload["admin_password"] = verbindung.admin_password
+    try:
+        return verbindung.client.postgres_run(verbindung.mit_ziel(payload))
+    except NodeClientError as exc:
+        if getattr(exc, "status_code", None) == 404:
+            raise PostgresServiceError(
+                "Der Agent dieses Nodes kennt das Studio noch nicht — bitte den Agent aktualisieren."
+            ) from exc
+        if getattr(exc, "status_code", None) == 400:
+            raise ValueError(exc.message or "PostgreSQL-Fehler") from exc
+        raise PostgresServiceError(exc.message or "Agent-Ausfuehrung fehlgeschlagen") from exc
+
+
+# ── Verbindungs-Hub ────────────────────────────────────────────────────────
+
+
+def _is_loopback_bind(bind_ip: str | None) -> bool:
+    import ipaddress
+
+    text = (bind_ip or "").strip()
+    if not text:
+        return True
+    try:
+        return ipaddress.ip_address(text).is_loopback
+    except ValueError:
+        return text == "localhost"
+
+
+def connection_info(db: Session, server: Server) -> dict[str, Any]:
+    """Alles, was ein Client zum Verbinden braucht — ohne Passwoerter."""
+    from services import postgres_instance_service
+
+    databases = (
+        db.query(PostgresDatabase)
+        .filter(PostgresDatabase.server_id == server.id)
+        .order_by(PostgresDatabase.id)
+        .all()
+    )
+    dedicated = is_database_server(server)
+    host, port = internal_address(server)
+    result: dict[str, Any] = {
+        "kind": "dedicated" if dedicated else "shared",
+        "internal": {"host": host, "port": port},
+        "external": None,
+        "ssl_certificate": None,
+        "bootstrap_pending": False,
+        "databases": [
+            {
+                "id": database.id,
+                "name": database.name,
+                "owner_role": database.owner_role,
+                "owner_revealable": bool(database.is_power_user),
+                "users": [
+                    {
+                        "id": grant.user.id,
+                        "username": grant.user.username,
+                        "password_stored": bool(grant.user.password_encrypted),
+                    }
+                    for grant in sorted(database.grants, key=lambda g: g.id)
+                    if grant.user is not None
+                ],
+            }
+            for database in databases
+        ],
+    }
+    if dedicated:
+        instance = server.postgres_instance
+        cidrs = postgres_instance_service.cidrs_of(instance)
+        # Von aussen kommt nur herein, wer beides hat: einen Port an einer
+        # erreichbaren IP und ein Netz in pg_hba.conf. Der Grund steht dabei,
+        # damit der Hub nicht zum Falschen raet.
+        blocked_by = (
+            "loopback" if _is_loopback_bind(server.public_bind_ip)
+            else "no_networks" if not cidrs
+            else None
+        )
+        result["external"] = {
+            "host": postgres_instance_service.public_host(server),
+            "port": database_port(server) or 5432,
+            "reachable": blocked_by is None,
+            "blocked_by": blocked_by,
+            "ssl_required": bool(instance.ssl_required),
+            "allowed_cidrs": cidrs,
+        }
+        result["ssl_certificate"] = postgres_instance_service.read_certificate(db, server)
+        if server.status == "running":
+            result["bootstrap_pending"] = postgres_instance_service.needs_bootstrap(db, server)
+    return result
+
+
+def reveal_credential(
+    db: Session, server: Server, database_id: int, user_id: int | None
+) -> dict[str, str]:
+    """Entschluesselt ein gespeichertes Passwort. Nur fuer ``server.databases.admin``."""
+    database = _database_row(db, server.id, database_id)
+    if user_id is None:
+        if not database.is_power_user:
+            raise ValueError(
+                "Der Owner-Zugang dieser Datenbank ist nicht herausgegeben (Power-User-Zugang anlegen)."
+            )
+        return {"username": database.owner_role, "password": _owner_password(database)}
+    grant = (
+        db.query(PostgresGrant)
+        .filter(PostgresGrant.database_id == database.id, PostgresGrant.user_id == user_id)
+        .first()
+    )
+    if grant is None or grant.user is None:
+        raise ValueError("Datenbank-User gehoert nicht zu dieser Datenbank.")
+    user = grant.user
+    if not user.password_encrypted:
+        raise ValueError("Das Passwort wurde nie gespeichert — bitte einmal rotieren.")
+    return {
+        "username": user.username,
+        "password": AuthService.decrypt_secret(
+            user.password_encrypted, aad=user_password_aad(server.id, user.username)
+        ),
+    }
+

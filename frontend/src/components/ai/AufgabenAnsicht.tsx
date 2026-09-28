@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { aiApi, type AiTaskEntry, type AiTaskWrite } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
 import { Button, DateTimePicker, Dropdown, type DropdownOption, Switch } from '@/Singra/UI'
+import { ChatHintergrund } from '@/features/chatHintergrund'
 import { useAuthStore } from '@/stores/authStore'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
@@ -255,8 +256,11 @@ export function AufgabenAnsicht() {
   const leer = aufgaben.length === 0 && !laedt
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest">
-      <header className="flex shrink-0 items-center gap-2 border-b border-outline-variant/40 px-4 py-3">
+    <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest">
+      {/* Derselbe Hintergrund wie im KI-Chat — eine Wahl für den Bereich. */}
+      <ChatHintergrund bereich="ki" />
+
+      <header className="relative flex shrink-0 items-center gap-2 border-b border-outline-variant/40 px-4 py-3">
         <CalendarClock className="h-4 w-4 shrink-0 text-secondary" aria-hidden="true" />
         <div className="min-w-0">
           <h2 className="truncate font-headline text-sm font-semibold text-on-surface">
@@ -286,7 +290,7 @@ export function AufgabenAnsicht() {
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="relative min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl space-y-3 px-3 py-6 sm:px-4">
           {formular && (
             <form
@@ -372,7 +376,7 @@ export function AufgabenAnsicht() {
                     </div>
                     <div>
                       <span className="mb-1.5 block text-xs text-on-surface-variant">
-                        {t('ai.tasks.weekdays', 'Wochentage')}
+                        {t('ai.tasks.weekdays')}
                       </span>
                       <div className="flex flex-wrap gap-1.5">
                         {WOCHENTAGE.map((tag) => {
@@ -459,7 +463,7 @@ export function AufgabenAnsicht() {
                     onChange={(wert) => setze('timezone', wert)}
                     options={zeitzonenOptionen}
                     searchable={true}
-                    searchPlaceholder={t('ai.tasks.timezoneSearch', 'Zeitzone suchen …')}
+                    searchPlaceholder={t('ai.tasks.timezoneSearch')}
                     className="max-w-64"
                     aria-label={t('ai.tasks.timezone')}
                   />
@@ -516,7 +520,7 @@ export function AufgabenAnsicht() {
           {leer && !formular && (
             <div className="py-16 text-center">
               <Sparkles className="mx-auto h-10 w-10 text-primary/70" aria-hidden="true" />
-              <h3 className="mt-4 font-headline text-lg font-semibold text-on-surface">
+              <h3 className="mt-4 font-headline text-title-lg font-semibold text-on-surface">
                 {t('ai.tasks.emptyTitle')}
               </h3>
               <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-on-surface-variant">

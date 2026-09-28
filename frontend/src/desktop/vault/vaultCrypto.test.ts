@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import i18n from '@/i18n'
 import {
   SecureBuffer,
   bytesToBase64,
@@ -19,6 +20,10 @@ import { pruefeBiometrieVerfuegbar, verifiziereBiometrie } from '../tauri'
 vi.mock('../tauri', () => ({
   pruefeBiometrieVerfuegbar: vi.fn().mockResolvedValue(false),
   verifiziereBiometrie: vi.fn().mockResolvedValue(false),
+  // Der Browser hat keinen Platz für ein Geheimnis. `isBiometricsAvailable`
+  // fragt das seit 09/2026 zuerst — fragen können und verwahren können sind
+  // zwei Dinge, und ohne das zweite gibt es keinen Schnelleinstieg.
+  biometrieSpeicherVerfuegbar: vi.fn().mockResolvedValue(false),
 }))
 
 describe('vaultCrypto', () => {
@@ -111,7 +116,10 @@ describe('vaultCrypto', () => {
         },
         configurable: true,
       })
-      await expect(promptBiometricVerification('Test')).rejects.toThrow(/abgebrochen/)
+      // Die Meldung folgt der Oberflächensprache; jsdom meldet `en-US`.
+      await expect(promptBiometricVerification('Test')).rejects.toThrow(
+        i18n.t('auth.passkeyErrors.biometricCancelled'),
+      )
 
       // 4. Other unexpected errors -> fails closed (returns false, not true!)
       Object.defineProperty(navigator, 'credentials', {

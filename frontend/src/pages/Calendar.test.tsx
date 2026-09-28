@@ -4,6 +4,8 @@ import { MemoryRouter } from 'react-router-dom'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
 import { Calendar } from './Calendar'
+import { grundbestandZuruecksetzen } from '@/lib/offlineSync'
+import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 
 vi.mock('@/api/client', () => ({
   api: vi.fn(),
@@ -11,6 +13,7 @@ vi.mock('@/api/client', () => ({
 
 describe('Calendar Page Component', () => {
   beforeEach(async () => {
+    setzeAngemeldetesKonto(null)
     vi.mocked(client.api).mockReset()
     await i18n.changeLanguage('de')
   })
@@ -163,6 +166,118 @@ describe('Calendar Page Component', () => {
 
     await waitFor(() => {
       expect(client.api).toHaveBeenCalledWith(expect.stringContaining('event_type=server'))
+    })
+  })
+
+  describe('Tageszuordnung: das Ende ist exklusiv', () => {
+    /** Ortszeit-Mitternacht des Tages `tag` im aktuellen Monat, als ISO. */
+    const mitternacht = (tag: number) => {
+      const jetzt = new Date()
+      return new Date(jetzt.getFullYear(), jetzt.getMonth(), tag, 0, 0, 0).toISOString()
+    }
+    const uhrzeit = (tag: number, stunde: number) => {
+      const jetzt = new Date()
+      return new Date(jetzt.getFullYear(), jetzt.getMonth(), tag, stunde, 0, 0).toISOString()
+    }
+
+    async function zeige(termin: Record<string, unknown>) {
+      grundbestandZuruecksetzen()
+      localStorage.clear()
+      vi.mocked(client.api).mockResolvedValue([
+        { id: 1, event_id: 'evt', recurrence: '{"rrule":null}', ...termin },
+      ] as any)
+      render(
+        <MemoryRouter>
+          <Calendar />
+        </MemoryRouter>,
+      )
+      await waitFor(() => {
+        expect(screen.getAllByText(String(termin.title)).length).toBeGreaterThan(0)
+      })
+      return screen.getAllByText(String(termin.title)).length
+    }
+
+    it('zeigt einen ganztaegigen Termin auf genau einem Tag', async () => {
+      // So speichert MSM einen eintaegigen ganztaegigen Termin, und so schreibt
+      // `export_ical` ihn als `DTEND;VALUE=DATE:` heraus: das Ende ist
+      // Mitternacht des Folgetags. Mit `evEnd >= dayStart` sass jeder
+      // Geburtstag auf zwei Tagen.
+      expect(
+        await zeige({
+          title: 'Geburtstag Ganztag',
+          start: mitternacht(14),
+          end: mitternacht(15),
+          all_day: true,
+        }),
+      ).toBe(1)
+    })
+
+    it('zaehlt einen Termin, der um Mitternacht endet, nicht zum Folgetag', async () => {
+      expect(
+        await zeige({ title: 'Spaete Wartung', start: uhrzeit(20, 23), end: mitternacht(21) }),
+      ).toBe(1)
+    })
+
+    it('zeigt einen mehrtaegigen Termin auf allen Tagen, die er wirklich belegt', async () => {
+      // 14. bis 17. Mitternacht sind drei Tage, nicht vier.
+      expect(
+        await zeige({
+          title: 'Mehrtaegige Wartung',
+          start: mitternacht(14),
+          end: mitternacht(17),
+          all_day: true,
+        }),
+      ).toBe(3)
+    })
+
+    it('zeigt einen punktuellen Termin ohne Dauer trotzdem', async () => {
+      // `end === start`: es gibt kein Ende, das nach dem Tagesbeginn liegen
+      // koennte. Ohne die Ausnahme verschwaende so ein Meilenstein ganz.
+      expect(
+        await zeige({ title: 'Meilenstein', start: uhrzeit(9, 14), end: uhrzeit(9, 14) }),
+      ).toBe(1)
+    })
+  })
+
+  it('behaelt beim Bearbeiten eine unlesbare Wiederholungsregel', async () => {
+    // Auf einem Geraet ohne Schluessel ist die Regel ein Umschlag. Das
+    // Formular zeigt dann "keine Wiederholung"; wer nur den Titel aendert,
+    // darf die Serie damit nicht loeschen oder doppelt verschluesseln.
+    grundbestandZuruecksetzen()
+    localStorage.clear()
+    // Die Offline-Ablage gehört einem Konto (`lib/offlineAblage.ts`).
+    setzeAngemeldetesKonto(1)
+    const umschlag = 'sv-cal-v1:unlesbar-auf-diesem-geraet'
+    const heute = new Date()
+    const start = new Date(heute.getFullYear(), heute.getMonth(), heute.getDate(), 12).toISOString()
+    const ende = new Date(heute.getFullYear(), heute.getMonth(), heute.getDate(), 13).toISOString()
+    vi.mocked(client.api).mockImplementation(async (pfad: string) => {
+      if (pfad.startsWith('/calendar/events')) {
+        return [
+          {
+            id: 1, event_id: 'evt-serie', title: 'Jour fixe', start, end: ende,
+            recurrence: umschlag, event_type: 'personal', can_edit: true,
+          },
+        ] as any
+      }
+      return {} as any
+    })
+
+    render(
+      <MemoryRouter>
+        <Calendar />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getAllByText('Jour fixe').length).toBeGreaterThan(0))
+    fireEvent.click(screen.getAllByText('Jour fixe')[0])
+    fireEvent.click(await screen.findByRole('button', { name: 'Speichern' }))
+
+    await waitFor(() => {
+      const geschrieben = vi
+        .mocked(client.api)
+        .mock.calls.filter(([p, o]) => p === '/calendar/events/evt-serie' && (o as any)?.method === 'PUT')
+      expect(geschrieben).toHaveLength(1)
+      expect(JSON.parse(String((geschrieben[0][1] as any).body)).recurrence).toBe(umschlag)
     })
   })
 })

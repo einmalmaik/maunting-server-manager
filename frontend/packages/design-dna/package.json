@@ -9,7 +9,11 @@
       "types": "./index.d.ts",
       "default": "./index.js"
     },
+    "./swarm": {
+      "types": "./swarm/index.d.ts",
+      "default": "./swarm/index.js"
+    },
     "./tokens.css": "./tokens.css"
   },
-  "files": ["index.js", "index.d.ts", "tokens.css", "README.md"]
+  "files": ["index.js", "index.d.ts", "tokens.css", "swarm", "README.md"]
 }

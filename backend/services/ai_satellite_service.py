@@ -16,6 +16,7 @@ import json
 import logging
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -29,23 +30,40 @@ logger = logging.getLogger(__name__)
 SETTINGS_KEY = "ai_satellite_credentials_encrypted"
 _AAD = "msm:settings:ai_satellite_credentials"
 
-# Copernicus Data Space Ecosystem (CDSE) Endpunkte
+# Copernicus Data Space Ecosystem (CDSE) Endpunkte. Der STAC-Katalog liegt
+# unter `stac.dataspace.copernicus.eu/v1`. Der alte unter
+# `catalogue.dataspace.copernicus.eu/stac` ist seit dem 17.11.2025 abgelöst
+# und kennt die Sammlung `SENTINEL-2` nicht mehr: Jede Suche danach endete
+# mit 400, mit Copernicus-Zugang erschien nie eine Szene (geprüft 23.09.2026).
 _TOKEN_ENDPOINT = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
-_STAC_ENDPOINT = "https://catalogue.dataspace.copernicus.eu/stac/search"
+_STAC_ENDPOINT = "https://stac.dataspace.copernicus.eu/v1/search"
 _TIMEOUT = 15.0
+#: Nur Szenen der letzten 90 Tage. Ohne Zeitfenster sortiert der Katalog das
+#: ganze Archiv seit 2015 und brauchte dafür 3 bis 21 s, mit Fenster im Median
+#: 1,5 s und höchstens 3,6 s (gemessen 23.09.2026). Eine ältere Aufnahme zeigt ein Gebiet ohnehin
+#: nicht mehr, wie es heute ist; dann bleibt es beim Kartenbild.
+_SEARCH_WINDOW_DAYS = 90
 
 # In-Memory Token Cache: { "token": str, "expires_at": float }
 _token_cache: dict[str, Any] = {}
 _token_lock = threading.Lock()
 _http_client: httpx.Client | None = None
 _http_client_lock = threading.Lock()
-_search_cache: dict[tuple[tuple[float, ...], int, float], tuple[float, list[dict[str, Any]]]] = {}
-_search_inflight: dict[tuple[tuple[float, ...], int, float], threading.Event] = {}
+# Schlüssel: (Breite, Länge, Anzahl, höchste Bewölkung)
+_SearchKey = tuple[float, float, int, float]
+_search_cache: dict[_SearchKey, tuple[float, list[dict[str, Any]]]] = {}
+_search_inflight: dict[_SearchKey, threading.Event] = {}
 _search_lock = threading.Lock()
 _SEARCH_CACHE_TTL_SECONDS = 60.0
+# Vorschau-Adressen gefundener Szenen, nach Szenen-ID. Das Kartenbild holt das
+# Panel selbst (`ai_geo_image_service`) und nimmt die Adresse nur von hier —
+# nie aus einer Anfrage. Eine Stunde reicht für jedes Gespräch über einen Ort.
+_preview_hrefs: dict[str, tuple[float, str]] = {}
+_PREVIEW_TTL_SECONDS = 3600.0
+_PREVIEW_MAX_ENTRIES = 256
 
 
-def _finish_search(cache_key: tuple[tuple[float, ...], int, float], pending: threading.Event) -> None:
+def _finish_search(cache_key: _SearchKey, pending: threading.Event) -> None:
     with _search_lock:
         _search_inflight.pop(cache_key, None)
         pending.set()
@@ -116,6 +134,7 @@ def store_credentials(client_id: str, client_secret: str) -> None:
             _token_cache.clear()
         with _search_lock:
             _search_cache.clear()
+            _preview_hrefs.clear()
         return
     payload = json.dumps({"client_id": cid, "client_secret": csec})
     PanelSettingsService.set(SETTINGS_KEY, AuthService.encrypt_secret(payload, aad=_AAD))
@@ -123,6 +142,7 @@ def store_credentials(client_id: str, client_secret: str) -> None:
         _token_cache.clear()
     with _search_lock:
         _search_cache.clear()
+        _preview_hrefs.clear()
 
 
 def is_configured() -> bool:
@@ -180,12 +200,19 @@ def _get_access_token(creds: dict[str, str]) -> str:
 
 
 def search_satellite_imagery(
-    bbox: list[float],
+    latitude: float,
+    longitude: float,
     limit: int = 3,
     max_cloud_cover: float = 30.0,
 ) -> list[dict[str, Any]]:
-    """Sucht nach den neuesten Sentinel-2 Aufnahmen für eine Bounding-Box [min_lon, min_lat, max_lon, max_lat]."""
-    cache_key = (tuple(round(float(value), 5) for value in bbox), int(limit), float(max_cloud_cover))
+    """Sucht die neuesten Sentinel-2-Aufnahmen (L2A), die diesen Ort zeigen.
+
+    Gesucht wird am Punkt, nicht in der Box des Geocoders: Die reicht oft weit
+    über den Ort hinaus, und eine Kachel am Rand der Box ist genauso neu wie
+    eine über dem Ort. Für Berlin enthielt keiner der beiden neuesten Treffer
+    der Box die Stadt, sie lagen östlich und südöstlich von ihr.
+    """
+    cache_key = (round(float(latitude), 5), round(float(longitude), 5), int(limit), float(max_cloud_cover))
     now = time.monotonic()
     with _search_lock:
         cached = _search_cache.get(cache_key)
@@ -210,6 +237,9 @@ def search_satellite_imagery(
         _finish_search(cache_key, pending)
         raise SatelliteUnavailable("AI_SATELLITE_NOT_CONFIGURED")
 
+    # Die Suche selbst ist öffentlich; ein Token prüft der Katalog nicht.
+    # Gesucht wird trotzdem nur mit gültigem Zugang: Copernicus ist eine
+    # Entscheidung des Betreibers, ohne sie bleibt es beim Kartenbild.
     try:
         token = _get_access_token(creds)
     except SatelliteUnavailable:
@@ -217,18 +247,27 @@ def search_satellite_imagery(
         raise
     headers = {
         "Authorization": f"Bearer {token}",
-        "Accept": "application/json",
+        "Accept": "application/geo+json, application/json",
         "Content-Type": "application/json",
     }
 
+    since = datetime.now(timezone.utc) - timedelta(days=_SEARCH_WINDOW_DAYS)
     body = {
-        "collections": ["SENTINEL-2"],
-        "bbox": bbox,
+        "collections": ["sentinel-2-l2a"],
+        "intersects": {"type": "Point", "coordinates": [float(longitude), float(latitude)]},
+        "datetime": f"{since:%Y-%m-%dT%H:%M:%SZ}/..",
         "limit": limit,
-        "query": {
-            "cloudCover": {"lte": max_cloud_cover},
-        },
+        "filter-lang": "cql2-json",
+        "filter": {"op": "<=", "args": [{"property": "eo:cloud_cover"}, max_cloud_cover]},
         "sortby": [{"field": "properties.datetime", "direction": "desc"}],
+        # Nur, was hier gebraucht wird: Ein Treffer trägt sonst 47 Assets
+        # (Bänder und Metadateien) und wiegt rund 70 statt 1,5 KB. Ignoriert
+        # ein Server die Auswahl, liest sich die volle Antwort genauso.
+        "fields": {
+            "include": [
+                "id", "properties.datetime", "properties.eo:cloud_cover", "assets.thumbnail.href", "geometry",
+            ],
+        },
     }
 
     try:
@@ -267,13 +306,12 @@ def search_satellite_imagery(
         props = feat.get("properties") or {}
         assets = feat.get("assets") or {}
         feat_id = redact_sensitive_text(str(feat.get("id") or ""))
-        dt = str(props.get("datetime") or props.get("startDate") or "")
-        clouds = props.get("cloudCover")
-        preview_url = ""
-        for k in ("thumbnail", "rendered_preview", "preview", "visual"):
-            if k in assets and isinstance(assets[k], dict) and assets[k].get("href"):
-                preview_url = str(assets[k]["href"])
-                break
+        dt = str(props.get("datetime") or "")
+        clouds = props.get("eo:cloud_cover")
+        # Die Schnellansicht der Kachel (343 × 343 px, JPEG). Die anderen
+        # Assets sind Bänder und Metadateien der vollen Szene.
+        thumbnail = assets.get("thumbnail")
+        preview_url = str(thumbnail.get("href") or "") if isinstance(thumbnail, dict) else ""
 
         results.append({
             "id": feat_id[:120],
@@ -288,4 +326,37 @@ def search_satellite_imagery(
         _search_cache[cache_key] = (time.monotonic() + _SEARCH_CACHE_TTL_SECONDS, results)
         _search_inflight.pop(cache_key, None)
         pending.set()
+    _remember_previews(results)
     return results
+
+
+def _remember_previews(results: list[dict[str, Any]]) -> None:
+    now = time.monotonic()
+    with _search_lock:
+        for scene in results:
+            if scene.get("id") and scene.get("preview_url"):
+                _preview_hrefs[str(scene["id"])] = (now + _PREVIEW_TTL_SECONDS, str(scene["preview_url"]))
+        for stale in [key for key, (expires, _href) in _preview_hrefs.items() if expires <= now]:
+            del _preview_hrefs[stale]
+        while len(_preview_hrefs) > _PREVIEW_MAX_ENTRIES:
+            del _preview_hrefs[min(_preview_hrefs, key=lambda key: _preview_hrefs[key][0])]
+
+
+def preview_href(scene_id: str) -> str | None:
+    """Die Vorschau-Adresse einer zuletzt gefundenen Szene, oder None."""
+    with _search_lock:
+        entry = _preview_hrefs.get(scene_id)
+    if entry is None or entry[0] <= time.monotonic():
+        return None
+    return entry[1]
+
+
+def access_token() -> str | None:
+    """Ein gültiges CDSE-Token für Copernicus-eigene Adressen, oder None."""
+    creds = get_credentials()
+    if not creds:
+        return None
+    try:
+        return _get_access_token(creds)
+    except SatelliteUnavailable:
+        return None

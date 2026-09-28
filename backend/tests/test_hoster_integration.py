@@ -397,7 +397,8 @@ def test_termination_sets_a_grace_period_and_deletes_nothing_yet(
     service = db.query(HosterService).one()
     assert service.status == "terminating"
     assert service.terminate_after is not None
-    # SQLite liefert naive Zeitstempel zurueck; fuer den Vergleich normalisieren.
+    # PostgreSQL liefert zeitzonenbehaftete Zeitstempel; naive Werte fuer den
+    # Vergleich trotzdem normalisieren.
     deadline = service.terminate_after
     if deadline.tzinfo is None:
         deadline = deadline.replace(tzinfo=timezone.utc)

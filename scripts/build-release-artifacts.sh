@@ -35,7 +35,8 @@ PANEL_ROOT="$WORK_DIR/mauntingservermanager-$VERSION"
 archive_tracked "$PANEL_ROOT" \
     README.md Caddyfile.template install.sh update.sh \
     msm-update.service msm-update.timer msm.service.template \
-    backend blueprints dis-sidecar docs frontend msm-agent scripts helper-scripts
+    backend blueprints dis-sidecar searxng-sidecar livekit-sidecar docs frontend \
+    msm-agent scripts helper-scripts
 rm -rf "$PANEL_ROOT/backend/tests" "$PANEL_ROOT/msm-agent/tests"
 rm -f "$PANEL_ROOT/dis-sidecar/test-backup-endpoints.mjs"
 rm -rf "$PANEL_ROOT/frontend/dist"

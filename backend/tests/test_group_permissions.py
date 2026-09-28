@@ -1,0 +1,621 @@
+"""Das Rechtevokabular der Gruppen: ein Name, eine Wirkung.
+
+Der Rechte-Dialog schrieb eine Zeit lang `call_start`, geprueft wurde
+`start_group_calls`. Ein gesetzter Haken blieb wirkungslos, und niemand merkte
+es, weil beide Seiten fuer sich stimmig waren. Diese Tests halten die Bruecke
+zwischen altem und neuem Namen fest und sorgen dafuer, dass ein dritter Name
+gar nicht erst in die Datenbank kommt.
+"""
+
+from __future__ import annotations
+
+import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from dependencies import get_current_user
+from main import app
+from models import User
+from services.social_service import (
+    GROUP_PERMISSION_ALIASES,
+    GROUP_PERMISSIONS,
+    GROUP_ROLE_ONLY_PERMISSIONS,
+    SocialService,
+)
+
+
+# ── Aufloesung alter Namen ──────────────────────────────────────────────────
+
+
+def test_expand_uebersetzt_alte_namen() -> None:
+    assert SocialService.expand_group_permissions("call_start") == {"start_group_calls"}
+    assert SocialService.expand_group_permissions("call_join") == {"join_group_calls"}
+    assert SocialService.expand_group_permissions("call_share") == {"share_screen"}
+
+
+def test_call_moderate_wird_zu_zwei_rechten() -> None:
+    # Bewusst: wer frueher „moderieren" hatte, konnte beides. Die Aufspaltung
+    # darf ihm nichts wegnehmen.
+    assert SocialService.expand_group_permissions("call_moderate") == {
+        "mute_in_calls",
+        "kick_from_calls",
+    }
+
+
+def test_expand_vertraegt_leerzeichen_und_leere_eintraege() -> None:
+    assert SocialService.expand_group_permissions(" send_messages , , call_join ") == {
+        "send_messages",
+        "join_group_calls",
+    }
+
+
+def test_expand_bei_none_ist_leer() -> None:
+    assert SocialService.expand_group_permissions(None) == set()
+
+
+def test_jeder_alias_zeigt_auf_bekannte_rechte() -> None:
+    # Ein Alias, der auf einen Namen zeigt, den niemand prueft, waere genau der
+    # Fehler, den diese Datei verhindern soll.
+    for ziele in GROUP_PERMISSION_ALIASES.values():
+        for ziel in ziele:
+            assert ziel in GROUP_PERMISSIONS
+
+
+# ── Schreibschutz ───────────────────────────────────────────────────────────
+
+
+def test_unbekanntes_recht_wird_abgewiesen() -> None:
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.assert_known_permissions("send_messages,call_stert")
+    assert fehler.value.status_code == 422
+    assert "call_stert" in fehler.value.detail
+
+
+def test_bekanntes_recht_wird_kanonisch_gespeichert() -> None:
+    assert (
+        SocialService.assert_known_permissions("call_join,send_messages")
+        == "join_group_calls,send_messages"
+    )
+
+
+def test_altes_und_neues_recht_nebeneinander_gibt_keine_dublette() -> None:
+    assert (
+        SocialService.assert_known_permissions("call_join,join_group_calls")
+        == "join_group_calls"
+    )
+
+
+def test_none_bleibt_none() -> None:
+    assert SocialService.assert_known_permissions(None) is None
+
+
+# ── Wirkung an einer echten Gruppe ──────────────────────────────────────────
+
+
+def _gruppe(db: Session, besitzer: User, mitglied: User, rechte: str | None):
+    gruppe = SocialService.create_group(db, besitzer)
+    SocialService.join_group_by_invite_code(db, mitglied, gruppe.invite_code)
+    if rechte is not None:
+        mitgliedschaft = SocialService.get_group_member(db, gruppe.id, mitglied.id)
+        # Direkt an der Spalte vorbei am Schreibschutz: so sieht die Datenbank
+        # nach einem Update von vor dieser Aenderung aus.
+        mitgliedschaft.permissions = rechte
+        db.commit()
+    return gruppe
+
+
+def test_alter_haken_wirkt_ohne_datenmigration(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, "call_join")
+    assert SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "join_group_calls"
+    )
+
+
+def test_call_moderate_gibt_stumm_und_rauswurf(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, "call_moderate")
+    assert SocialService.has_group_permission(db, gruppe.id, regular_user.id, "mute_in_calls")
+    assert SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "kick_from_calls"
+    )
+
+
+def test_ohne_eintrag_kein_anrufrecht(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, "")
+    assert not SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "join_group_calls"
+    )
+    assert not SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "mute_in_calls"
+    )
+
+
+def test_eigentuemer_hat_anrufrechte_ohne_eintrag(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Er koennte sie sich ohnehin jederzeit selbst geben. Ein Eigentuemer, der
+    # seinen eigenen Anruf nicht moderieren darf, waere nur eine Stolperfalle.
+    gruppe = _gruppe(db, owner_user, regular_user, "")
+    for recht in (
+        "start_group_calls",
+        "join_group_calls",
+        "share_screen",
+        "mute_in_calls",
+        "kick_from_calls",
+    ):
+        assert SocialService.has_group_permission(db, gruppe.id, owner_user.id, recht)
+
+
+def test_eigentuemer_bekommt_keine_nicht_anruf_rechte_geschenkt(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Die Abkuerzung gilt nur fuer Anrufe. Sonst waere sie eine stille
+    # Rechteausweitung ueber das ganze Gruppensystem.
+    gruppe = _gruppe(db, owner_user, regular_user, "")
+    eigene = SocialService.get_group_member(db, gruppe.id, owner_user.id)
+    eigene.permissions = ""
+    db.commit()
+    assert not SocialService.has_group_permission(
+        db, gruppe.id, owner_user.id, "delete_messages"
+    )
+
+
+def test_kein_mitglied_hat_nichts(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, "")
+    assert not SocialService.has_group_permission(
+        db, gruppe.id, 999_999, "join_group_calls"
+    )
+
+
+def test_rollenupdate_weist_unbekanntes_recht_ab(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.update_member_role_permissions(
+            db, gruppe.id, regular_user.id, "member", "join_group_kalls", owner_user
+        )
+    assert fehler.value.status_code == 422
+
+
+def test_gruppenliste_meldet_die_anrufflaggen(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, "call_moderate,call_join")
+    eintrag = next(
+        g for g in SocialService.list_user_groups(db, regular_user.id) if g["id"] == gruppe.id
+    )
+    assert eintrag["can_join_call"] is True
+    assert eintrag["can_mute_others"] is True
+    assert eintrag["can_kick_from_call"] is True
+    assert eintrag["can_start_call"] is False
+    assert eintrag["can_share_screen"] is False
+
+
+def test_gruppenliste_meldet_rechte_kanonisch(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Die Oberflaeche soll nur ein Vokabular kennen, auch wenn in der Spalte
+    # noch der alte Name steht.
+    gruppe = _gruppe(db, owner_user, regular_user, "call_join")
+    eintrag = next(
+        g for g in SocialService.list_user_groups(db, regular_user.id) if g["id"] == gruppe.id
+    )
+    eigener = next(m for m in eintrag["members"] if m["user_id"] == regular_user.id)
+    assert eigener["permissions"] == "join_group_calls"
+
+
+# ── Alle wecken und anheften ────────────────────────────────────────────────
+#
+# Diese beiden Rechte sind anders als alle anderen: der Server kann sie nicht
+# durchsetzen, weil er den Inhalt einer Nachricht nicht liest. Durchgesetzt
+# werden sie vom **empfangenden** Geraet, und das befragt dafuer die Marke am
+# *Absender* aus der Gruppenantwort. Laufen Marke und Pruefung auseinander,
+# klingelt ein Handy bei jemandem, der das nicht duerfte — und kein
+# 403 faengt es ab, weil nie ein Aufruf stattfindet.
+
+
+def test_beide_rechte_stehen_im_vokabular() -> None:
+    assert "mention_everyone" in GROUP_PERMISSIONS
+    assert "pin_messages" in GROUP_PERMISSIONS
+
+
+def test_tippfehler_im_neuen_recht_wird_abgewiesen() -> None:
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.assert_known_permissions("mention_everybody")
+    assert fehler.value.status_code == 422
+    assert "mention_everybody" in fehler.value.detail
+
+
+def test_mitglied_ohne_eintrag_darf_nicht_alle_wecken(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Der sichere Ausgangszustand: bestehende Gruppen bekommen nichts dazu.
+    gruppe = _gruppe(db, owner_user, regular_user, "")
+    assert not SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "mention_everyone"
+    )
+    assert not SocialService.has_group_permission(db, gruppe.id, regular_user.id, "pin_messages")
+
+
+def test_vergebenes_recht_wirkt(db: Session, owner_user: User, regular_user: User) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, "mention_everyone")
+    assert SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "mention_everyone"
+    )
+    assert not SocialService.has_group_permission(db, gruppe.id, regular_user.id, "pin_messages")
+
+
+def test_eigentuemer_darf_ohne_eintrag_wecken_und_anheften(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Dieselbe Begruendung wie bei den Anrufrechten: er kann sie sich mit zwei
+    # Klicks selbst geben. Ein Eigentuemer, der seine eigene Gruppe nicht
+    # erreicht, waere kein Schutz, sondern ein Raetsel.
+    gruppe = _gruppe(db, owner_user, regular_user, "")
+    eigene = SocialService.get_group_member(db, gruppe.id, owner_user.id)
+    eigene.permissions = ""
+    db.commit()
+    assert SocialService.has_group_permission(db, gruppe.id, owner_user.id, "mention_everyone")
+    assert SocialService.has_group_permission(db, gruppe.id, owner_user.id, "pin_messages")
+
+
+def test_marke_je_mitglied_stimmt_mit_der_pruefung_ueberein(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Die eigentliche Zusicherung dieser Datei.
+
+    Die Marke in der Gruppenantwort und ``has_group_permission`` muessen
+    dasselbe sagen — fuer jedes Mitglied, in jeder Rolle, bei jedem Recht.
+    Sie kommen aus derselben ``effective_permissions``; dieser Test haelt fest,
+    dass das so bleibt.
+    """
+    for rechte in (
+        None,
+        "",
+        "mention_everyone",
+        "pin_messages",
+        "set_disappearing_messages",
+        "send_messages",
+    ):
+        gruppe = _gruppe(db, owner_user, regular_user, rechte)
+        eintrag = next(
+            g
+            for g in SocialService.list_user_groups(db, regular_user.id)
+            if g["id"] == gruppe.id
+        )
+        for mitglied in eintrag["members"]:
+            for recht, marke in (
+                ("mention_everyone", "can_mention_everyone"),
+                ("pin_messages", "can_pin_messages"),
+                ("set_disappearing_messages", "can_set_disappearing_messages"),
+            ):
+                assert mitglied[marke] is SocialService.has_group_permission(
+                    db, gruppe.id, mitglied["user_id"], recht
+                ), f"{marke} weicht ab bei {mitglied['role']} mit {rechte!r}"
+
+
+def test_gruppenmarke_beschreibt_mich_selbst(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Die Marke an der Gruppe sagt „darf ich den Knopf sehen", die am Mitglied
+    # „durfte dieser Absender". Beim Eigentuemer faellt beides zusammen, beim
+    # Mitglied ohne Recht nicht — sonst waere die Unterscheidung zufaellig
+    # richtig und niemand merkte ihr Fehlen.
+    gruppe = _gruppe(db, owner_user, regular_user, "")
+    meins = next(
+        g for g in SocialService.list_user_groups(db, regular_user.id) if g["id"] == gruppe.id
+    )
+    assert meins["can_mention_everyone"] is False
+    besitzer = next(m for m in meins["members"] if m["user_id"] == owner_user.id)
+    assert besitzer["can_mention_everyone"] is True
+
+
+# ── Verschwindende Nachrichten einstellen ───────────────────────────────────
+#
+# Dieselbe Bauart wie Wecken und Anheften: die Umstellung reist verschluesselt
+# durch die Gruppenmailbox, der Server liest sie nie und kann sie deshalb nicht
+# abweisen. Bis 09/2026 gab es dafuer gar kein Recht — jedes Mitglied stellte
+# die Frist fuer alle, und das empfangende Geraet glaubte obendrein dem Namen,
+# den das Paket selbst nannte. Seitdem prueft der Empfaenger zuerst den belegten
+# Urheber und dann dessen Marke ``can_set_disappearing_messages`` aus dieser
+# Antwort. Im Direktchat gibt es keine Rollen; dort duerfen weiterhin beide.
+
+
+def _standardrechte(db: Session, gruppe, besitzer: User, rechte: str) -> None:
+    SocialService.update_group_default_permissions(
+        db, group_id=gruppe.id, default_permissions=rechte, caller=besitzer
+    )
+
+
+def test_verfallsrecht_steht_im_vokabular() -> None:
+    assert "set_disappearing_messages" in GROUP_PERMISSIONS
+    # Ohne 422 und kanonisch zurueck: ein Dialog, der das Recht vergibt, darf
+    # nicht an der Namenspruefung scheitern.
+    assert (
+        SocialService.assert_known_permissions("set_disappearing_messages,send_messages")
+        == "send_messages,set_disappearing_messages"
+    )
+
+
+def test_mitglied_mit_standardrechten_stellt_keine_frist(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Der sichere Ausgangszustand, wie beim Wecken: bestehende Gruppen bekommen
+    # nichts dazu. Ein gewoehnliches Mitglied, das bis 09/2026 umstellen
+    # konnte, weil es gar kein Recht gab, braucht jetzt eines.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    _standardrechte(db, gruppe, owner_user, "send_messages,attach_media,invite_members")
+
+    assert not SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "set_disappearing_messages"
+    )
+    meins = next(
+        g for g in SocialService.list_user_groups(db, regular_user.id) if g["id"] == gruppe.id
+    )
+    assert meins["can_set_disappearing_messages"] is False
+    ich = next(m for m in meins["members"] if m["user_id"] == regular_user.id)
+    assert ich["can_set_disappearing_messages"] is False
+
+
+def test_eigentuemer_und_admin_stellen_die_frist_ohne_eintrag(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Dieselbe Begruendung wie beim Anheften: sie koennten es sich mit zwei
+    # Klicks selbst geben. Ein Eigentuemer, der die Frist seiner eigenen Gruppe
+    # nicht stellen darf, waere kein Schutz, sondern ein Raetsel.
+    gruppe = _gruppe(db, owner_user, regular_user, "")
+    eigene = SocialService.get_group_member(db, gruppe.id, owner_user.id)
+    eigene.permissions = ""
+    db.commit()
+    assert SocialService.has_group_permission(
+        db, gruppe.id, owner_user.id, "set_disappearing_messages"
+    )
+
+    SocialService.update_member_role_permissions(
+        db,
+        group_id=gruppe.id,
+        target_user_id=regular_user.id,
+        role="admin",
+        permissions="",
+        caller=owner_user,
+    )
+    assert SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "set_disappearing_messages"
+    )
+
+
+def test_eine_rolle_gibt_das_recht_zur_frist(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    SocialService.update_member_role_permissions(
+        db,
+        group_id=gruppe.id,
+        target_user_id=regular_user.id,
+        role="moderator",
+        permissions="send_messages,set_disappearing_messages",
+        caller=owner_user,
+    )
+    assert SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "set_disappearing_messages"
+    )
+
+
+def test_frist_darf_standardrecht_fuer_alle_sein(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Eine kleine Gruppe unter Freunden, in der jeder umstellen darf. Anders als
+    # ``manage_roles`` gibt dieses Recht keine weiteren Rechte frei und haengt
+    # deshalb nicht nur an einer Rolle.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    _standardrechte(db, gruppe, owner_user, "send_messages,set_disappearing_messages")
+    assert SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "set_disappearing_messages"
+    )
+
+
+def test_gruppenliste_meldet_die_verfallsmarke(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Zwei Marken, zwei Fragen: die an der Gruppe sagt „darf ich den Eintrag
+    # bedienen", die am Mitglied „gilt die Umstellung dieses Absenders".
+    gruppe = _gruppe(db, owner_user, regular_user, "send_messages")
+
+    meins = next(
+        g for g in SocialService.list_user_groups(db, regular_user.id) if g["id"] == gruppe.id
+    )
+    assert meins["can_set_disappearing_messages"] is False
+    marken = {m["user_id"]: m["can_set_disappearing_messages"] for m in meins["members"]}
+    assert marken == {owner_user.id: True, regular_user.id: False}
+
+    seins = next(
+        g for g in SocialService.list_user_groups(db, owner_user.id) if g["id"] == gruppe.id
+    )
+    assert seins["can_set_disappearing_messages"] is True
+
+
+def test_die_verfallsmarke_uebersteht_das_antwortschema(
+    client: TestClient, db: Session, owner_user: User, regular_user: User
+) -> None:
+    """``response_model`` wirft weg, was das Schema nicht kennt.
+
+    Fehlte das Feld in ``ChatGroupResponse`` oder ``ChatGroupMemberResponse``,
+    waeren alle Tests darueber gruen und die Oberflaeche bekaeme die Marke
+    trotzdem nie. Eine fehlende Marke heisst dort nein — in keiner Gruppe
+    koennte dann noch jemand die Frist stellen, und niemand saehe, warum.
+    """
+    gruppe = _gruppe(db, owner_user, regular_user, "send_messages")
+    app.dependency_overrides[get_current_user] = lambda: owner_user
+    try:
+        antwort = client.get("/api/social/groups")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert antwort.status_code == 200
+    eintrag = next(g for g in antwort.json() if g["id"] == gruppe.id)
+    assert eintrag["can_set_disappearing_messages"] is True
+    marken = {m["user_id"]: m["can_set_disappearing_messages"] for m in eintrag["members"]}
+    assert marken == {owner_user.id: True, regular_user.id: False}
+
+
+# ── Nur-Rollen-Rechte gehoeren nicht an @everyone ───────────────────────────
+
+
+def test_manage_roles_nicht_als_standardrecht(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Der Dialog bot es nie an, das Backend nahm es klaglos: ein PATCH auf die
+    # Standardrechte machte jedes einfache Mitglied zum Rollenverwalter, und
+    # damit zum Administrator. Der Haken war versteckt, die Regel fehlte.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.update_group_default_permissions(
+            db,
+            group_id=gruppe.id,
+            default_permissions="send_messages,manage_roles",
+            caller=owner_user,
+        )
+    assert fehler.value.status_code == 422
+    assert "manage_roles" in fehler.value.detail
+
+    db.rollback()
+    frisch = SocialService.get_group_member(db, gruppe.id, regular_user.id)
+    assert frisch is not None
+    assert not SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "manage_roles"
+    )
+
+
+def test_standardrechte_ohne_nur_rollen_recht_gehen_durch(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Die Schranke darf nur das eine Recht treffen, nicht den ganzen Vorgang.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    aktualisiert = SocialService.update_group_default_permissions(
+        db,
+        group_id=gruppe.id,
+        default_permissions="send_messages,attach_media",
+        caller=owner_user,
+    )
+    assert aktualisiert.default_permissions == "attach_media,send_messages"
+
+
+def test_nur_rollen_recht_bleibt_an_einer_rolle_erlaubt(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Genau dafuer ist es da. Verboten ist nur der Weg ueber @everyone.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    SocialService.update_member_role_permissions(
+        db,
+        group_id=gruppe.id,
+        target_user_id=regular_user.id,
+        role="admin",
+        permissions="send_messages,manage_roles",
+        caller=owner_user,
+    )
+    assert SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "manage_roles"
+    )
+
+
+def test_jedes_nur_rollen_recht_ist_ein_bekanntes_recht() -> None:
+    # Ein Eintrag, der auf einen Namen zeigt, den das Vokabular nicht kennt,
+    # waere eine Schranke vor einer Tuer, die es nicht gibt.
+    assert GROUP_ROLE_ONLY_PERMISSIONS <= GROUP_PERMISSIONS
+
+
+# ── Der Einladungscode ──────────────────────────────────────────────────────
+#
+# `invite_members` war bis 09/2026 nicht nur ungeprueft, es war strukturell
+# unprueflar: der Code ging bei jedem Abruf der Gruppenliste an jedes Mitglied
+# heraus. Wer ihn hat, kommt rein — also ist ihn *nicht zu bekommen* die
+# einzige Durchsetzung, die es geben kann.
+
+
+def _code_von(db: Session, gruppe, wer: User) -> str | None:
+    eintrag = next(
+        (g for g in SocialService.list_user_groups(db, wer.id) if g["id"] == gruppe.id),
+        None,
+    )
+    assert eintrag is not None, "Die Gruppe fehlt in der eigenen Liste."
+    return eintrag["invite_code"]
+
+
+def test_eigentuemer_bekommt_den_einladungscode_immer(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Auch wenn `invite_members` nirgends gesetzt ist: ein Eigentuemer, der
+    # niemanden in seine eigene Gruppe holen darf, waere kein Schutz.
+    gruppe = _gruppe(db, owner_user, regular_user, "")
+    SocialService.update_group_default_permissions(
+        db, group_id=gruppe.id, default_permissions="send_messages", caller=owner_user
+    )
+
+    assert _code_von(db, gruppe, owner_user) == gruppe.invite_code
+
+
+def test_mitglied_ohne_recht_bekommt_keinen_einladungscode(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, "send_messages")
+
+    assert _code_von(db, gruppe, regular_user) is None
+
+
+def test_mitglied_mit_recht_bekommt_den_einladungscode(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, "send_messages,invite_members")
+
+    assert _code_von(db, gruppe, regular_user) == gruppe.invite_code
+
+
+def test_standardrecht_reicht_fuer_den_einladungscode(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # `permissions = None` heisst „nimm die Standardrechte" — und die tragen
+    # `invite_members` in einer frischen Gruppe.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    SocialService.update_group_default_permissions(
+        db,
+        group_id=gruppe.id,
+        default_permissions="send_messages,invite_members",
+        caller=owner_user,
+    )
+
+    assert _code_von(db, gruppe, regular_user) == gruppe.invite_code
+
+
+def test_entzogenes_recht_nimmt_den_einladungscode_wieder_weg(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, "send_messages,invite_members")
+    assert _code_von(db, gruppe, regular_user) == gruppe.invite_code
+
+    SocialService.update_member_role_permissions(
+        db,
+        group_id=gruppe.id,
+        target_user_id=regular_user.id,
+        role="member",
+        permissions="send_messages",
+        caller=owner_user,
+    )
+
+    assert _code_von(db, gruppe, regular_user) is None
+
+
+def test_darf_einladen_sagt_bei_einem_nichtmitglied_nein(
+    db: Session, owner_user: User, regular_user: User, inactive_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+
+    assert SocialService.darf_einladen(db, gruppe.id, inactive_user.id) is False

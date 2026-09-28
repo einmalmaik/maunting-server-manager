@@ -144,6 +144,24 @@ def _existing_result(db: Session, task: OperationTask) -> ProvisioningResult:
     return ProvisioningResult(server=server, task=task, postgres_credentials=[], reused=True)
 
 
+def _start_database_server(db: Session, server: Server) -> None:
+    """Erster Start einer eigenen Instanz; die erste Datenbank folgt danach.
+
+    Beides laeuft im Hintergrund: Docker zieht beim ersten Mal das Image, und
+    ``initdb`` braucht Zeit. Die Einrichtung stoesst der erfolgreiche Start an
+    (``server_lifecycle_service._datenbank_einrichtung_nachziehen``) — auch jeder
+    spaetere, falls dieser hier scheitert. ``instance/bootstrap`` wiederholt sie
+    von Hand.
+    """
+    from services.server_lifecycle_service import queue_lifecycle_operation
+
+    db.refresh(server)
+    try:
+        queue_lifecycle_operation(db, server, "start")
+    except Exception:
+        logger.warning("Erster Start des Datenbankservers %s nicht moeglich", server.id)
+
+
 def provision_server(
     db: Session,
     req: ServerCreate,
@@ -173,6 +191,14 @@ def provision_server(
     )
     if not permission_service.has_global_permission(db, principal, "servers.create"):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
+    # Panel, KI und Shop kommen alle hier vorbei — eine Stelle genuegt.
+    if req.server_kind == "database" and not permission_service.has_global_permission(
+        db, principal, "servers.create.database"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "database_server_forbidden", "message": "errors.database_server_forbidden"},
+        )
 
     task, created = create_or_reuse_task(
         db,
@@ -212,7 +238,10 @@ def provision_server(
             if value is not None:
                 requested_ports[role] = value
 
-        bind_ip = req.public_bind_ip or default_bind_ip()
+        is_database = req.server_kind == "database"
+        # Datenbankserver sind ohne ausdrueckliche Bind-IP nur lokal erreichbar
+        # (Agent und internes Netz). Nach aussen geht es nur mit Absicht.
+        bind_ip = req.public_bind_ip or ("127.0.0.1" if is_database else default_bind_ip())
         from services.node_service import get_local_node
 
         if req.node_id is not None:
@@ -224,15 +253,20 @@ def provision_server(
                 )
         else:
             target_node = get_local_node(db)
-        if target_node is not None and not target_node.is_local and req.public_bind_ip is None:
+        if (
+            target_node is not None
+            and not target_node.is_local
+            and req.public_bind_ip is None
+            and not is_database
+        ):
             bind_ip = "0.0.0.0"
 
         from services.node_capacity import ensure_ram_limit_fits
 
         set_phase(db, task, "allocating")
         # Die Node-Zeile serialisiert Kapazitäts- und Portvergabe über mehrere
-        # Backend-Prozesse. SQLite ignoriert FOR UPDATE in Tests; PostgreSQL
-        # hält den Lock bis Server und Ports gemeinsam committed sind.
+        # Backend-Prozesse. PostgreSQL hält den Lock, bis Server und Ports
+        # gemeinsam committed sind.
         if target_node is not None:
             target_node = (
                 db.query(Node)
@@ -376,6 +410,36 @@ def provision_server(
         db.commit()
         db.refresh(server)
 
+        if is_database:
+            from services import postgres_instance_service
+
+            set_phase(db, task, "configuring")
+            spec = req.database
+            try:
+                postgres_instance_service.create_instance(
+                    db,
+                    server,
+                    database_name=spec.database_name,
+                    username=spec.username,
+                    password=spec.password,
+                    allowed_cidrs=spec.allowed_cidrs,
+                    ssl_required=spec.ssl_required,
+                )
+                db.commit()
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"code": "database_spec_invalid", "message": str(exc)},
+                ) from exc
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "code": "postgres_provision_failed",
+                        "message": "errors.postgres_provision_failed",
+                    },
+                ) from exc
+
         if req.postgres_enabled:
             set_phase(db, task, "configuring")
             try:
@@ -399,7 +463,11 @@ def provision_server(
             action="server.provision.requested",
             target_type="server",
             target_id=server.id,
-            details={"task_id": task.id, "game_type": server.game_type},
+            details={
+                "task_id": task.id,
+                "game_type": server.game_type,
+                "server_kind": server.server_kind,
+            },
             origin=actor.origin,
             correlation_id=actor.correlation_id,
         )
@@ -429,6 +497,8 @@ def provision_server(
                     },
                 )
             install_started = True
+            if is_database:
+                _start_database_server(db, server)
         else:
             finish_server_provisioning(db, server.id, succeeded=True)
 

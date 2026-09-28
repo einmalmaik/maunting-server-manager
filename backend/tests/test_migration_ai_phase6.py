@@ -1,7 +1,7 @@
 """Rolling-Upgrade-Test fuer Teams, Team-Memory und das Audit-Ziel als Text.
 
-Die Migrationstests laufen auf SQLite, das Panel auf PostgreSQL. Diese Datei
-prueft deshalb vor allem, was auf beiden gleich sein muss: dass Tabellen und
+Die Migrationstests laufen wie das Panel auf PostgreSQL, jeder auf einer
+Wegwerfdatenbank (`pg_wegwerf`). Diese Datei prueft vor allem: dass Tabellen und
 Spalten entstehen, dass der CHECK-Constraint den neuen Scope kennt und dass ein
 Rueckbau die Datenbank in den vorherigen Zustand versetzt.
 """
@@ -23,8 +23,8 @@ def _config(backend_dir: Path) -> Config:
     return config
 
 
-def test_teams_migration_roundtrip(tmp_path: Path) -> None:
-    db_url = f"sqlite:///{tmp_path / 'ai-phase6.db'}"
+def test_teams_migration_roundtrip(tmp_path: Path, pg_wegwerf) -> None:
+    db_url = pg_wegwerf("ai-phase6")
     previous_database_url = settings.database_url
     settings.database_url = db_url
     engine = create_engine(db_url)
@@ -32,7 +32,10 @@ def test_teams_migration_roundtrip(tmp_path: Path) -> None:
     config = _config(backend_dir)
     try:
         Base.metadata.create_all(engine)
-        command.stamp(config, "20260809_02")
+        # Von `head` aus zurueck statt auf den alten Stand zu stempeln: PostgreSQL
+        # verweigert das Loeschen einer Tabelle, auf die eine spaetere noch zeigt.
+        command.stamp(config, "head")
+        command.downgrade(config, "20260809_02")
         command.downgrade(config, "20260808_04")
 
         names = set(inspect(engine).get_table_names())
@@ -64,8 +67,8 @@ def test_teams_migration_roundtrip(tmp_path: Path) -> None:
         settings.database_url = previous_database_url
 
 
-def test_memory_gains_team_scope_and_bound_encryption(tmp_path: Path) -> None:
-    db_url = f"sqlite:///{tmp_path / 'ai-phase6-memory.db'}"
+def test_memory_gains_team_scope_and_bound_encryption(tmp_path: Path, pg_wegwerf) -> None:
+    db_url = pg_wegwerf("ai-phase6-memory")
     previous_database_url = settings.database_url
     settings.database_url = db_url
     engine = create_engine(db_url)
@@ -73,7 +76,10 @@ def test_memory_gains_team_scope_and_bound_encryption(tmp_path: Path) -> None:
     config = _config(backend_dir)
     try:
         Base.metadata.create_all(engine)
-        command.stamp(config, "20260809_02")
+        # Von `head` aus zurueck statt auf den alten Stand zu stempeln: PostgreSQL
+        # verweigert das Loeschen einer Tabelle, auf die eine spaetere noch zeigt.
+        command.stamp(config, "head")
+        command.downgrade(config, "20260809_02")
         command.downgrade(config, "20260808_04")
 
         columns = {c["name"] for c in inspect(engine).get_columns("ai_memory_entries")}
@@ -98,7 +104,7 @@ def test_memory_gains_team_scope_and_bound_encryption(tmp_path: Path) -> None:
         settings.database_url = previous_database_url
 
 
-def test_skills_table_is_rebuilt_for_prose(tmp_path: Path) -> None:
+def test_skills_table_is_rebuilt_for_prose(tmp_path: Path, pg_wegwerf) -> None:
     """Aus der Makro-Tabelle wird eine fuer Text.
 
     Der Rueckbau stellt die alte Fassung wieder her, damit ein Downgrade das
@@ -106,7 +112,7 @@ def test_skills_table_is_rebuilt_for_prose(tmp_path: Path) -> None:
     kennt. Daten wandern in keine Richtung: es gibt keine sinnvolle
     Uebersetzung zwischen einer Aufrufliste und Fliesstext.
     """
-    db_url = f"sqlite:///{tmp_path / 'ai-phase6-skills.db'}"
+    db_url = pg_wegwerf("ai-phase6-skills")
     previous_database_url = settings.database_url
     settings.database_url = db_url
     engine = create_engine(db_url)
@@ -136,15 +142,15 @@ def test_skills_table_is_rebuilt_for_prose(tmp_path: Path) -> None:
         settings.database_url = previous_database_url
 
 
-def test_audit_target_id_becomes_text(tmp_path: Path) -> None:
+def test_audit_target_id_becomes_text(tmp_path: Path, pg_wegwerf) -> None:
     """Der Fehler, an dem `remember` auf PostgreSQL scheiterte.
 
     Seit Phase C uebergeben Memory, Skills und Anhaenge UUIDs als Ziel-ID. Die
-    Spalte war `INTEGER`. SQLite speichert einen String dort klaglos, weshalb
-    die Testsuite nichts gemerkt hat — PostgreSQL weist ihn ab, und damit
+    Spalte war `INTEGER`. Die damalige SQLite-Testsuite speicherte einen String
+    dort klaglos und merkte deshalb nichts — PostgreSQL weist ihn ab, und damit
     scheiterte im Betrieb jeder Schreibvorgang ins Gedaechtnis.
     """
-    db_url = f"sqlite:///{tmp_path / 'ai-phase6-audit.db'}"
+    db_url = pg_wegwerf("ai-phase6-audit")
     previous_database_url = settings.database_url
     settings.database_url = db_url
     engine = create_engine(db_url)
@@ -152,7 +158,10 @@ def test_audit_target_id_becomes_text(tmp_path: Path) -> None:
     config = _config(backend_dir)
     try:
         Base.metadata.create_all(engine)
-        command.stamp(config, "20260809_02")
+        # Von `head` aus zurueck statt auf den alten Stand zu stempeln: PostgreSQL
+        # verweigert das Loeschen einer Tabelle, auf die eine spaetere noch zeigt.
+        command.stamp(config, "head")
+        command.downgrade(config, "20260809_02")
         command.downgrade(config, "20260808_04")
         command.upgrade(config, "20260809_02")
 

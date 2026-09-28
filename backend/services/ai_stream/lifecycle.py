@@ -36,8 +36,8 @@ from services.ai_context_service import (
     auf_budget_kuerzen,
     build_provider_messages,
     estimate_reserved_tokens,
+    gesamtgrenze,
     message_character_count,
-    teilbudgets,
 )
 from services.ai_proposal_service import AufgabenKontext, GuardianKontext
 from services.ai_provider_service import estimate_cost_microunits, resolve_api_key
@@ -150,6 +150,19 @@ def _finalize_stream(
             # Ohne Verbrauchszeile gibt es nichts mehr abzurechnen.
             logger.warning("AI usage event missing at finalization message_id=%s", message_id)
             return
+        # Schon abgerechnet — von jemand anderem. Der Fall vom 25.09.2026: ein
+        # zweites Backend auf derselben Datenbank schloss beim Start die
+        # Reservierung dieses noch laufenden Segments
+        # (`reconcile_interrupted_ai_streams`). Ein zweites Buchen wiese
+        # `fail_ai_usage` ab, und die Ausnahme riss den Abschluss des Laufs mit:
+        # kein Fehlerereignis, kein Ende, der Chat wartete zehn Minuten. Die
+        # erste Buchung gilt; die Nachricht bekommt trotzdem ihren Text.
+        abgerechnet = usage_event.status != "reserved"
+        if abgerechnet:
+            logger.info(
+                "AI usage event already closed at finalization message_id=%s status=%s",
+                message_id, usage_event.status,
+            )
         if message is not None:
             # **Die Antwort wird nicht geschwärzt — und das ist Absicht.**
             #
@@ -201,9 +214,9 @@ def _finalize_stream(
             # sonst bliebe sie dauerhaft "reserved" und wuerde Kontingent sowie
             # einen Nebenlaeufigkeitsplatz des Benutzers permanent blockieren.
             logger.warning("AI message missing at finalization message_id=%s", message_id)
-        if failed and not had_output:
+        if failed and not had_output and not abgerechnet:
             ai_stream.fail_ai_usage(db, usage_event)
-        else:
+        elif not abgerechnet:
             # Nach partieller Ausgabe darf Verbrauch nicht als null verbucht
             # werden — auch dann nicht, wenn der Lauf gescheitert ist.
             accounted_tokens, accounted_cost, herkunft = ai_stream.abrechnung(
@@ -843,7 +856,7 @@ async def _werkzeuge_und_grenze(
         if str(eintrag.get("function", {}).get("name")) in erlaubt
     ]
     try:
-        from services.semantic_tool_router_adapter import SemanticToolRouterAdapter
+        from services.semantic_tool_router_adapter import SemanticToolRouterAdapter, gruppen_nachbarn
         from services.tool_selection_port import HOTSET
         import logging
         _log = logging.getLogger(__name__)
@@ -881,7 +894,7 @@ async def _werkzeuge_und_grenze(
                 router.warm(frozenset(erlaubt))
                 routed = router.select(letzte, frozenset(erlaubt), top_k=5)
             hot = [n for n in HOTSET if n in erlaubt]
-            keep = set(hot) | set(routed)
+            keep = set(hot) | set(routed) | set(gruppen_nachbarn(routed, frozenset(erlaubt)))
             tools = [e for e in tools if str(e.get("function", {}).get("name")) in keep]
             _log.info("Tool-Routing: erlaubt=%d keep=%d routed=%s query=%.80s", len(erlaubt), len(keep), routed, letzte)
     except Exception as exc:
@@ -951,8 +964,16 @@ async def _werkzeuge_und_grenze(
     # damit ein sehr kleines Fenster nicht in eine negative Grenze fällt —
     # dort passt der Katalog allein schon nicht, und ein leerer Kontext wäre
     # nicht besser als ein knapper.
+    #
+    # Ohne bekanntes Fenster rechnet `gesamtgrenze` anders: dort kam der
+    # Prompt allein schon über die 24.000 Zeichen, und abzüglich des Katalogs
+    # schrumpfte jeder Lauf eines unbekannten Modells auf den Boden.
     kontextgrenze = max(
-        teilbudgets(zustand.get("context_chars")).gesamt - katalog_zeichen,
+        gesamtgrenze(
+            zustand.get("context_chars"),
+            zustand.get("provider_messages") or [],
+            katalog_zeichen=katalog_zeichen,
+        ),
         MIN_HISTORY_CHARS,
     )
     return tools, cache_marke, kontextgrenze, denken, denkstufe

@@ -10,13 +10,16 @@ import {
   type AiProviderKind,
   type AiProviderTestResult,
   type AiProviderWrite,
+  type AiSprachweg,
 } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
+import i18n from '@/i18n'
 import { Button, Dropdown, Switch } from '@/Singra/UI'
 import { eingabeInMicroUsd, microUsdInEingabe } from '@/utils/geld'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
+import { Spinner } from '@/components/ui/Spinner'
 interface ProviderDraft extends AiProviderWrite {
   id?: number
   operator_key_configured?: boolean
@@ -33,23 +36,158 @@ interface ProviderDraft extends AiProviderWrite {
  */
 const KEIN_WORKER = '__aus__'
 const KEINE_ETHICS = '__aus__'
-const EMPFOHLENE_REALTIME_MODELLE = ['gpt-realtime-1.5', 'gpt-realtime-2'] as const
+const KEINE_TRANSKRIPTION = '__aus__'
+/** Keine Denkstufe des Sprachwegs — die Vorgabe des Modells gilt. */
+const KEINE_SPRACHSTUFE = '__aus__'
+/** Kein eigenes Backend-Modell: GPT-Live denkt mit dem Standardmodell. */
+const WIE_STANDARDMODELL = '__standard__'
 
-function realtimeModellOptionen(models: AiCatalogModel[] | null | undefined, t: (key: string) => string) {
-  const ausKatalog = (models ?? [])
-    .filter((item) => item.model_id.toLowerCase().includes('realtime'))
-    .map((item) => ({ value: item.model_id, label: item.model_id, hint: modellHinweis(item, t) }))
-  const vorhanden = new Set(ausKatalog.map((item) => item.value))
-  for (const model of EMPFOHLENE_REALTIME_MODELLE) {
-    if (!vorhanden.has(model)) {
-      ausKatalog.push({ value: model, label: model, hint: t('ai.providers.recommended') })
+/**
+ * Ob ein Sprachweg dieses Modell spricht — `Sprachweg.passt` aus
+ * `backend/services/ai_voice/sprachwege.py`, mit denselben Feldern, die
+ * `/settings/provider-kinds` mitschickt. Eine eigene, klügere Regel hier wäre
+ * eine zweite Antwort auf dieselbe Frage, und beim nächsten Modell die falsche.
+ */
+function wegPasst(weg: AiSprachweg, modell: string | null | undefined): boolean {
+  const kennung = (modell ?? '').trim().toLowerCase()
+  return Boolean(kennung)
+    && kennung.includes(weg.merkmal)
+    && !weg.ausschluesse.some((teil) => kennung.includes(teil))
+}
+
+/** Der erste Weg des Anbieters, der das Modell spricht (`sprachweg_fuer`). */
+function sprachwegFuer(wege: AiSprachweg[], modell: string | null | undefined): AiSprachweg | null {
+  return wege.find((weg) => wegPasst(weg, modell)) ?? null
+}
+
+/** `Sprachweg.nimmt_denkstufe`: ob der Weg bei diesem Modell eine Stufe annimmt. */
+function nimmtDenkstufe(weg: AiSprachweg | null, modell: string | null | undefined): boolean {
+  if (!weg || weg.denkstufen.length === 0) return false
+  if (weg.denkstufen_merkmal === null) return true
+  return (modell ?? '').trim().toLowerCase().includes(weg.denkstufen_merkmal)
+}
+
+/**
+ * Die Denkstufen, die ein Sprachweg bei diesem Modell zur Wahl stellt.
+ *
+ * Denkt der Weg im Backend (GPT-Live), gelten die Stufen des Backend-Modells,
+ * mit der Regel, nach der die Sitzung sie beim Aufbau prüft
+ * (`ai_reasoning.eingefroren_pruefen`): Schweigt der Katalog, steht alles zur
+ * Wahl, was der Endpunkt annimmt. Denkt das Modell laut Katalog nicht, oder
+ * weiß er es nicht, geht keine Stufe mit. Sonst nur, was beide führen.
+ *
+ * `none` steht dabei nie unter `efforts` — die API meldet „abschaltbar" als
+ * `mandatory: false`, dieselbe Angabe, nach der Worker und Ethik darunter
+ * „Nicht nachdenken" anbieten. Ohne diese Zeile fehlte „Kein Nachdenken"
+ * gerade bei GPT-6 Luna und Sol, die es laut OpenAIs GPT-6-Leitfaden führen.
+ */
+function sprachwegStufen(
+  weg: AiSprachweg | null,
+  modell: string | null | undefined,
+  backend: AiCatalogModel | null,
+): string[] {
+  if (!weg || !nimmtDenkstufe(weg, modell)) return []
+  if (!weg.denkt_im_backend || backend === null) return weg.denkstufen
+  if (backend.reasoning !== true) return []
+  return weg.denkstufen.filter((stufe) =>
+    stufe === 'none' ? !backend.mandatory : backend.efforts.includes(stufe))
+}
+
+/**
+ * Die Stimmen des gewählten Weges — oder, solange kein Modell feststeht, die
+ * aller Wege des Anbieters. So prüft auch das Backend einen Entwurf
+ * (`_realtime_felder_setzen`).
+ */
+function sprachwegStimmen(
+  wege: AiSprachweg[],
+  weg: AiSprachweg | null,
+  t: (schluessel: string) => string,
+) {
+  const gesehen = new Set<string>()
+  const optionen: { value: string; label: string; hint?: string }[] = []
+  for (const quelle of weg ? [weg] : wege) {
+    for (const stimme of quelle.stimmen) {
+      if (gesehen.has(stimme.toLowerCase())) continue
+      gesehen.add(stimme.toLowerCase())
+      optionen.push({
+        value: stimme,
+        label: stimme,
+        hint: quelle.empfohlene_stimmen.includes(stimme) ? t('ai.providers.recommended') : undefined,
+      })
     }
+  }
+  return optionen
+}
+
+/** Der Name einer Denkstufe; `none` ist dasselbe „aus" wie überall im Panel. */
+function stufenName(stufe: string, t: (schluessel: string, werte?: Record<string, unknown>) => string): string {
+  return stufe === 'none' ? t('ai.reasoning.off') : t(`ai.reasoning.levels.${stufe}`, { defaultValue: stufe })
+}
+
+function isGoogleLiveModel(modelId: string): boolean {
+  const m = modelId.toLowerCase()
+  return (
+    m.includes('live') ||
+    m.includes('realtime') ||
+    m.includes('2.5-flash') ||
+    m.includes('2.0-flash') ||
+    m.includes('flash-exp')
+  )
+}
+
+function realtimeModellOptionen(
+  models: AiCatalogModel[] | null | undefined,
+  t: (key: string) => string,
+  wege: AiSprachweg[],
+  isGoogle = false,
+  currentModel?: string | null,
+) {
+  // Trägt der Anbieter mehr als einen Weg, steht er an jedem Modell: welcher
+  // Endpunkt spricht, entscheidet das Modell.
+  const wegHinweis = (modell: string) => {
+    const weg = wege.length > 1 ? sprachwegFuer(wege, modell) : null
+    return weg ? t(`ai.providers.realtime.wege.${weg.weg}.title`) : null
+  }
+  const hinweis = (...teile: (string | null | undefined)[]) =>
+    teile.filter(Boolean).join(' · ') || undefined
+  // Nur, was einer der Wege dieses Anbieters spricht: dieselbe Regel, nach der
+  // das Backend beim Speichern prüft.
+  let ausKatalog: { value: string; label: string; hint?: string }[]
+  if (isGoogle) {
+    // Bei Google filtern wir gezielt auf Modelle, die die Live-API (WebSocket) unterstützen.
+    // Reine Text-/Chat- oder Embedding-Modelle (wie 1.5-pro, gemma) können NICHT über die Live-API laufen.
+    ausKatalog = (models ?? [])
+      .filter((item) => sprachwegFuer(wege, item.model_id) !== null && isGoogleLiveModel(item.model_id))
+      .map((item) => ({
+        value: item.model_id,
+        label: item.name && item.name !== item.model_id ? `${item.name} (${item.model_id})` : item.model_id,
+        hint: modellHinweis(item, t),
+      }))
+  } else {
+    ausKatalog = (models ?? [])
+      .filter((item) => sprachwegFuer(wege, item.model_id) !== null)
+      .map((item) => ({
+        value: item.model_id,
+        label: item.model_id,
+        hint: hinweis(wegHinweis(item.model_id), modellHinweis(item, t)),
+      }))
+  }
+  const vorhanden = new Set(ausKatalog.map((item) => item.value))
+  for (const model of wege.flatMap((weg) => weg.empfohlene_modelle)) {
+    if (!vorhanden.has(model)) {
+      ausKatalog.push({ value: model, label: model, hint: hinweis(wegHinweis(model), t('ai.providers.recommended')) })
+      vorhanden.add(model)
+    }
+  }
+  if (currentModel && !vorhanden.has(currentModel)) {
+    ausKatalog.unshift({ value: currentModel, label: currentModel })
   }
   return ausKatalog
 }
 
 /**
- * Der Hinweis unter einer Modellzeile: Anzeigename, Empfehlung, Bildsicht.
+ * Der Hinweis unter einer Modellzeile: Anzeigename, Empfehlung, Bildsicht,
+ * Kontextfenster.
  *
  * „Sieht Bilder" steht hier und in keinem Chat. Kann die KI nicht hinsehen,
  * sagt sie das dort als eine Fähigkeit, die ihr gerade fehlt, und nicht als
@@ -59,17 +197,46 @@ function realtimeModellOptionen(models: AiCatalogModel[] | null | undefined, t: 
  *
  * `vision === null` heißt „der Katalog sagt nichts dazu". Dann steht auch
  * hier nichts: eine Marke wäre eine Behauptung, ihr Fehlen ist nur Schweigen.
+ * Für das Kontextfenster gilt dasselbe.
  */
 function modellHinweis(
   item: AiCatalogModel,
-  t: (schluessel: string) => string,
+  t: (schluessel: string, werte?: Record<string, unknown>) => string,
 ): string | undefined {
   const teile = [
     item.name !== item.model_id ? item.name : null,
     item.recommended ? t('ai.providers.recommended') : null,
     item.vision ? t('ai.providers.vision') : null,
+    item.context_tokens != null
+      ? t('ai.providers.contextShort', { tokens: tokenzahl(item.context_tokens, true) })
+      : null,
   ].filter(Boolean)
   return teile.length > 0 ? teile.join(' · ') : undefined
+}
+
+/**
+ * Eine Tokenzahl in der Sprache des Panels — kompakt („1,05 Mio.") für die
+ * Auswahlliste, ausgeschrieben für die Angaben unter dem gewählten Modell.
+ */
+function tokenzahl(anzahl: number, kompakt = false): string {
+  return new Intl.NumberFormat(
+    i18n.language,
+    kompakt ? { notation: 'compact', maximumFractionDigits: 2 } : undefined,
+  ).format(anzahl)
+}
+
+/**
+ * Ein Kalendertag (`2026-10-23`) in der Sprache des Panels, oder `null`.
+ *
+ * Formatiert in UTC und nicht in Ortszeit: `new Date('2026-10-23')` ist
+ * Mitternacht UTC, und westlich davon stünde sonst der Vortag da. Der Tag ist
+ * ein Datum, keine Uhrzeit.
+ */
+function kalendertag(iso: string | null | undefined): string | null {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null
+  const datum = new Date(`${iso}T00:00:00Z`)
+  if (Number.isNaN(datum.getTime())) return null
+  return new Intl.DateTimeFormat(i18n.language, { dateStyle: 'long', timeZone: 'UTC' }).format(datum)
 }
 
 const EMPTY_PROVIDER: ProviderDraft = {
@@ -108,6 +275,10 @@ const EMPTY_PROVIDER: ProviderDraft = {
   realtime_text_output_price_micro_usd_per_million: null,
   realtime_audio_input_price_micro_usd_per_million: null,
   realtime_audio_output_price_micro_usd_per_million: null,
+  // Ohne eigenes Backend-Modell denkt GPT-Live mit dem Standardmodell
+  // (`ai_provider_service.backend_modell`).
+  realtime_backend_model: null,
+  realtime_minute_price_micro_usd: null,
   // Ohne Worker-Modell gilt der heutige Ein-Modell-Betrieb — der dokumentierte
   // Fallback (docs/agentic-framework.md, §5), keine Pflichtangabe.
   worker_model: null,
@@ -156,12 +327,15 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     realtime_text_output_price_micro_usd_per_million: provider.realtime_text_output_price_micro_usd_per_million ?? null,
     realtime_audio_input_price_micro_usd_per_million: provider.realtime_audio_input_price_micro_usd_per_million ?? null,
     realtime_audio_output_price_micro_usd_per_million: provider.realtime_audio_output_price_micro_usd_per_million ?? null,
+    realtime_backend_model: provider.realtime_backend_model ?? null,
+    realtime_minute_price_micro_usd: provider.realtime_minute_price_micro_usd ?? null,
     worker_model: provider.worker_model,
     worker_reasoning_effort: provider.worker_reasoning_effort,
     ethics_model: provider.ethics_model,
     ethics_reasoning_effort: provider.ethics_reasoning_effort,
     ethics_mode: provider.ethics_mode || 'auto',
     azure_resource_name: provider.azure_resource_name,
+    disable_safety: provider.disable_safety ?? false,
     operator_api_key: '',
     operator_key_configured: provider.operator_key_configured,
     operator_key_hint: provider.operator_key_hint,
@@ -233,11 +407,14 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
     // eine Einstellung.
     const gewaehlt = kinds.find((item) => item.kind === draft.provider_kind)
     const protokoll = gewaehlt?.protokoll
+    const sprachwege = gewaehlt?.sprachwege ?? []
+    const sprachweg = sprachwegFuer(sprachwege, draft.realtime_model)
     const payload: AiProviderWrite = {
       name: draft.name.trim(),
       provider_kind: draft.provider_kind,
       default_model: draft.default_model?.trim() || null,
       enabled: draft.enabled,
+      disable_safety: Boolean(draft.disable_safety),
       requires_api_key: draft.requires_api_key,
       standard_input_price_micro_usd_per_million: draft.standard_input_price_micro_usd_per_million ?? null,
       standard_output_price_micro_usd_per_million: draft.standard_output_price_micro_usd_per_million ?? null,
@@ -268,20 +445,28 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
               ? draft.ethics_reasoning_effort || null
               : null,
             ethics_mode: draft.ethics_mode || 'auto',
-            ...(gewaehlt?.realtime_tauglich ? {
+            ...(sprachwege.length > 0 ? {
               realtime_default: Boolean(draft.realtime_default || draft.realtime_enabled),
               realtime_enabled: Boolean(draft.realtime_enabled || draft.realtime_default),
               realtime_model: draft.realtime_model?.trim() || null,
               realtime_voice: draft.realtime_voice || null,
-              realtime_reasoning_effort: draft.realtime_model?.toLowerCase().includes('realtime-2')
+              // Nur, wo der Weg des Modells eine Stufe annimmt — die Regel,
+              // nach der das Backend beim Speichern prüft.
+              realtime_reasoning_effort: nimmtDenkstufe(sprachweg, draft.realtime_model)
                 ? draft.realtime_reasoning_effort || null
                 : null,
               realtime_language: draft.realtime_language || 'auto',
               realtime_vad_eagerness: draft.realtime_vad_eagerness || 'auto',
+              // Auch an einem anderen Weg unverändert zurück: wer zwischen
+              // Realtime und GPT-Live wechselt, verliert seine Angaben nicht.
+              // Welche davon zählen, entscheidet das Backend nach dem Weg
+              // (`realtime_preisfelder`).
+              realtime_backend_model: draft.realtime_backend_model?.trim() || null,
               realtime_text_input_price_micro_usd_per_million: draft.realtime_text_input_price_micro_usd_per_million ?? null,
               realtime_text_output_price_micro_usd_per_million: draft.realtime_text_output_price_micro_usd_per_million ?? null,
               realtime_audio_input_price_micro_usd_per_million: draft.realtime_audio_input_price_micro_usd_per_million ?? null,
               realtime_audio_output_price_micro_usd_per_million: draft.realtime_audio_output_price_micro_usd_per_million ?? null,
+              realtime_minute_price_micro_usd: draft.realtime_minute_price_micro_usd ?? null,
             } : {}),
           }
         : {}),
@@ -334,7 +519,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
   }
 
   if (loading) {
-    return <div className="flex h-32 items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>
+    return <div className="flex h-32 items-center justify-center"><Spinner size="lg" className="text-primary" /></div>
   }
 
   return (
@@ -343,7 +528,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
         <div className="max-w-3xl">
           <div className="flex items-center gap-2">
             <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
-            <h3 id="ai-provider-title" className="font-headline text-lg font-semibold text-on-surface">{t('ai.providers.title')}</h3>
+            <h3 id="ai-provider-title" className="font-headline text-title-lg font-semibold text-on-surface">{t('ai.providers.title')}</h3>
           </div>
           <p className="mt-2 text-sm text-on-surface-variant">{t('ai.providers.description')}</p>
         </div>
@@ -456,7 +641,11 @@ function ProviderForm({
     if (spec && !spec.fuehrt_katalog) return
     setLoadingModels(true)
     try {
-      setModels(await aiApi.listCatalogModels(draft.provider_kind, refresh, draft.id))
+      const apiKey = draft.operator_api_key?.trim() || undefined
+      const rows = apiKey
+        ? await aiApi.listCatalogModels(draft.provider_kind, refresh, draft.id, apiKey)
+        : await aiApi.listCatalogModels(draft.provider_kind, refresh, draft.id)
+      setModels(rows)
     } catch {
       setModels(null)
     } finally {
@@ -472,16 +661,56 @@ function ProviderForm({
     // nicht geladen" ein Zustand, und nur der zweite darf eine Ladeanzeige
     // rechtfertigen.
     if (fuehrtKatalog === false) { setModels([]); return }
+
+    const hatEingetipptenSchluessel = Boolean(draft.operator_api_key?.trim())
+    const hatGespeichertenSchluessel = Boolean(
+      draft.id && draft.operator_key_configured && !draft.clear_operator_api_key,
+    )
+
+    // Braucht der Anbieter einen Schlüssel, aber weder im Speicher noch im Eingabefeld
+    // liegt einer vor, zeigen wir direkt die leere Liste (mit Hinweis 'catalogNeedsKey').
+    if (spec?.katalog_braucht_schluessel && !hatEingetipptenSchluessel && !hatGespeichertenSchluessel) {
+      setModels([])
+      return
+    }
+
     setLoadingModels(true)
-    // `draft.id` geht mit, weil manche Anbieter ihren Katalog nur gegen den
-    // Schlüssel herausgeben. Beim Anlegen gibt es die Kennung noch nicht — dann
-    // kommt eine leere Liste, und der Hinweis darunter erklärt die Reihenfolge.
-    aiApi.listCatalogModels(draft.provider_kind, false, draft.id)
-      .then((rows) => { if (active) setModels(rows) })
-      .catch(() => { if (active) setModels(null) })
-      .finally(() => { if (active) setLoadingModels(false) })
-    return () => { active = false }
-  }, [draft.provider_kind, draft.id, fuehrtKatalog])
+    const apiKey = draft.operator_api_key?.trim() || undefined
+    const delay = hatEingetipptenSchluessel ? 400 : 0
+
+    const timer = window.setTimeout(() => {
+      const req = apiKey
+        ? aiApi.listCatalogModels(draft.provider_kind, false, draft.id, apiKey)
+        : aiApi.listCatalogModels(draft.provider_kind, false, draft.id)
+
+      req
+        .then((rows) => {
+          if (!active) return
+          setModels(rows)
+          if (rows && rows.length > 0 && !draft.default_model) {
+            const empf = rows.find((r) => r.recommended)?.model_id || rows[0]?.model_id
+            if (empf) {
+              change({ default_model: empf })
+            }
+          }
+        })
+        .catch(() => { if (active) setModels(null) })
+        .finally(() => { if (active) setLoadingModels(false) })
+    }, delay)
+
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [
+    draft.provider_kind,
+    draft.id,
+    draft.operator_api_key,
+    draft.operator_key_configured,
+    draft.clear_operator_api_key,
+    fuehrtKatalog,
+    spec?.katalog_braucht_schluessel,
+  ])
 
   /*
    * Anbieter ohne Katalog: die eingetippten Kennungen einzeln nachschlagen.
@@ -534,6 +763,26 @@ function ProviderForm({
   // verschwindet von selbst — statt auf ein Modell zu zeigen, das es nicht gibt.
   const empfohlenesModell = models?.find((item) => item.recommended) ?? null
 
+  // Der Sprachweg des gewählten Echtzeitmodells. Solange keines feststeht,
+  // gilt bei einem Anbieter mit nur einem Weg dieser eine, bei mehreren
+  // keiner: dann entscheidet erst das Modell, was die Sitzung spricht.
+  const sprachwege = spec?.sprachwege ?? []
+  const sprachweg = sprachwegFuer(sprachwege, draft.realtime_model)
+  const anzeigeWeg = sprachweg ?? (sprachwege.length === 1 ? sprachwege[0] : null)
+  // Das Modell hinter GPT-Live: das eigene oder, ohne Auswahl, das
+  // Standardmodell (`ai_provider_service.backend_modell`).
+  const backendKennung = draft.realtime_backend_model?.trim() || draft.default_model?.trim() || null
+  const backendModell = backendKennung
+    ? models?.find((item) => item.model_id === backendKennung) ?? nachgeschlagen(backendKennung)
+    : null
+  const eigenesBackendModell = draft.realtime_backend_model?.trim()
+    ? models?.find((item) => item.model_id === draft.realtime_backend_model?.trim())
+      ?? nachgeschlagen(draft.realtime_backend_model)
+    : null
+  const sprachStufen = sprachwegStufen(sprachweg, draft.realtime_model, backendModell)
+  const wegText = (weg: AiSprachweg, feld: 'title' | 'hint' | 'voice' | 'reasoningHint') =>
+    t(`ai.providers.realtime.wege.${weg.weg}.${feld}`)
+
   const keyId = useId()
   const kindId = useId()
   const modelId = useId()
@@ -551,6 +800,7 @@ function ProviderForm({
   const realtimeReasoningId = useId()
   const realtimeLanguageId = useId()
   const realtimeVadId = useId()
+  const realtimeBackendId = useId()
 
   // Solange die Politik nicht geladen ist, gilt USD 1:1 — die Waehrung der
   // Buchung. Ein Rueckfall auf Euro wuerde einen getippten Preis stillschweigend
@@ -633,7 +883,7 @@ function ProviderForm({
               <p className="text-xs text-on-surface-variant">{t('ai.providers.ttsHint')}</p>
             )}
             {!draft.provider_kind && (
-              <p className="text-xs text-status-error">{t('ai.providers.kindMissingHint')}</p>
+              <p className="text-xs text-status-destructive">{t('ai.providers.kindMissingHint')}</p>
             )}
           </div>
         </div>
@@ -662,7 +912,7 @@ function ProviderForm({
               {t('ai.providers.azureResourceHint', { url: adresse })}
             </p>
             {!draft.azure_resource_name?.trim() && (
-              <p className="text-xs text-status-error">{t('ai.providers.azureResourceMissing')}</p>
+              <p className="text-xs text-status-destructive">{t('ai.providers.azureResourceMissing')}</p>
             )}
           </div>
         )}
@@ -688,7 +938,7 @@ function ProviderForm({
               <button
                 type="button"
                 onClick={() => change({ clear_operator_api_key: true, operator_api_key: '' })}
-                className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-destructive transition-colors"
                 title={t('ai.providers.clearKey')}
                 aria-label={t('ai.providers.clearKey')}
               >
@@ -717,6 +967,18 @@ function ProviderForm({
         </div>
 
         <Toggle label={t('ai.providers.enabled')} checked={draft.enabled} onChange={(enabled) => change({ enabled })} />
+        {draft.provider_kind === 'google' && (
+          <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4 space-y-1">
+            <Toggle
+              label="Sicherheitsfilter deaktivieren (BLOCK_NONE)"
+              checked={Boolean(draft.disable_safety)}
+              onChange={(disable_safety) => change({ disable_safety })}
+            />
+            <p className="msm-field-help text-xs text-on-surface-variant">
+              {t('ai.providers.geminiSafetyOffHint')}
+            </p>
+          </div>
+        )}
         {/* Modelle & Fähigkeiten */}
         {spec?.protokoll === 'chat_completions' && (
           <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
@@ -804,7 +1066,7 @@ function ProviderForm({
                         onClick={() => change({ default_model: empfohlenesModell.model_id })}
                         className="underline underline-offset-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
-                        {t('ai.providers.recommendationApply')}
+                        {t('common.apply')}
                       </button>
                     </span>
                   </p>
@@ -838,17 +1100,52 @@ function ProviderForm({
                     aria-label={t('ai.providers.transcriptionEnabled')}
                   />
                 </div>
-                <input
-                  id={hoerenId}
-                  type="text"
-                  className="msm-input w-full"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={draft.transcription_model ?? ''}
-                  onChange={(ereignis) => change({ transcription_model: ereignis.target.value })}
-                  placeholder={draft.provider_kind === 'openai' ? 'whisper-1' : 'openai/gpt-transcribe'}
-                  aria-label={t('ai.providers.transcriptionModel')}
-                />
+                {models && models.length > 0 ? (
+                  <Dropdown
+                    id={hoerenId}
+                    value={draft.transcription_model || KEINE_TRANSKRIPTION}
+                    onChange={(transcription_model) => change({
+                      transcription_model: transcription_model === KEINE_TRANSKRIPTION ? null : transcription_model,
+                    })}
+                    options={[
+                      { value: KEINE_TRANSKRIPTION, label: t('ai.providers.transcriptionOff') },
+                      ...(draft.transcription_model && !models.some((m) => m.model_id === draft.transcription_model)
+                        ? [{ value: draft.transcription_model, label: draft.transcription_model }]
+                        : []),
+                      ...[...models]
+                        .filter((item) => {
+                          const lower = item.model_id.toLowerCase()
+                          if (draft.provider_kind === 'google') return lower.includes('gemini') || lower.includes('flash')
+                          if (draft.provider_kind === 'openai') return lower.includes('whisper') || lower.includes('audio') || lower.includes('gpt-4o')
+                          return true
+                        })
+                        .map((item) => ({
+                          value: item.model_id,
+                          label: item.model_id,
+                          hint: modellHinweis(item, t),
+                        })),
+                    ]}
+                    aria-label={t('ai.providers.transcriptionModel')}
+                  />
+                ) : (
+                  <input
+                    id={hoerenId}
+                    type="text"
+                    className="msm-input w-full"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={draft.transcription_model ?? ''}
+                    onChange={(ereignis) => change({ transcription_model: ereignis.target.value })}
+                    placeholder={
+                      draft.provider_kind === 'google'
+                        ? 'gemini-2.5-flash'
+                        : draft.provider_kind === 'openai'
+                          ? 'whisper-1'
+                          : 'openai/gpt-transcribe'
+                    }
+                    aria-label={t('ai.providers.transcriptionModel')}
+                  />
+                )}
                 <p className="msm-field-help">{t('ai.providers.transcriptionModelHint')}</p>
               </div>
               )}
@@ -856,14 +1153,18 @@ function ProviderForm({
           </div>
         )}
 
-        {spec?.realtime_tauglich && (
+        {sprachwege.length > 0 && (
           <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                  {t('ai.providers.realtime.title')}
+                  {anzeigeWeg
+                    ? wegText(anzeigeWeg, 'title')
+                    : sprachwege.map((weg) => wegText(weg, 'title')).join(' · ')}
                 </h4>
-                <p className="msm-field-help mt-1">{t('ai.providers.realtime.hint')}</p>
+                <p className="msm-field-help mt-1">
+                  {anzeigeWeg ? wegText(anzeigeWeg, 'hint') : t('ai.providers.realtime.modelDecides')}
+                </p>
               </div>
               <Switch
                 checked={Boolean(draft.realtime_enabled || draft.realtime_default)}
@@ -880,41 +1181,129 @@ function ProviderForm({
                 <Dropdown
                   id={realtimeModelId}
                   value={draft.realtime_model || null}
-                  onChange={(realtime_model) => change({
-                    realtime_model,
-                    realtime_reasoning_effort: realtime_model.toLowerCase().includes('realtime-2')
-                      ? draft.realtime_reasoning_effort
-                      : null,
-                  })}
+                  onChange={(realtime_model) => {
+                    // Was der Weg des neuen Modells nicht kennt, fällt hier
+                    // weg, statt erst beim Speichern abgewiesen zu werden: eine
+                    // Stimme, die nur GPT-Live führt, eine Stufe, die nur
+                    // Realtime-2 annimmt.
+                    const neu = sprachwegFuer(sprachwege, realtime_model)
+                    const stimme = draft.realtime_voice?.toLowerCase()
+                    const stufe = draft.realtime_reasoning_effort
+                    change({
+                      realtime_model,
+                      realtime_voice: stimme && neu && !neu.stimmen.some((kandidat) => kandidat.toLowerCase() === stimme)
+                        ? null
+                        : draft.realtime_voice,
+                      realtime_reasoning_effort: stufe && sprachwegStufen(neu, realtime_model, backendModell).includes(stufe)
+                        ? stufe
+                        : null,
+                    })
+                  }}
                   placeholder={t('ai.providers.modelChoose')}
-                  options={realtimeModellOptionen(models, t)}
+                  options={realtimeModellOptionen(models, t, sprachwege, draft.provider_kind === 'google', draft.realtime_model)}
+                  searchable
                 />
               </div>
               <div className="space-y-1.5">
-                <label htmlFor={realtimeVoiceId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.realtime.voice')}</label>
+                <label htmlFor={realtimeVoiceId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                  {anzeigeWeg ? wegText(anzeigeWeg, 'voice') : t('ai.providers.realtime.voiceAny')}
+                </label>
                 <Dropdown
                   id={realtimeVoiceId}
                   value={draft.realtime_voice || null}
                   onChange={(realtime_voice) => change({ realtime_voice: realtime_voice as AiProviderAdmin['realtime_voice'] })}
                   placeholder={t('ai.providers.realtime.voiceChoose')}
-                  options={['marin', 'cedar', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'].map((voice) => ({
-                    value: voice,
-                    label: voice,
-                    hint: voice === 'marin' || voice === 'cedar' ? t('ai.providers.recommended') : undefined,
-                  }))}
+                  options={sprachwegStimmen(sprachwege, sprachweg, t)}
                 />
               </div>
+              {sprachweg?.backend_modell && (
+                <div className="space-y-1.5">
+                  {models && models.length > 0 ? (
+                    <>
+                      <label htmlFor={realtimeBackendId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                        {t('ai.providers.realtime.backendModel')}
+                      </label>
+                      <Dropdown
+                        id={realtimeBackendId}
+                        value={draft.realtime_backend_model || WIE_STANDARDMODELL}
+                        onChange={(wahl) => {
+                          const realtime_backend_model = wahl === WIE_STANDARDMODELL ? null : wahl
+                          const kennung = realtime_backend_model || draft.default_model?.trim() || null
+                          const neu = kennung
+                            ? models.find((item) => item.model_id === kennung) ?? nachgeschlagen(kennung)
+                            : null
+                          const stufe = draft.realtime_reasoning_effort
+                          change({
+                            realtime_backend_model,
+                            // Die Stufe gehört dem Backend-Modell: was das neue
+                            // nicht führt, fällt weg.
+                            realtime_reasoning_effort: stufe && sprachwegStufen(sprachweg, draft.realtime_model, neu).includes(stufe)
+                              ? stufe
+                              : null,
+                          })
+                        }}
+                        options={[
+                          {
+                            value: WIE_STANDARDMODELL,
+                            label: draft.default_model?.trim()
+                              ? t('ai.providers.realtime.backendModelDefault', { model: draft.default_model.trim() })
+                              : t('ai.providers.realtime.backendModelMissing'),
+                          },
+                          ...(draft.realtime_backend_model && !models.some((item) => item.model_id === draft.realtime_backend_model)
+                            ? [{ value: draft.realtime_backend_model, label: draft.realtime_backend_model }]
+                            : []),
+                          // Ein Sprachmodell kann nicht hinter einem anderen
+                          // nachdenken — dieselbe Regel wie oben, umgekehrt.
+                          ...[...models]
+                            .filter((item) => sprachwegFuer(sprachwege, item.model_id) === null)
+                            .sort((a, b) => Number(b.recommended) - Number(a.recommended))
+                            .map((item) => ({ value: item.model_id, label: item.model_id, hint: modellHinweis(item, t) })),
+                        ]}
+                        searchable
+                      />
+                    </>
+                  ) : (
+                    <ProviderInput
+                      label={t('ai.providers.realtime.backendModel')}
+                      value={draft.realtime_backend_model ?? ''}
+                      placeholder={draft.default_model ?? ''}
+                      onChange={(wert) => change({ realtime_backend_model: wert || null })}
+                    />
+                  )}
+                  <p className="msm-field-help">{t('ai.providers.realtime.backendModelHint')}</p>
+                  {eigenesBackendModell && <ModelCapabilities model={eigenesBackendModell} />}
+                </div>
+              )}
               <div className="space-y-1.5">
                 <label htmlFor={realtimeReasoningId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.realtime.reasoning')}</label>
                 <Dropdown
                   id={realtimeReasoningId}
-                  value={draft.realtime_reasoning_effort || null}
-                  disabled={!draft.realtime_model?.toLowerCase().includes('realtime-2')}
-                  onChange={(realtime_reasoning_effort) => change({ realtime_reasoning_effort: realtime_reasoning_effort as AiProviderAdmin['realtime_reasoning_effort'] })}
-                  placeholder={t('ai.providers.realtime.reasoningOff')}
-                  options={['low', 'medium', 'high'].map((value) => ({ value, label: t(`ai.providers.realtime.reasoningValues.${value}`) }))}
+                  value={draft.realtime_reasoning_effort || KEINE_SPRACHSTUFE}
+                  disabled={sprachStufen.length === 0 && !draft.realtime_reasoning_effort}
+                  onChange={(stufe) => change({ realtime_reasoning_effort: stufe === KEINE_SPRACHSTUFE ? null : stufe })}
+                  options={[
+                    {
+                      value: KEINE_SPRACHSTUFE,
+                      label: sprachweg?.denkt_im_backend
+                        ? t('ai.providers.realtime.reasoningDefault')
+                        : t('ai.providers.realtime.reasoningOff'),
+                    },
+                    ...sprachStufen.map((stufe) => ({ value: stufe, label: stufenName(stufe, t) })),
+                    // Eine gespeicherte Stufe, die zum Modell nicht passt,
+                    // bleibt sichtbar — sonst stünde der Platzhalter da, und
+                    // gespeichert wäre etwas anderes.
+                    ...(draft.realtime_reasoning_effort && !sprachStufen.includes(draft.realtime_reasoning_effort)
+                      ? [{
+                          value: draft.realtime_reasoning_effort,
+                          label: stufenName(draft.realtime_reasoning_effort, t),
+                          hint: t('ai.providers.realtime.reasoningStale'),
+                        }]
+                      : []),
+                  ]}
                 />
-                <p className="msm-field-help">{t('ai.providers.realtime.reasoningHint')}</p>
+                <p className="msm-field-help">
+                  {anzeigeWeg ? wegText(anzeigeWeg, 'reasoningHint') : t('ai.providers.realtime.modelDecides')}
+                </p>
               </div>
               <div className="space-y-1.5">
                 <label htmlFor={realtimeLanguageId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.realtime.language')}</label>
@@ -924,17 +1313,48 @@ function ProviderForm({
                   { value: 'en', label: 'English' },
                 ]} />
               </div>
-              <div className="space-y-1.5">
-                <label htmlFor={realtimeVadId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.realtime.vad')}</label>
-                <Dropdown id={realtimeVadId} value={draft.realtime_vad_eagerness || 'auto'} onChange={(value) => change({ realtime_vad_eagerness: value as AiProviderAdmin['realtime_vad_eagerness'] })} options={['auto', 'low', 'medium', 'high'].map((value) => ({ value, label: t(`ai.providers.realtime.vadValues.${value}`) }))} />
-              </div>
+              {/* Pausenerkennung, Audio- und Minutenpreis gibt es nur, wo der
+                  Weg sie hat. Steht noch kein Modell fest, bleibt es bei dem,
+                  was das Backend für einen Zugang ohne Weg abrechnet
+                  (`realtime_preisfelder`). */}
+              {(anzeigeWeg?.vad ?? true) && (
+                <div className="space-y-1.5">
+                  <label htmlFor={realtimeVadId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.realtime.vad')}</label>
+                  <Dropdown id={realtimeVadId} value={draft.realtime_vad_eagerness || 'auto'} onChange={(value) => change({ realtime_vad_eagerness: value as AiProviderAdmin['realtime_vad_eagerness'] })} options={['auto', 'low', 'medium', 'high'].map((value) => ({ value, label: t(`ai.providers.realtime.vadValues.${value}`) }))} />
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <RealtimePreisInput label={t('ai.providers.realtime.textInputPrice')} value={draft.realtime_text_input_price_micro_usd_per_million ?? null} policy={waehrung} onChange={(value) => change({ realtime_text_input_price_micro_usd_per_million: value })} />
-              <RealtimePreisInput label={t('ai.providers.realtime.textOutputPrice')} value={draft.realtime_text_output_price_micro_usd_per_million ?? null} policy={waehrung} onChange={(value) => change({ realtime_text_output_price_micro_usd_per_million: value })} />
-              <RealtimePreisInput label={t('ai.providers.realtime.audioInputPrice')} value={draft.realtime_audio_input_price_micro_usd_per_million ?? null} policy={waehrung} onChange={(value) => change({ realtime_audio_input_price_micro_usd_per_million: value })} />
-              <RealtimePreisInput label={t('ai.providers.realtime.audioOutputPrice')} value={draft.realtime_audio_output_price_micro_usd_per_million ?? null} policy={waehrung} onChange={(value) => change({ realtime_audio_output_price_micro_usd_per_million: value })} />
+              <RealtimePreisInput
+                label={anzeigeWeg?.backend_modell ? t('ai.providers.realtime.backendInputPrice') : t('ai.providers.realtime.textInputPrice')}
+                value={draft.realtime_text_input_price_micro_usd_per_million ?? null}
+                policy={waehrung}
+                onChange={(value) => change({ realtime_text_input_price_micro_usd_per_million: value })}
+              />
+              <RealtimePreisInput
+                label={anzeigeWeg?.backend_modell ? t('ai.providers.realtime.backendOutputPrice') : t('ai.providers.realtime.textOutputPrice')}
+                value={draft.realtime_text_output_price_micro_usd_per_million ?? null}
+                policy={waehrung}
+                onChange={(value) => change({ realtime_text_output_price_micro_usd_per_million: value })}
+              />
+              {(anzeigeWeg?.audiopreise ?? true) && (
+                <>
+                  <RealtimePreisInput label={t('ai.providers.realtime.audioInputPrice')} value={draft.realtime_audio_input_price_micro_usd_per_million ?? null} policy={waehrung} onChange={(value) => change({ realtime_audio_input_price_micro_usd_per_million: value })} />
+                  <RealtimePreisInput label={t('ai.providers.realtime.audioOutputPrice')} value={draft.realtime_audio_output_price_micro_usd_per_million ?? null} policy={waehrung} onChange={(value) => change({ realtime_audio_output_price_micro_usd_per_million: value })} />
+                </>
+              )}
+              {anzeigeWeg?.minutenpreis && (
+                <RealtimePreisInput
+                  label={t('ai.providers.realtime.minutePrice')}
+                  value={draft.realtime_minute_price_micro_usd ?? null}
+                  policy={waehrung}
+                  onChange={(value) => change({ realtime_minute_price_micro_usd: value })}
+                />
+              )}
             </div>
+            {anzeigeWeg?.minutenpreis && (
+              <p className="msm-field-help">{t('ai.providers.realtime.minutePriceHint')}</p>
+            )}
             {draft.realtime_default && (
               <p className="text-xs text-on-surface-variant">{t('ai.providers.realtime.legacyPaused')}</p>
             )}
@@ -1222,7 +1642,7 @@ function ProviderForm({
                       onClick={() => change({ default_model: empfohlenesModell.model_id })}
                       className="underline underline-offset-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      {t('ai.providers.recommendationApply')}
+                      {t('common.apply')}
                     </button>
                   </span>
                 </p>
@@ -1255,7 +1675,7 @@ function ProviderForm({
           className={`flex items-start gap-2 rounded-lg border p-3 text-xs leading-5 ${
             testResult.ok
               ? 'border-status-success/30 bg-status-success/10 text-status-success'
-              : 'border-status-error/30 bg-status-error/10 text-status-error'
+              : 'border-status-destructive/30 bg-status-destructive/10 text-status-destructive'
           }`}
           role="status"
         >
@@ -1268,7 +1688,7 @@ function ProviderForm({
               : t(`ai.errors.codes.${testResult.code}`, { defaultValue: t('ai.providers.testFailed') })}
             {/* Die Anbietermeldung im Original: sie benennt die Ursache
                 praeziser, als ein uebersetzter Code es je koennte. */}
-            {testResult.detail && <span className="mt-1 block font-mono text-[11px] opacity-80">{testResult.detail}</span>}
+            {testResult.detail && <span className="mt-1 block font-mono text-label-sm opacity-80">{testResult.detail}</span>}
           </span>
         </p>
       )}
@@ -1293,19 +1713,36 @@ function ProviderForm({
  * Der Betreiber soll vor dem Speichern sehen, worauf er sich einlaesst. Drei
  * Faelle, die sich wirklich unterscheiden und gemessen alle haeufig sind:
  * Stufen (127 von 402 Modellen), nur an/aus (145) und nicht abschaltbar (82).
+ *
+ * Und ein vierter, der kein Faehigkeitsfall ist: **der Katalog weiss es
+ * nicht** (`reasoning === null`). Bis zum 22.09.2026 fiel er mit „denkt nicht
+ * nach" zusammen, und am Erscheinungstag von GPT-6 Luna stand genau das unter
+ * GPT-6 Luna. Darunter Fenster, Antwortgrenze und ein angekuendigter
+ * Abschalttag — der Chat rechnet laengst mit dem Fenster, nur der Betreiber
+ * sah es nirgends.
  */
 function ModelCapabilities({ model }: { model: AiCatalogModel }) {
   const { t } = useTranslation()
-  if (!model.reasoning) {
-    return <p className="mt-2 text-xs text-on-surface-variant">{t('ai.providers.caps.none')}</p>
-  }
+  const umfang = [
+    model.context_tokens != null
+      ? t('ai.providers.caps.context', { tokens: tokenzahl(model.context_tokens) })
+      : null,
+    model.max_output_tokens != null
+      ? t('ai.providers.caps.maxOutput', { tokens: tokenzahl(model.max_output_tokens) })
+      : null,
+  ].filter(Boolean)
+  const abschaltung = kalendertag(model.shutdown_date)
   return (
     <div className="mt-2 space-y-1 text-xs text-on-surface-variant">
-      {model.efforts.length > 0 ? (
+      {model.reasoning === null ? (
+        <p>{t('ai.providers.caps.unknown')}</p>
+      ) : !model.reasoning ? (
+        <p>{t('ai.providers.caps.none')}</p>
+      ) : model.efforts.length > 0 ? (
         <p>
           {t('ai.providers.caps.levels')}{' '}
           {model.efforts.map((effort) => (
-            <span key={effort} className="mr-1 inline-block rounded-md border border-outline-variant/50 px-1.5 py-0.5 font-mono text-[11px]">
+            <span key={effort} className="mr-1 inline-block rounded-md border border-outline-variant/50 px-1.5 py-0.5 font-mono text-label-sm">
               {t(`ai.reasoning.levels.${effort}`, { defaultValue: effort })}
             </span>
           ))}
@@ -1313,7 +1750,13 @@ function ModelCapabilities({ model }: { model: AiCatalogModel }) {
       ) : (
         <p>{t('ai.providers.caps.toggleOnly')}</p>
       )}
-      {model.mandatory && <p className="text-status-warning">{t('ai.providers.caps.mandatory')}</p>}
+      {model.reasoning && model.mandatory && (
+        <p className="text-status-warning">{t('ai.providers.caps.mandatory')}</p>
+      )}
+      {umfang.length > 0 && <p>{umfang.join(' · ')}</p>}
+      {abschaltung && (
+        <p className="text-status-warning">{t('ai.providers.caps.shutdown', { date: abschaltung })}</p>
+      )}
     </div>
   )
 }

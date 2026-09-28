@@ -239,12 +239,13 @@ class TestWorkerStart:
         Das Gehirn ruft die Werkzeuge einer Welle nebenläufig auf, jedes in
         einer eigenen Sitzung: ohne Sperre sähen zwei `worker_start` derselben
         Runde denselben freien Platz und belegten ihn beide. Echte
-        Nebenläufigkeit ist auf SQLite nicht herstellbar — dort ist
-        ``FOR UPDATE`` eine leere Anweisung —, deshalb hält dieser Test die
+        Nebenläufigkeit ist auf der geteilten Testverbindung (StaticPool) nicht
+        herstellbar — alle Sitzungen stecken dort in derselben Transaktion,
+        ``FOR UPDATE`` sperrt niemanden aus —, deshalb hält dieser Test die
         Invariante statt des Rennens: die Zeilensperre auf den Benutzer steht
         **vor** der Zählung, und zwischen Zählung und Lauf liegt kein Commit,
-        der sie vorzeitig wieder lösen würde. Das echte Rennen bleibt eine
-        PostgreSQL-Frage.
+        der sie vorzeitig wieder lösen würde. Das echte Rennen braucht getrennte
+        Verbindungen und bleibt eine Frage des Betriebs.
         """
         user = _benutzer(db, "gesperrt")
         _provider(db)
@@ -728,3 +729,14 @@ def test_der_dispatch_kennt_die_delegationen(db: Session) -> None:
         _execute_global_read_tool(
             db, user=user, tool_name="wait_until", arguments={"minuten": 5}
         )
+
+
+def test_worker_ohne_sondermodell_wechselt_nicht_den_anbieter(db, monkeypatch):
+    user = _benutzer(db, "anbietergrenze")
+    chosen = _provider(db, name="Ausgewaehlt")
+    _provider(db, name="Anderer Zugang", worker_model="anderes-arbeitsmodell")
+    monkeypatch.setattr(ai_provider_service, "anbieter_ohne_auswahl", lambda *_: chosen)
+    result = _start(db, user)
+    assert result["started"] is True
+    run = db.query(AiRun).filter_by(conversation_id=result["worker_id"]).one()
+    assert run.provider_id == chosen.id

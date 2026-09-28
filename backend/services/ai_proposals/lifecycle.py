@@ -28,6 +28,7 @@ from services.ai_tool_registry import (
     WRITE_TOOLS,
     aufgaben_tools,
     bekannt as _werkzeug_bekannt,
+    verlangt_klick,
 )
 from services.ai_action_service import (
     _resolve_server,
@@ -127,11 +128,25 @@ from services.ai_proposals.network_proposals import (
     _ausfuehren_cloudflare_dns,
     _ausfuehren_cloudflare_dns_delete,
 )
+from services.ai_proposals.user_proposals import (
+    _role_delete_payload,
+    _role_set_payload,
+    _user_roles_payload,
+    _user_server_permission_payload,
+    _ausfuehren_role_delete,
+    _ausfuehren_role_set,
+    _ausfuehren_user_roles,
+    _ausfuehren_user_server_permission,
+)
+from services.ai_proposals.database_proposals import (
+    _database_change_payload,
+    _ausfuehren_database_change,
+)
 from services.ai_proposals.task_proposals import (
-    _popup_create_payload,
+    _popup_set_payload,
     _task_set_payload,
     _task_delete_payload,
-    _ausfuehren_popup_create,
+    _ausfuehren_popup_set,
     _ausfuehren_task_set,
     _ausfuehren_task_delete,
     _ausfuehren_read_tool,
@@ -209,7 +224,7 @@ _GLOBALE_PAYLOADS: dict = {
         _blueprint_delete_payload(db, rest)
     ),
     "propose_server_create": lambda db, user, rest, arguments, guardian: (
-        _server_create_payload(db, arguments)
+        _server_create_payload(db, arguments, user=user)
     ),
     "propose_hoster_integration": lambda db, user, rest, arguments, guardian: (
         _hoster_integration_payload(db, user, rest)
@@ -247,14 +262,23 @@ _GLOBALE_PAYLOADS: dict = {
     "propose_note_delete": lambda db, user, rest, arguments, guardian: (
         _note_delete_payload(db, user, rest)
     ),
-    "propose_popup_create": lambda db, user, rest, arguments, guardian: (
-        _popup_create_payload(db, user, rest)
+    "propose_popup_set": lambda db, user, rest, arguments, guardian: (
+        _popup_set_payload(db, user, rest)
     ),
     "propose_cloudflare_dns_record": lambda db, user, rest, arguments, guardian: (
         _cloudflare_dns_payload(rest)
     ),
     "propose_cloudflare_dns_delete": lambda db, user, rest, arguments, guardian: (
         _cloudflare_dns_delete_payload(rest)
+    ),
+    "propose_role_set": lambda db, user, rest, arguments, guardian: (
+        _role_set_payload(db, user, rest)
+    ),
+    "propose_user_roles": lambda db, user, rest, arguments, guardian: (
+        _user_roles_payload(db, user, rest)
+    ),
+    "propose_role_delete": lambda db, user, rest, arguments, guardian: (
+        _role_delete_payload(db, user, rest)
     ),
 }
 
@@ -342,6 +366,24 @@ def create_proposal(
             }
         elif tool_name == "list_my_servers":
             preview = {"operation": "list_my_servers"}
+        elif tool_name == "forget_memory":
+            # Vergessen ist ein Loeschvorgang und fragt deshalb auch im
+            # autonomen Modus. Wer zustimmt, soll auf der Karte lesen, was
+            # verschwindet, nicht nur den Werkzeugnamen.
+            schluessel = rest.get("keys")
+            preview = {
+                "operation": "forget_memory",
+                "memory_scope": redact_sensitive_text(str(rest.get("scope", "")))[:32],
+                "memory_keys": [
+                    redact_sensitive_text(str(eintrag))[:64]
+                    for eintrag in (schluessel if isinstance(schluessel, list) else [])[:25]
+                ],
+            }
+        elif tool_name == "forget_skill":
+            preview = {
+                "operation": "forget_skill",
+                "skill_key": redact_sensitive_text(str(rest.get("skill_key", "")))[:64],
+            }
         else:
             preview = {"operation": tool_name}
         expected_revision = None
@@ -524,6 +566,12 @@ def create_proposal(
         elif tool_name == "propose_modpack_install":
             payload, preview = _modpack_install_payload(db, server, rest)
             expected_revision = None
+        elif tool_name == "propose_user_server_permission":
+            payload, preview = _user_server_permission_payload(db, user, server, rest)
+            expected_revision = None
+        elif tool_name == "propose_database_change":
+            payload, preview = _database_change_payload(db, user, server, rest)
+            expected_revision = None
         elif tool_name in SERVER_READ_TOOLS:
             _require_tool_permission(db, user, server.id, tool_name, rest)
             payload = dict(rest)
@@ -569,7 +617,12 @@ def create_proposal(
     else:
         proposal_type = "write"
 
-    autonomous = autonomy_allows(db, user=user, server_id=server_id, tool_name=tool_name)
+    # `verlangt_klick` liest die Vorschau, die der Payload-Bau eben aus dem
+    # Bestand geschrieben hat: eine Rechtevergabe, die etwas entzieht oder mehr
+    # als unkritische Serverrechte vergibt, fragt auch mit Freigabe.
+    autonomous = autonomy_allows(
+        db, user=user, server_id=server_id, tool_name=tool_name
+    ) and not verlangt_klick(tool_name, preview)
     proposal = AiActionProposal(
         id=proposal_id,
         conversation_id=conversation.id,
@@ -785,6 +838,7 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_restart_schedule_set": _ausfuehren_restart_schedule_set,
     "propose_backup_schedule_set": _ausfuehren_backup_schedule_set,
     "propose_file_delete": _ausfuehren_file_delete,
+    "propose_database_change": _ausfuehren_database_change,
     "propose_server_create": _ausfuehren_server_create,
     "propose_blueprint_change": _ausfuehren_blueprint_change,
     "propose_blueprint_delete": _ausfuehren_blueprint_delete,
@@ -802,10 +856,14 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_note_create": _ausfuehren_note_create,
     "propose_note_update": _ausfuehren_note_update,
     "propose_note_delete": _ausfuehren_note_delete,
-    "propose_popup_create": _ausfuehren_popup_create,
+    "propose_popup_set": _ausfuehren_popup_set,
     "propose_cloudflare_dns_record": _ausfuehren_cloudflare_dns,
     "propose_cloudflare_dns_delete": _ausfuehren_cloudflare_dns_delete,
     "propose_modpack_install": _ausfuehren_modpack_install,
+    "propose_user_server_permission": _ausfuehren_user_server_permission,
+    "propose_role_set": _ausfuehren_role_set,
+    "propose_user_roles": _ausfuehren_user_roles,
+    "propose_role_delete": _ausfuehren_role_delete,
     "worker_start": _ausfuehren_worker_start,
     "worker_cancel": _ausfuehren_worker_cancel,
     "worker_antwort": _ausfuehren_read_tool,

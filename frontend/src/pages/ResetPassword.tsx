@@ -8,7 +8,8 @@ import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, Check, X, ArrowRight } from 'lucide-react'
-
+import { Button, buttonClasses } from '@/Singra/UI'
+import { Spinner } from '@/components/ui/Spinner'
 export function ResetPassword() {
   const { t } = useTranslation()
   const [searchParams] = useSearchParams()
@@ -17,6 +18,7 @@ export function ResetPassword() {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaResetKey, setCaptchaResetKey] = useState(0)
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
 
@@ -52,6 +54,8 @@ export function ResetPassword() {
     } catch (err: any) {
       setStatus('error')
       setMessage(err.message || t('resetPassword.error'))
+      setCaptchaToken(null)
+      setCaptchaResetKey((k) => k + 1)
     }
   }
 
@@ -90,7 +94,7 @@ export function ResetPassword() {
               <p className="font-body-md text-base text-on-surface">{message}</p>
               <Link
                 to="/login"
-                className="msm-btn-primary w-full py-3 flex items-center justify-center gap-2"
+                className={buttonClasses('primary', 'lg', 'w-full')}
               >
                 {t('auth.goToLogin')}
                 <ArrowRight className="w-4 h-4" />
@@ -100,13 +104,13 @@ export function ResetPassword() {
 
           {status === 'error' && (
             <div className="text-center py-6 space-y-4">
-              <div className="w-16 h-16 rounded-full bg-status-error/10 border border-status-error/30 flex items-center justify-center mx-auto">
-                <X className="w-8 h-8 text-status-error" />
+              <div className="w-16 h-16 rounded-full bg-status-destructive/10 border border-status-destructive/30 flex items-center justify-center mx-auto">
+                <X className="w-8 h-8 text-status-destructive" />
               </div>
-              <p className="font-body-md text-base text-status-error">{message}</p>
+              <p className="font-body-md text-base text-status-destructive">{message}</p>
               <Link
                 to="/forgot-password"
-                className="msm-btn-secondary w-full py-3 flex items-center justify-center gap-2"
+                className={buttonClasses('secondary', 'lg', 'w-full')}
               >
                 {t('forgotPassword.title')}
               </Link>
@@ -132,18 +136,18 @@ export function ResetPassword() {
                 required
               />
 
-              <CaptchaWidget onVerify={setCaptchaToken} />
+              <CaptchaWidget onVerify={setCaptchaToken} resetKey={captchaResetKey} />
 
               <ErrorMessage message={message} className="text-sm" />
 
-              <button
+              <Button size="lg"
                 type="submit"
                 disabled={status === 'submitting'}
-                className="msm-btn-primary w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {status === 'submitting' ? (
                   <span className="inline-flex items-center gap-2">
-                    <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                    <Spinner />
                     {t('common.loading')}
                   </span>
                 ) : (
@@ -152,7 +156,7 @@ export function ResetPassword() {
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
-              </button>
+              </Button>
             </form>
           )}
         </div>

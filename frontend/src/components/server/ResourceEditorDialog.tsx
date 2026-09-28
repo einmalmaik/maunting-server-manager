@@ -5,6 +5,7 @@ import { api, SanitizedApiError } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import type { Node } from '@/types'
+import { Button } from '@/Singra/UI'
 
 /**
  * Resource-Limit-Editor für Server-Detail (CPU / RAM / Disk).
@@ -302,7 +303,7 @@ export function ResourceEditorDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto"
+      className="msm-modal-overlay overflow-y-auto"
       onClick={() => !saving && onClose()}
       role="dialog"
       aria-modal="true"
@@ -359,7 +360,7 @@ export function ResourceEditorDialog({
               {t('serverDetail.resourceEditor.cpuHint')}
             </p>
             {errors.cpu && (
-              <p id="resource-cpu-error" role="alert" className="font-body-md text-xs text-status-error mt-1" data-testid="resource-cpu-error">
+              <p id="resource-cpu-error" role="alert" className="font-body-md text-xs text-status-destructive mt-1" data-testid="resource-cpu-error">
                 {errors.cpu}
               </p>
             )}
@@ -391,7 +392,7 @@ export function ResourceEditorDialog({
               {t('serverDetail.resourceEditor.ramHint')}
             </p>
             {errors.ram && (
-              <p id="resource-ram-error" role="alert" className="font-body-md text-xs text-status-error mt-1" data-testid="resource-ram-error">
+              <p id="resource-ram-error" role="alert" className="font-body-md text-xs text-status-destructive mt-1" data-testid="resource-ram-error">
                 {errors.ram}
               </p>
             )}
@@ -423,7 +424,7 @@ export function ResourceEditorDialog({
               {t('serverDetail.resourceEditor.diskHint')}
             </p>
             {errors.disk && (
-              <p id="resource-disk-error" role="alert" className="font-body-md text-xs text-status-error mt-1" data-testid="resource-disk-error">
+              <p id="resource-disk-error" role="alert" className="font-body-md text-xs text-status-destructive mt-1" data-testid="resource-disk-error">
                 {errors.disk}
               </p>
             )}
@@ -432,28 +433,28 @@ export function ResourceEditorDialog({
           {formError && (
             <div
               role="alert"
-              className="p-3 rounded-md border border-status-error/30 bg-status-error/5"
+              className="p-3 rounded-md border border-status-destructive/30 bg-status-destructive/5"
               data-testid="resource-form-error"
             >
-              <p className="font-body-md text-sm text-status-error">
+              <p className="font-body-md text-sm text-status-destructive">
                 {formError}
               </p>
             </div>
           )}
 
           <div className="flex gap-3 pt-2">
-            <button
+            <Button variant="secondary"
               type="button"
-              className="msm-btn-secondary flex-1 py-2"
+              className="flex-1"
               onClick={() => !saving && onClose()}
               disabled={saving}
               data-testid="resource-cancel-btn"
             >
               {t('common.cancel')}
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
-              className="msm-btn-primary flex-1 py-2 disabled:opacity-50"
+              className="flex-1 disabled:opacity-50"
               disabled={saving || lifecycleBusy}
               aria-busy={saving || undefined}
               data-testid="resource-save-btn"
@@ -461,7 +462,7 @@ export function ResourceEditorDialog({
               {saving
                 ? t('serverDetail.resourceEditor.saving')
                 : t('common.save')}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

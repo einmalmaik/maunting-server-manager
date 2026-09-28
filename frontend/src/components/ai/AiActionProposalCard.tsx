@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Blocks, Bot, CalendarClock, ChevronDown, Eye, FilePenLine, FileX, Globe, HardDriveDownload, HardDriveUpload, Mail, Network, Package, Plug, Power, ServerCog, ShieldCheck, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
+import { Activity, AlertTriangle, Blocks, Bot, CalendarClock, ChevronDown, Database, Eye, FilePenLine, FileX, Globe, HardDriveDownload, HardDriveUpload, Mail, Network, Package, Plug, Power, ServerCog, ShieldCheck, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -62,6 +62,14 @@ const TATSACHEN: readonly string[] = [
   'startup_after',
   'image_after',
   'env_after',
+  // Woraus abgeleitet wird, wohin, und ob dort schon etwas steht. Die Quelle
+  // entscheidet, welcher Code geholt wird; ein Wechsel fragt immer und steht
+  // deshalb vorher und nachher hier (seit 26.09.2026).
+  'source_id',
+  'new_id',
+  'overwrites_blueprint',
+  'source_before',
+  'source_after',
   'server_name',
   'zugriff',
   'pfad',
@@ -80,6 +88,29 @@ const TATSACHEN: readonly string[] = [
   'location',
   'calendar_id',
   'event_id',
+  // Die Karte eines Vergessens nannte bis zum 23.09.2026 nur das Werkzeug;
+  // wer zustimmt, soll lesen, welche Einträge und welcher Skill gleich
+  // verschwinden.
+  'memory_scope',
+  'memory_keys',
+  'skill_key',
+  // Rechte anderer Benutzer: wer, was danach gilt, und getrennt davon, was neu
+  // dazukommt und was wegfaellt. Ohne die beiden letzten muesste der
+  // Bestaetigende zwei Listen im Kopf vergleichen, um zu sehen, dass er gerade
+  // etwas entzieht.
+  'target_user',
+  'permissions_after',
+  'permissions_added',
+  'permissions_removed',
+  'role_users',
+  'roles_after',
+  'roles_added',
+  'roles_removed',
+  // Datenbankänderung: wo, und ob der Plan Daten entfernt. Das SQL selbst
+  // steht als `diff` im Codeblock darunter.
+  'database',
+  'table',
+  'destructive',
 ]
 
 function tatsachenZeilen(preview: Record<string, unknown>): [string, string][] {
@@ -119,11 +150,11 @@ const UNUMKEHRBAR: readonly string[] = [
   'propose_backup_restore',
   'propose_server_blueprint_switch',
   'propose_server_lifecycle',
-  // `propose_file_delete` steht hier, obwohl es in `ai_tool_registry` nicht
-  // `immer_bestaetigen` ist. Das ist kein Widerspruch: die Registry entscheidet,
-  // ob eine Freigabe uebersprungen werden darf, dieser Farbton entscheidet, wie
-  // ein Mensch die Frage gestellt bekommt, wenn er sie doch bekommt. Eine
-  // geloeschte Datei ist ohne Backup weg — das gehoert rot gefragt.
+  // `propose_file_delete` stand hier schon, als es in `ai_tool_registry` noch
+  // nicht `immer_bestaetigen` war (seit dem 23.09.2026). Die Registry
+  // entscheidet, ob eine Freigabe uebersprungen werden darf; dieser Farbton
+  // entscheidet, wie ein Mensch die Frage gestellt bekommt. Eine geloeschte
+  // Datei ist ohne Backup weg — das gehoert rot gefragt.
   // `propose_server_repair` fehlt hier bewusst: Rechte richten und einen Port
   // neu vergeben stellt einen Zustand her, den das Panel ohnehin herstellen
   // wuerde.
@@ -139,9 +170,16 @@ const UNUMKEHRBAR: readonly string[] = [
 export function AiActionProposalCard({
   proposal,
   onChange,
+  nurAnsicht = false,
 }: {
   proposal: AiActionProposal
   onChange: (proposal: AiActionProposal) => void
+  /**
+   * Ohne Knöpfe, mit dem Hinweis, wo bestätigt wird. Für das Worker-Fenster:
+   * es ist zum Nachsehen da (Betreiber, 25.09.2026), und dieselbe Karte steht
+   * mit Knöpfen im Chat und in der Sprachansicht.
+   */
+  nurAnsicht?: boolean
 }) {
   const { t } = useTranslation()
   const [busy, setBusy] = useState(false)
@@ -155,6 +193,9 @@ export function AiActionProposalCard({
   const path = previewText(proposal.preview.path)
   const diff = previewText(proposal.preview.diff)
   const tatsachen = tatsachenZeilen(proposal.preview as Record<string, unknown>)
+  // Ein Werkzeug kann beides sein: `propose_database_change` legt eine Funktion
+  // an oder löscht eine Tabelle. Dann sagt es die Vorschau (`destructive`).
+  const unumkehrbar = UNUMKEHRBAR.includes(proposal.tool_name) || proposal.preview.destructive === true
   const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
     propose_config_update: FilePenLine,
     propose_config_patch: FilePenLine,
@@ -185,6 +226,8 @@ export function AiActionProposalCard({
     // es repariert nichts — der `Wrench` daneben wuerde genau das behaupten.
     propose_guardian_tuning: SlidersHorizontal,
     propose_file_delete: FileX,
+    propose_database_change: Database,
+    read_database: Database,
     // Ein stehender Auftrag ist eine Uhr, kein Serververhalten — deshalb
     // dasselbe Symbol fuers Anlegen wie fuers Loeschen, aber ein anderes als
     // fuer alles, was einen Server anfasst.
@@ -205,6 +248,10 @@ export function AiActionProposalCard({
     propose_email_send: Mail,
     propose_calendar_event_create: CalendarClock,
     propose_calendar_event_delete: Trash2,
+    propose_user_server_permission: ShieldCheck,
+    propose_role_set: ShieldCheck,
+    propose_user_roles: ShieldCheck,
+    propose_role_delete: Trash2,
   }
   const Icon = ICONS[proposal.tool_name] ?? Power
   // Eine autonom ausgefuehrte Aktion ist keine Anfrage. Sie bekommt deshalb
@@ -218,7 +265,7 @@ export function AiActionProposalCard({
     try {
       const rejected = await aiApi.rejectAction(proposal.id)
       onChange(rejected)
-      toast.success(t('ai.actions.rejectedToast', 'Aktion abgelehnt.'))
+      toast.success(t('ai.actions.rejectedToast'))
     } catch (error: unknown) {
       toast.error(error instanceof SanitizedApiError ? error.message : t('ai.actions.error'))
       void aiApi.getAction(proposal.id).then(onChange).catch(() => undefined)
@@ -231,7 +278,7 @@ export function AiActionProposalCard({
     // Bei unumkehrbaren, destruktiven Aktionen (z. B. Server oder Backups löschen) fragen wir
     // zur Sicherheit einmal per Bestätigungsdialog nach.
     // Bei allen regulären Vorschlägen genügt der Klick auf "Ausführen" direkt auf der Karte.
-    if (UNUMKEHRBAR.includes(proposal.tool_name)) {
+    if (unumkehrbar) {
       const message = [
         t(`ai.actions.tools.${proposal.tool_name}`),
         t(`ai.actions.confirm.${proposal.tool_name}`, { operation, path }),
@@ -242,7 +289,7 @@ export function AiActionProposalCard({
       const accepted = await confirm({
         title: t(`ai.actions.tools.${proposal.tool_name}`, proposal.tool_name),
         message,
-        confirmText: t('ai.actions.execute', 'Ausführen'),
+        confirmText: t('ai.actions.execute'),
         danger: true,
       })
       if (!accepted) return
@@ -286,12 +333,12 @@ export function AiActionProposalCard({
             <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-xs text-on-surface-variant">{t(`ai.actions.status.${proposal.status}`)}</span>
             {proposal.proposal_type === 'read' && (
               <span className="rounded-full bg-secondary/15 px-2 py-0.5 text-xs text-secondary">
-                {t('ai.actions.type.read', 'Lese-Zugriff')}
+                {t('ai.actions.type.read')}
               </span>
             )}
             {proposal.proposal_type === 'worker' && (
               <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary">
-                {t('ai.actions.type.worker', 'Worker')}
+                {t('ai.actions.type.worker')}
               </span>
             )}
             {proposal.autonomous && (
@@ -313,7 +360,7 @@ export function AiActionProposalCard({
             )}
           </div>
           {operation && <p className="mt-1 text-xs sm:text-sm text-on-surface-variant">{t('ai.actions.operation', { operation })}</p>}
-          {path && <p className="mt-0.5 break-all font-mono text-[11px] sm:text-xs text-on-surface-variant">{path}</p>}
+          {path && <p className="mt-0.5 break-all font-mono text-label-sm sm:text-xs text-on-surface-variant">{path}</p>}
           
           {detailsOpen && (
             <div className="mt-2 space-y-2">
@@ -339,16 +386,21 @@ export function AiActionProposalCard({
                   {proposal.expected_effect}
                 </p>
               )}
-              {diff && <pre className="max-h-64 overflow-auto rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-2.5 sm:p-3 text-[11px] sm:text-xs text-on-surface-variant">{diff}</pre>}
+              {diff && <pre className="max-h-64 overflow-auto rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-2.5 sm:p-3 text-label-sm sm:text-xs text-on-surface-variant">{diff}</pre>}
             </div>
           )}
 
           {proposal.autonomous && (
-            <p className="mt-1 text-[11px] text-on-surface-variant">{t('ai.actions.autonomousHint')}</p>
+            <p className="mt-1 text-label-sm text-on-surface-variant">{t('ai.actions.autonomousHint')}</p>
           )}
-          {proposal.error_code && <p className="mt-1.5 flex items-center gap-1 text-xs text-status-error"><AlertTriangle className="h-3.5 w-3.5" />{t('ai.actions.failed')}</p>}
+          {proposal.error_code && <p className="mt-1.5 flex items-center gap-1 text-xs text-status-destructive"><AlertTriangle className="h-3.5 w-3.5" />{t('ai.actions.failed')}</p>}
         </div>
-        {proposal.status === 'proposed' && !proposal.autonomous && (
+        {proposal.status === 'proposed' && !proposal.autonomous && nurAnsicht && (
+          <p className="mt-2 w-full text-xs text-on-surface-variant sm:mt-0 sm:w-auto sm:max-w-[14rem] sm:text-right">
+            {t('ai.actions.nurAnsicht')}
+          </p>
+        )}
+        {proposal.status === 'proposed' && !proposal.autonomous && !nurAnsicht && (
           <div className="flex w-full sm:w-auto flex-wrap items-center gap-2 justify-end mt-2 sm:mt-0">
             <Button
               type="button"
@@ -357,16 +409,16 @@ export function AiActionProposalCard({
               disabled={busy}
               onClick={() => void reject()}
             >
-              {t('ai.actions.reject', 'Ablehnen')}
+              {t('ai.actions.reject')}
             </Button>
             <Button
               type="button"
               size="sm"
-              variant={UNUMKEHRBAR.includes(proposal.tool_name) ? 'destructive' : 'primary'}
+              variant={unumkehrbar ? 'destructive' : 'primary'}
               disabled={busy}
               onClick={() => void execute()}
             >
-              {busy ? t('ai.actions.executing') : t('ai.actions.execute', 'Ausführen')}
+              {busy ? t('ai.actions.executing') : t('ai.actions.execute')}
             </Button>
           </div>
         )}

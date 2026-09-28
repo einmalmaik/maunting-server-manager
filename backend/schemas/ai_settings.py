@@ -95,6 +95,10 @@ class AiWebSearchStatus(BaseModel):
     configured: bool
     has_api_key: bool = False
     searxng_url: str | None = None
+    default_searxng_url: str = "http://127.0.0.1:8888"
+    is_default_searxng: bool = True
+    custom_searxng_url: str | None = None
+    sidecar_running: bool = False
 
 
 class AiSatelliteCredentialsUpdate(BaseModel):
@@ -181,6 +185,32 @@ class AiContextPolicyStatus(BaseModel):
     #: hinweg nichts mehr. Sichtbar war das bisher allein als eine Warnzeile im
     #: Log beim ersten Ladeversuch.
     memory_search_ready: bool
+
+
+#: Die Rückfallanbieter der Bedeutungssuche. Dieselbe Liste wie
+#: `ai_embedding_service.RUECKFALL_MODELLE`, plus "off".
+MemorySearchFallback = Literal["off", "google", "openai"]
+
+
+class AiMemorySearchUpdate(BaseModel):
+    fallback: MemorySearchFallback
+
+
+class AiMemorySearchStatus(BaseModel):
+    """Womit die Bedeutungssuche rechnet — und ob sie das Haus verlassen darf.
+
+    ``fallback`` ist der Anbieter, bei dem ohne lokales Modell gerechnet werden
+    darf (Standard "off"). ``available`` nennt die Rückfallanbieter mit aktivem
+    Zugang und Schlüssel — ein gewählter ohne Zugang rechnet nicht.
+    ``local_ready`` sagt, ob das lokale Modell da ist; dann bewirkt die Wahl
+    nichts. ``ready`` ist das Ergebnis aus allem, dieselbe Antwort wie
+    `memory_search_ready`.
+    """
+
+    fallback: MemorySearchFallback
+    available: list[Literal["google", "openai"]]
+    local_ready: bool
+    ready: bool
 
 
 class AiWorkerPolicyUpdate(BaseModel):

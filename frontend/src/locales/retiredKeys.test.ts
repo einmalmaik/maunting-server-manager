@@ -40,6 +40,21 @@ import en from './en.json'
  * sie und schriebe daran weiter.
  */
 const ABGELOESTE_SCHLUESSEL = [
+  // 09/2026: vier Schlüssel sagten dasselbe wie `common.apply` und
+  // `common.reset` — auf Deutsch Wort für Wort, auf Englisch in vier
+  // Fassungen („Apply", „Use it", „Adopt", „Reset"). Der fünfte Zwilling,
+  // `ai.guardian.takeOver`, bleibt: „übernehmen" heißt dort nicht
+  // „anwenden", sondern „die Steuerung an sich nehmen", und heißt seitdem
+  // auch so.
+  'profile.timezoneAdopt',
+  'ai.providers.recommendationApply',
+  'mss.wakeword.zuruecksetzen',
+  'databaseConsole.reset',
+  // 09/2026: die Panel-Datenbank öffnet das PostgreSQL-Studio
+  // (`postgresStudio.*`); die eigene Konsole ist mit ihren Texten entfallen.
+  'databaseConsole',
+  'panelDatabase.workspace',
+  'panelDatabase.rowsDeleted',
   'ai.memory.title',
   'ai.memory.description',
   'ai.memory.teamTitle',
@@ -48,10 +63,101 @@ const ABGELOESTE_SCHLUESSEL = [
   'permissions',
   'ai.providers.voices',
   'ai.providers.realtimeHint',
+  // 09/2026: die KI hat kein Werkzeug mehr, das den Messenger anfasst. Die
+  // Beschriftungen der beiden Suchen und der Text des Rechts
+  // `ai.social.message_friend` beschrieben ab da etwas, das es nicht gibt —
+  // und ein Rechtetext ist im Rechteeditor eine Zusage, keine Dekoration.
+  'ai.tools.search_messenger_contacts',
+  'ai.tools.search_messenger_groups',
+  'ai.toolsRunning.search_messenger_contacts',
+  'ai.toolsRunning.search_messenger_groups',
+  'permissionDetails.ai_social_message_friend',
+  // 09/2026: 342 Schlüssel, die kein Aufruf je gelesen hat (11 % der Datei),
+  // gefunden mit scripts/find-orphan-keys.mjs. Nicht alle stehen hier — eine
+  // Liste mit 342 Zeilen wäre selbst Ballast. Hier steht, was jemand aus
+  // Versehen neu anlegen würde, weil ein lebender Zwilling daneben liegt:
+  //
+  // `verifyEmail.*` beschrieb eine Seite, die es nie gab. Der echte Ablauf
+  // liegt unter `setup.verifyEmail*` — wer die Bestätigungsseite anfasst,
+  // findet über die Suche sonst fünf plausible Schlüssel, die nirgends
+  // erscheinen.
+  'verifyEmail.title',
+  'verifyEmail.loading',
+  'verifyEmail.success',
+  'verifyEmail.error',
+  'verifyEmail.noToken',
+  // `nav.social` ("Social & Hub") hat keine Route in navigation.tsx.
+  'nav.social',
+  // `shell.openUserMenu` neben den lebenden `shell.mainNavigation` und
+  // `shell.closeNavigation`.
+  'shell.openUserMenu',
+  // 09/2026: Die Videonotiz hat keine Wischgeste mehr. Sie hing am
+  // Vollbildrahmen und fing die Berührung des Sendeknopfs darin ab; abbrechen
+  // und senden gehen jetzt nur noch über die beiden Knöpfe. Ein Hinweis, der
+  // eine Geste erklärt, die es nicht gibt, ist schlimmer als keiner.
+  'social.videoNote.swipeToLock',
+  // 09/2026: Mit GPT-Live trägt OpenAI zwei Sprachwege, und welcher gilt,
+  // entscheidet das Modell, nicht der Anbieter. Die Texte stehen seitdem je
+  // Weg unter `ai.providers.realtime.wege.<weg>`; die alten Paare aus
+  // OpenAI-Text und `google…`-Zwilling hätten für GPT-Live einen dritten
+  // Zwilling gebraucht. `reasoningValues` sagte Wort für Wort dasselbe wie
+  // `ai.reasoning.levels` und kannte die Stufen von GPT-Live nicht.
+  'ai.providers.realtime.title',
+  'ai.providers.realtime.googleTitle',
+  'ai.providers.realtime.hint',
+  'ai.providers.realtime.googleHint',
+  'ai.providers.realtime.voice',
+  'ai.providers.realtime.googleVoice',
+  'ai.providers.realtime.reasoningHint',
+  'ai.providers.realtime.googleReasoningHint',
+  'ai.providers.realtime.reasoningValues',
+  // 09/2026: Der Link zur Szene fiel mit dem neuen Copernicus-Katalog. Seine
+  // Adresse lädt bei CREODIAS nur die kleine Vorschau als Datei herunter, die
+  // der Reiter schon zeigt — Vollauflösung war das nie. Eine echte
+  // Vollansicht bräuchte einen eigenen Weg, etwa den Copernicus Browser.
+  'ai.geo.openFullScene',
+  // 25.09.2026: jede Karte bestätigt nur noch der Klick, auch im Sprachmodus.
+  // Die Unterscheidung „sag Ja" / „klick hier" / „klick im Chat" gibt es
+  // nicht mehr; `ai.voice.vorschlag.hint` sagt jetzt das eine.
+  'ai.voice.vorschlag.hintKlick',
+  'ai.voice.vorschlag.hintKlickChat',
+  // 27.09.2026: Profil und App-Einstellungen haben weniger Reiter. Passwort,
+  // 2FA, Messenger-PIN und Tresor stehen unter „Sicherheit", verknüpfte
+  // Konten und Zugangsdaten unter „Verbindungen", das Wake-Word unter Audio.
+  // Die alten `?tab=`-Werte führen weiter an den neuen Ort; ihre Beschriftungen
+  // brauchte nur die Reiterleiste.
+  'profile.tabs.password',
+  'profile.tabs.setPassword',
+  'profile.tabs.2fa',
+  'profile.tabs.linked',
+  'profile.tabs.credentials',
+  'profile.tabs.messenger',
+  'profile.tabs.vault',
+  'mss.einstellungen.tab.wakeword',
+  // 28.09.2026: Das Geheimnisfeld der eigenen Zugangsdaten heißt je Art
+  // anders (Steam-Passwort, GitHub-Token); ein neutrales „Geheimnis" ließ
+  // offen, was hineingehört.
+  'credentials.secret',
+  'credentials.secretHint',
+  // 28.09.2026: Die Nutzungszeit hat eine Fassung (`Nutzungszeit.tsx`) für
+  // Browser, App und fremdes Profil. Das tote `AchievementsModal` trug die
+  // übrigen Kacheltexte; die Gesamtzeit heißt jetzt `statActivity`.
+  'social.milestones.platformActivity',
+  'social.milestones.progress',
+  'social.milestones.statAi',
+  'social.milestones.statAdmin',
+  'social.milestones.statCommands',
+  'mss.social.gesamtaktivitaet',
 ]
 
 /** Die Nachfolger muss es geben — sonst wäre das Löschen ein Verlust. */
 const NACHFOLGER = [
+  'credentials.secrets.steam_account',
+  'credentials.secrets.github_token',
+  'credentials.secretHints.steam_account',
+  'credentials.secretHints.github_token',
+  'profile.tabs.security',
+  'profile.tabs.connections',
   'ai.memory.titles.user',
   'ai.memory.titles.team',
   'ai.memory.titles.panel',
@@ -75,10 +181,23 @@ const NACHFOLGER = [
   'ai.providers.transcriptionModelHint',
   'ai.providers.protokoll.tts',
   'ai.providers.protokoll.chat_completions',
+  // Der Nachfolger des Wegfalls: die Datenschutzerklärung sagt jetzt
+  // ausdrücklich, dass der Messenger für die KI nicht erreichbar ist. Ohne
+  // diesen Satz wäre aus der Oberfläche nicht zu erkennen, ob der Zugriff
+  // entfernt wurde oder nur unerwähnt blieb.
+  'privacyPolicy.sections.ai.items.noMessenger',
+  // Die Nachfolger der Sprachweg-Texte — je Weg, den das Backend kennt
+  // (`services/ai_voice/sprachwege.py`).
+  ...['openai_realtime', 'openai_live', 'gemini_live'].flatMap((weg) =>
+    ['title', 'hint', 'voice', 'reasoningHint'].map((feld) => `ai.providers.realtime.wege.${weg}.${feld}`)),
+  'ai.reasoning.levels.low',
+  'ai.reasoning.levels.medium',
+  'ai.reasoning.levels.high',
 ]
 
-// Nur die beiden Basissprachen: die übrigen neun sind bewusst Teilmengen mit
-// englischem Rückfall (scripts/check-i18n.mjs) und kennen die Schlüssel nicht.
+// Die beiden Panelsprachen — seit 09/2026 gibt es keine weiteren. Die neun
+// Teilübersetzungen sind gefallen, weil sie über die Spracherkennung des
+// Browsers aktiv wurden, ohne je vollständig gewesen zu sein.
 const SPRACHEN: Record<string, unknown> = { de, en }
 
 function blatt(baum: unknown, pfad: string): unknown {

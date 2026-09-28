@@ -13,11 +13,12 @@ from .permissions import router as permissions_router
 from .blueprints import router as blueprints_router
 from .oauth import router as oauth_router
 from .databases import router as databases_router
+from .postgres_studio import panel_router as panel_database_studio_router
+from .postgres_studio import router as postgres_studio_router
 from .webhooks_outbound import router as webhooks_outbound_router
 from .singra_webhook import router as singra_webhook_router
 from .backup_config import router as backup_config_router
 from .panel_backups import router as panel_backups_router
-from .panel_database import router as panel_database_router
 from .nodes import router as nodes_router
 from .incidents import router as incidents_router
 from .change_timeline import router as change_timeline_router
@@ -45,6 +46,8 @@ from .calendar import router as calendar_router
 from .notes import router as notes_router
 from .vault import router as vault_router
 from .sync_events import router as sync_events_router, sync_alias_router
+from .social import router as social_router
+from .social_calls import router as social_calls_router, admin_router as livekit_admin_router
 
 __all__ = [
     "auth_router",
@@ -62,11 +65,12 @@ __all__ = [
     "blueprints_router",
     "oauth_router",
     "databases_router",
+    "postgres_studio_router",
+    "panel_database_studio_router",
     "webhooks_outbound_router",
     "singra_webhook_router",
     "backup_config_router",
     "panel_backups_router",
-    "panel_database_router",
     "nodes_router",
     "incidents_router",
     "change_timeline_router",
@@ -96,4 +100,7 @@ __all__ = [
     "vault_router",
     "sync_events_router",
     "sync_alias_router",
+    "social_router",
+    "social_calls_router",
+    "livekit_admin_router",
 ]  # noqa: E501

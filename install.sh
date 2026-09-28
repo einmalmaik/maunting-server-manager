@@ -302,11 +302,7 @@ show_current_config() {
         fi
     fi
     echo -e "  ${BOLD}SMTP-From:${NC}       ${CURRENT_SMTP_FROM:-<nicht gesetzt>}"
-    if $CURRENT_USE_POSTGRES; then
-        echo -e "  ${BOLD}Datenbank:${NC}       PostgreSQL"
-    else
-        echo -e "  ${BOLD}Datenbank:${NC}       Legacy-SQLite (wird nach PostgreSQL migriert)"
-    fi
+    echo -e "  ${BOLD}Datenbank:${NC}       PostgreSQL"
     if [[ -n "$CURRENT_REDIS_URL" ]]; then
         echo -e "  ${BOLD}Redis:${NC}           Aktiviert"
     else
@@ -508,7 +504,6 @@ REINSTALL_MODE=false
 KEEP_SETTINGS=false
 CHANGED_DOMAIN=false
 CHANGED_EMAIL=false
-CHANGED_DB=false
 CHANGED_REDIS=false
 CHANGED_AUTO_UPDATE=false
 NEED_FULL_REBUILD=false
@@ -521,6 +516,9 @@ fi
 if [[ -f "$MSM_DIR/backend/.env" ]]; then
     REINSTALL_MODE=true
     load_current_env
+    if ! $CURRENT_USE_POSTGRES; then
+        err "Die bestehende Installation nutzt keine PostgreSQL-Datenbank (MSM_DATABASE_URL in backend/.env). SQLite wird nicht mehr unterstützt — zuerst mit einer älteren MSM-Version nach PostgreSQL umziehen."
+    fi
     show_current_config
 
     if $SIMPLE_INSTALL; then
@@ -727,6 +725,9 @@ mkdir -p /opt/msm/servers
 chown "$MSM_USER:$MSM_USER" /opt/msm/servers
 mkdir -p /opt/msm/backups
 chown "$MSM_USER:$MSM_USER" /opt/msm/backups
+mkdir -p /opt/msm/blueprints/community
+chown -R "$MSM_USER:$MSM_USER" /opt/msm/blueprints
+chmod -R u+rwX,g+rwX /opt/msm/blueprints
 
 MSM_DOCKER_HOST=""
 if $INSTALL_LOCAL_AGENT; then
@@ -774,6 +775,10 @@ if $SHOULD_COPY_FILES; then
             rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
                 "$SCRIPT_DIR/searxng-sidecar/" "$MSM_DIR/searxng-sidecar/"
         fi
+        if [[ -d "$SCRIPT_DIR/livekit-sidecar" ]]; then
+            rsync -a --chown="$MSM_USER:$MSM_USER" --delete --exclude '.env' \
+                "$SCRIPT_DIR/livekit-sidecar/" "$MSM_DIR/livekit-sidecar/"
+        fi
         if [[ -d "$SCRIPT_DIR/msm-agent" ]]; then
             rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
                 --exclude '.env' --exclude 'venv/' --exclude 'servers/' \
@@ -801,7 +806,7 @@ if $SHOULD_COPY_FILES; then
         2>/dev/null || true
     # In-place Install (git checkout as root) leaves trees root-owned. Backend +
     # agent venvs are created as $MSM_USER and need write access to their dirs.
-    for _msm_tree in backend frontend dis-sidecar searxng-sidecar msm-agent docs scripts helper-scripts; do
+    for _msm_tree in backend frontend dis-sidecar searxng-sidecar livekit-sidecar msm-agent docs scripts helper-scripts blueprints; do
         if [[ -d "$MSM_DIR/$_msm_tree" ]]; then
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$_msm_tree" 2>/dev/null || true
         fi
@@ -818,7 +823,7 @@ fi
 # Always re-own code trees before Python venv work — even when SHOULD_COPY_FILES
 # is false (e.g. git checkout as root left msm-agent root:root).
 if id "$MSM_USER" &>/dev/null; then
-    for _msm_tree in backend frontend dis-sidecar searxng-sidecar msm-agent docs scripts helper-scripts; do
+    for _msm_tree in backend frontend dis-sidecar searxng-sidecar livekit-sidecar msm-agent docs scripts helper-scripts blueprints; do
         if [[ -d "$MSM_DIR/$_msm_tree" ]]; then
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$_msm_tree" \
                 || err "chown $MSM_USER:$MSM_USER auf $MSM_DIR/$_msm_tree fehlgeschlagen"
@@ -840,7 +845,6 @@ SMTP_PASS=""
 SMTP_FROM=""
 RESEND_API_KEY=""
 USE_POSTGRES=true
-MIGRATE_LEGACY_SQLITE=false
 PG_PASSWORD=""
 MSM_AUTO_UPDATE="false"
 
@@ -854,11 +858,6 @@ if $REINSTALL_MODE && $KEEP_SETTINGS; then
     SMTP_PASS="$CURRENT_SMTP_PASS"
     SMTP_FROM="$CURRENT_SMTP_FROM"
     RESEND_API_KEY="$CURRENT_RESEND_API_KEY"
-    if ! $CURRENT_USE_POSTGRES; then
-        MIGRATE_LEGACY_SQLITE=true
-        CHANGED_DB=true
-        warn "Legacy-SQLite erkannt — der geprüfte PostgreSQL-Import wird automatisch ausgeführt."
-    fi
     MSM_AUTO_UPDATE="$CURRENT_AUTO_UPDATE"
 
 elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
@@ -940,13 +939,7 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
     # ── 3/4 PostgreSQL ──
     echo ""
     echo -e "${BOLD}Schritt 3/4: Datenbank${NC}"
-    if $CURRENT_USE_POSTGRES; then
-        ok "PostgreSQL bleibt als Panel-Datenbank aktiv."
-    else
-        MIGRATE_LEGACY_SQLITE=true
-        CHANGED_DB=true
-        warn "Legacy-SQLite erkannt — MSM migriert die Daten automatisch nach PostgreSQL."
-    fi
+    ok "PostgreSQL bleibt als Panel-Datenbank aktiv."
 
     # ── 4/4 Auto-Update ──
     echo ""
@@ -970,7 +963,7 @@ elif $REINSTALL_MODE && ! $KEEP_SETTINGS; then
     fi
 
     # Bestimme ob Full Rebuild nötig
-    if $CODE_CHANGED || $CHANGED_DB; then
+    if $CODE_CHANGED; then
         NEED_FULL_REBUILD=true
     fi
 
@@ -1063,8 +1056,8 @@ if ! command -v psql &>/dev/null; then
     apt-get install -y -qq postgresql postgresql-contrib libpq-dev python3-dev 2>&1 | tee -a "$LOG_FILE"
 fi
 
-# Nur bei frischer Installation oder Legacy-SQLite-Migration: Passwort + User/DB erstellen
-if ! $REINSTALL_MODE || $CHANGED_DB; then
+# Nur bei frischer Installation: Passwort + User/DB erstellen
+if ! $REINSTALL_MODE; then
     PG_PASSWORD=$(python3 -c "import secrets, string; a=string.ascii_letters+string.digits+'_-'; print(''.join(secrets.choice(a) for _ in range(32)))")
 
     log "Richte PostgreSQL-User und Datenbank ein..."
@@ -1142,7 +1135,7 @@ if [[ -n "$PG_HBA" ]]; then
         fi
 fi
 
-if ! $REINSTALL_MODE || $CHANGED_DB; then
+if ! $REINSTALL_MODE; then
     ok "PostgreSQL installiert (DB: msm, User: msm)"
 fi
 
@@ -1173,6 +1166,26 @@ if [[ -z "$DIS_TOKEN" ]]; then
     DIS_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
 fi
 
+# LiveKit-Sidecar: Schluessel und Geheimnis fuer die Anruf-Zugangstoken.
+# Dasselbe Paar geht in die Backend-.env und in livekit-sidecar/.env. Weichen
+# beide Seiten voneinander ab, weist der Medienserver jedes Token ab und jeder
+# Anruf scheitert beim Verbinden — deshalb nur eine Erzeugungsstelle.
+# Bei Re-Install wird das Bestehende uebernommen; ein Wechsel wuerde laufende
+# Gespraeche abreissen lassen, ohne dass irgendwo etwas gewonnen waere.
+LIVEKIT_API_KEY=""
+LIVEKIT_API_SECRET=""
+if $REINSTALL_MODE && [[ -f "$MSM_DIR/backend/.env" ]]; then
+    LIVEKIT_API_KEY=$(grep -E '^MSM_LIVEKIT_API_KEY=' "$MSM_DIR/backend/.env" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    LIVEKIT_API_SECRET=$(grep -E '^MSM_LIVEKIT_API_SECRET=' "$MSM_DIR/backend/.env" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+fi
+if [[ -z "$LIVEKIT_API_KEY" ]]; then
+    # LiveKit erwartet einen Schluessel, der mit "API" beginnt.
+    LIVEKIT_API_KEY="API$(python3 -c "import secrets; print(secrets.token_hex(6))")"
+fi
+if [[ -z "$LIVEKIT_API_SECRET" ]]; then
+    LIVEKIT_API_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+fi
+
 PANEL_URL="http://localhost"
 API_URL="http://localhost"
 if [[ -n "$DOMAIN" ]]; then
@@ -1197,7 +1210,7 @@ existing_env_value() {
 }
 
 # Datenbank-URL bestimmen
-if ! $REINSTALL_MODE || $CHANGED_DB; then
+if ! $REINSTALL_MODE; then
     # Frische PostgreSQL-URL generieren
     PG_PASSWORD_ENCODED=$(printf '%s' "$PG_PASSWORD" | python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=''))")
     DB_URL="postgresql+psycopg2://msm:${PG_PASSWORD_ENCODED}@localhost:5432/msm"
@@ -1293,6 +1306,10 @@ MSM_STEAM_API_KEY="$STEAM_API_KEY"
 MSM_GITHUB_CLONE_TOKEN="$GITHUB_CLONE_TOKEN"
 MSM_REDIS_URL="$MSM_REDIS_URL"
 
+# Anrufe (LiveKit). Dasselbe Paar steht in livekit-sidecar/.env.
+MSM_LIVEKIT_API_KEY="$LIVEKIT_API_KEY"
+MSM_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET"
+
 # Auto-Update (GitHub Releases)
 MSM_GITHUB_OWNER="einmalmaik"
 MSM_GITHUB_REPO="maunting-server-manager"
@@ -1333,6 +1350,29 @@ EOF
     fi
 fi
 
+# LiveKit-Sidecar Environment. Anders als bei SearXNG wird die Datei bei jedem
+# Lauf neu geschrieben: sie muss mit der Backend-.env uebereinstimmen, und eine
+# stehengebliebene alte Datei waere genau der Fall, in dem Anrufe scheitern,
+# ohne dass irgendwo etwas kaputt aussieht.
+if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
+    LIVEKIT_ENV_FILE="$MSM_DIR/livekit-sidecar/.env"
+    # Adresse fuer die Medienports, hier auf dem Host ermittelt statt per STUN
+    # im Container. Begruendung in livekit-sidecar/medienadresse.py.
+    LIVEKIT_NODE_IP=$(python3 "$MSM_DIR/livekit-sidecar/medienadresse.py" "$ENV_FILE" 2>/dev/null || true)
+    cat > "$LIVEKIT_ENV_FILE" <<EOF
+# Automatisch generiert. Dokumentation: $MSM_DIR/livekit-sidecar/.env.example
+LIVEKIT_KEYS="$LIVEKIT_API_KEY: $LIVEKIT_API_SECRET"
+EOF
+    if [[ -n "$LIVEKIT_NODE_IP" ]]; then
+        echo "NODE_IP=\"$LIVEKIT_NODE_IP\"" >> "$LIVEKIT_ENV_FILE"
+    else
+        warn "Anrufe: keine Adresse fuer die Medienports gefunden. Anrufe verbinden, bleiben aber stumm."
+        warn "  MSM_LIVEKIT_NODE_IP=\"<oeffentliche IPv4>\" in $ENV_FILE eintragen und update.sh erneut ausfuehren."
+    fi
+    chmod 600 "$LIVEKIT_ENV_FILE"
+    chown "$MSM_USER:$MSM_USER" "$LIVEKIT_ENV_FILE"
+fi
+
 # ═══════════════════════════════════════════════════════════════
 # 7. Python-Backend einrichten
 # ═══════════════════════════════════════════════════════════════
@@ -1341,7 +1381,7 @@ if ! $REINSTALL_MODE; then
     RUN_BACKEND_SETUP=true
 elif $KEEP_SETTINGS; then
     RUN_BACKEND_SETUP=true
-elif $REINSTALL_MODE && ! $KEEP_SETTINGS && ($CODE_CHANGED || $CHANGED_DB); then
+elif $REINSTALL_MODE && ! $KEEP_SETTINGS && $CODE_CHANGED; then
     RUN_BACKEND_SETUP=true
 fi
 
@@ -1394,29 +1434,6 @@ fi
 # ═══════════════════════════════════════════════════════════════
 # 8. Datenbank initialisieren / Phase-8-Schema (immer idempotent)
 # ═══════════════════════════════════════════════════════════════
-RUN_DB_INIT=false
-if ! $REINSTALL_MODE; then
-    RUN_DB_INIT=true
-elif $MIGRATE_LEGACY_SQLITE; then
-    RUN_DB_INIT=true
-elif $REINSTALL_MODE && ! $KEEP_SETTINGS && $CHANGED_DB; then
-    RUN_DB_INIT=true
-fi
-
-if $MIGRATE_LEGACY_SQLITE; then
-    LEGACY_SQLITE="$MSM_DIR/backend/msm.db"
-    [[ -f "$LEGACY_SQLITE" ]] || err "Legacy-SQLite-Datei fehlt: $LEGACY_SQLITE"
-    log "Migriere Legacy-SQLite einmalig nach PostgreSQL..."
-    su - "$MSM_USER" -c "
-        set -euo pipefail
-        cd $MSM_DIR/backend
-        source venv/bin/activate
-        python3 scripts/migrate_sqlite_to_postgres.py \\
-            --sqlite '$LEGACY_SQLITE'
-    " 2>&1 | tee -a "$LOG_FILE" || err "SQLite-nach-PostgreSQL-Import fehlgeschlagen"
-    ok "Legacy-SQLite vollständig importiert und verifiziert"
-fi
-
 # KEEP_SETTINGS reinstall previously skipped schema work → missing servers.node_id
 # crashed the panel on multi-node startup. Always bridge/stamp (idempotent).
 log "Bereite PostgreSQL-Schema vor (Phase 8 / Multi-Node)..."
@@ -1426,18 +1443,6 @@ su - "$MSM_USER" -c "
     source venv/bin/activate
     python3 scripts/prepare_phase8_schema.py
 " 2>&1 | tee -a "$LOG_FILE" || err "PostgreSQL-Schema konnte nicht vorbereitet werden"
-
-if $MIGRATE_LEGACY_SQLITE; then
-    su - "$MSM_USER" -c "
-        set -euo pipefail
-        cd $MSM_DIR/backend
-        source venv/bin/activate
-        python3 scripts/migrate_sqlite_to_postgres.py \\
-            --sqlite '$LEGACY_SQLITE' \\
-            --archive-source
-    " 2>&1 | tee -a "$LOG_FILE" || err "SQLite-Archivierung nach erfolgreicher Migration fehlgeschlagen"
-    ok "Legacy-SQLite als Migrationsarchiv gesichert"
-fi
 ok "Datenbank/Schema bereit"
 
 # ═══════════════════════════════════════════════════════════════
@@ -1580,9 +1585,11 @@ $DOMAIN {
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
-        # microphone=(self): der Realtime-Sprachmodus braucht getUserMedia auf
-        # der eigenen Herkunft; microphone=() blockierte ihn vollstaendig.
-        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        # =(self) statt =(): der Sprachmodus braucht getUserMedia, Anrufe im
+        # Messenger zusaetzlich Kamera und getDisplayMedia — jeweils auf der
+        # eigenen Herkunft. Mit =() fragt der Browser nicht einmal nach.
+        Permissions-Policy "accelerometer=(), camera=(self), display-capture=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/ https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; style-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com https://singrabot.mauntingstudios.de; img-src 'self' data: blob: https:; media-src 'self' blob: data: mediastream:; worker-src 'self' blob:; connect-src 'self' https: http: ws: wss: blob: data:; font-src 'self' data: https://singrabot.mauntingstudios.de; frame-src 'self' https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/ https://singrabot.mauntingstudios.de; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
     }
 
     handle /api/* {
@@ -1591,6 +1598,13 @@ $DOMAIN {
 
     handle /ws/* {
         reverse_proxy localhost:8000
+    }
+
+    # LiveKit-Sidecar: Signalisierung fuer Anrufe im Messenger. handle_path
+    # schneidet das Praefix ab, damit /livekit/rtc dort als /rtc ankommt. Der
+    # Sidecar hoert nur auf 127.0.0.1; dies ist sein einziger Weg nach aussen.
+    handle_path /livekit/* {
+        reverse_proxy localhost:7880
     }
 
     handle {
@@ -1611,9 +1625,11 @@ $DOMAIN {
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
-        # microphone=(self): der Realtime-Sprachmodus braucht getUserMedia auf
-        # der eigenen Herkunft; microphone=() blockierte ihn vollstaendig.
-        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        # =(self) statt =(): der Sprachmodus braucht getUserMedia, Anrufe im
+        # Messenger zusaetzlich Kamera und getDisplayMedia — jeweils auf der
+        # eigenen Herkunft. Mit =() fragt der Browser nicht einmal nach.
+        Permissions-Policy "accelerometer=(), camera=(self), display-capture=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/ https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; style-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com https://singrabot.mauntingstudios.de; img-src 'self' data: blob: https:; media-src 'self' blob: data: mediastream:; worker-src 'self' blob:; connect-src 'self' https: http: ws: wss: blob: data:; font-src 'self' data: https://singrabot.mauntingstudios.de; frame-src 'self' https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/ https://singrabot.mauntingstudios.de; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
     }
 
     handle /api/* {
@@ -1624,7 +1640,37 @@ $DOMAIN {
         reverse_proxy localhost:8000
     }
 
+    # LiveKit-Sidecar: Signalisierung fuer Anrufe im Messenger. handle_path
+    # schneidet das Praefix ab, damit /livekit/rtc dort als /rtc ankommt. Der
+    # Sidecar hoert nur auf 127.0.0.1; dies ist sein einziger Weg nach aussen.
+    handle_path /livekit/* {
+        reverse_proxy localhost:7880
+    }
+
+    # Die gehashten Assets tragen ihren Inhalt im Namen: ein Jahr, ohne
+    # Nachfrage. Nur was es gibt; ein fehlender Chunk bleibt ein 404 und wird
+    # nie zur index.html, sonst stoppt der laufende Client mit
+    # "MIME type text/html".
+    handle /assets/* {
+        @vorhanden file
+        header @vorhanden Cache-Control "public, max-age=31536000, immutable"
+        file_server
+    }
+
+    # Die Seite selbst (/, jede .html und jede Unterseite, die try_files auf
+    # die index.html lenkt) fragt immer nach. Eine alte index.html zeigte nach
+    # einem Update auf Chunks, die es nicht mehr gibt, und die Oberflaeche
+    # bliebe leer. Icons, Manifest und die Erdtextur duerfen einen Tag bleiben.
     handle {
+        @seite not file
+        @html path / *.html
+        @datei {
+            file
+            not path / *.html
+        }
+        header @seite Cache-Control "no-cache, no-store, must-revalidate"
+        header @html Cache-Control "no-cache, no-store, must-revalidate"
+        header @datei Cache-Control "public, max-age=86400"
         try_files {path} /index.html
         file_server
     }
@@ -1645,6 +1691,8 @@ EOF
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "accelerometer=(), camera=(self), display-capture=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/ https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; style-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com https://singrabot.mauntingstudios.de; img-src 'self' data: blob: https:; media-src 'self' blob: data: mediastream:; worker-src 'self' blob:; connect-src 'self' https: http: ws: wss: blob: data:; font-src 'self' data: https://singrabot.mauntingstudios.de; frame-src 'self' https://challenges.cloudflare.com https://hcaptcha.com https://*.hcaptcha.com https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/ https://singrabot.mauntingstudios.de; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
     }
 
     handle /api/* {
@@ -1655,7 +1703,37 @@ EOF
         reverse_proxy localhost:8000
     }
 
+    # LiveKit-Sidecar: Signalisierung fuer Anrufe im Messenger. handle_path
+    # schneidet das Praefix ab, damit /livekit/rtc dort als /rtc ankommt. Der
+    # Sidecar hoert nur auf 127.0.0.1; dies ist sein einziger Weg nach aussen.
+    handle_path /livekit/* {
+        reverse_proxy localhost:7880
+    }
+
+    # Die gehashten Assets tragen ihren Inhalt im Namen: ein Jahr, ohne
+    # Nachfrage. Nur was es gibt; ein fehlender Chunk bleibt ein 404 und wird
+    # nie zur index.html, sonst stoppt der laufende Client mit
+    # "MIME type text/html".
+    handle /assets/* {
+        @vorhanden file
+        header @vorhanden Cache-Control "public, max-age=31536000, immutable"
+        file_server
+    }
+
+    # Die Seite selbst (/, jede .html und jede Unterseite, die try_files auf
+    # die index.html lenkt) fragt immer nach. Eine alte index.html zeigte nach
+    # einem Update auf Chunks, die es nicht mehr gibt, und die Oberflaeche
+    # bliebe leer. Icons, Manifest und die Erdtextur duerfen einen Tag bleiben.
     handle {
+        @seite not file
+        @html path / *.html
+        @datei {
+            file
+            not path / *.html
+        }
+        header @seite Cache-Control "no-cache, no-store, must-revalidate"
+        header @html Cache-Control "no-cache, no-store, must-revalidate"
+        header @datei Cache-Control "public, max-age=86400"
         try_files {path} /index.html
         file_server
     }
@@ -1730,6 +1808,10 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+    # --force-recreate: scheitert der Start an einem belegten Port, laesst
+    # Docker den angelegten Container liegen. Der naechste Versuch startete ihn
+    # dann ohne jede Portfreigabe, und systemd meldete „Started“ (27.09.2026).
+    # Frisch angelegt scheitert jeder Versuch sichtbar, bis der Port frei ist.
     # ── SearXNG Search Sidecar Service ──
     if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
         cat > /etc/systemd/system/msm-searxng.service <<EOF
@@ -1745,7 +1827,34 @@ Group=$MSM_USER
 WorkingDirectory=$MSM_DIR/searxng-sidecar
 Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ExecStart=/usr/bin/docker compose up
+ExecStart=/usr/bin/docker compose up --force-recreate
+ExecStop=/usr/bin/docker compose down
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
+
+    # ── LiveKit Media Sidecar Service (Anrufe im Messenger) ──
+    if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
+        cat > /etc/systemd/system/msm-livekit.service <<EOF
+[Unit]
+Description=MSM LiveKit Media Sidecar
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=$MSM_USER
+Group=$MSM_USER
+WorkingDirectory=$MSM_DIR/livekit-sidecar
+Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/usr/bin/docker compose up --force-recreate
 ExecStop=/usr/bin/docker compose down
 Restart=on-failure
 RestartSec=5
@@ -1772,9 +1881,10 @@ WorkingDirectory=/opt/msm/backend
 # Systemd-Units erben kein PATH vom Login-Shell. venv zuerst, danach System-Pfade.
 Environment="PATH=/opt/msm/backend/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
-ExecStart=/opt/msm/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
+ExecStart=/opt/msm/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1 --timeout-graceful-shutdown 2
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=10
 StandardOutput=journal
 StandardError=journal
 
@@ -1832,6 +1942,9 @@ EOF
         systemctl enable msm-dis-sidecar.service
         if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
             systemctl enable msm-searxng.service 2>/dev/null || true
+        fi
+        if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
+            systemctl enable msm-livekit.service 2>/dev/null || true
         fi
         systemctl enable msm-panel.service
         if $INSTALL_LOCAL_AGENT && [[ -f /etc/systemd/system/msm-agent.service ]]; then
@@ -1962,12 +2075,22 @@ if command -v ufw &>/dev/null; then
     if [[ -d /sys/class/net/loopback0 ]]; then
         ufw allow in on loopback0 from 127.0.0.0/8 comment 'WSL local loopback' 2>/dev/null || true
     fi
+    # Medienports des LiveKit-Sidecars. Die Signalisierung laeuft ueber 443
+    # (Caddy), die Sprach- und Videodaten nicht: sie brauchen einen eigenen
+    # Weg. 7882/udp ist der Normalfall, 7881/tcp der Rueckfall fuer Netze, die
+    # UDP sperren. Fehlen beide Regeln, kommt ein Anruf zustande und bleibt
+    # stumm — der unangenehmste aller Fehlerzustaende, weil nichts kaputt
+    # aussieht.
+    if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
+        ufw allow 7881/tcp comment 'MSM LiveKit media (TCP fallback)' 2>/dev/null || true
+        ufw allow 7882/udp comment 'MSM LiveKit media' 2>/dev/null || true
+    fi
     # Spiel-Ports werden ab Phase 2 NICHT mehr als Range freigegeben.
     # Der Port-Manager des Panels öffnet je Server nur die konkret
     # zugewiesenen Einzelports (game/udp, query/udp, rcon/tcp) und schließt
     # sie beim Stop wieder. Siehe backend/services/firewall_service.py.
     ufw --force enable 2>/dev/null || true
-    ok "Firewall aktiviert (UFW) — Ports 22, 80, 443 offen. Spiel-Ports werden zur Laufzeit vom Panel verwaltet."
+    ok "Firewall aktiviert (UFW) — Ports 22, 80, 443 offen, 7881/tcp + 7882/udp für Anrufe. Spiel-Ports werden zur Laufzeit vom Panel verwaltet."
 else
     warn "UFW nicht verfügbar. Firewall manuell konfigurieren."
 fi
@@ -2052,6 +2175,36 @@ if $SYSTEMD_AVAILABLE; then
         ok "SearXNG Sidecar bereit."
     fi
 
+    # LiveKit Sidecar starten (Anrufe im Messenger)
+    if [[ -f /etc/systemd/system/msm-livekit.service ]]; then
+        log "Starte LiveKit Media Sidecar..."
+        systemctl restart msm-livekit.service 2>/dev/null \
+            || systemctl start msm-livekit.service 2>/dev/null || true
+        # Erst pruefen, dann „bereit“ sagen: systemctl gelingt auch, wenn der
+        # Container darin an belegten Ports scheitert. Am 27.09.2026 hielt ein
+        # fremder LiveKit 7881/7882, und nichts im Lauf sagte das.
+        _livekit_ok=false
+        for _ in $(seq 1 15); do
+            if curl -fsS --max-time 2 http://127.0.0.1:7880 >/dev/null 2>&1; then
+                _livekit_ok=true
+                break
+            fi
+            sleep 1
+        done
+        if [[ "$_livekit_ok" == true ]]; then
+            ok "LiveKit Sidecar bereit."
+        else
+            warn "LiveKit Sidecar antwortet nicht auf 127.0.0.1:7880. Anrufe im Messenger gehen so nicht."
+            _livekit_belegt=$(ss -Hlntup '( sport = :7880 or sport = :7881 or sport = :7882 )' 2>/dev/null || true)
+            if [[ -n "$_livekit_belegt" ]]; then
+                warn "  Auf seinen Ports lauscht bereits:"
+                while IFS= read -r _zeile; do warn "    $_zeile"; done <<< "$_livekit_belegt"
+                warn "  Diesen Dienst anhalten oder auf andere Ports legen, dann: systemctl restart msm-livekit"
+            fi
+            warn "  Ursache im Journal: journalctl -u msm-livekit -n 30"
+        fi
+    fi
+
     # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)
     if [[ -f "$MSM_DIR/backend/msm.db" ]] || [[ "$DB_URL" == postgresql* ]]; then
         log "Pruefe DIS-Migration (Fernet -> DIS)..."
@@ -2129,7 +2282,6 @@ if $REINSTALL_MODE; then
     else
         if $CHANGED_DOMAIN; then     echo -e "    ${YELLOW}•${NC} Domain geändert";       else echo -e "    ${CYAN}•${NC} Domain unverändert"; fi
         if $CHANGED_EMAIL; then       echo -e "    ${YELLOW}•${NC} Email geändert";         else echo -e "    ${CYAN}•${NC} Email unverändert"; fi
-        if $CHANGED_DB; then         echo -e "    ${YELLOW}•${NC} Datenbank geändert";     else echo -e "    ${CYAN}•${NC} Datenbank unverändert"; fi
         if $CHANGED_REDIS; then      echo -e "    ${YELLOW}•${NC} Redis geändert";          else echo -e "    ${CYAN}•${NC} Redis unverändert"; fi
         if $CHANGED_AUTO_UPDATE; then echo -e "    ${YELLOW}•${NC} Auto-Update geändert";   else echo -e "    ${CYAN}•${NC} Auto-Update unverändert"; fi
         if $CODE_CHANGED; then       echo -e "    ${GREEN}•${NC} Quellcode aktualisiert";  else echo -e "    ${CYAN}•${NC} Quellcode unverändert"; fi

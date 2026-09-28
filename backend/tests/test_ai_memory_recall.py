@@ -11,7 +11,6 @@ Relevanz auswaehlen, und Herkunft respektieren.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-import json
 
 import pytest
 from fastapi import HTTPException
@@ -558,7 +557,7 @@ def test_remember_stores_a_preference_with_its_origin(
     )
 
     assert result["remembered"] is True
-    row = db.query(AiMemoryEntry).filter(AiMemoryEntry.key == "ram.bevorzugt").one()
+    (row,) = [r for r in db.query(AiMemoryEntry).all() if r.key == "ram.bevorzugt"]
     assert row.origin == "ai"
     assert row.scope == "user"
 
@@ -789,46 +788,6 @@ def _achsen_encode(texts: list[str]) -> list[list[float]]:
         vektor[achse] = 1.0
         vektoren.append(vektor)
     return vektoren
-
-
-def test_die_vorauswahl_liest_auch_bestandszeilen_im_alten_format(
-    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Während des Formatwechsels muss das Gedächtnis weiter finden.
-
-    Seit dem 19.08.2026 liegen die Vektoren als float32-Bytes statt als JSON —
-    das Lesen kostete bei 5.000 Einträgen 381 ms von 717 ms Gesamtrechenzeit.
-    Zwischen dem Einspielen des Codes und dem Durchlauf der Migration
-    `20260819_01` steht der Bestand aber noch im alten Format, und in dieser
-    Zeit darf die Vorauswahl nicht auf Aktualität zurückfallen: sie
-    entscheidet, was überhaupt entschlüsselt wird, und was sie wegwirft,
-    holt keine spätere Stufe zurück.
-
-    Die Frage ist englisch und teilt mit beiden Einträgen kein Wort — es gibt
-    also nichts außer dem Vektor, was sie mit dem richtigen verbindet. Der
-    falsche ist zusätzlich der frischere und gewänne jede Rangfolge, die die
-    Bedeutung nicht lesen kann.
-    """
-    _allow_memory(db, regular_user)
-    monkeypatch.setattr(ai_embedding_service, "encode", _achsen_encode)
-    gesucht = _write(db, regular_user, "wartungsfenster", "Sonntags ab drei Uhr")
-    frisch = _write(db, regular_user, "lieblingsfarbe", "Blau, seit jeher")
-    gesucht.last_used_at = datetime.now(timezone.utc) - timedelta(days=30)
-    frisch.last_used_at = datetime.now(timezone.utc)
-    # Der Stand vor der Migration: Vektor als Text, Byte-Spalte noch leer.
-    for row in (gesucht, frisch):
-        row.embedding_json = json.dumps(list(_achsen_encode([row.key])[0]))
-        row.embedding_bytes = None
-    db.commit()
-    # Genau eine Zeile überlebt die Vorauswahl. Welche, ist die ganze Frage.
-    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 1)
-
-    block = ai_memory_service.provider_memory_context(
-        db, regular_user, query="When is the next maintenance?"
-    )
-
-    assert "Sonntags ab drei Uhr" in block
-    assert "Blau" not in block
 
 
 def test_wer_gekuerzt_bekommt_erfaehrt_es_auch(

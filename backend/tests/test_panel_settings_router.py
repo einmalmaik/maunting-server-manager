@@ -377,3 +377,49 @@ class TestGitHubTokenEndpoints:
         # Token darf im Response nirgends auftauchen
         assert "ghp_panel_present" not in str(body)
         clear_panel_token()
+
+
+class TestBooleanToggleRoundTrip:
+    """Jeder Boolean-Schalter muss sich auch wieder ausschalten lassen.
+
+    Hintergrund: Ohne Normalisierung landet ``False`` als ``str(False) == "False"`` in der
+    Datenbank, waehrend beim Lesen gegen ``"false"`` verglichen wird -- der Schalter liess sich
+    einschalten, aber nie wieder aus. Repariert wurde das pro Schluessel mit je einer eigenen
+    Zeile, und genau darin liegt die naechste Falle: Ein neuer Schalter ohne diese Zeile hat
+    denselben Fehler und faellt niemandem auf.
+
+    Die Liste steht deshalb hier und nicht im Router -- sie prueft das Ergebnis, nicht die
+    Umsetzung, und deckt einen vergessenen Eintrag sofort auf.
+    """
+
+    TOGGLES = [
+        "updates_automatic",
+        "calendar_enabled",
+        "notes_enabled",
+        "vault_enabled",
+        "social_enabled",
+        "desktop_app_download_enabled",
+        "story_fable_download_enabled",
+        "imprint_enabled",
+        "support_widget_enabled",
+        "captcha_enabled",
+    ]
+
+    @pytest.mark.parametrize("key", TOGGLES)
+    def test_toggle_survives_off_and_on(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str, key: str
+    ):
+        for erwartet in (True, False, True):
+            res = client.post(
+                "/api/settings",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+                json={key: erwartet},
+            )
+            assert res.status_code == 200, f"{key}: POST scheiterte"
+
+            body = client.get("/api/settings", cookies=owner_cookies).json()
+            assert body[key] is erwartet, (
+                f"{key} kam als {body[key]!r} zurueck, erwartet war {erwartet!r} -- "
+                "vermutlich fehlt die Normalisierung auf 'true'/'false'."
+            )

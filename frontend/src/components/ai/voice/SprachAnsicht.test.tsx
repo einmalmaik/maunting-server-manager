@@ -1,21 +1,25 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { AiRegionalAnalysis, AiVoiceConfig } from '@/api/ai'
+import { aiApi, type AiActionProposal, type AiRegionalAnalysis, type AiVoiceConfig } from '@/api/ai'
 import i18n from '@/i18n'
 import { SprachAnsicht } from './SprachAnsicht'
-import type { Beleg, Sprachzeile, Sprachzustand, Vorschlag } from './useSprachsitzung'
+import type { Beleg, Sprachzeile, Sprachzustand } from './useSprachsitzung'
 
 const starten = vi.fn()
 const beenden = vi.fn()
 
 let sitzung: {
   zustand: Sprachzustand
+  abgelaufen?: boolean
   zeilen: Sprachzeile[]
   werkzeug: string | null
+  werkzeugLaeuft?: boolean
+  werkzeugStarts?: number
   fehler: string | null
+  fehlerCode?: string | null
   belege: Beleg[]
-  vorschlag: Vorschlag | null
+  kartenImpuls: number
   geoData: AiRegionalAnalysis | null
   regionalFocus: { tab: 'overview' | 'satellite' | 'news' | 'social' | 'traffic' | 'weather'; source?: string } | null
   setGeoData: ReturnType<typeof vi.fn>
@@ -25,10 +29,19 @@ vi.mock('./useSprachsitzung', () => ({
   useSprachsitzung: () => ({ ...sitzung, pegel: () => 0, starten, beenden }),
 }))
 
-// Die Kugel zeichnet auf ein Canvas, und jsdom hat keinen 2D-Kontext. Sie
-// bringt sich selbst nicht um (der Kontext wird geprueft), aber hier geht es um
-// die Bedienung — nicht um Farbverlaeufe.
-vi.mock('./Sprachblase', () => ({ Sprachblase: () => null }))
+// Der Schwarm zeichnet in WebGL, und jsdom hat keinen Kontext. Hier geht es
+// um die Bedienung — gezeichnet wird er in `designDnaSwarm.test.ts`. Die
+// Attrappe hält nur fest, was die Ansicht ihm sagt: Form, Ort und Impulse.
+const schwarm = vi.hoisted(() => ({
+  zuletzt: null as null | { zustand: string; ort: unknown; impulse: number },
+}))
+vi.mock('./Schwarm', async (original) => ({
+  ...(await original<typeof import('./Schwarm')>()),
+  Schwarm: (props: { zustand: string; ort?: unknown; impulse?: number }) => {
+    schwarm.zuletzt = { zustand: props.zustand, ort: props.ort ?? null, impulse: props.impulse ?? 0 }
+    return null
+  },
+}))
 
 const KONFIGURATION: AiVoiceConfig = {
   available: true,
@@ -48,11 +61,15 @@ function ansicht(
 ) {
   sitzung = {
     zustand: 'bereit',
+    abgelaufen: false,
     zeilen: [],
     werkzeug: null,
+    werkzeugLaeuft: false,
+    werkzeugStarts: 0,
     fehler: null,
+    fehlerCode: null,
     belege: [],
-    vorschlag: null,
+    kartenImpuls: 0,
     geoData: null,
     regionalFocus: null,
     setGeoData: vi.fn(),
@@ -72,6 +89,12 @@ describe('SprachAnsicht', () => {
   beforeEach(() => {
     starten.mockClear()
     beenden.mockClear()
+    schwarm.zuletzt = null
+    vi.spyOn(aiApi, 'listOpenActions').mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('hat fuer jeden Zustand Ueberschrift und Erklaerung', () => {
@@ -134,11 +157,46 @@ describe('SprachAnsicht', () => {
     expect(screen.queryByText(i18n.t('ai.voice.zustand.aus'))).not.toBeInTheDocument()
   })
 
-  it('zeigt nur den Werkzeugnamen', () => {
-    ansicht({ zustand: 'denkt', werkzeug: 'read_server_status' })
+  it('sagt, was das laufende Werkzeug tut, und formt dabei das Logo', () => {
+    ansicht({ zustand: 'denkt', werkzeug: 'read_server_status', werkzeugLaeuft: true, werkzeugStarts: 1 })
 
-    // Argumente tragen Serverkennungen und Pfade.
-    expect(screen.getByText('read_server_status')).toBeInTheDocument()
+    // Ein Satz aus dem Katalog statt der Kennung — und nie die Argumente:
+    // die tragen Serverkennungen und Pfade.
+    expect(screen.getByText(i18n.t('ai.toolsRunning.read_server_status'))).toBeInTheDocument()
+    expect(screen.queryByText('read_server_status')).not.toBeInTheDocument()
+    expect(schwarm.zuletzt).toMatchObject({ zustand: 'working', impulse: 1 })
+  })
+
+  it('nennt ein Werkzeug ohne eigenen Satz nicht bei seiner Kennung', () => {
+    ansicht({ zustand: 'denkt', werkzeug: 'neues_werkzeug_ohne_satz', werkzeugLaeuft: true })
+
+    expect(screen.getByText(i18n.t('ai.voice.werkzeug'))).toBeInTheDocument()
+    expect(screen.queryByText('neues_werkzeug_ohne_satz')).not.toBeInTheDocument()
+  })
+
+  it('zeigt ein Werkzeug vom letzten Zug nicht mehr an', () => {
+    // `werkzeug` behaelt seinen Namen, solange eine Regionalanalyse offen ist.
+    // Ohne `werkzeugLaeuft` stuende er in jedem spaeteren Zug noch da.
+    ansicht({ zustand: 'denkt', werkzeug: 'read_server_status', werkzeugLaeuft: false })
+
+    expect(screen.queryByText(i18n.t('ai.toolsRunning.read_server_status'))).not.toBeInTheDocument()
+    expect(schwarm.zuletzt?.zustand).toBe('thinking')
+  })
+
+  it('sagt, dass die Sitzung abgelaufen ist, und legt den Schwarm flach', () => {
+    ansicht({ zustand: 'verbindet', abgelaufen: true })
+
+    expect(screen.getByText(i18n.t('ai.voice.zustand.abgelaufen'))).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('ai.voice.hint.abgelaufen'))).toBeInTheDocument()
+    expect(schwarm.zuletzt?.zustand).toBe('expired')
+  })
+
+  it('erklaert eine Zeitueberschreitung des Werkzeugs in der Sprache des Panels', () => {
+    ansicht({ zustand: 'bereit', fehler: 'ai.voice.errors.provider', fehlerCode: 'REALTIME_TOOL_TIMEOUT' })
+
+    // Stand hier einmal fest auf Deutsch — auch im englischen Panel.
+    expect(screen.getByText(i18n.t('ai.voice.hint.werkzeugZeit'))).toBeInTheDocument()
+    expect(schwarm.zuletzt?.zustand).toBe('fault')
   })
 
   it('haelt den Zustand vorlesbar', () => {
@@ -179,36 +237,110 @@ describe('SprachAnsicht', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
   })
 
-  it('nennt die anstehende Aktion beim Namen — und gibt ihr keinen Knopf', () => {
-    ansicht({
-      zustand: 'spricht',
-      vorschlag: {
-        werkzeug: 'propose_server_delete',
-        wirkung: 'Der Server „Kreativ" und alle seine Dateien werden entfernt.',
-      },
-    })
+  // Seit dem 25.09.2026 bestätigt jede Karte nur der Klick, auch im
+  // Sprachmodus, und die Ansicht zeigt jede offene Karte — auch die eines
+  // Workers, die die Sprachsitzung selbst nie sieht. Vorher musste man für
+  // sie den Sprachmodus verlassen und im Worker-Fenster klicken.
+  function karte(teil: Partial<AiActionProposal> = {}): AiActionProposal {
+    return {
+      id: '0b7e7a52-2f6e-4a39-9d4e-3c2d1f0a9b11',
+      conversation_id: 'worker-fenster',
+      server_id: 3,
+      tool_name: 'propose_backup',
+      proposal_type: 'write',
+      preview: {},
+      expected_revision: null,
+      requires_confirmation: true,
+      autonomous: false,
+      reason: 'Der Worker braucht ein Backup vor dem Update.',
+      expected_effect: 'Vom Server „Kreativ" entsteht ein Backup.',
+      status: 'proposed',
+      task_id: null,
+      error_code: null,
+      run_id: 'lauf-1',
+      created_at: '2026-09-25T10:00:00Z',
+      ...teil,
+    }
+  }
 
-    expect(screen.getByText(i18n.t('ai.voice.vorschlag.heading'))).toBeInTheDocument()
-    // Derselbe Werkzeugname wie auf der Karte im Chat, aus derselben Quelle.
-    expect(
-      screen.getByText(i18n.t('ai.actions.tools.propose_server_delete')),
-    ).toBeInTheDocument()
-    expect(screen.getByText(/Der Server „Kreativ"/)).toBeInTheDocument()
-
-    // Der Kern der Zusage. Im Sprachmodus entscheidet die Stimme; ein Knopf
-    // waere ein zweiter Weg zum selben Ziel — und damit ein Zustand, den Bruecke
-    // und Ansicht auseinanderhalten muessten (geklickt, waehrend gesprochen
-    // wurde?). Die Knoepfe, die die Ansicht sonst hat, sind Mikrofon, Zahnrad
-    // und „Gespraech beenden"; im Vorschlagskasten selbst ist keiner.
-    const kasten = screen.getByText(i18n.t('ai.voice.vorschlag.heading')).closest('section')
-    expect(kasten).not.toBeNull()
-    expect(kasten?.querySelector('button')).toBeNull()
-    expect(screen.getByText(i18n.t('ai.voice.vorschlag.hint'))).toBeInTheDocument()
-  })
-
-  it('zeigt keinen Vorschlagskasten, solange keiner ansteht', () => {
+  it('zeigt die wartende Karte eines Workers mit Knöpfen', async () => {
+    vi.mocked(aiApi.listOpenActions).mockResolvedValue([karte()])
     ansicht({ zustand: 'spricht' })
 
+    expect(await screen.findByText(i18n.t('ai.actions.tools.propose_backup'))).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('ai.voice.vorschlag.heading'))).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('ai.voice.vorschlag.hint'))).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: i18n.t('ai.actions.execute') })).toBeEnabled()
+    expect(screen.getByRole('button', { name: i18n.t('ai.actions.reject') })).toBeEnabled()
+  })
+
+  it('führt über den Weg der Chatkarte aus und nimmt die Karte weg', async () => {
+    const kennung = karte().id
+    vi.mocked(aiApi.listOpenActions).mockResolvedValue([karte()])
+    const bestaetigt = vi.spyOn(aiApi, 'confirmAction').mockResolvedValue({
+      proposal_id: kennung, confirmation_token: 'einmal', expires_at: '',
+    })
+    const ausgefuehrt = vi.spyOn(aiApi, 'executeAction').mockResolvedValue({
+      proposal: karte({ status: 'succeeded' }), result: {},
+    })
+    const { rerender, aufChat } = ansicht({ zustand: 'spricht' })
+
+    fireEvent.click(await screen.findByRole('button', { name: i18n.t('ai.actions.execute') }))
+
+    await waitFor(() =>
+      expect(screen.queryByText(i18n.t('ai.actions.tools.propose_backup'))).not.toBeInTheDocument(),
+    )
+    expect(bestaetigt).toHaveBeenCalledWith(kennung)
+    expect(ausgefuehrt).toHaveBeenCalledWith(kennung, 'einmal')
+
+    // Eine Abfrage, die vor dem Klick losging, meldet die Karte noch als
+    // offen. Sie darf nicht mit einem Knopf zurückkommen, der nur noch einen
+    // Fehler auslöst.
+    sitzung.kartenImpuls = 1
+    await act(async () => {
+      rerender(<SprachAnsicht konfiguration={KONFIGURATION} aufChat={aufChat} />)
+    })
+    expect(screen.queryByText(i18n.t('ai.actions.tools.propose_backup'))).not.toBeInTheDocument()
+  })
+
+  it('lehnt über den Knopf ab', async () => {
+    const kennung = karte().id
+    vi.mocked(aiApi.listOpenActions).mockResolvedValue([karte()])
+    const abgelehnt = vi.spyOn(aiApi, 'rejectAction').mockResolvedValue(
+      karte({ status: 'expired', error_code: 'AI_ACTION_REJECTED' }),
+    )
+    const bestaetigt = vi.spyOn(aiApi, 'confirmAction')
+    ansicht({ zustand: 'spricht' })
+
+    fireEvent.click(await screen.findByRole('button', { name: i18n.t('ai.actions.reject') }))
+
+    await waitFor(() =>
+      expect(screen.queryByText(i18n.t('ai.actions.tools.propose_backup'))).not.toBeInTheDocument(),
+    )
+    expect(abgelehnt).toHaveBeenCalledWith(kennung)
+    expect(bestaetigt).not.toHaveBeenCalled()
+  })
+
+  it('lädt sofort neu, wenn die Sitzung eine Karte meldet', async () => {
+    const { rerender, aufChat } = ansicht({ zustand: 'spricht' })
+    await waitFor(() => expect(aiApi.listOpenActions).toHaveBeenCalledTimes(1))
+
+    vi.mocked(aiApi.listOpenActions).mockResolvedValue([karte({ tool_name: 'propose_file_delete' })])
+    sitzung.kartenImpuls = 1
+    rerender(<SprachAnsicht konfiguration={KONFIGURATION} aufChat={aufChat} />)
+
+    expect(await screen.findByText(i18n.t('ai.actions.tools.propose_file_delete'))).toBeInTheDocument()
+    expect(aiApi.listOpenActions).toHaveBeenCalledTimes(2)
+  })
+
+  it('zeigt keinen Kasten, solange keine Karte wartet', async () => {
+    vi.mocked(aiApi.listOpenActions).mockResolvedValue([
+      karte({ status: 'succeeded' }),
+      karte({ id: '5d0e6c1a-8f3b-4c2d-9e7a-1b2c3d4e5f60', autonomous: true }),
+    ])
+    ansicht({ zustand: 'spricht' })
+
+    await waitFor(() => expect(aiApi.listOpenActions).toHaveBeenCalled())
     expect(screen.queryByText(i18n.t('ai.voice.vorschlag.heading'))).not.toBeInTheDocument()
   })
 
@@ -268,6 +400,27 @@ describe('SprachAnsicht', () => {
 
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(aufChat).toHaveBeenCalledOnce()
+  })
+
+  it('laesst den Schwarm im Kommandozentrum zur Erde werden, gedreht zum Ort', () => {
+    ansicht({
+      zustand: 'spricht',
+      werkzeug: 'analyze_region',
+      geoData: {
+        status: 'success',
+        location: 'Berlin',
+        country: 'Deutschland',
+        coordinates: { latitude: 52.52, longitude: 13.405, bbox: [13.08, 52.33, 13.76, 52.67] },
+      },
+    })
+
+    expect(schwarm.zuletzt?.ort).toMatchObject({ latitude: 52.52, longitude: 13.405 })
+  })
+
+  it('zeigt ohne Regionalanalyse keine Erde', () => {
+    ansicht({ zustand: 'spricht' })
+
+    expect(schwarm.zuletzt?.ort).toBeNull()
   })
 
   it('oeffnet 3-Spalten-Kommandozentren-Modus sofort bei analyze_region', () => {

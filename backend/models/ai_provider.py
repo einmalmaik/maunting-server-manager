@@ -43,7 +43,6 @@ class AiProvider(Base):
             "uq_ai_providers_realtime_default",
             "realtime_default",
             unique=True,
-            sqlite_where=text("realtime_default = 1"),
             postgresql_where=text("realtime_default"),
         ),
     )
@@ -113,6 +112,13 @@ class AiProvider(Base):
     realtime_text_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     realtime_audio_input_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     realtime_audio_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Nur für GPT-Live (`services.ai_voice.sprachwege.OPENAI_LIVE`): das Modell,
+    # das hinter der Stimme nachdenkt und die Werkzeuge ruft — leer heisst „das
+    # Standardmodell" —, und der Preis je Minute Sitzung in Micro-USD. Die
+    # beiden Textpreise darüber gelten dort für dieses Backend-Modell;
+    # Audio-Token rechnet GPT-Live nicht ab.
+    realtime_backend_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    realtime_minute_price_micro_usd: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     standard_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"), nullable=False)
     worker_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
     ethics_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
@@ -211,6 +217,9 @@ class AiProvider(Base):
     worker_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     ethics_input_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     ethics_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    disable_safety: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

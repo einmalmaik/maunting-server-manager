@@ -138,3 +138,51 @@ class TestAuthCookiesShareDomainWithStateCookie:
         ]
         joined = b" ".join(set_cookie_headers).decode()
         assert "Domain=.foo.bar" in joined
+
+    def test_ip_addresses_remain_host_only(self, monkeypatch):
+        """IPv4 und IPv6 Adressen duerfen NIE ein Domain-Attribut erhalten.
+        
+        RFC 6265 Section 5.1.3 & 5.2.3: Domain-Attribute auf IP-Adressen sind ungueltig
+        und fuehren im Browser zur kompletten Verwerfung des Cookies.
+        """
+        for ip_url in (
+            "http://192.168.1.100:8000",
+            "http://10.0.0.5:3000",
+            "https://45.88.109.123",
+            "http://[2001:db8::1]:8000",
+        ):
+            monkeypatch.setattr(config.settings, "panel_url", ip_url, raising=False)
+            monkeypatch.setattr(config.settings, "cookie_domain", "", raising=False)
+            assert config.get_effective_cookie_domain() == "", f"IP {ip_url} muss host-only sein"
+            resp = Response()
+            _set_cookie(resp, "__Secure-access_token", "tok", max_age=600)
+            set_cookie_headers = [
+                v for k, v in resp.headers.raw
+                if k.lower() == b"set-cookie" and b"__Secure-access_token" in v
+            ]
+            joined = b" ".join(set_cookie_headers).decode()
+            assert "Domain=" not in joined, f"IP {ip_url} darf kein Domain-Attribut haben: {joined!r}"
+
+    def test_single_label_host_remains_host_only(self, monkeypatch):
+        """Hostnamen ohne Punkte (z. B. http://msm-box:8000) bleiben host-only."""
+        monkeypatch.setattr(config.settings, "panel_url", "http://msm-box:8000", raising=False)
+        monkeypatch.setattr(config.settings, "cookie_domain", "", raising=False)
+        assert config.get_effective_cookie_domain() == ""
+
+    def test_explicit_ip_cookie_domain_override_remains_host_only(self, monkeypatch):
+        """Auch wenn ein Betreiber versehentlich eine IP-Adresse in MSM_COOKIE_DOMAIN eintraegt,
+        darf kein Domain-Attribut gesetzt werden."""
+        monkeypatch.setattr(config.settings, "panel_url", "http://192.168.1.100:8000", raising=False)
+        monkeypatch.setattr(config.settings, "cookie_domain", "192.168.1.100", raising=False)
+        assert config.get_effective_cookie_domain() == ""
+        monkeypatch.setattr(config.settings, "cookie_domain", ".192.168.1.100", raising=False)
+        assert config.get_effective_cookie_domain() == ""
+
+    def test_explicit_localhost_or_single_label_override_remains_host_only(self, monkeypatch):
+        """Explizite Overrides auf localhost oder Single-Label-Hostnamen duerfen
+        ebenfalls NIE ein ungueltiges Domain-Attribut erzeugen."""
+        for explicit in ("localhost", "127.0.0.1", "::1", "intranet", "none", "   "):
+            monkeypatch.setattr(config.settings, "cookie_domain", explicit, raising=False)
+            assert config.get_effective_cookie_domain() == "", f"Override {explicit!r} muss host-only ergeben"
+
+

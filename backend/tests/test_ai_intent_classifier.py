@@ -49,8 +49,8 @@ def _semantic_stub(monkeypatch):
             return [0, 0, 0, 0, 1.0, 0]
         return [0, 0, 0, 0, 0, 1.0]
 
-    def encode(texts):
-        return [one(text) for text in texts]
+    def encode(texts, *, db=None, nur_lokal=False):
+        return ai_embedding_service.Kodierung([one(text) for text in texts], ai_embedding_service.MODEL_TAG)
 
     monkeypatch.setattr(ai_embedding_service, "encode", encode)
     monkeypatch.setattr(ai_embedding_service, "similarity", lambda query, _: query)
@@ -65,6 +65,32 @@ def test_multilingual_semantic_predictions(monkeypatch):
         assert prediction is not None, text
         assert prediction.intent == expected
     assert classifier.classify("Wetter Berlin") is None
+
+
+def test_die_absichtserkennung_fragt_nie_google(monkeypatch):
+    """Auch mit erlaubtem Rückfall rechnet die Absichtserkennung nur lokal.
+
+    `classify` läuft synchron in der Ereignisschleife der Sprachsitzung, je
+    Teiltranskript. Ein Google-Aufruf dort hielte die ganze Sitzung bis zu
+    30 s an — und schickte jedes halbe Wort, das jemand sagt, an Google. Fehlt
+    das lokale Modell, gibt es eben keine Vorhersage.
+    """
+    gerufen: list[list[str]] = []
+    monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
+    monkeypatch.setattr(ai_embedding_service, "rueckfall", lambda db=None: "google")
+    monkeypatch.setattr(
+        ai_embedding_service, "_zugang",
+        lambda db, anbieter: ("schluessel", "https://google.invalid", "text-embedding-004"),
+    )
+    monkeypatch.setattr(
+        ai_embedding_service, "encode_ueber_anbieter",
+        lambda texts, **_: gerufen.append(texts) or [[1.0] + [0.0] * 255 for _ in texts],
+    )
+    classifier = StreamingIntentClassifier(min_confidence=0.5)
+
+    assert classifier.warm() is False
+    assert classifier.classify("Wie ist das Wetter in Berlin heute") is None
+    assert gerufen == []
 
 
 def test_classifier_is_fast_after_warmup(monkeypatch):
@@ -144,6 +170,60 @@ async def test_voice_prefetch_sends_completed_geo_payload_immediately() -> None:
 
     assert messages[-1]["prefetch_status"] == "fertig"
     assert messages[-1]["geo_analysis"] == result
+
+
+@pytest.mark.parametrize("autonom", [False, True])
+@pytest.mark.asyncio
+async def test_der_vorababruf_holt_nur_mit_autonomie(db, regular_user, monkeypatch, autonom):
+    """Ohne autonomen Modus holt der Vorababruf nichts, bevor jemand ja sagt.
+
+    Er führt ein Lesewerkzeug aus, bevor das Modell es gewählt hat. Ohne
+    Freigabe wäre das eine Ausführung am Ja vorbei, das der Lauf danach
+    einholt: die Websuche ginge mit den Worten des Benutzers hinaus, bevor er
+    zugestimmt hat (Vorgabe des Betreibers vom 23.09.2026).
+    """
+    from models import Role, RolePermission
+    from services import ai_autonomy_service, ai_intent_classifier
+    from services.role_service import set_user_roles
+
+    if autonom:
+        rolle = Role(name="vorab-autonom", description=None, is_system=False)
+        db.add(rolle)
+        db.flush()
+        db.add(RolePermission(role_id=rolle.id, permission_key="ai.autonomous.use"))
+        db.commit()
+        set_user_roles(db, regular_user, [rolle.id])
+        ai_autonomy_service.set_grant(
+            db, user=regular_user, server_id=None, enabled=True,
+            max_actions_per_hour=10, granted_by=regular_user.id,
+        )
+        db.commit()
+
+    vorhersage = IntentPrediction(
+        intent="web_search",
+        confidence=0.95,
+        entities={"query": "OpenSSH"},
+        arguments={"query": "OpenSSH"},
+    )
+    monkeypatch.setattr(ai_intent_classifier, "classify_streaming_intent", lambda _text: vorhersage)
+    gestartet: list[str] = []
+
+    async def prefetch(**werte):
+        gestartet.append(werte["tool_name"])
+        return None
+
+    monkeypatch.setattr(ai_intent_classifier.prefetch_cache, "prefetch", prefetch)
+    nachrichten: list[dict] = []
+
+    async def senden(nachricht: dict) -> None:
+        nachrichten.append(nachricht)
+
+    vorab = VoicePrefetch(user_id=regular_user.id, herkunft="panel", familie=None, senden=senden)
+    await vorab.verarbeite("Suche aktuelle Nachrichten zu OpenSSH")
+
+    assert gestartet == (["web_search"] if autonom else [])
+    # Erkannt wird die Absicht trotzdem; das ist eine Anzeige, kein Abruf.
+    assert nachrichten and nachrichten[0]["prefetch_status"] == "erkannt"
 
 
 @pytest.mark.asyncio

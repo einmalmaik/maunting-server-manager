@@ -1,7 +1,8 @@
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
-import { localeResources, supportedLocales } from './config/locales'
+import { localeBackend } from './config/locales'
+import { panelLanguageCodes } from './config/panelLocales'
 import { getPersistedLocale, setPersistedLocale } from './utils/localePersistence'
 
 const detector = new LanguageDetector()
@@ -15,15 +16,27 @@ detector.addDetector({
   },
 })
 
-const supportedCodes = supportedLocales.map((l) => l.code)
-
-i18n
+/**
+ * Erfüllt, sobald die Texte der angezeigten Sprache geladen sind. `main.tsx`
+ * rendert erst danach, sonst stünden für einen Moment Schlüssel statt Text da.
+ */
+export const textBereit = i18n
+  .use(localeBackend)
   .use(detector)
   .use(initReactI18next)
   .init({
-    resources: localeResources,
-    fallbackLng: 'en',
-    supportedLngs: supportedCodes,
+    // Deutsch lädt kein Englisch nach: `check:i18n` hält beide Dateien
+    // schlüsselgleich, der Rückfall träfe also nie etwas und kostete 400 kB.
+    fallbackLng: { de: [], default: ['en'] },
+    // Alles ausser DE/EN landet auf Englisch. i18next prüft eine erkannte
+    // Sprache gegen diese Liste, bevor es sie übernimmt — ein Browser, der
+    // `ar-SA` meldet, bekommt damit `fallbackLng` und nicht eine Sprache, für
+    // die es keine Texte gibt.
+    supportedLngs: panelLanguageCodes,
+    // `de-AT`, `en-GB` und Verwandte fallen auf die Basissprache. Ohne das
+    // wären sie „nicht unterstützt" und ein österreichischer Browser bekäme
+    // Englisch statt Deutsch.
+    load: 'languageOnly',
     interpolation: {
       escapeValue: false,
     },
@@ -53,11 +66,13 @@ i18n
     parseMissingKeyHandler: (key: string, fallbackValue?: string) => fallbackValue ?? key,
   })
 
+// Nur `lang`, nicht `dir`: beide Panelsprachen laufen von links nach rechts,
+// und `dir` steht fest im HTML. Vorher schaltete Arabisch hier auf `rtl` — auf
+// ein Layout mit 374 physischen Richtungsklassen (`ml-`, `pl-`, `left-`), das
+// dabei auseinanderfiel. Käme RTL zurück, wäre das Umstellen dieser Klassen auf
+// logische Eigenschaften der eigentliche Auftrag, nicht diese Zeile.
 if (typeof document !== 'undefined') {
   i18n.on('languageChanged', (lng) => {
-    const meta = supportedLocales.find((l) => l.code === lng)
-    const dir = meta?.direction || 'ltr'
-    document.documentElement.dir = dir
     document.documentElement.lang = lng
   })
 }

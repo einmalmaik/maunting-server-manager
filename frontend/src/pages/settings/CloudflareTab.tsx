@@ -5,10 +5,11 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { Dropdown } from '@/Singra/UI'
+import { Button, Dropdown } from '@/Singra/UI'
 import type { PanelSettings } from './types'
 import { EMPTY_PANEL_SETTINGS } from './types'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function CloudflareTab() {
   const { t } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
@@ -104,7 +105,7 @@ export function CloudflareTab() {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -118,7 +119,7 @@ export function CloudflareTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Globe className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">
             {t('settings.cloudflare.title', { defaultValue: 'Cloudflare DNS' })}
           </h2>
         </div>
@@ -130,7 +131,7 @@ export function CloudflareTab() {
         </p>
 
         {!settings.cloudflare_enabled && (
-          <div className="p-3 mb-4 bg-amber-500/10 border border-amber-500/30 rounded-md text-sm text-amber-600">
+          <div className="p-3 mb-4 bg-status-warning/10 border border-status-warning/30 rounded-md text-sm text-status-warning">
             {t('settings.cloudflare.disabledHint', { defaultValue: 'Cloudflare DNS ist unter Allgemein deaktiviert.' })}
           </div>
         )}
@@ -179,7 +180,7 @@ export function CloudflareTab() {
                     setClearToken(true)
                     setNewToken('')
                   }}
-                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-destructive transition-colors"
                   title={t('settings.cloudflare.deleteToken', { defaultValue: 'Token entfernen' })}
                   aria-label={t('settings.cloudflare.deleteToken', { defaultValue: 'Token entfernen' })}
                 >
@@ -249,31 +250,31 @@ export function CloudflareTab() {
           </div>
 
           <div className="flex gap-3 justify-end flex-wrap pt-2">
-            <button
+            <Button variant="secondary"
               type="button"
               onClick={handleTest}
               disabled={testing || !settings.cloudflare_api_configured}
-              className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {testing ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Send className="w-4 h-4" />
               )}
               {t('settings.testConnection', { defaultValue: 'Verbindung testen' })}
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={saving || !hasChanges || !canWrite}
-              className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {saving ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Save className="w-4 h-4" />
               )}
               {t('settings.cloudflare.save', { defaultValue: 'Einstellungen speichern' })}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

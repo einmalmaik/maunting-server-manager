@@ -34,6 +34,7 @@ import {
 } from 'lucide-react'
 import { detectLanguage, detectIndentation, fileName } from './fileHelpers'
 import type { EditorTab } from './fileWorkspaceTypes'
+import { Button } from '@/Singra/UI'
 
 interface FileEditorWorkspaceProps {
   tabs: EditorTab[]
@@ -290,7 +291,7 @@ export function FileEditorWorkspace({
                 <FileCode2 className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate">{fileName(tab.path)}</span>
                 {tab.saveState !== 'clean' && tab.saveState !== 'saving' && (
-                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.saveState === 'conflict' || tab.saveState === 'error' ? 'bg-status-error' : 'bg-status-warning'}`} />
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.saveState === 'conflict' || tab.saveState === 'error' ? 'bg-status-destructive' : 'bg-status-warning'}`} />
                 )}
               </button>
               <button
@@ -312,28 +313,28 @@ export function FileEditorWorkspace({
       {activeTab ? (
         <>
           <div className="flex min-h-10 items-center justify-between gap-3 border-b border-outline-variant px-3">
-            <p className="min-w-0 truncate font-mono text-[11px] text-on-surface-variant">{t('files.serverFiles')} / {activeTab.path}</p>
+            <p className="min-w-0 truncate font-mono text-label-sm text-on-surface-variant">{t('files.serverFiles')} / {activeTab.path}</p>
             <div className="flex shrink-0 items-center gap-2">
-              <span className={`hidden items-center gap-1.5 text-[11px] sm:inline-flex ${activeTab.saveState === 'conflict' || activeTab.saveState === 'error' ? 'text-status-error' : activeTab.saveState === 'clean' ? 'text-status-success' : 'text-status-warning'}`}>
+              <span className={`hidden items-center gap-1.5 text-label-sm sm:inline-flex ${activeTab.saveState === 'conflict' || activeTab.saveState === 'error' ? 'text-status-destructive' : activeTab.saveState === 'clean' ? 'text-status-success' : 'text-status-warning'}`}>
                 {saveIndicator}
               </span>
-              <button
+              <Button variant="ghost" size="sm"
                 type="button"
                 onClick={() => setSearchOpen((value) => !value)}
-                className="msm-btn-tertiary flex h-8 w-8 items-center justify-center rounded-md"
+                className="flex w-8 items-center justify-center"
                 aria-label={t('files.editor.searchAndReplace')}
               >
                 <Search className="h-4 w-4" />
-              </button>
+              </Button>
               {canWrite && (
-                <button
+                <Button variant="secondary" size="sm"
                   type="button"
                   onClick={() => onSave(activeTab.path)}
                   disabled={activeTab.saveState === 'saving' || activeTab.saveState === 'clean' || activeTab.saveState === 'conflict'}
-                  className="msm-btn-secondary inline-flex h-8 items-center gap-1.5 px-2.5 text-xs disabled:opacity-40"
+                  className="inline-flex items-center gap-1.5 disabled:opacity-40"
                 >
                   <Save className="h-3.5 w-3.5" /> {t('common.save')}
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -342,9 +343,9 @@ export function FileEditorWorkspace({
             <div className="flex flex-wrap items-center gap-3 border-b border-status-warning/30 bg-status-warning/8 px-3 py-2 text-xs text-status-warning">
               <AlertTriangle className="h-4 w-4 shrink-0" />
               <p className="min-w-52 flex-1">{t('files.editor.conflictNotice')}</p>
-              <button type="button" className="msm-btn-secondary inline-flex h-8 items-center gap-1.5 px-2.5 text-xs" onClick={() => onReload(activeTab.path)}>
+              <Button variant="secondary" size="sm" type="button" className="inline-flex items-center gap-1.5" onClick={() => onReload(activeTab.path)}>
                 <RotateCcw className="h-3.5 w-3.5" /> {t('files.editor.reloadServerVersion')}
-              </button>
+              </Button>
             </div>
           )}
 
@@ -366,7 +367,7 @@ export function FileEditorWorkspace({
                   placeholder={t('files.editor.findPlaceholder')}
                   className="msm-input h-8 pl-8 pr-16 text-xs"
                 />
-                <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-on-surface-variant">{matches.length ? `${activeMatch + 1}/${matches.length}` : '0'}</span>
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-label-sm text-on-surface-variant">{matches.length ? `${activeMatch + 1}/${matches.length}` : '0'}</span>
               </div>
               <div className="relative">
                 <Replace className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
@@ -379,13 +380,13 @@ export function FileEditorWorkspace({
                 />
               </div>
               <div className="flex flex-wrap items-center gap-1">
-                <button type="button" onClick={() => setCaseSensitive((value) => !value)} className={`msm-btn-tertiary h-8 min-w-8 px-2 font-mono text-xs ${caseSensitive ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={caseSensitive} title={t('files.editor.matchCase')}>Aa</button>
-                <button type="button" onClick={() => selectMatch(activeMatch - 1)} disabled={!matches.length} className="msm-btn-tertiary flex h-8 w-8 items-center justify-center disabled:opacity-40" aria-label={t('files.editor.previousMatch')}><ChevronUp className="h-3.5 w-3.5" /></button>
-                <button type="button" onClick={() => selectMatch(activeMatch + 1)} disabled={!matches.length} className="msm-btn-tertiary flex h-8 w-8 items-center justify-center disabled:opacity-40" aria-label={t('files.editor.nextMatch')}><ChevronDown className="h-3.5 w-3.5" /></button>
-                <button type="button" onClick={replaceCurrent} disabled={!canWrite || !matches.length} className="msm-btn-secondary h-8 px-2.5 text-xs disabled:opacity-40">{t('files.editor.replace')}</button>
-                <button type="button" onClick={replaceAll} disabled={!canWrite || !matches.length} className="msm-btn-secondary h-8 px-2.5 text-xs disabled:opacity-40">{t('files.editor.replaceAll')}</button>
-                <button type="button" onClick={() => selectMatch(0)} disabled={!matches.length} className="msm-btn-tertiary h-8 px-2.5 text-xs disabled:opacity-40">{t('files.editor.findAll', { anzahl: matches.length })}</button>
-                <button type="button" onClick={() => setSearchOpen(false)} className="msm-btn-tertiary flex h-8 w-8 items-center justify-center" aria-label={t('files.editor.closeSearch')}><X className="h-3.5 w-3.5" /></button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => setCaseSensitive((value) => !value)} className={`min-w-8 font-mono ${caseSensitive ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={caseSensitive} title={t('files.editor.matchCase')}>Aa</Button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => selectMatch(activeMatch - 1)} disabled={!matches.length} className="flex w-8 items-center justify-center disabled:opacity-40" aria-label={t('files.editor.previousMatch')}><ChevronUp className="h-3.5 w-3.5" /></Button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => selectMatch(activeMatch + 1)} disabled={!matches.length} className="flex w-8 items-center justify-center disabled:opacity-40" aria-label={t('files.editor.nextMatch')}><ChevronDown className="h-3.5 w-3.5" /></Button>
+                <Button variant="secondary" size="sm" type="button" onClick={replaceCurrent} disabled={!canWrite || !matches.length} className="disabled:opacity-40">{t('files.editor.replace')}</Button>
+                <Button variant="secondary" size="sm" type="button" onClick={replaceAll} disabled={!canWrite || !matches.length} className="disabled:opacity-40">{t('files.editor.replaceAll')}</Button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => selectMatch(0)} disabled={!matches.length} className="disabled:opacity-40">{t('files.editor.findAll', { anzahl: matches.length })}</Button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => setSearchOpen(false)} className="flex w-8 items-center justify-center" aria-label={t('files.editor.closeSearch')}><X className="h-3.5 w-3.5" /></Button>
               </div>
             </div>
           )}
@@ -410,7 +411,7 @@ export function FileEditorWorkspace({
               />
             )}
           </div>
-          <footer className="flex min-h-8 flex-wrap items-center gap-x-4 gap-y-1 border-t border-outline-variant bg-surface-container-low/80 px-3 py-1 font-mono text-[10px] text-on-surface-variant">
+          <footer className="flex min-h-8 flex-wrap items-center gap-x-4 gap-y-1 border-t border-outline-variant bg-surface-container-low/80 px-3 py-1 font-mono text-label-sm text-on-surface-variant">
             <span>{t('files.editor.cursorPosition', { zeile: cursor.line, spalte: cursor.column })}</span>
             <span>{t('files.editor.selection', { anzahl: cursor.selected })}</span>
             <span>{detectIndentation(activeTab.content)}</span>
@@ -418,7 +419,7 @@ export function FileEditorWorkspace({
             <span>{activeTab.lineEnding === '\r\n' ? 'CRLF' : 'LF'}</span>
             <span>{detectLanguage(activeTab.path).toUpperCase()}</span>
             <span className="sm:hidden">{horizontalScrollHint}</span>
-            <span className={`ml-auto inline-flex items-center gap-1.5 ${activeTab.saveState === 'clean' ? 'text-status-success' : activeTab.saveState === 'conflict' || activeTab.saveState === 'error' ? 'text-status-error' : 'text-status-warning'}`}>{saveIndicator}</span>
+            <span className={`ml-auto inline-flex items-center gap-1.5 ${activeTab.saveState === 'clean' ? 'text-status-success' : activeTab.saveState === 'conflict' || activeTab.saveState === 'error' ? 'text-status-destructive' : 'text-status-warning'}`}>{saveIndicator}</span>
           </footer>
         </>
       ) : (

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from database import SessionLocal, get_db
-from dependencies import get_current_user, require_global, verify_csrf
+from dependencies import get_current_user, get_optional_user, require_global, verify_csrf
 from games import list_game_info
 from models import User
 from services import network_interfaces_service
@@ -256,7 +256,7 @@ def _get_latest_release() -> dict:
 
 
 @router.get("/version")
-def system_version(user: User = Depends(get_current_user)) -> dict:
+def system_version(user: User | None = Depends(get_optional_user)) -> dict:
     """Aktuelle Version + Update-Status (GitHub Releases).
 
     Für Tauri: derselbe Endpunkt kann als Update-Quelle genutzt werden.
@@ -384,10 +384,26 @@ def incident_alerts(
     if not user.device_notifications:
         return []
 
-    from models import Incident, Server, ServerPermission
+    from models import Incident, Role, Server, ServerPermission
 
-    # Server ermitteln, auf die der User Zugriff hat
-    if user.is_owner or any(r.role.name == "admin" for r in user.user_roles if r.role):
+    # Server ermitteln, auf die der User Zugriff hat.
+    #
+    # Die Rollen kommen über `user.role_ids`, nicht über eine Beziehung am
+    # Model: dort steckt neben den Zuweisungen auch die kompatible
+    # Legacy-Primärrolle. Eine Abfrage über `role_assignments` allein übersieht
+    # jeden Admin, der seine Rolle noch über `users.role_id` trägt.
+    def ist_admin() -> bool:
+        rollen = user.role_ids
+        if not rollen:
+            return False
+        return (
+            db.query(Role.id)
+            .filter(Role.id.in_(rollen), Role.name == "admin")
+            .first()
+            is not None
+        )
+
+    if user.is_owner or ist_admin():
         server_rows = db.query(Server.id, Server.name).all()
         server_map = {s[0]: s[1] for s in server_rows}
     else:

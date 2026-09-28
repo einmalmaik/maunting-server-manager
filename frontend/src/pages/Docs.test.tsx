@@ -27,7 +27,7 @@ describe('Docs index page', () => {
 
   it('renders the English index headline', async () => {
     renderIndex()
-    expect(await screen.findByText('Help & Documentation')).toBeInTheDocument()
+    expect(await screen.findByText(i18n.t('docsIndex.title'))).toBeInTheDocument()
   })
 
   it('links to the Blueprints sub-docs', () => {

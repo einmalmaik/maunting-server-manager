@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockKonfig = {
   backend_url: 'http://localhost:8000',
@@ -36,7 +36,11 @@ vi.mock('./tauri', () => ({
   sandboxVerfuegbar: vi.fn().mockResolvedValue(true),
   wakewordLauschen: vi.fn().mockResolvedValue(undefined),
   wakewordStand: vi.fn().mockResolvedValue({ aufnahmen: 0, gesamt: 3, schwelle: 0.45, trainiert: false, mikrofon: null, erkannt: null }),
+  biometrieSpeicherVerfuegbar: vi.fn().mockResolvedValue(false),
 }))
+
+// Wake-Word und Messenger-PIN stehen jetzt in Reitern, die diese Tests öffnen.
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn().mockResolvedValue(() => {}) }))
 
 vi.mock('@tauri-apps/plugin-autostart', () => ({
   isEnabled: vi.fn().mockResolvedValue(false),
@@ -57,12 +61,31 @@ vi.mock('@/hooks/usePublicLegalSettings', () => ({
   usePublicLegalSettings: () => mockLegalSettings,
 }))
 
+import i18n from '@/i18n'
+import { usePublicSettingsStore, DEFAULT_PUBLIC_SETTINGS } from '@/stores/publicSettingsStore'
 import { Einstellungen } from './Einstellungen'
 
+/**
+ * Der sichtbare Text zu einem Schlüssel.
+ *
+ * Diese Datei suchte früher nach den Schlüsseln selbst (`profile.tabs.account`).
+ * Das ging nur, solange die Übersetzungen im Test gar nicht geladen waren —
+ * die Oberfläche zeigte dann ihre eigenen Schlüssel, und der Test hielt genau
+ * diesen Zustand fest. Seit `@/i18n` mit im Bündel liegt, steht dort ein Satz,
+ * und die Suche lief ins Leere. Über `t()` bleibt die Zusage dieselbe („dieser
+ * Reiter ist da"), ohne einen Wortlaut festzunageln.
+ */
+const txt = (schluessel: string) => i18n.t(schluessel)
+
 describe('Einstellungen Component', () => {
+  beforeAll(async () => {
+    await i18n.changeLanguage('de')
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     konfigLadenMock.mockResolvedValue({ ...mockKonfig })
+    usePublicSettingsStore.setState({ ...DEFAULT_PUBLIC_SETTINGS, isLoading: false, error: null })
   })
 
   afterEach(() => {
@@ -76,12 +99,13 @@ describe('Einstellungen Component', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText(/profile\.title/i)).toBeInTheDocument()
-    expect(screen.getByText(/mss\.einstellungen\.tab\.desktop/i)).toBeInTheDocument()
-    expect(screen.getByText(/mss\.einstellungen\.tab\.wakeword/i)).toBeInTheDocument()
-    expect(screen.getByText(/mss\.einstellungen\.tab\.audio/i)).toBeInTheDocument()
-    expect(screen.getByText(/mss\.einstellungen\.tab\.rechtliches/i)).toBeInTheDocument()
-    expect(screen.getByText(/mss\.einstellungen\.tab\.gefahr/i)).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: txt('profile.tabs.account') })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: txt('profile.tabs.social') })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.desktop') })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: txt('profile.tabs.security') })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.audio') })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.rechtliches') })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.gefahr') })).toBeInTheDocument()
   })
 
   it('wechselt zum Rechtliches-Tab und zeigt Datenschutz und Impressum', async () => {
@@ -111,15 +135,15 @@ describe('Einstellungen Component', () => {
 
     await waitFor(() => expect(konfigLadenMock).toHaveBeenCalled())
 
-    const switchBtn = await screen.findByRole('switch', { name: /mss\.einstellungen\.computerUse\.titel/i })
+    const switchBtn = await screen.findByRole('switch', { name: txt('mss.einstellungen.computerUse.titel') })
     expect(switchBtn).toHaveAttribute('aria-checked', 'false')
 
     fireEvent.click(switchBtn)
 
     // Bestätigungsdialog erscheint
-    expect(await screen.findByText(/mss\.einstellungen\.computerUse\.aktivierenTitel/i)).toBeInTheDocument()
+    expect(await screen.findByText(txt('mss.einstellungen.computerUse.aktivierenTitel'))).toBeInTheDocument()
 
-    const confirmBtn = screen.getByRole('button', { name: /mss\.einstellungen\.computerUse\.aktivierenBestaetigen/i })
+    const confirmBtn = screen.getByRole('button', { name: txt('mss.einstellungen.computerUse.aktivierenBestaetigen') })
     fireEvent.click(confirmBtn)
 
     await waitFor(() => expect(konfigSpeichernMock).toHaveBeenCalledWith(
@@ -143,16 +167,68 @@ describe('Einstellungen Component', () => {
 
     await waitFor(() => expect(konfigLadenMock).toHaveBeenCalled())
 
-    const switchBtn = await screen.findByRole('switch', { name: /mss\.einstellungen\.computerUse\.titel/i })
+    const switchBtn = await screen.findByRole('switch', { name: txt('mss.einstellungen.computerUse.titel') })
     expect(switchBtn).toBeDisabled()
     expect(switchBtn).toHaveAttribute('aria-checked', 'false')
 
-    expect(screen.getByText(/mss\.einstellungen\.computerUse\.statusNichtVerfuegbar/i)).toBeInTheDocument()
-    expect(screen.getByText(/mss\.einstellungen\.computerUse\.androidHinweis/i)).toBeInTheDocument()
+    expect(screen.getByText(txt('mss.einstellungen.computerUse.statusNichtVerfuegbar'))).toBeInTheDocument()
+    expect(screen.getByText(txt('mss.einstellungen.computerUse.androidHinweis'))).toBeInTheDocument()
 
     Object.defineProperty(navigator, 'userAgent', {
       value: originalUserAgent,
       configurable: true,
     })
+  })
+
+  it('blendet Social- und Sicherheits-Reiter aus, wenn Social und Tresor deaktiviert sind', async () => {
+    usePublicSettingsStore.setState({
+      ...DEFAULT_PUBLIC_SETTINGS,
+      social_enabled: false,
+      vault_enabled: false,
+    })
+
+    render(
+      <MemoryRouter>
+        <Einstellungen />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('tab', { name: txt('profile.tabs.account') })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: txt('profile.tabs.social') })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: txt('profile.tabs.security') })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.desktop') })).toBeInTheDocument()
+  })
+
+  it('leitet bei direktem Aufruf eines deaktivierten Reiters auf desktop um', async () => {
+    usePublicSettingsStore.setState({
+      ...DEFAULT_PUBLIC_SETTINGS,
+      social_enabled: false,
+      vault_enabled: false,
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/einstellungen?tab=social']}>
+        <Einstellungen />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(konfigLadenMock).toHaveBeenCalled())
+    expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.desktop'), selected: true })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: txt('profile.tabs.social') })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['wakeword', 'mss.einstellungen.tab.audio'],
+    ['messenger', 'profile.tabs.security'],
+    ['tresor', 'profile.tabs.security'],
+    ['profil', 'profile.tabs.account'],
+  ])('ein alter Link ?tab=%s führt zum neuen Reiter', async (alt, reiter) => {
+    render(
+      <MemoryRouter initialEntries={[`/einstellungen?tab=${alt}`]}>
+        <Einstellungen />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('tab', { name: txt(reiter), selected: true })).toBeInTheDocument()
   })
 })

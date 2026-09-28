@@ -3,6 +3,7 @@ import { KeyRound, Info, AlertTriangle, ExternalLink } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
+import { buttonClasses } from '@/Singra/UI'
 function Alert({ type = 'info', title, children }: { type?: 'info' | 'warning', title: string, children: React.ReactNode }) {
   const styles = {
     info: 'bg-primary/10 text-primary border-primary/20',
@@ -38,7 +39,7 @@ export function OAuthDocs() {
   return (
     <div className="msm-page mx-auto max-w-6xl">
       <PageHeader
-        eyebrow={t('pageContext.help', 'Help & guidance')}
+        eyebrow={t('pageContext.help')}
         title={t('docsOAuth.title')}
         description={t('docsOAuth.subtitle')}
         status={<KeyRound className="h-6 w-6 text-primary" aria-hidden="true" />}
@@ -47,7 +48,7 @@ export function OAuthDocs() {
       <div className="mb-8">
         <Link
           to="/settings"
-          className="msm-btn-secondary inline-flex items-center gap-2 px-4 py-2"
+          className={buttonClasses('secondary')}
         >
           <ExternalLink className="w-4 h-4" />
           {t('docs.manageBlueprints').replace('Blueprints', 'OAuth')}
@@ -141,6 +142,7 @@ export function OAuthDocs() {
               <li>{t('docsOAuth.security.rule6')}</li>
               <li>{t('docsOAuth.security.rule7')}</li>
               <li>{t('docsOAuth.security.rule8')}</li>
+              <li>{t('docsOAuth.security.rule9')}</li>
             </ul>
           </section>
 

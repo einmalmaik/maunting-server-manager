@@ -72,6 +72,11 @@ fn main() {
         }
         println!("cargo:rustc-link-arg=-Wl,-z,max-page-size=16384");
     }
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") && std::env::var("TAURI_CONFIG").is_err() {
+        if let Ok(content) = std::fs::read_to_string("tauri.android.conf.json") {
+            std::env::set_var("TAURI_CONFIG", content);
+        }
+    }
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         println!("cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'");
     }

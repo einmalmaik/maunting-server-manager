@@ -174,7 +174,7 @@ function baueKette(
   eingang.gain.value = aktuelleVerarbeitung().verstaerkung
 
   // Geglättet, nicht roh. Ein ungeglätteter Pegel springt bei jedem Zischlaut
-  // auf Anschlag; die Blase zappelte dann, statt zu atmen.
+  // auf Anschlag; die Figur zappelte dann, statt zu atmen.
   let geglaettet = 0
   prozessor.onaudioprocess = (ereignis) => {
     if (kontext.state === 'suspended') {

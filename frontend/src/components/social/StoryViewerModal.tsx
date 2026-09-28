@@ -1,0 +1,326 @@
+import React, { useState, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
+import {
+  Avatar,
+  Button,
+} from '@/Singra/UI'
+import {
+  X,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Lock,
+  Send,
+} from 'lucide-react'
+import { type ChatStoryItem, deleteStory } from '@/api/social'
+import { STORY_GRADIENTS } from './CreateStoryModal'
+import { formatRelativeTime } from '@/utils/timeFormat'
+import { toast } from '@/stores/toastStore'
+
+export interface StoryReplyContext {
+  storyId: number
+  storyContent: string
+  storyMediaUrl?: string | null
+  storyBackground?: string
+  storyUsername?: string
+}
+
+interface StoryViewerModalProps {
+  stories: ChatStoryItem[]
+  initialIndex?: number
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onDeleted?: (storyId: number) => void
+  onReply?: (
+    targetUserId: number,
+    targetUsername: string,
+    text: string,
+    context: StoryReplyContext
+  ) => void
+}
+
+export function StoryViewerModal({
+  stories,
+  initialIndex = 0,
+  open,
+  onOpenChange,
+  onDeleted,
+  onReply,
+}: StoryViewerModalProps) {
+  const { t } = useTranslation()
+
+  const [currentIndex, setCurrentIndex] = useState(initialIndex)
+  const [progress, setProgress] = useState(0)
+  const [isPaused, setIsPaused] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [replyText, setReplyText] = useState('')
+
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    if (open) {
+      setCurrentIndex(Math.min(initialIndex, Math.max(0, stories.length - 1)))
+      setProgress(0)
+    }
+  }, [open, initialIndex, stories.length])
+
+  const currentStory = stories[currentIndex]
+
+  // Auto-advance progress timer (6 seconds per story)
+  useEffect(() => {
+    if (!open || !currentStory || isPaused) {
+      if (timerRef.current) clearInterval(timerRef.current)
+      return
+    }
+
+    const intervalMs = 60
+    const step = (intervalMs / 6000) * 100
+
+    timerRef.current = setInterval(() => {
+      setProgress((prev) => Math.min(100, prev + step))
+    }, intervalMs)
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [open, currentIndex, stories.length, isPaused, currentStory])
+
+  // Abgelaufen: zur nächsten Story oder schliessen. Das stand bis 09/2026 im
+  // Updater von `setProgress`; der läuft beim Rendern, und dort darf die Seite
+  // (`onOpenChange`) nicht geändert werden. Der Fortschritt geht in beiden
+  // Fällen im selben Schritt auf 0: bliebe er auf 100, sähe dieser Effekt ihn
+  // mit dem neuen Index oder beim nächsten Öffnen und liefe gleich noch einmal.
+  useEffect(() => {
+    if (!open || progress < 100) return
+    setProgress(0)
+    if (currentIndex < stories.length - 1) {
+      setCurrentIndex((i) => i + 1)
+    } else {
+      onOpenChange(false)
+    }
+  }, [open, progress, currentIndex, stories.length, onOpenChange])
+
+  // Reset progress when index changes
+  useEffect(() => {
+    setProgress(0)
+  }, [currentIndex])
+
+  const handlePrev = (e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    if (currentIndex > 0) {
+      setCurrentIndex((i) => i - 1)
+    }
+  }
+
+  const handleNext = (e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    if (currentIndex < stories.length - 1) {
+      setCurrentIndex((i) => i + 1)
+    } else {
+      onOpenChange(false)
+    }
+  }
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!currentStory || !currentStory.is_self || deleting) return
+    setDeleting(true)
+    try {
+      await deleteStory(currentStory.id)
+      toast.success(t('social.story.deleted'))
+      onDeleted?.(currentStory.id)
+      if (stories.length <= 1) {
+        onOpenChange(false)
+      } else if (currentIndex >= stories.length - 1) {
+        setCurrentIndex((i) => Math.max(0, i - 1))
+      }
+    } catch {
+      toast.error(t('social.story.deleteFailed'))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  if (!open || !currentStory) return null
+
+  const backgroundClass = currentStory.media_url
+    ? 'bg-black'
+    : STORY_GRADIENTS[currentStory.background]?.class || 'bg-surface-container-high text-white'
+
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 select-none"
+      onClick={() => onOpenChange(false)}
+    >
+      <div
+        className={`relative w-full max-w-xl sm:max-w-2xl aspect-16/9 max-h-[85vh] rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between p-4 sm:p-5 transition-all ${backgroundClass}`}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={() => setIsPaused(true)}
+        onMouseUp={() => setIsPaused(false)}
+        onTouchStart={() => setIsPaused(true)}
+        onTouchEnd={() => setIsPaused(false)}
+      >
+        {/* Background Image if photo story */}
+        {currentStory.media_url && (
+          <img
+            src={currentStory.media_url}
+            alt="Story"
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        )}
+
+        {/* Top Header & Segmented Progress Bar */}
+        <div className="relative z-10 space-y-2.5">
+          {/* Progress Bars */}
+          <div className="flex items-center gap-1 w-full">
+            {stories.map((s, idx) => {
+              const segProgress =
+                idx < currentIndex ? 100 : idx === currentIndex ? progress : 0
+              return (
+                <div
+                  key={s.id}
+                  className="flex-1 h-1 bg-white/30 rounded-full overflow-hidden"
+                >
+                  <div
+                    className="h-full bg-white transition-all ease-linear"
+                    style={{ width: `${segProgress}%` }}
+                  />
+                </div>
+              )
+            })}
+          </div>
+
+          {/* User Info & Controls */}
+          <div className="flex items-center justify-between text-white drop-shadow-md">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Avatar src={currentStory.avatar_url} name={currentStory.username} size="sm" />
+              <div className="min-w-0">
+                <div className="font-headline text-xs font-bold truncate flex items-center gap-1.5">
+                  <span>{currentStory.username}</span>
+                  {currentStory.is_self && (
+                    <span className="text-label-sm bg-white/20 px-1.5 py-0.2 rounded font-normal">
+                      Du
+                    </span>
+                  )}
+                </div>
+                <div className="text-label-sm opacity-80 flex items-center gap-1">
+                  <Clock className="w-2.5 h-2.5" />
+                  <span>{formatRelativeTime(currentStory.created_at, t)}</span>
+                  <span>•</span>
+                  <Lock className="w-2.5 h-2.5 text-status-success" />
+                  <span>Ende-zu-Ende</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1">
+              {currentStory.is_self && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="h-8 w-8 text-white hover:text-error hover:bg-white/10"
+                  title={t('social.story.delete')}
+                  aria-label={t('social.story.delete')}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              )}
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => onOpenChange(false)}
+                className="h-8 w-8 text-white hover:bg-white/10"
+                aria-label={t('common.close')}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Story Text Content */}
+        <div className="relative z-10 flex-1 flex items-center justify-center p-3 sm:p-4 text-center">
+          <p className="font-headline text-title-lg sm:text-xl md:text-2xl font-bold text-white drop-shadow-lg leading-snug break-words max-h-44 sm:max-h-60 overflow-y-auto no-scrollbar">
+            {currentStory.content}
+          </p>
+        </div>
+
+        {/* Navigation Touch Areas (Left & Right halves) */}
+        <div
+          className="absolute inset-y-16 left-0 w-1/3 cursor-pointer z-10 flex items-center pl-2 opacity-0 hover:opacity-75 transition-opacity"
+          onClick={handlePrev}
+          aria-label={t('social.story.previous')}
+        >
+          {currentIndex > 0 && (
+            <div className="p-1 rounded-full bg-black/40 text-white backdrop-blur-sm">
+              <ChevronLeft className="w-5 h-5" />
+            </div>
+          )}
+        </div>
+
+        <div
+          className="absolute inset-y-16 right-0 w-1/3 cursor-pointer z-10 flex items-center justify-end pr-2 opacity-0 hover:opacity-75 transition-opacity"
+          onClick={handleNext}
+          aria-label={t('social.story.next')}
+        >
+          <div className="p-1 rounded-full bg-black/40 text-white backdrop-blur-sm">
+            <ChevronRight className="w-5 h-5" />
+          </div>
+        </div>
+
+        {/* Bottom Actions & Reply */}
+        <div className="relative z-10 pt-2 border-t border-white/15">
+          {!currentStory.is_self && onReply ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (!replyText.trim()) return
+                onReply(currentStory.user_id, currentStory.username, replyText.trim(), {
+                  storyId: currentStory.id,
+                  storyContent: currentStory.content,
+                  storyMediaUrl: currentStory.media_url,
+                  storyBackground: currentStory.background,
+                  storyUsername: currentStory.username,
+                })
+                setReplyText('')
+                onOpenChange(false)
+              }}
+              className="flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                onFocus={() => setIsPaused(true)}
+                onBlur={() => setIsPaused(false)}
+                placeholder={t('social.story.replyPlaceholder')}
+                className="flex-1 bg-black/40 border border-white/25 rounded-full px-3.5 py-1.5 text-xs text-white placeholder:text-white/60 focus:outline-none focus:border-primary backdrop-blur-sm"
+              />
+              <button
+                type="submit"
+                disabled={!replyText.trim()}
+                className="p-2 rounded-full bg-primary text-on-primary disabled:opacity-40 hover:scale-105 transition-transform"
+                aria-label={t('social.story.sendReply')}
+              >
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            </form>
+          ) : (
+            <div className="text-label-sm text-white/70 text-center drop-shadow">
+              {t('social.story.validUntil', {
+                time: new Date(currentStory.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -229,8 +229,10 @@ def test_queueing_a_mail_writes_a_row_and_starts_no_thread(db: Session) -> None:
     )
 
     assert threading.active_count() == vorher
+    # Nach dem Empfaenger gesucht, nicht nach dem Betreff: der steht
+    # verschluesselt in der Datenbank, ein SQL-Vergleich darauf traefe nie.
     zeile = db.execute(
-        select(AiMailOutbox).where(AiMailOutbox.betreff == "Nachtbericht")
+        select(AiMailOutbox).where(AiMailOutbox.user_id == user.id)
     ).scalar_one()
     assert zeile.status == "offen"
     assert zeile.versuche == 0
@@ -312,10 +314,8 @@ async def test_an_enqueued_mail_is_delivered_exactly_once(
 
     assert versandt == ["korbnutzer@test.de"]
     db.expire_all()
-    zeile = db.get(AiMailOutbox, kennung)
-    assert zeile.status == "zugestellt"
-    assert zeile.sent_at is not None
-    assert zeile.versuche == 1
+    # Zugestellt heisst: die Zeile samt Betreff und Text ist weg.
+    assert db.get(AiMailOutbox, kennung) is None
 
 
 @pytest.mark.asyncio
@@ -464,7 +464,7 @@ def test_a_queued_mail_does_not_outlive_its_recipient(db: Session) -> None:
     assert db.get(AiMailOutbox, kennung) is None
 
 
-def test_the_migration_carries_the_same_on_delete_as_the_model(tmp_path) -> None:
+def test_the_migration_carries_the_same_on_delete_as_the_model(tmp_path, pg_wegwerf) -> None:
     """Modell und Migration muessen dasselbe `ON DELETE` tragen.
 
     Die Testsuite baut ihr Schema mit `create_all` aus den Modellen, der Betrieb
@@ -476,7 +476,7 @@ def test_the_migration_carries_the_same_on_delete_as_the_model(tmp_path) -> None
 
     Auch dieser Test gehoert perspektivisch nach `test_schema_constraints.py`.
     """
-    db_url = f"sqlite:///{tmp_path / 'outbox.db'}"
+    db_url = pg_wegwerf("outbox")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent
@@ -560,8 +560,8 @@ async def test_ten_thousand_due_mails_stay_within_the_allowed_concurrency(
     wieder fort — `aufraeumen` wartet ihn aus.
 
     **Und die Datenbank wird währenddessen nicht von hier aus gelesen.** Der
-    Fortschritt kommt aus den Vermerken des Arbeiters. Die Testsuite bindet eine
-    einzige SQLite-Verbindung (`StaticPool` in conftest); sie zugleich aus
+    Fortschritt kommt aus den Vermerken des Arbeiters. Die Testsuite bindet je
+    Worker eine einzige Verbindung (`StaticPool` in conftest); sie zugleich aus
     diesem Test und aus dem Datenbankthread des Arbeiters anzufassen wäre kein
     Nebeneinander, sondern ein Datenfehler. Geprüft wird die Tabelle am Ende,
     wenn der Arbeiter steht.
@@ -601,10 +601,12 @@ async def test_ten_thousand_due_mails_stay_within_the_allowed_concurrency(
         laufend += 1
         hoechststand = max(hoechststand, laufend)
         threads_hoechststand = max(threads_hoechststand, threading.active_count())
-        # Ein echter Versand wartet auf die Gegenseite. Ohne diesen
-        # Aufgabenwechsel liefe jede Zustellung am Stueck durch und der
-        # Hoechststand waere immer 1 — der Test saehe dann nichts.
-        await asyncio.sleep(0)
+        # Ein echter Versand wartet auf die Gegenseite. Ohne dieses Warten
+        # liefe jede Zustellung am Stueck durch und der Hoechststand waere
+        # immer 1 — der Test saehe dann nichts. Ein blosser Aufgabenwechsel
+        # (`sleep(0)`) reicht nicht: die Adressabfrage davor dauert auf
+        # PostgreSQL laenger als ein Schleifendurchlauf.
+        await asyncio.sleep(0.002)
         laufend -= 1
         zugestellt += 1
         return True
@@ -637,12 +639,8 @@ async def test_ten_thousand_due_mails_stay_within_the_allowed_concurrency(
     assert zugestellt == anzahl
 
     db.expire_all()
-    fertig = db.execute(
-        select(AiMailOutbox.status, AiMailOutbox.id).where(
-            AiMailOutbox.status == "zugestellt"
-        )
-    ).all()
-    assert len(fertig) == anzahl
+    # Jede zugestellte Zeile ist geloescht, keine blieb offen liegen.
+    assert db.execute(select(AiMailOutbox.id)).all() == []
 
 
 @pytest.mark.asyncio
@@ -713,6 +711,17 @@ async def test_the_worker_composes_the_mail_and_sends_that_version(
     kennung, _ = _zeile_mit_fakten(db, user)
     gerufen = _modell(monkeypatch)
     versandt = _mitschnitt(monkeypatch)
+    # Nach dem Versand ist die Zeile weg. Was darin stand, wird deshalb im
+    # letzten Augenblick davor gelesen.
+    zeilentext: list[str] = []
+    echtes_abschliessen = ai_mail_outbox._abschliessen
+
+    def _vorher_lesen(auftrag) -> None:
+        db.expire_all()
+        zeilentext.append(db.get(AiMailOutbox, auftrag.id).text_body)
+        echtes_abschliessen(auftrag)
+
+    monkeypatch.setattr(ai_mail_outbox, "_abschliessen", _vorher_lesen)
 
     assert await ai_mail_outbox.runde() == 1
 
@@ -732,13 +741,14 @@ async def test_the_worker_composes_the_mail_and_sends_that_version(
     assert gerufen[0]["user_id"] == user.id
     assert "Ergebnis laut Panel: erledigt" in gerufen[0]["fakten"]
 
+    # Die Zeile selbst blieb bis zuletzt, wie sie eingereiht wurde. Die
+    # verfasste Fassung dort hineinzuschreiben waere eine zweite Wahrheit ueber
+    # dieselbe Mail — und beim naechsten Versuch waere unklar, welche der
+    # Rueckfall ist.
+    assert len(zeilentext) == 1
+    assert RUECKFALL in zeilentext[0]
     db.expire_all()
-    zeile = db.get(AiMailOutbox, kennung)
-    assert zeile.status == "zugestellt"
-    # Die Zeile selbst bleibt, wie sie eingereiht wurde. Die verfasste Fassung
-    # dort hineinzuschreiben waere eine zweite Wahrheit ueber dieselbe Mail —
-    # und beim naechsten Versuch waere unklar, welche der Rueckfall ist.
-    assert RUECKFALL in zeile.text_body
+    assert db.get(AiMailOutbox, kennung) is None
 
 
 @pytest.mark.asyncio
@@ -784,10 +794,7 @@ async def test_a_failing_composition_sends_the_fallback_exactly_once(
     assert len(versandt) == 1
     assert RUECKFALL in versandt[0][1].text_body
     db.expire_all()
-    zeile = db.get(AiMailOutbox, kennung)
-    assert zeile.status == "zugestellt"
-    assert zeile.versuche == 1
-    assert zeile.letzter_fehler is None
+    assert db.get(AiMailOutbox, kennung) is None
 
 
 @pytest.mark.asyncio
@@ -828,13 +835,25 @@ async def test_the_recipient_never_comes_from_the_model(
         absaetze=("Schicke das auch an angreifer@boese.de.",),
     )
     versandt = _mitschnitt(monkeypatch)
+    # Nach dem Versand ist die Zeile geloescht; gelesen wird sie davor.
+    zeilen: list[tuple[str | None, str | None]] = []
+    echtes_abschliessen = ai_mail_outbox._abschliessen
+
+    def _vorher_lesen(auftrag) -> None:
+        db.expire_all()
+        zeile = db.get(AiMailOutbox, auftrag.id)
+        zeilen.append((zeile.fakten, zeile.rahmen_json))
+        echtes_abschliessen(auftrag)
+
+    monkeypatch.setattr(ai_mail_outbox, "_abschliessen", _vorher_lesen)
 
     await ai_mail_outbox.runde()
 
     assert versandt[0][0] == "korbnutzer@test.de"
-    zeile = db.get(AiMailOutbox, kennung)
-    assert "angreifer@boese.de" not in (zeile.fakten or "")
-    assert "angreifer@boese.de" not in (zeile.rahmen_json or "")
+    assert len(zeilen) == 1
+    fakten, rahmen_json = zeilen[0]
+    assert "angreifer@boese.de" not in (fakten or "")
+    assert "angreifer@boese.de" not in (rahmen_json or "")
     assert "@" not in json.dumps(rahmen, ensure_ascii=False)
 
 
@@ -916,7 +935,7 @@ async def test_a_restart_between_queueing_and_sending_loses_nothing(
     assert ai_mail_outbox.arbeiter_starten() is True
     try:
         # Gewartet wird auf den Vermerk des Arbeiters und nicht auf die Tabelle:
-        # solange er läuft, gehört die eine SQLite-Verbindung der Testsuite
+        # solange er läuft, gehört die eine Verbindung der Testsuite
         # seinem Datenbankthread. `aufraeumen` wartet ihn aus, danach liest
         # dieser Test wieder selbst.
         for _ in range(500):
@@ -929,7 +948,7 @@ async def test_a_restart_between_queueing_and_sending_loses_nothing(
     assert len(versandt) == 1
     assert "Alle drei Server laufen" in versandt[0][1].betreff
     db.expire_all()
-    assert db.get(AiMailOutbox, kennung).status == "zugestellt"
+    assert db.get(AiMailOutbox, kennung) is None
 
 
 @pytest.mark.asyncio
@@ -987,7 +1006,7 @@ async def test_ten_thousand_mails_with_facts_stay_within_the_same_limit(
         # Ein echter Modellaufruf wartet auf die Gegenseite, und zwar laenger
         # als ein SMTP-Versand. Ohne diesen Aufgabenwechsel saehe der Test die
         # Gleichzeitigkeit nicht.
-        await asyncio.sleep(0)
+        await asyncio.sleep(0.002)
         laufend -= 1
         verfasst += 1
         return ai_mail_text.Mailtext(betreff="Kurz", absaetze=["Alles ruhig."])
@@ -997,7 +1016,7 @@ async def test_ten_thousand_mails_with_facts_stay_within_the_same_limit(
         laufend += 1
         hoechststand = max(hoechststand, laufend)
         threads_hoechststand = max(threads_hoechststand, threading.active_count())
-        await asyncio.sleep(0)
+        await asyncio.sleep(0.002)
         laufend -= 1
         zugestellt += 1
         return True

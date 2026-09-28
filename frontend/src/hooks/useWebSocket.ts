@@ -57,10 +57,20 @@ export interface UseWebSocketOptions {
   }
 
   /** Optional: Backoff- und Max-Attempts-Konfiguration. */
-  reconnect?: {
-    delaysMs?: number[]
-    maxAttempts?: number
-  }
+  reconnect?: ReconnectConfig
+}
+
+export interface ReconnectConfig {
+  delaysMs?: number[]
+  maxAttempts?: number
+  /**
+   * Jitter-Faktor (z.B. 0.15 = 15% Streuung) oder boolean (true = default 0.15, false = kein Jitter).
+   * Bei aktivem Jitter variiert der Delay im Bereich [(1 - jitter) * baseDelay, baseDelay],
+   * wodurch Thundering-Herd-Probleme vermieden werden und bestehende Tests deterministisch bleiben.
+   */
+  jitter?: boolean | number
+  /** Mindestdauer in ms, die eine Verbindung offen bleiben muss, um als stabil zu gelten. Default 2000ms. */
+  stableThresholdMs?: number
 }
 
 export interface UseWebSocketResult {
@@ -69,9 +79,32 @@ export interface UseWebSocketResult {
   send: (payload: string) => boolean
 }
 
-const DEFAULT_HEARTBEAT_INTERVAL_MS = 25_000
-const DEFAULT_RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000]
-const DEFAULT_MAX_RECONNECT_ATTEMPTS = 10
+export const DEFAULT_HEARTBEAT_INTERVAL_MS = 25_000
+export const DEFAULT_RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000]
+export const DEFAULT_MAX_RECONNECT_ATTEMPTS = 10
+export const DEFAULT_STABLE_THRESHOLD_MS = 2000
+
+/**
+ * Berechnet exponentielles Backoff mit Jitter.
+ * Verhindert Thundering-Herd Reconnect-Stürme nach Server-Restarts oder Netzwerk-Abbrüchen.
+ */
+export function calculateBackoffWithJitter(
+  attempt: number,
+  config?: ReconnectConfig
+): number {
+  const delays = config?.delaysMs ?? DEFAULT_RECONNECT_DELAYS_MS
+  const baseDelay = delays[Math.min(attempt, delays.length - 1)]
+  const jitterOption = config?.jitter ?? true
+
+  if (jitterOption === false) {
+    return baseDelay
+  }
+
+  const jitterFactor = typeof jitterOption === 'number' ? Math.max(0, Math.min(1, jitterOption)) : 0.15
+  // Streuung zwischen (1 - jitterFactor) * baseDelay und baseDelay
+  const minDelay = Math.floor(baseDelay * (1 - jitterFactor))
+  return minDelay + Math.floor(Math.random() * (baseDelay - minDelay + 1))
+}
 
 export function useWebSocket(options: UseWebSocketOptions): UseWebSocketResult {
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
@@ -79,6 +112,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketResult {
   const reconnectTimerRef = useRef<number | null>(null)
   const pingTimerRef = useRef<number | null>(null)
   const reconnectAttemptRef = useRef(0)
+  const stableTimerRef = useRef<number | null>(null)
   const cancelledRef = useRef(false)
 
   // Options ueber Refs einfangen, damit der useEffect nur einmal pro
@@ -116,12 +150,15 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketResult {
         window.clearInterval(pingTimerRef.current)
         pingTimerRef.current = null
       }
+      if (stableTimerRef.current !== null) {
+        window.clearTimeout(stableTimerRef.current)
+        stableTimerRef.current = null
+      }
     }
 
     const scheduleReconnect = () => {
       if (cancelledRef.current) return
       const cfg = reconnectRef.current
-      const delays = cfg?.delaysMs ?? DEFAULT_RECONNECT_DELAYS_MS
       const maxAttempts = cfg?.maxAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS
 
       if (reconnectAttemptRef.current >= maxAttempts) {
@@ -135,7 +172,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketResult {
         // damit der Consumer genau einen Toast zeigt, nicht einen pro Versuch.
         onErrorRef.current?.('reconnecting', { attempts: 1 })
       }
-      const delay = delays[Math.min(reconnectAttemptRef.current, delays.length - 1)]
+      const delay = calculateBackoffWithJitter(reconnectAttemptRef.current, cfg)
       reconnectAttemptRef.current += 1
       reconnectTimerRef.current = window.setTimeout(connect, delay)
     }
@@ -148,8 +185,18 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketResult {
       wsRef.current = ws
 
       ws.onopen = () => {
-        reconnectAttemptRef.current = 0
         setStatusAndNotify('live')
+        // Flapping-Schutz: Reconnect-Zähler erst nach stabiler Verbindungsdauer zurücksetzen
+        const cfg = reconnectRef.current
+        const stableMs = cfg?.stableThresholdMs ?? DEFAULT_STABLE_THRESHOLD_MS
+        if (stableTimerRef.current !== null) {
+          window.clearTimeout(stableTimerRef.current)
+        }
+        stableTimerRef.current = window.setTimeout(() => {
+          reconnectAttemptRef.current = 0
+          stableTimerRef.current = null
+        }, stableMs)
+
         const hb = heartbeatRef.current
         if (hb) {
           if (pingTimerRef.current !== null) window.clearInterval(pingTimerRef.current)
@@ -177,6 +224,10 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketResult {
       }
 
       ws.onclose = (ev) => {
+        if (stableTimerRef.current !== null) {
+          window.clearTimeout(stableTimerRef.current)
+          stableTimerRef.current = null
+        }
         if (pingTimerRef.current !== null) {
           window.clearInterval(pingTimerRef.current)
           pingTimerRef.current = null

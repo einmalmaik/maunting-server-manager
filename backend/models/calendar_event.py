@@ -39,15 +39,35 @@ class CalendarEvent(Base):
         String(64), default=_gen_uid, nullable=False, unique=True, index=True
     )
 
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    location: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
     all_day: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     color: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # Die Wiederholungsregel — verschluesselt wie Titel, Beschreibung und Ort.
+    #
+    # `NOT NULL` und auf **jeder** Zeile gefuellt, auch bei Einzelterminen
+    # (dort steht der verschluesselte Satz "keine Wiederholung"). Eine
+    # `nullable`-Spalte haette durch blosses "gefuellt vs. leer" verraten,
+    # welche Termine Serien sind — ohne dass jemand etwas entschluesseln muss.
+    # Genau das war der Betreiberentscheid vom 22.09.2026: wer in die Datenbank
+    # sieht, soll Serien von Einzelterminen nicht unterscheiden koennen.
+    #
+    # Der Preis steht in `CalendarService.get_events`: ohne lesbares Merkmal
+    # kann der Server eine Serie von 1995 nicht in eine Abfrage fuer 2026
+    # hineinfiltern. Ausgebreitet wird deshalb im Client (und fuer
+    # Erinnerungen serverseitig, soweit der Server die Regel lesen kann).
+    #
+    # Leerer String heisst "Altbestand, noch nicht nachgezogen" — der Lesepfad
+    # fuellt ihn nach, wie er es mit unverschluesselten Titeln auch tut. Das
+    # verraet nichts ueber Wiederholungen, nur dass die Zeile aelter ist als
+    # die Migration.
+    recurrence: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
 
     # Semantische Kategorie: personal, team, server, node
     event_type: Mapped[str] = mapped_column(

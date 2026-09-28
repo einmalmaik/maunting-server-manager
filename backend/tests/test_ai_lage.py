@@ -479,7 +479,11 @@ def test_der_autonome_modus_steht_so_im_block_wie_darf_handeln_ihn_liest(
     # obwohl `ai_proposal_service` ihn laengst ohne Klick ausfuehrt
     # (Betreibermeldung 22.08.2026: "er fragt zu oft nach").
     assert "Schreibvorschläge im Gespräch laufen damit sofort" in block
-    assert "nur Unumkehrbares" in block
+    # Seit dem 25.09.2026 fragt nicht mehr jedes Löschen. Stand hier weiter
+    # „nur Unumkehrbares (Löschen …) fragt", kündigte das Modell zum
+    # Löschen einer Notiz eine Karte an, die nie kam (Probe am selben Tag).
+    assert "auch das Löschen eigener Notizen" in block
+    assert "nur Unumkehrbares" not in block
 
 
 def test_eine_freigabe_fuer_einen_server_verspricht_keinen_sofortlauf_ueberall(

@@ -10,13 +10,18 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from services.device_pairing_service import MAX_BEZEICHNUNG
+from schemas.passkey import Zweitnachweis
+from services.device_pairing_service import MAX_BEZEICHNUNG, MAX_VERLAUF_BYTES
 
 
 class PairingCreateRequest(BaseModel):
-    """Was der Benutzer im Panel angibt: wie das Geraet heissen soll."""
+    """Was der Benutzer im Panel angibt: wie das Geraet heissen soll, und der
+    Nachweis, dass er es selbst ist (Passwort, bei 2FA der Code oder der Passkey)."""
 
     label: str = Field(default="", max_length=MAX_BEZEICHNUNG)
+    password: str = Field(default="", max_length=256)
+    otp_code: str = Field(default="", max_length=16)
+    passkey: Zweitnachweis | None = None
 
 
 class PairingCreated(BaseModel):
@@ -46,3 +51,21 @@ class PairedDevice(BaseModel):
     paired_at: datetime | None = None
     is_active: bool = True
     last_active_at: datetime | None = None
+
+
+class VerlaufAblegen(BaseModel):
+    """Der versiegelte Verlauf fuer das frisch gekoppelte Geraet.
+
+    Ein Textblock und sonst nichts. Was drinsteht, geht den Server nichts an:
+    versiegelt wurde gegen den Geraeteschluessel des neuen Geraets, und der
+    liegt nur dort. Der Deckel ist derselbe wie bei Medien — er begrenzt eine
+    Anfrage, er schuetzt keinen Inhalt.
+    """
+
+    blob: str = Field(min_length=1, max_length=MAX_VERLAUF_BYTES)
+
+
+class VerlaufAntwort(BaseModel):
+    """Was das neue Geraet abholt. ``None`` heisst: liegt (noch) nichts."""
+
+    blob: str | None = None

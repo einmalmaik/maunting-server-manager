@@ -183,9 +183,8 @@ def naechster(
     im Sekundentakt, und mehrere Arbeitsprozesse sind ausdruecklich vorgesehen
     — ein doppelt ausgelieferter Auftrag hiesse, dass der Rechner ihn zweimal
     ausfuehrt. ``skip_locked``, damit ein Nebenbuhler die naechste Zeile
-    bekommt statt in der Schlange zu warten. Unter SQLite faellt die Klausel
-    weg (der Dialekt kennt sie nicht); dort serialisiert die Datenbank ohnehin
-    jeden Schreibzugriff — deshalb ist der Fehler in den Tests nie aufgefallen.
+    bekommt statt in der Schlange zu warten. In den Tests fiel der Fehler nie
+    auf, solange sie auf SQLite liefen, das die Klausel stillschweigend wegliess.
     """
     _aufraeumen(db, user_id=user_id)
     abfrage = db.query(DesktopJob).filter(

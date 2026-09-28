@@ -348,3 +348,53 @@ def test_fremde_auftragskarten_bleiben_unsichtbar(
 
     assert antwort.status_code == 200
     assert fremde_karte.id not in [k["id"] for k in antwort.json()]
+
+
+def test_offen_liefert_nur_die_karten_auf_die_jemand_wartet(
+    client: TestClient, db: Session, regular_user: User, user_cookies: dict
+) -> None:
+    """Die Liste der Sprachansicht: dort wird seit dem 25.09.2026 geklickt.
+
+    Ohne ``offen`` stuenden dort auch die Karten eines laengst beendeten
+    Chatlaufs und jede nie angeklickte Sprachkarte — ein Vorschlag verfaellt
+    nicht von selbst — und der Mensch suchte den einen Knopf dazwischen.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from services import ai_chat_service
+
+    dauerchat = ai_chat_service.get_or_create_conversation(db, regular_user, "primary")
+    db.commit()
+    fenster, lauf = _worker_fenster(db, regular_user, status="waiting_confirmation")
+    worker_karte = _wartende_karte(db, regular_user, fenster, lauf)
+    chat_lauf = AiRun(
+        id=str(uuid4()), conversation_id=dauerchat.id, user_id=regular_user.id,
+        status="waiting_confirmation",
+    )
+    toter_lauf = AiRun(
+        id=str(uuid4()), conversation_id=dauerchat.id, user_id=regular_user.id,
+        status="completed",
+    )
+    db.add_all([chat_lauf, toter_lauf])
+    db.commit()
+    chat_karte = _wartende_karte(db, regular_user, dauerchat, chat_lauf)
+    verlauf_karte = _wartende_karte(db, regular_user, dauerchat, toter_lauf)
+    erledigt = _wartende_karte(db, regular_user, dauerchat, chat_lauf, status="succeeded")
+    stimme_frisch = _wartende_karte(db, regular_user, dauerchat, chat_lauf)
+    stimme_alt = _wartende_karte(db, regular_user, dauerchat, chat_lauf)
+    stimme_frisch.run_id = None
+    stimme_alt.run_id = None
+    stimme_alt.created_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    db.commit()
+
+    antwort = client.get(
+        "/api/ai/conversation/actions", params={"offen": "true"}, cookies=user_cookies
+    )
+
+    assert antwort.status_code == 200
+    assert {k["id"] for k in antwort.json()} == {
+        worker_karte.id, chat_karte.id, stimme_frisch.id,
+    }
+    # Ohne den Parameter bleibt der Verlauf, wie er war.
+    alles = client.get("/api/ai/conversation/actions", cookies=user_cookies)
+    assert {verlauf_karte.id, erledigt.id, stimme_alt.id} <= {k["id"] for k in alles.json()}

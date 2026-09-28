@@ -9,6 +9,9 @@ Reihenfolge:
 """
 from __future__ import annotations
 
+import time
+
+from sqlalchemy import event
 from sqlalchemy.orm import Session, selectinload
 
 from models import (
@@ -23,24 +26,54 @@ from models import (
     User,
     UserRole,
 )
-from services.role_service import (
-    effective_user_role_ids,
-    effective_user_role_permission_keys,
-)
+from services.role_service import effective_user_role_permission_keys
+
+
+_ROLLENRECHTE = "msm.rollenrechte"
+_ROLLENRECHTE_FRIST = 2.0
+
+
+def rollenrechte(db: Session, user: User) -> frozenset[str]:
+    """Alle Keys aus den globalen Rollen des Benutzers, kurz gemerkt.
+
+    Ein KI-Kontext fragte fuer einen Nicht-Owner fuenf Rechte nacheinander ab,
+    jedes mit denselben zwei Abfragen (bis 27.09.2026 zehn von 27 Abfragen je
+    Runde). Gemerkt wird je Sitzung, und nur so lange, wie sich nichts
+    geaendert haben kann: jedes Schreiben, jeder Commit und jedes Rollback
+    dieser Sitzung wirft es weg, und nach zwei Sekunden wird ohnehin neu
+    gelesen. Eine lang laufende Sitzung sieht einen Entzug dadurch spaetestens
+    nach zwei Sekunden.
+    """
+    ablage = db.info.setdefault(_ROLLENRECHTE, {})
+    schluessel = (user.id, user.role_id)
+    jetzt = time.monotonic()
+    eintrag = ablage.get(schluessel)
+    if eintrag is not None and jetzt - eintrag[0] < _ROLLENRECHTE_FRIST:
+        return eintrag[1]
+    rechte = frozenset(effective_user_role_permission_keys(db, user))
+    ablage[schluessel] = (jetzt, rechte)
+    return rechte
+
+
+@event.listens_for(Session, "after_flush")
+@event.listens_for(Session, "after_commit")
+@event.listens_for(Session, "after_soft_rollback")
+def _rollenrechte_vergessen(session: Session, *_args) -> None:
+    session.info.pop(_ROLLENRECHTE, None)
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _rollenrechte_nach_massenaenderung_vergessen(zustand) -> None:
+    # `query(...).delete()`, `update()` und rohes SQL laufen am Flush vorbei.
+    # Alles ausser einem reinen Lesen wirft das Gemerkte deshalb auch weg.
+    if not zustand.is_select:
+        zustand.session.info.pop(_ROLLENRECHTE, None)
 
 
 def has_global_permission(db: Session, user: User, key: str) -> bool:
     if user.is_owner:
         return True
-    role_ids = effective_user_role_ids(db, user)
-    if not role_ids:
-        return False
-    exists = (
-        db.query(RolePermission.id)
-        .filter(RolePermission.role_id.in_(role_ids), RolePermission.permission_key == key)
-        .first()
-    )
-    return exists is not None
+    return key in rollenrechte(db, user)
 
 
 HOSTER_CUSTOMERS_VIEW_KEY = "servers.hoster_customers.view"
@@ -121,17 +154,8 @@ def direct_server_permission(
     if user.is_owner:
         return True
     # Pauschale Rolle (z.B. admin oder Custom-Rolle mit server.* Keys)
-    role_ids = effective_user_role_ids(db, user)
-    if role_ids:
-        granted_keys = {
-            row[0]
-            for row in db.query(RolePermission.permission_key)
-            .filter(
-                RolePermission.role_id.in_(role_ids),
-                RolePermission.permission_key.in_([key, HOSTER_CUSTOMERS_VIEW_KEY]),
-            )
-            .all()
-        }
+    granted_keys = rollenrechte(db, user)
+    if granted_keys:
         if key in granted_keys:
             # `hoster_ids` erlaubt Schleifen-Aufrufern (Team-Sichtbarkeit),
             # die Kundenserver-Menge einmal zu holen statt EXISTS je Zeile.
@@ -279,7 +303,7 @@ def direkte_rechte(
         return set(schluessel), set()
     if not schluessel:
         return set(), set()
-    pauschal = set(effective_user_role_permission_keys(db, user)) & schluessel
+    pauschal = set(rollenrechte(db, user)) & schluessel
     offen = schluessel - pauschal
     if not offen:
         return pauschal, set()
@@ -453,17 +477,8 @@ def list_visible_server_ids(db: Session, user: User) -> list[int] | None:
     if user.is_owner:
         return None
     pauschal = False
-    role_ids = effective_user_role_ids(db, user)
-    if role_ids:
-        granted_keys = {
-            row[0]
-            for row in db.query(RolePermission.permission_key)
-            .filter(
-                RolePermission.role_id.in_(role_ids),
-                RolePermission.permission_key.in_(["server.view", HOSTER_CUSTOMERS_VIEW_KEY]),
-            )
-            .all()
-        }
+    granted_keys = rollenrechte(db, user)
+    if granted_keys:
         if "server.view" in granted_keys:
             if HOSTER_CUSTOMERS_VIEW_KEY in granted_keys:
                 return None
@@ -576,12 +591,4 @@ def set_user_server_permissions(
 
 def list_user_effective_global_keys(db: Session, user: User) -> list[str]:
     """Globale Keys aller Rollen des Users (ohne Owner-Bypass auflisten)."""
-    role_ids = effective_user_role_ids(db, user)
-    if not role_ids:
-        return []
-    rows = (
-        db.query(RolePermission.permission_key)
-        .filter(RolePermission.role_id.in_(role_ids))
-        .all()
-    )
-    return sorted({r[0] for r in rows})
+    return sorted(rollenrechte(db, user))

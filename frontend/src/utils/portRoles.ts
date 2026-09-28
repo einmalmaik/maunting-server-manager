@@ -1,6 +1,6 @@
 import type { BlueprintPortDef, BlueprintPortRole } from '@/types'
 
-const STANDARD_ROLES = new Set(['game', 'query', 'rcon', 'voice', 'web', 'peer'])
+const STANDARD_ROLES = new Set(['game', 'query', 'rcon', 'voice', 'web', 'peer', 'database'])
 
 export type MappedBlueprintPort = BlueprintPortDef & {
   mappedRole: string

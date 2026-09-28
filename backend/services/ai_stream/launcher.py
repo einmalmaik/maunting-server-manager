@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
-from database import SessionLocal, engine
+from database import SessionLocal
 from models import AiMessage, AiProvider, AiRun, User
 import services.ai_stream as ai_stream
 from services import (
@@ -259,10 +259,9 @@ def lauf_beginnen(
 def _anlauf_nebenlaeufigkeit() -> int:
     """Wieviele Laufbeginne gleichzeitig laufen duerfen.
 
-    Dieselbe Regel wie bei `_werkzeug_nebenlaeufigkeit` und aus demselben Grund:
-    auf **SQLite** teilen sich alle Sitzungen eine Verbindung, zwei
-    Transaktionen darauf sind kein Nebenlauf, sondern ein Datenfehler. Auf
-    **PostgreSQL** holt sich jeder Anlauf seine eigene Verbindung.
+    Dieselbe Regel wie bei `_werkzeug_nebenlaeufigkeit`: jeder Anlauf holt sich
+    seine eigene Verbindung aus dem Pool (die Testsuite drosselt auf eins, weil
+    sie je Worker nur eine Verbindung hat).
 
     Acht und nicht mehr, obwohl `pool_size=10` plus `max_overflow=20` mehr
     hergaebe: der Anlauf ist kurz (13 ms), aber er ist nicht das Einzige, was
@@ -271,17 +270,11 @@ def _anlauf_nebenlaeufigkeit() -> int:
     gleichzeitig wartende Anlaeufe gemacht — der Pool haette abgesagt, und zwar
     zuerst den gewoehnlichen Anfragen des Panels.
 
-    **Der wichtigere Teil geht dabei nicht verloren.** Auch bei eins laeuft der
-    Anlauf durch `asyncio.to_thread` und damit *neben* der Schleife. Die
-    Gleichzeitigkeit ist der zweite Gewinn, nicht der erste.
-
-    Nachgemessen, damit die Eins nicht als Vorsicht missverstanden wird: mit
-    acht auf der SQLite-Datei des Benchmarks wurde bei Stufe 200 **alles**
-    schlechter — Wanduhr 7,92 s statt 7,31 s, Blockade in Summe 3,87 s statt
-    0,97 s, Pool 20 statt 6 Verbindungen. Acht Schreiber auf einer Datei sind
-    keine acht Schreiber.
+    **Der wichtigere Teil ist ohnehin der Thread.** Der Anlauf laeuft durch
+    `asyncio.to_thread` und damit *neben* der Schleife. Die Gleichzeitigkeit
+    ist der zweite Gewinn, nicht der erste.
     """
-    return 1 if str(engine.url).startswith("sqlite") else 8
+    return 8
 
 
 @asynccontextmanager

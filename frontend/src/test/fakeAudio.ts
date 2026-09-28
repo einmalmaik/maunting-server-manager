@@ -15,7 +15,7 @@
  * Zwei Dinge fehlten hier lange, und beide Lücken waren nicht harmlos: der
  * Messpunkt (`createAnalyser`) und die Autoplay-Sperre der Browser. Ohne den
  * ersten sprang die Wiedergabe im Test immer über ihren Messzweig, `pegel()`
- * lieferte durchweg 0, und die Bewegung der Sprachblase hatte keinen einzigen
+ * lieferte durchweg 0, und die Bewegung der Sprachanzeige hatte keinen einzigen
  * Test. Ohne die zweite startete jeder Kontext als `running` und `resume()`
  * gelang immer — ein Lautsprecher, der beim Menschen stumm bleibt, weil ihn
  * niemand entsperrt hat, fiele hier niemandem auf. Eine Attrappe, die
@@ -49,9 +49,8 @@ export class FakeBufferSource {
   startZeit: number | null = null
   gestoppt = false
   /**
-   * Woran das Stück hängt. Die Reihenfolge ist egal, die Menge nicht: der
-   * Messpunkt darf dazukommen, das Ziel darf dabei nicht wegfallen — sonst
-   * misst die Blase einen Ton, den niemand hört.
+   * Woran das Stück hängt. Jede Verbindung ist ein Weg zum Lautsprecher, und
+   * zwei Wege heißen: der Ton kommt doppelt an, 6 dB zu laut.
    */
   readonly ziele: unknown[] = []
 
@@ -107,7 +106,7 @@ export class FakeScriptProcessor {
 }
 
 /**
- * Der Messpunkt, an dem die Sprachblase abliest, wie laut gerade gesprochen
+ * Der Messpunkt, an dem der Sprachschwarm abliest, wie laut gerade gesprochen
  * wird.
  *
  * `welle` ist die Auslenkung um die Ruhelage 128, in denselben Byte-Schritten,
@@ -120,9 +119,12 @@ export class FakeMesser {
   smoothingTimeConstant = 0
   verbunden = false
   welle = 0
+  /** Wohin der Messpunkt den Ton weiterreicht — wie `FakeBufferSource.ziele`. */
+  readonly ziele: unknown[] = []
 
-  connect(): void {
+  connect(ziel?: unknown): void {
     this.verbunden = true
+    this.ziele.push(ziel)
   }
 
   disconnect(): void {

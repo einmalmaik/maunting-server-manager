@@ -13,6 +13,7 @@ import { PasswordInput } from '@/components/ui/PasswordInput'
 import { PanelSettings, EMPTY_PANEL_SETTINGS, type SupportWidgetProvider } from './types'
 import { API_ORIGIN } from '@/config/api'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function SupportWidgetTab() {
   const { t } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
@@ -157,7 +158,7 @@ export function SupportWidgetTab() {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -225,7 +226,7 @@ export function SupportWidgetTab() {
                   {t('settings.supportWidget.installIdSave')}
                 </Button>
                 {settings.singra_widget_install_source === 'panel' && (
-                  <Button type="button" variant="ghost" onClick={() => void removeInstallId()} className="gap-2 text-status-error">
+                  <Button type="button" variant="ghost" onClick={() => void removeInstallId()} className="gap-2 text-status-destructive">
                     <Trash2 className="h-4 w-4" />
                     {t('settings.supportWidget.installIdRemove')}
                   </Button>
@@ -323,7 +324,7 @@ export function SupportWidgetTab() {
                 {t('settings.supportWidget.webhookSecretSave')}
               </Button>
               {settings.singra_webhook_secret_source === 'panel' && settings.singra_webhook_secret_configured && (
-                <Button type="button" variant="ghost" onClick={() => void removeWebhookSecret()} className="text-status-error">
+                <Button type="button" variant="ghost" onClick={() => void removeWebhookSecret()} className="text-status-destructive">
                   {t('settings.supportWidget.webhookSecretRemove')}
                 </Button>
               )}
@@ -338,7 +339,7 @@ export function SupportWidgetTab() {
         {canWrite && (
           <div className="flex justify-end">
             <Button type="submit" disabled={saving}>
-              {saving ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-on-primary border-t-transparent" /> : <Save className="h-4 w-4" />}
+              {saving ? <Spinner /> : <Save className="h-4 w-4" />}
               {t('settings.save')}
             </Button>
           </div>

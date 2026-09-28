@@ -411,7 +411,7 @@ async def compact_conversation(
     try:
         async for chunk in stream_chat_completion(
             client, provider=provider, api_key=api_key, messages=messages, usage=usage,
-            reasoning=denken, reasoning_effort=denkstufe, compaction=True,
+            reasoning=denken, reasoning_effort=denkstufe,
         ):
             if chunk.kind == "content":
                 summary_parts.append(chunk.text)

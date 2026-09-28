@@ -108,9 +108,12 @@ class GuardianStateStore:
         file_name: str,
         value: dict[str, Any],
     ) -> Path:
+        return self.write_json_file(self.state_path(server_id, file_name), value)
+
+    def write_json_file(self, destination: Path, value: dict[str, Any]) -> Path:
+        """Atomically replace one owner-only JSON file below the Guardian root."""
         if not isinstance(value, dict) or value.get("schema_version") != STATE_SCHEMA_VERSION:
             raise GuardianStateError("Guardian state requires schema_version=1")
-        destination = self.state_path(server_id, file_name)
         if destination.is_symlink():
             raise GuardianStateSecurityError("Guardian state file is a symlink")
 
@@ -157,7 +160,10 @@ class GuardianStateStore:
         server_id: int | str,
         file_name: str,
     ) -> dict[str, Any] | None:
-        path = self.state_path(server_id, file_name)
+        return self.read_json_file(self.state_path(server_id, file_name))
+
+    def read_json_file(self, path: Path) -> dict[str, Any] | None:
+        """Read one JSON file; corrupt content is retained aside and reported."""
         if not path.exists() and not path.is_symlink():
             return None
         if path.is_symlink() or not path.is_file():

@@ -144,12 +144,15 @@ def test_ein_einmaliger_termin_kommt_kein_zweites_mal() -> None:
 
 
 def test_ein_zeitloser_wert_aus_der_datenbank_wirft_nicht() -> None:
-    """SQLite gibt zeitzonenlose Werte zurueck, PostgreSQL zeitzonenbehaftete.
+    """Ein zeitzonenloser Wert neben einem zeitzonenbehafteten wirft nicht.
 
+    PostgreSQL liefert fuer `DateTime(timezone=True)` zeitzonenbehaftete Werte,
+    ein zeitzonenloser `once_at` kommt aber vor, solange das Feld nicht aus der
+    Datenbank zurueckgelesen ist (frueher lieferte ihn auch die SQLite-Suite).
     Der Vergleich zwischen beiden wirft `TypeError` — hier in der
     Faelligkeitspruefung, also an der Stelle, an der ein Fehler bedeutet, dass
-    gar keine Aufgabe mehr laeuft. Der Prueftstand ist SQLite, der Betrieb
-    PostgreSQL; ohne diesen Test faellt es erst beim Betreiber auf.
+    gar keine Aufgabe mehr laeuft. Dieser Test baut den zeitzonenlosen Wert
+    deshalb selbst, statt auf die Datenbank zu warten.
     """
     aufgabe = _aufgabe(
         plan_kind="once", time_of_day=None, once_at=datetime(2026, 8, 20, 6, 0)

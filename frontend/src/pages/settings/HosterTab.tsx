@@ -42,7 +42,7 @@ import {
 import { credentialsApi } from '@/api/credentials'
 import { rbacApi } from '@/api/rbac'
 import { api, SanitizedApiError } from '@/api/client'
-import { Button, NumberStepper, Switch } from '@/Singra/UI'
+import { Button, NumberStepper, Switch, buttonClasses } from '@/Singra/UI'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { SecretOnce } from '@/components/ui/SecretOnce'
 import { confirm } from '@/stores/confirmStore'
@@ -50,6 +50,7 @@ import { toast } from '@/stores/toastStore'
 import type { Role } from '@/types/permissions'
 import type { GameInfo, User } from '@/types'
 
+import { Spinner } from '@/components/ui/Spinner'
 /**
  * Handoff-Link same-origin oeffnen: der absolute Link wird aus MSM_PANEL_URL
  * gebaut und zeigt in der Dev-Umgebung am Frontend vorbei. Der Pfad ueber die
@@ -154,7 +155,7 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
   if (loading) {
     return (
       <div className="flex h-32 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -165,7 +166,7 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
         <div className="max-w-3xl">
           <div className="flex items-center gap-2">
             <Plug className="h-5 w-5 text-secondary" aria-hidden="true" />
-            <h3 id="hoster-title" className="font-headline text-lg font-semibold text-on-surface">
+            <h3 id="hoster-title" className="font-headline text-title-lg font-semibold text-on-surface">
               {t('hoster.title')}
             </h3>
           </div>
@@ -174,7 +175,7 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
               Webhook-Referenz — dieser Reiter erklaert nur die Konfiguration. */}
           <Link
             to="/docs/hoster-api"
-            className="msm-btn-secondary mt-4 inline-flex items-center gap-2 px-4 py-2 text-sm"
+            className={buttonClasses('secondary', 'md', 'mt-4')}
           >
             <Plug className="h-4 w-4" aria-hidden="true" />
             {t('hoster.docsLink')}
@@ -236,8 +237,8 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
                 <span
                   className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                     selected.is_sandbox
-                      ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                      : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                      ? 'bg-status-warning/15 text-status-warning border border-status-warning/30'
+                      : 'bg-status-success/15 text-status-success border border-status-success/30'
                   }`}
                 >
                   {selected.is_sandbox ? (
@@ -1063,15 +1064,15 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
       toast.success(t('hoster.simulator.copiedAiPrompt'))
       setTimeout(() => setCopiedPrompt(false), 3000)
     } catch {
-      toast.error(t('common.clipboardError', 'Zwischenablage nicht verfügbar'))
+      toast.error(t('common.clipboardError'))
     }
   }
 
   return (
-    <div className="msm-card space-y-5 p-6 border-amber-500/25 bg-surface-container-low/20">
+    <div className="msm-card space-y-5 p-6 border-status-warning/25 bg-surface-container-low/20">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-2.5">
-          <div className="rounded-lg bg-amber-500/15 p-2 text-amber-400 border border-amber-500/30">
+          <div className="rounded-lg bg-status-warning/15 p-2 text-status-warning border border-status-warning/30">
             <FlaskConical className="h-5 w-5" aria-hidden="true" />
           </div>
           <div>
@@ -1089,7 +1090,7 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
           className="gap-2 text-xs"
           onClick={() => setShowAiModal((v) => !v)}
         >
-          <Sparkles className="h-4 w-4 text-amber-400" aria-hidden="true" />
+          <Sparkles className="h-4 w-4 text-status-warning" aria-hidden="true" />
           {t('hoster.simulator.aiDocsTitle')}
         </Button>
       </div>
@@ -1108,8 +1109,8 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
             >
               {copiedPrompt ? (
                 <>
-                  <Check className="h-3.5 w-3.5 text-emerald-400" />
-                  {t('hoster.copied', 'Kopiert')}
+                  <Check className="h-3.5 w-3.5 text-status-success" />
+                  {t('hoster.copied')}
                 </>
               ) : (
                 <>
@@ -1129,7 +1130,7 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
       )}
 
       {products.length === 0 && (
-        <div className="rounded-lg border border-outline-variant/30 bg-surface-container-low/50 p-3 text-xs text-amber-300/90">
+        <div className="rounded-lg border border-outline-variant/30 bg-surface-container-low/50 p-3 text-xs text-status-warning/90">
           {t('hoster.simulator.noProductsHint')}
         </div>
       )}
@@ -1141,9 +1142,9 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
           variant="secondary"
           disabled={!canWrite || Boolean(busyAction) || products.length === 0}
           onClick={() => void runSimulation('order')}
-          className="h-11 justify-center gap-2 text-xs font-medium border-emerald-500/20 hover:border-emerald-500/50 hover:bg-emerald-500/10"
+          className="h-11 justify-center gap-2 text-xs font-medium border-status-success/20 hover:border-status-success/50 hover:bg-status-success/10"
         >
-          <Play className="h-4 w-4 text-emerald-400" aria-hidden="true" />
+          <Play className="h-4 w-4 text-status-success" aria-hidden="true" />
           {busyAction === 'order' ? t('common.loading') : t('hoster.simulator.simulateOrder')}
         </Button>
 
@@ -1152,9 +1153,9 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
           variant="secondary"
           disabled={!canWrite || Boolean(busyAction) || services.length === 0}
           onClick={() => void runSimulation('suspend')}
-          className="h-11 justify-center gap-2 text-xs font-medium border-amber-500/20 hover:border-amber-500/50 hover:bg-amber-500/10"
+          className="h-11 justify-center gap-2 text-xs font-medium border-status-warning/20 hover:border-status-warning/50 hover:bg-status-warning/10"
         >
-          <Pause className="h-4 w-4 text-amber-400" aria-hidden="true" />
+          <Pause className="h-4 w-4 text-status-warning" aria-hidden="true" />
           {busyAction === 'suspend' ? t('common.loading') : t('hoster.simulator.simulateSuspend')}
         </Button>
 
@@ -1163,9 +1164,9 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
           variant="secondary"
           disabled={!canWrite || Boolean(busyAction) || services.length === 0}
           onClick={() => void runSimulation('reactivate')}
-          className="h-11 justify-center gap-2 text-xs font-medium border-cyan-500/20 hover:border-cyan-500/50 hover:bg-cyan-500/10"
+          className="h-11 justify-center gap-2 text-xs font-medium border-primary/20 hover:border-primary/50 hover:bg-primary/10"
         >
-          <RotateCcw className="h-4 w-4 text-cyan-400" aria-hidden="true" />
+          <RotateCcw className="h-4 w-4 text-primary" aria-hidden="true" />
           {busyAction === 'reactivate' ? t('common.loading') : t('hoster.simulator.simulateReactivate')}
         </Button>
 
@@ -1174,9 +1175,9 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
           variant="secondary"
           disabled={!canWrite || Boolean(busyAction) || services.length === 0}
           onClick={() => void runSimulation('terminate')}
-          className="h-11 justify-center gap-2 text-xs font-medium border-rose-500/20 hover:border-rose-500/50 hover:bg-rose-500/10"
+          className="h-11 justify-center gap-2 text-xs font-medium border-status-destructive/20 hover:border-status-destructive/50 hover:bg-status-destructive/10"
         >
-          <XCircle className="h-4 w-4 text-rose-400" aria-hidden="true" />
+          <XCircle className="h-4 w-4 text-status-destructive" aria-hidden="true" />
           {busyAction === 'terminate' ? t('common.loading') : t('hoster.simulator.simulateTerminate')}
         </Button>
 
@@ -1207,7 +1208,7 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
         <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/60 p-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-400 border border-emerald-500/30">
+              <span className="rounded-full bg-status-success/15 px-2 py-0.5 text-xs font-medium text-status-success border border-status-success/30">
                 {simResult.action.toUpperCase()}
               </span>
               <span className="text-sm font-medium text-on-surface">{simResult.message}</span>
@@ -1217,7 +1218,7 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
                 href={handoffPath(simResult.handoff_url)}
                 target="_blank"
                 rel="noopener"
-                className="msm-btn-primary inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium"
+                className={buttonClasses('primary', 'sm', 'font-medium')}
               >
                 <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                 {t('hoster.simulator.loginAsCustomer')}

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
+import { DisBadge } from '@/components/DisBadge'
 
 declare global {
   interface Window {
     turnstile?: {
       render: (container: HTMLElement, options: any) => any
+      reset?: (id: any) => void
       remove: (id: any) => void
     }
     hcaptcha?: {
@@ -19,18 +21,34 @@ declare global {
   }
 }
 
+/**
+ * - `loading`: Konfiguration oder Anbieterskript noch nicht da
+ * - `ready`: Widget steht, wartet auf den Menschen
+ * - `verified`: gültiges Token liegt vor
+ * - `failed`: Skript oder Konfiguration nicht ladbar
+ * - `disabled`: keine Sicherheitsabfrage konfiguriert
+ */
+export type CaptchaStatus = 'loading' | 'ready' | 'verified' | 'failed' | 'disabled'
+
+/** Solange das gilt, bleiben Anmelden und Social Login gesperrt. */
+export function captchaSperrt(status: CaptchaStatus): boolean {
+  return status !== 'verified' && status !== 'disabled'
+}
+
 interface CaptchaWidgetProps {
   onVerify: (token: string) => void
+  onStatusChange?: (status: CaptchaStatus) => void
+  resetKey?: any
 }
 
 interface CaptchaConfig {
   enabled: boolean
-  provider: 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
+  provider: 'altcha' | 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
   site_key: string
 }
 
-export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
-  const { t } = useTranslation()
+export function CaptchaWidget({ onVerify, onStatusChange, resetKey }: CaptchaWidgetProps) {
+  const { t, i18n } = useTranslation()
   const [config, setConfig] = useState<CaptchaConfig | null>(null)
   // Ohne diesen Zustand endet ein geblocktes Anbieterskript in einem leeren
   // Kasten: der Benutzer sendet ohne Token, das Backend lehnt ab, und der
@@ -38,15 +56,31 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
   const [loadFailed, setLoadFailed] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const widgetIdRef = useRef<any>(null)
+  // Die Anbieter behalten die Rückrufe vom ersten Rendern; über Refs sehen sie
+  // trotzdem immer die aktuellen Funktionen der Seite.
+  const onVerifyRef = useRef(onVerify)
+  const onStatusRef = useRef(onStatusChange)
+  onVerifyRef.current = onVerify
+  onStatusRef.current = onStatusChange
+
+  const melde = (status: CaptchaStatus) => onStatusRef.current?.(status)
 
   useEffect(() => {
     let active = true
+    melde('loading')
     api<CaptchaConfig>('/auth/captcha-config')
       .then((data) => {
-        if (active) setConfig(data)
+        if (!active) return
+        setConfig(data)
+        if (!data.enabled || data.provider === 'none') melde('disabled')
       })
       .catch((err) => {
         console.error('Failed to load CAPTCHA config:', err)
+        // Ohne Konfiguration wissen wir nicht, ob das Backend eine Abfrage
+        // verlangt. Gesperrt bleiben ist die ehrliche Antwort.
+        if (!active) return
+        setLoadFailed(true)
+        melde('failed')
       })
     return () => {
       active = false
@@ -54,10 +88,147 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
   }, [])
 
   useEffect(() => {
+    if (resetKey === undefined || !containerRef.current) return
+    if (config?.provider === 'altcha') {
+      const widget = containerRef.current.querySelector('altcha-widget') as any
+      if (widget) {
+        api<Record<string, unknown>>('/auth/captcha-challenge')
+          .then((fresh) => {
+            widget.setAttribute('challenge', JSON.stringify(fresh))
+            if (typeof widget.reset === 'function') {
+              widget.reset()
+            }
+            onVerifyRef.current('')
+            melde('ready')
+          })
+          .catch(() => {
+            if (typeof widget.reset === 'function') {
+              widget.reset()
+            }
+            onVerifyRef.current('')
+            melde('ready')
+          })
+      }
+    } else if (widgetIdRef.current !== null) {
+      if (config?.provider === 'turnstile' && window.turnstile?.remove) {
+        window.turnstile.reset?.(widgetIdRef.current)
+        onVerifyRef.current('')
+        melde('ready')
+      } else if (config?.provider === 'hcaptcha' && window.hcaptcha?.reset) {
+        window.hcaptcha.reset(widgetIdRef.current)
+        onVerifyRef.current('')
+        melde('ready')
+      } else if (config?.provider === 'recaptcha' && window.grecaptcha?.reset) {
+        window.grecaptcha.reset(widgetIdRef.current)
+        onVerifyRef.current('')
+        melde('ready')
+      }
+    }
+  }, [resetKey, config?.provider])
+
+  useEffect(() => {
     if (!config || !config.enabled || !containerRef.current) return
 
     const provider = config.provider
     const siteKey = config.site_key
+
+    if (provider === 'altcha') {
+      let active = true
+      Promise.all([
+        import('altcha'),
+        api<Record<string, unknown>>('/auth/captcha-challenge'),
+      ])
+        .then(([_, challengeData]) => {
+          if (!active || !containerRef.current) return
+          containerRef.current.innerHTML = ''
+          const widget = document.createElement('altcha-widget')
+          widget.setAttribute('challenge', JSON.stringify(challengeData))
+          widget.setAttribute('auto', 'onload')
+          widget.setAttribute('configuration', JSON.stringify({ hideFooter: true, hideLogo: true }))
+          widget.setAttribute('hidefooter', 'true')
+          widget.setAttribute('hidelogo', 'true')
+          widget.style.setProperty('--altcha-border-radius', '0.75rem')
+          widget.style.setProperty('--altcha-max-width', '100%')
+          if (typeof (widget as any).configure === 'function') {
+            ;(widget as any).configure({ hideFooter: true, hideLogo: true })
+          }
+          const lang = (i18n.language || 'de').startsWith('de') ? 'de' : 'en'
+          widget.setAttribute('language', lang)
+          const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+          widget.setAttribute('theme', isDark ? 'dark' : 'auto')
+          widget.setAttribute(
+            'strings',
+            JSON.stringify({
+              label: t('captcha.altcha.label', 'Ich bin ein Mensch'),
+              verifying: t('captcha.altcha.verifying', 'Sicherheitsprüfung läuft …'),
+              verified: t('captcha.altcha.verified', 'Verifiziert'),
+              error: t('captcha.altcha.error', 'Sicherheitsprüfung fehlgeschlagen'),
+            }),
+          )
+
+          const handleStateChange = (ev: Event) => {
+            const customEv = ev as CustomEvent
+            const st = customEv.detail?.state
+            if (st === 'verified' && customEv.detail?.payload) {
+              onVerifyRef.current(customEv.detail.payload)
+              melde('verified')
+            } else if (st === 'expired' || st === 'unverified') {
+              onVerifyRef.current('')
+              melde('ready')
+            } else if (st === 'error') {
+              onVerifyRef.current('')
+              setLoadFailed(true)
+              melde('failed')
+            }
+          }
+          const handleVerified = (ev: Event) => {
+            const customEv = ev as CustomEvent
+            if (customEv.detail?.payload) {
+              onVerifyRef.current(customEv.detail.payload)
+              melde('verified')
+            }
+          }
+          const handleExpired = () => {
+            onVerifyRef.current('')
+            melde('ready')
+            api<Record<string, unknown>>('/auth/captcha-challenge')
+              .then((fresh) => {
+                widget.setAttribute('challenge', JSON.stringify(fresh))
+                if (typeof widget.reset === 'function') widget.reset()
+              })
+              .catch(() => {})
+          }
+          const handleError = () => {
+            onVerifyRef.current('')
+            setLoadFailed(true)
+            melde('failed')
+          }
+
+          widget.addEventListener('statechange', handleStateChange)
+          widget.addEventListener('verified', handleVerified)
+          widget.addEventListener('expired', handleExpired)
+          widget.addEventListener('error', handleError)
+          containerRef.current.appendChild(widget)
+          if (typeof (widget as any).configure === 'function') {
+            ;(widget as any).configure({ hideFooter: true, hideLogo: true })
+          }
+          // Das Widget steht; gesperrt bleibt es, bis es `verified` meldet.
+          melde('ready')
+        })
+        .catch((err) => {
+          console.error('Failed to load ALTCHA widget:', err)
+          if (!active) return
+          setLoadFailed(true)
+          melde('failed')
+        })
+
+      return () => {
+        active = false
+        if (containerRef.current) {
+          containerRef.current.innerHTML = ''
+        }
+      }
+    }
 
     let scriptUrl = ''
     let checkGlobal = ''
@@ -74,6 +245,24 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
       return
     }
 
+    // Tokens laufen ab (Turnstile nach 300 s) und gelten nur einmal. Ein
+    // abgelaufenes Token sperrt deshalb wieder, statt still weiterzugelten.
+    const options = {
+      sitekey: siteKey,
+      callback: (token: string) => {
+        onVerifyRef.current(token)
+        melde('verified')
+      },
+      'expired-callback': () => {
+        onVerifyRef.current('')
+        melde('ready')
+      },
+      'error-callback': () => {
+        onVerifyRef.current('')
+        melde('ready')
+      },
+    }
+
     const initWidget = () => {
       if (!containerRef.current) return
       containerRef.current.innerHTML = ''
@@ -82,24 +271,23 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
 
       try {
         if (provider === 'turnstile' && window.turnstile) {
-          widgetIdRef.current = window.turnstile.render(widgetDiv, {
-            sitekey: siteKey,
-            callback: onVerify,
-          })
+          widgetIdRef.current = window.turnstile.render(widgetDiv, options)
         } else if (provider === 'hcaptcha' && window.hcaptcha) {
-          widgetIdRef.current = window.hcaptcha.render(widgetDiv, {
-            sitekey: siteKey,
-            callback: onVerify,
-          })
+          widgetIdRef.current = window.hcaptcha.render(widgetDiv, options)
         } else if (provider === 'recaptcha' && window.grecaptcha) {
-          widgetIdRef.current = window.grecaptcha.render(widgetDiv, {
-            sitekey: siteKey,
-            callback: onVerify,
-          })
+          widgetIdRef.current = window.grecaptcha.render(widgetDiv, options)
         }
+        melde('ready')
       } catch (err) {
         console.error('Failed to render CAPTCHA:', err)
+        setLoadFailed(true)
+        melde('failed')
       }
+    }
+
+    const scheitern = () => {
+      setLoadFailed(true)
+      melde('failed')
     }
 
     if ((window as any)[checkGlobal]) {
@@ -114,29 +302,29 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
         document.head.appendChild(script)
       }
 
+      let checkInterval: ReturnType<typeof setInterval> | null = null
       const handleLoad = () => {
         let attempts = 0
-        const checkInterval = setInterval(() => {
+        checkInterval = setInterval(() => {
           attempts++
           if ((window as any)[checkGlobal]) {
-            clearInterval(checkInterval)
+            if (checkInterval) clearInterval(checkInterval)
             initWidget()
           } else if (attempts > 50) {
-            clearInterval(checkInterval)
-            setLoadFailed(true)
+            if (checkInterval) clearInterval(checkInterval)
+            scheitern()
           }
         }, 100)
       }
 
       // Wird das Skript geblockt, feuert `load` nie — ohne diesen Listener
       // liefe nicht einmal der Timeout oben, und es bliebe vollständig still.
-      const handleError = () => setLoadFailed(true)
-
       script.addEventListener('load', handleLoad)
-      script.addEventListener('error', handleError)
+      script.addEventListener('error', scheitern)
       return () => {
+        if (checkInterval) clearInterval(checkInterval)
         script.removeEventListener('load', handleLoad)
-        script.removeEventListener('error', handleError)
+        script.removeEventListener('error', scheitern)
       }
     }
 
@@ -157,8 +345,6 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
     }
   }, [config])
 
-  if (!config || !config.enabled) return null
-
   if (loadFailed) {
     return (
       <p role="alert" className="my-4 text-center font-body-md text-sm text-error">
@@ -167,7 +353,14 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
     )
   }
 
+  if (!config || !config.enabled) return null
+
   return (
-    <div className="flex justify-center my-4 msm-captcha-container" ref={containerRef} />
+    <div className="flex flex-col items-center justify-center my-4 gap-2">
+      <div ref={containerRef} />
+      {config.provider === 'altcha' && (
+        <DisBadge size={14} className="py-0.5 px-2" />
+      )}
+    </div>
   )
 }

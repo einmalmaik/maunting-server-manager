@@ -76,6 +76,52 @@ def consume(db: Session, row: LoginChallenge) -> None:
     db.commit()
 
 
+def versuch_belegen(db: Session, row: LoginChallenge, hoechstens: int) -> int | None:
+    """Belegt atomar einen von ``hoechstens`` Versuchen; ``None``, wenn keiner frei ist.
+
+    Belegt wird vor der Pruefung des Codes, nicht danach. Bis 27.09.2026 las jede
+    Anfrage den Zaehler, pruefte und schrieb ihn zurueck: parallele Fehlversuche
+    ueberschrieben sich, und die Challenge blieb nach drei Fehlversuchen gueltig.
+
+    Das UPDATE greift nur, wenn ``payload_json`` noch so aussieht wie gelesen.
+    Schlaegt es fehl, hat eine andere Anfrage gerade einen Versuch belegt; nach
+    ``hoechstens`` solchen Runden ist sicher keiner mehr frei.
+    """
+    for _ in range(hoechstens):
+        treffer = (
+            db.query(LoginChallenge.payload_json)
+            .filter(
+                LoginChallenge.id == row.id,
+                LoginChallenge.consumed_at.is_(None),
+                LoginChallenge.expires_at > _now(),
+            )
+            .first()
+        )
+        if treffer is None:
+            return None
+        alt = treffer[0]
+        daten = json.loads(alt) if alt else {}
+        nummer = int(daten.get("versuche", 0)) + 1
+        if nummer > hoechstens:
+            return None
+        belegt = (
+            db.query(LoginChallenge)
+            .filter(
+                LoginChallenge.id == row.id,
+                LoginChallenge.consumed_at.is_(None),
+                LoginChallenge.payload_json.is_not_distinct_from(alt),
+            )
+            .update(
+                {LoginChallenge.payload_json: json.dumps({**daten, "versuche": nummer})},
+                synchronize_session=False,
+            )
+        )
+        db.commit()
+        if belegt == 1:
+            return nummer
+    return None
+
+
 def cleanup_expired(db: Session) -> int:
     """Loescht abgelaufene Challenges. Idempotent. Wird vom Lifespan aufgerufen."""
     cutoff = _now()
@@ -93,5 +139,6 @@ __all__ = [
     "create_challenge",
     "lookup_valid",
     "consume",
+    "versuch_belegen",
     "cleanup_expired",
 ]

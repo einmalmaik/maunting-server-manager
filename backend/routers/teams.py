@@ -7,6 +7,7 @@ Teams sehen — auch das persoenliche, das er nie selbst angelegt hat. Erst das
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -33,6 +34,12 @@ router = APIRouter(prefix="/api/teams", tags=["teams"])
 def _summary(db: Session, team: Team, user: User) -> TeamResponse:
     member = team_service.membership(db, team.id, user.id)
     count = db.query(TeamMember).filter(TeamMember.team_id == team.id).count()
+    return _zusammenfassung(team, user, member, count)
+
+
+def _zusammenfassung(
+    team: Team, user: User, member: TeamMember | None, count: int
+) -> TeamResponse:
     return TeamResponse(
         id=team.id,
         name=team.name,
@@ -118,9 +125,32 @@ def list_teams(
     guter Zeitpunkt, ihm sein eigenes zu geben, statt es beim ersten Chat
     unbemerkt entstehen zu lassen.
     """
-    team_service.personal_team(db, user)
-    db.commit()
-    return [_summary(db, team, user) for team in team_service.list_user_teams(db, user)]
+    # Nur committen, wenn das Team fehlt. Die Liste wird regelmaessig
+    # abgefragt, und ein Commit je Abruf liess alle geladenen Objekte
+    # verfallen, die danach einzeln neu geladen wurden.
+    if db.query(Team.id).filter(Team.personal_for_user_id == user.id).first() is None:
+        team_service.personal_team(db, user)
+        db.commit()
+    teams = team_service.list_user_teams(db, user)
+    ids = [team.id for team in teams]
+    # Mitgliedschaft und Kopfzahl fuer alle Teams in je einer Abfrage,
+    # nicht zwei je Team.
+    eigene = {
+        member.team_id: member
+        for member in db.query(TeamMember).filter(
+            TeamMember.user_id == user.id, TeamMember.team_id.in_(ids)
+        )
+    }
+    zahlen = dict(
+        db.query(TeamMember.team_id, func.count(TeamMember.id))
+        .filter(TeamMember.team_id.in_(ids))
+        .group_by(TeamMember.team_id)
+        .all()
+    )
+    return [
+        _zusammenfassung(team, user, eigene.get(team.id), zahlen.get(team.id, 0))
+        for team in teams
+    ]
 
 
 @router.post("", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)

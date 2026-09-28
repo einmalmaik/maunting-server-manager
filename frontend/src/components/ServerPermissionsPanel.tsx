@@ -9,7 +9,9 @@ import { Dropdown } from '@/components/ui/Dropdown'
 import type { User } from '@/types'
 import type { PermissionCatalog } from '@/types/permissions'
 import { PermissionEditor } from '@/Singra/UI/PermissionEditor'
+import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 interface Props {
   serverId: number
 }
@@ -131,7 +133,7 @@ export function ServerPermissionsPanel({ serverId }: Props) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-32">
-        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="md" className="text-primary" />
       </div>
     )
   }
@@ -152,7 +154,7 @@ export function ServerPermissionsPanel({ serverId }: Props) {
       {/* User hinzufuegen */}
       <div className="flex flex-col gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/40 p-3 sm:flex-row sm:items-end">
         <div className="min-w-0 flex-1">
-          <label className="mb-1.5 block font-label-md text-[10px] uppercase tracking-wider text-on-surface-variant">
+          <label className="mb-1.5 block font-label-md text-label-sm uppercase tracking-wider text-on-surface-variant">
             {t('serverPermissions.selectUser')}
           </label>
           <Dropdown
@@ -164,15 +166,15 @@ export function ServerPermissionsPanel({ serverId }: Props) {
             aria-label={t('serverPermissions.selectUser')}
           />
         </div>
-        <button
+        <Button
           type="button"
           onClick={addUser}
           disabled={!addingUserId}
-          className="msm-btn-primary inline-flex min-h-10 shrink-0 items-center justify-center gap-2 px-4 py-2 disabled:opacity-50"
+          className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 disabled:opacity-50"
         >
           <Plus className="w-4 h-4" />
           {t('serverPermissions.addUser')}
-        </button>
+        </Button>
       </div>
 
       {rows.length === 0 ? (
@@ -210,7 +212,7 @@ export function ServerPermissionsPanel({ serverId }: Props) {
                       <strong className="block font-label-md text-xs font-medium text-on-surface">
                         {t('serverPermissions.permissionCount', { count: row.permissions.length })}
                       </strong>
-                      <p className="mt-1 break-words font-mono text-[10px] leading-4 text-on-surface-variant">
+                      <p className="mt-1 break-words font-mono text-label-sm leading-4 text-on-surface-variant">
                         {visiblePermissions.join(' · ')}
                         {hiddenPermissionCount > 0 ? ` · +${hiddenPermissionCount}` : ''}
                       </p>
@@ -220,22 +222,22 @@ export function ServerPermissionsPanel({ serverId }: Props) {
                   <div className="col-start-2 row-start-1 flex items-center justify-end gap-1 md:col-start-3">
                     {isEditing ? (
                       <>
-                        <button
+                        <Button size="sm"
                           type="button"
                           onClick={() => save(row.user.id)}
-                          className="msm-btn-primary inline-flex min-h-9 items-center gap-1 px-3 py-1 text-xs"
+                          className="inline-flex min-h-9 items-center gap-1"
                         >
                           <Save className="w-3.5 h-3.5" />
                           {t('common.save')}
-                        </button>
-                        <button
+                        </Button>
+                        <Button variant="secondary" size="sm"
                           type="button"
                           onClick={cancelEdit}
-                          className="msm-btn-secondary inline-flex min-h-9 items-center gap-1 px-3 py-1 text-xs"
+                          className="inline-flex min-h-9 items-center gap-1"
                         >
                           <X className="w-3.5 h-3.5" />
                           {t('common.cancel')}
-                        </button>
+                        </Button>
                       </>
                     ) : (
                       <button
@@ -249,7 +251,7 @@ export function ServerPermissionsPanel({ serverId }: Props) {
                     <button
                       type="button"
                       onClick={() => revoke(row.user.id)}
-                      className="grid h-9 w-9 place-items-center rounded-lg text-status-error transition-colors hover:bg-status-error/10 hover:text-status-error/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-error/60"
+                      className="grid h-9 w-9 place-items-center rounded-lg text-status-destructive transition-colors hover:bg-status-destructive/10 hover:text-status-destructive/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-destructive/60"
                       title={t('serverPermissions.revoke')}
                       aria-label={`${t('serverPermissions.revoke')}: ${row.user.username}`}
                     >

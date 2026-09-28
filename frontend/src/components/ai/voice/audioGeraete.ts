@@ -14,6 +14,8 @@
  * ein fehlendes USB-Mikrofon soll den Sprachmodus nicht lahmlegen.
  */
 
+import { GAIN_MAX, GAIN_MIN, getAudioSettings } from '@/lib/audioSettings'
+
 let eingabeName: string | null = null
 let ausgabeName: string | null = null
 
@@ -38,14 +40,22 @@ export interface AudioVerarbeitung {
   verstaerkung: number
 }
 
-const VERARBEITUNG_VORGABE: AudioVerarbeitung = {
+/**
+ * Der Modulzustand. `verstaerkung: null` heißt „nicht registriert" — dann gilt
+ * der gespeicherte Wert aus `audioSettings`. Die Desktop-App registriert bei
+ * jedem Start eine Zahl aus ihrer Konfiguration; das Panel registriert nur,
+ * solange es läuft, und findet seinen Wert nach einem Neuladen im Speicher.
+ */
+const VERARBEITUNG_VORGABE: Omit<AudioVerarbeitung, 'verstaerkung'> & {
+  verstaerkung: number | null
+} = {
   echo: true,
   rauschen: true,
   autogain: true,
-  verstaerkung: 1,
+  verstaerkung: null,
 }
 
-let verarbeitung: AudioVerarbeitung = { ...VERARBEITUNG_VORGABE }
+let verarbeitung = { ...VERARBEITUNG_VORGABE }
 
 export function registriereAudioVerarbeitung(neu: Partial<AudioVerarbeitung>): void {
   // Feld für Feld statt Spread: ein explizit `undefined` übergebenes Feld
@@ -61,9 +71,15 @@ export function registriereAudioVerarbeitung(neu: Partial<AudioVerarbeitung>): v
 
 /** Die aktuelle Verarbeitung, Verstärkung bereits geklemmt. */
 export function aktuelleVerarbeitung(): AudioVerarbeitung {
-  const roh = verarbeitung.verstaerkung
-  const wert = Number.isFinite(roh) ? Math.min(4, Math.max(0.25, roh)) : 1
-  return { ...verarbeitung, verstaerkung: wert }
+  const stored = getAudioSettings()
+  const roh = verarbeitung.verstaerkung ?? stored.micGain
+  const wert = Number.isFinite(roh) ? Math.min(GAIN_MAX, Math.max(GAIN_MIN, roh)) : 1
+  return {
+    echo: verarbeitung.echo && stored.echoCancellation,
+    rauschen: verarbeitung.rauschen && stored.noiseSuppression,
+    autogain: verarbeitung.autogain && stored.autoGainControl,
+    verstaerkung: wert,
+  }
 }
 
 async function deviceIdZuLabel(
@@ -80,12 +96,23 @@ async function deviceIdZuLabel(
 
 /** Die deviceId des gewünschten Mikrofons — `null` heißt Standard. */
 export async function eingabeGeraetId(): Promise<string | null> {
+  const stored = getAudioSettings()
+  if (stored.preferredMicId) return stored.preferredMicId
   if (!eingabeName) return null
   return deviceIdZuLabel('audioinput', eingabeName)
 }
 
-/** Die sinkId des gewünschten Lautsprechers — `null` heißt Standard. */
+/**
+ * Die sinkId des gewünschten Lautsprechers — `null` heißt Standard.
+ *
+ * Wie beim Eingang hat die gespeicherte Kennung Vorrang: das Panel wählt ein
+ * Gerät über seine `deviceId`, die Desktop-App über den Namen, den Rust sieht.
+ * Ohne diesen Vorrang liefe die Wahl des Panels in `deviceIdZuLabel` und käme
+ * nie an, weil dort gegen `label` verglichen wird.
+ */
 export async function ausgabeGeraetId(): Promise<string | null> {
+  const stored = getAudioSettings()
+  if (stored.preferredSpeakerId) return stored.preferredSpeakerId
   if (!ausgabeName) return null
   return deviceIdZuLabel('audiooutput', ausgabeName)
 }

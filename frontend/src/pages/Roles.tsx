@@ -8,7 +8,9 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 import type { PermissionCatalog, Role } from '@/types/permissions'
 import { PermissionEditor } from '@/Singra/UI/PermissionEditor'
 import { PageHeader } from '@/Singra/UI/PageHeader'
+import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 /**
  * Erlaubte Rollennamen — dieselbe Sprache wie `backend/schemas/role.py`.
  *
@@ -117,16 +119,16 @@ function RoleForm({ catalog, initial, onSubmit, onCancel }: RoleFormProps) {
       </div>
 
       <div className="flex gap-3 pt-2">
-        <button type="button" onClick={onCancel} className="msm-btn-secondary px-4 py-2">
+        <Button variant="secondary" type="button" onClick={onCancel}>
           {t('common.cancel')}
-        </button>
-        <button
+        </Button>
+        <Button
           type="submit"
           disabled={saving || isAdminRole}
-          className="msm-btn-primary px-4 py-2 disabled:opacity-50"
+          className="disabled:opacity-50"
         >
           {saving ? t('common.loading') : t('common.save')}
-        </button>
+        </Button>
       </div>
     </form>
   )
@@ -207,7 +209,7 @@ export function Roles() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -218,17 +220,17 @@ export function Roles() {
 
   return (
     <div className="msm-page">
-      <PageHeader eyebrow={t('pageContext.administration', 'Administration')} title={t('roles.title')} description={t('roles.subtitle')} status={<span className="msm-badge-info">{roles.length} {t('roles.title')}</span>} actions={canManage ? (
-          <button
+      <PageHeader eyebrow={t('pageContext.administration')} title={t('roles.title')} description={t('roles.subtitle')} status={<span className="msm-badge-info">{roles.length} {t('roles.title')}</span>} actions={canManage ? (
+          <Button
             onClick={() => {
               setEditing(null)
               setCreating(true)
             }}
-            className="msm-btn-primary min-h-11 px-4 py-2 inline-flex items-center gap-2"
+            className="min-h-11 inline-flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
             {t('roles.create')}
-          </button>) : undefined} />
+          </Button>) : undefined} />
 
       {creating && (
         <div className="msm-card p-6">
@@ -281,7 +283,7 @@ export function Roles() {
                         {t('roles.system')}
                       </span>
                     ) : (
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-status-info/10 text-status-info border border-status-info/30">
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/30">
                         {t('roles.custom')}
                       </span>
                     )}
@@ -309,7 +311,7 @@ export function Roles() {
                   {canManage && !role.is_system && (
                     <button
                       onClick={() => handleDelete(role)}
-                      className="text-status-error hover:text-status-error/80 transition-colors inline-flex items-center"
+                      className="text-status-destructive hover:text-status-destructive/80 transition-colors inline-flex items-center"
                       title={t('common.delete')}
                     >
                       <Trash2 className="w-4 h-4" />

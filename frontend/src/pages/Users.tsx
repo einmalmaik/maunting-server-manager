@@ -13,8 +13,9 @@ import type { Server, User } from '@/types'
 import type { Role } from '@/types/permissions'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { MultiSelect } from '@/Singra/UI/MultiSelect'
-import { Avatar } from '@/Singra/UI'
-
+import { Button, Avatar, Checkbox } from '@/Singra/UI'
+import { Spinner } from '@/components/ui/Spinner'
+import { benutzernameFehler } from '@/lib/benutzername'
 export function Users() {
   const { t } = useTranslation()
   const currentUser = useAuthStore((s) => s.user)
@@ -89,6 +90,11 @@ export function Users() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
+    const namensfehler = benutzernameFehler(createForm.username)
+    if (namensfehler) {
+      toast.error(t(namensfehler.schluessel, namensfehler))
+      return
+    }
     setCreating(true)
     try {
       await api('/admin/users', {
@@ -118,21 +124,21 @@ export function Users() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
 
   return (
     <div className="msm-page">
-      <PageHeader eyebrow={t('pageContext.administration', 'Administration')} title={t('nav.users')} description={t('users.subtitle')} status={<span className="msm-badge-info">{users.length} {t('nav.users')}</span>} actions={canManageUsers ? (
-          <button
+      <PageHeader eyebrow={t('pageContext.administration')} title={t('nav.users')} description={t('users.subtitle')} status={<span className="msm-badge-info">{users.length} {t('nav.users')}</span>} actions={canManageUsers ? (
+          <Button
             onClick={() => setShowCreate(!showCreate)}
-            className="msm-btn-primary min-h-11 px-4 py-2 inline-flex items-center gap-2"
+            className="min-h-11 inline-flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
             {t('users.createUser')}
-          </button>) : undefined} />
+          </Button>) : undefined} />
 
       {showCreate && (
         <div className="msm-card p-6">
@@ -151,6 +157,7 @@ export function Users() {
                 className="msm-input"
                 required
                 minLength={3}
+                maxLength={32}
               />
             </div>
             <div>
@@ -184,11 +191,9 @@ export function Users() {
               {currentUser?.is_owner && (
                 <label className="flex items-center gap-2 cursor-pointer">
                   <div className={`relative w-10 h-6 rounded-full transition-colors ${createForm.is_owner ? 'bg-secondary' : 'bg-surface-container-highest'}`}>
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={createForm.is_owner}
-                      onChange={(e) => setCreateForm({ ...createForm, is_owner: e.target.checked })}
-                      className="sr-only"
+                      onCheckedChange={(gesetzt) => setCreateForm({ ...createForm, is_owner: gesetzt })} className="sr-only"
                     />
                     <span className={`absolute top-1 left-1 w-4 h-4 bg-on-surface rounded-full transition-transform ${createForm.is_owner ? 'translate-x-4 bg-on-secondary' : ''}`} />
                   </div>
@@ -199,11 +204,9 @@ export function Users() {
               )}
               <label className="flex items-center gap-2 cursor-pointer">
                 <div className={`relative w-10 h-6 rounded-full transition-colors ${createForm.auto_verify ? 'bg-secondary' : 'bg-surface-container-highest'}`}>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={createForm.auto_verify}
-                    onChange={(e) => setCreateForm({ ...createForm, auto_verify: e.target.checked })}
-                    className="sr-only"
+                    onCheckedChange={(gesetzt) => setCreateForm({ ...createForm, auto_verify: gesetzt })} className="sr-only"
                   />
                   <span className={`absolute top-1 left-1 w-4 h-4 bg-on-surface rounded-full transition-transform ${createForm.auto_verify ? 'translate-x-4 bg-on-secondary' : ''}`} />
                 </div>
@@ -213,20 +216,19 @@ export function Users() {
               </label>
             </div>
             <div className="md:col-span-2 flex gap-3">
-              <button
+              <Button variant="secondary"
                 type="button"
                 onClick={() => setShowCreate(false)}
-                className="msm-btn-secondary px-4 py-2"
               >
                 {t('common.cancel')}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
                 disabled={creating}
-                className="msm-btn-primary px-4 py-2 disabled:opacity-50"
+                className="disabled:opacity-50"
               >
                 {creating ? t('common.loading') : t('users.createUser')}
-              </button>
+              </Button>
             </div>
           </form>
         </div>
@@ -301,7 +303,7 @@ export function Users() {
                           <span className="block break-words font-body-md text-sm font-semibold leading-5">
                             {server.name}
                           </span>
-                          <span className="mt-1 block font-mono text-[10px] uppercase tracking-wide text-on-surface-variant">
+                          <span className="mt-1 block font-mono text-label-sm uppercase tracking-wide text-on-surface-variant">
                             {server.game_type}
                           </span>
                         </span>
@@ -324,7 +326,7 @@ export function Users() {
                       <ServerIcon aria-hidden="true" className="h-4 w-4" />
                     </span>
                     <div className="min-w-0">
-                      <p className="font-label-md text-[10px] uppercase tracking-wider text-on-surface-variant">
+                      <p className="font-label-md text-label-sm uppercase tracking-wider text-on-surface-variant">
                         {t('serverPermissions.selectedServer')}
                       </p>
                       <h3 className="mt-1 break-words font-headline text-base leading-6 text-on-surface">
@@ -355,7 +357,7 @@ export function Users() {
         <div className="msm-card min-w-0" data-testid="user-directory">
           <div
             aria-hidden="true"
-            className="hidden grid-cols-[minmax(9rem,1fr)_minmax(12rem,1.35fr)_7rem_minmax(10rem,12rem)_2.75rem] gap-4 border-b border-outline-variant/50 bg-surface-container-low/35 px-5 py-3 font-label-md text-[10px] uppercase tracking-wider text-on-surface-variant md:grid md:rounded-t-lg"
+            className="hidden grid-cols-[minmax(9rem,1fr)_minmax(12rem,1.35fr)_7rem_minmax(10rem,12rem)_2.75rem] gap-4 border-b border-outline-variant/50 bg-surface-container-low/35 px-5 py-3 font-label-md text-label-sm uppercase tracking-wider text-on-surface-variant md:grid md:rounded-t-lg"
           >
             <span>{t('auth.username')}</span>
             <span>{t('auth.email')}</span>
@@ -460,7 +462,7 @@ export function Users() {
                       <button
                         type="button"
                         onClick={() => handleDelete(user.id)}
-                        className="grid h-10 w-10 place-items-center rounded-lg text-status-error transition-colors hover:bg-status-error/10 hover:text-status-error/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-error/60"
+                        className="grid h-10 w-10 place-items-center rounded-lg text-status-destructive transition-colors hover:bg-status-destructive/10 hover:text-status-destructive/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-destructive/60"
                         title={t('users.delete')}
                         aria-label={`${t('users.delete')}: ${user.username}`}
                       >

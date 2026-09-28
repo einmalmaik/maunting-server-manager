@@ -92,7 +92,7 @@ class AiActionApproval(Base):
     )
     #: Einmalverbrauch. Gesetzt wird das per **bedingtem UPDATE**, damit zwei
     #: gleichzeitige Klicks auf denselben Link nicht zwei Ausfuehrungen
-    #: ergeben — auf SQLite gibt es kein `SELECT ... FOR UPDATE`.
+    #: ergeben — ohne dass es dafuer eine Zeilensperre braucht.
     consumed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

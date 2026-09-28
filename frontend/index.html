@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de" class="dark">
+<html lang="de" dir="ltr" class="dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
@@ -10,6 +10,8 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     
+    <!-- Content-Security-Policy: setzt der Bau (vite.csp.ts), nicht diese Datei. -->
+
     <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json" />
     
@@ -36,8 +38,9 @@
         margin: 0;
         padding: 0;
       }
-      #root { 
-        min-height: 100vh; 
+      #root {
+        min-height: 100vh;
+        min-height: 100dvh;
       }
     </style>
     

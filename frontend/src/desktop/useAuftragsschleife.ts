@@ -24,10 +24,10 @@ const RUHE_MS = 15_000
 /**
  * Wartet dieser Auftrag auf eine Entscheidung des Menschen am Rechner?
  *
- * Zwei tun das: die Bitte um Maus und Tastatur und — bei ausgeschaltetem
- * autonomem Modus — das Aufräumen. Ob Letzteres wirklich fragt, weiß hier
- * niemand: das entscheidet Rust anhand des `autonom`, das allein das Panel
- * setzt. Deshalb wird die Kennung schon **vor** dem Ausführen gemerkt und
+ * Zwei tun das: die Bitte um Maus und Tastatur und das Aufräumen, das seit
+ * dem 23.09.2026 auch im autonomen Modus fragt (Löschen fragt immer). Ob es
+ * wirklich fragt, weiß hier trotzdem niemand: das entscheidet Rust anhand des
+ * `autonom`, das allein das Panel setzt. Deshalb wird die Kennung schon **vor** dem Ausführen gemerkt und
  * hinterher wieder verworfen, wenn doch ein Ergebnis kam.
  *
  * Seit die Kennung mit in den Aufruf geht, ist dieser gemerkte Wert nur noch
@@ -91,8 +91,9 @@ export function useAuftragsschleife(aktiv: boolean): string | null {
       }
       // `null` heißt: das Ergebnis kommt später, weil ein Mensch entscheidet.
       // Die jeweilige Karte meldet dann selbst (Uebernahmekarte.tsx,
-      // Aufraeumkarte.tsx). Beim Aufräumen im autonomen Modus kommt statt
-      // `null` ein fertiges Ergebnis — dann läuft es hier normal weiter.
+      // Aufraeumkarte.tsx). Kommt statt `null` ein fertiges Ergebnis (ein
+      // älterer Panelstand setzte `autonom` beim Aufräumen noch), läuft es
+      // hier normal weiter.
       if (ergebnis === null) {
         return
       }

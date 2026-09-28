@@ -7,7 +7,9 @@ import { confirm } from "@/stores/confirmStore";
 import { useHasPermission } from "@/hooks/useHasPermission";
 import { Dropdown, Switch } from "@/Singra/UI";
 import { AlertTriangle, Bot, HardDrive, Plus, RotateCcw, Trash2, Settings, Cloud, CloudOff, UploadCloud } from "lucide-react";
+import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 interface Backup {
   id: number;
   server_id: number;
@@ -60,11 +62,11 @@ interface CreateBackupResponse {
 const INTERVAL_VALUES = [0, 1, 2, 3, 6, 12, 24, 48, 72, 168, 336, 504, 720];
 
 function intervalLabel(value: number, t: TFunction): string {
-  if (value === 0) return t("backups.intervalOff", "Deaktiviert");
-  if (value === 1) return t("backups.intervalHourly", "Stündlich");
-  if (value === 24) return t("backups.intervalDaily", "Täglich");
-  if (value === 168) return t("backups.intervalWeekly", "Wöchentlich");
-  if (value === 720) return t("backups.intervalMonthly", "Alle 30 Tage");
+  if (value === 0) return t("backups.intervalOff");
+  if (value === 1) return t("backups.intervalHourly");
+  if (value === 24) return t("backups.intervalDaily");
+  if (value === 168) return t("backups.intervalWeekly");
+  if (value === 720) return t("backups.intervalMonthly");
   if (value % 168 === 0) return t("backups.intervalWeeks", { count: value / 168 });
   if (value % 24 === 0) return t("backups.intervalDays", { count: value / 24 });
   return t("backups.intervalHours", { count: value });
@@ -238,7 +240,7 @@ export function Backups({ serverId }: BackupsProps) {
         method: "POST",
         body: JSON.stringify({ name: backupName.trim() || null }),
       });
-      toast.success(t("backups.created", "Backup erfolgreich abgeschlossen"));
+      toast.success(t("backups.created"));
       setShowCreateModal(false);
       setBackupName("");
       await fetchBackups();
@@ -333,7 +335,7 @@ export function Backups({ serverId }: BackupsProps) {
           backup_retention_count: settings.backup_retention_count,
         }),
       });
-      toast.success(t("backups.settingsSaved", "Einstellungen gespeichert"));
+      toast.success(t("backups.settingsSaved"));
       // Neu laden: manuelles Speichern nimmt „Von der KI verwaltet" zurück,
       // und der nächste Auto-Backup-Termin kann sich verschoben haben.
       await fetchSettings();
@@ -366,7 +368,7 @@ export function Backups({ serverId }: BackupsProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <span className="w-6 h-6 border-2 border-secondary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="md" className="text-secondary" />
       </div>
     );
   }
@@ -377,8 +379,8 @@ export function Backups({ serverId }: BackupsProps) {
       {isActive && (
         <div className="msm-card p-4 border border-secondary/40 bg-surface-container space-y-2">
           <div className="flex items-center gap-3 text-sm text-on-surface">
-            <span className="w-4 h-4 border-2 border-secondary border-t-transparent rounded-full animate-spin flex-shrink-0" />
-            <span className="font-body-md">{operationLabel || t("backups.creating", "Backup wird erstellt...")}</span>
+            <Spinner className="text-secondary flex-shrink-0" />
+            <span className="font-body-md">{operationLabel || t("backups.creating")}</span>
             {elapsedLabel && (
               <span className="text-on-surface-variant">
                 {t("backups.runningSince")} {elapsedLabel}
@@ -386,7 +388,7 @@ export function Backups({ serverId }: BackupsProps) {
             )}
             {backupStatus?.estimated_size_mb != null && backupStatus.estimated_size_mb > 0 && (
               <span className="text-on-surface-variant">
-                {t("backups.estimatedSize", "Geschätzte Größe")}: {backupStatus.estimated_size_mb} MB
+                {t("backups.estimatedSize")}: {backupStatus.estimated_size_mb} MB
               </span>
             )}
           </div>
@@ -427,23 +429,23 @@ export function Backups({ serverId }: BackupsProps) {
           )}
         </div>
         <div className="flex gap-2">
-          <button
+          <Button variant="secondary"
             onClick={() => setShowSettings(!showSettings)}
             disabled={isActive}
-            className={`msm-btn-secondary flex items-center gap-2 px-3 py-2 ${showSettings ? "bg-surface-container" : ""}`}
-            title={t("backups.scheduling", "Einstellungen")}
+            className={`flex items-center gap-2 ${showSettings ? "bg-surface-container" : ""}`}
+            title={t("backups.scheduling")}
           >
             <Settings className="w-4 h-4" />
-            {t("backups.scheduling", "Einstellungen")}
-          </button>
-          <button
+            {t("backups.scheduling")}
+          </Button>
+          <Button
             onClick={() => setShowCreateModal(true)}
             disabled={isActive || !!actionLoading}
-            className="msm-btn-primary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="flex items-center gap-2 disabled:opacity-50"
           >
             <Plus className="w-4 h-4" />
             {t("backups.create")}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -452,7 +454,7 @@ export function Backups({ serverId }: BackupsProps) {
         <div className="msm-card p-5 space-y-4">
           <div className="flex items-center gap-3 flex-wrap">
             <h2 className="font-headline text-body-lg text-on-surface">
-              {t("backups.schedulingTitle", "Backup-Einstellungen")}
+              {t("backups.schedulingTitle")}
             </h2>
             {settings.backup_ai_managed && (
               <span
@@ -468,7 +470,7 @@ export function Backups({ serverId }: BackupsProps) {
           </div>
           {settings.next_auto_backup_at && (
             <p className="font-body-md text-sm text-on-surface-variant">
-              {t("backups.nextAutoBackup", "Nächstes Auto-Backup")}: {formatDate(settings.next_auto_backup_at)}
+              {t("backups.nextAutoBackup")}: {formatDate(settings.next_auto_backup_at)}
             </p>
           )}
 
@@ -483,17 +485,17 @@ export function Backups({ serverId }: BackupsProps) {
                   setSettings({ ...settings, backup_on_start: checked })
                 }
                 disabled={!canWrite}
-                aria-label={t("backups.backupOnStart", "Backup vor dem Start erstellen")}
+                aria-label={t("backups.backupOnStart")}
               />
               <span className="font-body-md text-sm text-on-surface-variant">
-                {t("backups.backupOnStart", "Backup vor dem Start erstellen")}
+                {t("backups.backupOnStart")}
               </span>
             </label>
 
             {/* Interval */}
             <div>
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider text-xs">
-                {t("backups.interval", "Intervall")}
+                {t("backups.interval")}
               </label>
               {/* Design-DNA: kein natives <select>. `Number(wert) || null`
                   bleibt — 0 (Deaktiviert) wird als null gespeichert. Der
@@ -518,14 +520,14 @@ export function Backups({ serverId }: BackupsProps) {
                   label: intervalLabel(value, t),
                 }))}
                 disabled={!canWrite}
-                aria-label={t("backups.interval", "Intervall")}
+                aria-label={t("backups.interval")}
               />
             </div>
 
             {/* Retention */}
             <div>
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider text-xs">
-                {t("backups.retention", "Aufbewahrung (Anzahl)")}
+                {t("backups.retention")}
               </label>
               <input
                 type="number"
@@ -557,13 +559,13 @@ export function Backups({ serverId }: BackupsProps) {
           )}
 
           <div className="flex justify-end">
-            <button
+            <Button
               onClick={saveSettings}
               disabled={isActive || settingsSaving || !canWrite}
-              className="msm-btn-primary px-4 py-2 disabled:opacity-50"
+              className="disabled:opacity-50"
             >
               {settingsSaving ? t("common.loading") : t("common.save")}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -571,16 +573,16 @@ export function Backups({ serverId }: BackupsProps) {
       {/* Backup List */}
       {loadError ? (
         <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
-          <AlertTriangle className="w-10 h-10 text-status-error mx-auto mb-4" />
+          <AlertTriangle className="w-10 h-10 text-status-destructive mx-auto mb-4" />
           <h3 className="font-headline text-body-lg text-on-surface mb-1">
             {t("backups.loadFailed")}
           </h3>
-          <button
+          <Button variant="secondary"
             onClick={() => void fetchBackups()}
-            className="msm-btn-secondary min-h-11 px-4 py-2 mt-4"
+            className="min-h-11 mt-4"
           >
             {t("common.retry")}
-          </button>
+          </Button>
         </div>
       ) : backups.length === 0 ? (
         <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
@@ -631,50 +633,50 @@ export function Backups({ serverId }: BackupsProps) {
                 )}
                 {/* In Cloud hochladen: nur fuer reine lokale Backups */}
                 {!isS3Backed && backup.local_exists && (
-                  <button
+                  <Button variant="secondary" size="sm"
                     onClick={() => uploadToCloud(backup.id)}
                     disabled={isActive || !!actionLoading}
-                    className="msm-btn-secondary flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
+                    className="flex items-center gap-1 disabled:opacity-50"
                     title={t("backups.uploadToCloud")}
                   >
                     <UploadCloud className="w-3.5 h-3.5" />
                     {actionLoading === `upload-${backup.id}`
                       ? t("common.loading")
                       : t("backups.uploadToCloud")}
-                  </button>
+                  </Button>
                 )}
                 {/* Restore: lokal oder aus Cloud */}
                 {onlyInCloud ? (
-                  <button
+                  <Button variant="secondary" size="sm"
                     onClick={() => restoreFromCloud(backup.id)}
                     disabled={isActive || !!actionLoading}
-                    className="msm-btn-secondary flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
+                    className="flex items-center gap-1 disabled:opacity-50"
                     title={t("backups.restoreFromCloud")}
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                     {actionLoading === `restore-${backup.id}`
                       ? t("common.loading")
                       : t("backups.restoreFromCloud")}
-                  </button>
+                  </Button>
                 ) : (
-                  <button
+                  <Button variant="secondary" size="sm"
                     onClick={() => restoreBackup(backup.id)}
                     disabled={isActive || !!actionLoading}
-                    className="msm-btn-secondary flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
+                    className="flex items-center gap-1 disabled:opacity-50"
                     title={t("backups.restore")}
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                     {t("backups.restore")}
-                  </button>
+                  </Button>
                 )}
-                <button
+                <Button variant="destructive" size="sm"
                   onClick={() => deleteBackup(backup.id)}
                   disabled={isActive || !!actionLoading}
-                  className="msm-btn-danger flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
+                  className="flex items-center gap-1 disabled:opacity-50"
                   title={t("common.delete")}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                </Button>
               </div>
             </div>
             );
@@ -684,29 +686,23 @@ export function Backups({ serverId }: BackupsProps) {
 
       {/* Create Backup Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div className="msm-modal-overlay">
           <div className="msm-card w-full max-w-md p-6">
             <h2 className="font-headline text-headline-md text-primary mb-1">
               {t("backups.create")}
             </h2>
             <p className="font-body-md text-sm text-on-surface-variant mb-5">
-              {t(
-                "backups.createModalHint",
-                "Erstellt ein komprimiertes Archiv des Server-Verzeichnisses.",
-              )}
+              {t("backups.createModalHint")}
             </p>
 
             <div className="space-y-4">
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider text-xs">
-                  {t("backups.backupName", "Name (optional)")}
+                  {t("backups.backupName")}
                 </label>
                 <input
                   type="text"
-                  placeholder={t(
-                    "backups.backupNamePlaceholder",
-                    "z.B. Vor Update v1.5",
-                  )}
+                  placeholder={t("backups.backupNamePlaceholder")}
                   value={backupName}
                   onChange={(e) => setBackupName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && createBackup()}
@@ -717,24 +713,24 @@ export function Backups({ serverId }: BackupsProps) {
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button
+              <Button variant="secondary"
                 onClick={() => {
                   setShowCreateModal(false);
                   setBackupName("");
                 }}
-                className="msm-btn-secondary flex-1 px-4 py-2"
+                className="flex-1"
               >
                 {t("common.cancel")}
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={createBackup}
                 disabled={isActive || actionLoading === "create"}
-                className="msm-btn-primary flex-1 px-4 py-2 disabled:opacity-50"
+                className="flex-1 disabled:opacity-50"
               >
                 {actionLoading === "create"
                   ? t("common.loading")
-                  : t("backups.createNow", "Backup erstellen")}
-              </button>
+                  : t("backups.createNow")}
+              </Button>
             </div>
           </div>
         </div>

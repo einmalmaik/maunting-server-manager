@@ -515,7 +515,34 @@ def _rationale(arguments: dict, *, fallback: tuple[str, str] | None) -> tuple[st
 
     return reason_val, effect_val
 
-def _server_create_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
+def _database_spec_payload(raw: object) -> tuple[dict, int | None]:
+    """Die Datenbank-Einstellungen eines Datenbankservers, geprueft wie im Panel.
+
+    Dasselbe Schema wie der Anlegedialog (`DatabaseServerSpec`) — nur ohne
+    Passwort: das erzeugt das Panel, damit es weder im Chat noch in der
+    gespeicherten Vorschlagszeile im Klartext steht.
+    """
+    from pydantic import ValidationError
+
+    from schemas.server import DatabaseServerSpec
+
+    werte = dict(raw) if isinstance(raw, dict) else {}
+    if werte.get("password"):
+        raise AiActionValidationError(
+            "Ein Passwort nimmt die KI nicht an — das Panel erzeugt es, abrufbar im Reiter Verbindung."
+        )
+    port = werte.get("port")
+    if port is not None and (isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535):
+        raise AiActionValidationError("Ungueltiger Datenbank-Port")
+    felder = {k: werte[k] for k in ("database_name", "username", "allowed_cidrs", "ssl_required") if werte.get(k) is not None}
+    try:
+        spec = DatabaseServerSpec(**felder)
+    except ValidationError as exc:
+        raise AiActionValidationError(f"Ungueltige Datenbank-Einstellungen: {exc.errors()[0].get('msg', '')}") from exc
+    return spec.model_dump(exclude={"password"}), port
+
+
+def _server_create_payload(db: Session, arguments: dict, *, user: User | None = None) -> tuple[dict, dict]:
     """Prueft die Argumente einer Servererstellung gegen das Panel-Schema.
 
     Die eigentliche Validierung â€” Blueprint, Kapazitaet, Ports, Rechte â€” macht
@@ -542,6 +569,18 @@ def _server_create_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
         or (arguments.get("server") if isinstance(arguments.get("server"), dict) else {}).get("type")
         or ""
     ).strip()
+    from schemas.server import POSTGRES_GAME_TYPE
+
+    datenbankserver = arguments.get("server_kind") == "database" or raw_game_type == POSTGRES_GAME_TYPE
+    if datenbankserver:
+        # Schon beim Vorschlagen, nicht erst beim Klick: ein Vorschlag, den
+        # der Benutzer gar nicht ausfuehren darf, soll nicht entstehen.
+        # `provision_server` prueft es beim Ausfuehren noch einmal.
+        from services import permission_service
+
+        if user is None or not permission_service.has_global_permission(db, user, "servers.create.database"):
+            raise AiActionValidationError("Keine Berechtigung, Datenbankserver anzulegen (servers.create.database).")
+        raw_game_type = POSTGRES_GAME_TYPE
     plugin = get_plugin(raw_game_type)
     if plugin is None:
         raise AiActionValidationError(f"Unbekannter Servertyp: {raw_game_type or 'nicht angegeben'}")
@@ -622,6 +661,30 @@ def _server_create_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
         "ports": "auto",
         "restart_required": False,
     }
+    if datenbankserver:
+        spec, port = _database_spec_payload(arguments.get("database"))
+        payload["server_kind"] = "database"
+        payload["database"] = spec
+        preview["server_kind"] = "database"
+        preview["database"] = {
+            "database_name": spec["database_name"],
+            "username": spec["username"],
+            "allowed_cidrs": spec["allowed_cidrs"] or "nur intern",
+            "ssl_required": spec["ssl_required"],
+            "password": "erzeugt das Panel",
+        }
+        if port is not None:
+            # Der Benutzer hat ihn genannt: dann ist er eine Zusage, die
+            # Vorschau darf ihn zeigen.
+            payload["ports"] = {"database": port}
+            preview["ports"] = {"database": port}
+    else:
+        anzahl = arguments.get("postgres_database_count")
+        if anzahl is not None:
+            if isinstance(anzahl, bool) or not isinstance(anzahl, int) or not 1 <= anzahl <= 20:
+                raise AiActionValidationError("postgres_database_count muss zwischen 1 und 20 liegen")
+            payload["postgres_database_count"] = anzahl
+            preview["postgres_database_count"] = anzahl
 
     # Optionales Modpack: wenn mitgegeben, wird es nach der Servererstellung
     # automatisch installiert. Dieselbe Validierung wie _modpack_install_payload.
@@ -705,7 +768,7 @@ def _blueprint_change_payload(
     auf dem der Wachmann blind waere.
 
     Das kann die Ableitung nicht selbst verschulden: `AENDERBARE_PFADE` kennt
-    fuenf Pfade, alle unter `meta` und `runtime`, und alles uebrige wird aus der
+    nur Pfade unter `meta`, `runtime` und `source`, und alles uebrige wird aus der
     Vorlage tief kopiert â€” ein abgeleiteter Blueprint traegt die Guardian-Bloecke
     seiner Vorlage immer. Was diese Zeilen abfangen, ist deshalb die
     **guardianlose Vorlage**: leitet ein Reparaturlauf von ihr ab und stellt den
@@ -740,6 +803,7 @@ def _blueprint_change_payload(
         )
 
     quelle = blueprint_service.blueprint_view(str(arguments["source_id"]))["blueprint"]
+    ueberschreibt = blueprint_service.get_registry().get(str(arguments["new_id"])) is not None
     payload = {"blueprint": nutzlast}
     preview = {
         "operation": "blueprint_change",
@@ -762,9 +826,39 @@ def _blueprint_change_payload(
         # nie zu sehen bekommen hat.
         "startup_before": (quelle.get("runtime") or {}).get("startup"),
         "startup_after": (nutzlast.get("runtime") or {}).get("startup"),
+        # Die Installationsquelle entscheidet, welcher Code geholt wird. Bei
+        # GitHub laufen ihre `setupCommands` (npm, pip) auf dem lokalen Node im
+        # Panelprozess; ein anderes Repo ist fremder Code auf dem Panelserver.
+        "source_before": _quelle_kurz(quelle.get("source")),
+        "source_after": _quelle_kurz(nutzlast.get("source")),
+        # `derived_payload` laesst einen Community-Blueprint ohne Server
+        # ueberschreiben. Was dort vorher stand, ist danach weg. Nur gesetzt,
+        # wenn es so ist; die Karte zeigt dann die ID.
+        "overwrites_blueprint": arguments["new_id"] if ueberschreibt else None,
         "restart_required": False,
     }
+    # Quellwechsel und Ueberschreiben fragen auch im autonomen Modus
+    # (`ai_tool_registry.verlangt_klick`). Bis 26.09.2026 liefen beide ohne
+    # Klick, und die Karte zeigte die Quelle nicht.
+    if ueberschreibt or quelle.get("source") != nutzlast.get("source"):
+        preview["always_confirm"] = True
     return payload, preview
+
+
+def _quelle_kurz(quelle: object) -> dict | None:
+    """Die Installationsquelle so, wie sie auf der Karte steht."""
+    if not isinstance(quelle, dict):
+        return None
+    art = quelle.get("type")
+    angaben = quelle.get(art) if isinstance(art, str) else None
+    if not isinstance(angaben, dict):
+        return {"type": art}
+    kurz: dict = {"type": art}
+    for feld in ("repo", "url", "branch", "subPath", "appId"):
+        wert = angaben.get(feld)
+        if wert not in (None, ""):
+            kurz[feld] = redact_sensitive_text(str(wert))[:200]
+    return kurz
 
 def _blueprint_delete_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
     """Prueft das Loeschen eines Community-Blueprints schon beim Vorschlagen."""
@@ -1720,9 +1814,16 @@ def _execute_server_create(
     from schemas import ServerCreate
     from services.server_provisioning_service import provision_server
 
+    datenbankserver = payload.get("server_kind") == "database"
+    anzahl = payload.get("postgres_database_count")
     request = ServerCreate(
         name=str(payload["name"]),
-        game_type=str(payload["game_type"]),
+        server_kind="database" if datenbankserver else "application",
+        game_type=None if datenbankserver else str(payload["game_type"]),
+        database=payload.get("database") if datenbankserver else None,
+        ports=payload.get("ports"),
+        postgres_enabled=bool(anzahl),
+        postgres_database_count=anzahl,
         cpu_limit_percent=int(payload["cpu_limit_percent"]),
         ram_limit_mb=int(payload["ram_limit_mb"]),
         disk_limit_gb=int(payload["disk_limit_gb"]),

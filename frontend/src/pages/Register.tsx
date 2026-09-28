@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
@@ -8,15 +8,28 @@ import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
+import { CaptchaWidget, captchaSperrt, type CaptchaStatus } from '@/components/ui/CaptchaWidget'
 import { Shield, ArrowRight, Check, Mail } from 'lucide-react'
+import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
+import { sicheresZiel } from '@/lib/sicheresZiel'
+import { benutzernameFehler } from '@/lib/benutzername'
 export function Register() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
   const { finishLogin } = useAuthStore()
+
+  const redirectParam = searchParams.get('redirect')
+  const gemerktesZiel = (location.state as { from?: string } | null)?.from || redirectParam
+  const zielNachLogin = sicheresZiel(gemerktesZiel)
+
   const [error, setError] = useState('')
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaStatus, setCaptchaStatus] = useState<CaptchaStatus>('loading')
+  const [captchaResetKey, setCaptchaResetKey] = useState(0)
   const [success, setSuccess] = useState(false)
   const [requiresVerification, setRequiresVerification] = useState(false)
   const [registeredEmail, setRegisteredEmail] = useState('')
@@ -27,8 +40,14 @@ export function Register() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (captchaSperrt(captchaStatus)) return
     setError('')
 
+    const namensfehler = benutzernameFehler(form.username)
+    if (namensfehler) {
+      setError(t(namensfehler.schluessel, namensfehler))
+      return
+    }
     if (form.password !== form.confirm) {
       setError(t('auth.passwordMismatch'))
       return
@@ -54,6 +73,8 @@ export function Register() {
       setForm({ username: '', email: res.email, password: '', confirm: '' })
     } catch (err: any) {
       setError(err.message || t('auth.registerFailed'))
+      setCaptchaToken(null)
+      setCaptchaResetKey((k) => k + 1)
     } finally {
       setSubmitting(false)
     }
@@ -96,17 +117,17 @@ export function Register() {
             <p className="font-body-md text-sm text-on-surface-variant mb-6">
               {t('auth.verifiedAndSignedIn')}
             </p>
-            <button
+            <Button size="lg"
               type="button"
               onClick={() => {
                 if (!pendingUser) return
-                void finishLogin(pendingUser).then(() => navigate('/'))
+                void finishLogin(pendingUser).then(() => navigate(zielNachLogin))
               }}
-              className="msm-btn-primary px-8 py-3 inline-flex items-center gap-2"
+              className="inline-flex items-center gap-2"
             >
               {t('auth.continue')}
               <ArrowRight className="w-4 h-4" />
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -163,20 +184,20 @@ export function Register() {
 
                 <ErrorMessage message={error} className="text-sm" />
 
-                <button
+                <Button size="lg"
                   type="submit"
                   disabled={submitting || verifyCode.length !== 6}
-                  className="msm-btn-primary w-full py-3 disabled:opacity-50"
+                  className="w-full disabled:opacity-50"
                 >
                   {submitting ? (
                     <span className="inline-flex items-center gap-2">
-                      <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                      <Spinner />
                       {t('common.loading')}
                     </span>
                   ) : (
                     t('auth.verifyNow')
                   )}
-                </button>
+                </Button>
 
                 <Link
                   to="/login"
@@ -213,6 +234,7 @@ export function Register() {
                 placeholder="admin"
                 required
                 minLength={3}
+                maxLength={32}
               />
             </div>
 
@@ -247,18 +269,18 @@ export function Register() {
               required
             />
 
-            <CaptchaWidget onVerify={setCaptchaToken} />
+            <CaptchaWidget onVerify={setCaptchaToken} onStatusChange={setCaptchaStatus} resetKey={captchaResetKey} />
 
             <ErrorMessage message={error} className="text-sm" />
 
-            <button
+            <Button size="lg"
               type="submit"
-              disabled={submitting}
-              className="msm-btn-primary w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
+              disabled={submitting || captchaSperrt(captchaStatus)}
+              className="w-full flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {submitting ? (
                 <span className="inline-flex items-center gap-2">
-                  <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                  <Spinner />
                   {t('common.loading')}
                 </span>
               ) : (
@@ -267,11 +289,15 @@ export function Register() {
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
-            </button>
+            </Button>
           </form>
 
           <div className="mt-6 text-center font-body-md text-sm">
-            <Link to="/login" className="text-secondary hover:text-mint-accent transition-colors">
+            <Link
+              to={gemerktesZiel ? `/login?redirect=${encodeURIComponent(gemerktesZiel)}` : '/login'}
+              state={{ from: gemerktesZiel }}
+              className="text-secondary hover:text-mint-accent transition-colors"
+            >
               {t('auth.hasAccount')}
             </Link>
           </div>

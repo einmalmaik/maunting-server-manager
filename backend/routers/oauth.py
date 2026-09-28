@@ -25,21 +25,25 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from config import settings, get_effective_cookie_domain
 from cookies import _set_auth_cookies
 from database import get_db
 from dependencies import get_current_user, require_global, verify_csrf
+from middleware.rate_limit import auth_rate_limit
 from models import OAuthProvider, OAuthUserLink, User
+from schemas.passkey import PasskeyNachweis
 from schemas.oauth import (
+    OAuthLinkStartRequest,
     OAuthProviderCreate,
     OAuthProviderPublic,
     OAuthProviderUpdate,
     OAuthTestResult,
 )
-from services import audit_service, oauth_service
+from services import audit_service, oauth_service, passkey_service
 from services.auth_service import AuthService
 from services.session_service import issue_session
 from services.email_service import EmailService
@@ -132,6 +136,30 @@ def _set_login_session(response: Response, db: Session, user: User) -> None:
     issue_session(response, db, user)
 
 
+def _extract_all_state_cookies(request: Request) -> list[str]:
+    """Extrahiert alle Werte des State-Cookies aus allen Cookie-Headern.
+
+    Browser koennen mehrere gleichnamige Cookies senden (z. B. ein host-only
+    und ein domain-spezifisches Geister-Cookie), teils auch verteilt auf
+    mehrere Cookie-Header.
+    """
+    raw_headers = request.headers.getlist("cookie")
+    if not raw_headers:
+        return []
+    values: list[str] = []
+    target = oauth_service.STATE_COOKIE_NAME + "="
+    for raw_cookie in raw_headers:
+        for part in raw_cookie.split(";"):
+            part = part.strip()
+            if part.startswith(target):
+                val = part[len(target):].strip()
+                if val.startswith('"') and val.endswith('"') and len(val) >= 2:
+                    val = val[1:-1]
+                if val and val not in values:
+                    values.append(val)
+    return values
+
+
 def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
     # SameSite=None + Secure: der State-Cookie MUSS den IdP-Cross-Site-
     # Roundtrip (z. B. Google → msm.mauntingstudios.de) zuverlaessig
@@ -142,6 +170,24 @@ def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
     # JS-Zugriff. Domain-Attribut wird weiterhin aus get_effective_cookie_domain()
     # abgeleitet, damit Subdomain-Setups (z. B. app.X.example.com) korrekt
     # funktionieren.
+    cookie_domain = get_effective_cookie_domain()
+    # Wenn eine Domain gesetzt wird, loeschen wir vorab defensiv ein evtl.
+    # vorhandenes host-only-Cookie, damit keine zwei Cookies im Browser kollidieren.
+    if cookie_domain:
+        response.delete_cookie(
+            key=oauth_service.STATE_COOKIE_NAME,
+            path="/",
+            secure=True,
+            samesite="none",
+            httponly=True,
+        )
+        response.delete_cookie(
+            key=oauth_service.STATE_COOKIE_NAME,
+            path="/",
+            secure=True,
+            samesite="lax",
+            httponly=True,
+        )
     cookie_kwargs: dict[str, Any] = {
         "key": oauth_service.STATE_COOKIE_NAME,
         "value": encrypted,
@@ -151,27 +197,61 @@ def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
         "path": "/",
         "max_age": oauth_service.STATE_TTL_SECONDS,
     }
-    cookie_domain = get_effective_cookie_domain()
     if cookie_domain:
         cookie_kwargs["domain"] = cookie_domain
     response.set_cookie(**cookie_kwargs)
 
 
 def _clear_oauth_state_cookie(response: Response) -> None:
-    # Gleiche Domain/Path/SameSite-Attribute wie beim Setzen → Cookie wird
-    # zuverlaessig geloescht (auch bei Mismatch-Fehlern oder nach erfolgreichem
-    # Login). SameSite=None beim Delete ist zulaessig — Browser matchen das
-    # gegen das urspruenglich gesetzte Cookie.
-    delete_kwargs: dict[str, Any] = {
-        "key": oauth_service.STATE_COOKIE_NAME,
-        "path": "/",
-        "secure": True,
-        "samesite": "none",
-    }
+    """Loescht das OAuth-State-Cookie defensiv ueber alle moeglichen Domain- und SameSite-Scopes.
+
+    Hintergrund (Geister-Cookies):
+    Wurde ein Cookie zuvor host-only (ohne Domain) oder mit Domain (.example.com / example.com)
+    gesetzt, loescht ein einzelner delete_cookie()-Aufruf mit Domain das host-only-Cookie NICHT
+    (und umgekehrt). Das fuehrt dazu, dass im Browser zwei gleichnamige Cookies existieren
+    und beim naechsten Login ein alter 'Geister-State' an den Server gesendet wird.
+    Hier wird das Cookie daher defensiv auf allen relevanten Pfaden/Scopes invalidiert.
+    """
     cookie_domain = get_effective_cookie_domain()
+
+    # 1. Mit konfigurierter/abgeleiteter Domain loeschen (falls vorhanden)
     if cookie_domain:
-        delete_kwargs["domain"] = cookie_domain
-    response.delete_cookie(**delete_kwargs)
+        response.delete_cookie(
+            key=oauth_service.STATE_COOKIE_NAME,
+            path="/",
+            domain=cookie_domain,
+            secure=True,
+            samesite="none",
+            httponly=True,
+        )
+        stripped_domain = cookie_domain.lstrip(".")
+        if stripped_domain and stripped_domain != cookie_domain:
+            response.delete_cookie(
+                key=oauth_service.STATE_COOKIE_NAME,
+                path="/",
+                domain=stripped_domain,
+                secure=True,
+                samesite="none",
+                httponly=True,
+            )
+
+    # 2. Host-only loeschen (kein Domain-Attribut) mit SameSite=none
+    response.delete_cookie(
+        key=oauth_service.STATE_COOKIE_NAME,
+        path="/",
+        secure=True,
+        samesite="none",
+        httponly=True,
+    )
+
+    # 3. Host-only loeschen mit SameSite=lax (fuer aeltere Browser/Dev-Umgebungen)
+    response.delete_cookie(
+        key=oauth_service.STATE_COOKIE_NAME,
+        path="/",
+        secure=True,
+        samesite="lax",
+        httponly=True,
+    )
 
 
 # ── Public: Public-Provider-Listing fuer Login-UI ─────────────────────
@@ -423,6 +503,24 @@ def oauth_callback(
 
     state_cookie = request.cookies.get(oauth_service.STATE_COOKIE_NAME)
     payload = oauth_service.unpack_state_cookie(state_cookie)
+
+    # Defensives Geister-Cookie-Handling: Falls request.cookies den 'falschen'
+    # von mehreren gleichnamigen Cookies gewaehlt hat (z. B. ein altes Host-Only-Cookie
+    # statt des neuen Domain-Cookies), pruefen wir alle State-Cookies im Request-Header.
+    if payload is None or payload.get("state") != state:
+        all_candidates = _extract_all_state_cookies(request)
+        for cand in all_candidates:
+            if cand != state_cookie:
+                cand_payload = oauth_service.unpack_state_cookie(cand)
+                if cand_payload and cand_payload.get("state") == state:
+                    payload = cand_payload
+                    state_cookie = cand
+                    _log.info(
+                        "OAuth callback (slug=%s): matching state successfully recovered from alternate cookie",
+                        slug,
+                    )
+                    break
+
     # WICHTIG: Mode ZUERST lesen, BEVOR wir auf Mismatch prüfen — sonst landet
     # ein Link-Mode-Fehler auf /login (was PublicOnlyRoute für eingeloggte User
     # auf / redirected → der User sieht nie die Fehlermeldung in /profile).
@@ -542,7 +640,7 @@ def _resolve_link_user(
     return current_user
 
 
-@router.post("/{slug}/2fa")
+@router.post("/{slug}/2fa", dependencies=[Depends(auth_rate_limit)])
 def oauth_2fa(
     slug: str,
     body: dict,
@@ -550,13 +648,23 @@ def oauth_2fa(
 ) -> Response:
     """Vervollstaendigt einen OAuth-Login, bei dem der User 2FA aktiv hat.
 
-    Body: ``{"challenge": "...", "otp_code": "123456"}``
+    Body: ``{"challenge": "...", "otp_code": "123456"}`` oder, bei Passkey-Konten,
+    ``{"challenge": "...", "passkey": {...}}`` (Antwort von ``credentials.get()``).
     """
     challenge = (body or {}).get("challenge", "")
     otp_code = (body or {}).get("otp_code", "")
+    passkey_roh = (body or {}).get("passkey")
     if not isinstance(challenge, str) or not isinstance(otp_code, str):
         raise HTTPException(status_code=400, detail="Ungueltige Anfrage")
-    completed = oauth_service.complete_2fa_challenge(db, challenge, otp_code)
+    passkey = None
+    if passkey_roh is not None:
+        try:
+            passkey = PasskeyNachweis.model_validate(passkey_roh).model_dump()
+        except ValidationError:
+            raise HTTPException(status_code=400, detail="Ungueltige Anfrage")
+    completed = oauth_service.complete_2fa_challenge(
+        db, challenge, otp_code=otp_code, passkey=passkey
+    )
     if completed is None:
         raise HTTPException(status_code=401, detail="Ungueltige oder abgelaufene Challenge / falscher Code")
     user, provider = completed
@@ -567,6 +675,35 @@ def oauth_2fa(
     _set_login_session(resp, db, user)
     _clear_oauth_state_cookie(resp)
     return resp
+
+
+@router.post("/{slug}/2fa/methode", dependencies=[Depends(auth_rate_limit)])
+def oauth_2fa_methode(
+    slug: str,
+    body: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Welcher zweite Faktor fuer diese OAuth-Anmeldung gilt — bei Passkey mit Optionen.
+
+    Die Challenge wird nur gelesen, nicht verbraucht: das erledigt `/2fa`.
+    """
+    challenge = (body or {}).get("challenge", "")
+    if not isinstance(challenge, str):
+        raise HTTPException(status_code=400, detail="Ungueltige Anfrage")
+    user = oauth_service.user_fuer_2fa_challenge(db, challenge)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Ungueltige oder abgelaufene Challenge")
+    methode = user.two_factor_method
+    antwort: dict[str, Any] = {"methode": methode}
+    if methode == "passkey":
+        try:
+            antwort["passkey_options"] = passkey_service.bestaetigungs_optionen(
+                db, user, request.headers.get("origin"), "oauth_2fa"
+            )
+        except passkey_service.PasskeyFehler as e:
+            antwort["hinweis"] = str(e)
+    return antwort
 
 
 # ── User-Self: Linked-Accounts ────────────────────────────────────────
@@ -601,6 +738,17 @@ async def unlink_my_account(
     user: User = Depends(get_current_user),
     _=Depends(verify_csrf),
 ) -> dict[str, str]:
+    # Schutz vor Selbst-Aussperrung: Hat das Konto kein Passwort, keine weiteren
+    # OAuth-Links und keinen Passkey, darf die letzte Verbindung nicht getrennt werden.
+    if not user.has_password:
+        links = oauth_service.list_user_links(db, user.id)
+        hat_passkeys = len(user.passkeys) > 0
+        if len(links) <= 1 and not hat_passkeys:
+            raise HTTPException(
+                status_code=400,
+                detail="Diese Verknüpfung kann nicht getrennt werden, da kein Passwort und kein Passkey für dein Konto hinterlegt ist. Bitte lege zuerst ein Passwort fest.",
+            )
+
     ok = oauth_service.unlink_user_from_provider(db, user.id, provider_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Kein Link fuer diesen Provider")
@@ -618,14 +766,19 @@ async def unlink_my_account(
     return {"message": "Verknuepfung aufgehoben"}
 
 
-@router.get("/{slug}/link/start")
+@router.post("/{slug}/link/start", dependencies=[Depends(auth_rate_limit)])
 def oauth_link_start(
     slug: str,
+    req: OAuthLinkStartRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
 ) -> Response:
     """Startet einen Linking-Flow fuer den aktuell eingeloggten User.
 
+    Eine Verknuepfung ist ein neuer Zugang ohne Ablauf, deshalb vorher ein
+    frischer Nachweis. Nur mit ihm entsteht das State-Cookie, das der Callback
+    verlangt. Die Antwort traegt die IdP-Adresse, der Browser geht selbst hin.
     Der IdP redirected am Ende auf den geteilten ``/{slug}/callback`` — der
     Mode wird ueber das (DIS-encrypted) State-Cookie transportiert.
     """
@@ -634,6 +787,15 @@ def oauth_link_start(
     provider = oauth_service.get_provider_by_slug(db, slug)
     if provider is None or not provider.enabled:
         raise HTTPException(status_code=404, detail="Provider nicht verfuegbar")
+    fehlt = passkey_service.frischer_nachweis_fehlt(
+        db, user,
+        password=req.password,
+        otp_code=req.otp_code,
+        passkey=req.passkey.model_dump() if req.passkey else None,
+        zweck="oauth_link",
+    )
+    if fehlt:
+        raise HTTPException(status_code=403, detail=fehlt)
     try:
         auth_url, encrypted = oauth_service.build_authorization_url(
             db, provider, mode=oauth_service.OAUTH_MODE_LINK, user=user
@@ -648,7 +810,8 @@ def oauth_link_start(
         "OAuth link/start (slug=%s) → IdP=%s (cookie_domain=%r, panel_url=%s)",
         slug, idp_host, cookie_domain or "(host-only)", settings.panel_url,
     )
-    resp = _no_cache_redirect(auth_url)
+    resp = JSONResponse({"url": auth_url})
+    resp.headers["Cache-Control"] = "no-store"
     _set_oauth_state_cookie(resp, encrypted)
     return resp
 
@@ -682,7 +845,10 @@ def _handle_login_callback(
         if EmailService.is_configured() and user.email_notifications:
             background_tasks.add_task(
                 EmailService.send_account_registered_notification,
-                user.email, user.username
+                # Der Benutzername ist hier noch vorlaeufig (`user_<hex8>`);
+                # gewaehlt wird er erst im Panel. Anrede also mit dem Namen
+                # beim Anbieter.
+                user.email, profile.name or user.username
             )
 
         result = oauth_service._post_resolve(user)  # type: ignore[attr-defined]
@@ -740,7 +906,9 @@ def _login_redirect_path() -> str:
 
 
 def _profile_redirect_path() -> str:
-    return _frontend_url("/profile")
+    # Der Reiter, der `linked`/`error` auswertet. Ohne ihn landete die Meldung
+    # auf „Konto", wo niemand sie las (bis 27.09.2026).
+    return _frontend_url("/profile?tab=connections")
 
 
 def _frontend_url(path: str) -> str:
@@ -787,11 +955,11 @@ def _redirect_ok(next_path: str) -> Response:
 
 
 def _redirect_profile_error(reason: str) -> Response:
-    resp = _no_cache_redirect(f"{_profile_redirect_path()}?error={reason}")
+    resp = _no_cache_redirect(f"{_profile_redirect_path()}&error={reason}")
     _clear_oauth_state_cookie(resp)
     return resp
 
 
 def _redirect_profile_ok() -> Response:
-    resp = _no_cache_redirect(f"{_profile_redirect_path()}?linked=1")
+    resp = _no_cache_redirect(f"{_profile_redirect_path()}&linked=1")
     return resp

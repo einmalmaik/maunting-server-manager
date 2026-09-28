@@ -27,10 +27,10 @@ export function ResourceMetricCard({
           {icon}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="font-label-md text-[11px] font-semibold uppercase tracking-[0.09em] text-on-surface-variant">
+          <p className="font-label-md text-label-sm font-semibold uppercase tracking-[0.09em] text-on-surface-variant">
             {label}
           </p>
-          <p className="mt-0.5 truncate font-headline text-lg font-semibold text-on-surface">{value}</p>
+          <p className="mt-0.5 truncate font-headline text-title-lg font-semibold text-on-surface">{value}</p>
         </div>
       </div>
       {percent !== undefined ? (

@@ -1,7 +1,11 @@
 backend-dev.log
 backend-dev.err
 PATCHNOTES-ms-oauth-feature.md
-postgres/
+# Datenverzeichnis der managed PostgreSQL (MSM_MANAGED_POSTGRES_DATA_DIR=./postgres).
+# Verankert: ungebunden verschluckte `postgres/` auch frontend/src/components/postgres.
+/postgres/
+/backend/postgres/
+/msm-agent/postgres/
 /dis-sidecar/node_modules
 .factory-test-env
 /.cache
@@ -63,8 +67,10 @@ msm-agent/servers/
 msm-agent/servers-node-2/
 msm-agent/postgres-node-2/
 
-# Databases (production runs on Postgres per .env; this protects SQLite dev/test DBs)
+# Local database files (the panel runs on PostgreSQL only; this keeps stray
+# files such as an old msm.db out of the repository)
 *.db
+# Archiv früherer Umzüge von SQLite nach PostgreSQL (msm.db.migrated) auf Altrechnern
 *.db.migrated
 *.db.migration-complete
 *.sqlite
@@ -105,6 +111,12 @@ docs/smart-system-notes.md
 GEMINI.md
 /smart-system/.idea
 
+# Android-Build-Ausgang der Smart-System-App. `tauri android build` kopiert das
+# fertige `frontend/dist` hierher, damit Gradle es einpacken kann: rund 1300
+# Dateien und 21 MB, die bei jedem Lauf neu entstehen. Der Rest von
+# `gen/android/` (Gradle-Dateien, Manifest, Ressourcen) bleibt versioniert.
+/smart-system/src-tauri/gen/android/app/src/main/assets/
+
 # AI Agent / Dev environment ignore
 .chrome-profile/
 local-plans/
@@ -112,6 +124,7 @@ mcps/
 scratch/
 git_log.txt
 /.agents
+/.freebuff
 
 # Laufprotokolle und persoenliche Editor-Arbeitsbereiche
 *.log

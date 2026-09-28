@@ -35,6 +35,7 @@ from .refresh_token import RefreshToken
 from .jwt_blacklist import JwtBlacklist
 from .email_verification import EmailVerification
 from .backup_code import BackupCode
+from .user_passkey import UserPasskey
 from .panel_setting import PanelSetting
 from .server_port import ServerPort
 from .oauth_provider import OAuthProvider
@@ -43,6 +44,7 @@ from .login_challenge import LoginChallenge
 from .postgres_database import PostgresDatabase
 from .postgres_user import PostgresUser
 from .postgres_grant import PostgresGrant
+from .postgres_instance import PostgresInstance
 from .webhook_subscription import WebhookSubscription
 from .webhook_delivery import WebhookDelivery
 from .singra_webhook_event import SingraWebhookEvent
@@ -57,6 +59,15 @@ from .vault_entry import VaultEntry
 from .vault_hint import VaultHint
 from .vault_user_setting import VaultUserSetting
 from .vault_blind_bucket import VaultBlindBucket
+from .user_achievement import UserAchievement
+from .user_activity_time import UserActivityTime
+from .user_friend import UserFriend
+from .user_presence import UserPresence
+from .e2ee_blind_envelope import E2eeBlindEnvelope
+from .e2ee_blind_mailbox import E2eeBlindMailbox
+from .e2ee_mailbox_push import E2eeMailboxPush
+from .user_e2ee_device import UserE2eeDevice
+from .push_subscription import PushSubscription
 from .credential import (
     CREDENTIAL_KINDS,
     KIND_GITHUB_TOKEN,
@@ -73,6 +84,12 @@ from .hoster import (
     HosterWebhookDelivery,
 )
 
+from .chat_group import ChatGroup, ChatGroupMember
+from .chat_group_config import ChatGroupConfig
+from .chat_story import ChatStory
+from .direct_chat import DirectChat
+from .chat_media import ChatMedia
+
 __all__ = [
     "User", "UserRole", "RoleAiLimit", "AiUsageEvent", "OperationTask",
     "AiProvider", "AiConversation", "AiMessage", "AiActionProposal",
@@ -83,9 +100,9 @@ __all__ = [
     "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",
     "Team", "TeamInvitation", "TeamMember", "TeamServerGrant",
     "Backup", "PanelBackup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",
-    "EmailVerification", "BackupCode", "PanelSetting", "ServerPort",
+    "EmailVerification", "BackupCode", "UserPasskey", "PanelSetting", "ServerPort",
     "OAuthProvider", "OAuthUserLink", "LoginChallenge",
-    "PostgresDatabase", "PostgresUser", "PostgresGrant",
+    "PostgresDatabase", "PostgresUser", "PostgresGrant", "PostgresInstance",
     "WebhookSubscription", "WebhookDelivery", "SingraWebhookEvent",
     "Incident", "GuardianIncidentDelivery", "ChangeEvent",
     "HosterIntegration", "HosterProduct", "HosterIdentity", "HosterService",
@@ -95,4 +112,9 @@ __all__ = [
     "UserMailbox", "UserCalendar", "CalendarEvent", "Note",
     "PanelPopup", "UserPopupState",
     "VaultEntry", "VaultHint", "VaultUserSetting", "VaultBlindBucket",
+    "UserAchievement", "UserActivityTime", "UserFriend", "UserPresence", "E2eeBlindEnvelope",
+    "E2eeBlindMailbox", "E2eeMailboxPush",
+    "UserE2eeDevice", "PushSubscription",
+    "ChatGroup", "ChatGroupMember", "ChatGroupConfig", "ChatStory", "DirectChat", "ChatMedia",
 ]  # noqa: E501
+

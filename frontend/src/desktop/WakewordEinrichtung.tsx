@@ -33,6 +33,7 @@ import {
   type AppKonfig,
   type WakewordStand,
 } from './tauri'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 /**
  * Muss zu `wakeword::AUFNAHMEN_SOLL` in Rust passen.
@@ -170,7 +171,7 @@ export function WakewordEinrichtung() {
           stream.getTracks().forEach((t) => t.stop())
         } catch (e: any) {
           setBeschaeftigt(null)
-          setMeldung(t('mss.wakeword.keinMikrofon', 'Mikrofonzugriff wurde verweigert oder ist nicht verfügbar.'))
+          setMeldung(t('mss.wakeword.keinMikrofon'))
           return
         }
       }
@@ -212,6 +213,7 @@ export function WakewordEinrichtung() {
     setMeldung(null)
     try {
       await tun()
+      if (name === 'training') meldeErrungenschaft('starter_wakeword_tuned')
       await standLaden()
     } catch (fehler) {
       setMeldung(String(fehler))
@@ -245,7 +247,7 @@ export function WakewordEinrichtung() {
 
       {/* Assistent-Name als Rufname */}
       <div className="flex items-center gap-2">
-        <span className="text-xs text-on-surface-variant">{t('mss.wakeword.rufname', 'Rufname:')}</span>
+        <span className="text-xs text-on-surface-variant">{t('mss.wakeword.rufname')}</span>
         <span className="text-sm font-medium text-on-surface">{agentName}</span>
       </div>
 
@@ -296,7 +298,7 @@ export function WakewordEinrichtung() {
           onClick={() => void aktion('reset', () => wakewordZuruecksetzen())}
           disabled={beschaeftigt !== null || (stand.aufnahmen === 0 && !stand.trainiert)}
         >
-          {t('mss.wakeword.zuruecksetzen')}
+          {t('common.reset')}
         </Button>
       </div>
 

@@ -231,7 +231,7 @@ def test_deletion_cannot_reach_another_users_memory(
         arguments={"scope": "user", "keys": ["zeitzone"]},
     )
 
-    uebrig = db.query(AiMemoryEntry).filter(AiMemoryEntry.key == "zeitzone").all()
+    uebrig = [r for r in db.query(AiMemoryEntry).all() if r.key == "zeitzone"]
     assert len(uebrig) == 1
     assert uebrig[0].scope_identity == f"user:{other.id}"
 
@@ -899,8 +899,7 @@ def test_eine_erlaubte_korrektur_nimmt_dem_eintrag_nicht_dauerhaft_den_schutz(
     )
 
     zeile = db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity == f"user:{regular_user.id}",
-        AiMemoryEntry.key == "ram.bevorzugt",
+        ai_memory_service.schluessel_bedingung(db, f"user:{regular_user.id}", ["ram.bevorzugt"])
     ).one()
     assert zeile.origin == "user"
 
@@ -1143,7 +1142,7 @@ def test_ein_vorhandener_schluessel_ist_kein_doppel_sondern_das_update(
             db, user=regular_user, scope="user", server_id=None,
             key=key, value=value, origin="ai",
         )
-    altlast = db.query(AiMemoryEntry).filter(AiMemoryEntry.key == "standard_ram").one()
+    (altlast,) = [r for r in db.query(AiMemoryEntry).all() if r.key == "standard_ram"]
 
     # Jeder Aufruf findet ein Doppel — so verhält sich der Bestand oben.
     monkeypatch.setattr(

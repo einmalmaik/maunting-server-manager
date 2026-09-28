@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Iterable, Protocol
 
 
-STANDARD_PORT_ROLES = {"game", "query", "rcon", "voice", "web", "peer"}
+STANDARD_PORT_ROLES = {"game", "query", "rcon", "voice", "web", "peer", "database"}
 VALID_PORT_PROTOCOLS = {"tcp", "udp"}
 
 

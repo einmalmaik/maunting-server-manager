@@ -220,13 +220,9 @@ def community_blueprint_path(blueprint_id: str) -> Path:
 
 
 def ensure_community_dir() -> Path:
-    """Legt das Community-Verzeichnis an, falls noetig (mode 750)."""
+    """Legt das Verzeichnis an, ohne vorhandene Zugriffsrechte zu erweitern."""
     target = _community_dir()
-    target.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(target, 0o750)
-    except OSError as exc:
-        logger.warning("chmod 0750 fuer %s fehlgeschlagen: %s", target, exc)
+    target.mkdir(mode=0o750, parents=True, exist_ok=True)
     return target
 
 

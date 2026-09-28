@@ -10,6 +10,7 @@ import { NumberStepper } from '@/components/ui/NumberStepper'
 import { Switch } from '@/components/ui/Switch'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function EmailTab() {
   const { t } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
@@ -101,7 +102,7 @@ export function EmailTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -112,7 +113,7 @@ export function EmailTab() {
         <div className="msm-card p-6">
           <div className="flex items-center gap-2 mb-6">
             <Mail className="h-5 w-5 text-secondary" aria-hidden="true" />
-            <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.emailTitle')}</h2>
+            <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('settings.emailTitle')}</h2>
           </div>
 
           <div className="flex gap-4 mb-6">
@@ -256,7 +257,7 @@ export function EmailTab() {
                         setClearResendKey(true)
                         setNewResendKey('')
                       }}
-                      className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                      className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-destructive transition-colors"
                       title={t('common.delete', { defaultValue: 'Entfernen' })}
                       aria-label={t('common.delete', { defaultValue: 'Entfernen' })}
                     >
@@ -298,19 +299,19 @@ export function EmailTab() {
               </div>
 
               <div className="flex justify-end pt-2">
-                <button
+                <Button
                   type="button"
                   onClick={handleSaveResendKey}
                   disabled={savingResend || (!newResendKey.trim() && !clearResendKey) || !canWrite}
-                  className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 disabled:opacity-50"
                 >
                   {savingResend ? (
-                    <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                    <Spinner />
                   ) : (
                     <Save className="w-4 h-4" />
                   )}
                   {t('settings.save', { defaultValue: 'Speichern' })}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -329,19 +330,19 @@ export function EmailTab() {
                   placeholder="test@example.com"
                 />
               </div>
-              <button
+              <Button variant="secondary" size="lg"
                 type="button"
                 onClick={handleTestEmail}
                 disabled={sendingTest || !testEmail}
-                className="msm-btn-secondary px-4 py-2.5 inline-flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
+                className="inline-flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
               >
                 {sendingTest ? (
-                  <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                  <Spinner />
                 ) : (
                   <Send className="w-4 h-4" />
                 )}
                 {t('settings.testEmail')}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -350,7 +351,7 @@ export function EmailTab() {
           <div className="flex justify-end">
             <Button type="submit" disabled={saving}>
               {saving ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Save className="w-4 h-4" />
               )}

@@ -35,19 +35,19 @@ const config: Config = {
         // Content colors
         'on-surface': '#e7f4f7',
         'on-surface-variant': '#a9bdc3',
-        'on-background': '#e7f4f7',
-        'background': '#071013',
+        'on-background': 'hsl(var(--dna-foreground) / <alpha-value>)',
+        'background': 'hsl(var(--dna-background) / <alpha-value>)',
         // Shadcn-compatible aliases used by existing central components
-        'foreground': '#e7f4f7',
+        'foreground': 'hsl(var(--dna-foreground) / <alpha-value>)',
         'muted': '#162328',
         'muted-foreground': '#9db3b8',
         'border': '#284147',
         'input': '#284147',
-        'ring': '#67e8f9',
+        'ring': 'hsl(var(--dna-focus) / <alpha-value>)',
         'card': '#101b1f',
         'card-foreground': '#e7f4f7',
         // Primary (Logo ice cyan)
-        'primary': '#b9f6ff',
+        'primary': 'hsl(var(--dna-primary) / <alpha-value>)',
         // DIS Design DNA ice colors
         'ice': {
           100: 'hsl(188 29% 95%)',
@@ -89,18 +89,19 @@ const config: Config = {
         'on-error': '#690005',
         'error-container': '#93000a',
         'on-error-container': '#ffdad6',
-        'status-success': 'hsl(158 64% 52%)',
-        'status-warning': 'hsl(38 92% 50%)',
-        'status-destructive': 'hsl(0 70% 55%)',
-        'status-error': 'hsl(0 70% 55%)',
-        'destructive': 'hsl(0 70% 55%)',
-        'destructive-foreground': '#fff1f2',
+        // Ein Token je Bedeutung. Die Werte stehen in
+        // `packages/design-dna/tokens.css`, nicht hier — sonst gibt es sie
+        // wieder zweimal. `status-error` und `destructive` waren nur andere
+        // Namen für `status-destructive` und sind abgeschafft; wer sie
+        // schreibt, bekommt seit 09/2026 keine Farbe mehr.
+        'status-success': 'hsl(var(--dna-success) / <alpha-value>)',
+        'status-warning': 'hsl(var(--dna-warning) / <alpha-value>)',
+        'status-destructive': 'hsl(var(--dna-danger) / <alpha-value>)',
         // Infrastructure
         'outline': '#5b737a',
         'outline-variant': '#284147',
         'infrastructure-slate': '#475569',
         'cyan-glow': 'hsl(190 92% 62% / 0.16)',
-        'deep-background': 'hsl(206 31% 4%)',
         // Inverse
         'inverse-surface': '#e7f4f7',
         'inverse-on-surface': '#0b1518',
@@ -134,6 +135,16 @@ const config: Config = {
         'sans': ['Inter', 'system-ui', 'sans-serif'],
         'mono': ['JetBrains Mono', 'monospace'],
       },
+      /**
+       * Die Typo-Skala. Sie hatte Luecken, die niemandem auffielen, weil eine
+       * undefinierte Stufe kein CSS erzeugt und die Schrift einfach so bleibt,
+       * wie sie war: `body-sm` (20x), `title-md` (3x) und `label-lg` (3x)
+       * standen im Quelltext, aber nicht hier.
+       *
+       * `label-sm` ist die Untergrenze. Darunter lagen 388 feste Pixelwerte
+       * zwischen 8 und 11 px — unter jeder definierten Stufe und an der Grenze
+       * des Lesbaren.
+       */
       fontSize: {
         'display-sm': ['36px', { lineHeight: '1.15', fontWeight: '700' }],
         'headline-lg': ['32px', { lineHeight: '1.2', letterSpacing: '0', fontWeight: '700' }],
@@ -141,10 +152,14 @@ const config: Config = {
         'headline-md': ['24px', { lineHeight: '1.3', fontWeight: '600' }],
         'headline-sm': ['20px', { lineHeight: '1.3', fontWeight: '600' }],
         'title-lg': ['18px', { lineHeight: '1.4', fontWeight: '600' }],
+        'title-md': ['16px', { lineHeight: '1.4', fontWeight: '600' }],
         'title-sm': ['14px', { lineHeight: '1.4', fontWeight: '600' }],
         'body-lg': ['18px', { lineHeight: '1.6', fontWeight: '400' }],
         'body-md': ['16px', { lineHeight: '1.5', fontWeight: '400' }],
+        'body-sm': ['14px', { lineHeight: '1.5', fontWeight: '400' }],
+        'label-lg': ['16px', { lineHeight: '1.4', letterSpacing: '0', fontWeight: '500' }],
         'label-md': ['14px', { lineHeight: '1.4', letterSpacing: '0', fontWeight: '500' }],
+        'label-sm': ['12px', { lineHeight: '1.4', letterSpacing: '0', fontWeight: '500' }],
         'mono-sm': ['13px', { lineHeight: '1.5', fontWeight: '400' }],
       },
       spacing: {
@@ -155,6 +170,47 @@ const config: Config = {
         'panel-padding': '1.5rem',
         'stack-compact': '0.5rem',
         'stack-default': '1rem',
+      },
+      /*
+       * Ein- und Ausblenden von Overlays.
+       *
+       * Vorher standen im Quelltext sechs Schreibweisen für vier Effekte, und
+       * keine davon erzeugte CSS: `animate-in fade-in slide-in-from-bottom-2`
+       * ist das Vokabular des Plugins `tailwindcss-animate`, das nie
+       * eingebunden war (`plugins: []`), und `animate-[fadeIn_.15s_ease-out]`
+       * verwies auf Keyframes, die es nicht gibt. Dialoge, Menüs und die
+       * mobile Sidebar erschienen deshalb hart, ohne dass es jemandem auffiel —
+       * eine fehlende Animation sieht aus wie eine schnelle.
+       *
+       * Vier Keyframes statt eines Plugins: das Plugin bringt ein volles
+       * Vokabular für Ein- und Ausblendungen mit, benutzt würden vier Varianten.
+       * Die Dauer steckt in der Definition, weil Tailwinds `duration-*` nur
+       * `transition-duration` setzt und Animationen gar nicht erreicht — die
+       * `duration-200` neben den alten `animate-in` waren wirkungslos.
+       */
+      keyframes: {
+        'fade-in': {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
+        'scale-in': {
+          from: { opacity: '0', transform: 'scale(0.96)' },
+          to: { opacity: '1', transform: 'scale(1)' },
+        },
+        'slide-up': {
+          from: { opacity: '0', transform: 'translateY(0.5rem)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+        'slide-in-left': {
+          from: { opacity: '0', transform: 'translateX(-100%)' },
+          to: { opacity: '1', transform: 'translateX(0)' },
+        },
+      },
+      animation: {
+        'fade-in': 'fade-in 150ms ease-out both',
+        'scale-in': 'scale-in 150ms ease-out both',
+        'slide-up': 'slide-up 180ms ease-out both',
+        'slide-in-left': 'slide-in-left 180ms ease-out both',
       },
       backgroundImage: {
         'deep-grid': `linear-gradient(to right, rgba(65, 72, 73, 0.1) 1px, transparent 1px),

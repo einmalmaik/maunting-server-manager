@@ -1047,3 +1047,40 @@ def test_restart_server_sync_failure_reraises_original_exception(db: Session) ->
         db.refresh(server)
         assert server.status == "failed"
         assert "Simulation of restart failure" in server.status_message
+
+
+def test_start_eines_datenbankservers_holt_die_einrichtung_nach():
+    """Die Einrichtung (Datenbank + Rollen) lief nur einmal nach dem Anlegen, mit
+    fuenf Minuten Frist. Scheiterte der erste Start, blieb die Instanz fuer immer
+    ohne Datenbank — der naechste erfolgreiche Start holte nichts nach, obwohl
+    der Provisioning-Kommentar genau das versprach, und das Studio zeigte nur
+    „PostgreSQL connection failed"."""
+    from models import PostgresInstance
+
+    server = Server(id=26, name="DB", game_type="postgres", install_dir="/tmp/test", public_bind_ip="127.0.0.1")
+    server.ports = []
+    server.postgres_instance = PostgresInstance(server_id=26)
+    db = MagicMock(spec=Session)
+    plugin = _http_plugin(update_available=False)
+
+    with patch("services.server_lifecycle_service.open_ports"), \
+         patch("services.server_lifecycle_service.iptables_accept_server"), \
+         patch("services.postgres_instance_service.bootstrap_in_background") as einrichtung:
+        _run_start(db, server, plugin)
+
+    assert server.status == "running"
+    einrichtung.assert_called_once_with(26)
+
+
+def test_start_eines_anwendungsservers_richtet_keine_datenbank_ein():
+    server = Server(id=27, name="App", game_type="custom", install_dir="/tmp/test", public_bind_ip="127.0.0.1")
+    server.ports = []
+    db = MagicMock(spec=Session)
+    plugin = _http_plugin(update_available=False)
+
+    with patch("services.server_lifecycle_service.open_ports"), \
+         patch("services.server_lifecycle_service.iptables_accept_server"), \
+         patch("services.postgres_instance_service.bootstrap_in_background") as einrichtung:
+        _run_start(db, server, plugin)
+
+    einrichtung.assert_not_called()

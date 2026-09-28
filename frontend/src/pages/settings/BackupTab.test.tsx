@@ -99,7 +99,7 @@ describe('BackupTab', () => {
     })
     renderTab()
     expect(await screen.findByText('S3: Konfiguriert')).toBeInTheDocument()
-    expect(screen.getByText('Backup-Passwort: Gesetzt')).toBeInTheDocument()
+    expect(screen.getByText('Backup-Passwort gesetzt')).toBeInTheDocument()
   })
 
   it('status section shows not-configured flags when false', async () => {
@@ -110,7 +110,7 @@ describe('BackupTab', () => {
     })
     renderTab()
     expect(await screen.findByText('S3: Nicht konfiguriert')).toBeInTheDocument()
-    expect(screen.getByText('Backup-Passwort: Nicht gesetzt')).toBeInTheDocument()
+    expect(screen.getByText('Backup-Passwort nicht gesetzt')).toBeInTheDocument()
   })
 
   it('save button posts S3 config and shows German success toast', async () => {

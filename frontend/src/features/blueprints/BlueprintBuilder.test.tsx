@@ -135,7 +135,7 @@ describe('BlueprintBuilder accessibility', () => {
     render(<Harness />)
     fireEvent.click(screen.getByRole('button', { name: 'Editor öffnen' }))
     fireEvent.click(screen.getByRole('button', { name: /Autopilot/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Vorlage laden...' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Vorlage laden …' }))
     fireEvent.click(screen.getByRole('option', { name: presetName }))
     fireEvent.click(screen.getByRole('button', { name: /Prüfen/ }))
 

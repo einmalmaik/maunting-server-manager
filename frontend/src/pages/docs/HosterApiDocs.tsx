@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, KeyRound, Link2, ListChecks, Plug, Radio, ShieldCheck, Signature, Table2 } from 'lucide-react'
 import { CodeBlock } from '@/components/docs/CodeBlock'
 import { PageHeader } from '@/Singra/UI/PageHeader'
+import { Sprungleiste, SPRUNGZIEL_ABSTAND } from '@/Singra/UI/Sprungleiste'
 
+import { buttonClasses } from '@/Singra/UI'
 /**
  * Endpunkt- und Webhook-Referenz fuer Shop-Anbindungen.
  *
@@ -178,13 +180,14 @@ const SECTIONS = [
   ['signature', 'signature'],
   ['handoff', 'handoff'],
   ['admin', 'admin'],
+  ['operations', 'operations'],
 ] as const
 
 function SectionHeading({ id, icon, title }: { id: string; icon: React.ReactNode; title: string }) {
   return (
     <div className="mb-4 flex items-center gap-2">
       <span className="text-primary">{icon}</span>
-      <h2 id={id} className="font-headline text-headline-md text-on-surface">{title}</h2>
+      <h2 id={id} className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>{title}</h2>
     </div>
   )
 }
@@ -197,7 +200,7 @@ function DefinitionTable({ rows }: { rows: { term: string; body: string; badge?:
           <dt className="flex flex-wrap items-center gap-2 text-sm font-semibold text-on-surface">
             <code className="rounded bg-surface-container-highest px-1.5 py-0.5 font-mono text-xs">{row.term}</code>
             {row.badge && (
-              <span className="rounded-full bg-surface-container-highest px-2 py-0.5 font-mono text-[11px] text-on-surface-variant">
+              <span className="rounded-full bg-surface-container-highest px-2 py-0.5 font-mono text-label-sm text-on-surface-variant">
                 {row.badge}
               </span>
             )}
@@ -221,21 +224,15 @@ export function HosterApiDocs() {
         status={<Plug className="h-6 w-6 text-primary" aria-hidden="true" />}
       />
 
-      <Link to="/docs" className="msm-btn-secondary mb-6 inline-flex items-center gap-2 px-3 py-2 text-sm">
+      <Link to="/docs" className={buttonClasses('secondary', 'md', 'mb-6')}>
         <ArrowLeft className="h-4 w-4" />
         {t('docsHosterApi.backToDocs')}
       </Link>
 
-      <nav
-        className="sticky top-16 z-10 -mx-1 mb-6 flex gap-2 overflow-x-auto bg-surface/95 px-1 py-2 backdrop-blur"
-        aria-label={t('docsHosterApi.navigationLabel')}
-      >
-        {SECTIONS.map(([id, key]) => (
-          <a key={id} href={`#${id}`} className="msm-btn-secondary shrink-0 px-3 py-2 text-xs">
-            {t(`docsHosterApi.${key}.title`)}
-          </a>
-        ))}
-      </nav>
+      <Sprungleiste
+        label={t('docsHosterApi.navigationLabel')}
+        ziele={SECTIONS.map(([id, key]) => ({ id, label: t(`docsHosterApi.${key}.title`) }))}
+      />
 
       {/* Ohne angelegte Integration passiert nichts von alledem — das steht
           bewusst ganz oben, weil Self-Hosting der Normalfall ist. */}
@@ -448,7 +445,7 @@ export function HosterApiDocs() {
             body: t(`docsHosterApi.operations.${item}.body`),
           }))}
         />
-        <Link to="/docs/self-hosting#hoster-integration" className="msm-btn-secondary mt-6 inline-flex items-center gap-2 px-4 py-2 text-sm">
+        <Link to="/docs/self-hosting#hoster-integration" className={buttonClasses('secondary', 'md', 'mt-6')}>
           <Plug className="h-4 w-4" />
           {t('docsHosterApi.operations.setupLink')}
         </Link>

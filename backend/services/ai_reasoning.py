@@ -134,8 +134,13 @@ def darf_nachdenken(modell: Modell, deckel: int | None) -> bool:
 
 
 def darf_abschalten(modell: Modell) -> bool:
-    """Ob „aus“ eine gültige Wahl ist. Bei 82 der 402 Modelle ist sie es nicht."""
-    return modell.denkt and not modell.zwingend
+    """Ob „aus“ eine gültige Wahl ist. Bei 82 der 402 Modelle ist sie es nicht.
+
+    ``bool(…)`` und nicht ``modell.denkt`` selbst: seit ``denkt`` auch ``None``
+    sein kann („der Katalog weiß es nicht"), käme sonst ein ``None`` zurück, wo
+    ein Wahrheitswert versprochen ist — und die Antwort ginge so in die API.
+    """
+    return bool(modell.denkt) and not modell.zwingend
 
 
 def _kennt_schalter(kind: str) -> bool:
@@ -181,6 +186,41 @@ def _aus(modell: Modell) -> tuple[bool, str | None]:
     return False, (AUS_STUFE if AUS_STUFE in modell.stufen else None)
 
 
+def eingefroren_pruefen(
+    modell: Modell | None, *, aktiv: bool, stufe: str | None
+) -> tuple[bool, str | None]:
+    """Eine **festgelegte** Stufe, geprüft gegen das Modell, das sie jetzt trifft.
+
+    Für Stufen, die nicht in diesem Augenblick gewählt, sondern vorher
+    festgelegt wurden: die eines laufenden Auftrags (`ai_stream.context.
+    _denken_am_modell`, dort steht die ausführliche Begründung) und die, die
+    der Betreiber einem GPT-Live-Backend mitgibt. In beiden Fällen kann das
+    Modell inzwischen ein anderes sein oder die Stufe nie geführt haben — und
+    ein Wort, das es nicht kennt, ist ein ``400``.
+
+    Geprüft, nicht neu berechnet: was passt, geht unverändert hinaus; was nicht
+    passt, wird **nach unten** geklemmt, mit der festgelegten Stufe als Decke.
+    Schweigt der Katalog (``modell is None``), bleibt alles, wie es war.
+    """
+    if modell is None:
+        return aktiv, stufe
+    if not modell.denkt:
+        # Ein Modell ohne Denkvermögen: dort ist jedes ``reasoning_effort`` ein
+        # ``400``, ``none`` eingeschlossen. Dasselbe gilt für eines, über das der
+        # Katalog nichts weiß (``denkt is None``) — dort ist „nichts senden" die
+        # einzige Stufe ohne Risiko.
+        return False, None
+    if stufe is None or stufe in modell.stufen:
+        return aktiv, stufe
+    if stufe == AUS_STUFE:
+        # „Aus“ ist selbst nur ein Wort, und nicht jedes Modell führt es. Beim
+        # neuen Modell heißt dasselbe womöglich „gar kein Feld“ — oder, bei
+        # Denkzwang, „so flach wie es geht“. Ein Deckel von ``MIN_RANG`` sagt
+        # genau das, und zwar in derselben Funktion wie überall sonst.
+        return klemmen(modell, wunsch=None, aktiv=False, deckel=MIN_RANG)
+    return klemmen(modell, wunsch=stufe, aktiv=aktiv, deckel=rang(stufe))
+
+
 def klemmen(
     modell: Modell, *, wunsch: str | None, aktiv: bool, deckel: int | None
 ) -> tuple[bool, str | None]:
@@ -219,6 +259,11 @@ def klemmen(
     (`Anbieter.protokoll_chat`), kommen Denkschritte und Werkzeugaufruf dort in
     derselben Runde, und die Ausnahme wäre eine stille Verschlechterung
     geworden: der Worker soll gerade denken dürfen, während er arbeitet.
+
+    **Ein Modell, über das der Katalog schweigt** (``denkt is None``), geht wie
+    eines ohne Denkvermögen durch: nichts wird gesendet. Das ist dieselbe
+    Abwägung wie in `vorgabe` für ein ganz unbekanntes Modell — ein
+    ``reasoning_effort`` an ein Modell, das keines kennt, ist ein ``400``.
     """
     if not modell.denkt:
         return False, None

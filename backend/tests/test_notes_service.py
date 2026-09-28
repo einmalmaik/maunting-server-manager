@@ -1,20 +1,13 @@
 """Unit tests for NotesService."""
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from database import Base
 from models import User, Note, Team, TeamMember
 from services.notes_service import NotesService
 
 
 @pytest.fixture
-def db_session():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(bind=engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
+def db_session(db):
+    """Die gemeinsame Test-Datenbank aus conftest.py."""
+    return db
 
 
 @pytest.fixture
@@ -128,3 +121,198 @@ def test_privacy_other_user_cannot_access(db_session, test_user, other_user):
 
     with pytest.raises(ValueError):
         NotesService.get_note(db_session, user=other_user, note_id_or_uid=note["note_uid"])
+
+
+def test_notes_stored_encrypted_in_database(db_session, test_user):
+    """Beweist, dass in der Datenbank absolut KEIN Klartext fuer title und content existiert."""
+    secret_title = "Absolutes_Geheimnis_12345"
+    secret_content = "Dies_ist_vertraulicher_Inhalt_XYZ"
+
+    note = NotesService.create_note(
+        db_session,
+        user=test_user,
+        title=secret_title,
+        content=secret_content,
+    )
+
+    # Direkte RAW SQL Abfrage der DB-Tabelle (wie ein neugieriger Admin)
+    from sqlalchemy import text
+    row = db_session.execute(
+        text("SELECT title, content FROM notes WHERE note_uid = :uid"),
+        {"uid": note["note_uid"]},
+    ).fetchone()
+
+    raw_title, raw_content = row[0], row[1]
+
+    # Der Klartext darf NIEMALS in der Datenbank stehen!
+    assert secret_title not in raw_title
+    assert secret_content not in raw_content
+    # Es muss ein Base64-DIS-Ciphertext sein
+    assert len(raw_title) > 20
+    assert len(raw_content) > 20
+
+    # Aber fuer den berechtigten Nutzer wird es sauber entschluesselt
+    fetched = NotesService.get_note(db_session, user=test_user, note_id_or_uid=note["note_uid"])
+    assert fetched["title"] == secret_title
+    assert fetched["content"] == secret_content
+
+
+def test_notes_automatic_migration_of_legacy_plaintext(db_session, test_user):
+    """Beweist, dass Altdaten im Klartext beim ersten Aufruf automatisch verschluesselt werden."""
+    from sqlalchemy import text
+    import uuid
+
+    legacy_uid = str(uuid.uuid4())
+    legacy_title = "Alte_Unverschluesselte_Notiz"
+    legacy_content = "Alter_Klartext_der_damals_gespeichert_wurde"
+
+    # Altdaten direkt unverschluesselt in die DB einschleusen
+    db_session.execute(
+        text(
+            "INSERT INTO notes (user_id, note_uid, title, content, category, color, is_pinned, is_archived, note_type, created_at, updated_at) "
+            "VALUES (:uid, :nuid, :title, :content, 'personal', 'primary', false, false, 'personal', now(), now())"
+        ),
+        {
+            "uid": test_user.id,
+            "nuid": legacy_uid,
+            "title": legacy_title,
+            "content": legacy_content,
+        },
+    )
+    db_session.commit()
+
+    # Vor dem Aufruf: In der DB steht Klartext
+    before_row = db_session.execute(
+        text("SELECT title, content FROM notes WHERE note_uid = :uid"),
+        {"uid": legacy_uid},
+    ).fetchone()
+    assert before_row[0] == legacy_title
+    assert before_row[1] == legacy_content
+
+    # Nutzer ruft get_notes() auf
+    notes = NotesService.get_notes(db_session, user=test_user)
+    migrated_note = next(n for n in notes if n["note_uid"] == legacy_uid)
+    assert migrated_note["title"] == legacy_title
+    assert migrated_note["content"] == legacy_content
+
+    # Nach dem Aufruf: Die Datenbank MUSS jetzt transparent und dauerhaft verschluesselt sein!
+    after_row = db_session.execute(
+        text("SELECT title, content FROM notes WHERE note_uid = :uid"),
+        {"uid": legacy_uid},
+    ).fetchone()
+    assert after_row[0] != legacy_title
+    assert legacy_title not in after_row[0]
+    assert after_row[1] != legacy_content
+    assert legacy_content not in after_row[1]
+
+
+def test_notes_client_e2ee_opaque_storage(db_session, test_user):
+    """Beweist, dass client-seitig verschluesselte Daten (sv-note-v1:) vom Server nicht angefasst werden."""
+    from sqlalchemy import text
+
+    client_cipher_title = "sv-note-v1:abcdef1234567890base64title"
+    client_cipher_content = "sv-note-v1:fedcba0987654321base64content"
+
+    note = NotesService.create_note(
+        db_session,
+        user=test_user,
+        title=client_cipher_title,
+        content=client_cipher_content,
+        category="personal",
+    )
+
+    # In der DB muss exakt der Client-Ciphertext stehen
+    row = db_session.execute(
+        text("SELECT title, content FROM notes WHERE note_uid = :uid"),
+        {"uid": note["note_uid"]},
+    ).fetchone()
+    assert row[0] == client_cipher_title
+    assert row[1] == client_cipher_content
+
+    # Beim Abruf erhaelt der Client den Ciphertext unveraendert zur client-seitigen Entschluesselung
+    fetched = NotesService.get_note(db_session, user=test_user, note_id_or_uid=note["note_uid"])
+    assert fetched["title"] == client_cipher_title
+    assert fetched["content"] == client_cipher_content
+
+    # Update mit neuem Client-Ciphertext
+    new_cipher_title = "sv-note-v1:new9876543210title"
+    updated = NotesService.update_note(
+        db_session,
+        user=test_user,
+        note_id_or_uid=note["note_uid"],
+        title=new_cipher_title,
+    )
+    assert updated["title"] == new_cipher_title
+
+    upd_row = db_session.execute(
+        text("SELECT title FROM notes WHERE note_uid = :uid"),
+        {"uid": note["note_uid"]},
+    ).fetchone()
+    assert upd_row[0] == new_cipher_title
+
+    client_uid = "client-uuid-98765-note"
+    note_with_uid = NotesService.create_note(
+        db_session,
+        user=test_user,
+        note_uid=client_uid,
+        title=client_cipher_title,
+        content=client_cipher_content,
+        category="personal",
+    )
+    assert note_with_uid["note_uid"] == client_uid
+
+    # Idempotenter Replay mit gleicher UID liefert denselben Eintrag
+    replay_note = NotesService.create_note(
+        db_session,
+        user=test_user,
+        note_uid=client_uid,
+        title=client_cipher_title,
+        content=client_cipher_content,
+        category="personal",
+    )
+    assert replay_note["note_uid"] == client_uid
+    assert replay_note["id"] == note_with_uid["id"]
+
+
+
+
+@pytest.mark.parametrize("order,expected", [
+    ("asc", ["Pinned", "alpha", "Zulu"]),
+    ("desc", ["Pinned", "Zulu", "alpha"]),
+])
+def test_titelsortierung_nach_entschluesselung(db_session, test_user, monkeypatch, order, expected):
+    from services import notes_service
+    for title, pinned in [("Zulu", False), ("alpha", False), ("Pinned", True)]:
+        NotesService.create_note(db_session, user=test_user, title=title, content="", is_pinned=pinned)
+    # In Anlagereihenfolge: ohne ORDER BY verspricht die Datenbank keine.
+    rows = db_session.query(Note).order_by(Note.id).all()
+    titles = {row.id: title for row, title in zip(rows, ["Zulu", "alpha", "Pinned"])}
+    for row, encrypted in zip(rows, ["cipher-a", "cipher-z", "cipher-m"]):
+        row.title = encrypted
+    db_session.commit()
+    monkeypatch.setattr(NotesService, "_decrypt_or_migrate", lambda _db, row, _klartexte=None: (titles[row.id], ""))
+    result = NotesService.get_notes(db_session, test_user, sort_by="title", order=order)
+    assert [row["title"] for row in result] == expected
+
+
+def test_liste_entschluesselt_gebuendelt(db_session, test_user, monkeypatch):
+    """Die Liste fragt den Sidecar einmal, nicht zweimal je Notiz (bis 27.09.2026)."""
+    from services.dis_client import DisClient
+
+    for i in range(5):
+        NotesService.create_note(db_session, user=test_user, title=f"Titel {i}", content=f"Inhalt {i}")
+    db_session.expire_all()
+    einzeln = []
+    echt = DisClient.decrypt
+
+    def zaehle(ciphertext, aad=None):
+        einzeln.append(ciphertext)
+        return echt(ciphertext, aad)
+
+    monkeypatch.setattr(DisClient, "decrypt", staticmethod(zaehle))
+
+    notes = NotesService.get_notes(db_session, user=test_user)
+
+    assert sorted(n["title"] for n in notes) == [f"Titel {i}" for i in range(5)]
+    assert sorted(n["content"] for n in notes) == [f"Inhalt {i}" for i in range(5)]
+    assert einzeln == []

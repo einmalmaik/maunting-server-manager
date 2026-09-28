@@ -70,6 +70,7 @@ class _ServerState:
     file_pos: int = 0
     declared_file_positions: dict[str, int] = field(default_factory=dict)
     last_disconnected_at: float | None = None
+    rueckblick: asyncio.Task | None = None
 
 
 @dataclass(frozen=True)
@@ -171,50 +172,74 @@ def _serialize(line: _Line) -> str:
     )
 
 
+#: Wie viel vom Ende der Logdatei der Rueckblick liest. Der Ringpuffer haelt
+#: ohnehin nur ``RING_BUFFER_SIZE`` Zeilen.
+BACKLOG_BYTES = 512 * 1024
+
+
+def _backlog_zeilen(log_path: str) -> tuple[int, list[tuple[str, str]]]:
+    """Liest das Ende der Logdatei: Groesse und (Zeitstempel, Text) je Zeile.
+
+    Nur das Ende, und im Thread (siehe ``_read_initial_backlog``). Die Datei
+    wird nie rotiert und traegt jede Installation und jedes Update; bis
+    27.09.2026 las der erste Blick in die Konsole sie ganz, auf der
+    Ereignisschleife.
+    """
+    size = os.path.getsize(log_path)
+    with open(log_path, "rb") as f:
+        anfang = max(0, size - BACKLOG_BYTES)
+        f.seek(anfang)
+        daten = f.read(size - anfang)
+    rohzeilen = daten.splitlines()
+    if anfang > 0 and rohzeilen:
+        # Mitten in einer Zeile begonnen: der Rest davor fehlt.
+        rohzeilen = rohzeilen[1:]
+    zeilen: list[tuple[str, str]] = []
+    for raw_line in rohzeilen[-RING_BUFFER_SIZE:]:
+        if not raw_line:
+            continue
+        line_str = raw_line.decode("utf-8", errors="replace")
+        ts = _utc_iso()
+        text = line_str
+        if "\t" in line_str:
+            parts = line_str.split("\t", 1)
+            if len(parts) == 2:
+                cand, rest = parts
+                try:
+                    cand_norm = cand.replace("Z", "+00:00")
+                    datetime.fromisoformat(cand_norm)
+                    ts = cand
+                    text = rest
+                except Exception:
+                    pass
+        zeilen.append((ts, text))
+    return size, zeilen
+
+
 async def _read_initial_backlog(log_path: str, state: _ServerState, server_id: int | None = None) -> None:
-    """Liest die MSM-Console-Logdatei in den Ring-Buffer."""
+    """Liest das Ende der MSM-Console-Logdatei in den Ring-Buffer."""
     if not os.path.exists(log_path):
         state.file_pos = 0
         return
     try:
-        size = os.path.getsize(log_path)
-        state.file_pos = size
-        with open(log_path, "rb") as f:
-            while True:
-                chunk = f.read(64 * 1024)
-                if not chunk:
-                    break
-                for raw_line in chunk.splitlines(keepends=False):
-                    if not raw_line:
-                        continue
-                    line_str = raw_line.decode("utf-8", errors="replace")
-                    ts = _utc_iso()
-                    text = line_str
-                    if "\t" in line_str:
-                        parts = line_str.split("\t", 1)
-                        if len(parts) == 2:
-                            cand, rest = parts
-                            try:
-                                cand_norm = cand.replace("Z", "+00:00")
-                                datetime.fromisoformat(cand_norm)
-                                ts = cand
-                                text = rest
-                            except Exception:
-                                pass
-                    with state.lock:
-                        state.lines.append(
-                            _Line(
-                                id=state.next_id,
-                                text=text,
-                                source="msm",
-                                timestamp=ts,
-                            )
-                        )
-                        state.next_id += 1
-                        if server_id is not None:
-                            _NEXT_IDS[server_id] = state.next_id
+        size, zeilen = await asyncio.to_thread(_backlog_zeilen, log_path)
     except OSError as exc:
         logger.warning("ws backlog read failed for %s: %s", log_path, exc)
+        return
+    state.file_pos = size
+    with state.lock:
+        for ts, text in zeilen:
+            state.lines.append(
+                _Line(
+                    id=state.next_id,
+                    text=text,
+                    source="msm",
+                    timestamp=ts,
+                )
+            )
+            state.next_id += 1
+        if server_id is not None:
+            _NEXT_IDS[server_id] = state.next_id
 
 
 async def _tail_file_loop(log_path: str, state: _ServerState, on_line) -> None:
@@ -269,7 +294,9 @@ async def _tail_docker_loop(container: str, on_line, redactors: tuple[str, ...] 
     backoff = 0.5
     while True:
         try:
-            if not docker_service.is_running(container):
+            # Im Thread: der Docker-Aufruf wartet auf den Daemon, und das
+            # Abfragen laeuft alle paar Sekunden, solange der Container steht.
+            if not await asyncio.to_thread(docker_service.is_running, container):
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 1.5, 5.0)
                 continue
@@ -465,14 +492,24 @@ async def connect(
     """Hauptcoroutine: akzeptiert die WS-Verbindung, spult Replay ab, streamed live."""
     async with _STATES_LOCK:
         state = _get_state(server_id)
-        if len(state.websockets) >= MAX_CONCURRENT_WS_PER_SERVER:
-            await ws.accept()
-            await _close_safely(ws, code=1013)
-            return
-            
-        state.websockets.add(ws)
-        state.last_disconnected_at = None
-        is_first = len(state.websockets) == 1
+        voll = len(state.websockets) >= MAX_CONCURRENT_WS_PER_SERVER
+        if not voll:
+            state.websockets.add(ws)
+            state.last_disconnected_at = None
+            is_first = len(state.websockets) == 1
+            # Im Schloss gestartet: wer verbindet, waehrend die Datei noch
+            # gelesen wird, wartet unten auf dasselbe Ergebnis, statt einen
+            # leeren Rueckblick zu bekommen.
+            if is_first and not state.lines:
+                state.rueckblick = asyncio.create_task(
+                    _read_initial_backlog(log_path, state, server_id=server_id)
+                )
+    # Abweisen ausserhalb des Schlosses: es gilt fuer alle Server, und ein
+    # langsamer Client hielte sonst jede andere Konsole beim Verbinden auf.
+    if voll:
+        await ws.accept()
+        await _close_safely(ws, code=1013)
+        return
 
     try:
         await ws.accept()
@@ -483,13 +520,13 @@ async def connect(
         if node is not None and getattr(node, "is_local", False) and not docker_service.is_available():
             use_agent = True
             
+        if state.rueckblick is not None:
+            try:
+                await asyncio.shield(state.rueckblick)
+            except Exception:
+                pass
+
         if is_first:
-            if not state.lines:
-                try:
-                    await _read_initial_backlog(log_path, state, server_id=server_id)
-                except Exception:
-                    pass
-                    
             state.tasks.append(asyncio.create_task(
                 _tail_file_loop(log_path, state, lambda txt, src, ts: ingest_line(server_id, txt, src, ts))
             ))

@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 SETTINGS_KEY = "ai_web_search_api_key_encrypted"
 SEARXNG_SETTINGS_KEY = "ai_searxng_url"
+DEFAULT_SEARXNG_URL = "http://127.0.0.1:8888"
 _AAD = "msm:settings:ai_web_search_api_key"
 _ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 
@@ -58,6 +59,8 @@ _client_lock = threading.Lock()
 _cache: dict[tuple[str, str, int], tuple[float, list[dict]]] = {}
 _inflight: dict[tuple[str, str, int], threading.Event] = {}
 _cache_lock = threading.Lock()
+_sidecar_status_cache: dict[str, tuple[float, bool]] = {}
+_sidecar_cache_lock = threading.Lock()
 
 
 class WebSearchUnavailable(RuntimeError):
@@ -89,6 +92,8 @@ def shutdown_http_client() -> None:
     with _cache_lock:
         _cache.clear()
         _inflight.clear()
+    with _sidecar_cache_lock:
+        _sidecar_status_cache.clear()
 
 
 def _finish_inflight(cache_key: tuple[str, str, int] | None, pending: threading.Event | None) -> None:
@@ -199,6 +204,38 @@ def api_key() -> str | None:
     return _panel_api_key() or _env_api_key()
 
 
+def is_sidecar_running(url: str | None = None, timeout: float = 0.2) -> bool:
+    """Prueft, ob der SearXNG-Sidecar erreichbar ist (mit kurzem Caching)."""
+    target = url or default_searxng_url()
+    try:
+        parsed = urllib.parse.urlparse(target)
+        hostname = parsed.hostname or "127.0.0.1"
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        if hostname.lower() not in ("127.0.0.1", "localhost", "::1", "0.0.0.0"):
+            return True
+
+        cache_key = f"{hostname}:{port}"
+        now = time.monotonic()
+        with _sidecar_cache_lock:
+            cached = _sidecar_status_cache.get(cache_key)
+            if cached and cached[0] > now:
+                return cached[1]
+
+        import socket
+        running = False
+        try:
+            with socket.create_connection((hostname, port), timeout=timeout):
+                running = True
+        except OSError:
+            running = False
+
+        with _sidecar_cache_lock:
+            _sidecar_status_cache[cache_key] = (now + 5.0, running)
+        return running
+    except Exception:
+        return False
+
+
 def _panel_searxng_url() -> str | None:
     from services.panel_settings_service import PanelSettingsService
 
@@ -215,9 +252,44 @@ def _env_searxng_url() -> str | None:
     ) or None
 
 
+def custom_searxng_url() -> str | None:
+    """Liest die explizit in der Panel-DB gespeicherte benutzerdefinierte URL."""
+    return _panel_searxng_url()
+
+
+def default_searxng_url() -> str:
+    """Liest die Standard-URL fuer den Sidecar (Env/Config-Default oder 127.0.0.1:8888)."""
+    return _env_searxng_url() or DEFAULT_SEARXNG_URL
+
+
+def is_default_searxng() -> bool:
+    """True, wenn kein benutzerdefinierter Override in den Panel-Einstellungen aktiv ist."""
+    custom = _panel_searxng_url()
+    return custom is None or custom == default_searxng_url()
+
+
 def searxng_url() -> str | None:
-    """Liest die hinterlegte SearXNG URL (Panel-DB zuerst, ENV-Fallback)."""
-    return _panel_searxng_url() or _env_searxng_url()
+    """Liest die effektive SearXNG URL (Panel-DB zuerst, ENV-Fallback, dann Default-Sidecar)."""
+    custom = _panel_searxng_url()
+    if custom:
+        return custom
+
+    from config import settings
+    configured = (
+        (getattr(settings, "searxng_url", "") or "").strip()
+        or os.getenv("MSM_SEARXNG_URL", "").strip()
+        or os.getenv("SEARXNG_URL", "").strip()
+    )
+    if configured and configured != DEFAULT_SEARXNG_URL:
+        return configured
+
+    if is_sidecar_running(DEFAULT_SEARXNG_URL):
+        return DEFAULT_SEARXNG_URL
+
+    if os.getenv("MSM_SEARXNG_URL", "").strip() == DEFAULT_SEARXNG_URL:
+        return DEFAULT_SEARXNG_URL
+
+    return None
 
 
 def store_api_key(plaintext: str) -> None:
@@ -251,13 +323,13 @@ def is_configured() -> bool:
         return False
 
 
-def _search_searxng(query: str, limit: int = MAX_RESULTS) -> list[dict]:
-    s_url = searxng_url()
-    if not s_url:
+def _search_searxng(query: str, limit: int = MAX_RESULTS, s_url: str | None = None) -> list[dict]:
+    target_url = s_url or searxng_url()
+    if not target_url:
         return []
     try:
         resp = _http_client().get(
-            f"{s_url.rstrip('/')}/search",
+            f"{target_url.rstrip('/')}/search",
             params={"q": query, "format": "json"},
             headers={"Accept": "application/json"},
         )
@@ -363,7 +435,7 @@ def search(query: str, count: int = MAX_RESULTS, *, cache_scope: str | None = No
 
     # 1. SearXNG Abfrage, falls konfiguriert
     if s_url:
-        results = _search_searxng(safe_query, limit)
+        results = _search_searxng(safe_query, limit, s_url=s_url)
 
     # 2. Brave Search API Abfrage, falls Key hinterlegt und noch keine Treffer
     if not results and key:

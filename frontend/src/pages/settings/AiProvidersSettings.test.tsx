@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { aiApi, type AiProviderAdmin } from '@/api/ai'
+import { aiApi, type AiProviderAdmin, type AiSprachweg } from '@/api/ai'
 import i18n from '@/i18n'
 import { AiProvidersSettings } from './AiProvidersSettings'
 
@@ -40,6 +40,46 @@ const provider: AiProviderAdmin = {
   updated_at: '2026-08-01T12:00:00Z',
 }
 
+/**
+ * Die beiden Sprachwege eines OpenAI-Zugangs, wie `/settings/provider-kinds`
+ * sie schickt (`Sprachweg.als_dict` in backend/services/ai_voice/sprachwege.py).
+ * Abgeschrieben, nicht erfunden: jede Abweichung hier wäre eine Oberfläche,
+ * die anders urteilt als das Backend.
+ */
+const OPENAI_SPRACHWEGE: AiSprachweg[] = [{
+  weg: 'openai_realtime',
+  merkmal: 'realtime',
+  ausschluesse: [],
+  stimmen: ['marin', 'cedar', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'],
+  empfohlene_stimmen: ['marin', 'cedar'],
+  empfohlene_modelle: ['gpt-realtime-1.5', 'gpt-realtime-2'],
+  denkstufen: ['low', 'medium', 'high'],
+  denkstufen_merkmal: 'realtime-2',
+  denkt_im_backend: false,
+  vad: true,
+  audiopreise: true,
+  minutenpreis: false,
+  backend_modell: false,
+}, {
+  weg: 'openai_live',
+  merkmal: 'gpt-live',
+  ausschluesse: ['transcribe', 'translate'],
+  stimmen: [
+    'marin', 'alloy', 'ash', 'ballad', 'beacon', 'bossa', 'cedar', 'cinder',
+    'coral', 'delta', 'echo', 'gleam', 'meridian', 'quartz', 'ripple', 'sage',
+    'shimmer', 'stone', 'tempo', 'verse', 'vesper', 'willow',
+  ],
+  empfohlene_stimmen: ['marin'],
+  empfohlene_modelle: ['gpt-live-1'],
+  denkstufen: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+  denkstufen_merkmal: null,
+  denkt_im_backend: true,
+  vad: false,
+  audiopreise: false,
+  minutenpreis: true,
+  backend_modell: true,
+}]
+
 describe('AiProvidersSettings', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('de')
@@ -68,6 +108,7 @@ describe('AiProvidersSettings', () => {
       fuehrt_katalog: true,
       kann_hoeren: true,
       realtime_tauglich: true,
+      sprachwege: OPENAI_SPRACHWEGE,
     }, {
       // Der zweite Anbieter steht hier, damit die Auswahl im Test dieselbe
       // Entscheidung zu treffen hat wie im Betrieb: zwei Zugänge, die
@@ -172,6 +213,36 @@ describe('AiProvidersSettings', () => {
 
     // Und die Denkstufen des gewaehlten Modells stehen daneben.
     expect(await screen.findByText('Maximal')).toBeInTheDocument()
+  })
+
+  it('sagt „unbekannt" statt „denkt nicht" und zeigt Fenster und Abschalttag', async () => {
+    // Am 22.09.2026 stand GPT-6 Luna mit „Dieses Modell denkt nicht nach" in
+    // der Auswahl: der Katalog wusste es noch nicht, und aus seinem Schweigen
+    // wurde ein Nein. `null` ist eine eigene Auskunft.
+    vi.mocked(aiApi.listCatalogModels).mockResolvedValue([{
+      model_id: 'anthropic/claude-opus-5',
+      name: 'Claude Opus 5',
+      reasoning: null,
+      efforts: [],
+      default_effort: null,
+      mandatory: false,
+      recommended: false,
+      vision: null,
+      context_tokens: 1_050_000,
+      max_output_tokens: 128_000,
+      shutdown_date: '2026-10-23',
+    }])
+    render(<AiProvidersSettings canWrite />)
+
+    expect(await screen.findByText(/Der Katalog sagt nicht, ob dieses Modell nachdenkt/))
+      .toBeInTheDocument()
+    expect(screen.queryByText('Dieses Modell denkt nicht nach.')).not.toBeInTheDocument()
+    expect(screen.getByText('Kontextfenster: 1.050.000 Token · Antwort bis 128.000 Token'))
+      .toBeInTheDocument()
+    // Ein Kalendertag, in UTC gelesen — sonst stünde westlich von Greenwich
+    // der 22. Oktober da.
+    expect(screen.getByText(/Abschaltung dieses Modells für den 23\. Oktober 2026/))
+      .toBeInTheDocument()
   })
 
   it('keeps a text field when the catalog is unavailable', async () => {
@@ -508,5 +579,150 @@ describe('AiProvidersSettings', () => {
     // Katalog, und ein Auswahlfeld mit genau einem Eintrag naehme dem
     // Betreiber die Moeglichkeit, seinen Deployment-Namen einzutragen.
     expect(screen.getByLabelText(/Standardmodell/i).tagName).toBe('INPUT')
+  })
+
+  describe('GPT-Live', () => {
+    // So, wie `/models` sie am 23.09.2026 für einen echten OpenAI-Zugang
+    // lieferte: `none` steht nie unter `efforts` (`waehlbare_stufen` lässt es
+    // aus), sondern als `mandatory: false` daneben.
+    const LUNA = {
+      model_id: 'gpt-6-luna', name: 'GPT-6 Luna', reasoning: true,
+      efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_effort: 'medium',
+      mandatory: false, recommended: false, vision: true,
+    }
+    const MINI = {
+      model_id: 'gpt-5-mini', name: 'GPT-5 mini', reasoning: true,
+      efforts: ['minimal', 'low', 'medium', 'high'], default_effort: 'medium',
+      mandatory: true, recommended: false, vision: null,
+    }
+    const sprachmodell = (model_id: string) => ({
+      model_id, name: model_id, reasoning: null, efforts: [], default_effort: null,
+      mandatory: false, recommended: false, vision: null,
+    })
+    const LIVE_ZUGANG: AiProviderAdmin = {
+      ...provider,
+      provider_kind: 'openai',
+      base_url: 'https://api.openai.com/v1',
+      default_model: 'gpt-6-luna',
+      realtime_default: true,
+      realtime_model: 'gpt-live-1',
+      realtime_voice: 'beacon',
+      realtime_reasoning_effort: 'xhigh',
+      realtime_backend_model: null,
+      realtime_minute_price_micro_usd: 50_000,
+      realtime_text_input_price_micro_usd_per_million: 1_000_000,
+      realtime_text_output_price_micro_usd_per_million: 8_000_000,
+    }
+
+    beforeEach(() => {
+      vi.mocked(aiApi.listProviderSettings).mockResolvedValue([LIVE_ZUGANG])
+      vi.mocked(aiApi.listCatalogModels).mockResolvedValue([
+        LUNA,
+        MINI,
+        sprachmodell('gpt-live-1'),
+        sprachmodell('gpt-live-transcribe'),
+        sprachmodell('gpt-realtime-2'),
+      ])
+    })
+
+    it('zeigt Backend-Modell und Minutenpreis statt Audiopreisen und Pausenerkennung', async () => {
+      // GPT-Live rechnet nach Sekunden ab („billed per second") und hat keine
+      // turn_detection: ein Audiopreis oder eine Pausenerkennung wären hier
+      // Felder ohne Wirkung.
+      render(<AiProvidersSettings canWrite />)
+
+      await waitFor(() => expect(screen.getByLabelText('Realtime-Modell')).toHaveTextContent('gpt-live-1'))
+      expect(screen.getByRole('heading', { name: 'GPT-Live' })).toBeInTheDocument()
+      expect(screen.getByLabelText('GPT-Live-Stimme')).toHaveTextContent('beacon')
+      // Die Auswahl entsteht erst mit dem Katalog; vorher steht ein Textfeld da.
+      await waitFor(() =>
+        expect(screen.getByLabelText('Backend-Modell')).toHaveTextContent('Wie Standardmodell (gpt-6-luna)'))
+      expect(screen.getByLabelText('Denkstufe')).toHaveTextContent('Sehr hoch')
+      expect(screen.getByLabelText('Sprachsitzung je Minute')).toBeInTheDocument()
+      expect(screen.getByLabelText('Backend-Modell: Eingabe je 1 Mio. Tokens')).toBeInTheDocument()
+      expect(screen.queryByLabelText('Reaktion auf Sprechpausen')).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('Audio-Eingabe je 1 Mio. Tokens')).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+      await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(4, expect.objectContaining({
+        realtime_default: true,
+        realtime_model: 'gpt-live-1',
+        realtime_voice: 'beacon',
+        realtime_reasoning_effort: 'xhigh',
+        realtime_backend_model: null,
+        realtime_minute_price_micro_usd: 50_000,
+        realtime_text_input_price_micro_usd_per_million: 1_000_000,
+        realtime_text_output_price_micro_usd_per_million: 8_000_000,
+      })))
+    })
+
+    it('bietet nur Denkstufen, die GPT-Live annimmt und das Backend-Modell führt', async () => {
+      // „Supported values depend on the backend model" (OpenAI-Referenz zu
+      // `delegation.responses.reasoning.effort`). GPT-6 Luna führt kein
+      // `minimal`, GPT-Live nimmt kein `max`, GPT-5 mini kein `xhigh` — und
+      // wechselt das Backend-Modell, fällt eine Stufe weg, die das neue nicht
+      // kennt. `none` erlaubt OpenAIs GPT-6-Leitfaden für Luna ausdrücklich
+      // („GPT-6 Sol and Luna support `none`"), GPT-5 mini denkt zwingend.
+      const angebot = () => screen.getAllByRole('option').map((option) => option.textContent)
+      render(<AiProvidersSettings canWrite />)
+
+      const stufe = await screen.findByLabelText('Denkstufe')
+      await waitFor(() => expect(stufe).toHaveTextContent('Sehr hoch'))
+      fireEvent.click(stufe)
+      expect(await screen.findByRole('option', { name: /Kein Nachdenken/ })).toBeInTheDocument()
+      expect(angebot()).toEqual([
+        'Vorgabe des Backend-Modells', 'Kein Nachdenken', 'Niedrig', 'Mittel', 'Hoch', 'Sehr hoch',
+      ])
+      fireEvent.click(screen.getByRole('option', { name: /Sehr hoch/ }))
+
+      fireEvent.click(screen.getByLabelText('Backend-Modell'))
+      // Ein Sprachmodell denkt nicht hinter einem anderen nach.
+      expect(screen.queryByRole('option', { name: /^gpt-live-1/ })).not.toBeInTheDocument()
+      fireEvent.click(await screen.findByRole('option', { name: /^gpt-5-mini/ }))
+      await waitFor(() =>
+        expect(screen.getByLabelText('Denkstufe')).toHaveTextContent('Vorgabe des Backend-Modells'))
+      fireEvent.click(screen.getByLabelText('Denkstufe'))
+      await screen.findByRole('option', { name: /^Minimal/ })
+      expect(angebot()).toEqual(['Vorgabe des Backend-Modells', 'Minimal', 'Niedrig', 'Mittel', 'Hoch'])
+      fireEvent.click(screen.getByRole('option', { name: /Vorgabe des Backend-Modells/ }))
+
+      fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+      await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(4, expect.objectContaining({
+        realtime_backend_model: 'gpt-5-mini',
+        realtime_reasoning_effort: null,
+      })))
+    })
+
+    it('führt kein gpt-live-transcribe als Sprachmodell', async () => {
+      // Teilt den Namen, führt `v1/live/sessions` laut seiner Modellseite aber
+      // ausdrücklich nicht — dieselbe Ausnahme wie in `sprachwege.py`.
+      render(<AiProvidersSettings canWrite />)
+
+      const modell = await screen.findByLabelText('Realtime-Modell')
+      await waitFor(() => expect(modell).toHaveTextContent('gpt-live-1'))
+      fireEvent.click(modell)
+      expect(await screen.findByRole('option', { name: /^gpt-realtime-2/ })).toBeInTheDocument()
+      expect(screen.queryByRole('option', { name: /gpt-live-transcribe/ })).not.toBeInTheDocument()
+    })
+
+    it('nimmt beim Wechsel zu Realtime zurück, was nur GPT-Live kennt', async () => {
+      // `beacon` gibt es nur bei GPT-Live, `xhigh` nimmt Realtime-2 nicht an.
+      // Beides fällt beim Wechsel weg, statt erst beim Speichern abgewiesen zu
+      // werden — und mit dem Weg wechseln die Felder.
+      render(<AiProvidersSettings canWrite />)
+
+      const modell = await screen.findByLabelText('Realtime-Modell')
+      await waitFor(() => expect(modell).toHaveTextContent('gpt-live-1'))
+      fireEvent.click(modell)
+      fireEvent.click(await screen.findByRole('option', { name: /^gpt-realtime-2/ }))
+
+      await waitFor(() => expect(screen.getByLabelText('OpenAI-Stimme')).toHaveTextContent('Stimme wählen …'))
+      expect(screen.getByLabelText('Denkstufe')).toHaveTextContent('Keine Denkstufe')
+      expect(screen.getByRole('heading', { name: 'OpenAI Realtime' })).toBeInTheDocument()
+      expect(screen.getByLabelText('Reaktion auf Sprechpausen')).toBeInTheDocument()
+      expect(screen.getByLabelText('Audio-Eingabe je 1 Mio. Tokens')).toBeInTheDocument()
+      expect(screen.queryByLabelText('Sprachsitzung je Minute')).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('Backend-Modell')).not.toBeInTheDocument()
+    })
   })
 })

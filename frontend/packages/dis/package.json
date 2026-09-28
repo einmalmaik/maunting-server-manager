@@ -1,6 +1,6 @@
 {
   "name": "@msdis/shield",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "DIS — Defensive Integration Shield. Central, framework-agnostic cryptographic security platform (KDF, AEAD, vault & file encryption, key management, versioned formats, migrations). Powered by DIS — Defensive Integration Shield.",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
@@ -84,6 +84,10 @@
     "./migrations": {
       "types": "./dist/migrations/index.d.ts",
       "import": "./dist/migrations/index.js"
+    },
+    "./messaging": {
+      "types": "./dist/messaging/index.d.ts",
+      "import": "./dist/messaging/index.js"
     }
   },
   "keywords": [

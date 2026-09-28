@@ -153,21 +153,16 @@ def autonomy_allows(
         return False
     # Persönliche Kalender-, Notiz- und Domain-Operationen des Nutzers unterliegen bei erteilter
     # Autonomie-Freigabe nicht dem strikten Server-Stundenkontingent.
+    #
+    # Die Löschwerkzeuge standen bis zum 23.09.2026 mit in dieser Liste. Sie
+    # kommen hier gar nicht mehr an: `autonomie_grundlage` verneint jedes
+    # Werkzeug aus `ALWAYS_CONFIRM_TOOLS`, und Löschen gehört dazu.
     if tool_name in (
         "propose_calendar_event_create",
         "propose_calendar_event_update",
-        "propose_calendar_event_delete",
-        "calendar_event_create",
-        "calendar_event_update",
-        "calendar_event_delete",
         "propose_note_create",
         "propose_note_update",
-        "propose_note_delete",
-        "note_create",
-        "note_update",
-        "note_delete",
         "propose_cloudflare_dns_record",
-        "propose_cloudflare_dns_delete",
     ):
         return True
     # Die Obergrenze begrenzt nicht die Berechtigung, sondern die Menge: ein in

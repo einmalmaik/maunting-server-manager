@@ -34,6 +34,9 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("panel.database.read",       "panel",   "Panel-Datenbank lesen"),
     PermissionDef("panel.database.admin",      "panel",   "Panel-Datenbank verwalten"),
     PermissionDef("servers.create",            "servers", "Neuen Server anlegen"),
+    # Zusaetzlich zu `servers.create`: eine eigene PostgreSQL-Instanz ist ein
+    # eigener Dienst mit Port nach aussen, kein Spielserver.
+    PermissionDef("servers.create.database",   "servers", "Datenbankserver (eigene PostgreSQL-Instanz) anlegen"),
     PermissionDef("servers.delete",            "servers", "Server löschen (global, nicht delegierbar)"),
     # Server aus Shop-Verträgen sind Kundendaten. Pauschale Rollenrechte
     # (server.view, server.console.read, ...) greifen auf ihnen nur, wenn die
@@ -65,9 +68,24 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     # Durchgesetzt in ai_action_service._execute_web_search. Ohne hinterlegten
     # Suchschluessel wird das Werkzeug dem Modell gar nicht erst angeboten.
     PermissionDef("ai.web_search.use",         "ai",      "Websuche über die KI verwenden"),
-    # Durchgesetzt in ai_action_service._execute_analyze_region. Ohne hinterlegte
-    # Copernicus-Zugangsdaten wird das Werkzeug dem Modell nicht angeboten.
+    # Durchgesetzt in ai_tools/geo_tools (Regionsanalyse und Kamera) und an den
+    # Geo-Routen. Seit 09/2026 steht die Regionsanalyse immer im Katalog: ohne
+    # Copernicus-Zugang zeigt sie das schluesselfreie Kartenbild. Ortsname und
+    # Koordinaten gehen damit ohne Einrichtung an Nominatim, Open-Meteo, Reddit,
+    # Bluesky und Esri — `permissionDetails.ai_satellite_use` sagt das dem, der
+    # das Recht vergibt.
     PermissionDef("ai.satellite.use",          "ai",      "Satelliten- und Regionsanalyse über die KI verwenden"),
+    #
+    # `ai.social.message_friend` stand hier bis 09/2026 und ist ersatzlos weg.
+    # Es gewaehrte zuletzt nichts mehr: die drei Sendewerkzeuge fielen, weil sie
+    # serverseitig verschluesselt haben, die beiden Messenger-Suchen danach mit.
+    # Ein Recht ohne Abnehmer ist schlimmer als keines — der Betreiber haette im
+    # Rechteeditor weiter etwas freigegeben, das niemand mehr abfragt, und
+    # geglaubt, damit etwas erlaubt zu haben. Gespeicherte Rollen koennen den
+    # Schluessel noch tragen; `role_service` schreibt ihn beim naechsten
+    # Speichern nicht zurueck (`is_known_key`), und abgefragt wird er nirgends
+    # mehr.
+    #
     # Durchgesetzt in routers/ai_settings.py::get_usage_overview. Bewusst nicht
     # an `panel.settings.read` gehaengt: wer Verbraeuche sieht, sieht das
     # Nutzungsverhalten fremder Kunden. Den *eigenen* Verbrauch zeigt
@@ -75,6 +93,12 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     # duerfen, warum.
     PermissionDef("ai.usage.read.all",         "ai",      "KI-Nutzung aller Benutzer einsehen"),
     # Durchgesetzt in routers/ai_autonomy.py und services/ai_autonomy_service.py.
+    # Trotzdem fragt, was `ai_tool_registry.verlangt_klick` nennt: Server,
+    # Dateien, Backups, Blueprints und Rollen loeschen, Shop und Tarif, und eine
+    # Rechtevergabe an einen Benutzer, die etwas entzieht oder mehr als
+    # UNCRITICAL_SERVER_PERMISSIONS vergibt. `permissionDetails.ai_autonomous_use`
+    # zaehlt das dem auf, der das Recht vergibt — eine Zusage, bei jeder
+    # Aenderung dort mitziehen.
     PermissionDef("ai.autonomous.use",         "ai",      "Autonomen KI-Modus verwenden"),
     # Durchgesetzt in services/ai_task_service.py. Ein stehender Auftrag ist die
     # einzige Sache, die die KI *ohne* anwesenden Menschen in Gang setzt, ohne
@@ -117,7 +141,7 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("ai.mailbox.use",            "ai",      "Eigenes Postfach über die KI verwenden (Mails lesen/entwerfen)"),
     PermissionDef("ai.calendar.use",           "ai",      "Eigenen Kalender über die KI verwenden (Termine lesen/erstellen)"),
     PermissionDef("ai.notes.use",              "ai",      "Eigene Notizen über die KI verwenden (Notizen lesen/erstellen/bearbeiten)"),
-    PermissionDef("ai.popups.manage",          "ai",      "Pop-ups und Ankündigungen über die KI (Worker) erstellen"),
+    PermissionDef("ai.popups.manage",          "ai",      "Pop-ups und Ankündigungen über die KI lesen, erstellen und ändern"),
     # OAuth-Provider-Konfiguration (Phase 4 — Social Login).
     # `secret_update` ist bewusst separat: erfordert zusaetzliche Audit-Bestaetigung.
     # `test` ist read-only, damit ein Operator ohne write-Rechte die Konfiguration pruefen kann.
@@ -188,6 +212,34 @@ SERVER_PERMISSIONS: tuple[PermissionDef, ...] = (
 GLOBAL_KEYS: frozenset[str] = frozenset(p.key for p in GLOBAL_PERMISSIONS)
 SERVER_KEYS: frozenset[str] = frozenset(p.key for p in SERVER_PERMISSIONS)
 ALL_KEYS: frozenset[str] = GLOBAL_KEYS | SERVER_KEYS
+
+
+# ── Unkritische Serverrechte ──────────────────────────────────────────
+# Was die KI im autonomen Modus ohne Rueckfrage vergeben darf, wenn jemand
+# "die normalen Rechte" fuer einen Server verlangt: sehen, starten, stoppen,
+# Konsole und Dateien lesen, Backups anlegen, Mods schalten. Nichts davon
+# schreibt eine Datei, sendet einen Befehl, vernichtet Daten oder verteilt
+# Rechte weiter.
+#
+# Die kritische Menge ist **abgeleitet**, nicht aufgezaehlt: ein neuer
+# Serverschluessel ist kritisch, bis ihn jemand ausdruecklich hier einordnet.
+# Umgekehrt waere jedes neue Recht still autonom vergebbar geworden.
+# Durchgesetzt in services/ai_proposals/user_proposals.py (`always_confirm`).
+
+UNCRITICAL_SERVER_PERMISSIONS: frozenset[str] = frozenset({
+    "server.view",
+    "server.start",
+    "server.stop",
+    "server.restart",
+    "server.console.read",
+    "server.files.read",
+    "server.backups.read",
+    "server.backups.create",
+    "server.mods.read",
+    "server.mods.toggle",
+})
+
+CRITICAL_SERVER_PERMISSIONS: frozenset[str] = SERVER_KEYS - UNCRITICAL_SERVER_PERMISSIONS
 
 
 def is_known_key(key: str) -> bool:

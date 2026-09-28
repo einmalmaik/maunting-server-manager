@@ -598,6 +598,31 @@ def test_ein_gescheiterter_worker_meldet_ehrlich(db: Session) -> None:
     assert "AI_STREAM_FAILED" in meldung.text
 
 
+def test_ein_sicherheitsstopp_erreicht_das_gehirn_als_tatsache(db: Session) -> None:
+    """Das Gehirn erfaehrt, was geschah und welche Regel daran haengt.
+
+    Ohne den Vermerk saehe es einen gescheiterten Auftrag und haette allen
+    Grund, den naechsten Worker mit derselben Aufgabe loszuschicken — genau
+    die automatische Wiederholung, die OpenAI nach einem Sicherheitsstopp
+    untersagt. Kein Verbot im Prompt, sondern die Unterscheidung im Bericht.
+    """
+    user = _benutzer(db, "gestoppt", mit_chat=False)
+    run = _beendeter_worker(
+        db, user, status="failed", stop_reason="AI_PROVIDER_SAFETY_STOPPED"
+    )
+
+    ai_meldestelle.lauf_beendet(
+        db, run=run,
+        zustand={"worker": {"conversation_id": run.conversation_id,
+                            "titel": "Firewall", "kanal": "chat"}},
+    )
+
+    meldung = db.query(AiMeldung).one()
+    assert "Sicherheitsüberwachung des KI-Anbieters" in meldung.text
+    assert "nicht automatisch wiederholt" in meldung.text
+    assert "AI_PROVIDER_SAFETY_STOPPED" in meldung.text
+
+
 def test_abgeloeste_und_eingefangene_laeufe_melden_nichts(db: Session) -> None:
     """`answered`, `superseded`, `worker_cancel`, `berechtigung_entzogen`,
     `process_restart`: die Auskunft gibt jeweils ein anderer — der Nachfolger,
@@ -712,8 +737,8 @@ def _frisch(engine):
     return inspect(engine)
 
 
-def test_die_migration_traegt_die_meldungstabelle(tmp_path: Path) -> None:
-    db_url = f"sqlite:///{tmp_path / 'meldungen.db'}"
+def test_die_migration_traegt_die_meldungstabelle(tmp_path: Path, pg_wegwerf) -> None:
+    db_url = pg_wegwerf("meldungen")
     vorher = settings.database_url
     settings.database_url = db_url
     backend_dir = Path(__file__).resolve().parent.parent

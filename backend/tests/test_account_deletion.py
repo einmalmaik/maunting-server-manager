@@ -208,6 +208,22 @@ class TestAccountDeletion:
         cookies = dict(login.cookies)
         csrf = cookies.get("__Secure-csrf_token")
 
+        # Mit Passwort ersetzt die Verknuepfung das Passwort nicht (bis 28.09.2026
+        # reichte hier das Token).
+        resp = client.request(
+            "DELETE",
+            "/api/auth/delete-account",
+            json={"password": None, "confirmation": "delete", "otp_code": None},
+            cookies=cookies,
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 400, resp.text
+        assert db.query(User).filter(User.id == user_id).first() is not None
+
+        # Reines Social-Konto: nie ein eigenes Passwort gesetzt
+        user.has_password = False
+        db.commit()
+
         # Delete WITHOUT password, WITH confirmation
         resp = client.request(
             "DELETE",
@@ -247,11 +263,12 @@ class TestAccountDeletion:
     def test_social_only_via_custom_provider_can_delete_without_password(self, client: TestClient, db: Session):
         """Social-only accounts using a *custom* OAuth provider (custom_oauth2 or custom_oidc)
         must also be able to delete without providing current password.
-        The decision is based solely on existence of any OAuthUserLink, independent of preset.
+        The decision is based solely on has_password, independent of preset.
         """
         from services.auth_service import AuthService
         user = AuthService.create_user(db, "custom_social_delete", "customsocial@test.de", "TempPass123!")
         user.email_verified = True
+        user.has_password = False  # Social-Login-Konto: nie ein eigenes Passwort gesetzt
         db.commit()
         db.refresh(user)
         user_id = user.id

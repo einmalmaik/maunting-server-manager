@@ -35,7 +35,7 @@ export function ProgressBar({
   const clamped = known ? Math.max(0, Math.min(100, value as number)) : 0
   let barColor = 'bg-secondary'
   if (heat && known) {
-    if (clamped >= 90) barColor = 'bg-status-error'
+    if (clamped >= 90) barColor = 'bg-status-destructive'
     else if (clamped >= 70) barColor = 'bg-status-warning'
   }
 

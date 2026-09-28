@@ -20,7 +20,7 @@ from services.ai_tools.base import (
 )
 
 def _aufgaben_tool_definitions() -> list[dict]:
-    """Stehende Auftraege: auflisten, anlegen, aendern, loeschen â€” und die Testmail.
+    """Stehende Auftraege: auflisten, anlegen, aendern, loeschen — und die Testmail.
 
     Eigene Funktion, damit der ohnehin lange Katalog nicht noch eine Handbreit
     weiter nach rechts waechst. Der Katalog geht in **jeder** Runde der
@@ -30,7 +30,7 @@ def _aufgaben_tool_definitions() -> list[dict]:
     return [
         _function(
             "list_tasks",
-            "Zeigt die stehenden Auftraege dieses Benutzers â€” Name, Zeitplan, "
+            "Zeigt die stehenden Auftraege dieses Benutzers — Name, Zeitplan, "
             "Zeitzone, Zustellweg, ob aktiv, und wann sie das naechste Mal "
             "laufen. Ruf das auf, bevor du eine Aufgabe aenderst oder loeschst: "
             "die Nummern sind nicht zu erraten.",
@@ -40,7 +40,7 @@ def _aufgaben_tool_definitions() -> list[dict]:
         _function(
             "send_test_email",
             "Schickt eine Testmail an die hinterlegte Adresse **des Benutzers, "
-            "der gerade fragt** â€” einen Empfaenger kannst du nicht waehlen. "
+            "der gerade fragt** — einen Empfaenger kannst du nicht waehlen. "
             "Dafuer, wenn er wissen will, ob sein E-Mail-Versand funktioniert. "
             "Die Antwort nennt den benutzten Weg und die maskierte Adresse.",
             {},
@@ -48,14 +48,14 @@ def _aufgaben_tool_definitions() -> list[dict]:
         ),
         # Der ganze *Anlass* steht in `ai_prompt.AUFGABEN` und geht in
         # derselben Anfrage mit: wann ein stehender Auftrag entsteht ("jeden
-        # Tag um acht", "alle acht Stunden"), was in `instruction` gehÃ¶rt
+        # Tag um acht", "alle acht Stunden"), was in `instruction` gehört
         # ("dieser Text ist dein spaeterer Auftrag"), was `kind: "act"`
         # voraussetzt und dass die Zeitzone aus der Lage kommt. Das stand hier
         # ein zweites Mal und ist gestrichen.
         #
-        # Was bleibt, ist die Feldkunde â€” und die trÃ¤gt hier mehr als sonst:
-        # `required` nennt nur die BegrÃ¼ndung, weil dasselbe Werkzeug anlegt
-        # **und** Ã¤ndert. Welche Felder beim Anlegen nÃ¶tig sind, erfÃ¤hrt das
+        # Was bleibt, ist die Feldkunde — und die trägt hier mehr als sonst:
+        # `required` nennt nur die Begründung, weil dasselbe Werkzeug anlegt
+        # **und** ändert. Welche Felder beim Anlegen nötig sind, erfährt das
         # Modell nirgends sonst; ein fehlendes kostet eine ganze Runde.
         _function(
             "propose_task_set",
@@ -90,7 +90,7 @@ def _aufgaben_tool_definitions() -> list[dict]:
         _function(
             "propose_task_delete",
             "Entfernt einen stehenden Auftrag endgueltig. Soll er nur ruhen, "
-            "nimm `propose_task_set` mit `enabled: false` â€” das laesst sich "
+            "nimm `propose_task_set` mit `enabled: false` — das laesst sich "
             "zuruecknehmen. `task_id` aus `list_tasks`.",
             {
                 "task_id": {"type": "string", "maxLength": 36},
@@ -106,7 +106,7 @@ def _worker_tool_definitions() -> list[dict]:
     Fuenf Werkzeuge, zwei Adressaten: `worker_start`/`worker_cancel`/
     `worker_antwort` gehoeren dem Gehirn, `wait_until`/`worker_frage` nur den
     Workern selbst. Welcher Lauf welche sieht, entscheidet der
-    Laufart-Schnitt â€” hier stehen nur die Schemata, und die stehen wie alle
+    Laufart-Schnitt — hier stehen nur die Schemata, und die stehen wie alle
     im einen Katalog.
     """
     from services.ai_worker_service import (
@@ -119,23 +119,23 @@ def _worker_tool_definitions() -> list[dict]:
     return [
         _function(
             "worker_start",
-            "Ãœbergibt einen Auftrag an einen Worker, der ihn im Hintergrund "
-            "erledigt, wÃ¤hrend du weiter im GesprÃ¤ch bleibst. Der "
-            "`auftrag` ist dessen **einzige** Wissensquelle â€” schreib alles "
+            "Übergibt einen Auftrag an einen Worker, der ihn im Hintergrund "
+            "erledigt, während du weiter im Gespräch bleibst. Der "
+            "`auftrag` ist dessen **einzige** Wissensquelle — schreib alles "
             "hinein, was er braucht: was zu tun ist, woran der Erfolg zu "
             "erkennen ist, und jede Angabe des Benutzers. Nach dem Start "
-            "antworte sofort weiter; das Ergebnis kommt spÃ¤ter als Meldung. "
-            "Versprich nichts Ã¼ber die Dauer.",
+            "antworte sofort weiter; das Ergebnis kommt später als Meldung. "
+            "Versprich nichts über die Dauer.",
             {
                 "auftrag": {
                     "type": "string",
                     "maxLength": MAX_AUFTRAG_CHARS,
-                    "description": "VollstÃ¤ndiger, aus sich heraus verstÃ¤ndlicher Auftrag.",
+                    "description": "Vollständiger, aus sich heraus verständlicher Auftrag.",
                 },
                 "titel": {
                     "type": "string",
                     "maxLength": MAX_TITEL_CHARS,
-                    "description": "Kurzer Name fÃ¼r die Auftragsliste des Benutzers.",
+                    "description": "Kurzer Name für die Auftragsliste des Benutzers.",
                 },
                 "kanal": {
                     "type": "string",
@@ -147,7 +147,7 @@ def _worker_tool_definitions() -> list[dict]:
                     "enum": list(_MELDEKANAELE),
                     "description": (
                         "Wohin das Ergebnis gemeldet wird. chat = nur im "
-                        "Panel (Standard), email = zusÃ¤tzlich per Mail, "
+                        "Panel (Standard), email = zusätzlich per Mail, "
                         "both = beides. Im Chat steht das Ergebnis immer."
                     ),
                 },
@@ -166,17 +166,17 @@ def _worker_tool_definitions() -> list[dict]:
         ),
         _function(
             "worker_antwort",
-            "Gibt die Antwort des Benutzers an einen Auftrag zurÃ¼ck, der "
+            "Gibt die Antwort des Benutzers an einen Auftrag zurück, der "
             "eine Frage gestellt hat. `worker_id` steht in der Meldung mit "
             "der Frage. Schreib in `antwort`, was der Benutzer entschieden "
-            "hat â€” wÃ¶rtlich genug, dass der Auftrag danach handeln kann. "
+            "hat — wörtlich genug, dass der Auftrag danach handeln kann. "
             "Nicht nutzen, wenn kein Auftrag gefragt hat.",
             {
                 "worker_id": {"type": "string", "maxLength": 36},
                 "antwort": {
                     "type": "string",
                     "maxLength": MAX_AUFTRAG_CHARS,
-                    "description": "Die Entscheidung des Benutzers, vollstÃ¤ndig.",
+                    "description": "Die Entscheidung des Benutzers, vollständig.",
                 },
             },
             ["worker_id", "antwort"],
@@ -184,11 +184,11 @@ def _worker_tool_definitions() -> list[dict]:
         _function(
             "wait_until",
             "Parkt **diesen** Lauf und weckt ihn nach der angegebenen Zeit "
-            "wieder â€” fÃ¼r AuftrÃ¤ge, die auf etwas warten (\"in 30 Minuten "
-            "nachsehen\", \"heute Nacht prÃ¼fen\"). WÃ¤hrend des Wartens "
-            "kostet der Lauf nichts. Nach dem Wecken prÃ¼fst du den Stand im "
-            "Verlauf, statt blind zu wiederholen. Nicht fÃ¼r Wartezeiten "
-            "unter einer Minute â€” arbeite dann einfach weiter.",
+            "wieder — für Aufträge, die auf etwas warten (\"in 30 Minuten "
+            "nachsehen\", \"heute Nacht prüfen\"). Während des Wartens "
+            "kostet der Lauf nichts. Nach dem Wecken prüfst du den Stand im "
+            "Verlauf, statt blind zu wiederholen. Nicht für Wartezeiten "
+            "unter einer Minute — arbeite dann einfach weiter.",
             {
                 "minuten": {
                     "type": "integer",
@@ -206,15 +206,15 @@ def _worker_tool_definitions() -> list[dict]:
         _function(
             "worker_frage",
             "Stellt dem Benutzer eine Frage, obwohl er dieses Fenster nie "
-            "sieht: dein Lauf parkt, die Frage wird ihm im GesprÃ¤ch gestellt, "
+            "sieht: dein Lauf parkt, die Frage wird ihm im Gespräch gestellt, "
             "und die Antwort weckt genau diesen Lauf. Nutze sie **nur**, wenn "
-            "du ohne die Entscheidung nicht weiterkommst â€” Raten wÃ¤re teuer, "
+            "du ohne die Entscheidung nicht weiterkommst — Raten wäre teuer, "
             "Warten sinnlos. Rechne damit, dass die Antwort dauert.",
             {
                 "question": {
                     "type": "string",
                     "maxLength": MAX_QUESTION_CHARS,
-                    "description": "Die Frage, vollstÃ¤ndig und aus sich heraus verstÃ¤ndlich.",
+                    "description": "Die Frage, vollständig und aus sich heraus verständlich.",
                 },
                 "options": {
                     "type": "array",

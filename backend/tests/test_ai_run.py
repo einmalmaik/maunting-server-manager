@@ -1531,6 +1531,144 @@ async def test_a_superseded_run_performs_no_write_actions(
     assert ueberholt.stop_reason == "superseded"
 
 
+@pytest.mark.asyncio
+async def test_a_run_billed_elsewhere_still_ends_for_its_watchers(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein zweiter Prozess hat den Lauf schon abgerechnet — der Zuschauer hört trotzdem das Ende.
+
+    Der Fall vom 25.09.2026: während ein Lauf arbeitete, startete ein zweites
+    Backend auf derselben Datenbank. Sein Startabgleich schloss die
+    Reservierung (`reconcile_interrupted_ai_streams`) und setzte den Lauf auf
+    'failed' (`unterbrochene_laeufe_abgleichen`). Der alte Lauf nahm das als
+    Ablösung und wollte die Reservierung noch einmal als gescheitert buchen.
+    `fail_ai_usage` wies das ab, der Fehlerzweig versuchte es ein zweites Mal,
+    und weder das Fehlerereignis noch der Abschluss kamen je beim Vermittler an.
+    Der Chat wartete zehn Minuten auf ein Ende.
+    """
+    server = _server(db, "doppelt-abgerechnet")
+    _grant(db, regular_user, server=server,
+           server_keys=("server.view", "server.backups.create"))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+
+    async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
+                   tools=None, tool_choice=None, reasoning=False,
+                   reasoning_effort=None, cache_marke=False, model=None):
+        del provider, api_key, messages, reasoning, reasoning_effort
+        usage.total_tokens = 10
+        # Kein Text: genau dann bucht der Abbruch "gescheitert" und nicht
+        # "abgeschlossen" — der Weg aus dem Protokoll.
+        usage.tool_calls = [_backup_aufruf(server)]
+        # Das zweite Backend startet mitten in dieser Runde.
+        from services.ai_chat_service import reconcile_interrupted_ai_streams
+
+        reconcile_interrupted_ai_streams(db)
+        ai_run_service.unterbrochene_laeufe_abgleichen(db)
+        db.commit()
+        return
+        yield  # macht die Funktion zum Generator
+
+    monkeypatch.setattr(ai_stream_service, "stream_chat_completion", fake)
+
+    run, fehler = ai_stream_service.lauf_beginnen(
+        db, user=regular_user, conversation=conversation, provider=provider,
+        request_id=uuid4(), content="Sicher den Server", reasoning=False,
+    )
+    assert run is not None, f"Lauf konnte nicht beginnen: {fehler}"
+    ai_run_broker.eroeffnen(run.id)
+    await ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
+
+    assert not ai_run_broker.laeuft(run.id), "Der Kanal wartet weiter auf ein Ende"
+    # Wer jetzt zusieht, bekommt den Endstand — und wartet nicht.
+    ereignisse = await asyncio.wait_for(
+        _alle(ai_run_broker.lauf_verfolgen(run.id)), timeout=5,
+    )
+    assert '"status": "failed"' in "".join(ereignisse)
+    db.expire_all()
+    assert db.query(AiActionProposal).count() == 0, "Ein abgerechneter Lauf hat gehandelt"
+    assert db.get(AiRun, run.id).status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_a_failing_bill_does_not_swallow_the_end_of_the_run(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die zweite Schicht: wirft die Abrechnung selbst, endet der Lauf trotzdem.
+
+    Der Test darüber schützt die Buchung; dieser den Abschluss, falls sie aus
+    einem anderen Grund scheitert (Datenbank weg, neuer Konflikt). Fehler-
+    ereignis und Endzustand gehören dem Zuschauer, nicht der Buchhaltung.
+    """
+    server = _server(db, "abrechnung-wirft")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    gesehen: list[str] = []
+    echt = ai_run_broker.veroeffentlichen
+
+    def mitschreiben(run_id, ereignis, daten):
+        gesehen.append(ereignis)
+        echt(run_id, ereignis, daten)
+
+    async def fake(_client, **kwargs):
+        raise RuntimeError("Anbieter weg")
+        yield  # macht die Funktion zum Generator
+
+    def abrechnung_wirft(**kwargs):
+        raise RuntimeError("Datenbank weg")
+
+    monkeypatch.setattr(ai_stream_service, "stream_chat_completion", fake)
+    monkeypatch.setattr(ai_stream_service, "_finalize_stream", abrechnung_wirft)
+    monkeypatch.setattr(ai_run_broker, "veroeffentlichen", mitschreiben)
+
+    run = await _lauf(db, regular_user, conversation, provider)
+
+    assert "error" in gesehen
+    assert run.status == "failed"
+    assert not ai_run_broker.laeuft(run.id), "Der Kanal wartet weiter auf ein Ende"
+
+
+def test_a_closed_reservation_is_not_billed_twice(db: Session, regular_user: User) -> None:
+    """Die erste Buchung gilt; die Nachricht bekommt trotzdem ihren Text."""
+    from models import AiUsageEvent
+    from services.ai_usage_service import complete_ai_usage
+
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    run, _ = ai_stream_service.lauf_beginnen(
+        db, user=regular_user, conversation=conversation, provider=provider,
+        request_id=uuid4(), content="Hallo", reasoning=False,
+    )
+    ereignis = db.query(AiUsageEvent).filter(AiUsageEvent.user_id == regular_user.id).one()
+    nachricht = db.query(AiMessage).filter(
+        AiMessage.conversation_id == conversation.id, AiMessage.role == "assistant",
+    ).one()
+    complete_ai_usage(
+        db, ereignis,
+        actual_tokens=ereignis.reserved_tokens,
+        actual_cost_microunits=ereignis.reserved_cost_microunits,
+    )
+    db.commit()
+
+    for gescheitert, ausgabe in ((True, False), (True, True), (False, True)):
+        ai_stream_service._finalize_stream(
+            message_id=nachricht.id, usage_event_id=ereignis.id, content="Teiltext",
+            usage=StreamUsage(), estimated_actual_tokens=1, failed=gescheitert,
+            had_output=ausgabe,
+        )
+
+    db.expire_all()
+    ereignis = db.get(AiUsageEvent, ereignis.id)
+    assert ereignis.status == "completed"
+    assert ereignis.accounted_tokens == ereignis.reserved_tokens
+    assert db.get(AiMessage, nachricht.id).content == "Teiltext"
+
+
+async def _alle(strom) -> list[str]:
+    return [stueck async for stueck in strom]
+
+
 def test_two_confirmations_at_once_plan_only_one_segment(
     monkeypatch: pytest.MonkeyPatch
 ) -> None:

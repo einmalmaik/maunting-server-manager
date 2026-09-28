@@ -6,6 +6,9 @@ import { useToastStore } from './toastStore'
 import { useConfirmStore } from './confirmStore'
 import { usePromptStore } from './promptStore'
 import * as client from '@/api/client'
+import { chatMediaBlobCache, sessionChatCache } from '@/services/klartextSpeicher'
+import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { STORAGE_KEYS, getStorageItem, setStorageItem } from '@/lib/offlineAblage'
 
 vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/client')>()
@@ -84,6 +87,23 @@ describe('authStore', () => {
       useAuthStore.setState({ user: mockUser as any, isAuthenticated: true })
 
       vi.mocked(client.api).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+      const store = useAuthStore.getState()
+      await store.checkAuth()
+
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().user).toEqual(mockUser)
+      expect(useAuthStore.getState().isLoading).toBe(false)
+      expect(localStorage.getItem('msm_cached_user')).toBe(JSON.stringify(mockUser))
+    })
+
+    it('soll bei 502 Bad Gateway (Backend-Neustart via Proxy) die Session behalten und nicht abmelden', async () => {
+      const mockUser = { id: 1, username: 'test', is_owner: true }
+      localStorage.setItem('msm_cached_user', JSON.stringify(mockUser))
+      useAuthStore.setState({ user: mockUser as any, isAuthenticated: true })
+
+      const gatewayError = new client.SanitizedApiError('Bad Gateway', { status: 502 })
+      vi.mocked(client.api).mockRejectedValueOnce(gatewayError)
 
       const store = useAuthStore.getState()
       await store.checkAuth()
@@ -189,6 +209,30 @@ describe('authStore', () => {
       expect(useAuthStore.getState().user).toBeNull()
     })
 
+    it('leert beim Abmelden die Offline-Ablage', async () => {
+      vi.mocked(client.api).mockResolvedValueOnce({})
+      setzeAngemeldetesKonto(1)
+      setStorageItem(STORAGE_KEYS.CALENDAR, '[{"title":"Arzttermin"}]')
+      useAuthStore.setState({ user: { id: 1, username: 'test', is_owner: true } as any, isAuthenticated: true })
+
+      await useAuthStore.getState().logout()
+
+      expect(localStorage.getItem(STORAGE_KEYS.CALENDAR)).toBeNull()
+    })
+
+    it('behält die Offline-Ablage für dasselbe Konto, wenn die Sitzung nur abläuft', () => {
+      // Wer lange offline war, verliert seine ungesendeten Änderungen nicht,
+      // nur weil die Anmeldung inzwischen abgelaufen ist.
+      setzeAngemeldetesKonto(1)
+      setStorageItem(STORAGE_KEYS.OUTBOX, '[{"id":"m1"}]')
+
+      useAuthStore.getState().clearSession()
+      setzeAngemeldetesKonto(1)
+
+      expect(getStorageItem(STORAGE_KEYS.OUTBOX)).toBe('[{"id":"m1"}]')
+      setzeAngemeldetesKonto(null)
+    })
+
     it('should clear state even if /auth/logout fails', async () => {
       vi.mocked(client.api).mockRejectedValueOnce(new Error('Network error'))
 
@@ -243,6 +287,9 @@ describe('authStore', () => {
         toasts: [{ id: 1, message: 'Server prod-eu-1 gestoppt', type: 'error' }],
       })
       localStorage.setItem(SQL_VERLAUF, JSON.stringify(['SELECT * FROM users']))
+      // Entschlüsselter Klartext aus dem Messenger, nur im Arbeitsspeicher.
+      sessionChatCache.set('mailbox-1', [{ id: 1, senderId: 2, text: 'Das Passwort ist', createdAt: '', isSelf: false }])
+      chatMediaBlobCache.set('medium-1', 'data:image/png;base64,AAAA')
     }
 
     function speicherIstLeer() {
@@ -257,6 +304,8 @@ describe('authStore', () => {
       expect(useConfirmStore.getState().pending).toBeNull()
       expect(usePromptStore.getState().pending).toBeNull()
       expect(localStorage.getItem(SQL_VERLAUF)).toBeNull()
+      expect(sessionChatCache.size).toBe(0)
+      expect(chatMediaBlobCache.size).toBe(0)
       expect(client.clearCsrfTokenMemory).toHaveBeenCalled()
     }
 

@@ -6,6 +6,7 @@ export { HYBRID_VERSION, HybridKeyPair, PQKeyPair, SECURITY_STANDARD_VERSION, Sh
 export { constantTimeEqual, hmacSha256, hmacSha256WithKey, importHmacSha256Key, sha1Hex, sha256Base64, sha256Base64Url, sha256Bytes, sha256Hex, sha256JsonBase64, verifyPayloadIntegrity } from './integrity/index.js';
 export { ECDSA_P256_SIGNATURE_LENGTH, EcdsaP256KeyPair, generateEcdsaP256KeyPair, importEcdsaP256PublicKeySpki, signEcdsaP256, verifyEcdsaP256 } from './signing/index.js';
 export { TotpParams, buildTotpUri, generateTotpSecret, verifyTotpCode } from './totp/index.js';
+export { DEFAULT_MAX_SKIPPED_KEYS, RATCHET_MESSAGE_V1_PREFIX, RATCHET_STATE_V1_PREFIX, RatchetDhKeyPair, RatchetHeader, RatchetMessage, RatchetState, SkippedMessageKey, decryptMessage, deserializeRatchetMessage, deserializeRatchetState, destroyRatchetState, encryptMessage, generateRatchetKeyPair, initReceiverState, initSenderState, serializeRatchetMessage, serializeRatchetState } from './messaging/index.js';
 export { Migration, MigrationContext, MigrationRegistry, VersionDetector } from './migrations/index.js';
 export { aesGcmDecrypt, aesGcmEncrypt, decryptBytes, decryptString, encryptBytes, encryptString, generateAesGcmKey, importAesGcmRawKey } from './aead/index.js';
 export { SecureBuffer, withSecureBuffer, zeroBuffers } from './secure-memory/index.js';

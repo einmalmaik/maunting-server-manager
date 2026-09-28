@@ -151,22 +151,37 @@ function postStream(path, inputBuffer, headers = {}) {
   });
 }
 
-/** Parse encrypted frames into array of { nonce, ciphertext }. */
+// Stream format v2 (audit 2026-09-22): a magic header, then position-bound
+// frames. See dis-sidecar/server.mjs for why the AAD exists.
+const STREAM_MAGIC_V2 = Buffer.from('MSMBKP2\n', 'ascii');
+
+/** Parse encrypted frames into array of { nonce, ciphertext, raw }. */
 function parseFrames(buf) {
+  assert.ok(
+    buf.subarray(0, STREAM_MAGIC_V2.length).equals(STREAM_MAGIC_V2),
+    'stream must start with the v2 magic',
+  );
+  const body = buf.subarray(STREAM_MAGIC_V2.length);
   const frames = [];
   let off = 0;
-  while (off < buf.length) {
-    assert.ok(off + 4 <= buf.length, 'truncated frame length');
-    const len = buf.readUInt32BE(off);
+  while (off < body.length) {
+    assert.ok(off + 4 <= body.length, 'truncated frame length');
+    const len = body.readUInt32BE(off);
+    const raw = body.subarray(off, off + 4 + len);
     off += 4;
     assert.ok(len >= 12, 'frame length must include 12-byte nonce');
-    assert.ok(off + len <= buf.length, 'truncated frame body');
-    const nonce = buf.subarray(off, off + 12);
-    const ct = buf.subarray(off + 12, off + len);
-    frames.push({ nonce: Buffer.from(nonce), ciphertext: Buffer.from(ct) });
+    assert.ok(off + len <= body.length, 'truncated frame body');
+    const nonce = body.subarray(off, off + 12);
+    const ct = body.subarray(off + 12, off + len);
+    frames.push({ nonce: Buffer.from(nonce), ciphertext: Buffer.from(ct), raw: Buffer.from(raw) });
     off += len;
   }
   return frames;
+}
+
+/** Reassemble a stream from magic + the given frames. */
+function buildStream(frames) {
+  return Buffer.concat([STREAM_MAGIC_V2, ...frames.map((f) => f.raw)]);
 }
 
 let proc;
@@ -292,8 +307,9 @@ test('round-trip: empty input', async () => {
     'X-Backup-Key-Id': keyA,
   });
   assert.equal(enc.status, 200);
-  // empty input -> no frames -> empty body
-  assert.equal(enc.body.length, 0);
+  // Empty input still carries the magic and one final frame — the receipt that
+  // the stream was not cut short. Only the plaintext is empty.
+  assert.equal(parseFrames(enc.body).length, 1);
   const dec = await postStream('/backup/decrypt-stream', enc.body, {
     Authorization: `Bearer ${TOKEN}`,
     'X-Backup-Key-Id': keyA,
@@ -350,13 +366,77 @@ test('tamper nonce -> 400 DecryptionFailed', async () => {
     'X-Backup-Key-Id': keyA,
   });
   const tampered = Buffer.from(enc.body);
-  tampered[5] ^= 0x01; // nonce byte
+  tampered[STREAM_MAGIC_V2.length + 4 + 1] ^= 0x01; // nonce byte of the first frame
   const dec = await postStream('/backup/decrypt-stream', tampered, {
     Authorization: `Bearer ${TOKEN}`,
     'X-Backup-Key-Id': keyA,
   });
   assert.equal(dec.status, 400);
   assert.equal(dec.json.error, 'DecryptionFailed');
+});
+
+// ── Frame position binding (audit 2026-09-22) ────────────────────────────
+// v1 authenticated each frame but not its place in the stream. Anyone able to
+// write where backups are stored could reorder, duplicate or truncate frames
+// and every single tag still verified — the restore then wrote authentic but
+// rearranged plaintext over live data.
+
+/** 192 KiB -> several body frames plus the final one. */
+async function multiFrameStream() {
+  const plain = crypto.randomBytes(192 * 1024);
+  const enc = await postStream('/backup/encrypt-stream', plain, {
+    Authorization: `Bearer ${TOKEN}`,
+    'X-Backup-Key-Id': keyA,
+  });
+  assert.equal(enc.status, 200);
+  return { plain, frames: parseFrames(enc.body) };
+}
+
+async function expectRejected(stream) {
+  const dec = await postStream('/backup/decrypt-stream', stream, {
+    Authorization: `Bearer ${TOKEN}`,
+    'X-Backup-Key-Id': keyA,
+  });
+  // Either a clean 400 (nothing written yet) or a destroyed socket once
+  // authenticated plaintext had already gone out — never a 200.
+  assert.notEqual(dec.status, 200, 'manipulated stream must not decrypt cleanly');
+}
+
+test('reordered frames are rejected', async () => {
+  const { frames } = await multiFrameStream();
+  await expectRejected(buildStream([frames[1], frames[0], ...frames.slice(2)]));
+});
+
+test('duplicated frame is rejected', async () => {
+  const { frames } = await multiFrameStream();
+  await expectRejected(buildStream([frames[0], frames[0], ...frames.slice(1)]));
+});
+
+test('truncated stream (missing final frame) is rejected', async () => {
+  const { frames } = await multiFrameStream();
+  await expectRejected(buildStream(frames.slice(0, -2)));
+});
+
+test('appended frame after the final one is rejected', async () => {
+  const { frames } = await multiFrameStream();
+  await expectRejected(buildStream([...frames, frames[0]]));
+});
+
+test('oversized frame length is rejected without buffering', async () => {
+  const bomb = Buffer.concat([
+    STREAM_MAGIC_V2,
+    (() => {
+      const b = Buffer.alloc(4);
+      b.writeUInt32BE(0xffffffff, 0);
+      return b;
+    })(),
+    Buffer.alloc(64),
+  ]);
+  const dec = await postStream('/backup/decrypt-stream', bomb, {
+    Authorization: `Bearer ${TOKEN}`,
+    'X-Backup-Key-Id': keyA,
+  });
+  assert.equal(dec.status, 400);
 });
 
 // ── Wrong key (VAL-DIS-010) ──────────────────────────────────────────────

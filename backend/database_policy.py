@@ -3,16 +3,11 @@
 from __future__ import annotations
 
 
-def validate_panel_database_url(
-    database_url: str,
-    *,
-    testing: bool = False,
-    sqlite_migration: bool = False,
-) -> str:
-    """Return a normalized URL or reject unsupported runtime databases.
+def validate_panel_database_url(database_url: str) -> str:
+    """Return the URL or reject every database other than PostgreSQL.
 
-    PostgreSQL is the only supported control-plane database. SQLite may only
-    be opened by tests or by the explicit one-time migration tool.
+    PostgreSQL is the only control-plane database — in operation and in the
+    test suite alike. There is no exception for SQLite, not even for tests.
     """
 
     url = (database_url or "").strip()
@@ -22,13 +17,10 @@ def validate_panel_database_url(
         )
     if url.startswith(("postgresql://", "postgresql+psycopg2://")):
         return url
-    # The migration CLI opens its SQLite source through a dedicated read-only
-    # engine; it must never turn the full panel runtime into SQLite mode.
-    if url.startswith("sqlite") and testing:
-        return url
     if url.startswith("sqlite"):
         raise RuntimeError(
-            "SQLite ist keine unterstützte Panel-Betriebsdatenbank mehr. "
-            "Führe zuerst den einmaligen SQLite-nach-PostgreSQL-Import aus."
+            "SQLite wird nicht unterstützt. MSM läuft ausschließlich auf PostgreSQL; "
+            "eine alte SQLite-Installation muss zuerst mit einer älteren MSM-Version "
+            "nach PostgreSQL umziehen."
         )
     raise RuntimeError("MSM unterstützt als Panel-Datenbank ausschließlich PostgreSQL.")

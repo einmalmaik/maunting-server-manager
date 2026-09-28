@@ -533,7 +533,8 @@ class TestServernameImBericht:
         Auftragstext desselben Laufs ihn kürzt — zwei Längen für eine Angabe.
         """
         user = _benutzer(db)
-        server = _server(db, name="A" * 200)
+        # 128 ist die Spaltenbreite von `servers.name` — laenger kann kein Name sein.
+        server = _server(db, name="A" * 128)
         vorfall = _vorfall(db, server)
         run = _lauf(db, user)
 

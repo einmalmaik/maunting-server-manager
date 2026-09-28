@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 import hashlib
-import json
 import logging
 import os
 import re
@@ -28,8 +27,7 @@ from services import (
     permission_service,
 )
 from services.ai_redaction import enthaelt_zugangsdaten
-from services.ai_embedding_service import EMBEDDING_BYTES, EMBEDDING_DIMENSIONS
-from services.ai_embedding_service import MODEL_TAG as _EMBEDDING_MODEL_TAG
+from services.ai_embedding_service import EMBEDDING_BYTES
 from services.dis_client import DisClient, DisDecryptionError, DisSidecarError
 
 
@@ -141,6 +139,22 @@ VERBLASST_ZEICHEN = 60
 #: zusammengelegter Fakt ist teurer als ein doppelter.
 DUPLIKAT_AB = 0.70
 
+#: Ab wieviel Aehnlichkeit die Import-Vorschau einen Bestandseintrag daneben
+#: zeigt (`importabgleich`).
+#:
+#: Niedriger als `DUPLIKAT_AB`, weil hier nichts zusammengelegt wird: die
+#: Vorschau stellt den alten Eintrag nur daneben, und ersetzt wird allein auf
+#: Klick. Der teure Fehler, gegen den `DUPLIKAT_AB` hoch steht, kann hier also
+#: nicht passieren — der billige (ein Doppel, weil der Hinweis fehlte) schon.
+#: Gemessen am 25.09.2026 mit potion-multilingual-128M, Bestand gegen typische
+#: Importzeilen (Schlüssel ohne Kategoriepräfix, siehe
+#: `ai_memory_import_service.normalize_key`): derselbe Fakt 0,59 bis 0,87
+#: ("Antworte auf Deutsch." zu "Antworte immer auf Deutsch." 0,59; "Berlin"
+#: zu "Wohnt in Berlin." 0,86), verschiedene Fakten höchstens 0,31 ("Hat eine
+#: Schwester namens Mia" zu "Hat einen Bruder namens Tom." 0,31). 0,45 liegt
+#: in der Lücke.
+IMPORT_HINWEIS_AB = 0.45
+
 #: Wieviel Abrufstaerke ein frisch gemerkter Eintrag mitbringt.
 #:
 #: Ohne diesen Startwert waere jeder neue Eintrag sofort blass: er hat noch
@@ -212,6 +226,81 @@ def _aad(row: AiMemoryEntry) -> str:
     if int(row.aad_version or 1) >= 2:
         return f"msm:ai:memory:{row.scope_identity}:{row.id}"
     return f"msm:ai:memory:{row.id}"
+
+
+# ── Der verschluesselte Name ────────────────────────────────────────────────
+#
+# Bis 26.09.2026 stand `key` im Klartext und war zugleich Suchschluessel und
+# Eindeutigkeit je Bereich. Heute liegt er verschluesselt in `key_encrypted`,
+# und gesucht wird ueber `key_index` (HMAC ueber Bereich und Namen, siehe
+# Modell). Die Funktionen hier sind der einzige Weg dorthin: wer nach einem
+# Namen sucht, nimmt `schluessel_bedingung`, nie einen eigenen Filter.
+
+
+def _schluessel_indizes(identity: str, keys: list[str]) -> list[str]:
+    return DisClient.blind_index([f"{identity}\n{key}" for key in keys])
+
+
+def _schluessel_laden(rows: list[AiMemoryEntry]) -> None:
+    """Entschluesselt die Namen vieler Zeilen mit einem Sidecar-Aufruf.
+
+    Danach liest `row.key` aus dem Speicher der Zeile. Ohne diesen Schritt
+    kostete jede Zeile einen eigenen Aufruf, bei 5.000 Eintraegen rund 4 s.
+    Ein unlesbarer Name wird zu ``""``; der Wert daneben entscheidet dann, ob
+    die Zeile ueberhaupt erscheint.
+    """
+    offen = [
+        row for row in rows
+        if "_key_klartext" not in row.__dict__
+        and DisClient.ist_verschluesselt(row.key_encrypted or "")
+    ]
+    klartexte = DisClient.decrypt_many([(row.key_encrypted, row.key_aad()) for row in offen])
+    for row, klar in zip(offen, klartexte):
+        row._key_klartext = klar if klar is not None else ""
+
+
+def _index_nachziehen(db: Session, identity: str) -> None:
+    """Gibt Altbestand eines Bereichs Index und verschluesselten Namen.
+
+    Laeuft vor jeder Suche nach einem Namen. So findet die Suche auch eine
+    Zeile von vor der Umstellung, bevor `schluessel_nachziehen` beim Start
+    des Panels bei ihr angekommen ist, statt einen zweiten Eintrag mit
+    demselben Namen anzulegen.
+    """
+    alt = db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == identity, AiMemoryEntry.key_index.is_(None)
+    ).all()
+    if not alt:
+        return
+    _schluessel_laden(alt)
+    for row, index in zip(alt, _schluessel_indizes(identity, [row.key for row in alt])):
+        if not DisClient.ist_verschluesselt(row.key_encrypted or ""):
+            # Altbestand: der Getter liefert den Klartext, der Setter
+            # verschluesselt ihn.
+            row.key = row.key
+        row.key_index = index
+    db.flush()
+
+
+def schluessel_bedingung(db: Session, identity: str, keys: list[str]):
+    """SQL-Bedingung fuer "diese Namen in diesem Bereich"."""
+    _index_nachziehen(db, identity)
+    return and_(
+        AiMemoryEntry.scope_identity == identity,
+        AiMemoryEntry.key_index.in_(_schluessel_indizes(identity, keys)),
+    )
+
+
+def schluessel_nachziehen(db: Session) -> int:
+    """Zieht alle Bereiche mit Altbestand nach. Laeuft beim Start des Panels."""
+    bereiche = [
+        kennung for (kennung,) in db.query(AiMemoryEntry.scope_identity)
+        .filter(AiMemoryEntry.key_index.is_(None)).distinct().all()
+    ]
+    for kennung in bereiche:
+        _index_nachziehen(db, kennung)
+        db.commit()
+    return len(bereiche)
 
 
 def scope_identity(
@@ -314,7 +403,6 @@ def _preference_row(db: Session, user_id: int) -> AiMemoryPreference:
 def set_preference(db: Session, user: User, enabled: bool) -> AiMemoryPreference:
     row = _preference_row(db, user.id)
     row.enabled = enabled
-    row.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(row)
     return row
@@ -388,8 +476,10 @@ def list_entries(
     aufmacht.
     """
     identity, _, _, _ = scope_identity(db, user, scope, server_id, team_id)
-    rows = db.query(AiMemoryEntry).filter(AiMemoryEntry.scope_identity == identity).order_by(AiMemoryEntry.key).all()
-    return _entschluesseln_lesbare(rows)
+    rows = db.query(AiMemoryEntry).filter(AiMemoryEntry.scope_identity == identity).all()
+    # Nach dem Namen sortiert wird erst hier: in der Datenbank steht er
+    # verschluesselt, eine SQL-Sortierung ordnete nach Chiffrat.
+    return sorted(_entschluesseln_lesbare(rows), key=lambda paar: paar[0].key)
 
 
 @dataclass(frozen=True)
@@ -426,15 +516,16 @@ class Gedaechtnisseite:
 #: bekommt eine Seite in einer anderen Reihenfolge angezeigt, als sie
 #: geschnitten wurde.
 #:
-#: ``last_used_at IS NULL`` als erstes Kriterium statt ``NULLS LAST``: das ist
-#: auf SQLite wie auf PostgreSQL dasselbe Ergebnis, während die beiden ohne
-#: Angabe entgegengesetzt sortieren (PostgreSQL stellt NULL bei DESC nach vorn,
-#: SQLite nach hinten). Bei einer Seiteneinteilung wäre das nicht Kosmetik,
-#: sondern eine andere Seite je Datenbank.
+#: ``last_used_at IS NULL`` als erstes Kriterium: ohne Angabe stellt PostgreSQL
+#: NULL bei DESC nach vorn, und die nie benutzten Einträge sollen ans Ende.
 _SEITENORDNUNG = (
     AiMemoryEntry.last_used_at.is_(None),
     AiMemoryEntry.last_used_at.desc(),
-    AiMemoryEntry.key,
+    # Bis 26.09.2026 stand hier der Name. Er ist seitdem verschluesselt und
+    # sortierte nach Chiffrat; das Neueste zuerst ist bei Gleichstand ohnehin
+    # die nuetzlichere Reihenfolge, und die ID macht sie eindeutig.
+    AiMemoryEntry.created_at.desc(),
+    AiMemoryEntry.id,
 )
 
 
@@ -707,9 +798,8 @@ def _sperrzeile(db: Session, identity: str) -> Query:
     selbst durch diese Sperre gegangen ist — die Reihenfolge ist deshalb kein
     Schmuck, sondern die Zusage.
 
-    Zwei Grenzen, unverändert zu vorher: ein **leerer** Bereich hat keine Zeile
-    zum Sperren, dort können zwei erste Einträge nebeneinander entstehen. Und
-    auf SQLite (Testsuite) ist `FOR UPDATE` ein No-Op.
+    Eine Grenze, unverändert zu vorher: ein **leerer** Bereich hat keine Zeile
+    zum Sperren, dort können zwei erste Einträge nebeneinander entstehen.
     """
     return (
         db.query(AiMemoryEntry.id)
@@ -767,9 +857,7 @@ def upsert_entry(
     )
     _assert_may_write(db, user, scope, normalized_team_id, normalized_server_id)
     safe_value = _safe_value(value)
-    row = db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity == identity, AiMemoryEntry.key == key
-    ).first()
+    row = db.query(AiMemoryEntry).filter(schluessel_bedingung(db, identity, [key])).first()
     action = "ai.memory.updated"
     if row is None:
         # Wieviel hier hineinpasst, entscheidet nicht mehr eine Konstante dieses
@@ -857,9 +945,12 @@ def upsert_entry(
         row = AiMemoryEntry(
             id=str(uuid4()), owner_user_id=owner_id, server_id=normalized_server_id,
             team_id=normalized_team_id,
-            scope=scope, scope_identity=identity, key=key, value_encrypted="",
+            scope=scope, scope_identity=identity, value_encrypted="",
             origin=origin, aad_version=2,
         )
+        # Erst jetzt: die AAD des Namens braucht ID und Bereich der Zeile.
+        row.key = key
+        row.key_index = _schluessel_indizes(identity, [key])[0]
         db.add(row)
         action = "ai.memory.created"
     elif origin == "ai" and row.origin == "user" and not replace_user_entry:
@@ -897,7 +988,7 @@ def upsert_entry(
     row.value_encrypted = DisClient.encrypt(safe_value, aad=_aad(row))
     # Der Vektor entsteht aus dem Klartext, bevor er verschluesselt wird —
     # danach waere er nicht mehr zu haben, ohne erneut zu entschluesseln.
-    refresh_embedding(row, safe_value)
+    refresh_embedding(db, row, safe_value)
     row.updated_at = datetime.now(timezone.utc)
     audit_service.record_privileged_action(
         db, user_id=user.id, action=action, target_type="ai_memory", target_id=row.id,
@@ -962,32 +1053,139 @@ def aehnlicher_eintrag(
     waere ein Leseweg ueber die Bereichsgrenze hinweg, und sei es nur ueber
     ein Aehnlichkeitsmass.
     """
-    vektoren = ai_embedding_service.encode([_embedding_source(key, value)])
-    if not vektoren:
+    kodierung = ai_embedding_service.encode([_embedding_source(key, value)], db=db)
+    if kodierung is None or not kodierung.vektoren:
         return None
 
     # Vektor und Zeile zusammen halten: die Filterung oben hat `None`
     # ausgeschlossen, aber der Typpruefer sieht das nicht — und ein zweites
     # `_stored_vector` je Zeile wäre ein zweites Lesen der Vektorspalte.
     paare: list[tuple[AiMemoryEntry, Sequence[float]]] = []
+    eigener = _schluessel_indizes(scope_kennung, [key])[0]
+    _index_nachziehen(db, scope_kennung)
     for row in db.query(AiMemoryEntry).filter(
         AiMemoryEntry.scope_identity == scope_kennung,
-        AiMemoryEntry.key != key,
+        AiMemoryEntry.key_index != eigener,
     ).all():
-        vektor = _stored_vector(row)
+        vektor = _stored_vector(row, kodierung.modell)
         if vektor is not None:
             paare.append((row, vektor))
     if not paare:
         return None
 
     werte = ai_embedding_service.similarity(
-        vektoren[0], [vektor for _row, vektor in paare]
+        kodierung.vektoren[0], [vektor for _row, vektor in paare]
     )
     bester: tuple[AiMemoryEntry, float] | None = None
     for (row, _vektor), wert in zip(paare, werte):
         if wert >= schwelle and (bester is None or wert > bester[1]):
             bester = (row, float(wert))
     return bester
+
+
+@dataclass(frozen=True)
+class Importabgleich:
+    """Was ein Bereich zu einer Liste von Importkandidaten schon weiß.
+
+    ``gleicher_schluessel`` nennt je belegtem Kandidatenschlüssel den Klartext,
+    der dort heute steht — ``None``, wenn er sich nicht mehr öffnen lässt.
+    ``aehnlich`` steht parallel zur Kandidatenliste: der nächstliegende
+    Bestandseintrag unter einem **anderen** Schlüssel ab `IMPORT_HINWEIS_AB`
+    als (Schlüssel, Klartext, Ähnlichkeit) oder ``None``. ``frei`` ist,
+    wieviele neue Einträge der Bereich noch fasst.
+    """
+
+    gleicher_schluessel: dict[str, str | None]
+    aehnlich: list[tuple[str, str, float] | None]
+    frei: int
+
+
+def importabgleich(
+    db: Session,
+    user: User,
+    scope: str,
+    server_id: int | None,
+    team_id: int | None,
+    kandidaten: list[tuple[str, str]],
+) -> Importabgleich:
+    """Gleicht Importkandidaten in **einem** Durchgang gegen den Bereich ab.
+
+    Dieselbe Frage wie `aehnlicher_eintrag`, nur für viele Kandidaten auf
+    einmal. Jene Funktion liest je Aufruf alle Vektoren des Bereichs; bei 200
+    importierten Fakten gegen 5.000 Einträge wären das eine Million gelesene
+    Vektoren statt 5.000. Hier wird der Bereich einmal gelesen, einmal
+    eingebettet, und entschlüsselt werden nur die Zeilen, die in der Vorschau
+    auch erscheinen.
+
+    Geprüft werden dieselben Rechte wie beim Schreiben: wer in diesen Bereich
+    nicht schreiben darf, bekommt die Absage schon in der Vorschau und nicht
+    erst nach dem Aussuchen.
+    """
+    identity, _owner, sid, tid = scope_identity(db, user, scope, server_id, team_id)
+    _assert_may_write(db, user, scope, tid, sid)
+
+    bestand = db.query(AiMemoryEntry).filter(AiMemoryEntry.scope_identity == identity).all()
+    _schluessel_laden(bestand)
+    nach_schluessel = {row.key: row for row in bestand}
+    treffer: list[tuple[AiMemoryEntry, float] | None] = [None] * len(kandidaten)
+
+    kodierung = (
+        ai_embedding_service.encode(
+            [_embedding_source(key, value) for key, value in kandidaten], db=db
+        )
+        if kandidaten and bestand
+        else None
+    )
+    if kodierung is not None and len(kodierung.vektoren) == len(kandidaten):
+        paare: list[tuple[AiMemoryEntry, Sequence[float]]] = []
+        for row in bestand:
+            vektor = _stored_vector(row, kodierung.modell)
+            if vektor is not None:
+                paare.append((row, vektor))
+        vektoren = [vektor for _row, vektor in paare]
+        for index, (key, _value) in enumerate(kandidaten):
+            if not paare:
+                break
+            werte = ai_embedding_service.similarity(kodierung.vektoren[index], vektoren)
+            for (row, _vektor), wert in zip(paare, werte):
+                # Derselbe Schlüssel ist kein Doppel, sondern ein Überschreiben —
+                # das meldet `gleicher_schluessel`.
+                if row.key == key or wert < IMPORT_HINWEIS_AB:
+                    continue
+                bisher = treffer[index]
+                if bisher is None or wert > bisher[1]:
+                    treffer[index] = (row, float(wert))
+
+    gebraucht: dict[str, AiMemoryEntry] = {}
+    for key, _value in kandidaten:
+        if key in nach_schluessel:
+            gebraucht[nach_schluessel[key].id] = nach_schluessel[key]
+    for fund in treffer:
+        if fund is not None:
+            gebraucht[fund[0].id] = fund[0]
+    klartext = {row.id: value for row, value in _entschluesseln_lesbare(list(gebraucht.values()))}
+
+    grenze = ai_limit_service.resolve_scope_memory_limit(
+        db, scope, user, team_id=tid, server_id=sid,
+    )
+    return Importabgleich(
+        # Auch eine Zeile, die sich nicht mehr öffnen lässt, belegt ihren
+        # Schlüssel — ``None`` sagt "besetzt, Inhalt unlesbar".
+        gleicher_schluessel={
+            key: klartext.get(nach_schluessel[key].id)
+            for key, _value in kandidaten
+            if key in nach_schluessel
+        },
+        # Eine Zeile, die sich nicht öffnen lässt, taugt nicht als Vergleich:
+        # der Benutzer soll sehen, womit er abwägt.
+        aehnlich=[
+            (fund[0].key, klartext[fund[0].id], fund[1])
+            if fund is not None and fund[0].id in klartext
+            else None
+            for fund in treffer
+        ],
+        frei=max(0, grenze - len(bestand)),
+    )
 
 
 def delete_entry(db: Session, user: User, entry_id: str) -> None:
@@ -1318,6 +1516,7 @@ def _bewertung(
 
 
 def _vorauswahl(
+    db: Session,
     rows: list[AiMemoryEntry],
     query: str,
     now: datetime,
@@ -1355,8 +1554,11 @@ def _vorauswahl(
     """
     if len(rows) <= limit:
         return rows, False
+    # Die Wortueberlappung unten liest den Namen jeder Zeile: alle in einem
+    # Sidecar-Aufruf statt einem je Zeile.
+    _schluessel_laden(rows)
     query_tokens = _tokens(query)
-    scores = _similarities(query, rows)
+    scores = _similarities(db, query, rows)
     ranked = sorted(
         zip(rows, scores),
         key=lambda paar: _bewertung(
@@ -1423,11 +1625,13 @@ def _vektor_entschluesseln(gespeichert: bytes | None) -> bytes | None:
 def _liegt_im_klartext(row: AiMemoryEntry) -> bool:
     """Trägt diese Zeile ihren Vektor noch unverschlüsselt?
 
-    Zwei Formen aus dem Bestand: die alte Textspalte und die Bytespalte vor dem
-    23.08.2026 — dann genau `EMBEDDING_BYTES` lang, ohne Nonce und ohne Siegel,
-    und damit sauber von einer verpackten zu unterscheiden.
+    Eine Form aus dem Bestand: die Bytespalte vor dem 23.08.2026, dann genau
+    `EMBEDDING_BYTES` lang, ohne Nonce und ohne Siegel, und damit sauber von
+    einer verpackten zu unterscheiden. (Die alte Textspalte `embedding_json`
+    ist am 26.09.2026 weggefallen; Migration `20260926_08` hat ihren Rest in
+    genau diese Form umgepackt.)
 
-    Beide werden weiter **gelesen**. Sie einfach für ungültig zu erklären wäre
+    Sie wird weiter **gelesen**. Sie einfach für ungültig zu erklären wäre
     der bequemere Weg gewesen und hätte das Gedächtnis schlechter gemacht, als
     es war: in einem Bereich mit tausenden Einträgen kommen je Anfrage nur
     `MAX_CONTEXT_ROWS` Zeilen bis zum Nachziehen, und was die Vorauswahl ohne
@@ -1436,75 +1640,48 @@ def _liegt_im_klartext(row: AiMemoryEntry) -> bool:
     bisher, aber beim nächsten Abruf in den Kontext neu geschrieben, und dabei
     verpackt.
     """
-    if row.embedding_json:
-        return True
     return (
         row.embedding_bytes is not None
         and len(row.embedding_bytes) == EMBEDDING_BYTES
     )
 
 
-def _stored_vector(row: AiMemoryEntry) -> Sequence[float] | None:
-    """Liest den gespeicherten Vektor, wenn er zum aktuellen Modell passt.
+def _stored_vector(row: AiMemoryEntry, modell: str) -> Sequence[float] | None:
+    """Liest den gespeicherten Vektor, wenn er aus dem Modell ``modell`` stammt.
 
-    Zwei Spalten, eine Wahrheit. Geschrieben wird seit dem 19.08.2026 als
-    float32-Bytes — seit dem 23.08.2026 unter AES-GCM —, und von dort wird
-    zuerst gelesen; ``embedding_json`` ist der Rückfall für Bestandszeilen.
-    Beide Formen tragen dieselben Zahlen — unterschiedlich ist nur, was das
-    Lesen kostet: 4 ms gegen 381 ms bei 5.000 Einträgen, plus 10 bis 17 ms
-    fürs Entschlüsseln.
+    ``modell`` ist die Kennung der Frage, gegen die verglichen wird
+    (`ai_embedding_service.Kodierung`), und keine Konstante: `encode` rechnet
+    lokal oder im Google-Rückfall, und ein Vektor aus dem jeweils anderen Raum
+    hat dieselbe Länge, aber keine vergleichbare Bedeutung.
+
+    Geschrieben wird seit dem 19.08.2026 als float32-Bytes, seit dem
+    23.08.2026 unter AES-GCM. Das Lesen kostet 4 ms bei 5.000 Einträgen, plus
+    10 bis 17 ms fürs Entschlüsseln.
 
     Lässt sich die Bytespalte nicht öffnen, wird sie **roh** gelesen: dann ist
     es eine Bestandszeile mit unverpackten Zahlen, und `bytes_zu_vektor` erkennt
     an der Länge, ob sie das wirklich ist. Warum sie weiter gelesen wird und
     nicht einfach als fehlend gilt, steht an `_liegt_im_klartext`.
-
-    Der Rückfall bleibt, bis die Migration `20260819_01` überall gelaufen
-    ist. Zwischen dem Einspielen des Codes und diesem Lauf liegen bei jedem
-    Betreiber ein paar Sekunden, und in denen fände ein Gedächtnis ohne
-    Rückfall zu keiner Frage mehr etwas.
-
-    Dass eine beschädigte Byteszeile ebenfalls auf JSON zurückfällt, ist
-    Absicht und keine Nachlässigkeit: beide Spalten beschreiben denselben
-    Text, also ist die unversehrte von beiden die richtige Antwort.
     """
-    if row.embedding_model != _EMBEDDING_MODEL_TAG:
+    if row.embedding_model != modell:
         return None
     geoeffnet = _vektor_entschluesseln(row.embedding_bytes)
     vektor = ai_embedding_service.bytes_zu_vektor(
         row.embedding_bytes if geoeffnet is None else geoeffnet
     )
-    if vektor is not None:
-        return vektor
-    if not row.embedding_json:
-        return None
-    try:
-        alt = json.loads(row.embedding_json)
-    except (TypeError, ValueError):
-        return None
-    if not isinstance(alt, list) or len(alt) != EMBEDDING_DIMENSIONS:
-        return None
-    return alt
+    return vektor
 
 
-def _vektor_setzen(row: AiMemoryEntry, vektor: Sequence[float] | None) -> None:
-    """Schreibt den Vektor einer Zeile — in genau einer Form.
-
-    ``embedding_json`` wird dabei immer geleert, auch wenn gar nichts
-    geschrieben wird. Das ist dieselbe Regel, die `refresh_embedding` schon
-    für das Verwerfen begründet: eine Zeile trägt einen Vektor, und zwar den
-    zu ihrem aktuellen Text. Bliebe der alte JSON-Stand daneben stehen,
-    beschriebe er nach einer Berichtigung den *alten* Text — und der Rückfall
-    in `_stored_vector` griffe genau dann darauf zurück, wenn die Bytes einmal
-    fehlen.
-    """
+def _vektor_setzen(
+    row: AiMemoryEntry, vektor: Sequence[float] | None, modell: str | None
+) -> None:
+    """Schreibt den Vektor einer Zeile, verpackt, oder verwirft ihn."""
     row.embedding_bytes = (
         None
         if vektor is None
         else _vektor_verschluesseln(ai_embedding_service.vektor_zu_bytes(vektor))
     )
-    row.embedding_json = None
-    row.embedding_model = None if vektor is None else _EMBEDDING_MODEL_TAG
+    row.embedding_model = None if vektor is None else modell
 
 
 def _embedding_source(key: str, value: str) -> str:
@@ -1518,7 +1695,7 @@ def _embedding_source(key: str, value: str) -> str:
     return f"{readable_key}: {value}"
 
 
-def refresh_embedding(row: AiMemoryEntry, value: str) -> None:
+def refresh_embedding(db: Session, row: AiMemoryEntry, value: str) -> None:
     """Berechnet den Vektor eines Eintrags neu, falls ein Modell da ist.
 
     Schlägt es fehl, wird ein alter Vektor **verworfen** und der Eintrag eben
@@ -1532,11 +1709,14 @@ def refresh_embedding(row: AiMemoryEntry, value: str) -> None:
     damit zurecht — und `_vektoren_nachziehen` holt es beim nächsten Abruf in
     den Kontext nach, sobald wieder ein Modell da ist.
     """
-    vectors = ai_embedding_service.encode([_embedding_source(row.key, value)])
-    _vektor_setzen(row, vectors[0] if vectors else None)
+    kodierung = ai_embedding_service.encode([_embedding_source(row.key, value)], db=db)
+    if kodierung is None or not kodierung.vektoren:
+        _vektor_setzen(row, None, None)
+        return
+    _vektor_setzen(row, kodierung.vektoren[0], kodierung.modell)
 
 
-def _vektoren_nachziehen(decoded: list[tuple[AiMemoryEntry, str]]) -> None:
+def _vektoren_nachziehen(db: Session, decoded: list[tuple[AiMemoryEntry, str]]) -> None:
     """Berechnet fehlende Vektoren nach, solange der Klartext ohnehin vorliegt.
 
     `refresh_embedding` verwirft den Vektor, wenn `encode` beim Schreiben nichts
@@ -1567,23 +1747,26 @@ def _vektoren_nachziehen(decoded: list[tuple[AiMemoryEntry, str]]) -> None:
     jemand von Hand anfasst. Neu gerechnet trägt sie dieselben Zahlen —
     `_vektor_setzen` räumt beide alten Formen dabei ab.
     """
+    modell = ai_embedding_service.aktives_modell(db=db)
+    if modell is None:
+        return
     offen = [
         (row, value)
         for row, value in decoded
-        if _stored_vector(row) is None or _liegt_im_klartext(row)
+        if _stored_vector(row, modell) is None or _liegt_im_klartext(row)
     ]
     if not offen:
         return
-    vektoren = ai_embedding_service.encode(
-        [_embedding_source(row.key, value) for row, value in offen]
+    kodierung = ai_embedding_service.encode(
+        [_embedding_source(row.key, value) for row, value in offen], db=db
     )
     # Die Längenprüfung ist keine Formsache: käme weniger zurück als
     # hineingegeben, schriebe das `zip` den Vektor der einen Zeile an die
     # andere — eine falsche Bedeutung unter dem richtigen Schlüssel.
-    if not vektoren or len(vektoren) != len(offen):
+    if kodierung is None or len(kodierung.vektoren) != len(offen):
         return
-    for (row, _value), vektor in zip(offen, vektoren):
-        _vektor_setzen(row, vektor)
+    for (row, _value), vektor in zip(offen, kodierung.vektoren):
+        _vektor_setzen(row, vektor, kodierung.modell)
 
 
 def _utc(value: datetime) -> datetime:
@@ -1670,9 +1853,11 @@ def _visible_scope_rows(
         conditions.append(
             and_(AiMemoryEntry.scope == "team", AiMemoryEntry.team_id.in_(team_ids))
         )
-    rows = db.query(AiMemoryEntry).filter(
-        or_(*conditions)
-    ).order_by(AiMemoryEntry.scope, AiMemoryEntry.key).all()
+    rows = db.query(AiMemoryEntry).filter(or_(*conditions)).all()
+    # Der Name ist verschluesselt; sortiert wird nach dem Klartext, alle Namen
+    # in einem Sidecar-Aufruf.
+    _schluessel_laden(rows)
+    rows.sort(key=lambda row: (row.scope, row.key))
 
     # Je Server einmal fragen, nicht je Zeile. Zehn Notizen zu demselben Server
     # stellten bisher zehnmal dieselbe Frage, und die ist nicht billig:
@@ -1780,6 +1965,9 @@ def _entschluesseln_nebenlaeufig(
     """
     if not rows:
         return []
+    # Wer den Wert liest, liest auch den Namen. Hier, im Hauptthread und
+    # vor dem Pool, alle Namen in einem Aufruf.
+    _schluessel_laden(rows)
     auftraege = [(row.value_encrypted, _aad(row)) for row in rows]
 
     def oeffnen(ciphertext: str, aad: str) -> str | DisSidecarError:
@@ -1899,7 +2087,9 @@ def _memory_line(
     return f"[{scope}/{origin}] {row.key}: {flattened}"
 
 
-def _similarities(query: str, rows: list[AiMemoryEntry]) -> list[float | None]:
+def _similarities(
+    db: Session, query: str, rows: list[AiMemoryEntry]
+) -> list[float | None]:
     """Bedeutungsaehnlichkeit der Eintraege zur Frage, oder lauter ``None``.
 
     ``None`` steht fuer "kein Vergleich moeglich" und nicht fuer "unaehnlich":
@@ -1908,16 +2098,19 @@ def _similarities(query: str, rows: list[AiMemoryEntry]) -> list[float | None]:
     """
     if not query.strip():
         return [None] * len(rows)
-    query_vectors = ai_embedding_service.encode([query])
-    if not query_vectors:
+    kodierung = ai_embedding_service.encode([query], db=db)
+    if kodierung is None or not kodierung.vektoren:
         return [None] * len(rows)
 
-    stored = [_stored_vector(row) for row in rows]
+    # Nur Vektoren aus demselben Modell wie die Frage. Ein Eintrag aus dem
+    # anderen gilt als vektorlos — `None`, nicht unähnlich — bis
+    # `_vektoren_nachziehen` ihn neu gerechnet hat.
+    stored = [_stored_vector(row, kodierung.modell) for row in rows]
     known = [vector for vector in stored if vector is not None]
     if not known:
         return [None] * len(rows)
 
-    scores = ai_embedding_service.similarity(query_vectors[0], known)
+    scores = ai_embedding_service.similarity(kodierung.vektoren[0], known)
     if len(scores) != len(known):
         return [None] * len(rows)
     result: list[float | None] = []
@@ -1966,7 +2159,7 @@ def server_shared_context(
         return None
     jetzt = datetime.now(timezone.utc)
     query_tokens = _tokens(query)
-    aehnlichkeiten = _similarities(query, [row for row, _ in decoded])
+    aehnlichkeiten = _similarities(db, query, [row for row, _ in decoded])
     for (row, wert), aehnlichkeit in zip(decoded, aehnlichkeiten):
         treffer = _reiz(aehnlichkeit, len(query_tokens & _tokens(f"{row.key} {wert}")))
         if treffer < VERBLASSEN_AB:
@@ -2079,20 +2272,20 @@ def provider_memory_context(
     # überschrieben, und `decoded` kennt nur, was ihm gegeben wurde. Die Zahl
     # muss deshalb hier festgehalten werden — der Hinweis unten nennt sie.
     vor_der_vorauswahl = len(rows)
-    rows, vorgekuerzt = _vorauswahl(rows, query, now, zeilen)
+    rows, vorgekuerzt = _vorauswahl(db, rows, query, now, zeilen)
     vorab_verworfen = vor_der_vorauswahl - len(rows)
     decoded = _entschluesseln(rows)
     # Zeilen aus einer Ausfallphase des Modells tragen keinen Vektor. Hier
     # liegt ihr Klartext ohnehin offen, also ist hier die Stelle, an der es
     # nichts extra kostet, ihn nachzurechnen — sonst blieben sie für immer
     # blind für Bedeutungsrang und Reiz.
-    _vektoren_nachziehen(decoded)
+    _vektoren_nachziehen(db, decoded)
     # **Die Abrufstaerke je Zeile**, einmal berechnet und danach zweimal
     # gebraucht: fuer die Darstellung (blass oder voll) und, falls das Budget
     # nicht reicht, als Teil der Auswahl. Die Vektoren liegen ohnehin schon an
     # den Zeilen; teuer ist hier nichts.
     query_tokens = _tokens(query)
-    aehnlichkeiten = _similarities(query, [row for row, _ in decoded])
+    aehnlichkeiten = _similarities(db, query, [row for row, _ in decoded])
     ueberlappungen = [
         len(query_tokens & _tokens(f"{row.key} {value}")) for row, value in decoded
     ]
@@ -2254,10 +2447,10 @@ def search_entries(
     # mit dem Budget wächst: eine Suche meldet höchstens `MAX_SEARCH_RESULTS`
     # Treffer in den Chat und hängt an der Lesbarkeit, nicht am Kontextfenster
     # des Modells. Mehr Kandidaten zu öffnen kaufte hier nichts.
-    rows, _vorgekuerzt = _vorauswahl(rows, query, now, MAX_CONTEXT_ROWS)
+    rows, _vorgekuerzt = _vorauswahl(db, rows, query, now, MAX_CONTEXT_ROWS)
     decoded = _entschluesseln(rows)
     query_tokens = _tokens(query)
-    scores = _similarities(query, [row for row, _ in decoded])
+    scores = _similarities(db, query, [row for row, _ in decoded])
     ranked = sorted(
         zip(decoded, scores),
         key=lambda item: _relevance(item[0][0], item[0][1], query_tokens, now, item[1]),
@@ -2299,10 +2492,7 @@ def delete_by_keys(
         return []
     rows = (
         db.query(AiMemoryEntry)
-        .filter(
-            AiMemoryEntry.scope_identity == identity,
-            AiMemoryEntry.key.in_(wanted),
-        )
+        .filter(schluessel_bedingung(db, identity, wanted))
         .all()
     )
     removed: list[str] = []

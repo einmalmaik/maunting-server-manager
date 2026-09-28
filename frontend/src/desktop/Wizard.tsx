@@ -261,6 +261,30 @@ function SchrittKopplung({
   const [fehler, setFehler] = useState<string | null>(null)
   const [laeuft, setLaeuft] = useState(false)
   const [scannerOffen, setScannerOffen] = useState(false)
+  /**
+   * Die Sicherheitsnummer nach dem Koppeln. Solange sie steht, bleibt der
+   * Schritt offen: das Panel fragt gleich, ob es den Verlauf hierher übergeben
+   * soll, und dort vergleicht man mit genau dieser Nummer.
+   */
+  const [nummer, setNummer] = useState<string | null>(null)
+
+  async function fortfahren() {
+    const frischerStand = { ...(stand ?? {}), eingerichtet: true }
+    await onWeiter(frischerStand as AppKonfig)
+  }
+
+  /** Weiter unter der Nummer: ein Fehler beim Speichern gehört auf den Schirm. */
+  async function weiterNachNummer() {
+    setFehler(null)
+    setLaeuft(true)
+    try {
+      await fortfahren()
+    } catch (e) {
+      setFehler(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLaeuft(false)
+    }
+  }
 
   async function absenden(manuellerCode?: string) {
     const zielCode = (manuellerCode ?? code).trim()
@@ -268,9 +292,12 @@ function SchrittKopplung({
     setFehler(null)
     setLaeuft(true)
     try {
-      await koppeln(zielCode, name.trim())
-      const frischerStand = { ...(stand ?? {}), eingerichtet: true }
-      await onWeiter(frischerStand as AppKonfig)
+      const ergebnis = await koppeln(zielCode, name.trim())
+      if (ergebnis.sicherheitsnummer) {
+        setNummer(ergebnis.sicherheitsnummer)
+        return
+      }
+      await fortfahren()
     } catch (e) {
       setFehler(e instanceof Error ? e.message : String(e))
     } finally {
@@ -282,6 +309,24 @@ function SchrittKopplung({
     const sauber = gescannterCode.trim()
     setCode(sauber)
     void absenden(sauber)
+  }
+
+  if (nummer) {
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="rounded-lg border border-outline-variant/40 bg-surface-container-high/40 p-4">
+          <p className="text-label-sm text-on-surface-variant">{t('mss.wizard.sicherheitsnummerTitel')}</p>
+          <p className="mt-1 font-mono text-title-md tracking-wider text-on-surface">{nummer}</p>
+        </div>
+        <p className="text-sm text-on-surface-variant">{t('mss.wizard.sicherheitsnummerHinweis')}</p>
+        <Fehlerzeile text={fehler} />
+        <div className="flex justify-end">
+          <Button type="button" onClick={() => void weiterNachNummer()} disabled={laeuft}>
+            {t('mss.wizard.weiter')}
+          </Button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -298,7 +343,7 @@ function SchrittKopplung({
         {stand?.backend_url && (
           <div className="flex items-center justify-between rounded-lg bg-surface-container-high/40 p-2.5 px-3 border border-outline-variant/30 text-xs">
             <div className="flex flex-col min-w-0 pr-2">
-              <span className="text-on-surface-variant text-[11px]">{t('mss.wizard.verbundenesPanel', 'Panel-Server')}:</span>
+              <span className="text-on-surface-variant text-label-sm">{t('mss.wizard.verbundenesPanel')}:</span>
               <span className="font-mono text-on-surface truncate font-medium">{stand.backend_url}</span>
             </div>
             {onZurueck && (
@@ -308,7 +353,7 @@ function SchrittKopplung({
                 className="px-2.5 py-1 text-xs shrink-0 h-auto"
                 onClick={onZurueck}
               >
-                {t('mss.wizard.adresseAendern', 'Ändern')}
+                {t('mss.wizard.adresseAendern')}
               </Button>
             )}
           </div>
@@ -331,10 +376,10 @@ function SchrittKopplung({
               variant="secondary"
               className="px-3 h-10 inline-flex items-center gap-1.5 shrink-0"
               onClick={() => setScannerOffen(true)}
-              title={t('mss.wizard.qrCodeScannen', 'QR-Code per Kamera scannen')}
+              title={t('mss.wizard.qrCodeScannen')}
             >
               <Camera className="h-4 w-4 text-primary" />
-              <span className="hidden sm:inline text-xs">{t('mss.wizard.scannen', 'Scannen')}</span>
+              <span className="hidden sm:inline text-xs">{t('mss.wizard.scannen')}</span>
             </Button>
           </div>
           <p className="msm-field-help">{t('mss.wizard.codeHinweis')}</p>

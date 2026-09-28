@@ -1,4 +1,13 @@
+from typing import Literal
+
 from pydantic import BaseModel
+
+# Die beiden Panelsprachen. Das Panel schickt seit jeher nur diese zwei — es
+# leitet den Wert durch `normalizePanelLanguage` —, aber als freies `str` war
+# das eine Gewohnheit und keine Zusage: ein `"ar"` aus einem Skript wäre
+# angenommen worden und hätte eine Sprache eingestellt, für die es keine Texte
+# gibt. Steht die Liste hier, sagt die API 422 statt stillschweigend ja.
+PanelLanguage = Literal["de", "en"]
 
 
 class PanelSettingsResponse(BaseModel):
@@ -12,7 +21,7 @@ class PanelSettingsResponse(BaseModel):
     smtp_from: str = ""
     smtp_tls: str = "true"
     resend_api_key: str = ""
-    default_language: str = "de"
+    default_language: PanelLanguage = "de"
     email_configured: bool = False
     email_provider: str = "none"
     steam_api_key: str = ""
@@ -39,11 +48,13 @@ class PanelSettingsResponse(BaseModel):
     singra_webhook_secret_source: str = "none"
     updates_automatic: bool = False
     desktop_app_download_enabled: bool = True
+    story_fable_download_enabled: bool = False
     calendar_enabled: bool = True
     notes_enabled: bool = True
     vault_enabled: bool = True
-    captcha_enabled: bool = False
-    captcha_provider: str = "none"
+    social_enabled: bool = True
+    captcha_enabled: bool = True
+    captcha_provider: str = "altcha"
     captcha_site_key: str = ""
     captcha_secret_key: str = ""
     cloudflare_enabled: bool = True
@@ -64,6 +75,7 @@ class PanelSettingsUpdate(BaseModel):
     calendar_enabled: bool | None = None
     notes_enabled: bool | None = None
     vault_enabled: bool | None = None
+    social_enabled: bool | None = None
     smtp_host: str | None = None
     smtp_port: str | None = None
     smtp_user: str | None = None
@@ -71,7 +83,7 @@ class PanelSettingsUpdate(BaseModel):
     smtp_from: str | None = None
     smtp_tls: str | None = None
     resend_api_key: str | None = None
-    default_language: str | None = None
+    default_language: PanelLanguage | None = None
     time_format: str | None = None
     support_widget_enabled: bool | None = None
     support_widget_mode: str | None = None
@@ -81,6 +93,7 @@ class PanelSettingsUpdate(BaseModel):
     support_widget_custom_snippet: str | None = None
     updates_automatic: bool | None = None
     desktop_app_download_enabled: bool | None = None
+    story_fable_download_enabled: bool | None = None
     captcha_enabled: bool | None = None
     captcha_provider: str | None = None
     captcha_site_key: str | None = None

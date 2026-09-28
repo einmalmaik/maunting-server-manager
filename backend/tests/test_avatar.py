@@ -22,6 +22,8 @@ def test_avatar_upload_and_delete(client: TestClient, owner_user: User, owner_co
     assert get_res.status_code == 200
     assert get_res.content == png_bytes
     assert get_res.headers.get("access-control-allow-origin") == "*"
+    # Der eigene Kopf der Route gilt, nicht die Vorgabe für die API.
+    assert get_res.headers["cache-control"] == "public, max-age=86400"
 
     # Delete avatar
     del_res = client.delete("/api/auth/me/avatar", headers=headers, cookies=owner_cookies)
@@ -31,6 +33,7 @@ def test_avatar_upload_and_delete(client: TestClient, owner_user: User, owner_co
     # Get deleted avatar returns 404
     get_res_after = client.get(avatar_path)
     assert get_res_after.status_code == 404
+    assert get_res_after.headers["cache-control"] == "no-store"
 
 
 def test_avatar_invalid_format(client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str):

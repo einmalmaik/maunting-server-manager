@@ -85,7 +85,7 @@ class TestHeilungsbericht:
         assert "&lt;script&gt;" in html
         # Die Vorlage selbst bleibt HTML — sonst haette man den Fehler nur
         # gegen einen anderen getauscht.
-        assert "<strong>" in html
+        assert '<h1 class="headline"' in html
 
     def test_server_name_and_incident_type_are_escaped_too(self):
         """Auch die Felder, die nicht vom Modell stammen.
@@ -184,9 +184,10 @@ class TestBerichtsvorlage:
         assert "Passwort" not in html
         assert "kontaktiere den Administrator" not in html
 
-        # Und die andere Vorlage traegt ihn weiterhin — 17 Aufrufer brauchen ihn.
+        # Die andere Vorlage traegt ihn, wenn ein Sicherheitsereignis ihn anfordert.
         sicherheit = EmailService._notification_email_html(
             "einmalmaik", "Neuer Login", "Von einer neuen Adresse.", "",
+            sicherheitshinweis=True,
         )
         assert "ändere sofort dein Passwort" in sicherheit
 

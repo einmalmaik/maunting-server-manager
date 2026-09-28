@@ -1,0 +1,519 @@
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Mic, Volume2, Radio, Sliders, ShieldAlert, Video } from 'lucide-react'
+import { Button, Dropdown, type DropdownOption, Slider, Switch, ProgressBar } from '@/Singra/UI'
+import { getAudioSettings, saveAudioSettings } from '@/lib/audioSettings'
+import {
+  AUFLOESUNGEN as AUFLOESUNG_WERTE,
+  getVideoSettings,
+  saveVideoSettings,
+  type VideoAufloesung,
+  type VideoBildrate,
+} from '@/lib/videoSettings'
+import {
+  aktuelleVerarbeitung,
+  registriereAudioGeraete,
+  registriereAudioVerarbeitung,
+} from '@/components/ai/voice/audioGeraete'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
+
+export function AudioTab() {
+  const { t } = useTranslation()
+
+  // Devices state
+  const [inputDevices, setInputDevices] = useState<DropdownOption[]>([])
+  const [outputDevices, setOutputDevices] = useState<DropdownOption[]>([])
+  const [selectedInputId, setSelectedInputId] = useState<string>('')
+  const [selectedOutputId, setSelectedOutputId] = useState<string>('')
+
+  // Processing settings
+  const [noiseSuppression, setNoiseSuppression] = useState<boolean>(true)
+  const [echoCancellation, setEchoCancellation] = useState<boolean>(true)
+  const [autoGainControl, setAutoGainControl] = useState<boolean>(true)
+  const [gainPercent, setGainPercent] = useState<number>(100)
+
+  // Bildqualität. Gilt für die Kamera im Anruf und für Videonotizen.
+  const [videoAufloesung, setVideoAufloesung] = useState<VideoAufloesung>('1080p')
+  const [videoBildrate, setVideoBildrate] = useState<VideoBildrate>(60)
+
+  const AUFLOESUNGEN: DropdownOption[] = [
+    { value: '2160p', label: t('profile.videoResolution2160'), hint: t('profile.videoResolution2160Hint') },
+    { value: '1440p', label: t('profile.videoResolution1440'), hint: t('profile.videoResolution1440Hint') },
+    { value: '1080p', label: t('profile.videoResolution1080'), hint: t('profile.videoResolution1080Hint') },
+    { value: '720p', label: t('profile.videoResolution720'), hint: t('profile.videoResolution720Hint') },
+  ]
+  const BILDRATEN: DropdownOption[] = [
+    { value: '60', label: t('profile.videoFramerate60'), hint: t('profile.videoFramerate60Hint') },
+    { value: '30', label: t('profile.videoFramerate30'), hint: t('profile.videoFramerate30Hint') },
+  ]
+
+  // Live Test State
+  const [isTesting, setIsTesting] = useState(false)
+  const [testLevel, setTestLevel] = useState(0)
+  const [testError, setTestError] = useState<string | null>(null)
+
+  const cleanupRef = useRef<(() => void) | null>(null)
+  const gainNodeRef = useRef<GainNode | null>(null)
+  const unmountedRef = useRef(false)
+  const runIdRef = useRef(0)
+
+  // Load saved settings on mount
+  useEffect(() => {
+    const saved = getAudioSettings()
+    setNoiseSuppression(saved.noiseSuppression)
+    setEchoCancellation(saved.echoCancellation)
+    setAutoGainControl(saved.autoGainControl)
+    setSelectedInputId(saved.preferredMicId || '')
+    setSelectedOutputId(saved.preferredSpeakerId || '')
+
+    const currentVerarbeitung = aktuelleVerarbeitung()
+    setGainPercent(Math.round(currentVerarbeitung.verstaerkung * 100))
+
+    const bild = getVideoSettings()
+    setVideoAufloesung(bild.aufloesung)
+    setVideoBildrate(bild.bildrate)
+  }, [])
+
+  const handleSelectAufloesung = (wert: string) => {
+    const gewaehlt = AUFLOESUNG_WERTE.includes(wert as VideoAufloesung)
+      ? (wert as VideoAufloesung)
+      : '1080p'
+    setVideoAufloesung(gewaehlt)
+    saveVideoSettings({ aufloesung: gewaehlt })
+  }
+
+  const handleSelectBildrate = (wert: string) => {
+    const gewaehlt: VideoBildrate = wert === '30' ? 30 : 60
+    setVideoBildrate(gewaehlt)
+    saveVideoSettings({ bildrate: gewaehlt })
+  }
+
+  const loadDevices = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      const inputs = devices.filter((d) => d.kind === 'audioinput')
+      const outputs = devices.filter((d) => d.kind === 'audiooutput')
+
+      // Beide Listen benutzen denselben Schlüssel für ihren ersten Eintrag.
+      //
+      // Die Ausgabeliste stand vorher auf `mss.audio.standard` — und der heisst
+      // "Windows-Standard". Im Web-Panel, auf jedem Betriebssystem, direkt
+      // unter einer Mikrofonliste, deren erster Eintrag "Systemstandard" hiess.
+      // Der Ersatztext daneben sagte "Systemstandard (Ausgabe)": die Absicht
+      // war eindeutig, nur der Schlüssel war der falsche. `mss.audio.standard`
+      // bleibt dem Desktop-Einstieg, wo Windows zutrifft.
+      setInputDevices([
+        { value: '', label: t('profile.audioDeviceDefault') },
+        ...inputs.map((d, index) => ({
+          value: d.deviceId,
+          label: d.label || t('profile.audioMicrophoneFallback', { number: index + 1 }),
+        })),
+      ])
+
+      setOutputDevices([
+        { value: '', label: t('profile.audioDeviceDefault') },
+        ...outputs.map((d, index) => ({
+          value: d.deviceId,
+          label: d.label || t('profile.audioSpeakerFallback', { number: index + 1 }),
+        })),
+      ])
+    } catch {
+      // Fallback if not permitted
+    }
+  }, [t])
+
+  useEffect(() => {
+    void loadDevices()
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.addEventListener) {
+      navigator.mediaDevices.addEventListener('devicechange', loadDevices)
+      return () => {
+        navigator.mediaDevices.removeEventListener('devicechange', loadDevices)
+      }
+    }
+  }, [loadDevices])
+
+  // Stop test helper
+  const stopTest = useCallback(() => {
+    runIdRef.current += 1
+    cleanupRef.current?.()
+    cleanupRef.current = null
+    gainNodeRef.current = null
+    setIsTesting(false)
+    setTestLevel(0)
+  }, [])
+
+  // Start test helper
+  const startTest = useCallback(async () => {
+    const runId = runIdRef.current + 1
+    runIdRef.current = runId
+    cleanupRef.current?.()
+    cleanupRef.current = null
+    setTestError(null)
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: false, // Echo cancellation is disabled during local playback test to prevent silencing
+          noiseSuppression,
+          autoGainControl,
+          ...(selectedInputId ? { deviceId: { ideal: selectedInputId } } : {}),
+        },
+      })
+
+      if (unmountedRef.current || runId !== runIdRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
+
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      const ctx = new AudioCtx()
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => {})
+      }
+
+      // Route to output device if sinkId supported
+      if (selectedOutputId) {
+        const withSink = ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> }
+        if (withSink.setSinkId) {
+          await withSink.setSinkId(selectedOutputId).catch(() => {})
+        }
+      }
+
+      const source = ctx.createMediaStreamSource(stream)
+      const gain = ctx.createGain()
+      gain.gain.value = gainPercent / 100
+      gainNodeRef.current = gain
+
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 512
+
+      source.connect(gain)
+      gain.connect(analyser)
+      gain.connect(ctx.destination)
+
+      const pcmBuffer = new Float32Array(analyser.fftSize)
+      const interval = window.setInterval(() => {
+        analyser.getFloatTimeDomainData(pcmBuffer)
+        let sum = 0
+        for (let i = 0; i < pcmBuffer.length; i++) {
+          sum += pcmBuffer[i] * pcmBuffer[i]
+        }
+        const rms = Math.sqrt(sum / pcmBuffer.length)
+        setTestLevel(Math.min(1, Math.max(0, rms * 4)))
+      }, 80)
+
+      cleanupRef.current = () => {
+        window.clearInterval(interval)
+        source.disconnect()
+        gain.disconnect()
+        analyser.disconnect()
+        stream.getTracks().forEach((track) => track.stop())
+        void ctx.close().catch(() => {})
+      }
+
+      setIsTesting(true)
+    } catch {
+      setTestError(t('mss.audio.testhoerenFehler'))
+      setIsTesting(false)
+    }
+  }, [noiseSuppression, autoGainControl, selectedInputId, selectedOutputId, gainPercent, t])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      unmountedRef.current = true
+      cleanupRef.current?.()
+    }
+  }, [])
+
+  // Live gain adjustment during active test
+  useEffect(() => {
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.value = gainPercent / 100
+    }
+  }, [gainPercent])
+
+  // Restart test if constraints changed while active
+  useEffect(() => {
+    if (cleanupRef.current) {
+      void startTest()
+    }
+  }, [startTest])
+
+  const handleSelectInput = (deviceId: string) => {
+    setSelectedInputId(deviceId)
+    saveAudioSettings({ preferredMicId: deviceId || null })
+    registriereAudioGeraete(deviceId || null, selectedOutputId || null)
+  }
+
+  const handleSelectOutput = (deviceId: string) => {
+    setSelectedOutputId(deviceId)
+    saveAudioSettings({ preferredSpeakerId: deviceId || null })
+    registriereAudioGeraete(selectedInputId || null, deviceId || null)
+  }
+
+  const handleToggleNoise = (val: boolean) => {
+    setNoiseSuppression(val)
+    saveAudioSettings({ noiseSuppression: val })
+    registriereAudioVerarbeitung({ rauschen: val })
+  }
+
+  const handleToggleEcho = (val: boolean) => {
+    setEchoCancellation(val)
+    saveAudioSettings({ echoCancellation: val })
+    registriereAudioVerarbeitung({ echo: val })
+  }
+
+  const handleToggleAutoGain = (val: boolean) => {
+    setAutoGainControl(val)
+    saveAudioSettings({ autoGainControl: val })
+    meldeErrungenschaft('starter_audio_tuned')
+    registriereAudioVerarbeitung({ autogain: val })
+  }
+
+  const handleGainChange = (percent: number) => {
+    setGainPercent(percent)
+    saveAudioSettings({ micGain: percent / 100 })
+    meldeErrungenschaft('starter_audio_tuned')
+    registriereAudioVerarbeitung({ verstaerkung: percent / 100 })
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Device Selection Card */}
+      <section className="msm-card p-6" aria-labelledby="audio-devices-heading">
+        <div className="flex items-center justify-between gap-4 mb-4">
+          <div className="flex items-center gap-2">
+            <Mic className="h-5 w-5 text-secondary" aria-hidden="true" />
+            <h2 id="audio-devices-heading" className="font-headline text-title-lg font-semibold text-on-surface">
+              {t('profile.audioTitle')}
+            </h2>
+          </div>
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium ${
+              isTesting
+                ? 'border-status-success/30 bg-status-success/10 text-status-success animate-pulse'
+                : 'border-outline-variant bg-surface-container text-on-surface-variant'
+            }`}
+          >
+            <Radio className="h-3.5 w-3.5" aria-hidden="true" />
+            {isTesting ? t('profile.audioActive') : t('profile.audioInactive')}
+          </span>
+        </div>
+
+        <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-6">
+          {t('profile.audioDescription')}
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl">
+          <div className="space-y-1.5">
+            <label
+              htmlFor="audio-input-device"
+              className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider"
+            >
+              {t('profile.audioDeviceLabel')}
+            </label>
+            <Dropdown
+              id="audio-input-device"
+              value={selectedInputId}
+              onChange={handleSelectInput}
+              options={inputDevices}
+              aria-label={t('profile.audioDeviceLabel')}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label
+              htmlFor="audio-output-device"
+              className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider"
+            >
+              {t('mss.audio.ausgabe')}
+            </label>
+            <Dropdown
+              id="audio-output-device"
+              value={selectedOutputId}
+              onChange={handleSelectOutput}
+              options={outputDevices}
+              aria-label={t('mss.audio.ausgabe')}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Audio Processing & Hardware Filters */}
+      <section className="msm-card p-6" aria-labelledby="audio-processing-heading">
+        <div className="flex items-center gap-2 mb-4">
+          <Sliders className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 id="audio-processing-heading" className="font-headline text-title-lg font-semibold text-on-surface">
+            {t('mss.audio.verarbeitung')}
+          </h2>
+        </div>
+        <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-5">
+          {t('mss.audio.verarbeitungHinweis')}
+        </p>
+
+        <div className="max-w-xl space-y-4">
+          <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
+            <div>
+              <span className="text-sm font-medium text-on-surface block">
+                {t('profile.audioNoiseSuppression')}
+              </span>
+              <span className="text-xs text-on-surface-variant">
+                {t('mss.audio.rauschenHinweis')}
+              </span>
+            </div>
+            <Switch
+              checked={noiseSuppression}
+              onCheckedChange={handleToggleNoise}
+              aria-label={t('profile.audioNoiseSuppression')}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
+            <div>
+              <span className="text-sm font-medium text-on-surface block">
+                {t('profile.audioEchoCancellation')}
+              </span>
+              <span className="text-xs text-on-surface-variant">
+                {t('mss.audio.echoHinweis')}
+              </span>
+            </div>
+            <Switch
+              checked={echoCancellation}
+              onCheckedChange={handleToggleEcho}
+              aria-label={t('profile.audioEchoCancellation')}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
+            <div>
+              <span className="text-sm font-medium text-on-surface block">
+                {t('profile.audioAutoGain')}
+              </span>
+              <span className="text-xs text-on-surface-variant">
+                Gleicht leise und laute Sprachpassagen automatisch an ein gesundes Niveau an.
+              </span>
+            </div>
+            <Switch
+              checked={autoGainControl}
+              onCheckedChange={handleToggleAutoGain}
+              aria-label={t('profile.audioAutoGain')}
+            />
+          </div>
+
+          <div className="pt-2">
+            <Slider
+              value={gainPercent}
+              min={25}
+              max={400}
+              step={5}
+              onValueChange={handleGainChange}
+              label={t('mss.audio.verstaerkung')}
+              hint={`${gainPercent} %`}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Bildqualität für Anrufe und Videonotizen */}
+      <section className="msm-card p-6" aria-labelledby="video-quality-heading">
+        <div className="flex items-center gap-2 mb-4">
+          <Video className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 id="video-quality-heading" className="font-headline text-title-lg font-semibold text-on-surface">
+            {t('profile.videoTitle')}
+          </h2>
+        </div>
+        <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-6">
+          {t('profile.videoDescription')}
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl">
+          <div className="space-y-1.5">
+            <label
+              htmlFor="video-resolution"
+              className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider"
+            >
+              {t('profile.videoResolution')}
+            </label>
+            <Dropdown
+              id="video-resolution"
+              value={videoAufloesung}
+              onChange={handleSelectAufloesung}
+              options={AUFLOESUNGEN}
+              aria-label={t('profile.videoResolution')}
+            />
+            <p className="text-xs text-on-surface-variant">{t('profile.videoResolutionHint')}</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label
+              htmlFor="video-framerate"
+              className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider"
+            >
+              {t('profile.videoFramerate')}
+            </label>
+            <Dropdown
+              id="video-framerate"
+              value={String(videoBildrate)}
+              onChange={handleSelectBildrate}
+              options={BILDRATEN}
+              aria-label={t('profile.videoFramerate')}
+            />
+            <p className="text-xs text-on-surface-variant">{t('profile.videoFramerateHint')}</p>
+          </div>
+        </div>
+      </section>
+
+      {/* Live Testhören & Pegel */}
+      <section className="msm-card p-6" aria-labelledby="audio-test-heading">
+        <div className="flex items-center gap-2 mb-4">
+          <Volume2 className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 id="audio-test-heading" className="font-headline text-title-lg font-semibold text-on-surface">
+            {t('mss.audio.testhoeren')}
+          </h2>
+        </div>
+        <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-5">
+          {t('mss.audio.testhoerenHinweis')}
+        </p>
+
+        <div className="max-w-xl space-y-4">
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant={isTesting ? 'secondary' : 'primary'}
+              onClick={() => (isTesting ? stopTest() : void startTest())}
+              className="gap-2 shrink-0"
+            >
+              <Mic className="w-4 h-4" />
+              <span>{isTesting ? t('profile.audioTestStop') : t('profile.audioTestStart')}</span>
+            </Button>
+
+            <ProgressBar
+              value={isTesting ? Math.round(testLevel * 100) : null}
+              ariaLabel={t('mss.audio.testhoerenPegel')}
+              className="flex-1"
+            />
+          </div>
+
+          {isTesting && (
+            <div className="flex items-center justify-between text-xs px-1 text-on-surface-variant">
+              <span>Pegel: {Math.round(testLevel * 100)}%</span>
+              <span className={testLevel > 0.05 ? 'text-status-success font-semibold' : 'text-on-surface-variant/60'}>
+                {testLevel > 0.05 ? t('profile.audioSignalDetected') : 'Kein Signal'}
+              </span>
+            </div>
+          )}
+
+          {testError && (
+            <div className="p-3 rounded-xl bg-error/10 border border-error/30 text-error text-xs flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 shrink-0" />
+              <span>{testError}</span>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  )
+}

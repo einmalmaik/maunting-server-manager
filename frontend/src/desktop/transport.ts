@@ -9,7 +9,7 @@
  */
 import { invoke } from '@tauri-apps/api/core'
 
-import { registriereNativeSitzung } from '@/api/client'
+import { registriereNativeSitzung, AuthExpiredError } from '@/api/client'
 import { apiUrl } from '@/config/api'
 
 let accessToken: string | null = null
@@ -84,9 +84,10 @@ async function _stillAnmeldenDetailIntern(timeoutMs: number): Promise<AnmeldeErg
     clearTimeout(timer)
 
     if (antwort.status === 401 || antwort.status === 403) {
-      // Abgelehnte Rotation heißt: das Token ist verbrannt (Widerruf oder
-      // Wiederverwendungserkennung). Aufheben wäre sinnlos und riskant.
-      await invoke('refresh_token_loeschen').catch(() => {})
+      // Abgelehnte Rotation im Hintergrund: refresh_token_loeschen darf hier NIEMALS
+      // automatisch aufgerufen werden, damit gekoppelte Geräte dauerhaft gekoppelt
+      // bleiben. refresh_token_loeschen wird ausschließlich beim expliziten
+      // Abmelden (abmelden()) aufgerufen.
       return { status: 'abgelehnt' }
     }
 
@@ -126,6 +127,12 @@ export async function stillAnmelden(): Promise<boolean> {
 export function transportEinrichten(): void {
   registriereNativeSitzung({
     token: () => accessToken,
-    erneuern: stillAnmelden,
+    erneuern: async () => {
+      const res = await stillAnmeldenDetail(5000)
+      if (res.status === 'abgelehnt') {
+        throw new AuthExpiredError('Session abgelaufen')
+      }
+      return res.status === 'erfolg'
+    },
   })
 }

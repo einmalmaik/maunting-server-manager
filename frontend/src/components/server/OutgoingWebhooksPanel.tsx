@@ -17,6 +17,7 @@ import { api } from '@/api/client';
 import { toast } from '@/stores/toastStore';
 import { confirm } from '@/stores/confirmStore';
 import { Dropdown } from '@/components/ui/Dropdown';
+import { Button } from '@/Singra/UI'
 
 interface WebhookSub {
   id: number;
@@ -233,14 +234,14 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
               })}
             </p>
           </div>
-          <button
+          <Button
             type="button"
-            className="msm-btn-primary flex items-center gap-2"
+            className="flex items-center gap-2"
             onClick={() => setShowCreate((p) => !p)}
           >
             <Plus className="w-4 h-4" />
             {t('webhook.add', { defaultValue: 'Webhook hinzufügen' })}
-          </button>
+          </Button>
         </div>
 
         {showCreate && (
@@ -270,7 +271,7 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
                 placeholder="http://localhost:5173/api/webhooks/server-panel/…?secret=…"
                 required
               />
-              <p className="text-body-xs text-on-surface-variant mt-1">
+              <p className="text-label-sm text-on-surface-variant mt-1">
                 {t('webhook.targetUrlHelp', {
                   defaultValue:
                     'Die URL bekommst du vom Empfaengersystem (Bot-Anbieter, Monitor-Setup usw.).',
@@ -297,22 +298,20 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
               />
             </div>
             <div className="flex gap-2 justify-end pt-2">
-              <button
+              <Button variant="secondary"
                 type="button"
-                className="msm-btn-secondary"
                 onClick={() => setShowCreate(false)}
               >
                 {t('common.cancel', { defaultValue: 'Abbrechen' })}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
-                className="msm-btn-primary"
                 disabled={busy === 'create'}
               >
                 {busy === 'create'
                   ? t('common.working', { defaultValue: 'Bitte warten …' })
                   : t('common.save', { defaultValue: 'Anlegen' })}
-              </button>
+              </Button>
             </div>
           </form>
         )}
@@ -355,14 +354,14 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
               <code className="msm-input flex-1 font-mono text-body-sm overflow-x-auto whitespace-nowrap">
                 {sub.target_url}
               </code>
-              <button
+              <Button variant="secondary"
                 type="button"
-                className="msm-btn-secondary flex items-center gap-1"
+                className="flex items-center gap-1"
                 onClick={() => copyToClipboard(sub.target_url, 'URL')}
               >
                 <Copy className="w-4 h-4" />
                 {t('common.copy', { defaultValue: 'Kopieren' })}
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -395,21 +394,21 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
                 <span className="text-label-md text-status-warning font-medium">
                   {t('webhook.secretNew', { defaultValue: 'Neues Webhook-Secret' })}
                 </span>
-                <button
+                <Button variant="secondary"
                   type="button"
-                  className="msm-btn-secondary flex items-center gap-1"
+                  className="flex items-center gap-1"
                   onClick={() =>
                     copyToClipboard(revealedSecrets[sub.id], 'Secret')
                   }
                 >
                   <Copy className="w-4 h-4" />
                   {t('common.copy', { defaultValue: 'Kopieren' })}
-                </button>
+                </Button>
               </div>
               <code className="msm-input block font-mono text-body-sm break-all">
                 {revealedSecrets[sub.id]}
               </code>
-              <p className="text-body-xs text-on-surface-variant mt-2">
+              <p className="text-label-sm text-on-surface-variant mt-2">
                 {t('webhook.secretSetup', {
                   defaultValue:
                     'Trage dieses Secret im Empfaengersystem ein. Es wird als X-Webhook-Secret-Header mitgesendet und dort verifiziert.',
@@ -419,9 +418,9 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
           )}
 
           <div className="flex flex-wrap gap-2 pt-2 border-t border-outline/30">
-            <button
+            <Button variant="secondary"
               type="button"
-              className="msm-btn-secondary flex items-center gap-2"
+              className="flex items-center gap-2"
               onClick={() => void handleTest(sub.id)}
               disabled={testPending === sub.id || !sub.enabled}
               title={
@@ -438,19 +437,19 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
                 <Send className="w-4 h-4" />
               )}
               {t('webhook.test', { defaultValue: 'Test senden' })}
-            </button>
-            <button
+            </Button>
+            <Button variant="secondary"
               type="button"
-              className="msm-btn-secondary flex items-center gap-2"
+              className="flex items-center gap-2"
               onClick={() => void handleRotate(sub.id)}
               disabled={busy === `rotate-${sub.id}`}
             >
               <RotateCw className="w-4 h-4" />
               {t('webhook.rotate', { defaultValue: 'Secret rotieren' })}
-            </button>
-            <button
+            </Button>
+            <Button variant="secondary"
               type="button"
-              className="msm-btn-secondary flex items-center gap-2"
+              className="flex items-center gap-2"
               onClick={() => void handleToggleEnabled(sub)}
               disabled={busy === `toggle-${sub.id}`}
             >
@@ -458,16 +457,16 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
               {sub.enabled
                 ? t('webhook.pause', { defaultValue: 'Pausieren' })
                 : t('webhook.resume', { defaultValue: 'Fortsetzen' })}
-            </button>
-            <button
+            </Button>
+            <Button variant="destructive"
               type="button"
-              className="msm-btn-danger flex items-center gap-2 ml-auto"
+              className="flex items-center gap-2 ml-auto"
               onClick={() => void handleDelete(sub)}
               disabled={busy === `delete-${sub.id}`}
             >
               <Trash2 className="w-4 h-4" />
               {t('common.delete', { defaultValue: 'Löschen' })}
-            </button>
+            </Button>
           </div>
         </div>
       ))}
@@ -479,7 +478,7 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
           <h4 className="font-headline text-title-sm text-primary">
             {t('webhook.feedTitle', { defaultValue: 'Zustell-Feed' })}
           </h4>
-          <span className="text-body-xs text-on-surface-variant ml-auto">
+          <span className="text-label-sm text-on-surface-variant ml-auto">
             {t('webhook.feedAuto', { defaultValue: 'Auto-Refresh alle 5s' })}
           </span>
         </div>
@@ -502,10 +501,10 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
                   <span className="msm-badge bg-primary/10 text-primary font-mono">
                     {d.event_type}
                   </span>
-                  <span className="text-body-xs text-on-surface-variant">
+                  <span className="text-label-sm text-on-surface-variant">
                     #{d.id}
                   </span>
-                  <span className="text-body-xs text-on-surface-variant ml-auto">
+                  <span className="text-label-sm text-on-surface-variant ml-auto">
                     {new Date(d.sent_at).toLocaleTimeString()}
                     {d.attempt > 1 && (
                       <span className="ml-2">
@@ -515,9 +514,9 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
                   </span>
                 </div>
                 {d.error && (
-                  <p className="text-body-xs text-status-error mb-1">{d.error}</p>
+                  <p className="text-label-sm text-status-destructive mb-1">{d.error}</p>
                 )}
-                <details className="text-body-xs">
+                <details className="text-label-sm">
                   <summary className="cursor-pointer text-on-surface-variant hover:text-primary">
                     {t('webhook.feedPayload', { defaultValue: 'Payload anzeigen' })}
                   </summary>
@@ -551,7 +550,7 @@ function DeliveryBadge({
   }
   if (status === 'failed') {
     return (
-      <span className="msm-badge bg-status-error/15 text-status-error flex items-center gap-1">
+      <span className="msm-badge bg-status-destructive/15 text-status-destructive flex items-center gap-1">
         <XCircle className="w-3 h-3" />
         {code ?? 'fail'}
       </span>

@@ -62,6 +62,8 @@ class BlueprintCategory(str, Enum):
     NON_STEAM_GAME = "non_steam_game"
     VOICE_SERVER = "voice_server"
     BOT = "bot"
+    # Eigene Datenbankinstanz statt Spiel (Blueprint `postgres`).
+    DATABASE = "database"
 
 
 class BlueprintSourceType(str, Enum):
@@ -80,6 +82,7 @@ class BlueprintPortName(str, Enum):
     VOICE = "voice"
     WEB = "web"
     PEER = "peer"
+    DATABASE = "database"
     CUSTOM = "custom"
 
 
@@ -174,6 +177,7 @@ _ALLOWED_STARTUP_TOKENS: frozenset[str] = frozenset({
     "VOICE_PORT",
     "WEB_PORT",
     "PEER_PORT",
+    "DATABASE_PORT",
     "INSTALL_DIR",
     "MOD_ARG",
     "BIND_IP",

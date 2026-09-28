@@ -17,18 +17,27 @@ import uuid
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from models.dis_text import gebuendelt_entschluesseln
 from models.note import Note
 from models.user import User
 from services import team_service
+from services.dis_client import DisClient, DisDecryptionError
 from services.sync_event_service import SyncEventService
 
 _log = logging.getLogger("msm.notes")
+
+
+NOTE_CIPHERTEXT_PREFIX = "sv-note-v1:"
 
 
 def _iso_utc(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _note_aad(user_id: int, note_uid: str) -> str:
+    return f"msm:note:{user_id}:{note_uid}"
 
 
 class NotesService:
@@ -41,19 +50,102 @@ class NotesService:
             )
         return db.scalar(select(Note).where(Note.note_uid == target))
 
-    @staticmethod
-    def _format_note(note: Note, current_user: User) -> dict[str, Any]:
+    @classmethod
+    def _decrypt_or_migrate(
+        cls, db: Session, note: Note, klartexte: dict[tuple[str, str], str] | None = None
+    ) -> tuple[str, str]:
+        """Entschluesselt title und content bei Altdaten; E2EE-Ciphertexte (sv-note-v1:) bleiben unangetastet.
+
+        ``klartexte`` sind vorab gebuendelt entschluesselte Werte (``get_notes``).
+        Was dort fehlt, wird wie bisher einzeln entschluesselt oder migriert.
+        """
+        klartexte = klartexte or {}
+        raw_title = note.title or ""
+        raw_content = note.content or ""
+
+        # Wenn der Datensatz bereits client-seitig verschluesselt ist, bleibt der Server blind
+        if raw_title.startswith(NOTE_CIPHERTEXT_PREFIX):
+            title = raw_title
+        else:
+            aad = _note_aad(note.user_id, note.note_uid)
+            try:
+                title = klartexte.get((raw_title, aad)) or DisClient.decrypt(raw_title, aad=aad)
+            except DisDecryptionError:
+                # Klartext-Altdaten: sofort verschluesseln
+                title = raw_title
+                note.title = DisClient.encrypt(title, aad=aad)
+                try:
+                    db.commit()
+                    db.refresh(note)
+                except Exception as e:
+                    _log.warning("Fehler bei Altdaten-Verschluesselung der Notiz %s: %s", note.note_uid, e)
+                    db.rollback()
+
+        if raw_content.startswith(NOTE_CIPHERTEXT_PREFIX):
+            content = raw_content
+        elif not raw_content:
+            content = ""
+        else:
+            aad = _note_aad(note.user_id, note.note_uid)
+            try:
+                content = klartexte.get((raw_content, aad)) or DisClient.decrypt(raw_content, aad=aad)
+            except DisDecryptionError:
+                content = raw_content
+                note.content = DisClient.encrypt(content, aad=aad)
+                try:
+                    db.commit()
+                    db.refresh(note)
+                except Exception as e:
+                    _log.warning("Fehler bei Altdaten-Verschluesselung des Notiz-Inhalts %s: %s", note.note_uid, e)
+                    db.rollback()
+
+        return title, content
+
+    @classmethod
+    def _format_note(
+        cls,
+        note: Note,
+        current_user: User,
+        db: Session | None = None,
+        klartexte: dict[tuple[str, str], str] | None = None,
+    ) -> dict[str, Any]:
         can_edit = (note.user_id == current_user.id) or current_user.is_owner
         if note.note_type == "team" and note.team and note.team.owner_user_id == current_user.id:
             can_edit = True
+
+        if db is not None:
+            title, content = cls._decrypt_or_migrate(db, note, klartexte)
+        else:
+            # Best-effort Entschluesselung ohne DB-Persistierung
+            raw_title = note.title or ""
+            raw_content = note.content or ""
+            if raw_title.startswith(NOTE_CIPHERTEXT_PREFIX):
+                title = raw_title
+            else:
+                aad = _note_aad(note.user_id, note.note_uid)
+                try:
+                    title = DisClient.decrypt(raw_title, aad=aad)
+                except DisDecryptionError:
+                    title = raw_title
+
+            if raw_content.startswith(NOTE_CIPHERTEXT_PREFIX):
+                content = raw_content
+            elif not raw_content:
+                content = ""
+            else:
+                aad = _note_aad(note.user_id, note.note_uid)
+                try:
+                    content = DisClient.decrypt(raw_content, aad=aad)
+                except DisDecryptionError:
+                    content = raw_content
 
         return {
             "id": note.id,
             "note_uid": note.note_uid,
             "user_id": note.user_id,
             "creator_name": note.user.username if note.user else None,
-            "title": note.title,
-            "content": note.content or "",
+            "title": title,
+            "content": content,
             "category": note.category or "personal",
             "color": note.color or "primary",
             "is_pinned": note.is_pinned,
@@ -109,16 +201,11 @@ class NotesService:
             elif team_id == 0:
                 query = query.where(Note.note_type == "personal")
 
-        if search:
-            s = f"%{search.strip()}%"
-            query = query.where(or_(Note.title.ilike(s), Note.content.ilike(s)))
-
+        # Bei verschluesselten Daten filtern wir im Speicher nach Entschluesselung
         # Sortierung: Pinned Notizen immer zuerst, falls nicht anders angegeben
         sort_col = Note.updated_at
         if sort_by == "created_at":
             sort_col = Note.created_at
-        elif sort_by == "title":
-            sort_col = Note.title
 
         if order.lower() == "asc":
             query = query.order_by(Note.is_pinned.desc(), sort_col.asc())
@@ -126,7 +213,26 @@ class NotesService:
             query = query.order_by(Note.is_pinned.desc(), sort_col.desc())
 
         rows = db.scalars(query).all()
-        return [cls._format_note(n, user) for n in rows]
+        # Ein Aufruf beim Sidecar fuer die ganze Liste statt zwei je Notiz.
+        klartexte = gebuendelt_entschluesseln([
+            (wert, _note_aad(n.user_id, n.note_uid))
+            for n in rows
+            for wert in (n.title, n.content)
+            if wert and not wert.startswith(NOTE_CIPHERTEXT_PREFIX)
+        ])
+        formatted_list = [cls._format_note(n, user, db=db, klartexte=klartexte) for n in rows]
+
+        if search:
+            s = search.strip().lower()
+            formatted_list = [
+                n for n in formatted_list
+                if (s in n["title"].lower()) or (s in n["content"].lower())
+            ]
+
+        if sort_by == "title":
+            formatted_list.sort(key=lambda note: note["title"].casefold(), reverse=order.lower() != "asc")
+            formatted_list.sort(key=lambda note: not note["is_pinned"])
+        return formatted_list
 
     @classmethod
     def get_note(cls, db: Session, user: User, note_id_or_uid: str | int) -> dict[str, Any]:
@@ -145,7 +251,7 @@ class NotesService:
         if not can_view:
             raise ValueError("Keine Berechtigung zum Lesen dieser Notiz.")
 
-        return cls._format_note(note, user)
+        return cls._format_note(note, user, db=db)
 
     @classmethod
     def create_note(
@@ -154,6 +260,7 @@ class NotesService:
         user: User,
         *,
         title: str,
+        note_uid: str | None = None,
         content: str = "",
         category: str = "personal",
         color: str | None = "primary",
@@ -161,7 +268,7 @@ class NotesService:
         note_type: str = "personal",
         team_id: int | None = None,
     ) -> dict[str, Any]:
-        """Erstellt eine neue Notiz."""
+        """Erstellt eine neue Notiz, verschluesselt mit DIS (AES-256-GCM) oder client-seitigem E2EE."""
         norm_type = (note_type or "personal").lower().strip()
         if norm_type not in ("personal", "team"):
             norm_type = "personal"
@@ -173,12 +280,38 @@ class NotesService:
                 raise ValueError(f"Sie sind kein Mitglied von Team {team_id}.")
             final_team_id = team_id
 
-        note_uid = str(uuid.uuid4())
+        if note_uid and note_uid.strip():
+            final_note_uid = note_uid.strip()
+            existing = db.scalar(select(Note).where(Note.note_uid == final_note_uid))
+            if existing:
+                if existing.user_id == user.id:
+                    return cls._format_note(existing, user, db=db)
+                raise ValueError(f"Notiz mit UID '{final_note_uid}' existiert bereits.")
+        else:
+            final_note_uid = str(uuid.uuid4())
+
+        clean_title = title.strip()
+        clean_content = content or ""
+        aad = _note_aad(user.id, final_note_uid)
+
+        # Wenn client-seitiges E2EE verwendet wird (sv-note-v1:), speichert der Server blind
+        if clean_title.startswith(NOTE_CIPHERTEXT_PREFIX):
+            encrypted_title = clean_title
+        else:
+            encrypted_title = DisClient.encrypt(clean_title, aad=aad)
+
+        if clean_content.startswith(NOTE_CIPHERTEXT_PREFIX):
+            encrypted_content = clean_content
+        elif clean_content:
+            encrypted_content = DisClient.encrypt(clean_content, aad=aad)
+        else:
+            encrypted_content = ""
+
         note = Note(
             user_id=user.id,
-            note_uid=note_uid,
-            title=title.strip(),
-            content=content or "",
+            note_uid=final_note_uid,
+            title=encrypted_title,
+            content=encrypted_content,
             category=(category or "personal").strip().lower(),
             color=(color or "primary").strip().lower(),
             is_pinned=bool(is_pinned),
@@ -189,7 +322,7 @@ class NotesService:
         db.add(note)
         db.commit()
         db.refresh(note)
-        formatted = cls._format_note(note, user)
+        formatted = cls._format_note(note, user, db=db)
         SyncEventService.publish(
             {
                 "entity": "notes",
@@ -221,7 +354,7 @@ class NotesService:
         note_type: str | None = None,
         team_id: int | None = None,
     ) -> dict[str, Any]:
-        """Aktualisiert eine Notiz."""
+        """Aktualisiert eine Notiz mit DIS-Verschluesselung."""
         note = cls._find_note(db, note_id_or_uid)
         if not note:
             raise ValueError(f"Notiz '{note_id_or_uid}' wurde nicht gefunden.")
@@ -233,10 +366,21 @@ class NotesService:
         if not can_edit:
             raise ValueError("Keine Berechtigung zur Bearbeitung dieser Notiz.")
 
+        aad = _note_aad(note.user_id, note.note_uid)
+
         if title is not None:
-            note.title = title.strip()
+            clean_title = title.strip()
+            if clean_title.startswith(NOTE_CIPHERTEXT_PREFIX):
+                note.title = clean_title
+            else:
+                note.title = DisClient.encrypt(clean_title, aad=aad)
         if content is not None:
-            note.content = content
+            if content.startswith(NOTE_CIPHERTEXT_PREFIX):
+                note.content = content
+            elif content:
+                note.content = DisClient.encrypt(content, aad=aad)
+            else:
+                note.content = ""
         if category is not None:
             note.category = category.strip().lower()
         if color is not None:
@@ -267,7 +411,7 @@ class NotesService:
 
         db.commit()
         db.refresh(note)
-        formatted = cls._format_note(note, user)
+        formatted = cls._format_note(note, user, db=db)
         SyncEventService.publish(
             {
                 "entity": "notes",
@@ -299,7 +443,7 @@ class NotesService:
 
         note_uid = note.note_uid
         team_id = note.team_id
-        note_user_id = note.user_id
+        owner_user_id = note.user_id
         db.delete(note)
         db.commit()
         SyncEventService.publish(
@@ -309,16 +453,16 @@ class NotesService:
                 "id": note_uid,
                 "note_uid": note_uid,
                 "team_id": team_id,
-                "user_id": note_user_id,
+                "user_id": owner_user_id,
             },
-            user_id=note_user_id,
+            user_id=owner_user_id,
             team_id=team_id,
         )
-        return {"status": "deleted", "note_uid": note_uid, "id": note.id}
+        return {"status": "deleted", "note_uid": note_uid}
 
     @classmethod
     def toggle_pin(cls, db: Session, user: User, note_id_or_uid: str | int) -> dict[str, Any]:
-        """Schaltet den Pin-Status um."""
+        """Schaltet den Angepinnt-Status einer Notiz um."""
         note = cls._find_note(db, note_id_or_uid)
         if not note:
             raise ValueError(f"Notiz '{note_id_or_uid}' wurde nicht gefunden.")
@@ -328,12 +472,12 @@ class NotesService:
             can_edit = True
 
         if not can_edit:
-            raise ValueError("Keine Berechtigung zum Bearbeiten dieser Notiz.")
+            raise ValueError("Keine Berechtigung zur Bearbeitung dieser Notiz.")
 
         note.is_pinned = not note.is_pinned
         db.commit()
         db.refresh(note)
-        formatted = cls._format_note(note, user)
+        formatted = cls._format_note(note, user, db=db)
         SyncEventService.publish(
             {
                 "entity": "notes",
@@ -351,7 +495,7 @@ class NotesService:
 
     @classmethod
     def toggle_archive(cls, db: Session, user: User, note_id_or_uid: str | int) -> dict[str, Any]:
-        """Schaltet den Archiv-Status um."""
+        """Schaltet den Archivierungs-Status einer Notiz um."""
         note = cls._find_note(db, note_id_or_uid)
         if not note:
             raise ValueError(f"Notiz '{note_id_or_uid}' wurde nicht gefunden.")
@@ -361,12 +505,12 @@ class NotesService:
             can_edit = True
 
         if not can_edit:
-            raise ValueError("Keine Berechtigung zum Bearbeiten dieser Notiz.")
+            raise ValueError("Keine Berechtigung zur Bearbeitung dieser Notiz.")
 
         note.is_archived = not note.is_archived
         db.commit()
         db.refresh(note)
-        formatted = cls._format_note(note, user)
+        formatted = cls._format_note(note, user, db=db)
         SyncEventService.publish(
             {
                 "entity": "notes",

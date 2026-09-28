@@ -126,11 +126,10 @@ def migrate() -> None:
             resend_row.value = ""
             migrated += 1
 
-        # 6. Users: E-Mail-Verschluesselung (plain -> DIS encrypted + hash)
-        for user in db.query(User).filter(User.email_encrypted.is_(None)).all():
-            if user.email_plain:
-                user.email = user.email_plain  # Setter verschluesselt + hasht
-                migrated += 1
+        # 6. Users: Klartext-Adressen aus der alten Spalte users.email
+        # (nur auf Staenden vor 20260928_03, danach gibt es sie nicht mehr)
+        from services.email_altbestand import klartext_verschluesseln
+        migrated += klartext_verschluesseln(db.connection())
 
         # 7. OAuthUserLink subject hashing and profile details encryption
         # Idempotent + kollisionsresistent: wenn zwei Links dieselbe

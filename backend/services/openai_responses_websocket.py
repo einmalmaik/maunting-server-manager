@@ -3,6 +3,12 @@
 Ermöglicht persistente WebSocket-Sitzungen für agentic Tool-Loops, Turn-Chaining
 über `previous_response_id` und Stream-Multiplexing (`stream_id`) mit zero-breakage
 Fallback auf HTTP SSE.
+
+**Nur als gehaltene Sitzung.** Der Modus spart dort, wo eine Verbindung viele
+Züge trägt; eine neue Verbindung für einen einzelnen Zug zahlt nur den Aufbau
+und ist langsamer als HTTP mit gehaltener Verbindung (gemessen am 23.09.2026,
+siehe `openai_responses_adapter.stream_responses`). Die Hilfe dafür,
+``stream_responses_ws``, ist deshalb entfallen.
 """
 
 from __future__ import annotations
@@ -17,10 +23,12 @@ from urllib.parse import urlparse, urlunparse
 try:
     import websockets
     from websockets.exceptions import ConnectionClosed, WebSocketException
+    from websockets.protocol import State
 except ImportError:  # websockets ist optional / Fallback greift
     websockets = None  # type: ignore[assignment]
     ConnectionClosed = Exception  # type: ignore[misc,assignment]
     WebSocketException = Exception  # type: ignore[misc,assignment]
+    State = None  # type: ignore[assignment,misc]
 
 from services.openai_compatible_adapter import (
     MAX_ASSISTANT_CHARS,
@@ -35,19 +43,10 @@ from services.openai_compatible_adapter import (
     _ganzzahl,
     _kurzfassung,
     _teilmenge,
+    anbieter_fehlercode,
 )
 
 logger = logging.getLogger(__name__)
-
-_FEHLERARTEN = {
-    "rate_limit_exceeded": "AI_PROVIDER_RATE_LIMITED",
-    "insufficient_quota": "AI_PROVIDER_PAYMENT_REQUIRED",
-    "billing_hard_limit_reached": "AI_PROVIDER_PAYMENT_REQUIRED",
-    "invalid_api_key": "AI_PROVIDER_AUTH_FAILED",
-    "authentication_error": "AI_PROVIDER_AUTH_FAILED",
-    "model_not_found": "AI_PROVIDER_ENDPOINT_NOT_FOUND",
-    "server_error": "AI_PROVIDER_UNAVAILABLE",
-}
 
 
 def ws_url_fuer_base_url(base_url: str) -> str:
@@ -64,8 +63,14 @@ def ws_url_fuer_base_url(base_url: str) -> str:
     return urlunparse((scheme, parsed.netloc, path, "", "", ""))
 
 
-def _fehler_im_ws_rahmen(rahmen: dict) -> tuple[str, str | None] | None:
-    """Extrahiert Fehlermeldungen aus WebSocket-Ereignissen."""
+def fehler_im_rahmen(rahmen: dict) -> tuple[str, str | None] | None:
+    """Ein Fehler, den die Responses-API im Strom meldet statt als Status.
+
+    Derselbe Rahmen, ob er per WebSocket oder per SSE ankommt — deshalb eine
+    Funktion fuer beide Wege (`openai_responses_adapter` liest sie mit). Die
+    Codes uebersetzt `anbieter_fehlercode`; bis zum 22.09.2026 hatten beide Wege
+    je eine eigene Tabelle, und keine kannte die Codes der GPT-6-Familie.
+    """
     typ = rahmen.get("type")
     if typ in ("response.failed", "response.incomplete", "error"):
         antwort = rahmen.get("response")
@@ -79,8 +84,7 @@ def _fehler_im_ws_rahmen(rahmen: dict) -> tuple[str, str | None] | None:
         if isinstance(fehler, dict):
             nachricht = str(fehler.get("message") or fehler.get("reason") or "")
             code = fehler.get("code")
-            if isinstance(code, str):
-                marke = _FEHLERARTEN.get(code, marke)
+            marke = anbieter_fehlercode(code, marke)
         return marke, _kurzfassung(nachricht or str(typ))
     return None
 
@@ -119,10 +123,27 @@ class OpenAiResponsesWsSession:
         self.last_response_id: str | None = None
         self.last_stream_id: str | None = None
 
+    def _offen(self) -> bool:
+        """Ob die gehaltene Verbindung noch steht.
+
+        websockets ab 13 (der asyncio-Client; requirements.txt: 16.0) führt kein
+        ``closed`` mehr, nur ``state``. Hier stand ``getattr(self._ws, "closed",
+        True)``, und das war dort immer ``True``: jeder Zug öffnete eine neue
+        Verbindung, die alte blieb offen liegen, und ein Verweis auf die vorige
+        Antwort ging ins Leere — „Previous response with id '…' not found",
+        gemessen am 23.09.2026 gegen gpt-6-luna.
+        """
+        if self._ws is None:
+            return False
+        zustand = getattr(self._ws, "state", None)
+        if zustand is not None:
+            return zustand == State.OPEN
+        return not getattr(self._ws, "closed", True)
+
     async def connect(self) -> None:
         if websockets is None:
             raise AiProviderRequestError("AI_PROVIDER_UNAVAILABLE", "websockets package missing")
-        if self._ws is None or getattr(self._ws, "closed", True):
+        if not self._offen():
             self._ws = await websockets.connect(
                 self.ws_url,
                 additional_headers=self.headers,
@@ -176,11 +197,12 @@ class OpenAiResponsesWsSession:
                     id=eintrag["call_id"], name=eintrag["name"], arguments=argumente
                 )
 
-            # Sende `response.create` Frame
-            create_msg = {
-                "type": "response.create",
-                "response": payload,
-            }
+            # Der Körper steht flach neben ``type``: „This payload uses the same
+            # top-level fields as `POST /v1/responses`" (Referenz „Responses
+            # WebSocket events", `response.create`). Bis zum 23.09.2026 stand er
+            # unter ``"response"``, und OpenAI lehnte jeden Zug mit „Missing
+            # required parameter: 'model'" ab.
+            create_msg = {"type": "response.create", **payload}
             try:
                 await self._ws.send(json.dumps(create_msg))
             except Exception as exc:
@@ -220,7 +242,7 @@ class OpenAiResponsesWsSession:
                     if not isinstance(rahmen, dict):
                         raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
 
-                    if (gemeldet := _fehler_im_ws_rahmen(rahmen)) is not None:
+                    if (gemeldet := fehler_im_rahmen(rahmen)) is not None:
                         marke, text = gemeldet
                         logger.warning("OpenAI Responses WS stream error: code=%s text=%s", marke, text)
                         raise AiProviderRequestError(marke, text)
@@ -329,17 +351,3 @@ class OpenAiResponsesWsSession:
                 logger.warning("OpenAI Responses WS unexpected error: %s", exc)
                 await self.close()
                 raise AiProviderRequestError("AI_PROVIDER_UNAVAILABLE") from exc
-
-
-async def stream_responses_ws(
-    ws_url: str,
-    *,
-    headers: dict[str, str],
-    payload: dict[str, Any],
-    usage: StreamUsage,
-    deadline: float | None = None,
-) -> AsyncIterator[StreamChunk]:
-    """Führt einen einzelnen Responses-Stream über eine neue WebSocket-Verbindung aus."""
-    async with OpenAiResponsesWsSession(ws_url, headers) as session:
-        async for chunk in session.stream_turn(payload, usage, deadline=deadline):
-            yield chunk

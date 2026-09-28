@@ -431,6 +431,8 @@ def _create_panel_user(db: Session, *, integration: HosterIntegration, email: st
     username = _generate_unique_username(db, f"{integration.slug}-kunde")
     user = User(
         username=username,
+        # Vorlaeufig: der Kunde waehlt seinen Namen beim ersten Oeffnen.
+        username_gewaehlt=False,
         password_hash=AuthService.hash_password(secrets.token_urlsafe(32)),
         is_active=True,
         # Der Hoster hat den Kunden bereits authentifiziert. MSM verlangt

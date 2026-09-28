@@ -96,13 +96,19 @@ class StreamingIntentClassifier:
         self.min_confidence = configured_confidence() if min_confidence is None else min_confidence
         self._prototype_vectors: dict[str, list[float]] | None = None
 
+    # Beide Aufrufe von `encode` sind `nur_lokal`. `classify` läuft synchron in
+    # der Ereignisschleife der Sprachsitzung, je Teiltranskript: ein Rückfall
+    # auf Google hielte dort die ganze Sitzung bis zu 30 s an. Und weil nie
+    # Google rechnet, können Prototypen und Frage nie aus zwei Räumen stammen.
     def warm(self) -> bool:
         if self._prototype_vectors is not None:
             return True
-        vectors = ai_embedding_service.encode([" ".join(values) for values in _PROTOTYPES.values()])
-        if not vectors or len(vectors) != len(_PROTOTYPES):
+        kodierung = ai_embedding_service.encode(
+            [" ".join(values) for values in _PROTOTYPES.values()], nur_lokal=True
+        )
+        if kodierung is None or len(kodierung.vektoren) != len(_PROTOTYPES):
             return False
-        self._prototype_vectors = dict(zip(_PROTOTYPES, vectors, strict=True))
+        self._prototype_vectors = dict(zip(_PROTOTYPES, kodierung.vektoren, strict=True))
         return True
 
     def classify(self, text: str) -> IntentPrediction | None:
@@ -112,10 +118,10 @@ class StreamingIntentClassifier:
         if len(words) < self.min_words or self._prototype_vectors is None:
             return None
         started = time.perf_counter()
-        vectors = ai_embedding_service.encode([text.strip()])
-        if not vectors:
+        kodierung = ai_embedding_service.encode([text.strip()], nur_lokal=True)
+        if kodierung is None or not kodierung.vektoren:
             return None
-        scores = ai_embedding_service.similarity(vectors[0], list(self._prototype_vectors.values()))
+        scores = ai_embedding_service.similarity(kodierung.vektoren[0], list(self._prototype_vectors.values()))
         if len(scores) != len(self._prototype_vectors):
             return None
         intent, confidence = max(zip(self._prototype_vectors, scores, strict=True), key=lambda item: item[1])

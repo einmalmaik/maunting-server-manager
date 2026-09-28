@@ -22,7 +22,7 @@ import secrets
 
 from sqlalchemy.orm import Session
 
-from models import DevicePairing, User
+from models import DevicePairing, User, UserE2eeDevice
 
 # Zehn Minuten: lang genug, um vom Browser zum Desktop-Fenster zu wechseln,
 # kurz genug, dass ein Code in der Zwischenablage nicht zum Dauerausweis wird.
@@ -59,7 +59,7 @@ def normalisieren(eingabe: str) -> str:
 
 
 def _jetzt(bezug: datetime | None = None) -> datetime:
-    """Vergleichbare Zeit — SQLite liefert naive, PostgreSQL bewusste Stempel."""
+    """Vergleichbare Zeit — passend zu einem naiven oder bewussten Bezug."""
     jetzt = datetime.now(timezone.utc)
     if bezug is not None and bezug.tzinfo is None:
         return jetzt.replace(tzinfo=None)
@@ -70,10 +70,24 @@ def aufraeumen(db: Session) -> None:
     """Abgelaufene Einladungen loeschen. Eingeloeste bleiben — an ihnen haengt
     die Familie, und ohne sie weiss die Geraeteliste nicht mehr, wie ein Geraet
     heisst."""
+    jetzt = datetime.now(timezone.utc)
     db.query(DevicePairing).filter(
         DevicePairing.redeemed_at.is_(None),
-        DevicePairing.expires_at <= datetime.now(timezone.utc),
+        DevicePairing.expires_at <= jetzt,
     ).delete(synchronize_session=False)
+    # Eingeloeste Zeilen bleiben liegen, ihr Verlaufsblob darf das nicht. Er
+    # lebt hoechstens so lange wie die Uebergabe (`_uebergabe_endet`): hat das
+    # neue Geraet ihn bis dahin nicht geholt, ist der Erstabgleich gescheitert
+    # und der Blob hat keinen Zweck mehr. Er ist zwar versiegelt — aber nichts
+    # aufzubewahren ist besser, als sich auf die Versiegelung zu verlassen.
+    # Abgelegt wird nur an eingeloesten Codes, `redeemed_at` steht also immer.
+    db.query(DevicePairing).filter(
+        DevicePairing.verlauf_blob.isnot(None),
+        DevicePairing.redeemed_at <= jetzt - timedelta(minutes=FRIST_MINUTEN),
+    ).update(
+        {DevicePairing.verlauf_blob: None, DevicePairing.verlauf_abgelegt_am: None},
+        synchronize_session=False,
+    )
     db.commit()
 
 
@@ -130,6 +144,18 @@ def familie_vermerken(db: Session, einladung: DevicePairing, family: str) -> Non
     """
     einladung.family = family
     db.commit()
+
+
+def ist_gekoppelt(db: Session, family: str | None) -> bool:
+    """Prueft, ob eine Refresh-Familie zu einem aktiv gekoppelten Geraet gehoert."""
+    if not family:
+        return False
+    return (
+        db.query(DevicePairing)
+        .filter(DevicePairing.family == family, DevicePairing.redeemed_at.isnot(None))
+        .first()
+        is not None
+    )
 
 
 def geraete(db: Session, user: User) -> list[DevicePairing]:
@@ -242,5 +268,126 @@ def status(db: Session, user: User, code: str) -> dict:
         "expired": is_expired and not is_redeemed,
         "label": einladung.label,
         "family": einladung.family,
+        # Name und Zeitpunkt stehen daneben, weil das Panel vor dem Übergeben
+        # fragt: welches Gerät, seit wann, mit welcher Sicherheitsnummer. Die
+        # Nummer rechnet der Client aus `public_key` — hier stünde sie nur als
+        # Behauptung desselben Servers, gegen den sie schützen soll.
+        "neue_geraete": [
+            {
+                "device_id": g.device_id,
+                "public_key": g.public_key_jwk,
+                "label": g.label or "",
+                "created_at": g.created_at.isoformat() if g.created_at else None,
+            }
+            for g in neue_geraete(db, einladung)
+        ],
+        "verlauf_abgelegt": einladung.verlauf_blob is not None,
     }
+
+
+# ==========================================
+# Verlaufs-Erstabgleich
+# ==========================================
+
+# Derselbe Deckel wie bei Medien. Der Blob geht als Text durch eine gewoehnliche
+# Anfrage; groesser waere nicht der Verlauf, sondern ein Problem.
+MAX_VERLAUF_BYTES = 25 * 1024 * 1024
+
+
+def neue_geraete(db: Session, einladung: DevicePairing) -> list[UserE2eeDevice]:
+    """Die E2EE-Geraete, die sich nach dem Einloesen dieses Codes gemeldet haben.
+
+    Das ist der ganze Trick an der Zuordnung: ein Geraet kann sich erst
+    veroeffentlichen, wenn es eine Sitzung hat, und die bekommt es genau durch
+    das Einloesen. Wer nach `redeemed_at` neu dazukommt, ist also das Geraet,
+    das gerade gekoppelt wurde — ohne dass es sich dafuer extra melden muss und
+    ohne eine weitere Spalte.
+
+    Ein Geraet, das schon einmal gekoppelt war, faellt bewusst nicht darunter:
+    ein Upsert frischt `last_seen_at` auf, nicht `created_at`. Es braucht den
+    Erstabgleich auch nicht, denn sein Verlauf liegt noch bei ihm.
+    """
+    if einladung.redeemed_at is None:
+        return []
+    return (
+        db.query(UserE2eeDevice)
+        .filter(
+            UserE2eeDevice.user_id == einladung.user_id,
+            UserE2eeDevice.created_at >= einladung.redeemed_at,
+        )
+        .order_by(UserE2eeDevice.created_at.asc())
+        .all()
+    )
+
+
+def _uebergabe_endet(einladung: DevicePairing) -> datetime:
+    """Bis wann an dieser Einladung Verlauf abgelegt und abgeholt werden darf.
+
+    Ab dem Einloesen gerechnet, nicht ab dem Anlegen. Dazwischen liegt eine
+    Rueckfrage: im Panel vergleicht ein Mensch die Sicherheitsnummer, bevor der
+    Verlauf hinuebergeht, und das dauert Minuten. Mit der Frist des Codes
+    scheiterte eine Kopplung, die kurz vor Ablauf eingeloest wurde, am Ablegen —
+    und das Geraet wartete danach auf einen Verlauf, der nie kam. Laenger als
+    eine Frist nach dem Einloesen bleibt es trotzdem nicht offen.
+    """
+    if einladung.redeemed_at is None:
+        return einladung.expires_at
+    return einladung.redeemed_at + timedelta(minutes=FRIST_MINUTEN)
+
+
+def _offene_einladung(db: Session, user: User, code: str) -> DevicePairing | None:
+    """Die Einladung dieses Benutzers zu diesem Code, solange die Uebergabe laeuft."""
+    einladung = (
+        db.query(DevicePairing)
+        .filter(
+            DevicePairing.user_id == user.id,
+            DevicePairing.code_hash == _hash(normalisieren(code)),
+        )
+        .first()
+    )
+    if einladung is None:
+        return None
+    ende = _uebergabe_endet(einladung)
+    if ende <= _jetzt(ende):
+        return None
+    return einladung
+
+
+def verlauf_ablegen(db: Session, user: User, code: str, blob: str) -> bool:
+    """Legt den versiegelten Verlauf fuer das frisch gekoppelte Geraet ab.
+
+    Der Server sieht einen Textblock und reicht ihn durch. Versiegelt wurde er
+    gegen den **Geraeteschluessel** des neuen Geraets; aufmachen kann ihn hier
+    niemand, auch der Betreiber nicht.
+
+    Nur nach dem Einloesen: vorher gibt es kein Geraet, fuer das versiegelt
+    werden koennte, und ein Blob an einem offenen Code waere eine Ablage ohne
+    Abnehmer.
+    """
+    einladung = _offene_einladung(db, user, code)
+    if einladung is None or einladung.redeemed_at is None:
+        return False
+    if len(blob.encode("utf-8")) > MAX_VERLAUF_BYTES:
+        return False
+    einladung.verlauf_blob = blob
+    einladung.verlauf_abgelegt_am = _jetzt(einladung.expires_at)
+    db.commit()
+    return True
+
+
+def verlauf_abholen(db: Session, user: User, code: str) -> str | None:
+    """Gibt den Verlauf **einmal** heraus und loescht ihn dabei.
+
+    Einmal, weil es keinen zweiten Grund gibt, ihn zu holen: das Geraet hat ihn
+    danach lokal. Liegen zu bleiben waere der einzige Weg, wie er doch noch in
+    ein Backup geraet.
+    """
+    einladung = _offene_einladung(db, user, code)
+    if einladung is None or einladung.verlauf_blob is None:
+        return None
+    blob = einladung.verlauf_blob
+    einladung.verlauf_blob = None
+    einladung.verlauf_abgelegt_am = None
+    db.commit()
+    return blob
 

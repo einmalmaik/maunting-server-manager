@@ -139,6 +139,7 @@ describe('MapTilerDetailMap', () => {
     )
 
     await waitFor(() => expect(onUnavailable).toHaveBeenCalledOnce())
+    expect(onUnavailable).toHaveBeenCalledWith('not_configured')
     expect(mapHarness.configs).toHaveLength(0)
   })
 

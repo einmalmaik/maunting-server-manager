@@ -1,10 +1,10 @@
 /**
  * Die Bestätigungskarte fürs Aufräumen außerhalb des Sandbox-Ordners.
  *
- * Sie erscheint genau dann, wenn der autonome Modus **aus** ist. Das ist die
- * Regel des Betreibers, und sie gilt ohne Ausnahme: autonomer Modus an, kein
- * Klick; autonomer Modus aus, ein Klick für alles. Entschieden wird das nicht
- * hier und auch nicht in Rust, sondern im Panel (`_desktop_argumente` setzt
+ * Sie erscheint bei jedem Aufräumen, auch im autonomen Modus. Die Regel des
+ * Betreibers lautet seit dem 23.09.2026: alles automatisch, außer
+ * Löschvorgänge, und Aufräumen löscht immer. Entschieden wird das nicht hier
+ * und auch nicht in Rust, sondern im Panel (`_desktop_argumente` setzt
  * `autonom`) — die Wahrheit über Rechte liegt im Backend.
  *
  * Warum die Karte auf dem Rechner steht und nicht als Vorschlagskarte im

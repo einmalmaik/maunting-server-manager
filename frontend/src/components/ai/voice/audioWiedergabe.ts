@@ -35,7 +35,7 @@ export class Wiedergabe {
   /**
    * Misst, wie laut gerade gesprochen wird.
    *
-   * Nicht für die Wiedergabe nötig — für die **Blase**. Sie soll sich zum
+   * Nicht für die Wiedergabe nötig — für den **Schwarm**. Er soll sich zum
    * gesprochenen Wort bewegen und nicht zu einem Zufallsgenerator, der so tut.
    * Der Unterschied ist der ganze Punkt: eine Animation, die nur ungefähr zum
    * Ton passt, sieht sofort nach Dekoration aus.
@@ -55,7 +55,7 @@ export class Wiedergabe {
    * Der aktuelle Pegel zwischen 0 und 1.
    *
    * Effektivwert (RMS) und nicht der Spitzenwert: der Spitzenwert springt bei
-   * jedem Zischlaut auf Anschlag und lässt die Blase zappeln. RMS folgt der
+   * jedem Zischlaut auf Anschlag und lässt den Schwarm zappeln. RMS folgt der
    * Lautstärke, wie ein Ohr sie hört.
    */
   pegel(): number {
@@ -69,7 +69,7 @@ export class Wiedergabe {
       summe += abweichung * abweichung
     }
     // Der Faktor holt den RMS gesprochener Sprache (grob 0,05 bis 0,25) in
-    // einen Bereich, in dem die Blase sichtbar atmet.
+    // einen Bereich, in dem der Schwarm sichtbar atmet.
     return Math.min(1, Math.sqrt(summe / probe.length) * 4)
   }
 
@@ -92,10 +92,11 @@ export class Wiedergabe {
 
     const quelle = kontext.createBufferSource()
     quelle.buffer = puffer
-    if (this.messer) {
-      quelle.connect(this.messer)
-    }
-    quelle.connect(kontext.destination)
+    // Genau ein Weg zum Lautsprecher: über den Messpunkt, der den Ton
+    // unverändert weiterreicht, oder ohne ihn direkt. Hing das Stück zusätzlich
+    // direkt am Ziel, kam es dort zweimal an — doppelte Amplitude, 6 dB zu
+    // laut, und an lauten Stellen übersteuert.
+    quelle.connect(this.messer ?? kontext.destination)
 
     const jetzt = kontext.currentTime
     if (this.naechsterStart < jetzt) {
@@ -181,7 +182,8 @@ export class Wiedergabe {
         .catch(() => undefined)
       // Der Messpunkt liegt **vor** dem Lautsprecher: alles, was klingt, geht
       // durch ihn. Ein Browser ohne `createAnalyser` verliert damit die
-      // Bewegung der Blase, nicht den Ton — der Weg zum Ziel bleibt bestehen.
+      // Bewegung des Schwarms, nicht den Ton — die Stücke gehen dann direkt
+      // ans Ziel.
       if (typeof this.kontext.createAnalyser === 'function') {
         this.messer = this.kontext.createAnalyser()
         this.messer.fftSize = 256

@@ -8,6 +8,7 @@ import { aiApi } from '@/api/ai'
 
 type CameraMode = 'overview' | 'focus' | 'detail'
 type CameraAction = 'zoom_in' | 'zoom_out' | 'overview' | 'focus_location'
+export type MapUnavailableReason = 'not_configured' | 'rejected' | 'failed'
 
 interface Sight {
   latitude: number
@@ -21,7 +22,8 @@ interface MapTilerDetailMapProps {
   latitude: number
   longitude: number
   locationName: string
-  onUnavailable: () => void
+  /** `not_configured` und `rejected` bleiben so, bis der Betreiber etwas ändert. */
+  onUnavailable: (reason: MapUnavailableReason) => void
   onReady?: () => void
   globe?: boolean
   zoom?: number
@@ -94,21 +96,21 @@ export function MapTilerDetailMap({
   useEffect(() => {
     let disposed = false
     let unavailableReported = false
-    const unavailable = () => {
+    const unavailable = (reason: MapUnavailableReason) => {
       if (disposed || unavailableReported) return
       unavailableReported = true
-      onUnavailableRef.current()
+      onUnavailableRef.current(reason)
     }
     const initialise = async () => {
       const initial = latestViewRef.current
       if (!Number.isFinite(initial.latitude) || !Number.isFinite(initial.longitude)) {
-        unavailable()
+        unavailable('failed')
         return
       }
       const config = await aiApi.getMapTilerMapConfig()
       if (disposed) return
       if (!config.configured || !config.style_url || !elementRef.current) {
-        unavailable()
+        unavailable(!config.configured || !config.style_url ? 'not_configured' : 'failed')
         return
       }
       const { Map: MapLibre, Marker } = await import('maplibre-gl')
@@ -187,12 +189,12 @@ export function MapTilerDetailMap({
           msg.includes('Forbidden') ||
           msg.includes('Unauthorized')
         ) {
-          if (!disposed && !styleReady) unavailable()
+          if (!disposed && !styleReady) unavailable('rejected')
         }
       })
     }
     setReady(false)
-    void initialise().catch(unavailable)
+    void initialise().catch(() => unavailable('failed'))
     return () => {
       disposed = true
       if (tourTimerRef.current) {
@@ -234,7 +236,7 @@ export function MapTilerDetailMap({
           el.style.boxShadow = '0 0 10px rgba(56,189,248,0.8),0 2px 8px rgba(0,0,0,0.4)'
         })
 
-        const popupHtml = `<div class="pointer-events-none rounded-xl border border-outline-variant/60 bg-surface-container-high/95 px-3.5 py-2 text-xs font-medium leading-tight text-on-surface shadow-2xl backdrop-blur-md"><div class="flex items-center gap-1.5 font-semibold text-primary"><span class="inline-block h-2 w-2 shrink-0 rounded-full bg-primary animate-pulse"></span><span>${escapeHtml(s.name)}</span></div>${s.summary ? `<div class="mt-1 text-[11px] font-normal text-on-surface-variant leading-snug">${escapeHtml(s.summary)}</div>` : ''}</div>`
+        const popupHtml = `<div class="pointer-events-none rounded-xl border border-outline-variant/60 bg-surface-container-high/95 px-3.5 py-2 text-xs font-medium leading-tight text-on-surface shadow-2xl backdrop-blur-md"><div class="flex items-center gap-1.5 font-semibold text-primary"><span class="inline-block h-2 w-2 shrink-0 rounded-full bg-primary animate-pulse"></span><span>${escapeHtml(s.name)}</span></div>${s.summary ? `<div class="mt-1 text-label-sm font-normal text-on-surface-variant leading-snug">${escapeHtml(s.summary)}</div>` : ''}</div>`
         const popup = new Popup({ offset: 14, closeButton: false, className: 'msm-sight-popup', maxWidth: '280px' }).setHTML(popupHtml)
         const m = new Marker({ element: el }).setLngLat([s.longitude, s.latitude]).addTo(map)
         el.addEventListener('mouseenter', () => m.setPopup(popup).addTo(map))
@@ -387,7 +389,7 @@ export function MapTilerDetailMap({
       <div ref={elementRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
       {!ready && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center bg-surface-container-lowest/70 text-sm text-on-surface-variant">
-          {t('ai.geo.mapLoading', 'Karte wird geladen')}
+          {t('ai.geo.mapLoading')}
         </div>
       )}
       {ready && (
@@ -399,7 +401,7 @@ export function MapTilerDetailMap({
                 mapRef.current.zoomIn({ duration: 300 })
               }
             }}
-            aria-label={t('ai.geo.zoomIn', 'Vergrößern')}
+            aria-label={t('ai.geo.zoomIn')}
             className="flex h-9 w-9 items-center justify-center rounded-xl border border-outline-variant/40 bg-surface-container-low/95 text-on-surface shadow-md backdrop-blur-md transition-colors hover:bg-surface-container-high active:scale-95"
           >
             <Plus className="h-4 w-4" />
@@ -411,7 +413,7 @@ export function MapTilerDetailMap({
                 mapRef.current.zoomOut({ duration: 300 })
               }
             }}
-            aria-label={t('ai.geo.zoomOut', 'Verkleinern')}
+            aria-label={t('ai.geo.zoomOut')}
             className="flex h-9 w-9 items-center justify-center rounded-xl border border-outline-variant/40 bg-surface-container-low/95 text-on-surface shadow-md backdrop-blur-md transition-colors hover:bg-surface-container-high active:scale-95"
           >
             <Minus className="h-4 w-4" />

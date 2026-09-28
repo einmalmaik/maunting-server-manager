@@ -1,0 +1,632 @@
+/**
+ * Messenger Notification & Unread State Store
+ *
+ * Verwaltet:
+ * - Ungelesene Nachrichten (`unreadCounts`, `totalUnreadCount`)
+ * - Stummschaltungen (`mutedChats`: 8h, 1w, dauerhaft)
+ * - Blockierungen (`blockedUserIds`)
+ * - Blind-Mailbox Verzeichnis (`mailboxDirectory`: Name, Avatar, Typ)
+ * - Web Audio API Zweiklang-Glocke (`playNotificationChime()`)
+ */
+
+import { create } from 'zustand'
+import { api } from '@/api/client'
+import { deriveBlindMailboxId, deriveGroupBlindMailboxId } from '@/services/e2eeCrypto'
+import { useFunkenStore } from '@/stores/funkenStore'
+
+const STORAGE_MUTES_KEY = 'msm:chat_mutes'
+const STORAGE_BLOCKS_KEY = 'msm:chat_blocks'
+const STORAGE_BLOCKED_PROFILES_KEY = 'msm:chat_blocked_profiles'
+const STORAGE_UNREAD_KEY = 'msm:chat_unread'
+const STORAGE_MAILBOX_DIR_KEY = 'msm:chat_mailbox_dir'
+const STORAGE_PINS_KEY = 'msm:chat_pins'
+const STORAGE_ARCHIVE_KEY = 'msm:chat_archive'
+const STORAGE_MENTIONS_KEY = 'msm:chat_mentions'
+
+/**
+ * So viele Chats lassen sich anheften.
+ *
+ * Eine Grenze, weil eine angeheftete Liste ohne Grenze wieder nur eine Liste
+ * ist. Fünf passen auf ein Telefon, ohne den Rest zu verdrängen.
+ */
+export const PINS_MAX = 5
+
+export interface MailboxMeta {
+  name: string
+  avatarUrl?: string | null
+  isGroup?: boolean
+  userId?: number
+  groupId?: number
+}
+
+export interface BlockedProfile {
+  userId: number
+  username: string
+  avatarUrl?: string | null
+}
+
+interface MessengerNotificationState {
+  unreadCounts: Record<string, number>
+  totalUnreadCount: number
+  mutedChats: Record<string, number> // mailboxId -> expiryTimestamp (0 = permanent)
+  /**
+   * Angeheftete und archivierte Chats — **nur auf diesem Gerät**.
+   *
+   * Welche Gespräche jemandem wichtig sind und welche er weggeräumt hat, ist
+   * ein Metadatum ersten Ranges. Es hat auf keinem Server etwas zu suchen,
+   * auch nicht verschlüsselt: die Reihenfolge allein verrät genug. Dieselbe
+   * Bauart wie Stummschalten und Blockieren.
+   */
+  pinnedChats: string[]
+  archivedChats: string[]
+  /**
+   * Chats, in denen ich erwähnt wurde, ohne dass ich sie geöffnet habe.
+   *
+   * Das ist der einzige Hinweis, den eine stummgeschaltete Gruppe noch geben
+   * darf: ein Abzeichen in der Liste, kein Ton, keine Systemmeldung.
+   */
+  mentionedChats: string[]
+  blockedUserIds: number[]
+  blockedProfiles: Record<number, { username: string; avatarUrl?: string | null }>
+  mailboxDirectory: Record<string, MailboxMeta>
+  activeMailboxId: string | null
+
+  // Actions
+  setActiveMailboxId: (id: string | null) => void
+  registerMailbox: (mailboxId: string, meta: MailboxMeta) => void
+  registerMailboxes: (map: Record<string, MailboxMeta>) => void
+  incrementUnread: (mailboxId: string) => void
+  decrementUnread: (mailboxId: string, count?: number) => void
+  markAsRead: (mailboxId: string) => void
+  clearAllUnread: () => void
+
+  // Mute
+  isMuted: (mailboxId: string) => boolean
+  muteChat: (mailboxId: string, durationMinutes?: number) => void
+  unmuteChat: (mailboxId: string) => void
+
+  // Anheften & Archivieren (lokal)
+  istAngeheftet: (mailboxId: string) => boolean
+  istArchiviert: (mailboxId: string) => boolean
+  schalteAnheften: (mailboxId: string) => { ok: boolean; grund?: 'voll' }
+  schalteArchiv: (mailboxId: string) => void
+
+  // @-Abzeichen
+  istErwaehnt: (mailboxId: string) => boolean
+  merkeErwaehnung: (mailboxId: string) => void
+  loescheErwaehnung: (mailboxId: string) => void
+
+  // Block
+  isBlocked: (userId: number) => boolean
+  blockUser: (userId: number, username?: string, avatarUrl?: string | null) => Promise<void>
+  unblockUser: (userId: number) => Promise<void>
+  syncBlockedFromBackend: () => Promise<void>
+  syncMailboxDirectoryFromBackend: (currentUserId: number) => Promise<void>
+}
+
+function loadMailboxDirectory(): Record<string, MailboxMeta> {
+  try {
+    const raw = localStorage.getItem(STORAGE_MAILBOX_DIR_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return {}
+}
+
+function loadMutes(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(STORAGE_MUTES_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return {}
+}
+
+function loadBlocks(): number[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_BLOCKS_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return []
+}
+
+function loadBlockedProfiles(): Record<number, { username: string; avatarUrl?: string | null }> {
+  try {
+    const raw = localStorage.getItem(STORAGE_BLOCKED_PROFILES_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return {}
+}
+
+function ladeListe(schluessel: string): string[] {
+  try {
+    const raw = localStorage.getItem(schluessel)
+    const gelesen = raw ? JSON.parse(raw) : []
+    return Array.isArray(gelesen) ? gelesen.filter((x) => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function schreibeListe(schluessel: string, werte: string[]): void {
+  try {
+    localStorage.setItem(schluessel, JSON.stringify(werte))
+  } catch {
+    // Ohne localStorage gilt die Auswahl eben nur für diese Sitzung.
+  }
+}
+
+function loadUnread(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(STORAGE_UNREAD_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return {}
+}
+
+function calcTotal(unread: Record<string, number>, mutes: Record<string, number>): number {
+  const now = Date.now()
+  let sum = 0
+  for (const [mid, count] of Object.entries(unread)) {
+    if (count > 0) {
+      const expiry = mutes[mid]
+      const isMuted = expiry !== undefined && (expiry === 0 || expiry > now)
+      if (!isMuted) {
+        sum += count
+      }
+    }
+  }
+  return sum
+}
+
+/**
+ * Web Audio API Zweiklang-Glocke („Bing“-Chime)
+ * Erzeugt einen kristallklaren, unaufdringlichen Zweiton-Glockenklang (880 Hz -> 1320 Hz)
+ * ohne externe Audio-Dateien oder Netzwerklatenz.
+ */
+export function playNotificationChime() {
+  if (typeof window === 'undefined') return
+  try {
+    const AudioContextClass =
+      window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+    if (!AudioContextClass) return
+    const ctx = new AudioContextClass()
+    if (ctx.state === 'suspended') {
+      void ctx.resume()
+    }
+
+    const now = ctx.currentTime
+
+    // Oszillator: Grundton A5 (880 Hz) gleitet kurz auf E6 (1320 Hz)
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(880, now)
+    osc.frequency.exponentialRampToValueAtTime(1320, now + 0.09)
+
+    // Sanfte Lautstärken-Hüllkurve
+    gain.gain.setValueAtTime(0.18, now)
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.42)
+
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+
+    osc.start(now)
+    osc.stop(now + 0.43)
+  } catch {
+    // Stiller Fallback bei blockiertem AudioContext
+  }
+}
+
+export const useMessengerNotificationStore = create<MessengerNotificationState>((set, get) => {
+  const initialMutes = loadMutes()
+  const initialBlocks = loadBlocks()
+  const initialProfiles = loadBlockedProfiles()
+  const initialUnread = loadUnread()
+
+  return {
+    unreadCounts: initialUnread,
+    totalUnreadCount: calcTotal(initialUnread, initialMutes),
+    mutedChats: initialMutes,
+    pinnedChats: ladeListe(STORAGE_PINS_KEY),
+    archivedChats: ladeListe(STORAGE_ARCHIVE_KEY),
+    mentionedChats: ladeListe(STORAGE_MENTIONS_KEY),
+    blockedUserIds: initialBlocks,
+    blockedProfiles: initialProfiles,
+    mailboxDirectory: loadMailboxDirectory(),
+    activeMailboxId: null,
+
+    setActiveMailboxId: (id) => {
+      set({ activeMailboxId: id })
+      if (id) {
+        get().markAsRead(id)
+        // Wer hineinschaut, hat die Erwähnung gesehen.
+        get().loescheErwaehnung(id)
+      }
+    },
+
+    registerMailbox: (mailboxId, meta) => {
+      set((state) => {
+        const updated = {
+          ...state.mailboxDirectory,
+          [mailboxId]: meta,
+        }
+        try {
+          localStorage.setItem(STORAGE_MAILBOX_DIR_KEY, JSON.stringify(updated))
+        } catch {}
+        return { mailboxDirectory: updated }
+      })
+    },
+
+    registerMailboxes: (map) => {
+      set((state) => {
+        const updated = {
+          ...state.mailboxDirectory,
+          ...map,
+        }
+        try {
+          localStorage.setItem(STORAGE_MAILBOX_DIR_KEY, JSON.stringify(updated))
+        } catch {}
+        return { mailboxDirectory: updated }
+      })
+    },
+
+    incrementUnread: (mailboxId) => {
+      const state = get()
+      const isFocused =
+        state.activeMailboxId === mailboxId &&
+        typeof document !== 'undefined' &&
+        document.visibilityState === 'visible' &&
+        (typeof document.hasFocus !== 'function' || document.hasFocus())
+      if (isFocused) {
+        return
+      }
+      set((state) => {
+        const current = state.unreadCounts[mailboxId] || 0
+        const updated = { ...state.unreadCounts, [mailboxId]: current + 1 }
+        try {
+          localStorage.setItem(STORAGE_UNREAD_KEY, JSON.stringify(updated))
+        } catch {}
+        return {
+          unreadCounts: updated,
+          totalUnreadCount: calcTotal(updated, state.mutedChats),
+        }
+      })
+    },
+
+    decrementUnread: (mailboxId, count = 1) => {
+      set((state) => {
+        const current = state.unreadCounts[mailboxId] || 0
+        const newCount = Math.max(0, current - count)
+        const updated = { ...state.unreadCounts, [mailboxId]: newCount }
+        try {
+          localStorage.setItem(STORAGE_UNREAD_KEY, JSON.stringify(updated))
+        } catch {}
+        return {
+          unreadCounts: updated,
+          totalUnreadCount: calcTotal(updated, state.mutedChats),
+        }
+      })
+    },
+
+
+    markAsRead: (mailboxId) => {
+      set((state) => {
+        if (!state.unreadCounts[mailboxId]) return state
+        const updated = { ...state.unreadCounts, [mailboxId]: 0 }
+        try {
+          localStorage.setItem(STORAGE_UNREAD_KEY, JSON.stringify(updated))
+        } catch {}
+        return {
+          unreadCounts: updated,
+          totalUnreadCount: calcTotal(updated, state.mutedChats),
+        }
+      })
+    },
+
+    clearAllUnread: () => {
+      try {
+        localStorage.removeItem(STORAGE_UNREAD_KEY)
+      } catch {}
+      set({ unreadCounts: {}, totalUnreadCount: 0 })
+    },
+
+    isMuted: (mailboxId) => {
+      const { mutedChats } = get()
+      const expiry = mutedChats[mailboxId]
+      if (expiry === undefined) return false
+      if (expiry === 0) return true
+      if (expiry > Date.now()) return true
+      // Abgelaufen -> aufräumen
+      get().unmuteChat(mailboxId)
+      return false
+    },
+
+    muteChat: (mailboxId, durationMinutes) => {
+      set((state) => {
+        const expiry = durationMinutes && durationMinutes > 0 ? Date.now() + durationMinutes * 60 * 1000 : 0
+        const updated = { ...state.mutedChats, [mailboxId]: expiry }
+        try {
+          localStorage.setItem(STORAGE_MUTES_KEY, JSON.stringify(updated))
+        } catch {}
+        return {
+          mutedChats: updated,
+          totalUnreadCount: calcTotal(state.unreadCounts, updated),
+        }
+      })
+    },
+
+    unmuteChat: (mailboxId) => {
+      set((state) => {
+        const updated = { ...state.mutedChats }
+        delete updated[mailboxId]
+        try {
+          localStorage.setItem(STORAGE_MUTES_KEY, JSON.stringify(updated))
+        } catch {}
+        return {
+          mutedChats: updated,
+          totalUnreadCount: calcTotal(state.unreadCounts, updated),
+        }
+      })
+    },
+
+    istAngeheftet: (mailboxId) => get().pinnedChats.includes(mailboxId),
+    istArchiviert: (mailboxId) => get().archivedChats.includes(mailboxId),
+
+    /**
+     * Anheften und wieder lösen.
+     *
+     * Die Reihenfolge ist die Anzeigereihenfolge: neu Angeheftetes kommt nach
+     * oben, weil man das zuletzt Gewählte auch zuerst sucht. Über der Grenze
+     * wird nichts stillschweigend verdrängt — der Aufrufer bekommt `voll`
+     * zurück und sagt es.
+     */
+    schalteAnheften: (mailboxId) => {
+      const state = get()
+      const drin = state.pinnedChats.includes(mailboxId)
+      if (!drin && state.pinnedChats.length >= PINS_MAX) return { ok: false, grund: 'voll' as const }
+      const neu = drin
+        ? state.pinnedChats.filter((id) => id !== mailboxId)
+        : [mailboxId, ...state.pinnedChats]
+      schreibeListe(STORAGE_PINS_KEY, neu)
+      set({ pinnedChats: neu })
+      return { ok: true }
+    },
+
+    /**
+     * Ins Archiv und zurück.
+     *
+     * Ein archivierter Chat bleibt archiviert, auch wenn neue Nachrichten
+     * kommen: wer etwas weggeräumt hat, hat es weggeräumt. Sein
+     * Ungelesen-Zähler erscheint an der Archivzeile, nicht in der Hauptliste.
+     * Angeheftet und archiviert schließen sich aus.
+     */
+    schalteArchiv: (mailboxId) => {
+      const state = get()
+      const drin = state.archivedChats.includes(mailboxId)
+      const neu = drin
+        ? state.archivedChats.filter((id) => id !== mailboxId)
+        : [mailboxId, ...state.archivedChats]
+      schreibeListe(STORAGE_ARCHIVE_KEY, neu)
+      if (!drin && state.pinnedChats.includes(mailboxId)) {
+        const ohnePin = state.pinnedChats.filter((id) => id !== mailboxId)
+        schreibeListe(STORAGE_PINS_KEY, ohnePin)
+        set({ archivedChats: neu, pinnedChats: ohnePin })
+        return
+      }
+      set({ archivedChats: neu })
+    },
+
+    istErwaehnt: (mailboxId) => get().mentionedChats.includes(mailboxId),
+
+    merkeErwaehnung: (mailboxId) => {
+      const state = get()
+      if (state.activeMailboxId === mailboxId) return
+      if (state.mentionedChats.includes(mailboxId)) return
+      const neu = [...state.mentionedChats, mailboxId]
+      schreibeListe(STORAGE_MENTIONS_KEY, neu)
+      set({ mentionedChats: neu })
+    },
+
+    loescheErwaehnung: (mailboxId) => {
+      const state = get()
+      if (!state.mentionedChats.includes(mailboxId)) return
+      const neu = state.mentionedChats.filter((id) => id !== mailboxId)
+      schreibeListe(STORAGE_MENTIONS_KEY, neu)
+      set({ mentionedChats: neu })
+    },
+
+    isBlocked: (userId) => {
+      return get().blockedUserIds.includes(userId)
+    },
+
+    blockUser: async (userId, username, avatarUrl) => {
+      set((state) => {
+        const nextIds = state.blockedUserIds.includes(userId)
+          ? state.blockedUserIds
+          : [...state.blockedUserIds, userId]
+        const nextProfiles = { ...state.blockedProfiles }
+        if (username) {
+          nextProfiles[userId] = { username, avatarUrl: avatarUrl ?? null }
+        }
+        try {
+          localStorage.setItem(STORAGE_BLOCKS_KEY, JSON.stringify(nextIds))
+          localStorage.setItem(STORAGE_BLOCKED_PROFILES_KEY, JSON.stringify(nextProfiles))
+        } catch {}
+        return { blockedUserIds: nextIds, blockedProfiles: nextProfiles }
+      })
+      // Blockieren löscht den Funken, sofort und unwiderruflich. Aufheben
+      // bringt ihn nicht zurück.
+      void useFunkenStore.getState().vergiss(userId)
+      try {
+        await api(`/social/friends/${userId}/block`, { method: 'POST' })
+      } catch {
+        // Lokaler Fallback bleibt aktiv
+      }
+    },
+
+    unblockUser: async (userId) => {
+      set((state) => {
+        const nextIds = state.blockedUserIds.filter((id) => id !== userId)
+        const nextProfiles = { ...state.blockedProfiles }
+        delete nextProfiles[userId]
+        try {
+          localStorage.setItem(STORAGE_BLOCKS_KEY, JSON.stringify(nextIds))
+          localStorage.setItem(STORAGE_BLOCKED_PROFILES_KEY, JSON.stringify(nextProfiles))
+        } catch {}
+        return { blockedUserIds: nextIds, blockedProfiles: nextProfiles }
+      })
+      try {
+        await api(`/social/friends/${userId}/unblock`, { method: 'POST' })
+      } catch {
+        // Lokaler Fallback bleibt aktiv
+      }
+    },
+
+    syncBlockedFromBackend: async () => {
+      try {
+        const list = await api<Array<{ user_id: number; username: string; avatar_url?: string | null }>>(
+          '/social/friends/blocked'
+        )
+        if (Array.isArray(list)) {
+          const ids = list.map((item) => item.user_id)
+          const profiles: Record<number, { username: string; avatarUrl?: string | null }> = {}
+          for (const item of list) {
+            profiles[item.user_id] = { username: item.username, avatarUrl: item.avatar_url }
+          }
+          set({ blockedUserIds: ids, blockedProfiles: profiles })
+          try {
+            localStorage.setItem(STORAGE_BLOCKS_KEY, JSON.stringify(ids))
+            localStorage.setItem(STORAGE_BLOCKED_PROFILES_KEY, JSON.stringify(profiles))
+          } catch {}
+        }
+      } catch {
+        // Stiller Fallback auf lokalen Cache
+      }
+    },
+
+    syncMailboxDirectoryFromBackend: async (currentUserId: number) => {
+      if (!currentUserId) return
+      try {
+        const [friends, groups, publicProfiles] = await Promise.all([
+          api<Array<{ user_id: number; username: string; avatar_url?: string | null; status: string }>>(
+            '/social/friends'
+          ).catch(() => []),
+          api<Array<{ id: number; name: string; avatar_url?: string | null }>>('/social/groups').catch(() => []),
+          api<Array<{ user_id: number; username: string }>>('/social/profiles/public').catch(() => []),
+        ])
+
+        const dirUpdates: Record<string, MailboxMeta> = {}
+
+        if (Array.isArray(friends)) {
+          for (const f of friends) {
+            if (f.user_id && f.status === 'accepted') {
+              try {
+                const mid = await deriveBlindMailboxId(currentUserId, f.user_id)
+                dirUpdates[mid] = {
+                  name: f.username,
+                  avatarUrl: f.avatar_url,
+                  isGroup: false,
+                  userId: f.user_id,
+                }
+              } catch {}
+            }
+          }
+        }
+
+        if (Array.isArray(groups)) {
+          for (const g of groups) {
+            if (g.id) {
+              try {
+                const mid = await deriveGroupBlindMailboxId(g.id)
+                dirUpdates[mid] = {
+                  name: g.name,
+                  avatarUrl: g.avatar_url,
+                  isGroup: true,
+                  groupId: g.id,
+                }
+              } catch {}
+            }
+          }
+        }
+
+        if (Array.isArray(publicProfiles)) {
+          for (const p of publicProfiles) {
+            if (p.user_id && p.user_id !== currentUserId) {
+              try {
+                const mid = await deriveBlindMailboxId(currentUserId, p.user_id)
+                if (!dirUpdates[mid]) {
+                  dirUpdates[mid] = {
+                    name: p.username,
+                    avatarUrl: null,
+                    isGroup: false,
+                    userId: p.user_id,
+                  }
+                }
+              } catch {}
+            }
+          }
+        }
+
+        if (Object.keys(dirUpdates).length > 0) {
+          get().registerMailboxes(dirUpdates)
+        }
+      } catch {
+        // Stiller Fallback
+      }
+    },
+  }
+})
+
+// Multi-Tab & Multi-Device Synchronisation über das `storage`-Event
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === STORAGE_UNREAD_KEY) {
+      const updated = loadUnread()
+      const mutes = useMessengerNotificationStore.getState().mutedChats
+      useMessengerNotificationStore.setState({
+        unreadCounts: updated,
+        totalUnreadCount: calcTotal(updated, mutes),
+      })
+    } else if (e.key === STORAGE_MUTES_KEY) {
+      const mutes = loadMutes()
+      const unread = useMessengerNotificationStore.getState().unreadCounts
+      useMessengerNotificationStore.setState({
+        mutedChats: mutes,
+        totalUnreadCount: calcTotal(unread, mutes),
+      })
+    } else if (e.key === STORAGE_BLOCKS_KEY) {
+      useMessengerNotificationStore.setState({
+        blockedUserIds: loadBlocks(),
+      })
+    } else if (e.key === STORAGE_BLOCKED_PROFILES_KEY) {
+      useMessengerNotificationStore.setState({
+        blockedProfiles: loadBlockedProfiles(),
+      })
+    } else if (e.key === STORAGE_MAILBOX_DIR_KEY) {
+      useMessengerNotificationStore.setState({
+        mailboxDirectory: loadMailboxDirectory(),
+      })
+    } else if (e.key === STORAGE_PINS_KEY) {
+      useMessengerNotificationStore.setState({ pinnedChats: ladeListe(STORAGE_PINS_KEY) })
+    } else if (e.key === STORAGE_ARCHIVE_KEY) {
+      useMessengerNotificationStore.setState({ archivedChats: ladeListe(STORAGE_ARCHIVE_KEY) })
+    } else if (e.key === STORAGE_MENTIONS_KEY) {
+      useMessengerNotificationStore.setState({ mentionedChats: ladeListe(STORAGE_MENTIONS_KEY) })
+    }
+  })
+
+  // Chat-Fokus: Sobald das Browser-Fenster oder der Tab wieder aktiv wird,
+  // werden ungelesene Zähler des aktiven Chats unmittelbar genullt
+  const handleFocusOrVisible = () => {
+    const store = useMessengerNotificationStore.getState()
+    if (store.activeMailboxId && (typeof document === 'undefined' || document.visibilityState === 'visible')) {
+      store.markAsRead(store.activeMailboxId)
+    }
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleFocusOrVisible)
+  }
+  window.addEventListener('focus', handleFocusOrVisible)
+}
+

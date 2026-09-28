@@ -1,19 +1,22 @@
 import os
 import re
+import time
 from datetime import datetime, timedelta, timezone
-import uuid
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, JSONResponse
+from limits import parse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import settings
-from middleware.rate_limit import auth_rate_limit
+from middleware.rate_limit import auth_rate_limit, limiter
 # Nur noch das Loeschen der Cookies passiert hier direkt. Das Setzen laeuft
 # ausnahmslos ueber `issue_session`, damit kein Ausstellungsort die dort
 # zugesicherte `jti` erneut vergessen kann.
-from cookies import _clear_auth_cookies
+from cookies import _clear_auth_cookies, _set_auth_cookies
 from database import get_db
 from dependencies import (
     get_current_user,
@@ -24,18 +27,34 @@ from dependencies import (
     session_familie,
 )
 from models import User, EmailVerification
+from models.team import Team
+from services.achievement_service import AchievementService
 from services.dis_client import DisClient
-from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, NativeRefreshRequest, LogoutRequest
+from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, DataExportRequest, NativeRefreshRequest, LogoutRequest
 from schemas import ResendVerificationRequest
-from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, LocationSharingUpdateRequest, AgentNameUpdateRequest, AiProviderChoiceRequest
+from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, LocationSharingUpdateRequest, AgentNameUpdateRequest, AiProviderChoiceRequest, UsernameUpdateRequest
 from schemas.device_pairing import (
     PairedDevice,
     PairingCreated,
     PairingCreateRequest,
     PairingRedeemRequest,
+    VerlaufAblegen,
+    VerlaufAntwort,
 )
 from services import AuthService, EmailService, audit_service
+from services import bild_upload
+from services import datenexport_service
 from services import device_pairing_service
+from services import passkey_service
+from services import login_challenge_service
+from schemas.passkey import (
+    BrowserBestaetigungRequest,
+    BrowserVorgangKennung,
+    BrowserVorgangRequest,
+    PasskeyAnlage,
+    PasskeyOptionenRequest,
+    TwoFactorDisableRequest,
+)
 from services.email_verification_service import EmailVerificationService
 from services.jwt_blacklist_service import blacklist_jwt
 from services.backup_code_service import BackupCodeService
@@ -47,14 +66,16 @@ from services.totp_qr import qr_datenuri
 
 from services.captcha_service import CaptchaService
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @router.get("/captcha-config")
 def get_captcha_config() -> dict:
     """Oeffentliche CAPTCHA-Konfiguration fuer das Frontend."""
-    enabled = PanelSettingsService.get("captcha_enabled", "false") == "true"
-    provider = PanelSettingsService.get("captcha_provider", "none")
+    enabled = PanelSettingsService.get("captcha_enabled", "true") == "true"
+    provider = PanelSettingsService.get("captcha_provider", "altcha")
     site_key = PanelSettingsService.get("captcha_site_key", "")
     return {
         "enabled": enabled,
@@ -63,7 +84,19 @@ def get_captcha_config() -> dict:
     }
 
 
-logger = logging.getLogger(__name__)
+@router.get("/captcha-challenge")
+def get_captcha_challenge() -> dict:
+    """Liefert eine ALTCHA Proof-of-Work Challenge fuer das Frontend."""
+    enabled = PanelSettingsService.get("captcha_enabled", "true") == "true"
+    provider = PanelSettingsService.get("captcha_provider", "altcha")
+    if not enabled or provider != "altcha":
+        raise HTTPException(status_code=400, detail="ALTCHA ist derzeit nicht aktiv.")
+    try:
+        from services.dis_client import DisClient, DisSidecarError
+        return DisClient.create_altcha_challenge()
+    except DisSidecarError as exc:
+        logger.error("DIS Sidecar Fehler bei ALTCHA-Challenge: %s", exc)
+        raise HTTPException(status_code=503, detail="Kryptographischer Dienst vorübergehend nicht erreichbar.")
 
 REGISTER_VERIFICATION_PURPOSE = "register"
 LOGIN_VERIFICATION_PURPOSE = "login"
@@ -77,6 +110,133 @@ def _log_smtp_missing(email: str) -> None:
 def _set_login_session(response: Response, db: Session, user: User) -> SessionTokens:
     """Duennes Alias auf die gemeinsame Sitzungsausstellung (siehe session_service)."""
     return issue_session(response, db, user)
+
+
+_ZWISCHENSCHEIN = "login_2fa"
+_ZWISCHENSCHEIN_SEKUNDEN = 300
+# Fehlversuche je Schein. Danach ist er verbraucht, und der naechste Versuch
+# braucht wieder Captcha und Passwort — sonst waere der Schein ein Freibrief,
+# TOTP- und Backup-Codes ohne Abfrage durchzuprobieren.
+_ZWISCHENSCHEIN_VERSUCHE = 3
+
+
+def _zwischenschein(db: Session, req: LoginRequest | LoginVerifyRequest):
+    """Der Schein aus dem ersten Login-Schritt, falls gueltig — sonst ``None``.
+
+    Warum es ihn gibt: der zweite Schritt schickte bis 09/2026 dasselbe
+    Captcha-Token noch einmal. ALTCHA-Token gelten aber nur einmal, und mit
+    eingeschalteter Sicherheitsabfrage scheiterte jede 2FA-Anmeldung am
+    zweiten Schritt mit „CAPTCHA-Verifizierung fehlgeschlagen".
+
+    Ausgestellt wird der Schein nur nach bestandener Abfrage **und** richtigem
+    Passwort, gebunden an das Konto, fuenf Minuten und hoechstens
+    `_ZWISCHENSCHEIN_VERSUCHE` Fehlversuche gueltig. Er oeffnet also keinen
+    Weg, Passwoerter oder Codes ohne Abfrage durchzuprobieren.
+
+    Ein mitgeschickter, aber ungueltiger Schein ist 403 — nicht still der
+    Captcha-Weg. Sonst scheiterte der naechste Versuch am schon verbrauchten
+    Captcha-Token, und die Seite wuesste nicht, dass sie von vorn beginnen muss.
+    """
+    if not req.login_challenge:
+        return None
+    schein = login_challenge_service.lookup_valid(db, req.login_challenge, _ZWISCHENSCHEIN)
+    if schein is None:
+        raise HTTPException(status_code=403, detail="Anmeldung abgelaufen. Bitte erneut anmelden.")
+    return schein
+
+
+def _schein_versuch(db: Session, schein) -> int | None:
+    """Belegt vor der Pruefung eines Codes einen Versuch am Schein (403, wenn keiner frei ist)."""
+    if schein is None:
+        return None
+    nummer = login_challenge_service.versuch_belegen(db, schein, _ZWISCHENSCHEIN_VERSUCHE)
+    if nummer is None:
+        raise HTTPException(status_code=403, detail="Zu viele Fehlversuche. Bitte erneut anmelden.")
+    return nummer
+
+
+def _schein_fehlversuch(db: Session, schein, nummer: int | None) -> None:
+    """War es der letzte erlaubte Versuch, ist der Schein verbraucht (403)."""
+    if schein is None or nummer is None or nummer < _ZWISCHENSCHEIN_VERSUCHE:
+        return
+    login_challenge_service.consume(db, schein)
+    raise HTTPException(status_code=403, detail="Zu viele Fehlversuche. Bitte erneut anmelden.")
+
+
+def _login_zweiter_faktor(
+    db: Session, user: User, req: LoginRequest | LoginVerifyRequest, request: Request,
+    schein=None,
+) -> dict | None:
+    """Der zweite Faktor beim Login. ``None`` heisst bestanden, sonst die Rueckfrage.
+
+    Es zaehlt genau der eingerichtete Faktor oder ein Backup-Code. Bis 09/2026
+    stand hier ``if req.passkey_verified: pass`` — ein Feld aus dem Request,
+    mit dem jeder, der das Passwort kannte, die 2FA jedes Kontos uebersprang.
+    """
+    methode = user.two_factor_method
+    if req.passkey is not None:
+        if methode != "passkey":
+            raise HTTPException(status_code=401, detail="Für dieses Konto gilt kein Passkey.")
+        nummer = _schein_versuch(db, schein)
+        try:
+            passkey_service.bestaetigen(db, user, req.passkey.model_dump(), "login")
+        except passkey_service.PasskeyFehler as e:
+            _schein_fehlversuch(db, schein, nummer)
+            raise HTTPException(status_code=401, detail=str(e))
+        return None
+    if not req.otp_code:
+        rueckfrage = {
+            "requires_2fa": True, "access_token": "", "token_type": "",
+            "requires_verification": False, "email": user.email,
+            "two_factor_method": methode,
+            # Der Zwischenschein ersetzt im zweiten Schritt die Sicherheitsabfrage.
+            # Nur wer ohne Schein kam (also mit Captcha), bekommt einen neuen —
+            # sonst liesse sich der Fehlversuchszaehler durch Nachfragen umgehen.
+            "login_challenge": "" if schein is not None else login_challenge_service.create_challenge(
+                db, purpose=_ZWISCHENSCHEIN, user_id=user.id,
+                ttl_seconds=_ZWISCHENSCHEIN_SEKUNDEN,
+            ),
+        }
+        if methode == "passkey":
+            try:
+                rueckfrage["passkey_options"] = passkey_service.bestaetigungs_optionen(
+                    db, user, request.headers.get("origin"), "login"
+                )
+            except passkey_service.PasskeyFehler:
+                # Kein Passkey fuer diese Adresse: bleibt der Backup-Code.
+                pass
+        return rueckfrage
+    nummer = _schein_versuch(db, schein)
+    if methode == "totp" and AuthService.verify_current_2fa_code(user, req.otp_code):
+        return None
+    if BackupCodeService.validate_backup_code(db, user.id, req.otp_code):
+        return None
+    _schein_fehlversuch(db, schein, nummer)
+    raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
+
+
+def _zweiter_faktor_pflicht(
+    db: Session, user: User, otp_code: str | None, passkey, zweck: str
+) -> None:
+    """Vor Kontoaenderungen: der eingerichtete Faktor, sonst 401.
+
+    Mit Passkey-2FA liessen sich Passwort, E-Mail und Konto bis 09/2026 gar
+    nicht aendern — hier galt nur der TOTP-Code, den ein solches Konto nicht hat.
+    """
+    if not user.two_factor_enabled:
+        return
+    if user.two_factor_method == "passkey":
+        if passkey is None:
+            raise HTTPException(status_code=401, detail="Passkey-Bestätigung erforderlich")
+        try:
+            passkey_service.bestaetigen(db, user, passkey.model_dump(), zweck)
+        except passkey_service.PasskeyFehler as e:
+            raise HTTPException(status_code=401, detail=str(e))
+        return
+    if not otp_code:
+        raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
+    if not AuthService.verify_current_2fa_code(user, otp_code):
+        raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
 
 
 def _native_token_body(tokens: SessionTokens) -> dict:
@@ -143,7 +303,7 @@ def setup_status(db: Session = Depends(get_db)) -> dict:
 async def setup_owner(req: OwnerSetupRequest, db: Session = Depends(get_db)) -> dict:
     if AuthService.is_owner_exists(db):
         raise HTTPException(status_code=400, detail="Setup bereits abgeschlossen")
-    if AuthService.get_user_by_username(db, req.username):
+    if AuthService.benutzername_belegt(db, req.username):
         raise HTTPException(status_code=400, detail="Username bereits vergeben")
     if AuthService.get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")
@@ -246,11 +406,11 @@ async def register(
     db: Session = Depends(get_db)
 ) -> dict:
     await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
-    if AuthService.get_user_by_username(db, req.username):
+    if AuthService.benutzername_belegt(db, req.username):
         raise HTTPException(status_code=400, detail="Username bereits vergeben")
     if AuthService.get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")
-    user = AuthService.create_user(db, req.username, req.email, req.password)
+    user = await run_in_threadpool(AuthService.create_user, db, req.username, req.email, req.password)
     # Sicherer Default: System-Rolle `user`. Konsistent mit der Lifespan-
     # Migration und dem Admin-Create-Pfad. Verhindert Accounts mit role_id=NULL.
     default_role = get_role_by_name(db, SYSTEM_ROLE_USER)
@@ -307,6 +467,7 @@ async def register_verify(
 def login_verify(
     req: LoginVerifyRequest,
     response: Response,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> dict:
     user = AuthService.get_user_by_username(db, req.username)
@@ -331,12 +492,9 @@ def login_verify(
     db.commit()
 
     if user.two_factor_enabled:
-        if not req.otp_code:
-            return {"access_token": "", "token_type": "", "requires_2fa": True, "requires_verification": False, "email": user.email}
-        if not AuthService.verify_current_2fa_code(user, req.otp_code):
-            backup_valid = BackupCodeService.validate_backup_code(db, user.id, req.otp_code)
-            if not backup_valid:
-                raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
+        rueckfrage = _login_zweiter_faktor(db, user, req, request)
+        if rueckfrage is not None:
+            return rueckfrage
 
     tokens = _set_login_session(response, db, user)
     if req.native_client:
@@ -352,10 +510,23 @@ async def login(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
-    await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
+    schein = _zwischenschein(db, req)
+    if schein is None:
+        await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
     user = AuthService.get_user_by_username(db, req.username)
-    if not user or not AuthService.verify_password(req.password, user.password_hash):
+    # Der Schein gilt nur fuer das Konto, fuer das er ausgestellt wurde — und
+    # das wird geprueft, bevor das Passwort etwas verraet.
+    if schein is not None and (not user or schein.user_id != user.id):
         raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten")
+    # Argon2 dauert gewollt lange. Im Threadpool, sonst hielte jeder
+    # Anmeldeversuch die Ereignisschleife des ganzen Panels an.
+    if not user or not await run_in_threadpool(
+        AuthService.verify_password, req.password, user.password_hash
+    ):
+        raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten")
+    # Umhuellte und passlib-Hashes werden hier zu frischen DIS-Hashes. Bis
+    # 09/2026 geschah das nur in /login-verify, also fast nie.
+    await run_in_threadpool(AuthService.rehash_password_if_needed, db, user, req.password)
 
     if not user.is_active:
         raise HTTPException(status_code=401, detail="Account deaktiviert")
@@ -374,14 +545,14 @@ async def login(
         return {"access_token": "", "token_type": "", "requires_2fa": False, "requires_verification": True, "email": user.email}
 
     if user.two_factor_enabled:
-        if not req.otp_code:
-            return {"requires_2fa": True, "access_token": "", "token_type": "", "requires_verification": False, "email": user.email}
-        if not AuthService.verify_current_2fa_code(user, req.otp_code):
-            # Backup-Code als Fallback pruefen
-            backup_valid = BackupCodeService.validate_backup_code(db, user.id, req.otp_code)
-            if not backup_valid:
-                raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
+        rueckfrage = _login_zweiter_faktor(db, user, req, request, schein)
+        if rueckfrage is not None:
+            return rueckfrage
+    if schein is not None:
+        login_challenge_service.consume(db, schein)
 
+    # Hier legte der Server bis 09/2026 einen E2EE-Schlüssel für das Konto an.
+    # Das Gerät bringt seinen eigenen mit und veröffentlicht ihn selbst.
     tokens = _set_login_session(response, db, user)
 
     # Sicherheitsbenachrichtigung bei Login (asynchron im Hintergrund, blockiert Login-Antwort nicht)
@@ -420,7 +591,11 @@ async def login(
 # auf Kopplungscodes zu verhindern.
 
 
-@router.post("/devices/pairing", response_model=PairingCreated)
+@router.post(
+    "/devices/pairing",
+    response_model=PairingCreated,
+    dependencies=[Depends(auth_rate_limit)],
+)
 def create_device_pairing(
     req: PairingCreateRequest,
     user: User = Depends(require_global("ai.chat.use")),
@@ -431,7 +606,24 @@ def create_device_pairing(
 
     `ai.chat.use` als Schranke: ohne dieses Recht kann die App nichts, was sie
     ausmacht. Wer es nicht hat, soll erst gar keinen Zugang erzeugen koennen.
+
+    Dazu ein frischer Nachweis: bei 2FA der eingerichtete Faktor (Code oder
+    Passkey), sonst das Passwort.
+    Ein gekoppeltes Geraet ist ein Zugang ohne Ablauf; bis 26.09.2026 genuegte
+    dafuer ein Zugangstoken mit 15 Minuten Laufzeit. Wer eines abgriff, etwa
+    ueber ein Anrufbild in der Desktop-App, machte daraus einen dauerhaften
+    Zugang, bei einem Admin auf das ganze Panel. `auth_rate_limit`, weil der
+    Endpunkt damit auch ein Passwort prueft.
     """
+    fehlt = passkey_service.frischer_nachweis_fehlt(
+        db, user,
+        password=req.password,
+        otp_code=req.otp_code,
+        passkey=req.passkey.model_dump() if req.passkey else None,
+        zweck="device_pairing",
+    )
+    if fehlt:
+        raise HTTPException(status_code=403, detail=fehlt)
     einladung, code = device_pairing_service.anlegen(db, user, req.label)
     return {
         "code": code,
@@ -449,6 +641,51 @@ def get_device_pairing_status(
 ) -> dict:
     """Prueft den Einloesestatus eines erzeugten Kopplungscodes fuer das Panel."""
     return device_pairing_service.status(db, user, code)
+
+
+@router.put("/devices/pairing/{code}/verlauf")
+def put_device_pairing_verlauf(
+    code: str,
+    req: VerlaufAblegen,
+    user: User = Depends(require_global("ai.chat.use")),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Legt den versiegelten Verlauf fuer das frisch gekoppelte Geraet ab.
+
+    Der Erstabgleich laeuft ueber den Kanal, den es ohnehin gibt: das
+    einrichtende Geraet sieht am Status, dass eingeloest wurde, versiegelt
+    seinen lokalen Verlauf gegen den **Geraeteschluessel** des neuen Geraets
+    und legt ihn hier ab. Der Server reicht durch. Er kann nicht oeffnen, und
+    er soll nichts aufbewahren: der Blob stirbt mit dem Code oder beim Abholen,
+    je nachdem was zuerst kommt.
+
+    Schluessel wandern dabei **nicht** mit. Jedes Geraet hat seinen eigenen —
+    das ist der ganze Sinn der Umstellung von 09/2026, und ein Verlaufsumzug
+    darf sie nicht hintenherum wieder aufheben.
+    """
+    if not device_pairing_service.verlauf_ablegen(db, user, code, req.blob):
+        raise HTTPException(
+            status_code=400,
+            detail="Kein eingeloester Kopplungscode oder Verlauf zu gross.",
+        )
+    return {"ok": True}
+
+
+@router.get("/devices/pairing/{code}/verlauf", response_model=VerlaufAntwort)
+def get_device_pairing_verlauf(
+    code: str,
+    user: User = Depends(require_global("ai.chat.use")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Holt den Verlauf **einmal** ab; danach ist er hier weg.
+
+    Es ist derselbe Benutzer auf beiden Seiten — nur eben ein anderes Geraet.
+    Die Schranke ist deshalb bewusst duenn: ein anderes Geraet desselben Kontos
+    koennte den Blob zwar holen, aber nicht oeffnen. Die Versiegelung traegt,
+    nicht der Endpunkt.
+    """
+    return {"blob": device_pairing_service.verlauf_abholen(db, user, code)}
 
 
 @router.post("/devices/redeem", response_model=TokenResponse, dependencies=[Depends(auth_rate_limit)])
@@ -516,14 +753,16 @@ def revoke_device(
 ) -> dict:
     """Sperrt ein Geraet aus und vergisst seinen Namen.
 
-    Zwei Schritte, und der erste zaehlt: die Refresh-Familie wird widerrufen,
-    damit das Geraet keine neue Sitzung mehr holen kann. Das laufende
-    Access-Token bleibt bis zu seinem Ablauf gueltig — dieselbe Regel wie
-    ueberall sonst; ein Widerruf wirkt spaetestens beim naechsten Erneuern.
+    Zwei Schritte, und der erste zaehlt: die Refresh-Familie wird widerrufen.
+    Damit faellt sofort alles, was an diesem Geraet haengt: jede Anfrage mit
+    seinem Access-Token (`dependencies._familie_gesperrt`), seine offenen
+    Echtzeitverbindungen und seine Push-Adressen
+    (`AuthService._sitzung_abraeumen`).
     """
     AuthService.revoke_refresh_family(db, user.id, family)
     if device_pairing_service.vergessen(db, user, family) is None:
         raise HTTPException(status_code=404, detail="Gerät nicht gefunden")
+    AchievementService.melde(db, user.id, "starter_session_hygiene", commit=True)
     return {"message": "Gerät entkoppelt"}
 
 
@@ -586,6 +825,17 @@ def logout(
     return {"message": "Abgemeldet"}
 
 
+_recent_rotations: dict[str, dict] = {}
+
+
+def _remember_rotation(token_hash: str, tokens: SessionTokens) -> None:
+    now = time.time()
+    abgelaufen = [h for h, dat in _recent_rotations.items() if now - dat["timestamp"] > 120]
+    for h in abgelaufen:
+        _recent_rotations.pop(h, None)
+    _recent_rotations[token_hash] = {"timestamp": now, "tokens": tokens}
+
+
 @router.post("/refresh")
 def refresh(
     request: Request,
@@ -604,15 +854,29 @@ def refresh(
     refresh_value = body_token or request.cookies.get("__Secure-refresh_token")
     if not refresh_value:
         raise HTTPException(status_code=401, detail="Kein Refresh-Token")
+
+    token_hash = AuthService._hash_token(refresh_value)
+
     rt = AuthService.validate_refresh_token(db, refresh_value)
     if not rt:
         recent_rt = AuthService.find_recently_used_refresh_token(db, refresh_value, max_age_seconds=30)
-        if recent_rt:
+        if recent_rt and (not body_token or recent_rt.geraet == "desktop" or device_pairing_service.ist_gekoppelt(db, recent_rt.family)):
             user = AuthService.get_user_by_id(db, recent_rt.user_id)
             if user and user.is_active:
                 family = recent_rt.family
                 device_pairing_service.aktivitaet_vermerken(family)
-                tokens = issue_session(response, db, user, family=family, geraet=recent_rt.geraet)
+                cached = _recent_rotations.get(token_hash)
+                if cached:
+                    tokens = cached["tokens"]
+                else:
+                    # Ein Retry darf nur dieselbe bereits ausgestellte Antwort
+                    # wiederholen. Nach Neustart/auf einem anderen Worker ist
+                    # sie unbekannt: niemals eine zweite Tokenkette erzeugen.
+                    raise HTTPException(status_code=401, detail="Refresh-Antwort nicht mehr verfügbar")
+                if not AuthService.validate_refresh_token(db, tokens.refresh_token):
+                    raise HTTPException(status_code=401, detail="Refresh-Token bereits weiterrotiert")
+
+                _set_auth_cookies(response, tokens.access_token, tokens.refresh_token, tokens.csrf_token)
                 if body_token:
                     return _native_token_body(tokens)
                 return {"message": "Token refreshed"}
@@ -624,6 +888,7 @@ def refresh(
             AuthService.revoke_refresh_family(db, used_rt.user_id, used_rt.family)
 
         raise HTTPException(status_code=401, detail="Ungültiges Refresh-Token")
+
     family = rt.family
     device_pairing_service.aktivitaet_vermerken(family)
     AuthService.mark_refresh_token_used(db, rt)
@@ -640,6 +905,7 @@ def refresh(
     # Erneuern eine gewoehnliche Panel-Sitzung und verloere die Werkzeuge fuer
     # den Rechner des Benutzers.
     tokens = issue_session(response, db, user, family=family, geraet=rt.geraet)
+    _remember_rotation(token_hash, tokens)
     if body_token:
         return _native_token_body(tokens)
     return {"message": "Token refreshed"}
@@ -723,7 +989,7 @@ def update_agent_name(
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Setzt den Rufnamen des Assistenten (None/leer = Standardname 'Singra').
+    """Setzt den Rufnamen des Assistenten (None/leer = Standardname 'Assistent').
 
     Der Name landet im Lageblock (services/ai_lage.py), nie im statischen
     Systemprompt — sonst waere der Prompt je Benutzer verschieden und das
@@ -733,6 +999,49 @@ def update_agent_name(
     user.agent_name = req.agent_name
     db.commit()
     return {"agent_name": user.agent_name}
+
+
+@router.patch("/me/username", response_model=UserResponse, dependencies=[Depends(auth_rate_limit)])
+def update_username(
+    req: UsernameUpdateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> User:
+    """Waehlt oder aendert den eigenen Benutzernamen.
+
+    Ohne Passwortabfrage (Entscheidung des Betreibers, 28.09.2026), aber im
+    Audit-Log. Die Sitzung bleibt: Tokens finden das Konto ueber `user_id`
+    (dependencies.py). Wo der alte Name nur abgeschrieben steht (Audit,
+    Passkey-Anzeige, alte @Erwaehnungen), bleibt er stehen.
+    """
+    alt = user.username
+    if req.username != alt and AuthService.benutzername_belegt(db, req.username, ausser_id=user.id):
+        raise HTTPException(status_code=409, detail="Benutzername bereits vergeben")
+    user.username = req.username
+    user.username_gewaehlt = True
+    # Das persoenliche Team heisst nach seinem Besitzer, solange es niemand
+    # umbenannt hat.
+    team = db.query(Team).filter(Team.personal_for_user_id == user.id).first()
+    if team is not None and team.name == alt:
+        team.name = req.username
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Benutzername bereits vergeben")
+    if alt != req.username:
+        audit_service.record_privileged_action(
+            db,
+            user_id=user.id,
+            action="auth.username.change",
+            target_type="user",
+            target_id=user.id,
+            details={"alt": alt, "neu": req.username},
+        )
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 @router.patch("/me/ai-provider")
@@ -764,6 +1073,8 @@ def update_ai_provider(
         provider = db.get(AiProvider, req.provider_id)
         if provider is None or not provider.enabled or not ai_provider_service.fuer_chat(provider):
             raise HTTPException(status_code=404, detail="Provider nicht gefunden")
+    if user.ai_provider_id is not None and req.provider_id not in (None, user.ai_provider_id):
+        AchievementService.melde(db, user.id, "ai_model_switcher")
     user.ai_provider_id = req.provider_id
     db.commit()
     return {"ai_provider_id": user.ai_provider_id}
@@ -771,35 +1082,10 @@ def update_ai_provider(
 
 # ── Profilbild (Avatar) ──────────────────────────────────────────────────
 
-MAX_AVATAR_BYTES = 5 * 1024 * 1024  # 5 MB
-ALLOWED_AVATAR_TYPES = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-}
-
-
-def _get_avatars_dir() -> str:
-    base = settings.panel_config_dir if settings.panel_config_dir else "."
-    avatars_dir = os.path.join(base, "data", "avatars")
-    os.makedirs(avatars_dir, exist_ok=True)
-    return avatars_dir
-
-
-def _validate_image_bytes(content: bytes, mime_type: str) -> bool:
-    if len(content) > MAX_AVATAR_BYTES or len(content) < 8:
-        return False
-    # Magic number checks
-    if mime_type == "image/jpeg" and content.startswith(b"\xff\xd8\xff"):
-        return True
-    if mime_type == "image/png" and content.startswith(b"\x89PNG\r\n\x1a\n"):
-        return True
-    if mime_type == "image/gif" and (content.startswith(b"GIF87a") or content.startswith(b"GIF89a")):
-        return True
-    if mime_type == "image/webp" and content.startswith(b"RIFF") and b"WEBP" in content[8:16]:
-        return True
-    return False
+# Groesse, erlaubte Typen und die Magic-Byte-Pruefung liegen in
+# services/bild_upload.py, weil das Gruppenlogo dieselben Regeln braucht.
+MAX_AVATAR_BYTES = bild_upload.MAX_BILD_BYTES
+ALLOWED_AVATAR_TYPES = bild_upload.ERLAUBTE_BILDTYPEN
 
 
 @router.post("/me/avatar", response_model=UserResponse)
@@ -819,25 +1105,11 @@ async def upload_avatar(
     content = await file.read()
     if len(content) > MAX_AVATAR_BYTES:
         raise HTTPException(status_code=400, detail="Bild darf maximal 5 MB groß sein.")
-    if not _validate_image_bytes(content, content_type):
+    if not bild_upload.ist_gueltiges_bild(content, content_type):
         raise HTTPException(status_code=400, detail="Ungültige oder beschädigte Bilddatei.")
 
-    avatars_dir = _get_avatars_dir()
-    if user.avatar_url:
-        old_filename = user.avatar_url.split("/")[-1]
-        if old_filename and re.match(r"^[a-zA-Z0-9_\-\.]+$", old_filename):
-            old_path = os.path.join(avatars_dir, old_filename)
-            if os.path.isfile(old_path):
-                try:
-                    os.remove(old_path)
-                except OSError:
-                    pass
-
-    ext = ALLOWED_AVATAR_TYPES[content_type]
-    filename = f"avatar_{user.id}_{uuid.uuid4().hex[:12]}{ext}"
-    file_path = os.path.join(avatars_dir, filename)
-    with open(file_path, "wb") as f:
-        f.write(content)
+    bild_upload.loesche_bild(user.avatar_url)
+    filename = bild_upload.speichere_bild(content, content_type, "avatar", user.id)
 
     user.avatar_url = f"/api/auth/avatar/{filename}"
     db.commit()
@@ -853,15 +1125,7 @@ def delete_avatar(
 ) -> User:
     """Entfernt das eigene Profilbild."""
     if user.avatar_url:
-        avatars_dir = _get_avatars_dir()
-        old_filename = user.avatar_url.split("/")[-1]
-        if old_filename and re.match(r"^[a-zA-Z0-9_\-\.]+$", old_filename):
-            old_path = os.path.join(avatars_dir, old_filename)
-            if os.path.isfile(old_path):
-                try:
-                    os.remove(old_path)
-                except OSError:
-                    pass
+        bild_upload.loesche_bild(user.avatar_url)
         user.avatar_url = None
         db.commit()
         db.refresh(user)
@@ -873,8 +1137,7 @@ def get_avatar(filename: str):
     """Liefert ein gespeichertes Profilbild aus."""
     if not re.match(r"^avatar_\d+_[a-zA-Z0-9]+\.(jpg|jpeg|png|webp|gif)$", filename):
         raise HTTPException(status_code=404, detail="Profilbild nicht gefunden")
-    avatars_dir = _get_avatars_dir()
-    file_path = os.path.join(avatars_dir, filename)
+    file_path = os.path.join(bild_upload.bilder_verzeichnis(), filename)
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="Profilbild nicht gefunden")
     return FileResponse(
@@ -887,7 +1150,30 @@ def get_avatar(filename: str):
 
 
 
-@router.post("/change-password")
+@router.post("/password-link", dependencies=[Depends(auth_rate_limit)])
+async def password_link(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Link zum Festlegen oder Zurücksetzen des Passworts an die bestätigte E-Mail.
+
+    Für Konten ohne Passwort (Social Login) und für alle, die ihr aktuelles
+    Passwort nicht kennen. Ein Access-Token allein setzt kein Passwort, sonst
+    wird ein abgegriffenes Token zu dauerhaftem Zugang. Der Link beweist den
+    Zugriff aufs Postfach, festgelegt wird über /reset-password.
+    """
+    if not user.email_verified:
+        raise HTTPException(status_code=400, detail="Bitte bestätige zuerst deine E-Mail-Adresse.")
+    if not EmailService.is_configured():
+        raise HTTPException(status_code=503, detail="E-Mail-Versand ist nicht eingerichtet.")
+
+    token = await run_in_threadpool(AuthService.set_password_reset_token, db, user)
+    await EmailService.send_password_reset_email(user.email, user.username, token)
+    return {"message": "Link gesendet"}
+
+
+@router.post("/change-password", dependencies=[Depends(auth_rate_limit)])
 async def change_password(
     req: ChangePasswordRequest,
     user: User = Depends(get_current_user),
@@ -895,16 +1181,14 @@ async def change_password(
     _: None = Depends(verify_csrf),
 ) -> dict:
     """Eigenes Passwort ändern. Erfordert aktuelles Passwort + 2FA-Code wenn 2FA aktiv."""
-    if not AuthService.verify_password(req.current_password, user.password_hash):
+    if not await run_in_threadpool(
+        AuthService.verify_password, req.current_password, user.password_hash
+    ):
         raise HTTPException(status_code=401, detail="Aktuelles Passwort falsch")
 
-    if user.two_factor_enabled:
-        if not req.otp_code:
-            raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
-        if not AuthService.verify_current_2fa_code(user, req.otp_code):
-            raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
+    _zweiter_faktor_pflicht(db, user, req.otp_code, req.passkey, "password_change")
 
-    AuthService.reset_password(db, user, req.new_password)
+    await run_in_threadpool(AuthService.reset_password, db, user, req.new_password)
     audit_service.record_privileged_action(
         db,
         user_id=user.id,
@@ -919,22 +1203,29 @@ async def change_password(
     return {"message": "Passwort geändert"}
 
 
-@router.post("/change-email")
+@router.post("/change-email", dependencies=[Depends(auth_rate_limit)])
 async def change_email(
     req: ChangeEmailRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """E-Mail-Adresse ändern. Erfordert 2FA-Code wenn 2FA aktiv."""
+    """E-Mail-Adresse ändern. Erfordert aktuelles Passwort + 2FA-Code wenn 2FA aktiv.
+
+    Ohne Passwort liefe die Übernahme so: Adresse umstellen, Code im eigenen
+    Postfach bestätigen, Passwort per Link setzen. Konten ohne Passwort legen
+    deshalb zuerst eins fest.
+    """
+    if not user.has_password:
+        raise HTTPException(status_code=400, detail="Bitte lege zuerst ein Passwort fest.")
+    if not await run_in_threadpool(
+        AuthService.verify_password, req.current_password, user.password_hash
+    ):
+        raise HTTPException(status_code=401, detail="Aktuelles Passwort falsch")
     if AuthService.get_user_by_email(db, req.email):
         raise HTTPException(status_code=400, detail="E-Mail bereits vergeben")
 
-    if user.two_factor_enabled:
-        if not req.otp_code:
-            raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
-        if not AuthService.verify_current_2fa_code(user, req.otp_code):
-            raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
+    _zweiter_faktor_pflicht(db, user, req.otp_code, req.passkey, "email_change")
 
     user.email = req.email
     user.email_verified = False
@@ -975,8 +1266,65 @@ async def reset_password(
     ).first()
     if not user:
         raise HTTPException(status_code=400, detail="Ungültiger oder abgelaufener Token")
-    AuthService.reset_password(db, user, req.new_password)
+    await run_in_threadpool(AuthService.reset_password, db, user, req.new_password)
     return {"message": "Passwort zurückgesetzt"}
+_datenexport_grenze = parse("3/hour")
+
+
+@router.post("/data-export", dependencies=[Depends(auth_rate_limit)])
+def data_export(
+    req: DataExportRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> JSONResponse:
+    """Alle Daten des Kontos, die der Server lesen kann (DSGVO Art. 15 und 20).
+
+    Nachweis wie bei der Geraetekopplung: bei 2FA der eingerichtete Faktor,
+    sonst das Passwort. Nur dann gehen die selbst hinterlegten Zugangsdaten
+    (GitHub, Steam, Postfaecher, CalDAV) im Klartext mit. Ein Social-Konto ohne
+    Passwort und ohne 2FA bekommt alles andere: das kann es mit seinem Token
+    ohnehin schon lesen. `auth_rate_limit`, weil hier ein Passwort geprueft wird.
+    """
+    if user.two_factor_enabled:
+        if not passkey_service.zweiter_faktor_bestaetigt(
+            db, user,
+            otp_code=req.otp_code,
+            passkey=req.passkey.model_dump() if req.passkey else None,
+            zweck="data_export",
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Bitte mit deinem Passkey bestätigen."
+                    if user.two_factor_method == "passkey"
+                    else "Bitte den aktuellen 2FA-Code eingeben."
+                ),
+            )
+        mit_geheimnissen = True
+    elif user.has_password:
+        if not req.password or not AuthService.verify_password(req.password, user.password_hash):
+            raise HTTPException(status_code=403, detail="Bitte dein Passwort bestätigen.")
+        mit_geheimnissen = True
+    else:
+        mit_geheimnissen = False
+
+    if not limiter.limiter.hit(_datenexport_grenze, f"data-export:{user.id}"):
+        raise HTTPException(status_code=429, detail="Höchstens drei Exporte pro Stunde.")
+
+    paket = datenexport_service.exportieren(db, user.id, mit_geheimnissen=mit_geheimnissen)
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="auth.data_export",
+        target_type="user",
+        target_id=user.id,
+        details={"zugangsdaten_enthalten": mit_geheimnissen},
+        commit=True,
+    )
+    return JSONResponse(paket, headers={"Cache-Control": "no-store"})
+
+
 @router.delete("/delete-account")
 def delete_account(
     req: DeleteAccountRequest,
@@ -988,39 +1336,24 @@ def delete_account(
     """Eigenes Konto loeschen.
 
     Zentrale Logik:
-    - Lokale Accounts (keine OAuth-Links): aktuelles Passwort erforderlich.
-    - Social-Only Accounts (haben OAuthUserLink): Passwort-Schritt wird übersprungen
-      (die aktuelle Session beweist Besitz via Social-Login).
+    - Konten mit Passwort: aktuelles Passwort erforderlich, auch mit
+      Social-Verknuepfung (bis 28.09.2026 reichte dann das Token).
+    - Konten ohne Passwort (nur Social Login): Passwort-Schritt entfaellt.
     - 2FA wird **niemals** übersprungen, wenn aktiv (auch nicht bei Social).
     - Immer: exaktes Wort "delete" als confirmation (Frontend verhindert Paste).
     """
-    from models import OAuthUserLink
-
-    # Zentrale Entscheidung: braucht dieser User ein Passwort für Löschung?
-    has_oauth_links = (
-        db.query(OAuthUserLink)
-        .filter(OAuthUserLink.user_id == user.id)
-        .first()
-    ) is not None
-
-    if not has_oauth_links:
-        # Lokaler Account: Passwort zwingend
+    if user.has_password:
         if not req.password:
             raise HTTPException(status_code=400, detail="Passwort erforderlich")
         if not AuthService.verify_password(req.password, user.password_hash):
             raise HTTPException(status_code=401, detail="Passwort ungültig")
-    # else: Social-Only -> Passwort überspringen (wie gewünscht)
 
     # Immer Bestätigungswort "delete" (nicht kopierbar im Frontend)
     if (req.confirmation or "").strip().lower() != "delete":
         raise HTTPException(status_code=400, detail="Bestätigung delete erforderlich")
 
     # 2FA: niemals überspringen wenn aktiv
-    if user.two_factor_enabled:
-        if not req.otp_code:
-            raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
-        if not AuthService.verify_current_2fa_code(user, req.otp_code):
-            raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
+    _zweiter_faktor_pflicht(db, user, req.otp_code, req.passkey, "account_delete")
 
     # 3. Owner-Sperre: Owner-Account darf nicht geloescht werden
     if user.is_owner:
@@ -1107,20 +1440,186 @@ async def enable_2fa(
     return {"message": "2FA aktiviert"}
 
 
-@router.post("/2fa/disable")
-async def disable_2fa(
-    otp_code: str,
+@router.post("/2fa/passkey/options")
+def passkey_anlege_optionen(
+    request: Request,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """2FA deaktivieren — ERFORDERT aktuellen 2FA-Code. Backup-Codes funktionieren NICHT."""
-    if not user.two_factor_enabled or not user.two_factor_secret_encrypted:
+    """Optionen fuer `navigator.credentials.create()` — nur, solange 2FA aus ist.
+
+    Wie bei `/2fa/setup`: ein aktiver zweiter Faktor wird nicht nebenbei
+    ersetzt. Wer wechseln will, schaltet erst ab.
+    """
+    if user.two_factor_enabled:
+        raise HTTPException(status_code=400, detail="2FA ist bereits aktiv. Bitte zuerst deaktivieren.")
+    try:
+        return passkey_service.anlege_optionen(db, user, request.headers.get("origin"))
+    except passkey_service.PasskeyFehler as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/2fa/passkey/enable")
+async def enable_2fa_passkey(
+    req: PasskeyAnlage,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Aktiviert 2FA per Passkey — erst, wenn der Server den Schluessel hat.
+
+    Bis 09/2026 schaltete dieser Endpunkt 2FA ohne jeden Schluessel ein: der
+    Passkey blieb im Browser, der Server wusste nichts von ihm. Jetzt kommt die
+    Antwort von `navigator.credentials.create()` mit, und erst ein geprueftes
+    Anlegen schaltet ein. Ein von `/2fa/setup` liegengebliebenes TOTP-Geheimnis
+    faellt dabei weg: aktiv ohne Geheimnis heisst Passkey (`User.two_factor_method`).
+    """
+    if user.two_factor_enabled:
+        raise HTTPException(status_code=400, detail="2FA ist bereits aktiv. Bitte zuerst deaktivieren.")
+    try:
+        passkey_service.anlegen(db, user, req.model_dump())
+    except passkey_service.PasskeyFehler as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    user.two_factor_secret_encrypted = None
+    user.two_factor_enabled = True
+    db.commit()
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="auth.2fa.passkey.enable",
+        target_type="user",
+        target_id=user.id,
+        details={"username": user.username, "method": "passkey"},
+        commit=True,
+    )
+    if EmailService.is_configured() and user.email_notifications:
+        await EmailService.send_2fa_status_notification(user.email, user.username, enabled=True)
+    return {"message": "2FA via Passkey aktiviert"}
+
+
+@router.post("/passkey/options")
+def passkey_bestaetigungs_optionen(
+    req: PasskeyOptionenRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Optionen fuer `navigator.credentials.get()` vor einer geschuetzten Aktion.
+
+    Die Challenge gilt nur fuer den genannten Zweck — ein Nachweis fuer das
+    Koppeln schaltet keine 2FA ab.
+    """
+    if req.zweck not in passkey_service.ZWECKE_ANGEMELDET:
+        raise HTTPException(status_code=400, detail="Unbekannter Vorgang.")
+    if user.two_factor_method != "passkey":
+        raise HTTPException(status_code=400, detail="Für dieses Konto gilt kein Passkey.")
+    try:
+        return passkey_service.bestaetigungs_optionen(
+            db, user, request.headers.get("origin"), req.zweck
+        )
+    except passkey_service.PasskeyFehler as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Passkey-Bestaetigung im Browser (Desktop-App) ───────────────────────────
+#
+# Der Ablauf steht in `passkey_service` (Abschnitt „Bestaetigen im Browser").
+# Anlegen und Stand fragt die angemeldete App, Optionen und Bestaetigen die
+# Seite `/bestaetigen` im Browser, die nicht angemeldet sein muss: den Nutzer
+# belegt dort der Passkey selbst. Bis auf die Standabfrage unter `auth_rate_limit`.
+
+
+@router.post("/passkey/browser", dependencies=[Depends(auth_rate_limit)])
+def passkey_browser_anlegen(
+    req: BrowserVorgangRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    try:
+        vorgang = passkey_service.browser_vorgang_anlegen(db, user, req.zweck)
+    except passkey_service.PasskeyFehler as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {**vorgang, "url": _panel_adresse(f"/bestaetigen#{vorgang['vorgang']}")}
+
+
+# Ohne `auth_rate_limit`: die App fragt alle 2 s, und die strenge Grenze je IP
+# sperrte sonst nach 20 s auch die Bestaetigung im Browser. Die Route liest nur
+# den eigenen Vorgang; es gilt die allgemeine API-Grenze.
+@router.post("/passkey/browser/stand")
+def passkey_browser_stand(
+    req: BrowserVorgangKennung,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    return {"stand": passkey_service.browser_stand(db, user, req.vorgang)}
+
+
+@router.post("/passkey/browser/optionen", dependencies=[Depends(auth_rate_limit)])
+def passkey_browser_optionen(
+    req: BrowserVorgangKennung,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    try:
+        return passkey_service.browser_optionen(db, req.vorgang, request.headers.get("origin"))
+    except passkey_service.PasskeyFehler as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/passkey/browser/bestaetigen", dependencies=[Depends(auth_rate_limit)])
+def passkey_browser_bestaetigen(
+    req: BrowserBestaetigungRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    try:
+        passkey_service.browser_bestaetigen(db, req.vorgang, req.zahl, req.passkey.model_dump())
+    except passkey_service.PasskeyFehler as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    return {"stand": "bestaetigt"}
+
+
+def _panel_adresse(pfad: str) -> str:
+    """Absolute Adresse der Weboberflaeche; dort gilt der Passkey (RP-ID)."""
+    return settings.panel_url.rstrip("/") + pfad
+
+
+@router.post("/2fa/disable")
+async def disable_2fa(
+    otp_code: str | None = None,
+    body: TwoFactorDisableRequest | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """2FA deaktivieren — mit dem eingerichteten Faktor, nie mit einem Backup-Code.
+
+    TOTP-Konten: der aktuelle Code (Query-Parameter, wie bisher). Passkey-Konten:
+    die Passkey-Antwort im Body. Bis 09/2026 genuegte fuer Passkey-Konten der
+    Query-Parameter ``passkey_verified=true``.
+    """
+    if not user.two_factor_enabled:
         raise HTTPException(status_code=400, detail="2FA nicht aktiviert")
-    if not AuthService.verify_current_2fa_code(user, otp_code):
-        raise HTTPException(status_code=400, detail="Ungültiger 2FA-Code")
+    passkey = body.passkey.model_dump() if body and body.passkey else None
+    if not passkey_service.zweiter_faktor_bestaetigt(
+        db, user, otp_code=otp_code, passkey=passkey, zweck="2fa_disable"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Passkey-Bestätigung erforderlich"
+                if user.two_factor_method == "passkey"
+                else "Ungültiger 2FA-Code"
+            ),
+        )
     user.two_factor_enabled = False
     user.two_factor_secret_encrypted = None
+    for eintrag in list(user.passkeys):
+        db.delete(eintrag)
     BackupCodeService.clear_all_backup_codes(db, user.id)
     db.commit()
     audit_service.record_privileged_action(

@@ -26,6 +26,7 @@ from database import get_db
 from dependencies import require_global, session_familie, session_herkunft, verify_csrf
 from models import AiConversation, AiMessage, AiProvider, User
 from models.ai_conversation import ARTEN
+from models.dis_text import vorab_entschluesselt
 from schemas.ai_chat import (
     AiChatRequest,
     AiContextStatus,
@@ -112,7 +113,9 @@ def _run_response(db: Session, run) -> AiRunResponse:
     beendeter Reparaturlauf haette danach keine Art mehr — und die Glocke
     haengte ihn dem Dauerchat an, also ausgerechnet dort, wo er nicht hingehoert.
     """
-    conversation = db.get(AiConversation, run.conversation_id)
+    # Nur die Art, nicht das ganze Fenster: dessen Titel und Zusammenfassung
+    # sind verschluesselt, und diese Antwort geht alle acht Sekunden hinaus.
+    kind = db.query(AiConversation.kind).filter(AiConversation.id == run.conversation_id).scalar()
     return AiRunResponse(
         id=run.id,
         status=run.status,
@@ -120,7 +123,7 @@ def _run_response(db: Session, run) -> AiRunResponse:
         message_id=run.message_id,
         live=ai_run_broker.laeuft(run.id),
         created_at=run.created_at,
-        kind=getattr(conversation, "kind", "primary"),
+        kind=kind or "primary",
         conversation_id=run.conversation_id,
         server_id=run.last_server_id,
     )
@@ -259,11 +262,11 @@ def _verlauf_seite(
 
     # Eine mehr holen, als geliefert wird: das ist die ganze Auskunft darueber,
     # ob es weitergeht — ohne ein zweites COUNT ueber den halben Verlauf.
-    zeilen = (
-        query.order_by(AiMessage.created_at.desc(), AiMessage.id.desc())
-        .limit(HISTORY_LIMIT + 1)
-        .all()
-    )
+    seite = query.order_by(AiMessage.created_at.desc(), AiMessage.id.desc()).limit(HISTORY_LIMIT + 1)
+    with vorab_entschluesselt(
+        db, seite, AiMessage.content, AiMessage.reasoning, AiMessage.question_json, AiMessage.sections_json
+    ):
+        zeilen = seite.all()
     weitere = len(zeilen) > HISTORY_LIMIT
     messages = zeilen[:HISTORY_LIMIT]
 
@@ -676,8 +679,8 @@ async def stream_message(
         # Request-Thread und wird von ihm geschlossen.
         user_id, conversation_id, provider_id = user.id, conversation.id, provider.id
         # Und sie darf auch keine offene Transaktion ueber die Grenze tragen.
-        # Unter SQLite teilen sich beide Sitzungen eine Verbindung; der Commit
-        # der einen schloesse die offene Arbeit der anderen mit ab. Frueher
+        # Die Sitzung im Thread saehe ungesicherte Arbeit dieser Sitzung nicht,
+        # und in der Testsuite teilen sich beide sogar eine Verbindung. Frueher
         # endete `lauf_beginnen` selbst mit genau diesem Commit — es ist also
         # derselbe Zeitpunkt wie bisher, nur eine Zeile frueher.
         db.commit()

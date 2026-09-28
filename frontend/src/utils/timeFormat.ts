@@ -35,6 +35,28 @@ export function formatDurationSeconds(seconds: number | null | undefined): strin
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
 }
 
+/**
+ * „Gerade eben", „vor 12 Min.", „vor 3 Std." — und darüber das volle Datum.
+ *
+ * Die Staffelung stand dreimal im Code: bei den gekoppelten Geräten, bei den
+ * Stories und im Kontakt-Tab, jedes Mal mit eigenem Wortlaut. Sie liegt jetzt
+ * hier, damit dieselbe Zeitspanne überall gleich heißt.
+ */
+export function formatRelativeTime(
+  wann: string | number | Date,
+  t: (schluessel: string, werte?: Record<string, unknown>) => string,
+): string {
+  const datum = wann instanceof Date ? wann : new Date(wann)
+  if (Number.isNaN(datum.getTime())) return '-'
+  const sekunden = Math.max(0, Math.floor((Date.now() - datum.getTime()) / 1000))
+  if (sekunden < 60) return t('common.timeAgo.justNow')
+  const minuten = Math.floor(sekunden / 60)
+  if (minuten < 60) return t('common.timeAgo.minutes', { count: minuten })
+  const stunden = Math.floor(minuten / 60)
+  if (stunden < 24) return t('common.timeAgo.hours', { count: stunden })
+  return datum.toLocaleString()
+}
+
 export function getAvailableTimezones(): string[] {
   try {
     const intlWithSupported = Intl as typeof Intl & {

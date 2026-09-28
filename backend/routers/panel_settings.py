@@ -10,6 +10,7 @@ from config import settings
 from database import get_db
 from dependencies import require_global, verify_csrf
 from schemas.panel_settings import (
+    PanelLanguage,
     PanelSettingsResponse,
     PanelSettingsUpdate,
     TestEmailRequest,
@@ -73,6 +74,26 @@ def _mask_secret(value: str) -> str:
     return "*" * (len(value) - 4) + value[-4:]
 
 
+def _panel_language(value: str | None) -> PanelLanguage:
+    """Liest eine gespeicherte Panelsprache und gibt immer eine gültige zurück.
+
+    Bis 09/2026 kannte das Panel elf Sprachen, von denen neun nie vollständig
+    übersetzt waren. In der Datenbank einer bestehenden Anlage kann deshalb
+    `fr`, `zh` oder `ar` stehen. Ohne diese Stelle würde die Einstellungsseite
+    dort mit einem Validierungsfehler antworten statt mit Einstellungen — das
+    Panel wäre für den Betreiber unbenutzbar, weil vor Monaten jemand die
+    Sprache umgestellt hat.
+
+    Zwei verschiedene Fälle, zwei verschiedene Antworten: ist gar nichts
+    gespeichert, bleibt es beim bisherigen Auslieferungszustand Deutsch. Steht
+    dort eine abgeschaffte Sprache, wird daraus Englisch — dieselbe Regel, die
+    `normalizePanelLanguage` im Frontend anwendet.
+    """
+    if value is None:
+        return "de"
+    return "de" if value == "de" else "en"
+
+
 @router.get("", response_model=PanelSettingsResponse)
 def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.settings.read"))) -> dict:
     """Liest alle Panel-Einstellungen (DB-Werte mit Fallback auf Defaults).
@@ -98,7 +119,7 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "smtp_from": all_db.get("smtp_from", ""),
         "smtp_tls": all_db.get("smtp_tls", "true"),
         "resend_api_key": _mask_secret(EmailService._get_setting("resend_api_key")),
-        "default_language": all_db.get("default_language", "de"),
+        "default_language": _panel_language(all_db.get("default_language")),
         "email_configured": EmailService.is_configured(),
         "email_provider": EmailService._get_provider(),
         "steam_api_key": _mask_secret(steam_key),
@@ -124,11 +145,14 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "singra_webhook_secret_source": singra_secret.current_source(),
         "updates_automatic": all_db.get("updates_automatic", "false") == "true",
         "desktop_app_download_enabled": all_db.get("desktop_app_download_enabled", "true") != "false",
+        # Vorgabe aus: Der Download zeigt auf ein GitHub-Release, das erst existieren muss.
+        "story_fable_download_enabled": all_db.get("story_fable_download_enabled", "false") == "true",
         "calendar_enabled": all_db.get("calendar_enabled", "true") != "false",
         "notes_enabled": all_db.get("notes_enabled", "true") != "false",
         "vault_enabled": all_db.get("vault_enabled", "true") != "false",
-        "captcha_enabled": all_db.get("captcha_enabled", "false") == "true",
-        "captcha_provider": all_db.get("captcha_provider", "none"),
+        "social_enabled": all_db.get("social_enabled", "true") != "false",
+        "captcha_enabled": all_db.get("captcha_enabled", "true") == "true",
+        "captcha_provider": all_db.get("captcha_provider", "altcha"),
         "captcha_site_key": all_db.get("captcha_site_key", ""),
         "captcha_secret_key": _mask_secret(
             AuthService.decrypt_secret(
@@ -154,11 +178,14 @@ def get_public_settings() -> dict:
     all_db = PanelSettingsService.get_all()
     return {
         "desktop_app_download_enabled": all_db.get("desktop_app_download_enabled", "true") != "false",
+        # Vorgabe aus: Der Download zeigt auf ein GitHub-Release, das erst existieren muss.
+        "story_fable_download_enabled": all_db.get("story_fable_download_enabled", "false") == "true",
         "imprint_enabled": all_db.get("imprint_enabled", "false") == "true",
         "imprint_url": all_db.get("imprint_url", ""),
         "calendar_enabled": all_db.get("calendar_enabled", "true") != "false",
         "notes_enabled": all_db.get("notes_enabled", "true") != "false",
         "vault_enabled": all_db.get("vault_enabled", "true") != "false",
+        "social_enabled": all_db.get("social_enabled", "true") != "false",
     }
 
 
@@ -220,11 +247,20 @@ def update_settings(
             value = "true" if bool(value) else "false"
         if key == "vault_enabled":
             value = "true" if bool(value) else "false"
+        if key == "social_enabled":
+            value = "true" if bool(value) else "false"
+        # Ohne diese Normalisierung landet ein abgeschaltetes Banner als str(False) == "False"
+        # in der Datenbank und wird beim Lesen gegen "false" verglichen — der Schalter liess
+        # sich also gar nicht ausschalten.
+        if key == "desktop_app_download_enabled":
+            value = "true" if bool(value) else "false"
+        if key == "story_fable_download_enabled":
+            value = "true" if bool(value) else "false"
         if key == "captcha_enabled":
             value = "true" if bool(value) else "false"
         if key == "captcha_provider":
             mode = str(value).strip().lower()
-            if mode not in ("none", "turnstile", "hcaptcha", "recaptcha"):
+            if mode not in ("none", "altcha", "turnstile", "hcaptcha", "recaptcha"):
                 raise HTTPException(status_code=400, detail="Ungueltiger CAPTCHA-Anbieter")
             value = mode
         if key == "support_widget_mode":
@@ -307,11 +343,12 @@ async def test_email(
         raise HTTPException(status_code=503, detail="E-Mail nicht konfiguriert")
 
     body = "Dies ist eine Test-E-Mail vom Maunting Service Manager.\n\nDie E-Mail-Konfiguration funktioniert korrekt."
-    html = EmailService._base_template(
+    html = EmailService._notification_email_html(
+        "",
         "Test-E-Mail",
-        f"""<h1 class=\"headline\" style=\"margin:0 0 12px 0;font-size:24px;font-weight:700;color:{EmailService.CYAN_ACCENT};line-height:1.3;\">Test-E-Mail</h1>
-<p style=\"margin:0 0 20px 0;font-size:15px;color:{EmailService.SECONDARY_TEXT};line-height:1.6;\">Dies ist eine Test-E-Mail vom Maunting Service Manager.</p>
-<p style=\"margin:0 0 20px 0;font-size:15px;color:{EmailService.PRIMARY_TEXT};line-height:1.6;\">Die E-Mail-Konfiguration funktioniert korrekt.</p>"""
+        "dies ist eine Test-E-Mail vom Maunting Service Manager. "
+        "Die E-Mail-Konfiguration funktioniert korrekt.",
+        kategorie="Einstellungen",
     )
 
     ok = await EmailService.send_email(req.to, "Maunting Service Manager — Test", body, html)
@@ -509,16 +546,24 @@ async def test_cloudflare_token(
 async def list_cloudflare_zones(
     _=Depends(require_global("panel.settings.read")),
 ) -> dict:
-    from services.cloudflare_service import list_zones
-    from services import permission_service
-    from database import get_db as _get_db
-    from dependencies import get_current_user
+    import httpx
 
+    from services.cloudflare_service import CloudflareApiUnavailable, list_zones
+
+    # Fehlender oder abgelehnter Token ist eine Einstellungsfrage (400), ein
+    # stummes Cloudflare ein Fehler dahinter (502). Alles andere ist ein Fehler
+    # im Panel und bleibt ein protokollierter 500.
     try:
         zones = await list_zones()
-        return {"zones": [{"id": z.get("id"), "name": z.get("name"), "status": z.get("status")} for z in zones]}
-    except Exception:
-        raise HTTPException(status_code=500, detail="Cloudflare Zonen konnten nicht geladen werden")
+    except CloudflareApiUnavailable as exc:
+        if exc.code == "cloudflare_api_token_missing":
+            raise HTTPException(status_code=400, detail="Kein Cloudflare-API-Token hinterlegt.")
+        if exc.code == "cloudflare_api_token_invalid":
+            raise HTTPException(status_code=400, detail="Cloudflare hat den API-Token abgelehnt.")
+        raise
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Cloudflare ist gerade nicht erreichbar.")
+    return {"zones": [{"id": z.get("id"), "name": z.get("name"), "status": z.get("status")} for z in zones]}
 
 
 @router.post("/curseforge-key/test", status_code=200)

@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
 import { useAuthStore } from '@/stores/authStore'
+import { usePublicSettingsStore, DEFAULT_PUBLIC_SETTINGS } from '@/stores/publicSettingsStore'
 import type { User } from '@/types'
 
 const invokeMock = vi.fn()
@@ -51,6 +52,9 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 vi.mock('@/pages/Ai', () => ({
   Ai: () => <div data-testid="ki-seite" />,
 }))
+vi.mock('@/pages/Messenger', () => ({
+  Messenger: () => <div data-testid="messenger-seite" />,
+}))
 vi.mock('./vault/VaultView', () => ({
   VaultView: () => <div data-testid="tresor-seite" />,
 }))
@@ -69,9 +73,18 @@ vi.mock('@/components/ai/AiMemoryManager', () => ({
 vi.mock('@/components/ai/AiRunNotice', () => ({
   AiRunNotice: () => null,
 }))
-vi.mock('@/hooks/useHasPermission', () => ({
-  useHasPermission: () => true,
-}))
+// Der Ersatz muss selbst ein Hook sein: als blosse Funktion faellt nicht auf,
+// wenn die App ihn nur unter einer Bedingung aufruft. Genau das liess die
+// App bei jedem Netzwechsel abstuerzen, waehrend die Offline-Tests gruen waren.
+vi.mock('@/hooks/useHasPermission', async () => {
+  const { useRef } = await import('react')
+  return {
+    useHasPermission: () => {
+      useRef(null)
+      return true
+    },
+  }
+})
 // Der Splash wuerde jeden Test 10 Sekunden warten lassen.
 vi.mock('./Splash', () => ({
   Splash: () => null,
@@ -110,11 +123,13 @@ function konfigMock(konfig: Record<string, unknown>) {
 describe('DesktopApp', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     invokeMock.mockReset()
     eventListeners.clear()
     schleifeAktiv.length = 0
     setzeAccessToken(null)
     localStorage.clear()
+    usePublicSettingsStore.setState({ ...DEFAULT_PUBLIC_SETTINGS, isLoading: false, error: null })
     useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false })
   })
 
@@ -528,10 +543,55 @@ describe('DesktopApp', () => {
       expect(screen.getByText(i18n.t('mss.app.kalender'))).toBeInTheDocument()
       expect(screen.getByText(i18n.t('mss.app.notizen', 'Notizen'))).toBeInTheDocument()
 
-      // KI-Chat und Gedächtnis sind offline ausgeblendet
-      expect(screen.queryByText(i18n.t('mss.app.chat'))).not.toBeInTheDocument()
+      // KI-Assistent, Messenger und Gedächtnis sind offline ausgeblendet
+      expect(screen.queryByText(i18n.t('mss.app.ki'))).not.toBeInTheDocument()
+      expect(screen.queryByText(i18n.t('mss.app.messenger'))).not.toBeInTheDocument()
       expect(screen.queryByText(i18n.t('mss.app.gedaechtnis'))).not.toBeInTheDocument()
       expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('messenger-seite')).not.toBeInTheDocument()
+    })
+  })
+
+  it('zeigt den Messenger-Reiter online und rendert die Messenger-Seite beim Navigieren zu /chat', async () => {
+    localStorage.setItem(LETZTE_ROUTE_KEY, '/chat')
+    localStorage.setItem('msm_cached_user', JSON.stringify(BENUTZER))
+    useAuthStore.setState({ user: BENUTZER, isAuthenticated: true })
+
+    konfigMock({
+      backend_url: 'https://api.example.com',
+      sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+      eingerichtet: true,
+    })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((eingabe: RequestInfo | URL) => {
+        const url = String(eingabe)
+        if (url.includes('/auth/refresh')) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        if (url.includes('/auth/me')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(BENUTZER), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        return Promise.resolve(new Response('{}', { status: 200 }))
+      }),
+    )
+
+    render(<DesktopApp />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('messenger-seite')).toBeInTheDocument()
+      expect(screen.getByText(i18n.t('mss.app.messenger'))).toBeInTheDocument()
     })
   })
 
@@ -768,6 +828,171 @@ describe('DesktopApp', () => {
         expect(screen.queryByTestId('tresor-seite')).not.toBeInTheDocument()
         expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
       })
+    })
+  })
+
+  describe("Feature-Flags & Deaktivierte Module ('Aus ist aus')", () => {
+    it('blendet deaktivierten Tresor offline aus und fällt auf /kalender zurück', async () => {
+      usePublicSettingsStore.setState({
+        ...DEFAULT_PUBLIC_SETTINGS,
+        vault_enabled: false,
+        calendar_enabled: true,
+      })
+      localStorage.setItem(LETZTE_ROUTE_KEY, '/tresor')
+      localStorage.setItem('msm_cached_user', JSON.stringify(BENUTZER))
+      useAuthStore.setState({ user: BENUTZER, isAuthenticated: true })
+
+      konfigMock({
+        backend_url: 'https://api.example.com',
+        sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+        eingerichtet: true,
+      })
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() => Promise.reject(new TypeError('Failed to fetch (Offline)'))),
+      )
+
+      render(<DesktopApp />)
+
+      await waitFor(() => {
+        expect(screen.getByTestId('kalender-seite')).toBeInTheDocument()
+      })
+      expect(screen.queryByTestId('tresor-seite')).not.toBeInTheDocument()
+      expect(screen.queryByText(i18n.t('mss.app.tresor'))).not.toBeInTheDocument()
+    })
+
+    it('verhindert Zugriff auf Messenger sowohl online als auch offline, wenn social_enabled: false', async () => {
+      usePublicSettingsStore.setState({
+        ...DEFAULT_PUBLIC_SETTINGS,
+        social_enabled: false,
+      })
+      localStorage.setItem(LETZTE_ROUTE_KEY, '/chat')
+      localStorage.setItem('msm_cached_user', JSON.stringify(BENUTZER))
+      useAuthStore.setState({ user: BENUTZER, isAuthenticated: true })
+
+      konfigMock({
+        backend_url: 'https://api.example.com',
+        sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+        eingerichtet: true,
+      })
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((eingabe: RequestInfo | URL) => {
+          const url = String(eingabe)
+          if (url.includes('/auth/refresh')) {
+            return Promise.resolve(
+              new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              }),
+            )
+          }
+          if (url.includes('/auth/me')) {
+            return Promise.resolve(
+              new Response(JSON.stringify(BENUTZER), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              }),
+            )
+          }
+          if (url.includes('/settings/public')) {
+            return Promise.resolve(
+              new Response(JSON.stringify({ ...DEFAULT_PUBLIC_SETTINGS, social_enabled: false }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              }),
+            )
+          }
+          return Promise.resolve(new Response('{}', { status: 200 }))
+        }),
+      )
+
+      render(<DesktopApp />)
+
+      await waitFor(() => {
+        expect(screen.getByTestId('ki-seite')).toBeInTheDocument()
+      })
+      expect(screen.queryByTestId('messenger-seite')).not.toBeInTheDocument()
+      expect(screen.queryByText(i18n.t('mss.app.messenger'))).not.toBeInTheDocument()
+    })
+
+    it('fängt externe mss:navigiere-zu Events auf deaktivierte Module (/tresor, /chat) ab', async () => {
+      usePublicSettingsStore.setState({
+        ...DEFAULT_PUBLIC_SETTINGS,
+        vault_enabled: false,
+        social_enabled: false,
+        calendar_enabled: true,
+      })
+      localStorage.setItem('msm_cached_user', JSON.stringify(BENUTZER))
+      useAuthStore.setState({ user: BENUTZER, isAuthenticated: true })
+
+      konfigMock({
+        backend_url: 'https://api.example.com',
+        sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+        eingerichtet: true,
+      })
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() => Promise.reject(new TypeError('Failed to fetch (Offline)'))),
+      )
+
+      render(<DesktopApp />)
+
+      await waitFor(() => {
+        expect(screen.getByTestId('kalender-seite')).toBeInTheDocument()
+      })
+
+      // Missbrauchsversuch auf deaktivierten Tresor via Tauri Event
+      triggerTauriEvent('mss:navigiere-zu', '/tresor')
+      await waitFor(() => {
+        expect(screen.getByTestId('kalender-seite')).toBeInTheDocument()
+        expect(screen.queryByTestId('tresor-seite')).not.toBeInTheDocument()
+      })
+
+      // Missbrauchsversuch auf deaktivierten Chat via Tauri Event
+      triggerTauriEvent('mss:navigiere-zu', '/chat')
+      await waitFor(() => {
+        expect(screen.getByTestId('kalender-seite')).toBeInTheDocument()
+        expect(screen.queryByTestId('messenger-seite')).not.toBeInTheDocument()
+      })
+    })
+
+    it('übernimmt gecachte Deaktivierungen (localStorage msm_cached_public_settings) beim Offline-Start', async () => {
+      localStorage.setItem('msm_cached_public_settings', JSON.stringify({
+        ...DEFAULT_PUBLIC_SETTINGS,
+        vault_enabled: false,
+        calendar_enabled: false,
+        notes_enabled: true,
+      }))
+      // Initialisiere Store aus Cache
+      usePublicSettingsStore.getState().initFromCache()
+
+      localStorage.setItem(LETZTE_ROUTE_KEY, '/tresor')
+      localStorage.setItem('msm_cached_user', JSON.stringify(BENUTZER))
+      useAuthStore.setState({ user: BENUTZER, isAuthenticated: true })
+
+      konfigMock({
+        backend_url: 'https://api.example.com',
+        sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+        eingerichtet: true,
+      })
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() => Promise.reject(new TypeError('Failed to fetch (Offline)'))),
+      )
+
+      render(<DesktopApp />)
+
+      // Weil Tresor und Kalender deaktiviert sind, muss die App auf Notizen ausweichen
+      await waitFor(() => {
+        expect(screen.getByTestId('notizen-seite')).toBeInTheDocument()
+      })
+      expect(screen.queryByTestId('tresor-seite')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('kalender-seite')).not.toBeInTheDocument()
     })
   })
 })

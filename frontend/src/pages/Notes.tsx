@@ -18,11 +18,13 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { toast } from '@/stores/toastStore'
+import { FARB_PALETTE, farbwahl } from '@/config/farbpalette'
 import { confirm } from '@/stores/confirmStore'
 import { Dropdown, type DropdownOption } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { Switch } from '@/components/ui/Switch'
 import { teamsApi, type Team } from '@/api/teams'
+import { Spinner } from '@/components/ui/Spinner'
 import {
   loadNotesOfflineFirst,
   saveNoteOffline,
@@ -72,22 +74,6 @@ function InlineMarkdown({ text, strikethrough }: { text: string; strikethrough?:
       </ReactMarkdown>
     </span>
   )
-}
-
-const COLOR_THEMES = [
-  { id: 'primary', label: 'Blau (Standard)', bg: 'bg-primary/10', border: 'border-primary/40', text: 'text-primary', badge: 'bg-primary/20 text-primary border-primary/30' },
-  { id: 'emerald', label: 'Grün / Einkäufe', bg: 'bg-emerald-500/10', border: 'border-emerald-500/40', text: 'text-emerald-400', badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
-  { id: 'amber', label: 'Gelb / Orange', bg: 'bg-amber-500/10', border: 'border-amber-500/40', text: 'text-amber-400', badge: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
-  { id: 'rose', label: 'Rot / Dringend', bg: 'bg-rose-500/10', border: 'border-rose-500/40', text: 'text-rose-400', badge: 'bg-rose-500/20 text-rose-300 border-rose-500/30' },
-  { id: 'purple', label: 'Lila / Server & Tech', bg: 'bg-purple-500/10', border: 'border-purple-500/40', text: 'text-purple-400', badge: 'bg-purple-500/20 text-purple-300 border-purple-500/30' },
-  { id: 'cyan', label: 'Cyan / Ideen', bg: 'bg-cyan-500/10', border: 'border-cyan-500/40', text: 'text-cyan-400', badge: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' },
-]
-
-function getColorTheme(colorId?: string) {
-  let normalized = colorId || 'primary'
-  if (normalized === 'blue') normalized = 'primary'
-  if (normalized === 'green') normalized = 'emerald'
-  return COLOR_THEMES.find((c) => c.id === normalized) || COLOR_THEMES[0]
 }
 
 export function Notes() {
@@ -173,7 +159,7 @@ export function Notes() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!formTitle.trim()) {
-      toast.error(t('notes.titleRequired', 'Bitte gib einen Titel für die Notiz ein.'))
+      toast.error(t('notes.titleRequired'))
       return
     }
 
@@ -191,15 +177,15 @@ export function Notes() {
 
       await saveNoteOffline(payload, editingNote)
       if (editingNote) {
-        toast.success(t('notes.updated', 'Notiz erfolgreich aktualisiert.'))
+        toast.success(t('notes.updated'))
       } else {
-        toast.success(t('notes.created', 'Notiz erfolgreich erstellt.'))
+        toast.success(t('notes.created'))
       }
 
       setIsModalOpen(false)
       void loadNotes()
     } catch {
-      toast.error(t('notes.saveError', 'Fehler beim Speichern der Notiz.'))
+      toast.error(t('notes.saveError'))
     } finally {
       setSaving(false)
     }
@@ -207,19 +193,19 @@ export function Notes() {
 
   const handleDelete = async (note: NoteItem) => {
     const ok = await confirm({
-      title: t('notes.deleteConfirmTitle', 'Notiz löschen?'),
-      message: t('notes.deleteConfirmMessage', 'Möchtest du diese Notiz wirklich unwiderruflich löschen?'),
-      confirmText: t('common.delete', 'Löschen'),
+      title: t('notes.deleteConfirmTitle'),
+      message: t('notes.deleteConfirmMessage'),
+      confirmText: t('common.delete'),
       danger: true,
     })
     if (!ok) return
 
     try {
       await deleteNoteOffline(note)
-      toast.success(t('notes.deleted', 'Notiz gelöscht.'))
+      toast.success(t('notes.deleted'))
       void loadNotes()
     } catch {
-      toast.error(t('notes.deleteError', 'Fehler beim Löschen der Notiz.'))
+      toast.error(t('notes.deleteError'))
     }
   }
 
@@ -229,7 +215,7 @@ export function Notes() {
       await toggleNotePinOffline(note)
       void loadNotes()
     } catch {
-      toast.error(t('notes.pinError', 'Fehler beim Anpinnen der Notiz.'))
+      toast.error(t('notes.pinError'))
     }
   }
 
@@ -237,10 +223,10 @@ export function Notes() {
     e.stopPropagation()
     try {
       await toggleNoteArchiveOffline(note)
-      toast.success(note.is_archived ? t('notes.unarchived', 'Notiz wiederhergestellt.') : t('notes.archived', 'Notiz archiviert.'))
+      toast.success(note.is_archived ? t('notes.unarchived') : t('notes.archived'))
       void loadNotes()
     } catch {
-      toast.error(t('notes.archiveError', 'Fehler beim Ändern des Archivierungsstatus.'))
+      toast.error(t('notes.archiveError'))
     }
   }
 
@@ -290,33 +276,33 @@ export function Notes() {
   }, [notes, showArchived, selectedCategory, selectedType, searchQuery])
 
   const categoryOptions: DropdownOption[] = [
-    { value: 'all', label: t('notes.categories.all', 'Alle Kategorien') },
-    { value: 'personal', label: t('notes.categories.personal', 'Persönlich') },
-    { value: 'shopping', label: t('notes.categories.shopping', 'Einkaufsliste') },
-    { value: 'todo', label: t('notes.categories.todo', 'Aufgaben & To-Dos') },
-    { value: 'work', label: t('notes.categories.work', 'Arbeit & Server') },
-    { value: 'idea', label: t('notes.categories.idea', 'Ideen & Entwürfe') },
-    { value: 'meeting', label: t('notes.categories.meeting', 'Besprechung / Notizen') },
+    { value: 'all', label: t('notes.categories.all') },
+    { value: 'personal', label: t('notes.categories.personal') },
+    { value: 'shopping', label: t('notes.categories.shopping') },
+    { value: 'todo', label: t('notes.categories.todo') },
+    { value: 'work', label: t('notes.categories.work') },
+    { value: 'idea', label: t('notes.categories.idea') },
+    { value: 'meeting', label: t('notes.categories.meeting') },
   ]
 
   const modalCategoryOptions: DropdownOption[] = [
-    { value: 'personal', label: t('notes.categories.personal', 'Persönlich') },
-    { value: 'shopping', label: t('notes.categories.shopping', 'Einkaufsliste') },
-    { value: 'todo', label: t('notes.categories.todo', 'Aufgaben & To-Dos') },
-    { value: 'work', label: t('notes.categories.work', 'Arbeit & Server') },
-    { value: 'idea', label: t('notes.categories.idea', 'Ideen & Entwürfe') },
-    { value: 'meeting', label: t('notes.categories.meeting', 'Besprechung / Notizen') },
+    { value: 'personal', label: t('notes.categories.personal') },
+    { value: 'shopping', label: t('notes.categories.shopping') },
+    { value: 'todo', label: t('notes.categories.todo') },
+    { value: 'work', label: t('notes.categories.work') },
+    { value: 'idea', label: t('notes.categories.idea') },
+    { value: 'meeting', label: t('notes.categories.meeting') },
   ]
 
   const typeOptions: DropdownOption[] = [
-    { value: 'all', label: t('notes.types.all', 'Alle Bereiche') },
-    { value: 'personal', label: t('notes.types.personal', 'Nur Persönlich') },
-    { value: 'team', label: t('notes.types.team', 'Nur Team-Notizen') },
+    { value: 'all', label: t('notes.types.all') },
+    { value: 'personal', label: t('notes.types.personal') },
+    { value: 'team', label: t('notes.types.team') },
   ]
 
   const modalTypeOptions: DropdownOption[] = [
-    { value: 'personal', label: t('notes.types.personal', 'Persönlich (privat)') },
-    { value: 'team', label: t('notes.types.team', 'Im Team geteilt') },
+    { value: 'personal', label: t('notes.types.personal') },
+    { value: 'team', label: t('notes.types.team') },
   ]
 
   const teamOptions: DropdownOption[] = teams.map((team) => ({
@@ -329,14 +315,14 @@ export function Notes() {
       {/* ── Kopfzeile: Titel, Zähler & Erstellen ── */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center text-primary shadow-xs shrink-0">
+          <div className="w-8 h-8 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center text-primary shadow-sm shrink-0">
             <StickyNote className="w-4 h-4" />
           </div>
           <div className="flex items-center gap-2 min-w-0">
             <h2 className="font-headline text-base sm:text-lg font-bold text-on-surface tracking-tight truncate">
-              {t('notes.title', 'Notizen & Listen')}
+              {t('notes.title')}
             </h2>
-            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/30 shrink-0">
+            <span className="text-label-sm font-medium px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/30 shrink-0">
               {filteredNotes.length}
             </span>
           </div>
@@ -344,12 +330,11 @@ export function Notes() {
 
         <Button
           onClick={openCreateModal}
-          size="sm"
-          className="h-8.5 px-3 sm:px-3.5 rounded-xl flex items-center gap-1.5 font-medium shadow-sm shrink-0"
+          className="rounded-xl flex items-center gap-1.5 font-medium shadow-sm shrink-0"
         >
           <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">{t('notes.newNote', 'Neue Notiz')}</span>
-          <span className="sm:hidden">{t('notes.newNoteShort', 'Neu')}</span>
+          <span className="hidden sm:inline">{t('notes.newNote')}</span>
+          <span className="sm:hidden">{t('notes.newNoteShort')}</span>
         </Button>
       </div>
 
@@ -362,15 +347,15 @@ export function Notes() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t('notes.searchPlaceholder', 'Notizen oder Inhalte durchsuchen...')}
-            className="w-full bg-surface-container border border-outline-variant/40 rounded-xl pl-9 pr-8 py-2 text-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:border-primary transition-colors"
+            placeholder={t('notes.searchPlaceholder')}
+            className="msm-input pl-9 pr-8"
           />
           {searchQuery && (
             <button
               type="button"
               onClick={() => setSearchQuery('')}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-on-surface-variant hover:text-on-surface rounded-lg"
-              aria-label={t('common.clear', 'Löschen')}
+              aria-label={t('common.clear')}
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -384,7 +369,7 @@ export function Notes() {
               value={selectedCategory}
               onChange={setSelectedCategory}
               options={categoryOptions}
-              aria-label={t('notes.categories.all', 'Kategorie')}
+              aria-label={t('notes.categories.all')}
             />
           </div>
 
@@ -393,7 +378,7 @@ export function Notes() {
               value={selectedType}
               onChange={setSelectedType}
               options={typeOptions}
-              aria-label={t('notes.types.all', 'Bereich')}
+              aria-label={t('notes.types.all')}
             />
           </div>
 
@@ -402,12 +387,12 @@ export function Notes() {
             onClick={() => setShowArchived(!showArchived)}
             className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl border transition-colors whitespace-nowrap shrink-0 ${
               showArchived
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 font-semibold'
+                ? 'bg-status-warning/20 text-status-warning border-status-warning/40 font-semibold'
                 : 'bg-surface-container text-on-surface-variant border-outline-variant/30 hover:text-on-surface'
             }`}
           >
             <Archive className="w-3.5 h-3.5" />
-            <span>{showArchived ? t('notes.archivedView', 'Archiviert') : t('notes.activeView', 'Aktiv')}</span>
+            <span>{showArchived ? t('notes.archivedView') : t('notes.activeView')}</span>
           </button>
         </div>
       </div>
@@ -429,23 +414,23 @@ export function Notes() {
           </div>
           <h3 className="font-headline text-base font-semibold text-on-surface mb-1">
             {showArchived
-              ? t('notes.emptyArchivedTitle', 'Keine archivierten Notizen')
+              ? t('notes.emptyArchivedTitle')
               : searchQuery
-              ? t('notes.emptySearch', 'Keine passenden Notizen gefunden.')
-              : t('notes.emptyTitle', 'Noch keine Notizen vorhanden')}
+              ? t('notes.emptySearch')
+              : t('notes.emptyTitle')}
           </h3>
           <p className="text-xs text-on-surface-variant max-w-sm">
             {showArchived
-              ? t('notes.emptyArchivedDesc', 'Archivierte Notizen werden hier angezeigt.')
+              ? t('notes.emptyArchivedDesc')
               : searchQuery
-              ? t('notes.emptySearchDesc', 'Passe deine Suchbegriffe oder Filter an.')
-              : t('notes.emptyDesc', 'Erstelle deine erste Notiz, Einkaufsliste oder diktiere per KI.')}
+              ? t('notes.emptySearchDesc')
+              : t('notes.emptyDesc')}
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
           {filteredNotes.map((note) => {
-            const theme = getColorTheme(note.color)
+            const theme = farbwahl(note.color)
             const lines = (note.content || '').split('\n')
             let checkCounter = 0
 
@@ -453,13 +438,13 @@ export function Notes() {
               <div
                 key={note.id}
                 onClick={() => openEditModal(note)}
-                className={`group relative flex flex-col justify-between rounded-2xl border transition-all duration-200 cursor-pointer overflow-hidden p-3.5 sm:p-4 ${theme.bg} ${theme.border} hover:shadow-md hover:border-outline/50 active:scale-[0.99]`}
+                className={`group relative flex flex-col justify-between rounded-2xl border transition-all duration-200 cursor-pointer overflow-hidden p-3.5 sm:p-4 ${theme.flaeche} ${theme.rand} hover:shadow-md hover:border-outline/50 active:scale-[0.99]`}
               >
                 {/* Header */}
                 <div>
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border truncate ${theme.badge}`}>
+                      <span className={`text-label-sm font-semibold px-2 py-0.5 rounded-full border truncate ${theme.pille}`}>
                         {note.category === 'shopping'
                           ? 'Einkauf'
                           : note.category === 'todo'
@@ -473,7 +458,7 @@ export function Notes() {
                           : 'Notiz'}
                       </span>
                       {note.note_type === 'team' && (
-                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                        <span className="text-label-sm font-semibold px-2 py-0.5 rounded-full bg-status-success/20 text-status-success border border-status-success/30 flex items-center gap-1">
                           <Users className="w-3 h-3" />
                           <span className="truncate max-w-[90px]">{note.team_name || 'Team'}</span>
                         </span>
@@ -484,7 +469,7 @@ export function Notes() {
                       <button
                         type="button"
                         onClick={(e) => handleTogglePin(note, e)}
-                        title={note.is_pinned ? t('notes.unpin', 'Lösen') : t('notes.pin', 'Anpinnen')}
+                        title={note.is_pinned ? t('notes.unpin') : t('notes.pin')}
                         className={`p-1.5 rounded-lg transition-colors ${
                           note.is_pinned
                             ? 'text-primary bg-primary/20 hover:bg-primary/30'
@@ -516,7 +501,7 @@ export function Notes() {
                             className="flex items-start gap-2 py-1 px-1.5 rounded-lg hover:bg-surface-container-high/50 active:bg-surface-container-high/70 transition-colors cursor-pointer min-h-[26px]"
                           >
                             {isChecked ? (
-                              <CheckSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                              <CheckSquare className="w-3.5 h-3.5 text-status-success shrink-0 mt-0.5" />
                             ) : (
                               <Square className="w-3.5 h-3.5 text-on-surface-variant shrink-0 mt-0.5" />
                             )}
@@ -537,7 +522,7 @@ export function Notes() {
                 </div>
 
                 {/* Card Footer */}
-                <div className="flex items-center justify-between pt-2 border-t border-outline-variant/20 text-[11px] text-on-surface-variant/80 mt-auto">
+                <div className="flex items-center justify-between pt-2 border-t border-outline-variant/20 text-label-sm text-on-surface-variant/80 mt-auto">
                   <span>
                     {new Date(note.updated_at || note.created_at).toLocaleDateString('de-DE', {
                       day: '2-digit',
@@ -551,7 +536,7 @@ export function Notes() {
                     <button
                       type="button"
                       onClick={(e) => handleToggleArchive(note, e)}
-                      title={note.is_archived ? t('notes.unarchive', 'Wiederherstellen') : t('notes.archive', 'Archivieren')}
+                      title={note.is_archived ? t('notes.unarchive') : t('notes.archive')}
                       className="p-1.5 text-on-surface-variant hover:text-on-surface rounded-lg hover:bg-surface-container-high transition-colors"
                     >
                       {note.is_archived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
@@ -563,8 +548,8 @@ export function Notes() {
                         e.stopPropagation()
                         void handleDelete(note)
                       }}
-                      title={t('common.delete', 'Löschen')}
-                      className="p-1.5 text-rose-400 hover:text-rose-300 rounded-lg hover:bg-rose-500/10 transition-colors"
+                      title={t('common.delete')}
+                      className="p-1.5 text-status-destructive hover:text-status-destructive/80 rounded-lg hover:bg-status-destructive/10 transition-colors"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -578,15 +563,15 @@ export function Notes() {
 
       {/* Create / Edit Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-[fadeIn_.15s_ease-out]">
+        <div className="msm-modal-overlay animate-fade-in">
           <div
             className="w-full max-w-xl bg-surface-container-low border border-outline-variant/30 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/30">
-              <h3 className="font-headline text-lg font-semibold text-on-surface">
-                {editingNote ? t('notes.editNote', 'Notiz bearbeiten') : t('notes.createNote', 'Neue Notiz erstellen')}
+              <h3 className="font-headline text-title-lg font-semibold text-on-surface">
+                {editingNote ? t('notes.editNote') : t('notes.createNote')}
               </h3>
               <button
                 type="button"
@@ -602,15 +587,15 @@ export function Notes() {
               {/* Title */}
               <div>
                 <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                  {t('notes.formTitle', 'Titel')} *
+                  {t('notes.formTitle')} *
                 </label>
                 <input
                   type="text"
                   required
                   value={formTitle}
                   onChange={(e) => setFormTitle(e.target.value)}
-                  placeholder={t('notes.formTitlePlaceholder', 'z. B. Einkaufsliste Edeka, Meeting-Punkte, Server-Check')}
-                  className="w-full bg-surface-container border border-outline-variant/40 rounded-xl px-3.5 py-2 text-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:border-primary transition-colors"
+                  placeholder={t('notes.formTitlePlaceholder')}
+                  className="msm-input"
                 />
               </div>
 
@@ -618,7 +603,7 @@ export function Notes() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                    {t('notes.formCategory', 'Kategorie')}
+                    {t('notes.formCategory')}
                   </label>
                   <Dropdown
                     value={formCategory}
@@ -629,7 +614,7 @@ export function Notes() {
 
                 <div>
                   <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                    {t('notes.formType', 'Bereich & Sichtbarkeit')}
+                    {t('notes.formType')}
                   </label>
                   <Dropdown
                     value={formNoteType}
@@ -643,11 +628,11 @@ export function Notes() {
               {formNoteType === 'team' && (
                 <div>
                   <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                    {t('notes.formTeam', 'Team zuweisen')}
+                    {t('notes.formTeam')}
                   </label>
                   {teams.length === 0 ? (
-                    <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5">
-                      {t('notes.noTeamsAvailable', 'Du bist noch keinem Team beigetreten. Erstelle zuerst ein Team unter /teams.')}
+                    <p className="text-xs text-status-warning bg-status-warning/10 border border-status-warning/20 rounded-xl p-2.5">
+                      {t('notes.noTeamsAvailable')}
                     </p>
                   ) : (
                     <Dropdown
@@ -662,22 +647,22 @@ export function Notes() {
               {/* Color Accent Picker */}
               <div>
                 <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                  {t('notes.formColor', 'Farbakzent')}
+                  {t('notes.formColor')}
                 </label>
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  {COLOR_THEMES.map((theme) => (
+                  {FARB_PALETTE.map((theme) => (
                     <button
                       key={theme.id}
                       type="button"
                       onClick={() => setFormColor(theme.id)}
                       className={`px-2.5 py-1.5 rounded-xl text-xs font-medium border flex items-center gap-1.5 transition-all ${
                         formColor === theme.id
-                          ? `${theme.bg} ${theme.border} ${theme.text} ring-2 ring-primary/40`
+                          ? `${theme.flaeche} ${theme.rand} ${theme.text} ring-2 ring-primary/40`
                           : 'bg-surface-container border-outline-variant/30 text-on-surface-variant hover:text-on-surface'
                       }`}
                     >
-                      <span className={`w-2 h-2 rounded-full ${theme.bg} border ${theme.border}`} />
-                      {theme.label.split(' ')[0]}
+                      <span className={`w-2 h-2 rounded-full ${theme.flaeche} border ${theme.rand}`} />
+                      {t(theme.labelKey)}
                     </button>
                   ))}
                 </div>
@@ -687,12 +672,12 @@ export function Notes() {
               <div className="flex items-center justify-between bg-surface-container/50 border border-outline-variant/30 rounded-xl p-3">
                 <span className="text-xs font-semibold text-on-surface flex items-center gap-1.5">
                   <Pin className="w-3.5 h-3.5 text-primary" />
-                  {t('notes.pinToTop', 'Oben anpinnen')}
+                  {t('notes.pinToTop')}
                 </span>
                 <Switch
                   checked={formIsPinned}
                   onCheckedChange={setFormIsPinned}
-                  aria-label={t('notes.pinToTop', 'Oben anpinnen')}
+                  aria-label={t('notes.pinToTop')}
                 />
               </div>
 
@@ -700,9 +685,9 @@ export function Notes() {
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <label className="text-xs font-semibold text-on-surface-variant">
-                    {t('notes.formContent', 'Inhalt & Checkliste')}
+                    {t('notes.formContent')}
                   </label>
-                  <div className="flex items-center bg-surface-container rounded-lg p-0.5 border border-outline-variant/30 text-[11px]">
+                  <div className="flex items-center bg-surface-container rounded-lg p-0.5 border border-outline-variant/30 text-label-sm">
                     <button
                       type="button"
                       onClick={() => setModalTab('edit')}
@@ -713,7 +698,7 @@ export function Notes() {
                       }`}
                     >
                       <Edit3 className="w-3 h-3" />
-                      {t('notes.tabEditor', 'Editor')}
+                      {t('notes.tabEditor')}
                     </button>
                     <button
                       type="button"
@@ -725,7 +710,7 @@ export function Notes() {
                       }`}
                     >
                       <Eye className="w-3 h-3" />
-                      {t('notes.tabPreview', 'Vorschau')}
+                      {t('notes.tabPreview')}
                     </button>
                   </div>
                 </div>
@@ -735,7 +720,7 @@ export function Notes() {
                     <button
                       type="button"
                       onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] ` : '- [ ] '))}
-                      className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-surface-container text-on-surface-variant hover:text-primary hover:bg-surface-container-high border border-outline-variant/30 transition-colors"
+                      className="inline-flex items-center gap-1 text-label-sm px-2.5 py-1 rounded-lg bg-surface-container text-on-surface-variant hover:text-primary hover:bg-surface-container-high border border-outline-variant/30 transition-colors"
                     >
                       <Plus className="w-3 h-3 text-primary" />
                       <span>Checkliste</span>
@@ -743,9 +728,9 @@ export function Notes() {
                     <button
                       type="button"
                       onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] 1x  (~0,00 €)` : '- [ ] 1x  (~0,00 €)'))}
-                      className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-surface-container text-on-surface-variant hover:text-emerald-400 hover:bg-surface-container-high border border-outline-variant/30 transition-colors"
+                      className="inline-flex items-center gap-1 text-label-sm px-2.5 py-1 rounded-lg bg-surface-container text-on-surface-variant hover:text-status-success hover:bg-surface-container-high border border-outline-variant/30 transition-colors"
                     >
-                      <Plus className="w-3 h-3 text-emerald-400" />
+                      <Plus className="w-3 h-3 text-status-success" />
                       <span>Einkaufsposten</span>
                     </button>
                   </div>
@@ -756,11 +741,8 @@ export function Notes() {
                     rows={8}
                     value={formContent}
                     onChange={(e) => setFormContent(e.target.value)}
-                    placeholder={t(
-                      'notes.contentPlaceholder',
-                      '- [ ] 1x Butter (~1,89 €)\n- [ ] 6x Eier (~1,99 €)\n- [ ] 1x Brot (~2,49 €)\n\n**Geschätzte Gesamtsumme: ca. 6,37 €**'
-                    )}
-                    className="w-full bg-surface-container border border-outline-variant/40 rounded-xl p-3.5 text-xs text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary transition-colors font-mono leading-relaxed resize-y"
+                    placeholder={t('notes.contentPlaceholder')}
+                    className="msm-input font-mono leading-relaxed resize-y"
                   />
                 ) : (
                   <div className="w-full min-h-[190px] max-h-[300px] overflow-y-auto bg-surface-container/60 border border-outline-variant/40 rounded-xl p-3.5 text-xs space-y-1.5">
@@ -785,7 +767,7 @@ export function Notes() {
                               className="flex items-start gap-2 py-0.5 px-1.5 rounded hover:bg-surface-container-high/60 transition-colors cursor-pointer"
                             >
                               {isChecked ? (
-                                <CheckSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                                <CheckSquare className="w-3.5 h-3.5 text-status-success shrink-0 mt-0.5" />
                               ) : (
                                 <Square className="w-3.5 h-3.5 text-on-surface-variant shrink-0 mt-0.5" />
                               )}
@@ -804,7 +786,7 @@ export function Notes() {
                       })
                     ) : (
                       <p className="text-xs text-on-surface-variant/60 italic py-6 text-center">
-                        {t('notes.previewEmpty', 'Noch kein Inhalt zum Anzeigen eingegeben.')}
+                        {t('notes.previewEmpty')}
                       </p>
                     )}
                   </div>
@@ -818,13 +800,13 @@ export function Notes() {
                   variant="secondary"
                   onClick={() => setIsModalOpen(false)}
                 >
-                  {t('common.cancel', 'Abbrechen')}
+                  {t('common.cancel')}
                 </Button>
                 <Button type="submit" disabled={saving}>
                   {saving ? (
-                    <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin mr-1.5" />
+                    <Spinner className="mr-1.5" />
                   ) : null}
-                  {editingNote ? t('common.save', 'Speichern') : t('notes.createAction', 'Notiz anlegen')}
+                  {editingNote ? t('common.save') : t('notes.createAction')}
                 </Button>
               </div>
             </form>

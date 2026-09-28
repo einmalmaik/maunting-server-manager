@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from tests._totp import totp_now, random_totp_secret
 import pytest
+from fastapi import Response
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -453,10 +454,8 @@ class TestOAuthCallback:
         PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
         _create_provider(db, slug="gh-seq", preset="github")
 
-        # 1) Link-Flow (auth-pflichtig)
-        res_link = client.get(
-            "/api/oauth/gh-seq/link/start", cookies=user_cookies, follow_redirects=False
-        )
+        # 1) Link-Flow (auth-pflichtig, mit Nachweis)
+        res_link = _link_start(client, user_cookies, "gh-seq")
         link_cookie = res_link.cookies.get("__Secure-oauth_state")
         link_payload = oauth_service.unpack_state_cookie(link_cookie)
         assert link_payload["mode"] == oauth_service.OAUTH_MODE_LINK
@@ -634,6 +633,38 @@ class TestLinkedAccounts:
         db.expire_all()  # Cache invalidieren
         assert db.query(OAuthUserLink).filter_by(id=link_id).first() is None
 
+    def test_unlink_rejected_if_no_password_and_last_link(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict, user_csrf_token: str
+    ):
+        regular_user.has_password = False
+        db.commit()
+
+        p = _create_provider(db, slug="gh-lockout-test", preset="github")
+        link = OAuthUserLink(
+            provider_id=p.id, user_id=regular_user.id, subject=OAuthUserLink._hash_subject("sub-lockout")
+        )
+        db.add(link)
+        db.commit()
+
+        res = client.delete(
+            f"/api/oauth/me/links/{p.id}",
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert res.status_code == 400
+        assert "kein Passwort und kein Passkey" in res.json()["detail"]
+
+        # Mit Passwort darf der Link getrennt werden
+        regular_user.has_password = True
+        db.commit()
+
+        res2 = client.delete(
+            f"/api/oauth/me/links/{p.id}",
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": user_csrf_token},
+        )
+        assert res2.status_code == 200
+
     def test_list_my_links_includes_provider_info(
         self, client: TestClient, user_cookies: dict,
         db: Session, regular_user: User,
@@ -655,10 +686,19 @@ class TestLinkedAccounts:
 
 # ── Link-Start (Auth-Pflicht) ─────────────────────────────────────────
 
+def _link_start(client: TestClient, cookies: dict, slug: str, body: dict | None = None):
+    return client.post(
+        f"/api/oauth/{slug}/link/start",
+        json={"password": "UserPass123!"} if body is None else body,
+        cookies=cookies,
+        headers={"X-CSRF-Token": cookies.get("__Secure-csrf_token")},
+    )
+
+
 class TestLinkStart:
     def test_link_start_requires_auth(self, client: TestClient, db: Session):
         _create_provider(db, slug="gh-noauth", preset="github")
-        res = client.get("/api/oauth/gh-noauth/link/start")
+        res = client.post("/api/oauth/gh-noauth/link/start", json={})
         assert res.status_code == 401
 
     def test_link_start_blocked_when_linking_disabled(
@@ -666,17 +706,58 @@ class TestLinkStart:
     ):
         PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "false")
         _create_provider(db, slug="gh-nolink", preset="github")
-        res = client.get("/api/oauth/gh-nolink/link/start", cookies=user_cookies)
+        res = _link_start(client, user_cookies, "gh-nolink")
         assert res.status_code == 403
+
+    def test_link_start_ohne_nachweis_kein_state(
+        self, client: TestClient, user_cookies: dict, db: Session
+    ):
+        """Ein Access-Token allein haengt kein fremdes Social-Konto an (AGENTS.md Punkt 21)."""
+        PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
+        _create_provider(db, slug="gh-bare", preset="github")
+        for body in ({}, {"password": "falsch-geraten-1"}):
+            res = _link_start(client, user_cookies, "gh-bare", body)
+            assert res.status_code == 403, body
+            assert res.cookies.get("__Secure-oauth_state") is None
+        res = client.get("/api/oauth/gh-bare/link/start", cookies=user_cookies, follow_redirects=False)
+        assert res.status_code == 405
+        assert res.cookies.get("__Secure-oauth_state") is None
+
+    def test_link_start_social_konto_ohne_passwort_legt_zuerst_eins_fest(
+        self, client: TestClient, user_cookies: dict, regular_user: User, db: Session
+    ):
+        PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
+        _create_provider(db, slug="gh-nopw", preset="github")
+        regular_user.has_password = False
+        db.commit()
+        res = _link_start(client, user_cookies, "gh-nopw", {})
+        assert res.status_code == 403
+        assert "Passwort fest" in res.json()["detail"]
+
+    def test_link_start_mit_2fa_zaehlt_der_code(
+        self, client: TestClient, user_cookies: dict, regular_user: User, db: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
+        _create_provider(db, slug="gh-2fa", preset="github")
+        regular_user.two_factor_enabled = True
+        regular_user.two_factor_secret_encrypted = "totp-geheimnis"
+        db.commit()
+        monkeypatch.setattr(
+            AuthService, "verify_current_2fa_code", staticmethod(lambda _u, code: code == "123456")
+        )
+        assert _link_start(client, user_cookies, "gh-2fa", {"password": "UserPass123!"}).status_code == 403
+        res = _link_start(client, user_cookies, "gh-2fa", {"otp_code": "123456"})
+        assert res.status_code == 200
 
     def test_link_start_succeeds_when_enabled(
         self, client: TestClient, user_cookies: dict, db: Session
     ):
         PanelSettingsService.set(oauth_service.SWITCH_ALLOW_LINKING, "true")
         p = _create_provider(db, slug="gh-ok", preset="github")
-        res = client.get("/api/oauth/gh-ok/link/start", cookies=user_cookies, follow_redirects=False)
-        assert res.status_code == 302
-        assert "github.com/login/oauth/authorize" in res.headers["location"]
+        res = _link_start(client, user_cookies, "gh-ok")
+        assert res.status_code == 200
+        assert "github.com/login/oauth/authorize" in res.json()["url"]
         # State-Cookie traegt mode=link + user_id
         cookie = res.cookies.get("__Secure-oauth_state")
         assert cookie is not None
@@ -745,8 +826,8 @@ class TestUnifiedCallback:
         )
         # Anonymer Aufruf im link-Mode → /profile?error=auth_required
         assert res.status_code == 302
-        assert "/profile" in res.headers["location"]
-        assert "auth_required" in res.headers["location"]
+        # Auf dem Reiter, der die Meldung auswertet, nicht auf „Konto".
+        assert "/profile?tab=connections&error=auth_required" in res.headers["location"]
 
     def test_link_mode_blocked_when_linking_disabled(
         self, client: TestClient, user_cookies: dict, regular_user: User, db: Session
@@ -830,7 +911,7 @@ class TestUnifiedCallback:
         assert res.status_code == 302
         loc = res.headers["location"]
         assert "/profile" in loc, f"Link-Mode muss auf /profile landen, nicht /login (war: {loc!r})"
-        assert "state_user_mismatch" in loc
+        assert "/profile?tab=connections&error=state_user_mismatch" in loc
 
     def test_login_mode_state_mismatch_redirects_to_login(
         self, client: TestClient, db: Session
@@ -905,6 +986,100 @@ class TestTruncateForLog:
         assert "AAAAAAAAAAAAAAAA" in log_blob  # 16 As aus 10000
         assert huge_state not in log_blob  # nicht voll geleakt
         assert len(log_blob) < 500  # hart: Log-Eintrag bleibt klein
+
+
+
+# ── Ghost-Cookie & Defensive Clearing Tests ───────────────────────────
+
+class TestGhostCookieHandling:
+    def test_extract_all_state_cookies_multiple(self):
+        from fastapi import Request
+        from routers.oauth import _extract_all_state_cookies
+
+        req = Request({
+            "type": "http",
+            "headers": [
+                (b"cookie", b'__Secure-oauth_state="stale1"; other=123'),
+                (b"cookie", b"__Secure-oauth_state=valid2; __Secure-oauth_state=valid2"),
+            ],
+        })
+        cookies = _extract_all_state_cookies(req)
+        assert cookies == ["stale1", "valid2"]
+
+    def test_defensive_cookie_clearing_emits_multiple_delete_headers(self, monkeypatch):
+        from routers.oauth import _clear_oauth_state_cookie, _set_oauth_state_cookie
+        import config
+
+        monkeypatch.setattr(config.settings, "panel_url", "https://panel.example.com", raising=False)
+        monkeypatch.setattr(config.settings, "cookie_domain", "", raising=False)
+
+        resp = Response()
+        _clear_oauth_state_cookie(resp)
+
+        set_cookie_headers = [
+            v.decode() for k, v in resp.headers.raw
+            if k.lower() == b"set-cookie" and b"__Secure-oauth_state" in v
+        ]
+        # Must contain domain-scoped delete (.example.com and example.com)
+        assert any("Domain=.example.com" in h for h in set_cookie_headers)
+        assert any("Domain=example.com" in h for h in set_cookie_headers)
+        # Must contain host-only deletes (with SameSite=none and SameSite=lax)
+        host_only = [h for h in set_cookie_headers if "Domain=" not in h]
+        assert len(host_only) >= 2
+        assert any("samesite=none" in h.lower() for h in host_only)
+        assert any("samesite=lax" in h.lower() for h in host_only)
+        # All delete headers MUST enforce HttpOnly and Secure
+        for h in set_cookie_headers:
+            assert "httponly" in h.lower(), f"Delete header missing httponly: {h}"
+            assert "secure" in h.lower(), f"Delete header missing secure: {h}"
+
+        # Also test _set_oauth_state_cookie defensive clearing when domain is active
+        resp2 = Response()
+        _set_oauth_state_cookie(resp2, "test_enc")
+        set_cookie_headers2 = [
+            v.decode() for k, v in resp2.headers.raw
+            if k.lower() == b"set-cookie" and b"__Secure-oauth_state" in v
+        ]
+        # Must have host-only delete with httponly
+        assert any("max-age=0" in h.lower() and "httponly" in h.lower() for h in set_cookie_headers2)
+        # Must have actual set cookie with domain
+        assert any("Domain=.example.com" in h and "test_enc" in h for h in set_cookie_headers2)
+
+    def test_callback_recovers_matching_state_from_alternate_cookie(
+        self, client: TestClient, db: Session, monkeypatch
+    ):
+        """Wenn der Browser zwei State-Cookies sendet (z. B. altes Host-Only-Cookie
+        und neues Domain-Cookie), muss der Callback den passenden State auswerten."""
+        _create_provider(db, slug="gh-multi", preset="github", enabled=True, client_secret="secret")
+
+        stale_encrypted = oauth_service.pack_state_cookie(
+            {"state": "old_stale_state", "code_verifier": "ver1", "mode": "login", "redirect_uri": "http://localhost/api/oauth/gh-multi/callback"}
+        )
+        valid_encrypted = oauth_service.pack_state_cookie(
+            {"state": "new_valid_state", "code_verifier": "ver2", "mode": "login", "redirect_uri": "http://localhost/api/oauth/gh-multi/callback"}
+        )
+
+        def _fake_exchange(db, provider, code, code_verifier, redirect_uri):
+            assert code_verifier == "ver2"
+            return {"access_token": "gho_test"}
+
+        def _fake_profile(db, provider, tokens):
+            return {"id": "12345", "login": "octocat", "email": "octo@github.com"}
+
+        monkeypatch.setattr(oauth_service, "exchange_code", _fake_exchange)
+        monkeypatch.setattr(oauth_service, "fetch_user_profile", _fake_profile)
+
+        # Simuliere Browser-Header mit altem Cookie zuerst und neuem Cookie danach
+        cookie_header = f"__Secure-oauth_state={stale_encrypted}; __Secure-oauth_state={valid_encrypted}"
+        res = client.get(
+            "/api/oauth/gh-multi/callback",
+            params={"code": "valid_code", "state": "new_valid_state"},
+            headers={"Cookie": cookie_header},
+            follow_redirects=False,
+        )
+        # Sollte nicht mit state_mismatch fehlschlagen, sondern weiter zum Login/Link kommen!
+        assert res.status_code == 302
+        assert "oauth_state_mismatch" not in res.headers["location"]
 
 
 # ── Helpers (lokal) ───────────────────────────────────────────────────

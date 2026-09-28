@@ -5,6 +5,7 @@ const labels = {
   dashboard: 'Dashboard',
   calendar: 'Calendar',
   notes: 'Notes',
+  social: 'Social & Hub',
   servers: 'Servers',
   users: 'Users',
   roles: 'Roles',
@@ -215,5 +216,29 @@ describe('buildNavigation', () => {
     expect(routes).toContain('/servers')
     expect(routes).toContain('/ai')
     expect(routes).toContain('/docs')
+  })
+
+  it('zeigt Social & Hub nicht mehr, sondern den neuen Chat in der primären Sidebar-Navigation', () => {
+    const access = {
+      owner: true,
+      canManageUsers: true,
+      canManageRoles: true,
+      canViewAudit: true,
+      canViewSettings: true,
+      canManagePanelBackups: true,
+      canReadPanelDatabase: true,
+      canViewNodes: true,
+      canUseAi: true,
+      canUseSkills: true,
+      socialEnabled: true,
+    }
+    const items = buildNavigation(labels, access)
+    // Social Hub ist aus der Haupt-Sidebar entfernt und in Profil/Dock verlegt
+    expect(items.some((i) => i.to === '/social')).toBe(false)
+    // /chat ersetzt die alte Route in der Navigation
+    expect(items.some((i) => i.to === '/chat')).toBe(true)
+
+    const disabledItems = buildNavigation(labels, { ...access, socialEnabled: false })
+    expect(disabledItems.some((i) => i.to === '/chat')).toBe(false)
   })
 })

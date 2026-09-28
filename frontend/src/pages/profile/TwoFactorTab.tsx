@@ -2,18 +2,29 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/api/client'
-import { Shield, Check, AlertTriangle, Download, RotateCcw } from 'lucide-react'
+import { Shield, Check, AlertTriangle, Download, RotateCcw, Fingerprint, QrCode } from 'lucide-react'
+import { Button, buttonClasses, MauntingQrCard } from '@/Singra/UI'
+import { Spinner } from '@/components/ui/Spinner'
+import {
+  passkeyAnlegen,
+  passkeyNachweis,
+  webauthnVerfuegbar,
+  type PasskeyAnlageOptionen,
+} from '@/services/passkeyService'
 
 /**
- * Tab: Zwei-Faktor-Authentifizierung (TOTP).
+ * Tab: Zwei-Faktor-Authentifizierung (Modulares 2FA: TOTP & Passkey).
  *
  * Verwaltet den gesamten 2FA-Lifecycle in einem Tab:
- *  - Setup-Flow mit QR-Code + Secret
+ *  - Setup-Flow mit Wahl zwischen Authenticator-App (TOTP) und Passkey (Biometrie)
+ *  - Hochwertiges QR-Code-Design mit Firmen-DNA
  *  - Backup-Codes (Download + Regenerate)
- *  - Disable-Flow mit OTP-Bestaetigung
+ *  - Disable-Flow mit dem eingerichteten Faktor — nur dieser eine Weg wird gezeigt
  *
- * Der authStore wird aktualisiert, damit andere Tabs (Password) wissen,
- * ob 2FA aktiv ist.
+ * Der Passkey liegt seit 09/2026 auf dem Server: angelegt über
+ * `/2fa/passkey/options` + `/2fa/passkey/enable`, bestätigt über eine
+ * unterschriebene Challenge. Vorher blieb er im Browser, und der Server
+ * glaubte ein `passkey_verified=true`.
  */
 export function TwoFactorTab() {
   const { t } = useTranslation()
@@ -24,10 +35,14 @@ export function TwoFactorTab() {
 
   const [show2FASetup, setShow2FASetup] = useState(false)
   const [show2FADisable, setShow2FADisable] = useState(false)
+  const [activeSetupTab, setActiveSetupTab] = useState<'totp' | 'passkey'>('totp')
+  const passkeySupported = webauthnVerfuegbar()
+  const methode = user?.two_factor_enabled ? (user.two_factor_method ?? 'totp') : null
+
   const [otpCode, setOtpCode] = useState('')
   const [faSecret, setFaSecret] = useState('')
   const [faUri, setFaUri] = useState('')
-  const [qrDataUri, setQrDataUri] = useState('')
+  const [qrDataUri, setQrDataUri] = useState<string | null>(null)
   const [backupCodes, setBackupCodes] = useState<string[]>([])
 
   const handleSetup2FA = async () => {
@@ -39,7 +54,7 @@ export function TwoFactorTab() {
       )
       setFaSecret(res.secret)
       setFaUri(res.uri)
-      setQrDataUri(res.qr_data_uri ?? '')
+      setQrDataUri(res.qr_data_uri ?? null)
       setShow2FASetup(true)
     } catch (err: any) {
       setError(err.message)
@@ -54,19 +69,39 @@ export function TwoFactorTab() {
       await api('/auth/2fa/enable?otp_code=' + otpCode, { method: 'POST' })
       const codesRes = await api<{ codes: string[] }>('/auth/2fa/backup/generate', { method: 'POST' })
       setBackupCodes(codesRes.codes)
-      const updated = await api<{ two_factor_enabled: boolean }>('/auth/me')
-      if (user && updated) {
-        setUser({ ...user, two_factor_enabled: true })
+      if (user) {
+        setUser({ ...user, two_factor_enabled: true, two_factor_method: 'totp' })
       }
       setShow2FASetup(false)
       setOtpCode('')
-      // Ist 2FA einmal aktiv, hat das Geheimnis in der Oberflaeche nichts mehr
-      // verloren — es bliebe sonst bis zum Seitenwechsel im Zustand stehen und
-      // in der Komponentenansicht jedes Entwicklerwerkzeugs lesbar.
       setFaSecret('')
       setFaUri('')
-      setQrDataUri('')
+      setQrDataUri(null)
       setSuccess(t('profile.2faEnabled'))
+      setTimeout(() => setSuccess(''), 5000)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleEnablePasskey = async () => {
+    if (!user) return
+    setError('')
+    setSubmitting(true)
+    try {
+      const optionen = await api<PasskeyAnlageOptionen>('/auth/2fa/passkey/options', { method: 'POST' })
+      const anlage = await passkeyAnlegen(optionen)
+      await api('/auth/2fa/passkey/enable', { method: 'POST', body: JSON.stringify(anlage) })
+      const codesRes = await api<{ codes: string[] }>('/auth/2fa/backup/generate', { method: 'POST' })
+      setBackupCodes(codesRes.codes)
+      setUser({ ...user, two_factor_enabled: true, two_factor_method: 'passkey' })
+      setShow2FASetup(false)
+      setFaSecret('')
+      setFaUri('')
+      setQrDataUri(null)
+      setSuccess(t('profile.2faPasskeySuccess'))
       setTimeout(() => setSuccess(''), 5000)
     } catch (err: any) {
       setError(err.message)
@@ -82,10 +117,29 @@ export function TwoFactorTab() {
     try {
       await api('/auth/2fa/disable?otp_code=' + otpCode, { method: 'POST' })
       if (user) {
-        setUser({ ...user, two_factor_enabled: false })
+        setUser({ ...user, two_factor_enabled: false, two_factor_method: null })
       }
       setShow2FADisable(false)
       setOtpCode('')
+      setSuccess(t('profile.2faDisabled'))
+      setTimeout(() => setSuccess(''), 3000)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleDisableWithPasskey = async () => {
+    setError('')
+    setSubmitting(true)
+    try {
+      const nachweis = await passkeyNachweis('2fa_disable')
+      await api('/auth/2fa/disable', { method: 'POST', body: JSON.stringify({ passkey: nachweis }) })
+      if (user) {
+        setUser({ ...user, two_factor_enabled: false, two_factor_method: null })
+      }
+      setShow2FADisable(false)
       setSuccess(t('profile.2faDisabled'))
       setTimeout(() => setSuccess(''), 3000)
     } catch (err: any) {
@@ -132,7 +186,7 @@ export function TwoFactorTab() {
       <div className="flex items-center gap-2 mb-6">
         <Shield className="h-5 w-5 text-secondary" aria-hidden="true" />
         <div className="flex-1">
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('profile.2faStatus')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('profile.2faStatus')}</h2>
           <p className="font-body-md text-sm text-on-surface-variant mt-1">
             {user?.two_factor_enabled ? t('profile.2faEnabled') : t('profile.2faDisabled')}
           </p>
@@ -143,7 +197,7 @@ export function TwoFactorTab() {
             {t('profile.2faEnabled')}
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-status-error/10 text-status-error border border-status-error/30">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-status-destructive/10 text-status-destructive border border-status-destructive/30">
             <AlertTriangle className="w-3 h-3" />
             {t('profile.2faDisabled')}
           </span>
@@ -154,133 +208,214 @@ export function TwoFactorTab() {
       {success && <div className="msm-alert-success text-sm mb-4">{success}</div>}
 
       {!user?.two_factor_enabled && !show2FASetup && (
-        <button
+        <Button
           onClick={handleSetup2FA}
-          className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2"
+          className="inline-flex items-center gap-2"
         >
           <Shield className="w-4 h-4" />
           {t('profile.2faSetup')}
-        </button>
+        </Button>
       )}
 
       {user?.two_factor_enabled && !show2FADisable && (
         <div className="flex flex-wrap gap-3">
-          <button
+          <Button
+            variant="secondary"
             onClick={handleRegenerateBackupCodes}
             disabled={submitting}
-            className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+            className="inline-flex items-center gap-2 disabled:opacity-50"
           >
             <RotateCcw className="w-4 h-4" />
             {t('profile.regenerateBackupCodes')}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="secondary"
             onClick={() => setShow2FADisable(true)}
-            className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2"
+            className="inline-flex items-center gap-2"
           >
             <Shield className="w-4 h-4" />
             {t('profile.2faDisable')}
-          </button>
+          </Button>
         </div>
       )}
 
       {show2FASetup && (
-        <div className="mt-4 space-y-4 border-t border-outline-variant/30 pt-4">
-          {/* Hier stand ein <img> auf api.qrserver.com. Die vollstaendige
-              `otpauth://`-URI ging dabei als Query-Parameter an einen fremden
-              Dienst — sie enthaelt das TOTP-Geheimnis und die Kennung des
-              Benutzers. Wer diese Zugriffslogs liest, erzeugt dauerhaft gueltige
-              Codes; der zweite Faktor waere damit keiner mehr.
-
-              Der Code entsteht jetzt im Panel (backend/services/totp_qr.py) und
-              kommt als `data:`-URI mit der Antwort von /2fa/setup. `data:` steht
-              in der img-src-Liste unserer CSP, die Anzeige traegt also auch dort,
-              wo FastAPI das SPA-Dokument selbst ausliefert und seine CSP damit
-              auf dem Dokument liegt.
-
-              Das Bild bleibt eine Beigabe: Geheimnis und Link stehen weiterhin
-              darunter. Laesst sich kein Code erzeugen, liefert das Backend null
-              und der Weg ohne Kamera ist unveraendert vollstaendig. */}
-          <p className="font-body-md text-sm text-on-surface-variant">{t('profile.2faScan')}</p>
-          {faUri && (
-            <div className="flex flex-col items-center gap-3">
-              {qrDataUri && (
-                <img
-                  src={qrDataUri}
-                  alt={t('profile.2faQrCode')}
-                  width={192}
-                  height={192}
-                  className="h-48 w-48 rounded border border-outline-variant"
-                />
-              )}
-              <p className="font-mono-sm text-mono-sm text-on-surface-variant bg-surface-container-high px-3 py-1.5 rounded border border-outline-variant select-all">
-                {faSecret}
-              </p>
-              <a
-                href={faUri}
-                className="msm-btn-secondary inline-flex items-center gap-2 px-4 py-2 text-sm"
+        <div className="mt-4 space-y-6 border-t border-outline-variant/30 pt-6">
+          <div>
+            <h3 className="text-base font-semibold text-on-surface mb-2">{t('profile.2faChooseMethod')}</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Option 1: Authenticator-App (TOTP) */}
+              <div
+                onClick={() => setActiveSetupTab('totp')}
+                className={`cursor-pointer rounded-xl border p-4 transition-all ${
+                  activeSetupTab === 'totp'
+                    ? 'border-primary bg-primary/10 shadow-md ring-2 ring-primary/30'
+                    : 'border-outline-variant/40 bg-surface-container hover:border-outline-variant'
+                }`}
               >
-                <Shield className="h-4 w-4" aria-hidden="true" />
-                {t('profile.2faOpenApp')}
-              </a>
+                <div className="flex items-center gap-2.5 mb-1.5">
+                  <QrCode className="h-5 w-5 text-primary" />
+                  <span className="font-semibold text-sm text-on-surface">{t('profile.2faMethodTotp')}</span>
+                </div>
+                <p className="text-xs text-on-surface-variant">{t('profile.2faMethodTotpDesc')}</p>
+              </div>
+
+              {/* Option 2: Passkey / Biometrie */}
+              <div
+                onClick={() => setActiveSetupTab('passkey')}
+                className={`cursor-pointer rounded-xl border p-4 transition-all ${
+                  activeSetupTab === 'passkey'
+                    ? 'border-primary bg-primary/10 shadow-md ring-2 ring-primary/30'
+                    : 'border-outline-variant/40 bg-surface-container hover:border-outline-variant'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 mb-1.5">
+                  <Fingerprint className="h-5 w-5 text-primary" />
+                  <span className="font-semibold text-sm text-on-surface">{t('profile.2faMethodPasskey')}</span>
+                </div>
+                <p className="text-xs text-on-surface-variant">{t('profile.2faMethodPasskeyDesc')}</p>
+              </div>
+            </div>
+          </div>
+
+          {activeSetupTab === 'passkey' && (
+            <div className="rounded-xl border border-outline-variant/30 bg-surface-container-high/50 p-6 text-center space-y-4 max-w-lg mx-auto">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 border border-primary/20 text-primary shadow-inner">
+                <Fingerprint className="h-8 w-8" />
+              </div>
+              <div>
+                <h4 className="font-semibold text-on-surface text-base">{t('profile.2faMethodPasskey')}</h4>
+                <p className="text-xs text-on-surface-variant mt-1.5 max-w-md mx-auto">
+                  {t('profile.2faMethodPasskeyDesc')}
+                </p>
+              </div>
+              <Button
+                onClick={handleEnablePasskey}
+                disabled={submitting || !passkeySupported}
+                className="w-full sm:w-auto inline-flex items-center gap-2 justify-center"
+              >
+                {submitting ? <Spinner /> : <Fingerprint className="w-4 h-4" />}
+                {t('profile.2faPasskeySetupBtn')}
+              </Button>
             </div>
           )}
-          <form onSubmit={handleEnable2FA} className="mx-auto flex max-w-xs flex-col gap-3">
-            <label className="font-body-md text-sm text-on-surface-variant text-center">
-              {t('profile.2faEnterCode')}
-            </label>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="\d{6}"
-              maxLength={6}
-              value={otpCode}
-              onChange={(e) => setOtpCode(e.target.value)}
-              className="msm-input text-center text-xl tracking-[0.5em] font-mono"
-              placeholder="000000"
-              required
-            />
-            <button
-              type="submit"
-              disabled={submitting || otpCode.length !== 6}
-              className="msm-btn-primary px-4 py-2 disabled:opacity-50 whitespace-nowrap"
-            >
-              {submitting ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
-              ) : (
-                t('common.save')
+
+          {activeSetupTab === 'totp' && (
+            <div className="space-y-4">
+              <p className="font-body-md text-sm text-on-surface-variant text-center">{t('profile.2faScan')}</p>
+              {faUri && (
+                <div className="flex flex-col items-center gap-4">
+                  {qrDataUri && (
+                    <MauntingQrCard
+                      value={faUri}
+                      qrDataUri={qrDataUri}
+                      alt={t('profile.2faQrCode')}
+                      hint={t('profile.2faScanHint')}
+                    />
+                  )}
+                  <p className="font-mono-sm text-mono-sm text-on-surface-variant bg-surface-container-high px-3.5 py-1.5 rounded-lg border border-outline-variant select-all tracking-wider font-bold">
+                    {faSecret}
+                  </p>
+                  <a
+                    href={faUri}
+                    className={buttonClasses('secondary')}
+                  >
+                    <Shield className="h-4 w-4" aria-hidden="true" />
+                    {t('profile.2faOpenApp')}
+                  </a>
+                </div>
               )}
+              <form onSubmit={handleEnable2FA} className="mx-auto flex max-w-xs flex-col gap-3">
+                <label className="font-body-md text-sm text-on-surface-variant text-center">
+                  {t('profile.2faEnterCode')}
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="\d{6}"
+                  maxLength={6}
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value)}
+                  className="msm-input text-center text-xl tracking-[0.5em] font-mono"
+                  placeholder="000000"
+                  required
+                />
+                <Button
+                  type="submit"
+                  disabled={submitting || otpCode.length !== 6}
+                  className="disabled:opacity-50 whitespace-nowrap"
+                >
+                  {submitting ? (
+                    <Spinner />
+                  ) : (
+                    t('common.save')
+                  )}
+                </Button>
+              </form>
+            </div>
+          )}
+
+          <div className="text-center pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShow2FASetup(false)
+                setFaSecret('')
+                setFaUri('')
+                setQrDataUri(null)
+              }}
+              className="text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+            >
+              {t('common.cancel')}
             </button>
-          </form>
+          </div>
         </div>
       )}
 
       {show2FADisable && (
         <div className="mt-4 space-y-4 border-t border-outline-variant/30 pt-4">
-          <p className="font-body-md text-sm text-on-surface-variant">{t('profile.2faEnterCode')}</p>
-          <form onSubmit={handleDisable2FA} className="flex gap-3 max-w-xs">
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="\d{6}"
-              maxLength={6}
-              value={otpCode}
-              onChange={(e) => setOtpCode(e.target.value)}
-              className="msm-input text-center text-xl tracking-[0.5em] font-mono"
-              placeholder="000000"
-              required
-            />
-            <button
-              type="submit"
-              disabled={submitting || otpCode.length !== 6}
-              className="msm-btn-primary px-4 py-2 disabled:opacity-50 whitespace-nowrap"
-            >
-              {submitting ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
-              ) : (
-                t('common.save')
-              )}
-            </button>
-          </form>
+          {methode === 'totp' && (
+            <p className="font-body-md text-sm text-on-surface-variant">{t('profile.2faEnterCode')}</p>
+          )}
+          <div className="flex flex-col sm:flex-row gap-3 items-center max-w-md">
+            {methode === 'passkey' ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleDisableWithPasskey}
+                disabled={submitting}
+                className="inline-flex items-center gap-2 whitespace-nowrap"
+              >
+                <Fingerprint className="w-4 h-4 text-primary" />
+                {t('profile.2faDisableWithPasskey')}
+              </Button>
+            ) : (
+            <form onSubmit={handleDisable2FA} className="flex gap-2 flex-1 w-full sm:w-auto">
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="\d{6}"
+                maxLength={6}
+                value={otpCode}
+                onChange={(e) => setOtpCode(e.target.value)}
+                className="msm-input text-center text-xl tracking-[0.5em] font-mono flex-1"
+                placeholder="000000"
+                required
+              />
+              <Button
+                type="submit"
+                disabled={submitting || otpCode.length !== 6}
+                className="disabled:opacity-50 whitespace-nowrap"
+              >
+                {submitting ? (
+                  <Spinner />
+                ) : (
+                  t('common.save')
+                )}
+              </Button>
+            </form>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => { setShow2FADisable(false); setOtpCode('') }}
@@ -302,14 +437,14 @@ export function TwoFactorTab() {
             {t('profile.backupCodesDownloadOnce')}
           </p>
           <div className="flex flex-wrap gap-3">
-            <button
+            <Button
               type="button"
               onClick={handleDownloadBackupCodes}
-              className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2"
+              className="inline-flex items-center gap-2"
             >
               <Download className="w-4 h-4" />
               {t('profile.downloadBackupCodes')}
-            </button>
+            </Button>
           </div>
         </div>
       )}

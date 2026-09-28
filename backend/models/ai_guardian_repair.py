@@ -67,12 +67,12 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
-    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
+from models.dis_text import ai_text
 
 
 #: Die Phasen, in denen der Auftrag noch etwas vorhat. Jede von ihnen bekommt
@@ -84,7 +84,9 @@ ARBEITSPHASEN = ("diagnose", "eingriff", "beobachtung")
 #: * ``erledigt``    — die Anlage zeigt es: Vorfall geloest, Server laeuft.
 #: * ``eskaliert``   — es haengt an einer Entscheidung, die nur ein Mensch
 #:   treffen darf. Gesetzt wird das erst mit der E-Mail-Freigabe; bis dahin
-#:   fuehrt derselbe Fall ueber ``aufgegeben``.
+#:   fuehrt derselbe Fall ueber ``aufgegeben``. Und wenn die
+#:   Sicherheitsueberwachung des Anbieters einen Lauf angehalten hat — dann
+#:   prueft ein Mensch, bevor irgendetwas weiterlaeuft.
 #: * ``aufgegeben``  — Frist abgelaufen oder Versuche aufgebraucht.
 #: * ``abgebrochen`` — ein Mensch hat uebernommen.
 ENDPHASEN = ("erledigt", "eskaliert", "aufgegeben", "abgebrochen")
@@ -153,7 +155,7 @@ class AiGuardianRepair(Base):
     #: Benutzers im Klartext. Was der naechste Anlauf braucht, muss deshalb
     #: ausdruecklich hier landen, geschwaerzt und gedeckelt, und geht als
     #: Paneltext in seinen Auftrag.
-    erkenntnisse: Mapped[str | None] = mapped_column(Text, nullable=True)
+    erkenntnisse: Mapped[str | None] = mapped_column(ai_text("ai_guardian_repairs.erkenntnisse"), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False

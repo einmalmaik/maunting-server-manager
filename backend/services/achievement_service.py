@@ -1,0 +1,1206 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import logging
+from typing import Any
+from sqlalchemy import event, func
+from sqlalchemy.orm import Session
+
+from models import (
+    User,
+    UserAchievement,
+    UserActivityTime,
+)
+from services.achievement_pruefungen import PRUEFUNGEN
+from services.sync_event_service import SyncEventService
+
+logger = logging.getLogger(__name__)
+
+
+_EREIGNISSE = "msm_achievement_events"
+
+
+@event.listens_for(Session, "after_commit")
+def _sende_freischaltungen(db: Session) -> None:
+    if db.in_nested_transaction():
+        return
+    for _transaction, user_id, payload in db.info.pop(_EREIGNISSE, []):
+        try:
+            SyncEventService.publish(payload, user_id=user_id)
+        except Exception as exc:
+            # Die Daten sind bereits gespeichert. Eine defekte Verbindung
+            # darf weder den Commit als Fehler melden noch weitere Events verlieren.
+            logger.warning("Achievement-Ereignis nicht zugestellt: %s", type(exc).__name__)
+
+
+@event.listens_for(Session, "after_soft_rollback")
+def _verwerfe_freischaltungen(db: Session, transaction) -> None:
+    def gehoert_dazu(queued) -> bool:
+        while queued is not None:
+            if queued is transaction:
+                return True
+            queued = queued.parent
+        return False
+
+    db.info[_EREIGNISSE] = [
+        entry for entry in db.info.get(_EREIGNISSE, []) if not gehoert_dazu(entry[0])
+    ]
+
+
+@event.listens_for(Session, "after_transaction_end")
+def _verwerfe_beim_schliessen(db: Session, transaction) -> None:
+    if transaction.parent is None:
+        db.info.pop(_EREIGNISSE, None)
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
+    # =========================================================================
+    # 1. STARTER & KONTO
+    # =========================================================================
+    {
+        "id": "starter_first_step",
+        "title": "Erster Schritt",
+        "description": "Erste erfolgreiche Anmeldung im MSM Control Panel.",
+        "category": "starter",
+        "points": 10,
+        "icon": "award",
+    },
+    {
+        "id": "starter_security_first",
+        "title": "Sicherheitsbewusst",
+        "description": "Zwei-Faktor-Authentisierung (2FA) oder biometrischen Tresor aktiviert.",
+        "category": "starter",
+        "points": 20,
+        "icon": "shield-check",
+    },
+    {
+        "id": "starter_profile_setup",
+        "title": "Digitale Identität",
+        "description": "Profilbild angepasst und Benutzerkonto personalisiert.",
+        "category": "starter",
+        "points": 10,
+        "icon": "user",
+    },
+    {
+        "id": "starter_timezone_set",
+        "title": "Pünktlich wie die Uhr",
+        "description": "Eigene Zeitzone für exakte Server- und Kalenderzeiten festgelegt.",
+        "category": "starter",
+        "points": 10,
+        "icon": "clock",
+    },
+    {
+        "id": "starter_biometrics",
+        "title": "Fingerabdruck des Vertrauens",
+        "description": "Biometrische Schnellanmeldung in der Desktop-App eingerichtet.",
+        "category": "starter",
+        "points": 25,
+        "icon": "fingerprint",
+    },
+    {
+        "id": "starter_autolock",
+        "title": "Wachsamer Wächter",
+        "description": "Automatisches Sperren bei Abwesenheit oder Fensterverlust aktiviert.",
+        "category": "starter",
+        "points": 15,
+        "icon": "lock",
+    },
+    {
+        "id": "starter_privacy_pledge",
+        "title": "Schutz braucht Vertrauen",
+        "description": "Datenschutzerklärung und Betreiber-Impressum im Panel eingesehen.",
+        "category": "starter",
+        "points": 10,
+        "icon": "file-text",
+    },
+    {
+        "id": "starter_hotkeys",
+        "title": "Tastatur-Virtuose",
+        "description": "Globale Desktop-Hotkeys für Sprache und Schnellzugriff konfiguriert.",
+        "category": "starter",
+        "points": 15,
+        "icon": "keyboard",
+    },
+    {
+        "id": "starter_vault_master",
+        "title": "Schlüsseltresor",
+        "description": "Ersten sicheren Eintrag im verschlüsselten Vault abgelegt.",
+        "category": "starter",
+        "points": 20,
+        "icon": "key",
+    },
+    {
+        "id": "starter_audio_tuned",
+        "title": "Klangmeister",
+        "description": "Mikrofon-Eingangspegel und Signalverarbeitung erfolgreich kalibriert.",
+        "category": "starter",
+        "points": 15,
+        "icon": "volume-2",
+    },
+    {
+        "id": "starter_audio_ducking",
+        "title": "Sprechfunk-Disziplin",
+        "description": "Automatische Lautstärke-Absenkung (Audio Ducking) im Desktop ausprobiert.",
+        "category": "starter",
+        "points": 15,
+        "icon": "sliders",
+    },
+    {
+        "id": "starter_wakeword_tuned",
+        "title": "Auf ein Wort",
+        "description": "Eigenes Aktivierungswort (Wake-Word) für die Sprachsteuerung trainiert.",
+        "category": "starter",
+        "points": 25,
+        "icon": "mic",
+    },
+    {
+        "id": "starter_session_hygiene",
+        "title": "Sitzungs-Hygiene",
+        "description": "Aktive Sitzungen überprüft und unbenutzte Tokens abgemeldet.",
+        "category": "starter",
+        "points": 15,
+        "icon": "check-circle",
+    },
+    {
+        "id": "starter_onboarding_done",
+        "title": "Bereit zum Einsatz",
+        "description": "Alle Einstiegsschritte abgeschlossen und das Panel voll eingerichtet.",
+        "category": "starter",
+        "points": 30,
+        "icon": "compass",
+    },
+
+    # =========================================================================
+    # 2. SERVER-ADMINISTRATION & INFRASTRUKTUR
+    # =========================================================================
+    {
+        "id": "server_architect",
+        "title": "Weltenbauer",
+        "description": "Den ersten Spielserver erfolgreich aufgesetzt.",
+        "category": "servers",
+        "points": 25,
+        "icon": "server",
+    },
+    {
+        "id": "server_fleet_admiral",
+        "title": "Flottenadmiral",
+        "description": "Mindestens 3 Server gleichzeitig verwaltet.",
+        "category": "servers",
+        "points": 50,
+        "icon": "layers",
+    },
+    {
+        "id": "server_power_cycle",
+        "title": "Neu gestartet",
+        "description": "Einen Server sauber gestoppt und wieder hochgefahren.",
+        "category": "servers",
+        "points": 15,
+        "icon": "refresh-cw",
+    },
+    {
+        "id": "server_port_forwarder",
+        "title": "Pfortenöffner",
+        "description": "Server-Ports, TCP/UDP-Freigaben und Port-Rollen eingerichtet.",
+        "category": "servers",
+        "points": 20,
+        "icon": "network",
+    },
+    {
+        "id": "terminal_commander",
+        "title": "Kommandozentrale",
+        "description": "Administrative Befehle oder Server-Aktionen aktiv ausgeführt.",
+        "category": "servers",
+        "points": 35,
+        "icon": "terminal",
+    },
+    {
+        "id": "server_blueprint_deployer",
+        "title": "Blaupausen-Ingenieur",
+        "description": "Einen Server basierend auf einem Blueprint automatisiert ausgerollt.",
+        "category": "servers",
+        "points": 30,
+        "icon": "cpu",
+    },
+    {
+        "id": "server_custom_blueprint",
+        "title": "Rezept-Erfinder",
+        "description": "Eine eigene Server-Vorlage (Blueprint) erstellt und gespeichert.",
+        "category": "servers",
+        "points": 40,
+        "icon": "file-code",
+    },
+    {
+        "id": "server_modpack_installer",
+        "title": "Mod-Enthusiast",
+        "description": "Mods oder ein Modpack über den Katalog installiert.",
+        "category": "servers",
+        "points": 25,
+        "icon": "package",
+    },
+    {
+        "id": "server_file_manager",
+        "title": "Datei-Navigator",
+        "description": "Serverdateien über den Web-Dateimanager inspiziert und bearbeitet.",
+        "category": "servers",
+        "points": 20,
+        "icon": "folder",
+    },
+    {
+        "id": "server_log_analyzer",
+        "title": "Logbuch-Detektiv",
+        "description": "Live-Serverlogs gefiltert und nach Ausnahmen durchsucht.",
+        "category": "servers",
+        "points": 20,
+        "icon": "file-text",
+    },
+    {
+        "id": "server_resource_watcher",
+        "title": "Leistungs-Analyst",
+        "description": "CPU-, RAM- und Speicherauslastung im Detail-Dashboard überwacht.",
+        "category": "servers",
+        "points": 15,
+        "icon": "activity",
+    },
+    {
+        "id": "server_node_connector",
+        "title": "Node-Commander",
+        "description": "Einen externen Daemon-Node erfolgreich im Panel registriert.",
+        "category": "servers",
+        "points": 50,
+        "icon": "hard-drive",
+    },
+    {
+        "id": "server_high_availability",
+        "title": "Dauerläufer",
+        "description": "Einen Spielserver über 72 Stunden ohne Absturz betrieben.",
+        "category": "servers",
+        "points": 40,
+        "icon": "shield",
+    },
+    {
+        "id": "server_auto_restart",
+        "title": "Unbeirrbar",
+        "description": "Crash-Detection mit automatischem Neustart für einen Server konfiguriert.",
+        "category": "servers",
+        "points": 25,
+        "icon": "zap",
+    },
+    {
+        "id": "server_multi_env",
+        "title": "Umgebungs-Spezialist",
+        "description": "Benutzerdefinierte Umgebungsvariablen (ENV) in einen Server eingespeist.",
+        "category": "servers",
+        "points": 20,
+        "icon": "sliders",
+    },
+
+    # =========================================================================
+    # 3. BACKUP, SICHERHEIT & DESASTER-RECOVERY
+    # =========================================================================
+    {
+        "id": "backup_guardian",
+        "title": "Eiserne Reserve",
+        "description": "Ein vollständiges Server-Backup erfolgreich erstellt und gesichert.",
+        "category": "backup",
+        "points": 30,
+        "icon": "archive",
+    },
+    {
+        "id": "backup_cron_master",
+        "title": "Automatischer Schutz",
+        "description": "Einen wiederkehrenden Backup-Zeitplan (Cron) eingerichtet.",
+        "category": "backup",
+        "points": 30,
+        "icon": "calendar",
+    },
+    {
+        "id": "backup_restorer",
+        "title": "Zeitreisender",
+        "description": "Einen Server erfolgreich aus einem früheren Sicherungspunkt wiederhergestellt.",
+        "category": "backup",
+        "points": 40,
+        "icon": "rotate-ccw",
+    },
+    {
+        "id": "backup_cloud_offloader",
+        "title": "Wolken-Depot",
+        "description": "Ein Server-Backup in externen S3/Cloud-Speicher übertragen.",
+        "category": "backup",
+        "points": 45,
+        "icon": "cloud",
+    },
+    {
+        "id": "backup_panel_snapshot",
+        "title": "Gesamtsicherung",
+        "description": "Ein vollständiges Panel-Datenbank-Backup erzeugt.",
+        "category": "backup",
+        "points": 35,
+        "icon": "database",
+    },
+    {
+        "id": "backup_checksum_verifier",
+        "title": "Bitgenau geprüft",
+        "description": "Integritätsprüfung (SHA-256 Checksumme) eines Backups erfolgreich validiert.",
+        "category": "backup",
+        "points": 25,
+        "icon": "check-circle",
+    },
+    {
+        "id": "backup_retention_cleaner",
+        "title": "Saubere Festplatte",
+        "description": "Aufbewahrungsrichtlinien konfiguriert und veraltete Stände bereinigt.",
+        "category": "backup",
+        "points": 20,
+        "icon": "trash-2",
+    },
+    {
+        "id": "security_audit_inspector",
+        "title": "Audit-Wachhund",
+        "description": "Sicherheits- und Audit-Protokolle nach kritischen Ereignissen gefiltert.",
+        "category": "security",
+        "points": 25,
+        "icon": "eye",
+    },
+    {
+        "id": "security_api_key_creator",
+        "title": "Maschinen-Schlüssel",
+        "description": "Einen Scoped API-Key mit minimalen Rechten für Automation erstellt.",
+        "category": "security",
+        "points": 25,
+        "icon": "key",
+    },
+    {
+        "id": "security_ip_allowlist",
+        "title": "Burggraben",
+        "description": "IP-Zugriffsbeschränkungen für sensible Endpunkte eingerichtet.",
+        "category": "security",
+        "points": 30,
+        "icon": "shield",
+    },
+    {
+        "id": "security_role_granularity",
+        "title": "Präzise Privilegien",
+        "description": "Feingranulare Rollenrechte nach dem Least-Privilege-Prinzip vergeben.",
+        "category": "security",
+        "points": 30,
+        "icon": "user-check",
+    },
+    {
+        "id": "security_password_rotation",
+        "title": "Schlüsselwechsel",
+        "description": "Passwort oder Tresorschlüssel turnusmäßig aktualisiert.",
+        "category": "security",
+        "points": 20,
+        "icon": "refresh-cw",
+    },
+    {
+        "id": "security_fortress",
+        "title": "Festung MSM",
+        "description": "Alle Sicherheitsmodule (2FA, CSRF, Audit, Auto-Lock) gleichzeitig scharf.",
+        "category": "security",
+        "points": 60,
+        "icon": "shield-check",
+    },
+
+    # =========================================================================
+    # 4. KI, DIALOGE & AUTONOME WERKZEUGE
+    # =========================================================================
+    {
+        "id": "ai_first_contact",
+        "title": "Erster Kontakt",
+        "description": "Erste Unterhaltung mit dem Singra KI-Assistenten geführt.",
+        "category": "ai",
+        "points": 15,
+        "icon": "sparkles",
+    },
+    {
+        "id": "ai_collaborator",
+        "title": "Autonomer Partner",
+        "description": "Einen KI-Aktionsvorschlag geprüft und freigegeben.",
+        "category": "ai",
+        "points": 30,
+        "icon": "bot",
+    },
+    {
+        "id": "ai_mastermind",
+        "title": "Meisterstratege",
+        "description": "Intensive KI-Zusammenarbeit mit über 50 Interaktionen.",
+        "category": "ai",
+        "points": 75,
+        "icon": "cpu",
+    },
+    {
+        "id": "ai_voice_dialog",
+        "title": "Auf gleicher Wellenlänge",
+        "description": "Einen flüssigen Sprachdialog über den Voice-Bridge-Modus geführt.",
+        "category": "ai",
+        "points": 30,
+        "icon": "mic",
+    },
+    {
+        "id": "ai_deep_thinker",
+        "title": "Tiefgründig",
+        "description": "Eine komplexe Frage mit erweiterter KI-Denkstufe gelöst.",
+        "category": "ai",
+        "points": 25,
+        "icon": "brain",
+    },
+    {
+        "id": "ai_satellite_eye",
+        "title": "Blick aus dem Orbit",
+        "description": "Satellitenbilder und Geodaten mit dem 3D-Globus der KI analysiert.",
+        "category": "ai",
+        "points": 35,
+        "icon": "globe",
+    },
+    {
+        "id": "ai_memory_keeper",
+        "title": "Elefantengedächtnis",
+        "description": "Eine wichtige Information dauerhaft im KI-Gedächtnis gespeichert.",
+        "category": "ai",
+        "points": 20,
+        "icon": "bookmark",
+    },
+    {
+        "id": "ai_skill_user",
+        "title": "Werkzeugkasten",
+        "description": "Ein spezialisiertes Skill-Paket für die KI aktiviert.",
+        "category": "ai",
+        "points": 25,
+        "icon": "tool",
+    },
+    {
+        "id": "ai_server_medic",
+        "title": "KI-Doktor",
+        "description": "Einen Serverfehler durch die Diagnose des KI-Assistenten behoben.",
+        "category": "ai",
+        "points": 35,
+        "icon": "activity",
+    },
+    {
+        "id": "ai_calendar_assistant",
+        "title": "Termin-Dirigent",
+        "description": "Einen Kalendereintrag direkt per Sprach- oder Textanweisung erstellt.",
+        "category": "ai",
+        "points": 20,
+        "icon": "calendar",
+    },
+    {
+        "id": "ai_notes_scribe",
+        "title": "Protokollant",
+        "description": "Eine strukturierte Notiz über die KI verfassen lassen.",
+        "category": "ai",
+        "points": 20,
+        "icon": "file-text",
+    },
+    {
+        "id": "ai_proposal_denied",
+        "title": "Kritischer Geist",
+        "description": "Einen KI-Aktionsvorschlag nach sorgfältiger Prüfung abgelehnt.",
+        "category": "ai",
+        "points": 15,
+        "icon": "x-circle",
+    },
+    {
+        "id": "ai_file_analyzer",
+        "title": "Dokumenten-Forscher",
+        "description": "Eine angehängte Konfigurationsdatei von der KI analysieren lassen.",
+        "category": "ai",
+        "points": 25,
+        "icon": "paperclip",
+    },
+    {
+        "id": "ai_sightseeing_tour",
+        "title": "Virtuelle Weltreise",
+        "description": "Mehrere Sehenswürdigkeiten nacheinander auf dem Globus anfliegen lassen.",
+        "category": "ai",
+        "points": 30,
+        "icon": "map-pin",
+    },
+    {
+        "id": "ai_model_switcher",
+        "title": "Modell-Kenner",
+        "description": "Zwischen verschiedenen KI-Modellen für die passende Aufgabe gewechselt.",
+        "category": "ai",
+        "points": 20,
+        "icon": "refresh-cw",
+    },
+    {
+        "id": "ai_speech_directness",
+        "title": "Auf den Punkt",
+        "description": "Lautlose, floskelfreie Werkzeugausführung im Sprachmodus erlebt.",
+        "category": "ai",
+        "points": 20,
+        "icon": "zap",
+    },
+    {
+        "id": "ai_vision_expert",
+        "title": "Scharfes Auge",
+        "description": "Ein Bild über den Chat hochgeladen und von der KI auswerten lassen.",
+        "category": "ai",
+        "points": 25,
+        "icon": "camera",
+    },
+    {
+        "id": "ai_hundred_prompts",
+        "title": "Dialog-Marathon",
+        "description": "Über 100 fundierte Dialogrunden mit dem Assistenten absolviert.",
+        "category": "ai",
+        "points": 60,
+        "icon": "message-circle",
+    },
+    {
+        "id": "ai_autonomous_pilot",
+        "title": "Autonomer Flug",
+        "description": "Mehrere zusammenhängende Aktionen autonom von der KI ausführen lassen.",
+        "category": "ai",
+        "points": 50,
+        "icon": "sparkles",
+    },
+    {
+        "id": "ai_symbiosis",
+        "title": "Perfekte Symbiose",
+        "description": "Serververwaltung, Monitoring und Notizen vollständig mit KI verzahnt.",
+        "category": "ai",
+        "points": 80,
+        "icon": "cpu",
+    },
+
+    # =========================================================================
+    # 5. SOCIAL, MESSENGER & E2EE KRYPTOGRAPHIE
+    # =========================================================================
+    {
+        "id": "social_handshake",
+        "title": "Netzwerker",
+        "description": "Erste Freundschaftsanfrage im Social Hub bestätigt.",
+        "category": "social",
+        "points": 20,
+        "icon": "user-plus",
+    },
+    {
+        "id": "social_zero_knowledge",
+        "title": "Kryptographischer Pakt",
+        "description": "Erste Zero-Knowledge E2EE-Nachricht über DIS verschlüsselt gesendet.",
+        "category": "social",
+        "points": 50,
+        "icon": "lock",
+    },
+    {
+        "id": "social_group_founder",
+        "title": "Gilden-Gründer",
+        "description": "Eine eigene verschlüsselte Chat-Gruppe erstellt.",
+        "category": "social",
+        "points": 30,
+        "icon": "users",
+    },
+    {
+        "id": "social_invite_sharer",
+        "title": "Gemeinschaftsbauer",
+        "description": "Einen Gruppen-Einladungslink erfolgreich geteilt und neue Mitglieder begrüßt.",
+        "category": "social",
+        "points": 25,
+        "icon": "share-2",
+    },
+    {
+        "id": "social_role_architect",
+        "title": "Rangordnung",
+        "description": "Eigene Gruppenrollen und Rechte-Vorlagen konfiguriert.",
+        "category": "social",
+        "points": 30,
+        "icon": "shield",
+    },
+    {
+        "id": "social_status_story",
+        "title": "Im Rampenlicht",
+        "description": "Eine 24-Stunden Status-Story für deine Freunde geteilt.",
+        "category": "social",
+        "points": 20,
+        "icon": "sparkles",
+    },
+    {
+        "id": "social_voice_memo",
+        "title": "Stimmabdruck",
+        "description": "Eine verschlüsselte Sprachnachricht im Chat aufgenommen und versendet.",
+        "category": "social",
+        "points": 25,
+        "icon": "mic",
+    },
+    {
+        "id": "social_camera_moment",
+        "title": "Augenblick festgehalten",
+        "description": "Ein Direktfoto per Kamera im Messenger geteilt.",
+        "category": "social",
+        "points": 20,
+        "icon": "camera",
+    },
+    {
+        "id": "social_sticker_fun",
+        "title": "Ausdrucksstark",
+        "description": "Einen Sticker oder ein Emoji im E2EE-Chat gesendet.",
+        "category": "social",
+        "points": 15,
+        "icon": "smile",
+    },
+    {
+        "id": "social_note_share",
+        "title": "Gemeinsames Wissen",
+        "description": "Eine Notiz direkt in einer Gruppenunterhaltung geteilt.",
+        "category": "social",
+        "points": 20,
+        "icon": "file-text",
+    },
+    {
+        "id": "social_event_share",
+        "title": "Verabredung",
+        "description": "Einen Kalendertermin im Chat geteilt und abgestimmt.",
+        "category": "social",
+        "points": 20,
+        "icon": "calendar",
+    },
+    {
+        "id": "social_read_receipts",
+        "title": "Gelesen und Verstanden",
+        "description": "Lesebestätigungen (blaue Häkchen) in den Privatsphäre-Einstellungen gewählt.",
+        "category": "social",
+        "points": 15,
+        "icon": "check-circle",
+    },
+    {
+        "id": "social_public_ambassador",
+        "title": "Offenes Buch",
+        "description": "Profil auf 'Öffentlich' gestellt, um für alle Server-Admins auffindbar zu sein.",
+        "category": "social",
+        "points": 25,
+        "icon": "globe",
+    },
+    {
+        "id": "social_squad_leader",
+        "title": "Squad Leader",
+        "description": "Eine Gruppe mit mindestens 5 aktiven Mitgliedern geleitet.",
+        "category": "social",
+        "points": 45,
+        "icon": "crown",
+    },
+    # Funken: nur das Gerät kennt sie, der Server hat keine Tabelle dafür.
+    # Freigeschaltet über `POST /api/social/achievements/claim`, siehe
+    # `SELBST_GEMELDET`.
+    {
+        "id": "social_streak_10",
+        "title": "Erster Funke",
+        "description": "10 Tage Funken-Serie mit einem Freund gehalten.",
+        "category": "social",
+        "points": 25,
+        "icon": "flame",
+    },
+    {
+        "id": "social_streak_100",
+        "title": "Dauerbrenner",
+        "description": "100 Tage ununterbrochene Verbindung.",
+        "category": "social",
+        "points": 50,
+        "icon": "zap",
+    },
+    {
+        "id": "social_streak_1000",
+        "title": "Unzertrennlich",
+        "description": "1.000 Tage Funken-Serie.",
+        "category": "social",
+        "points": 100,
+        "icon": "sparkles",
+    },
+    {
+        "id": "social_streak_10000",
+        "title": "Legende der Freundschaft",
+        "description": "10.000 Tage Beständigkeit.",
+        "category": "social",
+        "points": 250,
+        "icon": "crown",
+    },
+
+    # =========================================================================
+    # 6. TEAMS, ROLLEN & KOLLABORATION
+    # =========================================================================
+    {
+        "id": "team_member_joined",
+        "title": "Teamplayer",
+        "description": "Einem Team im Server Manager beigetreten.",
+        "category": "team",
+        "points": 20,
+        "icon": "users",
+    },
+    {
+        "id": "team_created",
+        "title": "Projektgründer",
+        "description": "Ein eigenes Administrations-Team ins Leben gerufen.",
+        "category": "team",
+        "points": 30,
+        "icon": "briefcase",
+    },
+    {
+        "id": "team_permission_delegate",
+        "title": "Vertrauensbeweis",
+        "description": "Serverberechtigungen sicher an ein Teammitglied delegiert.",
+        "category": "team",
+        "points": 25,
+        "icon": "user-check",
+    },
+    {
+        "id": "team_shared_server",
+        "title": "Gemeinsame Welten",
+        "description": "Einen Server für das gesamte Team freigegeben.",
+        "category": "team",
+        "points": 30,
+        "icon": "server",
+    },
+    {
+        "id": "team_role_assigned",
+        "title": "Aufgabenteilung",
+        "description": "Rollen (Admin, Moderator, Operator) innerhalb des Teams verteilt.",
+        "category": "team",
+        "points": 20,
+        "icon": "shield",
+    },
+    {
+        "id": "team_five_collaborators",
+        "title": "Starke Allianz",
+        "description": "Erfolgreich mit mindestens 5 Teammitgliedern zusammengearbeitet.",
+        "category": "team",
+        "points": 45,
+        "icon": "users",
+    },
+    {
+        "id": "team_harmony",
+        "title": "Gleichklang",
+        "description": "Gemeinsam Server aktualisiert, Backups erstellt und Chats synchronisiert.",
+        "category": "team",
+        "points": 50,
+        "icon": "award",
+    },
+
+    # =========================================================================
+    # 7. AKTIVE SYSTEM- & SPIELZEIT („NUTZUNGSZEIT“)
+    # =========================================================================
+    {
+        "id": "activity_hour_1",
+        "title": "Eingearbeitet",
+        "description": "Mindestens 1 Stunde aktive Systemzeit im Panel verbracht.",
+        "category": "activity",
+        "points": 25,
+        "icon": "clock",
+    },
+    {
+        "id": "activity_hour_5",
+        "title": "Aufmerksamer Operator",
+        "description": "5 Stunden aktive Interaktion mit Servern, KI und Messenger.",
+        "category": "activity",
+        "points": 50,
+        "icon": "timer",
+    },
+    {
+        "id": "activity_hour_10",
+        "title": "Erfahrener Verwalter",
+        "description": "10 Stunden aktive Interaktionszeit mit Servern, KI und Verwaltung.",
+        "category": "activity",
+        "points": 75,
+        "icon": "timer",
+    },
+    {
+        "id": "activity_hour_25",
+        "title": "Infrastruktur-Veteran",
+        "description": "25 Stunden engagierte Verwaltungs- und Dialogzeit erreicht.",
+        "category": "activity",
+        "points": 100,
+        "icon": "award",
+    },
+    {
+        "id": "activity_hour_50",
+        "title": "Prestige Administrator",
+        "description": "Über 50 Stunden hochaktive Administrations- und Dialogzeit.",
+        "category": "activity",
+        "points": 150,
+        "icon": "crown",
+    },
+    {
+        "id": "activity_hour_100",
+        "title": "Hundert-Stunden-Pionier",
+        "description": "100 Stunden verlässlicher Einsatz im Herzen des Systems.",
+        "category": "activity",
+        "points": 200,
+        "icon": "flame",
+    },
+    {
+        "id": "activity_hour_250",
+        "title": "System-Legende",
+        "description": "250 Stunden meisterhafte Serverbeherrschung und Teamführung.",
+        "category": "activity",
+        "points": 300,
+        "icon": "trophy",
+    },
+    {
+        "id": "activity_hour_500",
+        "title": "Unsterbliche Eminenz",
+        "description": "500 Stunden unerschütterliche Hingabe für Sicherheit und Performance.",
+        "category": "activity",
+        "points": 500,
+        "icon": "crown",
+    },
+]
+
+ACHIEVEMENTS_BY_ID = {a["id"]: a for a in ACHIEVEMENTS_CATALOG}
+
+# Errungenschaften, die nur der Client feststellen kann und deshalb selbst
+# meldet. Der Server kann sie nicht prüfen — ein Funke lebt verschlüsselt auf
+# den Geräten, und genau das ist der Sinn. Er erfährt nur „dieses Konto hat
+# 100 Tage erreicht", nie mit wem. Dasselbe gilt für den Inhalt einer
+# verschlüsselten Nachricht (Sprachnachricht, Sticker, Termin) und für
+# Einstellungen, die nur auf dem Gerät liegen (Hotkeys, Tresorsperre, Audio).
+# Jede andere Kennung bleibt serverseitig entschieden; wer sie meldet,
+# bekommt 400.
+SELBST_GEMELDET = frozenset(
+    {
+        "social_streak_10",
+        "social_streak_100",
+        "social_streak_1000",
+        "social_streak_10000",
+        # Gerät und Desktop-App
+        "starter_biometrics",
+        "starter_autolock",
+        "starter_privacy_pledge",
+        "starter_hotkeys",
+        "starter_audio_tuned",
+        "starter_audio_ducking",
+        "starter_wakeword_tuned",
+        # Reine Oberfläche
+        "server_log_analyzer",
+        "server_resource_watcher",
+        # Inhalt verschlüsselter Nachrichten und Gruppen
+        "social_voice_memo",
+        "social_camera_moment",
+        "social_sticker_fun",
+        "social_note_share",
+        "social_event_share",
+        "social_read_receipts",
+        "social_role_architect",
+    }
+)
+
+
+def nur_fuer_den_inhaber(achievement: dict[str, Any]) -> bool:
+    """Verrät dieses Abzeichen, wie ein Konto geschützt ist?
+
+    „Sicherheitsbewusst" heißt: 2FA oder Tresor ist an, „Festung MSM": alle
+    Schutzmodule sind scharf. Auf einem öffentlichen Profil sagte das jedem,
+    bei welchem Konto ein gestohlenes Passwort allein genügt. Solche Abzeichen
+    sieht nur, wem das Konto gehört: die ganze Kategorie „security", die
+    Einsteiger-Abzeichen zu 2FA, Tresor, Biometrie und Auto-Sperre — und
+    „Einstieg abgeschlossen", das „Sicherheitsbewusst" voraussetzt und es
+    sonst durch die Hintertür verriete.
+    """
+    return achievement["category"] == "security" or achievement["id"] in (
+        "starter_security_first",
+        "starter_vault_master",
+        "starter_biometrics",
+        "starter_autolock",
+        "starter_onboarding_done",
+    )
+
+
+class AchievementService:
+    """Verwaltet Meilensteine, dynamische Seltenheit und aktive Nutzungszeit."""
+
+    @classmethod
+    def get_catalog(cls) -> list[dict[str, Any]]:
+        return list(ACHIEVEMENTS_CATALOG)
+
+    @classmethod
+    def get_rarity_stats(cls, db: Session) -> dict[str, dict[str, Any]]:
+        """Ermittelt die dynamische Seltenheit für alle Errungenschaften live aus der Datenbank."""
+        total_users = db.query(func.count(User.id)).filter(User.is_active == True).scalar() or 1
+        counts_raw = (
+            db.query(UserAchievement.achievement_id, func.count(UserAchievement.id))
+            .group_by(UserAchievement.achievement_id)
+            .all()
+        )
+        counts = {aid: count for aid, count in counts_raw}
+
+        result = {}
+        for ach in ACHIEVEMENTS_CATALOG:
+            aid = ach["id"]
+            unlocked_count = counts.get(aid, 0)
+            percentage = round((unlocked_count / total_users) * 100, 1)
+            # Rarity Tiers
+            if percentage > 50:
+                tier = "common"
+            elif percentage > 20:
+                tier = "rare"
+            elif percentage > 5:
+                tier = "epic"
+            else:
+                tier = "legendary"
+
+            result[aid] = {
+                "unlocked_count": unlocked_count,
+                "total_users": total_users,
+                "percentage": percentage,
+                "tier": tier,
+                "rarity_text": f"Nur von {percentage}% aller Nutzer freigeschaltet",
+            }
+        return result
+
+    @classmethod
+    def get_user_achievements(
+        cls, db: Session, user_id: int, fuer_fremde: bool = False, pruefen: bool = True
+    ) -> list[dict[str, Any]]:
+        """Liefert alle Errungenschaften inklusive Freischaltstatus und Rarity für einen Benutzer.
+
+        `fuer_fremde` lässt die Abzeichen weg, die verraten, wie ein Konto
+        geschützt ist (siehe `nur_fuer_den_inhaber`). `pruefen=False` für einen
+        zweiten Abruf in derselben Anfrage: die Zustandsprüfungen liefen schon.
+        """
+        if pruefen:
+            cls.check_automatic_achievements(db, user_id)
+        rarity_map = cls.get_rarity_stats(db)
+        unlocked_rows = (
+            db.query(UserAchievement)
+            .filter(UserAchievement.user_id == user_id)
+            .all()
+        )
+        unlocked_map = {row.achievement_id: row.unlocked_at for row in unlocked_rows}
+
+        results = []
+        for ach in ACHIEVEMENTS_CATALOG:
+            aid = ach["id"]
+            if fuer_fremde and nur_fuer_den_inhaber(ach):
+                continue
+            rarity = rarity_map.get(
+                aid,
+                {"percentage": 0.0, "tier": "common", "rarity_text": "Noch nicht freigeschaltet"},
+            )
+            is_unlocked = aid in unlocked_map
+            results.append({
+                "id": aid,
+                "title": ach["title"],
+                "description": ach["description"],
+                "category": ach["category"],
+                "points": ach["points"],
+                "icon": ach["icon"],
+                "unlocked": is_unlocked,
+                "unlocked_at": unlocked_map.get(aid),
+                "global_unlocked_percentage": rarity["percentage"],
+                "rarity_tier": rarity["tier"],
+                "rarity_text": rarity["rarity_text"],
+            })
+        return results
+
+    @classmethod
+    def get_achievements_overview(cls, db: Session, user_id: int) -> dict[str, Any]:
+        """Liefert die strukturierte Übersicht aller Errungenschaften samt Zähler und Prestige-Score."""
+        achievements = cls.get_user_achievements(db, user_id)
+        unlocked_count = sum(1 for a in achievements if a["unlocked"])
+        earned_points = sum(a["points"] for a in achievements if a["unlocked"])
+        return {
+            "achievements": achievements,
+            "total_unlocked": unlocked_count,
+            "total_available": len(ACHIEVEMENTS_CATALOG),
+            "prestige_score": earned_points,
+        }
+
+    @classmethod
+    def get_user_stats(
+        cls, db: Session, user_id: int, fuer_fremde: bool = False
+    ) -> dict[str, Any]:
+        """Ermittelt Gesamtpunkte, freigeschaltete Meilensteine und aktive Nutzungszeiten.
+
+        Mit `fuer_fremde` zählen nur die Abzeichen, die Fremde auch sehen. Sonst
+        verriete die Punktedifferenz, was die Liste verschweigt.
+        """
+        achievements = cls.get_user_achievements(db, user_id, fuer_fremde)
+        total_points = sum(a["points"] for a in achievements)
+        earned_points = sum(a["points"] for a in achievements if a["unlocked"])
+        unlocked_count = sum(1 for a in achievements if a["unlocked"])
+
+        # Nutzungszeiten
+        times = (
+            db.query(UserActivityTime)
+            .filter(UserActivityTime.user_id == user_id)
+            .all()
+        )
+        time_by_category = {t.category: t.seconds for t in times}
+        total_seconds = sum(time_by_category.values())
+
+        return {
+            "total_achievements": len(achievements),
+            "unlocked_achievements": unlocked_count,
+            "total_points": total_points,
+            "earned_points": earned_points,
+            "active_time_seconds": total_seconds,
+            "active_time_by_category": time_by_category,
+            # Frontend aliases
+            "achievements_unlocked": unlocked_count,
+            "total_activity_seconds": total_seconds,
+            "categories": time_by_category,
+        }
+
+    @classmethod
+    def unlock_achievement(
+        cls, db: Session, user_id: int, achievement_id: str, commit: bool = True
+    ) -> bool:
+        """Schaltet eine Errungenschaft frei, falls dieses Konto sie noch nicht hat."""
+        if achievement_id not in ACHIEVEMENTS_BY_ID:
+            logger.warning("Unbekanntes Achievement: %s", achievement_id)
+            return False
+
+        existing = (
+            db.query(UserAchievement)
+            .filter_by(user_id=user_id, achievement_id=achievement_id)
+            .first()
+        )
+        if existing:
+            return False
+
+        record = UserAchievement(
+            user_id=user_id,
+            achievement_id=achievement_id,
+            unlocked_at=_now(),
+        )
+        db.add(record)
+        ach = ACHIEVEMENTS_BY_ID[achievement_id]
+        payload = {
+            "type": "achievement_unlocked",
+            "achievement": {
+                "id": achievement_id,
+                "title": ach["title"],
+                "description": ach["description"],
+                "points": ach["points"],
+                "icon": ach["icon"],
+                "unlocked_at": record.unlocked_at.isoformat(),
+            },
+        }
+        db.info.setdefault(_EREIGNISSE, []).append((db.get_nested_transaction() or db.get_transaction(), user_id, payload))
+        if commit:
+            db.commit()
+        logger.info("Achievement '%s' für User %d freigeschaltet", achievement_id, user_id)
+        return True
+
+    @classmethod
+    def melde(cls, db: Session, user_id: int | None, achievement_id: str, *, commit: bool = False) -> bool:
+        """Freischaltung aus einem Aktionspfad (Konsolenbefehl, Datei gespeichert …).
+
+        Läuft in einem eigenen Savepoint und schluckt jeden Fehler: ein
+        Abzeichen darf die eigentliche Aktion nie scheitern lassen. Ohne
+        `commit` trägt der Commit des Aufrufers die Zeile mit.
+
+        Mit `commit` wird nur committet, wenn wirklich etwas freigeschaltet
+        wurde — sonst ließe jeder Aufruf die geladenen Objekte des Aufrufers
+        verfallen. Wer danach noch Objekte liest, lädt sie bei `True` neu.
+        """
+        if not user_id:
+            return False
+        try:
+            with db.begin_nested():
+                neu = cls.unlock_achievement(db, user_id, achievement_id, commit=False)
+            if commit and neu:
+                db.commit()
+            return neu
+        except Exception:
+            if commit:
+                db.rollback()
+            logger.warning("Errungenschaft %s nicht vergeben", achievement_id, exc_info=True)
+            return False
+
+    @classmethod
+    def record_activity_time(
+        cls, db: Session, user_id: int, category: str, seconds: int, commit: bool = True
+    ) -> dict[str, Any]:
+        """Erfasst aktive Interaktionszeit („Spielzeit“) und prüft Zeit-Meilensteine."""
+        seconds = max(1, min(seconds, 3600))
+        cat = category.strip()[:32] or "general"
+
+        record = (
+            db.query(UserActivityTime)
+            .filter_by(user_id=user_id, category=cat)
+            .first()
+        )
+        if not record:
+            record = UserActivityTime(
+                user_id=user_id,
+                category=cat,
+                seconds=seconds,
+                last_active_at=_now(),
+            )
+            db.add(record)
+        else:
+            record.seconds += seconds
+            record.last_active_at = _now()
+
+        if commit:
+            db.commit()
+
+        # Prüfe Stundenmeilensteine über alle Kategorien
+        total_seconds = (
+            db.query(func.sum(UserActivityTime.seconds))
+            .filter(UserActivityTime.user_id == user_id)
+            .scalar()
+            or 0
+        )
+        total_hours = total_seconds / 3600.0
+
+        if total_hours >= 1.0:
+            cls.unlock_achievement(db, user_id, "activity_hour_1", commit=commit)
+        if total_hours >= 5.0:
+            cls.unlock_achievement(db, user_id, "activity_hour_5", commit=commit)
+        if total_hours >= 10.0:
+            cls.unlock_achievement(db, user_id, "activity_hour_10", commit=commit)
+        if total_hours >= 25.0:
+            cls.unlock_achievement(db, user_id, "activity_hour_25", commit=commit)
+        if total_hours >= 50.0:
+            cls.unlock_achievement(db, user_id, "activity_hour_50", commit=commit)
+        if total_hours >= 100.0:
+            cls.unlock_achievement(db, user_id, "activity_hour_100", commit=commit)
+        if total_hours >= 250.0:
+            cls.unlock_achievement(db, user_id, "activity_hour_250", commit=commit)
+        if total_hours >= 500.0:
+            cls.unlock_achievement(db, user_id, "activity_hour_500", commit=commit)
+
+        return {
+            "category": cat,
+            "category_seconds": record.seconds,
+            "total_seconds": total_seconds,
+            "total_hours": round(total_hours, 2),
+        }
+
+    @classmethod
+    def check_automatic_achievements(cls, db: Session, user_id: int) -> None:
+        """Prüft die Meilensteine, die sich am Datenbestand ablesen lassen.
+
+        Was schon errungen ist, wird nicht mehr gefragt — so bleibt der Abruf
+        für langjährige Konten billig. Jede Prüfung läuft im eigenen
+        Savepoint: eine kaputte Abfrage kostet ein Abzeichen, nicht die Liste.
+        """
+        user = db.query(User).filter_by(id=user_id).first()
+        if not user:
+            return
+
+        schon = {
+            row[0]
+            for row in db.query(UserAchievement.achievement_id).filter(UserAchievement.user_id == user_id).all()
+        }
+        for achievement_id, pruefe in PRUEFUNGEN:
+            if achievement_id in schon:
+                continue
+            try:
+                with db.begin_nested():
+                    if pruefe(db, user, schon) and cls.unlock_achievement(db, user_id, achievement_id, commit=False):
+                        schon.add(achievement_id)
+            except Exception:
+                logger.warning("Prüfung für %s fehlgeschlagen", achievement_id, exc_info=True)
+
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.warning("Errungenschaften konnten nicht gespeichert werden", exc_info=True)

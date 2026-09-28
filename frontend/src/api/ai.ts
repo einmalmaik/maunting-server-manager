@@ -42,14 +42,25 @@ export interface AiProviderAdmin {
   transcription_model: string | null
   realtime_default?: boolean
   realtime_model?: string | null
-  realtime_voice?: 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'sage' | 'shimmer' | 'verse' | 'marin' | 'cedar' | null
-  realtime_reasoning_effort?: 'low' | 'medium' | 'high' | null
+  realtime_voice?: string | null
+  /**
+   * Die Wörter kommen vom Sprachweg des Modells (`AiSprachweg.denkstufen`) —
+   * bei GPT-Live sind es sechs, und sie gelten dort dem Backend-Modell.
+   */
+  realtime_reasoning_effort?: string | null
   realtime_language?: 'auto' | 'de' | 'en'
   realtime_vad_eagerness?: 'auto' | 'low' | 'medium' | 'high'
   realtime_text_input_price_micro_usd_per_million?: number | null
   realtime_text_output_price_micro_usd_per_million?: number | null
   realtime_audio_input_price_micro_usd_per_million?: number | null
   realtime_audio_output_price_micro_usd_per_million?: number | null
+  /**
+   * Nur GPT-Live: das Modell, das hinter der Stimme nachdenkt und die
+   * Werkzeuge ruft. `null` heisst „das Standardmodell des Zugangs".
+   */
+  realtime_backend_model?: string | null
+  /** Nur GPT-Live: der Preis je Minute Sitzung, in Micro-USD. */
+  realtime_minute_price_micro_usd?: number | null
   /**
    * Das Arbeitsmodell der Worker — die zweite Hälfte der Provider-Zweiteilung
    * (docs/agentic-framework.md, §5). `null` heisst: kein Hintergrund-Betrieb
@@ -86,6 +97,7 @@ export interface AiProviderAdmin {
    * nur der Bequemlichkeit halber — verbindlich prueft der Server.
    */
   azure_resource_name: string | null
+  disable_safety?: boolean
   enabled: boolean
   requires_api_key: boolean
   operator_key_configured: boolean
@@ -195,13 +207,49 @@ export interface AiProviderKind {
    */
   kann_hoeren: boolean
   realtime_tauglich?: boolean
+  /**
+   * Die Sprachwege dieses Anbieters, in der Reihenfolge, in der sie ein Modell
+   * erkennen — dieselben Felder, nach denen der Server prüft
+   * (`services/ai_voice/sprachwege.py`).
+   */
+  sprachwege?: AiSprachweg[]
+}
+
+/**
+ * Ein Sprachweg: welche Echtzeit-Schnittstelle ein Sprachmodell spricht.
+ *
+ * Ein Modell gehört zu einem Weg, wenn seine Kennung `merkmal` enthält und
+ * keinen der `ausschluesse` — dieselbe Regel wie `Sprachweg.passt` im Server.
+ * Eine zweite, klügere Regel hier wäre eine zweite Antwort auf dieselbe Frage.
+ */
+export interface AiSprachweg {
+  weg: 'openai_realtime' | 'openai_live' | 'gemini_live' | (string & {})
+  merkmal: string
+  ausschluesse: string[]
+  stimmen: string[]
+  empfohlene_stimmen: string[]
+  empfohlene_modelle: string[]
+  denkstufen: string[]
+  /** Nur Modelle mit diesem Teilwort nehmen eine Denkstufe an; `null`: jedes. */
+  denkstufen_merkmal: string | null
+  /** Die Denkstufe gilt dem Backend-Modell, nicht der Stimme (GPT-Live). */
+  denkt_im_backend: boolean
+  vad: boolean
+  audiopreise: boolean
+  minutenpreis: boolean
+  backend_modell: boolean
 }
 
 /** Ein Modell aus dem Katalog des Anbieters, mit seinen Denkfaehigkeiten. */
 export interface AiCatalogModel {
   model_id: string
   name: string
-  reasoning: boolean
+  /**
+   * Ob das Modell nachdenkt. `null` heisst „der Katalog sagt dazu nichts" und
+   * nie „denkt nicht". Bis zum 22.09.2026 kam hier `false`, und GPT-6 Luna
+   * stand am Erscheinungstag mit „Dieses Modell denkt nicht nach" da.
+   */
+  reasoning: boolean | null
   efforts: string[]
   default_effort: string | null
   mandatory: boolean
@@ -221,6 +269,16 @@ export interface AiCatalogModel {
    * Modell waehlt — also hier.
    */
   vision: boolean | null
+  /** Das Kontextfenster in Token, `null` wenn der Katalog es nicht nennt. */
+  context_tokens: number | null
+  /** Die laengste Antwort in Token, `null` wenn der Katalog sie nicht nennt. */
+  max_output_tokens: number | null
+  /**
+   * Der angekuendigte Abschalttag des Herstellers als ISO-Datum, oder `null`.
+   * Nie der eines Vermittlers: OpenRouters Tag sagt, wann OpenRouter ein
+   * Modell aus seiner Liste nimmt, nicht wann OpenAI es abschaltet.
+   */
+  shutdown_date: string | null
 }
 
 /**
@@ -387,6 +445,10 @@ export interface AiWebSearchStatus {
   configured: boolean
   has_api_key?: boolean
   searxng_url?: string | null
+  default_searxng_url?: string | null
+  is_default_searxng?: boolean
+  custom_searxng_url?: string | null
+  sidecar_running?: boolean
 }
 
 /** Nur der Zustand — Satelliten-Zugangsdaten verlassen das Backend nie. */
@@ -416,6 +478,19 @@ export interface AiSatelliteLayer {
   resolution?: string
   mission?: string
   description?: string
+  /**
+   * `scene`: eine Sentinel-2-Szene mit Aufnahmezeitpunkt. `map`: das
+   * Kartenbild, ein Mosaik ohne Zeitpunkt — nie als Überflug anzeigen.
+   * Fehlt bei Ständen von vor 09/2026.
+   */
+  kind?: 'scene' | 'map'
+  scene_id?: string
+  /** Der Ausschnitt des Kartenbilds, mit dem es das Panel holt (`kind: 'map'`). */
+  bbox?: [number, number, number, number]
+  captured_at?: string
+  cloud_cover_percent?: number | null
+  /** Die Quellennennung, die neben dem Bild stehen muss. */
+  attribution?: string
 }
 
 export interface AiSatelliteScene {
@@ -515,7 +590,7 @@ export interface AiProviderTestResult {
  */
 export interface AiVoiceConfig {
   available: boolean
-  mode?: 'legacy' | 'openai_realtime'
+  mode?: 'legacy' | 'openai_realtime' | 'openai_live' | 'gemini_live'
   /** Nur zur Anzeige. `null`, solange nichts eingerichtet ist. */
   model: string | null
   /**
@@ -525,7 +600,12 @@ export interface AiVoiceConfig {
    */
   voice: string | null
   language?: string
-  reasoning_effort?: 'low' | 'medium' | 'high' | null
+  reasoning_effort?: string | null
+  /**
+   * Nur bei GPT-Live: das Modell, das hinter der Stimme nachdenkt — die
+   * Denkstufe darüber gehört dann ihm.
+   */
+  backend_model?: string | null
   dictation_available?: boolean
   dictation_monthly_limit_minutes?: number | null
   dictation_used_seconds?: number
@@ -589,6 +669,7 @@ export const SCHREIBWERKZEUGE = [
   'propose_restart_schedule_set',
   'propose_backup_schedule_set',
   'propose_file_delete',
+  'propose_database_change',
   'propose_email_send',
   'propose_calendar_event_create',
   'propose_calendar_event_update',
@@ -596,10 +677,14 @@ export const SCHREIBWERKZEUGE = [
   'propose_note_create',
   'propose_note_update',
   'propose_note_delete',
-  'propose_popup_create',
+  'propose_popup_set',
   'propose_cloudflare_dns_record',
   'propose_cloudflare_dns_delete',
   'propose_modpack_install',
+  'propose_user_server_permission',
+  'propose_role_set',
+  'propose_user_roles',
+  'propose_role_delete',
 ] as const
 
 export type AiWriteTool = (typeof SCHREIBWERKZEUGE)[number]
@@ -705,6 +790,48 @@ export interface AiMemoryPage {
   limit: number
 }
 
+/** Was die Vorschau über einen erkannten Fakt sagt — siehe `schemas/ai_memory.py`. */
+export type AiMemoryImportStatus = 'new' | 'exact_duplicate' | 'similar_existing' | 'has_secret'
+
+export interface AiMemoryImportPreviewItem {
+  key: string
+  value: string
+  category: string
+  evidence: string | null
+  status: AiMemoryImportStatus
+  existing_key: string | null
+  /** `null` auch dann, wenn der Schlüssel belegt, sein Inhalt aber unlesbar ist. */
+  existing_value: string | null
+  similarity: number | null
+}
+
+export interface AiMemoryImportPreview {
+  detected_source: string | null
+  items: AiMemoryImportPreviewItem[]
+  total_detected: number
+  total_valid: number
+  total_conflicts: number
+  total_secrets_blocked: number
+  /** Wieviele neue Schlüssel der Bereich noch fasst. Ersetzen kostet keinen Platz. */
+  available_slots: number
+  /** Ob die KI persönliche Einträge heute liest — sonst bleibt der Import liegen. */
+  memory_enabled: boolean
+}
+
+export interface AiMemoryImportTarget {
+  scope: AiMemoryEntry['scope']
+  server_id?: number
+  team_id?: number
+  source_provider?: string
+}
+
+export interface AiMemoryImportResult {
+  imported_count: number
+  updated_count: number
+  skipped_count: number
+  skipped: { key: string; reason: 'exists' | 'full' | 'rejected' | 'duplicate' | 'conflict' }[]
+}
+
 export interface AiMemoryPreference {
   enabled: boolean
   /**
@@ -778,6 +905,22 @@ export interface AiContextPolicy {
   compaction_percent: number
   min_percent: number
   max_percent: number
+}
+
+export type AiMemorySearchFallback = 'off' | 'google' | 'openai'
+
+/**
+ * Bei wem die Bedeutungssuche ohne lokales Modell rechnen darf.
+ *
+ * `fallback` ist die Wahl des Betreibers (Standard `off`), `available` nennt
+ * die Rückfallanbieter mit aktivem Zugang, `local_ready` sagt, ob das lokale
+ * Modell läuft, und `ready`, ob die Suche gerade überhaupt rechnen kann.
+ */
+export interface AiMemorySearchPolicy {
+  fallback: AiMemorySearchFallback
+  available: Exclude<AiMemorySearchFallback, 'off'>[]
+  local_ready: boolean
+  ready: boolean
 }
 
 /**
@@ -1114,6 +1257,8 @@ export interface AiProviderWrite {
   realtime_text_output_price_micro_usd_per_million?: number | null
   realtime_audio_input_price_micro_usd_per_million?: number | null
   realtime_audio_output_price_micro_usd_per_million?: number | null
+  realtime_backend_model?: string | null
+  realtime_minute_price_micro_usd?: number | null
   /**
    * Wie `default_voice`: „nicht genannt" lässt den Stand stehen,
    * ausdrückliches `null` schaltet den Hintergrund-Betrieb ab.
@@ -1130,6 +1275,7 @@ export interface AiProviderWrite {
    * gespeicherten Schluessel, ein nicht mitgeschickter nicht.
    */
   azure_resource_name?: string | null
+  disable_safety?: boolean
   operator_api_key?: string
   clear_operator_api_key?: boolean
 }
@@ -1233,13 +1379,23 @@ export const aiApi = {
    * gibt seine Liste offen heraus. Fehlt der Schlüssel, kommt eine leere
    * Liste — beim Anlegen eines Zugangs gibt es ihn noch gar nicht.
    */
-  listCatalogModels: (kind: string, refresh = false, providerId?: number) => {
+  listCatalogModels: (kind: string, refresh = false, providerId?: number, apiKey?: string) => {
     const frage = new URLSearchParams()
     if (refresh) frage.set('refresh', 'true')
     if (providerId !== undefined) frage.set('provider_id', String(providerId))
+    const headers: Record<string, string> = {}
+    if (apiKey?.trim()) {
+      // **Nur im Kopf, nie im Abfrageteil.** Hier stand der Schlüssel zusätzlich
+      // als `api_key=…` in der Adresse — und eine Adresse landet in der
+      // Zugriffszeile von Caddy und uvicorn, im Verlauf des Browsers und im
+      // `Referer`. Aus keiner der drei Ablagen bekommt man ihn wieder heraus.
+      // Der Server liest ihn seit derselben Änderung ausschliesslich hier.
+      headers['X-Provider-Api-Key'] = apiKey.trim()
+    }
     const anhang = frage.toString()
     return api<AiCatalogModel[]>(
       `/ai/settings/provider-kinds/${encodeURIComponent(kind)}/models${anhang ? `?${anhang}` : ''}`,
+      apiKey?.trim() ? { headers } : undefined,
     )
   },
   /**
@@ -1359,6 +1515,13 @@ export const aiApi = {
    */
   listActions: (kind: AiConversationKind = 'primary') =>
     api<AiActionProposal[]>(`/ai/conversation/actions?kind=${kind}`),
+  /**
+   * Nur die Karten, auf deren Klick gerade jemand wartet — eigene und die
+   * lebender Worker. Die Liste der Sprachansicht: bestätigt wird seit dem
+   * 25.09.2026 nur per Klick, und die Karte steht dort, wo man gerade ist.
+   */
+  listOpenActions: () =>
+    api<AiActionProposal[]>('/ai/conversation/actions?kind=primary&offen=true'),
   /**
    * Die Vorschläge eines Worker-Fensters — über die Kennung, denn
    * `kind=worker` ist mehrdeutig: es gibt je Auftrag ein Fenster.
@@ -1495,6 +1658,19 @@ export const aiApi = {
   answerMemoryNotice: (enable: boolean, hideFuture: boolean) => api<AiMemoryPreference>('/ai/memory/notice', {
     method: 'POST', body: JSON.stringify({ enable, hide_future: hideFuture }),
   }),
+  /** Zerlegt die Antwort einer fremden KI und gleicht sie ab — schreibt nichts. */
+  importMemoryPreview: (payload: AiMemoryImportTarget & { raw_text: string }) =>
+    api<AiMemoryImportPreview>('/ai/memory/import/preview', {
+      method: 'POST', body: JSON.stringify(payload),
+    }),
+  /** Übernimmt die ausgewählten Einträge; übersprungene kommen mit Grund zurück. */
+  executeMemoryImport: (
+    payload: AiMemoryImportTarget & {
+      items: { key: string; value: string; replace_existing: boolean }[]
+    },
+  ) => api<AiMemoryImportResult>('/ai/memory/import', {
+    method: 'POST', body: JSON.stringify(payload),
+  }),
   /** Das Verzeichnis ohne Texte — dasselbe, das auch die KI im Prompt sieht. */
   listSkills: () => api<AiSkillSummary[]>('/ai/skills'),
   listManagedSkills: () => api<AiSkillManaged[]>('/ai/skills/manage'),
@@ -1522,6 +1698,11 @@ export const aiApi = {
   setContextPolicy: (percent: number) => api<AiContextPolicy>('/ai/settings/context', {
     method: 'PUT', body: JSON.stringify({ compaction_percent: percent }),
   }),
+  getMemorySearchPolicy: () => api<AiMemorySearchPolicy>('/ai/settings/memory-search'),
+  setMemorySearchPolicy: (fallback: AiMemorySearchFallback) =>
+    api<AiMemorySearchPolicy>('/ai/settings/memory-search', {
+      method: 'PUT', body: JSON.stringify({ fallback }),
+    }),
   getWorkerPolicy: () => api<AiWorkerPolicy>('/ai/settings/worker'),
   setWorkerPolicy: (maxParallelWorkers: number, roundsPerWorker: number) =>
     api<AiWorkerPolicy>('/ai/settings/worker', {

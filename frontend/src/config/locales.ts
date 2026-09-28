@@ -1,44 +1,41 @@
-export interface LocaleMetadata {
-  code: string
-  label: string
-  nativeLabel: string
-  direction: 'ltr' | 'rtl'
-  fallback: string
+import type { BackendModule, ResourceKey } from 'i18next'
+
+import type { PanelLanguageCode } from './panelLocales'
+
+/**
+ * Die Textbündel der beiden Panelsprachen — mehr gibt es nicht.
+ *
+ * Vorher stand hier ein `import.meta.glob('../locales/*.json')`. Das war der
+ * Grund, warum neun halbfertige Sprachdateien (772 von 4859 Schlüsseln) zu
+ * aktiven Sprachen wurden: wer eine Datei in den Ordner legte, schaltete sie
+ * damit frei. Die Spracherkennung des Browsers griff darauf zu, der Umschalter
+ * in den Einstellungen kannte sie nie — ein französischer Besucher sah eine zu
+ * 84 % englische Oberfläche und daneben „EN" als aktiv markiert.
+ *
+ * Jetzt sind es zwei benannte Importe. Eine neue Sprache kostet damit eine
+ * Zeile hier und eine in `panelLocales.ts` — und genau dort fällt auf, dass
+ * eine Sprache auch jemanden braucht, der sie übersetzt.
+ *
+ * Geladen wird nur die Sprache, die angezeigt wird. Beide zusammen sind über
+ * 700 kB und lagen bis 27.09.2026 in jedem ersten Seitenaufruf.
+ */
+const textbuendel: Record<PanelLanguageCode, () => Promise<{ default: ResourceKey }>> = {
+  de: () => import('../locales/de.json'),
+  en: () => import('../locales/en.json'),
 }
 
-const METADATA_MAPPING: Record<string, Omit<LocaleMetadata, 'code'>> = {
-  de: { label: 'German', nativeLabel: 'Deutsch', direction: 'ltr', fallback: 'en' },
-  en: { label: 'English', nativeLabel: 'English', direction: 'ltr', fallback: 'en' },
-  zh: { label: 'Chinese (Simplified)', nativeLabel: '简体中文', direction: 'ltr', fallback: 'en' },
-  hi: { label: 'Hindi', nativeLabel: 'हिन्दी', direction: 'ltr', fallback: 'en' },
-  es: { label: 'Spanish', nativeLabel: 'Español', direction: 'ltr', fallback: 'en' },
-  ar: { label: 'Arabic', nativeLabel: 'العربية', direction: 'rtl', fallback: 'en' },
-  fr: { label: 'French', nativeLabel: 'Français', direction: 'ltr', fallback: 'en' },
-  bn: { label: 'Bengali', nativeLabel: 'বাংলা', direction: 'ltr', fallback: 'en' },
-  pt: { label: 'Portuguese', nativeLabel: 'Português', direction: 'ltr', fallback: 'en' },
-  ru: { label: 'Russian', nativeLabel: 'Русский', direction: 'ltr', fallback: 'en' },
-  id: { label: 'Indonesian', nativeLabel: 'Bahasa Indonesia', direction: 'ltr', fallback: 'en' },
+export const localeBackend: BackendModule = {
+  type: 'backend',
+  init() {},
+  read(language, _namespace, callback) {
+    const laden = textbuendel[language as PanelLanguageCode]
+    if (!laden) {
+      callback(null, {})
+      return
+    }
+    laden().then(
+      (modul) => callback(null, modul.default),
+      (fehler: unknown) => callback(fehler instanceof Error ? fehler : new Error(String(fehler)), null),
+    )
+  },
 }
-
-// Auto-detect files in locales directory
-const localeFiles = import.meta.glob('../locales/*.json', { eager: true }) as Record<string, { default: any }>
-
-export const supportedLocales: LocaleMetadata[] = Object.keys(localeFiles).map((path) => {
-  const code = path.split('/').pop()?.replace('.json', '') || ''
-  const meta = METADATA_MAPPING[code] || {
-    label: code.toUpperCase(),
-    nativeLabel: code.toUpperCase(),
-    direction: 'ltr',
-    fallback: 'en',
-  }
-  return {
-    code,
-    ...meta,
-  }
-})
-
-export const localeResources = Object.keys(localeFiles).reduce((acc, path) => {
-  const code = path.split('/').pop()?.replace('.json', '') || ''
-  acc[code] = { translation: localeFiles[path].default }
-  return acc;
-}, {} as Record<string, { translation: any }>)

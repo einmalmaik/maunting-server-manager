@@ -886,7 +886,7 @@ def test_der_prompt_sagt_die_wahrheit_ueber_bestaetigungen() -> None:
         assert "Ist der autonome Modus dort aktiv" in prompt
         # Und die Ausnahme bleibt benannt, sonst verallgemeinert das Modell
         # sie zurueck auf alle Schreibwerkzeuge.
-        assert "was Daten vernichtet" in prompt
+        assert "Backupdaten vernichtet" in prompt
 
 
 def test_eine_erteilte_freigabe_gilt_wie_eine_antwort() -> None:

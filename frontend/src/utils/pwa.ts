@@ -1,5 +1,6 @@
 // PWA Utilities - Service Worker Registration & Update Handling
 import { confirm } from '@/stores/confirmStore'
+import i18n from '@/i18n'
 
 export function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
@@ -14,10 +15,10 @@ export function registerServiceWorker() {
                 if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
                   // New version available
                   void confirm({
-                    title: 'Update verfügbar',
-                    message: 'Eine neue Version ist verfügbar. Jetzt aktualisieren?',
-                    confirmText: 'Aktualisieren',
-                    cancelText: 'Später',
+                    title: i18n.t('pwa.updateTitle'),
+                    message: i18n.t('pwa.updateMessage'),
+                    confirmText: i18n.t('pwa.updateConfirm'),
+                    cancelText: i18n.t('pwa.updateCancel'),
                   }).then((ok) => {
                     if (ok) {
                       window.location.reload();

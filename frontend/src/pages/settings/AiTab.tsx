@@ -22,6 +22,7 @@ import { AiContextSettings } from './AiContextSettings'
 import { AiCostSettings } from './AiCostSettings'
 import { AiWorkerSettings } from './AiWorkerSettings'
 import { AiGuardianSettings } from './AiGuardianSettings'
+import { AiMemorySearchSettings } from './AiMemorySearchSettings'
 import { AiLearningSettings } from './AiLearningSettings'
 import { AiProvidersSettings } from './AiProvidersSettings'
 import { AiUsageSettings } from './AiUsageSettings'
@@ -30,6 +31,7 @@ import { AiSatelliteSettings } from './AiSatelliteSettings'
 import { AiMapTilerSettings } from './AiMapTilerSettings'
 import { AiTomTomSettings } from './AiTomTomSettings'
 
+import { Spinner } from '@/components/ui/Spinner'
 export type AiSubTab = 'providers' | 'features' | 'limits' | 'usage'
 
 const AI_TABS: TabDef<AiSubTab>[] = [
@@ -301,7 +303,7 @@ export function AiTab() {
     return <div className="msm-card p-6 text-sm text-on-surface-variant">{t('aiSettings.noPermission')}</div>
   }
   if (loading) {
-    return <div className="flex h-64 items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>
+    return <div className="flex h-64 items-center justify-center"><Spinner size="lg" className="text-primary" /></div>
   }
 
   return (
@@ -324,6 +326,10 @@ export function AiTab() {
               das dort gewählte Modell — einzustellen bleibt nur, wie voll er werden
               darf, bevor zusammengefasst wird. */}
           <AiContextSettings canWrite={canWrite} />
+          {/* Neben dem Kontext, weil beide dieselbe Frage beantworten: was von
+              einer Anfrage wohin geht. Die Wahl betrifft die Zugänge oben
+              (Google, OpenAI), aber nicht den Chat — nur die Bedeutungssuche. */}
+          <AiMemorySearchSettings canWrite={canWrite} />
           {/* Die Währung steht direkt hinter der Providerwahl, weil der Preis dort
               eingetragen wird: welche Zahl „1,20" bedeutet, entscheidet sich hier. */}
           <AiCostSettings canWrite={canWrite} />
@@ -358,7 +364,7 @@ export function AiTab() {
           <div className="msm-card p-6">
             <div className="mb-3 flex items-center gap-2">
               <Bot className="h-5 w-5 text-primary" aria-hidden="true" />
-              <h3 className="font-headline text-lg font-semibold text-on-surface">{t('aiSettings.title')}</h3>
+              <h3 className="font-headline text-title-lg font-semibold text-on-surface">{t('aiSettings.title')}</h3>
             </div>
             <p className="max-w-3xl text-sm text-on-surface-variant">{t('aiSettings.description')}</p>
             {/* Der Regeltext steht ueber dem Feldraster und wird zuerst gelesen —

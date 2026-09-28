@@ -245,6 +245,59 @@ describe('api client', () => {
       expect(useAuthStore.getState().isAuthenticated).toBe(true)
     })
 
+    it('räumt den Sitzungsspeicher NICHT, wenn der Refresh wegen Netzwerkfehlers abbricht', async () => {
+      sitzungsspeicherFuellen()
+      fetchSpy
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
+        .mockRejectedValueOnce(new TypeError('Failed to fetch (Netzwerkabbruch/Offline)'))
+
+      await expect(api('/test')).rejects.toThrow('Failed to fetch')
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().user).not.toBeNull()
+    })
+
+    it('räumt den Sitzungsspeicher NICHT, wenn der Refresh mit HTTP 502/503 antwortet', async () => {
+      sitzungsspeicherFuellen()
+      fetchSpy
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
+        .mockReturnValueOnce(mockResponse(502, { detail: 'Bad Gateway' }))
+
+      // Über `i18n.t`, nicht über den deutschen Wortlaut: diese Datei stellt in
+      // `beforeEach` auf Englisch um, und ein fest eingetippter Satz prüft dann
+      // die Sprache statt das Verhalten.
+      await expect(api('/test')).rejects.toThrow(
+        i18n.t('auth.errors.refreshFailed', { status: 502 }),
+      )
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().user).not.toBeNull()
+    })
+
+    it('räumt den Sitzungsspeicher NICHT, wenn der Refresh gelingt, aber der wiederholte Request fehlschlägt', async () => {
+      sitzungsspeicherFuellen()
+      fetchSpy
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
+        .mockReturnValueOnce(mockResponse(200, { message: 'refreshed' }))
+        .mockRejectedValueOnce(new TypeError('Netzwerkabbruch beim Retry'))
+
+      await expect(api('/test')).rejects.toThrow('Netzwerkabbruch beim Retry')
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().user).not.toBeNull()
+    })
+
+    it('räumt den Sitzungsspeicher NICHT im SSE-Pfad, wenn der Retry nach erfolgreichem Refresh abbricht', async () => {
+      sitzungsspeicherFuellen()
+      fetchSpy
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
+        .mockReturnValueOnce(mockResponse(200, { message: 'refreshed' }))
+        .mockRejectedValueOnce(new DOMException('The user aborted a request', 'AbortError'))
+
+      await expect(
+        apiStream('/ai/conversations/1/messages/stream', { method: 'POST', body: '{}' }),
+      ).rejects.toThrow('The user aborted a request')
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().user).not.toBeNull()
+    })
+
     it('should NOT refresh on /auth/login 401', async () => {
       fetchSpy.mockReturnValueOnce(mockResponse(401, { detail: 'Bad credentials' }))
 
@@ -412,6 +465,102 @@ describe('api client', () => {
       } as Response)
 
       await expect(api('/test')).rejects.toThrow('Internal Server Error')
+    })
+  })
+
+  describe('external origin security (isInternalApiUrl & token leak prevention)', () => {
+    it('correctly classifies internal and external URLs', async () => {
+      const { isInternalApiUrl } = await import('./client')
+      expect(isInternalApiUrl('/api/test')).toBe(true)
+      expect(isInternalApiUrl('api/test')).toBe(true)
+      expect(isInternalApiUrl('/media/avatar.png')).toBe(true)
+      expect(isInternalApiUrl(`${window.location.origin}/api/test`)).toBe(true)
+
+      expect(isInternalApiUrl('https://evil.com/avatar.png')).toBe(false)
+      expect(isInternalApiUrl('http://attacker.org/token')).toBe(false)
+      expect(isInternalApiUrl('//evil.com/avatar.png')).toBe(false)
+      expect(isInternalApiUrl('data:image/png;base64,...')).toBe(false)
+      expect(isInternalApiUrl('blob:http://localhost/uuid')).toBe(false)
+      expect(isInternalApiUrl('')).toBe(false)
+    })
+
+    it('does not attach Authorization or CSRF tokens to external URLs in api()', async () => {
+      const { registriereNativeSitzung } = await import('./client')
+      registriereNativeSitzung({
+        token: () => 'secret_jwt_token',
+        erneuern: async () => true,
+      })
+      document.cookie = '__Secure-csrf_token=super_secret_csrf;path=/;secure'
+
+      fetchSpy.mockReturnValueOnce(mockResponse(200, { ok: true }))
+      await api('https://evil.com/avatar.png', { method: 'POST', body: '{}' })
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      const call = fetchSpy.mock.calls[0]
+      const calledUrl = call[0]
+      const options = call[1] as RequestInit
+      expect(calledUrl).toBe('https://evil.com/avatar.png')
+      expect(options.credentials).toBe('omit')
+      const headers = (options.headers || {}) as Record<string, string>
+      expect(headers['Authorization']).toBeUndefined()
+      expect(headers['X-CSRF-Token']).toBeUndefined()
+    })
+
+    it('does not attach Authorization or CSRF tokens to external URLs in apiStream()', async () => {
+      const { registriereNativeSitzung } = await import('./client')
+      registriereNativeSitzung({
+        token: () => 'secret_jwt_token',
+        erneuern: async () => true,
+      })
+      document.cookie = '__Secure-csrf_token=super_secret_csrf;path=/;secure'
+
+      fetchSpy.mockReturnValueOnce(Promise.resolve(new Response('ok', { status: 200 })))
+      await apiStream('https://evil.com/stream', { method: 'POST' })
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      const call = fetchSpy.mock.calls[0]
+      const calledUrl = call[0]
+      const options = call[1] as RequestInit
+      expect(calledUrl).toBe('https://evil.com/stream')
+      expect(options.credentials).toBe('omit')
+      const headers = (options.headers || {}) as Record<string, string>
+      expect(headers['Authorization']).toBeUndefined()
+      expect(headers['X-CSRF-Token']).toBeUndefined()
+    })
+
+    it('gibt das Token nur an /api/ des Backends, nicht an LiveKit auf derselben Herkunft', async () => {
+      const { setRuntimeApiUrl } = await import('@/config/api')
+      const { registriereNativeSitzung } = await import('./client')
+      registriereNativeSitzung({ token: () => 'secret_jwt_token', erneuern: async () => true })
+      try {
+        setRuntimeApiUrl('https://api.my-backend.com')
+        fetchSpy.mockReturnValueOnce(Promise.resolve(new Response('ok', { status: 200 })))
+        await apiStream('https://api.my-backend.com/livekit/bild.png', { method: 'GET' })
+        fetchSpy.mockReturnValueOnce(Promise.resolve(new Response('ok', { status: 200 })))
+        await apiStream('https://api.my-backend.com/api/auth/avatar/a.png', { method: 'GET' })
+
+        const kopf = (i: number) => (fetchSpy.mock.calls[i][1] as RequestInit).headers as Record<string, string>
+        expect(kopf(0)['Authorization']).toBeUndefined()
+        expect(kopf(1)['Authorization']).toBe('Bearer secret_jwt_token')
+      } finally {
+        setRuntimeApiUrl(null)
+      }
+    })
+
+    it('does not send tokens to frontend origin when explicit backend URL is set', async () => {
+      const { setRuntimeApiUrl } = await import('@/config/api')
+      const { isInternalApiUrl } = await import('./client')
+      try {
+        setRuntimeApiUrl('https://api.my-backend.com')
+        // Explicit backend URL is allowed
+        expect(isInternalApiUrl('https://api.my-backend.com/api/test')).toBe(true)
+        // Frontend static host is NOT the API backend in decoupled mode
+        expect(isInternalApiUrl(`${window.location.origin}/test`)).toBe(false)
+        // External URLs are not allowed
+        expect(isInternalApiUrl('https://evil.com/test')).toBe(false)
+      } finally {
+        setRuntimeApiUrl(null)
+      }
     })
   })
 })

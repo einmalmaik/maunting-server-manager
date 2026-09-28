@@ -3,7 +3,9 @@
  *
  * Der Kopplungsschritt ist der einzige Weg hinein; geprueft wird die Kette
  * Code → /auth/devices/redeem → Token im Tresor → hydrierter authStore, und
- * dass ein falscher Code eine Meldung zeigt statt die App zu verlassen.
+ * dass ein falscher Code eine Meldung zeigt statt die App zu verlassen. Danach
+ * steht die Sicherheitsnummer des Geraets auf dem Schirm: das Panel uebergibt
+ * den Verlauf erst, wenn dort jemand dieselbe Nummer bestaetigt.
  *
  * Der Adress-Schritt traegt die Regel, ueber welche Leitung das alles geht:
  * `https://` ist Pflicht, `http://` nur auf dem eigenen Rechner.
@@ -28,8 +30,25 @@ vi.mock('./WakewordEinrichtung', () => ({
   WakewordEinrichtung: () => null,
 }))
 
+const { veroeffentlichen, abholen } = vi.hoisted(() => ({
+  veroeffentlichen: vi.fn(),
+  abholen: vi.fn(async () => 0),
+}))
+// Das Geraet und sein Schluessel sind erfunden — ein RSA-Paar zu erzeugen
+// kostete hier Sekunden und pruefte nichts, was `e2eeGeraet.test.ts` nicht
+// schon prueft. Die Sicherheitsnummer rechnet die echte Funktion.
+vi.mock('@/services/e2eeGeraet', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/e2eeGeraet')>()),
+  geraetVeroeffentlichen: veroeffentlichen,
+}))
+vi.mock('@/services/verlaufsUebergabe', () => ({ holeVerlaufAb: abholen }))
+
+import { sicherheitsnummer } from '@/services/e2eeGeraet'
+
 import { Wizard } from './Wizard'
 import { setzeAccessToken } from './transport'
+
+const OEFFENTLICH = JSON.stringify({ kty: 'RSA', n: 'geraeteschluessel', e: 'AQAB' })
 
 const KONFIG = {
   backend_url: 'https://api.example.com',
@@ -66,9 +85,16 @@ describe('Wizard: Kopplung', () => {
     invokeMock.mockResolvedValue(null)
     setzeAccessToken(null)
     useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false })
+    veroeffentlichen.mockReset()
+    veroeffentlichen.mockResolvedValue({
+      kennung: 'dieses-geraet',
+      paar: { publicKeyJwk: OEFFENTLICH, privateKeyJwk: '{}' },
+    })
+    abholen.mockClear()
   })
 
-  it('ein eingeloester Code fuellt Tresor und Sitzung', async () => {
+  /** Der Server nimmt den Code an und kennt den Benutzer. */
+  function panelNimmtAn() {
     vi.stubGlobal(
       'fetch',
       vi.fn((eingabe: RequestInfo | URL) => {
@@ -84,9 +110,10 @@ describe('Wizard: Kopplung', () => {
         return Promise.resolve(json(200, { global_permissions: [], server_permissions: {} }))
       }),
     )
-    const fertig = vi.fn()
-    render(<Wizard konfig={KONFIG} startSchritt="kopplung" nurDieserSchritt onFertig={fertig} />)
+  }
 
+  function codeEingeben(fertig: () => void) {
+    render(<Wizard konfig={KONFIG} startSchritt="kopplung" nurDieserSchritt onFertig={fertig} />)
     fireEvent.change(screen.getByLabelText(i18n.t('mss.wizard.codeLabel')), {
       target: { value: 'abcd efgh jklm' },
     })
@@ -94,10 +121,66 @@ describe('Wizard: Kopplung', () => {
       target: { value: 'Arbeitsrechner' },
     })
     fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.wizard.koppeln') }))
+  }
 
-    await waitFor(() => expect(fertig).toHaveBeenCalled())
+  it('ein eingeloester Code fuellt Tresor und Sitzung', async () => {
+    panelNimmtAn()
+    const fertig = vi.fn()
+    codeEingeben(fertig)
+
+    await screen.findByText(i18n.t('mss.wizard.sicherheitsnummerTitel'))
     expect(invokeMock).toHaveBeenCalledWith('refresh_token_speichern', { token: 'ref' })
     expect(useAuthStore.getState().isAuthenticated).toBe(true)
+  })
+
+  it('zeigt die Sicherheitsnummer und geht erst auf Weiter weiter', async () => {
+    // Dieselbe Nummer steht gleich im Panel, neben der Frage, ob der Verlauf
+    // hierher soll. Verschwaende sie sofort, gaebe es nichts zu vergleichen.
+    panelNimmtAn()
+    const fertig = vi.fn()
+    codeEingeben(fertig)
+
+    await screen.findByText(await sicherheitsnummer(OEFFENTLICH))
+    expect(veroeffentlichen).toHaveBeenCalledWith('Arbeitsrechner')
+    expect(abholen).toHaveBeenCalledWith('abcd efgh jklm', '{}')
+    expect(fertig).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.wizard.weiter') }))
+    await waitFor(() => expect(fertig).toHaveBeenCalled())
+  })
+
+  it('zeigt einen Fehler beim Weiter unter der Nummer, statt ihn zu verschlucken', async () => {
+    // Der Knopf rief `fortfahren()` ohne Auffangen: scheiterte das Speichern
+    // der Einstellungen, blieb der Schirm einfach stehen, und niemand sah,
+    // warum.
+    panelNimmtAn()
+    const fertig = vi.fn()
+    codeEingeben(fertig)
+    await screen.findByText(await sicherheitsnummer(OEFFENTLICH))
+
+    invokeMock.mockImplementation(async (befehl: string) => {
+      if (befehl === 'konfig_speichern') throw new Error('Platte voll')
+      return null
+    })
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.wizard.weiter') }))
+
+    expect(await screen.findByText('Platte voll')).toBeInTheDocument()
+    expect(fertig).not.toHaveBeenCalled()
+    // Die Nummer bleibt stehen: ein zweiter Versuch vergleicht dieselbe.
+    expect(screen.getByText(await sicherheitsnummer(OEFFENTLICH))).toBeInTheDocument()
+  })
+
+  it('geht ohne Nummer weiter, wenn sich das Geraet nicht melden liess', async () => {
+    // Dann gibt es auch keinen Verlauf, ueber den jemand entscheiden muesste.
+    // Die Kopplung selbst steht trotzdem.
+    veroeffentlichen.mockRejectedValue(new Error('kein Netz'))
+    panelNimmtAn()
+    const fertig = vi.fn()
+    codeEingeben(fertig)
+
+    await waitFor(() => expect(fertig).toHaveBeenCalled())
+    expect(screen.queryByText(i18n.t('mss.wizard.sicherheitsnummerTitel'))).not.toBeInTheDocument()
+    expect(abholen).not.toHaveBeenCalled()
   })
 
   it('ein abgelehnter Code zeigt eine Meldung und bleibt im Schritt', async () => {

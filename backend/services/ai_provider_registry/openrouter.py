@@ -25,7 +25,7 @@ welche, die es gibt.
 
 from __future__ import annotations
 
-from services.ai_provider_registry.basis import Anbieter, Modell, positive_zahl
+from services.ai_provider_registry.basis import Anbieter, Modell, iso_datum, positive_zahl
 
 
 ANBIETER = Anbieter(
@@ -136,6 +136,10 @@ def katalog_lesen(rohdaten: dict) -> Modell | None:
     kontext, ausgabe = _fenster(rohdaten)
     cache_marke = _cache_marke_noetig(rohdaten)
     blick = _sieht(rohdaten)
+    # Wann OpenRouter das Modell aus seiner Liste nimmt — bei 21 von 453
+    # Eintraegen gesetzt (nachgesehen am 2026-09-22). Gilt nur fuer Zugaenge
+    # **ueber** OpenRouter; `ai_model_catalog._anreichern` leiht es nie aus.
+    abschaltung = iso_datum(rohdaten.get("expiration_date"))
     reasoning = rohdaten.get("reasoning")
     if not isinstance(reasoning, dict):
         # Kein Denk-Objekt heißt: dieses Modell denkt nicht. Der Katalog führt
@@ -149,6 +153,7 @@ def katalog_lesen(rohdaten: dict) -> Modell | None:
             max_ausgabe_tokens=ausgabe,
             cache_marke_noetig=cache_marke,
             sieht=blick,
+            abschaltung=abschaltung,
         )
 
     rohe_stufen = reasoning.get("supported_efforts")
@@ -175,4 +180,5 @@ def katalog_lesen(rohdaten: dict) -> Modell | None:
         max_ausgabe_tokens=ausgabe,
         cache_marke_noetig=cache_marke,
         sieht=blick,
+        abschaltung=abschaltung,
     )

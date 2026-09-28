@@ -7,11 +7,13 @@ import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, Mail, ArrowRight, ArrowLeft } from 'lucide-react'
-
+import { Button, buttonClasses } from '@/Singra/UI'
+import { Spinner } from '@/components/ui/Spinner'
 export function ForgotPassword() {
   const { t } = useTranslation()
   const [email, setEmail] = useState('')
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaResetKey, setCaptchaResetKey] = useState(0)
   const [status, setStatus] = useState<'idle' | 'submitting' | 'sent'>('idle')
   const [error, setError] = useState('')
 
@@ -29,6 +31,8 @@ export function ForgotPassword() {
     } catch (err: any) {
       setError(err.message || t('forgotPassword.error'))
       setStatus('idle')
+      setCaptchaToken(null)
+      setCaptchaResetKey((k) => k + 1)
     }
   }
 
@@ -67,7 +71,7 @@ export function ForgotPassword() {
               <p className="font-body-md text-base text-on-surface">{t('forgotPassword.sent')}</p>
               <Link
                 to="/login"
-                className="msm-btn-primary w-full py-3 flex items-center justify-center gap-2"
+                className={buttonClasses('primary', 'lg', 'w-full')}
               >
                 {t('auth.goToLogin')}
                 <ArrowRight className="w-4 h-4" />
@@ -89,18 +93,18 @@ export function ForgotPassword() {
                 />
               </div>
 
-              <CaptchaWidget onVerify={setCaptchaToken} />
+              <CaptchaWidget onVerify={setCaptchaToken} resetKey={captchaResetKey} />
 
               <ErrorMessage message={error} className="text-sm" />
 
-              <button
+              <Button size="lg"
                 type="submit"
                 disabled={status === 'submitting'}
-                className="msm-btn-primary w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {status === 'submitting' ? (
                   <span className="inline-flex items-center gap-2">
-                    <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                    <Spinner />
                     {t('common.loading')}
                   </span>
                 ) : (
@@ -109,7 +113,7 @@ export function ForgotPassword() {
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
-              </button>
+              </Button>
             </form>
           )}
 

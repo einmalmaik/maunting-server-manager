@@ -11,7 +11,9 @@ import { Dropdown } from '@/components/ui/Dropdown'
 import { Switch } from '@/components/ui/Switch'
 import { normalizePanelLanguage } from '@/config/panelLocales'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
+import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function GeneralTab() {
   const { t, i18n } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
@@ -48,13 +50,27 @@ export function GeneralTab() {
           time_format: settings.time_format,
           updates_automatic: settings.updates_automatic,
           desktop_app_download_enabled: settings.desktop_app_download_enabled,
+          story_fable_download_enabled: settings.story_fable_download_enabled,
           calendar_enabled: settings.calendar_enabled,
           notes_enabled: settings.notes_enabled,
+          // Fehlte hier, obwohl der Schalter darunter existiert und schaltet: Der Nutzer legte
+          // den Social-Hub um, bekam "Gespeichert" zu sehen und fand beim naechsten Laden alles
+          // beim Alten. Ein stummer Schalter ist schlimmer als gar keiner.
+          social_enabled: settings.social_enabled,
           vault_enabled: settings.vault_enabled,
           cloudflare_enabled: settings.cloudflare_enabled,
         }),
       })
       toast.success(t('settings.saved'))
+      usePublicSettingsStore.getState().setSettings({
+        calendar_enabled: settings.calendar_enabled,
+        notes_enabled: settings.notes_enabled,
+        social_enabled: settings.social_enabled,
+        vault_enabled: settings.vault_enabled,
+        desktop_app_download_enabled: settings.desktop_app_download_enabled,
+        story_fable_download_enabled: settings.story_fable_download_enabled,
+      })
+      void usePublicSettingsStore.getState().refresh()
     } catch (err: any) {
       toast.error(err.message)
     } finally {
@@ -65,7 +81,7 @@ export function GeneralTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -98,7 +114,7 @@ export function GeneralTab() {
                 und wäre dann eine zweite, unwahre Wahrheit. */}
             <div>
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                {t('settings.apiUrl', 'API-Adresse')}
+                {t('settings.apiUrl')}
               </label>
               <div className="flex items-center gap-2">
                 <input
@@ -156,17 +172,17 @@ export function GeneralTab() {
               <label className="flex items-center justify-between gap-4">
                 <span className="block">
                   <span className="block font-headline text-body-md text-primary font-semibold">
-                    {t('settings.updatesAutomatic', 'Automatische Updates')}
+                    {t('settings.updatesAutomatic')}
                   </span>
                   <span className="block font-body text-xs text-on-surface-variant">
-                    {t('settings.updatesAutomaticHint', 'Das Panel und die remote Nodes aktualisieren sich automatisch, sobald ein neues Commit auf GitHub verfügbar ist.')}
+                    {t('settings.updatesAutomaticHint')}
                   </span>
                 </span>
                 <Switch
                   checked={settings.updates_automatic}
                   onCheckedChange={(checked) => setSettings({ ...settings, updates_automatic: checked })}
                   disabled={!canWrite}
-                  aria-label={t('settings.updatesAutomatic', 'Automatische Updates')}
+                  aria-label={t('settings.updatesAutomatic')}
                 />
               </label>
             </div>
@@ -174,17 +190,17 @@ export function GeneralTab() {
               <label className="flex items-center justify-between gap-4">
                 <span className="block">
                   <span className="block font-headline text-body-md text-primary font-semibold">
-                    {t('settings.desktopDownloadPromo', 'Desktop-App Download-Banner anzeigen')}
+                    {t('settings.desktopDownloadPromo')}
                   </span>
                   <span className="block font-body text-xs text-on-surface-variant">
-                    {t('settings.desktopDownloadPromoHint', 'Blendet in der Seitenleiste einen Download-Link zur Desktop-App für Windows (MSS) ein.')}
+                    {t('settings.desktopDownloadPromoHint')}
                   </span>
                 </span>
                 <Switch
                   checked={settings.desktop_app_download_enabled}
                   onCheckedChange={(checked) => setSettings({ ...settings, desktop_app_download_enabled: checked })}
                   disabled={!canWrite}
-                  aria-label={t('settings.desktopDownloadPromo', 'Desktop-App Download-Banner anzeigen')}
+                  aria-label={t('settings.desktopDownloadPromo')}
                 />
               </label>
             </div>
@@ -192,17 +208,35 @@ export function GeneralTab() {
               <label className="flex items-center justify-between gap-4">
                 <span className="block">
                   <span className="block font-headline text-body-md text-primary font-semibold">
-                    {t('settings.calendarEnabled', 'Integrierter Kalender')}
+                    {t('settings.storyFablePromo')}
                   </span>
                   <span className="block font-body text-xs text-on-surface-variant">
-                    {t('settings.calendarEnabledHint', 'Aktiviert das Kalendermodul im Panel und ermöglicht der KI die Terminverwaltung.')}
+                    {t('settings.storyFablePromoHint')}
+                  </span>
+                </span>
+                <Switch
+                  checked={settings.story_fable_download_enabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, story_fable_download_enabled: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.storyFablePromo')}
+                />
+              </label>
+            </div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
+                  <span className="block font-headline text-body-md text-primary font-semibold">
+                    {t('settings.calendarEnabled')}
+                  </span>
+                  <span className="block font-body text-xs text-on-surface-variant">
+                    {t('settings.calendarEnabledHint')}
                   </span>
                 </span>
                 <Switch
                   checked={settings.calendar_enabled}
                   onCheckedChange={(checked) => setSettings({ ...settings, calendar_enabled: checked })}
                   disabled={!canWrite}
-                  aria-label={t('settings.calendarEnabled', 'Integrierter Kalender')}
+                  aria-label={t('settings.calendarEnabled')}
                 />
               </label>
             </div>
@@ -210,17 +244,17 @@ export function GeneralTab() {
               <label className="flex items-center justify-between gap-4">
                 <span className="block">
                   <span className="block font-headline text-body-md text-primary font-semibold">
-                    {t('settings.notesEnabled', 'Notizfunktion & Einkaufslisten')}
+                    {t('settings.notesEnabled')}
                   </span>
                   <span className="block font-body text-xs text-on-surface-variant">
-                    {t('settings.notesEnabledHint', 'Ermöglicht persönliche und geteilte Notizen, strukturierte Aufgaben, Checklisten und KI-Diktierfunktionen.')}
+                    {t('settings.notesEnabledHint')}
                   </span>
                 </span>
                 <Switch
                   checked={settings.notes_enabled}
                   onCheckedChange={(checked) => setSettings({ ...settings, notes_enabled: checked })}
                   disabled={!canWrite}
-                  aria-label={t('settings.notesEnabled', 'Notizfunktion & Einkaufslisten')}
+                  aria-label={t('settings.notesEnabled')}
                 />
               </label>
             </div>
@@ -228,17 +262,17 @@ export function GeneralTab() {
               <label className="flex items-center justify-between gap-4">
                 <span className="block">
                   <span className="block font-headline text-body-md text-primary font-semibold">
-                    {t('settings.vaultEnabled', 'Passwort-Manager & Authenticator')}
+                    {t('settings.vaultEnabled')}
                   </span>
                   <span className="block font-body text-xs text-on-surface-variant">
-                    {t('settings.vaultEnabledHint', 'Aktiviert den integrierten Zero-Knowledge Tresor für native Apps. Deaktiviert verbirgt ihn im gesamten Panel und in der App.')}
+                    {t('settings.vaultEnabledHint')}
                   </span>
                 </span>
                 <Switch
                   checked={settings.vault_enabled}
                   onCheckedChange={(checked) => setSettings({ ...settings, vault_enabled: checked })}
                   disabled={!canWrite}
-                  aria-label={t('settings.vaultEnabled', 'Passwort-Manager & Authenticator')}
+                  aria-label={t('settings.vaultEnabled')}
                 />
               </label>
             </div>
@@ -246,17 +280,35 @@ export function GeneralTab() {
               <label className="flex items-center justify-between gap-4">
                 <span className="block">
                   <span className="block font-headline text-body-md text-primary font-semibold">
-                    {t('settings.cloudflareEnabled', 'Cloudflare DNS')}
+                    {t('settings.socialEnabled')}
                   </span>
                   <span className="block font-body text-xs text-on-surface-variant">
-                    {t('settings.cloudflareEnabledHint', 'Aktiviert die Cloudflare DNS Verwaltung und automatische Subdomains. Deaktiviert verbirgt sie für KI und UI.')}
+                    {t('settings.socialEnabledHint')}
+                  </span>
+                </span>
+                <Switch
+                  checked={settings.social_enabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, social_enabled: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.socialEnabled')}
+                />
+              </label>
+            </div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
+                  <span className="block font-headline text-body-md text-primary font-semibold">
+                    {t('settings.cloudflareEnabled')}
+                  </span>
+                  <span className="block font-body text-xs text-on-surface-variant">
+                    {t('settings.cloudflareEnabledHint')}
                   </span>
                 </span>
                 <Switch
                   checked={settings.cloudflare_enabled}
                   onCheckedChange={(checked) => setSettings({ ...settings, cloudflare_enabled: checked })}
                   disabled={!canWrite}
-                  aria-label={t('settings.cloudflareEnabled', 'Cloudflare DNS')}
+                  aria-label={t('settings.cloudflareEnabled')}
                 />
               </label>
             </div>
@@ -267,7 +319,7 @@ export function GeneralTab() {
           <div className="flex justify-end">
             <Button type="submit" disabled={saving}>
               {saving ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Save className="w-4 h-4" />
               )}

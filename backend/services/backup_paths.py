@@ -209,7 +209,7 @@ def create_selective_backup_tar(
 #   Cross-Kontamination).
 BACKUP_POSTGRES_ARCNAME = ".msm/postgres.sql"
 BACKUP_POSTGRES_DIR = ".msm/postgres"
-# Sektions-Marker im Legacy-Format (siehe _pg_dump_server_dbs).
+# Sektions-Marker im Legacy-Format — nur noch gelesen (alte Archive), nie geschrieben.
 _PG_SECTION_PREFIX = "-- ===== Database: "
 
 

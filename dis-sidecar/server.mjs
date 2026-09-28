@@ -25,8 +25,14 @@ import {
   deriveHkdfSha256Bits,
   argon2idRaw,
 } from '@msdis/shield/kdf';
+import { formatEnvelope, parseEnvelope } from '@msdis/shield/format-versioning';
 import { randomBytes } from '@msdis/shield/random';
-import { constantTimeEqual } from '@msdis/shield/integrity';
+import {
+  constantTimeEqual,
+  importHmacSha256Key,
+  hmacSha256WithKey,
+  sha256Bytes,
+} from '@msdis/shield/integrity';
 import {
   generateTotpSecret,
   verifyTotpCode,
@@ -68,9 +74,91 @@ const rawKey = await deriveHkdfSha256Bits(secretKeyBytes, {
 });
 const encKey = await importAesGcmKey(rawKey);
 rawKey.fill(0);
+
+const altchaKeyBytes = await deriveHkdfSha256Bits(secretKeyBytes, {
+  info: encoder.encode('MSM-ALTCHA-HMAC-v1'),
+  salt: saltBytes,
+  lengthBits: 256,
+});
+const altchaHmacKey = await importHmacSha256Key(altchaKeyBytes, ['sign', 'verify']);
+altchaKeyBytes.fill(0);
+
+// Blind index: a keyed hash that lets the panel find and deduplicate an
+// encrypted value (e.g. a memory key) without storing it readable. Its own
+// HKDF domain, so an index can never be confused with an ALTCHA signature.
+const blindIndexKeyBytes = await deriveHkdfSha256Bits(secretKeyBytes, {
+  info: encoder.encode('MSM-DIS-blind-index-v1'),
+  salt: saltBytes,
+  lengthBits: 256,
+});
+const blindIndexKey = await importHmacSha256Key(blindIndexKeyBytes, ['sign']);
+blindIndexKeyBytes.fill(0);
 secretKeyBytes.fill(0);
 
 console.log(`[DIS Sidecar] Encryption key derived (HKDF-SHA-256, 256-bit)`);
+console.log(`[DIS Sidecar] ALTCHA HMAC key derived (HKDF-SHA-256, 256-bit)`);
+
+// ── ALTCHA CAPTCHA state ──────────────────────────────────────────────────
+// Map of signature -> expiresAtMillis. Prevents replay attacks.
+const altchaReplayCache = new Map();
+const MAX_ALTCHA_CACHE_SIZE = 50000;
+
+function cleanAltchaReplayCache() {
+  const now = Date.now();
+  for (const [sig, exp] of altchaReplayCache.entries()) {
+    if (exp <= now) {
+      altchaReplayCache.delete(sig);
+    }
+  }
+}
+
+// ── Ciphertext envelope ──────────────────────────────────────────────────
+// Every value from /encrypt carries `msm-dis-v1:` so a stored ciphertext is
+// recognisable as DIS output in any table, just like `msm-pw-v1:` for password
+// hashes. /decrypt still accepts the bare base64 written before 26.09.2026
+// (`legacy`); an unknown `msm-dis-v2:` fails loudly instead of being guessed.
+const DIS_ENVELOPE = {
+  currentPrefix: 'msm-dis-v1:',
+  familyPrefix: 'msm-dis-',
+  subject: 'panel secret',
+};
+
+// What makes a single value unreadable (wrong key or aad, tampered, not even
+// base64). The same set the Python client maps to DisDecryptionError.
+// DisUnsupportedFormatVersionError is deliberately missing: a newer format is
+// not broken and must fail loudly.
+const UNREADABLE = new Set([
+  'DisDecryptionError',
+  'DisIntegrityError',
+  'DisInvalidArgumentError',
+  'InvalidCharacterError',
+]);
+
+// One request for many values instead of one round trip each. A memory with
+// 5,000 entries decrypts its keys in about 0.1 s this way, one by one it took
+// about 4 s. The cap keeps a single request from occupying the sidecar.
+const MAX_BATCH = 10000;
+
+function batchOf(list) {
+  if (!Array.isArray(list) || list.length > MAX_BATCH) {
+    throw new DisBatchError('invalid batch');
+  }
+  return list;
+}
+
+class DisBatchError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'DisBatchError';
+  }
+}
+
+class DisLegacyHashError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'DisLegacyHashError';
+  }
+}
 
 // ── Password hashing params (DIS KDF v2) ─────────────────────────────────
 const PW_SALT_LEN = 16;
@@ -80,6 +168,39 @@ const PW_PARAMS = {
   parallelism: 4,
   hashLength: 32,
 };
+
+// ── Umhuellte passlib-Hashes ─────────────────────────────────────────────
+// Konten von vor DIS tragen `$argon2id$v=19$m=…,t=…,p=…$salz$digest`. Neu
+// hashen geht ohne Klartext nicht, also wird der alte Digest selbst mit DIS
+// gehasht: `msm-pw-v1:<salz>:<hash>:alt.<m>.<t>.<p>.<laenge>.<altes salz>`.
+// Beim Pruefen entsteht der alte Digest aus Passwort und alten Parametern neu.
+// argon2idRaw nimmt nur Strings, darum geht der Digest als Base64 hinein.
+const LEGACY_ARGON2 = /^\$argon2id\$v=19\$m=(\d+),t=(\d+),p=(\d+)\$([A-Za-z0-9+/]+)\$([A-Za-z0-9+/]+)$/;
+const ALT_PARAMS = /^alt\.(\d+)\.(\d+)\.(\d+)\.(\d+)\.([A-Za-z0-9+/]+)$/;
+
+function b64Bytes(text) {
+  return new Uint8Array(Buffer.from(text, 'base64'));
+}
+
+function b64Ohne(bytes) {
+  return Buffer.from(bytes).toString('base64').replace(/=+$/, '');
+}
+
+async function altenDigestRechnen(password, altParams) {
+  const m = ALT_PARAMS.exec(altParams);
+  if (!m) return null;
+  const digest = await argon2idRaw({
+    password,
+    salt: b64Bytes(m[5]),
+    memorySize: Number(m[1]),
+    iterations: Number(m[2]),
+    parallelism: Number(m[3]),
+    hashLength: Number(m[4]),
+  });
+  const text = b64Ohne(digest);
+  digest.fill(0);
+  return text;
+}
 
 // ── Backup streaming encryption ──────────────────────────────────────────
 // In-memory store of backup encryption keys (key_id -> CryptoKey).
@@ -100,8 +221,62 @@ const NONCE_LEN = 12; // AES-GCM 96-bit nonce
 const TAG_LEN = 16; // AES-GCM auth tag
 const FRAME_LEN_FIELD = 4; // big-endian uint32
 
+// A frame carries at most STREAM_CHUNK plaintext plus nonce and tag. Anything
+// larger is not a frame we ever wrote.
+//
+// Audit 2026-09-22: the length field was read as an arbitrary uint32 and the
+// reader then waited for that many bytes to arrive. A single frame header of
+// 0xFFFFFFFF made the decryptor accumulate up to 4 GiB in one Buffer before it
+// could conclude anything — an OOM kill of the one process every crypto
+// operation of the panel depends on.
+const MAX_FRAME_LEN = NONCE_LEN + STREAM_CHUNK + TAG_LEN + 64;
+
+// ── Backup stream format v2 ──────────────────────────────────────────────
+//
+// Audit 2026-09-22: v1 frames were each authenticated on their own, but nothing
+// bound a frame to its *position*. Every frame used AAD=null, so an attacker
+// holding the encrypted backup (a compromised S3 bucket, NAS, or anyone who can
+// write where backups land) could reorder frames, duplicate them, or cut the
+// stream short — and every single frame still verified. The restore then wrote
+// authentic-but-rearranged plaintext: an old database page back over a new one,
+// silently, with a valid GCM tag on every chunk.
+//
+// v2 binds each frame to its index and marks the final frame, so reordering,
+// duplication and truncation all fail the tag check.
+//
+//   stream := MAGIC || frame*
+//   frame  := [4B BE len][12B nonce][ct||tag]
+//   AAD    := [8B BE index][1B final]
+//
+// The magic cannot collide with a v1 stream: a v1 stream opens with a frame
+// length field, and 'M' (0x4D) as its high byte would mean a frame of ~1.3 GB —
+// far beyond MAX_FRAME_LEN. Streams without the magic are read as v1 so that
+// backups written before this change stay restorable; v1 is never written.
+const STREAM_MAGIC_V2 = Buffer.from('MSMBKP2\n', 'ascii');
+
+/** AAD for frame `index`; `final` marks the last frame of the stream. */
+function frameAad(index, final) {
+  const aad = new Uint8Array(9);
+  const view = new DataView(aad.buffer);
+  view.setBigUint64(0, BigInt(index), false);
+  aad[8] = final ? 1 : 0;
+  return aad;
+}
+
 // ── HTTP server ──────────────────────────────────────────────────────────
-/** @param {import('node:http').IncomingMessage} req */
+const EXPECTED_AUTH = Buffer.from(`Bearer ${TOKEN}`, 'utf8');
+
+/**
+ * Constant-time bearer check.
+ *
+ * Audit 2026-09-22: this used `===` on the header string. JavaScript's string
+ * comparison exits at the first differing byte, so the response time leaked how
+ * long a prefix matched. Over loopback — where the whole threat model is "some
+ * other local process must not be able to call us" — an attacker can recover
+ * the token byte by byte and then use `/decrypt` as a universal oracle against
+ * every secret the panel holds. `constantTimeEqual` was already imported for
+ * password verification; it just wasn't used on the door.
+ */
 function checkAuth(req) {
   if (!TOKEN) {
     if (NODE_ENV === 'production') {
@@ -109,7 +284,15 @@ function checkAuth(req) {
     }
     return true;
   }
-  return req.headers.authorization === `Bearer ${TOKEN}`;
+  const supplied = Buffer.from(String(req.headers.authorization || ''), 'utf8');
+  // Length is not a secret (the token length is fixed by config), but the
+  // comparison must not short-circuit on content.
+  if (supplied.length !== EXPECTED_AUTH.length) {
+    // Still burn a comparison so a wrong length costs the same as a wrong byte.
+    constantTimeEqual(new Uint8Array(EXPECTED_AUTH), new Uint8Array(EXPECTED_AUTH));
+    return false;
+  }
+  return constantTimeEqual(new Uint8Array(supplied), new Uint8Array(EXPECTED_AUTH));
 }
 
 /** @param {import('node:http').ServerResponse} res @param {number} code @param {any} data */
@@ -118,11 +301,37 @@ function jsonReply(res, code, data) {
   res.end(JSON.stringify(data));
 }
 
+// A JSON request to this service is a secret, a hash or a TOTP code — none of
+// them is megabytes long. Without a ceiling a single request could grow the
+// heap until the process dies, taking every crypto operation of the panel with
+// it (fail-closed means: nothing works any more).
+const MAX_JSON_BODY = 8 * 1024 * 1024; // 8 MiB
+
 /** @param {import('node:http').IncomingMessage} req @returns {Promise<any>} */
 async function readJson(req) {
-  let body = '';
-  for await (const chunk of req) body += chunk;
-  return JSON.parse(body);
+  // Chunks are collected as bytes and decoded once. Decoding each chunk on its
+  // own turned a multi-byte character cut at a chunk boundary into U+FFFD, and
+  // /encrypt then encrypted the damaged text.
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_JSON_BODY) {
+      const e = new Error('request body too large');
+      e.name = 'PayloadTooLarge';
+      throw e;
+    }
+    chunks.push(chunk);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+/** Reply for a body readJson refused. Too large is not the same as broken. */
+function bodyError(res, e) {
+  if (e instanceof Error && e.name === 'PayloadTooLarge') {
+    return jsonReply(res, 413, { error: 'PayloadTooLarge' });
+  }
+  return jsonReply(res, 400, { error: 'invalid json' });
 }
 
 const server = http.createServer(async (req, res) => {
@@ -164,8 +373,8 @@ const server = http.createServer(async (req, res) => {
   let data;
   try {
     data = await readJson(req);
-  } catch {
-    return jsonReply(res, 400, { error: 'invalid json' });
+  } catch (e) {
+    return bodyError(res, e);
   }
 
   try {
@@ -173,15 +382,53 @@ const server = http.createServer(async (req, res) => {
     switch (req.url) {
       case '/encrypt':
         result = {
-          ciphertext: await encryptString(data.plaintext, encKey, data.aad),
+          ciphertext: formatEnvelope(
+            DIS_ENVELOPE,
+            await encryptString(data.plaintext, encKey, data.aad),
+          ),
         };
         break;
 
       case '/decrypt':
         result = {
-          plaintext: await decryptString(data.ciphertext, encKey, data.aad),
+          plaintext: await decryptString(
+            parseEnvelope(DIS_ENVELOPE, String(data.ciphertext)).payload,
+            encKey,
+            data.aad,
+          ),
         };
         break;
+
+      case '/decrypt-many': {
+        // One unreadable value must not hide all the others: it comes back
+        // as null, exactly the cases /decrypt reports as DisDecryptionError.
+        const plaintexts = await Promise.all(
+          batchOf(data.items).map(async (item) => {
+            try {
+              return await decryptString(
+                parseEnvelope(DIS_ENVELOPE, String(item.ciphertext)).payload,
+                encKey,
+                item.aad || undefined,
+              );
+            } catch (e) {
+              if (e instanceof Error && UNREADABLE.has(e.name)) return null;
+              throw e;
+            }
+          }),
+        );
+        result = { plaintexts };
+        break;
+      }
+
+      case '/blind-index': {
+        const indices = [];
+        for (const value of batchOf(data.values)) {
+          const mac = await hmacSha256WithKey(blindIndexKey, encoder.encode(String(value)));
+          indices.push(Buffer.from(mac).toString('hex'));
+        }
+        result = { indices };
+        break;
+      }
 
       case '/hash-password': {
         const salt = randomBytes(PW_SALT_LEN);
@@ -197,6 +444,28 @@ const server = http.createServer(async (req, res) => {
         break;
       }
 
+      case '/wrap-legacy-password': {
+        const m = LEGACY_ARGON2.exec(String(data.hash));
+        if (!m) {
+          throw new DisLegacyHashError('kein passlib-Argon2id-Hash (v=19)');
+        }
+        const [, mem, iter, par, altSalz, altDigest] = m;
+        const digestBytes = b64Bytes(altDigest);
+        const altParams = `alt.${mem}.${iter}.${par}.${digestBytes.length}.${b64Ohne(b64Bytes(altSalz))}`;
+        const salt = randomBytes(PW_SALT_LEN);
+        const hash = await argon2idRaw({
+          password: b64Ohne(digestBytes),
+          salt,
+          ...PW_PARAMS,
+        });
+        digestBytes.fill(0);
+        result = {
+          hash: `msm-pw-v1:${Buffer.from(salt).toString('base64')}:${Buffer.from(hash).toString('base64')}:${altParams}`,
+        };
+        hash.fill(0);
+        break;
+      }
+
       case '/verify-password': {
         const parts = String(data.hash).split(':');
         if (parts.length !== 4 || parts[0] !== 'msm-pw-v1') {
@@ -204,10 +473,18 @@ const server = http.createServer(async (req, res) => {
           result = { valid: false, legacy: true };
           break;
         }
+        let password = data.password;
+        if (parts[3] !== 'v2') {
+          password = await altenDigestRechnen(password, parts[3]);
+          if (password === null) {
+            result = { valid: false };
+            break;
+          }
+        }
         const salt = new Uint8Array(Buffer.from(parts[1], 'base64'));
         const storedHash = new Uint8Array(Buffer.from(parts[2], 'base64'));
         const computed = await argon2idRaw({
-          password: data.password,
+          password,
           salt,
           ...PW_PARAMS,
         });
@@ -235,6 +512,125 @@ const server = http.createServer(async (req, res) => {
           }),
         };
         break;
+
+      case '/altcha/challenge': {
+        cleanAltchaReplayCache();
+        const maxnumber = 50000;
+        const expiresInSeconds = 300; // 5 minutes
+        const expiresAt = Math.floor(Date.now() / 1000) + expiresInSeconds;
+        const saltHex = Buffer.from(randomBytes(16)).toString('hex');
+        const salt = `${saltHex}?expires=${expiresAt}`;
+        const targetNumber = crypto.randomInt(0, maxnumber + 1);
+
+        const challengeBytes = await sha256Bytes(encoder.encode(salt + targetNumber));
+        const challenge = Buffer.from(challengeBytes).toString('hex');
+
+        const sigBytes = await hmacSha256WithKey(altchaHmacKey, encoder.encode(challenge));
+        const signature = Buffer.from(sigBytes).toString('hex');
+
+        result = {
+          algorithm: 'SHA-256',
+          challenge,
+          maxnumber,
+          maxNumber: maxnumber,
+          salt,
+          signature,
+        };
+        break;
+      }
+
+      case '/altcha/verify': {
+        cleanAltchaReplayCache();
+        const payload = data?.payload;
+        if (typeof payload !== 'string' || !payload.trim()) {
+          result = { valid: false };
+          break;
+        }
+
+        let parsed;
+        try {
+          const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+          const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+          const jsonStr = Buffer.from(padded, 'base64').toString('utf8');
+          parsed = JSON.parse(jsonStr);
+        } catch {
+          result = { valid: false };
+          break;
+        }
+
+        if (
+          !parsed ||
+          parsed.algorithm !== 'SHA-256' ||
+          typeof parsed.challenge !== 'string' ||
+          typeof parsed.salt !== 'string' ||
+          typeof parsed.signature !== 'string' ||
+          typeof parsed.number !== 'number' ||
+          !Number.isInteger(parsed.number) ||
+          parsed.number < 0
+        ) {
+          result = { valid: false };
+          break;
+        }
+
+        // Check expiry in salt (reject expired or absurd future timestamps)
+        const qIndex = parsed.salt.indexOf('?');
+        if (qIndex === -1) {
+          result = { valid: false };
+          break;
+        }
+        const params = new URLSearchParams(parsed.salt.slice(qIndex + 1));
+        const expiresStr = params.get('expires');
+        if (!expiresStr) {
+          result = { valid: false };
+          break;
+        }
+        const expiresSec = parseInt(expiresStr, 10);
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (isNaN(expiresSec) || expiresSec < nowSec || expiresSec > nowSec + 600) {
+          result = { valid: false };
+          break;
+        }
+
+        // Replay check
+        if (altchaReplayCache.has(parsed.signature)) {
+          result = { valid: false };
+          break;
+        }
+
+        // Verify HMAC signature in constant time
+        const expectedSigBytes = await hmacSha256WithKey(altchaHmacKey, encoder.encode(parsed.challenge));
+        const expectedSig = Buffer.from(expectedSigBytes).toString('hex');
+
+        const expectedSigBuf = Buffer.from(expectedSig, 'utf8');
+        const suppliedSigBuf = Buffer.from(parsed.signature, 'utf8');
+        if (
+          expectedSigBuf.length !== suppliedSigBuf.length ||
+          !constantTimeEqual(new Uint8Array(expectedSigBuf), new Uint8Array(suppliedSigBuf))
+        ) {
+          result = { valid: false };
+          break;
+        }
+
+        // Verify Proof-of-Work
+        const computedChallengeBytes = await sha256Bytes(encoder.encode(parsed.salt + parsed.number));
+        const computedChallenge = Buffer.from(computedChallengeBytes).toString('hex');
+        if (computedChallenge.toLowerCase() !== parsed.challenge.toLowerCase()) {
+          result = { valid: false };
+          break;
+        }
+
+        // Record in replay cache with FIFO eviction guarantee to prevent replay bypass under load
+        if (altchaReplayCache.size >= MAX_ALTCHA_CACHE_SIZE) {
+          const oldestKey = altchaReplayCache.keys().next().value;
+          if (oldestKey !== undefined) {
+            altchaReplayCache.delete(oldestKey);
+          }
+        }
+        altchaReplayCache.set(parsed.signature, expiresSec * 1000);
+
+        result = { valid: true };
+        break;
+      }
 
       default:
         return jsonReply(res, 404, { error: 'not found' });
@@ -272,8 +668,8 @@ async function handleDeriveRawKey(req, res) {
   let body;
   try {
     body = await readJson(req);
-  } catch {
-    return jsonReply(res, 400, { error: 'invalid json' });
+  } catch (e) {
+    return bodyError(res, e);
   }
   const password = body?.password;
   const salt = body?.salt;
@@ -315,8 +711,8 @@ async function handleInitKey(req, res) {
   let body;
   try {
     body = await readJson(req);
-  } catch {
-    return jsonReply(res, 400, { error: 'invalid json' });
+  } catch (e) {
+    return bodyError(res, e);
   }
   const password = body?.password;
   const salt = body?.salt;
@@ -361,8 +757,8 @@ async function handleInvalidateKey(req, res) {
   let body;
   try {
     body = await readJson(req);
-  } catch {
-    return jsonReply(res, 400, { error: 'invalid json' });
+  } catch (e) {
+    return bodyError(res, e);
   }
   const keyId = body?.key_id;
   if (typeof keyId !== 'string' || keyId.length === 0) {
@@ -383,16 +779,20 @@ async function handleEncryptStream(req, res) {
     'Content-Type': 'application/octet-stream',
     'Transfer-Encoding': 'chunked',
   });
+  res.write(STREAM_MAGIC_V2);
 
   let buffer = Buffer.alloc(0);
+  let frameIndex = 0;
 
   /**
    * Encrypt one plaintext chunk into a frame and write it to the response.
    * Frame: [4-byte BE length][12-byte nonce][ciphertext + 16-byte tag]
+   * AAD binds the frame to its index and to whether it ends the stream.
    */
-  async function flushChunk(chunk) {
+  async function flushChunk(chunk, final) {
     const nonce = randomBytes(NONCE_LEN);
-    const ct = await aesGcmEncrypt(key, nonce, new Uint8Array(chunk));
+    const ct = await aesGcmEncrypt(key, nonce, new Uint8Array(chunk), frameAad(frameIndex, final));
+    frameIndex += 1;
     const len = NONCE_LEN + ct.length; // 12 + ciphertext + tag
     const frame = Buffer.allocUnsafe(FRAME_LEN_FIELD + len);
     frame.writeUInt32BE(len, 0);
@@ -407,12 +807,12 @@ async function handleEncryptStream(req, res) {
       while (buffer.length >= STREAM_CHUNK) {
         const piece = buffer.subarray(0, STREAM_CHUNK);
         buffer = buffer.subarray(STREAM_CHUNK);
-        await flushChunk(piece);
+        await flushChunk(piece, false);
       }
     }
-    if (buffer.length > 0) {
-      await flushChunk(buffer);
-    }
+    // Always emit a final frame — it is the receipt that the stream was not cut
+    // short. For empty input that is a single frame with empty plaintext.
+    await flushChunk(buffer, true);
     res.end();
   } catch (e) {
     // Encryption with a valid key should not fail; if it does, abort the
@@ -443,6 +843,9 @@ async function handleDecryptStream(req, res) {
 
   let headersSent = false;
   let buffer = Buffer.alloc(0);
+  let version = null; // null = not yet determined, 1 = legacy, 2 = position-bound
+  let frameIndex = 0;
+  let sawFinalFrame = false;
 
   /** Send 200 + chunked headers on first successful plaintext write. */
   function beginStreaming() {
@@ -452,6 +855,38 @@ async function handleDecryptStream(req, res) {
         'Transfer-Encoding': 'chunked',
       });
       headersSent = true;
+    }
+  }
+
+  /**
+   * Decrypt one frame. For v2 the frame's AAD must match its position; the
+   * final frame is recognised by falling back to the `final` AAD exactly once.
+   * Returns the plaintext, or null if the frame does not authenticate.
+   */
+  async function decryptFrame(nonce, ct) {
+    if (version === 1) {
+      try {
+        return await aesGcmDecrypt(key, nonce, ct);
+      } catch {
+        return null;
+      }
+    }
+    try {
+      const plain = await aesGcmDecrypt(key, nonce, ct, frameAad(frameIndex, false));
+      frameIndex += 1;
+      return plain;
+    } catch {
+      // Not a body frame at this position — the only other thing it may be is
+      // the final frame for this very index. Anything else (reordered,
+      // duplicated, foreign) fails both and is rejected below.
+    }
+    try {
+      const plain = await aesGcmDecrypt(key, nonce, ct, frameAad(frameIndex, true));
+      frameIndex += 1;
+      sawFinalFrame = true;
+      return plain;
+    } catch {
+      return null;
     }
   }
 
@@ -471,13 +906,24 @@ async function handleDecryptStream(req, res) {
     for await (const chunk of req) {
       buffer = buffer.length > 0 ? Buffer.concat([buffer, chunk]) : chunk;
 
+      // Determine the stream version once, from the leading magic.
+      if (version === null) {
+        if (buffer.length < STREAM_MAGIC_V2.length) continue;
+        if (buffer.subarray(0, STREAM_MAGIC_V2.length).equals(STREAM_MAGIC_V2)) {
+          version = 2;
+          buffer = Buffer.from(buffer.subarray(STREAM_MAGIC_V2.length));
+        } else {
+          version = 1;
+        }
+      }
+
       // Process as many complete frames as are available in the buffer.
       let off = 0;
       while (off + FRAME_LEN_FIELD <= buffer.length) {
         const frameLen = buffer.readUInt32BE(off);
         off += FRAME_LEN_FIELD;
-        if (frameLen < NONCE_LEN) {
-          // frame_length too small to contain a nonce — malformed.
+        if (frameLen < NONCE_LEN || frameLen > MAX_FRAME_LEN) {
+          // Too small to hold a nonce, or larger than anything we ever wrote.
           return failDecrypt();
         }
         if (off + frameLen > buffer.length) {
@@ -491,11 +937,15 @@ async function handleDecryptStream(req, res) {
         if (ct.length < TAG_LEN) {
           return failDecrypt();
         }
-        let plaintext;
-        try {
-          plaintext = await aesGcmDecrypt(key, nonce, ct);
-        } catch {
-          // Auth-tag mismatch (tamper or wrong key).
+        if (sawFinalFrame) {
+          // Data after the frame that claimed to end the stream: appended or
+          // replayed frames. Refuse rather than hand the caller a longer file
+          // than the one that was signed off.
+          return failDecrypt();
+        }
+        const plaintext = await decryptFrame(nonce, ct);
+        if (plaintext === null) {
+          // Auth-tag mismatch: tamper, wrong key, or a frame out of position.
           return failDecrypt();
         }
         beginStreaming();
@@ -510,6 +960,12 @@ async function handleDecryptStream(req, res) {
 
     // Request stream ended. Any leftover bytes mean a truncated final frame.
     if (buffer.length > 0) {
+      return failDecrypt();
+    }
+
+    // A v2 stream that never presented its final frame was cut short — the one
+    // manipulation a per-frame tag cannot notice on its own.
+    if (version === 2 && !sawFinalFrame) {
       return failDecrypt();
     }
 

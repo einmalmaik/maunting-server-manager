@@ -2,10 +2,12 @@ import base64
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 import hashlib
+import logging
 import secrets
 
 from jose import jwt, JWTError
 from passlib.context import CryptContext
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -16,6 +18,8 @@ from services.dis_client import DisClient
 # Wird entfernt sobald alle User mindestens einmal eingeloggt waren
 # und ihre Hashes im msm-pw-v1: Format vorliegen.
 _pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+
+logger = logging.getLogger("msm.auth_service")
 
 
 class AuthService:
@@ -37,11 +41,12 @@ class AuthService:
 
     @staticmethod
     def rehash_password_if_needed(db: Session, user: User, plain_password: str) -> None:
-        """Re-hasht ein Passwort mit DIS wenn der Hash noch im legacy Format ist.
+        """Re-hasht ein Passwort mit DIS, wenn der Hash kein frischer DIS-Hash ist.
 
-        Wird nach erfolgreichem Login aufgerufen (lazy Migration passlib -> DIS).
+        Wird nach erfolgreichem Login aufgerufen. Betrifft passlib-Hashes und
+        die beim Start umhuellten (services/passwort_altbestand.py).
         """
-        if not DisClient.is_dis_hash(user.password_hash):
+        if DisClient.braucht_neuen_hash(user.password_hash):
             user.password_hash = DisClient.hash_password(plain_password)
             db.commit()
 
@@ -101,7 +106,22 @@ class AuthService:
         token_hash = AuthService._hash_token(plain_token)
         token_family = family or secrets.token_urlsafe(16)
 
-        expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
+        is_paired = (geraet == "desktop")
+        if not is_paired and token_family:
+            from models.device_pairing import DevicePairing
+            is_paired = (
+                db.query(DevicePairing)
+                .filter(DevicePairing.family == token_family, DevicePairing.redeemed_at.isnot(None))
+                .first()
+                is not None
+            )
+
+        expire_days = (
+            settings.paired_device_refresh_token_expire_days
+            if is_paired
+            else settings.refresh_token_expire_days
+        )
+        expires_at = datetime.now(timezone.utc) + timedelta(days=expire_days)
 
         rt = RefreshToken(
             user_id=user_id,
@@ -130,11 +150,11 @@ class AuthService:
     def find_recently_used_refresh_token(
         db: Session, plain_token: str, max_age_seconds: int = 30
     ) -> RefreshToken | None:
-        """Findet ein vor kurzem rotiertes Token eines gekoppelten Geräts innerhalb der Grace Period.
+        """Findet ein vor kurzem rotiertes Token innerhalb der Grace Period.
 
-        Schuetzt mobile Apps und Desktop-Clients vor Verbindungsabbruechen
-        waehrend der Token-Rotation, ohne die Wiederverwendungserkennung fuer
-        tatsaechlich gestohlene Tokens aufzugeben (RFC 6749 BCP).
+        Schuetzt Web-Sessions, mobile Apps und Desktop-Clients vor Verbindungsabbruechen
+        und parallelen Fetch-Races waehrend der Token-Rotation, ohne die Wiederverwendungserkennung
+        fuer tatsaechlich gestohlene Tokens aufzugeben (RFC 6749 BCP).
         """
         token_hash = AuthService._hash_token(plain_token)
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
@@ -144,7 +164,6 @@ class AuthService:
                 RefreshToken.token_hash == token_hash,
                 RefreshToken.revoked_at.is_(None),
                 RefreshToken.used_at >= cutoff,
-                RefreshToken.geraet.isnot(None),
             )
             .first()
         )
@@ -173,6 +192,7 @@ class AuthService:
             RefreshToken.revoked_at.is_(None),
         ).update({"revoked_at": datetime.now(timezone.utc)})
         db.commit()
+        AuthService._sitzung_abraeumen(db, user_id, None)
 
     @staticmethod
     def revoke_refresh_family(db: Session, user_id: int, family: str) -> int:
@@ -190,7 +210,31 @@ class AuthService:
             RefreshToken.revoked_at.is_(None),
         ).update({"revoked_at": datetime.now(timezone.utc)})
         db.commit()
+        AuthService._sitzung_abraeumen(db, user_id, family)
         return int(getroffen)
+
+    @staticmethod
+    def _sitzung_abraeumen(db: Session, user_id: int, family: str | None) -> None:
+        """Was nach dem Sperren noch am Geraet haengt: offene Verbindungen und Push.
+
+        Das Sperren der Familie haelt nur **neue** Anfragen auf. Bis 09/2026
+        lief ein offener Echtzeitstrom weiter, und die Push-Adresse des
+        Geraets bekam weiter Benachrichtigungen. ``family=None`` heisst alle
+        Sitzungen des Kontos.
+
+        Scheitert das Abraeumen der Push-Adressen, bleibt die Sperre
+        trotzdem stehen; sie ist schon festgeschrieben.
+        """
+        # Lokale Importe: beide Dienste haengen mittelbar an diesem Modul.
+        from services import webpush_service
+        from services.sync_event_service import SyncEventService
+
+        SyncEventService.trenne(user_id, family)
+        try:
+            webpush_service.austragen_familie(db, user_id, family)
+        except Exception:
+            db.rollback()
+            logger.warning("Push-Adressen nach Sperre nicht entfernt (User %s).", user_id)
 
     # ── CSRF Token ──
     @staticmethod
@@ -217,6 +261,19 @@ class AuthService:
         return db.query(User).filter(User.username == username).first()
 
     @staticmethod
+    def benutzername_belegt(db: Session, username: str, ausser_id: int | None = None) -> bool:
+        """Ob ``username`` schon vergeben ist, ohne Ruecksicht auf Gross/klein.
+
+        ``Max`` neben ``max`` saehe in Profil, Suche und Erwaehnung wie
+        dieselbe Person aus. ``ausser_id`` nimmt das eigene Konto aus, damit
+        man die Schreibweise des eigenen Namens aendern kann.
+        """
+        abfrage = db.query(User.id).filter(func.lower(User.username) == username.lower())
+        if ausser_id is not None:
+            abfrage = abfrage.filter(User.id != ausser_id)
+        return abfrage.first() is not None
+
+    @staticmethod
     def get_user_by_email(db: Session, email: str) -> User | None:
         return db.query(User).filter(User.email_hash == User._email_hash(email)).first()
 
@@ -228,12 +285,30 @@ class AuthService:
     def is_owner_exists(db: Session) -> bool:
         return db.query(User).filter(User.is_owner == True).first() is not None
 
-    @staticmethod
-    def create_owner(db: Session, username: str, email: str, password: str) -> User:
+    # Hier erzeugte der Server bis 09/2026 ein RSA-Paar, warf den privaten Teil
+    # weg und veroeffentlichte den oeffentlichen als `users.social_e2ee_public_key`
+    # (`generate_e2ee_public_key_jwk` / `ensure_user_e2ee_key`). Jedes Konto hatte
+    # damit einen Schluessel, zu dem es nirgends einen privaten gab: wer dagegen
+    # verschluesselte, schrieb in ein schwarzes Loch — die Nachricht sah gesendet
+    # aus und war fuer immer unlesbar.
+    #
+    # E2EE-Schluessel entstehen jetzt ausschliesslich auf dem Geraet und werden
+    # ueber `PUT /social/e2ee/devices/self` veroeffentlicht. Der Server erzeugt
+    # kein Schluesselmaterial fuer den Messenger.
+
+    @classmethod
+    def authenticate_user(cls, db: Session, username: str, password: str) -> User | None:
+        user = cls.get_user_by_username(db, username)
+        if not user or not cls.verify_password(password, user.password_hash):
+            return None
+        return user
+
+    @classmethod
+    def create_owner(cls, db: Session, username: str, email: str, password: str) -> User:
         user = User(
             username=username,
             email=email,
-            password_hash=AuthService.hash_password(password),
+            password_hash=cls.hash_password(password),
             is_owner=True,
             email_verified=True,
         )
@@ -242,12 +317,12 @@ class AuthService:
         db.refresh(user)
         return user
 
-    @staticmethod
-    def create_user(db: Session, username: str, email: str, password: str) -> User:
+    @classmethod
+    def create_user(cls, db: Session, username: str, email: str, password: str) -> User:
         user = User(
             username=username,
             email=email,
-            password_hash=AuthService.hash_password(password),
+            password_hash=cls.hash_password(password),
         )
         db.add(user)
         db.commit()
@@ -265,6 +340,7 @@ class AuthService:
     @staticmethod
     def reset_password(db: Session, user: User, new_password: str) -> None:
         user.password_hash = AuthService.hash_password(new_password)
+        user.has_password = True
         user.password_reset_token = None
         user.password_reset_expires = None
         # Sicherheit: Bei Passwort-Aenderung alle Refresh-Tokens revozieren

@@ -38,11 +38,13 @@ export interface PanelSettings {
   singra_webhook_secret_source: 'env' | 'panel' | 'none'
   updates_automatic: boolean
   desktop_app_download_enabled: boolean
+  story_fable_download_enabled: boolean
   calendar_enabled: boolean
   notes_enabled: boolean
   vault_enabled: boolean
+  social_enabled: boolean
   captcha_enabled: boolean
-  captcha_provider: 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
+  captcha_provider: 'altcha' | 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
   captcha_site_key: string
   captcha_secret_key: string
   cloudflare_enabled: boolean
@@ -103,11 +105,13 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   singra_webhook_secret_source: 'none',
   updates_automatic: false,
   desktop_app_download_enabled: true,
+  story_fable_download_enabled: false,
   calendar_enabled: true,
   notes_enabled: true,
   vault_enabled: true,
-  captcha_enabled: false,
-  captcha_provider: 'none',
+  social_enabled: true,
+  captcha_enabled: true,
+  captcha_provider: 'altcha',
   captcha_site_key: '',
   captcha_secret_key: '',
   cloudflare_enabled: true,

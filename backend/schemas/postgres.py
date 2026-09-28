@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -66,158 +66,11 @@ class PostgresDatabaseRequest(BaseModel):
     database_id: int
 
 
-class PostgresCreateTableColumn(BaseModel):
-    name: str = Field(..., min_length=1, max_length=63)
-    type: str = Field(..., min_length=1, max_length=32)
-    primary_key: bool = False
-    not_null: bool = False
-
-
-class PostgresCreateTableRequest(BaseModel):
-    database_id: int
-    schema_name: str = Field("public", min_length=1, max_length=63)
-    table_name: str = Field(..., min_length=1, max_length=63)
-    columns: list[PostgresCreateTableColumn] = Field(..., min_length=1, max_length=64)
-
-
-class PostgresTableRequest(BaseModel):
-    database_id: int
-    schema_name: str = Field("public", min_length=1, max_length=63)
-    table_name: str = Field(..., min_length=1, max_length=63)
-
-
-class PostgresDropTableRequest(PostgresTableRequest):
-    confirm_name: str = Field(..., min_length=1, max_length=63)
-
-
-class PostgresRowsRequest(PostgresTableRequest):
-    limit: int = Field(500, ge=1, le=500)
-    offset: int = Field(0, ge=0)
-    search: str | None = Field(None, max_length=128)
-
-
-class PostgresUpdateRowRequest(BaseModel):
-    database_id: int | None = None
-    schema_name: str = Field("public", min_length=1, max_length=63)
-    table_name: str = Field(..., min_length=1, max_length=63)
-    key_conditions: dict[str, Any] = Field(..., min_length=1)
-    updates: dict[str, Any] = Field(..., min_length=1)
-
-
-class PostgresDeleteRowsRequest(BaseModel):
-    database_id: int | None = None
-    schema_name: str = Field("public", min_length=1, max_length=63)
-    table_name: str = Field(..., min_length=1, max_length=63)
-    row_conditions: list[dict[str, Any]] = Field(..., min_length=1)
-
-
-class PostgresInsertRowRequest(BaseModel):
-    database_id: int | None = None
-    schema_name: str = Field("public", min_length=1, max_length=63)
-    table_name: str = Field(..., min_length=1, max_length=63)
-    row_data: dict[str, Any] = Field(..., min_length=1)
-
-
-class PostgresSqlRequest(BaseModel):
-    database_id: int
-    sql: str = Field(..., min_length=1, max_length=20000)
-    limit: int = Field(500, ge=1, le=500)
-
-
-class PostgresRowsResponse(BaseModel):
-    columns: list[str]
-    rows: list[dict[str, Any]]
-    limit: int | None = None
-    offset: int | None = None
-    row_count: int | None = None
-    status: str | None = None
-
-
-class PostgresTableListItem(BaseModel):
-    schema: str
-    name: str
-    row_estimate: int | None = None
-    size_bytes: int | None = None
-
-
-class PostgresDatabaseStats(BaseModel):
-    status: str
-    latency_ms: int | None = None
-    size_bytes: int | None = None
-    table_count: int = 0
-    active_connections: int | None = None
-    max_connections: int | None = None
-    database_name: str
-    engine: str = "PostgreSQL"
-
-
-class PostgresColumnInfo(BaseModel):
-    name: str
-    data_type: str
-    nullable: bool
-    default: str | None = None
-    primary_key: bool = False
-
-
-class PostgresIndexInfo(BaseModel):
-    name: str
-    definition: str
-
-
-class PostgresForeignKeyInfo(BaseModel):
-    name: str
-    column_name: str
-    foreign_table: str
-    foreign_column: str
-
-
-class PostgresTableInfo(BaseModel):
-    schema: str
-    name: str
-    columns: list[PostgresColumnInfo]
-    indexes: list[PostgresIndexInfo]
-    foreign_keys: list[PostgresForeignKeyInfo]
-    size_bytes: int | None = None
-    row_estimate: int | None = None
-
-
-class PostgresSqlStatementResult(BaseModel):
-    statement: str
-    columns: list[str] = []
-    rows: list[dict[str, Any]] = []
-    row_count: int | None = None
-    status: str | None = None
-    error: str | None = None
-    duration_ms: int | None = None
-
-
 class PostgresRotatePasswordResponse(BaseModel):
     username: str
     password: str
     host: str
     port: int
-
-
-class PostgresSqlResponse(BaseModel):
-    statements: list[PostgresSqlStatementResult]
-    total_duration_ms: int
-    statement_timeout_ms: int
-
-
-class PostgresExtensionInfo(BaseModel):
-    name: str
-    version: str | None = None
-    trusted: bool = True
-
-
-class PostgresExtensionRequest(BaseModel):
-    database_id: int = Field(..., ge=1)
-    name: str = Field(..., min_length=1, max_length=63)
-
-
-class PostgresExtensionDropRequest(BaseModel):
-    database_id: int = Field(..., ge=1)
-    confirm_name: str = Field(..., min_length=1, max_length=63)
 
 
 class PostgresPowerUserResponse(BaseModel):
@@ -234,31 +87,6 @@ class PostgresPowerUserDemoteRequest(BaseModel):
     confirm_name: str = Field(..., min_length=1, max_length=63)
 
 
-class PostgresDumpRequest(BaseModel):
-    """Auswahl des Dump-Umfangs fuer ``pg_dump``.
-
-    Default: ``scope=all_dbs`` erfasst alle DBs des Servers. ``scope=database``
-    ist deprecated -- der Server hat genau einen Postgres-Container mit allen
-    DBs drin, daher macht ``scope=all_dbs`` immer Sinn.
-    """
-    confirm_text: str | None = Field(
-        None,
-        max_length=128,
-        description="Sicherheits-Bestaetigung -- muss mit Server-Namen uebereinstimmen wenn Dump loeschend wirkt.",
-    )
-
-
-class PostgresRestoreRequest(BaseModel):
-    """Restore-Request fuer ``psql``-Restore aus hochgeladenem SQL-Dump.
-
-    Verhalten: SQL wird IMMER in ALLE DBs des Servers geschrieben
-    (alle existierenden Tabellen werden vorher gedroppt, damit ein sauberer
-    Restore gelingt). Wenn der Server nur eine DB hat, ist der Effekt identisch.
-    """
-    sql: str = Field(..., min_length=1, max_length=200_000_000)
-    confirm_text: str | None = Field(None, max_length=128)
-
-
 class PostgresDumpResponse(BaseModel):
     """Metadata zu einem pg_dump-Lauf.
 
@@ -269,3 +97,62 @@ class PostgresDumpResponse(BaseModel):
     byte_size: int
     sha256: str
     duration_ms: int
+
+
+# ── Verbindungs-Hub ────────────────────────────────────────────────────────
+
+
+class PostgresHubUser(BaseModel):
+    id: int
+    username: str
+    # False bei Nutzern von vor 09/2026: nie gespeichert, erst Rotieren hilft.
+    password_stored: bool
+
+
+class PostgresHubDatabase(BaseModel):
+    id: int
+    name: str
+    owner_role: str
+    # Owner-Zugang abrufbar: bei eigener Instanz immer, sonst nach Power-User.
+    owner_revealable: bool
+    users: list[PostgresHubUser]
+
+
+class PostgresHubEndpoint(BaseModel):
+    host: str
+    port: int
+
+
+class PostgresHubExternal(PostgresHubEndpoint):
+    reachable: bool
+    # Warum nicht: "loopback" (Port liegt auf 127.0.0.1) oder "no_networks"
+    # (kein erlaubtes Netz in pg_hba.conf). None, wenn erreichbar.
+    blocked_by: Literal["loopback", "no_networks"] | None = None
+    ssl_required: bool
+    allowed_cidrs: list[str]
+
+
+class PostgresConnectionInfo(BaseModel):
+    kind: str  # "shared" | "dedicated"
+    internal: PostgresHubEndpoint
+    external: PostgresHubExternal | None = None
+    ssl_certificate: str | None = None
+    bootstrap_pending: bool = False
+    databases: list[PostgresHubDatabase]
+
+
+class PostgresRevealRequest(BaseModel):
+    database_id: int
+    # None: Owner der Datenbank.
+    user_id: int | None = None
+
+
+class PostgresRevealResponse(BaseModel):
+    username: str
+    password: str
+
+
+class PostgresInstanceNetworkRequest(BaseModel):
+    allowed_cidrs: list[str] = Field(default_factory=list, max_length=50)
+    ssl_required: bool = True
+

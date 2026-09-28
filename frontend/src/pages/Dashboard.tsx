@@ -22,6 +22,8 @@ import { PageHeader } from '@/Singra/UI/PageHeader'
 import { ProgressBar, StackedProgressBar, type Segment } from '@/Singra/UI/ProgressBar'
 import { Badge } from '@/components/ui/Badge'
 
+import { buttonClasses } from '@/Singra/UI'
+import { Spinner } from '@/components/ui/Spinner'
 interface ServiceStatus {
   status: 'ok' | 'degraded' | 'error'
   detail: string
@@ -147,7 +149,7 @@ function NodeCapacityCard() {
                     </span>
                   )}
                 </div>
-                <p className="mb-1.5 truncate font-mono-sm text-[11px] text-on-surface-variant/80" title={model}>
+                <p className="mb-1.5 truncate font-mono-sm text-label-sm text-on-surface-variant/80" title={model}>
                   {model}
                 </p>
                 <ProgressBar
@@ -304,7 +306,7 @@ export function Dashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <span className="w-6 h-6 border-2 border-secondary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="md" className="text-secondary" />
       </div>
     )
   }
@@ -312,7 +314,7 @@ export function Dashboard() {
   return (
     <div className="msm-page">
       <UpdateBanner />
-      <PageHeader eyebrow={t('pageContext.overview', 'Overview')} title={t('dashboard.title')} description={t('dashboard.subtitle')} status={<span className={runningCount > 0 ? 'msm-badge-success' : 'msm-badge-info'}>{runningCount} {t('dashboard.running')}</span>} />
+      <PageHeader eyebrow={t('pageContext.overview')} title={t('dashboard.title')} description={t('dashboard.subtitle')} status={<span className={runningCount > 0 ? 'msm-badge-success' : 'msm-badge-info'}>{runningCount} {t('dashboard.running')}</span>} />
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -368,7 +370,7 @@ export function Dashboard() {
       {/* Ladefehler — nicht als Leerzustand ausgeben */}
       {loadError && (
         <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
-          <AlertTriangle className="w-10 h-10 text-status-error mx-auto mb-4" />
+          <AlertTriangle className="w-10 h-10 text-status-destructive mx-auto mb-4" />
           <h3 className="font-headline text-body-lg text-on-surface mb-1">
             {t('dashboard.loadFailed')}
           </h3>
@@ -388,7 +390,7 @@ export function Dashboard() {
           {canCreateServer && (
             <a
               href="/servers"
-              className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
+              className={buttonClasses('primary')}
             >
               {t('dashboard.createServer')}
             </a>

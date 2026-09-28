@@ -1,4 +1,4 @@
-export type BlueprintCategory = 'steam_game' | 'non_steam_game' | 'voice_server' | 'bot'
+export type BlueprintCategory = 'steam_game' | 'non_steam_game' | 'voice_server' | 'bot' | 'database'
 export type BlueprintSourceType = 'steam' | 'http' | 'github' | 'dockerOnly' | 'custom' | 'manualUpload'
 export type BlueprintUpdateStrategy = 'alwaysValidate' | 'checkBased' | 'none'
 export type BlueprintPortName = 'game' | 'query' | 'rcon' | 'voice' | 'web' | 'custom'

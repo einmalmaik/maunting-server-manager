@@ -93,7 +93,7 @@ export function AiTomTomSettings({ canWrite }: { canWrite: boolean }) {
     <section className="msm-card space-y-4 p-6" aria-labelledby="ai-tomtom-title">
       <div className="flex items-center gap-2">
         <Car className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h3 id="ai-tomtom-title" className="font-headline text-lg font-semibold text-on-surface">
+        <h3 id="ai-tomtom-title" className="font-headline text-title-lg font-semibold text-on-surface">
           {t('ai.tomtom.title')}
         </h3>
       </div>
@@ -140,7 +140,7 @@ export function AiTomTomSettings({ canWrite }: { canWrite: boolean }) {
         <p className={`flex items-center gap-2 rounded-lg border p-3 text-xs ${
           testStatus.traffic_status === 'available'
             ? 'border-status-success/30 bg-status-success/10 text-status-success'
-            : 'border-status-error/30 bg-status-error/10 text-status-error'
+            : 'border-status-destructive/30 bg-status-destructive/10 text-status-destructive'
         }`} role="status">
           {testStatus.traffic_status === 'available'
             ? <CircleCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
