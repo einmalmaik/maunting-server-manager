@@ -52,13 +52,12 @@ def test_migrate_all_secrets(monkeypatch):
         db.add(server)
         db.flush()
         
-        # a) User 2FA Secret (Fernet) und email_plain (Plaintext)
+        # a) User 2FA Secret (Fernet). Klartext-Adressen aus users.email
+        # prueft test_migrations (die Spalte gibt es seit 20260928_03 nicht mehr).
         user = User(
             username="testuser",
             password_hash="some-hash",
             two_factor_secret_encrypted=fernet.encrypt(b"secrettotp").decode(),
-            email_plain="user@example.com",
-            email_encrypted=None,
             password_reset_token="legacy-token",
         )
         db.add(user)
@@ -136,12 +135,6 @@ def test_migrate_all_secrets(monkeypatch):
         )
         assert plaintext_2fa == "secrettotp"
         
-        # E-Mail must be DIS-encrypted and email_plain must contain the hash
-        assert user_migrated.email_encrypted.startswith("msm-email-v1:")
-        assert user_migrated.email_hash == User._email_hash("user@example.com")
-        assert user_migrated.email_plain == user_migrated.email_hash
-        assert user_migrated.email == "user@example.com"
-        
         # Password reset token must be invalidated (None)
         assert user_migrated.password_reset_token is None
 
@@ -216,7 +209,7 @@ def test_migrate_idempotency():
             username="idempotent-user",
             password_hash="some-hash",
             two_factor_secret_encrypted=fernet.encrypt(b"secret-totp").decode(),
-            email_plain="idem@example.com",
+            email="idem@example.com",
         )
         db.add(user)
         db.commit()
@@ -295,16 +288,6 @@ def test_migrate_error_rolls_back_transaction(monkeypatch):
         db.close()
 
 
-def test_user_email_property_pre_migration():
-    """Testet, dass vor der Migration (email_plain gesetzt, email_encrypted None) die E-Mail im Klartext zurückgegeben wird."""
-    user = User(
-        username="pre-user",
-        email_plain="pre@example.com",
-        email_encrypted=None,
-    )
-    assert user.email == "pre@example.com"
-
-
 def test_user_email_property_post_migration():
     """Testet, dass nach der Migration die E-Mail korrekt entschlüsselt wird."""
     user = User(username="post-user")
@@ -312,7 +295,7 @@ def test_user_email_property_post_migration():
     user.email = "post@example.com"
     
     assert user.email_encrypted.startswith("msm-email-v1:")
-    assert user.email_plain == User._email_hash("post@example.com")
+    assert user.email_hash == User._email_hash("post@example.com")
     assert user.email == "post@example.com"
 
 
@@ -321,19 +304,18 @@ def test_user_email_property_decrypt_failure_raises_error():
     user = User(username="corrupt-email-user")
     # Direktes Setzen mit ungültigem/anderem AAD-Wert in der Verschlüsselung
     user.email_encrypted = DisClient.encrypt("corrupt@example.com", aad="wrong:aad:context")
-    user.email_plain = User._email_hash("corrupt@example.com")
-    user.email_hash = user.email_plain
-    
-    # Der Getter muss fehlschlagen und darf NICHT den Hash aus email_plain zurückgeben
+    user.email_hash = User._email_hash("corrupt@example.com")
+
+    # Der Getter muss fehlschlagen und darf NICHT den Hash zurückgeben
     with pytest.raises(DisDecryptionError):
         _ = user.email
 
 
 def test_user_email_property_inconsistent_state_raises_error():
-    """Testet, dass wenn email_encrypted None ist, aber email_plain bereits ein Hashwert ist, ein Fehler geworfen wird."""
+    """Testet, dass wenn email_encrypted None ist, aber email_hash gesetzt ist, ein Fehler geworfen wird."""
     user = User(
         username="inconsistent-user",
-        email_plain=User._email_hash("test@example.com"),
+        email_hash=User._email_hash("test@example.com"),
         email_encrypted=None,
     )
     

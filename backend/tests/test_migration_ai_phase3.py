@@ -29,7 +29,6 @@ def test_ai_phase3_migration_upgrades_phase2_schema(tmp_path: Path, pg_wegwerf) 
         with Session(engine) as db:
             user = User(
                 username="migration-user",
-                email_plain="migration@example.invalid",
                 password_hash="disabled",
                 is_active=True,
             )

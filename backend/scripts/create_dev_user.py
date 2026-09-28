@@ -23,7 +23,7 @@ def create_dev_user():
             print("Es existiert bereits ein Owner-Benutzer in der Datenbank.")
             owner = db.query(AuthService.create_owner.__annotations__['return']).filter_by(is_owner=True).first()
             if owner:
-                print(f"Bestehender Owner: Username={owner.username}, Email={owner.email_plain}")
+                print(f"Bestehender Owner: Username={owner.username}, Email={owner.email}")
             return
 
         username = "admin"

@@ -80,7 +80,6 @@ OHNE_KONTOBEZUG: dict[str, str] = {
 
 #: Spalten, die nicht mitgehen. Die Gruende stehen im Paket.
 AUSGESCHLOSSEN: dict[str, str] = {
-    "users.email": "Hash der E-Mail-Adresse (die Adresse steht in email_encrypted)",
     "users.email_hash": "Hash der E-Mail-Adresse",
     "users.password_hash": "Passwort-Hash",
     "users.two_factor_secret_encrypted": "2FA-Geheimnis",

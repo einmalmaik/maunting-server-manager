@@ -169,6 +169,14 @@ async def lifespan(app: FastAPI):
             "ohne DIS nicht operieren."
         )
 
+    # Klartext-Adressen aus der alten Spalte users.email verschluesseln, bevor
+    # Migration 20260928_03 die Spalte entfernt. Sie bricht sonst ab, statt
+    # Adressen zu verlieren. Braucht den Sidecar, der oben geprueft ist.
+    if not is_testing:
+        from services.email_altbestand import klartext_verschluesseln
+        with engine.begin() as _conn:
+            klartext_verschluesseln(_conn)
+
     # Ensure database schema is up-to-date (automatically apply pending migrations in production)
     if not is_testing:
         from services.schema_manager import initialize_or_upgrade_schema
@@ -215,19 +223,6 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_encrypted VARCHAR(4096)"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_hash VARCHAR(64)"))
                 conn.execute(text("CREATE INDEX ix_users_email_hash ON users (email_hash)"))
-
-        # Bestehende Klartext-E-Mails immer nachziehen: Zeilen aus der Zeit vor
-        # den verschluesselten Spalten tragen sie noch nicht.
-        from database import SessionLocal as _SL
-        from models import User as _U
-        _db = _SL()
-        try:
-            for _u in _db.query(_U).filter(_U.email_encrypted.is_(None)).all():
-                if _u.email_plain:
-                    _u.email = _u.email_plain  # setter verschluesselt + hasht
-            _db.commit()
-        finally:
-            _db.close()
 
     # Migration: webhook_subscriptions.secret_encrypted Spalte hinzufuegen
     if legacy_schema_bridge and 'webhook_subscriptions' in inspector.get_table_names():

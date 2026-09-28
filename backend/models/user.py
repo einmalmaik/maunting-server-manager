@@ -103,9 +103,7 @@ class User(Base):
     # E-Mail: verschluesselt mit DIS (AES-256-GCM, AAD msm:user:email),
     # gespeichert als ``msm-email-v1:...`` (siehe EMAIL_PRAEFIX).
     # email_hash (SHA-256 mit Pepper) fuer SQL-Lookup (WHERE email_hash = ?).
-    # email_plain ist die Legacy-Spalte (DB-Name "email"), nach Migration
-    # nur noch Platzhalter (der Hash-Wert), keine Klartext-E-Mail mehr.
-    email_plain: Mapped[str | None] = mapped_column("email", String(255), unique=True, index=True, nullable=True)
+    # Die alte Klartext-Spalte "email" ist seit 20260928_03 weg.
     email_encrypted: Mapped[str | None] = mapped_column(String(4096), nullable=True)
     email_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
 
@@ -256,13 +254,10 @@ class User(Base):
         if self.email_encrypted:
             from services.dis_client import DisClient
             return DisClient.decrypt(email_chiffrat_fuer_dis(self.email_encrypted), aad="msm:user:email")
-        if self.email_plain:
-            # Echte Pre-Migration Erkennung: falls email_plain ein SHA-256 Hash ist, handelt es sich
-            # um eine bereits migrierte Zeile, bei der aber email_encrypted fehlt (Datenkorruption/Fehler).
-            if len(self.email_plain) == 64 and all(c in "0123456789abcdefABCDEF" for c in self.email_plain):
-                from services.dis_client import DisDecryptionError
-                raise DisDecryptionError("Inconsistent database state: email_encrypted is missing but email_plain is hashed.")
-            return self.email_plain
+        if self.email_hash:
+            # Pruefwert ohne Chiffrat: die Adresse ist verloren, nicht leer.
+            from services.dis_client import DisDecryptionError
+            raise DisDecryptionError("Inconsistent database state: email_encrypted is missing but email_hash is set.")
         return None
 
     @email.setter
@@ -271,10 +266,6 @@ class User(Base):
             from services.dis_client import DisClient
             self.email_encrypted = email_chiffrat_speichern(DisClient.encrypt(value, aad="msm:user:email"))
             self.email_hash = self._email_hash(value)
-            # Platzhalter in Legacy-Spalte (NOT NULL in alten Schemas).
-            # Nach Migration steht hier der Hash, keine Klartext-E-Mail.
-            self.email_plain = self.email_hash
         else:
             self.email_encrypted = None
             self.email_hash = None
-            self.email_plain = None

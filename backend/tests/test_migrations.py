@@ -6,6 +6,8 @@ Migration zurueck, legt Bestandszeilen an und prueft Hin- und Rueckweg.
 """
 from __future__ import annotations
 
+import pytest
+
 
 # ── 20260819_01 — Gedächtnisvektoren von JSON auf float32-Bytes ─────────────
 
@@ -231,6 +233,92 @@ def test_email_praefix_und_namenswahl_fuer_den_altbestand(pg_wegwerf):
         assert emails["dis"] == "msm-dis-v1:QUJD"
         assert emails["nackt"] == "msm-dis-v1:REVG"
         assert emails["fernet"] == "gAAAAAalt"
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
+
+@pytest.mark.parametrize("stand", ["20260926_08", "20260928_02"])
+def test_email_spalte_faellt_erst_nach_dem_verschluesseln(pg_wegwerf, monkeypatch, stand):
+    """20260928_03: `users.email` faellt nur, wenn keine Adresse mehr allein
+    dort steht. Sonst bricht die Migration ab, statt die Adresse zu verlieren.
+
+    Der Panelstart ruft `email_altbestand.klartext_verschluesseln` vor den
+    Migrationen; danach laeuft sie durch, und die Adresse ist lesbar. Der
+    Sidecar ist hier so nachgestellt, wie er schreibt (`msm-dis-v1:` +
+    Base64): Auf einem Stand vor 20260926_09 stand so am 28.09. ein doppeltes
+    `msm-email-v1:msm-email-v1:` in der Kopie der Dev-DB.
+    """
+    import base64
+    from pathlib import Path
+
+    from alembic import command
+    from services.dis_client import DisClient, DisDecryptionError
+
+    def verschluesseln(klartext, aad=None):
+        return "msm-dis-v1:" + base64.b64encode(f"{aad}|{klartext}".encode()).decode()
+
+    def entschluesseln(chiffrat, aad=None):
+        try:
+            gebunden, _, klartext = base64.b64decode(chiffrat.removeprefix("msm-dis-v1:"), validate=True).decode().partition("|")
+        except ValueError as exc:
+            raise DisDecryptionError("kaputt") from exc
+        if gebunden != str(aad):
+            raise DisDecryptionError("falsche AAD")
+        return klartext
+
+    monkeypatch.setattr(DisClient, "encrypt", staticmethod(verschluesseln))
+    monkeypatch.setattr(DisClient, "decrypt", staticmethod(entschluesseln))
+    monkeypatch.setattr(DisClient, "PRAEFIX", "msm-dis-v1:")
+    from sqlalchemy import create_engine, inspect, text
+    from sqlalchemy.orm import Session
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+    from models import User
+    from services.email_altbestand import klartext_verschluesseln
+
+    db_url = pg_wegwerf(f"email-spalte-{stand}")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as db:
+            neu = User(username="neu", password_hash="msm-pw-v1:x:y:v2")
+            neu.email = "neu@example.invalid"
+            db.add_all([neu, User(username="uralt", password_hash="msm-pw-v1:x:y:v2")])
+            db.commit()
+        command.stamp(config, "head")
+        command.downgrade(config, stand)
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT email FROM users WHERE username = 'neu'")).scalar() == User._email_hash(
+                "neu@example.invalid"
+            )
+            conn.execute(text("UPDATE users SET email = 'uralt@example.invalid' WHERE username = 'uralt'"))
+
+        with pytest.raises(RuntimeError, match="noch im Klartext"):
+            command.upgrade(config, "head")
+        assert "email" in {s["name"] for s in inspect(engine).get_columns("users")}
+
+        with engine.begin() as conn:
+            assert klartext_verschluesseln(conn) == 1
+            assert klartext_verschluesseln(conn) == 0
+        command.upgrade(config, "head")
+
+        assert "email" not in {s["name"] for s in inspect(engine).get_columns("users")}
+        with Session(engine) as db:
+            uralt = db.query(User).filter(User.username == "uralt").one()
+            assert uralt.email_encrypted.startswith("msm-email-v1:")
+            assert not uralt.email_encrypted.startswith("msm-email-v1:msm-")
+            assert uralt.email == "uralt@example.invalid"
+            assert uralt.email_hash == User._email_hash("uralt@example.invalid")
+            assert db.query(User).filter(User.username == "neu").one().email == "neu@example.invalid"
+        # Ohne die Spalte gibt es nichts mehr zu tun.
+        with engine.begin() as conn:
+            assert klartext_verschluesseln(conn) == 0
     finally:
         engine.dispose()
         settings.database_url = vorher
