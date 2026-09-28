@@ -3825,6 +3825,7 @@
     "someUser": "A user",
     "friendRequestTitle": "New friend request",
     "friendRequestText": "{{name}} sent you a friend request.",
+    "achievementUnlockedToast": "🏆 Achievement unlocked: {{title}} (+{{points}})",
     "friendRequestToast": "👋 Friend request from {{name}}",
     "messageTitle": "New message: {{name}}",
     "messageInGroup": "New message in the group “{{name}}”",

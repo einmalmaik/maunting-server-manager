@@ -26,6 +26,7 @@ from games import get_plugin
 from games.base import container_name_for, _console_log_path, _append_console_log
 from services import EmailService, docker_service
 from services import exec_service
+from services.achievement_service import AchievementService
 from services.docker_iptables_service import accept_server as iptables_accept_server
 from services.docker_iptables_service import revoke_server as iptables_revoke_server
 from services.firewall_service import close_ports, open_ports
@@ -585,6 +586,11 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
             from services.guardian_state_service import mark_guardian_configuration_changed
 
             mark_guardian_configuration_changed(server)
+
+        if changed_ports:
+            AchievementService.melde(db, user.id, "server_port_forwarder")
+        if payload.get("auto_restart"):
+            AchievementService.melde(db, user.id, "server_auto_restart")
 
         db.commit()
         db.refresh(server)
@@ -1158,6 +1164,7 @@ def server_console_input(
     if not result["ok"]:
         # Generische Fehlermeldung - keine Container-Internas leaken.
         raise HTTPException(status_code=500, detail="Eingabe konnte nicht zugestellt werden")
+    AchievementService.melde(db, user.id, "terminal_commander", commit=True)
     return {"ok": True}
 
 
@@ -1252,6 +1259,7 @@ def server_exec(
         # Generische Fehlermeldung -- keine Container-Internas leaken.
         raise HTTPException(status_code=500, detail="Exec fehlgeschlagen")
 
+    AchievementService.melde(db, user.id, "terminal_commander", commit=True)
     return {
         "ok": True,
         "stdout": result["stdout"],

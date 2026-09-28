@@ -26,6 +26,7 @@ from dependencies import (
     session_familie,
 )
 from models import User, EmailVerification
+from services.achievement_service import AchievementService
 from services.dis_client import DisClient
 from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, DataExportRequest, NativeRefreshRequest, LogoutRequest
 from schemas import ResendVerificationRequest
@@ -756,6 +757,7 @@ def revoke_device(
     AuthService.revoke_refresh_family(db, user.id, family)
     if device_pairing_service.vergessen(db, user, family) is None:
         raise HTTPException(status_code=404, detail="Gerät nicht gefunden")
+    AchievementService.melde(db, user.id, "starter_session_hygiene", commit=True)
     return {"message": "Gerät entkoppelt"}
 
 
@@ -1023,6 +1025,8 @@ def update_ai_provider(
         provider = db.get(AiProvider, req.provider_id)
         if provider is None or not provider.enabled or not ai_provider_service.fuer_chat(provider):
             raise HTTPException(status_code=404, detail="Provider nicht gefunden")
+    if user.ai_provider_id is not None and req.provider_id not in (None, user.ai_provider_id):
+        AchievementService.melde(db, user.id, "ai_model_switcher")
     user.ai_provider_id = req.provider_id
     db.commit()
     return {"ai_provider_id": user.ai_provider_id}

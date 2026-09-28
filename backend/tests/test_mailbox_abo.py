@@ -256,7 +256,9 @@ def test_die_unbekannte_mailbox_stellt_an_ihre_abonnenten_zu(
         mailbox_token=TOKEN,
     )
 
-    ereignisse = _empfangen(conn)
+    # Das Konto bekommt daneben das Abzeichen für die erste Nachricht; hier
+    # zählt nur, was aus der Mailbox kommt.
+    ereignisse = [e for e in _empfangen(conn) if e.get("type") != "achievement_unlocked"]
     assert len(ereignisse) == 1
     assert ereignisse[0]["blind_mailbox_id"] == GEHEIM
 

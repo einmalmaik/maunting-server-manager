@@ -129,8 +129,12 @@ export const useFunkenStore = create<FunkenState>((set, get) => {
     const gemeldet = gemeldeteMeilensteine(konto)
     for (const stufe of erreichteMeilensteine(falte(akte, seit).rekord)) {
       if (gemeldet.has(stufe)) continue
-      merkeMeilenstein(konto, stufe)
-      void claimAchievement(`social_streak_${stufe}`).catch(() => {})
+      // Gemerkt wird erst, was der Server angenommen hat. Bis 09/2026 stand
+      // die Stufe vor der Antwort in der Ablage — scheiterte die Meldung
+      // (offline, 5xx), wurde sie nie wiederholt.
+      void claimAchievement(`social_streak_${stufe}`)
+        .then(() => merkeMeilenstein(konto, stufe))
+        .catch(() => {})
     }
   }
 

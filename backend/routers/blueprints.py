@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from services import audit_service, blueprint_service
+from services.achievement_service import AchievementService
 
 from blueprints import (
     Blueprint,
@@ -159,6 +160,9 @@ async def import_blueprint(
         },
         commit=True,
     )
+    runtime = raw.get("runtime") if isinstance(raw, dict) else None
+    if isinstance(runtime, dict) and runtime.get("env"):
+        AchievementService.melde(db, _user.id, "server_multi_env", commit=True)
     return JSONResponse(
         status_code=201,
         content={"message": "Blueprint importiert", "id": blueprint_id},

@@ -413,6 +413,10 @@ def voice_werkzeug_ausfuehren(
                 wert = {"error": fehler}
                 return wert, fehler, _anzeigeeintrag(call, wert, fehler), []
             angeboten = angebotene_werkzeuge(db, user)
+            if call.name in angeboten:
+                from services.achievement_service import AchievementService
+
+                AchievementService.melde(db, user_id, "ai_speech_directness", commit=True)
         if call.name not in angeboten:
             fehler = "Dieses Werkzeug steht in dieser Sitzung nicht zur Verfügung"
             wert = {"error": fehler}

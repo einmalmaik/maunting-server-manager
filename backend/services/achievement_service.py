@@ -10,12 +10,8 @@ from models import (
     User,
     UserAchievement,
     UserActivityTime,
-    UserFriend,
-    Server,
-    Backup,
-    AiConversation,
-    ServerPermission,
 )
+from services.achievement_pruefungen import PRUEFUNGEN
 from services.sync_event_service import SyncEventService
 
 logger = logging.getLogger(__name__)
@@ -63,7 +59,7 @@ def _now() -> datetime:
 
 ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
     # =========================================================================
-    # 1. STARTER & KONTO (1 - 15)
+    # 1. STARTER & KONTO
     # =========================================================================
     {
         "id": "starter_first_step",
@@ -122,14 +118,6 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
         "icon": "file-text",
     },
     {
-        "id": "starter_dark_mode",
-        "title": "Nachteule",
-        "description": "Design-DNA und Farbschema an deine Vorlieben angepasst.",
-        "category": "starter",
-        "points": 10,
-        "icon": "moon",
-    },
-    {
         "id": "starter_hotkeys",
         "title": "Tastatur-Virtuose",
         "description": "Globale Desktop-Hotkeys für Sprache und Schnellzugriff konfiguriert.",
@@ -156,7 +144,7 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
     {
         "id": "starter_audio_ducking",
         "title": "Sprechfunk-Disziplin",
-        "description": "Automatische Lautstärke-Absenkung (Audio Ducking) im Desktop aktiviert.",
+        "description": "Automatische Lautstärke-Absenkung (Audio Ducking) im Desktop ausprobiert.",
         "category": "starter",
         "points": 15,
         "icon": "sliders",
@@ -187,7 +175,7 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
     },
 
     # =========================================================================
-    # 2. SERVER-ADMINISTRATION & INFRASTRUKTUR (16 - 35)
+    # 2. SERVER-ADMINISTRATION & INFRASTRUKTUR
     # =========================================================================
     {
         "id": "server_architect",
@@ -262,14 +250,6 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
         "icon": "folder",
     },
     {
-        "id": "server_sftp_connected",
-        "title": "Sicherer Datentransfer",
-        "description": "SFTP-Zugangsdaten erstellt und verschlüsselt verbunden.",
-        "category": "servers",
-        "points": 25,
-        "icon": "upload-cloud",
-    },
-    {
         "id": "server_log_analyzer",
         "title": "Logbuch-Detektiv",
         "description": "Live-Serverlogs gefiltert und nach Ausnahmen durchsucht.",
@@ -317,41 +297,9 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
         "points": 20,
         "icon": "sliders",
     },
-    {
-        "id": "server_player_moderator",
-        "title": "Spieler-Hüter",
-        "description": "Whitelist, Ban-Listen oder Ops über die Serververwaltung gepflegt.",
-        "category": "servers",
-        "points": 20,
-        "icon": "users",
-    },
-    {
-        "id": "server_tag_organizer",
-        "title": "Struktur-Genie",
-        "description": "Server mit Farb-Tags und Kategorien übersichtlich organisiert.",
-        "category": "servers",
-        "points": 15,
-        "icon": "bookmark",
-    },
-    {
-        "id": "server_bulk_operator",
-        "title": "Massen-Dirigent",
-        "description": "Mehrere Server gleichzeitig über Gruppenaktionen angesteuert.",
-        "category": "servers",
-        "points": 35,
-        "icon": "layers",
-    },
-    {
-        "id": "server_zero_downtime",
-        "title": "Unterbrechungsfrei",
-        "description": "Wartungsmodus für Wartungsarbeiten ohne Datenverlust aktiviert.",
-        "category": "servers",
-        "points": 30,
-        "icon": "tool",
-    },
 
     # =========================================================================
-    # 3. BACKUP, SICHERHEIT & DESASTER-RECOVERY (36 - 50)
+    # 3. BACKUP, SICHERHEIT & DESASTER-RECOVERY
     # =========================================================================
     {
         "id": "backup_guardian",
@@ -376,14 +324,6 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
         "category": "backup",
         "points": 40,
         "icon": "rotate-ccw",
-    },
-    {
-        "id": "backup_lock_champion",
-        "title": "Unlöschbar",
-        "description": "Ein kritisches Backup gegen automatisches Löschen gesperrt.",
-        "category": "backup",
-        "points": 20,
-        "icon": "lock",
     },
     {
         "id": "backup_cloud_offloader",
@@ -450,14 +390,6 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
         "icon": "user-check",
     },
     {
-        "id": "security_recovery_test",
-        "title": "Notfallprobe",
-        "description": "Wiederherstellungs-App im Trockenlauf erfolgreich getestet.",
-        "category": "security",
-        "points": 40,
-        "icon": "life-buoy",
-    },
-    {
         "id": "security_password_rotation",
         "title": "Schlüsselwechsel",
         "description": "Passwort oder Tresorschlüssel turnusmäßig aktualisiert.",
@@ -475,7 +407,7 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
     },
 
     # =========================================================================
-    # 4. KI, DIALOGE & AUTONOME WERKZEUGE (51 - 70)
+    # 4. KI, DIALOGE & AUTONOME WERKZEUGE
     # =========================================================================
     {
         "id": "ai_first_contact",
@@ -639,7 +571,7 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
     },
 
     # =========================================================================
-    # 5. SOCIAL, MESSENGER & E2EE KRYPTOGRAPHIE (71 - 85)
+    # 5. SOCIAL, MESSENGER & E2EE KRYPTOGRAPHIE
     # =========================================================================
     {
         "id": "social_handshake",
@@ -738,14 +670,6 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
         "icon": "check-circle",
     },
     {
-        "id": "social_rich_presence",
-        "title": "Status-Update",
-        "description": "Benutzerdefinierten Statustext oder Aktivitätsanzeige eingestellt.",
-        "category": "social",
-        "points": 15,
-        "icon": "activity",
-    },
-    {
         "id": "social_public_ambassador",
         "title": "Offenes Buch",
         "description": "Profil auf 'Öffentlich' gestellt, um für alle Server-Admins auffindbar zu sein.",
@@ -798,7 +722,7 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
     },
 
     # =========================================================================
-    # 6. TEAMS, ROLLEN & KOLLABORATION (86 - 92)
+    # 6. TEAMS, ROLLEN & KOLLABORATION
     # =========================================================================
     {
         "id": "team_member_joined",
@@ -858,7 +782,7 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
     },
 
     # =========================================================================
-    # 7. AKTIVE SYSTEM- & SPIELZEIT („NUTZUNGSZEIT“) (93 - 100)
+    # 7. AKTIVE SYSTEM- & SPIELZEIT („NUTZUNGSZEIT“)
     # =========================================================================
     {
         "id": "activity_hour_1",
@@ -931,10 +855,37 @@ ACHIEVEMENTS_BY_ID = {a["id"]: a for a in ACHIEVEMENTS_CATALOG}
 # Errungenschaften, die nur der Client feststellen kann und deshalb selbst
 # meldet. Der Server kann sie nicht prüfen — ein Funke lebt verschlüsselt auf
 # den Geräten, und genau das ist der Sinn. Er erfährt nur „dieses Konto hat
-# 100 Tage erreicht", nie mit wem. Jede andere Kennung bleibt serverseitig
-# entschieden; wer sie meldet, bekommt 400.
+# 100 Tage erreicht", nie mit wem. Dasselbe gilt für den Inhalt einer
+# verschlüsselten Nachricht (Sprachnachricht, Sticker, Termin) und für
+# Einstellungen, die nur auf dem Gerät liegen (Hotkeys, Tresorsperre, Audio).
+# Jede andere Kennung bleibt serverseitig entschieden; wer sie meldet,
+# bekommt 400.
 SELBST_GEMELDET = frozenset(
-    {"social_streak_10", "social_streak_100", "social_streak_1000", "social_streak_10000"}
+    {
+        "social_streak_10",
+        "social_streak_100",
+        "social_streak_1000",
+        "social_streak_10000",
+        # Gerät und Desktop-App
+        "starter_biometrics",
+        "starter_autolock",
+        "starter_privacy_pledge",
+        "starter_hotkeys",
+        "starter_audio_tuned",
+        "starter_audio_ducking",
+        "starter_wakeword_tuned",
+        # Reine Oberfläche
+        "server_log_analyzer",
+        "server_resource_watcher",
+        # Inhalt verschlüsselter Nachrichten und Gruppen
+        "social_voice_memo",
+        "social_camera_moment",
+        "social_sticker_fun",
+        "social_note_share",
+        "social_event_share",
+        "social_read_receipts",
+        "social_role_architect",
+    }
 )
 
 
@@ -944,12 +895,17 @@ def nur_fuer_den_inhaber(achievement: dict[str, Any]) -> bool:
     „Sicherheitsbewusst" heißt: 2FA oder Tresor ist an, „Festung MSM": alle
     Schutzmodule sind scharf. Auf einem öffentlichen Profil sagte das jedem,
     bei welchem Konto ein gestohlenes Passwort allein genügt. Solche Abzeichen
-    sieht nur, wem das Konto gehört: die ganze Kategorie „security" und die
-    beiden Einsteiger-Abzeichen zu 2FA und Tresor.
+    sieht nur, wem das Konto gehört: die ganze Kategorie „security", die
+    Einsteiger-Abzeichen zu 2FA, Tresor, Biometrie und Auto-Sperre — und
+    „Einstieg abgeschlossen", das „Sicherheitsbewusst" voraussetzt und es
+    sonst durch die Hintertür verriete.
     """
     return achievement["category"] == "security" or achievement["id"] in (
         "starter_security_first",
         "starter_vault_master",
+        "starter_biometrics",
+        "starter_autolock",
+        "starter_onboarding_done",
     )
 
 
@@ -997,14 +953,16 @@ class AchievementService:
 
     @classmethod
     def get_user_achievements(
-        cls, db: Session, user_id: int, fuer_fremde: bool = False
+        cls, db: Session, user_id: int, fuer_fremde: bool = False, pruefen: bool = True
     ) -> list[dict[str, Any]]:
         """Liefert alle Errungenschaften inklusive Freischaltstatus und Rarity für einen Benutzer.
 
         `fuer_fremde` lässt die Abzeichen weg, die verraten, wie ein Konto
-        geschützt ist (siehe `nur_fuer_den_inhaber`).
+        geschützt ist (siehe `nur_fuer_den_inhaber`). `pruefen=False` für einen
+        zweiten Abruf in derselben Anfrage: die Zustandsprüfungen liefen schon.
         """
-        cls.check_automatic_achievements(db, user_id)
+        if pruefen:
+            cls.check_automatic_achievements(db, user_id)
         rarity_map = cls.get_rarity_stats(db)
         unlocked_rows = (
             db.query(UserAchievement)
@@ -1091,10 +1049,7 @@ class AchievementService:
     def unlock_achievement(
         cls, db: Session, user_id: int, achievement_id: str, commit: bool = True
     ) -> bool:
-        """Schaltet eine Errungenschaft frei, falls noch nicht errungen.
-
-        Geteilter Pool: Jede Errungenschaft kann systemweit genau einmal errungen werden.
-        """
+        """Schaltet eine Errungenschaft frei, falls dieses Konto sie noch nicht hat."""
         if achievement_id not in ACHIEVEMENTS_BY_ID:
             logger.warning("Unbekanntes Achievement: %s", achievement_id)
             return False
@@ -1130,6 +1085,32 @@ class AchievementService:
             db.commit()
         logger.info("Achievement '%s' für User %d freigeschaltet", achievement_id, user_id)
         return True
+
+    @classmethod
+    def melde(cls, db: Session, user_id: int | None, achievement_id: str, *, commit: bool = False) -> bool:
+        """Freischaltung aus einem Aktionspfad (Konsolenbefehl, Datei gespeichert …).
+
+        Läuft in einem eigenen Savepoint und schluckt jeden Fehler: ein
+        Abzeichen darf die eigentliche Aktion nie scheitern lassen. Ohne
+        `commit` trägt der Commit des Aufrufers die Zeile mit.
+
+        Mit `commit` wird nur committet, wenn wirklich etwas freigeschaltet
+        wurde — sonst ließe jeder Aufruf die geladenen Objekte des Aufrufers
+        verfallen. Wer danach noch Objekte liest, lädt sie bei `True` neu.
+        """
+        if not user_id:
+            return False
+        try:
+            with db.begin_nested():
+                neu = cls.unlock_achievement(db, user_id, achievement_id, commit=False)
+            if commit and neu:
+                db.commit()
+            return neu
+        except Exception:
+            if commit:
+                db.rollback()
+            logger.warning("Errungenschaft %s nicht vergeben", achievement_id, exc_info=True)
+            return False
 
     @classmethod
     def record_activity_time(
@@ -1194,60 +1175,29 @@ class AchievementService:
 
     @classmethod
     def check_automatic_achievements(cls, db: Session, user_id: int) -> None:
-        """Prüft automatische Meilensteine anhand bestehender Daten."""
+        """Prüft die Meilensteine, die sich am Datenbestand ablesen lassen.
+
+        Was schon errungen ist, wird nicht mehr gefragt — so bleibt der Abruf
+        für langjährige Konten billig. Jede Prüfung läuft im eigenen
+        Savepoint: eine kaputte Abfrage kostet ein Abzeichen, nicht die Liste.
+        """
         user = db.query(User).filter_by(id=user_id).first()
         if not user:
             return
 
-        # 1. Erster Schritt: Bei aktiver Session immer verdient
-        cls.unlock_achievement(db, user_id, "starter_first_step", commit=False)
-
-        # 2. 2FA aktiv
-        if user.two_factor_enabled:
-            cls.unlock_achievement(db, user_id, "starter_security_first", commit=False)
-
-        # 3. Server-Anzahl (nur eigene oder freigegebene Server)
-        if getattr(user, "is_owner", False):
-            server_count = db.query(func.count(Server.id)).scalar() or 0
-        else:
-            server_count = db.query(func.count(func.distinct(ServerPermission.server_id))).filter_by(user_id=user_id).scalar() or 0
-
-        if server_count >= 1:
-            cls.unlock_achievement(db, user_id, "server_architect", commit=False)
-        if server_count >= 3:
-            cls.unlock_achievement(db, user_id, "server_fleet_admiral", commit=False)
-
-        # 4. Backups vorhanden (nur eigene oder freigegebene)
-        if getattr(user, "is_owner", False):
-            backup_count = db.query(func.count(Backup.id)).scalar() or 0
-        else:
-            backup_count = (
-                db.query(func.count(func.distinct(Backup.id)))
-                .join(ServerPermission, Backup.server_id == ServerPermission.server_id)
-                .filter(ServerPermission.user_id == user_id)
-                .scalar()
-                or 0
-            )
-        if backup_count >= 1:
-            cls.unlock_achievement(db, user_id, "backup_guardian", commit=False)
-
-        # 5. KI-Konversation
-        conv_count = db.query(func.count(AiConversation.id)).filter_by(user_id=user_id).scalar() or 0
-        if conv_count >= 1:
-            cls.unlock_achievement(db, user_id, "ai_first_contact", commit=False)
-
-        # 6. Freunde vorhanden
-        friends_count = (
-            db.query(func.count(UserFriend.id))
-            .filter(
-                ((UserFriend.user_id == user_id) | (UserFriend.friend_id == user_id))
-                & (UserFriend.status == "accepted")
-            )
-            .scalar()
-            or 0
-        )
-        if friends_count >= 1:
-            cls.unlock_achievement(db, user_id, "social_handshake", commit=False)
+        schon = {
+            row[0]
+            for row in db.query(UserAchievement.achievement_id).filter(UserAchievement.user_id == user_id).all()
+        }
+        for achievement_id, pruefe in PRUEFUNGEN:
+            if achievement_id in schon:
+                continue
+            try:
+                with db.begin_nested():
+                    if pruefe(db, user, schon) and cls.unlock_achievement(db, user_id, achievement_id, commit=False):
+                        schon.add(achievement_id)
+            except Exception:
+                logger.warning("Prüfung für %s fehlgeschlagen", achievement_id, exc_info=True)
 
         try:
             db.commit()

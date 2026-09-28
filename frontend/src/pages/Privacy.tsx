@@ -1,10 +1,17 @@
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { LegalDocumentViewer, type LegalDocumentData } from '@/components/ui/LegalDocumentViewer'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 export function Privacy() {
   const { isAuthenticated } = useAuthStore()
   const { t } = useTranslation()
+
+  useEffect(() => {
+    // Ohne Anmeldung kennt der Helfer kein Konto und meldet nichts.
+    if (isAuthenticated) meldeErrungenschaft('starter_privacy_pledge')
+  }, [isAuthenticated])
 
   const document: LegalDocumentData = {
     title: t('privacyPolicy.title'),

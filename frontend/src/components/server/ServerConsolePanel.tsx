@@ -7,6 +7,7 @@ import { useWebSocket } from '@/hooks/useWebSocket'
 import { toast } from '@/stores/toastStore'
 import { type PanelTimeFormat } from '@/utils/timeFormat'
 import { Button } from '@/Singra/UI'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 interface Props {
   serverId: number
@@ -225,6 +226,10 @@ export function ServerConsolePanel({ serverId, mode = 'console' }: Props) {
 
   const autoscrollRef = useRef(true)
   autoscrollRef.current = autoscroll
+
+  useEffect(() => {
+    if (searchQuery.trim().length >= 3) meldeErrungenschaft('server_log_analyzer')
+  }, [searchQuery])
 
   useEffect(() => {
     api<{ time_format: PanelTimeFormat }>('/settings')

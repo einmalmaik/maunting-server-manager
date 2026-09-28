@@ -53,6 +53,7 @@ import { UptimeDisplay } from "@/components/server/UptimeDisplay";
 import { Button } from '@/Singra/UI'
 
 import { Spinner } from '@/components/ui/Spinner'
+import { meldeErrungenschaft } from "@/lib/errungenschaft";
 type TabKey =
   | "files"
   | "console"
@@ -131,6 +132,10 @@ export function ServerDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [server, setServer] = useState<Server | null>(null);
   const [status, setStatus] = useState<ServerStatus | null>(null);
+  const liveMetriken = status?.cpu_percent != null && status?.ram_mb != null;
+  useEffect(() => {
+    if (liveMetriken) meldeErrungenschaft("server_resource_watcher");
+  }, [liveMetriken]);
   const [games, setGames] = useState<GameInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);

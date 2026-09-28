@@ -33,6 +33,7 @@ import {
   type AppKonfig,
   type WakewordStand,
 } from './tauri'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 /**
  * Muss zu `wakeword::AUFNAHMEN_SOLL` in Rust passen.
@@ -212,6 +213,7 @@ export function WakewordEinrichtung() {
     setMeldung(null)
     try {
       await tun()
+      if (name === 'training') meldeErrungenschaft('starter_wakeword_tuned')
       await standLaden()
     } catch (fehler) {
       setMeldung(String(fehler))

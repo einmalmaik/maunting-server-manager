@@ -57,6 +57,7 @@ import {
 } from '@/services/gruppenRollen'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 interface GroupPermissionsModalProps {
   open: boolean
@@ -681,7 +682,11 @@ export function GroupPermissionsModal({
       }),
       t('social.groupRoles.created', { name }),
     )
-    if (angelegt) setIsCreatingRole(false)
+    if (angelegt) {
+      setIsCreatingRole(false)
+      // Eigene Rollen liegen verschlüsselt im Gruppenzustand; der Server sieht sie nicht.
+      meldeErrungenschaft('social_role_architect')
+    }
   }
 
   const handleUpdateRole = async (

@@ -512,6 +512,9 @@ class Sprachbruecke:
         await asyncio.to_thread(self._prefetch_sitzung_an_lauf, run_id)
         self._voice_run_ids.add(run_id)
 
+        if not self._lage.laeufe:
+            # Nebenher: der erste Satz wartet auf keine Datenbank.
+            asyncio.get_running_loop().run_in_executor(None, self._dialog_abzeichen)
         self._lage.laeufe += 1
         # Dieselbe Reihenfolge wie im Chat-Endpunkt, und sie ist hier alles:
         # Kanal auf, **abonnieren**, dann erst die Arbeit starten. Andersherum
@@ -895,6 +898,14 @@ class Sprachbruecke:
 
     def _prefetch_sitzung_an_lauf(self, run_id: str) -> None:
         self._prefetch.an_lauf_binden(run_id)
+
+    def _dialog_abzeichen(self) -> None:
+        # Die Brücke hinterlässt keinen Zählerstand wie die Realtime-Wege
+        # (`realtime_text_input_tokens`); das Abzeichen kommt deshalb von hier.
+        from services.achievement_service import AchievementService
+
+        with SessionLocal() as db:
+            AchievementService.melde(db, self._user_id, "ai_voice_dialog", commit=True)
 
     async def _ausgabe_unterbrechen(self) -> None:
         """Stoppt sofort nur die Ausgabe; Tool-Runs laufen kontrolliert weiter."""

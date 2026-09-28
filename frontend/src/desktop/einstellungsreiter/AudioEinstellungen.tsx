@@ -18,6 +18,7 @@ import {
   type AudioGeraete,
 } from '../tauri'
 import { Testhoeren } from './Testhoeren'
+import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 const isAndroidClient = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
@@ -117,6 +118,7 @@ export function AudioEinstellungen() {
     setDuckt(true)
     try {
       await duckingSetzen(true)
+      meldeErrungenschaft('starter_audio_ducking')
       await new Promise((fertig) => setTimeout(fertig, 3000))
       await duckingSetzen(false)
     } finally {
@@ -131,6 +133,7 @@ export function AudioEinstellungen() {
     if (!konfig) return
     const neu: AppKonfig = { ...konfig, [feld]: wert }
     setKonfig(neu)
+    if (feld === 'audio_verstaerkung' || feld === 'audio_autogain') meldeErrungenschaft('starter_audio_tuned')
     registriereAudioVerarbeitung({
       echo: neu.audio_echo,
       rauschen: neu.audio_rauschen,
