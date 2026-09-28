@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { api, clearCsrfTokenMemory } from '@/api/client'
 import { isNetworkOrOfflineError } from '@/lib/networkErrors'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
-import { leereOfflineAblage } from '@/lib/offlineAblage'
+import { gehoertDemKonto, leereOfflineAblage } from '@/lib/offlineAblage'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { useNodeStore } from '@/stores/nodeStore'
 import { useToastStore } from '@/stores/toastStore'
@@ -44,6 +44,9 @@ function saveCachedUser(user: User | null): void {
   // gegeben. Diese Zeile steht vor dem `try`: ein gesperrter localStorage darf
   // nicht dazu führen, dass `e2eeGeraet` beim vorigen Konto bleibt.
   setzeAngemeldetesKonto(user?.id ?? null)
+  // Liegt noch die Ablage eines anderen Kontos im Browser (Sitzung ohne
+  // Abmelden beendet), fällt sie hier, bevor eine Seite daraus liest.
+  if (user) gehoertDemKonto()
   try {
     if (user) {
       localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user))

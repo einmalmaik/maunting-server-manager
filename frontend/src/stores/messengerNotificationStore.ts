@@ -11,17 +11,25 @@
 
 import { create } from 'zustand'
 import { api } from '@/api/client'
+import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { MESSENGER_KEYS, getStorageItem, setStorageItem } from '@/lib/offlineAblage'
 import { deriveBlindMailboxId, deriveGroupBlindMailboxId } from '@/services/e2eeCrypto'
+import { useAuthStore } from '@/stores/authStore'
 import { useFunkenStore } from '@/stores/funkenStore'
 
-const STORAGE_MUTES_KEY = 'msm:chat_mutes'
-const STORAGE_BLOCKS_KEY = 'msm:chat_blocks'
-const STORAGE_BLOCKED_PROFILES_KEY = 'msm:chat_blocked_profiles'
-const STORAGE_UNREAD_KEY = 'msm:chat_unread'
-const STORAGE_MAILBOX_DIR_KEY = 'msm:chat_mailbox_dir'
-const STORAGE_PINS_KEY = 'msm:chat_pins'
-const STORAGE_ARCHIVE_KEY = 'msm:chat_archive'
-const STORAGE_MENTIONS_KEY = 'msm:chat_mentions'
+// Alles hier gehört dem angemeldeten Konto: Namen der Kontakte und gesperrter
+// Profile, Stummschaltungen, Anheftungen. Deshalb über `offlineAblage`, die bei
+// einem Kontowechsel leert und ohne Anmeldung nichts herausgibt.
+const {
+  MUTES: STORAGE_MUTES_KEY,
+  BLOCKS: STORAGE_BLOCKS_KEY,
+  BLOCKED_PROFILES: STORAGE_BLOCKED_PROFILES_KEY,
+  UNREAD: STORAGE_UNREAD_KEY,
+  MAILBOX_DIR: STORAGE_MAILBOX_DIR_KEY,
+  PINS: STORAGE_PINS_KEY,
+  ARCHIVE: STORAGE_ARCHIVE_KEY,
+  MENTIONS: STORAGE_MENTIONS_KEY,
+} = MESSENGER_KEYS
 
 /**
  * So viele Chats lassen sich anheften.
@@ -106,7 +114,7 @@ interface MessengerNotificationState {
 
 function loadMailboxDirectory(): Record<string, MailboxMeta> {
   try {
-    const raw = localStorage.getItem(STORAGE_MAILBOX_DIR_KEY)
+    const raw = getStorageItem(STORAGE_MAILBOX_DIR_KEY)
     if (raw) return JSON.parse(raw)
   } catch {}
   return {}
@@ -114,7 +122,7 @@ function loadMailboxDirectory(): Record<string, MailboxMeta> {
 
 function loadMutes(): Record<string, number> {
   try {
-    const raw = localStorage.getItem(STORAGE_MUTES_KEY)
+    const raw = getStorageItem(STORAGE_MUTES_KEY)
     if (raw) return JSON.parse(raw)
   } catch {}
   return {}
@@ -122,7 +130,7 @@ function loadMutes(): Record<string, number> {
 
 function loadBlocks(): number[] {
   try {
-    const raw = localStorage.getItem(STORAGE_BLOCKS_KEY)
+    const raw = getStorageItem(STORAGE_BLOCKS_KEY)
     if (raw) return JSON.parse(raw)
   } catch {}
   return []
@@ -130,7 +138,7 @@ function loadBlocks(): number[] {
 
 function loadBlockedProfiles(): Record<number, { username: string; avatarUrl?: string | null }> {
   try {
-    const raw = localStorage.getItem(STORAGE_BLOCKED_PROFILES_KEY)
+    const raw = getStorageItem(STORAGE_BLOCKED_PROFILES_KEY)
     if (raw) return JSON.parse(raw)
   } catch {}
   return {}
@@ -138,7 +146,7 @@ function loadBlockedProfiles(): Record<number, { username: string; avatarUrl?: s
 
 function ladeListe(schluessel: string): string[] {
   try {
-    const raw = localStorage.getItem(schluessel)
+    const raw = getStorageItem(schluessel)
     const gelesen = raw ? JSON.parse(raw) : []
     return Array.isArray(gelesen) ? gelesen.filter((x) => typeof x === 'string') : []
   } catch {
@@ -148,7 +156,7 @@ function ladeListe(schluessel: string): string[] {
 
 function schreibeListe(schluessel: string, werte: string[]): void {
   try {
-    localStorage.setItem(schluessel, JSON.stringify(werte))
+    setStorageItem(schluessel, JSON.stringify(werte))
   } catch {
     // Ohne localStorage gilt die Auswahl eben nur für diese Sitzung.
   }
@@ -156,7 +164,7 @@ function schreibeListe(schluessel: string, werte: string[]): void {
 
 function loadUnread(): Record<string, number> {
   try {
-    const raw = localStorage.getItem(STORAGE_UNREAD_KEY)
+    const raw = getStorageItem(STORAGE_UNREAD_KEY)
     if (raw) return JSON.parse(raw)
   } catch {}
   return {}
@@ -217,23 +225,27 @@ export function playNotificationChime() {
   }
 }
 
-export const useMessengerNotificationStore = create<MessengerNotificationState>((set, get) => {
-  const initialMutes = loadMutes()
-  const initialBlocks = loadBlocks()
-  const initialProfiles = loadBlockedProfiles()
-  const initialUnread = loadUnread()
-
+/** Der gespeicherte Stand des angemeldeten Kontos; ohne Anmeldung leer. */
+function ausAblage() {
+  const mutes = loadMutes()
+  const unread = loadUnread()
   return {
-    unreadCounts: initialUnread,
-    totalUnreadCount: calcTotal(initialUnread, initialMutes),
-    mutedChats: initialMutes,
+    unreadCounts: unread,
+    totalUnreadCount: calcTotal(unread, mutes),
+    mutedChats: mutes,
     pinnedChats: ladeListe(STORAGE_PINS_KEY),
     archivedChats: ladeListe(STORAGE_ARCHIVE_KEY),
     mentionedChats: ladeListe(STORAGE_MENTIONS_KEY),
-    blockedUserIds: initialBlocks,
-    blockedProfiles: initialProfiles,
+    blockedUserIds: loadBlocks(),
+    blockedProfiles: loadBlockedProfiles(),
     mailboxDirectory: loadMailboxDirectory(),
     activeMailboxId: null,
+  }
+}
+
+export const useMessengerNotificationStore = create<MessengerNotificationState>((set, get) => {
+  return {
+    ...ausAblage(),
 
     setActiveMailboxId: (id) => {
       set({ activeMailboxId: id })
@@ -251,7 +263,7 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
           [mailboxId]: meta,
         }
         try {
-          localStorage.setItem(STORAGE_MAILBOX_DIR_KEY, JSON.stringify(updated))
+          setStorageItem(STORAGE_MAILBOX_DIR_KEY, JSON.stringify(updated))
         } catch {}
         return { mailboxDirectory: updated }
       })
@@ -264,7 +276,7 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
           ...map,
         }
         try {
-          localStorage.setItem(STORAGE_MAILBOX_DIR_KEY, JSON.stringify(updated))
+          setStorageItem(STORAGE_MAILBOX_DIR_KEY, JSON.stringify(updated))
         } catch {}
         return { mailboxDirectory: updated }
       })
@@ -284,7 +296,7 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
         const current = state.unreadCounts[mailboxId] || 0
         const updated = { ...state.unreadCounts, [mailboxId]: current + 1 }
         try {
-          localStorage.setItem(STORAGE_UNREAD_KEY, JSON.stringify(updated))
+          setStorageItem(STORAGE_UNREAD_KEY, JSON.stringify(updated))
         } catch {}
         return {
           unreadCounts: updated,
@@ -299,7 +311,7 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
         const newCount = Math.max(0, current - count)
         const updated = { ...state.unreadCounts, [mailboxId]: newCount }
         try {
-          localStorage.setItem(STORAGE_UNREAD_KEY, JSON.stringify(updated))
+          setStorageItem(STORAGE_UNREAD_KEY, JSON.stringify(updated))
         } catch {}
         return {
           unreadCounts: updated,
@@ -314,7 +326,7 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
         if (!state.unreadCounts[mailboxId]) return state
         const updated = { ...state.unreadCounts, [mailboxId]: 0 }
         try {
-          localStorage.setItem(STORAGE_UNREAD_KEY, JSON.stringify(updated))
+          setStorageItem(STORAGE_UNREAD_KEY, JSON.stringify(updated))
         } catch {}
         return {
           unreadCounts: updated,
@@ -346,7 +358,7 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
         const expiry = durationMinutes && durationMinutes > 0 ? Date.now() + durationMinutes * 60 * 1000 : 0
         const updated = { ...state.mutedChats, [mailboxId]: expiry }
         try {
-          localStorage.setItem(STORAGE_MUTES_KEY, JSON.stringify(updated))
+          setStorageItem(STORAGE_MUTES_KEY, JSON.stringify(updated))
         } catch {}
         return {
           mutedChats: updated,
@@ -360,7 +372,7 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
         const updated = { ...state.mutedChats }
         delete updated[mailboxId]
         try {
-          localStorage.setItem(STORAGE_MUTES_KEY, JSON.stringify(updated))
+          setStorageItem(STORAGE_MUTES_KEY, JSON.stringify(updated))
         } catch {}
         return {
           mutedChats: updated,
@@ -449,8 +461,8 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
           nextProfiles[userId] = { username, avatarUrl: avatarUrl ?? null }
         }
         try {
-          localStorage.setItem(STORAGE_BLOCKS_KEY, JSON.stringify(nextIds))
-          localStorage.setItem(STORAGE_BLOCKED_PROFILES_KEY, JSON.stringify(nextProfiles))
+          setStorageItem(STORAGE_BLOCKS_KEY, JSON.stringify(nextIds))
+          setStorageItem(STORAGE_BLOCKED_PROFILES_KEY, JSON.stringify(nextProfiles))
         } catch {}
         return { blockedUserIds: nextIds, blockedProfiles: nextProfiles }
       })
@@ -470,8 +482,8 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
         const nextProfiles = { ...state.blockedProfiles }
         delete nextProfiles[userId]
         try {
-          localStorage.setItem(STORAGE_BLOCKS_KEY, JSON.stringify(nextIds))
-          localStorage.setItem(STORAGE_BLOCKED_PROFILES_KEY, JSON.stringify(nextProfiles))
+          setStorageItem(STORAGE_BLOCKS_KEY, JSON.stringify(nextIds))
+          setStorageItem(STORAGE_BLOCKED_PROFILES_KEY, JSON.stringify(nextProfiles))
         } catch {}
         return { blockedUserIds: nextIds, blockedProfiles: nextProfiles }
       })
@@ -495,8 +507,8 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
           }
           set({ blockedUserIds: ids, blockedProfiles: profiles })
           try {
-            localStorage.setItem(STORAGE_BLOCKS_KEY, JSON.stringify(ids))
-            localStorage.setItem(STORAGE_BLOCKED_PROFILES_KEY, JSON.stringify(profiles))
+            setStorageItem(STORAGE_BLOCKS_KEY, JSON.stringify(ids))
+            setStorageItem(STORAGE_BLOCKED_PROFILES_KEY, JSON.stringify(profiles))
           } catch {}
         }
       } catch {
@@ -575,6 +587,19 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
       }
     },
   }
+})
+
+// Wechselt das Konto, wechselt auch der Stand im Speicher. Ohne das sah das
+// nächste Konto im selben Tab bis zum Neuladen die Namen, Sperren und
+// Stummschaltungen des vorigen (bis 29.09.2026). Nach einer abgelaufenen
+// Sitzung ist der Speicher leer; meldet sich dasselbe Konto wieder an, kommt
+// sein Stand aus der Ablage zurück.
+let gebundenesKonto = angemeldetesKonto()
+useAuthStore.subscribe(() => {
+  const konto = angemeldetesKonto()
+  if (konto === gebundenesKonto) return
+  gebundenesKonto = konto
+  useMessengerNotificationStore.setState(ausAblage())
 })
 
 // Multi-Tab & Multi-Device Synchronisation über das `storage`-Event

@@ -22,10 +22,12 @@ import {
   type PublicProfileResponse,
 } from '@/api/social'
 import { teamsApi, type TeamMember } from '@/api/teams'
+import { KONTAKTE_CACHE_KEY } from '@/lib/offlineAblage'
 import { gespraechsListe } from '@/services/gespraechsListe'
 import { benenneGruppen } from '@/services/gruppenName'
 
-const CONTACTS_CACHE_KEY = 'msm:chat_contacts_cache'
+// Der Abzug gehört dem Konto: bei einem Kontowechsel leert ihn `offlineAblage`.
+const CONTACTS_CACHE_KEY = KONTAKTE_CACHE_KEY
 const TAKT_MS = 15000
 /** Teammitglieder ändern sich selten; je Team eine Abfrage kostet am Server Dutzende. */
 const TEAM_TAKT_MS = 60000

@@ -1,17 +1,20 @@
 /**
- * Die Offline-Ablage für Notizen, Termine und die Warteschlange — gebunden an
- * das angemeldete Konto.
+ * Die lokale Ablage eines Kontos: Notizen, Termine und die Warteschlange, dazu
+ * die Hinweise des Messengers und der Zwischenspeicher der Kontaktliste.
  *
  * Bis 27.09.2026 lagen die Einträge unter festen Schlüsseln im localStorage,
  * ohne Konto. Endete eine Sitzung ohne Abmelden und meldete sich im selben
  * Browser ein anderes Konto an, sah es die Termine des ersten im Klartext, und
  * dessen ungesendete Änderungen hätten mit der neuen Anmeldung hinausgehen
- * können.
+ * können. Beim Messenger blieb es bis 29.09.2026 so: das Verzeichnis der
+ * Mailboxen mit den Namen der Kontakte, die Namen gesperrter Profile,
+ * Stummschaltungen und Anheftungen gingen an das nächste Konto über.
  *
  * Deshalb steht neben der Ablage, wem sie gehört. Gehört sie einem anderen
- * Konto als dem angemeldeten, wird sie vor dem ersten Zugriff geleert. Ohne
- * Anmeldung gibt es keinen Zugriff. `clearSession` leert sie außerdem beim
- * Ende jeder Sitzung.
+ * Konto als dem angemeldeten, wird sie geleert, bei der Anmeldung
+ * (`saveCachedUser`) und spätestens vor dem ersten Zugriff. Ohne Anmeldung gibt
+ * es keinen Zugriff. Bewusstes Abmelden leert sie (`authStore.logout`); eine
+ * bloß abgelaufene Sitzung lässt sie an ihr Konto gebunden liegen.
  *
  * Diese Datei importiert nur `angemeldetesKonto`: `authStore` braucht
  * `leereOfflineAblage`, und `offlineSync` importiert seinerseits `authStore`.
@@ -26,8 +29,30 @@ export const STORAGE_KEYS = {
   LAST_SYNC: 'msm_offline_last_sync',
 } as const
 
+/** Die Hinweise des Messengers (`stores/messengerNotificationStore.ts`). */
+export const MESSENGER_KEYS = {
+  MUTES: 'msm:chat_mutes',
+  BLOCKS: 'msm:chat_blocks',
+  BLOCKED_PROFILES: 'msm:chat_blocked_profiles',
+  UNREAD: 'msm:chat_unread',
+  MAILBOX_DIR: 'msm:chat_mailbox_dir',
+  PINS: 'msm:chat_pins',
+  ARCHIVE: 'msm:chat_archive',
+  MENTIONS: 'msm:chat_mentions',
+} as const
+
+/** Zwischenspeicher der Kontaktliste (`hooks/useKontaktdaten.ts`). Er kommt vom Server wieder. */
+export const KONTAKTE_CACHE_KEY = 'msm:chat_contacts_cache'
+
 const INHABER = 'msm_offline_konto'
 const ALTE_SCHLUESSEL = ['msm_outbox_replay_lease']
+const ALLE_SCHLUESSEL = [
+  ...Object.values(STORAGE_KEYS),
+  ...Object.values(MESSENGER_KEYS),
+  KONTAKTE_CACHE_KEY,
+  ...ALTE_SCHLUESSEL,
+  INHABER,
+]
 
 // Ersatz, falls localStorage fehlt oder gesperrt ist.
 let ersatz: Record<string, string> = {}
@@ -72,7 +97,7 @@ export function leereOfflineAblage(): void {
   const s = speicher()
   if (!s) return
   try {
-    for (const schluessel of [...Object.values(STORAGE_KEYS), ...ALTE_SCHLUESSEL, INHABER]) {
+    for (const schluessel of ALLE_SCHLUESSEL) {
       s.removeItem(schluessel)
     }
   } catch {
@@ -81,7 +106,7 @@ export function leereOfflineAblage(): void {
 }
 
 /** Gehört die Ablage dem angemeldeten Konto? Wenn nicht, wird sie ihm geleert übergeben. */
-function gehoertDemKonto(): boolean {
+export function gehoertDemKonto(): boolean {
   const konto = angemeldetesKonto()
   if (konto === null) return false
   if (lies(INHABER) !== String(konto)) {
