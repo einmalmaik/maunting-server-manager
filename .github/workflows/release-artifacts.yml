@@ -238,6 +238,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Standard ist "tools platform-tools". Das alte Paket `tools` fuehrt
+          # der sdkmanager im Runner-Image (cmdline-tools 16.0) nicht mehr, und
+          # die Einrichtung brach damit ab (v5.0.0, 29.09.2026).
+          packages: platform-tools
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
