@@ -22,6 +22,7 @@ from schemas.vault import (
     VaultSyncResponse,
 )
 from services import audit_service, passkey_service, vault_service
+from services.auth_service import AuthService
 from services.panel_settings_service import PanelSettingsService
 
 router = APIRouter(prefix="/api/vault", tags=["vault"])
@@ -201,22 +202,29 @@ def reset_vault(
 ) -> dict[str, str]:
     """Setzt den Tresor des Kontos zurueck, wenn das Master-Passwort vergessen ist.
 
-    Nachweis wie bei der Geraetekopplung: bei 2FA ein eingerichteter Faktor,
-    sonst das Passwort. Dazu das Wort „delete" wie beim Loeschen des Kontos.
+    Dieselben Huerden wie beim Loeschen des Kontos, jede fuer sich:
+    - Konto mit Passwort: das Passwort, auch wenn 2FA aktiv ist.
+    - Aktive 2FA: ein eingerichteter Faktor, gleich welcher.
+    - Immer: das Wort „delete".
+    Ein reines Social-Konto ohne 2FA kommt mit dem Wort allein durch
+    (Entscheidung des Betreibers vom 30.09.2026) — mehr hat es nicht, und
+    beim Loeschen des Kontos gilt dieselbe Regel.
     `auth_rate_limit`, weil hier ein Passwort geprueft wird.
     """
     _check_vault_enabled()
     if (payload.confirmation or "").strip().lower() != "delete":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bestätigung delete erforderlich")
-    fehlt = passkey_service.frischer_nachweis_fehlt(
+    if current_user.has_password and (
+        not payload.password or not AuthService.verify_password(payload.password, current_user.password_hash)
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bitte dein Passwort bestätigen.")
+    if current_user.two_factor_enabled and not passkey_service.zweiter_faktor_bestaetigt(
         db, current_user,
-        password=payload.password,
         otp_code=payload.otp_code,
         passkey=payload.passkey.model_dump() if payload.passkey else None,
         zweck="vault_reset",
-    )
-    if fehlt:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=fehlt)
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=passkey_service.nachweis_hinweis(current_user))
 
     vault_service.tresor_zuruecksetzen(db, current_user.id)
     audit_service.record_privileged_action(

@@ -17,16 +17,17 @@ interface Props {
 
 /**
  * „Master-Passwort vergessen?": der Ausweg, den es bis 09/2026 nur über die
- * Datenbank gab. Nachweis wie beim Koppeln eines Geräts — bei 2FA ein
- * eingerichteter Faktor, sonst das Konto-Passwort — und das Wort „delete" wie
- * beim Löschen des Kontos, nicht einfügbar.
+ * Datenbank gab. Dieselben Nachweise wie beim Löschen des Kontos, jeder für
+ * sich: das Konto-Passwort, wenn eins hinterlegt ist; bei 2FA zusätzlich ein
+ * Faktor, gleich welcher; immer das Wort „delete", nicht einfügbar. Ein
+ * reines Social-Konto ohne 2FA braucht nur das Wort.
  */
 export function TresorZuruecksetzen({ onAbbrechen, onFertig }: Props) {
   const { t } = useTranslation()
   const user = useAuthStore((s) => s.user)
   const resetVault = useVaultStore((s) => s.resetVault)
   const faktor = useZweitfaktor()
-  const brauchtPasswort = !faktor.wahl && user?.has_password !== false
+  const brauchtPasswort = user?.has_password !== false
 
   const [passwort, setPasswort] = useState('')
   const [wort, setWort] = useState('')

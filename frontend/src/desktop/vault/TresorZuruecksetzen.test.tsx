@@ -1,8 +1,9 @@
 /**
  * „Master-Passwort vergessen?": bis 09/2026 ging das nur über die Datenbank.
  *
- * Das Formular verlangt, was das Konto hat — ohne 2FA das Konto-Passwort —
- * und das Wort „delete", das sich nicht einfügen lässt.
+ * Wie beim Löschen des Kontos: das Konto-Passwort, wenn eins hinterlegt ist,
+ * bei 2FA zusätzlich ein Faktor, und das Wort „delete", das sich nicht
+ * einfügen lässt. Ein Social-Konto ohne 2FA braucht nur das Wort.
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -72,5 +73,38 @@ describe('TresorZuruecksetzen', () => {
     fireEvent.click(knopf())
     expect(await screen.findByRole('alert')).toHaveTextContent('Bitte dein Passwort bestätigen.')
     expect(fertig).not.toHaveBeenCalled()
+  })
+
+  it('verlangt bei 2FA Passwort und Code zugleich und schickt beides', async () => {
+    useAuthStore.setState({
+      user: { id: 1, username: 'ich', has_password: true, two_factor_enabled: true, two_factor_methods: ['totp'] } as never,
+    })
+    render(<TresorZuruecksetzen onAbbrechen={() => {}} onFertig={() => {}} />)
+    fireEvent.change(screen.getByLabelText(i18n.t('mss.vault.zuruecksetzen.passwortLabel')), {
+      target: { value: 'konto-pw' },
+    })
+    fireEvent.change(screen.getByLabelText(i18n.t('mss.vault.zuruecksetzen.wortLabel')), {
+      target: { value: 'delete' },
+    })
+    // Ohne vollständigen Code bleibt der Knopf gesperrt.
+    expect(knopf()).toBeDisabled()
+    fireEvent.change(screen.getByLabelText(i18n.t('mss.vault.zuruecksetzen.otpLabel')), {
+      target: { value: '123456' },
+    })
+    fireEvent.click(knopf())
+    await waitFor(() => expect(resetVault).toHaveBeenCalledWith({ password: 'konto-pw', otp_code: '123456' }, 'delete'))
+  })
+
+  it('fragt ein Social-Konto ohne 2FA nur nach dem Wort', async () => {
+    useAuthStore.setState({
+      user: { id: 1, username: 'ich', has_password: false, two_factor_enabled: false } as never,
+    })
+    render(<TresorZuruecksetzen onAbbrechen={() => {}} onFertig={() => {}} />)
+    expect(screen.queryByLabelText(i18n.t('mss.vault.zuruecksetzen.passwortLabel'))).toBeNull()
+    fireEvent.change(screen.getByLabelText(i18n.t('mss.vault.zuruecksetzen.wortLabel')), {
+      target: { value: 'delete' },
+    })
+    fireEvent.click(knopf())
+    await waitFor(() => expect(resetVault).toHaveBeenCalledWith({ password: null }, 'delete'))
   })
 })

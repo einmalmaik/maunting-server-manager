@@ -100,11 +100,11 @@ class VaultBlindCheckRequest(VaultBlindRegisterRequest):
 
 
 class VaultResetRequest(BaseModel):
-    """Tresor zuruecksetzen: der Nachweis wie bei der Geraetekopplung und das Bestaetigungswort.
+    """Tresor zuruecksetzen: dieselben Nachweise wie beim Loeschen des Kontos.
 
-    Bei 2FA ein eingerichteter Faktor, sonst das Passwort
-    (`passkey_service.frischer_nachweis_fehlt`). Das Wort ist dasselbe wie beim
-    Loeschen des Kontos, und die Seite laesst es nicht einfuegen.
+    Das Konto-Passwort, wenn eins hinterlegt ist; bei aktiver 2FA zusaetzlich
+    ein eingerichteter Faktor; immer das Wort „delete", das die Seite nicht
+    einfuegen laesst.
     """
 
     password: Optional[str] = Field(default=None, max_length=256)

@@ -1034,16 +1034,45 @@ def test_vault_reset_loest_den_tresor_vom_konto(client, test_db):
     assert client.post("/api/vault/salt", json={"kdf_salt": "cd" * 16, "bucket_id": neu}).status_code == 200
 
 
-def test_vault_reset_mit_2fa_reicht_das_passwort_nicht(client, test_db):
-    """Mit 2FA verlangt das Zuruecksetzen einen eingerichteten Faktor, wie die Geraetekopplung."""
+def test_vault_reset_mit_2fa_braucht_passwort_und_faktor(client, test_db):
+    """Wie beim Loeschen des Kontos: Passwort und Faktor, keins ersetzt das andere."""
     from services.auth_service import AuthService
+    from tests._totp import random_totp_secret, totp_now
 
     session, user, _ = test_db
+    geheimnis = random_totp_secret()
     user.password_hash = AuthService.hash_password("konto-passwort-1")
+    user.two_factor_secret_encrypted = AuthService.encrypt_secret(geheimnis, aad=f"msm:user:{user.id}:2fa")
     user.two_factor_enabled = True
     session.commit()
     assert client.post("/api/vault/salt", json={"kdf_salt": "ab" * 16, "bucket_id": "5" * 64}).status_code == 200
 
     nur_passwort = client.post("/api/vault/reset", json={"password": "konto-passwort-1", "confirmation": "delete"})
+    code = totp_now(geheimnis)
+    # Das Passwort wird zuerst geprueft; der Code bleibt dabei unverbraucht.
+    nur_code = client.post("/api/vault/reset", json={"otp_code": code, "confirmation": "delete"})
     assert nur_passwort.status_code == 403
+    assert nur_code.status_code == 403
     assert client.get("/api/vault/salt").json()["has_vault"] is True
+
+    beides = client.post(
+        "/api/vault/reset", json={"password": "konto-passwort-1", "otp_code": code, "confirmation": "delete"}
+    )
+    assert beides.status_code == 200
+    assert client.get("/api/vault/salt").json()["has_vault"] is False
+
+
+def test_vault_reset_social_konto_ohne_2fa_braucht_nur_das_wort(client, test_db):
+    """Ein reines Social-Konto ohne 2FA hat nichts, womit es sich ausweisen koennte.
+
+    Entscheidung des Betreibers vom 30.09.2026: dann genuegt das Wort, wie beim
+    Loeschen des Kontos. Ohne das Wort bleibt es beim Nein.
+    """
+    session, user, _ = test_db
+    user.has_password = False
+    session.commit()
+    assert client.post("/api/vault/salt", json={"kdf_salt": "ab" * 16, "bucket_id": "5" * 64}).status_code == 200
+
+    assert client.post("/api/vault/reset", json={}).status_code == 400
+    assert client.post("/api/vault/reset", json={"confirmation": "delete"}).status_code == 200
+    assert client.get("/api/vault/salt").json()["has_vault"] is False
