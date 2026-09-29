@@ -948,6 +948,24 @@ def test_vault_blind_check_bestaetigt_ohne_anzulegen(test_db):
         )
         assert registriert.status_code == 200
 
+        # Ein leerer Bucket ist ein Geist (falsches Passwort vor dem 11.09.),
+        # kein Tresor: er darf eine alte Tippvariante nicht bestaetigen.
+        geist = anonymous_client.post("/api/vault/blind-check", json={"bucket_id": bucket, "auth_token": token})
+        assert geist.status_code == 401
+
+        mit_canary = anonymous_client.post(
+            "/api/vault/blind-sync",
+            json={
+                "bucket_id": bucket,
+                "auth_token": token,
+                "since_revision": 0,
+                "mutations": [
+                    {"id": "vault-canary", "ciphertext": "sv-vault-v1:canary", "revision": 1, "is_deleted": False}
+                ],
+            },
+        )
+        assert mit_canary.status_code == 200
+
         passt = anonymous_client.post("/api/vault/blind-check", json={"bucket_id": bucket, "auth_token": token})
         assert passt.status_code == 200
 

@@ -1024,6 +1024,15 @@ export const useVaultStore = create<VaultState>((set, get) => {
         if (typeof localStorage !== 'undefined') {
           localStorage.setItem(VAULT_CANARY_KEY, newCanary)
           localStorage.setItem(`${VAULT_CANARY_PREFIX}${bucketId}`, newCanary)
+          // Auch zum Server, wie beim Einrichten. `/blind-check` bestätigt nur
+          // Buckets mit Eintrag; ein Tresor, der nie einen Canary hochlud und
+          // leer blieb, hieße auf dem nächsten Gerät sonst wieder „falsches
+          // Master-Passwort".
+          const pendingQueue = getPendingQueue(bucketId)
+          if (!pendingQueue.some((p) => p.id === 'vault-canary')) {
+            pendingQueue.push({ id: 'vault-canary', ciphertext: newCanary, revision: 1, is_deleted: false })
+            localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(pendingQueue))
+          }
         }
       }
       if (typeof localStorage !== 'undefined') {

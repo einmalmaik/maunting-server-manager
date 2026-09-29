@@ -294,12 +294,21 @@ def pruefe_blind_bucket(db: Session, bucket_id: str, auth_token: str) -> None:
     richtigen. `/blind-sync` taugt dafuer nicht: ein falsches Passwort ergibt
     einen jungfraeulichen Bucket, und den wuerde es anlegen.
 
-    Unbekannter Bucket und falscher Nachweis antworten gleich.
+    Ein Bucket ohne Eintrag zaehlt nicht: jeder echte Tresor traegt mindestens
+    seinen Canary. Leere blinde Buckets sind Geister aus der Zeit vor dem
+    11.09.2026, als ein falsches Passwort einen leeren Tresor oeffnete und
+    registrierte. Sie zu bestaetigen hiesse, eine alte Tippvariante als das
+    richtige Passwort auszugeben — und den Besitzer in einen leeren Tresor zu
+    schicken, waehrend seine Eintraege nebenan liegen.
+
+    Unbekannter Bucket, leerer Bucket und falscher Nachweis antworten gleich.
     """
-    blind_bucket = db.get(VaultBlindBucket, bucket_id.strip().lower())
+    bucket_id = bucket_id.strip().lower()
+    blind_bucket = db.get(VaultBlindBucket, bucket_id)
     verifier = hashlib.sha256(auth_token.lower().encode("utf-8")).hexdigest()
     gespeichert = blind_bucket.auth_verifier if blind_bucket is not None else "0" * 64
-    if not secrets.compare_digest(gespeichert, verifier) or blind_bucket is None:
+    passt = secrets.compare_digest(gespeichert, verifier) and blind_bucket is not None
+    if not passt or not _bucket_hat_eintraege(db, bucket_id):
         raise VaultBucketUnauthorized("Ungültiges Authentifizierungs-Token für diesen Tresor-Bucket.")
 
 

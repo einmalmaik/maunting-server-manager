@@ -730,6 +730,15 @@ describe('useVaultStore - Security & Operations', () => {
         expect(localStorage.getItem('mss:vault_server_bucket')).toBe(bucketId)
         const [[, init]] = pruefAufrufe(spy)
         expect(init?.credentials).toBe('omit')
+        // Der hier angelegte Canary geht zum Server. `/blind-check` bestätigt
+        // nur Buckets mit Eintrag, ein leer gebliebener Tresor hieße auf dem
+        // nächsten Gerät sonst „falsches Passwort".
+        await vi.waitFor(() => {
+          const gesendet = spy.mock.calls
+            .filter(([url]) => String(url).includes('/api/vault/blind-sync'))
+            .flatMap(([, i]) => JSON.parse(String(i?.body)).mutations as { id: string }[])
+          expect(gesendet.map((m) => m.id)).toContain('vault-canary')
+        })
       } finally {
         spy.mockRestore()
       }
