@@ -93,6 +93,9 @@ function postJson(path, body, { token = TOKEN } = {}) {
       `http://127.0.0.1:${PORT}${path}`,
       {
         method: 'POST',
+        // Keine wiederverwendete Verbindung: ein Test, dessen Socket der Sidecar
+        // absichtlich trennt, liesse sonst den naechsten mit ECONNRESET scheitern.
+        agent: false,
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': payload.length,
@@ -126,6 +129,9 @@ function postStream(path, inputBuffer, headers = {}) {
       `http://127.0.0.1:${PORT}${path}`,
       {
         method: 'POST',
+        // Keine wiederverwendete Verbindung: ein Test, dessen Socket der Sidecar
+        // absichtlich trennt, liesse sonst den naechsten mit ECONNRESET scheitern.
+        agent: false,
         headers: {
           'Content-Length': inputBuffer.length,
           ...headers,
@@ -133,6 +139,9 @@ function postStream(path, inputBuffer, headers = {}) {
       },
       (res) => {
         const chunks = [];
+        // A socket destroyed mid-response would otherwise never reach 'end'.
+        res.on('aborted', () => reject(Object.assign(new Error('aborted'), { code: 'ECONNRESET' })));
+        res.on('error', reject);
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => {
           const buf = Buffer.concat(chunks);
@@ -393,10 +402,21 @@ async function multiFrameStream() {
 }
 
 async function expectRejected(stream) {
-  const dec = await postStream('/backup/decrypt-stream', stream, {
-    Authorization: `Bearer ${TOKEN}`,
-    'X-Backup-Key-Id': keyA,
-  });
+  let dec;
+  try {
+    dec = await postStream('/backup/decrypt-stream', stream, {
+      Authorization: `Bearer ${TOKEN}`,
+      'X-Backup-Key-Id': keyA,
+    });
+  } catch (err) {
+    // Destroyed socket: the server aborted after plaintext had already gone
+    // out. That is a rejection, not a test failure (CI v5.0.0, 29.09.2026).
+    assert.ok(
+      ['ECONNRESET', 'EPIPE', 'ECONNABORTED'].includes(err.code) || /socket hang up|aborted/.test(err.message),
+      `unexpected error: ${err.code || err.message}`,
+    );
+    return;
+  }
   // Either a clean 400 (nothing written yet) or a destroyed socket once
   // authenticated plaintext had already gone out — never a 200.
   assert.notEqual(dec.status, 200, 'manipulated stream must not decrypt cleanly');
@@ -687,6 +707,9 @@ test('decrypt-stream processes frames incrementally (chunked send)', async () =>
       `http://127.0.0.1:${PORT}/backup/decrypt-stream`,
       {
         method: 'POST',
+        // Keine wiederverwendete Verbindung: ein Test, dessen Socket der Sidecar
+        // absichtlich trennt, liesse sonst den naechsten mit ECONNRESET scheitern.
+        agent: false,
         headers: {
           'Transfer-Encoding': 'chunked',
           Authorization: `Bearer ${TOKEN}`,
@@ -758,6 +781,9 @@ test('decrypt-stream: multi-frame tamper in later frame interrupts stream', asyn
       `http://127.0.0.1:${PORT}/backup/decrypt-stream`,
       {
         method: 'POST',
+        // Keine wiederverwendete Verbindung: ein Test, dessen Socket der Sidecar
+        // absichtlich trennt, liesse sonst den naechsten mit ECONNRESET scheitern.
+        agent: false,
         headers: {
           'Content-Length': tampered.length,
           Authorization: `Bearer ${TOKEN}`,
