@@ -5990,6 +5990,7 @@
         "setupFailed": "Einrichten fehlgeschlagen",
         "notSetup": "Es wurde noch kein Tresor eingerichtet. Bitte richte zuerst ein Master-Passwort ein.",
         "keysMissing": "Tresor-Schlüsseldaten fehlen oder konnten nicht geladen werden.",
+        "serverCheckFailed": "Das Master-Passwort konnte nicht am Server geprüft werden. Bitte prüfe die Verbindung und versuche es erneut.",
         "unlockFailed": "Entsperren fehlgeschlagen",
         "locked": "Tresor ist gesperrt",
         "attachmentTooLarge": "Dateianhang \"{{name}}\" überschreitet das Limit von 500 KB.",

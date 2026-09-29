@@ -93,6 +93,10 @@ class VaultBlindRegisterRequest(BaseModel):
         return v.lower()
 
 
+class VaultBlindCheckRequest(VaultBlindRegisterRequest):
+    """Unauthentifizierte Probe, ob ein blinder Besitznachweis passt. Legt nichts an."""
+
+
 class VaultEntryOut(BaseModel):
     id: str
     ciphertext: str

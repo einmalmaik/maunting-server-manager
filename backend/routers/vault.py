@@ -10,6 +10,7 @@ from dependencies import get_current_user, verify_csrf
 from middleware.rate_limit import limiter
 from models.user import User
 from schemas.vault import (
+    VaultBlindCheckRequest,
     VaultBlindRegisterRequest,
     VaultBlindSyncRequest,
     VaultHintSetRequest,
@@ -67,6 +68,26 @@ def sync_vault_blind(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Interner Fehler bei der blinden Tresor-Synchronisation.",
         ) from exc
+
+
+@router.post("/blind-check")
+@limiter.limit("20/minute")
+def check_vault_blind(
+    payload: VaultBlindCheckRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    """Bestätigt das Master-Passwort eines blinden Tresors auf einem neuen Gerät.
+
+    Wie `/blind-sync` ohne Cookies und ohne Konto, aber ohne Nebenwirkung: ein
+    falsches Passwort legt hier keinen leeren Bucket an.
+    """
+    _check_vault_enabled()
+    try:
+        vault_service.pruefe_blind_bucket(db, payload.bucket_id, payload.auth_token)
+    except vault_service.VaultBucketUnauthorized as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    return {"status": "ok"}
 
 
 @router.post("/blind-register")

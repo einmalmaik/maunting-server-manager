@@ -5990,6 +5990,7 @@
         "setupFailed": "Setup failed",
         "notSetup": "No vault has been set up yet. Please set up a master password first.",
         "keysMissing": "Vault key data is missing or could not be loaded.",
+        "serverCheckFailed": "The master password could not be checked with the server. Please check your connection and try again.",
         "unlockFailed": "Unlock failed",
         "locked": "Vault is locked",
         "attachmentTooLarge": "File attachment \"{{name}}\" exceeds the 500 KB limit.",

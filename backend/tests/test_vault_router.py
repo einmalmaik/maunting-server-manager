@@ -923,4 +923,44 @@ def test_vault_schema_boundary_limits(client):
     assert r_blind_rev.status_code == 422
 
 
+def test_vault_blind_check_bestaetigt_ohne_anzulegen(test_db):
+    """Die Probe fuer ein neues Geraet: bestaetigt den Nachweis, legt aber nie einen Bucket an.
 
+    Bis 09/2026 gab es sie nicht, und ein neues Geraet eines blinden Tresors
+    meldete bei jedem Passwort „falsch". `/blind-sync` kam als Ersatz nicht in
+    Frage: fuer ein falsches Passwort haette es einen leeren Bucket angelegt.
+    """
+    from models import VaultBlindBucket
+
+    session, _, _ = test_db
+
+    def override_get_db():
+        yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    with TestClient(app) as anonymous_client:
+        bucket = "c" * 64
+        token = "d" * 64
+        registriert = anonymous_client.post(
+            "/api/vault/blind-sync",
+            json={"bucket_id": bucket, "auth_token": token, "since_revision": 0, "mutations": []},
+        )
+        assert registriert.status_code == 200
+
+        passt = anonymous_client.post("/api/vault/blind-check", json={"bucket_id": bucket, "auth_token": token})
+        assert passt.status_code == 200
+
+        falscher_nachweis = anonymous_client.post(
+            "/api/vault/blind-check", json={"bucket_id": bucket, "auth_token": "e" * 64}
+        )
+        unbekannt = anonymous_client.post(
+            "/api/vault/blind-check", json={"bucket_id": "7" * 64, "auth_token": token}
+        )
+        assert falscher_nachweis.status_code == 401
+        assert unbekannt.status_code == 401
+        # Kein Orakel: unbekannter Bucket und falscher Nachweis sehen gleich aus.
+        assert falscher_nachweis.json() == unbekannt.json()
+
+    assert session.get(VaultBlindBucket, "7" * 64) is None
+    app.dependency_overrides.clear()

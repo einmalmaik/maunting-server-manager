@@ -292,6 +292,27 @@ export async function blindVaultSync(
   return (await res.json()) as VaultSyncResponse
 }
 
+/**
+ * Fragt den Server, ob Bucket und Besitznachweis zusammenpassen. Legt anders
+ * als `blindVaultSync` nichts an. `false` heißt: dieses Passwort gehört zu
+ * keinem Tresor. Wirft, wenn der Server nicht antwortet.
+ */
+export async function blindVaultCheck(bucketId: string, authToken: string): Promise<boolean> {
+  const res = await fetch(apiUrl('/api/vault/blind-check'), {
+    method: 'POST',
+    credentials: 'omit',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ bucket_id: bucketId, auth_token: authToken }),
+  })
+  if (res.status === 401) return false
+  if (!res.ok) {
+    throw new Error(`Blind vault check failed with status ${res.status}`)
+  }
+  return true
+}
+
 const VAULT_SALT_KEY = 'mss:vault_salt'
 const VAULT_SETUP_DONE_KEY = 'mss:vault_setup_done'
 const VAULT_CANARY_KEY = 'mss:vault_canary'
@@ -938,9 +959,27 @@ export const useVaultStore = create<VaultState>((set, get) => {
         }
       }
 
-      // Falls kein Canary lokal vorhanden/geprüft werden konnte:
-      // Entweder Canary entschlüsselt ODER über hinterlegten serverBucket verifiziert
-      const isVerified = matchedCanary || (serverBucket !== null && bucketId === serverBucket)
+      // Neues Gerät eines blinden Tresors: kein Canary hier, und der Server
+      // nennt keinen Bucket, weil der blinde Tresor an keinem Konto hängt.
+      // Bis 09/2026 endete das in „falsches Master-Passwort", egal was man
+      // eingab. Dann muss der Server den Besitznachweis bestätigen.
+      let serverBestaetigt = false
+      if (!matchedCanary && !serverBucket) {
+        let passt: boolean
+        try {
+          passt = await blindVaultCheck(bucketId, bucketAuthToken)
+        } catch {
+          throw new Error(i18n.t('mss.vault.errors.serverCheckFailed'))
+        }
+        if (!passt) {
+          throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
+        }
+        serverBestaetigt = true
+      }
+
+      // Entweder Canary entschlüsselt, über hinterlegten serverBucket
+      // verifiziert oder vom Server als blinder Tresor bestätigt
+      const isVerified = matchedCanary || serverBestaetigt || (serverBucket !== null && bucketId === serverBucket)
       if (!isVerified) {
         throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
       }

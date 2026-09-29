@@ -698,6 +698,74 @@ describe('useVaultStore - Security & Operations', () => {
     expect(localStorage.getItem('mss:vault_canary')).toBe(originalCanary)
   })
 
+  // Der Zustand eines neuen Geräts für einen blinden Tresor: das Salz kommt
+  // vom Server, der Bucket nicht (blinde Tresore hängen an keinem Konto), und
+  // einen Canary gibt es hier noch nicht. Bis 09/2026 hieß das bei jeder
+  // Eingabe „falsches Master-Passwort".
+  describe('neues Gerät eines blinden Tresors', () => {
+    const salzHex = '39'.repeat(32)
+    beforeEach(() => {
+      localStorage.setItem('mss:vault_salt', salzHex)
+      localStorage.setItem('mss:vault_setup_done', 'true')
+    })
+
+    const pruefAufrufe = (spy: ReturnType<typeof vi.spyOn>) =>
+      spy.mock.calls.filter(([url]) => String(url).includes('/api/vault/blind-check'))
+
+    it('entsperrt mit dem richtigen Passwort, wenn der Server den Nachweis bestätigt', async () => {
+      const { deriveVaultKeys } = await import('./vaultCrypto')
+      const salz = Uint8Array.from(salzHex.match(/../g)!.map((h) => parseInt(h, 16)))
+      const { bucketId, bucketAuthToken } = await deriveVaultKeys('richtiges-passwort', salz)
+      const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+        if (String(url).includes('/api/vault/blind-check')) {
+          const body = JSON.parse(String(init?.body))
+          const passt = body.bucket_id === bucketId && body.auth_token === bucketAuthToken
+          return { ok: passt, status: passt ? 200 : 401, json: async () => ({}) } as Response
+        }
+        return { ok: true, status: 200, json: async () => ({ server_revision: 0, entries: [] }) } as Response
+      })
+      try {
+        expect(await useVaultStore.getState().unlock('richtiges-passwort')).toBe(true)
+        expect(useVaultStore.getState().isUnlocked).toBe(true)
+        expect(localStorage.getItem('mss:vault_server_bucket')).toBe(bucketId)
+        const [[, init]] = pruefAufrufe(spy)
+        expect(init?.credentials).toBe('omit')
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
+    it('meldet ein falsches Passwort, wenn der Server den Nachweis ablehnt', async () => {
+      const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({}),
+      } as Response)
+      try {
+        expect(await useVaultStore.getState().unlock('falsches-passwort')).toBe(false)
+        expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.wrongMasterPassword'))
+        expect(useVaultStore.getState().isUnlocked).toBe(false)
+        expect(localStorage.getItem('mss:vault_server_bucket')).toBeNull()
+        expect(localStorage.getItem('mss:vault_canary')).toBeNull()
+        // Geprüft wird ausschließlich über die Probe, nie über `/blind-sync`:
+        // das legte für ein falsches Passwort einen leeren Bucket an.
+        expect(spy.mock.calls.some(([url]) => String(url).includes('/api/vault/blind-sync'))).toBe(false)
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
+    it('nennt ein unerreichbares Panel nicht „falsches Passwort"', async () => {
+      const spy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'))
+      try {
+        expect(await useVaultStore.getState().unlock('richtiges-passwort')).toBe(false)
+        expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.serverCheckFailed'))
+      } finally {
+        spy.mockRestore()
+      }
+    })
+  })
+
   it('queues vault-canary in pendingQueue upon initializeVault for server sync', async () => {
     const store = useVaultStore.getState()
     const initialized = await store.initializeVault('sync-canary-password-999')

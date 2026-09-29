@@ -285,6 +285,24 @@ def sync_vault_blind(db: Session, request: VaultBlindSyncRequest) -> VaultSyncRe
     return _lies_bucket(db, bucket_id, request.since_revision)
 
 
+def pruefe_blind_bucket(db: Session, bucket_id: str, auth_token: str) -> None:
+    """Bestaetigt einen blinden Besitznachweis, ohne irgendetwas anzulegen.
+
+    Das neue Geraet eines blinden Tresors hat keinen Canary und vom Server keine
+    `bucket_id` — die Kontokopplung ist bei blinden Tresoren leer. Ohne diese
+    Probe blieb dem Entsperren nur „falsches Master-Passwort", auch beim
+    richtigen. `/blind-sync` taugt dafuer nicht: ein falsches Passwort ergibt
+    einen jungfraeulichen Bucket, und den wuerde es anlegen.
+
+    Unbekannter Bucket und falscher Nachweis antworten gleich.
+    """
+    blind_bucket = db.get(VaultBlindBucket, bucket_id.strip().lower())
+    verifier = hashlib.sha256(auth_token.lower().encode("utf-8")).hexdigest()
+    gespeichert = blind_bucket.auth_verifier if blind_bucket is not None else "0" * 64
+    if not secrets.compare_digest(gespeichert, verifier) or blind_bucket is None:
+        raise VaultBucketUnauthorized("Ungültiges Authentifizierungs-Token für diesen Tresor-Bucket.")
+
+
 def register_blind_bucket(db: Session, user_id: int, bucket_id: str, auth_token: str) -> None:
     """Hinterlegt den blinden Besitznachweis fuer den **eigenen** Bucket.
 
