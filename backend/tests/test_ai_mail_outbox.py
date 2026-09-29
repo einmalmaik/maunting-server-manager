@@ -621,7 +621,9 @@ async def test_ten_thousand_due_mails_stay_within_the_allowed_concurrency(
     threads_vorher = threading.active_count()
     assert ai_mail_outbox.arbeiter_starten() is True
     try:
-        for _ in range(6000):
+        # Bis zu 300 s: gemessen wird die Schranke, nicht das Tempo. Ein langsamer
+        # CI-Runner schaffte die 10.000 nicht in 60 s (v5.0.0, 29.09.2026).
+        for _ in range(30_000):
             if len(vermerkt) >= anzahl:
                 break
             await asyncio.sleep(0.01)
@@ -1030,7 +1032,9 @@ async def test_ten_thousand_mails_with_facts_stay_within_the_same_limit(
     threads_vorher = threading.active_count()
     assert ai_mail_outbox.arbeiter_starten() is True
     try:
-        for _ in range(6000):
+        # Bis zu 300 s: gemessen wird die Schranke, nicht das Tempo. Ein langsamer
+        # CI-Runner schaffte die 10.000 nicht in 60 s (v5.0.0, 29.09.2026).
+        for _ in range(30_000):
             if len(vermerkt) >= anzahl:
                 break
             await asyncio.sleep(0.01)

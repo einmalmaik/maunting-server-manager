@@ -56,6 +56,8 @@ export function MauntingQrCard({
   const [generiertesQr, setGeneriertesQr] = useState<string | null>(qrDataUri || null)
 
   useEffect(() => {
+    // Das Erzeugen ist asynchron; nach dem Aushängen darf es keinen State mehr setzen.
+    let aktiv = true
     if (qrDataUri) {
       setGeneriertesQr(qrDataUri)
     } else if (value) {
@@ -68,10 +70,15 @@ export function MauntingQrCard({
           light: '#ffffff',
         },
       })
-        .then((url) => setGeneriertesQr(url))
-        .catch(() => {
-          setGeneriertesQr(null)
+        .then((url) => {
+          if (aktiv) setGeneriertesQr(url)
         })
+        .catch(() => {
+          if (aktiv) setGeneriertesQr(null)
+        })
+    }
+    return () => {
+      aktiv = false
     }
   }, [value, qrDataUri])
 

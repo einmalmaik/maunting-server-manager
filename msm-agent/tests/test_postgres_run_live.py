@@ -50,6 +50,10 @@ def instanz():
     if os.name == "nt":
         # Der Agent kennt sonst nur den Linux-Socket; der Dump spricht das SDK.
         os.environ.setdefault("DOCKER_HOST", "npipe:////./pipe/docker_engine")
+    elif not os.environ.get("DOCKER_HOST") and not os.path.exists(f"/run/user/{os.getuid()}/docker.sock"):
+        # Ohne Rootless-Docker (CI-Runner) spricht der Agent den Socket, den auch
+        # `docker info` eben erreicht hat.
+        os.environ["DOCKER_HOST"] = "unix:///var/run/docker.sock"
     port = _freier_port()
     subprocess.run(["docker", "rm", "-f", NAME], capture_output=True)
     started = subprocess.run(
