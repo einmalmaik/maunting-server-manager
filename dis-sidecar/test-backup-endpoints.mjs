@@ -215,10 +215,18 @@ test('init-key requires Bearer auth', async () => {
 test('encrypt-stream requires Bearer auth (immediate 401, no body read)', async () => {
   // Large body, wrong token — must still get 401 without processing
   const big = Buffer.alloc(1024 * 1024, 0xab);
-  const r = await postStream('/backup/encrypt-stream', big, {
-    Authorization: 'Bearer wrong-token',
-    'X-Backup-Key-Id': 'nope',
-  });
+  let r;
+  try {
+    r = await postStream('/backup/encrypt-stream', big, {
+      Authorization: 'Bearer wrong-token',
+      'X-Backup-Key-Id': 'nope',
+    });
+  } catch (err) {
+    // The sidecar answers 401 and closes before reading the body; the client
+    // may then fail writing the rest (EPIPE). That is the promised behaviour.
+    assert.ok(['EPIPE', 'ECONNRESET'].includes(err.code), `unexpected error: ${err.code || err.message}`);
+    return;
+  }
   assert.equal(r.status, 401);
 });
 
@@ -340,9 +348,10 @@ test('frame format is self-delimiting and nonces unique', async () => {
   // Nonces unique
   const nonces = new Set(frames.map((f) => f.nonce.toString('hex')));
   assert.equal(nonces.size, frames.length, 'nonces must be unique per frame');
-  // Each ciphertext length == chunk size (last may be smaller); tag is 16 bytes
+  // Each ciphertext carries its 16-byte tag. The final frame is always emitted
+  // and is empty (tag only) when the input is a multiple of the chunk size.
   for (const f of frames) {
-    assert.ok(f.ciphertext.length > 16, 'ciphertext must include 16-byte tag');
+    assert.ok(f.ciphertext.length >= 16, 'ciphertext must include 16-byte tag');
   }
   // Parser consumed entire body
   // (parseFrames asserts no leftover by virtue of while loop exiting at off === len)
