@@ -2,6 +2,7 @@ import base64
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 import hashlib
+import hmac
 import logging
 import secrets
 
@@ -89,11 +90,31 @@ class AuthService:
         return hashlib.sha256(token.encode()).hexdigest()
 
     @staticmethod
+    def nachfolger_token(plain_token: str) -> str:
+        """Das Refresh-Token, das die Rotation aus ``plain_token`` macht.
+
+        Abgeleitet statt gewuerfelt: eine zweite Anfrage mit demselben alten
+        Token bekommt denselben Nachfolger, auch nach einem Neustart und ohne
+        dass das Panel ihn irgendwo im Klartext behaelt. Bis 5.0.1 hielt nur
+        ein Merker im Prozess die Antwort fest. Nach einem Neustart fragten
+        App-Fenster gleichzeitig nach, eines bekam 401 und schickte das alte
+        Token spaeter noch einmal, und die Wiederverwendungserkennung sperrte
+        das ganze Geraet.
+        """
+        roh = hmac.new(
+            settings.secret_key.encode(),
+            b"msm:refresh-nachfolger:v1:" + plain_token.encode(),
+            hashlib.sha256,
+        ).digest()
+        return base64.urlsafe_b64encode(roh).rstrip(b"=").decode()
+
+    @staticmethod
     def create_refresh_token(
         db: Session,
         user_id: int,
         family: str | None = None,
         geraet: str | None = None,
+        plain_token: str | None = None,
     ) -> str:
         """Erstellt ein neues Refresh-Token, speichert Hash in DB, gibt Plain-Token zurueck.
 
@@ -101,8 +122,11 @@ class AuthService:
         stammt. Es steht an jeder Zeile der Familie, nicht nur an der ersten:
         die Rotation baut das Token neu, und ohne den Wert an der neuen Zeile
         waere die Herkunft nach dem ersten Erneuern weg.
+
+        ``plain_token`` gibt die Rotation vor (`nachfolger_token`); sonst wird
+        gewuerfelt.
         """
-        plain_token = secrets.token_urlsafe(32)
+        plain_token = plain_token or secrets.token_urlsafe(32)
         token_hash = AuthService._hash_token(plain_token)
         token_family = family or secrets.token_urlsafe(16)
 
@@ -175,10 +199,32 @@ class AuthService:
         return db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
 
     @staticmethod
-    def mark_refresh_token_used(db: Session, rt: RefreshToken) -> None:
-        """Markiert ein Refresh-Token als verwendet (bei Rotation)."""
-        rt.used_at = datetime.now(timezone.utc)
-        db.commit()
+    def rotieren(db: Session, rt: RefreshToken, nachfolger: str) -> bool:
+        """Verbraucht ``rt`` und legt ``nachfolger`` in einer Transaktion an.
+
+        Nur wer die Zeile per bedingtem UPDATE umschreibt, rotiert. Eine zweite
+        Anfrage mit demselben Token bekommt ``False`` und nimmt den Weg der
+        Wiederholung, statt die Kette zu brechen. Bis 5.0.1 wurde ``used_at``
+        erst gelesen, dann eigens festgeschrieben und der Nachfolger danach
+        angelegt; ein Neustart dazwischen liess das Geraet ohne gueltiges
+        Token zurueck.
+        """
+        verbraucht = (
+            db.query(RefreshToken)
+            .filter(
+                RefreshToken.id == rt.id,
+                RefreshToken.used_at.is_(None),
+                RefreshToken.revoked_at.is_(None),
+            )
+            .update({"used_at": datetime.now(timezone.utc)}, synchronize_session=False)
+        )
+        if not verbraucht:
+            db.rollback()
+            return False
+        AuthService.create_refresh_token(
+            db, rt.user_id, family=rt.family, geraet=rt.geraet, plain_token=nachfolger
+        )
+        return True
 
     @staticmethod
     def revoke_refresh_token(db: Session, rt: RefreshToken) -> None:

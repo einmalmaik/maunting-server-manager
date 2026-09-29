@@ -947,24 +947,122 @@ class TestVerlaufsErstabgleich:
         assert ablegen.status_code == 400
 
 
-@pytest.mark.parametrize("evict_cache", [True, False])
-def test_refresh_retry_erzeugt_keinen_neuen_nachfolger(client, db, regular_user, user_cookies, monkeypatch, evict_cache):
+def _neustart_nachstellen() -> None:
+    """Vergisst alles, was das Panel nur im Prozess haelt (bis 5.0.1 der Rotationsmerker)."""
     from routers import auth
-    monkeypatch.setattr(auth, "_recent_rotations", {})
+
+    getattr(auth, "_recent_rotations", {}).clear()
+
+
+def _gekoppelt(client, user_cookies, label: str) -> str:
+    code = _code_erzeugen(client, user_cookies, label=label)["code"]
+    return client.post("/api/auth/devices/redeem", json={"code": code}).json()["refresh_token"]
+
+
+def _familie_offen(db: Session, refresh_token: str) -> bool:
+    db.expire_all()
+    zeile = AuthService.find_any_refresh_token(db, refresh_token)
+    return zeile is not None and (
+        db.query(RefreshToken)
+        .filter(RefreshToken.family == zeile.family, RefreshToken.revoked_at.isnot(None))
+        .count()
+        == 0
+    )
+
+
+def test_wiederholung_nach_neustart_entkoppelt_nicht(client, db, regular_user, user_cookies):
+    """Die Antwort auf eine Rotation geht verloren, das Panel startet neu, die App fragt nochmal.
+
+    Bis 5.0.1 kannte nur ein Merker im Prozess die Antwort. Nach dem Neustart
+    bekam die Wiederholung 401, die App behielt ihr altes Token, und der
+    naechste Versuch nach 30 Sekunden sperrte das Geraet als Wiederverwendung.
+    """
     _mit_chatrecht(db, regular_user)
-    code = _code_erzeugen(client, user_cookies, label="RetryTest")["code"]
-    initial = client.post("/api/auth/devices/redeem", json={"code": code}).json()["refresh_token"]
-    first = client.post("/api/auth/refresh", json={"refresh_token": initial})
-    assert first.status_code == 200
-    valid = first.json()["refresh_token"]
-    if evict_cache:
-        auth._recent_rotations.clear()
-    else:
-        second = client.post("/api/auth/refresh", json={"refresh_token": valid})
-        assert second.status_code == 200
-        valid = second.json()["refresh_token"]
-    count = db.query(RefreshToken).count()
-    retry = client.post("/api/auth/refresh", json={"refresh_token": initial})
-    assert retry.status_code == 401
-    assert db.query(RefreshToken).count() == count
-    assert client.post("/api/auth/refresh", json={"refresh_token": valid}).status_code == 200
+    initial = _gekoppelt(client, user_cookies, "Neustart")
+    erste = client.post("/api/auth/refresh", json={"refresh_token": initial})
+    assert erste.status_code == 200
+    nachfolger = erste.json()["refresh_token"]
+
+    _neustart_nachstellen()
+    zeilen = db.query(RefreshToken).count()
+    wiederholung = client.post("/api/auth/refresh", json={"refresh_token": initial})
+
+    assert wiederholung.status_code == 200, wiederholung.text
+    assert wiederholung.json()["refresh_token"] == nachfolger
+    assert db.query(RefreshToken).count() == zeilen
+    assert _familie_offen(db, nachfolger)
+    weiter = client.post("/api/auth/refresh", json={"refresh_token": nachfolger})
+    assert weiter.status_code == 200
+    assert weiter.json()["refresh_token"] not in (initial, nachfolger)
+
+
+def test_wiederholung_nach_weiterrotation_bleibt_abgelehnt(client, db, regular_user, user_cookies):
+    """Ist der Nachfolger schon weiterrotiert, gibt es fuer das alte Token nichts mehr."""
+    _mit_chatrecht(db, regular_user)
+    initial = _gekoppelt(client, user_cookies, "Weiter")
+    zweites = client.post("/api/auth/refresh", json={"refresh_token": initial}).json()["refresh_token"]
+    drittes = client.post("/api/auth/refresh", json={"refresh_token": zweites}).json()["refresh_token"]
+
+    _neustart_nachstellen()
+    zeilen = db.query(RefreshToken).count()
+    assert client.post("/api/auth/refresh", json={"refresh_token": initial}).status_code == 401
+    assert db.query(RefreshToken).count() == zeilen
+    assert client.post("/api/auth/refresh", json={"refresh_token": drittes}).status_code == 200
+
+
+def test_zwei_fenster_erneuern_zugleich(client, db, regular_user, user_cookies, monkeypatch):
+    """Hauptfenster und Overlay teilen ein Token und fragen nach einem Neustart gleichzeitig.
+
+    Beide lesen das Token als unbenutzt, bevor eines schreibt. Bis 5.0.1
+    rotierten beide und legten zwei Nachfolger an; das Fenster mit dem
+    verworfenen hielt spaeter ein verbrauchtes Token und sperrte das Geraet.
+    Jetzt rotiert genau eine Anfrage, und beide bekommen denselben Nachfolger.
+    """
+    import threading
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import NullPool
+
+    import database as db_module
+
+    _mit_chatrecht(db, regular_user)
+    initial = _gekoppelt(client, user_cookies, "Zwei Fenster")
+    zeilen = db.query(RefreshToken).count()
+
+    engine = create_engine(db_module.engine.url, poolclass=NullPool)
+    monkeypatch.setattr(db_module, "SessionLocal", sessionmaker(bind=engine))
+    barriere = threading.Barrier(2)
+    angehalten: set[int] = set()
+    echt = AuthService.validate_refresh_token
+
+    def gebremst(sitzung, token):
+        gefunden = echt(sitzung, token)
+        if token == initial and threading.get_ident() not in angehalten:
+            angehalten.add(threading.get_ident())
+            try:
+                barriere.wait(timeout=5)
+            except threading.BrokenBarrierError:
+                pass
+        return gefunden
+
+    monkeypatch.setattr(AuthService, "validate_refresh_token", staticmethod(gebremst))
+    antworten: list = [None, None]
+
+    def lauf(i: int) -> None:
+        antworten[i] = client.post("/api/auth/refresh", json={"refresh_token": initial})
+
+    threads = [threading.Thread(target=lauf, args=(i,)) for i in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    engine.dispose()
+
+    assert not barriere.broken, "die Anfragen liefen nicht zugleich"
+    assert [a.status_code for a in antworten] == [200, 200], [a.text for a in antworten]
+    tokens = {a.json()["refresh_token"] for a in antworten}
+    assert len(tokens) == 1
+    db.expire_all()
+    assert db.query(RefreshToken).count() == zeilen + 1
+    assert _familie_offen(db, tokens.pop())

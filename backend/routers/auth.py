@@ -1,6 +1,5 @@
 import os
 import re
-import time
 from datetime import datetime, timedelta, timezone
 import logging
 
@@ -832,17 +831,6 @@ def logout(
     return {"message": "Abgemeldet"}
 
 
-_recent_rotations: dict[str, dict] = {}
-
-
-def _remember_rotation(token_hash: str, tokens: SessionTokens) -> None:
-    now = time.time()
-    abgelaufen = [h for h, dat in _recent_rotations.items() if now - dat["timestamp"] > 120]
-    for h in abgelaufen:
-        _recent_rotations.pop(h, None)
-    _recent_rotations[token_hash] = {"timestamp": now, "tokens": tokens}
-
-
 @router.post("/refresh")
 def refresh(
     request: Request,
@@ -856,66 +844,73 @@ def refresh(
     beide Wege laufen durch dieselbe Validierung, dieselbe Familie und
     dieselbe Wiederverwendungserkennung. Wer das Token im Body schickt, bekommt
     die neuen Tokens auch im Body zurueck (Cookies kann er nicht lesen).
+
+    Der Nachfolger ist aus dem alten Token abgeleitet
+    (`AuthService.nachfolger_token`). Kommt dasselbe Token binnen 30 Sekunden
+    noch einmal (Verbindungsabbruch, zwei App-Fenster zugleich), bekommt die
+    Wiederholung denselben Nachfolger, auch nach einem Neustart des Panels.
+    Bis 5.0.1 kannte nur ein Merker im Prozess die Antwort; nach einem
+    Neustart bekam die Wiederholung 401, und der naechste Versuch sperrte als
+    Wiederverwendung das ganze gekoppelte Geraet.
     """
     body_token = req.refresh_token if req else None
     refresh_value = body_token or request.cookies.get("__Secure-refresh_token")
     if not refresh_value:
         raise HTTPException(status_code=401, detail="Kein Refresh-Token")
 
-    token_hash = AuthService._hash_token(refresh_value)
+    nachfolger = AuthService.nachfolger_token(refresh_value)
 
     rt = AuthService.validate_refresh_token(db, refresh_value)
-    if not rt:
-        recent_rt = AuthService.find_recently_used_refresh_token(db, refresh_value, max_age_seconds=30)
-        if recent_rt and (not body_token or recent_rt.geraet == "desktop" or device_pairing_service.ist_gekoppelt(db, recent_rt.family)):
-            user = AuthService.get_user_by_id(db, recent_rt.user_id)
-            if user and user.is_active:
-                family = recent_rt.family
-                device_pairing_service.aktivitaet_vermerken(family)
-                cached = _recent_rotations.get(token_hash)
-                if cached:
-                    tokens = cached["tokens"]
-                else:
-                    # Ein Retry darf nur dieselbe bereits ausgestellte Antwort
-                    # wiederholen. Nach Neustart/auf einem anderen Worker ist
-                    # sie unbekannt: niemals eine zweite Tokenkette erzeugen.
-                    raise HTTPException(status_code=401, detail="Refresh-Antwort nicht mehr verfügbar")
-                if not AuthService.validate_refresh_token(db, tokens.refresh_token):
-                    raise HTTPException(status_code=401, detail="Refresh-Token bereits weiterrotiert")
+    if rt:
+        user = AuthService.get_user_by_id(db, rt.user_id)
+        if not user or not user.is_active:
+            raise HTTPException(status_code=401, detail="User nicht gefunden oder inaktiv")
+        family, geraet = rt.family, rt.geraet
+        if AuthService.rotieren(db, rt, nachfolger):
+            device_pairing_service.aktivitaet_vermerken(family)
+            # Die Rotation stellt eine vollwertige Sitzung aus und geht deshalb
+            # ueber denselben Weg wie jeder Login. Vorher baute sie die drei
+            # Token selbst — und liess dabei die `jti` weg. Folge: ab dem ersten
+            # Refresh konnte der Logout das Access-Token nicht mehr auf die
+            # Blacklist setzen. Die Familie wird weitergereicht, damit die
+            # Wiederverwendungserkennung nicht abreisst — und das Geraet mit
+            # ihr, sonst waere eine gekoppelte Sitzung nach dem ersten Erneuern
+            # eine gewoehnliche Panel-Sitzung und verloere die Werkzeuge fuer
+            # den Rechner des Benutzers.
+            tokens = issue_session(
+                response, db, user, family=family, geraet=geraet, refresh_token=nachfolger
+            )
+            if body_token:
+                return _native_token_body(tokens)
+            return {"message": "Token refreshed"}
+        # Eine gleichzeitige Anfrage hat dieses Token eben rotiert: dann ist
+        # dies eine Wiederholung und bekommt denselben Nachfolger.
 
-                _set_auth_cookies(response, tokens.access_token, tokens.refresh_token, tokens.csrf_token)
-                if body_token:
-                    return _native_token_body(tokens)
-                return {"message": "Token refreshed"}
+    recent_rt = AuthService.find_recently_used_refresh_token(db, refresh_value, max_age_seconds=30)
+    if recent_rt and (not body_token or recent_rt.geraet == "desktop" or device_pairing_service.ist_gekoppelt(db, recent_rt.family)):
+        user = AuthService.get_user_by_id(db, recent_rt.user_id)
+        if user and user.is_active:
+            # Wurde der Nachfolger selbst schon weiterrotiert, ist das keine
+            # Wiederholung mehr. Die Familie bleibt stehen: auch zwei Fenster
+            # derselben App koennen so hintereinander landen.
+            if not AuthService.validate_refresh_token(db, nachfolger):
+                raise HTTPException(status_code=401, detail="Refresh-Token bereits weiterrotiert")
+            device_pairing_service.aktivitaet_vermerken(recent_rt.family)
+            tokens = issue_session(
+                response, db, user,
+                family=recent_rt.family, geraet=recent_rt.geraet, refresh_token=nachfolger,
+            )
+            if body_token:
+                return _native_token_body(tokens)
+            return {"message": "Token refreshed"}
 
-        # Replay-Schutz: Wurde das Token bereits verwendet oder widerrufen,
-        # wird die gesamte Familie unverzüglich revoziert (RFC 6749 BCP).
-        used_rt = AuthService.find_any_refresh_token(db, refresh_value)
-        if used_rt and (used_rt.used_at is not None or used_rt.revoked_at is not None):
-            AuthService.revoke_refresh_family(db, used_rt.user_id, used_rt.family)
+    # Replay-Schutz: Wurde das Token bereits verwendet oder widerrufen,
+    # wird die gesamte Familie unverzüglich revoziert (RFC 6749 BCP).
+    used_rt = AuthService.find_any_refresh_token(db, refresh_value)
+    if used_rt and (used_rt.used_at is not None or used_rt.revoked_at is not None):
+        AuthService.revoke_refresh_family(db, used_rt.user_id, used_rt.family)
 
-        raise HTTPException(status_code=401, detail="Ungültiges Refresh-Token")
-
-    family = rt.family
-    device_pairing_service.aktivitaet_vermerken(family)
-    AuthService.mark_refresh_token_used(db, rt)
-    user = AuthService.get_user_by_id(db, rt.user_id)
-    if not user or not user.is_active:
-        raise HTTPException(status_code=401, detail="User nicht gefunden oder inaktiv")
-    # Die Rotation stellt eine vollwertige Sitzung aus und geht deshalb ueber
-    # denselben Weg wie jeder Login. Vorher baute sie die drei Token selbst —
-    # und liess dabei die `jti` weg. Folge: ab dem ersten Refresh konnte der
-    # Logout das Access-Token nicht mehr auf die Blacklist setzen, ein
-    # entwendetes Cookie blieb bis zum Ablauf voll gueltig. Die Familie wird
-    # weitergereicht, damit die Wiederverwendungserkennung nicht abreisst — und
-    # das Geraet mit ihr, sonst waere eine gekoppelte Sitzung nach dem ersten
-    # Erneuern eine gewoehnliche Panel-Sitzung und verloere die Werkzeuge fuer
-    # den Rechner des Benutzers.
-    tokens = issue_session(response, db, user, family=family, geraet=rt.geraet)
-    _remember_rotation(token_hash, tokens)
-    if body_token:
-        return _native_token_body(tokens)
-    return {"message": "Token refreshed"}
+    raise HTTPException(status_code=401, detail="Ungültiges Refresh-Token")
 
 
 @router.get("/me", response_model=UserResponse)

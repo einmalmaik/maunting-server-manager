@@ -119,8 +119,13 @@ class TestRefreshToken:
     def test_validate_used_token(self, db: Session, owner_user: User):
         plain = AuthService.create_refresh_token(db, owner_user.id)
         rt = AuthService.validate_refresh_token(db, plain)
-        AuthService.mark_refresh_token_used(db, rt)
+        nachfolger = AuthService.nachfolger_token(plain)
+        assert AuthService.rotieren(db, rt, nachfolger) is True
         assert AuthService.validate_refresh_token(db, plain) is None
+        assert AuthService.validate_refresh_token(db, nachfolger).family == rt.family
+        # Ein zweites Mal rotiert dasselbe Token nicht.
+        assert AuthService.rotieren(db, rt, nachfolger) is False
+        assert AuthService.nachfolger_token(plain) == nachfolger != plain
 
     def test_validate_expired_token(self, db: Session, owner_user: User):
         plain = AuthService.create_refresh_token(db, owner_user.id)

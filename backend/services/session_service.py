@@ -40,6 +40,7 @@ def issue_session(
     user: User,
     family: str | None = None,
     geraet: str | None = None,
+    refresh_token: str | None = None,
 ) -> SessionTokens:
     """Stellt Access-, Refresh- und CSRF-Token aus und setzt die Auth-Cookies.
 
@@ -69,6 +70,10 @@ def issue_session(
     und nicht eine Bitte an den Client: er kann sie nicht mehr selbst erklären
     (`dependencies.session_herkunft`).
 
+    `refresh_token` kommt nur aus `/api/auth/refresh`: die Rotation hat den
+    Nachfolger schon angelegt (`AuthService.rotieren`), und eine Wiederholung
+    derselben Rotation bekommt ihn noch einmal statt einer zweiten Zeile.
+
     **Die Familie sagt, *welches* Gerät.** `geraet` unterscheidet nur App von
     Browser; ein Benutzer darf aber mehrere Rechner koppeln
     (`device_pairing_service.geraete`, Geräteliste mit einzelnem Widerruf), und
@@ -91,9 +96,10 @@ def issue_session(
     if geraet:
         ansprueche["geraet"] = geraet
     access_token = AuthService.create_access_token(ansprueche)
-    refresh_token = AuthService.create_refresh_token(
-        db, user.id, family=familie, geraet=geraet
-    )
+    if refresh_token is None:
+        refresh_token = AuthService.create_refresh_token(
+            db, user.id, family=familie, geraet=geraet
+        )
     csrf_token = AuthService.create_csrf_token()
     _set_auth_cookies(response, access_token, refresh_token, csrf_token)
     return SessionTokens(access_token, refresh_token, csrf_token)
