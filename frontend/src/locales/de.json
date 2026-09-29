@@ -2803,7 +2803,8 @@
         "account_delete": "Konto löschen",
         "2fa_disable": "Zwei-Faktor-Anmeldung abschalten",
         "oauth_link": "Social-Konto verknüpfen",
-        "2fa_change": "Zwei-Faktor-Anmeldung ändern"
+        "2fa_change": "Zwei-Faktor-Anmeldung ändern",
+        "vault_reset": "Passwort-Manager zurücksetzen"
       }
     },
     "zweitfaktor": {
@@ -5980,6 +5981,18 @@
       "hinweisAktualisieren": "Hinweis aktualisieren",
       "hinweisAnlegen": "Neuen Hinweis hinterlegen",
       "hinweisPerMail": "Hinweis per E-Mail anfordern",
+      "zuruecksetzen": {
+        "link": "Master-Passwort vergessen? Tresor zurücksetzen",
+        "titel": "Tresor zurücksetzen",
+        "warnungTitel": "Alle Einträge gehen verloren",
+        "warnungText": "Ohne Master-Passwort kann niemand deine Einträge entschlüsseln, auch der Server nicht. Nach dem Zurücksetzen richtest du einen neuen, leeren Tresor ein. Geräte, auf denen der alte Tresor noch offen ist, behalten ihn, bis du ihn dort ebenfalls zurücksetzt.",
+        "passwortLabel": "Konto-Passwort bestätigen",
+        "otpLabel": "Code aus der Authenticator-App",
+        "wortLabel": "Tippe delete zur Bestätigung (nicht kopierbar)",
+        "knopf": "Tresor endgültig zurücksetzen",
+        "laeuft": "Wird zurückgesetzt …",
+        "fertig": "Tresor zurückgesetzt. Richte jetzt einen neuen ein."
+      },
       "sendeMail": "E-Mail wird gesendet …",
       "perMailTesten": "Per E-Mail testen",
       "spaeter": "Später",

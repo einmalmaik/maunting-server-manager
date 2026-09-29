@@ -37,6 +37,7 @@ function zweckText(t: TFunction, zweck: string): string {
     case '2fa_disable': return t('auth.browserBestaetigung.purpose.2fa_disable')
     case 'oauth_link': return t('auth.browserBestaetigung.purpose.oauth_link')
     case '2fa_change': return t('auth.browserBestaetigung.purpose.2fa_change')
+    case 'vault_reset': return t('auth.browserBestaetigung.purpose.vault_reset')
     default: return zweck
   }
 }

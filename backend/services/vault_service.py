@@ -452,6 +452,22 @@ def set_vault_salt(
     )
 
 
+def tresor_zuruecksetzen(db: Session, user_id: int) -> None:
+    """Loest den Tresor vom Konto: Salz, Kontokopplung und Hinweis. Committet nicht.
+
+    Der Ausweg bei vergessenem Master-Passwort. Danach meldet `/salt` „kein
+    Tresor", und die App bietet das Einrichten an. Bis 09/2026 ging das nur
+    ueber die Datenbank.
+
+    Die Ciphertexte bleiben liegen. Ein blinder Bucket gehoert keinem Konto,
+    der Server kann ihn also nicht sicher zuordnen; und ein gekoppelter Bucket
+    lebt womoeglich noch auf einem anderen Geraet, das ihn weiter abgleicht.
+    Lesen kann sie ohne das alte Passwort niemand.
+    """
+    db.query(VaultUserSetting).filter(VaultUserSetting.user_id == user_id).delete(synchronize_session=False)
+    db.query(VaultHint).filter(VaultHint.user_id == user_id).delete(synchronize_session=False)
+
+
 HINT_RATE_LIMIT_SECONDS = 600  # 10 Minuten Cooldown
 
 

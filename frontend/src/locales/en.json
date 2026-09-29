@@ -2803,7 +2803,8 @@
         "account_delete": "Delete account",
         "2fa_disable": "Turn off two-factor sign-in",
         "oauth_link": "Link a social account",
-        "2fa_change": "Change two-factor sign-in"
+        "2fa_change": "Change two-factor sign-in",
+        "vault_reset": "Reset password manager"
       }
     },
     "zweitfaktor": {
@@ -5980,6 +5981,18 @@
       "hinweisAktualisieren": "Update hint",
       "hinweisAnlegen": "Store a new hint",
       "hinweisPerMail": "Request the hint by email",
+      "zuruecksetzen": {
+        "link": "Forgot your master password? Reset the vault",
+        "titel": "Reset vault",
+        "warnungTitel": "All entries will be lost",
+        "warnungText": "Without the master password nobody can decrypt your entries, not even the server. After the reset you set up a new, empty vault. Devices where the old vault is still open keep it until you reset it there as well.",
+        "passwortLabel": "Confirm your account password",
+        "otpLabel": "Code from your authenticator app",
+        "wortLabel": "Type delete to confirm (cannot be pasted)",
+        "knopf": "Reset vault permanently",
+        "laeuft": "Resetting …",
+        "fertig": "Vault reset. Set up a new one now."
+      },
       "sendeMail": "Sending email …",
       "perMailTesten": "Test by email",
       "spaeter": "Later",

@@ -5,6 +5,8 @@ import re
 from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
+from schemas.passkey import Zweitnachweis
+
 
 HEX_64_REGEX = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -95,6 +97,20 @@ class VaultBlindRegisterRequest(BaseModel):
 
 class VaultBlindCheckRequest(VaultBlindRegisterRequest):
     """Unauthentifizierte Probe, ob ein blinder Besitznachweis passt. Legt nichts an."""
+
+
+class VaultResetRequest(BaseModel):
+    """Tresor zuruecksetzen: der Nachweis wie bei der Geraetekopplung und das Bestaetigungswort.
+
+    Bei 2FA ein eingerichteter Faktor, sonst das Passwort
+    (`passkey_service.frischer_nachweis_fehlt`). Das Wort ist dasselbe wie beim
+    Loeschen des Kontos, und die Seite laesst es nicht einfuegen.
+    """
+
+    password: Optional[str] = Field(default=None, max_length=256)
+    otp_code: Optional[str] = Field(default=None, pattern=r"^\d{6}$")
+    passkey: Optional[Zweitnachweis] = None
+    confirmation: str = Field(default="", max_length=32)
 
 
 class VaultEntryOut(BaseModel):

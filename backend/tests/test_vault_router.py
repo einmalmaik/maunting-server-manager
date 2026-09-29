@@ -982,3 +982,68 @@ def test_vault_blind_check_bestaetigt_ohne_anzulegen(test_db):
 
     assert session.get(VaultBlindBucket, "7" * 64) is None
     app.dependency_overrides.clear()
+
+
+def test_vault_reset_loest_den_tresor_vom_konto(client, test_db):
+    """Vergessenes Master-Passwort: nach dem Zuruecksetzen bietet die App das Einrichten an.
+
+    Bis 09/2026 ging das nur ueber die Datenbank. Die Ciphertexte bleiben
+    liegen; sie gehoeren einem blinden Bucket und sind ohne das alte Passwort
+    unlesbar.
+    """
+    from models import VaultBlindBucket, VaultHint
+    from services.auth_service import AuthService
+
+    session, user, _ = test_db
+    user.password_hash = AuthService.hash_password("konto-passwort-1")
+    session.commit()
+
+    bucket = "5" * 64
+    assert client.post("/api/vault/salt", json={"kdf_salt": "ab" * 16, "bucket_id": bucket}).status_code == 200
+    assert client.post("/api/vault/hint", json={"hint": "Firma abgekuerzt"}).status_code == 200
+    sync = client.post(
+        "/api/vault/sync",
+        json={
+            "bucket_id": bucket,
+            "since_revision": 0,
+            "mutations": [{"id": "vault-canary", "ciphertext": "sv-vault-v1:c", "revision": 1, "is_deleted": False}],
+        },
+    )
+    assert sync.status_code == 200
+
+    ohne_wort = client.post("/api/vault/reset", json={"password": "konto-passwort-1"})
+    falsches_passwort = client.post(
+        "/api/vault/reset", json={"password": "falsch", "confirmation": "delete"}
+    )
+    assert ohne_wort.status_code == 400
+    assert falsches_passwort.status_code == 403
+    assert client.get("/api/vault/salt").json()["has_vault"] is True
+
+    ok = client.post("/api/vault/reset", json={"password": "konto-passwort-1", "confirmation": "delete"})
+    assert ok.status_code == 200
+
+    salz = client.get("/api/vault/salt").json()
+    assert salz == {"kdf_salt": None, "bucket_id": None, "has_vault": False}
+    assert session.get(VaultHint, user.id) is None
+    # Nichts Verschluesseltes geloescht: der Server loest nur die Zuordnung.
+    assert session.query(VaultEntry).filter(VaultEntry.bucket_id == bucket).count() == 1
+    assert session.get(VaultBlindBucket, bucket) is None
+
+    # Danach laesst sich ein neuer Tresor einrichten.
+    neu = "6" * 64
+    assert client.post("/api/vault/salt", json={"kdf_salt": "cd" * 16, "bucket_id": neu}).status_code == 200
+
+
+def test_vault_reset_mit_2fa_reicht_das_passwort_nicht(client, test_db):
+    """Mit 2FA verlangt das Zuruecksetzen einen eingerichteten Faktor, wie die Geraetekopplung."""
+    from services.auth_service import AuthService
+
+    session, user, _ = test_db
+    user.password_hash = AuthService.hash_password("konto-passwort-1")
+    user.two_factor_enabled = True
+    session.commit()
+    assert client.post("/api/vault/salt", json={"kdf_salt": "ab" * 16, "bucket_id": "5" * 64}).status_code == 200
+
+    nur_passwort = client.post("/api/vault/reset", json={"password": "konto-passwort-1", "confirmation": "delete"})
+    assert nur_passwort.status_code == 403
+    assert client.get("/api/vault/salt").json()["has_vault"] is True

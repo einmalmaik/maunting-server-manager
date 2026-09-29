@@ -698,6 +698,62 @@ describe('useVaultStore - Security & Operations', () => {
     expect(localStorage.getItem('mss:vault_canary')).toBe(originalCanary)
   })
 
+  // „Master-Passwort vergessen?": bis 09/2026 ging das nur über die Datenbank.
+  describe('Tresor zurücksetzen', () => {
+    const tresorDaten = () => {
+      localStorage.setItem('mss:vault_salt', 'ab'.repeat(32))
+      localStorage.setItem('mss:vault_setup_done', 'true')
+      localStorage.setItem('mss:vault_canary', 'sv-vault-v1:c')
+      localStorage.setItem('mss:vault_canary_' + 'a'.repeat(64), 'sv-vault-v1:c')
+      localStorage.setItem('mss:vault_server_bucket', 'a'.repeat(64))
+      localStorage.setItem('mss:vault_blobs_' + 'a'.repeat(64), '[{"id":"x","ciphertext":"sv-vault-v1:x"}]')
+      localStorage.setItem('mss:vault_pending_' + 'a'.repeat(64), '[{"id":"y","ciphertext":"sv-vault-v1:y"}]')
+      localStorage.setItem('mss:vault_rev_' + 'a'.repeat(64), '7')
+      localStorage.setItem('mss:vault_autolock_minutes', '5')
+      useVaultStore.setState({ isInitialized: true })
+    }
+
+    it('fragt zuerst den Server und räumt danach die ganze lokale Kopie weg', async () => {
+      tresorDaten()
+      const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify({ status: 'ok' }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      )
+      try {
+        await useVaultStore.getState().resetVault({ password: 'konto-pw' }, 'delete')
+        const aufruf = spy.mock.calls.find(([url]) => String(url).includes('/api/vault/reset'))
+        expect(aufruf).toBeDefined()
+        expect(JSON.parse(String(aufruf![1]?.body))).toEqual({ password: 'konto-pw', confirmation: 'delete' })
+
+        const uebrig = Object.keys(localStorage).filter((k) => k.startsWith('mss:vault'))
+        // Nur die Einstellungen bleiben; alles, was zum alten Tresor gehört, ist weg.
+        const einstellungen = new Set(['mss:vault_autolock_minutes', 'mss:vault_lock_on_blur', 'mss:vault_bio_migrated_v2'])
+        expect(uebrig.filter((k) => !einstellungen.has(k))).toEqual([])
+        expect(uebrig).toContain('mss:vault_autolock_minutes')
+        expect(useVaultStore.getState().isInitialized).toBe(false)
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
+    it('lässt die lokale Kopie stehen, wenn der Server ablehnt', async () => {
+      tresorDaten()
+      const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify({ detail: 'Bitte dein Passwort bestätigen.' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      try {
+        await expect(useVaultStore.getState().resetVault({ password: 'falsch' }, 'delete')).rejects.toThrow()
+        expect(localStorage.getItem('mss:vault_salt')).toBe('ab'.repeat(32))
+        expect(localStorage.getItem('mss:vault_blobs_' + 'a'.repeat(64))).not.toBeNull()
+        expect(useVaultStore.getState().isInitialized).toBe(true)
+      } finally {
+        spy.mockRestore()
+      }
+    })
+  })
+
   // Der Zustand eines neuen Geräts für einen blinden Tresor: das Salz kommt
   // vom Server, der Bucket nicht (blinde Tresore hängen an keinem Konto), und
   // einen Canary gibt es hier noch nicht. Bis 09/2026 hieß das bei jeder

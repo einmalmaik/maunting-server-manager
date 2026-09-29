@@ -34,6 +34,7 @@ import { generateTotpCode, getTotpSecondsRemaining } from './totpEngine'
 import { MASTER_PASSWORT_MINDESTLAENGE, generateSecurePassword } from './vaultCrypto'
 import { createDebouncedLeakChecker, type LeakCheckResult } from './leakChecker'
 import { QrScannerModal } from './QrScannerModal'
+import { TresorZuruecksetzen } from './TresorZuruecksetzen'
 import { setzeTresorSchutz } from '../tauri'
 import { useVaultStore, getLocalVaultSalt, type VaultItem } from './vaultStore'
 import { DisBadge } from '@/components/DisBadge'
@@ -106,6 +107,7 @@ export function VaultView() {
 
   // UI-Zustände für Sperre & Ersteinrichtung
   const [isSetupMode, setIsSetupMode] = useState(!isInitialized)
+  const [zuruecksetzen, setZuruecksetzen] = useState(false)
 
   useEffect(() => {
     if (isInitialized) {
@@ -526,6 +528,16 @@ export function VaultView() {
     return (
       <div className="flex h-full w-full items-center justify-center p-4 bg-surface">
         <div className="w-full max-w-sm p-6 space-y-5 rounded-2xl bg-surface-container border border-outline-variant/30 shadow-xl">
+          {zuruecksetzen ? (
+            <TresorZuruecksetzen
+              onAbbrechen={() => setZuruecksetzen(false)}
+              onFertig={() => {
+                setZuruecksetzen(false)
+                setIsSetupMode(true)
+              }}
+            />
+          ) : (
+          <>
           <div className="text-center space-y-1.5">
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary border border-primary/20">
               <Lock className="h-6 w-6" />
@@ -646,7 +658,22 @@ export function VaultView() {
                 </button>
               </div>
             )}
+
+            {isInitialized && (
+              <button
+                type="button"
+                onClick={() => {
+                  setZuruecksetzen(true)
+                  setMasterPasswordInput('')
+                }}
+                className="text-xs text-on-surface-variant/70 hover:text-status-destructive hover:underline transition-colors"
+              >
+                {t('mss.vault.zuruecksetzen.link')}
+              </button>
+            )}
           </div>
+          </>
+          )}
         </div>
       </div>
     )

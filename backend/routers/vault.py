@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import get_current_user, verify_csrf
-from middleware.rate_limit import limiter
+from middleware.rate_limit import auth_rate_limit, limiter
 from models.user import User
 from schemas.vault import (
     VaultBlindCheckRequest,
@@ -15,12 +15,13 @@ from schemas.vault import (
     VaultBlindSyncRequest,
     VaultHintSetRequest,
     VaultHintStatusResponse,
+    VaultResetRequest,
     VaultSaltResponse,
     VaultSaltSetRequest,
     VaultSyncRequest,
     VaultSyncResponse,
 )
-from services import vault_service
+from services import audit_service, passkey_service, vault_service
 from services.panel_settings_service import PanelSettingsService
 
 router = APIRouter(prefix="/api/vault", tags=["vault"])
@@ -189,6 +190,44 @@ def set_vault_salt(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
+
+@router.post("/reset", dependencies=[Depends(auth_rate_limit)])
+def reset_vault(
+    payload: VaultResetRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    __=Depends(verify_csrf),
+) -> dict[str, str]:
+    """Setzt den Tresor des Kontos zurueck, wenn das Master-Passwort vergessen ist.
+
+    Nachweis wie bei der Geraetekopplung: bei 2FA ein eingerichteter Faktor,
+    sonst das Passwort. Dazu das Wort „delete" wie beim Loeschen des Kontos.
+    `auth_rate_limit`, weil hier ein Passwort geprueft wird.
+    """
+    _check_vault_enabled()
+    if (payload.confirmation or "").strip().lower() != "delete":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bestätigung delete erforderlich")
+    fehlt = passkey_service.frischer_nachweis_fehlt(
+        db, current_user,
+        password=payload.password,
+        otp_code=payload.otp_code,
+        passkey=payload.passkey.model_dump() if payload.passkey else None,
+        zweck="vault_reset",
+    )
+    if fehlt:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=fehlt)
+
+    vault_service.tresor_zuruecksetzen(db, current_user.id)
+    audit_service.record_privileged_action(
+        db,
+        user_id=current_user.id,
+        action="vault.reset",
+        target_type="user",
+        target_id=current_user.id,
+        commit=True,
+    )
+    return {"status": "ok"}
 
 
 @router.post("/hint")

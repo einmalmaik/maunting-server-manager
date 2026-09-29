@@ -478,6 +478,12 @@ interface VaultState {
   checkAutoLock: () => boolean
   lock: () => void
   resetLocalVaultState: () => void
+  /**
+   * Tresor zurücksetzen, wenn das Master-Passwort vergessen ist: der Server
+   * löst Salz und Hinweis vom Konto, danach verschwindet die lokale Kopie.
+   * `nachweis` ist, was das Konto hat: Passwort oder zweiter Faktor.
+   */
+  resetVault: (nachweis: Record<string, unknown>, bestaetigung: string) => Promise<void>
   setSearchQuery: (q: string) => void
   setSelectedItemId: (id: string | null) => void
   createQuickPasswordEntry: (serviceName?: string) => Promise<VaultItem>
@@ -735,7 +741,16 @@ export const useVaultStore = create<VaultState>((set, get) => {
       const toRemove: string[] = []
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i)
-        if (k && k.startsWith(VAULT_CANARY_PREFIX)) {
+        // Auch Einträge, Warteschlange und Revisionsstand: ohne Salz und
+        // Canary lässt sich davon nichts mehr öffnen, und eine liegengebliebene
+        // Warteschlange schöbe alte Umschläge in den nächsten Tresor.
+        if (
+          k &&
+          (k.startsWith(VAULT_CANARY_PREFIX) ||
+            k.startsWith(VAULT_LOCAL_STORAGE_PREFIX) ||
+            k.startsWith(VAULT_PENDING_QUEUE_PREFIX) ||
+            k.startsWith(VAULT_REVISION_PREFIX))
+        ) {
           toRemove.push(k)
         }
       }
@@ -758,6 +773,15 @@ export const useVaultStore = create<VaultState>((set, get) => {
       lastActivityTime: Date.now(),
       syncStatus: 'synced',
     })
+  },
+
+  resetVault: async (nachweis, bestaetigung) => {
+    // Erst der Server: scheitert der Nachweis, bleibt die lokale Kopie, wie sie war.
+    await api('/api/vault/reset', {
+      method: 'POST',
+      body: JSON.stringify({ ...nachweis, confirmation: bestaetigung }),
+    })
+    get().resetLocalVaultState()
   },
 
   initializeVault: async (masterPassword: string) => {

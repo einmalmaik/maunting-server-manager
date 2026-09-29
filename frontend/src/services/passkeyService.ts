@@ -185,6 +185,7 @@ export type PasskeyZweck =
   | 'data_export'
   | 'oauth_link'
   | '2fa_change'
+  | 'vault_reset'
 
 function nachB64url(puffer: ArrayBuffer): string {
   const bytes = new Uint8Array(puffer)
