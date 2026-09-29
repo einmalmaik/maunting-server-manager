@@ -83,6 +83,7 @@ AUSGESCHLOSSEN: dict[str, str] = {
     "users.email_hash": "Hash der E-Mail-Adresse",
     "users.password_hash": "Passwort-Hash",
     "users.two_factor_secret_encrypted": "2FA-Geheimnis",
+    "users.two_factor_secret_pending_encrypted": "2FA-Geheimnis in Einrichtung",
     "users.password_reset_token": "Hash eines Ruecksetzlinks",
     "backup_codes.code_hash": "Hash eines Backup-Codes",
     "refresh_tokens.token_hash": "Hash eines Sitzungstokens",

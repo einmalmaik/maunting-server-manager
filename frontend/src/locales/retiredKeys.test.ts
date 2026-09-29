@@ -148,6 +148,23 @@ const ABGELOESTE_SCHLUESSEL = [
   'social.milestones.statAdmin',
   'social.milestones.statCommands',
   'mss.social.gesamtaktivitaet',
+  // 29.09.2026: Ein Konto hat mehrere zweite Faktoren. Die Wahl „App oder
+  // Passkey“ und die Umschalter zwischen genau zwei Wegen sind gefallen.
+  'profile.2faSetup',
+  'profile.2faChooseMethod',
+  'profile.2faMethodTotp',
+  'profile.2faMethodTotpDesc',
+  'profile.2faMethodPasskey',
+  'profile.2faMethodPasskeyDesc',
+  'profile.2faPasskeySetupBtn',
+  'profile.2faPasskeySuccess',
+  'profile.2faPasskeyFailed',
+  'profile.2faDisableWithPasskey',
+  'profile.dataExport.passkeyHint',
+  'profile.dataExport.passkeyHintApp',
+  'profile.linkedAccounts.linkPasskeyHint',
+  'auth.use2FAInstead',
+  'auth.usePasskeyInstead',
 ]
 
 /** Die Nachfolger muss es geben — sonst wäre das Löschen ein Verlust. */
@@ -193,6 +210,12 @@ const NACHFOLGER = [
   'ai.reasoning.levels.low',
   'ai.reasoning.levels.medium',
   'ai.reasoning.levels.high',
+  'auth.zweitfaktor.usePasskey',
+  'auth.zweitfaktor.useCode',
+  'auth.zweitfaktor.passkeyHint',
+  'auth.zweitfaktor.passkeyHintApp',
+  'profile.zweitfaktoren.appEinrichten',
+  'profile.zweitfaktoren.passkeyHinzufuegen',
 ]
 
 // Die beiden Panelsprachen — seit 09/2026 gibt es keine weiteren. Die neun

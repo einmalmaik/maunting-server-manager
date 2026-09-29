@@ -31,7 +31,7 @@ from services.role_service import (
     get_role_by_name,
     set_user_roles,
 )
-from services import audit_service, postgres_service, rechtevergabe_service
+from services import audit_service, passkey_service, postgres_service, rechtevergabe_service
 from services.achievement_service import AchievementService
 from services.postgres_service import PostgresServiceError
 from services.user_deletion_service import prepare_user_deletion
@@ -143,13 +143,18 @@ def update_user(
         # Einschalten ohne eingerichteten Faktor sperrt das Konto aus: aktiv
         # ohne TOTP-Geheimnis heisst Passkey, und es gibt keinen.
         raise HTTPException(status_code=400, detail="2FA richtet der Benutzer selbst ein.")
-    if req.two_factor_enabled is not None:
-        user.two_factor_enabled = req.two_factor_enabled
-        if not req.two_factor_enabled:
-            # Sonst bleibt der alte Passkey in `excludeCredentials`, und der
-            # Browser verweigert, ihn fuer dasselbe Konto neu einzurichten.
-            for eintrag in list(user.passkeys):
-                db.delete(eintrag)
+    if req.two_factor_enabled is False and user.two_factor_enabled:
+        # Alle Faktoren und die Backup-Codes. Bis 29.09.2026 blieben Geheimnis
+        # und Backup-Codes stehen und galten wieder, sobald 2FA an war.
+        passkey_service.zweiten_faktor_abschalten(db, user)
+        audit_service.record_privileged_action(
+            db,
+            user_id=actor.id,
+            action="admin.user.2fa.disable",
+            target_type="user",
+            target_id=user.id,
+            details={"username": user.username},
+        )
     if req.time_zone is not None:
         user.time_zone = req.time_zone
     db.commit()

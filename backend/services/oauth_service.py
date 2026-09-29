@@ -990,7 +990,7 @@ OAUTH_2FA_VERSUCHE = 3
 def complete_2fa_challenge(
     db: Session, challenge_token: str, otp_code: str = "", passkey: dict | None = None
 ) -> tuple[User, OAuthProvider] | None:
-    """Validiert den eingerichteten Faktor gegen den Challenge-User. Konsumiert die Challenge bei Erfolg.
+    """Validiert einen eingerichteten Faktor gegen den Challenge-User. Konsumiert die Challenge bei Erfolg.
 
     Returns (User, Provider) oder None (Challenge ungueltig/Nachweis falsch).
     Bis 09/2026 genuegte hier ``passkey_verified=True`` aus dem Request-Body.
@@ -1013,9 +1013,12 @@ def complete_2fa_challenge(
     nummer = login_challenge_service.versuch_belegen(db, row, OAUTH_2FA_VERSUCHE)
     if nummer is None:
         return None
-    bestanden = passkey_service.zweiter_faktor_bestaetigt(
+    methode = passkey_service.zweiter_faktor_bestaetigt(
         db, user, otp_code=otp_code, passkey=passkey, zweck="oauth_2fa"
-    ) or (bool(otp_code) and passkey is None and BackupCodeService.validate_backup_code(db, user.id, otp_code))
+    )
+    bestanden = methode is not None or (
+        bool(otp_code) and passkey is None and BackupCodeService.validate_backup_code(db, user.id, otp_code)
+    )
     if not bestanden:
         if nummer >= OAUTH_2FA_VERSUCHE:
             login_challenge_service.consume(db, row)
@@ -1029,6 +1032,8 @@ def complete_2fa_challenge(
     )
     if provider is None:
         return None
+    if methode is not None:
+        user.two_factor_last_method = methode
     login_challenge_service.consume(db, row)
     return user, provider
 

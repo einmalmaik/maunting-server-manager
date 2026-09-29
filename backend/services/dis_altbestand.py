@@ -45,7 +45,8 @@ STAPEL = 500
 MARKE = "dis.klartext_bereinigt"
 #: 20260929: Stories (`chat_stories`) sind seither DisText. Abgelaufene und
 #: geloeschte Stories liegen als tote Zeilen noch im Klartext in der Datei.
-MARKE_WERT = "20260929"
+#: 20260929_2: `user_passkeys.name` ist neu und DisText.
+MARKE_WERT = "20260929_2"
 
 #: Ohne Frist wartete VACUUM FULL auf jede laufende Anfrage, und alles, was
 #: danach kommt, wartete auf VACUUM FULL. So scheitert es nach 10 s und wird

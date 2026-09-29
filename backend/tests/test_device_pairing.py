@@ -154,7 +154,7 @@ class TestNachweis:
     ):
         _mit_chatrecht(db, regular_user)
         regular_user.two_factor_enabled = True
-        # Ein TOTP-Konto: aktiv ohne Geheimnis hiesse Passkey (`two_factor_method`).
+        # Ein TOTP-Konto: aktiv ist die App, deren Geheimnis hier steht.
         regular_user.two_factor_secret_encrypted = "totp-geheimnis"
         db.commit()
         monkeypatch.setattr(

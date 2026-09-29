@@ -41,7 +41,7 @@ from cryptography.hazmat.primitives.serialization import load_der_public_key
 from sqlalchemy.orm import Session
 
 from config import TAURI_ORIGINS, get_cors_origins, settings
-from models import LoginChallenge, User, UserPasskey
+from models import BackupCode, LoginChallenge, User, UserPasskey
 from services import login_challenge_service
 
 
@@ -52,7 +52,7 @@ from services import login_challenge_service
 ZWECKE_ANGEMELDET = frozenset({
     "2fa_disable", "device_pairing", "e2ee_reset",
     "password_change", "email_change", "account_delete", "data_export",
-    "oauth_link",
+    "oauth_link", "2fa_change",
 })
 ZWECKE = ZWECKE_ANGEMELDET | {"login", "oauth_2fa"}
 
@@ -262,10 +262,10 @@ def _schluessel_laden(spki: bytes, alg: int):
     return schluessel
 
 
-def anlegen(db: Session, user: User, antwort: dict) -> UserPasskey:
+def anlegen(db: Session, user: User, antwort: dict, name: str | None = None) -> UserPasskey:
     """Prueft die Antwort von `navigator.credentials.create()` und speichert den Schluessel.
 
-    Committet nicht: der Aufrufer schaltet im selben Zug 2FA ein.
+    Committet nicht: der Aufrufer zieht im selben Zug `two_factor_enabled` nach.
     """
     inhalt = antwort.get("response")
     if antwort.get("type") != "public-key" or not isinstance(inhalt, dict):
@@ -301,15 +301,16 @@ def anlegen(db: Session, user: User, antwort: dict) -> UserPasskey:
     erlaubt = {"usb", "nfc", "ble", "smart-card", "hybrid", "internal"}
     wege = [t for t in transports if t in erlaubt] if isinstance(transports, list) else []
     passkey = UserPasskey(
-        user_id=user.id,
         credential_id=kennung,
         public_key=b64url(spki),
         algorithm=alg,
         rp_id=rp_id,
         sign_count=zaehler,
         transports=",".join(wege) or None,
+        name=name,
     )
-    db.add(passkey)
+    # Ueber die Beziehung, damit `user.passkeys` ihn sofort kennt.
+    user.passkeys.append(passkey)
     return passkey
 
 
@@ -411,35 +412,58 @@ def bestaetigen(db: Session, user: User, antwort: dict | None, zweck: str) -> Us
 
 def zweiter_faktor_bestaetigt(
     db: Session, user: User, *, otp_code: str | None, passkey: dict | None, zweck: str
-) -> bool:
-    """Genau der Weg, den das Konto eingerichtet hat — der andere zaehlt nicht.
+) -> str | None:
+    """Welcher aktive Faktor den Nachweis traegt: ``"passkey"``, ``"totp"`` oder ``None``.
 
-    TOTP-Konto: nur der aktuelle Code. Passkey-Konto: nur der Passkey. Frueher
-    oeffnete der Passkey-Weg auch TOTP-Konten, weil er gar nichts pruefte.
+    Es zaehlt jeder eingerichtete Faktor, nie einer, der nicht eingerichtet
+    ist: ein Code oeffnet kein Konto ohne bestaetigte Authenticator-App, ein
+    Passkey kein Konto ohne Passkey. Frueher oeffnete der Passkey-Weg auch
+    TOTP-Konten, weil er gar nichts pruefte.
     """
     from services.auth_service import AuthService
 
-    methode = user.two_factor_method
-    if methode == "totp":
-        return bool(otp_code) and AuthService.verify_current_2fa_code(user, otp_code)
-    if methode == "passkey":
-        if passkey is None:
-            return False
+    if not user.two_factor_enabled:
+        return None
+    if passkey is not None:
+        if not user.passkeys:
+            return None
         try:
             bestaetigen(db, user, passkey, zweck)
         except PasskeyFehler:
-            return False
-        return True
-    return False
+            return None
+        return "passkey"
+    if otp_code and user.two_factor_totp_aktiv and AuthService.verify_current_2fa_code(user, otp_code):
+        return "totp"
+    return None
+
+
+def nachweis_hinweis(user: User) -> str:
+    """Was fehlt, in den Worten der Faktoren, die das Konto hat."""
+    methoden = user.two_factor_methods
+    if methoden == ["passkey"]:
+        return "Bitte mit deinem Passkey bestätigen."
+    if methoden == ["totp"]:
+        return "Bitte den aktuellen 2FA-Code eingeben."
+    return "Bitte mit deinem Passkey oder dem aktuellen 2FA-Code bestätigen."
+
+
+def anmelde_reihenfolge(user: User) -> list[str]:
+    """Die aktiven Faktoren fuer den Login, der zuletzt genutzte vorn."""
+    methoden = user.two_factor_methods
+    zuletzt = user.two_factor_last_method
+    if zuletzt in methoden:
+        methoden.remove(zuletzt)
+        methoden.insert(0, zuletzt)
+    return methoden
 
 
 def frischer_nachweis_fehlt(
     db: Session, user: User, *, password: str | None, otp_code: str | None,
     passkey: dict | None, zweck: str,
 ) -> str | None:
-    """Vor einem neuen Zugang (Geraetekopplung, Social-Verknuepfung): bei 2FA
-    der eingerichtete Faktor, sonst das Passwort. Liefert den Grund, wenn der
-    Nachweis fehlt, sonst None.
+    """Vor einem neuen Zugang (Geraetekopplung, Social-Verknuepfung, neuer
+    Faktor): bei 2FA ein eingerichteter Faktor, sonst das Passwort. Liefert
+    den Grund, wenn der Nachweis fehlt, sonst None.
 
     Eine Social-Verknuepfung ist kein Nachweis. Bis 28.09.2026 uebersprang die
     Kopplung die Pruefung fuer jedes Konto mit OAuth-Link, auch wenn es ein
@@ -452,14 +476,41 @@ def frischer_nachweis_fehlt(
     if user.two_factor_enabled:
         if zweiter_faktor_bestaetigt(db, user, otp_code=otp_code, passkey=passkey, zweck=zweck):
             return None
-        if user.two_factor_method == "passkey":
-            return "Bitte mit deinem Passkey bestätigen."
-        return "Bitte den aktuellen 2FA-Code eingeben."
+        return nachweis_hinweis(user)
     if not user.has_password:
         return "Bitte lege zuerst ein Passwort fest."
     if not password or not AuthService.verify_password(password, user.password_hash):
         return "Bitte dein Passwort bestätigen."
     return None
+
+
+def zweiten_faktor_abschalten(db: Session, user: User) -> None:
+    """Nimmt alle zweiten Faktoren weg: Geheimnis, Passkeys, Backup-Codes. Committet nicht.
+
+    Bis 29.09.2026 liess das Abschalten durch einen Admin Geheimnis und
+    Backup-Codes stehen. Nach der alten Regel galt das Geheimnis wieder, sobald
+    jemand 2FA einschaltete.
+    """
+    user.two_factor_enabled = False
+    user.two_factor_secret_encrypted = None
+    user.two_factor_secret_pending_encrypted = None
+    user.two_factor_last_method = None
+    user.passkeys.clear()
+    db.query(BackupCode).filter(BackupCode.user_id == user.id).delete(synchronize_session=False)
+
+
+def faktoren_nachziehen(db: Session, user: User) -> bool:
+    """Die einzige Stelle, die ``two_factor_enabled`` setzt. Committet nicht.
+
+    An, solange TOTP bestaetigt ist oder ein Passkey besteht. Geht der letzte
+    Faktor, faellt alles andere mit (`zweiten_faktor_abschalten`). Liefert, ob
+    2FA danach an ist.
+    """
+    if user.two_factor_totp_aktiv or user.passkeys:
+        user.two_factor_enabled = True
+        return True
+    zweiten_faktor_abschalten(db, user)
+    return False
 
 
 # ── Bestaetigen im Browser (fuer die Desktop-App) ─────────────────────────
@@ -506,8 +557,8 @@ def browser_vorgang_anlegen(db: Session, user: User, zweck: str) -> dict:
     """Legt den Vorgang an. Die Kennung und die Zahl sieht nur die App."""
     if zweck not in ZWECKE_ANGEMELDET:
         raise PasskeyFehler("Unbekannter Vorgang.")
-    if user.two_factor_method != "passkey":
-        raise PasskeyFehler("Dieses Konto bestätigt nicht mit Passkey.")
+    if not user.passkeys:
+        raise PasskeyFehler("Für dieses Konto ist kein Passkey eingerichtet.")
     zahlen = secrets.SystemRandom().sample(range(10, 100), 3)
     vorgang = login_challenge_service.create_challenge(
         db,
@@ -595,4 +646,8 @@ __all__ = [
     "frischer_nachweis_fehlt",
     "bestaetigen",
     "zweiter_faktor_bestaetigt",
+    "nachweis_hinweis",
+    "anmelde_reihenfolge",
+    "zweiten_faktor_abschalten",
+    "faktoren_nachziehen",
 ]

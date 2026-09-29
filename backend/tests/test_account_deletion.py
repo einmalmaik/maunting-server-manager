@@ -121,7 +121,7 @@ class TestAccountDeletion:
             headers={"X-CSRF-Token": csrf},
         )
         assert response.status_code == 401
-        assert "2FA-Code erforderlich" in response.json()["detail"]
+        assert "2FA-Code eingeben" in response.json()["detail"]
 
         # Try with invalid OTP
         response = client.request(
@@ -132,7 +132,7 @@ class TestAccountDeletion:
             headers={"X-CSRF-Token": csrf},
         )
         assert response.status_code == 401
-        assert "Ungültiger 2FA-Code" in response.json()["detail"]
+        assert "2FA-Code eingeben" in response.json()["detail"]
 
         # Try with backup code (must be rejected)
         codes = BackupCodeService.generate_backup_codes(db, user_id)

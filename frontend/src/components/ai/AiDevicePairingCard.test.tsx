@@ -72,7 +72,7 @@ vi.mock('@/services/e2eeGeraet', () => ({
 }))
 
 const NACHWEIS = { id: 'k', rawId: 'k', type: 'public-key', response: { signatur: 'echt' } }
-vi.mock('@/services/passkeyService', () => ({ passkeyNachweis: vi.fn(async () => NACHWEIS) }))
+vi.mock('@/services/passkeyService', () => ({ passkeyNachweis: vi.fn(async () => NACHWEIS), inDerApp: () => false }))
 
 const { AiDevicePairingCard } = await import('./AiDevicePairingCard')
 const { useAuthStore } = await import('@/stores/authStore')
@@ -221,12 +221,12 @@ describe('AiDevicePairingCard — Rückfrage vor der Übergabe', () => {
   }, 15_000)
 })
 
-describe('AiDevicePairingCard — nur der eingerichtete Faktor', () => {
+describe('AiDevicePairingCard — nur eingerichtete Faktoren', () => {
   it('Passkey-Konto: kein Code-Feld, der Passkey-Nachweis geht mit', async () => {
     const { api } = await import('@/api/client')
     const { passkeyNachweis } = await import('@/services/passkeyService')
     useAuthStore.setState({
-      user: { id: 10, two_factor_enabled: true, two_factor_method: 'passkey' } as never,
+      user: { id: 10, two_factor_enabled: true, two_factor_methods: ['passkey'] } as never,
     })
     render(<AiDevicePairingCard />)
 
@@ -244,7 +244,7 @@ describe('AiDevicePairingCard — nur der eingerichtete Faktor', () => {
 
   it('App-Konto: nur das Code-Feld, kein Passkey-Knopf', () => {
     useAuthStore.setState({
-      user: { id: 10, two_factor_enabled: true, two_factor_method: 'totp' } as never,
+      user: { id: 10, two_factor_enabled: true, two_factor_methods: ['totp'] } as never,
     })
     render(<AiDevicePairingCard />)
 
@@ -252,5 +252,29 @@ describe('AiDevicePairingCard — nur der eingerichtete Faktor', () => {
     expect(
       screen.queryByRole('button', { name: i18n.t('ai.profile.devicesProofPasskey') }),
     ).not.toBeInTheDocument()
+    // Nur ein Faktor: kein Wechsel zu einem Weg, den das Konto nicht hat.
+    expect(screen.queryByRole('button', { name: i18n.t('auth.zweitfaktor.usePasskey') })).not.toBeInTheDocument()
+  })
+
+  it('Konto mit beiden: erst der Passkey, per Wechsel der Code', async () => {
+    const { api } = await import('@/api/client')
+    const { passkeyNachweis } = await import('@/services/passkeyService')
+    vi.mocked(passkeyNachweis).mockClear()
+    useAuthStore.setState({
+      user: { id: 10, two_factor_enabled: true, two_factor_methods: ['passkey', 'totp'] } as never,
+    })
+    render(<AiDevicePairingCard />)
+
+    expect(screen.queryByLabelText(i18n.t('ai.profile.devicesProofOtp'))).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('auth.zweitfaktor.useCode') }))
+    fireEvent.change(screen.getByLabelText(i18n.t('ai.profile.devicesProofOtp')), { target: { value: '123456' } })
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.profile.devicesPair') }))
+
+    await screen.findByText(CODE)
+    expect(passkeyNachweis).not.toHaveBeenCalled()
+    expect(api).toHaveBeenCalledWith(
+      '/auth/devices/pairing',
+      expect.objectContaining({ body: JSON.stringify({ label: '', otp_code: '123456' }) }),
+    )
   })
 })

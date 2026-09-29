@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import hashlib
 
-from sqlalchemy import Boolean, CheckConstraint, String, DateTime, ForeignKey, Integer, text, true, false, Text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, String, DateTime, ForeignKey, Integer, text, true, false, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -124,8 +124,21 @@ class User(Base):
 
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Das TOTP-Geheimnis, das gilt. Steht hier eines, ist die Authenticator-App aktiv.
     two_factor_secret_encrypted: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Ein Geheimnis in Einrichtung (`/2fa/setup`). Es oeffnet nichts, bis
+    # `/2fa/enable` einen Code dazu sieht und es nach oben verschiebt.
+    two_factor_secret_pending_encrypted: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Schreibt nur `passkey_service.faktoren_nachziehen`: an, solange ein
+    # Faktor aktiv ist (TOTP oder mindestens ein Passkey).
     two_factor_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Mit welchem Faktor zuletzt angemeldet ("totp"/"passkey"). Der Login
+    # fragt diesen zuerst.
+    two_factor_last_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # 30-s-Schritt des zuletzt angenommenen App-Codes. Ein Code gilt nur, wenn
+    # sein Schritt danach liegt; belegt wird per bedingtem UPDATE
+    # (`AuthService.verify_totp`). Bis 5.0.1 galt ein Code 90 s lang beliebig oft.
+    two_factor_totp_last_step: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     email_notifications: Mapped[bool] = mapped_column(Boolean, default=True)
     # Meldungen der KI im Panel — getrennt von den E-Mails, weil es zwei
@@ -221,17 +234,23 @@ class User(Base):
     )
 
     @property
-    def two_factor_method(self) -> str | None:
-        """Welcher zweite Faktor gilt: ``"totp"``, ``"passkey"`` oder ``None``.
+    def two_factor_totp_aktiv(self) -> bool:
+        return bool(self.two_factor_secret_encrypted)
 
-        Keine eigene Spalte, sondern die Regel, an die sich Ein- und Ausschalten
-        halten: ``/2fa/enable`` verlangt ein TOTP-Geheimnis, ein angelegter
-        Passkey loescht es. Aktiv mit Geheimnis heisst also App, aktiv ohne
-        heisst Passkey.
+    @property
+    def two_factor_methods(self) -> list[str]:
+        """Die aktiven zweiten Faktoren, ``"passkey"`` vor ``"totp"``.
+
+        Bis 29.09.2026 hatte ein Konto genau einen (`two_factor_method`): wer
+        einen Passkey anlegte, verlor die Authenticator-App, und ein Passkey
+        nur auf dem PC liess am neuen Handy nur den Backup-Code.
         """
         if not self.two_factor_enabled:
-            return None
-        return "totp" if self.two_factor_secret_encrypted else "passkey"
+            return []
+        methoden = ["passkey"] if self.passkeys else []
+        if self.two_factor_totp_aktiv:
+            methoden.append("totp")
+        return methoden
 
     @property
     def role_ids(self) -> list[int]:

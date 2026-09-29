@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Download, KeyRound, MessageSquareLock } from 'lucide-react'
-import { Button, Input } from '@/Singra/UI'
+import { Button } from '@/Singra/UI'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Spinner } from '@/components/ui/Spinner'
 import { useAuthStore } from '@/stores/authStore'
-import { inDerApp, passkeyNachweis } from '@/services/passkeyService'
+import { useZweitfaktor, ZweitfaktorFeld } from '@/components/auth/ZweitfaktorNachweis'
 import { istOffen } from '@/services/lokaleVersiegelung'
 import type { ExportErgebnis, TresorQuelle } from '@/services/datenexport'
 
@@ -17,18 +17,17 @@ interface Props {
 /**
  * „Meine Daten exportieren“: Nachweis und Knopf in einem Schritt, ohne Dialog.
  *
- * Der Nachweis ist der, den das Konto hat: bei 2FA der eingerichtete Faktor,
+ * Der Nachweis ist der, den das Konto hat: bei 2FA ein eingerichteter Faktor,
  * sonst das Passwort. Ein Social-Konto ohne beides exportiert ohne Nachweis,
  * dann fehlen nur die hinterlegten Zugangsdaten (Backend entscheidet).
  */
 export function DatenexportKarte({ tresor }: Props) {
   const { t } = useTranslation()
   const user = useAuthStore((s) => s.user)
-  const methode = user?.two_factor_enabled ? (user.two_factor_method ?? 'totp') : null
-  const brauchtPasswort = !methode && user?.has_password !== false
+  const faktor = useZweitfaktor()
+  const brauchtPasswort = !faktor.wahl && user?.has_password !== false
 
   const [passwort, setPasswort] = useState('')
-  const [code, setCode] = useState('')
   const [laeuft, setLaeuft] = useState(false)
   const [fehler, setFehler] = useState('')
   const [ergebnis, setErgebnis] = useState<ExportErgebnis | null>(null)
@@ -41,16 +40,16 @@ export function DatenexportKarte({ tresor }: Props) {
     setLaeuft(true)
     try {
       // Der Passkey zuerst: der Browser verlangt die Abfrage nah am Klick.
-      const passkey = methode === 'passkey' ? await passkeyNachweis('data_export') : null
+      const zweiter = await faktor.nachweis('data_export')
       const { exportErstellen, exportSpeichern } = await import('@/services/datenexport')
       const fertig = await exportErstellen(
-        { password: brauchtPasswort ? passwort : '', otp_code: methode === 'totp' ? code : '', passkey },
+        { password: brauchtPasswort ? passwort : '', ...zweiter },
         tresor,
       )
       if (await exportSpeichern(fertig.blob, fertig.dateiname)) {
         setErgebnis(fertig)
         setPasswort('')
-        setCode('')
+        faktor.setCode('')
       }
     } catch (err) {
       setFehler(err instanceof Error ? err.message : String(err))
@@ -100,25 +99,13 @@ export function DatenexportKarte({ tresor }: Props) {
             disabled={laeuft}
           />
         )}
-        {methode === 'totp' && (
-          <Input
-            id="data-export-otp"
-            label={t('profile.dataExport.otpLabel')}
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            placeholder="000000"
-            required
-            disabled={laeuft}
-          />
-        )}
-        {methode === 'passkey' && (
-          <p className="text-xs text-on-surface-variant">
-            {inDerApp() ? t('profile.dataExport.passkeyHintApp') : t('profile.dataExport.passkeyHint')}
-          </p>
-        )}
-        {!brauchtPasswort && !methode && (
+        <ZweitfaktorFeld
+          faktor={faktor}
+          id="data-export-otp"
+          label={t('profile.dataExport.otpLabel')}
+          disabled={laeuft}
+        />
+        {!brauchtPasswort && !faktor.wahl && (
           <p className="text-xs text-on-surface-variant">{t('profile.dataExport.withoutSecrets')}</p>
         )}
 

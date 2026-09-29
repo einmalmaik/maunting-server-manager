@@ -127,14 +127,23 @@ def _anmelden(client: TestClient, **extra) -> dict:
     return {"status": res.status_code, "body": res.json(), "cookies": dict(res.cookies)}
 
 
-def _passkey_einrichten(client: TestClient, cookies: dict) -> Authenticator:
+PASSWORT = {"password": "OwnerPass123!"}
+
+
+def _passkey_einrichten(
+    client: TestClient, cookies: dict, nachweis: dict | None = None, name: str | None = None
+) -> Authenticator:
+    """Legt einen Passkey an. Ohne aktive 2FA weist das Passwort aus, sonst `nachweis`."""
     geraet = Authenticator()
-    optionen = client.post("/api/auth/2fa/passkey/options", headers=_kopf(cookies), cookies=cookies)
+    optionen = client.post(
+        "/api/auth/2fa/passkey/options", headers=_kopf(cookies), cookies=cookies,
+        json=nachweis if nachweis is not None else PASSWORT,
+    )
     assert optionen.status_code == 200, optionen.text
     res = client.post(
         "/api/auth/2fa/passkey/enable",
         headers=_kopf(cookies), cookies=cookies,
-        json=geraet.anlegen(optionen.json()),
+        json={**geraet.anlegen(optionen.json()), "name": name},
     )
     assert res.status_code == 200, res.text
     return geraet
@@ -164,7 +173,7 @@ def test_passkey_verified_oeffnet_kein_totp_konto_mehr(client: TestClient, db: S
 
     assert antwort["status"] == 200
     assert antwort["body"]["requires_2fa"] is True
-    assert antwort["body"]["two_factor_method"] == "totp"
+    assert antwort["body"]["two_factor_methods"] == ["totp"]
     assert "passkey_options" not in antwort["body"] or antwort["body"]["passkey_options"] is None
     assert not any(k.endswith("access_token") for k in antwort["cookies"])
 
@@ -199,10 +208,10 @@ def test_ein_passkey_nachweis_oeffnet_kein_totp_konto(client: TestClient, db: Se
 def test_einrichten_speichert_den_schluessel_und_nennt_die_methode(
     client: TestClient, db: Session, owner_user: User, owner_cookies: dict
 ):
-    # Liegengebliebenes Geheimnis aus `/2fa/setup` — wie im Profil vor jedem Passkey.
-    client.post("/api/auth/2fa/setup", headers=_kopf(owner_cookies), cookies=owner_cookies)
+    # Eine abgebrochene App-Einrichtung liegt daneben; sie gilt nicht.
+    client.post("/api/auth/2fa/setup", headers=_kopf(owner_cookies), cookies=owner_cookies, json=PASSWORT)
     db.refresh(owner_user)
-    assert owner_user.two_factor_secret_encrypted
+    assert owner_user.two_factor_secret_pending_encrypted
 
     geraet = _passkey_einrichten(client, owner_cookies)
 
@@ -213,11 +222,13 @@ def test_einrichten_speichert_den_schluessel_und_nennt_die_methode(
     assert gespeichert.credential_id == _b64(geraet.kennung)
     assert gespeichert.rp_id == "localhost"
     me = client.get("/api/auth/me", cookies=owner_cookies)
-    assert me.json()["two_factor_method"] == "passkey"
+    assert me.json()["two_factor_methods"] == ["passkey"]
 
 
 def test_einrichten_ohne_nutzerpruefung_scheitert(client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
-    optionen = client.post("/api/auth/2fa/passkey/options", headers=_kopf(owner_cookies), cookies=owner_cookies).json()
+    optionen = client.post(
+        "/api/auth/2fa/passkey/options", headers=_kopf(owner_cookies), cookies=owner_cookies, json=PASSWORT
+    ).json()
     res = client.post(
         "/api/auth/2fa/passkey/enable", headers=_kopf(owner_cookies), cookies=owner_cookies,
         json=Authenticator().anlegen(optionen, uv=False),
@@ -229,7 +240,9 @@ def test_einrichten_ohne_nutzerpruefung_scheitert(client: TestClient, db: Sessio
 
 
 def test_einrichten_von_fremder_herkunft_scheitert(client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
-    optionen = client.post("/api/auth/2fa/passkey/options", headers=_kopf(owner_cookies), cookies=owner_cookies).json()
+    optionen = client.post(
+        "/api/auth/2fa/passkey/options", headers=_kopf(owner_cookies), cookies=owner_cookies, json=PASSWORT
+    ).json()
     res = client.post(
         "/api/auth/2fa/passkey/enable", headers=_kopf(owner_cookies), cookies=owner_cookies,
         json=Authenticator().anlegen(optionen, herkunft="https://phish.example"),
@@ -247,7 +260,7 @@ def test_login_mit_passkey(client: TestClient, db: Session, owner_user: User, ow
 
     schritt1 = _anmelden(client)
     assert schritt1["body"]["requires_2fa"] is True
-    assert schritt1["body"]["two_factor_method"] == "passkey"
+    assert schritt1["body"]["two_factor_methods"] == ["passkey"]
     optionen = schritt1["body"]["passkey_options"]
     assert optionen["rpId"] == "localhost"
     assert optionen["allowCredentials"][0]["id"] == _b64(geraet.kennung)
@@ -404,7 +417,7 @@ def test_abschalten_mit_passkey_raeumt_auf(client: TestClient, db: Session, owne
     assert res.status_code == 200, res.text
     db.expire_all()
     assert owner_user.two_factor_enabled is False
-    assert owner_user.two_factor_method is None
+    assert owner_user.two_factor_methods == []
     assert db.query(UserPasskey).count() == 0
     assert db.query(BackupCode).filter(BackupCode.user_id == owner_user.id).count() == 0
 

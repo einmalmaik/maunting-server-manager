@@ -6,7 +6,7 @@ import { apiUrl } from '@/config/api'
 import { useAuthStore } from '@/stores/authStore'
 import { oauthApi, type OAuthProviderPublic } from '@/api/oauth'
 import { toast } from '@/stores/toastStore'
-import type { User } from '@/types'
+import type { User, Zweitfaktor } from '@/types'
 import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
@@ -29,9 +29,10 @@ export function Login() {
   const [captchaResetKey, setCaptchaResetKey] = useState(0)
   const [form, setForm] = useState({ username: '', password: '', otp: '' })
   const [requires2FA, setRequires2FA] = useState(false)
-  // Welcher Faktor gilt — der Server sagt es nach dem Passwort. Gezeigt wird
-  // nur dieser Weg (plus Backup-Code als Notausgang).
-  const [methode, setMethode] = useState<'totp' | 'passkey' | null>(null)
+  // Welche Faktoren gelten, der zuletzt genutzte vorn — der Server sagt es
+  // nach dem Passwort. Angeboten werden nur diese, dazu der Backup-Code.
+  const [methoden, setMethoden] = useState<Zweitfaktor[]>([])
+  const [weg, setWeg] = useState<Anmeldeweg | null>(null)
   const [passkeyOptionen, setPasskeyOptionen] = useState<PasskeyBestaetigungsOptionen | null>(null)
   // Ersetzt im zweiten Schritt das Captcha-Token: das gilt nur einmal.
   const [zwischenschein, setZwischenschein] = useState<string | null>(null)
@@ -39,7 +40,6 @@ export function Login() {
   // Social Login zu. Sonst war der Social Login der Weg drumherum. Im
   // 2FA-Schritt ist die Abfrage schon bestanden und das Widget ausgeblendet.
   const captchaBlockiert = !requires2FA && captchaSperrt(captchaStatus)
-  const [useBackupCode, setUseBackupCode] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [requiresVerification, setRequiresVerification] = useState(false)
   const [verifyEmail, setVerifyEmail] = useState('')
@@ -129,18 +129,21 @@ export function Login() {
    */
   const vonVorn = () => {
     setRequires2FA(false)
-    setMethode(null)
+    setMethoden([])
+    setWeg(null)
     setPasskeyOptionen(null)
     setZwischenschein(null)
-    setUseBackupCode(false)
     setForm((f) => ({ ...f, otp: '' }))
     setCaptchaToken(null)
     setCaptchaResetKey((k) => k + 1)
   }
 
   const zweiterFaktorVerlangt = (res: ZweiFaktorAntwort) => {
+    const m = res.two_factor_methods ?? []
     setRequires2FA(true)
-    setMethode(res.two_factor_method ?? 'totp')
+    setMethoden(m)
+    // Ein neuer Versuch (etwa nach abgebrochenem Passkey) bleibt beim gewählten Weg.
+    setWeg((vorher) => vorher ?? m[0] ?? 'backup')
     setPasskeyOptionen(res.passkey_options ?? null)
     if (res.login_challenge) setZwischenschein(res.login_challenge)
   }
@@ -408,7 +411,7 @@ export function Login() {
 
               {requires2FA && (
                 <>
-                  {methode === 'passkey' && !useBackupCode && (
+                  {weg === 'passkey' && (
                     <Button
                       type="button"
                       onClick={() => void handlePasskeyLogin()}
@@ -419,10 +422,10 @@ export function Login() {
                       {t('auth.loginWithPasskey')}
                     </Button>
                   )}
-                  {(methode !== 'passkey' || useBackupCode) && (
+                  {weg !== 'passkey' && (
                   <div>
                     <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                      {useBackupCode
+                      {weg === 'backup'
                         ? t('auth.backupCode')
                         : t('auth.otpCode')}
                     </label>
@@ -430,25 +433,22 @@ export function Login() {
                       type="text"
                       value={form.otp}
                       onChange={(e) => setForm({ ...form, otp: e.target.value })}
-                      placeholder={useBackupCode ? 'XXXX-XXXX' : '000000'}
+                      placeholder={weg === 'backup' ? 'XXXX-XXXX' : '000000'}
                       required
-                      maxLength={useBackupCode ? 12 : 6}
+                      maxLength={weg === 'backup' ? 12 : 6}
                     />
                   </div>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUseBackupCode(!useBackupCode)
+                  <AndereWege
+                    methoden={methoden}
+                    aktiv={weg}
+                    disabled={submitting}
+                    waehlen={(neu) => {
+                      setWeg(neu)
                       setForm({ ...form, otp: '' })
+                      setError('')
                     }}
-                    className="text-xs text-secondary hover:text-mint-accent transition-colors flex items-center gap-1"
-                  >
-                    <KeyRound className="w-3 h-3" />
-                    {useBackupCode
-                      ? methode === 'passkey' ? t('auth.usePasskeyInstead') : t('auth.use2FAInstead')
-                      : t('auth.useBackupCode')}
-                  </button>
+                  />
                 </>
               )}
 
@@ -458,7 +458,7 @@ export function Login() {
 
               <ErrorMessage message={error} className="text-sm" />
 
-              {!(requires2FA && methode === 'passkey' && !useBackupCode) && (
+              {!(requires2FA && weg === 'passkey') && (
               <Button size="lg"
                 type="submit"
                 disabled={submitting || captchaBlockiert}
@@ -556,14 +556,15 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
   const [otp, setOtp] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const [methode, setMethode] = useState<'totp' | 'passkey' | null>(null)
-  // Kein Authenticator oder Passkey zur Hand: der Backup-Code gilt auch hier.
-  const [mitBackupCode, setMitBackupCode] = useState(false)
+  // Die Faktoren des Kontos, der zuletzt genutzte vorn. Kein Faktor zur Hand:
+  // der Backup-Code gilt auch hier.
+  const [methoden, setMethoden] = useState<Zweitfaktor[] | null>(null)
+  const [weg, setWeg] = useState<Anmeldeweg | null>(null)
   // Scheitert die Abfrage des Faktors, wird nicht geraten: bis 09/2026 galt dann
   // TOTP, und Passkey-Konten sahen nur ein Codefeld ohne jeden anderen Weg.
   const [ladeFehler, setLadeFehler] = useState('')
 
-  /** Welcher Faktor gilt — und für Passkey-Konten eine frische Challenge. */
+  /** Welche Faktoren gelten — und bei Passkeys eine frische Challenge. */
   const methodeLaden = async (): Promise<{ optionen: PasskeyBestaetigungsOptionen | null; hinweis: string }> => {
     let res: Response
     try {
@@ -580,11 +581,13 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
       throw new Error(t(res.status === 429 ? 'auth.oauth2faMethodRateLimited' : 'auth.oauth2faMethodFailed'))
     }
     const daten = (await res.json()) as {
-      methode: 'totp' | 'passkey' | null
+      methoden?: Zweitfaktor[]
       passkey_options?: PasskeyBestaetigungsOptionen
       hinweis?: string
     }
-    setMethode(daten.methode ?? 'totp')
+    const m = daten.methoden ?? []
+    setMethoden(m)
+    setWeg((vorher) => vorher ?? m[0] ?? 'backup')
     return { optionen: daten.passkey_options ?? null, hinweis: daten.hinweis ?? '' }
   }
 
@@ -598,8 +601,8 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, challenge])
 
-  const backupCodeUmschalten = () => {
-    setMitBackupCode(!mitBackupCode)
+  const wegWaehlen = (neu: Anmeldeweg) => {
+    setWeg(neu)
     setOtp('')
     setError('')
   }
@@ -681,13 +684,13 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
         </p>
       </div>
 
-      {methode === null && !ladeFehler && (
+      {methoden === null && !ladeFehler && (
         <div className="flex justify-center py-4">
           <Spinner />
         </div>
       )}
 
-      {methode === null && ladeFehler && (
+      {methoden === null && ladeFehler && (
         <div className="space-y-4">
           <ErrorMessage message={ladeFehler} className="text-sm" />
           <Button type="button" size="lg" onClick={faktorAbfragen} className="w-full">
@@ -703,7 +706,7 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
         </div>
       )}
 
-      {methode === 'passkey' && !mitBackupCode && (
+      {methoden !== null && weg === 'passkey' && (
         <div className="space-y-4">
           <Button
             type="button"
@@ -716,14 +719,7 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
             {t('auth.loginWithPasskey')}
           </Button>
           <ErrorMessage message={error} className="text-sm" />
-          <button
-            type="button"
-            onClick={backupCodeUmschalten}
-            className="text-xs text-secondary hover:text-mint-accent transition-colors flex items-center gap-1"
-          >
-            <KeyRound className="w-3 h-3" />
-            {t('auth.useBackupCode')}
-          </button>
+          <AndereWege methoden={methoden} aktiv={weg} waehlen={wegWaehlen} disabled={submitting} />
           <button
             type="button"
             onClick={onCancel}
@@ -734,35 +730,26 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
         </div>
       )}
 
-      {(methode === 'totp' || mitBackupCode) && (
+      {methoden !== null && (weg === 'totp' || weg === 'backup') && (
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-            {mitBackupCode ? t('auth.backupCode') : t('auth.otpCode')}
+            {weg === 'backup' ? t('auth.backupCode') : t('auth.otpCode')}
           </label>
           <Input
             type="text"
-            inputMode={mitBackupCode ? 'text' : 'numeric'}
-            maxLength={mitBackupCode ? 12 : 6}
+            inputMode={weg === 'backup' ? 'text' : 'numeric'}
+            maxLength={weg === 'backup' ? 12 : 6}
             value={otp}
             onChange={(e) => setOtp(e.target.value)}
             className="text-center text-2xl tracking-[0.5em] font-mono"
-            placeholder={mitBackupCode ? 'XXXX-XXXX' : '000000'}
+            placeholder={weg === 'backup' ? 'XXXX-XXXX' : '000000'}
             required
             autoFocus
           />
         </div>
 
-        <button
-          type="button"
-          onClick={backupCodeUmschalten}
-          className="text-xs text-secondary hover:text-mint-accent transition-colors flex items-center gap-1"
-        >
-          <KeyRound className="w-3 h-3" />
-          {mitBackupCode
-            ? methode === 'passkey' ? t('auth.usePasskeyInstead') : t('auth.use2FAInstead')
-            : t('auth.useBackupCode')}
-        </button>
+        <AndereWege methoden={methoden} aktiv={weg} waehlen={wegWaehlen} disabled={submitting} />
 
         <ErrorMessage message={error} className="text-sm" />
 
@@ -797,10 +784,51 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
   )
 }
 
+/** Ein Weg im zweiten Schritt: ein Faktor des Kontos oder der Backup-Code. */
+type Anmeldeweg = Zweitfaktor | 'backup'
+
+/**
+ * „Andere Methode“: die übrigen Faktoren des Kontos und der Backup-Code, je
+ * ein Klick. Ein Konto mit Passkey am PC und App am Handy kommt so an jedem
+ * Gerät hinein.
+ */
+function AndereWege({
+  methoden,
+  aktiv,
+  waehlen,
+  disabled,
+}: {
+  methoden: Zweitfaktor[]
+  aktiv: Anmeldeweg | null
+  waehlen: (weg: Anmeldeweg) => void
+  disabled?: boolean
+}) {
+  const { t } = useTranslation()
+  const namen: Record<Anmeldeweg, string> = {
+    passkey: t('auth.zweitfaktor.wegPasskey'),
+    totp: t('auth.zweitfaktor.wegTotp'),
+    backup: t('auth.useBackupCode'),
+  }
+  const andere = ([...methoden, 'backup'] as Anmeldeweg[]).filter((w) => w !== aktiv)
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-on-surface-variant">{t('auth.zweitfaktor.andereMethode')}</p>
+      <div className="flex flex-wrap gap-1">
+        {andere.map((w) => (
+          <Button key={w} type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => waehlen(w)}>
+            {w === 'passkey' ? <Fingerprint className="h-3.5 w-3.5" aria-hidden="true" /> : <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
+            {namen[w]}
+          </Button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /** Antwort von `/auth/login` und `/auth/login-verify`, soweit der zweite Faktor sie braucht. */
 interface ZweiFaktorAntwort {
   requires_2fa: boolean
-  two_factor_method?: 'totp' | 'passkey' | null
+  two_factor_methods?: Zweitfaktor[]
   passkey_options?: PasskeyBestaetigungsOptionen | null
   login_challenge?: string
 }

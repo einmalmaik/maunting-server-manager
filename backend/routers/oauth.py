@@ -684,7 +684,7 @@ def oauth_2fa_methode(
     request: Request,
     db: Session = Depends(get_db),
 ) -> dict:
-    """Welcher zweite Faktor fuer diese OAuth-Anmeldung gilt — bei Passkey mit Optionen.
+    """Welche zweiten Faktoren fuer diese OAuth-Anmeldung gelten — bei Passkey mit Optionen.
 
     Die Challenge wird nur gelesen, nicht verbraucht: das erledigt `/2fa`.
     """
@@ -694,9 +694,9 @@ def oauth_2fa_methode(
     user = oauth_service.user_fuer_2fa_challenge(db, challenge)
     if user is None:
         raise HTTPException(status_code=401, detail="Ungueltige oder abgelaufene Challenge")
-    methode = user.two_factor_method
-    antwort: dict[str, Any] = {"methode": methode}
-    if methode == "passkey":
+    # Der zuletzt genutzte Faktor vorn; die Seite fragt ihn zuerst.
+    antwort: dict[str, Any] = {"methoden": passkey_service.anmelde_reihenfolge(user)}
+    if user.passkeys:
         try:
             antwort["passkey_options"] = passkey_service.bestaetigungs_optionen(
                 db, user, request.headers.get("origin"), "oauth_2fa"

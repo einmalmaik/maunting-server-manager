@@ -730,6 +730,7 @@ class Test2FABackupCodes:
             "/api/auth/2fa/setup",
             cookies=owner_cookies,
             headers={"X-CSRF-Token": csrf},
+            json={"password": "OwnerPass123!"},
         )
         assert res.status_code == 200
         assert res.json()["secret"]
@@ -803,11 +804,14 @@ class Test2FABackupCodes:
             "/api/auth/2fa/backup/generate",
             cookies=owner_cookies,
             headers={"X-CSRF-Token": csrf},
+            json={"otp_code": totp_now(secret)},
         )
         second = client.post(
             "/api/auth/2fa/backup/generate",
             cookies=owner_cookies,
             headers={"X-CSRF-Token": csrf},
+            # Jeder Code gilt einmal: der naechste aus der App.
+            json={"otp_code": totp_now(secret, versatz=1)},
         )
 
         assert first.status_code == 200

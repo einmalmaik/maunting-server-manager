@@ -7,8 +7,8 @@ import secrets
 
 from jose import jwt, JWTError
 from passlib.context import CryptContext
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session, object_session
 
 from config import settings
 from models import User, RefreshToken
@@ -349,18 +349,48 @@ class AuthService:
 
     @staticmethod
     def verify_current_2fa_code(user: User, otp_code: str) -> bool:
-        if not user.two_factor_secret_encrypted:
+        """Der Code zur aktiven Authenticator-App."""
+        return AuthService.verify_totp(user, user.two_factor_secret_encrypted, otp_code)
+
+    @staticmethod
+    def verify_totp(user: User, verschluesselt: str | None, otp_code: str) -> bool:
+        """Ein Code gegen ein Geheimnis dieses Kontos (aktiv oder in Einrichtung).
+
+        Jeder Code gilt einmal. Bis 5.0.1 galt er, solange er gueltig war (bis
+        zu 90 s), beliebig oft: wer ihn mitlas, konnte ihn nach dem Inhaber
+        noch einmal benutzen. Jetzt belegt ein bedingtes UPDATE den Schritt des
+        Codes, und nur wer die Zeile umschreibt, kommt durch; eine zweite
+        Anfrage mit demselben Code findet den Schritt schon belegt, auch wenn
+        sie gleichzeitig kommt. Committet, wie `versuch_belegen`: ein belegter
+        Schritt bleibt belegt, auch wenn die Anfrage danach scheitert.
+        """
+        if not verschluesselt:
             return False
         try:
             secret = AuthService.decrypt_secret(
-                user.two_factor_secret_encrypted,
+                verschluesselt,
                 aad=f"msm:user:{user.id}:2fa",
             )
             if not secret:
                 return False
-            return DisClient.verify_totp(secret, otp_code)
+            schritt = DisClient.totp_schritt(secret, otp_code)
         except Exception:
             return False
+        if schritt is None:
+            return False
+        db = object_session(user)
+        if db is None:
+            return False
+        belegt = (
+            db.query(User)
+            .filter(
+                User.id == user.id,
+                or_(User.two_factor_totp_last_step.is_(None), User.two_factor_totp_last_step < schritt),
+            )
+            .update({User.two_factor_totp_last_step: schritt}, synchronize_session=False)
+        )
+        db.commit()
+        return belegt == 1
 
     @staticmethod
     def delete_account_atomically(db: Session, user: User) -> None:

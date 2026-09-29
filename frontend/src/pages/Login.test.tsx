@@ -154,7 +154,7 @@ describe('Login — zweiter Faktor per Passkey', () => {
         }
         return {
           access_token: '', requires_2fa: true, requires_verification: false, email: '',
-          two_factor_method: 'passkey', passkey_options: PASSKEY_OPTIONEN,
+          two_factor_methods: ['passkey'], passkey_options: PASSKEY_OPTIONEN,
         } as any
       }
       if (path === '/auth/me') return { id: 1, username: 'admin', is_owner: true } as any
@@ -182,6 +182,42 @@ describe('Login — zweiter Faktor per Passkey', () => {
   })
 })
 
+describe('Login — mehrere zweite Faktoren', () => {
+  it('beginnt mit dem zuletzt genutzten und wechselt mit einem Klick', async () => {
+    useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: true })
+    usePermissionsStore.setState({ me: null, isLoading: false, error: null })
+    vi.mocked(client.api).mockReset()
+    vi.mocked(client.api).mockImplementation(async (path: string, opt?: RequestInit) => {
+      if (path === '/auth/login') {
+        const body = JSON.parse(String(opt?.body ?? '{}'))
+        if (body.passkey) {
+          return { access_token: '', requires_2fa: false, requires_verification: false, email: '' } as any
+        }
+        // Zuletzt per App angemeldet: die App steht vorn.
+        return {
+          access_token: '', requires_2fa: true, requires_verification: false, email: '',
+          two_factor_methods: ['totp', 'passkey'], passkey_options: PASSKEY_OPTIONEN,
+        } as any
+      }
+      if (path === '/auth/me') return { id: 1, username: 'admin', is_owner: true } as any
+      if (path === '/permissions/me') return { is_owner: true, roles: [], permissions: [] } as any
+      if (path === '/auth/captcha-config') return { enabled: false, provider: 'none', site_key: '' } as any
+      return [] as any
+    })
+    const { passkeyBestaetigen } = await import('@/services/passkeyService')
+    const { container } = renderLogin()
+    await anmelden(container)
+
+    await screen.findByPlaceholderText('000000')
+    expect(screen.getByRole('button', { name: i18n.t('auth.useBackupCode') })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('auth.zweitfaktor.wegPasskey') }))
+
+    fireEvent.click(await screen.findByRole('button', { name: i18n.t('auth.loginWithPasskey') }))
+    await waitFor(() => expect(screen.getByTestId('dashboard')).toBeInTheDocument())
+    expect(passkeyBestaetigen).toHaveBeenCalledWith(PASSKEY_OPTIONEN)
+  })
+})
+
 describe('Login — verbrauchter Zwischenschein', () => {
   it('beginnt nach drei Fehlversuchen von vorn statt am alten Captcha zu scheitern', async () => {
     useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: true })
@@ -194,7 +230,7 @@ describe('Login — verbrauchter Zwischenschein', () => {
         }
         return {
           access_token: '', requires_2fa: true, requires_verification: false, email: '',
-          two_factor_method: 'totp', login_challenge: 'schein-1',
+          two_factor_methods: ['totp'], login_challenge: 'schein-1',
         } as any
       }
       if (path === '/auth/captcha-config') return { enabled: false, provider: 'none', site_key: '' } as any
@@ -243,7 +279,7 @@ describe('Login — zweiter Faktor nach Social Login', () => {
     // Bis 09/2026 galt nach einem 429 still TOTP: Passkey-Konten sahen nur ein Codefeld.
     const abruf = vi.fn()
       .mockResolvedValueOnce(antwort(429))
-      .mockResolvedValueOnce(antwort(200, { methode: 'passkey', passkey_options: PASSKEY_OPTIONEN }))
+      .mockResolvedValueOnce(antwort(200, { methoden: ['passkey'], passkey_options: PASSKEY_OPTIONEN }))
     vi.stubGlobal('fetch', abruf)
     renderOAuth2FA()
 
@@ -256,9 +292,28 @@ describe('Login — zweiter Faktor nach Social Login', () => {
     expect(abruf).toHaveBeenCalledTimes(2)
   })
 
+  it('bietet einem Konto mit Passkey und App beide Wege an', async () => {
+    const abruf = vi.fn(async (pfad: string) =>
+      pfad.endsWith('/2fa/methode')
+        ? antwort(200, { methoden: ['passkey', 'totp'], passkey_options: PASSKEY_OPTIONEN })
+        : antwort(401, { detail: 'falsch' }),
+    )
+    vi.stubGlobal('fetch', abruf)
+    const { container } = renderOAuth2FA()
+
+    await screen.findByRole('button', { name: i18n.t('auth.loginWithPasskey') })
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('auth.zweitfaktor.wegTotp') }))
+    fireEvent.change(screen.getByPlaceholderText('000000'), { target: { value: '123456' } })
+    fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+
+    await waitFor(() => expect(abruf).toHaveBeenCalledTimes(2))
+    const [, optionen] = abruf.mock.calls[1] as unknown as [string, RequestInit]
+    expect(JSON.parse(String(optionen.body))).toEqual({ challenge: 'c1', otp_code: '123456' })
+  })
+
   it('bietet auch TOTP-Konten den Backup-Code an', async () => {
     const abruf = vi.fn(async (pfad: string) =>
-      pfad.endsWith('/2fa/methode') ? antwort(200, { methode: 'totp' }) : antwort(401, { detail: 'falsch' }),
+      pfad.endsWith('/2fa/methode') ? antwort(200, { methoden: ['totp'] }) : antwort(401, { detail: 'falsch' }),
     )
     vi.stubGlobal('fetch', abruf)
     const { container } = renderOAuth2FA()

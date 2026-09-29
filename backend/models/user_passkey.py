@@ -4,6 +4,7 @@ from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
+from models.dis_text import DisText
 
 
 class UserPasskey(Base):
@@ -36,6 +37,9 @@ class UserPasskey(Base):
     # Vorzeichenloser 32-Bit-Zaehler — passt nicht in ein PostgreSQL-INTEGER.
     sign_count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     transports: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Vom Benutzer vergeben („Handy“, „PC Windows Hello“), damit er mehrere
+    # Passkeys auseinanderhaelt. Nutzerinhalt, deshalb verschluesselt.
+    name: Mapped[str | None] = mapped_column(DisText(aad="msm:auth:user_passkeys.name"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

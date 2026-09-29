@@ -14,6 +14,8 @@ Sicherheits-Invarianten:
 """
 from __future__ import annotations
 
+import time
+
 import httpx
 from config import settings
 
@@ -232,9 +234,21 @@ class DisClient:
         return DisClient._post("/totp/generate-secret", {})["secret"]
 
     @staticmethod
-    def verify_totp(secret: str, code: str) -> bool:
-        """Verifiziert einen TOTP-Code gegen ein Secret (±30s Fenster)."""
-        return DisClient._post("/totp/verify", {"secret": secret, "code": code}).get("valid", False)
+    def totp_schritt(secret: str, code: str) -> int | None:
+        """Der 30-s-Schritt, zu dem der Code passt (±1 Schritt), sonst ``None``.
+
+        Mit dem Schritt nimmt das Panel jeden Code nur einmal an
+        (`AuthService.verify_totp`). Ein Sidecar vor 5.0.1 nennt keinen
+        Schritt; dann gilt der aktuelle, damit die Sperre auch waehrend eines
+        Updates greift.
+        """
+        antwort = DisClient._post("/totp/verify", {"secret": secret, "code": code})
+        if antwort.get("valid") is not True:
+            return None
+        schritt = antwort.get("step")
+        if isinstance(schritt, int) and not isinstance(schritt, bool):
+            return schritt
+        return int(time.time()) // 30
 
     @staticmethod
     def build_totp_uri(issuer: str, label: str, secret: str) -> str:

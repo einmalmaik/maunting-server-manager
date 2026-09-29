@@ -26,7 +26,8 @@ from dependencies import (
     _bearer_token,
     session_familie,
 )
-from models import User, EmailVerification
+from models import User, EmailVerification, UserPasskey
+from models.dis_text import vorab_entschluesselt
 from models.team import Team
 from services.achievement_service import AchievementService
 from services.dis_client import DisClient
@@ -51,7 +52,9 @@ from schemas.passkey import (
     BrowserBestaetigungRequest,
     BrowserVorgangKennung,
     BrowserVorgangRequest,
-    PasskeyAnlage,
+    FaktorNachweis,
+    PasskeyEintrag,
+    PasskeyHinzufuegen,
     PasskeyOptionenRequest,
     TwoFactorDisableRequest,
 )
@@ -169,13 +172,13 @@ def _login_zweiter_faktor(
 ) -> dict | None:
     """Der zweite Faktor beim Login. ``None`` heisst bestanden, sonst die Rueckfrage.
 
-    Es zaehlt genau der eingerichtete Faktor oder ein Backup-Code. Bis 09/2026
+    Es zaehlt jeder eingerichtete Faktor oder ein Backup-Code. Bis 09/2026
     stand hier ``if req.passkey_verified: pass`` — ein Feld aus dem Request,
     mit dem jeder, der das Passwort kannte, die 2FA jedes Kontos uebersprang.
     """
-    methode = user.two_factor_method
+    methoden = user.two_factor_methods
     if req.passkey is not None:
-        if methode != "passkey":
+        if "passkey" not in methoden:
             raise HTTPException(status_code=401, detail="Für dieses Konto gilt kein Passkey.")
         nummer = _schein_versuch(db, schein)
         try:
@@ -183,12 +186,14 @@ def _login_zweiter_faktor(
         except passkey_service.PasskeyFehler as e:
             _schein_fehlversuch(db, schein, nummer)
             raise HTTPException(status_code=401, detail=str(e))
+        _zuletzt_genutzt(db, user, "passkey")
         return None
     if not req.otp_code:
         rueckfrage = {
             "requires_2fa": True, "access_token": "", "token_type": "",
             "requires_verification": False, "email": user.email,
-            "two_factor_method": methode,
+            # Der zuletzt genutzte Faktor vorn: die Seite fragt ihn zuerst.
+            "two_factor_methods": passkey_service.anmelde_reihenfolge(user),
             # Der Zwischenschein ersetzt im zweiten Schritt die Sicherheitsabfrage.
             # Nur wer ohne Schein kam (also mit Captcha), bekommt einen neuen —
             # sonst liesse sich der Fehlversuchszaehler durch Nachfragen umgehen.
@@ -197,17 +202,18 @@ def _login_zweiter_faktor(
                 ttl_seconds=_ZWISCHENSCHEIN_SEKUNDEN,
             ),
         }
-        if methode == "passkey":
+        if "passkey" in methoden:
             try:
                 rueckfrage["passkey_options"] = passkey_service.bestaetigungs_optionen(
                     db, user, request.headers.get("origin"), "login"
                 )
             except passkey_service.PasskeyFehler:
-                # Kein Passkey fuer diese Adresse: bleibt der Backup-Code.
+                # Kein Passkey fuer diese Adresse: bleiben App und Backup-Code.
                 pass
         return rueckfrage
     nummer = _schein_versuch(db, schein)
-    if methode == "totp" and AuthService.verify_current_2fa_code(user, req.otp_code):
+    if "totp" in methoden and AuthService.verify_current_2fa_code(user, req.otp_code):
+        _zuletzt_genutzt(db, user, "totp")
         return None
     if BackupCodeService.validate_backup_code(db, user.id, req.otp_code):
         return None
@@ -215,28 +221,29 @@ def _login_zweiter_faktor(
     raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
 
 
+def _zuletzt_genutzt(db: Session, user: User, methode: str) -> None:
+    if user.two_factor_last_method != methode:
+        user.two_factor_last_method = methode
+        db.commit()
+
+
 def _zweiter_faktor_pflicht(
     db: Session, user: User, otp_code: str | None, passkey, zweck: str
 ) -> None:
-    """Vor Kontoaenderungen: der eingerichtete Faktor, sonst 401.
+    """Vor Kontoaenderungen: ein eingerichteter Faktor, sonst 401.
 
     Mit Passkey-2FA liessen sich Passwort, E-Mail und Konto bis 09/2026 gar
     nicht aendern — hier galt nur der TOTP-Code, den ein solches Konto nicht hat.
     """
     if not user.two_factor_enabled:
         return
-    if user.two_factor_method == "passkey":
-        if passkey is None:
-            raise HTTPException(status_code=401, detail="Passkey-Bestätigung erforderlich")
-        try:
-            passkey_service.bestaetigen(db, user, passkey.model_dump(), zweck)
-        except passkey_service.PasskeyFehler as e:
-            raise HTTPException(status_code=401, detail=str(e))
-        return
-    if not otp_code:
-        raise HTTPException(status_code=401, detail="2FA-Code erforderlich")
-    if not AuthService.verify_current_2fa_code(user, otp_code):
-        raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
+    if not passkey_service.zweiter_faktor_bestaetigt(
+        db, user,
+        otp_code=otp_code,
+        passkey=passkey.model_dump() if passkey is not None else None,
+        zweck=zweck,
+    ):
+        raise HTTPException(status_code=401, detail=passkey_service.nachweis_hinweis(user))
 
 
 def _native_token_body(tokens: SessionTokens) -> dict:
@@ -1295,11 +1302,7 @@ def data_export(
         ):
             raise HTTPException(
                 status_code=403,
-                detail=(
-                    "Bitte mit deinem Passkey bestätigen."
-                    if user.two_factor_method == "passkey"
-                    else "Bitte den aktuellen 2FA-Code eingeben."
-                ),
+                detail=passkey_service.nachweis_hinweis(user),
             )
         mit_geheimnissen = True
     elif user.has_password:
@@ -1367,35 +1370,78 @@ def delete_account(
 
     return {"message": "Account gelöscht"}
 
-@router.post("/2fa/setup")
+# ── Zweite Faktoren verwalten ───────────────────────────────────────────────
+#
+# Seit 29.09.2026 gelten TOTP und beliebig viele Passkeys nebeneinander. Wer
+# einen Faktor hinzufuegt oder entfernt, weist sich vorher aus: bei aktiver
+# 2FA mit einem eingerichteten Faktor, sonst mit dem Passwort. Ein Konto nur
+# mit Social Login hat kein Passwort; es darf seinen ersten Faktor ohne
+# Nachweis einrichten (Entscheidung des Betreibers vom 29.09.2026).
+# `two_factor_enabled` setzt nur `passkey_service.faktoren_nachziehen`.
+
+_MAX_PASSKEYS = 20
+
+
+def _faktor_nachweis(db: Session, user: User, req: FaktorNachweis | None) -> None:
+    if not user.two_factor_enabled and not user.has_password:
+        return
+    req = req or FaktorNachweis()
+    fehlt = passkey_service.frischer_nachweis_fehlt(
+        db, user,
+        password=req.password,
+        otp_code=req.otp_code,
+        passkey=req.passkey.model_dump() if req.passkey else None,
+        zweck="2fa_change",
+    )
+    if fehlt:
+        raise HTTPException(status_code=403, detail=fehlt)
+
+
+def _faktor_audit(db: Session, user: User, action: str, **details) -> None:
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action=action,
+        target_type="user",
+        target_id=user.id,
+        details={"username": user.username, **details},
+        commit=True,
+    )
+
+
+async def _status_mail(user: User, enabled: bool) -> None:
+    if EmailService.is_configured() and user.email_notifications:
+        await EmailService.send_2fa_status_notification(user.email, user.username, enabled=enabled)
+
+
+@router.post("/2fa/setup", dependencies=[Depends(auth_rate_limit)])
 def setup_2fa(
+    req: FaktorNachweis | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Legt ein neues TOTP-Geheimnis an und gibt es einmalig im Klartext zurueck.
+    """Legt ein TOTP-Geheimnis in Einrichtung an und gibt es einmalig im Klartext zurueck.
 
-    `verify_csrf` ist hier Pflicht, weil der Endpunkt zustandsaendernd ist und
-    keinen Body braucht. Im unterstuetzten Cross-Domain-Betrieb
-    (`settings.cookie_cross_site`) stehen alle Auth-Cookies auf SameSite=None;
-    ein fremdes `<form method="POST">` erreicht die Route dann ohne Preflight,
-    und CORS verhindert nur das Lesen der Antwort, nicht die Ausfuehrung. Ohne
-    die Pruefung koennte eine beliebige Seite das TOTP-Geheimnis des Opfers
-    austauschen.
+    `verify_csrf` ist hier Pflicht, weil der Endpunkt zustandsaendernd ist. Im
+    unterstuetzten Cross-Domain-Betrieb (`settings.cookie_cross_site`) stehen
+    alle Auth-Cookies auf SameSite=None; ein fremdes `<form method="POST">`
+    erreicht die Route dann ohne Preflight, und CORS verhindert nur das Lesen
+    der Antwort, nicht die Ausfuehrung.
 
-    Ein bereits aktives 2FA wird ausserdem nicht mehr stillschweigend
-    abgeschaltet. Der zweite Faktor darf nur dort fallen, wo der aktuelle Code
-    nachgewiesen wird — das ist `/2fa/disable`. Wer neu einrichten will, geht
-    denselben Weg: erst deaktivieren, dann aufsetzen.
+    Das Geheimnis gilt erst, wenn `/2fa/enable` einen Code dazu sieht. Eine
+    aktive App wird nicht ersetzt: wer eine neue will, entfernt erst die alte.
     """
-    if user.two_factor_enabled:
+    if user.two_factor_totp_aktiv:
         raise HTTPException(
             status_code=400,
-            detail="2FA ist bereits aktiv. Bitte zuerst deaktivieren.",
+            detail="Die Authenticator-App ist schon eingerichtet. Entferne sie zuerst.",
         )
+    _faktor_nachweis(db, user, req)
     secret = DisClient.generate_totp_secret()
-    user.two_factor_secret_encrypted = AuthService.encrypt_secret(secret, aad=f"msm:user:{user.id}:2fa")
-    user.two_factor_enabled = False
+    user.two_factor_secret_pending_encrypted = AuthService.encrypt_secret(
+        secret, aad=f"msm:user:{user.id}:2fa"
+    )
     db.commit()
     uri = DisClient.build_totp_uri("Maunting Service Manager", user.email, secret)
     # Der QR-Code entsteht hier und nicht im Browser: die Antwort traegt das
@@ -1412,48 +1458,79 @@ async def enable_2fa(
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Aktiviert 2FA nach Nachweis eines gueltigen Codes.
+    """Schliesst die Einrichtung der App ab, sobald ein Code zum neuen Geheimnis passt.
 
-    Der Code allein haelt hier zwar schon jeden Fremdaufruf auf, aber der
-    Endpunkt ist zustandsaendernd — und genau die Uneinheitlichkeit war der
-    Grund, warum `/2fa/setup` beim Nachziehen des CSRF-Schutzes uebersehen
-    wurde. Deshalb gilt die Pflicht jetzt fuer alle Auth-Endpunkte ohne
-    Ausnahme.
+    Der Nachweis lag schon vor `/2fa/setup`; hier belegt der Code nur, dass die
+    App das Geheimnis hat. War 2FA vorher aus, kommen die Backup-Codes gleich
+    mit, denn `/2fa/backup/generate` verlangt einen Faktor.
     """
-    if not user.two_factor_secret_encrypted:
+    if not user.two_factor_secret_pending_encrypted:
         raise HTTPException(status_code=400, detail="2FA nicht eingerichtet")
-    if not AuthService.verify_current_2fa_code(user, otp_code):
+    if not AuthService.verify_totp(user, user.two_factor_secret_pending_encrypted, otp_code):
         raise HTTPException(status_code=400, detail="Ungültiger Code")
-    user.two_factor_enabled = True
+    war_an = user.two_factor_enabled
+    user.two_factor_secret_encrypted = user.two_factor_secret_pending_encrypted
+    user.two_factor_secret_pending_encrypted = None
+    passkey_service.faktoren_nachziehen(db, user)
     db.commit()
-    audit_service.record_privileged_action(
-        db,
-        user_id=user.id,
-        action="auth.2fa.enable",
-        target_type="user",
-        target_id=user.id,
-        details={"username": user.username},
-        commit=True,
-    )
-    if EmailService.is_configured() and user.email_notifications:
-        await EmailService.send_2fa_status_notification(user.email, user.username, enabled=True)
-    return {"message": "2FA aktiviert"}
+    _faktor_audit(db, user, "auth.2fa.enable")
+    antwort: dict = {"message": "Authenticator-App eingerichtet"}
+    if not war_an:
+        antwort["backup_codes"] = BackupCodeService.generate_backup_codes(db, user.id)
+        await _status_mail(user, True)
+    return antwort
 
 
-@router.post("/2fa/passkey/options")
-def passkey_anlege_optionen(
-    request: Request,
+@router.post("/2fa/totp/remove", dependencies=[Depends(auth_rate_limit)])
+async def remove_totp(
+    req: FaktorNachweis,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Optionen fuer `navigator.credentials.create()` — nur, solange 2FA aus ist.
+    """Entfernt die Authenticator-App. War sie der letzte Faktor, ist 2FA danach aus."""
+    if not user.two_factor_totp_aktiv:
+        raise HTTPException(status_code=400, detail="Keine Authenticator-App eingerichtet.")
+    _faktor_nachweis(db, user, req)
+    user.two_factor_secret_encrypted = None
+    an = passkey_service.faktoren_nachziehen(db, user)
+    db.commit()
+    _faktor_audit(db, user, "auth.2fa.totp.remove")
+    if not an:
+        await _status_mail(user, False)
+    return {"two_factor_enabled": an}
 
-    Wie bei `/2fa/setup`: ein aktiver zweiter Faktor wird nicht nebenbei
-    ersetzt. Wer wechseln will, schaltet erst ab.
+
+@router.get("/2fa/passkeys", response_model=list[PasskeyEintrag])
+def list_passkeys(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[UserPasskey]:
+    abfrage = (
+        db.query(UserPasskey)
+        .filter(UserPasskey.user_id == user.id)
+        .order_by(UserPasskey.created_at, UserPasskey.id)
+    )
+    with vorab_entschluesselt(db, abfrage, UserPasskey.name):
+        return abfrage.all()
+
+
+@router.post("/2fa/passkey/options", dependencies=[Depends(auth_rate_limit)])
+def passkey_anlege_optionen(
+    request: Request,
+    req: FaktorNachweis | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Optionen fuer `navigator.credentials.create()`, erst nach dem Nachweis.
+
+    Die Challenge darin gilt einmal und nur fuer dieses Konto; ohne sie nimmt
+    `/2fa/passkey/enable` nichts an. Der Nachweis hier deckt also das Anlegen.
     """
-    if user.two_factor_enabled:
-        raise HTTPException(status_code=400, detail="2FA ist bereits aktiv. Bitte zuerst deaktivieren.")
+    if len(user.passkeys) >= _MAX_PASSKEYS:
+        raise HTTPException(status_code=400, detail=f"Höchstens {_MAX_PASSKEYS} Passkeys je Konto.")
+    _faktor_nachweis(db, user, req)
     try:
         return passkey_service.anlege_optionen(db, user, request.headers.get("origin"))
     except passkey_service.PasskeyFehler as e:
@@ -1462,41 +1539,57 @@ def passkey_anlege_optionen(
 
 @router.post("/2fa/passkey/enable")
 async def enable_2fa_passkey(
-    req: PasskeyAnlage,
+    req: PasskeyHinzufuegen,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Aktiviert 2FA per Passkey — erst, wenn der Server den Schluessel hat.
+    """Speichert einen weiteren Passkey — erst, wenn der Server den Schluessel hat.
 
-    Bis 09/2026 schaltete dieser Endpunkt 2FA ohne jeden Schluessel ein: der
-    Passkey blieb im Browser, der Server wusste nichts von ihm. Jetzt kommt die
-    Antwort von `navigator.credentials.create()` mit, und erst ein geprueftes
-    Anlegen schaltet ein. Ein von `/2fa/setup` liegengebliebenes TOTP-Geheimnis
-    faellt dabei weg: aktiv ohne Geheimnis heisst Passkey (`User.two_factor_method`).
+    Bis 09/2026 schaltete dieser Endpunkt 2FA ohne jeden Schluessel ein. Bis
+    29.09.2026 loeschte er ausserdem die Authenticator-App und nahm nur einen
+    Passkey je Konto an.
     """
-    if user.two_factor_enabled:
-        raise HTTPException(status_code=400, detail="2FA ist bereits aktiv. Bitte zuerst deaktivieren.")
+    if len(user.passkeys) >= _MAX_PASSKEYS:
+        raise HTTPException(status_code=400, detail=f"Höchstens {_MAX_PASSKEYS} Passkeys je Konto.")
+    war_an = user.two_factor_enabled
     try:
-        passkey_service.anlegen(db, user, req.model_dump())
+        passkey = passkey_service.anlegen(
+            db, user, req.model_dump(exclude={"name"}), name=(req.name or "").strip() or None
+        )
     except passkey_service.PasskeyFehler as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
-    user.two_factor_secret_encrypted = None
-    user.two_factor_enabled = True
+    passkey_service.faktoren_nachziehen(db, user)
     db.commit()
-    audit_service.record_privileged_action(
-        db,
-        user_id=user.id,
-        action="auth.2fa.passkey.enable",
-        target_type="user",
-        target_id=user.id,
-        details={"username": user.username, "method": "passkey"},
-        commit=True,
-    )
-    if EmailService.is_configured() and user.email_notifications:
-        await EmailService.send_2fa_status_notification(user.email, user.username, enabled=True)
-    return {"message": "2FA via Passkey aktiviert"}
+    _faktor_audit(db, user, "auth.2fa.passkey.enable", method="passkey", passkey_id=passkey.id)
+    ergebnis: dict = {"message": "Passkey gespeichert", "id": passkey.id}
+    if not war_an:
+        ergebnis["backup_codes"] = BackupCodeService.generate_backup_codes(db, user.id)
+        await _status_mail(user, True)
+    return ergebnis
+
+
+@router.post("/2fa/passkeys/{passkey_id}/remove", dependencies=[Depends(auth_rate_limit)])
+async def remove_passkey(
+    passkey_id: int,
+    req: FaktorNachweis,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Entfernt einen Passkey. War er der letzte Faktor, ist 2FA danach aus."""
+    passkey = next((p for p in user.passkeys if p.id == passkey_id), None)
+    if passkey is None:
+        raise HTTPException(status_code=404, detail="Passkey nicht gefunden.")
+    _faktor_nachweis(db, user, req)
+    user.passkeys.remove(passkey)
+    an = passkey_service.faktoren_nachziehen(db, user)
+    db.commit()
+    _faktor_audit(db, user, "auth.2fa.passkey.remove", passkey_id=passkey_id)
+    if not an:
+        await _status_mail(user, False)
+    return {"two_factor_enabled": an}
 
 
 @router.post("/passkey/options")
@@ -1514,7 +1607,7 @@ def passkey_bestaetigungs_optionen(
     """
     if req.zweck not in passkey_service.ZWECKE_ANGEMELDET:
         raise HTTPException(status_code=400, detail="Unbekannter Vorgang.")
-    if user.two_factor_method != "passkey":
+    if not user.passkeys:
         raise HTTPException(status_code=400, detail="Für dieses Konto gilt kein Passkey.")
     try:
         return passkey_service.bestaetigungs_optionen(
@@ -1588,7 +1681,7 @@ def _panel_adresse(pfad: str) -> str:
     return settings.panel_url.rstrip("/") + pfad
 
 
-@router.post("/2fa/disable")
+@router.post("/2fa/disable", dependencies=[Depends(auth_rate_limit)])
 async def disable_2fa(
     otp_code: str | None = None,
     body: TwoFactorDisableRequest | None = None,
@@ -1596,11 +1689,11 @@ async def disable_2fa(
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """2FA deaktivieren — mit dem eingerichteten Faktor, nie mit einem Backup-Code.
+    """2FA ganz ausschalten — mit einem eingerichteten Faktor, nie mit einem Backup-Code.
 
-    TOTP-Konten: der aktuelle Code (Query-Parameter, wie bisher). Passkey-Konten:
-    die Passkey-Antwort im Body. Bis 09/2026 genuegte fuer Passkey-Konten der
-    Query-Parameter ``passkey_verified=true``.
+    Der Code kommt als Query-Parameter (wie bisher), der Passkey im Body. Bis
+    09/2026 genuegte fuer Passkey-Konten der Query-Parameter
+    ``passkey_verified=true``. Es fallen alle Faktoren und die Backup-Codes.
     """
     if not user.two_factor_enabled:
         raise HTTPException(status_code=400, detail="2FA nicht aktiviert")
@@ -1608,41 +1701,29 @@ async def disable_2fa(
     if not passkey_service.zweiter_faktor_bestaetigt(
         db, user, otp_code=otp_code, passkey=passkey, zweck="2fa_disable"
     ):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Passkey-Bestätigung erforderlich"
-                if user.two_factor_method == "passkey"
-                else "Ungültiger 2FA-Code"
-            ),
-        )
-    user.two_factor_enabled = False
-    user.two_factor_secret_encrypted = None
-    for eintrag in list(user.passkeys):
-        db.delete(eintrag)
-    BackupCodeService.clear_all_backup_codes(db, user.id)
+        raise HTTPException(status_code=400, detail=passkey_service.nachweis_hinweis(user))
+    passkey_service.zweiten_faktor_abschalten(db, user)
     db.commit()
-    audit_service.record_privileged_action(
-        db,
-        user_id=user.id,
-        action="auth.2fa.disable",
-        target_type="user",
-        target_id=user.id,
-        details={"username": user.username},
-        commit=True,
-    )
-    if EmailService.is_configured() and user.email_notifications:
-        await EmailService.send_2fa_status_notification(user.email, user.username, enabled=False)
+    _faktor_audit(db, user, "auth.2fa.disable")
+    await _status_mail(user, False)
     return {"message": "2FA deaktiviert"}
 
 
-@router.post("/2fa/backup/generate")
+@router.post("/2fa/backup/generate", dependencies=[Depends(auth_rate_limit)])
 def generate_backup_codes(
+    req: FaktorNachweis | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
+    """Neue Backup-Codes, die alten verfallen. Nur mit einem eingerichteten Faktor.
+
+    Ein Backup-Code meldet an. Bis 29.09.2026 gab es neue Codes allein mit dem
+    Zugangstoken: wer eines abgriff, hatte danach fuenf eigene Anmeldungen.
+    """
     if not user.two_factor_enabled:
         raise HTTPException(status_code=400, detail="2FA muss aktiviert sein")
+    _faktor_nachweis(db, user, req)
     codes = BackupCodeService.generate_backup_codes(db, user.id)
+    _faktor_audit(db, user, "auth.2fa.backup.regenerate")
     return {"codes": codes, "count": len(codes)}

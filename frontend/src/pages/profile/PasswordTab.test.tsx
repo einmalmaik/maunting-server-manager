@@ -85,8 +85,6 @@ describe('PasswordTab (Passwort ändern / festlegen)', () => {
         body: JSON.stringify({
           current_password: 'AltesPasswort123!',
           new_password: 'NeuesSicheresPasswort123!',
-          otp_code: null,
-          passkey: null,
         }),
       })
     })

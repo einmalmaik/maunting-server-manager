@@ -152,9 +152,9 @@ class UserResponse(BaseModel):
     two_factor_enabled: bool
     # False, wenn das Konto rein über Social Login / OAuth registriert wurde und noch kein Passwort gesetzt hat.
     has_password: bool = True
-    # "totp", "passkey" oder None — damit jede Abfrage nur den Weg zeigt, den
-    # das Konto eingerichtet hat.
-    two_factor_method: Literal["totp", "passkey"] | None = None
+    # Die aktiven Faktoren ("passkey", "totp") — jede Abfrage zeigt nur Wege,
+    # die das Konto eingerichtet hat.
+    two_factor_methods: list[Literal["passkey", "totp"]] = []
     email_notifications: bool
     ai_notifications: bool = True
     device_notifications: bool = True

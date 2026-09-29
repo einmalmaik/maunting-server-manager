@@ -43,20 +43,25 @@ class BackupCodeService:
 
     @staticmethod
     def validate_backup_code(db: Session, user_id: int, code: str) -> bool:
-        """Prueft einen Backup-Code. Wenn gueltig und unbenutzt → markiert als verwendet."""
+        """Verbraucht einen unbenutzten Backup-Code; ``True`` nur fuer die eine Anfrage, die ihn bekommt.
+
+        Bis 5.0.1 las die Pruefung den Code und markierte ihn danach. Zwei
+        Anfragen zugleich lasen ihn beide als unbenutzt, und beide kamen durch.
+        Jetzt markiert ein bedingtes UPDATE; nur wer die Zeile umschreibt, hat
+        den Code (AGENTS.md Punkt 43).
+        """
         code_hash = BackupCodeService._hash_code(code.upper().replace("-", ""))
-        bc = db.query(BackupCode).filter(
-            BackupCode.user_id == user_id,
-            BackupCode.code_hash == code_hash,
-            BackupCode.used_at.is_(None),
-        ).first()
-
-        if not bc:
-            return False
-
-        bc.used_at = datetime.now(timezone.utc)
+        verbraucht = (
+            db.query(BackupCode)
+            .filter(
+                BackupCode.user_id == user_id,
+                BackupCode.code_hash == code_hash,
+                BackupCode.used_at.is_(None),
+            )
+            .update({BackupCode.used_at: datetime.now(timezone.utc)}, synchronize_session=False)
+        )
         db.commit()
-        return True
+        return verbraucht > 0
 
     @staticmethod
     def get_remaining_count(db: Session, user_id: int) -> int:

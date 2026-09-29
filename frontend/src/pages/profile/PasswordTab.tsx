@@ -5,14 +5,14 @@ import { api } from '@/api/client'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { KeyRound, Mail, Save } from 'lucide-react'
 import { Button } from '@/Singra/UI'
-import { passkeyNachweis } from '@/services/passkeyService'
+import { useZweitfaktor, ZweitfaktorFeld } from '@/components/auth/ZweitfaktorNachweis'
 
 import { Spinner } from '@/components/ui/Spinner'
 /**
  * Tab: Passwort aendern.
  * Validiert lokal (Laenge, Match), ruft /auth/change-password,
- * beruecksichtigt den eingerichteten zweiten Faktor: TOTP-Feld oder Passkey-Abfrage
- * beim Speichern — nie beides.
+ * beruecksichtigt die eingerichteten zweiten Faktoren: Passkey-Abfrage beim
+ * Speichern oder, per Wechsel, das TOTP-Feld.
  * Konten ohne Passwort (Social Login) und wer das aktuelle Passwort nicht kennt,
  * bekommen einen Link an ihre E-Mail: ein angemeldetes Token allein setzt kein Passwort.
  */
@@ -20,8 +20,8 @@ export function PasswordTab() {
   const { t } = useTranslation()
   const { user } = useAuthStore()
   const hasPassword = user?.has_password ?? true
-  const methode = user?.two_factor_enabled ? (user.two_factor_method ?? 'totp') : null
-  const [form, setForm] = useState({ current: '', new: '', confirm: '', otp: '' })
+  const faktor = useZweitfaktor()
+  const [form, setForm] = useState({ current: '', new: '', confirm: '' })
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -47,12 +47,12 @@ export function PasswordTab() {
         body: JSON.stringify({
           current_password: form.current,
           new_password: form.new,
-          otp_code: methode === 'totp' ? form.otp : null,
-          passkey: methode === 'passkey' ? await passkeyNachweis('password_change') : null,
+          ...(await faktor.nachweis('password_change')),
         }),
       })
       setSuccess(t('profile.passwordChanged'))
-      setForm({ current: '', new: '', confirm: '', otp: '' })
+      setForm({ current: '', new: '', confirm: '' })
+      faktor.setCode('')
       setTimeout(() => setSuccess(''), 3000)
     } catch (err: any) {
       setError(err.message)
@@ -146,23 +146,9 @@ export function PasswordTab() {
             minLength={8}
           />
         </div>
-        {methode === 'totp' && (
+        {faktor.wahl && (
           <div className="md:col-span-2">
-            <label htmlFor="otp_code" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-              {t('auth.otpCode')}
-            </label>
-            <input
-              id="otp_code"
-              type="text"
-              inputMode="numeric"
-              pattern="\d{6}"
-              maxLength={6}
-              value={form.otp}
-              onChange={(e) => setForm({ ...form, otp: e.target.value })}
-              className="msm-input"
-              placeholder="000000"
-              required
-            />
+            <ZweitfaktorFeld faktor={faktor} id="otp_code" label={t('auth.otpCode')} />
           </div>
         )}
         <div className="md:col-span-2 flex justify-end">

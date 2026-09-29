@@ -51,9 +51,9 @@ export interface OAuthTestResult {
 }
 
 export interface OAuthLinkNachweis {
-  password: string
-  otp_code: string
-  passkey: unknown
+  password?: string
+  otp_code?: string
+  passkey?: unknown
 }
 
 export interface OAuthUserLink {

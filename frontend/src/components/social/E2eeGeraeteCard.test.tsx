@@ -176,7 +176,7 @@ describe('E2eeGeraeteCard', () => {
 
   it('bietet bei aktiver 2FA die Eingabe des OTP-Codes an', async () => {
     useAuthStore.setState({
-      user: { id: 10, username: 'anna', two_factor_enabled: true } as any,
+      user: { id: 10, username: 'anna', two_factor_enabled: true, two_factor_methods: ['totp'] } as any,
     })
 
     liste.inhalt = [

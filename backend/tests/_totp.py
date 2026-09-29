@@ -10,12 +10,32 @@ import struct
 import time
 
 
-def totp_now(secret_b32: str) -> str:
-    """Generate the current TOTP code for a base32 secret (replaces pyotp.TOTP(secret).now())."""
+def totp_now(secret_b32: str, versatz: int = 0) -> str:
+    """Generate the current TOTP code for a base32 secret (replaces pyotp.TOTP(secret).now()).
+
+    Each code is accepted once. A test that needs a second code within the same
+    30 s takes the next one (``versatz=1``); the sidecar accepts ±1 step.
+    """
+    return _code(secret_b32, int(time.time()) // 30 + versatz)
+
+
+def totp_schritt(secret_b32: str, code: str) -> int | None:
+    """The step a code hits (current ±1), like `/totp/verify` in the sidecar."""
+    jetzt = int(time.time()) // 30
+    eingabe = code.replace(" ", "").strip()
+    for schritt in (jetzt, jetzt - 1, jetzt + 1):
+        try:
+            if _code(secret_b32, schritt) == eingabe:
+                return schritt
+        except Exception:
+            return None
+    return None
+
+
+def _code(secret_b32: str, counter: int) -> str:
     # Pad secret to valid base32 length
     padded = secret_b32 + "=" * ((8 - len(secret_b32) % 8) % 8)
     key = base64.b32decode(padded)
-    counter = int(time.time()) // 30
     msg = struct.pack(">Q", counter)
     h = hmac.new(key, msg, hashlib.sha1).digest()
     offset = h[-1] & 0x0F

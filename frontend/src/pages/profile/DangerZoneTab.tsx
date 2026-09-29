@@ -6,7 +6,7 @@ import { api } from '@/api/client'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { AlertTriangle } from 'lucide-react'
 import { Button } from '@/Singra/UI'
-import { passkeyNachweis } from '@/services/passkeyService'
+import { useZweitfaktor, ZweitfaktorFeld } from '@/components/auth/ZweitfaktorNachweis'
 
 import { Spinner } from '@/components/ui/Spinner'
 /**
@@ -22,12 +22,11 @@ export function DangerZoneTab() {
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
   const isSocialOnly = user?.has_password === false
-  const methode = user?.two_factor_enabled ? (user.two_factor_method ?? 'totp') : null
+  const faktor = useZweitfaktor()
 
   const [deleteState, setDeleteState] = useState<'idle' | 'first-confirmed' | 'deleting' | 'success'>('idle')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [confirmDeleteWord, setConfirmDeleteWord] = useState('')
-  const [confirmOtp, setConfirmOtp] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
 
   const handleDelete = async (e: React.FormEvent) => {
@@ -42,8 +41,7 @@ export function DangerZoneTab() {
           // Pydantic lehnt leeren String ab, daher null statt ''.
           password: isSocialOnly ? null : confirmPassword,
           confirmation: confirmDeleteWord,
-          otp_code: methode === 'totp' ? confirmOtp : null,
-          passkey: methode === 'passkey' ? await passkeyNachweis('account_delete') : null,
+          ...(await faktor.nachweis('account_delete')),
         }),
       })
       setDeleteState('success')
@@ -133,25 +131,12 @@ export function DangerZoneTab() {
                 <p className="text-label-sm text-on-surface-variant mt-1">{t('profile.confirmDeleteWordHint')}</p>
               </div>
 
-              {methode === 'totp' && (
-                <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t('profile.confirmOtpLabel')}
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="\d{6}"
-                    maxLength={6}
-                    value={confirmOtp}
-                    onChange={(e) => setConfirmOtp(e.target.value)}
-                    className="msm-input"
-                    placeholder="000000"
-                    required
-                    disabled={deleteState === 'deleting'}
-                  />
-                </div>
-              )}
+              <ZweitfaktorFeld
+                faktor={faktor}
+                id="delete-account-otp"
+                label={t('profile.confirmOtpLabel')}
+                disabled={deleteState === 'deleting'}
+              />
 
               {errorMsg && <div className="msm-alert-error text-sm">{errorMsg}</div>}
 
@@ -173,7 +158,7 @@ export function DangerZoneTab() {
                     setDeleteState('idle')
                     setConfirmPassword('')
                     setConfirmDeleteWord('')
-                    setConfirmOtp('')
+                    faktor.setCode('')
                     setErrorMsg('')
                   }}
                   disabled={deleteState === 'deleting'}

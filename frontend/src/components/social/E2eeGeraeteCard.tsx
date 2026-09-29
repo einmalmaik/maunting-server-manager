@@ -3,7 +3,7 @@ import { CheckCircle2, Clock, Fingerprint, ShieldCheck, Trash2 } from 'lucide-re
 import { useTranslation } from 'react-i18next'
 
 import { getE2eeGeraete, type E2eeGeraetItem } from '@/api/social'
-import { Button } from '@/Singra/UI'
+import { Button, Input } from '@/Singra/UI'
 import {
   eigenesGeraet,
   entferneGeraet,
@@ -11,7 +11,7 @@ import {
   geraeteZuruecksetzen,
   sicherheitsnummer,
 } from '@/services/e2eeGeraet'
-import { passkeyNachweis } from '@/services/passkeyService'
+import { FaktorWechsel, useZweitfaktor } from '@/components/auth/ZweitfaktorNachweis'
 import { useAuthStore } from '@/stores/authStore'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
@@ -47,7 +47,7 @@ export function E2eeGeraeteCard() {
   const [laeuft, setLaeuft] = useState<string | null>(null)
   const [passwort, setPasswort] = useState('')
   const [confirmationWord, setConfirmationWord] = useState('')
-  const [totpCode, setTotpCode] = useState('')
+  const faktor = useZweitfaktor()
 
   const laden = useCallback(async () => {
     if (!eigeneId) return
@@ -138,7 +138,7 @@ export function E2eeGeraeteCard() {
   const neuBeginnenMitPasskey = async () => {
     setLaeuft('reset')
     try {
-      await geraeteZuruecksetzen({ passkey: await passkeyNachweis('e2ee_reset') })
+      await geraeteZuruecksetzen(await faktor.nachweis('e2ee_reset'))
       toast.success(t('profile.e2eeDevices.resetDone'))
       await laden()
     } catch (err: any) {
@@ -149,11 +149,11 @@ export function E2eeGeraeteCard() {
   }
 
   const neuBeginnenMitTotp = async () => {
-    if (totpCode.length !== 6) return
+    if (!faktor.bereit) return
     setLaeuft('reset')
     try {
-      await geraeteZuruecksetzen({ otp_code: totpCode })
-      setTotpCode('')
+      await geraeteZuruecksetzen(await faktor.nachweis('e2ee_reset'))
+      faktor.setCode('')
       toast.success(t('profile.e2eeDevices.resetDone'))
       await laden()
     } catch (err: any) {
@@ -206,8 +206,8 @@ export function E2eeGeraeteCard() {
             <p className="text-sm font-medium text-on-surface">{t('profile.e2eeDevices.resetTitle')}</p>
             <p className="text-sm text-on-surface-variant">{t('profile.e2eeDevices.resetHelp')}</p>
 
-            {user?.two_factor_enabled && user.two_factor_method === 'passkey' ? (
-              <div className="pt-2">
+            {faktor.wahl === 'passkey' ? (
+              <div className="space-y-2 pt-2">
                 <Button
                   variant="primary"
                   disabled={laeuft === 'reset'}
@@ -217,25 +217,25 @@ export function E2eeGeraeteCard() {
                   <Fingerprint className="h-4 w-4 mr-2" />
                   {t('profile.e2eeDevices.resetPasskey')}
                 </Button>
+                <FaktorWechsel faktor={faktor} disabled={laeuft === 'reset'} />
               </div>
-            ) : user?.two_factor_enabled ? (
+            ) : faktor.wahl === 'totp' ? (
               <div className="space-y-3 pt-2">
                 <div className="space-y-1">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <input
-                      type="text"
+                    <Input
                       inputMode="numeric"
-                      pattern="[0-9]*"
+                      autoComplete="one-time-code"
                       maxLength={6}
                       aria-label={t('profile.e2eeDevices.resetTotp')}
                       placeholder={t('profile.e2eeDevices.resetTotp')}
-                      value={totpCode}
-                      onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
-                      className="msm-input min-w-0 flex-1 font-mono tracking-widest"
+                      value={faktor.code}
+                      onChange={(e) => faktor.setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      className="font-mono tracking-widest"
                     />
                     <Button
                       variant="secondary"
-                      disabled={totpCode.length !== 6 || laeuft === 'reset'}
+                      disabled={!faktor.bereit || laeuft === 'reset'}
                       onClick={() => void neuBeginnenMitTotp()}
                       className="text-error hover:bg-error/10 hover:text-error"
                     >
@@ -243,6 +243,7 @@ export function E2eeGeraeteCard() {
                     </Button>
                   </div>
                 </div>
+                <FaktorWechsel faktor={faktor} disabled={laeuft === 'reset'} />
               </div>
             ) : isSocialAccount ? (
               <div className="space-y-2 pt-2">

@@ -13,7 +13,7 @@ import { SecretOnce } from '@/components/ui/SecretOnce'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { Button } from '@/Singra/UI'
 import { entferneGeraet, gebeGeraetFrei, sicherheitsnummer } from '@/services/e2eeGeraet'
-import { passkeyNachweis } from '@/services/passkeyService'
+import { FaktorWechsel, useZweitfaktor } from '@/components/auth/ZweitfaktorNachweis'
 import {
   uebergebeVerlauf,
   type KopplungsStatus,
@@ -63,11 +63,10 @@ export function AiDevicePairingCard() {
   const [geraete, setGeraete] = useState<Geraet[]>([])
   const [name, setName] = useState('')
   // Ein gekoppeltes Gerät ist ein Zugang ohne Ablauf. Deshalb fragt der Server
-  // vorher nach dem Passwort, bei 2FA nach dem eingerichteten Faktor — und
-  // die Karte zeigt nur diesen einen Weg.
-  const methode = useAuthStore((s) =>
-    s.user?.two_factor_enabled ? (s.user.two_factor_method ?? 'totp') : null,
-  )
+  // vorher nach dem Passwort, bei 2FA nach einem eingerichteten Faktor — und
+  // die Karte zeigt nur Wege, die das Konto hat.
+  const faktor = useZweitfaktor()
+  const methode = faktor.wahl
   const [nachweis, setNachweis] = useState('')
   // Ohne Passwort und ohne 2FA gibt es keinen Nachweis: erst ein Passwort festlegen.
   const ohnePasswort = useAuthStore((s) => s.user?.has_password === false)
@@ -168,15 +167,10 @@ export function AiDevicePairingCard() {
   const koppeln = async () => {
     setBusy(true)
     try {
-      const payload: Record<string, any> = { label: name.trim() }
-      if (methode === 'passkey') {
-        // Der Server prüft die Unterschrift; die Challenge gilt nur fürs Koppeln.
-        payload.passkey = await passkeyNachweis('device_pairing')
-      } else if (methode === 'totp') {
-        payload.otp_code = nachweis.trim()
-      } else {
-        payload.password = nachweis
-      }
+      // Bei Passkey prüft der Server die Unterschrift; die Challenge gilt nur fürs Koppeln.
+      const payload: Record<string, unknown> = methode
+        ? { label: name.trim(), ...(await faktor.nachweis('device_pairing')) }
+        : { label: name.trim(), password: nachweis }
 
       const antwort = await api<{ code: string; qr_data_uri?: string | null }>('/auth/devices/pairing', {
         method: 'POST',
@@ -186,6 +180,7 @@ export function AiDevicePairingCard() {
       setQrDataUri(antwort.qr_data_uri || null)
       setName('')
       setNachweis('')
+      faktor.setCode('')
     } catch (err: any) {
       toast.error(err.message || t('common.error'))
     } finally {
@@ -413,12 +408,12 @@ export function AiDevicePairingCard() {
                     label={t('ai.profile.devicesProofOtp')}
                     inputMode="numeric"
                     autoComplete="one-time-code"
-                    value={nachweis}
-                    onChange={(e) => setNachweis(e.target.value)}
-                    maxLength={16}
+                    value={faktor.code}
+                    onChange={(e) => faktor.setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    maxLength={6}
                   />
                 </div>
-                <Button onClick={() => void koppeln()} disabled={busy || !nachweis.trim()}>
+                <Button onClick={() => void koppeln()} disabled={busy || !faktor.bereit}>
                   {t('ai.profile.devicesPair')}
                 </Button>
               </>
@@ -439,6 +434,7 @@ export function AiDevicePairingCard() {
                 </Button>
               </>
             )}
+            <FaktorWechsel faktor={faktor} disabled={busy} />
           </div>
           <p className="msm-field-help">
             {ohnePasswort && !methode

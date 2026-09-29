@@ -8,11 +8,11 @@ import { Fingerprint, Link2, Unlink } from 'lucide-react'
 import { useOAuthLinks } from './useOAuthLinks'
 import { ConnectedMailboxesSection } from './ConnectedMailboxesSection'
 import { ConnectedCalendarsSection } from './ConnectedCalendarsSection'
-import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input } from '@/Singra/UI'
+import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/Singra/UI'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Spinner } from '@/components/ui/Spinner'
 import { useAuthStore } from '@/stores/authStore'
-import { passkeyNachweis } from '@/services/passkeyService'
+import { useZweitfaktor, ZweitfaktorFeld } from '@/components/auth/ZweitfaktorNachweis'
 /**
  * Tab: Verknuepfte Accounts & Dienste.
  * Enthält:
@@ -167,7 +167,7 @@ export function LinkedAccountsTab() {
 }
 
 /**
- * Nachweis vor dem Verknuepfen: bei 2FA der eingerichtete Faktor, sonst das
+ * Nachweis vor dem Verknuepfen: bei 2FA ein eingerichteter Faktor, sonst das
  * Passwort. Eine Verknuepfung ist ein Zugang ohne Ablauf, ein angemeldetes
  * Token allein reicht dafuer nicht. Konten ohne beides legen zuerst ein
  * Passwort fest.
@@ -175,10 +175,9 @@ export function LinkedAccountsTab() {
 function VerknuepfenDialog({ provider, onClose }: { provider: OAuthProviderPublic; onClose: () => void }) {
   const { t } = useTranslation()
   const user = useAuthStore((s) => s.user)
-  const methode = user?.two_factor_enabled ? (user.two_factor_method ?? 'totp') : null
-  const ohneNachweis = !methode && user?.has_password === false
+  const faktor = useZweitfaktor()
+  const ohneNachweis = !faktor.wahl && user?.has_password === false
   const [passwort, setPasswort] = useState('')
-  const [code, setCode] = useState('')
   const [laeuft, setLaeuft] = useState(false)
   const [fehler, setFehler] = useState('')
 
@@ -188,11 +187,10 @@ function VerknuepfenDialog({ provider, onClose }: { provider: OAuthProviderPubli
     setLaeuft(true)
     try {
       // Der Passkey zuerst: der Browser verlangt die Abfrage nah am Klick.
-      const passkey = methode === 'passkey' ? await passkeyNachweis('oauth_link') : null
+      const zweiter = await faktor.nachweis('oauth_link')
       const { url } = await oauthApi.startLink(provider.slug, {
-        password: methode ? '' : passwort,
-        otp_code: methode === 'totp' ? code : '',
-        passkey,
+        password: faktor.wahl ? '' : passwort,
+        ...zweiter,
       })
       window.location.assign(url)
     } catch (err) {
@@ -220,20 +218,8 @@ function VerknuepfenDialog({ provider, onClose }: { provider: OAuthProviderPubli
         ) : (
           <form onSubmit={starten}>
             <div className="p-6 space-y-4">
-              {methode === 'totp' ? (
-                <Input
-                  id="verknuepfen-otp"
-                  label={t('auth.otpCode')}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  placeholder="000000"
-                  required
-                  disabled={laeuft}
-                />
-              ) : methode === 'passkey' ? (
-                <p className="text-sm text-on-surface-variant">{t('profile.linkedAccounts.linkPasskeyHint')}</p>
+              {faktor.wahl ? (
+                <ZweitfaktorFeld faktor={faktor} id="verknuepfen-otp" label={t('auth.otpCode')} disabled={laeuft} />
               ) : (
                 <PasswordInput
                   id="verknuepfen-passwort"
@@ -252,7 +238,7 @@ function VerknuepfenDialog({ provider, onClose }: { provider: OAuthProviderPubli
                 {t('common.cancel')}
               </Button>
               <Button type="submit" disabled={laeuft} className="inline-flex items-center gap-2">
-                {laeuft ? <Spinner /> : methode === 'passkey' ? <Fingerprint className="w-4 h-4" /> : <Link2 className="w-4 h-4" />}
+                {laeuft ? <Spinner /> : faktor.wahl === 'passkey' ? <Fingerprint className="w-4 h-4" /> : <Link2 className="w-4 h-4" />}
                 {t('profile.linkedAccounts.linkContinue')}
               </Button>
             </DialogFooter>

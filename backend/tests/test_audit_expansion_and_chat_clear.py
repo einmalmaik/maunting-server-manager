@@ -242,7 +242,9 @@ def test_auth_2fa_audit_logging(client: TestClient, db: Session, owner_user: Use
     headers = _csrf(owner_cookies)
 
     # 1. 2FA setup & enable
-    resp_setup = client.post("/api/auth/2fa/setup", cookies=owner_cookies, headers=headers)
+    resp_setup = client.post(
+        "/api/auth/2fa/setup", cookies=owner_cookies, headers=headers, json={"password": "OwnerPass123!"}
+    )
     assert resp_setup.status_code == 200
     secret = resp_setup.json()["secret"]
     valid_code = totp_now(secret)
@@ -254,7 +256,8 @@ def test_auth_2fa_audit_logging(client: TestClient, db: Session, owner_user: Use
     assert audit_2fa_en is not None
 
     # 2. 2FA disable
-    valid_code2 = totp_now(secret)
+    # Jeder Code gilt einmal: der naechste aus der App.
+    valid_code2 = totp_now(secret, versatz=1)
     resp_disable = client.post(f"/api/auth/2fa/disable?otp_code={valid_code2}", cookies=owner_cookies, headers=headers)
     assert resp_disable.status_code == 200
 

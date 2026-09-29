@@ -157,9 +157,10 @@ def _mock_verify_password(password: str, stored_hash: str) -> bool:
         return CryptContext(schemes=["argon2"]).verify(password, alt)
     return stored_hash == _mock_hash_password(password)
 
-def _mock_totp_verify(secret: str, code: str, window: int = 1) -> bool:
-    from tests._totp import totp_now
-    return totp_now(secret) == code.strip()
+def _mock_totp_schritt(secret: str, code: str) -> int | None:
+    """Wie `/totp/verify` im Sidecar: der getroffene Schritt (aktueller ±1) oder None."""
+    from tests._totp import totp_schritt
+    return totp_schritt(secret, code)
 
 # Die echte Methode, fuer Tests, die ihre Pruefung des Sidecar-Ergebnisses brauchen.
 ECHTES_ENCRYPT = DisClient.encrypt
@@ -191,7 +192,7 @@ DisClient.verify_password = staticmethod(_mock_verify_password)
 DisClient.wrap_legacy_password = staticmethod(_mock_wrap_legacy_password)
 DisClient.is_dis_hash = staticmethod(lambda h: h.startswith("msm-pw-v1:"))
 DisClient.generate_totp_secret = staticmethod(lambda: _b64.b32encode(_sec.token_bytes(20)).decode().rstrip("="))
-DisClient.verify_totp = staticmethod(_mock_totp_verify)
+DisClient.totp_schritt = staticmethod(_mock_totp_schritt)
 DisClient.build_totp_uri = staticmethod(lambda issuer, label, secret: f"otpauth://totp/{issuer}:{label}?secret={secret}&issuer={issuer}&algorithm=SHA1&digits=6&period=30")
 DisClient.health_check = staticmethod(lambda: True)
 

@@ -62,7 +62,7 @@ describe('LinkedAccountsTab: Verknüpfen nur mit Nachweis', () => {
     fireEvent.click(screen.getByRole('button', { name: t('profile.linkedAccounts.linkContinue') }))
 
     await waitFor(() => {
-      expect(oauthApi.startLink).toHaveBeenCalledWith('google', { password: 'geheim-123', otp_code: '', passkey: null })
+      expect(oauthApi.startLink).toHaveBeenCalledWith('google', { password: 'geheim-123' })
       expect(assign).toHaveBeenCalledWith('https://accounts.example.invalid/auth')
     })
   })

@@ -27,6 +27,7 @@ def _setup(client: TestClient, cookies: dict) -> dict:
         "/api/auth/2fa/setup",
         cookies=cookies,
         headers={"X-CSRF-Token": cookies.get("__Secure-csrf_token")},
+        json={"password": "OwnerPass123!"},
     )
     assert res.status_code == 200, res.text
     return res.json()

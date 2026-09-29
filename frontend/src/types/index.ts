@@ -1,3 +1,6 @@
+/** Ein zweiter Faktor. Ein Konto kann beide gleichzeitig haben. */
+export type Zweitfaktor = 'passkey' | 'totp'
+
 export interface User {
   id: number
   username: string
@@ -14,8 +17,8 @@ export interface User {
   two_factor_enabled: boolean
   /** False, wenn das Konto rein über Social Login / OAuth registriert wurde und noch kein Passwort gesetzt hat. */
   has_password?: boolean
-  /** Der eingerichtete zweite Faktor — jede Abfrage zeigt nur diesen Weg. */
-  two_factor_method?: 'totp' | 'passkey' | null
+  /** Die aktiven zweiten Faktoren — jede Abfrage bietet nur diese Wege an. */
+  two_factor_methods?: Zweitfaktor[]
   email_notifications: boolean
   /** Hinweise der KI im Panel. Getrennt von den E-Mails — sie verschickt keine. */
   ai_notifications: boolean

@@ -41,9 +41,10 @@ class TokenResponse(BaseModel):
     requires_2fa: bool = False
     requires_verification: bool = False
     email: str = ""
-    # Nur bei requires_2fa: welcher Faktor gilt ("totp" / "passkey"), und für
-    # Passkey-Konten gleich die Optionen für `navigator.credentials.get()`.
-    two_factor_method: str | None = None
+    # Nur bei requires_2fa: die aktiven Faktoren ("passkey", "totp"), der
+    # zuletzt genutzte vorn, und bei Passkeys gleich die Optionen für
+    # `navigator.credentials.get()`.
+    two_factor_methods: list[str] = []
     passkey_options: dict | None = None
     login_challenge: str = ""
     # Nur für native Clients gefüllt (native_client=True im Request); der

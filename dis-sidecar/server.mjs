@@ -35,8 +35,9 @@ import {
 } from '@msdis/shield/integrity';
 import {
   generateTotpSecret,
-  verifyTotpCode,
+  generateTotpCode,
   buildTotpUri,
+  TOTP_PERIOD_SECONDS,
 } from '@msdis/shield/totp';
 
 // ── Config from env ──────────────────────────────────────────────────────
@@ -261,6 +262,32 @@ function frameAad(index, final) {
   view.setBigUint64(0, BigInt(index), false);
   aad[8] = final ? 1 : 0;
   return aad;
+}
+
+/**
+ * The 30-second step a TOTP code belongs to (current step ±1), or null.
+ *
+ * Until 5.0.1 `/totp/verify` only said valid or not, and the panel took the
+ * same code again for as long as it was valid. With the step the panel can
+ * accept each code once: it records the step it last accepted per account.
+ */
+function totpStep(secret, code) {
+  const input = String(code ?? '').replace(/\s/g, '');
+  if (!/^\d{6}$/.test(input)) return null;
+  const now = Date.now();
+  for (const offset of [0, -1, 1]) {
+    const timestamp = now + offset * TOTP_PERIOD_SECONDS * 1000;
+    let expected;
+    try {
+      expected = generateTotpCode(secret, { timestamp });
+    } catch {
+      return null;
+    }
+    if (constantTimeEqual(new TextEncoder().encode(expected), new TextEncoder().encode(input))) {
+      return Math.floor(timestamp / 1000 / TOTP_PERIOD_SECONDS);
+    }
+  }
+  return null;
 }
 
 // ── HTTP server ──────────────────────────────────────────────────────────
@@ -499,9 +526,11 @@ const server = http.createServer(async (req, res) => {
         result = { secret: generateTotpSecret() };
         break;
 
-      case '/totp/verify':
-        result = { valid: verifyTotpCode(data.secret, data.code) };
+      case '/totp/verify': {
+        const step = totpStep(data.secret, data.code);
+        result = { valid: step !== null, step };
         break;
+      }
 
       case '/totp/build-uri':
         result = {

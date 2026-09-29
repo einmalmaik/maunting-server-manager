@@ -5,6 +5,7 @@ Die Grenzen sind grosszuegig, aber endlich: eine Credential-ID hat hoechstens
 1023 Byte, ein RSA-4096-Schluessel knapp 600 Byte DER.
 """
 
+from datetime import datetime
 from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, Field
@@ -86,3 +87,27 @@ class TwoFactorDisableRequest(BaseModel):
     """Body von `/2fa/disable` fuer Passkey-Konten. TOTP bleibt im Query-Parameter."""
 
     passkey: Zweitnachweis | None = None
+
+
+class FaktorNachweis(BaseModel):
+    """Nachweis, bevor ein zweiter Faktor dazukommt oder wegfaellt.
+
+    Bei aktiver 2FA ein eingerichteter Faktor, sonst das Passwort
+    (`passkey_service.frischer_nachweis_fehlt`). Ein Backup-Code gilt hier
+    nicht: er ist der Notausgang, kein Schluessel fuer neue Schluessel.
+    """
+
+    password: str | None = Field(None, max_length=256)
+    otp_code: str | None = Field(None, pattern=r"^\d{6}$")
+    passkey: Zweitnachweis | None = None
+
+
+class PasskeyHinzufuegen(PasskeyAnlage):
+    name: str | None = Field(None, max_length=64)
+
+
+class PasskeyEintrag(BaseModel):
+    id: int
+    name: str | None
+    created_at: datetime | None
+    last_used_at: datetime | None
