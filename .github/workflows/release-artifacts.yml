@@ -351,14 +351,34 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+        # Titel, Notes und Veroeffentlichung setzt immer dieser Schritt, auch
+        # wenn das Release schon da ist: `recovery-release.yml` ist meist
+        # zuerst fertig und legt es als Entwurf „MSM Backup Recovery …“ ohne
+        # Notes an. Bis 5.0.1 blieb es so stehen und musste von Hand
+        # veroeffentlicht werden.
         run: |
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            notes="docs/patchnotes/${TAG}-release-notes.md"
-            if [ -f "$notes" ]; then
-              gh release create "$TAG" --verify-tag --title "MSM $TAG" --notes-file "$notes"
-            else
-              gh release create "$TAG" --verify-tag --title "MSM $TAG" \
-                --notes "Einheitlicher Release: Panel, Frontend, Node-Agent sowie Maunting Smart System Desktop- (Windows) und Mobile-Installer (Android APK)."
+          notes=""
+          for kandidat in "docs/patchnotes/${TAG}-release-notes.md" "docs/patchnotes/${TAG}-hotfix-notes.md"; do
+            if [ -f "$kandidat" ]; then notes="$kandidat"; break; fi
+          done
+          title="MSM / MSS $TAG"
+          if [ -n "$notes" ]; then
+            # "# Hotfix v5.0.1 — Thema" wird zu "MSM / MSS v5.0.1 — Hotfix: Thema".
+            kopf=$(head -n1 "$notes")
+            thema="${kopf#*— }"
+            if [ "$thema" != "$kopf" ]; then
+              case "$kopf" in "# Hotfix"*) thema="Hotfix: $thema" ;; esac
+              title="$title — $thema"
             fi
+          else
+            notes="$RUNNER_TEMP/release-notes.md"
+            echo "Einheitlicher Release: Panel, Frontend, Node-Agent sowie Maunting Smart System Desktop- (Windows) und Mobile-Installer (Android APK)." > "$notes"
+          fi
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --draft --title "$title" --notes-file "$notes"
           fi
           gh release upload "$TAG" final-release/* --clobber
+          latest=true
+          case "$TAG" in *-*) latest=false ;; esac
+          gh release edit "$TAG" --title "$title" --notes-file "$notes" --draft=false --latest="$latest"
+          gh release view "$TAG" --json isDraft,name,assets --jq '"\(.name) | Entwurf: \(.isDraft) | \(.assets | length) Dateien"'
