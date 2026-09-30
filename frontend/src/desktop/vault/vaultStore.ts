@@ -48,6 +48,7 @@ import {
   vorbereitungAbschliessen,
   type DateiAngaben,
 } from './tresorDateien'
+import { bildAngaben } from './tresorBilder'
 
 export interface VaultAttachment {
   id: string
@@ -616,7 +617,7 @@ interface VaultState {
    * Legt eine Datei im Tresor ab: verschlüsselt sie auf dem Gerät, speichert
    * den Eintrag und lädt im Hintergrund hoch. Liefert die Kennung des Eintrags.
    */
-  dateiHinzufuegen: (datei: File, ordner?: string, bilder?: { vorschau?: Uint8Array; miniatur?: Uint8Array }) => Promise<string>
+  dateiHinzufuegen: (datei: File, ordner?: string) => Promise<string>
   ordnerAnlegen: (name: string, ordner?: string) => Promise<string>
   toggleFavorite: (id: string) => Promise<void>
   markUsed: (id: string) => Promise<void>
@@ -1427,14 +1428,15 @@ export const useVaultStore = create<VaultState>((set, get) => {
     }
   },
 
-  dateiHinzufuegen: async (datei, ordner, bilder) => {
+  dateiHinzufuegen: async (datei, ordner) => {
     const { userKey, bucketId } = get()
     if (!userKey || !bucketId) throw new Error(i18n.t('mss.vault.errors.locked'))
     const id = window.crypto.randomUUID()
-    const angaben = await dateiVorbereiten(datei, userKey, bucketId, id, () => !sitzungOffen(userKey, bucketId), bilder)
+    const { vorschau, miniatur, ...bild } = await bildAngaben(datei)
+    const angaben = await dateiVorbereiten(datei, userKey, bucketId, id, () => !sitzungOffen(userKey, bucketId), { vorschau, miniatur })
     try {
       if (!sitzungOffen(userKey, bucketId)) throw new Error(i18n.t('mss.vault.errors.locked'))
-      await get().saveItem({ id, service: datei.name, category: 'datei', datei: angaben, ordner })
+      await get().saveItem({ id, service: datei.name, category: 'datei', datei: { ...angaben, ...bild }, ordner })
     } finally {
       // Ohne gespeicherten Eintrag verwirft der Uploader die Blobs beim nächsten Lauf.
       vorbereitungAbschliessen(angaben)

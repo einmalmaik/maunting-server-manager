@@ -56,6 +56,16 @@ export interface DateiAngaben {
   typ: string
   /** Letzte Änderung der Datei auf dem Gerät, von dem sie kam (ms). */
   geaendert?: number
+  /**
+   * Aufnahmezeit aus EXIF. Kameras speichern Ortszeit ohne Zone; sie steht
+   * hier als UTC und wird auch als UTC angezeigt, damit 14:05 14:05 bleibt.
+   */
+  aufgenommen?: number
+  kamera?: string
+  breite?: number
+  hoehe?: number
+  /** Videos: Länge in Sekunden. */
+  dauer?: number
   original: BlobKopf
   /** Bei Bildern und Videos ein Vorschaubild, sonst leer, aber immer gleich groß. */
   vorschau: BlobKopf
@@ -65,9 +75,15 @@ export interface DateiAngaben {
 export function istDateiAngaben(wert: unknown): wert is DateiAngaben {
   if (!wert || typeof wert !== 'object') return false
   const d = wert as Record<string, unknown>
+  const zahl = (w: unknown) => w === undefined || (typeof w === 'number' && Number.isFinite(w))
   return (
     typeof d.typ === 'string' &&
-    (d.geaendert === undefined || typeof d.geaendert === 'number') &&
+    zahl(d.geaendert) &&
+    zahl(d.aufgenommen) &&
+    zahl(d.breite) &&
+    zahl(d.hoehe) &&
+    zahl(d.dauer) &&
+    (d.kamera === undefined || typeof d.kamera === 'string') &&
     istBlobKopf(d.original) &&
     istBlobKopf(d.vorschau) &&
     istBlobKopf(d.miniatur)
