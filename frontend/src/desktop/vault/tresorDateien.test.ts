@@ -647,30 +647,33 @@ describe('Tresor-Dateien', () => {
       tauriKern.invoke.mockReset()
     })
 
-    /** Rust nachgebaut: merkt sich, was ankommt, und kopiert wie die echte IPC. */
+    /**
+     * Rust nachgebaut: merkt sich, was ankommt. Die Teile kommen als Base64 im
+     * JSON, weil Android keinen rohen IPC-Körper kennt.
+     */
     function rust(antwortStart: number | null, beiTeil?: (anzahl: number) => void) {
       const geschrieben: Uint8Array[] = []
-      const gesehen: Uint8Array[] = []
       const ende: unknown[] = []
       tauriKern.invoke.mockImplementation(async (befehl: string, nutzlast: unknown) => {
-        if (befehl === 'tresor_speichern_start') return antwortStart
-        if (befehl === 'tresor_speichern_teil') {
-          const teil = nutzlast as Uint8Array
-          gesehen.push(teil)
-          geschrieben.push(teil.slice())
+        if (befehl === 'datei_speichern_start') return antwortStart
+        if (befehl === 'datei_speichern_teil') {
+          const { vorgang, teil } = nutzlast as { vorgang: number; teil: string }
+          expect(vorgang).toBe(antwortStart)
+          expect(JSON.parse(JSON.stringify(nutzlast))).toEqual(nutzlast)
+          geschrieben.push(Uint8Array.from(atob(teil), (z) => z.charCodeAt(0)))
           beiTeil?.(geschrieben.length)
           return null
         }
-        if (befehl === 'tresor_speichern_ende') {
+        if (befehl === 'datei_speichern_ende') {
           ende.push(nutzlast)
           return null
         }
         throw new Error(befehl)
       })
-      return { geschrieben, gesehen, ende }
+      return { geschrieben, ende }
     }
 
-    it('schreibt Chunk für Chunk und hält danach keinen Klartext mehr', async () => {
+    it('schreibt Chunk für Chunk als Base64', async () => {
       serverStarten()
       const userKey = await tresorOeffnen()
       const datei = foto(CHUNK_KLARTEXT + 4321, 'gross.jpg')
@@ -681,13 +684,12 @@ describe('Tresor-Dateien', () => {
 
       expect(await aufGeraetSpeichern(item.datei!.original, id, userKey, item.service, item.datei!.typ)).toBe(true)
 
-      expect(tauriKern.invoke).toHaveBeenCalledWith('tresor_speichern_start', { name: 'gross.jpg' })
+      expect(tauriKern.invoke).toHaveBeenCalledWith('datei_speichern_start', { name: 'gross.jpg' })
       expect(r.geschrieben).toHaveLength(2)
       const zusammen = new Uint8Array(await new Blob(r.geschrieben as BlobPart[]).arrayBuffer())
       const echt = new Uint8Array(await datei.arrayBuffer())
       expect(zusammen.length).toBe(echt.length)
       expect(zusammen.every((x, i) => x === echt[i])).toBe(true)
-      expect(r.gesehen.every((teil) => teil.every((b) => b === 0))).toBe(true)
       expect(r.ende).toEqual([{ vorgang: 7, abbrechen: false }])
     })
 

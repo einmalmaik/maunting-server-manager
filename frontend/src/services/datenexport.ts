@@ -11,6 +11,7 @@
 import { api } from '@/api/client'
 import i18n from '@/i18n'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { blobTeile, inDerAppSpeichern } from '@/lib/geraetSpeichern'
 import { zipSchreiben, type ZipEintrag } from '@/lib/zipSchreiben'
 import { inDerApp, type Zweitnachweis } from '@/services/passkeyService'
 import {
@@ -227,9 +228,7 @@ export async function exportErstellen(nachweis: ExportNachweis, tresor?: TresorQ
 /** Legt das Zip ab. `false` heißt: der Mensch hat den Speichern-Dialog abgebrochen. */
 export async function exportSpeichern(blob: Blob, dateiname: string): Promise<boolean> {
   if (inDerApp()) {
-    const { invoke } = await import('@tauri-apps/api/core')
-    const bytes = new Uint8Array(await blob.arrayBuffer())
-    return invoke<boolean>('export_speichern', bytes, { headers: { 'x-dateiname': dateiname } })
+    return inDerAppSpeichern(dateiname, blobTeile(blob))
   }
   const adresse = URL.createObjectURL(blob)
   const link = document.createElement('a')

@@ -1,14 +1,16 @@
-//! Legt eine entschlüsselte Tresor-Datei dort ab, wo der Mensch es im Dialog sagt.
+//! Legt Bytes dort ab, wo der Mensch es im Speichern-Dialog sagt: entschlüsselte
+//! Tresor-Dateien und den Datenexport.
 //!
-//! Wie beim Datenexport bestimmt nur der Speichern-Dialog das Ziel, nie das
-//! Fenster (siehe `datenexport.rs`). Dateien können Gigabyte groß sein, deshalb
-//! kommen die Bytes in Teilen: `start` öffnet Dialog und Datei, `teil` hängt
-//! einen Chunk an, `ende` schließt oder bricht ab. Im Speicher liegt nie mehr
-//! als ein Chunk.
+//! Den Pfad bestimmt nur der Dialog, nie das Fenster: ein Befehl, der Bytes an
+//! einen Pfad aus JS schreibt, wäre ein Schreibzugriff auf die ganze Platte für
+//! jedes Skript im WebView. Dateien können Gigabyte groß sein, deshalb kommen
+//! die Bytes in Teilen: `start` öffnet Dialog und Datei, `teil` hängt einen
+//! Chunk an, `ende` schließt oder bricht ab.
 //!
-//! Geöffnet wird über das fs-Plugin, weil Android statt eines Pfads eine
-//! `content://`-Adresse liefert. Dem Fenster gibt das Plugin keine Rechte: es
-//! steht in keiner Capability.
+//! Android kennt keinen rohen IPC-Körper (Tauri liefert dort immer JSON) und
+//! statt eines Pfads eine `content://`-Adresse. Die Teile reisen deshalb als
+//! Base64, und geöffnet wird über das fs-Plugin. Dem Fenster gibt das Plugin
+//! keine Rechte: es steht in keiner Capability.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -16,13 +18,15 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use tauri::ipc::{InvokeBody, Request};
+use base64::Engine;
 use tauri::{Manager, WebviewWindow};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_fs::{FsExt, OpenOptions};
 
 /// Mehr gleichzeitige Speichervorgänge braucht niemand.
 const HOECHSTENS_OFFEN: usize = 4;
+/// Ein Teil als Base64; die Aufrufer schicken 1 MiB.
+const HOECHSTENS_TEIL: usize = 12 * 1024 * 1024;
 
 struct Vorgang {
     datei: File,
@@ -36,7 +40,7 @@ pub struct Offen {
     vorgaenge: Mutex<HashMap<u64, Vorgang>>,
 }
 
-/// Der Name aus dem Tresor als Vorschlag. Pfadteile, Steuerzeichen und die
+/// Der vorgeschlagene Name. Pfadteile, Steuerzeichen und die
 /// unter Windows verbotenen Zeichen fallen weg; Umlaute und Leerzeichen bleiben.
 pub fn sicherer_dateiname(vorschlag: &str) -> String {
     let name: String = vorschlag
@@ -62,7 +66,7 @@ fn nur_hauptfenster(fenster: &WebviewWindow) -> Result<(), String> {
 
 /// Fragt nach dem Ziel und öffnet es. `None` heißt: abgebrochen.
 #[tauri::command(async)]
-pub async fn tresor_speichern_start(
+pub async fn datei_speichern_start(
     app: tauri::AppHandle,
     window: WebviewWindow,
     name: String,
@@ -105,50 +109,46 @@ pub async fn tresor_speichern_start(
     Ok(Some(id))
 }
 
-/// Hängt einen Chunk an. Der Vorgang steht im Kopf `x-vorgang`, die Bytes im
-/// rohen Körper.
+/// Hängt einen Chunk an.
 #[tauri::command(async)]
-pub async fn tresor_speichern_teil(
+pub async fn datei_speichern_teil(
     app: tauri::AppHandle,
     window: WebviewWindow,
-    request: Request<'_>,
+    vorgang: u64,
+    teil: String,
 ) -> Result<(), String> {
     nur_hauptfenster(&window)?;
-    let InvokeBody::Raw(inhalt) = request.body() else {
-        return Err("Der Teil kam nicht als Bytes an.".to_string());
-    };
-    let id: u64 = request
-        .headers()
-        .get("x-vorgang")
-        .and_then(|wert| wert.to_str().ok())
-        .and_then(|wert| wert.parse().ok())
-        .ok_or("Vorgang fehlt.")?;
+    if teil.len() > HOECHSTENS_TEIL {
+        return Err("Der Teil ist zu groß.".to_string());
+    }
+    let inhalt = base64::engine::general_purpose::STANDARD
+        .decode(teil)
+        .map_err(|_| "Der Teil kam nicht als Base64 an.".to_string())?;
     let offen = app.state::<Offen>();
     // Herausnehmen, schreiben, zurücklegen: die Sperre hält nie während des Schreibens.
-    let mut vorgang = offen
+    let mut laufend = offen
         .vorgaenge
         .lock()
         .map_err(|_| "gesperrt")?
-        .remove(&id)
+        .remove(&vorgang)
         .ok_or("Dieser Speichervorgang ist nicht offen.")?;
-    let inhalt = inhalt.clone();
-    let (vorgang, ergebnis) = tauri::async_runtime::spawn_blocking(move || {
-        let ergebnis = vorgang.datei.write_all(&inhalt);
-        (vorgang, ergebnis)
+    let (laufend, ergebnis) = tauri::async_runtime::spawn_blocking(move || {
+        let ergebnis = laufend.datei.write_all(&inhalt);
+        (laufend, ergebnis)
     })
     .await
     .map_err(|fehler| fehler.to_string())?;
     if let Err(fehler) = ergebnis {
-        verwerfen(vorgang);
+        verwerfen(laufend);
         return Err(format!("Speichern fehlgeschlagen: {fehler}"));
     }
-    offen.vorgaenge.lock().map_err(|_| "gesperrt")?.insert(id, vorgang);
+    offen.vorgaenge.lock().map_err(|_| "gesperrt")?.insert(vorgang, laufend);
     Ok(())
 }
 
 /// Schließt die Datei. Mit `abbrechen` wird sie am Desktop wieder gelöscht.
 #[tauri::command(async)]
-pub async fn tresor_speichern_ende(
+pub async fn datei_speichern_ende(
     app: tauri::AppHandle,
     window: WebviewWindow,
     vorgang: u64,

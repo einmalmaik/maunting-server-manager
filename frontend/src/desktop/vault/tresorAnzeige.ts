@@ -2,6 +2,7 @@
  * Was die App mit einer entschlüsselten Datei anfangen kann: selbst zeigen
  * oder auf dem Gerät speichern. Gemeinsam für Dateien und Fotos.
  */
+import { inDerAppSpeichern } from '@/lib/geraetSpeichern'
 import { inDerApp } from '@/services/passkeyService'
 import { useVaultStore } from './vaultStore'
 import type { BlobKopf } from './tresorDatei'
@@ -18,9 +19,10 @@ export function anzeigeArt(typ: string): 'bild' | 'video' | 'audio' | 'text' | n
 
 /**
  * Speichert eine Tresor-Datei auf dem Gerät. In der App fragt Rust nach dem
- * Ziel und schreibt Chunk für Chunk (auch nach `content://` auf Android), im
- * JavaScript-Speicher liegt nie mehr als ein Chunk Klartext. `false` heißt:
- * der Mensch hat den Dialog abgebrochen.
+ * Ziel und schreibt Chunk für Chunk (auch nach `content://` auf Android); im
+ * JavaScript-Speicher liegt immer nur ein Chunk Klartext, dazu seine
+ * Base64-Fassung für den Weg nach Rust, bis sie eingesammelt wird. `false`
+ * heißt: der Mensch hat den Dialog abgebrochen.
  */
 export async function aufGeraetSpeichern(
   kopf: BlobKopf,
@@ -44,19 +46,13 @@ export async function aufGeraetSpeichern(
     setTimeout(() => ansichtSchliessen(url), 60_000)
     return true
   }
-  const { invoke } = await import('@tauri-apps/api/core')
-  const vorgang = await invoke<number | null>('tresor_speichern_start', { name })
-  if (vorgang === null) return false
-  try {
-    for await (const klartext of klartextTeile(kopf, eintragId, userKey)) {
-      // Gesperrt: nichts mehr herausgeben, die halbe Datei fällt weg.
-      if (useVaultStore.getState().userKey !== userKey) throw new Error('gesperrt')
-      await invoke('tresor_speichern_teil', klartext, { headers: { 'x-vorgang': String(vorgang) } })
-    }
-  } catch (fehler) {
-    await invoke('tresor_speichern_ende', { vorgang, abbrechen: true }).catch(() => {})
-    throw fehler
+  return inDerAppSpeichern(name, bisGesperrt(klartextTeile(kopf, eintragId, userKey), userKey))
+}
+
+/** Gesperrt: nichts mehr herausgeben, die halbe Datei fällt weg. */
+async function* bisGesperrt(teile: AsyncIterable<Uint8Array>, userKey: CryptoKey): AsyncGenerator<Uint8Array> {
+  for await (const teil of teile) {
+    if (useVaultStore.getState().userKey !== userKey) throw new Error('gesperrt')
+    yield teil
   }
-  await invoke('tresor_speichern_ende', { vorgang, abbrechen: false })
-  return true
 }

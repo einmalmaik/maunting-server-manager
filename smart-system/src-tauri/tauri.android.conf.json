@@ -3,6 +3,11 @@
   "build": {
     "devUrl": "http://localhost:1430"
   },
+  "bundle": {
+    "android": {
+      "debugApplicationIdSuffix": ".dev"
+    }
+  },
   "app": {
     "windows": [
       {

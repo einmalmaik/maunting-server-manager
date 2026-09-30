@@ -50,8 +50,11 @@ keyring = "4"
 tauri-plugin-dialog = "2"
 # Schon über tauri-plugin-dialog im Baum (gleiche Fassung). Direkt gebraucht,
 # um die `content://`-Adresse des Android-Speicherdialogs zu öffnen
-# (`tresor_speichern.rs`). Keine Capability gibt dem Fenster fs-Rechte.
+# (`datei_speichern.rs`). Keine Capability gibt dem Fenster fs-Rechte.
 tauri-plugin-fs = "2"
+# Bytes reisen als Text durch JSON: Bilder zum Panel und Modell, gespeicherte
+# Dateien vom WebView nach Rust (Android kennt keinen rohen IPC-Körper).
+base64 = "0.22"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }
@@ -107,9 +110,6 @@ version = "0.25"
 default-features = false
 features = ["png", "jpeg"]
 
-[target.'cfg(windows)'.dependencies.base64]
-# Das Bild reist als Text durch JSON zum Panel und weiter zum Modell.
-version = "0.22"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
