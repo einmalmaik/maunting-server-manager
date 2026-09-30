@@ -89,7 +89,7 @@ def _sperre_bucket(db: Session, bucket_id: str) -> None:
 
 def _wende_mutationen_an(
     db: Session, bucket_id: str, mutations: Sequence[VaultMutation]
-) -> None:
+) -> list[str]:
     """Schreibt die Mutationen des Clients und vergibt monoton steigende Revisionen.
 
     Die naechste Revision kommt ausschliesslich aus dem Serverstand. Das
@@ -97,9 +97,11 @@ def _wende_mutationen_an(
     frei waehlbares Feld, und mit dem Schema-Maximum (2^53-1) liess sich der
     Zaehler eines Buckets in einem einzigen Request ueber die sichere
     Ganzzahlgrenze von JavaScript heben — danach rechnet jeder Client falsch.
+
+    Liefert die IDs der Mutationen, die an ``expected_revision`` gescheitert sind.
     """
     if not mutations:
-        return
+        return []
 
     _sperre_bucket(db, bucket_id)
 
@@ -115,8 +117,16 @@ def _wende_mutationen_an(
     )
     existing_map = {row.id: row for row in db.scalars(existing_stmt).all()}
 
+    konflikte: list[str] = []
     for m in mutations:
         existing = existing_map.get(m.id)
+        if (
+            m.expected_revision is not None
+            and existing is not None
+            and existing.revision != m.expected_revision
+        ):
+            konflikte.append(m.id)
+            continue
         current_rev += 1
         if existing:
             existing.ciphertext = m.ciphertext
@@ -137,6 +147,7 @@ def _wende_mutationen_an(
             existing_map[m.id] = new_entry
 
     db.commit()
+    return konflikte
 
 
 def _lies_bucket(db: Session, bucket_id: str, since_revision: int) -> VaultSyncResponse:
@@ -224,8 +235,10 @@ def sync_vault(db: Session, user: User, request: VaultSyncRequest) -> VaultSyncR
         db.commit()
 
     # 2. Monotone Mutation & Revisions-Zuweisung (SEC-03)
-    _wende_mutationen_an(db, bucket_id, request.mutations)
-    return _lies_bucket(db, bucket_id, request.since_revision)
+    konflikte = _wende_mutationen_an(db, bucket_id, request.mutations)
+    antwort = _lies_bucket(db, bucket_id, request.since_revision)
+    antwort.conflicts = konflikte
+    return antwort
 
 
 def sync_vault_blind(db: Session, request: VaultBlindSyncRequest) -> VaultSyncResponse:
@@ -281,8 +294,10 @@ def sync_vault_blind(db: Session, request: VaultBlindSyncRequest) -> VaultSyncRe
             raise VaultBucketUnauthorized("Ungültiges Authentifizierungs-Token für diesen Tresor-Bucket.")
 
     # 2. Monotone Mutation & Revisions-Zuweisung (SEC-03)
-    _wende_mutationen_an(db, bucket_id, request.mutations)
-    return _lies_bucket(db, bucket_id, request.since_revision)
+    konflikte = _wende_mutationen_an(db, bucket_id, request.mutations)
+    antwort = _lies_bucket(db, bucket_id, request.since_revision)
+    antwort.conflicts = konflikte
+    return antwort
 
 
 def pruefe_blind_bucket(db: Session, bucket_id: str, auth_token: str) -> None:

@@ -35,6 +35,26 @@ export interface VaultAttachment {
   dataBase64: string
 }
 
+/**
+ * Die Arten von Einträgen, die diese Fassung der App anzeigen und bearbeiten
+ * kann. Ein Eintrag anderer Art stammt von einer neueren App: er bleibt im
+ * Speicher, damit der Sync ihn nicht verliert, erscheint aber nirgends und
+ * wird nicht geschrieben.
+ */
+export const BEKANNTE_KATEGORIEN = ['login', 'authenticator', 'secure_note'] as const
+export type VaultKategorie = (typeof BEKANNTE_KATEGORIEN)[number]
+
+export function istBekannteKategorie(kategorie: string | undefined): boolean {
+  return (BEKANNTE_KATEGORIEN as readonly string[]).includes(kategorie ?? 'login')
+}
+
+/** Aufbau der Nutzlast. Eine neuere App erkennt daran, was eine ältere geschrieben hat. */
+export const VAULT_EINTRAG_FORMAT = 1
+
+/** So lange liegt ein Eintrag im Papierkorb, bevor er endgültig gelöscht wird. */
+export const PAPIERKORB_TAGE = 30
+const PAPIERKORB_MS = PAPIERKORB_TAGE * 24 * 60 * 60 * 1000
+
 export interface VaultItem {
   id: string
   service: string
@@ -43,14 +63,99 @@ export interface VaultItem {
   url?: string
   notes?: string
   totpSecret?: string
-  category?: 'login' | 'authenticator' | 'secure_note'
+  category?: string
   isFavorite?: boolean
   lastUsedAt?: number
   attachments?: VaultAttachment[]
   linkedServiceId?: string
+  /** Gesetzt, solange der Eintrag im Archiv liegt. */
+  archivedAt?: number
+  /** Gesetzt, solange der Eintrag im Papierkorb liegt. */
+  trashedAt?: number
   createdAt: number
   updatedAt: number
   revision: number
+  /**
+   * Felder der Nutzlast, die diese Fassung nicht kennt. Sie gehen beim
+   * Speichern unverändert mit. Bis 09/2026 baute jede Speicherung die
+   * Nutzlast aus einer festen Feldliste neu, und eine ältere App löschte
+   * damit still, was eine neuere hineingeschrieben hatte.
+   */
+  extra?: Record<string, unknown>
+}
+
+const BEKANNTE_FELDER = new Set([
+  'service',
+  'username',
+  'password',
+  'url',
+  'notes',
+  'totpSecret',
+  'category',
+  'isFavorite',
+  'lastUsedAt',
+  'attachments',
+  'linkedServiceId',
+  'archivedAt',
+  'trashedAt',
+  'createdAt',
+  'updatedAt',
+  'format',
+])
+
+function zahlOderNichts(wert: unknown): number | undefined {
+  return typeof wert === 'number' && Number.isFinite(wert) ? wert : undefined
+}
+
+/** Liest einen entschlüsselten Umschlag. Unbekannte Felder landen in `extra`. */
+export function itemAusUmschlag(id: string, revision: number, payload: Record<string, unknown>): VaultItem {
+  const extra: Record<string, unknown> = {}
+  for (const [schluessel, wert] of Object.entries(payload)) {
+    if (!BEKANNTE_FELDER.has(schluessel)) extra[schluessel] = wert
+  }
+  return {
+    id,
+    service: String(payload.service || 'Unbekannt'),
+    username: String(payload.username || ''),
+    password: String(payload.password || ''),
+    url: payload.url ? String(payload.url) : undefined,
+    notes: payload.notes ? String(payload.notes) : undefined,
+    totpSecret: payload.totpSecret ? String(payload.totpSecret) : undefined,
+    category: typeof payload.category === 'string' && payload.category ? payload.category : 'login',
+    isFavorite: !!payload.isFavorite,
+    lastUsedAt: zahlOderNichts(payload.lastUsedAt),
+    attachments: Array.isArray(payload.attachments) ? (payload.attachments as VaultAttachment[]) : undefined,
+    linkedServiceId: payload.linkedServiceId ? String(payload.linkedServiceId) : undefined,
+    archivedAt: zahlOderNichts(payload.archivedAt),
+    trashedAt: zahlOderNichts(payload.trashedAt),
+    createdAt: Number(payload.createdAt || Date.now()),
+    updatedAt: Number(payload.updatedAt || Date.now()),
+    revision,
+    extra: Object.keys(extra).length > 0 ? extra : undefined,
+  }
+}
+
+/** Die Nutzlast eines Eintrags: erst die unbekannten Felder, darüber die bekannten. */
+export function umschlagAusItem(item: VaultItem): Record<string, unknown> {
+  return {
+    ...item.extra,
+    format: VAULT_EINTRAG_FORMAT,
+    service: item.service,
+    username: item.username,
+    password: item.password,
+    url: item.url,
+    notes: item.notes,
+    totpSecret: item.totpSecret,
+    category: item.category,
+    isFavorite: item.isFavorite,
+    lastUsedAt: item.lastUsedAt,
+    attachments: item.attachments,
+    linkedServiceId: item.linkedServiceId,
+    archivedAt: item.archivedAt,
+    trashedAt: item.trashedAt,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  }
 }
 
 interface StoredEncryptedEntry {
@@ -65,17 +170,30 @@ interface StoredEncryptedEntry {
    * nie an den Server.
    */
   stand?: number
+  /**
+   * Die Revision, die der Server dieser Fassung zuletzt gegeben hat. `revision`
+   * zählt nach dem Speichern lokal weiter; das endgültige Löschen braucht aber
+   * die Zahl des Servers, um eine fremde Änderung zu erkennen.
+   */
+  serverRev?: number
+  /** Nur in der Warteschlange: das Löschen gilt nur auf dieser Serverrevision. */
+  expected_revision?: number
+  /** Nur in der Warteschlange: der Cache-Eintrag vor dem Löschen, für den Konfliktfall. */
+  vorher?: StoredEncryptedEntry
+}
+
+interface VaultSyncMutation {
+  id: string
+  ciphertext: string
+  revision: number
+  is_deleted: boolean
+  expected_revision?: number
 }
 
 interface VaultSyncPayload {
   bucket_id: string
   since_revision: number
-  mutations: {
-    id: string
-    ciphertext: string
-    revision: number
-    is_deleted: boolean
-  }[]
+  mutations: VaultSyncMutation[]
 }
 
 interface VaultSyncResponse {
@@ -87,18 +205,18 @@ interface VaultSyncResponse {
     is_deleted: boolean
     updated_at: string
   }[]
+  /**
+   * Mutationen, die der Server nicht geschrieben hat, weil der Eintrag dort
+   * nicht mehr auf `expected_revision` stand. Ältere Server kennen das Feld nicht.
+   */
+  conflicts?: string[]
 }
 
 export interface VaultBlindSyncPayload {
   bucket_id: string
   auth_token: string
   since_revision: number
-  mutations: {
-    id: string
-    ciphertext: string
-    revision: number
-    is_deleted: boolean
-  }[]
+  mutations: VaultSyncMutation[]
 }
 
 /**
@@ -246,23 +364,7 @@ async function pruefeSyncAntwort(
       art: 'eintrag',
       entry,
       stand: standAus(dec),
-      item: {
-        id: entry.id,
-        service: String(dec.service || 'Unbekannt'),
-        username: String(dec.username || ''),
-        password: String(dec.password || ''),
-        url: dec.url ? String(dec.url) : undefined,
-        notes: dec.notes ? String(dec.notes) : undefined,
-        totpSecret: dec.totpSecret ? String(dec.totpSecret) : undefined,
-        category: (dec.category as VaultItem['category']) || 'login',
-        isFavorite: !!dec.isFavorite,
-        lastUsedAt: typeof dec.lastUsedAt === 'number' ? dec.lastUsedAt : undefined,
-        attachments: Array.isArray(dec.attachments) ? (dec.attachments as VaultAttachment[]) : undefined,
-        linkedServiceId: dec.linkedServiceId ? String(dec.linkedServiceId) : undefined,
-        createdAt: Number(dec.createdAt || Date.now()),
-        updatedAt: Number(dec.updatedAt || Date.now()),
-        revision: entry.revision,
-      },
+      item: itemAusUmschlag(entry.id, entry.revision, dec),
     })
   }
 
@@ -488,7 +590,13 @@ interface VaultState {
   setSelectedItemId: (id: string | null) => void
   createQuickPasswordEntry: (serviceName?: string) => Promise<VaultItem>
   saveItem: (item: Partial<VaultItem> & { service: string }) => Promise<void>
+  /** Legt einen Eintrag in den Papierkorb. Nach {@link PAPIERKORB_TAGE} Tagen wird er endgültig gelöscht. */
+  trashItem: (id: string) => Promise<void>
+  restoreItem: (id: string) => Promise<void>
+  setArchived: (id: string, archiviert: boolean) => Promise<void>
+  /** Löscht endgültig: ein Tombstone ersetzt den Eintrag, auch auf allen anderen Geräten. */
   deleteItem: (id: string) => Promise<void>
+  emptyTrash: () => Promise<void>
   toggleFavorite: (id: string) => Promise<void>
   markUsed: (id: string) => Promise<void>
   syncWithServer: () => Promise<void>
@@ -839,19 +947,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
         if (blob.is_deleted || blob.id === 'vault-canary') continue
         try {
           const payload = await decryptVaultEntry(blob.ciphertext, userKey, blob.id)
-          decryptedItems.push({
-            id: blob.id,
-            service: String(payload.service || 'Unbekannt'),
-            username: String(payload.username || ''),
-            password: String(payload.password || ''),
-            url: payload.url ? String(payload.url) : undefined,
-            notes: payload.notes ? String(payload.notes) : undefined,
-            totpSecret: payload.totpSecret ? String(payload.totpSecret) : undefined,
-            category: (payload.category as VaultItem['category']) || 'login',
-            createdAt: Number(payload.createdAt || Date.now()),
-            updatedAt: Number(payload.updatedAt || Date.now()),
-            revision: blob.revision,
-          })
+          if (payload?.[VAULT_TOMBSTONE_MARKER] === true) continue
+          decryptedItems.push(itemAusUmschlag(blob.id, blob.revision, payload))
         } catch {
           // Ignorieren falls nicht entschlüsselbar
         }
@@ -1016,23 +1113,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
         if (blob.is_deleted || blob.id === 'vault-canary') continue
         try {
           const payload = await decryptVaultEntry(blob.ciphertext, userKey, blob.id)
-          decryptedItems.push({
-            id: blob.id,
-            service: String(payload.service || 'Unbekannt'),
-            username: String(payload.username || ''),
-            password: String(payload.password || ''),
-            url: payload.url ? String(payload.url) : undefined,
-            notes: payload.notes ? String(payload.notes) : undefined,
-            totpSecret: payload.totpSecret ? String(payload.totpSecret) : undefined,
-            category: (payload.category as VaultItem['category']) || 'login',
-            isFavorite: !!payload.isFavorite,
-            lastUsedAt: typeof payload.lastUsedAt === 'number' ? payload.lastUsedAt : undefined,
-            attachments: Array.isArray(payload.attachments) ? (payload.attachments as VaultAttachment[]) : undefined,
-            linkedServiceId: payload.linkedServiceId ? String(payload.linkedServiceId) : undefined,
-            createdAt: Number(payload.createdAt || Date.now()),
-            updatedAt: Number(payload.updatedAt || Date.now()),
-            revision: blob.revision,
-          })
+          if (payload?.[VAULT_TOMBSTONE_MARKER] === true) continue
+          decryptedItems.push(itemAusUmschlag(blob.id, blob.revision, payload))
         } catch (err) {
           console.warn(`Gecachter Tresor-Eintrag ${blob.id} konnte nicht entschlüsselt werden (übersprungen):`, err)
         }
@@ -1125,18 +1207,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
     }
 
     // Verschlüsseln
-    const ciphertext = await encryptVaultEntry(
-      {
-        service: newItem.service,
-        username: newItem.username,
-        password: newItem.password,
-        category: newItem.category,
-        createdAt: newItem.createdAt,
-        updatedAt: newItem.updatedAt,
-      },
-      userKey,
-      newId,
-    )
+    const ciphertext = await encryptVaultEntry(umschlagAusItem(newItem), userKey, newId)
 
     // In Cache und Warteschlange ablegen
     const cachedBlobs = getStoredBlobs(bucketId)
@@ -1182,8 +1253,17 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
     const id = itemData.id || window.crypto.randomUUID()
     const existing = items.find((i) => i.id === id)
+    // Was diese Fassung nicht kennt, schreibt sie nicht: sie würde es nur
+    // unvollständig verstehen und beim Speichern verfälschen.
+    if (!istBekannteKategorie(existing?.category) || !istBekannteKategorie(itemData.category ?? existing?.category)) {
+      throw new Error(i18n.t('mss.vault.errors.unbekannteArt'))
+    }
     const revision = (existing?.revision || 0) + 1
     const now = naechsterStand(existing?.updatedAt)
+    // Ein ausdrücklich mitgegebenes `undefined` hebt Archiv oder Papierkorb auf;
+    // fehlt das Feld ganz (Bearbeiten im Formular), bleibt der bisherige Wert.
+    const uebernimm = (feld: 'archivedAt' | 'trashedAt'): number | undefined =>
+      feld in itemData ? itemData[feld] : existing?.[feld]
 
     const updatedItem: VaultItem = {
       id,
@@ -1198,33 +1278,21 @@ export const useVaultStore = create<VaultState>((set, get) => {
       lastUsedAt: itemData.lastUsedAt !== undefined ? itemData.lastUsedAt : existing?.lastUsedAt,
       attachments: itemData.attachments !== undefined ? itemData.attachments : existing?.attachments,
       linkedServiceId: itemData.linkedServiceId !== undefined ? itemData.linkedServiceId : existing?.linkedServiceId,
+      archivedAt: uebernimm('archivedAt'),
+      trashedAt: uebernimm('trashedAt'),
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       revision,
+      extra: existing?.extra,
     }
 
-    const payload: Record<string, unknown> = {
-      service: updatedItem.service,
-      username: updatedItem.username,
-      password: updatedItem.password,
-      url: updatedItem.url,
-      notes: updatedItem.notes,
-      totpSecret: updatedItem.totpSecret,
-      category: updatedItem.category,
-      isFavorite: updatedItem.isFavorite,
-      lastUsedAt: updatedItem.lastUsedAt,
-      attachments: updatedItem.attachments,
-      linkedServiceId: updatedItem.linkedServiceId,
-      createdAt: updatedItem.createdAt,
-      updatedAt: updatedItem.updatedAt,
-    }
-
-    const ciphertext = await encryptVaultEntry(payload, userKey, id)
+    const ciphertext = await encryptVaultEntry(umschlagAusItem(updatedItem), userKey, id)
 
     // Lokalen Cache aktualisieren
     let cachedBlobs = getStoredBlobs(bucketId)
+    const serverRev = cachedBlobs.find((b) => b.id === id)?.serverRev
     cachedBlobs = cachedBlobs.filter((b) => b.id !== id)
-    cachedBlobs.push({ id, ciphertext, revision, is_deleted: false, stand: now })
+    cachedBlobs.push({ id, ciphertext, revision, is_deleted: false, stand: now, serverRev })
     localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
 
     // Pending Queue aktualisieren
@@ -1267,13 +1335,24 @@ export const useVaultStore = create<VaultState>((set, get) => {
     // Sync eine zurückgespielte alte Fassung des Eintrags für einen neuen und
     // holte das gelöschte Passwort zurück.
     let cachedBlobs = getStoredBlobs(bucketId)
+    const vorher = cachedBlobs.find((b) => b.id === id)
     cachedBlobs = cachedBlobs.filter((b) => b.id !== id)
-    cachedBlobs.push({ id, ciphertext: tombstone, revision, is_deleted: true, stand })
+    cachedBlobs.push({ id, ciphertext: tombstone, revision, is_deleted: true, stand, serverRev: vorher?.serverRev })
     localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
 
-    // Tombstone in Pending Queue
+    // Tombstone in Pending Queue. Gelöscht wird nur die Fassung, die dieses
+    // Gerät zuletzt vom Server kannte: hat ein anderes Gerät den Eintrag
+    // inzwischen wiederhergestellt oder geändert, lehnt der Server ab, und die
+    // Änderung des anderen Geräts bleibt.
     const pendingQueue = getPendingQueue(bucketId).filter((b) => b.id !== id)
-    pendingQueue.push({ id, ciphertext: tombstone, revision, is_deleted: true })
+    pendingQueue.push({
+      id,
+      ciphertext: tombstone,
+      revision,
+      is_deleted: true,
+      expected_revision: vorher?.serverRev,
+      vorher: vorher ? { ...vorher, vorher: undefined } : undefined,
+    })
     localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(pendingQueue))
 
     if (!sitzungOffen(userKey, bucketId)) return
@@ -1284,6 +1363,34 @@ export const useVaultStore = create<VaultState>((set, get) => {
     })
 
     void get().syncWithServer()
+  },
+
+  trashItem: async (id: string) => {
+    const { items, saveItem } = get()
+    const item = items.find((i) => i.id === id)
+    if (!item || item.trashedAt) return
+    await saveItem({ ...item, trashedAt: Date.now() })
+  },
+
+  restoreItem: async (id: string) => {
+    const { items, saveItem } = get()
+    const item = items.find((i) => i.id === id)
+    if (!item || !item.trashedAt) return
+    await saveItem({ ...item, trashedAt: undefined })
+  },
+
+  setArchived: async (id: string, archiviert: boolean) => {
+    const { items, saveItem } = get()
+    const item = items.find((i) => i.id === id)
+    if (!item || !!item.archivedAt === archiviert) return
+    await saveItem({ ...item, archivedAt: archiviert ? Date.now() : undefined })
+  },
+
+  emptyTrash: async () => {
+    const imPapierkorb = get().items.filter((i) => i.trashedAt && istBekannteKategorie(i.category))
+    for (const item of imPapierkorb) {
+      await get().deleteItem(item.id)
+    }
   },
 
   toggleFavorite: async (id: string) => {
@@ -1352,6 +1459,11 @@ export const useVaultStore = create<VaultState>((set, get) => {
       }
     }
 
+    // Erst wenn die Warteschlange leer ist, kennt dieses Gerät den Stand des
+    // Servers. Nur dann darf der Papierkorb geleert werden: ein Gerät mit
+    // veraltetem Stand löschte sonst, was ein anderes gerade wiederhergestellt hat.
+    let abgeglichen = false
+
     try {
       // Die Warteschlange geht in Paketen, die der Server annimmt. Was
       // während einer Runde dazukommt, geht in der nächsten mit: der
@@ -1368,6 +1480,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
             ciphertext: m.ciphertext,
             revision: m.revision,
             is_deleted: m.is_deleted,
+            ...(m.expected_revision !== undefined ? { expected_revision: m.expected_revision } : {}),
           })),
           sinceRevision,
         )
@@ -1386,6 +1499,21 @@ export const useVaultStore = create<VaultState>((set, get) => {
         // überschrieben.
         let cachedBlobs = getStoredBlobs(bucketId)
         let currentItems = [...get().items]
+
+        // Abgelehnte Löschungen: ein anderes Gerät hat den Eintrag inzwischen
+        // geändert. Der eigene Tombstone kommt aus dem Cache, die Fassung von
+        // davor zurück, damit die neuere des anderen Geräts gegen sie
+        // verglichen wird. Behaupten kann der Server damit nur, was dieses
+        // Gerät selbst vorher hatte.
+        for (const konfliktId of data.conflicts ?? []) {
+          const gesendet = paket.find((m) => m.id === konfliktId && m.vorher)
+          if (!gesendet?.vorher) continue
+          const lokal = cachedBlobs.find((b) => b.id === konfliktId)
+          if (lokal?.ciphertext !== gesendet.ciphertext) continue
+          cachedBlobs = cachedBlobs.filter((b) => b.id !== konfliktId)
+          cachedBlobs.push(gesendet.vorher)
+          console.warn(`Tresor-Sync: Löschung von ${konfliktId} abgelehnt, ein anderes Gerät hat ihn geändert.`)
+        }
 
         for (const befund of befunde) {
           if (befund.art === 'canary') {
@@ -1414,13 +1542,14 @@ export const useVaultStore = create<VaultState>((set, get) => {
           }
 
           cachedBlobs = cachedBlobs.filter((b) => b.id !== entry.id)
+          const serverRev = entry.revision
           if (befund.art === 'grab') {
-            cachedBlobs.push({ id: entry.id, ciphertext: entry.ciphertext, revision: entry.revision, is_deleted: true, stand })
+            cachedBlobs.push({ id: entry.id, ciphertext: entry.ciphertext, revision: entry.revision, is_deleted: true, stand, serverRev })
             currentItems = currentItems.filter((i) => i.id !== entry.id)
             continue
           }
 
-          cachedBlobs.push({ id: entry.id, ciphertext: entry.ciphertext, revision: entry.revision, is_deleted: false, stand })
+          cachedBlobs.push({ id: entry.id, ciphertext: entry.ciphertext, revision: entry.revision, is_deleted: false, stand, serverRev })
           const idx = currentItems.findIndex((i) => i.id === entry.id)
           if (idx >= 0) {
             currentItems[idx] = befund.item
@@ -1445,7 +1574,10 @@ export const useVaultStore = create<VaultState>((set, get) => {
         localStorage.setItem(`${VAULT_REVISION_PREFIX}${bucketId}`, String(data.server_revision))
         set({ items: currentItems })
 
-        if (offen.length === 0) break
+        if (offen.length === 0) {
+          abgeglichen = true
+          break
+        }
       }
 
       // Falls lokal noch kein Canary existiert (z. B. Multi-Device Login), jetzt absichern
@@ -1470,6 +1602,17 @@ export const useVaultStore = create<VaultState>((set, get) => {
         syncStatus: 'synced',
         lastSyncTime: Date.now(),
       })
+
+      if (abgeglichen) {
+        const grenze = Date.now() - PAPIERKORB_MS
+        const abgelaufen = get().items.filter(
+          (i) => i.trashedAt !== undefined && i.trashedAt < grenze && istBekannteKategorie(i.category),
+        )
+        for (const item of abgelaufen) {
+          if (!sitzungOffen(userKey, bucketId)) return
+          await get().deleteItem(item.id)
+        }
+      }
     } catch (err: unknown) {
       // Der Status gehört der Sitzung, die ihn gesetzt hat.
       if (!sitzungOffen(userKey, bucketId)) return

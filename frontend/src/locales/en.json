@@ -6040,8 +6040,32 @@
         "invalidBase32Char": "Invalid Base32 character '{{char}}' at position {{pos}}",
         "invalidTotpSecret": "Invalid Base32 TOTP secret",
         "emptyTotpSecret": "Empty Base32 TOTP secret",
-        "invalidEnvelopeFormat": "Invalid envelope format: expected {{prefix}}"
-      }
+        "invalidEnvelopeFormat": "Invalid envelope format: expected {{prefix}}",
+        "unbekannteArt": "A newer version of the app created this entry. Update the app to edit it."
+      },
+      "ansicht": {
+        "tresor": "Vault",
+        "archiv": "Archive",
+        "papierkorb": "Trash"
+      },
+      "archivieren": "Archive",
+      "ausArchiv": "Move out of archive",
+      "archiviert": "Moved to the archive.",
+      "ausArchivGeholt": "Back in the vault.",
+      "archivLeer": "The archive is empty.",
+      "archivHinweis": "Archived entries no longer show up in the list, but they are kept.",
+      "inPapierkorb": "Move to trash",
+      "inPapierkorbGelegt": "Moved to the trash.",
+      "wiederherstellen": "Restore",
+      "wiederhergestellt": "Restored.",
+      "endgueltigLoeschen": "Delete for good",
+      "papierkorbLeer": "The trash is empty.",
+      "papierkorbHinweis": "After {{tage}} days an entry here is deleted for good, on all devices.",
+      "papierkorbLeeren": "Empty trash",
+      "papierkorbLeerenFrage": "Every entry in the trash will be deleted for good, on your other devices too.",
+      "papierkorbGeleert": "Trash emptied.",
+      "nochTage_one": "{{count}} day left",
+      "nochTage_other": "{{count}} days left"
     },
     "aktion": {
       "freigabeErforderlich": "Confirmation required",

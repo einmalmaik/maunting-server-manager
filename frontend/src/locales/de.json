@@ -6040,8 +6040,32 @@
         "invalidBase32Char": "Ungültiges Base32-Zeichen '{{char}}' an Position {{pos}}",
         "invalidTotpSecret": "Ungültiges Base32 TOTP-Secret",
         "emptyTotpSecret": "Leeres Base32 TOTP-Secret",
-        "invalidEnvelopeFormat": "Ungültiges Umschlag-Format: erwartet {{prefix}}"
-      }
+        "invalidEnvelopeFormat": "Ungültiges Umschlag-Format: erwartet {{prefix}}",
+        "unbekannteArt": "Diesen Eintrag hat eine neuere Version der App angelegt. Aktualisiere die App, um ihn zu bearbeiten."
+      },
+      "ansicht": {
+        "tresor": "Tresor",
+        "archiv": "Archiv",
+        "papierkorb": "Papierkorb"
+      },
+      "archivieren": "Archivieren",
+      "ausArchiv": "Aus dem Archiv holen",
+      "archiviert": "Ins Archiv gelegt.",
+      "ausArchivGeholt": "Wieder im Tresor.",
+      "archivLeer": "Im Archiv liegt nichts.",
+      "archivHinweis": "Archivierte Einträge erscheinen nicht mehr in der Liste und bleiben trotzdem erhalten.",
+      "inPapierkorb": "In den Papierkorb",
+      "inPapierkorbGelegt": "In den Papierkorb gelegt.",
+      "wiederherstellen": "Wiederherstellen",
+      "wiederhergestellt": "Wiederhergestellt.",
+      "endgueltigLoeschen": "Endgültig löschen",
+      "papierkorbLeer": "Der Papierkorb ist leer.",
+      "papierkorbHinweis": "Nach {{tage}} Tagen wird ein Eintrag hier endgültig gelöscht, auf allen Geräten.",
+      "papierkorbLeeren": "Papierkorb leeren",
+      "papierkorbLeerenFrage": "Alle Einträge im Papierkorb werden unwiderruflich gelöscht, auch auf deinen anderen Geräten.",
+      "papierkorbGeleert": "Papierkorb geleert.",
+      "nochTage_one": "noch {{count}} Tag",
+      "nochTage_other": "noch {{count}} Tage"
     },
     "aktion": {
       "freigabeErforderlich": "Bestätigung erforderlich",

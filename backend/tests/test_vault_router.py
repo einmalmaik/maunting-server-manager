@@ -1076,3 +1076,89 @@ def test_vault_reset_social_konto_ohne_2fa_braucht_nur_das_wort(client, test_db)
     assert client.post("/api/vault/reset", json={}).status_code == 400
     assert client.post("/api/vault/reset", json={"confirmation": "delete"}).status_code == 200
     assert client.get("/api/vault/salt").json()["has_vault"] is False
+
+
+def test_endgueltiges_loeschen_nur_auf_der_erwarteten_revision(client):
+    """Papierkorb (09/2026): endgueltig geloescht wird nur die Fassung, die das
+    Geraet kannte. Hat ein anderes Geraet den Eintrag inzwischen geaendert,
+    bleibt dessen Fassung stehen und die Antwort nennt den Konflikt."""
+    bucket = "c" * 64
+    anlegen = client.post(
+        "/api/vault/sync",
+        json={
+            "bucket_id": bucket,
+            "since_revision": 0,
+            "mutations": [{"id": "e1", "ciphertext": "sv-vault-v1:papierkorb", "revision": 1}],
+        },
+    )
+    assert anlegen.status_code == 200
+    rev_papierkorb = anlegen.json()["entries"][0]["revision"]
+
+    # Anderes Geraet holt den Eintrag aus dem Papierkorb.
+    wieder = client.post(
+        "/api/vault/sync",
+        json={
+            "bucket_id": bucket,
+            "since_revision": rev_papierkorb,
+            "mutations": [{"id": "e1", "ciphertext": "sv-vault-v1:wiederhergestellt", "revision": 2}],
+        },
+    )
+    rev_wieder = wieder.json()["entries"][0]["revision"]
+    assert rev_wieder > rev_papierkorb
+
+    # Erstes Geraet loescht auf Grundlage seines alten Stands: abgelehnt.
+    veraltet = client.post(
+        "/api/vault/sync",
+        json={
+            "bucket_id": bucket,
+            "since_revision": rev_papierkorb,
+            "mutations": [
+                {
+                    "id": "e1",
+                    "ciphertext": "sv-vault-v1:grab",
+                    "revision": 3,
+                    "is_deleted": True,
+                    "expected_revision": rev_papierkorb,
+                }
+            ],
+        },
+    )
+    assert veraltet.status_code == 200
+    daten = veraltet.json()
+    assert daten["conflicts"] == ["e1"]
+    assert [(e["id"], e["ciphertext"], e["is_deleted"]) for e in daten["entries"]] == [
+        ("e1", "sv-vault-v1:wiederhergestellt", False)
+    ]
+
+    # Mit der richtigen Revision geht es durch.
+    aktuell = client.post(
+        "/api/vault/sync",
+        json={
+            "bucket_id": bucket,
+            "since_revision": rev_wieder,
+            "mutations": [
+                {
+                    "id": "e1",
+                    "ciphertext": "sv-vault-v1:grab",
+                    "revision": 3,
+                    "is_deleted": True,
+                    "expected_revision": rev_wieder,
+                }
+            ],
+        },
+    )
+    daten = aktuell.json()
+    assert daten["conflicts"] == []
+    assert daten["entries"][0]["is_deleted"] is True
+    assert daten["entries"][0]["revision"] > rev_wieder
+
+
+def test_mutation_ohne_erwartete_revision_schreibt_wie_bisher(client):
+    bucket = "d" * 64
+    for text in ("sv-vault-v1:eins", "sv-vault-v1:zwei"):
+        antwort = client.post(
+            "/api/vault/sync",
+            json={"bucket_id": bucket, "since_revision": 0, "mutations": [{"id": "e1", "ciphertext": text, "revision": 1}]},
+        )
+        assert antwort.json()["conflicts"] == []
+    assert antwort.json()["entries"][0]["ciphertext"] == "sv-vault-v1:zwei"

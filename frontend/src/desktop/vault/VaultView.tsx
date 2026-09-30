@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
+  Archive,
+  ArchiveRestore,
   Check,
   Clock,
   Copy,
@@ -16,6 +18,7 @@ import {
   Plus,
   QrCode,
   RefreshCw,
+  RotateCcw,
   Search,
   Shield,
   ShieldAlert,
@@ -27,6 +30,7 @@ import {
   X,
 } from 'lucide-react'
 import { Button, Checkbox } from '@/Singra/UI'
+import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { getBrandIcon } from './brandCatalog'
@@ -36,8 +40,23 @@ import { createDebouncedLeakChecker, type LeakCheckResult } from './leakChecker'
 import { QrScannerModal } from './QrScannerModal'
 import { TresorZuruecksetzen } from './TresorZuruecksetzen'
 import { setzeTresorSchutz } from '../tauri'
-import { useVaultStore, getLocalVaultSalt, type VaultItem } from './vaultStore'
+import {
+  PAPIERKORB_TAGE,
+  getLocalVaultSalt,
+  istBekannteKategorie,
+  useVaultStore,
+  type VaultItem,
+} from './vaultStore'
 import { DisBadge } from '@/components/DisBadge'
+
+type Ansicht = 'tresor' | 'archiv' | 'papierkorb'
+
+const TAG_MS = 24 * 60 * 60 * 1000
+
+/** Ganze Tage, bis ein Eintrag im Papierkorb endgültig gelöscht wird (mindestens 0). */
+export function restTageImPapierkorb(trashedAt: number, jetzt = Date.now()): number {
+  return Math.max(0, Math.ceil((trashedAt + PAPIERKORB_TAGE * TAG_MS - jetzt) / TAG_MS))
+}
 
 export function VaultView() {
   const { t } = useTranslation()
@@ -58,7 +77,11 @@ export function VaultView() {
     lock,
     setSearchQuery,
     saveItem,
+    trashItem,
+    restoreItem,
+    setArchived,
     deleteItem,
+    emptyTrash,
     toggleFavorite,
     markUsed,
     syncWithServer,
@@ -98,6 +121,8 @@ export function VaultView() {
 
   // Ersteinrichtung
   const [skipHintSetup, setSkipHintSetup] = useState(false)
+
+  const [ansicht, setAnsicht] = useState<Ansicht>('tresor')
 
   // Nachträglicher Hinweis-Modal & Banner
   const [isHintModalOpen, setIsHintModalOpen] = useState(false)
@@ -268,22 +293,70 @@ export function VaultView() {
     }
   }
 
-  // Löschen eines Eintrags
+  // Löschen legt in den Papierkorb; das lässt sich zurücknehmen und fragt deshalb nicht.
+  const handleTrashItem = async (item: VaultItem) => {
+    try {
+      await trashItem(item.id)
+      if (isModalOpen && editingItemId === item.id) {
+        setIsModalOpen(false)
+      }
+      toast.success(t('mss.vault.inPapierkorbGelegt'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('mss.vault.loeschenFehlgeschlagen'))
+    }
+  }
+
+  const handleArchiv = async (item: VaultItem, archiviert: boolean) => {
+    try {
+      await setArchived(item.id, archiviert)
+      if (isModalOpen && editingItemId === item.id) {
+        setIsModalOpen(false)
+      }
+      toast.success(t(archiviert ? 'mss.vault.archiviert' : 'mss.vault.ausArchivGeholt'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('mss.vault.speichernFehlgeschlagen'))
+    }
+  }
+
+  const handleRestoreItem = async (item: VaultItem) => {
+    try {
+      await restoreItem(item.id)
+      toast.success(t('mss.vault.wiederhergestellt'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('mss.vault.speichernFehlgeschlagen'))
+    }
+  }
+
+  // Endgültig löschen gibt es nur im Papierkorb, und nur nach Rückfrage.
   const handleDeleteItem = async (item: VaultItem) => {
     const ok = await confirm({
       title: t('mss.vault.loeschenTitel'),
       message: t('mss.vault.loeschenFrage', { name: item.service }),
-      confirmText: t('common.delete'),
+      confirmText: t('mss.vault.endgueltigLoeschen'),
       cancelText: t('common.cancel'),
       danger: true,
     })
     if (!ok) return
     try {
       await deleteItem(item.id)
-      if (isModalOpen && editingItemId === item.id) {
-        setIsModalOpen(false)
-      }
       toast.success(t('mss.vault.geloescht'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('mss.vault.loeschenFehlgeschlagen'))
+    }
+  }
+
+  const handleEmptyTrash = async () => {
+    const ok = await confirm({
+      title: t('mss.vault.papierkorbLeeren'),
+      message: t('mss.vault.papierkorbLeerenFrage'),
+      confirmText: t('mss.vault.papierkorbLeeren'),
+      cancelText: t('common.cancel'),
+      danger: true,
+    })
+    if (!ok) return
+    try {
+      await emptyTrash()
+      toast.success(t('mss.vault.papierkorbGeleert'))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('mss.vault.loeschenFehlgeschlagen'))
     }
@@ -317,40 +390,73 @@ export function VaultView() {
     }
   }
 
+  // Einträge unbekannter Art (von einer neueren App) bleiben unsichtbar.
+  const ansichtsItems = useMemo(() => {
+    const bekannt = items.filter((item) => istBekannteKategorie(item.category))
+    if (ansicht === 'papierkorb') {
+      return bekannt.filter((item) => item.trashedAt).sort((a, b) => (b.trashedAt || 0) - (a.trashedAt || 0))
+    }
+    if (ansicht === 'archiv') {
+      return bekannt
+        .filter((item) => !item.trashedAt && item.archivedAt)
+        .sort((a, b) => a.service.localeCompare(b.service))
+    }
+    return bekannt.filter((item) => !item.trashedAt && !item.archivedAt)
+  }, [items, ansicht])
+
+  const anzahlImPapierkorb = useMemo(
+    () => items.filter((item) => item.trashedAt && istBekannteKategorie(item.category)).length,
+    [items],
+  )
+
+  const ansichten: TabDef<Ansicht>[] = [
+    { id: 'tresor', labelKey: 'mss.vault.ansicht.tresor', icon: Shield },
+    { id: 'archiv', labelKey: 'mss.vault.ansicht.archiv', icon: Archive },
+    {
+      id: 'papierkorb',
+      labelKey: 'mss.vault.ansicht.papierkorb',
+      icon: Trash2,
+      badge: anzahlImPapierkorb > 0 ? anzahlImPapierkorb : undefined,
+    },
+  ]
+
   // Filterung nach Suchbegriff
   const searchedItems = useMemo(() => {
-    if (!searchQuery.trim()) return items
+    if (!searchQuery.trim()) return ansichtsItems
     const q = searchQuery.toLowerCase()
-    return items.filter(
+    return ansichtsItems.filter(
       (item) =>
         item.service.toLowerCase().includes(q) ||
         item.username.toLowerCase().includes(q) ||
         (item.url && item.url.toLowerCase().includes(q)) ||
         (item.notes && item.notes.toLowerCase().includes(q))
     )
-  }, [items, searchQuery])
+  }, [ansichtsItems, searchQuery])
 
-  // 1. Favoriten
+  // 1. Favoriten (nur in der Tresor-Ansicht; Archiv und Papierkorb sind schlichte Listen)
   const favoriteItems = useMemo(() => {
+    if (ansicht !== 'tresor') return []
     return searchedItems.filter((item) => item.isFavorite)
-  }, [searchedItems])
+  }, [searchedItems, ansicht])
 
   // 2. Zuletzt verwendet
   const recentItems = useMemo(() => {
+    if (ansicht !== 'tresor') return []
     return searchedItems
       .filter((item) => !item.isFavorite && typeof item.lastUsedAt === 'number' && item.lastUsedAt > 0)
       .sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0))
       .slice(0, 5)
-  }, [searchedItems])
+  }, [searchedItems, ansicht])
 
   // 3. Alle anderen Einträge
   const otherItems = useMemo(() => {
+    if (ansicht !== 'tresor') return searchedItems
     const favoriteIds = new Set(favoriteItems.map((i) => i.id))
     const recentIds = new Set(recentItems.map((i) => i.id))
     return searchedItems
       .filter((item) => !favoriteIds.has(item.id) && !recentIds.has(item.id))
       .sort((a, b) => a.service.localeCompare(b.service))
-  }, [searchedItems, favoriteItems, recentItems])
+  }, [searchedItems, favoriteItems, recentItems, ansicht])
 
   const ModalBrandIcon = getBrandIcon(modalService, modalUrl)
 
@@ -793,8 +899,47 @@ export function VaultView() {
             )
           )}
 
-          {/* Favorit & Edit */}
+          {ansicht === 'papierkorb' ? (
+            <div className="flex items-center gap-1 border-l border-outline-variant/20 pl-1.5">
+              {item.trashedAt && (
+                <span className="text-label-sm text-on-surface-variant">
+                  {t('mss.vault.nochTage', { count: restTageImPapierkorb(item.trashedAt) })}
+                </span>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleRestoreItem(item)}
+                className="text-xs px-2 py-1 text-primary"
+              >
+                <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                {t('mss.vault.wiederherstellen')}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleDeleteItem(item)}
+                className="text-xs px-2 py-1 text-status-destructive hover:bg-status-destructive/10"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1" />
+                {t('mss.vault.endgueltigLoeschen')}
+              </Button>
+            </div>
+          ) : (
+          /* Favorit & Edit */
           <div className="flex items-center gap-0.5 border-l border-outline-variant/20 pl-1.5">
+            {ansicht === 'archiv' && (
+              <button
+                type="button"
+                onClick={() => void handleArchiv(item, false)}
+                aria-label={t('mss.vault.ausArchiv')}
+                className="p-1 rounded text-on-surface-variant hover:text-primary transition-colors"
+              >
+                <ArchiveRestore className="h-3.5 w-3.5" />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => void toggleFavorite(item.id)}
@@ -815,6 +960,7 @@ export function VaultView() {
               <Edit2 className="h-3.5 w-3.5" />
             </button>
           </div>
+          )}
         </div>
       </div>
     )
@@ -882,9 +1028,10 @@ export function VaultView() {
         </div>
       </div>
 
-      {/* SUCH-LEISTE */}
-      <div className="px-4 py-2 border-b border-outline-variant/15 bg-surface-container-low/40">
-        <div className="relative max-w-md">
+      {/* SUCH-LEISTE UND ANSICHTEN */}
+      <div className="px-4 py-2 border-b border-outline-variant/15 bg-surface-container-low/40 flex flex-wrap items-center gap-2">
+        <TabBar tabs={ansichten} active={ansicht} onChange={setAnsicht} embedded ariaLabel={t('mss.vault.titelManager')} />
+        <div className="relative max-w-md flex-1 min-w-[12rem]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-on-surface-variant" />
           <input
             type="text"
@@ -968,7 +1115,31 @@ export function VaultView() {
 
       {/* LISTE / TABELLE */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
-        {items.length === 0 ? (
+        {ansicht === 'papierkorb' && ansichtsItems.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-surface-container-low border border-outline-variant/20 px-3 py-2">
+            <span className="text-label-sm text-on-surface-variant">
+              {t('mss.vault.papierkorbHinweis', { tage: PAPIERKORB_TAGE })}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void handleEmptyTrash()}
+              className="text-xs px-2 py-1 text-status-destructive hover:bg-status-destructive/10"
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-1" />
+              {t('mss.vault.papierkorbLeeren')}
+            </Button>
+          </div>
+        )}
+        {ansicht === 'archiv' && ansichtsItems.length > 0 && (
+          <p className="text-label-sm text-on-surface-variant">{t('mss.vault.archivHinweis')}</p>
+        )}
+        {ansicht !== 'tresor' && ansichtsItems.length === 0 ? (
+          <div className="p-8 text-center text-xs text-on-surface-variant">
+            {t(ansicht === 'archiv' ? 'mss.vault.archivLeer' : 'mss.vault.papierkorbLeer')}
+          </div>
+        ) : ansichtsItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center p-8 text-center text-on-surface-variant max-w-xs mx-auto">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-container border border-outline-variant/30 mb-3 text-on-surface-variant/60">
               <KeyRound className="h-6 w-6" />
@@ -1179,18 +1350,41 @@ export function VaultView() {
               {/* Aktionen */}
               <div className="pt-2 flex items-center justify-between">
                 {editingItemId ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => {
-                      const item = items.find((i) => i.id === editingItemId)
-                      if (item) void handleDeleteItem(item)
-                    }}
-                    className="text-status-destructive hover:bg-status-destructive/10 text-xs px-2 py-1"
-                  >
-                    <Trash2 className="h-3.5 w-3.5 mr-1" />
-                    {t('common.delete')}
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        const item = items.find((i) => i.id === editingItemId)
+                        if (item) void handleTrashItem(item)
+                      }}
+                      className="text-status-destructive hover:bg-status-destructive/10 text-xs px-2 py-1"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 mr-1" />
+                      {t('mss.vault.inPapierkorb')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        const item = items.find((i) => i.id === editingItemId)
+                        if (item) void handleArchiv(item, !item.archivedAt)
+                      }}
+                      className="text-on-surface-variant text-xs px-2 py-1"
+                    >
+                      {items.find((i) => i.id === editingItemId)?.archivedAt ? (
+                        <>
+                          <ArchiveRestore className="h-3.5 w-3.5 mr-1" />
+                          {t('mss.vault.ausArchiv')}
+                        </>
+                      ) : (
+                        <>
+                          <Archive className="h-3.5 w-3.5 mr-1" />
+                          {t('mss.vault.archivieren')}
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 ) : (
                   <div />
                 )}

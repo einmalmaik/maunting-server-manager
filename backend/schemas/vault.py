@@ -26,6 +26,11 @@ class VaultMutation(BaseModel):
     ciphertext: str = Field(..., max_length=1048576, description="Vollstaendig verschluesselter AES-GCM Ciphertext-Envelope (sv-vault-v1:)")
     revision: int = Field(..., ge=0, description="Lokale Revisionsnummer")
     is_deleted: bool = Field(default=False, description="Tombstone-Flag fuer Loeschungen")
+    # Nur fuer endgueltiges Loeschen: geschrieben wird nur, wenn der Eintrag
+    # noch auf dieser Revision steht. Sonst hat ein anderes Geraet ihn
+    # inzwischen geaendert (etwa aus dem Papierkorb geholt), und dessen
+    # Fassung bleibt. Die Reihenfolge entscheidet weiter der Stand im Umschlag.
+    expected_revision: Optional[int] = Field(default=None, ge=0, le=9007199254740991)
 
 
 def _pruefe_gesamtgroesse(mutations: List["VaultMutation"]) -> List["VaultMutation"]:
@@ -124,6 +129,8 @@ class VaultEntryOut(BaseModel):
 class VaultSyncResponse(BaseModel):
     server_revision: int
     entries: List[VaultEntryOut]
+    # IDs der Mutationen, die wegen `expected_revision` nicht geschrieben wurden.
+    conflicts: List[str] = Field(default_factory=list)
 
 
 class VaultHintSetRequest(BaseModel):
