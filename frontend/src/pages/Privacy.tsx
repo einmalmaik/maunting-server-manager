@@ -17,8 +17,8 @@ export function Privacy() {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-09-29',
-    version: '3.12',
+    lastUpdated: '2026-09-30',
+    version: '3.13',
     meta: 'Maunting Studios — Sicherheit braucht Vertrauen',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
@@ -89,6 +89,19 @@ export function Privacy() {
           // Moderationshandlung hinterlaesst einen Eintrag. Wer anderen das
           // Wort nehmen kann, muss dafuer nachvollziehbar sein.
           t('privacyPolicy.sections.messenger.items.callModeration'),
+        ],
+      },
+      {
+        // Tresor-Cloud (3.13): was die Instanz trotz Verschluesselung sieht,
+        // steht hier ausdruecklich, ebenso die Kehrseite des Master-Passworts.
+        heading: t('privacyPolicy.sections.vault.heading'),
+        body: t('privacyPolicy.sections.vault.body'),
+        items: [
+          t('privacyPolicy.sections.vault.items.eintraege'),
+          t('privacyPolicy.sections.vault.items.dateien'),
+          t('privacyPolicy.sections.vault.items.speicher'),
+          t('privacyPolicy.sections.vault.items.geraet'),
+          t('privacyPolicy.sections.vault.items.verlust'),
         ],
       },
       {

@@ -514,9 +514,10 @@ Was der Server doch sieht: je Konto, wie viele Dateien es gibt, wie groß sie
 nach dem Auffüllen auf feste Größenstufen sind und wann sie hochgeladen
 wurden.
 
-- **Speicher je Konto:** 10 GB als Vorgabe. Die Panel-Einstellung
-  `vault_cloud_quota_bytes` ändert die Vorgabe, `users.vault_quota_bytes` den
-  Wert für ein einzelnes Konto.
+- **Speicher je Konto:** 10 GB als Vorgabe. Die Vorgabe steht unter
+  Einstellungen → Allgemein beim Passwort-Manager (`vault_cloud_quota_bytes`),
+  einzelne Konten stellt die Benutzerverwaltung ein (`users.vault_quota_bytes`).
+  Dort steht auch, wie viel jedes Konto belegt.
 - **Löschen:** Gelöschte Dateien bleiben noch 7 Tage auf der Platte und zählen
   so lange zum Speicher des Kontos. Abgebrochene Uploads verschwinden nach 24
   Stunden. Beides räumt das Panel stündlich auf, ebenso die Dateien gelöschter

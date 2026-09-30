@@ -25,7 +25,7 @@ from schemas.panel_settings import (
     SingraWebhookSecretRequest,
 )
 from models import User
-from services import audit_service
+from services import audit_service, vault_blob_service
 from services.panel_settings_service import PanelSettingsService
 from services.rate_limit_settings import (
     KEY_AUTH as RATE_LIMIT_AUTH_KEY,
@@ -150,6 +150,7 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "calendar_enabled": all_db.get("calendar_enabled", "true") != "false",
         "notes_enabled": all_db.get("notes_enabled", "true") != "false",
         "vault_enabled": all_db.get("vault_enabled", "true") != "false",
+        "vault_cloud_quota_bytes": vault_blob_service.standard_quote(),
         "social_enabled": all_db.get("social_enabled", "true") != "false",
         "captcha_enabled": all_db.get("captcha_enabled", "true") == "true",
         "captcha_provider": all_db.get("captcha_provider", "altcha"),
@@ -247,6 +248,8 @@ def update_settings(
             value = "true" if bool(value) else "false"
         if key == "vault_enabled":
             value = "true" if bool(value) else "false"
+        if key == "vault_cloud_quota_bytes":
+            value = str(int(value))
         if key == "social_enabled":
             value = "true" if bool(value) else "false"
         # Ohne diese Normalisierung landet ein abgeschaltetes Banner als str(False) == "False"

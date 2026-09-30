@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Plus, Trash2, Shield, Mail, CheckCircle, XCircle, Search, Server as ServerIcon } from 'lucide-react'
+import { Plus, Trash2, Shield, Mail, CheckCircle, XCircle, Search, Server as ServerIcon, HardDrive } from 'lucide-react'
 import { api } from '@/api/client'
 import { rbacApi } from '@/api/rbac'
 import { toast } from '@/stores/toastStore'
@@ -16,6 +16,9 @@ import { MultiSelect } from '@/Singra/UI/MultiSelect'
 import { Button, Avatar, Checkbox } from '@/Singra/UI'
 import { Spinner } from '@/components/ui/Spinner'
 import { benutzernameFehler } from '@/lib/benutzername'
+import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
+import { formatBytes } from '@/components/server/fileHelpers'
+import { TresorQuoteDialog, type KontoSpeicher } from '@/components/TresorQuoteDialog'
 export function Users() {
   const { t } = useTranslation()
   const currentUser = useAuthStore((s) => s.user)
@@ -37,6 +40,9 @@ export function Users() {
   })
   const [creating, setCreating] = useState(false)
   const [savingRoleUserId, setSavingRoleUserId] = useState<number | null>(null)
+  const tresorAn = usePublicSettingsStore((s) => s.vault_enabled)
+  const [tresor, setTresor] = useState<{ standard: number; konten: KontoSpeicher[] } | null>(null)
+  const [tresorKonto, setTresorKonto] = useState<KontoSpeicher | null>(null)
 
   const filteredServers = useMemo(() => {
     const query = serverSearch.trim().toLocaleLowerCase()
@@ -51,12 +57,14 @@ export function Users() {
 
   const fetchAll = async () => {
     try {
-      const [u, r, s] = await Promise.all([
+      const [u, r, s, speicher] = await Promise.all([
         api<User[]>('/admin/users'),
         rbacApi.listRoles().catch(() => [] as Role[]),
         canManagePermissions ? api<Server[]>('/servers').catch(() => [] as Server[]) : Promise.resolve([] as Server[]),
+        api<{ standard: number; konten: KontoSpeicher[] }>('/admin/tresor-speicher').catch(() => null),
       ])
       setUsers(u)
+      setTresor(speicher)
       setRoles(r)
       setServers(s)
       if (canManagePermissions && s.length > 0 && permServerId === '') {
@@ -357,7 +365,7 @@ export function Users() {
         <div className="msm-card min-w-0" data-testid="user-directory">
           <div
             aria-hidden="true"
-            className="hidden grid-cols-[minmax(9rem,1fr)_minmax(12rem,1.35fr)_7rem_minmax(10rem,12rem)_2.75rem] gap-4 border-b border-outline-variant/50 bg-surface-container-low/35 px-5 py-3 font-label-md text-label-sm uppercase tracking-wider text-on-surface-variant md:grid md:rounded-t-lg"
+            className="hidden grid-cols-[minmax(9rem,1fr)_minmax(12rem,1.35fr)_9rem_minmax(10rem,12rem)_2.75rem] gap-4 border-b border-outline-variant/50 bg-surface-container-low/35 px-5 py-3 font-label-md text-label-sm uppercase tracking-wider text-on-surface-variant md:grid md:rounded-t-lg"
           >
             <span>{t('auth.username')}</span>
             <span>{t('auth.email')}</span>
@@ -373,6 +381,7 @@ export function Users() {
                 : user.role_id != null
                   ? [user.role_id]
                   : []
+              const speicher = tresorAn ? tresor?.konten.find((k) => k.user_id === user.id) : undefined
               const assignedRoles = roles.filter((candidate) => assignedRoleIds.includes(candidate.id))
               const roleLabel = assignedRoles.length > 0
                 ? assignedRoles.map((role) => role.is_system
@@ -384,7 +393,7 @@ export function Users() {
               return (
                 <article
                   key={user.id}
-                  className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-3 px-4 py-4 transition-colors last:rounded-b-lg hover:bg-surface-container-high/30 md:grid-cols-[minmax(9rem,1fr)_minmax(12rem,1.35fr)_7rem_minmax(10rem,12rem)_2.75rem] md:items-center md:gap-4 md:px-5"
+                  className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-3 px-4 py-4 transition-colors last:rounded-b-lg hover:bg-surface-container-high/30 md:grid-cols-[minmax(9rem,1fr)_minmax(12rem,1.35fr)_9rem_minmax(10rem,12rem)_2.75rem] md:items-center md:gap-4 md:px-5"
                 >
                   <div className="flex min-w-0 items-center gap-3">
                     <Avatar
@@ -424,15 +433,35 @@ export function Users() {
                     </span>
                   </div>
 
-                  <span className="col-start-1 inline-flex items-center gap-2 text-xs text-on-surface-variant md:col-auto">
-                    <span
-                      aria-hidden="true"
-                      className={`h-1.5 w-1.5 rounded-full ${
-                        user.is_active ? 'bg-status-success' : 'bg-on-surface-variant/45'
-                      }`}
-                    />
-                    {user.is_active ? t('users.active') : t('users.inactive')}
-                  </span>
+                  <div className="col-start-1 min-w-0 md:col-auto">
+                    <span className="inline-flex items-center gap-2 text-xs text-on-surface-variant">
+                      <span
+                        aria-hidden="true"
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          user.is_active ? 'bg-status-success' : 'bg-on-surface-variant/45'
+                        }`}
+                      />
+                      {user.is_active ? t('users.active') : t('users.inactive')}
+                    </span>
+                    {speicher && (
+                      canManageUsers && (!user.is_owner || currentUser?.is_owner) ? (
+                        <button
+                          type="button"
+                          onClick={() => setTresorKonto(speicher)}
+                          className="mt-1 flex items-center gap-1 text-left text-xs text-on-surface-variant hover:text-primary"
+                          aria-label={`${t('users.tresor.aendern')}: ${user.username}`}
+                        >
+                          <HardDrive aria-hidden="true" className="h-3 w-3 shrink-0" />
+                          {formatBytes(speicher.belegt)} / {formatBytes(speicher.quote)}
+                        </button>
+                      ) : (
+                        <span className="mt-1 flex items-center gap-1 text-xs text-on-surface-variant">
+                          <HardDrive aria-hidden="true" className="h-3 w-3 shrink-0" />
+                          {formatBytes(speicher.belegt)} / {formatBytes(speicher.quote)}
+                        </span>
+                      )
+                    )}
+                  </div>
 
                   <div className="col-span-2 min-w-0 md:col-span-1">
                     {user.is_owner ? (
@@ -476,6 +505,16 @@ export function Users() {
           </div>
         </div>
       </section>
+
+      {tresorKonto && tresor && (
+        <TresorQuoteDialog
+          konto={tresorKonto}
+          name={users.find((u) => u.id === tresorKonto.user_id)?.username ?? ''}
+          standard={tresor.standard}
+          onClose={() => setTresorKonto(null)}
+          onSaved={(neu) => setTresor((alt) => (alt ? { ...alt, konten: alt.konten.map((k) => (k.user_id === neu.user_id ? neu : k)) } : alt))}
+        />
+      )}
     </div>
   )
 }

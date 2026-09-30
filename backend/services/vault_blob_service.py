@@ -50,6 +50,8 @@ MAX_BLOBS_JE_KONTO = 500_000
 # Ein Blob, groesser als jede sinnvolle Quote. Haelt die Zahlen klein, bevor die
 # Quote greift.
 MAX_BLOB_BYTES = 1024 * 1024 * 1024 * 1024
+# Obergrenze fuer jede eingestellte Quote (1 PiB); groesser ist ein Tippfehler.
+MAX_QUOTE = 1024**5
 # So viel muss auf der Platte frei bleiben, auch wenn die Quote mehr erlaubt.
 PLATTENRESERVE = 1024 * 1024 * 1024
 
@@ -124,13 +126,18 @@ def _groesse_passt(chunk_count: int, bytes_total: int) -> bool:
     return voll + CHUNK_UEBERHANG + 1 <= bytes_total <= voll + CHUNK_CHIFFRAT
 
 
+def standard_quote() -> int:
+    """Die Vorgabe je Konto aus den Panel-Einstellungen (`vault_cloud_quota_bytes`)."""
+    try:
+        return min(MAX_QUOTE, max(0, int(PanelSettingsService.get("vault_cloud_quota_bytes", str(STANDARD_QUOTE)))))
+    except (TypeError, ValueError):
+        return STANDARD_QUOTE
+
+
 def quote_fuer(user: User) -> int:
     if user.vault_quota_bytes is not None:
         return max(0, int(user.vault_quota_bytes))
-    try:
-        return max(0, int(PanelSettingsService.get("vault_cloud_quota_bytes", str(STANDARD_QUOTE))))
-    except (TypeError, ValueError):
-        return STANDARD_QUOTE
+    return standard_quote()
 
 
 def belegt(db: Session, user_id: int) -> int:
@@ -319,6 +326,25 @@ def speicher(db: Session, user: User) -> dict[str, int]:
         or 0
     )
     return {"belegt": belegt(db, user.id), "quote": quote_fuer(user), "in_loeschung": in_loeschung, "blobs": blobs}
+
+
+def speicher_aller(db: Session) -> list[dict[str, int | None]]:
+    """Belegt und Quote je Konto fuer die Benutzerverwaltung, in einer Abfrage."""
+    summen = dict(
+        db.execute(
+            select(VaultBlob.user_id, func.coalesce(func.sum(VaultBlob.bytes_total), 0)).group_by(VaultBlob.user_id)
+        ).all()
+    )
+    standard = standard_quote()
+    return [
+        {
+            "user_id": user_id,
+            "belegt": int(summen.get(user_id, 0)),
+            "quote": max(0, int(eigene)) if eigene is not None else standard,
+            "eigene_quote": eigene,
+        }
+        for user_id, eigene in db.execute(select(User.id, User.vault_quota_bytes).order_by(User.id)).all()
+    ]
 
 
 def alle_zur_loeschung(db: Session, user_id: int) -> None:

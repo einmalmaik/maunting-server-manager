@@ -2343,7 +2343,17 @@
     "roleSaved": "Rolle aktualisiert.",
     "registeredTitle": "Registrierte Benutzer",
     "registeredSubtitle": "Identitäten, Status und globale Panel-Rollen auf einen Blick.",
-    "currentUser": "Du"
+    "currentUser": "Du",
+    "tresor": {
+      "aendern": "Tresor-Speicher ändern",
+      "titel": "Tresor-Speicher von {{name}}",
+      "belegt": "Belegt: {{belegt}} von {{quote}}. Gelöschte Dateien zählen noch 7 Tage mit.",
+      "quote": "Speicher in GB",
+      "nutztVorgabe": "Das Konto nutzt die Vorgabe aus den Einstellungen ({{standard}}). Speichern gibt ihm einen eigenen Wert.",
+      "eigenerWert": "Das Konto hat einen eigenen Wert. Die Vorgabe liegt bei {{standard}}.",
+      "aufVorgabe": "Vorgabe verwenden",
+      "gespeichert": "Tresor-Speicher gespeichert"
+    }
   },
   "roles": {
     "title": "Rollen",
@@ -3193,6 +3203,8 @@
     "notesEnabledHint": "Aktiviert das Notizmodul im Panel und ermöglicht der KI die Notizverwaltung.",
     "vaultEnabled": "Passwort-Manager & Authenticator",
     "vaultEnabledHint": "Aktiviert den integrierten Zero-Knowledge Tresor für native Apps. Deaktiviert verbirgt ihn im gesamten Panel und in der App.",
+    "vaultQuota": "Tresor-Speicher je Konto (GB)",
+    "vaultQuotaHint": "Gilt für jedes Konto ohne eigenen Wert. Einzelne Konten stellst du in der Benutzerverwaltung ein.",
     "socialEnabled": "Social-, Freundes- & E2EE-Chat-Hub",
     "socialEnabledHint": "Aktiviert das weltweite Community-, Freundes- und Achievement-System sowie E2EE-Direktnachrichten. Deaktiviert verbirgt alle Social-Funktionen.",
     "cloudflareEnabled": "Cloudflare DNS",
@@ -4414,7 +4426,7 @@
       },
       "quote": {
         "title": "Speicher je Konto",
-        "body": "10 GB als Vorgabe. Die Panel-Einstellung vault_cloud_quota_bytes ändert die Vorgabe, users.vault_quota_bytes den Wert eines einzelnen Kontos."
+        "body": "10 GB als Vorgabe. Die Vorgabe steht unter Einstellungen → Allgemein beim Passwort-Manager, einzelne Konten stellst du in der Benutzerverwaltung ein. Dort steht auch, wie viel jedes Konto belegt."
       },
       "loeschen": {
         "title": "Löschen",
@@ -4635,6 +4647,17 @@
           "callModeration": "Schaltet ein Moderator jemanden im Gruppenanruf stumm oder entfernt ihn, wird das im Prüfprotokoll festgehalten: wer die Handlung ausgelöst hat, gegen wen sie ging und in welcher Gruppe. Der Raum und alles Gesprochene bleiben außen vor. Das ist die einzige Spur, die ein Anruf hinterlässt."
         }
       },
+      "vault": {
+        "heading": "Passwort-Manager und Tresor-Cloud",
+        "body": "Der Passwort-Manager in der App verschlüsselt jeden Eintrag auf Ihrem Gerät mit einem Schlüssel, der aus Ihrem Master-Passwort entsteht. Das Master-Passwort verlässt das Gerät nie, und die Instanz speichert nur verschlüsselte Einträge.",
+        "items": {
+          "eintraege": "Einträge (Passwörter, Authenticator-Codes, Notizen, Dateien, Ordner und Alben) liegen auf dem Server als verschlüsselter Umschlag, aufgefüllt auf feste Größen, mit Revisionsnummer und Zeitpunkt. Papierkorb und Archiv stehen im verschlüsselten Eintrag.",
+          "dateien": "Dateien und Fotos werden auf dem Gerät in Stücken verschlüsselt, jede Datei mit eigenem Schlüssel, und als drei Teile abgelegt: Original, Vorschau und Miniatur. Name, Dateityp, Aufnahmedatum, Aufnahmeort, Kamera und genaue Größe stehen nur im verschlüsselten Eintrag. Die Instanz sieht je Konto, wie viele Teile es gibt, wie groß sie aufgerundet sind, wann sie hochgeladen wurden und dass jeweils drei zusammengehören.",
+          "speicher": "Der Betreiber sieht, wie viel Speicher jedes Konto belegt, und legt fest, wie viel es belegen darf. Gelöschte Dateien bleiben noch 7 Tage verschlüsselt auf dem Server und zählen so lange mit, danach werden sie entfernt. Abgebrochene Uploads verschwinden nach 24 Stunden.",
+          "geraet": "Damit der Tresor ohne Verbindung funktioniert, liegen Einträge, Miniaturen und Vorschauen verschlüsselt im Speicher des Geräts, dazu Originale, die Sie offline verfügbar machen oder zuletzt geöffnet haben. Dieser Speicher gehört Ihrem Konto. Speichern Sie eine Datei ausdrücklich auf dem Gerät, liegt diese Kopie dort unverschlüsselt.",
+          "verlust": "Ohne Master-Passwort kann niemand den Tresor öffnen, auch der Betreiber nicht. Wer es vergisst, kann den Tresor nur zurücksetzen: Die Einträge bleiben dann unlesbar, und alle Dateien gehen in die 7-tägige Löschhaltung."
+        }
+      },
       "providers": {
         "heading": "5. Optionale externe Anbieter",
         "body": "Kein optionaler Anbieter ist für das Basispanel erforderlich. Aktiviert der Betreiber einen Anbieter, erhält er die für diese Integration erforderlichen Daten.",
@@ -4671,7 +4694,7 @@
       },
       "desktopApp": {
         "heading": "7. Desktop- und Mobile-App (Maunting Smart System)",
-        "body": "Das Maunting Smart System ist eine optionale Anwendung für Windows und Android, die auf dem Endgerät des Benutzers läuft und dort im Auftrag der KI arbeitet. Sie ist kein zweites Panel, sondern derselbe Zugang mit einem gekoppelten Gerät: Die Kopplung erfolgt über einen Code oder QR-Code aus dem Panel, und ohne das Recht „KI-Werkzeuge auf dem eigenen Rechner“ holt sie keine Aufträge ab. Dieser Abschnitt beschreibt, was dabei auf dem Gerät bleibt und was es verlässt. Alle ausgehenden Verbindungen der App gehen ausschließlich an die im Einrichtungsassistenten eingetragene Panel-Adresse: Es gibt keinen Updater, keine Telemetrie und keinen fest verdrahteten Fremdanbieter.",
+        "body": "Das Maunting Smart System ist eine optionale Anwendung für Windows und Android, die auf dem Endgerät des Benutzers läuft und dort im Auftrag der KI arbeitet. Sie ist kein zweites Panel, sondern derselbe Zugang mit einem gekoppelten Gerät: Die Kopplung erfolgt über einen Code oder QR-Code aus dem Panel, und ohne das Recht „KI-Werkzeuge auf dem eigenen Rechner“ holt sie keine Aufträge ab. Dieser Abschnitt beschreibt, was dabei auf dem Gerät bleibt und was es verlässt. Die ausgehenden Verbindungen der App gehen an die im Einrichtungsassistenten eingetragene Panel-Adresse. Die einzige Ausnahme ist die Suche nach Updates: Die App fragt bei den Releases von Maunting Studios auf GitHub nach einer neueren Fassung und lädt sie von dort; GitHub sieht dabei Ihre IP-Adresse. Es gibt keine Telemetrie und keinen weiteren Fremdanbieter.",
         "items": {
           "computerUse": "Computer-Use & Desktop-Steuerung (standardmäßig aus): Computer-Use ist ab Installation vollständig deaktiviert. Erst nach Ihrer ausdrücklichen Aktivierung in den Einstellungen und nach Bestätigung des Aufklärungsdialogs kann die KI Maus und Tastatur bedienen oder den Bildschirm betrachten. Bei deaktiviertem autonomen Modus erfordert jede einzelne Aktion eine Bestätigung am Bildschirm.",
           "wakeword": "Wake-Word (standardmäßig aus): Wird es eingeschaltet, liest die App das Mikrofon dauerhaft mit und vergleicht das Gehörte gegen ein Referenzmodell, vollständig auf dem Rechner ohne Netzverbindung. Solange das Wort nicht erkannt ist, verlässt kein einziges Audio-Sample den Prozess; es wird auch nichts mitgeschnitten. Das dauerhafte Zuhören erzeugt eine messbare Rechenlast (etwa ein Sechstel eines Prozessorkerns).",

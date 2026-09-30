@@ -2343,7 +2343,17 @@
     "roleSaved": "Role updated.",
     "registeredTitle": "Registered users",
     "registeredSubtitle": "Identities, status, and global panel roles at a glance.",
-    "currentUser": "You"
+    "currentUser": "You",
+    "tresor": {
+      "aendern": "Change vault storage",
+      "titel": "Vault storage of {{name}}",
+      "belegt": "Used: {{belegt}} of {{quote}}. Deleted files still count for 7 days.",
+      "quote": "Storage in GB",
+      "nutztVorgabe": "This account uses the default from the settings ({{standard}}). Saving gives it its own value.",
+      "eigenerWert": "This account has its own value. The default is {{standard}}.",
+      "aufVorgabe": "Use default",
+      "gespeichert": "Vault storage saved"
+    }
   },
   "roles": {
     "title": "Roles",
@@ -3193,6 +3203,8 @@
     "notesEnabledHint": "Enables the notes module in the panel and allows AI note management.",
     "vaultEnabled": "Password manager & authenticator",
     "vaultEnabledHint": "Enables the built-in zero-knowledge vault for native apps. Disabled hides it across panel and app.",
+    "vaultQuota": "Vault storage per account (GB)",
+    "vaultQuotaHint": "Applies to every account without its own value. Set single accounts in user management.",
     "socialEnabled": "Social, friends & E2EE chat hub",
     "socialEnabledHint": "Enables the global community, friends, and achievement system as well as E2EE direct messages. Disabled hides all social features.",
     "cloudflareEnabled": "Cloudflare DNS",
@@ -4414,7 +4426,7 @@
       },
       "quote": {
         "title": "Storage per account",
-        "body": "10 GB by default. The panel setting vault_cloud_quota_bytes changes the default, users.vault_quota_bytes the value of a single account."
+        "body": "10 GB by default. The default lives under Settings → General next to the password manager; single accounts are set in user management, which also shows how much each account uses."
       },
       "loeschen": {
         "title": "Deleting",
@@ -4635,6 +4647,17 @@
           "callModeration": "If a moderator mutes or removes someone during a group call, the audit log records who acted, against whom, and in which group. The room itself and anything said stay out of it. This is the only trace a call leaves behind."
         }
       },
+      "vault": {
+        "heading": "Password manager and vault cloud",
+        "body": "The password manager in the app encrypts every entry on your device with a key derived from your master password. The master password never leaves the device, and the instance only stores encrypted entries.",
+        "items": {
+          "eintraege": "Entries (passwords, authenticator codes, notes, files, folders and albums) are stored on the server as an encrypted envelope, padded to fixed sizes, with a revision number and a timestamp. Trash and archive live inside the encrypted entry.",
+          "dateien": "Files and photos are encrypted on the device in chunks, each file with its own key, and stored as three parts: original, preview and thumbnail. Name, file type, capture date, location, camera and exact size are only in the encrypted entry. Per account, the instance sees how many parts exist, their rounded-up sizes, when they were uploaded and that they belong together in threes.",
+          "speicher": "The operator sees how much storage each account uses and decides how much it may use. Deleted files stay encrypted on the server for another 7 days and count until then; afterwards they are removed. Aborted uploads disappear after 24 hours.",
+          "geraet": "So the vault works offline, entries, thumbnails and previews are kept encrypted in the device storage, plus originals you make available offline or opened recently. This storage belongs to your account. If you explicitly save a file to the device, that copy is stored there unencrypted.",
+          "verlust": "Without the master password nobody can open the vault, the operator included. If you forget it, you can only reset the vault: the entries stay unreadable and all files go into the 7-day deletion hold."
+        }
+      },
       "providers": {
         "heading": "5. optional external providers",
         "body": "No optional provider is required by the base panel. When the operator enables one, the provider receives the data needed for that integration.",
@@ -4671,7 +4694,7 @@
       },
       "desktopApp": {
         "heading": "7. Desktop & mobile app (Maunting Smart System)",
-        "body": "The Maunting Smart System is an optional application for Windows and Android that runs on the user’s device and works there on behalf of the AI. It is not a second panel but the same account with a device attached: pairing happens through a code or QR code issued by the panel, and without the “AI tools on your own computer” permission it fetches no jobs at all. This section describes what stays on the device and what leaves it. All outgoing connections go exclusively to the panel address entered during setup: there is no updater, no telemetry and no hard-wired third party.",
+        "body": "The Maunting Smart System is an optional application for Windows and Android that runs on the user’s device and works there on behalf of the AI. It is not a second panel but the same account with a device attached: pairing happens through a code or QR code issued by the panel, and without the “AI tools on your own computer” permission it fetches no jobs at all. This section describes what stays on the device and what leaves it. Outgoing connections of the app go to the panel address entered during setup. The one exception is the update check: the app asks the Maunting Studios releases on GitHub for a newer version and downloads it from there; GitHub sees your IP address. There is no telemetry and no other third party.",
         "items": {
           "computerUse": "Computer-Use & Desktop Control (disabled by default): Computer-Use is completely deactivated upon installation. Only after your explicit activation in the settings and confirmation of the educational dialog can the AI control mouse and keyboard or inspect the screen. With autonomous mode disabled, every single action requires manual on-screen confirmation.",
           "wakeword": "Wake word (off by default): once enabled, the app continuously reads the microphone and compares what it hears against a reference model, entirely on the machine with no network connection. Until the word is recognised, not a single audio sample leaves the process, and nothing is recorded. Continuous listening creates a measurable CPU load (roughly one sixth of a core).",

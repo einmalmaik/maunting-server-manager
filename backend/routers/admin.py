@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, selectinload
 
 from database import get_db
@@ -31,7 +31,7 @@ from services.role_service import (
     get_role_by_name,
     set_user_roles,
 )
-from services import audit_service, passkey_service, postgres_service, rechtevergabe_service
+from services import audit_service, passkey_service, postgres_service, rechtevergabe_service, vault_blob_service
 from services.achievement_service import AchievementService
 from services.postgres_service import PostgresServiceError
 from services.user_deletion_service import prepare_user_deletion
@@ -160,6 +160,49 @@ def update_user(
     db.commit()
     db.refresh(user)
     return user
+
+
+class TresorQuoteRequest(BaseModel):
+    """`null` setzt das Konto zurueck auf die Vorgabe aus den Panel-Einstellungen."""
+
+    quote_bytes: int | None = Field(..., ge=0, le=vault_blob_service.MAX_QUOTE)
+
+
+@router.get("/tresor-speicher")
+def tresor_speicher(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_global("users.read")),
+) -> dict:
+    """Belegter Speicher und Quote der Tresor-Cloud je Konto. Nur Zahlen: was in
+    den Dateien steht, kennt der Server nicht."""
+    return {"standard": vault_blob_service.standard_quote(), "konten": vault_blob_service.speicher_aller(db)}
+
+
+@router.put("/users/{user_id}/tresor-quote")
+def tresor_quote_setzen(
+    user_id: int,
+    req: TresorQuoteRequest,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_global("users.manage")),
+    __: None = Depends(verify_csrf),
+) -> dict:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User nicht gefunden")
+    if user.is_owner and not actor.is_owner:
+        raise HTTPException(status_code=403, detail="Owner-Account kann nur vom Owner geaendert werden")
+    vorher = user.vault_quota_bytes
+    user.vault_quota_bytes = req.quote_bytes
+    audit_service.record_privileged_action(
+        db,
+        user_id=actor.id,
+        action="admin.user.vault_quota",
+        target_type="user",
+        target_id=user.id,
+        details={"username": user.username, "vorher": vorher, "nachher": req.quote_bytes},
+    )
+    db.commit()
+    return {"quote": vault_blob_service.quote_fuer(user), "eigene_quote": user.vault_quota_bytes}
 
 
 @router.delete("/users/{user_id}")

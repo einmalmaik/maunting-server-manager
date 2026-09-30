@@ -42,6 +42,8 @@ export interface PanelSettings {
   calendar_enabled: boolean
   notes_enabled: boolean
   vault_enabled: boolean
+  /** Tresor-Cloud: Speicher je Konto ohne eigenen Wert. */
+  vault_cloud_quota_bytes: number
   social_enabled: boolean
   captcha_enabled: boolean
   captcha_provider: 'altcha' | 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
@@ -109,6 +111,7 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   calendar_enabled: true,
   notes_enabled: true,
   vault_enabled: true,
+  vault_cloud_quota_bytes: 10 * 1024 ** 3,
   social_enabled: true,
   captcha_enabled: true,
   captcha_provider: 'altcha',
