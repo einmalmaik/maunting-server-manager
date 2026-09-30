@@ -142,6 +142,22 @@
     "readOnly": "Read only"
   },
   "notes": {
+    "schluesselLage": {
+      "gesperrt": {
+        "titel": "This device cannot read your notes yet",
+        "text": "Its device key is protected by your messenger PIN. Unlock the messenger once, then the device registers and can be approved. Until then it cannot read the notes and calendar events of your other devices.",
+        "link": "Open and unlock the messenger"
+      },
+      "freigabe": {
+        "titel": "This device is waiting for approval",
+        "text": "Approve it on a device that is already approved, in the panel under Profile → Devices. Until then it cannot read the notes and calendar events of your other devices, and they cannot see what you write here.",
+        "link": "Open your device list"
+      },
+      "schluessel": {
+        "titel": "Waiting for the shared key",
+        "text": "This device has asked your other devices for the key to notes and calendar events. Open the notes on one of them and it will arrive."
+      }
+    },
     "title": "Notes",
     "newNote": "New note",
     "newNoteShort": "New",
@@ -3662,8 +3678,8 @@
     },
     "confirmDeleteWordLabel": "Type delete to confirm (paste disabled)",
     "e2eeDevices": {
-      "title": "Devices that can read your messages",
-      "description": "Every device has its own key and never shares it. Messages addressed to you are encrypted separately for each device in this list.",
+      "title": "Approved devices",
+      "description": "Each device has its own device key that never leaves it. Only approved devices can read your messages, notes and calendar events.",
       "thisDevice": "This device",
       "unnamed": "Unnamed device",
       "empty": "No device registered.",
@@ -3676,7 +3692,7 @@
       "approve": "Approve",
       "approved": "Device approved.",
       "safetyNumber": "Safety number",
-      "approvalHelp": "A new device only receives messages after you confirm it once on an approved device. Compare the safety number with the one the new device shows first.",
+      "approvalHelp": "Approve a new device on one that is already approved. First compare the safety number with the one on the new device.",
       "thisDevicePending": "This device is waiting for approval. On one of your other devices, open Profile → Devices, compare the safety number and tap “Approve”.",
       "resetTitle": "Lost all your other devices?",
       "resetHelp": "Then you can start over: all other devices are signed out and removed, and this one becomes your first. Old messages stay unreadable, and your contacts see a warning.",
@@ -6295,7 +6311,13 @@
       "koppelt": "Pairing …",
       "koppeln": "Pair",
       "sicherheitsnummerTitel": "Safety number of this device",
-      "sicherheitsnummerHinweis": "The panel will show the same number and ask whether to hand over your history to this device. Only confirm there if both numbers match.",
+      "sicherheitsnummerHinweis": "Approve this device in the panel under Profile → Devices. First compare the number there with this one. If the panel asks whether to hand your history over to this device, confirm only if both numbers match.",
+      "pinTitel": "Enter your messenger PIN",
+      "pinHinweis": "This device's device key is protected by your messenger PIN. Unlock it once and the device appears in your device list, ready to approve.",
+      "pinSpaeter": "Later",
+      "meldenFehlerTitel": "Device key not registered",
+      "meldenFehlerHinweis": "Pairing worked, but the device does not appear in your device list yet. Until it is approved it cannot read messages, notes or calendar events.",
+      "nochmal": "Try again",
       "personalisierungErklaerung": "Give your assistant a name — that is how you address it and how it introduces itself. Both apply everywhere: here and in the panel.",
       "agentnameLabel": "Assistant name",
       "agentnameHinweis": "2–32 characters; leave empty for the default name Assistant.",

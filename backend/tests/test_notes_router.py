@@ -94,3 +94,26 @@ def test_notes_crud_endpoints(client):
     del_res = client.delete(f"/api/notes/{note_uid}")
     assert del_res.status_code == 200
     assert del_res.json()["status"] == "deleted"
+
+
+def test_archivierte_notizen_kommen_mit_include_archived(client):
+    """Die App laedt mit ``include_archived=true`` und filtert selbst nach Aktiv/Archiviert.
+
+    Bis 5.0.3 kannte der Server den Parameter nicht und lieferte nur nicht
+    archivierte Notizen: eine archivierte Notiz stand nie unter „Archiviert“
+    und liess sich auch nicht wiederherstellen.
+    """
+    aktiv = client.post("/api/notes", json={"title": "Aktiv"}).json()["note_uid"]
+    archiv = client.post("/api/notes", json={"title": "Archiv"}).json()["note_uid"]
+    assert client.post(f"/api/notes/{archiv}/archive").json()["is_archived"] is True
+
+    alle = {n["note_uid"]: n["is_archived"] for n in client.get("/api/notes?include_archived=true").json()}
+    assert alle == {aktiv: False, archiv: True}
+
+    # Ohne den Parameter bleibt es, wie es war: nur die aktiven — so lesen es andere Aufrufer.
+    assert [n["note_uid"] for n in client.get("/api/notes").json()] == [aktiv]
+    assert [n["note_uid"] for n in client.get("/api/notes?is_archived=true").json()] == [archiv]
+
+    # Wiederhergestellt: wieder unter den aktiven.
+    assert client.post(f"/api/notes/{archiv}/archive").json()["is_archived"] is False
+    assert {n["note_uid"] for n in client.get("/api/notes").json()} == {aktiv, archiv}

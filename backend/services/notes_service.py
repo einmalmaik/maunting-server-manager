@@ -493,6 +493,115 @@ class NotesService:
         )
         return formatted
 
+    @staticmethod
+    def kontoschluessel_lesen(db: Session, user: User) -> dict[str, Any]:
+        """Der Kontoschluessel-Eintrag, frisch aus der Datenbank: Abdruck, Stand und Unterschrift."""
+        zeile = db.execute(
+            select(
+                User.notes_key_abdruck,
+                User.notes_key_stand,
+                User.notes_key_geraet,
+                User.notes_key_signatur,
+            ).where(User.id == user.id)
+        ).one()
+        return {"abdruck": zeile[0], "stand": zeile[1] or 0, "geraet": zeile[2], "signatur": zeile[3]}
+
+    @staticmethod
+    def kontoschluessel_daten(user_id: int, abdruck: str, stand: int, geraet: str) -> str:
+        """Was ein Geraet unterschreibt, wenn es den Kontoschluessel setzt.
+
+        Dieselben Bytes wie `kontoschluesselDaten` in `notesCalendarCrypto.ts`.
+        Der Stand gehoert hinein und waechst nur: eine Unterschrift passt auf
+        genau einen Stand und laesst sich spaeter nicht wieder vorlegen — auch
+        nicht, wenn der Eintrag zu einem frueheren Abdruck zurueckkehrt.
+        """
+        return f"msm:notes-kontoschluessel:v2:{user_id}:{abdruck}:{stand}:{geraet}"
+
+    @staticmethod
+    def kontoschluessel_setzen(
+        db: Session, user: User, abdruck: str, stand: int, geraet: str, signatur: str
+    ) -> dict[str, Any]:
+        """Setzt den Kontoschluessel-Eintrag als Stand ``stand`` — genau einer mehr als der geltende.
+
+        Nur mit der Unterschrift eines freigegebenen Geraets dieses Kontos: eine
+        Sitzung allein darf den Schluessel aller Geraete nicht umstellen
+        (Durchsicht 30.09.2026). Liefert den Eintrag danach; weicht er ab, war
+        ein anderes Geraet schneller.
+        """
+        from services import e2ee_device_service
+
+        daten = NotesService.kontoschluessel_daten(user.id, abdruck, stand, geraet)
+        if not e2ee_device_service.unterschrift_gilt(db, user, geraet, daten, signatur):
+            raise PermissionError("Die Unterschrift eines freigegebenen Geraets fehlt oder stimmt nicht.")
+        # Vergleich und Setzen: nur auf den Stand direkt davor. `NULL` ist 0.
+        bisher = (
+            or_(User.notes_key_stand.is_(None), User.notes_key_stand == 0)
+            if stand == 1
+            else User.notes_key_stand == stand - 1
+        )
+        geaendert = (
+            db.query(User)
+            .filter(User.id == user.id, bisher)
+            .update(
+                {
+                    User.notes_key_abdruck: abdruck,
+                    User.notes_key_stand: stand,
+                    User.notes_key_geraet: geraet,
+                    User.notes_key_signatur: signatur,
+                },
+                synchronize_session=False,
+            )
+        )
+        db.commit()
+        if geaendert:
+            # Die anderen Geraete laden daraufhin neu und gleichen ab, statt
+            # bis zum naechsten Oeffnen der Notizen mit dem alten zu schreiben.
+            SyncEventService.publish(
+                {"entity": "notes", "action": "kontoschluessel", "user_id": user.id},
+                user_id=user.id,
+            )
+        return NotesService.kontoschluessel_lesen(db, user)
+
+    @staticmethod
+    def neu_verschluesseln(
+        db: Session, user: User, auftraege: list[tuple[str, dict[str, tuple[str, str]]]]
+    ) -> dict[str, list[str]]:
+        """Tauscht E2EE-Chiffrate eigener persoenlicher Notizen gegen neue.
+
+        Je Notiz nur, wenn jedes Feld noch genau das ``alt`` hat, das das Geraet
+        gelesen hat — sonst ueberschriebe es eine spaetere Aenderung eines
+        anderen Geraets. ``updated_at`` bleibt: der Inhalt ist derselbe, nur der
+        Schluessel ist ein anderer. Ein Sammelauftrag, ein Ereignis: je Notiz
+        eines hiess, dass jedes offene Geraet die ganze Liste so oft neu laedt.
+        """
+        for _, felder in auftraege:
+            for alt, neu in felder.values():
+                if not alt.startswith(NOTE_CIPHERTEXT_PREFIX) or not neu.startswith(NOTE_CIPHERTEXT_PREFIX):
+                    raise ValueError("Neu verschluesselt wird nur, was E2EE war und bleibt.")
+        spalten = {"title": Note.title, "content": Note.content}
+        geschrieben: list[str] = []
+        uebersprungen: list[str] = []
+        for note_uid, felder in auftraege:
+            bedingungen = [spalten[name] == alt for name, (alt, _) in felder.items()]
+            werte: dict[Any, Any] = {spalten[name]: neu for name, (_, neu) in felder.items()}
+            # Die Spalte auf sich selbst setzen haelt `onupdate` fern.
+            werte[Note.updated_at] = Note.updated_at
+            geaendert = (
+                db.query(Note)
+                .filter(
+                    Note.note_uid == note_uid,
+                    Note.user_id == user.id,
+                    Note.note_type == "personal",
+                    *bedingungen,
+                )
+                .update(werte, synchronize_session=False)
+            ) if felder else 0
+            (geschrieben if geaendert else uebersprungen).append(note_uid)
+        db.commit()
+        if geschrieben:
+            SyncEventService.publish({"entity": "notes", "action": "updated", "user_id": user.id}, user_id=user.id)
+        return {"geschrieben": geschrieben, "uebersprungen": uebersprungen}
+
     @classmethod
     def toggle_archive(cls, db: Session, user: User, note_id_or_uid: str | int) -> dict[str, Any]:
         """Schaltet den Archivierungs-Status einer Notiz um."""

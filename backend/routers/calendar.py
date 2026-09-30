@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import _bearer_token, _user_from_token
+from dependencies import _bearer_token, _user_from_token, verify_csrf
 from models.user import User
 from routers.auth import get_current_user
 from services.calendar_service import CalendarService
@@ -58,6 +58,29 @@ class CalendarEventUpdate(BaseModel):
     team_id: int | None = None
     server_id: int | None = None
     recurrence: str | None = Field(default=None, max_length=_WIEDERHOLUNG_MAX)
+
+
+_CHIFFRAT_MAX = 1_000_000
+_SAMMEL_MAX = 200
+
+
+class Umschluesselung(BaseModel):
+    """Ein Feld, neu verschluesselt: gilt nur, solange ``alt`` noch dort steht."""
+
+    alt: str = Field(min_length=1, max_length=_CHIFFRAT_MAX)
+    neu: str = Field(min_length=1, max_length=_CHIFFRAT_MAX)
+
+
+class TerminUmschluesselung(BaseModel):
+    event_id: str = Field(min_length=1, max_length=255)
+    title: Umschluesselung | None = None
+    description: Umschluesselung | None = None
+    location: Umschluesselung | None = None
+    recurrence: Umschluesselung | None = None
+
+
+class TermineNeuVerschluesseln(BaseModel):
+    eintraege: list[TerminUmschluesselung] = Field(min_length=1, max_length=_SAMMEL_MAX)
 
 
 def _check_calendar_enabled() -> None:
@@ -163,6 +186,32 @@ def update_event(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/events/neu-verschluesseln")
+def neu_verschluesseln(
+    payload: TermineNeuVerschluesseln,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    __=Depends(verify_csrf),
+) -> dict[str, Any]:
+    """Tauscht Chiffrate gegen solche unter dem Kontoschluessel — je Termin nur beim unveraenderten Stand."""
+    _check_calendar_enabled()
+    auftraege = [
+        (
+            e.event_id,
+            {
+                name: (feld.alt, feld.neu)
+                for name in ("title", "description", "location", "recurrence")
+                if (feld := getattr(e, name)) is not None
+            },
+        )
+        for e in payload.eintraege
+    ]
+    try:
+        return CalendarService.neu_verschluesseln(db, user, auftraege)
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 

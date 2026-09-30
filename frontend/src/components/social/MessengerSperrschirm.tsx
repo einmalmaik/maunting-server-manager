@@ -18,7 +18,12 @@ import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Button } from '@/Singra/UI'
 import { useMessengerSperre } from '@/services/messengerSperre'
 
-export function MessengerSperrschirm() {
+/**
+ * `schlicht`: nur das Feld und die Knöpfe, ohne eigene Karte und Erklärung —
+ * für einen Ort, der selbst sagt, wozu der PIN gebraucht wird (die Kopplung
+ * der Desktop-App).
+ */
+export function MessengerSperrschirm({ schlicht = false }: { schlicht?: boolean }) {
   const { t } = useTranslation()
   const laeuft = useMessengerSperre((s) => s.laeuft)
   const fehler = useMessengerSperre((s) => s.fehler)
@@ -62,6 +67,56 @@ export function MessengerSperrschirm() {
     await useMessengerSperre.getState().entsperrenMitBiometrie()
   }
 
+  const formular = (
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void entsperren()
+      }}
+    >
+      <PasswordInput
+        ref={eingabe}
+        value={pin}
+        onChange={(e) => {
+          setPin(e.target.value)
+          if (fehler) useMessengerSperre.getState().fehlerLoeschen()
+        }}
+        autoComplete="current-password"
+        placeholder={t('profile.messengerLock.pinPlaceholder')}
+        disabled={laeuft || wartet}
+        error={
+          wartet
+            ? t('profile.messengerLock.waiting', {
+                count: restSekunden,
+              })
+            : (fehler ?? undefined)
+        }
+      />
+
+      <Button type="submit" className="w-full" disabled={laeuft || wartet || !pin}>
+        {laeuft
+          ? t('profile.messengerLock.working')
+          : t('profile.messengerLock.unlock')}
+      </Button>
+
+      {biometrieAktiv && (
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-full"
+          onClick={() => void perFinger()}
+          disabled={laeuft || wartet}
+        >
+          <Fingerprint className="h-4 w-4" />
+          {t('profile.messengerLock.useBiometrics')}
+        </Button>
+      )}
+    </form>
+  )
+
+  if (schlicht) return formular
+
   return (
     <div className="flex h-full w-full items-center justify-center p-6">
       <div className="msm-card w-full max-w-sm p-6 space-y-5">
@@ -79,51 +134,7 @@ export function MessengerSperrschirm() {
           </div>
         </div>
 
-        <form
-          className="space-y-3"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void entsperren()
-          }}
-        >
-          <PasswordInput
-            ref={eingabe}
-            value={pin}
-            onChange={(e) => {
-              setPin(e.target.value)
-              if (fehler) useMessengerSperre.getState().fehlerLoeschen()
-            }}
-            autoComplete="current-password"
-            placeholder={t('profile.messengerLock.pinPlaceholder')}
-            disabled={laeuft || wartet}
-            error={
-              wartet
-                ? t('profile.messengerLock.waiting', {
-                    count: restSekunden,
-                  })
-                : (fehler ?? undefined)
-            }
-          />
-
-          <Button type="submit" className="w-full" disabled={laeuft || wartet || !pin}>
-            {laeuft
-              ? t('profile.messengerLock.working')
-              : t('profile.messengerLock.unlock')}
-          </Button>
-
-          {biometrieAktiv && (
-            <Button
-              type="button"
-              variant="secondary"
-              className="w-full"
-              onClick={() => void perFinger()}
-              disabled={laeuft || wartet}
-            >
-              <Fingerprint className="h-4 w-4" />
-              {t('profile.messengerLock.useBiometrics')}
-            </Button>
-          )}
-        </form>
+        {formular}
 
         <p className="text-label-sm text-on-surface-variant text-center leading-relaxed">
           {t('profile.messengerLock.screenFootnote')}

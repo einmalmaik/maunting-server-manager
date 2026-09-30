@@ -391,3 +391,87 @@ def test_neustart_mit_2fa_nur_mit_dem_eingerichteten_faktor(client: TestClient, 
     assert res.status_code == 200
     assert res.json()["removed"] == 1
     assert e2ee_device_service.geraete(db, user.id) == []
+
+
+def test_verzeichnis_meldet_jede_aenderung_in_echtzeit(db: Session, clean_db, monkeypatch):
+    """Melden, Freigeben, Entfernen: jede offene Geraeteliste des Kontos erfaehrt es.
+
+    Bis 5.0.3 lud die Liste im Profil nur beim Oeffnen. Ein frisch gekoppeltes
+    Geraet erschien erst nach dem Neuladen der Seite zum Freigeben.
+    """
+    from services.sync_event_service import SyncEventService
+
+    gemeldet: list[tuple[dict, int | None]] = []
+    monkeypatch.setattr(
+        SyncEventService, "publish", lambda ereignis, **kw: gemeldet.append((ereignis, kw.get("user_id")))
+    )
+    user = _konto(db, "echtzeit1")
+    tel_priv, _, _, lap_ecdsa = _zwei_geraete(db, user)
+    assert [(e["entity"], u) for e, u in gemeldet] == [("e2ee_devices", user.id)] * 2
+
+    # Ein blosses Wiedermelden (jeder Start) ist keine Aenderung.
+    gemeldet.clear()
+    e2ee_device_service.veroeffentlichen(db, user, "laptop-00002", RSA_B, "", lap_ecdsa, familie="fam-lap")
+    assert gemeldet == []
+
+    sig = _freigabe(tel_priv, user.id, "laptop-00002", RSA_B, lap_ecdsa)
+    assert e2ee_device_service.bestaetigen(db, user, "laptop-00002", "telefon-0001", sig)
+    assert [e["entity"] for e, _ in gemeldet] == ["e2ee_devices"]
+
+    gemeldet.clear()
+    weg = _entfernen(tel_priv, user.id, "laptop-00002", RSA_B)
+    assert e2ee_device_service.vergessen(db, user, "laptop-00002", "telefon-0001", weg)
+    assert [e["entity"] for e, _ in gemeldet] == ["e2ee_devices"]
+
+    gemeldet.clear()
+    e2ee_device_service.zuruecksetzen(db, user, None)
+    assert [e["entity"] for e, _ in gemeldet] == ["e2ee_devices"]
+
+
+def test_gekoppeltes_geraet_ohne_namen_heisst_wie_die_einladung(db: Session, clean_db):
+    """Ohne eigenen Namen stand in der Liste „Unbenanntes Geraet".
+
+    Die Einladung im Panel hat einen Namen, und ihre Sitzungskette ist die, mit
+    der sich das Geraet meldet.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from models.device_pairing import DevicePairing
+
+    user = _konto(db, "benennung1")
+    jetzt = datetime.now(timezone.utc)
+    db.add(DevicePairing(
+        user_id=user.id, code_hash="h" * 64, label="Arbeitsrechner", family="fam-mss",
+        expires_at=jetzt + timedelta(minutes=10), redeemed_at=jetzt,
+    ))
+    db.commit()
+    _, ecdsa = _ecdsa_paar()
+    neu = e2ee_device_service.veroeffentlichen(db, user, "mss-geraet-01", RSA_A, "", ecdsa, familie="fam-mss")
+    assert neu.label == "Arbeitsrechner"
+
+    # Ein selbst gewaehlter Name bleibt; ein Browser ohne Einladung bleibt leer.
+    _, ecdsa2 = _ecdsa_paar()
+    eigen = e2ee_device_service.veroeffentlichen(db, user, "mss-geraet-02", RSA_B, "Laptop", ecdsa2, familie="fam-mss")
+    assert eigen.label == "Laptop"
+    _, ecdsa3 = _ecdsa_paar()
+    browser = e2ee_device_service.veroeffentlichen(db, user, "browser-0003", RSA_X, "", ecdsa3, familie="fam-web")
+    assert browser.label == ""
+
+
+def test_wiedergemeldetes_geraet_ohne_namen_bekommt_den_der_einladung(db: Session, clean_db):
+    """Bestand von vor 5.0.4: der Eintrag hat keinen Namen, die Einladung schon."""
+    from datetime import datetime, timedelta, timezone
+
+    from models.device_pairing import DevicePairing
+
+    user = _konto(db, "benennung2")
+    _, ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "mss-geraet-01", RSA_A, "", ecdsa, familie="fam-mss")
+    jetzt = datetime.now(timezone.utc)
+    db.add(DevicePairing(
+        user_id=user.id, code_hash="k" * 64, label="Arbeitsrechner", family="fam-mss",
+        expires_at=jetzt + timedelta(minutes=10), redeemed_at=jetzt,
+    ))
+    db.commit()
+    wieder = e2ee_device_service.veroeffentlichen(db, user, "mss-geraet-01", RSA_A, "", ecdsa, familie="fam-mss")
+    assert wieder.label == "Arbeitsrechner"

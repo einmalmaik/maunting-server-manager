@@ -127,6 +127,28 @@ describe('E2eeGeraeteCard', () => {
     )
   })
 
+  it('zeigt ein frisch gekoppeltes Gerät sofort zum Freigeben, ohne Neuladen', async () => {
+    // Bis 5.0.3 lud die Liste nur beim Öffnen: das neue Gerät erschien erst,
+    // wenn man die Seite neu lud.
+    liste.inhalt = [{ device_id: 'dieses-geraet-0001', public_key: 'pub-1', label: '', is_approved: true }]
+    render(<E2eeGeraeteCard />)
+    expect(await screen.findByText('Dieses Gerät')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Freigeben/ })).not.toBeInTheDocument()
+
+    // Ein fremdes Ereignis lädt nichts nach.
+    window.dispatchEvent(new CustomEvent('msm:sync-event', { detail: { entity: 'notes', action: 'updated' } }))
+    expect(getE2eeGeraete).toHaveBeenCalledTimes(1)
+
+    liste.inhalt = [
+      ...liste.inhalt,
+      { device_id: 'mss-geraet-00004', public_key: 'pub-4', label: 'Arbeitsrechner', is_approved: false },
+    ]
+    window.dispatchEvent(new CustomEvent('msm:sync-event', { detail: { entity: 'e2ee_devices', action: 'changed' } }))
+
+    expect(await screen.findByRole('button', { name: /Freigeben/ })).toBeInTheDocument()
+    expect(screen.getByText('Arbeitsrechner')).toBeInTheDocument()
+  })
+
   it('wartet dieses Gerät selbst, gibt es nichts frei und bietet den Neubeginn an', async () => {
     // Ein wartendes Gerät kann nicht unterschreiben — der Server nähme es
     // nicht an. Wer es in der Hand hat, hat vielleicht nur das Passwort.

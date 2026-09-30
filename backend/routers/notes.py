@@ -10,7 +10,14 @@ from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import get_current_user, verify_csrf
 from models.user import User
-from schemas.note import NoteCreate, NoteResponse, NoteUpdate
+from schemas.note import (
+    Kontoschluessel,
+    KontoschluesselSetzen,
+    NotizenNeuVerschluesseln,
+    NoteCreate,
+    NoteResponse,
+    NoteUpdate,
+)
 from services.notes_service import NotesService
 from services.panel_settings_service import PanelSettingsService
 
@@ -35,6 +42,62 @@ def get_notes_status(
     return {"enabled": enabled}
 
 
+# Vor `/{id_or_uid}`, sonst liest FastAPI "kontoschluessel" als Notiz-Kennung.
+# Ohne `_check_notes_enabled`: derselbe Schluessel verschluesselt den Kalender.
+@router.get("/kontoschluessel", response_model=Kontoschluessel)
+def get_kontoschluessel(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Welcher Notizschluessel fuer alle Geraete gilt — Abdruck und Unterschrift."""
+    return NotesService.kontoschluessel_lesen(db, user)
+
+
+@router.put("/kontoschluessel", response_model=Kontoschluessel)
+def put_kontoschluessel(
+    req: KontoschluesselSetzen,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    __=Depends(verify_csrf),
+) -> dict[str, Any]:
+    """Setzt den Eintrag als naechsten Stand, unterschrieben von einem eigenen Geraet."""
+    try:
+        stand = NotesService.kontoschluessel_setzen(
+            db, user, req.abdruck, req.stand, req.geraet, req.signatur
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    if stand["stand"] != req.stand or stand["signatur"] != req.signatur:
+        raise HTTPException(status_code=409, detail=stand)
+    return stand
+
+
+@router.post("/neu-verschluesseln")
+def neu_verschluesseln(
+    req: NotizenNeuVerschluesseln,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    __=Depends(verify_csrf),
+) -> dict[str, Any]:
+    """Tauscht Chiffrate gegen solche unter dem Kontoschluessel — je Notiz nur beim unveraenderten Stand."""
+    _check_notes_enabled()
+    auftraege = [
+        (
+            e.note_uid,
+            {
+                name: (feld.alt, feld.neu)
+                for name, feld in (("title", e.title), ("content", e.content))
+                if feld is not None
+            },
+        )
+        for e in req.eintraege
+    ]
+    try:
+        return NotesService.neu_verschluesseln(db, user, auftraege)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("", response_model=list[NoteResponse])
 def list_notes(
     category: str | None = Query(None, description="Kategorie-Filter"),
@@ -42,13 +105,21 @@ def list_notes(
     search: str | None = Query(None, description="Suchbegriff in Titel und Inhalt"),
     is_pinned: bool | None = Query(None, description="Nur angepinnte"),
     is_archived: bool | None = Query(False, description="Archivierte Notizen anzeigen"),
+    include_archived: bool = Query(False, description="Aktive und archivierte zusammen"),
     sort_by: str = Query("updated_at", description="updated_at | created_at | title"),
     order: str = Query("desc", description="desc | asc"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """Gibt Notizen des Benutzers zurück."""
+    """Gibt Notizen des Benutzers zurück.
+
+    ``include_archived`` liefert aktive und archivierte zusammen — so laedt die
+    App und trennt selbst nach Aktiv/Archiviert. Bis 5.0.3 kannte der Server
+    den Parameter nicht, und eine archivierte Notiz verschwand ganz.
+    """
     _check_notes_enabled()
+    if include_archived:
+        is_archived = None
     return NotesService.get_notes(
         db=db,
         user=user,

@@ -46,6 +46,7 @@ import {
   WOCHENTAG_KUERZEL,
 } from '@/services/kalenderSerie'
 import { useAuthStore } from '@/stores/authStore'
+import { NotizschluesselHinweis } from '@/components/notes/NotizschluesselHinweis'
 
 export type EventCategoryType = 'personal' | 'team' | 'server' | 'node'
 
@@ -788,6 +789,7 @@ export function Calendar() {
           </div>
         }
       />
+      <NotizschluesselHinweis />
 
       {/* Kategorie Filter Leiste */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">

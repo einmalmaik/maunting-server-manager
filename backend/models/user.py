@@ -143,6 +143,19 @@ class User(Base):
     # (`vault_cloud_quota_bytes`).
     vault_quota_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
+    # Fingerabdruck des Notiz- und Kalenderschluessels, der fuer alle Geraete
+    # dieses Kontos gilt (`abdruckVon` im Frontend). Nie der Schluessel selbst:
+    # der Server entscheidet damit nur, welcher gewinnt, lesen kann er nichts.
+    # Bis 30.09.2026 behielt jedes Geraet seinen eigenen.
+    notes_key_abdruck: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Wer ihn gesetzt hat, als wievielten Stand, und dessen Unterschrift
+    # (`notes_service.kontoschluessel_daten`). Die Geraete glauben dem Abdruck
+    # nur mit dieser Unterschrift eines vertrauten eigenen Geraets. Der Stand
+    # waechst nur: eine alte Unterschrift passt auf keinen spaeteren.
+    notes_key_stand: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes_key_geraet: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    notes_key_signatur: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
     email_notifications: Mapped[bool] = mapped_column(Boolean, default=True)
     # Meldungen der KI im Panel — getrennt von den E-Mails, weil es zwei
     # verschiedene Dinge sind: die KI verschickt keine E-Mails, und wer keine

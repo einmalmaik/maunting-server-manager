@@ -5,7 +5,7 @@
  * im Panel, und hier zaehlt nur die Weiche: wer landet wo, und was passiert,
  * wenn die stille Anmeldung scheitert.
  */
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
@@ -99,6 +99,7 @@ vi.mock('./useAuftragsschleife', () => ({
   },
 }))
 
+import { abmelden } from './auth'
 import { DesktopApp } from './DesktopApp'
 import { setzeAccessToken } from './transport'
 
@@ -266,6 +267,108 @@ describe('DesktopApp', () => {
     })
     // Die Passwortstrecke ist geloescht, nicht versteckt.
     expect(screen.queryByLabelText(/passwor/i)).not.toBeInTheDocument()
+  })
+
+  it('nach dem Abmelden steht sofort wieder die Kopplung da, ohne Neustart', async () => {
+    // Bis 5.0.3 fiel die App nach dem Abmelden in den Offline-Modus: Ohne
+    // Tresor-Token meldete die stille Anmeldung „abgelehnt", und die Wache
+    // im laufenden Betrieb deutete jede Ablehnung als vorübergehende Störung.
+    let token: string | null = 'tresor-token'
+    invokeMock.mockImplementation((befehl: string) => {
+      if (befehl === 'konfig_laden') {
+        return Promise.resolve({
+          backend_url: 'https://api.example.com',
+          sandbox_pfad: 'C:\Users\tester\MSS-Sandbox',
+          eingerichtet: true,
+        })
+      }
+      if (befehl === 'refresh_token_laden') return Promise.resolve(token)
+      if (befehl === 'refresh_token_loeschen') {
+        token = null
+        return Promise.resolve(null)
+      }
+      return Promise.resolve(null)
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((eingabe: RequestInfo | URL) => {
+        const url = String(eingabe)
+        if (url.includes('/auth/refresh')) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        if (url.includes('/auth/me')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(BENUTZER), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ global_permissions: [], server_permissions: {} }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }),
+    )
+
+    render(<DesktopApp />)
+    await waitFor(() => {
+      expect(screen.getByTestId('ki-seite')).toBeInTheDocument()
+    })
+    // Derselbe Aufruf wie der Eintrag im Profilmenue.
+    await act(async () => {
+      await abmelden()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText(i18n.t('mss.wizard.codeLabel'))).toBeInTheDocument()
+    })
+    expect(screen.queryByText(i18n.t('common.offline'))).not.toBeInTheDocument()
+  })
+
+  it('auch offline fuehrt Abmelden sofort zur Kopplung', async () => {
+    // Offline pruefte die App nur alle 20 Sekunden nach. Genau dort landet ein
+    // Geraet, dem das Panel den Zugang entzogen hat — und wer sich dann
+    // abmeldet, stand bis 5.0.3 weiter in der Hauptansicht.
+    let token: string | null = 'tresor-token'
+    invokeMock.mockImplementation((befehl: string) => {
+      if (befehl === 'konfig_laden') {
+        return Promise.resolve({
+          backend_url: 'https://api.example.com',
+          sandbox_pfad: 'C:\Users\tester\MSS-Sandbox',
+          eingerichtet: true,
+        })
+      }
+      if (befehl === 'refresh_token_laden') return Promise.resolve(token)
+      if (befehl === 'refresh_token_loeschen') {
+        token = null
+        return Promise.resolve(null)
+      }
+      return Promise.resolve(null)
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('Failed to fetch (Offline / Flugmodus)'))),
+    )
+
+    render(<DesktopApp />)
+    await waitFor(() => {
+      expect(screen.getByText(i18n.t('mss.app.tresor'))).toBeInTheDocument()
+    })
+    await act(async () => {
+      await abmelden()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText(i18n.t('mss.wizard.codeLabel'))).toBeInTheDocument()
+    })
   })
 
   it('zeigt den Computer-Use Deaktiviert-Hinweis im Chat, wenn computer_use_aktiv false ist', async () => {

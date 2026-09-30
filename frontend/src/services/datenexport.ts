@@ -22,6 +22,7 @@ import {
   decryptNoteContent,
   decryptNoteTitle,
   getUserNotesKey,
+  nebenschluessel,
 } from '@/services/notesCalendarCrypto'
 import {
   ladeAlleEntwuerfe,
@@ -79,13 +80,19 @@ const TERMIN_FELDER = ['title', 'description', 'location', 'recurrence'] as cons
 async function mitSchluessel<T>(
   versuch: (schluessel: CryptoKey | undefined) => Promise<T>,
   schluessel: CryptoKey | null,
-  alt: CryptoKey | null,
+  weitere: CryptoKey[],
 ): Promise<T> {
   try {
     return await versuch(schluessel ?? undefined)
   } catch (fehler) {
-    if (!alt) throw fehler
-    return versuch(alt)
+    // Der Altschlüssel und die Nebenschlüssel: was die Notizansicht öffnet,
+    // soll auch im Export offen stehen, bevor es neu verschlüsselt ist.
+    for (const k of weitere) {
+      try {
+        return await versuch(k)
+      } catch {}
+    }
+    throw fehler
   }
 }
 
@@ -96,6 +103,7 @@ async function mitSchluessel<T>(
 async function geraeteChiffratOeffnen(paket: ServerPaket, kontoId: number): Promise<number> {
   const schluessel = await getUserNotesKey(kontoId)
   const alt = await altschluessel().catch(() => null)
+  const weitere = [...(alt ? [alt] : []), ...(await nebenschluessel(kontoId).catch(() => []))]
   let zu = 0
 
   for (const notiz of paket.tabellen.notes ?? []) {
@@ -107,7 +115,7 @@ async function geraeteChiffratOeffnen(paket: ServerPaket, kontoId: number): Prom
         notiz[feld] = await mitSchluessel(
           (k) => (feld === 'title' ? decryptNoteTitle(wert, uid, k, kontoId) : decryptNoteContent(wert, uid, k, kontoId)),
           schluessel,
-          alt,
+          weitere,
         )
       } catch {
         zu++
@@ -120,7 +128,7 @@ async function geraeteChiffratOeffnen(paket: ServerPaket, kontoId: number): Prom
       if (typeof wert !== 'string' || !wert.startsWith(CALENDAR_CIPHERTEXT_PREFIX)) continue
       const uid = String(termin.event_uid)
       try {
-        termin[feld] = await mitSchluessel((k) => decryptCalendarField(wert, uid, feld, k, kontoId), schluessel, alt)
+        termin[feld] = await mitSchluessel((k) => decryptCalendarField(wert, uid, feld, k, kontoId), schluessel, weitere)
       } catch {
         zu++
       }

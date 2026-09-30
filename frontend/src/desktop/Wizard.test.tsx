@@ -10,7 +10,7 @@
  * Der Adress-Schritt traegt die Regel, ueber welche Leitung das alles geht:
  * `https://` ist Pflicht, `http://` nur auf dem eigenen Rechner.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
@@ -44,6 +44,8 @@ vi.mock('@/services/e2eeGeraet', async (importOriginal) => ({
 vi.mock('@/services/verlaufsUebergabe', () => ({ holeVerlaufAb: abholen }))
 
 import { sicherheitsnummer } from '@/services/e2eeGeraet'
+import { MessengerVerschlossenError } from '@/services/lokaleVersiegelung'
+import { useMessengerSperre } from '@/services/messengerSperre'
 
 import { Wizard } from './Wizard'
 import { setzeAccessToken } from './transport'
@@ -170,17 +172,59 @@ describe('Wizard: Kopplung', () => {
     expect(screen.getByText(await sicherheitsnummer(OEFFENTLICH))).toBeInTheDocument()
   })
 
-  it('geht ohne Nummer weiter, wenn sich das Geraet nicht melden liess', async () => {
-    // Dann gibt es auch keinen Verlauf, ueber den jemand entscheiden muesste.
-    // Die Kopplung selbst steht trotzdem.
+  it('mit Messenger-PIN fragt die Kopplung nach dem PIN und zeigt danach die Nummer', async () => {
+    // Bis 5.0.3 sass der Geraeteschluessel hinter dem PIN, die Kopplung
+    // verschluckte den Fehler und ging ohne Nummer weiter. Das Geraet tauchte
+    // nie in der Freigabeliste auf und bekam nie den Notizschluessel.
+    veroeffentlichen.mockRejectedValueOnce(new MessengerVerschlossenError())
+    useMessengerSperre.setState({ eingerichtet: true, entsperrt: false })
+    panelNimmtAn()
+    const fertig = vi.fn()
+    codeEingeben(fertig)
+
+    expect(await screen.findByText(i18n.t('mss.wizard.pinTitel'))).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(i18n.t('profile.messengerLock.pinPlaceholder'))).toBeInTheDocument()
+    expect(fertig).not.toHaveBeenCalled()
+    expect(abholen).not.toHaveBeenCalled()
+
+    // Entsperrt — wie nach einem richtigen PIN im Sperrschirm.
+    act(() => {
+      useMessengerSperre.setState({ entsperrt: true })
+    })
+    await screen.findByText(await sicherheitsnummer(OEFFENTLICH))
+    expect(veroeffentlichen).toHaveBeenLastCalledWith('Arbeitsrechner')
+    expect(abholen).toHaveBeenCalledWith('abcd efgh jklm', '{}')
+    expect(fertig).not.toHaveBeenCalled()
+  })
+
+  it('zeigt es, wenn sich das Geraet nicht melden liess, und versucht es auf Knopfdruck neu', async () => {
+    // Bis 5.0.3 ging es hier still ohne Nummer weiter: das Geraet fehlte in
+    // der Freigabeliste, und niemand sah, warum.
+    veroeffentlichen.mockRejectedValueOnce(new Error('kein Netz'))
+    panelNimmtAn()
+    const fertig = vi.fn()
+    codeEingeben(fertig)
+
+    expect(await screen.findByText(i18n.t('mss.wizard.meldenFehlerTitel'))).toBeInTheDocument()
+    expect(screen.getByText('kein Netz')).toBeInTheDocument()
+    expect(fertig).not.toHaveBeenCalled()
+    expect(abholen).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.wizard.nochmal') }))
+    await screen.findByText(await sicherheitsnummer(OEFFENTLICH))
+    expect(abholen).toHaveBeenCalledWith('abcd efgh jklm', '{}')
+  })
+
+  it('laesst nach einem gescheiterten Melden trotzdem weiter, wenn man will', async () => {
+    // Die Kopplung selbst steht; das Melden holt die App beim naechsten
+    // Entsperren des Messengers nach.
     veroeffentlichen.mockRejectedValue(new Error('kein Netz'))
     panelNimmtAn()
     const fertig = vi.fn()
     codeEingeben(fertig)
 
+    fireEvent.click(await screen.findByRole('button', { name: i18n.t('mss.wizard.pinSpaeter') }))
     await waitFor(() => expect(fertig).toHaveBeenCalled())
-    expect(screen.queryByText(i18n.t('mss.wizard.sicherheitsnummerTitel'))).not.toBeInTheDocument()
-    expect(abholen).not.toHaveBeenCalled()
   })
 
   it('ein abgelehnter Code zeigt eine Meldung und bleibt im Schritt', async () => {

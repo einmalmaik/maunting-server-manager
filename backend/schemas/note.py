@@ -28,6 +28,55 @@ class NoteUpdate(BaseModel):
     team_id: int | None = None
 
 
+_ABDRUCK = r"^[A-Za-z0-9+/]{22}$"
+
+
+class Kontoschluessel(BaseModel):
+    """Der Fingerabdruck des Notizschluessels, der fuer alle Geraete gilt — nie der Schluessel.
+
+    Mit der Unterschrift des Geraets, das ihn gesetzt hat: die Geraete pruefen
+    sie selbst und glauben dem Server den Abdruck nicht ohne sie.
+    """
+
+    abdruck: str | None = None
+    stand: int = 0
+    geraet: str | None = None
+    signatur: str | None = None
+
+
+class KontoschluesselSetzen(BaseModel):
+    abdruck: str = Field(pattern=_ABDRUCK)
+    # Der naechste Stand: genau einer mehr als der geltende. Zwei Geraete, die
+    # zugleich ihren Schluessel melden, ueberschreiben einander so nicht, und
+    # eine alte Unterschrift passt auf keinen spaeteren Stand.
+    stand: int = Field(ge=1)
+    geraet: str = Field(min_length=1, max_length=64)
+    signatur: str = Field(min_length=1, max_length=128)
+
+
+# Ein Chiffrat ist groesser als sein Klartext (Base64, Nonce, Tag). Die Grenze
+# haelt diesen Weg nur davon ab, mehr anzunehmen als die gewohnten.
+_CHIFFRAT_MAX = 1_000_000
+_SAMMEL_MAX = 200
+
+
+class Umschluesselung(BaseModel):
+    """Ein Feld, neu verschluesselt: gilt nur, solange ``alt`` noch dort steht."""
+
+    alt: str = Field(min_length=1, max_length=_CHIFFRAT_MAX)
+    neu: str = Field(min_length=1, max_length=_CHIFFRAT_MAX)
+
+
+class NotizUmschluesselung(BaseModel):
+    note_uid: str = Field(min_length=1, max_length=64)
+    title: Umschluesselung | None = None
+    content: Umschluesselung | None = None
+
+
+class NotizenNeuVerschluesseln(BaseModel):
+    eintraege: list[NotizUmschluesselung] = Field(min_length=1, max_length=_SAMMEL_MAX)
+
+
 class NoteResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
