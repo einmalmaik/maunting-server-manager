@@ -1,0 +1,505 @@
+/**
+ * Dateien im Tresor: hochladen, lesen, löschen.
+ *
+ * Hochladen geht in zwei Schritten. Erst wird die Datei Chunk für Chunk
+ * verschlüsselt und das Chiffrat in IndexedDB abgelegt (`dateiVorbereiten`);
+ * die Datei liegt dabei nie ganz im Speicher. Dann geht das Chiffrat hoch
+ * (`uploadsFortsetzen`), auch nach einem Neustart der App und nach dem
+ * Sperren des Tresors: dafür braucht es keinen Schlüssel mehr. Offline
+ * wartet es, bis das Netz wieder da ist.
+ *
+ * Gelöscht werden Blobs nur über einen ausdrücklichen Verweis: den Tombstone
+ * einer Datei, den der Server angenommen hat (`loeschungenAbarbeiten`). Einen
+ * Suchlauf nach verwaisten Blobs gibt es nicht; ein Gerät mit veraltetem Stand
+ * könnte sonst Dateien löschen, die ein anderes gerade hochlädt.
+ */
+
+import { create } from 'zustand'
+import { SanitizedApiError } from '@/api/client'
+import { beimLeeren } from '@/services/klartextSpeicher'
+import {
+  ablageDb,
+  ablageGeladen,
+  BLOB_CACHE,
+  blobsLesen,
+  blobsSchreiben,
+  UPLOAD_CHUNKS,
+  UPLOADS,
+  warteschlangeLesen,
+} from './tresorAblage'
+import {
+  blobAnlegen,
+  blobSchluessel,
+  chiffratGroesse,
+  chunkAnzahl,
+  chunkEntschluesseln,
+  CHUNK_KLARTEXT,
+  chunkVerschluesseln,
+  istBlobKopf,
+  loeschPruefwert,
+  MINIATUR_GROESSE,
+  VORSCHAU_GROESSE,
+  type BlobKopf,
+} from './tresorDatei'
+import {
+  blobFertig,
+  blobLoeschen,
+  blobReservieren,
+  blobStand,
+  chunkHochladen,
+  chunkLaden,
+} from './tresorBlobApi'
+
+/** Was der Tresor-Eintrag einer Datei über sie weiß. Nur verschlüsselt auf dem Server. */
+export interface DateiAngaben {
+  /** MIME-Typ, wie das Gerät ihn meldet; leer, wenn unbekannt. */
+  typ: string
+  /** Letzte Änderung der Datei auf dem Gerät, von dem sie kam (ms). */
+  geaendert?: number
+  original: BlobKopf
+  /** Bei Bildern und Videos ein Vorschaubild, sonst leer, aber immer gleich groß. */
+  vorschau: BlobKopf
+  miniatur: BlobKopf
+}
+
+export function istDateiAngaben(wert: unknown): wert is DateiAngaben {
+  if (!wert || typeof wert !== 'object') return false
+  const d = wert as Record<string, unknown>
+  return (
+    typeof d.typ === 'string' &&
+    (d.geaendert === undefined || typeof d.geaendert === 'number') &&
+    istBlobKopf(d.original) &&
+    istBlobKopf(d.vorschau) &&
+    istBlobKopf(d.miniatur)
+  )
+}
+
+export function dateiBlobs(angaben: DateiAngaben): BlobKopf[] {
+  return [angaben.original, angaben.vorschau, angaben.miniatur]
+}
+
+interface UploadZeile {
+  blobId: string
+  bucket: string
+  eintragId: string
+  chunkAnzahl: number
+  bytes: number
+  pruefwert: string
+  /** Erst wenn alle Chunks verschlüsselt abgelegt sind. */
+  bereit: boolean
+  /** Miniatur und Vorschau bleiben nach dem Hochladen im Cache, fürs Offline-Anzeigen. */
+  behalten: boolean
+  fehler?: 'speicherVoll'
+}
+
+interface ChunkZeile {
+  blobId: string
+  index: number
+  daten: Uint8Array
+}
+
+export interface UploadFortschritt {
+  gesendet: number
+  gesamt: number
+  fehler?: 'speicherVoll'
+}
+
+/** Fortschritt der Uploads je Tresor-Eintrag, für die Oberfläche. */
+export const useTresorUploads = create<{ je: Record<string, UploadFortschritt> }>(() => ({ je: {} }))
+
+function fortschrittSetzen(eintragId: string, aenderung: (alt: UploadFortschritt) => UploadFortschritt | null) {
+  useTresorUploads.setState((zustand) => {
+    const alt = zustand.je[eintragId] ?? { gesendet: 0, gesamt: 0 }
+    const neu = aenderung(alt)
+    const je = { ...zustand.je }
+    if (neu) je[eintragId] = neu
+    else delete je[eintragId]
+    return { je }
+  })
+}
+
+function anfrage<T>(req: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+function fertig(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error ?? new Error('Transaktion abgebrochen'))
+  })
+}
+
+async function schreiben(db: IDBDatabase, store: string, arbeit: (s: IDBObjectStore) => void): Promise<void> {
+  const tx = db.transaction(store, 'readwrite')
+  arbeit(tx.objectStore(store))
+  await fertig(tx)
+}
+
+/** Alle Chunks eines Blobs: `[id, 0]` bis `[id, []]`. */
+function chunkBereich(blobId: string): IDBKeyRange {
+  return IDBKeyRange.bound([blobId, 0], [blobId, []])
+}
+
+async function uploadEntfernen(db: IDBDatabase, blobId: string): Promise<void> {
+  const tx = db.transaction([UPLOADS, UPLOAD_CHUNKS], 'readwrite')
+  tx.objectStore(UPLOADS).delete(blobId)
+  tx.objectStore(UPLOAD_CHUNKS).delete(chunkBereich(blobId))
+  await fertig(tx)
+}
+
+async function ablageOderFehler(): Promise<IDBDatabase> {
+  const db = await ablageDb()
+  if (!db) throw new Error('Dateien brauchen eine lokale Ablage (IndexedDB) und ein angemeldetes Konto.')
+  return db
+}
+
+/** Blobs, deren Upload gerade vorbereitet wird: der Uploader lässt sie in Ruhe. */
+const inVorbereitung = new Set<string>()
+
+async function blobAblegen(
+  db: IDBDatabase,
+  bucket: string,
+  eintragId: string,
+  kopf: BlobKopf,
+  schluessel: CryptoKey,
+  behalten: boolean,
+  lesen: (von: number, bis: number) => Promise<Uint8Array>,
+  abgebrochen: () => boolean,
+): Promise<UploadZeile> {
+  const anzahl = chunkAnzahl(kopf.groesse)
+  const zeile: UploadZeile = {
+    blobId: kopf.id,
+    bucket,
+    eintragId,
+    chunkAnzahl: anzahl,
+    bytes: chiffratGroesse(kopf.groesse),
+    pruefwert: await loeschPruefwert(kopf),
+    bereit: false,
+    behalten,
+  }
+  await schreiben(db, UPLOADS, (s) => s.put(zeile))
+  for (let index = 0; index < anzahl; index++) {
+    if (abgebrochen()) throw new Error('abgebrochen')
+    const von = Math.min(index * CHUNK_KLARTEXT, kopf.echt)
+    const bis = Math.min((index + 1) * CHUNK_KLARTEXT, kopf.echt)
+    const daten = await chunkVerschluesseln(await lesen(von, bis), kopf, index, schluessel, eintragId)
+    // Einzeln ablegen und abwarten: so liegt nie mehr als ein Chunk im Speicher.
+    await schreiben(db, UPLOAD_CHUNKS, (s) => s.put({ blobId: kopf.id, index, daten } satisfies ChunkZeile))
+  }
+  return zeile
+}
+
+/**
+ * Verschlüsselt eine Datei in die Upload-Ablage und liefert die Angaben für
+ * ihren Tresor-Eintrag. Der Eintrag muss danach gespeichert und
+ * `vorbereitungAbschliessen` aufgerufen werden; erst dann geht etwas hoch.
+ *
+ * `abgebrochen` wird zwischen den Chunks gefragt (Sperren des Tresors).
+ */
+export async function dateiVorbereiten(
+  datei: Blob & { name?: string; lastModified?: number },
+  userKey: CryptoKey,
+  bucket: string,
+  eintragId: string,
+  abgebrochen: () => boolean,
+  bilder: { vorschau?: Uint8Array; miniatur?: Uint8Array } = {},
+): Promise<DateiAngaben> {
+  const db = await ablageOderFehler()
+  const vorschauDaten = bilder.vorschau ?? new Uint8Array(0)
+  const miniaturDaten = bilder.miniatur ?? new Uint8Array(0)
+  const original = await blobAnlegen(userKey, eintragId, datei.size)
+  const vorschau = await blobAnlegen(userKey, eintragId, vorschauDaten.length, VORSCHAU_GROESSE)
+  const miniatur = await blobAnlegen(userKey, eintragId, miniaturDaten.length, MINIATUR_GROESSE)
+  const blobs = [original, vorschau, miniatur]
+  for (const { kopf } of blobs) inVorbereitung.add(kopf.id)
+  try {
+    const zeilen = [
+      await blobAblegen(db, bucket, eintragId, original.kopf, original.schluessel, false, async (von, bis) => {
+        return new Uint8Array(await datei.slice(von, bis).arrayBuffer())
+      }, abgebrochen),
+      await blobAblegen(db, bucket, eintragId, vorschau.kopf, vorschau.schluessel, true, async (von, bis) => vorschauDaten.slice(von, bis), abgebrochen),
+      await blobAblegen(db, bucket, eintragId, miniatur.kopf, miniatur.schluessel, true, async (von, bis) => miniaturDaten.slice(von, bis), abgebrochen),
+    ]
+    await schreiben(db, UPLOADS, (s) => {
+      for (const zeile of zeilen) s.put({ ...zeile, bereit: true })
+    })
+  } catch (err) {
+    for (const { kopf } of blobs) {
+      inVorbereitung.delete(kopf.id)
+      await uploadEntfernen(db, kopf.id).catch(() => {})
+    }
+    throw err
+  }
+  fortschrittSetzen(eintragId, () => ({ gesendet: 0, gesamt: blobs.reduce((n, b) => n + chiffratGroesse(b.kopf.groesse), 0) }))
+  return {
+    typ: datei.type || '',
+    geaendert: datei.lastModified,
+    original: original.kopf,
+    vorschau: vorschau.kopf,
+    miniatur: miniatur.kopf,
+  }
+}
+
+/**
+ * Der Eintrag ist gespeichert (oder wurde nicht gespeichert): ab jetzt
+ * entscheidet der Uploader, ob die Blobs hochgehen.
+ */
+export function vorbereitungAbschliessen(angaben: DateiAngaben): void {
+  for (const kopf of dateiBlobs(angaben)) inVorbereitung.delete(kopf.id)
+}
+
+/** Ob ein Eintrag lokal lebt: im Cache oder in der Warteschlange, und kein Tombstone. */
+function eintragLebt(bucket: string, eintragId: string): boolean {
+  const inWarteschlange = warteschlangeLesen(bucket).find((e) => e.id === eintragId)
+  if (inWarteschlange) return !inWarteschlange.is_deleted
+  const imCache = blobsLesen(bucket).find((e) => e.id === eintragId)
+  return !!imCache && !imCache.is_deleted
+}
+
+function status(err: unknown): number | null {
+  return err instanceof SanitizedApiError ? err.status : null
+}
+
+let uploaderLaeuft: Promise<void> | null = null
+
+/**
+ * Lädt hoch, was in der Ablage wartet. Läuft höchstens einmal zugleich; ein
+ * Aufruf während eines Laufs wartet auf diesen. Bricht beim ersten
+ * Netzfehler ab, der nächste Sync oder das nächste „online“ stößt wieder an.
+ */
+export function uploadsFortsetzen(bucket: string): Promise<void> {
+  if (!uploaderLaeuft) {
+    uploaderLaeuft = hochladen(bucket).finally(() => {
+      uploaderLaeuft = null
+    })
+  }
+  return uploaderLaeuft
+}
+
+async function hochladen(bucket: string): Promise<void> {
+  // Ohne geladene Ablage wirkt jeder Eintrag tot, und wartende Uploads würden
+  // verworfen.
+  if (!ablageGeladen(bucket)) return
+  const db = await ablageDb()
+  if (!db) return
+  const zeilen = ((await anfrage(db.transaction(UPLOADS).objectStore(UPLOADS).getAll())) as UploadZeile[]).filter(
+    (z) => z.bucket === bucket && !inVorbereitung.has(z.blobId),
+  )
+  // Jeder Lauf zählt neu: was fertig ist, steht nicht mehr in der Ablage, und
+  // schon angekommene Chunks eines Blobs zählen im Lauf wieder mit.
+  const gesamt = new Map<string, number>()
+  for (const zeile of zeilen) {
+    if (zeile.bereit) gesamt.set(zeile.eintragId, (gesamt.get(zeile.eintragId) ?? 0) + zeile.bytes)
+  }
+  for (const [eintragId, bytes] of gesamt) {
+    const fehler = zeilen.find((z) => z.eintragId === eintragId && z.fehler)?.fehler
+    fortschrittSetzen(eintragId, () => ({ gesendet: 0, gesamt: bytes, fehler }))
+  }
+  for (const zeile of zeilen) {
+    if (!zeile.bereit || !eintragLebt(bucket, zeile.eintragId)) {
+      // Abgebrochene Vorbereitung oder inzwischen gelöschter Eintrag.
+      await uploadEntfernen(db, zeile.blobId)
+      continue
+    }
+    try {
+      await blobHochladen(db, zeile)
+    } catch (err) {
+      if (status(err) === 507) {
+        await schreiben(db, UPLOADS, (s) => s.put({ ...zeile, fehler: 'speicherVoll' }))
+        fortschrittSetzen(zeile.eintragId, (alt) => ({ ...alt, fehler: 'speicherVoll' }))
+      }
+      return
+    }
+  }
+}
+
+async function blobHochladen(db: IDBDatabase, zeile: UploadZeile): Promise<void> {
+  let vorhanden: number[] = []
+  try {
+    const stand = await blobStand(zeile.blobId)
+    if (stand.state === 'geloescht') {
+      await uploadEntfernen(db, zeile.blobId)
+      return
+    }
+    if (stand.state === 'fertig') {
+      await uploadAbschliessen(db, zeile)
+      return
+    }
+    vorhanden = stand.vorhanden
+  } catch (err) {
+    if (status(err) !== 404) throw err
+    try {
+      await blobReservieren(zeile.blobId, zeile.chunkAnzahl, zeile.bytes, zeile.pruefwert)
+    } catch (reserviert) {
+      // 409: eine frühere Anfrage kam an, ihre Antwort nicht. Der nächste Lauf fragt den Stand.
+      if (status(reserviert) !== 409) throw reserviert
+      return
+    }
+  }
+  const schon = new Set(vorhanden)
+  for (let index = 0; index < zeile.chunkAnzahl; index++) {
+    const chunk = (await anfrage(
+      db.transaction(UPLOAD_CHUNKS).objectStore(UPLOAD_CHUNKS).get([zeile.blobId, index]),
+    )) as ChunkZeile | undefined
+    if (!chunk) {
+      // Die Ablage ist unvollständig (vom Browser geräumt): so kommt die Datei nie an.
+      await uploadEntfernen(db, zeile.blobId)
+      return
+    }
+    if (!schon.has(index)) await chunkHochladen(zeile.blobId, index, chunk.daten)
+    const laenge = chunk.daten.byteLength
+    fortschrittSetzen(zeile.eintragId, (alt) => ({ ...alt, gesendet: alt.gesendet + laenge }))
+  }
+  await blobFertig(zeile.blobId)
+  await uploadAbschliessen(db, zeile)
+}
+
+async function uploadAbschliessen(db: IDBDatabase, zeile: UploadZeile): Promise<void> {
+  const chunks = zeile.behalten
+    ? ((await anfrage(db.transaction(UPLOAD_CHUNKS).objectStore(UPLOAD_CHUNKS).getAll(chunkBereich(zeile.blobId)))) as ChunkZeile[])
+    : []
+  const tx = db.transaction([UPLOADS, UPLOAD_CHUNKS, BLOB_CACHE], 'readwrite')
+  for (const chunk of chunks) tx.objectStore(BLOB_CACHE).put(chunk)
+  tx.objectStore(UPLOADS).delete(zeile.blobId)
+  tx.objectStore(UPLOAD_CHUNKS).delete(chunkBereich(zeile.blobId))
+  await fertig(tx)
+  const offen = ((await anfrage(db.transaction(UPLOADS).objectStore(UPLOADS).getAll())) as UploadZeile[]).some(
+    (z) => z.eintragId === zeile.eintragId,
+  )
+  if (!offen) fortschrittSetzen(zeile.eintragId, () => null)
+}
+
+/** Chiffrat eines Chunks, falls es auf dem Gerät liegt: im Cache oder noch in der Upload-Ablage. */
+async function lokalesChiffrat(db: IDBDatabase, blobId: string, index: number): Promise<Uint8Array | null> {
+  const tx = db.transaction([BLOB_CACHE, UPLOAD_CHUNKS])
+  const ausCache = (await anfrage(tx.objectStore(BLOB_CACHE).get([blobId, index]))) as ChunkZeile | undefined
+  if (ausCache) return ausCache.daten
+  const ausUpload = (await anfrage(tx.objectStore(UPLOAD_CHUNKS).get([blobId, index]))) as ChunkZeile | undefined
+  return ausUpload?.daten ?? null
+}
+
+/**
+ * Entschlüsselt einen Blob in ein `Blob`. Jeder Chunk wird einzeln zu einem
+ * `Blob`; die Laufzeit darf die Teile auslagern, und im JavaScript-Speicher
+ * liegt nie mehr als ein Chunk Klartext.
+ */
+export async function blobLesen(
+  kopf: BlobKopf,
+  eintragId: string,
+  userKey: CryptoKey,
+  typ: string,
+  optionen: { cachen?: boolean; signal?: AbortSignal; fortschritt?: (anteil: number) => void } = {},
+): Promise<Blob> {
+  const db = await ablageDb()
+  const schluessel = await blobSchluessel(kopf, userKey, eintragId)
+  const anzahl = chunkAnzahl(kopf.groesse)
+  const teile: Blob[] = []
+  for (let index = 0; index < anzahl; index++) {
+    optionen.signal?.throwIfAborted()
+    let chiffrat = db ? await lokalesChiffrat(db, kopf.id, index) : null
+    if (!chiffrat) {
+      chiffrat = await chunkLaden(kopf.id, index, optionen.signal)
+      if (db && optionen.cachen) {
+        const daten = chiffrat
+        await schreiben(db, BLOB_CACHE, (s) => s.put({ blobId: kopf.id, index, daten } satisfies ChunkZeile))
+      }
+    }
+    const klartext = await chunkEntschluesseln(chiffrat, kopf, index, schluessel, eintragId)
+    teile.push(new Blob([klartext as BlobPart]))
+    klartext.fill(0)
+    optionen.fortschritt?.((index + 1) / anzahl)
+  }
+  return new Blob(teile, { type: typ })
+}
+
+/** Ob alle Chunks eines Blobs auf dem Gerät liegen. */
+export async function blobLokal(kopf: BlobKopf): Promise<boolean> {
+  const db = await ablageDb()
+  if (!db) return false
+  for (let index = 0; index < chunkAnzahl(kopf.groesse); index++) {
+    if (!(await lokalesChiffrat(db, kopf.id, index))) return false
+  }
+  return true
+}
+
+/** Nimmt einen Blob aus dem Offline-Cache. */
+export async function cacheEntfernen(blobId: string): Promise<void> {
+  const db = await ablageDb()
+  if (db) await schreiben(db, BLOB_CACHE, (s) => s.delete(chunkBereich(blobId)))
+}
+
+let loeschenLaeuft: Promise<void> | null = null
+
+/**
+ * Löscht die Blobs gelöschter Dateien, sobald der Server deren Tombstone
+ * angenommen hat: der Tombstone steht im Cache, und in der Warteschlange ist
+ * für den Eintrag nichts mehr offen. Hat der Server abgelehnt, steht im Cache
+ * wieder die alte Fassung, und es gibt nichts zu tun.
+ */
+export function loeschungenAbarbeiten(bucket: string): Promise<void> {
+  if (!loeschenLaeuft) {
+    loeschenLaeuft = loeschen(bucket).finally(() => {
+      loeschenLaeuft = null
+    })
+  }
+  return loeschenLaeuft
+}
+
+async function loeschen(bucket: string): Promise<void> {
+  if (!ablageGeladen(bucket)) return
+  const offen = new Set(warteschlangeLesen(bucket).map((e) => e.id))
+  const faellig = blobsLesen(bucket).filter((e) => e.is_deleted && e.loeschBlobs?.length && !offen.has(e.id))
+  const db = await ablageDb()
+  for (const grab of faellig) {
+    for (const blob of grab.loeschBlobs ?? []) {
+      try {
+        await blobLoeschen(blob.id, blob.loeschen)
+      } catch (err) {
+        // 404: nie angekommen oder schon weg. 403 passiert nur mit einem
+        // fremden Kopf; wiederholen hilft dann nicht.
+        const s = status(err)
+        if (s !== 404 && s !== 403) return
+        if (s === 403) console.warn(`Tresor: Löschnachweis für Blob ${blob.id} abgelehnt.`)
+      }
+      if (db) {
+        await uploadEntfernen(db, blob.id).catch(() => {})
+        await schreiben(db, BLOB_CACHE, (s) => s.delete(chunkBereich(blob.id))).catch(() => {})
+      }
+    }
+    // Nach den Anfragen frisch lesen und nur diesen Eintrag umschreiben, wenn
+    // er noch derselbe Tombstone ist.
+    const aktuell = blobsLesen(bucket)
+    const jetzt = aktuell.find((e) => e.id === grab.id)
+    if (jetzt && jetzt.ciphertext === grab.ciphertext) {
+      blobsSchreiben(
+        bucket,
+        aktuell.map((e) => (e.id === grab.id ? { ...e, loeschBlobs: undefined } : e)),
+      )
+    }
+  }
+}
+
+/** Offene Ansichten entschlüsselter Dateien (Objekt-URLs). */
+const ansichten = new Set<string>()
+
+export function ansichtOeffnen(blob: Blob): string {
+  const url = URL.createObjectURL(blob)
+  ansichten.add(url)
+  return url
+}
+
+export function ansichtSchliessen(url: string): void {
+  if (ansichten.delete(url)) URL.revokeObjectURL(url)
+}
+
+/** Beim Sperren des Tresors und beim Abmelden: keine entschlüsselte Datei bleibt erreichbar. */
+export function ansichtenSchliessen(): void {
+  for (const url of ansichten) URL.revokeObjectURL(url)
+  ansichten.clear()
+}
+
+beimLeeren.add(ansichtenSchliessen)

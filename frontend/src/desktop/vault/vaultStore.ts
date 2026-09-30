@@ -38,6 +38,16 @@ import {
   warteschlangeSchreiben,
   type StoredEncryptedEntry,
 } from './tresorAblage'
+import {
+  ansichtenSchliessen,
+  dateiBlobs,
+  dateiVorbereiten,
+  istDateiAngaben,
+  loeschungenAbarbeiten,
+  uploadsFortsetzen,
+  vorbereitungAbschliessen,
+  type DateiAngaben,
+} from './tresorDateien'
 
 export interface VaultAttachment {
   id: string
@@ -53,11 +63,18 @@ export interface VaultAttachment {
  * Speicher, damit der Sync ihn nicht verliert, erscheint aber nirgends und
  * wird nicht geschrieben.
  */
-export const BEKANNTE_KATEGORIEN = ['login', 'authenticator', 'secure_note'] as const
+export const BEKANNTE_KATEGORIEN = ['login', 'authenticator', 'secure_note', 'datei', 'ordner'] as const
 export type VaultKategorie = (typeof BEKANNTE_KATEGORIEN)[number]
 
 export function istBekannteKategorie(kategorie: string | undefined): boolean {
   return (BEKANNTE_KATEGORIEN as readonly string[]).includes(kategorie ?? 'login')
+}
+
+/** Was in der Passwortliste steht. Dateien und Ordner haben ihren eigenen Bereich. */
+export const PASSWORT_KATEGORIEN = ['login', 'authenticator', 'secure_note'] as const
+
+export function istPasswortKategorie(kategorie: string | undefined): boolean {
+  return (PASSWORT_KATEGORIEN as readonly string[]).includes(kategorie ?? 'login')
 }
 
 /** Aufbau der Nutzlast. Eine neuere App erkennt daran, was eine ältere geschrieben hat. */
@@ -84,6 +101,10 @@ export interface VaultItem {
   archivedAt?: number
   /** Gesetzt, solange der Eintrag im Papierkorb liegt. */
   trashedAt?: number
+  /** Nur bei Dateien: Typ und die Köpfe ihrer Blobs. Der Name steht in `service`. */
+  datei?: DateiAngaben
+  /** Dateien und Ordner: der Ordner, in dem sie liegen. Fehlt in der obersten Ebene. */
+  ordner?: string
   createdAt: number
   updatedAt: number
   revision: number
@@ -110,6 +131,8 @@ const BEKANNTE_FELDER = new Set([
   'linkedServiceId',
   'archivedAt',
   'trashedAt',
+  'datei',
+  'ordner',
   'createdAt',
   'updatedAt',
   'format',
@@ -125,6 +148,10 @@ export function itemAusUmschlag(id: string, revision: number, payload: Record<st
   for (const [schluessel, wert] of Object.entries(payload)) {
     if (!BEKANNTE_FELDER.has(schluessel)) extra[schluessel] = wert
   }
+  // Angaben, die diese Fassung nicht lesen kann, gehen unverändert mit, statt
+  // beim nächsten Speichern zu verschwinden.
+  const datei = istDateiAngaben(payload.datei) ? payload.datei : undefined
+  if (payload.datei !== undefined && !datei) extra.datei = payload.datei
   return {
     id,
     service: String(payload.service || 'Unbekannt'),
@@ -140,6 +167,8 @@ export function itemAusUmschlag(id: string, revision: number, payload: Record<st
     linkedServiceId: payload.linkedServiceId ? String(payload.linkedServiceId) : undefined,
     archivedAt: zahlOderNichts(payload.archivedAt),
     trashedAt: zahlOderNichts(payload.trashedAt),
+    datei,
+    ordner: typeof payload.ordner === 'string' && payload.ordner ? payload.ordner : undefined,
     createdAt: Number(payload.createdAt || Date.now()),
     updatedAt: Number(payload.updatedAt || Date.now()),
     revision,
@@ -165,6 +194,8 @@ export function umschlagAusItem(item: VaultItem): Record<string, unknown> {
     linkedServiceId: item.linkedServiceId,
     archivedAt: item.archivedAt,
     trashedAt: item.trashedAt,
+    ...(item.datei ? { datei: item.datei } : {}),
+    ordner: item.ordner,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   }
@@ -221,7 +252,7 @@ export interface VaultBlindSyncPayload {
  */
 export function brauchtNeueApp(items: VaultItem[]): boolean {
   return items.some(
-    (i) => i.trashedAt !== undefined || i.archivedAt !== undefined || i.extra !== undefined || !istBekannteKategorie(i.category),
+    (i) => i.trashedAt !== undefined || i.archivedAt !== undefined || i.extra !== undefined || !istPasswortKategorie(i.category),
   )
 }
 
@@ -581,6 +612,12 @@ interface VaultState {
   /** Löscht endgültig: ein Tombstone ersetzt den Eintrag, auch auf allen anderen Geräten. */
   deleteItem: (id: string) => Promise<void>
   emptyTrash: () => Promise<void>
+  /**
+   * Legt eine Datei im Tresor ab: verschlüsselt sie auf dem Gerät, speichert
+   * den Eintrag und lädt im Hintergrund hoch. Liefert die Kennung des Eintrags.
+   */
+  dateiHinzufuegen: (datei: File, ordner?: string, bilder?: { vorschau?: Uint8Array; miniatur?: Uint8Array }) => Promise<string>
+  ordnerAnlegen: (name: string, ordner?: string) => Promise<string>
   toggleFavorite: (id: string) => Promise<void>
   markUsed: (id: string) => Promise<void>
   syncWithServer: () => Promise<void>
@@ -805,6 +842,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
   },
 
   lock: () => {
+    ansichtenSchliessen()
     set({
       isUnlocked: false,
       userKey: null,
@@ -1262,6 +1300,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
       linkedServiceId: itemData.linkedServiceId !== undefined ? itemData.linkedServiceId : existing?.linkedServiceId,
       archivedAt: uebernimm('archivedAt'),
       trashedAt: uebernimm('trashedAt'),
+      datei: itemData.datei ?? existing?.datei,
+      ordner: 'ordner' in itemData ? itemData.ordner : existing?.ordner,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       revision,
@@ -1316,10 +1356,14 @@ export const useVaultStore = create<VaultState>((set, get) => {
     // Im Cache bleibt der Tombstone stehen, nicht nichts: ohne ihn hielte der
     // Sync eine zurückgespielte alte Fassung des Eintrags für einen neuen und
     // holte das gelöschte Passwort zurück.
+    //
+    // Bei einer Datei trägt der Tombstone die Löschaufträge ihrer Blobs. Sie
+    // laufen erst, wenn der Server das Löschen angenommen hat.
     let cachedBlobs = getStoredBlobs(bucketId)
     const vorher = cachedBlobs.find((b) => b.id === id)
     cachedBlobs = cachedBlobs.filter((b) => b.id !== id)
-    cachedBlobs.push({ id, ciphertext: tombstone, revision, is_deleted: true, stand, serverRev: vorher?.serverRev })
+    const loeschBlobs = existing?.datei ? dateiBlobs(existing.datei).map((k) => ({ id: k.id, loeschen: k.loeschen })) : undefined
+    cachedBlobs.push({ id, ciphertext: tombstone, revision, is_deleted: true, stand, serverRev: vorher?.serverRev, loeschBlobs })
     blobsSchreiben(bucketId, cachedBlobs)
 
     // Tombstone in Pending Queue. Gelöscht wird nur die Fassung, die dieses
@@ -1343,6 +1387,14 @@ export const useVaultStore = create<VaultState>((set, get) => {
       items: remaining,
       selectedItemId: remaining.length > 0 ? remaining[0].id : null,
     })
+
+    // Was in einem Ordner liegt, geht mit ihm.
+    if (existing?.category === 'ordner') {
+      for (const kind of get().items.filter((i) => i.ordner === id)) {
+        if (!sitzungOffen(userKey, bucketId)) return
+        await get().deleteItem(kind.id)
+      }
+    }
 
     void get().syncWithServer()
   },
@@ -1373,6 +1425,28 @@ export const useVaultStore = create<VaultState>((set, get) => {
     for (const item of imPapierkorb) {
       await get().deleteItem(item.id)
     }
+  },
+
+  dateiHinzufuegen: async (datei, ordner, bilder) => {
+    const { userKey, bucketId } = get()
+    if (!userKey || !bucketId) throw new Error(i18n.t('mss.vault.errors.locked'))
+    const id = window.crypto.randomUUID()
+    const angaben = await dateiVorbereiten(datei, userKey, bucketId, id, () => !sitzungOffen(userKey, bucketId), bilder)
+    try {
+      if (!sitzungOffen(userKey, bucketId)) throw new Error(i18n.t('mss.vault.errors.locked'))
+      await get().saveItem({ id, service: datei.name, category: 'datei', datei: angaben, ordner })
+    } finally {
+      // Ohne gespeicherten Eintrag verwirft der Uploader die Blobs beim nächsten Lauf.
+      vorbereitungAbschliessen(angaben)
+    }
+    void uploadsFortsetzen(bucketId)
+    return id
+  },
+
+  ordnerAnlegen: async (name, ordner) => {
+    const id = window.crypto.randomUUID()
+    await get().saveItem({ id, service: name, category: 'ordner', ordner })
+    return id
   },
 
   toggleFavorite: async (id: string) => {
@@ -1531,7 +1605,9 @@ export const useVaultStore = create<VaultState>((set, get) => {
           cachedBlobs = cachedBlobs.filter((b) => b.id !== entry.id)
           const serverRev = entry.revision
           if (befund.art === 'grab') {
-            cachedBlobs.push({ id: entry.id, ciphertext: entry.ciphertext, revision: entry.revision, is_deleted: true, stand, serverRev })
+            // Das Echo des eigenen Tombstones behält dessen Löschaufträge.
+            const loeschBlobs = bekannt?.ciphertext === entry.ciphertext ? bekannt.loeschBlobs : undefined
+            cachedBlobs.push({ id: entry.id, ciphertext: entry.ciphertext, revision: entry.revision, is_deleted: true, stand, serverRev, loeschBlobs })
             currentItems = currentItems.filter((i) => i.id !== entry.id)
             continue
           }
@@ -1585,6 +1661,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
         syncStatus: 'synced',
         lastSyncTime: Date.now(),
       })
+      void uploadsFortsetzen(bucketId)
+      void loeschungenAbarbeiten(bucketId)
 
       if (abgeglichen) {
         await ablageUmziehen()

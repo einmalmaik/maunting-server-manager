@@ -47,6 +47,13 @@ export interface StoredEncryptedEntry {
   expected_revision?: number
   /** Nur in der Warteschlange: der Cache-Eintrag vor dem Löschen, für den Konfliktfall. */
   vorher?: StoredEncryptedEntry
+  /**
+   * Nur an einem Tombstone im Cache: die Blobs der gelöschten Datei samt
+   * Löschnachweis. Sie werden gelöscht, sobald der Server den Tombstone
+   * angenommen hat (siehe `tresorDateien.ts`). Lehnt er ab, ersetzt der Sync
+   * den Tombstone durch die alte Fassung, und die Aufträge sind mit weg.
+   */
+  loeschBlobs?: { id: string; loeschen: string }[]
 }
 
 export const ALT_BLOBS = 'mss:vault_blobs_'
@@ -54,10 +61,15 @@ export const ALT_WARTESCHLANGE = 'mss:vault_pending_'
 export const ALT_REVISION = 'mss:vault_rev_'
 
 const DB_PRAEFIX = 'msm_tresor:konto:'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const EINTRAEGE = 'eintraege'
 const WARTESCHLANGE = 'warteschlange'
 const STAND = 'stand'
+/** Wartende Uploads (Kopf und Stand je Blob) und ihr Chiffrat je Chunk. */
+export const UPLOADS = 'uploads'
+export const UPLOAD_CHUNKS = 'upload_chunks'
+/** Chiffrat heruntergeladener Chunks: Miniaturen und „offline verfügbar“. */
+export const BLOB_CACHE = 'blob_cache'
 
 interface Zeile extends StoredEncryptedEntry {
   bucket: string
@@ -138,8 +150,22 @@ function oeffnen(konto: number): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STAND)) {
         db.createObjectStore(STAND, { keyPath: 'bucket' })
       }
+      if (!db.objectStoreNames.contains(UPLOADS)) {
+        db.createObjectStore(UPLOADS, { keyPath: 'blobId' })
+      }
+      if (!db.objectStoreNames.contains(UPLOAD_CHUNKS)) {
+        db.createObjectStore(UPLOAD_CHUNKS, { keyPath: ['blobId', 'index'] })
+      }
+      if (!db.objectStoreNames.contains(BLOB_CACHE)) {
+        db.createObjectStore(BLOB_CACHE, { keyPath: ['blobId', 'index'] })
+      }
     }
-    req.onsuccess = () => resolve(req.result)
+    req.onsuccess = () => {
+      // Eine neuere Fassung oder das Zurücksetzen will die Datenbank ändern:
+      // diese Verbindung gibt nach, statt sie zu blockieren.
+      req.result.onversionchange = () => req.result.close()
+      resolve(req.result)
+    }
     req.onerror = () => reject(req.error)
   })
 }
@@ -317,6 +343,28 @@ export function ablageSchliessen(): void {
   fach = null
 }
 
+/**
+ * Die Datenbank des angemeldeten Kontos für Uploads und Blob-Cache. Ohne
+ * Konto oder ohne IndexedDB gibt es keine: Dateien brauchen sie.
+ */
+export async function ablageDb(): Promise<IDBDatabase | null> {
+  if (fach?.db) return fach.db
+  const konto = angemeldetesKonto()
+  if (konto === null || typeof indexedDB === 'undefined') return null
+  if (!eigeneDb || eigeneDb.konto !== konto) {
+    eigeneDb?.db.close()
+    eigeneDb = { konto, db: await oeffnen(konto) }
+  }
+  return eigeneDb.db
+}
+
+let eigeneDb: { konto: number; db: IDBDatabase } | null = null
+
+/** Ob die Ablage dieses Buckets im Speicher liegt. Vorher sagen Lesezugriffe nichts über den Bestand. */
+export function ablageGeladen(bucket: string): boolean {
+  return fach?.bucket === bucket
+}
+
 /** Ob die Ablage dieses Buckets in IndexedDB liegt (für Tests und Diagnose). */
 export function ablageInIndexedDb(bucket: string): boolean {
   return fach?.bucket === bucket && fach.db !== null
@@ -338,12 +386,28 @@ function gleich(a: StoredEncryptedEntry | undefined, b: StoredEncryptedEntry): b
     a.is_deleted === b.is_deleted &&
     a.stand === b.stand &&
     a.serverRev === b.serverRev &&
-    a.expected_revision === b.expected_revision
+    a.expected_revision === b.expected_revision &&
+    JSON.stringify(a.loeschBlobs) === JSON.stringify(b.loeschBlobs)
   )
 }
 
 function schreibfehler(err: unknown): void {
   console.warn('Tresor-Ablage: Schreiben nach IndexedDB gescheitert.', err)
+}
+
+/**
+ * Eine Schreibtransaktion auf der Datenbank des Fachs. Wurde die Verbindung
+ * geschlossen (Zurücksetzen, neuere Fassung in einem anderen Fenster), wirft
+ * `transaction` sofort; der Sync soll daran nicht abbrechen.
+ */
+function schreiben(db: IDBDatabase, store: string, arbeit: (s: IDBObjectStore) => void): void {
+  try {
+    const tx = db.transaction(store, 'readwrite')
+    arbeit(tx.objectStore(store))
+    fertig(tx).catch(schreibfehler)
+  } catch (err) {
+    schreibfehler(err)
+  }
 }
 
 export function blobsLesen(bucket: string): StoredEncryptedEntry[] {
@@ -363,15 +427,14 @@ export function blobsSchreiben(bucket: string, liste: StoredEncryptedEntry[]): v
     localStorage.setItem(`${ALT_BLOBS}${bucket}`, JSON.stringify(liste))
     return
   }
-  const tx = fach.db.transaction(EINTRAEGE, 'readwrite')
-  const store = tx.objectStore(EINTRAEGE)
-  for (const eintrag of neu.values()) {
-    if (!gleich(alt.get(eintrag.id), eintrag)) store.put({ ...eintrag, bucket })
-  }
-  for (const id of alt.keys()) {
-    if (!neu.has(id)) store.delete([bucket, id])
-  }
-  fertig(tx).catch(schreibfehler)
+  schreiben(fach.db, EINTRAEGE, (store) => {
+    for (const eintrag of neu.values()) {
+      if (!gleich(alt.get(eintrag.id), eintrag)) store.put({ ...eintrag, bucket })
+    }
+    for (const id of alt.keys()) {
+      if (!neu.has(id)) store.delete([bucket, id])
+    }
+  })
 }
 
 export function warteschlangeLesen(bucket: string): StoredEncryptedEntry[] {
@@ -395,23 +458,23 @@ export function warteschlangeSchreiben(bucket: string, liste: StoredEncryptedEnt
   }
   // Die Reihenfolge ist die des Einreihens: neue und geänderte Einträge
   // bekommen die nächste Nummer, unveränderte behalten ihre.
-  const tx = fach.db.transaction(WARTESCHLANGE, 'readwrite')
-  const store = tx.objectStore(WARTESCHLANGE)
-  const bleibend = new Set<string>()
-  for (const eintrag of liste) {
-    bleibend.add(eintrag.id)
-    if (gleich(alt.get(eintrag.id), eintrag) && fach.seq.has(eintrag.id)) continue
-    const seq = fach.naechsteSeq++
-    fach.seq.set(eintrag.id, seq)
-    store.put({ ...eintrag, bucket, seq })
-  }
-  for (const id of alt.keys()) {
-    if (!bleibend.has(id)) {
-      store.delete([bucket, id])
-      fach.seq.delete(id)
+  const f = fach
+  schreiben(f.db!, WARTESCHLANGE, (store) => {
+    const bleibend = new Set<string>()
+    for (const eintrag of liste) {
+      bleibend.add(eintrag.id)
+      if (gleich(alt.get(eintrag.id), eintrag) && f.seq.has(eintrag.id)) continue
+      const seq = f.naechsteSeq++
+      f.seq.set(eintrag.id, seq)
+      store.put({ ...eintrag, bucket, seq })
     }
-  }
-  fertig(tx).catch(schreibfehler)
+    for (const id of alt.keys()) {
+      if (!bleibend.has(id)) {
+        store.delete([bucket, id])
+        f.seq.delete(id)
+      }
+    }
+  })
 }
 
 export function revisionLesen(bucket: string): number {
@@ -429,9 +492,7 @@ export function revisionSchreiben(bucket: string, rev: number): void {
     localStorage.setItem(`${ALT_REVISION}${bucket}`, String(rev))
     return
   }
-  const tx = fach.db.transaction(STAND, 'readwrite')
-  tx.objectStore(STAND).put({ bucket, rev, umgezogen: true })
-  fertig(tx).catch(schreibfehler)
+  schreiben(fach.db, STAND, (store) => store.put({ bucket, rev, umgezogen: true }))
 }
 
 /**
@@ -440,6 +501,8 @@ export function revisionSchreiben(bucket: string, rev: number): void {
  */
 export async function ablageLoeschen(): Promise<void> {
   ablageSchliessen()
+  eigeneDb?.db.close()
+  eigeneDb = null
   if (typeof localStorage !== 'undefined') {
     const weg: string[] = []
     for (let i = 0; i < localStorage.length; i++) {

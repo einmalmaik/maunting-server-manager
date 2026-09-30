@@ -40,7 +40,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' https: http: ws: wss:; img-src 'self' data: https: http: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'"
+      "csp": "default-src 'self'; connect-src 'self' https: http: ws: wss:; img-src 'self' data: https: http: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'"
     }
   },
   "bundle": {

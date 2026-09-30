@@ -6072,9 +6072,10 @@
         "unbekannteArt": "A newer version of the app created this entry. Update the app to edit it."
       },
       "ansicht": {
-        "tresor": "Vault",
+        "tresor": "Passwords",
         "archiv": "Archive",
-        "papierkorb": "Trash"
+        "papierkorb": "Trash",
+        "dateien": "Files"
       },
       "archivieren": "Archive",
       "ausArchiv": "Move out of archive",
@@ -6093,7 +6094,30 @@
       "papierkorbLeerenFrage": "Every entry in the trash will be deleted for good, on your other devices too.",
       "papierkorbGeleert": "Trash emptied.",
       "nochTage_one": "{{count}} day left",
-      "nochTage_other": "{{count}} days left"
+      "nochTage_other": "{{count}} days left",
+      "dateien": {
+        "hochladen": "Upload",
+        "hochladenFehler": "The file could not be stored.",
+        "ordnerAnlegen": "New folder",
+        "ordnerName": "Folder name",
+        "neuerName": "New name",
+        "pfad": "Folder path",
+        "speicher": "Vault storage",
+        "speicherBelegt": "{{belegt}} of {{quote}}",
+        "verschluesselt_one": "Encrypting one file on this device …",
+        "verschluesselt_other": "Encrypting {{count}} files on this device …",
+        "leer": "Nothing here yet. Drop files here or upload them.",
+        "ordner": "Folder",
+        "unlesbar": "This app cannot read this file.",
+        "speicherVoll": "Storage full",
+        "wirdHochgeladen": "Uploading",
+        "aktionen": "Actions",
+        "umbenennen": "Rename",
+        "oeffnenFehler": "The file could not be opened. It may not be fully uploaded yet.",
+        "wirdEntschluesselt": "Decrypting",
+        "keineVorschau": "There is no preview for this file type. Save the file to open it.",
+        "speichern": "Save to device"
+      }
     },
     "aktion": {
       "freigabeErforderlich": "Confirmation required",

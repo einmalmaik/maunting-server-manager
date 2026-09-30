@@ -6072,9 +6072,10 @@
         "unbekannteArt": "Diesen Eintrag hat eine neuere Version der App angelegt. Aktualisiere die App, um ihn zu bearbeiten."
       },
       "ansicht": {
-        "tresor": "Tresor",
+        "tresor": "Passwörter",
         "archiv": "Archiv",
-        "papierkorb": "Papierkorb"
+        "papierkorb": "Papierkorb",
+        "dateien": "Dateien"
       },
       "archivieren": "Archivieren",
       "ausArchiv": "Aus dem Archiv holen",
@@ -6093,7 +6094,30 @@
       "papierkorbLeerenFrage": "Alle Einträge im Papierkorb werden unwiderruflich gelöscht, auch auf deinen anderen Geräten.",
       "papierkorbGeleert": "Papierkorb geleert.",
       "nochTage_one": "noch {{count}} Tag",
-      "nochTage_other": "noch {{count}} Tage"
+      "nochTage_other": "noch {{count}} Tage",
+      "dateien": {
+        "hochladen": "Hochladen",
+        "hochladenFehler": "Die Datei konnte nicht abgelegt werden.",
+        "ordnerAnlegen": "Neuer Ordner",
+        "ordnerName": "Name des Ordners",
+        "neuerName": "Neuer Name",
+        "pfad": "Ordnerpfad",
+        "speicher": "Speicher im Tresor",
+        "speicherBelegt": "{{belegt}} von {{quote}}",
+        "verschluesselt_one": "Eine Datei wird auf diesem Gerät verschlüsselt …",
+        "verschluesselt_other": "{{count}} Dateien werden auf diesem Gerät verschlüsselt …",
+        "leer": "Hier liegt noch nichts. Zieh Dateien hierher oder lade sie hoch.",
+        "ordner": "Ordner",
+        "unlesbar": "Diese Datei kann die App nicht lesen.",
+        "speicherVoll": "Speicher voll",
+        "wirdHochgeladen": "Wird hochgeladen",
+        "aktionen": "Aktionen",
+        "umbenennen": "Umbenennen",
+        "oeffnenFehler": "Die Datei ließ sich nicht öffnen. Sie ist vielleicht noch nicht fertig hochgeladen.",
+        "wirdEntschluesselt": "Wird entschlüsselt",
+        "keineVorschau": "Für diesen Dateityp gibt es keine Vorschau. Speichere die Datei, um sie zu öffnen.",
+        "speichern": "Auf dem Gerät speichern"
+      }
     },
     "aktion": {
       "freigabeErforderlich": "Bestätigung erforderlich",

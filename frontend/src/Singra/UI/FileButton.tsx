@@ -4,7 +4,10 @@ import { Button, type ButtonSize, type ButtonVariant } from '@/components/ui/But
 export interface FileButtonProps {
   /** Dateitypen wie beim `accept`-Attribut, z. B. ".csv,.json". */
   accept?: string
-  onFile: (file: File) => void
+  onFile?: (file: File) => void
+  /** Mehrere Dateien auf einmal; dann kommt die ganze Auswahl hier an. */
+  multiple?: boolean
+  onFiles?: (files: File[]) => void
   children: ReactNode
   variant?: ButtonVariant
   size?: ButtonSize
@@ -18,7 +21,7 @@ export interface FileButtonProps {
  * unsichtbar und wird nach jeder Wahl geleert — dieselbe Datei lässt sich
  * so ein zweites Mal wählen.
  */
-export function FileButton({ accept, onFile, children, variant = 'secondary', size = 'md', disabled, className, 'data-testid': testId }: FileButtonProps) {
+export function FileButton({ accept, onFile, multiple, onFiles, children, variant = 'secondary', size = 'md', disabled, className, 'data-testid': testId }: FileButtonProps) {
   const input = useRef<HTMLInputElement>(null)
   return (
     <>
@@ -29,12 +32,15 @@ export function FileButton({ accept, onFile, children, variant = 'secondary', si
         ref={input}
         type="file"
         accept={accept}
+        multiple={multiple}
         className="hidden"
         data-testid={testId}
         onChange={(event) => {
-          const file = event.target.files?.[0]
+          const files = Array.from(event.target.files ?? [])
           event.target.value = ''
-          if (file) onFile(file)
+          if (files.length === 0) return
+          if (onFiles) onFiles(files)
+          else onFile?.(files[0])
         }}
       />
     </>

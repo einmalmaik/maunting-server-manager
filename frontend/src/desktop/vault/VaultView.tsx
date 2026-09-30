@@ -10,7 +10,10 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  File as FileIcon,
   Fingerprint,
+  Folder,
+  FolderLock,
   HelpCircle,
   KeyRound,
   Lock,
@@ -39,17 +42,20 @@ import { MASTER_PASSWORT_MINDESTLAENGE, generateSecurePassword } from './vaultCr
 import { createDebouncedLeakChecker, type LeakCheckResult } from './leakChecker'
 import { QrScannerModal } from './QrScannerModal'
 import { TresorZuruecksetzen } from './TresorZuruecksetzen'
+import { TresorDateiBereich } from './TresorDateiBereich'
+import { formatBytes } from '@/components/server/fileHelpers'
 import { setzeTresorSchutz } from '../tauri'
 import {
   PAPIERKORB_TAGE,
   getLocalVaultSalt,
   istBekannteKategorie,
+  istPasswortKategorie,
   useVaultStore,
   type VaultItem,
 } from './vaultStore'
 import { DisBadge } from '@/components/DisBadge'
 
-type Ansicht = 'tresor' | 'archiv' | 'papierkorb'
+type Ansicht = 'tresor' | 'dateien' | 'archiv' | 'papierkorb'
 
 const TAG_MS = 24 * 60 * 60 * 1000
 
@@ -401,7 +407,7 @@ export function VaultView() {
         .filter((item) => !item.trashedAt && item.archivedAt)
         .sort((a, b) => a.service.localeCompare(b.service))
     }
-    return bekannt.filter((item) => !item.trashedAt && !item.archivedAt)
+    return bekannt.filter((item) => !item.trashedAt && !item.archivedAt && istPasswortKategorie(item.category))
   }, [items, ansicht])
 
   const anzahlImPapierkorb = useMemo(
@@ -411,6 +417,7 @@ export function VaultView() {
 
   const ansichten: TabDef<Ansicht>[] = [
     { id: 'tresor', labelKey: 'mss.vault.ansicht.tresor', icon: Shield },
+    { id: 'dateien', labelKey: 'mss.vault.ansicht.dateien', icon: FolderLock },
     { id: 'archiv', labelKey: 'mss.vault.ansicht.archiv', icon: Archive },
     {
       id: 'papierkorb',
@@ -787,7 +794,8 @@ export function VaultView() {
 
   // ── HILFSKOMPONENTE: ZEILE IN LISTE / TABELLE ──
   const renderItemRow = (item: VaultItem) => {
-    const ItemBrand = getBrandIcon(item.service, item.url)
+    const istDatei = !istPasswortKategorie(item.category)
+    const ItemBrand = item.category === 'ordner' ? Folder : istDatei ? FileIcon : getBrandIcon(item.service, item.url)
     const isRevealed = revealedPasswordId === item.id
     const itemTotp = totpCodes[item.id]
 
@@ -819,6 +827,11 @@ export function VaultView() {
               )}
             </div>
 
+            {istDatei ? (
+              <div className="mt-0.5 text-label-sm text-on-surface-variant">
+                {item.category === 'ordner' ? t('mss.vault.dateien.ordner') : item.datei ? formatBytes(item.datei.original.echt) : ''}
+              </div>
+            ) : (
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="text-label-sm text-on-surface-variant truncate font-mono">
                 {item.username || '—'}
@@ -838,6 +851,7 @@ export function VaultView() {
                 </button>
               )}
             </div>
+            )}
           </div>
         </div>
 
@@ -940,6 +954,7 @@ export function VaultView() {
                 <ArchiveRestore className="h-3.5 w-3.5" />
               </button>
             )}
+            {!istDatei && (
             <button
               type="button"
               onClick={() => void toggleFavorite(item.id)}
@@ -952,6 +967,8 @@ export function VaultView() {
               <Star className={`h-3.5 w-3.5 ${item.isFavorite ? 'fill-current' : ''}`} />
             </button>
 
+            )}
+            {!istDatei && (
             <button
               type="button"
               onClick={() => openEditEntryModal(item)}
@@ -959,6 +976,7 @@ export function VaultView() {
             >
               <Edit2 className="h-3.5 w-3.5" />
             </button>
+            )}
           </div>
           )}
         </div>
@@ -1114,6 +1132,9 @@ export function VaultView() {
       )}
 
       {/* LISTE / TABELLE */}
+      {ansicht === 'dateien' ? (
+        <TresorDateiBereich />
+      ) : (
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
         {ansicht === 'papierkorb' && ansichtsItems.length > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-surface-container-low border border-outline-variant/20 px-3 py-2">
@@ -1196,6 +1217,7 @@ export function VaultView() {
           </>
         )}
       </div>
+      )}
 
       {/* ── 4. MODAL: PASSWORT ANLEGEN / BEARBEITEN ── */}
       {isModalOpen && (

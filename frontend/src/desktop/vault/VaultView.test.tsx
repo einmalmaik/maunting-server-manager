@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import { VaultView, restTageImPapierkorb } from './VaultView'
 import { useVaultStore, type VaultItem } from './vaultStore'
+import { usePromptStore } from '@/stores/promptStore'
 
 vi.mock('../tauri', () => ({
   FACH_TRESOR: 'vault_biometric_key',
@@ -23,6 +24,10 @@ vi.mock('../tauri', () => ({
   biometrieSpeicherFragtSelbst: vi.fn().mockResolvedValue(false),
   verifiziereBiometrie: vi.fn().mockResolvedValue(false),
   setzeTresorSchutz: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('./tresorBlobApi', () => ({
+  speicherAbfragen: vi.fn().mockResolvedValue({ belegt: 1024 * 1024, quote: 10 * 1024 * 1024 * 1024, in_loeschung: 0 }),
 }))
 
 const TAG = 24 * 60 * 60 * 1000
@@ -103,5 +108,63 @@ describe('VaultView: Archiv und Papierkorb', () => {
     expect(restTageImPapierkorb(jetzt, jetzt)).toBe(30)
     expect(restTageImPapierkorb(jetzt - 29.5 * TAG, jetzt)).toBe(1)
     expect(restTageImPapierkorb(jetzt - 40 * TAG, jetzt)).toBe(0)
+  })
+})
+
+describe('VaultView: Dateien', () => {
+  const ordnerAnlegen = vi.fn(async () => 'neu')
+
+  beforeEach(() => {
+    ordnerAnlegen.mockClear()
+    useVaultStore.setState({
+      isInitialized: true,
+      isUnlocked: true,
+      hasHint: true,
+      searchQuery: '',
+      syncWithServer: vi.fn(async () => undefined),
+      checkHintStatus: vi.fn(async () => true),
+      ordnerAnlegen,
+      items: [
+        eintrag('a', 'Bank'),
+        eintrag('o1', 'Urlaub', { category: 'ordner', username: '', password: '' }),
+        eintrag('f1', 'strand.jpg', { category: 'datei', ordner: 'o1', username: '', password: '' }),
+        eintrag('f2', 'vertrag.pdf', { category: 'datei', username: '', password: '' }),
+        eintrag('f3', 'weg.txt', { category: 'datei', trashedAt: Date.now(), username: '', password: '' }),
+      ],
+    })
+  })
+
+  const reiter = (schluessel: string) => screen.getByRole('tab', { name: new RegExp(i18n.t(schluessel)) })
+
+  it('zeigt Ordner und Dateien der Ebene, nichts aus dem Papierkorb, und keine Passwörter', async () => {
+    render(<VaultView />)
+    fireEvent.click(reiter('mss.vault.ansicht.dateien'))
+
+    expect(screen.getByText('Urlaub')).toBeInTheDocument()
+    expect(screen.getByText('vertrag.pdf')).toBeInTheDocument()
+    expect(screen.queryByText('strand.jpg')).not.toBeInTheDocument()
+    expect(screen.queryByText('weg.txt')).not.toBeInTheDocument()
+    expect(screen.queryByText('Bank')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Urlaub'))
+    expect(screen.getByText('strand.jpg')).toBeInTheDocument()
+    expect(screen.queryByText('vertrag.pdf')).not.toBeInTheDocument()
+  })
+
+  it('legt einen Ordner in der geöffneten Ebene an', async () => {
+    render(<VaultView />)
+    fireEvent.click(reiter('mss.vault.ansicht.dateien'))
+    fireEvent.click(screen.getByText('Urlaub'))
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.dateien.ordnerAnlegen')) }))
+
+    await vi.waitFor(() => expect(usePromptStore.getState().pending).not.toBeNull())
+    usePromptStore.getState().resolve('Strandbilder')
+    await vi.waitFor(() => expect(ordnerAnlegen).toHaveBeenCalledWith('Strandbilder', 'o1'))
+  })
+
+  it('führt Dateien im Papierkorb mit den Passwörtern zusammen', () => {
+    render(<VaultView />)
+    fireEvent.click(reiter('mss.vault.ansicht.papierkorb'))
+    expect(screen.getByText('weg.txt')).toBeInTheDocument()
   })
 })

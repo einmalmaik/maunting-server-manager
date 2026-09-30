@@ -139,14 +139,14 @@ describe('Tresor: Verträglichkeit zwischen App-Versionen', () => {
 
   it('schreibt keinen Eintrag, dessen Art sie nicht kennt', async () => {
     await tresorVomServer(userKey, {
-      service: 'urlaub.jpg',
-      category: 'datei',
+      service: 'etwas-kuenftiges',
+      category: 'kuenftige_art',
       createdAt: 1,
       updatedAt: 10,
     })
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
     const item = useVaultStore.getState().items.find((i) => i.id === EINTRAG)!
-    expect(item.category).toBe('datei')
+    expect(item.category).toBe('kuenftige_art')
 
     await expect(useVaultStore.getState().saveItem({ ...item, service: 'anders' })).rejects.toThrow()
     await expect(useVaultStore.getState().trashItem(EINTRAG)).rejects.toThrow()
