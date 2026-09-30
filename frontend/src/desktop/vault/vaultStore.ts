@@ -26,6 +26,18 @@ import {
   biometrieSpeicherFragtSelbst,
 } from '../tauri'
 import { meldeErrungenschaft } from '@/lib/errungenschaft'
+import {
+  ablageLaden,
+  ablageLoeschen,
+  ablageUmziehen,
+  blobsLesen,
+  blobsSchreiben,
+  revisionLesen,
+  revisionSchreiben,
+  warteschlangeLesen,
+  warteschlangeSchreiben,
+  type StoredEncryptedEntry,
+} from './tresorAblage'
 
 export interface VaultAttachment {
   id: string
@@ -156,30 +168,6 @@ export function umschlagAusItem(item: VaultItem): Record<string, unknown> {
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   }
-}
-
-interface StoredEncryptedEntry {
-  id: string
-  ciphertext: string
-  revision: number
-  is_deleted: boolean
-  /**
-   * Der Stand aus dem Umschlag (siehe `standAus`), lokal mitgeschrieben, damit
-   * der Sync ihn ohne erneutes Entschlüsseln vergleichen kann. Fehlt bei
-   * Blobs aus der Zeit davor; dann wird er aus dem Ciphertext gelesen. Geht
-   * nie an den Server.
-   */
-  stand?: number
-  /**
-   * Die Revision, die der Server dieser Fassung zuletzt gegeben hat. `revision`
-   * zählt nach dem Speichern lokal weiter; das endgültige Löschen braucht aber
-   * die Zahl des Servers, um eine fremde Änderung zu erkennen.
-   */
-  serverRev?: number
-  /** Nur in der Warteschlange: das Löschen gilt nur auf dieser Serverrevision. */
-  expected_revision?: number
-  /** Nur in der Warteschlange: der Cache-Eintrag vor dem Löschen, für den Konfliktfall. */
-  vorher?: StoredEncryptedEntry
 }
 
 interface VaultSyncMutation {
@@ -437,9 +425,6 @@ const VAULT_SALT_KEY = 'mss:vault_salt'
 const VAULT_SETUP_DONE_KEY = 'mss:vault_setup_done'
 const VAULT_CANARY_KEY = 'mss:vault_canary'
 const VAULT_CANARY_PREFIX = 'mss:vault_canary_'
-const VAULT_LOCAL_STORAGE_PREFIX = 'mss:vault_blobs_'
-const VAULT_PENDING_QUEUE_PREFIX = 'mss:vault_pending_'
-const VAULT_REVISION_PREFIX = 'mss:vault_rev_'
 /**
  * Der Namensraum der Sperrfrist-Einstellungen. Die daraus gebauten Schlüssel
  * heißen weiter `mss:vault_autolock_minutes` und `mss:vault_lock_on_blur` —
@@ -518,31 +503,12 @@ export function getLocalVaultSalt(): Uint8Array | null {
 }
 
 export function getStoredBlobs(bucketId: string): StoredEncryptedEntry[] {
-  if (typeof localStorage === 'undefined') return []
-  const raw = localStorage.getItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`)
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch (err) {
-    console.warn('Beschädigter lokaler Tresor-Cache konnte nicht geparst werden:', err)
-    return []
-  }
+  return blobsLesen(bucketId)
 }
 
 export function getPendingQueue(bucketId: string): StoredEncryptedEntry[] {
-  if (typeof localStorage === 'undefined') return []
-  const raw = localStorage.getItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`)
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch (err) {
-    console.warn('Beschädigte Tresor-Warteschlange konnte nicht geparst werden:', err)
-    return []
-  }
+  return warteschlangeLesen(bucketId)
 }
-
 
 export function getOrCreateVaultSalt(): Uint8Array {
   const local = getLocalVaultSalt()
@@ -857,6 +823,10 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
   resetLocalVaultState: () => {
     void cleanseVulnerableBiometricData()
+    // Einträge, Warteschlange und Revisionsstand: ohne Salz und Canary lässt
+    // sich davon nichts mehr öffnen, und eine liegengebliebene Warteschlange
+    // schöbe alte Umschläge in den nächsten Tresor.
+    void ablageLoeschen()
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(VAULT_SETUP_DONE_KEY)
       localStorage.removeItem(VAULT_CANARY_KEY)
@@ -867,16 +837,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       const toRemove: string[] = []
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i)
-        // Auch Einträge, Warteschlange und Revisionsstand: ohne Salz und
-        // Canary lässt sich davon nichts mehr öffnen, und eine liegengebliebene
-        // Warteschlange schöbe alte Umschläge in den nächsten Tresor.
-        if (
-          k &&
-          (k.startsWith(VAULT_CANARY_PREFIX) ||
-            k.startsWith(VAULT_LOCAL_STORAGE_PREFIX) ||
-            k.startsWith(VAULT_PENDING_QUEUE_PREFIX) ||
-            k.startsWith(VAULT_REVISION_PREFIX))
-        ) {
+        if (k && k.startsWith(VAULT_CANARY_PREFIX)) {
           toRemove.push(k)
         }
       }
@@ -918,6 +879,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
       const saltHex = Array.from(salt).map((b) => b.toString(16).padStart(2, '0')).join('')
       const { userKey, bucketId, bucketAuthToken } = await deriveVaultKeys(masterPassword, salt)
 
+      await ablageLaden(bucketId)
+
       // KDF-Salt und Bucket lokal sichern
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem(VAULT_SERVER_BUCKET_KEY, bucketId)
@@ -953,7 +916,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
             revision: 1,
             is_deleted: false,
           })
-          localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(pendingQueue))
+          warteschlangeSchreiben(bucketId, pendingQueue)
         }
       }
 
@@ -1124,6 +1087,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       }
 
       // 4. Lokale verschlüsselte Blobs aus dem Cache laden
+      await ablageLaden(bucketId)
       const cachedBlobs = getStoredBlobs(bucketId)
 
       const decryptedItems: VaultItem[] = []
@@ -1155,7 +1119,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
           const pendingQueue = getPendingQueue(bucketId)
           if (!pendingQueue.some((p) => p.id === 'vault-canary')) {
             pendingQueue.push({ id: 'vault-canary', ciphertext: newCanary, revision: 1, is_deleted: false })
-            localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(pendingQueue))
+            warteschlangeSchreiben(bucketId, pendingQueue)
           }
         }
       }
@@ -1230,11 +1194,11 @@ export const useVaultStore = create<VaultState>((set, get) => {
     // In Cache und Warteschlange ablegen
     const cachedBlobs = getStoredBlobs(bucketId)
     cachedBlobs.push({ id: newId, ciphertext, revision: 1, is_deleted: false, stand: now })
-    localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
+    blobsSchreiben(bucketId, cachedBlobs)
 
     const pendingQueue = getPendingQueue(bucketId)
     pendingQueue.push({ id: newId, ciphertext, revision: 1, is_deleted: false })
-    localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(pendingQueue))
+    warteschlangeSchreiben(bucketId, pendingQueue)
 
     // Der Umschlag ist abgelegt; in den Speicher kommt der Klartext nur, wenn
     // während des Verschlüsselns niemand gesperrt hat.
@@ -1311,12 +1275,12 @@ export const useVaultStore = create<VaultState>((set, get) => {
     const serverRev = cachedBlobs.find((b) => b.id === id)?.serverRev
     cachedBlobs = cachedBlobs.filter((b) => b.id !== id)
     cachedBlobs.push({ id, ciphertext, revision, is_deleted: false, stand: now, serverRev })
-    localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
+    blobsSchreiben(bucketId, cachedBlobs)
 
     // Pending Queue aktualisieren
     const pendingQueue = getPendingQueue(bucketId).filter((b) => b.id !== id)
     pendingQueue.push({ id, ciphertext, revision, is_deleted: false })
-    localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(pendingQueue))
+    warteschlangeSchreiben(bucketId, pendingQueue)
 
     // Siehe createQuickPasswordEntry. Die Liste wird frisch gelesen: ein Sync
     // oder ein zweites Speichern kann sie während des Verschlüsselns geändert
@@ -1356,7 +1320,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
     const vorher = cachedBlobs.find((b) => b.id === id)
     cachedBlobs = cachedBlobs.filter((b) => b.id !== id)
     cachedBlobs.push({ id, ciphertext: tombstone, revision, is_deleted: true, stand, serverRev: vorher?.serverRev })
-    localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
+    blobsSchreiben(bucketId, cachedBlobs)
 
     // Tombstone in Pending Queue. Gelöscht wird nur die Fassung, die dieses
     // Gerät zuletzt vom Server kannte: hat ein anderes Gerät den Eintrag
@@ -1371,7 +1335,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       expected_revision: vorher?.serverRev,
       vorher: vorher ? { ...vorher, vorher: undefined } : undefined,
     })
-    localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(pendingQueue))
+    warteschlangeSchreiben(bucketId, pendingQueue)
 
     if (!sitzungOffen(userKey, bucketId)) return
     const remaining = get().items.filter((i) => i.id !== id)
@@ -1495,8 +1459,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       // vor und hat keinen eigenen gestartet.
       for (let runde = 0; runde < SYNC_MAX_RUNDEN; runde++) {
         const paket = naechstesSyncPaket(getPendingQueue(bucketId))
-        const storedRev = localStorage.getItem(`${VAULT_REVISION_PREFIX}${bucketId}`)
-        const sinceRevision = storedRev ? parseInt(storedRev, 10) : 0
+        const sinceRevision = revisionLesen(bucketId)
 
         const data = await senden(
           paket.map((m) => ({
@@ -1589,13 +1552,9 @@ export const useVaultStore = create<VaultState>((set, get) => {
         const offen = getPendingQueue(bucketId).filter(
           (m) => !paket.some((g) => g.id === m.id && g.ciphertext === m.ciphertext),
         )
-        if (offen.length > 0) {
-          localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(offen))
-        } else {
-          localStorage.removeItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`)
-        }
-        localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
-        localStorage.setItem(`${VAULT_REVISION_PREFIX}${bucketId}`, String(data.server_revision))
+        warteschlangeSchreiben(bucketId, offen)
+        blobsSchreiben(bucketId, cachedBlobs)
+        revisionSchreiben(bucketId, data.server_revision)
         set({ items: currentItems })
 
         if (offen.length === 0 && !data.has_more) {
@@ -1628,6 +1587,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
       })
 
       if (abgeglichen) {
+        await ablageUmziehen()
+        if (!sitzungOffen(userKey, bucketId)) return
         const grenze = Date.now() - PAPIERKORB_MS
         const abgelaufen = get().items.filter(
           (i) => i.trashedAt !== undefined && i.trashedAt < grenze && istBekannteKategorie(i.category),
