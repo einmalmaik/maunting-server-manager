@@ -441,30 +441,29 @@ async function lokalesChiffrat(db: IDBDatabase, blobId: string, index: number): 
   return ausUpload?.daten ?? null
 }
 
+interface LeseOptionen {
+  cachen?: boolean
+  /** Als „zuletzt geöffnet“ offline behalten, solange Platz ist (`ZULETZT_GRENZE`). */
+  zuletzt?: boolean
+  signal?: AbortSignal
+  fortschritt?: (anteil: number) => void
+}
+
 /**
- * Entschlüsselt einen Blob in ein `Blob`. Jeder Chunk wird einzeln zu einem
- * `Blob`; die Laufzeit darf die Teile auslagern, und im JavaScript-Speicher
- * liegt nie mehr als ein Chunk Klartext.
+ * Entschlüsselt einen Blob Chunk für Chunk. Wer einen Teil bekommt, muss ihn
+ * vor dem nächsten verbraucht haben: danach wird er genullt.
  */
-export async function blobLesen(
+export async function* klartextTeile(
   kopf: BlobKopf,
   eintragId: string,
   userKey: CryptoKey,
-  typ: string,
-  optionen: {
-    cachen?: boolean
-    /** Als „zuletzt geöffnet“ offline behalten, solange Platz ist (`ZULETZT_GRENZE`). */
-    zuletzt?: boolean
-    signal?: AbortSignal
-    fortschritt?: (anteil: number) => void
-  } = {},
-): Promise<Blob> {
+  optionen: LeseOptionen = {},
+): AsyncGenerator<Uint8Array> {
   const db = await ablageDb()
   const zuletzt = !!optionen.zuletzt && chiffratGroesse(kopf.groesse) <= ZULETZT_HOECHSTENS
   const cachen = optionen.cachen || zuletzt
   const schluessel = await blobSchluessel(kopf, userKey, eintragId)
   const anzahl = chunkAnzahl(kopf.groesse)
-  const teile: Blob[] = []
   for (let index = 0; index < anzahl; index++) {
     optionen.signal?.throwIfAborted()
     let chiffrat = db ? await lokalesChiffrat(db, kopf.id, index) : null
@@ -476,11 +475,32 @@ export async function blobLesen(
       }
     }
     const klartext = await chunkEntschluesseln(chiffrat, kopf, index, schluessel, eintragId)
-    teile.push(new Blob([klartext as BlobPart]))
-    klartext.fill(0)
+    try {
+      yield klartext
+    } finally {
+      klartext.fill(0)
+    }
     optionen.fortschritt?.((index + 1) / anzahl)
   }
   if (db && zuletzt) await zuletztMerken(db, kopf).catch(() => {})
+}
+
+/**
+ * Entschlüsselt einen Blob in ein `Blob`. Jeder Chunk wird einzeln zu einem
+ * `Blob`; die Laufzeit darf die Teile auslagern, und im JavaScript-Speicher
+ * liegt nie mehr als ein Chunk Klartext.
+ */
+export async function blobLesen(
+  kopf: BlobKopf,
+  eintragId: string,
+  userKey: CryptoKey,
+  typ: string,
+  optionen: LeseOptionen = {},
+): Promise<Blob> {
+  const teile: Blob[] = []
+  for await (const klartext of klartextTeile(kopf, eintragId, userKey, optionen)) {
+    teile.push(new Blob([klartext as BlobPart]))
+  }
   return new Blob(teile, { type: typ })
 }
 

@@ -48,6 +48,10 @@ serde_json = "1"
 keyring = "4"
 # Ordner-Auswahl fuer den Sandbox-Schritt des Einrichtungs-Assistenten.
 tauri-plugin-dialog = "2"
+# Schon über tauri-plugin-dialog im Baum (gleiche Fassung). Direkt gebraucht,
+# um die `content://`-Adresse des Android-Speicherdialogs zu öffnen
+# (`tresor_speichern.rs`). Keine Capability gibt dem Fenster fs-Rechte.
+tauri-plugin-fs = "2"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }

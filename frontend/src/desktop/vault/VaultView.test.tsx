@@ -157,25 +157,40 @@ describe('VaultView: Dateien', () => {
 
   const reiter = (schluessel: string) => screen.getByRole('tab', { name: new RegExp(i18n.t(schluessel)) })
 
+  const liste = () => within(screen.getByRole('list', { name: i18n.t('mss.vault.dateien.inhalt') }))
+
   it('zeigt Ordner und Dateien der Ebene, nichts aus dem Papierkorb, und keine Passwörter', async () => {
     render(<VaultView />)
     fireEvent.click(reiter('mss.vault.ansicht.dateien'))
 
-    expect(screen.getByText('Urlaub')).toBeInTheDocument()
-    expect(screen.getByText('vertrag.pdf')).toBeInTheDocument()
+    expect(liste().getByText('Urlaub')).toBeInTheDocument()
+    expect(liste().getByText('vertrag.pdf')).toBeInTheDocument()
     expect(screen.queryByText('strand.jpg')).not.toBeInTheDocument()
     expect(screen.queryByText('weg.txt')).not.toBeInTheDocument()
     expect(screen.queryByText('Bank')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('Urlaub'))
-    expect(screen.getByText('strand.jpg')).toBeInTheDocument()
+    fireEvent.click(liste().getByText('Urlaub'))
+    expect(liste().getByText('strand.jpg')).toBeInTheDocument()
     expect(screen.queryByText('vertrag.pdf')).not.toBeInTheDocument()
+  })
+
+  it('führt im Ordnerbaum vom Stammverzeichnis in den Ordner und zurück', () => {
+    render(<VaultView />)
+    fireEvent.click(reiter('mss.vault.ansicht.dateien'))
+    const baum = within(screen.getByRole('tree'))
+
+    fireEvent.click(baum.getByRole('button', { name: 'Urlaub' }))
+    expect(liste().getByText('strand.jpg')).toBeInTheDocument()
+    expect(baum.getByRole('button', { name: 'Urlaub' }).closest('[role="treeitem"]')).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.click(baum.getByRole('button', { name: i18n.t('mss.vault.dateien.stamm') }))
+    expect(liste().getByText('vertrag.pdf')).toBeInTheDocument()
   })
 
   it('legt einen Ordner in der geöffneten Ebene an', async () => {
     render(<VaultView />)
     fireEvent.click(reiter('mss.vault.ansicht.dateien'))
-    fireEvent.click(screen.getByText('Urlaub'))
+    fireEvent.click(liste().getByText('Urlaub'))
     fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.dateien.ordnerAnlegen')) }))
 
     await vi.waitFor(() => expect(usePromptStore.getState().pending).not.toBeNull())

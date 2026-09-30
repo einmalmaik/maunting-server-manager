@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Archive,
   ChevronRight,
+  CornerLeftUp,
   Download,
   File as DateiIcon,
   FileImage,
@@ -32,7 +33,8 @@ import { formatBytes } from '@/components/server/fileHelpers'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { angeheftet, ansichtOeffnen, ansichtSchliessen, blobLesen, offlineAnheften, offlineLoesen, useTresorUploads } from './tresorDateien'
 import { speicherAbfragen, type TresorSpeicher } from './tresorBlobApi'
-import { anzeigeArt, speichernUnter } from './tresorAnzeige'
+import { anzeigeArt, aufGeraetSpeichern } from './tresorAnzeige'
+import { TresorOrdnerBaum } from './TresorOrdnerBaum'
 import { TresorTexteditor } from './TresorTexteditor'
 
 function dateiIcon(typ: string) {
@@ -102,6 +104,15 @@ export function TresorDateiBereich() {
     void angeheftet(originale ? originale.split(',') : []).then(setOffline).catch(() => setOffline(new Set()))
   }
   useEffect(offlineLaden, [originale])
+
+  const speichern = async (item: VaultItem) => {
+    if (!item.datei || !userKey) return
+    try {
+      await aufGeraetSpeichern(item.datei.original, item.id, userKey, item.service, item.datei.typ)
+    } catch {
+      toast.error(t('mss.vault.dateien.speichernFehler'))
+    }
+  }
 
   const offlineUmschalten = async (item: VaultItem) => {
     if (!item.datei) return
@@ -225,254 +236,286 @@ export function TresorDateiBereich() {
   const art = geoeffnet?.item.datei ? anzeigeArt(geoeffnet.item.datei.typ) : null
 
   return (
-    <div
-      className={`flex-1 overflow-y-auto px-4 py-3 space-y-3 ${ziehen ? 'bg-primary/5 outline-dashed outline-2 outline-primary/40 -outline-offset-4' : ''}`}
-      onDragOver={auswahlZiehen}
-      onDragLeave={() => setZiehen(false)}
-      onDrop={(e) => {
-        e.preventDefault()
-        setZiehen(false)
-        const dateien = Array.from(e.dataTransfer.files)
-        if (dateien.length > 0) void hochladen(dateien)
-      }}
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <nav aria-label={t('mss.vault.dateien.pfad')} className="flex min-w-0 flex-wrap items-center gap-1 text-xs">
-          <button type="button" onClick={() => setOrdner(undefined)} className="font-semibold text-on-surface hover:text-primary">
-            {t('mss.vault.ansicht.dateien')}
-          </button>
-          {pfad.map((o) => (
-            <React.Fragment key={o.id}>
-              <ChevronRight className="h-3 w-3 text-on-surface-variant" />
-              <button type="button" onClick={() => setOrdner(o.id)} className="truncate text-on-surface hover:text-primary">
-                {o.service}
-              </button>
-            </React.Fragment>
-          ))}
-        </nav>
-        <div className="flex items-center gap-1.5">
-          <Button type="button" variant="ghost" size="sm" onClick={() => void neuerOrdner()}>
-            <FolderPlus className="mr-1 h-3.5 w-3.5" />
-            {t('mss.vault.dateien.ordnerAnlegen')}
-          </Button>
-          <FileButton multiple size="sm" variant="primary" onFiles={(dateien) => void hochladen(dateien)}>
-            <Upload className="mr-1 h-3.5 w-3.5" />
-            {t('mss.vault.dateien.hochladen')}
-          </FileButton>
-        </div>
-      </div>
-
-      {speicher && (
-        <div className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-low px-3 py-2">
-          <HardDrive className="h-4 w-4 shrink-0 text-on-surface-variant" />
-          <ProgressBar
-            value={speicher.quote > 0 ? (speicher.belegt / speicher.quote) * 100 : null}
-            heat
-            ariaLabel={t('mss.vault.dateien.speicher')}
-            hint={t('mss.vault.dateien.speicherBelegt', { belegt: formatBytes(speicher.belegt), quote: formatBytes(speicher.quote) })}
-          />
-        </div>
-      )}
-
-      {vorbereitung > 0 && (
-        <p className="text-label-sm text-on-surface-variant">{t('mss.vault.dateien.verschluesselt', { count: vorbereitung })}</p>
-      )}
-
-      {inhalt.length === 0 ? (
-        <div className="flex flex-col items-center justify-center p-8 text-center text-xs text-on-surface-variant">
-          <Upload className="mb-2 h-6 w-6 opacity-60" />
-          {t('mss.vault.dateien.leer')}
-        </div>
-      ) : (
-        <ul className="grid grid-cols-1 gap-1.5">
-          {inhalt.map((item) => {
-            const istOrdner = item.category === 'ordner'
-            const Icon = istOrdner ? Folder : dateiIcon(item.datei?.typ ?? '')
-            const upload = uploads[item.id]
-            return (
-              <li
-                key={item.id}
-                className="flex items-center gap-3 rounded-xl border border-outline-variant/20 bg-surface-container p-2.5 hover:bg-surface-container-high"
-              >
-                <button
-                  type="button"
-                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                  onClick={() => (istOrdner ? setOrdner(item.id) : void oeffnen(item))}
-                  disabled={!istOrdner && !item.datei}
-                >
-                  <Icon className={`h-5 w-5 shrink-0 ${istOrdner ? 'text-primary' : 'text-on-surface-variant'}`} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-semibold text-on-surface">{item.service}</span>
-                    <span className="block text-label-sm text-on-surface-variant">
-                      {istOrdner
-                        ? t('mss.vault.dateien.ordner')
-                        : item.datei
-                          ? [
-                              formatBytes(item.datei.original.echt),
-                              new Date(item.createdAt).toLocaleDateString(),
-                              offline.has(item.datei.original.id) ? t('mss.vault.dateien.offlineVerfuegbar') : null,
-                            ]
-                              .filter(Boolean)
-                              .join(' · ')
-                          : t('mss.vault.dateien.unlesbar')}
-                    </span>
-                  </span>
-                </button>
-                {holt[item.id] !== undefined && (
-                  <div className="w-28 shrink-0">
-                    <ProgressBar value={holt[item.id] * 100} ariaLabel={t('mss.vault.dateien.offlineLaedt')} />
-                  </div>
-                )}
-                {upload && (
-                  <div className="w-28 shrink-0">
-                    {upload.fehler === 'speicherVoll' ? (
-                      <span className="text-label-sm text-status-destructive">{t('mss.vault.dateien.speicherVoll')}</span>
-                    ) : (
-                      <ProgressBar
-                        value={upload.gesamt > 0 ? (upload.gesendet / upload.gesamt) * 100 : null}
-                        ariaLabel={t('mss.vault.dateien.wirdHochgeladen')}
-                      />
-                    )}
-                  </div>
-                )}
-                <ActionMenu
-                  compact
-                  align="end"
-                  label={t('mss.vault.dateien.aktionen')}
-                  items={[
-                    { key: 'umbenennen', label: t('mss.vault.dateien.umbenennen'), icon: <Pencil className="h-3.5 w-3.5" />, onSelect: () => void umbenennen(item) },
-                    {
-                      key: 'verschieben',
-                      label: t('mss.vault.dateien.verschieben'),
-                      icon: <FolderInput className="h-3.5 w-3.5" />,
-                      onSelect: () => setVerschieben({ item, ziel: item.ordner ?? '' }),
-                    },
-                    ...(item.datei
-                      ? [
-                          {
-                            key: 'offline',
-                            label: t(offline.has(item.datei.original.id) ? 'mss.vault.dateien.nurOnline' : 'mss.vault.dateien.offlineMachen'),
-                            icon: <HardDriveDownload className="h-3.5 w-3.5" />,
-                            disabled: holt[item.id] !== undefined,
-                            onSelect: () => void offlineUmschalten(item),
-                          },
-                        ]
-                      : []),
-                    { key: 'archiv', label: t('mss.vault.archivieren'), icon: <Archive className="h-3.5 w-3.5" />, onSelect: () => void setArchived(item.id, true) },
-                    {
-                      key: 'papierkorb',
-                      label: t('mss.vault.inPapierkorb'),
-                      icon: <Trash2 className="h-3.5 w-3.5" />,
-                      destructive: true,
-                      separatorBefore: true,
-                      onSelect: () => void trashItem(item.id).then(() => toast.success(t('mss.vault.inPapierkorbGelegt'))),
-                    },
-                  ]}
-                />
-              </li>
-            )
-          })}
-        </ul>
-      )}
-
-      <Dialog open={!!verschieben} onOpenChange={(offen) => !offen && setVerschieben(null)}>
-        {verschieben && (
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle className="truncate">{t('mss.vault.dateien.verschiebenTitel', { name: verschieben.item.service })}</DialogTitle>
-            </DialogHeader>
-            <div className="p-6">
-              <Dropdown
-                value={verschieben.ziel}
-                onChange={(ziel) => setVerschieben((v) => (v ? { ...v, ziel } : v))}
-                options={[{ value: '', label: t('mss.vault.dateien.obersteEbene') }, ...zielOrdner(verschieben.item)]}
-                searchable
-                aria-label={t('mss.vault.dateien.zielOrdner')}
-              />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="ghost" onClick={() => setVerschieben(null)}>
-                {t('common.cancel')}
-              </Button>
+    <div className="flex min-h-0 flex-1">
+      <aside className="hidden w-56 shrink-0 overflow-y-auto border-r border-outline-variant/20 p-2 md:block">
+        <TresorOrdnerBaum ordner={ordnerListe.filter(sichtbar)} aktuell={aktuellerOrdner} pfad={pfad} onWaehlen={setOrdner} />
+      </aside>
+      <div
+        className={`min-w-0 flex-1 overflow-y-auto px-4 py-3 space-y-3 ${ziehen ? 'bg-primary/5 outline-dashed outline-2 outline-primary/40 -outline-offset-4' : ''}`}
+        onDragOver={auswahlZiehen}
+        onDragLeave={() => setZiehen(false)}
+        onDrop={(e) => {
+          e.preventDefault()
+          setZiehen(false)
+          const dateien = Array.from(e.dataTransfer.files)
+          if (dateien.length > 0) void hochladen(dateien)
+        }}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <nav aria-label={t('mss.vault.dateien.pfad')} className="flex min-w-0 flex-wrap items-center gap-1 text-xs">
+            {pfad.length > 0 && (
               <Button
                 type="button"
-                disabled={verschieben.ziel === (verschieben.item.ordner ?? '')}
-                onClick={() => {
-                  const { item, ziel } = verschieben
-                  setVerschieben(null)
-                  void saveItem({ ...item, ordner: ziel || undefined }).catch((err) =>
-                    toast.error(err instanceof Error ? err.message : String(err)),
-                  )
-                }}
+                variant="ghost"
+                size="sm"
+                className="md:hidden"
+                onClick={() => setOrdner(pfad[pfad.length - 1].ordner)}
+                aria-label={t('mss.vault.dateien.hoch')}
               >
-                {t('mss.vault.dateien.verschieben')}
+                <CornerLeftUp className="h-3.5 w-3.5" />
               </Button>
-            </DialogFooter>
-          </DialogContent>
-        )}
-      </Dialog>
-
-      {/* Beim Bearbeiten schließt nur der Editor selbst, damit nichts Ungespeichertes verloren geht. */}
-      <Dialog open={!!geoeffnet} onOpenChange={(offen) => !offen && !geoeffnet?.bearbeiten && setGeoeffnet(null)}>
-        {geoeffnet?.bearbeiten && geoeffnet.text !== null ? (
-          <DialogContent className="max-w-5xl" showCloseButton={false}>
-            <div className="p-3">
-              <TresorTexteditor
-                item={geoeffnet.item}
-                text={geoeffnet.text}
-                onFertig={(gespeichert) => {
-                  if (gespeichert === null) {
-                    setGeoeffnet((g) => (g ? { ...g, bearbeiten: false } : g))
-                    return
-                  }
-                  // Die Ansicht zeigt ab jetzt die neue Fassung; die alte URL verfällt mit dem Wechsel.
-                  const url = ansichtOeffnen(new Blob([gespeichert], { type: geoeffnet.item.datei?.typ || 'text/plain' }))
-                  setGeoeffnet((g) => (g ? { ...g, bearbeiten: false, text: gespeichert, url } : g))
-                }}
-              />
-            </div>
-          </DialogContent>
-        ) : geoeffnet && (
-          <DialogContent className="max-w-4xl">
-            <DialogHeader>
-              <DialogTitle className="truncate">{geoeffnet.item.service}</DialogTitle>
-            </DialogHeader>
-            <div className="flex min-h-[12rem] items-center justify-center">
-              {geoeffnet.fehler ? (
-                <p className="text-xs text-status-destructive">{t('mss.vault.dateien.oeffnenFehler')}</p>
-              ) : !geoeffnet.url ? (
-                <div className="w-64">
-                  <ProgressBar value={geoeffnet.anteil * 100} label={t('mss.vault.dateien.wirdEntschluesselt')} />
-                </div>
-              ) : art === 'bild' ? (
-                <img src={geoeffnet.url} alt={geoeffnet.item.service} className="max-h-[70vh] max-w-full rounded-lg object-contain" />
-              ) : art === 'video' ? (
-                <video src={geoeffnet.url} controls className="max-h-[70vh] max-w-full rounded-lg" />
-              ) : art === 'audio' ? (
-                <audio src={geoeffnet.url} controls className="w-full" />
-              ) : art === 'text' && geoeffnet.text !== null ? (
-                <pre className="max-h-[70vh] w-full overflow-auto whitespace-pre-wrap rounded-lg bg-surface-container-low p-3 text-xs">{geoeffnet.text}</pre>
-              ) : (
-                <p className="text-xs text-on-surface-variant">{t('mss.vault.dateien.keineVorschau')}</p>
-              )}
-            </div>
-            {geoeffnet.url && (
-              <div className="flex justify-end gap-2">
-                {art === 'text' && geoeffnet.text !== null && (
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setGeoeffnet((g) => (g ? { ...g, bearbeiten: true } : g))}>
-                    <Pencil className="mr-1 h-3.5 w-3.5" />
-                    {t('mss.vault.bearbeiten.knopf')}
-                  </Button>
-                )}
-                <Button type="button" size="sm" onClick={() => speichernUnter(geoeffnet.url!, geoeffnet.item.service)}>
-                  <Download className="mr-1 h-3.5 w-3.5" />
-                  {t('mss.vault.dateien.speichern')}
-                </Button>
-              </div>
             )}
-          </DialogContent>
+            <button
+              type="button"
+              onClick={() => setOrdner(undefined)}
+              className={`inline-flex items-center gap-1 hover:text-primary ${pfad.length === 0 ? 'font-semibold text-on-surface' : 'text-on-surface-variant'}`}
+            >
+              <HardDrive className="h-3.5 w-3.5" />
+              {t('mss.vault.dateien.stamm')}
+            </button>
+            {pfad.map((o) => (
+              <React.Fragment key={o.id}>
+                <ChevronRight className="h-3 w-3 text-on-surface-variant" />
+                <button
+                  type="button"
+                  onClick={() => setOrdner(o.id)}
+                  className={`truncate hover:text-primary ${o.id === aktuellerOrdner ? 'font-semibold text-on-surface' : 'text-on-surface-variant'}`}
+                >
+                  {o.service}
+                </button>
+              </React.Fragment>
+            ))}
+          </nav>
+          <div className="flex items-center gap-1.5">
+            <Button type="button" variant="ghost" size="sm" onClick={() => void neuerOrdner()}>
+              <FolderPlus className="mr-1 h-3.5 w-3.5" />
+              {t('mss.vault.dateien.ordnerAnlegen')}
+            </Button>
+            <FileButton multiple size="sm" variant="primary" onFiles={(dateien) => void hochladen(dateien)}>
+              <Upload className="mr-1 h-3.5 w-3.5" />
+              {t('mss.vault.dateien.hochladen')}
+            </FileButton>
+          </div>
+        </div>
+
+        {speicher && (
+          <div className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-low px-3 py-2">
+            <HardDrive className="h-4 w-4 shrink-0 text-on-surface-variant" />
+            <ProgressBar
+              value={speicher.quote > 0 ? (speicher.belegt / speicher.quote) * 100 : null}
+              heat
+              ariaLabel={t('mss.vault.dateien.speicher')}
+              hint={t('mss.vault.dateien.speicherBelegt', { belegt: formatBytes(speicher.belegt), quote: formatBytes(speicher.quote) })}
+            />
+          </div>
         )}
-      </Dialog>
+
+        {vorbereitung > 0 && (
+          <p className="text-label-sm text-on-surface-variant">{t('mss.vault.dateien.verschluesselt', { count: vorbereitung })}</p>
+        )}
+
+        {inhalt.length === 0 ? (
+          <div className="flex flex-col items-center justify-center p-8 text-center text-xs text-on-surface-variant">
+            <Upload className="mb-2 h-6 w-6 opacity-60" />
+            {t('mss.vault.dateien.leer')}
+          </div>
+        ) : (
+          <ul aria-label={t('mss.vault.dateien.inhalt')} className="grid grid-cols-1 gap-1.5">
+            {inhalt.map((item) => {
+              const istOrdner = item.category === 'ordner'
+              const Icon = istOrdner ? Folder : dateiIcon(item.datei?.typ ?? '')
+              const upload = uploads[item.id]
+              return (
+                <li
+                  key={item.id}
+                  className="flex items-center gap-3 rounded-xl border border-outline-variant/20 bg-surface-container p-2.5 hover:bg-surface-container-high"
+                >
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    onClick={() => (istOrdner ? setOrdner(item.id) : void oeffnen(item))}
+                    disabled={!istOrdner && !item.datei}
+                  >
+                    <Icon className={`h-5 w-5 shrink-0 ${istOrdner ? 'text-primary' : 'text-on-surface-variant'}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-semibold text-on-surface">{item.service}</span>
+                      <span className="block text-label-sm text-on-surface-variant">
+                        {istOrdner
+                          ? t('mss.vault.dateien.ordner')
+                          : item.datei
+                            ? [
+                                formatBytes(item.datei.original.echt),
+                                new Date(item.createdAt).toLocaleDateString(),
+                                offline.has(item.datei.original.id) ? t('mss.vault.dateien.offlineVerfuegbar') : null,
+                              ]
+                                .filter(Boolean)
+                                .join(' · ')
+                            : t('mss.vault.dateien.unlesbar')}
+                      </span>
+                    </span>
+                  </button>
+                  {holt[item.id] !== undefined && (
+                    <div className="w-28 shrink-0">
+                      <ProgressBar value={holt[item.id] * 100} ariaLabel={t('mss.vault.dateien.offlineLaedt')} />
+                    </div>
+                  )}
+                  {upload && (
+                    <div className="w-28 shrink-0">
+                      {upload.fehler === 'speicherVoll' ? (
+                        <span className="text-label-sm text-status-destructive">{t('mss.vault.dateien.speicherVoll')}</span>
+                      ) : (
+                        <ProgressBar
+                          value={upload.gesamt > 0 ? (upload.gesendet / upload.gesamt) * 100 : null}
+                          ariaLabel={t('mss.vault.dateien.wirdHochgeladen')}
+                        />
+                      )}
+                    </div>
+                  )}
+                  <ActionMenu
+                    compact
+                    align="end"
+                    label={t('mss.vault.dateien.aktionen')}
+                    items={[
+                      { key: 'umbenennen', label: t('mss.vault.dateien.umbenennen'), icon: <Pencil className="h-3.5 w-3.5" />, onSelect: () => void umbenennen(item) },
+                      {
+                        key: 'verschieben',
+                        label: t('mss.vault.dateien.verschieben'),
+                        icon: <FolderInput className="h-3.5 w-3.5" />,
+                        onSelect: () => setVerschieben({ item, ziel: item.ordner ?? '' }),
+                      },
+                      ...(item.datei
+                        ? [
+                            {
+                              key: 'speichern',
+                              label: t('mss.vault.dateien.speichern'),
+                              icon: <Download className="h-3.5 w-3.5" />,
+                              onSelect: () => void speichern(item),
+                            },
+                            {
+                              key: 'offline',
+                              label: t(offline.has(item.datei.original.id) ? 'mss.vault.dateien.nurOnline' : 'mss.vault.dateien.offlineMachen'),
+                              icon: <HardDriveDownload className="h-3.5 w-3.5" />,
+                              disabled: holt[item.id] !== undefined,
+                              onSelect: () => void offlineUmschalten(item),
+                            },
+                          ]
+                        : []),
+                      { key: 'archiv', label: t('mss.vault.archivieren'), icon: <Archive className="h-3.5 w-3.5" />, onSelect: () => void setArchived(item.id, true) },
+                      {
+                        key: 'papierkorb',
+                        label: t('mss.vault.inPapierkorb'),
+                        icon: <Trash2 className="h-3.5 w-3.5" />,
+                        destructive: true,
+                        separatorBefore: true,
+                        onSelect: () => void trashItem(item.id).then(() => toast.success(t('mss.vault.inPapierkorbGelegt'))),
+                      },
+                    ]}
+                  />
+                </li>
+              )
+            })}
+          </ul>
+        )}
+
+        <Dialog open={!!verschieben} onOpenChange={(offen) => !offen && setVerschieben(null)}>
+          {verschieben && (
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle className="truncate">{t('mss.vault.dateien.verschiebenTitel', { name: verschieben.item.service })}</DialogTitle>
+              </DialogHeader>
+              <div className="p-6">
+                <Dropdown
+                  value={verschieben.ziel}
+                  onChange={(ziel) => setVerschieben((v) => (v ? { ...v, ziel } : v))}
+                  options={[{ value: '', label: t('mss.vault.dateien.obersteEbene') }, ...zielOrdner(verschieben.item)]}
+                  searchable
+                  aria-label={t('mss.vault.dateien.zielOrdner')}
+                />
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="ghost" onClick={() => setVerschieben(null)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button
+                  type="button"
+                  disabled={verschieben.ziel === (verschieben.item.ordner ?? '')}
+                  onClick={() => {
+                    const { item, ziel } = verschieben
+                    setVerschieben(null)
+                    void saveItem({ ...item, ordner: ziel || undefined }).catch((err) =>
+                      toast.error(err instanceof Error ? err.message : String(err)),
+                    )
+                  }}
+                >
+                  {t('mss.vault.dateien.verschieben')}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          )}
+        </Dialog>
+
+        {/* Beim Bearbeiten schließt nur der Editor selbst, damit nichts Ungespeichertes verloren geht. */}
+        <Dialog open={!!geoeffnet} onOpenChange={(offen) => !offen && !geoeffnet?.bearbeiten && setGeoeffnet(null)}>
+          {geoeffnet?.bearbeiten && geoeffnet.text !== null ? (
+            <DialogContent className="max-w-5xl" showCloseButton={false}>
+              <div className="p-3">
+                <TresorTexteditor
+                  item={geoeffnet.item}
+                  text={geoeffnet.text}
+                  onFertig={(gespeichert) => {
+                    if (gespeichert === null) {
+                      setGeoeffnet((g) => (g ? { ...g, bearbeiten: false } : g))
+                      return
+                    }
+                    // Die Ansicht zeigt ab jetzt die neue Fassung; die alte URL verfällt mit dem Wechsel.
+                    const url = ansichtOeffnen(new Blob([gespeichert], { type: geoeffnet.item.datei?.typ || 'text/plain' }))
+                    setGeoeffnet((g) => (g ? { ...g, bearbeiten: false, text: gespeichert, url } : g))
+                  }}
+                />
+              </div>
+            </DialogContent>
+          ) : geoeffnet && (
+            <DialogContent className="max-w-4xl">
+              <DialogHeader>
+                <DialogTitle className="truncate">{geoeffnet.item.service}</DialogTitle>
+              </DialogHeader>
+              <div className="flex min-h-[12rem] items-center justify-center">
+                {geoeffnet.fehler ? (
+                  <p className="text-xs text-status-destructive">{t('mss.vault.dateien.oeffnenFehler')}</p>
+                ) : !geoeffnet.url ? (
+                  <div className="w-64">
+                    <ProgressBar value={geoeffnet.anteil * 100} label={t('mss.vault.dateien.wirdEntschluesselt')} />
+                  </div>
+                ) : art === 'bild' ? (
+                  <img src={geoeffnet.url} alt={geoeffnet.item.service} className="max-h-[70vh] max-w-full rounded-lg object-contain" />
+                ) : art === 'video' ? (
+                  <video src={geoeffnet.url} controls className="max-h-[70vh] max-w-full rounded-lg" />
+                ) : art === 'audio' ? (
+                  <audio src={geoeffnet.url} controls className="w-full" />
+                ) : art === 'text' && geoeffnet.text !== null ? (
+                  <pre className="max-h-[70vh] w-full overflow-auto whitespace-pre-wrap rounded-lg bg-surface-container-low p-3 text-xs">{geoeffnet.text}</pre>
+                ) : (
+                  <p className="text-xs text-on-surface-variant">{t('mss.vault.dateien.keineVorschau')}</p>
+                )}
+              </div>
+              {geoeffnet.url && (
+                <div className="flex justify-end gap-2">
+                  {art === 'text' && geoeffnet.text !== null && (
+                    <Button type="button" variant="secondary" size="sm" onClick={() => setGeoeffnet((g) => (g ? { ...g, bearbeiten: true } : g))}>
+                      <Pencil className="mr-1 h-3.5 w-3.5" />
+                      {t('mss.vault.bearbeiten.knopf')}
+                    </Button>
+                  )}
+                  <Button type="button" size="sm" onClick={() => void speichern(geoeffnet.item)}>
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    {t('mss.vault.dateien.speichern')}
+                  </Button>
+                </div>
+              )}
+            </DialogContent>
+          )}
+        </Dialog>
+      </div>
     </div>
   )
 }

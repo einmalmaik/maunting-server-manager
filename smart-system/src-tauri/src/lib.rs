@@ -42,6 +42,7 @@ pub mod sandbox_container;
 mod sichtfeld;
 mod system;
 mod tray;
+mod tresor_speichern;
 mod uebernahme;
 pub mod updater;
 mod virenscan;
@@ -829,6 +830,10 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_dialog::init())
+        // Nur für `tresor_speichern` (Android-Adressen); dem Fenster gibt
+        // keine Capability ein fs-Recht.
+        .plugin(tauri_plugin_fs::init())
+        .manage(tresor_speichern::Offen::default())
         .plugin(tauri_plugin_notification::init())
         // Programme, Dateien und Adressen oeffnen — der offizielle Weg in
         // Tauri v2 (tauri-plugin-shell::open ist deprecated).
@@ -876,6 +881,9 @@ pub fn run() {
             biometrie_speicher_fragt_selbst,
             messenger_geraetegeheimnis,
             datenexport::export_speichern,
+            tresor_speichern::tresor_speichern_start,
+            tresor_speichern::tresor_speichern_teil,
+            tresor_speichern::tresor_speichern_ende,
             updater::update_pruefen,
             updater::update_installieren,
             updater::app_neu_starten

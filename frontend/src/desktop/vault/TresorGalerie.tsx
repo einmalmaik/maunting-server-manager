@@ -41,7 +41,7 @@ import { formatBytes } from '@/components/server/fileHelpers'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { ansichtOeffnen, ansichtSchliessen, blobLesen, useTresorUploads } from './tresorDateien'
 import { miniaturenVorladen, useMiniatur } from './tresorMiniaturen'
-import { speichernUnter } from './tresorAnzeige'
+import { aufGeraetSpeichern } from './tresorAnzeige'
 import { gruppieren, hashesBerechnen } from './tresorAehnlich'
 import { BEARBEITBAR, TresorBildeditor } from './TresorBildeditor'
 
@@ -811,13 +811,9 @@ function GalerieLichtbox({
 
   const speichern = async () => {
     try {
-      const blob = await blobLesen(datei.original, item.id, userKey, datei.typ, { zuletzt: true })
-      if (useVaultStore.getState().userKey !== userKey) return
-      const url = ansichtOeffnen(blob)
-      speichernUnter(url, item.service)
-      setTimeout(() => ansichtSchliessen(url), 60_000)
+      await aufGeraetSpeichern(datei.original, item.id, userKey, item.service, datei.typ)
     } catch {
-      toast.error(t('mss.vault.dateien.oeffnenFehler'))
+      toast.error(t('mss.vault.dateien.speichernFehler'))
     }
   }
 

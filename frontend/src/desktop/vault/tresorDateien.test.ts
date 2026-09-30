@@ -23,6 +23,10 @@ import {
 } from './tresorDateien'
 import { miniaturFreigeben, miniaturHolen } from './tresorMiniaturen'
 import { CHUNK_KLARTEXT, CHUNK_UEBERHANG } from './tresorDatei'
+import { aufGeraetSpeichern } from './tresorAnzeige'
+
+const tauriKern = vi.hoisted(() => ({ invoke: vi.fn() }))
+vi.mock('@tauri-apps/api/core', () => tauriKern)
 
 vi.mock('../tauri', () => ({
   FACH_TRESOR: 'vault_biometric_key',
@@ -632,6 +636,88 @@ describe('Tresor-Dateien', () => {
       await vi.waitFor(() => expect(server.geloescht).toContain(original.id))
       expect(await angeheftet([original.id])).toEqual(new Set())
       expect(await originalImCache(original.id)).toBe(false)
+    })
+  })
+  describe('Auf dem Gerät speichern', () => {
+    beforeEach(() => {
+      ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+    })
+    afterEach(() => {
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
+      tauriKern.invoke.mockReset()
+    })
+
+    /** Rust nachgebaut: merkt sich, was ankommt, und kopiert wie die echte IPC. */
+    function rust(antwortStart: number | null, beiTeil?: (anzahl: number) => void) {
+      const geschrieben: Uint8Array[] = []
+      const gesehen: Uint8Array[] = []
+      const ende: unknown[] = []
+      tauriKern.invoke.mockImplementation(async (befehl: string, nutzlast: unknown) => {
+        if (befehl === 'tresor_speichern_start') return antwortStart
+        if (befehl === 'tresor_speichern_teil') {
+          const teil = nutzlast as Uint8Array
+          gesehen.push(teil)
+          geschrieben.push(teil.slice())
+          beiTeil?.(geschrieben.length)
+          return null
+        }
+        if (befehl === 'tresor_speichern_ende') {
+          ende.push(nutzlast)
+          return null
+        }
+        throw new Error(befehl)
+      })
+      return { geschrieben, gesehen, ende }
+    }
+
+    it('schreibt Chunk für Chunk und hält danach keinen Klartext mehr', async () => {
+      serverStarten()
+      const userKey = await tresorOeffnen()
+      const datei = foto(CHUNK_KLARTEXT + 4321, 'gross.jpg')
+      const id = await useVaultStore.getState().dateiHinzufuegen(datei)
+      await allesErledigt()
+      const item = useVaultStore.getState().items.find((i) => i.id === id)!
+      const r = rust(7)
+
+      expect(await aufGeraetSpeichern(item.datei!.original, id, userKey, item.service, item.datei!.typ)).toBe(true)
+
+      expect(tauriKern.invoke).toHaveBeenCalledWith('tresor_speichern_start', { name: 'gross.jpg' })
+      expect(r.geschrieben).toHaveLength(2)
+      const zusammen = new Uint8Array(await new Blob(r.geschrieben as BlobPart[]).arrayBuffer())
+      const echt = new Uint8Array(await datei.arrayBuffer())
+      expect(zusammen.length).toBe(echt.length)
+      expect(zusammen.every((x, i) => x === echt[i])).toBe(true)
+      expect(r.gesehen.every((teil) => teil.every((b) => b === 0))).toBe(true)
+      expect(r.ende).toEqual([{ vorgang: 7, abbrechen: false }])
+    })
+
+    it('schreibt nichts, wenn der Dialog abgebrochen wird', async () => {
+      const { userKey, id, item } = await (async () => {
+        serverStarten()
+        const userKey = await tresorOeffnen()
+        const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Vertrag'], 'v.txt', { type: 'text/plain' }))
+        await allesErledigt()
+        return { userKey, id, item: useVaultStore.getState().items.find((i) => i.id === id)! }
+      })()
+      const r = rust(null)
+      expect(await aufGeraetSpeichern(item.datei!.original, id, userKey, item.service, 'text/plain')).toBe(false)
+      expect(r.geschrieben).toEqual([])
+      expect(r.ende).toEqual([])
+    })
+
+    it('bricht beim Sperren ab und lässt Rust die halbe Datei verwerfen', async () => {
+      serverStarten()
+      const userKey = await tresorOeffnen()
+      const id = await useVaultStore.getState().dateiHinzufuegen(foto(2 * CHUNK_KLARTEXT + 5, 'drei.jpg'))
+      await allesErledigt()
+      const item = useVaultStore.getState().items.find((i) => i.id === id)!
+      const r = rust(3, (anzahl) => {
+        if (anzahl === 1) useVaultStore.setState({ userKey: null, isUnlocked: false })
+      })
+
+      await expect(aufGeraetSpeichern(item.datei!.original, id, userKey, item.service, item.datei!.typ)).rejects.toThrow()
+      expect(r.geschrieben).toHaveLength(1)
+      expect(r.ende).toEqual([{ vorgang: 3, abbrechen: true }])
     })
   })
 })
