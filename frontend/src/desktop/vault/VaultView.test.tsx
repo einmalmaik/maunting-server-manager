@@ -45,6 +45,12 @@ vi.mock('./tresorDateien', async (original) => ({
   }),
 }))
 
+vi.mock('./tresorAehnlich', async (original) => ({
+  ...(await original<typeof import('./tresorAehnlich')>()),
+  // jsdom kann keine Bilder dekodieren: 1 und 3 sehen gleich aus, 2 anders.
+  hashesBerechnen: vi.fn(async (items: VaultItem[]) => new Map(items.map((i) => [i.id, i.id === '2' ? [0xffff, 0, 0x646464] : [0, 0, 0x646464]]))),
+}))
+
 const TAG = 24 * 60 * 60 * 1000
 
 function eintrag(id: string, service: string, extra: Partial<VaultItem> = {}): VaultItem {
@@ -266,6 +272,18 @@ describe('VaultView: Fotos', () => {
     fireEvent.click(screen.getByRole('option', { name: /Alle Quellen/ }))
     fireEvent.change(screen.getByPlaceholderText(i18n.t('common.search')), { target: { value: 'pixel' } })
     expect(kachel('strand.jpg')).not.toBeNull()
+    expect(kachel('wellen.mp4')).toBeNull()
+  })
+
+  it('zeigt ähnliche Fotos in Gruppen', async () => {
+    render(<VaultView />)
+    fireEvent.click(reiter('mss.vault.ansicht.fotos'))
+    fireEvent.click(reiter('mss.vault.fotos.aehnlich'))
+    const gruppe = await screen.findByRole('region', { name: i18n.t('mss.vault.fotos.aehnlicheGruppe', { count: 2 }) })
+    expect(within(gruppe).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
+      'strand.jpg',
+      'Screenshot_20260712.png',
+    ])
     expect(kachel('wellen.mp4')).toBeNull()
   })
 

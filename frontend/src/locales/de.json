@@ -6168,7 +6168,12 @@
           "whatsapp": "WhatsApp",
           "ki": "KI-Bilder",
           "sonstige": "Sonstige"
-        }
+        },
+        "aehnlich": "Ähnliche",
+        "aehnlicheGruppe_one": "{{count}} ähnliches Foto",
+        "aehnlicheGruppe_other": "{{count}} ähnliche Fotos",
+        "aehnlicheSuche": "Fotos werden auf diesem Gerät verglichen",
+        "keineAehnlichen": "Keine ähnlichen Fotos gefunden."
       }
     },
     "aktion": {

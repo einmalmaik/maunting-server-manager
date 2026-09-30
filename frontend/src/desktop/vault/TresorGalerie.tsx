@@ -17,6 +17,7 @@ import {
   Check,
   CheckSquare,
   Clock,
+  Copy,
   Download,
   Film,
   FolderInput,
@@ -40,8 +41,9 @@ import { useVaultStore, type VaultItem } from './vaultStore'
 import { ansichtOeffnen, ansichtSchliessen, blobLesen, useTresorUploads } from './tresorDateien'
 import { miniaturenVorladen, useMiniatur } from './tresorMiniaturen'
 import { speichernUnter } from './tresorAnzeige'
+import { gruppieren, hashesBerechnen } from './tresorAehnlich'
 
-type Filter = 'alle' | 'videos' | 'kuerzlich' | 'alben'
+type Filter = 'alle' | 'videos' | 'kuerzlich' | 'aehnlich' | 'alben'
 
 /** Kantenlänge der Kacheln je Zoomstufe. */
 const KACHEL = [84, 128, 200] as const
@@ -245,6 +247,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const setArchived = useVaultStore((s) => s.setArchived)
   const [filter, setFilterRoh] = useState<Filter>('alle')
   const [quelle, setQuelle] = useState('')
+  const [aehnlich, setAehnlich] = useState<{ fertig: number; gesamt: number; gruppen: string[][] | null }>({ fertig: 0, gesamt: 0, gruppen: null })
   const [albumId, setAlbumId] = useState<string | null>(null)
   const [auswahl, setAuswahl] = useState<Set<string> | null>(null)
   const [stufe, setStufe] = useState(1)
@@ -275,17 +278,43 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
     [medien],
   )
 
+  // Ähnliche erst suchen, wenn jemand danach fragt: dafür wird jede Miniatur entschlüsselt.
+  const anzahlMedien = medien.length
+  useEffect(() => {
+    if (filter !== 'aehnlich' || !userKey) return
+    let abgebrochen = false
+    const alle = useVaultStore.getState().items.filter((i) => istMedium(i) && !i.trashedAt && !i.archivedAt)
+    setAehnlich({ fertig: 0, gesamt: alle.length, gruppen: null })
+    void hashesBerechnen(alle, userKey, () => abgebrochen, (fertig) => !abgebrochen && setAehnlich((a) => ({ ...a, fertig })))
+      .then((hashes) => {
+        if (!abgebrochen) setAehnlich({ fertig: alle.length, gesamt: alle.length, gruppen: gruppieren(hashes) })
+      })
+      .catch(() => !abgebrochen && setAehnlich({ fertig: 0, gesamt: 0, gruppen: [] }))
+    return () => {
+      abgebrochen = true
+    }
+  }, [filter, userKey, anzahlMedien])
+
   const liste = useMemo(() => {
     const wort = suche.trim().toLocaleLowerCase()
-    const basis = album ? albumInhalt(album) : filter === 'alben' ? [] : medien
+    const nachId = new Map(medien.map((m) => [m.id, m]))
+    const basis = album
+      ? albumInhalt(album)
+      : filter === 'alben'
+        ? []
+        : filter === 'aehnlich'
+          ? (aehnlich.gruppen ?? []).flat().map((id) => nachId.get(id)).filter((m): m is VaultItem => !!m)
+          : medien
     const auswahlListe = basis.filter(
       (i) =>
         (filter !== 'videos' || istVideo(i)) &&
         quellePasst(i, quelle) &&
         (!wort || i.service.toLocaleLowerCase().includes(wort) || !!i.datei?.kamera?.toLocaleLowerCase().includes(wort)),
     )
+    // Ähnliche bleiben in ihren Gruppen beieinander.
+    if (filter === 'aehnlich' && !album) return auswahlListe
     return auswahlListe.sort((a, b) => zeitpunkt(b, filter).ms - zeitpunkt(a, filter).ms)
-  }, [medien, filter, suche, album, albumInhalt, quelle])
+  }, [medien, filter, suche, album, albumInhalt, quelle, aehnlich.gruppen])
 
   const quellen = useMemo(() => {
     const zahl = new Map<string, number>()
@@ -309,6 +338,14 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
 
   const gruppen = useMemo(() => {
     const ergebnis: { schluessel: string; titel: string; items: VaultItem[] }[] = []
+    if (filter === 'aehnlich' && !album) {
+      const sichtbar = new Map(liste.map((m) => [m.id, m]))
+      for (const [nr, g] of (aehnlich.gruppen ?? []).entries()) {
+        const drin = g.map((id) => sichtbar.get(id)).filter((m): m is VaultItem => !!m)
+        if (drin.length > 1) ergebnis.push({ schluessel: `g${nr}`, titel: t('mss.vault.fotos.aehnlicheGruppe', { count: drin.length }), items: drin })
+      }
+      return ergebnis
+    }
     const monat = (utc: boolean) =>
       new Intl.DateTimeFormat(i18n.language, { month: 'long', year: 'numeric', timeZone: utc ? 'UTC' : undefined })
     const formate = { utc: monat(true), lokal: monat(false) }
@@ -321,10 +358,9 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
       else ergebnis.push({ schluessel, titel: (utc ? formate.utc : formate.lokal).format(d), items: [item] })
     }
     return ergebnis
-  }, [liste, filter, i18n.language])
+  }, [liste, filter, i18n.language, album, aehnlich.gruppen, t])
 
   // Offline sollen alle Miniaturen da sein: im Hintergrund nachladen, was fehlt.
-  const anzahlMedien = medien.length
   useEffect(() => {
     if (!userKey || anzahlMedien === 0) return
     let abgebrochen = false
@@ -423,6 +459,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
     { id: 'alle', labelKey: 'mss.vault.fotos.alle', icon: Images },
     { id: 'videos', labelKey: 'mss.vault.fotos.videos', icon: Film },
     { id: 'kuerzlich', labelKey: 'mss.vault.fotos.kuerzlich', icon: Clock },
+    { id: 'aehnlich', labelKey: 'mss.vault.fotos.aehnlich', icon: Copy },
     { id: 'alben', labelKey: 'mss.vault.fotos.alben', icon: Library },
   ]
 
@@ -602,7 +639,15 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
         <p className="mb-2 text-label-sm text-on-surface-variant">{t('mss.vault.dateien.verschluesselt', { count: vorbereitung })}</p>
       )}
 
-      {albenUebersicht ? (
+      {filter === 'aehnlich' && !album && aehnlich.gruppen === null ? (
+        <div className="mx-auto mt-6 w-72">
+          <ProgressBar
+            value={aehnlich.gesamt > 0 ? (aehnlich.fertig / aehnlich.gesamt) * 100 : null}
+            label={t('mss.vault.fotos.aehnlicheSuche')}
+            hint={`${aehnlich.fertig} / ${aehnlich.gesamt}`}
+          />
+        </div>
+      ) : albenUebersicht ? (
         alben.length === 0 ? (
           <div className="flex flex-col items-center justify-center p-8 text-center text-xs text-on-surface-variant">
             <Library className="mb-2 h-6 w-6 opacity-60" />
@@ -619,7 +664,15 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
       ) : liste.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-8 text-center text-xs text-on-surface-variant">
           <Images className="mb-2 h-6 w-6 opacity-60" />
-          {t(album ? 'mss.vault.fotos.albumLeer' : filter === 'alle' && !suche.trim() ? 'mss.vault.fotos.leer' : 'mss.vault.fotos.leerFilter')}
+          {t(
+            album
+              ? 'mss.vault.fotos.albumLeer'
+              : filter === 'aehnlich'
+                ? 'mss.vault.fotos.keineAehnlichen'
+                : filter === 'alle' && !suche.trim()
+                  ? 'mss.vault.fotos.leer'
+                  : 'mss.vault.fotos.leerFilter',
+          )}
         </div>
       ) : (
         <SichtbarKontext.Provider value={beobachten}>
