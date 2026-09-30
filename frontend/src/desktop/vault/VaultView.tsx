@@ -1002,6 +1002,7 @@ export function VaultView() {
         </div>
 
         <div className="flex items-center gap-1.5">
+          {ansicht !== 'dateien' && (
           <Button
             onClick={openNewEntryModal}
             className="flex items-center gap-1 bg-primary text-on-primary hover:bg-primary-hover shadow-sm px-2.5 py-1.5 text-xs font-medium"
@@ -1009,6 +1010,7 @@ export function VaultView() {
             <Plus className="h-3.5 w-3.5" />
             <span>{t('mss.vault.neuerEintrag')}</span>
           </Button>
+          )}
 
           <Button
             size="sm"

@@ -264,21 +264,35 @@ function status(err: unknown): number | null {
   return err instanceof SanitizedApiError ? err.status : null
 }
 
-let uploaderLaeuft: Promise<void> | null = null
+/**
+ * Ein Lauf zur Zeit. Wer während eines Laufs anstößt, bekommt einen weiteren
+ * danach: der laufende hat seine Liste schon gelesen und sähe neu Abgelegtes
+ * sonst erst beim nächsten Sync.
+ */
+function einzeln(arbeit: (bucket: string) => Promise<void>) {
+  let lauf: Promise<void> | null = null
+  let nochmal: string | null = null
+  const starten = (bucket: string): Promise<void> => {
+    if (lauf) {
+      nochmal = bucket
+      return lauf
+    }
+    lauf = arbeit(bucket).finally(() => {
+      lauf = null
+      const naechster = nochmal
+      nochmal = null
+      if (naechster) void starten(naechster)
+    })
+    return lauf
+  }
+  return starten
+}
 
 /**
- * Lädt hoch, was in der Ablage wartet. Läuft höchstens einmal zugleich; ein
- * Aufruf während eines Laufs wartet auf diesen. Bricht beim ersten
- * Netzfehler ab, der nächste Sync oder das nächste „online“ stößt wieder an.
+ * Lädt hoch, was in der Ablage wartet. Bricht beim ersten Netzfehler ab; der
+ * nächste Sync stößt wieder an.
  */
-export function uploadsFortsetzen(bucket: string): Promise<void> {
-  if (!uploaderLaeuft) {
-    uploaderLaeuft = hochladen(bucket).finally(() => {
-      uploaderLaeuft = null
-    })
-  }
-  return uploaderLaeuft
-}
+export const uploadsFortsetzen = einzeln(hochladen)
 
 async function hochladen(bucket: string): Promise<void> {
   // Ohne geladene Ablage wirkt jeder Eintrag tot, und wartende Uploads würden
@@ -318,8 +332,13 @@ async function hochladen(bucket: string): Promise<void> {
 }
 
 async function blobHochladen(db: IDBDatabase, zeile: UploadZeile): Promise<void> {
+  // Erst reservieren; nur wenn es den Blob schon gibt (ein früherer Lauf kam
+  // an), nach dem Stand fragen.
   let vorhanden: number[] = []
   try {
+    await blobReservieren(zeile.blobId, zeile.chunkAnzahl, zeile.bytes, zeile.pruefwert)
+  } catch (err) {
+    if (status(err) !== 409) throw err
     const stand = await blobStand(zeile.blobId)
     if (stand.state === 'geloescht') {
       await uploadEntfernen(db, zeile.blobId)
@@ -330,15 +349,6 @@ async function blobHochladen(db: IDBDatabase, zeile: UploadZeile): Promise<void>
       return
     }
     vorhanden = stand.vorhanden
-  } catch (err) {
-    if (status(err) !== 404) throw err
-    try {
-      await blobReservieren(zeile.blobId, zeile.chunkAnzahl, zeile.bytes, zeile.pruefwert)
-    } catch (reserviert) {
-      // 409: eine frühere Anfrage kam an, ihre Antwort nicht. Der nächste Lauf fragt den Stand.
-      if (status(reserviert) !== 409) throw reserviert
-      return
-    }
   }
   const schon = new Set(vorhanden)
   for (let index = 0; index < zeile.chunkAnzahl; index++) {
@@ -432,22 +442,13 @@ export async function cacheEntfernen(blobId: string): Promise<void> {
   if (db) await schreiben(db, BLOB_CACHE, (s) => s.delete(chunkBereich(blobId)))
 }
 
-let loeschenLaeuft: Promise<void> | null = null
-
 /**
  * Löscht die Blobs gelöschter Dateien, sobald der Server deren Tombstone
  * angenommen hat: der Tombstone steht im Cache, und in der Warteschlange ist
  * für den Eintrag nichts mehr offen. Hat der Server abgelehnt, steht im Cache
  * wieder die alte Fassung, und es gibt nichts zu tun.
  */
-export function loeschungenAbarbeiten(bucket: string): Promise<void> {
-  if (!loeschenLaeuft) {
-    loeschenLaeuft = loeschen(bucket).finally(() => {
-      loeschenLaeuft = null
-    })
-  }
-  return loeschenLaeuft
-}
+export const loeschungenAbarbeiten = einzeln(loeschen)
 
 async function loeschen(bucket: string): Promise<void> {
   if (!ablageGeladen(bucket)) return

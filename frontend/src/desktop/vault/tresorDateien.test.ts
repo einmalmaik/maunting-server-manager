@@ -51,6 +51,11 @@ function serverStarten() {
   const server = {
     offline: false,
     speicherVoll: false,
+    /** Hält jeden hochgeladenen Chunk so lange auf (ms). */
+    verzoegerung: 0,
+    /** Der erste Upload eines zweiten Chunks bricht ab wie ein Netzfehler. */
+    abbruchBeiChunk1: false,
+    puts: [] as string[],
     revision: 10,
     eintraege: new Map<string, { ciphertext: string; revision: number; is_deleted: boolean }>(),
     konflikte: new Set<string>(),
@@ -110,6 +115,12 @@ function serverStarten() {
         const voll = CHUNK_KLARTEXT + CHUNK_UEBERHANG
         const erwartet = index < eintrag.chunk_count - 1 ? voll : eintrag.bytes_total - (eintrag.chunk_count - 1) * voll
         const daten = koerper as Uint8Array
+        if (index === 1 && server.abbruchBeiChunk1) {
+          server.abbruchBeiChunk1 = false
+          throw new TypeError('Failed to fetch')
+        }
+        server.puts.push(`${id}:${index}`)
+        if (server.verzoegerung) await new Promise((r) => setTimeout(r, server.verzoegerung))
         if (daten.length !== erwartet) return json({ detail: 'Länge' }, 422)
         eintrag.chunks.set(index, daten.slice())
         return new Response(null, { status: 204 })
@@ -230,6 +241,37 @@ describe('Tresor-Dateien', () => {
     expect(a.length).toBe(b.length)
     expect(a.every((x, i) => x === b[i])).toBe(true)
     expect(zurueck.type).toBe('image/jpeg')
+  })
+
+  it('lädt auch hoch, was während eines laufenden Uploads dazukommt', async () => {
+    const server = serverStarten()
+    server.verzoegerung = 150
+    await tresorOeffnen()
+
+    await useVaultStore.getState().dateiHinzufuegen(foto(9 * 1024 * 1024, 'gross.jpg'))
+    // Der Upload der ersten läuft noch, wenn die weiteren abgelegt sind.
+    await useVaultStore.getState().dateiHinzufuegen(foto(1000, 'klein-1.jpg'))
+    await useVaultStore.getState().dateiHinzufuegen(foto(1000, 'klein-2.jpg'))
+    await vi.waitFor(async () => expect(await zeilen(UPLOADS)).toEqual([]), { timeout: 5000 })
+
+    expect(server.blobs.size).toBe(9)
+    expect([...server.blobs.values()].every((b) => b.state === 'fertig')).toBe(true)
+  })
+
+  it('setzt einen abgebrochenen Upload fort, ohne Angekommenes erneut zu senden', async () => {
+    const server = serverStarten()
+    server.abbruchBeiChunk1 = true
+    await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(foto(5 * 1024 * 1024))
+    await vi.waitFor(() => expect(server.puts.length).toBeGreaterThan(0))
+    await new Promise((r) => setTimeout(r, 50))
+
+    await uploadsFortsetzen(BUCKET)
+    await vi.waitFor(async () => expect(await zeilen(UPLOADS)).toEqual([]))
+
+    const original = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.original.id
+    expect(server.puts.filter((p) => p.startsWith(original))).toEqual([`${original}:0`, `${original}:1`])
+    expect(server.blobs.get(original)!.state).toBe('fertig')
   })
 
   it('wartet offline und lädt nach einem Neustart hoch', async () => {
