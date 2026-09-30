@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
 import { VaultView, restTageImPapierkorb } from './VaultView'
+import { quelleVon } from './TresorGalerie'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { usePromptStore } from '@/stores/promptStore'
 
@@ -242,7 +243,7 @@ describe('VaultView: Fotos', () => {
     expect(screen.queryByText('Bank')).toBeNull()
   })
 
-  it('filtert nach Videos, Screenshots und Suchwort', () => {
+  it('filtert nach Videos, Quelle und Suchwort', () => {
     render(<VaultView />)
     fireEvent.click(reiter('mss.vault.ansicht.fotos'))
 
@@ -250,11 +251,19 @@ describe('VaultView: Fotos', () => {
     expect(kachel('wellen.mp4')).not.toBeNull()
     expect(kachel('strand.jpg')).toBeNull()
 
-    fireEvent.click(reiter('mss.vault.fotos.screenshots'))
+    fireEvent.click(reiter('mss.vault.fotos.alle'))
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.fotos.quelle.titel') }))
+    fireEvent.click(screen.getByRole('option', { name: /Screenshots/ }))
     expect(kachel('Screenshot_20260712.png')).not.toBeNull()
     expect(kachel('strand.jpg')).toBeNull()
 
-    fireEvent.click(reiter('mss.vault.fotos.alle'))
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.fotos.quelle.titel') }))
+    fireEvent.click(screen.getByRole('option', { name: /Google Pixel 8/ }))
+    expect(kachel('strand.jpg')).not.toBeNull()
+    expect(kachel('Screenshot_20260712.png')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.fotos.quelle.titel') }))
+    fireEvent.click(screen.getByRole('option', { name: /Alle Quellen/ }))
     fireEvent.change(screen.getByPlaceholderText(i18n.t('common.search')), { target: { value: 'pixel' } })
     expect(kachel('strand.jpg')).not.toBeNull()
     expect(kachel('wellen.mp4')).toBeNull()
@@ -317,5 +326,23 @@ describe('VaultView: Fotos', () => {
     fireEvent.click(kachel('strand.jpg')!)
     fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.ausAlbum')) }))
     await vi.waitFor(() => expect(albumAendern).toHaveBeenCalledWith('al', { weg: ['1'] }))
+  })
+})
+
+describe('Tresor-Galerie: Quellen', () => {
+  const bild = (service: string, kamera?: string, typ = 'image/jpeg') =>
+    eintrag('x', service, { category: 'datei', datei: { typ, kamera } as VaultItem['datei'] })
+
+  it('leitet die Quelle aus Name und EXIF ab', () => {
+    expect(quelleVon(bild('Screenshot_20260901-101010.png'))).toEqual({ art: 'screenshot' })
+    expect(quelleVon(bild('Bildschirmfoto 2026-09-01 um 10.10.10.png'))).toEqual({ art: 'screenshot' })
+    expect(quelleVon(bild('IMG-20260901-WA0003.jpg'))).toEqual({ art: 'whatsapp' })
+    expect(quelleVon(bild('DALL·E 2026-09-01 10.10.10 - Katze.webp'))).toEqual({ art: 'ki' })
+    expect(quelleVon(bild('ChatGPT Image 1. Sep. 2026.png'))).toEqual({ art: 'ki' })
+    expect(quelleVon(bild('PXL_20260901_101010.jpg', 'Google Pixel 8 Pro'))).toEqual({ art: 'kamera', modell: 'Google Pixel 8 Pro' })
+    expect(quelleVon(bild('PXL_20260901_101010.jpg'))).toEqual({ art: 'kamera' })
+    expect(quelleVon(bild('urlaub.jpg'))).toEqual({ art: 'sonstige' })
+    // Ein Video mit „Screenshot“ im Namen ist eine Bildschirmaufnahme, kein Screenshot.
+    expect(quelleVon(bild('Screenshot-Aufnahme.mp4', undefined, 'video/mp4')).art).not.toBe('screenshot')
   })
 })

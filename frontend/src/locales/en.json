@@ -6128,7 +6128,6 @@
       "fotos": {
         "alle": "All",
         "videos": "Videos",
-        "screenshots": "Screenshots",
         "kuerzlich": "Recently added",
         "filter": "Filter photos",
         "kleiner": "Smaller thumbnails",
@@ -6160,7 +6159,16 @@
         "zuAlbum": "Add to album",
         "ausAlbum": "Remove from album",
         "hinzugefuegt": "Added to “{{name}}”",
-        "albumVoll": "An album holds at most {{max}} items."
+        "albumVoll": "An album holds at most {{max}} items.",
+        "quelle": {
+          "titel": "Source",
+          "alle": "All sources",
+          "kamera": "Camera",
+          "screenshot": "Screenshots",
+          "whatsapp": "WhatsApp",
+          "ki": "AI images",
+          "sonstige": "Other"
+        }
       }
     },
     "aktion": {

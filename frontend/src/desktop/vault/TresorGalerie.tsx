@@ -25,14 +25,13 @@ import {
   Images,
   Library,
   Minus,
-  Monitor,
   Pencil,
   Play,
   Plus,
   Trash2,
   Upload,
 } from 'lucide-react'
-import { ActionMenu, Button, FileButton, Lichtbox, ProgressBar } from '@/Singra/UI'
+import { ActionMenu, Button, Dropdown, FileButton, Lichtbox, ProgressBar, type DropdownOption } from '@/Singra/UI'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { toast } from '@/stores/toastStore'
 import { prompt } from '@/stores/promptStore'
@@ -42,7 +41,7 @@ import { ansichtOeffnen, ansichtSchliessen, blobLesen, useTresorUploads } from '
 import { miniaturenVorladen, useMiniatur } from './tresorMiniaturen'
 import { speichernUnter } from './tresorAnzeige'
 
-type Filter = 'alle' | 'videos' | 'screenshots' | 'kuerzlich' | 'alben'
+type Filter = 'alle' | 'videos' | 'kuerzlich' | 'alben'
 
 /** Kantenlänge der Kacheln je Zoomstufe. */
 const KACHEL = [84, 128, 200] as const
@@ -58,8 +57,32 @@ function istVideo(item: VaultItem): boolean {
   return !!item.datei?.typ.startsWith('video/')
 }
 
-export function istScreenshot(item: VaultItem): boolean {
-  return !istVideo(item) && SCREENSHOT.test(item.service)
+const WHATSAPP = /^(IMG|VID)-\d{8}-WA\d+|whatsapp/i
+const KI_BILD = /dall[·.\s_-]?e|chatgpt|midjourney|stable[ _-]?diffusion|gemini_generated|firefly|ai[_-]generated/i
+const KAMERA_NAME = /^(IMG|VID|PXL|DSC|DSCN|DCIM|MVIMG|MOV|GOPR|DJI)[_-]/i
+
+export type QuellenArt = 'kamera' | 'screenshot' | 'whatsapp' | 'ki' | 'sonstige'
+
+/**
+ * Woher ein Bild vermutlich stammt, aus Dateiname und EXIF abgeleitet. Das
+ * steht nirgends gespeichert; es ist eine Vermutung für den Filter.
+ */
+export function quelleVon(item: VaultItem): { art: QuellenArt; modell?: string } {
+  const name = item.service
+  if (!istVideo(item) && SCREENSHOT.test(name)) return { art: 'screenshot' }
+  if (WHATSAPP.test(name)) return { art: 'whatsapp' }
+  if (KI_BILD.test(name)) return { art: 'ki' }
+  if (item.datei?.kamera) return { art: 'kamera', modell: item.datei.kamera }
+  if (KAMERA_NAME.test(name)) return { art: 'kamera' }
+  return { art: 'sonstige' }
+}
+
+/** Passt ein Bild zur gewählten Quelle? `kamera:<Modell>` wählt ein Modell. */
+function quellePasst(item: VaultItem, quelle: string): boolean {
+  if (!quelle) return true
+  const q = quelleVon(item)
+  if (quelle.startsWith('kamera:')) return q.modell === quelle.slice(7)
+  return q.art === quelle
 }
 
 /**
@@ -221,6 +244,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const trashItem = useVaultStore((s) => s.trashItem)
   const setArchived = useVaultStore((s) => s.setArchived)
   const [filter, setFilterRoh] = useState<Filter>('alle')
+  const [quelle, setQuelle] = useState('')
   const [albumId, setAlbumId] = useState<string | null>(null)
   const [auswahl, setAuswahl] = useState<Set<string> | null>(null)
   const [stufe, setStufe] = useState(1)
@@ -256,11 +280,32 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
     const basis = album ? albumInhalt(album) : filter === 'alben' ? [] : medien
     const auswahlListe = basis.filter(
       (i) =>
-        (filter === 'videos' ? istVideo(i) : filter === 'screenshots' ? istScreenshot(i) : true) &&
+        (filter !== 'videos' || istVideo(i)) &&
+        quellePasst(i, quelle) &&
         (!wort || i.service.toLocaleLowerCase().includes(wort) || !!i.datei?.kamera?.toLocaleLowerCase().includes(wort)),
     )
     return auswahlListe.sort((a, b) => zeitpunkt(b, filter).ms - zeitpunkt(a, filter).ms)
-  }, [medien, filter, suche, album, albumInhalt])
+  }, [medien, filter, suche, album, albumInhalt, quelle])
+
+  const quellen = useMemo(() => {
+    const zahl = new Map<string, number>()
+    for (const m of medien) {
+      const q = quelleVon(m)
+      zahl.set(q.art, (zahl.get(q.art) ?? 0) + 1)
+      if (q.modell) zahl.set(`kamera:${q.modell}`, (zahl.get(`kamera:${q.modell}`) ?? 0) + 1)
+    }
+    const modelle = [...zahl.keys()].filter((k) => k.startsWith('kamera:')).sort((a, b) => zahl.get(b)! - zahl.get(a)!)
+    const arten: QuellenArt[] = ['kamera', 'screenshot', 'whatsapp', 'ki', 'sonstige']
+    const optionen: DropdownOption[] = [{ value: '', label: t('mss.vault.fotos.quelle.alle') }]
+    for (const art of arten) {
+      if (!zahl.get(art)) continue
+      optionen.push({ value: art, label: t(`mss.vault.fotos.quelle.${art}`), hint: String(zahl.get(art)) })
+      if (art === 'kamera') {
+        for (const m of modelle) optionen.push({ value: m, label: m.slice(7), hint: String(zahl.get(m)) })
+      }
+    }
+    return optionen
+  }, [medien, t])
 
   const gruppen = useMemo(() => {
     const ergebnis: { schluessel: string; titel: string; items: VaultItem[] }[] = []
@@ -377,7 +422,6 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const filterTabs: TabDef<Filter>[] = [
     { id: 'alle', labelKey: 'mss.vault.fotos.alle', icon: Images },
     { id: 'videos', labelKey: 'mss.vault.fotos.videos', icon: Film },
-    { id: 'screenshots', labelKey: 'mss.vault.fotos.screenshots', icon: Monitor },
     { id: 'kuerzlich', labelKey: 'mss.vault.fotos.kuerzlich', icon: Clock },
     { id: 'alben', labelKey: 'mss.vault.fotos.alben', icon: Library },
   ]
@@ -514,7 +558,18 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
       }}
     >
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <TabBar tabs={filterTabs} active={filter} onChange={setFilter} embedded ariaLabel={t('mss.vault.fotos.filter')} />
+        <div className="flex flex-wrap items-center gap-2">
+          <TabBar tabs={filterTabs} active={filter} onChange={setFilter} embedded ariaLabel={t('mss.vault.fotos.filter')} />
+          {!albenUebersicht && quellen.length > 2 && (
+            <Dropdown
+              value={quelle}
+              onChange={setQuelle}
+              options={quellen}
+              aria-label={t('mss.vault.fotos.quelle.titel')}
+              className="w-48"
+            />
+          )}
+        </div>
         {leiste}
       </div>
 

@@ -6128,7 +6128,6 @@
       "fotos": {
         "alle": "Alle",
         "videos": "Videos",
-        "screenshots": "Screenshots",
         "kuerzlich": "Zuletzt hinzugefügt",
         "filter": "Fotos filtern",
         "kleiner": "Kleinere Vorschaubilder",
@@ -6160,7 +6159,16 @@
         "zuAlbum": "Zu Album hinzufügen",
         "ausAlbum": "Aus Album entfernen",
         "hinzugefuegt": "Zu „{{name}}“ hinzugefügt",
-        "albumVoll": "Ein Album fasst höchstens {{max}} Einträge."
+        "albumVoll": "Ein Album fasst höchstens {{max}} Einträge.",
+        "quelle": {
+          "titel": "Quelle",
+          "alle": "Alle Quellen",
+          "kamera": "Kamera",
+          "screenshot": "Screenshots",
+          "whatsapp": "WhatsApp",
+          "ki": "KI-Bilder",
+          "sonstige": "Sonstige"
+        }
       }
     },
     "aktion": {
