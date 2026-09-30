@@ -105,13 +105,21 @@ def list_notes(
     search: str | None = Query(None, description="Suchbegriff in Titel und Inhalt"),
     is_pinned: bool | None = Query(None, description="Nur angepinnte"),
     is_archived: bool | None = Query(False, description="Archivierte Notizen anzeigen"),
+    include_archived: bool = Query(False, description="Aktive und archivierte zusammen"),
     sort_by: str = Query("updated_at", description="updated_at | created_at | title"),
     order: str = Query("desc", description="desc | asc"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """Gibt Notizen des Benutzers zurück."""
+    """Gibt Notizen des Benutzers zurück.
+
+    ``include_archived`` liefert aktive und archivierte zusammen — so laedt die
+    App und trennt selbst nach Aktiv/Archiviert. Bis 5.0.3 kannte der Server
+    den Parameter nicht, und eine archivierte Notiz verschwand ganz.
+    """
     _check_notes_enabled()
+    if include_archived:
+        is_archived = None
     return NotesService.get_notes(
         db=db,
         user=user,
