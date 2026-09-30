@@ -4243,6 +4243,10 @@
         "title": "Anmelden per Kopplung",
         "body": "Die App kennt weder Passwort noch 2FA-Code. Im Panel unter Profil → Geräte wird nach Bestätigung mit Passwort oder 2FA-Code ein zehn Minuten gültiger Einmalcode erzeugt und in der App eingegeben. Gespeichert wird nur der Hash. So verbleiben Passwort, 2FA und Captcha vollständig im Browser. Gekoppelte Geräte können im Panel einzeln widerrufen werden; der Widerruf trennt auch ihre offenen Verbindungen und löscht ihre Push-Adresse. Über dieselbe Kopplung zieht der Messenger-Verlauf mit: das bereits eingerichtete Gerät versiegelt ihn gegen den Schlüssel des neuen, der Server reicht ihn einmal durch und löscht ihn dabei. Lesen kann er ihn nicht, und Schlüsselmaterial wandert nicht mit."
       },
+      "android": {
+        "title": "Android-App",
+        "body": "Das APK baut release-artifacts.yml auf v*-Tags mit (MauntingSmartSystem.apk). Gradle liefert es unsigniert, signiert wird nur in der Pipeline aus den Secrets MSS_ANDROID_KEYSTORE_B64 und MSS_ANDROID_ALT_KEYSTORE_B64 samt Passwörtern; fehlt eines, bricht der Lauf ab. Der frühere Schlüssel lag bis 5.0.4 öffentlich im Repo. Ab Android 9 gilt deshalb ein neuer, und ein Gerät, das einmal ein so signiertes Update bekommen hat, weist Updates nur mit dem früheren Schlüssel ab."
+      },
       "uninstall": {
         "title": "Deinstallation",
         "body": "In der App unter Einstellungen → Gefahrenzone. Entfernt zusätzlich verbleibende Dateien: Konfiguration, Stimmaufnahmen, Tresor-Eintrag und Autostart. Der Sandbox-Ordner bleibt erhalten."

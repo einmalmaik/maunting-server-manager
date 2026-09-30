@@ -4243,6 +4243,10 @@
         "title": "Signing in by pairing",
         "body": "The app knows neither password nor 2FA code. In the panel under Profile → Devices you confirm with your password or 2FA code, then a one-time code is generated (ten minutes, exactly once) and entered into the app; only its hash is stored. Password, 2FA, and captcha stay entirely in the browser. Paired devices can be locked out individually from the same place; locking one out also closes its open connections and deletes its push address. The messenger history travels along the same pairing: the device you already use seals it for the new device's key, and the server passes it through once and deletes it in the process. It cannot read the blob, and no key material travels with it."
       },
+      "android": {
+        "title": "Android app",
+        "body": "release-artifacts.yml also builds the APK on v* tags (MauntingSmartSystem.apk). Gradle produces it unsigned; it is signed only in the pipeline from the secrets MSS_ANDROID_KEYSTORE_B64 and MSS_ANDROID_ALT_KEYSTORE_B64 plus their passwords, and the run fails if one is missing. The previous key was public in the repository up to 5.0.4. From Android 9 on a new key applies, and a device that has received one update signed this way rejects updates signed only with the previous key."
+      },
       "uninstall": {
         "title": "Uninstalling",
         "body": "In the app under Settings → Danger zone. Cleans up remaining app data: config, voice recordings, vault entry, and autostart. The sandbox folder remains untouched."

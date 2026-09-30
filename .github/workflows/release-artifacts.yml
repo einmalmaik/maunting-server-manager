@@ -289,6 +289,21 @@ jobs:
           chmod +x src-tauri/gen/android/gradlew || true
           npx tauri android build --apk --target aarch64 --target armv7 --target i686 --target x86_64
 
+      # Gradle baut unsigniert; der Schluessel liegt nur in den Secrets.
+      # Fehlt ein Secret, bricht das Skript ab, statt ein unsigniertes APK
+      # zu veroeffentlichen.
+      - name: Sign Android APKs
+        shell: bash
+        env:
+          MSS_ANDROID_ALT_KEYSTORE_B64: ${{ secrets.MSS_ANDROID_ALT_KEYSTORE_B64 }}
+          MSS_ANDROID_ALT_KEYSTORE_PASSWORT: ${{ secrets.MSS_ANDROID_ALT_KEYSTORE_PASSWORT }}
+          MSS_ANDROID_KEYSTORE_B64: ${{ secrets.MSS_ANDROID_KEYSTORE_B64 }}
+          MSS_ANDROID_KEYSTORE_PASSWORT: ${{ secrets.MSS_ANDROID_KEYSTORE_PASSWORT }}
+        run: |
+          mapfile -t roh < <(find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*-release-unsigned.apk")
+          [ "${#roh[@]}" -gt 0 ] || { echo "Keine unsignierten Release-APKs gefunden." >&2; exit 1; }
+          bash scripts/android-apk-signieren.sh "${roh[@]}"
+
       - name: Collect Android APK
         shell: bash
         run: |
@@ -300,10 +315,12 @@ jobs:
           if [ -z "$APK_FILE" ]; then
             APK_FILE=$(find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk" ! -name "*x86*" | head -n 1)
           fi
-          if [ -n "$APK_FILE" ]; then
-            echo "Packaging selected APK for MauntingSmartSystem.apk: $APK_FILE"
-            cp -v "$APK_FILE" android-release/MauntingSmartSystem.apk
+          if [ -z "$APK_FILE" ]; then
+            echo "Kein signiertes APK gefunden." >&2
+            exit 1
           fi
+          echo "Packaging selected APK for MauntingSmartSystem.apk: $APK_FILE"
+          cp -v "$APK_FILE" android-release/MauntingSmartSystem.apk
           for f in $(find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk"); do
             cp -v "$f" "android-release/$(basename "$f")" || true
           done

@@ -119,6 +119,21 @@ eigenen Takt — ein Panel-Update erzwingt keinen neuen Installer.
   Maus und Tastatur, Anmeldeinformations-Manager als Tresor).
 - `SHA256SUMS.txt`: Prüfsumme des Installers, als Actions-Artefakt.
 
+**Android-App.** Das APK (`MauntingSmartSystem.apk`) baut
+`.github/workflows/release-artifacts.yml` auf `v*`-Tags mit. Gradle liefert es
+unsigniert; signiert wird nur in der Pipeline mit
+`scripts/android-apk-signieren.sh` aus den Repository-Secrets
+`MSS_ANDROID_KEYSTORE_B64`/`MSS_ANDROID_KEYSTORE_PASSWORT` (neuer Schlüssel)
+und `MSS_ANDROID_ALT_KEYSTORE_B64`/`MSS_ANDROID_ALT_KEYSTORE_PASSWORT`
+(früherer Schlüssel). Fehlt eines, bricht der Lauf ab, statt ein unsigniertes
+APK zu veröffentlichen. Der frühere Schlüssel lag bis 5.0.4 samt Passwort
+öffentlich im Repo. Deshalb rotiert die Signatur (APK Signature Scheme v3,
+Abfolge in `smart-system/android-signatur/abfolge.bin`): ab Android 9 gilt der
+neue Schlüssel, und ein Gerät, das einmal ein so signiertes Update bekommen
+hat, weist Updates nur mit dem früheren Schlüssel ab. Android 8 kennt keine
+Rotation und bleibt beim früheren Schlüssel. Wer einen Fork baut, erzeugt
+eigene Schlüssel und eine eigene Abfolge.
+
 **Der Installer ist nicht signiert.** Windows SmartScreen meldet deshalb einen
 unbekannten Herausgeber; über „Weitere Informationen“ lässt er sich starten.
 Die Prüfsumme aus dem Release ist der Ersatz für die fehlende Signatur — sie

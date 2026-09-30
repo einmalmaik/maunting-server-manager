@@ -32,28 +32,10 @@ android {
             isUniversalApk = true
         }
     }
-    signingConfigs {
-        create("release") {
-            val keystorePath = file("../keystore/mss-release.keystore")
-            if (keystorePath.exists()) {
-                storeFile = keystorePath
-                storePassword = "mauntingstudios"
-                keyAlias = "mss-release"
-                keyPassword = "mauntingstudios"
-            } else {
-                val debugKeystore = signingConfigs.getByName("debug")
-                storeFile = debugKeystore.storeFile
-                storePassword = debugKeystore.storePassword
-                keyAlias = debugKeystore.keyAlias
-                keyPassword = debugKeystore.keyPassword
-            }
-        }
-    }
     buildTypes {
         getByName("debug") {
             applicationIdSuffix = ".dev"
             manifestPlaceholders["usesCleartextTraffic"] = "true"
-            signingConfig = signingConfigs.getByName("release")
             isDebuggable = true
             isJniDebuggable = true
             isMinifyEnabled = false
@@ -65,7 +47,8 @@ android {
             }
         }
         getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
+            // Kommt unsigniert heraus. Signiert wird nur in der Release-Pipeline
+            // (scripts/android-apk-signieren.sh), der Schluessel liegt nie im Repo.
             isMinifyEnabled = false
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

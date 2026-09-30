@@ -1,5 +1,6 @@
 """Contracts for split release artifacts and public self-hosting docs."""
 
+import subprocess
 from pathlib import Path
 
 
@@ -50,3 +51,27 @@ def test_canonical_docs_cover_deployment_and_secret_free_enrollment() -> None:
     }
     for item in required:
         assert item in docs
+
+
+def test_android_signing_key_never_lives_in_the_repo() -> None:
+    """Bis 5.0.4 lagen Keystore und Passwort im oeffentlichen Repo."""
+    android = ROOT / "smart-system" / "src-tauri" / "gen" / "android"
+    eingecheckt = subprocess.run(
+        ["git", "ls-files", "*.keystore", "*.jks", "*.p12", "*.pfx"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert eingecheckt == []
+    gradle = (android / "app" / "build.gradle.kts").read_text(encoding="utf-8")
+    assert "storePassword" not in gradle
+    assert "keyPassword" not in gradle
+
+    workflow = (ROOT / ".github" / "workflows" / "release-artifacts.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "bash scripts/android-apk-signieren.sh" in workflow
+    assert "secrets.MSS_ANDROID_KEYSTORE_B64" in workflow
+    signieren = (ROOT / "scripts" / "android-apk-signieren.sh").read_text(encoding="utf-8")
+    assert "--lineage" in signieren and "--rotation-min-sdk-version 28" in signieren
