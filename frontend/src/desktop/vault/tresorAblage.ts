@@ -63,7 +63,7 @@ export const ALT_WARTESCHLANGE = 'mss:vault_pending_'
 export const ALT_REVISION = 'mss:vault_rev_'
 
 const DB_PRAEFIX = 'msm_tresor:konto:'
-const DB_VERSION = 2
+const DB_VERSION = 3
 const EINTRAEGE = 'eintraege'
 const WARTESCHLANGE = 'warteschlange'
 const STAND = 'stand'
@@ -72,6 +72,8 @@ export const UPLOADS = 'uploads'
 export const UPLOAD_CHUNKS = 'upload_chunks'
 /** Chiffrat heruntergeladener Chunks: Miniaturen und „offline verfügbar“. */
 export const BLOB_CACHE = 'blob_cache'
+/** Welche Originale offline liegen sollen: angeheftet oder zuletzt geöffnet. */
+export const OFFLINE = 'offline'
 
 interface Zeile extends StoredEncryptedEntry {
   bucket: string
@@ -160,6 +162,9 @@ function oeffnen(konto: number): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(BLOB_CACHE)) {
         db.createObjectStore(BLOB_CACHE, { keyPath: ['blobId', 'index'] })
+      }
+      if (!db.objectStoreNames.contains(OFFLINE)) {
+        db.createObjectStore(OFFLINE, { keyPath: 'blobId' })
       }
     }
     req.onsuccess = () => {

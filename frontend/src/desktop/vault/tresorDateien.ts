@@ -22,6 +22,7 @@ import {
   ablageGeladen,
   BLOB_CACHE,
   blobsLesen,
+  OFFLINE,
   blobsSchreiben,
   UPLOAD_CHUNKS,
   UPLOADS,
@@ -254,7 +255,7 @@ export async function dateiVorbereiten(
   bucket: string,
   eintragId: string,
   abgebrochen: () => boolean,
-  bilder: { vorschau?: Uint8Array; miniatur?: Uint8Array } = {},
+  bilder: { vorschau?: Uint8Array; miniatur?: Uint8Array; originalBehalten?: boolean } = {},
 ): Promise<DateiAngaben> {
   const db = await ablageOderFehler()
   const vorschauDaten = bilder.vorschau ?? new Uint8Array(0)
@@ -266,7 +267,7 @@ export async function dateiVorbereiten(
   for (const { kopf } of blobs) inVorbereitung.add(kopf.id)
   try {
     const zeilen = [
-      await blobAblegen(db, bucket, eintragId, original.kopf, original.schluessel, false, async (von, bis) => {
+      await blobAblegen(db, bucket, eintragId, original.kopf, original.schluessel, !!bilder.originalBehalten, async (von, bis) => {
         return new Uint8Array(await datei.slice(von, bis).arrayBuffer())
       }, abgebrochen),
       await blobAblegen(db, bucket, eintragId, vorschau.kopf, vorschau.schluessel, true, async (von, bis) => vorschauDaten.slice(von, bis), abgebrochen),
@@ -450,9 +451,17 @@ export async function blobLesen(
   eintragId: string,
   userKey: CryptoKey,
   typ: string,
-  optionen: { cachen?: boolean; signal?: AbortSignal; fortschritt?: (anteil: number) => void } = {},
+  optionen: {
+    cachen?: boolean
+    /** Als „zuletzt geöffnet“ offline behalten, solange Platz ist (`ZULETZT_GRENZE`). */
+    zuletzt?: boolean
+    signal?: AbortSignal
+    fortschritt?: (anteil: number) => void
+  } = {},
 ): Promise<Blob> {
   const db = await ablageDb()
+  const zuletzt = !!optionen.zuletzt && chiffratGroesse(kopf.groesse) <= ZULETZT_HOECHSTENS
+  const cachen = optionen.cachen || zuletzt
   const schluessel = await blobSchluessel(kopf, userKey, eintragId)
   const anzahl = chunkAnzahl(kopf.groesse)
   const teile: Blob[] = []
@@ -461,7 +470,7 @@ export async function blobLesen(
     let chiffrat = db ? await lokalesChiffrat(db, kopf.id, index) : null
     if (!chiffrat) {
       chiffrat = await chunkLaden(kopf.id, index, optionen.signal)
-      if (db && optionen.cachen) {
+      if (db && cachen) {
         const daten = chiffrat
         await schreiben(db, BLOB_CACHE, (s) => s.put({ blobId: kopf.id, index, daten } satisfies ChunkZeile))
       }
@@ -471,7 +480,81 @@ export async function blobLesen(
     klartext.fill(0)
     optionen.fortschritt?.((index + 1) / anzahl)
   }
+  if (db && zuletzt) await zuletztMerken(db, kopf).catch(() => {})
   return new Blob(teile, { type: typ })
+}
+
+/*
+ * Offline verfügbar. Miniaturen liegen immer auf dem Gerät. Originale nur,
+ * wenn sie angeheftet sind („Offline verfügbar“) oder zuletzt geöffnet
+ * wurden; die zuletzt geöffneten teilen sich `ZULETZT_GRENZE`, die ältesten
+ * fallen zuerst heraus. Angeheftete zählen nicht mit und fallen nie heraus.
+ * Das gilt nur für dieses Gerät und wird nicht synchronisiert.
+ */
+
+interface OfflineZeile {
+  blobId: string
+  angeheftet: boolean
+  zuletzt: number
+  bytes: number
+}
+
+export const ZULETZT_GRENZE = 512 * 1024 * 1024
+/** Größere Dateien werden nur angeheftet offline gehalten, nicht nebenbei. */
+const ZULETZT_HOECHSTENS = 128 * 1024 * 1024
+
+async function zuletztMerken(db: IDBDatabase, kopf: BlobKopf): Promise<void> {
+  const alt = (await anfrage(db.transaction(OFFLINE).objectStore(OFFLINE).get(kopf.id))) as OfflineZeile | undefined
+  const zeile: OfflineZeile = { blobId: kopf.id, angeheftet: alt?.angeheftet ?? false, zuletzt: Date.now(), bytes: chiffratGroesse(kopf.groesse) }
+  await schreiben(db, OFFLINE, (s) => s.put(zeile))
+  const alle = ((await anfrage(db.transaction(OFFLINE).objectStore(OFFLINE).getAll())) as OfflineZeile[])
+    .filter((z) => !z.angeheftet)
+    .sort((a, b) => b.zuletzt - a.zuletzt)
+  let summe = 0
+  for (const z of alle) {
+    summe += z.bytes
+    if (summe > ZULETZT_GRENZE) await offlineZeileEntfernen(db, z.blobId)
+  }
+}
+
+async function offlineZeileEntfernen(db: IDBDatabase, blobId: string): Promise<void> {
+  const tx = db.transaction([OFFLINE, BLOB_CACHE], 'readwrite')
+  tx.objectStore(OFFLINE).delete(blobId)
+  tx.objectStore(BLOB_CACHE).delete(chunkBereich(blobId))
+  await fertig(tx)
+}
+
+/** Welche dieser Blobs angeheftet sind. */
+export async function angeheftet(blobIds: string[]): Promise<Set<string>> {
+  const db = await ablageDb()
+  if (!db) return new Set()
+  const zeilen = (await anfrage(db.transaction(OFFLINE).objectStore(OFFLINE).getAll())) as OfflineZeile[]
+  const gesucht = new Set(blobIds)
+  return new Set(zeilen.filter((z) => z.angeheftet && gesucht.has(z.blobId)).map((z) => z.blobId))
+}
+
+/**
+ * Heftet ein Original an und lädt sein Chiffrat auf das Gerät. Entschlüsselt
+ * wird dabei nichts; es braucht keinen Schlüssel.
+ */
+export async function offlineAnheften(kopf: BlobKopf, fortschritt?: (anteil: number) => void, signal?: AbortSignal): Promise<void> {
+  const db = await ablageOderFehler()
+  await schreiben(db, OFFLINE, (s) => s.put({ blobId: kopf.id, angeheftet: true, zuletzt: Date.now(), bytes: chiffratGroesse(kopf.groesse) } satisfies OfflineZeile))
+  const anzahl = chunkAnzahl(kopf.groesse)
+  for (let index = 0; index < anzahl; index++) {
+    signal?.throwIfAborted()
+    if (!(await lokalesChiffrat(db, kopf.id, index))) {
+      const daten = await chunkLaden(kopf.id, index, signal)
+      await schreiben(db, BLOB_CACHE, (s) => s.put({ blobId: kopf.id, index, daten } satisfies ChunkZeile))
+    }
+    fortschritt?.((index + 1) / anzahl)
+  }
+}
+
+/** Nimmt ein Original wieder vom Gerät. */
+export async function offlineLoesen(blobId: string): Promise<void> {
+  const db = await ablageDb()
+  if (db) await offlineZeileEntfernen(db, blobId)
 }
 
 const KLEIN_JE_ANFRAGE = 100
@@ -547,12 +630,6 @@ export async function blobLokal(kopf: BlobKopf): Promise<boolean> {
   return true
 }
 
-/** Nimmt einen Blob aus dem Offline-Cache. */
-export async function cacheEntfernen(blobId: string): Promise<void> {
-  const db = await ablageDb()
-  if (db) await schreiben(db, BLOB_CACHE, (s) => s.delete(chunkBereich(blobId)))
-}
-
 /**
  * Löscht die Blobs gelöschter Dateien, sobald der Server deren Tombstone
  * angenommen hat: der Tombstone steht im Cache, und in der Warteschlange ist
@@ -582,7 +659,7 @@ async function loeschen(bucket: string): Promise<void> {
       }
       if (db) {
         await uploadEntfernen(db, blob.id).catch(() => {})
-        await schreiben(db, BLOB_CACHE, (s) => s.delete(chunkBereich(blob.id))).catch(() => {})
+        await offlineZeileEntfernen(db, blob.id).catch(() => {})
       }
     }
     // Nach den Anfragen frisch lesen und nur diesen Eintrag umschreiben, wenn

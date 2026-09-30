@@ -6123,7 +6123,17 @@
         "oeffnenFehler": "The file could not be opened. It may not be fully uploaded yet.",
         "wirdEntschluesselt": "Decrypting",
         "keineVorschau": "There is no preview for this file type. Save the file to open it.",
-        "speichern": "Save to device"
+        "speichern": "Save to device",
+        "verschieben": "Move",
+        "verschiebenTitel": "Move {{name}}",
+        "obersteEbene": "Top level",
+        "zielOrdner": "Destination folder",
+        "offlineMachen": "Make available offline",
+        "nurOnline": "Keep online only",
+        "offlineVerfuegbar": "available offline",
+        "offlineLaedt": "Downloading to this device",
+        "offlineFertig": "{{name}} is now available offline.",
+        "offlineFehler": "The file could not be downloaded to this device."
       },
       "fotos": {
         "alle": "All",

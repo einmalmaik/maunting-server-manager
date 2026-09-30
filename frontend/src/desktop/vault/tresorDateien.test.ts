@@ -8,8 +8,19 @@ import { IDBFactory } from 'fake-indexeddb'
 import 'fake-indexeddb/auto'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { useVaultStore, type VaultBlindSyncPayload } from './vaultStore'
-import { ablageDb, ablageLaden, ablageSchliessen, BLOB_CACHE, UPLOAD_CHUNKS, UPLOADS } from './tresorAblage'
-import { blobLesen, loeschungenAbarbeiten, miniaturenLesen, uploadsFortsetzen, useTresorUploads, VERSIONEN } from './tresorDateien'
+import { ablageDb, ablageLaden, ablageSchliessen, BLOB_CACHE, OFFLINE, UPLOAD_CHUNKS, UPLOADS } from './tresorAblage'
+import {
+  angeheftet,
+  blobLesen,
+  loeschungenAbarbeiten,
+  miniaturenLesen,
+  offlineAnheften,
+  offlineLoesen,
+  uploadsFortsetzen,
+  useTresorUploads,
+  VERSIONEN,
+  ZULETZT_GRENZE,
+} from './tresorDateien'
 import { miniaturFreigeben, miniaturHolen } from './tresorMiniaturen'
 import { CHUNK_KLARTEXT, CHUNK_UEBERHANG } from './tresorDatei'
 
@@ -533,6 +544,94 @@ describe('Tresor-Dateien', () => {
       await useVaultStore.getState().deleteItem(id)
       await allesErledigt()
       await vi.waitFor(() => expect(new Set(server.geloescht)).toEqual(new Set(alle)))
+    })
+  })
+
+  describe('Offline verfügbar', () => {
+    const originalImCache = async (blobId: string) =>
+      ((await zeilen(BLOB_CACHE)) as { blobId: string }[]).some((z) => z.blobId === blobId)
+
+    async function hochgeladen(inhalt = 'Vertrag', name = 'vertrag.txt') {
+      const server = serverStarten()
+      const userKey = await tresorOeffnen()
+      const id = await useVaultStore.getState().dateiHinzufuegen(new File([inhalt], name, { type: 'text/plain' }))
+      await allesErledigt()
+      const item = () => useVaultStore.getState().items.find((i) => i.id === id)!
+      return { server, userKey, id, item }
+    }
+
+    it('hält ein angeheftetes Original ohne Netz lesbar, bis es gelöst wird', async () => {
+      const { server, userKey, id, item } = await hochgeladen()
+      const original = item().datei!.original
+      expect(await originalImCache(original.id)).toBe(false)
+
+      await offlineAnheften(original)
+      expect(await angeheftet([original.id, 'f'.repeat(32)])).toEqual(new Set([original.id]))
+      server.offline = true
+      expect(await (await blobLesen(original, id, userKey, 'text/plain')).text()).toBe('Vertrag')
+
+      await offlineLoesen(original.id)
+      expect(await angeheftet([original.id])).toEqual(new Set())
+      expect(await originalImCache(original.id)).toBe(false)
+      await expect(blobLesen(original, id, userKey, 'text/plain')).rejects.toThrow()
+    })
+
+    it('behält zuletzt Geöffnetes bis zur Grenze, die ältesten zuerst raus, Angeheftetes nie', async () => {
+      const { server, userKey, id, item } = await hochgeladen()
+      // Drei ältere Einträge, zusammen über der Grenze; der älteste ist angeheftet.
+      const gross = Math.floor(ZULETZT_GRENZE / 2)
+      const db = (await ablageDb())!
+      await new Promise<void>((ok) => {
+        const tx = db.transaction([OFFLINE, BLOB_CACHE], 'readwrite')
+        const alt = [
+          { blobId: 'a'.repeat(32), angeheftet: true, zuletzt: 1, bytes: gross },
+          { blobId: 'b'.repeat(32), angeheftet: false, zuletzt: 2, bytes: gross },
+          { blobId: 'c'.repeat(32), angeheftet: false, zuletzt: 3, bytes: gross },
+        ]
+        for (const z of alt) {
+          tx.objectStore(OFFLINE).put(z)
+          tx.objectStore(BLOB_CACHE).put({ blobId: z.blobId, index: 0, daten: new Uint8Array(1) })
+        }
+        tx.oncomplete = () => ok()
+      })
+
+      const original = item().datei!.original
+      await blobLesen(original, id, userKey, 'text/plain', { zuletzt: true })
+
+      const offline = ((await zeilen(OFFLINE)) as { blobId: string }[]).map((z) => z.blobId)
+      expect(new Set(offline)).toEqual(new Set(['a'.repeat(32), 'c'.repeat(32), original.id]))
+      expect(await originalImCache('b'.repeat(32))).toBe(false)
+      expect(await originalImCache('a'.repeat(32))).toBe(true)
+      server.offline = true
+      expect(await (await blobLesen(original, id, userKey, 'text/plain')).text()).toBe('Vertrag')
+    })
+
+    it('hält eine bearbeitete Datei weiter angeheftet und gibt die alte Fassung frei', async () => {
+      const { server, userKey, id, item } = await hochgeladen('eins')
+      const alt = item().datei!.original
+      await offlineAnheften(alt)
+
+      await useVaultStore.getState().dateiErsetzen(id, new Blob(['zwei'], { type: 'text/plain' }))
+      await allesErledigt()
+      const neu = item().datei!.original
+      expect(neu.id).not.toBe(alt.id)
+      expect(await angeheftet([alt.id, neu.id])).toEqual(new Set([neu.id]))
+      expect(await originalImCache(alt.id)).toBe(false)
+
+      server.offline = true
+      expect(await (await blobLesen(neu, id, userKey, 'text/plain')).text()).toBe('zwei')
+    })
+
+    it('nimmt eine gelöschte Datei auch vom Gerät', async () => {
+      const { server, id, item } = await hochgeladen()
+      const original = item().datei!.original
+      await offlineAnheften(original)
+
+      await useVaultStore.getState().deleteItem(id)
+      await allesErledigt()
+      await vi.waitFor(() => expect(server.geloescht).toContain(original.id))
+      expect(await angeheftet([original.id])).toEqual(new Set())
+      expect(await originalImCache(original.id)).toBe(false)
     })
   })
 })

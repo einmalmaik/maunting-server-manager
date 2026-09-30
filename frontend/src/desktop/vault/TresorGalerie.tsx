@@ -763,6 +763,7 @@ function GalerieLichtbox({
       try {
         const blob = await blobLesen(kopf, id, userKey, typ, {
           cachen: welcher === 'vorschau',
+          zuletzt: welcher === 'original',
           signal: abbruch.signal,
           fortschritt: welcher === 'original' ? (anteil) => setAnzeige((a) => (a.id === id ? { ...a, anteil } : a)) : undefined,
         })
@@ -810,7 +811,7 @@ function GalerieLichtbox({
 
   const speichern = async () => {
     try {
-      const blob = await blobLesen(datei.original, item.id, userKey, datei.typ)
+      const blob = await blobLesen(datei.original, item.id, userKey, datei.typ, { zuletzt: true })
       if (useVaultStore.getState().userKey !== userKey) return
       const url = ansichtOeffnen(blob)
       speichernUnter(url, item.service)

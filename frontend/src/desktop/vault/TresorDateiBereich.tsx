@@ -17,18 +17,20 @@ import {
   FileText,
   FileVideo,
   Folder,
+  FolderInput,
   FolderPlus,
   HardDrive,
+  HardDriveDownload,
   Pencil,
   Trash2,
   Upload,
 } from 'lucide-react'
-import { ActionMenu, Button, Dialog, DialogContent, DialogHeader, DialogTitle, FileButton, ProgressBar } from '@/Singra/UI'
+import { ActionMenu, Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Dropdown, FileButton, ProgressBar } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { prompt } from '@/stores/promptStore'
 import { formatBytes } from '@/components/server/fileHelpers'
 import { useVaultStore, type VaultItem } from './vaultStore'
-import { ansichtOeffnen, ansichtSchliessen, blobLesen, useTresorUploads } from './tresorDateien'
+import { angeheftet, ansichtOeffnen, ansichtSchliessen, blobLesen, offlineAnheften, offlineLoesen, useTresorUploads } from './tresorDateien'
 import { speicherAbfragen, type TresorSpeicher } from './tresorBlobApi'
 import { anzeigeArt, speichernUnter } from './tresorAnzeige'
 import { TresorTexteditor } from './TresorTexteditor'
@@ -66,6 +68,9 @@ export function TresorDateiBereich() {
   const [ziehen, setZiehen] = useState(false)
   const [geoeffnet, setGeoeffnet] = useState<Geoeffnet | null>(null)
   const [vorbereitung, setVorbereitung] = useState(0)
+  const [verschieben, setVerschieben] = useState<{ item: VaultItem; ziel: string } | null>(null)
+  const [offline, setOffline] = useState<Set<string>>(new Set())
+  const [holt, setHolt] = useState<Record<string, number>>({})
 
   const sichtbar = (i: VaultItem) => !i.trashedAt && !i.archivedAt
   const ordnerListe = useMemo(() => items.filter((i) => i.category === 'ordner'), [items])
@@ -90,6 +95,57 @@ export function TresorDateiBereich() {
     const nachName = (a: VaultItem, b: VaultItem) => a.service.localeCompare(b.service)
     return [...hier.filter((i) => i.category === 'ordner').sort(nachName), ...hier.filter((i) => i.category === 'datei').sort(nachName)]
   }, [items, aktuellerOrdner])
+
+  // Welche Originale dieser Ebene angeheftet sind (nur dieses Gerät).
+  const originale = inhalt.flatMap((i) => (i.datei ? [i.datei.original.id] : [])).join(',')
+  const offlineLaden = () => {
+    void angeheftet(originale ? originale.split(',') : []).then(setOffline).catch(() => setOffline(new Set()))
+  }
+  useEffect(offlineLaden, [originale])
+
+  const offlineUmschalten = async (item: VaultItem) => {
+    if (!item.datei) return
+    const kopf = item.datei.original
+    if (offline.has(kopf.id)) {
+      await offlineLoesen(kopf.id)
+      offlineLaden()
+      return
+    }
+    setHolt((h) => ({ ...h, [item.id]: 0 }))
+    try {
+      await offlineAnheften(kopf, (anteil) => setHolt((h) => ({ ...h, [item.id]: anteil })))
+      toast.success(t('mss.vault.dateien.offlineFertig', { name: item.service }))
+    } catch {
+      toast.error(t('mss.vault.dateien.offlineFehler'))
+    } finally {
+      setHolt((h) => {
+        const rest = { ...h }
+        delete rest[item.id]
+        return rest
+      })
+      offlineLaden()
+    }
+  }
+
+  /** Ordner, in die `item` verschoben werden kann: kein Ordner in sich selbst oder in einen seiner Unterordner. */
+  const zielOrdner = (item: VaultItem) => {
+    const lebende = ordnerListe.filter(sichtbar)
+    const pfadVon = (o: VaultItem): VaultItem[] => {
+      const kette: VaultItem[] = []
+      let aktuell: VaultItem | undefined = o
+      while (aktuell && kette.length < 50) {
+        kette.unshift(aktuell)
+        const eltern: string | undefined = aktuell.ordner
+        aktuell = lebende.find((x) => x.id === eltern)
+      }
+      return kette
+    }
+    return lebende
+      .map((o) => ({ o, kette: pfadVon(o) }))
+      .filter(({ kette }) => !kette.some((k) => k.id === item.id))
+      .map(({ o, kette }) => ({ value: o.id, label: kette.map((k) => k.service).join(' / ') }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }
 
   const speicherLaden = () => {
     speicherAbfragen()
@@ -141,6 +197,7 @@ export function TresorDateiBereich() {
     setGeoeffnet({ item, url: null, text: null, anteil: 0, fehler: false })
     try {
       const blob = await blobLesen(item.datei.original, item.id, userKey, item.datei.typ, {
+        zuletzt: true,
         fortschritt: (anteil) => setGeoeffnet((g) => (g?.item.id === item.id ? { ...g, anteil } : g)),
       })
       const text = art === 'text' && blob.size <= TEXT_HOECHSTENS ? await blob.text() : null
@@ -250,11 +307,22 @@ export function TresorDateiBereich() {
                       {istOrdner
                         ? t('mss.vault.dateien.ordner')
                         : item.datei
-                          ? `${formatBytes(item.datei.original.echt)} · ${new Date(item.createdAt).toLocaleDateString()}`
+                          ? [
+                              formatBytes(item.datei.original.echt),
+                              new Date(item.createdAt).toLocaleDateString(),
+                              offline.has(item.datei.original.id) ? t('mss.vault.dateien.offlineVerfuegbar') : null,
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')
                           : t('mss.vault.dateien.unlesbar')}
                     </span>
                   </span>
                 </button>
+                {holt[item.id] !== undefined && (
+                  <div className="w-28 shrink-0">
+                    <ProgressBar value={holt[item.id] * 100} ariaLabel={t('mss.vault.dateien.offlineLaedt')} />
+                  </div>
+                )}
                 {upload && (
                   <div className="w-28 shrink-0">
                     {upload.fehler === 'speicherVoll' ? (
@@ -273,6 +341,23 @@ export function TresorDateiBereich() {
                   label={t('mss.vault.dateien.aktionen')}
                   items={[
                     { key: 'umbenennen', label: t('mss.vault.dateien.umbenennen'), icon: <Pencil className="h-3.5 w-3.5" />, onSelect: () => void umbenennen(item) },
+                    {
+                      key: 'verschieben',
+                      label: t('mss.vault.dateien.verschieben'),
+                      icon: <FolderInput className="h-3.5 w-3.5" />,
+                      onSelect: () => setVerschieben({ item, ziel: item.ordner ?? '' }),
+                    },
+                    ...(item.datei
+                      ? [
+                          {
+                            key: 'offline',
+                            label: t(offline.has(item.datei.original.id) ? 'mss.vault.dateien.nurOnline' : 'mss.vault.dateien.offlineMachen'),
+                            icon: <HardDriveDownload className="h-3.5 w-3.5" />,
+                            disabled: holt[item.id] !== undefined,
+                            onSelect: () => void offlineUmschalten(item),
+                          },
+                        ]
+                      : []),
                     { key: 'archiv', label: t('mss.vault.archivieren'), icon: <Archive className="h-3.5 w-3.5" />, onSelect: () => void setArchived(item.id, true) },
                     {
                       key: 'papierkorb',
@@ -289,6 +374,43 @@ export function TresorDateiBereich() {
           })}
         </ul>
       )}
+
+      <Dialog open={!!verschieben} onOpenChange={(offen) => !offen && setVerschieben(null)}>
+        {verschieben && (
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="truncate">{t('mss.vault.dateien.verschiebenTitel', { name: verschieben.item.service })}</DialogTitle>
+            </DialogHeader>
+            <div className="p-6">
+              <Dropdown
+                value={verschieben.ziel}
+                onChange={(ziel) => setVerschieben((v) => (v ? { ...v, ziel } : v))}
+                options={[{ value: '', label: t('mss.vault.dateien.obersteEbene') }, ...zielOrdner(verschieben.item)]}
+                searchable
+                aria-label={t('mss.vault.dateien.zielOrdner')}
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setVerschieben(null)}>
+                {t('common.cancel')}
+              </Button>
+              <Button
+                type="button"
+                disabled={verschieben.ziel === (verschieben.item.ordner ?? '')}
+                onClick={() => {
+                  const { item, ziel } = verschieben
+                  setVerschieben(null)
+                  void saveItem({ ...item, ordner: ziel || undefined }).catch((err) =>
+                    toast.error(err instanceof Error ? err.message : String(err)),
+                  )
+                }}
+              >
+                {t('mss.vault.dateien.verschieben')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
 
       {/* Beim Bearbeiten schließt nur der Editor selbst, damit nichts Ungespeichertes verloren geht. */}
       <Dialog open={!!geoeffnet} onOpenChange={(offen) => !offen && !geoeffnet?.bearbeiten && setGeoeffnet(null)}>

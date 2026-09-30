@@ -6123,7 +6123,17 @@
         "oeffnenFehler": "Die Datei ließ sich nicht öffnen. Sie ist vielleicht noch nicht fertig hochgeladen.",
         "wirdEntschluesselt": "Wird entschlüsselt",
         "keineVorschau": "Für diesen Dateityp gibt es keine Vorschau. Speichere die Datei, um sie zu öffnen.",
-        "speichern": "Auf dem Gerät speichern"
+        "speichern": "Auf dem Gerät speichern",
+        "verschieben": "Verschieben",
+        "verschiebenTitel": "{{name}} verschieben",
+        "obersteEbene": "Oberste Ebene",
+        "zielOrdner": "Zielordner",
+        "offlineMachen": "Offline verfügbar machen",
+        "nurOnline": "Nur online behalten",
+        "offlineVerfuegbar": "offline verfügbar",
+        "offlineLaedt": "Wird auf dieses Gerät geladen",
+        "offlineFertig": "{{name}} ist jetzt offline verfügbar.",
+        "offlineFehler": "Die Datei ließ sich nicht auf dieses Gerät laden."
       },
       "fotos": {
         "alle": "Alle",

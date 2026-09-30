@@ -39,8 +39,11 @@ import {
   type StoredEncryptedEntry,
 } from './tresorAblage'
 import {
+  angeheftet,
   ansichtenSchliessen,
   dateiBlobs,
+  offlineAnheften,
+  offlineLoesen,
   dateiVorbereiten,
   istDateiAngaben,
   loeschungenAbarbeiten,
@@ -1507,7 +1510,13 @@ export const useVaultStore = create<VaultState>((set, get) => {
     const alt = get().items.find((i) => i.id === id)
     if (!alt?.datei) throw new Error(i18n.t('mss.vault.dateien.oeffnenFehler'))
     const { vorschau, miniatur, ...bild } = await bildAngaben(inhalt)
-    const neu = await dateiVorbereiten(inhalt, userKey, bucketId, id, () => !sitzungOffen(userKey, bucketId), { vorschau, miniatur })
+    // Eine angeheftete Datei bleibt offline verfügbar: das neue Original wird gleich behalten.
+    const warAngeheftet = (await angeheftet([alt.datei.original.id])).size > 0
+    const neu = await dateiVorbereiten(inhalt, userKey, bucketId, id, () => !sitzungOffen(userKey, bucketId), {
+      vorschau,
+      miniatur,
+      originalBehalten: warAngeheftet,
+    })
     try {
       if (!sitzungOffen(userKey, bucketId)) throw new Error(i18n.t('mss.vault.errors.locked'))
       // Frisch lesen: während des Verschlüsselns kann ein Sync die Datei geändert haben.
@@ -1536,6 +1545,10 @@ export const useVaultStore = create<VaultState>((set, get) => {
         },
         { loeschBlobs: weg.map((k) => ({ id: k.id, loeschen: k.loeschen })) },
       )
+      if (warAngeheftet) {
+        await offlineAnheften(neu.original)
+        await offlineLoesen(alt.datei.original.id)
+      }
     } finally {
       vorbereitungAbschliessen(neu)
     }
