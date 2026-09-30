@@ -16,11 +16,13 @@ vi.mock('@/lib/zipSchreiben', () => ({
 }))
 
 let schluesselDa = true
+let nebenDa = false
 vi.mock('@/services/notesCalendarCrypto', () => ({
   NOTE_CIPHERTEXT_PREFIX: 'sv-note-v1:',
   CALENDAR_CIPHERTEXT_PREFIX: 'sv-cal-v1:',
   getUserNotesKey: async () => (schluesselDa ? ({} as CryptoKey) : null),
   altschluessel: async () => null,
+  nebenschluessel: async () => (nebenDa ? [{} as CryptoKey] : []),
   decryptNoteTitle: async (w: string, _uid: string, k?: CryptoKey) => {
     if (!k) throw new Error('kein Schlüssel')
     return `klar:${w.slice('sv-note-v1:'.length)}`
@@ -67,6 +69,7 @@ describe('exportErstellen', () => {
     apiMock.mockReset().mockResolvedValue(paket())
     konto = 7
     schluesselDa = true
+    nebenDa = false
     offen = true
     eintraege = []
   })
@@ -89,6 +92,16 @@ describe('exportErstellen', () => {
     expect(inhalt('geraet/messenger/verlauf.json')).toEqual({
       'mb-1': [{ id: 1, text: 'Hallo Anna', createdAt: '2026-09-27T10:00:00Z' }],
     })
+  })
+
+  it('öffnet auch, was nur ein Nebenschlüssel öffnet', async () => {
+    // Ein Gerät, das den Kontoschlüssel eben übernommen hat: die Altnotizen
+    // öffnet noch sein bisheriger, bis sie neu verschlüsselt sind.
+    schluesselDa = false
+    nebenDa = true
+    const ergebnis = await exportErstellen({})
+    expect(inhalt('server/notes.json')[0].title).toBe('klar:Einkauf')
+    expect(ergebnis.ohneSchluessel).toBe(0)
   })
 
   it('ohne Schlüssel bleibt das Chiffrat stehen und wird gezählt', async () => {

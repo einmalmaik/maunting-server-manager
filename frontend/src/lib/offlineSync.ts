@@ -37,6 +37,10 @@ import {
   checkAndRespondToDeviceKeyRequests,
   altschluessel,
   altschluesselUebernehmen,
+  nebenschluessel,
+  kontoschluesselAbgleichen,
+  kontoAbdruckVergessen,
+  eigenerIstKontoschluessel,
 } from '@/services/notesCalendarCrypto'
 
 export { STORAGE_KEYS }
@@ -44,7 +48,7 @@ export { STORAGE_KEYS }
 export interface OutboxMutation {
   id: string
   entity: 'note' | 'calendar' | 'message'
-  action: 'create' | 'update' | 'delete' | 'toggle_pin' | 'toggle_archive' | 'relay'
+  action: 'create' | 'update' | 'delete' | 'toggle_pin' | 'toggle_archive' | 'relay' | 'neu_verschluesseln'
   entityId: string
   payload?: any
   timestamp: string
@@ -292,6 +296,20 @@ export function mergeCalendarWithServer(serverEvents: CalendarEventItem[]): Cale
 
 let isReplaying = false
 
+/**
+ * Schickt einen Sammelauftrag zum Neuverschlüsseln. Was sich seit dem Lesen
+ * geändert hat, lässt der Server liegen und meldet es als `uebersprungen` —
+ * kein Fehlschlag, der die Warteschlange anhielte; der nächste Ladevorgang
+ * sieht den neuen Stand.
+ *
+ * Ein Auftrag ohne `eintraege` stammt aus einem Vorabbau, der je Eintrag
+ * einen eigenen schickte; den Weg gibt es nicht mehr, er fällt weg.
+ */
+async function neuVerschluesseltSenden(pfad: string, payload: any): Promise<void> {
+  if (!Array.isArray(payload?.eintraege)) return
+  await api(pfad, { method: 'POST', body: JSON.stringify(payload) })
+}
+
 export async function replayOutbox(): Promise<{ processed: number; failed: number; remaining: number }> {
   if (isReplaying) {
     return { processed: 0, failed: 0, remaining: getOutbox().length }
@@ -360,6 +378,8 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
             await api('/notes/' + encodeURIComponent(mutation.entityId) + '/archive', {
               method: 'POST',
             })
+          } else if (mutation.action === 'neu_verschluesseln') {
+            await neuVerschluesseltSenden('/notes/neu-verschluesseln', mutation.payload)
           }
         } else if (mutation.entity === 'calendar') {
           if (mutation.action === 'create') {
@@ -396,6 +416,8 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
             await api('/calendar/events/' + encodeURIComponent(mutation.entityId), {
               method: 'DELETE',
             })
+          } else if (mutation.action === 'neu_verschluesseln') {
+            await neuVerschluesseltSenden('/calendar/events/neu-verschluesseln', mutation.payload)
           }
         } else if (mutation.entity === 'message') {
           if (mutation.action === 'relay' || mutation.action === 'create') {
@@ -512,11 +534,12 @@ export async function redecryptPendingOfflineNotesAndCalendar(userId: number = 1
     const contentIsEnc = typeof n.content === 'string' && n.content.startsWith(NOTE_CIPHERTEXT_PREFIX)
     if (titleIsEnc || contentIsEnc) {
       try {
+        const kennung = n.user_id || userId
         const decryptedTitle = titleIsEnc
-          ? await decryptNoteTitle(n.title, n.note_uid, undefined, n.user_id || userId)
+          ? await mitAltbestand(kennung, (k) => decryptNoteTitle(n.title, n.note_uid, k, kennung))
           : n.title
         const decryptedContent = contentIsEnc
-          ? await decryptNoteContent(n.content, n.note_uid, undefined, n.user_id || userId)
+          ? await mitAltbestand(kennung, (k) => decryptNoteContent(n.content, n.note_uid, k, kennung))
           : n.content
         updatedNotes.push({
           ...n,
@@ -554,16 +577,16 @@ export async function redecryptPendingOfflineNotesAndCalendar(userId: number = 1
     if (titleIsEnc || descIsEnc || locIsEnc || recIsEnc) {
       try {
         const decryptedTitle = titleIsEnc
-          ? await decryptCalendarField(ev.title, ev.event_id, 'title', undefined, userId)
+          ? await mitAltbestand(userId, (k) => decryptCalendarField(ev.title, ev.event_id, 'title', k, userId))
           : ev.title
         const decryptedDesc = descIsEnc
-          ? await decryptCalendarField(ev.description, ev.event_id, 'description', undefined, userId)
+          ? await mitAltbestand(userId, (k) => decryptCalendarField(ev.description, ev.event_id, 'description', k, userId))
           : ev.description
         const decryptedLoc = locIsEnc
-          ? await decryptCalendarField(ev.location, ev.event_id, 'location', undefined, userId)
+          ? await mitAltbestand(userId, (k) => decryptCalendarField(ev.location, ev.event_id, 'location', k, userId))
           : ev.location
         const decryptedRec = recIsEnc
-          ? await decryptCalendarField(ev.recurrence, ev.event_id, 'recurrence', undefined, userId)
+          ? await mitAltbestand(userId, (k) => decryptCalendarField(ev.recurrence, ev.event_id, 'recurrence', k, userId))
           : ev.recurrence
 
         updatedEvents.push({
@@ -628,15 +651,47 @@ function getEffectiveUserId(explicitUserId?: number): number {
 async function mitAltbestand<T>(
   kennung: number,
   versuch: (schluessel: CryptoKey | undefined) => Promise<T>,
+  veraltet?: () => void,
 ): Promise<T> {
   try {
     return await versuch(undefined)
   } catch (fehler) {
+    // Die Nebenschlüssel: frühere dieses Geräts und die anderer eigener
+    // Geräte (siehe „Ein Schlüssel je Konto" in `notesCalendarCrypto`). Was
+    // nur einer von ihnen öffnet, meldet `veraltet` zum Neuverschlüsseln.
+    for (const neben of await nebenschluessel(kennung)) {
+      try {
+        const ergebnis = await versuch(neben)
+        veraltet?.()
+        return ergebnis
+      } catch {}
+    }
     const alt = await altschluessel()
     if (!alt) throw fehler
+    // Ohne eigenen Schlüssel wird der Altschlüssel übernommen und ist dann der
+    // eigene; neu verschlüsselt werden muss nur, wenn schon ein anderer da war.
+    const schonEigener = hasUserNotesKey(kennung)
     const ergebnis = await versuch(alt)
     void altschluesselUebernehmen(kennung).catch(() => {})
+    if (schonEigener) veraltet?.()
     return ergebnis
+  }
+}
+
+/**
+ * Bereitet den Schlüssel vor, bevor Notizen oder Termine geladen werden.
+ *
+ * Der Abgleich zuerst: danach weiß dieses Gerät, ob sein Schlüssel der des
+ * Kontos ist, und gibt einen anderen nicht mehr weiter.
+ */
+async function schluesselVorbereiten(kennung: number): Promise<void> {
+  if (!hasUserNotesKey(kennung)) {
+    await checkAndReceiveDeviceNotesKey(kennung).catch(() => false)
+  }
+  await kontoschluesselAbgleichen(kennung).catch(() => 'unbekannt')
+  if (hasUserNotesKey(kennung)) {
+    void syncNotesKeyToPairedDevices(kennung).catch(() => {})
+    void checkAndRespondToDeviceKeyRequests(kennung).catch(() => {})
   }
 }
 
@@ -644,7 +699,12 @@ async function mitAltbestand<T>(
 if (typeof window !== 'undefined') {
   window.addEventListener('msm:notes-key-updated', (e: any) => {
     const uid = e?.detail?.userId || getEffectiveUserId()
-    void redecryptPendingOfflineNotesAndCalendar(uid)
+    // Danach neu laden: der Ladeweg verschlüsselt, was nur ein Nebenschlüssel
+    // öffnete, mit dem des Kontos neu.
+    void redecryptPendingOfflineNotesAndCalendar(uid).then(() => {
+      window.dispatchEvent(new CustomEvent('msm:notes-updated'))
+      window.dispatchEvent(new CustomEvent('msm:calendar-updated'))
+    })
   })
 }
 
@@ -734,6 +794,167 @@ function geteilteNotizenUmstellen(roh: NoteItem[], lesbar: NoteItem[], effective
   })
 }
 
+/**
+ * Je Eintrag die Felder, die nur ein Nebenschlüssel öffnete.
+ */
+type Veraltet = Map<string, Set<string>>
+
+function merkeVeraltet(veraltet: Veraltet, kennung: string, feld: string): void {
+  const felder = veraltet.get(kennung) ?? new Set<string>()
+  felder.add(feld)
+  veraltet.set(kennung, felder)
+}
+
+/**
+ * Einträge, die in dieser Sitzung schon mit dem Kontoschlüssel neu
+ * verschlüsselt wurden — aus demselben Grund wie `aufKlartextUmgestellt`.
+ */
+const neuVerschluesselt = new Set<string>()
+
+/** Wie viele Einträge ein Sammelauftrag höchstens trägt — die Grenze des Servers. */
+const SAMMEL_MAX = 200
+
+/**
+ * Steht für diesen Eintrag schon etwas in der Warteschlange — als eigener
+ * Auftrag oder in einem Sammelauftrag? Dann wird er nicht neu verschlüsselt:
+ * ein wartendes Update brächte ohnehin den neuen Stand, und ein zweiter
+ * Sammelauftrag wäre doppelt.
+ */
+function inWarteschlange(entity: 'note' | 'calendar', kennung: string): boolean {
+  const feld = entity === 'note' ? 'note_uid' : 'event_id'
+  return getOutbox().some(
+    (m) =>
+      m.entity === entity &&
+      (m.entityId === kennung ||
+        (m.action === 'neu_verschluesseln' &&
+          Array.isArray((m.payload as any)?.eintraege) &&
+          (m.payload as any).eintraege.some((e: any) => e?.[feld] === kennung))),
+  )
+}
+
+/**
+ * Reiht die Einträge als Sammelaufträge ein, höchstens `SAMMEL_MAX` je
+ * Auftrag. Je Eintrag einer hieß: je Eintrag ein Ereignis an jedes offene
+ * Gerät, und jedes lud daraufhin die ganze Liste neu (Durchsicht 30.09.2026).
+ */
+function sammelauftraegeEinreihen(entity: 'note' | 'calendar', eintraege: Record<string, unknown>[]): void {
+  for (let i = 0; i < eintraege.length; i += SAMMEL_MAX) {
+    enqueueMutation({
+      entity,
+      action: 'neu_verschluesseln',
+      entityId: '',
+      payload: { eintraege: eintraege.slice(i, i + SAMMEL_MAX) },
+    })
+  }
+  if (eintraege.length > 0) void replayOutbox()
+}
+
+/**
+ * Das neue Chiffrat je Feld, neben dem alten, das der Server gerade hat.
+ *
+ * Er tauscht nur, solange dort noch genau das alte steht, und lässt den
+ * Bearbeitungszeitpunkt stehen (`/neu-verschluesseln`). Bis zur Durchsicht vom
+ * 30.09.2026 ging das als gewöhnliches Update hinaus: es konnte eine spätere
+ * Änderung eines anderen Geräts überschreiben und schob jede Altnotiz in der
+ * Liste nach oben.
+ */
+async function umschluesselung(
+  roh: Record<string, unknown>,
+  klar: Record<string, unknown>,
+  felder: Set<string> | undefined,
+  praefix: string,
+  verschluesseln: (feld: string, wert: string) => Promise<string>,
+): Promise<Record<string, { alt: string; neu: string }> | null> {
+  if (!felder) return null
+  const umschluesselt: Record<string, { alt: string; neu: string }> = {}
+  for (const feld of felder) {
+    const alt = roh[feld]
+    const wert = klar[feld]
+    // Nur, was wirklich E2EE war und jetzt offen vorliegt.
+    if (!istUmschlag(alt, praefix) || typeof wert !== 'string' || !wert || istUmschlag(wert, praefix)) {
+      continue
+    }
+    umschluesselt[feld] = { alt: alt as string, neu: await verschluesseln(feld, wert) }
+  }
+  return Object.keys(umschluesselt).length > 0 ? umschluesselt : null
+}
+
+/**
+ * Schreibt persönliche Notizen, die nur ein Nebenschlüssel öffnete, mit dem
+ * Kontoschlüssel neu.
+ *
+ * Nur, wenn dieses Gerät den des Kontos hat — sonst verschlüsselte es mit
+ * einem, der gleich wieder abgelöst wird.
+ */
+async function veralteteNotizenNeuSchreiben(
+  roh: NoteItem[],
+  lesbar: NoteItem[],
+  veraltet: Veraltet,
+  effectiveUid: number,
+): Promise<void> {
+  if (veraltet.size === 0) return
+  if ((await eigenerIstKontoschluessel(effectiveUid)) !== true) return
+  const eintraege: Record<string, unknown>[] = []
+  for (let i = 0; i < roh.length; i++) {
+    const n = roh[i]
+    const klar = lesbar[i]
+    if (!klar || notizIstGeteilt(n) || n.user_id !== effectiveUid) continue
+    if (neuVerschluesselt.has(n.note_uid)) continue
+    if (inWarteschlange('note', n.note_uid)) continue
+    const payload = await umschluesselung(
+      n as unknown as Record<string, unknown>,
+      klar as unknown as Record<string, unknown>,
+      veraltet.get(n.note_uid),
+      NOTE_CIPHERTEXT_PREFIX,
+      (feld, wert) =>
+        feld === 'title'
+          ? encryptNoteTitle(wert, n.note_uid, undefined, effectiveUid)
+          : encryptNoteContent(wert, n.note_uid, undefined, effectiveUid),
+    )
+    if (!payload) continue
+    neuVerschluesselt.add(n.note_uid)
+    eintraege.push({ note_uid: n.note_uid, ...payload })
+  }
+  sammelauftraegeEinreihen('note', eintraege)
+}
+
+/** Dasselbe für persönliche Termine. */
+async function veralteteTermineNeuSchreiben(
+  roh: CalendarEventItem[],
+  lesbar: CalendarEventItem[],
+  veraltet: Veraltet,
+  effectiveUid: number,
+): Promise<void> {
+  if (veraltet.size === 0) return
+  if ((await eigenerIstKontoschluessel(effectiveUid)) !== true) return
+  const eintraege: Record<string, unknown>[] = []
+  for (let i = 0; i < roh.length; i++) {
+    const ev = roh[i]
+    const klar = lesbar[i]
+    if (!klar || terminIstGeteilt(ev) || ev.user_id !== effectiveUid) continue
+    if (neuVerschluesselt.has(ev.event_id)) continue
+    if (inWarteschlange('calendar', ev.event_id)) continue
+    const payload = await umschluesselung(
+      ev as unknown as Record<string, unknown>,
+      klar as unknown as Record<string, unknown>,
+      veraltet.get(ev.event_id),
+      CALENDAR_CIPHERTEXT_PREFIX,
+      (feld, wert) =>
+        encryptCalendarField(
+          wert,
+          ev.event_id,
+          feld as 'title' | 'description' | 'location' | 'recurrence',
+          undefined,
+          effectiveUid,
+        ),
+    )
+    if (!payload) continue
+    neuVerschluesselt.add(ev.event_id)
+    eintraege.push({ event_id: ev.event_id, ...payload })
+  }
+  sammelauftraegeEinreihen('calendar', eintraege)
+}
+
 // ── Public Offline-First Notes API ──
 
 export async function loadNotesOfflineFirst(_options?: {
@@ -741,12 +962,7 @@ export async function loadNotesOfflineFirst(_options?: {
   userId?: number
 }): Promise<{ notes: NoteItem[]; isOffline: boolean }> {
   const effectiveUid = getEffectiveUserId(_options?.userId)
-  if (!hasUserNotesKey(effectiveUid)) {
-    await checkAndReceiveDeviceNotesKey(effectiveUid).catch(() => false)
-  } else {
-    void syncNotesKeyToPairedDevices(effectiveUid).catch(() => {})
-    void checkAndRespondToDeviceKeyRequests(effectiveUid).catch(() => {})
-  }
+  await schluesselVorbereiten(effectiveUid)
 
   let localNotes = getOfflineNotes()
   let isOffline = false
@@ -754,15 +970,19 @@ export async function loadNotesOfflineFirst(_options?: {
   try {
     const data = await api<NoteItem[]>('/notes?include_archived=true')
     if (Array.isArray(data)) {
+      const veraltet: Veraltet = new Map()
       const decryptedData: NoteItem[] = await Promise.all(
         data.map(async (n) => {
           const itemUid = n.user_id || effectiveUid
+          const alt = (feld: string) => () => merkeVeraltet(veraltet, n.note_uid, feld)
           let title = n.title
           let content = n.content
           if (typeof title === 'string' && title.startsWith(NOTE_CIPHERTEXT_PREFIX)) {
             try {
-              title = await mitAltbestand(itemUid, (k) =>
-                decryptNoteTitle(n.title, n.note_uid, k, itemUid),
+              title = await mitAltbestand(
+                itemUid,
+                (k) => decryptNoteTitle(n.title, n.note_uid, k, itemUid),
+                alt('title'),
               )
             } catch {
               // Bei fehlendem oder falschem Schlüssel Ciphertext im Offline-Cache belassen,
@@ -771,8 +991,10 @@ export async function loadNotesOfflineFirst(_options?: {
           }
           if (typeof content === 'string' && content.startsWith(NOTE_CIPHERTEXT_PREFIX)) {
             try {
-              content = await mitAltbestand(itemUid, (k) =>
-                decryptNoteContent(n.content, n.note_uid, k, itemUid),
+              content = await mitAltbestand(
+                itemUid,
+                (k) => decryptNoteContent(n.content, n.note_uid, k, itemUid),
+                alt('content'),
               )
             } catch {
               // Ciphertext belassen
@@ -787,6 +1009,7 @@ export async function loadNotesOfflineFirst(_options?: {
       )
       localNotes = mergeNotesWithServer(decryptedData)
       geteilteNotizenUmstellen(data, decryptedData, effectiveUid)
+      await veralteteNotizenNeuSchreiben(data, decryptedData, veraltet, effectiveUid)
     }
   } catch {
     isOffline = true
@@ -1058,36 +1281,48 @@ export async function toggleCheckItemOffline(
 async function entschluesselterTermin(
   ev: CalendarEventItem,
   itemUid: number,
+  veraltet?: Veraltet,
 ): Promise<CalendarEventItem> {
+  const alt = (feld: string) => () => {
+    if (veraltet) merkeVeraltet(veraltet, ev.event_id, feld)
+  }
   let title = ev.title
   let description = ev.description
   let location = ev.location
   let recurrence = ev.recurrence
   if (typeof ev.title === 'string' && ev.title.startsWith(CALENDAR_CIPHERTEXT_PREFIX)) {
     try {
-      title = await mitAltbestand(itemUid, (k) =>
-        decryptCalendarField(ev.title, ev.event_id, 'title', k, itemUid),
+      title = await mitAltbestand(
+        itemUid,
+        (k) => decryptCalendarField(ev.title, ev.event_id, 'title', k, itemUid),
+        alt('title'),
       )
     } catch {}
   }
   if (typeof ev.description === 'string' && ev.description.startsWith(CALENDAR_CIPHERTEXT_PREFIX)) {
     try {
-      description = await mitAltbestand(itemUid, (k) =>
-        decryptCalendarField(ev.description, ev.event_id, 'description', k, itemUid),
+      description = await mitAltbestand(
+        itemUid,
+        (k) => decryptCalendarField(ev.description, ev.event_id, 'description', k, itemUid),
+        alt('description'),
       )
     } catch {}
   }
   if (typeof ev.location === 'string' && ev.location.startsWith(CALENDAR_CIPHERTEXT_PREFIX)) {
     try {
-      location = await mitAltbestand(itemUid, (k) =>
-        decryptCalendarField(ev.location, ev.event_id, 'location', k, itemUid),
+      location = await mitAltbestand(
+        itemUid,
+        (k) => decryptCalendarField(ev.location, ev.event_id, 'location', k, itemUid),
+        alt('location'),
       )
     } catch {}
   }
   if (typeof ev.recurrence === 'string' && ev.recurrence.startsWith(CALENDAR_CIPHERTEXT_PREFIX)) {
     try {
-      recurrence = await mitAltbestand(itemUid, (k) =>
-        decryptCalendarField(ev.recurrence, ev.event_id, 'recurrence', k, itemUid),
+      recurrence = await mitAltbestand(
+        itemUid,
+        (k) => decryptCalendarField(ev.recurrence, ev.event_id, 'recurrence', k, itemUid),
+        alt('recurrence'),
       )
     } catch {}
   }
@@ -1116,11 +1351,13 @@ async function holeGrundbestand(effectiveUid: number): Promise<CalendarEventItem
   if (grundbestandGeholt) return null
   const data = await api<CalendarEventItem[]>('/calendar/events')
   if (!Array.isArray(data)) return null
+  const veraltet: Veraltet = new Map()
   const entschluesselt = await Promise.all(
-    data.map((ev) => entschluesselterTermin(ev, ev.user_id || effectiveUid)),
+    data.map((ev) => entschluesselterTermin(ev, ev.user_id || effectiveUid, veraltet)),
   )
   const zusammengefuehrt = mergeCalendarWithServer(entschluesselt)
   geteilteTermineUmstellen(data, entschluesselt, effectiveUid)
+  await veralteteTermineNeuSchreiben(data, entschluesselt, veraltet, effectiveUid)
   grundbestandGeholt = true
   return zusammengefuehrt
 }
@@ -1133,12 +1370,7 @@ export async function loadCalendarEventsOfflineFirst(
   zeitzone?: string | null
 ): Promise<{ events: KalenderVorkommen[]; isOffline: boolean }> {
   const effectiveUid = getEffectiveUserId(userId)
-  if (!hasUserNotesKey(effectiveUid)) {
-    await checkAndReceiveDeviceNotesKey(effectiveUid).catch(() => false)
-  } else {
-    void syncNotesKeyToPairedDevices(effectiveUid).catch(() => {})
-    void checkAndRespondToDeviceKeyRequests(effectiveUid).catch(() => {})
-  }
+  await schluesselVorbereiten(effectiveUid)
 
   let localEvents = getOfflineCalendarEvents()
   let isOffline = false
@@ -1167,11 +1399,13 @@ export async function loadCalendarEventsOfflineFirst(
       '/calendar/events?start=' + encodeURIComponent(rangeStart) + '&end=' + encodeURIComponent(rangeEnd) + catParam
     )
     if (Array.isArray(data)) {
+      const veraltet: Veraltet = new Map()
       const decryptedData: CalendarEventItem[] = await Promise.all(
-        data.map((ev) => entschluesselterTermin(ev, ev.user_id || effectiveUid)),
+        data.map((ev) => entschluesselterTermin(ev, ev.user_id || effectiveUid, veraltet)),
       )
       localEvents = mergeCalendarWithServer(decryptedData)
       geteilteTermineUmstellen(data, decryptedData, effectiveUid)
+      await veralteteTermineNeuSchreiben(data, decryptedData, veraltet, effectiveUid)
     }
   } catch {
     isOffline = true
@@ -1581,7 +1815,11 @@ export function handleIncomingSyncEvent(eventName: string, data: SyncEventPayloa
     const targetUid = useAuthStore.getState().user?.id
     if (typeof targetUid !== 'number' || targetUid <= 0) return
     if (cType === 'notes_key_sync') {
-      void checkAndReceiveDeviceNotesKey(targetUid)
+      // Auch mit Schlüssel: die Übergabe kann der des Kontos sein, der den
+      // eigenen ablöst (`kontoschluesselAbgleichen`).
+      void (hasUserNotesKey(targetUid)
+        ? checkAndRespondToDeviceKeyRequests(targetUid)
+        : checkAndReceiveDeviceNotesKey(targetUid))
     } else if (cType === 'notes_key_request') {
       // Gefragt hat ein Gerät, und seine Anfrage liegt in der Mailbox: die wird
       // beantwortet, einmal. Bis 09/2026 ging bei jeder solchen Meldung der
@@ -1600,6 +1838,12 @@ export function handleIncomingSyncEvent(eventName: string, data: SyncEventPayloa
     const hasPendingLocal = id ? outbox.some((m) => m.entityId === id) : false
 
     if (entity === 'notes' || entity === 'note') {
+      if (data.action === 'kontoschluessel') {
+        // Ein anderes Gerät hat den Kontoschlüssel gesetzt: beim Neuladen, das
+        // gleich folgt, frisch nachsehen statt aus der Frist zu antworten.
+        const konto = useAuthStore.getState().user?.id
+        if (typeof konto === 'number') kontoAbdruckVergessen(konto)
+      }
       if (!hasPendingLocal && id) {
         if (data.action === 'deleted') {
           const current = getOfflineNotes()
@@ -1613,10 +1857,10 @@ export function handleIncomingSyncEvent(eventName: string, data: SyncEventPayloa
               let title = raw.title
               let content = raw.content
               try {
-                title = await decryptNoteTitle(raw.title, id, undefined, raw.user_id)
+                title = await mitAltbestand(raw.user_id, (k) => decryptNoteTitle(raw.title, id, k, raw.user_id))
               } catch {}
               try {
-                content = await decryptNoteContent(raw.content, id, undefined, raw.user_id)
+                content = await mitAltbestand(raw.user_id, (k) => decryptNoteContent(raw.content, id, k, raw.user_id))
               } catch {}
               const decryptedData: NoteItem = {
                 ...raw,

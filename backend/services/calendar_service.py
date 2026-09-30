@@ -1419,6 +1419,49 @@ class CalendarService:
         )
         return res
 
+    @staticmethod
+    def neu_verschluesseln(
+        db: Session, user: User, auftraege: list[tuple[str, dict[str, tuple[str, str]]]]
+    ) -> dict[str, list[str]]:
+        """Tauscht E2EE-Chiffrate eigener persoenlicher Termine gegen neue.
+
+        Wie `NotesService.neu_verschluesseln`: je Termin nur, solange jedes Feld
+        noch das ``alt`` hat, ohne ``updated_at`` anzufassen, und ein Ereignis
+        fuer den ganzen Auftrag.
+        """
+        for _, felder in auftraege:
+            for alt, neu in felder.values():
+                if not alt.startswith(CALENDAR_CIPHERTEXT_PREFIX) or not neu.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+                    raise ValueError("Neu verschluesselt wird nur, was E2EE war und bleibt.")
+        spalten = {
+            "title": CalendarEvent.title,
+            "description": CalendarEvent.description,
+            "location": CalendarEvent.location,
+            "recurrence": CalendarEvent.recurrence,
+        }
+        geschrieben: list[str] = []
+        uebersprungen: list[str] = []
+        for event_uid, felder in auftraege:
+            bedingungen = [spalten[name] == alt for name, (alt, _) in felder.items()]
+            werte: dict[Any, Any] = {spalten[name]: neu for name, (_, neu) in felder.items()}
+            # Die Spalte auf sich selbst setzen haelt `onupdate` fern.
+            werte[CalendarEvent.updated_at] = CalendarEvent.updated_at
+            geaendert = (
+                db.query(CalendarEvent)
+                .filter(
+                    CalendarEvent.event_uid == event_uid,
+                    CalendarEvent.user_id == user.id,
+                    CalendarEvent.event_type == "personal",
+                    *bedingungen,
+                )
+                .update(werte, synchronize_session=False)
+            ) if felder else 0
+            (geschrieben if geaendert else uebersprungen).append(event_uid)
+        db.commit()
+        if geschrieben:
+            SyncEventService.publish({"entity": "calendar", "action": "updated", "user_id": user.id}, user_id=user.id)
+        return {"geschrieben": geschrieben, "uebersprungen": uebersprungen}
+
     @classmethod
     def delete_event(
         cls,

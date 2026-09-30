@@ -352,6 +352,16 @@ def _unterzeichner(db: Session, user: User, device_id: str | None) -> UserE2eeDe
     return geraet
 
 
+def unterschrift_gilt(
+    db: Session, user: User, device_id: str | None, daten: str, signatur: str | None
+) -> bool:
+    """Hat ein freigegebenes Geraet dieses Kontos ``daten`` unterschrieben?"""
+    unterzeichner = _unterzeichner(db, user, device_id)
+    if unterzeichner is None or not signatur:
+        return False
+    return _pruefe_signatur(daten, unterzeichner.signing_public_key_jwk, signatur)
+
+
 def bestaetigen(
     db: Session,
     user: User,
@@ -468,6 +478,19 @@ def zuruecksetzen(db: Session, user: User, familie_behalten: str | None) -> int:
     familien = {e.auth_family for e in eintraege if e.auth_family}
     for e in eintraege:
         db.delete(e)
+    # Der Notizschluessel lag auf diesen Geraeten. Ohne sie gibt es niemanden
+    # mehr, der ihn hat oder den Eintrag beglaubigen koennte: das naechste
+    # Geraet setzt den Kontoschluessel neu (`kontoschluesselAbgleichen`).
+    db.query(User).filter(User.id == user.id).update(
+        {
+            User.notes_key_abdruck: None,
+            User.notes_key_geraet: None,
+            User.notes_key_signatur: None,
+            # `notes_key_stand` bleibt: auch nach dem Neubeginn passt keine
+            # Unterschrift von vorher auf den naechsten Eintrag.
+        },
+        synchronize_session=False,
+    )
     db.commit()
     for familie in familien - {familie_behalten}:
         _sperre_sitzung(db, user, familie)

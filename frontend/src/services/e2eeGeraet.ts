@@ -846,6 +846,36 @@ export async function vertrauteGeraete(
   return liste.filter((g) => vertraut.has(g.device_id))
 }
 
+/**
+ * Hat ein Gerät aus `liste` dieses freigegeben — belegt durch seine Unterschrift?
+ *
+ * `liste` muss eine von `vertrauteGeraete` geprüfte sein (`verzeichnisVon`,
+ * `geraeteVon`): dann ist der Freigeber selbst vertraut, und die Unterschrift
+ * kann nur von ihm stammen. `approved_by` allein ist das Wort des Servers und
+ * zählt nicht.
+ */
+export async function freigabeBelegt(
+  userId: number,
+  geraet: E2eeGeraetItem,
+  liste: E2eeGeraetItem[],
+): Promise<boolean> {
+  const von = geraet.approved_by
+  if (!von || von === geraet.device_id || !geraet.approval_signature) return false
+  const freigeber = liste.find((g) => g.device_id === von)
+  if (!freigeber?.signing_public_key) return false
+  try {
+    const daten = await freigabeDaten(
+      userId,
+      geraet.device_id,
+      geraet.public_key,
+      geraet.signing_public_key,
+    )
+    return await pruefe(daten, geraet.approval_signature, freigeber.signing_public_key)
+  } catch {
+    return false
+  }
+}
+
 /** Ob der Server dieses Gerät zuletzt als freigegeben gemeldet hat. `null`: noch nicht gemeldet. */
 let eigeneFreigabe: boolean | null = null
 const eigeneFreigabeListeners = new Set<(freigegeben: boolean | null) => void>()

@@ -39,6 +39,7 @@ import {
 import { signiere } from './absenderSignatur'
 import {
   eigenesGeraet,
+  freigabeBelegt,
   geraeteVon,
   pruefeGeraeteBeleg,
   verzeichnisVon,
@@ -47,8 +48,14 @@ import {
 import {
   relayE2eeEnvelope,
   fetchE2eeEnvelopes,
+  getE2eeGeraete,
   type E2eeGeraetItem,
 } from '@/api/social'
+import {
+  holeKontoschluessel,
+  setzeKontoschluessel,
+  type KontoschluesselStand,
+} from '@/api/notizschluessel'
 
 export const NOTE_ENVELOPE_SPEC: VersionedCipherEnvelopeSpec = {
   currentPrefix: 'sv-note-v1:',
@@ -147,6 +154,13 @@ export function clearNotesKeyCache(): void {
   laufendeVerteilung.clear()
   laufenderDurchgang.clear()
   bestaetigteGeraeteFuerNotizen.clear()
+  nebenOhneAblage.clear()
+  nebenImRam.clear()
+  kontoAbdruck.clear()
+  laufenderAbgleich.clear()
+  laufendesErzeugen.clear()
+  letzterAbgleich.clear()
+  neuBelegt.clear()
 }
 
 /**
@@ -211,16 +225,29 @@ export async function getUserNotesKey(userId: number = 1): Promise<CryptoKey | n
  * Ermittelt oder erzeugt den symmetrischen AES-256-GCM E2EE-Schlüssel für Notizen & Kalender.
  * Bleibt rein auf dem Client und wird NIEMALS an den Server übertragen.
  */
-export async function getOrCreateUserNotesKey(userId: number = 1): Promise<CryptoKey> {
+export function getOrCreateUserNotesKey(userId: number = 1): Promise<CryptoKey> {
   const cached = keyCache.get(userId)
   if (cached) {
     if (!syncedInSession.has(userId)) {
       syncedInSession.add(userId)
       void syncNotesKeyToPairedDevices(userId).catch(() => {})
     }
-    return cached
+    return Promise.resolve(cached)
   }
+  // Ein Lauf je Konto. Seit dem Warten auf den Kontoschlüssel dauert einer
+  // Sekunden; zwei zugleich (Notiz und Termin, zwei Speichervorgänge) erzeugten
+  // sonst je einen Schlüssel, und der zweite überschriebe den ersten — mit dem
+  // eben Gespeicherten darunter (Durchsicht 30.09.2026).
+  const schon = laufendesErzeugen.get(userId)
+  if (schon) return schon
+  const lauf = holeOderErzeuge(userId).finally(() => laufendesErzeugen.delete(userId))
+  laufendesErzeugen.set(userId, lauf)
+  return lauf
+}
 
+const laufendesErzeugen = new Map<number, Promise<CryptoKey>>()
+
+async function holeOderErzeuge(userId: number): Promise<CryptoKey> {
   const storageKey = `${STORAGE_KEY_PREFIX}${userId}`
   let rawBase64: string | null = null
 
@@ -249,6 +276,10 @@ export async function getOrCreateUserNotesKey(userId: number = 1): Promise<Crypt
     } catch {
       // Fehler beim Mailbox-Abruf ignorieren
     }
+  }
+
+  if (!rawBase64) {
+    rawBase64 = await aufKontoschluesselWarten(userId)
   }
 
   // Hier wird der Altbestand unter der Kennung 1 **nicht** übernommen, obwohl
@@ -296,6 +327,13 @@ export async function getOrCreateUserNotesKey(userId: number = 1): Promise<Crypt
  */
 export async function setUserNotesKey(userId: number, rawBase64: string): Promise<CryptoKey> {
   const storageKey = `${STORAGE_KEY_PREFIX}${userId}`
+  // Ein ersetzter Schlüssel bleibt zum Lesen da — beim Übernehmen des
+  // Kontoschlüssels wie beim Koppeln (`verlaufsUebergabe`). Sonst wäre alles,
+  // was mit ihm geschrieben wurde, auf diesem Gerät verloren.
+  const bisher = exportUserNotesKey(userId)
+  if (bisher && bisher !== rawBase64) merkeNebenschluessel(userId, bisher)
+  // Ein anderer Schlüssel: der letzte Abgleich sagt über ihn nichts.
+  letzterAbgleich.delete(userId)
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       window.localStorage.setItem(storageKey, rawBase64)
@@ -379,6 +417,328 @@ export async function altschluesselUebernehmen(userId: number): Promise<boolean>
   await setUserNotesKey(userId, roh)
   return true
 }
+
+// ── Ein Schlüssel je Konto ──
+//
+// Bis 30.09.2026 behielt jedes Gerät den Schlüssel, den es sich beim ersten
+// Speichern selbst gemacht hatte: `getOrCreateUserNotesKey` wartete nicht auf
+// die Übergabe, und kam sie danach, verteidigte das Gerät seinen eigenen. Was
+// eines schrieb, zeigten die anderen als `sv-note-v1:`-Blob — gemessen am
+// 30.09. an zwei Geräten desselben Kontos mit zwei Abdrücken.
+//
+// Jetzt nennt der Server den Abdruck des Schlüssels, der gilt (nie den
+// Schlüssel). Das erste Gerät, das einen hat, setzt ihn. Ein Gerät mit einem
+// anderen holt sich den des Kontos über die unterschriebene Übergabe und
+// behält seinen bisherigen als **Nebenschlüssel**: nur zum Lesen, bis
+// `offlineSync` alles damit Geschriebene neu verschlüsselt hat.
+
+const NEBEN_PREFIX = 'msm_e2ee_notes_nebenschluessel_'
+/** Nebenschlüssel, wo es keine Ablage gibt — wie `rawKeyMemoryStore`. */
+const nebenOhneAblage = new Map<number, string[]>()
+const nebenImRam = new Map<string, CryptoKey>()
+
+function nebenschluesselRoh(userId: number): string[] {
+  let liste: unknown = nebenOhneAblage.get(userId)
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const roh = window.localStorage.getItem(`${NEBEN_PREFIX}${userId}`)
+      if (roh) liste = JSON.parse(roh)
+    }
+  } catch {}
+  return Array.isArray(liste) ? liste.filter((x): x is string => typeof x === 'string' && x !== '') : []
+}
+
+function merkeNebenschluessel(userId: number, roh: string): boolean {
+  const liste = nebenschluesselRoh(userId)
+  if (liste.includes(roh)) return false
+  liste.push(roh)
+  nebenOhneAblage.set(userId, liste)
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(`${NEBEN_PREFIX}${userId}`, JSON.stringify(liste))
+    }
+  } catch {}
+  return true
+}
+
+/**
+ * Die Nebenschlüssel dieses Kontos auf diesem Gerät — nur zum Lesen.
+ *
+ * Frühere eigene Schlüssel und die anderer eigener Geräte, sofern deren
+ * Übergabe unterschrieben ankam. Verschlüsselt wird damit nie.
+ */
+export async function nebenschluessel(userId: number): Promise<CryptoKey[]> {
+  const aktuell = exportUserNotesKey(userId)
+  const schluessel: CryptoKey[] = []
+  for (const roh of nebenschluesselRoh(userId)) {
+    if (roh === aktuell) continue
+    let k = nebenImRam.get(roh)
+    if (!k) {
+      try {
+        k = await importAesGcmRawKey(base64ToBytes(roh), ['decrypt'])
+      } catch {
+        continue
+      }
+      nebenImRam.set(roh, k)
+    }
+    schluessel.push(k)
+  }
+  return schluessel
+}
+
+/** Macht `roh` zum Schlüssel dieses Geräts; der bisherige wird Nebenschlüssel (`setUserNotesKey`). */
+async function kontoschluesselUebernehmen(userId: number, roh: string): Promise<void> {
+  if (exportUserNotesKey(userId) === roh) return
+  // Meldet `msm:notes-key-updated`; `offlineSync` lädt daraufhin neu und
+  // verschlüsselt, was nur der alte öffnete.
+  await setUserNotesKey(userId, roh)
+}
+
+/**
+ * Abdruck des Kontoschlüssels — nur, wenn die Unterschrift darunter von einem
+ * vertrauten eigenen Gerät stammt (`pruefeStand`). Fehlt der Eintrag, weiß
+ * dieses Gerät es nicht; das ist kein „keiner".
+ */
+const kontoAbdruck = new Map<number, string>()
+const laufenderAbgleich = new Map<number, Promise<Abgleichstand>>()
+/**
+ * Der letzte Abgleich, gleich welcher Ausgang. Notizen laden bei jedem
+ * Ereignis neu, im Ausweichbetrieb alle zehn Sekunden; öfter als einmal in der
+ * Minute muss niemand den Server fragen. Ein neuer eigener Schlüssel
+ * (`setUserNotesKey`) und die Meldung des Servers (`kontoAbdruckVergessen`)
+ * räumen den Eintrag sofort.
+ */
+const letzterAbgleich = new Map<number, { stand: Abgleichstand; am: number }>()
+const ABGLEICH_FRIST_MS = 60 * 1000
+/**
+ * Konten, deren Eintrag dieses Gerät in dieser Sitzung schon einmal neu belegt
+ * hat. Zwei Geräte, die einander nicht vertrauen, stellten sonst im Wechsel um.
+ */
+const neuBelegt = new Set<number>()
+
+async function eigenerAbdruck(userId: number): Promise<string | null> {
+  const roh = exportUserNotesKey(userId)
+  return roh ? abdruckVon(roh) : null
+}
+
+/**
+ * Was ein Gerät unterschreibt, wenn es den Kontoschlüssel setzt — dieselben
+ * Bytes wie `NotesService.kontoschluessel_daten` im Backend.
+ *
+ * Der Stand gehört hinein und wächst nur: eine Unterschrift passt auf genau
+ * einen und lässt sich später nicht wieder vorlegen — auch dann nicht, wenn
+ * der Eintrag zu einem früheren Abdruck zurückgekehrt ist. Mit dem Vorgänger
+ * statt des Stands ging das bis zur Durchsicht vom 30.09.2026.
+ */
+export function kontoschluesselDaten(
+  userId: number,
+  abdruck: string,
+  stand: number,
+  geraet: string,
+): string {
+  return `msm:notes-kontoschluessel:v2:${userId}:${abdruck}:${stand}:${geraet}`
+}
+
+/**
+ * Gilt der Eintrag? Nur mit der Unterschrift eines vertrauten eigenen Geräts.
+ *
+ * Bis zur Durchsicht vom 30.09.2026 glaubte jedes Gerät dem Server den Abdruck
+ * ohne Beleg. Wer eine Sitzung hatte — oder der Server selbst —, konnte ihn auf
+ * den Schlüssel eines entfernten Geräts stellen, und alle Geräte wären auf
+ * diesen umgestiegen.
+ *
+ * - `echt`: belegt.
+ * - `unbelegt`: die Unterschrift stimmt nicht, oder ihr Gerät steht gar nicht
+ *   mehr im Verzeichnis (entfernt). Dann darf ein Gerät ihn neu belegen.
+ * - `fremd`: das Gerät ist freigegeben, aber diesem hier nicht vertraut — etwa
+ *   eines, dessen Freigabe es nicht nachprüfen kann. Nicht gültig, aber auch
+ *   kein Grund, einem womöglich echten Gerät den Eintrag wegzunehmen: zwei
+ *   solche stellten ihn sonst im Wechsel um (Durchsicht 30.09.2026).
+ * - `offen`: das Verzeichnis war nicht zu erreichen — weder ja noch nein.
+ */
+async function pruefeStand(
+  userId: number,
+  stand: KontoschluesselStand,
+): Promise<'echt' | 'unbelegt' | 'fremd' | 'offen'> {
+  if (!stand.abdruck || !stand.geraet || !stand.signatur) return 'unbelegt'
+  const beleg = await pruefeGeraeteBeleg(
+    userId,
+    stand.geraet,
+    kontoschluesselDaten(userId, stand.abdruck, stand.stand, stand.geraet),
+    stand.signatur,
+  )
+  if (beleg === 'offen') return 'offen'
+  if (beleg === 'echt') return 'echt'
+  if (beleg !== 'unbekannt') return 'unbelegt'
+  // Nicht unter den vertrauten. Entfernt — oder nur nicht nachprüfbar?
+  try {
+    const roh = await getE2eeGeraete(userId)
+    return roh.some((g) => g.device_id === stand.geraet) ? 'fremd' : 'unbelegt'
+  } catch {
+    return 'offen'
+  }
+}
+
+/**
+ * Setzt den eigenen als Kontoschlüssel, unterschrieben von diesem Gerät, als
+ * Stand `stand` (einer mehr als der geltende).
+ *
+ * Liefert den belegten Abdruck danach — den eigenen, oder den eines Geräts,
+ * das schneller war —, sonst `null`. Ein Gerät, das noch nicht freigegeben ist,
+ * weist der Server ab.
+ */
+async function belegen(userId: number, eigen: string, stand: number): Promise<string | null> {
+  let ich: EigenesGeraet
+  try {
+    ich = await eigenesGeraet()
+  } catch {
+    return null
+  }
+  let danach: KontoschluesselStand
+  let signatur: string
+  try {
+    signatur = await signiere(
+      kontoschluesselDaten(userId, eigen, stand, ich.kennung),
+      ich.signaturPaar.privateKeyJwk,
+    )
+    danach = await setzeKontoschluessel({ abdruck: eigen, stand, geraet: ich.kennung, signatur })
+  } catch {
+    return null
+  }
+  if (!danach.abdruck) return null
+  if (danach.abdruck === eigen && danach.signatur === signatur) return eigen
+  return (await pruefeStand(userId, danach)) === 'echt' ? danach.abdruck : null
+}
+
+/**
+ * Ist der Schlüssel dieses Geräts der des Kontos?
+ *
+ * `null`, solange dieses Gerät das nicht weiß — dann verhält es sich wie
+ * vorher. Nur ein klares Nein hält es davon ab, seinen Schlüssel zu verteilen:
+ * es gäbe sonst einen weiter, der gleich wieder abgelöst wird.
+ */
+export async function eigenerIstKontoschluessel(userId: number): Promise<boolean | null> {
+  const marke = kontoAbdruck.get(userId)
+  if (!marke) return null
+  return (await eigenerAbdruck(userId)) === marke
+}
+
+/** Nach einer Meldung des Servers, dass sich der Kontoschlüssel geändert hat. */
+export function kontoAbdruckVergessen(userId: number): void {
+  kontoAbdruck.delete(userId)
+  letzterAbgleich.delete(userId)
+}
+
+/**
+ * - `passt`: dieses Gerät hat den Kontoschlüssel.
+ * - `uebernommen`: hatte einen anderen und hat jetzt den des Kontos.
+ * - `wartet`: hat ihn nicht; die Anfrage an die anderen Geräte ist gestellt.
+ * - `unbekannt`: der Server war nicht zu fragen, oder es gibt keinen belegten.
+ */
+export type Abgleichstand = 'passt' | 'uebernommen' | 'wartet' | 'unbekannt'
+
+/**
+ * Bringt dieses Gerät auf den Schlüssel des Kontos.
+ *
+ * Notizen und Kalender laden zugleich; ein zweiter Aufruf wartet auf den
+ * ersten, statt denselben Weg noch einmal zu gehen.
+ */
+export function kontoschluesselAbgleichen(userId: number): Promise<Abgleichstand> {
+  const zuletzt = letzterAbgleich.get(userId)
+  if (zuletzt && Date.now() - zuletzt.am < ABGLEICH_FRIST_MS) {
+    return Promise.resolve(zuletzt.stand === 'uebernommen' ? 'passt' : zuletzt.stand)
+  }
+  const schon = laufenderAbgleich.get(userId)
+  if (schon) return schon
+  const lauf = abgleichen(userId)
+    .then((stand) => {
+      letzterAbgleich.set(userId, { stand, am: Date.now() })
+      return stand
+    })
+    .finally(() => laufenderAbgleich.delete(userId))
+  laufenderAbgleich.set(userId, lauf)
+  return lauf
+}
+
+async function abgleichen(userId: number): Promise<Abgleichstand> {
+  let stand: KontoschluesselStand
+  try {
+    stand = await holeKontoschluessel()
+  } catch {
+    return 'unbekannt'
+  }
+  const eigen = await eigenerAbdruck(userId)
+  let marke: string | null
+
+  if (!stand.abdruck) {
+    // Noch keiner festgelegt: der erste, der einen hat, setzt ihn. Waren zwei
+    // zugleich dran, gewinnt der eine, und der andere richtet sich nach ihm.
+    if (!eigen) return 'unbekannt'
+    marke = await belegen(userId, eigen, stand.stand + 1)
+  } else {
+    const beleg = await pruefeStand(userId, stand)
+    if (beleg === 'offen' || beleg === 'fremd') return 'unbekannt'
+    if (beleg === 'echt') {
+      marke = stand.abdruck
+    } else {
+      // Die Unterschrift ist falsch, oder ihr Gerät wurde entfernt. Dann gilt
+      // er nicht, und dieses Gerät belegt den Eintrag mit dem eigenen neu —
+      // über den bisherigen hinweg, einmal je Sitzung. Ist das der eigene
+      // Schlüssel, weil sein Unterzeichner entfernt wurde, bleibt es derselbe.
+      if (!eigen || neuBelegt.has(userId)) return 'unbekannt'
+      neuBelegt.add(userId)
+      marke = await belegen(userId, eigen, stand.stand + 1)
+    }
+  }
+  if (!marke) return 'unbekannt'
+  kontoAbdruck.set(userId, marke)
+  if (eigen === marke) return 'passt'
+
+  // Vielleicht liegt er schon hier — etwa, weil dieses Gerät ihn früher hatte.
+  // Unbedenklich, weil `marke` belegt ist: ein vertrautes Gerät steht für
+  // genau diesen Schlüssel ein.
+  for (const roh of nebenschluesselRoh(userId)) {
+    if ((await abdruckVon(roh)) === marke) {
+      await kontoschluesselUebernehmen(userId, roh)
+      return 'uebernommen'
+    }
+  }
+
+  // Eine Übergabe, die schon in der Geräte-Mailbox liegt.
+  try {
+    await geraeteMailboxDurchgehen(userId, false)
+  } catch {}
+  if ((await eigenerAbdruck(userId)) === marke) return 'uebernommen'
+
+  void frageNachSchluessel(userId).catch(() => false)
+  return 'wartet'
+}
+
+/**
+ * Wartet kurz auf den Kontoschlüssel, bevor ein Gerät ohne Schlüssel sich
+ * einen eigenen macht.
+ *
+ * Nur, wenn es einen belegten Kontoschlüssel gibt: dann hat ihn ein anderes
+ * Gerät, und ein eigener hieße, dass das, was dieses Gerät jetzt speichert,
+ * für die anderen Blob bleibt, bis es neu verschlüsselt ist. Ist nach ein paar
+ * Sekunden nichts da, geht es trotzdem weiter — lieber mit eigenem Schlüssel
+ * speichern als gar nicht; `abgleichen` holt den des Kontos später nach.
+ */
+async function aufKontoschluesselWarten(userId: number): Promise<string | null> {
+  if (!kontoAbdruck.has(userId)) return null
+  void frageNachSchluessel(userId).catch(() => false)
+  for (const pause of KONTOSCHLUESSEL_WARTEN_MS) {
+    await new Promise((weiter) => setTimeout(weiter, pause))
+    try {
+      await geraeteMailboxDurchgehen(userId, true)
+    } catch {}
+    const roh = exportUserNotesKey(userId)
+    if (roh) return roh
+  }
+  return null
+}
+
+const KONTOSCHLUESSEL_WARTEN_MS = [1500, 1500, 2000]
 
 /**
  * Die Zeichenkette, über die eine Übergabe des Notizschlüssels unterschrieben wird.
@@ -672,6 +1032,8 @@ export function syncNotesKeyToPairedDevices(userId: number = 1): Promise<number>
 async function verteileSchluessel(userId: number): Promise<number> {
   const rawKey = exportUserNotesKey(userId)
   if (!rawKey) return 0
+  // Nur den Schlüssel des Kontos — siehe „Ein Schlüssel je Konto".
+  if ((await eigenerIstKontoschluessel(userId)) === false) return 0
 
   let self: EigenesGeraet | null = null
   try {
@@ -692,22 +1054,28 @@ async function verteileSchluessel(userId: number): Promise<number> {
   // Jedem Gerät einmal je Schlüssel — siehe „Abgleich unter eigenen Geräten".
   // Wer ihn verloren hat, fragt; beantwortet wird jede Anfrage.
   const abdruck = await abdruckVon(rawKey)
-  const targetDevices = pairedDevices
+  const kandidaten = pairedDevices
     .map((d) => ({
       deviceId: d.device_id || (d as any).deviceId,
       publicKey: d.public_key || (d as any).publicKey,
       isApproved: d.is_approved,
       approvedBy: d.approved_by,
+      eintrag: d,
     }))
     .filter((d) => d.deviceId && d.deviceId !== ich.kennung && d.publicKey)
     .filter((d) => d.isApproved !== false)
-    .filter(
-      (d) =>
-        d.isApproved !== true ||
-        d.approvedBy === ich.kennung ||
-        istGeraetBestaetigtFuerNotizenSchluessel(userId, d.deviceId),
-    )
     .filter((d) => !schonGegeben(userId, ich.kennung, abdruck, d.deviceId))
+  const targetDevices: typeof kandidaten = []
+  for (const d of kandidaten) {
+    if (
+      d.isApproved !== true ||
+      d.approvedBy === ich.kennung ||
+      istGeraetBestaetigtFuerNotizenSchluessel(userId, d.deviceId) ||
+      (await freigabeBelegt(userId, d.eintrag, pairedDevices))
+    ) {
+      targetDevices.push(d)
+    }
+  }
 
   if (targetDevices.length === 0) return 0
 
@@ -744,7 +1112,14 @@ export async function requestNotesKeyFromPairedDevices(userId: number = 1): Prom
   if (hasUserNotesKey(userId)) {
     return false
   }
+  return frageNachSchluessel(userId)
+}
 
+/**
+ * Fragt die anderen eigenen Geräte nach dem Schlüssel — auch, wenn dieses
+ * schon einen hat, der aber nicht der des Kontos ist (`abgleichen`).
+ */
+async function frageNachSchluessel(userId: number): Promise<boolean> {
   // Höchstens eine Runde je Pause. Die Marke steht, bevor das erste `await`
   // fällt: Notizen, Kalender und Erinnerungen laden gleichzeitig, und jeder
   // Aufruf sähe sonst noch keine Runde. Öfter zu fragen bringt nichts — eine
@@ -896,11 +1271,25 @@ async function verarbeiteSteuerumschlag(
     }
     const existing = exportUserNotesKey(userId)
     if (existing && existing !== data.notesKey) {
-      // Bereits ein Schlüssel vorhanden, der vom eingegangenen abweicht.
-      // Wir verteidigen unseren bestehenden Schlüssel und senden ihn zurück —
-      // jedem Gerät einmal. Bis 09/2026 ging er bei jedem solchen Umschlag an
-      // alle, und das andere Gerät hielt es genauso: ein Pingpong ohne Ende.
-      await syncNotesKeyToPairedDevices(userId).catch(() => 0)
+      const marke = kontoAbdruck.get(userId)
+      if (marke && (await abdruckVon(data.notesKey)) === marke) {
+        // Der des Kontos: er löst den eigenen ab, der Nebenschlüssel wird.
+        await kontoschluesselUebernehmen(userId, data.notesKey)
+        return 'erledigt'
+      }
+      // Ein anderer eines eigenen Geräts: zum Lesen behalten. Was jenes Gerät
+      // geschrieben hat, öffnet sich damit auch hier und wird beim nächsten
+      // Laden mit dem Kontoschlüssel neu verschlüsselt.
+      if (merkeNebenschluessel(userId, data.notesKey) && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('msm:notes-key-updated', { detail: { userId } }))
+      }
+      // Den eigenen verteidigen — jedem Gerät einmal, und nur, wenn er der des
+      // Kontos ist oder das niemand weiß. Bis 09/2026 ging er bei jedem solchen
+      // Umschlag an alle, und das andere Gerät hielt es genauso: ein Pingpong
+      // ohne Ende.
+      if (!marke || (await abdruckVon(existing)) === marke) {
+        await syncNotesKeyToPairedDevices(userId).catch(() => 0)
+      }
     }
     return 'erledigt'
   } else if (data?.type === 'notes_key_request') {
@@ -913,6 +1302,9 @@ async function verarbeiteSteuerumschlag(
     // Ohne Schlüssel ist nichts zu geben — noch nicht. Kommt er später, wird
     // dieselbe Anfrage dann beantwortet.
     if (!existingRawKey) return 'offen'
+    // Nur den Schlüssel des Kontos. Hat dieses Gerät noch einen anderen, bleibt
+    // die Anfrage liegen, bis es den richtigen hat.
+    if ((await eigenerIstKontoschluessel(userId)) === false) return 'offen'
 
     // Jedem fragenden Gerät höchstens eine Antwort je Pause. In die eigene
     // Geräte-Mailbox darf jeder Freund und jedes Gruppenmitglied einwerfen, und
@@ -954,10 +1346,19 @@ async function verarbeiteSteuerumschlag(
     if (ziel.is_approved === false) {
       return 'offen'
     }
+    // Freigegeben von einem anderen eigenen Gerät zählt, wenn dessen
+    // Unterschrift stimmt (`freigabeBelegt`). Bis 30.09.2026 zählte nur die
+    // eigene; für alle anderen wartete die Anfrage auf eine Bestätigung, nach
+    // der die Oberfläche nie fragte — der Schlüssel kam dort nie an.
+    let belegt = false
+    try {
+      belegt = await freigabeBelegt(userId, ziel, await verzeichnisVon(userId))
+    } catch {}
     if (
       ziel.is_approved === true &&
       ziel.approved_by !== self.kennung &&
-      !istGeraetBestaetigtFuerNotizenSchluessel(userId, anGeraet)
+      !istGeraetBestaetigtFuerNotizenSchluessel(userId, anGeraet) &&
+      !belegt
     ) {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
