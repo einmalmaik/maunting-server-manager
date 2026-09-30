@@ -769,6 +769,23 @@ pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();
 
+    // `tauri dev` bekommt eine eigene Kennung und damit eigene Konfiguration,
+    // eigenen WebView-Speicher und einen eigenen Autostart-Eintrag. So bleibt
+    // die installierte App an ihrem Backend angemeldet, während die Dev-App an
+    // einem anderen hängt. Den Keyring trennt `geheimnisse::DIENST`.
+    #[allow(unused_mut)]
+    let mut kontext = tauri::generate_context!();
+    #[cfg(all(debug_assertions, desktop))]
+    {
+        let name = "Maunting Smart System Dev";
+        kontext.config_mut().identifier = "com.mauntingstudios.smart-system.dev".into();
+        kontext.config_mut().product_name = Some(name.into());
+        kontext.package_info_mut().name = name.into();
+        for fenster in kontext.config_mut().app.windows.iter_mut() {
+            fenster.title = format!("{} (Dev)", fenster.title);
+        }
+    }
+
     #[cfg(not(target_os = "android"))]
     {
         // "--autostart" markiert Boot-Starts: Crash-Guard und sanfter Start
@@ -929,7 +946,7 @@ pub fn run() {
                 _ => {}
             }
         })
-        .run(tauri::generate_context!())
+        .run(kontext)
         .expect("Fehler beim Start des Maunting Smart Systems");
 }
 

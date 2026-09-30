@@ -28,7 +28,7 @@ use windows::Security::Credentials::UI::{
 use keyring::Entry;
 
 #[cfg(not(target_os = "android"))]
-const DIENST: &str = "MauntingSmartSystem";
+use crate::geheimnisse::DIENST;
 
 /// Das Fach des Tresors.
 ///

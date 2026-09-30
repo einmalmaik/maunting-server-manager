@@ -89,7 +89,12 @@ pub fn aufraeumen(app: &AppHandle) -> Aufraeumbericht {
         Ok(verzeichnis) => {
             let mut geschafft = true;
             // Der Ordner der frueheren Kennung liegt daneben, nicht darin.
-            let frueher = verzeichnis.parent().map(|e| e.join(DATENORDNER_FRUEHER));
+            // Er gehoert der installierten App; `tauri dev` laesst ihn liegen.
+            let frueher = if cfg!(debug_assertions) {
+                None
+            } else {
+                verzeichnis.parent().map(|e| e.join(DATENORDNER_FRUEHER))
+            };
             for ordner in [Some(verzeichnis), frueher].into_iter().flatten() {
                 if let Err(problem) = ordner_weg(&ordner) {
                     fehler.push(format!("Konfiguration ({}): {problem}", ordner.display()));

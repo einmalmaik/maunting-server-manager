@@ -17,10 +17,17 @@ use tauri::{AppHandle, Manager};
 #[cfg(not(target_os = "android"))]
 use keyring::Entry;
 
-#[cfg(not(target_os = "android"))]
-const DIENST: &str = "MauntingSmartSystem";
-#[cfg(not(target_os = "android"))]
+/// Name im Credential Manager, auch für die Fächer in `biometrie.rs`.
+/// `tauri dev` läuft neben der installierten App und bekommt eigene Einträge,
+/// sonst meldete das Koppeln an ein Dev-Backend die echte App ab.
+#[cfg(all(not(target_os = "android"), not(debug_assertions)))]
+pub(crate) const DIENST: &str = "MauntingSmartSystem";
+#[cfg(all(not(target_os = "android"), debug_assertions))]
+pub(crate) const DIENST: &str = "MauntingSmartSystemDev";
+#[cfg(all(not(target_os = "android"), not(debug_assertions)))]
 const DIENST_FRUEHER: &str = "SingraSmartSystem";
+#[cfg(all(not(target_os = "android"), debug_assertions))]
+const DIENST_FRUEHER: &str = "SingraSmartSystemDev";
 #[cfg(not(target_os = "android"))]
 const KONTO: &str = "refresh_token";
 
