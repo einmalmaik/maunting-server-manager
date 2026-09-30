@@ -382,3 +382,43 @@ describe('Tresor: seitenweiser Sync', () => {
     expect(useVaultStore.getState().items.map((i) => i.service).sort()).toEqual(['eins', 'zwei'])
   })
 })
+
+describe('Tresor: Alben', () => {
+  let userKey: CryptoKey
+
+  beforeEach(async () => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+    userKey = await userKeyAnlegen()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('führt die Liste im Album-Eintrag, ohne Doppelte, und nimmt heraus', async () => {
+    useVaultStore.setState({ userKey, bucketId: BUCKET, bucketAuthToken: 'b'.repeat(64), isUnlocked: true, syncStatus: 'synced', items: [] })
+    echoServer()
+    const id = await useVaultStore.getState().albumAnlegen('Urlaub', ['f1', 'f2', 'f1'])
+    await useVaultStore.getState().albumAendern(id, { hinzu: ['f3', 'f2'] })
+    await useVaultStore.getState().albumAendern(id, { weg: ['f1'] })
+
+    const album = useVaultStore.getState().items.find((i) => i.id === id)!
+    expect(album.category).toBe('album')
+    expect(album.album).toEqual({ eintraege: ['f2', 'f3'] })
+  })
+
+  it('lässt ein Album, das diese Fassung nicht lesen kann, beim Umbenennen unverändert', async () => {
+    const kaputt = { eintraege: 'nicht-eine-liste', neu: 1 }
+    await tresorVomServer(userKey, { service: 'Alt', category: 'album', album: kaputt, createdAt: 1, updatedAt: 10 })
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
+    const item = useVaultStore.getState().items.find((i) => i.id === EINTRAG)!
+    expect(item.album).toBeUndefined()
+
+    await useVaultStore.getState().saveItem({ ...item, service: 'Neu' })
+    const gesendet = warteschlange().find((m) => m.id === EINTRAG)!
+    const nutzlast = await decryptVaultEntry(gesendet.ciphertext, userKey, EINTRAG)
+    expect(nutzlast.service).toBe('Neu')
+    expect(nutzlast.album).toEqual(kaputt)
+  })
+})

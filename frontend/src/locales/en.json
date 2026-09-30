@@ -6144,7 +6144,23 @@
           "dauer": "Length",
           "groesse": "Size",
           "hinzugefuegt": "Added"
-        }
+        },
+        "alben": "Albums",
+        "album_one": "{{count}} item",
+        "album_other": "{{count}} items",
+        "neuesAlbum": "New album",
+        "albumName": "Album name",
+        "alleAlben": "All albums",
+        "albumLeer": "This album is empty. Select photos under “All” and add them.",
+        "keineAlben": "No albums yet.",
+        "albumLoeschen": "Move album to trash",
+        "auswaehlen": "Select",
+        "ausgewaehlt_one": "{{count}} selected",
+        "ausgewaehlt_other": "{{count}} selected",
+        "zuAlbum": "Add to album",
+        "ausAlbum": "Remove from album",
+        "hinzugefuegt": "Added to “{{name}}”",
+        "albumVoll": "An album holds at most {{max}} items."
       }
     },
     "aktion": {

@@ -798,7 +798,7 @@ export function VaultView() {
   // ── HILFSKOMPONENTE: ZEILE IN LISTE / TABELLE ──
   const renderItemRow = (item: VaultItem) => {
     const istDatei = !istPasswortKategorie(item.category)
-    const ItemBrand = item.category === 'ordner' ? Folder : istDatei ? FileIcon : getBrandIcon(item.service, item.url)
+    const ItemBrand = item.category === 'ordner' ? Folder : item.category === 'album' ? Images : istDatei ? FileIcon : getBrandIcon(item.service, item.url)
     const isRevealed = revealedPasswordId === item.id
     const itemTotp = totpCodes[item.id]
 
@@ -832,7 +832,13 @@ export function VaultView() {
 
             {istDatei ? (
               <div className="mt-0.5 text-label-sm text-on-surface-variant">
-                {item.category === 'ordner' ? t('mss.vault.dateien.ordner') : item.datei ? formatBytes(item.datei.original.echt) : ''}
+                {item.category === 'ordner'
+                  ? t('mss.vault.dateien.ordner')
+                  : item.album
+                    ? t('mss.vault.fotos.album', { count: item.album.eintraege.length })
+                    : item.datei
+                      ? formatBytes(item.datei.original.echt)
+                      : ''}
               </div>
             ) : (
             <div className="flex items-center gap-1.5 mt-0.5">

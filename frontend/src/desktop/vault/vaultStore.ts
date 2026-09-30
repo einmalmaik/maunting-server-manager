@@ -64,7 +64,7 @@ export interface VaultAttachment {
  * Speicher, damit der Sync ihn nicht verliert, erscheint aber nirgends und
  * wird nicht geschrieben.
  */
-export const BEKANNTE_KATEGORIEN = ['login', 'authenticator', 'secure_note', 'datei', 'ordner'] as const
+export const BEKANNTE_KATEGORIEN = ['login', 'authenticator', 'secure_note', 'datei', 'ordner', 'album'] as const
 export type VaultKategorie = (typeof BEKANNTE_KATEGORIEN)[number]
 
 export function istBekannteKategorie(kategorie: string | undefined): boolean {
@@ -106,6 +106,8 @@ export interface VaultItem {
   datei?: DateiAngaben
   /** Dateien und Ordner: der Ordner, in dem sie liegen. Fehlt in der obersten Ebene. */
   ordner?: string
+  /** Nur bei Alben: die Einträge darin, in dieser Reihenfolge. Die Dateien selbst ändern sich nicht. */
+  album?: AlbumAngaben
   createdAt: number
   updatedAt: number
   revision: number
@@ -134,10 +136,31 @@ const BEKANNTE_FELDER = new Set([
   'trashedAt',
   'datei',
   'ordner',
+  'album',
   'createdAt',
   'updatedAt',
   'format',
 ])
+
+export interface AlbumAngaben {
+  eintraege: string[]
+}
+
+/**
+ * Ein Umschlag darf höchstens 1 MiB Chiffrat haben. 10.000 Kennungen sind
+ * rund 400 KB und lassen Luft.
+ */
+export const ALBUM_HOECHSTENS = 10_000
+
+function istAlbumAngaben(wert: unknown): wert is AlbumAngaben {
+  if (!wert || typeof wert !== 'object') return false
+  const eintraege = (wert as { eintraege?: unknown }).eintraege
+  return (
+    Array.isArray(eintraege) &&
+    eintraege.length <= ALBUM_HOECHSTENS &&
+    eintraege.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 64)
+  )
+}
 
 function zahlOderNichts(wert: unknown): number | undefined {
   return typeof wert === 'number' && Number.isFinite(wert) ? wert : undefined
@@ -153,6 +176,8 @@ export function itemAusUmschlag(id: string, revision: number, payload: Record<st
   // beim nächsten Speichern zu verschwinden.
   const datei = istDateiAngaben(payload.datei) ? payload.datei : undefined
   if (payload.datei !== undefined && !datei) extra.datei = payload.datei
+  const album = istAlbumAngaben(payload.album) ? payload.album : undefined
+  if (payload.album !== undefined && !album) extra.album = payload.album
   return {
     id,
     service: String(payload.service || 'Unbekannt'),
@@ -170,6 +195,7 @@ export function itemAusUmschlag(id: string, revision: number, payload: Record<st
     trashedAt: zahlOderNichts(payload.trashedAt),
     datei,
     ordner: typeof payload.ordner === 'string' && payload.ordner ? payload.ordner : undefined,
+    album,
     createdAt: Number(payload.createdAt || Date.now()),
     updatedAt: Number(payload.updatedAt || Date.now()),
     revision,
@@ -197,6 +223,7 @@ export function umschlagAusItem(item: VaultItem): Record<string, unknown> {
     trashedAt: item.trashedAt,
     ...(item.datei ? { datei: item.datei } : {}),
     ordner: item.ordner,
+    ...(item.album ? { album: item.album } : {}),
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   }
@@ -619,6 +646,9 @@ interface VaultState {
    */
   dateiHinzufuegen: (datei: File, ordner?: string) => Promise<string>
   ordnerAnlegen: (name: string, ordner?: string) => Promise<string>
+  albumAnlegen: (name: string, eintraege: string[]) => Promise<string>
+  /** Nimmt Einträge in ein Album auf oder heraus; doppelte zählen einmal. */
+  albumAendern: (id: string, aenderung: { hinzu?: string[]; weg?: string[] }) => Promise<void>
   toggleFavorite: (id: string) => Promise<void>
   markUsed: (id: string) => Promise<void>
   syncWithServer: () => Promise<void>
@@ -1303,6 +1333,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       trashedAt: uebernimm('trashedAt'),
       datei: itemData.datei ?? existing?.datei,
       ordner: 'ordner' in itemData ? itemData.ordner : existing?.ordner,
+      album: itemData.album ?? existing?.album,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       revision,
@@ -1449,6 +1480,24 @@ export const useVaultStore = create<VaultState>((set, get) => {
     const id = window.crypto.randomUUID()
     await get().saveItem({ id, service: name, category: 'ordner', ordner })
     return id
+  },
+
+  albumAnlegen: async (name, eintraege) => {
+    const liste = [...new Set(eintraege)]
+    if (liste.length > ALBUM_HOECHSTENS) throw new Error(i18n.t('mss.vault.fotos.albumVoll', { max: ALBUM_HOECHSTENS }))
+    const id = window.crypto.randomUUID()
+    await get().saveItem({ id, service: name, category: 'album', album: { eintraege: liste } })
+    return id
+  },
+
+  albumAendern: async (id, { hinzu = [], weg = [] }) => {
+    // Frisch lesen: eine zweite Änderung kurz davor ist sonst verloren.
+    const album = get().items.find((i) => i.id === id && i.category === 'album')
+    if (!album) return
+    const raus = new Set(weg)
+    const liste = [...new Set([...(album.album?.eintraege ?? []), ...hinzu])].filter((e) => !raus.has(e))
+    if (liste.length > ALBUM_HOECHSTENS) throw new Error(i18n.t('mss.vault.fotos.albumVoll', { max: ALBUM_HOECHSTENS }))
+    await get().saveItem({ ...album, album: { eintraege: liste } })
   },
 
   toggleFavorite: async (id: string) => {

@@ -194,9 +194,16 @@ describe('VaultView: Fotos', () => {
       ...extra,
     })
 
+  const albumAnlegen = vi.fn(async () => 'neues-album')
+  const albumAendern = vi.fn(async () => undefined)
+
   beforeEach(() => {
     geladen.blobs = []
+    albumAnlegen.mockClear()
+    albumAendern.mockClear()
     useVaultStore.setState({
+      albumAnlegen,
+      albumAendern,
       isInitialized: true,
       isUnlocked: true,
       hasHint: true,
@@ -211,6 +218,7 @@ describe('VaultView: Fotos', () => {
         medium('3', 'Screenshot_20260712.png', 'image/png', {}, { aufgenommen: Date.UTC(2026, 6, 12) }),
         medium('4', 'geloescht.jpg', 'image/jpeg', { trashedAt: Date.now() }),
         medium('5', 'vertrag.pdf', 'application/pdf'),
+        eintrag('al', 'Sommer', { category: 'album', username: '', password: '', album: { eintraege: ['1', '4', '3', 'weg'] } }),
       ],
     })
   })
@@ -275,5 +283,39 @@ describe('VaultView: Fotos', () => {
 
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('wählt aus und legt daraus ein neues Album an', async () => {
+    render(<VaultView />)
+    fireEvent.click(reiter('mss.vault.ansicht.fotos'))
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.auswaehlen')) }))
+    fireEvent.click(kachel('strand.jpg')!)
+    fireEvent.click(kachel('wellen.mp4')!)
+    expect(kachel('strand.jpg')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByText(i18n.t('mss.vault.fotos.ausgewaehlt', { count: 2 }))).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.zuAlbum')) }))
+    fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(i18n.t('mss.vault.fotos.neuesAlbum')) }))
+    await vi.waitFor(() => expect(usePromptStore.getState().pending).not.toBeNull())
+    usePromptStore.getState().resolve('Meer')
+    await vi.waitFor(() => expect(albumAnlegen).toHaveBeenCalledWith('Meer', ['1', '2']))
+  })
+
+  it('zeigt im Album nur, was noch da ist, und nimmt Ausgewähltes heraus', async () => {
+    render(<VaultView />)
+    fireEvent.click(reiter('mss.vault.ansicht.fotos'))
+    fireEvent.click(reiter('mss.vault.fotos.alben'))
+    fireEvent.click(screen.getByRole('button', { name: /Sommer/ }))
+    expect(screen.getByRole('heading', { name: 'Sommer' })).toBeInTheDocument()
+    expect(kachel('strand.jpg')).not.toBeNull()
+    expect(kachel('Screenshot_20260712.png')).not.toBeNull()
+    expect(kachel('geloescht.jpg')).toBeNull()
+    expect(kachel('wellen.mp4')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.auswaehlen')) }))
+    fireEvent.click(kachel('strand.jpg')!)
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.ausAlbum')) }))
+    await vi.waitFor(() => expect(albumAendern).toHaveBeenCalledWith('al', { weg: ['1'] }))
   })
 })

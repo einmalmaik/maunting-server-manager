@@ -6144,7 +6144,23 @@
           "dauer": "Länge",
           "groesse": "Größe",
           "hinzugefuegt": "Hinzugefügt"
-        }
+        },
+        "alben": "Alben",
+        "album_one": "{{count}} Element",
+        "album_other": "{{count}} Elemente",
+        "neuesAlbum": "Neues Album",
+        "albumName": "Name des Albums",
+        "alleAlben": "Alle Alben",
+        "albumLeer": "Dieses Album ist leer. Wähle in „Alle“ Fotos aus und füge sie hinzu.",
+        "keineAlben": "Noch keine Alben.",
+        "albumLoeschen": "Album in den Papierkorb",
+        "auswaehlen": "Auswählen",
+        "ausgewaehlt_one": "{{count}} ausgewählt",
+        "ausgewaehlt_other": "{{count}} ausgewählt",
+        "zuAlbum": "Zu Album hinzufügen",
+        "ausAlbum": "Aus Album entfernen",
+        "hinzugefuegt": "Zu „{{name}}“ hinzugefügt",
+        "albumVoll": "Ein Album fasst höchstens {{max}} Einträge."
       }
     },
     "aktion": {
