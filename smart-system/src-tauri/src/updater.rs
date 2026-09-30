@@ -100,6 +100,11 @@ pub fn ist_neuer(ziel: &str, aktuell: &str) -> bool {
     ziel_teile.len() > akt_teile.len()
 }
 
+/// Ein Debug-Bau (`tauri dev`) installiert nie ein Update. Der Installer eines
+/// Releases installiert die echte App und startet sie: am 30.09.2026 ersetzte
+/// der Debug-Bau so nach 60 Sekunden die installierte App.
+pub const SELBST_AKTUALISIEREN: bool = !cfg!(debug_assertions);
+
 #[tauri::command(async)]
 pub async fn update_pruefen(app: AppHandle) -> Result<UpdateInfo, String> {
     let current_version = app.package_info().version.to_string();
@@ -139,6 +144,9 @@ pub async fn update_pruefen(app: AppHandle) -> Result<UpdateInfo, String> {
 
 #[tauri::command(async)]
 pub async fn update_installieren(app: AppHandle) -> Result<(), String> {
+    if !SELBST_AKTUALISIEREN {
+        return Err("Ein Entwicklungsbau installiert keine Updates.".to_string());
+    }
     #[cfg(not(target_os = "android"))]
     {
         let updater = app.updater().map_err(|e| format!("Updater nicht verfügbar: {e}"))?;
@@ -360,6 +368,9 @@ async fn pruefe_android_update(_app: &AppHandle, current_version: &str) -> Resul
 
 #[allow(unused_variables)]
 pub fn pruefe_und_installiere_update_hintergrund(app_handle: AppHandle) {
+    if !SELBST_AKTUALISIEREN {
+        return;
+    }
     std::thread::spawn(move || {
         // Erst nach 60 Sekunden Laufzeit im Hintergrund prüfen, damit der
         // Kaltstart beim Öffnen vollkommen ungestört bleibt und die UI flüssig läuft.
@@ -482,6 +493,12 @@ pub fn pruefe_und_installiere_update_hintergrund(app_handle: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn debug_bau_installiert_nie_ein_update() {
+        assert!(!super::SELBST_AKTUALISIEREN);
+    }
 
     #[test]
     fn version_vergleich_erkennt_neuere_versionen() {
