@@ -20,7 +20,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, func, inspect, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -30,7 +30,7 @@ from database import Base
 from dependencies import get_current_user, get_db, verify_csrf
 from main import app
 from models import User, VaultBlob
-from services import vault_blob_service
+from services import vault_blob_service, vault_service
 from services.vault_blob_service import CHUNK_CHIFFRAT, CHUNK_UEBERHANG
 
 
@@ -191,7 +191,33 @@ def test_quote_je_konto(als, konten, db):
     assert _anlegen(client, 600)[2].status_code == 201
     assert _anlegen(client, 600)[2].status_code == 507
     assert _anlegen(client, 400)[2].status_code == 201
-    assert client.get("/api/vault/speicher").json() == {"belegt": 1000, "quote": 1000, "in_loeschung": 0}
+    assert client.get("/api/vault/speicher").json() == {"belegt": 1000, "quote": 1000, "in_loeschung": 0, "blobs": 2}
+
+
+def test_zuruecksetzen_legt_alle_dateien_in_die_loeschhaltung(als, konten, db):
+    """Ohne das alte Master-Passwort liesse sich kein Blob mehr loeschen; sie
+    belegten die Quote fuer immer. Das fremde Konto bleibt unberuehrt."""
+    eins, zwei = konten
+    for user in (eins, zwei):
+        client = als(user)
+        for groesse in (100, 200):
+            blob_id, _, _ = _anlegen(client, groesse)
+            _hochladen(client, blob_id, 0, b"a" * groesse)
+            client.post(f"/api/vault/blobs/{blob_id}/fertig")
+    _anlegen(als(eins), 50)  # ein Upload, der nie fertig wurde
+
+    client = als(eins)
+    assert client.get("/api/vault/speicher").json()["blobs"] == 3
+
+    vault_service.tresor_zuruecksetzen(db, eins.id)
+    db.commit()
+
+    speicher = client.get("/api/vault/speicher").json()
+    assert speicher["blobs"] == 0
+    assert speicher["in_loeschung"] == 350
+    zustaende = dict(db.execute(select(VaultBlob.user_id, func.count()).where(VaultBlob.state == "geloescht").group_by(VaultBlob.user_id)).all())
+    assert zustaende == {eins.id: 3}
+    assert als(zwei).get("/api/vault/speicher").json()["blobs"] == 2
 
 
 def test_kleine_blobs_in_einer_antwort(als, konten):

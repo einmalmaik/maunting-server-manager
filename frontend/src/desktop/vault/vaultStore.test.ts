@@ -157,31 +157,6 @@ describe('useVaultStore - Security & Operations', () => {
     expect(useVaultStore.getState().isUnlocked).toBe(true)
   })
 
-  it('enforces payload attachment limit (<500 KB) in saveItem (SEC-08)', async () => {
-    const fakeKey = {} as CryptoKey
-    useVaultStore.setState({
-      isUnlocked: true,
-      userKey: fakeKey,
-      bucketId: 'a'.repeat(64),
-    })
-
-    // Oversized attachment (600 KB)
-    const oversizedAttachment = {
-      id: 'att-1',
-      name: 'large_backup.bin',
-      size: 600 * 1024,
-      mimeType: 'application/octet-stream',
-      dataBase64: 'AAAA'.repeat(150 * 1024),
-    }
-
-    await expect(
-      useVaultStore.getState().saveItem({
-        service: 'Important Service',
-        attachments: [oversizedAttachment],
-      }),
-    ).rejects.toThrow(/500 KB/)
-  })
-
   it('blocks brute-force attempts with lockout window (SEC-07)', async () => {
     useVaultStore.setState({
       lockedUntilMs: Date.now() + 5000, // locked for 5 seconds

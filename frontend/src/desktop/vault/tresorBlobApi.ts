@@ -10,6 +10,8 @@ export interface TresorSpeicher {
   belegt: number
   quote: number
   in_loeschung: number
+  /** Nicht gelöschte Blobs; je Datei und Fassung sind es drei. */
+  blobs: number
 }
 
 export interface BlobStand {

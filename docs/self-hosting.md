@@ -526,9 +526,11 @@ wurden.
   Wiederherstellung auf fehlende Dateien. Sichere `/opt/msm/vault-blobs` mit
   der Sicherung des Servers. Der Inhalt ist verschlüsselt und darf auch auf ein
   fremdes Ziel.
-- **Tresor zurücksetzen** löst nur die Verbindung zum Konto. Die Dateien
-  bleiben liegen, weil der alte Tresor auf einem anderen Gerät noch offen sein
-  kann, und belegen weiter Speicher.
+- **Tresor zurücksetzen** löst die Verbindung zum Konto und legt alle Dateien
+  des Kontos in die Löschhaltung (7 Tage). Ohne das alte Master-Passwort ließe
+  sich keine davon je wieder löschen. Der Dialog nennt vorher Anzahl und Größe.
+  Ein anderes Gerät, auf dem der alte Tresor noch offen ist, behält seine
+  Einträge, aber nicht die Dateien.
 - **Ältere App-Versionen:** Sobald ein Tresor Papierkorb, Archiv oder Dateien
   nutzt, nimmt der Server von Apps, die diese Einträge nicht kennen, keinen
   Abgleich mehr an (HTTP 426). Sie würden die Einträge beim Speichern sonst

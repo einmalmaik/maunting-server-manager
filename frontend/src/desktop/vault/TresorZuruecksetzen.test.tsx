@@ -14,6 +14,9 @@ import { useAuthStore } from '@/stores/authStore'
 import { TresorZuruecksetzen } from './TresorZuruecksetzen'
 import { useVaultStore } from './vaultStore'
 
+const speicher = vi.hoisted(() => ({ wert: { belegt: 0, quote: 1, in_loeschung: 0, blobs: 0 } }))
+vi.mock('./tresorBlobApi', () => ({ speicherAbfragen: vi.fn(async () => speicher.wert) }))
+
 vi.mock('../tauri', () => ({
   FACH_TRESOR: 'vault_biometric_key',
   biometrieLoeschen: vi.fn().mockResolvedValue(undefined),
@@ -26,6 +29,7 @@ describe('TresorZuruecksetzen', () => {
 
   beforeEach(() => {
     resetVault.mockClear()
+    speicher.wert = { belegt: 0, quote: 1, in_loeschung: 0, blobs: 0 }
     useVaultStore.setState({ resetVault })
     useAuthStore.setState({
       user: { id: 1, username: 'ich', has_password: true, two_factor_enabled: false } as never,
@@ -106,5 +110,19 @@ describe('TresorZuruecksetzen', () => {
     })
     fireEvent.click(knopf())
     await waitFor(() => expect(resetVault).toHaveBeenCalledWith({ password: null }, 'delete'))
+  })
+
+  it('nennt vorher, wie viele Dateien mitgehen und wie groß sie sind', async () => {
+    speicher.wert = { belegt: 3 * 1024 * 1024 + 500, quote: 10, in_loeschung: 500, blobs: 7 }
+    render(<TresorZuruecksetzen onAbbrechen={() => {}} onFertig={() => {}} />)
+    expect(
+      await screen.findByText(i18n.t('mss.vault.zuruecksetzen.dateien', { anzahl: 3, groesse: '3.0 MB' })),
+    ).toBeInTheDocument()
+  })
+
+  it('schweigt über Dateien, wenn keine da sind', async () => {
+    render(<TresorZuruecksetzen onAbbrechen={() => {}} onFertig={() => {}} />)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByText(/7 Tagen/)).toBeNull()
   })
 })

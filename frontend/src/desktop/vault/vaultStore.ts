@@ -55,14 +55,6 @@ import {
 } from './tresorDateien'
 import { bildAngaben } from './tresorBilder'
 
-export interface VaultAttachment {
-  id: string
-  name: string
-  size: number
-  mimeType: string
-  dataBase64: string
-}
-
 /**
  * Die Arten von Einträgen, die diese Fassung der App anzeigen und bearbeiten
  * kann. Ein Eintrag anderer Art stammt von einer neueren App: er bleibt im
@@ -101,7 +93,6 @@ export interface VaultItem {
   category?: string
   isFavorite?: boolean
   lastUsedAt?: number
-  attachments?: VaultAttachment[]
   linkedServiceId?: string
   /** Gesetzt, solange der Eintrag im Archiv liegt. */
   archivedAt?: number
@@ -135,7 +126,6 @@ const BEKANNTE_FELDER = new Set([
   'category',
   'isFavorite',
   'lastUsedAt',
-  'attachments',
   'linkedServiceId',
   'archivedAt',
   'trashedAt',
@@ -194,7 +184,6 @@ export function itemAusUmschlag(id: string, revision: number, payload: Record<st
     category: typeof payload.category === 'string' && payload.category ? payload.category : 'login',
     isFavorite: !!payload.isFavorite,
     lastUsedAt: zahlOderNichts(payload.lastUsedAt),
-    attachments: Array.isArray(payload.attachments) ? (payload.attachments as VaultAttachment[]) : undefined,
     linkedServiceId: payload.linkedServiceId ? String(payload.linkedServiceId) : undefined,
     archivedAt: zahlOderNichts(payload.archivedAt),
     trashedAt: zahlOderNichts(payload.trashedAt),
@@ -222,7 +211,6 @@ export function umschlagAusItem(item: VaultItem): Record<string, unknown> {
     category: item.category,
     isFavorite: item.isFavorite,
     lastUsedAt: item.lastUsedAt,
-    attachments: item.attachments,
     linkedServiceId: item.linkedServiceId,
     archivedAt: item.archivedAt,
     trashedAt: item.trashedAt,
@@ -544,8 +532,6 @@ export function runBiometricsMigration(): void {
 
 // Aktive Migration/Bereinigung bei Modul-Initialisierung (SEC-CRIT-01)
 runBiometricsMigration()
-
-export const MAX_VAULT_ATTACHMENT_SIZE_BYTES = 500 * 1024 // 500 KB limit (SEC-08)
 
 export function getLocalVaultSalt(): Uint8Array | null {
   const existing = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_SALT_KEY) : null
@@ -1299,20 +1285,6 @@ export const useVaultStore = create<VaultState>((set, get) => {
     const { userKey, bucketId, items } = get()
     if (!userKey || !bucketId) throw new Error(i18n.t('mss.vault.errors.locked'))
 
-    // Payload-Guardrail (SEC-08): Dateianhänge begrenzen (<500 KB)
-    if (itemData.attachments && itemData.attachments.length > 0) {
-      let totalSize = 0
-      for (const att of itemData.attachments) {
-        if (att.size > MAX_VAULT_ATTACHMENT_SIZE_BYTES || (att.dataBase64 && att.dataBase64.length > MAX_VAULT_ATTACHMENT_SIZE_BYTES * 1.4)) {
-          throw new Error(i18n.t('mss.vault.errors.attachmentTooLarge', { name: att.name }))
-        }
-        totalSize += att.size
-      }
-      if (totalSize > MAX_VAULT_ATTACHMENT_SIZE_BYTES) {
-        throw new Error(i18n.t('mss.vault.errors.attachmentsTotalTooLarge'))
-      }
-    }
-
     const id = itemData.id || window.crypto.randomUUID()
     const existing = items.find((i) => i.id === id)
     // Was diese Fassung nicht kennt, schreibt sie nicht: sie würde es nur
@@ -1338,7 +1310,6 @@ export const useVaultStore = create<VaultState>((set, get) => {
       category: itemData.category || existing?.category || 'login',
       isFavorite: itemData.isFavorite !== undefined ? itemData.isFavorite : existing?.isFavorite,
       lastUsedAt: itemData.lastUsedAt !== undefined ? itemData.lastUsedAt : existing?.lastUsedAt,
-      attachments: itemData.attachments !== undefined ? itemData.attachments : existing?.attachments,
       linkedServiceId: itemData.linkedServiceId !== undefined ? itemData.linkedServiceId : existing?.linkedServiceId,
       archivedAt: uebernimm('archivedAt'),
       trashedAt: uebernimm('trashedAt'),

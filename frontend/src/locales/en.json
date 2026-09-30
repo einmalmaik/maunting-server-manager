@@ -4426,7 +4426,7 @@
       },
       "reset": {
         "title": "Resetting the vault",
-        "body": "Only removes the link to the account. The files stay, because the old vault may still be open on another device."
+        "body": "Detaches the vault from the account and puts all of the account's files into the 7-day deletion hold; without the old master password none of them could ever be deleted. The dialog shows their number and size first."
       },
       "altApps": {
         "title": "Older app versions",
@@ -6020,6 +6020,7 @@
         "titel": "Reset vault",
         "warnungTitel": "All entries will be lost",
         "warnungText": "Without the master password nobody can decrypt your entries, not even the server. After the reset you set up a new, empty vault. Devices where the old vault is still open keep it until you reset it there as well.",
+        "dateien": "Your files go too: {{anzahl}} files and earlier versions, {{groesse}} in total. The server deletes them after 7 days.",
         "passwortLabel": "Confirm your account password",
         "otpLabel": "Code from your authenticator app",
         "wortLabel": "Type delete to confirm (cannot be pasted)",
@@ -6066,8 +6067,6 @@
         "serverCheckFailed": "The master password could not be checked with the server. Please check your connection and try again.",
         "unlockFailed": "Unlock failed",
         "locked": "Vault is locked",
-        "attachmentTooLarge": "File attachment \"{{name}}\" exceeds the 500 KB limit.",
-        "attachmentsTotalTooLarge": "The total size of all file attachments exceeds the 500 KB limit.",
         "emptyPassword": "Master password cannot be empty.",
         "invalidSalt": "Invalid KDF salt: At least 16 bytes required.",
         "decryptionFailed": "Vault entry could not be decrypted (authentication error or incorrect key)",

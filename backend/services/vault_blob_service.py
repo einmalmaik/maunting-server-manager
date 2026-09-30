@@ -314,7 +314,20 @@ def speicher(db: Session, user: User) -> dict[str, int]:
         )
         or 0
     )
-    return {"belegt": belegt(db, user.id), "quote": quote_fuer(user), "in_loeschung": in_loeschung}
+    blobs = int(
+        db.scalar(select(func.count()).select_from(VaultBlob).where(VaultBlob.user_id == user.id, VaultBlob.state != "geloescht"))
+        or 0
+    )
+    return {"belegt": belegt(db, user.id), "quote": quote_fuer(user), "in_loeschung": in_loeschung, "blobs": blobs}
+
+
+def alle_zur_loeschung(db: Session, user_id: int) -> None:
+    """Legt alle Blobs des Kontos in die Loeschhaltung. Committet nicht."""
+    db.execute(
+        update(VaultBlob)
+        .where(VaultBlob.user_id == user_id, VaultBlob.state != "geloescht")
+        .values(state="geloescht", deleted_at=_jetzt())
+    )
 
 
 def _entfernen(blob_id: str) -> None:

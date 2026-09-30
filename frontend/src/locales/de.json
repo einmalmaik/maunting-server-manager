@@ -4426,7 +4426,7 @@
       },
       "reset": {
         "title": "Tresor zurücksetzen",
-        "body": "Löst nur die Verbindung zum Konto. Die Dateien bleiben liegen, weil der alte Tresor auf einem anderen Gerät noch offen sein kann."
+        "body": "Löst die Verbindung zum Konto und legt alle Dateien des Kontos für 7 Tage in die Löschhaltung; ohne das alte Master-Passwort ließe sich keine je wieder löschen. Der Dialog nennt vorher Anzahl und Größe."
       },
       "altApps": {
         "title": "Ältere App-Versionen",
@@ -6020,6 +6020,7 @@
         "titel": "Tresor zurücksetzen",
         "warnungTitel": "Alle Einträge gehen verloren",
         "warnungText": "Ohne Master-Passwort kann niemand deine Einträge entschlüsseln, auch der Server nicht. Nach dem Zurücksetzen richtest du einen neuen, leeren Tresor ein. Geräte, auf denen der alte Tresor noch offen ist, behalten ihn, bis du ihn dort ebenfalls zurücksetzt.",
+        "dateien": "Auch die Dateien gehen verloren: {{anzahl}} Dateien und frühere Fassungen, zusammen {{groesse}}. Der Server löscht sie nach 7 Tagen.",
         "passwortLabel": "Konto-Passwort bestätigen",
         "otpLabel": "Code aus der Authenticator-App",
         "wortLabel": "Tippe delete zur Bestätigung (nicht kopierbar)",
@@ -6066,8 +6067,6 @@
         "serverCheckFailed": "Das Master-Passwort konnte nicht am Server geprüft werden. Bitte prüfe die Verbindung und versuche es erneut.",
         "unlockFailed": "Entsperren fehlgeschlagen",
         "locked": "Tresor ist gesperrt",
-        "attachmentTooLarge": "Dateianhang \"{{name}}\" überschreitet das Limit von 500 KB.",
-        "attachmentsTotalTooLarge": "Die Gesamtgröße aller Dateianhänge überschreitet das Limit von 500 KB.",
         "emptyPassword": "Master-Passwort darf nicht leer sein.",
         "invalidSalt": "Ungültiger KDF-Salt: Mindestens 16 Bytes erforderlich.",
         "decryptionFailed": "Tresor-Eintrag konnte nicht entschlüsselt werden (Authentifizierungsfehler oder falscher Schlüssel)",

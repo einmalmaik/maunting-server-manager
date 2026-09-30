@@ -216,3 +216,5 @@ class VaultSpeicher(BaseModel):
     belegt: int
     quote: int
     in_loeschung: int
+    #: Nicht geloeschte Blobs. Je Datei und Fassung sind es drei.
+    blobs: int

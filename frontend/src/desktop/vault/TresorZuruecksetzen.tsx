@@ -1,13 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle } from 'lucide-react'
 import { Button } from '@/Singra/UI'
+import { Input } from '@/components/ui/Input'
 import { PasswordInput } from '@/components/ui/PasswordInput'
+import { formatBytes } from '@/components/server/fileHelpers'
 import { Spinner } from '@/components/ui/Spinner'
 import { useZweitfaktor, ZweitfaktorFeld } from '@/components/auth/ZweitfaktorNachweis'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 import { useVaultStore } from './vaultStore'
+import { speicherAbfragen, type TresorSpeicher } from './tresorBlobApi'
 
 interface Props {
   onAbbrechen: () => void
@@ -33,6 +36,11 @@ export function TresorZuruecksetzen({ onAbbrechen, onFertig }: Props) {
   const [wort, setWort] = useState('')
   const [laeuft, setLaeuft] = useState(false)
   const [fehler, setFehler] = useState('')
+  // Die Dateien gehen mit: das braucht der Nutzer vorher. Der Server kennt nur Zahl und Größe.
+  const [speicher, setSpeicher] = useState<TresorSpeicher | null>(null)
+  useEffect(() => {
+    speicherAbfragen().then(setSpeicher, () => setSpeicher(null))
+  }, [])
 
   const absenden = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -60,6 +68,14 @@ export function TresorZuruecksetzen({ onAbbrechen, onFertig }: Props) {
           {t('mss.vault.zuruecksetzen.warnungTitel')}
         </p>
         <p className="text-xs text-on-surface-variant">{t('mss.vault.zuruecksetzen.warnungText')}</p>
+        {speicher && speicher.blobs > 0 && (
+          <p className="mt-2 text-xs text-on-surface-variant">
+            {t('mss.vault.zuruecksetzen.dateien', {
+              anzahl: Math.ceil(speicher.blobs / 3),
+              groesse: formatBytes(Math.max(0, speicher.belegt - speicher.in_loeschung)),
+            })}
+          </p>
+        )}
       </div>
 
       {brauchtPasswort && (
@@ -80,24 +96,20 @@ export function TresorZuruecksetzen({ onAbbrechen, onFertig }: Props) {
         disabled={laeuft}
       />
 
-      <div>
-        <label htmlFor="vault-reset-wort" className="mb-1.5 block text-xs text-on-surface-variant">
-          {t('mss.vault.zuruecksetzen.wortLabel')}
-        </label>
-        <input
-          id="vault-reset-wort"
-          type="text"
-          value={wort}
-          onChange={(e) => setWort(e.target.value)}
-          onPaste={(e) => e.preventDefault()}
-          className="msm-input font-mono"
-          placeholder="delete"
-          required
-          disabled={laeuft}
-          autoComplete="off"
-          spellCheck={false}
-        />
-      </div>
+      <Input
+        id="vault-reset-wort"
+        type="text"
+        label={t('mss.vault.zuruecksetzen.wortLabel')}
+        value={wort}
+        onChange={(e) => setWort(e.target.value)}
+        onPaste={(e) => e.preventDefault()}
+        className="font-mono"
+        placeholder="delete"
+        required
+        disabled={laeuft}
+        autoComplete="off"
+        spellCheck={false}
+      />
 
       {fehler && (
         <div role="alert" className="rounded-xl border border-status-destructive/30 bg-status-destructive/15 p-2.5 text-xs text-status-destructive">

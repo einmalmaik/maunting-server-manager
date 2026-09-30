@@ -24,6 +24,7 @@ from schemas.vault import (
     VaultSyncRequest,
     VaultSyncResponse,
 )
+from services import vault_blob_service
 from services.auth_service import AuthService
 
 
@@ -523,13 +524,16 @@ def tresor_zuruecksetzen(db: Session, user_id: int) -> None:
     lebt womoeglich noch auf einem anderen Geraet, das ihn weiter abgleicht.
     Lesen kann sie ohne das alte Passwort niemand.
 
-    Aus demselben Grund bleiben die Dateien der Tresor-Cloud (`vault_blobs`):
-    das andere Geraet oeffnet den alten Tresor womoeglich per Biometrie, die
-    das Master-Passwort im Schluesselspeicher haelt. Sie belegen weiter die
-    Quote.
+    Die Dateien der Tresor-Cloud (`vault_blobs`) gehen dagegen in die
+    Loeschhaltung (7 Tage). Sie gehoeren dem Konto, und ohne das alte
+    Master-Passwort liesse sich keine davon je wieder loeschen: der
+    Loeschnachweis haengt am Schluessel der Datei. Sie belegten die Quote fuer
+    immer. Ein anderes Geraet mit dem alten Tresor verliert sie damit auch;
+    der Dialog nennt vorher Anzahl und Groesse.
     """
     db.query(VaultUserSetting).filter(VaultUserSetting.user_id == user_id).delete(synchronize_session=False)
     db.query(VaultHint).filter(VaultHint.user_id == user_id).delete(synchronize_session=False)
+    vault_blob_service.alle_zur_loeschung(db, user_id)
 
 
 HINT_RATE_LIMIT_SECONDS = 600  # 10 Minuten Cooldown
