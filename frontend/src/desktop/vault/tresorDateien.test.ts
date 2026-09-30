@@ -9,7 +9,8 @@ import 'fake-indexeddb/auto'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { useVaultStore, type VaultBlindSyncPayload } from './vaultStore'
 import { ablageDb, ablageLaden, ablageSchliessen, BLOB_CACHE, UPLOAD_CHUNKS, UPLOADS } from './tresorAblage'
-import { blobLesen, loeschungenAbarbeiten, uploadsFortsetzen, useTresorUploads } from './tresorDateien'
+import { blobLesen, loeschungenAbarbeiten, miniaturenLesen, uploadsFortsetzen, useTresorUploads } from './tresorDateien'
+import { miniaturFreigeben, miniaturHolen } from './tresorMiniaturen'
 import { CHUNK_KLARTEXT, CHUNK_UEBERHANG } from './tresorDatei'
 
 vi.mock('../tauri', () => ({
@@ -25,6 +26,14 @@ vi.mock('../tauri', () => ({
 }))
 
 const BUCKET = 'e'.repeat(64)
+
+/** Miniaturen, wie sie der Bildleser für Fotos erzeugen würde (jsdom kann keine Bilder). */
+const bilder = vi.hoisted(() => ({ an: false }))
+vi.mock('./tresorBilder', () => ({
+  bildAngaben: vi.fn(async (datei: File) =>
+    bilder.an && datei.type.startsWith('image/') ? { miniatur: new TextEncoder().encode(`mini:${datei.name}`) } : {},
+  ),
+}))
 
 interface ServerBlob {
   chunk_count: number
@@ -56,6 +65,7 @@ function serverStarten() {
     /** Der erste Upload eines zweiten Chunks bricht ab wie ein Netzfehler. */
     abbruchBeiChunk1: false,
     puts: [] as string[],
+    kleinAnfragen: 0,
     revision: 10,
     eintraege: new Map<string, { ciphertext: string; revision: number; is_deleted: boolean }>(),
     konflikte: new Set<string>(),
@@ -87,6 +97,18 @@ function serverStarten() {
         entries.push({ ...m, revision: server.revision, updated_at: '2026-09-30T00:00:00Z' })
       }
       return json({ server_revision: server.revision, entries, conflicts })
+    }
+
+    if (pfad === '/api/vault/blobs/klein' && methode === 'POST') {
+      server.kleinAnfragen += 1
+      const { ids } = JSON.parse(String(koerper)) as { ids: string[] }
+      const teile: number[] = []
+      for (const id of ids) {
+        const b = server.blobs.get(id)
+        const daten = b && b.state === 'fertig' && b.chunk_count === 1 ? b.chunks.get(0)! : new Uint8Array(0)
+        teile.push(daten.length >>> 24, (daten.length >> 16) & 0xff, (daten.length >> 8) & 0xff, daten.length & 0xff, ...daten)
+      }
+      return new Response(new Uint8Array(teile) as BodyInit, { status: 200 })
     }
 
     const blob = pfad.match(/\/api\/vault\/blobs\/([0-9a-f]{32})(\/.*)?$/)
@@ -193,6 +215,7 @@ describe('Tresor-Dateien', () => {
     setzeAngemeldetesKonto(1)
     vi.restoreAllMocks()
     useTresorUploads.setState({ je: {} })
+    bilder.an = false
   })
 
   afterEach(() => {
@@ -376,5 +399,86 @@ describe('Tresor-Dateien', () => {
     await uploadsFortsetzen(BUCKET)
     await vi.waitFor(async () => expect(await zeilen(UPLOADS)).toEqual([]))
     expect(useTresorUploads.getState().je[id]).toBeUndefined()
+  })
+
+  describe('Miniaturen', () => {
+    async function dreiFotos() {
+      bilder.an = true
+      const server = serverStarten()
+      const userKey = await tresorOeffnen()
+      for (const name of ['a.jpg', 'b.jpg', 'c.jpg']) await useVaultStore.getState().dateiHinzufuegen(foto(1000, name))
+      await allesErledigt()
+      const items = useVaultStore.getState().items.filter((i) => i.datei)
+      const anfragen = items.map((i) => ({ kopf: i.datei!.miniatur, eintragId: i.id }))
+      return { server, userKey, items, anfragen }
+    }
+
+    async function cacheLeeren() {
+      const db = (await ablageDb())!
+      await new Promise<void>((ok) => {
+        const tx = db.transaction(BLOB_CACHE, 'readwrite')
+        tx.objectStore(BLOB_CACHE).clear()
+        tx.oncomplete = () => ok()
+      })
+    }
+
+    const text = (daten?: Uint8Array) => (daten ? new TextDecoder().decode(daten) : undefined)
+
+    it('holt fehlende in einer Anfrage, behält sie und zeigt sie offline', async () => {
+      const { server, userKey, items, anfragen } = await dreiFotos()
+      await cacheLeeren() // wie auf einem zweiten Gerät
+
+      const geladen = await miniaturenLesen(anfragen, userKey)
+      expect(server.kleinAnfragen).toBe(1)
+      for (const item of items) expect(text(geladen.get(item.datei!.miniatur.id))).toBe(`mini:${item.service}`)
+
+      server.offline = true
+      const offline = await miniaturenLesen(anfragen, userKey)
+      expect(offline.size).toBe(3)
+      expect(server.kleinAnfragen).toBe(1)
+    })
+
+    it('zeigt keine Miniatur, die der Server einem anderen Eintrag untergeschoben hat', async () => {
+      const { server, userKey, items, anfragen } = await dreiFotos()
+      await cacheLeeren()
+      const [a, b] = items.map((i) => server.blobs.get(i.datei!.miniatur.id)!)
+      const tausch = a.chunks.get(0)!
+      a.chunks.set(0, b.chunks.get(0)!)
+      b.chunks.set(0, tausch)
+
+      const geladen = await miniaturenLesen(anfragen, userKey)
+      expect(geladen.has(items[0].datei!.miniatur.id)).toBe(false)
+      expect(geladen.has(items[1].datei!.miniatur.id)).toBe(false)
+      expect(text(geladen.get(items[2].datei!.miniatur.id))).toBe(`mini:${items[2].service}`)
+    })
+
+    it('lädt ohne Schlüssel nur vor und entschlüsselt dabei nichts', async () => {
+      const { server, anfragen } = await dreiFotos()
+      await cacheLeeren()
+      expect(await miniaturenLesen(anfragen, null)).toEqual(new Map())
+      expect(await zeilen(BLOB_CACHE)).toHaveLength(3)
+      // Was schon da ist, wird nicht noch einmal geholt.
+      await miniaturenLesen(anfragen, null)
+      expect(server.kleinAnfragen).toBe(1)
+    })
+
+    it('bündelt gleichzeitige Kacheln und fängt nach dem Sperren neu an', async () => {
+      const { server, userKey, anfragen } = await dreiFotos()
+      await cacheLeeren()
+      const urls = await Promise.all(anfragen.map((a) => miniaturHolen(a.kopf, a.eintragId, userKey)))
+      expect(server.kleinAnfragen).toBe(1)
+      expect(urls.every((u) => typeof u === 'string' && u.startsWith('blob:'))).toBe(true)
+      // Dieselbe Miniatur ein zweites Mal kommt aus dem Speicher.
+      expect(await miniaturHolen(anfragen[0].kopf, anfragen[0].eintragId, userKey)).toBe(urls[0])
+      for (const a of anfragen) miniaturFreigeben(a.kopf.id)
+
+      const widerruf = vi.spyOn(URL, 'revokeObjectURL')
+      useVaultStore.getState().lock()
+      expect(widerruf).toHaveBeenCalledWith(urls[0])
+      const neu = await tresorOeffnen()
+      const danach = await miniaturHolen(anfragen[0].kopf, anfragen[0].eintragId, neu)
+      expect(danach).not.toBe(urls[0])
+      expect(danach).toMatch(/^blob:/)
+    })
   })
 })

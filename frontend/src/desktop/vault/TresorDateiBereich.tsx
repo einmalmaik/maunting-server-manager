@@ -30,6 +30,7 @@ import { formatBytes } from '@/components/server/fileHelpers'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { ansichtOeffnen, ansichtSchliessen, blobLesen, useTresorUploads } from './tresorDateien'
 import { speicherAbfragen, type TresorSpeicher } from './tresorBlobApi'
+import { anzeigeArt, speichernUnter } from './tresorAnzeige'
 
 function dateiIcon(typ: string) {
   if (typ.startsWith('image/')) return FileImage
@@ -38,26 +39,7 @@ function dateiIcon(typ: string) {
   return DateiIcon
 }
 
-/** Was die Ansicht im Tresor selbst zeigen kann. Alles andere wird gespeichert. */
-function anzeigeArt(typ: string): 'bild' | 'video' | 'audio' | 'text' | null {
-  if (typ.startsWith('image/') && typ !== 'image/svg+xml') return 'bild'
-  if (typ.startsWith('video/')) return 'video'
-  if (typ.startsWith('audio/')) return 'audio'
-  if (typ.startsWith('text/') || typ === 'application/json') return 'text'
-  return null
-}
-
 const TEXT_HOECHSTENS = 1024 * 1024
-
-function speichernUnter(url: string, name: string) {
-  const link = document.createElement('a')
-  link.href = url
-  link.download = name
-  link.rel = 'noopener'
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-}
 
 interface Geoeffnet {
   item: VaultItem

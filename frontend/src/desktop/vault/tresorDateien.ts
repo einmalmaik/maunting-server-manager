@@ -48,6 +48,7 @@ import {
   blobStand,
   chunkHochladen,
   chunkLaden,
+  kleineLaden,
 } from './tresorBlobApi'
 
 /** Was der Tresor-Eintrag einer Datei über sie weiß. Nur verschlüsselt auf dem Server. */
@@ -440,6 +441,69 @@ export async function blobLesen(
     optionen.fortschritt?.((index + 1) / anzahl)
   }
   return new Blob(teile, { type: typ })
+}
+
+const KLEIN_JE_ANFRAGE = 100
+
+/**
+ * Liest viele einteilige Blobs (Miniaturen) auf einmal: zuerst vom Gerät, den
+ * Rest gebündelt vom Server. Was vom Server kommt, bleibt im Cache, damit die
+ * Galerie offline ihre Bilder hat. Was fehlt, offline nicht zu holen ist oder
+ * sich nicht entschlüsseln lässt, steht nicht in der Antwort.
+ *
+ * Ohne `userKey` wird nur der Cache gefüllt (Vorladen für offline).
+ */
+export async function miniaturenLesen(
+  anfragen: { kopf: BlobKopf; eintragId: string }[],
+  userKey: CryptoKey | null,
+): Promise<Map<string, Uint8Array>> {
+  const db = await ablageDb()
+  const einteilig = anfragen.filter(({ kopf }) => kopf.echt > 0 && chunkAnzahl(kopf.groesse) === 1)
+  const chiffrate = new Map<string, Uint8Array>()
+  if (db) {
+    if (userKey) {
+      for (const { kopf } of einteilig) {
+        const lokal = await lokalesChiffrat(db, kopf.id, 0)
+        if (lokal) chiffrate.set(kopf.id, lokal)
+      }
+    } else {
+      // Nur vorladen: ein Blick auf die Schlüssel genügt, gelesen wird nichts.
+      const tx = db.transaction([BLOB_CACHE, UPLOAD_CHUNKS])
+      const schluessel = [
+        ...((await anfrage(tx.objectStore(BLOB_CACHE).getAllKeys())) as [string, number][]),
+        ...((await anfrage(tx.objectStore(UPLOAD_CHUNKS).getAllKeys())) as [string, number][]),
+      ]
+      const da = new Set(schluessel.map(([id]) => id))
+      for (const { kopf } of einteilig) if (da.has(kopf.id)) chiffrate.set(kopf.id, new Uint8Array(0))
+    }
+  }
+  const fehlend = einteilig.filter(({ kopf }) => !chiffrate.has(kopf.id))
+  for (let i = 0; i < fehlend.length; i += KLEIN_JE_ANFRAGE) {
+    let geladen: Map<string, Uint8Array>
+    try {
+      geladen = await kleineLaden(fehlend.slice(i, i + KLEIN_JE_ANFRAGE).map(({ kopf }) => kopf.id))
+    } catch {
+      break // offline oder Server nicht erreichbar: was da ist, reicht für jetzt
+    }
+    if (db && geladen.size > 0) {
+      await schreiben(db, BLOB_CACHE, (s) => {
+        for (const [blobId, daten] of geladen) s.put({ blobId, index: 0, daten } satisfies ChunkZeile)
+      }).catch(() => {})
+    }
+    for (const [id, daten] of geladen) chiffrate.set(id, daten)
+  }
+  const ergebnis = new Map<string, Uint8Array>()
+  if (!userKey) return ergebnis
+  for (const { kopf, eintragId } of einteilig) {
+    const chiffrat = chiffrate.get(kopf.id)
+    if (!chiffrat) continue
+    try {
+      ergebnis.set(kopf.id, await chunkEntschluesseln(chiffrat, kopf, 0, await blobSchluessel(kopf, userKey, eintragId), eintragId))
+    } catch {
+      // Fremder, vertauschter oder kaputter Blob: kein Bild.
+    }
+  }
+  return ergebnis
 }
 
 /** Ob alle Chunks eines Blobs auf dem Gerät liegen. */

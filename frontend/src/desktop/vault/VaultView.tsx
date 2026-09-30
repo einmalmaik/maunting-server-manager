@@ -14,6 +14,7 @@ import {
   Fingerprint,
   Folder,
   FolderLock,
+  Images,
   HelpCircle,
   KeyRound,
   Lock,
@@ -43,6 +44,7 @@ import { createDebouncedLeakChecker, type LeakCheckResult } from './leakChecker'
 import { QrScannerModal } from './QrScannerModal'
 import { TresorZuruecksetzen } from './TresorZuruecksetzen'
 import { TresorDateiBereich } from './TresorDateiBereich'
+import { TresorGalerie } from './TresorGalerie'
 import { formatBytes } from '@/components/server/fileHelpers'
 import { setzeTresorSchutz } from '../tauri'
 import {
@@ -55,7 +57,7 @@ import {
 } from './vaultStore'
 import { DisBadge } from '@/components/DisBadge'
 
-type Ansicht = 'tresor' | 'dateien' | 'archiv' | 'papierkorb'
+type Ansicht = 'tresor' | 'fotos' | 'dateien' | 'archiv' | 'papierkorb'
 
 const TAG_MS = 24 * 60 * 60 * 1000
 
@@ -417,6 +419,7 @@ export function VaultView() {
 
   const ansichten: TabDef<Ansicht>[] = [
     { id: 'tresor', labelKey: 'mss.vault.ansicht.tresor', icon: Shield },
+    { id: 'fotos', labelKey: 'mss.vault.ansicht.fotos', icon: Images },
     { id: 'dateien', labelKey: 'mss.vault.ansicht.dateien', icon: FolderLock },
     { id: 'archiv', labelKey: 'mss.vault.ansicht.archiv', icon: Archive },
     {
@@ -1002,7 +1005,7 @@ export function VaultView() {
         </div>
 
         <div className="flex items-center gap-1.5">
-          {ansicht !== 'dateien' && (
+          {ansicht !== 'dateien' && ansicht !== 'fotos' && (
           <Button
             onClick={openNewEntryModal}
             className="flex items-center gap-1 bg-primary text-on-primary hover:bg-primary-hover shadow-sm px-2.5 py-1.5 text-xs font-medium"
@@ -1134,7 +1137,9 @@ export function VaultView() {
       )}
 
       {/* LISTE / TABELLE */}
-      {ansicht === 'dateien' ? (
+      {ansicht === 'fotos' ? (
+        <TresorGalerie suche={searchQuery} />
+      ) : ansicht === 'dateien' ? (
         <TresorDateiBereich />
       ) : (
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">

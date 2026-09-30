@@ -3949,7 +3949,13 @@
     "opensInNewTab": "Öffnet in neuem Tab",
     "noRolesAvailable": "Keine Rollen verfügbar",
     "more": "Mehr",
-    "taken": "Übernommen"
+    "taken": "Übernommen",
+    "lichtbox": {
+      "position": "{{index}} von {{anzahl}}",
+      "info": "Informationen",
+      "vor": "Nächstes",
+      "zurueck": "Vorheriges"
+    }
   },
   "serverDetail": {
     "showServerOverview": "Server-Übersicht",
@@ -6075,7 +6081,8 @@
         "tresor": "Passwörter",
         "archiv": "Archiv",
         "papierkorb": "Papierkorb",
-        "dateien": "Dateien"
+        "dateien": "Dateien",
+        "fotos": "Fotos"
       },
       "archivieren": "Archivieren",
       "ausArchiv": "Aus dem Archiv holen",
@@ -6117,6 +6124,27 @@
         "wirdEntschluesselt": "Wird entschlüsselt",
         "keineVorschau": "Für diesen Dateityp gibt es keine Vorschau. Speichere die Datei, um sie zu öffnen.",
         "speichern": "Auf dem Gerät speichern"
+      },
+      "fotos": {
+        "alle": "Alle",
+        "videos": "Videos",
+        "screenshots": "Screenshots",
+        "kuerzlich": "Zuletzt hinzugefügt",
+        "filter": "Fotos filtern",
+        "kleiner": "Kleinere Vorschaubilder",
+        "groesser": "Größere Vorschaubilder",
+        "leer": "Noch keine Fotos oder Videos. Zieh sie hierher oder lade sie hoch.",
+        "leerFilter": "Nichts gefunden.",
+        "abspielen": "Video abspielen",
+        "info": {
+          "name": "Name",
+          "aufgenommen": "Aufgenommen",
+          "kamera": "Kamera",
+          "masse": "Abmessungen",
+          "dauer": "Länge",
+          "groesse": "Größe",
+          "hinzugefuegt": "Hinzugefügt"
+        }
       }
     },
     "aktion": {

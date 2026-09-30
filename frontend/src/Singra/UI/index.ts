@@ -74,3 +74,5 @@ export {
   type AbgleichzahlProps,
   type ZahlenwahlProps,
 } from './Zahlenabgleich'
+
+export { Lichtbox, type LichtboxProps } from './Lichtbox'

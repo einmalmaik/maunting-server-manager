@@ -3949,7 +3949,13 @@
     "opensInNewTab": "Opens in a new tab",
     "noRolesAvailable": "No roles available",
     "more": "More",
-    "taken": "Taken"
+    "taken": "Taken",
+    "lichtbox": {
+      "position": "{{index}} of {{anzahl}}",
+      "info": "Details",
+      "vor": "Next",
+      "zurueck": "Previous"
+    }
   },
   "serverDetail": {
     "showServerOverview": "Server overview",
@@ -6075,7 +6081,8 @@
         "tresor": "Passwords",
         "archiv": "Archive",
         "papierkorb": "Trash",
-        "dateien": "Files"
+        "dateien": "Files",
+        "fotos": "Photos"
       },
       "archivieren": "Archive",
       "ausArchiv": "Move out of archive",
@@ -6117,6 +6124,27 @@
         "wirdEntschluesselt": "Decrypting",
         "keineVorschau": "There is no preview for this file type. Save the file to open it.",
         "speichern": "Save to device"
+      },
+      "fotos": {
+        "alle": "All",
+        "videos": "Videos",
+        "screenshots": "Screenshots",
+        "kuerzlich": "Recently added",
+        "filter": "Filter photos",
+        "kleiner": "Smaller thumbnails",
+        "groesser": "Larger thumbnails",
+        "leer": "No photos or videos yet. Drop them here or upload them.",
+        "leerFilter": "Nothing found.",
+        "abspielen": "Play video",
+        "info": {
+          "name": "Name",
+          "aufgenommen": "Taken",
+          "kamera": "Camera",
+          "masse": "Dimensions",
+          "dauer": "Length",
+          "groesse": "Size",
+          "hinzugefuegt": "Added"
+        }
       }
     },
     "aktion": {
