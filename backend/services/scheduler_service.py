@@ -1211,6 +1211,7 @@ async def _e2ee_envelope_cleanup_task() -> None:
     """Regelmäßiger Hintergrund-Task zur Durchsetzung der 30-Tage-Vorhaltefrist für E2EE-Umschläge."""
     from services.chat_media_service import ChatMediaService
     from services.social_service import SocialService
+    from services import vault_blob_service
     def _worker() -> None:
         db = SessionLocal()
         try:
@@ -1218,6 +1219,7 @@ async def _e2ee_envelope_cleanup_task() -> None:
                 ("E2EE-Umschlag", SocialService.cleanup_expired_envelopes),
                 ("Anhang", ChatMediaService.cleanup_expired_media),
                 ("Story", SocialService.cleanup_expired_stories),
+                ("Tresor-Datei", vault_blob_service.aufraeumen),
             ):
                 try:
                     cleanup(db)

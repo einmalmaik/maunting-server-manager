@@ -146,6 +146,13 @@ describe('SelfHostingDocs', () => {
     expect(screen.getByText(/Reads and exports are never logged/)).toBeInTheDocument()
   })
 
+  it('sagt, dass die Dateien der Tresor-Cloud nicht im Panel-Backup liegen', () => {
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Vault cloud: files in the vault' })).toBeInTheDocument()
+    expect(screen.getByText(/The panel backup contains the database, not \/opt\/msm\/vault-blobs/)).toBeInTheDocument()
+  })
+
   it('führt jeden Abschnitt in der Sprungleiste, und jede Marke trifft einen', () => {
     // Die Datenbankverschlüsselung stand bis 27.09.2026 auf der Seite, aber
     // nicht in der Leiste, und war nur durch Scrollen zu finden.

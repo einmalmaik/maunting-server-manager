@@ -59,6 +59,8 @@ from .vault_entry import VaultEntry
 from .vault_hint import VaultHint
 from .vault_user_setting import VaultUserSetting
 from .vault_blind_bucket import VaultBlindBucket
+from .vault_blob import VaultBlob
+from .vault_bucket_format import VaultBucketFormat
 from .user_achievement import UserAchievement
 from .user_activity_time import UserActivityTime
 from .user_friend import UserFriend
@@ -111,7 +113,7 @@ __all__ = [
     "CREDENTIAL_KINDS", "KIND_GITHUB_TOKEN", "KIND_STEAM_ACCOUNT",
     "UserMailbox", "UserCalendar", "CalendarEvent", "Note",
     "PanelPopup", "UserPopupState",
-    "VaultEntry", "VaultHint", "VaultUserSetting", "VaultBlindBucket",
+    "VaultEntry", "VaultHint", "VaultUserSetting", "VaultBlindBucket", "VaultBlob", "VaultBucketFormat",
     "UserAchievement", "UserActivityTime", "UserFriend", "UserPresence", "E2eeBlindEnvelope",
     "E2eeBlindMailbox", "E2eeMailboxPush",
     "UserE2eeDevice", "PushSubscription",

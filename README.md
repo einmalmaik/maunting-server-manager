@@ -243,6 +243,8 @@ Vor jeder Änderung an der Datenbank sichert der Updater sie. Das Panel ist kurz
 
 Beim Update auf den Stand vom 26.09.2026 verschlüsselt das Panel beim ersten Start alte KI-Inhalte nach. Die Sicherungen in `/opt/msm/backups` von davor, auch die dieses Updates, enthalten sie noch im Klartext. Details in [docs/self-hosting.md](docs/self-hosting.md#verschlüsselung-der-datenbank-nach-dem-update).
 
+Die Dateien der Tresor-Cloud liegen verschlüsselt in `/opt/msm/vault-blobs` und nicht im Panel-Backup. Nimm das Verzeichnis in die Sicherung des Servers auf, siehe [docs/self-hosting.md](docs/self-hosting.md#tresor-cloud-dateien-im-tresor).
+
 ### Automatisch aktualisieren (optional)
 
 Schalte es in `/opt/msm/backend/.env` ein:

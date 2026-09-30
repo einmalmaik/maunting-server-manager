@@ -1,0 +1,46 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
+
+from database import Base
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class VaultBlob(Base):
+    """Eine Datei der Tresor-Cloud, wie der Server sie sieht: Chiffrat in Chunks.
+
+    Name, Typ, echte Groesse und Schluessel stehen im Tresor-Eintrag, der auf
+    den Blob verweist, und damit nur im Umschlag des Clients. Hier stehen nur
+    Kennung, Besitzer, Anzahl und Groesse der Chunks (gepolstert) und der Hash
+    des Loeschnachweises.
+
+    Der Blob gehoert dem Konto, weil die Quote einen Besitzer braucht. Der
+    Chiffrat liegt auf der Platte unter ``settings.vault_blob_dir``.
+    """
+
+    __tablename__ = "vault_blobs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    bytes_total: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # sha256 des Loeschschluessels, der nur im Tresor-Eintrag steht. Ein
+    # abgegriffenes Zugangstoken allein loescht damit keine Datei.
+    delete_verifier: Mapped[str] = mapped_column(String(64), nullable=False)
+    # offen -> fertig -> geloescht. Geloeschte haelt der Server noch
+    # `LOESCHHALTUNG` lang, bevor die Dateien verschwinden.
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="offen")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

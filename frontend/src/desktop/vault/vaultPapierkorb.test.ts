@@ -315,3 +315,70 @@ describe('Tresor: Papierkorb und Archiv', () => {
     expect(useVaultStore.getState().items).toHaveLength(1)
   })
 })
+
+describe('Tresor: Hochstufen gegen alte Apps', () => {
+  let userKey: CryptoKey
+
+  beforeEach(async () => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+    userKey = await userKeyAnlegen()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('meldet sein Format immer und stuft erst hoch, wenn der Tresor es braucht', async () => {
+    await tresorVomServer(userKey, { service: 'Bank', category: 'login', createdAt: 1, updatedAt: 10 })
+    let koerper = echoServer()
+    await useVaultStore.getState().syncWithServer()
+    expect(koerper[0].client_format).toBe(1)
+    expect(koerper[0].min_client_format).toBeUndefined()
+    vi.restoreAllMocks()
+
+    koerper = echoServer()
+    await useVaultStore.getState().trashItem(EINTRAG)
+    await vi.waitFor(() => expect(koerper.length).toBeGreaterThan(0))
+    expect(koerper[0].min_client_format).toBe(1)
+    await vi.waitFor(() => expect(useVaultStore.getState().syncStatus).toBe('synced'))
+  })
+})
+
+describe('Tresor: seitenweiser Sync', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it('holt weiter, solange der Server mehr meldet', async () => {
+    const userKey = await userKeyAnlegen()
+    useVaultStore.setState({ userKey, bucketId: BUCKET, bucketAuthToken: 'b'.repeat(64), isUnlocked: true, syncStatus: 'synced', items: [] })
+    const seiten = await Promise.all(
+      ['eins', 'zwei'].map(async (id, i) => ({
+        server_revision: i + 1,
+        has_more: i === 0,
+        entries: [
+          {
+            id,
+            ciphertext: await encryptVaultEntry({ service: id, category: 'login', createdAt: 1, updatedAt: 1 }, userKey, id),
+            revision: i + 1,
+            is_deleted: false,
+            updated_at: '2026-09-30T00:00:00Z',
+          },
+        ],
+      })),
+    )
+    const anfragen: VaultBlindSyncPayload[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      anfragen.push(JSON.parse(String(init?.body)))
+      const seite = seiten[anfragen.length - 1] ?? { server_revision: 2, has_more: false, entries: [] }
+      return { ok: true, status: 200, json: async () => seite } as Response
+    })
+
+    await useVaultStore.getState().syncWithServer()
+
+    expect(anfragen.map((a) => a.since_revision)).toEqual([0, 1])
+    expect(useVaultStore.getState().items.map((i) => i.service).sort()).toEqual(['eins', 'zwei'])
+  })
+})

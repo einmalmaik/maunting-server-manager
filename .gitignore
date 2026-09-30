@@ -22,6 +22,8 @@ PATCHNOTES-ms-oauth-feature.md
 .local/
 /backups/
 /servers/
+# Chiffrat der Tresor-Cloud (MSM_VAULT_BLOB_DIR)
+/vault-blobs/
 /postgres/
 frontend/scripts/simple-icons-cache.json
 

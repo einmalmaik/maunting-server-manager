@@ -46,6 +46,11 @@ class VaultSyncRequest(BaseModel):
     bucket_id: str = Field(..., min_length=64, max_length=64, description="Blinde 64-Hex Bucket-ID, abgeleitet aus dem Client-Master-Secret")
     since_revision: int = Field(default=0, ge=0, le=9007199254740991, description="Revisions-Wasserzeichen des Clients")
     mutations: List[VaultMutation] = Field(default_factory=list, max_length=100, description="Neue oder aktualisierte verschluesselte Eintraege")
+    # Welches Eintragsformat die App versteht, und ab welchem sie den Bucket
+    # nur noch beschreiben laesst (siehe `VaultBucketFormat`). Aeltere Apps
+    # schicken beides nicht.
+    client_format: Optional[int] = Field(default=None, ge=0, le=1000)
+    min_client_format: Optional[int] = Field(default=None, ge=0, le=1000)
 
     @field_validator("bucket_id")
     @classmethod
@@ -65,6 +70,11 @@ class VaultBlindSyncRequest(BaseModel):
     auth_token: str = Field(..., min_length=64, max_length=64, description="Blinder Besitznachweis (SHA-256 Hex)")
     since_revision: int = Field(default=0, ge=0, le=9007199254740991, description="Revisions-Wasserzeichen des Clients")
     mutations: List[VaultMutation] = Field(default_factory=list, max_length=100, description="Neue oder aktualisierte verschluesselte Eintraege")
+    # Welches Eintragsformat die App versteht, und ab welchem sie den Bucket
+    # nur noch beschreiben laesst (siehe `VaultBucketFormat`). Aeltere Apps
+    # schicken beides nicht.
+    client_format: Optional[int] = Field(default=None, ge=0, le=1000)
+    min_client_format: Optional[int] = Field(default=None, ge=0, le=1000)
 
     @field_validator("bucket_id")
     @classmethod
@@ -131,6 +141,8 @@ class VaultSyncResponse(BaseModel):
     entries: List[VaultEntryOut]
     # IDs der Mutationen, die wegen `expected_revision` nicht geschrieben wurden.
     conflicts: List[str] = Field(default_factory=list)
+    # Es liegen weitere Eintraege ueber `server_revision` bereit.
+    has_more: bool = False
 
 
 class VaultHintSetRequest(BaseModel):
@@ -174,3 +186,33 @@ class VaultSaltSetRequest(BaseModel):
         return v.lower()
 
 
+
+
+class VaultBlobAnlegen(BaseModel):
+    """Ein neuer Blob: Kennung, Chunkzahl, Groesse des Chiffrats und der Hash
+    des Loeschschluessels. Mehr erfaehrt der Server ueber die Datei nicht."""
+
+    id: str = Field(..., min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
+    chunk_count: int = Field(..., ge=1, le=1_000_000)
+    bytes_total: int = Field(..., ge=1, le=1024 ** 4)
+    delete_verifier: str = Field(..., min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+
+
+class VaultBlobLoeschen(BaseModel):
+    schluessel: str = Field(..., min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+
+
+class VaultBlobsKlein(BaseModel):
+    ids: List[str] = Field(..., min_length=1, max_length=100)
+
+
+class VaultBlobStatus(BaseModel):
+    state: str
+    chunk_count: int
+    vorhanden: List[int]
+
+
+class VaultSpeicher(BaseModel):
+    belegt: int
+    quote: int
+    in_loeschung: int

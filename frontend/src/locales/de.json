@@ -4398,6 +4398,34 @@
         "body": "Pipecat bleibt Teil des Legacy-Modus. OpenAI Realtime nutzt native Browser-WebRTC-APIs ohne zusätzliches SDK. Der Panel-WebSocket überträgt dabei nur Signalisierung, Status und bereinigte Karten-, Quellen- und Vorschlagsdaten."
       },
       "spokenLimit": "Löschen und Backup-Wiederherstellungen können per Stimme bestätigt werden, wenn der Betreiber dies freigibt. Im Audit-Protokoll wird die gesprochene Zustimmung dokumentiert."
+    },
+    "vaultCloud": {
+      "title": "Tresor-Cloud: Dateien im Tresor",
+      "intro": "Die App verschlüsselt Fotos, Videos und Dokumente auf dem Gerät, bevor sie hochgehen, in Stücken von 4 MiB. Das Panel speichert nur diese Stücke unter MSM_VAULT_BLOB_DIR (Standard /opt/msm/vault-blobs). Name, Typ, echte Größe und Schlüssel stehen im verschlüsselten Tresor-Eintrag.",
+      "sieht": {
+        "title": "Was der Server sieht",
+        "body": "Je Konto die Anzahl der Dateien, ihre auf feste Stufen aufgefüllte Größe und den Zeitpunkt des Hochladens. Inhalt, Namen und Typen nicht, auch nicht mit Root-Zugang."
+      },
+      "quote": {
+        "title": "Speicher je Konto",
+        "body": "10 GB als Vorgabe. Die Panel-Einstellung vault_cloud_quota_bytes ändert die Vorgabe, users.vault_quota_bytes den Wert eines einzelnen Kontos."
+      },
+      "loeschen": {
+        "title": "Löschen",
+        "body": "Gelöschte Dateien bleiben 7 Tage auf der Platte und zählen so lange zum Speicher. Abgebrochene Uploads verschwinden nach 24 Stunden, Dateien gelöschter Konten beim nächsten stündlichen Aufräumen."
+      },
+      "backup": {
+        "title": "Backup",
+        "body": "Das Panel-Backup enthält die Datenbank, nicht /opt/msm/vault-blobs. Ohne das Verzeichnis zeigen die Tresor-Einträge nach einer Wiederherstellung auf fehlende Dateien. Sichere es mit der Sicherung des Servers; der Inhalt ist verschlüsselt."
+      },
+      "reset": {
+        "title": "Tresor zurücksetzen",
+        "body": "Löst nur die Verbindung zum Konto. Die Dateien bleiben liegen, weil der alte Tresor auf einem anderen Gerät noch offen sein kann."
+      },
+      "altApps": {
+        "title": "Ältere App-Versionen",
+        "body": "Nutzt ein Tresor Papierkorb, Archiv oder Dateien, nimmt der Server von Apps, die diese Einträge nicht kennen, keinen Abgleich mehr an (HTTP 426). Sie würden die Einträge beim Speichern sonst beschädigen."
+      }
     }
   },
   "docsOAuth": {

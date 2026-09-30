@@ -725,6 +725,8 @@ mkdir -p /opt/msm/servers
 chown "$MSM_USER:$MSM_USER" /opt/msm/servers
 mkdir -p /opt/msm/backups
 chown "$MSM_USER:$MSM_USER" /opt/msm/backups
+# Tresor-Cloud: nur verschluesselte Chunks, trotzdem nur fuer das Panel lesbar.
+install -d -o "$MSM_USER" -g "$MSM_USER" -m 700 /opt/msm/vault-blobs
 mkdir -p /opt/msm/blueprints/community
 chown -R "$MSM_USER:$MSM_USER" /opt/msm/blueprints
 chmod -R u+rwX,g+rwX /opt/msm/blueprints
@@ -1291,6 +1293,7 @@ MSM_LOCAL_AGENT_ENV_FILE="$MSM_DIR/msm-agent/.env"
 MSM_LOCAL_AGENT_ENABLED=$INSTALL_LOCAL_AGENT
 MSM_PANEL_CONFIG_DIR="$MSM_DIR"
 MSM_PANEL_BACKUP_DIR="$MSM_DIR/backups/panel"
+MSM_VAULT_BLOB_DIR="$MSM_DIR/vault-blobs"
 MSM_BLUEPRINTS_DIR="$MSM_DIR/blueprints/community"
 MSM_DOCKER_HOST="$MSM_DOCKER_HOST"
 MSM_MANAGED_POSTGRES_IMAGE="postgres:17-alpine"

@@ -1162,3 +1162,63 @@ def test_mutation_ohne_erwartete_revision_schreibt_wie_bisher(client):
         )
         assert antwort.json()["conflicts"] == []
     assert antwort.json()["entries"][0]["ciphertext"] == "sv-vault-v1:zwei"
+
+
+def test_hochgestufter_bucket_sperrt_aeltere_apps_aus(client, test_db):
+    """Eine App vor 09/2026 verwirft beim Speichern Felder, die sie nicht kennt.
+    Hat eine neuere App den Bucket hochgestuft, nimmt der Server von ihr nichts
+    mehr an, auch nicht lesend; herabstufen geht nicht."""
+    bucket = "e" * 64
+    alt = {"bucket_id": bucket, "since_revision": 0, "mutations": []}
+    assert client.post("/api/vault/sync", json=alt).status_code == 200
+
+    neu = {**alt, "client_format": 1, "min_client_format": 1}
+    assert client.post("/api/vault/sync", json=neu).status_code == 200
+
+    assert client.post("/api/vault/sync", json=alt).status_code == 426
+    assert client.post("/api/vault/sync", json={**alt, "client_format": 0, "min_client_format": 0}).status_code == 426
+    assert client.post("/api/vault/sync", json={**alt, "client_format": 1}).status_code == 200
+
+
+def test_formatsperre_gilt_auch_blind(test_db):
+    session, _, _ = test_db
+
+    def override_get_db():
+        yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app) as c:
+            anfrage = {"bucket_id": "f" * 64, "auth_token": "1" * 64, "since_revision": 0, "mutations": []}
+            assert c.post("/api/vault/blind-sync", json={**anfrage, "client_format": 1, "min_client_format": 1}).status_code == 200
+            assert c.post("/api/vault/blind-sync", json=anfrage).status_code == 426
+            # Hochstufen ueber das eigene Format hinaus geht nicht.
+            assert c.post("/api/vault/blind-sync", json={**anfrage, "client_format": 1, "min_client_format": 5}).status_code == 200
+            assert c.post("/api/vault/blind-sync", json={**anfrage, "client_format": 1}).status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_sync_liefert_seitenweise(client, monkeypatch):
+    from services import vault_service
+
+    monkeypatch.setattr(vault_service, "SYNC_SEITE", 2)
+    bucket = "9" * 64
+    client.post(
+        "/api/vault/sync",
+        json={
+            "bucket_id": bucket,
+            "since_revision": 0,
+            "mutations": [{"id": f"e{i}", "ciphertext": f"sv-vault-v1:{i}", "revision": 1} for i in range(5)],
+        },
+    )
+    gesehen: list[str] = []
+    stand = 0
+    for _ in range(5):
+        daten = client.post("/api/vault/sync", json={"bucket_id": bucket, "since_revision": stand, "mutations": []}).json()
+        assert len(daten["entries"]) <= 2
+        gesehen += [e["id"] for e in daten["entries"]]
+        stand = daten["server_revision"]
+        if not daten["has_more"]:
+            break
+    assert gesehen == [f"e{i}" for i in range(5)]

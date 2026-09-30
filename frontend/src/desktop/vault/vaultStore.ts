@@ -194,6 +194,8 @@ interface VaultSyncPayload {
   bucket_id: string
   since_revision: number
   mutations: VaultSyncMutation[]
+  client_format?: number
+  min_client_format?: number
 }
 
 interface VaultSyncResponse {
@@ -210,6 +212,8 @@ interface VaultSyncResponse {
    * nicht mehr auf `expected_revision` stand. Ältere Server kennen das Feld nicht.
    */
   conflicts?: string[]
+  /** Es liegen weitere Einträge bereit; der Sync holt sie in der nächsten Runde. */
+  has_more?: boolean
 }
 
 export interface VaultBlindSyncPayload {
@@ -217,6 +221,20 @@ export interface VaultBlindSyncPayload {
   auth_token: string
   since_revision: number
   mutations: VaultSyncMutation[]
+  client_format?: number
+  min_client_format?: number
+}
+
+/**
+ * Ob eine App vor 09/2026 diesen Tresor beschädigen würde. Sie kennt weder
+ * Papierkorb noch Archiv noch fremde Felder und schriebe jeden Eintrag ohne
+ * sie zurück. Trägt der Tresor so etwas, stuft der Sync den Bucket hoch, und
+ * der Server nimmt von alten Apps nichts mehr an.
+ */
+export function brauchtNeueApp(items: VaultItem[]): boolean {
+  return items.some(
+    (i) => i.trashedAt !== undefined || i.archivedAt !== undefined || i.extra !== undefined || !istBekannteKategorie(i.category),
+  )
 }
 
 /**
@@ -1422,11 +1440,16 @@ export const useVaultStore = create<VaultState>((set, get) => {
       mutations: VaultSyncPayload['mutations'],
       sinceRevision: number,
     ): Promise<VaultSyncResponse> => {
+      const format = {
+        client_format: VAULT_EINTRAG_FORMAT,
+        ...(brauchtNeueApp(get().items) ? { min_client_format: VAULT_EINTRAG_FORMAT } : {}),
+      }
       if (!bucketAuthToken) {
         const payload: VaultSyncPayload = {
           bucket_id: bucketId,
           since_revision: sinceRevision,
           mutations,
+          ...format,
         }
         return api<VaultSyncResponse>('/api/vault/sync', {
           method: 'POST',
@@ -1439,6 +1462,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
           auth_token: bucketAuthToken,
           since_revision: sinceRevision,
           mutations,
+          ...format,
         })
       try {
         return await blind()
@@ -1574,7 +1598,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
         localStorage.setItem(`${VAULT_REVISION_PREFIX}${bucketId}`, String(data.server_revision))
         set({ items: currentItems })
 
-        if (offen.length === 0) {
+        if (offen.length === 0 && !data.has_more) {
           abgeglichen = true
           break
         }
@@ -1617,7 +1641,9 @@ export const useVaultStore = create<VaultState>((set, get) => {
       // Der Status gehört der Sitzung, die ihn gesetzt hat.
       if (!sitzungOffen(userKey, bucketId)) return
       // Bei 401 Unauthorized: Auth-Fehler anzeigen, sonst im Offline-Modus bleiben
-      const isAuthError = blindAbgewiesen || (err instanceof Error && err.message.includes('401'))
+      // 426: eine neuere App hat den Tresor hochgestuft, diese muss aktualisiert werden.
+      const isAuthError =
+        blindAbgewiesen || (err instanceof Error && (err.message.includes('401') || err.message.includes('426')))
       set({ syncStatus: isAuthError ? 'error' : 'offline' })
     }
   },

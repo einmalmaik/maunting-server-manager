@@ -100,6 +100,9 @@ class Settings(BaseSettings):
     # Dev/Test kann beides ueber env ueberschreiben (z.B. auf tmp_path).
     panel_config_dir: str = "/opt/msm"
     panel_backup_dir: str = "/opt/msm/backups/panel"
+    # Chiffrat der Tresor-Cloud (nur verschluesselte Chunks, ohne Namen).
+    # Gehoert ins Backup: ohne diese Dateien sind die Tresor-Eintraege Verweise ins Leere.
+    vault_blob_dir: str = "/opt/msm/vault-blobs"
     local_agent_env_file: str = "/opt/msm/msm-agent/.env"
     # false = reine Control Plane ohne Docker/Agent auf demselben Host.
     # Ein bestehender lokaler Node muss vor dem Start kontrolliert in einen

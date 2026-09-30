@@ -500,6 +500,40 @@ sobald das neue Panel läuft. Kalender und Notizen bekommen den
 Präfix erst beim nächsten Speichern, weil dort E2EE-, DIS- und alte
 Klartextwerte nebeneinander liegen.
 
+## Tresor-Cloud: Dateien im Tresor
+
+Die App legt im Tresor auch Dateien ab: Fotos, Videos, Dokumente. Sie werden
+auf dem Gerät verschlüsselt, bevor sie hochgehen, in Stücken von 4 MiB. Das
+Panel speichert nur diese Stücke, unter `MSM_VAULT_BLOB_DIR` (Standard
+`/opt/msm/vault-blobs`, angelegt von `install.sh` und `update.sh`, nur für den
+Benutzer `msm` lesbar). Dateiname, Typ, echte Größe und Schlüssel stehen im
+verschlüsselten Tresor-Eintrag. Auch mit Root-Zugang und Datenbank sieht der
+Betreiber davon nichts.
+
+Was der Server doch sieht: je Konto, wie viele Dateien es gibt, wie groß sie
+nach dem Auffüllen auf feste Größenstufen sind und wann sie hochgeladen
+wurden.
+
+- **Speicher je Konto:** 10 GB als Vorgabe. Die Panel-Einstellung
+  `vault_cloud_quota_bytes` ändert die Vorgabe, `users.vault_quota_bytes` den
+  Wert für ein einzelnes Konto.
+- **Löschen:** Gelöschte Dateien bleiben noch 7 Tage auf der Platte und zählen
+  so lange zum Speicher des Kontos. Abgebrochene Uploads verschwinden nach 24
+  Stunden. Beides räumt das Panel stündlich auf, ebenso die Dateien gelöschter
+  Konten.
+- **Backup:** Das Panel-Backup enthält die Datenbank, nicht dieses
+  Verzeichnis. Ohne das Verzeichnis zeigen die Tresor-Einträge nach einer
+  Wiederherstellung auf fehlende Dateien. Sichere `/opt/msm/vault-blobs` mit
+  der Sicherung des Servers. Der Inhalt ist verschlüsselt und darf auch auf ein
+  fremdes Ziel.
+- **Tresor zurücksetzen** löst nur die Verbindung zum Konto. Die Dateien
+  bleiben liegen, weil der alte Tresor auf einem anderen Gerät noch offen sein
+  kann, und belegen weiter Speicher.
+- **Ältere App-Versionen:** Sobald ein Tresor Papierkorb, Archiv oder Dateien
+  nutzt, nimmt der Server von Apps, die diese Einträge nicht kennen, keinen
+  Abgleich mehr an (HTTP 426). Sie würden die Einträge beim Speichern sonst
+  unbemerkt beschädigen.
+
 ## PostgreSQL-Datenbanken und das Studio
 
 Datenbanken verwaltest du im **PostgreSQL-Studio**. Es steht an zwei Stellen:

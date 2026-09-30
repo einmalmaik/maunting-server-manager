@@ -14,6 +14,7 @@ from models.vault_entry import VaultEntry
 from models.vault_hint import VaultHint
 from models.vault_user_setting import VaultUserSetting
 from models.vault_blind_bucket import VaultBlindBucket
+from models.vault_bucket_format import VaultBucketFormat
 from schemas.vault import (
     VaultBlindSyncRequest,
     VaultEntryOut,
@@ -40,6 +41,33 @@ class VaultBucketUnauthorized(Exception):
 
 class VaultBucketAlreadyBound(Exception):
     """Raised when a blind verifier already exists and must not be overwritten."""
+
+
+class VaultClientZuAlt(Exception):
+    """Die App ist aelter als das Format, das dieser Bucket verlangt."""
+
+
+def _pruefe_format(db: Session, bucket_id: str, client_format: int | None, min_client_format: int | None) -> None:
+    """Laesst nur Apps an den Bucket, die seine Eintraege beim Speichern nicht verstuemmeln.
+
+    Eine App vor 09/2026 schreibt jeden Eintrag aus einer festen Feldliste neu
+    und verliert dabei Papierkorb, Archiv und Dateiverweise. Hat eine neuere App
+    den Bucket einmal hochgestuft, weist der Server aeltere ab, lesend wie
+    schreibend: sie wuerde die fremden Eintraege sonst als ihre eigenen zeigen.
+    Herabstufen geht nicht.
+    """
+    eigenes = client_format or 0
+    zeile = db.get(VaultBucketFormat, bucket_id)
+    verlangt = zeile.min_client_format if zeile is not None else 0
+    if eigenes < verlangt:
+        raise VaultClientZuAlt("Diese App ist zu alt fuer diesen Tresor. Bitte aktualisieren.")
+    if min_client_format and min_client_format > verlangt and min_client_format <= eigenes:
+        if zeile is None:
+            db.add(VaultBucketFormat(bucket_id=bucket_id, min_client_format=min_client_format, updated_at=_now()))
+        else:
+            zeile.min_client_format = min_client_format
+            zeile.updated_at = _now()
+        db.commit()
 
 
 # ─── Gemeinsamer Kern beider Sync-Pfade ──────────────────────────────────────
@@ -150,6 +178,14 @@ def _wende_mutationen_an(
     return konflikte
 
 
+# Hoechstens so viele Eintraege je Antwort. Mit der Tresor-Cloud hat ein Tresor
+# leicht zehntausende; alles in einer Antwort waeren dutzende Megabyte. Den Rest
+# holt der Client in weiteren Runden (``has_more``). Aeltere Clients kennen das
+# Feld nicht und holen ihn beim naechsten Sync: ihr Wasserzeichen ist die
+# hoechste gelieferte Revision.
+SYNC_SEITE = 2000
+
+
 def _lies_bucket(db: Session, bucket_id: str, since_revision: int) -> VaultSyncResponse:
     """Liefert alles ab ``since_revision`` — und ein Wasserzeichen, das nie zu weit zeigt.
 
@@ -167,7 +203,10 @@ def _lies_bucket(db: Session, bucket_id: str, since_revision: int) -> VaultSyncR
             VaultEntry.revision > since_revision,
         )
         .order_by(VaultEntry.revision.asc())
+        .limit(SYNC_SEITE + 1)
     ).all()
+    has_more = len(entries_db) > SYNC_SEITE
+    entries_db = entries_db[:SYNC_SEITE]
 
     entries_out = [
         VaultEntryOut(
@@ -184,6 +223,7 @@ def _lies_bucket(db: Session, bucket_id: str, since_revision: int) -> VaultSyncR
     return VaultSyncResponse(
         server_revision=int(hoechste_geliefert),
         entries=entries_out,
+        has_more=has_more,
     )
 
 
@@ -233,6 +273,8 @@ def sync_vault(db: Session, user: User, request: VaultSyncRequest) -> VaultSyncR
                 )
             )
         db.commit()
+
+    _pruefe_format(db, bucket_id, request.client_format, request.min_client_format)
 
     # 2. Monotone Mutation & Revisions-Zuweisung (SEC-03)
     konflikte = _wende_mutationen_an(db, bucket_id, request.mutations)
@@ -292,6 +334,8 @@ def sync_vault_blind(db: Session, request: VaultBlindSyncRequest) -> VaultSyncRe
         # Bestehender blinder Bucket -> auth_verifier prüfen (Timing-sicher)
         if not secrets.compare_digest(blind_bucket.auth_verifier, computed_verifier):
             raise VaultBucketUnauthorized("Ungültiges Authentifizierungs-Token für diesen Tresor-Bucket.")
+
+    _pruefe_format(db, bucket_id, request.client_format, request.min_client_format)
 
     # 2. Monotone Mutation & Revisions-Zuweisung (SEC-03)
     konflikte = _wende_mutationen_an(db, bucket_id, request.mutations)
@@ -478,6 +522,11 @@ def tresor_zuruecksetzen(db: Session, user_id: int) -> None:
     der Server kann ihn also nicht sicher zuordnen; und ein gekoppelter Bucket
     lebt womoeglich noch auf einem anderen Geraet, das ihn weiter abgleicht.
     Lesen kann sie ohne das alte Passwort niemand.
+
+    Aus demselben Grund bleiben die Dateien der Tresor-Cloud (`vault_blobs`):
+    das andere Geraet oeffnet den alten Tresor womoeglich per Biometrie, die
+    das Master-Passwort im Schluesselspeicher haelt. Sie belegen weiter die
+    Quote.
     """
     db.query(VaultUserSetting).filter(VaultUserSetting.user_id == user_id).delete(synchronize_session=False)
     db.query(VaultHint).filter(VaultHint.user_id == user_id).delete(synchronize_session=False)

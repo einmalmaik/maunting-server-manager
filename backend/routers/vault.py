@@ -2,7 +2,9 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -10,6 +12,11 @@ from dependencies import get_current_user, verify_csrf
 from middleware.rate_limit import auth_rate_limit, limiter
 from models.user import User
 from schemas.vault import (
+    VaultBlobAnlegen,
+    VaultBlobLoeschen,
+    VaultBlobsKlein,
+    VaultBlobStatus,
+    VaultSpeicher,
     VaultBlindCheckRequest,
     VaultBlindRegisterRequest,
     VaultBlindSyncRequest,
@@ -21,7 +28,7 @@ from schemas.vault import (
     VaultSyncRequest,
     VaultSyncResponse,
 )
-from services import audit_service, passkey_service, vault_service
+from services import audit_service, passkey_service, vault_blob_service, vault_service
 from services.auth_service import AuthService
 from services.panel_settings_service import PanelSettingsService
 
@@ -54,6 +61,8 @@ def sync_vault_blind(
     _check_vault_enabled()
     try:
         return vault_service.sync_vault_blind(db, payload)
+    except vault_service.VaultClientZuAlt as exc:
+        raise HTTPException(status_code=status.HTTP_426_UPGRADE_REQUIRED, detail=str(exc)) from exc
     except vault_service.VaultBucketUnauthorized as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -136,6 +145,8 @@ def sync_vault_entries(
     _check_vault_enabled()
     try:
         return vault_service.sync_vault(db, current_user, payload)
+    except vault_service.VaultClientZuAlt as exc:
+        raise HTTPException(status_code=status.HTTP_426_UPGRADE_REQUIRED, detail=str(exc)) from exc
     except vault_service.VaultBucketAccessDenied as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -283,3 +294,156 @@ async def send_vault_hint(
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=msg)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
     return {"status": "ok", "message": msg}
+
+
+# ─── Tresor-Cloud: verschluesselte Dateien ───────────────────────────────────
+#
+# Alle Wege sind angemeldet und gelten nur fuer die Blobs des eigenen Kontos.
+# Ein fremder Blob ist wie ein fehlender (404). Die Grenzen sind grosszuegig und
+# gehoeren nur diesen Routen: ein Upload von tausend Fotos sind dreitausend
+# Blobs, und nichts davon darf die Anmeldegrenze aufbrauchen.
+
+
+def _blob_fehler(exc: vault_blob_service.BlobFehler) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=str(exc))
+
+
+@router.get("/speicher", response_model=VaultSpeicher)
+def tresor_speicher(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> VaultSpeicher:
+    _check_vault_enabled()
+    return VaultSpeicher(**vault_blob_service.speicher(db, current_user))
+
+
+@router.post("/blobs", status_code=status.HTTP_201_CREATED)
+@limiter.limit("1200/minute")
+def blob_anlegen(
+    payload: VaultBlobAnlegen,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    __=Depends(verify_csrf),
+) -> dict[str, str]:
+    _check_vault_enabled()
+    try:
+        vault_blob_service.anlegen(
+            db, current_user, payload.id, payload.chunk_count, payload.bytes_total, payload.delete_verifier
+        )
+    except vault_blob_service.BlobFehler as exc:
+        raise _blob_fehler(exc) from exc
+    return {"id": payload.id}
+
+
+@router.put("/blobs/{blob_id}/chunks/{index}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("1200/minute")
+async def blob_chunk_hochladen(
+    blob_id: str,
+    index: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    __=Depends(verify_csrf),
+) -> Response:
+    """Nimmt einen Chunk als rohe Bytes an. Laenge exakt wie angemeldet, sonst 413/422.
+
+    Datenbank und Platte laufen im Threadpool, nacheinander mit derselben Sitzung.
+    """
+    await run_in_threadpool(_check_vault_enabled)
+    try:
+        erwartet = await run_in_threadpool(vault_blob_service.laenge_fuer_upload, db, current_user.id, blob_id, index)
+    except vault_blob_service.BlobFehler as exc:
+        raise _blob_fehler(exc) from exc
+
+    daten = bytearray()
+    async for teil in request.stream():
+        daten += teil
+        if len(daten) > erwartet:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Chunk zu gross.")
+    if len(daten) != erwartet:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Chunk hat die falsche Laenge.")
+
+    await run_in_threadpool(vault_blob_service.chunk_schreiben, blob_id, index, bytes(daten))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/blobs/{blob_id}/status", response_model=VaultBlobStatus)
+def blob_status(
+    blob_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> VaultBlobStatus:
+    _check_vault_enabled()
+    try:
+        blob = vault_blob_service.eigener_blob(db, current_user.id, blob_id)
+    except vault_blob_service.BlobFehler as exc:
+        raise _blob_fehler(exc) from exc
+    return VaultBlobStatus(
+        state=blob.state,
+        chunk_count=blob.chunk_count,
+        vorhanden=vault_blob_service.vorhandene_chunks(blob),
+    )
+
+
+@router.post("/blobs/{blob_id}/fertig")
+def blob_fertig(
+    blob_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    __=Depends(verify_csrf),
+) -> dict[str, str]:
+    _check_vault_enabled()
+    try:
+        vault_blob_service.fertigstellen(db, current_user.id, blob_id)
+    except vault_blob_service.BlobFehler as exc:
+        raise _blob_fehler(exc) from exc
+    return {"state": "fertig"}
+
+
+@router.get("/blobs/{blob_id}/chunks/{index}")
+@limiter.limit("1200/minute")
+def blob_chunk_lesen(
+    blob_id: str,
+    index: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    _check_vault_enabled()
+    try:
+        pfad = vault_blob_service.chunk_pfad(db, current_user.id, blob_id, index)
+    except vault_blob_service.BlobFehler as exc:
+        raise _blob_fehler(exc) from exc
+    return FileResponse(pfad, media_type="application/octet-stream")
+
+
+@router.post("/blobs/klein")
+@limiter.limit("300/minute")
+def blobs_klein(
+    payload: VaultBlobsKlein,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    __=Depends(verify_csrf),
+) -> Response:
+    """Bis zu 100 Miniaturen in einer Antwort, damit die Galerie nicht tausend Anfragen stellt."""
+    _check_vault_enabled()
+    inhalt = vault_blob_service.kleine_lesen(db, current_user.id, payload.ids)
+    return Response(content=inhalt, media_type="application/octet-stream")
+
+
+@router.delete("/blobs/{blob_id}")
+def blob_loeschen(
+    blob_id: str,
+    payload: VaultBlobLoeschen,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    __=Depends(verify_csrf),
+) -> dict[str, str]:
+    _check_vault_enabled()
+    try:
+        vault_blob_service.loeschen(db, current_user.id, blob_id, payload.schluessel)
+    except vault_blob_service.BlobFehler as exc:
+        raise _blob_fehler(exc) from exc
+    return {"state": "geloescht"}

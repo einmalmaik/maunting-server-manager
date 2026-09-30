@@ -4398,6 +4398,34 @@
         "body": "Pipecat remains part of legacy mode. OpenAI Realtime uses native browser WebRTC APIs without another SDK. The panel WebSocket carries signaling, status, and redacted map, source, and proposal data only."
       },
       "spokenLimit": "Server deletion and backup restores can be confirmed by voice if allowed by the operator. Spoken approvals are logged in the audit trail."
+    },
+    "vaultCloud": {
+      "title": "Vault cloud: files in the vault",
+      "intro": "The app encrypts photos, videos and documents on the device before they are uploaded, in pieces of 4 MiB. The panel only stores those pieces under MSM_VAULT_BLOB_DIR (default /opt/msm/vault-blobs). Name, type, real size and key are kept in the encrypted vault entry.",
+      "sieht": {
+        "title": "What the server sees",
+        "body": "Per account the number of files, their size rounded up to fixed steps, and when they were uploaded. Not the content, names or types, not even with root access."
+      },
+      "quote": {
+        "title": "Storage per account",
+        "body": "10 GB by default. The panel setting vault_cloud_quota_bytes changes the default, users.vault_quota_bytes the value of a single account."
+      },
+      "loeschen": {
+        "title": "Deleting",
+        "body": "Deleted files stay on disk for 7 days and count towards the storage until then. Aborted uploads disappear after 24 hours, files of deleted accounts at the next hourly cleanup."
+      },
+      "backup": {
+        "title": "Backup",
+        "body": "The panel backup contains the database, not /opt/msm/vault-blobs. Without that directory, vault entries point to missing files after a restore. Include it in the server backup; its content is encrypted."
+      },
+      "reset": {
+        "title": "Resetting the vault",
+        "body": "Only removes the link to the account. The files stay, because the old vault may still be open on another device."
+      },
+      "altApps": {
+        "title": "Older app versions",
+        "body": "Once a vault uses the trash, the archive or files, the server no longer accepts a sync from apps that do not know these entries (HTTP 426). They would otherwise damage the entries when saving."
+      }
     }
   },
   "docsOAuth": {

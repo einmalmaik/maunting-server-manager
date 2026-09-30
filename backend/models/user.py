@@ -139,6 +139,9 @@ class User(Base):
     # sein Schritt danach liegt; belegt wird per bedingtem UPDATE
     # (`AuthService.verify_totp`). Bis 5.0.1 galt ein Code 90 s lang beliebig oft.
     two_factor_totp_last_step: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Speicher der Tresor-Cloud in Bytes. NULL heisst: die Vorgabe des Panels
+    # (`vault_cloud_quota_bytes`).
+    vault_quota_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     email_notifications: Mapped[bool] = mapped_column(Boolean, default=True)
     # Meldungen der KI im Panel — getrennt von den E-Mails, weil es zwei
