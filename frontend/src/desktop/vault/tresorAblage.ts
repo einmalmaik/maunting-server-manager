@@ -48,10 +48,12 @@ export interface StoredEncryptedEntry {
   /** Nur in der Warteschlange: der Cache-Eintrag vor dem Löschen, für den Konfliktfall. */
   vorher?: StoredEncryptedEntry
   /**
-   * Nur an einem Tombstone im Cache: die Blobs der gelöschten Datei samt
-   * Löschnachweis. Sie werden gelöscht, sobald der Server den Tombstone
-   * angenommen hat (siehe `tresorDateien.ts`). Lehnt er ab, ersetzt der Sync
-   * den Tombstone durch die alte Fassung, und die Aufträge sind mit weg.
+   * Nur im Cache: Blobs samt Löschnachweis, die weg können, sobald der
+   * Server genau diese Fassung angenommen hat. An einem Tombstone sind es die
+   * Blobs der gelöschten Datei, an einer bearbeiteten Datei die Fassung, die
+   * aus `frueher` herausfiel (siehe `tresorDateien.ts`). Lehnt der Server ein
+   * Löschen ab, ersetzt der Sync den Tombstone durch die alte Fassung, und
+   * die Aufträge sind mit weg.
    */
   loeschBlobs?: { id: string; loeschen: string }[]
 }

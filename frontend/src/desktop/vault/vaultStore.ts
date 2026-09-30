@@ -46,7 +46,9 @@ import {
   loeschungenAbarbeiten,
   uploadsFortsetzen,
   vorbereitungAbschliessen,
+  VERSIONEN,
   type DateiAngaben,
+  type DateiVersion,
 } from './tresorDateien'
 import { bildAngaben } from './tresorBilder'
 
@@ -632,7 +634,7 @@ interface VaultState {
   setSearchQuery: (q: string) => void
   setSelectedItemId: (id: string | null) => void
   createQuickPasswordEntry: (serviceName?: string) => Promise<VaultItem>
-  saveItem: (item: Partial<VaultItem> & { service: string }) => Promise<void>
+  saveItem: (item: Partial<VaultItem> & { service: string }, optionen?: { loeschBlobs?: { id: string; loeschen: string }[] }) => Promise<void>
   /** Legt einen Eintrag in den Papierkorb. Nach {@link PAPIERKORB_TAGE} Tagen wird er endgültig gelöscht. */
   trashItem: (id: string) => Promise<void>
   restoreItem: (id: string) => Promise<void>
@@ -647,6 +649,12 @@ interface VaultState {
   dateiHinzufuegen: (datei: File, ordner?: string) => Promise<string>
   ordnerAnlegen: (name: string, ordner?: string) => Promise<string>
   albumAnlegen: (name: string, eintraege: string[]) => Promise<string>
+  /**
+   * Ersetzt den Inhalt einer Datei (Editor). Die bisherige Fassung rückt nach
+   * `frueher`; was dort über `VERSIONEN` hinausgeht, wird gelöscht, sobald
+   * der Server die neue Fassung hat.
+   */
+  dateiErsetzen: (id: string, inhalt: Blob) => Promise<void>
   /** Nimmt Einträge in ein Album auf oder heraus; doppelte zählen einmal. */
   albumAendern: (id: string, aenderung: { hinzu?: string[]; weg?: string[] }) => Promise<void>
   toggleFavorite: (id: string) => Promise<void>
@@ -1284,7 +1292,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
     return newItem
   },
 
-  saveItem: async (itemData) => {
+  saveItem: async (itemData, optionen) => {
     const { userKey, bucketId, items } = get()
     if (!userKey || !bucketId) throw new Error(i18n.t('mss.vault.errors.locked'))
 
@@ -1344,9 +1352,20 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
     // Lokalen Cache aktualisieren
     let cachedBlobs = getStoredBlobs(bucketId)
-    const serverRev = cachedBlobs.find((b) => b.id === id)?.serverRev
+    const bisher = cachedBlobs.find((b) => b.id === id)
+    // Löschaufträge der vorigen Fassung, die noch nicht liefen, gehen mit:
+    // auch die neue Fassung zeigt nicht mehr auf diese Blobs.
+    const loeschBlobs = [...(bisher?.loeschBlobs ?? []), ...(optionen?.loeschBlobs ?? [])]
     cachedBlobs = cachedBlobs.filter((b) => b.id !== id)
-    cachedBlobs.push({ id, ciphertext, revision, is_deleted: false, stand: now, serverRev })
+    cachedBlobs.push({
+      id,
+      ciphertext,
+      revision,
+      is_deleted: false,
+      stand: now,
+      serverRev: bisher?.serverRev,
+      loeschBlobs: loeschBlobs.length > 0 ? loeschBlobs : undefined,
+    })
     blobsSchreiben(bucketId, cachedBlobs)
 
     // Pending Queue aktualisieren
@@ -1480,6 +1499,47 @@ export const useVaultStore = create<VaultState>((set, get) => {
     const id = window.crypto.randomUUID()
     await get().saveItem({ id, service: name, category: 'ordner', ordner })
     return id
+  },
+
+  dateiErsetzen: async (id, inhalt) => {
+    const { userKey, bucketId } = get()
+    if (!userKey || !bucketId) throw new Error(i18n.t('mss.vault.errors.locked'))
+    const alt = get().items.find((i) => i.id === id)
+    if (!alt?.datei) throw new Error(i18n.t('mss.vault.dateien.oeffnenFehler'))
+    const { vorschau, miniatur, ...bild } = await bildAngaben(inhalt)
+    const neu = await dateiVorbereiten(inhalt, userKey, bucketId, id, () => !sitzungOffen(userKey, bucketId), { vorschau, miniatur })
+    try {
+      if (!sitzungOffen(userKey, bucketId)) throw new Error(i18n.t('mss.vault.errors.locked'))
+      // Frisch lesen: während des Verschlüsselns kann ein Sync die Datei geändert haben.
+      const jetzt = get().items.find((i) => i.id === id)
+      if (!jetzt?.datei) throw new Error(i18n.t('mss.vault.dateien.oeffnenFehler'))
+      const { frueher = [], ...bisher } = jetzt.datei
+      const versionen: DateiVersion[] = [
+        { typ: bisher.typ, ersetzt: Date.now(), original: bisher.original, vorschau: bisher.vorschau, miniatur: bisher.miniatur },
+        ...frueher,
+      ]
+      const weg = versionen.slice(VERSIONEN).flatMap((v) => [v.original, v.vorschau, v.miniatur])
+      await get().saveItem(
+        {
+          ...jetzt,
+          datei: {
+            // Aufnahmezeit und Kamera bleiben: ein gedrehtes Foto ist noch dasselbe.
+            ...bisher,
+            ...bild,
+            typ: inhalt.type || bisher.typ,
+            geaendert: Date.now(),
+            original: neu.original,
+            vorschau: neu.vorschau,
+            miniatur: neu.miniatur,
+            frueher: versionen.slice(0, VERSIONEN),
+          },
+        },
+        { loeschBlobs: weg.map((k) => ({ id: k.id, loeschen: k.loeschen })) },
+      )
+    } finally {
+      vorbereitungAbschliessen(neu)
+    }
+    void uploadsFortsetzen(bucketId)
   },
 
   albumAnlegen: async (name, eintraege) => {
@@ -1655,15 +1715,15 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
           cachedBlobs = cachedBlobs.filter((b) => b.id !== entry.id)
           const serverRev = entry.revision
+          // Das Echo der eigenen Fassung behält deren Löschaufträge.
+          const loeschBlobs = bekannt?.ciphertext === entry.ciphertext ? bekannt.loeschBlobs : undefined
           if (befund.art === 'grab') {
-            // Das Echo des eigenen Tombstones behält dessen Löschaufträge.
-            const loeschBlobs = bekannt?.ciphertext === entry.ciphertext ? bekannt.loeschBlobs : undefined
             cachedBlobs.push({ id: entry.id, ciphertext: entry.ciphertext, revision: entry.revision, is_deleted: true, stand, serverRev, loeschBlobs })
             currentItems = currentItems.filter((i) => i.id !== entry.id)
             continue
           }
 
-          cachedBlobs.push({ id: entry.id, ciphertext: entry.ciphertext, revision: entry.revision, is_deleted: false, stand, serverRev })
+          cachedBlobs.push({ id: entry.id, ciphertext: entry.ciphertext, revision: entry.revision, is_deleted: false, stand, serverRev, loeschBlobs })
           const idx = currentItems.findIndex((i) => i.id === entry.id)
           if (idx >= 0) {
             currentItems[idx] = befund.item

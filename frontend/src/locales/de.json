@@ -6174,6 +6174,16 @@
         "aehnlicheGruppe_other": "{{count}} ähnliche Fotos",
         "aehnlicheSuche": "Fotos werden auf diesem Gerät verglichen",
         "keineAehnlichen": "Keine ähnlichen Fotos gefunden."
+      },
+      "bearbeiten": {
+        "knopf": "Bearbeiten",
+        "titel": "{{name}} bearbeiten",
+        "gespeichert": "Neue Fassung gespeichert. Die vorige bleibt erhalten.",
+        "fehler": "Die Änderung ließ sich nicht speichern.",
+        "verwerfen": "Ungespeicherte Änderungen verwerfen?",
+        "links": "Nach links drehen",
+        "rechts": "Nach rechts drehen",
+        "zuruecksetzen": "Zurücksetzen"
       }
     },
     "aktion": {

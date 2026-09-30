@@ -71,6 +71,35 @@ export interface DateiAngaben {
   /** Bei Bildern und Videos ein Vorschaubild, sonst leer, aber immer gleich groß. */
   vorschau: BlobKopf
   miniatur: BlobKopf
+  /**
+   * Frühere Fassungen nach einer Bearbeitung, neueste zuerst, höchstens
+   * `VERSIONEN`. Sie bleiben, damit ein Gerät mit altem Stand, das den
+   * Eintrag noch einmal speichert, auf Blobs zeigt, die es noch gibt.
+   */
+  frueher?: DateiVersion[]
+}
+
+export interface DateiVersion {
+  typ: string
+  /** Wann diese Fassung ersetzt wurde (ms). */
+  ersetzt: number
+  original: BlobKopf
+  vorschau: BlobKopf
+  miniatur: BlobKopf
+}
+
+export const VERSIONEN = 5
+
+function istVersion(wert: unknown): wert is DateiVersion {
+  if (!wert || typeof wert !== 'object') return false
+  const v = wert as Record<string, unknown>
+  return (
+    typeof v.typ === 'string' &&
+    typeof v.ersetzt === 'number' &&
+    istBlobKopf(v.original) &&
+    istBlobKopf(v.vorschau) &&
+    istBlobKopf(v.miniatur)
+  )
 }
 
 export function istDateiAngaben(wert: unknown): wert is DateiAngaben {
@@ -87,12 +116,14 @@ export function istDateiAngaben(wert: unknown): wert is DateiAngaben {
     (d.kamera === undefined || typeof d.kamera === 'string') &&
     istBlobKopf(d.original) &&
     istBlobKopf(d.vorschau) &&
-    istBlobKopf(d.miniatur)
+    istBlobKopf(d.miniatur) &&
+    (d.frueher === undefined || (Array.isArray(d.frueher) && d.frueher.length <= 50 && d.frueher.every(istVersion)))
   )
 }
 
+/** Alle Blobs einer Datei, frühere Fassungen eingeschlossen. */
 export function dateiBlobs(angaben: DateiAngaben): BlobKopf[] {
-  return [angaben.original, angaben.vorschau, angaben.miniatur]
+  return [angaben, ...(angaben.frueher ?? [])].flatMap((f) => [f.original, f.vorschau, f.miniatur])
 }
 
 interface UploadZeile {
@@ -527,13 +558,16 @@ export async function cacheEntfernen(blobId: string): Promise<void> {
  * angenommen hat: der Tombstone steht im Cache, und in der Warteschlange ist
  * für den Eintrag nichts mehr offen. Hat der Server abgelehnt, steht im Cache
  * wieder die alte Fassung, und es gibt nichts zu tun.
+ *
+ * Genauso bei einer bearbeiteten Datei: die Fassung, die aus `frueher`
+ * herausfällt, verschwindet erst, wenn der Server den neuen Eintrag hat.
  */
 export const loeschungenAbarbeiten = einzeln(loeschen)
 
 async function loeschen(bucket: string): Promise<void> {
   if (!ablageGeladen(bucket)) return
   const offen = new Set(warteschlangeLesen(bucket).map((e) => e.id))
-  const faellig = blobsLesen(bucket).filter((e) => e.is_deleted && e.loeschBlobs?.length && !offen.has(e.id))
+  const faellig = blobsLesen(bucket).filter((e) => e.loeschBlobs?.length && !offen.has(e.id))
   const db = await ablageDb()
   for (const grab of faellig) {
     for (const blob of grab.loeschBlobs ?? []) {

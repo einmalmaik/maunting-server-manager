@@ -18,6 +18,7 @@ import {
   CheckSquare,
   Clock,
   Copy,
+  Crop,
   Download,
   Film,
   FolderInput,
@@ -42,6 +43,7 @@ import { ansichtOeffnen, ansichtSchliessen, blobLesen, useTresorUploads } from '
 import { miniaturenVorladen, useMiniatur } from './tresorMiniaturen'
 import { speichernUnter } from './tresorAnzeige'
 import { gruppieren, hashesBerechnen } from './tresorAehnlich'
+import { BEARBEITBAR, TresorBildeditor } from './TresorBildeditor'
 
 type Filter = 'alle' | 'videos' | 'kuerzlich' | 'aehnlich' | 'alben'
 
@@ -740,6 +742,7 @@ function GalerieLichtbox({
   const setArchived = useVaultStore((s) => s.setArchived)
   const [anzeige, setAnzeige] = useState<Anzeige>({ id: item.id, url: null, original: false, anteil: null, fehler: false })
   const [spielt, setSpielt] = useState(false)
+  const [bearbeiten, setBearbeiten] = useState(false)
   const laufend = useRef<AbortController | null>(null)
   const datei = item.datei!
   const video = istVideo(item)
@@ -790,7 +793,8 @@ function GalerieLichtbox({
     if (aktuell.current.datei.vorschau.echt > 0) void laden('vorschau')
     else if (!aktuell.current.datei.typ.startsWith('video/')) void laden('original')
     return () => laufend.current?.abort()
-  }, [item.id, laden])
+    // Nach dem Bearbeiten hat die Datei ein neues Original und damit eine neue Vorschau.
+  }, [item.id, datei.original.id, laden])
 
   // Beim Schließen die letzte Ansicht freigeben.
   const letzteUrl = useRef<string | null>(null)
@@ -871,6 +875,10 @@ function GalerieLichtbox({
     )
   }
 
+  if (bearbeiten && anzeige.url) {
+    return <TresorBildeditor item={item} vorschauUrl={anzeige.url} onFertig={() => setBearbeiten(false)} />
+  }
+
   return (
     <Lichtbox
       kennung={item.id}
@@ -887,6 +895,19 @@ function GalerieLichtbox({
       info={info}
       aktionen={
         <>
+          {BEARBEITBAR.includes(datei.typ) && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={knopf}
+              aria-label={t('mss.vault.bearbeiten.knopf')}
+              disabled={!anzeige.url}
+              onClick={() => setBearbeiten(true)}
+            >
+              <Crop className="h-4 w-4" />
+            </Button>
+          )}
           <Button type="button" variant="ghost" size="icon" className={knopf} aria-label={t('mss.vault.dateien.speichern')} onClick={() => void speichern()}>
             <Download className="h-4 w-4" />
           </Button>

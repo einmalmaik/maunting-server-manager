@@ -6174,6 +6174,16 @@
         "aehnlicheGruppe_other": "{{count}} similar photos",
         "aehnlicheSuche": "Comparing photos on this device",
         "keineAehnlichen": "No similar photos found."
+      },
+      "bearbeiten": {
+        "knopf": "Edit",
+        "titel": "Edit {{name}}",
+        "gespeichert": "New version saved. The previous one is kept.",
+        "fehler": "The change could not be saved.",
+        "verwerfen": "Discard unsaved changes?",
+        "links": "Rotate left",
+        "rechts": "Rotate right",
+        "zuruecksetzen": "Reset"
       }
     },
     "aktion": {

@@ -9,7 +9,7 @@ import 'fake-indexeddb/auto'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { useVaultStore, type VaultBlindSyncPayload } from './vaultStore'
 import { ablageDb, ablageLaden, ablageSchliessen, BLOB_CACHE, UPLOAD_CHUNKS, UPLOADS } from './tresorAblage'
-import { blobLesen, loeschungenAbarbeiten, miniaturenLesen, uploadsFortsetzen, useTresorUploads } from './tresorDateien'
+import { blobLesen, loeschungenAbarbeiten, miniaturenLesen, uploadsFortsetzen, useTresorUploads, VERSIONEN } from './tresorDateien'
 import { miniaturFreigeben, miniaturHolen } from './tresorMiniaturen'
 import { CHUNK_KLARTEXT, CHUNK_UEBERHANG } from './tresorDatei'
 
@@ -479,6 +479,60 @@ describe('Tresor-Dateien', () => {
       const danach = await miniaturHolen(anfragen[0].kopf, anfragen[0].eintragId, neu)
       expect(danach).not.toBe(urls[0])
       expect(danach).toMatch(/^blob:/)
+    })
+  })
+
+  describe('Bearbeiten', () => {
+    const text = (inhalt: string) => new Blob([inhalt], { type: 'text/plain' })
+    const lesen = async (userKey: CryptoKey, id: string) => {
+      const item = useVaultStore.getState().items.find((i) => i.id === id)!
+      return (await blobLesen(item.datei!.original, id, userKey, item.datei!.typ)).text()
+    }
+
+    it('behält frühere Fassungen und löscht erst, was über die Grenze fällt', async () => {
+      const server = serverStarten()
+      const userKey = await tresorOeffnen()
+      const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Fassung 0'], 'notiz.txt', { type: 'text/plain' }))
+      await allesErledigt()
+      const erste = useVaultStore.getState().items.find((i) => i.id === id)!.datei!
+
+      for (let n = 1; n <= VERSIONEN; n++) {
+        await useVaultStore.getState().dateiErsetzen(id, text(`Fassung ${n}`))
+        await allesErledigt()
+      }
+      expect(server.geloescht).toEqual([])
+      const datei = useVaultStore.getState().items.find((i) => i.id === id)!.datei!
+      expect(datei.frueher).toHaveLength(VERSIONEN)
+      expect(datei.frueher![VERSIONEN - 1].original.id).toBe(erste.original.id)
+      expect(await lesen(userKey, id)).toBe(`Fassung ${VERSIONEN}`)
+
+      // Offline bearbeitet: die älteste Fassung fällt heraus, bleibt aber, bis der Server die neue hat.
+      server.offline = true
+      await useVaultStore.getState().dateiErsetzen(id, text('Fassung neu'))
+      await vi.waitFor(() => expect(useVaultStore.getState().syncStatus).toBe('offline'))
+      await loeschungenAbarbeiten(BUCKET)
+      expect(server.geloescht).toEqual([])
+
+      server.offline = false
+      await useVaultStore.getState().syncWithServer()
+      await allesErledigt()
+      await vi.waitFor(() => expect(new Set(server.geloescht)).toEqual(new Set([erste.original.id, erste.vorschau.id, erste.miniatur.id])))
+      expect(await lesen(userKey, id)).toBe('Fassung neu')
+    })
+
+    it('löscht mit der Datei auch alle früheren Fassungen', async () => {
+      const server = serverStarten()
+      await tresorOeffnen()
+      const id = await useVaultStore.getState().dateiHinzufuegen(new File(['a'], 'a.txt', { type: 'text/plain' }))
+      await allesErledigt()
+      await useVaultStore.getState().dateiErsetzen(id, text('b'))
+      await allesErledigt()
+      const alle = [...server.blobs.keys()]
+      expect(alle).toHaveLength(6)
+
+      await useVaultStore.getState().deleteItem(id)
+      await allesErledigt()
+      await vi.waitFor(() => expect(new Set(server.geloescht)).toEqual(new Set(alle)))
     })
   })
 })

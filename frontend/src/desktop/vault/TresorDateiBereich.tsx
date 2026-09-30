@@ -31,6 +31,7 @@ import { useVaultStore, type VaultItem } from './vaultStore'
 import { ansichtOeffnen, ansichtSchliessen, blobLesen, useTresorUploads } from './tresorDateien'
 import { speicherAbfragen, type TresorSpeicher } from './tresorBlobApi'
 import { anzeigeArt, speichernUnter } from './tresorAnzeige'
+import { TresorTexteditor } from './TresorTexteditor'
 
 function dateiIcon(typ: string) {
   if (typ.startsWith('image/')) return FileImage
@@ -47,6 +48,7 @@ interface Geoeffnet {
   text: string | null
   anteil: number
   fehler: boolean
+  bearbeiten?: boolean
 }
 
 export function TresorDateiBereich() {
@@ -288,8 +290,27 @@ export function TresorDateiBereich() {
         </ul>
       )}
 
-      <Dialog open={!!geoeffnet} onOpenChange={(offen) => !offen && setGeoeffnet(null)}>
-        {geoeffnet && (
+      {/* Beim Bearbeiten schließt nur der Editor selbst, damit nichts Ungespeichertes verloren geht. */}
+      <Dialog open={!!geoeffnet} onOpenChange={(offen) => !offen && !geoeffnet?.bearbeiten && setGeoeffnet(null)}>
+        {geoeffnet?.bearbeiten && geoeffnet.text !== null ? (
+          <DialogContent className="max-w-5xl" showCloseButton={false}>
+            <div className="p-3">
+              <TresorTexteditor
+                item={geoeffnet.item}
+                text={geoeffnet.text}
+                onFertig={(gespeichert) => {
+                  if (gespeichert === null) {
+                    setGeoeffnet((g) => (g ? { ...g, bearbeiten: false } : g))
+                    return
+                  }
+                  // Die Ansicht zeigt ab jetzt die neue Fassung; die alte URL verfällt mit dem Wechsel.
+                  const url = ansichtOeffnen(new Blob([gespeichert], { type: geoeffnet.item.datei?.typ || 'text/plain' }))
+                  setGeoeffnet((g) => (g ? { ...g, bearbeiten: false, text: gespeichert, url } : g))
+                }}
+              />
+            </div>
+          </DialogContent>
+        ) : geoeffnet && (
           <DialogContent className="max-w-4xl">
             <DialogHeader>
               <DialogTitle className="truncate">{geoeffnet.item.service}</DialogTitle>
@@ -314,7 +335,13 @@ export function TresorDateiBereich() {
               )}
             </div>
             {geoeffnet.url && (
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-2">
+                {art === 'text' && geoeffnet.text !== null && (
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setGeoeffnet((g) => (g ? { ...g, bearbeiten: true } : g))}>
+                    <Pencil className="mr-1 h-3.5 w-3.5" />
+                    {t('mss.vault.bearbeiten.knopf')}
+                  </Button>
+                )}
                 <Button type="button" size="sm" onClick={() => speichernUnter(geoeffnet.url!, geoeffnet.item.service)}>
                   <Download className="mr-1 h-3.5 w-3.5" />
                   {t('mss.vault.dateien.speichern')}
