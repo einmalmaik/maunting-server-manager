@@ -21,10 +21,13 @@ import { useTranslation } from 'react-i18next'
 import { Button, Dropdown } from '@/Singra/UI'
 import { Input } from '@/components/ui/Input'
 import { api } from '@/api/client'
+import { MessengerSperrschirm } from '@/components/social/MessengerSperrschirm'
+import { MessengerVerschlossenError } from '@/services/lokaleVersiegelung'
+import { useMessengerSperre } from '@/services/messengerSperre'
 import { useAuthStore } from '@/stores/authStore'
 import { QrScannerModal } from './QrScannerModal'
 import { WakewordEinrichtung } from './WakewordEinrichtung'
-import { erreichbar, koppeln } from './auth'
+import { erreichbar, geraetMelden, koppeln } from './auth'
 import { konfigSpeichern, type AppKonfig } from './tauri'
 
 export type Schritt = 'backend' | 'kopplung' | 'personalisierung' | 'sandbox' | 'wakeword'
@@ -267,6 +270,41 @@ function SchrittKopplung({
    * soll, und dort vergleicht man mit genau dieser Nummer.
    */
   const [nummer, setNummer] = useState<string | null>(null)
+  /**
+   * Gekoppelt, aber der Geräteschlüssel liegt hinter dem Messenger-PIN. Ohne
+   * ihn taucht das Gerät nicht in der Freigabeliste auf und bekommt weder
+   * Nachrichten noch den Notizschlüssel — also erst entsperren, dann melden.
+   */
+  const [wartetAufPin, setWartetAufPin] = useState(false)
+  /** Gekoppelt, aber das Melden scheiterte anders: sichtbar, mit neuem Versuch. */
+  const [meldeFehler, setMeldeFehler] = useState<string | null>(null)
+  const entsperrt = useMessengerSperre((s) => s.entsperrt)
+
+  async function melden() {
+    setMeldeFehler(null)
+    setLaeuft(true)
+    try {
+      setNummer(await geraetMelden(code.trim(), name.trim()))
+      setWartetAufPin(false)
+    } catch (e) {
+      if (e instanceof MessengerVerschlossenError) {
+        setWartetAufPin(true)
+        // Der Store glaubte „offen", der Schlüssel ist es nicht: gleichziehen.
+        void useMessengerSperre.getState().initialisiere()
+      } else {
+        setWartetAufPin(false)
+        setMeldeFehler(e instanceof Error ? e.message : String(e))
+      }
+    } finally {
+      setLaeuft(false)
+    }
+  }
+
+  useEffect(() => {
+    if (wartetAufPin && entsperrt) void melden()
+    // `melden` liest nur Code und Namen, die hier nicht mehr wechseln.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wartetAufPin, entsperrt])
 
   async function fortfahren() {
     const frischerStand = { ...(stand ?? {}), eingerichtet: true }
@@ -297,7 +335,11 @@ function SchrittKopplung({
         setNummer(ergebnis.sicherheitsnummer)
         return
       }
-      await fortfahren()
+      if (ergebnis.gesperrt) {
+        setWartetAufPin(true)
+        return
+      }
+      setMeldeFehler(ergebnis.fehler ?? '')
     } catch (e) {
       setFehler(e instanceof Error ? e.message : String(e))
     } finally {
@@ -309,6 +351,45 @@ function SchrittKopplung({
     const sauber = gescannterCode.trim()
     setCode(sauber)
     void absenden(sauber)
+  }
+
+  if (wartetAufPin && !nummer) {
+    return (
+      <div className="flex flex-col gap-4">
+        <div>
+          <p className="text-sm font-medium text-on-surface">{t('mss.wizard.pinTitel')}</p>
+          <p className="mt-1 text-sm text-on-surface-variant">{t('mss.wizard.pinHinweis')}</p>
+        </div>
+        <MessengerSperrschirm schlicht />
+        <div className="flex justify-end">
+          <Button type="button" variant="secondary" onClick={() => void weiterNachNummer()} disabled={laeuft}>
+            {t('mss.wizard.pinSpaeter')}
+          </Button>
+        </div>
+        <Fehlerzeile text={fehler} />
+      </div>
+    )
+  }
+
+  if (meldeFehler !== null && !nummer) {
+    return (
+      <div className="flex flex-col gap-4">
+        <div>
+          <p className="text-sm font-medium text-on-surface">{t('mss.wizard.meldenFehlerTitel')}</p>
+          <p className="mt-1 text-sm text-on-surface-variant">{t('mss.wizard.meldenFehlerHinweis')}</p>
+        </div>
+        <Fehlerzeile text={meldeFehler || null} />
+        <Fehlerzeile text={fehler} />
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={() => void weiterNachNummer()} disabled={laeuft}>
+            {t('mss.wizard.pinSpaeter')}
+          </Button>
+          <Button type="button" onClick={() => void melden()} disabled={laeuft}>
+            {t('mss.wizard.nochmal')}
+          </Button>
+        </div>
+      </div>
+    )
   }
 
   if (nummer) {

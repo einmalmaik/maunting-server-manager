@@ -43,7 +43,7 @@ import { useMessengerSperreBereitschaft } from '@/hooks/useMessengerSperre'
 import { usePresenceAndActivity } from '@/hooks/usePresenceAndActivity'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
-import { abmelden } from './auth'
+import { ABGEMELDET, abmelden } from './auth'
 import { Einstellungen } from './Einstellungen'
 import { Splash } from './Splash'
 import { OverlayFenster } from './OverlayFenster'
@@ -297,6 +297,16 @@ export function DesktopApp() {
     })()
   }, [t])
 
+  // Abgemeldet: zurück zur Kopplung, gleich ob online oder offline.
+  useEffect(() => {
+    const zurKopplung = () => {
+      setIsOffline(false)
+      setPhase('kopplung')
+    }
+    window.addEventListener(ABGEMELDET, zurKopplung)
+    return () => window.removeEventListener(ABGEMELDET, zurKopplung)
+  }, [])
+
   // Regelmäßiges Lebenszeichen des gekoppelten Geräts an das Backend
   useEffect(() => {
     if (!sitzungSteht || isOffline) return
@@ -334,6 +344,12 @@ export function DesktopApp() {
     const nachfragen = async () => {
       const pruefung = await stillAnmeldenDetail(8000)
       if (!aktiv || pruefung.status === 'offline') return
+      if (pruefung.grund === 'kein_token') {
+        // Abgemeldet: kein Token, auf das ein naechster Takt hoffen koennte.
+        setIsOffline(false)
+        setPhase('kopplung')
+        return
+      }
       if (pruefung.status === 'abgelehnt') {
         // Nicht sofort die Kopplung verwerfen: Bei vorübergehenden Störungen bleibt
         // das gekoppelte Gerät offline und versucht es im nächsten Takt erneut.
@@ -357,7 +373,12 @@ export function DesktopApp() {
       // wechseln, damit Tresor, Kalender und Notizen lokal benutzbar bleiben.
       void (async () => {
         const pruefung = await stillAnmeldenDetail(3000)
-        if (pruefung.status === 'abgelehnt') {
+        if (pruefung.grund === 'kein_token') {
+          // Nach dem Abmelden ist der Tresor leer: zurueck zur Kopplung, sofort.
+          // Bis 5.0.3 landete die App hier im Offline-Modus und kam erst nach
+          // einem Neustart zur Kopplung.
+          setPhase('kopplung')
+        } else if (pruefung.status === 'abgelehnt') {
           setIsOffline(true)
         } else if (pruefung.status === 'offline') {
           setIsOffline(true)

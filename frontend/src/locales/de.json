@@ -142,6 +142,22 @@
     "readOnly": "Nur lesen"
   },
   "notes": {
+    "schluesselLage": {
+      "gesperrt": {
+        "titel": "Dieses Gerät kann deine Notizen noch nicht lesen",
+        "text": "Sein Geräteschlüssel ist mit deinem Messenger-PIN gesichert. Entsperre den Messenger einmal, dann meldet sich das Gerät und kann freigegeben werden. Bis dahin kann es die Notizen und Termine deiner anderen Geräte nicht lesen.",
+        "link": "Messenger öffnen und entsperren"
+      },
+      "freigabe": {
+        "titel": "Dieses Gerät wartet auf Freigabe",
+        "text": "Gib es auf einem freigegebenen Gerät frei, im Panel unter Profil → Geräte. Bis dahin kann es die Notizen und Termine deiner anderen Geräte nicht lesen, und was du hier schreibst, sehen sie nicht.",
+        "link": "Zu Profil → Geräte"
+      },
+      "schluessel": {
+        "titel": "Wartet auf den gemeinsamen Schlüssel",
+        "text": "Dieses Gerät hat den Schlüssel für Notizen und Termine bei deinen anderen Geräten angefragt. Öffne die Notizen auf einem davon, dann kommt er an."
+      }
+    },
     "title": "Notizen",
     "newNote": "Neue Notiz",
     "newNoteShort": "Neu",
@@ -3650,8 +3666,8 @@
     },
     "confirmDeleteWordLabel": "Tippe delete zur Bestätigung (nicht kopierbar)",
     "e2eeDevices": {
-      "title": "Geräte mit Nachrichtenzugriff",
-      "description": "Jedes Gerät hat einen eigenen Schlüssel, der es nie verlässt. Nachrichten an dich werden für jedes Gerät in dieser Liste einzeln verschlüsselt.",
+      "title": "Freigegebene Geräte",
+      "description": "Jedes Gerät hat einen eigenen Geräteschlüssel, der es nie verlässt. Nur freigegebene Geräte können deine Nachrichten, Notizen und Termine lesen.",
       "thisDevice": "Dieses Gerät",
       "unnamed": "Unbenanntes Gerät",
       "empty": "Kein Gerät angemeldet.",
@@ -3664,7 +3680,7 @@
       "approve": "Freigeben",
       "approved": "Gerät freigegeben.",
       "safetyNumber": "Sicherheitsnummer",
-      "approvalHelp": "Ein neues Gerät bekommt erst Nachrichten, wenn du es einmal auf einem freigegebenen Gerät bestätigst. Vergleiche vorher die Sicherheitsnummer mit der, die das neue Gerät zeigt.",
+      "approvalHelp": "Ein neues Gerät gibst du auf einem schon freigegebenen frei. Vergleiche vorher die Sicherheitsnummer mit der auf dem neuen Gerät.",
       "thisDevicePending": "Dieses Gerät wartet auf Freigabe. Öffne auf einem deiner anderen Geräte Profil → Geräte, vergleiche die Sicherheitsnummer und tippe auf „Freigeben“.",
       "resetTitle": "Alle anderen Geräte verloren?",
       "resetHelp": "Dann kannst du neu beginnen: alle anderen Geräte werden abgemeldet und entfernt, dieses wird dein erstes. Alte Nachrichten bleiben unlesbar, und deine Kontakte sehen eine Warnung.",
@@ -6109,7 +6125,13 @@
       "koppelt": "Koppelt …",
       "koppeln": "Koppeln",
       "sicherheitsnummerTitel": "Sicherheitsnummer dieses Geräts",
-      "sicherheitsnummerHinweis": "Das Panel zeigt gleich dieselbe Nummer und fragt, ob es deinen Verlauf an dieses Gerät übergeben soll. Bestätige dort nur, wenn beide Nummern übereinstimmen.",
+      "sicherheitsnummerHinweis": "Gib dieses Gerät im Panel unter Profil → Geräte frei. Vergleiche vorher die Nummer dort mit dieser. Fragt das Panel, ob es deinen Verlauf hierher übergeben soll, bestätige nur bei gleicher Nummer.",
+      "pinTitel": "Messenger-PIN eingeben",
+      "pinHinweis": "Der Geräteschlüssel dieses Geräts ist mit deinem Messenger-PIN gesichert. Entsperre ihn einmal, dann erscheint das Gerät in deiner Geräteliste zum Freigeben.",
+      "pinSpaeter": "Später",
+      "meldenFehlerTitel": "Geräteschlüssel nicht gemeldet",
+      "meldenFehlerHinweis": "Die Kopplung steht, aber das Gerät erscheint noch nicht in deiner Geräteliste. Ohne Freigabe kann es keine Nachrichten, Notizen und Termine lesen.",
+      "nochmal": "Nochmal versuchen",
       "personalisierungErklaerung": "Gib deinem Assistenten einen Namen — so sprichst du ihn an, und so meldet er sich. Beides gilt überall: hier und im Panel.",
       "agentnameLabel": "Name des Assistenten",
       "agentnameHinweis": "2–32 Zeichen; leer lassen für den Standardnamen Assistent.",

@@ -5,6 +5,7 @@ import { useCallStore, setzeAnrufIdentitaet } from '@/stores/useCallStore'
 import { deviceLabelKey, getDeviceId } from '@/lib/deviceIdentity'
 import { useAuthStore } from '@/stores/authStore'
 import { eigenesGeraet, geraetVeroeffentlichen } from '@/services/e2eeGeraet'
+import { useMessengerSperre } from '@/services/messengerSperre'
 import type { GruppenAnsicht } from '@/services/gruppenName'
 
 interface CrossDeviceCallBannerProps {
@@ -72,6 +73,10 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
 
   // Globale E2EE-Anrufidentität beim Start und Benutzerwechsel auflösen,
   // damit Anrufe auch außerhalb des Messengers angenommen und entschlüsselt werden können.
+  // Mit Messenger-PIN liegt der Geräteschlüssel beim Start versiegelt, und das
+  // Melden scheitert. Nach dem Entsperren noch einmal: sonst kommt das Gerät
+  // nie in die Freigabeliste und bekommt nie den Notizschlüssel (bis 5.0.3).
+  const messengerOffen = useMessengerSperre((s) => s.entsperrt)
   useEffect(() => {
     if (!user?.id) return
     let active = true
@@ -89,7 +94,7 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
       })
       .catch(() => {})
     return () => { active = false }
-  }, [user?.id])
+  }, [user?.id, messengerOffen])
 
   // Beim Mounten und zyklisch (alle 4s) nachsehen, ob ein eingehender oder aktiver Anruf vorliegt
   useEffect(() => {

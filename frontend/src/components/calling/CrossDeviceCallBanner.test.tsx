@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import type { ActiveCallInfo, PendingGroupCallInfo } from '@/api/calls'
@@ -25,7 +25,16 @@ vi.mock('@/stores/useCallStore', () => ({
   useCallStore: () => mockStore,
 }))
 
+const { veroeffentlichen } = vi.hoisted(() => ({ veroeffentlichen: vi.fn() }))
+vi.mock('@/services/e2eeGeraet', () => ({
+  geraetVeroeffentlichen: veroeffentlichen,
+  eigenesGeraet: vi.fn(async () => ({ paar: { publicKeyJwk: 'pub', privateKeyJwk: 'priv' } })),
+}))
+
 const { CrossDeviceCallBanner } = await import('./CrossDeviceCallBanner')
+const { useAuthStore } = await import('@/stores/authStore')
+const { useMessengerSperre } = await import('@/services/messengerSperre')
+const { MessengerVerschlossenError } = await import('@/services/lokaleVersiegelung')
 
 describe('CrossDeviceCallBanner', () => {
   const MOCK_CALL: ActiveCallInfo = {
@@ -55,6 +64,25 @@ describe('CrossDeviceCallBanner', () => {
 
   afterEach(() => {
     cleanup()
+    useAuthStore.setState({ user: null })
+  })
+
+  it('meldet das Geraet nach, sobald der Messenger entsperrt wird', async () => {
+    // Mit Messenger-PIN liegt der Geraeteschluessel beim Start versiegelt. Bis
+    // 5.0.3 versuchte die App es genau einmal, beim Anmelden: das Geraet kam
+    // nie in die Freigabeliste und bekam nie den Notizschluessel.
+    veroeffentlichen.mockReset()
+    veroeffentlichen.mockRejectedValueOnce(new MessengerVerschlossenError())
+    veroeffentlichen.mockResolvedValue({})
+    useMessengerSperre.setState({ entsperrt: false })
+    useAuthStore.setState({ user: { id: 7, username: 'anna' } as never })
+    render(<CrossDeviceCallBanner />)
+    await vi.waitFor(() => expect(veroeffentlichen).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      useMessengerSperre.setState({ entsperrt: true })
+    })
+    await vi.waitFor(() => expect(veroeffentlichen).toHaveBeenCalledTimes(2))
   })
 
   it('rendert nichts wenn kein geräteübergreifender Anruf vorliegt', () => {

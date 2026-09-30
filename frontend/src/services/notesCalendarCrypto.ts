@@ -164,6 +164,28 @@ export function clearNotesKeyCache(): void {
 }
 
 /**
+ * Ein anderes Fenster derselben Ablage hat den Schlüssel gewechselt.
+ *
+ * Die Desktop-App hat Hauptfenster und Overlay, jedes mit eigenem Speicher.
+ * Bis 5.0.4 schrieb das eine weiter mit dem Schlüssel, den es zuerst gelesen
+ * hatte, nachdem das andere den des Kontos übernommen hatte — für die übrigen
+ * Geräte Blob. `storage` kommt nur in den *anderen* Fenstern an.
+ */
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (!e.key?.startsWith(STORAGE_KEY_PREFIX)) return
+    const userId = Number(e.key.slice(STORAGE_KEY_PREFIX.length))
+    if (!Number.isInteger(userId)) return
+    keyCache.delete(userId)
+    rawKeyMemoryStore.delete(userId)
+    letzterAbgleich.delete(userId)
+    // Dieselbe Meldung wie beim Übernehmen hier: Notizen und Kalender dieses
+    // Fensters entschlüsseln neu.
+    window.dispatchEvent(new CustomEvent('msm:notes-key-updated', { detail: { userId } }))
+  })
+}
+
+/**
  * Prüft synchron, ob für diesen Benutzer bereits ein lokaler Notizenschlüssel vorliegt.
  */
 export function hasUserNotesKey(userId: number = 1): boolean {
@@ -516,7 +538,8 @@ const ABGLEICH_FRIST_MS = 60 * 1000
  */
 const neuBelegt = new Set<number>()
 
-async function eigenerAbdruck(userId: number): Promise<string | null> {
+/** Der Abdruck des Schlüssels, mit dem dieses Gerät schreibt, oder `null`. */
+export async function eigenerAbdruck(userId: number): Promise<string | null> {
   const roh = exportUserNotesKey(userId)
   return roh ? abdruckVon(roh) : null
 }

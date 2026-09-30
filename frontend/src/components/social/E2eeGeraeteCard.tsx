@@ -78,6 +78,17 @@ export function E2eeGeraeteCard() {
     void laden()
   }, [laden])
 
+  // Ein Gerät meldet sich, wird freigegeben oder entfernt: das Backend sagt es
+  // allen offenen Listen des Kontos. Bis 5.0.3 erschien ein frisch
+  // gekoppeltes Gerät erst nach dem Neuladen der Seite zum Freigeben.
+  useEffect(() => {
+    const beiEreignis = (e: Event) => {
+      if ((e as CustomEvent<{ entity?: string }>).detail?.entity === 'e2ee_devices') void laden()
+    }
+    window.addEventListener('msm:sync-event', beiEreignis)
+    return () => window.removeEventListener('msm:sync-event', beiEreignis)
+  }, [laden])
+
   useEffect(() => {
     eigenesGeraet()
       .then((g) => setMeineKennung(g.kennung))

@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/Button'
 import { Switch } from '@/components/ui/Switch'
 import { teamsApi, type Team } from '@/api/teams'
 import { Spinner } from '@/components/ui/Spinner'
+import { NotizschluesselHinweis } from '@/components/notes/NotizschluesselHinweis'
 import {
   loadNotesOfflineFirst,
   saveNoteOffline,
@@ -337,6 +338,8 @@ export function Notes() {
           <span className="sm:hidden">{t('notes.newNoteShort')}</span>
         </Button>
       </div>
+
+      <NotizschluesselHinweis />
 
       {/* ── Werkzeugleiste: Suche & Filter ── */}
       <div className="flex flex-col gap-2.5 bg-surface-container-low/80 border border-outline-variant/30 rounded-2xl p-2.5 sm:p-3 shadow-sm backdrop-blur-sm">

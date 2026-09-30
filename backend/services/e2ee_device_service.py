@@ -109,7 +109,7 @@ def veroeffentlichen(
         device_id=kennung,
         public_key_jwk=public_key_jwk,
         signing_public_key_jwk=signatur or None,
-        label=(label or "").strip()[:MAX_BEZEICHNUNG],
+        label=((label or "").strip() or _name_der_einladung(db, user.id, familie))[:MAX_BEZEICHNUNG],
         is_approved=_freigegebene(db, user.id).count() == 0,
         auth_family=familie or None,
         created_at=_jetzt(),
@@ -136,7 +136,41 @@ def veroeffentlichen(
             raise
         return _auffrischen(db, user, bestand, public_key_jwk, signatur, label, familie)
     db.refresh(eintrag)
+    _verzeichnis_geaendert(user.id)
     return eintrag
+
+
+def _verzeichnis_geaendert(user_id: int) -> None:
+    """Sagt jeder offenen Geraeteliste des Kontos, dass sie neu laden soll.
+
+    Nur das Signal, kein Inhalt: die Liste holt sich den Stand selbst. Bis
+    5.0.3 lud sie nur beim Oeffnen, und ein frisch gekoppeltes Geraet erschien
+    zum Freigeben erst nach dem Neuladen der Seite.
+    """
+    from services.sync_event_service import SyncEventService
+
+    SyncEventService.publish({"entity": "e2ee_devices", "action": "changed"}, user_id=user_id)
+
+
+def _name_der_einladung(db: Session, user_id: int, familie: str | None) -> str:
+    """Der Name, unter dem dieses Geraet im Panel eingeladen wurde, oder "".
+
+    Die Einladung merkt sich die Sitzungskette, die aus ihr entstand — und mit
+    genau der meldet sich das gekoppelte Geraet hier. Ohne eigenen Namen stand
+    es sonst als „Unbenanntes Geraet" in der Liste, neben dem Browser, der
+    auch keinen hat.
+    """
+    if not familie:
+        return ""
+    from models.device_pairing import DevicePairing
+
+    einladung = (
+        db.query(DevicePairing)
+        .filter(DevicePairing.user_id == user_id, DevicePairing.family == familie)
+        .order_by(DevicePairing.created_at.desc())
+        .first()
+    )
+    return (einladung.label or "").strip() if einladung else ""
 
 
 def _geraet(db: Session, user_id: int, device_id: str) -> UserE2eeDevice | None:
@@ -198,16 +232,22 @@ def _auffrischen(
         andere = _freigegebene(db, user.id).filter(UserE2eeDevice.id != bestand.id).count()
         if andere > 0:
             bestand.is_approved = False
+    vorher = (bestand.public_key_jwk, bestand.signing_public_key_jwk, bestand.label, bestand.is_approved)
     bestand.public_key_jwk = public_key_jwk
     if signatur:
         bestand.signing_public_key_jwk = signatur
-    if label:
+    if label.strip():
         bestand.label = label.strip()[:MAX_BEZEICHNUNG]
+    elif not bestand.label:
+        bestand.label = _name_der_einladung(db, user.id, familie)[:MAX_BEZEICHNUNG]
     if familie:
         bestand.auth_family = familie
     bestand.last_seen_at = _jetzt()
     db.commit()
     db.refresh(bestand)
+    # Jeder Start meldet sich neu; das allein ist keine Aenderung der Liste.
+    if vorher != (bestand.public_key_jwk, bestand.signing_public_key_jwk, bestand.label, bestand.is_approved):
+        _verzeichnis_geaendert(user.id)
     return bestand
 
 
@@ -388,6 +428,7 @@ def bestaetigen(
     if _freigegebene(db, user.id).count() == 0:
         eintrag.is_approved = True
         db.commit()
+        _verzeichnis_geaendert(user.id)
         return True
     unterzeichner = _unterzeichner(db, user, approver_device_id)
     if unterzeichner is None or unterzeichner.device_id == kennung or not signature:
@@ -401,6 +442,7 @@ def bestaetigen(
     eintrag.approved_by = unterzeichner.device_id
     eintrag.approval_signature = signature
     db.commit()
+    _verzeichnis_geaendert(user.id)
     return True
 
 
@@ -461,6 +503,7 @@ def vergessen(
     db.delete(eintrag)
     db.commit()
     _sperre_sitzung(db, user, familie)
+    _verzeichnis_geaendert(user.id)
     return True
 
 
@@ -494,4 +537,5 @@ def zuruecksetzen(db: Session, user: User, familie_behalten: str | None) -> int:
     db.commit()
     for familie in familien - {familie_behalten}:
         _sperre_sitzung(db, user, familie)
+    _verzeichnis_geaendert(user.id)
     return len(eintraege)

@@ -12,6 +12,7 @@ import { invoke } from '@tauri-apps/api/core'
 
 import { api } from '@/api/client'
 import { geraetVeroeffentlichen, sicherheitsnummer } from '@/services/e2eeGeraet'
+import { MessengerVerschlossenError } from '@/services/lokaleVersiegelung'
 import { holeVerlaufAb } from '@/services/verlaufsUebergabe'
 import { useAuthStore } from '@/stores/authStore'
 import { konfigLaden, konfigSpeichern } from './tauri'
@@ -45,10 +46,16 @@ export interface Kopplungsergebnis {
   /**
    * Die Sicherheitsnummer dieses Geräts — dieselbe, die das Panel neben der
    * Rückfrage zeigt, ob es den Verlauf hierher übergeben soll. `null`, wenn
-   * sich das Gerät nicht veröffentlichen ließ; dann gibt es auch keinen
-   * Verlauf, über den jemand entscheiden müsste.
+   * sich das Gerät (noch) nicht veröffentlichen ließ.
    */
   sicherheitsnummer: string | null
+  /**
+   * Der Geräteschlüssel liegt hinter dem Messenger-PIN. Erst nach dem
+   * Entsperren lässt sich das Gerät veröffentlichen — `geraetMelden()`.
+   */
+  gesperrt?: boolean
+  /** Das Veröffentlichen scheiterte aus einem anderen Grund. */
+  fehler?: string
 }
 
 /**
@@ -72,25 +79,42 @@ export async function koppeln(code: string, bezeichnung: string): Promise<Kopplu
   } catch {}
   await useAuthStore.getState().checkAuth()
 
-  // Der Verlaufs-Erstabgleich. Erst den eigenen Geräteschlüssel veröffentlichen
-  // — daran erkennt die andere Seite, für wen sie versiegeln soll. Das wird
-  // abgewartet, weil die Sicherheitsnummer daraus kommt: das Panel übergibt
-  // erst, wenn dort jemand bestätigt, dass seine Nummer dieselbe ist wie hier.
-  //
-  // Das Abholen läuft im Hintergrund: ein Gerät, das gekoppelt ist, soll
-  // benutzbar sein, auch wenn nebenan noch jemand vergleicht. Scheitert es,
-  // beginnt das Gerät mit einem leeren Verlauf — der Normalfall bei einem
-  // Konto ohne bisherige Nachrichten und kein Grund, die Kopplung zu verwerfen.
-  let geraet: Awaited<ReturnType<typeof geraetVeroeffentlichen>>
+  // Die Kopplung selbst steht ab hier. Was folgt, entscheidet nur noch, ob
+  // das Gerät seinen Geräteschlüssel zeigen kann — und damit, ob es in der
+  // Freigabeliste auftaucht. Bis 5.0.3 wurde jeder Fehler hier verschluckt:
+  // mit Messenger-PIN kam das Gerät nie in die Liste, ohne dass es jemand sah.
   try {
-    geraet = await geraetVeroeffentlichen(bezeichnung)
-  } catch {
-    // Kein Verlauf. Die Kopplung selbst steht.
-    return { sicherheitsnummer: null }
+    return { sicherheitsnummer: await geraetMelden(code, bezeichnung) }
+  } catch (e) {
+    if (e instanceof MessengerVerschlossenError) return { sicherheitsnummer: null, gesperrt: true }
+    return { sicherheitsnummer: null, fehler: e instanceof Error ? e.message : String(e) }
   }
-  void holeVerlaufAb(code, geraet.paar.privateKeyJwk).catch(() => 0)
-  return { sicherheitsnummer: await sicherheitsnummer(geraet.paar.publicKeyJwk) }
 }
+
+/**
+ * Veröffentlicht den Geräteschlüssel und liefert die Sicherheitsnummer.
+ *
+ * Erst den eigenen Geräteschlüssel veröffentlichen — daran erkennt die andere
+ * Seite, für wen sie versiegeln soll. Das wird abgewartet, weil die
+ * Sicherheitsnummer daraus kommt: das Panel übergibt erst, wenn dort jemand
+ * bestätigt, dass seine Nummer dieselbe ist wie hier.
+ *
+ * Das Abholen des Verlaufs läuft im Hintergrund: ein gekoppeltes Gerät soll
+ * benutzbar sein, auch wenn nebenan noch jemand vergleicht. Scheitert es,
+ * beginnt das Gerät mit einem leeren Verlauf — der Normalfall bei einem Konto
+ * ohne bisherige Nachrichten.
+ *
+ * Wirft `MessengerVerschlossenError`, solange der Messenger-PIN den
+ * Geräteschlüssel versiegelt.
+ */
+export async function geraetMelden(code: string, bezeichnung: string): Promise<string> {
+  const geraet = await geraetVeroeffentlichen(bezeichnung)
+  void holeVerlaufAb(code, geraet.paar.privateKeyJwk).catch(() => 0)
+  return sicherheitsnummer(geraet.paar.publicKeyJwk)
+}
+
+/** Fensterereignis nach `abmelden()`: die Sitzung ist lokal verworfen. */
+export const ABGEMELDET = 'mss:abgemeldet'
 
 /**
  * Abmelden: Refresh-Familie serverseitig widerrufen, dann lokal alles räumen.
@@ -112,5 +136,8 @@ export async function abmelden(): Promise<void> {
   } finally {
     await sitzungVerwerfen()
     useAuthStore.getState().clearSession()
+    // Die Hauptansicht geht sofort zur Kopplung, auch offline. Bis 5.0.3
+    // fand sie erst nach einem Neustart dorthin.
+    window.dispatchEvent(new Event(ABGEMELDET))
   }
 }

@@ -30,6 +30,12 @@ export async function sitzungVerwerfen(): Promise<void> {
 
 export type AnmeldeErgebnis = {
   status: 'erfolg' | 'abgelehnt' | 'offline'
+  /**
+   * Nur bei 'abgelehnt': `kein_token` heisst, der Tresor ist leer — nach dem
+   * Abmelden oder vor der ersten Kopplung. Das ist endgueltig, anders als eine
+   * verweigerte Rotation, die auch ein Wettlauf zweier Fenster sein kann.
+   */
+  grund?: 'kein_token' | 'verweigert'
 }
 
 /**
@@ -64,11 +70,11 @@ async function _stillAnmeldenDetailIntern(timeoutMs: number): Promise<AnmeldeErg
   try {
     refresh = await invoke<string | null>('refresh_token_laden')
   } catch {
-    return { status: 'abgelehnt' }
+    return { status: 'abgelehnt', grund: 'verweigert' }
   }
 
   if (!refresh) {
-    return { status: 'abgelehnt' }
+    return { status: 'abgelehnt', grund: 'kein_token' }
   }
 
   const controller = new AbortController()
@@ -88,7 +94,7 @@ async function _stillAnmeldenDetailIntern(timeoutMs: number): Promise<AnmeldeErg
       // automatisch aufgerufen werden, damit gekoppelte Geräte dauerhaft gekoppelt
       // bleiben. refresh_token_loeschen wird ausschließlich beim expliziten
       // Abmelden (abmelden()) aufgerufen.
-      return { status: 'abgelehnt' }
+      return { status: 'abgelehnt', grund: 'verweigert' }
     }
 
     if (!antwort.ok) {

@@ -196,6 +196,17 @@ auf 25 MB; ist mehr da, bleibt das Älteste zurück. Schlägt der Umzug fehl,
 beginnt das neue Gerät mit einem leeren Verlauf — die Kopplung selbst steht
 davon unberührt.
 
+**Danach wird das Gerät freigegeben.** Nach dem Koppeln erscheint es sofort,
+ohne Neuladen, im Panel unter **Profil → Geräte → Freigegebene Geräte**, mit dem
+Namen aus der Einladung und seiner Sicherheitsnummer. Erst nach der Freigabe
+auf einem schon freigegebenen Gerät bekommt es Nachrichten und den
+gemeinsamen Schlüssel für Notizen und Termine. Ist in der App ein
+Messenger-PIN eingerichtet, liegt der Geräteschlüssel dahinter: die App fragt
+nach dem Koppeln nach dem PIN und zeigt erst danach die Sicherheitsnummer.
+Wer das überspringt, holt es beim nächsten Entsperren des Messengers nach; bis
+dahin nennen Notizen und Kalender den Grund. **Abmelden** in der App führt
+sofort zurück zur Kopplung.
+
 **Die Oberfläche der App ist die des Panels.** Seit dem 21.08.2026 gibt es
 keine zweite Chat-Implementierung mehr: die App rendert dieselbe KI-Seite wie
 der Browser (Chat, Realtime-Modus, Guardian-Fenster, Aufgabenliste,
