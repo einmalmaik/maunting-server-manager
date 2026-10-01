@@ -9,6 +9,7 @@
  * geladen, wenn ihre Kachel in die Nähe kommt.
  */
 
+import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
 import React, { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -253,6 +254,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const [aehnlich, setAehnlich] = useState<{ fertig: number; gesamt: number; gruppen: string[][] | null }>({ fertig: 0, gesamt: 0, gruppen: null })
   const [albumId, setAlbumId] = useState<string | null>(null)
   const [auswahl, setAuswahl] = useState<Set<string> | null>(null)
+  useZurueckSchliesst(auswahl !== null, () => setAuswahl(null))
   const [stufe, setStufe] = useState(1)
   const [offen, setOffen] = useState<{ id: string; index: number } | null>(null)
   const [vorbereitung, setVorbereitung] = useState(0)
@@ -766,8 +768,8 @@ function GalerieLichtbox({
       if (welcher === 'original') setAnzeige((a) => ({ ...a, anteil: 0 }))
       try {
         const blob = await blobLesen(kopf, id, userKey, typ, {
-          cachen: welcher === 'vorschau',
-          zuletzt: welcher === 'original',
+          // Auch die Vorschau fällt nach ZULETZT_GRENZE heraus; tausend davon füllten sonst das Gerät.
+          zuletzt: true,
           signal: abbruch.signal,
           fortschritt: welcher === 'original' ? (anteil) => setAnzeige((a) => (a.id === id ? { ...a, anteil } : a)) : undefined,
         })

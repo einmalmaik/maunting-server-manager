@@ -136,10 +136,19 @@ interface UploadZeile {
   pruefwert: string
   /** Erst wenn alle Chunks verschlüsselt abgelegt sind. */
   bereit: boolean
-  /** Miniatur und Vorschau bleiben nach dem Hochladen im Cache, fürs Offline-Anzeigen. */
+  /** Bleibt nach dem Hochladen im Cache, fürs Offline-Anzeigen. */
   behalten: boolean
+  /** Fällt nach `ZULETZT_GRENZE` wieder heraus (Vorschau). Sonst bleibt es. */
+  offline?: 'zuletzt'
   fehler?: UploadFehler
 }
+
+/**
+ * Was nach dem Hochladen auf dem Gerät bleibt: nichts, die Miniatur und das
+ * Original einer angehefteten Datei für immer, die Vorschau als zuletzt
+ * gesehen, bis `ZULETZT_GRENZE` sie verdrängt.
+ */
+type Behalten = 'nein' | 'immer' | 'zuletzt'
 
 interface ChunkZeile {
   blobId: string
@@ -218,7 +227,7 @@ async function blobAblegen(
   eintragId: string,
   kopf: BlobKopf,
   schluessel: CryptoKey,
-  behalten: boolean,
+  behalten: Behalten,
   lesen: (von: number, bis: number) => Promise<Uint8Array>,
   abgebrochen: () => boolean,
 ): Promise<UploadZeile> {
@@ -231,7 +240,8 @@ async function blobAblegen(
     bytes: chiffratGroesse(kopf.groesse),
     pruefwert: await loeschPruefwert(kopf),
     bereit: false,
-    behalten,
+    behalten: behalten !== 'nein',
+    offline: behalten === 'zuletzt' ? behalten : undefined,
   }
   await schreiben(db, UPLOADS, (s) => s.put(zeile))
   for (let index = 0; index < anzahl; index++) {
@@ -269,12 +279,13 @@ export async function dateiVorbereiten(
   const blobs = [original, vorschau, miniatur]
   for (const { kopf } of blobs) inVorbereitung.add(kopf.id)
   try {
+    // Eine leere Vorschau oder Miniatur (keine Bilddatei) ist nur Polster und bleibt nicht liegen.
     const zeilen = [
-      await blobAblegen(db, bucket, eintragId, original.kopf, original.schluessel, !!bilder.originalBehalten, async (von, bis) => {
+      await blobAblegen(db, bucket, eintragId, original.kopf, original.schluessel, bilder.originalBehalten ? 'immer' : 'nein', async (von, bis) => {
         return new Uint8Array(await datei.slice(von, bis).arrayBuffer())
       }, abgebrochen),
-      await blobAblegen(db, bucket, eintragId, vorschau.kopf, vorschau.schluessel, true, async (von, bis) => vorschauDaten.slice(von, bis), abgebrochen),
-      await blobAblegen(db, bucket, eintragId, miniatur.kopf, miniatur.schluessel, true, async (von, bis) => miniaturDaten.slice(von, bis), abgebrochen),
+      await blobAblegen(db, bucket, eintragId, vorschau.kopf, vorschau.schluessel, vorschauDaten.length > 0 ? 'zuletzt' : 'nein', async (von, bis) => vorschauDaten.slice(von, bis), abgebrochen),
+      await blobAblegen(db, bucket, eintragId, miniatur.kopf, miniatur.schluessel, miniaturDaten.length > 0 ? 'immer' : 'nein', async (von, bis) => miniaturDaten.slice(von, bis), abgebrochen),
     ]
     await schreiben(db, UPLOADS, (s) => {
       for (const zeile of zeilen) s.put({ ...zeile, bereit: true })
@@ -355,7 +366,11 @@ export const uploadsFortsetzen = einzeln(hochladen)
 async function hochladen(bucket: string): Promise<void> {
   // Ohne geladene Ablage wirkt jeder Eintrag tot, und wartende Uploads würden
   // verworfen.
-  if (!ablageGeladen(bucket)) return
+  // Vor jedem Blob und Chunk gefragt: die Anfragen gehen mit der Sitzung, die
+  // gerade angemeldet ist, und nach einem Kontowechsel landeten Dateien sonst
+  // im Bucket des anderen Kontos.
+  const weiter = () => ablageGeladen(bucket)
+  if (!weiter()) return
   const db = await ablageDb()
   if (!db) return
   const zeilen = ((await anfrage(db.transaction(UPLOADS).objectStore(UPLOADS).getAll())) as UploadZeile[]).filter(
@@ -372,13 +387,14 @@ async function hochladen(bucket: string): Promise<void> {
     fortschrittSetzen(eintragId, () => ({ gesendet: 0, gesamt: bytes, fehler }))
   }
   for (const zeile of zeilen) {
+    if (!weiter()) return
     if (!zeile.bereit || !eintragLebt(bucket, zeile.eintragId)) {
       // Abgebrochene Vorbereitung oder inzwischen gelöschter Eintrag.
       await uploadEntfernen(db, zeile.blobId)
       continue
     }
     try {
-      await blobHochladen(db, zeile)
+      await blobHochladen(db, zeile, weiter)
     } catch (err) {
       // Ein abgewiesener Blob hält die übrigen nicht auf. Voller Speicher,
       // Netz weg, abgelaufene Sitzung oder gestörter Server träfen jeden
@@ -393,7 +409,7 @@ async function hochladen(bucket: string): Promise<void> {
   }
 }
 
-async function blobHochladen(db: IDBDatabase, zeile: UploadZeile): Promise<void> {
+async function blobHochladen(db: IDBDatabase, zeile: UploadZeile, weiter: () => boolean): Promise<void> {
   // Erst reservieren; nur wenn es den Blob schon gibt (ein früherer Lauf kam
   // an), nach dem Stand fragen.
   let vorhanden: number[] = []
@@ -414,6 +430,7 @@ async function blobHochladen(db: IDBDatabase, zeile: UploadZeile): Promise<void>
   }
   const schon = new Set(vorhanden)
   for (let index = 0; index < zeile.chunkAnzahl; index++) {
+    if (!weiter()) throw new Error('Tresor oder Konto gewechselt')
     const chunk = (await anfrage(
       db.transaction(UPLOAD_CHUNKS).objectStore(UPLOAD_CHUNKS).get([zeile.blobId, index]),
     )) as ChunkZeile | undefined
@@ -426,6 +443,7 @@ async function blobHochladen(db: IDBDatabase, zeile: UploadZeile): Promise<void>
     const laenge = chunk.daten.byteLength
     fortschrittSetzen(zeile.eintragId, (alt) => ({ ...alt, gesendet: alt.gesendet + laenge }))
   }
+  if (!weiter()) throw new Error('Tresor oder Konto gewechselt')
   await blobFertig(zeile.blobId)
   await uploadAbschliessen(db, zeile)
 }
@@ -439,6 +457,7 @@ async function uploadAbschliessen(db: IDBDatabase, zeile: UploadZeile): Promise<
   tx.objectStore(UPLOADS).delete(zeile.blobId)
   tx.objectStore(UPLOAD_CHUNKS).delete(chunkBereich(zeile.blobId))
   await fertig(tx)
+  if (zeile.offline === 'zuletzt') await zuletztMerken(db, zeile.blobId, zeile.bytes).catch(() => {})
   const offen = ((await anfrage(db.transaction(UPLOADS).objectStore(UPLOADS).getAll())) as UploadZeile[]).some(
     (z) => z.eintragId === zeile.eintragId,
   )
@@ -455,7 +474,6 @@ async function lokalesChiffrat(db: IDBDatabase, blobId: string, index: number): 
 }
 
 interface LeseOptionen {
-  cachen?: boolean
   /** Als „zuletzt geöffnet“ offline behalten, solange Platz ist (`ZULETZT_GRENZE`). */
   zuletzt?: boolean
   signal?: AbortSignal
@@ -474,20 +492,26 @@ export async function* klartextTeile(
 ): AsyncGenerator<Uint8Array> {
   const db = await ablageDb()
   const zuletzt = !!optionen.zuletzt && chiffratGroesse(kopf.groesse) <= ZULETZT_HOECHSTENS
-  const cachen = optionen.cachen || zuletzt
   const schluessel = await blobSchluessel(kopf, userKey, eintragId)
   const anzahl = chunkAnzahl(kopf.groesse)
   for (let index = 0; index < anzahl; index++) {
     optionen.signal?.throwIfAborted()
-    let chiffrat = db ? await lokalesChiffrat(db, kopf.id, index) : null
-    if (!chiffrat) {
-      chiffrat = await chunkLaden(kopf.id, index, optionen.signal)
-      if (db && cachen) {
-        const daten = chiffrat
-        await schreiben(db, BLOB_CACHE, (s) => s.put({ blobId: kopf.id, index, daten } satisfies ChunkZeile))
+    let klartext: Uint8Array | null = null
+    const lokal = db ? await lokalesChiffrat(db, kopf.id, index) : null
+    if (db && lokal) {
+      try {
+        klartext = await chunkEntschluesseln(lokal, kopf, index, schluessel, eintragId)
+      } catch {
+        // Kaputt im Cache: weg damit und frisch vom Server, sonst bliebe die Datei hier für immer unlesbar.
+        await schreiben(db, BLOB_CACHE, (s) => s.delete([kopf.id, index])).catch(() => {})
       }
     }
-    const klartext = await chunkEntschluesseln(chiffrat, kopf, index, schluessel, eintragId)
+    if (!klartext) {
+      const chiffrat = await chunkLaden(kopf.id, index, optionen.signal)
+      klartext = await chunkEntschluesseln(chiffrat, kopf, index, schluessel, eintragId)
+      // In den Cache kommt nur, was sich entschlüsseln ließ.
+      if (db && zuletzt) await schreiben(db, BLOB_CACHE, (s) => s.put({ blobId: kopf.id, index, daten: chiffrat } satisfies ChunkZeile))
+    }
     try {
       yield klartext
     } finally {
@@ -495,7 +519,7 @@ export async function* klartextTeile(
     }
     optionen.fortschritt?.((index + 1) / anzahl)
   }
-  if (db && zuletzt) await zuletztMerken(db, kopf).catch(() => {})
+  if (db && zuletzt) await zuletztMerken(db, kopf.id, chiffratGroesse(kopf.groesse)).catch(() => {})
 }
 
 /**
@@ -536,9 +560,9 @@ export const ZULETZT_GRENZE = 512 * 1024 * 1024
 /** Größere Dateien werden nur angeheftet offline gehalten, nicht nebenbei. */
 const ZULETZT_HOECHSTENS = 128 * 1024 * 1024
 
-async function zuletztMerken(db: IDBDatabase, kopf: BlobKopf): Promise<void> {
-  const alt = (await anfrage(db.transaction(OFFLINE).objectStore(OFFLINE).get(kopf.id))) as OfflineZeile | undefined
-  const zeile: OfflineZeile = { blobId: kopf.id, angeheftet: alt?.angeheftet ?? false, zuletzt: Date.now(), bytes: chiffratGroesse(kopf.groesse) }
+async function zuletztMerken(db: IDBDatabase, blobId: string, bytes: number): Promise<void> {
+  const alt = (await anfrage(db.transaction(OFFLINE).objectStore(OFFLINE).get(blobId))) as OfflineZeile | undefined
+  const zeile: OfflineZeile = { blobId, angeheftet: alt?.angeheftet ?? false, zuletzt: Date.now(), bytes }
   await schreiben(db, OFFLINE, (s) => s.put(zeile))
   const alle = ((await anfrage(db.transaction(OFFLINE).objectStore(OFFLINE).getAll())) as OfflineZeile[])
     .filter((z) => !z.angeheftet)
@@ -647,7 +671,9 @@ export async function miniaturenLesen(
     try {
       ergebnis.set(kopf.id, await chunkEntschluesseln(chiffrat, kopf, 0, await blobSchluessel(kopf, userKey, eintragId), eintragId))
     } catch {
-      // Fremder, vertauschter oder kaputter Blob: kein Bild.
+      // Fremder, vertauschter oder kaputter Blob: kein Bild. Aus dem Cache
+      // fällt er, damit der nächste Aufruf ihn frisch holt.
+      if (db) await schreiben(db, BLOB_CACHE, (s) => s.delete([kopf.id, 0])).catch(() => {})
     }
   }
   return ergebnis
@@ -681,6 +707,8 @@ async function loeschen(bucket: string): Promise<void> {
   const db = await ablageDb()
   for (const grab of faellig) {
     for (const blob of grab.loeschBlobs ?? []) {
+      // Nach einem Kontowechsel kämen Löschungen als 404 zurück und gälten als erledigt.
+      if (!ablageGeladen(bucket)) return
       try {
         await blobLoeschen(blob.id, blob.loeschen)
       } catch (err) {

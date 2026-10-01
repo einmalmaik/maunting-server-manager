@@ -10,6 +10,7 @@ was faellig ist.
 from __future__ import annotations
 
 import hashlib
+import os
 import secrets
 import struct
 import threading
@@ -427,6 +428,7 @@ def test_aufraeumen_entfernt_nur_faelliges(als, konten, db, blob_dir):
     alt_geloescht = fertiger_blob()
     jetzt = datetime.now(timezone.utc)
     db.get(VaultBlob, abgebrochen).created_at = jetzt - timedelta(hours=25)
+    _altern(abgebrochen, timedelta(hours=25))
     for blob_id, wann in ((frisch_geloescht, jetzt - timedelta(days=1)), (alt_geloescht, jetzt - timedelta(days=8))):
         zeile = db.get(VaultBlob, blob_id)
         zeile.state = "geloescht"
@@ -440,6 +442,7 @@ def test_aufraeumen_entfernt_nur_faelliges(als, konten, db, blob_dir):
     _hochladen(client, von_zwei, 0, b"z" * 100)
     db.execute(VaultBlob.__table__.delete().where(VaultBlob.id == von_zwei))
     db.commit()
+    _altern(von_zwei, timedelta(hours=25))
 
     ergebnis = vault_blob_service.aufraeumen(db)
 
@@ -447,6 +450,61 @@ def test_aufraeumen_entfernt_nur_faelliges(als, konten, db, blob_dir):
     vorhanden = {p.name for p in blob_dir.glob("*/*")}
     assert vorhanden == {bleibt, frisch_geloescht}
     assert {z.id for z in db.query(VaultBlob).all()} == {bleibt, frisch_geloescht}
+
+
+def _altern(blob_id: str, wie_alt: timedelta) -> None:
+    """Stellt Verzeichnis und Chunks eines Blobs so, als waere zuletzt vor ``wie_alt`` geschrieben worden."""
+    verzeichnis = vault_blob_service.blob_verzeichnis(blob_id)
+    zeit = (datetime.now(timezone.utc) - wie_alt).timestamp()
+    for pfad in [*verzeichnis.iterdir(), verzeichnis]:
+        os.utime(pfad, (zeit, zeit))
+
+
+def test_offener_upload_gilt_ab_dem_letzten_chunk_als_abgebrochen(als, konten, db, blob_dir):
+    """Ein grosser Upload, der nach 24 Stunden noch Chunks schreibt, laeuft noch.
+
+    Bis 01.10.2026 zaehlte die Frist ab dem Anlegen, und das Aufraeumen nahm
+    einen solchen Upload mitten im Hochladen weg.
+    """
+    eins, _ = konten
+    client = als(eins)
+    laeuft, _, _ = _anlegen(client, CHUNK_CHIFFRAT + 100, chunk_count=2)
+    assert _hochladen(client, laeuft, 0, b"z" * CHUNK_CHIFFRAT).status_code == 204
+    steht, _, _ = _anlegen(client, 100)
+    assert _hochladen(client, steht, 0, b"z" * 100).status_code == 204
+    nie_begonnen, _, _ = _anlegen(client, 100)
+    jetzt = datetime.now(timezone.utc)
+    for blob_id in (laeuft, steht, nie_begonnen):
+        db.get(VaultBlob, blob_id).created_at = jetzt - timedelta(hours=30)
+    db.commit()
+    _altern(laeuft, timedelta(hours=26))
+    # Der eben geschriebene zweite Chunk ist die juengste Aktivitaet.
+    assert _hochladen(client, laeuft, 1, b"z" * 100).status_code == 204
+    _altern(steht, timedelta(hours=25))
+
+    ergebnis = vault_blob_service.aufraeumen(db)
+
+    assert ergebnis == {"entfernt": 2, "verwaist": 0}
+    assert {z.id for z in db.query(VaultBlob).all()} == {laeuft}
+    assert sorted(p.name for p in vault_blob_service.blob_verzeichnis(laeuft).iterdir()) == ["0", "1"]
+    assert client.post(f"/api/vault/blobs/{laeuft}/fertig").status_code == 200
+
+
+def test_verzeichnis_ohne_zeile_bleibt_solange_geschrieben_wird(db, blob_dir):
+    """Ein Chunk, dessen Zeile diese Sitzung (noch) nicht sieht, wird nicht sofort weggeraeumt.
+
+    Bis 01.10.2026 entfernte das Aufraeumen jedes Verzeichnis ohne Zeile, auch
+    eines, in das im selben Augenblick geschrieben wurde.
+    """
+    blob_id = _neue_id()
+    vault_blob_service.chunk_schreiben(blob_id, 0, b"z" * 100)
+
+    assert vault_blob_service.aufraeumen(db)["verwaist"] == 0
+    assert vault_blob_service.blob_verzeichnis(blob_id).is_dir()
+
+    _altern(blob_id, timedelta(hours=25))
+    assert vault_blob_service.aufraeumen(db)["verwaist"] == 1
+    assert not vault_blob_service.blob_verzeichnis(blob_id).exists()
 
 
 def test_migration_hin_und_zurueck(tmp_path: Path, pg_wegwerf) -> None:
@@ -478,3 +536,19 @@ def test_migration_hin_und_zurueck(tmp_path: Path, pg_wegwerf) -> None:
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+@pytest.mark.parametrize("route", ["tresor_speicher", "blob_status", "blob_fertig", "blob_loeschen"])
+def test_jede_blob_route_hat_eine_eigene_grenze(route):
+    """Bis 01.10.2026 hingen diese vier Routen nur an der globalen Grenze des Panels."""
+    from middleware.rate_limit import limiter
+
+    grenzen = limiter._route_limits.get(f"routers.vault.{route}", [])
+    assert [str(g.limit) for g in grenzen] in (["1200 per 1 minute"], ["120 per 1 minute"])
+
+
+def test_speicher_grenze_greift(als, konten):
+    client = als(konten[0])
+    for _ in range(120):
+        assert client.get("/api/vault/speicher").status_code == 200
+    assert client.get("/api/vault/speicher").status_code == 429

@@ -29,7 +29,7 @@ from models import User, EmailVerification, UserPasskey
 from models.dis_text import vorab_entschluesselt
 from models.team import Team
 from services.achievement_service import AchievementService
-from services.dis_client import DisClient
+from services.dis_client import DisClient, DisSidecarError
 from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, DataExportRequest, NativeRefreshRequest, LogoutRequest
 from schemas import ResendVerificationRequest
 from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, LocationSharingUpdateRequest, AgentNameUpdateRequest, AiProviderChoiceRequest, UsernameUpdateRequest
@@ -46,6 +46,7 @@ from services import bild_upload
 from services import datenexport_service
 from services import device_pairing_service
 from services import passkey_service
+from services import vault_service
 from services import login_challenge_service
 from schemas.passkey import (
     BrowserBestaetigungRequest,
@@ -1288,6 +1289,18 @@ def data_export(
     Passwort und ohne 2FA bekommt alles andere: das kann es mit seinem Token
     ohnehin schon lesen. `auth_rate_limit`, weil hier ein Passwort geprueft wird.
     """
+    # Den Tresor findet der Export nur ueber den Index aus dem Sidecar
+    # (`vault_service.tresor_konto`, danach im Prozess gemerkt). Ist der Sidecar
+    # weg, scheitert der Export, und zwar bevor der Nachweis verbraucht ist:
+    # ein App-Code oder eine Passkey-Challenge gilt nur einmal.
+    try:
+        vault_service.tresor_konto(user.id)
+    except DisSidecarError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Der Export ist gerade nicht möglich. Bitte später erneut versuchen.",
+        ) from exc
+
     if user.two_factor_enabled:
         if not passkey_service.zweiter_faktor_bestaetigt(
             db, user,

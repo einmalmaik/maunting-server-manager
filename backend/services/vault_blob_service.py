@@ -401,9 +401,35 @@ def _entfernen(blob_id: str) -> None:
     shutil.rmtree(blob_verzeichnis(blob_id), ignore_errors=True)
 
 
+def _zuletzt_geschrieben(verzeichnis: Path) -> datetime | None:
+    """Wann zuletzt in das Verzeichnis eines Blobs geschrieben wurde: das juengste
+    mtime von Verzeichnis und Chunks. ``None``, wenn es das Verzeichnis nicht gibt."""
+    try:
+        zeiten = [verzeichnis.stat().st_mtime]
+        for eintrag in verzeichnis.iterdir():
+            try:
+                zeiten.append(eintrag.stat().st_mtime)
+            except FileNotFoundError:
+                continue
+    except FileNotFoundError:
+        return None
+    return datetime.fromtimestamp(max(zeiten), timezone.utc)
+
+
+def _kuerzlich_beschrieben(verzeichnis: Path, jetzt: datetime) -> bool:
+    zuletzt = _zuletzt_geschrieben(verzeichnis)
+    return zuletzt is not None and zuletzt >= jetzt - OFFEN_HOECHSTENS
+
+
 def aufraeumen(db: Session, jetzt: datetime | None = None) -> dict[str, int]:
     """Entfernt abgebrochene Uploads, Blobs nach der Loeschhaltung und
-    Verzeichnisse ohne Zeile (etwa nach der Umstellung auf Buckets)."""
+    Verzeichnisse ohne Zeile (etwa nach der Umstellung auf Buckets).
+
+    Abgebrochen ist ein offener Upload erst, wenn `OFFEN_HOECHSTENS` lang kein
+    Chunk mehr kam, nicht schon `OFFEN_HOECHSTENS` nach dem Anlegen: eine grosse
+    Datei ueber eine langsame Leitung braucht laenger als einen Tag. Die letzte
+    Aktivitaet steht ohne eigene Spalte im mtime der Chunks.
+    """
     jetzt = jetzt or _jetzt()
     faellig = db.scalars(
         select(VaultBlob.id).where(
@@ -411,9 +437,16 @@ def aufraeumen(db: Session, jetzt: datetime | None = None) -> dict[str, int]:
             | ((VaultBlob.state == "geloescht") & (VaultBlob.deleted_at < jetzt - LOESCHHALTUNG))
         )
     ).all()
+    entfernt = 0
     for blob_id in faellig:
+        blob = db.get(VaultBlob, blob_id)
+        if blob is None:
+            continue
+        if blob.state == "offen" and _kuerzlich_beschrieben(blob_verzeichnis(blob_id), jetzt):
+            continue
         _entfernen(blob_id)
         db.execute(VaultBlob.__table__.delete().where(VaultBlob.id == blob_id))
+        entfernt += 1
     db.commit()
 
     verwaist = 0
@@ -427,7 +460,12 @@ def aufraeumen(db: Session, jetzt: datetime | None = None) -> dict[str, int]:
                 continue
             bekannt = set(db.scalars(select(VaultBlob.id).where(VaultBlob.id.in_(namen))).all())
             for name in namen:
-                if name not in bekannt:
+                # Ein Verzeichnis ohne Zeile, in das gerade geschrieben wurde,
+                # kann ein Upload sein, dessen Zeile diese Sitzung noch nicht
+                # sieht. Es bleibt dieselbe Frist liegen wie ein offener Upload
+                # ohne Chunk: wer `OFFEN_HOECHSTENS` lang nichts schreibt, laedt
+                # nicht mehr hoch.
+                if name not in bekannt and not _kuerzlich_beschrieben(fach / name, jetzt):
                     _entfernen(name)
                     verwaist += 1
-    return {"entfernt": len(faellig), "verwaist": verwaist}
+    return {"entfernt": entfernt, "verwaist": verwaist}

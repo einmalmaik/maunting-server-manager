@@ -10,6 +10,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { cx } from '@/utils/classNames'
+import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
 import type { ActionMenuItem } from './ActionMenu'
 
 const RAND = 8
@@ -39,6 +40,7 @@ export function Kontextmenue({ ort, items, label, ausloeser, onSchliessen }: Kon
   const [lage, setLage] = useState<CSSProperties | null>(null)
   const schliessenRef = useRef(onSchliessen)
   schliessenRef.current = onSchliessen
+  useZurueckSchliesst(!!ort, () => schliessenRef.current())
 
   // Vor dem Zeichnen messen, damit das Menü nie einen Frame lang über den Rand ragt.
   useLayoutEffect(() => {

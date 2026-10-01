@@ -363,3 +363,62 @@ def test_simulator_rejected_on_live_integration(
     )
     assert res.status_code == 400
     assert "Sandbox" in res.json()["detail"]
+
+
+def _sandbox_kunde_mit_tresor(db: Session, integration: HosterIntegration) -> tuple[int, str]:
+    """Ein Sandbox-Kunde wie aus dem Simulator, mit Tresor und einer Datei darin."""
+    from models import VaultBlob, VaultUserSetting
+    from services import vault_service
+
+    kunde = AuthService.create_user(db, "sim-kunde", "sim-abc123@example.com", "KundePass123!")
+    db.add(HosterIdentity(integration_id=integration.id, external_subject_hash="e" * 64, user_id=kunde.id))
+    bucket = "d" * 64
+    db.add(VaultUserSetting(konto_index=vault_service.tresor_konto(kunde.id).index, bucket_id=bucket))
+    db.add(VaultBlob(id="f" * 32, bucket_id=bucket, chunk_count=1, bytes_total=100, delete_verifier="0" * 64, state="fertig"))
+    db.commit()
+    return kunde.id, bucket
+
+
+def test_sandbox_reset_loescht_den_kunden_samt_tresor(db: Session) -> None:
+    """Bis 01.10.2026 loeschte der Reset Sandbox-Kunden per `db.delete(user)`.
+
+    Die Tresortabellen haben keinen Fremdschluessel aufs Konto mehr; ohne
+    `prepare_user_deletion` blieb der Tresor ohne Besitzer liegen.
+    """
+    from sqlalchemy import text
+
+    from models import VaultBlob
+    from services import hoster_simulator_service
+
+    integration, _ = _sandbox_integration(db, _service_user(db))
+    kunde_id, _ = _sandbox_kunde_mit_tresor(db, integration)
+
+    hoster_simulator_service.clean_sandbox_data(db, integration=integration)
+
+    db.expire_all()
+    assert db.get(User, kunde_id) is None
+    assert db.execute(text("SELECT count(*) FROM vault_user_settings")).scalar() == 0
+    assert db.get(VaultBlob, "f" * 32).state == "geloescht"
+
+
+def test_sandbox_reset_ohne_sidecar_sperrt_den_kunden_statt_ihn_zu_loeschen(db: Session, monkeypatch) -> None:
+    from sqlalchemy import text
+
+    from services import hoster_simulator_service, vault_service
+    from services.dis_client import DisClient, DisSidecarError
+
+    integration, _ = _sandbox_integration(db, _service_user(db))
+    kunde_id, _ = _sandbox_kunde_mit_tresor(db, integration)
+
+    def kaputt(werte):
+        raise DisSidecarError("weg")
+
+    monkeypatch.setattr(vault_service, "_KONTO_INDEX", {})
+    monkeypatch.setattr(DisClient, "blind_index", staticmethod(kaputt))
+    hoster_simulator_service.clean_sandbox_data(db, integration=integration)
+
+    db.expire_all()
+    kunde = db.get(User, kunde_id)
+    assert kunde is not None and kunde.is_active is False
+    assert db.query(HosterIdentity).filter(HosterIdentity.integration_id == integration.id).count() == 0
+    assert db.execute(text("SELECT count(*) FROM vault_user_settings")).scalar() == 1

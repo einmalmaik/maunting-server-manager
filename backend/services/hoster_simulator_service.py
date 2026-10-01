@@ -33,6 +33,7 @@ from services import (
     hoster_service_lifecycle,
     hoster_webhook_service,
 )
+from services.auth_service import AuthService
 
 
 logger = logging.getLogger(__name__)
@@ -291,14 +292,19 @@ def clean_sandbox_data(db: Session, *, integration: HosterIntegration) -> int:
         .filter(HosterIdentity.integration_id == integration.id)
         .all()
     )
+    # Derselbe Loeschweg wie bei jeder Kontoloeschung: der Tresor haengt seit
+    # 01.10.2026 ohne Fremdschluessel am Konto, ein blosses `db.delete(user)`
+    # liesse ihn ohne Besitzer liegen. Verweigert die Vorpruefung (Team,
+    # Sidecar weg), wurde nichts geschrieben; der Sandbox-User bleibt dann
+    # gesperrt stehen und mit ihm sein Tresor.
     for ident in identities:
         user = db.query(User).filter(User.id == ident.user_id).first()
         db.delete(ident)
         if user is not None and not user.is_owner and (user.email or "").startswith("sim-"):
             try:
-                db.delete(user)
-            except Exception as exc:
-                logger.warning("Sandbox-User %s konnte nicht geloescht werden: %s", user.id, exc)
+                AuthService.delete_account_atomically(db, user)
+            except HTTPException as exc:
+                logger.warning("Sandbox-User %s konnte nicht geloescht werden: %s", user.id, exc.detail)
                 user.is_active = False
 
     db.commit()

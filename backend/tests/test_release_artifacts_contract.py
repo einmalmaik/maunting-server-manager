@@ -87,3 +87,19 @@ def test_android_webview_hears_network_changes() -> None:
         ROOT / "smart-system" / "src-tauri" / "gen" / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
     ).read_text(encoding="utf-8")
     assert 'android:name="android.permission.ACCESS_NETWORK_STATE"' in manifest
+
+
+def test_android_asks_for_no_overlay_and_no_microphone_service() -> None:
+    """Die App zeichnet über keine fremden Apps und hat keinen Mikrofon-Dienst.
+
+    `SYSTEM_ALERT_WINDOW` und `FOREGROUND_SERVICE_MICROPHONE` standen seit dem
+    ersten Android-Bau im Manifest, ohne dass Kotlin oder Rust sie je nutzte
+    (der einzige Dienst ist `dataSync`). Eine Berechtigung, die niemand braucht,
+    ist nur Angriffsfläche; wer sie wieder braucht, nimmt diesen Test mit.
+    """
+    manifest = (
+        ROOT / "smart-system" / "src-tauri" / "gen" / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
+    ).read_text(encoding="utf-8")
+    assert "android.permission.SYSTEM_ALERT_WINDOW" not in manifest
+    assert "android.permission.FOREGROUND_SERVICE_MICROPHONE" not in manifest
+    assert 'android:foregroundServiceType="microphone' not in manifest

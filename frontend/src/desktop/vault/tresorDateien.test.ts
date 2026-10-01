@@ -7,22 +7,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import 'fake-indexeddb/auto'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
-import { useVaultStore, type VaultBlindSyncPayload } from './vaultStore'
+import { fassungenZusammenfuehren, getPendingQueue, umschlagAusItem, useVaultStore, type VaultBlindSyncPayload, type VaultItem } from './vaultStore'
+import { encryptVaultEntry } from './vaultCrypto'
 import { ablageDb, ablageLaden, ablageSchliessen, BLOB_CACHE, OFFLINE, UPLOAD_CHUNKS, UPLOADS } from './tresorAblage'
 import {
   angeheftet,
   blobLesen,
+  dateiVorbereiten,
   loeschungenAbarbeiten,
   miniaturenLesen,
   offlineAnheften,
   offlineLoesen,
   uploadsFortsetzen,
   useTresorUploads,
+  vorbereitungAbschliessen,
   VERSIONEN,
   ZULETZT_GRENZE,
 } from './tresorDateien'
 import { miniaturFreigeben, miniaturHolen } from './tresorMiniaturen'
-import { CHUNK_KLARTEXT, CHUNK_UEBERHANG } from './tresorDatei'
+import { CHUNK_KLARTEXT, CHUNK_UEBERHANG, type BlobKopf } from './tresorDatei'
 import { aufGeraetSpeichern } from './tresorAnzeige'
 
 const tauriKern = vi.hoisted(() => ({ invoke: vi.fn() }))
@@ -46,7 +49,9 @@ const BUCKET = 'e'.repeat(64)
 const bilder = vi.hoisted(() => ({ an: false }))
 vi.mock('./tresorBilder', () => ({
   bildAngaben: vi.fn(async (datei: File) =>
-    bilder.an && datei.type.startsWith('image/') ? { miniatur: new TextEncoder().encode(`mini:${datei.name}`) } : {},
+    bilder.an && datei.type.startsWith('image/')
+      ? { miniatur: new TextEncoder().encode(`mini:${datei.name}`), vorschau: new TextEncoder().encode(`vorschau:${datei.name}`) }
+      : {},
   ),
 }))
 
@@ -116,13 +121,17 @@ function serverStarten() {
       const conflicts: string[] = []
       const entries = []
       for (const m of body.mutations) {
-        if (m.is_deleted && server.konflikte.has(m.id)) {
+        const da = server.eintraege.get(m.id)
+        const veraltet = m.expected_revision !== undefined && da !== undefined && da.revision !== m.expected_revision
+        if ((m.is_deleted && server.konflikte.has(m.id)) || veraltet) {
           conflicts.push(m.id)
           continue
         }
         server.revision += 1
         server.eintraege.set(m.id, { ciphertext: m.ciphertext, revision: server.revision, is_deleted: m.is_deleted })
-        entries.push({ ...m, revision: server.revision, updated_at: '2026-09-30T00:00:00Z' })
+      }
+      for (const [id, e] of server.eintraege) {
+        if (e.revision > body.since_revision) entries.push({ id, ...e, updated_at: '2026-09-30T00:00:00Z' })
       }
       return json({ server_revision: server.revision, entries, conflicts })
     }
@@ -300,10 +309,10 @@ describe('Tresor-Dateien', () => {
       expect(stueck[0] === 0xff && stueck[1] === 0xd8 && stueck[2] === 0xff).toBe(false)
     }
 
-    // Die Upload-Ablage ist leer, Miniatur und Vorschau bleiben im Cache.
+    // Die Upload-Ablage ist leer. Ohne Bild sind Miniatur und Vorschau nur
+    // Polster und bleiben nicht im Cache.
     expect(await zeilen(UPLOAD_CHUNKS)).toEqual([])
-    const cache = (await zeilen(BLOB_CACHE)) as { blobId: string }[]
-    expect(new Set(cache.map((c) => c.blobId))).toEqual(new Set([item.datei!.vorschau.id, item.datei!.miniatur.id]))
+    expect(await zeilen(BLOB_CACHE)).toEqual([])
 
     // Vom Server zurück entschlüsselt ist es dieselbe Datei.
     const zurueck = await blobLesen(item.datei!.original, id, userKey, item.datei!.typ)
@@ -380,6 +389,76 @@ describe('Tresor-Dateien', () => {
 
     expect(server.eintraege.has(id)).toBe(true)
     expect([...server.blobs.values()].every((b) => b.state === 'fertig')).toBe(true)
+  })
+
+  it('behält von einem Foto die Miniatur und die Vorschau nur als zuletzt gesehen', async () => {
+    // Bis 01.10.2026 blieb je Datei eine gepolsterte Vorschau (512 KiB) für
+    // immer liegen, auch ohne Bild: tausend Dateien, ein halbes Gigabyte.
+    bilder.an = true
+    serverStarten()
+    await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(foto(1000))
+    await allesErledigt()
+
+    const { vorschau, miniatur } = useVaultStore.getState().items.find((i) => i.id === id)!.datei!
+    const cache = (await zeilen(BLOB_CACHE)) as { blobId: string }[]
+    expect(new Set(cache.map((c) => c.blobId))).toEqual(new Set([vorschau.id, miniatur.id]))
+    const offline = (await zeilen(OFFLINE)) as { blobId: string; angeheftet: boolean }[]
+    expect(offline).toEqual([expect.objectContaining({ blobId: vorschau.id, angeheftet: false })])
+  })
+
+  it('legt nur in den Cache, was sich entschlüsseln lässt, und holt Kaputtes neu', async () => {
+    const server = serverStarten()
+    const userKey = await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Vertrag'], 'v.txt', { type: 'text/plain' }))
+    await allesErledigt()
+    const original = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.original
+    const imCache = async () => ((await zeilen(BLOB_CACHE)) as { blobId: string }[]).some((z) => z.blobId === original.id)
+
+    // Der Server liefert Kaputtes: nichts davon bleibt auf dem Gerät.
+    const echt = server.blobs.get(original.id)!.chunks.get(0)!
+    const kaputt = echt.slice()
+    kaputt[kaputt.length - 1] ^= 1
+    server.blobs.get(original.id)!.chunks.set(0, kaputt)
+    await expect(blobLesen(original, id, userKey, 'text/plain', { zuletzt: true })).rejects.toThrow()
+    expect(await imCache()).toBe(false)
+
+    // Kaputtes im Cache wird verworfen und frisch geholt.
+    server.blobs.get(original.id)!.chunks.set(0, echt)
+    const db = (await ablageDb())!
+    await new Promise<void>((ok) => {
+      const tx = db.transaction(BLOB_CACHE, 'readwrite')
+      tx.objectStore(BLOB_CACHE).put({ blobId: original.id, index: 0, daten: kaputt })
+      tx.oncomplete = () => ok()
+    })
+    expect(await (await blobLesen(original, id, userKey, 'text/plain', { zuletzt: true })).text()).toBe('Vertrag')
+    server.offline = true
+    expect(await (await blobLesen(original, id, userKey, 'text/plain')).text()).toBe('Vertrag')
+  })
+
+  it('lädt nach einem Kontowechsel nichts mehr mit der fremden Sitzung hoch', async () => {
+    // Die Anfragen gehen mit der Sitzung, die gerade angemeldet ist. Ohne die
+    // Prüfung landete der Rest im Bucket des anderen Kontos.
+    const server = serverStarten()
+    server.verzoegerung = 100
+    await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(foto(9 * 1024 * 1024))
+    await vi.waitFor(() => expect(server.puts.length).toBeGreaterThan(0))
+    setzeAngemeldetesKonto(2)
+    const gesendet = server.puts.length
+    await new Promise((r) => setTimeout(r, 400))
+
+    const original = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.original.id
+    expect(server.puts.length).toBeLessThanOrEqual(gesendet + 1)
+    expect(server.blobs.get(original)?.state).not.toBe('fertig')
+    expect(await zeilen(UPLOADS)).not.toEqual([])
+
+    // Zurück beim eigenen Konto geht der Rest hinaus.
+    setzeAngemeldetesKonto(1)
+    server.verzoegerung = 0
+    await uploadsFortsetzen(BUCKET)
+    await vi.waitFor(async () => expect(await zeilen(UPLOADS)).toEqual([]))
+    expect(server.blobs.get(original)!.state).toBe('fertig')
   })
 
   it('verwirft die Vorbereitung, wenn der Tresor währenddessen gesperrt wird', async () => {
@@ -542,6 +621,80 @@ describe('Tresor-Dateien', () => {
     await uploadsFortsetzen(BUCKET)
     expect(await zeilen(UPLOADS)).toHaveLength(3)
     expect(useTresorUploads.getState().je[id]?.fehler).toBeUndefined()
+  })
+
+  describe('Zwei Geräte an derselben Datei', () => {
+    it('führt das Umbenennen auf altem Stand mit dem neueren Inhalt des anderen Geräts zusammen', async () => {
+      // Bis 01.10.2026 gewann die zuletzt gesendete Fassung: das Gerät, das
+      // offline umbenannt hatte, holte den alten Inhalt zurück.
+      const server = serverStarten()
+      const userKey = await tresorOeffnen()
+      const id = await useVaultStore.getState().dateiHinzufuegen(new File(['eins'], 'a.txt', { type: 'text/plain' }))
+      await allesErledigt()
+      const v1 = useVaultStore.getState().items.find((i) => i.id === id)!
+
+      // Das andere Gerät ersetzt den Inhalt; seine Blobs kommen hier über die Ablage hoch.
+      const zwei = await dateiVorbereiten(new File(['zwei'], 'a.txt', { type: 'text/plain' }), userKey, BUCKET, id, () => false)
+      vorbereitungAbschliessen(zwei)
+      const alt = v1.datei!
+      const anderes: VaultItem = {
+        ...v1,
+        datei: { ...zwei, frueher: [{ typ: alt.typ, ersetzt: Date.now(), original: alt.original, vorschau: alt.vorschau, miniatur: alt.miniatur }] },
+        updatedAt: v1.updatedAt + 1000,
+      }
+      server.revision += 1
+      server.eintraege.set(id, { ciphertext: await encryptVaultEntry(umschlagAusItem(anderes), userKey, id), revision: server.revision, is_deleted: false })
+
+      // Dieses Gerät ist offline und benennt um.
+      server.offline = true
+      await useVaultStore.getState().saveItem({ ...v1, service: 'b.txt' })
+      await vi.waitFor(() => expect(useVaultStore.getState().syncStatus).toBe('offline'))
+      server.offline = false
+      await useVaultStore.getState().syncWithServer()
+
+      await vi.waitFor(async () => {
+        expect(getPendingQueue(BUCKET)).toEqual([])
+        expect(await zeilen(UPLOADS)).toEqual([])
+        expect(useVaultStore.getState().syncStatus).toBe('synced')
+      })
+      const item = useVaultStore.getState().items.find((i) => i.id === id)!
+      expect(item.service).toBe('b.txt')
+      expect(item.datei!.original.id).toBe(zwei.original.id)
+      expect(item.datei!.frueher!.map((v) => v.original.id)).toEqual([alt.original.id])
+      expect(await (await blobLesen(item.datei!.original, id, userKey, 'text/plain')).text()).toBe('zwei')
+      expect(server.geloescht).toEqual([])
+    })
+
+    const kopf = (id: string) => ({ id, loeschen: `l-${id}` }) as unknown as BlobKopf
+    const datei = (n: string, frueher: string[] = []) => ({
+      typ: 'text/plain',
+      original: kopf(`${n}o`),
+      vorschau: kopf(`${n}v`),
+      miniatur: kopf(`${n}m`),
+      frueher: frueher.map((f, i) => ({ typ: 'text/plain', ersetzt: 100 - i, original: kopf(`${f}o`), vorschau: kopf(`${f}v`), miniatur: kopf(`${f}m`) })),
+    })
+    const eintrag = (d: ReturnType<typeof datei>, service = 'a.txt') =>
+      ({ id: 'x', service, category: 'datei', datei: d, createdAt: 1, updatedAt: 1, revision: 1 }) as unknown as VaultItem
+
+    it('behält beide Inhalte, wenn beide Geräte ersetzt haben, und löscht nichts davon', () => {
+      const { item, weg } = fassungenZusammenfuehren(eintrag(datei('a')), eintrag(datei('e', ['a'])), eintrag(datei('s', ['a'])))
+      expect(item.datei!.original.id).toBe('eo')
+      expect(item.datei!.frueher!.map((v) => v.original.id)).toEqual(['so', 'ao'])
+      expect(weg).toEqual([])
+    })
+
+    it('verliert keine Fassung, die dieses Gerät offline angelegt hat', () => {
+      // Offline zweimal ersetzt (e1, dann e2), währenddessen hat der Server umbenannt und ersetzt (s).
+      const { item, weg } = fassungenZusammenfuehren(
+        eintrag(datei('a')),
+        eintrag(datei('e2', ['e1', 'a'])),
+        eintrag(datei('s', ['a']), 'neu.txt'),
+      )
+      expect(item.service).toBe('neu.txt')
+      expect(item.datei!.original.id).toBe('e2o')
+      expect(new Set(item.datei!.frueher!.map((v) => v.original.id))).toEqual(new Set(['so', 'e1o', 'ao']))
+      expect(weg).toEqual([])
+    })
   })
 
   describe('Miniaturen', () => {

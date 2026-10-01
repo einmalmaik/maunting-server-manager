@@ -357,7 +357,9 @@ def _blob_fehler(exc: vault_blob_service.BlobFehler) -> HTTPException:
 
 
 @router.get("/speicher", response_model=VaultSpeicher)
+@limiter.limit("120/minute")
 def tresor_speicher(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     konto: vault_service.TresorKonto = Depends(_tresor_konto),
@@ -428,8 +430,10 @@ async def blob_chunk_hochladen(
 
 
 @router.get("/blobs/{blob_id}/status", response_model=VaultBlobStatus)
+@limiter.limit("1200/minute")
 def blob_status(
     blob_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     bucket: str = Depends(_eigener_bucket),
 ) -> VaultBlobStatus:
@@ -446,8 +450,10 @@ def blob_status(
 
 
 @router.post("/blobs/{blob_id}/fertig")
+@limiter.limit("1200/minute")
 def blob_fertig(
     blob_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     bucket: str = Depends(_eigener_bucket),
     __=Depends(verify_csrf),
@@ -493,9 +499,11 @@ def blobs_klein(
 
 
 @router.delete("/blobs/{blob_id}")
+@limiter.limit("1200/minute")
 def blob_loeschen(
     blob_id: str,
     payload: VaultBlobLoeschen,
+    request: Request,
     db: Session = Depends(get_db),
     bucket: str = Depends(_eigener_bucket),
     __=Depends(verify_csrf),

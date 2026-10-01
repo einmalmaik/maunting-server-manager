@@ -1,3 +1,4 @@
+import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
 import React, { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import jsQR from 'jsqr'
@@ -187,6 +188,8 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
       stopCamera()
     }
   }, [isOpen, activeTab])
+
+  useZurueckSchliesst(isOpen, onClose)
 
   if (!isOpen) return null
 

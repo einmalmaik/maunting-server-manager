@@ -6,7 +6,7 @@
  * einer Art, die diese App nicht kennt, erscheinen nirgends.
  */
 
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
@@ -142,6 +142,18 @@ describe('VaultView: Archiv und Papierkorb', () => {
     fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.inPapierkorb')) }))
     await vi.waitFor(() => expect(trashItem).toHaveBeenCalledWith('a'))
     expect(deleteItem).not.toHaveBeenCalled()
+  })
+
+  it('schließt den Bearbeiten-Dialog mit der Zurück-Taste', async () => {
+    await vi.waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    render(<VaultView />)
+    const zeile = screen.getByText('Bank').closest('div.group') as HTMLElement
+    const knoepfe = within(zeile).getAllByRole('button')
+    fireEvent.click(knoepfe[knoepfe.length - 1])
+    expect(screen.getByText(i18n.t('common.edit'))).toBeInTheDocument()
+    await vi.waitFor(() => expect(window.history.state?.msmTiefe).toBe(1))
+    act(() => window.history.back())
+    await vi.waitFor(() => expect(screen.queryByText(i18n.t('common.edit'))).toBeNull())
   })
 
   it('rechnet die Restfrist in ganzen Tagen und nie unter null', () => {
@@ -365,6 +377,18 @@ describe('VaultView: Fotos', () => {
     await vi.waitFor(() => expect(usePromptStore.getState().pending).not.toBeNull())
     usePromptStore.getState().resolve('Meer')
     await vi.waitFor(() => expect(albumAnlegen).toHaveBeenCalledWith('Meer', ['1', '2']))
+  })
+
+  it('beendet die Auswahl mit der Zurück-Taste', async () => {
+    await vi.waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    render(<VaultView />)
+    fireEvent.click(reiter('mss.vault.ansicht.fotos'))
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.auswaehlen')) }))
+    fireEvent.click(kachel('strand.jpg')!)
+    expect(kachel('strand.jpg')).toHaveAttribute('aria-pressed', 'true')
+    await vi.waitFor(() => expect(window.history.state?.msmTiefe).toBe(1))
+    act(() => window.history.back())
+    await vi.waitFor(() => expect(kachel('strand.jpg')).not.toHaveAttribute('aria-pressed', 'true'))
   })
 
   it('zeigt im Album nur, was noch da ist, und nimmt Ausgewähltes heraus', async () => {

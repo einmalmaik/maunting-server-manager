@@ -1,3 +1,4 @@
+import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
 import {
   useEffect,
   useId,
@@ -40,6 +41,7 @@ export function ActionMenu({
   compact = false,
 }: ActionMenuProps) {
   const [open, setOpen] = useState(false)
+  useZurueckSchliesst(open, () => setOpen(false))
   const [style, setStyle] = useState<CSSProperties | null>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)

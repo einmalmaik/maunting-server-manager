@@ -1370,9 +1370,22 @@ export const useVaultStore = create<VaultState>((set, get) => {
     })
     blobsSchreiben(bucketId, cachedBlobs)
 
-    // Pending Queue aktualisieren
-    const pendingQueue = getPendingQueue(bucketId).filter((b) => b.id !== id)
-    pendingQueue.push({ id, ciphertext, revision, is_deleted: false })
+    // Pending Queue aktualisieren. Eine Datei gilt nur auf der Fassung, die
+    // dieses Gerät vom Server kannte: sonst holte ein Umbenennen auf einem
+    // Gerät, das offline war, den alten Inhalt zurück (`konflikteZusammenfuehren`).
+    const alteQueue = getPendingQueue(bucketId)
+    const wartend = alteQueue.find((b) => b.id === id)
+    const basis = updatedItem.datei ? (wartend?.vorher && !wartend.konflikt ? wartend.vorher : bisher) : undefined
+    const pendingQueue = alteQueue.filter((b) => b.id !== id)
+    pendingQueue.push({
+      id,
+      ciphertext,
+      revision,
+      is_deleted: false,
+      ...(basis?.serverRev !== undefined
+        ? { expected_revision: basis.serverRev, vorher: { ...basis, vorher: undefined, loeschBlobs: undefined } }
+        : {}),
+    })
     warteschlangeSchreiben(bucketId, pendingQueue)
 
     // Siehe createQuickPasswordEntry. Die Liste wird frisch gelesen: ein Sync
@@ -1456,7 +1469,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
     const { items, saveItem } = get()
     const item = items.find((i) => i.id === id)
     if (!item || item.trashedAt) return
-    await saveItem({ ...item, trashedAt: Date.now() })
+    // Wie der Stand: eine nachgehende Uhr legt nichts schon abgelaufen in den Papierkorb.
+    await saveItem({ ...item, trashedAt: naechsterStand(item.updatedAt) })
   },
 
   restoreItem: async (id: string) => {
@@ -1664,7 +1678,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       // Speichern-Aufruf, der es eingereiht hat, fand den Sync schon laufend
       // vor und hat keinen eigenen gestartet.
       for (let runde = 0; runde < SYNC_MAX_RUNDEN; runde++) {
-        const paket = naechstesSyncPaket(getPendingQueue(bucketId))
+        const paket = naechstesSyncPaket(getPendingQueue(bucketId).filter((m) => !m.konflikt))
         const sinceRevision = revisionLesen(bucketId)
 
         const data = await senden(
@@ -1698,6 +1712,10 @@ export const useVaultStore = create<VaultState>((set, get) => {
         // davor zurück, damit die neuere des anderen Geräts gegen sie
         // verglichen wird. Behaupten kann der Server damit nur, was dieses
         // Gerät selbst vorher hatte.
+        //
+        // Abgelehnte Dateiänderungen genauso; sie bleiben als Konflikt in der
+        // Warteschlange und werden nach dem Abgleich zusammengeführt.
+        const abgelehnt = new Set<string>()
         for (const konfliktId of data.conflicts ?? []) {
           const gesendet = paket.find((m) => m.id === konfliktId && m.vorher)
           if (!gesendet?.vorher) continue
@@ -1705,7 +1723,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
           if (lokal?.ciphertext !== gesendet.ciphertext) continue
           cachedBlobs = cachedBlobs.filter((b) => b.id !== konfliktId)
           cachedBlobs.push(gesendet.vorher)
-          console.warn(`Tresor-Sync: Löschung von ${konfliktId} abgelehnt, ein anderes Gerät hat ihn geändert.`)
+          if (!gesendet.is_deleted) abgelehnt.add(konfliktId)
+          console.warn(`Tresor-Sync: Änderung an ${konfliktId} abgelehnt, ein anderes Gerät hat ihn geändert.`)
         }
 
         for (const befund of befunde) {
@@ -1757,15 +1776,16 @@ export const useVaultStore = create<VaultState>((set, get) => {
         // die gleiche ID: wer einen Eintrag änderte, während seine vorige
         // Fassung unterwegs war, verlor die neue Fassung aus der
         // Warteschlange, ohne dass sie je den Server erreichte.
-        const offen = getPendingQueue(bucketId).filter(
-          (m) => !paket.some((g) => g.id === m.id && g.ciphertext === m.ciphertext),
-        )
+        const offen = getPendingQueue(bucketId).flatMap((m) => {
+          if (!paket.some((g) => g.id === m.id && g.ciphertext === m.ciphertext)) return [m]
+          return abgelehnt.has(m.id) ? [{ ...m, konflikt: true }] : []
+        })
         warteschlangeSchreiben(bucketId, offen)
         blobsSchreiben(bucketId, cachedBlobs)
         revisionSchreiben(bucketId, data.server_revision)
         set({ items: currentItems })
 
-        if (offen.length === 0 && !data.has_more) {
+        if (offen.every((m) => m.konflikt) && !data.has_more) {
           abgeglichen = true
           break
         }
@@ -1797,6 +1817,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
       void loeschungenAbarbeiten(bucketId)
 
       if (abgeglichen) {
+        await konflikteZusammenfuehren(userKey, bucketId)
+        if (!sitzungOffen(userKey, bucketId)) return
         await ablageUmziehen()
         if (!sitzungOffen(userKey, bucketId)) return
         const grenze = Date.now() - PAPIERKORB_MS
@@ -1866,6 +1888,108 @@ export const useVaultStore = create<VaultState>((set, get) => {
   }
 })
 
+/** Was ein Gerät an einer Datei ändern kann, außer ihrem Inhalt. */
+const DATEI_FELDER = [
+  'service',
+  'username',
+  'password',
+  'url',
+  'notes',
+  'totpSecret',
+  'category',
+  'isFavorite',
+  'lastUsedAt',
+  'linkedServiceId',
+  'archivedAt',
+  'trashedAt',
+  'ordner',
+  'album',
+] as const
+
+/**
+ * Setzt die Änderung dieses Geräts (`eigen`, ausgehend von `basis`) auf die
+ * Fassung des Servers. Jedes Feld, das dieses Gerät geändert hat, gilt; hat es
+ * den Inhalt ersetzt, wird der des Servers zur früheren Fassung. `weg` sind die
+ * Blobs, auf die danach keine Fassung mehr zeigt.
+ */
+export function fassungenZusammenfuehren(
+  basis: VaultItem,
+  eigen: VaultItem,
+  server: VaultItem,
+): { item: VaultItem; weg: { id: string; loeschen: string }[] } {
+  const item: VaultItem = { ...server, datei: server.datei ?? eigen.datei }
+  for (const feld of DATEI_FELDER) {
+    if (JSON.stringify(eigen[feld]) !== JSON.stringify(basis[feld])) Object.assign(item, { [feld]: eigen[feld] })
+  }
+  const neuerInhalt = eigen.datei?.original.id
+  if (eigen.datei && server.datei && neuerInhalt !== basis.datei?.original.id && neuerInhalt !== server.datei.original.id) {
+    const { frueher: eigeneFrueher = [], ...kopf } = eigen.datei
+    const { frueher: serverFrueher = [], ...serverKopf } = server.datei
+    const gesehen = new Set([kopf.original.id])
+    const versionen = [
+      { typ: serverKopf.typ, ersetzt: Date.now(), original: serverKopf.original, vorschau: serverKopf.vorschau, miniatur: serverKopf.miniatur },
+      ...serverFrueher,
+      ...eigeneFrueher,
+    ]
+      .filter((v) => !gesehen.has(v.original.id) && gesehen.add(v.original.id))
+      .sort((a, b) => b.ersetzt - a.ersetzt)
+    item.datei = { ...serverKopf, ...kopf, frueher: versionen.slice(0, VERSIONEN) }
+  }
+  const bleibt = new Set(item.datei ? dateiBlobs(item.datei).map((k) => k.id) : [])
+  const weg = new Map<string, { id: string; loeschen: string }>()
+  for (const fassung of [basis, eigen, server]) {
+    for (const k of fassung.datei ? dateiBlobs(fassung.datei) : []) {
+      if (!bleibt.has(k.id)) weg.set(k.id, { id: k.id, loeschen: k.loeschen })
+    }
+  }
+  return { item, weg: [...weg.values()] }
+}
+
+/**
+ * Führt Dateiänderungen, die der Server abgelehnt hat, mit seiner Fassung
+ * zusammen und schickt das Ergebnis wieder auf der bekannten Revision.
+ *
+ * Bis 01.10.2026 galt die zuletzt gesendete Fassung. Benannte ein Gerät, das
+ * offline war, eine Datei um, holte es den Inhalt zurück, den ein anderes
+ * inzwischen ersetzt hatte; die Blobs des neuen Inhalts belegten danach den
+ * Speicher, und niemand konnte sie mehr löschen.
+ */
+async function konflikteZusammenfuehren(userKey: CryptoKey, bucketId: string): Promise<void> {
+  for (const m of getPendingQueue(bucketId).filter((e) => e.konflikt && e.vorher)) {
+    const lesen = async (e: StoredEncryptedEntry) =>
+      itemAusUmschlag(e.id, e.revision, await decryptVaultEntry(e.ciphertext, userKey, e.id))
+    let basis: VaultItem
+    let eigen: VaultItem
+    try {
+      ;[basis, eigen] = await Promise.all([lesen(m.vorher!), lesen(m)])
+    } catch {
+      continue // nicht lesbar: bleibt liegen, statt etwas zu überschreiben
+    }
+    const jetzt = useVaultStore.getState()
+    if (jetzt.userKey !== userKey || jetzt.bucketId !== bucketId) return
+    const server = jetzt.items.find((i) => i.id === m.id)
+    if (server) {
+      const { item, weg } = fassungenZusammenfuehren(basis, eigen, server)
+      await useVaultStore.getState().saveItem(item, { loeschBlobs: weg })
+      continue
+    }
+    // Auf einem anderen Gerät gelöscht. Was nur diese Änderung hochgeladen
+    // hat, geht mit, sobald die Warteschlange den Eintrag freigibt.
+    const bekannt = new Set(basis.datei ? dateiBlobs(basis.datei).map((k) => k.id) : [])
+    const neu = (eigen.datei ? dateiBlobs(eigen.datei) : []).filter((k) => !bekannt.has(k.id))
+    blobsSchreiben(
+      bucketId,
+      getStoredBlobs(bucketId).map((e) =>
+        e.id === m.id ? { ...e, loeschBlobs: [...(e.loeschBlobs ?? []), ...neu.map((k) => ({ id: k.id, loeschen: k.loeschen }))] } : e,
+      ),
+    )
+    warteschlangeSchreiben(
+      bucketId,
+      getPendingQueue(bucketId).filter((e) => !(e.id === m.id && e.ciphertext === m.ciphertext)),
+    )
+  }
+}
+
 bucketMelderSetzen(bucketNeuMelden)
 zurueckgesetztFrage(() => useVaultStore.getState().zurueckgesetzt)
 
@@ -1889,6 +2013,8 @@ export function abgleichAnstossen(anlass: 'netz' | 'vordergrund'): void {
     return
   }
   if (anlass === 'vordergrund' && syncStatus === 'synced' && lastSyncTime && Date.now() - lastSyncTime < VORDERGRUND_PAUSE_MS) {
+    // Ein Upload, den der Wechsel in den Hintergrund abgerissen hat, wartet sonst bis zum nächsten Abgleich.
+    void uploadsFortsetzen(bucketId)
     return
   }
   void useVaultStore.getState().syncWithServer()

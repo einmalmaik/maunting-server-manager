@@ -43,10 +43,16 @@ export interface StoredEncryptedEntry {
    * die Zahl des Servers, um eine fremde Änderung zu erkennen.
    */
   serverRev?: number
-  /** Nur in der Warteschlange: das Löschen gilt nur auf dieser Serverrevision. */
+  /** Nur in der Warteschlange: Löschen und Dateiänderungen gelten nur auf dieser Serverrevision. */
   expected_revision?: number
-  /** Nur in der Warteschlange: der Cache-Eintrag vor dem Löschen, für den Konfliktfall. */
+  /** Nur in der Warteschlange: die Fassung vom Server, auf der die Änderung aufsetzt, für den Konfliktfall. */
   vorher?: StoredEncryptedEntry
+  /**
+   * Nur in der Warteschlange: der Server hat diese Dateiänderung abgelehnt,
+   * weil ein anderes Gerät schneller war. Sie geht nicht mehr so hinaus,
+   * sondern wird nach dem Abgleich mit seiner Fassung zusammengeführt.
+   */
+  konflikt?: boolean
   /**
    * Nur im Cache: Blobs samt Löschnachweis, die weg können, sobald der
    * Server genau diese Fassung angenommen hat. An einem Tombstone sind es die
@@ -85,6 +91,8 @@ interface WarteZeile extends Zeile {
 
 interface Fach {
   bucket: string
+  /** Das Konto, für das sie geladen wurde. Nach einem Wechsel gilt sie nicht mehr. */
+  konto: number | null
   db: IDBDatabase | null
   blobs: Map<string, StoredEncryptedEntry>
   queue: StoredEncryptedEntry[]
@@ -202,6 +210,7 @@ export async function ablageLaden(bucket: string): Promise<void> {
   const konto = angemeldetesKonto()
   const alt: Fach = {
     bucket,
+    konto,
     db: null,
     blobs: new Map(altLesen<StoredEncryptedEntry>(`${ALT_BLOBS}${bucket}`).map((e) => [e.id, e])),
     queue: altLesen<StoredEncryptedEntry>(`${ALT_WARTESCHLANGE}${bucket}`),
@@ -244,6 +253,7 @@ export async function ablageLaden(bucket: string): Promise<void> {
   warte.sort((a, b) => a.seq - b.seq)
   const neu: Fach = {
     bucket,
+    konto,
     db: null,
     blobs: new Map(eintraege.map((z) => [z.id, ohneBucket(z)])),
     queue: warte.map(ohneBucket),
@@ -367,9 +377,13 @@ export async function ablageDb(): Promise<IDBDatabase | null> {
 
 let eigeneDb: { konto: number; db: IDBDatabase } | null = null
 
-/** Ob die Ablage dieses Buckets im Speicher liegt. Vorher sagen Lesezugriffe nichts über den Bestand. */
+/**
+ * Ob die Ablage dieses Buckets für das angemeldete Konto im Speicher liegt.
+ * Vorher sagen Lesezugriffe nichts über den Bestand, und nach einem
+ * Kontowechsel spräche jede Anfrage mit der Sitzung des anderen Kontos.
+ */
 export function ablageGeladen(bucket: string): boolean {
-  return fach?.bucket === bucket
+  return fach?.bucket === bucket && fach.konto === angemeldetesKonto()
 }
 
 /** Ob die Ablage dieses Buckets in IndexedDB liegt (für Tests und Diagnose). */

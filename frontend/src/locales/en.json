@@ -4500,7 +4500,7 @@
       },
       "loeschen": {
         "title": "Deleting",
-        "body": "Deleted files stay on disk for 7 days and count towards the vault's storage until then. Aborted uploads disappear after 24 hours, files of deleted accounts at the next hourly cleanup."
+        "body": "Deleted files stay on disk for 7 days and count towards the vault's storage until then. An upload that receives nothing for 24 hours disappears, files of deleted accounts at the next hourly cleanup."
       },
       "backup": {
         "title": "Backup",
@@ -4723,8 +4723,8 @@
         "items": {
           "eintraege": "Entries (passwords, authenticator codes, notes, files, folders and albums) are stored on the server as an encrypted envelope, padded to fixed sizes, with a revision number and a timestamp. Trash and archive live inside the encrypted entry.",
           "dateien": "Files and photos are encrypted on the device in chunks, each file with its own key, and stored as three parts: original, preview and thumbnail. Name, file type, capture date, location, camera and exact size are only in the encrypted entry. Per vault, the instance sees how many parts exist, their rounded-up sizes, when they were uploaded and that they belong together in threes.",
-          "speicher": "Which account a vault belongs to is stored in the database only as a check value that only the instance can compute with its key. Anyone who only reads the database, for example in a backup, cannot link the vault or its files to an account. The instance makes the link while you access the vault signed in and counts how much storage your vault uses; how much it may use is set by the operator through your roles. Anyone with access to the server itself can make the link as well. Deleted files stay encrypted on the server for another 7 days and count until then; afterwards they are removed. Aborted uploads disappear after 24 hours.",
-          "geraet": "So the vault works offline, entries, thumbnails and previews are kept encrypted in the device storage, plus originals you make available offline or opened recently. This storage belongs to your account. If you explicitly save a file to the device, that copy is stored there unencrypted.",
+          "speicher": "Which account a vault belongs to is stored in the database only as a check value that only the instance can compute with its key. Anyone who only reads the database, for example in a backup, cannot link the vault or its files to an account. The instance makes the link while you access the vault signed in and counts how much storage your vault uses; how much it may use is set by the operator through your roles. Anyone with access to the server itself can make the link as well. Deleted files stay encrypted on the server for another 7 days and count until then; afterwards they are removed. An upload that receives nothing for 24 hours disappears.",
+          "geraet": "So the vault works offline, entries and thumbnails are kept encrypted in the device storage, plus originals you make available offline and what you opened recently (originals and previews, up to 512 MB together). This storage belongs to your account. If you explicitly save a file to the device, that copy is stored there unencrypted.",
           "verlust": "Without the master password nobody can open the vault, the operator included. If you forget it, you can only reset the vault. Then, as when you delete your account, the instance removes all entries at once and all files within an hour. It keeps only the identifier of the old vault so that another device does not upload it again; that identifier reveals neither account nor content."
         }
       },

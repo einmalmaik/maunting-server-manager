@@ -71,6 +71,40 @@ class TestNachweis:
         antwort = _export(client, user_cookies, otp_code="123456")
         assert antwort.status_code == 200, antwort.text
 
+    def test_ohne_sidecar_503_und_der_code_bleibt_gueltig(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict, monkeypatch
+    ):
+        """Ohne Sidecar gibt es keinen Tresorindex und damit keinen Export.
+
+        Bis 01.10.2026 wurde der App-Code erst verbraucht und der Export lief
+        danach in den fehlenden Sidecar: der Code war weg, der Export auch.
+        """
+        from services import vault_service
+        from services.dis_client import DisSidecarError
+        from tests._totp import totp_now
+
+        geheimnis = "JBSWY3DPEHPK3PXP"
+        regular_user.two_factor_secret_encrypted = AuthService.encrypt_secret(
+            geheimnis, aad=f"msm:user:{regular_user.id}:2fa"
+        )
+        regular_user.two_factor_enabled = True
+        db.commit()
+        code = totp_now(geheimnis)
+
+        def kaputt(werte):
+            raise DisSidecarError("weg")
+
+        echter_index = DisClient.blind_index
+        monkeypatch.setattr(vault_service, "_KONTO_INDEX", {})
+        monkeypatch.setattr(DisClient, "blind_index", staticmethod(kaputt))
+        assert _export(client, user_cookies, otp_code=code).status_code == 503
+        db.refresh(regular_user)
+        assert regular_user.two_factor_totp_last_step is None
+
+        monkeypatch.setattr(DisClient, "blind_index", echter_index)
+        antwort = _export(client, user_cookies, otp_code=code)
+        assert antwort.status_code == 200, antwort.text
+
     def test_hoechstens_drei_je_stunde_und_jeder_im_audit(
         self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
     ):

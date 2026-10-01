@@ -42,6 +42,7 @@ import { generateTotpCode, getTotpSecondsRemaining } from './totpEngine'
 import { MASTER_PASSWORT_MINDESTLAENGE, generateSecurePassword } from './vaultCrypto'
 import { createDebouncedLeakChecker, type LeakCheckResult } from './leakChecker'
 import { QrScannerModal } from './QrScannerModal'
+import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
 import { TresorZuruecksetzen } from './TresorZuruecksetzen'
 import { TresorDateiBereich } from './TresorDateiBereich'
 import { TresorGalerie } from './TresorGalerie'
@@ -175,6 +176,9 @@ export function VaultView() {
   const [modalTotpSecret, setModalTotpSecret] = useState('')
   const [showModalPassword, setShowModalPassword] = useState(false)
   const [showQrScanner, setShowQrScanner] = useState(false)
+  // Eigene Overlays: Zurück schließt sie, statt die App zu verlassen (Android).
+  useZurueckSchliesst(isModalOpen, () => setIsModalOpen(false))
+  useZurueckSchliesst(isHintModalOpen, () => setIsHintModalOpen(false))
   const [leakCheckResult, setLeakCheckResult] = useState<LeakCheckResult | null>(null)
 
   // TOTP-Ticker für alle Einträge mit 2FA-Secret

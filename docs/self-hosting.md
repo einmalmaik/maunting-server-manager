@@ -553,8 +553,8 @@ zugreift.
   hoch; vorhandene bleiben lesbar und löschbar. Der Owner ist nicht begrenzt.
   Über die Hoster-API vergebene Rollen bringen ihren Speicher mit.
 - **Löschen:** Gelöschte Dateien bleiben noch 7 Tage auf der Platte und zählen
-  so lange zum Speicher des Tresors. Abgebrochene Uploads verschwinden nach 24
-  Stunden. Beides räumt das Panel stündlich auf, ebenso die Dateien gelöschter
+  so lange zum Speicher des Tresors. Ein Upload, an dem 24 Stunden lang nichts
+  mehr ankommt, gilt als abgebrochen und verschwindet. Beides räumt das Panel stündlich auf, ebenso die Dateien gelöschter
   Konten.
 - **Backup:** Das Panel-Backup enthält die Datenbank, nicht dieses
   Verzeichnis. Ohne das Verzeichnis zeigen die Tresor-Einträge nach einer

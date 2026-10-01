@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { Kontextmenue, menueLage } from './Kontextmenue'
 
@@ -59,5 +59,14 @@ describe('Kontextmenue', () => {
   it('zeigt nichts, solange kein Ort gesetzt ist', () => {
     render(<Kontextmenue ort={null} items={eintraege()} label="Aktionen" onSchliessen={vi.fn()} />)
     expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('schließt mit der Zurück-Taste', async () => {
+    await waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    const onSchliessen = vi.fn()
+    render(<Kontextmenue ort={{ x: 10, y: 10 }} items={eintraege()} label="Aktionen" onSchliessen={onSchliessen} />)
+    await waitFor(() => expect(window.history.state?.msmTiefe).toBe(1))
+    act(() => window.history.back())
+    await waitFor(() => expect(onSchliessen).toHaveBeenCalled())
   })
 })
