@@ -141,11 +141,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.13 vom 2026-09-30 aus (Tresor-Cloud)', () => {
+  it('weist die Fassung 3.14 vom 2026-10-01 aus (Tresor ohne Kontobezug)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.13`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.14`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -164,15 +164,18 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.messenger.items.stories')).toMatch(/Datenbank stehen Text und Bild verschlüsselt/);
     // 3.13: Tresor-Cloud; was die Instanz trotzdem sieht, und die Update-Abfrage bei GitHub.
     expect(i18n.t('privacyPolicy.sections.vault.items.dateien')).toMatch(/wie groß sie aufgerundet sind/);
-    expect(i18n.t('privacyPolicy.sections.vault.items.speicher')).toMatch(/wie viel Speicher jedes Konto belegt/);
+    // 3.14: die Datenbank ordnet Tresor und Dateien keinem Konto mehr im Klartext zu.
+    expect(i18n.t('privacyPolicy.sections.vault.items.speicher')).toMatch(/nur als Prüfwert/);
+    expect(i18n.t('privacyPolicy.sections.vault.items.speicher')).toMatch(/Wer Zugriff auf den Server selbst hat/);
+    expect(i18n.t('privacyPolicy.sections.vault.items.dateien')).toMatch(/je Tresor/);
     expect(i18n.t('privacyPolicy.sections.desktopApp.body')).toMatch(/GitHub sieht dabei Ihre IP-Adresse/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-09-30');
-    expect(stand).toHaveTextContent('2026-09-30');
+    expect(stand).toHaveAttribute('datetime', '2026-10-01');
+    expect(stand).toHaveTextContent('2026-10-01');
   });
 
   /**

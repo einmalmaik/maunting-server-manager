@@ -1,4 +1,4 @@
-"""REST-Router für den blinden, verschlüsselten Zero-Knowledge Passwort-Manager."""
+"""REST-Router für den blinden, verschlüsselten Zero-Knowledge-Tresor."""
 
 import logging
 
@@ -30,6 +30,7 @@ from schemas.vault import (
 )
 from services import audit_service, passkey_service, vault_blob_service, vault_service
 from services.auth_service import AuthService
+from services.dis_client import DisSidecarError
 from services.panel_settings_service import PanelSettingsService
 
 router = APIRouter(prefix="/api/vault", tags=["vault"])
@@ -40,8 +41,43 @@ def _check_vault_enabled() -> None:
     if PanelSettingsService.get("vault_enabled", "true") == "false":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Der Passwort-Manager ist in den Panel-Einstellungen deaktiviert.",
+            detail="Der Tresor ist in den Panel-Einstellungen deaktiviert.",
         )
+
+
+def _tresor_konto(current_user: User = Depends(get_current_user)) -> vault_service.TresorKonto:
+    """Das angemeldete Konto, wie die Tresortabellen es kennen (HMAC aus dem Sidecar).
+
+    Ohne Sidecar gibt es keinen Index und damit keinen Tresor: 503 statt 500.
+    """
+    try:
+        return vault_service.tresor_konto(current_user.id)
+    except DisSidecarError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Der Tresor ist gerade nicht erreichbar.",
+        ) from exc
+
+
+def _eigener_bucket(
+    db: Session = Depends(get_db),
+    konto: vault_service.TresorKonto = Depends(_tresor_konto),
+) -> str:
+    """Der Bucket, an dem die Dateien des Kontos haengen.
+
+    Fehlt er (die Meldung des Salzes ist beim Einrichten gescheitert), meldet
+    der Client ihn auf ``VAULT_BUCKET_UNBEKANNT`` neu und versucht es noch
+    einmal.
+    """
+    try:
+        bucket = vault_service.eigener_bucket(db, konto)
+    except vault_service.VaultOhneBucket as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "VAULT_BUCKET_UNBEKANNT", "message": "errors.vault_bucket_unbekannt"},
+        ) from exc
+    db.commit()
+    return bucket
 
 
 @router.post("/blind-sync", response_model=VaultSyncResponse)
@@ -106,7 +142,7 @@ def register_blind_vault_bucket(
     payload: VaultBlindRegisterRequest,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    konto: vault_service.TresorKonto = Depends(_tresor_konto),
     __=Depends(verify_csrf),
 ) -> dict[str, str]:
     """Hinterlegt den blinden Besitznachweis für den eigenen Tresor-Bucket.
@@ -117,9 +153,7 @@ def register_blind_vault_bucket(
     """
     _check_vault_enabled()
     try:
-        vault_service.register_blind_bucket(
-            db, current_user.id, payload.bucket_id, payload.auth_token
-        )
+        vault_service.register_blind_bucket(db, konto, payload.bucket_id, payload.auth_token)
     except vault_service.VaultBucketAccessDenied as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except vault_service.VaultBucketAlreadyBound as exc:
@@ -131,7 +165,7 @@ def register_blind_vault_bucket(
 def sync_vault_entries(
     payload: VaultSyncRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    konto: vault_service.TresorKonto = Depends(_tresor_konto),
     __=Depends(verify_csrf),
 ) -> VaultSyncResponse:
     """Synchronisiert verschlüsselte Tresor-Einträge mit dem Server.
@@ -144,7 +178,7 @@ def sync_vault_entries(
     """
     _check_vault_enabled()
     try:
-        return vault_service.sync_vault(db, current_user, payload)
+        return vault_service.sync_vault(db, konto, payload)
     except vault_service.VaultClientZuAlt as exc:
         raise HTTPException(status_code=status.HTTP_426_UPGRADE_REQUIRED, detail=str(exc)) from exc
     except vault_service.VaultBucketAccessDenied as exc:
@@ -168,18 +202,18 @@ def sync_vault_entries(
 @router.get("/salt", response_model=VaultSaltResponse)
 def get_vault_salt(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    konto: vault_service.TresorKonto = Depends(_tresor_konto),
 ) -> VaultSaltResponse:
     """Ruft den am Benutzerkonto hinterlegten KDF-Salt für Multi-Device-Sync ab (SEC-04)."""
     _check_vault_enabled()
-    return vault_service.get_vault_salt(db, current_user.id)
+    return vault_service.get_vault_salt(db, konto)
 
 
 @router.post("/salt", response_model=VaultSaltResponse)
 def set_vault_salt(
     payload: VaultSaltSetRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    konto: vault_service.TresorKonto = Depends(_tresor_konto),
     __=Depends(verify_csrf),
 ) -> VaultSaltResponse:
     """Hinterlegt den KDF-Salt des Benutzers beim initialen Setup (SEC-04, SEC-09)."""
@@ -187,7 +221,7 @@ def set_vault_salt(
     try:
         return vault_service.set_vault_salt(
             db,
-            current_user.id,
+            konto,
             payload.kdf_salt,
             payload.bucket_id,
             payload.auth_token,
@@ -209,6 +243,7 @@ def reset_vault(
     payload: VaultResetRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    konto: vault_service.TresorKonto = Depends(_tresor_konto),
     __=Depends(verify_csrf),
 ) -> dict[str, str]:
     """Setzt den Tresor des Kontos zurueck, wenn das Master-Passwort vergessen ist.
@@ -237,7 +272,7 @@ def reset_vault(
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=passkey_service.nachweis_hinweis(current_user))
 
-    vault_service.tresor_zuruecksetzen(db, current_user.id)
+    vault_service.tresor_zuruecksetzen(db, konto)
     audit_service.record_privileged_action(
         db,
         user_id=current_user.id,
@@ -253,23 +288,23 @@ def reset_vault(
 def save_vault_hint(
     payload: VaultHintSetRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    konto: vault_service.TresorKonto = Depends(_tresor_konto),
     __=Depends(verify_csrf),
 ) -> dict[str, str]:
-    """Hinterlegt einen Passwort-Hinweis für den Passwort-Manager."""
+    """Hinterlegt einen Passwort-Hinweis für den Tresor."""
     _check_vault_enabled()
-    vault_service.set_vault_hint(db, current_user.id, payload.hint)
+    vault_service.set_vault_hint(db, konto, payload.hint)
     return {"status": "ok", "message": "Passwort-Hinweis erfolgreich hinterlegt."}
 
 
 @router.get("/hint-status", response_model=VaultHintStatusResponse)
 def get_vault_hint_status(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    konto: vault_service.TresorKonto = Depends(_tresor_konto),
 ) -> VaultHintStatusResponse:
     """Gibt den Status des Passwort-Hinweises und Cooldowns zurück."""
     _check_vault_enabled()
-    return vault_service.get_vault_hint_status(db, current_user.id)
+    return vault_service.get_vault_hint_status(db, konto)
 
 
 @router.post("/request-hint")
@@ -278,6 +313,7 @@ async def send_vault_hint(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    konto: vault_service.TresorKonto = Depends(_tresor_konto),
     __=Depends(verify_csrf),
 ) -> dict[str, str]:
     """Sendet den hinterlegten Passwort-Hinweis an die E-Mail des Benutzers (max. 1x alle 10 Minuten).
@@ -287,7 +323,7 @@ async def send_vault_hint(
     schon die abgewiesenen Anfragen jeweils einen Datenbank-Roundtrip.
     """
     _check_vault_enabled()
-    success, msg = await vault_service.request_vault_hint_email(db, current_user)
+    success, msg = await vault_service.request_vault_hint_email(db, current_user, konto)
     if not success:
         # Falls Cooldown aktiv ist: 429 Too Many Requests
         if "10 Minuten" in msg:
@@ -298,8 +334,8 @@ async def send_vault_hint(
 
 # ─── Tresor-Cloud: verschluesselte Dateien ───────────────────────────────────
 #
-# Alle Wege sind angemeldet und gelten nur fuer die Blobs des eigenen Kontos.
-# Ein fremder Blob ist wie ein fehlender (404). Die Grenzen sind grosszuegig und
+# Alle Wege sind angemeldet und gelten nur fuer die Blobs im Bucket des
+# eigenen Kontos (`_eigener_bucket`). Ein fremder Blob ist wie ein fehlender (404). Die Grenzen sind grosszuegig und
 # gehoeren nur diesen Routen: ein Upload von tausend Fotos sind dreitausend
 # Blobs, und nichts davon darf die Anmeldegrenze aufbrauchen.
 
@@ -312,9 +348,13 @@ def _blob_fehler(exc: vault_blob_service.BlobFehler) -> HTTPException:
 def tresor_speicher(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    konto: vault_service.TresorKonto = Depends(_tresor_konto),
 ) -> VaultSpeicher:
     _check_vault_enabled()
-    return VaultSpeicher(**vault_blob_service.speicher(db, current_user))
+    einstellung = vault_service.einstellung(db, konto)
+    bucket = einstellung.bucket_id if einstellung is not None else None
+    db.commit()
+    return VaultSpeicher(**vault_blob_service.speicher(db, current_user, bucket))
 
 
 @router.post("/blobs", status_code=status.HTTP_201_CREATED)
@@ -324,12 +364,13 @@ def blob_anlegen(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    bucket: str = Depends(_eigener_bucket),
     __=Depends(verify_csrf),
 ) -> dict[str, str]:
     _check_vault_enabled()
     try:
         vault_blob_service.anlegen(
-            db, current_user, payload.id, payload.chunk_count, payload.bytes_total, payload.delete_verifier
+            db, current_user, bucket, payload.id, payload.chunk_count, payload.bytes_total, payload.delete_verifier
         )
     except vault_blob_service.BlobFehler as exc:
         raise _blob_fehler(exc) from exc
@@ -343,7 +384,7 @@ async def blob_chunk_hochladen(
     index: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    bucket: str = Depends(_eigener_bucket),
     __=Depends(verify_csrf),
 ) -> Response:
     """Nimmt einen Chunk als rohe Bytes an. Laenge exakt wie angemeldet, sonst 413/422.
@@ -352,7 +393,7 @@ async def blob_chunk_hochladen(
     """
     await run_in_threadpool(_check_vault_enabled)
     try:
-        erwartet = await run_in_threadpool(vault_blob_service.laenge_fuer_upload, db, current_user.id, blob_id, index)
+        erwartet = await run_in_threadpool(vault_blob_service.laenge_fuer_upload, db, bucket, blob_id, index)
     except vault_blob_service.BlobFehler as exc:
         raise _blob_fehler(exc) from exc
 
@@ -372,11 +413,11 @@ async def blob_chunk_hochladen(
 def blob_status(
     blob_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    bucket: str = Depends(_eigener_bucket),
 ) -> VaultBlobStatus:
     _check_vault_enabled()
     try:
-        blob = vault_blob_service.eigener_blob(db, current_user.id, blob_id)
+        blob = vault_blob_service.eigener_blob(db, bucket, blob_id)
     except vault_blob_service.BlobFehler as exc:
         raise _blob_fehler(exc) from exc
     return VaultBlobStatus(
@@ -390,12 +431,12 @@ def blob_status(
 def blob_fertig(
     blob_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    bucket: str = Depends(_eigener_bucket),
     __=Depends(verify_csrf),
 ) -> dict[str, str]:
     _check_vault_enabled()
     try:
-        vault_blob_service.fertigstellen(db, current_user.id, blob_id)
+        vault_blob_service.fertigstellen(db, bucket, blob_id)
     except vault_blob_service.BlobFehler as exc:
         raise _blob_fehler(exc) from exc
     return {"state": "fertig"}
@@ -408,11 +449,11 @@ def blob_chunk_lesen(
     index: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    bucket: str = Depends(_eigener_bucket),
 ) -> FileResponse:
     _check_vault_enabled()
     try:
-        pfad = vault_blob_service.chunk_pfad(db, current_user.id, blob_id, index)
+        pfad = vault_blob_service.chunk_pfad(db, bucket, blob_id, index)
     except vault_blob_service.BlobFehler as exc:
         raise _blob_fehler(exc) from exc
     return FileResponse(pfad, media_type="application/octet-stream")
@@ -424,12 +465,12 @@ def blobs_klein(
     payload: VaultBlobsKlein,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    bucket: str = Depends(_eigener_bucket),
     __=Depends(verify_csrf),
 ) -> Response:
     """Bis zu 100 Miniaturen in einer Antwort, damit die Galerie nicht tausend Anfragen stellt."""
     _check_vault_enabled()
-    inhalt = vault_blob_service.kleine_lesen(db, current_user.id, payload.ids)
+    inhalt = vault_blob_service.kleine_lesen(db, bucket, payload.ids)
     return Response(content=inhalt, media_type="application/octet-stream")
 
 
@@ -438,12 +479,12 @@ def blob_loeschen(
     blob_id: str,
     payload: VaultBlobLoeschen,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    bucket: str = Depends(_eigener_bucket),
     __=Depends(verify_csrf),
 ) -> dict[str, str]:
     _check_vault_enabled()
     try:
-        vault_blob_service.loeschen(db, current_user.id, blob_id, payload.schluessel)
+        vault_blob_service.loeschen(db, bucket, blob_id, payload.schluessel)
     except vault_blob_service.BlobFehler as exc:
         raise _blob_fehler(exc) from exc
     return {"state": "geloescht"}

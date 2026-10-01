@@ -331,7 +331,7 @@ export async function deinstallationStarten(): Promise<void> {
 
 /**
  * Human Error Guard: Aktiviert oder deaktiviert den Windows-Hardware- und
- * Software-Schutz, um das Passwort-Manager-Fenster vor KI-Screenshots
+ * Software-Schutz, um das Tresor-Fenster vor KI-Screenshots
  * (Computer-Use) zu verbergen bzw. zu schwärzen.
  */
 export async function setzeTresorSchutz(aktiv: boolean): Promise<void> {

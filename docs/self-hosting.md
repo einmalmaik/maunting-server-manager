@@ -536,9 +536,13 @@ Benutzer `msm` lesbar). Dateiname, Typ, echte Größe und Schlüssel stehen im
 verschlüsselten Tresor-Eintrag. Auch mit Root-Zugang und Datenbank sieht der
 Betreiber davon nichts.
 
-Was der Server doch sieht: je Konto, wie viele Dateien es gibt, wie groß sie
+Was der Server doch sieht: je Tresor, wie viele Dateien es gibt, wie groß sie
 nach dem Auffüllen auf feste Größenstufen sind und wann sie hochgeladen
-wurden.
+wurden. Welchem Konto ein Tresor gehört, steht in der Datenbank nur als HMAC
+der Kontonummer (`konto_index`), dessen Schlüssel der DIS-Sidecar hält. Wer nur
+die Datenbank oder ein Backup liest, kann Tresor und Dateien keinem Konto
+zuordnen; das Panel stellt die Zuordnung her, solange das Konto angemeldet
+zugreift.
 
 - **Speicher je Rolle:** Den Speicher vergibst du über Rollen, unter
   Einstellungen → Tresorspeicher (`role_vault_quotas`). Ein Konto bekommt den
@@ -546,7 +550,7 @@ wurden.
   hoch; vorhandene bleiben lesbar und löschbar. Der Owner ist nicht begrenzt.
   Über die Hoster-API vergebene Rollen bringen ihren Speicher mit.
 - **Löschen:** Gelöschte Dateien bleiben noch 7 Tage auf der Platte und zählen
-  so lange zum Speicher des Kontos. Abgebrochene Uploads verschwinden nach 24
+  so lange zum Speicher des Tresors. Abgebrochene Uploads verschwinden nach 24
   Stunden. Beides räumt das Panel stündlich auf, ebenso die Dateien gelöschter
   Konten.
 - **Backup:** Das Panel-Backup enthält die Datenbank, nicht dieses
@@ -554,9 +558,11 @@ wurden.
   Wiederherstellung auf fehlende Dateien. Sichere `/opt/msm/vault-blobs` mit
   der Sicherung des Servers. Der Inhalt ist verschlüsselt und darf auch auf ein
   fremdes Ziel.
-- **Tresor zurücksetzen** löst die Verbindung zum Konto und legt alle Dateien
-  des Kontos in die Löschhaltung (7 Tage). Ohne das alte Master-Passwort ließe
-  sich keine davon je wieder löschen. Der Dialog nennt vorher Anzahl und Größe.
+- **Tresor zurücksetzen** löst die Verbindung zum Konto und gibt alle Dateien
+  des Tresors zum Entfernen frei; das nächste stündliche Aufräumen löscht sie.
+  Ohne das alte Master-Passwort ließe sich keine davon je wieder löschen, und
+  sie zählten gegen keinen Speicher mehr. Der Dialog nennt vorher Anzahl und
+  Größe.
   Ein anderes Gerät, auf dem der alte Tresor noch offen ist, behält seine
   Einträge, aber nicht die Dateien.
 - **Ältere App-Versionen:** Sobald ein Tresor Papierkorb, Archiv oder Dateien

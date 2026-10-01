@@ -427,7 +427,7 @@ describe('DesktopApp', () => {
     )
 
     render(<DesktopApp />)
-    // Landet direkt in der Hauptansicht (bereit), nicht im Wizard, und öffnet den Passwort-Manager
+    // Landet direkt in der Hauptansicht (bereit), nicht im Wizard, und öffnet den Tresor
     await waitFor(() => {
       expect(screen.getByText(i18n.t('mss.app.tresor'))).toBeInTheDocument()
       expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
@@ -620,7 +620,7 @@ describe('DesktopApp', () => {
     })
   })
 
-  it('zeigt im Offline-Modus nur Passwort-Manager, Notizen und Kalender und behält den lokalen Account', async () => {
+  it('zeigt im Offline-Modus nur Tresor, Notizen und Kalender und behält den lokalen Account', async () => {
     localStorage.setItem('msm_cached_user', JSON.stringify(BENUTZER))
     useAuthStore.setState({ user: BENUTZER, isAuthenticated: true })
 
@@ -641,7 +641,7 @@ describe('DesktopApp', () => {
     await waitFor(() => {
       expect(screen.getByText('Jarvis')).toBeInTheDocument()
       expect(screen.getByText('Offline')).toBeInTheDocument()
-      // Nur Passwort-Manager, Notizen und Kalender werden angezeigt
+      // Nur Tresor, Notizen und Kalender werden angezeigt
       expect(screen.getByText(i18n.t('mss.app.tresor'))).toBeInTheDocument()
       expect(screen.getByText(i18n.t('mss.app.kalender'))).toBeInTheDocument()
       expect(screen.getByText(i18n.t('mss.app.notizen', 'Notizen'))).toBeInTheDocument()

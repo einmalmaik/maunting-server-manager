@@ -1006,7 +1006,7 @@ app.include_router(user_integrations_router)
 app.include_router(popups_router)
 app.include_router(calendar_router)
 app.include_router(notes_router)
-# Zero-Knowledge Passwort-Manager & Authenticator (strikt isoliert von KI-Endpunkten).
+# Zero-Knowledge-Tresor & Authenticator (strikt isoliert von KI-Endpunkten).
 app.include_router(vault_router)
 app.include_router(sync_events_router)
 app.include_router(sync_alias_router)

@@ -1,5 +1,5 @@
 /**
- * DIS-kompatible Kryptographie für den integrierten Zero-Knowledge Passwort-Manager.
+ * DIS-kompatible Kryptographie für den integrierten Zero-Knowledge-Tresor.
  *
  * Spezifikation:
  * - KDF: Speicherhartes Argon2id via `@msdis/shield` (hash-wasm).

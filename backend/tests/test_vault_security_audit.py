@@ -16,7 +16,19 @@ import pytest
 from fastapi.testclient import TestClient
 from dependencies import get_current_user, get_db, verify_csrf
 from main import app
-from models import User, VaultEntry, VaultUserSetting
+from sqlalchemy import select
+
+from models import User, VaultEntry, VaultHint, VaultUserSetting
+from services import vault_service
+
+
+def _index(user) -> str:
+    return vault_service.tresor_konto(user.id).index
+
+
+def _tresorzeile(session, user, modell=VaultUserSetting):
+    """Die Zeile des Kontos; die Tresortabellen kennen es nur als Index."""
+    return session.scalar(select(modell).where(modell.konto_index == _index(user)))
 from models.vault_blind_bucket import VaultBlindBucket
 
 
@@ -77,7 +89,7 @@ def _als(session, user):
 
 def _lege_fremden_tresor_an(session, besitzer, bucket, *, revision=5):
     """Ein bestehender, befuellter Tresor eines anderen Kontos."""
-    session.add(VaultUserSetting(user_id=besitzer.id, bucket_id=bucket, kdf_salt="00" * 16))
+    session.add(VaultUserSetting(konto_index=_index(besitzer), bucket_id=bucket, kdf_salt="00" * 16))
     session.add(
         VaultEntry(
             id="geheim-1",
@@ -146,7 +158,7 @@ def test_blind_sync_entkoppelt_den_besitzer_nicht(test_db, anonym):
     )
 
     session.expire_all()
-    assert session.get(VaultUserSetting, opfer.id).bucket_id == bucket, (
+    assert _tresorzeile(session, opfer).bucket_id == bucket, (
         "Die Besitzkopplung wurde durch einen unauthentifizierten Request geloest"
     )
 
@@ -256,7 +268,7 @@ def test_salt_beansprucht_keinen_blind_registrierten_fremdbucket(test_db, anonym
 
     assert salz.status_code == 403
     assert lesen.status_code == 403
-    assert session.get(VaultUserSetting, angreifer.id) is None
+    assert _tresorzeile(session, angreifer) is None
 
     # Wer den Besitznachweis hat, bindet den Bucket weiter an sein Konto.
     with _als(session, angreifer) as client:

@@ -88,6 +88,9 @@ function serverStarten() {
     geloescht: [] as string[],
     /** Alles, was über die Leitung kam, als Text: für den Nachweis, dass Namen fehlen. */
     mitschnitt: [] as Uint8Array[],
+    /** Der Server kennt den Bucket des Kontos nicht, bis `/salt` ihn meldet. */
+    ohneZuordnung: false,
+    saltMeldungen: [] as { kdf_salt: string; bucket_id: string }[],
   }
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (eingabe, init) => {
     if (server.offline) throw new TypeError('Failed to fetch')
@@ -112,6 +115,16 @@ function serverStarten() {
         entries.push({ ...m, revision: server.revision, updated_at: '2026-09-30T00:00:00Z' })
       }
       return json({ server_revision: server.revision, entries, conflicts })
+    }
+
+    if (pfad === '/api/vault/salt' && methode === 'POST') {
+      const body = JSON.parse(String(koerper))
+      server.saltMeldungen.push(body)
+      server.ohneZuordnung = false
+      return json({ kdf_salt: body.kdf_salt, bucket_id: body.bucket_id, has_vault: true })
+    }
+    if (pfad.startsWith('/api/vault/blobs') && server.ohneZuordnung) {
+      return json({ detail: { code: 'VAULT_BUCKET_UNBEKANNT', message: 'errors.vault_bucket_unbekannt' } }, 409)
     }
 
     if (pfad === '/api/vault/blobs/klein' && methode === 'POST') {
@@ -279,6 +292,23 @@ describe('Tresor-Dateien', () => {
     expect(a.length).toBe(b.length)
     expect(a.every((x, i) => x === b[i])).toBe(true)
     expect(zurueck.type).toBe('image/jpeg')
+  })
+
+  it('meldet den Bucket neu, wenn der Server ihn nicht kennt, und lädt dann hoch', async () => {
+    // Die Dateien hängen am Bucket, nicht am Konto. Scheiterte das Melden beim
+    // Einrichten, antworten die Datei-Routen 409; dann einmal nachmelden.
+    const server = serverStarten()
+    server.ohneZuordnung = true
+    localStorage.setItem('mss:vault_salt', 'ab'.repeat(16))
+    await tresorOeffnen()
+
+    await useVaultStore.getState().dateiHinzufuegen(foto(1000, 'a.jpg'))
+    await useVaultStore.getState().dateiHinzufuegen(foto(1000, 'b.jpg'))
+    await allesErledigt()
+
+    expect(server.saltMeldungen).toEqual([{ kdf_salt: 'ab'.repeat(16), bucket_id: BUCKET, auth_token: null }])
+    expect(server.blobs.size).toBe(6)
+    expect([...server.blobs.values()].every((b) => b.state === 'fertig')).toBe(true)
   })
 
   it('lädt auch hoch, was während eines laufenden Uploads dazukommt', async () => {

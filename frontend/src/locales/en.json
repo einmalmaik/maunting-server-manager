@@ -2822,7 +2822,7 @@
         "2fa_disable": "Turn off two-factor sign-in",
         "oauth_link": "Link a social account",
         "2fa_change": "Change two-factor sign-in",
-        "vault_reset": "Reset password manager"
+        "vault_reset": "Reset vault"
       }
     },
     "zweitfaktor": {
@@ -3208,7 +3208,7 @@
     "calendarEnabledHint": "Enables the calendar module in the panel and allows AI scheduling.",
     "notesEnabled": "Integrated notes",
     "notesEnabledHint": "Enables the notes module in the panel and allows AI note management.",
-    "vaultEnabled": "Password manager & authenticator",
+    "vaultEnabled": "Vault & authenticator",
     "vaultEnabledHint": "Enables the built-in zero-knowledge vault for native apps. Disabled hides it across panel and app.",
     "socialEnabled": "Social, friends & E2EE chat hub",
     "socialEnabledHint": "Enables the global community, friends, and achievement system as well as E2EE direct messages. Disabled hides all social features.",
@@ -3849,6 +3849,7 @@
     "invalid_workshop_id": "Invalid Workshop ID.",
     "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency.",
     "database_server_forbidden": "You lack the permission to create database servers.",
+    "vault_bucket_unbekannt": "The server no longer knows this vault. Was it reset on another device?",
     "install_directory_create_failed": "The server directory could not be created. Check that the panel or node may write to the servers folder.",
     "install_directory_exists": "A directory for this server already exists. Remove it or create the server again.",
     "invalid_port_request": "The port settings are invalid.",
@@ -4489,7 +4490,7 @@
       "intro": "The app encrypts photos, videos and documents on the device before they are uploaded, in pieces of 4 MiB. The panel only stores those pieces under MSM_VAULT_BLOB_DIR (default /opt/msm/vault-blobs). Name, type, real size and key are kept in the encrypted vault entry.",
       "sieht": {
         "title": "What the server sees",
-        "body": "Per account the number of files, their size rounded up to fixed steps, and when they were uploaded. Not the content, names or types, not even with root access."
+        "body": "Per vault the number of files, their size rounded up to fixed steps, and when they were uploaded. Not the content, names or types, not even with root access. Which account a vault belongs to is stored in the database only as an HMAC of the account number, keyed by the DIS sidecar; the panel makes the link while the account accesses it signed in."
       },
       "quote": {
         "title": "Storage per role",
@@ -4497,7 +4498,7 @@
       },
       "loeschen": {
         "title": "Deleting",
-        "body": "Deleted files stay on disk for 7 days and count towards the storage until then. Aborted uploads disappear after 24 hours, files of deleted accounts at the next hourly cleanup."
+        "body": "Deleted files stay on disk for 7 days and count towards the vault's storage until then. Aborted uploads disappear after 24 hours, files of deleted accounts at the next hourly cleanup."
       },
       "backup": {
         "title": "Backup",
@@ -4505,7 +4506,7 @@
       },
       "reset": {
         "title": "Resetting the vault",
-        "body": "Detaches the vault from the account and puts all of the account's files into the 7-day deletion hold; without the old master password none of them could ever be deleted. The dialog shows their number and size first."
+        "body": "Detaches the vault from the account and releases all of its files for removal; the next hourly cleanup deletes them. Without the old master password none of them could ever be deleted. The dialog shows their number and size first."
       },
       "altApps": {
         "title": "Older app versions",
@@ -4715,14 +4716,14 @@
         }
       },
       "vault": {
-        "heading": "Password manager and vault cloud",
-        "body": "The password manager in the app encrypts every entry on your device with a key derived from your master password. The master password never leaves the device, and the instance only stores encrypted entries.",
+        "heading": "Vault and vault cloud",
+        "body": "The vault in the app encrypts every entry on your device with a key derived from your master password. The master password never leaves the device, and the instance only stores encrypted entries.",
         "items": {
           "eintraege": "Entries (passwords, authenticator codes, notes, files, folders and albums) are stored on the server as an encrypted envelope, padded to fixed sizes, with a revision number and a timestamp. Trash and archive live inside the encrypted entry.",
-          "dateien": "Files and photos are encrypted on the device in chunks, each file with its own key, and stored as three parts: original, preview and thumbnail. Name, file type, capture date, location, camera and exact size are only in the encrypted entry. Per account, the instance sees how many parts exist, their rounded-up sizes, when they were uploaded and that they belong together in threes.",
-          "speicher": "The operator sees how much storage each account uses and decides how much it may use. Deleted files stay encrypted on the server for another 7 days and count until then; afterwards they are removed. Aborted uploads disappear after 24 hours.",
+          "dateien": "Files and photos are encrypted on the device in chunks, each file with its own key, and stored as three parts: original, preview and thumbnail. Name, file type, capture date, location, camera and exact size are only in the encrypted entry. Per vault, the instance sees how many parts exist, their rounded-up sizes, when they were uploaded and that they belong together in threes.",
+          "speicher": "Which account a vault belongs to is stored in the database only as a check value that only the instance can compute with its key. Anyone who only reads the database, for example in a backup, cannot link the vault or its files to an account. The instance makes the link while you access the vault signed in and counts how much storage your vault uses; how much it may use is set by the operator through your roles. Anyone with access to the server itself can make the link as well. Deleted files stay encrypted on the server for another 7 days and count until then; afterwards they are removed. Aborted uploads disappear after 24 hours.",
           "geraet": "So the vault works offline, entries, thumbnails and previews are kept encrypted in the device storage, plus originals you make available offline or opened recently. This storage belongs to your account. If you explicitly save a file to the device, that copy is stored there unencrypted.",
-          "verlust": "Without the master password nobody can open the vault, the operator included. If you forget it, you can only reset the vault: the entries stay unreadable and all files go into the 7-day deletion hold."
+          "verlust": "Without the master password nobody can open the vault, the operator included. If you forget it, you can only reset the vault: the entries stay unreadable and all files are removed within an hour. If you delete your account, the instance removes the entries and files of your vault."
         }
       },
       "providers": {
@@ -5995,7 +5996,7 @@
       "menueOeffnen": "Open menu",
       "keinChatrecht": "Your account lacks permission for AI chat (ai.chat.use). Contact your administrator to grant access.",
       "gedaechtnis": "Memory",
-      "tresor": "Password manager"
+      "tresor": "Vault"
     },
     "updateModal": {
       "titelVerfuegbar": "Update available",
@@ -6039,9 +6040,10 @@
       "biometrieAn": "The vault can now be opened with a fingerprint.",
       "biometrieAusToast": "Fingerprint unlock is switched off.",
       "biometrieFehler": "Fingerprint unlock could not be set up. Check the master password.",
-      "titelManager": "Password manager",
-      "einrichtenTitel": "Set up the password manager",
-      "eingerichtet": "The password manager is set up.",
+      "titelManager": "Vault",
+      "entsperrenGrund": "Unlock vault",
+      "einrichtenTitel": "Set up the vault",
+      "eingerichtet": "The vault is set up.",
       "neuenTresorEinrichten": "Set up a new vault",
       "bereitsEingerichtet": "Already set up? Sign in with your master password",
       "neuesMasterPasswort": "New master password",
@@ -6110,7 +6112,7 @@
         "titel": "Reset vault",
         "warnungTitel": "All entries will be lost",
         "warnungText": "Without the master password nobody can decrypt your entries, not even the server. After the reset you set up a new, empty vault. Devices where the old vault is still open keep it until you reset it there as well.",
-        "dateien": "Your files go too: {{anzahl}} files and earlier versions, {{groesse}} in total. The server deletes them after 7 days.",
+        "dateien": "Your files go too: {{anzahl}} files and earlier versions, {{groesse}} in total. The server deletes them within an hour.",
         "passwortLabel": "Confirm your account password",
         "otpLabel": "Code from your authenticator app",
         "wortLabel": "Type delete to confirm (cannot be pasted)",

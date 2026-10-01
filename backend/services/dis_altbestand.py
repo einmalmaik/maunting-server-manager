@@ -46,7 +46,10 @@ MARKE = "dis.klartext_bereinigt"
 #: 20260929: Stories (`chat_stories`) sind seither DisText. Abgelaufene und
 #: geloeschte Stories liegen als tote Zeilen noch im Klartext in der Datei.
 #: 20260929_2: `user_passkeys.name` ist neu und DisText.
-MARKE_WERT = "20260929_2"
+#: 20261001: die Tresortabellen tragen keine `user_id` mehr; alte
+#: Zeilenversionen und die entfernte Spalte in `vault_blobs` liegen noch in
+#: der Datei.
+MARKE_WERT = "20261001"
 
 #: Ohne Frist wartete VACUUM FULL auf jede laufende Anfrage, und alles, was
 #: danach kommt, wartete auf VACUUM FULL. So scheitert es nach 10 s und wird
@@ -128,15 +131,16 @@ def nachziehen(db: Session) -> dict[str, int]:
 
 
 def dis_tabellen() -> set[str]:
-    """Jede Tabelle mit einer DisText-Spalte, dazu das Gedaechtnis."""
+    """Jede Tabelle mit einer DisText-Spalte, dazu Gedaechtnis und Tresor."""
     tabellen = {
         tabelle.name for tabelle in Base.metadata.sorted_tables
         if any(isinstance(spalte.type, DisText) for spalte in tabelle.columns)
     }
     # Keine DisText-Spalte, aber derselbe Befund: Name und Vektoren lagen
     # dort im Klartext, bis 20260926_08 und `schluessel_nachziehen` sie
-    # ersetzt haben.
-    return tabellen | {"ai_memory_entries"}
+    # ersetzt haben. Ebenso die Kontonummer in den Tresortabellen, bis
+    # 20261001_01 und `vault_service.kontoindex_nachziehen`.
+    return tabellen | {"ai_memory_entries", "vault_user_settings", "vault_hints", "vault_blobs"}
 
 
 def klartextreste_entfernen(engine: Engine, tabellen: set[str]) -> bool:
@@ -157,14 +161,15 @@ def klartextreste_entfernen(engine: Engine, tabellen: set[str]) -> bool:
 
 
 def beim_start(db: Session) -> None:
-    """Nachzug, Gedaechtnisnamen, Passwort-Hashes und, wo noetig, VACUUM FULL. Laeuft beim Start."""
-    from services import passwort_altbestand
+    """Nachzug, Gedaechtnisnamen, Tresorkonten, Passwort-Hashes und, wo noetig, VACUUM FULL. Laeuft beim Start."""
+    from services import passwort_altbestand, vault_service
     from services.ai_memory_service import schluessel_nachziehen
     from services.panel_settings_service import PanelSettingsService
 
     betroffen = set(nachziehen(db))
     if schluessel_nachziehen(db):
         betroffen.add("ai_memory_entries")
+    betroffen |= vault_service.kontoindex_nachziehen(db)
     # Die alten passlib-Hashes laegen sonst weiter in toten Zeilenversionen.
     if passwort_altbestand.umhuellen(db):
         betroffen.add("users")

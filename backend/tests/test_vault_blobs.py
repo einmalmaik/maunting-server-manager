@@ -29,7 +29,7 @@ from config import settings
 from database import Base
 from dependencies import get_current_user, get_db, verify_csrf
 from main import app
-from models import Role, RoleVaultQuota, User, VaultBlob
+from models import Role, RoleVaultQuota, User, VaultBlob, VaultUserSetting
 from services import vault_blob_service, vault_service
 from services.vault_blob_service import CHUNK_CHIFFRAT, CHUNK_UEBERHANG
 
@@ -41,9 +41,16 @@ def blob_dir(tmp_path, monkeypatch):
     return ziel
 
 
+BUCKET = {1: "a" * 64, 2: "b" * 64}
+
+
+def _tresor_anlegen(db, user: User) -> None:
+    db.add(VaultUserSetting(konto_index=vault_service.tresor_konto(user.id).index, bucket_id=BUCKET[user.id]))
+
+
 @pytest.fixture
 def konten(db):
-    """Zwei Konten mit einer gemeinsamen Rolle, die 10 GB Tresorspeicher gibt."""
+    """Zwei Konten mit je einem Tresor und einer gemeinsamen Rolle, die 10 GB Tresorspeicher gibt."""
     rolle = Role(name="tresor", description=None, is_system=False)
     db.add(rolle)
     db.flush()
@@ -51,6 +58,9 @@ def konten(db):
     eins = User(id=1, username="eins", email="eins@example.com", password_hash="x", is_active=True, role_id=rolle.id)
     zwei = User(id=2, username="zwei", email="zwei@example.com", password_hash="x", is_active=True, role_id=rolle.id)
     db.add_all([eins, zwei])
+    db.flush()
+    _tresor_anlegen(db, eins)
+    _tresor_anlegen(db, zwei)
     db.commit()
     return eins, zwei
 
@@ -193,7 +203,7 @@ def test_loeschen_braucht_den_schluessel(als, konten, db):
     assert speicher["in_loeschung"] == 100
 
 
-def test_quote_je_konto(als, konten, db):
+def test_quote_je_tresor(als, konten, db):
     eins, _ = konten
     _speicher_der_rolle(db, eins, 1000)
     client = als(eins)
@@ -214,9 +224,12 @@ def test_ohne_rolle_mit_speicher_kein_upload(als, konten, db):
     assert client.get("/api/vault/speicher").json()["quote"] == 0
 
 
-def test_zuruecksetzen_legt_alle_dateien_in_die_loeschhaltung(als, konten, db):
-    """Ohne das alte Master-Passwort liesse sich kein Blob mehr loeschen; sie
-    belegten die Quote fuer immer. Das fremde Konto bleibt unberuehrt."""
+def test_zuruecksetzen_gibt_alle_dateien_zum_entfernen_frei(als, konten, db, blob_dir):
+    """Ohne das alte Master-Passwort liesse sich kein Blob mehr loeschen. Nach
+    dem Zuruecksetzen gehoert der Bucket keinem Konto mehr, seine Blobs zaehlen
+    gegen keinen Speicher; mit Loeschhaltung fuellte Hochladen und
+    Zuruecksetzen die Platte. Das naechste Aufraeumen entfernt sie. Das fremde
+    Konto bleibt unberuehrt."""
     eins, zwei = konten
     for user in (eins, zwei):
         client = als(user)
@@ -229,14 +242,13 @@ def test_zuruecksetzen_legt_alle_dateien_in_die_loeschhaltung(als, konten, db):
     client = als(eins)
     assert client.get("/api/vault/speicher").json()["blobs"] == 3
 
-    vault_service.tresor_zuruecksetzen(db, eins.id)
+    vault_service.tresor_zuruecksetzen(db, vault_service.tresor_konto(eins.id))
     db.commit()
 
-    speicher = client.get("/api/vault/speicher").json()
-    assert speicher["blobs"] == 0
-    assert speicher["in_loeschung"] == 350
-    zustaende = dict(db.execute(select(VaultBlob.user_id, func.count()).where(VaultBlob.state == "geloescht").group_by(VaultBlob.user_id)).all())
-    assert zustaende == {eins.id: 3}
+    assert client.get("/api/vault/speicher").json() == {"belegt": 0, "quote": 10 * 1024**3, "in_loeschung": 0, "blobs": 0}
+    assert vault_blob_service.aufraeumen(db)["entfernt"] == 3
+    uebrig = dict(db.execute(select(VaultBlob.bucket_id, func.count()).group_by(VaultBlob.bucket_id)).all())
+    assert uebrig == {BUCKET[zwei.id]: 2}
     assert als(zwei).get("/api/vault/speicher").json()["blobs"] == 2
 
 
@@ -278,8 +290,8 @@ def test_quote_haelt_bei_zwei_anfragen_zugleich(db, konten, blob_dir):
     barriere = threading.Barrier(2)
     urspruenglich = vault_blob_service.belegt
 
-    def belegt_mit_barriere(s, user_id):
-        wert = urspruenglich(s, user_id)
+    def belegt_mit_barriere(s, bucket_id):
+        wert = urspruenglich(s, bucket_id)
         try:
             barriere.wait(timeout=3)
         except threading.BrokenBarrierError:
@@ -292,7 +304,7 @@ def test_quote_haelt_bei_zwei_anfragen_zugleich(db, konten, blob_dir):
         s = sitzung()
         try:
             user = s.get(User, eins.id)
-            vault_blob_service.anlegen(s, user, _neue_id(), 1, 501, "0" * 64)
+            vault_blob_service.anlegen(s, user, BUCKET[eins.id], _neue_id(), 1, 501, "0" * 64)
             ergebnisse.append("angelegt")
         except vault_blob_service.SpeicherVoll:
             ergebnisse.append("voll")
@@ -312,7 +324,7 @@ def test_quote_haelt_bei_zwei_anfragen_zugleich(db, konten, blob_dir):
 
     assert sorted(ergebnisse) == ["angelegt", "voll"]
     db.expire_all()
-    assert vault_blob_service.belegt(db, eins.id) == 501
+    assert vault_blob_service.belegt(db, BUCKET[eins.id]) == 501
 
 
 def test_aufraeumen_entfernt_nur_faelliges(als, konten, db, blob_dir):
@@ -338,14 +350,13 @@ def test_aufraeumen_entfernt_nur_faelliges(als, konten, db, blob_dir):
         zeile.deleted_at = wann
     db.commit()
 
-    # Konto zwei hat einen Blob und wird geloescht: die Zeile faellt per
-    # Kaskade, das Verzeichnis raeumt das Aufraeumen ab.
+    # Ein Verzeichnis ohne Zeile (etwa nach der Umstellung auf Buckets, die
+    # Blobs ohne Tresor entfernt) raeumt das Aufraeumen ab.
     als(zwei)
     von_zwei, _, _ = _anlegen(client, 100)
     _hochladen(client, von_zwei, 0, b"z" * 100)
-    db.delete(db.get(User, zwei.id))
+    db.execute(VaultBlob.__table__.delete().where(VaultBlob.id == von_zwei))
     db.commit()
-    assert db.get(VaultBlob, von_zwei) is None
 
     ergebnis = vault_blob_service.aufraeumen(db)
 
@@ -375,8 +386,9 @@ def test_migration_hin_und_zurueck(tmp_path: Path, pg_wegwerf) -> None:
         command.upgrade(config, "head")
         pruefer = inspect(engine)
         assert {"vault_blobs", "vault_bucket_formats", "role_vault_quotas"} <= set(pruefer.get_table_names())
-        fks = pruefer.get_foreign_keys("vault_blobs")
-        assert fks and fks[0]["options"].get("ondelete") == "CASCADE"
+        # Seit 20261001_01 haengt ein Blob am Bucket, nicht am Konto.
+        assert pruefer.get_foreign_keys("vault_blobs") == []
+        assert "user_id" not in {s["name"] for s in pruefer.get_columns("vault_blobs")}
     finally:
         engine.dispose()
         settings.database_url = vorher

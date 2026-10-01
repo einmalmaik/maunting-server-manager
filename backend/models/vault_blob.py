@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String
+from sqlalchemy import BigInteger, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -17,22 +17,20 @@ class VaultBlob(Base):
 
     Name, Typ, echte Groesse und Schluessel stehen im Tresor-Eintrag, der auf
     den Blob verweist, und damit nur im Umschlag des Clients. Hier stehen nur
-    Kennung, Besitzer, Anzahl und Groesse der Chunks (gepolstert) und der Hash
+    Kennung, Bucket, Anzahl und Groesse der Chunks (gepolstert) und der Hash
     des Loeschnachweises.
 
-    Der Blob gehoert dem Konto, weil die Quote einen Besitzer braucht. Der
-    Chiffrat liegt auf der Platte unter ``settings.vault_blob_dir``.
+    Der Blob gehoert dem Bucket, nicht dem Konto: welches Konto den Bucket
+    hat, steht nur als HMAC in ``vault_user_settings``. Die Quote wird je
+    Bucket gezaehlt, ihre Grenze kommt aus den Rollen des angemeldeten Kontos.
+    Bis 01.10.2026 stand hier die ``user_id``. Der Chiffrat liegt auf der
+    Platte unter ``settings.vault_blob_dir``.
     """
 
     __tablename__ = "vault_blobs"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("users.id", ondelete="CASCADE"),
-        index=True,
-        nullable=False,
-    )
+    bucket_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False)
     bytes_total: Mapped[int] = mapped_column(BigInteger, nullable=False)
     # sha256 des Loeschschluessels, der nur im Tresor-Eintrag steht. Ein

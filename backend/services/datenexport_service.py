@@ -9,6 +9,8 @@ Welche Zeilen dazugehoeren, steht in keiner Liste, sondern im Schema selbst:
    ``ai_conversations``). Eine Tabelle mit eigenem Benutzerbezug wird nur ueber
    diesen gewaehlt; so kommen Team-Notizen anderer Mitglieder nie mit, nur weil
    das Team dem Konto gehoert.
+3. Die Tresortabellen nennen das Konto nur als HMAC (``konto_index``, seit
+   01.10.2026); sie stehen in ``tresor_bedingungen``.
 
 Eine neue Tabelle mit Fremdschluessel ist damit ohne Zutun dabei. Was davon
 nicht erfasst wird, steht in ``OHNE_KONTOBEZUG``; ``test_datenexport_abdeckung``
@@ -177,15 +179,34 @@ def _benutzer_schluessel(tabelle: Table) -> list:
     ]
 
 
-def zeilenwahl(benutzer_id: int) -> dict[str, Any]:
+def tresor_bedingungen(konto_index: str) -> dict[str, Any]:
+    """Die Tresortabellen: ohne Fremdschluessel aufs Konto, aber mit seinem Index."""
+    einstellungen = Base.metadata.tables["vault_user_settings"]
+    hinweise = Base.metadata.tables["vault_hints"]
+    blobs = Base.metadata.tables["vault_blobs"]
+    return {
+        "vault_user_settings": einstellungen.c.konto_index == konto_index,
+        "vault_hints": hinweise.c.konto_index == konto_index,
+        "vault_blobs": blobs.c.bucket_id.in_(
+            select(einstellungen.c.bucket_id).where(einstellungen.c.konto_index == konto_index)
+        ),
+    }
+
+
+def zeilenwahl(benutzer_id: int, konto_index: str) -> dict[str, Any]:
     """Je exportierter Tabelle die WHERE-Bedingung, in Schemareihenfolge.
 
     Eltern stehen vor Kindern (``sorted_tables``); ein Kind verweist per
-    Unterabfrage auf die Bedingung seines Elternteils.
+    Unterabfrage auf die Bedingung seines Elternteils. ``konto_index`` ist der
+    Index des Kontos in den Tresortabellen (``vault_service.tresor_konto``).
     """
+    tresor = tresor_bedingungen(konto_index)
     bedingungen: dict[str, Any] = {}
     for tabelle in Base.metadata.sorted_tables:
         if tabelle.name in OHNE_KONTOBEZUG:
+            continue
+        if tabelle.name in tresor:
+            bedingungen[tabelle.name] = tresor[tabelle.name]
             continue
         if tabelle.name == "users":
             bedingungen["users"] = tabelle.c.id == benutzer_id
@@ -294,14 +315,26 @@ def _anhang_als_datei(zeile: dict) -> dict | None:
 
 
 def exportieren(db: Session, benutzer_id: int, *, mit_geheimnissen: bool) -> dict[str, Any]:
+    from services import vault_service
+
+    tresor = vault_service.tresor_konto(benutzer_id)
+    # Altbestand dieses Kontos, den der Nachzug beim Start noch nicht erreicht hat.
+    vault_service.konto_umstellen(db, tresor)
+    db.commit()
+
     tabellen: dict[str, list[dict]] = {}
     dateien: list[dict] = []
     unlesbar = 0
-    for name, bedingung in zeilenwahl(benutzer_id).items():
+    for name, bedingung in zeilenwahl(benutzer_id, tresor.index).items():
         tabelle = Base.metadata.tables[name]
         zeilen = _rohe_zeilen(db, tabelle, bedingung)
         if not zeilen:
             continue
+        if name == "vault_hints":
+            # Die AAD des Hinweises nennt die Kontonummer; in der Zeile steht
+            # sie seit 01.10.2026 nicht mehr.
+            for zeile in zeilen:
+                zeile["user_id"] = benutzer_id
         unlesbar += _entschluesseln(zeilen, _aad_je_spalte(tabelle, mit_geheimnissen))
         if not mit_geheimnissen:
             for spalte in tabelle.columns:

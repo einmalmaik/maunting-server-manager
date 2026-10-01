@@ -2822,7 +2822,7 @@
         "2fa_disable": "Zwei-Faktor-Anmeldung abschalten",
         "oauth_link": "Social-Konto verknüpfen",
         "2fa_change": "Zwei-Faktor-Anmeldung ändern",
-        "vault_reset": "Passwort-Manager zurücksetzen"
+        "vault_reset": "Tresor zurücksetzen"
       }
     },
     "zweitfaktor": {
@@ -3208,7 +3208,7 @@
     "calendarEnabledHint": "Aktiviert das Kalendermodul im Panel und ermöglicht der KI die Terminverwaltung.",
     "notesEnabled": "Integrierte Notizen",
     "notesEnabledHint": "Aktiviert das Notizmodul im Panel und ermöglicht der KI die Notizverwaltung.",
-    "vaultEnabled": "Passwort-Manager & Authenticator",
+    "vaultEnabled": "Tresor & Authenticator",
     "vaultEnabledHint": "Aktiviert den integrierten Zero-Knowledge Tresor für native Apps. Deaktiviert verbirgt ihn im gesamten Panel und in der App.",
     "socialEnabled": "Social-, Freundes- & E2EE-Chat-Hub",
     "socialEnabledHint": "Aktiviert das weltweite Community-, Freundes- und Achievement-System sowie E2EE-Direktnachrichten. Deaktiviert verbirgt alle Social-Funktionen.",
@@ -3849,6 +3849,7 @@
     "invalid_workshop_id": "Ungültige Workshop-ID.",
     "server_lifecycle_already_running": "Es läuft bereits eine Server-Lebenszyklus-Operation (Start/Stop/Neustart). Bitte warte, bis die aktuelle Operation abgeschlossen ist oder nutze im Notfall den Kill-Button.",
     "database_server_forbidden": "Dir fehlt das Recht, Datenbankserver zu erstellen.",
+    "vault_bucket_unbekannt": "Der Server kennt diesen Tresor nicht mehr. Wurde er auf einem anderen Gerät zurückgesetzt?",
     "install_directory_create_failed": "Das Serververzeichnis ließ sich nicht anlegen. Prüfe, ob das Panel bzw. die Node in den Server-Ordner schreiben darf.",
     "install_directory_exists": "Für diesen Server gibt es schon ein Verzeichnis. Entferne es oder lege den Server neu an.",
     "invalid_port_request": "Die Portangaben sind ungültig.",
@@ -4489,7 +4490,7 @@
       "intro": "Die App verschlüsselt Fotos, Videos und Dokumente auf dem Gerät, bevor sie hochgehen, in Stücken von 4 MiB. Das Panel speichert nur diese Stücke unter MSM_VAULT_BLOB_DIR (Standard /opt/msm/vault-blobs). Name, Typ, echte Größe und Schlüssel stehen im verschlüsselten Tresor-Eintrag.",
       "sieht": {
         "title": "Was der Server sieht",
-        "body": "Je Konto die Anzahl der Dateien, ihre auf feste Stufen aufgefüllte Größe und den Zeitpunkt des Hochladens. Inhalt, Namen und Typen nicht, auch nicht mit Root-Zugang."
+        "body": "Je Tresor die Anzahl der Dateien, ihre auf feste Stufen aufgefüllte Größe und den Zeitpunkt des Hochladens. Inhalt, Namen und Typen nicht, auch nicht mit Root-Zugang. Welchem Konto ein Tresor gehört, steht in der Datenbank nur als HMAC der Kontonummer, dessen Schlüssel der DIS-Sidecar hält; das Panel stellt die Zuordnung her, solange das Konto angemeldet zugreift."
       },
       "quote": {
         "title": "Speicher je Rolle",
@@ -4497,7 +4498,7 @@
       },
       "loeschen": {
         "title": "Löschen",
-        "body": "Gelöschte Dateien bleiben 7 Tage auf der Platte und zählen so lange zum Speicher. Abgebrochene Uploads verschwinden nach 24 Stunden, Dateien gelöschter Konten beim nächsten stündlichen Aufräumen."
+        "body": "Gelöschte Dateien bleiben 7 Tage auf der Platte und zählen so lange zum Speicher des Tresors. Abgebrochene Uploads verschwinden nach 24 Stunden, Dateien gelöschter Konten beim nächsten stündlichen Aufräumen."
       },
       "backup": {
         "title": "Backup",
@@ -4505,7 +4506,7 @@
       },
       "reset": {
         "title": "Tresor zurücksetzen",
-        "body": "Löst die Verbindung zum Konto und legt alle Dateien des Kontos für 7 Tage in die Löschhaltung; ohne das alte Master-Passwort ließe sich keine je wieder löschen. Der Dialog nennt vorher Anzahl und Größe."
+        "body": "Löst die Verbindung zum Konto und gibt alle Dateien des Tresors zum Entfernen frei; das nächste stündliche Aufräumen löscht sie. Ohne das alte Master-Passwort ließe sich keine je wieder löschen. Der Dialog nennt vorher Anzahl und Größe."
       },
       "altApps": {
         "title": "Ältere App-Versionen",
@@ -4715,14 +4716,14 @@
         }
       },
       "vault": {
-        "heading": "Passwort-Manager und Tresor-Cloud",
-        "body": "Der Passwort-Manager in der App verschlüsselt jeden Eintrag auf Ihrem Gerät mit einem Schlüssel, der aus Ihrem Master-Passwort entsteht. Das Master-Passwort verlässt das Gerät nie, und die Instanz speichert nur verschlüsselte Einträge.",
+        "heading": "Tresor und Tresor-Cloud",
+        "body": "Der Tresor in der App verschlüsselt jeden Eintrag auf Ihrem Gerät mit einem Schlüssel, der aus Ihrem Master-Passwort entsteht. Das Master-Passwort verlässt das Gerät nie, und die Instanz speichert nur verschlüsselte Einträge.",
         "items": {
           "eintraege": "Einträge (Passwörter, Authenticator-Codes, Notizen, Dateien, Ordner und Alben) liegen auf dem Server als verschlüsselter Umschlag, aufgefüllt auf feste Größen, mit Revisionsnummer und Zeitpunkt. Papierkorb und Archiv stehen im verschlüsselten Eintrag.",
-          "dateien": "Dateien und Fotos werden auf dem Gerät in Stücken verschlüsselt, jede Datei mit eigenem Schlüssel, und als drei Teile abgelegt: Original, Vorschau und Miniatur. Name, Dateityp, Aufnahmedatum, Aufnahmeort, Kamera und genaue Größe stehen nur im verschlüsselten Eintrag. Die Instanz sieht je Konto, wie viele Teile es gibt, wie groß sie aufgerundet sind, wann sie hochgeladen wurden und dass jeweils drei zusammengehören.",
-          "speicher": "Der Betreiber sieht, wie viel Speicher jedes Konto belegt, und legt fest, wie viel es belegen darf. Gelöschte Dateien bleiben noch 7 Tage verschlüsselt auf dem Server und zählen so lange mit, danach werden sie entfernt. Abgebrochene Uploads verschwinden nach 24 Stunden.",
+          "dateien": "Dateien und Fotos werden auf dem Gerät in Stücken verschlüsselt, jede Datei mit eigenem Schlüssel, und als drei Teile abgelegt: Original, Vorschau und Miniatur. Name, Dateityp, Aufnahmedatum, Aufnahmeort, Kamera und genaue Größe stehen nur im verschlüsselten Eintrag. Die Instanz sieht je Tresor, wie viele Teile es gibt, wie groß sie aufgerundet sind, wann sie hochgeladen wurden und dass jeweils drei zusammengehören.",
+          "speicher": "Welchem Konto ein Tresor gehört, steht in der Datenbank nur als Prüfwert, den allein die Instanz mit ihrem Schlüssel bilden kann. Wer nur die Datenbank liest, etwa in einer Sicherung, kann Tresor und Dateien keinem Konto zuordnen. Die Instanz stellt die Zuordnung her, solange Sie angemeldet darauf zugreifen, und zählt so, wie viel Speicher Ihr Tresor belegt; wie viel er belegen darf, legt der Betreiber über Ihre Rollen fest. Wer Zugriff auf den Server selbst hat, kann die Zuordnung ebenfalls herstellen. Gelöschte Dateien bleiben noch 7 Tage verschlüsselt auf dem Server und zählen so lange mit, danach werden sie entfernt. Abgebrochene Uploads verschwinden nach 24 Stunden.",
           "geraet": "Damit der Tresor ohne Verbindung funktioniert, liegen Einträge, Miniaturen und Vorschauen verschlüsselt im Speicher des Geräts, dazu Originale, die Sie offline verfügbar machen oder zuletzt geöffnet haben. Dieser Speicher gehört Ihrem Konto. Speichern Sie eine Datei ausdrücklich auf dem Gerät, liegt diese Kopie dort unverschlüsselt.",
-          "verlust": "Ohne Master-Passwort kann niemand den Tresor öffnen, auch der Betreiber nicht. Wer es vergisst, kann den Tresor nur zurücksetzen: Die Einträge bleiben dann unlesbar, und alle Dateien gehen in die 7-tägige Löschhaltung."
+          "verlust": "Ohne Master-Passwort kann niemand den Tresor öffnen, auch der Betreiber nicht. Wer es vergisst, kann den Tresor nur zurücksetzen: Die Einträge bleiben dann unlesbar, und alle Dateien werden innerhalb einer Stunde entfernt. Löschen Sie Ihr Konto, entfernt die Instanz Einträge und Dateien Ihres Tresors."
         }
       },
       "providers": {
@@ -5995,7 +5996,7 @@
       "menueOeffnen": "Menü öffnen",
       "keinChatrecht": "Dein Konto besitzt kein Recht für den KI-Chat (ai.chat.use). Wende dich an deinen Administrator, um die Berechtigung zu erhalten.",
       "gedaechtnis": "Gedächtnis",
-      "tresor": "Passwort-Manager"
+      "tresor": "Tresor"
     },
     "updateModal": {
       "titelVerfuegbar": "Update verfügbar",
@@ -6039,9 +6040,10 @@
       "biometrieAn": "Der Tresor lässt sich jetzt per Fingerabdruck öffnen.",
       "biometrieAusToast": "Der Fingerabdruck ist abgeschaltet.",
       "biometrieFehler": "Der Fingerabdruck liess sich nicht einrichten. Prüfe das Master-Passwort.",
-      "titelManager": "Passwort-Manager",
-      "einrichtenTitel": "Passwort-Manager einrichten",
-      "eingerichtet": "Der Passwort-Manager ist eingerichtet.",
+      "titelManager": "Tresor",
+      "entsperrenGrund": "Tresor entsperren",
+      "einrichtenTitel": "Tresor einrichten",
+      "eingerichtet": "Der Tresor ist eingerichtet.",
       "neuenTresorEinrichten": "Neuen Tresor einrichten",
       "bereitsEingerichtet": "Bereits eingerichtet? Hier mit Master-Passwort anmelden",
       "neuesMasterPasswort": "Neues Master-Passwort",
@@ -6110,7 +6112,7 @@
         "titel": "Tresor zurücksetzen",
         "warnungTitel": "Alle Einträge gehen verloren",
         "warnungText": "Ohne Master-Passwort kann niemand deine Einträge entschlüsseln, auch der Server nicht. Nach dem Zurücksetzen richtest du einen neuen, leeren Tresor ein. Geräte, auf denen der alte Tresor noch offen ist, behalten ihn, bis du ihn dort ebenfalls zurücksetzt.",
-        "dateien": "Auch die Dateien gehen verloren: {{anzahl}} Dateien und frühere Fassungen, zusammen {{groesse}}. Der Server löscht sie nach 7 Tagen.",
+        "dateien": "Auch die Dateien gehen verloren: {{anzahl}} Dateien und frühere Fassungen, zusammen {{groesse}}. Der Server löscht sie innerhalb einer Stunde.",
         "passwortLabel": "Konto-Passwort bestätigen",
         "otpLabel": "Code aus der Authenticator-App",
         "wortLabel": "Tippe delete zur Bestätigung (nicht kopierbar)",

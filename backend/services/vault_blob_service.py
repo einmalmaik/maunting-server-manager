@@ -8,8 +8,12 @@ Tresor-Eintrag. Name, Typ und Schluessel kennt der Server nicht.
 
 Was er erzwingt:
 
-- Jeder Blob gehoert einem Konto; ein fremder ist wie ein fehlender (404).
-- Die Quote wird beim Anlegen unter einer Sperre je Konto reserviert. Sie zaehlt
+- Jeder Blob gehoert einem Bucket; ein fremder ist wie ein fehlender (404).
+  Welches Konto den Bucket hat, steht nur als HMAC in ``vault_user_settings``;
+  die Routen bekommen den Bucket des angemeldeten Kontos von
+  ``vault_service.eigener_bucket``.
+- Die Quote wird beim Anlegen unter einer Sperre je Bucket reserviert. Ihre
+  Grenze kommt aus den Rollen des angemeldeten Kontos (``quote_fuer``). Sie zaehlt
   offene, fertige und geloeschte Blobs: auch ein geloeschter belegt die Platte,
   bis die Loeschhaltung um ist. Sonst liesse sich die Platte mit
   Hochladen-Loeschen-Hochladen fuellen.
@@ -46,7 +50,7 @@ CHUNK_CHIFFRAT = CHUNK_KLARTEXT + CHUNK_UEBERHANG
 
 LOESCHHALTUNG = timedelta(days=7)
 OFFEN_HOECHSTENS = timedelta(hours=24)
-MAX_BLOBS_JE_KONTO = 500_000
+MAX_BLOBS_JE_BUCKET = 500_000
 # Ein Blob, groesser als jede sinnvolle Quote. Haelt die Zahlen klein, bevor die
 # Quote greift.
 MAX_BLOB_BYTES = 1024 * 1024 * 1024 * 1024
@@ -171,31 +175,34 @@ def rolle_speicher_setzen(db: Session, role_id: int, quota_bytes: int | None) ->
     db.flush()
 
 
-def belegt(db: Session, user_id: int) -> int:
+def belegt(db: Session, bucket_id: str) -> int:
     return int(
-        db.scalar(select(func.coalesce(func.sum(VaultBlob.bytes_total), 0)).where(VaultBlob.user_id == user_id)) or 0
+        db.scalar(select(func.coalesce(func.sum(VaultBlob.bytes_total), 0)).where(VaultBlob.bucket_id == bucket_id))
+        or 0
     )
 
 
-def _sperre_konto(db: Session, user_id: int) -> None:
-    """Serialisiert das Reservieren der Quote eines Kontos bis zum Ende der Transaktion."""
-    schluessel = int.from_bytes(hashlib.sha256(f"vault-blob:{user_id}".encode()).digest()[:8], "big", signed=True)
+def _sperre_bucket(db: Session, bucket_id: str) -> None:
+    """Serialisiert das Reservieren der Quote eines Buckets bis zum Ende der Transaktion."""
+    schluessel = int.from_bytes(hashlib.sha256(f"vault-blob:{bucket_id}".encode()).digest()[:8], "big", signed=True)
     db.execute(text("SELECT pg_advisory_xact_lock(:schluessel)"), {"schluessel": schluessel})
 
 
-def anlegen(db: Session, user: User, blob_id: str, chunk_count: int, bytes_total: int, delete_verifier: str) -> VaultBlob:
+def anlegen(
+    db: Session, user: User, bucket_id: str, blob_id: str, chunk_count: int, bytes_total: int, delete_verifier: str
+) -> VaultBlob:
     if not ist_blob_id(blob_id) or not _HEX64.match(delete_verifier or ""):
         raise BlobUngueltig("Ungueltige Kennung.")
     if not _groesse_passt(chunk_count, bytes_total):
         raise BlobUngueltig("Chunkzahl und Groesse passen nicht zusammen.")
 
-    _sperre_konto(db, user.id)
+    _sperre_bucket(db, bucket_id)
     if db.get(VaultBlob, blob_id) is not None:
         raise BlobKonflikt("Diese Kennung ist vergeben.")
-    anzahl = int(db.scalar(select(func.count()).select_from(VaultBlob).where(VaultBlob.user_id == user.id)) or 0)
-    if anzahl >= MAX_BLOBS_JE_KONTO:
-        raise SpeicherVoll("Zu viele Dateien in diesem Konto.")
-    if belegt(db, user.id) + bytes_total > quote_fuer(db, user):
+    anzahl = int(db.scalar(select(func.count()).select_from(VaultBlob).where(VaultBlob.bucket_id == bucket_id)) or 0)
+    if anzahl >= MAX_BLOBS_JE_BUCKET:
+        raise SpeicherVoll("Zu viele Dateien in diesem Tresor.")
+    if belegt(db, bucket_id) + bytes_total > quote_fuer(db, user):
         raise SpeicherVoll("Der Speicher dieses Kontos ist voll.")
 
     basis = _basis()
@@ -205,7 +212,7 @@ def anlegen(db: Session, user: User, blob_id: str, chunk_count: int, bytes_total
 
     blob = VaultBlob(
         id=blob_id,
-        user_id=user.id,
+        bucket_id=bucket_id,
         chunk_count=chunk_count,
         bytes_total=bytes_total,
         delete_verifier=delete_verifier,
@@ -217,17 +224,17 @@ def anlegen(db: Session, user: User, blob_id: str, chunk_count: int, bytes_total
     return blob
 
 
-def eigener_blob(db: Session, user_id: int, blob_id: str) -> VaultBlob:
+def eigener_blob(db: Session, bucket_id: str, blob_id: str) -> VaultBlob:
     if not ist_blob_id(blob_id):
         raise BlobNichtGefunden("Blob nicht gefunden.")
     blob = db.get(VaultBlob, blob_id)
-    if blob is None or blob.user_id != user_id:
+    if blob is None or blob.bucket_id != bucket_id:
         raise BlobNichtGefunden("Blob nicht gefunden.")
     return blob
 
 
-def laenge_fuer_upload(db: Session, user_id: int, blob_id: str, index: int) -> int:
-    blob = eigener_blob(db, user_id, blob_id)
+def laenge_fuer_upload(db: Session, bucket_id: str, blob_id: str, index: int) -> int:
+    blob = eigener_blob(db, bucket_id, blob_id)
     if blob.state != "offen":
         raise BlobKonflikt("Dieser Blob nimmt keine Chunks mehr an.")
     return erwartete_laenge(blob, index)
@@ -262,8 +269,8 @@ def vorhandene_chunks(blob: VaultBlob) -> list[int]:
     return vorhanden
 
 
-def fertigstellen(db: Session, user_id: int, blob_id: str) -> None:
-    blob = eigener_blob(db, user_id, blob_id)
+def fertigstellen(db: Session, bucket_id: str, blob_id: str) -> None:
+    blob = eigener_blob(db, bucket_id, blob_id)
     if blob.state == "fertig":
         return
     if blob.state != "offen":
@@ -272,7 +279,7 @@ def fertigstellen(db: Session, user_id: int, blob_id: str) -> None:
         raise BlobKonflikt("Es fehlen noch Chunks.")
     ergebnis = db.execute(
         update(VaultBlob)
-        .where(VaultBlob.id == blob_id, VaultBlob.user_id == user_id, VaultBlob.state == "offen")
+        .where(VaultBlob.id == blob_id, VaultBlob.bucket_id == bucket_id, VaultBlob.state == "offen")
         .values(state="fertig", completed_at=_jetzt())
     )
     db.commit()
@@ -282,8 +289,8 @@ def fertigstellen(db: Session, user_id: int, blob_id: str) -> None:
             raise BlobKonflikt("Dieser Blob ist geloescht.")
 
 
-def chunk_pfad(db: Session, user_id: int, blob_id: str, index: int) -> Path:
-    blob = eigener_blob(db, user_id, blob_id)
+def chunk_pfad(db: Session, bucket_id: str, blob_id: str, index: int) -> Path:
+    blob = eigener_blob(db, bucket_id, blob_id)
     if blob.state != "fertig":
         raise BlobNichtGefunden("Blob nicht gefunden.")
     erwartete_laenge(blob, index)
@@ -293,7 +300,7 @@ def chunk_pfad(db: Session, user_id: int, blob_id: str, index: int) -> Path:
     return pfad
 
 
-def kleine_lesen(db: Session, user_id: int, ids: Sequence[str]) -> bytes:
+def kleine_lesen(db: Session, bucket_id: str, ids: Sequence[str]) -> bytes:
     """Viele Miniaturen in einer Antwort: je angefragter Kennung, in dieser
     Reihenfolge, 4 Byte Laenge (big endian) und dann der Chunk. Laenge 0 heisst:
     nicht da, nicht fertig, fremd oder zu gross fuer diesen Weg."""
@@ -303,7 +310,7 @@ def kleine_lesen(db: Session, user_id: int, ids: Sequence[str]) -> bytes:
         for blob in db.scalars(
             select(VaultBlob).where(
                 VaultBlob.id.in_(gueltig),
-                VaultBlob.user_id == user_id,
+                VaultBlob.bucket_id == bucket_id,
                 VaultBlob.state == "fertig",
                 VaultBlob.chunk_count == 1,
                 VaultBlob.bytes_total <= KLEIN_GRENZE,
@@ -325,8 +332,8 @@ def kleine_lesen(db: Session, user_id: int, ids: Sequence[str]) -> bytes:
     return b"".join(teile)
 
 
-def loeschen(db: Session, user_id: int, blob_id: str, schluessel_hex: str) -> None:
-    blob = eigener_blob(db, user_id, blob_id)
+def loeschen(db: Session, bucket_id: str, blob_id: str, schluessel_hex: str) -> None:
+    blob = eigener_blob(db, bucket_id, blob_id)
     try:
         schluessel = bytes.fromhex(schluessel_hex)
     except ValueError as exc:
@@ -337,34 +344,48 @@ def loeschen(db: Session, user_id: int, blob_id: str, schluessel_hex: str) -> No
         raise LoeschnachweisFalsch("Loeschnachweis passt nicht.")
     db.execute(
         update(VaultBlob)
-        .where(VaultBlob.id == blob_id, VaultBlob.user_id == user_id, VaultBlob.state != "geloescht")
+        .where(VaultBlob.id == blob_id, VaultBlob.bucket_id == bucket_id, VaultBlob.state != "geloescht")
         .values(state="geloescht", deleted_at=_jetzt())
     )
     db.commit()
 
 
-def speicher(db: Session, user: User) -> dict[str, int]:
+def speicher(db: Session, user: User, bucket_id: str | None) -> dict[str, int]:
+    """Belegung des Buckets und Quote des Kontos. Ohne Bucket ist nichts belegt."""
+    quote = quote_fuer(db, user)
+    if bucket_id is None:
+        return {"belegt": 0, "quote": quote, "in_loeschung": 0, "blobs": 0}
     in_loeschung = int(
         db.scalar(
             select(func.coalesce(func.sum(VaultBlob.bytes_total), 0)).where(
-                VaultBlob.user_id == user.id, VaultBlob.state == "geloescht"
+                VaultBlob.bucket_id == bucket_id, VaultBlob.state == "geloescht"
             )
         )
         or 0
     )
     blobs = int(
-        db.scalar(select(func.count()).select_from(VaultBlob).where(VaultBlob.user_id == user.id, VaultBlob.state != "geloescht"))
+        db.scalar(
+            select(func.count()).select_from(VaultBlob).where(
+                VaultBlob.bucket_id == bucket_id, VaultBlob.state != "geloescht"
+            )
+        )
         or 0
     )
-    return {"belegt": belegt(db, user.id), "quote": quote_fuer(db, user), "in_loeschung": in_loeschung, "blobs": blobs}
+    return {"belegt": belegt(db, bucket_id), "quote": quote, "in_loeschung": in_loeschung, "blobs": blobs}
 
 
-def alle_zur_loeschung(db: Session, user_id: int) -> None:
-    """Legt alle Blobs des Kontos in die Loeschhaltung. Committet nicht."""
+def alle_zur_loeschung(db: Session, bucket_id: str) -> None:
+    """Gibt alle Blobs des Buckets zum Entfernen frei, ohne Loeschhaltung. Committet nicht.
+
+    Fuer Zuruecksetzen und Kontoloeschung: danach gehoert der Bucket keinem
+    Konto mehr, und seine Blobs zaehlen gegen keinen Speicher. Mit sieben
+    Tagen Haltung liesse sich die Platte durch Hochladen und Zuruecksetzen
+    beliebig oft fuellen. Das naechste Aufraeumen (stuendlich) entfernt sie.
+    """
     db.execute(
         update(VaultBlob)
-        .where(VaultBlob.user_id == user_id, VaultBlob.state != "geloescht")
-        .values(state="geloescht", deleted_at=_jetzt())
+        .where(VaultBlob.bucket_id == bucket_id)
+        .values(state="geloescht", deleted_at=_jetzt() - LOESCHHALTUNG)
     )
 
 
@@ -374,7 +395,7 @@ def _entfernen(blob_id: str) -> None:
 
 def aufraeumen(db: Session, jetzt: datetime | None = None) -> dict[str, int]:
     """Entfernt abgebrochene Uploads, Blobs nach der Loeschhaltung und
-    Verzeichnisse ohne Zeile (etwa nach einer Kontoloeschung)."""
+    Verzeichnisse ohne Zeile (etwa nach der Umstellung auf Buckets)."""
     jetzt = jetzt or _jetzt()
     faellig = db.scalars(
         select(VaultBlob.id).where(

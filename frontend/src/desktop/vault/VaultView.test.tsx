@@ -29,6 +29,7 @@ vi.mock('../tauri', () => ({
 
 vi.mock('./tresorBlobApi', () => ({
   speicherAbfragen: vi.fn().mockResolvedValue({ belegt: 1024 * 1024, quote: 10 * 1024 * 1024 * 1024, in_loeschung: 0 }),
+  bucketMelderSetzen: vi.fn(),
 }))
 
 vi.mock('./tresorMiniaturen', () => ({

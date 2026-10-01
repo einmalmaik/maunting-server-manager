@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import html
@@ -26,6 +27,7 @@ from schemas.vault import (
 )
 from services import vault_blob_service
 from services.auth_service import AuthService
+from services.dis_client import DisClient
 
 
 def _now() -> datetime:
@@ -46,6 +48,106 @@ class VaultBucketAlreadyBound(Exception):
 
 class VaultClientZuAlt(Exception):
     """Die App ist aelter als das Format, das dieser Bucket verlangt."""
+
+
+class VaultOhneBucket(Exception):
+    """Das Konto hat keinen Bucket; die Dateien wissen nicht, wohin."""
+
+
+# ─── Das Konto in den Tresortabellen ─────────────────────────────────────────
+#
+# Die Tresortabellen nennen kein Konto im Klartext. Bis 01.10.2026 stand die
+# `user_id` in `vault_user_settings`, `vault_hints` und `vault_blobs`: wer die
+# Datenbank las, sah, wem welcher Tresor gehoert und wie viele und wie grosse
+# Dateien darin liegen. Heute steht dort ein HMAC der Kontonummer, den nur der
+# DIS-Sidecar rechnen kann. Der Server erfaehrt die Zuordnung, solange eine
+# angemeldete Anfrage laeuft.
+
+_KONTO_INDEX: dict[int, str] = {}
+
+
+@dataclass(frozen=True)
+class TresorKonto:
+    """Ein Konto, wie die Tresortabellen es kennen.
+
+    ``index`` steht in der Datenbank. ``user_id`` dient nur dem Altbestand
+    und der AAD des Hinweises; geschrieben wird sie nie.
+    """
+
+    user_id: int
+    index: str
+
+
+def tresor_konto(user_id: int) -> TresorKonto:
+    """Rechnet den Index ueber den Sidecar und merkt ihn sich im Prozess.
+
+    Der Wert haengt nur an Kontonummer und Sidecar-Schluessel, er aendert sich
+    also nie. Scheitert der Sidecar, fliegt ``DisSidecarError``, und nichts
+    wird gemerkt.
+    """
+    index = _KONTO_INDEX.get(user_id)
+    if index is None:
+        index = DisClient.blind_index([f"vault:konto\n{user_id}"])[0]
+        _KONTO_INDEX[user_id] = index
+    return TresorKonto(user_id=user_id, index=index)
+
+
+def _eigene_zeile(db: Session, modell, konto: TresorKonto):
+    """Die Zeile des Kontos in ``vault_user_settings`` bzw. ``vault_hints``.
+
+    Findet sie den Index nicht, sucht sie nach der alten ``user_id`` und
+    stellt die Zeile gleich um. Ohne diesen Rueckfall waere ein Tresor
+    zwischen Update und Nachzug beim Start unsichtbar.
+    """
+    zeile = db.scalar(select(modell).where(modell.konto_index == konto.index))
+    if zeile is None:
+        zeile = db.scalar(select(modell).where(modell.user_id == konto.user_id))
+        if zeile is not None:
+            zeile.konto_index = konto.index
+            zeile.user_id = None
+            db.flush()
+    return zeile
+
+
+def kontoindex_nachziehen(db: Session) -> set[str]:
+    """Setzt den Index im Altbestand und leert die ``user_id``. Laeuft beim Start.
+
+    Gibt die Tabellen zurueck, in denen sich etwas geaendert hat: dort liegt
+    die alte Zeilenversion mit ``user_id`` noch in der Datei, bis VACUUM FULL
+    sie entfernt.
+    """
+    geaendert: set[str] = set()
+    for modell in (VaultUserSetting, VaultHint):
+        zeilen = db.scalars(select(modell).where(modell.user_id.isnot(None))).all()
+        for anfang in range(0, len(zeilen), 1000):
+            teil = zeilen[anfang:anfang + 1000]
+            indizes = DisClient.blind_index([f"vault:konto\n{z.user_id}" for z in teil])
+            for zeile, index in zip(teil, indizes):
+                _KONTO_INDEX[zeile.user_id] = index
+                zeile.konto_index = index
+                zeile.user_id = None
+            db.commit()
+        if zeilen:
+            geaendert.add(modell.__tablename__)
+    return geaendert
+
+
+def einstellung(db: Session, konto: TresorKonto) -> VaultUserSetting | None:
+    return _eigene_zeile(db, VaultUserSetting, konto)
+
+
+def konto_umstellen(db: Session, konto: TresorKonto) -> None:
+    """Stellt den Altbestand eines Kontos auf den Index um. Committet nicht."""
+    _eigene_zeile(db, VaultUserSetting, konto)
+    _eigene_zeile(db, VaultHint, konto)
+
+
+def eigener_bucket(db: Session, konto: TresorKonto) -> str:
+    """Der Bucket des Kontos, an dem seine Dateien haengen."""
+    zeile = einstellung(db, konto)
+    if zeile is None or not zeile.bucket_id:
+        raise VaultOhneBucket("Zu diesem Konto ist kein Tresor hinterlegt.")
+    return zeile.bucket_id
 
 
 def _pruefe_format(db: Session, bucket_id: str, client_format: int | None, min_client_format: int | None) -> None:
@@ -91,11 +193,19 @@ def _bucket_hat_eintraege(db: Session, bucket_id: str) -> bool:
     ) is not None
 
 
-def _bucket_besitzer(db: Session, bucket_id: str) -> int | None:
-    """Das Konto, an das dieser Bucket gekoppelt ist — oder None."""
-    return db.scalar(
-        select(VaultUserSetting.user_id).where(VaultUserSetting.bucket_id == bucket_id)
-    )
+def _bucket_besitzer(db: Session, bucket_id: str) -> str | None:
+    """Der Kontoindex, an den dieser Bucket gekoppelt ist — oder None.
+
+    Eine Altzeile ohne Index zaehlt als gekoppelt: sie bekommt ``alt:`` und
+    passt damit auf kein Konto. Wer sie besitzt, hat sie vorher beim Lesen
+    ueber ``einstellung`` schon umgestellt.
+    """
+    zeile = db.execute(
+        select(VaultUserSetting.konto_index, VaultUserSetting.user_id).where(VaultUserSetting.bucket_id == bucket_id)
+    ).first()
+    if zeile is None:
+        return None
+    return zeile.konto_index or f"alt:{zeile.user_id}"
 
 
 def _sperre_bucket(db: Session, bucket_id: str) -> None:
@@ -105,7 +215,7 @@ def _sperre_bucket(db: Session, bucket_id: str) -> None:
     und vergeben beide dieselbe naechste Nummer. Zwei Eintraege mit gleicher
     Revision sind eine Luecke im Wasserzeichen des Clients: wer den einen sieht
     und ``since_revision`` fortschreibt, bekommt den anderen nie wieder
-    angeboten — stiller Datenverlust in einem Passwort-Manager.
+    angeboten — stiller Datenverlust in einem Tresor.
 
     PostgreSQL haelt die Sperre bis zum Ende der Transaktion, also bis zum
     ``commit`` des Aufrufers.
@@ -228,7 +338,7 @@ def _lies_bucket(db: Session, bucket_id: str, since_revision: int) -> VaultSyncR
     )
 
 
-def sync_vault(db: Session, user: User, request: VaultSyncRequest) -> VaultSyncResponse:
+def sync_vault(db: Session, konto: TresorKonto, request: VaultSyncRequest) -> VaultSyncResponse:
     """Führt einen deterministischen Revisions-Sync für einen blinden Tresor-Bucket durch.
 
     Sicherheits-Invariante:
@@ -239,9 +349,11 @@ def sync_vault(db: Session, user: User, request: VaultSyncRequest) -> VaultSyncR
     bucket_id = request.bucket_id.lower()
 
     # 1. Bucket-Autorisierung (SEC-02: IDOR-Schutz)
-    # Prüfe, ob dieser Bucket bereits einem ANDEREN Benutzer gehört
+    # Prüfe, ob dieser Bucket bereits einem ANDEREN Benutzer gehört. Erst die
+    # eigene Zeile lesen: sie stellt einen Altbestand auf den Index um.
+    user_setting = einstellung(db, konto)
     besitzer = _bucket_besitzer(db, bucket_id)
-    if besitzer is not None and besitzer != user.id:
+    if besitzer is not None and besitzer != konto.index:
         raise VaultBucketAccessDenied("Zugriff auf fremden Tresor-Bucket verweigert.")
 
     # Ein blind registrierter Bucket gehoert seinem Besitznachweis, nicht einem
@@ -251,7 +363,6 @@ def sync_vault(db: Session, user: User, request: VaultSyncRequest) -> VaultSyncR
     if besitzer is None and db.get(VaultBlindBucket, bucket_id) is not None:
         raise VaultBucketAccessDenied("Dieser Tresor-Bucket ist an einen blinden Besitznachweis gebunden.")
 
-    user_setting = db.get(VaultUserSetting, user.id)
     if user_setting and user_setting.bucket_id and user_setting.bucket_id != bucket_id:
         raise VaultBucketAccessDenied("Nicht autorisierter Tresor-Bucket für dieses Benutzerkonto.")
 
@@ -267,7 +378,7 @@ def sync_vault(db: Session, user: User, request: VaultSyncRequest) -> VaultSyncR
         else:
             db.add(
                 VaultUserSetting(
-                    user_id=user.id,
+                    konto_index=konto.index,
                     bucket_id=bucket_id,
                     created_at=_now(),
                     updated_at=_now(),
@@ -372,7 +483,7 @@ def pruefe_blind_bucket(db: Session, bucket_id: str, auth_token: str) -> None:
         raise VaultBucketUnauthorized("Ungültiges Authentifizierungs-Token für diesen Tresor-Bucket.")
 
 
-def register_blind_bucket(db: Session, user_id: int, bucket_id: str, auth_token: str) -> None:
+def register_blind_bucket(db: Session, konto: TresorKonto, bucket_id: str, auth_token: str) -> None:
     """Hinterlegt den blinden Besitznachweis fuer den **eigenen** Bucket.
 
     Der authentifizierte Weg vom Cookie-Pfad auf den blinden Pfad. Er ersetzt die
@@ -388,8 +499,9 @@ def register_blind_bucket(db: Session, user_id: int, bucket_id: str, auth_token:
       davor soll der blinde Pfad schuetzen.
     """
     bucket_id = bucket_id.strip().lower()
+    setting = einstellung(db, konto)
     besitzer = _bucket_besitzer(db, bucket_id)
-    if besitzer is not None and besitzer != user_id:
+    if besitzer is not None and besitzer != konto.index:
         raise VaultBucketAccessDenied("Zugriff auf fremden Tresor-Bucket verweigert.")
 
     vorhanden = db.get(VaultBlindBucket, bucket_id)
@@ -403,7 +515,6 @@ def register_blind_bucket(db: Session, user_id: int, bucket_id: str, auth_token:
     if besitzer is None:
         if _bucket_hat_eintraege(db, bucket_id):
             raise VaultBucketAccessDenied("Zugriff auf fremden Tresor-Bucket verweigert.")
-        setting = db.get(VaultUserSetting, user_id)
         if setting and setting.bucket_id and setting.bucket_id != bucket_id:
             raise VaultBucketAccessDenied("Nicht autorisierter Tresor-Bucket für dieses Benutzerkonto.")
         if setting:
@@ -412,7 +523,7 @@ def register_blind_bucket(db: Session, user_id: int, bucket_id: str, auth_token:
         else:
             db.add(
                 VaultUserSetting(
-                    user_id=user_id,
+                    konto_index=konto.index,
                     bucket_id=bucket_id,
                     created_at=_now(),
                     updated_at=_now(),
@@ -434,9 +545,10 @@ def register_blind_bucket(db: Session, user_id: int, bucket_id: str, auth_token:
         raise VaultBucketAlreadyBound("Für diesen Tresor-Bucket ist bereits ein Besitznachweis hinterlegt.")
 
 
-def get_vault_salt(db: Session, user_id: int) -> VaultSaltResponse:
+def get_vault_salt(db: Session, konto: TresorKonto) -> VaultSaltResponse:
     """Liest den hinterlegten KDF-Salt und Bucket-Status des Benutzers."""
-    setting = db.get(VaultUserSetting, user_id)
+    setting = einstellung(db, konto)
+    db.commit()
     if not setting:
         return VaultSaltResponse(kdf_salt=None, bucket_id=None, has_vault=False)
     return VaultSaltResponse(
@@ -448,7 +560,7 @@ def get_vault_salt(db: Session, user_id: int) -> VaultSaltResponse:
 
 def set_vault_salt(
     db: Session,
-    user_id: int,
+    konto: TresorKonto,
     kdf_salt: str,
     bucket_id: str,
     auth_token: str | None = None,
@@ -466,16 +578,11 @@ def set_vault_salt(
     clean_salt = kdf_salt.strip()
 
     # Prüfe ob Bucket bereits fremd vergeben ist
-    other_owner = db.scalar(
-        select(VaultUserSetting).where(
-            VaultUserSetting.bucket_id == clean_bucket,
-            VaultUserSetting.user_id != user_id,
-        )
-    )
-    if other_owner is not None:
+    setting = einstellung(db, konto)
+    besitzer = _bucket_besitzer(db, clean_bucket)
+    if besitzer is not None and besitzer != konto.index:
         raise VaultBucketAccessDenied("Der angegebene Tresor-Bucket ist bereits vergeben.")
 
-    setting = db.get(VaultUserSetting, user_id)
     eigener = setting is not None and setting.bucket_id == clean_bucket
     if not eigener:
         blind = db.get(VaultBlindBucket, clean_bucket)
@@ -490,7 +597,7 @@ def set_vault_salt(
             raise VaultBucketAccessDenied("Der angegebene Tresor-Bucket ist bereits vergeben.")
     if not setting:
         setting = VaultUserSetting(
-            user_id=user_id,
+            konto_index=konto.index,
             bucket_id=clean_bucket,
             kdf_salt=clean_salt,
             created_at=_now(),
@@ -512,7 +619,7 @@ def set_vault_salt(
     )
 
 
-def tresor_zuruecksetzen(db: Session, user_id: int) -> None:
+def tresor_zuruecksetzen(db: Session, konto: TresorKonto) -> None:
     """Loest den Tresor vom Konto: Salz, Kontokopplung und Hinweis. Committet nicht.
 
     Der Ausweg bei vergessenem Master-Passwort. Danach meldet `/salt` „kein
@@ -524,29 +631,55 @@ def tresor_zuruecksetzen(db: Session, user_id: int) -> None:
     lebt womoeglich noch auf einem anderen Geraet, das ihn weiter abgleicht.
     Lesen kann sie ohne das alte Passwort niemand.
 
-    Die Dateien der Tresor-Cloud (`vault_blobs`) gehen dagegen in die
-    Loeschhaltung (7 Tage). Sie gehoeren dem Konto, und ohne das alte
-    Master-Passwort liesse sich keine davon je wieder loeschen: der
-    Loeschnachweis haengt am Schluessel der Datei. Sie belegten die Quote fuer
-    immer. Ein anderes Geraet mit dem alten Tresor verliert sie damit auch;
-    der Dialog nennt vorher Anzahl und Groesse.
+    Die Dateien der Tresor-Cloud (`vault_blobs`) werden dagegen entfernt
+    (beim naechsten Aufraeumen, stuendlich). Ohne das alte Master-Passwort
+    liesse sich keine davon je wieder loeschen: der Loeschnachweis haengt am
+    Schluessel der Datei. Eine Loeschhaltung gibt es hier nicht mehr, seit die
+    Blobs am Bucket haengen (01.10.2026): sie zaehlten gegen keinen Speicher,
+    und Hochladen und Zuruecksetzen fuellte die Platte. Ein anderes Geraet mit
+    dem alten Tresor verliert sie damit auch; der Dialog nennt vorher Anzahl
+    und Groesse.
     """
-    db.query(VaultUserSetting).filter(VaultUserSetting.user_id == user_id).delete(synchronize_session=False)
-    db.query(VaultHint).filter(VaultHint.user_id == user_id).delete(synchronize_session=False)
-    vault_blob_service.alle_zur_loeschung(db, user_id)
+    setting = einstellung(db, konto)
+    hinweis = _eigene_zeile(db, VaultHint, konto)
+    if setting is not None:
+        if setting.bucket_id:
+            vault_blob_service.alle_zur_loeschung(db, setting.bucket_id)
+        db.delete(setting)
+    if hinweis is not None:
+        db.delete(hinweis)
+    db.flush()
+
+
+def konto_entfernen(db: Session, konto: TresorKonto) -> None:
+    """Raeumt beim Loeschen eines Kontos alles ab, was im Tresor an ihm haengt. Committet nicht.
+
+    Bis 01.10.2026 tat das die Kaskade auf ``users.id``. Die Tresortabellen
+    tragen seither keinen Fremdschluessel aufs Konto mehr, also geschieht es
+    hier. Anders als beim Zuruecksetzen gehen auch Eintraege, Besitznachweis
+    und Formatsperre des Buckets mit: wer sein Konto loescht, will seine Daten
+    weg haben.
+    """
+    setting = einstellung(db, konto)
+    bucket = setting.bucket_id if setting is not None else None
+    tresor_zuruecksetzen(db, konto)
+    if bucket:
+        db.query(VaultEntry).filter(VaultEntry.bucket_id == bucket).delete(synchronize_session=False)
+        db.query(VaultBlindBucket).filter(VaultBlindBucket.bucket_id == bucket).delete(synchronize_session=False)
+        db.query(VaultBucketFormat).filter(VaultBucketFormat.bucket_id == bucket).delete(synchronize_session=False)
 
 
 HINT_RATE_LIMIT_SECONDS = 600  # 10 Minuten Cooldown
 
 
-def set_vault_hint(db: Session, user_id: int, hint_text: str) -> None:
+def set_vault_hint(db: Session, konto: TresorKonto, hint_text: str) -> None:
     """Hinterlegt oder aktualisiert den Passwort-Hinweis (verschlüsselt at rest mit Server-Key und AAD)."""
     encrypted_hint = AuthService.encrypt_secret(
-        hint_text.strip(), aad=f"msm:vault:hint:{user_id}"
+        hint_text.strip(), aad=f"msm:vault:hint:{konto.user_id}"
     )
-    hint_obj = db.get(VaultHint, user_id)
+    hint_obj = _eigene_zeile(db, VaultHint, konto)
     if not hint_obj:
-        hint_obj = VaultHint(user_id=user_id, hint=encrypted_hint)
+        hint_obj = VaultHint(konto_index=konto.index, hint=encrypted_hint)
         db.add(hint_obj)
     else:
         hint_obj.hint = encrypted_hint
@@ -562,9 +695,10 @@ def _to_utc(dt: datetime | None) -> datetime | None:
     return dt
 
 
-def get_vault_hint_status(db: Session, user_id: int) -> VaultHintStatusResponse:
+def get_vault_hint_status(db: Session, konto: TresorKonto) -> VaultHintStatusResponse:
     """Prüft, ob ein Hinweis hinterlegt ist und ob die 10-Minuten-Sperrfrist aktiv ist."""
-    hint_obj = db.get(VaultHint, user_id)
+    hint_obj = _eigene_zeile(db, VaultHint, konto)
+    db.commit()
     if not hint_obj or not hint_obj.hint:
         return VaultHintStatusResponse(
             has_hint=False,
@@ -590,12 +724,13 @@ def get_vault_hint_status(db: Session, user_id: int) -> VaultHintStatusResponse:
     )
 
 
-async def request_vault_hint_email(db: Session, user: User) -> tuple[bool, str]:
+async def request_vault_hint_email(db: Session, user: User, konto: TresorKonto) -> tuple[bool, str]:
     """Sendet den hinterlegten Hinweis an die registrierte E-Mail-Adresse des Benutzers.
     
     Verbindliche Invariante: Nur 1 Anfrage alle 10 Minuten erlaubt.
     """
-    hint_obj = db.get(VaultHint, user.id)
+    hint_obj = _eigene_zeile(db, VaultHint, konto)
+    db.commit()
     if not hint_obj or not hint_obj.hint:
         return False, "Für dein Konto ist kein Passwort-Hinweis hinterlegt."
 
@@ -614,7 +749,7 @@ async def request_vault_hint_email(db: Session, user: User) -> tuple[bool, str]:
     getroffen = (
         db.query(VaultHint)
         .filter(
-            VaultHint.user_id == user.id,
+            VaultHint.id == hint_obj.id,
             (VaultHint.last_requested_at.is_(None)) | (VaultHint.last_requested_at <= grenze),
         )
         .update({"last_requested_at": now}, synchronize_session=False)
@@ -643,10 +778,10 @@ async def request_vault_hint_email(db: Session, user: User) -> tuple[bool, str]:
 
     from services.email_service import EmailService
 
-    subject = "Passwort-Manager — Dein Passwort-Hinweis"
+    subject = "Tresor: Dein Passwort-Hinweis"
     body = f"""Hallo {user.username},
 
-du hast deinen Passwort-Hinweis für den Maunting Service Manager Passwort-Manager angefordert.
+du hast den Passwort-Hinweis für deinen Tresor im Maunting Service Manager angefordert.
 
 Dein hinterlegter Hinweis lautet:
 {raw_hint}
@@ -661,9 +796,9 @@ Maunting Service Manager
     html_content = EmailService._notification_email_html(
         user.username,
         "Passwort-Hinweis",
-        "Hier ist deine persönliche Gedankenstütze für das Master-Passwort deines Passwort-Managers:",
+        "Hier ist deine persönliche Gedankenstütze für das Master-Passwort deines Tresors:",
         f"<strong>{html.escape(raw_hint)}</strong>",
-        kategorie="Passwort-Manager",
+        kategorie="Tresor",
     )
 
     success = await EmailService.send_email(user.email, subject, body, html_content)

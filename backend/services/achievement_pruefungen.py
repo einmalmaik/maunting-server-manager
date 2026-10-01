@@ -94,21 +94,26 @@ def _backups(db: Session, user: User):
     return query
 
 
+def _tresor(db: Session, user: User) -> VaultUserSetting | None:
+    # Das Konto steht dort nur als Index; scheitert der Sidecar, kostet das
+    # diese Pruefung, nicht die Liste.
+    from services import vault_service
+
+    return vault_service.einstellung(db, vault_service.tresor_konto(user.id))
+
+
 def _hat_tresor(db: Session, user: User) -> bool:
     # Dieselbe Frage wie `has_vault` im Tresordienst.
-    return _gibt(
-        db.query(VaultUserSetting.user_id).filter(
-            VaultUserSetting.user_id == user.id,
-            or_(VaultUserSetting.bucket_id.isnot(None), VaultUserSetting.kdf_salt.isnot(None)),
-        )
-    )
+    zeile = _tresor(db, user)
+    return zeile is not None and bool(zeile.bucket_id or zeile.kdf_salt)
 
 
 def _tresoreintrag(db: Session, user: User) -> bool:
+    zeile = _tresor(db, user)
+    if zeile is None or not zeile.bucket_id:
+        return False
     return _gibt(
-        db.query(VaultEntry.id)
-        .join(VaultUserSetting, VaultUserSetting.bucket_id == VaultEntry.bucket_id)
-        .filter(VaultUserSetting.user_id == user.id, VaultEntry.is_deleted.is_(False))
+        db.query(VaultEntry.id).filter(VaultEntry.bucket_id == zeile.bucket_id, VaultEntry.is_deleted.is_(False))
     )
 
 

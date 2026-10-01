@@ -55,6 +55,7 @@ import {
   type DateiVersion,
 } from './tresorDateien'
 import { bildAngaben } from './tresorBilder'
+import { bucketMelderSetzen } from './tresorBlobApi'
 
 /**
  * Die Arten von Einträgen, die diese Fassung der App anzeigen und bearbeiten
@@ -662,6 +663,22 @@ interface VaultState {
   checkHintStatus: () => Promise<boolean>
 }
 
+/**
+ * Hinterlegt Salz und Bucket des offenen Tresors erneut beim Konto. Die
+ * Datei-Routen brauchen die Zuordnung; beim Einrichten wird ein Fehler hier
+ * verschluckt (`initializeVault`), und dann fragen sie über
+ * `VAULT_BUCKET_UNBEKANNT` nach.
+ */
+async function bucketNeuMelden(): Promise<void> {
+  const { bucketId, bucketAuthToken } = useVaultStore.getState()
+  const salz = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_SALT_KEY) : null
+  if (!bucketId || !salz) throw new Error(i18n.t('errors.vault_bucket_unbekannt'))
+  await api('/api/vault/salt', {
+    method: 'POST',
+    body: JSON.stringify({ kdf_salt: salz, bucket_id: bucketId, auth_token: bucketAuthToken }),
+  })
+}
+
 export const useVaultStore = create<VaultState>((set, get) => {
   runBiometricsMigration()
 
@@ -862,7 +879,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       }
 
       // Primär: Native Windows Hello Verifikation & Freigabe aus dem geschützten Credential Store
-      const masterPassword = await biometrieEntsperren('Passwort-Manager entsperren', FACH_TRESOR)
+      const masterPassword = await biometrieEntsperren(i18n.t('mss.vault.entsperrenGrund'), FACH_TRESOR)
       if (!masterPassword) {
         throw new Error(i18n.t('mss.vault.errors.biometricsKeyLoadFailed'))
       }
@@ -1838,6 +1855,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
   },
   }
 })
+
+bucketMelderSetzen(bucketNeuMelden)
 
 /**
  * Was `useAutoSperre` braucht, um den Tresor zu bewachen.

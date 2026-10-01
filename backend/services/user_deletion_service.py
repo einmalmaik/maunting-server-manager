@@ -29,6 +29,11 @@ kaskadiert zwar, aber dieselbe Zeile haengt zugleich per RESTRICT an
 greift, ist nicht zugesichert. Ein ausdrueckliches DELETE davor macht die Frage
 gegenstandslos, statt sich auf eine Reihenfolge zu verlassen, die nirgends
 zugesichert ist.
+
+Ausdruecklich geloescht wird auch der Tresor. Seine Tabellen nennen das Konto
+seit dem 01.10.2026 nur noch als HMAC, also greift dort keine Kaskade mehr.
+Den Index rechnet der DIS-Sidecar; ist er nicht erreichbar, bricht die
+Loeschung mit 503 ab, bevor irgendetwas geschrieben wurde.
 """
 
 from __future__ import annotations
@@ -45,6 +50,8 @@ from models import (
     User,
     UserCredential,
 )
+from services import vault_service
+from services.dis_client import DisSidecarError
 from services.social_service import SocialService
 
 
@@ -53,9 +60,17 @@ def prepare_user_deletion(db: Session, user: User) -> None:
 
     Aufzurufen unmittelbar vor ``db.delete(user)``, in derselben Transaktion.
     Ohne Fund kehrt die Funktion stumm zurueck. Geschrieben wird ausschliesslich
-    das Loeschen des persoenlichen Teams, und zwar nur per ``flush`` — bricht
-    die umgebende Transaktion spaeter ab, ist auch das Team wieder da.
+    das Loeschen des persoenlichen Teams und des Tresors, und zwar nur per
+    ``flush`` — bricht die umgebende Transaktion spaeter ab, ist beides wieder da.
     """
+    try:
+        tresor = vault_service.tresor_konto(user.id)
+    except DisSidecarError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Der Tresor ist gerade nicht erreichbar, das Konto kann deshalb nicht geloescht werden.",
+        ) from exc
+
     # Echte Teams: `personal_for_user_id IS NULL` ist die Unterscheidung, die
     # das Schema ohnehin traegt (siehe models/team.py) — kein zweites Flag.
     owned_teams = (
@@ -132,3 +147,6 @@ def prepare_user_deletion(db: Session, user: User) -> None:
     if personal is not None:
         db.delete(personal)
         db.flush()
+
+    vault_service.konto_entfernen(db, tresor)
+    db.flush()

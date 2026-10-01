@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -13,22 +13,28 @@ def _now() -> datetime:
 
 
 class VaultUserSetting(Base):
-    """User-specific Zero-Knowledge Vault configuration and authorization.
+    """Welcher Tresor-Bucket zu welchem Konto gehoert, und das Salz dazu.
+
+    Das Konto steht hier nur als ``konto_index``: ein HMAC der Kontonummer aus
+    dem DIS-Sidecar (``vault_service.konto_index``). Wer nur die Datenbank
+    liest, sieht nicht, welchem Konto ein Tresor gehoert; der Server erfaehrt
+    es, solange eine angemeldete Anfrage laeuft. Bis 01.10.2026 stand die
+    ``user_id`` im Klartext darin.
 
     SECURITY INVARIANTS:
-    - Links a user account to their authorized blind `bucket_id`.
-    - Prevents IDOR / unauthorized multi-tenant access to another user's vault bucket.
-    - Persists the user's KDF salt for multi-device synchronization and offline recovery.
+    - Ein Bucket gehoert hoechstens einem Konto (``bucket_id`` unique).
+    - Ein Konto hat hoechstens einen Bucket (``konto_index`` unique).
     """
 
     __tablename__ = "vault_user_settings"
 
-    user_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("users.id", ondelete="CASCADE"),
-        primary_key=True,
-        nullable=False,
-    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Leer nur fuer Altbestand, bis der Nachzug beim Start oder das erste Lesen
+    # ihn setzt.
+    konto_index: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
+    # Altbestand von vor dem 01.10.2026. Wird beim Umstellen auf NULL gesetzt
+    # und nie mehr geschrieben.
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     bucket_id: Mapped[str | None] = mapped_column(
         String(64),
         unique=True,

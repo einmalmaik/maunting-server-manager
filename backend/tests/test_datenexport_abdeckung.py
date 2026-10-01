@@ -48,12 +48,12 @@ def _verdaechtige_spalten(tabellen, bedingungen) -> list[str]:
 
 
 def test_jede_tabelle_ist_exportiert_oder_begruendet_ausgelassen():
-    bedingungen = export.zeilenwahl(1)
+    bedingungen = export.zeilenwahl(1, "0" * 64)
     assert _nicht_eingeordnet(Base.metadata.sorted_tables, bedingungen) == []
 
 
 def test_jede_verdaechtige_spalte_ist_eingeordnet():
-    bedingungen = export.zeilenwahl(1)
+    bedingungen = export.zeilenwahl(1, "0" * 64)
     assert _verdaechtige_spalten(Base.metadata.sorted_tables, bedingungen) == []
 
 

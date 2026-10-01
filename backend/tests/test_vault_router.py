@@ -4,7 +4,19 @@ import pytest
 from fastapi.testclient import TestClient
 from dependencies import get_current_user, get_db, verify_csrf
 from main import app
-from models import User, VaultEntry, VaultUserSetting
+from sqlalchemy import select
+
+from models import User, VaultEntry, VaultHint, VaultUserSetting
+from services import vault_service
+
+
+def _index(user) -> str:
+    return vault_service.tresor_konto(user.id).index
+
+
+def _tresorzeile(session, user, modell=VaultUserSetting):
+    """Die Zeile des Kontos; die Tresortabellen kennen es nur als Index."""
+    return session.scalar(select(modell).where(modell.konto_index == _index(user)))
 
 
 @pytest.fixture
@@ -527,7 +539,7 @@ def test_vault_migration_preserves_entries(client, test_db):
     auth_token = "c" * 64
 
     # 1. Existing legacy entry created in database under user1
-    session.add(VaultUserSetting(user_id=user1.id, bucket_id=bucket))
+    session.add(VaultUserSetting(konto_index=_index(user1), bucket_id=bucket))
     session.add(
         VaultEntry(
             id="legacy-item-1",
@@ -567,7 +579,7 @@ def test_vault_migration_preserves_entries(client, test_db):
         # 4. Die Kontokopplung bleibt bestehen: sie ist der IDOR-Schutz des
         #    Cookie-Pfads, und ein anonymer Request darf sie nicht aufloesen.
         session.expire_all()
-        assert session.get(VaultUserSetting, user1.id).bucket_id == bucket
+        assert _tresorzeile(session, user1).bucket_id == bucket
 
         # 5. Subsequent blind mutations succeed under the same bucket
         res_mutate = anonymous_client.post(
@@ -991,7 +1003,7 @@ def test_vault_reset_loest_den_tresor_vom_konto(client, test_db):
     liegen; sie gehoeren einem blinden Bucket und sind ohne das alte Passwort
     unlesbar.
     """
-    from models import VaultBlindBucket, VaultHint
+    from models import VaultBlindBucket
     from services.auth_service import AuthService
 
     session, user, _ = test_db
@@ -1024,7 +1036,7 @@ def test_vault_reset_loest_den_tresor_vom_konto(client, test_db):
 
     salz = client.get("/api/vault/salt").json()
     assert salz == {"kdf_salt": None, "bucket_id": None, "has_vault": False}
-    assert session.get(VaultHint, user.id) is None
+    assert _tresorzeile(session, user, VaultHint) is None
     # Nichts Verschluesseltes geloescht: der Server loest nur die Zuordnung.
     assert session.query(VaultEntry).filter(VaultEntry.bucket_id == bucket).count() == 1
     assert session.get(VaultBlindBucket, bucket) is None
