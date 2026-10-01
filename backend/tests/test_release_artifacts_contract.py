@@ -75,3 +75,15 @@ def test_android_signing_key_never_lives_in_the_repo() -> None:
     assert "secrets.MSS_ANDROID_KEYSTORE_B64" in workflow
     signieren = (ROOT / "scripts" / "android-apk-signieren.sh").read_text(encoding="utf-8")
     assert "--lineage" in signieren and "--rotation-min-sdk-version 28" in signieren
+
+
+def test_android_webview_hears_network_changes() -> None:
+    """Ohne ACCESS_NETWORK_STATE bleibt navigator.onLine im WebView immer true.
+
+    Kein `online`-Ereignis: Tresor und Notizen merkten bis 01.10.2026 nicht,
+    wenn das Netz zurückkam (Emulator-Probe mit Flugmodus).
+    """
+    manifest = (
+        ROOT / "smart-system" / "src-tauri" / "gen" / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
+    ).read_text(encoding="utf-8")
+    assert 'android:name="android.permission.ACCESS_NETWORK_STATE"' in manifest
