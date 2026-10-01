@@ -33,6 +33,12 @@ export interface LichtboxProps {
   info?: React.ReactNode
   /** Ob der Inhalt gezoomt werden darf (Bilder ja, Videos nein). */
   zoombar?: boolean
+  /**
+   * Der Inhalt füllt die Fläche und scrollt selbst (PDF, Listen, Tabellen).
+   * Touch scrollt dann nativ; Wischen zum Blättern bleibt, solange der Inhalt
+   * nicht seitlich scrollt.
+   */
+  rollbar?: boolean
   /** Wird beim ersten Hineinzoomen gerufen, etwa um das Original nachzuladen. */
   onZoom?: () => void
   children: React.ReactNode
@@ -54,6 +60,7 @@ export function Lichtbox({
   aktionen,
   info,
   zoombar = false,
+  rollbar = false,
   onZoom,
   children,
 }: LichtboxProps) {
@@ -157,7 +164,9 @@ export function Lichtbox({
       role="dialog"
       aria-modal="true"
       aria-label={titel}
-      className="fixed inset-0 z-50 flex flex-col bg-black/95 text-white animate-fade-in"
+      // Per Portal an body, also ohne die Ränder der App: Status- und Gestenleiste hält sie selbst frei.
+      // Rollbarer Inhalt (Dokumente) ist hell und lückenhaft; dahinter darf die App nicht durchscheinen.
+      className={`fixed inset-0 z-50 flex flex-col pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] text-white animate-fade-in ${rollbar ? 'bg-black' : 'bg-black/95'}`}
     >
       <header className="flex items-center gap-2 px-3 py-2 sm:px-4">
         <div className="min-w-0 flex-1">
@@ -199,7 +208,11 @@ export function Lichtbox({
 
       <div className="relative flex min-h-0 flex-1">
         <div
-          className="relative flex min-w-0 flex-1 touch-none select-none items-center justify-center overflow-hidden"
+          className={
+            rollbar
+              ? 'relative flex min-w-0 flex-1 overflow-hidden'
+              : 'relative flex min-w-0 flex-1 touch-none select-none items-center justify-center overflow-hidden'
+          }
           onPointerDown={zeigerRunter}
           onPointerMove={zeigerBewegt}
           onPointerUp={zeigerHoch}
@@ -207,12 +220,16 @@ export function Lichtbox({
           onDoubleClick={() => zoombar && zoomSetzen(zoom.stufe > 1 ? 1 : ZOOM_DOPPEL)}
           onWheel={rad}
         >
-          <div
-            className="flex h-full w-full items-center justify-center p-2 transition-transform duration-100 sm:p-6"
-            style={{ transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.stufe})` }}
-          >
-            {children}
-          </div>
+          {rollbar ? (
+            <div className="h-full w-full">{children}</div>
+          ) : (
+            <div
+              className="flex h-full w-full items-center justify-center p-2 transition-transform duration-100 sm:p-6"
+              style={{ transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.stufe})` }}
+            >
+              {children}
+            </div>
+          )}
           {onZurueck && (
             <Button
               type="button"

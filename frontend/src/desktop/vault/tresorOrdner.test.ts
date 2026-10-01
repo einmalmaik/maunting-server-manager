@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { darfVerschieben, fassungenVon, pfadVon, zielOrdner } from './tresorOrdner'
+import { dateienUnter, darfAlleVerschieben, darfVerschieben, fassungenVon, obersteAuswahl, pfadVon, zielOrdner } from './tresorOrdner'
 import type { VaultItem } from './vaultStore'
 
 const ordner = (id: string, service: string, eltern?: string) => ({ id, service, category: 'ordner', ordner: eltern }) as VaultItem
@@ -31,9 +31,36 @@ describe('tresorOrdner', () => {
   })
 
   it('bietet im Dialog nur erlaubte Ziele mit vollem Pfad an', () => {
-    expect(zielOrdner(miete, alle)).toEqual([
+    expect(zielOrdner([miete], alle)).toEqual([
       { value: 'f', label: 'Fotos' },
       { value: 'v', label: 'Verträge' },
+    ])
+    // Mehrere gewählte Ordner: keiner ihrer Teilbäume ist ein Ziel.
+    expect(zielOrdner([miete, fotos], alle)).toEqual([{ value: 'v', label: 'Verträge' }])
+  })
+
+  it('verschiebt mehrere nur, wenn keiner ein Ordner auf dem Weg ist und einer den Ort wechselt', () => {
+    expect(darfAlleVerschieben([datei('d', 'f'), miete], 'f', alle)).toBe(true)
+    expect(darfAlleVerschieben([datei('d', 'f')], 'f', alle)).toBe(false)
+    expect(darfAlleVerschieben([datei('d'), vertraege], 'a', alle)).toBe(false)
+  })
+
+  it('lässt von der Auswahl weg, was in einem gewählten Ordner liegt', () => {
+    const kind = datei('k', 'a')
+    const draussen = datei('d', 'f')
+    const items = [...alle, kind, draussen]
+    expect(obersteAuswahl(['m', 'k', 'd'], items).map((i) => i.id)).toEqual(['m', 'd'])
+    expect(obersteAuswahl(['k'], items).map((i) => i.id)).toEqual(['k'])
+  })
+
+  it('sammelt Dateien rekursiv mit Pfad und macht gleiche Namen eindeutig', () => {
+    const mitDatei = (id: string, name: string, eltern?: string) => ({ ...datei(id, eltern), service: name, datei: {} }) as VaultItem
+    const items = [...alle, mitDatei('x', 'vertrag.pdf', 'm'), mitDatei('y', 'Vertrag.pdf', 'm'), mitDatei('z', 'plan.txt', 'a'), mitDatei('o', 'ohne/strich.txt')]
+    expect(dateienUnter([miete, items[7]], items).map((d) => d.pfad)).toEqual([
+      'Miete/2024/plan.txt',
+      'Miete/vertrag.pdf',
+      'Miete/Vertrag (2).pdf',
+      'ohne_strich.txt',
     ])
   })
 

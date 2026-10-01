@@ -1,8 +1,9 @@
 /**
  * Der Dateibereich wie im Explorer: Ziehen auf Ordner, Pfadleiste und Baum,
- * Dateien vom Rechner in einen Ordner, Rechtsklick, Ansicht und Editor.
+ * Dateien vom Rechner in einen Ordner, Rechtsklick, Ansicht und Editor,
+ * Mehrfachauswahl mit Sammelaktionen.
  */
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { createEvent, fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import { TresorDateiBereich, ZIEH_TYP } from './TresorDateiBereich'
@@ -25,10 +26,18 @@ vi.mock('./tresorBlobApi', async (original) => ({
   speicherAbfragen: vi.fn().mockResolvedValue({ belegt: 0, quote: 10 * 1024 ** 3 }),
 }))
 
+const offlineAnheften = vi.hoisted(() => vi.fn(async () => undefined))
 vi.mock('./tresorDateien', async (original) => ({
   ...(await original<typeof import('./tresorDateien')>()),
   angeheftet: vi.fn().mockResolvedValue(new Set()),
+  offlineAnheften,
   blobLesen: vi.fn(async () => new Blob(['Zeile eins'], { type: 'text/plain' })),
+}))
+
+const mehrereAufGeraetSpeichern = vi.hoisted(() => vi.fn(async () => true))
+vi.mock('./tresorAnzeige', async (original) => ({
+  ...(await original<typeof import('./tresorAnzeige')>()),
+  mehrereAufGeraetSpeichern,
 }))
 
 // CodeMirror braucht ein Layout, das jsdom nicht hat.
@@ -53,6 +62,7 @@ const miete = ordner('m', 'Miete', 'v')
 const pdf = datei('p', 'vertrag.pdf', 'application/pdf')
 const notiz = datei('n', 'notiz.txt', 'text/plain')
 const beleg = datei('b', 'beleg.pdf', 'application/pdf', 'v')
+const brief = datei('w', 'brief.docx', '')
 
 /** Ein DataTransfer, der zwischen dragStart und drop dasselbe behält. */
 function transfer(dateien: File[] = []) {
@@ -72,19 +82,34 @@ function transfer(dateien: File[] = []) {
 const eintrag = (name: string) =>
   within(screen.getByRole('list', { name: i18n.t('mss.vault.dateien.inhalt') })).getByRole('button', { name: new RegExp(`^${name}`) })
 const zeile = (name: string) => eintrag(name).closest('li')!
+const auswahlLeiste = () => screen.getAllByRole('toolbar', { name: /ausgewählt/ })[0]
+
+/** Langes Drücken mit dem Finger; jsdom kennt kein PointerEvent mit `pointerType`. */
+async function langDruecken(el: HTMLElement) {
+  const druck = createEvent.pointerDown(el, { clientX: 10, clientY: 10, button: 0 })
+  Object.defineProperty(druck, 'pointerType', { value: 'touch' })
+  fireEvent(el, druck)
+  await new Promise((r) => setTimeout(r, 600))
+  fireEvent.pointerUp(el)
+}
 
 describe('TresorDateiBereich', () => {
   const saveItem = vi.fn(async (..._args: unknown[]) => undefined)
   const dateiHinzufuegen = vi.fn(async (..._args: unknown[]) => 'neu')
+  const trashItem = vi.fn(async (..._args: unknown[]) => undefined)
 
   beforeEach(async () => {
     await i18n.changeLanguage('de')
     saveItem.mockClear()
     dateiHinzufuegen.mockClear()
+    trashItem.mockClear()
+    offlineAnheften.mockClear()
+    mehrereAufGeraetSpeichern.mockClear()
     useVaultStore.setState({
-      items: [vertraege, fotos, miete, pdf, notiz, beleg],
+      items: [vertraege, fotos, miete, pdf, notiz, beleg, brief],
       userKey: {} as CryptoKey,
       saveItem: saveItem as never,
+      trashItem: trashItem as never,
       dateiHinzufuegen: dateiHinzufuegen as never,
     })
   })
@@ -93,7 +118,7 @@ describe('TresorDateiBereich', () => {
     render(<TresorDateiBereich />)
     const dt = transfer()
     fireEvent.dragStart(zeile('vertrag.pdf'), { dataTransfer: dt })
-    expect(dt.getData(ZIEH_TYP)).toBe('p')
+    expect(JSON.parse(dt.getData(ZIEH_TYP))).toEqual(['p'])
     const ziel = zeile('Verträge')
     expect(fireEvent.dragOver(ziel, { dataTransfer: dt })).toBe(false)
     fireEvent.drop(ziel, { dataTransfer: dt })
@@ -138,13 +163,127 @@ describe('TresorDateiBereich', () => {
     expect(within(menue).getByRole('menuitem', { name: i18n.t('mss.vault.dateien.speichern') })).toBeInTheDocument()
   })
 
-  it('zeigt eine Datei ohne Vorschau mit Speichern in der Kopfleiste', () => {
+  it('zeigt eine Datei ohne Vorschau mit Art und Speichern in der Kopfleiste', () => {
     render(<TresorDateiBereich />)
-    fireEvent.click(eintrag('vertrag.pdf'))
-    const ansicht = screen.getByRole('dialog', { name: 'vertrag.pdf' })
+    fireEvent.click(eintrag('brief.docx'))
+    const ansicht = screen.getByRole('dialog', { name: 'brief.docx' })
     const kopfleiste = ansicht.querySelector('header')!
     expect(within(kopfleiste).getByRole('button', { name: i18n.t('mss.vault.dateien.speichern') })).toBeInTheDocument()
     expect(within(ansicht).getByText(i18n.t('mss.vault.dateien.keineVorschau'))).toBeInTheDocument()
+    expect(within(ansicht).getByText(new RegExp(i18n.t('mss.vault.dateien.art.dokument')))).toBeInTheDocument()
+  })
+
+  describe('Mehrfachauswahl', () => {
+    it('wählt mit Strg-Klick, ohne zu öffnen, und ein Klick schaltet danach nur um', () => {
+      render(<TresorDateiBereich />)
+      fireEvent.click(eintrag('vertrag.pdf'), { ctrlKey: true })
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(auswahlLeiste()).toHaveAccessibleName(i18n.t('mss.vault.dateien.ausgewaehlt', { count: 1 }))
+      fireEvent.click(eintrag('notiz.txt'))
+      expect(screen.queryByTestId('tresor-texteditor')).not.toBeInTheDocument()
+      expect(auswahlLeiste()).toHaveAccessibleName(i18n.t('mss.vault.dateien.ausgewaehlt', { count: 2 }))
+      fireEvent.click(eintrag('notiz.txt'))
+      expect(auswahlLeiste()).toHaveAccessibleName(i18n.t('mss.vault.dateien.ausgewaehlt', { count: 1 }))
+    })
+
+    it('wählt mit Umschalt einen Bereich und mit Strg+A alles; Escape hebt auf', () => {
+      render(<TresorDateiBereich />)
+      fireEvent.click(eintrag('Fotos'), { ctrlKey: true })
+      fireEvent.click(eintrag('notiz.txt'), { shiftKey: true })
+      // Reihenfolge: Ordner (Fotos, Verträge), dann Dateien (brief, notiz, vertrag).
+      expect(auswahlLeiste()).toHaveAccessibleName(i18n.t('mss.vault.dateien.ausgewaehlt', { count: 4 }))
+      fireEvent.keyDown(eintrag('notiz.txt'), { key: 'a', ctrlKey: true })
+      expect(auswahlLeiste()).toHaveAccessibleName(i18n.t('mss.vault.dateien.ausgewaehlt', { count: 5 }))
+      fireEvent.keyDown(eintrag('notiz.txt'), { key: 'Escape' })
+      expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
+    })
+
+    it('legt mit Entf alle gewählten in den Papierkorb', async () => {
+      render(<TresorDateiBereich />)
+      fireEvent.click(eintrag('vertrag.pdf'), { ctrlKey: true })
+      fireEvent.click(eintrag('Fotos'), { ctrlKey: true })
+      fireEvent.keyDown(eintrag('Fotos'), { key: 'Delete' })
+      await vi.waitFor(() => expect(trashItem.mock.calls.map((c) => c[0]).sort()).toEqual(['f', 'p']))
+    })
+
+    it('zieht alle gewählten zusammen auf einen Ordner', async () => {
+      render(<TresorDateiBereich />)
+      fireEvent.click(eintrag('vertrag.pdf'), { ctrlKey: true })
+      fireEvent.click(eintrag('notiz.txt'), { ctrlKey: true })
+      const dt = transfer()
+      fireEvent.dragStart(zeile('notiz.txt'), { dataTransfer: dt })
+      expect(JSON.parse(dt.getData(ZIEH_TYP)).sort()).toEqual(['n', 'p'])
+      fireEvent.dragOver(zeile('Fotos'), { dataTransfer: dt })
+      fireEvent.drop(zeile('Fotos'), { dataTransfer: dt })
+      await vi.waitFor(() => expect(saveItem).toHaveBeenCalledTimes(2))
+      expect(saveItem.mock.calls.map((c) => [(c[0] as VaultItem).id, (c[0] as VaultItem).ordner]).sort()).toEqual([
+        ['n', 'f'],
+        ['p', 'f'],
+      ])
+    })
+
+    it('lässt einen gewählten Ordner nicht in einen anderen gewählten fallen', () => {
+      render(<TresorDateiBereich />)
+      fireEvent.click(eintrag('Fotos'), { ctrlKey: true })
+      fireEvent.click(eintrag('Verträge'), { ctrlKey: true })
+      const dt = transfer()
+      fireEvent.dragStart(zeile('Fotos'), { dataTransfer: dt })
+      expect(fireEvent.dragOver(zeile('Verträge'), { dataTransfer: dt })).toBe(true)
+    })
+
+    it('startet die Auswahl am Finger mit langem Drücken und öffnet dabei nichts', async () => {
+      render(<TresorDateiBereich />)
+      await langDruecken(zeile('notiz.txt'))
+      fireEvent.click(eintrag('notiz.txt'))
+      expect(screen.queryByTestId('tresor-texteditor')).not.toBeInTheDocument()
+      expect(auswahlLeiste()).toHaveAccessibleName(i18n.t('mss.vault.dateien.ausgewaehlt', { count: 1 }))
+    })
+
+    it('startet am Finger kein Ziehen, das hängen bliebe (Android beim langen Drücken)', () => {
+      render(<TresorDateiBereich />)
+      const li = zeile('notiz.txt')
+      const druck = createEvent.pointerDown(li, { clientX: 10, clientY: 10, button: 0 })
+      Object.defineProperty(druck, 'pointerType', { value: 'touch' })
+      fireEvent(li, druck)
+      const dt = transfer()
+      expect(fireEvent.dragStart(li, { dataTransfer: dt })).toBe(false)
+      expect(dt.types).toEqual([])
+      expect(li).not.toHaveClass('opacity-50')
+      // Mit der Maus bleibt Ziehen wie gewohnt.
+      const maus = createEvent.pointerDown(li, { clientX: 10, clientY: 10, button: 0 })
+      Object.defineProperty(maus, 'pointerType', { value: 'mouse' })
+      fireEvent(li, maus)
+      expect(fireEvent.dragStart(li, { dataTransfer: transfer() })).toBe(true)
+    })
+
+    it('hebt die Auswahl beim Ordnerwechsel auf', async () => {
+      render(<TresorDateiBereich />)
+      fireEvent.click(eintrag('vertrag.pdf'), { ctrlKey: true })
+      const pfad = screen.getByRole('navigation', { name: i18n.t('mss.vault.dateien.pfad') })
+      fireEvent.contextMenu(zeile('Verträge'))
+      fireEvent.click(screen.getByRole('menuitem', { name: i18n.t('mss.vault.dateien.oeffnen') }))
+      await vi.waitFor(() => expect(within(pfad).getByRole('button', { name: 'Verträge' })).toBeInTheDocument())
+      expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
+    })
+
+    it('speichert Ordner und Dateien als ein Zip mit Pfaden', async () => {
+      render(<TresorDateiBereich />)
+      fireEvent.click(eintrag('Verträge'), { ctrlKey: true })
+      fireEvent.click(eintrag('notiz.txt'), { ctrlKey: true })
+      fireEvent.click(within(auswahlLeiste()).getByRole('button', { name: i18n.t('mss.vault.dateien.speichern') }))
+      await vi.waitFor(() => expect(mehrereAufGeraetSpeichern).toHaveBeenCalledTimes(1))
+      const [dateien, , name] = mehrereAufGeraetSpeichern.mock.calls[0] as unknown as [{ pfad: string }[], unknown, string]
+      expect(dateien.map((d) => d.pfad).sort()).toEqual(['Verträge/beleg.pdf', 'notiz.txt'])
+      expect(name).toBe(`${i18n.t('mss.vault.dateien.zipStamm')}.zip`)
+    })
+
+    it('macht einen gewählten Ordner samt Inhalt offline verfügbar', async () => {
+      render(<TresorDateiBereich />)
+      fireEvent.click(eintrag('Verträge'), { ctrlKey: true })
+      fireEvent.click(within(auswahlLeiste()).getByRole('button', { name: i18n.t('mss.vault.dateien.offlineMachen') }))
+      await vi.waitFor(() => expect(offlineAnheften).toHaveBeenCalledTimes(1))
+      expect((offlineAnheften.mock.calls[0] as unknown as [{ id: string }])[0].id).toBe('o-b')
+    })
   })
 
   it('öffnet eine Textdatei gleich im Editor, mit ihrem Ort', async () => {

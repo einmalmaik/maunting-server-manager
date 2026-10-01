@@ -6,12 +6,17 @@
  * neue Blobs, die alte Fassung bleibt unter `frueher` und lässt sich in der
  * Seitenleiste „Versionen“ zurückholen. Der Editor wird erst geladen, wenn
  * jemand ihn öffnet (CodeMirror gehört nicht ins Startbündel).
+ *
+ * Markdown und CSV gehen gelesen auf (Dokument bzw. Tabelle); ein Knopf in der
+ * Kopfleiste schaltet zum Text. Der Editor bleibt dabei geladen, damit
+ * Rückgängig nicht verloren geht, und die Ansicht zeigt auch Ungespeichertes.
  */
 
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Download, FileText, History, LoaderCircle, X } from 'lucide-react'
-import { Button, Dialog, DialogContent, Versionsliste } from '@/Singra/UI'
+import { BookOpen, Download, FileText, History, LoaderCircle, Pencil, Table2, X } from 'lucide-react'
+import { Button, Dialog, DialogContent, Tabellenansicht, Versionsliste } from '@/Singra/UI'
+import { parseCsv } from '@/lib/csv'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { detectLineEnding, serializeLineEndings } from '@/components/server/fileHelpers'
@@ -22,16 +27,19 @@ import { aufGeraetSpeichern } from './tresorAnzeige'
 import { fassungenVon } from './tresorOrdner'
 
 const FileEditorWorkspace = lazy(() => import('@/components/server/FileEditorWorkspace').then((m) => ({ default: m.FileEditorWorkspace })))
+const Markdownansicht = lazy(() => import('@/Singra/UI/Markdownansicht').then((m) => ({ default: m.Markdownansicht })))
 
 interface Props {
   item: VaultItem
   text: string
   /** Ort der Datei für die Kopfzeile des Editors, etwa „Stammverzeichnis / Verträge“. */
   ort?: string
+  /** Markdown und Tabellen haben eine gelesene Ansicht neben dem Text. */
+  ansicht?: 'markdown' | 'tabelle'
   onFertig: (gespeichert: string | null) => void
 }
 
-export function TresorTexteditor({ item: anfang, text, ort, onFertig }: Props) {
+export function TresorTexteditor({ item: anfang, text, ort, ansicht, onFertig }: Props) {
   const { t } = useTranslation()
   const dateiErsetzen = useVaultStore((s) => s.dateiErsetzen)
   const fassungZurueckholen = useVaultStore((s) => s.fassungZurueckholen)
@@ -39,6 +47,7 @@ export function TresorTexteditor({ item: anfang, text, ort, onFertig }: Props) {
   // Nach dem Speichern hat die Datei ein neues Original und neue frühere Fassungen.
   const item = useVaultStore((s) => s.items.find((i) => i.id === anfang.id)) ?? anfang
   const [versionenOffen, setVersionenOffen] = useState(false)
+  const [lesen, setLesen] = useState(!!ansicht)
   const [holt, setHolt] = useState<string | null>(null)
   const [tab, setTab] = useState<EditorTab>(() => ({
     path: anfang.service,
@@ -55,6 +64,8 @@ export function TresorTexteditor({ item: anfang, text, ort, onFertig }: Props) {
     group: null,
   }))
   const ungespeichert = tab.content !== tab.savedContent
+  const tsv = item.service.toLowerCase().endsWith('.tsv')
+  const zeilen = useMemo(() => (lesen && ansicht === 'tabelle' ? parseCsv(tab.content, tsv ? '\t' : undefined) : []), [lesen, ansicht, tab.content, tsv])
 
   const speichern = async () => {
     if (tab.saveState === 'clean' || tab.saveState === 'saving') return
@@ -104,10 +115,27 @@ export function TresorTexteditor({ item: anfang, text, ort, onFertig }: Props) {
 
   return (
     <Dialog open onOpenChange={() => undefined}>
-      <DialogContent className="h-[100dvh] max-w-none rounded-none border-0" overlayClassName="p-0" showCloseButton={false} data-testid="tresor-texteditor">
+      <DialogContent
+        // Vollbild bis an den Rand: Status- und Gestenleiste hält der Editor selbst frei.
+        className="h-[100dvh] max-w-none rounded-none border-0 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]"
+        overlayClassName="p-0" showCloseButton={false} data-testid="tresor-texteditor">
         <header className="flex min-h-12 items-center gap-2 border-b border-outline-variant bg-surface-container-low px-3 py-1.5">
           <FileText className="h-4 w-4 shrink-0 text-secondary" aria-hidden />
           <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-on-surface">{item.service}</h2>
+          {ansicht && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label={lesen ? t('mss.vault.dateien.textBearbeiten') : t(ansicht === 'markdown' ? 'mss.vault.dateien.dokumentLesen' : 'mss.vault.dateien.alsTabelle')}
+              onClick={() => setLesen((l) => !l)}
+            >
+              {lesen ? <Pencil className="h-4 w-4" /> : ansicht === 'markdown' ? <BookOpen className="h-4 w-4" /> : <Table2 className="h-4 w-4" />}
+              <span className="hidden sm:inline">
+                {lesen ? t('mss.vault.dateien.textBearbeiten') : t(ansicht === 'markdown' ? 'mss.vault.dateien.dokumentLesen' : 'mss.vault.dateien.alsTabelle')}
+              </span>
+            </Button>
+          )}
           <Button
             type="button"
             variant="ghost"
@@ -137,12 +165,22 @@ export function TresorTexteditor({ item: anfang, text, ort, onFertig }: Props) {
               </div>
             }
           >
-            <div className="flex min-h-0 min-w-0 flex-1">
+            {lesen && (
+              <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-surface" data-testid="tresor-leseansicht">
+                {ansicht === 'markdown' ? (
+                  <Markdownansicht text={tab.content} />
+                ) : (
+                  <Tabellenansicht zeilen={zeilen} label={item.service} />
+                )}
+              </div>
+            )}
+            <div className={lesen ? 'hidden' : 'flex min-h-0 min-w-0 flex-1'}>
               <FileEditorWorkspace
                 tabs={[tab]}
                 activePath={tab.path}
                 canWrite
-                vollbild
+                // Beim Lesen gehört Strg+F dem Browser: gesucht wird im gezeigten Dokument.
+                vollbild={!lesen}
                 ortLabel={ort ? `${ort} / ${item.service}` : item.service}
                 tabListLabel={t('mss.vault.bearbeiten.titel', { name: item.service })}
                 horizontalScrollHint={t('files.horizontalScrollHint')}

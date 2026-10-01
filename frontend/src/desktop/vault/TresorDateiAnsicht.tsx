@@ -3,46 +3,101 @@
  * Galerie. Die Aktionen stehen oben in der Kopfleiste, Details und frühere
  * Fassungen in der Infoleiste. Textdateien öffnen gleich im Editor.
  *
+ * Was gezeigt wird, sagt `vorschauArt`: Bilder (auch SVG, als <img>, ohne
+ * Skripte), Video, Audio, PDF, Archive (Inhaltsliste), Schriften (Probetext).
+ * Eine unbekannte Datei bis 1 MB, die sich als Text lesen lässt, geht im
+ * Editor auf. Der Rest bekommt eine Karte zum Speichern.
+ *
  * Entschlüsselt wird auf dem Gerät; die Objekt-URL verfällt beim Wechsel, beim
  * Schließen und beim Sperren.
  */
 
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Crop, Download, File as DateiIcon, FileAudio, FileImage, FileText, FileVideo, Trash2 } from 'lucide-react'
+import {
+  Crop,
+  Download,
+  File as DateiIcon,
+  FileArchive,
+  FileAudio,
+  FileCode,
+  FileImage,
+  FileSpreadsheet,
+  FileText,
+  FileType,
+  FileVideo,
+  Presentation,
+  Trash2,
+} from 'lucide-react'
 import { Button, Lichtbox, ProgressBar, Versionsliste } from '@/Singra/UI'
+import { archivInhalt, type ArchivEintrag } from '@/lib/zipLesen'
 import { toast } from '@/stores/toastStore'
 import { formatBytes } from '@/components/server/fileHelpers'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { ansichtOeffnen, ansichtSchliessen, blobLesen } from './tresorDateien'
-import { anzeigeArt, aufGeraetSpeichern } from './tresorAnzeige'
+import { artBezeichnung, aufGeraetSpeichern, istText, vorschauArt, type VorschauArt } from './tresorAnzeige'
 import { fassungenVon } from './tresorOrdner'
 import { BEARBEITBAR, TresorBildeditor } from './TresorBildeditor'
 import { TresorTexteditor } from './TresorTexteditor'
+import { Archivliste } from './vorschau/Archivliste'
+import { Schriftprobe } from './vorschau/Schriftprobe'
+
+const PdfAnsicht = lazy(() => import('@/Singra/UI/PdfAnsicht').then((m) => ({ default: m.PdfAnsicht })))
 
 /** Bis zu dieser Größe öffnet eine Textdatei im Editor, größere werden gespeichert. */
 export const TEXT_HOECHSTENS = 1024 * 1024
+/** PDFs, Archive und Schriften liegen zum Zeigen ganz im Speicher; darüber nur die Karte. */
+export const GANZ_HOECHSTENS = 256 * 1024 * 1024
 
-export function dateiIcon(typ: string) {
-  if (typ.startsWith('image/')) return FileImage
-  if (typ.startsWith('video/')) return FileVideo
-  if (typ.startsWith('audio/')) return FileAudio
-  if (typ.startsWith('text/') || typ === 'application/pdf') return FileText
-  return DateiIcon
+const TEXTARTIG: (VorschauArt | null)[] = ['text', 'markdown', 'tabelle']
+
+export function dateiIcon(typ: string, name = '') {
+  switch (vorschauArt(typ, name)) {
+    case 'bild':
+      return FileImage
+    case 'video':
+      return FileVideo
+    case 'audio':
+      return FileAudio
+    case 'text':
+      return FileCode
+    case 'markdown':
+    case 'pdf':
+      return FileText
+    case 'tabelle':
+      return FileSpreadsheet
+    case 'archiv':
+      return FileArchive
+    case 'schrift':
+      return FileType
+    case 'office': {
+      const art = artBezeichnung(typ, name)
+      return art === 'tabellenblatt' ? FileSpreadsheet : art === 'praesentation' ? Presentation : FileText
+    }
+    default:
+      return DateiIcon
+  }
 }
 
 /** Ob eine Datei direkt im Editor statt in der Lichtbox aufgeht. */
 export function oeffnetImEditor(item: VaultItem): boolean {
-  return !!item.datei && anzeigeArt(item.datei.typ) === 'text' && item.datei.original.echt <= TEXT_HOECHSTENS
+  return !!item.datei && TEXTARTIG.includes(vorschauArt(item.datei.typ, item.service)) && item.datei.original.echt <= TEXT_HOECHSTENS
 }
 
 interface Anzeige {
   id: string
   url: string | null
   text: string | null
+  /** Bytes für PDF und Schriften. */
+  bytes: Uint8Array | null
+  archiv: ArchivEintrag[] | null
   anteil: number | null
   fehler: boolean
+  /** Geladen, aber hier nicht darstellbar (Bildformat, Codec, kaputtes Archiv). */
+  nichtDarstellbar: boolean
 }
+
+const LEER = { url: null, text: null, bytes: null, archiv: null, anteil: 0, fehler: false, nichtDarstellbar: false }
 
 interface Props {
   item: VaultItem
@@ -64,23 +119,28 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
   // Live aus dem Store: nach Bearbeiten oder Zurückholen hat die Datei ein neues Original.
   const item = useVaultStore((s) => s.items.find((i) => i.id === anfang.id)) ?? anfang
   const datei = item.datei
-  const art = datei ? anzeigeArt(datei.typ) : null
-  const [anzeige, setAnzeige] = useState<Anzeige>({ id: item.id, url: null, text: null, anteil: 0, fehler: false })
+  const art = datei ? vorschauArt(datei.typ, item.service) : null
+  const groesse = datei?.original.echt ?? 0
+  // Unbekannt und klein: vielleicht Text. Das zeigt erst der Inhalt.
+  const textartig = TEXTARTIG.includes(art) || (art === null && groesse <= TEXT_HOECHSTENS)
+  const [anzeige, setAnzeige] = useState<Anzeige>({ id: item.id, ...LEER })
   const [bildBearbeiten, setBildBearbeiten] = useState(false)
   const [holt, setHolt] = useState<string | null>(null)
 
   // Ein neues Original (nach Bearbeiten oder Zurückholen) lädt neu. Im
   // Texteditor nicht: er hält den Text selbst, ein Neuladen würfe ihn samt
   // Rückgängig-Verlauf weg.
-  const ladeSchluessel = art === 'text' ? item.id : `${item.id}:${datei?.original.id}`
+  const ladeSchluessel = textartig ? item.id : `${item.id}:${datei?.original.id}`
   useEffect(() => {
     if (!datei || !userKey) return
     const abbruch = new AbortController()
     const id = item.id
-    setAnzeige({ id, url: null, text: null, anteil: 0, fehler: false })
-    const mitInhalt = art !== null && (art !== 'text' || datei.original.echt <= TEXT_HOECHSTENS)
+    setAnzeige({ id, ...LEER })
+    const ganz = art === 'pdf' || art === 'archiv' || art === 'schrift'
+    const mitInhalt =
+      art === 'bild' || art === 'video' || art === 'audio' || (textartig && groesse <= TEXT_HOECHSTENS) || (ganz && groesse <= GANZ_HOECHSTENS)
     if (!mitInhalt) {
-      setAnzeige({ id, url: null, text: null, anteil: null, fehler: false })
+      setAnzeige({ id, ...LEER, anteil: null })
       return () => abbruch.abort()
     }
     let url: string | null = null
@@ -93,9 +153,24 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
         })
         // Während des Ladens gesperrt oder weitergeblättert: nichts mehr anzeigen.
         if (abbruch.signal.aborted || useVaultStore.getState().userKey !== userKey) return
-        const text = art === 'text' ? await blob.text() : null
-        url = text === null ? ansichtOeffnen(blob) : null
-        setAnzeige({ id, url, text, anteil: null, fehler: false })
+        const fertig = { id, ...LEER, anteil: null }
+        if (textartig) {
+          const bytes = new Uint8Array(await blob.arrayBuffer())
+          // Eine unbekannte Datei, die kein Text ist, bekommt die Karte.
+          setAnzeige(art !== null || istText(bytes) ? { ...fertig, text: new TextDecoder().decode(bytes) } : fertig)
+        } else if (ganz) {
+          const bytes = new Uint8Array(await blob.arrayBuffer())
+          if (art === 'archiv') {
+            const archiv = await archivInhalt(bytes).catch(() => null)
+            if (abbruch.signal.aborted) return
+            setAnzeige(archiv ? { ...fertig, archiv } : { ...fertig, nichtDarstellbar: true })
+          } else {
+            setAnzeige({ ...fertig, bytes })
+          }
+        } else {
+          url = ansichtOeffnen(blob)
+          setAnzeige({ ...fertig, url })
+        }
       } catch {
         if (!abbruch.signal.aborted) setAnzeige((a) => (a.id === id ? { ...a, anteil: null, fehler: true } : a))
       }
@@ -132,7 +207,15 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
 
   // Textdateien haben keine eigene Ansicht: sobald der Text da ist, geht der Editor auf.
   if (anzeige.id === item.id && anzeige.text !== null) {
-    return <TresorTexteditor item={item} text={anzeige.text} ort={ort} onFertig={onSchliessen} />
+    return (
+      <TresorTexteditor
+        item={item}
+        text={anzeige.text}
+        ort={ort}
+        ansicht={art === 'markdown' || art === 'tabelle' ? art : undefined}
+        onFertig={onSchliessen}
+      />
+    )
   }
   if (bildBearbeiten && anzeige.url) {
     return <TresorBildeditor item={item} vorschauUrl={anzeige.url} onFertig={() => setBildBearbeiten(false)} />
@@ -140,16 +223,28 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
 
   const datum = (ms: number) => new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' }).format(ms)
   const index = folge.findIndex((f) => f.id === item.id)
-  const Icon = dateiIcon(datei.typ)
+  const Icon = dateiIcon(datei.typ, item.service)
   const geladen = anzeige.id === item.id
+  const nichtDarstellbar = () => setAnzeige((a) => (a.id === item.id ? { ...a, nichtDarstellbar: true } : a))
+  const rollbar = geladen && !anzeige.nichtDarstellbar && (anzeige.bytes !== null || anzeige.archiv !== null)
 
   let inhalt: React.ReactNode
   if (geladen && anzeige.fehler) {
     inhalt = <p className="text-sm text-white/70">{t('mss.vault.dateien.oeffnenFehler')}</p>
-  } else if (geladen && anzeige.url && art === 'bild') {
-    inhalt = <img src={anzeige.url} alt={item.service} draggable={false} className="max-h-full max-w-full object-contain" />
-  } else if (geladen && anzeige.url && art === 'video') {
-    inhalt = <video src={anzeige.url} controls className="max-h-full max-w-full" />
+  } else if (geladen && anzeige.url && art === 'bild' && !anzeige.nichtDarstellbar) {
+    inhalt = <img src={anzeige.url} alt={item.service} draggable={false} onError={nichtDarstellbar} className="max-h-full max-w-full object-contain" />
+  } else if (geladen && anzeige.url && art === 'video' && !anzeige.nichtDarstellbar) {
+    inhalt = <video src={anzeige.url} controls onError={nichtDarstellbar} className="max-h-full max-w-full" />
+  } else if (rollbar && anzeige.archiv) {
+    inhalt = <Archivliste eintraege={anzeige.archiv} label={t('mss.vault.dateien.archiv.inhalt', { name: item.service })} />
+  } else if (rollbar && anzeige.bytes && art === 'pdf') {
+    inhalt = (
+      <Suspense fallback={null}>
+        <PdfAnsicht daten={anzeige.bytes} label={item.service} aufDunkel />
+      </Suspense>
+    )
+  } else if (rollbar && anzeige.bytes && art === 'schrift') {
+    inhalt = <Schriftprobe daten={anzeige.bytes} />
   } else if (geladen && anzeige.anteil !== null) {
     inhalt = (
       <div className="w-64 rounded-lg bg-black/60 p-3">
@@ -163,13 +258,17 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
         <Icon className="h-14 w-14 text-white/60" aria-hidden />
         <div className="min-w-0 max-w-full">
           <p className="break-words font-semibold text-white">{item.service}</p>
-          <p className="mt-0.5 text-label-sm text-white/55">{formatBytes(datei.original.echt)}</p>
+          <p className="mt-0.5 text-label-sm text-white/55">
+            {t(`mss.vault.dateien.art.${artBezeichnung(datei.typ, item.service)}`)} · {formatBytes(datei.original.echt)}
+          </p>
         </div>
-        {art === 'audio' && anzeige.url ? (
-          <audio src={anzeige.url} controls className="w-full" />
+        {art === 'audio' && anzeige.url && !anzeige.nichtDarstellbar ? (
+          <audio src={anzeige.url} controls onError={nichtDarstellbar} className="w-full" />
         ) : (
           <>
-            <p className="text-sm text-white/70">{t('mss.vault.dateien.keineVorschau')}</p>
+            <p className="text-sm text-white/70">
+              {t(anzeige.nichtDarstellbar ? 'mss.vault.dateien.formatNichtDarstellbar' : 'mss.vault.dateien.keineVorschau')}
+            </p>
             <Button type="button" onClick={() => void aufGeraet()}>
               <Download className="mr-1.5 h-4 w-4" />
               {t('mss.vault.dateien.speichern')}
@@ -214,6 +313,7 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
       onVor={index >= 0 && index < folge.length - 1 ? () => onWechseln(folge[index + 1]) : undefined}
       onZurueck={index > 0 ? () => onWechseln(folge[index - 1]) : undefined}
       zoombar={art === 'bild'}
+      rollbar={rollbar}
       info={info}
       aktionen={
         <>

@@ -105,4 +105,16 @@ describe('Lichtbox', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Informationen' }))
     expect(screen.getByText('Details zu eins')).toBeInTheDocument()
   })
+
+  it('lässt rollbaren Inhalt die Fläche füllen, ohne Zoom und ohne Gestensperre', () => {
+    render(
+      <Lichtbox kennung="pdf" titel="pdf" onSchliessen={() => {}} rollbar>
+        <div data-testid="inhalt">Seiten</div>
+      </Lichtbox>,
+    )
+    const huelle = screen.getByTestId('inhalt').parentElement!
+    expect(huelle.style.transform).toBe('')
+    expect(huelle.className).toContain('h-full')
+    expect(huelle.parentElement!.className).not.toContain('touch-none')
+  })
 })

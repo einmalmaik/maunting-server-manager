@@ -4012,6 +4012,24 @@
       "leer": "Noch keine ältere Fassung gespeichert.",
       "wiederherstellen": "Wiederherstellen",
       "hinweis": "Wiederherstellen legt die Fassung als neueste an. Die aktuelle bleibt dabei erhalten."
+    },
+    "markdown": {
+      "bild": "Bild (wird hier nicht geladen)",
+      "bildMitText": "Bild: {{text}} (wird hier nicht geladen)"
+    },
+    "tabelle": {
+      "leer": "Die Tabelle ist leer.",
+      "gekuerzt": "Gezeigt werden {{gezeigt}} von {{gesamt}} Zeilen. Alle Zeilen siehst du in der Textansicht."
+    },
+    "pdf": {
+      "seiten_one": "{{count}} Seite",
+      "seiten_other": "{{count}} Seiten",
+      "seite": "Seite {{nummer}}",
+      "kleiner": "Verkleinern",
+      "groesser": "Vergrößern",
+      "breite": "An Breite anpassen",
+      "laedt": "PDF wird geöffnet …",
+      "fehler": "Dieses PDF lässt sich hier nicht anzeigen. Speichere es, um es mit einem anderen Programm zu öffnen."
     }
   },
   "serverDetail": {
@@ -6222,7 +6240,75 @@
         "leerTitel": "Dieser Ordner ist leer",
         "ablegenHochladen": "Loslassen, um nach {{ordner}} hochzuladen",
         "verschoben": "{{name}} liegt jetzt in {{ordner}}.",
-        "fassungZurueck": "Die frühere Fassung ist wiederhergestellt. Die bisherige steht unter Versionen."
+        "fassungZurueck": "Die frühere Fassung ist wiederhergestellt. Die bisherige steht unter Versionen.",
+        "art": {
+          "bild": "Bild",
+          "video": "Video",
+          "audio": "Audio",
+          "text": "Textdatei",
+          "markdown": "Markdown-Dokument",
+          "tabelle": "Tabelle (CSV)",
+          "pdf": "PDF-Dokument",
+          "archiv": "Archiv",
+          "schrift": "Schriftart",
+          "office": "Office-Datei",
+          "dokument": "Textdokument",
+          "tabellenblatt": "Tabellenblatt",
+          "praesentation": "Präsentation",
+          "programm": "Programm oder Installationspaket",
+          "datei": "Datei"
+        },
+        "formatNichtDarstellbar": "Dieses Format kann die App nicht anzeigen. Speichere die Datei, um sie mit einem anderen Programm zu öffnen.",
+        "archiv": {
+          "inhalt": "Inhalt von {{name}}",
+          "zusammenfassung_one": "{{count}} Datei, entpackt {{groesse}}",
+          "zusammenfassung_other": "{{count}} Dateien, entpackt {{groesse}}",
+          "gekuerzt": "die ersten {{anzahl}} Einträge"
+        },
+        "schrift": {
+          "probe": "Falsches Üben von Xylophonmusik quält jeden größeren Zwerg.",
+          "fehler": "Diese Schriftdatei lässt sich nicht laden."
+        },
+        "textBearbeiten": "Text bearbeiten",
+        "dokumentLesen": "Lesen",
+        "alsTabelle": "Als Tabelle",
+        "auswaehlen": "Auswählen",
+        "auswaehlenName": "{{name}} auswählen",
+        "ausgewaehlt_one": "{{count}} ausgewählt",
+        "ausgewaehlt_other": "{{count}} ausgewählt",
+        "alleAuswaehlen": "Alle",
+        "auswahlBeenden": "Auswahl aufheben",
+        "eintraege_one": "{{count}} Eintrag",
+        "eintraege_other": "{{count}} Einträge",
+        "verschiebenTitelMehrere_one": "{{count}} Eintrag verschieben",
+        "verschiebenTitelMehrere_other": "{{count}} Einträge verschieben",
+        "verschobenMehrere_one": "{{count}} Eintrag liegt jetzt in {{ordner}}.",
+        "verschobenMehrere_other": "{{count}} Einträge liegen jetzt in {{ordner}}.",
+        "offlineSammelLaedt_one": "{{count}} Datei wird auf dieses Gerät geladen …",
+        "offlineSammelLaedt_other": "{{count}} Dateien werden auf dieses Gerät geladen …",
+        "offlineFertigMehrere_one": "{{count}} Datei ist jetzt offline verfügbar.",
+        "offlineFertigMehrere_other": "{{count}} Dateien sind jetzt offline verfügbar.",
+        "offlineTeilweise_one": "{{count}} von {{gesamt}} Dateien ließ sich nicht laden. Versuch es mit Netz noch einmal.",
+        "offlineTeilweise_other": "{{count}} von {{gesamt}} Dateien ließen sich nicht laden. Versuch es mit Netz noch einmal.",
+        "nurOnlineMehrere_one": "{{count}} Datei liegt nicht mehr auf diesem Gerät.",
+        "nurOnlineMehrere_other": "{{count}} Dateien liegen nicht mehr auf diesem Gerät.",
+        "alsZip": "Als ZIP speichern",
+        "zipStamm": "Tresor-Dateien",
+        "zipLaeuft_one": "{{count}} Datei wird als ZIP gespeichert …",
+        "zipLaeuft_other": "{{count}} Dateien werden als ZIP gespeichert …",
+        "zipZuGross": "Zusammen sind die Dateien größer als 4 GB, das passt in keine ZIP. Wähle weniger aus.",
+        "zipZuVieleDateien": "Mehr als 65.535 Dateien passen in keine ZIP. Wähle weniger aus.",
+        "keineDateien": "In der Auswahl liegen keine Dateien.",
+        "archiviertMehrere_one": "{{count}} Eintrag archiviert.",
+        "archiviertMehrere_other": "{{count}} Einträge archiviert.",
+        "papierkorbMehrere_one": "{{count}} Eintrag liegt im Papierkorb.",
+        "papierkorbMehrere_other": "{{count}} Einträge liegen im Papierkorb.",
+        "kurz": {
+          "offline": "Offline",
+          "nurOnline": "Nur online",
+          "speichern": "Speichern",
+          "papierkorb": "Papierkorb"
+        }
       },
       "fotos": {
         "alle": "Alle",

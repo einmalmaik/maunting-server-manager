@@ -4012,6 +4012,24 @@
       "leer": "No older version has been saved yet.",
       "wiederherstellen": "Restore",
       "hinweis": "Restoring saves that version as the newest one. The current version is kept."
+    },
+    "markdown": {
+      "bild": "Image (not loaded here)",
+      "bildMitText": "Image: {{text}} (not loaded here)"
+    },
+    "tabelle": {
+      "leer": "The table is empty.",
+      "gekuerzt": "Showing {{gezeigt}} of {{gesamt}} rows. The text view has all of them."
+    },
+    "pdf": {
+      "seiten_one": "{{count}} page",
+      "seiten_other": "{{count}} pages",
+      "seite": "Page {{nummer}}",
+      "kleiner": "Zoom out",
+      "groesser": "Zoom in",
+      "breite": "Fit to width",
+      "laedt": "Opening PDF …",
+      "fehler": "This PDF can't be shown here. Save it to open it in another app."
     }
   },
   "serverDetail": {
@@ -6222,7 +6240,75 @@
         "leerTitel": "This folder is empty",
         "ablegenHochladen": "Drop to upload to {{ordner}}",
         "verschoben": "{{name}} is now in {{ordner}}.",
-        "fassungZurueck": "The earlier version is restored. The previous one is listed under Versions."
+        "fassungZurueck": "The earlier version is restored. The previous one is listed under Versions.",
+        "art": {
+          "bild": "Image",
+          "video": "Video",
+          "audio": "Audio",
+          "text": "Text file",
+          "markdown": "Markdown document",
+          "tabelle": "Table (CSV)",
+          "pdf": "PDF document",
+          "archiv": "Archive",
+          "schrift": "Font",
+          "office": "Office file",
+          "dokument": "Document",
+          "tabellenblatt": "Spreadsheet",
+          "praesentation": "Presentation",
+          "programm": "Program or installer",
+          "datei": "File"
+        },
+        "formatNichtDarstellbar": "The app can't display this format. Save the file to open it in another app.",
+        "archiv": {
+          "inhalt": "Contents of {{name}}",
+          "zusammenfassung_one": "{{count}} file, {{groesse}} unpacked",
+          "zusammenfassung_other": "{{count}} files, {{groesse}} unpacked",
+          "gekuerzt": "first {{anzahl}} entries"
+        },
+        "schrift": {
+          "probe": "The quick brown fox jumps over the lazy dog.",
+          "fehler": "This font file can't be loaded."
+        },
+        "textBearbeiten": "Edit text",
+        "dokumentLesen": "Read",
+        "alsTabelle": "As table",
+        "auswaehlen": "Select",
+        "auswaehlenName": "Select {{name}}",
+        "ausgewaehlt_one": "{{count}} selected",
+        "ausgewaehlt_other": "{{count}} selected",
+        "alleAuswaehlen": "All",
+        "auswahlBeenden": "Clear selection",
+        "eintraege_one": "{{count}} item",
+        "eintraege_other": "{{count}} items",
+        "verschiebenTitelMehrere_one": "Move {{count}} item",
+        "verschiebenTitelMehrere_other": "Move {{count}} items",
+        "verschobenMehrere_one": "{{count}} item is now in {{ordner}}.",
+        "verschobenMehrere_other": "{{count}} items are now in {{ordner}}.",
+        "offlineSammelLaedt_one": "Downloading {{count}} file to this device …",
+        "offlineSammelLaedt_other": "Downloading {{count}} files to this device …",
+        "offlineFertigMehrere_one": "{{count}} file is now available offline.",
+        "offlineFertigMehrere_other": "{{count}} files are now available offline.",
+        "offlineTeilweise_one": "{{count}} of {{gesamt}} files couldn't be downloaded. Try again with a connection.",
+        "offlineTeilweise_other": "{{count}} of {{gesamt}} files couldn't be downloaded. Try again with a connection.",
+        "nurOnlineMehrere_one": "{{count}} file is no longer kept on this device.",
+        "nurOnlineMehrere_other": "{{count}} files are no longer kept on this device.",
+        "alsZip": "Save as ZIP",
+        "zipStamm": "Vault files",
+        "zipLaeuft_one": "Saving {{count}} file as ZIP …",
+        "zipLaeuft_other": "Saving {{count}} files as ZIP …",
+        "zipZuGross": "Together these files are larger than 4 GB, which doesn't fit in a ZIP. Select fewer.",
+        "zipZuVieleDateien": "More than 65,535 files don't fit in a ZIP. Select fewer.",
+        "keineDateien": "There are no files in the selection.",
+        "archiviertMehrere_one": "{{count}} item archived.",
+        "archiviertMehrere_other": "{{count}} items archived.",
+        "papierkorbMehrere_one": "{{count}} item moved to the trash.",
+        "papierkorbMehrere_other": "{{count}} items moved to the trash.",
+        "kurz": {
+          "offline": "Offline",
+          "nurOnline": "Online only",
+          "speichern": "Save",
+          "papierkorb": "Trash"
+        }
       },
       "fotos": {
         "alle": "All",
