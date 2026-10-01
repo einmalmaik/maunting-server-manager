@@ -142,16 +142,21 @@ export function TresorBildeditor({ item, vorschauUrl, onFertig }: { item: VaultI
 
   return (
     <Dialog open onOpenChange={(offen) => !offen && !speichert && onFertig()}>
-      <DialogContent className="max-w-3xl">
+      {/* Ab `md` füllt der Editor das Fenster; `--bildhoehe` ist der Platz zwischen Kopf und Fuß. */}
+      <DialogContent
+        className="max-w-3xl [--bildhoehe:60vh] md:h-[100dvh] md:max-w-none md:rounded-none md:border-0 md:[--bildhoehe:calc(100dvh-12rem)]"
+        overlayClassName="md:p-0"
+        data-testid="tresor-bildeditor"
+      >
         <DialogHeader>
           <DialogTitle className="truncate">{t('mss.vault.bearbeiten.titel', { name: item.service })}</DialogTitle>
         </DialogHeader>
-        <div className="flex items-center justify-center bg-black/80 p-4">
+        <div className="flex items-center justify-center bg-black/80 p-4 md:min-h-0 md:flex-1">
           {bild && (
             <div
               ref={flaeche}
-              className="relative max-h-[60vh] max-w-full touch-none select-none"
-              style={{ aspectRatio: String(seitenverhaeltnis), width: `min(100%, calc(60vh * ${seitenverhaeltnis}))` }}
+              className="relative max-h-[var(--bildhoehe)] max-w-full touch-none select-none"
+              style={{ aspectRatio: String(seitenverhaeltnis), width: `min(100%, calc(var(--bildhoehe) * ${seitenverhaeltnis}))` }}
               onPointerMove={bewegt}
               onPointerUp={() => (zug.current = null)}
               onPointerCancel={() => (zug.current = null)}
