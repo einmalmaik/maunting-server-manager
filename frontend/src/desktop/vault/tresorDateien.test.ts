@@ -91,6 +91,13 @@ function serverStarten() {
     /** Der Server kennt den Bucket des Kontos nicht, bis `/salt` ihn meldet. */
     ohneZuordnung: false,
     saltMeldungen: [] as { kdf_salt: string; bucket_id: string }[],
+    /** Lehnt das nächste DELETE mit 403 ohne Code ab (CSRF, Tresor abgeschaltet). */
+    loeschenGesperrt: false,
+    /** Weist die erste Reservierung mit 422 ab, und denselben Blob danach immer wieder. */
+    abweisen: false,
+    /** Der Tresor wurde auf einem anderen Gerät zurückgesetzt: jeder Abgleich 410. */
+    zurueckgesetzt: false,
+    abgewiesen: null as string | null,
   }
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (eingabe, init) => {
     if (server.offline) throw new TypeError('Failed to fetch')
@@ -101,6 +108,9 @@ function serverStarten() {
     if (typeof koerper === 'string') server.mitschnitt.push(new TextEncoder().encode(koerper))
     else if (koerper instanceof Uint8Array) server.mitschnitt.push(koerper)
 
+    if ((pfad.endsWith('/sync') || pfad.endsWith('/blind-sync')) && server.zurueckgesetzt) {
+      return json({ detail: { code: 'VAULT_ZURUECKGESETZT', message: 'errors.vault_zurueckgesetzt' } }, 410)
+    }
     if (pfad.endsWith('/sync') || pfad.endsWith('/blind-sync')) {
       const body = JSON.parse(String(koerper)) as VaultBlindSyncPayload
       const conflicts: string[] = []
@@ -143,6 +153,10 @@ function serverStarten() {
     if (pfad === '/api/vault/blobs' && methode === 'POST') {
       const b = JSON.parse(String(koerper))
       if (server.speicherVoll) return json({ detail: 'voll' }, 507)
+      if (server.abweisen && (server.abgewiesen ?? b.id) === b.id) {
+        server.abgewiesen = b.id
+        return json({ detail: 'abgewiesen' }, 422)
+      }
       if (server.blobs.has(b.id)) return json({ detail: 'vergeben' }, 409)
       server.blobs.set(b.id, { ...b, state: 'offen', chunks: new Map() })
       return json({ id: b.id }, 201)
@@ -180,9 +194,15 @@ function serverStarten() {
         return new Response(eintrag.chunks.get(Number(chunk[1])) as BodyInit, { status: 200 })
       }
       if (rest === '' && methode === 'DELETE') {
+        if (server.loeschenGesperrt) {
+          server.loeschenGesperrt = false
+          return json({ detail: 'CSRF' }, 403)
+        }
         const { schluessel } = JSON.parse(String(koerper))
         const bytes = new Uint8Array(schluessel.match(/../g).map((h: string) => parseInt(h, 16)))
-        if ((await sha256Hex(bytes)) !== eintrag.delete_verifier) return json({ detail: 'falsch' }, 403)
+        if ((await sha256Hex(bytes)) !== eintrag.delete_verifier) {
+          return json({ detail: { code: 'VAULT_LOESCHNACHWEIS_FALSCH', message: 'errors.vault_loeschnachweis_falsch' } }, 403)
+        }
         eintrag.state = 'geloescht'
         server.geloescht.push(id)
         return json({ state: 'geloescht' })
@@ -402,6 +422,41 @@ describe('Tresor-Dateien', () => {
     expect(await zeilen(BLOB_CACHE)).toEqual([])
   })
 
+  it('versucht das Löschen nach einem vorübergehenden 403 erneut', async () => {
+    const server = serverStarten()
+    await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(foto(1000))
+    await allesErledigt()
+
+    server.loeschenGesperrt = true
+    await useVaultStore.getState().deleteItem(id)
+    await vi.waitFor(() => expect(useVaultStore.getState().syncStatus).toBe('synced'))
+    await loeschungenAbarbeiten(BUCKET)
+    // Das erste DELETE scheiterte, der Lauf hörte dort auf; jetzt geht der Rest.
+    await loeschungenAbarbeiten(BUCKET)
+    expect(server.geloescht).toHaveLength(3)
+  })
+
+  it('gibt eine Datei auf, deren Löschnachweis der Server ablehnt', async () => {
+    const server = serverStarten()
+    await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(foto(1000))
+    await allesErledigt()
+    for (const b of server.blobs.values()) b.delete_verifier = '0'.repeat(64)
+    const warnung = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await useVaultStore.getState().deleteItem(id)
+    await vi.waitFor(() => expect(useVaultStore.getState().syncStatus).toBe('synced'))
+    await loeschungenAbarbeiten(BUCKET)
+    expect(warnung).toHaveBeenCalledTimes(3)
+
+    // Kein zweiter Versuch: die Datei steht nicht mehr zum Löschen an.
+    warnung.mockClear()
+    await loeschungenAbarbeiten(BUCKET)
+    expect(warnung).not.toHaveBeenCalled()
+    expect(server.geloescht).toEqual([])
+  })
+
   it('lässt die Blobs stehen, wenn ein anderes Gerät die Datei inzwischen geändert hat', async () => {
     const server = serverStarten()
     await tresorOeffnen()
@@ -411,7 +466,9 @@ describe('Tresor-Dateien', () => {
     server.konflikte.add(id)
     await useVaultStore.getState().deleteItem(id)
     await vi.waitFor(() => expect(useVaultStore.getState().syncStatus).toBe('synced'))
-    await new Promise((r) => setTimeout(r, 30))
+    // Ein eigener Lauf wartet auch einen gerade laufenden ab.
+    await loeschungenAbarbeiten(BUCKET)
+    await loeschungenAbarbeiten(BUCKET)
 
     expect(server.geloescht).toEqual([])
     expect([...server.blobs.values()].every((b) => b.state === 'fertig')).toBe(true)
@@ -444,6 +501,47 @@ describe('Tresor-Dateien', () => {
     await uploadsFortsetzen(BUCKET)
     await vi.waitFor(async () => expect(await zeilen(UPLOADS)).toEqual([]))
     expect(useTresorUploads.getState().je[id]).toBeUndefined()
+  })
+
+  it('lädt die übrigen Blobs hoch, wenn der Server einen abweist', async () => {
+    const server = serverStarten()
+    server.abweisen = true
+    await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(foto(1000))
+    await vi.waitFor(() => expect(useTresorUploads.getState().je[id]?.fehler).toBe('abgelehnt'))
+    await vi.waitFor(async () => expect(await zeilen(UPLOADS)).toHaveLength(1))
+    expect([...server.blobs.values()].filter((b) => b.state === 'fertig')).toHaveLength(2)
+
+    // Der abgewiesene wartet auf den nächsten Lauf.
+    server.abweisen = false
+    await uploadsFortsetzen(BUCKET)
+    await vi.waitFor(async () => expect(await zeilen(UPLOADS)).toEqual([]))
+  })
+
+  it('lädt nach einem Zurücksetzen auf einem anderen Gerät nichts mehr hoch', async () => {
+    const server = serverStarten()
+    await tresorOeffnen()
+    server.zurueckgesetzt = true
+    await useVaultStore.getState().syncWithServer()
+    expect(useVaultStore.getState().zurueckgesetzt).toBe(true)
+
+    await useVaultStore.getState().dateiHinzufuegen(foto(1000))
+    await vi.waitFor(() => expect(useVaultStore.getState().syncStatus).toBe('error'))
+    await uploadsFortsetzen(BUCKET)
+    // Die Datei-Routen kennen nur den Bucket des Kontos, also den eines neuen Tresors.
+    expect(server.blobs.size).toBe(0)
+    expect(await zeilen(UPLOADS)).toHaveLength(3)
+    useVaultStore.setState({ zurueckgesetzt: false })
+  })
+
+  it('wartet bei einem Fehler, der alle träfe, und meldet nichts als abgewiesen', async () => {
+    const server = serverStarten()
+    server.offline = true
+    await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(foto(1000))
+    await uploadsFortsetzen(BUCKET)
+    expect(await zeilen(UPLOADS)).toHaveLength(3)
+    expect(useTresorUploads.getState().je[id]?.fehler).toBeUndefined()
   })
 
   describe('Miniaturen', () => {

@@ -51,6 +51,16 @@ def test_script_keeps_node_security_boundary_and_source_data() -> None:
     assert "--target-node-id \"$TARGET_NODE_ID\"" in script
 
 
+def test_backend_cutover_carries_the_vault_files() -> None:
+    script = _script()
+    archiv = script[script.index("create_runtime_archive() {") : script.index("run_backend_migration() {")]
+
+    assert 'paths+=("vault-blobs")' in archiv
+    assert "/opt/msm/vault-blobs" in script[script.index("REMOTE_CUTOVER") :]
+    assert "vault_bytes * 2" in script
+    assert "`vault-blobs`" in (ROOT / "docs" / "self-hosting.md").read_text(encoding="utf-8")
+
+
 def test_operator_docs_and_environment_contract_stay_synchronized() -> None:
     command = "sudo /opt/msm/helper-scripts/migrate-panel-components.sh"
     self_hosting = (ROOT / "docs" / "self-hosting.md").read_text(encoding="utf-8")

@@ -88,6 +88,8 @@ export function tarInhalt(daten: Uint8Array): ArchivEintrag[] {
     const kopf = daten.subarray(start, start + 512)
     if (kopf.every((b) => b === 0)) break
     const groesse = parseInt(tarText(daten, start + 124, 12).trim() || '0', 8) || 0
+    // Eine negative Größe führte zurück auf denselben Kopf, und die Schleife lief ewig.
+    if (groesse < 0 || !Number.isSafeInteger(groesse)) break
     const art = String.fromCharCode(kopf[156])
     const inhaltVon = start + 512
     p = inhaltVon + Math.ceil(groesse / 512) * 512
@@ -106,9 +108,32 @@ export function tarInhalt(daten: Uint8Array): ArchivEintrag[] {
   return eintraege
 }
 
-export async function gunzip(daten: Uint8Array): Promise<Uint8Array> {
-  const strom = new Blob([daten as BlobPart]).stream().pipeThrough(new DecompressionStream('gzip'))
-  return new Uint8Array(await new Response(strom).arrayBuffer())
+/**
+ * So viel entpackt `gunzip` höchstens. Ein .gz von wenigen Kilobyte kann sonst
+ * Gigabytes ergeben und die App aus dem Speicher werfen. Für die Inhaltsliste
+ * reicht der Anfang; ein abgeschnittenes tar liest `tarInhalt` bis dorthin.
+ */
+export const GUNZIP_HOECHSTENS = 64 * 1024 * 1024
+
+export async function gunzip(daten: Uint8Array, hoechstens = GUNZIP_HOECHSTENS): Promise<Uint8Array> {
+  const leser = new Blob([daten as BlobPart]).stream().pipeThrough(new DecompressionStream('gzip')).getReader()
+  const teile: Uint8Array[] = []
+  let laenge = 0
+  while (laenge < hoechstens) {
+    const { done, value } = await leser.read()
+    if (done) break
+    const stueck = value.subarray(0, hoechstens - laenge)
+    teile.push(stueck)
+    laenge += stueck.length
+  }
+  await leser.cancel().catch(() => {})
+  const ergebnis = new Uint8Array(laenge)
+  let p = 0
+  for (const teil of teile) {
+    ergebnis.set(teil, p)
+    p += teil.length
+  }
+  return ergebnis
 }
 
 /** Erkennt das Archiv an seinen ersten Bytes und liest den Inhalt. */

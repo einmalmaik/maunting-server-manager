@@ -996,12 +996,13 @@ def test_vault_blind_check_bestaetigt_ohne_anzulegen(test_db):
     app.dependency_overrides.clear()
 
 
-def test_vault_reset_loest_den_tresor_vom_konto(client, test_db):
+def test_vault_reset_loescht_den_tresor_ganz(client, test_db):
     """Vergessenes Master-Passwort: nach dem Zuruecksetzen bietet die App das Einrichten an.
 
-    Bis 09/2026 ging das nur ueber die Datenbank. Die Ciphertexte bleiben
-    liegen; sie gehoeren einem blinden Bucket und sind ohne das alte Passwort
-    unlesbar.
+    Bis 09/2026 ging das nur ueber die Datenbank. Bis 01.10.2026 blieben die
+    Eintraege liegen; ein anderes Geraet mit dem alten Tresor fand dann einen
+    herrenlosen Bucket vor, beanspruchte ihn und spielte den Tresor zurueck.
+    Seither ist alles weg und der Bucket beerdigt: jeder Weg hinein ist 410.
     """
     from models import VaultBlindBucket
     from services.auth_service import AuthService
@@ -1022,6 +1023,8 @@ def test_vault_reset_loest_den_tresor_vom_konto(client, test_db):
         },
     )
     assert sync.status_code == 200
+    token = "a1" * 32
+    assert client.post("/api/vault/blind-register", json={"bucket_id": bucket, "auth_token": token}).status_code == 200
 
     ohne_wort = client.post("/api/vault/reset", json={"password": "konto-passwort-1"})
     falsches_passwort = client.post(
@@ -1037,9 +1040,27 @@ def test_vault_reset_loest_den_tresor_vom_konto(client, test_db):
     salz = client.get("/api/vault/salt").json()
     assert salz == {"kdf_salt": None, "bucket_id": None, "has_vault": False}
     assert _tresorzeile(session, user, VaultHint) is None
-    # Nichts Verschluesseltes geloescht: der Server loest nur die Zuordnung.
-    assert session.query(VaultEntry).filter(VaultEntry.bucket_id == bucket).count() == 1
+    session.expire_all()
+    assert session.query(VaultEntry).filter(VaultEntry.bucket_id == bucket).count() == 0
     assert session.get(VaultBlindBucket, bucket) is None
+
+    # Das andere Geraet mit dem alten Tresor kommt auf keinem Weg mehr hinein.
+    mutation = [{"id": "vault-canary", "ciphertext": "sv-vault-v1:c", "revision": 2, "is_deleted": False}]
+    wege = [
+        client.post("/api/vault/sync", json={"bucket_id": bucket, "since_revision": 0, "mutations": mutation}),
+        client.post("/api/vault/salt", json={"kdf_salt": "ab" * 16, "bucket_id": bucket}),
+        client.post("/api/vault/blind-register", json={"bucket_id": bucket, "auth_token": token}),
+        client.post(
+            "/api/vault/blind-sync",
+            json={"bucket_id": bucket, "auth_token": token, "since_revision": 0, "mutations": mutation},
+        ),
+    ]
+    for antwort in wege:
+        assert antwort.status_code == 410, antwort.text
+        assert antwort.json()["detail"]["code"] == "VAULT_ZURUECKGESETZT"
+    assert session.query(VaultEntry).filter(VaultEntry.bucket_id == bucket).count() == 0
+    # Die Probe auf dem neuen Geraet bleibt ohne Orakel.
+    assert client.post("/api/vault/blind-check", json={"bucket_id": bucket, "auth_token": token}).status_code == 401
 
     # Danach laesst sich ein neuer Tresor einrichten.
     neu = "6" * 64
@@ -1204,11 +1225,71 @@ def test_formatsperre_gilt_auch_blind(test_db):
             anfrage = {"bucket_id": "f" * 64, "auth_token": "1" * 64, "since_revision": 0, "mutations": []}
             assert c.post("/api/vault/blind-sync", json={**anfrage, "client_format": 1, "min_client_format": 1}).status_code == 200
             assert c.post("/api/vault/blind-sync", json=anfrage).status_code == 426
-            # Hochstufen ueber das eigene Format hinaus geht nicht.
-            assert c.post("/api/vault/blind-sync", json={**anfrage, "client_format": 1, "min_client_format": 5}).status_code == 200
+            # Ein Format, das der Server nicht kennt, nimmt er gar nicht an.
+            assert c.post("/api/vault/blind-sync", json={**anfrage, "client_format": 5, "min_client_format": 5}).status_code == 422
             assert c.post("/api/vault/blind-sync", json={**anfrage, "client_format": 1}).status_code == 200
     finally:
         app.dependency_overrides.clear()
+
+
+def test_erfundenes_format_sperrt_den_tresor_nicht(client):
+    """Ein Token reichte, um `min_client_format=1000` zu setzen: ab dann bekam
+    jede echte App 426, und herabstufen ging nicht (bis 01.10.2026)."""
+    bucket = "c" * 64
+    anfrage = {"bucket_id": bucket, "since_revision": 0, "mutations": []}
+    angriff = client.post("/api/vault/sync", json={**anfrage, "client_format": 1000, "min_client_format": 1000})
+    assert angriff.status_code == 422
+    assert client.post("/api/vault/sync", json={**anfrage, "client_format": 1}).status_code == 200
+
+
+def test_erstes_hochstufen_von_zwei_geraeten_zugleich(test_db, monkeypatch):
+    """Beide lesen „noch kein Format“ und legen die Zeile an; einer bekam 500."""
+    import threading
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import NullPool
+
+    import database as db_module
+    from models.vault_bucket_format import VaultBucketFormat
+
+    engine = create_engine(db_module.engine.url, poolclass=NullPool)
+    sitzung = sessionmaker(bind=engine)
+    barriere = threading.Barrier(2)
+    urspruenglich = vault_service._now
+
+    def jetzt_mit_barriere():
+        try:
+            barriere.wait(timeout=3)
+        except threading.BrokenBarrierError:
+            pass
+        return urspruenglich()
+
+    monkeypatch.setattr(vault_service, "_now", jetzt_mit_barriere)
+    fehler: list[Exception] = []
+
+    def lauf() -> None:
+        s = sitzung()
+        try:
+            vault_service._pruefe_format(s, "d" * 64, 1, 1)
+        except Exception as exc:  # noqa: BLE001 - jeder Fehler ist hier einer
+            fehler.append(exc)
+        finally:
+            s.close()
+
+    try:
+        threads = [threading.Thread(target=lauf) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+    finally:
+        engine.dispose()
+
+    assert fehler == []
+    session, _, _ = test_db
+    session.expire_all()
+    assert session.get(VaultBucketFormat, "d" * 64).min_client_format == 1
 
 
 def test_sync_liefert_seitenweise(client, monkeypatch):

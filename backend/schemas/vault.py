@@ -42,6 +42,11 @@ def _pruefe_gesamtgroesse(mutations: List["VaultMutation"]) -> List["VaultMutati
     return mutations
 
 
+# Das neueste Eintragsformat, das ein Bucket verlangen darf (Frontend:
+# `VAULT_EINTRAG_FORMAT`). Wird mit jedem neuen Format angehoben.
+VAULT_FORMAT_BEKANNT = 1
+
+
 class VaultSyncRequest(BaseModel):
     bucket_id: str = Field(..., min_length=64, max_length=64, description="Blinde 64-Hex Bucket-ID, abgeleitet aus dem Client-Master-Secret")
     since_revision: int = Field(default=0, ge=0, le=9007199254740991, description="Revisions-Wasserzeichen des Clients")
@@ -50,7 +55,9 @@ class VaultSyncRequest(BaseModel):
     # nur noch beschreiben laesst (siehe `VaultBucketFormat`). Aeltere Apps
     # schicken beides nicht.
     client_format: Optional[int] = Field(default=None, ge=0, le=1000)
-    min_client_format: Optional[int] = Field(default=None, ge=0, le=1000)
+    # Nie hoeher, als dieser Server kennt: sonst sperrt ein einziger Aufruf
+    # mit erfundenem Format jede echte App fuer immer aus.
+    min_client_format: Optional[int] = Field(default=None, ge=0, le=VAULT_FORMAT_BEKANNT)
 
     @field_validator("bucket_id")
     @classmethod
@@ -74,7 +81,9 @@ class VaultBlindSyncRequest(BaseModel):
     # nur noch beschreiben laesst (siehe `VaultBucketFormat`). Aeltere Apps
     # schicken beides nicht.
     client_format: Optional[int] = Field(default=None, ge=0, le=1000)
-    min_client_format: Optional[int] = Field(default=None, ge=0, le=1000)
+    # Nie hoeher, als dieser Server kennt: sonst sperrt ein einziger Aufruf
+    # mit erfundenem Format jede echte App fuer immer aus.
+    min_client_format: Optional[int] = Field(default=None, ge=0, le=VAULT_FORMAT_BEKANNT)
 
     @field_validator("bucket_id")
     @classmethod

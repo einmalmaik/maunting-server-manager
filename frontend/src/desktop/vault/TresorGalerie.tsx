@@ -44,7 +44,7 @@ import { miniaturenVorladen, useMiniatur } from './tresorMiniaturen'
 import { aufGeraetSpeichern } from './tresorAnzeige'
 import { gruppieren, hashesBerechnen } from './tresorAehnlich'
 import { BEARBEITBAR, TresorBildeditor } from './TresorBildeditor'
-import { fassungenVon } from './tresorOrdner'
+import { fassungenVon, sichtbareEintraege } from './tresorOrdner'
 
 type Filter = 'alle' | 'videos' | 'kuerzlich' | 'aehnlich' | 'alben'
 
@@ -207,8 +207,8 @@ const Kachel = memo(function Kachel({
       )}
       {upload && (
         <span className="absolute inset-x-1 bottom-1">
-          {upload.fehler === 'speicherVoll' ? (
-            <span className="rounded bg-black/70 px-1 text-label-sm text-status-destructive">{t('mss.vault.dateien.speicherVoll')}</span>
+          {upload.fehler ? (
+            <span className="rounded bg-black/70 px-1 text-label-sm text-status-destructive">{t(`mss.vault.dateien.${upload.fehler}`)}</span>
           ) : (
             <ProgressBar value={upload.gesamt > 0 ? (upload.gesendet / upload.gesamt) * 100 : null} ariaLabel={t('mss.vault.dateien.wirdHochgeladen')} />
           )}
@@ -266,10 +266,11 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
     setAuswahl(null)
   }
 
-  const medien = useMemo(() => items.filter((i) => istMedium(i) && !i.trashedAt && !i.archivedAt), [items])
+  const sichtbar = useMemo(() => sichtbareEintraege(items), [items])
+  const medien = useMemo(() => sichtbar.filter(istMedium), [sichtbar])
   const alben = useMemo(
-    () => items.filter((i) => i.category === 'album' && !i.trashedAt && !i.archivedAt).sort((a, b) => a.service.localeCompare(b.service)),
-    [items],
+    () => sichtbar.filter((i) => i.category === 'album').sort((a, b) => a.service.localeCompare(b.service)),
+    [sichtbar],
   )
   // Ein Album, das inzwischen gelöscht ist (auch auf einem anderen Gerät), ist nicht mehr offen.
   const album = albumId ? alben.find((a) => a.id === albumId) : undefined
@@ -286,7 +287,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   useEffect(() => {
     if (filter !== 'aehnlich' || !userKey) return
     let abgebrochen = false
-    const alle = useVaultStore.getState().items.filter((i) => istMedium(i) && !i.trashedAt && !i.archivedAt)
+    const alle = sichtbareEintraege(useVaultStore.getState().items).filter(istMedium)
     setAehnlich({ fertig: 0, gesamt: alle.length, gruppen: null })
     void hashesBerechnen(alle, userKey, () => abgebrochen, (fertig) => !abgebrochen && setAehnlich((a) => ({ ...a, fertig })))
       .then((hashes) => {

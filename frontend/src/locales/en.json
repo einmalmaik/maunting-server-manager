@@ -3849,6 +3849,8 @@
     "invalid_workshop_id": "Invalid Workshop ID.",
     "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency.",
     "database_server_forbidden": "You lack the permission to create database servers.",
+    "vault_zurueckgesetzt": "This vault was reset on another device.",
+    "vault_loeschnachweis_falsch": "This file can't be deleted with this key.",
     "vault_bucket_unbekannt": "The server no longer knows this vault. Was it reset on another device?",
     "install_directory_create_failed": "The server directory could not be created. Check that the panel or node may write to the servers folder.",
     "install_directory_exists": "A directory for this server already exists. Remove it or create the server again.",
@@ -4135,7 +4137,7 @@
         },
         "3": {
           "title": "Move the backend",
-          "description": "Pre-installs the fresh target, automatically uses the owner-confirmed node ID, then transfers the panel database, configuration, DIS secrets, panel backups and community blueprints during the short cutover."
+          "description": "Pre-installs the fresh target, automatically uses the owner-confirmed node ID, then transfers the panel database, configuration, DIS secrets, panel backups, community blueprints and the encrypted vault files during the short cutover."
         }
       },
       "externalBoundary": "MSM cannot change the DNS A/AAAA record at an external provider or grant the one-time owner approval for a new agent. These boundaries are shown clearly and never bypassed.",
@@ -4506,7 +4508,7 @@
       },
       "reset": {
         "title": "Resetting the vault",
-        "body": "Detaches the vault from the account and releases all of its files for removal; the next hourly cleanup deletes them. Without the old master password none of them could ever be deleted. The dialog shows their number and size first."
+        "body": "Deletes the vault completely, as deleting the account does: entries at once, files at the next hourly cleanup. Only the identifier of the old bucket remains (`vault_bucket_tombstones`) so another device cannot upload it again; every sync there gets a 410. The dialog shows the number and size of the files first."
       },
       "altApps": {
         "title": "Older app versions",
@@ -4723,7 +4725,7 @@
           "dateien": "Files and photos are encrypted on the device in chunks, each file with its own key, and stored as three parts: original, preview and thumbnail. Name, file type, capture date, location, camera and exact size are only in the encrypted entry. Per vault, the instance sees how many parts exist, their rounded-up sizes, when they were uploaded and that they belong together in threes.",
           "speicher": "Which account a vault belongs to is stored in the database only as a check value that only the instance can compute with its key. Anyone who only reads the database, for example in a backup, cannot link the vault or its files to an account. The instance makes the link while you access the vault signed in and counts how much storage your vault uses; how much it may use is set by the operator through your roles. Anyone with access to the server itself can make the link as well. Deleted files stay encrypted on the server for another 7 days and count until then; afterwards they are removed. Aborted uploads disappear after 24 hours.",
           "geraet": "So the vault works offline, entries, thumbnails and previews are kept encrypted in the device storage, plus originals you make available offline or opened recently. This storage belongs to your account. If you explicitly save a file to the device, that copy is stored there unencrypted.",
-          "verlust": "Without the master password nobody can open the vault, the operator included. If you forget it, you can only reset the vault: the entries stay unreadable and all files are removed within an hour. If you delete your account, the instance removes the entries and files of your vault."
+          "verlust": "Without the master password nobody can open the vault, the operator included. If you forget it, you can only reset the vault. Then, as when you delete your account, the instance removes all entries at once and all files within an hour. It keeps only the identifier of the old vault so that another device does not upload it again; that identifier reveals neither account nor content."
         }
       },
       "providers": {
@@ -6073,6 +6075,8 @@
       "speichernFehlgeschlagen": "Saving did not work.",
       "loeschenTitel": "Delete entry",
       "loeschenFrage": "Really delete \"{{name}}\" from the vault for good?",
+      "loeschenFrageOrdner_one": "Delete the folder \"{{name}}\" and the {{count}} entry inside it for good?",
+      "loeschenFrageOrdner_other": "Delete the folder \"{{name}}\" and the {{count}} entries inside it for good?",
       "geloescht": "Deleted.",
       "loeschenFehlgeschlagen": "Deleting did not work.",
       "leer": "No passwords stored",
@@ -6101,6 +6105,8 @@
       "hinweisGespeichert": "The password hint has been saved.",
       "hinweisHinterlegt": "The password hint is stored.",
       "hinweisSpeichernFehlgeschlagen": "The hint could not be saved.",
+      "anderswoZurueckgesetzt": "Reset on another device",
+      "anderswoZurueckgesetztText": "This vault no longer syncs. What you see here only exists on this device and keeps opening here with the old master password.",
       "keinHinweisHinterlegt": "No emergency password hint stored",
       "hinweisVorhanden": "A hint is stored right now",
       "hinweisFehlt": "No hint stored yet",
@@ -6111,7 +6117,7 @@
         "link": "Forgot your master password? Reset the vault",
         "titel": "Reset vault",
         "warnungTitel": "All entries will be lost",
-        "warnungText": "Without the master password nobody can decrypt your entries, not even the server. After the reset you set up a new, empty vault. Devices where the old vault is still open keep it until you reset it there as well.",
+        "warnungText": "Without the master password nobody can decrypt your entries, not even the server. The server deletes the old vault completely, then you set up a new, empty one. Your other devices stop syncing the old vault; whatever is open there stays only there.",
         "dateien": "Your files go too: {{anzahl}} files and earlier versions, {{groesse}} in total. The server deletes them within an hour.",
         "passwortLabel": "Confirm your account password",
         "otpLabel": "Code from your authenticator app",
@@ -6208,6 +6214,7 @@
         "ordner": "Folder",
         "unlesbar": "This app cannot read this file.",
         "speicherVoll": "No storage left",
+        "abgelehnt": "Rejected, will retry",
         "wirdHochgeladen": "Uploading",
         "aktionen": "Actions",
         "umbenennen": "Rename",

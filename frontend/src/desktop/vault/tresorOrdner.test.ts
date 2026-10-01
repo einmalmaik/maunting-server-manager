@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dateienUnter, darfAlleVerschieben, darfVerschieben, fassungenVon, obersteAuswahl, pfadVon, zielOrdner } from './tresorOrdner'
+import { dateienUnter, darfAlleVerschieben, darfVerschieben, fassungenVon, obersteAuswahl, pfadVon, sichtbareEintraege, zielOrdner } from './tresorOrdner'
 import type { VaultItem } from './vaultStore'
 
 const ordner = (id: string, service: string, eltern?: string) => ({ id, service, category: 'ordner', ordner: eltern }) as VaultItem
@@ -15,6 +15,12 @@ describe('tresorOrdner', () => {
   it('kennt den Weg vom Stamm bis zu einem Ordner', () => {
     expect(pfadVon('a', alle).map((o) => o.id)).toEqual(['v', 'm', 'a'])
     expect(pfadVon(undefined, alle)).toEqual([])
+  })
+
+  it('blendet aus, was in einem Ordner im Papierkorb oder Archiv liegt', () => {
+    const imMuell = { ...miete, trashedAt: 1 }
+    const items = [vertraege, imMuell, alt, fotos, datei('tief', 'a'), datei('frei', 'f'), { ...datei('archiv', 'f'), archivedAt: 1 }]
+    expect(sichtbareEintraege(items).map((i) => i.id)).toEqual(['v', 'f', 'frei'])
   })
 
   it('lässt keinen Ordner in sich selbst oder einen Unterordner wandern', () => {

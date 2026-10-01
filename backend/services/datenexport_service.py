@@ -77,6 +77,7 @@ OHNE_KONTOBEZUG: dict[str, str] = {
     "singra_webhook_events": "Panel-Betrieb",
     "vault_blind_buckets": "blind, der Tresor liegt nur verschluesselt vor",
     "vault_bucket_formats": "blind, der Tresor liegt nur verschluesselt vor",
+    "vault_bucket_tombstones": "blind, nur die Kennung eines geloeschten Tresors",
     "vault_entries": "blind, der Tresor liegt nur verschluesselt vor",
     "webhook_deliveries": "Server-Daten",
     "webhook_subscriptions": "Server-Daten",

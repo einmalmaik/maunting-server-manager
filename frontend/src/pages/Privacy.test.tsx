@@ -168,6 +168,9 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.vault.items.speicher')).toMatch(/nur als Prüfwert/);
     expect(i18n.t('privacyPolicy.sections.vault.items.speicher')).toMatch(/Wer Zugriff auf den Server selbst hat/);
     expect(i18n.t('privacyPolicy.sections.vault.items.dateien')).toMatch(/je Tresor/);
+    // Zuruecksetzen loescht seither alles; bis dahin blieben die Eintraege liegen.
+    expect(i18n.t('privacyPolicy.sections.vault.items.verlust')).toMatch(/entfernt die Instanz alle Einträge sofort/);
+    expect(i18n.t('privacyPolicy.sections.vault.items.verlust')).toMatch(/nur die Kennung des alten Tresors/);
     expect(i18n.t('privacyPolicy.sections.desktopApp.body')).toMatch(/GitHub sieht dabei Ihre IP-Adresse/);
 
     const stand = container.querySelector('time');

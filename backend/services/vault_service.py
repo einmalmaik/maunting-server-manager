@@ -7,6 +7,7 @@ import html
 import secrets
 from typing import Sequence
 from sqlalchemy import func, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -16,6 +17,7 @@ from models.vault_hint import VaultHint
 from models.vault_user_setting import VaultUserSetting
 from models.vault_blind_bucket import VaultBlindBucket
 from models.vault_bucket_format import VaultBucketFormat
+from models.vault_bucket_tombstone import VaultBucketTombstone
 from schemas.vault import (
     VaultBlindSyncRequest,
     VaultEntryOut,
@@ -48,6 +50,10 @@ class VaultBucketAlreadyBound(Exception):
 
 class VaultClientZuAlt(Exception):
     """Die App ist aelter als das Format, das dieser Bucket verlangt."""
+
+
+class VaultZurueckgesetzt(Exception):
+    """Der Bucket wurde zurueckgesetzt oder mit seinem Konto geloescht (410)."""
 
 
 class VaultOhneBucket(Exception):
@@ -165,11 +171,20 @@ def _pruefe_format(db: Session, bucket_id: str, client_format: int | None, min_c
     if eigenes < verlangt:
         raise VaultClientZuAlt("Diese App ist zu alt fuer diesen Tresor. Bitte aktualisieren.")
     if min_client_format and min_client_format > verlangt and min_client_format <= eigenes:
-        if zeile is None:
-            db.add(VaultBucketFormat(bucket_id=bucket_id, min_client_format=min_client_format, updated_at=_now()))
-        else:
-            zeile.min_client_format = min_client_format
-            zeile.updated_at = _now()
+        # Zwei Geraete koennen zugleich zum ersten Mal hochstufen: einfuegen
+        # oder anheben in einem Schritt, nie herabsetzen.
+        anweisung = pg_insert(VaultBucketFormat).values(
+            bucket_id=bucket_id, min_client_format=min_client_format, updated_at=_now()
+        )
+        db.execute(
+            anweisung.on_conflict_do_update(
+                index_elements=[VaultBucketFormat.bucket_id],
+                set_={
+                    "min_client_format": func.greatest(VaultBucketFormat.min_client_format, anweisung.excluded.min_client_format),
+                    "updated_at": anweisung.excluded.updated_at,
+                },
+            )
+        )
         db.commit()
 
 
@@ -208,6 +223,12 @@ def _bucket_besitzer(db: Session, bucket_id: str) -> str | None:
     return zeile.konto_index or f"alt:{zeile.user_id}"
 
 
+def _pruefe_nicht_beerdigt(db: Session, bucket_id: str) -> None:
+    """Ein beerdigter Bucket nimmt nichts mehr an und wird nie neu vergeben (``VaultBucketTombstone``)."""
+    if db.get(VaultBucketTombstone, bucket_id) is not None:
+        raise VaultZurueckgesetzt("Dieser Tresor wurde zurückgesetzt.")
+
+
 def _sperre_bucket(db: Session, bucket_id: str) -> None:
     """Serialisiert die Revisionsvergabe eines Buckets gegen parallele Syncs.
 
@@ -243,6 +264,8 @@ def _wende_mutationen_an(
         return []
 
     _sperre_bucket(db, bucket_id)
+    # Erst unter der Sperre ist sicher, dass kein Zuruecksetzen dazwischenkam.
+    _pruefe_nicht_beerdigt(db, bucket_id)
 
     max_rev_db = db.scalar(
         select(func.max(VaultEntry.revision)).where(VaultEntry.bucket_id == bucket_id)
@@ -347,6 +370,7 @@ def sync_vault(db: Session, konto: TresorKonto, request: VaultSyncRequest) -> Va
     - Monotone Revision: Jede serverseitige Mutation erhält eine aufsteigende Revisionsnummer.
     """
     bucket_id = request.bucket_id.lower()
+    _pruefe_nicht_beerdigt(db, bucket_id)
 
     # 1. Bucket-Autorisierung (SEC-02: IDOR-Schutz)
     # Prüfe, ob dieser Bucket bereits einem ANDEREN Benutzer gehört. Erst die
@@ -416,6 +440,7 @@ def sync_vault_blind(db: Session, request: VaultBlindSyncRequest) -> VaultSyncRe
     bucket_id = request.bucket_id.lower()
     auth_token = request.auth_token.lower()
     computed_verifier = hashlib.sha256(auth_token.encode("utf-8")).hexdigest()
+    _pruefe_nicht_beerdigt(db, bucket_id)
 
     # 1. Blind Bucket lookup
     blind_bucket = db.get(VaultBlindBucket, bucket_id)
@@ -499,6 +524,7 @@ def register_blind_bucket(db: Session, konto: TresorKonto, bucket_id: str, auth_
       davor soll der blinde Pfad schuetzen.
     """
     bucket_id = bucket_id.strip().lower()
+    _pruefe_nicht_beerdigt(db, bucket_id)
     setting = einstellung(db, konto)
     besitzer = _bucket_besitzer(db, bucket_id)
     if besitzer is not None and besitzer != konto.index:
@@ -576,6 +602,7 @@ def set_vault_salt(
     """
     clean_bucket = bucket_id.strip().lower()
     clean_salt = kdf_salt.strip()
+    _pruefe_nicht_beerdigt(db, clean_bucket)
 
     # Prüfe ob Bucket bereits fremd vergeben ist
     setting = einstellung(db, konto)
@@ -619,54 +646,39 @@ def set_vault_salt(
     )
 
 
+def _bucket_entfernen(db: Session, bucket_id: str) -> None:
+    """Loescht Eintraege, Besitznachweis, Formatsperre und Dateien des Buckets und beerdigt ihn."""
+    _sperre_bucket(db, bucket_id)
+    vault_blob_service.alle_zur_loeschung(db, bucket_id)
+    db.query(VaultEntry).filter(VaultEntry.bucket_id == bucket_id).delete(synchronize_session=False)
+    db.query(VaultBlindBucket).filter(VaultBlindBucket.bucket_id == bucket_id).delete(synchronize_session=False)
+    db.query(VaultBucketFormat).filter(VaultBucketFormat.bucket_id == bucket_id).delete(synchronize_session=False)
+    db.execute(pg_insert(VaultBucketTombstone).values(bucket_id=bucket_id, created_at=_now()).on_conflict_do_nothing())
+
+
 def tresor_zuruecksetzen(db: Session, konto: TresorKonto) -> None:
-    """Loest den Tresor vom Konto: Salz, Kontokopplung und Hinweis. Committet nicht.
+    """Loescht den Tresor des Kontos ganz: Salz, Kontokopplung, Hinweis und den Bucket samt Inhalt. Committet nicht.
 
     Der Ausweg bei vergessenem Master-Passwort. Danach meldet `/salt` „kein
-    Tresor", und die App bietet das Einrichten an. Bis 09/2026 ging das nur
-    ueber die Datenbank.
+    Tresor", und die App bietet das Einrichten an.
 
-    Die Ciphertexte bleiben liegen. Ein blinder Bucket gehoert keinem Konto,
-    der Server kann ihn also nicht sicher zuordnen; und ein gekoppelter Bucket
-    lebt womoeglich noch auf einem anderen Geraet, das ihn weiter abgleicht.
-    Lesen kann sie ohne das alte Passwort niemand.
+    Auch der Weg beim Loeschen des Kontos. Bis 01.10.2026 blieben Eintraege
+    und Besitznachweis liegen; seither ist der Bucket beerdigt
+    (``VaultBucketTombstone``), und ein anderes Geraet behaelt nur seine lokale
+    Kopie. Der Dialog nennt vorher, was mitgeht.
 
-    Die Dateien der Tresor-Cloud (`vault_blobs`) werden dagegen entfernt
-    (beim naechsten Aufraeumen, stuendlich). Ohne das alte Master-Passwort
-    liesse sich keine davon je wieder loeschen: der Loeschnachweis haengt am
-    Schluessel der Datei. Eine Loeschhaltung gibt es hier nicht mehr, seit die
-    Blobs am Bucket haengen (01.10.2026): sie zaehlten gegen keinen Speicher,
-    und Hochladen und Zuruecksetzen fuellte die Platte. Ein anderes Geraet mit
-    dem alten Tresor verliert sie damit auch; der Dialog nennt vorher Anzahl
-    und Groesse.
+    Ein blinder Bucket ohne Kontokopplung bleibt, wo er ist: der Server kann ihn
+    keinem Konto zuordnen.
     """
     setting = einstellung(db, konto)
     hinweis = _eigene_zeile(db, VaultHint, konto)
     if setting is not None:
         if setting.bucket_id:
-            vault_blob_service.alle_zur_loeschung(db, setting.bucket_id)
+            _bucket_entfernen(db, setting.bucket_id)
         db.delete(setting)
     if hinweis is not None:
         db.delete(hinweis)
     db.flush()
-
-
-def konto_entfernen(db: Session, konto: TresorKonto) -> None:
-    """Raeumt beim Loeschen eines Kontos alles ab, was im Tresor an ihm haengt. Committet nicht.
-
-    Bis 01.10.2026 tat das die Kaskade auf ``users.id``. Die Tresortabellen
-    tragen seither keinen Fremdschluessel aufs Konto mehr, also geschieht es
-    hier. Anders als beim Zuruecksetzen gehen auch Eintraege, Besitznachweis
-    und Formatsperre des Buckets mit: wer sein Konto loescht, will seine Daten
-    weg haben.
-    """
-    setting = einstellung(db, konto)
-    bucket = setting.bucket_id if setting is not None else None
-    tresor_zuruecksetzen(db, konto)
-    if bucket:
-        db.query(VaultEntry).filter(VaultEntry.bucket_id == bucket).delete(synchronize_session=False)
-        db.query(VaultBlindBucket).filter(VaultBlindBucket.bucket_id == bucket).delete(synchronize_session=False)
-        db.query(VaultBucketFormat).filter(VaultBucketFormat.bucket_id == bucket).delete(synchronize_session=False)
 
 
 HINT_RATE_LIMIT_SECONDS = 600  # 10 Minuten Cooldown

@@ -24,6 +24,30 @@ export function pfadVon(id: string | undefined, ordner: VaultItem[]): VaultItem[
 }
 
 /**
+ * Was weder selbst noch über einen seiner Ordner im Papierkorb oder Archiv
+ * liegt. Ein Ordner im Papierkorb nimmt seinen Inhalt mit: der bekommt kein
+ * eigenes `trashedAt`, darf aber in keiner Ansicht mehr auftauchen, auch nicht
+ * in der Galerie.
+ */
+export function sichtbareEintraege(items: VaultItem[]): VaultItem[] {
+  const nachId = new Map(items.map((i) => [i.id, i]))
+  return items.filter((i) => {
+    let aktuell: VaultItem | undefined = i
+    for (let n = 0; aktuell && n < TIEFE; n++) {
+      if (aktuell.trashedAt || aktuell.archivedAt) return false
+      aktuell = aktuell.ordner ? nachId.get(aktuell.ordner) : undefined
+    }
+    return true
+  })
+}
+
+/** Alles, was in und unter dem Ordner `id` liegt (ohne ihn selbst). */
+export function inhaltVon(id: string, items: VaultItem[]): VaultItem[] {
+  const ordner = items.filter((i) => i.category === 'ordner')
+  return items.filter((i) => pfadVon(i.ordner, ordner).some((o) => o.id === id))
+}
+
+/**
  * Ob `item` in den Ordner `ziel` (`undefined` = Stamm) verschoben werden darf:
  * nicht dorthin, wo er schon liegt, und kein Ordner unter sich selbst.
  */

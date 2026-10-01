@@ -138,7 +138,7 @@ interface UploadZeile {
   bereit: boolean
   /** Miniatur und Vorschau bleiben nach dem Hochladen im Cache, fürs Offline-Anzeigen. */
   behalten: boolean
-  fehler?: 'speicherVoll'
+  fehler?: UploadFehler
 }
 
 interface ChunkZeile {
@@ -147,10 +147,13 @@ interface ChunkZeile {
   daten: Uint8Array
 }
 
+/** `abgelehnt`: der Server wies den Blob ab (etwa 413, 422); der nächste Lauf versucht es wieder. */
+export type UploadFehler = 'speicherVoll' | 'abgelehnt'
+
 export interface UploadFortschritt {
   gesendet: number
   gesamt: number
-  fehler?: 'speicherVoll'
+  fehler?: UploadFehler
 }
 
 /** Fortschritt der Uploads je Tresor-Eintrag, für die Oberfläche. */
@@ -337,9 +340,15 @@ function einzeln(arbeit: (bucket: string) => Promise<void>) {
   return starten
 }
 
+/** Was nur diesen Blob trifft (zu groß, falsche Länge) oder vollen Speicher meldet; alles andere: `null`, warten. */
+function uploadFehler(s: number | null): UploadFehler | null {
+  if (s === 507) return 'speicherVoll'
+  return s === 413 || s === 422 ? 'abgelehnt' : null
+}
+
 /**
- * Lädt hoch, was in der Ablage wartet. Bricht beim ersten Netzfehler ab; der
- * nächste Sync stößt wieder an.
+ * Lädt hoch, was in der Ablage wartet. Bricht beim ersten Fehler ab, der alle
+ * träfe (Netz, Sitzung, Server); der nächste Sync stößt wieder an.
  */
 export const uploadsFortsetzen = einzeln(hochladen)
 
@@ -371,11 +380,15 @@ async function hochladen(bucket: string): Promise<void> {
     try {
       await blobHochladen(db, zeile)
     } catch (err) {
-      if (status(err) === 507) {
-        await schreiben(db, UPLOADS, (s) => s.put({ ...zeile, fehler: 'speicherVoll' }))
-        fortschrittSetzen(zeile.eintragId, (alt) => ({ ...alt, fehler: 'speicherVoll' }))
+      // Ein abgewiesener Blob hält die übrigen nicht auf. Voller Speicher,
+      // Netz weg, abgelaufene Sitzung oder gestörter Server träfen jeden
+      // weiteren auch: dann bis zum nächsten Anstoß warten.
+      const fehler = uploadFehler(status(err))
+      if (fehler && zeile.fehler !== fehler) {
+        await schreiben(db, UPLOADS, (s) => s.put({ ...zeile, fehler }))
+        fortschrittSetzen(zeile.eintragId, (alt) => ({ ...alt, fehler }))
       }
-      return
+      if (fehler !== 'abgelehnt') return
     }
   }
 }
@@ -671,11 +684,13 @@ async function loeschen(bucket: string): Promise<void> {
       try {
         await blobLoeschen(blob.id, blob.loeschen)
       } catch (err) {
-        // 404: nie angekommen oder schon weg. 403 passiert nur mit einem
-        // fremden Kopf; wiederholen hilft dann nicht.
-        const s = status(err)
-        if (s !== 404 && s !== 403) return
-        if (s === 403) console.warn(`Tresor: Löschnachweis für Blob ${blob.id} abgelehnt.`)
+        // 404: nie angekommen oder schon weg. Ein falscher Löschnachweis
+        // (fremder Kopf) gilt nie, wiederholen hilft dann nicht. Jedes andere
+        // 403 (CSRF, Tresor abgeschaltet) ist vorübergehend: der nächste Lauf
+        // versucht es wieder, sonst belegte die Datei den Speicher für immer.
+        if (err instanceof SanitizedApiError && err.code === 'VAULT_LOESCHNACHWEIS_FALSCH') {
+          console.warn(`Tresor: Löschnachweis für Blob ${blob.id} abgelehnt.`)
+        } else if (status(err) !== 404) return
       }
       if (db) {
         await uploadEntfernen(db, blob.id).catch(() => {})

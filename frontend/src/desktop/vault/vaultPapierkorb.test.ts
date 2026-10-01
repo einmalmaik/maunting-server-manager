@@ -422,3 +422,40 @@ describe('Tresor: Alben', () => {
     expect(nutzlast.album).toEqual(kaputt)
   })
 })
+
+describe('Tresor: auf einem anderen Gerät zurückgesetzt', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('hört bei 410 auf, behält alles hier und lädt nichts hoch', async () => {
+    const userKey = await userKeyAnlegen()
+    await tresorVomServer(userKey, { service: 'Bank', username: 'ich', password: 'geheim', category: 'login', createdAt: 1, updatedAt: 10 })
+    const anfragen = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 410,
+      json: async () => ({ detail: { code: 'VAULT_ZURUECKGESETZT', message: 'errors.vault_zurueckgesetzt' } }),
+    } as Response)
+
+    await useVaultStore.getState().toggleFavorite(EINTRAG)
+    await vi.waitFor(() => expect(useVaultStore.getState().zurueckgesetzt).toBe(true))
+    expect(useVaultStore.getState().syncStatus).toBe('error')
+    expect(useVaultStore.getState().items.map((i) => i.id)).toEqual([EINTRAG])
+    expect(warteschlange()).toHaveLength(1)
+
+    // Kein neuer Anlauf, wenn das Netz wiederkommt: hochgeladen würde der gelöschte Tresor.
+    const bisher = anfragen.mock.calls.length
+    window.dispatchEvent(new Event('online'))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(anfragen.mock.calls.length).toBe(bisher)
+
+    // Erst eine neue Sitzung vergisst die Meldung.
+    useVaultStore.getState().lock()
+    expect(useVaultStore.getState().zurueckgesetzt).toBe(false)
+  })
+})

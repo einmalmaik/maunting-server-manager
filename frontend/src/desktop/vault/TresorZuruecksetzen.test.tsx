@@ -15,7 +15,7 @@ import { TresorZuruecksetzen } from './TresorZuruecksetzen'
 import { useVaultStore } from './vaultStore'
 
 const speicher = vi.hoisted(() => ({ wert: { belegt: 0, quote: 1, in_loeschung: 0, blobs: 0 } }))
-vi.mock('./tresorBlobApi', () => ({ speicherAbfragen: vi.fn(async () => speicher.wert), bucketMelderSetzen: vi.fn() }))
+vi.mock('./tresorBlobApi', () => ({ speicherAbfragen: vi.fn(async () => speicher.wert), bucketMelderSetzen: vi.fn(), zurueckgesetztFrage: vi.fn() }))
 
 vi.mock('../tauri', () => ({
   FACH_TRESOR: 'vault_biometric_key',

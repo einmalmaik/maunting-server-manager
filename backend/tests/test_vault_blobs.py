@@ -15,6 +15,7 @@ import struct
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from alembic import command
@@ -31,7 +32,7 @@ from dependencies import get_current_user, get_db, verify_csrf
 from main import app
 from models import Role, RoleVaultQuota, User, VaultBlob, VaultUserSetting
 from services import vault_blob_service, vault_service
-from services.vault_blob_service import CHUNK_CHIFFRAT, CHUNK_UEBERHANG
+from services.vault_blob_service import CHUNK_CHIFFRAT, CHUNK_UEBERHANG, MAX_BLOB_BYTES, PLATTENRESERVE
 
 
 @pytest.fixture
@@ -160,6 +161,8 @@ def test_chunk_mit_falscher_laenge(als, konten):
         (1, CHUNK_CHIFFRAT + 1),
         (2, CHUNK_CHIFFRAT),
         (3, 2 * CHUNK_CHIFFRAT + CHUNK_UEBERHANG),
+        # groesser als ein Blob sein darf, auch wenn Chunks und Bytes zusammenpassen
+        (MAX_BLOB_BYTES // CHUNK_CHIFFRAT + 2, (MAX_BLOB_BYTES // CHUNK_CHIFFRAT + 1) * CHUNK_CHIFFRAT + CHUNK_UEBERHANG + 1),
     ],
 )
 def test_unpassende_groesse_wird_abgelehnt(als, konten, chunk_count, bytes_total):
@@ -192,7 +195,10 @@ def test_loeschen_braucht_den_schluessel(als, konten, db):
     client.post(f"/api/vault/blobs/{blob_id}/fertig")
 
     falsch = secrets.token_hex(32)
-    assert client.request("DELETE", f"/api/vault/blobs/{blob_id}", json={"schluessel": falsch}).status_code == 403
+    abgelehnt = client.request("DELETE", f"/api/vault/blobs/{blob_id}", json={"schluessel": falsch})
+    assert abgelehnt.status_code == 403
+    # Der Client unterscheidet daran „gilt nie“ von CSRF oder abgeschaltetem Tresor.
+    assert abgelehnt.json()["detail"]["code"] == "VAULT_LOESCHNACHWEIS_FALSCH"
     assert client.get(f"/api/vault/blobs/{blob_id}/chunks/0").status_code == 200
 
     assert client.request("DELETE", f"/api/vault/blobs/{blob_id}", json={"schluessel": schluessel}).status_code == 200
@@ -203,6 +209,44 @@ def test_loeschen_braucht_den_schluessel(als, konten, db):
     assert speicher["in_loeschung"] == 100
 
 
+def test_schreibende_blob_routen_brauchen_csrf(db, konten, blob_dir):
+    """Ein Browser schickt die Sitzung ungefragt mit. Ohne CSRF-Nachweis
+    legt keine Route etwas an, schreibt, schliesst ab oder loescht."""
+    eins, _ = konten
+    app.dependency_overrides[get_db] = lambda: (yield db)
+    app.dependency_overrides[get_current_user] = lambda: eins
+    blob_id = _neue_id()
+    try:
+        with TestClient(app) as client:
+            client.cookies.set("__Secure-access_token", "sitzung")
+            schluessel, verifier = _schluessel()
+            antworten = [
+                client.post(
+                    "/api/vault/blobs",
+                    json={"id": blob_id, "chunk_count": 1, "bytes_total": 100, "delete_verifier": verifier},
+                ),
+                _hochladen(client, blob_id, 0, b"x" * 100),
+                client.post(f"/api/vault/blobs/{blob_id}/fertig"),
+                client.post("/api/vault/blobs/klein", json={"ids": [blob_id]}),
+                client.request("DELETE", f"/api/vault/blobs/{blob_id}", json={"schluessel": schluessel}),
+            ]
+    finally:
+        app.dependency_overrides.clear()
+    assert [a.status_code for a in antworten] == [403] * 5
+    assert db.get(VaultBlob, blob_id) is None
+
+
+def test_fremdes_konto_schliesst_keinen_upload_ab(als, konten, db):
+    eins, zwei = konten
+    blob_id, _, antwort = _anlegen(als(eins), 100)
+    assert antwort.status_code == 201
+    assert _hochladen(als(eins), blob_id, 0, b"x" * 100).status_code == 204
+
+    assert als(zwei).post(f"/api/vault/blobs/{blob_id}/fertig").status_code == 404
+    db.expire_all()
+    assert db.get(VaultBlob, blob_id).state == "offen"
+
+
 def test_quote_je_tresor(als, konten, db):
     eins, _ = konten
     _speicher_der_rolle(db, eins, 1000)
@@ -211,6 +255,24 @@ def test_quote_je_tresor(als, konten, db):
     assert _anlegen(client, 600)[2].status_code == 507
     assert _anlegen(client, 400)[2].status_code == 201
     assert client.get("/api/vault/speicher").json() == {"belegt": 1000, "quote": 1000, "in_loeschung": 0, "blobs": 2}
+
+
+def test_chunk_haelt_die_plattenreserve_frei(als, konten, blob_dir, monkeypatch):
+    """Zwei Tresore reservieren je 1000 Bytes, frei sind 1500 ueber der
+    Reserve. Beide bestehen die Pruefung beim Reservieren; erst beim Schreiben
+    darf der zweite die Reserve nicht mehr anbrechen."""
+    eins, zwei = konten
+    frei = {"bytes": PLATTENRESERVE + 1500}
+    monkeypatch.setattr(vault_blob_service.shutil, "disk_usage", lambda _pfad: SimpleNamespace(free=frei["bytes"]))
+    erster, _, a = _anlegen(als(eins), 1000)
+    zweiter, _, b = _anlegen(als(zwei), 1000)
+    assert (a.status_code, b.status_code) == (201, 201)
+
+    assert _hochladen(als(eins), erster, 0, b"x" * 1000).status_code == 204
+    frei["bytes"] -= 1000
+    antwort = _hochladen(als(zwei), zweiter, 0, b"y" * 1000)
+    assert antwort.status_code == 507
+    assert not (blob_dir / zweiter[:2] / zweiter / "0").exists()
 
 
 def test_ohne_rolle_mit_speicher_kein_upload(als, konten, db):
@@ -275,6 +337,27 @@ def test_kleine_blobs_in_einer_antwort(als, konten):
         pos += 4 + laenge
     assert pos == len(antwort)
     assert gelesen == [*inhalte.values(), b"", b"", b""]
+
+
+def test_chunk_upload_haelt_keine_datenbankverbindung_beim_lesen(als, konten, db):
+    """Der Body eines Chunks kann langsam eintroepfeln. Bis 01.10.2026 hielt die
+    Route waehrenddessen eine offene Transaktion: rund 30 langsame Uploads
+    belegten den ganzen Pool, und das Panel stand."""
+    client = als(konten[0])
+    blob_id, _, _ = _anlegen(client, 1000)
+    db.commit()
+    waehrend: list[bool] = []
+
+    def body():
+        yield b"x" * 500
+        waehrend.append(db.in_transaction())
+        yield b"x" * 500
+
+    antwort = client.put(
+        f"/api/vault/blobs/{blob_id}/chunks/0", content=body(), headers={"Content-Type": "application/octet-stream"}
+    )
+    assert antwort.status_code == 204
+    assert waehrend == [False]
 
 
 def test_quote_haelt_bei_zwei_anfragen_zugleich(db, konten, blob_dir):
@@ -382,10 +465,13 @@ def test_migration_hin_und_zurueck(tmp_path: Path, pg_wegwerf) -> None:
         assert "vault_blobs" not in pruefer.get_table_names()
         assert "vault_bucket_formats" not in pruefer.get_table_names()
         assert "role_vault_quotas" not in pruefer.get_table_names()
+        assert "vault_bucket_tombstones" not in pruefer.get_table_names()
 
         command.upgrade(config, "head")
         pruefer = inspect(engine)
-        assert {"vault_blobs", "vault_bucket_formats", "role_vault_quotas"} <= set(pruefer.get_table_names())
+        assert {"vault_blobs", "vault_bucket_formats", "role_vault_quotas", "vault_bucket_tombstones"} <= set(
+            pruefer.get_table_names()
+        )
         # Seit 20261001_01 haengt ein Blob am Bucket, nicht am Konto.
         assert pruefer.get_foreign_keys("vault_blobs") == []
         assert "user_id" not in {s["name"] for s in pruefer.get_columns("vault_blobs")}

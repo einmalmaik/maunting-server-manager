@@ -148,5 +148,7 @@ def prepare_user_deletion(db: Session, user: User) -> None:
         db.delete(personal)
         db.flush()
 
-    vault_service.konto_entfernen(db, tresor)
+    # Tresortabellen haben keinen Fremdschluessel aufs Konto (seit 01.10.2026),
+    # also raeumt keine Kaskade ab: derselbe Weg wie beim Zuruecksetzen.
+    vault_service.tresor_zuruecksetzen(db, tresor)
     db.flush()

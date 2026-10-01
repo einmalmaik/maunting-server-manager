@@ -173,6 +173,8 @@ def test_kontoloeschung_raeumt_den_tresor_ab(client: TestClient, db: Session, ow
 
     for tabelle in ("vault_user_settings", "vault_hints", "vault_entries", "vault_blind_buckets", "vault_bucket_formats"):
         assert db.execute(text(f'SELECT count(*) FROM "{tabelle}"')).scalar() == 0, tabelle
+    # Beerdigt: ein Geraet mit dem alten Tresor spielt ihn nicht zurueck.
+    assert db.execute(text("SELECT bucket_id FROM vault_bucket_tombstones")).scalars().all() == [BUCKET]
     blob = db.get(VaultBlob, blob_id)
     assert blob.state == "geloescht"
     from services import vault_blob_service

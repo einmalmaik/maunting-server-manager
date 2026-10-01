@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import i18n from '@/i18n'
-import { api, apiUrl } from '@/api/client'
+import { SanitizedApiError, api, apiUrl } from '@/api/client'
 import {
   type AutoSperrQuelle,
   fristAbgelaufen,
@@ -55,7 +55,7 @@ import {
   type DateiVersion,
 } from './tresorDateien'
 import { bildAngaben } from './tresorBilder'
-import { bucketMelderSetzen } from './tresorBlobApi'
+import { bucketMelderSetzen, zurueckgesetztFrage } from './tresorBlobApi'
 
 /**
  * Die Arten von Einträgen, die diese Fassung der App anzeigen und bearbeiten
@@ -448,7 +448,7 @@ export async function blindVaultSync(
   })
 
   if (!res.ok) {
-    throw new Error(`Blind vault sync failed with status ${res.status}`)
+    throw new SanitizedApiError(`Blind vault sync failed with status ${res.status}`, { status: res.status })
   }
 
   return (await res.json()) as VaultSyncResponse
@@ -594,6 +594,8 @@ interface VaultState {
   searchQuery: string
   syncStatus: SyncStatus
   lastSyncTime: number | null
+  /** Der Server meldet diesen Tresor als zurückgesetzt (410). Die Kopie hier bleibt, abgeglichen wird nicht mehr. */
+  zurueckgesetzt: boolean
 
   // Auto-Lock & Biometrie
   autoLockMinutes: number
@@ -710,6 +712,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
   searchQuery: '',
   syncStatus: 'synced',
   lastSyncTime: null,
+  zurueckgesetzt: false,
   hasHint: null,
 
   autoLockMinutes: liesSperrfrist(VAULT_SPERR_PRAEFIX, 15),
@@ -908,6 +911,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       // verwirft seine Antwort (siehe `syncWithServer`). Bliebe hier
       // „syncing" stehen, liefe nach dem nächsten Entsperren keiner mehr.
       syncStatus: 'synced',
+      zurueckgesetzt: false,
     })
   },
 
@@ -1638,7 +1642,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
         // Den Nachweis darf nur der angemeldete Besitzer hinterlegen;
         // unauthentifiziert nachzuregistrieren war genau die Lücke, über die
         // sich fremde Tresore übernehmen ließen.
-        const istAuthFehler = err instanceof Error && err.message.includes('401')
+        const istAuthFehler = err instanceof SanitizedApiError && err.status === 401
         if (!istAuthFehler) throw err
         blindAbgewiesen = true
         await api('/api/vault/blind-register', {
@@ -1809,8 +1813,14 @@ export const useVaultStore = create<VaultState>((set, get) => {
       if (!sitzungOffen(userKey, bucketId)) return
       // Bei 401 Unauthorized: Auth-Fehler anzeigen, sonst im Offline-Modus bleiben
       // 426: eine neuere App hat den Tresor hochgestuft, diese muss aktualisiert werden.
+      // 410: auf einem anderen Gerät zurückgesetzt. Die Kopie hier bleibt
+      // unangetastet; sie hochzuladen hieße, den gelöschten Tresor zurückzuholen.
+      if (err instanceof SanitizedApiError && err.status === 410) {
+        set({ syncStatus: 'error', zurueckgesetzt: true })
+        return
+      }
       const isAuthError =
-        blindAbgewiesen || (err instanceof Error && (err.message.includes('401') || err.message.includes('426')))
+        blindAbgewiesen || (err instanceof SanitizedApiError && (err.status === 401 || err.status === 426))
       set({ syncStatus: isAuthError ? 'error' : 'offline' })
     }
   },
@@ -1857,6 +1867,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
 })
 
 bucketMelderSetzen(bucketNeuMelden)
+zurueckgesetztFrage(() => useVaultStore.getState().zurueckgesetzt)
 
 /** Kommt die App früher wieder nach vorn, reicht der letzte Abgleich. */
 const VORDERGRUND_PAUSE_MS = 30_000

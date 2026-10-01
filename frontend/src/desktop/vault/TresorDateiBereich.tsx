@@ -61,7 +61,7 @@ import { useVaultStore, type VaultItem } from './vaultStore'
 import { angeheftet, offlineAnheften, offlineLoesen, useTresorUploads, type UploadFortschritt } from './tresorDateien'
 import { speicherAbfragen, type TresorSpeicher } from './tresorBlobApi'
 import { aufGeraetSpeichern, mehrereAufGeraetSpeichern } from './tresorAnzeige'
-import { dateienUnter, darfAlleVerschieben, darfVerschieben, obersteAuswahl, pfadVon, zielOrdner } from './tresorOrdner'
+import { dateienUnter, darfAlleVerschieben, darfVerschieben, obersteAuswahl, pfadVon, sichtbareEintraege, zielOrdner } from './tresorOrdner'
 import { TresorOrdnerBaum } from './TresorOrdnerBaum'
 import { TresorDateiAnsicht, dateiIcon, oeffnetImEditor } from './TresorDateiAnsicht'
 
@@ -117,8 +117,7 @@ export function TresorDateiBereich() {
   const [rechnerDateiDarueber, setRechnerDateiDarueber] = useState(false)
   const letzterLangdruck = useRef(0)
 
-  const sichtbar = (i: VaultItem) => !i.trashedAt && !i.archivedAt
-  const sichtbareItems = useMemo(() => items.filter(sichtbar), [items])
+  const sichtbareItems = useMemo(() => sichtbareEintraege(items), [items])
   const ordnerListe = useMemo(() => sichtbareItems.filter((i) => i.category === 'ordner'), [sichtbareItems])
 
   // Liegt der geöffnete Ordner nicht mehr da (gelöscht, in den Papierkorb), zurück nach oben.
@@ -844,8 +843,8 @@ function TresorDateiZeile({
     holt !== undefined ? (
       <ProgressBar value={holt * 100} ariaLabel={t('mss.vault.dateien.offlineLaedt')} />
     ) : upload ? (
-      upload.fehler === 'speicherVoll' ? (
-        <span className="text-label-sm text-status-destructive">{t('mss.vault.dateien.speicherVoll')}</span>
+      upload.fehler ? (
+        <span className="text-label-sm text-status-destructive">{t(`mss.vault.dateien.${upload.fehler}`)}</span>
       ) : (
         <ProgressBar value={upload.gesamt > 0 ? (upload.gesendet / upload.gesamt) * 100 : null} ariaLabel={t('mss.vault.dateien.wirdHochgeladen')} />
       )

@@ -357,8 +357,11 @@ in einer sicheren Reihenfolge aus:
 
 Beim finalen Backend-Cutover stoppt nur die alte Control Plane kurz. Danach
 werden ein konsistenter PostgreSQL-Dump, die Backend-Konfiguration, dieselben
-DIS-/Anwendungs-Secrets, Panel-Backups, Community-Blueprints und der
-Setup-Zustand übertragen. Das Ziel behält sein frisch generiertes lokales
+DIS-/Anwendungs-Secrets, Panel-Backups, Community-Blueprints, die
+verschlüsselten Tresor-Dateien (`vault-blobs`) und der Setup-Zustand
+übertragen. Die Tresor-Dateien liegen auf dem Ziel zweimal (Paket und
+entpackt); der Assistent prüft vorher, ob dort und in `/tmp` der Quelle Platz
+dafür ist. Das Ziel behält sein frisch generiertes lokales
 PostgreSQL-Passwort; Datenbank-URLs der Quelle werden nicht übernommen. Nach
 Restore, DIS-, Backend-, Caddy- und Health-Prüfung bleibt die alte Control Plane
 deaktiviert, während ihr eigenständiger Agent weiterläuft. Die Quelle wird nicht
@@ -558,13 +561,15 @@ zugreift.
   Wiederherstellung auf fehlende Dateien. Sichere `/opt/msm/vault-blobs` mit
   der Sicherung des Servers. Der Inhalt ist verschlüsselt und darf auch auf ein
   fremdes Ziel.
-- **Tresor zurücksetzen** löst die Verbindung zum Konto und gibt alle Dateien
-  des Tresors zum Entfernen frei; das nächste stündliche Aufräumen löscht sie.
-  Ohne das alte Master-Passwort ließe sich keine davon je wieder löschen, und
-  sie zählten gegen keinen Speicher mehr. Der Dialog nennt vorher Anzahl und
-  Größe.
-  Ein anderes Gerät, auf dem der alte Tresor noch offen ist, behält seine
-  Einträge, aber nicht die Dateien.
+- **Tresor zurücksetzen** löscht den Tresor ganz, wie das Löschen des
+  Kontos: Einträge, Besitznachweis und Formatsperre sofort, die Dateien beim
+  nächsten stündlichen Aufräumen. Der Dialog nennt vorher Anzahl und Größe der
+  Dateien. Übrig bleibt nur die Kennung des alten Buckets in
+  `vault_bucket_tombstones`, ohne Kontobezug. Jeder Weg, der diesen Bucket
+  beschreibt oder beansprucht, antwortet mit 410 (`VAULT_ZURUECKGESETZT`).
+  Ohne diese Marke hätte ein anderes Gerät mit dem alten Tresor den leeren
+  Bucket neu belegt und seine Kopie wieder hochgeladen. Dieses Gerät behält
+  seine Kopie, gleicht nicht mehr ab und sagt das an.
 - **Ältere App-Versionen:** Sobald ein Tresor Papierkorb, Archiv oder Dateien
   nutzt, nimmt der Server von Apps, die diese Einträge nicht kennen, keinen
   Abgleich mehr an (HTTP 426). Sie würden die Einträge beim Speichern sonst

@@ -8,6 +8,7 @@ import { api, apiStream, SanitizedApiError } from '@/api/client'
 
 let bucketMelder: (() => Promise<void>) | null = null
 let laufendesMelden: Promise<void> | null = null
+let zurueckgesetzt: () => boolean = () => false
 
 /**
  * Der Tresor sagt hier, wie er seinen Bucket beim Server neu hinterlegt. Die
@@ -19,8 +20,18 @@ export function bucketMelderSetzen(melder: (() => Promise<void>) | null): void {
   bucketMelder = melder
 }
 
+/**
+ * Ob der offene Tresor auf einem anderen Gerät zurückgesetzt wurde. Dann geht
+ * keine Datei-Anfrage mehr hinaus: die Routen kennen nur den Bucket des
+ * Kontos, und das wäre schon der eines neuen Tresors.
+ */
+export function zurueckgesetztFrage(frage: () => boolean): void {
+  zurueckgesetzt = frage
+}
+
 /** Meldet auf `VAULT_BUCKET_UNBEKANNT` den Bucket einmal neu und wiederholt. */
 async function mitBucket<T>(anfrage: () => Promise<T>): Promise<T> {
+  if (zurueckgesetzt()) throw new SanitizedApiError('VAULT_ZURUECKGESETZT', { status: 410, code: 'VAULT_ZURUECKGESETZT' })
   try {
     return await anfrage()
   } catch (err) {

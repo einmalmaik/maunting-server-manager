@@ -69,6 +69,7 @@ _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 class BlobFehler(Exception):
     status_code = 400
+    code: str | None = None
 
 
 class BlobNichtGefunden(BlobFehler):
@@ -93,6 +94,9 @@ class SpeicherVoll(BlobFehler):
 
 class LoeschnachweisFalsch(BlobFehler):
     status_code = 403
+    # Eigener Code: 403 kommt auch von CSRF und vom abgeschalteten Tresor, und
+    # danach muss der Client es spaeter noch einmal versuchen.
+    code = "VAULT_LOESCHNACHWEIS_FALSCH"
 
 
 def _jetzt() -> datetime:
@@ -245,6 +249,10 @@ def chunk_schreiben(blob_id: str, index: int, daten: bytes) -> None:
     zwei Anfragen fuer denselben Chunk ueberschreiben sich, mischen sich aber nie."""
     verzeichnis = blob_verzeichnis(blob_id)
     verzeichnis.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # Die Pruefung beim Reservieren bestehen beliebig viele Uploads zugleich;
+    # erst hier, wo geschrieben wird, haelt sie die Reserve wirklich frei.
+    if shutil.disk_usage(verzeichnis).free < len(daten) + PLATTENRESERVE:
+        raise SpeicherVoll("Auf dem Server ist kein Platz mehr frei.")
     zwischen = verzeichnis / f"{index}.{secrets.token_hex(8)}.part"
     try:
         with open(zwischen, "wb") as datei:

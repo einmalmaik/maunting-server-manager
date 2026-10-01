@@ -45,6 +45,7 @@ import { QrScannerModal } from './QrScannerModal'
 import { TresorZuruecksetzen } from './TresorZuruecksetzen'
 import { TresorDateiBereich } from './TresorDateiBereich'
 import { TresorGalerie } from './TresorGalerie'
+import { inhaltVon } from './tresorOrdner'
 import { formatBytes } from '@/components/server/fileHelpers'
 import { setzeTresorSchutz } from '../tauri'
 import {
@@ -79,6 +80,7 @@ export function VaultView() {
     items,
     searchQuery,
     syncStatus,
+    zurueckgesetzt,
     initializeVault,
     unlock,
     unlockWithBiometrics,
@@ -337,9 +339,13 @@ export function VaultView() {
 
   // Endgültig löschen gibt es nur im Papierkorb, und nur nach Rückfrage.
   const handleDeleteItem = async (item: VaultItem) => {
+    const inhalt = item.category === 'ordner' ? inhaltVon(item.id, items).length : 0
     const ok = await confirm({
       title: t('mss.vault.loeschenTitel'),
-      message: t('mss.vault.loeschenFrage', { name: item.service }),
+      // Ein Ordner nimmt seinen Inhalt mit; das muss vor dem Klick dastehen.
+      message: inhalt
+        ? t('mss.vault.loeschenFrageOrdner', { name: item.service, count: inhalt })
+        : t('mss.vault.loeschenFrage', { name: item.service }),
       confirmText: t('mss.vault.endgueltigLoeschen'),
       cancelText: t('common.cancel'),
       danger: true,
@@ -1071,6 +1077,18 @@ export function VaultView() {
           />
         </div>
       </div>
+
+      {zurueckgesetzt && (
+        <div role="alert" className="mx-4 mt-2.5 flex items-start gap-2.5 rounded-2xl border border-status-destructive/30 bg-status-destructive/10 p-3">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-status-destructive/20 text-status-destructive">
+            <ShieldAlert className="h-4 w-4" />
+          </div>
+          <div>
+            <h3 className="text-xs font-bold text-on-surface">{t('mss.vault.anderswoZurueckgesetzt')}</h3>
+            <p className="mt-0.5 text-label-sm text-on-surface-variant">{t('mss.vault.anderswoZurueckgesetztText')}</p>
+          </div>
+        </div>
+      )}
 
       {/* HINWEIS-ERINNERUNG: Wenn nach dem Entsperren noch kein Hinweis hinterlegt ist */}
       {hasHint === false && !dismissedHintReminder && (

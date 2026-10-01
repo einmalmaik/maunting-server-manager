@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
 import { VaultView, restTageImPapierkorb } from './VaultView'
+import { useConfirmStore } from '@/stores/confirmStore'
 import { quelleVon } from './TresorGalerie'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { usePromptStore } from '@/stores/promptStore'
@@ -30,6 +31,7 @@ vi.mock('../tauri', () => ({
 vi.mock('./tresorBlobApi', () => ({
   speicherAbfragen: vi.fn().mockResolvedValue({ belegt: 1024 * 1024, quote: 10 * 1024 * 1024 * 1024, in_loeschung: 0 }),
   bucketMelderSetzen: vi.fn(),
+  zurueckgesetztFrage: vi.fn(),
 }))
 
 vi.mock('./tresorMiniaturen', () => ({
@@ -82,6 +84,10 @@ describe('VaultView: Archiv und Papierkorb', () => {
         eintrag('b', 'Altes Forum', { archivedAt: 5 }),
         eintrag('c', 'Weg damit', { trashedAt: Date.now() - 3 * TAG }),
         eintrag('d', 'urlaub.jpg', { category: 'datei' }),
+        eintrag('o', 'Belege', { category: 'ordner', username: '', password: '', trashedAt: Date.now() }),
+        eintrag('o1', 'quittung.pdf', { category: 'datei', ordner: 'o' }),
+        eintrag('o2', '2025', { category: 'ordner', ordner: 'o' }),
+        eintrag('o3', 'januar.pdf', { category: 'datei', ordner: 'o2' }),
       ],
     })
   })
@@ -111,6 +117,19 @@ describe('VaultView: Archiv und Papierkorb', () => {
 
     fireEvent.click(within(zeile).getByRole('button', { name: new RegExp(i18n.t('mss.vault.wiederherstellen')) }))
     expect(restoreItem).toHaveBeenCalledWith('c')
+    expect(deleteItem).not.toHaveBeenCalled()
+  })
+
+  it('nennt vor dem endgültigen Löschen eines Ordners, wie viel darin mitgeht', async () => {
+    render(<VaultView />)
+    fireEvent.click(reiter('mss.vault.ansicht.papierkorb'))
+    const zeile = screen.getByText('Belege').closest('div.group') as HTMLElement
+    fireEvent.click(within(zeile).getByRole('button', { name: new RegExp(i18n.t('mss.vault.endgueltigLoeschen')) }))
+
+    await vi.waitFor(() =>
+      expect(useConfirmStore.getState().pending?.message).toBe(i18n.t('mss.vault.loeschenFrageOrdner', { name: 'Belege', count: 3 })),
+    )
+    useConfirmStore.getState().resolve(false)
     expect(deleteItem).not.toHaveBeenCalled()
   })
 
@@ -241,6 +260,8 @@ describe('VaultView: Fotos', () => {
         medium('3', 'Screenshot_20260712.png', 'image/png', {}, { aufgenommen: Date.UTC(2026, 6, 12) }),
         medium('4', 'geloescht.jpg', 'image/jpeg', { trashedAt: Date.now() }),
         medium('5', 'vertrag.pdf', 'application/pdf'),
+        eintrag('o', 'Alt', { category: 'ordner', username: '', password: '', trashedAt: Date.now() }),
+        medium('6', 'im-ordner.jpg', 'image/jpeg', { ordner: 'o' }),
         eintrag('al', 'Sommer', { category: 'album', username: '', password: '', album: { eintraege: ['1', '4', '3', 'weg'] } }),
       ],
     })
@@ -261,6 +282,7 @@ describe('VaultView: Fotos', () => {
     ])
     expect(within(juni).getByRole('button', { name: 'wellen.mp4' })).toHaveTextContent('1:15')
     expect(kachel('geloescht.jpg')).toBeNull()
+    expect(kachel('im-ordner.jpg')).toBeNull()
     expect(kachel('vertrag.pdf')).toBeNull()
     expect(screen.queryByText('Bank')).toBeNull()
   })

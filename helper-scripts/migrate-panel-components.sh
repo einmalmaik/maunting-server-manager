@@ -320,11 +320,16 @@ create_runtime_archive() {
     local output="$1" paths=()
     [[ -d "$MSM_DIR/backups/panel" ]] && paths+=("backups/panel")
     [[ -d "$MSM_DIR/blueprints/community" ]] && paths+=("blueprints/community")
+    # Tresor-Dateien liegen nur verschlüsselt auf der Platte, die Datenbank kennt
+    # bloß ihre Kennungen. Ohne sie zeigt das Ziel jede Datei als fehlend.
+    # Ohne Kompression: die Tresor-Dateien sind Chiffrat, gzip kostete hier
+    # nur Zeit, und die laeuft in der Downtime.
+    [[ -d "$MSM_DIR/vault-blobs" ]] && paths+=("vault-blobs")
     [[ -f "$MSM_DIR/.setup_completed" ]] && paths+=(".setup_completed")
     if (( ${#paths[@]} == 0 )); then
-        tar -czf "$output" --files-from /dev/null
+        tar -cf "$output" --files-from /dev/null
     else
-        tar -czf "$output" -C "$MSM_DIR" "${paths[@]}"
+        tar -cf "$output" -C "$MSM_DIR" "${paths[@]}"
     fi
 }
 
@@ -361,7 +366,13 @@ run_backend_migration() {
     "$SOURCE_PYTHON" "$SOURCE_BACKEND/scripts/update_database_backup.py" \
         --env-file "$SOURCE_ENV" --output "$preflight_dump"
     create_code_archive "$code_archive"
-    required_bytes=$(( $(stat -c '%s' "$code_archive") + $(stat -c '%s' "$preflight_dump") * 3 + 2147483648 ))
+    local vault_bytes=0
+    [[ -d "$MSM_DIR/vault-blobs" ]] && vault_bytes="$(du -sb "$MSM_DIR/vault-blobs" | cut -f1)"
+    # Tresor-Dateien liegen auf dem Ziel zweimal: im Paket und entpackt.
+    required_bytes=$(( $(stat -c '%s' "$code_archive") + $(stat -c '%s' "$preflight_dump") * 3 + vault_bytes * 2 + 2147483648 ))
+    local local_free
+    local_free="$(df -PB1 "$WORK_DIR" | awk 'NR==2 {print $4}')"
+    [[ "$local_free" =~ ^[0-9]+$ ]] && (( local_free >= vault_bytes + 1073741824 ))         || fail "Quelle hat in $WORK_DIR zu wenig freien Speicher für das Paket der Tresor-Dateien"
     remote_free="$(ssh_run "df -PB1 /opt 2>/dev/null | awk 'NR==2 {print \$4}' || df -PB1 / | awk 'NR==2 {print \$4}'")"
     [[ "$remote_free" =~ ^[0-9]+$ ]] || fail "Freier Speicher des Ziels konnte nicht ermittelt werden"
     (( remote_free >= required_bytes )) \
@@ -412,7 +423,7 @@ run_backend_migration() {
     local final_dump source_env_copy runtime_archive
     final_dump="$WORK_DIR/panel-final.dump"
     source_env_copy="$WORK_DIR/source.env"
-    runtime_archive="$WORK_DIR/runtime.tar.gz"
+    runtime_archive="$WORK_DIR/runtime.tar"
 
     info "Stoppe die Quell-Control-Plane für den konsistenten finalen Dump..."
     systemctl is-active --quiet msm-update.timer && SOURCE_UPDATE_TIMER_ACTIVE=true
@@ -426,8 +437,8 @@ run_backend_migration() {
 
     scp_to_target "$final_dump" "/tmp/msm-panel-$run_id.dump"
     scp_to_target "$source_env_copy" "/tmp/msm-source-$run_id.env"
-    scp_to_target "$runtime_archive" "/tmp/msm-runtime-$run_id.tar.gz"
-    ssh_run "$REMOTE_SUDO mv '/tmp/msm-panel-$run_id.dump' '$remote_stage/panel.dump' && $REMOTE_SUDO mv '/tmp/msm-source-$run_id.env' '$remote_stage/source.env' && $REMOTE_SUDO mv '/tmp/msm-runtime-$run_id.tar.gz' '$remote_stage/runtime.tar.gz' && $REMOTE_SUDO chmod 600 '$remote_stage/panel.dump' '$remote_stage/source.env' '$remote_stage/runtime.tar.gz'"
+    scp_to_target "$runtime_archive" "/tmp/msm-runtime-$run_id.tar"
+    ssh_run "$REMOTE_SUDO mv '/tmp/msm-panel-$run_id.dump' '$remote_stage/panel.dump' && $REMOTE_SUDO mv '/tmp/msm-source-$run_id.env' '$remote_stage/source.env' && $REMOTE_SUDO mv '/tmp/msm-runtime-$run_id.tar' '$remote_stage/runtime.tar' && $REMOTE_SUDO chmod 600 '$remote_stage/panel.dump' '$remote_stage/source.env' '$remote_stage/runtime.tar'"
 
     info "Stelle Datenbank, Konfiguration, DIS-Schlüssel, Backups und Blueprints auf dem Ziel wieder her..."
     local frontend_arg=""
@@ -456,8 +467,9 @@ sudo -u postgres pg_restore --clean --if-exists --no-owner --role=msm \
     --api-origin "\$api_origin" $frontend_arg
 install -o msm -g msm -m 600 "\$stage/backend.env" /opt/msm/backend/.env
 install -o msm -g msm -m 600 "\$stage/dis.env" /opt/msm/dis-sidecar/.env
-tar -xzf "\$stage/runtime.tar.gz" -C /opt/msm
-chown -R msm:msm /opt/msm/backups /opt/msm/blueprints 2>/dev/null || true
+tar -xf "\$stage/runtime.tar" -C /opt/msm
+chown -R msm:msm /opt/msm/backups /opt/msm/blueprints /opt/msm/vault-blobs 2>/dev/null || true
+chmod 700 /opt/msm/vault-blobs 2>/dev/null || true
 systemctl restart msm-dis-sidecar.service
 systemctl restart msm-panel.service
 deadline=\$((SECONDS + 180))

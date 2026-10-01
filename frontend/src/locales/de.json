@@ -3849,6 +3849,8 @@
     "invalid_workshop_id": "Ungültige Workshop-ID.",
     "server_lifecycle_already_running": "Es läuft bereits eine Server-Lebenszyklus-Operation (Start/Stop/Neustart). Bitte warte, bis die aktuelle Operation abgeschlossen ist oder nutze im Notfall den Kill-Button.",
     "database_server_forbidden": "Dir fehlt das Recht, Datenbankserver zu erstellen.",
+    "vault_zurueckgesetzt": "Dieser Tresor wurde auf einem anderen Gerät zurückgesetzt.",
+    "vault_loeschnachweis_falsch": "Diese Datei lässt sich mit diesem Schlüssel nicht löschen.",
     "vault_bucket_unbekannt": "Der Server kennt diesen Tresor nicht mehr. Wurde er auf einem anderen Gerät zurückgesetzt?",
     "install_directory_create_failed": "Das Serververzeichnis ließ sich nicht anlegen. Prüfe, ob das Panel bzw. die Node in den Server-Ordner schreiben darf.",
     "install_directory_exists": "Für diesen Server gibt es schon ein Verzeichnis. Entferne es oder lege den Server neu an.",
@@ -4135,7 +4137,7 @@
         },
         "3": {
           "title": "Backend auslagern",
-          "description": "Installiert das frische Ziel vorab, übernimmt die vom Owner bestätigte Node-ID automatisch und überträgt beim kurzen Cutover Panel-Datenbank, Konfiguration, DIS-Secrets, Panel-Backups und Community-Blueprints."
+          "description": "Installiert das frische Ziel vorab, übernimmt die vom Owner bestätigte Node-ID automatisch und überträgt beim kurzen Cutover Panel-Datenbank, Konfiguration, DIS-Secrets, Panel-Backups, Community-Blueprints und die verschlüsselten Tresor-Dateien."
         }
       },
       "externalBoundary": "Den DNS-A/AAAA-Eintrag beim externen Anbieter und die einmalige Owner-Freigabe eines neuen Agents kann MSM nicht selbst übernehmen. Diese Grenzen werden deutlich angezeigt und nicht umgangen.",
@@ -4506,7 +4508,7 @@
       },
       "reset": {
         "title": "Tresor zurücksetzen",
-        "body": "Löst die Verbindung zum Konto und gibt alle Dateien des Tresors zum Entfernen frei; das nächste stündliche Aufräumen löscht sie. Ohne das alte Master-Passwort ließe sich keine je wieder löschen. Der Dialog nennt vorher Anzahl und Größe."
+        "body": "Löscht den Tresor ganz, wie das Löschen des Kontos: Einträge sofort, Dateien beim nächsten stündlichen Aufräumen. Übrig bleibt nur die Kennung des alten Buckets (`vault_bucket_tombstones`), damit ein anderes Gerät ihn nicht wieder hochlädt; dort antwortet jeder Abgleich mit 410. Der Dialog nennt vorher Anzahl und Größe der Dateien."
       },
       "altApps": {
         "title": "Ältere App-Versionen",
@@ -4723,7 +4725,7 @@
           "dateien": "Dateien und Fotos werden auf dem Gerät in Stücken verschlüsselt, jede Datei mit eigenem Schlüssel, und als drei Teile abgelegt: Original, Vorschau und Miniatur. Name, Dateityp, Aufnahmedatum, Aufnahmeort, Kamera und genaue Größe stehen nur im verschlüsselten Eintrag. Die Instanz sieht je Tresor, wie viele Teile es gibt, wie groß sie aufgerundet sind, wann sie hochgeladen wurden und dass jeweils drei zusammengehören.",
           "speicher": "Welchem Konto ein Tresor gehört, steht in der Datenbank nur als Prüfwert, den allein die Instanz mit ihrem Schlüssel bilden kann. Wer nur die Datenbank liest, etwa in einer Sicherung, kann Tresor und Dateien keinem Konto zuordnen. Die Instanz stellt die Zuordnung her, solange Sie angemeldet darauf zugreifen, und zählt so, wie viel Speicher Ihr Tresor belegt; wie viel er belegen darf, legt der Betreiber über Ihre Rollen fest. Wer Zugriff auf den Server selbst hat, kann die Zuordnung ebenfalls herstellen. Gelöschte Dateien bleiben noch 7 Tage verschlüsselt auf dem Server und zählen so lange mit, danach werden sie entfernt. Abgebrochene Uploads verschwinden nach 24 Stunden.",
           "geraet": "Damit der Tresor ohne Verbindung funktioniert, liegen Einträge, Miniaturen und Vorschauen verschlüsselt im Speicher des Geräts, dazu Originale, die Sie offline verfügbar machen oder zuletzt geöffnet haben. Dieser Speicher gehört Ihrem Konto. Speichern Sie eine Datei ausdrücklich auf dem Gerät, liegt diese Kopie dort unverschlüsselt.",
-          "verlust": "Ohne Master-Passwort kann niemand den Tresor öffnen, auch der Betreiber nicht. Wer es vergisst, kann den Tresor nur zurücksetzen: Die Einträge bleiben dann unlesbar, und alle Dateien werden innerhalb einer Stunde entfernt. Löschen Sie Ihr Konto, entfernt die Instanz Einträge und Dateien Ihres Tresors."
+          "verlust": "Ohne Master-Passwort kann niemand den Tresor öffnen, auch der Betreiber nicht. Wer es vergisst, kann den Tresor nur zurücksetzen. Dabei, wie beim Löschen Ihres Kontos, entfernt die Instanz alle Einträge sofort und alle Dateien innerhalb einer Stunde. Sie behält nur die Kennung des alten Tresors, damit ein anderes Gerät ihn nicht wieder hochlädt; diese Kennung verrät weder Konto noch Inhalt."
         }
       },
       "providers": {
@@ -6073,6 +6075,8 @@
       "speichernFehlgeschlagen": "Das Speichern hat nicht geklappt.",
       "loeschenTitel": "Eintrag löschen",
       "loeschenFrage": "Möchtest du „{{name}}\" wirklich unwiderruflich aus dem Tresor löschen?",
+      "loeschenFrageOrdner_one": "Möchtest du den Ordner „{{name}}\" samt {{count}} Eintrag darin unwiderruflich löschen?",
+      "loeschenFrageOrdner_other": "Möchtest du den Ordner „{{name}}\" samt {{count}} Einträgen darin unwiderruflich löschen?",
       "geloescht": "Gelöscht.",
       "loeschenFehlgeschlagen": "Das Löschen hat nicht geklappt.",
       "leer": "Keine Passwörter hinterlegt",
@@ -6101,6 +6105,8 @@
       "hinweisGespeichert": "Der Passwort-Hinweis ist gespeichert.",
       "hinweisHinterlegt": "Der Passwort-Hinweis ist hinterlegt.",
       "hinweisSpeichernFehlgeschlagen": "Der Hinweis konnte nicht gespeichert werden.",
+      "anderswoZurueckgesetzt": "Auf einem anderen Gerät zurückgesetzt",
+      "anderswoZurueckgesetztText": "Dieser Tresor wird nicht mehr abgeglichen. Was du hier siehst, liegt nur noch auf diesem Gerät und öffnet sich hier weiter mit dem alten Master-Passwort.",
       "keinHinweisHinterlegt": "Kein Notfall-Passwort-Hinweis hinterlegt",
       "hinweisVorhanden": "Aktuell ist ein Hinweis hinterlegt",
       "hinweisFehlt": "Noch kein Hinweis hinterlegt",
@@ -6111,7 +6117,7 @@
         "link": "Master-Passwort vergessen? Tresor zurücksetzen",
         "titel": "Tresor zurücksetzen",
         "warnungTitel": "Alle Einträge gehen verloren",
-        "warnungText": "Ohne Master-Passwort kann niemand deine Einträge entschlüsseln, auch der Server nicht. Nach dem Zurücksetzen richtest du einen neuen, leeren Tresor ein. Geräte, auf denen der alte Tresor noch offen ist, behalten ihn, bis du ihn dort ebenfalls zurücksetzt.",
+        "warnungText": "Ohne Master-Passwort kann niemand deine Einträge entschlüsseln, auch der Server nicht. Der Server löscht den alten Tresor ganz, danach richtest du einen neuen, leeren ein. Deine anderen Geräte gleichen den alten nicht mehr ab; was dort gerade offen ist, bleibt nur dort.",
         "dateien": "Auch die Dateien gehen verloren: {{anzahl}} Dateien und frühere Fassungen, zusammen {{groesse}}. Der Server löscht sie innerhalb einer Stunde.",
         "passwortLabel": "Konto-Passwort bestätigen",
         "otpLabel": "Code aus der Authenticator-App",
@@ -6208,6 +6214,7 @@
         "ordner": "Ordner",
         "unlesbar": "Diese Datei kann die App nicht lesen.",
         "speicherVoll": "Kein Speicher frei",
+        "abgelehnt": "Abgewiesen, neuer Versuch folgt",
         "wirdHochgeladen": "Wird hochgeladen",
         "aktionen": "Aktionen",
         "umbenennen": "Umbenennen",

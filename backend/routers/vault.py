@@ -72,12 +72,14 @@ def _eigener_bucket(
     try:
         bucket = vault_service.eigener_bucket(db, konto)
     except vault_service.VaultOhneBucket as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "VAULT_BUCKET_UNBEKANNT", "message": "errors.vault_bucket_unbekannt"},
-        ) from exc
+        raise _mit_code(status.HTTP_409_CONFLICT, "VAULT_BUCKET_UNBEKANNT") from exc
     db.commit()
     return bucket
+
+
+def _mit_code(status_code: int, code: str) -> HTTPException:
+    """Fehler mit Code; die App uebersetzt ``errors.<code>``."""
+    return HTTPException(status_code=status_code, detail={"code": code, "message": f"errors.{code.lower()}"})
 
 
 @router.post("/blind-sync", response_model=VaultSyncResponse)
@@ -97,6 +99,8 @@ def sync_vault_blind(
     _check_vault_enabled()
     try:
         return vault_service.sync_vault_blind(db, payload)
+    except vault_service.VaultZurueckgesetzt as exc:
+        raise _mit_code(status.HTTP_410_GONE, "VAULT_ZURUECKGESETZT") from exc
     except vault_service.VaultClientZuAlt as exc:
         raise HTTPException(status_code=status.HTTP_426_UPGRADE_REQUIRED, detail=str(exc)) from exc
     except vault_service.VaultBucketUnauthorized as exc:
@@ -154,6 +158,8 @@ def register_blind_vault_bucket(
     _check_vault_enabled()
     try:
         vault_service.register_blind_bucket(db, konto, payload.bucket_id, payload.auth_token)
+    except vault_service.VaultZurueckgesetzt as exc:
+        raise _mit_code(status.HTTP_410_GONE, "VAULT_ZURUECKGESETZT") from exc
     except vault_service.VaultBucketAccessDenied as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except vault_service.VaultBucketAlreadyBound as exc:
@@ -179,6 +185,8 @@ def sync_vault_entries(
     _check_vault_enabled()
     try:
         return vault_service.sync_vault(db, konto, payload)
+    except vault_service.VaultZurueckgesetzt as exc:
+        raise _mit_code(status.HTTP_410_GONE, "VAULT_ZURUECKGESETZT") from exc
     except vault_service.VaultClientZuAlt as exc:
         raise HTTPException(status_code=status.HTTP_426_UPGRADE_REQUIRED, detail=str(exc)) from exc
     except vault_service.VaultBucketAccessDenied as exc:
@@ -226,6 +234,8 @@ def set_vault_salt(
             payload.bucket_id,
             payload.auth_token,
         )
+    except vault_service.VaultZurueckgesetzt as exc:
+        raise _mit_code(status.HTTP_410_GONE, "VAULT_ZURUECKGESETZT") from exc
     except vault_service.VaultBucketAccessDenied as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -341,6 +351,8 @@ async def send_vault_hint(
 
 
 def _blob_fehler(exc: vault_blob_service.BlobFehler) -> HTTPException:
+    if exc.code:
+        return _mit_code(exc.status_code, exc.code)
     return HTTPException(status_code=exc.status_code, detail=str(exc))
 
 
@@ -389,13 +401,16 @@ async def blob_chunk_hochladen(
 ) -> Response:
     """Nimmt einen Chunk als rohe Bytes an. Laenge exakt wie angemeldet, sonst 413/422.
 
-    Datenbank und Platte laufen im Threadpool, nacheinander mit derselben Sitzung.
+    Datenbank und Platte laufen im Threadpool. Die Sitzung ist frei, bevor der Body gelesen wird.
     """
     await run_in_threadpool(_check_vault_enabled)
     try:
         erwartet = await run_in_threadpool(vault_blob_service.laenge_fuer_upload, db, bucket, blob_id, index)
     except vault_blob_service.BlobFehler as exc:
         raise _blob_fehler(exc) from exc
+    # Der Body kann langsam kommen. Solange er laeuft, haelt die Route keine
+    # Verbindung aus dem Pool, sonst legen ein paar langsame Uploads das Panel lahm.
+    await run_in_threadpool(db.rollback)
 
     daten = bytearray()
     async for teil in request.stream():
@@ -405,7 +420,10 @@ async def blob_chunk_hochladen(
     if len(daten) != erwartet:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Chunk hat die falsche Laenge.")
 
-    await run_in_threadpool(vault_blob_service.chunk_schreiben, blob_id, index, bytes(daten))
+    try:
+        await run_in_threadpool(vault_blob_service.chunk_schreiben, blob_id, index, bytes(daten))
+    except vault_blob_service.BlobFehler as exc:
+        raise _blob_fehler(exc) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
