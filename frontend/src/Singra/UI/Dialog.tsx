@@ -2,10 +2,12 @@ import React, { createContext, useContext, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
+import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
 
 interface DialogContextValue {
   open: boolean
   onOpenChange: (open: boolean) => void
+  escapeSchliesst: boolean
 }
 
 const DialogContext = createContext<DialogContextValue | null>(null)
@@ -14,11 +16,13 @@ export interface DialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   children: React.ReactNode
+  /** Aus, wo Escape dem Inhalt gehört (Suche im Editor). Zurück schließt trotzdem. */
+  escapeSchliesst?: boolean
 }
 
-export function Dialog({ open, onOpenChange, children }: DialogProps) {
+export function Dialog({ open, onOpenChange, children, escapeSchliesst = true }: DialogProps) {
   return (
-    <DialogContext.Provider value={{ open, onOpenChange }}>
+    <DialogContext.Provider value={{ open, onOpenChange, escapeSchliesst }}>
       {open ? children : null}
     </DialogContext.Provider>
   )
@@ -48,6 +52,9 @@ export function DialogContent({
     throw new Error('DialogContent must be used within a Dialog')
   }
 
+  // Der Inhalt existiert nur, solange der Dialog offen ist: Zurück schließt ihn.
+  useZurueckSchliesst(true, () => ctx.onOpenChange(false))
+
   const dialogRef = useRef<HTMLDivElement>(null)
   const previousFocus = useRef<HTMLElement | null>(
     typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -56,6 +63,7 @@ export function DialogContent({
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (!ctx.escapeSchliesst) return
         e.preventDefault()
         ctx.onOpenChange(false)
         return

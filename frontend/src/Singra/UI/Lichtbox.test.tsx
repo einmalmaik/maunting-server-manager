@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { useState } from 'react'
 import { Lichtbox } from './Lichtbox'
@@ -116,5 +116,15 @@ describe('Lichtbox', () => {
     expect(huelle.style.transform).toBe('')
     expect(huelle.className).toContain('h-full')
     expect(huelle.parentElement!.className).not.toContain('touch-none')
+  })
+
+  it('schließt mit der Zurück-Taste', async () => {
+    // Ein Vortest kann beim Aufräumen noch einen Schritt zurück laufen haben.
+    await waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    render(<Aufbau />)
+    fireEvent.click(screen.getByText('öffnen'))
+    await waitFor(() => expect(window.history.state?.msmTiefe).toBe(1))
+    act(() => window.history.back())
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 })

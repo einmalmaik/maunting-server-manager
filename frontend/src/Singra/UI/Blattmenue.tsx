@@ -17,6 +17,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreVertical } from 'lucide-react'
+import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
 
 const FOKUSSIERBAR =
   'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -34,6 +35,7 @@ export interface BlattmenueProps {
 export function Blattmenue({ offen, onSchliessen, titel, children, className = '' }: BlattmenueProps) {
   const blatt = useRef<HTMLDivElement>(null)
   const vorherigerFokus = useRef<HTMLElement | null>(null)
+  useZurueckSchliesst(offen, onSchliessen)
 
   useEffect(() => {
     if (!offen) return

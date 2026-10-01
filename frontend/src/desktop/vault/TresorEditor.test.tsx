@@ -3,7 +3,7 @@
  * selbst prüft `tresorDateien.test.ts` („Bearbeiten“).
  */
 
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import { useConfirmStore } from '@/stores/confirmStore'
@@ -125,5 +125,29 @@ describe('Texteditor', () => {
     await Promise.resolve()
     expect(fertig).not.toHaveBeenCalled()
     expect(dateiErsetzen).not.toHaveBeenCalled()
+  })
+
+  it('schließt mit der Zurück-Taste, aber nicht mit Escape', async () => {
+    await vi.waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    const fertig = vi.fn()
+    render(<TresorTexteditor item={item} text="alt" onFertig={fertig} />)
+    await screen.findByLabelText('inhalt')
+    // Escape gehört der Suche im Editor.
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(fertig).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(window.history.state?.msmTiefe).toBe(1))
+    act(() => window.history.back())
+    await vi.waitFor(() => expect(fertig).toHaveBeenCalledWith(null))
+  })
+
+  it('fragt bei Zurück nach, wenn noch etwas ungespeichert ist', async () => {
+    await vi.waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    const fertig = vi.fn()
+    render(<TresorTexteditor item={item} text="alt" onFertig={fertig} />)
+    fireEvent.change(await screen.findByLabelText('inhalt'), { target: { value: 'neu' } })
+    await vi.waitFor(() => expect(window.history.state?.msmTiefe).toBe(1))
+    act(() => window.history.back())
+    await vi.waitFor(() => expect(useConfirmStore.getState().pending).not.toBeNull())
+    expect(fertig).not.toHaveBeenCalled()
   })
 })

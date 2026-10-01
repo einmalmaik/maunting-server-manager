@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle } from 'lucide-react'
 import { usePromptStore } from '@/stores/promptStore'
+import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
 import { Button } from './Button'
 
 /** Globaler Prompt-Dialog. Genau einmal in der App montieren (siehe App.tsx).
@@ -16,6 +18,7 @@ export function PromptDialog() {
   const { t } = useTranslation()
   const pending = usePromptStore((s) => s.pending)
   const resolve = usePromptStore((s) => s.resolve)
+  useZurueckSchliesst(!!pending, () => resolve(null))
   const [value, setValue] = useState('')
 
   // Eingabefeld beim Oeffnen vorbelegen.
@@ -71,7 +74,9 @@ export function PromptDialog() {
     ? value === pending.expectedValue
     : value.trim().length > 0
 
-  return (
+  // Per Portal an body, nach allem, was schon offen ist: im App-Baum lag die
+  // Rückfrage hinter dem Vollbild-Editor, der selbst per Portal an body hängt.
+  return createPortal(
     <div
       className="msm-modal-overlay"
       onClick={() => resolve(null)}
@@ -128,6 +133,7 @@ export function PromptDialog() {
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

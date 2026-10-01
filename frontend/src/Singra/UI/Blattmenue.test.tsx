@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { Blatteintrag, Blattknopf } from './Blattmenue'
@@ -82,5 +82,22 @@ describe('Blattknopf', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Mehr' }))
     fireEvent.click(screen.getByText('Verlauf löschen'))
     expect(gerufen).not.toHaveBeenCalled()
+  })
+})
+
+describe('Blattmenü und Zurück-Taste', () => {
+  it('schließt das Blatt mit Zurück', async () => {
+    // Ein Vortest kann beim Aufräumen noch einen Schritt zurück laufen haben.
+    await waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    render(
+      <Blattknopf label="Mehr" titel="Chat">
+        <Blatteintrag label="Stummschalten" onClick={() => undefined} />
+      </Blattknopf>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Mehr' }))
+    expect(screen.getByText('Stummschalten')).toBeInTheDocument()
+    await waitFor(() => expect(window.history.state?.msmTiefe).toBe(1))
+    act(() => window.history.back())
+    await waitFor(() => expect(screen.queryByText('Stummschalten')).not.toBeInTheDocument())
   })
 })

@@ -16,6 +16,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { ChevronLeft, ChevronRight, Info, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
 
 export interface LichtboxProps {
   /** Kennung des gezeigten Elements; wechselt sie, springt der Zoom zurück. */
@@ -65,6 +66,7 @@ export function Lichtbox({
   children,
 }: LichtboxProps) {
   const { t } = useTranslation()
+  useZurueckSchliesst(true, onSchliessen)
   const rahmen = useRef<HTMLDivElement>(null)
   const vorherFokus = useRef<HTMLElement | null>(
     typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null,

@@ -3,7 +3,7 @@
  * Dateien vom Rechner in einen Ordner, Rechtsklick, Ansicht und Editor,
  * Mehrfachauswahl mit Sammelaktionen.
  */
-import { createEvent, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, createEvent, fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import { TresorDateiBereich, ZIEH_TYP } from './TresorDateiBereich'
@@ -254,6 +254,15 @@ describe('TresorDateiBereich', () => {
       Object.defineProperty(maus, 'pointerType', { value: 'mouse' })
       fireEvent(li, maus)
       expect(fireEvent.dragStart(li, { dataTransfer: transfer() })).toBe(true)
+    })
+
+    it('beendet die Auswahl mit der Zurück-Taste', async () => {
+      await vi.waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+      render(<TresorDateiBereich />)
+      fireEvent.click(eintrag('vertrag.pdf'), { ctrlKey: true })
+      await vi.waitFor(() => expect(window.history.state?.msmTiefe).toBe(1))
+      act(() => window.history.back())
+      await vi.waitFor(() => expect(screen.queryAllByRole('toolbar')).toHaveLength(0))
     })
 
     it('hebt die Auswahl beim Ordnerwechsel auf', async () => {

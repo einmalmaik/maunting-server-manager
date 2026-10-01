@@ -114,7 +114,8 @@ export function TresorTexteditor({ item: anfang, text, ort, ansicht, onFertig }:
   }
 
   return (
-    <Dialog open onOpenChange={() => undefined}>
+    // Escape gehört der Suche im Editor; Zurück schließt (mit Rückfrage bei Ungesichertem).
+    <Dialog open onOpenChange={(offen) => !offen && void schliessen()} escapeSchliesst={false}>
       <DialogContent
         // Vollbild bis an den Rand: Status- und Gestenleiste hält der Editor selbst frei.
         className="h-[100dvh] max-w-none rounded-none border-0 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]"

@@ -54,6 +54,7 @@ import { toast } from '@/stores/toastStore'
 import { prompt } from '@/stores/promptStore'
 import { formatBytes } from '@/components/server/fileHelpers'
 import { useLangdruck } from '@/hooks/useLangdruck'
+import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
 import { ZipZuGross } from '@/lib/zipSchreiben'
 import { cx } from '@/utils/classNames'
 import { useVaultStore, type VaultItem } from './vaultStore'
@@ -95,6 +96,11 @@ export function TresorDateiBereich() {
   const [menue, setMenue] = useState<{ item: VaultItem; x: number; y: number; ausloeser: HTMLElement } | null>(null)
   /** Gewählte Einträge; `null` heißt: keine Auswahl. */
   const [auswahl, setAuswahl] = useState<Set<string> | null>(null)
+  // Am Handy beendet Zurück die Auswahl, nicht die App.
+  useZurueckSchliesst(auswahl !== null, () => {
+    setAuswahl(null)
+    setAnker(null)
+  })
   /** Ausgangspunkt für Umschalt-Klick. */
   const [anker, setAnker] = useState<string | null>(null)
   /** Eine laufende Sammelaktion (Offline, Zip), mit Fortschritt. */

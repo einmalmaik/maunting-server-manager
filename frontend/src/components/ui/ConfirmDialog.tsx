@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle } from 'lucide-react'
 import { useConfirmStore } from '@/stores/confirmStore'
+import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
 import { Button } from './Button'
 
 /** Globaler Confirm-Dialog. Genau einmal in der App montieren (siehe App.tsx).
@@ -14,6 +16,7 @@ export function ConfirmDialog() {
   const { t } = useTranslation()
   const pending = useConfirmStore((s) => s.pending)
   const resolve = useConfirmStore((s) => s.resolve)
+  useZurueckSchliesst(!!pending, () => resolve(false))
 
   // Escape zum Abbrechen — Standard-Verhalten fuer Modals. Enter triggert den
   // Confirm-Button (er hat autofocus), das deckt die OK-via-Tastatur ab.
@@ -50,7 +53,9 @@ export function ConfirmDialog() {
   const confirmText = pending.confirmText ?? t('common.confirm')
   const cancelText = pending.cancelText ?? t('common.cancel')
 
-  return (
+  // Per Portal an body, nach allem, was schon offen ist: im App-Baum lag die
+  // Rückfrage hinter dem Vollbild-Editor, der selbst per Portal an body hängt.
+  return createPortal(
     <div
       className="msm-modal-overlay"
       onClick={() => resolve(false)}
@@ -98,6 +103,7 @@ export function ConfirmDialog() {
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
