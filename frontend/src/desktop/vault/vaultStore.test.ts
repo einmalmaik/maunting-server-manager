@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import i18n from '@/i18n'
 import {
   useVaultStore,
@@ -821,3 +821,73 @@ describe('useVaultStore - Security & Operations', () => {
 })
 
 
+
+describe('Abgleich, wenn das Netz zurückkommt', () => {
+  const original = useVaultStore.getState().syncWithServer
+  let sync: ReturnType<typeof vi.fn>
+
+  const offen = (stand: Partial<ReturnType<typeof useVaultStore.getState>> = {}) =>
+    useVaultStore.setState({
+      isUnlocked: true,
+      userKey: {} as CryptoKey,
+      bucketId: 'b'.repeat(64),
+      syncStatus: 'offline',
+      lastSyncTime: null,
+      syncWithServer: sync as unknown as () => Promise<void>,
+      ...stand,
+    })
+
+  const sichtbar = () => {
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+
+  beforeEach(() => {
+    sync = vi.fn().mockResolvedValue(undefined)
+  })
+
+  afterEach(() => {
+    useVaultStore.setState({ userKey: null, bucketId: null, isUnlocked: false, syncStatus: 'synced', syncWithServer: original })
+  })
+
+  it('gleicht einen offenen Tresor ab, sobald das Netz zurück ist', () => {
+    offen()
+    window.dispatchEvent(new Event('online'))
+    expect(sync).toHaveBeenCalledTimes(1)
+  })
+
+  it('fasst einen gesperrten Tresor nicht an', () => {
+    offen({ isUnlocked: false, userKey: null, bucketId: null })
+    window.dispatchEvent(new Event('online'))
+    expect(sync).not.toHaveBeenCalled()
+  })
+
+  it('versucht es nach einer Abweisung nicht von selbst', () => {
+    offen({ syncStatus: 'error' })
+    window.dispatchEvent(new Event('online'))
+    expect(sync).not.toHaveBeenCalled()
+  })
+
+  it('holt nach, wenn das Netz während eines laufenden Abgleichs zurückkommt', () => {
+    offen({ syncStatus: 'syncing' })
+    window.dispatchEvent(new Event('online'))
+    expect(sync).not.toHaveBeenCalled()
+    // Der laufende scheitert noch am alten Netz.
+    useVaultStore.setState({ syncStatus: 'offline' })
+    expect(sync).toHaveBeenCalledTimes(1)
+  })
+
+  it('gleicht beim Zurückholen der App ab, aber nicht direkt nach einem Abgleich', () => {
+    offen({ syncStatus: 'synced', lastSyncTime: Date.now() - 5_000 })
+    sichtbar()
+    expect(sync).not.toHaveBeenCalled()
+
+    useVaultStore.setState({ lastSyncTime: Date.now() - 60_000 })
+    sichtbar()
+    expect(sync).toHaveBeenCalledTimes(1)
+
+    useVaultStore.setState({ syncStatus: 'offline', lastSyncTime: Date.now() - 5_000 })
+    sichtbar()
+    expect(sync).toHaveBeenCalledTimes(2)
+  })
+})

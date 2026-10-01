@@ -1858,6 +1858,44 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
 bucketMelderSetzen(bucketNeuMelden)
 
+/** Kommt die App früher wieder nach vorn, reicht der letzte Abgleich. */
+const VORDERGRUND_PAUSE_MS = 30_000
+let abgleichNachholen = false
+
+/**
+ * Ein offener Tresor gleicht selbst ab, wenn das Netz zurückkommt oder die App
+ * wieder nach vorn kommt; offline Gespeichertes ging sonst erst beim nächsten
+ * Entsperren oder Speichern hinaus. Nach einem Fehler (abgewiesen, App zu alt)
+ * nicht von selbst: das klärt der Sync-Knopf.
+ */
+export function abgleichAnstossen(anlass: 'netz' | 'vordergrund'): void {
+  const { userKey, bucketId, syncStatus, lastSyncTime } = useVaultStore.getState()
+  if (!userKey || !bucketId || syncStatus === 'error') return
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+  if (syncStatus === 'syncing') {
+    // Der laufende Abgleich kann noch am alten, toten Netz scheitern.
+    abgleichNachholen = true
+    return
+  }
+  if (anlass === 'vordergrund' && syncStatus === 'synced' && lastSyncTime && Date.now() - lastSyncTime < VORDERGRUND_PAUSE_MS) {
+    return
+  }
+  void useVaultStore.getState().syncWithServer()
+}
+
+useVaultStore.subscribe((jetzt, vorher) => {
+  if (!abgleichNachholen || vorher.syncStatus !== 'syncing' || jetzt.syncStatus === 'syncing') return
+  abgleichNachholen = false
+  abgleichAnstossen('netz')
+})
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => abgleichAnstossen('netz'))
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') abgleichAnstossen('vordergrund')
+  })
+}
+
 /**
  * Was `useAutoSperre` braucht, um den Tresor zu bewachen.
  *
