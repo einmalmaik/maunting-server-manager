@@ -29,7 +29,7 @@ from config import settings
 from database import Base
 from dependencies import get_current_user, get_db, verify_csrf
 from main import app
-from models import User, VaultBlob
+from models import Role, RoleVaultQuota, User, VaultBlob
 from services import vault_blob_service, vault_service
 from services.vault_blob_service import CHUNK_CHIFFRAT, CHUNK_UEBERHANG
 
@@ -43,11 +43,21 @@ def blob_dir(tmp_path, monkeypatch):
 
 @pytest.fixture
 def konten(db):
-    eins = User(id=1, username="eins", email="eins@example.com", password_hash="x", is_active=True)
-    zwei = User(id=2, username="zwei", email="zwei@example.com", password_hash="x", is_active=True)
+    """Zwei Konten mit einer gemeinsamen Rolle, die 10 GB Tresorspeicher gibt."""
+    rolle = Role(name="tresor", description=None, is_system=False)
+    db.add(rolle)
+    db.flush()
+    db.add(RoleVaultQuota(role_id=rolle.id, quota_bytes=10 * 1024**3))
+    eins = User(id=1, username="eins", email="eins@example.com", password_hash="x", is_active=True, role_id=rolle.id)
+    zwei = User(id=2, username="zwei", email="zwei@example.com", password_hash="x", is_active=True, role_id=rolle.id)
     db.add_all([eins, zwei])
     db.commit()
     return eins, zwei
+
+
+def _speicher_der_rolle(db, user: User, quota_bytes: int) -> None:
+    db.get(RoleVaultQuota, user.role_id).quota_bytes = quota_bytes
+    db.commit()
 
 
 @pytest.fixture
@@ -185,13 +195,23 @@ def test_loeschen_braucht_den_schluessel(als, konten, db):
 
 def test_quote_je_konto(als, konten, db):
     eins, _ = konten
-    eins.vault_quota_bytes = 1000
-    db.commit()
+    _speicher_der_rolle(db, eins, 1000)
     client = als(eins)
     assert _anlegen(client, 600)[2].status_code == 201
     assert _anlegen(client, 600)[2].status_code == 507
     assert _anlegen(client, 400)[2].status_code == 201
     assert client.get("/api/vault/speicher").json() == {"belegt": 1000, "quote": 1000, "in_loeschung": 0, "blobs": 2}
+
+
+def test_ohne_rolle_mit_speicher_kein_upload(als, konten, db):
+    """Speicher kommt nur ueber eine Rolle. Ohne sie bleibt der Upload zu,
+    und die Anzeige sagt 0 statt einer Vorgabe."""
+    eins, _ = konten
+    eins.role_id = None
+    db.commit()
+    client = als(eins)
+    assert _anlegen(client, 100)[2].status_code == 507
+    assert client.get("/api/vault/speicher").json()["quote"] == 0
 
 
 def test_zuruecksetzen_legt_alle_dateien_in_die_loeschhaltung(als, konten, db):
@@ -251,8 +271,7 @@ def test_quote_haelt_bei_zwei_anfragen_zugleich(db, konten, blob_dir):
     Ohne Sperre lesen beide denselben belegten Stand und legen beide an.
     """
     eins, _ = konten
-    eins.vault_quota_bytes = 1000
-    db.commit()
+    _speicher_der_rolle(db, eins, 1000)
 
     engine = create_engine(db_module.engine.url, poolclass=NullPool)
     sitzung = sessionmaker(bind=engine)
@@ -351,12 +370,11 @@ def test_migration_hin_und_zurueck(tmp_path: Path, pg_wegwerf) -> None:
         pruefer = inspect(engine)
         assert "vault_blobs" not in pruefer.get_table_names()
         assert "vault_bucket_formats" not in pruefer.get_table_names()
-        assert "vault_quota_bytes" not in {s["name"] for s in pruefer.get_columns("users")}
+        assert "role_vault_quotas" not in pruefer.get_table_names()
 
         command.upgrade(config, "head")
         pruefer = inspect(engine)
-        assert {"vault_blobs", "vault_bucket_formats"} <= set(pruefer.get_table_names())
-        assert "vault_quota_bytes" in {s["name"] for s in pruefer.get_columns("users")}
+        assert {"vault_blobs", "vault_bucket_formats", "role_vault_quotas"} <= set(pruefer.get_table_names())
         fks = pruefer.get_foreign_keys("vault_blobs")
         assert fks and fks[0]["options"].get("ondelete") == "CASCADE"
     finally:

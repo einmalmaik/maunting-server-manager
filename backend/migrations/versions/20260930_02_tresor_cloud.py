@@ -1,9 +1,10 @@
-"""Tresor-Cloud: Blobs, Quote je Konto, Mindestformat je Bucket.
+"""Tresor-Cloud: Blobs, Speicher je Rolle, Mindestformat je Bucket.
 
 ``vault_blobs`` fuehrt die verschluesselten Dateien der Tresor-Cloud; der
-Chiffrat selbst liegt auf der Platte. ``users.vault_quota_bytes`` ist die Quote
-eines Kontos (NULL heisst Vorgabe des Panels). ``vault_bucket_formats`` sperrt
-Apps aus, die neuere Eintraege beim Speichern verstuemmeln wuerden.
+Chiffrat selbst liegt auf der Platte. ``role_vault_quotas`` haelt den Speicher
+je Rolle; ein Konto ohne Rolle mit Speicher kann nichts hochladen.
+``vault_bucket_formats`` sperrt Apps aus, die neuere Eintraege beim Speichern
+verstuemmeln wuerden.
 
 Revision ID: 20260930_02
 Revises: 20260930_01
@@ -26,10 +27,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def _tabellen() -> set[str]:
     return set(sa.inspect(op.get_bind()).get_table_names())
-
-
-def _spalten(tabelle: str) -> set[str]:
-    return {s["name"] for s in sa.inspect(op.get_bind()).get_columns(tabelle)}
 
 
 def upgrade() -> None:
@@ -56,13 +53,18 @@ def upgrade() -> None:
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         )
 
-    if "vault_quota_bytes" not in _spalten("users"):
-        op.add_column("users", sa.Column("vault_quota_bytes", sa.BigInteger(), nullable=True))
+    if "role_vault_quotas" not in _tabellen():
+        op.create_table(
+            "role_vault_quotas",
+            sa.Column("role_id", sa.Integer(), sa.ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
+            sa.Column("quota_bytes", sa.BigInteger(), nullable=False),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        )
 
 
 def downgrade() -> None:
-    if "vault_quota_bytes" in _spalten("users"):
-        op.drop_column("users", "vault_quota_bytes")
+    if "role_vault_quotas" in _tabellen():
+        op.drop_table("role_vault_quotas")
     if "vault_bucket_formats" in _tabellen():
         op.drop_table("vault_bucket_formats")
     if "vault_blobs" in _tabellen():

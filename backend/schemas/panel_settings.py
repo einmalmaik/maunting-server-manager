@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 # Die beiden Panelsprachen. Das Panel schickt seit jeher nur diese zwei — es
 # leitet den Wert durch `normalizePanelLanguage` —, aber als freies `str` war
@@ -52,8 +52,6 @@ class PanelSettingsResponse(BaseModel):
     calendar_enabled: bool = True
     notes_enabled: bool = True
     vault_enabled: bool = True
-    # Speicher der Tresor-Cloud je Konto, solange das Konto keinen eigenen Wert hat.
-    vault_cloud_quota_bytes: int = 10 * 1024**3
     social_enabled: bool = True
     captcha_enabled: bool = True
     captcha_provider: str = "altcha"
@@ -77,8 +75,6 @@ class PanelSettingsUpdate(BaseModel):
     calendar_enabled: bool | None = None
     notes_enabled: bool | None = None
     vault_enabled: bool | None = None
-    # Obergrenze wie `vault_blob_service.MAX_QUOTE` (1 PiB).
-    vault_cloud_quota_bytes: int | None = Field(None, ge=0, le=1024**5)
     social_enabled: bool | None = None
     smtp_host: str | None = None
     smtp_port: str | None = None

@@ -996,7 +996,9 @@
         "roles_removed": "Entfernte Rollen",
         "database": "Datenbank",
         "table": "Tabelle",
-        "destructive": "Entfernt Daten"
+        "destructive": "Entfernt Daten",
+        "vault_storage_gb_before": "Tresorspeicher vorher (GB)",
+        "vault_storage_gb_after": "Tresorspeicher danach (GB)"
       },
       "reasonLabel": "Begründung der KI",
       "effectLabel": "Erwartete Wirkung",
@@ -2359,17 +2361,7 @@
     "roleSaved": "Rolle aktualisiert.",
     "registeredTitle": "Registrierte Benutzer",
     "registeredSubtitle": "Identitäten, Status und globale Panel-Rollen auf einen Blick.",
-    "currentUser": "Du",
-    "tresor": {
-      "aendern": "Tresor-Speicher ändern",
-      "titel": "Tresor-Speicher von {{name}}",
-      "belegt": "Belegt: {{belegt}} von {{quote}}. Gelöschte Dateien zählen noch 7 Tage mit.",
-      "quote": "Speicher in GB",
-      "nutztVorgabe": "Das Konto nutzt die Vorgabe aus den Einstellungen ({{standard}}). Speichern gibt ihm einen eigenen Wert.",
-      "eigenerWert": "Das Konto hat einen eigenen Wert. Die Vorgabe liegt bei {{standard}}.",
-      "aufVorgabe": "Vorgabe verwenden",
-      "gespeichert": "Tresor-Speicher gespeichert"
-    }
+    "currentUser": "Du"
   },
   "roles": {
     "title": "Rollen",
@@ -3219,8 +3211,6 @@
     "notesEnabledHint": "Aktiviert das Notizmodul im Panel und ermöglicht der KI die Notizverwaltung.",
     "vaultEnabled": "Passwort-Manager & Authenticator",
     "vaultEnabledHint": "Aktiviert den integrierten Zero-Knowledge Tresor für native Apps. Deaktiviert verbirgt ihn im gesamten Panel und in der App.",
-    "vaultQuota": "Tresor-Speicher je Konto (GB)",
-    "vaultQuotaHint": "Gilt für jedes Konto ohne eigenen Wert. Einzelne Konten stellst du in der Benutzerverwaltung ein.",
     "socialEnabled": "Social-, Freundes- & E2EE-Chat-Hub",
     "socialEnabledHint": "Aktiviert das weltweite Community-, Freundes- und Achievement-System sowie E2EE-Direktnachrichten. Deaktiviert verbirgt alle Social-Funktionen.",
     "cloudflareEnabled": "Cloudflare DNS",
@@ -3249,7 +3239,8 @@
       "ai": "KI",
       "messenger": "Messenger",
       "popup": "Pop-up",
-      "hoster": "Hoster"
+      "hoster": "Hoster",
+      "vaultStorage": "Tresorspeicher"
     },
     "messenger": {
       "title": "Anrufe",
@@ -4445,8 +4436,8 @@
         "body": "Je Konto die Anzahl der Dateien, ihre auf feste Stufen aufgefüllte Größe und den Zeitpunkt des Hochladens. Inhalt, Namen und Typen nicht, auch nicht mit Root-Zugang."
       },
       "quote": {
-        "title": "Speicher je Konto",
-        "body": "10 GB als Vorgabe. Die Vorgabe steht unter Einstellungen → Allgemein beim Passwort-Manager, einzelne Konten stellst du in der Benutzerverwaltung ein. Dort steht auch, wie viel jedes Konto belegt."
+        "title": "Speicher je Rolle",
+        "body": "Den Speicher vergibst du über Rollen, unter Einstellungen → Tresorspeicher. Ein Konto bekommt den höchsten Wert seiner Rollen. Ohne Rolle mit Speicher lädt es keine Dateien hoch; vorhandene bleiben lesbar und löschbar. Der Owner ist nicht begrenzt."
       },
       "loeschen": {
         "title": "Löschen",
@@ -6158,7 +6149,7 @@
         "leer": "Hier liegt noch nichts. Zieh Dateien hierher oder lade sie hoch.",
         "ordner": "Ordner",
         "unlesbar": "Diese Datei kann die App nicht lesen.",
-        "speicherVoll": "Speicher voll",
+        "speicherVoll": "Kein Speicher frei",
         "wirdHochgeladen": "Wird hochgeladen",
         "aktionen": "Aktionen",
         "umbenennen": "Umbenennen",
@@ -6182,7 +6173,8 @@
         "offlineVerfuegbar": "offline verfügbar",
         "offlineLaedt": "Wird auf dieses Gerät geladen",
         "offlineFertig": "{{name}} ist jetzt offline verfügbar.",
-        "offlineFehler": "Die Datei ließ sich nicht auf dieses Gerät laden."
+        "offlineFehler": "Die Datei ließ sich nicht auf dieses Gerät laden.",
+        "keinSpeicher": "Dein Konto hat keinen Tresorspeicher. Den vergibt der Betreiber über eine Rolle."
       },
       "fotos": {
         "alle": "Alle",
@@ -8085,5 +8077,19 @@
     "fehlerForm": "3–32 Zeichen: Buchstaben, Ziffern, Unterstrich, Punkt oder Bindestrich. Punkt und Bindestrich nicht am Anfang oder Ende.",
     "fehlerReserviert": "„{{name}}“ ist reserviert.",
     "aendern": "Benutzernamen ändern"
+  },
+  "vaultStorage": {
+    "title": "Tresorspeicher",
+    "description": "Lege fest, wie viel jede Rolle in der Tresor-Cloud speichern darf. Ein Konto bekommt den höchsten Wert seiner Rollen. Hat keine seiner Rollen Speicher, kann es keine Dateien hochladen; was schon im Tresor liegt, bleibt lesbar und lässt sich löschen. Der Owner ist nicht begrenzt.",
+    "selectRole": "Rolle",
+    "gb": "Speicher in GB",
+    "none": "Kein Speicher",
+    "noneHint": "Diese Rolle gibt keinen Speicher.",
+    "remove": "Speicher entfernen",
+    "saved": "Tresorspeicher gespeichert",
+    "loadFailed": "Der Tresorspeicher konnte nicht geladen werden.",
+    "saveFailed": "Der Tresorspeicher konnte nicht gespeichert werden.",
+    "noPermission": "Dir fehlt das Recht, die Panel-Einstellungen zu lesen.",
+    "noRoles": "Es gibt noch keine Rollen."
   }
 }

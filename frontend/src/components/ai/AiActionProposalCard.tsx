@@ -106,6 +106,8 @@ const TATSACHEN: readonly string[] = [
   'roles_after',
   'roles_added',
   'roles_removed',
+  'vault_storage_gb_before',
+  'vault_storage_gb_after',
   // Datenbankänderung: wo, und ob der Plan Daten entfernt. Das SQL selbst
   // steht als `diff` im Codeblock darunter.
   'database',

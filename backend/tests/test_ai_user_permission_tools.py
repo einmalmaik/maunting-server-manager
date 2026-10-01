@@ -38,6 +38,7 @@ from models import (
     Server,
     ServerPermission,
     User,
+    UserRole,
 )
 from services import (
     ai_action_service,
@@ -45,6 +46,7 @@ from services import (
     ai_proposal_service,
     ai_tool_registry,
     rechtevergabe_service,
+    vault_blob_service,
 )
 from services.ai_action_errors import AiActionStateError, AiActionValidationError
 from services.ai_tools import user_tools
@@ -543,6 +545,93 @@ def test_eine_vergebene_rolle_erweitern_fragt_wie_eine_vergabe(db: Session) -> N
     )
     assert harmlos.autonomous is True
     assert not json.loads(harmlos.preview_json).get("always_confirm")
+
+
+# ── Tresorspeicher einer Rolle (Betreiber, 01.10.2026) ────────────────────
+
+GIB = 1024**3
+
+
+def test_tresorspeicher_mit_der_rolle_autonom_und_ohne_autonomie_per_karte(db: Session) -> None:
+    """Speicher ist kein Recht und loescht nichts: autonom laeuft er ohne Karte,
+    auch an einer vergebenen Rolle. Ohne Autonomie fragt er wie alles andere."""
+    verwalter = _verwalter(db, autonom=True)
+    rolle = rechtevergabe_service.create_role(db, verwalter, "kunde", None, ["server.view"])
+    ziel = _konto(db, "kunde-a")
+    set_user_roles(db, ziel, [rolle.id])
+    db.commit()
+    # Der Speicher braucht zusaetzlich das Recht der Panel-Einstellungen.
+    with pytest.raises(AiActionValidationError, match="panel.settings.write"):
+        _vorschlag(db, verwalter, "propose_role_set", role_id=rolle.id, vault_storage_gb=10)
+    db.add(RolePermission(role_id=_eigene_rolle_von(db, verwalter), permission_key="panel.settings.write"))
+    db.commit()
+
+    setzen = _vorschlag(db, verwalter, "propose_role_set", role_id=rolle.id, vault_storage_gb="10")
+    vorschau = json.loads(setzen.preview_json)
+    assert setzen.autonomous is True
+    assert not vorschau.get("always_confirm")
+    assert vorschau["vault_storage_gb_before"] == 0
+    assert vorschau["vault_storage_gb_after"] == 10
+    ai_proposal_service.execute_autonomously(db, proposal_id=setzen.id, user=verwalter)
+    assert vault_blob_service.rolle_speicher(db, rolle.id) == 10 * GIB
+    assert vault_blob_service.quote_fuer(db, ziel) == 10 * GIB
+    # Die Rechte der Rolle bleiben, wie sie waren.
+    assert get_role_by_name(db, "kunde") is not None
+    assert set(json.loads(setzen.preview_json)["role_permissions"]) == {"server.view"}
+
+    # 0 nimmt ihn weg; null heisst unveraendert und aendert nichts.
+    with pytest.raises(AiActionValidationError, match="nichts genannt"):
+        _vorschlag(db, verwalter, "propose_role_set", role_id=rolle.id, vault_storage_gb=None)
+    weg = _vorschlag(db, verwalter, "propose_role_set", role_id=rolle.id, vault_storage_gb=0)
+    ai_proposal_service.execute_autonomously(db, proposal_id=weg.id, user=verwalter)
+    assert vault_blob_service.rolle_speicher(db, rolle.id) is None
+    assert vault_blob_service.quote_fuer(db, ziel) == 0
+
+    # Ohne Autonomie kommt eine Karte.
+    ohne = _verwalter(db)
+    db.add(RolePermission(role_id=_eigene_rolle_von(db, ohne), permission_key="panel.settings.write"))
+    db.commit()
+    karte = _vorschlag(db, ohne, "propose_role_set", role_id=rolle.id, vault_storage_gb=5)
+    assert karte.autonomous is False
+    _bestaetigen(db, ohne, karte)
+    assert vault_blob_service.rolle_speicher(db, rolle.id) == 5 * GIB
+
+
+def test_rolle_mit_speicher_anlegen_und_an_der_systemrolle_nur_den_speicher(
+    db: Session, owner_user: User
+) -> None:
+    anlegen = _vorschlag(
+        db, owner_user, "propose_role_set", name="tarif-gold", permissions=["server.view"], vault_storage_gb=2.5,
+    )
+    _bestaetigen(db, owner_user, anlegen)
+    rolle = get_role_by_name(db, "tarif-gold")
+    assert vault_blob_service.rolle_speicher(db, rolle.id) == round(2.5 * GIB)
+
+    nutzer = get_role_by_name(db, "user")
+    nur_speicher = _vorschlag(db, owner_user, "propose_role_set", role_id=nutzer.id, vault_storage_gb=1)
+    _bestaetigen(db, owner_user, nur_speicher)
+    assert vault_blob_service.rolle_speicher(db, nutzer.id) == GIB
+    with pytest.raises(AiActionValidationError, match="Systemrolle"):
+        _vorschlag(db, owner_user, "propose_role_set", role_id=nutzer.id, vault_storage_gb=2, description="x")
+
+    rollen = {r["name"]: r for r in _lesen(db, owner_user, "list_roles")["roles"]}
+    assert rollen["tarif-gold"]["vault_storage_gb"] == 2.5
+    assert rollen["user"]["vault_storage_gb"] == 1.0
+    assert rollen["admin"]["vault_storage_gb"] is None
+
+
+def test_ein_geaenderter_speicher_fuehrt_den_alten_plan_nicht_aus(db: Session, owner_user: User) -> None:
+    rolle = rechtevergabe_service.create_role(db, owner_user, "kunde-b", None, [])
+    karte = _vorschlag(db, owner_user, "propose_role_set", role_id=rolle.id, vault_storage_gb=10)
+    vault_blob_service.rolle_speicher_setzen(db, rolle.id, 3 * GIB)
+    db.commit()
+    with pytest.raises(AiActionStateError, match="REVISION_CONFLICT"):
+        _bestaetigen(db, owner_user, karte)
+    assert vault_blob_service.rolle_speicher(db, rolle.id) == 3 * GIB
+
+
+def _eigene_rolle_von(db: Session, user: User) -> int:
+    return db.query(UserRole.role_id).filter(UserRole.user_id == user.id).first()[0]
 
 
 def test_eine_zugewiesene_rolle_wird_nicht_geloescht(db: Session) -> None:

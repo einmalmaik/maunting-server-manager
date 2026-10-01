@@ -35,15 +35,15 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
 from config import settings
+from models import Role, RoleVaultQuota
 from models.user import User
 from models.vault_blob import VaultBlob
-from services.panel_settings_service import PanelSettingsService
+from services.role_service import effective_user_role_ids
 
 CHUNK_KLARTEXT = 4 * 1024 * 1024
 CHUNK_UEBERHANG = 12 + 16
 CHUNK_CHIFFRAT = CHUNK_KLARTEXT + CHUNK_UEBERHANG
 
-STANDARD_QUOTE = 10 * 1024 * 1024 * 1024
 LOESCHHALTUNG = timedelta(days=7)
 OFFEN_HOECHSTENS = timedelta(hours=24)
 MAX_BLOBS_JE_KONTO = 500_000
@@ -126,18 +126,49 @@ def _groesse_passt(chunk_count: int, bytes_total: int) -> bool:
     return voll + CHUNK_UEBERHANG + 1 <= bytes_total <= voll + CHUNK_CHIFFRAT
 
 
-def standard_quote() -> int:
-    """Die Vorgabe je Konto aus den Panel-Einstellungen (`vault_cloud_quota_bytes`)."""
-    try:
-        return min(MAX_QUOTE, max(0, int(PanelSettingsService.get("vault_cloud_quota_bytes", str(STANDARD_QUOTE)))))
-    except (TypeError, ValueError):
-        return STANDARD_QUOTE
+def quote_fuer(db: Session, user: User) -> int:
+    """Der Speicher eines Kontos: der hoechste Wert seiner Rollen.
+
+    Ohne Rolle mit Speicher ist es 0, das Konto laedt nichts hoch; vorhandene
+    Dateien bleiben lesbar und loeschbar. Der Owner ist wie bei den Rechten
+    nicht begrenzt, er hat oft gar keine Rolle.
+    """
+    if user.is_owner:
+        return MAX_QUOTE
+    rollen = effective_user_role_ids(db, user)
+    if not rollen:
+        return 0
+    hoechste = db.scalar(select(func.max(RoleVaultQuota.quota_bytes)).where(RoleVaultQuota.role_id.in_(rollen)))
+    return max(0, int(hoechste or 0))
 
 
-def quote_fuer(user: User) -> int:
-    if user.vault_quota_bytes is not None:
-        return max(0, int(user.vault_quota_bytes))
-    return standard_quote()
+def rollen_speicher(db: Session) -> list[dict]:
+    """Jede Rolle mit ihrem Speicher (``None``: keiner) fuer die Einstellungen."""
+    gesetzt = dict(db.execute(select(RoleVaultQuota.role_id, RoleVaultQuota.quota_bytes)).all())
+    rollen = db.execute(select(Role.id, Role.name).order_by(Role.is_system.desc(), Role.name.asc())).all()
+    return [{"role_id": rid, "role_name": name, "quota_bytes": gesetzt.get(rid)} for rid, name in rollen]
+
+
+def rolle_speicher(db: Session, role_id: int) -> int | None:
+    return db.scalar(select(RoleVaultQuota.quota_bytes).where(RoleVaultQuota.role_id == role_id))
+
+
+def rolle_speicher_setzen(db: Session, role_id: int, quota_bytes: int | None) -> None:
+    """Setzt den Speicher einer Rolle in der offenen Transaktion; ``None`` nimmt ihn weg."""
+    if db.get(Role, role_id) is None:
+        raise ValueError("Rolle nicht gefunden")
+    if quota_bytes is not None and (isinstance(quota_bytes, bool) or not 0 <= int(quota_bytes) <= MAX_QUOTE):
+        raise ValueError("Ungueltiger Speicherwert")
+    zeile = db.get(RoleVaultQuota, role_id)
+    if quota_bytes is None:
+        if zeile is not None:
+            db.delete(zeile)
+    elif zeile is None:
+        db.add(RoleVaultQuota(role_id=role_id, quota_bytes=int(quota_bytes)))
+    else:
+        zeile.quota_bytes = int(quota_bytes)
+        zeile.updated_at = datetime.now(timezone.utc)
+    db.flush()
 
 
 def belegt(db: Session, user_id: int) -> int:
@@ -164,7 +195,7 @@ def anlegen(db: Session, user: User, blob_id: str, chunk_count: int, bytes_total
     anzahl = int(db.scalar(select(func.count()).select_from(VaultBlob).where(VaultBlob.user_id == user.id)) or 0)
     if anzahl >= MAX_BLOBS_JE_KONTO:
         raise SpeicherVoll("Zu viele Dateien in diesem Konto.")
-    if belegt(db, user.id) + bytes_total > quote_fuer(user):
+    if belegt(db, user.id) + bytes_total > quote_fuer(db, user):
         raise SpeicherVoll("Der Speicher dieses Kontos ist voll.")
 
     basis = _basis()
@@ -325,26 +356,7 @@ def speicher(db: Session, user: User) -> dict[str, int]:
         db.scalar(select(func.count()).select_from(VaultBlob).where(VaultBlob.user_id == user.id, VaultBlob.state != "geloescht"))
         or 0
     )
-    return {"belegt": belegt(db, user.id), "quote": quote_fuer(user), "in_loeschung": in_loeschung, "blobs": blobs}
-
-
-def speicher_aller(db: Session) -> list[dict[str, int | None]]:
-    """Belegt und Quote je Konto fuer die Benutzerverwaltung, in einer Abfrage."""
-    summen = dict(
-        db.execute(
-            select(VaultBlob.user_id, func.coalesce(func.sum(VaultBlob.bytes_total), 0)).group_by(VaultBlob.user_id)
-        ).all()
-    )
-    standard = standard_quote()
-    return [
-        {
-            "user_id": user_id,
-            "belegt": int(summen.get(user_id, 0)),
-            "quote": max(0, int(eigene)) if eigene is not None else standard,
-            "eigene_quote": eigene,
-        }
-        for user_id, eigene in db.execute(select(User.id, User.vault_quota_bytes).order_by(User.id)).all()
-    ]
+    return {"belegt": belegt(db, user.id), "quote": quote_fuer(db, user), "in_loeschung": in_loeschung, "blobs": blobs}
 
 
 def alle_zur_loeschung(db: Session, user_id: int) -> None:

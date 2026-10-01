@@ -1,6 +1,7 @@
 from .user import User
 from .user_role import UserRole
 from .role_ai_limit import RoleAiLimit
+from .role_vault_quota import RoleVaultQuota
 from .ai_usage_event import AiUsageEvent
 from .operation_task import OperationTask
 from .ai_provider import AiProvider
@@ -93,7 +94,7 @@ from .direct_chat import DirectChat
 from .chat_media import ChatMedia
 
 __all__ = [
-    "User", "UserRole", "RoleAiLimit", "AiUsageEvent", "OperationTask",
+    "User", "UserRole", "RoleAiLimit", "RoleVaultQuota", "AiUsageEvent", "OperationTask",
     "AiProvider", "AiConversation", "AiMessage", "AiActionProposal",
     "AiMemoryEntry", "AiMemoryPreference", "AiSkill", "AiAttachment",
     "AiAutonomyGrant", "AiToolResult", "AiRun", "AiGuardianNotice",

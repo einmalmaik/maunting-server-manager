@@ -99,22 +99,6 @@ describe('GeneralTab', () => {
     })
   })
 
-  it('speichert den Tresor-Speicher je Konto in Byte', async () => {
-    vi.mocked(api).mockResolvedValue({ ...EMPTY_PANEL_SETTINGS, vault_cloud_quota_bytes: 20 * 1024 ** 3 })
-    render(<GeneralTab />)
-
-    const feld = await screen.findByLabelText(/Tresor-Speicher je Konto/)
-    await waitFor(() => expect(feld).toHaveValue('20'))
-    fireEvent.change(feld, { target: { value: '50' } })
-    fireEvent.click(screen.getByRole('button', { name: /Speichern/i }))
-
-    await waitFor(() => {
-      const aufrufe = vi.mocked(api).mock.calls
-      const body = JSON.parse(String(aufrufe[aufrufe.length - 1][1]?.body))
-      expect(body.vault_cloud_quota_bytes).toBe(50 * 1024 ** 3)
-    })
-  })
-
   it('sperrt den Schalter ohne das Recht panel.settings.write', async () => {
     usePermissionsStore.setState({
       isLoading: false,

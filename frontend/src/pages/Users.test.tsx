@@ -204,38 +204,4 @@ describe('Users access workspace', () => {
       expect(rbacApi.assignRoles).toHaveBeenCalledWith(3, [8])
     })
   })
-
-  it('zeigt den Tresor-Speicher je Konto und gibt einem Konto einen eigenen Wert', async () => {
-    const GIB = 1024 ** 3
-    const konten = [
-      { user_id: 1, belegt: 0, quote: 10 * GIB, eigene_quote: null },
-      { user_id: 3, belegt: 2 * GIB, quote: 10 * GIB, eigene_quote: null },
-    ]
-    vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
-      if (path === '/admin/users') return [owner, currentUser, otherUser] as never
-      if (path === '/servers') return servers as never
-      if (path === '/admin/tresor-speicher') return { standard: 10 * GIB, konten } as never
-      if (path === '/admin/users/3/tresor-quote' && init?.method === 'PUT') {
-        const { quote_bytes } = JSON.parse(String(init.body))
-        return { quote: quote_bytes, eigene_quote: quote_bytes } as never
-      }
-      throw new Error(`Unexpected API path: ${path}`)
-    })
-    render(<Users />)
-
-    // Den Owner darf nur ein Owner ändern; die Zahlen sieht man trotzdem.
-    expect(await screen.findByText('2.00 GB / 10.00 GB')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Tresor-Speicher ändern: owner/ })).not.toBeInTheDocument()
-    expect(screen.getByText('0 B / 10.00 GB')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: /Tresor-Speicher ändern: delegated-user/ }))
-    const feld = await screen.findByLabelText('Speicher in GB')
-    fireEvent.change(feld, { target: { value: '25' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
-
-    await waitFor(() =>
-      expect(api).toHaveBeenCalledWith('/admin/users/3/tresor-quote', { method: 'PUT', body: JSON.stringify({ quote_bytes: 25 * GIB }) }),
-    )
-    expect(await screen.findByText('2.00 GB / 25.00 GB')).toBeInTheDocument()
-  })
 })

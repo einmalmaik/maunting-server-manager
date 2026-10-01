@@ -67,6 +67,7 @@ OHNE_KONTOBEZUG: dict[str, str] = {
     "postgres_instances": "Server-Daten",
     "postgres_users": "Server-Daten",
     "role_ai_limits": "Panel-Einstellung",
+    "role_vault_quotas": "Panel-Einstellung",
     "role_permissions": "Panel-Einstellung",
     "roles": "Panel-Einstellung",
     "server_ports": "Server-Daten",

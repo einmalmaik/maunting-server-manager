@@ -67,6 +67,8 @@ export function TresorDateiBereich() {
   const uploads = useTresorUploads((s) => s.je)
   const [ordner, setOrdner] = useState<string | undefined>(undefined)
   const [speicher, setSpeicher] = useState<TresorSpeicher | null>(null)
+  // Speicher gibt nur eine Rolle. Ohne sie bleibt der Upload zu, der Server weist ihn ohnehin ab.
+  const ohneSpeicher = speicher?.quote === 0
   const [ziehen, setZiehen] = useState(false)
   const [geoeffnet, setGeoeffnet] = useState<Geoeffnet | null>(null)
   const [vorbereitung, setVorbereitung] = useState(0)
@@ -248,7 +250,7 @@ export function TresorDateiBereich() {
           e.preventDefault()
           setZiehen(false)
           const dateien = Array.from(e.dataTransfer.files)
-          if (dateien.length > 0) void hochladen(dateien)
+          if (dateien.length > 0 && !ohneSpeicher) void hochladen(dateien)
         }}
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -291,7 +293,7 @@ export function TresorDateiBereich() {
               <FolderPlus className="mr-1 h-3.5 w-3.5" />
               {t('mss.vault.dateien.ordnerAnlegen')}
             </Button>
-            <FileButton multiple size="sm" variant="primary" onFiles={(dateien) => void hochladen(dateien)}>
+            <FileButton multiple size="sm" variant="primary" disabled={ohneSpeicher} onFiles={(dateien) => void hochladen(dateien)}>
               <Upload className="mr-1 h-3.5 w-3.5" />
               {t('mss.vault.dateien.hochladen')}
             </FileButton>
@@ -301,12 +303,16 @@ export function TresorDateiBereich() {
         {speicher && (
           <div className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-low px-3 py-2">
             <HardDrive className="h-4 w-4 shrink-0 text-on-surface-variant" />
-            <ProgressBar
-              value={speicher.quote > 0 ? (speicher.belegt / speicher.quote) * 100 : null}
-              heat
-              ariaLabel={t('mss.vault.dateien.speicher')}
-              hint={t('mss.vault.dateien.speicherBelegt', { belegt: formatBytes(speicher.belegt), quote: formatBytes(speicher.quote) })}
-            />
+            {ohneSpeicher ? (
+              <p className="text-xs text-on-surface-variant">{t('mss.vault.dateien.keinSpeicher')}</p>
+            ) : (
+              <ProgressBar
+                value={(speicher.belegt / speicher.quote) * 100}
+                heat
+                ariaLabel={t('mss.vault.dateien.speicher')}
+                hint={t('mss.vault.dateien.speicherBelegt', { belegt: formatBytes(speicher.belegt), quote: formatBytes(speicher.quote) })}
+              />
+            )}
           </div>
         )}
 
@@ -457,8 +463,14 @@ export function TresorDateiBereich() {
         {/* Beim Bearbeiten schließt nur der Editor selbst, damit nichts Ungespeichertes verloren geht. */}
         <Dialog open={!!geoeffnet} onOpenChange={(offen) => !offen && !geoeffnet?.bearbeiten && setGeoeffnet(null)}>
           {geoeffnet?.bearbeiten && geoeffnet.text !== null ? (
-            <DialogContent className="max-w-5xl" showCloseButton={false}>
-              <div className="p-3">
+            // Ab `md` füllt der Editor das ganze Fenster, sonst lassen sich lange Dateien kaum bearbeiten.
+            <DialogContent
+              className="max-w-5xl md:h-[100dvh] md:max-w-none md:rounded-none md:border-0"
+              overlayClassName="md:p-0"
+              showCloseButton={false}
+              data-testid="tresor-texteditor"
+            >
+              <div className="p-3 md:flex md:min-h-0 md:flex-1 md:flex-col">
                 <TresorTexteditor
                   item={geoeffnet.item}
                   text={geoeffnet.text}

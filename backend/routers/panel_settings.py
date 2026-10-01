@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -150,7 +151,6 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "calendar_enabled": all_db.get("calendar_enabled", "true") != "false",
         "notes_enabled": all_db.get("notes_enabled", "true") != "false",
         "vault_enabled": all_db.get("vault_enabled", "true") != "false",
-        "vault_cloud_quota_bytes": vault_blob_service.standard_quote(),
         "social_enabled": all_db.get("social_enabled", "true") != "false",
         "captcha_enabled": all_db.get("captcha_enabled", "true") == "true",
         "captcha_provider": all_db.get("captcha_provider", "altcha"),
@@ -248,8 +248,6 @@ def update_settings(
             value = "true" if bool(value) else "false"
         if key == "vault_enabled":
             value = "true" if bool(value) else "false"
-        if key == "vault_cloud_quota_bytes":
-            value = str(int(value))
         if key == "social_enabled":
             value = "true" if bool(value) else "false"
         # Ohne diese Normalisierung landet ein abgeschaltetes Banner als str(False) == "False"
@@ -332,6 +330,48 @@ def update_settings(
         commit=True,
     )
     return {"message": "Einstellungen gespeichert"}
+
+
+class TresorSpeicherUpdate(BaseModel):
+    """`null` nimmt der Rolle den Speicher; ihre Traeger laden dann nichts mehr hoch."""
+
+    quota_bytes: int | None = Field(..., ge=0, le=vault_blob_service.MAX_QUOTE)
+
+
+@router.get("/tresor-speicher")
+def tresor_speicher(
+    db: Session = Depends(get_db),
+    _=Depends(require_global("panel.settings.read")),
+) -> list[dict]:
+    """Speicher der Tresor-Cloud je Rolle. Ein Konto bekommt den hoechsten Wert
+    seiner Rollen, ohne Rolle mit Speicher keinen."""
+    return vault_blob_service.rollen_speicher(db)
+
+
+@router.put("/tresor-speicher/{role_id}")
+def tresor_speicher_setzen(
+    role_id: int,
+    req: TresorSpeicherUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_global("panel.settings.write")),
+    __: None = Depends(verify_csrf),
+) -> dict:
+    vorher = vault_blob_service.rolle_speicher(db, role_id)
+    try:
+        vault_blob_service.rolle_speicher_setzen(db, role_id, req.quota_bytes)
+    except ValueError as fehler:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(fehler)) from fehler
+    audit_service.record_privileged_action(
+        db,
+        user_id=actor.id,
+        action="vault.role_quota.updated",
+        target_type="role",
+        target_id=role_id,
+        details={"vorher": vorher, "nachher": req.quota_bytes},
+    )
+    db.commit()
+    return {"role_id": role_id, "quota_bytes": req.quota_bytes}
 
 
 @router.post("/test-email", status_code=200)

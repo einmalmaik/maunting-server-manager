@@ -23,7 +23,7 @@ from difflib import SequenceMatcher
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from models import RefreshToken, Role, RolePermission, Server, ServerPermission, User, UserRole
+from models import RefreshToken, Role, RolePermission, RoleVaultQuota, Server, ServerPermission, User, UserRole
 from services import permission_service, role_service
 from services.ai_action_errors import AiActionValidationError
 from services.ai_redaction import redact_sensitive_text
@@ -88,7 +88,7 @@ def _user_tool_definitions() -> list[dict]:
         ),
         _function(
             "list_roles",
-            "Alle Rollen mit Rechten und Nutzerzahl, dazu der Rechtekatalog.",
+            "Alle Rollen mit Rechten, Tresorspeicher und Nutzerzahl, dazu der Rechtekatalog.",
             {},
             [],
         ),
@@ -106,12 +106,13 @@ def _user_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_role_set",
-            "Rolle erstellen bzw. anlegen oder ändern (mit role_id).",
+            "Rolle erstellen bzw. anlegen oder ändern (mit role_id), auch ihren Tresorspeicher.",
             {
                 "role_id": {"type": "integer", "minimum": 1},
                 "name": {"type": "string", "maxLength": 64},
                 "description": {"type": "string", "maxLength": 255},
                 "permissions": rechte,
+                "vault_storage_gb": {"type": "number", "minimum": 0, "description": "Tresorspeicher in GB; 0: keiner"},
                 **_RATIONALE_SCHEMA,
             },
             [*_RATIONALE_REQUIRED],
@@ -369,6 +370,7 @@ def _execute_list_roles(db: Session, user: User, arguments: dict) -> dict:
     schluessel: dict[int, list[str]] = {}
     for role_id, key in db.query(RolePermission.role_id, RolePermission.permission_key).all():
         schluessel.setdefault(role_id, []).append(key)
+    speicher = dict(db.query(RoleVaultQuota.role_id, RoleVaultQuota.quota_bytes).all())
 
     rollen = []
     for rolle in role_service.list_roles(db):
@@ -378,6 +380,8 @@ def _execute_list_roles(db: Session, user: User, arguments: dict) -> dict:
             "description": redact_sensitive_text(str(rolle.description or ""))[:255] or None,
             "is_system": bool(rolle.is_system),
             "user_count": len(zuweisungen.get(rolle.id, ())),
+            # GB wie im Werkzeug; None heisst: diese Rolle gibt keinen Tresorspeicher.
+            "vault_storage_gb": round(speicher[rolle.id] / 1024**3, 2) if rolle.id in speicher else None,
         }
         # Die admin-Rolle traegt jeden Schluessel des Katalogs; achtzig Namen
         # sagen dem Modell nichts, was "alle" nicht sagt.

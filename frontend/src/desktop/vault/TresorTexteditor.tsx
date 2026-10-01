@@ -57,7 +57,7 @@ export function TresorTexteditor({ item, text, onFertig }: { item: VaultItem; te
   }
 
   return (
-    <div className="flex h-[65vh] flex-col gap-2">
+    <div className="flex h-[65vh] flex-col gap-2 md:h-auto md:min-h-0 md:flex-1">
       <Suspense
         fallback={
           <div className="flex flex-1 items-center justify-center">

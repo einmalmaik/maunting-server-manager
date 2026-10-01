@@ -996,7 +996,9 @@
         "roles_removed": "Removed roles",
         "database": "Database",
         "table": "Table",
-        "destructive": "Removes data"
+        "destructive": "Removes data",
+        "vault_storage_gb_before": "Vault storage before (GB)",
+        "vault_storage_gb_after": "Vault storage after (GB)"
       },
       "reasonLabel": "AI reasoning",
       "effectLabel": "Expected effect",
@@ -2359,17 +2361,7 @@
     "roleSaved": "Role updated.",
     "registeredTitle": "Registered users",
     "registeredSubtitle": "Identities, status, and global panel roles at a glance.",
-    "currentUser": "You",
-    "tresor": {
-      "aendern": "Change vault storage",
-      "titel": "Vault storage of {{name}}",
-      "belegt": "Used: {{belegt}} of {{quote}}. Deleted files still count for 7 days.",
-      "quote": "Storage in GB",
-      "nutztVorgabe": "This account uses the default from the settings ({{standard}}). Saving gives it its own value.",
-      "eigenerWert": "This account has its own value. The default is {{standard}}.",
-      "aufVorgabe": "Use default",
-      "gespeichert": "Vault storage saved"
-    }
+    "currentUser": "You"
   },
   "roles": {
     "title": "Roles",
@@ -3219,8 +3211,6 @@
     "notesEnabledHint": "Enables the notes module in the panel and allows AI note management.",
     "vaultEnabled": "Password manager & authenticator",
     "vaultEnabledHint": "Enables the built-in zero-knowledge vault for native apps. Disabled hides it across panel and app.",
-    "vaultQuota": "Vault storage per account (GB)",
-    "vaultQuotaHint": "Applies to every account without its own value. Set single accounts in user management.",
     "socialEnabled": "Social, friends & E2EE chat hub",
     "socialEnabledHint": "Enables the global community, friends, and achievement system as well as E2EE direct messages. Disabled hides all social features.",
     "cloudflareEnabled": "Cloudflare DNS",
@@ -3249,7 +3239,8 @@
       "security": "Security",
       "ai": "AI",
       "messenger": "Messenger",
-      "hoster": "Hoster"
+      "hoster": "Hoster",
+      "vaultStorage": "Vault storage"
     },
     "messenger": {
       "title": "Calls",
@@ -4445,8 +4436,8 @@
         "body": "Per account the number of files, their size rounded up to fixed steps, and when they were uploaded. Not the content, names or types, not even with root access."
       },
       "quote": {
-        "title": "Storage per account",
-        "body": "10 GB by default. The default lives under Settings → General next to the password manager; single accounts are set in user management, which also shows how much each account uses."
+        "title": "Storage per role",
+        "body": "You grant storage through roles, under Settings → Vault storage. An account gets the highest value of its roles. Without a role that has storage it cannot upload files; existing ones stay readable and deletable. The owner has no limit."
       },
       "loeschen": {
         "title": "Deleting",
@@ -6158,7 +6149,7 @@
         "leer": "Nothing here yet. Drop files here or upload them.",
         "ordner": "Folder",
         "unlesbar": "This app cannot read this file.",
-        "speicherVoll": "Storage full",
+        "speicherVoll": "No storage left",
         "wirdHochgeladen": "Uploading",
         "aktionen": "Actions",
         "umbenennen": "Rename",
@@ -6182,7 +6173,8 @@
         "offlineVerfuegbar": "available offline",
         "offlineLaedt": "Downloading to this device",
         "offlineFertig": "{{name}} is now available offline.",
-        "offlineFehler": "The file could not be downloaded to this device."
+        "offlineFehler": "The file could not be downloaded to this device.",
+        "keinSpeicher": "Your account has no vault storage. The operator grants it through a role."
       },
       "fotos": {
         "alle": "All",
@@ -8085,5 +8077,19 @@
     "fehlerForm": "3–32 characters: letters, digits, underscore, dot or hyphen. No dot or hyphen at the start or end.",
     "fehlerReserviert": "“{{name}}” is reserved.",
     "aendern": "Change username"
+  },
+  "vaultStorage": {
+    "title": "Vault storage",
+    "description": "Set how much each role may store in the vault cloud. An account gets the highest value of its roles. If none of its roles has storage, it cannot upload files; what is already in the vault stays readable and can be deleted. The owner has no limit.",
+    "selectRole": "Role",
+    "gb": "Storage in GB",
+    "none": "No storage",
+    "noneHint": "This role gives no storage.",
+    "remove": "Remove storage",
+    "saved": "Vault storage saved",
+    "loadFailed": "Vault storage could not be loaded.",
+    "saveFailed": "Vault storage could not be saved.",
+    "noPermission": "You are not allowed to read the panel settings.",
+    "noRoles": "There are no roles yet."
   }
 }

@@ -9,22 +9,15 @@ import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher'
 import { Button } from '@/components/ui/Button'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { Switch } from '@/components/ui/Switch'
-import { NumberStepper } from '@/components/ui/NumberStepper'
 import { normalizePanelLanguage } from '@/config/panelLocales'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
 import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 
 import { Spinner } from '@/components/ui/Spinner'
-const GIB = 1024 ** 3
-/** Wie `vault_blob_service.MAX_QUOTE` im Backend (1 PiB). */
-const MAX_QUOTE_GB = 1024 ** 2
-
 export function GeneralTab() {
   const { t, i18n } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
   const [settings, setSettings] = useState<PanelSettings>(EMPTY_PANEL_SETTINGS)
-  // Eingabe in GB, gespeichert wird in Byte.
-  const [tresorGb, setTresorGb] = useState(String(EMPTY_PANEL_SETTINGS.vault_cloud_quota_bytes / GIB))
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -38,7 +31,6 @@ export function GeneralTab() {
           ...(data && typeof data === 'object' ? data : {}),
         }
         setSettings(normalizedSettings)
-        setTresorGb(String(Math.round(normalizedSettings.vault_cloud_quota_bytes / GIB)))
         void i18n.changeLanguage(normalizePanelLanguage(normalizedSettings.default_language))
       })
       .catch((err) => toast.error(err.message))
@@ -66,7 +58,6 @@ export function GeneralTab() {
           // beim Alten. Ein stummer Schalter ist schlimmer als gar keiner.
           social_enabled: settings.social_enabled,
           vault_enabled: settings.vault_enabled,
-          vault_cloud_quota_bytes: Number(tresorGb || 0) * GIB,
           cloudflare_enabled: settings.cloudflare_enabled,
         }),
       })
@@ -284,24 +275,6 @@ export function GeneralTab() {
                   aria-label={t('settings.vaultEnabled')}
                 />
               </label>
-              {settings.vault_enabled && (
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
-                  <label htmlFor="tresor-quote" className="block">
-                    <span className="block font-body text-sm text-on-surface">{t('settings.vaultQuota')}</span>
-                    <span className="block font-body text-xs text-on-surface-variant">{t('settings.vaultQuotaHint')}</span>
-                  </label>
-                  <div className="w-40 shrink-0">
-                    <NumberStepper
-                      id="tresor-quote"
-                      value={tresorGb}
-                      onValueChange={setTresorGb}
-                      min={0}
-                      max={MAX_QUOTE_GB}
-                      disabled={!canWrite}
-                    />
-                  </div>
-                </div>
-              )}
             </div>
             <div className="md:col-span-2 border-t border-outline-variant/30 pt-6">
               <label className="flex items-center justify-between gap-4">

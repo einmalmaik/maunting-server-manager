@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 
 from models import Role, Server, User, UserRole
 from schemas.role import RoleCreate, RoleUpdate
-from services import rechtevergabe_service, role_service
+from services import audit_service, permission_service, rechtevergabe_service, role_service, vault_blob_service
 from services.ai_action_errors import AiActionStateError, AiActionValidationError
 from services.ai_proposals.base import _AusfuehrungsRahmen, _Ausgefuehrt
 from services.ai_redaction import redact_sensitive_text
@@ -237,7 +237,7 @@ def _zuweisungen(db: Session, role_id: int) -> int:
     return len(neu | alt)
 
 
-def _eigene_rolle(db: Session, role_id: int) -> Role:
+def _eigene_rolle(db: Session, role_id: int, *, systemrolle_erlaubt: bool = False) -> Role:
     rolle = role_service.get_role(db, role_id)
     if rolle is None:
         # Der Hinweis gehört in die Meldung: ein Modell, das eine erfundene
@@ -246,16 +246,49 @@ def _eigene_rolle(db: Session, role_id: int) -> Role:
             f"Eine Rolle mit role_id {role_id} gibt es nicht. Zum Anlegen role_id "
             "weglassen; vorhandene Rollen liefert list_roles."
         )
-    if rolle.is_system:
+    if rolle.is_system and not systemrolle_erlaubt:
         raise AiActionValidationError(
             f"'{rolle.name}' ist eine Systemrolle; die ändert die KI nicht."
         )
     return rolle
 
 
+_GIB = 1024**3
+
+
+def _speicher(roh: object) -> int | None:
+    """Tresorspeicher in GB, nachsichtig gelesen ("10", 10, 2.5); 0 heisst keiner.
+
+    Ergebnis in Bytes, ``None`` fuer keinen Speicher. Ein ``null`` des Modells
+    kommt hier nicht an: es heisst "unveraendert" und wird vorher verworfen.
+    So nimmt ein Modell, das jedes freie Feld mit null fuellt, keiner Rolle
+    still den Speicher.
+    """
+    if isinstance(roh, str):
+        roh = roh.strip().lower().removesuffix("gb").strip().replace(",", ".")
+        try:
+            roh = float(roh)
+        except ValueError:
+            raise AiActionValidationError("vault_storage_gb ist keine Zahl") from None
+    if isinstance(roh, bool) or not isinstance(roh, (int, float)) or roh < 0:
+        raise AiActionValidationError("vault_storage_gb ist keine Zahl ab 0")
+    menge = round(roh * _GIB)
+    if menge > vault_blob_service.MAX_QUOTE:
+        raise AiActionValidationError("vault_storage_gb ist zu groß")
+    return menge or None
+
+
 def _role_set_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
-    if set(rest) - {"role_id", "name", "description", "permissions"}:
+    if set(rest) - {"role_id", "name", "description", "permissions", "vault_storage_gb"}:
         raise AiActionValidationError("propose_role_set hat ungueltige Argumente")
+    # Der Speicher ist eine Panel-Einstellung wie das KI-Kontingent und braucht
+    # deren Recht, nicht nur `roles.manage`.
+    speicher_genannt = rest.get("vault_storage_gb") is not None
+    speicher = _speicher(rest["vault_storage_gb"]) if speicher_genannt else None
+    if speicher_genannt and not permission_service.has_global_permission(db, user, "panel.settings.write"):
+        raise AiActionValidationError(
+            "Für den Tresorspeicher einer Rolle fehlt das Recht 'panel.settings.write'"
+        )
     roh = rest.get("role_id")
     role_id = None if roh in (None, "", 0) else kennung(roh, "role_id")
     name = str(rest["name"]).strip() if rest.get("name") not in (None, "") else None
@@ -303,8 +336,11 @@ def _role_set_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
                 "permissions": sorted(nachher),
             }
         else:
-            rolle = _eigene_rolle(db, role_id)
-            if name is None and beschreibung is None and schluessel is None:
+            # Nur den Speicher zu setzen geht auch an Systemrollen: an deren
+            # Rechten aendert sich dabei nichts.
+            nur_speicher = speicher_genannt and name is None and beschreibung is None and schluessel is None
+            rolle = _eigene_rolle(db, role_id, systemrolle_erlaubt=nur_speicher)
+            if name is None and beschreibung is None and schluessel is None and not speicher_genannt:
                 raise AiActionValidationError("Es wurde nichts genannt, das geändert werden soll")
             if name is not None and name != rolle.name:
                 andere = role_service.get_role_by_name(db, name)
@@ -336,6 +372,14 @@ def _role_set_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
         "permissions_removed": sorted(weg),
         "role_users": betroffen,
     }
+    if speicher_genannt:
+        vorher_speicher = vault_blob_service.rolle_speicher(db, payload["role_id"]) if payload["role_id"] else None
+        payload.update(vault_set=True, vault_quota_bytes=speicher, vault_before=vorher_speicher)
+        # Fuer die Karte in GB; 0 heisst kein Speicher, wie im Werkzeug.
+        preview.update(
+            vault_storage_gb_before=round((vorher_speicher or 0) / _GIB, 2),
+            vault_storage_gb_after=round((speicher or 0) / _GIB, 2),
+        )
     # Siehe Modulkopf: eine Rolle ohne Traeger fragt nicht, eine vergebene
     # Rolle fragt wie eine Vergabe an ihre Traeger.
     if betroffen:
@@ -346,6 +390,10 @@ def _role_set_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
 def _ausfuehren_role_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     p = rahmen.payload
     actor = rahmen.active_user
+    speicher_setzen = p.get("vault_set") is True
+    rechte_aendern = any(p.get(k) is not None for k in ("name", "description", "permissions"))
+    if speicher_setzen and not permission_service.has_global_permission(db, actor, "panel.settings.write"):
+        raise AiActionStateError("AI_ACTION_ACCESS_REVOKED")
     try:
         if p.get("role_id") is None:
             rolle = rechtevergabe_service.create_role(
@@ -354,19 +402,35 @@ def _ausfuehren_role_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefueh
         else:
             role_id = int(p["role_id"])
             rolle = role_service.get_role(db, role_id)
-            if rolle is None or rolle.is_system:
+            if rolle is None or (rolle.is_system and rechte_aendern):
                 raise AiActionStateError("AI_ACTION_EXECUTION_FAILED")
             if set(role_service.role_permission_keys(db, role_id)) != set(p.get("before") or []):
                 raise AiActionStateError("AI_ACTION_REVISION_CONFLICT")
-            rolle = rechtevergabe_service.update_role(
-                db, actor, role_id, p.get("name"), p.get("description"), p.get("permissions")
-            )
+            if speicher_setzen and vault_blob_service.rolle_speicher(db, role_id) != p.get("vault_before"):
+                raise AiActionStateError("AI_ACTION_REVISION_CONFLICT")
+            if rechte_aendern:
+                rolle = rechtevergabe_service.update_role(
+                    db, actor, role_id, p.get("name"), p.get("description"), p.get("permissions")
+                )
     except rechtevergabe_service.RechteFehler as fehler:
         raise _bei_ausfuehrung(fehler) from fehler
+    if speicher_setzen:
+        vault_blob_service.rolle_speicher_setzen(db, rolle.id, p.get("vault_quota_bytes"))
+        audit_service.record_privileged_action(
+            db,
+            user_id=actor.id,
+            action="vault.role_quota.updated",
+            target_type="role",
+            target_id=rolle.id,
+            details={"vorher": p.get("vault_before"), "nachher": p.get("vault_quota_bytes")},
+        )
+        db.commit()
+    gespeichert = vault_blob_service.rolle_speicher(db, rolle.id)
     return _Ausgefuehrt(result={
         "role_id": rolle.id,
         "name": rolle.name,
         "permissions": role_service.role_permission_keys(db, rolle.id),
+        "vault_storage_gb": round(gespeichert / _GIB, 2) if gespeichert is not None else None,
     })
 
 
