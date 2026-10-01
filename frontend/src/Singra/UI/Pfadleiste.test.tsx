@@ -42,6 +42,20 @@ describe('Pfadleiste', () => {
     expect(miete.className).not.toContain('ring-primary/50')
   })
 
+  it('färbt ein Ziel nur als Ziel, auch wenn es die offene Ebene ist, und den Stamm immer gleich', () => {
+    render(<Pfadleiste label="Pfad" stamm={{ key: '', label: 'Stamm' }} teile={teile} onWaehlen={vi.fn()} onAblegen={vi.fn()} />)
+
+    const miete = screen.getByRole('button', { name: 'Miete' })
+    expect(miete.className).toContain('text-on-surface')
+    fireEvent.dragOver(miete, { dataTransfer: daten(['Files']) })
+    expect(miete.className).toContain('text-primary')
+    expect(miete.className).not.toContain('text-on-surface')
+
+    render(<Pfadleiste label="Wurzel" stamm={{ key: '', label: 'Oben' }} teile={[]} onWaehlen={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Oben' }).className).toContain('text-secondary')
+    expect(screen.getByRole('button', { name: 'Oben' }).className).not.toContain('text-on-surface')
+  })
+
   it('ist ohne onAblegen kein Ablageziel', () => {
     render(<Pfadleiste label="Pfad" stamm={{ key: '', label: 'Stamm' }} teile={teile} onWaehlen={vi.fn()} />)
     expect(fireEvent.dragOver(screen.getByRole('button', { name: 'Stamm' }), { dataTransfer: daten(['Files']) })).toBe(true)

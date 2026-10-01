@@ -61,8 +61,9 @@ export function Pfadleiste({ label, stamm, teile, onWaehlen, kannAblegen, onAble
         }
       : {}
 
-  const knopf = (key: string, extra: string) =>
-    cx('rounded px-1 transition-colors', ziel === key ? 'bg-primary/15 text-primary ring-1 ring-primary/50' : extra, key === aktuell && 'text-on-surface')
+  // Ein Teil ist entweder Ablageziel, offene Ebene oder normal, nie zwei Farben zugleich.
+  const knopf = (key: string, normal: string, offen = normal) =>
+    cx('rounded px-1 transition-colors', ziel === key ? 'bg-primary/15 text-primary ring-1 ring-primary/50' : key === aktuell ? offen : normal)
 
   return (
     <nav ref={leiste} aria-label={label} className={cx('flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-on-surface-variant', className)}>
@@ -95,7 +96,7 @@ export function Pfadleiste({ label, stamm, teile, onWaehlen, kannAblegen, onAble
             type="button"
             onClick={() => onWaehlen(teil.key)}
             aria-current={aktuell === teil.key ? 'page' : undefined}
-            className={knopf(teil.key, 'hover:text-on-surface')}
+            className={knopf(teil.key, 'hover:text-on-surface', 'text-on-surface')}
             {...ablage(teil.key)}
           >
             {teil.label}
