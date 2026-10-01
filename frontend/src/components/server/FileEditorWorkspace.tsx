@@ -6,7 +6,7 @@ import { yaml } from '@codemirror/lang-yaml'
 import { xml } from '@codemirror/lang-xml'
 import { markdown } from '@codemirror/lang-markdown'
 import { StreamLanguage, type LanguageSupport } from '@codemirror/language'
-import { EditorView, keymap, type ViewUpdate } from '@codemirror/view'
+import { EditorView, type ViewUpdate } from '@codemirror/view'
 import { css } from '@codemirror/legacy-modes/mode/css'
 import { cpp, csharp, java } from '@codemirror/legacy-modes/mode/clike'
 import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile'
@@ -47,6 +47,13 @@ interface FileEditorWorkspaceProps {
   onSave: (path: string) => void
   onClose: (path: string) => void
   onReload: (path: string) => void
+  /** Ort vor dem Dateinamen in der Kopfzeile; ohne ihn „Server-Dateien / Pfad“. */
+  ortLabel?: string
+  /**
+   * Der Editor füllt das Fenster: die Tastenkürzel gelten dann im ganzen
+   * Dokument, auch wenn der Fokus auf einem Knopf daneben liegt.
+   */
+  vollbild?: boolean
 }
 
 function languageExtension(path: string): LanguageSupport | ReturnType<typeof StreamLanguage.define> | null {
@@ -120,12 +127,15 @@ export function FileEditorWorkspace({
   onSave,
   onClose,
   onReload,
+  ortLabel,
+  vollbild = false,
 }: FileEditorWorkspaceProps) {
   const { t } = useTranslation()
   const activeTab = tabs.find((tab) => tab.path === activePath) ?? null
   const editorRef = useRef<EditorView | null>(null)
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const findInputRef = useRef<HTMLInputElement>(null)
+  const replaceInputRef = useRef<HTMLInputElement>(null)
   const activePathRef = useRef(activeTab?.path ?? null)
   const onChangeRef = useRef(onChange)
   const onSaveRef = useRef(onSave)
@@ -145,10 +155,6 @@ export function FileEditorWorkspace({
     setActiveMatch(0)
     setSearchOpen(false)
   }, [activePath])
-
-  useEffect(() => {
-    if (searchOpen) window.setTimeout(() => findInputRef.current?.focus({ preventScroll: true }), 0)
-  }, [searchOpen])
 
   const matches = useMemo(
     () => matchPositions(activeTab?.content ?? '', query, caseSensitive),
@@ -185,32 +191,64 @@ export function FileEditorWorkspace({
     })
   }
 
+  /** Öffnet die Suche und setzt den Fokus in das Such- oder Ersetzen-Feld. */
+  const openSearch = (field: 'find' | 'replace') => {
+    const view = editorRef.current
+    const selection = view?.state?.selection.main
+    // Wie in gängigen Editoren: markierter Text (eine Zeile) wird zum Suchbegriff.
+    if (view && selection && !selection.empty) {
+      const selected = view.state.sliceDoc(selection.from, selection.to)
+      if (!selected.includes('\n')) {
+        setQuery(selected)
+        setActiveMatch(0)
+      }
+    }
+    setSearchOpen(true)
+    window.setTimeout(() => {
+      const input = field === 'replace' ? replaceInputRef.current : findInputRef.current
+      input?.focus({ preventScroll: true })
+      input?.select()
+    }, 0)
+  }
+
+  const closeSearch = () => {
+    setSearchOpen(false)
+    editorRef.current?.focus()
+  }
+
+  // Tastenkürzel greifen, wo im Editor der Fokus auch liegt, nicht nur im Text.
+  // Sonst öffnet Strg+F die Suche des Browsers statt der eigenen.
+  const shortcutRef = useRef<(event: KeyboardEvent) => void>(() => undefined)
+  shortcutRef.current = (event: KeyboardEvent) => {
+    if (!activeTab) return
+    const mod = event.ctrlKey || event.metaKey
+    const key = event.key.toLowerCase()
+    let handled = true
+    if (mod && !event.altKey && key === 's') onSaveRef.current(activeTab.path)
+    else if (mod && !event.altKey && key === 'f') openSearch('find')
+    else if (mod && !event.altKey && key === 'h' && canWrite) openSearch('replace')
+    else if (event.key === 'F3') {
+      if (searchOpen && matches.length) selectMatch(event.shiftKey ? activeMatch - 1 : activeMatch + 1)
+      else openSearch('find')
+    } else if (event.key === 'Escape' && searchOpen) closeSearch()
+    else handled = false
+    if (handled) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+  }
+
+  useEffect(() => {
+    if (!vollbild) return
+    const onKey = (event: KeyboardEvent) => shortcutRef.current(event)
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [vollbild])
+
   const extensions = useMemo(() => {
     if (!activeTab) return []
     const language = languageExtension(activeTab.path)
-    return [
-      ...(language ? [language] : []),
-      keymap.of([
-        {
-          key: 'Mod-s',
-          preventDefault: true,
-          run: () => {
-            const path = activePathRef.current
-            if (path) onSaveRef.current(path)
-            return true
-          },
-        },
-        {
-          key: 'Mod-f',
-          preventDefault: true,
-          run: () => {
-            setSearchOpen(true)
-            return true
-          },
-        },
-      ]),
-      EDITOR_THEME,
-    ]
+    return [...(language ? [language] : []), EDITOR_THEME]
   }, [activeTab?.path])
 
   const updateCursor = useCallback((update: ViewUpdate) => {
@@ -261,7 +299,10 @@ export function FileEditorWorkspace({
           : <><Check className="h-3.5 w-3.5" /> {t('files.editor.saved')}</>
 
   return (
-    <section className="flex h-full min-h-[520px] min-w-0 flex-1 flex-col bg-surface-container-lowest/55 lg:min-h-0">
+    <section
+      onKeyDownCapture={vollbild ? undefined : (event) => shortcutRef.current(event.nativeEvent)}
+      className="flex h-full min-h-[520px] min-w-0 flex-1 flex-col bg-surface-container-lowest/55 lg:min-h-0"
+    >
       <div role="tablist" aria-label={tabListLabel} className="flex min-h-10 items-end overflow-x-auto border-b border-outline-variant bg-surface-container-low/70 [scrollbar-width:thin]">
         {tabs.length === 0 ? (
           <div className="px-4 py-2.5 text-xs text-on-surface-variant">{t('files.editor.noFileOpen')}</div>
@@ -313,16 +354,17 @@ export function FileEditorWorkspace({
       {activeTab ? (
         <>
           <div className="flex min-h-10 items-center justify-between gap-3 border-b border-outline-variant px-3">
-            <p className="min-w-0 truncate font-mono text-label-sm text-on-surface-variant">{t('files.serverFiles')} / {activeTab.path}</p>
+            <p className="min-w-0 truncate font-mono text-label-sm text-on-surface-variant">{ortLabel ?? `${t('files.serverFiles')} / ${activeTab.path}`}</p>
             <div className="flex shrink-0 items-center gap-2">
               <span className={`hidden items-center gap-1.5 text-label-sm sm:inline-flex ${activeTab.saveState === 'conflict' || activeTab.saveState === 'error' ? 'text-status-destructive' : activeTab.saveState === 'clean' ? 'text-status-success' : 'text-status-warning'}`}>
                 {saveIndicator}
               </span>
               <Button variant="ghost" size="sm"
                 type="button"
-                onClick={() => setSearchOpen((value) => !value)}
+                onClick={() => (searchOpen ? closeSearch() : openSearch('find'))}
                 className="flex w-8 items-center justify-center"
                 aria-label={t('files.editor.searchAndReplace')}
+                aria-pressed={searchOpen}
               >
                 <Search className="h-4 w-4" />
               </Button>
@@ -362,8 +404,8 @@ export function FileEditorWorkspace({
                       event.preventDefault()
                       selectMatch(event.shiftKey ? activeMatch - 1 : activeMatch + 1)
                     }
-                    if (event.key === 'Escape') setSearchOpen(false)
                   }}
+                  aria-label={t('files.editor.findPlaceholder')}
                   placeholder={t('files.editor.findPlaceholder')}
                   className="msm-input h-8 pl-8 pr-16 text-xs"
                 />
@@ -372,21 +414,23 @@ export function FileEditorWorkspace({
               <div className="relative">
                 <Replace className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
                 <input
+                  ref={replaceInputRef}
                   value={replacement}
                   onChange={(event) => setReplacement(event.target.value)}
                   placeholder={t('files.editor.replacePlaceholder')}
+                  aria-label={t('files.editor.replacePlaceholder')}
                   disabled={!canWrite}
                   className="msm-input h-8 pl-8 text-xs disabled:opacity-50"
                 />
               </div>
               <div className="flex flex-wrap items-center gap-1">
-                <Button variant="ghost" size="sm" type="button" onClick={() => setCaseSensitive((value) => !value)} className={`min-w-8 font-mono ${caseSensitive ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={caseSensitive} title={t('files.editor.matchCase')}>Aa</Button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => setCaseSensitive((value) => !value)} className={`min-w-8 font-mono ${caseSensitive ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={caseSensitive} aria-label={t('files.editor.matchCase')}>Aa</Button>
                 <Button variant="ghost" size="sm" type="button" onClick={() => selectMatch(activeMatch - 1)} disabled={!matches.length} className="flex w-8 items-center justify-center disabled:opacity-40" aria-label={t('files.editor.previousMatch')}><ChevronUp className="h-3.5 w-3.5" /></Button>
                 <Button variant="ghost" size="sm" type="button" onClick={() => selectMatch(activeMatch + 1)} disabled={!matches.length} className="flex w-8 items-center justify-center disabled:opacity-40" aria-label={t('files.editor.nextMatch')}><ChevronDown className="h-3.5 w-3.5" /></Button>
                 <Button variant="secondary" size="sm" type="button" onClick={replaceCurrent} disabled={!canWrite || !matches.length} className="disabled:opacity-40">{t('files.editor.replace')}</Button>
                 <Button variant="secondary" size="sm" type="button" onClick={replaceAll} disabled={!canWrite || !matches.length} className="disabled:opacity-40">{t('files.editor.replaceAll')}</Button>
                 <Button variant="ghost" size="sm" type="button" onClick={() => selectMatch(0)} disabled={!matches.length} className="disabled:opacity-40">{t('files.editor.findAll', { anzahl: matches.length })}</Button>
-                <Button variant="ghost" size="sm" type="button" onClick={() => setSearchOpen(false)} className="flex w-8 items-center justify-center" aria-label={t('files.editor.closeSearch')}><X className="h-3.5 w-3.5" /></Button>
+                <Button variant="ghost" size="sm" type="button" onClick={closeSearch} className="flex w-8 items-center justify-center" aria-label={t('files.editor.closeSearch')}><X className="h-3.5 w-3.5" /></Button>
               </div>
             </div>
           )}
@@ -402,6 +446,7 @@ export function FileEditorWorkspace({
                 onChange={handleEditorChange}
                 onUpdate={updateCursor}
                 onCreateEditor={handleCreateEditor}
+                autoFocus
                 theme="dark"
                 extensions={extensions}
                 editable={canWrite}

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   ArchiveRestore,
-  ChevronRight,
   Download,
   FilePlus2,
   FolderInput,
@@ -24,7 +23,7 @@ import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { Button, ActionMenu, Switch, type ActionMenuItem } from '@/Singra/UI'
+import { Button, ActionMenu, Kontextmenue, Pfadleiste, Switch, Versionsliste, type ActionMenuItem } from '@/Singra/UI'
 import { FileTree } from '@/components/server/FileTree'
 import { FileEditorWorkspace } from '@/components/server/FileEditorWorkspace'
 import {
@@ -158,7 +157,6 @@ export function FileManager({ serverId }: FileManagerProps) {
   const inspectorTriggerRef = useRef<HTMLButtonElement>(null)
   const treePanelRef = useRef<HTMLElement>(null)
   const inspectorPanelRef = useRef<HTMLElement>(null)
-  const contextMenuRef = useRef<HTMLDivElement>(null)
   const contextTriggerRef = useRef<HTMLElement | null>(null)
   const tabsRef = useRef(tabs)
   const savingPathsRef = useRef(new Set<string>())
@@ -235,49 +233,6 @@ export function FileManager({ serverId }: FileManagerProps) {
   }, [searchMode, searchQuery, serverId, t])
 
   useEffect(() => {
-    if (!contextMenu) return
-    const focusMenu = window.requestAnimationFrame(() => contextMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus())
-    const dismiss = (restoreFocus = false) => {
-      const trigger = contextTriggerRef.current
-      setContextMenu(null)
-      if (restoreFocus) trigger?.focus()
-    }
-    const onPointerDown = (event: MouseEvent) => {
-      if (!contextMenuRef.current?.contains(event.target as Node)) dismiss(false)
-    }
-    const onScroll = () => dismiss(false)
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        dismiss(true)
-        return
-      }
-      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
-      const items = Array.from(contextMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])
-      if (!items.length) return
-      event.preventDefault()
-      const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement)
-      const nextIndex = event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? items.length - 1
-          : event.key === 'ArrowUp'
-            ? (currentIndex - 1 + items.length) % items.length
-            : (currentIndex + 1) % items.length
-      items[nextIndex].focus()
-    }
-    document.addEventListener('mousedown', onPointerDown)
-    window.addEventListener('scroll', onScroll, true)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      window.cancelAnimationFrame(focusMenu)
-      document.removeEventListener('mousedown', onPointerDown)
-      window.removeEventListener('scroll', onScroll, true)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [contextMenu])
-
-  useEffect(() => {
     if (!treeOpen && !inspectorOpen) return
     const focusPanel = window.requestAnimationFrame(() => {
       if (treeOpen) treePanelRef.current?.focus()
@@ -288,7 +243,7 @@ export function FileManager({ serverId }: FileManagerProps) {
       // dem Dialog, nicht der Ebene darunter — sonst raeumt ein einziger
       // Tastendruck zwei Ebenen gleichzeitig ab und der Benutzer verliert den
       // Kontext, in dem er gerade gearbeitet hat.
-      if (event.key !== 'Escape' || contextMenuRef.current || promptDialog || moveDialog) return
+      if (event.key !== 'Escape' || contextMenu || promptDialog || moveDialog) return
       event.preventDefault()
       if (treeOpen) {
         setTreeOpen(false)
@@ -303,7 +258,7 @@ export function FileManager({ serverId }: FileManagerProps) {
       window.cancelAnimationFrame(focusPanel)
       document.removeEventListener('keydown', onKey)
     }
-  }, [inspectorOpen, moveDialog, promptDialog, treeOpen])
+  }, [contextMenu, inspectorOpen, moveDialog, promptDialog, treeOpen])
 
   useEffect(() => {
     if (!promptDialog) return
@@ -683,13 +638,18 @@ export function FileManager({ serverId }: FileManagerProps) {
   const handleDropFolder = async (event: React.DragEvent, entry: FileEntry, parent: string) => {
     event.preventDefault()
     event.stopPropagation()
+    await dropIntoDirectory(joinPath(parent, entry.name), event.dataTransfer)
+  }
+
+  /** Ein Eintrag aus dem Baum wird verschoben, Dateien vom Rechner werden hochgeladen. */
+  const dropIntoDirectory = async (destination: string, data: DataTransfer) => {
     if (!canWrite) return
-    const destination = joinPath(parent, entry.name)
-    const source = event.dataTransfer.getData('application/x-msm-path')
+    const source = data.getData('application/x-msm-path')
     if (!source) {
-      enqueueUpload(event.dataTransfer.files, destination)
+      enqueueUpload(data.files, destination)
       return
     }
+    if (parentPath(source) === destination) return
     const sourceName = fileName(source)
     if (isWithin(source, joinPath(destination, sourceName))) {
       toast.error(t('files.moveSelfError'))
@@ -755,12 +715,15 @@ export function FileManager({ serverId }: FileManagerProps) {
       </header>
 
       <div className="flex min-h-10 flex-wrap items-center gap-2 border-b border-outline-variant px-3 py-2 text-xs">
-        <nav aria-label={t('files.breadcrumb')} className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto font-mono text-on-surface-variant">
-          <button type="button" onClick={() => toggleDirectory('')} className="whitespace-nowrap text-secondary hover:text-primary">{t('files.serverFiles')}</button>
-          {breadcrumbs.map((segment, index) => (
-            <span key={`${segment}-${index}`} className="flex items-center gap-1 whitespace-nowrap"><ChevronRight className="h-3 w-3" /><button type="button" onClick={() => toggleDirectory(breadcrumbs.slice(0, index + 1).join('/'))} className="hover:text-on-surface">{segment}</button></span>
-          ))}
-        </nav>
+        <Pfadleiste
+          label={t('files.breadcrumb')}
+          className="font-mono"
+          stamm={{ key: '', label: t('files.serverFiles') }}
+          teile={breadcrumbs.map((segment, index) => ({ key: breadcrumbs.slice(0, index + 1).join('/'), label: segment }))}
+          onWaehlen={toggleDirectory}
+          kannAblegen={() => canWrite}
+          onAblegen={(destination, data) => void dropIntoDirectory(destination, data)}
+        />
         <p className="shrink-0 text-label-sm text-on-surface-variant">{t('files.summary', { files: directorySummary.files, folders: directorySummary.folders, size: formatBytes(directorySummary.bytes) })}</p>
       </div>
 
@@ -827,25 +790,10 @@ export function FileManager({ serverId }: FileManagerProps) {
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 border-b border-outline-variant p-3 text-label-sm"><dt className="text-on-surface-variant">{t('files.modified')}</dt><dd className="text-right text-on-surface">{formatModified(activeTab.modified)}</dd><dt className="text-on-surface-variant">{t('files.size')}</dt><dd className="text-right font-mono text-on-surface">{formatBytes(activeTab.size)}</dd><dt className="text-on-surface-variant">{t('files.permissions')}</dt><dd className="text-right font-mono text-on-surface">{activeTab.mode ?? t('files.notAvailable')}</dd><dt className="text-on-surface-variant">{t('files.owner')}</dt><dd className="truncate text-right text-on-surface">{activeTab.owner ?? t('files.notAvailable')}</dd><dt className="text-on-surface-variant">{t('files.group')}</dt><dd className="truncate text-right text-on-surface">{activeTab.group ?? t('files.notAvailable')}</dd></dl>
             <div className="border-b border-outline-variant p-3">
               <h4 className="mb-2 text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">{t('files.versionHistory')}</h4>
-              {(versions[activeTab.path] ?? []).length === 0 ? (
-                <p className="text-label-sm text-on-surface-variant">{t('files.noVersions')}</p>
-              ) : (
-                <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
-                  {(versions[activeTab.path] ?? []).map((version) => (
-                    <div key={version.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface-container-highest/70">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-label-sm text-on-surface">{formatModified(version.created_at)}</p>
-                        <p className="font-mono text-label-sm text-on-surface-variant">{formatBytes(version.size)}</p>
-                      </div>
-                      {canWrite && (
-                        <Button variant="ghost" type="button" onClick={() => void restoreVersion(activeTab.path, version.id)} className="h-7 text-label-sm">
-                          {t('files.restoreVersion')}
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+              <Versionsliste
+                versionen={(versions[activeTab.path] ?? []).map((version) => ({ id: version.id, zeit: version.created_at * 1000, groesse: version.size }))}
+                onWiederherstellen={canWrite ? (id) => void restoreVersion(activeTab.path, id) : undefined}
+              />
             </div>
             <div className="p-3">
               <h4 className="mb-2 text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">{t('files.quickActions')}</h4>
@@ -855,7 +803,13 @@ export function FileManager({ serverId }: FileManagerProps) {
         </aside>
       </div>
 
-      {contextMenu && <div ref={contextMenuRef} className="fixed z-[120] min-w-48 rounded-lg border border-outline-variant bg-surface-container-high p-1.5 shadow-panel" style={{ left: Math.min(contextMenu.x, window.innerWidth - 210), top: Math.min(contextMenu.y, window.innerHeight - 240) }} onClick={(event) => event.stopPropagation()} role="menu" aria-label={t('files.more')}>{actionItems(contextMenu).map((item) => <button key={item.key} type="button" role="menuitem" disabled={item.disabled} onClick={() => { item.onSelect(); setContextMenu(null) }} className={`flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary sm:min-h-9 ${item.separatorBefore ? 'mt-1 border-t border-outline-variant' : ''} ${item.destructive ? 'text-status-destructive hover:bg-status-destructive/10' : 'text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface'}`}>{item.icon}{item.label}</button>)}</div>}
+      <Kontextmenue
+        ort={contextMenu ? { x: contextMenu.x, y: contextMenu.y } : null}
+        items={contextMenu ? actionItems(contextMenu) : []}
+        label={t('files.more')}
+        ausloeser={contextTriggerRef.current}
+        onSchliessen={() => setContextMenu(null)}
+      />
 
       {promptDialog && <div className="msm-modal-overlay z-[130]" role="dialog" aria-modal="true" aria-labelledby={promptTitleId} onClick={() => setPromptDialog(null)}><div className="msm-card w-full max-w-md p-5" onClick={(event) => event.stopPropagation()}><h2 id={promptTitleId} className="font-headline text-title-lg font-semibold text-on-surface">{promptDialog.title}</h2><label className="mt-4 block text-xs font-medium text-on-surface-variant">{promptDialog.label}</label><input ref={promptInputRef} defaultValue={promptDialog.initialValue} className="msm-input mt-1.5" onKeyDown={(event) => { if (event.key === 'Enter') void promptDialog.onConfirm(event.currentTarget.value) }} /><div className="mt-5 flex justify-end gap-2"><Button variant="secondary" size="sm" type="button" onClick={() => setPromptDialog(null)}>{t('common.cancel')}</Button><Button size="sm" type="button" onClick={() => void promptDialog.onConfirm(promptInputRef.current?.value ?? '')}>{promptDialog.confirmLabel}</Button></div></div></div>}
 

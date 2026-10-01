@@ -76,3 +76,6 @@ export {
 } from './Zahlenabgleich'
 
 export { Lichtbox, type LichtboxProps } from './Lichtbox'
+export { Pfadleiste, type PfadleisteProps, type Pfadteil } from './Pfadleiste'
+export { Kontextmenue, menueLage, type KontextmenueProps } from './Kontextmenue'
+export { Versionsliste, type VersionslisteProps, type Fassung } from './Versionsliste'

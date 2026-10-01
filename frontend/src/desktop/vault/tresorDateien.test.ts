@@ -535,6 +535,25 @@ describe('Tresor-Dateien', () => {
       expect(await lesen(userKey, id)).toBe('Fassung neu')
     })
 
+    it('holt eine frühere Fassung als neue zurück, die aktuelle bleibt erhalten', async () => {
+      serverStarten()
+      const userKey = await tresorOeffnen()
+      const id = await useVaultStore.getState().dateiHinzufuegen(new File(['erste'], 'notiz.txt', { type: 'text/plain' }))
+      await allesErledigt()
+      await useVaultStore.getState().dateiErsetzen(id, text('zweite'))
+      await allesErledigt()
+      const alt = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.frueher![0]
+
+      await useVaultStore.getState().fassungZurueckholen(id, alt.original.id)
+      await allesErledigt()
+      expect(await lesen(userKey, id)).toBe('erste')
+      const frueher = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.frueher!
+      const texte = await Promise.all(frueher.map(async (v) => (await blobLesen(v.original, id, userKey, v.typ)).text()))
+      expect(texte).toEqual(['zweite', 'erste'])
+
+      await expect(useVaultStore.getState().fassungZurueckholen(id, 'gibt-es-nicht')).rejects.toThrow()
+    })
+
     it('löscht mit der Datei auch alle früheren Fassungen', async () => {
       const server = serverStarten()
       await tresorOeffnen()

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
@@ -45,5 +45,26 @@ describe('TresorOrdnerBaum', () => {
 
     rerender(<TresorOrdnerBaum ordner={alle} aktuell="a" pfad={[vertraege, miete, alt]} onWaehlen={vi.fn()} />)
     expect(screen.getByRole('button', { name: '2024' }).closest('[role="treeitem"]')).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('nimmt Abgelegtes an und klappt einen zugeklappten Ordner beim Darüberziehen auf', () => {
+    vi.useFakeTimers()
+    const onAblegen = vi.fn()
+    const kannAblegen = (id: string | undefined) => id !== 'u'
+    render(<TresorOrdnerBaum ordner={alle} aktuell={undefined} pfad={[]} onWaehlen={vi.fn()} ablage={{ kannAblegen, onAblegen }} />)
+    const daten = { types: ['Files'], getData: () => '', files: [] }
+
+    const fotosKnopf = screen.getByRole('button', { name: 'Fotos' })
+    fireEvent.dragEnter(fotosKnopf, { dataTransfer: daten })
+    expect(fireEvent.dragOver(fotosKnopf, { dataTransfer: daten })).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Urlaub' })).not.toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(800))
+    const urlaub = screen.getByRole('button', { name: 'Urlaub' })
+    // Was `kannAblegen` ablehnt, ist kein Ziel.
+    expect(fireEvent.dragOver(urlaub, { dataTransfer: daten })).toBe(true)
+
+    fireEvent.drop(screen.getByRole('button', { name: i18n.t('mss.vault.dateien.stamm') }), { dataTransfer: daten })
+    expect(onAblegen).toHaveBeenCalledWith(undefined, expect.anything())
+    vi.useRealTimers()
   })
 })

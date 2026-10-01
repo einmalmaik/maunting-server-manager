@@ -3043,7 +3043,6 @@
     "extractFailed": "The archive could not be extracted.",
     "moveFailed": "The entry could not be moved.",
     "versionHistory": "Version history",
-    "noVersions": "No older version has been saved yet.",
     "restoreVersion": "Restore",
     "confirmRestoreVersion": "Restore this version? The current content will be saved as a new version first.",
     "versionRestored": "File version restored",
@@ -3974,6 +3973,12 @@
       "info": "Details",
       "vor": "Next",
       "zurueck": "Previous"
+    },
+    "versionen": {
+      "titel": "Versions",
+      "leer": "No older version has been saved yet.",
+      "wiederherstellen": "Restore",
+      "hinweis": "Restoring saves that version as the newest one. The current version is kept."
     }
   },
   "serverDetail": {
@@ -6146,7 +6151,7 @@
         "speicherBelegt": "{{belegt}} of {{quote}}",
         "verschluesselt_one": "Encrypting one file on this device …",
         "verschluesselt_other": "Encrypting {{count}} files on this device …",
-        "leer": "Nothing here yet. Drop files here or upload them.",
+        "leer": "Drag files here or upload them.",
         "ordner": "Folder",
         "unlesbar": "This app cannot read this file.",
         "speicherVoll": "No storage left",
@@ -6174,7 +6179,17 @@
         "offlineLaedt": "Downloading to this device",
         "offlineFertig": "{{name}} is now available offline.",
         "offlineFehler": "The file could not be downloaded to this device.",
-        "keinSpeicher": "Your account has no vault storage. The operator grants it through a role."
+        "keinSpeicher": "Your account has no vault storage. The operator grants it through a role.",
+        "oeffnen": "Open",
+        "aktionenFuer": "Actions for {{name}}",
+        "spalteName": "Name",
+        "spalteGroesse": "Size",
+        "geaendert": "Modified",
+        "ort": "Location",
+        "leerTitel": "This folder is empty",
+        "ablegenHochladen": "Drop to upload to {{ordner}}",
+        "verschoben": "{{name}} is now in {{ordner}}.",
+        "fassungZurueck": "The earlier version is restored. The previous one is listed under Versions."
       },
       "fotos": {
         "alle": "All",

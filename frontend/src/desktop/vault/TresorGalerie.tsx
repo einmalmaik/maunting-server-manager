@@ -33,7 +33,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
-import { ActionMenu, Button, Dropdown, FileButton, Lichtbox, ProgressBar, type DropdownOption } from '@/Singra/UI'
+import { ActionMenu, Button, Dropdown, FileButton, Lichtbox, ProgressBar, Versionsliste, type DropdownOption } from '@/Singra/UI'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { toast } from '@/stores/toastStore'
 import { prompt } from '@/stores/promptStore'
@@ -44,6 +44,7 @@ import { miniaturenVorladen, useMiniatur } from './tresorMiniaturen'
 import { aufGeraetSpeichern } from './tresorAnzeige'
 import { gruppieren, hashesBerechnen } from './tresorAehnlich'
 import { BEARBEITBAR, TresorBildeditor } from './TresorBildeditor'
+import { fassungenVon } from './tresorOrdner'
 
 type Filter = 'alle' | 'videos' | 'kuerzlich' | 'aehnlich' | 'alben'
 
@@ -740,6 +741,8 @@ function GalerieLichtbox({
   const { t, i18n } = useTranslation()
   const trashItem = useVaultStore((s) => s.trashItem)
   const setArchived = useVaultStore((s) => s.setArchived)
+  const fassungZurueckholen = useVaultStore((s) => s.fassungZurueckholen)
+  const [holt, setHolt] = useState<string | null>(null)
   const [anzeige, setAnzeige] = useState<Anzeige>({ id: item.id, url: null, original: false, anteil: null, fehler: false })
   const [spielt, setSpielt] = useState(false)
   const [bearbeiten, setBearbeiten] = useState(false)
@@ -828,25 +831,48 @@ function GalerieLichtbox({
 
   const knopf = 'text-white/85 hover:bg-white/10 hover:text-white'
 
+  const zurueckholen = async (originalId: string) => {
+    setHolt(originalId)
+    try {
+      await fassungZurueckholen(item.id, originalId)
+      toast.success(t('mss.vault.dateien.fassungZurueck'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('mss.vault.bearbeiten.fehler'))
+    } finally {
+      setHolt(null)
+    }
+  }
+
+  // Gedrehte und zugeschnittene Fotos sind neue Fassungen; die früheren stehen hier.
+  const versionen = fassungenVon(item)
   const info = (
-    <dl className="space-y-3">
-      {[
-        [t('mss.vault.fotos.info.name'), item.service],
-        [t('mss.vault.fotos.info.aufgenommen'), aufnahme],
-        [t('mss.vault.fotos.info.kamera'), datei.kamera],
-        [t('mss.vault.fotos.info.masse'), datei.breite && datei.hoehe ? `${datei.breite} × ${datei.hoehe}` : null],
-        [t('mss.vault.fotos.info.dauer'), datei.dauer ? dauerText(datei.dauer) : null],
-        [t('mss.vault.fotos.info.groesse'), formatBytes(datei.original.echt)],
-        [t('mss.vault.fotos.info.hinzugefuegt'), hinzugefuegt],
-      ]
-        .filter(([, wert]) => wert)
-        .map(([name, wert]) => (
-          <div key={name}>
-            <dt className="text-label-sm text-white/55">{name}</dt>
-            <dd className="break-words text-white/90">{wert}</dd>
-          </div>
-        ))}
-    </dl>
+    <div className="space-y-6">
+      <dl className="space-y-3">
+        {[
+          [t('mss.vault.fotos.info.name'), item.service],
+          [t('mss.vault.fotos.info.aufgenommen'), aufnahme],
+          [t('mss.vault.fotos.info.kamera'), datei.kamera],
+          [t('mss.vault.fotos.info.masse'), datei.breite && datei.hoehe ? `${datei.breite} × ${datei.hoehe}` : null],
+          [t('mss.vault.fotos.info.dauer'), datei.dauer ? dauerText(datei.dauer) : null],
+          [t('mss.vault.fotos.info.groesse'), formatBytes(datei.original.echt)],
+          [t('mss.vault.fotos.info.hinzugefuegt'), hinzugefuegt],
+        ]
+          .filter(([, wert]) => wert)
+          .map(([name, wert]) => (
+            <div key={name}>
+              <dt className="text-label-sm text-white/55">{name}</dt>
+              <dd className="break-words text-white/90">{wert}</dd>
+            </div>
+          ))}
+      </dl>
+      {versionen.length > 0 && (
+        <section aria-label={t('common.versionen.titel')}>
+          <h3 className="mb-1 text-sm font-semibold text-white">{t('common.versionen.titel')}</h3>
+          <p className="mb-3 text-label-sm text-white/55">{t('common.versionen.hinweis')}</p>
+          <Versionsliste versionen={versionen} onWiederherstellen={(id) => void zurueckholen(id)} laeuft={holt} aufDunkel />
+        </section>
+      )}
+    </div>
   )
 
   let inhalt: React.ReactNode

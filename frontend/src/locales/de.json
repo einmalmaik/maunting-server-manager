@@ -3031,7 +3031,6 @@
     "extractFailed": "Das Archiv konnte nicht entpackt werden.",
     "moveFailed": "Der Eintrag konnte nicht verschoben werden.",
     "versionHistory": "Versionsverlauf",
-    "noVersions": "Noch keine ältere Version gespeichert.",
     "restoreVersion": "Wiederherstellen",
     "confirmRestoreVersion": "Diese Version wiederherstellen? Der aktuelle Inhalt wird zuvor als neue Version gesichert.",
     "versionRestored": "Dateiversion wiederhergestellt",
@@ -3974,6 +3973,12 @@
       "info": "Informationen",
       "vor": "Nächstes",
       "zurueck": "Vorheriges"
+    },
+    "versionen": {
+      "titel": "Versionen",
+      "leer": "Noch keine ältere Fassung gespeichert.",
+      "wiederherstellen": "Wiederherstellen",
+      "hinweis": "Wiederherstellen legt die Fassung als neueste an. Die aktuelle bleibt dabei erhalten."
     }
   },
   "serverDetail": {
@@ -6146,7 +6151,7 @@
         "speicherBelegt": "{{belegt}} von {{quote}}",
         "verschluesselt_one": "Eine Datei wird auf diesem Gerät verschlüsselt …",
         "verschluesselt_other": "{{count}} Dateien werden auf diesem Gerät verschlüsselt …",
-        "leer": "Hier liegt noch nichts. Zieh Dateien hierher oder lade sie hoch.",
+        "leer": "Zieh Dateien hierher oder lade sie hoch.",
         "ordner": "Ordner",
         "unlesbar": "Diese Datei kann die App nicht lesen.",
         "speicherVoll": "Kein Speicher frei",
@@ -6174,7 +6179,17 @@
         "offlineLaedt": "Wird auf dieses Gerät geladen",
         "offlineFertig": "{{name}} ist jetzt offline verfügbar.",
         "offlineFehler": "Die Datei ließ sich nicht auf dieses Gerät laden.",
-        "keinSpeicher": "Dein Konto hat keinen Tresorspeicher. Den vergibt der Betreiber über eine Rolle."
+        "keinSpeicher": "Dein Konto hat keinen Tresorspeicher. Den vergibt der Betreiber über eine Rolle.",
+        "oeffnen": "Öffnen",
+        "aktionenFuer": "Aktionen für {{name}}",
+        "spalteName": "Name",
+        "spalteGroesse": "Größe",
+        "geaendert": "Geändert",
+        "ort": "Ort",
+        "leerTitel": "Dieser Ordner ist leer",
+        "ablegenHochladen": "Loslassen, um nach {{ordner}} hochzuladen",
+        "verschoben": "{{name}} liegt jetzt in {{ordner}}.",
+        "fassungZurueck": "Die frühere Fassung ist wiederhergestellt. Die bisherige steht unter Versionen."
       },
       "fotos": {
         "alle": "Alle",

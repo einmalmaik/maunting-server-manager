@@ -219,3 +219,64 @@ describe('FileEditorWorkspace — Sprachwahl', () => {
     expect(screen.getByText('Open a file to edit')).toBeInTheDocument()
   })
 })
+
+/**
+ * Strg+F galt nur, solange CodeMirror den Fokus hatte. Lag er auf einem Knopf
+ * der Kopfzeile oder (im Tresor) irgendwo im Vollbild, öffnete der Browser
+ * seine eigene Suche, die im Editor nichts ersetzen kann.
+ */
+describe('FileEditorWorkspace — Tastenkürzel', () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('de')
+  })
+
+  const props = (extra: Partial<React.ComponentProps<typeof FileEditorWorkspace>> = {}) => ({
+    tabs: [tab('notizen/liste.txt', 'Alpha\nBeta')],
+    activePath: 'notizen/liste.txt',
+    canWrite: true,
+    tabListLabel: 'Offene Dateien',
+    horizontalScrollHint: 'Seitlich scrollen',
+    onActivate: vi.fn(),
+    onChange: vi.fn(),
+    onSave: vi.fn(),
+    onClose: vi.fn(),
+    onReload: vi.fn(),
+    ...extra,
+  })
+
+  it('öffnet mit Strg+F die eigene Suche, auch wenn ein Knopf den Fokus hat', async () => {
+    render(<FileEditorWorkspace {...props()} />)
+    const speichern = screen.getByRole('button', { name: 'Speichern' })
+    const ereignis = new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true })
+    speichern.dispatchEvent(ereignis)
+
+    expect(ereignis.defaultPrevented).toBe(true)
+    const suche = await screen.findByRole('textbox', { name: /Suchen/ })
+    await waitFor(() => expect(suche).toHaveFocus())
+  })
+
+  it('setzt mit Strg+H den Fokus ins Ersetzen-Feld und speichert mit Strg+S', async () => {
+    const onSave = vi.fn()
+    render(<FileEditorWorkspace {...props({ onSave })} />)
+    const knopf = screen.getByRole('button', { name: 'Suchen und ersetzen' })
+    fireEvent.keyDown(knopf, { key: 'h', ctrlKey: true })
+    const ersetzen = await screen.findByRole('textbox', { name: /Ersetzen durch/ })
+    await waitFor(() => expect(ersetzen).toHaveFocus())
+
+    fireEvent.keyDown(ersetzen, { key: 's', ctrlKey: true })
+    expect(onSave).toHaveBeenCalledWith('notizen/liste.txt')
+    fireEvent.keyDown(ersetzen, { key: 'Escape' })
+    expect(screen.queryByRole('textbox', { name: /Ersetzen durch/ })).toBeNull()
+  })
+
+  it('fängt im Vollbild Strg+F im ganzen Dokument ab und zeigt den eigenen Ort', async () => {
+    render(<FileEditorWorkspace {...props({ vollbild: true, ortLabel: 'Tresor / Notizen / liste.txt' })} />)
+    expect(screen.getByText('Tresor / Notizen / liste.txt')).toBeInTheDocument()
+    expect(screen.queryByText(/Server-Dateien/)).toBeNull()
+
+    const ereignis = new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true })
+    document.body.dispatchEvent(ereignis)
+    expect(ereignis.defaultPrevented).toBe(true)
+    expect(await screen.findByRole('textbox', { name: /Suchen/ })).toBeInTheDocument()
+  })
+})

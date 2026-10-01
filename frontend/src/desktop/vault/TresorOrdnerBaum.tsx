@@ -1,8 +1,11 @@
 /**
  * Ordnerbaum der Tresor-Dateien, vom Stammverzeichnis aus. Der Weg zum
  * geöffneten Ordner ist immer aufgeklappt, damit man sieht, wo man ist.
+ *
+ * Mit `ablage` ist jeder Ordner ein Ablageziel. Wer etwas über einen
+ * zugeklappten Ordner zieht und kurz wartet, klappt ihn auf, wie im Explorer.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, Folder, FolderOpen, HardDrive } from 'lucide-react'
 import type { VaultItem } from './vaultStore'
@@ -14,9 +17,17 @@ interface Props {
   /** Ordner vom Stamm bis zum geöffneten. */
   pfad: VaultItem[]
   onWaehlen: (id: string | undefined) => void
+  /** Ablegen auf einem Ordner; `undefined` ist das Stammverzeichnis. */
+  ablage?: {
+    kannAblegen: (id: string | undefined, daten: DataTransfer) => boolean
+    onAblegen: (id: string | undefined, daten: DataTransfer) => void
+  }
 }
 
-export function TresorOrdnerBaum({ ordner, aktuell, pfad, onWaehlen }: Props) {
+/** So lange schwebt etwas über einem zugeklappten Ordner, bis er aufgeht. */
+const AUFKLAPPEN_NACH_MS = 700
+
+export function TresorOrdnerBaum({ ordner, aktuell, pfad, onWaehlen, ablage }: Props) {
   const { t } = useTranslation()
   /** Von Hand auf- oder zugeklappt; sonst ist nur der Weg zum geöffneten Ordner offen. */
   const [geklappt, setGeklappt] = useState<Map<string, boolean>>(new Map())
@@ -42,9 +53,44 @@ export function TresorOrdnerBaum({ ordner, aktuell, pfad, onWaehlen }: Props) {
   const offen = (id: string) => geklappt.get(id) ?? aufDemWeg.has(id)
   const umschalten = (id: string) => setGeklappt((alt) => new Map(alt).set(id, !offen(id)))
 
-  const zeile = (aktiv: boolean) =>
+  /** Ordner, über dem gerade etwas gezogen wird; `''` ist der Stamm. */
+  const [ziel, setZiel] = useState<string | null>(null)
+  const aufklappen = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(aufklappen.current), [])
+
+  const ablageZiel = (id: string | undefined, zu: boolean) =>
+    ablage
+      ? {
+          onDragEnter: () => {
+            window.clearTimeout(aufklappen.current)
+            if (id && zu) aufklappen.current = window.setTimeout(() => setGeklappt((alt) => new Map(alt).set(id, true)), AUFKLAPPEN_NACH_MS)
+          },
+          onDragOver: (event: React.DragEvent) => {
+            if (!ablage.kannAblegen(id, event.dataTransfer)) return
+            event.preventDefault()
+            setZiel(id ?? '')
+          },
+          onDragLeave: () => {
+            window.clearTimeout(aufklappen.current)
+            setZiel((z) => (z === (id ?? '') ? null : z))
+          },
+          onDrop: (event: React.DragEvent) => {
+            event.preventDefault()
+            event.stopPropagation()
+            window.clearTimeout(aufklappen.current)
+            setZiel(null)
+            ablage.onAblegen(id, event.dataTransfer)
+          },
+        }
+      : {}
+
+  const zeile = (aktiv: boolean, markiert: boolean) =>
     `flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-xs ${
-      aktiv ? 'bg-primary/10 font-semibold text-primary' : 'text-on-surface hover:bg-surface-container-high'
+      markiert
+        ? 'bg-primary/15 text-primary ring-1 ring-primary/50'
+        : aktiv
+          ? 'bg-primary/10 font-semibold text-primary'
+          : 'text-on-surface hover:bg-surface-container-high'
     }`
 
   const ebene = (eltern: string | undefined, tiefe: number): ReactNode => {
@@ -68,7 +114,7 @@ export function TresorOrdnerBaum({ ordner, aktuell, pfad, onWaehlen }: Props) {
                 >
                   {istOffen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                 </button>
-                <button type="button" className={zeile(aktuell === o.id)} onClick={() => onWaehlen(o.id)}>
+                <button type="button" className={zeile(aktuell === o.id, ziel === o.id)} onClick={() => onWaehlen(o.id)} {...ablageZiel(o.id, hatKinder && !istOffen)}>
                   <Icon className="h-3.5 w-3.5 shrink-0 text-primary" />
                   <span className="truncate">{o.service}</span>
                 </button>
@@ -86,7 +132,7 @@ export function TresorOrdnerBaum({ ordner, aktuell, pfad, onWaehlen }: Props) {
       <ul role="tree">
         <li role="treeitem" aria-expanded aria-selected={aktuell === undefined}>
           <div className="flex items-center">
-            <button type="button" className={zeile(aktuell === undefined)} onClick={() => onWaehlen(undefined)}>
+            <button type="button" className={zeile(aktuell === undefined, ziel === '')} onClick={() => onWaehlen(undefined)} {...ablageZiel(undefined, false)}>
               <HardDrive className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">{t('mss.vault.dateien.stamm')}</span>
             </button>

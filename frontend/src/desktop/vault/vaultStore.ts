@@ -41,6 +41,7 @@ import {
 import {
   angeheftet,
   ansichtenSchliessen,
+  blobLesen,
   dateiBlobs,
   offlineAnheften,
   offlineLoesen,
@@ -644,6 +645,12 @@ interface VaultState {
    * der Server die neue Fassung hat.
    */
   dateiErsetzen: (id: string, inhalt: Blob) => Promise<void>
+  /**
+   * Holt eine frühere Fassung zurück (erkannt am Original-Blob). Sie wird als
+   * neue Fassung gespeichert, die aktuelle rückt dabei selbst nach `frueher`.
+   * So geht beim Zurückholen nichts verloren.
+   */
+  fassungZurueckholen: (id: string, originalId: string) => Promise<void>
   /** Nimmt Einträge in ein Album auf oder heraus; doppelte zählen einmal. */
   albumAendern: (id: string, aenderung: { hinzu?: string[]; weg?: string[] }) => Promise<void>
   toggleFavorite: (id: string) => Promise<void>
@@ -1524,6 +1531,15 @@ export const useVaultStore = create<VaultState>((set, get) => {
       vorbereitungAbschliessen(neu)
     }
     void uploadsFortsetzen(bucketId)
+  },
+
+  fassungZurueckholen: async (id, originalId) => {
+    const { userKey } = get()
+    if (!userKey) throw new Error(i18n.t('mss.vault.errors.locked'))
+    const fassung = get().items.find((i) => i.id === id)?.datei?.frueher?.find((v) => v.original.id === originalId)
+    if (!fassung) throw new Error(i18n.t('mss.vault.dateien.oeffnenFehler'))
+    const inhalt = await blobLesen(fassung.original, id, userKey, fassung.typ)
+    await get().dateiErsetzen(id, inhalt)
   },
 
   albumAnlegen: async (name, eintraege) => {
