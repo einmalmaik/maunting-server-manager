@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 import threading
 
@@ -272,7 +273,7 @@ def _speicher(roh: object) -> int | None:
             roh = float(roh)
         except ValueError:
             raise AiActionValidationError("vault_storage_gb ist keine Zahl") from None
-    if isinstance(roh, bool) or not isinstance(roh, (int, float)) or roh < 0:
+    if isinstance(roh, bool) or not isinstance(roh, (int, float)) or not math.isfinite(roh) or roh < 0:
         raise AiActionValidationError("vault_storage_gb ist keine Zahl ab 0")
     menge = round(roh * _GIB)
     if menge > vault_blob_service.MAX_QUOTE:
@@ -400,11 +401,17 @@ def _ausfuehren_role_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefueh
     rechte_aendern = any(p.get(k) is not None for k in ("name", "description", "permissions"))
     if speicher_setzen and not permission_service.has_global_permission(db, actor, "panel.settings.write"):
         raise AiActionStateError("AI_ACTION_ACCESS_REVOKED")
+    # Alles in einer Transaktion: Rolle, Rechte und Speicher schreiben nur
+    # flushen, festgeschrieben wird einmal am Ende (AGENTS 93). Bis 02.10.2026
+    # schrieben `create_role`/`update_role` selbst fest, und ein scheiternder
+    # Speicher oder ein scheiterndes Rechteschreiben liess die Rolle halb.
     try:
         if p.get("role_id") is None:
             rolle = rechtevergabe_service.create_role(
-                db, actor, str(p["name"]), p.get("description"), list(p.get("permissions") or [])
+                db, actor, str(p["name"]), p.get("description"), list(p.get("permissions") or []), commit=False
             )
+            if speicher_setzen:
+                vault_blob_service.rolle_speicher_aendern(db, actor.id, rolle.id, p.get("vault_quota_bytes"))
         else:
             role_id = int(p["role_id"])
             rolle = role_service.get_role(db, role_id)
@@ -414,21 +421,19 @@ def _ausfuehren_role_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefueh
                 raise AiActionStateError("AI_ACTION_REVISION_CONFLICT")
             if speicher_setzen and vault_blob_service.rolle_speicher(db, role_id) != p.get("vault_before"):
                 raise AiActionStateError("AI_ACTION_REVISION_CONFLICT")
-            # Speicher vor den Rechten: `update_role` schreibt fest, und beides
-            # geht so in einer Transaktion (bis 02.10.2026 zwei).
             if speicher_setzen:
                 vault_blob_service.rolle_speicher_aendern(db, actor.id, role_id, p.get("vault_quota_bytes"))
             if rechte_aendern:
                 rolle = rechtevergabe_service.update_role(
-                    db, actor, role_id, p.get("name"), p.get("description"), p.get("permissions")
+                    db, actor, role_id, p.get("name"), p.get("description"), p.get("permissions"), commit=False
                 )
     except rechtevergabe_service.RechteFehler as fehler:
+        db.rollback()
         raise _bei_ausfuehrung(fehler) from fehler
-    if speicher_setzen:
-        # Eine neue Rolle gibt es erst nach `create_role`.
-        if p.get("role_id") is None:
-            vault_blob_service.rolle_speicher_aendern(db, actor.id, rolle.id, p.get("vault_quota_bytes"))
-        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.commit()
     gespeichert = vault_blob_service.rolle_speicher(db, rolle.id)
     return _Ausgefuehrt(result={
         "role_id": rolle.id,

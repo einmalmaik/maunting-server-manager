@@ -1353,6 +1353,14 @@ def delete_account(
     vault_service.tresor_konto_oder_503(
         user.id, "Der Tresor ist gerade nicht erreichbar, das Konto kann deshalb nicht gelöscht werden."
     )
+    # Der Index kann schon im Prozess liegen; dann fragt die Zeile oben den
+    # Sidecar nicht. Die Adresse braucht die Loeschung danach in jedem Fall.
+    try:
+        _ = user.email
+    except DisSidecarError as exc:
+        raise HTTPException(
+            status_code=503, detail="Die Verschlüsselung ist gerade nicht erreichbar. Bitte später erneut versuchen."
+        ) from exc
 
     if user.has_password:
         if not req.password:

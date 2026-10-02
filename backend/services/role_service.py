@@ -113,7 +113,7 @@ def set_user_roles(
     return desired
 
 
-def _replace_role_permissions(db: Session, role_id: int, keys: list[str]) -> list[str]:
+def _replace_role_permissions(db: Session, role_id: int, keys: list[str], commit: bool = True) -> list[str]:
     desired = {k for k in keys if is_known_key(k)}
     existing = db.query(RolePermission).filter(RolePermission.role_id == role_id).all()
     existing_by_key = {p.permission_key: p for p in existing}
@@ -123,20 +123,21 @@ def _replace_role_permissions(db: Session, role_id: int, keys: list[str]) -> lis
     for key in desired:
         if key not in existing_by_key:
             db.add(RolePermission(role_id=role_id, permission_key=key))
-    db.commit()
+    db.commit() if commit else db.flush()
     return sorted(desired)
 
 
 def create_role(
-    db: Session, name: str, description: str | None, keys: list[str]
+    db: Session, name: str, description: str | None, keys: list[str], commit: bool = True
 ) -> Role:
+    """``commit=False`` flusht nur: der Aufrufer schreibt mit, was dazugehoert (KI-Karte, AGENTS 93)."""
     if name in SYSTEM_ROLE_NAMES:
         raise ValueError("Reservierter Rollenname")
     role = Role(name=name, description=description, is_system=False)
     db.add(role)
-    db.commit()
+    db.commit() if commit else db.flush()
     db.refresh(role)
-    _replace_role_permissions(db, role.id, keys)
+    _replace_role_permissions(db, role.id, keys, commit)
     db.refresh(role)
     return role
 
@@ -147,6 +148,7 @@ def update_role(
     name: str | None,
     description: str | None,
     keys: list[str] | None,
+    commit: bool = True,
 ) -> Role:
     """is_system-Rollen: Name und is_system unveraenderlich. Permissions der
     admin-Rolle sind ebenfalls fest (alle Keys, Self-Heal). Permissions der
@@ -158,10 +160,10 @@ def update_role(
         role.name = name
     if description is not None:
         role.description = description
-    db.commit()
+    db.commit() if commit else db.flush()
 
     if keys is not None and not (role.is_system and role.name == SYSTEM_ROLE_ADMIN):
-        _replace_role_permissions(db, role.id, keys)
+        _replace_role_permissions(db, role.id, keys, commit)
     db.refresh(role)
     return role
 

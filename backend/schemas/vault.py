@@ -9,6 +9,7 @@ from schemas.passkey import Zweitnachweis
 
 
 HEX_64_REGEX = re.compile(r"^[0-9a-fA-F]{64}$")
+SALZ_REGEX = re.compile(r"^[A-Za-z0-9+/=_-]{16,128}$")
 
 # Obergrenze fuer die Summe aller Ciphertexte eines Requests.
 #
@@ -194,7 +195,16 @@ class VaultSaltSetRequest(BaseModel):
             raise ValueError("bucket_id must be a 64-character hex string")
         return v.lower()
 
-
+    @field_validator("kdf_salt")
+    @classmethod
+    def validate_kdf_salt(cls, v: str) -> str:
+        # Nur Hex- oder Base64-Zeichen. Ein Salz aus Leerzeichen bestand bis
+        # 02.10.2026 die Laengenpruefung und wurde gekuerzt als "" gespeichert:
+        # danach galt es als nicht gesetzt und liess sich ueberschreiben.
+        v = v.strip()
+        if not SALZ_REGEX.match(v):
+            raise ValueError("kdf_salt must be 16-128 hex or base64 characters")
+        return v
 
 
 class VaultBlobAnlegen(BaseModel):

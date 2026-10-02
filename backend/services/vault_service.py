@@ -7,7 +7,7 @@ import hashlib
 import html
 import secrets
 from typing import Sequence
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -134,7 +134,11 @@ def _eigene_zeile(db: Session, modell, konto: TresorKonto):
     stellt die Zeile gleich um. Ohne diesen Rueckfall waere ein Tresor
     zwischen Update und Nachzug beim Start unsichtbar.
     """
-    zeile = db.scalar(select(modell).where(modell.konto_index == konto.index))
+    # Frisch aus der Datenbank, auch wenn die Sitzung die Zeile schon kennt:
+    # wer unter einer Sperre liest, braucht den Stand danach.
+    zeile = db.scalar(
+        select(modell).where(modell.konto_index == konto.index).execution_options(populate_existing=True)
+    )
     if zeile is None:
         zeile = db.scalar(select(modell).where(modell.user_id == konto.user_id))
         if zeile is not None:
@@ -268,6 +272,17 @@ def _beanspruchen(db: Session, bucket_id: str) -> None:
     """
     _sperre_bucket(db, bucket_id)
     _pruefe_nicht_beerdigt(db, bucket_id)
+
+
+def _sperre_konto(db: Session, konto: TresorKonto) -> None:
+    """Sperrt den Tresor eines Kontos bis zum Ende der Transaktion.
+
+    Anders als die Bucket-Sperre greift sie auch, wenn zwei Geraete
+    verschiedene Buckets nennen. Wer sie nimmt, nimmt sie vor jeder
+    Bucket-Sperre.
+    """
+    schluessel = int.from_bytes(hashlib.sha256(f"vault-konto:{konto.index}".encode()).digest()[:8], "big", signed=True)
+    db.execute(text("SELECT pg_advisory_xact_lock(:schluessel)"), {"schluessel": schluessel})
 
 
 def _sperre_bucket(db: Session, bucket_id: str) -> None:
@@ -652,7 +667,10 @@ def set_vault_salt(
     clean_salt = kdf_salt.strip()
     _pruefe_nicht_beerdigt(db, clean_bucket)
 
-    # Prüfe ob Bucket bereits fremd vergeben ist
+    # Ein Salz je Konto, einer nach dem anderen: zwei Geraete lasen sonst
+    # beide „noch keins" und bekamen beide 200 (bis 02.10.2026). Die Zeile
+    # wird erst unter der Sperre gelesen.
+    _sperre_konto(db, konto)
     setting = einstellung(db, konto)
     besitzer = _bucket_besitzer(db, clean_bucket)
     if besitzer is not None and besitzer != konto.index:
