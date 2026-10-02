@@ -51,6 +51,7 @@ import { inhaltVon } from './tresorOrdner'
 import { useMiniatur } from './tresorMiniaturen'
 import { formatBytes } from '@/components/server/fileHelpers'
 import { setzeTresorSchutz } from '../tauri'
+import { useShallow } from 'zustand/react/shallow'
 import {
   PAPIERKORB_TAGE,
   getLocalVaultSalt,
@@ -117,7 +118,10 @@ export function VaultView() {
     requestHintEmail,
     checkBiometricsSupport,
     fetchVaultSalt,
-  } = useVaultStore()
+  } = useVaultStore(
+    // Nur diese Felder: `lastActivityTime` ändert sich bei jeder Mausbewegung.
+    useShallow((s) => ({ isInitialized: s.isInitialized, isUnlocked: s.isUnlocked, isUnlocking: s.isUnlocking, unlockError: s.unlockError, isBiometricsEnabled: s.isBiometricsEnabled, isBiometricsSupported: s.isBiometricsSupported, items: s.items, searchQuery: s.searchQuery, syncStatus: s.syncStatus, zurueckgesetzt: s.zurueckgesetzt, initializeVault: s.initializeVault, unlock: s.unlock, unlockWithBiometrics: s.unlockWithBiometrics, lock: s.lock, setSearchQuery: s.setSearchQuery, saveItem: s.saveItem, trashItem: s.trashItem, restoreItem: s.restoreItem, setArchived: s.setArchived, deleteItem: s.deleteItem, emptyTrash: s.emptyTrash, toggleFavorite: s.toggleFavorite, markUsed: s.markUsed, syncWithServer: s.syncWithServer, saveHint: s.saveHint, requestHintEmail: s.requestHintEmail, checkBiometricsSupport: s.checkBiometricsSupport, fetchVaultSalt: s.fetchVaultSalt })),
+  )
 
   // Beim Laden Server-Status und Salt nur prüfen, falls lokal noch kein Salt vorliegt (Leck-2-Schutz)
   useEffect(() => {

@@ -320,3 +320,57 @@ class TestAccountDeletion:
         assert resp.status_code == 200, resp.text
         assert resp.json().get("message") == "Account gelöscht"
         assert db.query(User).filter(User.id == user_id).first() is None
+
+
+def test_ohne_sidecar_503_und_der_code_bleibt_gueltig(client: TestClient, db: Session, monkeypatch):
+    """Die Loeschung braucht den Tresorindex aus dem Sidecar.
+
+    Bis 02.10.2026 wurde der App-Code zuerst verbraucht, danach scheiterte die
+    Loeschung am fehlenden Sidecar: das Konto stand noch, der Code war weg.
+    """
+    from services import vault_service
+    from services.dis_client import DisClient, DisSidecarError
+
+    user = AuthService.create_user(db, "loesch_sidecar", "loesch_sidecar@test.de", "UserPass123!")
+    user.email_verified = True
+    geheimnis = random_totp_secret()
+    user.two_factor_secret_encrypted = AuthService.encrypt_secret(geheimnis, aad=f"msm:user:{user.id}:2fa")
+    user.two_factor_enabled = True
+    db.commit()
+    user_id = user.id
+    login = client.post("/api/auth/login", json={
+        "username": "loesch_sidecar", "password": "UserPass123!", "otp_code": totp_now(geheimnis),
+    })
+    assert login.status_code == 200, login.text
+    cookies = dict(login.cookies)
+    # Der Login hat den Code dieses Schritts verbraucht; der naechste gilt erst im naechsten.
+    db.query(User).filter(User.id == user_id).update({User.two_factor_totp_last_step: None})
+    db.commit()
+    code = totp_now(geheimnis)
+
+    def loeschen():
+        return client.request(
+            "DELETE",
+            "/api/auth/delete-account",
+            json={"password": "UserPass123!", "confirmation": "delete", "otp_code": code},
+            cookies=cookies,
+            headers={"X-CSRF-Token": cookies.get("__Secure-csrf_token")},
+        )
+
+    def kaputt(werte):
+        raise DisSidecarError("weg")
+
+    echter_index = DisClient.blind_index
+    monkeypatch.setattr(vault_service, "_KONTO_INDEX", {})
+    monkeypatch.setattr(DisClient, "blind_index", staticmethod(kaputt))
+    assert loeschen().status_code == 503
+    db.expire_all()
+    geblieben = db.get(User, user_id)
+    assert geblieben is not None
+    assert geblieben.two_factor_totp_last_step is None
+
+    monkeypatch.setattr(DisClient, "blind_index", echter_index)
+    antwort = loeschen()
+    assert antwort.status_code == 200, antwort.text
+    db.expire_all()
+    assert db.get(User, user_id) is None

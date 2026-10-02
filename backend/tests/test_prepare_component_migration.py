@@ -32,7 +32,8 @@ MSM_DATABASE_URL_ASYNC="postgresql+asyncpg://source:source-password@localhost/so
 MSM_PANEL_URL="https://old.example.com"
 MSM_CORS_ALLOWED_ORIGINS="https://preview.example.com"
 MSM_LOCAL_AGENT_ENABLED=true
-MSM_DOCKER_HOST="unix:///source/docker.sock"''',
+MSM_DOCKER_HOST="unix:///source/docker.sock"
+MSM_VAULT_BLOB_DIR="/mnt/platte/tresor"''',
     )
     target = _write(
         tmp_path / "target.env",
@@ -65,6 +66,9 @@ MSM_DATABASE_URL_ASYNC="postgresql+asyncpg://msm:target-password@localhost/msm"'
     assert "MSM_SERVE_FRONTEND=false" in merged
     assert "https://preview.example.com,https://panel.vercel.app" in merged
     assert 'MSM_DOCKER_HOST=""' in merged
+    # Ein eigener Tresorpfad ginge beim Umzug still verloren (bis 02.10.2026).
+    assert 'MSM_VAULT_BLOB_DIR="/opt/msm/vault-blobs"' in merged
+    assert "/mnt/platte/tresor" not in merged
     if os.name != "nt":
         assert output.stat().st_mode & 0o777 == 0o600
         assert dis_output.stat().st_mode & 0o777 == 0o600

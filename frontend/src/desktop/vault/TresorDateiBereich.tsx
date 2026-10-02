@@ -101,7 +101,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
   const userKey = useVaultStore((s) => s.userKey)
   const dateiHinzufuegen = useVaultStore((s) => s.dateiHinzufuegen)
   const ordnerAnlegen = useVaultStore((s) => s.ordnerAnlegen)
-  const saveItem = useVaultStore((s) => s.saveItem)
+  const aendern = useVaultStore((s) => s.aendern)
   const trashItem = useVaultStore((s) => s.trashItem)
   const restoreItem = useVaultStore((s) => s.restoreItem)
   const setArchived = useVaultStore((s) => s.setArchived)
@@ -306,7 +306,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
     const name = await prompt({ message: t('mss.vault.dateien.neuerName'), defaultValue: item.service })
     if (!name?.trim() || name.trim() === item.service) return
     try {
-      await saveItem({ ...item, service: name.trim() })
+      await aendern(item.id, { service: name.trim() })
     } catch (err) {
       toast.error(fehlerText(err, t('mss.vault.dateien.umbenennenFehler')))
     }
@@ -349,7 +349,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
     const bewegt = liste.filter((i) => darfVerschieben(i, ziel, ordnerListe))
     if (bewegt.length === 0) return
     try {
-      for (const item of bewegt) await saveItem({ ...item, ordner: ziel })
+      for (const item of bewegt) await aendern(item.id, { ordner: ziel })
       toast.success(
         bewegt.length === 1
           ? t('mss.vault.dateien.verschoben', { name: bewegt[0].service, ordner: ordnerName(ziel) })

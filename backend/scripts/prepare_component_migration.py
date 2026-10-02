@@ -166,6 +166,9 @@ def merge_target_environment(
             "MSM_PANEL_CONFIG_DIR": _quoted("/opt/msm"),
             "MSM_PANEL_BACKUP_DIR": _quoted("/opt/msm/backups/panel"),
             "MSM_BLUEPRINTS_DIR": _quoted("/opt/msm/blueprints/community"),
+            # Der Assistent nimmt nur /opt/msm/vault-blobs mit, und systemd lässt
+            # das Panel nur unter /opt/msm schreiben.
+            "MSM_VAULT_BLOB_DIR": _quoted("/opt/msm/vault-blobs"),
             "MSM_DOCKER_HOST": _quoted(""),
         }
     )

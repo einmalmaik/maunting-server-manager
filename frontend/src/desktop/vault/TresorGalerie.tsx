@@ -346,7 +346,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const dateiHinzufuegen = useVaultStore((s) => s.dateiHinzufuegen)
   const albumAnlegen = useVaultStore((s) => s.albumAnlegen)
   const albumAendern = useVaultStore((s) => s.albumAendern)
-  const saveItem = useVaultStore((s) => s.saveItem)
+  const aendern = useVaultStore((s) => s.aendern)
   const trashItem = useVaultStore((s) => s.trashItem)
   const restoreItem = useVaultStore((s) => s.restoreItem)
   const setArchived = useVaultStore((s) => s.setArchived)
@@ -616,7 +616,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const albumUmbenennen = async (a: VaultItem) => {
     const name = await prompt({ message: t('mss.vault.dateien.neuerName'), defaultValue: a.service })
     if (!name?.trim() || name.trim() === a.service) return
-    await saveItem({ ...a, service: name.trim() }).catch(fehlerZeigen)
+    await aendern(a.id, { service: name.trim() }).catch(fehlerZeigen)
   }
 
   /** Nur das Album geht in den Papierkorb; die Fotos darin bleiben. */

@@ -7,6 +7,7 @@
  */
 
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { Profiler } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
@@ -101,6 +102,22 @@ describe('VaultView: Archiv und Papierkorb', () => {
     expect(screen.queryByText('Altes Forum')).not.toBeInTheDocument()
     expect(screen.queryByText('Weg damit')).not.toBeInTheDocument()
     expect(screen.queryByText('urlaub.jpg')).not.toBeInTheDocument()
+  })
+
+  it('zeichnet bei bloßer Aktivität nicht neu', () => {
+    // Bis 02.10.2026 hing die Ansicht am ganzen Store: jede Mausbewegung setzte
+    // `lastActivityTime`, und der Tresor mit allen Einträgen zeichnete neu.
+    let gezeichnet = 0
+    render(
+      <Profiler id="tresor" onRender={() => gezeichnet++}>
+        <VaultView />
+      </Profiler>,
+    )
+    const vorher = gezeichnet
+    act(() => {
+      for (let i = 0; i < 5; i++) useVaultStore.setState({ lastActivityTime: Date.now() + i })
+    })
+    expect(gezeichnet).toBe(vorher)
   })
 
   it('zeigt das Archiv für sich', () => {

@@ -46,6 +46,7 @@ from services import (
     ai_proposal_service,
     ai_tool_registry,
     rechtevergabe_service,
+    role_service,
     vault_blob_service,
 )
 from services.ai_action_errors import AiActionStateError, AiActionValidationError
@@ -554,7 +555,8 @@ GIB = 1024**3
 
 def test_tresorspeicher_mit_der_rolle_autonom_und_ohne_autonomie_per_karte(db: Session) -> None:
     """Speicher ist kein Recht und loescht nichts: autonom laeuft er ohne Karte,
-    auch an einer vergebenen Rolle. Ohne Autonomie fragt er wie alles andere."""
+    auch an einer vergebenen Rolle. 0 haelt jeden Upload an und fragt immer
+    (Betreiber, 02.10.2026). Ohne Autonomie fragt er wie alles andere."""
     verwalter = _verwalter(db, autonom=True)
     rolle = rechtevergabe_service.create_role(db, verwalter, "kunde", None, ["server.view"])
     ziel = _konto(db, "kunde-a")
@@ -583,7 +585,10 @@ def test_tresorspeicher_mit_der_rolle_autonom_und_ohne_autonomie_per_karte(db: S
     with pytest.raises(AiActionValidationError, match="nichts genannt"):
         _vorschlag(db, verwalter, "propose_role_set", role_id=rolle.id, vault_storage_gb=None)
     weg = _vorschlag(db, verwalter, "propose_role_set", role_id=rolle.id, vault_storage_gb=0)
-    ai_proposal_service.execute_autonomously(db, proposal_id=weg.id, user=verwalter)
+    assert weg.autonomous is False
+    assert json.loads(weg.preview_json)["always_confirm"] is True
+    assert vault_blob_service.rolle_speicher(db, rolle.id) == 10 * GIB
+    _bestaetigen(db, verwalter, weg)
     assert vault_blob_service.rolle_speicher(db, rolle.id) is None
     assert vault_blob_service.quote_fuer(db, ziel) == 0
 
@@ -595,6 +600,28 @@ def test_tresorspeicher_mit_der_rolle_autonom_und_ohne_autonomie_per_karte(db: S
     assert karte.autonomous is False
     _bestaetigen(db, ohne, karte)
     assert vault_blob_service.rolle_speicher(db, rolle.id) == 5 * GIB
+
+
+def test_rechte_und_speicher_einer_rolle_aendern_sich_nur_zusammen(
+    db: Session, owner_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bis 02.10.2026 schrieb `update_role` die Rechte fest, bevor der Speicher
+    gesetzt wurde: scheiterte der Speicher, blieb die Rolle halb geaendert."""
+    rolle = rechtevergabe_service.create_role(db, owner_user, "tarif-halb", None, ["server.view"])
+    db.commit()
+    vorschlag = _vorschlag(
+        db, owner_user, "propose_role_set", role_id=rolle.id, permissions=["server.view", "server.start"], vault_storage_gb=3,
+    )
+
+    def scheitert(*_args, **_kwargs):
+        raise RuntimeError("Speicher kaputt")
+
+    monkeypatch.setattr(vault_blob_service, "rolle_speicher_setzen", scheitert)
+    with pytest.raises(Exception):
+        _bestaetigen(db, owner_user, vorschlag)
+    db.rollback()
+    assert set(role_service.role_permission_keys(db, rolle.id)) == {"server.view"}
+    assert vault_blob_service.rolle_speicher(db, rolle.id) is None
 
 
 def test_rolle_mit_speicher_anlegen_und_an_der_systemrolle_nur_den_speicher(

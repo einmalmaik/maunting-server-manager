@@ -628,6 +628,17 @@ interface VaultState {
   setSelectedItemId: (id: string | null) => void
   createQuickPasswordEntry: (serviceName?: string) => Promise<VaultItem>
   saveItem: (item: Partial<VaultItem> & { service: string }, optionen?: { loeschBlobs?: { id: string; loeschen: string }[] }) => Promise<void>
+  /**
+   * Ändert nur die genannten Felder, am Stand, der beim Speichern gilt. Für
+   * alles, was nach einer Rückfrage speichert: ein Schnappschuss von vorher
+   * schrieb sonst den Inhalt zurück, den ein anderes Gerät inzwischen ersetzt
+   * hatte (bis 02.10.2026). Als Funktion bekommt die Änderung den frischen
+   * Eintrag; `undefined` heißt nichts ändern.
+   */
+  aendern: (
+    id: string,
+    aenderung: Partial<VaultItem> | ((frisch: VaultItem) => Partial<VaultItem> | undefined),
+  ) => Promise<void>
   /** Legt einen Eintrag in den Papierkorb. Nach {@link PAPIERKORB_TAGE} Tagen wird er endgültig gelöscht. */
   trashItem: (id: string) => Promise<void>
   restoreItem: (id: string) => Promise<void>
@@ -695,6 +706,113 @@ export const useVaultStore = create<VaultState>((set, get) => {
   const sitzungOffen = (userKey: CryptoKey, bucketId: string) => {
     const jetzt = get()
     return jetzt.userKey === userKey && jetzt.bucketId === bucketId
+  }
+
+  /**
+   * Speichern läuft einer nach dem anderen. Jeder Vorgang liest den Eintrag,
+   * verschlüsselt (`await`) und schreibt; zwei zugleich lasen denselben alten
+   * Stand, und der zweite überschrieb den ersten (bis 02.10.2026).
+   */
+  let speicherLauf: Promise<unknown> = Promise.resolve()
+  const nacheinander = <T,>(arbeit: () => Promise<T>): Promise<T> => {
+    const lauf = speicherLauf.then(arbeit, arbeit)
+    speicherLauf = lauf.catch(() => undefined)
+    return lauf
+  }
+
+  const speichernJetzt = async (
+    itemData: Partial<VaultItem> & { service: string },
+    optionen?: { loeschBlobs?: { id: string; loeschen: string }[] },
+  ): Promise<void> => {
+    const { userKey, bucketId, items } = get()
+    if (!userKey || !bucketId) throw new Error(i18n.t('mss.vault.errors.locked'))
+
+    const id = itemData.id || window.crypto.randomUUID()
+    const existing = items.find((i) => i.id === id)
+    // Was diese Fassung nicht kennt, schreibt sie nicht: sie würde es nur
+    // unvollständig verstehen und beim Speichern verfälschen.
+    if (!istBekannteKategorie(existing?.category) || !istBekannteKategorie(itemData.category ?? existing?.category)) {
+      throw new Error(i18n.t('mss.vault.errors.unbekannteArt'))
+    }
+    const revision = (existing?.revision || 0) + 1
+    const now = naechsterStand(existing?.updatedAt)
+    // Ein ausdrücklich mitgegebenes `undefined` hebt Archiv oder Papierkorb auf;
+    // fehlt das Feld ganz (Bearbeiten im Formular), bleibt der bisherige Wert.
+    const uebernimm = (feld: 'archivedAt' | 'trashedAt'): number | undefined =>
+      feld in itemData ? itemData[feld] : existing?.[feld]
+
+    const updatedItem: VaultItem = {
+      id,
+      service: itemData.service,
+      username: itemData.username || '',
+      password: itemData.password || '',
+      url: itemData.url,
+      notes: itemData.notes,
+      totpSecret: itemData.totpSecret,
+      category: itemData.category || existing?.category || 'login',
+      isFavorite: itemData.isFavorite !== undefined ? itemData.isFavorite : existing?.isFavorite,
+      lastUsedAt: itemData.lastUsedAt !== undefined ? itemData.lastUsedAt : existing?.lastUsedAt,
+      linkedServiceId: itemData.linkedServiceId !== undefined ? itemData.linkedServiceId : existing?.linkedServiceId,
+      archivedAt: uebernimm('archivedAt'),
+      trashedAt: uebernimm('trashedAt'),
+      datei: itemData.datei ?? existing?.datei,
+      ordner: 'ordner' in itemData ? itemData.ordner : existing?.ordner,
+      album: itemData.album ?? existing?.album,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      revision,
+      extra: existing?.extra,
+    }
+
+    const ciphertext = await encryptVaultEntry(umschlagAusItem(updatedItem), userKey, id)
+
+    // Lokalen Cache aktualisieren
+    let cachedBlobs = getStoredBlobs(bucketId)
+    const bisher = cachedBlobs.find((b) => b.id === id)
+    // Löschaufträge der vorigen Fassung, die noch nicht liefen, gehen mit:
+    // auch die neue Fassung zeigt nicht mehr auf diese Blobs.
+    const loeschBlobs = [...(bisher?.loeschBlobs ?? []), ...(optionen?.loeschBlobs ?? [])]
+    cachedBlobs = cachedBlobs.filter((b) => b.id !== id)
+    cachedBlobs.push({
+      id,
+      ciphertext,
+      revision,
+      is_deleted: false,
+      stand: now,
+      serverRev: bisher?.serverRev,
+      loeschBlobs: loeschBlobs.length > 0 ? loeschBlobs : undefined,
+    })
+    blobsSchreiben(bucketId, cachedBlobs)
+
+    // Pending Queue aktualisieren. Eine Datei gilt nur auf der Fassung, die
+    // dieses Gerät vom Server kannte: sonst holte ein Umbenennen auf einem
+    // Gerät, das offline war, den alten Inhalt zurück (`konflikteZusammenfuehren`).
+    const alteQueue = getPendingQueue(bucketId)
+    const wartend = alteQueue.find((b) => b.id === id)
+    const basis = updatedItem.datei ? (wartend?.vorher && !wartend.konflikt ? wartend.vorher : bisher) : undefined
+    const pendingQueue = alteQueue.filter((b) => b.id !== id)
+    pendingQueue.push({
+      id,
+      ciphertext,
+      revision,
+      is_deleted: false,
+      ...(basis?.serverRev !== undefined
+        ? { expected_revision: basis.serverRev, vorher: { ...basis, vorher: undefined, loeschBlobs: undefined } }
+        : {}),
+    })
+    warteschlangeSchreiben(bucketId, pendingQueue)
+
+    // Siehe createQuickPasswordEntry. Die Liste wird frisch gelesen: ein Sync
+    // oder ein zweites Speichern kann sie während des Verschlüsselns geändert
+    // haben.
+    if (!sitzungOffen(userKey, bucketId)) return
+    const aktuell = get().items
+    const newItems = aktuell.some((i) => i.id === id)
+      ? aktuell.map((i) => (i.id === id ? updatedItem : i))
+      : [updatedItem, ...aktuell]
+
+    set({ items: newItems, selectedItemId: id })
+    void get().syncWithServer()
   }
 
   return {
@@ -1309,103 +1427,26 @@ export const useVaultStore = create<VaultState>((set, get) => {
     return newItem
   },
 
-  saveItem: async (itemData, optionen) => {
-    const { userKey, bucketId, items } = get()
-    if (!userKey || !bucketId) throw new Error(i18n.t('mss.vault.errors.locked'))
+  saveItem: (itemData, optionen) => nacheinander(() => speichernJetzt(itemData, optionen)),
 
-    const id = itemData.id || window.crypto.randomUUID()
-    const existing = items.find((i) => i.id === id)
-    // Was diese Fassung nicht kennt, schreibt sie nicht: sie würde es nur
-    // unvollständig verstehen und beim Speichern verfälschen.
-    if (!istBekannteKategorie(existing?.category) || !istBekannteKategorie(itemData.category ?? existing?.category)) {
-      throw new Error(i18n.t('mss.vault.errors.unbekannteArt'))
-    }
-    const revision = (existing?.revision || 0) + 1
-    const now = naechsterStand(existing?.updatedAt)
-    // Ein ausdrücklich mitgegebenes `undefined` hebt Archiv oder Papierkorb auf;
-    // fehlt das Feld ganz (Bearbeiten im Formular), bleibt der bisherige Wert.
-    const uebernimm = (feld: 'archivedAt' | 'trashedAt'): number | undefined =>
-      feld in itemData ? itemData[feld] : existing?.[feld]
-
-    const updatedItem: VaultItem = {
-      id,
-      service: itemData.service,
-      username: itemData.username || '',
-      password: itemData.password || '',
-      url: itemData.url,
-      notes: itemData.notes,
-      totpSecret: itemData.totpSecret,
-      category: itemData.category || existing?.category || 'login',
-      isFavorite: itemData.isFavorite !== undefined ? itemData.isFavorite : existing?.isFavorite,
-      lastUsedAt: itemData.lastUsedAt !== undefined ? itemData.lastUsedAt : existing?.lastUsedAt,
-      linkedServiceId: itemData.linkedServiceId !== undefined ? itemData.linkedServiceId : existing?.linkedServiceId,
-      archivedAt: uebernimm('archivedAt'),
-      trashedAt: uebernimm('trashedAt'),
-      datei: itemData.datei ?? existing?.datei,
-      ordner: 'ordner' in itemData ? itemData.ordner : existing?.ordner,
-      album: itemData.album ?? existing?.album,
-      createdAt: existing?.createdAt || now,
-      updatedAt: now,
-      revision,
-      extra: existing?.extra,
-    }
-
-    const ciphertext = await encryptVaultEntry(umschlagAusItem(updatedItem), userKey, id)
-
-    // Lokalen Cache aktualisieren
-    let cachedBlobs = getStoredBlobs(bucketId)
-    const bisher = cachedBlobs.find((b) => b.id === id)
-    // Löschaufträge der vorigen Fassung, die noch nicht liefen, gehen mit:
-    // auch die neue Fassung zeigt nicht mehr auf diese Blobs.
-    const loeschBlobs = [...(bisher?.loeschBlobs ?? []), ...(optionen?.loeschBlobs ?? [])]
-    cachedBlobs = cachedBlobs.filter((b) => b.id !== id)
-    cachedBlobs.push({
-      id,
-      ciphertext,
-      revision,
-      is_deleted: false,
-      stand: now,
-      serverRev: bisher?.serverRev,
-      loeschBlobs: loeschBlobs.length > 0 ? loeschBlobs : undefined,
-    })
-    blobsSchreiben(bucketId, cachedBlobs)
-
-    // Pending Queue aktualisieren. Eine Datei gilt nur auf der Fassung, die
-    // dieses Gerät vom Server kannte: sonst holte ein Umbenennen auf einem
-    // Gerät, das offline war, den alten Inhalt zurück (`konflikteZusammenfuehren`).
-    const alteQueue = getPendingQueue(bucketId)
-    const wartend = alteQueue.find((b) => b.id === id)
-    const basis = updatedItem.datei ? (wartend?.vorher && !wartend.konflikt ? wartend.vorher : bisher) : undefined
-    const pendingQueue = alteQueue.filter((b) => b.id !== id)
-    pendingQueue.push({
-      id,
-      ciphertext,
-      revision,
-      is_deleted: false,
-      ...(basis?.serverRev !== undefined
-        ? { expected_revision: basis.serverRev, vorher: { ...basis, vorher: undefined, loeschBlobs: undefined } }
-        : {}),
-    })
-    warteschlangeSchreiben(bucketId, pendingQueue)
-
-    // Siehe createQuickPasswordEntry. Die Liste wird frisch gelesen: ein Sync
-    // oder ein zweites Speichern kann sie während des Verschlüsselns geändert
-    // haben.
-    if (!sitzungOffen(userKey, bucketId)) return
-    const aktuell = get().items
-    const newItems = aktuell.some((i) => i.id === id)
-      ? aktuell.map((i) => (i.id === id ? updatedItem : i))
-      : [updatedItem, ...aktuell]
-
-    set({ items: newItems, selectedItemId: id })
-    void get().syncWithServer()
-  },
+  aendern: (id, aenderung) =>
+    nacheinander(async () => {
+      const frisch = get().items.find((i) => i.id === id)
+      if (!frisch) return
+      const felder = typeof aenderung === 'function' ? aenderung(frisch) : aenderung
+      if (!felder) return
+      await speichernJetzt({ ...frisch, ...felder })
+    }),
 
   deleteItem: async (id: string) => {
     const { userKey, bucketId, items } = get()
     if (!userKey || !bucketId) return
 
     const existing = items.find((i) => i.id === id)
+    // Schon beerdigt (etwa mit seinem Ordner): ein zweiter Tombstone ersetzte
+    // den ersten samt dessen Löschaufträgen, und die Blobs blieben für immer
+    // liegen (bis 02.10.2026, „Papierkorb leeren“).
+    if (!existing && getStoredBlobs(bucketId).some((b) => b.id === id && b.is_deleted)) return
     const revision = (existing?.revision || 0) + 1
     const stand = naechsterStand(existing?.updatedAt)
 
@@ -1428,7 +1469,9 @@ export const useVaultStore = create<VaultState>((set, get) => {
     let cachedBlobs = getStoredBlobs(bucketId)
     const vorher = cachedBlobs.find((b) => b.id === id)
     cachedBlobs = cachedBlobs.filter((b) => b.id !== id)
-    const loeschBlobs = existing?.datei ? dateiBlobs(existing.datei).map((k) => ({ id: k.id, loeschen: k.loeschen })) : undefined
+    const loeschBlobs = existing?.datei
+      ? dateiBlobs(existing.datei).map((k) => ({ id: k.id, loeschen: k.loeschen }))
+      : vorher?.loeschBlobs
     cachedBlobs.push({ id, ciphertext: tombstone, revision, is_deleted: true, stand, serverRev: vorher?.serverRev, loeschBlobs })
     blobsSchreiben(bucketId, cachedBlobs)
 
@@ -1465,27 +1508,16 @@ export const useVaultStore = create<VaultState>((set, get) => {
     void get().syncWithServer()
   },
 
-  trashItem: async (id: string) => {
-    const { items, saveItem } = get()
-    const item = items.find((i) => i.id === id)
-    if (!item || item.trashedAt) return
-    // Wie der Stand: eine nachgehende Uhr legt nichts schon abgelaufen in den Papierkorb.
-    await saveItem({ ...item, trashedAt: naechsterStand(item.updatedAt) })
-  },
+  // Wie der Stand: eine nachgehende Uhr legt nichts schon abgelaufen in den Papierkorb.
+  trashItem: (id: string) =>
+    get().aendern(id, (item) => (item.trashedAt ? undefined : { trashedAt: naechsterStand(item.updatedAt) })),
 
-  restoreItem: async (id: string) => {
-    const { items, saveItem } = get()
-    const item = items.find((i) => i.id === id)
-    if (!item || !item.trashedAt) return
-    await saveItem({ ...item, trashedAt: undefined })
-  },
+  restoreItem: (id: string) => get().aendern(id, (item) => (item.trashedAt ? { trashedAt: undefined } : undefined)),
 
-  setArchived: async (id: string, archiviert: boolean) => {
-    const { items, saveItem } = get()
-    const item = items.find((i) => i.id === id)
-    if (!item || !!item.archivedAt === archiviert) return
-    await saveItem({ ...item, archivedAt: archiviert ? Date.now() : undefined })
-  },
+  setArchived: (id: string, archiviert: boolean) =>
+    get().aendern(id, (item) =>
+      !!item.archivedAt === archiviert ? undefined : { archivedAt: archiviert ? Date.now() : undefined },
+    ),
 
   emptyTrash: async () => {
     const imPapierkorb = get().items.filter((i) => i.trashedAt && istBekannteKategorie(i.category))
@@ -1585,29 +1617,19 @@ export const useVaultStore = create<VaultState>((set, get) => {
     return id
   },
 
-  albumAendern: async (id, { hinzu = [], weg = [] }) => {
-    // Frisch lesen: eine zweite Änderung kurz davor ist sonst verloren.
-    const album = get().items.find((i) => i.id === id && i.category === 'album')
-    if (!album) return
-    const raus = new Set(weg)
-    const liste = [...new Set([...(album.album?.eintraege ?? []), ...hinzu])].filter((e) => !raus.has(e))
-    if (liste.length > ALBUM_HOECHSTENS) throw new Error(i18n.t('mss.vault.fotos.albumVoll', { max: ALBUM_HOECHSTENS }))
-    await get().saveItem({ ...album, album: { eintraege: liste } })
-  },
+  // Die Liste wird erst beim Speichern gelesen: eine zweite Änderung kurz davor ist sonst verloren.
+  albumAendern: (id, { hinzu = [], weg = [] }) =>
+    get().aendern(id, (album) => {
+      if (album.category !== 'album') return undefined
+      const raus = new Set(weg)
+      const liste = [...new Set([...(album.album?.eintraege ?? []), ...hinzu])].filter((e) => !raus.has(e))
+      if (liste.length > ALBUM_HOECHSTENS) throw new Error(i18n.t('mss.vault.fotos.albumVoll', { max: ALBUM_HOECHSTENS }))
+      return { album: { eintraege: liste } }
+    }),
 
-  toggleFavorite: async (id: string) => {
-    const { items, saveItem } = get()
-    const item = items.find((i) => i.id === id)
-    if (!item) return
-    await saveItem({ ...item, isFavorite: !item.isFavorite })
-  },
+  toggleFavorite: (id: string) => get().aendern(id, (item) => ({ isFavorite: !item.isFavorite })),
 
-  markUsed: async (id: string) => {
-    const { items, saveItem } = get()
-    const item = items.find((i) => i.id === id)
-    if (!item) return
-    await saveItem({ ...item, lastUsedAt: Date.now() })
-  },
+  markUsed: (id: string) => get().aendern(id, { lastUsedAt: Date.now() }),
 
   syncWithServer: async () => {
     const { userKey, bucketId, bucketAuthToken, syncStatus } = get()

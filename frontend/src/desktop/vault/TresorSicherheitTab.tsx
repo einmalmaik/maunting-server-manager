@@ -20,6 +20,7 @@ import { sperrfristOptionen } from '@/services/autoSperre'
 import { Button, Dropdown, type DropdownOption, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 
+import { useShallow } from 'zustand/react/shallow'
 import { useVaultStore } from './vaultStore'
 
 export function TresorSicherheitTab() {
@@ -38,7 +39,10 @@ export function TresorSicherheitTab() {
     enableBiometrics,
     disableBiometrics,
     checkBiometricsSupport,
-  } = useVaultStore()
+  } = useVaultStore(
+    // Nur diese Felder: `lastActivityTime` ändert sich bei jeder Mausbewegung.
+    useShallow((s) => ({ isInitialized: s.isInitialized, isUnlocked: s.isUnlocked, autoLockMinutes: s.autoLockMinutes, lockOnWindowBlur: s.lockOnWindowBlur, isBiometricsSupported: s.isBiometricsSupported, isBiometricsEnabled: s.isBiometricsEnabled, setAutoLockMinutes: s.setAutoLockMinutes, setLockOnWindowBlur: s.setLockOnWindowBlur, enableBiometrics: s.enableBiometrics, disableBiometrics: s.disableBiometrics, checkBiometricsSupport: s.checkBiometricsSupport })),
+  )
 
   const [biometricsModalOpen, setBiometricsModalOpen] = useState(false)
   const [masterPasswordInput, setMasterPasswordInput] = useState('')

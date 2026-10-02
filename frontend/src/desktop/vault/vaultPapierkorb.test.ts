@@ -21,6 +21,7 @@ import {
   type VaultBlindSyncPayload,
 } from './vaultStore'
 import { decryptVaultEntry, encryptVaultEntry } from './vaultCrypto'
+import { gepolsterteGroesse } from './tresorDatei'
 
 vi.mock('../tauri', () => ({
   FACH_TRESOR: 'vault_biometric_key',
@@ -305,6 +306,41 @@ describe('Tresor: Papierkorb und Archiv', () => {
     })
   })
 
+  it('behält die Löschaufträge einer Datei, deren Ordner mit ihr im Papierkorb liegt', async () => {
+    // Bis 02.10.2026: „Papierkorb leeren“ löschte zuerst den Ordner und mit ihm
+    // die Datei, danach die Datei noch einmal. Der zweite Tombstone ersetzte
+    // den ersten ohne Löschaufträge, und ihre Blobs blieben für immer liegen.
+    const kopf = (id: string) => ({ id: id.repeat(32), groesse: gepolsterteGroesse(10), echt: 10, schluessel: 'k', loeschen: id.repeat(64) })
+    const weg = Date.now() - TAG
+    useVaultStore.setState({
+      userKey,
+      bucketId: BUCKET,
+      bucketAuthToken: 'b'.repeat(64),
+      isUnlocked: true,
+      items: [
+        { id: 'ordner-1', service: 'Fotos', username: '', password: '', category: 'ordner', createdAt: 1, updatedAt: 10, trashedAt: weg },
+        {
+          id: 'datei-1', service: 'bild.jpg', username: '', password: '', category: 'datei', ordner: 'ordner-1',
+          createdAt: 1, updatedAt: 10, trashedAt: weg,
+          datei: { typ: 'image/jpeg', original: kopf('a'), vorschau: kopf('b'), miniatur: kopf('c') },
+        },
+      ] as never,
+    })
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
+
+    await useVaultStore.getState().emptyTrash()
+
+    const cache = JSON.parse(localStorage.getItem(`mss:vault_blobs_${BUCKET}`) || '[]') as {
+      id: string
+      is_deleted: boolean
+      loeschBlobs?: { id: string }[]
+    }[]
+    const grab = cache.find((b) => b.id === 'datei-1')!
+    expect(grab.is_deleted).toBe(true)
+    expect(grab.loeschBlobs?.map((b) => b.id)).toEqual(['a'.repeat(32), 'b'.repeat(32), 'c'.repeat(32)])
+    expect(warteschlange().filter((m) => m.id === 'datei-1')).toHaveLength(1)
+  })
+
   it('lässt einen Eintrag, der erst kurz im Papierkorb liegt', async () => {
     await tresorVomServer(userKey, bank({ trashedAt: Date.now() - (PAPIERKORB_TAGE - 1) * TAG }), 17)
     const koerper = echoServer()
@@ -420,6 +456,62 @@ describe('Tresor: Alben', () => {
     const nutzlast = await decryptVaultEntry(gesendet.ciphertext, userKey, EINTRAG)
     expect(nutzlast.service).toBe('Neu')
     expect(nutzlast.album).toEqual(kaputt)
+  })
+
+  it('verliert keine von zwei gleichzeitigen Änderungen am selben Album', async () => {
+    // Bis 02.10.2026 lasen beide vor dem Verschlüsseln denselben alten Stand.
+    useVaultStore.setState({ userKey, bucketId: BUCKET, bucketAuthToken: 'b'.repeat(64), isUnlocked: true, syncStatus: 'synced', items: [] })
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
+    const id = await useVaultStore.getState().albumAnlegen('Urlaub', ['f1'])
+
+    await Promise.all([
+      useVaultStore.getState().albumAendern(id, { hinzu: ['f2'] }),
+      useVaultStore.getState().albumAendern(id, { hinzu: ['f3'] }),
+      useVaultStore.getState().toggleFavorite(id),
+    ])
+
+    const album = useVaultStore.getState().items.find((i) => i.id === id)!
+    expect(album.album?.eintraege).toEqual(['f1', 'f2', 'f3'])
+    expect(album.isFavorite).toBe(true)
+  })
+})
+
+describe('Tresor: Umbenennen nach einem Abgleich', () => {
+  it('behält den Inhalt, den ein anderes Gerät während der Rückfrage ersetzt hat', async () => {
+    // Bis 02.10.2026 schrieb Umbenennen den Schnappschuss von vor der Rückfrage
+    // zurück: die neue Fassung des anderen Geräts war weg, ihre Blobs belegten
+    // den Speicher ohne Eintrag.
+    localStorage.clear()
+    vi.restoreAllMocks()
+    const userKey = await userKeyAnlegen()
+    const kopf = (id: string) => ({ id: id.repeat(32), groesse: gepolsterteGroesse(10), echt: 10, schluessel: 'k', loeschen: id.repeat(64) })
+    const alt = { typ: 'image/jpeg', original: kopf('a'), vorschau: kopf('b'), miniatur: kopf('c') }
+    await tresorVomServer(userKey, { service: 'bild.jpg', category: 'datei', datei: alt, createdAt: 1, updatedAt: 10 }, 10)
+    const schnappschuss = useVaultStore.getState().items.find((i) => i.id === EINTRAG)!
+
+    // Während die Rückfrage offen ist, bringt der Abgleich den Inhalt von Gerät B.
+    const neu = { typ: 'image/jpeg', original: kopf('d'), vorschau: kopf('e'), miniatur: kopf('f'), frueher: [{ ...alt, ersetzt: 20 }] }
+    const vonB = await encryptVaultEntry({ service: 'bild.jpg', category: 'datei', datei: neu, createdAt: 1, updatedAt: 20 }, userKey, EINTRAG)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        server_revision: 11,
+        entries: [{ id: EINTRAG, ciphertext: vonB, revision: 11, is_deleted: false, updated_at: '2026-09-30T00:00:00Z' }],
+      }),
+    } as Response)
+    await useVaultStore.getState().syncWithServer()
+    vi.restoreAllMocks()
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
+
+    await useVaultStore.getState().aendern(schnappschuss.id, { service: 'urlaub.jpg' })
+
+    const gesendet = warteschlange().find((m) => m.id === EINTRAG)!
+    const nutzlast = await decryptVaultEntry(gesendet.ciphertext, userKey, EINTRAG)
+    expect(nutzlast.service).toBe('urlaub.jpg')
+    expect((nutzlast.datei as { original: { id: string } }).original.id).toBe('d'.repeat(32))
+    expect(gesendet.expected_revision).toBe(11)
+    vi.restoreAllMocks()
   })
 })
 

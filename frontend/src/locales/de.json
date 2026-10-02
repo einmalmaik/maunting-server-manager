@@ -4501,7 +4501,7 @@
     },
     "vaultCloud": {
       "title": "Tresor-Cloud: Dateien im Tresor",
-      "intro": "Die App verschlüsselt Fotos, Videos und Dokumente auf dem Gerät, bevor sie hochgehen, in Stücken von 4 MiB. Das Panel speichert nur diese Stücke unter MSM_VAULT_BLOB_DIR (Standard /opt/msm/vault-blobs). Name, Typ, echte Größe und Schlüssel stehen im verschlüsselten Tresor-Eintrag.",
+      "intro": "Die App verschlüsselt Fotos, Videos und Dokumente auf dem Gerät, bevor sie hochgehen, in Stücken von 4 MiB. Das Panel speichert nur diese Stücke, in /opt/msm/vault-blobs. Der Pfad ist fest; für einen anderen Datenträger hängst du ihn dort ein. Name, Typ, echte Größe und Schlüssel stehen im verschlüsselten Tresor-Eintrag.",
       "sieht": {
         "title": "Was der Server sieht",
         "body": "Je Tresor die Anzahl der Dateien, ihre auf feste Stufen aufgefüllte Größe und den Zeitpunkt des Hochladens. Inhalt, Namen und Typen nicht, auch nicht mit Root-Zugang. Welchem Konto ein Tresor gehört, steht in der Datenbank nur als HMAC der Kontonummer, dessen Schlüssel der DIS-Sidecar hält; das Panel stellt die Zuordnung her, solange das Konto angemeldet zugreift."

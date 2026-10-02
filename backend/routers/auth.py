@@ -1353,6 +1353,17 @@ def delete_account(
     - 2FA wird **niemals** übersprungen, wenn aktiv (auch nicht bei Social).
     - Immer: exaktes Wort "delete" als confirmation (Frontend verhindert Paste).
     """
+    # Wie beim Export: den Tresor findet die Loeschung nur ueber den Index aus
+    # dem Sidecar. Fehlt er, scheitert sie hier, bevor der zweite Faktor
+    # verbraucht ist (bis 02.10.2026 erst danach).
+    try:
+        vault_service.tresor_konto(user.id)
+    except DisSidecarError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Der Tresor ist gerade nicht erreichbar, das Konto kann deshalb nicht gelöscht werden.",
+        ) from exc
+
     if user.has_password:
         if not req.password:
             raise HTTPException(status_code=400, detail="Passwort erforderlich")

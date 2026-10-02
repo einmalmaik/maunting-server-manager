@@ -533,9 +533,11 @@ Klartextwerte nebeneinander liegen.
 
 Die App legt im Tresor auch Dateien ab: Fotos, Videos, Dokumente. Sie werden
 auf dem Gerät verschlüsselt, bevor sie hochgehen, in Stücken von 4 MiB. Das
-Panel speichert nur diese Stücke, unter `MSM_VAULT_BLOB_DIR` (Standard
-`/opt/msm/vault-blobs`, angelegt von `install.sh` und `update.sh`, nur für den
-Benutzer `msm` lesbar). Dateiname, Typ, echte Größe und Schlüssel stehen im
+Panel speichert nur diese Stücke, in `/opt/msm/vault-blobs` (angelegt von
+`install.sh` und `update.sh`, nur für den Benutzer `msm` lesbar). Der Pfad ist
+fest: systemd lässt das Panel nur unter `/opt/msm` schreiben, und der
+Umzugsassistent nimmt nur dieses Verzeichnis mit. Für einen anderen Datenträger
+hängst du ihn dort ein. Dateiname, Typ, echte Größe und Schlüssel stehen im
 verschlüsselten Tresor-Eintrag. Auch mit Root-Zugang und Datenbank sieht der
 Betreiber davon nichts.
 

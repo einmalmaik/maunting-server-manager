@@ -18,6 +18,8 @@ Panel-Router fragen. Hier steht nur, was die KI zusaetzlich braucht:
   schon jemand, ist die Aenderung eine Vergabe an diese Benutzer und fragt
   nach derselben Grenze wie oben. Sonst liesse sich eine harmlose Rolle
   autonom zuweisen und danach autonom um jedes Recht erweitern.
+  Tresorspeicher ist kein Recht und laeuft autonom, nur 0 fragt immer: es
+  haelt jeden Upload der Traeger an.
 * **Der Stand beim Vorschlagen reist mit.** Zwischen Karte und Klick liegt ein
   Zeitfenster ohne Obergrenze. Hat jemand die Rechte darin im Panel geaendert,
   fuehrt der Klick nicht den alten Plan ueber den neuen Stand aus, sondern
@@ -384,7 +386,23 @@ def _role_set_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
     # Rolle fragt wie eine Vergabe an ihre Traeger.
     if betroffen:
         _vorschau(preview, entzogen=bool(weg), vergeben=hinzu)
+    # Speicher auf 0 haelt jeden Upload der Traeger an: das fragt immer
+    # (Entscheidung des Betreibers, 02.10.2026).
+    if speicher_genannt and not speicher:
+        preview["always_confirm"] = True
     return payload, preview
+
+
+def _speicher_setzen(db: Session, actor: User, role_id: int, p: dict) -> None:
+    vault_blob_service.rolle_speicher_setzen(db, role_id, p.get("vault_quota_bytes"))
+    audit_service.record_privileged_action(
+        db,
+        user_id=actor.id,
+        action="vault.role_quota.updated",
+        target_type="role",
+        target_id=role_id,
+        details={"vorher": p.get("vault_before"), "nachher": p.get("vault_quota_bytes")},
+    )
 
 
 def _ausfuehren_role_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
@@ -408,6 +426,10 @@ def _ausfuehren_role_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefueh
                 raise AiActionStateError("AI_ACTION_REVISION_CONFLICT")
             if speicher_setzen and vault_blob_service.rolle_speicher(db, role_id) != p.get("vault_before"):
                 raise AiActionStateError("AI_ACTION_REVISION_CONFLICT")
+            # Speicher vor den Rechten: `update_role` schreibt fest, und beides
+            # geht so in einer Transaktion (bis 02.10.2026 zwei).
+            if speicher_setzen:
+                _speicher_setzen(db, actor, role_id, p)
             if rechte_aendern:
                 rolle = rechtevergabe_service.update_role(
                     db, actor, role_id, p.get("name"), p.get("description"), p.get("permissions")
@@ -415,15 +437,9 @@ def _ausfuehren_role_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefueh
     except rechtevergabe_service.RechteFehler as fehler:
         raise _bei_ausfuehrung(fehler) from fehler
     if speicher_setzen:
-        vault_blob_service.rolle_speicher_setzen(db, rolle.id, p.get("vault_quota_bytes"))
-        audit_service.record_privileged_action(
-            db,
-            user_id=actor.id,
-            action="vault.role_quota.updated",
-            target_type="role",
-            target_id=rolle.id,
-            details={"vorher": p.get("vault_before"), "nachher": p.get("vault_quota_bytes")},
-        )
+        # Eine neue Rolle gibt es erst nach `create_role`.
+        if p.get("role_id") is None:
+            _speicher_setzen(db, actor, rolle.id, p)
         db.commit()
     gespeichert = vault_blob_service.rolle_speicher(db, rolle.id)
     return _Ausgefuehrt(result={

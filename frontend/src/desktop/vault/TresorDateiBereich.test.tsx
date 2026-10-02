@@ -97,7 +97,7 @@ async function langDruecken(el: HTMLElement) {
 }
 
 describe('TresorDateiBereich', () => {
-  const saveItem = vi.fn(async (..._args: unknown[]) => undefined)
+  const aendern = vi.fn(async (..._args: unknown[]) => undefined)
   const dateiHinzufuegen = vi.fn(async (..._args: unknown[]) => 'neu')
   const trashItem = vi.fn(async (..._args: unknown[]) => undefined)
   const restoreItem = vi.fn(async (..._args: unknown[]) => undefined)
@@ -106,7 +106,7 @@ describe('TresorDateiBereich', () => {
 
   beforeEach(async () => {
     await i18n.changeLanguage('de')
-    saveItem.mockReset().mockResolvedValue(undefined)
+    aendern.mockReset().mockResolvedValue(undefined)
     dateiHinzufuegen.mockClear()
     trashItem.mockReset().mockResolvedValue(undefined)
     restoreItem.mockReset().mockResolvedValue(undefined)
@@ -120,7 +120,7 @@ describe('TresorDateiBereich', () => {
     useVaultStore.setState({
       items: [vertraege, fotos, miete, pdf, notiz, beleg, brief],
       userKey: {} as CryptoKey,
-      saveItem: saveItem as never,
+      aendern: aendern as never,
       trashItem: trashItem as never,
       restoreItem: restoreItem as never,
       setArchived: setArchived as never,
@@ -137,7 +137,7 @@ describe('TresorDateiBereich', () => {
     const ziel = zeile('Verträge')
     expect(fireEvent.dragOver(ziel, { dataTransfer: dt })).toBe(false)
     fireEvent.drop(ziel, { dataTransfer: dt })
-    await vi.waitFor(() => expect(saveItem).toHaveBeenCalledWith(expect.objectContaining({ id: 'p', ordner: 'v' })))
+    await vi.waitFor(() => expect(aendern).toHaveBeenCalledWith('p', { ordner: 'v' }))
   })
 
   it('lässt einen Ordner nicht auf sich selbst fallen', () => {
@@ -146,7 +146,7 @@ describe('TresorDateiBereich', () => {
     fireEvent.dragStart(zeile('Verträge'), { dataTransfer: dt })
     expect(fireEvent.dragOver(zeile('Verträge'), { dataTransfer: dt })).toBe(true)
     fireEvent.drop(zeile('Verträge'), { dataTransfer: dt })
-    expect(saveItem).not.toHaveBeenCalled()
+    expect(aendern).not.toHaveBeenCalled()
   })
 
   it('verschiebt über die Pfadleiste nach oben', async () => {
@@ -158,7 +158,7 @@ describe('TresorDateiBereich', () => {
     const stamm = within(pfad).getByRole('button', { name: i18n.t('mss.vault.dateien.stamm') })
     fireEvent.dragOver(stamm, { dataTransfer: dt })
     fireEvent.drop(stamm, { dataTransfer: dt })
-    await vi.waitFor(() => expect(saveItem).toHaveBeenCalledWith(expect.objectContaining({ id: 'b', ordner: undefined })))
+    await vi.waitFor(() => expect(aendern).toHaveBeenCalledWith('b', { ordner: undefined }))
   })
 
   it('lädt Dateien vom Rechner in den Ordner, auf dem sie landen', async () => {
@@ -230,8 +230,8 @@ describe('TresorDateiBereich', () => {
       expect(JSON.parse(dt.getData(ZIEH_TYP)).sort()).toEqual(['n', 'p'])
       fireEvent.dragOver(zeile('Fotos'), { dataTransfer: dt })
       fireEvent.drop(zeile('Fotos'), { dataTransfer: dt })
-      await vi.waitFor(() => expect(saveItem).toHaveBeenCalledTimes(2))
-      expect(saveItem.mock.calls.map((c) => [(c[0] as VaultItem).id, (c[0] as VaultItem).ordner]).sort()).toEqual([
+      await vi.waitFor(() => expect(aendern).toHaveBeenCalledTimes(2))
+      expect(aendern.mock.calls.map((c) => [c[0], (c[1] as Partial<VaultItem>).ordner]).sort()).toEqual([
         ['n', 'f'],
         ['p', 'f'],
       ])
@@ -359,7 +359,7 @@ describe('TresorDateiBereich', () => {
       fireEvent.click(screen.getByRole('menuitem', { name: i18n.t('mss.vault.archivieren') }))
       await vi.waitFor(() => expect(letzterToast()).toMatchObject({ type: 'error', message: 'Tresor gesperrt' }))
 
-      saveItem.mockRejectedValueOnce('kaputt')
+      aendern.mockRejectedValueOnce('kaputt')
       fireEvent.contextMenu(zeile('vertrag.pdf'))
       fireEvent.click(screen.getByRole('menuitem', { name: i18n.t('mss.vault.dateien.umbenennen') }))
       await vi.waitFor(() => expect(usePromptStore.getState().pending).not.toBeNull())
