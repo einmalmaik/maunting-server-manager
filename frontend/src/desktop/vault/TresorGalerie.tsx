@@ -7,15 +7,18 @@
  * wird auf dem Gerät entschlüsselt; Monatsgruppen außerhalb des Bildschirms
  * überspringt der Browser (`content-visibility`), und Miniaturen werden erst
  * geladen, wenn ihre Kachel in die Nähe kommt.
+ *
+ * Mehrfachauswahl wie in „Dateien“: am Rechner mit Strg/Cmd- und
+ * Umschalt-Klick oder „Auswählen“, am Telefon mit langem Drücken. Die
+ * Aktionen stehen am Rechner oben, am Telefon unten in Daumenreichweite.
  */
 
 import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
-import React, { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import React, { createContext, memo, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Archive,
   ArrowLeft,
-  Check,
   CheckSquare,
   Clock,
   Copy,
@@ -33,24 +36,50 @@ import {
   Plus,
   Trash2,
   Upload,
+  Check,
+  type LucideIcon,
 } from 'lucide-react'
-import { ActionMenu, Button, Dropdown, FileButton, Lichtbox, ProgressBar, Versionsliste, type DropdownOption } from '@/Singra/UI'
-import { TabBar, type TabDef } from '@/components/ui/TabBar'
+import {
+  ActionMenu,
+  Auswahlleiste,
+  Button,
+  Dropdown,
+  FileButton,
+  Kontextmenue,
+  Lichtbox,
+  ProgressBar,
+  Versionsliste,
+  buttonClasses,
+  type ActionMenuItem,
+  type AuswahlAktion,
+  type DropdownOption,
+} from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { prompt } from '@/stores/promptStore'
 import { formatBytes } from '@/components/server/fileHelpers'
+import { useLangdruck } from '@/hooks/useLangdruck'
+import { ZipZuGross } from '@/lib/zipSchreiben'
+import { cx } from '@/utils/classNames'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { ansichtOeffnen, ansichtSchliessen, blobLesen, useTresorUploads } from './tresorDateien'
 import { miniaturenVorladen, useMiniatur } from './tresorMiniaturen'
-import { aufGeraetSpeichern } from './tresorAnzeige'
+import { aufGeraetSpeichern, mehrereAufGeraetSpeichern } from './tresorAnzeige'
 import { gruppieren, hashesBerechnen } from './tresorAehnlich'
 import { BEARBEITBAR, TresorBildeditor } from './TresorBildeditor'
-import { fassungenVon, sichtbareEintraege } from './tresorOrdner'
+import { dateienUnter, fassungenVon, sichtbareEintraege } from './tresorOrdner'
+import { TresorSpeicherAnzeige, TresorUploadStand, useTresorSpeicher } from './TresorSpeicher'
 
 type Filter = 'alle' | 'videos' | 'kuerzlich' | 'aehnlich' | 'alben'
 
 /** Kantenlänge der Kacheln je Zoomstufe. */
 const KACHEL = [84, 128, 200] as const
+
+/** So lange nach einem langen Druck gilt der folgende Klick als dessen Ende, nicht als neuer Tipp. */
+const KLICK_NACH_LANGDRUCK_MS = 700
+
+/** Am Telefon mindestens 44 px; `min-h` setzt sich gegen die Höhe aus `size` durch. */
+const DAUMEN = 'min-h-11 sm:min-h-0'
+const DAUMEN_QUADRAT = 'min-h-11 min-w-11 sm:min-h-0 sm:min-w-0'
 
 const SCREENSHOT = /screenshot|bildschirmfoto|screen[ _-]?shot|scrnshot|capture d.?écran/i
 
@@ -151,29 +180,43 @@ function useSichtbar(ref: React.RefObject<HTMLElement | null>): boolean {
   return sichtbar
 }
 
+/** Welche Tasten beim Klick gedrückt waren. */
+type Tasten = Pick<React.MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>
+
 const Kachel = memo(function Kachel({
   item,
   ausgewaehlt,
   onKlick,
+  onLangdruck,
 }: {
   item: VaultItem
   /** Nur im Auswahlmodus gesetzt. */
   ausgewaehlt?: boolean
-  onKlick: (id: string) => void
+  onKlick: (id: string, tasten: Tasten) => void
+  onLangdruck: (id: string) => void
 }) {
   const { t } = useTranslation()
   const ref = useRef<HTMLButtonElement>(null)
   const sichtbar = useSichtbar(ref)
   const url = useMiniatur(item.datei?.miniatur, item.id, sichtbar)
   const upload = useTresorUploads((s) => s.je[item.id])
+  const lang = useLangdruck(() => onLangdruck(item.id))
+  const beschreibung = useId()
   const video = istVideo(item)
   const Symbol = video ? Film : ImageIcon
+  const dauer = item.datei?.dauer ? dauerText(item.datei.dauer) : null
   return (
     <button
       ref={ref}
       type="button"
-      onClick={() => onKlick(item.id)}
+      onClick={(event) => onKlick(item.id, event)}
+      onPointerDown={lang.onPointerDown}
+      onPointerMove={lang.onPointerMove}
+      onPointerUp={lang.onPointerUp}
+      onPointerCancel={lang.onPointerCancel}
+      onContextMenu={lang.onContextMenu}
       aria-label={item.service}
+      aria-describedby={video ? beschreibung : undefined}
       aria-pressed={ausgewaehlt}
       className={`group relative aspect-square overflow-hidden rounded-md bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${
         ausgewaehlt ? 'ring-2 ring-primary ring-offset-2 ring-offset-surface' : ''
@@ -201,9 +244,15 @@ const Kachel = memo(function Kachel({
         </span>
       )}
       {video && (
-        <span className="absolute bottom-1 right-1 inline-flex items-center gap-0.5 rounded bg-black/60 px-1 text-label-sm font-medium text-white">
+        <span className="absolute bottom-1 right-1 inline-flex items-center gap-0.5 rounded bg-black/60 px-1 text-label-sm font-medium text-white" aria-hidden>
           <Play className="h-2.5 w-2.5 fill-current" />
-          {item.datei?.dauer ? dauerText(item.datei.dauer) : null}
+          {dauer}
+        </span>
+      )}
+      {video && (
+        // Der Name bleibt der Dateiname; dass es ein Video ist und wie lang, liest der Screenreader als Beschreibung.
+        <span id={beschreibung} className="sr-only">
+          {dauer ? t('mss.vault.fotos.videoMitDauer', { dauer }) : t('mss.vault.fotos.video')}
         </span>
       )}
       {upload && (
@@ -239,6 +288,14 @@ function AlbumKarte({ album, titelbild, anzahl, onOeffnen }: { album: VaultItem;
   )
 }
 
+const FILTER: { id: Filter; labelKey: string; icon: LucideIcon }[] = [
+  { id: 'alle', labelKey: 'mss.vault.fotos.alle', icon: Images },
+  { id: 'videos', labelKey: 'mss.vault.fotos.videos', icon: Film },
+  { id: 'kuerzlich', labelKey: 'mss.vault.fotos.kuerzlich', icon: Clock },
+  { id: 'aehnlich', labelKey: 'mss.vault.fotos.aehnlich', icon: Copy },
+  { id: 'alben', labelKey: 'mss.vault.fotos.alben', icon: Library },
+]
+
 export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const { t, i18n } = useTranslation()
   const items = useVaultStore((s) => s.items)
@@ -248,13 +305,22 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const albumAendern = useVaultStore((s) => s.albumAendern)
   const saveItem = useVaultStore((s) => s.saveItem)
   const trashItem = useVaultStore((s) => s.trashItem)
+  const restoreItem = useVaultStore((s) => s.restoreItem)
   const setArchived = useVaultStore((s) => s.setArchived)
+  const { speicher, ohneSpeicher } = useTresorSpeicher()
   const [filter, setFilterRoh] = useState<Filter>('alle')
   const [quelle, setQuelle] = useState('')
   const [aehnlich, setAehnlich] = useState<{ fertig: number; gesamt: number; gruppen: string[][] | null }>({ fertig: 0, gesamt: 0, gruppen: null })
   const [albumId, setAlbumId] = useState<string | null>(null)
+  /** Gewählte Kacheln; `null` heißt: keine Auswahl. */
   const [auswahl, setAuswahl] = useState<Set<string> | null>(null)
-  useZurueckSchliesst(auswahl !== null, () => setAuswahl(null))
+  useZurueckSchliesst(auswahl !== null, () => auswahlLeeren())
+  /** Ausgangspunkt für Umschalt-Klick. */
+  const anker = useRef<string | null>(null)
+  const letzterLangdruck = useRef(0)
+  /** Eine laufende Sammelaktion, mit Fortschritt. Solange sie läuft, sind die Aktionen gesperrt. */
+  const [sammel, setSammel] = useState<{ text: string; anteil: number | null } | null>(null)
+  const [albumMenue, setAlbumMenue] = useState<{ x: number; y: number; ausloeser: HTMLElement | null } | null>(null)
   const [stufe, setStufe] = useState(1)
   const [offen, setOffen] = useState<{ id: string; index: number } | null>(null)
   const [vorbereitung, setVorbereitung] = useState(0)
@@ -262,10 +328,20 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const scroller = useRef<HTMLDivElement>(null)
   const beobachten = useBeobachter(scroller)
 
+  function auswahlLeeren() {
+    setAuswahl(null)
+    anker.current = null
+  }
+
   const setFilter = (neu: Filter) => {
     setFilterRoh(neu)
     setAlbumId(null)
-    setAuswahl(null)
+    auswahlLeeren()
+  }
+
+  const albumWechseln = (id: string | null) => {
+    setAlbumId(id)
+    auswahlLeeren()
   }
 
   const sichtbar = useMemo(() => sichtbareEintraege(items), [items])
@@ -321,6 +397,8 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
     if (filter === 'aehnlich' && !album) return auswahlListe
     return auswahlListe.sort((a, b) => zeitpunkt(b, filter).ms - zeitpunkt(a, filter).ms)
   }, [medien, filter, suche, album, albumInhalt, quelle, aehnlich.gruppen])
+  const listeRef = useRef(liste)
+  listeRef.current = liste
 
   const quellen = useMemo(() => {
     const zahl = new Map<string, number>()
@@ -381,26 +459,58 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
     }
   }, [userKey, anzahlMedien])
 
+  // ── Auswahl ───────────────────────────────────────────────────────────────
+
   const auswahlAn = auswahl !== null
+  // Was nicht mehr in der Liste steht (gelöscht, weggefiltert), zählt nicht mehr mit.
+  const gewaehlt = useMemo(() => (auswahl ? liste.filter((i) => auswahl.has(i.id)) : []), [auswahl, liste])
+  const gewaehltIds = gewaehlt.map((i) => i.id)
+
+  const umschalten = useCallback((id: string) => {
+    setAuswahl((a) => {
+      const neu = new Set(a ?? [])
+      if (neu.has(id)) neu.delete(id)
+      else neu.add(id)
+      return neu.size > 0 ? neu : null
+    })
+    anker.current = id
+  }, [])
+
   const kachelKlick = useCallback(
-    (id: string) => {
-      if (!auswahlAn) {
-        setOffen({ id, index: 0 })
+    (id: string, tasten: Tasten) => {
+      if (Date.now() - letzterLangdruck.current < KLICK_NACH_LANGDRUCK_MS) return
+      if (tasten.shiftKey && anker.current) {
+        // Umschalt-Klick: alles zwischen Anker und dieser Kachel, in der Reihenfolge des Rasters.
+        const ids = listeRef.current.map((i) => i.id)
+        const von = ids.indexOf(anker.current)
+        const bis = ids.indexOf(id)
+        if (von >= 0 && bis >= 0) {
+          setAuswahl(new Set(ids.slice(Math.min(von, bis), Math.max(von, bis) + 1)))
+          return
+        }
+      }
+      if (tasten.ctrlKey || tasten.metaKey || tasten.shiftKey || auswahlAn) {
+        umschalten(id)
         return
       }
-      setAuswahl((alt) => {
-        const neu = new Set(alt)
-        if (neu.has(id)) neu.delete(id)
-        else neu.add(id)
-        return neu
-      })
+      setOffen({ id, index: 0 })
     },
-    [auswahlAn],
+    [auswahlAn, umschalten],
   )
+
+  const kachelLangdruck = useCallback((id: string) => {
+    letzterLangdruck.current = Date.now()
+    setAuswahl((a) => new Set([...(a ?? []), id]))
+    anker.current = id
+  }, [])
+
+  // ── Hochladen ─────────────────────────────────────────────────────────────
 
   const fehlerZeigen = (err: unknown) => toast.error(err instanceof Error ? err.message : String(err))
 
   const hochladen = async (dateien: File[]) => {
+    // Ohne Speicher wiese der Server den Upload ab; die Anzeige oben sagt, warum.
+    if (ohneSpeicher) return
     const passend = dateien.filter((d) => d.type.startsWith('image/') || d.type.startsWith('video/'))
     setVorbereitung((n) => n + passend.length)
     const neue: string[] = []
@@ -417,12 +527,14 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
     if (album && neue.length > 0) await albumAendern(album.id, { hinzu: neue }).catch(fehlerZeigen)
   }
 
+  // ── Alben ─────────────────────────────────────────────────────────────────
+
   const neuesAlbum = async (eintraege: string[]) => {
     const name = await prompt({ message: t('mss.vault.fotos.albumName'), confirmText: t('mss.vault.fotos.neuesAlbum') })
     if (!name?.trim()) return
     try {
       const id = await albumAnlegen(name.trim(), eintraege)
-      setAuswahl(null)
+      auswahlLeeren()
       if (eintraege.length === 0) {
         setFilterRoh('alben')
         setAlbumId(id)
@@ -437,8 +549,18 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const zuAlbum = async (a: VaultItem, ids: string[]) => {
     try {
       await albumAendern(a.id, { hinzu: ids })
-      setAuswahl(null)
+      auswahlLeeren()
       toast.success(t('mss.vault.fotos.hinzugefuegt', { name: a.service }))
+    } catch (err) {
+      fehlerZeigen(err)
+    }
+  }
+
+  const ausAlbum = async (ids: string[]) => {
+    if (!album) return
+    try {
+      await albumAendern(album.id, { weg: ids })
+      auswahlLeeren()
     } catch (err) {
       fehlerZeigen(err)
     }
@@ -450,24 +572,192 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
     await saveItem({ ...a, service: name.trim() }).catch(fehlerZeigen)
   }
 
-  const fuerAuswahl = async (arbeit: (id: string) => Promise<void>, meldung?: string) => {
-    if (!auswahl) return
+  /** Nur das Album geht in den Papierkorb; die Fotos darin bleiben. */
+  const albumInPapierkorb = async (a: VaultItem) => {
     try {
-      for (const id of auswahl) await arbeit(id)
-      if (meldung) toast.success(meldung)
-      setAuswahl(null)
+      await trashItem(a.id)
+    } catch {
+      toast.error(t('mss.vault.fotos.fehler.albumPapierkorb'))
+      return
+    }
+    setAlbumId(null)
+    toast.success(t('mss.vault.fotos.albumImPapierkorb'), {
+      label: t('common.undo'),
+      ausfuehren: () => void zuruecknehmen([a.id], restoreItem),
+    })
+  }
+
+  /** Öffnet die Albenwahl am gerade gedrückten Knopf (oben oder in der Fußleiste). */
+  const albumMenueOeffnen = () => {
+    const knopf = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null
+    const box = knopf?.getBoundingClientRect()
+    setAlbumMenue(
+      box && box.width > 0
+        ? { x: box.left, y: box.bottom + 4, ausloeser: knopf }
+        : { x: window.innerWidth / 2, y: window.innerHeight - 96, ausloeser: knopf },
+    )
+  }
+
+  const albumMenueEintraege = (ids: string[]): ActionMenuItem[] => [
+    ...alben
+      .filter((a) => a.id !== album?.id)
+      .map((a) => ({ key: a.id, label: a.service, icon: <Images className="h-4 w-4" />, onSelect: () => void zuAlbum(a, ids) })),
+    {
+      key: 'neu',
+      label: t('mss.vault.fotos.neuesAlbum'),
+      icon: <Plus className="h-4 w-4" />,
+      separatorBefore: alben.some((a) => a.id !== album?.id),
+      onSelect: () => void neuesAlbum(ids),
+    },
+  ]
+
+  // ── Sammelaktionen ────────────────────────────────────────────────────────
+
+  /**
+   * Arbeitet die Einträge nacheinander ab, zeigt den Fortschritt und sperrt
+   * solange die Aktionen. Ein Fehler hält den Rest nicht auf; er wird gezählt.
+   */
+  const sammelnLaufen = async (ids: string[], text: string, arbeit: (id: string) => Promise<void>) => {
+    const geschafft: string[] = []
+    let fehler = 0
+    setSammel({ text, anteil: 0 })
+    try {
+      for (const [nr, id] of ids.entries()) {
+        try {
+          await arbeit(id)
+          geschafft.push(id)
+        } catch {
+          fehler += 1
+        }
+        setSammel({ text, anteil: (nr + 1) / ids.length })
+      }
+    } finally {
+      setSammel(null)
+    }
+    return { geschafft, fehler }
+  }
+
+  async function zuruecknehmen(ids: string[], arbeit: (id: string) => Promise<void>) {
+    let fehler = 0
+    for (const id of ids) {
+      try {
+        await arbeit(id)
+      } catch {
+        fehler += 1
+      }
+    }
+    if (fehler > 0) toast.error(t('mss.vault.fotos.fehler.rueckgaengig'))
+  }
+
+  const inPapierkorb = async (ids: string[]) => {
+    if (ids.length === 0 || sammel) return
+    const { geschafft, fehler } = await sammelnLaufen(ids, t('mss.vault.fotos.sammel.papierkorb', { count: ids.length }), trashItem)
+    auswahlLeeren()
+    if (geschafft.length > 0) {
+      toast.success(
+        geschafft.length === 1 ? t('mss.vault.inPapierkorbGelegt') : t('mss.vault.dateien.papierkorbMehrere', { count: geschafft.length }),
+        { label: t('common.undo'), ausfuehren: () => void zuruecknehmen(geschafft, restoreItem) },
+      )
+    }
+    if (fehler > 0) toast.error(t('mss.vault.fotos.fehler.papierkorb', { count: fehler }))
+  }
+
+  const archivieren = async (ids: string[]) => {
+    if (ids.length === 0 || sammel) return
+    const { geschafft, fehler } = await sammelnLaufen(ids, t('mss.vault.fotos.sammel.archiv', { count: ids.length }), (id) => setArchived(id, true))
+    auswahlLeeren()
+    if (geschafft.length > 0) {
+      toast.success(
+        geschafft.length === 1 ? t('mss.vault.archiviert') : t('mss.vault.fotos.archiviertMehrere', { count: geschafft.length }),
+        { label: t('common.undo'), ausfuehren: () => void zuruecknehmen(geschafft, (id) => setArchived(id, false)) },
+      )
+    }
+    if (fehler > 0) toast.error(t('mss.vault.fotos.fehler.archiv', { count: fehler }))
+  }
+
+  /** Ein Foto wie es ist, mehrere als ZIP. */
+  const speichernSammel = async (gewaehlteItems: VaultItem[]) => {
+    if (!userKey || gewaehlteItems.length === 0 || sammel) return
+    if (gewaehlteItems.length === 1) {
+      const [item] = gewaehlteItems
+      try {
+        await aufGeraetSpeichern(item.datei!.original, item.id, userKey, item.service, item.datei!.typ)
+        auswahlLeeren()
+      } catch {
+        toast.error(t('mss.vault.dateien.speichernFehler'))
+      }
+      return
+    }
+    const dateien = dateienUnter(gewaehlteItems, sichtbar)
+    setSammel({ text: t('mss.vault.dateien.zipLaeuft', { count: dateien.length }), anteil: null })
+    try {
+      await mehrereAufGeraetSpeichern(
+        dateien.map((d) => ({ kopf: d.item.datei!.original, eintragId: d.item.id, pfad: d.pfad, geaendert: d.item.datei!.geaendert ?? d.item.updatedAt })),
+        userKey,
+        `${album?.service ?? t('mss.vault.fotos.zipName')}.zip`,
+      )
+      auswahlLeeren()
     } catch (err) {
-      fehlerZeigen(err)
+      toast.error(
+        err instanceof ZipZuGross
+          ? t(err.grund === 'dateien' ? 'mss.vault.dateien.zipZuVieleDateien' : 'mss.vault.dateien.zipZuGross')
+          : t('mss.vault.dateien.speichernFehler'),
+      )
+    } finally {
+      setSammel(null)
     }
   }
 
-  const filterTabs: TabDef<Filter>[] = [
-    { id: 'alle', labelKey: 'mss.vault.fotos.alle', icon: Images },
-    { id: 'videos', labelKey: 'mss.vault.fotos.videos', icon: Film },
-    { id: 'kuerzlich', labelKey: 'mss.vault.fotos.kuerzlich', icon: Clock },
-    { id: 'aehnlich', labelKey: 'mss.vault.fotos.aehnlich', icon: Copy },
-    { id: 'alben', labelKey: 'mss.vault.fotos.alben', icon: Library },
+  const leer = gewaehlt.length === 0
+  const beschaeftigt = sammel !== null
+  const aktionen: AuswahlAktion[] = [
+    {
+      key: 'album',
+      label: t('mss.vault.fotos.zuAlbum'),
+      kurz: t('mss.vault.fotos.kurz.album'),
+      icon: <FolderInput className="h-5 w-5 md:h-4 md:w-4" />,
+      disabled: leer || beschaeftigt,
+      onSelect: albumMenueOeffnen,
+    },
+    ...(album
+      ? [
+          {
+            key: 'ausAlbum',
+            label: t('mss.vault.fotos.ausAlbum'),
+            kurz: t('mss.vault.fotos.kurz.ausAlbum'),
+            icon: <FolderMinus className="h-5 w-5 md:h-4 md:w-4" />,
+            disabled: leer || beschaeftigt,
+            onSelect: () => void ausAlbum(gewaehltIds),
+          },
+        ]
+      : []),
+    {
+      key: 'speichern',
+      label: t(gewaehlt.length > 1 ? 'mss.vault.dateien.alsZip' : 'mss.vault.dateien.speichern'),
+      kurz: t('mss.vault.dateien.kurz.speichern'),
+      icon: <Download className="h-5 w-5 md:h-4 md:w-4" />,
+      disabled: leer || beschaeftigt,
+      onSelect: () => void speichernSammel(gewaehlt),
+    },
+    {
+      key: 'archiv',
+      label: t('mss.vault.archivieren'),
+      icon: <Archive className="h-5 w-5 md:h-4 md:w-4" />,
+      disabled: leer || beschaeftigt,
+      onSelect: () => void archivieren(gewaehltIds),
+    },
+    {
+      key: 'papierkorb',
+      label: t('mss.vault.inPapierkorb'),
+      kurz: t('mss.vault.dateien.kurz.papierkorb'),
+      icon: <Trash2 className="h-5 w-5 md:h-4 md:w-4" />,
+      destructive: true,
+      disabled: leer || beschaeftigt,
+      onSelect: () => void inPapierkorb(gewaehltIds),
+    },
   ]
+
+  // ── Lichtbox ──────────────────────────────────────────────────────────────
 
   // Die Lichtbox hält sich an die Kennung; fällt das Bild aus der Liste
   // (Archiv, Papierkorb), zeigt sie das an seiner Stelle.
@@ -482,223 +772,267 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
     if (offen && !offenItem) setOffen(null)
   }, [offen, offenItem, offenIndex])
 
+  // ── Darstellung ───────────────────────────────────────────────────────────
+
   const kante = KACHEL[stufe]
   const albenUebersicht = filter === 'alben' && !album
-  const anzahlAuswahl = auswahl?.size ?? 0
+  const auswahlLabel = t('mss.vault.fotos.ausgewaehlt', { count: gewaehlt.length })
 
-  let leiste: React.ReactNode
-  if (auswahl) {
-    const ids = [...auswahl]
-    leiste = (
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="mr-1 text-xs font-semibold text-on-surface">{t('mss.vault.fotos.ausgewaehlt', { count: anzahlAuswahl })}</span>
-        <ActionMenu
-          label={t('mss.vault.fotos.zuAlbum')}
-          icon={<FolderInput className="h-3.5 w-3.5" />}
-          disabled={anzahlAuswahl === 0}
-          items={[
-            ...alben
-              .filter((a) => a.id !== album?.id)
-              .map((a) => ({ key: a.id, label: a.service, icon: <Images className="h-3.5 w-3.5" />, onSelect: () => void zuAlbum(a, ids) })),
-            {
-              key: 'neu',
-              label: t('mss.vault.fotos.neuesAlbum'),
-              icon: <Plus className="h-3.5 w-3.5" />,
-              separatorBefore: alben.length > 0,
-              onSelect: () => void neuesAlbum(ids),
-            },
-          ]}
-        />
-        {album && (
+  const rasterTaste = (event: React.KeyboardEvent) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a' && liste.length > 0 && !albenUebersicht) {
+      event.preventDefault()
+      setAuswahl(new Set(liste.map((i) => i.id)))
+    } else if (event.key === 'Escape' && auswahl) {
+      event.preventDefault()
+      auswahlLeeren()
+    } else if (event.key === 'Delete' && gewaehlt.length > 0) {
+      event.preventDefault()
+      void inPapierkorb(gewaehltIds)
+    }
+  }
+
+  const werkzeuge = (
+    <div className="flex items-center justify-end gap-1">
+      {!albenUebersicht && (
+        <>
           <Button
             type="button"
-            variant="secondary"
-            size="sm"
-            disabled={anzahlAuswahl === 0}
-            onClick={() =>
-              void albumAendern(album.id, { weg: ids })
-                .then(() => setAuswahl(null))
-                .catch(fehlerZeigen)
-            }
+            variant="ghost"
+            size="icon"
+            className={DAUMEN_QUADRAT}
+            aria-label={t('mss.vault.fotos.kleiner')}
+            disabled={stufe === 0}
+            onClick={() => setStufe((s) => Math.max(0, s - 1))}
           >
-            <FolderMinus className="mr-1 h-3.5 w-3.5" />
-            {t('mss.vault.fotos.ausAlbum')}
+            <Minus className="h-4 w-4" />
           </Button>
-        )}
-        <Button type="button" variant="secondary" size="sm" disabled={anzahlAuswahl === 0} onClick={() => void fuerAuswahl((id) => setArchived(id, true))}>
-          <Archive className="mr-1 h-3.5 w-3.5" />
-          {t('mss.vault.archivieren')}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className={DAUMEN_QUADRAT}
+            aria-label={t('mss.vault.fotos.groesser')}
+            disabled={stufe === KACHEL.length - 1}
+            onClick={() => setStufe((s) => Math.min(KACHEL.length - 1, s + 1))}
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+          <Button type="button" variant="ghost" size="sm" className={DAUMEN} disabled={liste.length === 0} onClick={() => setAuswahl(new Set())}>
+            <CheckSquare className="mr-1 h-3.5 w-3.5" />
+            {t('mss.vault.fotos.auswaehlen')}
+          </Button>
+        </>
+      )}
+      {albenUebersicht ? (
+        <Button type="button" variant="primary" size="sm" className={DAUMEN} onClick={() => void neuesAlbum([])}>
+          <Plus className="mr-1 h-3.5 w-3.5" />
+          {t('mss.vault.fotos.neuesAlbum')}
         </Button>
-        <Button
-          type="button"
-          variant="destructive"
-          size="sm"
-          disabled={anzahlAuswahl === 0}
-          onClick={() => void fuerAuswahl((id) => trashItem(id), t('mss.vault.inPapierkorbGelegt'))}
-        >
-          <Trash2 className="mr-1 h-3.5 w-3.5" />
-          {t('mss.vault.inPapierkorb')}
-        </Button>
-        <Button type="button" variant="ghost" size="sm" onClick={() => setAuswahl(null)}>
-          {t('common.cancel')}
-        </Button>
-      </div>
-    )
-  } else {
-    leiste = (
-      <div className="flex items-center gap-1">
-        {!albenUebersicht && (
-          <>
-            <Button type="button" variant="ghost" size="icon" aria-label={t('mss.vault.fotos.kleiner')} disabled={stufe === 0} onClick={() => setStufe((s) => Math.max(0, s - 1))}>
-              <Minus className="h-4 w-4" />
-            </Button>
-            <Button
+      ) : (
+        <FileButton multiple accept="image/*,video/*" size="sm" variant="primary" className={DAUMEN} disabled={ohneSpeicher} onFiles={(dateien) => void hochladen(dateien)}>
+          <Upload className="mr-1 h-3.5 w-3.5" />
+          {t('mss.vault.dateien.hochladen')}
+        </FileButton>
+      )}
+    </div>
+  )
+
+  // Filter als Chips: eine Ebene unter den Reitern des Tresors, nicht eine zweite Reiterleiste.
+  // Am Telefon eine Zeile zum Wischen, ab sm wie gehabt mit Umbruch.
+  const filterLeiste = (
+    // -my-1/py-1: der Fokusring wird in der Wischleiste sonst oben und unten abgeschnitten.
+    <div className="-mx-4 -my-1 flex items-center gap-2 overflow-x-auto px-4 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:my-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:py-0">
+      <div role="tablist" aria-label={t('mss.vault.fotos.filter')} className="flex shrink-0 items-center gap-1.5 sm:flex-wrap">
+        {FILTER.map(({ id, labelKey, icon: Icon }) => {
+          const aktiv = filter === id
+          return (
+            <button
+              key={id}
               type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={t('mss.vault.fotos.groesser')}
-              disabled={stufe === KACHEL.length - 1}
-              onClick={() => setStufe((s) => Math.min(KACHEL.length - 1, s + 1))}
+              role="tab"
+              aria-selected={aktiv}
+              onClick={() => setFilter(id)}
+              className={cx(
+                buttonClasses('secondary', 'sm', 'shrink-0 gap-1.5 rounded-full px-3'),
+                DAUMEN,
+                aktiv && 'border-primary/50 bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary',
+              )}
             >
-              <Plus className="h-4 w-4" />
-            </Button>
-            <Button type="button" variant="ghost" size="sm" disabled={liste.length === 0} onClick={() => setAuswahl(new Set())}>
-              <CheckSquare className="mr-1 h-3.5 w-3.5" />
-              {t('mss.vault.fotos.auswaehlen')}
-            </Button>
-          </>
-        )}
-        {albenUebersicht ? (
-          <Button type="button" variant="primary" size="sm" onClick={() => void neuesAlbum([])}>
-            <Plus className="mr-1 h-3.5 w-3.5" />
-            {t('mss.vault.fotos.neuesAlbum')}
-          </Button>
-        ) : (
-          <FileButton multiple accept="image/*,video/*" size="sm" variant="primary" onFiles={(dateien) => void hochladen(dateien)}>
-            <Upload className="mr-1 h-3.5 w-3.5" />
-            {t('mss.vault.dateien.hochladen')}
-          </FileButton>
-        )}
+              <Icon className="h-3.5 w-3.5" aria-hidden />
+              {t(labelKey)}
+            </button>
+          )
+        })}
       </div>
-    )
-  }
+      {!albenUebersicht && quellen.length > 2 && (
+        <div className="w-44 shrink-0 sm:w-48">
+          <Dropdown value={quelle} onChange={setQuelle} options={quellen} aria-label={t('mss.vault.fotos.quelle.titel')} />
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div
-      ref={scroller}
-      className={`flex-1 overflow-y-auto px-4 py-3 ${ziehen ? 'bg-primary/5 outline-dashed outline-2 outline-primary/40 -outline-offset-4' : ''}`}
+      className={cx('flex min-h-0 flex-1 flex-col', ziehen && 'bg-primary/5 outline-dashed outline-2 outline-primary/40 -outline-offset-4')}
       onDragOver={(e) => {
-        if (albenUebersicht || !e.dataTransfer.types.includes('Files')) return
+        if (!e.dataTransfer.types.includes('Files')) return
+        // Auch wo nichts angenommen wird, abfangen: sonst öffnet der Browser die Datei.
         e.preventDefault()
+        if (albenUebersicht || ohneSpeicher) {
+          e.dataTransfer.dropEffect = 'none'
+          return
+        }
         setZiehen(true)
       }}
       onDragLeave={() => setZiehen(false)}
       onDrop={(e) => {
         e.preventDefault()
         setZiehen(false)
+        if (albenUebersicht || ohneSpeicher) return
         const dateien = Array.from(e.dataTransfer.files)
         if (dateien.length > 0) void hochladen(dateien)
       }}
     >
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <TabBar tabs={filterTabs} active={filter} onChange={setFilter} embedded ariaLabel={t('mss.vault.fotos.filter')} />
-          {!albenUebersicht && quellen.length > 2 && (
-            <Dropdown
-              value={quelle}
-              onChange={setQuelle}
-              options={quellen}
-              aria-label={t('mss.vault.fotos.quelle.titel')}
-              className="w-48"
+      <div className="shrink-0 space-y-2 px-4 pb-2 pt-3">
+        {auswahl ? (
+          <div className="flex items-center rounded-lg bg-primary/5 px-2 py-1">
+            <Auswahlleiste
+              variante="kopf"
+              anzahlLabel={auswahlLabel}
+              aktionen={aktionen}
+              abbrechenLabel={t('mss.vault.dateien.auswahlBeenden')}
+              onAbbrechen={auswahlLeeren}
+              alleLabel={gewaehlt.length < liste.length ? t('mss.vault.dateien.alleAuswaehlen') : undefined}
+              onAlle={() => setAuswahl(new Set(liste.map((i) => i.id)))}
             />
-          )}
-        </div>
-        {leiste}
-      </div>
-
-      {album && (
-        <div className="mb-3 flex items-center gap-2">
-          <Button type="button" variant="ghost" size="icon" aria-label={t('mss.vault.fotos.alleAlben')} onClick={() => setAlbumId(null)}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-on-surface">{album.service}</h3>
-          <ActionMenu
-            compact
-            align="end"
-            label={t('mss.vault.dateien.aktionen')}
-            items={[
-              { key: 'umbenennen', label: t('mss.vault.dateien.umbenennen'), icon: <Pencil className="h-3.5 w-3.5" />, onSelect: () => void albumUmbenennen(album) },
-              {
-                key: 'papierkorb',
-                label: t('mss.vault.fotos.albumLoeschen'),
-                icon: <Trash2 className="h-3.5 w-3.5" />,
-                destructive: true,
-                separatorBefore: true,
-                onSelect: () => void trashItem(album.id).then(() => toast.success(t('mss.vault.inPapierkorbGelegt'))),
-              },
-            ]}
-          />
-        </div>
-      )}
-
-      {vorbereitung > 0 && (
-        <p className="mb-2 text-label-sm text-on-surface-variant">{t('mss.vault.dateien.verschluesselt', { count: vorbereitung })}</p>
-      )}
-
-      {filter === 'aehnlich' && !album && aehnlich.gruppen === null ? (
-        <div className="mx-auto mt-6 w-72">
-          <ProgressBar
-            value={aehnlich.gesamt > 0 ? (aehnlich.fertig / aehnlich.gesamt) * 100 : null}
-            label={t('mss.vault.fotos.aehnlicheSuche')}
-            hint={`${aehnlich.fertig} / ${aehnlich.gesamt}`}
-          />
-        </div>
-      ) : albenUebersicht ? (
-        alben.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-8 text-center text-xs text-on-surface-variant">
-            <Library className="mb-2 h-6 w-6 opacity-60" />
-            {t('mss.vault.fotos.keineAlben')}
           </div>
         ) : (
-          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
-            {alben.map((a) => {
-              const inhalt = albumInhalt(a)
-              return <AlbumKarte key={a.id} album={a} titelbild={inhalt[0]} anzahl={inhalt.length} onOeffnen={() => setAlbumId(a.id)} />
-            })}
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            {filterLeiste}
+            {werkzeuge}
           </div>
-        )
-      ) : liste.length === 0 ? (
-        <div className="flex flex-col items-center justify-center p-8 text-center text-xs text-on-surface-variant">
-          <Images className="mb-2 h-6 w-6 opacity-60" />
-          {t(
-            album
-              ? 'mss.vault.fotos.albumLeer'
-              : filter === 'aehnlich'
-                ? 'mss.vault.fotos.keineAehnlichen'
-                : filter === 'alle' && !suche.trim()
-                  ? 'mss.vault.fotos.leer'
-                  : 'mss.vault.fotos.leerFilter',
-          )}
-        </div>
-      ) : (
-        <SichtbarKontext.Provider value={beobachten}>
-          {gruppen.map((gruppe) => (
-            <section
-              key={gruppe.schluessel}
-              aria-label={gruppe.titel}
-              className="mb-4"
-              style={{ contentVisibility: 'auto', containIntrinsicSize: `auto ${Math.ceil(gruppe.items.length / 6) * kante + 32}px` }}
-            >
-              <h3 className="mb-1.5 text-xs font-semibold text-on-surface">{gruppe.titel}</h3>
-              <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${kante}px, 1fr))` }}>
-                {gruppe.items.map((item) => (
-                  <Kachel key={item.id} item={item} ausgewaehlt={auswahl ? auswahl.has(item.id) : undefined} onKlick={kachelKlick} />
-                ))}
-              </div>
-            </section>
-          ))}
-        </SichtbarKontext.Provider>
+        )}
+
+        {album && (
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="ghost" size="icon" className={DAUMEN_QUADRAT} aria-label={t('mss.vault.fotos.alleAlben')} onClick={() => albumWechseln(null)}>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-on-surface">{album.service}</h3>
+            <ActionMenu
+              compact
+              align="end"
+              label={t('mss.vault.dateien.aktionen')}
+              items={[
+                { key: 'umbenennen', label: t('mss.vault.dateien.umbenennen'), icon: <Pencil className="h-3.5 w-3.5" />, onSelect: () => void albumUmbenennen(album) },
+                {
+                  key: 'papierkorb',
+                  label: t('mss.vault.fotos.albumLoeschen'),
+                  icon: <Trash2 className="h-3.5 w-3.5" />,
+                  destructive: true,
+                  separatorBefore: true,
+                  onSelect: () => void albumInPapierkorb(album),
+                },
+              ]}
+            />
+          </div>
+        )}
+
+        <TresorUploadStand />
+        {vorbereitung > 0 && (
+          <p role="status" className="text-label-sm text-on-surface-variant">
+            {t('mss.vault.dateien.verschluesselt', { count: vorbereitung })}
+          </p>
+        )}
+        {sammel && (
+          <div role="status" className="rounded-lg border border-outline-variant/20 bg-surface-container-low px-3 py-2">
+            <ProgressBar value={sammel.anteil === null ? null : sammel.anteil * 100} label={sammel.text} />
+          </div>
+        )}
+        {!auswahl && speicher && (
+          <div className="sm:max-w-xs">
+            <TresorSpeicherAnzeige speicher={speicher} />
+          </div>
+        )}
+      </div>
+
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 pb-3" onKeyDown={rasterTaste}>
+        {filter === 'aehnlich' && !album && aehnlich.gruppen === null ? (
+          <div className="mx-auto mt-6 w-72">
+            <ProgressBar
+              value={aehnlich.gesamt > 0 ? (aehnlich.fertig / aehnlich.gesamt) * 100 : null}
+              label={t('mss.vault.fotos.aehnlicheSuche')}
+              hint={`${aehnlich.fertig} / ${aehnlich.gesamt}`}
+            />
+          </div>
+        ) : albenUebersicht ? (
+          alben.length === 0 ? (
+            <div className="flex flex-col items-center justify-center p-8 text-center text-xs text-on-surface-variant">
+              <Library className="mb-2 h-6 w-6 opacity-60" />
+              {t('mss.vault.fotos.keineAlben')}
+            </div>
+          ) : (
+            <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
+              {alben.map((a) => {
+                const inhalt = albumInhalt(a)
+                return <AlbumKarte key={a.id} album={a} titelbild={inhalt[0]} anzahl={inhalt.length} onOeffnen={() => albumWechseln(a.id)} />
+              })}
+            </div>
+          )
+        ) : liste.length === 0 ? (
+          <div className="flex flex-col items-center justify-center p-8 text-center text-xs text-on-surface-variant">
+            <Images className="mb-2 h-6 w-6 opacity-60" />
+            {t(
+              album
+                ? 'mss.vault.fotos.albumLeer'
+                : filter === 'aehnlich'
+                  ? 'mss.vault.fotos.keineAehnlichen'
+                  : filter === 'alle' && !suche.trim()
+                    ? ohneSpeicher
+                      ? 'mss.vault.fotos.leerOhneSpeicher'
+                      : 'mss.vault.fotos.leer'
+                    : 'mss.vault.fotos.leerFilter',
+            )}
+          </div>
+        ) : (
+          <SichtbarKontext.Provider value={beobachten}>
+            {gruppen.map((gruppe) => (
+              <section
+                key={gruppe.schluessel}
+                aria-label={gruppe.titel}
+                className="mb-4"
+                style={{ contentVisibility: 'auto', containIntrinsicSize: `auto ${Math.ceil(gruppe.items.length / 6) * kante + 32}px` }}
+              >
+                <h3 className="mb-1.5 text-xs font-semibold text-on-surface">{gruppe.titel}</h3>
+                <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${kante}px, 1fr))` }}>
+                  {gruppe.items.map((item) => (
+                    <Kachel
+                      key={item.id}
+                      item={item}
+                      ausgewaehlt={auswahl ? auswahl.has(item.id) : undefined}
+                      onKlick={kachelKlick}
+                      onLangdruck={kachelLangdruck}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </SichtbarKontext.Provider>
+        )}
+      </div>
+
+      {auswahl && (
+        <Auswahlleiste variante="fuss" anzahlLabel={auswahlLabel} aktionen={aktionen} abbrechenLabel={t('mss.vault.dateien.auswahlBeenden')} onAbbrechen={auswahlLeeren} />
       )}
+
+      <Kontextmenue
+        ort={albumMenue ? { x: albumMenue.x, y: albumMenue.y } : null}
+        items={albumMenue ? albumMenueEintraege(gewaehltIds) : []}
+        label={t('mss.vault.fotos.zuAlbum')}
+        ausloeser={albumMenue?.ausloeser}
+        onSchliessen={() => setAlbumMenue(null)}
+      />
 
       {offenItem && userKey && (
         <GalerieLichtbox
@@ -711,6 +1045,8 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
             const ziel = liste[offenIndex + richtung]
             if (ziel) setOffen({ id: ziel.id, index: offenIndex + richtung })
           }}
+          onArchivieren={(id) => void archivieren([id])}
+          onPapierkorb={(id) => void inPapierkorb([id])}
         />
       )}
     </div>
@@ -723,7 +1059,8 @@ interface Anzeige {
   /** Zeigt `url` schon das Original? */
   original: boolean
   anteil: number | null
-  fehler: boolean
+  /** Warum nichts zu sehen ist: ohne Netz, oder das Laden scheiterte. */
+  fehler: false | 'offline' | 'laden'
 }
 
 function GalerieLichtbox({
@@ -733,6 +1070,8 @@ function GalerieLichtbox({
   userKey,
   onSchliessen,
   onBlaettern,
+  onArchivieren,
+  onPapierkorb,
 }: {
   item: VaultItem
   index: number
@@ -740,21 +1079,24 @@ function GalerieLichtbox({
   userKey: CryptoKey
   onSchliessen: () => void
   onBlaettern: (richtung: 1 | -1) => void
+  onArchivieren: (id: string) => void
+  onPapierkorb: (id: string) => void
 }) {
   const { t, i18n } = useTranslation()
-  const trashItem = useVaultStore((s) => s.trashItem)
-  const setArchived = useVaultStore((s) => s.setArchived)
   const fassungZurueckholen = useVaultStore((s) => s.fassungZurueckholen)
+  const upload = useTresorUploads((s) => s.je[item.id])
   const [holt, setHolt] = useState<string | null>(null)
   const [anzeige, setAnzeige] = useState<Anzeige>({ id: item.id, url: null, original: false, anteil: null, fehler: false })
   const [spielt, setSpielt] = useState(false)
   const [bearbeiten, setBearbeiten] = useState(false)
   const laufend = useRef<AbortController | null>(null)
+  const letzterVersuch = useRef<'vorschau' | 'original'>('vorschau')
   const datei = item.datei!
   const video = istVideo(item)
   // Ein Sync baut die Einträge neu auf; das offene Bild soll dabei nicht neu laden.
   const aktuell = useRef({ id: item.id, datei })
   aktuell.current = { id: item.id, datei }
+  const ladenRef = useRef<(welcher: 'vorschau' | 'original') => Promise<void>>(async () => {})
 
   /** Lädt einen Blob dieses Eintrags und zeigt ihn, solange derselbe Eintrag offen ist. */
   const laden = useCallback(
@@ -762,6 +1104,7 @@ function GalerieLichtbox({
       laufend.current?.abort()
       const abbruch = new AbortController()
       laufend.current = abbruch
+      letzterVersuch.current = welcher
       const { id, datei } = aktuell.current
       const kopf = welcher === 'vorschau' ? datei.vorschau : datei.original
       const typ = welcher === 'vorschau' ? 'image/webp' : datei.typ
@@ -781,14 +1124,35 @@ function GalerieLichtbox({
             return a
           }
           if (a.url) ansichtSchliessen(a.url)
-          return { ...a, url, original: welcher === 'original', anteil: null }
+          return { ...a, url, original: welcher === 'original', anteil: null, fehler: false }
         })
       } catch {
-        if (!abbruch.signal.aborted) setAnzeige((a) => (a.id === id ? { ...a, fehler: !a.url, anteil: null } : a))
+        if (abbruch.signal.aborted) return
+        const offline = typeof navigator !== 'undefined' && navigator.onLine === false
+        if (welcher === 'vorschau') {
+          // Ein Video ohne Standbild lässt sich trotzdem abspielen.
+          if (datei.typ.startsWith('video/')) return
+          // Ohne Netz liegt vielleicht das Original auf dem Gerät (angeheftet oder zuletzt geöffnet), die Vorschau nicht.
+          if (offline) return void ladenRef.current('original')
+        }
+        setAnzeige((a) => (a.id === id ? { ...a, fehler: a.url ? false : offline ? 'offline' : 'laden', anteil: null } : a))
       }
     },
     [userKey],
   )
+  ladenRef.current = laden
+
+  const erneut = useCallback(() => {
+    setAnzeige((a) => ({ ...a, fehler: false }))
+    void laden(letzterVersuch.current)
+  }, [laden])
+
+  // Kommt das Netz zurück, lädt ein Bild, das ohne Netz nicht kam, von selbst.
+  useEffect(() => {
+    if (anzeige.fehler !== 'offline') return
+    window.addEventListener('online', erneut)
+    return () => window.removeEventListener('online', erneut)
+  }, [anzeige.fehler, erneut])
 
   useEffect(() => {
     setAnzeige((a) => {
@@ -880,7 +1244,22 @@ function GalerieLichtbox({
 
   let inhalt: React.ReactNode
   if (anzeige.fehler) {
-    inhalt = <p className="text-sm text-white/70">{t('mss.vault.dateien.oeffnenFehler')}</p>
+    inhalt = (
+      <div className="flex max-w-sm flex-col items-center gap-3 px-6 text-center">
+        <p className="text-sm text-white/70">
+          {anzeige.fehler === 'offline'
+            ? t('mss.vault.fotos.offlineNichtDa', { aktion: t('mss.vault.dateien.offlineMachen') })
+            : upload
+              ? t('mss.vault.dateien.oeffnenFehler')
+              : t('mss.vault.fotos.ladeFehler')}
+        </p>
+        {anzeige.fehler === 'laden' && (
+          <Button type="button" variant="secondary" size="sm" className={DAUMEN} onClick={erneut}>
+            {t('mss.vault.fotos.erneutLaden')}
+          </Button>
+        )}
+      </div>
+    )
   } else if (video && anzeige.original && anzeige.url) {
     inhalt = <video src={anzeige.url} controls autoPlay className="max-h-full max-w-full" />
   } else {
@@ -937,17 +1316,10 @@ function GalerieLichtbox({
           <Button type="button" variant="ghost" size="icon" className={knopf} aria-label={t('mss.vault.dateien.speichern')} onClick={() => void speichern()}>
             <Download className="h-4 w-4" />
           </Button>
-          <Button type="button" variant="ghost" size="icon" className={knopf} aria-label={t('mss.vault.archivieren')} onClick={() => void setArchived(item.id, true)}>
+          <Button type="button" variant="ghost" size="icon" className={knopf} aria-label={t('mss.vault.archivieren')} onClick={() => onArchivieren(item.id)}>
             <Archive className="h-4 w-4" />
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={knopf}
-            aria-label={t('mss.vault.inPapierkorb')}
-            onClick={() => void trashItem(item.id).then(() => toast.success(t('mss.vault.inPapierkorbGelegt')))}
-          >
+          <Button type="button" variant="ghost" size="icon" className={knopf} aria-label={t('mss.vault.inPapierkorb')} onClick={() => onPapierkorb(item.id)}>
             <Trash2 className="h-4 w-4" />
           </Button>
         </>

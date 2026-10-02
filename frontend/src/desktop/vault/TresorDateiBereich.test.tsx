@@ -4,9 +4,12 @@
  * Mehrfachauswahl mit Sammelaktionen.
  */
 import { act, createEvent, fireEvent, render, screen, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
+import { useToastStore } from '@/stores/toastStore'
+import { usePromptStore } from '@/stores/promptStore'
 import { TresorDateiBereich, ZIEH_TYP } from './TresorDateiBereich'
+import { useTresorUploads } from './tresorDateien'
 import { useVaultStore, type VaultItem } from './vaultStore'
 
 vi.mock('../tauri', () => ({
@@ -97,12 +100,21 @@ describe('TresorDateiBereich', () => {
   const saveItem = vi.fn(async (..._args: unknown[]) => undefined)
   const dateiHinzufuegen = vi.fn(async (..._args: unknown[]) => 'neu')
   const trashItem = vi.fn(async (..._args: unknown[]) => undefined)
+  const restoreItem = vi.fn(async (..._args: unknown[]) => undefined)
+  const setArchived = vi.fn(async (..._args: unknown[]) => undefined)
+  const ordnerAnlegen = vi.fn(async (..._args: unknown[]) => 'neu')
 
   beforeEach(async () => {
     await i18n.changeLanguage('de')
-    saveItem.mockClear()
+    saveItem.mockReset().mockResolvedValue(undefined)
     dateiHinzufuegen.mockClear()
-    trashItem.mockClear()
+    trashItem.mockReset().mockResolvedValue(undefined)
+    restoreItem.mockReset().mockResolvedValue(undefined)
+    setArchived.mockReset().mockResolvedValue(undefined)
+    ordnerAnlegen.mockReset().mockResolvedValue('neu')
+    useToastStore.setState({ toasts: [] })
+    usePromptStore.setState({ pending: null })
+    useTresorUploads.setState({ je: {} })
     offlineAnheften.mockClear()
     mehrereAufGeraetSpeichern.mockClear()
     useVaultStore.setState({
@@ -110,6 +122,9 @@ describe('TresorDateiBereich', () => {
       userKey: {} as CryptoKey,
       saveItem: saveItem as never,
       trashItem: trashItem as never,
+      restoreItem: restoreItem as never,
+      setArchived: setArchived as never,
+      ordnerAnlegen: ordnerAnlegen as never,
       dateiHinzufuegen: dateiHinzufuegen as never,
     })
   })
@@ -293,6 +308,141 @@ describe('TresorDateiBereich', () => {
       await vi.waitFor(() => expect(offlineAnheften).toHaveBeenCalledTimes(1))
       expect((offlineAnheften.mock.calls[0] as unknown as [{ id: string }])[0].id).toBe('o-b')
     })
+  })
+
+  describe('Suche', () => {
+    const treffer = () => screen.getByRole('list', { name: i18n.t('mss.vault.dateien.treffer') })
+
+    it('findet Dateien in allen Ordnern, ohne Papierkorb und Archiv, und nennt ihren Ort', () => {
+      const geloescht = { ...datei('x', 'beleg-alt.pdf', 'application/pdf'), trashedAt: 5 } as VaultItem
+      const archiv = { ...ordner('a', 'Altes'), archivedAt: 5 } as VaultItem
+      const imArchiv = datei('y', 'beleg-2019.pdf', 'application/pdf', 'a')
+      useVaultStore.setState({ items: [vertraege, fotos, miete, pdf, notiz, beleg, brief, geloescht, archiv, imArchiv] })
+      render(<TresorDateiBereich suche="  BELEG " />)
+      const liste = treffer()
+      expect(within(liste).getAllByRole('listitem')).toHaveLength(1)
+      expect(within(liste).getByRole('button', { name: /^beleg\.pdf/ })).toHaveTextContent(`${i18n.t('mss.vault.dateien.stamm')} / Verträge`)
+      expect(screen.getByText(i18n.t('mss.vault.dateien.trefferAnzahl', { count: 1 }))).toBeInTheDocument()
+    })
+
+    it('findet auch Unterordner und zeigt nach dem Öffnen ihren Inhalt', async () => {
+      useVaultStore.setState({ items: [vertraege, fotos, miete, pdf, notiz, beleg, brief, datei('k', 'kaution.pdf', 'application/pdf', 'm')] })
+      render(<TresorDateiBereich suche="miete" />)
+      const ordnerZeile = within(treffer()).getByRole('button', { name: /^Miete/ })
+      expect(ordnerZeile).toHaveTextContent(`${i18n.t('mss.vault.dateien.stamm')} / Verträge`)
+      fireEvent.click(ordnerZeile)
+      await vi.waitFor(() => expect(eintrag('kaution.pdf')).toBeInTheDocument())
+    })
+
+    it('hat einen eigenen Leerzustand, wenn nichts passt', () => {
+      render(<TresorDateiBereich suche="gibt-es-nicht" />)
+      expect(screen.getByText(i18n.t('mss.vault.dateien.sucheLeerTitel'))).toBeInTheDocument()
+      expect(screen.queryByText(i18n.t('mss.vault.dateien.leerTitel'))).not.toBeInTheDocument()
+    })
+  })
+
+  describe('Fehler und Rückgängig', () => {
+    const letzterToast = () => useToastStore.getState().toasts.at(-1)
+
+    it('meldet, wenn der Papierkorb scheitert, statt still zu bleiben', async () => {
+      trashItem.mockRejectedValueOnce('kaputt')
+      render(<TresorDateiBereich />)
+      fireEvent.contextMenu(zeile('vertrag.pdf'))
+      fireEvent.click(screen.getByRole('menuitem', { name: i18n.t('mss.vault.inPapierkorb') }))
+      await vi.waitFor(() => expect(letzterToast()).toMatchObject({ type: 'error', message: i18n.t('mss.vault.dateien.papierkorbFehler') }))
+    })
+
+    it('meldet, wenn Archivieren, Umbenennen oder ein neuer Ordner scheitert', async () => {
+      setArchived.mockRejectedValueOnce(new Error('Tresor gesperrt'))
+      render(<TresorDateiBereich />)
+      fireEvent.contextMenu(zeile('vertrag.pdf'))
+      fireEvent.click(screen.getByRole('menuitem', { name: i18n.t('mss.vault.archivieren') }))
+      await vi.waitFor(() => expect(letzterToast()).toMatchObject({ type: 'error', message: 'Tresor gesperrt' }))
+
+      saveItem.mockRejectedValueOnce('kaputt')
+      fireEvent.contextMenu(zeile('vertrag.pdf'))
+      fireEvent.click(screen.getByRole('menuitem', { name: i18n.t('mss.vault.dateien.umbenennen') }))
+      await vi.waitFor(() => expect(usePromptStore.getState().pending).not.toBeNull())
+      act(() => usePromptStore.getState().resolve('neu.pdf'))
+      await vi.waitFor(() => expect(letzterToast()).toMatchObject({ type: 'error', message: i18n.t('mss.vault.dateien.umbenennenFehler') }))
+
+      ordnerAnlegen.mockRejectedValueOnce('kaputt')
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.dateien.ordnerAnlegen') }))
+      await vi.waitFor(() => expect(usePromptStore.getState().pending).not.toBeNull())
+      act(() => usePromptStore.getState().resolve('Neu'))
+      await vi.waitFor(() => expect(letzterToast()).toMatchObject({ type: 'error', message: i18n.t('mss.vault.dateien.ordnerFehler') }))
+    })
+
+    it('holt nach Entf alle gewählten mit „Rückgängig“ zurück', async () => {
+      render(<TresorDateiBereich />)
+      fireEvent.click(eintrag('vertrag.pdf'), { ctrlKey: true })
+      fireEvent.click(eintrag('Fotos'), { ctrlKey: true })
+      fireEvent.keyDown(eintrag('Fotos'), { key: 'Delete' })
+      await vi.waitFor(() => expect(letzterToast()?.aktion?.label).toBe(i18n.t('common.undo')))
+      expect(letzterToast()?.message).toBe(i18n.t('mss.vault.dateien.papierkorbMehrere', { count: 2 }))
+      act(() => letzterToast()!.aktion!.ausfuehren())
+      await vi.waitFor(() => expect(restoreItem.mock.calls.map((c) => c[0]).sort()).toEqual(['f', 'p']))
+    })
+
+    it('macht Archivieren rückgängig, auch für einen einzelnen Eintrag', async () => {
+      render(<TresorDateiBereich />)
+      fireEvent.contextMenu(zeile('notiz.txt'))
+      fireEvent.click(screen.getByRole('menuitem', { name: i18n.t('mss.vault.archivieren') }))
+      await vi.waitFor(() => expect(letzterToast()).toMatchObject({ type: 'success', message: i18n.t('mss.vault.archiviert') }))
+      act(() => letzterToast()!.aktion!.ausfuehren())
+      await vi.waitFor(() => expect(setArchived).toHaveBeenCalledWith('n', false))
+    })
+  })
+
+  describe('Aktionsmenü am Telefon', () => {
+    const telefon = (ja: boolean) =>
+      vi.stubGlobal('matchMedia', (frage: string) => ({
+        matches: ja && frage.includes('max-width'),
+        media: frage,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }))
+
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('öffnet über „…“ ein Blatt von unten statt eines Flyouts', async () => {
+      telefon(true)
+      render(<TresorDateiBereich />)
+      const name = i18n.t('mss.vault.dateien.aktionenFuer', { name: 'vertrag.pdf' })
+      fireEvent.click(screen.getByRole('button', { name }))
+      const blatt = screen.getByRole('dialog', { name })
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+      fireEvent.click(within(blatt).getByRole('button', { name: i18n.t('mss.vault.inPapierkorb') }))
+      await vi.waitFor(() => expect(trashItem).toHaveBeenCalledWith('p'))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('bleibt am Rechner beim Flyout am Knopf', () => {
+      telefon(false)
+      render(<TresorDateiBereich />)
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.dateien.aktionenFuer', { name: 'vertrag.pdf' }) }))
+      expect(screen.getByRole('menu', { name: i18n.t('mss.vault.dateien.aktionen') })).toBeInTheDocument()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+  })
+
+  it('verspricht im leeren Ordner das Hineinziehen nur am Rechner', async () => {
+    render(<TresorDateiBereich />)
+    fireEvent.click(eintrag('Fotos'))
+    expect(await screen.findByText(i18n.t('mss.vault.dateien.leerTitel'))).toBeInTheDocument()
+    // Der immer sichtbare Teil gilt auch am Telefon, wo es kein Ziehen gibt.
+    expect(i18n.t('mss.vault.dateien.leer')).not.toMatch(/zieh/i)
+    expect(screen.getByText(i18n.t('mss.vault.dateien.leerZiehen'))).toHaveClass('hidden', 'md:inline')
+  })
+
+  it('nennt die Speichern-Aktion der Auswahl anders als das Speichern im Editor', () => {
+    expect(i18n.t('mss.vault.dateien.kurz.speichern')).not.toBe(i18n.t('common.save'))
+  })
+
+  it('zeigt laufende Uploads oben im Bereich', () => {
+    useTresorUploads.setState({ je: { n: { gesendet: 1, gesamt: 4 } } })
+    render(<TresorDateiBereich />)
+    expect(screen.getByText(i18n.t('mss.vault.dateien.uploadStand', { count: 1 }))).toBeInTheDocument()
   })
 
   it('öffnet eine Textdatei gleich im Editor, mit ihrem Ort', async () => {

@@ -98,6 +98,89 @@ describe('Lichtbox', () => {
     expect(onZoom).toHaveBeenCalledTimes(2)
   })
 
+  it('zoomt mit zwei Fingern, hält die Mitte zwischen ihnen und bleibt in den Grenzen', () => {
+    const onZoom = vi.fn()
+    render(<Aufbau onZoom={onZoom} />)
+    fireEvent.click(screen.getByText('öffnen'))
+    const flaeche = screen.getByTestId('inhalt')
+    const huelle = () => screen.getByTestId('inhalt').parentElement!.style.transform
+
+    // jsdom misst die Fläche mit 0 × 0: ihr Mittelpunkt liegt bei (0, 0).
+    fireEvent.pointerDown(flaeche, { button: 0, pointerId: 1, isPrimary: true, clientX: 100, clientY: 100 })
+    fireEvent.pointerDown(flaeche, { button: 0, pointerId: 2, isPrimary: false, clientX: 200, clientY: 100 })
+    fireEvent.pointerMove(flaeche, { pointerId: 2, clientX: 300, clientY: 100 })
+    // Abstand 100 → 200: doppelt. Der Punkt (150, 100) unter den Fingern liegt jetzt bei (200, 100).
+    expect(huelle()).toBe('translate(-100px, -100px) scale(2)')
+    expect(onZoom).toHaveBeenCalledTimes(1)
+
+    fireEvent.pointerMove(flaeche, { pointerId: 2, clientX: 2000, clientY: 100 })
+    expect(huelle()).toContain('scale(5)')
+    fireEvent.pointerMove(flaeche, { pointerId: 2, clientX: 110, clientY: 100 })
+    expect(huelle()).toBe('translate(0px, 0px) scale(1)')
+
+    // Nach dem Spreizen blättert der übrige Finger nicht, auch bei weitem Zug.
+    fireEvent.pointerUp(flaeche, { button: 0, pointerId: 2, clientX: 110, clientY: 100 })
+    fireEvent.pointerMove(flaeche, { pointerId: 1, clientX: -100, clientY: 100 })
+    fireEvent.pointerUp(flaeche, { button: 0, pointerId: 1, clientX: -100, clientY: 100 })
+    expect(titel()).toBe('eins')
+
+    // Einfaches Wischen geht danach wie vorher.
+    wischen(flaeche, -100)
+    expect(titel()).toBe('zwei')
+  })
+
+  it('verschiebt nach dem Spreizen mit dem übrigen Finger', () => {
+    render(<Aufbau />)
+    fireEvent.click(screen.getByText('öffnen'))
+    const flaeche = screen.getByTestId('inhalt')
+    fireEvent.pointerDown(flaeche, { button: 0, pointerId: 1, isPrimary: true, clientX: -50, clientY: 0 })
+    fireEvent.pointerDown(flaeche, { button: 0, pointerId: 2, clientX: 50, clientY: 0 })
+    fireEvent.pointerMove(flaeche, { pointerId: 2, clientX: 150, clientY: 0 })
+    fireEvent.pointerUp(flaeche, { button: 0, pointerId: 2, clientX: 150, clientY: 0 })
+    const vorher = screen.getByTestId('inhalt').parentElement!.style.transform
+    expect(vorher).toContain('scale(2)')
+    fireEvent.pointerMove(flaeche, { pointerId: 1, clientX: -20, clientY: 40 })
+    expect(screen.getByTestId('inhalt').parentElement!.style.transform).not.toBe(vorher)
+    expect(screen.getByTestId('inhalt').parentElement!.style.transform).toContain('scale(2)')
+  })
+
+  it('zoomt mit +, - und 0, lässt Strg+Plus aber dem Browser', () => {
+    const onZoom = vi.fn()
+    render(<Aufbau onZoom={onZoom} />)
+    fireEvent.click(screen.getByText('öffnen'))
+    const transform = () => screen.getByTestId('inhalt').parentElement!.style.transform
+
+    fireEvent.keyDown(document, { key: '+' })
+    expect(transform()).toContain('scale(1.2)')
+    expect(onZoom).toHaveBeenCalledTimes(1)
+    fireEvent.keyDown(document, { key: '+' })
+    expect(transform()).toContain('scale(1.44)')
+    fireEvent.keyDown(document, { key: '-' })
+    expect(transform()).toContain('scale(1.2)')
+    for (let i = 0; i < 30; i++) fireEvent.keyDown(document, { key: '+' })
+    expect(transform()).toContain('scale(5)')
+    fireEvent.keyDown(document, { key: '0' })
+    expect(transform()).toBe('translate(0px, 0px) scale(1)')
+
+    const browser = fireEvent.keyDown(document, { key: '+', ctrlKey: true })
+    expect(browser).toBe(true)
+    expect(transform()).toContain('scale(1)')
+  })
+
+  it('macht die Knöpfe der Kopfleiste auf dem Telefon 44 px groß, auch die des Aufrufers', () => {
+    render(
+      <Lichtbox kennung="a" titel="a" onSchliessen={() => {}} aktionen={<button type="button">Teilen</button>}>
+        <div>Bild</div>
+      </Lichtbox>,
+    )
+    const kopf = screen.getByRole('button', { name: 'Teilen' }).closest('header')!
+    expect(kopf.className).toContain('max-sm:[&_button]:min-h-11')
+    expect(kopf.className).toContain('max-sm:[&_button]:min-w-11')
+    // Deckend und über dem Bild, sonst scheint darunter die App durch.
+    expect(kopf.className).toMatch(/(^| )bg-black( |$)/)
+    expect(kopf.className).toContain('z-10')
+  })
+
   it('zeigt die Info-Leiste erst auf Wunsch', () => {
     render(<Aufbau />)
     fireEvent.click(screen.getByText('öffnen'))

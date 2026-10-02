@@ -1,9 +1,8 @@
-import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
 import React, { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import jsQR from 'jsqr'
-import { Camera, Upload, Keyboard, X, AlertCircle, CheckCircle2 } from 'lucide-react'
-import { Button } from '@/Singra/UI'
+import { Camera, Upload, Keyboard, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { Button, Dialog, DialogContent, DialogHeader, DialogTitle, Input } from '@/Singra/UI'
 import { parseOtpauthUri } from './totpEngine'
 
 interface QrScannerModalProps {
@@ -189,34 +188,24 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
     }
   }, [isOpen, activeTab])
 
-  useZurueckSchliesst(isOpen, onClose)
-
-  if (!isOpen) return null
-
   return (
-    <div className="msm-modal-overlay">
-      <div className="relative w-full max-w-md rounded-2xl bg-surface-container border border-outline-variant/30 shadow-2xl overflow-hidden animate-scale-in">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/20 bg-surface-container-low">
+    <Dialog open={isOpen} onOpenChange={(offen) => !offen && onClose()}>
+      <DialogContent className="max-w-md max-h-[90dvh] overflow-y-auto">
+        <DialogHeader className="px-5 py-4 pr-14">
           <div className="flex items-center gap-2.5">
             <Camera className="h-5 w-5 text-primary" />
-            <h3 className="text-base font-semibold text-on-surface">{t('mss.vault.qr.scannen')}</h3>
+            <DialogTitle className="text-base">{t('mss.vault.qr.scannen')}</DialogTitle>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+        </DialogHeader>
 
         {/* Tab-Leiste */}
-        <div className="flex border-b border-outline-variant/20 bg-surface-container-low/50 p-1 gap-1">
+        <div role="tablist" className="flex border-b border-outline-variant/20 bg-surface-container-low/50 p-1 gap-1">
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'camera'}
             onClick={() => setActiveTab('camera')}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-lg transition-colors ${
+            className={`flex-1 flex items-center justify-center gap-2 py-2 max-md:min-h-11 text-xs font-medium rounded-lg transition-colors ${
               activeTab === 'camera'
                 ? 'bg-surface-container text-primary shadow-sm'
                 : 'text-on-surface-variant hover:text-on-surface'
@@ -227,8 +216,10 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
           </button>
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'upload'}
             onClick={() => setActiveTab('upload')}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-lg transition-colors ${
+            className={`flex-1 flex items-center justify-center gap-2 py-2 max-md:min-h-11 text-xs font-medium rounded-lg transition-colors ${
               activeTab === 'upload'
                 ? 'bg-surface-container text-primary shadow-sm'
                 : 'text-on-surface-variant hover:text-on-surface'
@@ -239,8 +230,10 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
           </button>
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'manual'}
             onClick={() => setActiveTab('manual')}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-lg transition-colors ${
+            className={`flex-1 flex items-center justify-center gap-2 py-2 max-md:min-h-11 text-xs font-medium rounded-lg transition-colors ${
               activeTab === 'manual'
                 ? 'bg-surface-container text-primary shadow-sm'
                 : 'text-on-surface-variant hover:text-on-surface'
@@ -339,15 +332,15 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
           {activeTab === 'manual' && (
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-on-surface mb-1.5">
-                  {t('mss.vault.qr.codeBezeichnung')}
-                </label>
-                <input
+                <Input
+                  id="tresor-qr-code"
+                  label={t('mss.vault.qr.codeBezeichnung')}
                   type="text"
                   value={manualCode}
                   onChange={(e) => setManualCode(e.target.value)}
                   placeholder={t('mss.vault.qr.codePlatzhalter')}
-                  className="msm-input font-mono"
+                  autoComplete="off"
+                  className="font-mono"
                 />
               </div>
 
@@ -361,7 +354,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

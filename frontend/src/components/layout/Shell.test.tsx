@@ -38,7 +38,7 @@ describe('Shell', () => {
 
     expect(screen.getByRole('link', { name: 'Datenschutz' })).toHaveAttribute('href', '/privacy')
     expect(screen.queryByText(/Impressum/i)).toBeNull()
-    const disBadge = screen.getByRole('link', { name: /Powered by DIS/i })
+    const disBadge = screen.getByRole('link', { name: /Defensive Integration Shield/i })
     expect(disBadge.closest('footer')).not.toBeNull()
   })
 
@@ -53,7 +53,7 @@ describe('Shell', () => {
       </PrivacyNoticeVisibilityContext.Provider>,
     )
 
-    expect(screen.queryByRole('link', { name: /Powered by DIS/i })).toBeNull()
+    expect(screen.queryByRole('link', { name: /Defensive Integration Shield/i })).toBeNull()
   })
 
   // jsdom rechnet kein Layout, deshalb prüft diese Probe die Ursache statt der

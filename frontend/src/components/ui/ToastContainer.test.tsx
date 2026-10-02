@@ -117,4 +117,26 @@ describe('ToastContainer', () => {
     })
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(message)
   })
+
+  it('führt die Handlung am Toast aus und schließt ihn, ohne Browser-Tooltips', () => {
+    const rueckgaengig = vi.fn()
+    act(() => toast.success('In den Papierkorb gelegt', { label: 'Rückgängig', ausfuehren: rueckgaengig }))
+    render(<ToastContainer />)
+    expect(document.querySelector('[title]')).toBeNull()
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Rückgängig' }))
+    })
+    expect(rueckgaengig).toHaveBeenCalledOnce()
+    expect(useToastStore.getState().toasts).toEqual([])
+  })
+
+  it('lässt einen Toast mit Handlung lange genug stehen, um sie anzutippen', () => {
+    // Im Emulator war „Rückgängig“ nach 5 s weg, bevor der Daumen dort war.
+    act(() => toast.success('Ins Archiv gelegt', { label: 'Rückgängig', ausfuehren: vi.fn() }))
+    act(() => toast.success('Gespeichert'))
+    act(() => vi.advanceTimersByTime(6000))
+    expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual(['Ins Archiv gelegt'])
+    act(() => vi.advanceTimersByTime(4500))
+    expect(useToastStore.getState().toasts).toEqual([])
+  })
 })

@@ -301,7 +301,9 @@ export function FileEditorWorkspace({
   return (
     <section
       onKeyDownCapture={vollbild ? undefined : (event) => shortcutRef.current(event.nativeEvent)}
-      className="flex h-full min-h-[520px] min-w-0 flex-1 flex-col bg-surface-container-lowest/55 lg:min-h-0"
+      // Im Vollbild gilt nur der sichtbare Bereich: öffnet am Telefon die Tastatur, schrumpft der Editor
+      // mit, statt unten samt Cursorzeile abgeschnitten zu werden.
+      className={`flex h-full min-w-0 flex-1 flex-col bg-surface-container-lowest/55 ${vollbild ? 'min-h-0 max-h-[100dvh]' : 'min-h-[520px] lg:min-h-0'}`}
     >
       <div role="tablist" aria-label={tabListLabel} className="flex min-h-10 items-end overflow-x-auto border-b border-outline-variant bg-surface-container-low/70 [scrollbar-width:thin]">
         {tabs.length === 0 ? (
@@ -468,7 +470,7 @@ export function FileEditorWorkspace({
           </footer>
         </>
       ) : (
-        <div className="flex min-h-[520px] flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-on-surface-variant">
+        <div className={`flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-on-surface-variant ${vollbild ? 'min-h-0' : 'min-h-[520px]'}`}>
           <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-outline-variant bg-surface-container-low"><FileCode2 className="h-5 w-5 text-secondary" /></div>
           <div><p className="text-sm font-medium text-on-surface">{t('files.editor.emptyTitle')}</p><p className="mt-1 max-w-sm text-xs">{t('files.editor.emptyHint')}</p></div>
         </div>

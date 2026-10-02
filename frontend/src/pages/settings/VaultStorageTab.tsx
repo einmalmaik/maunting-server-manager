@@ -3,6 +3,11 @@
  * Wert eintragen, speichern. Ein Konto bekommt den höchsten Wert seiner Rollen;
  * ohne Rolle mit Speicher lädt es nichts hoch. Das setzt das Backend durch
  * (`vault_blob_service.quote_fuer`), diese Ansicht stellt nur ein.
+ *
+ * Gerechnet wird in GiB (1024³ Byte), und so steht es auch dran. Das Feld nimmt
+ * ganze GiB; ein Wert, der keine ganze Zahl GiB ist (über die API gesetzt),
+ * wird genau angezeigt und beim Speichern unverändert zurückgeschrieben,
+ * solange niemand das Feld anfasst.
  */
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -16,7 +21,7 @@ import { toast } from '@/stores/toastStore'
 
 const GIB = 1024 ** 3
 /** Wie `vault_blob_service.MAX_QUOTE` im Backend (1 PiB). */
-const MAX_GB = 1024 ** 2
+const MAX_GIB = 1024 ** 2
 
 export interface RollenSpeicher {
   role_id: number
@@ -25,12 +30,14 @@ export interface RollenSpeicher {
 }
 
 export function VaultStorageTab() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const canRead = useHasPermission('panel.settings.read')
   const canWrite = useHasPermission('panel.settings.write')
   const [rollen, setRollen] = useState<RollenSpeicher[]>([])
   const [rolleId, setRolleId] = useState<number | null>(null)
-  const [gb, setGb] = useState(0)
+  const [gib, setGib] = useState(0)
+  /** Der gespeicherte Wert in Byte, solange das Feld unverändert ist; sonst null. */
+  const [exakt, setExakt] = useState<number | null>(null)
   const [laden, setLaden] = useState(canRead)
   const [speichern, setSpeichern] = useState(false)
 
@@ -46,7 +53,7 @@ export function VaultStorageTab() {
         setRollen(liste)
         const erste = liste.find((r) => r.quota_bytes !== null) ?? liste[0]
         setRolleId(erste?.role_id ?? null)
-        setGb(erste?.quota_bytes ? Math.round(erste.quota_bytes / GIB) : 0)
+        uebernehmen(erste?.quota_bytes ?? null)
       })
       .catch((error: unknown) => {
         if (aktiv) toast.error(error instanceof SanitizedApiError ? error.message : t('vaultStorage.loadFailed'))
@@ -60,11 +67,16 @@ export function VaultStorageTab() {
   }, [canRead, t])
 
   const rolle = rollen.find((r) => r.role_id === rolleId) ?? null
+  const gibText = (bytes: number) => `${new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 2 }).format(bytes / GIB)} GiB`
+
+  function uebernehmen(bytes: number | null) {
+    setGib(bytes === null ? 0 : Math.round(bytes / GIB))
+    setExakt(bytes)
+  }
 
   const waehlen = (id: number) => {
     setRolleId(id)
-    const neu = rollen.find((r) => r.role_id === id)
-    setGb(neu?.quota_bytes ? Math.round(neu.quota_bytes / GIB) : 0)
+    uebernehmen(rollen.find((r) => r.role_id === id)?.quota_bytes ?? null)
   }
 
   const setzen = async (quotaBytes: number | null) => {
@@ -76,7 +88,7 @@ export function VaultStorageTab() {
         body: JSON.stringify({ quota_bytes: quotaBytes }),
       })
       setRollen((alt) => alt.map((r) => (r.role_id === rolle.role_id ? { ...r, quota_bytes: quotaBytes } : r)))
-      if (quotaBytes === null) setGb(0)
+      uebernehmen(quotaBytes)
       toast.success(t('vaultStorage.saved'))
     } catch (error: unknown) {
       toast.error(error instanceof SanitizedApiError ? error.message : t('vaultStorage.saveFailed'))
@@ -116,7 +128,7 @@ export function VaultStorageTab() {
               options={rollen.map((r) => ({
                 value: String(r.role_id),
                 label: r.role_name,
-                hint: r.quota_bytes === null ? t('vaultStorage.none') : `${Math.round(r.quota_bytes / GIB)} GB`,
+                hint: r.quota_bytes === null ? t('vaultStorage.none') : gibText(r.quota_bytes),
               }))}
               disabled={speichern}
               aria-label={t('vaultStorage.selectRole')}
@@ -124,28 +136,37 @@ export function VaultStorageTab() {
           </label>
 
           <div className="max-w-sm space-y-2">
-            <label htmlFor="vault-storage-gb" className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-              {t('vaultStorage.gb')}
+            <label htmlFor="vault-storage-gib" className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {/* Die Einheit bleibt, wie sie heißt: in Großbuchstaben läse sich GiB als GIB. */}
+              {t('vaultStorage.speicher')} <span className="normal-case">(GiB)</span>
             </label>
             <NumberStepper
-              id="vault-storage-gb"
+              id="vault-storage-gib"
               min={0}
-              max={MAX_GB}
+              max={MAX_GIB}
               step={1}
-              value={gb}
+              value={gib}
               disabled={!canWrite || speichern}
               onValueChange={(roh) => {
                 const zahl = Number(roh)
-                if (Number.isInteger(zahl) && zahl >= 0 && zahl <= MAX_GB) setGb(zahl)
+                if (!Number.isInteger(zahl) || zahl < 0 || zahl > MAX_GIB) return
+                setGib(zahl)
+                setExakt(null)
               }}
-              aria-label={`${t('vaultStorage.gb')}: ${rolle.role_name}`}
+              aria-label={`${t('vaultStorage.speicher')} (GiB): ${rolle.role_name}`}
             />
-            {rolle.quota_bytes === null && <p className="text-xs text-on-surface-variant">{t('vaultStorage.noneHint')}</p>}
+            {rolle.quota_bytes === null ? (
+              <p className="text-xs text-on-surface-variant">{t('vaultStorage.noneHint')}</p>
+            ) : (
+              exakt !== null &&
+              exakt % GIB !== 0 && <p className="text-xs text-on-surface-variant">{t('vaultStorage.exactHint', { wert: gibText(exakt) })}</p>
+            )}
+            <p className="text-xs text-on-surface-variant">{t('vaultStorage.zeroOrRemove')}</p>
           </div>
 
           {canWrite && (
             <div className="flex flex-wrap gap-2">
-              <Button type="button" disabled={speichern} onClick={() => void setzen(gb * GIB)}>
+              <Button type="button" disabled={speichern} onClick={() => void setzen(exakt ?? gib * GIB)}>
                 <Save className="h-4 w-4" aria-hidden="true" />
                 {t('settings.save')}
               </Button>

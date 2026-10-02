@@ -62,6 +62,8 @@ export function DialogContent({
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      const dialoge = document.querySelectorAll('[aria-modal="true"]')
+      if (dialogRef.current?.parentElement !== dialoge[dialoge.length - 1]) return
       if (e.key === 'Escape') {
         if (!ctx.escapeSchliesst) return
         e.preventDefault()

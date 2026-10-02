@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import { VaultView, restTageImPapierkorb } from './VaultView'
 import { useConfirmStore } from '@/stores/confirmStore'
+import { useToastStore } from '@/stores/toastStore'
 import { quelleVon } from './TresorGalerie'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { usePromptStore } from '@/stores/promptStore'
@@ -156,6 +157,67 @@ describe('VaultView: Archiv und Papierkorb', () => {
     await vi.waitFor(() => expect(screen.queryByText(i18n.t('common.edit'))).toBeNull())
   })
 
+  it('nimmt das Verschieben in den Papierkorb am Toast zurück', async () => {
+    useToastStore.setState({ toasts: [] })
+    render(<VaultView />)
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.eintragBearbeiten', { name: 'Bank' }) }))
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.inPapierkorb')) }))
+    await vi.waitFor(() => expect(trashItem).toHaveBeenCalledWith('a'))
+
+    const meldung = useToastStore.getState().toasts.find((t) => t.message === i18n.t('mss.vault.inPapierkorbGelegt'))
+    expect(meldung?.aktion?.label).toBe(i18n.t('common.undo'))
+    meldung!.aktion!.ausfuehren()
+    await vi.waitFor(() => expect(restoreItem).toHaveBeenCalledWith('a'))
+  })
+
+  it('fragt vor dem Schließen, wenn im Dialog schon getippt wurde, und behält die Eingabe', async () => {
+    render(<VaultView />)
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.eintragBearbeiten', { name: 'Bank' }) }))
+    const dienst = screen.getByLabelText(i18n.t('mss.vault.dienstBezeichnung'))
+    fireEvent.change(dienst, { target: { value: 'Bank neu' } })
+
+    // Tippen neben den Dialog
+    fireEvent.click(screen.getByRole('dialog'))
+    await vi.waitFor(() => expect(useConfirmStore.getState().pending?.message).toBe(i18n.t('mss.vault.verwerfenFrage')))
+    act(() => useConfirmStore.getState().resolve(false))
+    await vi.waitFor(() => expect(useConfirmStore.getState().pending).toBeNull())
+    expect(screen.getByLabelText(i18n.t('mss.vault.dienstBezeichnung'))).toHaveValue('Bank neu')
+
+    // Ohne Änderung schließt Abbrechen sofort.
+    fireEvent.change(dienst, { target: { value: 'Bank' } })
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('common.cancel') }))
+    await vi.waitFor(() => expect(screen.queryByLabelText(i18n.t('mss.vault.dienstBezeichnung'))).toBeNull())
+    expect(useConfirmStore.getState().pending).toBeNull()
+  })
+
+  it('bietet neue Einträge nur im Tresor an, nicht im Archiv und Papierkorb', () => {
+    render(<VaultView />)
+    const neu = () => screen.queryByRole('button', { name: i18n.t('mss.vault.neuerEintrag') })
+    expect(neu()).toBeInTheDocument()
+    fireEvent.click(reiter('mss.vault.ansicht.archiv'))
+    expect(neu()).toBeNull()
+    fireEvent.click(reiter('mss.vault.ansicht.papierkorb'))
+    expect(neu()).toBeNull()
+  })
+
+  it('sagt, wenn der Tresor offline ist, und gleicht auf Wunsch neu ab', () => {
+    const syncWithServer = vi.fn(async () => undefined)
+    useVaultStore.setState({ syncStatus: 'offline', syncWithServer })
+    render(<VaultView />)
+    const zeile = screen.getByText(i18n.t('mss.vault.offlineHinweis')).closest('[role="status"]') as HTMLElement
+    fireEvent.click(within(zeile).getByRole('button', { name: i18n.t('common.retry') }))
+    expect(syncWithServer).toHaveBeenCalled()
+    useVaultStore.setState({ syncStatus: 'synced' })
+  })
+
+  it('benennt jeden Knopf für Screenreader und setzt keine Browser-Tooltips', () => {
+    const { container } = render(<VaultView />)
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
+    for (const knopf of screen.getAllByRole('button')) {
+      expect(knopf.textContent?.trim() || knopf.getAttribute('aria-label')).toBeTruthy()
+    }
+  })
+
   it('rechnet die Restfrist in ganzen Tagen und nie unter null', () => {
     const jetzt = 1_000 * TAG
     expect(restTageImPapierkorb(jetzt, jetzt)).toBe(30)
@@ -209,11 +271,11 @@ describe('VaultView: Dateien', () => {
   it('führt im Ordnerbaum vom Stammverzeichnis in den Ordner und zurück', () => {
     render(<VaultView />)
     fireEvent.click(reiter('mss.vault.ansicht.dateien'))
-    const baum = within(screen.getByRole('tree'))
+    const baum = within(screen.getByRole('navigation', { name: i18n.t('mss.vault.dateien.ordnerBaum') }))
 
     fireEvent.click(baum.getByRole('button', { name: 'Urlaub' }))
     expect(liste().getByText('strand.jpg')).toBeInTheDocument()
-    expect(baum.getByRole('button', { name: 'Urlaub' }).closest('[role="treeitem"]')).toHaveAttribute('aria-selected', 'true')
+    expect(baum.getByRole('button', { name: 'Urlaub' })).toHaveAttribute('aria-current', 'page')
 
     fireEvent.click(baum.getByRole('button', { name: i18n.t('mss.vault.dateien.stamm') }))
     expect(liste().getByText('vertrag.pdf')).toBeInTheDocument()
@@ -372,7 +434,7 @@ describe('VaultView: Fotos', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getByText(i18n.t('mss.vault.fotos.ausgewaehlt', { count: 2 }))).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.zuAlbum')) }))
+    fireEvent.click(within(screen.getAllByRole('toolbar', { name: /ausgewählt/ })[0]).getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.zuAlbum')) }))
     fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(i18n.t('mss.vault.fotos.neuesAlbum')) }))
     await vi.waitFor(() => expect(usePromptStore.getState().pending).not.toBeNull())
     usePromptStore.getState().resolve('Meer')
@@ -404,7 +466,7 @@ describe('VaultView: Fotos', () => {
 
     fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.auswaehlen')) }))
     fireEvent.click(kachel('strand.jpg')!)
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.ausAlbum')) }))
+    fireEvent.click(within(screen.getAllByRole('toolbar', { name: /ausgewählt/ })[0]).getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.ausAlbum')) }))
     await vi.waitFor(() => expect(albumAendern).toHaveBeenCalledWith('al', { weg: ['1'] }))
   })
 })

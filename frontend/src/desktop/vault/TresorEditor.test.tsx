@@ -127,6 +127,18 @@ describe('Texteditor', () => {
     expect(dateiErsetzen).not.toHaveBeenCalled()
   })
 
+  // „Bestätigen“ sagt nicht, was passiert: der Knopf heißt wie die Folge.
+  it('nennt den Knopf der Rückfrage „Verwerfen“', async () => {
+    render(<TresorTexteditor item={item} text="alt" onFertig={vi.fn()} />)
+    fireEvent.change(await screen.findByLabelText('inhalt'), { target: { value: 'neu' } })
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('common.close') }))
+    await vi.waitFor(() => expect(useConfirmStore.getState().pending).not.toBeNull())
+    const frage = useConfirmStore.getState().pending!
+    expect(frage.confirmText).toBe(i18n.t('mss.vault.bearbeiten.verwerfenKnopf'))
+    expect(frage.confirmText).not.toBe(i18n.t('common.confirm'))
+    expect(frage.danger).toBe(true)
+  })
+
   it('schließt mit der Zurück-Taste, aber nicht mit Escape', async () => {
     await vi.waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
     const fertig = vi.fn()

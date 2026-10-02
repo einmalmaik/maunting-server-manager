@@ -279,4 +279,17 @@ describe('FileEditorWorkspace — Tastenkürzel', () => {
     expect(ereignis.defaultPrevented).toBe(true)
     expect(await screen.findByRole('textbox', { name: /Suchen/ })).toBeInTheDocument()
   })
+
+  it('hat im Vollbild keine Mindesthöhe, damit er bei offener Tastatur in den sichtbaren Bereich passt', () => {
+    const { unmount } = render(<FileEditorWorkspace {...props({ vollbild: true })} />)
+    const vollbild = screen.getByRole('tablist').closest('section')!.className.split(/\s+/)
+    expect(vollbild).not.toContain('min-h-[520px]')
+    expect(vollbild).toContain('min-h-0')
+    expect(vollbild).toContain('max-h-[100dvh]')
+    unmount()
+
+    // Eingebettet (Server-Dateimanager) bleibt die Mindesthöhe unterhalb von lg.
+    render(<FileEditorWorkspace {...props()} />)
+    expect(screen.getByRole('tablist').closest('section')!.className.split(/\s+/)).toContain('min-h-[520px]')
+  })
 })

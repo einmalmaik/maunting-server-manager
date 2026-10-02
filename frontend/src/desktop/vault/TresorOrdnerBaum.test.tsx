@@ -21,7 +21,7 @@ describe('TresorOrdnerBaum', () => {
     expect(screen.getByRole('button', { name: i18n.t('mss.vault.dateien.stamm') })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Fotos' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Verträge' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Miete' }).closest('[role="treeitem"]')).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('button', { name: 'Miete' })).toHaveAttribute('aria-current', 'page')
     // Der geöffnete Ordner zeigt seine Unterordner, andere Zweige bleiben zu, bis man sie aufklappt.
     expect(screen.getByRole('button', { name: '2024' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Urlaub' })).not.toBeInTheDocument()
@@ -44,7 +44,20 @@ describe('TresorOrdnerBaum', () => {
     expect(screen.queryByRole('button', { name: 'Miete' })).not.toBeInTheDocument()
 
     rerender(<TresorOrdnerBaum ordner={alle} aktuell="a" pfad={[vertraege, miete, alt]} onWaehlen={vi.fn()} />)
-    expect(screen.getByRole('button', { name: '2024' }).closest('[role="treeitem"]')).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('button', { name: '2024' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  // Ein `role="tree"` verspricht Pfeiltasten, die es hier nicht gibt; `aria-selected`
+  // stand am Listeneintrag statt am Knopf. Der Baum ist eine Navigation aus Listen.
+  it('ist eine Navigation ohne Baum-Rollen; nur der geöffnete Ordner trägt aria-current', () => {
+    render(<TresorOrdnerBaum ordner={alle} aktuell="m" pfad={[vertraege, miete]} onWaehlen={vi.fn()} />)
+    const nav = screen.getByRole('navigation', { name: i18n.t('mss.vault.dateien.ordnerBaum') })
+    expect(nav.querySelector('[role="tree"], [role="treeitem"], [role="group"], [aria-selected]')).toBeNull()
+    expect(nav.querySelectorAll('[aria-current]')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: i18n.t('mss.vault.dateien.stamm') })).not.toHaveAttribute('aria-current')
+    // Das Aufklappen meldet seinen Zustand selbst.
+    expect(screen.getByRole('button', { name: i18n.t('mss.vault.dateien.zuklappen', { name: 'Verträge' }) })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: i18n.t('mss.vault.dateien.aufklappen', { name: 'Fotos' }) })).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('nimmt Abgelegtes an und klappt einen zugeklappten Ordner beim Darüberziehen auf', () => {

@@ -27,7 +27,9 @@ import {
   FileType,
   FileVideo,
   Presentation,
+  RotateCw,
   Trash2,
+  WifiOff,
 } from 'lucide-react'
 import { Button, Lichtbox, ProgressBar, Versionsliste } from '@/Singra/UI'
 import { archivInhalt, type ArchivEintrag } from '@/lib/zipLesen'
@@ -93,11 +95,13 @@ interface Anzeige {
   archiv: ArchivEintrag[] | null
   anteil: number | null
   fehler: boolean
+  /** Der Fehler kam ohne Netz: die Datei liegt nicht auf diesem Gerät. */
+  offline: boolean
   /** Geladen, aber hier nicht darstellbar (Bildformat, Codec, kaputtes Archiv). */
   nichtDarstellbar: boolean
 }
 
-const LEER = { url: null, text: null, bytes: null, archiv: null, anteil: 0, fehler: false, nichtDarstellbar: false }
+const LEER = { url: null, text: null, bytes: null, archiv: null, anteil: 0, fehler: false, offline: false, nichtDarstellbar: false }
 
 interface Props {
   item: VaultItem
@@ -109,12 +113,14 @@ interface Props {
   onSchliessen: () => void
 }
 
-const KNOPF = 'text-white/85 hover:bg-white/10 hover:text-white'
+// Am Telefon 44 px Tippfläche; `min-*` schlägt die Höhe aus `size`.
+const KNOPF = 'min-h-11 min-w-11 sm:min-h-8 sm:min-w-8 text-white/85 hover:bg-white/10 hover:text-white'
 
 export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSchliessen }: Props) {
   const { t, i18n } = useTranslation()
   const userKey = useVaultStore((s) => s.userKey)
   const trashItem = useVaultStore((s) => s.trashItem)
+  const restoreItem = useVaultStore((s) => s.restoreItem)
   const fassungZurueckholen = useVaultStore((s) => s.fassungZurueckholen)
   // Live aus dem Store: nach Bearbeiten oder Zurückholen hat die Datei ein neues Original.
   const item = useVaultStore((s) => s.items.find((i) => i.id === anfang.id)) ?? anfang
@@ -126,6 +132,8 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
   const [anzeige, setAnzeige] = useState<Anzeige>({ id: item.id, ...LEER })
   const [bildBearbeiten, setBildBearbeiten] = useState(false)
   const [holt, setHolt] = useState<string | null>(null)
+  /** Zählt „Erneut laden“ hoch und lädt damit neu. */
+  const [versuch, setVersuch] = useState(0)
 
   // Ein neues Original (nach Bearbeiten oder Zurückholen) lädt neu. Im
   // Texteditor nicht: er hält den Text selbst, ein Neuladen würfe ihn samt
@@ -172,7 +180,8 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
           setAnzeige({ ...fertig, url })
         }
       } catch {
-        if (!abbruch.signal.aborted) setAnzeige((a) => (a.id === id ? { ...a, anteil: null, fehler: true } : a))
+        const offline = typeof navigator !== 'undefined' && navigator.onLine === false
+        if (!abbruch.signal.aborted) setAnzeige((a) => (a.id === id ? { ...a, anteil: null, fehler: true, offline } : a))
       }
     })()
     return () => {
@@ -180,7 +189,16 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
       if (url) ansichtSchliessen(url)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ladeSchluessel, userKey])
+  }, [ladeSchluessel, userKey, versuch])
+
+  // Ohne Netz gescheitert: sobald es zurück ist, von selbst noch einmal.
+  const wartetAufNetz = anzeige.fehler && anzeige.offline
+  useEffect(() => {
+    if (!wartetAufNetz) return
+    const los = () => setVersuch((v) => v + 1)
+    window.addEventListener('online', los)
+    return () => window.removeEventListener('online', los)
+  }, [wartetAufNetz])
 
   if (!datei) return null
 
@@ -191,6 +209,20 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
     } catch {
       toast.error(t('mss.vault.dateien.speichernFehler'))
     }
+  }
+
+  const inPapierkorb = async () => {
+    try {
+      await trashItem(item.id)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('mss.vault.dateien.papierkorbFehler'))
+      return
+    }
+    toast.success(t('mss.vault.inPapierkorbGelegt'), {
+      label: t('common.undo'),
+      ausfuehren: () => void restoreItem(item.id).catch(() => toast.error(t('mss.vault.dateien.rueckgaengigFehler'))),
+    })
+    onSchliessen()
   }
 
   const zurueckholen = async (id: string) => {
@@ -229,8 +261,24 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
   const rollbar = geladen && !anzeige.nichtDarstellbar && (anzeige.bytes !== null || anzeige.archiv !== null)
 
   let inhalt: React.ReactNode
-  if (geladen && anzeige.fehler) {
-    inhalt = <p className="text-sm text-white/70">{t('mss.vault.dateien.oeffnenFehler')}</p>
+  if (geladen && anzeige.fehler && anzeige.offline) {
+    inhalt = (
+      <div className="flex max-w-sm flex-col items-center gap-3 px-6 text-center" role="status">
+        <WifiOff className="h-10 w-10 text-white/60" aria-hidden />
+        <p className="font-semibold text-white">{t('mss.vault.dateien.ohneNetzTitel')}</p>
+        <p className="text-sm text-white/70">{t('mss.vault.dateien.ohneNetzHinweis')}</p>
+      </div>
+    )
+  } else if (geladen && anzeige.fehler) {
+    inhalt = (
+      <div className="flex max-w-sm flex-col items-center gap-4 px-6 text-center" role="alert">
+        <p className="text-sm text-white/70">{t('mss.vault.dateien.oeffnenFehler')}</p>
+        <Button type="button" variant="secondary" className="min-h-11 sm:min-h-10" onClick={() => setVersuch((v) => v + 1)}>
+          <RotateCw className="h-4 w-4" aria-hidden />
+          {t('mss.vault.dateien.erneutLaden')}
+        </Button>
+      </div>
+    )
   } else if (geladen && anzeige.url && art === 'bild' && !anzeige.nichtDarstellbar) {
     inhalt = <img src={anzeige.url} alt={item.service} draggable={false} onError={nichtDarstellbar} className="max-h-full max-w-full object-contain" />
   } else if (geladen && anzeige.url && art === 'video' && !anzeige.nichtDarstellbar) {
@@ -341,12 +389,7 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
             size="icon"
             className={KNOPF}
             aria-label={t('mss.vault.inPapierkorb')}
-            onClick={() =>
-              void trashItem(item.id).then(() => {
-                toast.success(t('mss.vault.inPapierkorbGelegt'))
-                onSchliessen()
-              })
-            }
+            onClick={() => void inPapierkorb()}
           >
             <Trash2 className="h-4 w-4" />
           </Button>

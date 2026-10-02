@@ -5,8 +5,12 @@
  * Die Lichtbox zeigt nur an. Was angezeigt wird (Bild, Video, Ladeanzeige),
  * gibt der Aufrufer als `children`, ebenso die Aktionen in der Kopfleiste und
  * den Inhalt der Info-Leiste. Geblättert wird mit den Pfeiltasten, den
- * Knöpfen am Rand oder per Wischen; gezoomt per Doppelklick oder Mausrad, und
- * gezoomt verschiebt Ziehen den Ausschnitt statt zu blättern.
+ * Knöpfen am Rand oder per Wischen; gezoomt per Doppelklick, Mausrad, mit zwei
+ * Fingern (der Punkt zwischen den Fingern bleibt unter ihnen) oder mit den
+ * Tasten +, - und 0. Gezoomt verschiebt Ziehen den Ausschnitt statt zu blättern.
+ *
+ * Auf dem Telefon sind alle Knöpfe der Kopfleiste mindestens 44 px groß, auch
+ * die, die der Aufrufer als `aktionen` mitgibt.
  *
  * Sie liegt per Portal an `body`, damit kein Stapelkontext sie abschneidet.
  */
@@ -49,6 +53,26 @@ const FOKUSSIERBAR = 'button:not([disabled]), a[href], video[controls], [tabinde
 const WISCHEN_AB = 60
 const ZOOM_MAX = 5
 const ZOOM_DOPPEL = 2.5
+/** Ein Schritt mit Mausrad oder Taste. */
+const ZOOM_SCHRITT = 1.2
+
+interface Zoom {
+  stufe: number
+  x: number
+  y: number
+}
+
+/** Zwei Finger: Abstand und Bildpunkt (vom Mittelpunkt aus, ungezoomt) zu Beginn. */
+interface Spreizen {
+  abstand: number
+  stufe: number
+  punktX: number
+  punktY: number
+}
+
+function abstandUndMitte(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return { abstand: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+}
 
 export function Lichtbox({
   kennung,
@@ -72,19 +96,30 @@ export function Lichtbox({
     typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null,
   )
   const [infoOffen, setInfoOffen] = useState(false)
-  const [zoom, setZoom] = useState({ stufe: 1, x: 0, y: 0 })
-  const zug = useRef<{ x: number; y: number; startX: number; startY: number; id: number } | null>(null)
+  const [zoom, setZoom] = useState<Zoom>({ stufe: 1, x: 0, y: 0 })
+  // Zeigerereignisse kommen schneller, als React neu zeichnet: der Stand für Gesten liegt hier.
+  const zoomJetzt = useRef(zoom)
+  zoomJetzt.current = zoom
+  // `wischen: false` nach dem Spreizen: der übrige Finger verschiebt, blättert aber nicht.
+  const zug = useRef<{ x: number; y: number; startX: number; startY: number; id: number; wischen: boolean } | null>(null)
+  const zeiger = useRef(new Map<number, { x: number; y: number }>())
+  const spreizen = useRef<Spreizen | null>(null)
   const gezoomtGemeldet = useRef(false)
 
   useEffect(() => {
-    setZoom({ stufe: 1, x: 0, y: 0 })
+    const zurueck = { stufe: 1, x: 0, y: 0 }
+    zoomJetzt.current = zurueck
+    setZoom(zurueck)
+    spreizen.current = null
     gezoomtGemeldet.current = false
   }, [kennung])
 
   const zoomSetzen = useCallback(
     (stufe: number, x = 0, y = 0) => {
       const s = Math.min(ZOOM_MAX, Math.max(1, stufe))
-      setZoom(s === 1 ? { stufe: 1, x: 0, y: 0 } : { stufe: s, x, y })
+      const neu = s === 1 ? { stufe: 1, x: 0, y: 0 } : { stufe: s, x, y }
+      zoomJetzt.current = neu
+      setZoom(neu)
       if (s > 1 && !gezoomtGemeldet.current) {
         gezoomtGemeldet.current = true
         onZoom?.()
@@ -93,9 +128,26 @@ export function Lichtbox({
     [onZoom],
   )
 
+  /** Zoomt um `faktor`; was in der Mitte der Fläche liegt, bleibt dort. */
+  const zoomUm = useCallback(
+    (faktor: number) => {
+      const z = zoomJetzt.current
+      const s = Math.min(ZOOM_MAX, Math.max(1, z.stufe * faktor))
+      zoomSetzen(s, (z.x * s) / z.stufe, (z.y * s) / z.stufe)
+    },
+    [zoomSetzen],
+  )
+
   useEffect(() => {
     const taste = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      const eingabe =
+        e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target instanceof HTMLElement && e.target.isContentEditable)
+      // Strg/Cmd mit + und - zoomt die Seite; das bleibt dem Browser.
+      if (zoombar && !eingabe && !e.ctrlKey && !e.metaKey && !e.altKey && ['+', '=', '-', '0'].includes(e.key)) {
+        e.preventDefault()
+        if (e.key === '0') zoomSetzen(1)
+        else zoomUm(e.key === '-' ? 1 / ZOOM_SCHRITT : ZOOM_SCHRITT)
+      } else if (e.key === 'Escape') {
         e.preventDefault()
         onSchliessen()
       } else if (e.key === 'ArrowRight' && onVor && !(e.target instanceof HTMLVideoElement)) {
@@ -120,7 +172,7 @@ export function Lichtbox({
     }
     document.addEventListener('keydown', taste)
     return () => document.removeEventListener('keydown', taste)
-  }, [onSchliessen, onVor, onZurueck])
+  }, [onSchliessen, onVor, onZurueck, zoombar, zoomSetzen, zoomUm])
 
   useEffect(() => {
     rahmen.current?.querySelector<HTMLElement>('[data-lichtbox-schliessen]')?.focus()
@@ -130,22 +182,66 @@ export function Lichtbox({
     }
   }, [])
 
+  /** Abstand der beiden Finger und ihre Mitte, gemessen vom Mittelpunkt der Fläche. */
+  const zweiFinger = (flaeche: Element) => {
+    const [a, b] = Array.from(zeiger.current.values())
+    const box = flaeche.getBoundingClientRect()
+    const m = abstandUndMitte(a, b)
+    return { abstand: m.abstand, x: m.x - (box.left + box.width / 2), y: m.y - (box.top + box.height / 2) }
+  }
+
   const zeigerRunter = (e: React.PointerEvent) => {
     // Die Bedienleiste eines Videos (Spulen) ist kein Wischen.
     if (e.button !== 0 || e.target instanceof HTMLVideoElement || e.target instanceof HTMLAudioElement) return
-    zug.current = { x: e.clientX, y: e.clientY, startX: zoom.x, startY: zoom.y, id: e.pointerId }
+    // Ein erster Finger heißt: kein anderer liegt mehr auf (ein verpasstes Hochheben zählt nicht).
+    if (e.isPrimary) zeiger.current.clear()
+    zeiger.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (zeiger.current.size === 1) {
+      const z = zoomJetzt.current
+      zug.current = { x: e.clientX, y: e.clientY, startX: z.x, startY: z.y, id: e.pointerId, wischen: true }
+      return
+    }
+    // Ein zweiter Finger beendet Wischen und Verschieben; mit zwei Fingern wird gezoomt.
+    zug.current = null
+    if (!zoombar || zeiger.current.size !== 2) return
+    const m = zweiFinger(e.currentTarget)
+    if (m.abstand < 1) return
+    const z = zoomJetzt.current
+    spreizen.current = { abstand: m.abstand, stufe: z.stufe, punktX: (m.x - z.x) / z.stufe, punktY: (m.y - z.y) / z.stufe }
   }
 
   const zeigerBewegt = (e: React.PointerEvent) => {
+    if (!zeiger.current.has(e.pointerId)) return
+    zeiger.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    const s = spreizen.current
+    if (s && zeiger.current.size === 2) {
+      // Der Bildpunkt, der zu Beginn zwischen den Fingern lag, bleibt zwischen ihnen.
+      const m = zweiFinger(e.currentTarget)
+      const stufe = Math.min(ZOOM_MAX, Math.max(1, (s.stufe * m.abstand) / s.abstand))
+      zoomSetzen(stufe, m.x - stufe * s.punktX, m.y - stufe * s.punktY)
+      return
+    }
     const z = zug.current
-    if (!z || z.id !== e.pointerId || zoom.stufe === 1) return
-    setZoom((alt) => ({ ...alt, x: z.startX + e.clientX - z.x, y: z.startY + e.clientY - z.y }))
+    if (!z || z.id !== e.pointerId || zoomJetzt.current.stufe === 1) return
+    const neu = { ...zoomJetzt.current, x: z.startX + e.clientX - z.x, y: z.startY + e.clientY - z.y }
+    zoomJetzt.current = neu
+    setZoom(neu)
   }
 
   const zeigerHoch = (e: React.PointerEvent) => {
+    zeiger.current.delete(e.pointerId)
+    if (spreizen.current) {
+      if (zeiger.current.size >= 2) return
+      spreizen.current = null
+      const rest = Array.from(zeiger.current.entries())[0]
+      const z = zoomJetzt.current
+      zug.current = rest ? { x: rest[1].x, y: rest[1].y, startX: z.x, startY: z.y, id: rest[0], wischen: false } : null
+      return
+    }
     const z = zug.current
+    if (!z || z.id !== e.pointerId) return
     zug.current = null
-    if (!z || z.id !== e.pointerId || zoom.stufe > 1) return
+    if (!z.wischen || zoomJetzt.current.stufe > 1) return
     const dx = e.clientX - z.x
     const dy = e.clientY - z.y
     if (Math.abs(dx) < WISCHEN_AB || Math.abs(dy) > Math.abs(dx)) return
@@ -153,9 +249,15 @@ export function Lichtbox({
     else onZurueck?.()
   }
 
+  const zeigerAbbruch = (e: React.PointerEvent) => {
+    zeiger.current.delete(e.pointerId)
+    spreizen.current = null
+    zug.current = null
+  }
+
   const rad = (e: React.WheelEvent) => {
     if (!zoombar) return
-    zoomSetzen(zoom.stufe * (e.deltaY < 0 ? 1.2 : 1 / 1.2), zoom.x, zoom.y)
+    zoomUm(e.deltaY < 0 ? ZOOM_SCHRITT : 1 / ZOOM_SCHRITT)
   }
 
   const randKnopf = 'text-white/85 hover:bg-white/10 hover:text-white'
@@ -170,7 +272,9 @@ export function Lichtbox({
       // Rollbarer Inhalt (Dokumente) ist hell und lückenhaft; dahinter darf die App nicht durchscheinen.
       className={`fixed inset-0 z-50 flex flex-col pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] text-white animate-fade-in ${rollbar ? 'bg-black' : 'bg-black/95'}`}
     >
-      <header className="flex items-center gap-2 px-3 py-2 sm:px-4">
+      {/* min-h/min-w statt h/w: die Höhe aus `size` gewinnt sonst je nach Stylesheet gegen das className. */}
+      {/* Deckend: unter 95 % Schwarz schien die Kopfzeile der App genau unter den Knöpfen durch (Emulator, 02.10.2026). */}
+      <header className="relative z-10 flex items-center gap-2 bg-black px-3 py-2 sm:px-4 max-sm:[&_button]:min-h-11 max-sm:[&_button]:min-w-11">
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{titel}</p>
           {(untertitel || position) && (
@@ -218,7 +322,7 @@ export function Lichtbox({
           onPointerDown={zeigerRunter}
           onPointerMove={zeigerBewegt}
           onPointerUp={zeigerHoch}
-          onPointerCancel={() => (zug.current = null)}
+          onPointerCancel={zeigerAbbruch}
           onDoubleClick={() => zoombar && zoomSetzen(zoom.stufe > 1 ? 1 : ZOOM_DOPPEL)}
           onWheel={rad}
         >

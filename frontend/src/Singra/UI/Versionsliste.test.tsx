@@ -26,6 +26,13 @@ describe('Versionsliste', () => {
     for (const knopf of screen.getAllByRole('button', { name: i18n.t('common.versionen.wiederherstellen') })) expect(knopf).toBeDisabled()
   })
 
+  it('macht „Wiederherstellen“ auf dem Telefon 44 px hoch', () => {
+    render(<Versionsliste versionen={versionen} onWiederherstellen={vi.fn()} />)
+    for (const knopf of screen.getAllByRole('button', { name: i18n.t('common.versionen.wiederherstellen') })) {
+      expect(knopf.className.split(/\s+/)).toContain('max-sm:min-h-11')
+    }
+  })
+
   it('zeigt ohne Schreibrecht nur an und sagt, wenn es nichts gibt', () => {
     const { rerender } = render(<Versionsliste versionen={versionen} />)
     expect(screen.queryByRole('button')).toBeNull()

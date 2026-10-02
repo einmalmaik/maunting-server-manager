@@ -72,14 +72,14 @@ export function Auswahlleiste({ variante, anzahlLabel, aktionen, abbrechenLabel,
   }
   return (
     <div role="toolbar" aria-label={anzahlLabel} className={cx('flex min-w-0 flex-1 items-center gap-1', className)}>
-      <Button type="button" variant="ghost" size="icon" className="-ml-1 shrink-0" aria-label={abbrechenLabel} onClick={onAbbrechen}>
+      <Button type="button" variant="ghost" size="icon" className="-ml-1 shrink-0 max-md:h-11 max-md:w-11" aria-label={abbrechenLabel} onClick={onAbbrechen}>
         <X className="h-4 w-4" />
       </Button>
       <span className="mr-auto truncate text-sm font-semibold tabular-nums text-on-surface" aria-live="polite">
         {anzahlLabel}
       </span>
       {alleLabel && onAlle && (
-        <Button type="button" variant="ghost" size="sm" className="shrink-0" onClick={onAlle}>
+        <Button type="button" variant="ghost" size="sm" className="shrink-0 max-md:h-11" onClick={onAlle}>
           <CheckCheck className="h-4 w-4" />
           {alleLabel}
         </Button>

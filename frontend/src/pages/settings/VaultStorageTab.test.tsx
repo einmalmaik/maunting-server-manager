@@ -50,6 +50,35 @@ describe('VaultStorageTab', () => {
     )
   })
 
+  it('beschriftet in GiB, wie gerechnet wird, und verfälscht keinen krummen Wert', async () => {
+    liste[1].quota_bytes = 1.5 * GIB
+    usePermissionsStore.setState({ me: rechte(['panel.settings.read', 'panel.settings.write']), isLoading: false, error: null })
+    render(<VaultStorageTab />)
+
+    const feld = await screen.findByLabelText(/GiB/)
+    expect(feld).toHaveValue('2')
+    expect(screen.getByText(i18n.t('vaultStorage.exactHint', { wert: '1,5 GiB' }))).toBeInTheDocument()
+
+    // Unverändert gespeichert bleibt es genau 1,5 GiB, nicht die gerundeten 2.
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('settings.save') }))
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith('/settings/tresor-speicher/5', { method: 'PUT', body: JSON.stringify({ quota_bytes: 1.5 * GIB }) }),
+    )
+
+    fireEvent.change(feld, { target: { value: '3' } })
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('settings.save') }))
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith('/settings/tresor-speicher/5', { method: 'PUT', body: JSON.stringify({ quota_bytes: 3 * GIB }) }),
+    )
+  })
+
+  it('erklärt, dass 0 GiB und „Wert entfernen“ zwei Wege mit gleicher Wirkung sind', async () => {
+    usePermissionsStore.setState({ me: rechte(['panel.settings.read', 'panel.settings.write']), isLoading: false, error: null })
+    render(<VaultStorageTab />)
+    expect(await screen.findByText(i18n.t('vaultStorage.zeroOrRemove'))).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: i18n.t('vaultStorage.remove') })).toBeInTheDocument()
+  })
+
   it('nimmt einer Rolle den Speicher mit null', async () => {
     usePermissionsStore.setState({ me: rechte(['panel.settings.read', 'panel.settings.write']), isLoading: false, error: null })
     render(<VaultStorageTab />)

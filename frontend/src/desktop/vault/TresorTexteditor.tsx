@@ -29,6 +29,9 @@ import { fassungenVon } from './tresorOrdner'
 const FileEditorWorkspace = lazy(() => import('@/components/server/FileEditorWorkspace').then((m) => ({ default: m.FileEditorWorkspace })))
 const Markdownansicht = lazy(() => import('@/Singra/UI/Markdownansicht').then((m) => ({ default: m.Markdownansicht })))
 
+/** Knöpfe der Kopfleiste: am Telefon 44 px, damit der Daumen trifft; `min-*` schlägt die Höhe aus `size`. */
+const KOPFKNOPF = 'min-h-11 min-w-11 sm:min-h-8 sm:min-w-0'
+
 interface Props {
   item: VaultItem
   text: string
@@ -82,8 +85,12 @@ export function TresorTexteditor({ item: anfang, text, ort, ansicht, onFertig }:
     }
   }
 
+  /** Ob Ungespeichertes weg darf; ohne Ungespeichertes ohne Rückfrage. */
+  const verwerfenErlaubt = async () =>
+    !ungespeichert || (await confirm({ message: t('mss.vault.bearbeiten.verwerfen'), confirmText: t('mss.vault.bearbeiten.verwerfenKnopf'), danger: true }))
+
   const schliessen = async () => {
-    if (ungespeichert && !(await confirm({ message: t('mss.vault.bearbeiten.verwerfen'), danger: true }))) return
+    if (!(await verwerfenErlaubt())) return
     onFertig(tab.savedContent !== text ? tab.savedContent : null)
   }
 
@@ -97,7 +104,7 @@ export function TresorTexteditor({ item: anfang, text, ort, ansicht, onFertig }:
   }
 
   const zurueckholen = async (originalId: string) => {
-    if (ungespeichert && !(await confirm({ message: t('mss.vault.bearbeiten.verwerfen'), danger: true }))) return
+    if (!(await verwerfenErlaubt())) return
     setHolt(originalId)
     try {
       await fassungZurueckholen(item.id, originalId)
@@ -128,6 +135,7 @@ export function TresorTexteditor({ item: anfang, text, ort, ansicht, onFertig }:
               type="button"
               variant="ghost"
               size="sm"
+              className={KOPFKNOPF}
               aria-label={lesen ? t('mss.vault.dateien.textBearbeiten') : t(ansicht === 'markdown' ? 'mss.vault.dateien.dokumentLesen' : 'mss.vault.dateien.alsTabelle')}
               onClick={() => setLesen((l) => !l)}
             >
@@ -143,17 +151,17 @@ export function TresorTexteditor({ item: anfang, text, ort, ansicht, onFertig }:
             size="sm"
             aria-pressed={versionenOffen}
             aria-label={t('common.versionen.titel')}
-            className={versionenOffen ? 'bg-primary/10 text-primary' : ''}
+            className={`${KOPFKNOPF} ${versionenOffen ? 'bg-primary/10 text-primary' : ''}`}
             onClick={() => setVersionenOffen((o) => !o)}
           >
             <History className="h-4 w-4" />
             <span className="ml-1.5 hidden sm:inline">{t('common.versionen.titel')}</span>
           </Button>
-          <Button type="button" variant="ghost" size="sm" aria-label={t('mss.vault.dateien.speichern')} onClick={() => void aufGeraet()}>
+          <Button type="button" variant="ghost" size="sm" className={KOPFKNOPF} aria-label={t('mss.vault.dateien.speichern')} onClick={() => void aufGeraet()}>
             <Download className="h-4 w-4" />
             <span className="ml-1.5 hidden sm:inline">{t('mss.vault.dateien.speichern')}</span>
           </Button>
-          <Button type="button" variant="ghost" size="sm" aria-label={t('common.close')} onClick={() => void schliessen()}>
+          <Button type="button" variant="ghost" size="sm" className={KOPFKNOPF} aria-label={t('common.close')} onClick={() => void schliessen()}>
             <X className="h-4 w-4" />
             <span className="ml-1.5 hidden sm:inline">{t('common.close')}</span>
           </Button>

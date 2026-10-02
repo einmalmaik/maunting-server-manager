@@ -37,4 +37,30 @@ describe('Dialog', () => {
     act(() => window.history.back())
     await waitFor(() => expect(screen.queryByText('Inhalt')).not.toBeInTheDocument())
   })
+
+  it('schließt mit Escape nur den obersten von zwei offenen Dialogen', async () => {
+    // Über dem Bearbeiten-Dialog des Tresors liegt der QR-Scanner. Bis
+    // 02.10.2026 schloss Escape beide, und das Getippte darunter war weg.
+    await waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    function Gestapelt() {
+      const [unten, setUnten] = useState(true)
+      const [oben, setOben] = useState(true)
+      return (
+        <>
+          <Dialog open={unten} onOpenChange={setUnten}>
+            <DialogContent>Unten</DialogContent>
+          </Dialog>
+          <Dialog open={oben} onOpenChange={setOben}>
+            <DialogContent>Oben</DialogContent>
+          </Dialog>
+        </>
+      )
+    }
+    render(<Gestapelt />)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByText('Oben')).not.toBeInTheDocument()
+    expect(screen.getByText('Unten')).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByText('Unten')).not.toBeInTheDocument()
+  })
 })

@@ -55,12 +55,23 @@ export function ToastContainer() {
           >
             {toast.message}
           </p>
+          {toast.aktion && (
+            <button
+              type="button"
+              onClick={() => {
+                toast.aktion?.ausfuehren()
+                removeToast(toast.id)
+              }}
+              className="-my-2 inline-flex min-h-11 shrink-0 items-center rounded-md px-3 font-label-md text-label-md text-on-surface underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+            >
+              {toast.aktion.label}
+            </button>
+          )}
           {toast.type === 'error' && (
             <button
               type="button"
               onClick={() => void copyToast(toast.id, toast.message)}
-              className="opacity-70 hover:opacity-100 transition-opacity shrink-0"
-              title={copiedId === toast.id ? t('common.copied') : t('common.copy')}
+              className="-m-2 shrink-0 p-2 opacity-70 transition-opacity hover:opacity-100 max-md:-m-3.5 max-md:p-3.5"
               aria-label={copiedId === toast.id ? t('common.copied') : t('common.copy')}
             >
               {copiedId === toast.id ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
@@ -69,8 +80,7 @@ export function ToastContainer() {
           <button
             type="button"
             onClick={() => removeToast(toast.id)}
-            className="opacity-60 hover:opacity-100 transition-opacity shrink-0"
-            title={t('common.close')}
+            className="-m-2 shrink-0 p-2 opacity-60 transition-opacity hover:opacity-100 max-md:-m-3.5 max-md:p-3.5"
             aria-label={t('common.close')}
           >
             <X className="w-4 h-4" />

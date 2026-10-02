@@ -14,9 +14,13 @@
  * Kästchen, am Telefon mit langem Drücken. Solange etwas gewählt ist, schaltet
  * ein Klick um, statt zu öffnen; gezogen werden alle gewählten zusammen. Die
  * Auswahl gilt für den geöffneten Ordner und leert sich beim Wechsel.
+ *
+ * Mit `suche` zeigt die Liste statt des Ordners alle Ordner und Dateien, deren
+ * Name sie enthält, aus dem ganzen Tresor (ohne Papierkorb und Archiv), jeweils
+ * mit ihrem Ort. Gesucht wird nur auf dem Gerät, im entschlüsselten Bestand.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Archive,
@@ -30,11 +34,14 @@ import {
   HardDriveDownload,
   MoreHorizontal,
   Pencil,
+  SearchX,
   Trash2,
   Upload,
 } from 'lucide-react'
 import {
   Auswahlleiste,
+  Blatteintrag,
+  Blattmenue,
   Button,
   Checkbox,
   Dialog,
@@ -59,11 +66,11 @@ import { ZipZuGross } from '@/lib/zipSchreiben'
 import { cx } from '@/utils/classNames'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { angeheftet, offlineAnheften, offlineLoesen, useTresorUploads, type UploadFortschritt } from './tresorDateien'
-import { speicherAbfragen, type TresorSpeicher } from './tresorBlobApi'
 import { aufGeraetSpeichern, mehrereAufGeraetSpeichern } from './tresorAnzeige'
 import { dateienUnter, darfAlleVerschieben, darfVerschieben, obersteAuswahl, pfadVon, sichtbareEintraege, zielOrdner } from './tresorOrdner'
 import { TresorOrdnerBaum } from './TresorOrdnerBaum'
 import { TresorDateiAnsicht, dateiIcon, oeffnetImEditor } from './TresorDateiAnsicht'
+import { TresorSpeicherAnzeige, TresorUploadStand, useTresorSpeicher } from './TresorSpeicher'
 
 /** Kennzeichnet beim Ziehen Einträge aus dem Tresor (im Unterschied zu Dateien vom Rechner). Wert: JSON-Liste der IDs. */
 export const ZIEH_TYP = 'application/x-msm-tresor'
@@ -74,7 +81,21 @@ const SPALTEN = 'lg:grid lg:grid-cols-[1.25rem_minmax(0,1fr)_6.5rem_10rem_2.5rem
 /** So lange nach einem langen Druck gilt der folgende Klick als dessen Ende, nicht als neuer Tipp. */
 const KLICK_NACH_LANGDRUCK_MS = 700
 
-export function TresorDateiBereich() {
+/** Knöpfe in Kopf und Zeilen: am Telefon 44 px Tippfläche. `min-*` schlägt die Höhe aus `size`. */
+const TIPPFLAECHE = 'min-h-11 min-w-11 sm:min-h-8 sm:min-w-8'
+
+/** Unter `md` steht das Aktionsmenü einer Zeile als Blatt am unteren Rand, nicht als Flyout am Knopf. */
+const amTelefon = () => typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 767.98px)').matches
+
+/** Die Meldung eines Fehlers aus dem Tresor; die sind schon übersetzt. Sonst ein eigener Text. */
+const fehlerText = (err: unknown, ersatz: string) => (err instanceof Error && err.message ? err.message : ersatz)
+
+interface Props {
+  /** Suchbegriff aus der Kopfleiste des Tresors. Nicht leer: Treffer aus allen Ordnern statt des geöffneten. */
+  suche?: string
+}
+
+export function TresorDateiBereich({ suche = '' }: Props) {
   const { t, i18n } = useTranslation()
   const items = useVaultStore((s) => s.items)
   const userKey = useVaultStore((s) => s.userKey)
@@ -82,18 +103,26 @@ export function TresorDateiBereich() {
   const ordnerAnlegen = useVaultStore((s) => s.ordnerAnlegen)
   const saveItem = useVaultStore((s) => s.saveItem)
   const trashItem = useVaultStore((s) => s.trashItem)
+  const restoreItem = useVaultStore((s) => s.restoreItem)
   const setArchived = useVaultStore((s) => s.setArchived)
   const uploads = useTresorUploads((s) => s.je)
   const [ordner, setOrdner] = useState<string | undefined>(undefined)
-  const [speicher, setSpeicher] = useState<TresorSpeicher | null>(null)
+  /**
+   * Der Suchbegriff, bei dem jemand einen Ordner geöffnet hat. Die Suche steht
+   * in der Kopfleiste des Tresors und lässt sich hier nicht leeren; solange der
+   * Begriff gleich bleibt, zeigt die Liste den geöffneten Ordner.
+   */
+  const [verlassenBei, setVerlassenBei] = useState<string | null>(null)
   // Speicher gibt nur eine Rolle. Ohne sie bleibt der Upload zu, der Server weist ihn ohnehin ab.
-  const ohneSpeicher = speicher?.quote === 0
+  const { speicher, ohneSpeicher } = useTresorSpeicher()
   const [ansicht, setAnsicht] = useState<VaultItem | null>(null)
   const [vorbereitung, setVorbereitung] = useState(0)
   const [verschiebenDialog, setVerschiebenDialog] = useState<{ items: VaultItem[]; ziel: string } | null>(null)
   const [offline, setOffline] = useState<Set<string>>(new Set())
   const [holt, setHolt] = useState<Record<string, number>>({})
-  const [menue, setMenue] = useState<{ item: VaultItem; x: number; y: number; ausloeser: HTMLElement } | null>(null)
+  /** Offenes Aktionsmenü einer Zeile; `blatt` heißt: am Telefon über den Knopf geöffnet. */
+  const [menue, setMenue] = useState<{ item: VaultItem; x: number; y: number; ausloeser: HTMLElement; blatt: boolean } | null>(null)
+  const menueSchliessen = useCallback(() => setMenue(null), [])
   /** Gewählte Einträge; `null` heißt: keine Auswahl. */
   const [auswahl, setAuswahl] = useState<Set<string> | null>(null)
   // Am Handy beendet Zurück die Auswahl, nicht die App.
@@ -123,20 +152,34 @@ export function TresorDateiBereich() {
   // Liegt der geöffnete Ordner nicht mehr da (gelöscht, in den Papierkorb), zurück nach oben.
   const aktuellerOrdner = ordner && ordnerListe.some((o) => o.id === ordner) ? ordner : undefined
   const pfad = useMemo(() => pfadVon(aktuellerOrdner, ordnerListe), [aktuellerOrdner, ordnerListe])
-  const ort = [t('mss.vault.dateien.stamm'), ...pfad.map((o) => o.service)].join(' / ')
+  /** Ort eines Ordners als Text, etwa „Stammverzeichnis / Verträge“. */
+  const ortVon = (id: string | undefined) => [t('mss.vault.dateien.stamm'), ...pfadVon(id, ordnerListe).map((o) => o.service)].join(' / ')
   const ordnerName = (id: string | undefined) => (id ? ordnerListe.find((o) => o.id === id)?.service : undefined) ?? t('mss.vault.dateien.stamm')
 
+  const suchwort = suche.trim().toLocaleLowerCase()
+  // Ist die Suche leer, gilt ein später wieder getippter gleicher Begriff als neue Suche.
+  if (suchwort === '' && verlassenBei !== null) setVerlassenBei(null)
+  const sucht = suchwort !== '' && suchwort !== verlassenBei
+  /** Öffnet einen Ordner (`undefined` = Stamm), auch aus der Suche heraus. */
+  const ordnerOeffnen = (id: string | undefined) => {
+    setOrdner(id)
+    setVerlassenBei(suchwort || null)
+  }
+
   const inhalt = useMemo(() => {
-    const hier = sichtbareItems.filter((i) => (i.category === 'ordner' || i.category === 'datei') && i.ordner === aktuellerOrdner)
+    // Beim Suchen der ganze Tresor; `sichtbareItems` lässt Papierkorb und Archiv samt Inhalt schon weg.
+    const hier = sichtbareItems.filter(
+      (i) => (i.category === 'ordner' || i.category === 'datei') && (sucht ? i.service.toLocaleLowerCase().includes(suchwort) : i.ordner === aktuellerOrdner),
+    )
     const nachName = (a: VaultItem, b: VaultItem) => a.service.localeCompare(b.service)
     return [...hier.filter((i) => i.category === 'ordner').sort(nachName), ...hier.filter((i) => i.category === 'datei').sort(nachName)]
-  }, [sichtbareItems, aktuellerOrdner])
+  }, [sichtbareItems, aktuellerOrdner, sucht, suchwort])
 
-  // Die Auswahl gilt für diesen Ordner. Was verschwindet (verschoben, gelöscht), fällt heraus.
+  // Die Auswahl gilt für diesen Ordner bzw. diese Suche. Was verschwindet (verschoben, gelöscht), fällt heraus.
   useEffect(() => {
     setAuswahl(null)
     setAnker(null)
-  }, [aktuellerOrdner])
+  }, [aktuellerOrdner, sucht, suchwort])
   const gewaehlt = useMemo(() => (auswahl ? obersteAuswahl(auswahl, inhalt) : []), [auswahl, inhalt])
   const gewaehltIds = gewaehlt.map((i) => i.id).join(',')
 
@@ -159,16 +202,7 @@ export function TresorDateiBereich() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gewaehltIds, menueOrdner, offline])
 
-  const speicherLaden = () => {
-    speicherAbfragen()
-      .then(setSpeicher)
-      .catch(() => setSpeicher(null))
-  }
-  useEffect(speicherLaden, [])
   const anzahlUploads = Object.keys(uploads).length
-  useEffect(() => {
-    if (anzahlUploads === 0) speicherLaden()
-  }, [anzahlUploads])
 
   // ── Auswahl ───────────────────────────────────────────────────────────────
 
@@ -261,19 +295,52 @@ export function TresorDateiBereich() {
   const neuerOrdner = async () => {
     const name = await prompt({ message: t('mss.vault.dateien.ordnerName'), confirmText: t('mss.vault.dateien.ordnerAnlegen') })
     if (!name?.trim()) return
-    await ordnerAnlegen(name.trim(), aktuellerOrdner)
+    try {
+      await ordnerAnlegen(name.trim(), aktuellerOrdner)
+    } catch (err) {
+      toast.error(fehlerText(err, t('mss.vault.dateien.ordnerFehler')))
+    }
   }
 
   const umbenennen = async (item: VaultItem) => {
     const name = await prompt({ message: t('mss.vault.dateien.neuerName'), defaultValue: item.service })
     if (!name?.trim() || name.trim() === item.service) return
-    await saveItem({ ...item, service: name.trim() })
+    try {
+      await saveItem({ ...item, service: name.trim() })
+    } catch (err) {
+      toast.error(fehlerText(err, t('mss.vault.dateien.umbenennenFehler')))
+    }
   }
 
   const oeffnen = (item: VaultItem) => {
-    if (item.category === 'ordner') setOrdner(item.id)
+    if (item.category === 'ordner') ordnerOeffnen(item.id)
     else if (item.datei) setAnsicht(item)
   }
+
+  /**
+   * Führt `schritt` für jede ID aus und gibt die zurück, bei denen es klappte.
+   * Beim ersten Fehler hört es auf und meldet ihn; was bis dahin erledigt ist,
+   * bleibt erledigt und lässt sich rückgängig machen.
+   */
+  const fuerAlle = async (ids: string[], schritt: (id: string) => Promise<void>, ersatz: string) => {
+    const erledigt: string[] = []
+    try {
+      for (const id of ids) {
+        await schritt(id)
+        erledigt.push(id)
+      }
+    } catch (err) {
+      toast.error(fehlerText(err, ersatz))
+    }
+    return erledigt
+  }
+
+  /** Ein Erfolgstoast mit „Rückgängig“, das `zurueck` für alle Erledigten ausführt. */
+  const mitRueckgaengig = (text: string, erledigt: string[], zurueck: (id: string) => Promise<void>) =>
+    toast.success(text, {
+      label: t('common.undo'),
+      ausfuehren: () => void fuerAlle(erledigt, zurueck, t('mss.vault.dateien.rueckgaengigFehler')),
+    })
 
   // ── Sammelaktionen (eine oder viele) ──────────────────────────────────────
 
@@ -353,14 +420,26 @@ export function TresorDateiBereich() {
   }
 
   const archivieren = async (liste: VaultItem[]) => {
-    for (const item of liste) await setArchived(item.id, true)
-    if (liste.length > 1) toast.success(t('mss.vault.dateien.archiviertMehrere', { count: liste.length }))
+    const erledigt = await fuerAlle(liste.map((i) => i.id), (id) => setArchived(id, true), t('mss.vault.dateien.archivierenFehler'))
+    if (erledigt.length > 0) {
+      mitRueckgaengig(
+        erledigt.length === 1 ? t('mss.vault.archiviert') : t('mss.vault.dateien.archiviertMehrere', { count: erledigt.length }),
+        erledigt,
+        (id) => setArchived(id, false),
+      )
+    }
     auswahlLeeren()
   }
 
   const inPapierkorb = async (liste: VaultItem[]) => {
-    for (const item of liste) await trashItem(item.id)
-    toast.success(liste.length === 1 ? t('mss.vault.inPapierkorbGelegt') : t('mss.vault.dateien.papierkorbMehrere', { count: liste.length }))
+    const erledigt = await fuerAlle(liste.map((i) => i.id), trashItem, t('mss.vault.dateien.papierkorbFehler'))
+    if (erledigt.length > 0) {
+      mitRueckgaengig(
+        erledigt.length === 1 ? t('mss.vault.inPapierkorbGelegt') : t('mss.vault.dateien.papierkorbMehrere', { count: erledigt.length }),
+        erledigt,
+        restoreItem,
+      )
+    }
     auswahlLeeren()
   }
 
@@ -509,7 +588,7 @@ export function TresorDateiBereich() {
     return [
       ...(item.category === 'ordner'
         ? [
-            { key: 'oeffnen', label: t('mss.vault.dateien.oeffnen'), icon: <FolderOpen className="h-4 w-4" />, onSelect: () => setOrdner(item.id) },
+            { key: 'oeffnen', label: t('mss.vault.dateien.oeffnen'), icon: <FolderOpen className="h-4 w-4" />, onSelect: () => ordnerOeffnen(item.id) },
             {
               key: 'offline',
               label: t(alleAngeheftet ? 'mss.vault.dateien.nurOnline' : 'mss.vault.dateien.offlineMachen'),
@@ -556,23 +635,6 @@ export function TresorDateiBereich() {
 
   const datum = new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' })
 
-  const speicherAnzeige = speicher && (
-    <div className="flex items-start gap-2">
-      <HardDrive className="mt-0.5 h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden />
-      {ohneSpeicher ? (
-        <p className="text-label-sm text-on-surface-variant">{t('mss.vault.dateien.keinSpeicher')}</p>
-      ) : (
-        <div className="min-w-0 flex-1">
-          <ProgressBar
-            value={(speicher.belegt / speicher.quote) * 100}
-            heat
-            ariaLabel={t('mss.vault.dateien.speicher')}
-            hint={t('mss.vault.dateien.speicherBelegt', { belegt: formatBytes(speicher.belegt), quote: formatBytes(speicher.quote) })}
-          />
-        </div>
-      )}
-    </div>
-  )
 
   const listenTaste = (event: React.KeyboardEvent) => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
@@ -593,9 +655,13 @@ export function TresorDateiBereich() {
     <div className="flex min-h-0 flex-1">
       <aside className="hidden w-60 shrink-0 flex-col border-r border-outline-variant/30 md:flex">
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
-          <TresorOrdnerBaum ordner={ordnerListe} aktuell={aktuellerOrdner} pfad={pfad} onWaehlen={setOrdner} ablage={{ kannAblegen, onAblegen: ablegen }} />
+          <TresorOrdnerBaum ordner={ordnerListe} aktuell={aktuellerOrdner} pfad={pfad} onWaehlen={ordnerOeffnen} ablage={{ kannAblegen, onAblegen: ablegen }} />
         </div>
-        {speicherAnzeige && <div className="border-t border-outline-variant/30 p-3">{speicherAnzeige}</div>}
+        {speicher && (
+          <div className="border-t border-outline-variant/30 p-3">
+            <TresorSpeicherAnzeige speicher={speicher} />
+          </div>
+        )}
       </aside>
 
       <section className="relative flex min-w-0 flex-1 flex-col" {...flaecheAblage}>
@@ -606,7 +672,7 @@ export function TresorDateiBereich() {
             className="basis-full text-xs [scrollbar-width:none] sm:basis-0"
             stamm={{ key: '', label: t('mss.vault.dateien.stamm'), icon: <HardDrive className="h-3.5 w-3.5" aria-hidden /> }}
             teile={pfad.map((o) => ({ key: o.id, label: o.service }))}
-            onWaehlen={(key) => setOrdner(key || undefined)}
+            onWaehlen={(key) => ordnerOeffnen(key || undefined)}
             hochLabel={t('mss.vault.dateien.hoch')}
             kannAblegen={(key, daten) => kannAblegen(key || undefined, daten)}
             onAblegen={(key, daten) => ablegen(key || undefined, daten)}
@@ -614,15 +680,29 @@ export function TresorDateiBereich() {
           {!auswahl && (
             <div className="ml-auto flex items-center gap-1.5">
               {inhalt.length > 0 && (
-                <Button type="button" variant="ghost" size="sm" className="md:hidden" aria-label={t('mss.vault.dateien.auswaehlen')} onClick={() => setAuswahl(new Set())}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className={cx('md:hidden', TIPPFLAECHE)}
+                  aria-label={t('mss.vault.dateien.auswaehlen')}
+                  onClick={() => setAuswahl(new Set())}
+                >
                   <CheckSquare className="h-4 w-4" />
                 </Button>
               )}
-              <Button type="button" variant="ghost" size="sm" onClick={() => void neuerOrdner()}>
+              <Button type="button" variant="ghost" size="sm" className={TIPPFLAECHE} onClick={() => void neuerOrdner()}>
                 <FolderPlus className="mr-1.5 h-4 w-4" />
                 {t('mss.vault.dateien.ordnerAnlegen')}
               </Button>
-              <FileButton multiple size="sm" variant="primary" disabled={ohneSpeicher} onFiles={(dateien) => void hochladen(dateien, aktuellerOrdner)}>
+              <FileButton
+                multiple
+                size="sm"
+                variant="primary"
+                className={TIPPFLAECHE}
+                disabled={ohneSpeicher}
+                onFiles={(dateien) => void hochladen(dateien, aktuellerOrdner)}
+              >
                 <Upload className="mr-1.5 h-4 w-4" />
                 {t('mss.vault.dateien.hochladen')}
               </FileButton>
@@ -644,7 +724,17 @@ export function TresorDateiBereich() {
           </div>
         )}
 
-        {speicherAnzeige && !auswahl && <div className="border-b border-outline-variant/30 px-3 py-2 md:hidden">{speicherAnzeige}</div>}
+        {speicher && !auswahl && (
+          <div className="border-b border-outline-variant/30 px-3 py-2 md:hidden">
+            <TresorSpeicherAnzeige speicher={speicher} />
+          </div>
+        )}
+
+        {anzahlUploads > 0 && (
+          <div className="border-b border-outline-variant/30 px-3 py-2 sm:px-4">
+            <TresorUploadStand />
+          </div>
+        )}
 
         {vorbereitung > 0 && (
           <p className="border-b border-outline-variant/30 px-4 py-1.5 text-label-sm text-on-surface-variant" role="status">
@@ -658,17 +748,33 @@ export function TresorDateiBereich() {
         )}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2 sm:px-3" onKeyDown={listenTaste}>
-          {inhalt.length === 0 ? (
+          {inhalt.length === 0 && sucht ? (
+            <div className="flex h-full min-h-64 flex-col items-center justify-center gap-3 px-6 text-center" role="status">
+              <SearchX className="h-10 w-10 text-on-surface-variant/60" aria-hidden />
+              <div>
+                <p className="text-sm font-semibold text-on-surface">{t('mss.vault.dateien.sucheLeerTitel')}</p>
+                <p className="mt-1 max-w-sm text-xs text-on-surface-variant">{t('mss.vault.dateien.sucheLeer', { suche: suche.trim() })}</p>
+              </div>
+            </div>
+          ) : inhalt.length === 0 ? (
             <div className="flex h-full min-h-64 flex-col items-center justify-center gap-3 px-6 text-center">
               <FolderOpen className="h-10 w-10 text-on-surface-variant/60" aria-hidden />
               <div>
                 <p className="text-sm font-semibold text-on-surface">{t('mss.vault.dateien.leerTitel')}</p>
                 <p className="mt-1 max-w-sm text-xs text-on-surface-variant">
-                  {ohneSpeicher ? t('mss.vault.dateien.keinSpeicher') : t('mss.vault.dateien.leer')}
+                  {ohneSpeicher ? (
+                    t('mss.vault.dateien.keinSpeicher')
+                  ) : (
+                    <>
+                      {t('mss.vault.dateien.leer')}
+                      {/* Ziehen gibt es nur mit Maus; am Telefon stünde da etwas, das nicht geht. */}
+                      <span className="hidden md:inline"> {t('mss.vault.dateien.leerZiehen')}</span>
+                    </>
+                  )}
                 </p>
               </div>
               {!ohneSpeicher && (
-                <FileButton multiple size="sm" variant="secondary" onFiles={(dateien) => void hochladen(dateien, aktuellerOrdner)}>
+                <FileButton multiple size="sm" variant="secondary" className={TIPPFLAECHE} onFiles={(dateien) => void hochladen(dateien, aktuellerOrdner)}>
                   <Upload className="mr-1.5 h-4 w-4" />
                   {t('mss.vault.dateien.hochladen')}
                 </FileButton>
@@ -676,6 +782,11 @@ export function TresorDateiBereich() {
             </div>
           ) : (
             <>
+              {sucht && (
+                <p className="px-2 pb-1.5 text-label-sm text-on-surface-variant" role="status">
+                  {t('mss.vault.dateien.trefferAnzahl', { count: inhalt.length })}
+                </p>
+              )}
               <div className={cx('hidden px-2 pb-1.5 text-label-sm text-on-surface-variant', SPALTEN)} aria-hidden>
                 <span />
                 <span className="pl-9">{t('mss.vault.dateien.spalteName')}</span>
@@ -684,7 +795,7 @@ export function TresorDateiBereich() {
                 <span />
               </div>
               <ul
-                aria-label={t('mss.vault.dateien.inhalt')}
+                aria-label={t(sucht ? 'mss.vault.dateien.treffer' : 'mss.vault.dateien.inhalt')}
                 className="overflow-hidden rounded-xl border border-outline-variant/40 bg-surface-container-low/60"
               >
                 {inhalt.map((item) => (
@@ -699,12 +810,13 @@ export function TresorDateiBereich() {
                     ziel={zielZeile === item.id}
                     gezogen={gezogen.includes(item.id)}
                     geaendert={datum.format(item.datei?.geaendert ?? item.updatedAt)}
+                    ort={sucht ? ortVon(item.ordner) : undefined}
                     ziehen={zeileZiehen(item)}
                     ablage={item.category === 'ordner' ? ordnerAblage(item) : undefined}
                     onKlick={(event) => zeileKlick(item, event)}
                     onLangdruck={() => langdruck(item)}
                     onKaestchen={(schieben) => (schieben && anker ? bereich(item) : umschalten(item))}
-                    onMenue={(x, y, ausloeser) => setMenue({ item, x, y, ausloeser })}
+                    onMenue={(x, y, ausloeser, perKnopf) => setMenue({ item, x, y, ausloeser, blatt: perKnopf && amTelefon() })}
                   />
                 ))}
               </ul>
@@ -733,12 +845,36 @@ export function TresorDateiBereich() {
       </section>
 
       <Kontextmenue
-        ort={menue ? { x: menue.x, y: menue.y } : null}
-        items={menue ? menueEintraege(menue.item) : []}
+        ort={menue && !menue.blatt ? { x: menue.x, y: menue.y } : null}
+        items={menue && !menue.blatt ? menueEintraege(menue.item) : []}
         label={t('mss.vault.dateien.aktionen')}
         ausloeser={menue?.ausloeser}
-        onSchliessen={() => setMenue(null)}
+        onSchliessen={menueSchliessen}
       />
+
+      {/* Am Telefon fährt das Menü von unten herein, in Daumenreichweite. */}
+      <Blattmenue offen={!!menue?.blatt} onSchliessen={menueSchliessen} titel={menue ? t('mss.vault.dateien.aktionenFuer', { name: menue.item.service }) : ''}>
+        {menue?.blatt && (
+          <>
+            <div className="truncate px-4 pb-1 pt-2 text-xs font-semibold text-on-surface-variant">{menue.item.service}</div>
+            <div className="pb-2">
+              {menueEintraege(menue.item).map((eintrag) => (
+                <Blatteintrag
+                  key={eintrag.key}
+                  icon={eintrag.icon}
+                  label={eintrag.label}
+                  gefahr={eintrag.destructive}
+                  disabled={eintrag.disabled}
+                  onClick={() => {
+                    menueSchliessen()
+                    eintrag.onSelect()
+                  }}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </Blattmenue>
 
       <Dialog open={!!verschiebenDialog} onOpenChange={(offen) => !offen && setVerschiebenDialog(null)}>
         {verschiebenDialog && (
@@ -782,7 +918,7 @@ export function TresorDateiBereich() {
       {ansicht && (
         <TresorDateiAnsicht
           item={ansicht}
-          ort={ort}
+          ort={ortVon(ansicht.ordner)}
           folge={inhalt.filter((i) => i.datei && !oeffnetImEditor(i))}
           onWechseln={setAnsicht}
           onSchliessen={() => setAnsicht(null)}
@@ -803,13 +939,16 @@ interface ZeileProps {
   ziel: boolean
   gezogen: boolean
   geaendert: string
+  /** Ort des Eintrags, nur in Suchtreffern. */
+  ort?: string
   ziehen: React.HTMLAttributes<HTMLLIElement> & { draggable: boolean }
   ablage: React.HTMLAttributes<HTMLLIElement> | undefined
   onKlick: (event: React.MouseEvent) => void
   onLangdruck: () => void
   /** Kästchen umgeschaltet; `true`, wenn dabei Umschalt gedrückt war. */
   onKaestchen: (schieben: boolean) => void
-  onMenue: (x: number, y: number, ausloeser: HTMLElement) => void
+  /** `perKnopf`: über den Knopf „…“ geöffnet, nicht per Rechtsklick. */
+  onMenue: (x: number, y: number, ausloeser: HTMLElement, perKnopf: boolean) => void
 }
 
 /** Eine Zeile der Liste. Eigene Komponente, weil das lange Drücken ein Hook ist. */
@@ -823,6 +962,7 @@ function TresorDateiZeile({
   ziel,
   gezogen,
   geaendert,
+  ort,
   ziehen,
   ablage,
   onKlick,
@@ -872,7 +1012,7 @@ function TresorDateiZeile({
         lang.onContextMenu(event)
         if (event.defaultPrevented) return
         event.preventDefault()
-        onMenue(event.clientX, event.clientY, event.currentTarget)
+        onMenue(event.clientX, event.clientY, event.currentTarget, false)
       }}
       className={cx(
         'group flex items-center gap-2 border-b border-outline-variant/40 px-2 py-1.5 last:border-b-0',
@@ -895,7 +1035,7 @@ function TresorDateiZeile({
       </span>
       <button
         type="button"
-        className="flex min-h-10 min-w-0 flex-1 items-center gap-3 rounded-md px-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+        className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-md px-1 text-left sm:min-h-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
         onClick={onKlick}
         disabled={!istOrdner && !item.datei}
       >
@@ -909,6 +1049,7 @@ function TresorDateiZeile({
           <span className="block truncate text-label-sm text-on-surface-variant lg:hidden">
             {istOrdner ? t('mss.vault.dateien.ordner') : item.datei ? `${groesse}, ${geaendert}` : t('mss.vault.dateien.unlesbar')}
           </span>
+          {ort && <span className="block truncate text-label-sm text-on-surface-variant">{ort}</span>}
           {fortschritt && <span className="mt-1 block max-w-56">{fortschritt}</span>}
         </span>
       </button>
@@ -918,12 +1059,12 @@ function TresorDateiZeile({
         type="button"
         variant="ghost"
         size="icon"
-        className={cx('h-9 w-9 shrink-0 opacity-70 group-hover:opacity-100', auswahlAktiv && 'invisible')}
+        className={cx('min-h-11 min-w-11 shrink-0 opacity-70 group-hover:opacity-100 sm:min-h-9 sm:min-w-9', auswahlAktiv && 'invisible')}
         aria-label={t('mss.vault.dateien.aktionenFuer', { name: item.service })}
         aria-haspopup="menu"
         onClick={(event) => {
           const box = event.currentTarget.getBoundingClientRect()
-          onMenue(box.right, box.bottom + 4, event.currentTarget)
+          onMenue(box.right, box.bottom + 4, event.currentTarget, true)
         }}
       >
         <MoreHorizontal className="h-4 w-4" />

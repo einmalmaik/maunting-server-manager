@@ -97,6 +97,51 @@ describe('FileManager: Verschieben- und Umbenennen-Dialog', () => {
   })
 })
 
+describe('FileManager: Bausteine und Telefon', () => {
+  beforeEach(async () => {
+    mockApi.mockReset()
+    mockApi.mockImplementation(async () => ROOT_LISTING as any)
+    await i18n.changeLanguage('en')
+    usePermissionsStore.setState({ me: OWNER, isLoading: false, error: null })
+  })
+
+  it('bindet die Eingabefelder der Dialoge an ihre Beschriftung (Input statt nativem Feld)', async () => {
+    await chooseFromContextMenu(i18n.t('files.rename'))
+    expect(await screen.findByLabelText(i18n.t('files.newName'))).toHaveValue('server.properties')
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    fireEvent.contextMenu(screen.getByText('server.properties'))
+    fireEvent.click(await screen.findByRole('menuitem', { name: i18n.t('files.move') }))
+    expect(await screen.findByLabelText(i18n.t('files.targetFolder'))).toHaveFocus()
+  })
+
+  it('schließt den Umbenennen-Dialog mit der Zurück-Taste', async () => {
+    await waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    await chooseFromContextMenu(i18n.t('files.rename'))
+    await screen.findByRole('dialog', { name: i18n.t('files.renameTitle') })
+    await waitFor(() => expect(window.history.state?.msmTiefe).toBe(1))
+    act(() => window.history.back())
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('zeigt in einem Unterordner den Knopf „eine Ebene hoch“', async () => {
+    const mitOrdner: BrowseResponse = {
+      path: '',
+      exists: true,
+      entries: [{ name: 'mods', is_dir: true, size: 0, modified: 0, mode: null, owner: null, group: null }],
+    }
+    mockApi.mockImplementation(async (pfad: string) => (pfad.includes('path=mods') ? { path: 'mods', exists: true, entries: [] } : mitOrdner) as any)
+    render(<FileManager serverId={SERVER_ID} />)
+    expect(screen.queryByRole('button', { name: i18n.t('files.parentFolder') })).toBeNull()
+
+    fireEvent.click(await screen.findByText('mods'))
+    const hoch = await screen.findByRole('button', { name: i18n.t('files.parentFolder') })
+    fireEvent.click(hoch)
+    await waitFor(() => expect(screen.queryByRole('button', { name: i18n.t('files.parentFolder') })).toBeNull())
+  })
+})
+
 describe('FileManager: Dateisuche', () => {
   beforeEach(async () => {
     mockApi.mockReset()

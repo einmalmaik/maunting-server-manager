@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Eye, EyeOff } from 'lucide-react'
 
 interface PasswordInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
@@ -8,6 +9,7 @@ interface PasswordInputProps extends React.InputHTMLAttributes<HTMLInputElement>
 
 export const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputProps>(
   ({ className = '', label, error, ...props }, ref) => {
+    const { t } = useTranslation()
     const [showPassword, setShowPassword] = useState(false)
     const timerRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -71,8 +73,9 @@ export const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputPro
           <button
             type="button"
             onClick={handleToggle}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface focus:outline-none transition-colors"
-            title={showPassword ? 'Passwort verbergen' : 'Passwort anzeigen'}
+            className="absolute right-0 top-1/2 -translate-y-1/2 inline-flex h-10 w-10 items-center justify-center rounded-md text-on-surface-variant hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-colors"
+            aria-label={t(showPassword ? 'common.hidePassword' : 'common.showPassword')}
+            aria-pressed={showPassword}
           >
             {showPassword ? (
               <EyeOff className="w-4 h-4" />

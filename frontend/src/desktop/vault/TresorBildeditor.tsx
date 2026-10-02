@@ -178,12 +178,13 @@ export function TresorBildeditor({ item, vorschauUrl, onFertig }: { item: VaultI
                 style={{ left: `${rahmen.x * 100}%`, top: `${rahmen.y * 100}%`, width: `${rahmen.b * 100}%`, height: `${rahmen.h * 100}%` }}
                 onPointerDown={runter('mitte')}
               >
+                {/* Sichtbar 16 px, getroffen wird eine unsichtbare Fläche von 44 px drumherum. */}
                 {griffe.map((g) => (
                   <span
                     key={g}
                     data-griff={g}
                     onPointerDown={runter(g)}
-                    className={`absolute h-4 w-4 rounded-full border-2 border-white bg-primary ${g.includes('n') ? '-top-2' : '-bottom-2'} ${
+                    className={`absolute h-4 w-4 rounded-full border-2 border-white bg-primary before:absolute before:-inset-3.5 before:rounded-full ${g.includes('n') ? '-top-2' : '-bottom-2'} ${
                       g.includes('w') ? '-left-2' : '-right-2'
                     } ${g === 'nw' || g === 'se' ? 'cursor-nwse-resize' : 'cursor-nesw-resize'}`}
                   />
@@ -192,7 +193,8 @@ export function TresorBildeditor({ item, vorschauUrl, onFertig }: { item: VaultI
             </div>
           )}
         </div>
-        <DialogFooter className="justify-between">
+        {/* Auf dem Telefon 44-px-Ziele (min-h/min-w, die Höhe aus `size` bleibt sonst stehen); ab sm wie gehabt. */}
+        <DialogFooter className="flex-wrap justify-between gap-y-2 max-sm:[&_button]:min-h-11 max-sm:[&_button]:min-w-11">
           <div className="flex gap-1">
             <Button type="button" variant="ghost" size="icon" aria-label={t('mss.vault.bearbeiten.links')} onClick={() => drehen(-90)} disabled={speichert}>
               <RotateCcw className="h-4 w-4" />

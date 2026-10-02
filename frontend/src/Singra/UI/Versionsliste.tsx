@@ -50,7 +50,7 @@ export function Versionsliste({ versionen, onWiederherstellen, laeuft = null, au
               type="button"
               disabled={laeuft !== null}
               onClick={() => onWiederherstellen(fassung.id)}
-              className={cx('h-7 text-label-sm', aufDunkel && 'text-white/85 hover:bg-white/10 hover:text-white')}
+              className={cx('h-7 text-label-sm max-sm:min-h-11', aufDunkel && 'text-white/85 hover:bg-white/10 hover:text-white')}
             >
               {laeuft === fassung.id && <LoaderCircle className="mr-1 h-3 w-3 animate-spin" aria-hidden />}
               {t('common.versionen.wiederherstellen')}

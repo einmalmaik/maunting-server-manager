@@ -2,17 +2,24 @@
  * Jede Dateiart bekommt ihre Ansicht: SVG als Bild, PDF über pdf.js, Archive
  * als Inhaltsliste, unbekannter Text im Editor, Unlesbares als Karte.
  */
-import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import { zipSchreiben } from '@/lib/zipSchreiben'
+import { useToastStore } from '@/stores/toastStore'
 import { TresorDateiAnsicht } from './TresorDateiAnsicht'
 import { useVaultStore, type VaultItem } from './vaultStore'
 
-const inhalt = vi.hoisted(() => ({ blob: new Blob() }))
+const inhalt = vi.hoisted(() => ({ blob: new Blob(), scheitert: false }))
+const blobLesen = vi.hoisted(() =>
+  vi.fn(async () => {
+    if (inhalt.scheitert) throw new Error('Netz weg')
+    return inhalt.blob
+  }),
+)
 vi.mock('./tresorDateien', async (original) => ({
   ...(await original<typeof import('./tresorDateien')>()),
-  blobLesen: vi.fn(async () => inhalt.blob),
+  blobLesen,
   ansichtOeffnen: vi.fn(() => 'blob:ansicht'),
   ansichtSchliessen: vi.fn(),
 }))
@@ -44,16 +51,91 @@ const datei = (service: string, typ: string, echt = 1000) =>
     datei: { typ, original: kopf('o', echt), vorschau: kopf('v', 0), miniatur: kopf('m', 0) },
   }) as unknown as VaultItem
 
-function zeigen(item: VaultItem, blob: Blob) {
+function zeigen(item: VaultItem, blob: Blob, onSchliessen = () => {}) {
   inhalt.blob = blob
   useVaultStore.setState({ items: [item], userKey: {} as CryptoKey })
-  return render(<TresorDateiAnsicht item={item} ort="Stammverzeichnis" folge={[item]} onWechseln={() => {}} onSchliessen={() => {}} />)
+  return render(<TresorDateiAnsicht item={item} ort="Stammverzeichnis" folge={[item]} onWechseln={() => {}} onSchliessen={onSchliessen} />)
+}
+
+/** `navigator.onLine` für einen Test umstellen. */
+function netz(da: boolean) {
+  vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(da)
 }
 
 describe('TresorDateiAnsicht', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('de')
     pdfDaten.zuletzt = null
+    inhalt.scheitert = false
+    blobLesen.mockClear()
+    useToastStore.setState({ toasts: [] })
+  })
+
+  afterEach(() => vi.restoreAllMocks())
+
+  describe('Ladefehler', () => {
+    it('sagt ohne Netz, dass die Datei offline nicht da ist, und verweist auf „Offline verfügbar machen“', async () => {
+      netz(false)
+      inhalt.scheitert = true
+      zeigen(datei('foto.png', 'image/png'), new Blob(['x']))
+      expect(await screen.findByText(i18n.t('mss.vault.dateien.ohneNetzTitel'))).toBeInTheDocument()
+      expect(screen.getByText(i18n.t('mss.vault.dateien.ohneNetzHinweis'))).toBeInTheDocument()
+      expect(screen.queryByText(i18n.t('mss.vault.dateien.oeffnenFehler'))).not.toBeInTheDocument()
+    })
+
+    it('lädt ohne Netz von selbst neu, sobald es zurück ist', async () => {
+      netz(false)
+      inhalt.scheitert = true
+      zeigen(datei('foto.png', 'image/png'), new Blob(['x']))
+      await screen.findByText(i18n.t('mss.vault.dateien.ohneNetzTitel'))
+      inhalt.scheitert = false
+      netz(true)
+      act(() => {
+        window.dispatchEvent(new Event('online'))
+      })
+      expect(await screen.findByRole('img', { name: 'foto.png' })).toBeInTheDocument()
+    })
+
+    it('zeigt mit Netz den Fehler und lädt mit „Erneut laden“ noch einmal', async () => {
+      netz(true)
+      inhalt.scheitert = true
+      zeigen(datei('foto.png', 'image/png'), new Blob(['x']))
+      const knopf = await screen.findByRole('button', { name: i18n.t('mss.vault.dateien.erneutLaden') })
+      expect(screen.getByText(i18n.t('mss.vault.dateien.oeffnenFehler'))).toBeInTheDocument()
+      inhalt.scheitert = false
+      fireEvent.click(knopf)
+      expect(await screen.findByRole('img', { name: 'foto.png' })).toBeInTheDocument()
+      expect(blobLesen).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('Papierkorb', () => {
+    const letzterToast = () => useToastStore.getState().toasts.at(-1)
+
+    it('bietet nach dem Papierkorb „Rückgängig“ an', async () => {
+      const trashItem = vi.fn(async () => undefined)
+      const restoreItem = vi.fn(async () => undefined)
+      const schliessen = vi.fn()
+      useVaultStore.setState({ trashItem, restoreItem } as never)
+      zeigen(datei('foto.png', 'image/png'), new Blob(['x']), schliessen)
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.inPapierkorb') }))
+      await vi.waitFor(() => expect(schliessen).toHaveBeenCalled())
+      expect(letzterToast()?.aktion?.label).toBe(i18n.t('common.undo'))
+      act(() => letzterToast()!.aktion!.ausfuehren())
+      expect(restoreItem).toHaveBeenCalledWith('d')
+    })
+
+    it('meldet, wenn der Papierkorb scheitert, und bleibt offen', async () => {
+      const trashItem = vi.fn(async () => {
+        throw 'kaputt'
+      })
+      const schliessen = vi.fn()
+      useVaultStore.setState({ trashItem } as never)
+      zeigen(datei('foto.png', 'image/png'), new Blob(['x']), schliessen)
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.inPapierkorb') }))
+      await vi.waitFor(() => expect(letzterToast()).toMatchObject({ type: 'error', message: i18n.t('mss.vault.dateien.papierkorbFehler') }))
+      expect(schliessen).not.toHaveBeenCalled()
+    })
   })
 
   it('zeigt SVG als Bild, nicht als Dokument mit Skripten', async () => {

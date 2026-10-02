@@ -23,7 +23,8 @@ import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { Button, ActionMenu, Kontextmenue, Pfadleiste, Switch, Versionsliste, type ActionMenuItem } from '@/Singra/UI'
+import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
+import { Button, ActionMenu, Input, Kontextmenue, Pfadleiste, Switch, Versionsliste, type ActionMenuItem } from '@/Singra/UI'
 import { FileTree } from '@/components/server/FileTree'
 import { FileEditorWorkspace } from '@/components/server/FileEditorWorkspace'
 import {
@@ -151,6 +152,11 @@ export function FileManager({ serverId }: FileManagerProps) {
   // der Dateimanager ein zweites Mal montiert wird.
   const promptTitleId = useId()
   const moveTitleId = useId()
+  const promptInputId = useId()
+  const moveInputId = useId()
+  // Unter Android schließt Zurück den offenen Dialog, statt die Seite zu verlassen.
+  useZurueckSchliesst(promptDialog !== null, () => setPromptDialog(null))
+  useZurueckSchliesst(moveDialog !== null, () => setMoveDialog(null))
   const fileInputRef = useRef<HTMLInputElement>(null)
   const promptInputRef = useRef<HTMLInputElement>(null)
   const treeTriggerRef = useRef<HTMLButtonElement>(null)
@@ -719,6 +725,7 @@ export function FileManager({ serverId }: FileManagerProps) {
           label={t('files.breadcrumb')}
           className="font-mono"
           stamm={{ key: '', label: t('files.serverFiles') }}
+          hochLabel={t('files.parentFolder')}
           teile={breadcrumbs.map((segment, index) => ({ key: breadcrumbs.slice(0, index + 1).join('/'), label: segment }))}
           onWaehlen={toggleDirectory}
           kannAblegen={() => canWrite}
@@ -776,7 +783,7 @@ export function FileManager({ serverId }: FileManagerProps) {
             />
           </div>
           {uploads.length > 0 && <div className="border-t border-outline-variant p-2">{uploads.map((job) => <div key={job.id} className="py-1.5"><div className="flex justify-between gap-2 text-label-sm"><span className="truncate">{job.name}</span><span className={job.status === 'error' ? 'text-status-destructive' : 'text-on-surface-variant'}>{job.status === 'error' ? t('common.error') : `${Math.round(job.fraction * 100)}%`}</span></div><div className="mt-1 h-1 overflow-hidden rounded-full bg-surface-container-highest"><div className={`h-full ${job.status === 'error' ? 'bg-status-destructive' : 'bg-secondary'}`} style={{ width: `${job.fraction * 100}%` }} /></div></div>)}</div>}
-          <footer className="border-t border-outline-variant px-3 py-2 text-label-sm text-on-surface-variant">{directorySummary.files} Dateien · {directorySummary.folders} Ordner · {formatBytes(directorySummary.bytes)}</footer>
+          <footer className="border-t border-outline-variant px-3 py-2 text-label-sm text-on-surface-variant">{t('files.summary', { files: directorySummary.files, folders: directorySummary.folders, size: formatBytes(directorySummary.bytes) })}</footer>
         </aside>
 
         <div className={`min-h-0 min-w-0 lg:flex ${dragOver ? 'ring-1 ring-inset ring-secondary' : ''}`}>
@@ -811,9 +818,9 @@ export function FileManager({ serverId }: FileManagerProps) {
         onSchliessen={() => setContextMenu(null)}
       />
 
-      {promptDialog && <div className="msm-modal-overlay z-[130]" role="dialog" aria-modal="true" aria-labelledby={promptTitleId} onClick={() => setPromptDialog(null)}><div className="msm-card w-full max-w-md p-5" onClick={(event) => event.stopPropagation()}><h2 id={promptTitleId} className="font-headline text-title-lg font-semibold text-on-surface">{promptDialog.title}</h2><label className="mt-4 block text-xs font-medium text-on-surface-variant">{promptDialog.label}</label><input ref={promptInputRef} defaultValue={promptDialog.initialValue} className="msm-input mt-1.5" onKeyDown={(event) => { if (event.key === 'Enter') void promptDialog.onConfirm(event.currentTarget.value) }} /><div className="mt-5 flex justify-end gap-2"><Button variant="secondary" size="sm" type="button" onClick={() => setPromptDialog(null)}>{t('common.cancel')}</Button><Button size="sm" type="button" onClick={() => void promptDialog.onConfirm(promptInputRef.current?.value ?? '')}>{promptDialog.confirmLabel}</Button></div></div></div>}
+      {promptDialog && <div className="msm-modal-overlay z-[130]" role="dialog" aria-modal="true" aria-labelledby={promptTitleId} onClick={() => setPromptDialog(null)}><div className="msm-card w-full max-w-md p-5" onClick={(event) => event.stopPropagation()}><h2 id={promptTitleId} className="font-headline text-title-lg font-semibold text-on-surface">{promptDialog.title}</h2><div className="mt-4"><Input id={promptInputId} label={promptDialog.label} ref={promptInputRef} defaultValue={promptDialog.initialValue} onKeyDown={(event) => { if (event.key === 'Enter') void promptDialog.onConfirm(event.currentTarget.value) }} /></div><div className="mt-5 flex justify-end gap-2"><Button variant="secondary" size="sm" type="button" onClick={() => setPromptDialog(null)}>{t('common.cancel')}</Button><Button size="sm" type="button" onClick={() => void promptDialog.onConfirm(promptInputRef.current?.value ?? '')}>{promptDialog.confirmLabel}</Button></div></div></div>}
 
-      {moveDialog && <div className="msm-modal-overlay z-[130]" role="dialog" aria-modal="true" aria-labelledby={moveTitleId} onClick={() => setMoveDialog(null)}><div className="msm-card w-full max-w-md p-5" onClick={(event) => event.stopPropagation()}><h2 id={moveTitleId} className="font-headline text-title-lg font-semibold text-on-surface">{t('files.move')}</h2><p className="mt-2 text-sm text-on-surface-variant">{t('files.moveHint', { name: moveDialog.entry.name })}</p><label className="mt-4 block text-xs font-medium text-on-surface-variant">{t('files.targetFolder')}</label><input value={moveTarget} onChange={(event) => setMoveTarget(event.target.value)} className="msm-input mt-1.5" placeholder="mods/config" autoFocus /><p className="mt-1 text-xs text-on-surface-variant">{t('files.moveTargetHint')}</p><div className="mt-5 flex justify-end gap-2"><Button variant="secondary" size="sm" type="button" onClick={() => setMoveDialog(null)}>{t('common.cancel')}</Button><Button size="sm" type="button" onClick={() => void submitMove()}>{t('common.save')}</Button></div></div></div>}
+      {moveDialog && <div className="msm-modal-overlay z-[130]" role="dialog" aria-modal="true" aria-labelledby={moveTitleId} onClick={() => setMoveDialog(null)}><div className="msm-card w-full max-w-md p-5" onClick={(event) => event.stopPropagation()}><h2 id={moveTitleId} className="font-headline text-title-lg font-semibold text-on-surface">{t('files.move')}</h2><p className="mt-2 text-sm text-on-surface-variant">{t('files.moveHint', { name: moveDialog.entry.name })}</p><div className="mt-4"><Input id={moveInputId} label={t('files.targetFolder')} value={moveTarget} onChange={(event) => setMoveTarget(event.target.value)} placeholder="mods/config" autoFocus /></div><p className="mt-1 text-xs text-on-surface-variant">{t('files.moveTargetHint')}</p><div className="mt-5 flex justify-end gap-2"><Button variant="secondary" size="sm" type="button" onClick={() => setMoveDialog(null)}>{t('common.cancel')}</Button><Button size="sm" type="button" onClick={() => void submitMove()}>{t('common.save')}</Button></div></div></div>}
     </div>
   )
 }

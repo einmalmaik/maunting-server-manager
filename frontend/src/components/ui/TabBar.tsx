@@ -29,6 +29,11 @@ interface TabBarProps<TId extends string> {
    * der Karte.
    */
   embedded?: boolean
+  /**
+   * Am Handy eine Zeile, die sich seitlich wischen lässt, statt umzubrechen.
+   * Ab md wie gewohnt.
+   */
+  einzeilig?: boolean
 }
 
 /**
@@ -36,14 +41,16 @@ interface TabBarProps<TId extends string> {
  * damit beide Seiten dasselbe Verhalten, dieselben i18n-Keys und dasselbe Design
  * teilen. Die Auswahl der Tabs liegt weiterhin in der jeweiligen Orchestrator-Komponente.
  */
-export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel, embedded = false }: TabBarProps<TId>) {
+export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel, embedded = false, einzeilig = false }: TabBarProps<TId>) {
   const { t } = useTranslation()
 
   return (
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className={`${embedded ? 'rounded-lg bg-surface-container-low/50 p-1' : 'msm-card p-2'} inline-flex flex-wrap gap-1`}
+      className={`${embedded ? 'rounded-lg bg-surface-container-low/50 p-1' : 'msm-card p-2'} inline-flex flex-wrap gap-1 ${
+        einzeilig ? 'max-md:flex max-md:w-full max-md:flex-nowrap max-md:overflow-x-auto max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden' : ''
+      }`}
     >
       {tabs.map((tab) => {
         const Icon = tab.icon
@@ -55,8 +62,13 @@ export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel, 
             type="button"
             role="tab"
             aria-selected={isActive}
-            onClick={() => onChange(tab.id)}
-            className={`px-4 py-2 rounded-md text-sm font-medium inline-flex items-center gap-2 transition-colors ${
+            onClick={(e) => {
+              onChange(tab.id)
+              if (einzeilig) e.currentTarget.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+            }}
+            className={`px-4 py-2 rounded-md text-sm font-medium inline-flex shrink-0 items-center gap-2 transition-colors ${
+              einzeilig ? 'max-md:min-h-11' : ''
+            } ${
               isActive
                 ? isDanger
                   ? 'bg-status-destructive/15 text-status-destructive'

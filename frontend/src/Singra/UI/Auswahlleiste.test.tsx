@@ -20,6 +20,13 @@ describe('Auswahlleiste', () => {
     expect(alle).toHaveBeenCalledTimes(1)
   })
 
+  it('gibt Aufheben und Alle in der Kopfleiste am Finger 44 px', () => {
+    // Im Emulator waren beide bis 02.10.2026 32 px hoch.
+    render(<Auswahlleiste variante="kopf" anzahlLabel="1 ausgewählt" aktionen={aktionen()} abbrechenLabel="Aufheben" onAbbrechen={vi.fn()} alleLabel="Alle" onAlle={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Aufheben' }).className).toMatch(/max-md:h-11 max-md:w-11/)
+    expect(screen.getByRole('button', { name: 'Alle' }).className).toMatch(/max-md:h-11/)
+  })
+
   it('führt in der Fußleiste die Aktion aus und sperrt deaktivierte', () => {
     const loeschen = vi.fn()
     render(<Auswahlleiste variante="fuss" anzahlLabel="2 ausgewählt" aktionen={aktionen(loeschen)} abbrechenLabel="Aufheben" onAbbrechen={() => {}} />)
