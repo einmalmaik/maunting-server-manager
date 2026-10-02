@@ -16,8 +16,6 @@ interface Reiter {
   wert: KontaktFilter
   Icon: LucideIcon
   titel: string
-  /** Kurzer Text neben dem Symbol, erst ab `xs` sichtbar. */
-  label?: string
   /** Ohne Angabe steht keine Zahl am Reiter. */
   anzahl?: number
 }
@@ -30,16 +28,16 @@ export function ContactFilterTabs({ filter, onFilter, gruppenAnzahl, kontakte }:
   const oeffentlich = kontakte.filter((c) => c.isPublicUser).length
 
   const reiter: Reiter[] = [
-    { wert: 'all', Icon: LayoutGrid, titel: t('messenger.filterAll'), label: 'Alle' },
+    { wert: 'all', Icon: LayoutGrid, titel: t('messenger.filterAll') },
     { wert: 'groups', Icon: UsersRound, titel: t('messenger.filterGroups', { count: gruppenAnzahl }), anzahl: gruppenAnzahl },
     { wert: 'friends', Icon: UserCheck, titel: t('messenger.filterFriends', { count: freunde }), anzahl: freunde },
     { wert: 'teams', Icon: Briefcase, titel: t('messenger.filterTeams', { count: team }), anzahl: team },
-    { wert: 'public', Icon: Globe, titel: t('messenger.filterPublic', { count: oeffentlich }), label: 'Entdecken', anzahl: oeffentlich },
+    { wert: 'public', Icon: Globe, titel: t('messenger.filterPublic', { count: oeffentlich }), anzahl: oeffentlich },
   ]
 
   return (
     <div className="grid grid-cols-5 gap-0.5 sm:gap-1 p-1 rounded-xl bg-surface-container-high/50 border border-outline-variant/15 w-full">
-      {reiter.map(({ wert, Icon, titel, label, anzahl }, index) => {
+      {reiter.map(({ wert, Icon, titel, anzahl }, index) => {
         const aktiv = filter === wert
         // Die äusseren Reiter stehen am Rand der Seitenleiste.
         const seite = index === 0 ? 'anfang' : index === reiter.length - 1 ? 'ende' : 'mitte'
@@ -48,7 +46,7 @@ export function ContactFilterTabs({ filter, onFilter, gruppenAnzahl, kontakte }:
             <button
               type="button"
               onClick={() => onFilter(wert)}
-              className={`w-full h-7 rounded-lg flex items-center justify-center ${wert === 'all' ? 'gap-1' : 'gap-0.5 sm:gap-1'} transition-all text-xs font-semibold ${
+              className={`w-full h-7 rounded-lg flex items-center justify-center gap-0.5 sm:gap-1 transition-all text-xs font-semibold ${
                 aktiv
                   ? 'bg-primary text-on-primary shadow-sm'
                   : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
@@ -56,7 +54,6 @@ export function ContactFilterTabs({ filter, onFilter, gruppenAnzahl, kontakte }:
               aria-label={titel}
             >
               <Icon className="w-3.5 h-3.5 shrink-0" />
-              {label && <span className="text-label-sm leading-none hidden xs:inline">{label}</span>}
               {anzahl !== undefined && anzahl > 0 && (
                 <span
                   className={`text-label-sm px-1 py-0.2 rounded-full font-bold leading-none ${

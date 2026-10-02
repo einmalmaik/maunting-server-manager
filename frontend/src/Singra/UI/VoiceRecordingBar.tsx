@@ -199,7 +199,7 @@ export function VoiceRecordingBar({
             aria-label={cancelLabel}
           >
             {cancelIcon}
-            <span className="hidden xs:inline">{cancelLabel}</span>
+            <span className="hidden sm:inline">{cancelLabel}</span>
           </button>
         )}
 

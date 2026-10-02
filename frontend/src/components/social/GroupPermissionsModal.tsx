@@ -1204,7 +1204,7 @@ export function GroupPermissionsModal({
                                 aria-label={t('social.groupRoles.editAria', { name: rollentext(r.name, r.is_system, t) })}
                               >
                                 <Pencil className="w-3.5 h-3.5" />
-                                <span className="hidden xs:inline">{t('common.edit')}</span>
+                                <span className="hidden sm:inline">{t('common.edit')}</span>
                               </button>
                             </Kurzinfo>
                             {!r.is_system && (

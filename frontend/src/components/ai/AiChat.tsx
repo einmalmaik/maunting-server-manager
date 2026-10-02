@@ -1524,7 +1524,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
                         : t('ai.chat.dictationUnlimitedHint')
                     }
                     lage="oben"
-                    aussen="hidden xs:inline-flex shrink-0"
+                    aussen="hidden sm:inline-flex shrink-0"
                   >
                   <div className="flex items-center gap-1 rounded-lg border border-outline-variant/40 bg-surface-container-low/60 px-2 py-0.5 text-xs text-on-surface-variant">
                     <span className="tabular-nums font-medium text-on-surface">
