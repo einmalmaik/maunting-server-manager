@@ -12,7 +12,7 @@
  * nach dem Sperren sind sie weg.
  */
 
-import type { VaultItem } from './vaultStore'
+import type { VaultItem } from './vaultEintrag'
 import { miniaturenLesen } from './tresorDateien'
 
 export const ABSTAND = 6

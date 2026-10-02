@@ -30,7 +30,6 @@ from schemas.vault import (
 )
 from services import audit_service, passkey_service, vault_blob_service, vault_service
 from services.auth_service import AuthService
-from services.dis_client import DisSidecarError
 from services.panel_settings_service import PanelSettingsService
 
 logger = logging.getLogger(__name__)
@@ -57,13 +56,7 @@ def _tresor_konto(current_user: User = Depends(get_current_user)) -> vault_servi
 
     Ohne Sidecar gibt es keinen Index und damit keinen Tresor: 503 statt 500.
     """
-    try:
-        return vault_service.tresor_konto(current_user.id)
-    except DisSidecarError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Der Tresor ist gerade nicht erreichbar.",
-        ) from exc
+    return vault_service.tresor_konto_oder_503(current_user.id)
 
 
 BUCKET_KOPF = "X-MSM-Vault-Bucket"

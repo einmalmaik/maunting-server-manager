@@ -9,7 +9,8 @@ import i18n from '@/i18n'
 import { useConfirmStore } from '@/stores/confirmStore'
 import { rahmenZiehen, zeichnen } from './TresorBildeditor'
 import { TresorTexteditor } from './TresorTexteditor'
-import { useVaultStore, type VaultItem } from './vaultStore'
+import { useVaultStore } from './vaultStore'
+import { type VaultItem } from './vaultEintrag'
 
 vi.mock('../tauri', () => ({
   FACH_TRESOR: 'vault_biometric_key',

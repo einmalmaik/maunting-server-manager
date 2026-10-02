@@ -16,12 +16,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
-import {
-  useVaultStore,
-  naechstesSyncPaket,
-  VAULT_TOMBSTONE_MARKER,
-  type VaultBlindSyncPayload,
-} from './vaultStore'
+import { useVaultStore, naechstesSyncPaket, type VaultBlindSyncPayload } from './vaultStore'
+import { VAULT_TOMBSTONE_MARKER } from './vaultEintrag'
 import { decryptVaultEntry, encryptVaultEntry } from './vaultCrypto'
 
 vi.mock('../tauri', () => ({

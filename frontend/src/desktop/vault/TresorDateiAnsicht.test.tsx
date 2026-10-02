@@ -8,7 +8,8 @@ import i18n from '@/i18n'
 import { zipSchreiben } from '@/lib/zipSchreiben'
 import { useToastStore } from '@/stores/toastStore'
 import { TresorDateiAnsicht } from './TresorDateiAnsicht'
-import { useVaultStore, type VaultItem } from './vaultStore'
+import { useVaultStore } from './vaultStore'
+import { type VaultItem } from './vaultEintrag'
 
 const inhalt = vi.hoisted(() => ({ blob: new Blob(), scheitert: false }))
 const blobLesen = vi.hoisted(() =>

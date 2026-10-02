@@ -10,7 +10,8 @@ import { useToastStore } from '@/stores/toastStore'
 import { usePromptStore } from '@/stores/promptStore'
 import { TresorDateiBereich, ZIEH_TYP } from './TresorDateiBereich'
 import { useTresorUploads } from './tresorDateien'
-import { useVaultStore, type VaultItem } from './vaultStore'
+import { useVaultStore } from './vaultStore'
+import { type VaultItem } from './vaultEintrag'
 
 vi.mock('../tauri', () => ({
   FACH_TRESOR: 'vault_biometric_key',

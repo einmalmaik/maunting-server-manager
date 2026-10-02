@@ -15,7 +15,8 @@ import { VaultView, restTageImPapierkorb } from './VaultView'
 import { useConfirmStore } from '@/stores/confirmStore'
 import { useToastStore } from '@/stores/toastStore'
 import { quelleVon } from './TresorGalerie'
-import { useVaultStore, type VaultItem } from './vaultStore'
+import { useVaultStore } from './vaultStore'
+import { type VaultItem } from './vaultEintrag'
 import { usePromptStore } from '@/stores/promptStore'
 
 vi.mock('../tauri', () => ({

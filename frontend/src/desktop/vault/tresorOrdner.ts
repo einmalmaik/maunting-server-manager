@@ -5,7 +5,7 @@
  * hinge der Teilbaum an nichts mehr und verschwände aus der Ansicht.
  */
 import type { Fassung } from '@/Singra/UI'
-import type { VaultItem } from './vaultStore'
+import type { VaultItem } from './vaultEintrag'
 
 /** Höchstens so viele Ebenen werden verfolgt; schützt vor kaputten Ketten. */
 const TIEFE = 50

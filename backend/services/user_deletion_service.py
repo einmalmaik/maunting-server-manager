@@ -51,7 +51,6 @@ from models import (
     UserCredential,
 )
 from services import vault_service
-from services.dis_client import DisSidecarError
 from services.social_service import SocialService
 
 
@@ -63,13 +62,9 @@ def prepare_user_deletion(db: Session, user: User) -> None:
     das Loeschen des persoenlichen Teams und des Tresors, und zwar nur per
     ``flush`` — bricht die umgebende Transaktion spaeter ab, ist beides wieder da.
     """
-    try:
-        tresor = vault_service.tresor_konto(user.id)
-    except DisSidecarError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Der Tresor ist gerade nicht erreichbar, das Konto kann deshalb nicht geloescht werden.",
-        ) from exc
+    tresor = vault_service.tresor_konto_oder_503(
+        user.id, "Der Tresor ist gerade nicht erreichbar, das Konto kann deshalb nicht gelöscht werden."
+    )
 
     # Echte Teams: `personal_for_user_id IS NULL` ist die Unterscheidung, die
     # das Schema ohnehin traegt (siehe models/team.py) — kein zweites Flag.

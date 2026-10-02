@@ -30,7 +30,7 @@ from schemas.vault import (
 )
 from services import vault_blob_service
 from services.auth_service import AuthService
-from services.dis_client import DisClient
+from services.dis_client import DisClient, DisSidecarError
 
 
 def _now() -> datetime:
@@ -73,6 +73,16 @@ class VaultSalzGesetzt(Exception):
 # Dateien darin liegen. Heute steht dort ein HMAC der Kontonummer, den nur der
 # DIS-Sidecar rechnen kann. Der Server erfaehrt die Zuordnung, solange eine
 # angemeldete Anfrage laeuft.
+#
+# Abbau des Altbestands: Die Spalte `user_id` in `vault_user_settings` und
+# `vault_hints` bleibt nur fuer Installationen, die von einem Stand vor
+# Migration 20261001_01 kommen; der Start stellt sie um (`kontoindex_nachziehen`).
+# Ein Release, nachdem jede Installation einmal mit 20261001_01 gestartet ist
+# (fruehestens das uebernaechste nach dem, das sie bringt), loescht per
+# Migration beide Spalten und mit ihnen genau diese Stellen:
+# `_eigene_zeile` (Rueckfall), `kontoindex_nachziehen` samt Aufruf in
+# `dis_altbestand`, `_bucket_besitzer` (`alt:`), `konto_umstellen` samt seinen
+# Aufrufern (Export, Kontoloeschung) und die Felder in beiden Modellen.
 
 _KONTO_INDEX: dict[int, str] = {}
 
@@ -101,6 +111,20 @@ def tresor_konto(user_id: int) -> TresorKonto:
         index = DisClient.blind_index([f"vault:konto\n{user_id}"])[0]
         _KONTO_INDEX[user_id] = index
     return TresorKonto(user_id=user_id, index=index)
+
+
+def tresor_konto_oder_503(user_id: int, meldung: str = "Der Tresor ist gerade nicht erreichbar.") -> TresorKonto:
+    """``tresor_konto`` fuer Routen: ohne Sidecar 503 mit ``meldung`` statt 500.
+
+    Auch fuer Wege, die vor einem Einmal-Nachweis pruefen (Export, Loeschung),
+    damit der Nachweis nicht verbraucht wird, wenn danach nichts gehen kann.
+    """
+    from fastapi import HTTPException
+
+    try:
+        return tresor_konto(user_id)
+    except DisSidecarError as exc:
+        raise HTTPException(status_code=503, detail=meldung) from exc
 
 
 def _eigene_zeile(db: Session, modell, konto: TresorKonto):

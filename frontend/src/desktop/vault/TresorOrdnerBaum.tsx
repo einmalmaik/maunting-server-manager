@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, Folder, FolderOpen, HardDrive } from 'lucide-react'
-import type { VaultItem } from './vaultStore'
+import type { VaultItem } from './vaultEintrag'
 
 interface Props {
   ordner: VaultItem[]

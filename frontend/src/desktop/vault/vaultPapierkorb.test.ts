@@ -15,12 +15,8 @@
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import i18n from '@/i18n'
-import {
-  PAPIERKORB_TAGE,
-  useVaultStore,
-  VAULT_TOMBSTONE_MARKER,
-  type VaultBlindSyncPayload,
-} from './vaultStore'
+import { useVaultStore, type VaultBlindSyncPayload } from './vaultStore'
+import { PAPIERKORB_TAGE, VAULT_TOMBSTONE_MARKER } from './vaultEintrag'
 import { decryptVaultEntry, encryptVaultEntry } from './vaultCrypto'
 import { gepolsterteGroesse } from './tresorDatei'
 

@@ -52,14 +52,8 @@ import { useMiniatur } from './tresorMiniaturen'
 import { formatBytes } from '@/components/server/fileHelpers'
 import { setzeTresorSchutz } from '../tauri'
 import { useShallow } from 'zustand/react/shallow'
-import {
-  PAPIERKORB_TAGE,
-  getLocalVaultSalt,
-  istBekannteKategorie,
-  istPasswortKategorie,
-  useVaultStore,
-  type VaultItem,
-} from './vaultStore'
+import { getLocalVaultSalt, useVaultStore } from './vaultStore'
+import { PAPIERKORB_TAGE, istBekannteKategorie, istPasswortKategorie, type VaultItem } from './vaultEintrag'
 import { DisBadge } from '@/components/DisBadge'
 import { fehlerText } from './tresorFehler'
 

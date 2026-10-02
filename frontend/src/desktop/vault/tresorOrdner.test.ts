@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { dateienUnter, darfAlleVerschieben, darfVerschieben, fassungenVon, obersteAuswahl, pfadVon, sichtbareEintraege, zielOrdner } from './tresorOrdner'
-import type { VaultItem } from './vaultStore'
+import type { VaultItem } from './vaultEintrag'
 
 const ordner = (id: string, service: string, eltern?: string) => ({ id, service, category: 'ordner', ordner: eltern }) as VaultItem
 const datei = (id: string, eltern?: string) => ({ id, service: `${id}.txt`, category: 'datei', ordner: eltern }) as VaultItem

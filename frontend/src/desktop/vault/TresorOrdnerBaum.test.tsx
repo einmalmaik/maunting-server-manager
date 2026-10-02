@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
 import { TresorOrdnerBaum } from './TresorOrdnerBaum'
-import type { VaultItem } from './vaultStore'
+import type { VaultItem } from './vaultEintrag'
 
 const ordner = (id: string, service: string, eltern?: string) => ({ id, service, category: 'ordner', ordner: eltern }) as VaultItem
 

@@ -1293,13 +1293,7 @@ def data_export(
     # (`vault_service.tresor_konto`, danach im Prozess gemerkt). Ist der Sidecar
     # weg, scheitert der Export, und zwar bevor der Nachweis verbraucht ist:
     # ein App-Code oder eine Passkey-Challenge gilt nur einmal.
-    try:
-        vault_service.tresor_konto(user.id)
-    except DisSidecarError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Der Export ist gerade nicht möglich. Bitte später erneut versuchen.",
-        ) from exc
+    vault_service.tresor_konto_oder_503(user.id, "Der Export ist gerade nicht möglich. Bitte später erneut versuchen.")
 
     if user.two_factor_enabled:
         if not passkey_service.zweiter_faktor_bestaetigt(
@@ -1356,13 +1350,9 @@ def delete_account(
     # Wie beim Export: den Tresor findet die Loeschung nur ueber den Index aus
     # dem Sidecar. Fehlt er, scheitert sie hier, bevor der zweite Faktor
     # verbraucht ist (bis 02.10.2026 erst danach).
-    try:
-        vault_service.tresor_konto(user.id)
-    except DisSidecarError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Der Tresor ist gerade nicht erreichbar, das Konto kann deshalb nicht gelöscht werden.",
-        ) from exc
+    vault_service.tresor_konto_oder_503(
+        user.id, "Der Tresor ist gerade nicht erreichbar, das Konto kann deshalb nicht gelöscht werden."
+    )
 
     if user.has_password:
         if not req.password:

@@ -11,7 +11,8 @@ import i18n from '@/i18n'
 import { useToastStore } from '@/stores/toastStore'
 import { usePromptStore } from '@/stores/promptStore'
 import { TresorGalerie, nachbarKachel } from './TresorGalerie'
-import { useVaultStore, type VaultItem } from './vaultStore'
+import { useVaultStore } from './vaultStore'
+import { type VaultItem } from './vaultEintrag'
 
 vi.mock('../tauri', () => ({
   FACH_TRESOR: 'vault_biometric_key',
