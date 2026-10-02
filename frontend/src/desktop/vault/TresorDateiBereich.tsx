@@ -203,7 +203,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
   const aufGeraet = (item: VaultItem) => dateiAufsGeraet(item, userKey)
 
   const offlineUmschalten = async (item: VaultItem) => {
-    if (!item.datei) return
+    if (!item.datei || !userKey) return
     const kopf = item.datei.original
     if (offline.has(kopf.id)) {
       await offlineLoesen(kopf.id)
@@ -212,7 +212,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
     }
     setHolt((h) => ({ ...h, [item.id]: 0 }))
     try {
-      await offlineAnheften(kopf, (anteil) => setHolt((h) => ({ ...h, [item.id]: anteil })))
+      await offlineAnheften(kopf, item.id, userKey, (anteil) => setHolt((h) => ({ ...h, [item.id]: anteil })))
       toast.success(t('mss.vault.dateien.offlineFertig', { name: item.service }))
     } catch {
       toast.error(t('mss.vault.dateien.offlineFehler'))
@@ -297,7 +297,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
   /** Heftet alle Dateien in und unter `liste` an, oder löst sie, wenn schon alle angeheftet sind. */
   const offlineSammel = async (liste: VaultItem[]) => {
     const dateien = dateienUnter(liste, sichtbareItems)
-    if (dateien.length === 0) return
+    if (dateien.length === 0 || !userKey) return
     const da = await angeheftet(dateien.map((d) => d.item.datei!.original.id))
     if (dateien.every((d) => da.has(d.item.datei!.original.id))) {
       for (const d of dateien) await offlineLoesen(d.item.datei!.original.id)
@@ -312,7 +312,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
       for (const d of fehlen) {
         const groesse = d.item.datei!.original.echt
         try {
-          await offlineAnheften(d.item.datei!.original, (anteil) => setSammel({ text, anteil: (erledigt + anteil * groesse) / gesamt }))
+          await offlineAnheften(d.item.datei!.original, d.item.id, userKey, (anteil) => setSammel({ text, anteil: (erledigt + anteil * groesse) / gesamt }))
         } catch {
           fehler += 1
         }

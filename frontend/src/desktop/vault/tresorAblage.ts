@@ -41,11 +41,11 @@ export interface StoredEncryptedEntry {
   stand?: number
   /**
    * Die Revision, die der Server dieser Fassung zuletzt gegeben hat. `revision`
-   * zählt nach dem Speichern lokal weiter; das endgültige Löschen braucht aber
-   * die Zahl des Servers, um eine fremde Änderung zu erkennen.
+   * zählt nach dem Speichern lokal weiter; jede Änderung braucht aber die Zahl
+   * des Servers, um eine fremde Änderung zu erkennen.
    */
   serverRev?: number
-  /** Nur in der Warteschlange: Löschen und Dateiänderungen gelten nur auf dieser Serverrevision. */
+  /** Nur in der Warteschlange: jede Änderung an einem bestehenden Eintrag gilt nur auf dieser Serverrevision. */
   expected_revision?: number
   /** Nur in der Warteschlange: die Fassung vom Server, auf der die Änderung aufsetzt, für den Konfliktfall. */
   vorher?: StoredEncryptedEntry

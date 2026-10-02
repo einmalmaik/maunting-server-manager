@@ -623,25 +623,44 @@ function laengePasst(kopf: BlobKopf, index: number, daten: Uint8Array): boolean 
 }
 
 /**
- * Heftet ein Original an und lädt sein Chiffrat auf das Gerät. Entschlüsselt
- * wird dabei nichts; es braucht keinen Schlüssel, geprüft wird nur die Länge.
+ * Heftet ein Original an und lädt sein Chiffrat auf das Gerät. Jeder Chunk
+ * wird vorher probeweise entschlüsselt und der Klartext gleich genullt: bis
+ * 02.10.2026 zählte nur die Länge, und ein kaputter oder fremder Chunk
+ * derselben Größe galt als angeheftet, ließ sich offline aber nie öffnen.
  *
- * Scheitert es (Netz weg, abgebrochen, falsche Länge), gilt das Original nicht
- * als angeheftet, und der Fehler geht an den Aufrufer. Was schon geholt war,
- * fällt wieder heraus; war das Original vorher zuletzt geöffnet, bleibt es
- * das, und die Chunks zählen gegen `ZULETZT_GRENZE`.
+ * Scheitert es (Netz weg, abgebrochen, nicht zu öffnen), gilt das Original
+ * nicht als angeheftet, und der Fehler geht an den Aufrufer. Was schon geholt
+ * war, fällt wieder heraus; war das Original vorher zuletzt geöffnet, bleibt
+ * es das, und die Chunks zählen gegen `ZULETZT_GRENZE`.
  */
-export async function offlineAnheften(kopf: BlobKopf, fortschritt?: (anteil: number) => void, signal?: AbortSignal): Promise<void> {
+export async function offlineAnheften(
+  kopf: BlobKopf,
+  eintragId: string,
+  userKey: CryptoKey,
+  fortschritt?: (anteil: number) => void,
+  signal?: AbortSignal,
+): Promise<void> {
   const db = await ablageOderFehler()
+  const schluessel = await blobSchluessel(kopf, userKey, eintragId)
   const vorher = (await anfrage(db.transaction(OFFLINE).objectStore(OFFLINE).get(kopf.id))) as OfflineZeile | undefined
   await schreiben(db, OFFLINE, (s) => s.put({ blobId: kopf.id, angeheftet: true, zuletzt: Date.now(), bytes: chiffratGroesse(kopf.groesse) } satisfies OfflineZeile))
+  const oeffnetSich = async (daten: Uint8Array, index: number) => {
+    try {
+      ;(await chunkEntschluesseln(daten, kopf, index, schluessel, eintragId)).fill(0)
+      return true
+    } catch {
+      return false
+    }
+  }
   try {
     const anzahl = chunkAnzahl(kopf.groesse)
     for (let index = 0; index < anzahl; index++) {
       signal?.throwIfAborted()
-      if (!(await lokalesChiffrat(db, kopf.id, index))) {
+      const lokal = await lokalesChiffrat(db, kopf.id, index)
+      // Auch was schon hier liegt: Miniaturen ohne Schlüssel kamen ungeprüft in den Cache.
+      if (!lokal || !(await oeffnetSich(lokal, index))) {
         const daten = await chunkLaden(kopf.id, index, signal)
-        if (!laengePasst(kopf, index, daten)) throw new Error('Chunk hat die falsche Länge')
+        if (!(await oeffnetSich(daten, index))) throw new Error('Chunk lässt sich nicht öffnen')
         await schreiben(db, BLOB_CACHE, (s) => s.put({ blobId: kopf.id, index, daten } satisfies ChunkZeile))
       }
       fortschritt?.((index + 1) / anzahl)

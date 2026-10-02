@@ -77,13 +77,32 @@ pub struct Offen {
 fn ist_unsichtbar(z: char) -> bool {
     matches!(
         z,
-        '\u{061C}'
+        '\u{00AD}'
+            | '\u{034F}'
+            | '\u{061C}'
+            | '\u{115F}'..='\u{1160}'
+            | '\u{17B4}'..='\u{17B5}'
             | '\u{180E}'
             | '\u{200B}'..='\u{200F}'
-            | '\u{202A}'..='\u{202E}'
-            | '\u{2060}'..='\u{2069}'
+            | '\u{2028}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{3164}'
             | '\u{FEFF}'
+            | '\u{FFA0}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0000}'..='\u{E007F}'
     )
+}
+
+/// Windows-Gerätenamen gelten mit jeder Endung (`aux.txt`).
+fn ist_geraetename(name: &str) -> bool {
+    let stamm = name.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    matches!(stamm.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
+        || ((stamm.starts_with("COM") || stamm.starts_with("LPT"))
+            && stamm.chars().count() == 4
+            && stamm.chars().nth(3).is_some_and(|z| z.is_ascii_digit() || "¹²³".contains(z)))
 }
 
 /// Der vorgeschlagene Name. Pfadteile, Steuer- und Richtungszeichen und die
@@ -101,6 +120,8 @@ pub fn sicherer_dateiname(vorschlag: &str) -> String {
     let name = kuerzen(name.trim().trim_start_matches('.').trim_end_matches(['.', ' ']));
     if name.is_empty() {
         "datei".to_string()
+    } else if ist_geraetename(&name) {
+        kuerzen(&format!("_{name}"))
     } else {
         name
     }
@@ -164,15 +185,26 @@ fn waisen_aufraeumen(marken: &Path) {
     };
     for eintrag in eintraege.flatten() {
         let marke = eintrag.path();
+        let zufall = eintrag.file_name().to_string_lossy().into_owned();
         let erledigt = match std::fs::read_to_string(&marke) {
-            Ok(teil) if ist_teildatei(Path::new(&teil)) => match std::fs::symlink_metadata(&teil) {
-                Ok(art) if art.is_file() => entfernt(std::fs::remove_file(&teil)),
-                // Ordner oder Verknüpfung: nicht von der App.
-                Ok(_) => true,
-                Err(fehler) => fehler.kind() == io::ErrorKind::NotFound,
-            },
+            Ok(teil) if ist_teildatei(Path::new(&teil), &zufall) => {
+                // Zeigt der Pfad heute noch dorthin, wo die App die Datei anlegte?
+                // Ein Ordner im Pfad, der seitdem gegen eine Junction getauscht
+                // wurde, führt woandershin.
+                match std::fs::canonicalize(&teil) {
+                    Ok(echt) if echt == Path::new(&teil) => match std::fs::symlink_metadata(&teil) {
+                        Ok(art) if art.is_file() => entfernt(std::fs::remove_file(&teil)),
+                        // Ordner oder Verknüpfung: nicht von der App.
+                        Ok(_) => true,
+                        Err(fehler) => fehler.kind() == io::ErrorKind::NotFound,
+                    },
+                    Ok(_) => true,
+                    Err(fehler) => fehler.kind() == io::ErrorKind::NotFound,
+                }
+            }
             Ok(_) => true,
-            Err(_) => false,
+            // Kein Text: keine Marke dieser App.
+            Err(fehler) => fehler.kind() == io::ErrorKind::InvalidData,
         };
         if erledigt {
             let _ = std::fs::remove_file(&marke);
@@ -181,15 +213,20 @@ fn waisen_aufraeumen(marken: &Path) {
 }
 
 /// Sieht der Pfad aus wie eine Teildatei, die `daneben_oeffnen` anlegt?
-fn ist_teildatei(pfad: &Path) -> bool {
+fn ist_teildatei(pfad: &Path, marke: &str) -> bool {
     let Some(name) = pfad.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
     pfad.is_absolute()
+        && pfad
+            .components()
+            .all(|teil| !matches!(teil, std::path::Component::ParentDir | std::path::Component::CurDir))
         && name
             .strip_suffix(".part")
             .and_then(|rest| rest.rsplit_once('.'))
-            .is_some_and(|(_, zufall)| !zufall.is_empty() && zufall.chars().all(|z| z.is_ascii_hexdigit()))
+            .is_some_and(|(_, zufall)| {
+                zufall == marke && zufall.len() >= 24 && zufall.chars().all(|z| z.is_ascii_hexdigit())
+            })
 }
 
 /// Nimmt Vorgänge heraus, für die seit `LIEGEN_GELASSEN` kein Teil kam. Für sie
@@ -345,15 +382,28 @@ fn daneben_oeffnen(ziel: &Path, marken: &Path) -> io::Result<Vorgang> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Ziel ohne Dateinamen"))?;
     let zeit = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let zufall = format!("{zeit:x}{:08x}{:x}", std::process::id(), ZAEHLER.fetch_add(1, Ordering::Relaxed));
-    let mut teilname = name.to_os_string();
-    teilname.push(format!(".{zufall}.part"));
-    let teil = ziel.with_file_name(teilname);
-    // Die Marke hält den Pfad als Text; ohne absoluten UTF-8-Pfad ginge das nicht.
-    let pfad = teil
+    let name = name
         .to_str()
-        .filter(|_| teil.is_absolute())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Ziel ohne lesbaren Pfad"))?
-        .to_string();
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Ziel ohne lesbaren Namen"))?;
+    // Ein Name hat höchstens 255 UTF-16-Einheiten; die Endung `.<zufall>.part`
+    // darf ein Ziel, das selbst passt, nicht darüber heben.
+    let endung = format!(".{zufall}.part");
+    let mut platz = 255usize.saturating_sub(endung.len());
+    let mut teilname: String = name
+        .chars()
+        .take_while(|z| match platz.checked_sub(z.len_utf16()) {
+            Some(rest) => {
+                platz = rest;
+                true
+            }
+            None => false,
+        })
+        .collect();
+    teilname.push_str(&endung);
+    let teil = ziel.with_file_name(teilname);
+    if !teil.is_absolute() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Ziel ohne absoluten Pfad"));
+    }
     let mut optionen = std::fs::OpenOptions::new();
     optionen.write(true).create_new(true);
     // Windows: solange die Datei offen ist, löscht sie kein anderer Prozess,
@@ -362,7 +412,14 @@ fn daneben_oeffnen(ziel: &Path, marken: &Path) -> io::Result<Vorgang> {
     std::os::windows::fs::OpenOptionsExt::share_mode(&mut optionen, 0x1);
     let datei = optionen.open(&teil)?;
     let marke = marken.join(&zufall);
-    let gemerkt = std::fs::create_dir_all(marken).and_then(|_| {
+    // Die Marke hält den aufgelösten Pfad; das Aufräumen löscht nur, wenn er
+    // sich heute noch genauso auflöst.
+    let pfad = std::fs::canonicalize(&teil).and_then(|echt| {
+        echt.to_str()
+            .map(str::to_string)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Ziel ohne lesbaren Pfad"))
+    });
+    let gemerkt = pfad.and_then(|pfad| std::fs::create_dir_all(marken).map(|_| pfad)).and_then(|pfad| {
         let mut notiz = std::fs::OpenOptions::new().write(true).create_new(true).open(&marke)?;
         notiz.write_all(pfad.as_bytes())?;
         notiz.sync_all()
@@ -655,5 +712,492 @@ mod tests {
         assert_eq!(sicherer_dateiname(&ohne), ohne.chars().take(120).collect::<String>());
         // Kurze Namen bleiben, wie sie sind.
         assert_eq!(sicherer_dateiname("bericht.tar.gz"), "bericht.tar.gz");
+    }
+}
+
+#[cfg(test)]
+mod angriff {
+    //! Negativtests aus der Sicherheitsprüfung vom 02.10.2026. Jeder Test hat
+    //! seinen eigenen Ordner; geteilter Zustand ist nur der Zähler in
+    //! `daneben_oeffnen` (atomar), deshalb ohne Test-Sperre.
+    use super::*;
+
+    fn ordner(zweck: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let zufall = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let temp = std::env::temp_dir().to_string_lossy().replace('/', "\\");
+        let basis = PathBuf::from(temp).join(format!("msm-angriff-{zweck}-{zufall:x}"));
+        let ziel = basis.join("ziel");
+        std::fs::create_dir_all(&ziel).unwrap();
+        (basis.clone(), ziel, basis.join("marken"))
+    }
+
+    fn marke(marken: &Path, name: &str, inhalt: &[u8]) -> PathBuf {
+        std::fs::create_dir_all(marken).unwrap();
+        let pfad = marken.join(name);
+        std::fs::write(&pfad, inhalt).unwrap();
+        pfad
+    }
+
+    fn weg(basis: PathBuf) {
+        let _ = std::fs::remove_dir_all(basis);
+    }
+
+    fn inhalt(ordner: &Path) -> Vec<String> {
+        let Ok(eintraege) = std::fs::read_dir(ordner) else {
+            return Vec::new();
+        };
+        let mut namen: Vec<String> =
+            eintraege.map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        namen.sort();
+        namen
+    }
+
+    fn junction(link: &Path, ziel: &Path) -> bool {
+        std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(ziel)
+            .output()
+            .map(|a| a.status.success())
+            .unwrap_or(false)
+    }
+
+    // ------------------------------------------------------------------
+    // Befunde (am Stand 1493f41a rot)
+    // ------------------------------------------------------------------
+
+    /// Eine Marke, die nicht von `daneben_oeffnen` stammt, zeigt auf eine
+    /// fremde Datei, die nur nach dem Muster `<name>.<hex>.part` heißt.
+    #[test]
+    fn b1_marke_auf_fremde_teilartige_datei_loescht_sie_nicht() {
+        let (basis, ziel, marken) = ordner("b1");
+        let fremd = ziel.join("Diplomarbeit.docx.1a2b.part");
+        std::fs::write(&fremd, b"fremd").unwrap();
+        marke(&marken, "beliebig", fremd.to_str().unwrap().as_bytes());
+
+        waisen_aufraeumen(&marken);
+
+        let noch_da = fremd.exists();
+        weg(basis);
+        assert!(noch_da, "fremde Datei per Marke geloescht: {fremd:?}");
+    }
+
+    /// Dieselbe fremde Datei, erreicht über `..` im Markenpfad.
+    #[test]
+    fn b1_marke_mit_punktpunkt_loescht_nichts_ausserhalb() {
+        let (basis, ziel, marken) = ordner("b1pp");
+        let fremd = basis.join("Diplomarbeit.docx.1a2b.part");
+        std::fs::write(&fremd, b"fremd").unwrap();
+        let ueber = format!("{}\\gibtsnicht\\..\\..\\Diplomarbeit.docx.1a2b.part", ziel.display());
+        marke(&marken, "pp", ueber.as_bytes());
+
+        waisen_aufraeumen(&marken);
+
+        let noch_da = fremd.exists();
+        weg(basis);
+        assert!(noch_da, "fremde Datei ueber `..` geloescht");
+    }
+
+    /// Dieselbe fremde Datei als Verbatim-Pfad `\\?\D:\…`.
+    #[cfg(windows)]
+    #[test]
+    fn b1_marke_als_verbatim_pfad_loescht_nichts() {
+        let (basis, ziel, marken) = ordner("b1vb");
+        let fremd = ziel.join("bild.png.abcdef.part");
+        std::fs::write(&fremd, b"fremd").unwrap();
+        marke(&marken, "vb", format!("\\\\?\\{}", fremd.display()).as_bytes());
+
+        waisen_aufraeumen(&marken);
+
+        let noch_da = fremd.exists();
+        weg(basis);
+        assert!(noch_da, "fremde Datei ueber verbatim-Pfad geloescht");
+    }
+
+    /// Dieselbe fremde Datei über eine UNC-Freigabe (`\\localhost\D$\…`). Ist
+    /// die Admin-Freigabe nicht erreichbar, sagt der Test das und prüft nichts.
+    #[cfg(windows)]
+    #[test]
+    fn b1_marke_als_unc_pfad_loescht_nichts() {
+        let (basis, ziel, marken) = ordner("b1unc");
+        let fremd = ziel.join("bild.png.abcdef.part");
+        std::fs::write(&fremd, b"fremd").unwrap();
+        let lokal = fremd.to_str().unwrap().to_string();
+        let unc = format!("\\\\localhost\\{}${}", &lokal[..1], &lokal[2..]);
+        if std::fs::metadata(&unc).is_err() {
+            eprintln!("UNC nicht erreichbar, uebersprungen: {unc}");
+            weg(basis);
+            return;
+        }
+        marke(&marken, "unc", unc.as_bytes());
+
+        waisen_aufraeumen(&marken);
+
+        let noch_da = fremd.exists();
+        weg(basis);
+        assert!(noch_da, "fremde Datei ueber UNC geloescht: {unc}");
+    }
+
+    /// Echte Marke der App (Absturz mitten im Speichern). Danach wird der
+    /// Zielordner gegen eine Junction auf einen fremden Ordner getauscht, in dem
+    /// eine Datei gleichen Namens liegt.
+    #[cfg(windows)]
+    #[test]
+    fn b1_echte_marke_nach_ordnertausch_gegen_junction_loescht_nichts() {
+        let (basis, ziel, marken) = ordner("b1j");
+        let abzweig = ziel.join("abzweig");
+        std::fs::create_dir_all(&abzweig).unwrap();
+        let vorgang = daneben_oeffnen(&abzweig.join("x.pdf"), &marken).unwrap();
+        let teilname = match &vorgang.ablage {
+            Ablage::Pfad { teil, .. } => teil.file_name().unwrap().to_owned(),
+            Ablage::Adresse(_) => unreachable!(),
+        };
+        drop(vorgang); // Absturz: weder ende noch verwerfen.
+        std::fs::remove_dir_all(&abzweig).unwrap();
+        let anderswo = basis.join("anderswo");
+        std::fs::create_dir_all(&anderswo).unwrap();
+        let fremd = anderswo.join(&teilname);
+        std::fs::write(&fremd, b"fremd").unwrap();
+        assert!(junction(&abzweig, &anderswo), "Junction liess sich nicht anlegen");
+
+        waisen_aufraeumen(&marken);
+
+        let noch_da = fremd.exists();
+        let _ = std::fs::remove_dir(&abzweig);
+        weg(basis);
+        assert!(noch_da, "Datei hinter einer Junction geloescht");
+    }
+
+    /// Unsichtbare Formatzeichen, die nicht in `ist_unsichtbar` stehen.
+    #[test]
+    fn b2_weitere_unsichtbare_zeichen_fallen_weg() {
+        let mut bleiben = Vec::new();
+        for z in [
+            '\u{00AD}', '\u{034F}', '\u{2028}', '\u{2029}', '\u{206A}', '\u{206F}', '\u{FFF9}',
+            '\u{FFFB}', '\u{E0001}', '\u{E0041}', '\u{1D173}',
+        ] {
+            let name = sicherer_dateiname(&format!("a{z}b.txt"));
+            if name != "ab.txt" {
+                bleiben.push(format!("U+{:04X}", z as u32));
+            }
+        }
+        assert!(bleiben.is_empty(), "bleiben im Dateinamen: {bleiben:?}");
+    }
+
+    /// Reservierte Windows-Gerätenamen bleiben im Vorschlag stehen.
+    #[test]
+    fn b3_reservierte_windows_namen_werden_nicht_vorgeschlagen() {
+        const RESERVIERT: [&str; 22] = [
+            "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        ];
+        let mut durch = Vec::new();
+        for vorschlag in ["CON", "nul", "aux.txt", "COM1.pdf", "lpt9.tar.gz", "Prn . "] {
+            let name = sicherer_dateiname(vorschlag);
+            let stamm = name.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+            if RESERVIERT.contains(&stamm.as_str()) {
+                durch.push(format!("{vorschlag:?} -> {name:?}"));
+            }
+        }
+        assert!(durch.is_empty(), "reservierte Namen vorgeschlagen: {durch:?}");
+    }
+
+    /// Was passiert, wenn der Dialog trotzdem `…\CON` liefert?
+    #[cfg(windows)]
+    #[test]
+    fn b3_reservierter_name_als_ziel_schreibt_in_keine_geraetedatei() {
+        let (basis, ziel, marken) = ordner("b3z");
+        let ergebnis = daneben_oeffnen(&ziel.join("CON"), &marken);
+        let angelegt = inhalt(&ziel);
+        if let Ok(mut vorgang) = ergebnis {
+            let geschrieben = vorgang.datei.write_all(b"Klartext");
+            let fertig = abschliessen(vorgang).map_err(|(f, _)| f);
+            eprintln!("CON: angelegt {angelegt:?}, schreiben {geschrieben:?}, ende {fertig:?}, danach {:?}", inhalt(&ziel));
+        } else {
+            eprintln!("CON: daneben_oeffnen scheitert: {:?}", ergebnis.err());
+        }
+        let m = inhalt(&marken);
+        weg(basis);
+        assert!(m.is_empty(), "Marke bleibt liegen: {m:?}");
+    }
+
+    /// Ein Name, den `sicherer_dateiname` selbst liefert (Emoji: 2 UTF-16-
+    /// Einheiten je Zeichen), lässt sich am Ziel anlegen, die Teildatei
+    /// daneben aber nicht: `.<zufall>.part` hebt sie über 255 Einheiten.
+    #[test]
+    fn b4_vorgeschlagener_langer_name_laesst_sich_speichern() {
+        let (basis, ziel, marken) = ordner("b4");
+        let name = sicherer_dateiname(&format!("{}.jpg", "\u{1F600}".repeat(200)));
+        let pfad = ziel.join(&name);
+        // Das Betriebssystem nimmt den Namen selbst an.
+        std::fs::write(&pfad, b"x").unwrap();
+        std::fs::remove_file(&pfad).unwrap();
+
+        let ergebnis = daneben_oeffnen(&pfad, &marken).map(|_| ());
+
+        weg(basis);
+        assert!(ergebnis.is_ok(), "Speichern unter dem Vorschlag scheitert: {ergebnis:?}");
+    }
+
+    /// Dasselbe mit einem langen Namen, den der Mensch im Dialog tippt.
+    #[test]
+    fn b4_im_dialog_getippter_langer_name_laesst_sich_speichern() {
+        let (basis, ziel, marken) = ordner("b4d");
+        let pfad = ziel.join(format!("{}.pdf", "a".repeat(240)));
+        std::fs::write(&pfad, b"x").unwrap();
+        std::fs::remove_file(&pfad).unwrap();
+
+        let ergebnis = daneben_oeffnen(&pfad, &marken).map(|_| ());
+
+        weg(basis);
+        assert!(ergebnis.is_ok(), "Speichern unter 244 Zeichen scheitert: {ergebnis:?}");
+    }
+
+    /// Eine Marke, die kein UTF-8 ist, bleibt bei jedem Start liegen.
+    #[test]
+    fn b5_kaputte_marke_bleibt_nicht_ewig_liegen() {
+        let (basis, _ziel, marken) = ordner("b5");
+        let kaputt = marke(&marken, "kaputt", &[0xff, 0xfe, 0x00, 0xc3]);
+
+        waisen_aufraeumen(&marken);
+        waisen_aufraeumen(&marken);
+
+        let liegt = kaputt.exists();
+        weg(basis);
+        assert!(!liegt, "kaputte Marke liegt nach zwei Starts noch");
+    }
+
+    // ------------------------------------------------------------------
+    // Geprüft, hält
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn h_leere_riesige_und_umbrochene_marken_loeschen_nichts() {
+        let (basis, ziel, marken) = ordner("hm");
+        let fremd = ziel.join("a.txt");
+        std::fs::write(&fremd, b"bleibt").unwrap();
+        marke(&marken, "leer", b"");
+        marke(&marken, "riesig", &vec![b'a'; 8 * 1024 * 1024]);
+        marke(&marken, "zeile", format!("{}\n", fremd.display()).as_bytes());
+        marke(&marken, "relativ", b"..\\..\\x.1a2b.part");
+        marke(&marken, "nur_part", format!("{}\\.part", ziel.display()).as_bytes());
+        marke(&marken, "ohne_hex", format!("{}\\a.txt.xyz.part", ziel.display()).as_bytes());
+        marke(&marken, "leerer_zufall", format!("{}\\a.txt..part", ziel.display()).as_bytes());
+        std::fs::write(ziel.join("a.txt.xyz.part"), b"bleibt").unwrap();
+        std::fs::write(ziel.join("a.txt..part"), b"bleibt").unwrap();
+
+        waisen_aufraeumen(&marken);
+
+        let liegt = inhalt(&ziel);
+        let marken_rest = inhalt(&marken);
+        weg(basis);
+        assert_eq!(liegt, vec!["a.txt", "a.txt..part", "a.txt.xyz.part"]);
+        assert!(marken_rest.is_empty(), "{marken_rest:?}");
+    }
+
+    #[test]
+    fn h_marke_die_selbst_ein_ordner_ist_bleibt_und_loescht_nichts() {
+        let (basis, ziel, marken) = ordner("hmo");
+        std::fs::create_dir_all(marken.join("ordner")).unwrap();
+        std::fs::write(ziel.join("a.txt"), b"x").unwrap();
+        waisen_aufraeumen(&marken);
+        let liegt = inhalt(&ziel);
+        let m = inhalt(&marken);
+        weg(basis);
+        assert_eq!(liegt, vec!["a.txt"]);
+        assert_eq!(m, vec!["ordner"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn h_junction_die_wie_teildatei_heisst_wird_nicht_angefasst() {
+        let (basis, ziel, marken) = ordner("hj");
+        let anderswo = basis.join("anderswo");
+        std::fs::create_dir_all(&anderswo).unwrap();
+        std::fs::write(anderswo.join("wichtig.txt"), b"x").unwrap();
+        let als_teil = ziel.join("x.pdf.1a2b.part");
+        assert!(junction(&als_teil, &anderswo));
+        marke(&marken, "j", als_teil.to_str().unwrap().as_bytes());
+        waisen_aufraeumen(&marken);
+        let junction_da = std::fs::symlink_metadata(&als_teil).is_ok();
+        let wichtig = anderswo.join("wichtig.txt").exists();
+        let _ = std::fs::remove_dir(&als_teil);
+        weg(basis);
+        assert!(junction_da && wichtig);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn h_symlink_der_wie_teildatei_heisst_wird_nicht_angefasst() {
+        let (basis, ziel, marken) = ordner("hs");
+        let wichtig = basis.join("wichtig.txt");
+        std::fs::write(&wichtig, b"x").unwrap();
+        let als_teil = ziel.join("x.pdf.1a2b.part");
+        if std::os::windows::fs::symlink_file(&wichtig, &als_teil).is_err() {
+            eprintln!("Symlink braucht Rechte, uebersprungen");
+            weg(basis);
+            return;
+        }
+        marke(&marken, "s", als_teil.to_str().unwrap().as_bytes());
+        waisen_aufraeumen(&marken);
+        let link = std::fs::symlink_metadata(&als_teil).is_ok();
+        let ziel_da = wichtig.exists();
+        weg(basis);
+        assert!(link && ziel_da);
+    }
+
+    /// Ein zweiter Start (zweite Instanz) räumt nicht weg, was die erste
+    /// gerade schreibt.
+    #[cfg(windows)]
+    #[test]
+    fn h_laufender_vorgang_ueberlebt_das_aufraeumen_einer_zweiten_instanz() {
+        let (basis, ziel, marken) = ordner("hl");
+        let mut vorgang = daneben_oeffnen(&ziel.join("laeuft.pdf"), &marken).unwrap();
+        vorgang.datei.write_all(b"halb").unwrap();
+        waisen_aufraeumen(&marken);
+        vorgang.datei.write_all(b" ganz").unwrap();
+        let m = inhalt(&marken).len();
+        let ergebnis = abschliessen(vorgang).map_err(|(f, _)| f);
+        let gelesen = std::fs::read(ziel.join("laeuft.pdf")).ok();
+        let rest = inhalt(&marken);
+        weg(basis);
+        assert_eq!(m, 1);
+        ergebnis.unwrap();
+        assert_eq!(gelesen.as_deref(), Some(&b"halb ganz"[..]));
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn h_zwei_vorgaenge_auf_dasselbe_ziel() {
+        let (basis, ziel, marken) = ordner("h2");
+        let pfad = ziel.join("doppelt.txt");
+        let mut a = daneben_oeffnen(&pfad, &marken).unwrap();
+        let mut b = daneben_oeffnen(&pfad, &marken).unwrap();
+        a.datei.write_all(b"A").unwrap();
+        b.datei.write_all(b"B").unwrap();
+        let ra = abschliessen(a).map_err(|(f, _)| f);
+        let rb = abschliessen(b).map_err(|(f, _)| f);
+        let liegt = inhalt(&ziel);
+        let gelesen = std::fs::read(&pfad).unwrap();
+        let m = inhalt(&marken);
+        weg(basis);
+        ra.unwrap();
+        rb.unwrap();
+        assert_eq!(liegt, vec!["doppelt.txt"]);
+        assert_eq!(gelesen, b"B");
+        assert!(m.is_empty());
+    }
+
+    #[test]
+    fn h_verwerfen_und_teil_loeschen_doppelt() {
+        let (basis, ziel, marken) = ordner("hd");
+        let vorgang = daneben_oeffnen(&ziel.join("x.txt"), &marken).unwrap();
+        let (teil, marke) = match &vorgang.ablage {
+            Ablage::Pfad { teil, marke, .. } => (teil.clone(), marke.clone()),
+            Ablage::Adresse(_) => unreachable!(),
+        };
+        verwerfen(vorgang).unwrap();
+        teil_loeschen(&teil, &marke);
+        waisen_aufraeumen(&marken);
+        let liegt = inhalt(&ziel);
+        let m = inhalt(&marken);
+        weg(basis);
+        assert!(liegt.is_empty() && m.is_empty());
+    }
+
+    #[test]
+    fn h_relatives_oder_namenloses_ziel_legt_nichts_an() {
+        let (basis, _ziel, marken) = ordner("hr");
+        assert!(daneben_oeffnen(Path::new("relativ.txt"), &marken).is_err());
+        assert!(daneben_oeffnen(Path::new("C:\\"), &marken).is_err());
+        let relativ_angelegt = std::fs::read_dir(".")
+            .unwrap()
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().starts_with("relativ.txt"));
+        let m = inhalt(&marken);
+        weg(basis);
+        assert!(!relativ_angelegt);
+        assert!(m.is_empty());
+    }
+
+    #[test]
+    fn h_ohne_marke_kein_klartext() {
+        let (basis, ziel, _) = ordner("hk");
+        // Der Marken-Ordner ist eine Datei: die Marke lässt sich nicht anlegen.
+        let marken = basis.join("blockiert");
+        std::fs::write(&marken, b"x").unwrap();
+        assert!(daneben_oeffnen(&ziel.join("x.txt"), &marken).is_err());
+        let liegt = inhalt(&ziel);
+        weg(basis);
+        assert!(liegt.is_empty(), "{liegt:?}");
+    }
+
+    #[test]
+    fn h_mehr_als_hoechstens_offen_liegengebliebene() {
+        let (basis, ziel, marken) = ordner("hh");
+        let mut offen = HashMap::new();
+        for n in 0..(HOECHSTENS_OFFEN as u64 * 3) {
+            offen.insert(n, daneben_oeffnen(&ziel.join(format!("{n}.txt")), &marken).unwrap());
+        }
+        // Zeitpunkt vor dem Anlegen: nichts fällt, keine Panik.
+        let frueher = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        assert!(liegengebliebene(&mut offen, frueher).is_empty());
+        let spaeter = Instant::now() + LIEGEN_GELASSEN + Duration::from_secs(1);
+        let alt = liegengebliebene(&mut offen, spaeter);
+        assert_eq!(alt.len(), HOECHSTENS_OFFEN * 3);
+        for v in alt {
+            verwerfen(v).unwrap();
+        }
+        let liegt = inhalt(&ziel);
+        let m = inhalt(&marken);
+        weg(basis);
+        assert!(liegt.is_empty() && m.is_empty());
+    }
+
+    #[test]
+    fn h_dateinamen_invarianten() {
+        let verboten = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
+        let mut faelle: Vec<String> = vec![
+            String::new(),
+            ".".into(),
+            "....".into(),
+            " . . ".into(),
+            "\u{0}\u{1f}\u{7f}".into(),
+            "CON".into(),
+            "a.".into(),
+            "a ".into(),
+            "name.endungmitsiebzehn".into(),
+            format!("{}.{}", "a".repeat(200), "b".repeat(10_000)),
+            format!("{}.{}", "a".repeat(10_000), "pdf"),
+            format!("{}.pdf", "e\u{0301}".repeat(200)),
+            format!("{}.pdf", "\u{1F468}\u{200D}\u{1F469}".repeat(100)),
+            format!("{}. .pdf", "a".repeat(300)),
+            format!("{}{}", "a".repeat(119), "\u{0301}".repeat(10)),
+            format!("{} .{}", "x".repeat(300), "y".repeat(16)),
+            format!("{}..{}", ".".repeat(300), "pdf"),
+            "..\\..\\..\\Windows\\win.ini".into(),
+            "\\\\server\\share\\x".into(),
+            "rechnung\u{202E}fdp.exe".into(),
+        ];
+        for n in 0..200u32 {
+            faelle.push(format!("{}{}", "\u{00E4}".repeat(n as usize), ".x".repeat((n % 7) as usize)));
+        }
+        for vorschlag in faelle {
+            let name = sicherer_dateiname(&vorschlag);
+            assert!(!name.is_empty(), "{vorschlag:?}");
+            assert!(name.chars().count() <= HOECHSTENS_NAME, "{vorschlag:?} -> {name:?}");
+            assert!(!name.ends_with(['.', ' ']), "{vorschlag:?} -> {name:?}");
+            assert!(!name.starts_with('.'), "{vorschlag:?} -> {name:?}");
+            assert!(!name.contains(verboten), "{vorschlag:?} -> {name:?}");
+            assert!(!name.chars().any(|z| z.is_control() || ist_unsichtbar(z)), "{vorschlag:?}");
+        }
+        // Kürzen am Kombinationszeichen: Zeichengrenze, keine Panik, Endung bleibt.
+        let name = sicherer_dateiname(&format!("{}.pdf", "e\u{0301}".repeat(200)));
+        assert!(name.ends_with(".pdf"));
+        // Endung genau 16 bleibt, 17 nicht.
+        let n16 = sicherer_dateiname(&format!("{}.{}", "a".repeat(200), "b".repeat(16)));
+        assert!(n16.ends_with(&format!(".{}", "b".repeat(16))));
+        let n17 = sicherer_dateiname(&format!("{}.{}", "a".repeat(200), "b".repeat(17)));
+        assert_eq!(n17, "a".repeat(120));
     }
 }

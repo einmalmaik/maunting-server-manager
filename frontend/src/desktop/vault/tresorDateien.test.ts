@@ -7,13 +7,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import 'fake-indexeddb/auto'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
-import { getPendingQueue, useVaultStore, type VaultBlindSyncPayload } from './vaultStore'
-import { fassungenZusammenfuehren, umschlagAusItem, VAULT_TOMBSTONE_MARKER, type VaultItem } from './vaultEintrag'
-import { encryptVaultEntry } from './vaultCrypto'
-import { ablageDb, ablageLaden, ablageSchliessen, BLOB_CACHE, OFFLINE, UPLOAD_CHUNKS, UPLOADS } from './tresorAblage'
+import { EINTRAG_MAX_ZEICHEN, getPendingQueue, useVaultStore, type VaultBlindSyncPayload } from './vaultStore'
+import { ALBUM_HOECHSTENS, fassungenZusammenfuehren, itemAusUmschlag, umschlagAusItem, VAULT_TOMBSTONE_MARKER, type VaultItem } from './vaultEintrag'
+import { decryptVaultEntry, encryptVaultEntry } from './vaultCrypto'
+import {
+  ablageDb,
+  ablageLaden,
+  ablageSchliessen,
+  blobsLesen,
+  blobsSchreiben,
+  BLOB_CACHE,
+  OFFLINE,
+  revisionSchreiben,
+  UPLOAD_CHUNKS,
+  UPLOADS,
+} from './tresorAblage'
 import {
   angeheftet,
   blobLesen,
+  dateiBlobs,
   dateiVorbereiten,
   loeschungenAbarbeiten,
   miniaturenLesen,
@@ -29,6 +41,7 @@ import {
 import { miniaturFreigeben, miniaturHolen } from './tresorMiniaturen'
 import { chiffratGroesse, CHUNK_KLARTEXT, CHUNK_UEBERHANG, type BlobKopf } from './tresorDatei'
 import { aufGeraetSpeichern } from './tresorAnzeige'
+import { useToastStore } from '@/stores/toastStore'
 
 const tauriKern = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => tauriKern)
@@ -929,7 +942,7 @@ describe('Tresor-Dateien', () => {
       const original = item().datei!.original
       expect(await originalImCache(original.id)).toBe(false)
 
-      await offlineAnheften(original)
+      await offlineAnheften(original, id, userKey)
       expect(await angeheftet([original.id, 'f'.repeat(32)])).toEqual(new Set([original.id]))
       server.offline = true
       expect(await (await blobLesen(original, id, userKey, 'text/plain')).text()).toBe('Vertrag')
@@ -973,13 +986,13 @@ describe('Tresor-Dateien', () => {
     it('heftet nicht an, wenn das Holen scheitert, und lässt nichts Halbes liegen', async () => {
       // Bis 02.10.2026 galt die Datei danach als offline verfügbar, obwohl ein Teil fehlte.
       const server = serverStarten()
-      await tresorOeffnen()
+      const userKey = await tresorOeffnen()
       const id = await useVaultStore.getState().dateiHinzufuegen(foto(5 * 1024 * 1024))
       await allesErledigt()
       const original = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.original
 
       await expect(
-        offlineAnheften(original, (anteil) => {
+        offlineAnheften(original, id, userKey, (anteil) => {
           if (anteil < 1) server.offline = true // nach dem ersten Chunk ist das Netz weg
         }),
       ).rejects.toThrow()
@@ -989,12 +1002,12 @@ describe('Tresor-Dateien', () => {
     })
 
     it('legt beim Anheften kein Chiffrat in falscher Länge ab', async () => {
-      const { server, item } = await hochgeladen()
+      const { server, userKey, id, item } = await hochgeladen()
       const original = item().datei!.original
       const blob = server.blobs.get(original.id)!
       blob.chunks.set(0, new Uint8Array([...blob.chunks.get(0)!, 0]))
 
-      await expect(offlineAnheften(original)).rejects.toThrow()
+      await expect(offlineAnheften(original, id, userKey)).rejects.toThrow()
       expect(await originalImCache(original.id)).toBe(false)
       expect(await angeheftet([original.id])).toEqual(new Set())
     })
@@ -1020,13 +1033,13 @@ describe('Tresor-Dateien', () => {
     })
 
     it('nimmt vom Gerät, was kein Eintrag mehr nennt, und lässt Uploads in Ruhe', async () => {
-      const { server, item } = await hochgeladen()
+      const { server, userKey, id, item } = await hochgeladen()
       const weg = item().datei!.original
       const zweite = await useVaultStore.getState().dateiHinzufuegen(new File(['bleibt'], 'b.txt', { type: 'text/plain' }))
       await allesErledigt()
       const bleibt = useVaultStore.getState().items.find((i) => i.id === zweite)!.datei!
-      await offlineAnheften(weg)
-      await offlineAnheften(bleibt.original)
+      await offlineAnheften(weg, id, userKey)
+      await offlineAnheften(bleibt.original, zweite, userKey)
       // Eine dritte wartet offline auf den Upload; ihr Eintrag ist hier noch nicht in `benutzt`.
       server.offline = true
       await useVaultStore.getState().dateiHinzufuegen(new File(['wartet'], 'c.txt', { type: 'text/plain' }))
@@ -1046,7 +1059,7 @@ describe('Tresor-Dateien', () => {
       // Bis 02.10.2026 blieb sie als Chiffrat liegen, auch GB-große Originale.
       const { server, userKey, id, item } = await hochgeladen()
       const original = item().datei!.original
-      await offlineAnheften(original)
+      await offlineAnheften(original, id, userKey)
       expect(await angeheftet([original.id])).toEqual(new Set([original.id]))
 
       server.revision += 1
@@ -1062,7 +1075,7 @@ describe('Tresor-Dateien', () => {
     it('hält eine bearbeitete Datei weiter angeheftet und gibt die alte Fassung frei', async () => {
       const { server, userKey, id, item } = await hochgeladen('eins')
       const alt = item().datei!.original
-      await offlineAnheften(alt)
+      await offlineAnheften(alt, id, userKey)
 
       await useVaultStore.getState().dateiErsetzen(id, new Blob(['zwei'], { type: 'text/plain' }))
       await allesErledigt()
@@ -1076,9 +1089,9 @@ describe('Tresor-Dateien', () => {
     })
 
     it('nimmt eine gelöschte Datei auch vom Gerät', async () => {
-      const { server, id, item } = await hochgeladen()
+      const { server, userKey, id, item } = await hochgeladen()
       const original = item().datei!.original
-      await offlineAnheften(original)
+      await offlineAnheften(original, id, userKey)
 
       await useVaultStore.getState().deleteItem(id)
       await allesErledigt()
@@ -1170,5 +1183,460 @@ describe('Tresor-Dateien', () => {
       expect(r.geschrieben).toHaveLength(1)
       expect(r.ende).toEqual([{ vorgang: 3, abbrechen: true }])
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Review 02.10.2026: Negativtests gegen bösartigen Server und Wettläufe
+// ---------------------------------------------------------------------------
+
+/**
+ * Hält den ersten Verschlüsselungsaufruf mit dieser AAD (der Kennung eines
+ * Eintrags) fest, bis `frei()` kommt. So steht ein Speichern genau zwischen
+ * Lesen und Schreiben.
+ */
+function encryptAnhalten(aad: string) {
+  const subtle = window.crypto.subtle
+  const original = subtle.encrypt.bind(subtle)
+  let loslassen!: () => void
+  const freigabe = new Promise<void>((r) => (loslassen = r))
+  let gestartet!: () => void
+  const angehalten = new Promise<void>((r) => (gestartet = r))
+  let erwischt = false
+  vi.spyOn(subtle, 'encrypt').mockImplementation(async (algo, key, data) => {
+    const roh = (algo as AesGcmParams).additionalData
+    const text = roh ? new TextDecoder().decode(roh as Uint8Array) : ''
+    if (!erwischt && text === aad) {
+      erwischt = true
+      gestartet()
+      await freigabe
+    }
+    return original(algo as AesGcmParams, key, data)
+  })
+  return { angehalten, frei: () => loslassen() }
+}
+
+/** Ersetzt die Antwort auf passende Anfragen; alles andere geht an den nachgebauten Server. */
+function abfangen(passt: (pfad: string, methode: string) => Response | null) {
+  const weiter = vi.mocked(globalThis.fetch).getMockImplementation()!
+  vi.mocked(globalThis.fetch).mockImplementation(async (eingabe, init) => {
+    const pfad = new URL(String(eingabe), 'http://panel.test').pathname
+    const ersatz = passt(pfad, (init?.method ?? 'GET').toUpperCase())
+    if (ersatz) return ersatz
+    return weiter(eingabe, init)
+  })
+}
+
+const synchron = () => vi.waitFor(() => expect(useVaultStore.getState().syncStatus).toBe('synced'))
+const eintrag = (id: string) => useVaultStore.getState().items.find((i) => i.id === id)
+
+describe('Review: Negativtests Tresor-Client', () => {
+  beforeEach(() => {
+    ablageSchliessen()
+    localStorage.clear()
+    globalThis.indexedDB = new IDBFactory()
+    setzeAngemeldetesKonto(1)
+    vi.restoreAllMocks()
+    useTresorUploads.setState({ je: {} })
+    bilder.an = false
+    useVaultStore.setState({ zurueckgesetzt: false })
+  })
+
+  afterEach(() => {
+    ablageSchliessen()
+    setzeAngemeldetesKonto(null)
+    vi.restoreAllMocks()
+  })
+
+  // ---------------- Befunde (am Stand 1493f41a rot) ----------------
+
+  it('R1: endgültiges Löschen während eines Speicherns lässt keinen lebenden Eintrag mit gelöschten Blobs zurück', async () => {
+    const server = serverStarten()
+    await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Vertrag'], 'a.txt', { type: 'text/plain' }))
+    await allesErledigt()
+
+    const halt = encryptAnhalten(id)
+    const umbenennen = useVaultStore.getState().aendern(id, { service: 'b.txt' })
+    await halt.angehalten
+    // Der Mensch löscht endgültig, während das Umbenennen noch verschlüsselt.
+    // Das Löschen wartet, bis das Umbenennen gespeichert ist (`nacheinander`).
+    const loeschen = useVaultStore.getState().deleteItem(id)
+    await new Promise((r) => setTimeout(r, 20))
+    halt.frei()
+    await umbenennen
+    await loeschen
+    await synchron()
+    await useVaultStore.getState().syncWithServer()
+    await loeschungenAbarbeiten(BUCKET)
+    await loeschungenAbarbeiten(BUCKET)
+    for (let i = 0; i < 3; i++) {
+      await useVaultStore.getState().syncWithServer()
+      await synchron()
+      await loeschungenAbarbeiten(BUCKET)
+    }
+
+    const lebtLokal = !!eintrag(id)
+    const lebtOben = !server.eintraege.get(id)!.is_deleted
+    // Nach dem nächsten Entsperren zählt, was im Cache steht.
+    const imCache = blobsLesen(BUCKET).find((b) => b.id === id)
+    const lebtNachEntsperren = !!imCache && !imCache.is_deleted
+    // Gelöscht wurde zuletzt: der Eintrag ist weg, überall (auch im Cache), und mit ihm seine Blobs.
+    expect({ lebtLokal, lebtOben, lebtNachEntsperren, geloescht: server.geloescht.length }).toEqual({
+      lebtLokal: false,
+      lebtOben: false,
+      lebtNachEntsperren: false,
+      geloescht: 3,
+    })
+  })
+
+  it('R1b: wie R1, ohne Anhalten: Favorit setzen und gleich danach endgültig löschen', async () => {
+    const server = serverStarten()
+    await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Vertrag'], 'a.txt', { type: 'text/plain' }))
+    await allesErledigt()
+
+    const favorit = useVaultStore.getState().toggleFavorite(id)
+    await useVaultStore.getState().deleteItem(id)
+    await favorit
+    for (let i = 0; i < 3; i++) {
+      await synchron()
+      await useVaultStore.getState().syncWithServer()
+      await loeschungenAbarbeiten(BUCKET)
+    }
+    const imCache = blobsLesen(BUCKET).find((b) => b.id === id)
+    expect({
+      lebtLokal: !!eintrag(id),
+      lebtOben: !server.eintraege.get(id)!.is_deleted,
+      lebtNachEntsperren: !!imCache && !imCache.is_deleted,
+      geloescht: server.geloescht.length,
+    }).toEqual({ lebtLokal: false, lebtOben: false, lebtNachEntsperren: false, geloescht: 3 })
+  })
+
+  it('R2: ein Speichern belebt keine Datei, die ein anderes Gerät währenddessen gelöscht hat', async () => {
+    const server = serverStarten()
+    const userKey = await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Vertrag'], 'a.txt', { type: 'text/plain' }))
+    await allesErledigt()
+    const kopf = eintrag(id)!.datei!
+
+    const halt = encryptAnhalten(id)
+    const umbenennen = useVaultStore.getState().aendern(id, { service: 'b.txt' }).catch(() => {})
+    await halt.angehalten
+
+    // Gerät B löscht die Datei endgültig samt ihren Blobs.
+    const grab = await encryptVaultEntry({ [VAULT_TOMBSTONE_MARKER]: true, deletedAt: Date.now(), updatedAt: Date.now() + 1000 }, userKey, id)
+    server.revision += 1
+    server.eintraege.set(id, { ciphertext: grab, revision: server.revision, is_deleted: true })
+    for (const k of dateiBlobs(kopf)) server.blobs.get(k.id)!.state = 'geloescht'
+    await useVaultStore.getState().syncWithServer()
+    expect(eintrag(id)).toBeUndefined()
+
+    halt.frei()
+    await umbenennen
+    await synchron()
+    await useVaultStore.getState().syncWithServer()
+
+    // Sonst steht auf dem Server ein lebender Eintrag, dessen Blobs es nicht mehr gibt.
+    expect(server.eintraege.get(id)!.is_deleted).toBe(true)
+    expect(eintrag(id)).toBeUndefined()
+  })
+
+  it('R3: Ersetzen des Inhalts verliert keinen Namen, der kurz davor gespeichert wurde (Punkt 90)', async () => {
+    serverStarten()
+    await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(new File(['alt'], 'a.txt', { type: 'text/plain' }))
+    await allesErledigt()
+
+    const halt = encryptAnhalten(id)
+    const umbenennen = useVaultStore.getState().aendern(id, { service: 'b.txt' })
+    await halt.angehalten
+    const ersetzen = useVaultStore.getState().dateiErsetzen(id, new Blob(['neu!'], { type: 'text/plain' }))
+    // Das Ersetzen hat seine Blobs abgelegt und wartet aufs Speichern.
+    await vi.waitFor(() => expect(useTresorUploads.getState().je[id]).toBeDefined())
+    await new Promise((r) => setTimeout(r, 20))
+    halt.frei()
+    await umbenennen
+    await ersetzen
+
+    expect(eintrag(id)!.datei!.original.echt).toBe(4)
+    expect(eintrag(id)!.service).toBe('b.txt')
+  })
+
+  it('R4: zwei Geräte laufen bei einem Passwort nicht auseinander, wenn die ältere Offline-Änderung später ankommt', async () => {
+    const server = serverStarten()
+    const userKey = await tresorOeffnen()
+    await useVaultStore.getState().saveItem({ id: 'pw', service: 'Bank', password: 'alt', category: 'login' })
+    await synchron()
+    await vi.waitFor(() => expect(getPendingQueue(BUCKET)).toEqual([]))
+
+    // Gerät A (dieses) ändert offline.
+    server.offline = true
+    await useVaultStore.getState().aendern('pw', { password: 'von-A' })
+    await vi.waitFor(() => expect(useVaultStore.getState().syncStatus).toBe('offline'))
+
+    // Gerät B ändert fünf Minuten später und ist zuerst beim Server.
+    const standB = Date.now() + 5 * 60_000
+    const vonB = await encryptVaultEntry(
+      umschlagAusItem({ ...eintrag('pw')!, password: 'von-B', updatedAt: standB }),
+      userKey,
+      'pw',
+    )
+    server.revision += 1
+    const revB = server.revision
+    server.eintraege.set('pw', { ciphertext: vonB, revision: revB, is_deleted: false })
+
+    // A ist wieder im Netz und gleicht ab.
+    server.offline = false
+    useVaultStore.setState({ syncStatus: 'synced' })
+    await useVaultStore.getState().syncWithServer()
+    await synchron()
+
+    // Jetzt gleicht Gerät B ab (eigene Ablage, eigene Fassung als Stand).
+    ablageSchliessen()
+    setzeAngemeldetesKonto(2)
+    await ablageLaden(BUCKET)
+    blobsSchreiben(BUCKET, [{ id: 'pw', ciphertext: vonB, revision: revB, is_deleted: false, stand: standB, serverRev: revB }])
+    revisionSchreiben(BUCKET, revB)
+    useVaultStore.setState({
+      items: [itemAusUmschlag('pw', revB, await decryptVaultEntry(vonB, userKey, 'pw'))],
+      syncStatus: 'synced',
+    })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await useVaultStore.getState().syncWithServer()
+    await synchron()
+
+    const aufDemServer = (await decryptVaultEntry(server.eintraege.get('pw')!.ciphertext, userKey, 'pw')).password
+    const aufB = eintrag('pw')!.password
+    // Server und Gerät B müssen dasselbe Passwort haben.
+    expect({ aufDemServer, aufB }).toEqual({ aufDemServer: aufB, aufB })
+  })
+
+  it('R5: heftet kein Chiffrat an, das sich nicht entschlüsseln lässt (Punkt 81)', async () => {
+    const server = serverStarten()
+    const userKey = await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Vertrag'], 'v.txt', { type: 'text/plain' }))
+    await allesErledigt()
+    const original = eintrag(id)!.datei!.original
+    // Richtige Länge, falscher Inhalt (ein Bit gekippt oder ein fremder Blob derselben Größe).
+    const chunk = server.blobs.get(original.id)!.chunks.get(0)!.slice()
+    chunk[40] ^= 1
+    server.blobs.get(original.id)!.chunks.set(0, chunk)
+
+    await expect(offlineAnheften(original, id, userKey)).rejects.toThrow()
+    expect(await angeheftet([original.id])).toEqual(new Set())
+  })
+
+  // ---------------- geprüft, hält ----------------
+
+  it('G1: verwirft einen Umschlag unter vertauschter entryId', async () => {
+    const server = serverStarten()
+    await tresorOeffnen()
+    await useVaultStore.getState().saveItem({ id: 'pw', service: 'Bank', password: 'echt', category: 'login' })
+    await synchron()
+    const fremd = server.eintraege.get('pw')!
+    server.revision += 1
+    server.eintraege.set('anderer', { ...fremd, revision: server.revision })
+    await useVaultStore.getState().syncWithServer()
+    expect(eintrag('anderer')).toBeUndefined()
+    expect(eintrag('pw')!.password).toBe('echt')
+  })
+
+  it('G2: eine ältere Fassung nach der neueren in derselben Antwort springt nicht zurück', async () => {
+    serverStarten()
+    const userKey = await tresorOeffnen()
+    const alt = await encryptVaultEntry({ service: 'Bank', password: 'alt', updatedAt: 10, createdAt: 1 }, userKey, 'pw')
+    const neu = await encryptVaultEntry({ service: 'Bank', password: 'neu', updatedAt: 20, createdAt: 1 }, userKey, 'pw')
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      json({
+        server_revision: 12,
+        entries: [
+          { id: 'pw', ciphertext: neu, revision: 11, is_deleted: false, updated_at: 'x' },
+          { id: 'pw', ciphertext: alt, revision: 12, is_deleted: false, updated_at: 'x' },
+        ],
+      }),
+    )
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await useVaultStore.getState().syncWithServer()
+    expect(eintrag('pw')!.password).toBe('neu')
+  })
+
+  it('G3: zurückgesetzte server_revision holt nur neu, ohne Rücksprung', async () => {
+    const server = serverStarten()
+    await tresorOeffnen()
+    await useVaultStore.getState().saveItem({ id: 'pw', service: 'Bank', password: 'v1', category: 'login' })
+    await synchron()
+    const v1 = server.eintraege.get('pw')!
+    await useVaultStore.getState().aendern('pw', { password: 'v2' })
+    await synchron()
+    // Der Server vergisst alles nach v1 und meldet eine kleinere Revision.
+    server.eintraege.set('pw', { ...v1, revision: 3 })
+    server.revision = 3
+    useVaultStore.setState({ syncStatus: 'synced' })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await useVaultStore.getState().syncWithServer()
+    expect(eintrag('pw')!.password).toBe('v2')
+  })
+
+  it('G4: Konflikt für eine nie gesendete ID ändert nichts', async () => {
+    serverStarten()
+    await tresorOeffnen()
+    await useVaultStore.getState().saveItem({ id: 'pw', service: 'Bank', password: 'p', category: 'login' })
+    await synchron()
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(json({ server_revision: 99, entries: [], conflicts: ['pw', 'nie-gesendet'] }))
+    await useVaultStore.getState().syncWithServer()
+    expect(eintrag('pw')!.password).toBe('p')
+    expect(getPendingQueue(BUCKET)).toEqual([])
+  })
+
+  it.each([429, 503, 'netz'] as const)('G5: Löschlauf behält seine Aufträge bei %s und holt sie nach', async (fall) => {
+    const server = serverStarten()
+    await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(new File(['x'], 'x.txt', { type: 'text/plain' }))
+    await allesErledigt()
+    let einmal = true
+    abfangen((_pfad, methode) => {
+      if (!einmal || methode !== 'DELETE') return null
+      einmal = false
+      if (fall === 'netz') throw new TypeError('Failed to fetch')
+      return json({ detail: 'später' }, fall)
+    })
+    await useVaultStore.getState().deleteItem(id)
+    await synchron()
+    await loeschungenAbarbeiten(BUCKET)
+    await loeschungenAbarbeiten(BUCKET)
+    expect(server.geloescht).toHaveLength(3)
+  })
+
+  it('G6: 410 mitten im Upload verwirft nichts, und danach geht keine Datei-Anfrage mehr hinaus', async () => {
+    const server = serverStarten()
+    await tresorOeffnen()
+    abfangen((pfad, methode) =>
+      methode === 'PUT' && pfad.includes('/chunks/')
+        ? json({ detail: { code: 'VAULT_ZURUECKGESETZT', message: 'errors.vault_zurueckgesetzt' } }, 410)
+        : null,
+    )
+    await useVaultStore.getState().dateiHinzufuegen(new File(['x'], 'x.txt', { type: 'text/plain' }))
+    await vi.waitFor(() => expect(server.blobs.size).toBeGreaterThan(0))
+    server.zurueckgesetzt = true
+    useVaultStore.setState({ syncStatus: 'synced' })
+    await useVaultStore.getState().syncWithServer()
+    expect(useVaultStore.getState().zurueckgesetzt).toBe(true)
+    await uploadsFortsetzen(BUCKET)
+    const vorher = vi.mocked(globalThis.fetch).mock.calls.length
+    await uploadsFortsetzen(BUCKET)
+    await loeschungenAbarbeiten(BUCKET)
+    expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(vorher)
+    expect(await zeilen(UPLOADS)).toHaveLength(3)
+  })
+
+  it('G7: klein-Antwort mit vertauschten oder überzähligen Teilen landet weder im Bild noch im Cache', async () => {
+    const server = serverStarten()
+    bilder.an = true
+    const userKey = await tresorOeffnen()
+    const a = await useVaultStore.getState().dateiHinzufuegen(foto(1000, 'a.jpg'))
+    const b = await useVaultStore.getState().dateiHinzufuegen(foto(1000, 'b.jpg'))
+    await allesErledigt()
+    const ma = eintrag(a)!.datei!.miniatur
+    const mb = eintrag(b)!.datei!.miniatur
+    const db = (await ablageDb())!
+    await new Promise<void>((ok) => {
+      const tx = db.transaction(BLOB_CACHE, 'readwrite')
+      tx.objectStore(BLOB_CACHE).clear()
+      tx.oncomplete = () => ok()
+    })
+    const da = server.blobs.get(ma.id)!.chunks.get(0)!
+    const dbb = server.blobs.get(mb.id)!.chunks.get(0)!
+    abfangen((pfad) => {
+      if (pfad !== '/api/vault/blobs/klein') return null
+      const teile: number[] = []
+      for (const d of [dbb, da, new Uint8Array(5)]) teile.push(d.length >>> 24, (d.length >> 16) & 0xff, (d.length >> 8) & 0xff, d.length & 0xff, ...d)
+      return new Response(new Uint8Array(teile) as BodyInit, { status: 200 })
+    })
+    const ergebnis = await miniaturenLesen([{ kopf: ma, eintragId: a }, { kopf: mb, eintragId: b }], userKey)
+    expect(ergebnis.size).toBe(0)
+    expect(await zeilen(BLOB_CACHE)).toEqual([])
+  })
+
+  it('G8: Umschlag an der Servergrenze geht, einer darüber nicht', async () => {
+    serverStarten()
+    await tresorOeffnen()
+    expect(EINTRAG_MAX_ZEICHEN).toBe(1048576) // = max_length in backend/schemas/vault.py
+    await useVaultStore.getState().saveItem({ id: 'n', service: 'Notiz', category: 'secure_note', notes: '' })
+    await synchron()
+    const basis = JSON.stringify(umschlagAusItem({ ...eintrag('n')!, notes: '', updatedAt: 1_700_000_000_000 })).length
+    // Polsterung in 4-KiB-Blöcken: 191 Blöcke ergeben 1.043.164 Zeichen, 192 schon 1.048.628.
+    const passt = 191 * 4096 - 7 - basis
+    await useVaultStore.getState().aendern('n', { notes: 'x'.repeat(passt) })
+    expect(eintrag('n')!.notes!.length).toBe(passt)
+    await expect(useVaultStore.getState().aendern('n', { notes: 'x'.repeat(passt + 1) })).rejects.toThrow()
+  })
+
+  it('G9: Album mit ALBUM_HOECHSTENS langen Kennungen geht, eine mehr nicht', async () => {
+    serverStarten()
+    await tresorOeffnen()
+    const ids = Array.from({ length: ALBUM_HOECHSTENS }, (_, i) => String(i).padStart(64, 'a'))
+    const album = await useVaultStore.getState().albumAnlegen('voll', ids)
+    expect(eintrag(album)!.album!.eintraege).toHaveLength(ALBUM_HOECHSTENS)
+    await expect(useVaultStore.getState().albumAendern(album, { hinzu: ['b'.repeat(64)] })).rejects.toThrow()
+    await expect(useVaultStore.getState().albumAnlegen('zu viel', [...ids, 'b'.repeat(64)])).rejects.toThrow()
+    expect(eintrag(album)!.album!.eintraege).toHaveLength(ALBUM_HOECHSTENS)
+  })
+
+  it('G10: Aufräumen während eines Anheftens nimmt der angehefteten Datei nichts', async () => {
+    serverStarten()
+    const userKey = await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Vertrag'], 'v.txt', { type: 'text/plain' }))
+    await allesErledigt()
+    const datei = eintrag(id)!.datei!
+    let weiter!: () => void
+    const gehalten = new Promise<void>((r) => (weiter = r))
+    const impl = vi.mocked(globalThis.fetch).getMockImplementation()!
+    vi.mocked(globalThis.fetch).mockImplementation(async (e, i) => {
+      if (String(e).includes(`/blobs/${datei.original.id}/chunks/`)) await gehalten
+      return impl(e, i)
+    })
+    const anheften = offlineAnheften(datei.original, id, userKey)
+    await vi.waitFor(async () => expect(await zeilen(OFFLINE)).toHaveLength(1))
+    await unbenutzteBlobsEntfernen(new Set(useVaultStore.getState().items.flatMap((i) => (i.datei ? dateiBlobs(i.datei).map((k) => k.id) : []))))
+    weiter()
+    await anheften
+    expect(await angeheftet([datei.original.id])).toEqual(new Set([datei.original.id]))
+  })
+
+  it('G11: kein Klartext (Passwort, Name, Inhalt) in Konsole, Toast, localStorage, URL oder auf der Leitung', async () => {
+    const server = serverStarten()
+    const konsole: unknown[][] = []
+    for (const art of ['log', 'warn', 'error', 'info', 'debug'] as const) {
+      vi.spyOn(console, art).mockImplementation((...a: unknown[]) => void konsole.push(a))
+    }
+    await tresorOeffnen()
+    await useVaultStore.getState().saveItem({ id: 'pw', service: 'Hausbank-Geheim', password: 'Pa55-Geheim-4711', category: 'login' })
+    const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Inhalt-Geheim-0815'], 'steuer-geheim.txt', { type: 'text/plain' }))
+    await allesErledigt()
+    // Eine gefälschte Löschung, damit auch die Warnwege laufen.
+    const fremderSchluessel = await crypto.subtle.importKey('raw', new Uint8Array(32).fill(9), 'AES-GCM', false, ['encrypt'])
+    const fremd = await encryptVaultEntry({ [VAULT_TOMBSTONE_MARKER]: true, deletedAt: 1 }, fremderSchluessel, 'pw')
+    server.revision += 1
+    server.eintraege.set('pw', { ciphertext: fremd, revision: server.revision, is_deleted: true })
+    await useVaultStore.getState().syncWithServer()
+    await useVaultStore.getState().deleteItem(id)
+    await synchron()
+    await loeschungenAbarbeiten(BUCKET)
+    expect(eintrag('pw')!.password).toBe('Pa55-Geheim-4711')
+
+    const geheim = ['Hausbank-Geheim', 'Pa55-Geheim-4711', 'steuer-geheim', 'Inhalt-Geheim-0815']
+    const lokal = Object.keys(localStorage).map((k) => `${k}=${localStorage.getItem(k)}`).join('\n')
+    const urls = vi.mocked(globalThis.fetch).mock.calls.map(([u]) => String(u)).join('\n')
+    const toasts = JSON.stringify(useToastStore.getState())
+    const log = konsole.map((a) => a.map((x) => (x instanceof Error ? x.message : String(x))).join(' ')).join('\n')
+    const leitung = server.mitschnitt.map((b) => new TextDecoder().decode(b)).join('\n')
+    for (const g of geheim) {
+      expect(lokal).not.toContain(g)
+      expect(urls).not.toContain(g)
+      expect(toasts).not.toContain(g)
+      expect(log).not.toContain(g)
+      expect(leitung).not.toContain(g)
+    }
   })
 })

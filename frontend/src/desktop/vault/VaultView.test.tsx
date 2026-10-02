@@ -208,6 +208,19 @@ describe('VaultView: Archiv und Papierkorb', () => {
     expect(useConfirmStore.getState().pending).toBeNull()
   })
 
+  it('Tippen im Benutzernamen lässt den Fokus dort', () => {
+    // Bis 02.10.2026 sprang der Fokus bei jedem Buchstaben auf „Dienst“.
+    render(<VaultView />)
+    const knopf = screen.getByRole('button', { name: i18n.t('mss.vault.eintragBearbeiten', { name: 'Bank' }) })
+    knopf.focus()
+    fireEvent.click(knopf)
+    const feld = screen.getByLabelText(i18n.t('mss.vault.benutzernameBezeichnung'))
+    feld.focus()
+    fireEvent.change(feld, { target: { value: 'ich2' } })
+    expect(feld).toHaveValue('ich2')
+    expect(document.activeElement).toBe(feld)
+  })
+
   it('bietet neue Einträge nur im Tresor an, nicht im Archiv und Papierkorb', () => {
     render(<VaultView />)
     const neu = () => screen.queryByRole('button', { name: i18n.t('mss.vault.neuerEintrag') })

@@ -437,7 +437,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   }, [offlineLaden])
 
   const offlineUmschalten = async (item: VaultItem) => {
-    if (!item.datei) return
+    if (!item.datei || !userKey) return
     const kopf = item.datei.original
     if (offline.has(kopf.id)) {
       await offlineLoesen(kopf.id)
@@ -445,7 +445,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
       return
     }
     try {
-      await offlineAnheften(kopf)
+      await offlineAnheften(kopf, item.id, userKey)
       toast.success(t('mss.vault.dateien.offlineFertig', { name: item.service }))
     } catch {
       toast.error(t('mss.vault.dateien.offlineFehler'))
@@ -456,7 +456,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
 
   const offlineSammel = async (gewaehlteListe: VaultItem[]) => {
     const dateien = gewaehlteListe.filter((i) => i.datei)
-    if (dateien.length === 0 || sammel) return
+    if (dateien.length === 0 || sammel || !userKey) return
     const da = await angeheftet(dateien.map((d) => d.datei!.original.id))
     if (dateien.every((d) => da.has(d.datei!.original.id))) {
       for (const d of dateien) await offlineLoesen(d.datei!.original.id)
@@ -471,7 +471,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
       for (const d of fehlen) {
         const groesse = d.datei!.original.echt
         try {
-          await offlineAnheften(d.datei!.original, (anteil) => setSammel({ text, anteil: (erledigt + anteil * groesse) / gesamt }))
+          await offlineAnheften(d.datei!.original, d.id, userKey, (anteil) => setSammel({ text, anteil: (erledigt + anteil * groesse) / gesamt }))
         } catch {
           fehler += 1
         }
