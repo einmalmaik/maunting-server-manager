@@ -2,10 +2,12 @@
  * Was die App mit einer entschlüsselten Datei anfangen kann: selbst zeigen
  * oder auf dem Gerät speichern. Gemeinsam für Dateien und Fotos.
  */
+import i18n from '@/i18n'
 import { inDerAppSpeichern } from '@/lib/geraetSpeichern'
+import { toast } from '@/stores/toastStore'
 import { zipGrenzenPruefen, zipStrom } from '@/lib/zipSchreiben'
 import { inDerApp } from '@/services/passkeyService'
-import { useVaultStore } from './vaultStore'
+import { useVaultStore, type VaultItem } from './vaultStore'
 import type { BlobKopf } from './tresorDatei'
 import { ansichtOeffnen, ansichtSchliessen, klartextTeile } from './tresorDateien'
 
@@ -131,9 +133,28 @@ export async function aufGeraetSpeichern(
     for await (const klartext of klartextTeile(kopf, eintragId, userKey)) teile.push(new Blob([klartext as BlobPart]))
     if (useVaultStore.getState().userKey !== userKey) return false
     herunterladen(new Blob(teile, { type: typ }), name)
-    return true
+    return gespeichert(true)
   }
-  return inDerAppSpeichern(name, bisGesperrt(klartextTeile(kopf, eintragId, userKey), userKey))
+  return gespeichert(await inDerAppSpeichern(name, bisGesperrt(klartextTeile(kopf, eintragId, userKey), userKey)))
+}
+
+/**
+ * Die Kopie auf dem Gerät ist unverschlüsselt. Bis 02.10.2026 sagte das
+ * niemand, und der Tresor wirkte wie ein Ort, aus dem nichts im Klartext geht.
+ */
+function gespeichert(ok: boolean): boolean {
+  if (ok) toast.success(i18n.t('mss.vault.dateien.gespeichertUnverschluesselt'))
+  return ok
+}
+
+/** „Auf dem Gerät speichern“ für eine Datei, mit Fehlermeldung. */
+export async function dateiAufsGeraet(item: VaultItem, userKey: CryptoKey | null): Promise<void> {
+  if (!item.datei || !userKey) return
+  try {
+    await aufGeraetSpeichern(item.datei.original, item.id, userKey, item.service, item.datei.typ)
+  } catch {
+    toast.error(i18n.t('mss.vault.dateien.speichernFehler'))
+  }
 }
 
 /** Außerhalb der App (nur im Browser): als Download anbieten. */
@@ -179,7 +200,7 @@ export async function mehrereAufGeraetSpeichern(
     const teile: Blob[] = []
     for await (const teil of bisGesperrt(zipStrom(eintraege), userKey)) teile.push(new Blob([teil as BlobPart]))
     herunterladen(new Blob(teile, { type: 'application/zip' }), name)
-    return true
+    return gespeichert(true)
   }
-  return inDerAppSpeichern(name, bisGesperrt(zipStrom(eintraege), userKey))
+  return gespeichert(await inDerAppSpeichern(name, bisGesperrt(zipStrom(eintraege), userKey)))
 }

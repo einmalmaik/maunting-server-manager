@@ -22,6 +22,7 @@ import { toast } from '@/stores/toastStore'
 
 import { useShallow } from 'zustand/react/shallow'
 import { useVaultStore } from './vaultStore'
+import { leakCheckGewaehlt, setLeakCheckEnabled } from './leakChecker'
 
 export function TresorSicherheitTab() {
   const { t } = useTranslation()
@@ -47,6 +48,7 @@ export function TresorSicherheitTab() {
   const [biometricsModalOpen, setBiometricsModalOpen] = useState(false)
   const [masterPasswordInput, setMasterPasswordInput] = useState('')
   const [biometricsLoading, setBiometricsLoading] = useState(false)
+  const [leckPruefung, setLeckPruefung] = useState(leakCheckGewaehlt)
 
   useEffect(() => {
     void checkBiometricsSupport()
@@ -126,6 +128,21 @@ export function TresorSicherheitTab() {
             <Switch
               checked={lockOnWindowBlur}
               onCheckedChange={setLockOnWindowBlur}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4 pt-2 border-t border-outline-variant/20">
+            <div>
+              <span id="tresor-leckpruefung" className="text-xs font-medium text-on-surface">{t('mss.vault.leckPruefung')}</span>
+              <p className="text-label-sm text-on-surface-variant">{t('mss.vault.leckPruefungHinweis')}</p>
+            </div>
+            <Switch
+              aria-labelledby="tresor-leckpruefung"
+              checked={leckPruefung}
+              onCheckedChange={(an) => {
+                setLeakCheckEnabled(an)
+                setLeckPruefung(an)
+              }}
             />
           </div>
         </div>

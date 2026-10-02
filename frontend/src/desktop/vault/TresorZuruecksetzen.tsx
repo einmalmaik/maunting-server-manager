@@ -70,10 +70,8 @@ export function TresorZuruecksetzen({ onAbbrechen, onFertig }: Props) {
         <p className="text-xs text-on-surface-variant">{t('mss.vault.zuruecksetzen.warnungText')}</p>
         {speicher && speicher.blobs > 0 && (
           <p className="mt-2 text-xs text-on-surface-variant">
-            {t('mss.vault.zuruecksetzen.dateien', {
-              anzahl: Math.ceil(speicher.blobs / 3),
-              groesse: formatBytes(Math.max(0, speicher.belegt - speicher.in_loeschung)),
-            })}
+            {/* Ohne Anzahl: frühere Fassungen sind auch Blobs, `blobs / 3` zählte sie als Dateien. */}
+            {t('mss.vault.zuruecksetzen.dateien', { groesse: formatBytes(Math.max(0, speicher.belegt - speicher.in_loeschung)) })}
           </p>
         )}
       </div>

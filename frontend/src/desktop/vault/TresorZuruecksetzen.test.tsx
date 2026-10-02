@@ -116,7 +116,7 @@ describe('TresorZuruecksetzen', () => {
     speicher.wert = { belegt: 3 * 1024 * 1024 + 500, quote: 10, in_loeschung: 500, blobs: 7 }
     render(<TresorZuruecksetzen onAbbrechen={() => {}} onFertig={() => {}} />)
     expect(
-      await screen.findByText(i18n.t('mss.vault.zuruecksetzen.dateien', { anzahl: 3, groesse: '3.0 MB' })),
+      await screen.findByText(i18n.t('mss.vault.zuruecksetzen.dateien', { groesse: '3.0 MB' })),
     ).toBeInTheDocument()
   })
 

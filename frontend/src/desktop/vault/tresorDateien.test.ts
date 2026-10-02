@@ -80,6 +80,7 @@ function serverStarten() {
   const server = {
     offline: false,
     speicherVoll: false,
+    vollCode: 'VAULT_SPEICHER_VOLL',
     /** Hält jeden hochgeladenen Chunk so lange auf (ms). */
     verzoegerung: 0,
     /** Der erste Upload eines zweiten Chunks bricht ab wie ein Netzfehler. */
@@ -161,7 +162,7 @@ function serverStarten() {
     const blob = pfad.match(/\/api\/vault\/blobs\/([0-9a-f]{32})(\/.*)?$/)
     if (pfad === '/api/vault/blobs' && methode === 'POST') {
       const b = JSON.parse(String(koerper))
-      if (server.speicherVoll) return json({ detail: 'voll' }, 507)
+      if (server.speicherVoll) return json({ detail: { code: server.vollCode, message: 'errors.x' } }, 507)
       if (server.abweisen && (server.abgewiesen ?? b.id) === b.id) {
         server.abgewiesen = b.id
         return json({ detail: 'abgewiesen' }, 422)
@@ -580,6 +581,18 @@ describe('Tresor-Dateien', () => {
     await uploadsFortsetzen(BUCKET)
     await vi.waitFor(async () => expect(await zeilen(UPLOADS)).toEqual([]))
     expect(useTresorUploads.getState().je[id]).toBeUndefined()
+  })
+
+  it('sagt, ob das Kontingent, die Platte oder die Dateizahl voll ist', async () => {
+    // Bis 02.10.2026 hieß jedes 507 „Tresorspeicher voll, lösche Dateien“,
+    // auch wenn die Platte des Servers voll war und Löschen nichts half.
+    const server = serverStarten()
+    server.speicherVoll = true
+    server.vollCode = 'VAULT_PLATTE_VOLL'
+    await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(foto(1000))
+    await vi.waitFor(() => expect(useTresorUploads.getState().je[id]?.fehler).toBe('platteVoll'))
+    expect(await zeilen(UPLOADS)).toHaveLength(3)
   })
 
   it('lädt die übrigen Blobs hoch, wenn der Server einen abweist', async () => {

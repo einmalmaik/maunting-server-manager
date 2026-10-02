@@ -253,7 +253,10 @@ def test_quote_je_tresor(als, konten, db):
     _speicher_der_rolle(db, eins, 1000)
     client = als(eins)
     assert _anlegen(client, 600)[2].status_code == 201
-    assert _anlegen(client, 600)[2].status_code == 507
+    voll = _anlegen(client, 600)[2]
+    assert voll.status_code == 507
+    # Jeder Grund hat seinen Code: Löschen hilft nur beim Kontingent.
+    assert voll.json()["detail"]["code"] == "VAULT_SPEICHER_VOLL"
     assert _anlegen(client, 400)[2].status_code == 201
     assert client.get("/api/vault/speicher").json() == {"belegt": 1000, "quote": 1000, "in_loeschung": 0, "blobs": 2}
 
@@ -273,6 +276,7 @@ def test_chunk_haelt_die_plattenreserve_frei(als, konten, blob_dir, monkeypatch)
     frei["bytes"] -= 1000
     antwort = _hochladen(als(zwei), zweiter, 0, b"y" * 1000)
     assert antwort.status_code == 507
+    assert antwort.json()["detail"]["code"] == "VAULT_PLATTE_VOLL"
     assert not (blob_dir / zweiter[:2] / zweiter / "0").exists()
 
 

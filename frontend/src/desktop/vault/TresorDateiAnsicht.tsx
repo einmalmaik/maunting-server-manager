@@ -37,7 +37,7 @@ import { toast } from '@/stores/toastStore'
 import { formatBytes } from '@/components/server/fileHelpers'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { ansichtOeffnen, ansichtSchliessen, blobLesen } from './tresorDateien'
-import { artBezeichnung, aufGeraetSpeichern, istText, vorschauArt, type VorschauArt } from './tresorAnzeige'
+import { artBezeichnung, dateiAufsGeraet, istText, vorschauArt, type VorschauArt } from './tresorAnzeige'
 import { fassungenVon } from './tresorOrdner'
 import { BEARBEITBAR, TresorBildeditor } from './TresorBildeditor'
 import { TresorTexteditor } from './TresorTexteditor'
@@ -202,14 +202,7 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
 
   if (!datei) return null
 
-  const aufGeraet = async () => {
-    if (!userKey) return
-    try {
-      await aufGeraetSpeichern(datei.original, item.id, userKey, item.service, datei.typ)
-    } catch {
-      toast.error(t('mss.vault.dateien.speichernFehler'))
-    }
-  }
+  const aufGeraet = () => dateiAufsGeraet(item, userKey)
 
   const inPapierkorb = async () => {
     try {

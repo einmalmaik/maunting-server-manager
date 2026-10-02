@@ -516,7 +516,7 @@ fi
 mkdir -p /opt/msm/backups
 chown msm:msm /opt/msm/backups 2>/dev/null || true
 
-# ── Tresor-Cloud-Verzeichnis sicherstellen (seit 5.1) ──
+# ── Tresor-Cloud-Verzeichnis sicherstellen ──
 install -d -o msm -g msm -m 700 /opt/msm/vault-blobs 2>/dev/null || true
 
 # ── Backend aktualisieren ──

@@ -157,7 +157,7 @@ interface ChunkZeile {
 }
 
 /** `abgelehnt`: der Server wies den Blob ab (etwa 413, 422); der nächste Lauf versucht es wieder. */
-export type UploadFehler = 'speicherVoll' | 'abgelehnt'
+export type UploadFehler = 'speicherVoll' | 'platteVoll' | 'zuVieleDateien' | 'abgelehnt'
 
 export interface UploadFortschritt {
   gesendet: number
@@ -351,9 +351,16 @@ function einzeln(arbeit: (bucket: string) => Promise<void>) {
   return starten
 }
 
-/** Was nur diesen Blob trifft (zu groß, falsche Länge) oder vollen Speicher meldet; alles andere: `null`, warten. */
-function uploadFehler(s: number | null): UploadFehler | null {
-  if (s === 507) return 'speicherVoll'
+const VOLL: Record<string, UploadFehler> = { VAULT_PLATTE_VOLL: 'platteVoll', VAULT_ZU_VIELE_DATEIEN: 'zuVieleDateien' }
+
+/**
+ * Was nur diesen Blob trifft (zu groß, falsche Länge) oder vollen Speicher
+ * meldet; alles andere: `null`, warten. Voll hat drei Gründe, und nur beim
+ * Kontingent hilft Löschen (bis 02.10.2026 hieß alles „Tresorspeicher voll“).
+ */
+function uploadFehler(err: unknown): UploadFehler | null {
+  const s = status(err)
+  if (s === 507) return (err instanceof SanitizedApiError && err.code && VOLL[err.code]) || 'speicherVoll'
   return s === 413 || s === 422 ? 'abgelehnt' : null
 }
 
@@ -399,7 +406,7 @@ async function hochladen(bucket: string): Promise<void> {
       // Ein abgewiesener Blob hält die übrigen nicht auf. Voller Speicher,
       // Netz weg, abgelaufene Sitzung oder gestörter Server träfen jeden
       // weiteren auch: dann bis zum nächsten Anstoß warten.
-      const fehler = uploadFehler(status(err))
+      const fehler = uploadFehler(err)
       if (fehler && zeile.fehler !== fehler) {
         await schreiben(db, UPLOADS, (s) => s.put({ ...zeile, fehler }))
         fortschrittSetzen(zeile.eintragId, (alt) => ({ ...alt, fehler }))

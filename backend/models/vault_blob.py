@@ -37,7 +37,8 @@ class VaultBlob(Base):
     # abgegriffenes Zugangstoken allein loescht damit keine Datei.
     delete_verifier: Mapped[str] = mapped_column(String(64), nullable=False)
     # offen -> fertig -> geloescht. Geloeschte haelt der Server noch
-    # `LOESCHHALTUNG` lang, bevor die Dateien verschwinden.
+    # `LOESCHHALTUNG` lang, bevor die Dateien verschwinden; nach Zuruecksetzen
+    # und Kontoloeschung nicht (`alle_zur_loeschung`).
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="offen")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -141,11 +141,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.14 vom 2026-10-01 aus (Tresor ohne Kontobezug)', () => {
+  it('weist die Fassung 3.15 vom 2026-10-02 aus (Leck-Prüfung, Passwort-Hinweis, was am Konto bleibt)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.14`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.15`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -172,13 +172,25 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.vault.items.verlust')).toMatch(/entfernt die Instanz alle Einträge sofort/);
     expect(i18n.t('privacyPolicy.sections.vault.items.verlust')).toMatch(/nur die Kennung des alten Tresors/);
     expect(i18n.t('privacyPolicy.sections.desktopApp.body')).toMatch(/GitHub sieht dabei Ihre IP-Adresse/);
+    // 3.15: die Leck-Prüfung war ein ungenannter Fremdanbieter, der Hinweis hiess
+    // „verschlüsselt", obwohl die Instanz ihn liest, und „keinem Konto
+    // zuordnen" galt nicht für Prüfprotokoll und Auszeichnung.
+    expect(i18n.t('privacyPolicy.sections.desktopApp.body')).toMatch(/Have I Been Pwned/);
+    expect(i18n.t('privacyPolicy.sections.desktopApp.body')).not.toMatch(/einzige Ausnahme/);
+    expect(i18n.t('privacyPolicy.sections.vault.items.hinweis')).toMatch(/Die Instanz kann ihn also lesen/);
+    expect(i18n.t('privacyPolicy.sections.vault.items.speicher')).toMatch(/Prüfprotokoll vermerkt/);
+    expect(i18n.t('privacyPolicy.sections.vault.items.dateien')).toMatch(/bis zu 5 frühere Fassungen/);
+    expect(i18n.t('privacyPolicy.sections.vault.items.geraet')).toMatch(/512 MiB/);
+    expect(i18n.t('privacyPolicy.sections.retention.items.export')).toMatch(/Dateien aus dem Tresor enthält es nicht/);
+    expect(i18n.t('privacyPolicy.sections.desktopApp.items.benachrichtigungen')).toMatch(/nutzt das Mikrofon nicht/);
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.vault.items.hinweis'))).toBeInTheDocument();
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-10-01');
-    expect(stand).toHaveTextContent('2026-10-01');
+    expect(stand).toHaveAttribute('datetime', '2026-10-02');
+    expect(stand).toHaveTextContent('2026-10-02');
   });
 
   /**

@@ -72,11 +72,11 @@ export function TresorUploadStand() {
   if (laufend.length === 0) return null
   const gesendet = laufend.reduce((n, u) => n + u.gesendet, 0)
   const gesamt = laufend.reduce((n, u) => n + u.gesamt, 0)
-  const speicherVoll = laufend.some((u) => u.fehler === 'speicherVoll')
+  const voll = laufend.find((u) => u.fehler && u.fehler !== 'abgelehnt')?.fehler
   return (
     <div role="status" className="rounded-lg border border-outline-variant/20 bg-surface-container-low px-3 py-2">
-      {speicherVoll ? (
-        <p className="text-label-sm text-status-destructive">{t('mss.vault.dateien.uploadStandVoll', { count: laufend.length })}</p>
+      {voll ? (
+        <p className="text-label-sm text-status-destructive">{t(`mss.vault.dateien.uploadStand_${voll}`, { count: laufend.length })}</p>
       ) : (
         <ProgressBar
           value={gesamt > 0 ? (gesendet / gesamt) * 100 : null}

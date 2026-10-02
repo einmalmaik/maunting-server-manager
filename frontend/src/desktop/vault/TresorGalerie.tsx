@@ -63,7 +63,7 @@ import { cx } from '@/utils/classNames'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { ansichtOeffnen, ansichtSchliessen, blobLesen, useTresorUploads } from './tresorDateien'
 import { miniaturenVorladen, useMiniatur } from './tresorMiniaturen'
-import { aufGeraetSpeichern, mehrereAufGeraetSpeichern } from './tresorAnzeige'
+import { dateiAufsGeraet, mehrereAufGeraetSpeichern } from './tresorAnzeige'
 import { gruppieren, hashesBerechnen } from './tresorAehnlich'
 import { BEARBEITBAR, TresorBildeditor } from './TresorBildeditor'
 import { dateienUnter, fassungenVon, sichtbareEintraege } from './tresorOrdner'
@@ -726,13 +726,8 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const speichernSammel = async (gewaehlteItems: VaultItem[]) => {
     if (!userKey || gewaehlteItems.length === 0 || sammel) return
     if (gewaehlteItems.length === 1) {
-      const [item] = gewaehlteItems
-      try {
-        await aufGeraetSpeichern(item.datei!.original, item.id, userKey, item.service, item.datei!.typ)
-        auswahlLeeren()
-      } catch {
-        toast.error(t('mss.vault.dateien.speichernFehler'))
-      }
+      await dateiAufsGeraet(gewaehlteItems[0], userKey)
+      auswahlLeeren()
       return
     }
     const dateien = dateienUnter(gewaehlteItems, sichtbar)
@@ -1238,13 +1233,7 @@ function GalerieLichtbox({
     void laden('original')
   }
 
-  const speichern = async () => {
-    try {
-      await aufGeraetSpeichern(datei.original, item.id, userKey, item.service, datei.typ)
-    } catch {
-      toast.error(t('mss.vault.dateien.speichernFehler'))
-    }
-  }
+  const speichern = () => dateiAufsGeraet(item, userKey)
 
   const aufnahme = datei.aufgenommen
     ? new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(datei.aufgenommen)

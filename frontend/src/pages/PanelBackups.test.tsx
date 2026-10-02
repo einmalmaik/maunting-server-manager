@@ -68,7 +68,7 @@ describe('PanelBackups', () => {
     })
     renderPage()
     expect(await screen.findByText('Panel-Backups')).toBeInTheDocument()
-    expect(screen.getByText('Sicherungen des MSM-Panels (Datenbank + Konfiguration)')).toBeInTheDocument()
+    expect(screen.getByText('Sicherungen des MSM-Panels (Datenbank + Konfiguration, ohne die Dateien im Tresor)')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Panel-Backup erstellen/ })).toBeInTheDocument()
   })
 

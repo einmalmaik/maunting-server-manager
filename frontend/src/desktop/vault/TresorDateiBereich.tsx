@@ -66,7 +66,7 @@ import { ZipZuGross } from '@/lib/zipSchreiben'
 import { cx } from '@/utils/classNames'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { angeheftet, offlineAnheften, offlineLoesen, useTresorUploads, type UploadFortschritt } from './tresorDateien'
-import { aufGeraetSpeichern, mehrereAufGeraetSpeichern } from './tresorAnzeige'
+import { dateiAufsGeraet, mehrereAufGeraetSpeichern } from './tresorAnzeige'
 import { dateienUnter, darfAlleVerschieben, darfVerschieben, obersteAuswahl, pfadVon, sichtbareEintraege, zielOrdner } from './tresorOrdner'
 import { TresorOrdnerBaum } from './TresorOrdnerBaum'
 import { TresorDateiAnsicht, dateiIcon, oeffnetImEditor } from './TresorDateiAnsicht'
@@ -245,14 +245,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
 
   // ── Einzelaktionen ────────────────────────────────────────────────────────
 
-  const aufGeraet = async (item: VaultItem) => {
-    if (!item.datei || !userKey) return
-    try {
-      await aufGeraetSpeichern(item.datei.original, item.id, userKey, item.service, item.datei.typ)
-    } catch {
-      toast.error(t('mss.vault.dateien.speichernFehler'))
-    }
-  }
+  const aufGeraet = (item: VaultItem) => dateiAufsGeraet(item, userKey)
 
   const offlineUmschalten = async (item: VaultItem) => {
     if (!item.datei) return

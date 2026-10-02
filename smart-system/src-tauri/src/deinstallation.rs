@@ -2,7 +2,8 @@
 //!
 //! Der Windows-Uninstaller entfernt das Programm. Er entfernt **nicht**, was
 //! die App im Betrieb angelegt hat: die Konfiguration, die Stimmaufnahmen des
-//! Wake-Words und den Eintrag im Anmeldeinformations-Manager. Genau das ist
+//! Wake-Words und die Einträge im Anmeldeinformations-Manager (Sitzung,
+//! biometrische Fächer von Tresor und Messenger). Genau das ist
 //! das Heikle daran — Sprachaufnahmen und ein Refresh-Token sollen nicht auf
 //! einem Rechner zurueckbleiben, von dem jemand die App entfernt hat.
 //!
@@ -67,13 +68,25 @@ pub fn aufraeumen(app: &AppHandle) -> Aufraeumbericht {
         }
     };
 
-    let tresor_geleert = match crate::geheimnisse::loeschen(app) {
+    let mut tresor_geleert = match crate::geheimnisse::loeschen(app) {
         Ok(()) => true,
         Err(meldung) => {
             fehler.push(format!("Tresor: {meldung}"));
             false
         }
     };
+    // Die Fächer von Tresor und Messenger liegen im selben Speicher. Bis
+    // 02.10.2026 blieben sie nach der Deinstallation stehen.
+    for fach in [
+        crate::biometrie::FACH_TRESOR,
+        crate::biometrie::FACH_MESSENGER,
+        crate::biometrie::FACH_MESSENGER_GERAET,
+    ] {
+        if let Err(meldung) = crate::biometrie::loesche_biometrie_geheimnis(app, fach) {
+            fehler.push(format!("Tresor: {meldung}"));
+            tresor_geleert = false;
+        }
+    }
 
     let autostart_entfernt = match autostart_aus(app) {
         Ok(()) => true,

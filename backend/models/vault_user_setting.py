@@ -16,7 +16,7 @@ class VaultUserSetting(Base):
     """Welcher Tresor-Bucket zu welchem Konto gehoert, und das Salz dazu.
 
     Das Konto steht hier nur als ``konto_index``: ein HMAC der Kontonummer aus
-    dem DIS-Sidecar (``vault_service.konto_index``). Wer nur die Datenbank
+    dem DIS-Sidecar (``vault_service.tresor_konto``). Wer nur die Datenbank
     liest, sieht nicht, welchem Konto ein Tresor gehoert; der Server erfaehrt
     es, solange eine angemeldete Anfrage laeuft. Bis 01.10.2026 stand die
     ``user_id`` im Klartext darin.

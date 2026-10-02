@@ -23,7 +23,7 @@ import { detectLineEnding, serializeLineEndings } from '@/components/server/file
 import type { EditorTab } from '@/components/server/fileWorkspaceTypes'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { blobLesen } from './tresorDateien'
-import { aufGeraetSpeichern } from './tresorAnzeige'
+import { dateiAufsGeraet } from './tresorAnzeige'
 import { fassungenVon } from './tresorOrdner'
 
 const FileEditorWorkspace = lazy(() => import('@/components/server/FileEditorWorkspace').then((m) => ({ default: m.FileEditorWorkspace })))
@@ -94,14 +94,7 @@ export function TresorTexteditor({ item: anfang, text, ort, ansicht, onFertig }:
     onFertig(tab.savedContent !== text ? tab.savedContent : null)
   }
 
-  const aufGeraet = async () => {
-    if (!item.datei || !userKey) return
-    try {
-      await aufGeraetSpeichern(item.datei.original, item.id, userKey, item.service, item.datei.typ)
-    } catch {
-      toast.error(t('mss.vault.dateien.speichernFehler'))
-    }
-  }
+  const aufGeraet = () => dateiAufsGeraet(item, userKey)
 
   const zurueckholen = async (originalId: string) => {
     if (!(await verwerfenErlaubt())) return

@@ -132,7 +132,10 @@ Abfolge in `smart-system/android-signatur/abfolge.bin`): ab Android 9 gilt der
 neue Schlüssel, und ein Gerät, das einmal ein so signiertes Update bekommen
 hat, weist Updates nur mit dem früheren Schlüssel ab. Android 8 kennt keine
 Rotation und bleibt beim früheren Schlüssel. Wer einen Fork baut, erzeugt
-eigene Schlüssel und eine eigene Abfolge.
+eigene Schlüssel und eine eigene Abfolge. Das Skript erwartet die Aliase
+`mss-release` (früher) und `mss-release-2026` (neu), `ANDROID_HOME` und
+Build-Tools ab Version 35 (`zipalign -P`); mit nur einem Schlüssel ohne
+Vorgänger passt das Skript nicht und muss angepasst werden.
 
 **Der Installer ist nicht signiert.** Windows SmartScreen meldet deshalb einen
 unbekannten Herausgeber; über „Weitere Informationen“ lässt er sich starten.
@@ -525,7 +528,9 @@ Was kein Update erreicht: **Backups und Dumps von vor dem Update** enthalten
 den Chatverlauf weiter im Klartext, ebenso archivierte WAL-Dateien. Das gilt
 auch für den Dump, den `update.sh` vor genau diesem Update in
 `/opt/msm/backups` ablegt. Die müssen Betreiber selbst löschen oder ersetzen,
-sobald das neue Panel läuft. Kalender und Notizen bekommen den
+sobald das neue Panel läuft. Dasselbe gilt für den Tresor: Sicherungen von
+vor der Migration `20261001_01` enthalten in `vault_user_settings`,
+`vault_hints` und `vault_blobs` noch die `user_id`. Kalender und Notizen bekommen den
 Präfix erst beim nächsten Speichern, weil dort E2EE-, DIS- und alte
 Klartextwerte nebeneinander liegen.
 
@@ -554,15 +559,29 @@ zugreift.
   höchsten Wert seiner Rollen. Ohne Rolle mit Speicher lädt es keine Dateien
   hoch; vorhandene bleiben lesbar und löschbar. Der Owner ist nicht begrenzt.
   Über die Hoster-API vergebene Rollen bringen ihren Speicher mit.
-- **Löschen:** Gelöschte Dateien bleiben noch 7 Tage auf der Platte und zählen
-  so lange zum Speicher des Tresors. Ein Upload, an dem 24 Stunden lang nichts
+- **Löschen:** Eine Datei im Papierkorb zählt weiter voll. Endgültig gelöscht
+  (Papierkorb geleert oder nach 30 Tagen dort), bleibt sie noch 7 Tage auf der
+  Platte und zählt so lange zum Speicher des Tresors. Ein Upload, an dem 24 Stunden lang nichts
   mehr ankommt, gilt als abgebrochen und verschwindet. Beides räumt das Panel stündlich auf, ebenso die Dateien gelöschter
   Konten.
+- **Grenzen:** Ein Tresor hat höchstens 500.000 Teile (je Datei drei:
+  Original, Vorschau, Miniatur). Das Panel nimmt nur an, solange auf der Platte
+  danach noch 1 GiB frei bleibt, beim Anlegen und bei jedem Stück. Jede Grenze
+  antwortet mit 507 und eigenem Code: `VAULT_SPEICHER_VOLL` (Speicher der
+  Rollen), `VAULT_PLATTE_VOLL` (Platte des Servers), `VAULT_ZU_VIELE_DATEIEN`.
+  Die App sagt dazu, wer etwas tun kann; bei voller Platte nur du.
+- **DIS-Sidecar:** Den Kontoindex rechnet der Sidecar. Ist er nicht
+  erreichbar, antworten alle Tresor-Routen und die Kontolöschung mit 503, und
+  es wird nichts gelöscht. Ein App-Code für die Kontolöschung bleibt dabei
+  gültig.
 - **Backup:** Das Panel-Backup enthält die Datenbank, nicht dieses
   Verzeichnis. Ohne das Verzeichnis zeigen die Tresor-Einträge nach einer
   Wiederherstellung auf fehlende Dateien. Sichere `/opt/msm/vault-blobs` mit
   der Sicherung des Servers. Der Inhalt ist verschlüsselt und darf auch auf ein
-  fremdes Ziel.
+  fremdes Ziel. Datenbank und Verzeichnis müssen vom selben Stand sein: das
+  stündliche Aufräumen entfernt jedes Dateiverzeichnis, zu dem die Datenbank
+  seit 24 Stunden keine Zeile hat. Spielst du eine ältere Datenbank ein,
+  verschwinden die Dateien, die erst danach hochgeladen wurden.
 - **Tresor zurücksetzen** löscht den Tresor ganz, wie das Löschen des
   Kontos: Einträge, Besitznachweis und Formatsperre sofort, die Dateien beim
   nächsten stündlichen Aufräumen. Der Dialog nennt vorher Anzahl und Größe der

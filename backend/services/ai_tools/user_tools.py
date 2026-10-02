@@ -106,7 +106,7 @@ def _user_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_role_set",
-            "Rolle erstellen bzw. anlegen oder ändern (mit role_id), auch ihren Tresorspeicher.",
+            "Rolle erstellen bzw. anlegen oder ändern (mit role_id), auch ihren Tresorspeicher (braucht panel.settings.write; nur Speicher geht auch an Systemrollen).",
             {
                 "role_id": {"type": "integer", "minimum": 1},
                 "name": {"type": "string", "maxLength": 64},
@@ -380,7 +380,7 @@ def _execute_list_roles(db: Session, user: User, arguments: dict) -> dict:
             "description": redact_sensitive_text(str(rolle.description or ""))[:255] or None,
             "is_system": bool(rolle.is_system),
             "user_count": len(zuweisungen.get(rolle.id, ())),
-            # GB wie im Werkzeug; None heisst: diese Rolle gibt keinen Tresorspeicher.
+            # GiB wie im Werkzeug; None heisst: diese Rolle gibt keinen Tresorspeicher.
             "vault_storage_gb": round(speicher[rolle.id] / 1024**3, 2) if rolle.id in speicher else None,
         }
         # Die admin-Rolle traegt jeden Schluessel des Katalogs; achtzig Namen

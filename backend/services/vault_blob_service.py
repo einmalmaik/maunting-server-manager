@@ -20,7 +20,8 @@ Was er erzwingt:
 - Loeschen verlangt den Loeschschluessel aus dem Tresor-Eintrag. Ein
   abgegriffenes Zugangstoken allein loescht nichts.
 - Geloescht wird erst nach ``LOESCHHALTUNG``; bis dahin kann ein Betreiber
-  einen Fehler noch rueckgaengig machen.
+  einen Fehler noch rueckgaengig machen. Ausnahme: Zuruecksetzen und
+  Kontoloeschung geben alles sofort frei (``alle_zur_loeschung``).
 """
 
 from __future__ import annotations
@@ -89,7 +90,18 @@ class BlobZuGross(BlobFehler):
 
 
 class SpeicherVoll(BlobFehler):
+    """507 mit eigenem Code je Grund: der Text sagt, wer etwas tun kann."""
+
     status_code = 507
+    code = "VAULT_SPEICHER_VOLL"
+
+
+class PlatteVoll(SpeicherVoll):
+    code = "VAULT_PLATTE_VOLL"
+
+
+class ZuVieleDateien(SpeicherVoll):
+    code = "VAULT_ZU_VIELE_DATEIEN"
 
 
 class LoeschnachweisFalsch(BlobFehler):
@@ -205,14 +217,14 @@ def anlegen(
         raise BlobKonflikt("Diese Kennung ist vergeben.")
     anzahl = int(db.scalar(select(func.count()).select_from(VaultBlob).where(VaultBlob.bucket_id == bucket_id)) or 0)
     if anzahl >= MAX_BLOBS_JE_BUCKET:
-        raise SpeicherVoll("Zu viele Dateien in diesem Tresor.")
+        raise ZuVieleDateien("Zu viele Dateien in diesem Tresor.")
     if belegt(db, bucket_id) + bytes_total > quote_fuer(db, user):
         raise SpeicherVoll("Der Speicher dieses Kontos ist voll.")
 
     basis = _basis()
     basis.mkdir(parents=True, exist_ok=True, mode=0o700)
     if shutil.disk_usage(basis).free < bytes_total + PLATTENRESERVE:
-        raise SpeicherVoll("Auf dem Server ist kein Platz mehr frei.")
+        raise PlatteVoll("Auf dem Server ist kein Platz mehr frei.")
 
     blob = VaultBlob(
         id=blob_id,
@@ -252,7 +264,7 @@ def chunk_schreiben(blob_id: str, index: int, daten: bytes) -> None:
     # Die Pruefung beim Reservieren bestehen beliebig viele Uploads zugleich;
     # erst hier, wo geschrieben wird, haelt sie die Reserve wirklich frei.
     if shutil.disk_usage(verzeichnis).free < len(daten) + PLATTENRESERVE:
-        raise SpeicherVoll("Auf dem Server ist kein Platz mehr frei.")
+        raise PlatteVoll("Auf dem Server ist kein Platz mehr frei.")
     zwischen = verzeichnis / f"{index}.{secrets.token_hex(8)}.part"
     try:
         with open(zwischen, "wb") as datei:

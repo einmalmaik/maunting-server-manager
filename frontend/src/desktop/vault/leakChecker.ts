@@ -27,13 +27,12 @@ export function isLeakCheckEnabled(): boolean {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     return false
   }
-  if (typeof localStorage !== 'undefined') {
-    const val = localStorage.getItem(VAULT_LEAK_CHECK_ENABLED_KEY)
-    if (val === 'false') {
-      return false
-    }
-  }
-  return true
+  return leakCheckGewaehlt()
+}
+
+/** Die Wahl in den Einstellungen, unabhängig vom Netz. Standard: an. */
+export function leakCheckGewaehlt(): boolean {
+  return typeof localStorage === 'undefined' || localStorage.getItem(VAULT_LEAK_CHECK_ENABLED_KEY) !== 'false'
 }
 
 export function setLeakCheckEnabled(enabled: boolean): void {

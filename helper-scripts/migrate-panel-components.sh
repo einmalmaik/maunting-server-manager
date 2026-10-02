@@ -373,7 +373,9 @@ run_backend_migration() {
     local local_free
     local_free="$(df -PB1 "$WORK_DIR" | awk 'NR==2 {print $4}')"
     [[ "$local_free" =~ ^[0-9]+$ ]] && (( local_free >= vault_bytes + 1073741824 ))         || fail "Quelle hat in $WORK_DIR zu wenig freien Speicher für das Paket der Tresor-Dateien"
-    remote_free="$(ssh_run "df -PB1 /opt 2>/dev/null | awk 'NR==2 {print \$4}' || df -PB1 / | awk 'NR==2 {print \$4}'")"
+    # Paket und Dump landen in /tmp und /var/lib/msm-migration, die Installation
+    # in /opt. Liegen sie auf verschiedenen Platten, zählt die kleinste.
+    remote_free="$(ssh_run "df -B1 --output=avail /opt /var/lib /tmp 2>/dev/null | tail -n +2 | sort -n | head -n 1 | tr -d ' '")"
     [[ "$remote_free" =~ ^[0-9]+$ ]] || fail "Freier Speicher des Ziels konnte nicht ermittelt werden"
     (( remote_free >= required_bytes )) \
         || fail "Ziel hat zu wenig freien Speicher für Installation, Dump und Rollbackreserve"
@@ -440,7 +442,7 @@ run_backend_migration() {
     scp_to_target "$runtime_archive" "/tmp/msm-runtime-$run_id.tar"
     ssh_run "$REMOTE_SUDO mv '/tmp/msm-panel-$run_id.dump' '$remote_stage/panel.dump' && $REMOTE_SUDO mv '/tmp/msm-source-$run_id.env' '$remote_stage/source.env' && $REMOTE_SUDO mv '/tmp/msm-runtime-$run_id.tar' '$remote_stage/runtime.tar' && $REMOTE_SUDO chmod 600 '$remote_stage/panel.dump' '$remote_stage/source.env' '$remote_stage/runtime.tar'"
 
-    info "Stelle Datenbank, Konfiguration, DIS-Schlüssel, Backups und Blueprints auf dem Ziel wieder her..."
+    info "Stelle Datenbank, Konfiguration, DIS-Schlüssel, Backups, Blueprints und Tresor-Dateien auf dem Ziel wieder her..."
     local frontend_arg=""
     [[ -n "$FRONTEND_ORIGIN" ]] && frontend_arg="--frontend-origin '$FRONTEND_ORIGIN'"
     ssh_run "$REMOTE_SUDO bash -s -- '$remote_stage' 'https://$API_DOMAIN'" <<REMOTE_CUTOVER

@@ -290,7 +290,7 @@ export function SelfHostingDocs() {
           </div>
         </div>
         <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
-          {(['sieht', 'quote', 'loeschen', 'backup', 'reset', 'altApps'] as const).map(item => (
+          {(['sieht', 'quote', 'loeschen', 'grenzen', 'backup', 'sidecar', 'reset', 'altApps'] as const).map(item => (
             <div key={item} className="bg-surface-container p-4">
               <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.vaultCloud.${item}.title`)}</dt>
               <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.vaultCloud.${item}.body`)}</dd>
