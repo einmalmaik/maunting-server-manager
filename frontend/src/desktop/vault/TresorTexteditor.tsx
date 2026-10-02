@@ -125,7 +125,7 @@ export function TresorTexteditor({ item: anfang, text, ort, ansicht, onFertig }:
     <Dialog open onOpenChange={(offen) => !offen && void schliessen()} escapeSchliesst={false}>
       <DialogContent
         // Vollbild bis an den Rand: Status- und Gestenleiste hält der Editor selbst frei.
-        className="h-[100dvh] max-w-none rounded-none border-0 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]"
+        className="h-[100dvh] max-w-none rounded-none border-0 pt-[env(safe-area-inset-top,0px)] pb-[var(--msm-unten-sicher)]"
         overlayClassName="p-0" showCloseButton={false} data-testid="tresor-texteditor">
         <header className="flex min-h-12 items-center gap-2 border-b border-outline-variant bg-surface-container-low px-3 py-1.5">
           <FileText className="h-4 w-4 shrink-0 text-secondary" aria-hidden />

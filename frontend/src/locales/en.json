@@ -997,8 +997,8 @@
         "database": "Database",
         "table": "Table",
         "destructive": "Removes data",
-        "vault_storage_gb_before": "Vault storage before (GB)",
-        "vault_storage_gb_after": "Vault storage after (GB)"
+        "vault_storage_gb_before": "Vault storage before (GiB)",
+        "vault_storage_gb_after": "Vault storage after (GiB)"
       },
       "reasonLabel": "AI reasoning",
       "effectLabel": "Expected effect",

@@ -127,6 +127,11 @@ describe('FileEditorWorkspace tabs', () => {
 
     const findInput = await screen.findByPlaceholderText(/Suchen/)
     await waitFor(() => expect(findInput).toHaveFocus())
+    // Felder aus der Design-DNA (Input), unter md 44 px hoch; bis 02.10.2026 nativ und 32 px.
+    for (const feld of [findInput, screen.getByPlaceholderText(/Ersetzen/)]) {
+      expect(feld).toHaveClass('msm-input', 'max-md:h-11')
+      expect(feld.parentElement).toHaveClass('flex-col')
+    }
     fireEvent.change(findInput, { target: { value: 'Alpha' } })
     expect(findInput).toHaveFocus()
     fireEvent.keyDown(findInput, { key: 'Enter' })

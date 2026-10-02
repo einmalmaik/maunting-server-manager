@@ -257,7 +257,7 @@ _GIB = 1024**3
 
 
 def _speicher(roh: object) -> int | None:
-    """Tresorspeicher in GB, nachsichtig gelesen ("10", 10, 2.5); 0 heisst keiner.
+    """Tresorspeicher in GiB, nachsichtig gelesen ("10", "10 GiB", 10, 2.5); 0 heisst keiner.
 
     Ergebnis in Bytes, ``None`` fuer keinen Speicher. Ein ``null`` des Modells
     kommt hier nicht an: es heisst "unveraendert" und wird vorher verworfen.
@@ -265,7 +265,7 @@ def _speicher(roh: object) -> int | None:
     still den Speicher.
     """
     if isinstance(roh, str):
-        roh = roh.strip().lower().removesuffix("gb").strip().replace(",", ".")
+        roh = roh.strip().lower().removesuffix("gib").removesuffix("gb").strip().replace(",", ".")
         try:
             roh = float(roh)
         except ValueError:
@@ -375,7 +375,7 @@ def _role_set_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
     if speicher_genannt:
         vorher_speicher = vault_blob_service.rolle_speicher(db, payload["role_id"]) if payload["role_id"] else None
         payload.update(vault_set=True, vault_quota_bytes=speicher, vault_before=vorher_speicher)
-        # Fuer die Karte in GB; 0 heisst kein Speicher, wie im Werkzeug.
+        # Fuer die Karte in GiB; 0 heisst kein Speicher, wie im Werkzeug.
         preview.update(
             vault_storage_gb_before=round((vorher_speicher or 0) / _GIB, 2),
             vault_storage_gb_after=round((speicher or 0) / _GIB, 2),

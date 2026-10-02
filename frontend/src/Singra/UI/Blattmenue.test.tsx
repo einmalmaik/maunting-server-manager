@@ -3,6 +3,21 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { Blatteintrag, Blattknopf } from './Blattmenue'
 
+describe('Blattknopf ohne title', () => {
+  it('nennt seinen Namen per Kurzinfo bündig rechts statt per title', () => {
+    // Bis 02.10.2026 zeigte der Knopf den Tooltip des Betriebssystems.
+    render(<Blattknopf label="Weitere Einstellungen" titel="Chat" className="ml-auto">{null}</Blattknopf>)
+    const knopf = screen.getByRole('button', { name: 'Weitere Einstellungen' })
+    expect(knopf).not.toHaveAttribute('title')
+    const blase = knopf.parentElement!.querySelector(':scope > [data-kurzinfo]')
+    expect(blase).toHaveAttribute('data-kurzinfo', 'Weitere Einstellungen')
+    expect(blase).toHaveClass('right-0')
+    // Lage und Abstand des Aufrufers gelten fürs Ganze, nicht für den Knopf darin.
+    expect(knopf.parentElement).toHaveClass('ml-auto')
+    expect(knopf).not.toHaveClass('ml-auto')
+  })
+})
+
 describe('Blattknopf', () => {
   it('trägt seine Beschriftung und sagt, dass ein Blatt daran hängt', () => {
     render(

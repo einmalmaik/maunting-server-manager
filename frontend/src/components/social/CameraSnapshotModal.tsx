@@ -344,7 +344,7 @@ export function CameraSnapshotModal({
           </div>
 
           {/* Unten: drei gleich breite Spalten, damit der Auslöser genau mittig steht. */}
-          <div className="absolute inset-x-0 bottom-0 px-4 pt-10 pb-[max(1.25rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-black/55 to-transparent">
+          <div className="absolute inset-x-0 bottom-0 px-4 pt-10 pb-[max(1.25rem,var(--msm-unten-sicher))] bg-gradient-to-t from-black/55 to-transparent">
             {capturedPhoto ? (
               <div className="space-y-3">
                 {mitStempel && ortOffen && (

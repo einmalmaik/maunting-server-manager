@@ -610,13 +610,13 @@ export function AdminNodes() {
                         {node.disk_total != null && (
                           <div className="space-y-1 text-xs text-on-surface-variant" data-testid={`node-disk-breakdown-${node.id}`}>
                             <div className="flex flex-wrap items-center gap-3 font-mono text-label-sm">
-                              <span className="text-primary" title={t('nodes.diskPanelUsed', { value: formatRamMb(panelUsedMb) })}>
+                              <span className="text-primary">
                                 ■ {t('nodes.diskPanelUsed', { value: formatRamMb(panelUsedMb) })}
                               </span>
-                              <span className="text-on-surface-variant" title={t('nodes.diskSystemUsed', { value: formatRamMb(systemUsedMb) })}>
+                              <span className="text-on-surface-variant">
                                 ■ {t('nodes.diskSystemUsed', { value: formatRamMb(systemUsedMb) })}
                               </span>
-                              <span className="text-status-success" title={t('nodes.diskFree', { value: formatRamMb(fDisk) })}>
+                              <span className="text-status-success">
                                 ■ {t('nodes.diskFree', { value: formatRamMb(fDisk) })}
                               </span>
                             </div>

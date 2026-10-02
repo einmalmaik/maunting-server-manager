@@ -7,7 +7,7 @@
  *   darunter nur Anzahl und Abbrechen.
  * - `fuss` gehört ans untere Ende der Fläche und ist nur unter `md` sichtbar:
  *   am Telefon liegen die Aktionen so in Daumenreichweite. Den Abstand zur
- *   Gestenleiste hält `env(safe-area-inset-bottom)`.
+ *   Gestenleiste hält `var(--msm-unten-sicher)`.
  */
 import type { ReactNode } from 'react'
 import { CheckCheck, X } from 'lucide-react'
@@ -45,7 +45,7 @@ export function Auswahlleiste({ variante, anzahlLabel, aktionen, abbrechenLabel,
         role="toolbar"
         aria-label={anzahlLabel}
         className={cx(
-          'flex shrink-0 items-stretch justify-around gap-1 border-t border-outline-variant/40 bg-surface-container-low px-1 pt-1.5 pb-[calc(0.375rem+env(safe-area-inset-bottom))] md:hidden',
+          'flex shrink-0 items-stretch justify-around gap-1 border-t border-outline-variant/40 bg-surface-container-low px-1 pt-1.5 pb-[calc(0.375rem+var(--msm-unten-sicher))] md:hidden',
           className,
         )}
       >

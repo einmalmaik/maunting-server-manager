@@ -87,7 +87,7 @@ export function TrefferListe({
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+      <div className="flex-1 min-h-0 overflow-y-auto pb-[var(--msm-unten-sicher)]">
         {gesperrt ? (
           <div className="py-16 px-6 text-center space-y-2">
             <Lock className="w-6 h-6 mx-auto text-on-surface-variant/60" />

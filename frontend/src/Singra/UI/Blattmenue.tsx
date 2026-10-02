@@ -18,6 +18,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreVertical } from 'lucide-react'
 import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
+import { Kurzinfo } from './Kurzinfo'
 
 const FOKUSSIERBAR =
   'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -89,7 +90,7 @@ export function Blattmenue({ offen, onSchliessen, titel, children, className = '
         ref={blatt}
         onClick={(e) => e.stopPropagation()}
         className={`w-full sm:max-w-sm bg-surface-container-low border-t sm:border border-outline-variant/30 rounded-t-3xl sm:rounded-2xl shadow-2xl
-          pb-[env(safe-area-inset-bottom)] sm:pb-0 max-h-[80dvh] overflow-y-auto
+          pb-[var(--msm-unten-sicher)] sm:pb-0 max-h-[80dvh] overflow-y-auto
           animate-[slideUp_.16s_ease-out] sm:animate-[fadeIn_.12s_ease-out] ${className}`}
       >
         {/* Der Griff. Reine Anzeige: er sagt „das hier lässt sich wegwischen“,
@@ -128,7 +129,7 @@ const KNOPF_KLASSEN: Record<BlattknopfVariante, string> = {
 }
 
 export interface BlattknopfProps {
-  /** Vorgelesen und als Tooltip am Knopf. */
+  /** Vorgelesen und für Maus und Tastatur als Kurzinfo unter dem Knopf. */
   label: string
   /** Überschrift des Blatts; vorgelesen beim Öffnen. */
   titel: string
@@ -170,19 +171,20 @@ export function Blattknopf({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setzeOffen(true)}
-        disabled={disabled}
-        aria-haspopup="dialog"
-        aria-expanded={offen}
-        aria-label={label}
-        title={label}
-        className={`inline-flex shrink-0 items-center justify-center transition-colors
-          disabled:opacity-40 disabled:cursor-not-allowed ${KNOPF_KLASSEN[variante]} ${className}`}
-      >
-        {icon ?? <MoreVertical className="w-4 h-4" aria-hidden="true" />}
-      </button>
+      <Kurzinfo text={label} seite="ende" aussen={className}>
+        <button
+          type="button"
+          onClick={() => setzeOffen(true)}
+          disabled={disabled}
+          aria-haspopup="dialog"
+          aria-expanded={offen}
+          aria-label={label}
+          className={`inline-flex shrink-0 items-center justify-center transition-colors
+            disabled:opacity-40 disabled:cursor-not-allowed ${KNOPF_KLASSEN[variante]}`}
+        >
+          {icon ?? <MoreVertical className="w-4 h-4" aria-hidden="true" />}
+        </button>
+      </Kurzinfo>
 
       <Blattmenue offen={offen} onSchliessen={schliessen} titel={titel}>
         {ueberschrift && (

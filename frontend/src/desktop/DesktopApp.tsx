@@ -577,7 +577,7 @@ export function DesktopApp() {
   return (
     <MemoryRouter initialEntries={[getInitialRoute(isOffline)]}>
       <NavigationEmpfaenger isOffline={isOffline} />
-      <div className="relative h-[100dvh] max-h-[100dvh] w-full overflow-hidden bg-background text-on-surface pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] flex flex-col">
+      <div className="relative h-[100dvh] max-h-[100dvh] w-full overflow-hidden bg-background text-on-surface pb-[var(--msm-unten-sicher)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] flex flex-col">
         <div className="msm-deep-grid pointer-events-none absolute inset-0 opacity-30" />
         {phase === 'bereit' && publicSettings.social_enabled && <CrossDeviceCallBanner />}
         <div className="relative z-10 flex h-full max-h-full min-h-0 flex-1 flex-col overflow-hidden">{inhalt}</div>
@@ -873,6 +873,8 @@ function Hauptseite({
   }, [isOffline, location.pathname, navigate, offlineRouten, fallbackRoute])
 
   const agentName = user?.agent_name?.trim() || 'Assistent'
+  // Am Handy fehlt die Reiterleiste; die Kopfzeile nennt deshalb den offenen Bereich.
+  const kopfTitel = bereich === 'ki' ? agentName : t(BEREICH_TITEL[bereich])
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
   const { status: presenceStatus, changeStatus: handlePresenceChange } = usePresenceAndActivity(
     !isOffline && darfMessenger,
@@ -909,7 +911,7 @@ function Hauptseite({
         {/* Linke Seite: Agent-Name & Aktivitätsanzeige */}
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <div className="min-w-0">
-            <h1 className="truncate font-headline text-base sm:text-title-lg font-bold text-on-surface">{agentName}</h1>
+            <h1 className="truncate font-headline text-base sm:text-title-lg font-bold text-on-surface">{kopfTitel}</h1>
           </div>
           {isOffline && (
             <div className="flex items-center gap-1 rounded-full border border-outline-variant/50 bg-surface-container-high/60 px-2 py-0.5 text-label-sm font-medium text-on-surface-variant">
@@ -1220,6 +1222,16 @@ function Hauptseite({
     </>
   )
 }
+
+const BEREICH_TITEL = {
+  chat: 'mss.app.messenger',
+  profil: 'mss.app.messenger',
+  kalender: 'mss.app.kalender',
+  notizen: 'mss.app.notizen',
+  gedaechtnis: 'mss.app.gedaechtnis',
+  tresor: 'mss.app.tresor',
+  einstellungen: 'mss.app.einstellungen',
+} as const
 
 /** Segmented Reiter mit ruhiger Optik: Aktiver Tab hebt sich soft ab, Inaktive bleiben dezent */
 function Reiter({

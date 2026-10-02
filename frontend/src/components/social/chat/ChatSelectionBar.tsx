@@ -46,7 +46,7 @@ export function ChatSelectionBar({
         </button>
       </div>
 
-      <div className="absolute bottom-0 left-0 right-0 z-40 px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] border-t border-outline-variant/30 bg-surface-container-low flex items-center justify-around">
+      <div className="absolute bottom-0 left-0 right-0 z-40 px-3 py-2 pb-[calc(0.5rem+var(--msm-unten-sicher))] border-t border-outline-variant/30 bg-surface-container-low flex items-center justify-around">
         <button
           type="button"
           disabled={anzahl === 0}

@@ -12,6 +12,7 @@
  * und ein Cache zwischen App und Panel-API wäre nur eine zweite Wahrheit.
  */
 import { invoke } from '@tauri-apps/api/core'
+import { gestenleisteUebernehmen } from '@/lib/gestenleiste'
 
 interface AppKonfig {
   backend_url: string | null
@@ -29,4 +30,5 @@ async function hochfahren(): Promise<void> {
   await import('./start')
 }
 
+gestenleisteUebernehmen()
 void hochfahren()

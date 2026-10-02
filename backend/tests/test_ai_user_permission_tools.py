@@ -620,6 +620,19 @@ def test_rolle_mit_speicher_anlegen_und_an_der_systemrolle_nur_den_speicher(
     assert rollen["admin"]["vault_storage_gb"] is None
 
 
+def test_tresorspeicher_heisst_gib_wie_im_panel(db: Session, owner_user: User) -> None:
+    """Das Werkzeug rechnet mit 1024³ Byte; bis 02.10.2026 nannte es die Einheit GB."""
+    from services.ai_proposals.user_proposals import _speicher
+
+    schema = next(w for w in user_tools._user_tool_definitions() if w["function"]["name"] == "propose_role_set")
+    beschreibung = json.dumps(schema, ensure_ascii=False)
+    assert "Tresorspeicher in GiB" in beschreibung
+    assert "in GB" not in beschreibung
+    assert _speicher("10 GiB") == 10 * GIB
+    assert _speicher("2,5 gib") == round(2.5 * GIB)
+    assert _speicher("3 GB") == 3 * GIB
+
+
 def test_ein_geaenderter_speicher_fuehrt_den_alten_plan_nicht_aus(db: Session, owner_user: User) -> None:
     rolle = rechtevergabe_service.create_role(db, owner_user, "kunde-b", None, [])
     karte = _vorschlag(db, owner_user, "propose_role_set", role_id=rolle.id, vault_storage_gb=10)

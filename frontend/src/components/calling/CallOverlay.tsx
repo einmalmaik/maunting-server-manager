@@ -518,7 +518,7 @@ export const CallOverlay: React.FC = () => {
 
       {/* Steuerleiste */}
       {state !== 'incoming' && (
-        <div className="relative shrink-0 border-t border-outline-variant/40 bg-surface-container-low/90 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md sm:p-4">
+        <div className="relative shrink-0 border-t border-outline-variant/40 bg-surface-container-low/90 p-3 pb-[max(0.75rem,var(--msm-unten-sicher))] backdrop-blur-md sm:p-4">
           {/* Flüchtige Meldungen, direkt über der Steuerleiste statt in der
               Bühne: dort verdeckten sie auf schmalen Fenstern die Gesichter.
               Nichts davon landet im Chatverlauf. */}

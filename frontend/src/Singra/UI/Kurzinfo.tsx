@@ -6,6 +6,13 @@ export interface KurzinfoProps {
   children: ReactNode
   /** Zusätzliche Klassen für die Blase, etwa `xl:hidden`, wenn der Name ab dort sichtbar dasteht. */
   className?: string
+  /**
+   * `mitte` unter dem Knopf; `ende` bündig mit seiner rechten Kante, für Knöpfe
+   * am rechten Rand (Menüknöpfe in Kopfzeilen), wo die Blase sonst übersteht.
+   */
+  seite?: 'mitte' | 'ende'
+  /** Lage und Abstand des Ganzen (etwa `ml-auto`); am Knopf darin wirkten sie nicht mehr. */
+  aussen?: string
 }
 
 /**
@@ -20,17 +27,17 @@ export interface KurzinfoProps {
  * nicht bei Berührung. Vorgelesen wird sie nicht: den Namen trägt der Knopf
  * selbst per `aria-label`, sonst hörte man ihn doppelt.
  *
- * Sie steht mittig unter dem Knopf und prüft keine Fensterränder. Für Knöpfe
- * direkt am Rand ist sie deshalb nicht gedacht.
+ * Sie prüft keine Fensterränder. Für Knöpfe am rechten Rand gibt es
+ * `seite="ende"`; ganz links steht kein solcher Knopf.
  */
-export function Kurzinfo({ text, children, className = '' }: KurzinfoProps) {
+export function Kurzinfo({ text, children, className = '', seite = 'mitte', aussen = '' }: KurzinfoProps) {
   return (
-    <span className="group/kurzinfo relative inline-flex">
+    <span className={`group/kurzinfo relative inline-flex ${aussen}`}>
       {children}
       <span
         aria-hidden="true"
         data-kurzinfo={text}
-        className={`pointer-events-none before:content-[attr(data-kurzinfo)] absolute left-1/2 top-full z-50 mt-1.5 -translate-x-1/2 whitespace-nowrap rounded-md border border-outline-variant bg-surface-container-highest px-2 py-1 text-label-sm font-medium text-on-surface opacity-0 shadow-lg transition-opacity duration-150 motion-reduce:transition-none [@media(hover:hover)]:group-hover/kurzinfo:opacity-100 group-has-[:focus-visible]/kurzinfo:opacity-100 ${className}`}
+        className={`pointer-events-none before:content-[attr(data-kurzinfo)] absolute top-full z-50 mt-1.5 whitespace-nowrap ${seite === 'ende' ? 'right-0' : 'left-1/2 -translate-x-1/2'} rounded-md border border-outline-variant bg-surface-container-highest px-2 py-1 text-label-sm font-medium text-on-surface opacity-0 shadow-lg transition-opacity duration-150 motion-reduce:transition-none [@media(hover:hover)]:group-hover/kurzinfo:opacity-100 group-has-[:focus-visible]/kurzinfo:opacity-100 ${className}`}
       />
     </span>
   )

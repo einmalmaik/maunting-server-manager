@@ -183,17 +183,57 @@ function useSichtbar(ref: React.RefObject<HTMLElement | null>): boolean {
 /** Welche Tasten beim Klick gedrückt waren. */
 type Tasten = Pick<React.MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>
 
+/**
+ * Die Kachel, zu der eine Pfeiltaste im Raster führt. Links und rechts gehen
+ * in Leserichtung (auch über Monatsgrenzen), hoch und runter in die nächste
+ * Zeile zur Kachel, die der Mitte am nächsten liegt. Gemessen wird nur bis zum
+ * Ende dieser Zeile, nicht über alle Kacheln.
+ */
+export function nachbarKachel(raster: HTMLElement, von: HTMLElement, taste: string): HTMLElement | null {
+  const alle = [...raster.querySelectorAll<HTMLElement>('[data-kachel]')]
+  const i = alle.indexOf(von)
+  if (i < 0) return null
+  if (taste === 'ArrowLeft') return alle[i - 1] ?? null
+  if (taste === 'ArrowRight') return alle[i + 1] ?? null
+  if (taste === 'Home') return alle[0] ?? null
+  if (taste === 'End') return alle[alle.length - 1] ?? null
+  if (taste !== 'ArrowUp' && taste !== 'ArrowDown') return null
+  const runter = taste === 'ArrowDown'
+  const a = von.getBoundingClientRect()
+  const mitte = a.left + a.width / 2
+  let zeile: number | null = null
+  let beste: HTMLElement | null = null
+  let abstand = Infinity
+  for (let j = i + (runter ? 1 : -1); j >= 0 && j < alle.length; j += runter ? 1 : -1) {
+    const b = alle[j].getBoundingClientRect()
+    if (runter ? b.top < a.bottom - 1 : b.bottom > a.top + 1) continue
+    if (zeile === null) zeile = b.top
+    else if (Math.abs(b.top - zeile) > 1) break
+    const d = Math.abs(b.left + b.width / 2 - mitte)
+    if (d < abstand) {
+      abstand = d
+      beste = alle[j]
+    }
+  }
+  return beste
+}
+
 const Kachel = memo(function Kachel({
   item,
   ausgewaehlt,
+  tabHalt,
   onKlick,
   onLangdruck,
+  onFokus,
 }: {
   item: VaultItem
   /** Nur im Auswahlmodus gesetzt. */
   ausgewaehlt?: boolean
+  /** Die eine Kachel, die Tab erreicht; die übrigen erreichen die Pfeiltasten. */
+  tabHalt: boolean
   onKlick: (id: string, tasten: Tasten) => void
   onLangdruck: (id: string) => void
+  onFokus: (id: string) => void
 }) {
   const { t } = useTranslation()
   const ref = useRef<HTMLButtonElement>(null)
@@ -209,6 +249,9 @@ const Kachel = memo(function Kachel({
     <button
       ref={ref}
       type="button"
+      data-kachel={item.id}
+      tabIndex={tabHalt ? 0 : -1}
+      onFocus={() => onFokus(item.id)}
       onClick={(event) => onKlick(item.id, event)}
       onPointerDown={lang.onPointerDown}
       onPointerMove={lang.onPointerMove}
@@ -498,6 +541,10 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
     [auswahlAn, umschalten],
   )
 
+  // Ein Tab-Halt für das ganze Raster: sonst führt Tab durch jedes Foto einzeln.
+  const [fokusId, setFokusId] = useState<string | null>(null)
+  const tabHalt = gruppen.some((g) => g.items.some((i) => i.id === fokusId)) ? fokusId : (gruppen[0]?.items[0]?.id ?? null)
+
   const kachelLangdruck = useCallback((id: string) => {
     letzterLangdruck.current = Date.now()
     setAuswahl((a) => new Set([...(a ?? []), id]))
@@ -779,6 +826,16 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const auswahlLabel = t('mss.vault.fotos.ausgewaehlt', { count: gewaehlt.length })
 
   const rasterTaste = (event: React.KeyboardEvent) => {
+    const kachel = (event.target as HTMLElement).closest<HTMLElement>('[data-kachel]')
+    if (kachel && scroller.current && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      const ziel = nachbarKachel(scroller.current, kachel, event.key)
+      if (ziel) {
+        event.preventDefault()
+        ziel.focus()
+        ziel.scrollIntoView?.({ block: 'nearest' })
+        return
+      }
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a' && liste.length > 0 && !albenUebersicht) {
       event.preventDefault()
       setAuswahl(new Set(liste.map((i) => i.id)))
@@ -1011,8 +1068,10 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
                       key={item.id}
                       item={item}
                       ausgewaehlt={auswahl ? auswahl.has(item.id) : undefined}
+                      tabHalt={item.id === tabHalt}
                       onKlick={kachelKlick}
                       onLangdruck={kachelLangdruck}
+                      onFokus={setFokusId}
                     />
                   ))}
                 </div>

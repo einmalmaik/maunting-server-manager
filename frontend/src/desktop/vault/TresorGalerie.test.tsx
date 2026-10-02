@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import { useToastStore } from '@/stores/toastStore'
 import { usePromptStore } from '@/stores/promptStore'
-import { TresorGalerie } from './TresorGalerie'
+import { TresorGalerie, nachbarKachel } from './TresorGalerie'
 import { useVaultStore, type VaultItem } from './vaultStore'
 
 vi.mock('../tauri', () => ({
@@ -348,5 +348,55 @@ describe('TresorGalerie', () => {
       expect(screen.queryByRole('button', { name: 'a.jpg' })).toBeNull()
       expect(kachel('clip.mp4')).toBeInTheDocument()
     })
+
+    it('erreicht das Raster mit einem Tab und wandert darin mit den Pfeiltasten', () => {
+      // Bis 02.10.2026 führte Tab durch jedes Foto einzeln.
+      render(<TresorGalerie />)
+      const kacheln = ['a.jpg', 'b.jpg', 'c.jpg', 'clip.mp4'].map(kachel)
+      expect(kacheln.map((k) => k.tabIndex)).toEqual([0, -1, -1, -1])
+
+      kacheln[0].focus()
+      fireEvent.keyDown(kacheln[0], { key: 'ArrowRight' })
+      expect(kacheln[1]).toHaveFocus()
+      expect(kacheln.map((k) => k.tabIndex)).toEqual([-1, 0, -1, -1])
+
+      fireEvent.keyDown(kacheln[1], { key: 'End' })
+      expect(kacheln[3]).toHaveFocus()
+      fireEvent.keyDown(kacheln[3], { key: 'Home' })
+      expect(kacheln[0]).toHaveFocus()
+      // Ohne Nachbarn bleibt der Fokus stehen.
+      fireEvent.keyDown(kacheln[0], { key: 'ArrowLeft' })
+      expect(kacheln[0]).toHaveFocus()
+    })
+  })
+})
+
+describe('nachbarKachel', () => {
+  /** Ein Raster aus festen Kästen; jsdom misst sonst alles mit 0. */
+  function raster(kaesten: Array<[number, number]>) {
+    const wurzel = document.createElement('div')
+    const kacheln = kaesten.map(([links, oben], i) => {
+      const k = document.createElement('button')
+      k.dataset.kachel = String(i)
+      k.getBoundingClientRect = () => ({ left: links, top: oben, width: 100, height: 100, right: links + 100, bottom: oben + 100, x: links, y: oben, toJSON: () => ({}) })
+      wurzel.append(k)
+      return k
+    })
+    return { wurzel, kacheln }
+  }
+
+  it('geht hoch und runter zur Kachel unter der Mitte, auch in eine kürzere Zeile', () => {
+    // Drei Spalten; die letzte Zeile hat nur zwei Kacheln, danach ein neuer Monat.
+    const { wurzel, kacheln } = raster([
+      [0, 0], [104, 0], [208, 0],
+      [0, 104], [104, 104],
+      [0, 240], [104, 240], [208, 240],
+    ])
+    expect(nachbarKachel(wurzel, kacheln[1], 'ArrowDown')).toBe(kacheln[4])
+    expect(nachbarKachel(wurzel, kacheln[2], 'ArrowDown')).toBe(kacheln[4])
+    expect(nachbarKachel(wurzel, kacheln[4], 'ArrowDown')).toBe(kacheln[6])
+    expect(nachbarKachel(wurzel, kacheln[7], 'ArrowUp')).toBe(kacheln[4])
+    expect(nachbarKachel(wurzel, kacheln[0], 'ArrowUp')).toBeNull()
+    expect(nachbarKachel(wurzel, kacheln[7], 'ArrowDown')).toBeNull()
   })
 })

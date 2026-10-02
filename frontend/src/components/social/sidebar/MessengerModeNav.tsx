@@ -69,7 +69,7 @@ export function MessengerBottomNav({ modus, onModus }: MessengerModeNavProps) {
 
   // Höhe plus sichere Fläche, siehe die Eingabeleiste im Chat.
   return (
-    <nav className="md:hidden shrink-0 h-14 box-content pb-[env(safe-area-inset-bottom)] border-t border-outline-variant/20 bg-surface-container/95 backdrop-blur flex items-center justify-around px-2 z-10">
+    <nav className="md:hidden shrink-0 h-14 box-content pb-[var(--msm-unten-sicher)] border-t border-outline-variant/20 bg-surface-container/95 backdrop-blur flex items-center justify-around px-2 z-10">
       {eintraege.map(({ wert, label, Icon }) => (
         <button
           key={wert}

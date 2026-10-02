@@ -270,7 +270,7 @@ export function Lichtbox({
       aria-label={titel}
       // Per Portal an body, also ohne die Ränder der App: Status- und Gestenleiste hält sie selbst frei.
       // Rollbarer Inhalt (Dokumente) ist hell und lückenhaft; dahinter darf die App nicht durchscheinen.
-      className={`fixed inset-0 z-50 flex flex-col pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] text-white animate-fade-in ${rollbar ? 'bg-black' : 'bg-black/95'}`}
+      className={`fixed inset-0 z-50 flex flex-col pt-[env(safe-area-inset-top,0px)] pb-[var(--msm-unten-sicher)] text-white animate-fade-in ${rollbar ? 'bg-black' : 'bg-black/95'}`}
     >
       {/* min-h/min-w statt h/w: die Höhe aus `size` gewinnt sonst je nach Stylesheet gegen das className. */}
       {/* Deckend: unter 95 % Schwarz schien die Kopfzeile der App genau unter den Knöpfen durch (Emulator, 02.10.2026). */}

@@ -185,7 +185,7 @@ describe('DesktopApp', () => {
       expect(screen.getByTestId('ki-seite')).toBeInTheDocument()
     })
     // Der Agent-Name steht in der Kopfleiste — dieselbe Quelle wie im Panel.
-    expect(screen.getByText('Jarvis')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Jarvis' })).toBeInTheDocument()
   })
 
   it('ohne Sandbox-Ordner bietet die App genau diesen Schritt noch einmal an', async () => {
@@ -639,7 +639,7 @@ describe('DesktopApp', () => {
 
     // Lokaler Account bleibt sichtbar und Offline-Badge wird angezeigt
     await waitFor(() => {
-      expect(screen.getByText('Jarvis')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 1, name: 'Jarvis' })).toBeInTheDocument()
       expect(screen.getByText('Offline')).toBeInTheDocument()
       // Nur Tresor, Notizen und Kalender werden angezeigt
       expect(screen.getByText(i18n.t('mss.app.tresor'))).toBeInTheDocument()
@@ -694,8 +694,10 @@ describe('DesktopApp', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('messenger-seite')).toBeInTheDocument()
-      expect(screen.getByText(i18n.t('mss.app.messenger'))).toBeInTheDocument()
+      // Die Kopfzeile nennt den offenen Bereich; bis 02.10.2026 stand dort immer der Assistent.
+      expect(screen.getByRole('heading', { level: 1, name: i18n.t('mss.app.messenger') })).toBeInTheDocument()
     })
+    expect(screen.queryByRole('heading', { level: 1, name: 'Jarvis' })).toBeNull()
   })
 
   it('setzt in Kopfzeile und Navigation kein natives title; inaktive Reiter nennen ihren Namen per Kurzinfo', async () => {

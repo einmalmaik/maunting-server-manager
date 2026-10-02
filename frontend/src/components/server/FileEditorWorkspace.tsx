@@ -34,7 +34,7 @@ import {
 } from 'lucide-react'
 import { detectLanguage, detectIndentation, fileName } from './fileHelpers'
 import type { EditorTab } from './fileWorkspaceTypes'
-import { Button } from '@/Singra/UI'
+import { Button, Input } from '@/Singra/UI'
 
 interface FileEditorWorkspaceProps {
   tabs: EditorTab[]
@@ -396,8 +396,8 @@ export function FileEditorWorkspace({
           {searchOpen && (
             <div className="grid gap-2 border-b border-outline-variant bg-surface-container-high/65 p-2.5 md:grid-cols-[minmax(160px,1fr)_minmax(160px,1fr)_auto]">
               <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
-                <input
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
+                <Input
                   ref={findInputRef}
                   value={query}
                   onChange={(event) => { setQuery(event.target.value); setActiveMatch(0) }}
@@ -409,20 +409,20 @@ export function FileEditorWorkspace({
                   }}
                   aria-label={t('files.editor.findPlaceholder')}
                   placeholder={t('files.editor.findPlaceholder')}
-                  className="msm-input h-8 pl-8 pr-16 text-xs"
+                  className="pl-8 pr-16 text-xs max-md:h-11"
                 />
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-label-sm text-on-surface-variant">{matches.length ? `${activeMatch + 1}/${matches.length}` : '0'}</span>
               </div>
               <div className="relative">
-                <Replace className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
-                <input
+                <Replace className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
+                <Input
                   ref={replaceInputRef}
                   value={replacement}
                   onChange={(event) => setReplacement(event.target.value)}
                   placeholder={t('files.editor.replacePlaceholder')}
                   aria-label={t('files.editor.replacePlaceholder')}
                   disabled={!canWrite}
-                  className="msm-input h-8 pl-8 text-xs disabled:opacity-50"
+                  className="pl-8 text-xs max-md:h-11"
                 />
               </div>
               <div className="flex flex-wrap items-center gap-1">

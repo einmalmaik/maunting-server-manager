@@ -282,7 +282,7 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
         // was darunter liegt — auf dem Desktop über den Fenstern, in der App
         // über ihrer Oberfläche, die dabei bedienbar bleibt.
         inApp
-          ? 'pointer-events-none fixed inset-x-0 bottom-0 z-50 h-[380px] max-h-[75dvh] pb-[env(safe-area-inset-bottom,0px)]'
+          ? 'pointer-events-none fixed inset-x-0 bottom-0 z-50 h-[380px] max-h-[75dvh] pb-[var(--msm-unten-sicher)]'
           : 'relative h-screen w-full',
       ].join(' ')}
     >

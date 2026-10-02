@@ -445,7 +445,7 @@ export function AiMemoryImportModal({ open, onOpenChange, scope, onImported }: P
           )}
         </div>
 
-        <DialogFooter className="flex-wrap gap-y-2 max-sm:pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <DialogFooter className="flex-wrap gap-y-2 max-sm:pb-[max(1rem,var(--msm-unten-sicher))]">
           {vorschau !== null && zuviel > 0 && (
             <p className="mr-auto text-xs text-status-warning">
               {t('ai.memory.import.tooMany', { over: zuviel })}

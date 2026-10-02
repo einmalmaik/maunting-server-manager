@@ -144,7 +144,7 @@ export function WeiterleitenAnsicht({
         )}
       </div>
 
-      <div className="shrink-0 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] border-t border-outline-variant/20 bg-surface-container-lowest space-y-2">
+      <div className="shrink-0 p-3 pb-[calc(0.75rem+var(--msm-unten-sicher))] border-t border-outline-variant/20 bg-surface-container-lowest space-y-2">
         {fortschritt && fortschritt.gesamt > 0 && (
           <div className="space-y-1">
             <div className="flex justify-between text-label-sm text-on-surface-variant">

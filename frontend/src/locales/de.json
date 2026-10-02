@@ -997,8 +997,8 @@
         "database": "Datenbank",
         "table": "Tabelle",
         "destructive": "Entfernt Daten",
-        "vault_storage_gb_before": "Tresorspeicher vorher (GB)",
-        "vault_storage_gb_after": "Tresorspeicher danach (GB)"
+        "vault_storage_gb_before": "Tresorspeicher vorher (GiB)",
+        "vault_storage_gb_after": "Tresorspeicher danach (GiB)"
       },
       "reasonLabel": "Begründung der KI",
       "effectLabel": "Erwartete Wirkung",

@@ -3,6 +3,12 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Unterer sicherer Rand: env() oder, wo ein alter Android-WebView die
+   Gestenleiste verschweigt, die Höhe aus der App (lib/gestenleiste.ts). */
+:root {
+  --msm-unten-sicher: max(env(safe-area-inset-bottom, 0px), var(--msm-gestenleiste, 0px));
+}
+
 @layer base {
   html {
     background-color: hsl(var(--dna-background));

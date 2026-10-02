@@ -87,7 +87,7 @@ export interface Segment {
   value: number
   /** Tailwind background color class, e.g. 'bg-primary' */
   colorClass: string
-  /** Tooltip or accessible label */
+  /** Vorgelesen als Teil des Balkens; sichtbar macht es der Aufrufer (Legende). */
   label?: string
 }
 
@@ -127,6 +127,8 @@ export function StackedProgressBar({
       <div
         className="flex h-2.5 w-full overflow-hidden rounded-full border border-outline-variant/40 bg-surface-container-highest"
         role="progressbar"
+        aria-label={label}
+        aria-valuetext={segments.map((s) => s.label).filter(Boolean).join(', ') || undefined}
       >
         {totalWeight > 0 ? (
           segments.map((seg, i) => {
@@ -137,7 +139,6 @@ export function StackedProgressBar({
                 key={i}
                 className={cx('h-full transition-all duration-300', seg.colorClass)}
                 style={{ width: `${pct}%` }}
-                title={seg.label}
               />
             )
           })
