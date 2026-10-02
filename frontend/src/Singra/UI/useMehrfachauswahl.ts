@@ -13,7 +13,7 @@
 import { useCallback, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { useZurueckSchliesst } from './useZurueckSchliesst'
 
-/** So lange nach einem langen Druck gilt der folgende Klick als dessen Ende, nicht als neuer Tipp. */
+/** So lange nach einem langen Druck gilt der folgende Klick auf denselben Eintrag als dessen Ende, nicht als neuer Tipp. */
 const KLICK_NACH_LANGDRUCK_MS = 700
 
 /** Welche Tasten beim Klick gedrückt waren. */
@@ -44,7 +44,7 @@ export function useMehrfachauswahl(reihenfolge: readonly string[]): Mehrfachausw
   const [auswahl, setAuswahl] = useState<Set<string> | null>(null)
   /** Ausgangspunkt für Umschalt-Klick. */
   const anker = useRef<string | null>(null)
-  const letzterLangdruck = useRef(0)
+  const letzterLangdruck = useRef<{ id: string; zeit: number } | null>(null)
   // Über Refs, damit die Rückrufe gleich bleiben und gemerkte Kacheln nicht neu zeichnen.
   const reihe = useRef(reihenfolge)
   reihe.current = reihenfolge
@@ -80,7 +80,12 @@ export function useMehrfachauswahl(reihenfolge: readonly string[]): Mehrfachausw
 
   const klick = useCallback(
     (id: string, tasten: Auswahltasten) => {
-      if (Date.now() - letzterLangdruck.current < KLICK_NACH_LANGDRUCK_MS) return true
+      // Nur der Klick, mit dem derselbe Finger loslässt; ein Tipp auf einen anderen Eintrag zählt.
+      const lang = letzterLangdruck.current
+      if (lang?.id === id && Date.now() - lang.zeit < KLICK_NACH_LANGDRUCK_MS) {
+        letzterLangdruck.current = null
+        return true
+      }
       if (tasten.shiftKey) bereich(id)
       else if (tasten.ctrlKey || tasten.metaKey || aktiv.current) umschalten(id)
       else return false
@@ -90,7 +95,7 @@ export function useMehrfachauswahl(reihenfolge: readonly string[]): Mehrfachausw
   )
 
   const langdruck = useCallback((id: string) => {
-    letzterLangdruck.current = Date.now()
+    letzterLangdruck.current = { id, zeit: Date.now() }
     setAuswahl((a) => new Set([...(a ?? []), id]))
     anker.current = id
   }, [])
@@ -103,7 +108,11 @@ export function useMehrfachauswahl(reihenfolge: readonly string[]): Mehrfachausw
 
   const taste = useCallback(
     (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a' && reihe.current.length > 0) {
+      const ziel = event.target
+      const eingabe =
+        ziel instanceof HTMLInputElement || ziel instanceof HTMLTextAreaElement || (ziel instanceof HTMLElement && ziel.isContentEditable)
+      // In einem Eingabefeld markiert Strg+A den Text darin, nicht die Liste.
+      if (!eingabe && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a' && reihe.current.length > 0) {
         event.preventDefault()
         alle()
         return true

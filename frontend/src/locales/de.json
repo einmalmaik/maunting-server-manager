@@ -4051,7 +4051,10 @@
       "fehler": "Dieses PDF lässt sich hier nicht anzeigen. Speichere es, um es mit einem anderen Programm zu öffnen."
     },
     "eintippenZumBestaetigen": "Gib „{{wert}}“ ein, um zu bestätigen.",
-    "unbekannt": "unbekannt"
+    "unbekannt": "unbekannt",
+    "auswaehlen": "Auswählen",
+    "suchenPunkte": "Suchen …",
+    "keineEintraege": "Keine Einträge"
   },
   "serverDetail": {
     "showServerOverview": "Server-Übersicht",
@@ -6216,7 +6219,8 @@
         "invalidTotpSecret": "Ungültiges Base32 TOTP-Secret",
         "emptyTotpSecret": "Leeres Base32 TOTP-Secret",
         "invalidEnvelopeFormat": "Ungültiges Umschlag-Format: erwartet {{prefix}}",
-        "unbekannteArt": "Diesen Eintrag hat eine neuere Version der App angelegt. Aktualisiere die App, um ihn zu bearbeiten."
+        "unbekannteArt": "Diesen Eintrag hat eine neuere Version der App angelegt. Aktualisiere die App, um ihn zu bearbeiten.",
+        "geloescht": "Dieser Eintrag wurde inzwischen gelöscht."
       },
       "ansicht": {
         "tresor": "Passwörter",

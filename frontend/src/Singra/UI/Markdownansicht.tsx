@@ -9,7 +9,7 @@
  *   der Alt-Text da.
  * - Links öffnen getrennt, ohne Referrer.
  */
-import { memo } from 'react'
+import { memo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -29,6 +29,19 @@ export function MarkdownBild({ alt }: { alt?: string }) {
   )
 }
 
+/**
+ * Ersatz für `a` in jedem Markdown aus fremder Hand: öffnet getrennt und ohne
+ * Referrer. Ein Link im selben Fenster ersetzte die Seite, in der App den
+ * ganzen WebView.
+ */
+export function MarkdownLink({ href, children }: { href?: string; children?: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noreferrer noopener" className="text-primary underline underline-offset-2 hover:text-primary/80">
+      {children}
+    </a>
+  )
+}
+
 export const Markdownansicht = memo(function Markdownansicht({ text }: { text: string }) {
   return (
     <article className="mx-auto w-full max-w-3xl break-words px-4 py-6 text-base leading-relaxed text-on-surface sm:px-8 sm:text-sm sm:leading-6">
@@ -36,11 +49,7 @@ export const Markdownansicht = memo(function Markdownansicht({ text }: { text: s
         remarkPlugins={[remarkGfm]}
         components={{
           img: MarkdownBild,
-          a: ({ children, href }) => (
-            <a href={href} target="_blank" rel="noreferrer noopener" className="text-primary underline underline-offset-2 hover:text-primary/80">
-              {children}
-            </a>
-          ),
+          a: MarkdownLink,
           code: ({ className, children }) =>
             className ? (
               <code className="font-mono text-xs">{children}</code>

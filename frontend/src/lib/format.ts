@@ -17,13 +17,22 @@ const TIB = GIB * 1024
  * „512 B“, „1.5 KB“, „3.00 GB“. Ist keine Größe bekannt (fehlt, negativ, keine
  * Zahl), steht ein Strich; „0 B“ heißt wirklich leer.
  */
+const STUFEN = [
+  { name: 'KB', teiler: KIB, stellen: 1 },
+  { name: 'MB', teiler: MIB, stellen: 1 },
+  { name: 'GB', teiler: GIB, stellen: 2 },
+  { name: 'TB', teiler: TIB, stellen: 2 },
+] as const
+
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return '-'
-  if (bytes < KIB) return `${Math.round(bytes)} B`
-  if (bytes < MIB) return `${(bytes / KIB).toFixed(1)} KB`
-  if (bytes < GIB) return `${(bytes / MIB).toFixed(1)} MB`
-  if (bytes < TIB) return `${(bytes / GIB).toFixed(2)} GB`
-  return `${(bytes / TIB).toFixed(2)} TB`
+  if (Math.round(bytes) < KIB) return `${Math.round(bytes)} B`
+  // Gerundet wird erst hier: 1048575 B wären sonst „1024.0 KB“ statt „1.0 MB“.
+  for (const [i, { name, teiler, stellen }] of STUFEN.entries()) {
+    const wert = (bytes / teiler).toFixed(stellen)
+    if (Number(wert) < 1024 || i === STUFEN.length - 1) return `${wert} ${name}`
+  }
+  return '-'
 }
 
 export interface ZeitpunktOptionen {

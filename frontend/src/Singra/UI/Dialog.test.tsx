@@ -63,4 +63,36 @@ describe('Dialog', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByText('Unten')).not.toBeInTheDocument()
   })
+  it('springt beim Tippen ins zweite Feld nicht ins erste zurück', async () => {
+    // Der Wert des Providers war bei jedem Neuzeichnen neu, und der Effekt hing
+    // daran: der Fokus sprang an den Auslöser und dann aufs erste Feld.
+    await waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    function Formular() {
+      const [offen, setOffen] = useState(false)
+      const [eins, setEins] = useState('')
+      const [zwei, setZwei] = useState('')
+      return (
+        <>
+          <button type="button" onClick={() => setOffen(true)}>
+            öffnen
+          </button>
+          <Dialog open={offen} onOpenChange={setOffen}>
+            <DialogContent>
+              <input aria-label="eins" value={eins} onChange={(e) => setEins(e.target.value)} />
+              <input aria-label="zwei" value={zwei} onChange={(e) => setZwei(e.target.value)} />
+            </DialogContent>
+          </Dialog>
+        </>
+      )
+    }
+    render(<Formular />)
+    const knopf = screen.getByText('öffnen')
+    knopf.focus()
+    fireEvent.click(knopf)
+    const zwei = screen.getByLabelText('zwei')
+    zwei.focus()
+    fireEvent.change(zwei, { target: { value: 'a' } })
+    expect(zwei).toHaveValue('a')
+    expect(document.activeElement).toBe(zwei)
+  })
 })

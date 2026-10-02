@@ -60,6 +60,15 @@ describe('PromptDialog', () => {
 
     expect(document.activeElement).toBe(feld)
   })
+
+  it('hält Tab im Dialog', () => {
+    oeffnen()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'neu' } })
+    const ja = screen.getByRole('button', { name: 'Ja' })
+    ja.focus()
+    expect(fireEvent.keyDown(ja, { key: 'Tab' })).toBe(false)
+    expect(document.activeElement).toBe(screen.getByRole('textbox'))
+  })
 })
 
 describe('PromptDialog in der App-Sprache', () => {

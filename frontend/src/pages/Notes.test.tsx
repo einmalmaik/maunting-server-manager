@@ -141,4 +141,23 @@ describe('Notes Component', () => {
       expect(screen.getByText('Server Wartungsplan')).toBeInTheDocument()
     })
   })
+  it('öffnet Links aus fremden Notizen getrennt und ohne Referrer', async () => {
+    // InlineMarkdown hatte bis 02.10.2026 keinen eigenen Link: ein Link in einer
+    // Team-Notiz ersetzte die Seite, in der App navigierte der WebView weg.
+    vi.mocked(api).mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('/notes')) {
+        return [{ ...mockNotes[1], content: 'Siehe [Login](https://phish.example/login)' }]
+      }
+      return []
+    })
+    render(
+      <MemoryRouter>
+        <Notes />
+      </MemoryRouter>
+    )
+    const link = await screen.findByRole('link', { name: 'Login' })
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link.getAttribute('rel')).toContain('noopener')
+    expect(link.getAttribute('rel')).toContain('noreferrer')
+  })
 })

@@ -12,7 +12,7 @@ import { createPortal } from 'react-dom'
 import { cx } from '@/utils/classNames'
 import { useZurueckSchliesst } from './useZurueckSchliesst'
 import type { ActionMenuItem } from './ActionMenu'
-import { ankerLage, SCHICHT } from './Ankerlage'
+import { ankerLage, RAND, SCHICHT } from './Ankerlage'
 
 export interface KontextmenueProps {
   /** Zeigerposition beim Öffnen; `null` heißt geschlossen. */
@@ -45,7 +45,9 @@ export function Kontextmenue({ ort, items, label, ausloeser, onSchliessen }: Kon
     const setzen = () => {
       const box = menue.current?.getBoundingClientRect()
       if (!box) return
-      setLage(menueLage(ort.x, ort.y, box.width, box.height, { breite: window.innerWidth, hoehe: window.innerHeight }))
+      // Höher als das Fenster wird es nicht (`max-h` unten); gerechnet wird mit der Höhe, die bleibt.
+      const hoehe = Math.min(box.height, window.innerHeight - 2 * RAND)
+      setLage(menueLage(ort.x, ort.y, box.width, hoehe, { breite: window.innerWidth, hoehe: window.innerHeight }))
     }
     setzen()
     window.addEventListener('resize', setzen)
@@ -61,13 +63,15 @@ export function Kontextmenue({ ort, items, label, ausloeser, onSchliessen }: Kon
     const gescrollt = (event: Event) => {
       if (!menue.current?.contains(event.target as Node)) schliessenRef.current()
     }
+    // Escape in der Capture-Phase: vor dem Dialog darunter, der dann
+    // `defaultPrevented` sieht und offen bleibt.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      schliessenRef.current()
+      ausloeser?.focus()
+    }
     const taste = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        schliessenRef.current()
-        ausloeser?.focus()
-        return
-      }
       if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
       const eintraege = Array.from(menue.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])
       if (!eintraege.length) return
@@ -86,11 +90,13 @@ export function Kontextmenue({ ort, items, label, ausloeser, onSchliessen }: Kon
     document.addEventListener('mousedown', daneben)
     window.addEventListener('scroll', gescrollt, true)
     document.addEventListener('keydown', taste)
+    document.addEventListener('keydown', escape, true)
     return () => {
       window.cancelAnimationFrame(fokus)
       document.removeEventListener('mousedown', daneben)
       window.removeEventListener('scroll', gescrollt, true)
       document.removeEventListener('keydown', taste)
+      document.removeEventListener('keydown', escape, true)
     }
   }, [ort, ausloeser])
 
@@ -100,7 +106,7 @@ export function Kontextmenue({ ort, items, label, ausloeser, onSchliessen }: Kon
       ref={menue}
       role="menu"
       aria-label={label}
-      className="fixed min-w-48 rounded-lg border border-outline-variant bg-surface-container-high p-1.5 shadow-panel"
+      className="fixed min-w-48 max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-lg border border-outline-variant bg-surface-container-high p-1.5 shadow-panel"
       // Bis gemessen ist, unsichtbar in der Ecke: dort hat es seine volle Breite.
       // Am Zeiger nahe dem Rand würde es schmaler gemessen, als es ist.
       style={{ zIndex: SCHICHT.kontextmenue, ...(lage ?? { left: 0, top: 0, visibility: 'hidden' }) }}

@@ -140,6 +140,10 @@ export function Lichtbox({
 
   useEffect(() => {
     const taste = (e: KeyboardEvent) => {
+      // Wie `DialogContent`: Tasten gehören dem obersten offenen Dialog. Unter
+      // einer Rückfrage blätterte ArrowRight bis 02.10.2026 weiter.
+      const dialoge = document.querySelectorAll('[aria-modal="true"]')
+      if (rahmen.current !== dialoge[dialoge.length - 1]) return
       const eingabe =
         e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target instanceof HTMLElement && e.target.isContentEditable)
       // Strg/Cmd mit + und - zoomt die Seite; das bleibt dem Browser.
@@ -148,6 +152,8 @@ export function Lichtbox({
         if (e.key === '0') zoomSetzen(1)
         else zoomUm(e.key === '-' ? 1 / ZOOM_SCHRITT : ZOOM_SCHRITT)
       } else if (e.key === 'Escape') {
+        // Ein Menü in der Kopfleiste hat Escape schon für sich genommen.
+        if (e.defaultPrevented) return
         e.preventDefault()
         onSchliessen()
       } else if (e.key === 'ArrowRight' && onVor && !(e.target instanceof HTMLVideoElement)) {

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { AlertTriangle } from 'lucide-react'
 import { usePromptStore } from '@/stores/promptStore'
 import { useZurueckSchliesst } from '@/Singra/UI/useZurueckSchliesst'
+import { istObersterDialog, tabImRahmen } from '@/Singra/UI/Dialog'
 import { Button } from './Button'
 import { Input } from './Input'
 
@@ -21,6 +22,7 @@ export function PromptDialog() {
   const resolve = usePromptStore((s) => s.resolve)
   useZurueckSchliesst(!!pending, () => resolve(null))
   const [value, setValue] = useState('')
+  const overlayRef = useRef<HTMLDivElement>(null)
 
   // Eingabefeld beim Oeffnen vorbelegen.
   useEffect(() => {
@@ -29,11 +31,17 @@ export function PromptDialog() {
     }
   }, [pending])
 
-  // Escape bricht ab, Enter bestaetigt (wenn freigegeben und nicht leer).
+  // Escape bricht ab, Enter bestaetigt (wenn freigegeben und nicht leer), Tab
+  // bleibt im Dialog. Tasten gehören nur dem obersten offenen Dialog.
   useEffect(() => {
     if (!pending) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      const overlay = overlayRef.current
+      if (!overlay || !istObersterDialog(overlay)) return
+      if (e.key === 'Tab') {
+        tabImRahmen(e, overlay)
+      } else if (e.key === 'Escape') {
+        if (e.defaultPrevented) return
         e.preventDefault()
         resolve(null)
       } else if (e.key === 'Enter') {
@@ -81,6 +89,7 @@ export function PromptDialog() {
   // Rückfrage hinter dem Vollbild-Editor, der selbst per Portal an body hängt.
   return createPortal(
     <div
+      ref={overlayRef}
       className="msm-modal-overlay"
       onClick={() => resolve(null)}
       role="dialog"

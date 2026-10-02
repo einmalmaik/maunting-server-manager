@@ -59,13 +59,15 @@ export function ActionMenu({
         setOpen(false)
       }
     }
+    // Escape in der Capture-Phase: vor dem Dialog darunter, der dann
+    // `defaultPrevented` sieht und offen bleibt.
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      setOpen(false)
+      triggerRef.current?.focus()
+    }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        setOpen(false)
-        triggerRef.current?.focus()
-        return
-      }
       if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
       const menuItems: HTMLButtonElement[] = menuRef.current
         ? Array.from<HTMLButtonElement>(menuRef.current.querySelectorAll('[role="menuitem"]:not(:disabled)'))
@@ -91,9 +93,11 @@ export function ActionMenu({
     })
     document.addEventListener('mousedown', dismiss)
     document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('keydown', onEscape, true)
     return () => {
       document.removeEventListener('mousedown', dismiss)
       document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('keydown', onEscape, true)
       window.cancelAnimationFrame(focusFrame)
     }
   }, [open])
@@ -135,7 +139,7 @@ export function ActionMenu({
               id={menuId}
               role="menu"
               style={lage}
-              className="min-w-[190px] max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-lg border border-outline-variant bg-surface-container-high/98 p-1.5 shadow-panel backdrop-blur-xl"
+              className="min-w-[190px] max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-lg border border-outline-variant bg-surface-container-high/98 p-1.5 shadow-panel backdrop-blur-xl"
             >
               {items.map((item) => (
                 <div key={item.key} className={item.separatorBefore ? 'mt-1 border-t border-outline-variant pt-1' : ''}>
@@ -157,7 +161,7 @@ export function ActionMenu({
                     <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
                       {item.icon}
                     </span>
-                    <span>{item.label}</span>
+                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
                   </button>
                 </div>
               ))}

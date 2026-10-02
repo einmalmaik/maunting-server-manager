@@ -90,4 +90,28 @@ describe('ConfirmDialog', () => {
     expect(rueckfrage.parentElement).toBe(document.body)
     expect(editor.compareDocumentPosition(rueckfrage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
+  it('hat einen Namen und eine Beschreibung für Screenreader', () => {
+    render(<ConfirmDialog />)
+    act(() => {
+      void confirm({ message: 'Wirklich löschen?' })
+    })
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('Wirklich löschen?')
+    act(() => useConfirmStore.setState({ pending: null }))
+    act(() => {
+      void confirm({ title: 'Datei löschen', message: 'Wirklich löschen?' })
+    })
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('Datei löschen')
+    expect(screen.getByRole('dialog')).toHaveAccessibleDescription('Wirklich löschen?')
+  })
+
+  it('hält Tab im Dialog', () => {
+    oeffnen()
+    const ja = screen.getByRole('button', { name: 'Ja' })
+    ja.focus()
+    // fireEvent gibt false zurück, wenn preventDefault gerufen wurde.
+    expect(fireEvent.keyDown(ja, { key: 'Tab' })).toBe(false)
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Nein' }))
+    expect(fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true })).toBe(false)
+    expect(document.activeElement).toBe(ja)
+  })
 })

@@ -19,6 +19,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { Dropdown } from './Dropdown'
+import { Dialog, DialogContent } from '@/Singra/UI/Dialog'
 
 const OPTIONEN = [
   { value: 'a', label: 'Minecraft Forge' },
@@ -158,5 +159,48 @@ describe('Dropdown', () => {
 
     expect(auswahl).toHaveBeenCalledWith('b')
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+})
+
+describe('Dropdown in einem Dialog', () => {
+  it('schließt mit Escape nur die Liste, nicht den Dialog darunter', async () => {
+    // Bis 02.10.2026 hörte der Dialog Escape am Dokument und hielt sich für
+    // den obersten: Escape schloss die Liste und den Dialog mitsamt Eingaben.
+    await waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    const dialogZu = vi.fn()
+    render(
+      <Dialog open onOpenChange={dialogZu}>
+        <DialogContent>
+          <Dropdown aria-label="Spiel" value="a" onChange={() => {}} options={OPTIONEN} />
+        </DialogContent>
+      </Dialog>,
+    )
+    const knopf = screen.getByRole('button', { name: 'Spiel' })
+    fireEvent.click(knopf)
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+    fireEvent.keyDown(knopf, { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(dialogZu).not.toHaveBeenCalled()
+  })
+})
+
+describe('Dropdown in der App-Sprache', () => {
+  afterEach(async () => {
+    const { default: i18n } = await import('@/i18n')
+    await i18n.changeLanguage('de')
+  })
+
+  it('zeigt Platzhalter, Suche und leere Liste in der App-Sprache', async () => {
+    // Bis 03.10.2026 standen „Auswählen“, „Suchen …“ und „Keine Einträge“ fest
+    // im Baustein, auch in der englischen App.
+    const { default: i18n } = await import('@/i18n')
+    await i18n.changeLanguage('en')
+    render(<Dropdown aria-label="Spiel" value={null} onChange={() => {}} options={[]} searchable />)
+    const knopf = screen.getByRole('button', { name: 'Spiel' })
+    expect(knopf).toHaveTextContent(i18n.t('common.auswaehlen'))
+    expect(knopf).not.toHaveTextContent('Auswählen')
+    fireEvent.click(knopf)
+    expect(await screen.findByPlaceholderText(i18n.t('common.suchenPunkte'))).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('common.keineEintraege'))).toBeInTheDocument()
   })
 })

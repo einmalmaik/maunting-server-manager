@@ -4051,7 +4051,10 @@
       "fehler": "This PDF can't be shown here. Save it to open it in another app."
     },
     "eintippenZumBestaetigen": "Type “{{wert}}” to confirm.",
-    "unbekannt": "unknown"
+    "unbekannt": "unknown",
+    "auswaehlen": "Select",
+    "suchenPunkte": "Search …",
+    "keineEintraege": "No entries"
   },
   "serverDetail": {
     "showServerOverview": "Server overview",
@@ -6216,7 +6219,8 @@
         "invalidTotpSecret": "Invalid Base32 TOTP secret",
         "emptyTotpSecret": "Empty Base32 TOTP secret",
         "invalidEnvelopeFormat": "Invalid envelope format: expected {{prefix}}",
-        "unbekannteArt": "A newer version of the app created this entry. Update the app to edit it."
+        "unbekannteArt": "A newer version of the app created this entry. Update the app to edit it.",
+        "geloescht": "This entry has been deleted in the meantime."
       },
       "ansicht": {
         "tresor": "Passwords",

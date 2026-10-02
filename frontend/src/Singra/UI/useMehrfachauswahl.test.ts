@@ -54,4 +54,22 @@ describe('useMehrfachauswahl', () => {
     act(() => result.current.starten())
     expect(result.current.auswahl?.size).toBe(0)
   })
+  it('nimmt nach einem langen Druck den Tipp auf einen anderen Eintrag an', () => {
+    // Bis 02.10.2026 verschluckte der Riegel nach dem langen Druck jeden Tipp
+    // für 700 ms, auch auf einen anderen Eintrag.
+    const { result } = renderHook(() => useMehrfachauswahl(ids))
+    act(() => result.current.langdruck('a'))
+    act(() => void expect(result.current.klick('b', ohne)).toBe(true))
+    expect([...result.current.auswahl!]).toEqual(['a', 'b'])
+  })
+
+  it('lässt Strg+A in einem Eingabefeld dem Feld', () => {
+    const { result } = renderHook(() => useMehrfachauswahl(ids))
+    for (const feld of [document.createElement('input'), document.createElement('textarea')]) {
+      const ereignis = { ...taste('a', { ctrlKey: true }), target: feld } as unknown as KeyboardEvent
+      act(() => void expect(result.current.taste(ereignis)).toBe(false))
+      expect(ereignis.preventDefault).not.toHaveBeenCalled()
+      expect(result.current.auswahl).toBeNull()
+    }
+  })
 })

@@ -38,6 +38,28 @@ export interface DialogContentProps extends React.HTMLAttributes<HTMLDivElement>
 const FOCUSSABLE =
   'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
+/** Liegt `overlay` (das Element mit `aria-modal`) über allen anderen offenen Dialogen? */
+export function istObersterDialog(overlay: Element | null | undefined): boolean {
+  const dialoge = document.querySelectorAll('[aria-modal="true"]')
+  return !!overlay && overlay === dialoge[dialoge.length - 1]
+}
+
+/** Hält Tab und Umschalt+Tab in `rahmen`: vom letzten Ziel geht es zum ersten und umgekehrt. */
+export function tabImRahmen(e: KeyboardEvent, rahmen: HTMLElement) {
+  if (e.key !== 'Tab') return
+  const ziele = Array.from(rahmen.querySelectorAll<HTMLElement>(FOCUSSABLE))
+  if (ziele.length === 0) return
+  const erstes = ziele[0]
+  const letztes = ziele[ziele.length - 1]
+  if (e.shiftKey && document.activeElement === erstes) {
+    e.preventDefault()
+    letztes.focus()
+  } else if (!e.shiftKey && document.activeElement === letztes) {
+    e.preventDefault()
+    erstes.focus()
+  }
+}
+
 export function DialogContent({
   children,
   className = '',
@@ -56,8 +78,14 @@ export function DialogContent({
     throw new Error('DialogContent must be used within a Dialog')
   }
 
+  // Der Wert des Providers ist bei jedem Neuzeichnen des Aufrufers neu. Hinge
+  // der Effekt daran, sprang der Fokus bei jedem Tastendruck an den Auslöser
+  // und dann aufs erste Feld (bis 02.10.2026). Die Handler lesen deshalb hier.
+  const ctxRef = useRef(ctx)
+  ctxRef.current = ctx
+
   // Der Inhalt existiert nur, solange der Dialog offen ist: Zurück schließt ihn.
-  useZurueckSchliesst(true, () => ctx.onOpenChange(false))
+  useZurueckSchliesst(true, () => ctxRef.current.onOpenChange(false))
 
   const dialogRef = useRef<HTMLDivElement>(null)
   const previousFocus = useRef<HTMLElement | null>(
@@ -66,31 +94,17 @@ export function DialogContent({
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      const dialoge = document.querySelectorAll('[aria-modal="true"]')
-      if (dialogRef.current?.parentElement !== dialoge[dialoge.length - 1]) return
+      if (!istObersterDialog(dialogRef.current?.parentElement)) return
       if (e.key === 'Escape') {
-        if (!ctx.escapeSchliesst) return
+        // Ein offenes Popover im Dialog (Auswahl, Kalender, Menü) hat Escape
+        // schon in der Capture-Phase genommen und schließt nur sich selbst.
+        if (!ctxRef.current.escapeSchliesst || e.defaultPrevented) return
         e.preventDefault()
-        ctx.onOpenChange(false)
+        ctxRef.current.onOpenChange(false)
         return
       }
 
-      if (e.key === 'Tab' && dialogRef.current) {
-        const focusable = Array.from(
-          dialogRef.current.querySelectorAll<HTMLElement>(FOCUSSABLE)
-        )
-        if (focusable.length === 0) return
-        const first = focusable[0]
-        const last = focusable[focusable.length - 1]
-
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault()
-          last.focus()
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault()
-          first.focus()
-        }
-      }
+      if (dialogRef.current) tabImRahmen(e, dialogRef.current)
     }
 
     const el = dialogRef.current
@@ -105,7 +119,7 @@ export function DialogContent({
         previousFocus.current.focus()
       }
     }
-  }, [ctx])
+  }, [])
 
   return createPortal(
     <div

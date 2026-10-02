@@ -62,4 +62,12 @@ describe('TabBar', () => {
     expect(screen.getByRole('tab', { name: /teams\.tabServers/ })).toHaveTextContent('0')
     expect(screen.getByRole('tablist', { name: 'Team' }).className).not.toMatch(/msm-card/)
   })
+
+  it('trennt die Zahl im Namen des Reiters vom Text', () => {
+    // Im Tresor las ein Screenreader „Papierkorb1“.
+    const gezaehlt: TabDef<'a'>[] = [{ id: 'a', labelKey: 'mss.vault.papierkorb', icon: Mail, badge: 1 }]
+    render(<TabBar tabs={gezaehlt} active="a" onChange={() => {}} />)
+
+    expect(screen.getByRole('tab', { name: /^mss\.vault\.papierkorb,\s?1$/ })).toBeInTheDocument()
+  })
 })

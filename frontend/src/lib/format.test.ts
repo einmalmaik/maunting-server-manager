@@ -11,6 +11,15 @@ describe('formatBytes', () => {
     expect(formatBytes(2 * 1024 ** 4)).toBe('2.00 TB')
   })
 
+  it('springt an der Rundungsgrenze in die nächste Stufe', () => {
+    // Bis 02.10.2026 stand hier „1024.0 KB“.
+    expect(formatBytes(1048575)).toBe('1.0 MB')
+    expect(formatBytes(1023.6)).toBe('1.0 KB')
+    expect(formatBytes(1024 ** 3 - 1)).toBe('1.00 GB')
+    expect(formatBytes(1024 ** 4 - 1)).toBe('1.00 TB')
+    expect(formatBytes(1024 * 1024 - 52)).toBe('1023.9 KB')
+  })
+
   it('unterscheidet die leere Datei von der unbekannten Größe', () => {
     // Im Messenger hieß eine fehlende Größe bis 02.10.2026 „0 B“.
     expect(formatBytes(0)).toBe('0 B')

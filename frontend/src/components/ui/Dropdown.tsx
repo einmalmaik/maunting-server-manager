@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
 import { Check, ChevronDown, Search } from 'lucide-react'
 import { cx } from '@/utils/classNames'
 
@@ -44,10 +45,10 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
       id,
       onChange,
       options,
-      placeholder = 'Auswählen',
+      placeholder,
       searchable = false,
-      searchPlaceholder = 'Suchen …',
-      emptyText = 'Keine Einträge',
+      searchPlaceholder,
+      emptyText,
       disabled = false,
       className = '',
       buttonClassName = '',
@@ -59,6 +60,7 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
     },
     ref,
   ) => {
+    const { t } = useTranslation()
     const [open, setOpen] = useState(false)
     const [query, setQuery] = useState('')
     const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null)
@@ -96,14 +98,16 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
         menuRef.current
           ? Array.from<HTMLButtonElement>(menuRef.current.querySelectorAll('[role="option"]:not(:disabled)'))
           : []
+      // Escape in der Capture-Phase: vor dem Dialog darunter, der dann
+      // `defaultPrevented` sieht und offen bleibt.
+      const onEscape = (event: KeyboardEvent) => {
+        if (event.key !== 'Escape' || event.defaultPrevented) return
+        event.preventDefault()
+        setOpen(false)
+        // Ohne diese Zeile verliert man nach Escape seinen Platz im Formular.
+        rootRef.current?.querySelector<HTMLButtonElement>('button')?.focus()
+      }
       const onKey = (event: KeyboardEvent) => {
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          setOpen(false)
-          // Ohne diese Zeile verliert man nach Escape seinen Platz im Formular.
-          rootRef.current?.querySelector<HTMLButtonElement>('button')?.focus()
-          return
-        }
         if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
         const optionen = optionenSammeln()
         if (!optionen.length) return
@@ -129,9 +133,11 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
       })
       document.addEventListener('mousedown', onClick)
       document.addEventListener('keydown', onKey)
+      document.addEventListener('keydown', onEscape, true)
       return () => {
         document.removeEventListener('mousedown', onClick)
         document.removeEventListener('keydown', onKey)
+        document.removeEventListener('keydown', onEscape, true)
         window.cancelAnimationFrame(fokusFrame)
       }
     }, [open])
@@ -207,7 +213,7 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
                   <span className="truncate">{selected.label}</span>
                 </span>
               ) : (
-                placeholder
+                placeholder ?? t('common.auswaehlen')
               )}
             </span>
             <ChevronDown
@@ -244,7 +250,7 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
                           autoFocus
                           value={query}
                           onChange={(e) => setQuery(e.target.value)}
-                          placeholder={searchPlaceholder}
+                          placeholder={searchPlaceholder ?? t('common.suchenPunkte')}
                           className="msm-input w-full py-1.5 pl-8 pr-2 text-xs"
                           onClick={(e) => e.stopPropagation()}
                           onKeyDown={(e) => e.stopPropagation()}
@@ -255,7 +261,7 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
                   <ul id={listId} role="listbox" className="min-h-0 flex-1 overflow-y-auto p-1">
                     {filteredOptions.length === 0 ? (
                       <li className="px-3 py-4 text-center text-xs text-on-surface-variant/60">
-                        {emptyText}
+                        {emptyText ?? t('common.keineEintraege')}
                       </li>
                     ) : (
                       filteredOptions.map((option) => {

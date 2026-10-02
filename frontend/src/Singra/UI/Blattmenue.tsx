@@ -50,6 +50,8 @@ export function Blattmenue({ offen, onSchliessen, titel, children, className = '
       const dialoge = document.querySelectorAll('[aria-modal="true"]')
       if (blatt.current?.parentElement !== dialoge[dialoge.length - 1]) return
       if (e.key === 'Escape') {
+        // Ein Popover im Blatt hat Escape schon für sich genommen.
+        if (e.defaultPrevented) return
         e.preventDefault()
         onSchliessen()
         return

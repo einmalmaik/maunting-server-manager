@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { useState } from 'react'
 import { Lichtbox } from './Lichtbox'
+import { Dialog, DialogContent } from './Dialog'
+import { Blattmenue } from './Blattmenue'
 
 function Aufbau({ onZoom, video = false }: { onZoom?: () => void; video?: boolean }) {
   const bilder = ['eins', 'zwei', 'drei']
@@ -209,5 +211,60 @@ describe('Lichtbox', () => {
     await waitFor(() => expect(window.history.state?.msmTiefe).toBe(1))
     act(() => window.history.back())
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+})
+
+describe('Lichtbox unter einem Overlay', () => {
+  // Bis 02.10.2026 hörte die Lichtbox jede Taste: Escape schloss eine Rückfrage
+  // und die Lichtbox darunter, ArrowRight blätterte hinter dem Dialog weiter.
+  function Gestapelt({ oben }: { oben: 'dialog' | 'blatt' }) {
+    const bilder = ['eins', 'zwei']
+    const [index, setIndex] = useState<number | null>(0)
+    const [ueber, setUeber] = useState(false)
+    return (
+      <>
+        {index !== null && (
+          <Lichtbox
+            kennung={bilder[index]}
+            titel={bilder[index]}
+            onSchliessen={() => setIndex(null)}
+            onVor={index < bilder.length - 1 ? () => setIndex(index + 1) : undefined}
+            aktionen={
+              <button type="button" onClick={() => setUeber(true)}>
+                darüber
+              </button>
+            }
+          >
+            <div>{bilder[index]}</div>
+          </Lichtbox>
+        )}
+        {oben === 'dialog' ? (
+          <Dialog open={ueber} onOpenChange={setUeber}>
+            <DialogContent aria-label="Rückfrage">
+              <button type="button">ok</button>
+            </DialogContent>
+          </Dialog>
+        ) : (
+          <Blattmenue offen={ueber} onSchliessen={() => setUeber(false)} titel="Blatt">
+            <button type="button">ok</button>
+          </Blattmenue>
+        )}
+      </>
+    )
+  }
+
+  it.each(['dialog', 'blatt'] as const)('überlässt Escape und Pfeile dem %s darüber', async (oben) => {
+    await waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    render(<Gestapelt oben={oben} />)
+    fireEvent.click(screen.getByText('darüber'))
+    const ueberName = oben === 'dialog' ? 'Rückfrage' : 'Blatt'
+    expect(screen.getByRole('dialog', { name: ueberName })).toBeInTheDocument()
+
+    fireEvent.keyDown(screen.getByText('ok'), { key: 'ArrowRight' })
+    expect(screen.getByRole('dialog', { name: 'eins' })).toBeInTheDocument()
+
+    fireEvent.keyDown(screen.getByText('ok'), { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: ueberName })).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'eins' })).toBeInTheDocument()
   })
 })

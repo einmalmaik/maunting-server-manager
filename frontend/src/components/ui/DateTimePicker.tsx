@@ -132,14 +132,17 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
           setOpen(false)
         }
       }
+      // Capture-Phase und preventDefault: der Dialog darunter bleibt offen.
       const onKey = (event: KeyboardEvent) => {
-        if (event.key === 'Escape') setOpen(false)
+        if (event.key !== 'Escape' || event.defaultPrevented) return
+        event.preventDefault()
+        setOpen(false)
       }
       document.addEventListener('mousedown', onClick)
-      document.addEventListener('keydown', onKey)
+      document.addEventListener('keydown', onKey, true)
       return () => {
         document.removeEventListener('mousedown', onClick)
-        document.removeEventListener('keydown', onKey)
+        document.removeEventListener('keydown', onKey, true)
       }
     }, [open])
 

@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { MultiSelect } from './MultiSelect'
+import { Dialog, DialogContent } from './Dialog'
 import { fakeLayout } from '@/test/fakeLayout'
 
 const options = [
@@ -100,5 +101,27 @@ describe('MultiSelect', () => {
     user.focus()
     fireEvent.keyDown(user, { key: 'ArrowDown' })
     expect(screen.getByRole('option', { name: 'AI-VIP' })).toHaveFocus()
+  })
+})
+
+describe('MultiSelect in einem Dialog', () => {
+  it('schließt mit Escape nur die Liste, nicht den Dialog darunter', async () => {
+    // Bis 02.10.2026 hörte der Dialog Escape am Dokument und hielt sich für
+    // den obersten: Escape schloss die Liste und den Dialog mitsamt Eingaben.
+    await waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    const dialogZu = vi.fn()
+    render(
+      <Dialog open onOpenChange={dialogZu}>
+        <DialogContent>
+          <MultiSelect aria-label="Rollen" placeholder="wählen" options={options} values={[]} onChange={() => {}} />
+        </DialogContent>
+      </Dialog>,
+    )
+    const knopf = screen.getByRole('button', { name: 'Rollen' })
+    fireEvent.click(knopf)
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+    fireEvent.keyDown(knopf, { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(dialogZu).not.toHaveBeenCalled()
   })
 })

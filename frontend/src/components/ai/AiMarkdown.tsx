@@ -2,7 +2,7 @@ import { memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
-import { MarkdownBild } from '@/Singra/UI/Markdownansicht'
+import { MarkdownBild, MarkdownLink } from '@/Singra/UI/Markdownansicht'
 
 /**
  * Rendert Modellausgabe als Markdown.
@@ -26,16 +26,7 @@ export const AiMarkdown = memo(function AiMarkdown({ content }: { content: strin
         remarkPlugins={[remarkGfm]}
         components={{
           img: MarkdownBild,
-          a: ({ children, href }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="text-primary underline underline-offset-2 hover:text-primary/80"
-            >
-              {children}
-            </a>
-          ),
+          a: MarkdownLink,
           code: ({ className, children }) => {
             // `react-markdown` unterscheidet Inline- von Blockcode ueber die
             // Sprachklasse des umschliessenden <pre>. Ohne Klasse ist es Inline.

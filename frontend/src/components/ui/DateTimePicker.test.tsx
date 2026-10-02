@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { DateTimePicker } from './DateTimePicker'
+import { Dialog, DialogContent } from '@/Singra/UI/Dialog'
 import { fakeLayout } from '@/test/fakeLayout'
 
 describe('DateTimePicker', () => {
@@ -121,5 +122,27 @@ describe('DateTimePicker', () => {
     } finally {
       layout.aufraeumen()
     }
+  })
+})
+
+describe('DateTimePicker in einem Dialog', () => {
+  it('schließt mit Escape nur den Kalender, nicht den Dialog darunter', async () => {
+    // Bis 02.10.2026 hörte der Dialog Escape am Dokument und hielt sich für
+    // den obersten: Escape schloss den Kalender und den Dialog mitsamt Eingaben.
+    await waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    const dialogZu = vi.fn()
+    render(
+      <Dialog open onOpenChange={dialogZu}>
+        <DialogContent>
+          <DateTimePicker value="2026-08-21T14:30" onChange={() => {}} />
+        </DialogContent>
+      </Dialog>,
+    )
+    const knopf = screen.getByRole('button', { name: /21\.08\.2026/ })
+    fireEvent.click(knopf)
+    expect(screen.getAllByRole('dialog')).toHaveLength(2)
+    fireEvent.keyDown(knopf, { key: 'Escape' })
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    expect(dialogZu).not.toHaveBeenCalled()
   })
 })

@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle } from 'lucide-react'
 import { useConfirmStore } from '@/stores/confirmStore'
 import { useZurueckSchliesst } from '@/Singra/UI/useZurueckSchliesst'
+import { istObersterDialog, tabImRahmen } from '@/Singra/UI/Dialog'
 import { Button } from './Button'
 
 /** Globaler Confirm-Dialog. Genau einmal in der App montieren (siehe App.tsx).
@@ -17,16 +18,25 @@ export function ConfirmDialog() {
   const pending = useConfirmStore((s) => s.pending)
   const resolve = useConfirmStore((s) => s.resolve)
   useZurueckSchliesst(!!pending, () => resolve(false))
+  const overlayRef = useRef<HTMLDivElement>(null)
+  const titelId = useId()
+  const textId = useId()
 
   // Escape zum Abbrechen — Standard-Verhalten fuer Modals. Enter triggert den
-  // Confirm-Button (er hat autofocus), das deckt die OK-via-Tastatur ab.
+  // Confirm-Button (er hat autofocus), das deckt die OK-via-Tastatur ab. Tab
+  // bleibt im Dialog. Tasten gehören nur dem obersten offenen Dialog.
   useEffect(() => {
     if (!pending) return
     const onKey = (e: KeyboardEvent) => {
+      const overlay = overlayRef.current
+      if (!overlay || !istObersterDialog(overlay)) return
       if (e.key === 'Escape') {
+        if (e.defaultPrevented) return
         e.preventDefault()
         resolve(false)
+        return
       }
+      tabImRahmen(e, overlay)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -57,10 +67,13 @@ export function ConfirmDialog() {
   // Rückfrage hinter dem Vollbild-Editor, der selbst per Portal an body hängt.
   return createPortal(
     <div
+      ref={overlayRef}
       className="msm-modal-overlay"
       onClick={() => resolve(false)}
       role="dialog"
       aria-modal="true"
+      aria-labelledby={pending.title ? titelId : textId}
+      aria-describedby={pending.title ? textId : undefined}
     >
       <div
         className="msm-card w-full max-w-md p-6"
@@ -72,14 +85,14 @@ export function ConfirmDialog() {
           )}
           <div className="flex-1">
             {pending.title && (
-              <h2 className="font-headline text-headline-md text-primary mb-2">
+              <h2 id={titelId} className="font-headline text-headline-md text-primary mb-2">
                 {pending.title}
               </h2>
             )}
             {/* `whitespace-pre-line`, damit mehrzeilige Meldungen ihre Struktur
                 behalten. Ohne das lief eine Aufzaehlung — etwa was eine
                 KI-Aktion genau aendert — zu einem Fliesstext zusammen. */}
-            <p className="font-body-md whitespace-pre-line text-sm text-on-surface">
+            <p id={textId} className="font-body-md whitespace-pre-line text-sm text-on-surface">
               {pending.message}
             </p>
           </div>

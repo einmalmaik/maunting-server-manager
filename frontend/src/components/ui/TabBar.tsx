@@ -81,9 +81,13 @@ export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel, 
             <Icon className="w-4 h-4" />
             {t(tab.labelKey)}
             {tab.badge !== undefined && (
-              <span className="min-w-[1.25rem] rounded-full bg-surface-container-high px-1.5 text-center text-xs tabular-nums">
-                {tab.badge}
-              </span>
+              <>
+                {/* Ohne Trenner liest ein Screenreader „Papierkorb1“. */}
+                <span className="sr-only">, </span>
+                <span className="min-w-[1.25rem] rounded-full bg-surface-container-high px-1.5 text-center text-xs tabular-nums">
+                  {tab.badge}
+                </span>
+              </>
             )}
           </button>
         )

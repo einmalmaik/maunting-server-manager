@@ -65,18 +65,20 @@ export const MultiSelect = forwardRef<HTMLDivElement, MultiSelectProps>(
         // Die Liste hängt per Portal an body, also außerhalb von rootRef.
         if (!rootRef.current?.contains(ziel) && !listeRef.current?.contains(ziel)) setOpen(false)
       }
+      // Capture-Phase und preventDefault: der Dialog darunter bleibt offen.
       const handleKeyDown = (event: KeyboardEvent) => {
-        if (event.key === 'Escape') {
+        if (event.key === 'Escape' && !event.defaultPrevented) {
+          event.preventDefault()
           setOpen(false)
           rootRef.current?.querySelector<HTMLButtonElement>('[data-multiselect-trigger]')?.focus()
         }
       }
 
       document.addEventListener('pointerdown', handlePointerDown)
-      document.addEventListener('keydown', handleKeyDown)
+      document.addEventListener('keydown', handleKeyDown, true)
       return () => {
         document.removeEventListener('pointerdown', handlePointerDown)
-        document.removeEventListener('keydown', handleKeyDown)
+        document.removeEventListener('keydown', handleKeyDown, true)
       }
     }, [open])
 
