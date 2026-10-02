@@ -5,7 +5,7 @@
  * im Panel, und hier zaehlt nur die Weiche: wer landet wo, und was passiert,
  * wenn die stille Anmeldung scheitert.
  */
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
@@ -696,6 +696,44 @@ describe('DesktopApp', () => {
       expect(screen.getByTestId('messenger-seite')).toBeInTheDocument()
       expect(screen.getByText(i18n.t('mss.app.messenger'))).toBeInTheDocument()
     })
+  })
+
+  it('setzt in Kopfzeile und Navigation kein natives title; inaktive Reiter nennen ihren Namen per Kurzinfo', async () => {
+    // Im Emulator (02.10.2026) zeigten die Reiter und die Glocke Tooltips des
+    // Betriebssystems statt eines Bausteins der Design-DNA.
+    localStorage.setItem(LETZTE_ROUTE_KEY, '/chat')
+    localStorage.setItem('msm_cached_user', JSON.stringify(BENUTZER))
+    useAuthStore.setState({ user: BENUTZER, isAuthenticated: true })
+    konfigMock({
+      backend_url: 'https://api.example.com',
+      sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+      eingerichtet: true,
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((eingabe: RequestInfo | URL) => {
+        const url = String(eingabe)
+        if (url.includes('/auth/refresh')) {
+          return Promise.resolve(new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+        }
+        if (url.includes('/auth/me')) {
+          return Promise.resolve(new Response(JSON.stringify(BENUTZER), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+        }
+        return Promise.resolve(new Response('{}', { status: 200 }))
+      }),
+    )
+
+    render(<DesktopApp />)
+
+    const navigation = await screen.findByRole('navigation', { name: i18n.t('mss.app.bereiche') })
+    const kopf = navigation.closest('header')!
+    await waitFor(() => expect(within(kopf).getByRole('button', { name: i18n.t('mss.app.kalender') })).toBeInTheDocument())
+    expect(kopf.querySelectorAll('[title]')).toHaveLength(0)
+
+    const kalender = within(navigation).getByRole('button', { name: i18n.t('mss.app.kalender') })
+    const blase = kalender.parentElement!.querySelector(':scope > [data-kurzinfo]')
+    expect(blase).toHaveAttribute('data-kurzinfo', i18n.t('mss.app.kalender'))
+    expect(blase).toHaveClass('xl:hidden')
   })
 
   describe('Negativtests & Missbrauchsschutz im Offline-Modus', () => {

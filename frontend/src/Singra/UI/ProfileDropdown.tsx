@@ -46,6 +46,8 @@ export function ProfileDropdown({
 }: ProfileDropdownProps) {
   const { t } = useTranslation()
   const ausloeserName = triggerAriaLabel ?? t('common.openUserMenu')
+  const anzeigename = user?.username || t('messenger.userFallback')
+  const statusText = status ? t(`social.status.${status}`) : ''
 
   const [isOpen, setIsOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -131,8 +133,9 @@ export function ProfileDropdown({
 
     return (
       <span
+        role="img"
         className={`absolute bottom-0 right-0 inline-block rounded-full ring-2 ring-surface ${sizeClasses} ${colorClasses}`}
-        aria-label={status === 'online' ? 'Online' : status === 'away' ? 'Abwesend' : 'Unsichtbar'}
+        aria-label={statusText}
       />
     )
   }
@@ -212,7 +215,7 @@ export function ProfileDropdown({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <p className="truncate text-xs font-semibold text-on-surface">
-                {user?.username || 'Benutzer'}
+                {anzeigename}
               </p>
             </div>
             {user?.email && (
@@ -244,7 +247,7 @@ export function ProfileDropdown({
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-on-surface">
-                  {user?.username || 'Benutzer'}
+                  {anzeigename}
                 </p>
                 {user?.email && (
                   <p className="truncate text-xs text-on-surface-variant font-mono">
@@ -259,16 +262,17 @@ export function ProfileDropdown({
               <div className="mt-3 pt-2.5 border-t border-outline-variant/20">
                 <div className="flex items-center justify-between gap-1 mb-1.5">
                   <span className="text-label-sm uppercase font-bold text-on-surface-variant tracking-wider">
-                    Status
+                    {t('social.status.titel')}
                   </span>
                   <span className="text-label-sm text-primary capitalize font-medium">
-                    {status === 'invisible' ? 'Unsichtbar' : status === 'away' ? 'Abwesend' : 'Online'}
+                    {statusText}
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-1 bg-surface-container-high p-1 rounded-xl border border-outline-variant/30">
                   <button
                     type="button"
                     onClick={() => onStatusChange('online')}
+                    aria-pressed={status === 'online'}
                     className={`py-1 px-1.5 rounded-lg text-label-sm font-semibold flex items-center justify-center gap-1 transition-all ${
                       status === 'online'
                         ? 'bg-status-success/20 text-status-success border border-status-success/40 shadow-sm'
@@ -276,11 +280,12 @@ export function ProfileDropdown({
                     }`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-status-success shrink-0" />
-                    Online
+                    {t('social.status.online')}
                   </button>
                   <button
                     type="button"
                     onClick={() => onStatusChange('away')}
+                    aria-pressed={status === 'away'}
                     className={`py-1 px-1.5 rounded-lg text-label-sm font-semibold flex items-center justify-center gap-1 transition-all ${
                       status === 'away'
                         ? 'bg-status-warning/20 text-status-warning border border-status-warning/40 shadow-sm'
@@ -288,11 +293,12 @@ export function ProfileDropdown({
                     }`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-status-warning shrink-0" />
-                    Abwesend
+                    {t('social.status.away')}
                   </button>
                   <button
                     type="button"
                     onClick={() => onStatusChange('invisible')}
+                    aria-pressed={status === 'invisible'}
                     className={`py-1 px-1.5 rounded-lg text-label-sm font-semibold flex items-center justify-center gap-1 transition-all ${
                       status === 'invisible'
                         ? 'bg-surface-container-highest text-on-surface border border-outline-variant/60 shadow-sm'
@@ -300,7 +306,7 @@ export function ProfileDropdown({
                     }`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant/50 shrink-0" />
-                    Unsichtbar
+                    {t('social.status.invisible')}
                   </button>
                 </div>
               </div>

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import { ProfileDropdown, type ProfileDropdownItem } from './ProfileDropdown'
@@ -76,6 +76,24 @@ describe('ProfileDropdown', () => {
     const awayBtn = screen.getByRole('button', { name: /Abwesend/i })
     fireEvent.click(awayBtn)
     expect(handleStatusChange).toHaveBeenCalledWith('away')
+  })
+
+  it('nennt den Status in der App-Sprache, auch auf Englisch', async () => {
+    // Im Emulator (02.10.2026, App auf Englisch) stand „Abwesend“ und „Unsichtbar“.
+    await i18n.changeLanguage('en')
+    try {
+      render(
+        <ProfileDropdown user={{ username: null }} items={[]} triggerVariant="full" status="away" onStatusChange={vi.fn()} />,
+      )
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('common.openUserMenu') }))
+      const menue = screen.getByRole('menu')
+      expect(within(menue).getByRole('button', { name: 'Away' })).toHaveAttribute('aria-pressed', 'true')
+      expect(within(menue).getByRole('button', { name: 'Invisible' })).toHaveAttribute('aria-pressed', 'false')
+      expect(menue.textContent).not.toMatch(/Abwesend|Unsichtbar|Benutzer/)
+      expect(within(menue).getByText('User')).toBeInTheDocument()
+    } finally {
+      await i18n.changeLanguage('de')
+    }
   })
 
   it('calls item onClick when clicked and closes dropdown', () => {

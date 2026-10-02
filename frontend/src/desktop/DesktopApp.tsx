@@ -29,7 +29,7 @@ import { ToastContainer } from '@/components/ui/ToastContainer'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
 import { AnrufEbene } from '@/components/calling/AnrufEbene'
 import { CrossDeviceCallBanner } from '@/components/calling/CrossDeviceCallBanner'
-import { Avatar, BenachrichtigungsGlocke, Button, ProfileDropdown, type ProfileDropdownItem } from '@/Singra/UI'
+import { Avatar, BenachrichtigungsGlocke, Button, Kurzinfo, ProfileDropdown, type ProfileDropdownItem } from '@/Singra/UI'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Ai } from '@/pages/Ai'
 import { Messenger } from '@/pages/Messenger'
@@ -1237,35 +1237,37 @@ function Reiter({
   badge?: number
   pulse?: boolean
 }) {
+  // Ohne xl steht bei inaktiven Reitern nur das Symbol; die Kurzinfo nennt dann den Namen.
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={aktiv}
-      title={label}
-      aria-label={label}
-      className={`group relative flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
-        aktiv
-          ? 'bg-surface-container-high text-primary shadow-sm font-semibold'
-          : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/40'
-      }`}
-    >
-      <div className="relative flex items-center justify-center">
-        {icon}
-        {pulse && (
-          <span className="absolute -top-1 -right-1 flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+    <Kurzinfo text={label} className={aktiv ? 'hidden' : 'xl:hidden'}>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={aktiv}
+        aria-label={label}
+        className={`group relative flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
+          aktiv
+            ? 'bg-surface-container-high text-primary shadow-sm font-semibold'
+            : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/40'
+        }`}
+      >
+        <div className="relative flex items-center justify-center">
+          {icon}
+          {pulse && (
+            <span className="absolute -top-1 -right-1 flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+            </span>
+          )}
+        </div>
+        <span className={aktiv ? 'inline' : 'hidden xl:inline'}>{label}</span>
+        {badge !== undefined && badge > 0 && (
+          <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-label-sm font-bold rounded-full bg-primary text-on-primary ml-0.5">
+            {badge > 99 ? '99+' : badge}
           </span>
         )}
-      </div>
-      <span className={aktiv ? 'inline' : 'hidden xl:inline'}>{label}</span>
-      {badge !== undefined && badge > 0 && (
-        <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-label-sm font-bold rounded-full bg-primary text-on-primary ml-0.5">
-          {badge > 99 ? '99+' : badge}
-        </span>
-      )}
-    </button>
+      </button>
+    </Kurzinfo>
   )
 }
 

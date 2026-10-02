@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { Download } from 'lucide-react'
 
 interface SidebarDownloadBadgeProps {
@@ -22,6 +22,7 @@ interface SidebarDownloadBadgeProps {
  * Aussage, die keine gemeinsame Abstraktion verwischen darf.
  */
 export function SidebarDownloadBadge({ href, icon, title, subtext, tooltip }: SidebarDownloadBadgeProps) {
+  const hinweisId = useId()
   return (
     <div className="px-3 py-2">
       <a
@@ -29,8 +30,9 @@ export function SidebarDownloadBadge({ href, icon, title, subtext, tooltip }: Si
         target="_blank"
         rel="noreferrer noopener"
         className="group flex items-center gap-3 p-2.5 rounded-xl bg-surface-container-high/60 hover:bg-surface-container-highest/80 border border-outline-variant/30 hover:border-primary/40 transition-all duration-200"
-        title={tooltip}
+        aria-describedby={hinweisId}
       >
+        <span id={hinweisId} className="sr-only">{tooltip}</span>
         <div className="w-8 h-8 rounded-lg bg-primary/15 group-hover:bg-primary/25 text-primary flex items-center justify-center shrink-0 transition-colors">
           {icon}
         </div>

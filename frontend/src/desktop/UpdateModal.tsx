@@ -100,7 +100,7 @@ export function UpdateModal() {
             type="button"
             onClick={() => setSichtbar(false)}
             className="absolute top-4 right-4 p-1.5 rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors"
-            title={t('mss.updateModal.spaeterErinnern')}
+            aria-label={t('mss.updateModal.spaeterErinnern')}
           >
             <X className="w-5 h-5" />
           </button>
