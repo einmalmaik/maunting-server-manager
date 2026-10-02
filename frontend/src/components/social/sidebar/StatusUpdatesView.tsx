@@ -167,7 +167,7 @@ export function StatusUpdatesView({
                     <DeviceBadge deviceType={c.deviceType} />
                   </div>
                   <div className="text-label-sm text-on-surface-variant/80 truncate">
-                    {c.activityLabel || (c.status === 'online' ? 'Online' : c.status === 'away' ? 'Abwesend' : 'Offline')}
+                    {c.activityLabel || t(`social.status.${c.status === 'online' || c.status === 'away' ? c.status : 'offline'}`)}
                   </div>
                 </div>
               </div>

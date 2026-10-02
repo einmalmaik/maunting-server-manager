@@ -150,7 +150,6 @@ export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', pla
         onClick={toggleBell}
         aria-expanded={bellOpen}
         aria-haspopup="menu"
-        title={irgendwasAn ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
         aria-label={irgendwasAn ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
         className="p-2 rounded-full transition-colors active:scale-95 relative hover:bg-surface-variant/50 text-on-surface-variant hover:text-primary"
       >

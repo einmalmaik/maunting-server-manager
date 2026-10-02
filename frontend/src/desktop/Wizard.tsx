@@ -457,7 +457,7 @@ function SchrittKopplung({
               variant="secondary"
               className="px-3 h-10 inline-flex items-center gap-1.5 shrink-0"
               onClick={() => setScannerOffen(true)}
-              title={t('mss.wizard.qrCodeScannen')}
+              aria-label={t('mss.wizard.qrCodeScannen')}
             >
               <Camera className="h-4 w-4 text-primary" />
               <span className="hidden sm:inline text-xs">{t('mss.wizard.scannen')}</span>

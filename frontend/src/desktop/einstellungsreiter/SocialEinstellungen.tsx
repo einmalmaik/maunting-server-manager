@@ -413,7 +413,6 @@ export function SocialEinstellungen() {
                         type="button"
                         onClick={() => navigate(`/user/${f.user_id ?? f.id}`)}
                         className="flex items-center gap-2.5 min-w-0 text-left"
-                        title={t('social.profile.open', { name: f.username })}
                       >
                         <div className="relative shrink-0">
                           <Avatar src={f.avatar_url} name={f.username} size="sm" />
@@ -439,8 +438,7 @@ export function SocialEinstellungen() {
                         size="icon"
                         onClick={() => void handleRemoveFriend(f.user_id ?? f.id)}
                         className="h-7 w-7 p-0 text-on-surface-variant hover:text-status-destructive shrink-0"
-                        title="Kontakt entfernen"
-                        aria-label="Kontakt entfernen"
+                        aria-label={t('social.contacts.remove')}
                       >
                         <UserMinus className="w-3.5 h-3.5" />
                       </Button>

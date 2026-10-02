@@ -196,7 +196,6 @@ export function VoiceRecordingBar({
             type="button"
             onClick={onCancel}
             className="h-8 px-3 text-xs rounded-xl font-medium text-white/60 hover:text-status-destructive hover:bg-status-destructive/10 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
-            title={cancelLabel}
             aria-label={cancelLabel}
           >
             {cancelIcon}
@@ -213,7 +212,6 @@ export function VoiceRecordingBar({
                 ? 'bg-status-destructive hover:bg-status-destructive/90 text-white shadow-status-destructive/20'
                 : 'bg-primary hover:bg-primary/90 text-on-primary shadow-primary/20'
             }`}
-            title={confirmLabel}
             aria-label={confirmLabel}
           >
             {confirmIcon}

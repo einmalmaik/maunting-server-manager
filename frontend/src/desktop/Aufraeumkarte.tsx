@@ -149,7 +149,7 @@ export function Aufraeumkarte({ offenerAuftragId }: { offenerAuftragId: string |
                   key={posten.pfad}
                   className="flex items-baseline justify-between gap-3 border-b border-outline-variant/40 py-1 last:border-0"
                 >
-                  <span className="truncate font-mono" title={posten.pfad}>
+                  <span className="min-w-0 break-all font-mono">
                     {posten.pfad}
                   </span>
                   <span className="shrink-0 tabular-nums">
