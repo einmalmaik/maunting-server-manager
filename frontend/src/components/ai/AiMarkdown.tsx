@@ -2,6 +2,8 @@ import { memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+import { MarkdownBild } from '@/Singra/UI/Markdownansicht'
+
 /**
  * Rendert Modellausgabe als Markdown.
  *
@@ -10,6 +12,9 @@ import remarkGfm from 'remark-gfm'
  * wird als Text ausgegeben, solange kein `rehype-raw` eingebunden ist — und das
  * wird hier absichtlich nicht getan. Modellausgabe ist Fremdtext; sie darf
  * niemals Markup in unsere Seite einbringen.
+ *
+ * Bilder werden nicht geladen (`MarkdownBild`): eine Adresse im Modelltext
+ * verriete beim bloßen Anzeigen IP und Zeitpunkt an ihren Server.
  *
  * Links oeffnen in einem neuen Tab mit `rel="noreferrer"`, damit ein vom Modell
  * erzeugter Link weder die Panelsitzung mitnimmt noch die Seite ersetzt.
@@ -20,6 +25,7 @@ export const AiMarkdown = memo(function AiMarkdown({ content }: { content: strin
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
+          img: MarkdownBild,
           a: ({ children, href }) => (
             <a
               href={href}

@@ -1,3 +1,4 @@
+import { adresseHerunterladen } from '@/lib/herunterladen'
 import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FileText, Download, Loader2, AlertCircle, RefreshCw } from 'lucide-react'
@@ -148,12 +149,7 @@ export function triggerDownload(url: string, filename: string): void {
     }
   }
 
-  const downloadLink = document.createElement('a')
-  downloadLink.href = finalHref
-  downloadLink.download = filename
-  document.body.appendChild(downloadLink)
-  downloadLink.click()
-  document.body.removeChild(downloadLink)
+  adresseHerunterladen(finalHref, filename)
 
   if (blobUrl) {
     setTimeout(() => URL.revokeObjectURL(blobUrl!), 2000)

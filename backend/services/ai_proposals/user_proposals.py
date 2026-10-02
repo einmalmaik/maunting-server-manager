@@ -37,7 +37,7 @@ from sqlalchemy.orm import Session
 
 from models import Role, Server, User, UserRole
 from schemas.role import RoleCreate, RoleUpdate
-from services import audit_service, permission_service, rechtevergabe_service, role_service, vault_blob_service
+from services import permission_service, rechtevergabe_service, role_service, vault_blob_service
 from services.ai_action_errors import AiActionStateError, AiActionValidationError
 from services.ai_proposals.base import _AusfuehrungsRahmen, _Ausgefuehrt
 from services.ai_redaction import redact_sensitive_text
@@ -393,18 +393,6 @@ def _role_set_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
     return payload, preview
 
 
-def _speicher_setzen(db: Session, actor: User, role_id: int, p: dict) -> None:
-    vault_blob_service.rolle_speicher_setzen(db, role_id, p.get("vault_quota_bytes"))
-    audit_service.record_privileged_action(
-        db,
-        user_id=actor.id,
-        action="vault.role_quota.updated",
-        target_type="role",
-        target_id=role_id,
-        details={"vorher": p.get("vault_before"), "nachher": p.get("vault_quota_bytes")},
-    )
-
-
 def _ausfuehren_role_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     p = rahmen.payload
     actor = rahmen.active_user
@@ -429,7 +417,7 @@ def _ausfuehren_role_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefueh
             # Speicher vor den Rechten: `update_role` schreibt fest, und beides
             # geht so in einer Transaktion (bis 02.10.2026 zwei).
             if speicher_setzen:
-                _speicher_setzen(db, actor, role_id, p)
+                vault_blob_service.rolle_speicher_aendern(db, actor.id, role_id, p.get("vault_quota_bytes"))
             if rechte_aendern:
                 rolle = rechtevergabe_service.update_role(
                     db, actor, role_id, p.get("name"), p.get("description"), p.get("permissions")
@@ -439,7 +427,7 @@ def _ausfuehren_role_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefueh
     if speicher_setzen:
         # Eine neue Rolle gibt es erst nach `create_role`.
         if p.get("role_id") is None:
-            _speicher_setzen(db, actor, rolle.id, p)
+            vault_blob_service.rolle_speicher_aendern(db, actor.id, rolle.id, p.get("vault_quota_bytes"))
         db.commit()
     gespeichert = vault_blob_service.rolle_speicher(db, rolle.id)
     return _Ausgefuehrt(result={

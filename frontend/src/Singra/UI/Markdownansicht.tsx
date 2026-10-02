@@ -15,19 +15,27 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ImageOff } from 'lucide-react'
 
-export const Markdownansicht = memo(function Markdownansicht({ text }: { text: string }) {
+/**
+ * Ersatz für `img` in jedem Markdown aus fremder Hand (Tresor, KI-Antwort,
+ * Notizen): zeigt den Alt-Text, lädt nichts.
+ */
+export function MarkdownBild({ alt }: { alt?: string }) {
   const { t } = useTranslation()
+  return (
+    <span className="my-1 inline-flex items-center gap-1.5 rounded border border-outline-variant/50 px-2 py-0.5 text-label-sm text-on-surface-variant">
+      <ImageOff className="h-3.5 w-3.5" aria-hidden />
+      {alt ? t('common.markdown.bildMitText', { text: alt }) : t('common.markdown.bild')}
+    </span>
+  )
+}
+
+export const Markdownansicht = memo(function Markdownansicht({ text }: { text: string }) {
   return (
     <article className="mx-auto w-full max-w-3xl break-words px-4 py-6 text-base leading-relaxed text-on-surface sm:px-8 sm:text-sm sm:leading-6">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          img: ({ alt }) => (
-            <span className="my-1 inline-flex items-center gap-1.5 rounded border border-outline-variant/50 px-2 py-0.5 text-label-sm text-on-surface-variant">
-              <ImageOff className="h-3.5 w-3.5" aria-hidden />
-              {alt ? t('common.markdown.bildMitText', { text: alt }) : t('common.markdown.bild')}
-            </span>
-          ),
+          img: MarkdownBild,
           a: ({ children, href }) => (
             <a href={href} target="_blank" rel="noreferrer noopener" className="text-primary underline underline-offset-2 hover:text-primary/80">
               {children}

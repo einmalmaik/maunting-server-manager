@@ -4,6 +4,7 @@
  * Strukturänderungen gehen nur als Spezifikation (`StudioOperation`) raus —
  * das Backend übersetzt sie, für die Vorschau und die Ausführung gleich.
  */
+import { blobHerunterladen } from '@/lib/herunterladen'
 import { api, apiUrl, getCsrfToken } from '@/api/client'
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
@@ -480,12 +481,7 @@ async function download(path: string, body: unknown): Promise<Download> {
 }
 
 export function saveDownload({ blob, filename }: Download): void {
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.click()
-  URL.revokeObjectURL(url)
+  blobHerunterladen(blob, filename)
 }
 
 export async function fileToBase64(file: File): Promise<string> {

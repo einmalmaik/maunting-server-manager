@@ -1,3 +1,4 @@
+import { blobHerunterladen } from '@/lib/herunterladen'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, Download, Fingerprint, QrCode, RotateCcw, Shield, Trash2 } from 'lucide-react'
@@ -201,15 +202,7 @@ export function TwoFactorTab() {
   const handleDownloadBackupCodes = () => {
     if (backupCodes.length === 0) return
     const blob = new Blob([backupCodes.join('\n')], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    const date = new Date().toISOString().slice(0, 10)
-    link.href = url
-    link.download = `msm-backup-codes-${date}.txt`
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
+    blobHerunterladen(blob, `msm-backup-codes-${new Date().toISOString().slice(0, 10)}.txt`)
     setBackupCodes([])
     setMeldung(t('profile.backupCodesDownloaded'))
   }

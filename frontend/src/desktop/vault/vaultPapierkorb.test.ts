@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
+import i18n from '@/i18n'
 import {
   PAPIERKORB_TAGE,
   useVaultStore,
@@ -512,6 +513,85 @@ describe('Tresor: Umbenennen nach einem Abgleich', () => {
     expect((nutzlast.datei as { original: { id: string } }).original.id).toBe('d'.repeat(32))
     expect(gesendet.expected_revision).toBe(11)
     vi.restoreAllMocks()
+  })
+})
+
+describe('Tresor: zu lange Einträge', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('speichert nichts, was der Server nicht annimmt', async () => {
+    // Bis 02.10.2026 ging ein Umschlag über 1 MiB in die Warteschlange, und
+    // jeder folgende Abgleich scheiterte mit 422.
+    localStorage.clear()
+    vi.restoreAllMocks()
+    const userKey = await userKeyAnlegen()
+    await tresorVomServer(userKey, { service: 'Notiz', category: 'secure_note', notes: 'kurz', createdAt: 1, updatedAt: 10 })
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
+    const vorher = useVaultStore.getState().items.find((i) => i.id === EINTRAG)!
+
+    await expect(useVaultStore.getState().aendern(EINTRAG, { notes: 'x'.repeat(1_100_000) })).rejects.toThrow(
+      i18n.t('mss.vault.eintragZuGross'),
+    )
+    expect(warteschlange()).toEqual([])
+    expect(useVaultStore.getState().items.find((i) => i.id === EINTRAG)).toEqual(vorher)
+  })
+})
+
+describe('Tresor: Konflikt, während ein Abgleich läuft', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('übernimmt die Fassung des anderen Geräts und kreist nicht', async () => {
+    // Bis 02.10.2026: wurde während der Anfrage noch einmal gespeichert, galt
+    // die Fassung des anderen Geräts als Rücksprung, ging verloren, und der
+    // Konflikt kam bei jedem Abgleich wieder.
+    localStorage.clear()
+    vi.restoreAllMocks()
+    const userKey = await userKeyAnlegen()
+    const kopf = (id: string) => ({ id: id.repeat(32), groesse: gepolsterteGroesse(10), echt: 10, schluessel: 'k', loeschen: id.repeat(64) })
+    const alt = { typ: 'image/jpeg', original: kopf('a'), vorschau: kopf('b'), miniatur: kopf('c') }
+    await tresorVomServer(userKey, { service: 'bild.jpg', category: 'datei', datei: alt, createdAt: 1, updatedAt: 10 }, 10)
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
+    await useVaultStore.getState().aendern(EINTRAG, { service: 'eins.jpg' })
+    await vi.waitFor(() => expect(useVaultStore.getState().syncStatus).toBe('offline'))
+    vi.restoreAllMocks()
+
+    // Gerät B hat inzwischen den Inhalt ersetzt, Revision 11.
+    const neu = { typ: 'image/jpeg', original: kopf('d'), vorschau: kopf('e'), miniatur: kopf('f'), frueher: [{ ...alt, ersetzt: 20 }] }
+    const vonB = await encryptVaultEntry({ service: 'bild.jpg', category: 'datei', datei: neu, createdAt: 1, updatedAt: 20 }, userKey, EINTRAG)
+    const antwort = (daten: unknown) => ({ ok: true, status: 200, json: async () => daten }) as Response
+    const gesendet: VaultBlindSyncPayload[] = []
+    let freigeben = () => {}
+    let revision = 11
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as VaultBlindSyncPayload
+      gesendet.push(body)
+      if (gesendet.length === 1) {
+        await new Promise<void>((weiter) => (freigeben = weiter))
+        const zeile = { id: EINTRAG, ciphertext: vonB, revision: 11, is_deleted: false, updated_at: '2026-09-30T00:00:00Z' }
+        return antwort({ server_revision: 11, conflicts: [EINTRAG], entries: [zeile] })
+      }
+      // Wie der echte Server: angenommen wird nur, was auf Revision 11 aufsetzt.
+      const m = body.mutations.find((x) => x.id === EINTRAG)
+      if (m && m.expected_revision !== revision) return antwort({ server_revision: revision, conflicts: [EINTRAG], entries: [] })
+      const entries = m ? [{ ...m, revision: ++revision, updated_at: '2026-09-30T00:00:00Z' }] : []
+      return antwort({ server_revision: revision, entries })
+    })
+
+    const lauf = useVaultStore.getState().syncWithServer()
+    await vi.waitFor(() => expect(gesendet).toHaveLength(1))
+    await useVaultStore.getState().aendern(EINTRAG, { service: 'zwei.jpg' })
+    freigeben()
+    await lauf
+
+    await vi.waitFor(() => expect(warteschlange()).toEqual([]))
+    const item = useVaultStore.getState().items.find((i) => i.id === EINTRAG)!
+    expect(item.service).toBe('zwei.jpg')
+    expect(item.datei?.original.id).toBe('d'.repeat(32))
+    expect(gesendet.length).toBeLessThan(6)
   })
 })
 

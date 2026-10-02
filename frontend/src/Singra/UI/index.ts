@@ -82,5 +82,6 @@ export { Kontextmenue, menueLage, type KontextmenueProps } from './Kontextmenue'
 export { Versionsliste, type VersionslisteProps, type Fassung } from './Versionsliste'
 export { Auswahlleiste, type AuswahlAktion, type AuswahlleisteProps } from './Auswahlleiste'
 export { Tabellenansicht, type TabellenansichtProps } from './Tabellenansicht'
+export { useMehrfachauswahl, type Mehrfachauswahl, type Auswahltasten } from './useMehrfachauswahl'
 // Markdownansicht und PdfAnsicht ziehen große Bibliotheken nach sich und stehen
 // deshalb nicht hier: direkt aus ihrer Datei importieren, am besten per lazy().

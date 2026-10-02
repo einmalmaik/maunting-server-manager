@@ -821,6 +821,8 @@ app.add_middleware(
         # Der Besitznachweis einer Mailbox (Chatgeheimnis, Gruppengeheimnis).
         # Fehlte er hier, scheiterte in der App jede Vorabfrage mit 400.
         "X-Mailbox-Token",
+        # Der Bucket des offenen Tresors an den Datei-Routen (`routers/vault.py`).
+        "X-MSM-Vault-Bucket",
     ],
     # Was das Frontend aus einer Antwort liest. Die App spricht von fremder
     # Herkunft und sähe alles andere als `null` (Dateiname und Prüfsumme der

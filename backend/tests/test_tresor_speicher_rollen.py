@@ -79,7 +79,8 @@ def test_einstellen_je_rolle(client: TestClient, owner_cookies: dict, regular_us
     assert vault_blob_service.rolle_speicher(db, rolle.id) is None
     assert vault_blob_service.quote_fuer(db, regular_user) == 0
 
-    for falsch in (-1, vault_blob_service.MAX_QUOTE + 1):
+    # `true` machte Pydantic bis 02.10.2026 zu 1: die Rolle bekam 1 Byte Speicher.
+    for falsch in (-1, vault_blob_service.MAX_QUOTE + 1, True):
         antwort = client.put(
             f"/api/settings/tresor-speicher/{rolle.id}",
             cookies=owner_cookies,

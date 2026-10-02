@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -335,7 +335,8 @@ def update_settings(
 class TresorSpeicherUpdate(BaseModel):
     """`null` nimmt der Rolle den Speicher; ihre Traeger laden dann nichts mehr hoch."""
 
-    quota_bytes: int | None = Field(..., ge=0, le=vault_blob_service.MAX_QUOTE)
+    # Strikt: `true` wurde sonst zu 1 und als 1 Byte gespeichert (bis 02.10.2026).
+    quota_bytes: StrictInt | None = Field(..., ge=0, le=vault_blob_service.MAX_QUOTE)
 
 
 @router.get("/tresor-speicher")
@@ -356,20 +357,14 @@ def tresor_speicher_setzen(
     actor: User = Depends(require_global("panel.settings.write")),
     __: None = Depends(verify_csrf),
 ) -> dict:
-    vorher = vault_blob_service.rolle_speicher(db, role_id)
     try:
-        vault_blob_service.rolle_speicher_setzen(db, role_id, req.quota_bytes)
-    except ValueError as fehler:
+        vault_blob_service.rolle_speicher_aendern(db, actor.id, role_id, req.quota_bytes)
+    except vault_blob_service.RolleFehlt as fehler:
         db.rollback()
         raise HTTPException(status_code=404, detail=str(fehler)) from fehler
-    audit_service.record_privileged_action(
-        db,
-        user_id=actor.id,
-        action="vault.role_quota.updated",
-        target_type="role",
-        target_id=role_id,
-        details={"vorher": vorher, "nachher": req.quota_bytes},
-    )
+    except vault_blob_service.SpeicherUngueltig as fehler:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(fehler)) from fehler
     db.commit()
     return {"role_id": role_id, "quota_bytes": req.quota_bytes}
 

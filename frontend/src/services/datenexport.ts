@@ -8,6 +8,7 @@
  * geht. Web und App nutzen denselben Weg, nur das Speichern unterscheidet sich.
  */
 
+import { blobHerunterladen } from '@/lib/herunterladen'
 import { api } from '@/api/client'
 import i18n from '@/i18n'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
@@ -238,13 +239,6 @@ export async function exportSpeichern(blob: Blob, dateiname: string): Promise<bo
   if (inDerApp()) {
     return inDerAppSpeichern(dateiname, blobTeile(blob))
   }
-  const adresse = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = adresse
-  link.download = dateiname
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  setTimeout(() => URL.revokeObjectURL(adresse), 2000)
+  blobHerunterladen(blob, dateiname)
   return true
 }

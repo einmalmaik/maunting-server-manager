@@ -48,6 +48,7 @@ import {
   dateiVorbereiten,
   istDateiAngaben,
   loeschungenAbarbeiten,
+  unbenutzteBlobsEntfernen,
   uploadsFortsetzen,
   vorbereitungAbschliessen,
   VERSIONEN,
@@ -56,6 +57,7 @@ import {
 } from './tresorDateien'
 import { bildAngaben } from './tresorBilder'
 import { bucketMelderSetzen, zurueckgesetztFrage } from './tresorBlobApi'
+import { fehlerText, TresorFehler } from './tresorFehler'
 
 /**
  * Die Arten von Einträgen, die diese Fassung der App anzeigen und bearbeiten
@@ -303,6 +305,18 @@ export const VAULT_TOMBSTONE_MARKER = 'mss-vault-tombstone-v1'
  */
 const SYNC_MAX_MUTATIONEN = 100
 const SYNC_MAX_BYTES = 8 * 1024 * 1024
+
+/**
+ * Ein Umschlag darf höchstens so lang sein, wie `VaultMutation.ciphertext` in
+ * `backend/schemas/vault.py` annimmt. Bis 02.10.2026 ging ein längerer in die
+ * Warteschlange, der Server lehnte jeden Abgleich mit 422 ab, und keine
+ * Änderung kam mehr an.
+ */
+export const EINTRAG_MAX_ZEICHEN = 1024 * 1024
+
+function umschlagPruefen(ciphertext: string): void {
+  if (ciphertext.length > EINTRAG_MAX_ZEICHEN) throw new TresorFehler(i18n.t('mss.vault.eintragZuGross'))
+}
 /** Mehr Runden als das (5.000 Änderungen) übernimmt der nächste Anstoß. */
 const SYNC_MAX_RUNDEN = 50
 
@@ -685,7 +699,7 @@ interface VaultState {
 async function bucketNeuMelden(): Promise<void> {
   const { bucketId, bucketAuthToken } = useVaultStore.getState()
   const salz = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_SALT_KEY) : null
-  if (!bucketId || !salz) throw new Error(i18n.t('errors.vault_bucket_unbekannt'))
+  if (!bucketId || !salz) throw new TresorFehler(i18n.t('errors.vault_bucket_unbekannt'))
   await api('/api/vault/salt', {
     method: 'POST',
     body: JSON.stringify({ kdf_salt: salz, bucket_id: bucketId, auth_token: bucketAuthToken }),
@@ -725,14 +739,14 @@ export const useVaultStore = create<VaultState>((set, get) => {
     optionen?: { loeschBlobs?: { id: string; loeschen: string }[] },
   ): Promise<void> => {
     const { userKey, bucketId, items } = get()
-    if (!userKey || !bucketId) throw new Error(i18n.t('mss.vault.errors.locked'))
+    if (!userKey || !bucketId) throw new TresorFehler(i18n.t('mss.vault.errors.locked'))
 
     const id = itemData.id || window.crypto.randomUUID()
     const existing = items.find((i) => i.id === id)
     // Was diese Fassung nicht kennt, schreibt sie nicht: sie würde es nur
     // unvollständig verstehen und beim Speichern verfälschen.
     if (!istBekannteKategorie(existing?.category) || !istBekannteKategorie(itemData.category ?? existing?.category)) {
-      throw new Error(i18n.t('mss.vault.errors.unbekannteArt'))
+      throw new TresorFehler(i18n.t('mss.vault.errors.unbekannteArt'))
     }
     const revision = (existing?.revision || 0) + 1
     const now = naechsterStand(existing?.updatedAt)
@@ -765,6 +779,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
     }
 
     const ciphertext = await encryptVaultEntry(umschlagAusItem(updatedItem), userKey, id)
+    umschlagPruefen(ciphertext)
 
     // Lokalen Cache aktualisieren
     let cachedBlobs = getStoredBlobs(bucketId)
@@ -920,7 +935,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
     try {
       const isAvailable = await isBiometricsAvailable()
       if (!isAvailable) {
-        throw new Error(i18n.t('mss.vault.errors.biometricsNotSupported'))
+        throw new TresorFehler(i18n.t('mss.vault.errors.biometricsNotSupported'))
       }
 
       const salt = getOrCreateVaultSalt()
@@ -929,10 +944,10 @@ export const useVaultStore = create<VaultState>((set, get) => {
       const currentBucketId = get().bucketId
       const serverBucket = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_SERVER_BUCKET_KEY) : null
       if (currentBucketId && bucketId !== currentBucketId) {
-        throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
+        throw new TresorFehler(i18n.t('mss.vault.errors.wrongMasterPassword'))
       }
       if (serverBucket && bucketId !== serverBucket) {
-        throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
+        throw new TresorFehler(i18n.t('mss.vault.errors.wrongMasterPassword'))
       }
 
       const canary = typeof localStorage !== 'undefined'
@@ -961,7 +976,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       if (!(await biometrieSpeicherFragtSelbst())) {
         const verified = await promptBiometricVerification('Biometrischen Schnelleinstieg aktivieren')
         if (!verified) {
-          throw new Error(i18n.t('mss.vault.errors.biometricsFailed'))
+          throw new TresorFehler(i18n.t('mss.vault.errors.biometricsFailed'))
         }
       }
 
@@ -978,8 +993,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       meldeErrungenschaft('starter_biometrics')
       return true
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : i18n.t('mss.vault.errors.biometricsActivationFailed')
-      throw new Error(msg)
+      throw new TresorFehler(fehlerText(err, i18n.t('mss.vault.errors.biometricsActivationFailed')))
     }
   },
 
@@ -996,13 +1010,13 @@ export const useVaultStore = create<VaultState>((set, get) => {
     try {
       const isAvailable = await isBiometricsAvailable()
       if (!isAvailable) {
-        throw new Error(i18n.t('mss.vault.errors.biometricsNotSupportedShort'))
+        throw new TresorFehler(i18n.t('mss.vault.errors.biometricsNotSupportedShort'))
       }
 
       // Primär: Native Windows Hello Verifikation & Freigabe aus dem geschützten Credential Store
       const masterPassword = await biometrieEntsperren(i18n.t('mss.vault.entsperrenGrund'), FACH_TRESOR)
       if (!masterPassword) {
-        throw new Error(i18n.t('mss.vault.errors.biometricsKeyLoadFailed'))
+        throw new TresorFehler(i18n.t('mss.vault.errors.biometricsKeyLoadFailed'))
       }
 
       const success = await get().unlock(masterPassword)
@@ -1207,11 +1221,11 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
       // Wenn weder ein lokaler noch ein Server-Tresor eingerichtet ist: Keinen Phantom-Tresor anlegen!
       if (!isConfigured) {
-        throw new Error(i18n.t('mss.vault.errors.notSetup'))
+        throw new TresorFehler(i18n.t('mss.vault.errors.notSetup'))
       }
 
       if (!salt) {
-        throw new Error(i18n.t('mss.vault.errors.keysMissing'))
+        throw new TresorFehler(i18n.t('mss.vault.errors.keysMissing'))
       }
 
       const { userKey, bucketId, bucketAuthToken } = await deriveVaultKeys(masterPassword, salt)
@@ -1219,7 +1233,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       // Bei hinterlegtem Server-Bucket muss der abgeleitete Bucket exakt übereinstimmen
       const serverBucket = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_SERVER_BUCKET_KEY) : null
       if (serverBucket && bucketId !== serverBucket) {
-        throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
+        throw new TresorFehler(i18n.t('mss.vault.errors.wrongMasterPassword'))
       }
 
       // 3. Canary prüfen
@@ -1231,7 +1245,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
           await decryptVaultEntry(canaryCiphertext, userKey, 'vault-canary')
           matchedCanary = true
         } catch {
-          throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
+          throw new TresorFehler(i18n.t('mss.vault.errors.wrongMasterPassword'))
         }
       } else if (typeof localStorage !== 'undefined') {
         const legacyCanaryKeys: string[] = []
@@ -1268,7 +1282,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
           }
 
           if (!decryptedSuccessfully) {
-            throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
+            throw new TresorFehler(i18n.t('mss.vault.errors.wrongMasterPassword'))
           }
         }
       }
@@ -1283,10 +1297,10 @@ export const useVaultStore = create<VaultState>((set, get) => {
         try {
           passt = await blindVaultCheck(bucketId, bucketAuthToken)
         } catch {
-          throw new Error(i18n.t('mss.vault.errors.serverCheckFailed'))
+          throw new TresorFehler(i18n.t('mss.vault.errors.serverCheckFailed'))
         }
         if (!passt) {
-          throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
+          throw new TresorFehler(i18n.t('mss.vault.errors.wrongMasterPassword'))
         }
         serverBestaetigt = true
       }
@@ -1295,7 +1309,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       // verifiziert oder vom Server als blinder Tresor bestätigt
       const isVerified = matchedCanary || serverBestaetigt || (serverBucket !== null && bucketId === serverBucket)
       if (!isVerified) {
-        throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
+        throw new TresorFehler(i18n.t('mss.vault.errors.wrongMasterPassword'))
       }
 
       // 4. Lokale verschlüsselte Blobs aus dem Cache laden
@@ -1382,7 +1396,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
   createQuickPasswordEntry: async (serviceName = 'Neuer Eintrag') => {
     const { userKey, bucketId } = get()
     if (!userKey || !bucketId) {
-      throw new Error(i18n.t('mss.vault.errors.locked'))
+      throw new TresorFehler(i18n.t('mss.vault.errors.locked'))
     }
 
     const newId = window.crypto.randomUUID()
@@ -1402,6 +1416,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
     // Verschlüsseln
     const ciphertext = await encryptVaultEntry(umschlagAusItem(newItem), userKey, newId)
+    umschlagPruefen(ciphertext)
 
     // In Cache und Warteschlange ablegen
     const cachedBlobs = getStoredBlobs(bucketId)
@@ -1528,12 +1543,12 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
   dateiHinzufuegen: async (datei, ordner) => {
     const { userKey, bucketId } = get()
-    if (!userKey || !bucketId) throw new Error(i18n.t('mss.vault.errors.locked'))
+    if (!userKey || !bucketId) throw new TresorFehler(i18n.t('mss.vault.errors.locked'))
     const id = window.crypto.randomUUID()
     const { vorschau, miniatur, ...bild } = await bildAngaben(datei)
     const angaben = await dateiVorbereiten(datei, userKey, bucketId, id, () => !sitzungOffen(userKey, bucketId), { vorschau, miniatur })
     try {
-      if (!sitzungOffen(userKey, bucketId)) throw new Error(i18n.t('mss.vault.errors.locked'))
+      if (!sitzungOffen(userKey, bucketId)) throw new TresorFehler(i18n.t('mss.vault.errors.locked'))
       await get().saveItem({ id, service: datei.name, category: 'datei', datei: { ...angaben, ...bild }, ordner })
     } finally {
       // Ohne gespeicherten Eintrag verwirft der Uploader die Blobs beim nächsten Lauf.
@@ -1551,9 +1566,9 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
   dateiErsetzen: async (id, inhalt) => {
     const { userKey, bucketId } = get()
-    if (!userKey || !bucketId) throw new Error(i18n.t('mss.vault.errors.locked'))
+    if (!userKey || !bucketId) throw new TresorFehler(i18n.t('mss.vault.errors.locked'))
     const alt = get().items.find((i) => i.id === id)
-    if (!alt?.datei) throw new Error(i18n.t('mss.vault.dateien.oeffnenFehler'))
+    if (!alt?.datei) throw new TresorFehler(i18n.t('mss.vault.dateien.oeffnenFehler'))
     const { vorschau, miniatur, ...bild } = await bildAngaben(inhalt)
     // Eine angeheftete Datei bleibt offline verfügbar: das neue Original wird gleich behalten.
     const warAngeheftet = (await angeheftet([alt.datei.original.id])).size > 0
@@ -1563,10 +1578,10 @@ export const useVaultStore = create<VaultState>((set, get) => {
       originalBehalten: warAngeheftet,
     })
     try {
-      if (!sitzungOffen(userKey, bucketId)) throw new Error(i18n.t('mss.vault.errors.locked'))
+      if (!sitzungOffen(userKey, bucketId)) throw new TresorFehler(i18n.t('mss.vault.errors.locked'))
       // Frisch lesen: während des Verschlüsselns kann ein Sync die Datei geändert haben.
       const jetzt = get().items.find((i) => i.id === id)
-      if (!jetzt?.datei) throw new Error(i18n.t('mss.vault.dateien.oeffnenFehler'))
+      if (!jetzt?.datei) throw new TresorFehler(i18n.t('mss.vault.dateien.oeffnenFehler'))
       const { frueher = [], ...bisher } = jetzt.datei
       const versionen: DateiVersion[] = [
         { typ: bisher.typ, ersetzt: Date.now(), original: bisher.original, vorschau: bisher.vorschau, miniatur: bisher.miniatur },
@@ -1602,16 +1617,16 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
   fassungZurueckholen: async (id, originalId) => {
     const { userKey } = get()
-    if (!userKey) throw new Error(i18n.t('mss.vault.errors.locked'))
+    if (!userKey) throw new TresorFehler(i18n.t('mss.vault.errors.locked'))
     const fassung = get().items.find((i) => i.id === id)?.datei?.frueher?.find((v) => v.original.id === originalId)
-    if (!fassung) throw new Error(i18n.t('mss.vault.dateien.oeffnenFehler'))
+    if (!fassung) throw new TresorFehler(i18n.t('mss.vault.dateien.oeffnenFehler'))
     const inhalt = await blobLesen(fassung.original, id, userKey, fassung.typ)
     await get().dateiErsetzen(id, inhalt)
   },
 
   albumAnlegen: async (name, eintraege) => {
     const liste = [...new Set(eintraege)]
-    if (liste.length > ALBUM_HOECHSTENS) throw new Error(i18n.t('mss.vault.fotos.albumVoll', { max: ALBUM_HOECHSTENS }))
+    if (liste.length > ALBUM_HOECHSTENS) throw new TresorFehler(i18n.t('mss.vault.fotos.albumVoll', { max: ALBUM_HOECHSTENS }))
     const id = window.crypto.randomUUID()
     await get().saveItem({ id, service: name, category: 'album', album: { eintraege: liste } })
     return id
@@ -1623,7 +1638,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       if (album.category !== 'album') return undefined
       const raus = new Set(weg)
       const liste = [...new Set([...(album.album?.eintraege ?? []), ...hinzu])].filter((e) => !raus.has(e))
-      if (liste.length > ALBUM_HOECHSTENS) throw new Error(i18n.t('mss.vault.fotos.albumVoll', { max: ALBUM_HOECHSTENS }))
+      if (liste.length > ALBUM_HOECHSTENS) throw new TresorFehler(i18n.t('mss.vault.fotos.albumVoll', { max: ALBUM_HOECHSTENS }))
       return { album: { eintraege: liste } }
     }),
 
@@ -1737,12 +1752,16 @@ export const useVaultStore = create<VaultState>((set, get) => {
         //
         // Abgelehnte Dateiänderungen genauso; sie bleiben als Konflikt in der
         // Warteschlange und werden nach dem Abgleich zusammengeführt.
+        //
+        // Auch wenn hier während der Anfrage noch einmal gespeichert wurde:
+        // die neue Fassung setzt auf derselben Revision auf und scheitert
+        // genauso. Bis 02.10.2026 blieb sie dann im Cache, die Fassung des
+        // anderen Geräts galt daneben als Rücksprung und ging verloren, und
+        // der Konflikt kreiste.
         const abgelehnt = new Set<string>()
         for (const konfliktId of data.conflicts ?? []) {
           const gesendet = paket.find((m) => m.id === konfliktId && m.vorher)
           if (!gesendet?.vorher) continue
-          const lokal = cachedBlobs.find((b) => b.id === konfliktId)
-          if (lokal?.ciphertext !== gesendet.ciphertext) continue
           cachedBlobs = cachedBlobs.filter((b) => b.id !== konfliktId)
           cachedBlobs.push(gesendet.vorher)
           if (!gesendet.is_deleted) abgelehnt.add(konfliktId)
@@ -1799,8 +1818,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
         // Fassung unterwegs war, verlor die neue Fassung aus der
         // Warteschlange, ohne dass sie je den Server erreichte.
         const offen = getPendingQueue(bucketId).flatMap((m) => {
-          if (!paket.some((g) => g.id === m.id && g.ciphertext === m.ciphertext)) return [m]
-          return abgelehnt.has(m.id) ? [{ ...m, konflikt: true }] : []
+          if (abgelehnt.has(m.id) && m.vorher && !m.is_deleted) return [{ ...m, konflikt: true }]
+          return paket.some((g) => g.id === m.id && g.ciphertext === m.ciphertext) ? [] : [m]
         })
         warteschlangeSchreiben(bucketId, offen)
         blobsSchreiben(bucketId, cachedBlobs)
@@ -1841,6 +1860,12 @@ export const useVaultStore = create<VaultState>((set, get) => {
       if (abgeglichen) {
         await konflikteZusammenfuehren(userKey, bucketId)
         if (!sitzungOffen(userKey, bucketId)) return
+        // Was ein anderes Gerät gelöscht oder ersetzt hat, gehört nicht mehr
+        // auf dieses. Bis 02.10.2026 blieben auch angeheftete Originale liegen.
+        // Nur nach vollem Abgleich: eine halbe Liste nähme zu viel weg.
+        unbenutzteBlobsEntfernen(
+          new Set(get().items.flatMap((i) => (i.datei ? dateiBlobs(i.datei).map((k) => k.id) : []))),
+        ).catch((err) => console.warn('Tresor: Aufräumen der Ablage gescheitert.', err))
         await ablageUmziehen()
         if (!sitzungOffen(userKey, bucketId)) return
         const grenze = Date.now() - PAPIERKORB_MS
@@ -1895,16 +1920,13 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
   requestHintEmail: async (): Promise<{ ok: boolean; message: string }> => {
     try {
-      const res = await api<{ status: string; message: string }>('/api/vault/request-hint', {
-        method: 'POST',
-      })
-      return { ok: true, message: res.message || 'Passwort-Hinweis wurde per E-Mail gesendet.' }
+      await api('/api/vault/request-hint', { method: 'POST' })
+      return { ok: true, message: i18n.t('mss.vault.hinweisGesendet') }
     } catch (err: unknown) {
-      const msg =
-        err && typeof err === 'object' && 'message' in err && typeof (err as { message: unknown }).message === 'string'
-          ? (err as { message: string }).message
-          : 'Fehler beim Anfordern des Hinweises.'
-      return { ok: false, message: msg }
+      // 429 meldet `api` schon selbst. Sonst antwortet der Server auf Deutsch,
+      // und die App sagt in ihrer Sprache, was passiert ist.
+      if (err instanceof SanitizedApiError && err.status === 429) return { ok: false, message: '' }
+      return { ok: false, message: i18n.t('mss.vault.hinweisAnfordernFehler') }
     }
   },
   }

@@ -23,6 +23,7 @@ import { toast } from '@/stores/toastStore'
 import { useShallow } from 'zustand/react/shallow'
 import { useVaultStore } from './vaultStore'
 import { leakCheckGewaehlt, setLeakCheckEnabled } from './leakChecker'
+import { fehlerText } from './tresorFehler'
 
 export function TresorSicherheitTab() {
   const { t } = useTranslation()
@@ -84,7 +85,7 @@ export function TresorSicherheitTab() {
         toast.error(t('mss.vault.biometrieFehler'))
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : t('mss.vault.biometrieFehler')
+      const msg = fehlerText(err, t('mss.vault.biometrieFehler'))
       toast.error(msg)
     } finally {
       setBiometricsLoading(false)

@@ -2,6 +2,7 @@
  * Was die App mit einer entschlüsselten Datei anfangen kann: selbst zeigen
  * oder auf dem Gerät speichern. Gemeinsam für Dateien und Fotos.
  */
+import { adresseHerunterladen } from '@/lib/herunterladen'
 import i18n from '@/i18n'
 import { inDerAppSpeichern } from '@/lib/geraetSpeichern'
 import { toast } from '@/stores/toastStore'
@@ -57,9 +58,9 @@ function endung(name: string): string {
 
 function nachEndung(name: string): VorschauArt | null {
   const e = endung(name)
-  // "key" ist bei Apple eine Präsentation, sonst meist ein Schlüssel im Textformat.
+  // Die erste Art gewinnt: "key" steht bei office und bei text und ist hier
+  // eine Präsentation.
   for (const art of Object.keys(ENDUNGEN) as VorschauArt[]) {
-    if (art === 'text' && e === 'key') continue
     if (e && ENDUNGEN[art].includes(e)) return art
   }
   const basis = name.toLowerCase().split('/').pop() ?? ''
@@ -157,16 +158,13 @@ export async function dateiAufsGeraet(item: VaultItem, userKey: CryptoKey | null
   }
 }
 
-/** Außerhalb der App (nur im Browser): als Download anbieten. */
+/**
+ * Außerhalb der App (nur im Browser): als Download anbieten. Die Adresse kommt
+ * aus `ansichtOeffnen`, damit das Sperren auch diesen Klartext widerruft.
+ */
 function herunterladen(blob: Blob, name: string): void {
   const url = ansichtOeffnen(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = name
-  link.rel = 'noopener'
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
+  adresseHerunterladen(url, name)
   setTimeout(() => ansichtSchliessen(url), 60_000)
 }
 

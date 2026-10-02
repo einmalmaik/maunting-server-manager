@@ -349,7 +349,7 @@ describe('TresorDateiBereich', () => {
       render(<TresorDateiBereich />)
       fireEvent.contextMenu(zeile('vertrag.pdf'))
       fireEvent.click(screen.getByRole('menuitem', { name: i18n.t('mss.vault.inPapierkorb') }))
-      await vi.waitFor(() => expect(letzterToast()).toMatchObject({ type: 'error', message: i18n.t('mss.vault.dateien.papierkorbFehler') }))
+      await vi.waitFor(() => expect(letzterToast()).toMatchObject({ type: 'error', message: i18n.t('mss.vault.fotos.fehler.papierkorb', { count: 1 }) }))
     })
 
     it('meldet, wenn Archivieren, Umbenennen oder ein neuer Ordner scheitert', async () => {
@@ -357,7 +357,8 @@ describe('TresorDateiBereich', () => {
       render(<TresorDateiBereich />)
       fireEvent.contextMenu(zeile('vertrag.pdf'))
       fireEvent.click(screen.getByRole('menuitem', { name: i18n.t('mss.vault.archivieren') }))
-      await vi.waitFor(() => expect(letzterToast()).toMatchObject({ type: 'error', message: 'Tresor gesperrt' }))
+      // Ein Fehler ohne Text für die Oberfläche: der Toast nennt die Aktion, nicht die Technikmeldung.
+      await vi.waitFor(() => expect(letzterToast()).toMatchObject({ type: 'error', message: i18n.t('mss.vault.fotos.fehler.archiv', { count: 1 }) }))
 
       aendern.mockRejectedValueOnce('kaputt')
       fireEvent.contextMenu(zeile('vertrag.pdf'))
@@ -382,6 +383,25 @@ describe('TresorDateiBereich', () => {
       expect(letzterToast()?.message).toBe(i18n.t('mss.vault.dateien.papierkorbMehrere', { count: 2 }))
       act(() => letzterToast()!.aktion!.ausfuehren())
       await vi.waitFor(() => expect(restoreItem.mock.calls.map((c) => c[0]).sort()).toEqual(['f', 'p']))
+    })
+
+    it('macht nach einem Fehler mit dem Rest weiter und nennt die Zahl', async () => {
+      trashItem.mockImplementation(async (id) => {
+        if (id === 'f') throw new Error('kaputt')
+      })
+      render(<TresorDateiBereich />)
+      fireEvent.click(eintrag('Fotos'), { ctrlKey: true })
+      fireEvent.click(eintrag('notiz.txt'), { ctrlKey: true })
+      fireEvent.click(eintrag('vertrag.pdf'), { ctrlKey: true })
+      fireEvent.keyDown(eintrag('vertrag.pdf'), { key: 'Delete' })
+      const toasts = () => useToastStore.getState().toasts
+      // Der erste scheitert, die beiden danach laufen trotzdem.
+      await vi.waitFor(() => expect(trashItem.mock.calls.map((c) => c[0])).toEqual(['f', 'n', 'p']))
+      await vi.waitFor(() => expect(toasts().find((t) => t.type === 'error')?.message).toBe(i18n.t('mss.vault.fotos.fehler.papierkorb', { count: 1 })))
+      const erfolg = toasts().find((t) => t.type === 'success')
+      expect(erfolg?.message).toBe(i18n.t('mss.vault.dateien.papierkorbMehrere', { count: 2 }))
+      act(() => erfolg!.aktion!.ausfuehren())
+      await vi.waitFor(() => expect(restoreItem.mock.calls.map((c) => c[0]).sort()).toEqual(['n', 'p']))
     })
 
     it('macht Archivieren rückgängig, auch für einen einzelnen Eintrag', async () => {

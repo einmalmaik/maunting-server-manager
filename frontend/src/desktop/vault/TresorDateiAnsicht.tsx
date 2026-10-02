@@ -12,7 +12,7 @@
  * Schließen und beim Sperren.
  */
 
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Crop,
@@ -27,18 +27,16 @@ import {
   FileType,
   FileVideo,
   Presentation,
-  RotateCw,
   Trash2,
-  WifiOff,
 } from 'lucide-react'
-import { Button, Lichtbox, ProgressBar, Versionsliste } from '@/Singra/UI'
+import { Button, Lichtbox, ProgressBar } from '@/Singra/UI'
 import { archivInhalt, type ArchivEintrag } from '@/lib/zipLesen'
-import { toast } from '@/stores/toastStore'
 import { formatBytes } from '@/components/server/fileHelpers'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { ansichtOeffnen, ansichtSchliessen, blobLesen } from './tresorDateien'
 import { artBezeichnung, dateiAufsGeraet, istText, vorschauArt, type VorschauArt } from './tresorAnzeige'
-import { fassungenVon } from './tresorOrdner'
+import { inDenPapierkorb } from './tresorSammel'
+import { LadeFehlerHinweis, TresorDateiInfo, ladeFehler, useNeuBeiNetz, type LadeFehler } from './TresorLichtboxTeile'
 import { BEARBEITBAR, TresorBildeditor } from './TresorBildeditor'
 import { TresorTexteditor } from './TresorTexteditor'
 import { Archivliste } from './vorschau/Archivliste'
@@ -94,14 +92,13 @@ interface Anzeige {
   bytes: Uint8Array | null
   archiv: ArchivEintrag[] | null
   anteil: number | null
-  fehler: boolean
-  /** Der Fehler kam ohne Netz: die Datei liegt nicht auf diesem Gerät. */
-  offline: boolean
+  /** Warum nichts kam; `offline`: die Datei liegt nicht auf diesem Gerät. */
+  fehler: false | LadeFehler
   /** Geladen, aber hier nicht darstellbar (Bildformat, Codec, kaputtes Archiv). */
   nichtDarstellbar: boolean
 }
 
-const LEER = { url: null, text: null, bytes: null, archiv: null, anteil: 0, fehler: false, offline: false, nichtDarstellbar: false }
+const LEER = { url: null, text: null, bytes: null, archiv: null, anteil: 0, fehler: false as const, nichtDarstellbar: false }
 
 interface Props {
   item: VaultItem
@@ -119,9 +116,6 @@ const KNOPF = 'min-h-11 min-w-11 sm:min-h-8 sm:min-w-8 text-white/85 hover:bg-wh
 export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSchliessen }: Props) {
   const { t, i18n } = useTranslation()
   const userKey = useVaultStore((s) => s.userKey)
-  const trashItem = useVaultStore((s) => s.trashItem)
-  const restoreItem = useVaultStore((s) => s.restoreItem)
-  const fassungZurueckholen = useVaultStore((s) => s.fassungZurueckholen)
   // Live aus dem Store: nach Bearbeiten oder Zurückholen hat die Datei ein neues Original.
   const item = useVaultStore((s) => s.items.find((i) => i.id === anfang.id)) ?? anfang
   const datei = item.datei
@@ -131,9 +125,9 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
   const textartig = TEXTARTIG.includes(art) || (art === null && groesse <= TEXT_HOECHSTENS)
   const [anzeige, setAnzeige] = useState<Anzeige>({ id: item.id, ...LEER })
   const [bildBearbeiten, setBildBearbeiten] = useState(false)
-  const [holt, setHolt] = useState<string | null>(null)
   /** Zählt „Erneut laden“ hoch und lädt damit neu. */
   const [versuch, setVersuch] = useState(0)
+  const erneut = useCallback(() => setVersuch((v) => v + 1), [])
 
   // Ein neues Original (nach Bearbeiten oder Zurückholen) lädt neu. Im
   // Texteditor nicht: er hält den Text selbst, ein Neuladen würfe ihn samt
@@ -180,8 +174,7 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
           setAnzeige({ ...fertig, url })
         }
       } catch {
-        const offline = typeof navigator !== 'undefined' && navigator.onLine === false
-        if (!abbruch.signal.aborted) setAnzeige((a) => (a.id === id ? { ...a, anteil: null, fehler: true, offline } : a))
+        if (!abbruch.signal.aborted) setAnzeige((a) => (a.id === id ? { ...a, anteil: null, fehler: ladeFehler() } : a))
       }
     })()
     return () => {
@@ -191,43 +184,15 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ladeSchluessel, userKey, versuch])
 
-  // Ohne Netz gescheitert: sobald es zurück ist, von selbst noch einmal.
-  const wartetAufNetz = anzeige.fehler && anzeige.offline
-  useEffect(() => {
-    if (!wartetAufNetz) return
-    const los = () => setVersuch((v) => v + 1)
-    window.addEventListener('online', los)
-    return () => window.removeEventListener('online', los)
-  }, [wartetAufNetz])
+  useNeuBeiNetz(anzeige.fehler, erneut)
 
   if (!datei) return null
 
   const aufGeraet = () => dateiAufsGeraet(item, userKey)
 
+  // Scheitert es, bleibt die Datei offen; der Toast sagt es.
   const inPapierkorb = async () => {
-    try {
-      await trashItem(item.id)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('mss.vault.dateien.papierkorbFehler'))
-      return
-    }
-    toast.success(t('mss.vault.inPapierkorbGelegt'), {
-      label: t('common.undo'),
-      ausfuehren: () => void restoreItem(item.id).catch(() => toast.error(t('mss.vault.dateien.rueckgaengigFehler'))),
-    })
-    onSchliessen()
-  }
-
-  const zurueckholen = async (id: string) => {
-    setHolt(id)
-    try {
-      await fassungZurueckholen(item.id, id)
-      toast.success(t('mss.vault.dateien.fassungZurueck'))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('mss.vault.bearbeiten.fehler'))
-    } finally {
-      setHolt(null)
-    }
+    if ((await inDenPapierkorb([item.id])).length > 0) onSchliessen()
   }
 
   // Textdateien haben keine eigene Ansicht: sobald der Text da ist, geht der Editor auf.
@@ -254,23 +219,14 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
   const rollbar = geladen && !anzeige.nichtDarstellbar && (anzeige.bytes !== null || anzeige.archiv !== null)
 
   let inhalt: React.ReactNode
-  if (geladen && anzeige.fehler && anzeige.offline) {
+  if (geladen && anzeige.fehler) {
     inhalt = (
-      <div className="flex max-w-sm flex-col items-center gap-3 px-6 text-center" role="status">
-        <WifiOff className="h-10 w-10 text-white/60" aria-hidden />
-        <p className="font-semibold text-white">{t('mss.vault.dateien.ohneNetzTitel')}</p>
-        <p className="text-sm text-white/70">{t('mss.vault.dateien.ohneNetzHinweis')}</p>
-      </div>
-    )
-  } else if (geladen && anzeige.fehler) {
-    inhalt = (
-      <div className="flex max-w-sm flex-col items-center gap-4 px-6 text-center" role="alert">
-        <p className="text-sm text-white/70">{t('mss.vault.dateien.oeffnenFehler')}</p>
-        <Button type="button" variant="secondary" className="min-h-11 sm:min-h-10" onClick={() => setVersuch((v) => v + 1)}>
-          <RotateCw className="h-4 w-4" aria-hidden />
-          {t('mss.vault.dateien.erneutLaden')}
-        </Button>
-      </div>
+      <LadeFehlerHinweis
+        fehler={anzeige.fehler}
+        offlineHinweis={t('mss.vault.dateien.ohneNetzHinweis')}
+        text={t('mss.vault.dateien.oeffnenFehler')}
+        onErneut={erneut}
+      />
     )
   } else if (geladen && anzeige.url && art === 'bild' && !anzeige.nichtDarstellbar) {
     inhalt = <img src={anzeige.url} alt={item.service} draggable={false} onError={nichtDarstellbar} className="max-h-full max-w-full object-contain" />
@@ -321,27 +277,16 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
   }
 
   const info = (
-    <div className="space-y-6">
-      <dl className="space-y-3">
-        {[
-          [t('mss.vault.fotos.info.name'), item.service],
-          [t('mss.vault.dateien.ort'), ort],
-          [t('mss.vault.fotos.info.groesse'), formatBytes(datei.original.echt)],
-          [t('mss.vault.dateien.geaendert'), datum(datei.geaendert ?? item.updatedAt)],
-          [t('mss.vault.fotos.info.hinzugefuegt'), datum(item.createdAt)],
-        ].map(([name, wert]) => (
-          <div key={name}>
-            <dt className="text-label-sm text-white/55">{name}</dt>
-            <dd className="break-words text-white/90">{wert}</dd>
-          </div>
-        ))}
-      </dl>
-      <section aria-label={t('common.versionen.titel')}>
-        <h3 className="mb-1 text-sm font-semibold text-white">{t('common.versionen.titel')}</h3>
-        {fassungenVon(item).length > 0 && <p className="mb-3 text-label-sm text-white/55">{t('common.versionen.hinweis')}</p>}
-        <Versionsliste versionen={fassungenVon(item)} onWiederherstellen={(id) => void zurueckholen(id)} laeuft={holt} aufDunkel />
-      </section>
-    </div>
+    <TresorDateiInfo
+      item={item}
+      angaben={[
+        [t('mss.vault.fotos.info.name'), item.service],
+        [t('mss.vault.dateien.ort'), ort],
+        [t('mss.vault.fotos.info.groesse'), formatBytes(datei.original.echt)],
+        [t('mss.vault.dateien.geaendert'), datum(datei.geaendert ?? item.updatedAt)],
+        [t('mss.vault.fotos.info.hinzugefuegt'), datum(item.createdAt)],
+      ]}
+    />
   )
 
   return (

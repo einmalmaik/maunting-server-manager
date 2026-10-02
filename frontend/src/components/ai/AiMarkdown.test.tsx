@@ -69,3 +69,12 @@ describe('AiMarkdown', () => {
     expect(link).toHaveAttribute('rel', 'noreferrer noopener')
   })
 })
+
+describe('AiMarkdown und Bilder', () => {
+  it('lädt kein Bild aus dem Modelltext, zeigt nur den Alt-Text', () => {
+    const { container } = render(<AiMarkdown content={'Vorher ![Logo](https://fremd.example/p.png) nachher'} />)
+
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.textContent).toContain('Logo')
+  })
+})

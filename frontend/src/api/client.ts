@@ -422,7 +422,7 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     if (res.status === 429) {
       const message = i18n.t('errors.RATE_LIMITED')
       toast.error(message)
-      throw new SanitizedApiError(message)
+      throw new SanitizedApiError(message, { status: 429 })
     }
     const text = await res.text()
     let message: string | null = null

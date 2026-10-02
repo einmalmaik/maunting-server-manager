@@ -13,7 +13,6 @@
  * Aktionen stehen am Rechner oben, am Telefon unten in Daumenreichweite.
  */
 
-import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
 import React, { createContext, memo, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -48,10 +47,11 @@ import {
   Kontextmenue,
   Lichtbox,
   ProgressBar,
-  Versionsliste,
   buttonClasses,
+  useMehrfachauswahl,
   type ActionMenuItem,
   type AuswahlAktion,
+  type Auswahltasten,
   type DropdownOption,
 } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
@@ -66,16 +66,16 @@ import { miniaturenVorladen, useMiniatur } from './tresorMiniaturen'
 import { dateiAufsGeraet, mehrereAufGeraetSpeichern } from './tresorAnzeige'
 import { gruppieren, hashesBerechnen } from './tresorAehnlich'
 import { BEARBEITBAR, TresorBildeditor } from './TresorBildeditor'
-import { dateienUnter, fassungenVon, sichtbareEintraege } from './tresorOrdner'
+import { dateienUnter, sichtbareEintraege } from './tresorOrdner'
+import { fehlerText } from './tresorFehler'
+import { inDenPapierkorb, insArchiv, zuruecknehmen, type SammelStand } from './tresorSammel'
+import { LadeFehlerHinweis, TresorDateiInfo, ladeFehler, useNeuBeiNetz, type LadeFehler } from './TresorLichtboxTeile'
 import { TresorSpeicherAnzeige, TresorUploadStand, useTresorSpeicher } from './TresorSpeicher'
 
 type Filter = 'alle' | 'videos' | 'kuerzlich' | 'aehnlich' | 'alben'
 
 /** Kantenlänge der Kacheln je Zoomstufe. */
 const KACHEL = [84, 128, 200] as const
-
-/** So lange nach einem langen Druck gilt der folgende Klick als dessen Ende, nicht als neuer Tipp. */
-const KLICK_NACH_LANGDRUCK_MS = 700
 
 /** Am Telefon mindestens 44 px; `min-h` setzt sich gegen die Höhe aus `size` durch. */
 const DAUMEN = 'min-h-11 sm:min-h-0'
@@ -180,9 +180,6 @@ function useSichtbar(ref: React.RefObject<HTMLElement | null>): boolean {
   return sichtbar
 }
 
-/** Welche Tasten beim Klick gedrückt waren. */
-type Tasten = Pick<React.MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>
-
 /**
  * Die Kachel, zu der eine Pfeiltaste im Raster führt. Links und rechts gehen
  * in Leserichtung (auch über Monatsgrenzen), hoch und runter in die nächste
@@ -231,7 +228,7 @@ const Kachel = memo(function Kachel({
   ausgewaehlt?: boolean
   /** Die eine Kachel, die Tab erreicht; die übrigen erreichen die Pfeiltasten. */
   tabHalt: boolean
-  onKlick: (id: string, tasten: Tasten) => void
+  onKlick: (id: string, tasten: Auswahltasten) => void
   onLangdruck: (id: string) => void
   onFokus: (id: string) => void
 }) {
@@ -332,7 +329,7 @@ function AlbumKarte({ album, titelbild, anzahl, onOeffnen }: { album: VaultItem;
 }
 
 const FILTER: { id: Filter; labelKey: string; icon: LucideIcon }[] = [
-  { id: 'alle', labelKey: 'mss.vault.fotos.alle', icon: Images },
+  { id: 'alle', labelKey: 'mss.vault.alle', icon: Images },
   { id: 'videos', labelKey: 'mss.vault.fotos.videos', icon: Film },
   { id: 'kuerzlich', labelKey: 'mss.vault.fotos.kuerzlich', icon: Clock },
   { id: 'aehnlich', labelKey: 'mss.vault.fotos.aehnlich', icon: Copy },
@@ -349,20 +346,13 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const aendern = useVaultStore((s) => s.aendern)
   const trashItem = useVaultStore((s) => s.trashItem)
   const restoreItem = useVaultStore((s) => s.restoreItem)
-  const setArchived = useVaultStore((s) => s.setArchived)
   const { speicher, ohneSpeicher } = useTresorSpeicher()
   const [filter, setFilterRoh] = useState<Filter>('alle')
   const [quelle, setQuelle] = useState('')
   const [aehnlich, setAehnlich] = useState<{ fertig: number; gesamt: number; gruppen: string[][] | null }>({ fertig: 0, gesamt: 0, gruppen: null })
   const [albumId, setAlbumId] = useState<string | null>(null)
-  /** Gewählte Kacheln; `null` heißt: keine Auswahl. */
-  const [auswahl, setAuswahl] = useState<Set<string> | null>(null)
-  useZurueckSchliesst(auswahl !== null, () => auswahlLeeren())
-  /** Ausgangspunkt für Umschalt-Klick. */
-  const anker = useRef<string | null>(null)
-  const letzterLangdruck = useRef(0)
   /** Eine laufende Sammelaktion, mit Fortschritt. Solange sie läuft, sind die Aktionen gesperrt. */
-  const [sammel, setSammel] = useState<{ text: string; anteil: number | null } | null>(null)
+  const [sammel, setSammel] = useState<SammelStand>(null)
   const [albumMenue, setAlbumMenue] = useState<{ x: number; y: number; ausloeser: HTMLElement | null } | null>(null)
   const [stufe, setStufe] = useState(1)
   const [offen, setOffen] = useState<{ id: string; index: number } | null>(null)
@@ -370,22 +360,6 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const [ziehen, setZiehen] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
   const beobachten = useBeobachter(scroller)
-
-  function auswahlLeeren() {
-    setAuswahl(null)
-    anker.current = null
-  }
-
-  const setFilter = (neu: Filter) => {
-    setFilterRoh(neu)
-    setAlbumId(null)
-    auswahlLeeren()
-  }
-
-  const albumWechseln = (id: string | null) => {
-    setAlbumId(id)
-    auswahlLeeren()
-  }
 
   const sichtbar = useMemo(() => sichtbareEintraege(items), [items])
   const medien = useMemo(() => sichtbar.filter(istMedium), [sichtbar])
@@ -440,8 +414,20 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
     if (filter === 'aehnlich' && !album) return auswahlListe
     return auswahlListe.sort((a, b) => zeitpunkt(b, filter).ms - zeitpunkt(a, filter).ms)
   }, [medien, filter, suche, album, albumInhalt, quelle, aehnlich.gruppen])
-  const listeRef = useRef(liste)
-  listeRef.current = liste
+  // Mehrfachauswahl wie in „Dateien“, in der Reihenfolge des Rasters.
+  const wahl = useMehrfachauswahl(liste.map((i) => i.id))
+  const { auswahl, leeren: auswahlLeeren, klick: auswahlKlick, langdruck: kachelLangdruck } = wahl
+
+  const setFilter = (neu: Filter) => {
+    setFilterRoh(neu)
+    setAlbumId(null)
+    auswahlLeeren()
+  }
+
+  const albumWechseln = (id: string | null) => {
+    setAlbumId(id)
+    auswahlLeeren()
+  }
 
   const quellen = useMemo(() => {
     const zahl = new Map<string, number>()
@@ -504,56 +490,24 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
 
   // ── Auswahl ───────────────────────────────────────────────────────────────
 
-  const auswahlAn = auswahl !== null
   // Was nicht mehr in der Liste steht (gelöscht, weggefiltert), zählt nicht mehr mit.
   const gewaehlt = useMemo(() => (auswahl ? liste.filter((i) => auswahl.has(i.id)) : []), [auswahl, liste])
   const gewaehltIds = gewaehlt.map((i) => i.id)
 
-  const umschalten = useCallback((id: string) => {
-    setAuswahl((a) => {
-      const neu = new Set(a ?? [])
-      if (neu.has(id)) neu.delete(id)
-      else neu.add(id)
-      return neu.size > 0 ? neu : null
-    })
-    anker.current = id
-  }, [])
-
   const kachelKlick = useCallback(
-    (id: string, tasten: Tasten) => {
-      if (Date.now() - letzterLangdruck.current < KLICK_NACH_LANGDRUCK_MS) return
-      if (tasten.shiftKey && anker.current) {
-        // Umschalt-Klick: alles zwischen Anker und dieser Kachel, in der Reihenfolge des Rasters.
-        const ids = listeRef.current.map((i) => i.id)
-        const von = ids.indexOf(anker.current)
-        const bis = ids.indexOf(id)
-        if (von >= 0 && bis >= 0) {
-          setAuswahl(new Set(ids.slice(Math.min(von, bis), Math.max(von, bis) + 1)))
-          return
-        }
-      }
-      if (tasten.ctrlKey || tasten.metaKey || tasten.shiftKey || auswahlAn) {
-        umschalten(id)
-        return
-      }
-      setOffen({ id, index: 0 })
+    (id: string, tasten: Auswahltasten) => {
+      if (!auswahlKlick(id, tasten)) setOffen({ id, index: 0 })
     },
-    [auswahlAn, umschalten],
+    [auswahlKlick],
   )
 
   // Ein Tab-Halt für das ganze Raster: sonst führt Tab durch jedes Foto einzeln.
   const [fokusId, setFokusId] = useState<string | null>(null)
   const tabHalt = gruppen.some((g) => g.items.some((i) => i.id === fokusId)) ? fokusId : (gruppen[0]?.items[0]?.id ?? null)
 
-  const kachelLangdruck = useCallback((id: string) => {
-    letzterLangdruck.current = Date.now()
-    setAuswahl((a) => new Set([...(a ?? []), id]))
-    anker.current = id
-  }, [])
-
   // ── Hochladen ─────────────────────────────────────────────────────────────
 
-  const fehlerZeigen = (err: unknown) => toast.error(err instanceof Error ? err.message : String(err))
+  const fehlerZeigen = (err: unknown) => toast.error(fehlerText(err, t('mss.vault.bearbeiten.fehler')))
 
   const hochladen = async (dateien: File[]) => {
     // Ohne Speicher wiese der Server den Upload ab; die Anzeige oben sagt, warum.
@@ -565,7 +519,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
       try {
         neue.push(await dateiHinzufuegen(datei))
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t('mss.vault.dateien.hochladenFehler'))
+        toast.error(fehlerText(err, t('mss.vault.dateien.hochladenFehler')))
       } finally {
         setVorbereitung((n) => n - 1)
       }
@@ -616,7 +570,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   const albumUmbenennen = async (a: VaultItem) => {
     const name = await prompt({ message: t('mss.vault.dateien.neuerName'), defaultValue: a.service })
     if (!name?.trim() || name.trim() === a.service) return
-    await aendern(a.id, { service: name.trim() }).catch(fehlerZeigen)
+    await aendern(a.id, { service: name.trim() }).catch((err) => toast.error(fehlerText(err, t('mss.vault.dateien.umbenennenFehler'))))
   }
 
   /** Nur das Album geht in den Papierkorb; die Fotos darin bleiben. */
@@ -660,66 +614,17 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
 
   // ── Sammelaktionen ────────────────────────────────────────────────────────
 
-  /**
-   * Arbeitet die Einträge nacheinander ab, zeigt den Fortschritt und sperrt
-   * solange die Aktionen. Ein Fehler hält den Rest nicht auf; er wird gezählt.
-   */
-  const sammelnLaufen = async (ids: string[], text: string, arbeit: (id: string) => Promise<void>) => {
-    const geschafft: string[] = []
-    let fehler = 0
-    setSammel({ text, anteil: 0 })
-    try {
-      for (const [nr, id] of ids.entries()) {
-        try {
-          await arbeit(id)
-          geschafft.push(id)
-        } catch {
-          fehler += 1
-        }
-        setSammel({ text, anteil: (nr + 1) / ids.length })
-      }
-    } finally {
-      setSammel(null)
-    }
-    return { geschafft, fehler }
-  }
-
-  async function zuruecknehmen(ids: string[], arbeit: (id: string) => Promise<void>) {
-    let fehler = 0
-    for (const id of ids) {
-      try {
-        await arbeit(id)
-      } catch {
-        fehler += 1
-      }
-    }
-    if (fehler > 0) toast.error(t('mss.vault.fotos.fehler.rueckgaengig'))
-  }
-
+  // Ein Fehler hält den Rest nicht auf; die Meldung nennt, wie viele nicht gingen (tresorSammel).
   const inPapierkorb = async (ids: string[]) => {
     if (ids.length === 0 || sammel) return
-    const { geschafft, fehler } = await sammelnLaufen(ids, t('mss.vault.fotos.sammel.papierkorb', { count: ids.length }), trashItem)
+    await inDenPapierkorb(ids, setSammel)
     auswahlLeeren()
-    if (geschafft.length > 0) {
-      toast.success(
-        geschafft.length === 1 ? t('mss.vault.inPapierkorbGelegt') : t('mss.vault.dateien.papierkorbMehrere', { count: geschafft.length }),
-        { label: t('common.undo'), ausfuehren: () => void zuruecknehmen(geschafft, restoreItem) },
-      )
-    }
-    if (fehler > 0) toast.error(t('mss.vault.fotos.fehler.papierkorb', { count: fehler }))
   }
 
   const archivieren = async (ids: string[]) => {
     if (ids.length === 0 || sammel) return
-    const { geschafft, fehler } = await sammelnLaufen(ids, t('mss.vault.fotos.sammel.archiv', { count: ids.length }), (id) => setArchived(id, true))
+    await insArchiv(ids, setSammel)
     auswahlLeeren()
-    if (geschafft.length > 0) {
-      toast.success(
-        geschafft.length === 1 ? t('mss.vault.archiviert') : t('mss.vault.fotos.archiviertMehrere', { count: geschafft.length }),
-        { label: t('common.undo'), ausfuehren: () => void zuruecknehmen(geschafft, (id) => setArchived(id, false)) },
-      )
-    }
-    if (fehler > 0) toast.error(t('mss.vault.fotos.fehler.archiv', { count: fehler }))
   }
 
   /** Ein Foto wie es ist, mehrere als ZIP. */
@@ -818,7 +723,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
 
   const kante = KACHEL[stufe]
   const albenUebersicht = filter === 'alben' && !album
-  const auswahlLabel = t('mss.vault.fotos.ausgewaehlt', { count: gewaehlt.length })
+  const auswahlLabel = t('mss.vault.dateien.ausgewaehlt', { count: gewaehlt.length })
 
   const rasterTaste = (event: React.KeyboardEvent) => {
     const kachel = (event.target as HTMLElement).closest<HTMLElement>('[data-kachel]')
@@ -831,13 +736,9 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
         return
       }
     }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a' && liste.length > 0 && !albenUebersicht) {
-      event.preventDefault()
-      setAuswahl(new Set(liste.map((i) => i.id)))
-    } else if (event.key === 'Escape' && auswahl) {
-      event.preventDefault()
-      auswahlLeeren()
-    } else if (event.key === 'Delete' && gewaehlt.length > 0) {
+    // Strg+A und Escape; in der Albenübersicht ist die Liste leer.
+    if (wahl.taste(event)) return
+    if (event.key === 'Delete' && gewaehlt.length > 0) {
       event.preventDefault()
       void inPapierkorb(gewaehltIds)
     }
@@ -869,9 +770,9 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
           >
             <Plus className="h-4 w-4" />
           </Button>
-          <Button type="button" variant="ghost" size="sm" className={DAUMEN} disabled={liste.length === 0} onClick={() => setAuswahl(new Set())}>
+          <Button type="button" variant="ghost" size="sm" className={DAUMEN} disabled={liste.length === 0} onClick={wahl.starten}>
             <CheckSquare className="mr-1 h-3.5 w-3.5" />
-            {t('mss.vault.fotos.auswaehlen')}
+            {t('mss.vault.dateien.auswaehlen')}
           </Button>
         </>
       )}
@@ -955,8 +856,8 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
               aktionen={aktionen}
               abbrechenLabel={t('mss.vault.dateien.auswahlBeenden')}
               onAbbrechen={auswahlLeeren}
-              alleLabel={gewaehlt.length < liste.length ? t('mss.vault.dateien.alleAuswaehlen') : undefined}
-              onAlle={() => setAuswahl(new Set(liste.map((i) => i.id)))}
+              alleLabel={gewaehlt.length < liste.length ? t('mss.vault.alle') : undefined}
+              onAlle={wahl.alle}
             />
           </div>
         ) : (
@@ -1114,7 +1015,7 @@ interface Anzeige {
   original: boolean
   anteil: number | null
   /** Warum nichts zu sehen ist: ohne Netz, oder das Laden scheiterte. */
-  fehler: false | 'offline' | 'laden'
+  fehler: false | LadeFehler
 }
 
 function GalerieLichtbox({
@@ -1137,9 +1038,7 @@ function GalerieLichtbox({
   onPapierkorb: (id: string) => void
 }) {
   const { t, i18n } = useTranslation()
-  const fassungZurueckholen = useVaultStore((s) => s.fassungZurueckholen)
   const upload = useTresorUploads((s) => s.je[item.id])
-  const [holt, setHolt] = useState<string | null>(null)
   const [anzeige, setAnzeige] = useState<Anzeige>({ id: item.id, url: null, original: false, anteil: null, fehler: false })
   const [spielt, setSpielt] = useState(false)
   const [bearbeiten, setBearbeiten] = useState(false)
@@ -1182,14 +1081,14 @@ function GalerieLichtbox({
         })
       } catch {
         if (abbruch.signal.aborted) return
-        const offline = typeof navigator !== 'undefined' && navigator.onLine === false
+        const fehler = ladeFehler()
         if (welcher === 'vorschau') {
           // Ein Video ohne Standbild lässt sich trotzdem abspielen.
           if (datei.typ.startsWith('video/')) return
           // Ohne Netz liegt vielleicht das Original auf dem Gerät (angeheftet oder zuletzt geöffnet), die Vorschau nicht.
-          if (offline) return void ladenRef.current('original')
+          if (fehler === 'offline') return void ladenRef.current('original')
         }
-        setAnzeige((a) => (a.id === id ? { ...a, fehler: a.url ? false : offline ? 'offline' : 'laden', anteil: null } : a))
+        setAnzeige((a) => (a.id === id ? { ...a, fehler: a.url ? false : fehler, anteil: null } : a))
       }
     },
     [userKey],
@@ -1201,12 +1100,7 @@ function GalerieLichtbox({
     void laden(letzterVersuch.current)
   }, [laden])
 
-  // Kommt das Netz zurück, lädt ein Bild, das ohne Netz nicht kam, von selbst.
-  useEffect(() => {
-    if (anzeige.fehler !== 'offline') return
-    window.addEventListener('online', erneut)
-    return () => window.removeEventListener('online', erneut)
-  }, [anzeige.fehler, erneut])
+  useNeuBeiNetz(anzeige.fehler, erneut)
 
   useEffect(() => {
     setAnzeige((a) => {
@@ -1246,67 +1140,31 @@ function GalerieLichtbox({
 
   const knopf = 'text-white/85 hover:bg-white/10 hover:text-white'
 
-  const zurueckholen = async (originalId: string) => {
-    setHolt(originalId)
-    try {
-      await fassungZurueckholen(item.id, originalId)
-      toast.success(t('mss.vault.dateien.fassungZurueck'))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('mss.vault.bearbeiten.fehler'))
-    } finally {
-      setHolt(null)
-    }
-  }
-
-  // Gedrehte und zugeschnittene Fotos sind neue Fassungen; die früheren stehen hier.
-  const versionen = fassungenVon(item)
+  // Gedrehte und zugeschnittene Fotos sind neue Fassungen; die Infoleiste zeigt die früheren.
   const info = (
-    <div className="space-y-6">
-      <dl className="space-y-3">
-        {[
-          [t('mss.vault.fotos.info.name'), item.service],
-          [t('mss.vault.fotos.info.aufgenommen'), aufnahme],
-          [t('mss.vault.fotos.info.kamera'), datei.kamera],
-          [t('mss.vault.fotos.info.masse'), datei.breite && datei.hoehe ? `${datei.breite} × ${datei.hoehe}` : null],
-          [t('mss.vault.fotos.info.dauer'), datei.dauer ? dauerText(datei.dauer) : null],
-          [t('mss.vault.fotos.info.groesse'), formatBytes(datei.original.echt)],
-          [t('mss.vault.fotos.info.hinzugefuegt'), hinzugefuegt],
-        ]
-          .filter(([, wert]) => wert)
-          .map(([name, wert]) => (
-            <div key={name}>
-              <dt className="text-label-sm text-white/55">{name}</dt>
-              <dd className="break-words text-white/90">{wert}</dd>
-            </div>
-          ))}
-      </dl>
-      {versionen.length > 0 && (
-        <section aria-label={t('common.versionen.titel')}>
-          <h3 className="mb-1 text-sm font-semibold text-white">{t('common.versionen.titel')}</h3>
-          <p className="mb-3 text-label-sm text-white/55">{t('common.versionen.hinweis')}</p>
-          <Versionsliste versionen={versionen} onWiederherstellen={(id) => void zurueckholen(id)} laeuft={holt} aufDunkel />
-        </section>
-      )}
-    </div>
+    <TresorDateiInfo
+      item={item}
+      angaben={[
+        [t('mss.vault.fotos.info.name'), item.service],
+        [t('mss.vault.fotos.info.aufgenommen'), aufnahme],
+        [t('mss.vault.fotos.info.kamera'), datei.kamera],
+        [t('mss.vault.fotos.info.masse'), datei.breite && datei.hoehe ? `${datei.breite} × ${datei.hoehe}` : null],
+        [t('mss.vault.fotos.info.dauer'), datei.dauer ? dauerText(datei.dauer) : null],
+        [t('mss.vault.fotos.info.groesse'), formatBytes(datei.original.echt)],
+        [t('mss.vault.fotos.info.hinzugefuegt'), hinzugefuegt],
+      ]}
+    />
   )
 
   let inhalt: React.ReactNode
   if (anzeige.fehler) {
     inhalt = (
-      <div className="flex max-w-sm flex-col items-center gap-3 px-6 text-center">
-        <p className="text-sm text-white/70">
-          {anzeige.fehler === 'offline'
-            ? t('mss.vault.fotos.offlineNichtDa', { aktion: t('mss.vault.dateien.offlineMachen') })
-            : upload
-              ? t('mss.vault.dateien.oeffnenFehler')
-              : t('mss.vault.fotos.ladeFehler')}
-        </p>
-        {anzeige.fehler === 'laden' && (
-          <Button type="button" variant="secondary" size="sm" className={DAUMEN} onClick={erneut}>
-            {t('mss.vault.fotos.erneutLaden')}
-          </Button>
-        )}
-      </div>
+      <LadeFehlerHinweis
+        fehler={anzeige.fehler}
+        offlineHinweis={t('mss.vault.fotos.offlineNichtDa', { aktion: t('mss.vault.dateien.offlineMachen') })}
+        text={upload ? t('mss.vault.dateien.oeffnenFehler') : t('mss.vault.fotos.ladeFehler')}
+        onErneut={erneut}
+      />
     )
   } else if (video && anzeige.original && anzeige.url) {
     inhalt = <video src={anzeige.url} controls autoPlay className="max-h-full max-w-full" />

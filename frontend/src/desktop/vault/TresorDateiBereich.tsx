@@ -54,6 +54,7 @@ import {
   Kontextmenue,
   Pfadleiste,
   ProgressBar,
+  useMehrfachauswahl,
   type ActionMenuItem,
   type AuswahlAktion,
 } from '@/Singra/UI'
@@ -61,7 +62,6 @@ import { toast } from '@/stores/toastStore'
 import { prompt } from '@/stores/promptStore'
 import { formatBytes } from '@/components/server/fileHelpers'
 import { useLangdruck } from '@/hooks/useLangdruck'
-import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
 import { ZipZuGross } from '@/lib/zipSchreiben'
 import { cx } from '@/utils/classNames'
 import { useVaultStore, type VaultItem } from './vaultStore'
@@ -69,6 +69,8 @@ import { angeheftet, offlineAnheften, offlineLoesen, useTresorUploads, type Uplo
 import { dateiAufsGeraet, mehrereAufGeraetSpeichern } from './tresorAnzeige'
 import { dateienUnter, darfAlleVerschieben, darfVerschieben, obersteAuswahl, pfadVon, sichtbareEintraege, zielOrdner } from './tresorOrdner'
 import { TresorOrdnerBaum } from './TresorOrdnerBaum'
+import { fehlerText } from './tresorFehler'
+import { inDenPapierkorb, insArchiv, type SammelStand } from './tresorSammel'
 import { TresorDateiAnsicht, dateiIcon, oeffnetImEditor } from './TresorDateiAnsicht'
 import { TresorSpeicherAnzeige, TresorUploadStand, useTresorSpeicher } from './TresorSpeicher'
 
@@ -78,17 +80,11 @@ export const ZIEH_TYP = 'application/x-msm-tresor'
 /** Spalten der Liste ab `lg`: Auswahl, Name, Größe, Geändert, Menü. Darunter stehen Größe und Datum unter dem Namen. */
 const SPALTEN = 'lg:grid lg:grid-cols-[1.25rem_minmax(0,1fr)_6.5rem_10rem_2.5rem] lg:items-center lg:gap-3'
 
-/** So lange nach einem langen Druck gilt der folgende Klick als dessen Ende, nicht als neuer Tipp. */
-const KLICK_NACH_LANGDRUCK_MS = 700
-
 /** Knöpfe in Kopf und Zeilen: am Telefon 44 px Tippfläche. `min-*` schlägt die Höhe aus `size`. */
 const TIPPFLAECHE = 'min-h-11 min-w-11 sm:min-h-8 sm:min-w-8'
 
 /** Unter `md` steht das Aktionsmenü einer Zeile als Blatt am unteren Rand, nicht als Flyout am Knopf. */
 const amTelefon = () => typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 767.98px)').matches
-
-/** Die Meldung eines Fehlers aus dem Tresor; die sind schon übersetzt. Sonst ein eigener Text. */
-const fehlerText = (err: unknown, ersatz: string) => (err instanceof Error && err.message ? err.message : ersatz)
 
 interface Props {
   /** Suchbegriff aus der Kopfleiste des Tresors. Nicht leer: Treffer aus allen Ordnern statt des geöffneten. */
@@ -102,9 +98,6 @@ export function TresorDateiBereich({ suche = '' }: Props) {
   const dateiHinzufuegen = useVaultStore((s) => s.dateiHinzufuegen)
   const ordnerAnlegen = useVaultStore((s) => s.ordnerAnlegen)
   const aendern = useVaultStore((s) => s.aendern)
-  const trashItem = useVaultStore((s) => s.trashItem)
-  const restoreItem = useVaultStore((s) => s.restoreItem)
-  const setArchived = useVaultStore((s) => s.setArchived)
   const uploads = useTresorUploads((s) => s.je)
   const [ordner, setOrdner] = useState<string | undefined>(undefined)
   /**
@@ -123,17 +116,8 @@ export function TresorDateiBereich({ suche = '' }: Props) {
   /** Offenes Aktionsmenü einer Zeile; `blatt` heißt: am Telefon über den Knopf geöffnet. */
   const [menue, setMenue] = useState<{ item: VaultItem; x: number; y: number; ausloeser: HTMLElement; blatt: boolean } | null>(null)
   const menueSchliessen = useCallback(() => setMenue(null), [])
-  /** Gewählte Einträge; `null` heißt: keine Auswahl. */
-  const [auswahl, setAuswahl] = useState<Set<string> | null>(null)
-  // Am Handy beendet Zurück die Auswahl, nicht die App.
-  useZurueckSchliesst(auswahl !== null, () => {
-    setAuswahl(null)
-    setAnker(null)
-  })
-  /** Ausgangspunkt für Umschalt-Klick. */
-  const [anker, setAnker] = useState<string | null>(null)
-  /** Eine laufende Sammelaktion (Offline, Zip), mit Fortschritt. */
-  const [sammel, setSammel] = useState<{ text: string; anteil: number | null } | null>(null)
+  /** Eine laufende Sammelaktion (Papierkorb, Archiv, Offline, Zip), mit Fortschritt. Solange sie läuft, sind diese Aktionen gesperrt. */
+  const [sammel, setSammel] = useState<SammelStand>(null)
   /** Ob alle Dateien der Auswahl bzw. des Menü-Ordners schon offline liegen. */
   const [alleAngeheftet, setAlleAngeheftet] = useState(false)
   /** Einträge, die gerade gezogen werden; nur innerhalb dieses Fensters bekannt. */
@@ -144,7 +128,6 @@ export function TresorDateiBereich({ suche = '' }: Props) {
   // erst wenn der Zähler auf null fällt, hat die Datei die Fläche verlassen.
   const ziehZaehler = useRef(0)
   const [rechnerDateiDarueber, setRechnerDateiDarueber] = useState(false)
-  const letzterLangdruck = useRef(0)
 
   const sichtbareItems = useMemo(() => sichtbareEintraege(items), [items])
   const ordnerListe = useMemo(() => sichtbareItems.filter((i) => i.category === 'ordner'), [sichtbareItems])
@@ -175,11 +158,12 @@ export function TresorDateiBereich({ suche = '' }: Props) {
     return [...hier.filter((i) => i.category === 'ordner').sort(nachName), ...hier.filter((i) => i.category === 'datei').sort(nachName)]
   }, [sichtbareItems, aktuellerOrdner, sucht, suchwort])
 
+  // Mehrfachauswahl in der Reihenfolge der Liste.
+  const wahl = useMehrfachauswahl(inhalt.map((i) => i.id))
+  const { auswahl, leeren: auswahlLeeren } = wahl
+
   // Die Auswahl gilt für diesen Ordner bzw. diese Suche. Was verschwindet (verschoben, gelöscht), fällt heraus.
-  useEffect(() => {
-    setAuswahl(null)
-    setAnker(null)
-  }, [aktuellerOrdner, sucht, suchwort])
+  useEffect(auswahlLeeren, [aktuellerOrdner, sucht, suchwort, auswahlLeeren])
   const gewaehlt = useMemo(() => (auswahl ? obersteAuswahl(auswahl, inhalt) : []), [auswahl, inhalt])
   const gewaehltIds = gewaehlt.map((i) => i.id).join(',')
 
@@ -206,41 +190,8 @@ export function TresorDateiBereich({ suche = '' }: Props) {
 
   // ── Auswahl ───────────────────────────────────────────────────────────────
 
-  const auswahlLeeren = () => {
-    setAuswahl(null)
-    setAnker(null)
-  }
-
-  const umschalten = (item: VaultItem) => {
-    setAuswahl((a) => {
-      const neu = new Set(a ?? [])
-      if (neu.has(item.id)) neu.delete(item.id)
-      else neu.add(item.id)
-      return neu.size > 0 ? neu : null
-    })
-    setAnker(item.id)
-  }
-
-  /** Umschalt-Klick: alles zwischen Anker und `item` in der Reihenfolge der Liste. */
-  const bereich = (item: VaultItem) => {
-    const von = inhalt.findIndex((i) => i.id === anker)
-    const bis = inhalt.findIndex((i) => i.id === item.id)
-    if (von < 0 || bis < 0) return umschalten(item)
-    const [a, b] = von < bis ? [von, bis] : [bis, von]
-    setAuswahl(new Set(inhalt.slice(a, b + 1).map((i) => i.id)))
-  }
-
   const zeileKlick = (item: VaultItem, event: React.MouseEvent) => {
-    if (Date.now() - letzterLangdruck.current < KLICK_NACH_LANGDRUCK_MS) return
-    if (event.shiftKey && anker) bereich(item)
-    else if (event.ctrlKey || event.metaKey || auswahl) umschalten(item)
-    else oeffnen(item)
-  }
-
-  const langdruck = (item: VaultItem) => {
-    letzterLangdruck.current = Date.now()
-    setAuswahl((a) => new Set([...(a ?? []), item.id]))
-    setAnker(item.id)
+    if (!wahl.klick(item.id, event)) oeffnen(item)
   }
 
   // ── Einzelaktionen ────────────────────────────────────────────────────────
@@ -278,7 +229,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
       try {
         await dateiHinzufuegen(datei, ziel)
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t('mss.vault.dateien.hochladenFehler'))
+        toast.error(fehlerText(err, t('mss.vault.dateien.hochladenFehler')))
       } finally {
         setVorbereitung((n) => n - 1)
       }
@@ -310,48 +261,33 @@ export function TresorDateiBereich({ suche = '' }: Props) {
     else if (item.datei) setAnsicht(item)
   }
 
-  /**
-   * Führt `schritt` für jede ID aus und gibt die zurück, bei denen es klappte.
-   * Beim ersten Fehler hört es auf und meldet ihn; was bis dahin erledigt ist,
-   * bleibt erledigt und lässt sich rückgängig machen.
-   */
-  const fuerAlle = async (ids: string[], schritt: (id: string) => Promise<void>, ersatz: string) => {
-    const erledigt: string[] = []
-    try {
-      for (const id of ids) {
-        await schritt(id)
-        erledigt.push(id)
-      }
-    } catch (err) {
-      toast.error(fehlerText(err, ersatz))
-    }
-    return erledigt
-  }
-
-  /** Ein Erfolgstoast mit „Rückgängig“, das `zurueck` für alle Erledigten ausführt. */
-  const mitRueckgaengig = (text: string, erledigt: string[], zurueck: (id: string) => Promise<void>) =>
-    toast.success(text, {
-      label: t('common.undo'),
-      ausfuehren: () => void fuerAlle(erledigt, zurueck, t('mss.vault.dateien.rueckgaengigFehler')),
-    })
-
   // ── Sammelaktionen (eine oder viele) ──────────────────────────────────────
 
-  /** Verschiebt, was nach `ziel` darf; was schon dort liegt, bleibt liegen. */
+  /**
+   * Verschiebt, was nach `ziel` darf; was schon dort liegt, bleibt liegen. Ein
+   * Fehler hält den Rest nicht auf; die Meldung nennt, wie viele nicht gingen.
+   */
   const verschieben = async (liste: VaultItem[], ziel: string | undefined) => {
     const bewegt = liste.filter((i) => darfVerschieben(i, ziel, ordnerListe))
     if (bewegt.length === 0) return
-    try {
-      for (const item of bewegt) await aendern(item.id, { ordner: ziel })
-      toast.success(
-        bewegt.length === 1
-          ? t('mss.vault.dateien.verschoben', { name: bewegt[0].service, ordner: ordnerName(ziel) })
-          : t('mss.vault.dateien.verschobenMehrere', { count: bewegt.length, ordner: ordnerName(ziel) }),
-      )
-      auswahlLeeren()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+    const geschafft: VaultItem[] = []
+    for (const item of bewegt) {
+      try {
+        await aendern(item.id, { ordner: ziel })
+        geschafft.push(item)
+      } catch {
+        // gezählt
+      }
     }
+    if (geschafft.length > 0) {
+      toast.success(
+        geschafft.length === 1
+          ? t('mss.vault.dateien.verschoben', { name: geschafft[0].service, ordner: ordnerName(ziel) })
+          : t('mss.vault.dateien.verschobenMehrere', { count: geschafft.length, ordner: ordnerName(ziel) }),
+      )
+    }
+    if (geschafft.length < bewegt.length) toast.error(t('mss.vault.dateien.verschiebenFehler', { count: bewegt.length - geschafft.length }))
+    auswahlLeeren()
   }
 
   /** Heftet alle Dateien in und unter `liste` an, oder löst sie, wenn schon alle angeheftet sind. */
@@ -412,27 +348,16 @@ export function TresorDateiBereich({ suche = '' }: Props) {
     }
   }
 
+  // Wie in der Galerie: ein Fehler hält den Rest nicht auf, die Meldung nennt die Zahl (tresorSammel).
   const archivieren = async (liste: VaultItem[]) => {
-    const erledigt = await fuerAlle(liste.map((i) => i.id), (id) => setArchived(id, true), t('mss.vault.dateien.archivierenFehler'))
-    if (erledigt.length > 0) {
-      mitRueckgaengig(
-        erledigt.length === 1 ? t('mss.vault.archiviert') : t('mss.vault.dateien.archiviertMehrere', { count: erledigt.length }),
-        erledigt,
-        (id) => setArchived(id, false),
-      )
-    }
+    if (liste.length === 0 || sammel) return
+    await insArchiv(liste.map((i) => i.id), setSammel)
     auswahlLeeren()
   }
 
   const inPapierkorb = async (liste: VaultItem[]) => {
-    const erledigt = await fuerAlle(liste.map((i) => i.id), trashItem, t('mss.vault.dateien.papierkorbFehler'))
-    if (erledigt.length > 0) {
-      mitRueckgaengig(
-        erledigt.length === 1 ? t('mss.vault.inPapierkorbGelegt') : t('mss.vault.dateien.papierkorbMehrere', { count: erledigt.length }),
-        erledigt,
-        restoreItem,
-      )
-    }
+    if (liste.length === 0 || sammel) return
+    await inDenPapierkorb(liste.map((i) => i.id), setSammel)
     auswahlLeeren()
   }
 
@@ -467,7 +392,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
         key: 'archiv',
         label: t('mss.vault.archivieren'),
         icon: <Archive className="h-5 w-5 md:h-4 md:w-4" />,
-        disabled: leer,
+        disabled: leer || beschaeftigt,
         onSelect: () => void archivieren(liste),
       },
       {
@@ -476,7 +401,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
         kurz: t('mss.vault.dateien.kurz.papierkorb'),
         icon: <Trash2 className="h-5 w-5 md:h-4 md:w-4" />,
         destructive: true,
-        disabled: leer,
+        disabled: leer || beschaeftigt,
         onSelect: () => void inPapierkorb(liste),
       },
     ]
@@ -611,14 +536,21 @@ export function TresorDateiBereich({ suche = '' }: Props) {
         icon: <FolderInput className="h-4 w-4" />,
         onSelect: () => setVerschiebenDialog({ items: [item], ziel: item.ordner ?? '' }),
       },
-      { key: 'auswaehlen', label: t('mss.vault.dateien.auswaehlen'), icon: <CheckSquare className="h-4 w-4" />, onSelect: () => langdruck(item) },
-      { key: 'archiv', label: t('mss.vault.archivieren'), icon: <Archive className="h-4 w-4" />, onSelect: () => void archivieren([item]) },
+      { key: 'auswaehlen', label: t('mss.vault.dateien.auswaehlen'), icon: <CheckSquare className="h-4 w-4" />, onSelect: () => wahl.langdruck(item.id) },
+      {
+        key: 'archiv',
+        label: t('mss.vault.archivieren'),
+        icon: <Archive className="h-4 w-4" />,
+        disabled: sammel !== null,
+        onSelect: () => void archivieren([item]),
+      },
       {
         key: 'papierkorb',
         label: t('mss.vault.inPapierkorb'),
         icon: <Trash2 className="h-4 w-4" />,
         destructive: true,
         separatorBefore: true,
+        disabled: sammel !== null,
         onSelect: () => void inPapierkorb([item]),
       },
     ]
@@ -630,13 +562,9 @@ export function TresorDateiBereich({ suche = '' }: Props) {
 
 
   const listenTaste = (event: React.KeyboardEvent) => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
-      event.preventDefault()
-      setAuswahl(new Set(inhalt.map((i) => i.id)))
-    } else if (event.key === 'Escape' && auswahl) {
-      event.preventDefault()
-      auswahlLeeren()
-    } else if (event.key === 'Delete' && gewaehlt.length > 0) {
+    // Strg+A und Escape.
+    if (wahl.taste(event)) return
+    if (event.key === 'Delete' && gewaehlt.length > 0) {
       event.preventDefault()
       void inPapierkorb(gewaehlt)
     }
@@ -679,7 +607,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
                   size="sm"
                   className={cx('md:hidden', TIPPFLAECHE)}
                   aria-label={t('mss.vault.dateien.auswaehlen')}
-                  onClick={() => setAuswahl(new Set())}
+                  onClick={wahl.starten}
                 >
                   <CheckSquare className="h-4 w-4" />
                 </Button>
@@ -711,8 +639,8 @@ export function TresorDateiBereich({ suche = '' }: Props) {
               aktionen={sammelAktionen(gewaehlt)}
               abbrechenLabel={t('mss.vault.dateien.auswahlBeenden')}
               onAbbrechen={auswahlLeeren}
-              alleLabel={gewaehlt.length < inhalt.length ? t('mss.vault.dateien.alleAuswaehlen') : undefined}
-              onAlle={() => setAuswahl(new Set(inhalt.map((i) => i.id)))}
+              alleLabel={gewaehlt.length < inhalt.length ? t('mss.vault.alle') : undefined}
+              onAlle={wahl.alle}
             />
           </div>
         )}
@@ -807,8 +735,8 @@ export function TresorDateiBereich({ suche = '' }: Props) {
                     ziehen={zeileZiehen(item)}
                     ablage={item.category === 'ordner' ? ordnerAblage(item) : undefined}
                     onKlick={(event) => zeileKlick(item, event)}
-                    onLangdruck={() => langdruck(item)}
-                    onKaestchen={(schieben) => (schieben && anker ? bereich(item) : umschalten(item))}
+                    onLangdruck={() => wahl.langdruck(item.id)}
+                    onKaestchen={(schieben) => (schieben ? wahl.bereich(item.id) : wahl.umschalten(item.id))}
                     onMenue={(x, y, ausloeser, perKnopf) => setMenue({ item, x, y, ausloeser, blatt: perKnopf && amTelefon() })}
                   />
                 ))}

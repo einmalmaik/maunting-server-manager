@@ -54,6 +54,7 @@ def _tresor_mit_datei(client: TestClient, cookies: dict) -> str:
     assert client.post("/api/vault/hint", json={"hint": "Hund und Jahr"}, cookies=cookies, headers=kopf).status_code == 200
     blob_id = secrets.token_hex(16)
     verifier = hashlib.sha256(secrets.token_bytes(32)).hexdigest()
+    kopf = {**kopf, "X-MSM-Vault-Bucket": BUCKET}
     antwort = client.post(
         "/api/vault/blobs",
         json={"id": blob_id, "chunk_count": 1, "bytes_total": 100, "delete_verifier": verifier},
@@ -138,7 +139,7 @@ def test_ohne_zuordnung_409_mit_code(client: TestClient, owner_cookies: dict):
         "/api/vault/blobs",
         json={"id": secrets.token_hex(16), "chunk_count": 1, "bytes_total": 100, "delete_verifier": "0" * 64},
         cookies=owner_cookies,
-        headers=_kopf(owner_cookies),
+        headers={**_kopf(owner_cookies), "X-MSM-Vault-Bucket": BUCKET},
     )
     assert antwort.status_code == 409
     assert antwort.json()["detail"]["code"] == "VAULT_BUCKET_UNBEKANNT"
@@ -306,3 +307,25 @@ def test_migration_hin_und_zurueck(pg_wegwerf) -> None:
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+def test_abgeschalteter_tresor_sagt_403_auch_ohne_sidecar(client: TestClient, owner_cookies: dict, monkeypatch):
+    """Bis 02.10.2026 lief die Pruefung nach den Abhaengigkeiten: ohne Sidecar
+    hiess ein abgeschalteter Tresor 503 „Sidecar fehlt“, und der Betreiber
+    suchte am falschen Ort."""
+    from services import vault_service
+    from services.dis_client import DisClient, DisSidecarError
+    from services.panel_settings_service import PanelSettingsService
+
+    def kaputt(werte):
+        raise DisSidecarError("weg")
+
+    monkeypatch.setattr(vault_service, "_KONTO_INDEX", {})
+    monkeypatch.setattr(DisClient, "blind_index", staticmethod(kaputt))
+    PanelSettingsService.set("vault_enabled", "false")
+    try:
+        for methode, pfad in (("get", "/api/vault/salt"), ("get", "/api/vault/speicher"), ("get", "/api/vault/hint-status")):
+            antwort = getattr(client, methode)(pfad, cookies=owner_cookies)
+            assert antwort.status_code == 403, (pfad, antwort.status_code)
+    finally:
+        PanelSettingsService.set("vault_enabled", "true")

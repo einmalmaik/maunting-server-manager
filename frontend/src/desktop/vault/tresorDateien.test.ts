@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import 'fake-indexeddb/auto'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
-import { fassungenZusammenfuehren, getPendingQueue, umschlagAusItem, useVaultStore, type VaultBlindSyncPayload, type VaultItem } from './vaultStore'
+import { fassungenZusammenfuehren, getPendingQueue, umschlagAusItem, useVaultStore, VAULT_TOMBSTONE_MARKER, type VaultBlindSyncPayload, type VaultItem } from './vaultStore'
 import { encryptVaultEntry } from './vaultCrypto'
 import { ablageDb, ablageLaden, ablageSchliessen, BLOB_CACHE, OFFLINE, UPLOAD_CHUNKS, UPLOADS } from './tresorAblage'
 import {
@@ -18,6 +18,7 @@ import {
   miniaturenLesen,
   offlineAnheften,
   offlineLoesen,
+  unbenutzteBlobsEntfernen,
   uploadsFortsetzen,
   useTresorUploads,
   vorbereitungAbschliessen,
@@ -25,7 +26,7 @@ import {
   ZULETZT_GRENZE,
 } from './tresorDateien'
 import { miniaturFreigeben, miniaturHolen } from './tresorMiniaturen'
-import { CHUNK_KLARTEXT, CHUNK_UEBERHANG, type BlobKopf } from './tresorDatei'
+import { chiffratGroesse, CHUNK_KLARTEXT, CHUNK_UEBERHANG, type BlobKopf } from './tresorDatei'
 import { aufGeraetSpeichern } from './tresorAnzeige'
 
 const tauriKern = vi.hoisted(() => ({ invoke: vi.fn() }))
@@ -636,6 +637,38 @@ describe('Tresor-Dateien', () => {
     expect(useTresorUploads.getState().je[id]?.fehler).toBeUndefined()
   })
 
+  it('nimmt den Fortschritt eines verworfenen Uploads weg', async () => {
+    // Bis 02.10.2026 blieb er stehen, und die Speicheranzeige, die erst ohne
+    // laufenden Upload fragt, fror ein.
+    serverStarten()
+    const userKey = await tresorOeffnen()
+    const eintragId = crypto.randomUUID()
+    const angaben = await dateiVorbereiten(foto(1000), userKey, BUCKET, eintragId, () => false)
+    vorbereitungAbschliessen(angaben) // der Eintrag wurde nie gespeichert
+    expect(useTresorUploads.getState().je[eintragId]).toBeDefined()
+
+    await uploadsFortsetzen(BUCKET)
+    expect(await zeilen(UPLOADS)).toEqual([])
+    expect(useTresorUploads.getState().je[eintragId]).toBeUndefined()
+  })
+
+  it('leert den Fortschritt beim Sperren, und ein weiterlaufender Upload legt ihn nicht neu an', async () => {
+    const server = serverStarten()
+    server.verzoegerung = 100
+    await tresorOeffnen()
+    const id = await useVaultStore.getState().dateiHinzufuegen(foto(9 * 1024 * 1024))
+    await vi.waitFor(() => expect(server.puts.length).toBeGreaterThan(0))
+    expect(useTresorUploads.getState().je[id]).toBeDefined()
+
+    useVaultStore.getState().lock()
+    expect(useTresorUploads.getState().je).toEqual({})
+    const gesendet = server.puts.length
+    await vi.waitFor(() => expect(server.puts.length).toBeGreaterThan(gesendet))
+    expect(useTresorUploads.getState().je).toEqual({})
+    await vi.waitFor(async () => expect(await zeilen(UPLOADS)).toEqual([]), { timeout: 5000 })
+    expect(useTresorUploads.getState().je).toEqual({})
+  })
+
   describe('Zwei Geräte an derselben Datei', () => {
     it('führt das Umbenennen auf altem Stand mit dem neueren Inhalt des anderen Geräts zusammen', async () => {
       // Bis 01.10.2026 gewann die zuletzt gesendete Fassung: das Gerät, das
@@ -769,6 +802,19 @@ describe('Tresor-Dateien', () => {
       // Was schon da ist, wird nicht noch einmal geholt.
       await miniaturenLesen(anfragen, null)
       expect(server.kleinAnfragen).toBe(1)
+    })
+
+    it('legt keine Miniatur in falscher Länge in den Cache', async () => {
+      // Ohne Schlüssel wird nichts entschlüsselt; bis 02.10.2026 lag sie dann
+      // ungeprüft im Cache.
+      const { server, items, anfragen } = await dreiFotos()
+      await cacheLeeren()
+      const blob = server.blobs.get(items[0].datei!.miniatur.id)!
+      blob.chunks.set(0, blob.chunks.get(0)!.slice(0, -1))
+
+      await miniaturenLesen(anfragen, null)
+      const cache = ((await zeilen(BLOB_CACHE)) as { blobId: string }[]).map((z) => z.blobId)
+      expect(new Set(cache)).toEqual(new Set([items[1].datei!.miniatur.id, items[2].datei!.miniatur.id]))
     })
 
     it('bündelt gleichzeitige Kacheln und fängt nach dem Sperren neu an', async () => {
@@ -921,6 +967,95 @@ describe('Tresor-Dateien', () => {
       expect(await originalImCache('a'.repeat(32))).toBe(true)
       server.offline = true
       expect(await (await blobLesen(original, id, userKey, 'text/plain')).text()).toBe('Vertrag')
+    })
+
+    it('heftet nicht an, wenn das Holen scheitert, und lässt nichts Halbes liegen', async () => {
+      // Bis 02.10.2026 galt die Datei danach als offline verfügbar, obwohl ein Teil fehlte.
+      const server = serverStarten()
+      await tresorOeffnen()
+      const id = await useVaultStore.getState().dateiHinzufuegen(foto(5 * 1024 * 1024))
+      await allesErledigt()
+      const original = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.original
+
+      await expect(
+        offlineAnheften(original, (anteil) => {
+          if (anteil < 1) server.offline = true // nach dem ersten Chunk ist das Netz weg
+        }),
+      ).rejects.toThrow()
+      expect(await angeheftet([original.id])).toEqual(new Set())
+      expect(await originalImCache(original.id)).toBe(false)
+      expect(await zeilen(OFFLINE)).toEqual([])
+    })
+
+    it('legt beim Anheften kein Chiffrat in falscher Länge ab', async () => {
+      const { server, item } = await hochgeladen()
+      const original = item().datei!.original
+      const blob = server.blobs.get(original.id)!
+      blob.chunks.set(0, new Uint8Array([...blob.chunks.get(0)!, 0]))
+
+      await expect(offlineAnheften(original)).rejects.toThrow()
+      expect(await originalImCache(original.id)).toBe(false)
+      expect(await angeheftet([original.id])).toEqual(new Set())
+    })
+
+    it('zählt, was ein abgebrochenes Lesen schon abgelegt hat, gegen die Grenze', async () => {
+      // Lichtbox weitergeblättert: bis 02.10.2026 blieb der erste Chunk ohne
+      // Zeile im Cache, und keine Grenze nahm ihn je wieder heraus.
+      serverStarten()
+      const userKey = await tresorOeffnen()
+      const id = await useVaultStore.getState().dateiHinzufuegen(foto(5 * 1024 * 1024))
+      await allesErledigt()
+      const original = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.original
+
+      const abbruch = new AbortController()
+      await expect(
+        blobLesen(original, id, userKey, 'image/jpeg', { zuletzt: true, signal: abbruch.signal, fortschritt: () => abbruch.abort() }),
+      ).rejects.toThrow()
+      const chunks = ((await zeilen(BLOB_CACHE)) as { blobId: string; index: number }[]).filter((z) => z.blobId === original.id)
+      expect(chunks.map((z) => z.index)).toEqual([0])
+      expect(await zeilen(OFFLINE)).toEqual([
+        expect.objectContaining({ blobId: original.id, angeheftet: false, bytes: chiffratGroesse(original.groesse) }),
+      ])
+    })
+
+    it('nimmt vom Gerät, was kein Eintrag mehr nennt, und lässt Uploads in Ruhe', async () => {
+      const { server, item } = await hochgeladen()
+      const weg = item().datei!.original
+      const zweite = await useVaultStore.getState().dateiHinzufuegen(new File(['bleibt'], 'b.txt', { type: 'text/plain' }))
+      await allesErledigt()
+      const bleibt = useVaultStore.getState().items.find((i) => i.id === zweite)!.datei!
+      await offlineAnheften(weg)
+      await offlineAnheften(bleibt.original)
+      // Eine dritte wartet offline auf den Upload; ihr Eintrag ist hier noch nicht in `benutzt`.
+      server.offline = true
+      await useVaultStore.getState().dateiHinzufuegen(new File(['wartet'], 'c.txt', { type: 'text/plain' }))
+      const uploads = await zeilen(UPLOADS)
+      const uploadChunks = await zeilen(UPLOAD_CHUNKS)
+      expect(uploads).toHaveLength(3)
+
+      await unbenutzteBlobsEntfernen(new Set([bleibt.original.id, bleibt.vorschau.id, bleibt.miniatur.id]))
+      expect(await angeheftet([weg.id, bleibt.original.id])).toEqual(new Set([bleibt.original.id]))
+      expect(await originalImCache(weg.id)).toBe(false)
+      expect(await originalImCache(bleibt.original.id)).toBe(true)
+      expect(await zeilen(UPLOADS)).toEqual(uploads)
+      expect(await zeilen(UPLOAD_CHUNKS)).toEqual(uploadChunks)
+    })
+
+    it('nimmt eine angeheftete Datei vom Gerät, wenn ein anderes Gerät sie gelöscht hat', async () => {
+      // Bis 02.10.2026 blieb sie als Chiffrat liegen, auch GB-große Originale.
+      const { server, userKey, id, item } = await hochgeladen()
+      const original = item().datei!.original
+      await offlineAnheften(original)
+      expect(await angeheftet([original.id])).toEqual(new Set([original.id]))
+
+      server.revision += 1
+      const spaeter = Date.now() + 1000
+      const grab = await encryptVaultEntry({ [VAULT_TOMBSTONE_MARKER]: true, deletedAt: spaeter, updatedAt: spaeter }, userKey, id)
+      server.eintraege.set(id, { ciphertext: grab, revision: server.revision, is_deleted: true })
+      await useVaultStore.getState().syncWithServer()
+
+      await vi.waitFor(async () => expect(await angeheftet([original.id])).toEqual(new Set()))
+      expect(await originalImCache(original.id)).toBe(false)
     })
 
     it('hält eine bearbeitete Datei weiter angeheftet und gibt die alte Fassung frei', async () => {

@@ -1,13 +1,17 @@
 import { useRef, type ReactNode } from 'react'
 import { Button, type ButtonSize, type ButtonVariant } from '@/components/ui/Button'
 
-export interface FileButtonProps {
+/**
+ * Genau ein Empfänger: eine Datei (`onFile`) oder mit `multiple` alle
+ * (`onFiles`). Bis 02.10.2026 ließ sich der Knopf ganz ohne bauen und tat dann nichts.
+ */
+type FileEmpfang =
+  | { multiple?: false; onFile: (file: File) => void; onFiles?: never }
+  | { multiple: true; onFiles: (files: File[]) => void; onFile?: never }
+
+export type FileButtonProps = FileEmpfang & {
   /** Dateitypen wie beim `accept`-Attribut, z. B. ".csv,.json". */
   accept?: string
-  onFile?: (file: File) => void
-  /** Mehrere Dateien auf einmal; dann kommt die ganze Auswahl hier an. */
-  multiple?: boolean
-  onFiles?: (files: File[]) => void
   children: ReactNode
   variant?: ButtonVariant
   size?: ButtonSize

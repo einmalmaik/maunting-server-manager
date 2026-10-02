@@ -1,3 +1,4 @@
+import { adresseHerunterladen } from '@/lib/herunterladen'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -597,12 +598,7 @@ export function FileManager({ serverId }: FileManagerProps) {
 
   const downloadEntry = (selection: SelectedEntry) => {
     const path = joinPath(selection.parent, selection.entry.name)
-    const link = document.createElement('a')
-    link.href = apiUrl(`/files/${serverId}/download?path=${encodeURIComponent(path)}`)
-    link.download = selection.entry.name
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
+    adresseHerunterladen(apiUrl(`/files/${serverId}/download?path=${encodeURIComponent(path)}`), selection.entry.name)
   }
 
   const extractEntry = async (selection: SelectedEntry) => {

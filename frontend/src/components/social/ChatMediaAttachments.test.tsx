@@ -48,7 +48,6 @@ describe('triggerDownload', () => {
   it('creates an anchor element and clicks it with converted blob for data URLs', () => {
     const clickSpy = vi.fn()
     const appendChildSpy = vi.spyOn(document.body, 'appendChild')
-    const removeChildSpy = vi.spyOn(document.body, 'removeChild')
 
     const origCreateElement = document.createElement.bind(document)
     vi.spyOn(document, 'createElement').mockImplementation((tag) => {
@@ -64,7 +63,7 @@ describe('triggerDownload', () => {
 
     expect(appendChildSpy).toHaveBeenCalled()
     expect(clickSpy).toHaveBeenCalled()
-    expect(removeChildSpy).toHaveBeenCalled()
+    expect(document.querySelector('a[download]')).toBeNull()
   })
 
   it('handles base64 data URLs with whitespace or newlines correctly', () => {

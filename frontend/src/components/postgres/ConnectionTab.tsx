@@ -1,3 +1,4 @@
+import { blobHerunterladen } from '@/lib/herunterladen'
 import { useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Download, Eye, Globe, KeyRound, Network, Plus, RefreshCw, RotateCw, Server, Trash2 } from 'lucide-react'
@@ -137,12 +138,7 @@ export function ConnectionTab({ serverId, databaseId, onResourcesChanged }: {
   const downloadCert = () => {
     if (!info.data?.ssl_certificate) return
     const blob = new Blob([info.data.ssl_certificate], { type: 'application/x-pem-file' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `msm-server-${serverId}-postgres.crt`
-    link.click()
-    URL.revokeObjectURL(url)
+    blobHerunterladen(blob, `msm-server-${serverId}-postgres.crt`)
   }
 
   if (info.loading && !info.data) return <Loading />

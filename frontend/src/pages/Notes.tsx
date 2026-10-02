@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { MarkdownBild } from '@/Singra/UI/Markdownansicht'
 import { toast } from '@/stores/toastStore'
 import { FARB_PALETTE, farbwahl } from '@/config/farbpalette'
 import { confirm } from '@/stores/confirmStore'
@@ -62,6 +63,7 @@ function InlineMarkdown({ text, strikethrough }: { text: string; strikethrough?:
         remarkPlugins={[remarkGfm]}
         components={{
           p: ({ children }) => <span className="m-0 inline">{children}</span>,
+          img: MarkdownBild,
           strong: ({ children }) => <strong className="font-semibold text-on-surface">{children}</strong>,
           em: ({ children }) => <em className="italic">{children}</em>,
           code: ({ children }) => (

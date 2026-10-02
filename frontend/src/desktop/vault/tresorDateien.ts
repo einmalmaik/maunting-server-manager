@@ -19,6 +19,8 @@ import { SanitizedApiError } from '@/api/client'
 import { beimLeeren } from '@/services/klartextSpeicher'
 import {
   ablageDb,
+  anfrage,
+  fertig,
   ablageGeladen,
   BLOB_CACHE,
   blobsLesen,
@@ -35,6 +37,8 @@ import {
   chunkAnzahl,
   chunkEntschluesseln,
   CHUNK_KLARTEXT,
+  CHUNK_UEBERHANG,
+  chunkLaenge,
   chunkVerschluesseln,
   istBlobKopf,
   loeschPruefwert,
@@ -168,29 +172,18 @@ export interface UploadFortschritt {
 /** Fortschritt der Uploads je Tresor-Eintrag, für die Oberfläche. */
 export const useTresorUploads = create<{ je: Record<string, UploadFortschritt> }>(() => ({ je: {} }))
 
-function fortschrittSetzen(eintragId: string, aenderung: (alt: UploadFortschritt) => UploadFortschritt | null) {
+/**
+ * `alt` fehlt, wenn der Eintrag nicht (mehr) im Fortschritt steht: beim
+ * Sperren fällt alles heraus, und ein Lauf, der danach weiterläuft, legt es
+ * nicht wieder an. Der nächste Lauf zählt neu.
+ */
+function fortschrittSetzen(eintragId: string, aenderung: (alt: UploadFortschritt | undefined) => UploadFortschritt | null) {
   useTresorUploads.setState((zustand) => {
-    const alt = zustand.je[eintragId] ?? { gesendet: 0, gesamt: 0 }
-    const neu = aenderung(alt)
+    const neu = aenderung(zustand.je[eintragId])
     const je = { ...zustand.je }
     if (neu) je[eintragId] = neu
     else delete je[eintragId]
     return { je }
-  })
-}
-
-function anfrage<T>(req: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error)
-  })
-}
-
-function fertig(tx: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-    tx.onabort = () => reject(tx.error ?? new Error('Transaktion abgebrochen'))
   })
 }
 
@@ -210,6 +203,24 @@ async function uploadEntfernen(db: IDBDatabase, blobId: string): Promise<void> {
   tx.objectStore(UPLOADS).delete(blobId)
   tx.objectStore(UPLOAD_CHUNKS).delete(chunkBereich(blobId))
   await fertig(tx)
+}
+
+/**
+ * Nimmt den Fortschritt eines Eintrags weg, sobald nichts mehr von ihm in der
+ * Ablage wartet: hochgeladen oder verworfen. Ein stehengebliebener Eintrag
+ * hielt die Speicheranzeige an (sie fragt erst, wenn kein Upload mehr läuft).
+ */
+async function fortschrittPruefen(db: IDBDatabase, eintragId: string): Promise<void> {
+  const offen = ((await anfrage(db.transaction(UPLOADS).objectStore(UPLOADS).getAll())) as UploadZeile[]).some(
+    (z) => z.eintragId === eintragId,
+  )
+  if (!offen) fortschrittSetzen(eintragId, () => null)
+}
+
+/** Verwirft einen Upload samt seinem Fortschritt. */
+async function uploadVerwerfen(db: IDBDatabase, zeile: UploadZeile): Promise<void> {
+  await uploadEntfernen(db, zeile.blobId)
+  await fortschrittPruefen(db, zeile.eintragId)
 }
 
 async function ablageOderFehler(): Promise<IDBDatabase> {
@@ -397,7 +408,7 @@ async function hochladen(bucket: string): Promise<void> {
     if (!weiter()) return
     if (!zeile.bereit || !eintragLebt(bucket, zeile.eintragId)) {
       // Abgebrochene Vorbereitung oder inzwischen gelöschter Eintrag.
-      await uploadEntfernen(db, zeile.blobId)
+      await uploadVerwerfen(db, zeile)
       continue
     }
     try {
@@ -409,7 +420,7 @@ async function hochladen(bucket: string): Promise<void> {
       const fehler = uploadFehler(err)
       if (fehler && zeile.fehler !== fehler) {
         await schreiben(db, UPLOADS, (s) => s.put({ ...zeile, fehler }))
-        fortschrittSetzen(zeile.eintragId, (alt) => ({ ...alt, fehler }))
+        fortschrittSetzen(zeile.eintragId, (alt) => (alt ? { ...alt, fehler } : null))
       }
       if (fehler !== 'abgelehnt') return
     }
@@ -421,12 +432,12 @@ async function blobHochladen(db: IDBDatabase, zeile: UploadZeile, weiter: () => 
   // an), nach dem Stand fragen.
   let vorhanden: number[] = []
   try {
-    await blobReservieren(zeile.blobId, zeile.chunkAnzahl, zeile.bytes, zeile.pruefwert)
+    await blobReservieren(zeile.bucket, zeile.blobId, zeile.chunkAnzahl, zeile.bytes, zeile.pruefwert)
   } catch (err) {
     if (status(err) !== 409) throw err
-    const stand = await blobStand(zeile.blobId)
+    const stand = await blobStand(zeile.bucket, zeile.blobId)
     if (stand.state === 'geloescht') {
-      await uploadEntfernen(db, zeile.blobId)
+      await uploadVerwerfen(db, zeile)
       return
     }
     if (stand.state === 'fertig') {
@@ -443,15 +454,15 @@ async function blobHochladen(db: IDBDatabase, zeile: UploadZeile, weiter: () => 
     )) as ChunkZeile | undefined
     if (!chunk) {
       // Die Ablage ist unvollständig (vom Browser geräumt): so kommt die Datei nie an.
-      await uploadEntfernen(db, zeile.blobId)
+      await uploadVerwerfen(db, zeile)
       return
     }
-    if (!schon.has(index)) await chunkHochladen(zeile.blobId, index, chunk.daten)
+    if (!schon.has(index)) await chunkHochladen(zeile.bucket, zeile.blobId, index, chunk.daten)
     const laenge = chunk.daten.byteLength
-    fortschrittSetzen(zeile.eintragId, (alt) => ({ ...alt, gesendet: alt.gesendet + laenge }))
+    fortschrittSetzen(zeile.eintragId, (alt) => (alt ? { ...alt, gesendet: alt.gesendet + laenge } : null))
   }
   if (!weiter()) throw new Error('Tresor oder Konto gewechselt')
-  await blobFertig(zeile.blobId)
+  await blobFertig(zeile.bucket, zeile.blobId)
   await uploadAbschliessen(db, zeile)
 }
 
@@ -465,10 +476,7 @@ async function uploadAbschliessen(db: IDBDatabase, zeile: UploadZeile): Promise<
   tx.objectStore(UPLOAD_CHUNKS).delete(chunkBereich(zeile.blobId))
   await fertig(tx)
   if (zeile.offline === 'zuletzt') await zuletztMerken(db, zeile.blobId, zeile.bytes).catch(() => {})
-  const offen = ((await anfrage(db.transaction(UPLOADS).objectStore(UPLOADS).getAll())) as UploadZeile[]).some(
-    (z) => z.eintragId === zeile.eintragId,
-  )
-  if (!offen) fortschrittSetzen(zeile.eintragId, () => null)
+  await fortschrittPruefen(db, zeile.eintragId)
 }
 
 /** Chiffrat eines Chunks, falls es auf dem Gerät liegt: im Cache oder noch in der Upload-Ablage. */
@@ -501,6 +509,11 @@ export async function* klartextTeile(
   const zuletzt = !!optionen.zuletzt && chiffratGroesse(kopf.groesse) <= ZULETZT_HOECHSTENS
   const schluessel = await blobSchluessel(kopf, userKey, eintragId)
   const anzahl = chunkAnzahl(kopf.groesse)
+  // Die Zeile kommt vor dem ersten Chunk in den Cache: bricht das Lesen ab
+  // (Lichtbox weitergeblättert, Netz weg), zählt das schon Geschriebene gegen
+  // `ZULETZT_GRENZE`, statt ohne Grenze liegenzubleiben. Erst dann, sonst
+  // verdrängte offline jeder Blick auf eine fehlende Datei echte Einträge.
+  let gemerkt = false
   for (let index = 0; index < anzahl; index++) {
     optionen.signal?.throwIfAborted()
     let klartext: Uint8Array | null = null
@@ -517,7 +530,11 @@ export async function* klartextTeile(
       const chiffrat = await chunkLaden(kopf.id, index, optionen.signal)
       klartext = await chunkEntschluesseln(chiffrat, kopf, index, schluessel, eintragId)
       // In den Cache kommt nur, was sich entschlüsseln ließ.
-      if (db && zuletzt) await schreiben(db, BLOB_CACHE, (s) => s.put({ blobId: kopf.id, index, daten: chiffrat } satisfies ChunkZeile))
+      if (db && zuletzt) {
+        if (!gemerkt) await zuletztMerken(db, kopf.id, chiffratGroesse(kopf.groesse))
+        gemerkt = true
+        await schreiben(db, BLOB_CACHE, (s) => s.put({ blobId: kopf.id, index, daten: chiffrat } satisfies ChunkZeile))
+      }
     }
     try {
       yield klartext
@@ -526,7 +543,7 @@ export async function* klartextTeile(
     }
     optionen.fortschritt?.((index + 1) / anzahl)
   }
-  if (db && zuletzt) await zuletztMerken(db, kopf.id, chiffratGroesse(kopf.groesse)).catch(() => {})
+  if (db && zuletzt && !gemerkt) await zuletztMerken(db, kopf.id, chiffratGroesse(kopf.groesse)).catch(() => {})
 }
 
 /**
@@ -598,21 +615,73 @@ export async function angeheftet(blobIds: string[]): Promise<Set<string>> {
 }
 
 /**
+ * Ob Chiffrat die Länge hat, die der Kopf für diesen Chunk vorgibt. Was der
+ * Server sonst liefert, ließe sich nie öffnen und kommt nicht in den Cache.
+ */
+function laengePasst(kopf: BlobKopf, index: number, daten: Uint8Array): boolean {
+  return daten.byteLength === chunkLaenge(kopf.groesse, index) + CHUNK_UEBERHANG
+}
+
+/**
  * Heftet ein Original an und lädt sein Chiffrat auf das Gerät. Entschlüsselt
- * wird dabei nichts; es braucht keinen Schlüssel.
+ * wird dabei nichts; es braucht keinen Schlüssel, geprüft wird nur die Länge.
+ *
+ * Scheitert es (Netz weg, abgebrochen, falsche Länge), gilt das Original nicht
+ * als angeheftet, und der Fehler geht an den Aufrufer. Was schon geholt war,
+ * fällt wieder heraus; war das Original vorher zuletzt geöffnet, bleibt es
+ * das, und die Chunks zählen gegen `ZULETZT_GRENZE`.
  */
 export async function offlineAnheften(kopf: BlobKopf, fortschritt?: (anteil: number) => void, signal?: AbortSignal): Promise<void> {
   const db = await ablageOderFehler()
+  const vorher = (await anfrage(db.transaction(OFFLINE).objectStore(OFFLINE).get(kopf.id))) as OfflineZeile | undefined
   await schreiben(db, OFFLINE, (s) => s.put({ blobId: kopf.id, angeheftet: true, zuletzt: Date.now(), bytes: chiffratGroesse(kopf.groesse) } satisfies OfflineZeile))
-  const anzahl = chunkAnzahl(kopf.groesse)
-  for (let index = 0; index < anzahl; index++) {
-    signal?.throwIfAborted()
-    if (!(await lokalesChiffrat(db, kopf.id, index))) {
-      const daten = await chunkLaden(kopf.id, index, signal)
-      await schreiben(db, BLOB_CACHE, (s) => s.put({ blobId: kopf.id, index, daten } satisfies ChunkZeile))
+  try {
+    const anzahl = chunkAnzahl(kopf.groesse)
+    for (let index = 0; index < anzahl; index++) {
+      signal?.throwIfAborted()
+      if (!(await lokalesChiffrat(db, kopf.id, index))) {
+        const daten = await chunkLaden(kopf.id, index, signal)
+        if (!laengePasst(kopf, index, daten)) throw new Error('Chunk hat die falsche Länge')
+        await schreiben(db, BLOB_CACHE, (s) => s.put({ blobId: kopf.id, index, daten } satisfies ChunkZeile))
+      }
+      fortschritt?.((index + 1) / anzahl)
     }
-    fortschritt?.((index + 1) / anzahl)
+  } catch (err) {
+    if (vorher) await schreiben(db, OFFLINE, (s) => s.put(vorher)).catch(() => {})
+    else await offlineZeileEntfernen(db, kopf.id).catch(() => {})
+    throw err
   }
+}
+
+/**
+ * Nimmt OFFLINE-Zeilen und Cache-Chunks aller Blobs weg, die kein Eintrag
+ * mehr nennt (`benutzt`: alle Blobs aller Einträge, frühere Fassungen,
+ * Vorschauen und Miniaturen eingeschlossen). So fällt vom Gerät, was ein
+ * anderes Gerät gelöscht oder ersetzt hat, auch ein angeheftetes Original.
+ *
+ * Uploads fasst sie nicht an, und Blobs, die gerade hochgehen oder vorbereitet
+ * werden, bleiben auch im Cache: ihr Eintrag kann noch unterwegs sein.
+ */
+export async function unbenutzteBlobsEntfernen(benutzt: Set<string>): Promise<void> {
+  const db = await ablageDb()
+  if (!db) return
+  const lesen = db.transaction([OFFLINE, BLOB_CACHE, UPLOADS])
+  const [offline, cache, uploads] = await Promise.all([
+    anfrage(lesen.objectStore(OFFLINE).getAllKeys()) as Promise<string[]>,
+    anfrage(lesen.objectStore(BLOB_CACHE).getAllKeys()) as Promise<[string, number][]>,
+    anfrage(lesen.objectStore(UPLOADS).getAllKeys()) as Promise<string[]>,
+  ])
+  const laufend = new Set(uploads)
+  const weg = new Set(
+    [...offline, ...cache.map(([id]) => id)].filter((id) => !benutzt.has(id) && !laufend.has(id) && !inVorbereitung.has(id)),
+  )
+  if (weg.size === 0) return
+  const tx = db.transaction([OFFLINE, BLOB_CACHE], 'readwrite')
+  for (const id of weg) {
+    tx.objectStore(OFFLINE).delete(id)
+    tx.objectStore(BLOB_CACHE).delete(chunkBereich(id))
+  }
+  await fertig(tx)
 }
 
 /** Nimmt ein Original wieder vom Gerät. */
@@ -657,11 +726,17 @@ export async function miniaturenLesen(
   }
   const fehlend = einteilig.filter(({ kopf }) => !chiffrate.has(kopf.id))
   for (let i = 0; i < fehlend.length; i += KLEIN_JE_ANFRAGE) {
+    const gefragt = new Map(fehlend.slice(i, i + KLEIN_JE_ANFRAGE).map(({ kopf }) => [kopf.id, kopf]))
     let geladen: Map<string, Uint8Array>
     try {
-      geladen = await kleineLaden(fehlend.slice(i, i + KLEIN_JE_ANFRAGE).map(({ kopf }) => kopf.id))
+      geladen = await kleineLaden([...gefragt.keys()])
     } catch {
       break // offline oder Server nicht erreichbar: was da ist, reicht für jetzt
+    }
+    // Nur Gefragtes in der Länge, die der Kopf vorgibt; alles andere ließe sich nie öffnen.
+    for (const [id, daten] of geladen) {
+      const kopf = gefragt.get(id)
+      if (!kopf || !laengePasst(kopf, 0, daten)) geladen.delete(id)
     }
     if (db && geladen.size > 0) {
       await schreiben(db, BLOB_CACHE, (s) => {
@@ -717,7 +792,7 @@ async function loeschen(bucket: string): Promise<void> {
       // Nach einem Kontowechsel kämen Löschungen als 404 zurück und gälten als erledigt.
       if (!ablageGeladen(bucket)) return
       try {
-        await blobLoeschen(blob.id, blob.loeschen)
+        await blobLoeschen(bucket, blob.id, blob.loeschen)
       } catch (err) {
         // 404: nie angekommen oder schon weg. Ein falscher Löschnachweis
         // (fremder Kopf) gilt nie, wiederholen hilft dann nicht. Jedes andere
@@ -758,10 +833,16 @@ export function ansichtSchliessen(url: string): void {
   if (ansichten.delete(url)) URL.revokeObjectURL(url)
 }
 
-/** Beim Sperren des Tresors und beim Abmelden: keine entschlüsselte Datei bleibt erreichbar. */
+/**
+ * Beim Sperren des Tresors und beim Abmelden: keine entschlüsselte Datei
+ * bleibt erreichbar. Der Upload-Fortschritt fällt mit; er gehört zur Sitzung,
+ * und nach einem Kontowechsel hielte ein stehengebliebener Eintrag die
+ * Speicheranzeige des nächsten Kontos an. Der nächste Lauf zählt neu.
+ */
 export function ansichtenSchliessen(): void {
   for (const url of ansichten) URL.revokeObjectURL(url)
   ansichten.clear()
+  useTresorUploads.setState({ je: {} })
 }
 
 beimLeeren.add(ansichtenSchliessen)

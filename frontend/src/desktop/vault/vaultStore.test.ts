@@ -891,3 +891,28 @@ describe('Abgleich, wenn das Netz zurückkommt', () => {
     expect(sync).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('Hinweis per E-Mail', () => {
+  afterEach(async () => {
+    vi.restoreAllMocks()
+    await i18n.changeLanguage('de')
+  })
+
+  it('sagt in der App-Sprache, dass es nicht ging, nicht mit dem Text des Servers', async () => {
+    // Bis 02.10.2026 ging der deutsche Text des Servers in den Toast, auch in der englischen App.
+    await i18n.changeLanguage('en')
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'Für dein Konto ist kein Passwort-Hinweis hinterlegt.' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    expect(await useVaultStore.getState().requestHintEmail()).toEqual({ ok: false, message: 'The hint could not be sent.' })
+  })
+
+  it('meldet die Wartezeit nicht ein zweites Mal', async () => {
+    // `api` zeigt bei 429 schon „zu viele Anfragen“; bis 02.10.2026 kam derselbe Toast doppelt.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 429 }))
+    expect(await useVaultStore.getState().requestHintEmail()).toEqual({ ok: false, message: '' })
+  })
+})

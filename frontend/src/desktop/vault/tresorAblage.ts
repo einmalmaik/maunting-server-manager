@@ -24,7 +24,9 @@
  * localStorage wie bisher.
  */
 
+import i18n from '@/i18n'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { toast } from '@/stores/toastStore'
 
 export interface StoredEncryptedEntry {
   id: string
@@ -133,14 +135,16 @@ function altEntfernen(bucket: string): void {
   localStorage.removeItem(`${ALT_REVISION}${bucket}`)
 }
 
-function anfrage<T>(req: IDBRequest<T>): Promise<T> {
+/** Eine IndexedDB-Anfrage als Promise. Auch für `tresorDateien.ts`. */
+export function anfrage<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
   })
 }
 
-function fertig(tx: IDBTransaction): Promise<void> {
+/** Erfüllt, wenn die Transaktion durch ist; wirft bei Fehler und Abbruch. */
+export function fertig(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
@@ -412,8 +416,19 @@ function gleich(a: StoredEncryptedEntry | undefined, b: StoredEncryptedEntry): b
   )
 }
 
+let zuletztGemeldet = 0
+
+/**
+ * Was hier nicht ankommt, ist nach einem Neustart weg, auch offline
+ * Gespeichertes, das noch nicht beim Server ist. Bis 02.10.2026 stand das nur
+ * in der Konsole. Höchstens eine Meldung je Minute: ein Abgleich schreibt oft.
+ */
 function schreibfehler(err: unknown): void {
   console.warn('Tresor-Ablage: Schreiben nach IndexedDB gescheitert.', err)
+  if (Date.now() - zuletztGemeldet < 60_000) return
+  zuletztGemeldet = Date.now()
+  const voll = err instanceof DOMException && err.name === 'QuotaExceededError'
+  toast.error(i18n.t(voll ? 'mss.vault.ablageVoll' : 'mss.vault.ablageFehler'))
 }
 
 /**

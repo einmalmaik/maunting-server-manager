@@ -43,6 +43,8 @@ from config import settings
 from models import Role, RoleVaultQuota
 from models.user import User
 from models.vault_blob import VaultBlob
+from models.vault_bucket_tombstone import VaultBucketTombstone
+from services import audit_service
 from services.role_service import effective_user_role_ids
 
 CHUNK_KLARTEXT = 4 * 1024 * 1024
@@ -102,6 +104,13 @@ class PlatteVoll(SpeicherVoll):
 
 class ZuVieleDateien(SpeicherVoll):
     code = "VAULT_ZU_VIELE_DATEIEN"
+
+
+class TresorZurueckgesetzt(BlobFehler):
+    """Der Bucket ist beerdigt (``VaultBucketTombstone``); dieselbe Antwort wie im Sync."""
+
+    status_code = 410
+    code = "VAULT_ZURUECKGESETZT"
 
 
 class LoeschnachweisFalsch(BlobFehler):
@@ -173,12 +182,23 @@ def rolle_speicher(db: Session, role_id: int) -> int | None:
     return db.scalar(select(RoleVaultQuota.quota_bytes).where(RoleVaultQuota.role_id == role_id))
 
 
+class RolleFehlt(ValueError):
+    pass
+
+
+class SpeicherUngueltig(ValueError):
+    pass
+
+
 def rolle_speicher_setzen(db: Session, role_id: int, quota_bytes: int | None) -> None:
-    """Setzt den Speicher einer Rolle in der offenen Transaktion; ``None`` nimmt ihn weg."""
+    """Setzt den Speicher einer Rolle in der offenen Transaktion; ``None`` nimmt ihn weg.
+
+    Ohne Audit-Eintrag: Panel und KI gehen ueber ``rolle_speicher_aendern``.
+    """
     if db.get(Role, role_id) is None:
-        raise ValueError("Rolle nicht gefunden")
+        raise RolleFehlt("Rolle nicht gefunden")
     if quota_bytes is not None and (isinstance(quota_bytes, bool) or not 0 <= int(quota_bytes) <= MAX_QUOTE):
-        raise ValueError("Ungueltiger Speicherwert")
+        raise SpeicherUngueltig("Ungueltiger Speicherwert")
     zeile = db.get(RoleVaultQuota, role_id)
     if quota_bytes is None:
         if zeile is not None:
@@ -191,6 +211,24 @@ def rolle_speicher_setzen(db: Session, role_id: int, quota_bytes: int | None) ->
     db.flush()
 
 
+def rolle_speicher_aendern(db: Session, actor_id: int, role_id: int, quota_bytes: int | None) -> None:
+    """Der eine Weg fuer Panel und KI: setzen und auditieren, ohne Commit (AGENTS 32).
+
+    Bis 02.10.2026 standen Setzen und Audit-Eintrag in der Panel-Route und in
+    der KI-Ausfuehrung je einmal.
+    """
+    vorher = rolle_speicher(db, role_id)
+    rolle_speicher_setzen(db, role_id, quota_bytes)
+    audit_service.record_privileged_action(
+        db,
+        user_id=actor_id,
+        action="vault.role_quota.updated",
+        target_type="role",
+        target_id=role_id,
+        details={"vorher": vorher, "nachher": quota_bytes},
+    )
+
+
 def belegt(db: Session, bucket_id: str) -> int:
     return int(
         db.scalar(select(func.coalesce(func.sum(VaultBlob.bytes_total), 0)).where(VaultBlob.bucket_id == bucket_id))
@@ -198,10 +236,21 @@ def belegt(db: Session, bucket_id: str) -> int:
     )
 
 
-def _sperre_bucket(db: Session, bucket_id: str) -> None:
-    """Serialisiert das Reservieren der Quote eines Buckets bis zum Ende der Transaktion."""
-    schluessel = int.from_bytes(hashlib.sha256(f"vault-blob:{bucket_id}".encode()).digest()[:8], "big", signed=True)
+def sperre_bucket(db: Session, bucket_id: str) -> None:
+    """Die eine Sperre je Bucket, bis zum Ende der Transaktion.
+
+    Sie gilt fuer alles, was einen Bucket beansprucht, beschreibt oder beerdigt:
+    Revisionsvergabe und Erstanspruch (``vault_service``), Quote beim Anlegen
+    eines Blobs, Zuruecksetzen und Kontoloeschung. Bis 02.10.2026 nahmen
+    Zuruecksetzen und Anlegen verschiedene Schluessel und liefen aneinander
+    vorbei: ein Blob liess sich anlegen, waehrend der Bucket beerdigt wurde.
+    """
+    schluessel = int.from_bytes(hashlib.sha256(f"vault-bucket:{bucket_id}".encode()).digest()[:8], "big", signed=True)
     db.execute(text("SELECT pg_advisory_xact_lock(:schluessel)"), {"schluessel": schluessel})
+
+
+def ist_beerdigt(db: Session, bucket_id: str) -> bool:
+    return db.get(VaultBucketTombstone, bucket_id, populate_existing=True) is not None
 
 
 def anlegen(
@@ -212,7 +261,10 @@ def anlegen(
     if not _groesse_passt(chunk_count, bytes_total):
         raise BlobUngueltig("Chunkzahl und Groesse passen nicht zusammen.")
 
-    _sperre_bucket(db, bucket_id)
+    sperre_bucket(db, bucket_id)
+    # Erst unter der Sperre: ein Zuruecksetzen, das gerade laeuft, ist dann durch.
+    if ist_beerdigt(db, bucket_id):
+        raise TresorZurueckgesetzt("Dieser Tresor wurde zurückgesetzt.")
     if db.get(VaultBlob, blob_id) is not None:
         raise BlobKonflikt("Diese Kennung ist vergeben.")
     anzahl = int(db.scalar(select(func.count()).select_from(VaultBlob).where(VaultBlob.bucket_id == bucket_id)) or 0)
@@ -256,7 +308,31 @@ def laenge_fuer_upload(db: Session, bucket_id: str, blob_id: str, index: int) ->
     return erwartete_laenge(blob, index)
 
 
-def chunk_schreiben(blob_id: str, index: int, daten: bytes) -> None:
+def chunk_ablegen(db: Session, bucket_id: str, blob_id: str, index: int, daten: bytes | bytearray) -> None:
+    """Schreibt einen Chunk, wenn der Blob noch offen ist. Committet (gibt die Zeile frei).
+
+    Der Zustand wird erst hier geprueft, nach dem Body, und die Zeile bleibt
+    bis nach dem Schreiben gesperrt (``FOR SHARE``; parallele Chunks desselben
+    Blobs gehen weiter, ``fertigstellen`` wartet). Bis 02.10.2026 galt nur die
+    Pruefung vor dem Body: ein Body, der nach ``fertig`` ankam, ueberschrieb
+    einen Chunk eines fertigen Blobs.
+    """
+    blob = db.get(
+        VaultBlob, blob_id, with_for_update={"read": True}, populate_existing=True
+    ) if ist_blob_id(blob_id) else None
+    try:
+        if blob is None or blob.bucket_id != bucket_id:
+            raise BlobNichtGefunden("Blob nicht gefunden.")
+        if blob.state != "offen":
+            raise BlobKonflikt("Dieser Blob nimmt keine Chunks mehr an.")
+        if len(daten) != erwartete_laenge(blob, index):
+            raise BlobUngueltig("Chunk hat die falsche Laenge.")
+        chunk_schreiben(blob_id, index, daten)
+    finally:
+        db.commit()
+
+
+def chunk_schreiben(blob_id: str, index: int, daten: bytes | bytearray) -> None:
     """Schreibt einen Chunk. Erst unter eigenem Namen, dann atomar an seinen Platz:
     zwei Anfragen fuer denselben Chunk ueberschreiben sich, mischen sich aber nie."""
     verzeichnis = blob_verzeichnis(blob_id)
@@ -277,21 +353,39 @@ def chunk_schreiben(blob_id: str, index: int, daten: bytes) -> None:
 
 
 def vorhandene_chunks(blob: VaultBlob) -> list[int]:
-    verzeichnis = blob_verzeichnis(blob.id)
+    """Die Chunks, die mit voller Laenge auf der Platte liegen.
+
+    Einmal das Verzeichnis lesen statt je Index ein ``stat``: ein Blob von
+    1 TiB hat rund 262.000 Chunks, und bis 02.10.2026 kostete jeder Status
+    und jedes Fertigstellen so viele Plattenzugriffe, auch fuer fehlende.
+    """
     vorhanden: list[int] = []
-    for index in range(blob.chunk_count):
-        pfad = verzeichnis / str(index)
-        try:
-            if pfad.stat().st_size == erwartete_laenge(blob, index):
-                vorhanden.append(index)
-        except FileNotFoundError:
-            continue
-    return vorhanden
+    try:
+        eintraege = os.scandir(blob_verzeichnis(blob.id))
+    except FileNotFoundError:
+        return vorhanden
+    with eintraege:
+        for eintrag in eintraege:
+            if not eintrag.name.isdigit():
+                continue
+            index = int(eintrag.name)
+            if index >= blob.chunk_count:
+                continue
+            try:
+                if eintrag.stat().st_size == erwartete_laenge(blob, index):
+                    vorhanden.append(index)
+            except FileNotFoundError:
+                continue
+    return sorted(vorhanden)
 
 
 def fertigstellen(db: Session, bucket_id: str, blob_id: str) -> None:
     blob = eigener_blob(db, bucket_id, blob_id)
+    # Gesperrt, bevor die Chunks gezaehlt werden: ein Chunk, der gerade
+    # geschrieben wird (``chunk_ablegen``), ist danach ganz da oder abgewiesen.
+    db.refresh(blob, with_for_update=True)
     if blob.state == "fertig":
+        db.commit()
         return
     if blob.state != "offen":
         raise BlobKonflikt("Dieser Blob ist geloescht.")

@@ -888,6 +888,9 @@ pub fn run() {
         ])
         .setup(|app| {
             tray::erstellen(app.handle())?;
+            // Halbe Klartextdateien, die ein früherer Lauf beim Speichern
+            // liegen ließ (App mitten im Schreiben beendet).
+            datei_speichern::waisen_beim_start(app.handle());
             // Ohne diesen Handler bleibt getUserMedia in WebView2 stumm —
             // Sprachmodus und Anrufe wären in der App unbenutzbar.
             #[cfg(windows)]

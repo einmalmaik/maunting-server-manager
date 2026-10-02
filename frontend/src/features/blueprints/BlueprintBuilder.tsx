@@ -1,3 +1,4 @@
+import { blobHerunterladen } from '@/lib/herunterladen'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
@@ -151,12 +152,7 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
   const updateSourceType = (type: BlueprintSourceType) => setDraft(current => changeBlueprintSource(current, type))
   const downloadDraft = () => {
     const blob = new Blob([`${JSON.stringify(normalized, null, 2)}\n`], { type: 'application/json' })
-    const href = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = href
-    anchor.download = `${draft.meta.id || 'msm-blueprint'}.blueprint.json`
-    anchor.click()
-    URL.revokeObjectURL(href)
+    blobHerunterladen(blob, `${draft.meta.id || 'msm-blueprint'}.blueprint.json`)
   }
 
   const saveDraft = async () => {

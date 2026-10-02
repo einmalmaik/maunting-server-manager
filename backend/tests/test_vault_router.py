@@ -1315,3 +1315,99 @@ def test_sync_liefert_seitenweise(client, monkeypatch):
         if not daten["has_more"]:
             break
     assert gesehen == [f"e{i}" for i in range(5)]
+
+
+# ─── Befunde vom 02.10.2026 ─────────────────────────────────────────────────
+
+
+def test_erstanspruch_koppelt_keinen_beerdigten_bucket(test_db, monkeypatch):
+    """Geraet 2 gleicht ab, waehrend Geraet 1 zuruecksetzt. Bis 02.10.2026 lag
+    die Pruefung auf den Grabstein vor dem Erstanspruch und ohne Sperre: lief
+    das Zuruecksetzen dazwischen, koppelte Geraet 2 den beerdigten Bucket neu
+    ans Konto, und ein neuer Tresor liess sich danach nicht mehr einrichten."""
+    import database as db_module
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import NullPool
+
+    from schemas.vault import VaultSyncRequest
+
+    session, user, _ = test_db
+    bucket = "4" * 64
+    konto = vault_service.tresor_konto(user.id)
+    session.add(VaultUserSetting(konto_index=konto.index, bucket_id=bucket, kdf_salt="ab" * 16))
+    session.commit()
+
+    engine = create_engine(db_module.engine.url, poolclass=NullPool)
+    geraet_eins = sessionmaker(bind=engine)()
+    echt = vault_service.einstellung
+    schon = {"zurueckgesetzt": False}
+
+    def einstellung(db, k):
+        # Geraet 2 hat den Grabstein schon geprueft; jetzt setzt Geraet 1 zurueck.
+        if not schon["zurueckgesetzt"]:
+            schon["zurueckgesetzt"] = True
+            vault_service.tresor_zuruecksetzen(geraet_eins, konto)
+            geraet_eins.commit()
+        return echt(db, k)
+
+    monkeypatch.setattr(vault_service, "einstellung", einstellung)
+    try:
+        with pytest.raises(vault_service.VaultZurueckgesetzt):
+            vault_service.sync_vault(session, konto, VaultSyncRequest(bucket_id=bucket, since_revision=0, mutations=[]))
+    finally:
+        geraet_eins.close()
+        engine.dispose()
+    session.rollback()
+    assert schon["zurueckgesetzt"]
+    assert _tresorzeile(session, user) is None
+
+
+def test_salz_laesst_sich_nicht_ueberschreiben(client):
+    """Bis 02.10.2026 ueberschrieb `/salt` ein gesetztes Salz mit dem blossen
+    Zugangstoken; jedes andere Geraet leitete danach aus dem richtigen
+    Master-Passwort einen falschen Schluessel ab."""
+    bucket = "3" * 64
+    assert client.post("/api/vault/salt", json={"kdf_salt": "ab" * 16, "bucket_id": bucket}).status_code == 200
+    # Nachmelden mit demselben Salz geht weiter.
+    assert client.post("/api/vault/salt", json={"kdf_salt": "ab" * 16, "bucket_id": bucket}).status_code == 200
+
+    anderes = client.post("/api/vault/salt", json={"kdf_salt": "cd" * 16, "bucket_id": bucket})
+    assert anderes.status_code == 409
+    assert client.get("/api/vault/salt").json()["kdf_salt"] == "ab" * 16
+
+
+def test_hinweis_anfordern_haelt_die_schleife_frei(client, test_db, monkeypatch):
+    """`/request-hint` ist async. Bis 02.10.2026 liefen Datenbank und
+    Entschluesseln darin direkt in der Ereignisschleife und hielten jede andere
+    Anfrage an (AGENTS 47)."""
+    import asyncio
+
+    from sqlalchemy import event
+
+    from services.email_service import EmailService
+
+    session, _, _ = test_db
+    assert client.post("/api/vault/hint", json={"hint": "Erstes Haustier"}).status_code == 200
+
+    async def senden(to, subject, body, html=None):
+        return True
+
+    monkeypatch.setattr(EmailService, "send_email", senden)
+    in_der_schleife: list[str] = []
+
+    def mitschreiben(conn, cursor, statement, parameters, context, executemany):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        in_der_schleife.append(statement.split()[0])
+
+    bindung = session.get_bind()
+    event.listen(bindung, "before_cursor_execute", mitschreiben)
+    try:
+        antwort = client.post("/api/vault/request-hint")
+    finally:
+        event.remove(bindung, "before_cursor_execute", mitschreiben)
+    assert antwort.status_code == 200, antwort.text
+    assert in_der_schleife == []

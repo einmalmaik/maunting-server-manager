@@ -146,14 +146,14 @@ describe('TresorGalerie', () => {
       render(<TresorGalerie />)
       fireEvent.click(kachel('a.jpg'), { ctrlKey: true })
       expect(screen.queryByRole('dialog')).toBeNull()
-      expect(kopfleiste()).toHaveAccessibleName(i18n.t('mss.vault.fotos.ausgewaehlt', { count: 1 }))
+      expect(kopfleiste()).toHaveAccessibleName(i18n.t('mss.vault.dateien.ausgewaehlt', { count: 1 }))
 
       fireEvent.click(kachel('c.jpg'), { shiftKey: true })
       expect(kachel('b.jpg')).toHaveAttribute('aria-pressed', 'true')
-      expect(kopfleiste()).toHaveAccessibleName(i18n.t('mss.vault.fotos.ausgewaehlt', { count: 3 }))
+      expect(kopfleiste()).toHaveAccessibleName(i18n.t('mss.vault.dateien.ausgewaehlt', { count: 3 }))
 
-      fireEvent.click(within(kopfleiste()).getByRole('button', { name: new RegExp(i18n.t('mss.vault.dateien.alleAuswaehlen')) }))
-      expect(kopfleiste()).toHaveAccessibleName(i18n.t('mss.vault.fotos.ausgewaehlt', { count: 4 }))
+      fireEvent.click(within(kopfleiste()).getByRole('button', { name: new RegExp(i18n.t('mss.vault.alle')) }))
+      expect(kopfleiste()).toHaveAccessibleName(i18n.t('mss.vault.dateien.ausgewaehlt', { count: 4 }))
     })
 
     it('startet die Auswahl am Finger mit langem Drücken', async () => {
@@ -282,7 +282,7 @@ describe('TresorGalerie', () => {
       render(<TresorGalerie />)
       const box = await oeffnen()
       expect(await within(box).findByText(i18n.t('mss.vault.fotos.ladeFehler'))).toBeInTheDocument()
-      fireEvent.click(within(box).getByRole('button', { name: i18n.t('mss.vault.fotos.erneutLaden') }))
+      fireEvent.click(within(box).getByRole('button', { name: i18n.t('mss.vault.dateien.erneutLaden') }))
       expect(await within(box).findByRole('img', { name: 'a.jpg' })).toBeInTheDocument()
     })
 
@@ -296,7 +296,7 @@ describe('TresorGalerie', () => {
       ).toBeInTheDocument()
       // Ohne Netz wird auch das Original versucht; das liegt vielleicht angeheftet auf dem Gerät.
       expect(blobLesen.mock.calls.map(([k]) => (k as { id: string }).id)).toEqual(['1b'.padEnd(32, '0'), '1a'.padEnd(32, '0')])
-      expect(within(box).queryByRole('button', { name: i18n.t('mss.vault.fotos.erneutLaden') })).toBeNull()
+      expect(within(box).queryByRole('button', { name: i18n.t('mss.vault.dateien.erneutLaden') })).toBeNull()
 
       Object.defineProperty(navigator, 'onLine', { value: true, configurable: true })
       blobLesen.mockResolvedValue(new Blob(['bild'], { type: 'image/jpeg' }))
@@ -343,7 +343,7 @@ describe('TresorGalerie', () => {
     it('zeigt die Filter als Reiter mit Auswahlzustand', () => {
       render(<TresorGalerie />)
       const filter = screen.getByRole('tablist', { name: i18n.t('mss.vault.fotos.filter') })
-      expect(within(filter).getByRole('tab', { name: new RegExp(i18n.t('mss.vault.fotos.alle')) })).toHaveAttribute('aria-selected', 'true')
+      expect(within(filter).getByRole('tab', { name: new RegExp(i18n.t('mss.vault.alle')) })).toHaveAttribute('aria-selected', 'true')
       fireEvent.click(within(filter).getByRole('tab', { name: new RegExp(i18n.t('mss.vault.fotos.videos')) }))
       expect(screen.queryByRole('button', { name: 'a.jpg' })).toBeNull()
       expect(kachel('clip.mp4')).toBeInTheDocument()

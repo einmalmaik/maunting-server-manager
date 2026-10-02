@@ -52,9 +52,9 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
         setIsScanning(true)
         scanFrame()
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : t('mss.vault.qr.kameraFehlgeschlagen')
-      setCameraError(msg)
+    } catch {
+      // Der Browser meldet auf Englisch (NotAllowedError …); der Nutzer bekommt unseren Satz.
+      setCameraError(t('mss.vault.qr.kameraFehlgeschlagen'))
       setIsScanning(false)
     }
   }

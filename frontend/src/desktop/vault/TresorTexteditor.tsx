@@ -25,6 +25,7 @@ import { useVaultStore, type VaultItem } from './vaultStore'
 import { blobLesen } from './tresorDateien'
 import { dateiAufsGeraet } from './tresorAnzeige'
 import { fassungenVon } from './tresorOrdner'
+import { fehlerText } from './tresorFehler'
 
 const FileEditorWorkspace = lazy(() => import('@/components/server/FileEditorWorkspace').then((m) => ({ default: m.FileEditorWorkspace })))
 const Markdownansicht = lazy(() => import('@/Singra/UI/Markdownansicht').then((m) => ({ default: m.Markdownansicht })))
@@ -81,7 +82,7 @@ export function TresorTexteditor({ item: anfang, text, ort, ansicht, onFertig }:
       toast.success(t('mss.vault.bearbeiten.gespeichert'))
     } catch (err) {
       setTab((a) => ({ ...a, saveState: 'error' }))
-      toast.error(err instanceof Error ? err.message : t('mss.vault.bearbeiten.fehler'))
+      toast.error(fehlerText(err, t('mss.vault.bearbeiten.fehler')))
     }
   }
 
@@ -107,7 +108,7 @@ export function TresorTexteditor({ item: anfang, text, ort, ansicht, onFertig }:
       setTab((a) => ({ ...a, content: inhalt, savedContent: inhalt, saveState: 'clean', lineEnding: detectLineEnding(inhalt), size: inhalt.length }))
       toast.success(t('mss.vault.dateien.fassungZurueck'))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('mss.vault.bearbeiten.fehler'))
+      toast.error(fehlerText(err, t('mss.vault.bearbeiten.fehler')))
     } finally {
       setHolt(null)
     }

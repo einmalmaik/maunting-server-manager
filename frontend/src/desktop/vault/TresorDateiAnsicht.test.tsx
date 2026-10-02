@@ -133,7 +133,7 @@ describe('TresorDateiAnsicht', () => {
       useVaultStore.setState({ trashItem } as never)
       zeigen(datei('foto.png', 'image/png'), new Blob(['x']), schliessen)
       fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.inPapierkorb') }))
-      await vi.waitFor(() => expect(letzterToast()).toMatchObject({ type: 'error', message: i18n.t('mss.vault.dateien.papierkorbFehler') }))
+      await vi.waitFor(() => expect(letzterToast()).toMatchObject({ type: 'error', message: i18n.t('mss.vault.fotos.fehler.papierkorb', { count: 1 }) }))
       expect(schliessen).not.toHaveBeenCalled()
     })
   })

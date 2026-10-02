@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import html
 import secrets
 from typing import Sequence
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -58,6 +59,10 @@ class VaultZurueckgesetzt(Exception):
 
 class VaultOhneBucket(Exception):
     """Das Konto hat keinen Bucket; die Dateien wissen nicht, wohin."""
+
+
+class VaultSalzGesetzt(Exception):
+    """Das Konto hat schon ein anderes Salz; ein neues gibt es nur ueber das Zuruecksetzen (409)."""
 
 
 # ─── Das Konto in den Tresortabellen ─────────────────────────────────────────
@@ -225,8 +230,20 @@ def _bucket_besitzer(db: Session, bucket_id: str) -> str | None:
 
 def _pruefe_nicht_beerdigt(db: Session, bucket_id: str) -> None:
     """Ein beerdigter Bucket nimmt nichts mehr an und wird nie neu vergeben (``VaultBucketTombstone``)."""
-    if db.get(VaultBucketTombstone, bucket_id) is not None:
+    if vault_blob_service.ist_beerdigt(db, bucket_id):
         raise VaultZurueckgesetzt("Dieser Tresor wurde zurückgesetzt.")
+
+
+def _beanspruchen(db: Session, bucket_id: str) -> None:
+    """Sperrt den Bucket fuer einen Erstanspruch und prueft danach erneut, ob er beerdigt ist.
+
+    Bis 02.10.2026 lag die Pruefung vor dem Anspruch und ohne Sperre. Lief das
+    Zuruecksetzen dazwischen, koppelte ein anderes Geraet den beerdigten Bucket
+    wieder ans Konto, und das Einrichten eines neuen Tresors scheiterte danach
+    an „Bucket kann nicht nachtraeglich geaendert werden".
+    """
+    _sperre_bucket(db, bucket_id)
+    _pruefe_nicht_beerdigt(db, bucket_id)
 
 
 def _sperre_bucket(db: Session, bucket_id: str) -> None:
@@ -239,12 +256,10 @@ def _sperre_bucket(db: Session, bucket_id: str) -> None:
     angeboten — stiller Datenverlust in einem Tresor.
 
     PostgreSQL haelt die Sperre bis zum Ende der Transaktion, also bis zum
-    ``commit`` des Aufrufers.
+    ``commit`` des Aufrufers. Es ist dieselbe Sperre wie beim Anlegen eines
+    Blobs und beim Zuruecksetzen (``vault_blob_service.sperre_bucket``).
     """
-    schluessel = int.from_bytes(
-        hashlib.sha256(bucket_id.encode("utf-8")).digest()[:8], "big", signed=True
-    )
-    db.execute(text("SELECT pg_advisory_xact_lock(:schluessel)"), {"schluessel": schluessel})
+    vault_blob_service.sperre_bucket(db, bucket_id)
 
 
 def _wende_mutationen_an(
@@ -396,6 +411,7 @@ def sync_vault(db: Session, konto: TresorKonto, request: VaultSyncRequest) -> Va
         # angemeldeten Konto zuzuschlagen, gaebe dessen Inhalt heraus.
         if _bucket_hat_eintraege(db, bucket_id):
             raise VaultBucketAccessDenied("Zugriff auf fremden Tresor-Bucket verweigert.")
+        _beanspruchen(db, bucket_id)
         if user_setting:
             user_setting.bucket_id = bucket_id
             user_setting.updated_at = _now()
@@ -450,6 +466,7 @@ def sync_vault_blind(db: Session, request: VaultBlindSyncRequest) -> VaultSyncRe
         # Fehlertext waere ein Orakel dafuer, welche Buckets belegt sind.
         if _bucket_hat_eintraege(db, bucket_id) or _bucket_besitzer(db, bucket_id) is not None:
             raise VaultBucketUnauthorized("Ungültiges Authentifizierungs-Token für diesen Tresor-Bucket.")
+        _beanspruchen(db, bucket_id)
 
         blind_bucket = VaultBlindBucket(
             bucket_id=bucket_id,
@@ -538,6 +555,7 @@ def register_blind_bucket(db: Session, konto: TresorKonto, bucket_id: str, auth_
             return  # Idempotent: derselbe Nachweis, nichts zu tun.
         raise VaultBucketAlreadyBound("Für diesen Tresor-Bucket ist bereits ein Besitznachweis hinterlegt.")
 
+    _beanspruchen(db, bucket_id)
     if besitzer is None:
         if _bucket_hat_eintraege(db, bucket_id):
             raise VaultBucketAccessDenied("Zugriff auf fremden Tresor-Bucket verweigert.")
@@ -599,6 +617,12 @@ def set_vault_salt(
     Besitzer und las danach ueber `/sync` jeden Eintrag. Solche Buckets
     entstehen, wenn der erste Abgleich ohne `/salt` lief oder das Konto des
     Besitzers geloescht wurde.
+
+    Ein gesetztes Salz bleibt. Dasselbe noch einmal ist in Ordnung (das
+    Nachmelden des Buckets schickt es), ein anderes ist ``VaultSalzGesetzt``;
+    ein neues gibt es nur ueber das Zuruecksetzen. Bis 02.10.2026 ueberschrieb
+    hier schon das blosse Zugangstoken das Salz, und jedes andere Geraet
+    leitete danach aus dem richtigen Master-Passwort einen falschen Schluessel ab.
     """
     clean_bucket = bucket_id.strip().lower()
     clean_salt = kdf_salt.strip()
@@ -622,6 +646,7 @@ def set_vault_salt(
             # Derselbe Wortlaut wie oben: die Antwort verraet nicht, ob es den
             # Bucket gibt.
             raise VaultBucketAccessDenied("Der angegebene Tresor-Bucket ist bereits vergeben.")
+    _beanspruchen(db, clean_bucket)
     if not setting:
         setting = VaultUserSetting(
             konto_index=konto.index,
@@ -634,6 +659,8 @@ def set_vault_salt(
     else:
         if setting.bucket_id and setting.bucket_id != clean_bucket:
             raise VaultBucketAccessDenied("Der Tresor-Bucket kann nicht nachträglich geändert werden.")
+        if setting.kdf_salt and setting.kdf_salt != clean_salt:
+            raise VaultSalzGesetzt("Für diesen Tresor ist schon ein anderes Salz hinterlegt.")
         setting.bucket_id = clean_bucket
         setting.kdf_salt = clean_salt
         setting.updated_at = _now()
@@ -736,15 +763,24 @@ def get_vault_hint_status(db: Session, konto: TresorKonto) -> VaultHintStatusRes
     )
 
 
-async def request_vault_hint_email(db: Session, user: User, konto: TresorKonto) -> tuple[bool, str]:
-    """Sendet den hinterlegten Hinweis an die registrierte E-Mail-Adresse des Benutzers.
-    
-    Verbindliche Invariante: Nur 1 Anfrage alle 10 Minuten erlaubt.
+@dataclass(frozen=True)
+class _HinweisVersand:
+    hint_id: int
+    hinweis: str
+    name: str
+    adresse: str | None
+
+
+def _hinweis_vormerken(db: Session, user: User, konto: TresorKonto) -> _HinweisVersand | str:
+    """Setzt die Sperrfrist und liefert, was die Mail braucht; sonst die Meldung.
+
+    Synchron, im Threadpool: auch Name und Adresse kommen hierher, die Adresse
+    entschluesselt der Sidecar.
     """
     hint_obj = _eigene_zeile(db, VaultHint, konto)
     db.commit()
     if not hint_obj or not hint_obj.hint:
-        return False, "Für dein Konto ist kein Passwort-Hinweis hinterlegt."
+        return "Für dein Konto ist kein Passwort-Hinweis hinterlegt."
 
     now = _now()
 
@@ -773,10 +809,7 @@ async def request_vault_hint_email(db: Session, user: User, konto: TresorKonto) 
         last_req = _to_utc(hint_obj.last_requested_at)
         diff = (now - last_req).total_seconds() if last_req else 0
         wait_minutes = max(1, int((HINT_RATE_LIMIT_SECONDS - diff + 59) // 60))
-        return (
-            False,
-            f"Der Hinweis kann nur alle 10 Minuten angefordert werden. Bitte warte noch {wait_minutes} Minute(n).",
-        )
+        return f"Der Hinweis kann nur alle 10 Minuten angefordert werden. Bitte warte noch {wait_minutes} Minute(n)."
 
     # Entschlüsseln mit AAD. Scheitert das, wird **nicht** der Rohwert verschickt:
     # der waere der Ciphertext aus der Datenbank, und den per E-Mail aus dem
@@ -786,12 +819,35 @@ async def request_vault_hint_email(db: Session, user: User, konto: TresorKonto) 
             hint_obj.hint, aad=f"msm:vault:hint:{user.id}"
         )
     except Exception:
-        return False, "Der hinterlegte Hinweis konnte nicht gelesen werden. Bitte hinterlege ihn erneut."
+        return "Der hinterlegte Hinweis konnte nicht gelesen werden. Bitte hinterlege ihn erneut."
+    return _HinweisVersand(hint_id=hint_obj.id, hinweis=raw_hint, name=user.username, adresse=user.email)
+
+
+def _sperrfrist_freigeben(db: Session, hint_id: int) -> None:
+    db.query(VaultHint).filter(VaultHint.id == hint_id).update(
+        {"last_requested_at": None}, synchronize_session=False
+    )
+    db.commit()
+
+
+async def request_vault_hint_email(db: Session, user: User, konto: TresorKonto) -> tuple[bool, str]:
+    """Sendet den hinterlegten Hinweis an die registrierte E-Mail-Adresse des Benutzers.
+
+    Verbindliche Invariante: Nur 1 Anfrage alle 10 Minuten erlaubt.
+
+    Datenbank und Entschluesseln laufen im Threadpool, nacheinander mit
+    derselben Sitzung; die Schleife wartet nur auf den Versand. Bis 02.10.2026
+    lief alles in der Ereignisschleife und hielt dabei jede andere Anfrage an.
+    """
+    versand = await asyncio.to_thread(_hinweis_vormerken, db, user, konto)
+    if isinstance(versand, str):
+        return False, versand
+    raw_hint = versand.hinweis
 
     from services.email_service import EmailService
 
     subject = "Tresor: Dein Passwort-Hinweis"
-    body = f"""Hallo {user.username},
+    body = f"""Hallo {versand.name},
 
 du hast den Passwort-Hinweis für deinen Tresor im Maunting Service Manager angefordert.
 
@@ -806,19 +862,18 @@ Maunting Service Manager
     # ohne Maskierung traegt jedes `<a href=…>` darin ungeprueft in eine Mail,
     # die aus der eigenen, per SPF/DKIM beglaubigten Domain kommt.
     html_content = EmailService._notification_email_html(
-        user.username,
+        versand.name,
         "Passwort-Hinweis",
         "Hier ist deine persönliche Gedankenstütze für das Master-Passwort deines Tresors:",
         f"<strong>{html.escape(raw_hint)}</strong>",
         kategorie="Tresor",
     )
 
-    success = await EmailService.send_email(user.email, subject, body, html_content)
+    success = await EmailService.send_email(versand.adresse, subject, body, html_content)
     if not success:
         # Fehlschlag gibt die Frist wieder frei — sonst kostet ein kaputter
         # SMTP-Server den Benutzer zehn Minuten.
-        hint_obj.last_requested_at = None
-        db.commit()
+        await asyncio.to_thread(_sperrfrist_freigeben, db, versand.hint_id)
         return False, "E-Mail konnte nicht versendet werden. Bitte prüfe die E-Mail-Konfiguration."
 
     return True, "Dein Passwort-Hinweis wurde erfolgreich an deine E-Mail-Adresse gesendet."

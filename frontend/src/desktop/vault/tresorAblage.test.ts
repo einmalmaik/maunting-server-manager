@@ -9,7 +9,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import 'fake-indexeddb/auto'
+import i18n from '@/i18n'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { useToastStore } from '@/stores/toastStore'
 import {
   ALT_BLOBS,
   ALT_REVISION,
@@ -92,6 +94,19 @@ describe('Tresor-Ablage in IndexedDB', () => {
     await ablageLaden(BUCKET)
     expect(blobsLesen(BUCKET).map((e) => e.id).sort()).toEqual(['a', 'b'])
     expect(revisionLesen(BUCKET)).toBe(7)
+  })
+
+  it('sagt, wenn das Gerät nicht speichern kann', async () => {
+    // Bis 02.10.2026 stand ein voller Gerätespeicher nur in der Konsole, und
+    // offline Gespeichertes war nach einem Neustart still weg.
+    await ablageLaden(BUCKET)
+    expect(ablageInIndexedDb(BUCKET)).toBe(true)
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(() => {
+      throw new DOMException('voll', 'QuotaExceededError')
+    })
+    warteschlangeSchreiben(BUCKET, [eintrag('a')])
+    expect(useToastStore.getState().toasts.map((t) => t.message)).toContain(i18n.t('mss.vault.ablageVoll'))
   })
 
   it('wartet mit dem Umzug, bis die Warteschlange leer ist', async () => {

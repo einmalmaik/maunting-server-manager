@@ -74,7 +74,7 @@ def _speicher_der_rolle(db, user: User, quota_bytes: int) -> None:
 
 @pytest.fixture
 def als(db, konten, blob_dir):
-    """``als(user)`` wechselt das angemeldete Konto des Test-Clients."""
+    """``als(user)`` wechselt das angemeldete Konto des Test-Clients; der Client nennt dessen Bucket."""
     aktuell = {"user": konten[0]}
 
     def override_get_db():
@@ -86,6 +86,7 @@ def als(db, konten, blob_dir):
     with TestClient(app) as client:
         def wechseln(user: User) -> TestClient:
             aktuell["user"] = user
+            client.headers["X-MSM-Vault-Bucket"] = BUCKET[user.id]
             return client
 
         yield wechseln
@@ -220,6 +221,7 @@ def test_schreibende_blob_routen_brauchen_csrf(db, konten, blob_dir):
     try:
         with TestClient(app) as client:
             client.cookies.set("__Secure-access_token", "sitzung")
+            client.headers["X-MSM-Vault-Bucket"] = BUCKET[eins.id]
             schluessel, verifier = _schluessel()
             antworten = [
                 client.post(
@@ -556,3 +558,136 @@ def test_speicher_grenze_greift(als, konten):
     for _ in range(120):
         assert client.get("/api/vault/speicher").status_code == 200
     assert client.get("/api/vault/speicher").status_code == 429
+
+
+# ─── Befunde vom 02.10.2026 ─────────────────────────────────────────────────
+
+
+def test_alter_tresor_laedt_nicht_in_den_neuen(als, konten, db):
+    """Geraet 1 setzt zurueck und richtet einen neuen Tresor ein; Geraet 2 hat
+    noch den alten offen. Bis 02.10.2026 nahmen die Datei-Routen den Bucket des
+    Kontos, und Geraet 2 lud in den neuen hoch: Dateien ohne Eintrag, die dessen
+    Speicher belegten."""
+    eins, _ = konten
+    alt = BUCKET[eins.id]
+    vault_service.tresor_zuruecksetzen(db, vault_service.tresor_konto(eins.id))
+    neu = "9" * 64
+    db.add(VaultUserSetting(konto_index=vault_service.tresor_konto(eins.id).index, bucket_id=neu))
+    db.commit()
+
+    client = als(eins)
+    client.headers["X-MSM-Vault-Bucket"] = alt
+    blob_id, _, antwort = _anlegen(client, 100)
+    assert antwort.status_code == 410, antwort.text
+    assert antwort.json()["detail"]["code"] == "VAULT_ZURUECKGESETZT"
+    assert db.get(VaultBlob, blob_id) is None
+    assert vault_blob_service.belegt(db, neu) == 0
+
+    # Ein Bucket, der nicht (mehr) der des Kontos ist, gilt genauso.
+    client.headers["X-MSM-Vault-Bucket"] = "7" * 64
+    assert _anlegen(client, 100)[2].status_code == 410
+    # Ohne genannten Bucket schreibt keine Route.
+    del client.headers["X-MSM-Vault-Bucket"]
+    assert _anlegen(client, 100)[2].status_code == 400
+
+    client.headers["X-MSM-Vault-Bucket"] = neu
+    assert _anlegen(client, 100)[2].status_code == 201
+
+
+def test_anlegen_in_beerdigtem_bucket(db, konten, blob_dir):
+    """Laeuft das Zuruecksetzen, waehrend ein Upload schon an der Route vorbei
+    ist, prueft ``anlegen`` unter der Sperre selbst noch einmal."""
+    from models import VaultBucketTombstone
+
+    eins, _ = konten
+    db.add(VaultBucketTombstone(bucket_id=BUCKET[eins.id]))
+    db.commit()
+    with pytest.raises(vault_blob_service.BlobFehler) as fehler:
+        vault_blob_service.anlegen(db, eins, BUCKET[eins.id], _neue_id(), 1, 100, "0" * 64)
+    assert (fehler.value.status_code, fehler.value.code) == (410, "VAULT_ZURUECKGESETZT")
+    db.rollback()
+    assert db.query(VaultBlob).count() == 0
+
+
+def test_zuruecksetzen_und_anlegen_teilen_eine_sperre(db, konten, blob_dir):
+    """Bis 02.10.2026 sperrten Zuruecksetzen (``sha256(bucket)``) und Anlegen
+    (``vault-blob:`` + bucket) verschiedene Schluessel und liefen aneinander vorbei."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    eins, _ = konten
+    engine = create_engine(db_module.engine.url, poolclass=NullPool)
+    sitzung = sessionmaker(bind=engine)
+    zuruecksetzen, upload = sitzung(), sitzung()
+    try:
+        # Das Zuruecksetzen haelt die Sperre bis zu seinem Commit.
+        vault_service._bucket_entfernen(zuruecksetzen, BUCKET[eins.id])
+        upload.execute(text("SET LOCAL lock_timeout = '300ms'"))
+        with pytest.raises(OperationalError):
+            vault_blob_service.anlegen(upload, upload.get(User, eins.id), BUCKET[eins.id], _neue_id(), 1, 100, "0" * 64)
+    finally:
+        upload.rollback()
+        zuruecksetzen.rollback()
+        upload.close()
+        zuruecksetzen.close()
+        engine.dispose()
+
+
+def test_chunk_nach_fertig_ueberschreibt_nichts(als, konten, db, blob_dir):
+    """Der Body eines Chunks kam an, nachdem der Blob fertig war. Bis 02.10.2026
+    galt nur die Pruefung vor dem Body, und der Chunk eines fertigen Blobs wurde
+    ueberschrieben."""
+    eins, _ = konten
+    client = als(eins)
+    blob_id, _, _ = _anlegen(client, 100)
+    assert _hochladen(client, blob_id, 0, b"a" * 100).status_code == 204
+
+    def body():
+        yield b"b" * 50
+        vault_blob_service.fertigstellen(db, BUCKET[eins.id], blob_id)
+        yield b"b" * 50
+
+    antwort = client.put(
+        f"/api/vault/blobs/{blob_id}/chunks/0", content=body(), headers={"Content-Type": "application/octet-stream"}
+    )
+    assert antwort.status_code == 409
+    assert (blob_dir / blob_id[:2] / blob_id / "0").read_bytes() == b"a" * 100
+    assert client.get(f"/api/vault/blobs/{blob_id}/chunks/0").content == b"a" * 100
+
+
+def test_zu_viele_chunks_zugleich_503(als, konten, monkeypatch):
+    """Jeder Chunk liegt bis zum Schreiben im Speicher. Bis 02.10.2026 gab es
+    keine Grenze, wie viele das zugleich sein durften."""
+    from routers import vault as vault_router
+
+    client = als(konten[0])
+    blob_id, _, _ = _anlegen(client, 100)
+    monkeypatch.setattr(vault_router, "_chunks_laufend", getattr(vault_router, "CHUNKS_ZUGLEICH", 16), raising=False)
+    antwort = _hochladen(client, blob_id, 0, b"a" * 100)
+    assert antwort.status_code == 503
+    assert antwort.headers.get("retry-after")
+    assert client.get(f"/api/vault/blobs/{blob_id}/status").json()["vorhanden"] == []
+
+    monkeypatch.setattr(vault_router, "_chunks_laufend", 0, raising=False)
+    assert _hochladen(client, blob_id, 0, b"a" * 100).status_code == 204
+    # Der Zaehler steht danach wieder, wo er war.
+    assert vault_router._chunks_laufend == 0
+
+
+def test_status_liest_das_verzeichnis_einmal(blob_dir, monkeypatch):
+    """Ein Blob von 1 TiB hat rund 262.000 Chunks. Bis 02.10.2026 kostete jeder
+    Status und jedes Fertigstellen ein ``stat`` je Index, auch fuer fehlende."""
+    blob = VaultBlob(id=_neue_id(), bucket_id=BUCKET[1], chunk_count=50_000, bytes_total=50_000 * CHUNK_CHIFFRAT, state="offen")
+    vault_blob_service.chunk_schreiben(blob.id, 3, b"x" * CHUNK_CHIFFRAT)
+    vault_blob_service.chunk_schreiben(blob.id, 7, b"x" * 10)  # zu kurz: zaehlt nicht
+
+    aufrufe = {"stat": 0}
+    echt = os.stat
+
+    def gezaehlt(*args, **kwargs):
+        aufrufe["stat"] += 1
+        return echt(*args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", gezaehlt)
+    assert vault_blob_service.vorhandene_chunks(blob) == [3]
+    assert aufrufe["stat"] < 10

@@ -6261,9 +6261,6 @@
         "sucheLeer": "No folder or file name contains “{{suche}}”. Trash and archive aren't searched here.",
         "ordnerFehler": "The folder couldn't be created.",
         "umbenennenFehler": "The name couldn't be changed.",
-        "archivierenFehler": "Archiving didn't work.",
-        "papierkorbFehler": "This couldn't be moved to the trash.",
-        "rueckgaengigFehler": "This couldn't be brought back.",
         "ohneNetzTitel": "Not available without a connection",
         "ohneNetzHinweis": "This file isn't stored on this device. Use “Make available offline” in the file's menu to open it without a connection.",
         "erneutLaden": "Reload",
@@ -6343,7 +6340,6 @@
         "auswaehlenName": "Select {{name}}",
         "ausgewaehlt_one": "{{count}} selected",
         "ausgewaehlt_other": "{{count}} selected",
-        "alleAuswaehlen": "All",
         "auswahlBeenden": "Clear selection",
         "eintraege_one": "{{count}} item",
         "eintraege_other": "{{count}} items",
@@ -6384,10 +6380,11 @@
         "uploadStand_platteVoll_other": "{{count}} files waiting: the server has no free space left. Let the operator know; uploading continues once there is space.",
         "uploadStand_zuVieleDateien_one": "{{count}} file waiting: your vault has reached the maximum number of files. Delete files you no longer need.",
         "uploadStand_zuVieleDateien_other": "{{count}} files waiting: your vault has reached the maximum number of files. Delete files you no longer need.",
-        "gespeichertUnverschluesselt": "Saved. This copy is stored unencrypted on the device."
+        "gespeichertUnverschluesselt": "Saved. This copy is stored unencrypted on the device.",
+        "verschiebenFehler_one": "One item could not be moved.",
+        "verschiebenFehler_other": "{{count}} items could not be moved."
       },
       "fotos": {
-        "alle": "All",
         "videos": "Videos",
         "kuerzlich": "Recently added",
         "filter": "Filter photos",
@@ -6416,9 +6413,6 @@
         "keineAlben": "No albums yet.",
         "albumLoeschen": "Move album to trash (photos stay)",
         "albumImPapierkorb": "The album is in the trash. Its photos stay where they are.",
-        "auswaehlen": "Select",
-        "ausgewaehlt_one": "{{count}} selected",
-        "ausgewaehlt_other": "{{count}} selected",
         "zuAlbum": "Add to album",
         "ausAlbum": "Remove from album",
         "hinzugefuegt": "Added to “{{name}}”",
@@ -6438,13 +6432,10 @@
         "aehnlicheSuche": "Comparing photos on this device",
         "keineAehnlichen": "No similar photos found.",
         "zipName": "Photos",
-        "archiviertMehrere_one": "{{count}} item moved to the archive.",
-        "archiviertMehrere_other": "{{count}} items moved to the archive.",
         "video": "Video",
         "videoMitDauer": "Video, {{dauer}}",
         "ladeFehler": "The photo could not be loaded.",
-        "erneutLaden": "Load again",
-        "offlineNichtDa": "Not available without a connection. To open a photo offline, select it under “Files” and choose “{{aktion}}”.",
+        "offlineNichtDa": "To open a photo offline, select it under “Files” and choose “{{aktion}}”.",
         "kurz": {
           "album": "Album",
           "ausAlbum": "Take out"
@@ -6476,7 +6467,12 @@
         "zuruecksetzen": "Reset"
       },
       "leckPruefung": "Check passwords against known breaches",
-      "leckPruefungHinweis": "From 6 characters on, the first 5 characters of the SHA-1 hash go to Have I Been Pwned. The password itself never leaves the device."
+      "leckPruefungHinweis": "From 6 characters on, the first 5 characters of the SHA-1 hash go to Have I Been Pwned. The password itself never leaves the device.",
+      "ablageVoll": "This device has no free space left. Anything you save offline is gone after a restart; stay online until the sync is done.",
+      "ablageFehler": "The vault could not save on this device. Anything you save offline is gone after a restart; stay online until the sync is done.",
+      "eintragZuGross": "This entry is too long to save. Split it up or store the text as a file.",
+      "hinweisGesendet": "Your password hint is on its way to your email address.",
+      "hinweisAnfordernFehler": "The hint could not be sent."
     },
     "aktion": {
       "freigabeErforderlich": "Confirmation required",

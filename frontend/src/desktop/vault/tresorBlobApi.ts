@@ -5,6 +5,7 @@
  */
 
 import { api, apiStream, SanitizedApiError } from '@/api/client'
+import i18n from '@/i18n'
 
 let bucketMelder: (() => Promise<void>) | null = null
 let laufendesMelden: Promise<void> | null = null
@@ -22,8 +23,7 @@ export function bucketMelderSetzen(melder: (() => Promise<void>) | null): void {
 
 /**
  * Ob der offene Tresor auf einem anderen Gerät zurückgesetzt wurde. Dann geht
- * keine Datei-Anfrage mehr hinaus: die Routen kennen nur den Bucket des
- * Kontos, und das wäre schon der eines neuen Tresors.
+ * keine Datei-Anfrage mehr hinaus.
  */
 export function zurueckgesetztFrage(frage: () => boolean): void {
   zurueckgesetzt = frage
@@ -31,7 +31,7 @@ export function zurueckgesetztFrage(frage: () => boolean): void {
 
 /** Meldet auf `VAULT_BUCKET_UNBEKANNT` den Bucket einmal neu und wiederholt. */
 async function mitBucket<T>(anfrage: () => Promise<T>): Promise<T> {
-  if (zurueckgesetzt()) throw new SanitizedApiError('VAULT_ZURUECKGESETZT', { status: 410, code: 'VAULT_ZURUECKGESETZT' })
+  if (zurueckgesetzt()) throw new SanitizedApiError(i18n.t('errors.vault_zurueckgesetzt'), { status: 410, code: 'VAULT_ZURUECKGESETZT' })
   try {
     return await anfrage()
   } catch (err) {
@@ -59,35 +59,52 @@ export interface BlobStand {
   vorhanden: number[]
 }
 
+/**
+ * Schreibende Anfragen nennen den Bucket, zu dem die Datei gehört. Der Server
+ * nimmt sie nur an, wenn das noch der Bucket des Kontos ist, sonst 410: nach
+ * einem Zurücksetzen auf einem anderen Gerät landeten Dateien des alten
+ * Tresors sonst im neuen (bis 02.10.2026).
+ */
+function mitBucketKopf(bucket: string, kopf: Record<string, string> = {}): Record<string, string> {
+  return { ...kopf, 'X-MSM-Vault-Bucket': bucket }
+}
+
 export function speicherAbfragen(): Promise<TresorSpeicher> {
   return api<TresorSpeicher>('/api/vault/speicher')
 }
 
-export async function blobReservieren(id: string, chunkAnzahl: number, bytes: number, loeschPruefwert: string): Promise<void> {
+export async function blobReservieren(
+  bucket: string,
+  id: string,
+  chunkAnzahl: number,
+  bytes: number,
+  loeschPruefwert: string,
+): Promise<void> {
   await mitBucket(() =>
     api('/api/vault/blobs', {
       method: 'POST',
+      headers: mitBucketKopf(bucket),
       body: JSON.stringify({ id, chunk_count: chunkAnzahl, bytes_total: bytes, delete_verifier: loeschPruefwert }),
     }),
   )
 }
 
-export function blobStand(id: string): Promise<BlobStand> {
-  return mitBucket(() => api<BlobStand>(`/api/vault/blobs/${id}/status`))
+export function blobStand(bucket: string, id: string): Promise<BlobStand> {
+  return mitBucket(() => api<BlobStand>(`/api/vault/blobs/${id}/status`, { headers: mitBucketKopf(bucket) }))
 }
 
-export async function chunkHochladen(id: string, index: number, chiffrat: Uint8Array): Promise<void> {
+export async function chunkHochladen(bucket: string, id: string, index: number, chiffrat: Uint8Array): Promise<void> {
   await mitBucket(() =>
     apiStream(`/api/vault/blobs/${id}/chunks/${index}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/octet-stream', Accept: '*/*' },
+      headers: mitBucketKopf(bucket, { 'Content-Type': 'application/octet-stream', Accept: '*/*' }),
       body: chiffrat as BodyInit,
     }),
   )
 }
 
-export async function blobFertig(id: string): Promise<void> {
-  await mitBucket(() => api(`/api/vault/blobs/${id}/fertig`, { method: 'POST' }))
+export async function blobFertig(bucket: string, id: string): Promise<void> {
+  await mitBucket(() => api(`/api/vault/blobs/${id}/fertig`, { method: 'POST', headers: mitBucketKopf(bucket) }))
 }
 
 export async function chunkLaden(id: string, index: number, signal?: AbortSignal): Promise<Uint8Array> {
@@ -128,8 +145,12 @@ export async function kleineLaden(ids: string[]): Promise<Map<string, Uint8Array
   return ergebnis
 }
 
-export async function blobLoeschen(id: string, loeschen: string): Promise<void> {
+export async function blobLoeschen(bucket: string, id: string, loeschen: string): Promise<void> {
   await mitBucket(() =>
-    api(`/api/vault/blobs/${id}`, { method: 'DELETE', body: JSON.stringify({ schluessel: loeschen }) }),
+    api(`/api/vault/blobs/${id}`, {
+      method: 'DELETE',
+      headers: mitBucketKopf(bucket),
+      body: JSON.stringify({ schluessel: loeschen }),
+    }),
   )
 }

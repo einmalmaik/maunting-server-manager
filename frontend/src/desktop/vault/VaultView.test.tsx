@@ -386,7 +386,7 @@ describe('VaultView: Fotos', () => {
     expect(kachel('wellen.mp4')).not.toBeNull()
     expect(kachel('strand.jpg')).toBeNull()
 
-    fireEvent.click(reiter('mss.vault.fotos.alle'))
+    fireEvent.click(reiter('mss.vault.alle'))
     fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.fotos.quelle.titel') }))
     fireEvent.click(screen.getByRole('option', { name: /Screenshots/ }))
     expect(kachel('Screenshot_20260712.png')).not.toBeNull()
@@ -444,12 +444,12 @@ describe('VaultView: Fotos', () => {
   it('wählt aus und legt daraus ein neues Album an', async () => {
     render(<VaultView />)
     fireEvent.click(reiter('mss.vault.ansicht.fotos'))
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.auswaehlen')) }))
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.dateien.auswaehlen')) }))
     fireEvent.click(kachel('strand.jpg')!)
     fireEvent.click(kachel('wellen.mp4')!)
     expect(kachel('strand.jpg')).toHaveAttribute('aria-pressed', 'true')
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.getByText(i18n.t('mss.vault.fotos.ausgewaehlt', { count: 2 }))).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('mss.vault.dateien.ausgewaehlt', { count: 2 }))).toBeInTheDocument()
 
     fireEvent.click(within(screen.getAllByRole('toolbar', { name: /ausgewählt/ })[0]).getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.zuAlbum')) }))
     fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(i18n.t('mss.vault.fotos.neuesAlbum')) }))
@@ -462,7 +462,7 @@ describe('VaultView: Fotos', () => {
     await vi.waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
     render(<VaultView />)
     fireEvent.click(reiter('mss.vault.ansicht.fotos'))
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.auswaehlen')) }))
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.dateien.auswaehlen')) }))
     fireEvent.click(kachel('strand.jpg')!)
     expect(kachel('strand.jpg')).toHaveAttribute('aria-pressed', 'true')
     await vi.waitFor(() => expect(window.history.state?.msmTiefe).toBe(1))
@@ -481,7 +481,7 @@ describe('VaultView: Fotos', () => {
     expect(kachel('geloescht.jpg')).toBeNull()
     expect(kachel('wellen.mp4')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.auswaehlen')) }))
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('mss.vault.dateien.auswaehlen')) }))
     fireEvent.click(kachel('strand.jpg')!)
     fireEvent.click(within(screen.getAllByRole('toolbar', { name: /ausgewählt/ })[0]).getByRole('button', { name: new RegExp(i18n.t('mss.vault.fotos.ausAlbum')) }))
     await vi.waitFor(() => expect(albumAendern).toHaveBeenCalledWith('al', { weg: ['1'] }))

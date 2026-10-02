@@ -14,6 +14,7 @@ import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle 
 import { toast } from '@/stores/toastStore'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import { blobLesen } from './tresorDateien'
+import { fehlerText } from './tresorFehler'
 
 /** Formate, die der Browser auch schreiben kann. */
 export const BEARBEITBAR = ['image/jpeg', 'image/png', 'image/webp']
@@ -132,7 +133,7 @@ export function TresorBildeditor({ item, vorschauUrl, onFertig }: { item: VaultI
       toast.success(t('mss.vault.bearbeiten.gespeichert'))
       onFertig()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('mss.vault.bearbeiten.fehler'))
+      toast.error(fehlerText(err, t('mss.vault.bearbeiten.fehler')))
       setSpeichert(false)
     }
   }

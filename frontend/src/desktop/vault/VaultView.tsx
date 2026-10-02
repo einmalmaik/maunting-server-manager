@@ -61,6 +61,7 @@ import {
   type VaultItem,
 } from './vaultStore'
 import { DisBadge } from '@/components/DisBadge'
+import { fehlerText } from './tresorFehler'
 
 type Ansicht = 'tresor' | 'fotos' | 'dateien' | 'archiv' | 'papierkorb'
 
@@ -350,7 +351,7 @@ export function VaultView() {
       setIsModalOpen(false)
       toast.success(t('mss.vault.gespeichert'))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('mss.vault.speichernFehlgeschlagen'))
+      toast.error(fehlerText(err, t('mss.vault.speichernFehlgeschlagen')))
     }
   }
 
@@ -366,7 +367,7 @@ export function VaultView() {
         ausfuehren: () => void handleRestoreItem(item),
       })
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('mss.vault.loeschenFehlgeschlagen'))
+      toast.error(fehlerText(err, t('mss.vault.loeschenFehlgeschlagen')))
     }
   }
 
@@ -381,7 +382,7 @@ export function VaultView() {
         ausfuehren: () => void handleArchiv(item, !archiviert),
       })
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('mss.vault.speichernFehlgeschlagen'))
+      toast.error(fehlerText(err, t('mss.vault.speichernFehlgeschlagen')))
     }
   }
 
@@ -390,7 +391,7 @@ export function VaultView() {
       await restoreItem(item.id)
       toast.success(t('mss.vault.wiederhergestellt'))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('mss.vault.speichernFehlgeschlagen'))
+      toast.error(fehlerText(err, t('mss.vault.speichernFehlgeschlagen')))
     }
   }
 
@@ -412,7 +413,7 @@ export function VaultView() {
       await deleteItem(item.id)
       toast.success(t('mss.vault.geloescht'))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('mss.vault.loeschenFehlgeschlagen'))
+      toast.error(fehlerText(err, t('mss.vault.loeschenFehlgeschlagen')))
     }
   }
 
@@ -429,7 +430,7 @@ export function VaultView() {
       await emptyTrash()
       toast.success(t('mss.vault.papierkorbGeleert'))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('mss.vault.loeschenFehlgeschlagen'))
+      toast.error(fehlerText(err, t('mss.vault.loeschenFehlgeschlagen')))
     }
   }
 
@@ -453,7 +454,7 @@ export function VaultView() {
       const res = await requestHintEmail()
       if (res.ok) {
         toast.success(res.message)
-      } else {
+      } else if (res.message) {
         toast.error(res.message)
       }
     } finally {

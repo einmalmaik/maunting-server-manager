@@ -6261,9 +6261,6 @@
         "sucheLeer": "Kein Ordner- oder Dateiname enthält „{{suche}}“. Papierkorb und Archiv werden hier nicht durchsucht.",
         "ordnerFehler": "Der Ordner ließ sich nicht anlegen.",
         "umbenennenFehler": "Der Name ließ sich nicht ändern.",
-        "archivierenFehler": "Archivieren hat nicht geklappt.",
-        "papierkorbFehler": "Das ließ sich nicht in den Papierkorb legen.",
-        "rueckgaengigFehler": "Das ließ sich nicht zurückholen.",
         "ohneNetzTitel": "Ohne Verbindung nicht verfügbar",
         "ohneNetzHinweis": "Diese Datei liegt nicht auf diesem Gerät. Mit „Offline verfügbar machen“ im Menü der Datei öffnet sie sich auch ohne Netz.",
         "erneutLaden": "Erneut laden",
@@ -6343,7 +6340,6 @@
         "auswaehlenName": "{{name}} auswählen",
         "ausgewaehlt_one": "{{count}} ausgewählt",
         "ausgewaehlt_other": "{{count}} ausgewählt",
-        "alleAuswaehlen": "Alle",
         "auswahlBeenden": "Auswahl aufheben",
         "eintraege_one": "{{count}} Eintrag",
         "eintraege_other": "{{count}} Einträge",
@@ -6384,10 +6380,11 @@
         "uploadStand_platteVoll_other": "{{count}} Dateien warten: Auf dem Server ist kein Platz mehr frei. Sag dem Betreiber Bescheid; sobald Platz da ist, geht es weiter.",
         "uploadStand_zuVieleDateien_one": "{{count}} Datei wartet: Dein Tresor hat die Höchstzahl an Dateien erreicht. Lösche Dateien, die du nicht mehr brauchst.",
         "uploadStand_zuVieleDateien_other": "{{count}} Dateien warten: Dein Tresor hat die Höchstzahl an Dateien erreicht. Lösche Dateien, die du nicht mehr brauchst.",
-        "gespeichertUnverschluesselt": "Gespeichert. Diese Kopie liegt unverschlüsselt auf dem Gerät."
+        "gespeichertUnverschluesselt": "Gespeichert. Diese Kopie liegt unverschlüsselt auf dem Gerät.",
+        "verschiebenFehler_one": "Ein Eintrag ließ sich nicht verschieben.",
+        "verschiebenFehler_other": "{{count}} Einträge ließen sich nicht verschieben."
       },
       "fotos": {
-        "alle": "Alle",
         "videos": "Videos",
         "kuerzlich": "Zuletzt hinzugefügt",
         "filter": "Fotos filtern",
@@ -6416,9 +6413,6 @@
         "keineAlben": "Noch keine Alben.",
         "albumLoeschen": "Album in den Papierkorb (Fotos bleiben)",
         "albumImPapierkorb": "Das Album liegt im Papierkorb. Die Fotos darin bleiben, wo sie sind.",
-        "auswaehlen": "Auswählen",
-        "ausgewaehlt_one": "{{count}} ausgewählt",
-        "ausgewaehlt_other": "{{count}} ausgewählt",
         "zuAlbum": "Zu Album hinzufügen",
         "ausAlbum": "Aus Album entfernen",
         "hinzugefuegt": "Zu „{{name}}“ hinzugefügt",
@@ -6438,13 +6432,10 @@
         "aehnlicheSuche": "Fotos werden auf diesem Gerät verglichen",
         "keineAehnlichen": "Keine ähnlichen Fotos gefunden.",
         "zipName": "Fotos",
-        "archiviertMehrere_one": "{{count}} Eintrag ins Archiv gelegt.",
-        "archiviertMehrere_other": "{{count}} Einträge ins Archiv gelegt.",
         "video": "Video",
         "videoMitDauer": "Video, {{dauer}}",
         "ladeFehler": "Das Foto ließ sich nicht laden.",
-        "erneutLaden": "Erneut laden",
-        "offlineNichtDa": "Ohne Verbindung nicht verfügbar. Damit ein Foto auch ohne Netz aufgeht, wähle es unter „Dateien“ und dann „{{aktion}}“.",
+        "offlineNichtDa": "Damit ein Foto auch ohne Netz aufgeht, wähle es unter „Dateien“ und dann „{{aktion}}“.",
         "kurz": {
           "album": "Album",
           "ausAlbum": "Herausnehmen"
@@ -6476,7 +6467,12 @@
         "zuruecksetzen": "Zurücksetzen"
       },
       "leckPruefung": "Passwörter gegen bekannte Lecks prüfen",
-      "leckPruefungHinweis": "Ab 6 Zeichen gehen die ersten 5 Zeichen des SHA-1-Prüfwerts an Have I Been Pwned. Das Passwort selbst verlässt das Gerät nicht."
+      "leckPruefungHinweis": "Ab 6 Zeichen gehen die ersten 5 Zeichen des SHA-1-Prüfwerts an Have I Been Pwned. Das Passwort selbst verlässt das Gerät nicht.",
+      "ablageVoll": "Auf diesem Gerät ist kein Platz mehr frei. Was du offline speicherst, ist nach einem Neustart weg; bleib online, bis der Abgleich durch ist.",
+      "ablageFehler": "Der Tresor konnte auf diesem Gerät nicht speichern. Was du offline speicherst, ist nach einem Neustart weg; bleib online, bis der Abgleich durch ist.",
+      "eintragZuGross": "Der Eintrag ist zu lang zum Speichern. Teile ihn auf oder leg den Text als Datei ab.",
+      "hinweisGesendet": "Der Passwort-Hinweis ist an deine E-Mail-Adresse unterwegs.",
+      "hinweisAnfordernFehler": "Der Hinweis konnte nicht verschickt werden."
     },
     "aktion": {
       "freigabeErforderlich": "Bestätigung erforderlich",
