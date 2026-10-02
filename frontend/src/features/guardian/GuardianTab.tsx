@@ -16,7 +16,7 @@ import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
 import { useHasPermission } from "@/hooks/useHasPermission";
 import { getGuardianDisplayState } from "./GuardianBadge";
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 
 /**
  * Was fuer diesen Server abweichend von der Blueprint gilt.
@@ -212,6 +212,20 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
     }
   };
 
+  // Ohne Schreibrecht sagt der gesperrte Knopf, warum er gesperrt ist.
+  const zuruecksetzenGesperrt = canWriteConfig ? null : t("servers.guardian.override.resetDenied");
+  const zuruecksetzenKnopf = (
+    <Button variant="secondary" size="sm"
+      type="button"
+      onClick={() => void handleResetOverrides()}
+      disabled={!canWriteConfig || resettingOverrides}
+      className="shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+      aria-description={zuruecksetzenGesperrt ?? undefined}
+    >
+      {t("servers.guardian.override.reset")}
+    </Button>
+  );
+
   return (
     <div className="space-y-6">
       {/* Overview Card */}
@@ -281,17 +295,11 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
                   : t("servers.guardian.override.originHuman")}
               </p>
             </div>
-            <Button variant="secondary" size="sm"
-              type="button"
-              onClick={() => void handleResetOverrides()}
-              disabled={!canWriteConfig || resettingOverrides}
-              className="shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-              title={
-                canWriteConfig ? undefined : t("servers.guardian.override.resetDenied")
-              }
-            >
-              {t("servers.guardian.override.reset")}
-            </Button>
+            {zuruecksetzenGesperrt ? (
+              <Kurzinfo text={zuruecksetzenGesperrt} seite="ende" aussen="shrink-0">
+                {zuruecksetzenKnopf}
+              </Kurzinfo>
+            ) : zuruecksetzenKnopf}
           </div>
           <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {Object.entries(overrides.overrides).map(([name, wert]) => (

@@ -632,6 +632,11 @@ describe("Guardian UI Components", () => {
       zeichnen();
       const knopf = await screen.findByRole("button", { name: satz("reset") });
       expect(knopf).toBeDisabled();
+      // Warum gesperrt, sagt die Kurzinfo samt aria-description, nicht ein natives title.
+      expect(knopf).toHaveAttribute("aria-description", satz("resetDenied"));
+      expect(knopf.closest('[class*="group/kurzinfo"]')?.querySelector("[data-kurzinfo]"))
+        .toHaveAttribute("data-kurzinfo", satz("resetDenied"));
+      expect(knopf).not.toHaveAttribute("title");
     });
 
     it("setzt mit dem Recht wirklich zurueck", async () => {

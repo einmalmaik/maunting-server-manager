@@ -3,7 +3,7 @@ import { Pencil } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { useBenutzernameSpeichern } from '@/components/BenutzernameFeld'
-import { Button, Input } from '@/Singra/UI'
+import { Button, Input, Kurzinfo } from '@/Singra/UI'
 import { benutzernameFehler } from '@/lib/benutzername'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -43,17 +43,18 @@ export function BenutzernameInline({ className = '' }: Props) {
     return (
       <div className="flex min-w-0 items-center gap-1.5">
         <span className={`truncate ${className}`}>{username}</span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 shrink-0"
-          onClick={oeffnen}
-          aria-label={t('benutzername.aendern')}
-          title={t('benutzername.aendern')}
-        >
-          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-        </Button>
+        <Kurzinfo text={t('benutzername.aendern')} aussen="shrink-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={oeffnen}
+            aria-label={t('benutzername.aendern')}
+          >
+            <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+          </Button>
+        </Kurzinfo>
       </div>
     )
   }

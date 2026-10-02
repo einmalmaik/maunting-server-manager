@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
+
 import { MemoryRouter } from 'react-router-dom'
 import { Messenger } from './Messenger'
 import { leereKlartextSpeicher } from '@/services/klartextSpeicher'
@@ -16,6 +17,13 @@ import { eigenesGeraet, signaturSchluesselVon } from '@/services/e2eeGeraet'
 import { decryptE2eeHybridWithKeyring } from '@/services/e2eeCrypto'
 import { verfallStand } from '@/services/nachrichtVerfall'
 import { verschluesseleFuerGruppe } from '@/services/gruppenSchluessel'
+
+/** Ein Knopf, dessen Hinweis (früher `title`) als Kurzinfo und `aria-description` dasteht. */
+function mitHinweis(hinweis: string): HTMLElement {
+  const knopf = document.querySelector<HTMLElement>(`[aria-description="${hinweis}"]`)
+  if (!knopf) throw new Error(`Kein Element mit dem Hinweis „${hinweis}“`)
+  return knopf
+}
 
 /**
  * Seit 09/2026 stehen die Aktionen eines Chats im Blattmenue, nicht mehr als
@@ -599,7 +607,7 @@ describe('Messenger (Allround Chat)', () => {
     const input = screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))
     fireEvent.change(input, { target: { value: 'Hallo Teammate!' } })
 
-    const sendBtn = screen.getByTitle('Senden')
+    const sendBtn = screen.getByLabelText(i18n.t('messenger.send'))
     fireEvent.click(sendBtn)
 
     await waitFor(() => {
@@ -783,11 +791,15 @@ describe('Messenger (Allround Chat)', () => {
     fireEvent.change(input, { target: { value: 'Hey!' } })
 
     expect(screen.queryByLabelText('Sprachnachricht aufnehmen')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Senden/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: i18n.t('messenger.send') })).toBeInTheDocument()
 
     // Clearing input restores Mic button
     fireEvent.change(input, { target: { value: '' } })
     expect(screen.getByLabelText('Sprachnachricht aufnehmen')).toBeInTheDocument()
+
+    // Kopfzeile, Eingabe und Verlauf zeigen ihre Namen als Kurzinfo, nie als
+    // natives title (AGENTS.md Punkt 4).
+    expect(Array.from(document.querySelectorAll('[title]'), (el) => el.outerHTML.slice(0, 120))).toEqual([])
   })
 
   it('öffnet den Sticker- und Emoji-Wähler im Chat', async () => {
@@ -1016,7 +1028,7 @@ describe('Messenger (Allround Chat)', () => {
     })
 
     // Filter by public tab
-    const publicTab = screen.getByTitle(/Öffentlich/i)
+    const publicTab = screen.getByLabelText(/Öffentlich/i)
     fireEvent.click(publicTab)
 
     expect(screen.getByRole('button', { name: /bob_public/i })).toBeInTheDocument()
@@ -1085,7 +1097,7 @@ describe('Messenger (Allround Chat)', () => {
       expect(screen.getByText('Meine ursprüngliche Nachricht')).toBeInTheDocument()
       expect(screen.getByText('Hallo von Alice!')).toBeInTheDocument()
       // Initial status before acknowledgement is "Nicht zugestellt", "Gesendet" or "Zugestellt"
-      expect(screen.getByTitle(/Gesendet|Zugestellt/i)).toBeInTheDocument()
+      expect(screen.getByLabelText(/Gesendet|Zugestellt/i)).toBeInTheDocument()
     })
 
     // 2. Simulate incoming read receipt envelope from Alice for message 10
@@ -1142,7 +1154,7 @@ describe('Messenger (Allround Chat)', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByTitle(i18n.t('messenger.stateRead'))).toBeInTheDocument()
+      expect(screen.getByLabelText(i18n.t('messenger.stateRead'))).toBeInTheDocument()
     })
 
     // 3. Test Editing Message
@@ -1154,7 +1166,7 @@ describe('Messenger (Allround Chat)', () => {
     const input = screen.getByPlaceholderText('Nachricht bearbeiten …')
     fireEvent.change(input, { target: { value: 'Meine korrigierte Nachricht' } })
 
-    const sendBtn = screen.getByTitle('Senden')
+    const sendBtn = screen.getByLabelText(i18n.t('messenger.send'))
     fireEvent.click(sendBtn)
 
     await waitFor(() => {
@@ -1263,7 +1275,7 @@ describe('Messenger (Allround Chat)', () => {
     expect(screen.getByText('1x')).toBeInTheDocument()
 
     // 2. Note Import (Double-click prevention)
-    const importNoteBtn = screen.getByTitle('In eigene Notizen übernehmen')
+    const importNoteBtn = mitHinweis('In eigene Notizen übernehmen')
     fireEvent.click(importNoteBtn)
 
     await waitFor(() => {
@@ -1272,13 +1284,13 @@ describe('Messenger (Allround Chat)', () => {
     })
 
     // Clicking again should not trigger saveNoteOffline again
-    const importedNoteBtn = screen.getByTitle('Bereits in eigene Notizen übernommen')
+    const importedNoteBtn = mitHinweis('Bereits in eigene Notizen übernommen')
     expect(importedNoteBtn).toBeDisabled()
     fireEvent.click(importedNoteBtn)
     expect(saveNoteOffline).toHaveBeenCalledTimes(1)
 
     // 3. Calendar Import (Double-click prevention)
-    const importCalBtn = screen.getByTitle('In eigenen Kalender eintragen')
+    const importCalBtn = mitHinweis('In eigenen Kalender eintragen')
     fireEvent.click(importCalBtn)
 
     await waitFor(() => {
@@ -1286,7 +1298,7 @@ describe('Messenger (Allround Chat)', () => {
       expect(screen.getByText('Eingetragen')).toBeInTheDocument()
     })
 
-    const importedCalBtn = screen.getByTitle('Bereits in eigenen Kalender eingetragen')
+    const importedCalBtn = mitHinweis('Bereits in eigenen Kalender eingetragen')
     expect(importedCalBtn).toBeDisabled()
     fireEvent.click(importedCalBtn)
     expect(saveCalendarEventOffline).toHaveBeenCalledTimes(1)
@@ -1431,11 +1443,11 @@ describe('Messenger (Allround Chat)', () => {
     fireEvent.change(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder')), {
       target: { value: 'Geht nicht raus' },
     })
-    fireEvent.click(screen.getByTitle('Senden'))
+    fireEvent.click(screen.getByLabelText(i18n.t('messenger.send')))
 
     // Sitzungsaufbau und Nachricht liegen als zwei Aufträge in der Schlange.
     await waitFor(() => {
-      expect(screen.getByTitle(/Warteschlange/)).toBeInTheDocument()
+      expect(screen.getByLabelText(/Warteschlange/)).toBeInTheDocument()
       expect(warteschlange).toHaveLength(2)
     })
     const basisUuid = warteschlange[1].payload.client_uuid.split('#')[0]
@@ -1795,7 +1807,7 @@ describe('Messenger (Allround Chat)', () => {
       )
     })
 
-    const sendBtn = screen.getByTitle('Senden')
+    const sendBtn = screen.getByLabelText(i18n.t('messenger.send'))
     fireEvent.click(sendBtn)
 
     // Der Ratchet baut je Zielgeraet einen Umschlag. Der Empfaenger steht
@@ -1836,7 +1848,7 @@ describe('Messenger (Allround Chat)', () => {
     fireEvent.change(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder')), {
       target: { value: 'Von einem entfernten Gerät' },
     })
-    fireEvent.click(screen.getByTitle('Senden'))
+    fireEvent.click(screen.getByLabelText(i18n.t('messenger.send')))
 
     await waitFor(() => {
       expect(useToastStore.getState().toasts.map((t) => t.message)).toContain(
@@ -2118,7 +2130,7 @@ describe('Messenger (Allround Chat)', () => {
     const input = screen.getByPlaceholderText(/Nachricht schreiben/i)
     fireEvent.change(input, { target: { value: 'Offline gesendete Nachricht' } })
 
-    const sendBtn = screen.getByRole('button', { name: 'Senden' })
+    const sendBtn = screen.getByRole('button', { name: i18n.t('messenger.send') })
     fireEvent.click(sendBtn)
 
     await waitFor(() => {
@@ -2182,7 +2194,7 @@ describe('Messenger (Allround Chat)', () => {
     fireEvent.change(screen.getByPlaceholderText(/Nachricht schreiben/i), {
       target: { value: 'Geht trotzdem raus' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('messenger.send') }))
 
     await waitFor(() => {
       expect(socialApi.relayE2eeEnvelope).toHaveBeenCalled()
@@ -2243,7 +2255,7 @@ describe('Messenger (Allround Chat)', () => {
     // 1. Initialer Zustand: 1 grauer Strich (noch nicht beim Empfänger angekommen)
     await waitFor(() => {
       expect(screen.getByText('Hallo Alice, ist das angekommen?')).toBeInTheDocument()
-      expect(screen.getByTitle('Noch nicht zugestellt')).toBeInTheDocument()
+      expect(screen.getByLabelText('Noch nicht zugestellt')).toBeInTheDocument()
     })
 
     // 2. Zwischensprung: Bob empfängt Nachricht (Zustellbestätigung -> 2 graue Striche)
@@ -2274,7 +2286,7 @@ describe('Messenger (Allround Chat)', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByTitle('Zugestellt')).toBeInTheDocument()
+      expect(screen.getByLabelText('Zugestellt')).toBeInTheDocument()
     })
 
     // 3. Gelesen: Bob öffnet den Chat (Lesebestätigung -> 2 blaue Striche)
@@ -2311,7 +2323,7 @@ describe('Messenger (Allround Chat)', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByTitle(i18n.t('messenger.stateRead'))).toBeInTheDocument()
+      expect(screen.getByLabelText(i18n.t('messenger.stateRead'))).toBeInTheDocument()
     })
   })
 
@@ -2331,7 +2343,7 @@ describe('Messenger (Allround Chat)', () => {
     const input = await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
     fireEvent.change(input, { target: { value: 'Sofortige optimistische Nachricht' } })
 
-    const sendButton = screen.getByTitle('Senden')
+    const sendButton = screen.getByLabelText(i18n.t('messenger.send'))
     fireEvent.click(sendButton)
 
     // Input must be cleared synchronously / immediately
@@ -2354,7 +2366,7 @@ describe('Messenger (Allround Chat)', () => {
     vi.mocked(socialApi.relayE2eeEnvelope).mockResolvedValue({ success: true, id: 1001 } as any)
 
     fireEvent.change(input, { target: { value: 'Nachricht vor Wechsel' } })
-    fireEvent.click(screen.getByTitle('Senden'))
+    fireEvent.click(screen.getByLabelText(i18n.t('messenger.send')))
 
     await waitFor(() => {
       expect(screen.getByText('Nachricht vor Wechsel')).toBeInTheDocument()
@@ -2494,7 +2506,7 @@ describe('Messenger (Allround Chat)', () => {
 
     const input = await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
     fireEvent.change(input, { target: { value: 'Nachricht mit Session-Init' } })
-    fireEvent.click(screen.getByTitle('Senden'))
+    fireEvent.click(screen.getByLabelText(i18n.t('messenger.send')))
 
     await waitFor(() => {
       // Sowohl dr-init als auch die abhängige Nachricht müssen eingereiht werden

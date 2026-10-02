@@ -87,6 +87,8 @@ describe('ServerPermissionsPanel delegation wiring', () => {
     render(<ServerPermissionsPanel serverId={41} />)
 
     await screen.findByText('delegated-user')
+    // Der Entfernen-Knopf nennt sich per aria-label und Kurzinfo, nicht per nativem title.
+    expect(document.body.querySelectorAll('[title]')).toHaveLength(0)
     fireEvent.click(screen.getByRole('button', { name: 'Bearbeiten' }))
     expect(screen.getByText('Server anzeigen')).toBeInTheDocument()
 

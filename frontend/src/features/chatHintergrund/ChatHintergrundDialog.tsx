@@ -10,6 +10,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  Kurzinfo,
 } from '@/Singra/UI'
 
 import {
@@ -286,17 +287,19 @@ function DialogInhalt({
       {/* `flex-wrap`, damit die Fusszeile auf einem 375-px-Telefon umbricht,
           statt „Übernehmen" über den Rand zu schieben. */}
       <DialogFooter className="flex flex-wrap items-center justify-between gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={zuruecksetzen}
-          className="text-xs h-8 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high gap-1 px-2.5"
-          title={t('social.wallpaper.resetHint')}
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          <span>{t('common.reset')}</span>
-        </Button>
+        <Kurzinfo text={t('social.wallpaper.resetHint')} seite="anfang" lage="oben">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={zuruecksetzen}
+            className="text-xs h-8 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high gap-1 px-2.5"
+            aria-description={t('social.wallpaper.resetHint')}
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>{t('common.reset')}</span>
+          </Button>
+        </Kurzinfo>
 
         <div className="flex items-center gap-2">
           <button

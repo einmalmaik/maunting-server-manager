@@ -169,6 +169,9 @@ describe('Users access workspace', () => {
 
     expect(screen.getByRole('button', { name: /Rolle zuweisen: delegated-user/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Löschen: delegated-user/i })).toBeInTheDocument()
+    // Der Löschknopf zeigt nur ein Symbol; sein Name steht im aria-label, nicht im nativen title.
+    expect(within(directory).getByRole('button', { name: /Löschen: delegated-user/i })).not.toHaveAttribute('title')
+    expect(directory.querySelectorAll('[title]')).toHaveLength(0)
   })
 
   it('assigns multiple roles as one complete set', async () => {

@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Briefcase, Globe, LayoutGrid, UserCheck, UsersRound, type LucideIcon } from 'lucide-react'
+import { Kurzinfo } from '@/Singra/UI'
 import type { ChatContact } from '@/components/social/sidebar/ConversationListItem'
 
 export type KontaktFilter = 'all' | 'groups' | 'friends' | 'teams' | 'public'
@@ -38,33 +39,35 @@ export function ContactFilterTabs({ filter, onFilter, gruppenAnzahl, kontakte }:
 
   return (
     <div className="grid grid-cols-5 gap-0.5 sm:gap-1 p-1 rounded-xl bg-surface-container-high/50 border border-outline-variant/15 w-full">
-      {reiter.map(({ wert, Icon, titel, label, anzahl }) => {
+      {reiter.map(({ wert, Icon, titel, label, anzahl }, index) => {
         const aktiv = filter === wert
+        // Die äusseren Reiter stehen am Rand der Seitenleiste.
+        const seite = index === 0 ? 'anfang' : index === reiter.length - 1 ? 'ende' : 'mitte'
         return (
-          <button
-            key={wert}
-            type="button"
-            onClick={() => onFilter(wert)}
-            className={`h-7 rounded-lg flex items-center justify-center ${wert === 'all' ? 'gap-1' : 'gap-0.5 sm:gap-1'} transition-all text-xs font-semibold ${
-              aktiv
-                ? 'bg-primary text-on-primary shadow-sm'
-                : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
-            }`}
-            title={titel}
-            aria-label={titel}
-          >
-            <Icon className="w-3.5 h-3.5 shrink-0" />
-            {label && <span className="text-label-sm leading-none hidden xs:inline">{label}</span>}
-            {anzahl !== undefined && anzahl > 0 && (
-              <span
-                className={`text-label-sm px-1 py-0.2 rounded-full font-bold leading-none ${
-                  aktiv ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
-                }`}
-              >
-                {anzahl}
-              </span>
-            )}
-          </button>
+          <Kurzinfo key={wert} text={titel} seite={seite} aussen="w-full">
+            <button
+              type="button"
+              onClick={() => onFilter(wert)}
+              className={`w-full h-7 rounded-lg flex items-center justify-center ${wert === 'all' ? 'gap-1' : 'gap-0.5 sm:gap-1'} transition-all text-xs font-semibold ${
+                aktiv
+                  ? 'bg-primary text-on-primary shadow-sm'
+                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
+              }`}
+              aria-label={titel}
+            >
+              <Icon className="w-3.5 h-3.5 shrink-0" />
+              {label && <span className="text-label-sm leading-none hidden xs:inline">{label}</span>}
+              {anzahl !== undefined && anzahl > 0 && (
+                <span
+                  className={`text-label-sm px-1 py-0.2 rounded-full font-bold leading-none ${
+                    aktiv ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
+                  }`}
+                >
+                  {anzahl}
+                </span>
+              )}
+            </button>
+          </Kurzinfo>
         )
       })}
     </div>

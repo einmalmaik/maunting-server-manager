@@ -20,7 +20,7 @@ import {
   VideoOff,
   Volume2,
 } from 'lucide-react'
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 import { Avatar } from '@/Singra/UI/Avatar'
 import { aktiverRaum, useCallStore, type CallParticipant } from '@/stores/useCallStore'
 import { bildschirmfreigabeMoeglich } from '@/services/livekitRaum'
@@ -313,16 +313,17 @@ export const CallOverlay: React.FC = () => {
           </div>
         </div>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setGeraeteDialogOffen(true)}
-          className="shrink-0 rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
-          title={t('calls.chooseDevices')}
-          aria-label={t('calls.chooseDevices')}
-        >
-          <Settings className="h-5 w-5" />
-        </Button>
+        <Kurzinfo text={t('calls.chooseDevices')} seite="ende" aussen="shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setGeraeteDialogOffen(true)}
+            className="rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
+            aria-label={t('calls.chooseDevices')}
+          >
+            <Settings className="h-5 w-5" />
+          </Button>
+        </Kurzinfo>
       </div>
 
       {errorMessage && (
@@ -545,96 +546,105 @@ export const CallOverlay: React.FC = () => {
             </div>
           )}
           <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-2 sm:gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleMute}
-              className={steuerKnopf(isMuted, 'warnung')}
-              title={
-                serverStumm
-                  ? t('calls.mutedByModerator')
-                  : isMuted
-                    ? t('calls.micEnable')
-                    : t('calls.micMute')
-              }
-              aria-label={isMuted ? t('calls.micEnable') : t('calls.micMute')}
-              aria-pressed={isMuted}
+            <Kurzinfo
+              text={serverStumm ? t('calls.mutedByModerator') : isMuted ? t('calls.micEnable') : t('calls.micMute')}
+              lage="oben"
             >
-              {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-            </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleMute}
+                className={steuerKnopf(isMuted, 'warnung')}
+                aria-label={isMuted ? t('calls.micEnable') : t('calls.micMute')}
+                aria-description={serverStumm ? t('calls.mutedByModerator') : undefined}
+                aria-pressed={isMuted}
+              >
+                {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+              </Button>
+            </Kurzinfo>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleDeafen}
-              className={steuerKnopf(isDeafened, 'warnung')}
-              title={isDeafened ? t('calls.playbackEnable') : t('calls.playbackMuteHint')}
-              aria-label={isDeafened ? t('calls.playbackEnable') : t('calls.playbackMute')}
-              aria-pressed={isDeafened}
-            >
-              {isDeafened ? <HeadphoneOff className="h-5 w-5" /> : <Headphones className="h-5 w-5" />}
-            </Button>
+            <Kurzinfo text={isDeafened ? t('calls.playbackEnable') : t('calls.playbackMuteHint')} lage="oben">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleDeafen}
+                className={steuerKnopf(isDeafened, 'warnung')}
+                aria-label={isDeafened ? t('calls.playbackEnable') : t('calls.playbackMute')}
+                aria-description={isDeafened ? undefined : t('calls.playbackMuteHint')}
+                aria-pressed={isDeafened}
+              >
+                {isDeafened ? <HeadphoneOff className="h-5 w-5" /> : <Headphones className="h-5 w-5" />}
+              </Button>
+            </Kurzinfo>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleCamera}
-              className={steuerKnopf(!isCameraOff, 'aktion')}
-              title={isCameraOff ? t('calls.cameraEnable') : t('calls.cameraDisable')}
-              aria-label={isCameraOff ? t('calls.cameraEnable') : t('calls.cameraDisable')}
-              aria-pressed={!isCameraOff}
-            >
-              {isCameraOff ? <VideoOff className="h-5 w-5" /> : <VideoIcon className="h-5 w-5" />}
-            </Button>
+            <Kurzinfo text={isCameraOff ? t('calls.cameraEnable') : t('calls.cameraDisable')} lage="oben">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleCamera}
+                className={steuerKnopf(!isCameraOff, 'aktion')}
+                aria-label={isCameraOff ? t('calls.cameraEnable') : t('calls.cameraDisable')}
+                aria-pressed={!isCameraOff}
+              >
+                {isCameraOff ? <VideoOff className="h-5 w-5" /> : <VideoIcon className="h-5 w-5" />}
+              </Button>
+            </Kurzinfo>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => {
-                if (isScreenSharing) void stopScreenShare()
-                else setFreigabeDialogOffen(true)
-              }}
-              disabled={!freigabeMoeglich}
-              className={`${steuerKnopf(isScreenSharing, 'aktion')} ${freigabeMoeglich ? '' : 'opacity-50'}`}
-              title={
+            <Kurzinfo
+              text={
                 freigabeMoeglich
                   ? isScreenSharing
                     ? t('calls.stopShare')
                     : t('calls.shareScreen')
                   : t('calls.shareNotPossible')
               }
-              aria-label={isScreenSharing ? t('calls.stopShare') : t('calls.shareScreen')}
-              aria-pressed={isScreenSharing}
+              lage="oben"
             >
-              {isScreenSharing ? <MonitorOff className="h-5 w-5" /> : <Monitor className="h-5 w-5" />}
-            </Button>
-
-            {kind === 'direkt' && state === 'active' && (
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setEinladenDialogOffen(true)}
-                className={steuerKnopf(false)}
-                title={t('calls.addParticipant')}
-                aria-label={t('calls.addParticipant')}
+                onClick={() => {
+                  if (isScreenSharing) void stopScreenShare()
+                  else setFreigabeDialogOffen(true)
+                }}
+                disabled={!freigabeMoeglich}
+                className={`${steuerKnopf(isScreenSharing, 'aktion')} ${freigabeMoeglich ? '' : 'opacity-50'}`}
+                aria-label={isScreenSharing ? t('calls.stopShare') : t('calls.shareScreen')}
+                aria-description={freigabeMoeglich ? undefined : t('calls.shareNotPossible')}
+                aria-pressed={isScreenSharing}
               >
-                <UserPlus className="h-5 w-5" />
+                {isScreenSharing ? <MonitorOff className="h-5 w-5" /> : <Monitor className="h-5 w-5" />}
               </Button>
+            </Kurzinfo>
+
+            {kind === 'direkt' && state === 'active' && (
+              <Kurzinfo text={t('calls.addParticipant')} lage="oben">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setEinladenDialogOffen(true)}
+                  className={steuerKnopf(false)}
+                  aria-label={t('calls.addParticipant')}
+                >
+                  <UserPlus className="h-5 w-5" />
+                </Button>
+              </Kurzinfo>
             )}
 
             {/* Auflegen steht abgesetzt und beschriftet: der eine Knopf, den man
                 im Zweifel sofort finden muss. */}
             <span className="mx-1 hidden h-8 w-px bg-outline-variant/50 sm:block" aria-hidden="true" />
-            <Button
-              variant="destructive"
-              onClick={endCall}
-              className="h-11 gap-2 rounded-full px-4 sm:px-5"
-              title={t('calls.endCall')}
-              aria-label={t('calls.endCall')}
-            >
-              <PhoneOff className="h-5 w-5" />
-              <span className="hidden sm:inline">{t('calls.hangUp')}</span>
-            </Button>
+            <Kurzinfo text={t('calls.endCall')} lage="oben" className="sm:!hidden">
+              <Button
+                variant="destructive"
+                onClick={endCall}
+                className="h-11 gap-2 rounded-full px-4 sm:px-5"
+                aria-label={t('calls.endCall')}
+              >
+                <PhoneOff className="h-5 w-5" />
+                <span className="hidden sm:inline">{t('calls.hangUp')}</span>
+              </Button>
+            </Kurzinfo>
           </div>
         </div>
       )}

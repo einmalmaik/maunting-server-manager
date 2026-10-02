@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 
-import { Dropdown, type DropdownOption } from '@/Singra/UI'
+import { Dropdown, Kurzinfo, type DropdownOption } from '@/Singra/UI'
 
 export type PresenceStatus = 'online' | 'away' | 'invisible'
 
@@ -20,31 +20,37 @@ export function StatusDot({ status = 'invisible', className = '', size = 'md' }:
 
   if (status === 'online') {
     return (
-      <span
-        className={`inline-block rounded-full bg-status-success ring-2 ring-surface shadow-[0_0_8px_rgba(16,185,129,0.5)] ${sizeClasses} ${className}`}
-        title={t('social.status.online')}
-        aria-label={t('social.status.online')}
-      />
+      <Kurzinfo text={t('social.status.online')} aussen={className}>
+        <span
+          role="img"
+          className={`inline-block rounded-full bg-status-success ring-2 ring-surface shadow-[0_0_8px_rgba(16,185,129,0.5)] ${sizeClasses}`}
+          aria-label={t('social.status.online')}
+        />
+      </Kurzinfo>
     )
   }
 
   if (status === 'away') {
     return (
-      <span
-        className={`inline-block rounded-full bg-status-warning ring-2 ring-surface shadow-[0_0_8px_rgba(245,158,11,0.5)] ${sizeClasses} ${className}`}
-        title={t('social.status.away')}
-        aria-label={t('social.status.away')}
-      />
+      <Kurzinfo text={t('social.status.away')} aussen={className}>
+        <span
+          role="img"
+          className={`inline-block rounded-full bg-status-warning ring-2 ring-surface shadow-[0_0_8px_rgba(245,158,11,0.5)] ${sizeClasses}`}
+          aria-label={t('social.status.away')}
+        />
+      </Kurzinfo>
     )
   }
 
   // Invisible / Offline
   return (
-    <span
-      className={`inline-block rounded-full bg-on-surface-variant/40 ring-2 ring-surface ${sizeClasses} ${className}`}
-      title={t('social.status.offline')}
-      aria-label={t('social.status.offline')}
-    />
+    <Kurzinfo text={t('social.status.offline')} aussen={className}>
+      <span
+        role="img"
+        className={`inline-block rounded-full bg-on-surface-variant/40 ring-2 ring-surface ${sizeClasses}`}
+        aria-label={t('social.status.offline')}
+      />
+    </Kurzinfo>
   )
 }
 

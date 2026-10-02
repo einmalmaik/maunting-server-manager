@@ -49,11 +49,14 @@ describe('CloudflareTab', () => {
   })
 
   it('rendert den CloudflareTab mit konfiguriertem Status', async () => {
-    render(<CloudflareTab />)
+    const { container } = render(<CloudflareTab />)
 
     expect(await screen.findByText('Cloudflare DNS')).toBeInTheDocument()
     expect(await screen.findByText(/Konfiguriert/i)).toBeInTheDocument()
     expect(screen.getByPlaceholderText(/Schlüssel hinterlegt/i)).toBeInTheDocument()
+    // „Token entfernen“ steht sichtbar am Knopf; ein natives title wiederholte es nur.
+    expect(screen.getByRole('button', { name: /Token entfernen/i })).toBeInTheDocument()
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
   })
 
   it('führt einen Verbindungstest durch', async () => {

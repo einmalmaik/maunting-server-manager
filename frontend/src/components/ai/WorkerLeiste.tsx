@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiWorkerInfo } from '@/api/ai'
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
+import { Kurzinfo } from '@/Singra/UI'
 
 /**
  * Dynamischer Takt: Schnell (2s), solange Aufträge aktiv sind; gemächlich (15s) in Ruhe.
@@ -76,11 +77,10 @@ export function WorkerLeiste() {
         {t('ai.worker.listLabel')}
       </span>
       {workers.map((worker) => (
+        <Kurzinfo key={worker.conversation_id} text={worker.title} aussen="min-w-0 max-w-[16rem]">
         <button
-          key={worker.conversation_id}
           type="button"
           onClick={() => navigate(`/ai?ansicht=worker&id=${encodeURIComponent(worker.conversation_id)}`)}
-          title={worker.title}
           className={[
             'inline-flex max-w-[16rem] items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
             'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
@@ -96,6 +96,7 @@ export function WorkerLeiste() {
             · {t(STATUS_TEXT[worker.status] ?? 'ai.worker.running')}
           </span>
         </button>
+        </Kurzinfo>
       ))}
     </div>
   )

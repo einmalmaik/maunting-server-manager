@@ -651,7 +651,7 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
       const input = screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))
       fireEvent.change(input, { target: { value: 'Wichtige Nachricht' } })
 
-      const sendBtn = screen.getByTitle('Senden')
+      const sendBtn = screen.getByLabelText(i18n.t('messenger.send'))
       fireEvent.click(sendBtn)
 
       // The sent message renders in the timeline
@@ -675,7 +675,7 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
       const deliveredCheckTitle = i18n.t('messenger.stateDelivered')
       await waitFor(
         () => {
-          expect(screen.getByTitle(deliveredCheckTitle)).toBeInTheDocument()
+          expect(screen.getByLabelText(deliveredCheckTitle)).toBeInTheDocument()
         },
         { timeout: 4000 }
       )

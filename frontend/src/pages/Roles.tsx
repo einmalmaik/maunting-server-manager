@@ -8,7 +8,7 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 import type { PermissionCatalog, Role } from '@/types/permissions'
 import { PermissionEditor } from '@/Singra/UI/PermissionEditor'
 import { PageHeader } from '@/Singra/UI/PageHeader'
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 
 import { Spinner } from '@/components/ui/Spinner'
 /**
@@ -297,25 +297,29 @@ export function Roles() {
                 </td>
                 <td className="p-4 text-right space-x-3">
                   {canManage && (
-                    <button
-                      onClick={() => {
-                        setCreating(false)
-                        setEditing(role)
-                      }}
-                      className="text-primary hover:text-primary/80 transition-colors inline-flex items-center"
-                      title={t('common.edit')}
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
+                    <Kurzinfo text={t('common.edit')} seite="ende">
+                      <button
+                        onClick={() => {
+                          setCreating(false)
+                          setEditing(role)
+                        }}
+                        className="text-primary hover:text-primary/80 transition-colors inline-flex items-center"
+                        aria-label={t('common.edit')}
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                    </Kurzinfo>
                   )}
                   {canManage && !role.is_system && (
-                    <button
-                      onClick={() => handleDelete(role)}
-                      className="text-status-destructive hover:text-status-destructive/80 transition-colors inline-flex items-center"
-                      title={t('common.delete')}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <Kurzinfo text={t('common.delete')} seite="ende">
+                      <button
+                        onClick={() => handleDelete(role)}
+                        className="text-status-destructive hover:text-status-destructive/80 transition-colors inline-flex items-center"
+                        aria-label={t('common.delete')}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </Kurzinfo>
                   )}
                 </td>
               </tr>

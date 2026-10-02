@@ -48,7 +48,7 @@ describe('AiWebSearchSettings', () => {
     expect(input.value).toBe('')
     expect(input.placeholder).toContain('Standard: http://127.0.0.1:8888')
     // No delete button when using default sidecar
-    expect(screen.queryByTitle('Auf Standard zurücksetzen')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Löschen' })).not.toBeInTheDocument()
   })
 
   it('displays default sidecar status as inactive/ready when not running', async () => {
@@ -108,8 +108,10 @@ describe('AiWebSearchSettings', () => {
     expect(input.value).toBe('http://custom-searxng.lan:8080')
 
     // Click delete to reset to default
-    const deleteButton = screen.getByTitle('Auf Standard zurücksetzen')
-    expect(deleteButton).toBeInTheDocument()
+    const deleteButton = screen.getByRole('button', { name: 'Löschen' })
+    expect(deleteButton).toHaveAttribute('aria-description', 'Auf Standard zurücksetzen')
+    // Der Hinweis steht in Kurzinfo und aria-description, nicht im nativen title.
+    expect(document.body.querySelectorAll('[title]')).toHaveLength(0)
 
     fireEvent.click(deleteButton)
 

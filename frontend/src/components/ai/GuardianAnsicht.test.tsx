@@ -260,7 +260,11 @@ describe('GuardianAnsicht', () => {
 
     zeichnen()
 
-    fireEvent.click(await screen.findByRole('button', { name: /übernehmen/i }))
+    const uebernehmen = await screen.findByRole('button', { name: /übernehmen/i })
+    // Der Hinweis steht in Kurzinfo und aria-description, nicht im nativen title.
+    expect(uebernehmen).toHaveAttribute('aria-description', i18n.t('ai.guardian.takeOverHint'))
+    expect(document.body.querySelectorAll('[title]')).toHaveLength(0)
+    fireEvent.click(uebernehmen)
     await waitFor(() => expect(aiApi.takeOverGuardian).toHaveBeenCalledTimes(1))
     await waitFor(() => {
       expect(screen.getByTestId('standort')).toHaveTextContent(/^\/ai$/)

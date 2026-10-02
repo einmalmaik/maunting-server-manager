@@ -50,7 +50,7 @@ import { AiMemoryManager } from "@/components/ai/AiMemoryManager";
 import type { GameInfo, Server } from "@/types";
 import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
 import { UptimeDisplay } from "@/components/server/UptimeDisplay";
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 
 import { Spinner } from '@/components/ui/Spinner'
 import { meldeErrungenschaft } from "@/lib/errungenschaft";
@@ -662,6 +662,56 @@ export function ServerDetail() {
     }
   };
 
+  const startHinweis = isNodeUnreachable
+    ? t("servers.nodeUnreachableHint")
+    : !server.public_bind_ip
+    ? t("servers.bindIp.startBlockedTitle")
+    : undefined;
+  const startKnopf = (
+    <Button
+      onClick={() => doAction("start")}
+      disabled={!!actionLoading || !server.public_bind_ip || isNodeUnreachable}
+      className="flex items-center gap-2 disabled:opacity-50"
+      aria-description={startHinweis}
+    >
+      <Play className="w-4 h-4" />
+      {actionLoading === "start"
+        ? t("common.loading")
+        : t("servers.start")}
+    </Button>
+  );
+  const wechselKnopf = (
+    <Button variant="secondary"
+      onClick={() => setShowSwitchBlueprint(true)}
+      disabled={!!actionLoading || isNodeUnreachable || effectiveStatus !== "stopped"}
+      className="flex items-center gap-2 disabled:opacity-50"
+      aria-description={effectiveStatus !== "stopped" ? t("servers.mustStopToSwitch") : undefined}
+    >
+      <RefreshCw className="w-4 h-4 text-primary" />
+      {t("servers.switchBlueprintAction")}
+    </Button>
+  );
+  const updateHinweis = (
+    <span
+      className="font-mono-sm text-mono-sm px-2.5 py-1 rounded-full border bg-status-warning/10 border-status-warning/30 text-status-warning"
+      aria-description={serverUpdateBadge?.reason || undefined}
+    >
+      {t("servers.serverFileUpdateAvailable")}
+    </span>
+  );
+  const netzwerkKnopf = (
+    <Button variant="secondary" size="sm"
+      onClick={() => setShowEditNetwork(true)}
+      disabled={effectiveStatus === "running" || !!actionLoading}
+      aria-description={effectiveStatus === "running" ? t("servers.networkEditRequiresStopped") : undefined}
+      className={
+        effectiveStatus === "running" || !!actionLoading ? "opacity-50 cursor-not-allowed" : ""
+      }
+    >
+      {t("common.edit")}
+    </Button>
+  );
+
   return (
     <div className="msm-page">
       <div className={activeTab === "files" ? "hidden md:block" : "block"}>
@@ -701,21 +751,23 @@ export function ServerDetail() {
               <span>{t("tabs.ai")}</span>
             </Button>
           )}
-          <Button variant="secondary"
-            type="button"
-            className="inline-flex min-h-11 max-w-full items-center gap-2 text-left"
-            aria-label={t("servers.copyDockerContainerName")}
-            title={t("servers.dockerContainerInstallDirHint")}
-            onClick={() => {
-              void navigator.clipboard.writeText(`msm-srv-${server.id}`);
-              toast.success(t("servers.dockerContainerNameCopied"));
-            }}
-          >
-            <span className="font-label-md text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">
-              {t("servers.dockerContainerLabel")}
-            </span>
-            <span className="font-mono text-xs">msm-srv-{server.id}</span>
-          </Button>
+          <Kurzinfo text={t("servers.dockerContainerInstallDirHint")} seite="ende" aussen="max-w-full">
+            <Button variant="secondary"
+              type="button"
+              className="inline-flex min-h-11 max-w-full items-center gap-2 text-left"
+              aria-label={t("servers.copyDockerContainerName")}
+              aria-description={t("servers.dockerContainerInstallDirHint")}
+              onClick={() => {
+                void navigator.clipboard.writeText(`msm-srv-${server.id}`);
+                toast.success(t("servers.dockerContainerNameCopied"));
+              }}
+            >
+              <span className="font-label-md text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">
+                {t("servers.dockerContainerLabel")}
+              </span>
+              <span className="font-mono text-xs">msm-srv-{server.id}</span>
+            </Button>
+          </Kurzinfo>
           </div>
         )}
       />
@@ -797,23 +849,9 @@ export function ServerDetail() {
       {/* Actions */}
       <div className="flex gap-3 flex-wrap">
         {effectiveStatus !== "running" && effectiveStatus !== "installing" && effectiveStatus !== "starting" && effectiveStatus !== "stopping" && effectiveStatus !== "restarting" && effectiveStatus !== "queued" && (
-          <Button
-            onClick={() => doAction("start")}
-            disabled={!!actionLoading || !server.public_bind_ip || isNodeUnreachable}
-            className="flex items-center gap-2 disabled:opacity-50"
-            title={
-              isNodeUnreachable
-                ? t("servers.nodeUnreachableHint")
-                : !server.public_bind_ip
-                ? t("servers.bindIp.startBlockedTitle")
-                : undefined
-            }
-          >
-            <Play className="w-4 h-4" />
-            {actionLoading === "start"
-              ? t("common.loading")
-              : t("servers.start")}
-          </Button>
+          startHinweis ? (
+            <Kurzinfo text={startHinweis} seite="anfang">{startKnopf}</Kurzinfo>
+          ) : startKnopf
         )}
         {effectiveStatus === "running" && (
           <Button variant="destructive"
@@ -857,15 +895,9 @@ export function ServerDetail() {
         )}
 
         {effectiveStatus !== "installing" && effectiveStatus !== "queued" && (
-          <Button variant="secondary"
-            onClick={() => setShowSwitchBlueprint(true)}
-            disabled={!!actionLoading || isNodeUnreachable || effectiveStatus !== "stopped"}
-            className="flex items-center gap-2 disabled:opacity-50"
-            title={effectiveStatus !== "stopped" ? t("servers.mustStopToSwitch") : undefined}
-          >
-            <RefreshCw className="w-4 h-4 text-primary" />
-            {t("servers.switchBlueprintAction")}
-          </Button>
+          effectiveStatus !== "stopped" ? (
+            <Kurzinfo text={t("servers.mustStopToSwitch")}>{wechselKnopf}</Kurzinfo>
+          ) : wechselKnopf
         )}
 
         {hasServerFiles && showServerFileUpdates && (
@@ -889,12 +921,9 @@ export function ServerDetail() {
           hasServerFiles &&
           showServerFileUpdates && (
           <div className="flex items-center gap-2 self-center">
-            <span
-              className="font-mono-sm text-mono-sm px-2.5 py-1 rounded-full border bg-status-warning/10 border-status-warning/30 text-status-warning"
-              title={serverUpdateBadge.reason || undefined}
-            >
-              {t("servers.serverFileUpdateAvailable")}
-            </span>
+            {serverUpdateBadge.reason ? (
+              <Kurzinfo text={serverUpdateBadge.reason}>{updateHinweis}</Kurzinfo>
+            ) : updateHinweis}
           </div>
         )}
 
@@ -978,16 +1007,9 @@ export function ServerDetail() {
               {t("servers.network")}
             </h3>
           </div>
-          <Button variant="secondary" size="sm"
-            onClick={() => setShowEditNetwork(true)}
-            disabled={effectiveStatus === "running" || !!actionLoading}
-            title={effectiveStatus === "running" ? t("servers.networkEditRequiresStopped") : undefined}
-            className={
-              effectiveStatus === "running" || !!actionLoading ? "opacity-50 cursor-not-allowed" : ""
-            }
-          >
-            {t("common.edit")}
-          </Button>
+          {effectiveStatus === "running" ? (
+            <Kurzinfo text={t("servers.networkEditRequiresStopped")} seite="ende">{netzwerkKnopf}</Kurzinfo>
+          ) : netzwerkKnopf}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <div>

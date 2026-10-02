@@ -30,7 +30,7 @@ describe('AdminAudit', () => {
       },
     ])
 
-    render(
+    const { container } = render(
       <MemoryRouter>
         <AdminAudit />
       </MemoryRouter>,
@@ -40,6 +40,9 @@ describe('AdminAudit', () => {
     expect(client.api).toHaveBeenCalledWith(expect.stringMatching(/^\/admin\/audit-logs\?/))
     expect(screen.getByText('System')).toBeInTheDocument()
     expect(screen.getByText('0a613465')).toBeInTheDocument()
+    // Die volle Korrelations-ID steht in der Kurzinfo, nicht im nativen title der Zelle.
+    expect(container.querySelector('[data-kurzinfo="0a613465-487d-44a0-af1c-5aa031a873c9"]')).not.toBeNull()
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
     expect(screen.queryByText(/password\s*=/i)).not.toBeInTheDocument()
   })
 

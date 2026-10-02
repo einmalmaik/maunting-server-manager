@@ -1251,7 +1251,7 @@ function Reiter({
 }) {
   // Ohne xl steht bei inaktiven Reitern nur das Symbol; die Kurzinfo nennt dann den Namen.
   return (
-    <Kurzinfo text={label} className={aktiv ? 'hidden' : 'xl:hidden'}>
+    <Kurzinfo text={label} className={aktiv ? '!hidden' : 'xl:!hidden'}>
       <button
         type="button"
         onClick={onClick}

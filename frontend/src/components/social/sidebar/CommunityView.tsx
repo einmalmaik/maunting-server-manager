@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Plus, Share2, UsersRound } from 'lucide-react'
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 import type { ChatGroupItem } from '@/api/social'
 
 interface CommunityViewProps {
@@ -34,7 +34,6 @@ export function CommunityView({ gruppen, onGruppe, onNeueGruppe, onEinladungKopi
           onClick={onNeueGruppe}
           className="h-7 text-xs gap-1 px-2.5 rounded-full"
           aria-label={t('messenger.newGroup')}
-          title={t('messenger.newGroup')}
         >
           <Plus className="w-3.5 h-3.5" />
           <span>{t('messenger.createGroup')}</span>
@@ -70,17 +69,19 @@ export function CommunityView({ gruppen, onGruppe, onNeueGruppe, onEinladungKopi
               </div>
 
               {g.invite_code && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onEinladungKopieren(g)}
-                  className="h-7 px-2 text-xs gap-1 text-primary"
-                  title={t('messenger.copyInvite')}
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>Link</span>
-                </Button>
+                <Kurzinfo text={t('messenger.copyInvite')} seite="ende">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onEinladungKopieren(g)}
+                    className="h-7 px-2 text-xs gap-1 text-primary"
+                    aria-description={t('messenger.copyInvite')}
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>Link</span>
+                  </Button>
+                </Kurzinfo>
               )}
             </div>
           ))

@@ -38,6 +38,9 @@ describe('BlueprintBuilder accessibility', () => {
     expect(navigation.querySelector('ol')?.className).toContain('lg:grid-cols-1')
     expect(actions.className).toContain('grid-cols-[auto_minmax(0,1fr)]')
     expect(document.body.style.overflow).toBe('hidden')
+    // Die Symbolknöpfe der Fußleiste nennen sich per aria-label und Kurzinfo, nie per title.
+    expect(screen.getByRole('button', { name: 'Zurück' })).toBeInTheDocument()
+    expect(document.querySelectorAll('[title]')).toHaveLength(0)
   })
 
   it('closes on Escape and returns focus to the opener', async () => {

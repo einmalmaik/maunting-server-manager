@@ -20,7 +20,7 @@ import remarkGfm from 'remark-gfm'
 import { toast } from '@/stores/toastStore'
 import { FARB_PALETTE, farbwahl } from '@/config/farbpalette'
 import { confirm } from '@/stores/confirmStore'
-import { Dropdown, type DropdownOption } from '@/Singra/UI'
+import { Dropdown, Kurzinfo, type DropdownOption } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { Switch } from '@/components/ui/Switch'
 import { teamsApi, type Team } from '@/api/teams'
@@ -469,18 +469,20 @@ export function Notes() {
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        type="button"
-                        onClick={(e) => handleTogglePin(note, e)}
-                        title={note.is_pinned ? t('notes.unpin') : t('notes.pin')}
-                        className={`p-1.5 rounded-lg transition-colors ${
-                          note.is_pinned
-                            ? 'text-primary bg-primary/20 hover:bg-primary/30'
-                            : 'text-on-surface-variant/60 hover:text-on-surface hover:bg-surface-container-high'
-                        }`}
-                      >
-                        {note.is_pinned ? <Pin className="w-3.5 h-3.5 fill-primary" /> : <Pin className="w-3.5 h-3.5" />}
-                      </button>
+                      <Kurzinfo text={note.is_pinned ? t('notes.unpin') : t('notes.pin')} seite="ende">
+                        <button
+                          type="button"
+                          onClick={(e) => handleTogglePin(note, e)}
+                          aria-label={note.is_pinned ? t('notes.unpin') : t('notes.pin')}
+                          className={`p-1.5 rounded-lg transition-colors ${
+                            note.is_pinned
+                              ? 'text-primary bg-primary/20 hover:bg-primary/30'
+                              : 'text-on-surface-variant/60 hover:text-on-surface hover:bg-surface-container-high'
+                          }`}
+                        >
+                          {note.is_pinned ? <Pin className="w-3.5 h-3.5 fill-primary" /> : <Pin className="w-3.5 h-3.5" />}
+                        </button>
+                      </Kurzinfo>
                     </div>
                   </div>
 
@@ -536,26 +538,30 @@ export function Notes() {
                   </span>
 
                   <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={(e) => handleToggleArchive(note, e)}
-                      title={note.is_archived ? t('notes.unarchive') : t('notes.archive')}
-                      className="p-1.5 text-on-surface-variant hover:text-on-surface rounded-lg hover:bg-surface-container-high transition-colors"
-                    >
-                      {note.is_archived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
-                    </button>
+                    <Kurzinfo text={note.is_archived ? t('notes.unarchive') : t('notes.archive')}>
+                      <button
+                        type="button"
+                        onClick={(e) => handleToggleArchive(note, e)}
+                        aria-label={note.is_archived ? t('notes.unarchive') : t('notes.archive')}
+                        className="p-1.5 text-on-surface-variant hover:text-on-surface rounded-lg hover:bg-surface-container-high transition-colors"
+                      >
+                        {note.is_archived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
+                      </button>
+                    </Kurzinfo>
 
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        void handleDelete(note)
-                      }}
-                      title={t('common.delete')}
-                      className="p-1.5 text-status-destructive hover:text-status-destructive/80 rounded-lg hover:bg-status-destructive/10 transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <Kurzinfo text={t('common.delete')} seite="ende">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void handleDelete(note)
+                        }}
+                        aria-label={t('common.delete')}
+                        className="p-1.5 text-status-destructive hover:text-status-destructive/80 rounded-lg hover:bg-status-destructive/10 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </Kurzinfo>
                   </div>
                 </div>
               </div>

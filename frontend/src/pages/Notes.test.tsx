@@ -100,7 +100,7 @@ describe('Notes Component', () => {
   })
 
   it('renders multiple notes with proper formatting and checklist items', async () => {
-    render(
+    const { container } = render(
       <MemoryRouter>
         <Notes />
       </MemoryRouter>
@@ -116,6 +116,10 @@ describe('Notes Component', () => {
     expect(screen.getByText('1x Milch')).toBeInTheDocument()
     expect(screen.getByText('2x Brot')).toBeInTheDocument()
     expect(screen.getByText('6x Eier')).toBeInTheDocument()
+
+    // Anheften, Archivieren und Löschen nennen sich per aria-label, nie per nativem title.
+    expect(screen.getAllByRole('button', { name: i18n.t('common.delete') }).length).toBeGreaterThan(0)
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
   })
 
   it('filters notes when searching in the search bar', async () => {

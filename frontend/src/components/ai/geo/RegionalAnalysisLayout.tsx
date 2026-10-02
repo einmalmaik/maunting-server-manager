@@ -3,7 +3,7 @@ import { Globe2, MessageSquare, Satellite, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { AiRegionalAnalysis } from '@/api/ai'
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 import { GlobeViewer } from './GlobeViewer'
 import { RegionalInfoPanel, type NewsItem } from './RegionalInfoPanel'
 import type { RegionalFocus } from '../voice/useSprachsitzung'
@@ -125,18 +125,19 @@ export function RegionalAnalysisLayout({
           </button>
         </div>
 
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={onClose}
-          aria-label={t('ai.geo.close')}
-          title={t('ai.geo.close')}
-          className="h-8 shrink-0 px-2 rounded-lg text-xs font-medium text-on-surface-variant hover:text-status-destructive hover:bg-status-destructive/10 border border-outline-variant/30 flex items-center gap-1 transition-colors"
-        >
-          <X className="h-4 w-4" />
-          <span className="hidden sm:inline">{t('ai.geo.close')}</span>
-        </Button>
+        <Kurzinfo text={t('ai.geo.close')} seite="ende" className="sm:!hidden" aussen="shrink-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            aria-label={t('ai.geo.close')}
+            className="h-8 px-2 rounded-lg text-xs font-medium text-on-surface-variant hover:text-status-destructive hover:bg-status-destructive/10 border border-outline-variant/30 flex items-center gap-1 transition-colors"
+          >
+            <X className="h-4 w-4" />
+            <span className="hidden sm:inline">{t('ai.geo.close')}</span>
+          </Button>
+        </Kurzinfo>
       </div>
 
       {/* ── Einheitlicher Container für Mobile & Desktop (verhindert doppeltes Mounten & Scroll-Resets) ── */}

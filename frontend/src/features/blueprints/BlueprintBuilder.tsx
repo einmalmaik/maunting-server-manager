@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Code2, Download, Plus, Save, Trash2, X } from 'lucide-react'
-import { Button, Dropdown, NumberStepper, Checkbox } from '@/Singra/UI'
+import { Button, Dropdown, NumberStepper, Checkbox, Kurzinfo } from '@/Singra/UI'
 import { api } from '@/api/client'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
@@ -985,28 +985,30 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
           </div>
         )}
         <footer className="grid shrink-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 border-t border-outline-variant/60 bg-surface-container-low/80 px-3 py-2 sm:px-4 sm:py-3 md:px-6" data-testid="blueprint-builder-actions">
-          <Button
-            variant="secondary"
-            className="min-h-11 w-11 px-0 sm:w-auto sm:px-4"
-            aria-label={t('common.back')}
-            title={t('common.back')}
-            disabled={currentIndex === 0}
-            onClick={() => setSection(sectionIds[currentIndex - 1])}
-          >
-            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-            <span className="hidden sm:inline">{t('common.back')}</span>
-          </Button>
-          <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-2 sm:ml-auto sm:flex sm:flex-wrap sm:justify-end">
+          <Kurzinfo text={t('common.back')} seite="anfang" lage="oben" className="sm:!hidden">
             <Button
               variant="secondary"
               className="min-h-11 w-11 px-0 sm:w-auto sm:px-4"
-              aria-label={t('blueprintBuilder.downloadJson')}
-              title={t('blueprintBuilder.downloadJson')}
-              onClick={downloadDraft}
+              aria-label={t('common.back')}
+              disabled={currentIndex === 0}
+              onClick={() => setSection(sectionIds[currentIndex - 1])}
             >
-              <Download className="h-4 w-4" aria-hidden="true" />
-              <span className="hidden sm:inline">{t('blueprintBuilder.downloadJson')}</span>
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+              <span className="hidden sm:inline">{t('common.back')}</span>
             </Button>
+          </Kurzinfo>
+          <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-2 sm:ml-auto sm:flex sm:flex-wrap sm:justify-end">
+            <Kurzinfo text={t('blueprintBuilder.downloadJson')} lage="oben" className="sm:!hidden">
+              <Button
+                variant="secondary"
+                className="min-h-11 w-11 px-0 sm:w-auto sm:px-4"
+                aria-label={t('blueprintBuilder.downloadJson')}
+                onClick={downloadDraft}
+              >
+                <Download className="h-4 w-4" aria-hidden="true" />
+                <span className="hidden sm:inline">{t('blueprintBuilder.downloadJson')}</span>
+              </Button>
+            </Kurzinfo>
             {currentIndex < sectionIds.length - 1 ? (
               <Button className="min-h-11 min-w-0 w-full sm:w-auto" onClick={() => setSection(sectionIds[currentIndex + 1])}><span className="min-w-0 truncate">{t('common.next')}</span><ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" /></Button>
             ) : (

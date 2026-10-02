@@ -44,16 +44,22 @@ describe('PopupTab', () => {
       },
     ])
 
-    render(<PopupTab />)
+    const { container } = render(<PopupTab />)
 
     expect(await screen.findByText('Geplante Wartung')).toBeInTheDocument()
     expect(screen.getByText('Server-Neustart um 04:00 Uhr.')).toBeInTheDocument()
+    // Symbolknöpfe tragen ihren Namen per aria-label, nie per nativem title.
+    expect(screen.getByRole('button', { name: i18n.t('common.edit') })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: i18n.t('common.delete') })).toBeInTheDocument()
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
 
     const newBtn = screen.getByRole('button', { name: /Neues Pop-up|Create New/i })
     fireEvent.click(newBtn)
 
     expect(screen.getByLabelText(/Titel|Title/i)).toBeInTheDocument()
     expect(screen.getByPlaceholderText(i18n.t('popups.bodyPlaceholder'))).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: i18n.t('popups.markdownHeading') })).toBeInTheDocument()
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
   })
 
   it('submits a new popup creation', async () => {

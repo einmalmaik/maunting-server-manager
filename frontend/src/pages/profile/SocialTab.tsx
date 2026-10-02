@@ -5,6 +5,7 @@ import {
   Avatar,
   Button,
   Input,
+  Kurzinfo,
 } from '@/Singra/UI'
 import {
   Users,
@@ -392,20 +393,21 @@ export function SocialTab() {
                       className="flex items-center justify-between p-3 rounded-xl bg-surface-container-low border border-outline-variant/30 hover:border-outline-variant/60 transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <button
-                          type="button"
-                          onClick={() => navigate(`/user/${f.user_id ?? f.id}`)}
-                          className="relative shrink-0 rounded-full"
-                          aria-label={t('social.profile.open', { name: f.username })}
-                          title={t('social.profile.open', { name: f.username })}
-                        >
-                          <Avatar src={f.avatar_url} name={f.username} size="sm" />
-                          <StatusDot
-                            status={f.presence?.status || 'invisible'}
-                            size="sm"
-                            className="absolute bottom-0 right-0"
-                          />
-                        </button>
+                        <Kurzinfo text={t('social.profile.open', { name: f.username })} seite="anfang" aussen="shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/user/${f.user_id ?? f.id}`)}
+                            className="relative rounded-full"
+                            aria-label={t('social.profile.open', { name: f.username })}
+                          >
+                            <Avatar src={f.avatar_url} name={f.username} size="sm" />
+                            <StatusDot
+                              status={f.presence?.status || 'invisible'}
+                              size="sm"
+                              className="absolute bottom-0 right-0"
+                            />
+                          </button>
+                        </Kurzinfo>
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
                             <button
@@ -435,16 +437,17 @@ export function SocialTab() {
                         </div>
                       </div>
 
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => void handleRemoveFriend(f.user_id ?? f.id)}
-                        className="h-7 w-7 p-0 text-on-surface-variant hover:text-status-destructive hover:bg-status-destructive/10 shrink-0 ml-2"
-                        title={t('social.contacts.remove')}
-                        aria-label={t('social.contacts.remove')}
-                      >
-                        <UserMinus className="w-3.5 h-3.5" />
-                      </Button>
+                      <Kurzinfo text={t('social.contacts.remove')} seite="ende" aussen="shrink-0 ml-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => void handleRemoveFriend(f.user_id ?? f.id)}
+                          className="h-7 w-7 p-0 text-on-surface-variant hover:text-status-destructive hover:bg-status-destructive/10"
+                          aria-label={t('social.contacts.remove')}
+                        >
+                          <UserMinus className="w-3.5 h-3.5" />
+                        </Button>
+                      </Kurzinfo>
                     </div>
                   ))}
                 </div>

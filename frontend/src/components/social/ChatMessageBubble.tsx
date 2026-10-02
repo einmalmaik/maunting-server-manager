@@ -43,7 +43,7 @@ import {
   Trash2,
 } from 'lucide-react'
 
-import { Avatar, Button } from '@/Singra/UI'
+import { Avatar, Button, Kurzinfo } from '@/Singra/UI'
 import {
   ChatMediaFile,
   ChatMediaImage,
@@ -494,33 +494,35 @@ function ChatMessageBubbleContent({
         {/* Zitat über einer Antwort. Der Auszug reist mit der Nachricht, damit
             er auch dann steht, wenn die Ursprungszeile hier nie ankam. */}
         {!msg.isDeleted && msg.antwortAuf && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              aktionen.onSpringeZu(msg.antwortAuf!.clientUuid)
-            }}
-            className={`w-full text-left flex gap-2 rounded-lg px-2 py-1.5 border-l-2 transition-colors ${
-              msg.isSelf
-                ? 'bg-black/25 border-white/50 hover:bg-black/35'
-                : 'bg-surface-container-highest border-primary/60 hover:bg-surface-container-highest/70'
-            }`}
-            title={t('messenger.jumpToQuoted')}
-          >
-            <span className="min-w-0 flex-1 space-y-0.5">
-              <span className="block text-label-sm font-semibold text-primary truncate">
-                {msg.antwortAuf.absenderName ||
-                  (Number(msg.antwortAuf.absenderId) === Number(eigeneId) ? eigenerName : 'Nachricht')}
+          <Kurzinfo text={t('messenger.jumpToQuoted')} seite={msg.isSelf ? 'ende' : 'anfang'} aussen="w-full">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                aktionen.onSpringeZu(msg.antwortAuf!.clientUuid)
+              }}
+              className={`w-full text-left flex gap-2 rounded-lg px-2 py-1.5 border-l-2 transition-colors ${
+                msg.isSelf
+                  ? 'bg-black/25 border-white/50 hover:bg-black/35'
+                  : 'bg-surface-container-highest border-primary/60 hover:bg-surface-container-highest/70'
+              }`}
+              aria-description={t('messenger.jumpToQuoted')}
+            >
+              <span className="min-w-0 flex-1 space-y-0.5">
+                <span className="block text-label-sm font-semibold text-primary truncate">
+                  {msg.antwortAuf.absenderName ||
+                    (Number(msg.antwortAuf.absenderId) === Number(eigeneId) ? eigenerName : 'Nachricht')}
+                </span>
+                <span className="block text-label-sm opacity-80 line-clamp-2 leading-snug">
+                  {typeof msg.antwortAuf.auszug === 'string'
+                    ? msg.antwortAuf.auszug
+                    : typeof msg.antwortAuf.auszug === 'object' && msg.antwortAuf.auszug !== null
+                      ? JSON.stringify(msg.antwortAuf.auszug)
+                      : String(msg.antwortAuf.auszug ?? '')}
+                </span>
               </span>
-              <span className="block text-label-sm opacity-80 line-clamp-2 leading-snug">
-                {typeof msg.antwortAuf.auszug === 'string'
-                  ? msg.antwortAuf.auszug
-                  : typeof msg.antwortAuf.auszug === 'object' && msg.antwortAuf.auszug !== null
-                    ? JSON.stringify(msg.antwortAuf.auszug)
-                    : String(msg.antwortAuf.auszug ?? '')}
-              </span>
-            </span>
-          </button>
+            </button>
+          </Kurzinfo>
         )}
 
         {/* Ein Augenblick trägt seine Marke über dem Bild: er zählt für den Funken. */}
@@ -556,7 +558,6 @@ function ChatMessageBubbleContent({
             <div
               className="w-24 h-24 sm:w-28 sm:h-28 drop-shadow-md"
               dangerouslySetInnerHTML={{ __html: sanitizeSvg(msg.stickerAttachment.svg) }}
-              title={msg.stickerAttachment.label}
             />
             <div className="text-label-sm opacity-60 text-center mt-1">{msg.stickerAttachment.label}</div>
           </div>
@@ -571,24 +572,24 @@ function ChatMessageBubbleContent({
           >
             {/* Sender Profile Picture on Left (WhatsApp-style: transitions to speed toggle button when playing) */}
             {ton.playingAudioId === msg.id ? (
-              <button
-                type="button"
-                onClick={ton.onCycleRate}
-                className={`w-10 h-10 rounded-full font-bold text-xs shadow-sm flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all ${
-                  msg.isSelf
-                    ? 'bg-white text-[#0c2e35] hover:bg-white/90'
-                    : 'bg-primary text-on-primary hover:opacity-90'
-                }`}
-                title={t('messenger.playbackSpeed')}
-                aria-label={t('messenger.playbackSpeed')}
-              >
-                {ton.audioPlaybackRate}x
-              </button>
+              <Kurzinfo text={t('messenger.playbackSpeed')} seite="anfang" aussen="shrink-0">
+                <button
+                  type="button"
+                  onClick={ton.onCycleRate}
+                  className={`w-10 h-10 rounded-full font-bold text-xs shadow-sm flex items-center justify-center hover:scale-105 active:scale-95 transition-all ${
+                    msg.isSelf
+                      ? 'bg-white text-[#0c2e35] hover:bg-white/90'
+                      : 'bg-primary text-on-primary hover:opacity-90'
+                  }`}
+                  aria-label={t('messenger.playbackSpeed')}
+                >
+                  {ton.audioPlaybackRate}x
+                </button>
+              </Kurzinfo>
             ) : (
               <div
                 className="relative shrink-0 w-10 h-10 rounded-full cursor-pointer"
                 onClick={ton.onCycleRate}
-                title={t('messenger.playbackSpeed')}
               >
                 <Avatar
                   src={msg.isSelf ? eigenesBild : activeContact?.avatarUrl || null}
@@ -596,17 +597,18 @@ function ChatMessageBubbleContent({
                   size="md"
                   className="w-10 h-10"
                 />
-                <button
-                  type="button"
-                  onClick={ton.onCycleRate}
-                  className={`absolute -bottom-1 -right-1 px-1 py-0.5 rounded-full font-bold text-label-sm shadow-sm border border-surface leading-none hover:scale-110 transition-transform ${
-                    msg.isSelf ? 'bg-white text-[#0c2e35]' : 'bg-primary text-on-primary'
-                  }`}
-                  title={t('messenger.playbackSpeed')}
-                  aria-label={t('messenger.playbackSpeed')}
-                >
-                  {ton.audioPlaybackRate}x
-                </button>
+                <Kurzinfo text={t('messenger.playbackSpeed')} seite="anfang" aussen="absolute -bottom-1 -right-1">
+                  <button
+                    type="button"
+                    onClick={ton.onCycleRate}
+                    className={`px-1 py-0.5 rounded-full font-bold text-label-sm shadow-sm border border-surface leading-none hover:scale-110 transition-transform ${
+                      msg.isSelf ? 'bg-white text-[#0c2e35]' : 'bg-primary text-on-primary'
+                    }`}
+                    aria-label={t('messenger.playbackSpeed')}
+                  >
+                    {ton.audioPlaybackRate}x
+                  </button>
+                </Kurzinfo>
               </div>
             )}
 
@@ -629,55 +631,56 @@ function ChatMessageBubbleContent({
             </button>
 
             {/* Dynamic Audio Waveform with Click-to-Seek */}
-            <div
-              className="flex-1 min-w-[130px] space-y-1 cursor-pointer select-none"
-              onClick={(e) => ton.onSeek(msg.id, msg.audioAttachment!, medienBindung(msg), e)}
-              title={t('messenger.seekHint')}
-            >
-              <div className="flex items-center gap-[2.5px] h-7 px-0.5">
-                {getWaveformBars(msg.id).map((barH, bIdx) => {
-                  const count = 28
-                  const progress =
-                    ton.playingAudioId === msg.id && msg.audioAttachment!.durationSeconds > 0
-                      ? ton.audioCurrentTime / msg.audioAttachment!.durationSeconds
-                      : 0
-                  const barProgress = bIdx / count
-                  const isPlayed = barProgress <= progress
+            <Kurzinfo text={t('messenger.seekHint')} aussen="flex-1 min-w-[130px]">
+              <div
+                className="w-full space-y-1 cursor-pointer select-none"
+                onClick={(e) => ton.onSeek(msg.id, msg.audioAttachment!, medienBindung(msg), e)}
+              >
+                <div className="flex items-center gap-[2.5px] h-7 px-0.5">
+                  {getWaveformBars(msg.id).map((barH, bIdx) => {
+                    const count = 28
+                    const progress =
+                      ton.playingAudioId === msg.id && msg.audioAttachment!.durationSeconds > 0
+                        ? ton.audioCurrentTime / msg.audioAttachment!.durationSeconds
+                        : 0
+                    const barProgress = bIdx / count
+                    const isPlayed = barProgress <= progress
 
-                  return (
-                    <div
-                      key={bIdx}
-                      className={`flex-1 rounded-full transition-colors ${
-                        isPlayed
-                          ? msg.isSelf
-                            ? 'bg-white'
-                            : 'bg-primary'
-                          : msg.isSelf
-                          ? 'bg-white/35'
-                          : 'bg-on-surface-variant/35'
-                      }`}
-                      style={{
-                        height: `${Math.max(4, Math.round(barH * 24))}px`,
-                        minWidth: '2px',
-                        maxWidth: '4px',
-                      }}
-                    />
-                  )
-                })}
-              </div>
+                    return (
+                      <div
+                        key={bIdx}
+                        className={`flex-1 rounded-full transition-colors ${
+                          isPlayed
+                            ? msg.isSelf
+                              ? 'bg-white'
+                              : 'bg-primary'
+                            : msg.isSelf
+                            ? 'bg-white/35'
+                            : 'bg-on-surface-variant/35'
+                        }`}
+                        style={{
+                          height: `${Math.max(4, Math.round(barH * 24))}px`,
+                          minWidth: '2px',
+                          maxWidth: '4px',
+                        }}
+                      />
+                    )
+                  })}
+                </div>
 
-              <div className="flex justify-between items-center text-label-sm opacity-80 px-0.5">
-                <span>
-                  {ton.playingAudioId === msg.id
-                    ? formatDuration(ton.audioCurrentTime)
-                    : formatDuration(msg.audioAttachment.durationSeconds)}
-                </span>
-                <span className="flex items-center gap-1 opacity-70">
-                  <Mic className="w-2.5 h-2.5" />
-                  <span>Sprachnachricht</span>
-                </span>
+                <div className="flex justify-between items-center text-label-sm opacity-80 px-0.5">
+                  <span>
+                    {ton.playingAudioId === msg.id
+                      ? formatDuration(ton.audioCurrentTime)
+                      : formatDuration(msg.audioAttachment.durationSeconds)}
+                  </span>
+                  <span className="flex items-center gap-1 opacity-70">
+                    <Mic className="w-2.5 h-2.5" />
+                    <span>Sprachnachricht</span>
+                  </span>
+                </div>
               </div>
-            </div>
+            </Kurzinfo>
           </div>
         )}
 
@@ -713,25 +716,28 @@ function ChatMessageBubbleContent({
               {(() => {
                 const noteKey = `note_${msg.id}_${msg.noteAttachment!.title}`
                 const isImported = importedAttachmentIds.has(noteKey)
+                const hinweis = isImported ? t('messenger.noteTakenAlready') : t('messenger.takeNote')
                 return (
-                  <Button
-                    type="button"
-                    variant={msg.isSelf ? 'secondary' : 'primary'}
-                    size="sm"
-                    disabled={isImported}
-                    onClick={() => aktionen.onImportNote(msg.noteAttachment!, noteKey)}
-                    className={`h-6 px-2.5 text-label-sm gap-1 shrink-0 rounded-full font-medium ${
-                      isImported
-                        ? 'opacity-60 cursor-default bg-white/10 text-white border-none'
-                        : msg.isSelf
-                        ? 'bg-white/20 hover:bg-white/30 text-white border-none'
-                        : 'bg-primary text-on-primary hover:bg-primary/90'
-                    }`}
-                    title={isImported ? t('messenger.noteTakenAlready') : t('messenger.takeNote')}
-                  >
-                    {isImported ? <Check className="w-3 h-3 text-status-success" /> : <Download className="w-3 h-3" />}
-                    <span>{isImported ? t('common.taken') : t('common.apply')}</span>
-                  </Button>
+                  <Kurzinfo text={hinweis} seite="ende" aussen="shrink-0">
+                    <Button
+                      type="button"
+                      variant={msg.isSelf ? 'secondary' : 'primary'}
+                      size="sm"
+                      disabled={isImported}
+                      onClick={() => aktionen.onImportNote(msg.noteAttachment!, noteKey)}
+                      className={`h-6 px-2.5 text-label-sm gap-1 rounded-full font-medium ${
+                        isImported
+                          ? 'opacity-60 cursor-default bg-white/10 text-white border-none'
+                          : msg.isSelf
+                          ? 'bg-white/20 hover:bg-white/30 text-white border-none'
+                          : 'bg-primary text-on-primary hover:bg-primary/90'
+                      }`}
+                      aria-description={hinweis}
+                    >
+                      {isImported ? <Check className="w-3 h-3 text-status-success" /> : <Download className="w-3 h-3" />}
+                      <span>{isImported ? t('common.taken') : t('common.apply')}</span>
+                    </Button>
+                  </Kurzinfo>
                 )
               })()}
             </div>
@@ -766,27 +772,28 @@ function ChatMessageBubbleContent({
               {(() => {
                 const calKey = `cal_${msg.id}_${msg.calendarAttachment!.title}`
                 const isImported = importedAttachmentIds.has(calKey)
+                const hinweis = isImported ? t('messenger.eventTakenAlready') : t('messenger.takeEvent')
                 return (
-                  <Button
-                    type="button"
-                    variant={msg.isSelf ? 'secondary' : 'primary'}
-                    size="sm"
-                    disabled={isImported}
-                    onClick={() => aktionen.onImportCalendar(msg.calendarAttachment!, calKey)}
-                    className={`h-6 px-2.5 text-label-sm gap-1 shrink-0 rounded-full font-medium ${
-                      isImported
-                        ? 'opacity-60 cursor-default bg-white/10 text-white border-none'
-                        : msg.isSelf
-                        ? 'bg-white/20 hover:bg-white/30 text-white border-none'
-                        : 'bg-primary text-on-primary hover:bg-primary/90'
-                    }`}
-                    title={
-                      isImported ? t('messenger.eventTakenAlready') : t('messenger.takeEvent')
-                    }
-                  >
-                    {isImported ? <Check className="w-3 h-3 text-status-success" /> : <Plus className="w-3 h-3" />}
-                    <span>{isImported ? t('messenger.eventEntered') : t('messenger.enterEvent')}</span>
-                  </Button>
+                  <Kurzinfo text={hinweis} seite="ende" aussen="shrink-0">
+                    <Button
+                      type="button"
+                      variant={msg.isSelf ? 'secondary' : 'primary'}
+                      size="sm"
+                      disabled={isImported}
+                      onClick={() => aktionen.onImportCalendar(msg.calendarAttachment!, calKey)}
+                      className={`h-6 px-2.5 text-label-sm gap-1 rounded-full font-medium ${
+                        isImported
+                          ? 'opacity-60 cursor-default bg-white/10 text-white border-none'
+                          : msg.isSelf
+                          ? 'bg-white/20 hover:bg-white/30 text-white border-none'
+                          : 'bg-primary text-on-primary hover:bg-primary/90'
+                      }`}
+                      aria-description={hinweis}
+                    >
+                      {isImported ? <Check className="w-3 h-3 text-status-success" /> : <Plus className="w-3 h-3" />}
+                      <span>{isImported ? t('messenger.eventEntered') : t('messenger.enterEvent')}</span>
+                    </Button>
+                  </Kurzinfo>
                 )
               })()}
             </div>
@@ -995,15 +1002,18 @@ function ChatMessageBubbleContent({
             // der Klick angekommen ist.
             onPointerDown={(e) => e.stopPropagation()}
           >
-            <button
-              type="button"
-              onClick={() => aktionen.onMenue(msg)}
-              className="w-8 h-8 rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center"
-              title={t('common.more')}
-              aria-label={t('messenger.messageActions')}
-            >
-              <MoreHorizontal className="w-3.5 h-3.5" />
-            </button>
+            {/* Kurz wie vorher das title: der lange Name stünde am rechten
+                Rand über den Verlauf hinaus und schöbe eine Bildlaufleiste auf. */}
+            <Kurzinfo text={t('common.more')} lage="oben">
+              <button
+                type="button"
+                onClick={() => aktionen.onMenue(msg)}
+                className="w-8 h-8 rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center"
+                aria-label={t('messenger.messageActions')}
+              >
+                <MoreHorizontal className="w-3.5 h-3.5" />
+              </button>
+            </Kurzinfo>
           </div>
         )}
 
@@ -1015,28 +1025,37 @@ function ChatMessageBubbleContent({
         </span>
         {msg.isSelf &&
           (msg.status === 'queued' ? (
-            <span title={t('messenger.stateQueued')} className="inline-flex items-center">
-              <Clock className="w-3.5 h-3.5 opacity-60 animate-pulse" />
-            </span>
+            <Kurzinfo text={t('messenger.stateQueued')} seite="ende" lage="oben">
+              <span role="img" aria-label={t('messenger.stateQueued')} className="inline-flex items-center">
+                <Clock className="w-3.5 h-3.5 opacity-60 animate-pulse" />
+              </span>
+            </Kurzinfo>
           ) : activeGroup ? (
             // Gruppen verschicken keine Quittungen. Ein einzelner Haken hiesse
             // hier „noch nicht zugestellt“, und das stimmt nicht.
             null
           ) : msg.isRead && readReceiptsEnabled ? (
-            <span title={t('messenger.stateRead')} className="inline-flex items-center">
-              <CheckCheck className="w-3.5 h-3.5 text-primary" />
-            </span>
+            <Kurzinfo text={t('messenger.stateRead')} seite="ende" lage="oben">
+              <span role="img" aria-label={t('messenger.stateRead')} className="inline-flex items-center">
+                <CheckCheck className="w-3.5 h-3.5 text-primary" />
+              </span>
+            </Kurzinfo>
           ) : msg.isDelivered ? (
-            <span title={t('messenger.stateDelivered')} className="inline-flex items-center">
-              <CheckCheck className="w-3.5 h-3.5 opacity-60" />
-            </span>
+            <Kurzinfo text={t('messenger.stateDelivered')} seite="ende" lage="oben">
+              <span role="img" aria-label={t('messenger.stateDelivered')} className="inline-flex items-center">
+                <CheckCheck className="w-3.5 h-3.5 opacity-60" />
+              </span>
+            </Kurzinfo>
           ) : (
-            <span
-              title={t('messenger.stateUndelivered')}
-              className="inline-flex items-center"
-            >
-              <Check className="w-3.5 h-3.5 opacity-60" />
-            </span>
+            <Kurzinfo text={t('messenger.stateUndelivered')} seite="ende" lage="oben">
+              <span
+                role="img"
+                aria-label={t('messenger.stateUndelivered')}
+                className="inline-flex items-center"
+              >
+                <Check className="w-3.5 h-3.5 opacity-60" />
+              </span>
+            </Kurzinfo>
           ))}
       </div>
     </div>

@@ -5,7 +5,7 @@ import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
 import { confirm } from "@/stores/confirmStore";
 import { useHasPermission } from "@/hooks/useHasPermission";
-import { Dropdown, Switch } from "@/Singra/UI";
+import { Dropdown, Kurzinfo, Switch } from "@/Singra/UI";
 import { AlertTriangle, Bot, HardDrive, Plus, RotateCcw, Trash2, Settings, Cloud, CloudOff, UploadCloud } from "lucide-react";
 import { Button } from '@/Singra/UI'
 
@@ -405,27 +405,35 @@ export function Backups({ serverId }: BackupsProps) {
             {t("backups.subtitle")}
           </p>
           {s3Status && (
-            <span
-              className={`msm-badge msm-badge-success inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
-                s3Status.s3_configured
-                  ? "border-status-success/40 bg-status-success/10 text-status-success"
-                  : "border-outline-variant bg-surface-container text-on-surface-variant"
-              }`}
-              title={
+            <Kurzinfo
+              text={
                 s3Status.s3_configured
                   ? t("backups.s3ActiveTooltip")
                   : t("backups.s3NotConfiguredTooltip")
               }
             >
-              {s3Status.s3_configured ? (
-                <Cloud className="w-3.5 h-3.5" />
-              ) : (
-                <CloudOff className="w-3.5 h-3.5" />
-              )}
-              {s3Status.s3_configured
-                ? t("backups.s3Active")
-                : t("backups.s3NotConfigured")}
-            </span>
+              <span
+                className={`msm-badge msm-badge-success inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
+                  s3Status.s3_configured
+                    ? "border-status-success/40 bg-status-success/10 text-status-success"
+                    : "border-outline-variant bg-surface-container text-on-surface-variant"
+                }`}
+                aria-description={
+                  s3Status.s3_configured
+                    ? t("backups.s3ActiveTooltip")
+                    : t("backups.s3NotConfiguredTooltip")
+                }
+              >
+                {s3Status.s3_configured ? (
+                  <Cloud className="w-3.5 h-3.5" />
+                ) : (
+                  <CloudOff className="w-3.5 h-3.5" />
+                )}
+                {s3Status.s3_configured
+                  ? t("backups.s3Active")
+                  : t("backups.s3NotConfigured")}
+              </span>
+            </Kurzinfo>
           )}
         </div>
         <div className="flex gap-2">
@@ -433,7 +441,6 @@ export function Backups({ serverId }: BackupsProps) {
             onClick={() => setShowSettings(!showSettings)}
             disabled={isActive}
             className={`flex items-center gap-2 ${showSettings ? "bg-surface-container" : ""}`}
-            title={t("backups.scheduling")}
           >
             <Settings className="w-4 h-4" />
             {t("backups.scheduling")}
@@ -457,15 +464,17 @@ export function Backups({ serverId }: BackupsProps) {
               {t("backups.schedulingTitle")}
             </h2>
             {settings.backup_ai_managed && (
-              <span
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-primary/40 bg-primary/10 text-primary"
-                title={t("backups.aiManagedHint")}
-              >
-                <Bot className="w-3.5 h-3.5" />
-                {settings.backup_ai_task_title
-                  ? t("backups.aiManagedByTask", { title: settings.backup_ai_task_title })
-                  : t("backups.aiManaged")}
-              </span>
+              <Kurzinfo text={t("backups.aiManagedHint")}>
+                <span
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-primary/40 bg-primary/10 text-primary"
+                  aria-description={t("backups.aiManagedHint")}
+                >
+                  <Bot className="w-3.5 h-3.5" />
+                  {settings.backup_ai_task_title
+                    ? t("backups.aiManagedByTask", { title: settings.backup_ai_task_title })
+                    : t("backups.aiManaged")}
+                </span>
+              </Kurzinfo>
             )}
           </div>
           {settings.next_auto_backup_at && (
@@ -623,13 +632,17 @@ export function Backups({ serverId }: BackupsProps) {
               <div className="flex items-center gap-2">
                 {/* Cloud-Icon: gefuellt fuer S3-backed, gedimmt fuer lokal */}
                 {isS3Backed ? (
-                  <span title={t("backups.cloudBackedTooltip")} className="flex-shrink-0">
-                    <Cloud className="w-5 h-5 text-status-success" />
-                  </span>
+                  <Kurzinfo text={t("backups.cloudBackedTooltip")} aussen="flex-shrink-0">
+                    <span role="img" aria-label={t("backups.cloudBackedTooltip")}>
+                      <Cloud className="w-5 h-5 text-status-success" />
+                    </span>
+                  </Kurzinfo>
                 ) : (
-                  <span title={t("backups.localOnlyTooltip")} className="flex-shrink-0">
-                    <CloudOff className="w-5 h-5 text-on-surface-variant/40" />
-                  </span>
+                  <Kurzinfo text={t("backups.localOnlyTooltip")} aussen="flex-shrink-0">
+                    <span role="img" aria-label={t("backups.localOnlyTooltip")}>
+                      <CloudOff className="w-5 h-5 text-on-surface-variant/40" />
+                    </span>
+                  </Kurzinfo>
                 )}
                 {/* In Cloud hochladen: nur fuer reine lokale Backups */}
                 {!isS3Backed && backup.local_exists && (
@@ -637,7 +650,6 @@ export function Backups({ serverId }: BackupsProps) {
                     onClick={() => uploadToCloud(backup.id)}
                     disabled={isActive || !!actionLoading}
                     className="flex items-center gap-1 disabled:opacity-50"
-                    title={t("backups.uploadToCloud")}
                   >
                     <UploadCloud className="w-3.5 h-3.5" />
                     {actionLoading === `upload-${backup.id}`
@@ -651,7 +663,6 @@ export function Backups({ serverId }: BackupsProps) {
                     onClick={() => restoreFromCloud(backup.id)}
                     disabled={isActive || !!actionLoading}
                     className="flex items-center gap-1 disabled:opacity-50"
-                    title={t("backups.restoreFromCloud")}
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                     {actionLoading === `restore-${backup.id}`
@@ -663,20 +674,21 @@ export function Backups({ serverId }: BackupsProps) {
                     onClick={() => restoreBackup(backup.id)}
                     disabled={isActive || !!actionLoading}
                     className="flex items-center gap-1 disabled:opacity-50"
-                    title={t("backups.restore")}
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                     {t("backups.restore")}
                   </Button>
                 )}
-                <Button variant="destructive" size="sm"
-                  onClick={() => deleteBackup(backup.id)}
-                  disabled={isActive || !!actionLoading}
-                  className="flex items-center gap-1 disabled:opacity-50"
-                  title={t("common.delete")}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
+                <Kurzinfo text={t("common.delete")} seite="ende">
+                  <Button variant="destructive" size="sm"
+                    onClick={() => deleteBackup(backup.id)}
+                    disabled={isActive || !!actionLoading}
+                    className="flex items-center gap-1 disabled:opacity-50"
+                    aria-label={t("common.delete")}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </Kurzinfo>
               </div>
             </div>
             );

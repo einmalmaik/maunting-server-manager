@@ -11,7 +11,7 @@ import { confirm } from '@/stores/confirmStore'
 import { Switch } from '@/components/ui/Switch'
 import { NumberStepper } from '@/components/ui/NumberStepper'
 import { Dropdown } from '@/components/ui/Dropdown'
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 
 import { Spinner } from '@/components/ui/Spinner'
 interface FormState {
@@ -289,14 +289,16 @@ export function OAuthTab() {
                       <code className="font-mono-sm text-on-surface-variant bg-surface-container-low px-2 py-0.5 rounded truncate max-w-md">
                         {callbackUri}
                       </code>
-                      <button
-                        type="button"
-                        onClick={() => copyRedirectUri(callbackUri, p.id)}
-                        className="text-on-surface-variant hover:text-on-surface inline-flex items-center gap-1"
-                        title={t('common.copy')}
-                      >
-                        {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                      </button>
+                      <Kurzinfo text={t('common.copy')}>
+                        <button
+                          type="button"
+                          onClick={() => copyRedirectUri(callbackUri, p.id)}
+                          className="text-on-surface-variant hover:text-on-surface inline-flex items-center gap-1"
+                          aria-label={t('common.copy')}
+                        >
+                          {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </Kurzinfo>
                     </div>
                   </div>
                   {canWrite && (
@@ -314,22 +316,26 @@ export function OAuthTab() {
                         )}
                         {t('settings.oauth.test')}
                       </Button>
-                      <Button variant="secondary" size="sm"
-                        type="button"
-                        onClick={() => openEdit(p)}
-                        className="inline-flex items-center gap-1.5"
-                        title={t('settings.oauth.edit')}
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </Button>
-                      <Button variant="secondary" size="sm"
-                        type="button"
-                        onClick={() => handleDelete(p)}
-                        className="inline-flex items-center gap-1.5 text-status-destructive hover:bg-status-destructive/10"
-                        title={t('settings.oauth.delete')}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
+                      <Kurzinfo text={t('settings.oauth.edit')}>
+                        <Button variant="secondary" size="sm"
+                          type="button"
+                          onClick={() => openEdit(p)}
+                          className="inline-flex items-center gap-1.5"
+                          aria-label={t('settings.oauth.edit')}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </Button>
+                      </Kurzinfo>
+                      <Kurzinfo text={t('settings.oauth.delete')} seite="ende">
+                        <Button variant="secondary" size="sm"
+                          type="button"
+                          onClick={() => handleDelete(p)}
+                          className="inline-flex items-center gap-1.5 text-status-destructive hover:bg-status-destructive/10"
+                          aria-label={t('settings.oauth.delete')}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </Kurzinfo>
                     </div>
                   )}
                 </li>

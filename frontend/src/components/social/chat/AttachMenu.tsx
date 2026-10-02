@@ -9,6 +9,7 @@ import {
   StickyNote,
   type LucideIcon,
 } from 'lucide-react'
+import { Kurzinfo } from '@/Singra/UI'
 
 interface AttachMenuProps {
   /** Ohne das Recht, Anhänge zu senden, bleibt der Knopf gesperrt. */
@@ -47,18 +48,20 @@ export function AttachMenu({ erlaubt, onKamera, onFoto, onDokument, onNotiz, onT
 
   return (
     <div className="relative shrink-0" ref={huelle}>
-      <button
-        type="button"
-        disabled={!erlaubt}
-        onClick={() => setOffen((vorher) => !vorher)}
-        className={`w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-          offen ? 'bg-surface-container-highest text-primary' : 'text-on-surface-variant hover:text-primary'
-        }`}
-        title={knopfText}
-        aria-label={knopfText}
-      >
-        <Plus className={`w-4 h-4 transition-transform duration-200 ${offen ? 'rotate-45 text-primary' : ''}`} />
-      </button>
+      {/* Bei offenem Menü läge die Kurzinfo über dessen unterstem Eintrag. */}
+      <Kurzinfo text={knopfText} seite="anfang" lage="oben" className={offen ? '!hidden' : ''}>
+        <button
+          type="button"
+          disabled={!erlaubt}
+          onClick={() => setOffen((vorher) => !vorher)}
+          className={`w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+            offen ? 'bg-surface-container-highest text-primary' : 'text-on-surface-variant hover:text-primary'
+          }`}
+          aria-label={knopfText}
+        >
+          <Plus className={`w-4 h-4 transition-transform duration-200 ${offen ? 'rotate-45 text-primary' : ''}`} />
+        </button>
+      </Kurzinfo>
 
       {offen && (
         <div className="absolute bottom-10 left-0 z-30 min-w-[210px] p-1.5 rounded-2xl bg-surface-container-high/95 backdrop-blur-md border border-outline-variant/30 shadow-xl space-y-1 animate-slide-up">

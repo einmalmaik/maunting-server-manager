@@ -151,6 +151,7 @@ describe('Blueprints page', () => {
     // Community-Row hat beide Buttons fuer Owner.
     expect(screen.getByTestId('blueprint-replace-my_custom')).toBeInTheDocument()
     expect(screen.getByTestId('blueprint-delete-my_custom')).toBeInTheDocument()
+    expect(document.querySelectorAll('[title]')).toHaveLength(0)
   })
 
   it('hides write actions completely for read-only users', async () => {

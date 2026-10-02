@@ -166,4 +166,19 @@ describe('CallOverlay: Platz im Baum', () => {
     expect(screen.getByLabelText(i18n.t('calls.endCall'))).toBeTruthy()
     expect(screen.getByText(i18n.t('calls.hangUp'))).toBeTruthy()
   })
+
+  it('benennt die Steuerknöpfe per aria-label, nicht per nativem title', () => {
+    imInhaltsbereich(<CallOverlay />)
+    act(() => {
+      useCallStore.setState({
+        state: 'active',
+        kind: 'direkt',
+        partner: { userId: 2, username: 'Maik', avatarUrl: null },
+        raum: 'r1',
+      })
+    })
+    expect(screen.getByRole('button', { name: i18n.t('calls.chooseDevices') })).toBeTruthy()
+    expect(screen.getByRole('button', { name: i18n.t('calls.addParticipant') })).toBeTruthy()
+    expect(document.querySelector('div.fixed.inset-0.z-50')!.querySelectorAll('[title]')).toHaveLength(0)
+  })
 })

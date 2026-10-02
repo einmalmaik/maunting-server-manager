@@ -447,25 +447,25 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
 
       // Send Message 1 (will get ID 2)
       fireEvent.change(input, { target: { value: 'Rapid Message 1' } })
-      await waitFor(() => expect(screen.getByTitle('Senden')).not.toBeDisabled(), { timeout: 5000 })
-      fireEvent.click(screen.getByTitle('Senden'))
+      await waitFor(() => expect(screen.getByLabelText(i18n.t('messenger.send'))).not.toBeDisabled(), { timeout: 5000 })
+      fireEvent.click(screen.getByLabelText(i18n.t('messenger.send')))
       await waitFor(() => expect(screen.getByText('Rapid Message 1')).toBeInTheDocument(), { timeout: 5000 })
 
       // Send Message 2 (will get ID 5)
       fireEvent.change(input, { target: { value: 'Rapid Message 2' } })
-      await waitFor(() => expect(screen.getByTitle('Senden')).not.toBeDisabled(), { timeout: 5000 })
-      fireEvent.click(screen.getByTitle('Senden'))
+      await waitFor(() => expect(screen.getByLabelText(i18n.t('messenger.send'))).not.toBeDisabled(), { timeout: 5000 })
+      fireEvent.click(screen.getByLabelText(i18n.t('messenger.send')))
       await waitFor(() => expect(screen.getByText('Rapid Message 2')).toBeInTheDocument(), { timeout: 5000 })
 
       // Send Message 3 (will get ID 10)
       fireEvent.change(input, { target: { value: 'Rapid Message 3' } })
-      await waitFor(() => expect(screen.getByTitle('Senden')).not.toBeDisabled(), { timeout: 5000 })
-      fireEvent.click(screen.getByTitle('Senden'))
+      await waitFor(() => expect(screen.getByLabelText(i18n.t('messenger.send'))).not.toBeDisabled(), { timeout: 5000 })
+      fireEvent.click(screen.getByLabelText(i18n.t('messenger.send')))
       await waitFor(() => expect(screen.getByText('Rapid Message 3')).toBeInTheDocument(), { timeout: 5000 })
 
       // All 3 messages initially display 1 single checkmark (sent / not yet delivered)
       await waitFor(() => {
-        const singleTicks = screen.getAllByTitle(singleTickTitle)
+        const singleTicks = screen.getAllByLabelText(singleTickTitle)
         expect(singleTicks.length).toBe(3)
       })
 
@@ -503,9 +503,9 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
       // Message 1 (ID 2 <= 5) and Message 2 (ID 5 <= 5) transition to double checkmark
       // Message 3 (ID 10 > 5) remains single checkmark
       await waitFor(() => {
-        const doubleTicks = screen.getAllByTitle(doubleGrayTickTitle)
+        const doubleTicks = screen.getAllByLabelText(doubleGrayTickTitle)
         expect(doubleTicks.length).toBe(2)
-        const singleTicks = screen.getAllByTitle(singleTickTitle)
+        const singleTicks = screen.getAllByLabelText(singleTickTitle)
         expect(singleTicks.length).toBe(1)
       })
 
@@ -550,9 +550,9 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
       // CRITICAL ASSERTION: Out-of-order receipt for ID 2 MUST NOT cause Message 2 (ID 5) to regress!
       // Double ticks must remain at 2, single tick at 1.
       await waitFor(() => {
-        const doubleTicks = screen.getAllByTitle(doubleGrayTickTitle)
+        const doubleTicks = screen.getAllByLabelText(doubleGrayTickTitle)
         expect(doubleTicks.length).toBe(2)
-        const singleTicks = screen.getAllByTitle(singleTickTitle)
+        const singleTicks = screen.getAllByLabelText(singleTickTitle)
         expect(singleTicks.length).toBe(1)
       })
 
@@ -603,10 +603,10 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
 
       // All 3 messages are now acknowledged and show 2 checkmarks
       await waitFor(() => {
-        const doubleTicks = screen.getAllByTitle(doubleGrayTickTitle)
-        console.log('DOUBLE TICKS FOUND:', doubleTicks.length, 'SINGLE TICKS:', screen.queryAllByTitle(singleTickTitle).length)
+        const doubleTicks = screen.getAllByLabelText(doubleGrayTickTitle)
+        console.log('DOUBLE TICKS FOUND:', doubleTicks.length, 'SINGLE TICKS:', screen.queryAllByLabelText(singleTickTitle).length)
         expect(doubleTicks.length).toBe(3)
-        expect(screen.queryByTitle(singleTickTitle)).not.toBeInTheDocument()
+        expect(screen.queryByLabelText(singleTickTitle)).not.toBeInTheDocument()
       })
     })
 
@@ -631,14 +631,14 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
 
       const input = await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
       fireEvent.change(input, { target: { value: 'In-Flight Message' } })
-      const sendBtn = screen.getByTitle('Senden')
+      const sendBtn = screen.getByLabelText(i18n.t('messenger.send'))
 
       // Send message - relay remains pending
       fireEvent.click(sendBtn)
       await waitFor(() => expect(screen.getByText('In-Flight Message')).toBeInTheDocument())
       expect(
-        screen.queryByTitle(i18n.t('messenger.stateQueued')) ||
-          screen.queryByTitle(singleTickTitle)
+        screen.queryByLabelText(i18n.t('messenger.stateQueued')) ||
+          screen.queryByLabelText(singleTickTitle)
       ).toBeInTheDocument()
 
       // Delivery receipt acknowledging up to ID 25 arrives while relay is still in flight!
@@ -685,8 +685,8 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
 
       // Message immediately renders double checkmark upon relay resolution!
       await waitFor(() => {
-        expect(screen.getByTitle(doubleGrayTickTitle)).toBeInTheDocument()
-        expect(screen.queryByTitle(singleTickTitle)).not.toBeInTheDocument()
+        expect(screen.getByLabelText(doubleGrayTickTitle)).toBeInTheDocument()
+        expect(screen.queryByLabelText(singleTickTitle)).not.toBeInTheDocument()
       })
     })
   })
@@ -750,7 +750,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
       // Step 1: Open Alice and verify Alice has double checkmarks for envelope 500
       await waitFor(() => {
         expect(screen.getByText('Message to Alice with high ID')).toBeInTheDocument()
-        expect(screen.getByTitle(doubleGrayTickTitle)).toBeInTheDocument()
+        expect(screen.getByLabelText(doubleGrayTickTitle)).toBeInTheDocument()
       })
 
       // Step 2: Switch to Bob
@@ -773,7 +773,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
 
       const input = await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
       fireEvent.change(input, { target: { value: 'Hello Bob low ID' } })
-      const sendBtn = screen.getByTitle('Senden')
+      const sendBtn = screen.getByLabelText(i18n.t('messenger.send'))
       fireEvent.click(sendBtn)
 
       await waitFor(() => {
@@ -783,8 +783,8 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
       // CRITICAL ASSERTION: Message to Bob (ID 2) MUST NOT show false double checkmarks!
       // If maxPartnerDeliveredIdRef was not reset from Alice's 500, 500 >= 2 would falsely mark it delivered.
       await waitFor(() => {
-        expect(screen.getByTitle(singleTickTitle)).toBeInTheDocument()
-        expect(screen.queryByTitle(doubleGrayTickTitle)).not.toBeInTheDocument()
+        expect(screen.getByLabelText(singleTickTitle)).toBeInTheDocument()
+        expect(screen.queryByLabelText(doubleGrayTickTitle)).not.toBeInTheDocument()
       })
 
       // Step 3: Test that incoming message from Bob with low ID (ID 3) triggers a delivery receipt
@@ -896,7 +896,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
 
       // Outgoing message to Bob now properly transitions to double checkmark
       await waitFor(() => {
-        expect(screen.getByTitle(doubleGrayTickTitle)).toBeInTheDocument()
+        expect(screen.getByLabelText(doubleGrayTickTitle)).toBeInTheDocument()
       })
 
       // Step 5: Switch back to Alice and verify Alice's messages are intact with double checkmarks
@@ -905,7 +905,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
 
       await waitFor(() => {
         expect(screen.getByText('Message to Alice with high ID')).toBeInTheDocument()
-        expect(screen.getByTitle(doubleGrayTickTitle)).toBeInTheDocument()
+        expect(screen.getByLabelText(doubleGrayTickTitle)).toBeInTheDocument()
       })
     })
   })
@@ -1037,7 +1037,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
 
       // 3. Outgoing message (ID 20) is hydrated with double ticks because Envelope 25 was in mailbox history
       await waitFor(() => {
-        expect(screen.getByTitle(doubleGrayTickTitle)).toBeInTheDocument()
+        expect(screen.getByLabelText(doubleGrayTickTitle)).toBeInTheDocument()
       })
 
       // 4. Zero instances of "Verschlüsselte Nachricht" placeholder spam

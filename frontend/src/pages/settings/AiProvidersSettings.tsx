@@ -939,7 +939,6 @@ function ProviderForm({
                 type="button"
                 onClick={() => change({ clear_operator_api_key: true, operator_api_key: '' })}
                 className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-destructive transition-colors"
-                title={t('ai.providers.clearKey')}
                 aria-label={t('ai.providers.clearKey')}
               >
                 <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />

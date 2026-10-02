@@ -24,6 +24,7 @@ import {
   type Wischrichtung,
 } from '@/lib/gesten'
 import { useLangdruck } from '@/hooks/useLangdruck'
+import { Kurzinfo } from '@/Singra/UI'
 
 export interface ChatZeilenGesteProps {
   angeheftet: boolean
@@ -158,20 +159,21 @@ export function ChatZeilenGeste({
           transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto
           focus-within:opacity-100 focus-within:pointer-events-auto"
       >
-        <button
-          type="button"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation()
-            onMenue()
-          }}
-          className="w-8 h-8 rounded-md bg-surface-container-high/90 text-on-surface-variant
-            hover:text-primary transition-colors flex items-center justify-center"
-          aria-label={t('messenger.chatActions')}
-          title={t('messenger.chatActions')}
-        >
-          <MoreHorizontal className="w-4 h-4" />
-        </button>
+        <Kurzinfo text={t('messenger.chatActions')} seite="ende">
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              onMenue()
+            }}
+            className="w-8 h-8 rounded-md bg-surface-container-high/90 text-on-surface-variant
+              hover:text-primary transition-colors flex items-center justify-center"
+            aria-label={t('messenger.chatActions')}
+          >
+            <MoreHorizontal className="w-4 h-4" />
+          </button>
+        </Kurzinfo>
       </div>
     </div>
   )

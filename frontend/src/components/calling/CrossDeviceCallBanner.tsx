@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { eigenesGeraet, geraetVeroeffentlichen } from '@/services/e2eeGeraet'
 import { useMessengerSperre } from '@/services/messengerSperre'
 import type { GruppenAnsicht } from '@/services/gruppenName'
+import { Kurzinfo } from '@/Singra/UI'
 
 interface CrossDeviceCallBannerProps {
   className?: string
@@ -162,26 +163,28 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
 
           {/* Rechte Seite: Beitritts-Knopf */}
           <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
-            <button
-              type="button"
-              onClick={() => {
-                void joinGroupCall(
-                  {
-                    id: groupCall.group_id,
-                    name: gruppenTitel(groupCall.group_id),
-                    avatarUrl: gruppenNamen.get(groupCall.group_id)?.logo ?? null,
-                    canShare: true,
-                    canModerate: false,
-                  },
-                  groupCall.room_token,
-                )
-              }}
-              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-status-success hover:bg-status-success/90 text-surface-container-lowest font-semibold text-xs shadow transition-colors active:scale-95 cursor-pointer"
-              title={t('calls.joinGroupCall')}
-            >
-              <PhoneForwarded className="w-3.5 h-3.5" />
-              <span>{t('calls.joinCall')}</span>
-            </button>
+            <Kurzinfo text={t('calls.joinGroupCall')} seite="ende" aussen="flex-1 sm:flex-initial">
+              <button
+                type="button"
+                onClick={() => {
+                  void joinGroupCall(
+                    {
+                      id: groupCall.group_id,
+                      name: gruppenTitel(groupCall.group_id),
+                      avatarUrl: gruppenNamen.get(groupCall.group_id)?.logo ?? null,
+                      canShare: true,
+                      canModerate: false,
+                    },
+                    groupCall.room_token,
+                  )
+                }}
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-status-success hover:bg-status-success/90 text-surface-container-lowest font-semibold text-xs shadow transition-colors active:scale-95 cursor-pointer"
+                aria-description={t('calls.joinGroupCall')}
+              >
+                <PhoneForwarded className="w-3.5 h-3.5" />
+                <span>{t('calls.joinCall')}</span>
+              </button>
+            </Kurzinfo>
           </div>
         </div>
       </div>
@@ -204,6 +207,30 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
       : crossDeviceCall.device_type === 'desktop'
         ? Monitor
         : Globe
+
+  // Am eigenen Gerät sagt der Knopf schon alles; auf einem anderen erklärt der
+  // Hinweis, dass der Anruf herübergeholt wird.
+  const eigenesGeraetImAnruf = crossDeviceCall.device_id === getDeviceId()
+  const uebertragenKnopf = (
+    <button
+      type="button"
+      onClick={() => void transferCallToThisDevice()}
+      className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-status-success hover:bg-status-success/90 text-surface-container-lowest font-semibold text-xs shadow transition-colors active:scale-95 cursor-pointer"
+      aria-description={eigenesGeraetImAnruf ? undefined : t('calls.transferToThisDevice')}
+    >
+      <PhoneForwarded className="w-3.5 h-3.5" />
+      <span>
+        {eigenesGeraetImAnruf
+          ? t('calls.resumeCall')
+          : t('calls.joinOnThisDevice')}
+      </span>
+    </button>
+  )
+  const uebertragen = eigenesGeraetImAnruf ? uebertragenKnopf : (
+    <Kurzinfo text={t('calls.transferToThisDevice')} aussen="flex-1 sm:flex-initial">
+      {uebertragenKnopf}
+    </Kurzinfo>
+  )
 
   return (
     <div
@@ -243,29 +270,19 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
 
         {/* Rechte Seite: Aktionsknöpfe wie bei Discord */}
         <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
-          <button
-            type="button"
-            onClick={() => void transferCallToThisDevice()}
-            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-status-success hover:bg-status-success/90 text-surface-container-lowest font-semibold text-xs shadow transition-colors active:scale-95 cursor-pointer"
-            title={crossDeviceCall.device_id === getDeviceId() ? t('calls.resumeCall') : t('calls.transferToThisDevice')}
-          >
-            <PhoneForwarded className="w-3.5 h-3.5" />
-            <span>
-              {crossDeviceCall.device_id === getDeviceId()
-                ? t('calls.resumeCall')
-                : t('calls.joinOnThisDevice')}
-            </span>
-          </button>
+          {uebertragen}
 
-          <button
-            type="button"
-            onClick={() => void terminateCrossDeviceCall()}
-            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-status-destructive/20 hover:bg-status-destructive/30 text-status-destructive hover:text-status-destructive/80 border border-status-destructive/30 text-xs font-medium transition-colors active:scale-95 cursor-pointer"
-            title={t('calls.endOnAllDevices')}
-          >
-            <PhoneOff className="w-3.5 h-3.5" />
-            <span>{t('calls.hangUp')}</span>
-          </button>
+          <Kurzinfo text={t('calls.endOnAllDevices')} seite="ende">
+            <button
+              type="button"
+              onClick={() => void terminateCrossDeviceCall()}
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-status-destructive/20 hover:bg-status-destructive/30 text-status-destructive hover:text-status-destructive/80 border border-status-destructive/30 text-xs font-medium transition-colors active:scale-95 cursor-pointer"
+              aria-description={t('calls.endOnAllDevices')}
+            >
+              <PhoneOff className="w-3.5 h-3.5" />
+              <span>{t('calls.hangUp')}</span>
+            </button>
+          </Kurzinfo>
         </div>
       </div>
     </div>

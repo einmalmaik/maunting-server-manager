@@ -117,17 +117,49 @@ describe('ChatMessageBubble Resilienz & Fehlerbehandlung', () => {
       const gruppe = { ...defaultKontext, activeGroup: { id: 77, name: 'Gruppe', members: [] } as any }
 
       const imDirektchat = zeige(defaultKontext)
-      expect(screen.getByTitle(i18n.t('messenger.stateRead'))).toBeDefined()
+      expect(screen.getByRole('img', { name: i18n.t('messenger.stateRead') })).toBeDefined()
       imDirektchat.unmount()
 
       const inDerGruppe = zeige(gruppe)
-      expect(screen.queryByTitle(i18n.t('messenger.stateRead'))).toBeNull()
-      expect(screen.queryByTitle(i18n.t('messenger.stateUndelivered'))).toBeNull()
+      expect(screen.queryByRole('img', { name: i18n.t('messenger.stateRead') })).toBeNull()
+      expect(screen.queryByRole('img', { name: i18n.t('messenger.stateUndelivered') })).toBeNull()
       inDerGruppe.unmount()
 
       // Die Uhr für „wartet noch“ bleibt auch in der Gruppe.
       zeige(gruppe, { ...eigene, isRead: false, status: 'queued' })
-      expect(screen.getByTitle(i18n.t('messenger.stateQueued'))).toBeDefined()
+      expect(screen.getByRole('img', { name: i18n.t('messenger.stateQueued') })).toBeDefined()
+    })
+
+    it('setzt kein natives title, die Hinweise stehen als Kurzinfo da', () => {
+      // Das Betriebssystem zeichnete title-Tooltips verspätet, im eigenen Stil
+      // und am Finger nie (AGENTS.md Punkt 4).
+      const msg = {
+        id: 9,
+        senderId: 1,
+        text: 'Alles drin',
+        createdAt: '2026-09-25T14:30:00.000Z',
+        isSelf: true,
+        isDelivered: true,
+        antwortAuf: { clientUuid: 'ref-9', absenderId: 2, auszug: 'Vorher' },
+        noteAttachment: { title: 'Notiz', content: 'Inhalt' },
+        calendarAttachment: { title: 'Termin', start: '2026-09-26T10:00:00Z', end: '2026-09-26T11:00:00Z' },
+        stickerAttachment: { svg: '<svg></svg>', label: 'Herz' },
+        audioAttachment: { durationSeconds: 4 },
+      } as unknown as ChatMessage
+      const { container } = render(
+        <ChatMessageBubble
+          msg={msg}
+          kontext={defaultKontext}
+          ton={defaultTon}
+          aktionen={defaultAktionen}
+          auswahl={defaultAuswahl}
+          medienBindung={() => ({} as any)}
+        />
+      )
+      expect(container.querySelectorAll('[title]')).toHaveLength(0)
+      expect(screen.getByRole('button', { name: i18n.t('messenger.messageActions') })).toBeDefined()
+      expect(screen.getByRole('img', { name: i18n.t('messenger.stateDelivered') })).toBeDefined()
+      expect(container.querySelector(`[aria-description="${i18n.t('messenger.takeNote')}"]`)).not.toBeNull()
     })
 
     it('rendert ohne Absturz bei ungueltigem createdAt Zeitstempel', () => {

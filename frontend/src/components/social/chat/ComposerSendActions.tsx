@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Mic, Send, Video } from 'lucide-react'
+import { Kurzinfo } from '@/Singra/UI'
 
 interface ComposerSendActionsProps {
   /** Text, Foto oder Datei liegen bereit: dann steht hier Senden. */
@@ -24,38 +25,41 @@ export function ComposerSendActions({ hatInhalt, sendet, onVideonotiz, onSprachn
      * `msm-btn-primary` bringt nur die Farben mit und kollidiert mit nichts.
      */
     return (
-      <button
-        type="submit"
-        disabled={sendet}
-        className="msm-btn-primary w-11 h-11 sm:w-8 sm:h-8 shrink-0 rounded-full flex items-center justify-center"
-        title="Senden"
-        aria-label="Senden"
-      >
-        <Send className="w-3.5 h-3.5" />
-      </button>
+      <Kurzinfo text={t('messenger.send')} seite="ende" lage="oben" aussen="shrink-0">
+        <button
+          type="submit"
+          disabled={sendet}
+          className="msm-btn-primary w-11 h-11 sm:w-8 sm:h-8 rounded-full flex items-center justify-center"
+          aria-label={t('messenger.send')}
+        >
+          <Send className="w-3.5 h-3.5" />
+        </button>
+      </Kurzinfo>
     )
   }
 
   return (
     <div className="flex items-center gap-1">
-      <button
-        type="button"
-        onClick={onVideonotiz}
-        className="w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center text-on-surface-variant hover:text-status-success hover:bg-status-success/10 rounded-full transition-colors"
-        title={t('messenger.recordVideoNoteHint')}
-        aria-label={t('messenger.recordVideoNote')}
-      >
-        <Video className="w-4 h-4" />
-      </button>
-      <button
-        type="button"
-        onClick={onSprachnachricht}
-        className="w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-full transition-colors"
-        title={t('messenger.recordVoice')}
-        aria-label={t('messenger.recordVoice')}
-      >
-        <Mic className="w-4 h-4" />
-      </button>
+      <Kurzinfo text={t('messenger.recordVideoNoteHint')} seite="ende" lage="oben" aussen="shrink-0">
+        <button
+          type="button"
+          onClick={onVideonotiz}
+          className="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center text-on-surface-variant hover:text-status-success hover:bg-status-success/10 rounded-full transition-colors"
+          aria-label={t('messenger.recordVideoNote')}
+        >
+          <Video className="w-4 h-4" />
+        </button>
+      </Kurzinfo>
+      <Kurzinfo text={t('messenger.recordVoice')} seite="ende" lage="oben" aussen="shrink-0">
+        <button
+          type="button"
+          onClick={onSprachnachricht}
+          className="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-full transition-colors"
+          aria-label={t('messenger.recordVoice')}
+        >
+          <Mic className="w-4 h-4" />
+        </button>
+      </Kurzinfo>
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { BellOff, Camera, ChevronLeft, Phone, Search, UserPlus, UsersRound } from 'lucide-react'
-import { Blattknopf } from '@/Singra/UI'
+import { Blattknopf, Kurzinfo } from '@/Singra/UI'
 
 interface ChatHeaderProps {
   /** Während Auswahl oder Suche treten die schwebenden Knöpfe zurück. */
@@ -60,15 +60,16 @@ export function ChatHeader({
       }`}
     >
       <div className="flex items-center gap-2 min-w-0 pointer-events-auto">
-        <button
-          type="button"
-          onClick={onZurueck}
-          className="md:hidden w-11 h-11 flex items-center justify-center rounded-full bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant shadow-sm transition-colors"
-          aria-label={t('messenger.backToContacts')}
-          title={t('messenger.backToContacts')}
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
+        <Kurzinfo text={t('messenger.backToContacts')} seite="anfang" aussen="shrink-0 md:hidden">
+          <button
+            type="button"
+            onClick={onZurueck}
+            className="w-11 h-11 flex items-center justify-center rounded-full bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant shadow-sm transition-colors"
+            aria-label={t('messenger.backToContacts')}
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+        </Kurzinfo>
 
         <div className="flex items-center gap-2 min-w-0 px-3 py-1.5 rounded-full bg-surface-container-high/85 backdrop-blur-md border border-outline-variant/30 shadow-sm">
           {gruppenBild && (
@@ -77,22 +78,26 @@ export function ChatHeader({
           {/* Nur der Name ist der Knopf: das Funken-Abzeichen daneben ist selbst
               einer, und Knopf in Knopf gibt es nicht. */}
           {onProfil ? (
-            <button
-              type="button"
-              onClick={onProfil}
-              className="text-xs font-bold text-on-surface truncate max-w-[130px] sm:max-w-xs hover:underline"
-              title={t('social.profile.open', { name: titel })}
-            >
-              {titel}
-            </button>
+            <Kurzinfo text={t('social.profile.open', { name: titel })} seite="anfang" aussen="min-w-0">
+              <button
+                type="button"
+                onClick={onProfil}
+                className="text-xs font-bold text-on-surface truncate max-w-[130px] sm:max-w-xs hover:underline"
+                aria-description={t('social.profile.open', { name: titel })}
+              >
+                {titel}
+              </button>
+            </Kurzinfo>
           ) : (
             <span className="text-xs font-bold text-on-surface truncate max-w-[130px] sm:max-w-xs">{titel}</span>
           )}
           {funke}
           {stumm && (
-            <span title="Stummgeschaltet" className="inline-flex items-center text-status-warning">
-              <BellOff className="w-3.5 h-3.5" />
-            </span>
+            <Kurzinfo text={t('messenger.chatMuted')}>
+              <span role="img" aria-label={t('messenger.chatMuted')} className="inline-flex items-center text-status-warning">
+                <BellOff className="w-3.5 h-3.5" />
+              </span>
+            </Kurzinfo>
           )}
           {blockiert && (
             <span className="px-1.5 py-0.2 rounded-md bg-status-destructive/15 text-status-destructive text-label-sm font-semibold">
@@ -108,63 +113,72 @@ export function ChatHeader({
           Abstand. */}
       <div className="flex items-center gap-1.5 shrink-0 pointer-events-auto">
         {gruppenanruf && (
-          <button
-            type="button"
-            onClick={gruppenanruf.onStarten}
-            disabled={!gruppenanruf.erlaubt}
-            className={`${rundknopf} text-primary disabled:opacity-60`}
-            title={gruppenanruf.erlaubt ? t('messenger.startGroupCall') : t('messenger.noStartCallRight')}
-            aria-label={t('messenger.startGroupCall')}
+          <Kurzinfo
+            text={gruppenanruf.erlaubt ? t('messenger.startGroupCall') : t('messenger.noStartCallRight')}
+            seite="ende"
           >
-            <UsersRound className="w-4 h-4" />
-          </button>
+            <button
+              type="button"
+              onClick={gruppenanruf.onStarten}
+              disabled={!gruppenanruf.erlaubt}
+              className={`${rundknopf} text-primary disabled:opacity-60`}
+              aria-label={t('messenger.startGroupCall')}
+              aria-description={gruppenanruf.erlaubt ? undefined : t('messenger.noStartCallRight')}
+            >
+              <UsersRound className="w-4 h-4" />
+            </button>
+          </Kurzinfo>
         )}
 
         {onSprachanruf && (
-          <button
-            type="button"
-            onClick={onSprachanruf}
-            className={`${rundknopf} text-primary`}
-            title={t('messenger.startVoiceCall')}
-            aria-label={t('messenger.startVoiceCall')}
-          >
-            <Phone className="w-4 h-4" />
-          </button>
+          <Kurzinfo text={t('messenger.startVoiceCall')} seite="ende">
+            <button
+              type="button"
+              onClick={onSprachanruf}
+              className={`${rundknopf} text-primary`}
+              aria-label={t('messenger.startVoiceCall')}
+            >
+              <Phone className="w-4 h-4" />
+            </button>
+          </Kurzinfo>
         )}
 
         {onAugenblick && (
-          <button
-            type="button"
-            onClick={onAugenblick}
-            className={`${rundknopf} text-status-warning`}
-            title={t('messenger.moment.take')}
-            aria-label={t('messenger.moment.take')}
-          >
-            <Camera className="w-4 h-4" />
-          </button>
+          <Kurzinfo text={t('messenger.moment.take')} seite="ende">
+            <button
+              type="button"
+              onClick={onAugenblick}
+              className={`${rundknopf} text-status-warning`}
+              aria-label={t('messenger.moment.take')}
+            >
+              <Camera className="w-4 h-4" />
+            </button>
+          </Kurzinfo>
         )}
 
         {onFreundschaftsanfrage && (
-          <button
-            type="button"
-            onClick={onFreundschaftsanfrage}
-            className={`${rundknopf} text-primary`}
-            title={t('messenger.sendFriendRequest')}
-            aria-label={t('messenger.sendFriendRequest')}
-          >
-            <UserPlus className="w-4 h-4" />
-          </button>
+          <Kurzinfo text={t('messenger.sendFriendRequest')} seite="ende">
+            <button
+              type="button"
+              onClick={onFreundschaftsanfrage}
+              className={`${rundknopf} text-primary`}
+              aria-label={t('messenger.sendFriendRequest')}
+            >
+              <UserPlus className="w-4 h-4" />
+            </button>
+          </Kurzinfo>
         )}
 
-        <button
-          type="button"
-          onClick={onSuche}
-          className={`${rundknopf} text-on-surface-variant hover:text-primary`}
-          title={t('messenger.searchInChat')}
-          aria-label={t('messenger.searchInChat')}
-        >
-          <Search className="w-4 h-4" />
-        </button>
+        <Kurzinfo text={t('messenger.searchInChat')} seite="ende">
+          <button
+            type="button"
+            onClick={onSuche}
+            className={`${rundknopf} text-on-surface-variant hover:text-primary`}
+            aria-label={t('messenger.searchInChat')}
+          >
+            <Search className="w-4 h-4" />
+          </button>
+        </Kurzinfo>
 
         <Blattknopf
           variante="schwebend"

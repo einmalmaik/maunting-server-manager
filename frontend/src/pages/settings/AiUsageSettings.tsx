@@ -3,6 +3,7 @@ import { BarChart3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiUsageEvents, type AiUsageOverview } from '@/api/ai'
+import { Kurzinfo } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { betragFormatieren } from '@/utils/geld'
 
@@ -170,8 +171,10 @@ export function AiUsageSettings() {
                       <td className="py-2 pr-4 text-right tabular-nums text-on-surface-variant">
                         {event.provider_requests === null ? '—' : numbers.format(event.provider_requests)}
                       </td>
-                      <td className="py-2 pr-4 text-right tabular-nums text-on-surface" title={betrag.sekundaer ?? undefined}>
-                        {betrag.primaer}
+                      <td className="py-2 pr-4 text-right tabular-nums text-on-surface">
+                        {betrag.sekundaer
+                          ? <Kurzinfo text={betrag.sekundaer} seite="ende">{betrag.primaer}</Kurzinfo>
+                          : betrag.primaer}
                       </td>
                       <td className="py-2">
                         <span

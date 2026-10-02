@@ -53,6 +53,43 @@ describe('Calendar Page Component', () => {
     })
   })
 
+  it('nennt Kategorie und Knöpfe ohne natives title', async () => {
+    const now = new Date()
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0).toISOString()
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 13, 0, 0).toISOString()
+    vi.mocked(client.api).mockResolvedValue([
+      {
+        id: 1,
+        event_id: 'evt-team-1',
+        title: 'Teamrunde',
+        start,
+        end,
+        event_type: 'team',
+        team_name: 'DevOps',
+        color: 'primary',
+      },
+    ])
+
+    const { container } = render(
+      <MemoryRouter>
+        <Calendar />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Teamrunde')).toBeInTheDocument()
+    })
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
+
+    // Die Kategorie-Plakette und „Termin hinzufügen“ stehen in der Wochenansicht.
+    fireEvent.click(screen.getByRole('button', { name: 'Woche' }))
+    await waitFor(() => {
+      expect(screen.getAllByText('DevOps').length).toBeGreaterThan(0)
+    })
+    expect(screen.getAllByRole('button', { name: i18n.t('calendar.addEvent') }).length).toBeGreaterThan(0)
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
+  })
+
   it('switches between Month, Week, and Day views', async () => {
     vi.mocked(client.api).mockResolvedValue([])
 

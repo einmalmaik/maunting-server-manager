@@ -1,6 +1,7 @@
 import { memo, useEffect, useState } from 'react'
 import { AlertTriangle, BookOpen, Bot, BrainCircuit, Calendar, CalendarClock, ChevronDown, ChevronRight, Globe2, Loader2, Mail, Sparkles, User, Wrench } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { Kurzinfo } from '@/Singra/UI'
 
 import type {
   AiActionProposal,
@@ -312,20 +313,22 @@ function AiWerkzeugzeile({ tool }: { tool: AiToolUse }) {
         <span>{skillLabel ?? t(`ai.tools.${tool.tool_name}`, { defaultValue: tool.tool_name })}</span>
         {/* Ausklappbare Fehlerdetails beim Klick auf den Fehlschlag */}
         {tool.failed && (
-          <button
-            type="button"
-            onClick={() => setErrorOpen(!errorOpen)}
-            className="inline-flex items-center gap-1 text-status-destructive hover:underline cursor-pointer focus:outline-none"
-            title={t('ai.chat.toolFailedToggle', { defaultValue: 'Fehlerdetails anzeigen/verstecken' })}
-          >
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>{t('ai.chat.toolFailed')}</span>
-            {errorOpen ? (
-              <ChevronDown className="h-3 w-3 shrink-0 opacity-80" aria-hidden="true" />
-            ) : (
-              <ChevronRight className="h-3 w-3 shrink-0 opacity-80" aria-hidden="true" />
-            )}
-          </button>
+          <Kurzinfo text={t('ai.chat.toolFailedToggle')}>
+            <button
+              type="button"
+              onClick={() => setErrorOpen(!errorOpen)}
+              className="inline-flex items-center gap-1 text-status-destructive hover:underline cursor-pointer focus:outline-none"
+              aria-description={t('ai.chat.toolFailedToggle')}
+            >
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>{t('ai.chat.toolFailed')}</span>
+              {errorOpen ? (
+                <ChevronDown className="h-3 w-3 shrink-0 opacity-80" aria-hidden="true" />
+              ) : (
+                <ChevronRight className="h-3 w-3 shrink-0 opacity-80" aria-hidden="true" />
+              )}
+            </button>
+          </Kurzinfo>
         )}
       </div>
       {tool.failed && errorOpen && failureDetail && (

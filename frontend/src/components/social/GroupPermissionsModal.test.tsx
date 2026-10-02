@@ -91,6 +91,15 @@ describe('GroupPermissionsModal — Rauswurf', () => {
     expect(neu.member_count).toBe(1)
   })
 
+  it('setzt an Rauswurf und Rollenknöpfen kein natives title', async () => {
+    render(
+      <GroupPermissionsModal open onOpenChange={() => {}} group={gruppe()} currentUserId={1} onGroupUpdated={vi.fn()} />,
+    )
+    await screen.findByLabelText(i18n.t('social.groupRoles.kickAria', { name: 'bert' }))
+    expect(document.querySelectorAll('[title]')).toHaveLength(0)
+    expect(document.querySelector(`[data-kurzinfo="${i18n.t('social.groupRoles.kickTitle')}"]`)).not.toBeNull()
+  })
+
   it('lässt keinen alten Code stehen, wenn der Server keinen herausgibt', async () => {
     // Wer nur hinauswerfen darf, bekommt den neuen Code nicht. Der alte gilt
     // aber auch nicht mehr — ihn weiter anzuzeigen hiesse, einen toten Link

@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Ban, FileText, Pencil, X } from 'lucide-react'
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 import type { FileAttachment, ImageAttachment } from '@/components/social/ChatMediaAttachments'
 
 export function formatFileSize(bytes: number): string {
@@ -77,15 +77,16 @@ export function EditingBanner({ text, onAbbrechen }: { text: string; onAbbrechen
           <p className="text-label-sm text-on-surface-variant truncate max-w-md">{text}</p>
         </div>
       </div>
-      <button
-        type="button"
-        onClick={onAbbrechen}
-        className="p-1 rounded-full hover:bg-surface-container-highest text-on-surface-variant"
-        aria-label={t('messenger.cancelEdit')}
-        title="Abbrechen"
-      >
-        <X className="w-3.5 h-3.5" />
-      </button>
+      <Kurzinfo text={t('messenger.cancelEdit')} seite="ende" lage="oben" aussen="shrink-0">
+        <button
+          type="button"
+          onClick={onAbbrechen}
+          className="p-1 rounded-full hover:bg-surface-container-highest text-on-surface-variant"
+          aria-label={t('messenger.cancelEdit')}
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </Kurzinfo>
     </div>
   )
 }

@@ -100,4 +100,21 @@ describe('StoryViewerModal', () => {
     expect(screen.getByText('eine Story')).toBeInTheDocument()
     expect(screen.queryByText(/Ende-zu-Ende|verschlüsselt/i)).not.toBeInTheDocument()
   })
+
+  it('nennt den Löschknopf der eigenen Story ohne natives title', () => {
+    render(<Seite stories={[{ ...story(1, 'meine Story'), is_self: true }]} onZu={vi.fn()} />)
+    fireEvent.click(screen.getByText('öffnen'))
+    expect(screen.getByRole('button', { name: i18n.t('social.story.delete') })).toBeInTheDocument()
+    expect(document.body.querySelectorAll('[title]')).toHaveLength(0)
+  })
+
+  it('zeigt jede Story im Hochformat 9:16, ob Text oder Foto', () => {
+    // Bis 02.10.2026 stand dort aspect-16/9, das Tailwind 3 nicht kennt: die Größe hing am Inhalt.
+    const foto = { ...story(2, 'mit Foto'), media_url: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' }
+    render(<Seite stories={[story(1, 'nur Text'), foto]} onZu={vi.fn()} />)
+    fireEvent.click(screen.getByText('öffnen'))
+    expect(screen.getByText('nur Text').closest('[class*="aspect-"]')).toHaveClass('aspect-[9/16]')
+    warte(6_000)
+    expect(screen.getByText('mit Foto').closest('[class*="aspect-"]')).toHaveClass('aspect-[9/16]')
+  })
 })

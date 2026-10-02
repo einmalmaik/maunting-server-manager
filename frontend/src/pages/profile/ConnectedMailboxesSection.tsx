@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { Mail, Plus, Trash2, RefreshCw, Star, ShieldCheck, HelpCircle, Info, X } from 'lucide-react'
 import { userIntegrationsApi, type MailboxItem, type MailboxCreateInput } from '@/api/userIntegrations'
-import { Button, Checkbox, Dropdown, type DropdownOption } from '@/Singra/UI'
+import { Button, Checkbox, Dropdown, Kurzinfo, type DropdownOption } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 
@@ -342,13 +342,12 @@ export function ConnectedMailboxesSection() {
                     <span className="text-xs font-semibold text-on-surface flex items-center gap-1.5">
                       IMAP (Posteingang lesen & suchen)
                     </span>
-                    <span
-                      className="text-label-sm text-on-surface-variant cursor-help flex items-center gap-1 hover:text-primary transition-colors"
-                      title={t('profile.mailboxes.imapHelp')}
-                    >
-                      <HelpCircle className="w-3.5 h-3.5" />
-                      Optional
-                    </span>
+                    <Kurzinfo text={t('profile.mailboxes.imapHelp')} seite="ende">
+                      <span className="text-label-sm text-on-surface-variant cursor-help flex items-center gap-1 hover:text-primary transition-colors">
+                        <HelpCircle role="img" aria-label={t('profile.mailboxes.imapHelp')} className="w-3.5 h-3.5" />
+                        Optional
+                      </span>
+                    </Kurzinfo>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="col-span-2">
@@ -383,13 +382,12 @@ export function ConnectedMailboxesSection() {
                     <span className="text-xs font-semibold text-on-surface flex items-center gap-1.5">
                       SMTP (E-Mails vorbereiten & versenden)
                     </span>
-                    <span
-                      className="text-label-sm text-on-surface-variant cursor-help flex items-center gap-1 hover:text-primary transition-colors"
-                      title={t('profile.mailboxes.smtpHelp')}
-                    >
-                      <HelpCircle className="w-3.5 h-3.5" />
-                      Optional
-                    </span>
+                    <Kurzinfo text={t('profile.mailboxes.smtpHelp')} seite="ende">
+                      <span className="text-label-sm text-on-surface-variant cursor-help flex items-center gap-1 hover:text-primary transition-colors">
+                        <HelpCircle role="img" aria-label={t('profile.mailboxes.smtpHelp')} className="w-3.5 h-3.5" />
+                        Optional
+                      </span>
+                    </Kurzinfo>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="col-span-2">

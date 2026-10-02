@@ -59,4 +59,23 @@ describe('Dashboard — Ladefehler statt Leerzustand', () => {
     expect(await screen.findByText('Erstelle deinen ersten Server, um loszulegen.')).toBeInTheDocument()
     expect(screen.queryByText('Die Serverliste konnte nicht geladen werden.')).not.toBeInTheDocument()
   })
+
+  it('zeigt den vollen Dienstdetailtext per Kurzinfo, nicht per nativem title', async () => {
+    vi.mocked(client.api).mockImplementation(async (path: string) => {
+      if (path === '/system/health') {
+        return {
+          overall: 'ok',
+          services: { database: { status: 'ok', detail: 'PostgreSQL 16, 12 Verbindungen offen' } },
+          checked_in_ms: 3,
+        }
+      }
+      return antwort(path)
+    })
+    renderDashboard()
+
+    const detail = await screen.findByText('PostgreSQL 16, 12 Verbindungen offen')
+    expect(detail.closest('[class*="group/kurzinfo"]')?.querySelector('[data-kurzinfo]'))
+      .toHaveAttribute('data-kurzinfo', 'PostgreSQL 16, 12 Verbindungen offen')
+    expect(document.body.querySelectorAll('[title]')).toHaveLength(0)
+  })
 })

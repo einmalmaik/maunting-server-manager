@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { X, Check } from 'lucide-react'
+import { Kurzinfo } from '@/Singra/UI'
 import {
   calculateProgressRingOffset,
   videoNotizBitraten,
@@ -297,24 +298,26 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
        * das es nie gab — geöffnet wird der Rekorder per Klick.
        */}
       <div className="mt-8 flex items-center gap-6">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-transform hover:scale-105"
-          title={t('common.cancel')}
-          aria-label={t('common.cancel')}
-        >
-          <X className="w-6 h-6" />
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleStopAndFinish()}
-          className="w-14 h-14 rounded-full bg-status-success hover:bg-status-success/90 text-on-surface flex items-center justify-center shadow-lg shadow-status-success/30 transition-transform hover:scale-105"
-          title={t('social.videoNote.send')}
-          aria-label={t('social.videoNote.send')}
-        >
-          <Check className="w-7 h-7" />
-        </button>
+        <Kurzinfo text={t('common.cancel')}>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-transform hover:scale-105"
+            aria-label={t('common.cancel')}
+          >
+            <X className="w-6 h-6" />
+          </button>
+        </Kurzinfo>
+        <Kurzinfo text={t('social.videoNote.send')}>
+          <button
+            type="button"
+            onClick={() => void handleStopAndFinish()}
+            className="w-14 h-14 rounded-full bg-status-success hover:bg-status-success/90 text-on-surface flex items-center justify-center shadow-lg shadow-status-success/30 transition-transform hover:scale-105"
+            aria-label={t('social.videoNote.send')}
+          >
+            <Check className="w-7 h-7" />
+          </button>
+        </Kurzinfo>
       </div>
     </div>
   )

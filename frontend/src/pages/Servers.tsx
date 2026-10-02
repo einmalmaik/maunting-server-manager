@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { TabBar } from '@/components/ui/TabBar'
 import { PageHeader } from '@/Singra/UI/PageHeader'
-import { Button, Checkbox, Input, Switch } from '@/Singra/UI'
+import { Button, Checkbox, Input, Kurzinfo, Switch } from '@/Singra/UI'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Spinner } from '@/components/ui/Spinner'
 type ServerKind = 'application' | 'database'
@@ -451,10 +451,12 @@ export function Servers() {
                 <ServerIcon className="w-4 h-4 text-on-surface-variant shrink-0" />
                 <h3 className="font-headline text-body-md text-on-surface truncate">{server.name}</h3>
                 {server.node_name && (
-                  <Badge variant="info" className="shrink-0" title={t('servers.node')}>
-                    <Network className="w-3 h-3 mr-1 inline" />
-                    {server.node_name}
-                  </Badge>
+                  <Kurzinfo text={t('servers.node')} aussen="shrink-0">
+                    <Badge variant="info" aria-description={t('servers.node')}>
+                      <Network className="w-3 h-3 mr-1 inline" />
+                      {server.node_name}
+                    </Badge>
+                  </Kurzinfo>
                 )}
                 {server.server_kind === 'database' && (
                   <Badge variant="info" className="shrink-0">
@@ -463,7 +465,7 @@ export function Servers() {
                   </Badge>
                 )}
                 {server.is_hoster_managed && (
-                  <Badge variant="info" className="shrink-0" title={t('servers.customerBadge')}>
+                  <Badge variant="info" className="shrink-0">
                     <Store className="w-3 h-3 mr-1 inline" />
                     {t('servers.customerBadge')}
                   </Badge>

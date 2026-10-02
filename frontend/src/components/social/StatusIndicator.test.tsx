@@ -10,18 +10,26 @@ beforeAll(async () => {
 })
 
 describe('StatusIndicator', () => {
-  it('renders online dot with proper title', () => {
+  it('renders online dot with proper name', () => {
     render(<StatusDot status="online" />)
-    expect(screen.getByTitle(i18n.t('social.status.online'))).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: i18n.t('social.status.online') })).toBeInTheDocument()
   })
 
-  it('renders away dot with proper title', () => {
+  it('renders away dot with proper name', () => {
     render(<StatusDot status="away" />)
-    expect(screen.getByTitle(i18n.t('social.status.away'))).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: i18n.t('social.status.away') })).toBeInTheDocument()
   })
 
   it('renders invisible dot by default', () => {
     render(<StatusDot status="invisible" />)
-    expect(screen.getByTitle(i18n.t('social.status.offline'))).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: i18n.t('social.status.offline') })).toBeInTheDocument()
+  })
+
+  it('setzt kein natives title und legt die Lage an die Hülle', () => {
+    const { container } = render(<StatusDot status="online" className="absolute bottom-0 right-0" />)
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
+    const punkt = screen.getByRole('img', { name: i18n.t('social.status.online') })
+    expect(punkt.parentElement).toHaveClass('absolute', 'bottom-0', 'right-0')
+    expect(punkt).not.toHaveClass('absolute')
   })
 })

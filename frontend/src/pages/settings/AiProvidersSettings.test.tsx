@@ -184,7 +184,10 @@ describe('AiProvidersSettings', () => {
     })
     render(<AiProvidersSettings canWrite />)
 
-    fireEvent.click(await screen.findByLabelText('Key entfernen'))
+    const entfernen = await screen.findByRole('button', { name: 'Key entfernen' })
+    // Der Knopf trägt seinen Text sichtbar; ein natives title wiederholte ihn nur.
+    expect(entfernen).not.toHaveAttribute('title')
+    fireEvent.click(entfernen)
     fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
 
     await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(4, expect.objectContaining({

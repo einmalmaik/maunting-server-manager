@@ -15,7 +15,7 @@ import {
   mapAuditApiRows,
   safeAuditDetails,
 } from '@/services/auditPresentation'
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 
 export function AdminAudit() {
   const { t, i18n } = useTranslation()
@@ -145,8 +145,12 @@ export function AdminAudit() {
                   <td className="px-3 py-2 text-xs text-on-surface-variant">
                     {t(`audit.origins.${row.origin}`, { defaultValue: row.origin })}
                   </td>
-                  <td className="px-3 py-2 font-mono text-xs text-on-surface-variant" title={row.correlation_id ?? undefined}>
-                    {row.correlation_id ? row.correlation_id.slice(0, 8) : '—'}
+                  <td className="px-3 py-2 font-mono text-xs text-on-surface-variant">
+                    {row.correlation_id ? (
+                      <Kurzinfo text={row.correlation_id} aussen="min-w-0 max-w-full">
+                        <span>{row.correlation_id.slice(0, 8)}</span>
+                      </Kurzinfo>
+                    ) : '—'}
                   </td>
                   <td className="px-3 py-2 text-on-surface-variant">{formatAuditTarget(row)}</td>
                   <td className="max-w-md break-all px-3 py-2 font-mono text-xs text-on-surface-variant">

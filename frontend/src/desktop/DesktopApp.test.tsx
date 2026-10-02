@@ -735,7 +735,7 @@ describe('DesktopApp', () => {
     const kalender = within(navigation).getByRole('button', { name: i18n.t('mss.app.kalender') })
     const blase = kalender.parentElement!.querySelector(':scope > [data-kurzinfo]')
     expect(blase).toHaveAttribute('data-kurzinfo', i18n.t('mss.app.kalender'))
-    expect(blase).toHaveClass('xl:hidden')
+    expect(blase).toHaveClass('xl:!hidden')
   })
 
   describe('Negativtests & Missbrauchsschutz im Offline-Modus', () => {

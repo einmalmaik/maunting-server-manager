@@ -8,6 +8,7 @@ import {
   Avatar,
   Dropdown,
   Input,
+  Kurzinfo,
   type DropdownOption,
   RechteAbschnitte,
   type RechteAbschnittDefinition,
@@ -1050,17 +1051,18 @@ export function GroupPermissionsModal({
                                   options={rollenAuswahl}
                                 />
                               </div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => void handleKickMember(member)}
-                                className="h-9 w-9 p-0 text-error hover:bg-error/10 rounded-xl shrink-0"
-                                title={t('social.groupRoles.kickTitle')}
-                                aria-label={t('social.groupRoles.kickAria', { name: member.username })}
-                              >
-                                <UserMinus className="w-4 h-4" />
-                              </Button>
+                              <Kurzinfo text={t('social.groupRoles.kickTitle')} seite="ende" aussen="shrink-0">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => void handleKickMember(member)}
+                                  className="h-9 w-9 p-0 text-error hover:bg-error/10 rounded-xl"
+                                  aria-label={t('social.groupRoles.kickAria', { name: member.username })}
+                                >
+                                  <UserMinus className="w-4 h-4" />
+                                </Button>
+                              </Kurzinfo>
                             </>
                           )}
                           {!canEditThisMember && isMemberOwner && (
@@ -1190,31 +1192,33 @@ export function GroupPermissionsModal({
                         {/* Always visible, prominent Action Buttons */}
                         {canManage && (
                           <div className="flex items-center gap-1.5 shrink-0 ml-auto">
-                            <button
-                              type="button"
-                              disabled={konfigLage !== 'bereit' || rollenSpeichern}
-                              onClick={() => {
-                                setIsCreatingRole(false)
-                                setEditingRole(r)
-                              }}
-                              className="px-2.5 py-1.5 rounded-xl bg-surface-container-high hover:bg-primary/15 text-primary text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-50"
-                              title={t('social.groupRoles.edit')}
-                              aria-label={t('social.groupRoles.editAria', { name: rollentext(r.name, r.is_system, t) })}
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                              <span className="hidden xs:inline">{t('common.edit')}</span>
-                            </button>
-                            {!r.is_system && (
+                            <Kurzinfo text={t('social.groupRoles.edit')} seite="ende">
                               <button
                                 type="button"
                                 disabled={konfigLage !== 'bereit' || rollenSpeichern}
-                                onClick={() => void handleDeleteRole(r)}
-                                className="p-1.5 rounded-xl bg-surface-container-high hover:bg-error/15 text-error transition-colors disabled:opacity-50"
-                                title={t('social.groupRoles.deleteTitle')}
-                                aria-label={t('social.groupRoles.deleteAria', { name: r.name })}
+                                onClick={() => {
+                                  setIsCreatingRole(false)
+                                  setEditingRole(r)
+                                }}
+                                className="px-2.5 py-1.5 rounded-xl bg-surface-container-high hover:bg-primary/15 text-primary text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                                aria-label={t('social.groupRoles.editAria', { name: rollentext(r.name, r.is_system, t) })}
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Pencil className="w-3.5 h-3.5" />
+                                <span className="hidden xs:inline">{t('common.edit')}</span>
                               </button>
+                            </Kurzinfo>
+                            {!r.is_system && (
+                              <Kurzinfo text={t('social.groupRoles.deleteTitle')} seite="ende">
+                                <button
+                                  type="button"
+                                  disabled={konfigLage !== 'bereit' || rollenSpeichern}
+                                  onClick={() => void handleDeleteRole(r)}
+                                  className="p-1.5 rounded-xl bg-surface-container-high hover:bg-error/15 text-error transition-colors disabled:opacity-50"
+                                  aria-label={t('social.groupRoles.deleteAria', { name: r.name })}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </Kurzinfo>
                             )}
                           </div>
                         )}

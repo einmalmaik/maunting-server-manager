@@ -102,6 +102,12 @@ describe('ServerRestartPanel', () => {
       />,
     )
     expect(screen.getByText(i18n.t('restarts.aiManaged'))).toBeInTheDocument()
+    // Der Hinweis steht an aria-description und in der Kurzinfo, nicht am nativen title.
+    expect(screen.getByText(i18n.t('restarts.aiManaged'))).toHaveAttribute(
+      'aria-description',
+      i18n.t('restarts.aiManagedHint'),
+    )
+    expect(document.querySelectorAll('[title]')).toHaveLength(0)
   })
 
   it('schaltet mit server.config.write um und gibt den Zeitplan frei', async () => {

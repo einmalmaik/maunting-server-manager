@@ -8,6 +8,7 @@ import {
   VoiceRecordingBar,
   Blattmenue,
   Blatteintrag,
+  Kurzinfo,
   type ChatInputBarRef,
 } from '@/Singra/UI'
 import {
@@ -4310,16 +4311,17 @@ function MessengerSeite() {
           </div>
 
           <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => loadData()}
-              className="h-8 w-8 text-on-surface-variant"
-              aria-label="Aktualisieren"
-              title="Aktualisieren"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-            </Button>
+            <Kurzinfo text={t('common.refresh')} seite="ende">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => loadData()}
+                className="h-8 w-8 text-on-surface-variant"
+                aria-label={t('common.refresh')}
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </Button>
+            </Kurzinfo>
           </div>
         </header>
       )}
@@ -4424,15 +4426,16 @@ function MessengerSeite() {
                       <span>{t('messenger.sectionGroups')}</span>
                       <div className="flex items-center gap-1">
                         <span className="text-label-sm">{filteredGroups.length}</span>
-                        <button
-                          type="button"
-                          onClick={() => setIsCreateGroupOpen(true)}
-                          className="p-0.5 rounded text-on-surface-variant hover:text-primary transition-colors"
-                          aria-label={t('messenger.newGroup')}
-                          title={t('messenger.newGroup')}
-                        >
-                          <Plus className="w-3 h-3" />
-                        </button>
+                        <Kurzinfo text={t('messenger.newGroup')} seite="ende" className="normal-case tracking-normal">
+                          <button
+                            type="button"
+                            onClick={() => setIsCreateGroupOpen(true)}
+                            className="p-0.5 rounded text-on-surface-variant hover:text-primary transition-colors"
+                            aria-label={t('messenger.newGroup')}
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        </Kurzinfo>
                       </div>
                     </div>
                     {(archivOffen
@@ -4826,19 +4829,27 @@ function MessengerSeite() {
                         }
                         leftActions={
                           <>
-                            <button
-                              type="button"
-                              onClick={() => setIsStickerPickerOpen((prev) => !prev)}
-                              className={`w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center rounded-full transition-colors ${
-                                isStickerPickerOpen
-                                  ? 'bg-surface-container-highest text-status-warning'
-                                  : 'text-on-surface-variant hover:text-status-warning'
-                              }`}
-                              title={t('messenger.stickers')}
-                              aria-label={t('messenger.pickSticker')}
+                            {/* Bei offener Auswahl läge die Kurzinfo über ihr. */}
+                            <Kurzinfo
+                              text={t('messenger.stickers')}
+                              seite="anfang"
+                              lage="oben"
+                              aussen="shrink-0"
+                              className={isStickerPickerOpen ? '!hidden' : ''}
                             >
-                              <Smile className="w-4 h-4" />
-                            </button>
+                              <button
+                                type="button"
+                                onClick={() => setIsStickerPickerOpen((prev) => !prev)}
+                                className={`w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-full transition-colors ${
+                                  isStickerPickerOpen
+                                    ? 'bg-surface-container-highest text-status-warning'
+                                    : 'text-on-surface-variant hover:text-status-warning'
+                                }`}
+                                aria-label={t('messenger.pickSticker')}
+                              >
+                                <Smile className="w-4 h-4" />
+                              </button>
+                            </Kurzinfo>
 
                             <AttachMenu
                               erlaubt={darfAnhaengen}

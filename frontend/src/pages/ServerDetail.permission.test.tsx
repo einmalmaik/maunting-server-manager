@@ -265,9 +265,10 @@ describe('ServerDetail permission topology — VAL-UI-002 / VAL-UI-018', () => {
     expect(copyButton).toHaveTextContent(i18n.t('servers.dockerContainerLabel'))
     expect(copyButton).toHaveTextContent('msm-srv-84')
     expect(copyButton).toHaveAttribute(
-      'title',
+      'aria-description',
       expect.stringContaining('palworld_84'),
     )
+    expect(copyButton).not.toHaveAttribute('title')
 
     fireEvent.click(copyButton)
 

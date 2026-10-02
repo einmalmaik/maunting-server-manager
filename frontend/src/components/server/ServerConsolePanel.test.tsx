@@ -158,7 +158,11 @@ describe('ServerConsolePanel', () => {
       expect(screen.getByText('[MSM] Container msm-srv-42 started')).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /^copy$/i }))
+    const kopieren = screen.getByRole('button', { name: /^copy$/i })
+    // Der Hinweis steht an aria-description und in der Kurzinfo, nicht am nativen title.
+    expect(kopieren).toHaveAttribute('aria-description', i18n.t('servers.consoleCopyTitle'))
+    expect(document.querySelectorAll('[title]')).toHaveLength(0)
+    fireEvent.click(kopieren)
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       'first line\n[MSM] Container msm-srv-42 started',
     )

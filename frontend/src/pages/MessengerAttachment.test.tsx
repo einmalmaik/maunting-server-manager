@@ -416,7 +416,7 @@ describe('Messenger Attachment Flow', () => {
     })
 
     // Click send
-    const sendButton = screen.getByTitle('Senden')
+    const sendButton = screen.getByLabelText(i18n.t('messenger.send'))
     fireEvent.click(sendButton)
 
     await waitFor(() => {

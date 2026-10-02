@@ -23,7 +23,7 @@ import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { BlueprintBuilder, type BlueprintBuilderMode } from '@/features/blueprints/BlueprintBuilder'
 import { normalizeBlueprintId } from '@/features/blueprints/contract'
-import { Button, buttonClasses } from '@/Singra/UI'
+import { Button, buttonClasses, Kurzinfo } from '@/Singra/UI'
 import { Spinner } from '@/components/ui/Spinner'
 /** Hilfsfunktion: lesbarer Label pro source_type */
 function sourceLabel(src: string): string {
@@ -405,9 +405,11 @@ export function Blueprints() {
                   </div>
 
                   {/* ID — kompakt, copyable feel */}
-                  <p className="font-mono-sm text-xs text-on-surface-variant/50 truncate" title={entry.id}>
-                    {entry.id}
-                  </p>
+                  <Kurzinfo text={entry.id} seite="anfang" aussen="min-w-0 max-w-full">
+                    <span className="block min-w-0 font-mono-sm text-xs text-on-surface-variant/50 truncate">
+                      {entry.id}
+                    </span>
+                  </Kurzinfo>
 
                   {/* Aktionen */}
                   <div className="grid grid-cols-2 gap-2 mt-auto pt-2 border-t border-outline-variant/20 sm:flex sm:flex-wrap">
@@ -416,7 +418,6 @@ export function Blueprints() {
                       download
                       className={buttonClasses('secondary', 'sm', 'min-h-11')}
                       data-testid={`blueprint-download-${entry.id}`}
-                      title={t('blueprints.download')}
                     >
                       <Download className="w-3.5 h-3.5" />
                       {t('blueprints.download')}
@@ -437,7 +438,6 @@ export function Blueprints() {
                           disabled={isReplacing}
                           className="inline-flex min-h-11 items-center justify-center gap-1 disabled:opacity-50"
                           data-testid={`blueprint-replace-${entry.id}`}
-                          title={t('blueprints.replace')}
                         >
                           {isReplacing ? (
                             <Spinner />
@@ -452,7 +452,6 @@ export function Blueprints() {
                           disabled={isDeleting}
                           className="inline-flex min-h-11 items-center justify-center gap-1 px-3 py-2 text-xs rounded-md text-status-destructive hover:bg-status-destructive/10 transition-colors disabled:opacity-50 sm:ml-auto"
                           data-testid={`blueprint-delete-${entry.id}`}
-                          title={t('blueprints.delete')}
                         >
                           {isDeleting ? (
                             <Spinner />

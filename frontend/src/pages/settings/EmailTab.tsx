@@ -258,7 +258,6 @@ export function EmailTab() {
                         setNewResendKey('')
                       }}
                       className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-destructive transition-colors"
-                      title={t('common.delete', { defaultValue: 'Entfernen' })}
                       aria-label={t('common.delete', { defaultValue: 'Entfernen' })}
                     >
                       <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />

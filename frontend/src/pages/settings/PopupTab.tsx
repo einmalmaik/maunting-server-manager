@@ -28,7 +28,7 @@ import {
   type PanelPopup,
   type PanelPopupCreateInput,
 } from '@/api/popups'
-import { Button, Switch, DateTimePicker } from '@/Singra/UI'
+import { Button, Switch, DateTimePicker, Kurzinfo } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
@@ -255,62 +255,76 @@ export function PopupTab() {
                   {t('popups.fieldContent')} *
                 </label>
                 <div className="flex items-center gap-1 bg-surface-container-high rounded-lg p-1 border border-outline-variant/30">
-                  <button
-                    type="button"
-                    title="Fett (**text**)"
-                    onClick={() => insertMarkdown('**', '**')}
-                    className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
-                  >
-                    <Bold className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    title="Kursiv (*text*)"
-                    onClick={() => insertMarkdown('*', '*')}
-                    className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
-                  >
-                    <Italic className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    title={t('popups.markdownHeading')}
-                    onClick={() => insertMarkdown('### ')}
-                    className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
-                  >
-                    <Heading className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    title={t('popups.markdownList')}
-                    onClick={() => insertMarkdown('- ')}
-                    className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
-                  >
-                    <List className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    title="Nummerierte Liste (1. )"
-                    onClick={() => insertMarkdown('1. ')}
-                    className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
-                  >
-                    <ListOrdered className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    title="Link ([Text](url))"
-                    onClick={() => insertMarkdown('[', '](https://example.com)')}
-                    className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
-                  >
-                    <Link className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    title="Code (`code`)"
-                    onClick={() => insertMarkdown('`', '`')}
-                    className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
-                  >
-                    <Code className="w-3.5 h-3.5" />
-                  </button>
+                  <Kurzinfo text={t('popups.markdownBold')}>
+                    <button
+                      type="button"
+                      aria-label={t('popups.markdownBold')}
+                      onClick={() => insertMarkdown('**', '**')}
+                      className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
+                    >
+                      <Bold className="w-3.5 h-3.5" />
+                    </button>
+                  </Kurzinfo>
+                  <Kurzinfo text={t('popups.markdownItalic')}>
+                    <button
+                      type="button"
+                      aria-label={t('popups.markdownItalic')}
+                      onClick={() => insertMarkdown('*', '*')}
+                      className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
+                    >
+                      <Italic className="w-3.5 h-3.5" />
+                    </button>
+                  </Kurzinfo>
+                  <Kurzinfo text={t('popups.markdownHeading')}>
+                    <button
+                      type="button"
+                      aria-label={t('popups.markdownHeading')}
+                      onClick={() => insertMarkdown('### ')}
+                      className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
+                    >
+                      <Heading className="w-3.5 h-3.5" />
+                    </button>
+                  </Kurzinfo>
+                  <Kurzinfo text={t('popups.markdownList')}>
+                    <button
+                      type="button"
+                      aria-label={t('popups.markdownList')}
+                      onClick={() => insertMarkdown('- ')}
+                      className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
+                    >
+                      <List className="w-3.5 h-3.5" />
+                    </button>
+                  </Kurzinfo>
+                  <Kurzinfo text={t('popups.markdownOrderedList')}>
+                    <button
+                      type="button"
+                      aria-label={t('popups.markdownOrderedList')}
+                      onClick={() => insertMarkdown('1. ')}
+                      className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
+                    >
+                      <ListOrdered className="w-3.5 h-3.5" />
+                    </button>
+                  </Kurzinfo>
+                  <Kurzinfo text={t('popups.markdownLink')}>
+                    <button
+                      type="button"
+                      aria-label={t('popups.markdownLink')}
+                      onClick={() => insertMarkdown('[', '](https://example.com)')}
+                      className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
+                    >
+                      <Link className="w-3.5 h-3.5" />
+                    </button>
+                  </Kurzinfo>
+                  <Kurzinfo text={t('popups.markdownCode')} seite="ende">
+                    <button
+                      type="button"
+                      aria-label={t('popups.markdownCode')}
+                      onClick={() => insertMarkdown('`', '`')}
+                      className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
+                    >
+                      <Code className="w-3.5 h-3.5" />
+                    </button>
+                  </Kurzinfo>
                 </div>
               </div>
               <textarea
@@ -507,30 +521,33 @@ export function PopupTab() {
                       variant="secondary"
                       size="sm"
                       onClick={() => setPreviewPopup(p)}
-                      title={t('popups.preview')}
                     >
                       <Eye className="w-4 h-4 mr-1" />
                       {t('popups.previewBtn')}
                     </Button>
                     {canWrite && (
                       <>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => startEdit(p)}
-                          title={t('common.edit')}
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDelete(p)}
-                          title={t('common.delete')}
-                          className="text-on-surface-variant hover:text-error"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
+                        <Kurzinfo text={t('common.edit')}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => startEdit(p)}
+                            aria-label={t('common.edit')}
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </Button>
+                        </Kurzinfo>
+                        <Kurzinfo text={t('common.delete')} seite="ende">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(p)}
+                            aria-label={t('common.delete')}
+                            className="text-on-surface-variant hover:text-error"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </Kurzinfo>
                       </>
                     )}
                   </div>

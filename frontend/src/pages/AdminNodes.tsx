@@ -26,7 +26,7 @@ import type { Node } from '@/types'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PageHeader } from '@/Singra/UI/PageHeader'
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 
 import { Spinner } from '@/components/ui/Spinner'
 function statusVariant(status: string): 'success' | 'destructive' | 'default' | 'warning' {
@@ -484,48 +484,57 @@ export function AdminNodes() {
                     </p>
                     {(() => {
                       const model = cpuModelLabel(node)
+                      if (!model) {
+                        return (
+                          <p className="mt-1 truncate font-body-md text-xs text-on-surface-variant/90">
+                            {t('nodes.cpuModelUnknown')}
+                          </p>
+                        )
+                      }
                       return (
-                        <p
-                          className="mt-1 truncate font-body-md text-xs text-on-surface-variant/90"
-                          title={model ?? undefined}
-                        >
-                          {model ?? t('nodes.cpuModelUnknown')}
-                        </p>
+                        <Kurzinfo text={model} seite="anfang" aussen="mt-1 min-w-0 max-w-full">
+                          <p className="min-w-0 truncate font-body-md text-xs text-on-surface-variant/90">
+                            {model}
+                          </p>
+                        </Kurzinfo>
                       )
                     })()}
                   </div>
                   <div className="flex shrink-0 gap-1">
-                    <Button variant="secondary" size="icon"
-                      type="button"
-                      title={t('nodes.healthCheck')}
-                      aria-label={t('nodes.healthCheckLabel', { name: node.name })}
-                      onClick={() => void handleHealth(node)}
-                      disabled={busyId === node.id}
-                    >
-                      <RefreshCw
-                        className={`h-4 w-4 ${busyId === node.id ? 'animate-spin' : ''}`}
-                      />
-                    </Button>
+                    <Kurzinfo text={t('nodes.healthCheck')} seite={canManageNodes ? 'mitte' : 'ende'}>
+                      <Button variant="secondary" size="icon"
+                        type="button"
+                        aria-label={t('nodes.healthCheckLabel', { name: node.name })}
+                        onClick={() => void handleHealth(node)}
+                        disabled={busyId === node.id}
+                      >
+                        <RefreshCw
+                          className={`h-4 w-4 ${busyId === node.id ? 'animate-spin' : ''}`}
+                        />
+                      </Button>
+                    </Kurzinfo>
                     {canManageNodes && (
                       <>
-                        <Button variant="secondary" size="icon"
-                          type="button"
-                          title={t('nodes.edit')}
-                          aria-label={t('nodes.editLabel', { name: node.name })}
-                          onClick={() => openEdit(node)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button variant="secondary" size="icon"
-                          type="button"
-                          className="text-status-destructive disabled:opacity-40"
-                          title={t('common.delete')}
-                          aria-label={t('nodes.deleteLabel', { name: node.name })}
-                          disabled={node.is_local || node.server_count > 0}
-                          onClick={() => void handleDelete(node)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <Kurzinfo text={t('nodes.edit')}>
+                          <Button variant="secondary" size="icon"
+                            type="button"
+                            aria-label={t('nodes.editLabel', { name: node.name })}
+                            onClick={() => openEdit(node)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </Kurzinfo>
+                        <Kurzinfo text={t('common.delete')} seite="ende">
+                          <Button variant="secondary" size="icon"
+                            type="button"
+                            className="text-status-destructive disabled:opacity-40"
+                            aria-label={t('nodes.deleteLabel', { name: node.name })}
+                            disabled={node.is_local || node.server_count > 0}
+                            onClick={() => void handleDelete(node)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </Kurzinfo>
                       </>
                     )}
                   </div>

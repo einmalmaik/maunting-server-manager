@@ -29,6 +29,8 @@ describe('BenutzernameInline', () => {
 
     expect(screen.getByText('alt_name')).toBeInTheDocument()
     expect(screen.queryByLabelText(t('benutzername.label'))).not.toBeInTheDocument()
+    // Der Stift nennt sich per aria-label und Kurzinfo, nicht per nativem title.
+    expect(document.body.querySelectorAll('[title]')).toHaveLength(0)
 
     fireEvent.click(screen.getByRole('button', { name: t('benutzername.aendern') }))
     const feld = screen.getByLabelText(t('benutzername.label')) as HTMLInputElement

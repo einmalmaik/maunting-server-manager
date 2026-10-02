@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Play, Pause, Volume2, VolumeX, Maximize2, Loader2 } from 'lucide-react'
+import { Kurzinfo } from '@/Singra/UI'
 import {
   holeAnhangUrl,
   type MedienBindungsKontext,
@@ -71,11 +72,10 @@ export const CircularVideoNotePlayer: React.FC<CircularVideoNotePlayerProps> = (
     setIsMuted(nextMuted)
   }
 
-  return (
+  const kreis = (
     <div
       onClick={onExpand}
       className="relative w-44 h-44 sm:w-52 sm:h-52 rounded-full overflow-hidden bg-surface-container-high border-2 border-primary/40 shadow-lg cursor-pointer group select-none transition-transform hover:scale-[1.02]"
-      title={t('social.videoNote.expand')}
     >
       {quelle ? (
         <video
@@ -133,4 +133,7 @@ export const CircularVideoNotePlayer: React.FC<CircularVideoNotePlayerProps> = (
       </div>
     </div>
   )
+
+  // Der Hinweis nennt nur, was ein Klick auch tut: ohne `onExpand` vergrößert nichts.
+  return onExpand ? <Kurzinfo text={t('social.videoNote.expand')}>{kreis}</Kurzinfo> : kreis
 }

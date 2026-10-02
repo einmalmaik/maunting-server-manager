@@ -264,12 +264,15 @@ describe('Servers — Kunden-Server-Tabs und Badge', () => {
   })
 
   it('zeigt Tabs und Kunde-Badge, sobald ein Kundenserver in der Liste ist, und filtert beim Wechsel', async () => {
-    mockWithServers([serverStub(1, 'Eigener', false), serverStub(2, 'Vertragsserver', true)])
+    mockWithServers([{ ...serverStub(1, 'Eigener', false), node_name: 'node-berlin' }, serverStub(2, 'Vertragsserver', true)])
     renderServers()
 
     expect(await screen.findByRole('tab', { name: 'Eigene Server' })).toBeInTheDocument()
     // Standard-Tab: nur der eigene Server.
     expect(screen.getByText('Eigener')).toBeInTheDocument()
+    // Was das Node-Abzeichen ist, sagt die Kurzinfo, nicht ein natives title.
+    expect(screen.getByText('node-berlin').closest('[aria-description]')).toHaveAttribute('aria-description', 'Node')
+    expect(document.querySelectorAll('[title]')).toHaveLength(0)
     expect(screen.queryByText('Vertragsserver')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Kunden-Server' }))

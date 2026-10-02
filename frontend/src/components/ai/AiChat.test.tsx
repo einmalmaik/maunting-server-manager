@@ -1274,7 +1274,7 @@ describe('AiChat', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
 
     // Der Stopp-Knopf ist sichtbar
-    const stopButton = await screen.findByRole('button', { name: 'KI stoppen (abbrechen)' })
+    const stopButton = await screen.findByRole('button', { name: 'KI stoppen' })
     expect(stopButton).toBeInTheDocument()
 
     // Klick auf Stopp ruft stopRun auf
@@ -1351,5 +1351,8 @@ describe('AiChat', () => {
     // Warteschlangen-Anzeige sichtbar
     expect(await screen.findByText(/Warteschlange \(1\)/)).toBeInTheDocument()
     expect(screen.getByText('Zweite Nachricht in Queue')).toBeInTheDocument()
+
+    // Namen und Hinweise stehen in Kurzinfo und aria-label, nie im nativen title.
+    expect(document.body.querySelectorAll('[title]')).toHaveLength(0)
   })
 })

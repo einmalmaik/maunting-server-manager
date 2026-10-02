@@ -43,7 +43,7 @@ export function StatusUpdatesView({
           size="sm"
           onClick={onErstellen}
           className="h-8 text-xs gap-1.5 px-3 rounded-xl font-medium"
-          title={t('messenger.addStatus')}
+          aria-label={t('messenger.addStatus')}
         >
           <Plus className="w-3.5 h-3.5" />
           <span>{t('common.add')}</span>

@@ -116,6 +116,9 @@ describe('Benutzerprofil', () => {
     await waitFor(() =>
       expect(initiateCall).toHaveBeenCalledWith({ userId: 7, username: 'mara', avatarUrl: null }, 'audio'),
     )
+    // Der Videoknopf zeigt nur ein Symbol und nennt sich per aria-label und Kurzinfo.
+    expect(screen.getByRole('button', { name: i18n.t('messenger.videoCall') })).toBeInTheDocument()
+    expect(document.body.querySelectorAll('[title]')).toHaveLength(0)
   })
 
   it('sagt bei 404 nur „nicht verfügbar", ohne Namen', async () => {

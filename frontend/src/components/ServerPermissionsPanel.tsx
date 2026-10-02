@@ -9,7 +9,7 @@ import { Dropdown } from '@/components/ui/Dropdown'
 import type { User } from '@/types'
 import type { PermissionCatalog } from '@/types/permissions'
 import { PermissionEditor } from '@/Singra/UI/PermissionEditor'
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 
 import { Spinner } from '@/components/ui/Spinner'
 interface Props {
@@ -248,15 +248,16 @@ export function ServerPermissionsPanel({ serverId }: Props) {
                         {t('common.edit')}
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => revoke(row.user.id)}
-                      className="grid h-9 w-9 place-items-center rounded-lg text-status-destructive transition-colors hover:bg-status-destructive/10 hover:text-status-destructive/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-destructive/60"
-                      title={t('serverPermissions.revoke')}
-                      aria-label={`${t('serverPermissions.revoke')}: ${row.user.username}`}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <Kurzinfo text={t('serverPermissions.revoke')} seite="ende">
+                      <button
+                        type="button"
+                        onClick={() => revoke(row.user.id)}
+                        className="grid h-9 w-9 place-items-center rounded-lg text-status-destructive transition-colors hover:bg-status-destructive/10 hover:text-status-destructive/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-destructive/60"
+                        aria-label={`${t('serverPermissions.revoke')}: ${row.user.username}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </Kurzinfo>
                   </div>
                 </div>
 

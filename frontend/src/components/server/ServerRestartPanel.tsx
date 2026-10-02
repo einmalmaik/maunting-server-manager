@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Bot, CalendarClock, CheckCircle2, Plus, Save, Trash2, XCircle } from 'lucide-react'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { Button, Dropdown, Switch } from '@/Singra/UI'
+import { Button, Dropdown, Kurzinfo, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import type { Server } from '@/types'
 import { formatPanelDateTime, formatPanelTime, type PanelTimeFormat } from '@/utils/timeFormat'
@@ -102,13 +102,15 @@ export function ServerRestartPanel({ server, serverId, onSaved }: Props) {
         <div className="flex items-center gap-3 flex-wrap">
           <p className="font-body-md text-body-md text-on-surface-variant">{t('restarts.subtitle')}</p>
           {server.restart_ai_managed && (
-            <span
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-primary/40 bg-primary/10 text-primary"
-              title={t('restarts.aiManagedHint')}
-            >
-              <Bot className="w-3.5 h-3.5" />
-              {t('restarts.aiManaged')}
-            </span>
+            <Kurzinfo text={t('restarts.aiManagedHint')}>
+              <span
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-primary/40 bg-primary/10 text-primary"
+                aria-description={t('restarts.aiManagedHint')}
+              >
+                <Bot className="w-3.5 h-3.5" />
+                {t('restarts.aiManaged')}
+              </span>
+            </Kurzinfo>
           )}
         </div>
         <Button
@@ -262,15 +264,17 @@ export function ServerRestartPanel({ server, serverId, onSaved }: Props) {
                       buttonClassName="disabled:opacity-100"
                       aria-label={t('restarts.fixedTimes')}
                     />
-                    <Button variant="secondary"
-                      type="button"
-                      onClick={() => setTimes(times.filter((_, i) => i !== index))}
-                      disabled={times.length <= 1}
-                      className="disabled:opacity-50"
-                      title={t('common.delete')}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    <Kurzinfo text={t('common.delete')} seite="ende">
+                      <Button variant="secondary"
+                        type="button"
+                        onClick={() => setTimes(times.filter((_, i) => i !== index))}
+                        disabled={times.length <= 1}
+                        className="disabled:opacity-50"
+                        aria-label={t('common.delete')}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </Kurzinfo>
                   </div>
                 ))}
               </div>

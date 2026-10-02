@@ -70,6 +70,11 @@ describe('ConnectedMailboxesSection', () => {
 
     const checkboxes = screen.getAllByRole('checkbox')
     expect(checkboxes.length).toBeGreaterThanOrEqual(2)
+
+    // Die Hilfe zu IMAP und SMTP hängt am Symbol (role="img"), nicht im nativen title.
+    expect(screen.getByRole('img', { name: i18n.t('profile.mailboxes.imapHelp') })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: i18n.t('profile.mailboxes.smtpHelp') })).toBeInTheDocument()
+    expect(document.body.querySelectorAll('[title]')).toHaveLength(0)
   })
 
   it('tests mailbox connection on test button click', async () => {

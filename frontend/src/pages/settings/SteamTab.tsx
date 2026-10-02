@@ -123,7 +123,6 @@ export function SteamTab() {
                     setNewSteamKey('')
                   }}
                   className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-destructive transition-colors"
-                  title={t('settings.steamDeleteKey', { defaultValue: 'Schlüssel entfernen' })}
                   aria-label={t('settings.steamDeleteKey', { defaultValue: 'Schlüssel entfernen' })}
                 >
                   <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />

@@ -17,7 +17,7 @@ import { api } from '@/api/client';
 import { toast } from '@/stores/toastStore';
 import { confirm } from '@/stores/confirmStore';
 import { Dropdown } from '@/components/ui/Dropdown';
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 
 interface WebhookSub {
   id: number;
@@ -217,6 +217,26 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
       </div>
     );
   }
+
+  const testHinweis = t('webhook.testHintDisabled', {
+    defaultValue: 'Webhook muss aktiv sein für Test-Send',
+  });
+  const testKnopf = (sub: WebhookSub) => (
+    <Button variant="secondary"
+      type="button"
+      className="flex items-center gap-2"
+      onClick={() => void handleTest(sub.id)}
+      disabled={testPending === sub.id || !sub.enabled}
+      aria-description={sub.enabled ? undefined : testHinweis}
+    >
+      {testPending === sub.id ? (
+        <Loader2 className="w-4 h-4 animate-spin" />
+      ) : (
+        <Send className="w-4 h-4" />
+      )}
+      {t('webhook.test', { defaultValue: 'Test senden' })}
+    </Button>
+  );
 
   return (
     <div className="space-y-4">
@@ -418,26 +438,11 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
           )}
 
           <div className="flex flex-wrap gap-2 pt-2 border-t border-outline/30">
-            <Button variant="secondary"
-              type="button"
-              className="flex items-center gap-2"
-              onClick={() => void handleTest(sub.id)}
-              disabled={testPending === sub.id || !sub.enabled}
-              title={
-                sub.enabled
-                  ? undefined
-                  : t('webhook.testHintDisabled', {
-                      defaultValue: 'Webhook muss aktiv sein für Test-Send',
-                    })
-              }
-            >
-              {testPending === sub.id ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
-              {t('webhook.test', { defaultValue: 'Test senden' })}
-            </Button>
+            {sub.enabled ? (
+              testKnopf(sub)
+            ) : (
+              <Kurzinfo text={testHinweis} seite="anfang">{testKnopf(sub)}</Kurzinfo>
+            )}
             <Button variant="secondary"
               type="button"
               className="flex items-center gap-2"

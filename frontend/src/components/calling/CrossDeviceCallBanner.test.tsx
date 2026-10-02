@@ -156,12 +156,14 @@ describe('CrossDeviceCallBanner', () => {
 
   it('führt terminateCrossDeviceCall aus wenn man auf Auflegen klickt', () => {
     mockStore.crossDeviceCall = MOCK_CALL
-    render(<CrossDeviceCallBanner />)
+    const { container } = render(<CrossDeviceCallBanner />)
 
     const hangupBtn = screen.getByRole('button', { name: /Auflegen/i })
     fireEvent.click(hangupBtn)
 
     expect(mockStore.terminateCrossDeviceCall).toHaveBeenCalledTimes(1)
+    // Hinweise stehen in Kurzinfo und aria-description, nie im nativen title.
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
   })
 
   it('leitet SSE-Ereignisse an handleCrossDeviceEvent weiter', () => {
@@ -204,9 +206,10 @@ describe('CrossDeviceCallBanner', () => {
         participant_count: 3,
       },
     ]
-    render(<CrossDeviceCallBanner />)
+    const { container } = render(<CrossDeviceCallBanner />)
     // Erst wenn der Name steht, traegt der Klick ihn auch weiter.
     await screen.findByText('Team Alpha')
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
 
     const joinBtn = screen.getByRole('button', { name: /Anruf beitreten/i })
     fireEvent.click(joinBtn)

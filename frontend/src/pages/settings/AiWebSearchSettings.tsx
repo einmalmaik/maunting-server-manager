@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 
 import { aiApi } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
@@ -236,16 +236,18 @@ export function AiWebSearchSettings({ canWrite }: { canWrite: boolean }) {
                 {t('settings.save')}
               </Button>
               {Boolean(currentSearxngUrl) && (
-                <Button
-                  type="button"
-                  variant="destructive"
-                  disabled={busy}
-                  onClick={() => void removeSearxng()}
-                  title={t('ai.webSearch.resetToDefault')}
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden="true" />
-                  {t('common.delete')}
-                </Button>
+                <Kurzinfo text={t('ai.webSearch.resetToDefault')}>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    disabled={busy}
+                    onClick={() => void removeSearxng()}
+                    aria-description={t('ai.webSearch.resetToDefault')}
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    {t('common.delete')}
+                  </Button>
+                </Kurzinfo>
               )}
             </>
           )}

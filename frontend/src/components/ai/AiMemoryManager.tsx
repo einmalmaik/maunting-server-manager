@@ -21,7 +21,7 @@ import { useTranslation } from 'react-i18next'
 import { aiApi, type AiMemoryEntry, type AiMemoryPage } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { Button, Pagination, Switch } from '@/Singra/UI'
+import { Button, Kurzinfo, Pagination, Switch } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
@@ -330,19 +330,20 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
         <>
           {werkzeugleiste && herkunftsFilter}
           {sichtbar.length > 1 && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={toggleAllExpanded}
-              title={allExpanded ? t('ai.memory.collapseAll') : t('ai.memory.expandAll')}
-              aria-label={allExpanded ? t('ai.memory.collapseAll') : t('ai.memory.expandAll')}
-            >
-              <ChevronsUpDown className="h-4 w-4" aria-hidden="true" />
-              <span className="hidden sm:inline">
-                {allExpanded ? t('ai.memory.collapseAll') : t('ai.memory.expandAll')}
-              </span>
-            </Button>
+            <Kurzinfo text={allExpanded ? t('ai.memory.collapseAll') : t('ai.memory.expandAll')} className="sm:!hidden">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={toggleAllExpanded}
+                aria-label={allExpanded ? t('ai.memory.collapseAll') : t('ai.memory.expandAll')}
+              >
+                <ChevronsUpDown className="h-4 w-4" aria-hidden="true" />
+                <span className="hidden sm:inline">
+                  {allExpanded ? t('ai.memory.collapseAll') : t('ai.memory.expandAll')}
+                </span>
+              </Button>
+            </Kurzinfo>
           )}
           {darfAendern && (
             <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={() => setImportOffen(true)}>
@@ -498,10 +499,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
 
                       {/* Häufigkeitszähler */}
                       {entry.use_count > 0 && (
-                        <span
-                          className="inline-flex items-center gap-1 rounded-full border border-outline-variant/40 bg-surface-container-high px-2 py-0.5 text-label-sm text-on-surface-variant font-medium"
-                          title={t('ai.memory.usedCount', { count: entry.use_count })}
-                        >
+                        <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/40 bg-surface-container-high px-2 py-0.5 text-label-sm text-on-surface-variant font-medium">
                           <Flame className="h-3 w-3 text-status-warning shrink-0" aria-hidden="true" />
                           {t('ai.memory.usedCount', { count: entry.use_count })}
                         </span>

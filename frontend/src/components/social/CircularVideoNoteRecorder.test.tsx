@@ -205,11 +205,13 @@ describe('Abbrechen', () => {
   })
 
   it('zeigt beide Knöpfe von Anfang an', async () => {
-    render(<CircularVideoNoteRecorder onCancel={vi.fn()} onComplete={vi.fn()} />)
+    const { container } = render(<CircularVideoNoteRecorder onCancel={vi.fn()} onComplete={vi.fn()} />)
     await rekorder()
 
     expect(screen.getByRole('button', { name: t('common.cancel') })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: t('social.videoNote.send') })).toBeInTheDocument()
+    // Die Namen stehen im aria-label und in der Kurzinfo, nicht im nativen title.
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
   })
 })
 

@@ -6,7 +6,7 @@ import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Dropdown } from '@/components/ui/Dropdown'
-import { Button, Checkbox } from '@/Singra/UI'
+import { Button, Checkbox, Kurzinfo } from '@/Singra/UI'
 import { Spinner } from '@/components/ui/Spinner'
 /** Panel-Backup-List-Item (GET /api/panel-backups). */
 interface PanelBackupItem {
@@ -209,7 +209,6 @@ export function PanelBackups() {
           <Button variant="secondary"
             onClick={() => setShowSettings(!showSettings)}
             className={`flex min-h-11 items-center gap-2 ${showSettings ? 'bg-surface-container' : ''}`}
-            title={t('panelBackups.settingsTitle')}
           >
             <SettingsIcon className="w-4 h-4" />
             {t('panelBackups.settingsButton')}
@@ -356,19 +355,22 @@ export function PanelBackups() {
                 </div>
                 <div className="flex items-center gap-2">
                   {isCloud ? (
-                    <span title={t('panelBackups.cloudTooltip')} className="flex-shrink-0">
-                      <Cloud className="w-5 h-5 text-status-success" />
-                    </span>
+                    <Kurzinfo text={t('panelBackups.cloudTooltip')} aussen="flex-shrink-0">
+                      <span role="img" aria-label={t('panelBackups.cloudTooltip')}>
+                        <Cloud className="w-5 h-5 text-status-success" />
+                      </span>
+                    </Kurzinfo>
                   ) : (
-                    <span title={t('panelBackups.localTooltip')} className="flex-shrink-0">
-                      <CloudOff className="w-5 h-5 text-on-surface-variant/40" />
-                    </span>
+                    <Kurzinfo text={t('panelBackups.localTooltip')} aussen="flex-shrink-0">
+                      <span role="img" aria-label={t('panelBackups.localTooltip')}>
+                        <CloudOff className="w-5 h-5 text-on-surface-variant/40" />
+                      </span>
+                    </Kurzinfo>
                   )}
                   <Button variant="secondary" size="sm"
                     onClick={() => prepareRestore(backup.id)}
                     disabled={preparingId === backup.id}
                     className="flex items-center gap-1 disabled:opacity-50"
-                    title={t('panelBackups.prepareRestore')}
                   >
                     {preparingId === backup.id ? (
                       <Spinner />
@@ -379,18 +381,20 @@ export function PanelBackups() {
                       ? t('panelBackups.prepareRestoreLoading')
                       : t('panelBackups.prepareRestore')}
                   </Button>
-                  <Button variant="destructive" size="sm"
-                    onClick={() => deleteBackup(backup.id)}
-                    disabled={deletingId === backup.id}
-                    className="flex items-center gap-1 disabled:opacity-50"
-                    title={t('common.delete')}
-                  >
-                    {deletingId === backup.id ? (
-                      <Spinner />
-                    ) : (
-                      <Trash2 className="w-3.5 h-3.5" />
-                    )}
-                  </Button>
+                  <Kurzinfo text={t('common.delete')} seite="ende">
+                    <Button variant="destructive" size="sm"
+                      onClick={() => deleteBackup(backup.id)}
+                      disabled={deletingId === backup.id}
+                      className="flex items-center gap-1 disabled:opacity-50"
+                      aria-label={t('common.delete')}
+                    >
+                      {deletingId === backup.id ? (
+                        <Spinner />
+                      ) : (
+                        <Trash2 className="w-3.5 h-3.5" />
+                      )}
+                    </Button>
+                  </Kurzinfo>
                 </div>
               </div>
             )
@@ -447,7 +451,6 @@ export function PanelBackups() {
                 <Button variant="secondary"
                   onClick={copyScriptPath}
                   className="flex items-center gap-1"
-                  title={t('panelBackups.restoreModalCopyScript')}
                 >
                   {scriptCopied ? (
                     <Check className="w-3.5 h-3.5" />

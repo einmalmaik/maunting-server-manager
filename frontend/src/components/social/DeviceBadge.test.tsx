@@ -13,18 +13,25 @@ describe('DeviceBadge', () => {
   it('renders web badge by default', () => {
     render(<DeviceBadge showLabel />)
     expect(screen.getByText(i18n.t('social.device.web'))).toBeInTheDocument()
-    expect(screen.getByTitle(i18n.t('social.device.web'))).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: i18n.t('social.device.web') })).toBeInTheDocument()
   })
 
   it('renders desktop badge when type is desktop', () => {
     render(<DeviceBadge deviceType="desktop" showLabel />)
     expect(screen.getByText(i18n.t('social.device.desktop'))).toBeInTheDocument()
-    expect(screen.getByTitle(i18n.t('social.device.desktop'))).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: i18n.t('social.device.desktop') })).toBeInTheDocument()
   })
 
   it('renders mobile badge when type is mobile', () => {
     render(<DeviceBadge deviceType="mobile" showLabel />)
     expect(screen.getByText(i18n.t('social.device.mobile'))).toBeInTheDocument()
-    expect(screen.getByTitle(i18n.t('social.device.mobile'))).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: i18n.t('social.device.mobile') })).toBeInTheDocument()
+  })
+
+  it('setzt kein natives title; ohne sichtbaren Namen bleibt er am Symbol', () => {
+    const { container } = render(<DeviceBadge deviceType="mobile" />)
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
+    expect(screen.getByRole('img', { name: i18n.t('social.device.mobile') })).toBeInTheDocument()
+    expect(container.querySelector(`[data-kurzinfo="${i18n.t('social.device.mobile')}"]`)).not.toBeNull()
   })
 })

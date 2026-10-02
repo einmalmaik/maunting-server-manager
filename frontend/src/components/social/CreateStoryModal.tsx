@@ -5,6 +5,7 @@ import {
   DialogContent,
   Button,
   Input,
+  Kurzinfo,
 } from '@/Singra/UI'
 import {
   Sparkles,
@@ -129,10 +130,10 @@ export function CreateStoryModal({
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-3">
-            {/* Live Story Preview Card in 16:9 Format */}
+            {/* Vorschau im Hochformat 9:16, wie die Story später erscheint */}
             <div className="flex justify-center w-full">
               <div
-                className={`relative aspect-16/9 w-full max-w-sm sm:max-w-md max-h-[45dvh] rounded-2xl p-4 flex flex-col justify-between shadow-2xl overflow-hidden transition-all border border-outline-variant/30 ${
+                className={`relative aspect-[9/16] w-full max-w-[calc(50dvh*9/16)] rounded-2xl p-4 flex flex-col justify-between shadow-2xl overflow-hidden transition-all border border-outline-variant/30 ${
                   photoDataUrl ? 'bg-black text-white' : STORY_GRADIENTS[selectedGradient]?.class || 'bg-surface-container-high text-white'
                 }`}
               >
@@ -151,15 +152,16 @@ export function CreateStoryModal({
                     <span>{t('social.story.badge24h')}</span>
                   </span>
                   {photoDataUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setPhotoDataUrl(null)}
-                      className="p-1 rounded-full bg-black/60 text-white hover:bg-black/90 transition-colors shadow-sm"
-                      title={t('social.story.removePhoto')}
-                      aria-label={t('social.story.removePhoto')}
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                    <Kurzinfo text={t('social.story.removePhoto')} seite="ende">
+                      <button
+                        type="button"
+                        onClick={() => setPhotoDataUrl(null)}
+                        className="p-1 rounded-full bg-black/60 text-white hover:bg-black/90 transition-colors shadow-sm"
+                        aria-label={t('social.story.removePhoto')}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </Kurzinfo>
                   )}
                 </div>
 
@@ -231,7 +233,6 @@ export function CreateStoryModal({
                           ? 'ring-2 ring-primary ring-offset-2 ring-offset-surface scale-110'
                           : 'opacity-80 hover:opacity-100 hover:scale-105'
                       }`}
-                      title={t(grad.labelKey)}
                       aria-label={t('social.story.gradientLabel', { name: t(grad.labelKey) })}
                     />
                   ))}

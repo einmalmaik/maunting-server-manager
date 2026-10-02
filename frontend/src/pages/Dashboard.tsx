@@ -22,7 +22,7 @@ import { PageHeader } from '@/Singra/UI/PageHeader'
 import { ProgressBar, StackedProgressBar, type Segment } from '@/Singra/UI/ProgressBar'
 import { Badge } from '@/components/ui/Badge'
 
-import { buttonClasses } from '@/Singra/UI'
+import { buttonClasses, Kurzinfo } from '@/Singra/UI'
 import { Spinner } from '@/components/ui/Spinner'
 interface ServiceStatus {
   status: 'ok' | 'degraded' | 'error'
@@ -149,8 +149,10 @@ function NodeCapacityCard() {
                     </span>
                   )}
                 </div>
-                <p className="mb-1.5 truncate font-mono-sm text-label-sm text-on-surface-variant/80" title={model}>
-                  {model}
+                <p className="mb-1.5 flex min-w-0 font-mono-sm text-label-sm text-on-surface-variant/80">
+                  <Kurzinfo text={model} seite="anfang" aussen="min-w-0 max-w-full">
+                    <span className="truncate">{model}</span>
+                  </Kurzinfo>
                 </p>
                 <ProgressBar
                   value={usedPct}
@@ -261,9 +263,13 @@ function SystemStatusCard() {
                     {serviceNames[key] ?? key}
                   </span>
                 </div>
-                <span className="font-mono-sm text-xs text-on-surface-variant/60 truncate max-w-[120px]" title={svc.detail}>
-                  {svc.detail}
-                </span>
+                {svc.detail && (
+                  <Kurzinfo text={svc.detail} seite="ende" aussen="min-w-0 max-w-[120px]">
+                    <span className="font-mono-sm text-xs text-on-surface-variant/60 truncate max-w-[120px]">
+                      {svc.detail}
+                    </span>
+                  </Kurzinfo>
+                )}
               </div>
             ))}
         </div>

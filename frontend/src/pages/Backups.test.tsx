@@ -135,7 +135,7 @@ describe('Backups — S3 Cloud Features', () => {
       return undefined
     })
     renderBackups()
-    const cloudIcon = await screen.findByTitle('In S3-Cloud gespeichert (verschlüsselt)')
+    const cloudIcon = await screen.findByRole('img', { name: 'In S3-Cloud gespeichert (verschlüsselt)' })
     expect(cloudIcon).toBeInTheDocument()
   })
 
@@ -149,7 +149,7 @@ describe('Backups — S3 Cloud Features', () => {
       return undefined
     })
     renderBackups()
-    const cloudIcon = await screen.findByTitle('Nur lokal gespeichert')
+    const cloudIcon = await screen.findByRole('img', { name: 'Nur lokal gespeichert' })
     expect(cloudIcon).toBeInTheDocument()
   })
 
@@ -272,7 +272,9 @@ describe('Backups — S3 Cloud Features', () => {
     renderBackups()
     expect(await screen.findByRole('button', { name: /Backup erstellen/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Einstellungen/ })).toBeInTheDocument()
-    expect(screen.getByTitle('Löschen')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Löschen' })).toBeInTheDocument()
+    // Namen und Hinweise stehen an aria-label und Kurzinfo, nie am nativen title.
+    expect(document.querySelectorAll('[title]')).toHaveLength(0)
   })
 
   it('zeigt im Einstellungs-Panel das KI-Abzeichen nur, wenn die KI verwaltet', async () => {

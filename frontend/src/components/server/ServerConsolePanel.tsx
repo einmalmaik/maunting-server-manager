@@ -6,7 +6,7 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { toast } from '@/stores/toastStore'
 import { type PanelTimeFormat } from '@/utils/timeFormat'
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 import { meldeErrungenschaft } from '@/lib/errungenschaft'
 
 interface Props {
@@ -603,22 +603,23 @@ export function ServerConsolePanel({ serverId, mode = 'console' }: Props) {
             type="button"
             onClick={() => setShowTimestamps(!showTimestamps)}
             className={`inline-flex items-center gap-1.5 ${showTimestamps ? 'bg-secondary/15 text-primary border-primary/20' : ''}`}
-            title={t('servers.consoleTimestampsTitle')}
           >
             <Clock className="w-3.5 h-3.5" />
             {showTimestamps ? t('servers.consoleTimestampsOn') : t('servers.consoleTimestampsOff')}
           </Button>
           
-          <Button variant="secondary" size="sm"
-            type="button"
-            onClick={() => void copyVisibleLogs()}
-            disabled={filteredLogs.length === 0}
-            className="inline-flex items-center gap-1.5 disabled:opacity-50"
-            title={t('servers.consoleCopyTitle')}
-          >
-            {copiedLogs ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-            {copiedLogs ? t('common.copied') : t('servers.consoleCopy')}
-          </Button>
+          <Kurzinfo text={t('servers.consoleCopyTitle')} seite="ende">
+            <Button variant="secondary" size="sm"
+              type="button"
+              onClick={() => void copyVisibleLogs()}
+              disabled={filteredLogs.length === 0}
+              className="inline-flex items-center gap-1.5 disabled:opacity-50"
+              aria-description={t('servers.consoleCopyTitle')}
+            >
+              {copiedLogs ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              {copiedLogs ? t('common.copied') : t('servers.consoleCopy')}
+            </Button>
+          </Kurzinfo>
         </div>
       </div>
       <div className="p-5">

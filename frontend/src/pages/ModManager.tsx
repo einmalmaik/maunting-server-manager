@@ -21,7 +21,7 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { getModInstallPresentation, hasActiveModInstall } from '@/services/modInstallStatus'
-import { Button, buttonClasses } from '@/Singra/UI'
+import { Button, buttonClasses, Kurzinfo } from '@/Singra/UI'
 interface Mod {
   id: number
   server_id: number
@@ -93,6 +93,7 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
   const isCurseForge = Boolean(gameInfo?.supports_curseforge || gameInfo?.mod_provider === 'curseforge')
   const supportsModpacks = isCurseForge && Boolean(gameInfo?.supports_modpacks ?? true)
   const providerLabel = isCurseForge ? 'CurseForge' : 'Steam Workshop'
+  const ansehenText = isCurseForge ? t('mods.viewInCurseForge', { defaultValue: 'Auf CurseForge anzeigen' }) : t('mods.viewInWorkshop')
 
   // Workshop / CurseForge Browser (inline section)
   const [steamQuery, setSteamQuery] = useState('')
@@ -489,15 +490,17 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
             >
               {isAdded ? t('mods.added') : t('mods.add')}
             </Button>
-            <a
-              href={mod.direct_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={buttonClasses('secondary', 'sm')}
-              title={isCurseForge ? t('mods.viewInCurseForge', { defaultValue: 'Auf CurseForge anzeigen' }) : t('mods.viewInWorkshop')}
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
+            <Kurzinfo text={ansehenText} seite="ende">
+              <a
+                href={mod.direct_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={buttonClasses('secondary', 'sm')}
+                aria-label={ansehenText}
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </Kurzinfo>
           </div>
         </div>
       </div>
@@ -543,23 +546,27 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
               className="msm-input pl-10 text-sm"
             />
           </div>
-          <Button variant="secondary"
-            onClick={() => void abortModInstalls()}
-            disabled={loading || !anyModInstallActive}
-            className="inline-flex items-center gap-2 disabled:opacity-50"
-            title={t('mods.abortInstallsHint')}
-          >
-            {t('mods.abortInstalls')}
-          </Button>
-          <Button variant="secondary"
-            onClick={() => void reinstallAllMods()}
-            disabled={loading || reinstallingAll || mods.length === 0 || anyModInstallActive}
-            className="inline-flex items-center gap-2 disabled:opacity-50"
-            title={t('mods.reinstallAllHint')}
-          >
-            <RotateCcw className={`w-4 h-4 ${reinstallingAll ? 'animate-spin' : ''}`} />
-            {t('mods.reinstallAll')}
-          </Button>
+          <Kurzinfo text={t('mods.abortInstallsHint')}>
+            <Button variant="secondary"
+              onClick={() => void abortModInstalls()}
+              disabled={loading || !anyModInstallActive}
+              className="inline-flex items-center gap-2 disabled:opacity-50"
+              aria-description={t('mods.abortInstallsHint')}
+            >
+              {t('mods.abortInstalls')}
+            </Button>
+          </Kurzinfo>
+          <Kurzinfo text={t('mods.reinstallAllHint')}>
+            <Button variant="secondary"
+              onClick={() => void reinstallAllMods()}
+              disabled={loading || reinstallingAll || mods.length === 0 || anyModInstallActive}
+              className="inline-flex items-center gap-2 disabled:opacity-50"
+              aria-description={t('mods.reinstallAllHint')}
+            >
+              <RotateCcw className={`w-4 h-4 ${reinstallingAll ? 'animate-spin' : ''}`} />
+              {t('mods.reinstallAll')}
+            </Button>
+          </Kurzinfo>
           <Button variant="secondary"
             onClick={() => void checkModUpdates()}
             className="inline-flex items-center gap-2"
@@ -652,7 +659,6 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
                         onClick={() => void installExistingMod(mod, 'update')}
                         disabled={isInstalling}
                         className="inline-flex items-center gap-1.5 disabled:opacity-50"
-                        title={t('mods.updateAvailable')}
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
                         {t('mods.updateAvailable')}
@@ -662,40 +668,45 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
                       onClick={() => void installExistingMod(mod, 'reinstall')}
                       disabled={isInstalling}
                       className="inline-flex items-center gap-1.5 disabled:opacity-50"
-                      title={t('mods.reinstall')}
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
                       {t('mods.reinstall')}
                     </Button>
-                    <button
-                      onClick={() => toggleEnabled(mod.id, mod.enabled)}
-                      title={mod.enabled ? t('mods.disable') : t('mods.enable')}
-                      className="p-1.5 rounded-md hover:bg-surface-container transition-colors"
-                    >
-                      {mod.enabled ? (
-                        <ToggleRight className="w-5 h-5 text-primary" />
-                      ) : (
-                        <ToggleLeft className="w-5 h-5 text-on-surface-variant" />
-                      )}
-                    </button>
+                    <Kurzinfo text={mod.enabled ? t('mods.disable') : t('mods.enable')}>
+                      <button
+                        onClick={() => toggleEnabled(mod.id, mod.enabled)}
+                        aria-label={mod.enabled ? t('mods.disable') : t('mods.enable')}
+                        className="p-1.5 rounded-md hover:bg-surface-container transition-colors"
+                      >
+                        {mod.enabled ? (
+                          <ToggleRight className="w-5 h-5 text-primary" />
+                        ) : (
+                          <ToggleLeft className="w-5 h-5 text-on-surface-variant" />
+                        )}
+                      </button>
+                    </Kurzinfo>
 
-                    <a
-                      href={isCurseForge ? `https://www.curseforge.com` : `https://steamcommunity.com/sharedfiles/filedetails/?id=${mod.workshop_id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-1.5 rounded-md hover:bg-surface-container transition-colors"
-                      title={isCurseForge ? t('mods.viewInCurseForge', { defaultValue: 'Auf CurseForge anzeigen' }) : t('mods.viewInWorkshop')}
-                    >
-                      <ExternalLink className="w-4 h-4 text-on-surface-variant" />
-                    </a>
+                    <Kurzinfo text={ansehenText}>
+                      <a
+                        href={isCurseForge ? `https://www.curseforge.com` : `https://steamcommunity.com/sharedfiles/filedetails/?id=${mod.workshop_id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1.5 rounded-md hover:bg-surface-container transition-colors"
+                        aria-label={ansehenText}
+                      >
+                        <ExternalLink className="w-4 h-4 text-on-surface-variant" />
+                      </a>
+                    </Kurzinfo>
 
-                    <button
-                      onClick={() => removeMod(mod.id)}
-                      className="p-1.5 rounded-md hover:bg-status-destructive/10 transition-colors"
-                      title={t('mods.remove')}
-                    >
-                      <Trash2 className="w-4 h-4 text-status-destructive" />
-                    </button>
+                    <Kurzinfo text={t('mods.remove')} seite="ende">
+                      <button
+                        onClick={() => removeMod(mod.id)}
+                        className="p-1.5 rounded-md hover:bg-status-destructive/10 transition-colors"
+                        aria-label={t('mods.remove')}
+                      >
+                        <Trash2 className="w-4 h-4 text-status-destructive" />
+                      </button>
+                    </Kurzinfo>
                   </div>
                 </div>
               </div>

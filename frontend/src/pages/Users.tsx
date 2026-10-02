@@ -13,7 +13,7 @@ import type { Server, User } from '@/types'
 import type { Role } from '@/types/permissions'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { MultiSelect } from '@/Singra/UI/MultiSelect'
-import { Button, Avatar, Checkbox } from '@/Singra/UI'
+import { Button, Avatar, Checkbox, Kurzinfo } from '@/Singra/UI'
 import { Spinner } from '@/components/ui/Spinner'
 import { benutzernameFehler } from '@/lib/benutzername'
 export function Users() {
@@ -459,15 +459,16 @@ export function Users() {
 
                   <div className="col-start-2 row-start-1 flex justify-end md:col-auto md:row-auto">
                     {canManageUsers && user.id !== currentUser?.id && (!user.is_owner || currentUser?.is_owner) && (
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(user.id)}
-                        className="grid h-10 w-10 place-items-center rounded-lg text-status-destructive transition-colors hover:bg-status-destructive/10 hover:text-status-destructive/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-destructive/60"
-                        title={t('users.delete')}
-                        aria-label={`${t('users.delete')}: ${user.username}`}
-                      >
-                        <Trash2 aria-hidden="true" className="h-4 w-4" />
-                      </button>
+                      <Kurzinfo text={t('users.delete')} seite="ende">
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(user.id)}
+                          className="grid h-10 w-10 place-items-center rounded-lg text-status-destructive transition-colors hover:bg-status-destructive/10 hover:text-status-destructive/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-destructive/60"
+                          aria-label={`${t('users.delete')}: ${user.username}`}
+                        >
+                          <Trash2 aria-hidden="true" className="h-4 w-4" />
+                        </button>
+                      </Kurzinfo>
                     )}
                   </div>
                 </article>

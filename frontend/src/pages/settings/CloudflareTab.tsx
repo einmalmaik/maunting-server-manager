@@ -181,7 +181,6 @@ export function CloudflareTab() {
                     setNewToken('')
                   }}
                   className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-destructive transition-colors"
-                  title={t('settings.cloudflare.deleteToken', { defaultValue: 'Token entfernen' })}
                   aria-label={t('settings.cloudflare.deleteToken', { defaultValue: 'Token entfernen' })}
                 >
                   <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />

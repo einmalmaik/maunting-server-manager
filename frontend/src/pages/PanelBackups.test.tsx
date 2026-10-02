@@ -97,8 +97,9 @@ describe('PanelBackups', () => {
     expect(await screen.findByText('256 MB')).toBeInTheDocument()
     expect(screen.getByText('64 MB')).toBeInTheDocument()
     // Cloud tooltip (cloud) and local tooltip (local)
-    expect(screen.getByTitle('In S3-Cloud gespeichert (verschlüsselt)')).toBeInTheDocument()
-    expect(screen.getByTitle('Nur lokal gespeichert')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'In S3-Cloud gespeichert (verschlüsselt)' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Nur lokal gespeichert' })).toBeInTheDocument()
+    expect(document.querySelectorAll('[title]')).toHaveLength(0)
   })
 
   it('create button issues POST /panel-backups with loading state and success toast', async () => {
@@ -134,7 +135,7 @@ describe('PanelBackups', () => {
     renderPage()
     await screen.findByText('128 MB')
 
-    fireEvent.click(screen.getByTitle('Löschen'))
+    fireEvent.click(screen.getByRole('button', { name: 'Löschen' }))
     await waitFor(() => {
       expect(vi.mocked(confirmImpl)).toHaveBeenCalledWith(expect.objectContaining({
         message: 'Panel-Backup wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.',
@@ -161,7 +162,7 @@ describe('PanelBackups', () => {
     renderPage()
     await screen.findByText('128 MB')
 
-    fireEvent.click(screen.getByTitle('Löschen'))
+    fireEvent.click(screen.getByRole('button', { name: 'Löschen' }))
     await waitFor(() => {
       expect(vi.mocked(confirmImpl)).toHaveBeenCalled()
     })
@@ -254,7 +255,7 @@ describe('PanelBackups', () => {
     })
     renderPage()
     await screen.findByText('128 MB')
-    fireEvent.click(screen.getByTitle('Löschen'))
+    fireEvent.click(screen.getByRole('button', { name: 'Löschen' }))
     await waitFor(() => {
       const msg = vi.mocked(confirmImpl).mock.calls[0][0].message
       expect(msg).toContain('löschen')
@@ -345,7 +346,7 @@ describe('PanelBackups', () => {
     fireEvent.click(screen.getByRole('button', { name: /Restore vorbereiten/ }))
     await screen.findByText('Restore vorbereitet')
 
-    const copyBtn = screen.getByTitle('Skript-Pfad kopieren')
+    const copyBtn = screen.getByRole('button', { name: 'Kopieren' })
     fireEvent.click(copyBtn)
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(scriptPath)

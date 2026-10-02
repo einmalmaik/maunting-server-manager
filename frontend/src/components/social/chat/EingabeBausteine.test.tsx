@@ -10,7 +10,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
 import { AttachMenu } from './AttachMenu'
-import { formatFileSize, StagedFileBar } from './ChatComposerBars'
+import { EditingBanner, formatFileSize, StagedFileBar } from './ChatComposerBars'
 import { MentionSuggestions } from './ChatComposerTop'
 import { ComposerSendActions } from './ComposerSendActions'
 
@@ -45,6 +45,12 @@ describe('AttachMenu', () => {
     expect(knopf).toBeDisabled()
   })
 
+  it('setzt kein natives title, auch nicht mit offenem Menü', () => {
+    anhang()
+    fireEvent.click(plus())
+    expect(document.querySelectorAll('[title]')).toHaveLength(0)
+  })
+
   it('schliesst nach einer Wahl und führt sie aus', () => {
     const aktionen = anhang()
     fireEvent.click(plus())
@@ -73,7 +79,7 @@ describe('AttachMenu', () => {
 describe('ComposerSendActions', () => {
   it('zeigt mit Inhalt nur Senden, gesperrt während des Sendens', () => {
     render(<ComposerSendActions hatInhalt sendet onVideonotiz={() => {}} onSprachnachricht={() => {}} />)
-    const senden = screen.getByLabelText('Senden')
+    const senden = screen.getByLabelText(i18n.t('messenger.send'))
     expect(senden).toHaveAttribute('type', 'submit')
     expect(senden).toBeDisabled()
     expect(screen.queryByLabelText(i18n.t('messenger.recordVoice'))).not.toBeInTheDocument()
@@ -84,10 +90,20 @@ describe('ComposerSendActions', () => {
     render(
       <ComposerSendActions hatInhalt={false} sendet={false} onVideonotiz={() => {}} onSprachnachricht={onSprachnachricht} />,
     )
-    expect(screen.queryByLabelText('Senden')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(i18n.t('messenger.send'))).not.toBeInTheDocument()
     fireEvent.click(screen.getByLabelText(i18n.t('messenger.recordVoice')))
     expect(onSprachnachricht).toHaveBeenCalledTimes(1)
     expect(screen.getByLabelText(i18n.t('messenger.recordVideoNote'))).toBeInTheDocument()
+  })
+
+  it('setzt weder an Senden noch an den Aufnahmen ein natives title', () => {
+    const mitInhalt = render(<ComposerSendActions hatInhalt sendet={false} onVideonotiz={() => {}} onSprachnachricht={() => {}} />)
+    expect(mitInhalt.container.querySelectorAll('[title]')).toHaveLength(0)
+    mitInhalt.unmount()
+    const ohneInhalt = render(
+      <ComposerSendActions hatInhalt={false} sendet={false} onVideonotiz={() => {}} onSprachnachricht={() => {}} />,
+    )
+    expect(ohneInhalt.container.querySelectorAll('[title]')).toHaveLength(0)
   })
 })
 
@@ -117,5 +133,15 @@ describe('StagedFileBar', () => {
       <StagedFileBar datei={{ name: 'plan.pdf', sizeBytes: 2048, mimeType: 'application/pdf' }} onEntfernen={() => {}} />,
     )
     expect(screen.getByText('2.0 KB')).toBeInTheDocument()
+  })
+})
+
+describe('EditingBanner', () => {
+  it('bricht über einen benannten Knopf ohne natives title ab', () => {
+    const onAbbrechen = vi.fn()
+    const { container } = render(<EditingBanner text="Alter Text" onAbbrechen={onAbbrechen} />)
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('messenger.cancelEdit') }))
+    expect(onAbbrechen).toHaveBeenCalledTimes(1)
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
   })
 })

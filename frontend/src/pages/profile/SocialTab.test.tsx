@@ -132,6 +132,14 @@ describe('SocialTab (Profile page)', () => {
     })
     expect(screen.getByText('Server-Administration')).toBeInTheDocument()
 
+    // Profil öffnen und Entfernen nennen sich per aria-label, nicht per nativem title.
+    for (const knopf of [
+      screen.getByRole('button', { name: i18n.t('social.profile.open', { name: 'alice' }) }),
+      screen.getByRole('button', { name: i18n.t('social.contacts.remove') }),
+    ]) {
+      expect(knopf).not.toHaveAttribute('title')
+    }
+
     // Incoming request
     expect(screen.getByText('bob')).toBeInTheDocument()
     expect(screen.getByText(i18n.t('social.contacts.pendingRequests', { count: 1 }))).toBeInTheDocument()

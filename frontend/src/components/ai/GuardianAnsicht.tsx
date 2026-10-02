@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiActionProposal, type AiRunInfo } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 import { ChatHintergrund } from '@/features/chatHintergrund'
 import { toast } from '@/stores/toastStore'
 import { AiVerlauf, mergeEntries } from './AiVerlauf'
@@ -206,15 +206,17 @@ export function GuardianAnsicht() {
           )}
           {/* Der ausdrückliche Abbruch — die einzige Stelle, an der man hier
               etwas auslöst. Ein Eingabefeld täte dasselbe versehentlich. */}
-          <Button
-            type="button" variant="ghost" size="sm"
-            disabled={uebernimmt}
-            title={t('ai.guardian.takeOverHint')}
-            onClick={() => void uebernehmen()}
-          >
-            <Hand className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-            {t('ai.guardian.takeOver')}
-          </Button>
+          <Kurzinfo text={t('ai.guardian.takeOverHint')} seite="ende">
+            <Button
+              type="button" variant="ghost" size="sm"
+              disabled={uebernimmt}
+              aria-description={t('ai.guardian.takeOverHint')}
+              onClick={() => void uebernehmen()}
+            >
+              <Hand className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+              {t('ai.guardian.takeOver')}
+            </Button>
+          </Kurzinfo>
         </div>
       </header>
 

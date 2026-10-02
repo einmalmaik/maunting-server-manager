@@ -24,7 +24,7 @@ import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
-import { DateTimePicker, Dropdown, NumberStepper } from '@/Singra/UI'
+import { DateTimePicker, Dropdown, Kurzinfo, NumberStepper } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
 import {
@@ -721,41 +721,44 @@ export function Calendar() {
   const renderCategoryBadge = (ev: CalendarEventItem, isCompact = false) => {
     if (ev.event_type === 'team') {
       return (
-        <span
-          title={ev.team_name ? `Team: ${ev.team_name}` : 'Team-Termin'}
-          className={`inline-flex items-center gap-1 rounded font-semibold bg-status-success/20 text-status-success border border-status-success/30 ${
-            isCompact ? 'text-label-sm px-1 py-0.5' : 'text-label-sm px-1.5 py-0.5'
-          }`}
-        >
-          <Users className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
-          <span className="truncate max-w-[85px]">{ev.team_name || 'Team'}</span>
-        </span>
+        <Kurzinfo text={ev.team_name ? t('calendar.badgeTeam', { name: ev.team_name }) : t('calendar.badgeTeamEvent')} seite={isCompact ? 'ende' : 'mitte'}>
+          <span
+            className={`inline-flex items-center gap-1 rounded font-semibold bg-status-success/20 text-status-success border border-status-success/30 ${
+              isCompact ? 'text-label-sm px-1 py-0.5' : 'text-label-sm px-1.5 py-0.5'
+            }`}
+          >
+            <Users className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
+            <span className="truncate max-w-[85px]">{ev.team_name || 'Team'}</span>
+          </span>
+        </Kurzinfo>
       )
     }
     if (ev.event_type === 'server') {
       return (
-        <span
-          title={ev.server_name ? `Server: ${ev.server_name}` : t('calendar.filterServer')}
-          className={`inline-flex items-center gap-1 rounded font-semibold ${SERVER_TON.flaecheStark} ${SERVER_TON.text} border ${SERVER_TON.rand} ${
-            isCompact ? 'text-label-sm px-1 py-0.5' : 'text-label-sm px-1.5 py-0.5'
-          }`}
-        >
-          <Server className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
-          <span className="truncate max-w-[85px]">{ev.server_name || 'Server'}</span>
-        </span>
+        <Kurzinfo text={ev.server_name ? t('calendar.badgeServer', { name: ev.server_name }) : t('calendar.filterServer')} seite={isCompact ? 'ende' : 'mitte'}>
+          <span
+            className={`inline-flex items-center gap-1 rounded font-semibold ${SERVER_TON.flaecheStark} ${SERVER_TON.text} border ${SERVER_TON.rand} ${
+              isCompact ? 'text-label-sm px-1 py-0.5' : 'text-label-sm px-1.5 py-0.5'
+            }`}
+          >
+            <Server className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
+            <span className="truncate max-w-[85px]">{ev.server_name || 'Server'}</span>
+          </span>
+        </Kurzinfo>
       )
     }
     if (ev.event_type === 'node') {
       return (
-        <span
-          title="Node / Infrastruktur"
-          className={`inline-flex items-center gap-1 rounded font-semibold bg-status-warning/20 text-status-warning border border-status-warning/30 ${
-            isCompact ? 'text-label-sm px-1 py-0.5' : 'text-label-sm px-1.5 py-0.5'
-          }`}
-        >
-          <Network className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
-          <span>Node</span>
-        </span>
+        <Kurzinfo text={t('calendar.badgeNode')} seite={isCompact ? 'ende' : 'mitte'}>
+          <span
+            className={`inline-flex items-center gap-1 rounded font-semibold bg-status-warning/20 text-status-warning border border-status-warning/30 ${
+              isCompact ? 'text-label-sm px-1 py-0.5' : 'text-label-sm px-1.5 py-0.5'
+            }`}
+          >
+            <Network className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
+            <span>Node</span>
+          </span>
+        </Kurzinfo>
       )
     }
     return null
@@ -1125,14 +1128,16 @@ export function Calendar() {
                         </span>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => openCreateModal(date)}
-                      className="p-1 rounded-md text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors"
-                      title={t('calendar.addEvent')}
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
+                    <Kurzinfo text={t('calendar.addEvent')} seite="ende">
+                      <button
+                        type="button"
+                        onClick={() => openCreateModal(date)}
+                        className="p-1 rounded-md text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors"
+                        aria-label={t('calendar.addEvent')}
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </Kurzinfo>
                   </div>
 
                   {dayEvents.length === 0 ? (

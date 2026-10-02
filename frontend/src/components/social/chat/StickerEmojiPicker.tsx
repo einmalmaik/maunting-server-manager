@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
-import { Button } from '@/Singra/UI'
+import { Button, Kurzinfo } from '@/Singra/UI'
 import { sanitizeSvg } from '@/lib/sanitizeSvg'
 import { CATEGORIZED_EMOJIS, IN_HOUSE_STICKERS, type InHouseSticker } from '@/services/stickerCatalog'
 
@@ -57,21 +57,24 @@ export function StickerEmojiPicker({ reiter, onReiter, onSticker, onEmoji, onSch
       {reiter === 'stickers' ? (
         <div className="grid grid-cols-4 sm:grid-cols-8 gap-2 max-h-48 overflow-y-auto p-1.5">
           {IN_HOUSE_STICKERS.map((stk) => (
-            <button
-              key={stk.id}
-              type="button"
-              onClick={() => onSticker(stk)}
-              className="flex flex-col items-center justify-center p-1.5 rounded-xl hover:bg-surface-container-high transition-transform hover:scale-105"
-              title={stk.label}
-            >
-              <div
-                className="w-11 h-11 flex items-center justify-center"
-                dangerouslySetInnerHTML={{ __html: sanitizeSvg(stk.svg) }}
-              />
-              <span className="text-label-sm text-on-surface-variant/80 truncate w-full text-center mt-1 font-medium">
-                {stk.label}
-              </span>
-            </button>
+            // Der Name ist unter dem Sticker oft abgeschnitten; die Kurzinfo zeigt
+            // ihn ganz. `ende`, weil eine mittige Blase in der rechten Spalte
+            // über den Rand der Rollfläche ragte und eine Querleiste aufschöbe.
+            <Kurzinfo key={stk.id} text={stk.label} seite="ende" aussen="min-w-0 w-full">
+              <button
+                type="button"
+                onClick={() => onSticker(stk)}
+                className="w-full min-w-0 flex flex-col items-center justify-center p-1.5 rounded-xl hover:bg-surface-container-high transition-transform hover:scale-105"
+              >
+                <div
+                  className="w-11 h-11 flex items-center justify-center"
+                  dangerouslySetInnerHTML={{ __html: sanitizeSvg(stk.svg) }}
+                />
+                <span className="text-label-sm text-on-surface-variant/80 truncate w-full text-center mt-1 font-medium">
+                  {stk.label}
+                </span>
+              </button>
+            </Kurzinfo>
           ))}
         </div>
       ) : (

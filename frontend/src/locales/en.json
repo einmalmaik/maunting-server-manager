@@ -125,7 +125,11 @@
       "deleteSeriesMessage": "The event and all of its repetitions will be deleted.",
       "occurrenceDeleted": "Occurrence cancelled",
       "reminderHint": "Note: for recurring events you create here, reminders reach your devices only. The server cannot send a reminder e-mail — it cannot read the recurrence rule, which is encrypted on your device."
-    }
+    },
+    "badgeTeam": "Team: {{name}}",
+    "badgeTeamEvent": "Team event",
+    "badgeServer": "Server: {{name}}",
+    "badgeNode": "Node / infrastructure"
   },
   "pageContext": {
     "overview": "Overview",
@@ -778,7 +782,12 @@
       "editHint": "This message and everything after it will be removed. The assistant will no longer know the earlier wording.",
       "editSend": "Send again",
       "reasoningLevel": "Reasoning depth",
-      "moreSettings": "More chat settings"
+      "moreSettings": "More chat settings",
+      "stopRun": "Stop the AI",
+      "enqueue": "Add to queue",
+      "sendNowInterrupt": "Send now and interrupt",
+      "dictationMonthlyLimit": "Monthly limit: {{min}} min",
+      "dictationUnlimitedHint": "Unlimited dictation"
     },
     "context": {
       "title": "Context and summarization",
@@ -6756,7 +6765,12 @@
     "markdownHeading": "Heading (### )",
     "markdownList": "Bullet list (- )",
     "bodyPlaceholder": "Write the announcement in clear, human language …",
-    "buttonTextPlaceholder": "e.g. Open status page"
+    "buttonTextPlaceholder": "e.g. Open status page",
+    "markdownBold": "Bold (**text**)",
+    "markdownItalic": "Italic (*text*)",
+    "markdownOrderedList": "Numbered list (1. )",
+    "markdownLink": "Link ([text](url))",
+    "markdownCode": "Code (`code`)"
   },
   "desktopBadge": {
     "tooltip": "Download Maunting Smart System desktop app",
@@ -7661,7 +7675,9 @@
         "place": "Place",
         "placePlaceholder": "Type a place, e.g. Hamburg"
       }
-    }
+    },
+    "send": "Send",
+    "chatMuted": "Muted"
   },
   "databaseManager": {
     "subtitle": "Manage and edit this server’s PostgreSQL databases.",

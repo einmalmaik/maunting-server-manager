@@ -13,7 +13,7 @@ import {
   type AiRunInfo,
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
-import { Button, Dropdown, Avatar, Blatteintrag, Blattknopf, VoiceRecordingBar } from '@/Singra/UI'
+import { Button, Dropdown, Avatar, Blatteintrag, Blattknopf, Kurzinfo, VoiceRecordingBar } from '@/Singra/UI'
 import {
   aiChatPreferenceKeys,
   readClosedGeoAnalysis,
@@ -1128,62 +1128,66 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
         )}
 
         {canUseSkills && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setSkillsModalOpen(true)}
-            className="h-8 px-2 text-xs flex items-center gap-1.5 border border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 rounded-lg transition-colors shrink-0"
-            title={t('ai.skills.directoryTitle')}
-            aria-label={t('ai.skills.directoryTitle')}
-          >
-            <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
-            <span className="hidden xl:inline">{t('ai.skills.directoryTitle')}</span>
-          </Button>
+          <Kurzinfo text={t('ai.skills.directoryTitle')} className="xl:!hidden" aussen="shrink-0">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setSkillsModalOpen(true)}
+              className="h-8 px-2 text-xs flex items-center gap-1.5 border border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 rounded-lg transition-colors"
+              aria-label={t('ai.skills.directoryTitle')}
+            >
+              <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
+              <span className="hidden xl:inline">{t('ai.skills.directoryTitle')}</span>
+            </Button>
+          </Kurzinfo>
         )}
 
         <div className="ml-auto flex items-center gap-1 sm:gap-1.5 shrink-0">
           {(canTasks || onSwitchMode) && (
             <div className="flex items-center rounded-lg border border-outline-variant/30 bg-surface-container/50 p-0.5">
               {canTasks && onSwitchMode && (
-                <button
-                  type="button"
-                  onClick={() => onSwitchMode('aufgaben')}
-                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 transition-colors"
-                  aria-label={t('ai.tasks.toTasks')}
-                  title={t('ai.tasks.toTasks')}
-                >
-                  <CalendarClock className="h-3.5 w-3.5 shrink-0 text-on-surface-variant" aria-hidden="true" />
-                  <span className="hidden xl:inline">Aufgaben</span>
-                </button>
+                <Kurzinfo text={t('ai.tasks.toTasks')} className="xl:!hidden">
+                  <button
+                    type="button"
+                    onClick={() => onSwitchMode('aufgaben')}
+                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 transition-colors"
+                    aria-label={t('ai.tasks.toTasks')}
+                  >
+                    <CalendarClock className="h-3.5 w-3.5 shrink-0 text-on-surface-variant" aria-hidden="true" />
+                    <span className="hidden xl:inline">Aufgaben</span>
+                  </button>
+                </Kurzinfo>
               )}
 
               {onSwitchMode && (
-                <button
-                  type="button"
-                  onClick={() => onSwitchMode('guardian')}
-                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 transition-colors"
-                  aria-label={t('ai.guardian.toGuardianMode')}
-                  title={t('ai.guardian.toGuardianMode')}
-                >
-                  <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-on-surface-variant" aria-hidden="true" />
-                  <span className="hidden xl:inline">Guardian</span>
-                </button>
+                <Kurzinfo text={t('ai.guardian.toGuardianMode')} className="xl:!hidden">
+                  <button
+                    type="button"
+                    onClick={() => onSwitchMode('guardian')}
+                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 transition-colors"
+                    aria-label={t('ai.guardian.toGuardianMode')}
+                  >
+                    <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-on-surface-variant" aria-hidden="true" />
+                    <span className="hidden xl:inline">Guardian</span>
+                  </button>
+                </Kurzinfo>
               )}
             </div>
           )}
 
           {hasVoice && onSwitchMode && (
-            <button
-              type="button"
-              onClick={() => onSwitchMode('sprache')}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors shrink-0"
-              aria-label={t('ai.voice.toVoiceMode')}
-              title={t('ai.voice.toVoiceMode')}
-            >
-              <AudioLines className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span className="hidden sm:inline">Realtime</span>
-            </button>
+            <Kurzinfo text={t('ai.voice.toVoiceMode')} className="sm:!hidden" aussen="shrink-0">
+              <button
+                type="button"
+                onClick={() => onSwitchMode('sprache')}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+                aria-label={t('ai.voice.toVoiceMode')}
+              >
+                <AudioLines className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span className="hidden sm:inline">Realtime</span>
+              </button>
+            </Kurzinfo>
           )}
 
           {/* Was selten gebraucht wird, steht im Blattmenü — dasselbe Bauteil,
@@ -1479,21 +1483,19 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
                 Warteschlange ({queuedMessages.length}):
               </span>
               {queuedMessages.map((msg, idx) => (
-                <span
-                  key={idx}
-                  className="inline-flex max-w-[220px] items-center gap-1 rounded bg-surface-container-highest px-2 py-0.5 text-on-surface border border-outline-variant/40"
-                  title={msg}
-                >
-                  <span className="truncate">{msg}</span>
-                  <button
-                    type="button"
-                    className="text-on-surface-variant hover:text-status-destructive transition-colors"
-                    onClick={() => setQueuedMessages((q) => q.filter((_, i) => i !== idx))}
-                    aria-label="Aus Warteschlange entfernen"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
+                <Kurzinfo key={idx} text={msg} aussen="max-w-[220px]">
+                  <span className="inline-flex max-w-[220px] items-center gap-1 rounded bg-surface-container-highest px-2 py-0.5 text-on-surface border border-outline-variant/40">
+                    <span className="truncate">{msg}</span>
+                    <button
+                      type="button"
+                      className="text-on-surface-variant hover:text-status-destructive transition-colors"
+                      onClick={() => setQueuedMessages((q) => q.filter((_, i) => i !== idx))}
+                      aria-label="Aus Warteschlange entfernen"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                </Kurzinfo>
               ))}
               {queuedMessages.length > 1 && (
                 <button
@@ -1515,14 +1517,16 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
                 variant="danger"
                 className="flex-1 border-0 bg-transparent p-0"
                 extraInfo={
-                  <div
-                    className="hidden xs:flex items-center gap-1 shrink-0 rounded-lg border border-outline-variant/40 bg-surface-container-low/60 px-2 py-0.5 text-xs text-on-surface-variant"
-                    title={
+                  <Kurzinfo
+                    text={
                       dictationQuota?.monthly_limit_minutes != null
-                        ? `Monatliches Limit: ${dictationQuota.monthly_limit_minutes} Min.`
-                        : 'Unbegrenztes Diktierkontingent'
+                        ? t('ai.chat.dictationMonthlyLimit', { min: dictationQuota.monthly_limit_minutes })
+                        : t('ai.chat.dictationUnlimitedHint')
                     }
+                    lage="oben"
+                    aussen="hidden xs:inline-flex shrink-0"
                   >
+                  <div className="flex items-center gap-1 rounded-lg border border-outline-variant/40 bg-surface-container-low/60 px-2 py-0.5 text-xs text-on-surface-variant">
                     <span className="tabular-nums font-medium text-on-surface">
                       {dictationQuota?.monthly_limit_minutes != null
                         ? t('ai.chat.dictationRemaining', {
@@ -1536,6 +1540,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
                         : t('ai.chat.dictationUnlimited')}
                     </span>
                   </div>
+                  </Kurzinfo>
                 }
                 onCancel={diktatAbbrechen}
                 onConfirm={() => void diktatUmschalten()}
@@ -1548,11 +1553,11 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
             ) : (
               <>
                 {canAttach && (
+                  <Kurzinfo text={t('ai.attachments.add')} lage="oben" seite="anfang" aussen="shrink-0">
                   <label
-                    className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-on-surface-variant transition-colors ${
+                    className={`grid h-9 w-9 place-items-center rounded-full text-on-surface-variant transition-colors ${
                       uploading ? 'pointer-events-none opacity-50' : 'cursor-pointer hover:bg-surface-container-high hover:text-on-surface'
                     }`}
-                    title={t('ai.attachments.add')}
                   >
                     {uploading
                       ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -1566,6 +1571,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
                       }}
                     />
                   </label>
+                  </Kurzinfo>
                 )}
                 <textarea
                   ref={inputRef}
@@ -1594,20 +1600,21 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
                   aria-label={t('ai.chat.message')}
                 />
                 {dictationAvailable && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-9 w-9 shrink-0 rounded-full p-0"
-                    disabled={transcribing || uploading || !providerId}
-                    onClick={() => void diktatUmschalten()}
-                    aria-label={t('ai.chat.dictationStart')}
-                    title={t('ai.chat.dictationStart')}
-                  >
-                    {transcribing
-                      ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                      : <Mic className="h-4 w-4" aria-hidden="true" />}
-                  </Button>
+                  <Kurzinfo text={t('ai.chat.dictationStart')} lage="oben" aussen="shrink-0">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-9 w-9 rounded-full p-0"
+                      disabled={transcribing || uploading || !providerId}
+                      onClick={() => void diktatUmschalten()}
+                      aria-label={t('ai.chat.dictationStart')}
+                    >
+                      {transcribing
+                        ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                        : <Mic className="h-4 w-4" aria-hidden="true" />}
+                    </Button>
+                  </Kurzinfo>
                 )}
               </>
             )}
@@ -1618,41 +1625,46 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
             <AiContextMeter status={contextStatus} />
             {streaming ? (
               !input.trim() ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="destructive"
-                  className="h-9 w-9 shrink-0 rounded-full p-0 flex items-center justify-center bg-status-destructive/15 text-status-destructive hover:bg-status-destructive/25 border border-status-destructive/30 transition-colors"
-                  onClick={() => void stoppeLauf()}
-                  aria-label="KI stoppen (abbrechen)"
-                  title="KI stoppen (abbrechen)"
-                >
-                  <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
-                </Button>
-              ) : (
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-9 shrink-0 rounded-full px-2.5 text-xs flex items-center gap-1"
-                    onClick={() => enqueueMessage(input)}
-                    title="In Warteschlange einreihen (Enter)"
-                    aria-label="In Warteschlange einreihen"
-                  >
-                    <ListPlus className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span className="hidden sm:inline">Einreihen</span>
-                  </Button>
+                <Kurzinfo text={t('ai.chat.stopRun')} lage="oben" seite="ende" aussen="shrink-0">
                   <Button
                     type="button"
                     size="sm"
                     variant="destructive"
-                    className="h-9 w-9 shrink-0 rounded-full p-0 flex items-center justify-center bg-status-destructive/15 text-status-destructive hover:bg-status-destructive/25 border border-status-destructive/30"
-                    onClick={() => void sendImmediatelyAndInterrupt(input)}
-                    title="Sofort senden & Unterbrechen (Alt+Enter)"
-                    aria-label="Sofort senden & Unterbrechen"
+                    className="h-9 w-9 rounded-full p-0 flex items-center justify-center bg-status-destructive/15 text-status-destructive hover:bg-status-destructive/25 border border-status-destructive/30 transition-colors"
+                    onClick={() => void stoppeLauf()}
+                    aria-label={t('ai.chat.stopRun')}
                   >
-                    <Zap className="h-4 w-4" aria-hidden="true" />
+                    <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
                   </Button>
+                </Kurzinfo>
+              ) : (
+                <div className="flex items-center gap-1 shrink-0">
+                  <Kurzinfo text={`${t('ai.chat.enqueue')} (Enter)`} lage="oben" aussen="shrink-0">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-9 rounded-full px-2.5 text-xs flex items-center gap-1"
+                      onClick={() => enqueueMessage(input)}
+                      aria-label={t('ai.chat.enqueue')}
+                      aria-keyshortcuts="Enter"
+                    >
+                      <ListPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span className="hidden sm:inline">Einreihen</span>
+                    </Button>
+                  </Kurzinfo>
+                  <Kurzinfo text={`${t('ai.chat.sendNowInterrupt')} (Alt+Enter)`} lage="oben" seite="ende" aussen="shrink-0">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      className="h-9 w-9 rounded-full p-0 flex items-center justify-center bg-status-destructive/15 text-status-destructive hover:bg-status-destructive/25 border border-status-destructive/30"
+                      onClick={() => void sendImmediatelyAndInterrupt(input)}
+                      aria-label={t('ai.chat.sendNowInterrupt')}
+                      aria-keyshortcuts="Alt+Enter"
+                    >
+                      <Zap className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  </Kurzinfo>
                 </div>
               )
             ) : (

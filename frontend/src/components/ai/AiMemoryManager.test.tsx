@@ -157,6 +157,8 @@ describe('AiMemoryManager', () => {
     expect(screen.getByText('4× verwendet')).toBeInTheDocument()
     // Der selbst hinterlegte Eintrag traegt die Kennzeichnung nicht.
     expect(screen.getAllByText('von der KI gemerkt')).toHaveLength(1)
+    // Zähler und Aufklappknopf tragen kein natives title.
+    expect(document.body.querySelectorAll('[title]')).toHaveLength(0)
   })
 
   it('filters by text and by origin', async () => {

@@ -125,7 +125,11 @@
       "deleteSeriesMessage": "Der Termin und alle seine Wiederholungen werden gelöscht.",
       "occurrenceDeleted": "Termin abgesagt",
       "reminderHint": "Hinweis: Für Serientermine, die du hier anlegst, kommen Erinnerungen nur auf deine Geräte. Eine Erinnerungs-Mail kann der Server nicht verschicken — er kann die Wiederholungsregel nicht lesen, weil sie verschlüsselt auf deinem Gerät entsteht."
-    }
+    },
+    "badgeTeam": "Team: {{name}}",
+    "badgeTeamEvent": "Team-Termin",
+    "badgeServer": "Server: {{name}}",
+    "badgeNode": "Node / Infrastruktur"
   },
   "pageContext": {
     "overview": "Übersicht",
@@ -778,7 +782,12 @@
       "editHint": "Diese Nachricht und alles danach wird entfernt. Die KI kennt die alte Fassung dann nicht mehr.",
       "editSend": "Neu senden",
       "reasoningLevel": "Denktiefe",
-      "moreSettings": "Weitere Einstellungen dieses Chats"
+      "moreSettings": "Weitere Einstellungen dieses Chats",
+      "stopRun": "KI stoppen",
+      "enqueue": "In Warteschlange einreihen",
+      "sendNowInterrupt": "Sofort senden und unterbrechen",
+      "dictationMonthlyLimit": "Monatliches Limit: {{min}} Min.",
+      "dictationUnlimitedHint": "Unbegrenztes Diktierkontingent"
     },
     "context": {
       "title": "Kontext und Zusammenfassung",
@@ -6756,7 +6765,12 @@
     "markdownHeading": "Überschrift (### )",
     "markdownList": "Aufzählung (- )",
     "bodyPlaceholder": "Verfasse den Text der Ankündigung in klarem, menschlichem Ton …",
-    "buttonTextPlaceholder": "z. B. Statusseite öffnen"
+    "buttonTextPlaceholder": "z. B. Statusseite öffnen",
+    "markdownBold": "Fett (**text**)",
+    "markdownItalic": "Kursiv (*text*)",
+    "markdownOrderedList": "Nummerierte Liste (1. )",
+    "markdownLink": "Link ([Text](url))",
+    "markdownCode": "Code (`code`)"
   },
   "desktopBadge": {
     "tooltip": "Maunting Smart System Desktop-App herunterladen",
@@ -7661,7 +7675,9 @@
         "place": "Ort",
         "placePlaceholder": "Ort eintippen, z. B. Hamburg"
       }
-    }
+    },
+    "send": "Senden",
+    "chatMuted": "Stummgeschaltet"
   },
   "databaseManager": {
     "subtitle": "Verwalte und bearbeite die PostgreSQL-Datenbanken dieses Servers.",

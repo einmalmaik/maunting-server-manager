@@ -74,9 +74,10 @@ describe('Chatzeilen', () => {
     })
     const { container } = render(<ContactListItem kontakt={kontakt()} mid="m1" {...zeile} />)
     expect(screen.getByText('99+')).toBeInTheDocument()
-    expect(screen.getByTitle(i18n.t('messenger.youWereMentioned'))).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: i18n.t('messenger.youWereMentioned') })).toBeInTheDocument()
     expect(container.querySelector('.lucide-pin')).not.toBeNull()
     expect(container.querySelector('.lucide-bell-off')).not.toBeNull()
+    expect(container.querySelectorAll('[title]')).toHaveLength(0)
   })
 
   it('zeigt ohne Postfach keine Abzeichen und löst keine Geste aus', () => {
@@ -131,5 +132,6 @@ describe('ContactFilterTabs', () => {
     expect(screen.getByLabelText(i18n.t('messenger.filterGroups', { count: 0 })).textContent).toBe('')
     fireEvent.click(screen.getByLabelText(i18n.t('messenger.filterTeams', { count: 1 })))
     expect(onFilter).toHaveBeenCalledWith('teams')
+    expect(document.querySelectorAll('[title]')).toHaveLength(0)
   })
 })

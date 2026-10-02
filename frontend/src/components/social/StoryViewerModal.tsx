@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Avatar,
   Button,
+  Kurzinfo,
 } from '@/Singra/UI'
 import {
   X,
@@ -154,7 +155,7 @@ export function StoryViewerModal({
       onClick={() => onOpenChange(false)}
     >
       <div
-        className={`relative w-full max-w-xl sm:max-w-2xl aspect-16/9 max-h-[85vh] rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between p-4 sm:p-5 transition-all ${backgroundClass}`}
+        className={`relative aspect-[9/16] w-full max-w-[calc(88dvh*9/16)] rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between p-4 sm:p-5 transition-all ${backgroundClass}`}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={() => setIsPaused(true)}
         onMouseUp={() => setIsPaused(false)}
@@ -213,18 +214,19 @@ export function StoryViewerModal({
 
             <div className="flex items-center gap-1">
               {currentStory.is_self && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleDelete}
-                  disabled={deleting}
-                  className="h-8 w-8 text-white hover:text-error hover:bg-white/10"
-                  title={t('social.story.delete')}
-                  aria-label={t('social.story.delete')}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
+                <Kurzinfo text={t('social.story.delete')} seite="ende">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className="h-8 w-8 text-white hover:text-error hover:bg-white/10"
+                    aria-label={t('social.story.delete')}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </Kurzinfo>
               )}
 
               <Button

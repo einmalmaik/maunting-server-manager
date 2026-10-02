@@ -71,7 +71,8 @@ describe('ChatZeilenGeste', () => {
   it('fängt keine Klicks ab, solange er unsichtbar ist', () => {
     zeichne()
     const knopf = screen.getByRole('button', { name: i18n.t('messenger.chatActions') })
-    const huelle = knopf.parentElement as HTMLElement
+    // Die nächste Hülle ist die der Kurzinfo; ein- und ausgeblendet wird das div darum.
+    const huelle = knopf.closest('div') as HTMLElement
     // Unsichtbar heißt hier auch: durchlässig. Sonst schluckt die Fläche über
     // dem Ungelesen-Abzeichen den Tipper, der den Chat öffnen sollte.
     expect(huelle.className).toContain('opacity-0')
@@ -85,5 +86,11 @@ describe('ChatZeilenGeste', () => {
     expect(
       screen.getByRole('button', { name: i18n.t('messenger.chatActions') }),
     ).toHaveAttribute('aria-label', i18n.t('messenger.chatActions'))
+  })
+
+  it('setzt kein natives title; der Name steht als Kurzinfo am Knopf', () => {
+    zeichne()
+    expect(document.querySelectorAll('[title]')).toHaveLength(0)
+    expect(document.querySelector(`[data-kurzinfo="${i18n.t('messenger.chatActions')}"]`)).not.toBeNull()
   })
 })

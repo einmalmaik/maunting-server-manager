@@ -11,7 +11,7 @@ import { Meilensteine } from '@/components/social/Meilensteine'
 import { Nutzungszeit } from '@/components/social/Nutzungszeit'
 import { StatusDot } from '@/components/social/StatusIndicator'
 import { Spinner } from '@/components/ui/Spinner'
-import { Avatar, Button } from '@/Singra/UI'
+import { Avatar, Button, Kurzinfo } from '@/Singra/UI'
 import { useAuthStore } from '@/stores/authStore'
 import { useCallStore } from '@/stores/useCallStore'
 import { useFunkenStore } from '@/stores/funkenStore'
@@ -198,15 +198,16 @@ export function Benutzerprofil() {
                     <Phone className="h-4 w-4" />
                     <span>{t('social.profile.call')}</span>
                   </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => void anrufen('video')}
-                    aria-label={t('messenger.videoCall')}
-                    title={t('messenger.videoCall')}
-                  >
-                    <Video className="h-4 w-4" />
-                  </Button>
+                  <Kurzinfo text={t('messenger.videoCall')} seite="ende">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => void anrufen('video')}
+                      aria-label={t('messenger.videoCall')}
+                    >
+                      <Video className="h-4 w-4" />
+                    </Button>
+                  </Kurzinfo>
                 </>
               ) : (
                 <Button

@@ -1,7 +1,7 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { Archive, AtSign, BellOff, Globe, Pin, UsersRound } from 'lucide-react'
-import { Avatar } from '@/Singra/UI'
+import { Avatar, Kurzinfo } from '@/Singra/UI'
 import type { ChatGroupItem } from '@/api/social'
 import { ChatZeilenGeste } from '@/components/social/ChatZeilenGeste'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
@@ -58,12 +58,15 @@ function ZeilenAbzeichen({ mid }: { mid: string | undefined }) {
       {archivedChats.includes(mid) && <Archive className="w-3.5 h-3.5 text-on-surface-variant/50" />}
       {isMuted(mid) && <BellOff className="w-3.5 h-3.5 text-on-surface-variant/50" />}
       {mentionedChats.includes(mid) && (
-        <span
-          title={t('messenger.youWereMentioned')}
-          className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-primary/20 text-primary"
-        >
-          <AtSign className="w-3 h-3" />
-        </span>
+        <Kurzinfo text={t('messenger.youWereMentioned')} seite="ende">
+          <span
+            role="img"
+            aria-label={t('messenger.youWereMentioned')}
+            className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-primary/20 text-primary"
+          >
+            <AtSign className="w-3 h-3" />
+          </span>
+        </Kurzinfo>
       )}
       {unread > 0 && (
         <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-label-sm font-bold rounded-full bg-primary text-on-primary min-w-[18px]">
