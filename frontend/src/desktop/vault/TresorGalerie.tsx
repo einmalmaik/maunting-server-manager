@@ -218,6 +218,7 @@ const Kachel = memo(function Kachel({
   tabHalt,
   onKlick,
   onLangdruck,
+  onMenue,
   onFokus,
 }: {
   item: VaultItem
@@ -229,6 +230,8 @@ const Kachel = memo(function Kachel({
   tabHalt: boolean
   onKlick: (id: string, tasten: Auswahltasten) => void
   onLangdruck: (id: string) => void
+  /** Rechtsklick und Menütaste; am Finger gehört der lange Druck der Auswahl. */
+  onMenue: (id: string, x: number, y: number, ausloeser: HTMLElement) => void
   onFokus: (id: string) => void
 }) {
   const { t } = useTranslation()
@@ -253,7 +256,12 @@ const Kachel = memo(function Kachel({
       onPointerMove={lang.onPointerMove}
       onPointerUp={lang.onPointerUp}
       onPointerCancel={lang.onPointerCancel}
-      onContextMenu={lang.onContextMenu}
+      onContextMenu={(event) => {
+        lang.onContextMenu(event)
+        if (event.defaultPrevented) return
+        event.preventDefault()
+        onMenue(item.id, event.clientX, event.clientY, event.currentTarget)
+      }}
       aria-label={item.service}
       aria-describedby={video ? beschreibung : undefined}
       aria-pressed={ausgewaehlt}
@@ -362,6 +370,11 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   /** Eine laufende Sammelaktion, mit Fortschritt. Solange sie läuft, sind die Aktionen gesperrt. */
   const [sammel, setSammel] = useState<SammelStand>(null)
   const [albumMenue, setAlbumMenue] = useState<{ x: number; y: number; ausloeser: HTMLElement | null } | null>(null)
+  const [kachelMenue, setKachelMenue] = useState<{ id: string; x: number; y: number; ausloeser: HTMLElement } | null>(null)
+  const kachelMenueOeffnen = useCallback(
+    (id: string, x: number, y: number, ausloeser: HTMLElement) => setKachelMenue({ id, x, y, ausloeser }),
+    [],
+  )
   const [stufe, setStufe] = useState(1)
   const [offen, setOffen] = useState<{ id: string; index: number } | null>(null)
   const [vorbereitung, setVorbereitung] = useState(0)
@@ -724,6 +737,46 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
 
   const leer = gewaehlt.length === 0
   const beschaeftigt = sammel !== null
+
+  /** Das Menü einer Kachel: dieselben Aktionen wie in der Lichtbox und im Dateibereich. */
+  const kachelEintraege = (item: VaultItem): ActionMenuItem[] => {
+    const istOffline = Boolean(item.datei && offline.has(item.datei.original.id))
+    return [
+      { key: 'oeffnen', label: t('mss.vault.dateien.oeffnen'), onSelect: () => setOffen({ id: item.id, index: 0 }) },
+      {
+        key: 'offline',
+        label: t(istOffline ? 'mss.vault.dateien.nurOnline' : 'mss.vault.dateien.offlineMachen'),
+        icon: <HardDriveDownload className="h-4 w-4" />,
+        disabled: beschaeftigt,
+        onSelect: () => void offlineUmschalten(item),
+      },
+      {
+        key: 'speichern',
+        label: t('mss.vault.dateien.speichern'),
+        icon: <Download className="h-4 w-4" />,
+        disabled: beschaeftigt || !userKey,
+        onSelect: () => void (userKey && dateiAufsGeraet(item, userKey)),
+      },
+      { key: 'auswaehlen', label: t('mss.vault.dateien.auswaehlen'), icon: <CheckSquare className="h-4 w-4" />, onSelect: () => kachelLangdruck(item.id) },
+      {
+        key: 'archiv',
+        label: t('mss.vault.archivieren'),
+        icon: <Archive className="h-4 w-4" />,
+        separatorBefore: true,
+        disabled: beschaeftigt,
+        onSelect: () => void archivieren([item.id]),
+      },
+      {
+        key: 'papierkorb',
+        label: t('mss.vault.inPapierkorb'),
+        icon: <Trash2 className="h-4 w-4" />,
+        destructive: true,
+        disabled: beschaeftigt,
+        onSelect: () => void inPapierkorb([item.id]),
+      },
+    ]
+  }
+  const menueItem = kachelMenue ? liste.find((i) => i.id === kachelMenue.id) : undefined
   const aktionen: AuswahlAktion[] = [
     {
       key: 'album',
@@ -1044,6 +1097,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
                       tabHalt={item.id === tabHalt}
                       onKlick={kachelKlick}
                       onLangdruck={kachelLangdruck}
+                      onMenue={kachelMenueOeffnen}
                       onFokus={setFokusId}
                     />
                   ))}
@@ -1059,6 +1113,14 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
       {auswahl && (
         <Auswahlleiste variante="fuss" anzahlLabel={auswahlLabel} aktionen={aktionen} abbrechenLabel={t('mss.vault.dateien.auswahlBeenden')} onAbbrechen={auswahlLeeren} />
       )}
+
+      <Kontextmenue
+        ort={kachelMenue && menueItem ? { x: kachelMenue.x, y: kachelMenue.y } : null}
+        items={menueItem ? kachelEintraege(menueItem) : []}
+        label={menueItem ? t('mss.vault.dateien.aktionenFuer', { name: menueItem.service }) : t('mss.vault.dateien.aktionen')}
+        ausloeser={kachelMenue?.ausloeser}
+        onSchliessen={() => setKachelMenue(null)}
+      />
 
       <Kontextmenue
         ort={albumMenue ? { x: albumMenue.x, y: albumMenue.y } : null}

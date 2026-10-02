@@ -130,8 +130,8 @@ SEITEN: dict[str, Seite] = {
 # Stand der Datenschutzerklaerung. Er steht als Literal in `Privacy.tsx` und in
 # keiner Sprachdatei — also genau die zwei Angaben, die ein Modell sonst
 # erfindet. Ein Test haelt sie gegen die TSX-Datei.
-DATENSCHUTZ_VERSION = "3.15"
-DATENSCHUTZ_STAND = "2026-10-02"
+DATENSCHUTZ_VERSION = "3.16"
+DATENSCHUTZ_STAND = "2026-10-03"
 
 # `de.json` fuehrt neben `privacyPolicy` einen zweiten, **toten** Namensraum
 # `privacy` — sieben Schluessel, darunter "6. Verschluesselte Cloud-Backups

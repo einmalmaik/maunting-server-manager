@@ -38,9 +38,11 @@ vi.mock('./tresorMiniaturen', () => ({
 }))
 
 const blobLesen = vi.hoisted(() => vi.fn())
+const offlineAnheften = vi.hoisted(() => vi.fn(async () => undefined))
 vi.mock('./tresorDateien', async (original) => ({
   ...(await original<typeof import('./tresorDateien')>()),
   blobLesen,
+  offlineAnheften,
 }))
 
 const mehrereAufGeraetSpeichern = vi.hoisted(() => vi.fn(async () => true))
@@ -191,6 +193,29 @@ describe('TresorGalerie', () => {
       expect(kachel('b.jpg')).toHaveAttribute('aria-pressed', 'true')
       // Für die Daumen gibt es die Aktionen unten noch einmal.
       expect(screen.getAllByRole('toolbar', { name: /ausgewählt/ })).toHaveLength(2)
+    })
+
+    it('öffnet mit Rechtsklick das Menü der Kachel und macht die Datei dort offline verfügbar', async () => {
+      // Bis 03.10.2026 ging das in der Galerie nur über Auswahl oder Lichtbox.
+      offlineAnheften.mockClear()
+      render(<TresorGalerie />)
+      fireEvent.contextMenu(kachel('b.jpg'), { clientX: 40, clientY: 40 })
+      const menue = await screen.findByRole('menu', { name: i18n.t('mss.vault.dateien.aktionenFuer', { name: 'b.jpg' }) })
+      expect(within(menue).getByRole('menuitem', { name: i18n.t('mss.vault.inPapierkorb') })).toBeInTheDocument()
+      fireEvent.click(within(menue).getByRole('menuitem', { name: i18n.t('mss.vault.dateien.offlineMachen') }))
+      await vi.waitFor(() => expect(offlineAnheften).toHaveBeenCalledWith(expect.objectContaining({ id: kopf('2a').id }), '2', expect.anything()))
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+
+    it('öffnet am Finger kein Menü: der lange Druck bleibt bei der Auswahl', async () => {
+      render(<TresorGalerie />)
+      const k = kachel('b.jpg')
+      const druck = createEvent.pointerDown(k, { clientX: 10, clientY: 10, button: 0 })
+      Object.defineProperty(druck, 'pointerType', { value: 'touch' })
+      fireEvent(k, druck)
+      fireEvent.contextMenu(k)
+      expect(screen.queryByRole('menu')).toBeNull()
+      fireEvent.pointerUp(k)
     })
 
     it('speichert mehrere als ZIP', async () => {

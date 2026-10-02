@@ -141,11 +141,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.15 vom 2026-10-02 aus (Leck-Prüfung, Passwort-Hinweis, was am Konto bleibt)', () => {
+  it('weist die Fassung 3.16 vom 2026-10-03 aus (Kamera-Sicherung, Aufnahmeort)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.15`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.16`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -184,13 +184,19 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.retention.items.export')).toMatch(/Dateien aus dem Tresor enthält es nicht/);
     expect(i18n.t('privacyPolicy.sections.desktopApp.items.benachrichtigungen')).toMatch(/nutzt das Mikrofon nicht/);
     expect(screen.getByText(i18n.t('privacyPolicy.sections.vault.items.hinweis'))).toBeInTheDocument();
+    // 3.16: Kamera-Sicherung; den Aufnahmeort zog der Tresor nie eigens in den Eintrag, wie 3.15 behauptete.
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.vault.items.kamera'))).toBeInTheDocument();
+    expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/aus, bis Sie sie einschalten/);
+    expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/Android fragt vorher/);
+    expect(i18n.t('privacyPolicy.sections.vault.items.dateien')).toMatch(/liest der Tresor nicht eigens aus/);
+    expect(i18n.t('privacyPolicy.sections.vault.items.geraet')).toMatch(/auf diesem Gerät hochgeladen/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-10-02');
-    expect(stand).toHaveTextContent('2026-10-02');
+    expect(stand).toHaveAttribute('datetime', '2026-10-03');
+    expect(stand).toHaveTextContent('2026-10-03');
   });
 
   /**

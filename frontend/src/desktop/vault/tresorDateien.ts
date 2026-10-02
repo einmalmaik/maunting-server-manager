@@ -82,6 +82,33 @@ export interface DateiAngaben {
    * Eintrag noch einmal speichert, auf Blobs zeigt, die es noch gibt.
    */
   frueher?: DateiVersion[]
+  /**
+   * Kamera-Sicherung: welche Aufnahme dieses Geräts das ist und welche Bytes
+   * hochgingen. „Speicher freigeben“ löscht nur, was hier gleich ist.
+   */
+  quelle?: DateiQuelle
+}
+
+export interface DateiQuelle {
+  /** Zufällige Kennung der Installation, je Tresor (`kameraSicherung.ts`). */
+  geraet: string
+  /** Kennung der Aufnahme im MediaStore dieses Geräts. */
+  medienId: number
+  art: 'bild' | 'video'
+  sha256: string
+}
+
+function istQuelle(wert: unknown): wert is DateiQuelle {
+  if (!wert || typeof wert !== 'object') return false
+  const q = wert as Record<string, unknown>
+  return (
+    typeof q.geraet === 'string' &&
+    typeof q.medienId === 'number' &&
+    Number.isSafeInteger(q.medienId) &&
+    (q.art === 'bild' || q.art === 'video') &&
+    typeof q.sha256 === 'string' &&
+    /^[0-9a-f]{64}$/.test(q.sha256)
+  )
 }
 
 export interface DateiVersion {
@@ -122,7 +149,8 @@ export function istDateiAngaben(wert: unknown): wert is DateiAngaben {
     istBlobKopf(d.original) &&
     istBlobKopf(d.vorschau) &&
     istBlobKopf(d.miniatur) &&
-    (d.frueher === undefined || (Array.isArray(d.frueher) && d.frueher.length <= 50 && d.frueher.every(istVersion)))
+    (d.frueher === undefined || (Array.isArray(d.frueher) && d.frueher.length <= 50 && d.frueher.every(istVersion))) &&
+    (d.quelle === undefined || istQuelle(d.quelle))
   )
 }
 
@@ -152,7 +180,15 @@ interface UploadZeile {
  * Original einer angehefteten Datei für immer, die Vorschau als zuletzt
  * gesehen, bis `ZULETZT_GRENZE` sie verdrängt.
  */
-type Behalten = 'nein' | 'immer' | 'zuletzt'
+export type Behalten = 'nein' | 'immer' | 'zuletzt'
+
+/**
+ * Ein Upload von diesem Gerät bleibt als „zuletzt“ im Cache und ist ohne
+ * Download zu öffnen. Große Dateien nicht: sie verdrängten den ganzen Rest.
+ */
+function originalBehalten(groesse: number): Behalten {
+  return groesse <= ZULETZT_GRENZE / 4 ? 'zuletzt' : 'nein'
+}
 
 interface ChunkZeile {
   blobId: string
@@ -279,7 +315,7 @@ export async function dateiVorbereiten(
   bucket: string,
   eintragId: string,
   abgebrochen: () => boolean,
-  bilder: { vorschau?: Uint8Array; miniatur?: Uint8Array; originalBehalten?: boolean } = {},
+  bilder: { vorschau?: Uint8Array; miniatur?: Uint8Array; original?: Behalten } = {},
 ): Promise<DateiAngaben> {
   const db = await ablageOderFehler()
   const vorschauDaten = bilder.vorschau ?? new Uint8Array(0)
@@ -292,7 +328,7 @@ export async function dateiVorbereiten(
   try {
     // Eine leere Vorschau oder Miniatur (keine Bilddatei) ist nur Polster und bleibt nicht liegen.
     const zeilen = [
-      await blobAblegen(db, bucket, eintragId, original.kopf, original.schluessel, bilder.originalBehalten ? 'immer' : 'nein', async (von, bis) => {
+      await blobAblegen(db, bucket, eintragId, original.kopf, original.schluessel, bilder.original ?? originalBehalten(datei.size), async (von, bis) => {
         return new Uint8Array(await datei.slice(von, bis).arrayBuffer())
       }, abgebrochen),
       await blobAblegen(db, bucket, eintragId, vorschau.kopf, vorschau.schluessel, vorschauDaten.length > 0 ? 'zuletzt' : 'nein', async (von, bis) => vorschauDaten.slice(von, bis), abgebrochen),
@@ -343,7 +379,7 @@ function status(err: unknown): number | null {
  * danach: der laufende hat seine Liste schon gelesen und sähe neu Abgelegtes
  * sonst erst beim nächsten Sync.
  */
-function einzeln(arbeit: (bucket: string) => Promise<void>) {
+export function einzeln(arbeit: (bucket: string) => Promise<void>) {
   let lauf: Promise<void> | null = null
   let nochmal: string | null = null
   const starten = (bucket: string): Promise<void> => {
@@ -477,6 +513,18 @@ async function uploadAbschliessen(db: IDBDatabase, zeile: UploadZeile): Promise<
   await fertig(tx)
   if (zeile.offline === 'zuletzt') await zuletztMerken(db, zeile.blobId, zeile.bytes).catch(() => {})
   await fortschrittPruefen(db, zeile.eintragId)
+}
+
+/** Welche dieser Blobs noch nicht vollständig beim Server liegen. */
+export async function uploadsOffen(blobIds: string[]): Promise<Set<string>> {
+  const db = await ablageDb()
+  if (!db) return new Set(blobIds)
+  const store = db.transaction(UPLOADS).objectStore(UPLOADS)
+  const offen = new Set<string>()
+  for (const id of blobIds) {
+    if ((await anfrage(store.getKey(id))) !== undefined || inVorbereitung.has(id)) offen.add(id)
+  }
+  return offen
 }
 
 /** Chiffrat eines Chunks, falls es auf dem Gerät liegt: im Cache oder noch in der Upload-Ablage. */

@@ -4751,9 +4751,10 @@
         "body": "Der Tresor in der App verschlüsselt jeden Eintrag auf Ihrem Gerät mit einem Schlüssel, der aus Ihrem Master-Passwort entsteht. Das Master-Passwort verlässt das Gerät nie, und die Instanz speichert nur verschlüsselte Einträge.",
         "items": {
           "eintraege": "Einträge (Passwörter, Authenticator-Codes, Notizen, Dateien, Ordner und Alben) liegen auf dem Server als verschlüsselter Umschlag, aufgefüllt auf feste Größen, mit Revisionsnummer, Zeitpunkt und der Angabe, ob er gelöscht ist. Papierkorb und Archiv stehen im verschlüsselten Eintrag.",
-          "dateien": "Dateien und Fotos werden auf dem Gerät in Stücken verschlüsselt, jede Datei mit eigenem Schlüssel, und als drei Teile abgelegt: Original, Vorschau und Miniatur. Name, Dateityp, Aufnahmedatum, Aufnahmeort, Kamera und genaue Größe stehen nur im verschlüsselten Eintrag. Die Instanz sieht je Tresor, wie viele Teile es gibt, wie groß sie aufgerundet sind, wann sie hochgeladen wurden, dass jeweils drei zusammengehören und bei jedem Abruf, welcher Teil geholt wird. Bearbeiten Sie eine Datei, bleiben bis zu 5 frühere Fassungen verschlüsselt auf dem Server, zählen zum Speicher und lassen sich zurückholen.",
+          "dateien": "Dateien und Fotos werden auf dem Gerät in Stücken verschlüsselt, jede Datei mit eigenem Schlüssel, und als drei Teile abgelegt: Original, Vorschau und Miniatur. Name, Dateityp, Aufnahmedatum, Kamera und genaue Größe stehen nur im verschlüsselten Eintrag. Einen Aufnahmeort liest der Tresor nicht eigens aus; steht er in der Datei selbst, ist er mit ihr verschlüsselt. Die Instanz sieht je Tresor, wie viele Teile es gibt, wie groß sie aufgerundet sind, wann sie hochgeladen wurden, dass jeweils drei zusammengehören und bei jedem Abruf, welcher Teil geholt wird. Bearbeiten Sie eine Datei, bleiben bis zu 5 frühere Fassungen verschlüsselt auf dem Server, zählen zum Speicher und lassen sich zurückholen.",
           "speicher": "Welchem Konto ein Tresor gehört, steht in der Datenbank nur als Prüfwert, den allein die Instanz mit ihrem Schlüssel bilden kann. Wer nur die Datenbank liest, etwa in einer Sicherung, kann Tresor und Dateien keinem Konto zuordnen. Zwei Angaben stehen trotzdem an Ihrem Konto: das Prüfprotokoll vermerkt, wann Sie Ihren Tresor zurückgesetzt haben, und eine Auszeichnung zeigt, dass Sie ihn nutzen. Sicherungen von vor dieser Umstellung (Fassung 3.14) enthalten die Zuordnung noch, bis sie gelöscht werden. Die Instanz stellt die Zuordnung her, solange Sie angemeldet darauf zugreifen, und zählt so, wie viel Speicher Ihr Tresor belegt; wie viel er belegen darf, legt der Betreiber über Ihre Rollen fest. Wer Zugriff auf den Server selbst hat, kann die Zuordnung ebenfalls herstellen. Gelöschte Dateien bleiben noch 7 Tage verschlüsselt auf dem Server und zählen so lange mit, danach werden sie entfernt. Ein Upload, an dem 24 Stunden lang nichts mehr ankommt, verschwindet.",
-          "geraet": "Damit der Tresor ohne Verbindung funktioniert, liegen Einträge und Miniaturen verschlüsselt im Speicher des Geräts, dazu Originale, die Sie offline verfügbar machen, und was Sie zuletzt geöffnet haben (Originale und Vorschauen, zusammen bis 512 MiB). Dieser Speicher gehört Ihrem Konto; ein anderes Konto auf demselben Gerät kommt nicht daran. Beim Abmelden bleibt er verschlüsselt liegen, entfernt wird er beim Zurücksetzen des Tresors und mit der App. Speichern Sie eine Datei ausdrücklich auf dem Gerät, liegt diese Kopie dort unverschlüsselt.",
+          "geraet": "Damit der Tresor ohne Verbindung funktioniert, liegen Einträge und Miniaturen verschlüsselt im Speicher des Geräts, dazu Originale, die Sie offline verfügbar machen, und was Sie zuletzt geöffnet oder auf diesem Gerät hochgeladen haben (Originale und Vorschauen, zusammen bis 512 MiB). Dieser Speicher gehört Ihrem Konto; ein anderes Konto auf demselben Gerät kommt nicht daran. Beim Abmelden bleibt er verschlüsselt liegen, entfernt wird er beim Zurücksetzen des Tresors und mit der App. Speichern Sie eine Datei ausdrücklich auf dem Gerät, liegt diese Kopie dort unverschlüsselt.",
+          "kamera": "Kamera-Sicherung (nur Android, aus, bis Sie sie einschalten): Die App liest dann neue Fotos und Videos aus dem Kamera-Ordner (DCIM) und sichert das unveränderte Original samt Aufnahmeort verschlüsselt wie jede andere Datei, solange die App offen und der Tresor entsperrt ist. Die Instanz sieht dabei dasselbe wie bei anderen Dateien. Im verschlüsselten Eintrag steht eine Prüfsumme der Aufnahme; auf dem Gerät merkt sich die App, bis zu welcher Aufnahme gesichert ist. „Speicher freigeben“ legt nur Aufnahmen in den Papierkorb der Galerie, die nachweislich vollständig im Tresor liegen, und Android fragt vorher selbst nach.",
           "verlust": "Ohne Master-Passwort kann niemand den Tresor öffnen, auch der Betreiber nicht. Wer es vergisst, kann den Tresor nur zurücksetzen. Dabei, wie beim Löschen Ihres Kontos, entfernt die Instanz alle Einträge sofort und alle Dateien innerhalb einer Stunde. Sie behält nur die Kennung des alten Tresors, damit ein anderes Gerät ihn nicht wieder hochlädt; diese Kennung verrät weder Konto noch Inhalt.",
           "hinweis": "Passwort-Hinweis (freiwillig): Er wird mit dem Schlüssel der Instanz verschlüsselt, nicht mit Ihrem Master-Passwort. Die Instanz kann ihn also lesen, schickt ihn auf Ihre Anforderung unverschlüsselt an Ihre E-Mail-Adresse, und er steht in Ihrem Datenexport. Schreiben Sie nichts hinein, was das Master-Passwort verrät."
         }
@@ -6480,7 +6481,42 @@
       "ablageFehler": "Der Tresor konnte auf diesem Gerät nicht speichern. Was du offline speicherst, ist nach einem Neustart weg; bleib online, bis der Abgleich durch ist.",
       "eintragZuGross": "Der Eintrag ist zu lang zum Speichern. Teile ihn auf oder leg den Text als Datei ab.",
       "hinweisGesendet": "Der Passwort-Hinweis ist an deine E-Mail-Adresse unterwegs.",
-      "hinweisAnfordernFehler": "Der Hinweis konnte nicht verschickt werden."
+      "hinweisAnfordernFehler": "Der Hinweis konnte nicht verschickt werden.",
+      "kamera": {
+        "titel": "Kamera-Sicherung",
+        "schalter": "Neue Fotos und Videos sichern",
+        "hinweis": "Neue Aufnahmen der Kamera gehen verschlüsselt in den Tresor, solange MSS offen und der Tresor entsperrt ist. Gesichert wird das unveränderte Original. Es bleibt auch in deiner Galerie.",
+        "gesperrt": "Entsperre den Tresor, um die Kamera-Sicherung einzurichten.",
+        "nurWlan": "Nur über WLAN",
+        "laeuft": "Sichert gerade …",
+        "nochNichts": "Noch keine Aufnahme gesichert. Neue Fotos und Videos kommen dazu, sobald du sie aufnimmst.",
+        "stand_one": "{{count}} Aufnahme gesichert, zuletzt am {{zeit}}",
+        "stand_other": "{{count}} Aufnahmen gesichert, zuletzt am {{zeit}}",
+        "warten": {
+          "zugriff": "MSS darf nicht auf alle Fotos und Videos zugreifen. Ohne vollen Zugriff (auch auf den Aufnahmeort) sichert sie nichts.",
+          "wlan": "Wartet auf WLAN.",
+          "fehler": "Die Sicherung wurde unterbrochen."
+        },
+        "zugriff": {
+          "teilweise": "MSS braucht Zugriff auf alle Fotos und Videos samt Aufnahmeort. Mit „Nur ausgewählte“ sieht sie neue Aufnahmen nicht.",
+          "keiner": "Ohne Zugriff auf Fotos und Videos kann MSS nichts sichern."
+        },
+        "zugriffErteilen": "Zugriff erteilen",
+        "nochmal": "Erneut versuchen",
+        "fehler": "Die Kamera-Sicherung hat nicht geklappt.",
+        "vorhandeneKnopf": "Vorhandene Aufnahmen sichern",
+        "vorhandeneTitel": "Vorhandene Aufnahmen sichern?",
+        "vorhandeneFrage": "MSS sichert dann auch alles, was schon in der Kamera liegt. Das kann viel Tresorspeicher belegen und dauern.",
+        "freigebenKnopf": "Speicher freigeben",
+        "freigebenTitel": "Speicher freigeben?",
+        "freigebenFrage_one": "{{count}} gesicherte Aufnahme ({{groesse}}) geht in den Papierkorb deiner Galerie. Dort liegt sie noch 30 Tage, danach nur noch im Tresor.",
+        "freigebenFrage_other": "{{count}} gesicherte Aufnahmen ({{groesse}}) gehen in den Papierkorb deiner Galerie. Dort liegen sie noch 30 Tage, danach nur noch im Tresor.",
+        "freigegeben_one": "{{count}} Aufnahme liegt im Papierkorb der Galerie.",
+        "freigegeben_other": "{{count}} Aufnahmen liegen im Papierkorb der Galerie.",
+        "nichtsFreizugeben": "Keine Aufnahme ist schon vollständig gesichert.",
+        "wirdGeprueft": "Wird geprüft …",
+        "freigebenAlt": "Speicher freigeben gibt es erst ab Android 11."
+      }
     },
     "aktion": {
       "freigabeErforderlich": "Bestätigung erforderlich",

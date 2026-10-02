@@ -37,6 +37,7 @@ mod durchklick;
 mod ducking;
 mod geheimnisse;
 mod konfig;
+mod medien;
 mod sandbox;
 pub mod sandbox_container;
 mod sichtfeld;
@@ -824,7 +825,9 @@ pub fn run() {
             // aber nichts verwahren; dieses hier hängt am Android-Keystore und
             // ist das Gegenstück zum Credential Store auf Windows.
             .plugin(biometrie::init_android_schluesselfach())
-            .plugin(updater::init_android_installer());
+            .plugin(updater::init_android_installer())
+            // Kameraaufnahmen für die Kamera-Sicherung des Tresors.
+            .plugin(medien::init_android_medien());
     }
 
     builder
@@ -882,6 +885,12 @@ pub fn run() {
             datei_speichern::datei_speichern_start,
             datei_speichern::datei_speichern_teil,
             datei_speichern::datei_speichern_ende,
+            medien::medien_zugriff,
+            medien::medien_hoechste_id,
+            medien::medien_aufnahmen,
+            medien::medien_lesen,
+            medien::medien_pruefsumme,
+            medien::medien_papierkorb,
             updater::update_pruefen,
             updater::update_installieren,
             updater::app_neu_starten

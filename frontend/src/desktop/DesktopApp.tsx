@@ -53,6 +53,7 @@ import { Uebernahmekarte } from './Uebernahmekarte'
 import { UpdateModal } from './UpdateModal'
 import { Wizard } from './Wizard'
 import { VaultView } from './vault/VaultView'
+import { kameraBeobachten } from './vault/kameraSicherung'
 import { tresorAutoSperrQuelle, useVaultStore } from './vault/vaultStore'
 import {
   beiFremdemSprachstart,
@@ -140,6 +141,9 @@ export function DesktopApp() {
   // Mechanik — siehe `services/autoSperre`.
   useAutoSperre(tresorAutoSperrQuelle, isUnlocked)
   useMessengerSperreBereitschaft()
+
+  // Kamera-Sicherung: sieht bei offenem Tresor nach neuen Aufnahmen.
+  useEffect(() => (isAndroid ? kameraBeobachten() : undefined), [])
 
   const ladeKonfigNeu = useCallback(async () => {
     try {

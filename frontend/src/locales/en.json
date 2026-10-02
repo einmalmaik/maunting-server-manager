@@ -4751,9 +4751,10 @@
         "body": "The vault in the app encrypts every entry on your device with a key derived from your master password. The master password never leaves the device, and the instance only stores encrypted entries.",
         "items": {
           "eintraege": "Entries (passwords, authenticator codes, notes, files, folders and albums) are stored on the server as an encrypted envelope, padded to fixed sizes, with a revision number, a timestamp and whether it is deleted. Trash and archive live inside the encrypted entry.",
-          "dateien": "Files and photos are encrypted on the device in chunks, each file with its own key, and stored as three parts: original, preview and thumbnail. Name, file type, capture date, location, camera and exact size are only in the encrypted entry. Per vault, the instance sees how many parts exist, their rounded-up sizes, when they were uploaded, that they belong together in threes and, on each download, which part is fetched. When you edit a file, up to 5 earlier versions stay encrypted on the server, count towards the storage and can be restored.",
+          "dateien": "Files and photos are encrypted on the device in chunks, each file with its own key, and stored as three parts: original, preview and thumbnail. Name, file type, capture date, camera and exact size are only in the encrypted entry. The vault does not extract a location; if the file itself contains one, it is encrypted with the file. Per vault, the instance sees how many parts exist, their rounded-up sizes, when they were uploaded, that they belong together in threes and, on each download, which part is fetched. When you edit a file, up to 5 earlier versions stay encrypted on the server, count towards the storage and can be restored.",
           "speicher": "Which account a vault belongs to is stored in the database only as a check value that only the instance can compute with its key. Anyone who only reads the database, for example in a backup, cannot link the vault or its files to an account. Two things are still recorded with your account: the audit log notes when you reset your vault, and an achievement shows that you use it. Backups made before this change (version 3.14) still contain the link until they are deleted. The instance makes the link while you access the vault signed in and counts how much storage your vault uses; how much it may use is set by the operator through your roles. Anyone with access to the server itself can make the link as well. Deleted files stay encrypted on the server for another 7 days and count until then; afterwards they are removed. An upload that receives nothing for 24 hours disappears.",
-          "geraet": "So the vault works offline, entries and thumbnails are kept encrypted in the device storage, plus originals you make available offline and what you opened recently (originals and previews, up to 512 MiB together). This storage belongs to your account; another account on the same device cannot read it. It stays on the device, encrypted, when you sign out, and is removed when you reset the vault or uninstall the app. If you explicitly save a file to the device, that copy is stored there unencrypted.",
+          "geraet": "So the vault works offline, entries and thumbnails are kept encrypted in the device storage, plus originals you make available offline and what you opened or uploaded from this device recently (originals and previews, up to 512 MiB together). This storage belongs to your account; another account on the same device cannot read it. It stays on the device, encrypted, when you sign out, and is removed when you reset the vault or uninstall the app. If you explicitly save a file to the device, that copy is stored there unencrypted.",
+          "kamera": "Camera backup (Android only, off until you turn it on): the app then reads new photos and videos from the camera folder (DCIM) and backs up the unchanged original, including its location, encrypted like any other file, while the app is open and the vault is unlocked. The instance sees the same as for other files. The encrypted entry holds a checksum of the shot; on the device the app remembers up to which shot it has backed up. \"Free up space\" only moves shots to the gallery trash that are verifiably complete in the vault, and Android asks first.",
           "verlust": "Without the master password nobody can open the vault, the operator included. If you forget it, you can only reset the vault. Then, as when you delete your account, the instance removes all entries at once and all files within an hour. It keeps only the identifier of the old vault so that another device does not upload it again; that identifier reveals neither account nor content.",
           "hinweis": "Password hint (optional): it is encrypted with the instance's key, not with your master password. The instance can therefore read it, sends it unencrypted to your email address when you request it, and it is part of your data export. Do not write anything into it that gives the master password away."
         }
@@ -6480,7 +6481,42 @@
       "ablageFehler": "The vault could not save on this device. Anything you save offline is gone after a restart; stay online until the sync is done.",
       "eintragZuGross": "This entry is too long to save. Split it up or store the text as a file.",
       "hinweisGesendet": "Your password hint is on its way to your email address.",
-      "hinweisAnfordernFehler": "The hint could not be sent."
+      "hinweisAnfordernFehler": "The hint could not be sent.",
+      "kamera": {
+        "titel": "Camera backup",
+        "schalter": "Back up new photos and videos",
+        "hinweis": "New camera shots go encrypted into the vault while MSS is open and the vault is unlocked. The unchanged original is backed up. It also stays in your gallery.",
+        "gesperrt": "Unlock the vault to set up camera backup.",
+        "nurWlan": "Wi-Fi only",
+        "laeuft": "Backing up …",
+        "nochNichts": "Nothing backed up yet. New photos and videos are added as you take them.",
+        "stand_one": "{{count}} shot backed up, last on {{zeit}}",
+        "stand_other": "{{count}} shots backed up, last on {{zeit}}",
+        "warten": {
+          "zugriff": "MSS may not access all photos and videos. Without full access (including location) it backs up nothing.",
+          "wlan": "Waiting for Wi-Fi.",
+          "fehler": "The backup was interrupted."
+        },
+        "zugriff": {
+          "teilweise": "MSS needs access to all photos and videos, including location. With \"selected photos only\" it cannot see new shots.",
+          "keiner": "Without access to photos and videos, MSS cannot back anything up."
+        },
+        "zugriffErteilen": "Grant access",
+        "nochmal": "Try again",
+        "fehler": "Camera backup did not work.",
+        "vorhandeneKnopf": "Back up existing shots",
+        "vorhandeneTitel": "Back up existing shots?",
+        "vorhandeneFrage": "MSS will also back up everything already in the camera. This can take a lot of vault storage and time.",
+        "freigebenKnopf": "Free up space",
+        "freigebenTitel": "Free up space?",
+        "freigebenFrage_one": "{{count}} backed-up shot ({{groesse}}) goes to your gallery trash. It stays there for 30 days, after that only in the vault.",
+        "freigebenFrage_other": "{{count}} backed-up shots ({{groesse}}) go to your gallery trash. They stay there for 30 days, after that only in the vault.",
+        "freigegeben_one": "{{count}} shot is in the gallery trash.",
+        "freigegeben_other": "{{count}} shots are in the gallery trash.",
+        "nichtsFreizugeben": "No shot is fully backed up yet.",
+        "wirdGeprueft": "Checking …",
+        "freigebenAlt": "Freeing up space needs Android 11 or later."
+      }
     },
     "aktion": {
       "freigabeErforderlich": "Confirmation required",

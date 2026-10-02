@@ -24,6 +24,9 @@ import { useShallow } from 'zustand/react/shallow'
 import { useVaultStore } from './vaultStore'
 import { leakCheckGewaehlt, setLeakCheckEnabled } from './leakChecker'
 import { fehlerText } from './tresorFehler'
+import { KameraSicherungKarte } from './KameraSicherungKarte'
+
+const istAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
 export function TresorSicherheitTab() {
   const { t } = useTranslation()
@@ -197,6 +200,8 @@ export function TresorSicherheitTab() {
           )}
         </div>
       </div>
+
+      {istAndroid && <KameraSicherungKarte />}
 
       {/* Biometrie Aktivierungs-Modal */}
       {biometricsModalOpen && (

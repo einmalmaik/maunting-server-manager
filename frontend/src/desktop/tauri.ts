@@ -6,6 +6,7 @@
  * Transport und liegen in `transport.ts`.)
  */
 import { invoke } from '@tauri-apps/api/core'
+import { base64ToBytes } from '@msdis/shield/core'
 import { setRuntimeApiUrl } from '@/config/api'
 
 export type AgentStatus = 'bereit' | 'hoert' | 'denkt' | 'spricht'
@@ -486,3 +487,52 @@ export async function appNeuStarten(): Promise<void> {
   await invoke('app_neu_starten')
 }
 
+
+// ── Kamera-Sicherung (nur Android: `medien.rs`, `MedienPlugin.kt`) ──────────
+
+export type MedienArt = 'bild' | 'video'
+
+export interface Aufnahme {
+  id: number
+  art: MedienArt
+  name: string
+  typ: string
+  groesse: number
+  /** Aufnahmezeit, sonst Zeit des Hinzufügens (ms). */
+  aufgenommen: number
+  geaendert: number
+}
+
+export interface MedienZugriff {
+  /** `teilweise`: nur ausgewählte Fotos oder ohne Aufnahmeort. */
+  stand: 'voll' | 'teilweise' | 'keiner'
+  /** Ab Android 11 lassen sich Aufnahmen in den Papierkorb der Galerie legen. */
+  papierkorb: boolean
+}
+
+export async function medienZugriff(anfragen: boolean): Promise<MedienZugriff> {
+  return invoke<MedienZugriff>('medien_zugriff', { anfragen })
+}
+
+export async function medienHoechsteId(): Promise<number> {
+  return (await invoke<{ id: number }>('medien_hoechste_id')).id
+}
+
+/** Aufnahmen aus DCIM mit größerer Kennung als `nachId`, aufsteigend. */
+export async function medienAufnahmen(nachId: number, hoechstens: number): Promise<Aufnahme[]> {
+  return (await invoke<{ aufnahmen: Aufnahme[] }>('medien_aufnahmen', { nachId, hoechstens })).aufnahmen
+}
+
+export async function medienLesen(id: number, art: MedienArt, von: number, laenge: number): Promise<Uint8Array> {
+  const { daten } = await invoke<{ daten: string }>('medien_lesen', { id, art, von, laenge })
+  return base64ToBytes(daten)
+}
+
+export async function medienPruefsumme(id: number, art: MedienArt): Promise<{ sha256: string; groesse: number }> {
+  return invoke<{ sha256: string; groesse: number }>('medien_pruefsumme', { id, art })
+}
+
+/** Legt Aufnahmen in den Papierkorb der Galerie; Android fragt selbst nach. */
+export async function medienPapierkorb(bilder: number[], videos: number[]): Promise<boolean> {
+  return (await invoke<{ erledigt: boolean }>('medien_papierkorb', { bilder, videos })).erledigt
+}

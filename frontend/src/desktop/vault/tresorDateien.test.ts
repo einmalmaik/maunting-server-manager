@@ -302,7 +302,7 @@ describe('Tresor-Dateien', () => {
     const userKey = await tresorOeffnen()
     const datei = foto(5 * 1024 * 1024 + 17)
 
-    const id = await useVaultStore.getState().dateiHinzufuegen(datei)
+    const id = await useVaultStore.getState().dateiHinzufuegen(datei, undefined, { original: 'nein' })
     await allesErledigt()
 
     const item = useVaultStore.getState().items.find((i) => i.id === id)!
@@ -407,7 +407,7 @@ describe('Tresor-Dateien', () => {
     expect([...server.blobs.values()].every((b) => b.state === 'fertig')).toBe(true)
   })
 
-  it('behält von einem Foto die Miniatur und die Vorschau nur als zuletzt gesehen', async () => {
+  it('behält von einem Foto Miniatur, Vorschau und Original nur als zuletzt gesehen', async () => {
     // Bis 01.10.2026 blieb je Datei eine gepolsterte Vorschau (512 KiB) für
     // immer liegen, auch ohne Bild: tausend Dateien, ein halbes Gigabyte.
     bilder.an = true
@@ -416,17 +416,17 @@ describe('Tresor-Dateien', () => {
     const id = await useVaultStore.getState().dateiHinzufuegen(foto(1000))
     await allesErledigt()
 
-    const { vorschau, miniatur } = useVaultStore.getState().items.find((i) => i.id === id)!.datei!
+    const { original, vorschau, miniatur } = useVaultStore.getState().items.find((i) => i.id === id)!.datei!
     const cache = (await zeilen(BLOB_CACHE)) as { blobId: string }[]
-    expect(new Set(cache.map((c) => c.blobId))).toEqual(new Set([vorschau.id, miniatur.id]))
+    expect(new Set(cache.map((c) => c.blobId))).toEqual(new Set([original.id, vorschau.id, miniatur.id]))
     const offline = (await zeilen(OFFLINE)) as { blobId: string; angeheftet: boolean }[]
-    expect(offline).toEqual([expect.objectContaining({ blobId: vorschau.id, angeheftet: false })])
+    expect(new Set(offline.map((z) => `${z.blobId}:${z.angeheftet}`))).toEqual(new Set([`${vorschau.id}:false`, `${original.id}:false`]))
   })
 
   it('legt nur in den Cache, was sich entschlüsseln lässt, und holt Kaputtes neu', async () => {
     const server = serverStarten()
     const userKey = await tresorOeffnen()
-    const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Vertrag'], 'v.txt', { type: 'text/plain' }))
+    const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Vertrag'], 'v.txt', { type: 'text/plain' }), undefined, { original: 'nein' })
     await allesErledigt()
     const original = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.original
     const imCache = async () => ((await zeilen(BLOB_CACHE)) as { blobId: string }[]).some((z) => z.blobId === original.id)
@@ -928,19 +928,46 @@ describe('Tresor-Dateien', () => {
     const originalImCache = async (blobId: string) =>
       ((await zeilen(BLOB_CACHE)) as { blobId: string }[]).some((z) => z.blobId === blobId)
 
+    /** Eine Datei, deren Original nicht auf diesem Gerät liegt (wie von einem anderen Gerät hochgeladen). */
     async function hochgeladen(inhalt = 'Vertrag', name = 'vertrag.txt') {
       const server = serverStarten()
       const userKey = await tresorOeffnen()
-      const id = await useVaultStore.getState().dateiHinzufuegen(new File([inhalt], name, { type: 'text/plain' }))
+      const id = await useVaultStore.getState().dateiHinzufuegen(new File([inhalt], name, { type: 'text/plain' }), undefined, {
+        original: 'nein',
+      })
       await allesErledigt()
       const item = () => useVaultStore.getState().items.find((i) => i.id === id)!
       return { server, userKey, id, item }
     }
 
+    it('hält ein Original, das dieses Gerät hochgeladen hat, ohne Download und ohne Anheften lesbar', async () => {
+      // Bis 03.10.2026 musste jede eben hochgeladene Datei wieder heruntergeladen werden.
+      const server = serverStarten()
+      const userKey = await tresorOeffnen()
+      const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Vertrag'], 'vertrag.txt', { type: 'text/plain' }))
+      await allesErledigt()
+      const original = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.original
+      expect(await originalImCache(original.id)).toBe(true)
+      expect(await angeheftet([original.id])).toEqual(new Set())
+      server.offline = true
+      expect(await (await blobLesen(original, id, userKey, 'text/plain')).text()).toBe('Vertrag')
+    })
+
+    it('behält eine Kamera-Aufnahme nicht doppelt auf dem Gerät', async () => {
+      // Das Original liegt schon in der Galerie.
+      serverStarten()
+      await tresorOeffnen()
+      const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Foto'], 'IMG_1.jpg', { type: 'image/jpeg' }), undefined, {
+        original: 'nein',
+      })
+      await allesErledigt()
+      const original = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.original
+      expect(await originalImCache(original.id)).toBe(false)
+    })
+
     it('hält ein angeheftetes Original ohne Netz lesbar, bis es gelöst wird', async () => {
       const { server, userKey, id, item } = await hochgeladen()
       const original = item().datei!.original
-      expect(await originalImCache(original.id)).toBe(false)
 
       await offlineAnheften(original, id, userKey)
       expect(await angeheftet([original.id, 'f'.repeat(32)])).toEqual(new Set([original.id]))
@@ -987,7 +1014,7 @@ describe('Tresor-Dateien', () => {
       // Bis 02.10.2026 galt die Datei danach als offline verfügbar, obwohl ein Teil fehlte.
       const server = serverStarten()
       const userKey = await tresorOeffnen()
-      const id = await useVaultStore.getState().dateiHinzufuegen(foto(5 * 1024 * 1024))
+      const id = await useVaultStore.getState().dateiHinzufuegen(foto(5 * 1024 * 1024), undefined, { original: 'nein' })
       await allesErledigt()
       const original = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.original
 
@@ -1017,7 +1044,7 @@ describe('Tresor-Dateien', () => {
       // Zeile im Cache, und keine Grenze nahm ihn je wieder heraus.
       serverStarten()
       const userKey = await tresorOeffnen()
-      const id = await useVaultStore.getState().dateiHinzufuegen(foto(5 * 1024 * 1024))
+      const id = await useVaultStore.getState().dateiHinzufuegen(foto(5 * 1024 * 1024), undefined, { original: 'nein' })
       await allesErledigt()
       const original = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.original
 
@@ -1415,7 +1442,7 @@ describe('Review: Negativtests Tresor-Client', () => {
   it('R5: heftet kein Chiffrat an, das sich nicht entschlüsseln lässt (Punkt 81)', async () => {
     const server = serverStarten()
     const userKey = await tresorOeffnen()
-    const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Vertrag'], 'v.txt', { type: 'text/plain' }))
+    const id = await useVaultStore.getState().dateiHinzufuegen(new File(['Vertrag'], 'v.txt', { type: 'text/plain' }), undefined, { original: 'nein' })
     await allesErledigt()
     const original = eintrag(id)!.datei!.original
     // Richtige Länge, falscher Inhalt (ein Bit gekippt oder ein fremder Blob derselben Größe).
