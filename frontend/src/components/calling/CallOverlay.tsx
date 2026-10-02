@@ -33,13 +33,7 @@ import { ParticipantMenu } from './ParticipantMenu'
 import { ParticipantTile } from './ParticipantTile'
 import { RemoteAudio } from './RemoteAudio'
 import { ScreenShareOptionsModal } from './ScreenShareOptionsModal'
-
-function formatiereDauer(sekunden: number): string {
-  const s = Math.max(0, sekunden)
-  const m = Math.floor(s / 60)
-  const rest = s % 60
-  return `${m.toString().padStart(2, '0')}:${rest.toString().padStart(2, '0')}`
-}
+import { formatDauer } from '@/lib/format'
 
 /**
  * Wie viele Kacheln nebeneinander passen. Feste Stufen statt `auto-fit`: so ist
@@ -261,7 +255,7 @@ export const CallOverlay: React.FC = () => {
         ? t('calls.incoming')
         : state === 'connecting'
           ? t('calls.connecting')
-          : t('calls.connectedFor', { duration: formatiereDauer(callDurationSeconds) })
+          : t('calls.connectedFor', { duration: formatDauer(callDurationSeconds) })
 
   const titel = istGruppe ? group?.name || t('calls.groupCall') : partner?.username || t('calls.peer')
   const kopfBild = istGruppe ? group?.avatarUrl : partner?.avatarUrl

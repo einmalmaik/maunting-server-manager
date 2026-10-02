@@ -49,7 +49,7 @@ export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel, 
       role="tablist"
       aria-label={ariaLabel}
       className={`${embedded ? 'rounded-lg bg-surface-container-low/50 p-1' : 'msm-card p-2'} inline-flex flex-wrap gap-1 ${
-        einzeilig ? 'max-md:flex max-md:w-full max-md:flex-nowrap max-md:overflow-x-auto max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden' : ''
+        einzeilig ? 'max-md:flex max-md:w-full max-md:flex-nowrap max-md:overflow-x-auto msm-ohne-rollbalken' : ''
       }`}
     >
       {tabs.map((tab) => {

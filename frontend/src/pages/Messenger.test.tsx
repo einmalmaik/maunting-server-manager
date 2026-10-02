@@ -1372,6 +1372,39 @@ describe('Messenger (Allround Chat)', () => {
     expect(screen.getByText('Heute')).toBeInTheDocument()
   })
 
+  // Am Handy beendete Zurück die Auswahl nicht, sondern verließ den Chat
+  // (bis 02.10.2026). Seitdem gilt `useMehrfachauswahl` wie im Tresor.
+  it('beendet die Mehrfachauswahl mit der Zurück-Taste', async () => {
+    await waitFor(() => expect(window.history.state?.msmTiefe ?? 0).toBe(0))
+    vi.mocked(socialApi.getFriends).mockResolvedValue([
+      { id: 1, friend_user_id: 102, username: 'bob', avatar_url: null, presence: { status: 'online' } } as any,
+    ])
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      { id: 1, blind_mailbox_id: 'mailbox-102', ciphertext_envelope: 'auswahl-1', created_at: new Date().toISOString() },
+      { id: 2, blind_mailbox_id: 'mailbox-102', ciphertext_envelope: 'auswahl-2', created_at: new Date().toISOString() },
+    ])
+    testKlartext.mockImplementation(async (envelope) =>
+      JSON.stringify({ sender_id: 102, text: envelope === 'auswahl-1' ? 'Erste Nachricht' : 'Zweite Nachricht' }),
+    )
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /bob(?!_)/i }))
+    await screen.findByText('Zweite Nachricht')
+
+    oeffneNachrichtenMenue()
+    fireEvent.click(await screen.findByText(i18n.t('messenger.selectSeveral')))
+    const beenden = await screen.findByRole('button', { name: i18n.t('messenger.endSelection') })
+    expect(beenden).toBeInTheDocument()
+    await waitFor(() => expect(window.history.state?.msmTiefe).toBe(1))
+
+    act(() => window.history.back())
+    await waitFor(() => expect(screen.queryByRole('button', { name: i18n.t('messenger.endSelection') })).not.toBeInTheDocument())
+  })
+
   // Am laufenden System gefunden: die Warteschlange meldet die Kennung **mit**
   // Gerätesuffix (`<uuid>#<geraet>`), weil dort je Zielgerät ein Auftrag
   // liegt. Die Zeile im Verlauf trägt die logische Kennung. Der Abgleich traf

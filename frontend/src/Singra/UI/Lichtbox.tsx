@@ -20,7 +20,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { ChevronLeft, ChevronRight, Info, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
-import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
+import { useZurueckSchliesst } from './useZurueckSchliesst'
 
 export interface LichtboxProps {
   /** Kennung des gezeigten Elements; wechselt sie, springt der Zoom zurück. */

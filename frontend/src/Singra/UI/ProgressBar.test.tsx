@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { StackedProgressBar } from './ProgressBar'
+import { ProgressBar, StackedProgressBar } from './ProgressBar'
 
 describe('StackedProgressBar', () => {
   it('liest die Abschnitte vor, statt sie im title zu verstecken', () => {
@@ -19,5 +19,13 @@ describe('StackedProgressBar', () => {
     const balken = screen.getByRole('progressbar', { name: 'Disk' })
     expect(balken).toHaveAttribute('aria-valuetext', 'Panel: 2 GB, System: 6 GB')
     expect(container.querySelectorAll('[title]')).toHaveLength(0)
+  })
+})
+
+describe('ProgressBar ohne Wert', () => {
+  it('sagt „unbekannt“ in der Sprache der App', () => {
+    // Bis 02.10.2026 las der Screenreader auch in der deutschen App „unknown“.
+    render(<ProgressBar value={null} label="Speicher" />)
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', 'unbekannt')
   })
 })

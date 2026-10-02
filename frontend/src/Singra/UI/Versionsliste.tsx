@@ -9,7 +9,7 @@ import { useTranslation } from 'react-i18next'
 import { LoaderCircle } from 'lucide-react'
 import { cx } from '@/utils/classNames'
 import { Button } from '@/components/ui/Button'
-import { formatBytes } from '@/components/server/fileHelpers'
+import { formatBytes, formatZeitpunkt } from '@/lib/format'
 
 export interface Fassung {
   id: string
@@ -28,7 +28,6 @@ export interface VersionslisteProps {
 
 export function Versionsliste({ versionen, onWiederherstellen, laeuft = null, aufDunkel = false }: VersionslisteProps) {
   const { t, i18n } = useTranslation()
-  const datum = new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' })
   const haupt = aufDunkel ? 'text-white/90' : 'text-on-surface'
   const neben = aufDunkel ? 'text-white/55' : 'text-on-surface-variant'
 
@@ -41,16 +40,18 @@ export function Versionsliste({ versionen, onWiederherstellen, laeuft = null, au
           className={cx('flex items-center gap-2 rounded-md px-2 py-1.5', aufDunkel ? 'hover:bg-white/10' : 'hover:bg-surface-container-highest/70')}
         >
           <div className="min-w-0 flex-1">
-            <p className={cx('text-label-sm', haupt)}>{datum.format(fassung.zeit)}</p>
+            <p className={cx('text-label-sm', haupt)}>{formatZeitpunkt(fassung.zeit, i18n.language)}</p>
             <p className={cx('font-mono text-label-sm', neben)}>{formatBytes(fassung.groesse)}</p>
           </div>
           {onWiederherstellen && (
             <Button
               variant="ghost"
+              size="sm"
+              fingerziel
               type="button"
               disabled={laeuft !== null}
               onClick={() => onWiederherstellen(fassung.id)}
-              className={cx('h-7 text-label-sm max-sm:min-h-11', aufDunkel && 'text-white/85 hover:bg-white/10 hover:text-white')}
+              className={cx('text-label-sm', aufDunkel && 'text-white/85 hover:bg-white/10 hover:text-white')}
             >
               {laeuft === fassung.id && <LoaderCircle className="mr-1 h-3 w-3 animate-spin" aria-hidden />}
               {t('common.versionen.wiederherstellen')}

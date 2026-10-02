@@ -10,8 +10,7 @@
  */
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { RotateCw, WifiOff } from 'lucide-react'
-import { Button, Versionsliste } from '@/Singra/UI'
+import { Versionsliste, Zustandsflaeche } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { useVaultStore } from './vaultStore'
 import { type VaultItem } from './vaultEintrag'
@@ -47,23 +46,10 @@ interface HinweisProps {
 /** Statt des Inhalts, wenn er nicht kam. Ohne Netz ohne Knopf: geladen wird von selbst. */
 export function LadeFehlerHinweis({ fehler, offlineHinweis, text, onErneut }: HinweisProps) {
   const { t } = useTranslation()
-  if (fehler === 'offline') {
-    return (
-      <div className="flex max-w-sm flex-col items-center gap-3 px-6 text-center" role="status">
-        <WifiOff className="h-10 w-10 text-white/60" aria-hidden />
-        <p className="font-semibold text-white">{t('mss.vault.dateien.ohneNetzTitel')}</p>
-        <p className="text-sm text-white/70">{offlineHinweis}</p>
-      </div>
-    )
-  }
-  return (
-    <div className="flex max-w-sm flex-col items-center gap-4 px-6 text-center" role="alert">
-      <p className="text-sm text-white/70">{text}</p>
-      <Button type="button" variant="secondary" className="min-h-11 sm:min-h-10" onClick={onErneut}>
-        <RotateCw className="h-4 w-4" aria-hidden />
-        {t('mss.vault.dateien.erneutLaden')}
-      </Button>
-    </div>
+  return fehler === 'offline' ? (
+    <Zustandsflaeche art="offline" aufDunkel titel={t('mss.vault.dateien.ohneNetzTitel')} text={offlineHinweis} />
+  ) : (
+    <Zustandsflaeche art="fehler" aufDunkel text={text} erneutLabel={t('mss.vault.dateien.erneutLaden')} onErneut={onErneut} />
   )
 }
 

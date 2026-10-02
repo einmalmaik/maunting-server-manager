@@ -335,6 +335,19 @@
   }
 }
 
+@layer utilities {
+  /* Rollt, zeigt aber keinen Balken: Reiter- und Chipleisten, die man am
+     Handy seitlich wischt. Bis 02.10.2026 stand dafür an neun Stellen
+     `no-scrollbar`, eine Klasse, die es nie gab, und an fünf eine eigene
+     Kette aus Firefox- und WebKit-Regel. Als Utility geht auch `max-md:`. */
+  .msm-ohne-rollbalken {
+    scrollbar-width: none;
+  }
+  .msm-ohne-rollbalken::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* MSS-Keyframes — ausserhalb der Layer, Keyframes gehoeren in keinen. */
 @keyframes mss-puls {
   0%,

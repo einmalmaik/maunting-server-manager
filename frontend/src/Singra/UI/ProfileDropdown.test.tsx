@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import { ProfileDropdown, type ProfileDropdownItem } from './ProfileDropdown'
+import { fakeLayout } from '@/test/fakeLayout'
 
 // Die Sprache festlegen: die Behauptungen unten prüfen deutsche Texte, und
 // ohne diese Zeile entscheidet navigator.language der Testumgebung.
@@ -116,40 +117,53 @@ describe('ProfileDropdown', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
-  it('correctly aligns right-0 when trigger is near right edge on mobile viewport', () => {
-    // Set mobile viewport width
-    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 360 })
-    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 640 })
-
-    const { container } = render(
-      <ProfileDropdown
-        user={dummyUser}
-        items={dummyItems}
-        triggerVariant="avatar"
-        placement="bottom-right"
-      />
-    )
-
-    const triggerContainer = container.firstChild as HTMLElement
-    // Mock getBoundingClientRect for trigger near right edge
-    vi.spyOn(triggerContainer, 'getBoundingClientRect').mockReturnValue({
-      left: 290,
-      right: 330,
-      top: 10,
-      bottom: 50,
-      width: 40,
-      height: 40,
-      x: 290,
-      y: 10,
-      toJSON: () => {},
+  it('bleibt am rechten Rand eines Telefons im Fenster', () => {
+    const layout = fakeLayout({
+      fenster: { breite: 360, hoehe: 640 },
+      anker: { left: 290, top: 10, width: 40, height: 40 },
+      popover: { width: 256, height: 300 },
     })
+    try {
+      render(<ProfileDropdown user={dummyUser} items={dummyItems} triggerVariant="avatar" placement="bottom-right" />)
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('common.openUserMenu') }))
+      const menu = screen.getByRole('menu')
+      expect(menu.style.left).toBe(`${330 - 256}px`)
+      expect(menu.style.top).toBe(`${50 + 8}px`)
+      expect(layout.imFenster(menu)).toBe(true)
+    } finally {
+      layout.aufraeumen()
+    }
+  })
 
-    const trigger = screen.getByRole('button', { name: i18n.t('common.openUserMenu') })
-    fireEvent.click(trigger)
+  it('klappt nach oben, wenn das gemessene Menü unten nicht passt, und hängt an body', () => {
+    // Bis 02.10.2026 entschied eine feste Schwelle von 200 px: bei 248 px Platz
+    // blieb ein 400 px hohes Menü unten, im Stapelkontext der Shell.
+    const layout = fakeLayout({
+      fenster: { breite: 1024, hoehe: 768 },
+      anker: { left: 100, top: 480, width: 40, height: 40 },
+      popover: { width: 256, height: 400 },
+    })
+    try {
+      render(<ProfileDropdown user={dummyUser} items={dummyItems} triggerVariant="avatar" placement="bottom-left" />)
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('common.openUserMenu') }))
+      const menu = screen.getByRole('menu')
+      expect(menu.parentElement).toBe(document.body)
+      expect(menu.style.top).toBe(`${480 - 8 - 400}px`)
+      expect(layout.imFenster(menu)).toBe(true)
+    } finally {
+      layout.aufraeumen()
+    }
+  })
 
-    const menu = screen.getByRole('menu')
-    expect(menu).toBeInTheDocument()
-    // Should have right-0 so it expands to the left within viewport
-    expect(menu.className).toContain('right-0')
+  it('schließt bei Klick daneben, nicht bei Klick ins Menü', () => {
+    const onStatusChange = vi.fn()
+    render(<ProfileDropdown user={dummyUser} items={dummyItems} status="online" onStatusChange={onStatusChange} />)
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('common.openUserMenu') }))
+    fireEvent.mouseDown(screen.getByRole('button', { name: /Abwesend/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Abwesend/i }))
+    expect(onStatusChange).toHaveBeenCalledWith('away')
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    fireEvent.mouseDown(document.body)
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 })

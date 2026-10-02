@@ -1,6 +1,8 @@
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { Check, ChevronDown } from 'lucide-react'
+import { useAnkerLage } from './Ankerlage'
 
 export interface MultiSelectOption {
   value: string
@@ -39,6 +41,8 @@ export const MultiSelect = forwardRef<HTMLDivElement, MultiSelectProps>(
     const { t } = useTranslation()
     const [open, setOpen] = useState(false)
     const rootRef = useRef<HTMLDivElement | null>(null)
+    const listeRef = useRef<HTMLDivElement | null>(null)
+    const lage = useAnkerLage(open, rootRef, listeRef, { mindestensAnkerbreite: true })
     const listboxId = useId()
     const selected = useMemo(() => new Set(values), [values])
     const selectedLabels = options
@@ -57,7 +61,9 @@ export const MultiSelect = forwardRef<HTMLDivElement, MultiSelectProps>(
       if (!open) return undefined
 
       const handlePointerDown = (event: PointerEvent) => {
-        if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+        const ziel = event.target as Node
+        // Die Liste hängt per Portal an body, also außerhalb von rootRef.
+        if (!rootRef.current?.contains(ziel) && !listeRef.current?.contains(ziel)) setOpen(false)
       }
       const handleKeyDown = (event: KeyboardEvent) => {
         if (event.key === 'Escape') {
@@ -87,7 +93,7 @@ export const MultiSelect = forwardRef<HTMLDivElement, MultiSelectProps>(
       if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
       event.preventDefault()
       const buttons = Array.from(
-        rootRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? [],
+        listeRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? [],
       )
       if (buttons.length === 0) return
       const current = buttons.indexOf(event.currentTarget)
@@ -136,13 +142,15 @@ export const MultiSelect = forwardRef<HTMLDivElement, MultiSelectProps>(
           </span>
         </button>
 
-        {open && (
+        {open && createPortal(
           <div
+            ref={listeRef}
+            style={lage}
             id={listboxId}
             role="listbox"
             aria-label={ariaLabel}
             aria-multiselectable="true"
-            className="absolute left-0 right-0 z-50 mt-2 max-h-64 overflow-y-auto rounded-xl border border-outline-variant/70 bg-surface-container-high/95 p-1.5 shadow-2xl backdrop-blur-xl"
+            className="max-h-[min(16rem,calc(100dvh-1rem))] max-w-[calc(100vw-1rem)] overflow-y-auto rounded-xl border border-outline-variant/70 bg-surface-container-high/95 p-1.5 shadow-2xl backdrop-blur-xl"
           >
             {options.length === 0 ? (
               <p className="px-3 py-4 text-center text-xs text-on-surface-variant">
@@ -181,7 +189,8 @@ export const MultiSelect = forwardRef<HTMLDivElement, MultiSelectProps>(
                 )
               })
             )}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
     )

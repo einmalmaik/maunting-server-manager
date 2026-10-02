@@ -1,10 +1,12 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { Bell, Bot, Mail, Smartphone } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { Switch } from '@/components/ui/Switch'
+import { useAnkerLage } from './Ankerlage'
 
 interface BenachrichtigungsGlockeProps {
   className?: string
@@ -21,6 +23,12 @@ export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', pla
   const [deviceNotificationsEnabled, setDeviceNotificationsEnabled] = useState<boolean>(user?.device_notifications ?? true)
   const [bellOpen, setBellOpen] = useState(false)
   const bellRef = useRef<HTMLDivElement>(null)
+  const menueRef = useRef<HTMLDivElement>(null)
+  // `sidebar` hieß früher: links bündig, am Telefon rechts. Das entscheidet jetzt die Messung.
+  const lage = useAnkerLage(bellOpen, bellRef, menueRef, {
+    seite: placement === 'top' ? 'oben' : 'unten',
+    ausrichtung: align === 'right' ? 'ende' : 'start',
+  })
 
   const irgendwasAn = notificationsEnabled || aiNotificationsEnabled || deviceNotificationsEnabled
 
@@ -33,8 +41,11 @@ export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', pla
   }, [user?.email_notifications, user?.ai_notifications, user?.device_notifications])
 
   useEffect(() => {
+    if (!bellOpen) return
     function handleClickOutside(e: MouseEvent) {
-      if (bellRef.current && !bellRef.current.contains(e.target as Node)) {
+      const ziel = e.target as Node
+      // Das Menü hängt per Portal an body, also außerhalb von bellRef.
+      if (!bellRef.current?.contains(ziel) && !menueRef.current?.contains(ziel)) {
         setBellOpen(false)
       }
     }
@@ -49,7 +60,7 @@ export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', pla
       document.removeEventListener('mousedown', handleClickOutside)
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [])
+  }, [bellOpen])
 
   const schalte = async (feld: 'email' | 'ai' | 'device', naechster: boolean) => {
     if (!user) return
@@ -82,72 +93,10 @@ export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', pla
     }
   }
 
-  const [computedPlacement, setComputedPlacement] = useState<'top' | 'bottom'>(placement)
-  const [computedAlign, setComputedAlign] = useState<'left' | 'right'>(() => {
-    if (align === 'left') return 'left'
-    if (align === 'right') return 'right'
-    return align === 'sidebar' && typeof window !== 'undefined' && window.innerWidth >= 1024 ? 'left' : 'right'
-  })
-
-  const updatePosition = useCallback(() => {
-    if (!bellRef.current) return
-    const rect = bellRef.current.getBoundingClientRect()
-    // In Test-Umgebungen ohne Layout-Engine (jsdom) Props respektieren
-    if (rect.width === 0 && rect.height === 0 && rect.top === 0 && rect.bottom === 0) {
-      setComputedPlacement(placement)
-      setComputedAlign(align === 'sidebar' ? (typeof window !== 'undefined' && window.innerWidth >= 1024 ? 'left' : 'right') : align)
-      return
-    }
-
-    const spaceBelow = window.innerHeight - rect.bottom
-    const spaceAbove = rect.top
-    const spaceRight = window.innerWidth - rect.right
-    const spaceLeft = rect.left
-
-    // Vertikal: Wenn oben nicht genug Platz ist (< 320px) oder explizit placement="bottom"
-    if (placement === 'bottom' || (spaceAbove < 320 && spaceBelow >= spaceAbove)) {
-      setComputedPlacement('bottom')
-    } else {
-      setComputedPlacement('top')
-    }
-
-    // Horizontal: Wenn rechts nicht genug Platz ist (< 320px) oder explizit align="right"
-    if (align === 'right' || (spaceRight < 320 && spaceLeft >= spaceRight)) {
-      setComputedAlign('right')
-    } else if (align === 'left') {
-      setComputedAlign('left')
-    } else if (align === 'sidebar') {
-      setComputedAlign(spaceRight >= 320 ? 'left' : 'right')
-    } else {
-      setComputedAlign(spaceRight >= 320 ? 'left' : 'right')
-    }
-  }, [placement, align])
-
-  useEffect(() => {
-    if (!bellOpen) return
-    updatePosition()
-    window.addEventListener('resize', updatePosition)
-    window.addEventListener('scroll', updatePosition, true)
-    return () => {
-      window.removeEventListener('resize', updatePosition)
-      window.removeEventListener('scroll', updatePosition, true)
-    }
-  }, [bellOpen, updatePosition])
-
-  const toggleBell = () => {
-    if (!bellOpen) {
-      updatePosition()
-    }
-    setBellOpen((offen) => !offen)
-  }
-
-  const alignClass = computedAlign === 'right' ? 'right-0 left-auto' : 'left-0 right-auto'
-  const placementClass = computedPlacement === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
-
   return (
     <div className={`relative ${className}`} ref={bellRef}>
       <button
-        onClick={toggleBell}
+        onClick={() => setBellOpen((offen) => !offen)}
         aria-expanded={bellOpen}
         aria-haspopup="menu"
         aria-label={irgendwasAn ? t('notifications.activeLabel') : t('notifications.inactiveLabel')}
@@ -164,10 +113,12 @@ export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', pla
         </div>
       </button>
 
-      {bellOpen && (
+      {bellOpen && createPortal(
         <div
+          ref={menueRef}
           role="menu"
-          className={`absolute ${alignClass} ${placementClass} w-72 sm:w-80 max-w-[calc(100vw-2rem)] bg-surface-container-high border border-outline-variant rounded-lg shadow-xl z-50 overflow-hidden`}
+          style={lage}
+          className="w-72 sm:w-80 max-w-[calc(100vw-1rem)] bg-surface-container-high border border-outline-variant rounded-lg shadow-xl max-h-[calc(100dvh-1rem)] overflow-y-auto"
         >
           <div className="p-3 border-b border-outline-variant/30">
             <p className="font-label-md text-sm text-on-surface font-medium">
@@ -222,7 +173,8 @@ export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', pla
               aria-label={t('notifications.deviceLabel')}
             />
           </label>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

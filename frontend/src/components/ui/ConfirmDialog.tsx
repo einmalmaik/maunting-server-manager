@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle } from 'lucide-react'
 import { useConfirmStore } from '@/stores/confirmStore'
-import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
+import { useZurueckSchliesst } from '@/Singra/UI/useZurueckSchliesst'
 import { Button } from './Button'
 
 /** Globaler Confirm-Dialog. Genau einmal in der App montieren (siehe App.tsx).

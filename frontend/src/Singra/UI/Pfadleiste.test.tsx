@@ -58,11 +58,14 @@ describe('Pfadleiste', () => {
 
   it('macht auf dem Telefon jeden Teil und den Hoch-Knopf zum 44-px-Ziel', () => {
     render(<Pfadleiste label="Pfad" stamm={{ key: '', label: 'Stamm' }} teile={teile} onWaehlen={vi.fn()} hochLabel="Hoch" />)
-    for (const name of ['Stamm', 'Verträge', 'Miete', 'Hoch']) {
+    for (const name of ['Stamm', 'Verträge', 'Miete']) {
       const klassen = screen.getByRole('button', { name }).className.split(/\s+/)
       expect(klassen).toContain('max-sm:min-h-11')
       expect(klassen).toContain('max-sm:min-w-11')
     }
+    expect(screen.getByRole('button', { name: 'Hoch' }).className.split(/\s+/)).toEqual(
+      expect.arrayContaining(['max-md:h-11', 'max-md:w-11']),
+    )
   })
 
   it('ist ohne onAblegen kein Ablageziel', () => {

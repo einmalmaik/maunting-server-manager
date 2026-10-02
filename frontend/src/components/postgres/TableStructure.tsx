@@ -6,7 +6,8 @@ import { prompt } from '@/stores/promptStore'
 import { useStudio } from './StudioContext'
 import { AddColumnDialog, ColumnTypeDialog, ConstraintDialog, IndexDialog, PartitionDialog, type ConstraintKind } from './StructureDialogs'
 import { Empty, Section, formatNumber } from './shared'
-import { formatBytes, type StudioRelation, type StudioTableDetails } from './studioApi'
+import { formatBytes } from '@/lib/format'
+import { type StudioRelation, type StudioTableDetails } from './studioApi'
 
 export function TableStructure({ table, relations, enums, onOpenTable }: {
   table: StudioTableDetails
@@ -238,7 +239,7 @@ export function TableStructure({ table, relations, enums, onOpenTable }: {
                       {index.unique && !index.primary && <Badge variant="info">UNIQUE</Badge>}
                       {!index.valid && <Badge variant="destructive">{t('postgresStudio.indexes.invalid')}</Badge>}
                       <span className="text-xs text-on-surface-variant">
-                        {formatBytes(index.size_bytes, i18n.language)} · {t('postgresStudio.indexes.scans', { count: index.scans ?? 0 })}
+                        {formatBytes(index.size_bytes)} · {t('postgresStudio.indexes.scans', { count: index.scans ?? 0 })}
                       </span>
                     </div>
                     <p className="mt-1 break-words font-mono text-xs text-on-surface-variant">{index.definition}</p>

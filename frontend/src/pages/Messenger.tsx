@@ -9,6 +9,8 @@ import {
   Blattmenue,
   Blatteintrag,
   Kurzinfo,
+  Ablageflaeche,
+  useMehrfachauswahl,
   type ChatInputBarRef,
 } from '@/Singra/UI'
 import {
@@ -20,7 +22,6 @@ import {
   Trash2,
   Plus,
   Smile,
-  Upload,
   UserCheck,
   Bell,
   BellOff,
@@ -333,6 +334,9 @@ function meldeInhaltsErrungenschaften(auftrag: SendeAuftrag, text: string): void
  * Sperrschirm ihn ablöst. Gelesen hätte er nichts — die Ablagen geben ohne
  * Schlüssel nichts heraus —, aber es sähe kaputt aus.
  */
+/** Kennung einer Nachricht in der Mehrfachauswahl; noch nicht gesendete haben nur ihre `clientUuid`. */
+const auswahlSchluessel = (m: ChatMessage) => m.clientUuid || `#${m.id}`
+
 const istGesperrt = (s: { entsperrt: boolean; eingerichtet: boolean }) =>
   !s.entsperrt && (s.eingerichtet || siegelAktiv())
 
@@ -542,9 +546,13 @@ function MessengerSeite() {
   const [antwortAuf, setAntwortAuf] = useState<AntwortBezug | null>(null)
   /** Die Nachricht, für die gerade das Langdruck-Menü offen ist. */
   const [menueNachricht, setMenueNachricht] = useState<ChatMessage | null>(null)
-  /** Mehrfachauswahl: aus der Kopfzeile wird eine Aktionsleiste. */
-  const [auswahlModus, setAuswahlModus] = useState(false)
-  const [gewaehlteUuids, setGewaehlteUuids] = useState<string[]>([])
+  /**
+   * Mehrfachauswahl: aus der Kopfzeile wird eine Aktionsleiste. Zurück und
+   * Escape beenden sie, wie überall, wo `useMehrfachauswahl` gilt.
+   */
+  const auswahlReihe = useMemo(() => messages.map(auswahlSchluessel), [messages])
+  const wahl = useMehrfachauswahl(auswahlReihe)
+  const auswahlModus = wahl.auswahl !== null
   /** Was weitergeleitet werden soll, und wie weit das Neu-Hochladen ist. */
   const [weiterzuleiten, setWeiterzuleiten] = useState<ChatMessage[] | null>(null)
   const [wlFortschritt, setWlFortschritt] = useState<{ gesamt: number; fertig: number } | null>(null)
@@ -1569,8 +1577,7 @@ function MessengerSeite() {
     setAntwortAuf(null)
     chatSuche.schliesse()
     setAngeheftet(null)
-    setAuswahlModus(false)
-    setGewaehlteUuids([])
+    wahl.leeren()
     setInputText('')
 
     if (!blindMailboxId) {
@@ -2181,20 +2188,11 @@ function MessengerSeite() {
   }
 
   /** Auswahlmodus: ein Haken je Zeile, die Aktionen unten. */
-  const handleAuswahlUmschalten = (msg: ChatMessage) => {
-    const schluessel = msg.clientUuid || `#${msg.id}`
-    setGewaehlteUuids((v) =>
-      v.includes(schluessel) ? v.filter((x) => x !== schluessel) : [...v, schluessel],
-    )
-  }
+  const handleAuswahlUmschalten = (msg: ChatMessage) => wahl.umschalten(auswahlSchluessel(msg))
 
-  const beendeAuswahl = () => {
-    setAuswahlModus(false)
-    setGewaehlteUuids([])
-  }
+  const beendeAuswahl = wahl.leeren
 
-  const gewaehlteNachrichten = () =>
-    messages.filter((m) => gewaehlteUuids.includes(m.clientUuid || `#${m.id}`))
+  const gewaehlteNachrichten = () => messages.filter((m) => wahl.auswahl?.has(auswahlSchluessel(m)))
 
   /** Mehrere Texte am Stück in die Zwischenablage, in Reihenfolge des Verlaufs. */
   const handleAuswahlKopieren = async () => {
@@ -4255,7 +4253,7 @@ function MessengerSeite() {
             aktionen={blasenAktionen}
             auswahl={{
               aktiv: auswahlModus,
-              gewaehlt: gewaehlteUuids.includes(msg.clientUuid || `#${msg.id}`),
+              gewaehlt: Boolean(wahl.auswahl?.has(auswahlSchluessel(msg))),
               onUmschalten: umschalten,
             }}
             medienBindung={medienBindung}
@@ -4280,7 +4278,7 @@ function MessengerSeite() {
     audioCurrentTime,
     audioPlaybackRate,
     auswahlModus,
-    gewaehlteUuids,
+    wahl.auswahl,
     // `medienBindung` liest nur diese beiden.
     blindMailboxId,
     blasenAktionen,
@@ -4560,14 +4558,7 @@ function MessengerSeite() {
             if (file) handleFileAttachment(file)
           }}
         >
-          {/* Drag and Drop Visual Dropzone Overlay */}
-          {isDragOver && (
-            <div className="absolute inset-0 z-40 bg-surface/85 backdrop-blur-sm border-2 border-dashed border-primary flex flex-col items-center justify-center p-6 text-center pointer-events-none">
-              <Upload className="w-12 h-12 text-primary animate-bounce mb-2" />
-              <p className="font-headline font-bold text-sm text-primary">{t('messenger.dropFile')}</p>
-              <p className="text-xs text-on-surface-variant">{t('messenger.dropHint')}</p>
-            </div>
-          )}
+          {isDragOver && <Ablageflaeche className="z-40" text={t('messenger.dropFile')} hinweis={t('messenger.dropHint')} />}
 
           {/* Der Chat-Hintergrund — dieselbe Schicht wie im KI-Bereich. */}
           <ChatHintergrund bereich="messenger" />
@@ -4576,7 +4567,7 @@ function MessengerSeite() {
             <>
               {auswahlModus && (
                 <ChatSelectionBar
-                  anzahl={gewaehlteUuids.length}
+                  anzahl={wahl.auswahl?.size ?? 0}
                   loeschenMoeglich={gewaehlteNachrichten().some((m) => m.isSelf && !m.isDeleted)}
                   onBeenden={beendeAuswahl}
                   onWeiterleiten={() => {
@@ -4908,10 +4899,7 @@ function MessengerSeite() {
         }}
         onKopieren={(m) => void handleKopieren(m)}
         onMarkieren={handleMarkieren}
-        onAuswaehlen={(m) => {
-          setAuswahlModus(true)
-          setGewaehlteUuids([m.clientUuid || `#${m.id}`])
-        }}
+        onAuswaehlen={(m) => wahl.umschalten(auswahlSchluessel(m))}
         onBearbeiten={(m) => {
           setEditingMessage(m)
           setInputText(m.text)

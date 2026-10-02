@@ -332,6 +332,19 @@ describe('AiChat', () => {
     await waitFor(() => expect(aiApi.uploadAttachment).toHaveBeenCalledWith(file))
   })
 
+  // Im rollenden Verlauf rollte die Fläche mit (unten im Chat nicht zu sehen)
+  // und wurde über dessen `aria-live` vorgelesen (bis 02.10.2026).
+  it('legt die Ablagefläche über den ganzen Chat, nicht in den Verlauf', async () => {
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
+    await screen.findByText('synthetic-note.txt')
+    const chat = screen.getByRole('region', { name: i18n.t('ai.chat.title') })
+
+    fireEvent.dragEnter(chat, { dataTransfer: { types: ['Files'], files: [] } })
+
+    const flaeche = screen.getByText(i18n.t('ai.attachments.drop'))
+    expect(flaeche.closest('[aria-live]')).toBeNull()
+  })
+
   it('sends the chosen reasoning level along with the message', async () => {
     // Aus dem Schalter ist eine Stufenwahl geworden. Die Stufen stehen nicht
     // im Code, sondern kommen je Modell vom Server — gemessen gibt es bei

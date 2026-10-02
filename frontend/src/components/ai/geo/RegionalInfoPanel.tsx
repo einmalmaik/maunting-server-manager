@@ -218,7 +218,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
       </div>
 
       {/* 2. Reiterleiste (Tabs) */}
-      <div role="tablist" aria-label={t('ai.geo.tabsLabel')} className="flex items-center gap-1 border-b border-outline-variant/20 px-3 py-2 overflow-x-auto no-scrollbar shrink-0 bg-surface-container-lowest/30">
+      <div role="tablist" aria-label={t('ai.geo.tabsLabel')} className="flex items-center gap-1 border-b border-outline-variant/20 px-3 py-2 overflow-x-auto msm-ohne-rollbalken shrink-0 bg-surface-container-lowest/30">
         {tabs.map((tab, index) => {
           const Icon = tab.icon
           const isActive = activeTab === tab.id
@@ -264,7 +264,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
               </div>
 
               {/* Sentinel beschreibt Szenen; die MapTiler-Karte bleibt unverändert. */}
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
+              <div className="flex items-center gap-1.5 overflow-x-auto msm-ohne-rollbalken pb-1">
                 {availableLayers.map((layer) => (
                   <span
                     key={layer.id}

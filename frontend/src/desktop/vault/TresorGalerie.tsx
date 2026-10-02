@@ -26,6 +26,7 @@ import {
   Film,
   FolderInput,
   FolderMinus,
+  HardDriveDownload,
   ImageIcon,
   Images,
   Library,
@@ -39,6 +40,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import {
+  Ablageflaeche,
   ActionMenu,
   Auswahlleiste,
   Button,
@@ -47,6 +49,7 @@ import {
   Kontextmenue,
   Lichtbox,
   ProgressBar,
+  Zustandsflaeche,
   buttonClasses,
   useMehrfachauswahl,
   type ActionMenuItem,
@@ -56,13 +59,13 @@ import {
 } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { prompt } from '@/stores/promptStore'
-import { formatBytes } from '@/components/server/fileHelpers'
+import { formatBytes, formatDauer, formatZeitpunkt } from '@/lib/format'
 import { useLangdruck } from '@/hooks/useLangdruck'
 import { ZipZuGross } from '@/lib/zipSchreiben'
 import { cx } from '@/utils/classNames'
 import { useVaultStore } from './vaultStore'
 import { type VaultItem } from './vaultEintrag'
-import { ansichtOeffnen, ansichtSchliessen, blobLesen, useTresorUploads } from './tresorDateien'
+import { ansichtOeffnen, ansichtSchliessen, blobLesen, useTresorUploads, angeheftet, offlineAnheften, offlineLoesen } from './tresorDateien'
 import { miniaturenVorladen, useMiniatur } from './tresorMiniaturen'
 import { dateiAufsGeraet, mehrereAufGeraetSpeichern } from './tresorAnzeige'
 import { gruppieren, hashesBerechnen } from './tresorAehnlich'
@@ -132,14 +135,6 @@ function zeitpunkt(item: VaultItem, filter: Filter): { ms: number; utc: boolean 
     if (item.datei?.geaendert) return { ms: item.datei.geaendert, utc: false }
   }
   return { ms: item.createdAt, utc: false }
-}
-
-function dauerText(sekunden: number): string {
-  const s = Math.round(sekunden)
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const rest = String(s % 60).padStart(2, '0')
-  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${rest}` : `${m}:${rest}`
 }
 
 /** Ein gemeinsamer IntersectionObserver für alle Kacheln, am Scrollbereich. */
@@ -219,6 +214,7 @@ export function nachbarKachel(raster: HTMLElement, von: HTMLElement, taste: stri
 const Kachel = memo(function Kachel({
   item,
   ausgewaehlt,
+  offline,
   tabHalt,
   onKlick,
   onLangdruck,
@@ -227,6 +223,8 @@ const Kachel = memo(function Kachel({
   item: VaultItem
   /** Nur im Auswahlmodus gesetzt. */
   ausgewaehlt?: boolean
+  /** Ist das Original offline auf dem Gerät verfügbar? */
+  offline?: boolean
   /** Die eine Kachel, die Tab erreicht; die übrigen erreichen die Pfeiltasten. */
   tabHalt: boolean
   onKlick: (id: string, tasten: Auswahltasten) => void
@@ -242,7 +240,7 @@ const Kachel = memo(function Kachel({
   const beschreibung = useId()
   const video = istVideo(item)
   const Symbol = video ? Film : ImageIcon
-  const dauer = item.datei?.dauer ? dauerText(item.datei.dauer) : null
+  const dauer = item.datei?.dauer ? formatDauer(item.datei.dauer) : null
   return (
     <button
       ref={ref}
@@ -282,6 +280,15 @@ const Kachel = memo(function Kachel({
           }`}
         >
           {ausgewaehlt && <Check className="h-3 w-3" />}
+        </span>
+      )}
+      {ausgewaehlt === undefined && offline && (
+        <span
+          className="absolute left-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-secondary"
+          role="img"
+          aria-label={t('mss.vault.dateien.offlineVerfuegbar')}
+        >
+          <HardDriveDownload className="h-3 w-3" />
         </span>
       )}
       {video && (
@@ -418,6 +425,65 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   // Mehrfachauswahl wie in „Dateien“, in der Reihenfolge des Rasters.
   const wahl = useMehrfachauswahl(liste.map((i) => i.id))
   const { auswahl, leeren: auswahlLeeren, klick: auswahlKlick, langdruck: kachelLangdruck } = wahl
+
+  const [offline, setOffline] = useState<Set<string>>(new Set())
+  const offlineLaden = useCallback(() => {
+    const ids = medien.filter((i) => i.datei).map((i) => i.datei!.original.id)
+    if (ids.length === 0) return
+    void angeheftet(ids).then(setOffline)
+  }, [medien])
+  useEffect(() => {
+    offlineLaden()
+  }, [offlineLaden])
+
+  const offlineUmschalten = async (item: VaultItem) => {
+    if (!item.datei) return
+    const kopf = item.datei.original
+    if (offline.has(kopf.id)) {
+      await offlineLoesen(kopf.id)
+      offlineLaden()
+      return
+    }
+    try {
+      await offlineAnheften(kopf)
+      toast.success(t('mss.vault.dateien.offlineFertig', { name: item.service }))
+    } catch {
+      toast.error(t('mss.vault.dateien.offlineFehler'))
+    } finally {
+      offlineLaden()
+    }
+  }
+
+  const offlineSammel = async (gewaehlteListe: VaultItem[]) => {
+    const dateien = gewaehlteListe.filter((i) => i.datei)
+    if (dateien.length === 0 || sammel) return
+    const da = await angeheftet(dateien.map((d) => d.datei!.original.id))
+    if (dateien.every((d) => da.has(d.datei!.original.id))) {
+      for (const d of dateien) await offlineLoesen(d.datei!.original.id)
+      toast.success(t('mss.vault.dateien.nurOnlineMehrere', { count: dateien.length }))
+    } else {
+      const fehlen = dateien.filter((d) => !da.has(d.datei!.original.id))
+      const gesamt = fehlen.reduce((s, d) => s + d.datei!.original.echt, 0) || 1
+      let erledigt = 0
+      let fehler = 0
+      const text = t('mss.vault.dateien.offlineSammelLaedt', { count: fehlen.length })
+      setSammel({ text, anteil: 0 })
+      for (const d of fehlen) {
+        const groesse = d.datei!.original.echt
+        try {
+          await offlineAnheften(d.datei!.original, (anteil) => setSammel({ text, anteil: (erledigt + anteil * groesse) / gesamt }))
+        } catch {
+          fehler += 1
+        }
+        erledigt += groesse
+      }
+      setSammel(null)
+      if (fehler === 0) toast.success(t('mss.vault.dateien.offlineFertigMehrere', { count: fehlen.length }))
+      else toast.error(t('mss.vault.dateien.offlineTeilweise', { count: fehler, gesamt: fehlen.length }))
+    }
+    offlineLaden()
+    auswahlLeeren()
+  }
 
   const setFilter = (neu: Filter) => {
     setFilterRoh(neu)
@@ -680,6 +746,14 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
         ]
       : []),
     {
+      key: 'offline',
+      label: t(gewaehlt.length > 0 && gewaehlt.every((i) => i.datei && offline.has(i.datei.original.id)) ? 'mss.vault.dateien.nurOnline' : 'mss.vault.dateien.offlineMachen'),
+      kurz: t(gewaehlt.length > 0 && gewaehlt.every((i) => i.datei && offline.has(i.datei.original.id)) ? 'mss.vault.dateien.kurz.nurOnline' : 'mss.vault.dateien.kurz.offline'),
+      icon: <HardDriveDownload className="h-5 w-5 md:h-4 md:w-4" />,
+      disabled: leer || beschaeftigt,
+      onSelect: () => void offlineSammel(gewaehlt),
+    },
+    {
       key: 'speichern',
       label: t(gewaehlt.length > 1 ? 'mss.vault.dateien.alsZip' : 'mss.vault.dateien.speichern'),
       kurz: t('mss.vault.dateien.kurz.speichern'),
@@ -795,7 +869,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
   // Am Telefon eine Zeile zum Wischen, ab sm wie gehabt mit Umbruch.
   const filterLeiste = (
     // -my-1/py-1: der Fokusring wird in der Wischleiste sonst oben und unten abgeschnitten.
-    <div className="-mx-4 -my-1 flex items-center gap-2 overflow-x-auto px-4 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:my-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:py-0">
+    <div className="-mx-4 -my-1 flex items-center gap-2 overflow-x-auto px-4 py-1 msm-ohne-rollbalken sm:mx-0 sm:my-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:py-0">
       <div role="tablist" aria-label={t('mss.vault.fotos.filter')} className="flex shrink-0 items-center gap-1.5 sm:flex-wrap">
         {FILTER.map(({ id, labelKey, icon: Icon }) => {
           const aktiv = filter === id
@@ -828,7 +902,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
 
   return (
     <div
-      className={cx('flex min-h-0 flex-1 flex-col', ziehen && 'bg-primary/5 outline-dashed outline-2 outline-primary/40 -outline-offset-4')}
+      className="relative flex min-h-0 flex-1 flex-col"
       onDragOver={(e) => {
         if (!e.dataTransfer.types.includes('Files')) return
         // Auch wo nichts angenommen wird, abfangen: sonst öffnet der Browser die Datei.
@@ -839,7 +913,10 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
         }
         setZiehen(true)
       }}
-      onDragLeave={() => setZiehen(false)}
+      // Beim Wechsel auf ein Kind kommt `dragleave` auch; erst das Verlassen der Fläche zählt.
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setZiehen(false)
+      }}
       onDrop={(e) => {
         e.preventDefault()
         setZiehen(false)
@@ -922,10 +999,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
           </div>
         ) : albenUebersicht ? (
           alben.length === 0 ? (
-            <div className="flex flex-col items-center justify-center p-8 text-center text-xs text-on-surface-variant">
-              <Library className="mb-2 h-6 w-6 opacity-60" />
-              {t('mss.vault.fotos.keineAlben')}
-            </div>
+            <Zustandsflaeche art="leer" icon={<Library className="h-10 w-10" />} text={t('mss.vault.fotos.keineAlben')} />
           ) : (
             <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
               {alben.map((a) => {
@@ -935,9 +1009,10 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
             </div>
           )
         ) : liste.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-8 text-center text-xs text-on-surface-variant">
-            <Images className="mb-2 h-6 w-6 opacity-60" />
-            {t(
+          <Zustandsflaeche
+            art="leer"
+            icon={<Images className="h-10 w-10" />}
+            text={t(
               album
                 ? 'mss.vault.fotos.albumLeer'
                 : filter === 'aehnlich'
@@ -948,7 +1023,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
                       : 'mss.vault.fotos.leer'
                     : 'mss.vault.fotos.leerFilter',
             )}
-          </div>
+          />
         ) : (
           <SichtbarKontext.Provider value={beobachten}>
             {gruppen.map((gruppe) => (
@@ -965,6 +1040,7 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
                       key={item.id}
                       item={item}
                       ausgewaehlt={auswahl ? auswahl.has(item.id) : undefined}
+                      offline={Boolean(item.datei && offline.has(item.datei.original.id))}
                       tabHalt={item.id === tabHalt}
                       onKlick={kachelKlick}
                       onLangdruck={kachelLangdruck}
@@ -977,6 +1053,8 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
           </SichtbarKontext.Provider>
         )}
       </div>
+
+      {ziehen && <Ablageflaeche text={t('mss.vault.fotos.ablegenHochladen')} />}
 
       {auswahl && (
         <Auswahlleiste variante="fuss" anzahlLabel={auswahlLabel} aktionen={aktionen} abbrechenLabel={t('mss.vault.dateien.auswahlBeenden')} onAbbrechen={auswahlLeeren} />
@@ -996,6 +1074,8 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
           index={offenIndex}
           anzahl={liste.length}
           userKey={userKey}
+          istOffline={Boolean(offenItem.datei && offline.has(offenItem.datei.original.id))}
+          onOffline={offlineUmschalten}
           onSchliessen={() => setOffen(null)}
           onBlaettern={(richtung) => {
             const ziel = liste[offenIndex + richtung]
@@ -1024,6 +1104,8 @@ function GalerieLichtbox({
   index,
   anzahl,
   userKey,
+  istOffline,
+  onOffline,
   onSchliessen,
   onBlaettern,
   onArchivieren,
@@ -1033,6 +1115,8 @@ function GalerieLichtbox({
   index: number
   anzahl: number
   userKey: CryptoKey
+  istOffline: boolean
+  onOffline: (item: VaultItem) => Promise<void> | void
   onSchliessen: () => void
   onBlaettern: (richtung: 1 | -1) => void
   onArchivieren: (id: string) => void
@@ -1131,13 +1215,13 @@ function GalerieLichtbox({
   const speichern = () => dateiAufsGeraet(item, userKey)
 
   const aufnahme = datei.aufgenommen
-    ? new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(datei.aufgenommen)
+    ? formatZeitpunkt(datei.aufgenommen, i18n.language, { utc: true })
     : null
-  const hinzugefuegt = new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' }).format(item.createdAt)
+  const hinzugefuegt = formatZeitpunkt(item.createdAt, i18n.language)
   // Ohne EXIF steht in der Kopfzeile das Änderungsdatum der Datei.
   const datum =
     aufnahme ??
-    (datei.geaendert ? new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' }).format(datei.geaendert) : undefined)
+    (datei.geaendert ? formatZeitpunkt(datei.geaendert, i18n.language) : undefined)
 
   const knopf = 'text-white/85 hover:bg-white/10 hover:text-white'
 
@@ -1150,7 +1234,7 @@ function GalerieLichtbox({
         [t('mss.vault.fotos.info.aufgenommen'), aufnahme],
         [t('mss.vault.fotos.info.kamera'), datei.kamera],
         [t('mss.vault.fotos.info.masse'), datei.breite && datei.hoehe ? `${datei.breite} × ${datei.hoehe}` : null],
-        [t('mss.vault.fotos.info.dauer'), datei.dauer ? dauerText(datei.dauer) : null],
+        [t('mss.vault.fotos.info.dauer'), datei.dauer ? formatDauer(datei.dauer) : null],
         [t('mss.vault.fotos.info.groesse'), formatBytes(datei.original.echt)],
         [t('mss.vault.fotos.info.hinzugefuegt'), hinzugefuegt],
       ]}
@@ -1220,6 +1304,16 @@ function GalerieLichtbox({
               <Crop className="h-4 w-4" />
             </Button>
           )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className={knopf}
+            aria-label={t(istOffline ? 'mss.vault.dateien.nurOnline' : 'mss.vault.dateien.offlineMachen')}
+            onClick={() => void onOffline(item)}
+          >
+            <HardDriveDownload className={cx('h-4 w-4', istOffline && 'text-secondary')} />
+          </Button>
           <Button type="button" variant="ghost" size="icon" className={knopf} aria-label={t('mss.vault.dateien.speichern')} onClick={() => void speichern()}>
             <Download className="h-4 w-4" />
           </Button>

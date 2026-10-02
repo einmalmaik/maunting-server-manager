@@ -67,6 +67,7 @@ import type { AugenblickMarke, RettungsMarke } from '@/services/funkenService'
 // Gefahr. Für so etwas gibt es keinen Status-Token, und genau dafür ist die
 // Palette da: der einzige Ort, an dem eine Roh-Farbe stehen darf.
 import { farbwahl } from '@/config/farbpalette'
+import { formatDauer } from '@/lib/format'
 
 const ORT_TON = farbwahl('rose')
 
@@ -171,13 +172,6 @@ export interface ChatMessage {
    * als schmalen Hinweis statt als Sprechblase.
    */
   isSystem?: boolean
-}
-
-/** Sekunden als `m:ss`. */
-function formatDuration(sec: number): string {
-  const m = Math.floor(sec / 60)
-  const s = Math.floor(sec % 60)
-  return `${m}:${s < 10 ? '0' : ''}${s}`
 }
 
 /**
@@ -671,8 +665,8 @@ function ChatMessageBubbleContent({
                 <div className="flex justify-between items-center text-label-sm opacity-80 px-0.5">
                   <span>
                     {ton.playingAudioId === msg.id
-                      ? formatDuration(ton.audioCurrentTime)
-                      : formatDuration(msg.audioAttachment.durationSeconds)}
+                      ? formatDauer(ton.audioCurrentTime)
+                      : formatDauer(msg.audioAttachment.durationSeconds)}
                   </span>
                   <span className="flex items-center gap-1 opacity-70">
                     <Mic className="w-2.5 h-2.5" />

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { DateTimePicker } from './DateTimePicker'
+import { fakeLayout } from '@/test/fakeLayout'
 
 describe('DateTimePicker', () => {
   it('renders trigger with placeholder when value is empty', () => {
@@ -83,5 +84,42 @@ describe('DateTimePicker', () => {
 
       expect(handleChange).toHaveBeenCalledWith('2026-08-15T14:30')
     })
+  })
+
+  it('bleibt in einem niedrigen Fenster ganz sichtbar', () => {
+    // Bis 02.10.2026 rechnete der Kalender mit fest 360 px und ragte bei 600 px
+    // Fensterhöhe unten 66 px hinaus, weil oben noch weniger Platz war.
+    const layout = fakeLayout({
+      fenster: { breite: 1024, hoehe: 600 },
+      anker: { left: 100, top: 250, width: 200, height: 40 },
+      popover: { width: 320, height: 360 },
+    })
+    try {
+      render(<DateTimePicker value="2026-08-21T14:30" onChange={() => {}} />)
+      fireEvent.click(screen.getByRole('button'))
+      const kalender = screen.getByRole('dialog')
+      expect(layout.imFenster(kalender)).toBe(true)
+      expect(kalender.style.left).toBe('100px')
+    } finally {
+      layout.aufraeumen()
+    }
+  })
+
+  it('klappt am unteren Rand nach oben und am rechten nach links', () => {
+    const layout = fakeLayout({
+      fenster: { breite: 1024, hoehe: 768 },
+      anker: { left: 900, top: 700, width: 110, height: 40 },
+      popover: { width: 320, height: 360 },
+    })
+    try {
+      render(<DateTimePicker value="2026-08-21T14:30" onChange={() => {}} />)
+      fireEvent.click(screen.getByRole('button'))
+      const kalender = screen.getByRole('dialog')
+      expect(kalender.style.top).toBe(`${700 - 8 - 360}px`)
+      expect(kalender.style.left).toBe(`${1010 - 320}px`)
+      expect(layout.imFenster(kalender)).toBe(true)
+    } finally {
+      layout.aufraeumen()
+    }
   })
 })

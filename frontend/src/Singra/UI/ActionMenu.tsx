@@ -1,16 +1,16 @@
-import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
+import { useZurueckSchliesst } from './useZurueckSchliesst'
 import {
   useEffect,
   useId,
   useRef,
   useState,
-  type CSSProperties,
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 import { cx } from '@/utils/classNames'
 import { buttonClasses } from '@/components/ui/Button'
+import { useAnkerLage } from './Ankerlage'
 
 export interface ActionMenuItem {
   key: string
@@ -42,26 +42,17 @@ export function ActionMenu({
 }: ActionMenuProps) {
   const [open, setOpen] = useState(false)
   useZurueckSchliesst(open, () => setOpen(false))
-  const [style, setStyle] = useState<CSSProperties | null>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const lage = useAnkerLage(open, triggerRef, menuRef, {
+    ausrichtung: align === 'end' ? 'ende' : 'start',
+    mindestensAnkerbreite: true,
+  })
   const initialFocusRef = useRef<'first' | 'last'>('first')
   const menuId = useId()
 
   useEffect(() => {
     if (!open) return
-    const update = () => {
-      const rect = triggerRef.current?.getBoundingClientRect()
-      if (!rect) return
-      setStyle({
-        position: 'fixed',
-        top: rect.bottom + 6,
-        left: align === 'start' ? rect.left : undefined,
-        right: align === 'end' ? Math.max(8, window.innerWidth - rect.right) : undefined,
-        minWidth: Math.max(190, rect.width),
-        zIndex: 110,
-      })
-    }
     const dismiss = (event: MouseEvent) => {
       const target = event.target as Node
       if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) {
@@ -91,7 +82,6 @@ export function ActionMenu({
             : (currentIndex + 1) % menuItems.length
       menuItems[nextIndex].focus()
     }
-    update()
     const focusFrame = window.requestAnimationFrame(() => {
       const menuItems: HTMLButtonElement[] = menuRef.current
         ? Array.from<HTMLButtonElement>(menuRef.current.querySelectorAll('[role="menuitem"]:not(:disabled)'))
@@ -101,16 +91,12 @@ export function ActionMenu({
     })
     document.addEventListener('mousedown', dismiss)
     document.addEventListener('keydown', onKeyDown)
-    window.addEventListener('resize', update)
-    window.addEventListener('scroll', update, true)
     return () => {
       document.removeEventListener('mousedown', dismiss)
       document.removeEventListener('keydown', onKeyDown)
       window.cancelAnimationFrame(focusFrame)
-      window.removeEventListener('resize', update)
-      window.removeEventListener('scroll', update, true)
     }
-  }, [align, open])
+  }, [open])
 
   return (
     <>
@@ -142,14 +128,14 @@ export function ActionMenu({
         <span>{label}</span>
         <ChevronDown className={cx('h-3.5 w-3.5 transition-transform', open && 'rotate-180')} aria-hidden />
       </button>
-      {open && style
+      {open
         ? createPortal(
             <div
               ref={menuRef}
               id={menuId}
               role="menu"
-              style={style}
-              className="rounded-lg border border-outline-variant bg-surface-container-high/98 p-1.5 shadow-panel backdrop-blur-xl"
+              style={lage}
+              className="min-w-[190px] max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-lg border border-outline-variant bg-surface-container-high/98 p-1.5 shadow-panel backdrop-blur-xl"
             >
               {items.map((item) => (
                 <div key={item.key} className={item.separatorBefore ? 'mt-1 border-t border-outline-variant pt-1' : ''}>

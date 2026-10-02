@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
-import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
+import { useZurueckSchliesst } from './useZurueckSchliesst'
 
 interface DialogContextValue {
   open: boolean
@@ -43,6 +43,10 @@ export function DialogContent({
   className = '',
   overlayClassName = '',
   showCloseButton = true,
+  // Der Name gehört an das Element mit `role="dialog"`, nicht an die Karte darin.
+  'aria-labelledby': labelledBy,
+  'aria-describedby': describedBy,
+  'aria-label': ariaLabel,
   ...props
 }: DialogContentProps) {
   const { t } = useTranslation()
@@ -109,6 +113,9 @@ export function DialogContent({
       onClick={() => ctx.onOpenChange(false)}
       role="dialog"
       aria-modal="true"
+      aria-labelledby={labelledBy}
+      aria-describedby={describedBy}
+      aria-label={ariaLabel}
     >
       <div
         ref={dialogRef}

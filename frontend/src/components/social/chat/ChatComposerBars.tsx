@@ -1,14 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import { Ban, FileText, Pencil, X } from 'lucide-react'
 import { Button, Kurzinfo } from '@/Singra/UI'
+import { formatBytes } from '@/lib/format'
 import type { FileAttachment, ImageAttachment } from '@/components/social/ChatMediaAttachments'
-
-export function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
-}
 
 /** Das angehängte Foto über der Eingabe, noch nicht gesendet. */
 export function StagedImageBar({ bild, onEntfernen }: { bild: ImageAttachment; onEntfernen: () => void }) {
@@ -48,7 +42,7 @@ export function StagedFileBar({ datei, onEntfernen }: { datei: FileAttachment; o
         </div>
         <div className="min-w-0">
           <p className="text-xs font-semibold text-primary truncate">{datei.name}</p>
-          <p className="text-label-sm text-on-surface-variant">{formatFileSize(datei.sizeBytes)}</p>
+          <p className="text-label-sm text-on-surface-variant">{formatBytes(datei.sizeBytes)}</p>
         </div>
       </div>
       <button

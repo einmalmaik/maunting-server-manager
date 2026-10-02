@@ -10,7 +10,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
 import { AttachMenu } from './AttachMenu'
-import { EditingBanner, formatFileSize, StagedFileBar } from './ChatComposerBars'
+import { EditingBanner, StagedFileBar } from './ChatComposerBars'
 import { MentionSuggestions } from './ChatComposerTop'
 import { ComposerSendActions } from './ComposerSendActions'
 
@@ -126,9 +126,6 @@ describe('MentionSuggestions', () => {
 
 describe('StagedFileBar', () => {
   it('nennt die Größe lesbar', () => {
-    expect(formatFileSize(512)).toBe('512 B')
-    expect(formatFileSize(1536)).toBe('1.5 KB')
-    expect(formatFileSize(5 * 1024 * 1024)).toBe('5.0 MB')
     render(
       <StagedFileBar datei={{ name: 'plan.pdf', sizeBytes: 2048, mimeType: 'application/pdf' }} onEntfernen={() => {}} />,
     )

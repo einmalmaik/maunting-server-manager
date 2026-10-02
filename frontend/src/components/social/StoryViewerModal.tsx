@@ -245,7 +245,7 @@ export function StoryViewerModal({
 
         {/* Story Text Content */}
         <div className="relative z-10 flex-1 flex items-center justify-center p-3 sm:p-4 text-center">
-          <p className="font-headline text-title-lg sm:text-xl md:text-2xl font-bold text-white drop-shadow-lg leading-snug break-words max-h-44 sm:max-h-60 overflow-y-auto no-scrollbar">
+          <p className="font-headline text-title-lg sm:text-xl md:text-2xl font-bold text-white drop-shadow-lg leading-snug break-words max-h-44 sm:max-h-60 overflow-y-auto msm-ohne-rollbalken">
             {currentStory.content}
           </p>
         </div>

@@ -11,7 +11,7 @@
  * der Aufrufer; Texte trägt der Haken keine.
  */
 import { useCallback, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
-import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
+import { useZurueckSchliesst } from './useZurueckSchliesst'
 
 /** So lange nach einem langen Druck gilt der folgende Klick als dessen Ende, nicht als neuer Tipp. */
 const KLICK_NACH_LANGDRUCK_MS = 700

@@ -29,7 +29,7 @@ describe('Versionsliste', () => {
   it('macht „Wiederherstellen“ auf dem Telefon 44 px hoch', () => {
     render(<Versionsliste versionen={versionen} onWiederherstellen={vi.fn()} />)
     for (const knopf of screen.getAllByRole('button', { name: i18n.t('common.versionen.wiederherstellen') })) {
-      expect(knopf.className.split(/\s+/)).toContain('max-sm:min-h-11')
+      expect(knopf.className.split(/\s+/)).toContain('max-md:h-11')
     }
   })
 

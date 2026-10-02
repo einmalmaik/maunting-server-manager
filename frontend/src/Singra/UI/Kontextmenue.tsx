@@ -10,10 +10,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { cx } from '@/utils/classNames'
-import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
+import { useZurueckSchliesst } from './useZurueckSchliesst'
 import type { ActionMenuItem } from './ActionMenu'
-
-const RAND = 8
+import { ankerLage, SCHICHT } from './Ankerlage'
 
 export interface KontextmenueProps {
   /** Zeigerposition beim Öffnen; `null` heißt geschlossen. */
@@ -25,14 +24,9 @@ export interface KontextmenueProps {
   onSchliessen: () => void
 }
 
-/** Wohin das Menü passt, ohne über den Fensterrand zu ragen. */
+/** Wohin das Menü am Zeiger passt, ohne über den Fensterrand zu ragen. */
 export function menueLage(x: number, y: number, breite: number, hoehe: number, fenster: { breite: number; hoehe: number }) {
-  const links = x + breite > fenster.breite - RAND ? x - breite : x
-  const oben = y + hoehe > fenster.hoehe - RAND ? y - hoehe : y
-  return {
-    left: Math.max(RAND, Math.min(links, fenster.breite - breite - RAND)),
-    top: Math.max(RAND, Math.min(oben, fenster.hoehe - hoehe - RAND)),
-  }
+  return ankerLage({ left: x, right: x, top: y, bottom: y }, breite, hoehe, fenster)
 }
 
 export function Kontextmenue({ ort, items, label, ausloeser, onSchliessen }: KontextmenueProps) {
@@ -106,10 +100,10 @@ export function Kontextmenue({ ort, items, label, ausloeser, onSchliessen }: Kon
       ref={menue}
       role="menu"
       aria-label={label}
-      className="fixed z-[120] min-w-48 rounded-lg border border-outline-variant bg-surface-container-high p-1.5 shadow-panel"
+      className="fixed min-w-48 rounded-lg border border-outline-variant bg-surface-container-high p-1.5 shadow-panel"
       // Bis gemessen ist, unsichtbar in der Ecke: dort hat es seine volle Breite.
       // Am Zeiger nahe dem Rand würde es schmaler gemessen, als es ist.
-      style={lage ?? { left: 0, top: 0, visibility: 'hidden' }}
+      style={{ zIndex: SCHICHT.kontextmenue, ...(lage ?? { left: 0, top: 0, visibility: 'hidden' }) }}
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
     >

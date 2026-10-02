@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { FileManager } from './FileManager'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
@@ -94,6 +94,26 @@ describe('FileManager: Verschieben- und Umbenennen-Dialog', () => {
     fireEvent.keyDown(document.body, { key: 'Escape' })
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  // Im Seitenbaum lag der Dialog im Stapelkontext der Shell (z-50) und damit
+  // unter allem, was selbst per Portal an body hängt.
+  it('hängt den Dialog per Portal an body', async () => {
+    await chooseFromContextMenu(i18n.t('files.rename'))
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('files.renameTitle') })
+    expect(dialog.parentElement).toBe(document.body)
+  })
+
+  it('hält Tab im Dialog', async () => {
+    await chooseFromContextMenu(i18n.t('files.move'))
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('files.move') })
+    const knoepfe = within(dialog).getAllByRole('button')
+    knoepfe[knoepfe.length - 1].focus()
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Tab' })
+
+    expect(dialog.contains(document.activeElement)).toBe(true)
+    expect(document.activeElement).toBe(within(dialog).getByLabelText(i18n.t('files.targetFolder')))
   })
 })
 

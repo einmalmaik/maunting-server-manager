@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { PromptDialog } from './PromptDialog'
 import { prompt, usePromptStore } from '@/stores/promptStore'
+import i18n from '@/i18n'
 
 /** Der Fokus ist die einzige Zusage, die dieser Dialog gegenüber der Tastatur
  * macht: er wandert beim Öffnen ins Eingabefeld und beim Schließen zum
@@ -58,5 +59,26 @@ describe('PromptDialog', () => {
     fireEvent.change(feld, { target: { value: 'ab' } })
 
     expect(document.activeElement).toBe(feld)
+  })
+})
+
+describe('PromptDialog in der App-Sprache', () => {
+  afterEach(async () => {
+    act(() => {
+      usePromptStore.setState({ pending: null })
+    })
+    await i18n.changeLanguage('de')
+  })
+
+  it('nennt sich und das Bestätigungswort in der Sprache der App', async () => {
+    // Bis 02.10.2026 stand der Hinweis fest auf Deutsch, und der Dialog hatte keinen Namen.
+    await i18n.changeLanguage('en')
+    render(<PromptDialog />)
+    act(() => {
+      void prompt({ title: 'Delete server', message: 'This cannot be undone.', expectedValue: 'alpha' })
+    })
+    expect(screen.getByRole('dialog', { name: 'Delete server' })).toBeInTheDocument()
+    expect(screen.getByText('Type “alpha” to confirm.')).toBeInTheDocument()
+    expect(screen.queryByText(/Geben Sie/)).toBeNull()
   })
 })

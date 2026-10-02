@@ -6,6 +6,8 @@ export type ButtonSize = 'sm' | 'md' | 'lg' | 'icon'
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
   size?: ButtonSize
+  /** Unter `md` 44 px hoch (bei `icon` auch breit), darüber die Höhe aus `size`. */
+  fingerziel?: boolean
 }
 
 const BASIS = 'inline-flex items-center justify-center gap-2 whitespace-nowrap'
@@ -30,6 +32,16 @@ const GROESSEN: Record<ButtonSize, string> = {
 }
 
 /**
+ * Am Finger ist ein Ziel 44 px groß (AGENTS.md Punkt 86). Ein schlichtes `h-11`
+ * im className streitet mit der Höhe aus `size`; die Variante unter `md` steht
+ * im CSS hinter ihr und gewinnt. Bis 02.10.2026 trug jede Stelle die Kette
+ * selbst, mal ab `sm`, mal ab `md`.
+ */
+function fingerKlassen(size: ButtonSize): string {
+  return size === 'icon' ? 'max-md:h-11 max-md:w-11' : 'max-md:h-11'
+}
+
+/**
  * Die Knopfgestalt für alles, was kein `<button>` sein kann — ein `<Link>`, ein
  * `<a>` nach draußen, ein `<label>` um ein Dateifeld. Sie sehen aus wie ein
  * Knopf und sind genauso hoch, ohne einer zu sein.
@@ -41,13 +53,15 @@ export function buttonClasses(
   variant: ButtonVariant = 'primary',
   size: ButtonSize = 'md',
   extra = '',
+  fingerziel = false,
 ): string {
-  return `${BASIS} ${VARIANTEN[variant]} ${GROESSEN[size]}${extra ? ` ${extra}` : ''}`
+  const finger = fingerziel ? ` ${fingerKlassen(size)}` : ''
+  return `${BASIS} ${VARIANTEN[variant]} ${GROESSEN[size]}${finger}${extra ? ` ${extra}` : ''}`
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className = '', variant = 'primary', size = 'md', ...props }, ref) => (
-    <button ref={ref} className={buttonClasses(variant, size, className)} {...props} />
+  ({ className = '', variant = 'primary', size = 'md', fingerziel = false, ...props }, ref) => (
+    <button ref={ref} className={buttonClasses(variant, size, className, fingerziel)} {...props} />
   ),
 )
 Button.displayName = 'Button'

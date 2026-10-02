@@ -13,7 +13,7 @@ import {
   type AiRunInfo,
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
-import { Button, Dropdown, Avatar, Blatteintrag, Blattknopf, Kurzinfo, VoiceRecordingBar } from '@/Singra/UI'
+import { Ablageflaeche, Button, Dropdown, Avatar, Blatteintrag, Blattknopf, Kurzinfo, VoiceRecordingBar } from '@/Singra/UI'
 import {
   aiChatPreferenceKeys,
   readClosedGeoAnalysis,
@@ -1096,7 +1096,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
       {/* ── Kopfzeile: Provider, Denkschritte, Autonomie, Skills ─────────
           `sticky` ist eine Position und liegt damit von selbst über der
           Schicht; ihr undurchsichtiger Grund deckt sie dort ab. */}
-      <header className="flex flex-nowrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/30 bg-surface-container-low px-2.5 py-2 sm:px-4 sm:py-2.5 shrink-0 sticky top-0 z-20 overflow-x-auto no-scrollbar">
+      <header className="flex flex-nowrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/30 bg-surface-container-low px-2.5 py-2 sm:px-4 sm:py-2.5 shrink-0 sticky top-0 z-20 overflow-x-auto msm-ohne-rollbalken">
         <div className="w-40 sm:w-56 max-w-[240px] shrink-0">
           <Dropdown
             value={providerId ? String(providerId) : null}
@@ -1252,14 +1252,6 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
           }
         }}
       >
-        {dragging && (
-          <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-primary/5">
-            <span className="flex items-center gap-2 text-sm font-medium text-primary">
-              <Paperclip className="h-4 w-4" aria-hidden="true" />
-              {t('ai.attachments.drop')}
-            </span>
-          </div>
-        )}
 
         <div
           ref={messagesContainerRef}
@@ -1689,6 +1681,8 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
           <p className="mt-2 text-center text-xs text-on-surface-variant hidden sm:block">{t('ai.chat.privacyHint')}</p>
         </div>
       </form>
+      {/* Über der ganzen Fläche statt im Verlauf: dort rollte sie mit und sprach über `aria-live` mit. */}
+      {dragging && <Ablageflaeche icon={<Paperclip className="h-4 w-4" />} text={t('ai.attachments.drop')} />}
     </section>
     <AiSkillModal open={skillsModalOpen} onClose={() => setSkillsModalOpen(false)} />
     {/* Ausserhalb des Blattmenüs: das schliesst sich beim Klick auf die Zeile

@@ -17,7 +17,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreVertical } from 'lucide-react'
-import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
+import { useZurueckSchliesst } from './useZurueckSchliesst'
 import { Kurzinfo } from './Kurzinfo'
 
 const FOKUSSIERBAR =
@@ -46,6 +46,9 @@ export function Blattmenue({ offen, onSchliessen, titel, children, className = '
         : null
 
     const beiTaste = (e: KeyboardEvent) => {
+      // Wie `DialogContent`: Tasten gehören dem obersten offenen Dialog.
+      const dialoge = document.querySelectorAll('[aria-modal="true"]')
+      if (blatt.current?.parentElement !== dialoge[dialoge.length - 1]) return
       if (e.key === 'Escape') {
         e.preventDefault()
         onSchliessen()

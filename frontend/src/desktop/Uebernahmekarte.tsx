@@ -15,6 +15,7 @@ import { listen } from '@tauri-apps/api/event'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/Singra/UI'
+import { formatDauer } from '@/lib/format'
 import { ergebnisMelden } from './desktopJobs'
 import { uebernahmeFreigeben, uebernahmeRest, uebernahmeWiderrufen } from './tauri'
 
@@ -132,7 +133,7 @@ export function Uebernahmekarte({ offenerAuftragId }: { offenerAuftragId: string
         <span className="mss-blase inline-block h-2 w-2 rounded-full bg-primary" />
         <span className="text-on-surface">
           {t('mss.uebernahme.aktiv', {
-            zeit: `${Math.floor(rest / 60)}:${String(rest % 60).padStart(2, '0')}`,
+            zeit: formatDauer(rest),
           })}
         </span>
         <Button variant="secondary" size="sm" onClick={() => void uebernahmeWiderrufen()}>

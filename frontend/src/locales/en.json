@@ -2987,6 +2987,7 @@
   },
   "files": {
     "upload": "Upload",
+    "dropToUpload": "Release to upload to this folder",
     "uploadAlreadyRunning": "“{{name}}” is already uploading.",
     "newFolder": "New folder",
     "newFile": "New file",
@@ -4048,7 +4049,9 @@
       "breite": "Fit to width",
       "laedt": "Opening PDF …",
       "fehler": "This PDF can't be shown here. Save it to open it in another app."
-    }
+    },
+    "eintippenZumBestaetigen": "Type “{{wert}}” to confirm.",
+    "unbekannt": "unknown"
   },
   "serverDetail": {
     "showServerOverview": "Server overview",
@@ -6436,6 +6439,7 @@
         "videoMitDauer": "Video, {{dauer}}",
         "ladeFehler": "The photo could not be loaded.",
         "offlineNichtDa": "To open a photo offline, select it under “Files” and choose “{{aktion}}”.",
+        "ablegenHochladen": "Release to upload photos and videos",
         "kurz": {
           "album": "Album",
           "ausAlbum": "Take out"
@@ -7620,6 +7624,8 @@
     "activeStories_one": "One active story • Tap to play",
     "activeStories_other": "{{count}} active stories • Tap to play",
     "endSelection": "End selection",
+    "selectedCount_one": "{{count}} selected",
+    "selectedCount_other": "{{count}} selected",
     "moreChatSettings": "More settings for this chat",
     "someone": "Someone",
     "someoneRecording": "{{name}} is recording audio …",

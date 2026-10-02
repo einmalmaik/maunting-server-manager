@@ -494,18 +494,6 @@ export async function fileToBase64(file: File): Promise<string> {
   return btoa(binary)
 }
 
-export function formatBytes(value: number | null | undefined, locale: string): string {
-  if (value == null) return '–'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let size = value
-  let unit = 0
-  while (size >= 1024 && unit < units.length - 1) {
-    size /= 1024
-    unit += 1
-  }
-  return `${size.toLocaleString(locale, { maximumFractionDigits: unit === 0 ? 0 : 1 })} ${units[unit]}`
-}
-
 export function cellText(value: Json | undefined): string {
   if (value === null || value === undefined) return 'NULL'
   if (typeof value === 'object') return JSON.stringify(value)

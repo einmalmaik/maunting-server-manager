@@ -142,6 +142,31 @@ describe('TresorGalerie', () => {
     })
   })
 
+  describe('Ablegen', () => {
+    // Bis 02.10.2026 zeigte die Galerie beim Ziehen nur einen Rahmen ohne Text,
+    // und jedes Überfahren einer Kachel ließ ihn kurz verschwinden.
+    it('sagt beim Ziehen, was mit den Dateien geschieht, auch über einer Kachel', async () => {
+      const { container } = render(<TresorGalerie />)
+      await screen.findByRole('progressbar', { name: i18n.t('mss.vault.dateien.speicher') })
+      const flaeche = container.firstElementChild as HTMLElement
+      const text = i18n.t('mss.vault.fotos.ablegenHochladen')
+
+      fireEvent.dragOver(flaeche, { dataTransfer: { types: ['Files'], files: [] } })
+      expect(screen.getByText(text)).toBeInTheDocument()
+
+      const verlassen = (nach: Element | null) => {
+        const ev = createEvent.dragLeave(flaeche)
+        Object.defineProperty(ev, 'relatedTarget', { value: nach })
+        fireEvent(flaeche, ev)
+      }
+      verlassen(within(flaeche).getAllByRole('button')[0])
+      expect(screen.getByText(text)).toBeInTheDocument()
+
+      verlassen(null)
+      expect(screen.queryByText(text)).toBeNull()
+    })
+  })
+
   describe('Mehrfachauswahl', () => {
     it('wählt mit Strg-Klick, Umschalt-Klick und „Alle“, ohne die Lichtbox zu öffnen', () => {
       render(<TresorGalerie />)

@@ -4,7 +4,6 @@ import {
   detectIndentation,
   detectLineEnding,
   fileName,
-  formatBytes,
   isWithin,
   joinPath,
   parentPath,
@@ -105,26 +104,6 @@ describe('editor file details', () => {
       savedContent: 'submitted',
       saveState: 'dirty',
     })
-  })
-})
-
-describe('formatBytes', () => {
-  it('rendert sinnvolle Einheiten', () => {
-    expect(formatBytes(512)).toBe('512 B')
-    expect(formatBytes(2048)).toBe('2.0 KB')
-    expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB')
-    expect(formatBytes(3 * 1024 * 1024 * 1024)).toBe('3.00 GB')
-    // Ein Backup-Archiv erreicht das: vorher stand hier '2048.00 GB'.
-    expect(formatBytes(2 * 1024 * 1024 * 1024 * 1024)).toBe('2.00 TB')
-  })
-
-  it('unterscheidet die bekannte Null von der unbekannten Groesse', () => {
-    // Eine leere Datei hat eine Groesse, und zwar null. Der Strich gehoert dem
-    // Fall, in dem gar keine Zahl vorliegt — sonst liest der Benutzer bei jeder
-    // frisch angelegten Datei "unbekannt".
-    expect(formatBytes(0)).toBe('0 B')
-    expect(formatBytes(Number.NaN)).toBe('-')
-    expect(formatBytes(-1)).toBe('-')
   })
 })
 

@@ -3,6 +3,7 @@
  * Design DNA: quiet cyan track, no aggressive glow, compact for cards/tables.
  * When value is null/undefined, the track stays visible (empty) — never fake 0%.
  */
+import { useTranslation } from 'react-i18next'
 import { cx } from '@/utils/classNames'
 
 interface ProgressBarProps {
@@ -31,6 +32,7 @@ export function ProgressBar({
   heat = false,
   'data-testid': testId,
 }: ProgressBarProps) {
+  const { t } = useTranslation()
   const known = value != null && Number.isFinite(value)
   const clamped = known ? Math.max(0, Math.min(100, value as number)) : 0
   let barColor = 'bg-secondary'
@@ -65,7 +67,7 @@ export function ProgressBar({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-label={ariaLabel ?? label}
-        aria-valuetext={known ? undefined : 'unknown'}
+        aria-valuetext={known ? undefined : t('common.unbekannt')}
       >
         {known ? (
           <div

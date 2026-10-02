@@ -1109,7 +1109,7 @@ export function ServerDetail() {
       <ServerCredentialsPanel serverId={serverId} canManage={canManageCredentials} />
 
       {/* Tabs */}
-      <div className="sticky top-12 z-20 -mb-px overflow-x-auto border-b border-outline bg-background/95 backdrop-blur-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:static md:bg-transparent md:backdrop-blur-none">
+      <div className="sticky top-12 z-20 -mb-px overflow-x-auto border-b border-outline bg-background/95 backdrop-blur-xl msm-ohne-rollbalken md:static md:bg-transparent md:backdrop-blur-none">
         <div className="flex gap-1 min-w-max">
           {tabs.map((tab) => {
             const Icon = tab.icon;

@@ -1,6 +1,8 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { Avatar } from './Avatar'
+import { useAnkerLage } from './Ankerlage'
 
 export interface ProfileDropdownItem {
   key: string
@@ -52,74 +54,11 @@ export function ProfileDropdown({
   const [isOpen, setIsOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const initialPlacement = placement.startsWith('top') ? 'top' : 'bottom'
-  const initialAlign = placement.endsWith('right') ? 'right' : 'left'
-  const [computedPlacement, setComputedPlacement] = useState<'top' | 'bottom'>(initialPlacement)
-  const [computedAlign, setComputedAlign] = useState<'left' | 'right'>(initialAlign)
-  const [computedMaxHeight, setComputedMaxHeight] = useState<number>(480)
-
-  const updatePosition = useCallback(() => {
-    if (!containerRef.current) return
-    const rect = containerRef.current.getBoundingClientRect()
-    // Test environments without layout engine (jsdom)
-    if (rect.width === 0 && rect.height === 0 && rect.top === 0 && rect.bottom === 0) {
-      setComputedPlacement(initialPlacement)
-      setComputedAlign(initialAlign)
-      setComputedMaxHeight(480)
-      return
-    }
-
-    const spaceBelow = window.innerHeight - rect.bottom
-    const spaceAbove = rect.top
-    const totalSpaceToRightFromLeft = window.innerWidth - rect.left
-    const totalSpaceToLeftFromRight = rect.right
-
-    // Vertical collision detection (dropdown height ~300px)
-    let chosenPlacement: 'top' | 'bottom' = 'bottom'
-    if (placement.startsWith('top')) {
-      if (spaceAbove >= 200 || spaceAbove >= spaceBelow) {
-        chosenPlacement = 'top'
-      } else {
-        chosenPlacement = 'bottom'
-      }
-    } else {
-      if (spaceBelow >= 200 || spaceBelow >= spaceAbove) {
-        chosenPlacement = 'bottom'
-      } else {
-        chosenPlacement = 'top'
-      }
-    }
-    setComputedPlacement(chosenPlacement)
-
-    const availableHeight = chosenPlacement === 'top' ? spaceAbove - 16 : spaceBelow - 16
-    setComputedMaxHeight(Math.max(120, Math.min(Math.floor(availableHeight), window.innerHeight - 32)))
-
-    // Horizontal collision detection (dropdown width ~260px)
-    if (placement.endsWith('right')) {
-      // Default: align right edge of dropdown with right edge of trigger (right-0).
-      // Needs space to the left of trigger's right edge.
-      if (totalSpaceToLeftFromRight >= 260 || totalSpaceToLeftFromRight >= totalSpaceToRightFromLeft) {
-        setComputedAlign('right')
-      } else {
-        setComputedAlign('left')
-      }
-    } else {
-      // Default: align left edge of dropdown with left edge of trigger (left-0).
-      // Needs space to the right of trigger's left edge.
-      if (totalSpaceToRightFromLeft >= 260 || totalSpaceToRightFromLeft >= totalSpaceToLeftFromRight) {
-        setComputedAlign('left')
-      } else {
-        setComputedAlign('right')
-      }
-    }
-  }, [placement, initialPlacement, initialAlign])
-
-  const toggleDropdown = () => {
-    if (!isOpen) {
-      updatePosition()
-    }
-    setIsOpen((prev) => !prev)
-  }
+  const menueRef = useRef<HTMLDivElement>(null)
+  const lage = useAnkerLage(isOpen, containerRef, menueRef, {
+    seite: placement.startsWith('top') ? 'oben' : 'unten',
+    ausrichtung: placement.endsWith('right') ? 'ende' : 'start',
+  })
 
   const renderStatusDot = (size: 'xs' | 'sm' | 'md') => {
     if (!status) return null
@@ -142,7 +81,9 @@ export function ProfileDropdown({
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const ziel = e.target as Node
+      // Das Menü hängt per Portal an body, also außerhalb von containerRef.
+      if (!containerRef.current?.contains(ziel) && !menueRef.current?.contains(ziel)) {
         setIsOpen(false)
       }
     }
@@ -155,21 +96,13 @@ export function ProfileDropdown({
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside)
       document.addEventListener('keydown', handleKeyDown)
-      updatePosition()
-      window.addEventListener('resize', updatePosition)
-      window.addEventListener('scroll', updatePosition, true)
     }
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
       document.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('resize', updatePosition)
-      window.removeEventListener('scroll', updatePosition, true)
     }
-  }, [isOpen, updatePosition])
-
-  const placementClass = computedPlacement === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
-  const alignClass = computedAlign === 'right' ? 'right-0 left-auto' : 'left-0 right-auto'
+  }, [isOpen])
 
   return (
     <div
@@ -180,7 +113,7 @@ export function ProfileDropdown({
       {triggerVariant === 'avatar' ? (
         <button
           type="button"
-          onClick={toggleDropdown}
+          onClick={() => setIsOpen((offen) => !offen)}
           aria-expanded={isOpen}
           aria-haspopup="menu"
           aria-label={ausloeserName}
@@ -198,7 +131,7 @@ export function ProfileDropdown({
       ) : (
         <button
           type="button"
-          onClick={toggleDropdown}
+          onClick={() => setIsOpen((offen) => !offen)}
           aria-expanded={isOpen}
           aria-haspopup="menu"
           aria-label={ausloeserName}
@@ -228,11 +161,12 @@ export function ProfileDropdown({
       )}
 
       {/* Dropdown Popup */}
-      {isOpen && (
+      {isOpen && createPortal(
         <div
+          ref={menueRef}
           role="menu"
-          style={{ maxHeight: `${computedMaxHeight}px` }}
-          className={`absolute w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-2xl border border-outline-variant bg-surface-container-high shadow-2xl z-50 animate-fade-in ${placementClass} ${alignClass}`}
+          style={lage}
+          className="w-64 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-2xl border border-outline-variant bg-surface-container-high shadow-2xl animate-fade-in"
         >
           {/* Header mit Avatar & Benutzername & Statusumschalter */}
           <div className="border-b border-outline-variant/30 p-3.5 bg-surface-container">
@@ -351,7 +285,8 @@ export function ProfileDropdown({
               )
             })}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

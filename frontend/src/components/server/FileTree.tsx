@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, File as FileIcon, Folder, Server } from 'lucide-react'
 import type { ContentMatch, FileEntry, SearchResult } from './fileWorkspaceTypes'
-import { formatBytes, joinPath, sortEntries } from './fileHelpers'
+import { formatBytes } from '@/lib/format'
+import { joinPath, sortEntries } from './fileHelpers'
 
 import { Spinner } from '@/components/ui/Spinner'
 interface FileTreeProps {

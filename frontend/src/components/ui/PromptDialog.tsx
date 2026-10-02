@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle } from 'lucide-react'
 import { usePromptStore } from '@/stores/promptStore'
-import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
+import { useZurueckSchliesst } from '@/Singra/UI/useZurueckSchliesst'
 import { Button } from './Button'
+import { Input } from './Input'
 
 /** Globaler Prompt-Dialog. Genau einmal in der App montieren (siehe App.tsx).
  *
@@ -58,6 +59,8 @@ export function PromptDialog() {
   if (pending && !previousFocus.current) {
     previousFocus.current = document.activeElement as HTMLElement | null
   }
+  const titelId = useId()
+  const textId = useId()
   useEffect(() => {
     if (pending) return
     const target = previousFocus.current
@@ -82,6 +85,8 @@ export function PromptDialog() {
       onClick={() => resolve(null)}
       role="dialog"
       aria-modal="true"
+      aria-labelledby={pending.title ? titelId : textId}
+      aria-describedby={pending.title ? textId : undefined}
     >
       <div
         className="msm-card w-full max-w-md p-6"
@@ -93,15 +98,15 @@ export function PromptDialog() {
           )}
           <div className="flex-1">
             {pending.title && (
-              <h2 className="font-headline text-headline-md text-primary mb-2">
+              <h2 id={titelId} className="font-headline text-headline-md text-primary mb-2">
                 {pending.title}
               </h2>
             )}
-            <p className="font-body-md text-sm text-on-surface mb-4">
+            <p id={textId} className="font-body-md text-sm text-on-surface mb-4">
               {pending.message}
             </p>
-            <input
-              className="msm-input"
+            <Input
+              aria-labelledby={textId}
               placeholder={pending.placeholder ?? ''}
               value={value}
               onChange={(e) => setValue(e.target.value)}
@@ -109,7 +114,7 @@ export function PromptDialog() {
             />
             {pending.expectedValue && (
               <p className="text-xs text-on-surface-variant mt-2">
-                Geben Sie „{pending.expectedValue}“ ein zum Bestätigen.
+                {t('common.eintippenZumBestaetigen', { wert: pending.expectedValue })}
               </p>
             )}
           </div>

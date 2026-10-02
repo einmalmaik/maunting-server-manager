@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HardDrive } from 'lucide-react'
 import { ProgressBar } from '@/Singra/UI'
-import { formatBytes } from '@/components/server/fileHelpers'
+import { formatBytes } from '@/lib/format'
 import { useTresorUploads } from './tresorDateien'
 import { speicherAbfragen, type TresorSpeicher } from './tresorBlobApi'
 

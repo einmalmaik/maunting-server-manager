@@ -4,7 +4,6 @@ import i18n from '@/i18n'
 import {
   ChatMediaImage,
   ChatMediaFile,
-  formatFileSize,
   triggerDownload,
 } from './ChatMediaAttachments'
 import { chatMediaBlobCache } from '@/services/klartextSpeicher'
@@ -28,21 +27,6 @@ const BINDUNG = { absenderId: 1, blindMailboxId: 'mailbox-fuer-den-test' }
 function zeiger(mediaId: string) {
   return { mediaId, paketSchluessel: 'cGFrZXRzY2hsdWVzc2Vs', fileId: `anhang-${mediaId}` }
 }
-
-describe('formatFileSize', () => {
-  it('formats bytes, kilobytes, and megabytes accurately', () => {
-    expect(formatFileSize(500)).toBe('500 B')
-    expect(formatFileSize(2048)).toBe('2.0 KB')
-    expect(formatFileSize(5 * 1024 * 1024)).toBe('5.0 MB')
-  })
-
-  it('safely handles zero, negative, undefined, and NaN inputs without NaN MB', () => {
-    expect(formatFileSize(undefined)).toBe('0 B')
-    expect(formatFileSize(0)).toBe('0 B')
-    expect(formatFileSize(-100)).toBe('0 B')
-    expect(formatFileSize(NaN)).toBe('0 B')
-  })
-})
 
 describe('triggerDownload', () => {
   it('creates an anchor element and clicks it with converted blob for data URLs', () => {
@@ -254,6 +238,27 @@ describe('ChatMediaFile Component', () => {
 
     fireEvent.click(card!)
     expect(appendChildSpy).toHaveBeenCalled()
+  })
+
+  it('nennt große Dateien in GB und eine unbekannte Größe nicht „0 B“', () => {
+    // Bis 02.10.2026 endete die Skala im Messenger bei MB („3072.0 MB“), und
+    // eine fehlende Größe stand als „0 B“ da, als wäre die Datei leer.
+    const { rerender } = render(
+      <ChatMediaFile
+        attachment={{ name: 'backup.tar', sizeBytes: 3 * 1024 ** 3, mimeType: 'application/x-tar', ...zeiger('gross') }}
+        bindung={BINDUNG}
+      />,
+    )
+    expect(screen.getByText('3.00 GB')).toBeInTheDocument()
+
+    rerender(
+      <ChatMediaFile
+        attachment={{ name: 'alt.bin', sizeBytes: Number.NaN, mimeType: 'application/octet-stream', ...zeiger('alt') }}
+        bindung={BINDUNG}
+      />,
+    )
+    expect(screen.queryByText('0 B')).not.toBeInTheDocument()
+    expect(screen.getByText('-')).toBeInTheDocument()
   })
 
   it('downloads and decrypts file when only mediaId is present', async () => {

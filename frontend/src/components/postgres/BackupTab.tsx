@@ -6,7 +6,8 @@ import { prompt } from '@/stores/promptStore'
 import { toast } from '@/stores/toastStore'
 import { useStudio } from './StudioContext'
 import { Empty, ErrorBox, Field, Section, formatDate, useLoad } from './shared'
-import { fileToBase64, formatBytes, saveDownload } from './studioApi'
+import { formatBytes } from '@/lib/format'
+import { fileToBase64, saveDownload } from './studioApi'
 
 type Format = 'plain' | 'custom' | 'tar'
 type Scope = 'all' | 'schema' | 'data'
@@ -30,7 +31,7 @@ export function BackupTab() {
 }
 
 function DumpSection() {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const { api, overview } = useStudio()
   const [format, setFormat] = useState<Format>('custom')
   const [scope, setScope] = useState<Scope>('all')
@@ -117,7 +118,7 @@ function DumpSection() {
         <div className="mt-3 rounded-lg border border-status-success/40 bg-status-success/5 p-3 text-xs" data-testid="dump-result">
           <p className="flex items-center gap-2 text-on-surface">
             <ShieldCheck className="h-4 w-4 text-status-success" />
-            {last.name} · {formatBytes(last.size, i18n.language)}
+            {last.name} · {formatBytes(last.size)}
           </p>
           <p className="mt-1 break-all font-mono text-on-surface-variant">SHA256 {last.sha}</p>
         </div>
@@ -232,7 +233,7 @@ function PendingSection() {
       {pending.data?.map((dump) => (
         <div key={dump.database} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-status-warning/40 bg-status-warning/5 p-3">
           <span className="text-sm text-on-surface">
-            <span className="font-mono">{dump.database}.sql</span> · {formatBytes(dump.size_bytes, i18n.language)} · {formatDate(new Date(dump.modified * 1000).toISOString(), i18n.language)}
+            <span className="font-mono">{dump.database}.sql</span> · {formatBytes(dump.size_bytes)} · {formatDate(new Date(dump.modified * 1000).toISOString(), i18n.language)}
           </span>
           <span className="flex gap-2">
             <Button size="sm" onClick={() => void act('apply')} disabled={busy}>{t('postgresStudio.backup.applyPending')}</Button>

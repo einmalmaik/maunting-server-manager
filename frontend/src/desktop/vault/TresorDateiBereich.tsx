@@ -39,6 +39,8 @@ import {
   Upload,
 } from 'lucide-react'
 import {
+  ABLAGEZIEL,
+  Ablageflaeche,
   Auswahlleiste,
   Blatteintrag,
   Blattmenue,
@@ -54,13 +56,14 @@ import {
   Kontextmenue,
   Pfadleiste,
   ProgressBar,
+  Zustandsflaeche,
   useMehrfachauswahl,
   type ActionMenuItem,
   type AuswahlAktion,
 } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { prompt } from '@/stores/promptStore'
-import { formatBytes } from '@/components/server/fileHelpers'
+import { formatBytes, formatZeitpunkt } from '@/lib/format'
 import { useLangdruck } from '@/hooks/useLangdruck'
 import { ZipZuGross } from '@/lib/zipSchreiben'
 import { cx } from '@/utils/classNames'
@@ -559,9 +562,6 @@ export function TresorDateiBereich({ suche = '' }: Props) {
 
   // ── Darstellung ───────────────────────────────────────────────────────────
 
-  const datum = new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' })
-
-
   const listenTaste = (event: React.KeyboardEvent) => {
     // Strg+A und Escape.
     if (wahl.taste(event)) return
@@ -591,7 +591,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
           <Pfadleiste
             label={t('mss.vault.dateien.pfad')}
             // Auf dem Handy steht der Pfad in einer eigenen Zeile über den Knöpfen.
-            className="basis-full text-xs [scrollbar-width:none] sm:basis-0"
+            className="basis-full text-xs msm-ohne-rollbalken sm:basis-0"
             stamm={{ key: '', label: t('mss.vault.dateien.stamm'), icon: <HardDrive className="h-3.5 w-3.5" aria-hidden /> }}
             teile={pfad.map((o) => ({ key: o.id, label: o.service }))}
             onWaehlen={(key) => ordnerOeffnen(key || undefined)}
@@ -671,37 +671,39 @@ export function TresorDateiBereich({ suche = '' }: Props) {
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2 sm:px-3" onKeyDown={listenTaste}>
           {inhalt.length === 0 && sucht ? (
-            <div className="flex h-full min-h-64 flex-col items-center justify-center gap-3 px-6 text-center" role="status">
-              <SearchX className="h-10 w-10 text-on-surface-variant/60" aria-hidden />
-              <div>
-                <p className="text-sm font-semibold text-on-surface">{t('mss.vault.dateien.sucheLeerTitel')}</p>
-                <p className="mt-1 max-w-sm text-xs text-on-surface-variant">{t('mss.vault.dateien.sucheLeer', { suche: suche.trim() })}</p>
-              </div>
-            </div>
+            <Zustandsflaeche
+              art="leer"
+              ansagen
+              className="h-full min-h-64"
+              icon={<SearchX className="h-10 w-10" />}
+              titel={t('mss.vault.dateien.sucheLeerTitel')}
+              text={t('mss.vault.dateien.sucheLeer', { suche: suche.trim() })}
+            />
           ) : inhalt.length === 0 ? (
-            <div className="flex h-full min-h-64 flex-col items-center justify-center gap-3 px-6 text-center">
-              <FolderOpen className="h-10 w-10 text-on-surface-variant/60" aria-hidden />
-              <div>
-                <p className="text-sm font-semibold text-on-surface">{t('mss.vault.dateien.leerTitel')}</p>
-                <p className="mt-1 max-w-sm text-xs text-on-surface-variant">
-                  {ohneSpeicher ? (
-                    t('mss.vault.dateien.keinSpeicher')
-                  ) : (
-                    <>
-                      {t('mss.vault.dateien.leer')}
-                      {/* Ziehen gibt es nur mit Maus; am Telefon stünde da etwas, das nicht geht. */}
-                      <span className="hidden md:inline"> {t('mss.vault.dateien.leerZiehen')}</span>
-                    </>
-                  )}
-                </p>
-              </div>
+            <Zustandsflaeche
+              art="leer"
+              className="h-full min-h-64"
+              icon={<FolderOpen className="h-10 w-10" />}
+              titel={t('mss.vault.dateien.leerTitel')}
+              text={
+                ohneSpeicher ? (
+                  t('mss.vault.dateien.keinSpeicher')
+                ) : (
+                  <>
+                    {t('mss.vault.dateien.leer')}
+                    {/* Ziehen gibt es nur mit Maus; am Telefon stünde da etwas, das nicht geht. */}
+                    <span className="hidden md:inline"> {t('mss.vault.dateien.leerZiehen')}</span>
+                  </>
+                )
+              }
+            >
               {!ohneSpeicher && (
                 <FileButton multiple size="sm" variant="secondary" className={TIPPFLAECHE} onFiles={(dateien) => void hochladen(dateien, aktuellerOrdner)}>
                   <Upload className="mr-1.5 h-4 w-4" />
                   {t('mss.vault.dateien.hochladen')}
                 </FileButton>
               )}
-            </div>
+            </Zustandsflaeche>
           ) : (
             <>
               {sucht && (
@@ -731,7 +733,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
                     upload={uploads[item.id]}
                     ziel={zielZeile === item.id}
                     gezogen={gezogen.includes(item.id)}
-                    geaendert={datum.format(item.datei?.geaendert ?? item.updatedAt)}
+                    geaendert={formatZeitpunkt(item.datei?.geaendert ?? item.updatedAt, i18n.language)}
                     ort={sucht ? ortVon(item.ordner) : undefined}
                     ziehen={zeileZiehen(item)}
                     ablage={item.category === 'ordner' ? ordnerAblage(item) : undefined}
@@ -757,12 +759,7 @@ export function TresorDateiBereich({ suche = '' }: Props) {
         )}
 
         {rechnerDateiDarueber && !ohneSpeicher && (
-          <div className="pointer-events-none absolute inset-2 flex items-end justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-primary/5 pb-8">
-            <p className="flex items-center gap-2 rounded-full bg-surface-container-highest px-4 py-2 text-sm text-on-surface shadow-panel">
-              <Upload className="h-4 w-4 text-primary" aria-hidden />
-              {t('mss.vault.dateien.ablegenHochladen', { ordner: ordnerName(zielZeile ?? aktuellerOrdner) })}
-            </p>
-          </div>
+          <Ablageflaeche text={t('mss.vault.dateien.ablegenHochladen', { ordner: ordnerName(zielZeile ?? aktuellerOrdner) })} />
         )}
       </section>
 
@@ -939,7 +936,7 @@ function TresorDateiZeile({
       className={cx(
         'group flex items-center gap-2 border-b border-outline-variant/40 px-2 py-1.5 last:border-b-0',
         SPALTEN,
-        ziel ? 'bg-primary/10 ring-1 ring-inset ring-primary/50' : ausgewaehlt ? 'bg-primary/10' : 'hover:bg-surface-container-high/70',
+        ziel ? ABLAGEZIEL : ausgewaehlt ? 'bg-primary/10' : 'hover:bg-surface-container-high/70',
         gezogen && 'opacity-50',
       )}
     >

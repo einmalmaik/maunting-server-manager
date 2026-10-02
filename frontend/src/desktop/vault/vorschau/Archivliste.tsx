@@ -4,7 +4,7 @@
  */
 import { useTranslation } from 'react-i18next'
 import { File as DateiIcon, Folder } from 'lucide-react'
-import { formatBytes } from '@/components/server/fileHelpers'
+import { formatBytes } from '@/lib/format'
 import { ARCHIV_EINTRAEGE_HOECHSTENS, type ArchivEintrag } from '@/lib/zipLesen'
 
 export function Archivliste({ eintraege, label }: { eintraege: ArchivEintrag[]; label: string }) {

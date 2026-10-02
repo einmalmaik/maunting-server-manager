@@ -116,3 +116,24 @@ describe('Blattmenü und Zurück-Taste', () => {
     await waitFor(() => expect(screen.queryByText('Stummschalten')).not.toBeInTheDocument())
   })
 })
+
+describe('Blattmenue unter einem Dialog', () => {
+  it('lässt Escape dem Dialog, der darüber liegt', () => {
+    // Bis 02.10.2026 schloss Escape auch das Blatt unter einem offenen Dialog.
+    render(
+      <Blattknopf label="Mehr" titel="Chat">
+        <Blatteintrag label="Löschen" onClick={() => undefined} />
+      </Blattknopf>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Mehr' }))
+    const darueber = document.createElement('div')
+    darueber.setAttribute('aria-modal', 'true')
+    document.body.appendChild(darueber)
+    try {
+      fireEvent.keyDown(document, { key: 'Escape' })
+      expect(screen.getByText('Löschen')).toBeInTheDocument()
+    } finally {
+      darueber.remove()
+    }
+  })
+})

@@ -5,13 +5,13 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type HTMLAttributes,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { CalendarDays, ChevronLeft, ChevronRight, Clock } from 'lucide-react'
 import { cx } from '@/utils/classNames'
 import { NumberStepper } from './NumberStepper'
+import { useAnkerLage } from '@/Singra/UI/Ankerlage'
 
 export interface DateTimePickerProps
   extends Omit<HTMLAttributes<HTMLDivElement>, 'value' | 'onChange'> {
@@ -98,9 +98,9 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
     const today = useMemo(() => new Date(), [])
     const [open, setOpen] = useState(false)
     const [visibleMonth, setVisibleMonth] = useState<Date>(() => startOfMonth(parsed?.date ?? today))
-    const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null)
     const rootRef = useRef<HTMLDivElement | null>(null)
     const menuRef = useRef<HTMLDivElement | null>(null)
+    const menuStyle = useAnkerLage(open, rootRef, menuRef, { mindestensAnkerbreite: true })
     const dialogId = useId()
 
     const selectedDate = parsed?.date ?? null
@@ -140,37 +140,6 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
       return () => {
         document.removeEventListener('mousedown', onClick)
         document.removeEventListener('keydown', onKey)
-      }
-    }, [open])
-
-    useEffect(() => {
-      if (!open) return
-      const updatePosition = () => {
-        const rect = rootRef.current?.getBoundingClientRect()
-        if (!rect) return
-        const RAND = 8
-        const MENUE_HOEHE = 360
-        const MENUE_BREITE = 320
-        const platzUnten = window.innerHeight - rect.bottom - RAND * 2
-        const platzOben = rect.top - RAND * 2
-        const nachOben = platzUnten < MENUE_HOEHE && platzOben > platzUnten
-
-        setMenuStyle({
-          position: 'fixed',
-          ...(nachOben
-            ? { bottom: Math.max(RAND, window.innerHeight - rect.top + RAND) }
-            : { top: rect.bottom + RAND }),
-          left: Math.min(rect.left, window.innerWidth - MENUE_BREITE - RAND),
-          width: Math.max(rect.width, MENUE_BREITE),
-          zIndex: 100,
-        })
-      }
-      updatePosition()
-      window.addEventListener('resize', updatePosition)
-      window.addEventListener('scroll', updatePosition, true)
-      return () => {
-        window.removeEventListener('resize', updatePosition)
-        window.removeEventListener('scroll', updatePosition, true)
       }
     }, [open])
 
@@ -256,7 +225,7 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
             )}
           </button>
 
-          {open && menuStyle
+          {open
             ? createPortal(
                 <div
                   ref={menuRef}
@@ -264,7 +233,7 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
                   role="dialog"
                   style={menuStyle}
                   data-msm-dropdown-menu=""
-                  className="z-[100] rounded-xl border border-outline-variant bg-surface-container-high p-3 shadow-panel"
+                  className="w-80 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-xl border border-outline-variant bg-surface-container-high p-3 shadow-panel"
                   onPointerDown={(e) => e.nativeEvent.stopImmediatePropagation()}
                   onPointerUp={(e) => e.nativeEvent.stopImmediatePropagation()}
                   onMouseDown={(e) => e.nativeEvent.stopImmediatePropagation()}

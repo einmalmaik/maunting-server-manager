@@ -81,7 +81,7 @@ export function RegionalAnalysisLayout({
     <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden p-1 sm:p-2 transition-all duration-300 ease-out">
       {/* ── Mobil-Kopfzeile (< lg): Umschalter zwischen Chat, Globus und Satellitendaten ── */}
       <div className="flex shrink-0 items-center justify-between gap-1 rounded-xl border border-outline-variant/30 bg-surface-container-low/95 p-1 mb-2 shadow-sm backdrop-blur-md lg:hidden">
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+        <div className="flex items-center gap-1 overflow-x-auto msm-ohne-rollbalken py-0.5">
           <button
             type="button"
             onClick={() => setMobileTab('chat')}

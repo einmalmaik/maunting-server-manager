@@ -368,7 +368,7 @@ export function Notes() {
         </div>
 
         {/* Untere Leiste: Filter */}
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
+        <div className="flex items-center gap-2 overflow-x-auto msm-ohne-rollbalken py-0.5">
           <div className="w-36 sm:w-44 shrink-0">
             <Dropdown
               value={selectedCategory}

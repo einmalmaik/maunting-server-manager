@@ -6,7 +6,8 @@ import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 import { useStudio } from './StudioContext'
 import { Empty, ErrorBox, Loading, Section, formatDate, formatNumber, formatRatio, useLoad } from './shared'
-import { formatBytes, type StudioLock, type StudioSession } from './studioApi'
+import { formatBytes } from '@/lib/format'
+import { type StudioLock, type StudioSession } from './studioApi'
 
 const REFRESH_MS = 5000
 
@@ -65,7 +66,7 @@ function HealthSection() {
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Metric label={t('postgresStudio.health.cacheHit')} value={formatRatio(data.cache_hit_ratio, i18n.language)} warn={data.cache_hit_ratio != null && data.cache_hit_ratio < 0.95} hint={t('postgresStudio.health.cacheHitHint')} />
             <Metric label={t('postgresStudio.health.indexHit')} value={formatRatio(data.index_hit_ratio, i18n.language)} warn={data.index_hit_ratio != null && data.index_hit_ratio < 0.95} />
-            <Metric label={t('postgresStudio.health.size')} value={formatBytes(Number(data.database.size_bytes ?? 0), i18n.language)} />
+            <Metric label={t('postgresStudio.health.size')} value={formatBytes(Number(data.database.size_bytes ?? 0))} />
             <Metric label={t('postgresStudio.health.deadlocks')} value={formatNumber(deadlocks, i18n.language)} warn={deadlocks > 0} />
           </div>
           <div>
@@ -123,7 +124,7 @@ function HealthSection() {
                     <span className="font-mono text-on-surface">
                       {index.schema}.{index.index} <span className="text-on-surface-variant">({index.table})</span>
                     </span>
-                    <span className="text-on-surface-variant">{formatBytes(index.size_bytes, i18n.language)}</span>
+                    <span className="text-on-surface-variant">{formatBytes(index.size_bytes)}</span>
                   </li>
                 ))}
               </ul>

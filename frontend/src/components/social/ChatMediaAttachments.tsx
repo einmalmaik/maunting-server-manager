@@ -1,4 +1,5 @@
 import { adresseHerunterladen } from '@/lib/herunterladen'
+import { formatBytes } from '@/lib/format'
 import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FileText, Download, Loader2, AlertCircle, RefreshCw } from 'lucide-react'
@@ -112,13 +113,6 @@ export async function holeAnhangUrl(
   } catch {
     return null
   }
-}
-
-export function formatFileSize(bytes?: number): string {
-  if (bytes === undefined || bytes === null || isNaN(bytes) || bytes <= 0) return '0 B'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 /**
@@ -366,7 +360,7 @@ export function ChatMediaFile({ attachment, bindung, isSelf = false }: ChatMedia
       </div>
       <div className="min-w-0 flex-1">
         <p className="font-semibold text-xs truncate">{safeName}</p>
-        <p className="text-label-sm opacity-75">{formatFileSize(attachment.sizeBytes)}</p>
+        <p className="text-label-sm opacity-75">{formatBytes(attachment.sizeBytes)}</p>
       </div>
       {isDownloading ? (
         <Loader2 className="w-3.5 h-3.5 animate-spin opacity-75 shrink-0" />

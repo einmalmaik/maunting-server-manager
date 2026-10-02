@@ -11,6 +11,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronRight, CornerLeftUp } from 'lucide-react'
 import { cx } from '@/utils/classNames'
 import { Button } from '@/components/ui/Button'
+import { ABLAGEZIEL } from './Ablageflaeche'
 
 export interface Pfadteil {
   key: string
@@ -64,7 +65,7 @@ export function Pfadleiste({ label, stamm, teile, onWaehlen, kannAblegen, onAble
   // Ein Teil ist entweder Ablageziel, offene Ebene oder normal, nie zwei Farben zugleich.
   // Auf dem Telefon ist jeder Teil ein 44-px-Daumenziel; ab sm bleibt er Text.
   const knopf = (key: string, normal: string, offen = normal) =>
-    cx('rounded px-1 transition-colors max-sm:inline-flex max-sm:min-h-11 max-sm:min-w-11 max-sm:items-center max-sm:justify-center', ziel === key ? 'bg-primary/15 text-primary ring-1 ring-primary/50' : key === aktuell ? offen : normal)
+    cx('rounded px-1 transition-colors max-sm:inline-flex max-sm:min-h-11 max-sm:min-w-11 max-sm:items-center max-sm:justify-center', ziel === key ? ABLAGEZIEL : key === aktuell ? offen : normal)
 
   return (
     <nav ref={leiste} aria-label={label} className={cx('flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-on-surface-variant', className)}>
@@ -72,8 +73,9 @@ export function Pfadleiste({ label, stamm, teile, onWaehlen, kannAblegen, onAble
         <Button
           type="button"
           variant="ghost"
-          size="sm"
-          className="-ml-1 h-9 w-9 shrink-0 p-0 text-on-surface max-sm:min-h-11 max-sm:min-w-11 md:hidden"
+          size="icon"
+          fingerziel
+          className="-ml-1 shrink-0 text-on-surface md:hidden"
           aria-label={hochLabel}
           onClick={() => onWaehlen(teile.length > 1 ? teile[teile.length - 2].key : stamm.key)}
         >

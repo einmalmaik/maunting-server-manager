@@ -24,14 +24,13 @@ import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { useZurueckSchliesst } from '@/hooks/useZurueckSchliesst'
-import { Button, ActionMenu, Input, Kontextmenue, Pfadleiste, Switch, Versionsliste, type ActionMenuItem } from '@/Singra/UI'
+import { Ablageflaeche, Button, ActionMenu, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input, Kontextmenue, Pfadleiste, Switch, Versionsliste, type ActionMenuItem } from '@/Singra/UI'
+import { formatBytes, formatZeitpunkt } from '@/lib/format'
 import { FileTree } from '@/components/server/FileTree'
 import { FileEditorWorkspace } from '@/components/server/FileEditorWorkspace'
 import {
   detectLineEnding,
   fileName,
-  formatBytes,
   isWithin,
   joinPath,
   parentPath,
@@ -110,13 +109,8 @@ function isArchive(name: string): boolean {
   return ['.zip', '.tar.gz', '.tgz', '.tar.xz', '.txz', '.tar.bz2', '.tbz2'].some((extension) => lower.endsWith(extension))
 }
 
-function formatModified(value: number): string {
-  if (!value) return 'Nicht verfügbar'
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value * 1000))
-}
-
 export function FileManager({ serverId }: FileManagerProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const permissionsLoading = usePermissionsStore((state) => state.isLoading)
   const canWrite = useHasPermission('server.files.write', serverId)
   const canDelete = useHasPermission('server.files.delete', serverId)
@@ -155,9 +149,6 @@ export function FileManager({ serverId }: FileManagerProps) {
   const moveTitleId = useId()
   const promptInputId = useId()
   const moveInputId = useId()
-  // Unter Android schließt Zurück den offenen Dialog, statt die Seite zu verlassen.
-  useZurueckSchliesst(promptDialog !== null, () => setPromptDialog(null))
-  useZurueckSchliesst(moveDialog !== null, () => setMoveDialog(null))
   const fileInputRef = useRef<HTMLInputElement>(null)
   const promptInputRef = useRef<HTMLInputElement>(null)
   const treeTriggerRef = useRef<HTMLButtonElement>(null)
@@ -266,29 +257,6 @@ export function FileManager({ serverId }: FileManagerProps) {
       document.removeEventListener('keydown', onKey)
     }
   }, [contextMenu, inspectorOpen, moveDialog, promptDialog, treeOpen])
-
-  useEffect(() => {
-    if (!promptDialog) return
-    const handle = window.setTimeout(() => promptInputRef.current?.focus(), 0)
-    return () => window.clearTimeout(handle)
-  }, [promptDialog])
-
-  // Escape schliesst den offenen Dialog. Der Listener haengt bewusst am Dokument
-  // und nicht am Eingabefeld: Sobald der Fokus das Feld verlaesst — beim Griff
-  // zum Abbrechen-Knopf, oder weil der Verschieben-Dialog frueher gar keinen
-  // Autofokus hatte — erreicht ein Handler am Feld die Taste nie mehr. Der
-  // Dialog blieb dann stehen, bis der Benutzer den Abbrechen-Knopf traf.
-  useEffect(() => {
-    if (!promptDialog && !moveDialog) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      setPromptDialog(null)
-      setMoveDialog(null)
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [moveDialog, promptDialog])
 
   const refreshWorkspace = useCallback(async () => {
     await loadDirectory(currentPath, true)
@@ -731,9 +699,15 @@ export function FileManager({ serverId }: FileManagerProps) {
       </div>
 
       <div
-        className="grid min-h-[560px] grid-cols-1 lg:h-[clamp(560px,calc(100vh-300px),760px)] lg:min-h-0 lg:grid-cols-[280px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[260px_minmax(0,1fr)_230px]"
-        onDragOver={(event) => { if (canWrite) { event.preventDefault(); setDragOver(true) } }}
-        onDragLeave={() => setDragOver(false)}
+        className="relative grid min-h-[560px] grid-cols-1 lg:h-[clamp(560px,calc(100vh-300px),760px)] lg:min-h-0 lg:grid-cols-[280px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[260px_minmax(0,1fr)_230px]"
+        onDragOver={(event) => {
+          if (!canWrite) return
+          event.preventDefault()
+          // Verschieben im Baum ist kein Hochladen.
+          if (!event.dataTransfer.types.includes('application/x-msm-path')) setDragOver(true)
+        }}
+        // Beim Wechsel auf ein Kind kommt `dragleave` auch; erst das Verlassen der Fläche zählt.
+        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(false) }}
         onDrop={(event) => {
           event.preventDefault()
           setDragOver(false)
@@ -782,7 +756,7 @@ export function FileManager({ serverId }: FileManagerProps) {
           <footer className="border-t border-outline-variant px-3 py-2 text-label-sm text-on-surface-variant">{t('files.summary', { files: directorySummary.files, folders: directorySummary.folders, size: formatBytes(directorySummary.bytes) })}</footer>
         </aside>
 
-        <div className={`min-h-0 min-w-0 lg:flex ${dragOver ? 'ring-1 ring-inset ring-secondary' : ''}`}>
+        <div className="min-h-0 min-w-0 lg:flex">
           <FileEditorWorkspace tabs={tabs} activePath={activePath} canWrite={canWrite} tabListLabel={t('files.openFiles')} horizontalScrollHint={t('files.horizontalScrollHint')} onActivate={setActivePath} onChange={updateTabContent} onSave={(path) => void saveTab(path)} onClose={(path) => void closeTab(path)} onReload={(path) => void reloadTab(path)} />
         </div>
 
@@ -790,7 +764,7 @@ export function FileManager({ serverId }: FileManagerProps) {
           <div className="flex min-h-11 items-center justify-between border-b border-outline-variant px-3"><h3 className="text-xs font-semibold text-on-surface">{t('files.details')}</h3>{inspectorOpen && <Button variant="ghost" size="sm" type="button" onClick={() => { setInspectorOpen(false); window.requestAnimationFrame(() => inspectorTriggerRef.current?.focus()) }} className="inline-flex items-center justify-center gap-2 xl:hidden" aria-label={t('common.close')}><X className="h-4 w-4" /><span>{t('common.close')}</span></Button>}</div>
           {activeTab ? <>
             <div className="border-b border-outline-variant p-3"><div className="flex items-start gap-2"><ArchiveRestore className="mt-0.5 h-4 w-4 text-secondary" /><div className="min-w-0"><p className="truncate text-xs font-semibold text-on-surface">{fileName(activeTab.path)}</p><p className="mt-0.5 truncate font-mono text-label-sm text-on-surface-variant">{activeTab.path}</p></div></div></div>
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 border-b border-outline-variant p-3 text-label-sm"><dt className="text-on-surface-variant">{t('files.modified')}</dt><dd className="text-right text-on-surface">{formatModified(activeTab.modified)}</dd><dt className="text-on-surface-variant">{t('files.size')}</dt><dd className="text-right font-mono text-on-surface">{formatBytes(activeTab.size)}</dd><dt className="text-on-surface-variant">{t('files.permissions')}</dt><dd className="text-right font-mono text-on-surface">{activeTab.mode ?? t('files.notAvailable')}</dd><dt className="text-on-surface-variant">{t('files.owner')}</dt><dd className="truncate text-right text-on-surface">{activeTab.owner ?? t('files.notAvailable')}</dd><dt className="text-on-surface-variant">{t('files.group')}</dt><dd className="truncate text-right text-on-surface">{activeTab.group ?? t('files.notAvailable')}</dd></dl>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 border-b border-outline-variant p-3 text-label-sm"><dt className="text-on-surface-variant">{t('files.modified')}</dt><dd className="text-right text-on-surface">{activeTab.modified ? formatZeitpunkt(activeTab.modified * 1000, i18n.language) : t('files.notAvailable')}</dd><dt className="text-on-surface-variant">{t('files.size')}</dt><dd className="text-right font-mono text-on-surface">{formatBytes(activeTab.size)}</dd><dt className="text-on-surface-variant">{t('files.permissions')}</dt><dd className="text-right font-mono text-on-surface">{activeTab.mode ?? t('files.notAvailable')}</dd><dt className="text-on-surface-variant">{t('files.owner')}</dt><dd className="truncate text-right text-on-surface">{activeTab.owner ?? t('files.notAvailable')}</dd><dt className="text-on-surface-variant">{t('files.group')}</dt><dd className="truncate text-right text-on-surface">{activeTab.group ?? t('files.notAvailable')}</dd></dl>
             <div className="border-b border-outline-variant p-3">
               <h4 className="mb-2 text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">{t('files.versionHistory')}</h4>
               <Versionsliste
@@ -804,6 +778,7 @@ export function FileManager({ serverId }: FileManagerProps) {
             </div>
           </> : <p className="p-6 text-center text-xs text-on-surface-variant">{t('files.noDetails')}</p>}
         </aside>
+        {dragOver && <Ablageflaeche text={t('files.dropToUpload')} />}
       </div>
 
       <Kontextmenue
@@ -814,9 +789,26 @@ export function FileManager({ serverId }: FileManagerProps) {
         onSchliessen={() => setContextMenu(null)}
       />
 
-      {promptDialog && <div className="msm-modal-overlay z-[130]" role="dialog" aria-modal="true" aria-labelledby={promptTitleId} onClick={() => setPromptDialog(null)}><div className="msm-card w-full max-w-md p-5" onClick={(event) => event.stopPropagation()}><h2 id={promptTitleId} className="font-headline text-title-lg font-semibold text-on-surface">{promptDialog.title}</h2><div className="mt-4"><Input id={promptInputId} label={promptDialog.label} ref={promptInputRef} defaultValue={promptDialog.initialValue} onKeyDown={(event) => { if (event.key === 'Enter') void promptDialog.onConfirm(event.currentTarget.value) }} /></div><div className="mt-5 flex justify-end gap-2"><Button variant="secondary" size="sm" type="button" onClick={() => setPromptDialog(null)}>{t('common.cancel')}</Button><Button size="sm" type="button" onClick={() => void promptDialog.onConfirm(promptInputRef.current?.value ?? '')}>{promptDialog.confirmLabel}</Button></div></div></div>}
+      {/* Dialog statt eigener Überlagerung: hängt an body, hält Tab, Escape und Zurück schließen nur ihn. */}
+      <Dialog open={promptDialog !== null} onOpenChange={(offen) => { if (!offen) setPromptDialog(null) }}>
+        {promptDialog && (
+          <DialogContent className="max-w-md" aria-labelledby={promptTitleId}>
+            <DialogHeader><DialogTitle id={promptTitleId}>{promptDialog.title}</DialogTitle></DialogHeader>
+            <div className="p-6"><Input id={promptInputId} label={promptDialog.label} ref={promptInputRef} defaultValue={promptDialog.initialValue} onKeyDown={(event) => { if (event.key === 'Enter') void promptDialog.onConfirm(event.currentTarget.value) }} /></div>
+            <DialogFooter><Button variant="secondary" size="sm" type="button" onClick={() => setPromptDialog(null)}>{t('common.cancel')}</Button><Button size="sm" type="button" onClick={() => void promptDialog.onConfirm(promptInputRef.current?.value ?? '')}>{promptDialog.confirmLabel}</Button></DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
 
-      {moveDialog && <div className="msm-modal-overlay z-[130]" role="dialog" aria-modal="true" aria-labelledby={moveTitleId} onClick={() => setMoveDialog(null)}><div className="msm-card w-full max-w-md p-5" onClick={(event) => event.stopPropagation()}><h2 id={moveTitleId} className="font-headline text-title-lg font-semibold text-on-surface">{t('files.move')}</h2><p className="mt-2 text-sm text-on-surface-variant">{t('files.moveHint', { name: moveDialog.entry.name })}</p><div className="mt-4"><Input id={moveInputId} label={t('files.targetFolder')} value={moveTarget} onChange={(event) => setMoveTarget(event.target.value)} placeholder="mods/config" autoFocus /></div><p className="mt-1 text-xs text-on-surface-variant">{t('files.moveTargetHint')}</p><div className="mt-5 flex justify-end gap-2"><Button variant="secondary" size="sm" type="button" onClick={() => setMoveDialog(null)}>{t('common.cancel')}</Button><Button size="sm" type="button" onClick={() => void submitMove()}>{t('common.save')}</Button></div></div></div>}
+      <Dialog open={moveDialog !== null} onOpenChange={(offen) => { if (!offen) setMoveDialog(null) }}>
+        {moveDialog && (
+          <DialogContent className="max-w-md" aria-labelledby={moveTitleId}>
+            <DialogHeader><DialogTitle id={moveTitleId}>{t('files.move')}</DialogTitle></DialogHeader>
+            <div className="p-6"><p className="text-sm text-on-surface-variant">{t('files.moveHint', { name: moveDialog.entry.name })}</p><div className="mt-4"><Input id={moveInputId} label={t('files.targetFolder')} value={moveTarget} onChange={(event) => setMoveTarget(event.target.value)} placeholder="mods/config" /></div><p className="mt-1 text-xs text-on-surface-variant">{t('files.moveTargetHint')}</p></div>
+            <DialogFooter><Button variant="secondary" size="sm" type="button" onClick={() => setMoveDialog(null)}>{t('common.cancel')}</Button><Button size="sm" type="button" onClick={() => void submitMove()}>{t('common.save')}</Button></DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   )
 }

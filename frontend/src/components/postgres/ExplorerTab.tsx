@@ -9,7 +9,8 @@ import { EnumDialog, SequenceDialog, ViewDialog } from './StructureDialogs'
 import { TableDesignerDialog } from './TableDesigner'
 import { TableStructure } from './TableStructure'
 import { Empty, ErrorBox, Loading, Section, formatNumber, useLoad } from './shared'
-import { formatBytes, type RowFilter, type StudioRelation } from './studioApi'
+import { formatBytes } from '@/lib/format'
+import { type RowFilter, type StudioRelation } from './studioApi'
 
 type Selection = { kind: 'relation'; name: string } | { kind: 'sequence'; name: string } | { kind: 'enum'; name: string } | null
 
@@ -274,7 +275,7 @@ function RelationView({ schema, name, relation, relations, enums, filters, view,
           </h3>
           <p className="text-xs text-on-surface-variant">
             {relation && t(`postgresStudio.kinds.${relation.kind}`)}
-            {table?.size_bytes != null && ` · ${formatBytes(table.size_bytes, i18n.language)}`}
+            {table?.size_bytes != null && ` · ${formatBytes(table.size_bytes)}`}
             {table && ` · ~${formatNumber(Math.max(0, table.estimated_rows), i18n.language)} ${t('postgresStudio.explorer.rowsShort')}`}
             {table?.rls_enabled && (
               <Badge variant="info" className="ml-2">

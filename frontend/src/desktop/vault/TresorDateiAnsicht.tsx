@@ -31,7 +31,7 @@ import {
 } from 'lucide-react'
 import { Button, Lichtbox, ProgressBar } from '@/Singra/UI'
 import { archivInhalt, type ArchivEintrag } from '@/lib/zipLesen'
-import { formatBytes } from '@/components/server/fileHelpers'
+import { formatBytes, formatZeitpunkt } from '@/lib/format'
 import { useVaultStore } from './vaultStore'
 import { type VaultItem } from './vaultEintrag'
 import { ansichtOeffnen, ansichtSchliessen, blobLesen } from './tresorDateien'
@@ -212,7 +212,7 @@ export function TresorDateiAnsicht({ item: anfang, ort, folge, onWechseln, onSch
     return <TresorBildeditor item={item} vorschauUrl={anzeige.url} onFertig={() => setBildBearbeiten(false)} />
   }
 
-  const datum = (ms: number) => new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' }).format(ms)
+  const datum = (ms: number) => formatZeitpunkt(ms, i18n.language)
   const index = folge.findIndex((f) => f.id === item.id)
   const Icon = dateiIcon(datei.typ, item.service)
   const geladen = anzeige.id === item.id

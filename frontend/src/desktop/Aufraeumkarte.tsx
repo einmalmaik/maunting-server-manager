@@ -21,6 +21,7 @@ import { listen } from '@tauri-apps/api/event'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/Singra/UI'
+import { formatBytes } from '@/lib/format'
 import { ergebnisMelden } from './desktopJobs'
 import {
   aufraeumenAblehnen,
@@ -32,20 +33,6 @@ export const EREIGNIS_AUFRAEUMEN = 'mss:aufraeumen-anfrage'
 
 /** Wie viele Pfade die Karte zeigt, bevor sie zusammenfasst. */
 const SICHTBAR = 12
-
-function groesse(bytes: number | null): string {
-  if (bytes === null) {
-    return ''
-  }
-  const einheiten = ['B', 'KB', 'MB', 'GB', 'TB']
-  let wert = bytes
-  let stelle = 0
-  while (wert >= 1024 && stelle < einheiten.length - 1) {
-    wert /= 1024
-    stelle += 1
-  }
-  return `${wert.toFixed(wert >= 10 || stelle === 0 ? 0 : 1)} ${einheiten[stelle]}`
-}
 
 export function Aufraeumkarte({ offenerAuftragId }: { offenerAuftragId: string | null }) {
   const { t } = useTranslation()
@@ -153,7 +140,7 @@ export function Aufraeumkarte({ offenerAuftragId }: { offenerAuftragId: string |
                     {posten.pfad}
                   </span>
                   <span className="shrink-0 tabular-nums">
-                    {posten.ungefaehr ? '≥ ' : ''}{groesse(posten.bytes)}
+                    {posten.ungefaehr ? '≥ ' : ''}{posten.bytes === null ? '' : formatBytes(posten.bytes)}
                     {posten.zone === 'system' ? ` · ${t('mss.aufraeumen.system')}` : ''}
                     {posten.zone === 'muell' ? ` · ${t('mss.aufraeumen.sofortWeg')}` : ''}
                   </span>
@@ -168,7 +155,7 @@ export function Aufraeumkarte({ offenerAuftragId }: { offenerAuftragId: string |
             <p className="mt-3 text-xs text-on-surface-variant">
               {t('mss.aufraeumen.summe', {
                 anzahl: plan.posten.length,
-                groesse: groesse(summe),
+                groesse: formatBytes(summe),
               })}
             </p>
           </>

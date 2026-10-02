@@ -24,6 +24,7 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  SearchX,
   Shield,
   ShieldAlert,
   ShieldCheck,
@@ -34,7 +35,7 @@ import {
   Zap,
   X,
 } from 'lucide-react'
-import { Button, Checkbox, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input, Textarea } from '@/Singra/UI'
+import { Button, Checkbox, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input, Textarea, Zustandsflaeche } from '@/Singra/UI'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { toast } from '@/stores/toastStore'
@@ -49,7 +50,7 @@ import { TresorDateiBereich } from './TresorDateiBereich'
 import { TresorGalerie } from './TresorGalerie'
 import { inhaltVon } from './tresorOrdner'
 import { useMiniatur } from './tresorMiniaturen'
-import { formatBytes } from '@/components/server/fileHelpers'
+import { formatBytes } from '@/lib/format'
 import { setzeTresorSchutz } from '../tauri'
 import { useShallow } from 'zustand/react/shallow'
 import { getLocalVaultSalt, useVaultStore } from './vaultStore'
@@ -60,10 +61,6 @@ import { fehlerText } from './tresorFehler'
 type Ansicht = 'tresor' | 'fotos' | 'dateien' | 'archiv' | 'papierkorb'
 
 const TAG_MS = 24 * 60 * 60 * 1000
-
-/** Symbolknopf in Zeilen und Kopfleiste: am Rechner 32 px, am Finger 44 px. */
-const SYMBOLKNOPF =
-  'inline-flex h-8 w-8 max-md:h-11 max-md:w-11 shrink-0 items-center justify-center rounded-md transition-colors'
 
 /** Miniatur einer Datei im Archiv oder Papierkorb, sonst das Symbol ihrer Art. */
 function ZeilenBild({ item, Symbol }: { item: VaultItem; Symbol: React.ComponentType<{ className?: string }> }) {
@@ -653,6 +650,7 @@ export function VaultView() {
 
           <div className="text-center pt-1">
             <Button
+              fingerziel
               type="button"
               variant="ghost"
               size="sm"
@@ -661,7 +659,7 @@ export function VaultView() {
                 setMasterPasswordInput('')
                 setConfirmPasswordInput('')
               }}
-              className="text-primary max-md:h-11"
+              className="text-primary"
             >
               {t('mss.vault.bereitsEingerichtet')}
             </Button>
@@ -773,12 +771,13 @@ export function VaultView() {
           {/* Hinweis per E-Mail anfordern */}
           <div className="flex flex-col items-center gap-1 pt-1">
             <Button
+              fingerziel
               type="button"
               variant="ghost"
               size="sm"
               onClick={handleRequestHint}
               disabled={isRequestingHint}
-              className="text-on-surface-variant hover:text-primary max-md:h-11"
+              className="text-on-surface-variant hover:text-primary"
             >
               <HelpCircle className="h-3.5 w-3.5" />
               <span>{isRequestingHint ? t('mss.vault.sendeMail') : t('mss.vault.hinweisPerMail')}</span>
@@ -786,6 +785,7 @@ export function VaultView() {
 
             {!isInitialized && (
               <Button
+                fingerziel
                 type="button"
                 variant="ghost"
                 size="sm"
@@ -793,7 +793,7 @@ export function VaultView() {
                   setIsSetupMode(true)
                   setMasterPasswordInput('')
                 }}
-                className="text-on-surface-variant hover:text-primary max-md:h-11"
+                className="text-on-surface-variant hover:text-primary"
               >
                 {t('mss.vault.neuenTresorEinrichten')}
               </Button>
@@ -801,6 +801,7 @@ export function VaultView() {
 
             {isInitialized && (
               <Button
+                fingerziel
                 type="button"
                 variant="ghost"
                 size="sm"
@@ -808,7 +809,7 @@ export function VaultView() {
                   setZuruecksetzen(true)
                   setMasterPasswordInput('')
                 }}
-                className="text-on-surface-variant hover:text-status-destructive max-md:h-11"
+                className="text-on-surface-variant hover:text-status-destructive"
               >
                 {t('mss.vault.zuruecksetzen.link')}
               </Button>
@@ -871,10 +872,13 @@ export function VaultView() {
                 {item.username || '—'}
               </span>
               {item.username && (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
+                  fingerziel
                   onClick={() => void handleCopy(item.username, `user-${item.id}`, item.id)}
-                  className={`${SYMBOLKNOPF} text-on-surface-variant hover:text-on-surface`}
+                  className="text-on-surface-variant hover:text-on-surface"
                   aria-label={t('mss.vault.benutzernameKopieren')}
                 >
                   {copiedIdField === `user-${item.id}` ? (
@@ -882,7 +886,7 @@ export function VaultView() {
                   ) : (
                     <Copy className="h-3 w-3" />
                   )}
-                </button>
+                </Button>
               )}
             </div>
             )}
@@ -896,19 +900,25 @@ export function VaultView() {
               <span className="text-on-surface select-none">
                 {isRevealed ? item.password : '••••••••'}
               </span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
+                fingerziel
                 onClick={() => handleToggleRevealPassword(item.id)}
                 aria-label={t(isRevealed ? 'common.hidePassword' : 'common.showPassword')}
                 aria-pressed={isRevealed}
-                className={`${SYMBOLKNOPF} text-on-surface-variant hover:text-on-surface`}
+                className="text-on-surface-variant hover:text-on-surface"
               >
                 {isRevealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
+                fingerziel
                 onClick={() => void handleCopy(item.password, `pwd-${item.id}`, item.id)}
-                className={`${SYMBOLKNOPF} text-primary hover:text-primary-hover`}
+                className="text-primary hover:text-primary-hover"
                 aria-label={t('mss.vault.passwortKopieren')}
               >
                 {copiedIdField === `pwd-${item.id}` ? (
@@ -916,7 +926,7 @@ export function VaultView() {
                 ) : (
                   <Copy className="h-3.5 w-3.5" />
                 )}
-              </button>
+              </Button>
             </div>
           )}
 
@@ -933,10 +943,13 @@ export function VaultView() {
                   {itemTotp.length === 6 ? `${itemTotp.slice(0, 3)} ${itemTotp.slice(3)}` : itemTotp}
                 </span>
                 <span className="text-label-sm text-status-success/70">({totpRemaining}s)</span>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
+                  fingerziel
                   onClick={() => void handleCopy(itemTotp, `totp-${item.id}`, item.id)}
-                  className={`${SYMBOLKNOPF} text-status-success hover:text-status-success/80`}
+                  className="text-status-success hover:text-status-success/80"
                   aria-label={t('mss.vault.codeKopieren')}
                 >
                   {copiedIdField === `totp-${item.id}` ? (
@@ -944,7 +957,7 @@ export function VaultView() {
                   ) : (
                     <Copy className="h-3.5 w-3.5" />
                   )}
-                </button>
+                </Button>
               </div>
             )
           )}
@@ -957,21 +970,23 @@ export function VaultView() {
                 </span>
               )}
               <Button
+                fingerziel
                 type="button"
                 variant="ghost"
                 size="sm"
                 onClick={() => void handleRestoreItem(item)}
-                className="text-xs px-2 py-1 text-primary max-md:h-11"
+                className="text-xs px-2 py-1 text-primary"
               >
                 <RotateCcw className="h-3.5 w-3.5 mr-1" />
                 {t('mss.vault.wiederherstellen')}
               </Button>
               <Button
+                fingerziel
                 type="button"
                 variant="ghost"
                 size="sm"
                 onClick={() => void handleDeleteItem(item)}
-                className="text-xs px-2 py-1 text-status-destructive hover:bg-status-destructive/10 max-md:h-11"
+                className="text-xs px-2 py-1 text-status-destructive hover:bg-status-destructive/10"
               >
                 <Trash2 className="h-3.5 w-3.5 mr-1" />
                 {t('mss.vault.endgueltigLoeschen')}
@@ -981,40 +996,49 @@ export function VaultView() {
           /* Favorit & Edit */
           <div className="flex items-center gap-0.5 border-l border-outline-variant/20 pl-1.5">
             {ansicht === 'archiv' && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
+                fingerziel
                 onClick={() => void handleArchiv(item, false)}
                 aria-label={t('mss.vault.ausArchiv')}
-                className={`${SYMBOLKNOPF} text-on-surface-variant hover:text-primary`}
+                className="text-on-surface-variant hover:text-primary"
               >
                 <ArchiveRestore className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             )}
             {!istDatei && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
+              fingerziel
               onClick={() => void toggleFavorite(item.id)}
               aria-label={t(item.isFavorite ? 'mss.vault.favoritEntfernen' : 'mss.vault.favoritSetzen', { name: item.service })}
               aria-pressed={!!item.isFavorite}
-              className={`${SYMBOLKNOPF} ${
+              className={`${
                 item.isFavorite
                   ? 'text-status-warning hover:text-status-warning/80'
                   : 'text-on-surface-variant hover:text-status-warning'
               }`}
             >
               <Star className={`h-3.5 w-3.5 ${item.isFavorite ? 'fill-current' : ''}`} />
-            </button>
+            </Button>
 
             )}
             {!istDatei && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
+              fingerziel
               onClick={() => openEditEntryModal(item)}
               aria-label={t('mss.vault.eintragBearbeiten', { name: item.service })}
-              className={`${SYMBOLKNOPF} text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest`}
+              className="text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest"
             >
               <Edit2 className="h-3.5 w-3.5" />
-            </button>
+            </Button>
             )}
           </div>
           )}
@@ -1044,9 +1068,10 @@ export function VaultView() {
           {/* Neue Einträge gibt es nur unter „Tresor“; Archiv und Papierkorb nehmen nur auf, was schon da ist. */}
           {ansicht === 'tresor' && (
           <Button
+            fingerziel
             onClick={openNewEntryModal}
             aria-label={t('mss.vault.neuerEintrag')}
-            className="flex items-center gap-1 bg-primary text-on-primary hover:bg-primary-hover shadow-sm px-2.5 py-1.5 text-xs font-medium max-md:h-11 max-md:w-11 max-md:px-0"
+            className="flex items-center gap-1 bg-primary text-on-primary hover:bg-primary-hover shadow-sm px-2.5 py-1.5 text-xs font-medium max-md:w-11 max-md:px-0"
           >
             <Plus className="h-3.5 w-3.5" />
             <span className="max-md:hidden">{t('mss.vault.neuerEintrag')}</span>
@@ -1054,17 +1079,19 @@ export function VaultView() {
           )}
 
           <Button
+            fingerziel
             size="icon"
             variant="ghost"
             onClick={() => void syncWithServer()}
             disabled={syncStatus === 'syncing'}
             aria-label={t('mss.vault.abgleichen')}
-            className="text-on-surface-variant hover:text-on-surface max-md:h-11 max-md:w-11"
+            className="text-on-surface-variant hover:text-on-surface"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
           </Button>
 
           <Button
+            fingerziel
             size="icon"
             variant="ghost"
             onClick={() => {
@@ -1073,17 +1100,18 @@ export function VaultView() {
               void checkHintStatus()
             }}
             aria-label={t('mss.vault.hinweisVerwalten')}
-            className={`max-md:h-11 max-md:w-11 ${hasHint === false ? 'text-status-warning hover:text-status-warning/80' : 'text-on-surface-variant hover:text-on-surface'}`}
+            className={`${hasHint === false ? 'text-status-warning hover:text-status-warning/80' : 'text-on-surface-variant hover:text-on-surface'}`}
           >
             <KeyRound className="h-3.5 w-3.5" />
           </Button>
 
           <Button
+            fingerziel
             size="icon"
             variant="ghost"
             onClick={lock}
             aria-label={t('mss.vault.sperren')}
-            className="text-on-surface-variant hover:text-status-destructive max-md:h-11 max-md:w-11"
+            className="text-on-surface-variant hover:text-status-destructive"
           >
             <Lock className="h-3.5 w-3.5" />
           </Button>
@@ -1102,7 +1130,7 @@ export function VaultView() {
         >
           {syncStatus === 'error' ? <ShieldAlert className="h-3.5 w-3.5 shrink-0" /> : <WifiOff className="h-3.5 w-3.5 shrink-0" />}
           <span className="min-w-0 flex-1">{t(syncStatus === 'error' ? 'mss.vault.abgleichAbgelehnt' : 'mss.vault.offlineHinweis')}</span>
-          <Button type="button" variant="ghost" size="sm" onClick={() => void syncWithServer()} className="shrink-0 max-md:h-11">
+          <Button fingerziel type="button" variant="ghost" size="sm" onClick={() => void syncWithServer()} className="shrink-0">
             {t('common.retry')}
           </Button>
         </div>
@@ -1151,14 +1179,17 @@ export function VaultView() {
                 </p>
               </div>
             </div>
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
+              fingerziel
               onClick={() => setDismissedHintReminder(true)}
-              className={`${SYMBOLKNOPF} text-on-surface-variant hover:text-on-surface`}
+              className="text-on-surface-variant hover:text-on-surface"
               aria-label={t('common.close')}
             >
               <X className="h-3.5 w-3.5" />
-            </button>
+            </Button>
           </div>
 
           <form
@@ -1236,24 +1267,16 @@ export function VaultView() {
           <p className="text-label-sm text-on-surface-variant">{t('mss.vault.archivHinweis')}</p>
         )}
         {ansicht !== 'tresor' && ansichtsItems.length === 0 ? (
-          <div className="p-8 text-center text-xs text-on-surface-variant">
-            {t(ansicht === 'archiv' ? 'mss.vault.archivLeer' : 'mss.vault.papierkorbLeer')}
-          </div>
+          <Zustandsflaeche art="leer" text={t(ansicht === 'archiv' ? 'mss.vault.archivLeer' : 'mss.vault.papierkorbLeer')} />
         ) : ansichtsItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-8 text-center text-on-surface-variant max-w-xs mx-auto">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-container border border-outline-variant/30 mb-3 text-on-surface-variant/60">
-              <KeyRound className="h-6 w-6" />
-            </div>
-            <h3 className="text-xs font-semibold text-on-surface mb-3">{t('mss.vault.leer')}</h3>
-            <Button onClick={openNewEntryModal} className="bg-primary text-on-primary text-xs py-1.5 px-3">
+          <Zustandsflaeche art="leer" icon={<KeyRound className="h-10 w-10" />} titel={t('mss.vault.leer')}>
+            <Button size="sm" className="max-sm:min-h-11" onClick={openNewEntryModal}>
               <Plus className="h-3.5 w-3.5 mr-1" />
               {t('mss.vault.passwortAnlegen')}
             </Button>
-          </div>
+          </Zustandsflaeche>
         ) : searchedItems.length === 0 ? (
-          <div className="p-8 text-center text-xs text-on-surface-variant">
-            {t('mss.vault.keineTreffer')}
-          </div>
+          <Zustandsflaeche art="leer" ansagen icon={<SearchX className="h-10 w-10" />} text={t('mss.vault.keineTreffer')} />
         ) : (
           <>
             {/* FAVORITEN */}
@@ -1341,6 +1364,7 @@ export function VaultView() {
                     {t('mss.vault.passwort')}
                   </label>
                   <Button
+                    fingerziel
                     type="button"
                     variant="ghost"
                     size="sm"
@@ -1349,7 +1373,7 @@ export function VaultView() {
                       setModalPassword(newP)
                       debouncedLeakCheck(newP)
                     }}
-                    className="text-primary max-md:h-11"
+                    className="text-primary"
                   >
                     <Zap className="h-3 w-3" />
                     {t('mss.vault.generieren')}
@@ -1391,11 +1415,12 @@ export function VaultView() {
                     {t('mss.vault.zweifaktorBezeichnung')}
                   </label>
                   <Button
+                    fingerziel
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={() => setShowQrScanner(true)}
-                    className="text-primary max-md:h-11"
+                    className="text-primary"
                   >
                     <QrCode className="h-3 w-3" />
                     {t('mss.vault.qr.scannen')}
@@ -1426,6 +1451,7 @@ export function VaultView() {
               {editingItemId ? (
                 <div className="flex items-center gap-1">
                   <Button
+                    fingerziel
                     type="button"
                     variant="ghost"
                     size="sm"
@@ -1433,12 +1459,13 @@ export function VaultView() {
                       const item = items.find((i) => i.id === editingItemId)
                       if (item) void handleTrashItem(item)
                     }}
-                    className="text-status-destructive hover:bg-status-destructive/10 max-md:h-11"
+                    className="text-status-destructive hover:bg-status-destructive/10"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     {t('mss.vault.inPapierkorb')}
                   </Button>
                   <Button
+                    fingerziel
                     type="button"
                     variant="ghost"
                     size="sm"
@@ -1446,7 +1473,7 @@ export function VaultView() {
                       const item = items.find((i) => i.id === editingItemId)
                       if (item) void handleArchiv(item, !item.archivedAt)
                     }}
-                    className="text-on-surface-variant max-md:h-11"
+                    className="text-on-surface-variant"
                   >
                     {items.find((i) => i.id === editingItemId)?.archivedAt ? (
                       <>
@@ -1535,12 +1562,13 @@ export function VaultView() {
             <DialogFooter className="flex-wrap justify-between">
               {hasHint ? (
                 <Button
+                  fingerziel
                   type="button"
                   variant="secondary"
                   size="sm"
                   disabled={isRequestingHint}
                   onClick={() => void handleRequestHint()}
-                  className="max-md:h-11"
+                  
                 >
                   <Mail className="h-3.5 w-3.5" />
                   <span>{isRequestingHint ? t('mss.vault.sendeMail') : t('mss.vault.perMailTesten')}</span>

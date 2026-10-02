@@ -25,7 +25,7 @@ export function Sprungleiste({ label, ziele }: SprungleisteProps) {
   return (
     <nav
       aria-label={label}
-      className="sticky top-12 z-20 -mx-1 mb-6 flex gap-2 overflow-x-auto border-b border-outline-variant bg-background/95 px-1 py-2 backdrop-blur-xl [scrollbar-width:none] lg:top-0 [&::-webkit-scrollbar]:hidden"
+      className="sticky top-12 z-20 -mx-1 mb-6 flex gap-2 overflow-x-auto border-b border-outline-variant bg-background/95 px-1 py-2 backdrop-blur-xl msm-ohne-rollbalken lg:top-0"
     >
       {ziele.map(ziel => (
         <a key={ziel.id} href={`#${ziel.id}`} className={buttonClasses('secondary', 'sm', 'shrink-0')}>

@@ -167,7 +167,7 @@ export function CreateStoryModal({
 
                 {/* Story Text */}
                 <div className="relative z-10 flex-1 flex items-center justify-center text-center px-2 py-4">
-                  <p className="font-headline text-base sm:text-lg font-bold break-words drop-shadow-md max-h-40 overflow-y-auto no-scrollbar">
+                  <p className="font-headline text-base sm:text-lg font-bold break-words drop-shadow-md max-h-40 overflow-y-auto msm-ohne-rollbalken">
                     {content || (photoDataUrl ? '' : t('social.story.tapForText'))}
                   </p>
                 </div>
@@ -222,7 +222,7 @@ export function CreateStoryModal({
             {!photoDataUrl && (
               <div className="flex items-center gap-2.5 py-1 px-1">
                 <span className="text-label-sm font-semibold text-on-surface-variant/90 shrink-0">{t('social.story.colour')}</span>
-                <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar py-1">
+                <div className="flex items-center gap-2.5 overflow-x-auto msm-ohne-rollbalken py-1">
                   {Object.entries(STORY_GRADIENTS).map(([k, grad]) => (
                     <button
                       key={k}

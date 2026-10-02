@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useToastStore } from '@/stores/toastStore'
 import { api } from '@/api/client'
 import i18n from '@/i18n'
+import { fakeLayout } from '@/test/fakeLayout'
 
 vi.mock('@/api/client', () => ({
   api: vi.fn(),
@@ -40,27 +41,22 @@ describe('BenachrichtigungsGlocke', () => {
     setUser(true, true, true)
   })
 
-  it('renders bell button and opens menu with bottom/right placement (Tauri style)', () => {
+  it('öffnet das Menü per Portal an body, außerhalb des Stapelkontexts der Shell', () => {
     render(<BenachrichtigungsGlocke placement="bottom" align="right" />)
 
-    const btn = screen.getByRole('button', { name: /benachrichtigungen/i })
-    expect(btn).toBeInTheDocument()
-
-    fireEvent.click(btn)
+    fireEvent.click(screen.getByRole('button', { name: /benachrichtigungen/i }))
     const menu = screen.getByRole('menu')
-    expect(menu).toBeInTheDocument()
-    expect(menu.className).toContain('top-full')
-    expect(menu.className).toContain('right-0')
+    expect(menu.parentElement).toBe(document.body)
+    expect(menu.style.position).toBe('fixed')
   })
 
-  it('renders bell button and opens menu with top/sidebar placement', () => {
-    render(<BenachrichtigungsGlocke placement="top" align="sidebar" />)
-
-    const btn = screen.getByRole('button', { name: /benachrichtigungen/i })
-    fireEvent.click(btn)
-    const menu = screen.getByRole('menu')
-    expect(menu).toBeInTheDocument()
-    expect(menu.className).toContain('bottom-full')
+  it('schließt bei Klick daneben, nicht bei Klick ins Menü', () => {
+    render(<BenachrichtigungsGlocke placement="bottom" align="right" />)
+    fireEvent.click(screen.getByRole('button', { name: /benachrichtigungen/i }))
+    fireEvent.mouseDown(screen.getByRole('menu'))
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    fireEvent.mouseDown(document.body)
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
   it('toggles email and device notifications correctly', async () => {
@@ -82,33 +78,40 @@ describe('BenachrichtigungsGlocke', () => {
     })
   })
 
-  it('dynamically adapts to top-full and right-0 when header collision is detected', () => {
-    // Mock viewport and top-right positioning
-    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1024 })
-    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 768 })
-
-    const { container } = render(<BenachrichtigungsGlocke placement="top" align="sidebar" />)
-    const bellWrapper = container.firstElementChild as HTMLElement
-    vi.spyOn(bellWrapper, 'getBoundingClientRect').mockReturnValue({
-      width: 36,
-      height: 36,
-      top: 10,
-      bottom: 46,
-      left: 980,
-      right: 1016,
-      x: 980,
-      y: 10,
-      toJSON: () => {},
+  it('klappt am unteren Rand nach oben, auch wenn unten gewünscht ist', () => {
+    // Bis 02.10.2026 galt placement="bottom" ohne Messung, und das Menü lief unten aus dem Fenster.
+    const layout = fakeLayout({
+      fenster: { breite: 1024, hoehe: 768 },
+      anker: { left: 980, top: 700, width: 36, height: 36 },
+      popover: { width: 320, height: 250 },
     })
+    try {
+      render(<BenachrichtigungsGlocke placement="bottom" align="right" />)
+      fireEvent.click(screen.getByRole('button', { name: /benachrichtigungen/i }))
+      const menu = screen.getByRole('menu')
+      expect(menu.style.top).toBe(`${700 - 8 - 250}px`)
+      expect(menu.style.left).toBe(`${1016 - 320}px`)
+      expect(layout.imFenster(menu)).toBe(true)
+    } finally {
+      layout.aufraeumen()
+    }
+  })
 
-    const btn = screen.getByRole('button', { name: /benachrichtigungen/i })
-    fireEvent.click(btn)
-
-    const menu = screen.getByRole('menu')
-    expect(menu).toBeInTheDocument()
-    // spaceAbove = 10 (< 320), so adapts to top-full (placement="bottom")
-    expect(menu.className).toContain('top-full')
-    // spaceRight = 1024 - 1016 = 8 (< 320), so adapts to right-0 (align="right")
-    expect(menu.className).toContain('right-0')
+  it('klappt in der Seitenleiste oben nach unten, wenn darüber kein Platz ist', () => {
+    const layout = fakeLayout({
+      fenster: { breite: 1024, hoehe: 768 },
+      anker: { left: 210, top: 10, width: 36, height: 36 },
+      popover: { width: 320, height: 250 },
+    })
+    try {
+      render(<BenachrichtigungsGlocke placement="top" align="sidebar" />)
+      fireEvent.click(screen.getByRole('button', { name: /benachrichtigungen/i }))
+      const menu = screen.getByRole('menu')
+      expect(menu.style.top).toBe(`${46 + 8}px`)
+      expect(menu.style.left).toBe('210px')
+      expect(layout.imFenster(menu)).toBe(true)
+    } finally {
+      layout.aufraeumen()
+    }
   })
 })
