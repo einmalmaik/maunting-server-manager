@@ -39,7 +39,7 @@ vi.mock('./kameraSicherung', async () => {
 })
 
 const BUCKET = 'k'.repeat(64)
-const STAND = { bucket: BUCKET, an: true, nurWlan: false, geraet: 'g', bisId: 3, gesichert: 0 }
+const STAND = { bucket: BUCKET, an: true, nurWlan: false, geraet: 'g', bis: 3, fassung: 'gen:1', gesichert: 0 }
 
 function zeigen() {
   return render(
@@ -88,6 +88,17 @@ describe('KameraSicherungKarte', () => {
     fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.kamera.zugriffErteilen') }))
     await waitFor(() => expect(kamera.kameraAnstossen).toHaveBeenCalledWith(BUCKET))
     expect(tauri.medienZugriff).toHaveBeenLastCalledWith(true)
+  })
+
+  it('sagt, solange bei gesperrtem Tresor nicht gesichert wird, und schweigt danach', () => {
+    kamera.useKameraSicherung.setState({ stand: STAND })
+    const { unmount } = zeigen()
+    expect(screen.getByText(i18n.t('mss.vault.kamera.eingangFehlt'))).toBeInTheDocument()
+    unmount()
+
+    kamera.useKameraSicherung.setState({ stand: { ...STAND, eingang: { id: 'e', pqPublicKey: 'p', rsaPublicKey: 'r' } } })
+    zeigen()
+    expect(screen.queryByText(i18n.t('mss.vault.kamera.eingangFehlt'))).not.toBeInTheDocument()
   })
 
   it('gibt Speicher erst nach der Rückfrage frei, mit Zahl und Größe', async () => {

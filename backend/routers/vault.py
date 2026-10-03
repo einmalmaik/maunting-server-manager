@@ -16,6 +16,9 @@ from schemas.vault import (
     VaultBlobLoeschen,
     VaultBlobsKlein,
     VaultBlobStatus,
+    VaultEingangAnlegen,
+    VaultEingangDatensatz,
+    VaultEingangListe,
     VaultSpeicher,
     VaultBlindCheckRequest,
     VaultBlindRegisterRequest,
@@ -561,3 +564,51 @@ def blob_loeschen(
     except vault_blob_service.BlobFehler as exc:
         raise _blob_fehler(exc) from exc
     return {"state": "geloescht"}
+
+
+# ── Posteingang (Kamera-Sicherung bei gesperrtem Tresor) ────────────────────
+
+
+@router.post("/eingang", status_code=status.HTTP_201_CREATED)
+@limiter.limit("600/minute")
+def eingang_ablegen(
+    payload: VaultEingangAnlegen,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    bucket: str = Depends(_genannter_bucket),
+    __=Depends(verify_csrf),
+) -> dict[str, str]:
+    try:
+        vault_blob_service.eingang_ablegen(db, current_user, bucket, payload.id, payload.ciphertext)
+    except vault_blob_service.BlobFehler as exc:
+        raise _blob_fehler(exc) from exc
+    return {"id": payload.id}
+
+
+@router.get("/eingang", response_model=VaultEingangListe)
+@limiter.limit("120/minute")
+def eingang_liste(
+    request: Request,
+    nach: str | None = None,
+    db: Session = Depends(get_db),
+    bucket: str = Depends(_genannter_bucket),
+) -> VaultEingangListe:
+    zeilen, weiter = vault_blob_service.eingang_liste(db, bucket, nach)
+    return VaultEingangListe(
+        eintraege=[VaultEingangDatensatz(id=z.id, ciphertext=z.ciphertext, created_at=z.created_at) for z in zeilen],
+        weiter=weiter,
+    )
+
+
+@router.delete("/eingang/{eingang_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("1200/minute")
+def eingang_loeschen(
+    eingang_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    bucket: str = Depends(_genannter_bucket),
+    __=Depends(verify_csrf),
+) -> Response:
+    vault_blob_service.eingang_loeschen(db, bucket, eingang_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

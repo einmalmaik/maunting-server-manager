@@ -887,6 +887,8 @@ pub fn run() {
             datei_speichern::datei_speichern_ende,
             medien::medien_zugriff,
             medien::medien_stand,
+            medien::medien_sicherung_schluessel,
+            medien::medien_sicherung_signieren,
             medien::medien_aufnahmen,
             medien::medien_lesen,
             medien::medien_pruefsumme,

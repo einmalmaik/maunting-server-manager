@@ -36,6 +36,7 @@
     "@fontsource/playfair-display": "^5.3.0",
     "@maunting/design-dna": "file:packages/design-dna",
     "@msdis/shield": "file:packages/dis",
+    "@noble/post-quantum": "0.5.4",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-autostart": "^2.5.0",
     "@tauri-apps/plugin-biometric": "~2.3.0",

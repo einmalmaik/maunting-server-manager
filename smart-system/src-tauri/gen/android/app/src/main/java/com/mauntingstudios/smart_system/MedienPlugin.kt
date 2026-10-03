@@ -40,6 +40,12 @@ class MedienArgs {
 }
 
 @InvokeArg
+class SicherungArgs {
+    lateinit var geraet: String
+    var daten: String = ""
+}
+
+@InvokeArg
 class PapierkorbArgs {
     var bilder: LongArray = LongArray(0)
     var videos: LongArray = LongArray(0)
@@ -227,6 +233,46 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
      * die Fassung des MediaStore. Baut Android ihn neu auf, beginnen die
      * Generationen von vorn, und eine alte Marke fände nie wieder etwas.
      */
+    /** Öffentlicher Unterschriftsschlüssel dieses Geräts (`SicherungsSchluessel`), legt ihn bei Bedarf an. */
+    @Command
+    fun sicherungSchluessel(invoke: Invoke) {
+        val args = try {
+            invoke.parseArgs(SicherungArgs::class.java)
+        } catch (e: Exception) {
+            invoke.reject("Unvollständige Anfrage")
+            return
+        }
+        arbeit.execute {
+            try {
+                val spki = SicherungsSchluessel.oeffentlich(args.geraet)
+                invoke.resolve(JSObject().apply { put("spki", Base64.encodeToString(spki, Base64.NO_WRAP)) })
+            } catch (e: Exception) {
+                invoke.reject(e.message ?: "Schlüssel nicht verfügbar")
+            }
+        }
+    }
+
+    /** Unterschreibt einen Posteingang-Datensatz; `daten` in Base64, höchstens 64 KiB. */
+    @Command
+    fun sicherungSignieren(invoke: Invoke) {
+        val args = try {
+            invoke.parseArgs(SicherungArgs::class.java)
+        } catch (e: Exception) {
+            invoke.reject("Unvollständige Anfrage")
+            return
+        }
+        arbeit.execute {
+            try {
+                val daten = Base64.decode(args.daten, Base64.NO_WRAP)
+                require(daten.size <= 64 * 1024) { "Zu viele Daten" }
+                val signatur = SicherungsSchluessel.unterschreiben(args.geraet, daten)
+                invoke.resolve(JSObject().apply { put("signatur", Base64.encodeToString(signatur, Base64.NO_WRAP)) })
+            } catch (e: Exception) {
+                invoke.reject(e.message ?: "Unterschrift gescheitert")
+            }
+        }
+    }
+
     @Command
     fun medienStand(invoke: Invoke) {
         arbeit.execute {

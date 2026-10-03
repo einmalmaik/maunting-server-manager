@@ -2,7 +2,8 @@
  * Kamera-Sicherung in den Einstellungen (Sicherheit → Tresor), nur unter Android.
  *
  * Einschalten geht nur bei offenem Tresor: der Stand liegt je Tresor, und
- * gesichert wird mit dem Schlüssel des offenen Tresors.
+ * dabei wird der Posteingang eingerichtet, über den bei gesperrtem Tresor
+ * gesichert wird (`tresorEingang.ts`). Solange er fehlt, sagt die Karte das.
  */
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -165,6 +166,12 @@ export function KameraSicherungKarte() {
                     })
                   : t('mss.vault.kamera.nochNichts')}
             </p>
+
+            {!stand.eingang && (
+              <p className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
+                {t('mss.vault.kamera.eingangFehlt')}
+              </p>
+            )}
 
             {warten && (
               <div className="flex flex-col items-start gap-2 p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant sm:flex-row sm:items-center sm:gap-3">

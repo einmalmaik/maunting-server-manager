@@ -79,6 +79,7 @@ OHNE_KONTOBEZUG: dict[str, str] = {
     "vault_bucket_formats": "blind, der Tresor liegt nur verschluesselt vor",
     "vault_bucket_tombstones": "blind, nur die Kennung eines geloeschten Tresors",
     "vault_entries": "blind, der Tresor liegt nur verschluesselt vor",
+    "vault_eingang": "blind, Posteingang des Tresors, nur mit dessen Schluessel lesbar",
     "webhook_deliveries": "Server-Daten",
     "webhook_subscriptions": "Server-Daten",
 }

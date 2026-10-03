@@ -98,7 +98,7 @@ export interface DateiQuelle {
   sha256: string
 }
 
-function istQuelle(wert: unknown): wert is DateiQuelle {
+export function istQuelle(wert: unknown): wert is DateiQuelle {
   if (!wert || typeof wert !== 'object') return false
   const q = wert as Record<string, unknown>
   return (
@@ -173,6 +173,11 @@ interface UploadZeile {
   /** Fällt nach `ZULETZT_GRENZE` wieder heraus (Vorschau). Sonst bleibt es. */
   offline?: 'zuletzt'
   fehler?: UploadFehler
+  /**
+   * Posteingang der Kamera-Sicherung: der Eintrag entsteht erst bei der
+   * Übernahme. Bis dahin lebt der Upload ohne ihn.
+   */
+  eingang?: boolean
 }
 
 /**
@@ -275,6 +280,7 @@ async function blobAblegen(
   kopf: BlobKopf,
   schluessel: CryptoKey,
   behalten: Behalten,
+  eingang: boolean,
   lesen: (von: number, bis: number) => Promise<Uint8Array>,
   abgebrochen: () => boolean,
 ): Promise<UploadZeile> {
@@ -289,6 +295,7 @@ async function blobAblegen(
     bereit: false,
     behalten: behalten !== 'nein',
     offline: behalten === 'zuletzt' ? behalten : undefined,
+    eingang: eingang || undefined,
   }
   await schreiben(db, UPLOADS, (s) => s.put(zeile))
   for (let index = 0; index < anzahl; index++) {
@@ -308,10 +315,14 @@ async function blobAblegen(
  * `vorbereitungAbschliessen` aufgerufen werden; erst dann geht etwas hoch.
  *
  * `abgebrochen` wird zwischen den Chunks gefragt (Sperren des Tresors).
+ *
+ * Ohne `userKey` ist es der Posteingang der Kamera-Sicherung: die Köpfe tragen
+ * rohe Schlüssel (`blobAnlegen`), und statt eines Eintrags wird ein
+ * Datensatz abgelegt; geht das nicht, verwirft `vorbereitungVerwerfen`.
  */
 export async function dateiVorbereiten(
   datei: Blob & { name?: string; lastModified?: number },
-  userKey: CryptoKey,
+  userKey: CryptoKey | null,
   bucket: string,
   eintragId: string,
   abgebrochen: () => boolean,
@@ -327,12 +338,13 @@ export async function dateiVorbereiten(
   for (const { kopf } of blobs) inVorbereitung.add(kopf.id)
   try {
     // Eine leere Vorschau oder Miniatur (keine Bilddatei) ist nur Polster und bleibt nicht liegen.
+    const eingang = userKey === null
     const zeilen = [
-      await blobAblegen(db, bucket, eintragId, original.kopf, original.schluessel, bilder.original ?? originalBehalten(datei.size), async (von, bis) => {
+      await blobAblegen(db, bucket, eintragId, original.kopf, original.schluessel, bilder.original ?? originalBehalten(datei.size), eingang, async (von, bis) => {
         return new Uint8Array(await datei.slice(von, bis).arrayBuffer())
       }, abgebrochen),
-      await blobAblegen(db, bucket, eintragId, vorschau.kopf, vorschau.schluessel, vorschauDaten.length > 0 ? 'zuletzt' : 'nein', async (von, bis) => vorschauDaten.slice(von, bis), abgebrochen),
-      await blobAblegen(db, bucket, eintragId, miniatur.kopf, miniatur.schluessel, miniaturDaten.length > 0 ? 'immer' : 'nein', async (von, bis) => miniaturDaten.slice(von, bis), abgebrochen),
+      await blobAblegen(db, bucket, eintragId, vorschau.kopf, vorschau.schluessel, vorschauDaten.length > 0 ? 'zuletzt' : 'nein', eingang, async (von, bis) => vorschauDaten.slice(von, bis), abgebrochen),
+      await blobAblegen(db, bucket, eintragId, miniatur.kopf, miniatur.schluessel, miniaturDaten.length > 0 ? 'immer' : 'nein', eingang, async (von, bis) => miniaturDaten.slice(von, bis), abgebrochen),
     ]
     await schreiben(db, UPLOADS, (s) => {
       for (const zeile of zeilen) s.put({ ...zeile, bereit: true })
@@ -362,12 +374,31 @@ export function vorbereitungAbschliessen(angaben: DateiAngaben): void {
   for (const kopf of dateiBlobs(angaben)) inVorbereitung.delete(kopf.id)
 }
 
+/**
+ * Nimmt vorbereitete Blobs wieder aus der Ablage. Für den Posteingang, wenn
+ * der Datensatz nicht ankam: ohne ihn kennt niemand ihre Schlüssel, und sie
+ * belegten nur Speicher.
+ */
+export async function vorbereitungVerwerfen(angaben: DateiAngaben): Promise<void> {
+  const db = await ablageDb()
+  for (const kopf of dateiBlobs(angaben)) {
+    if (db) await uploadEntfernen(db, kopf.id).catch(() => {})
+    inVorbereitung.delete(kopf.id)
+  }
+}
+
 /** Ob ein Eintrag lokal lebt: im Cache oder in der Warteschlange, und kein Tombstone. */
 function eintragLebt(bucket: string, eintragId: string): boolean {
   const inWarteschlange = warteschlangeLesen(bucket).find((e) => e.id === eintragId)
   if (inWarteschlange) return !inWarteschlange.is_deleted
   const imCache = blobsLesen(bucket).find((e) => e.id === eintragId)
   return !!imCache && !imCache.is_deleted
+}
+
+/** Ob ein Eintrag lokal als gelöscht bekannt ist. Fehlt er ganz, ist er es nicht. */
+function eintragGeloescht(bucket: string, eintragId: string): boolean {
+  const eintrag = warteschlangeLesen(bucket).find((e) => e.id === eintragId) ?? blobsLesen(bucket).find((e) => e.id === eintragId)
+  return !!eintrag?.is_deleted
 }
 
 function status(err: unknown): number | null {
@@ -377,21 +408,25 @@ function status(err: unknown): number | null {
 /**
  * Ein Lauf zur Zeit. Wer während eines Laufs anstößt, bekommt einen weiteren
  * danach: der laufende hat seine Liste schon gelesen und sähe neu Abgelegtes
- * sonst erst beim nächsten Sync.
+ * sonst erst beim nächsten Sync. Das Versprechen gilt für diesen weiteren
+ * Lauf, nicht für den, der schon lief.
  */
 export function einzeln(arbeit: (bucket: string) => Promise<void>) {
   let lauf: Promise<void> | null = null
-  let nochmal: string | null = null
+  let folge: Promise<void> | null = null
+  let nochmal = ''
   const starten = (bucket: string): Promise<void> => {
     if (lauf) {
       nochmal = bucket
-      return lauf
+      const danach = () => {
+        folge = null
+        return starten(nochmal)
+      }
+      folge ??= lauf.then(danach, danach)
+      return folge
     }
     lauf = arbeit(bucket).finally(() => {
       lauf = null
-      const naechster = nochmal
-      nochmal = null
-      if (naechster) void starten(naechster)
     })
     return lauf
   }
@@ -442,7 +477,9 @@ async function hochladen(bucket: string): Promise<void> {
   }
   for (const zeile of zeilen) {
     if (!weiter()) return
-    if (!zeile.bereit || !eintragLebt(bucket, zeile.eintragId)) {
+    // Ein Posteingang-Upload hat seinen Eintrag erst nach der Übernahme.
+    const verwaist = zeile.eingang ? eintragGeloescht(bucket, zeile.eintragId) : !eintragLebt(bucket, zeile.eintragId)
+    if (!zeile.bereit || verwaist) {
       // Abgebrochene Vorbereitung oder inzwischen gelöschter Eintrag.
       await uploadVerwerfen(db, zeile)
       continue

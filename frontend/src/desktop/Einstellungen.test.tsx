@@ -61,9 +61,19 @@ vi.mock('@/hooks/usePublicLegalSettings', () => ({
   usePublicLegalSettings: () => mockLegalSettings,
 }))
 
+// Was die Karte exportieren würde; den Export selbst prüft `datenexport.test.ts`.
+let exportTresor: { eintraege: () => { category?: string }[] } | undefined
+vi.mock('@/pages/profile/DatenexportKarte', () => ({
+  DatenexportKarte: (props: { tresor?: typeof exportTresor }) => {
+    exportTresor = props.tresor
+    return null
+  },
+}))
+
 import i18n from '@/i18n'
 import { usePublicSettingsStore, DEFAULT_PUBLIC_SETTINGS } from '@/stores/publicSettingsStore'
 import { Einstellungen } from './Einstellungen'
+import { useVaultStore, type VaultItem } from './vault/vaultStore'
 
 /**
  * Der sichtbare Text zu einem Schlüssel.
@@ -90,6 +100,25 @@ describe('Einstellungen Component', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('gibt die Schlüssel der Kamera-Sicherung nicht in den Datenexport', async () => {
+    usePublicSettingsStore.setState({ ...DEFAULT_PUBLIC_SETTINGS, vault_enabled: true, isLoading: false, error: null })
+    useVaultStore.setState({
+      isUnlocked: true,
+      items: [
+        { id: 'a', service: 'Bank', category: 'login' } as VaultItem,
+        { id: 'b', service: 'Posteingang', category: 'sicherung' } as VaultItem,
+      ],
+    })
+    render(
+      <MemoryRouter initialEntries={['/einstellungen?tab=konto']}>
+        <Einstellungen />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(exportTresor).toBeDefined())
+    expect(exportTresor!.eintraege().map((e) => e.category)).toEqual(['login'])
+    useVaultStore.setState({ isUnlocked: false, items: [] })
   })
 
   it('rendert Reiterleiste inklusive Rechtliches', async () => {

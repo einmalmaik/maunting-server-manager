@@ -141,11 +141,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.16 vom 2026-10-03 aus (Kamera-Sicherung, Aufnahmeort)', () => {
+  it('weist die Fassung 3.17 vom 2026-10-03 aus (Kamera-Sicherung bei gesperrtem Tresor)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.16`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.17`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -190,6 +190,10 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/Android fragt vorher/);
     expect(i18n.t('privacyPolicy.sections.vault.items.dateien')).toMatch(/liest der Tresor nicht eigens aus/);
     expect(i18n.t('privacyPolicy.sections.vault.items.geraet')).toMatch(/auf diesem Gerät hochgeladen/);
+    // 3.17: bei gesperrtem Tresor über den Posteingang; was die Instanz davon sieht.
+    expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/Bei gesperrtem Tresor/);
+    expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/Vom Posteingang sieht die Instanz nur/);
+    expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/der Datenexport enthält sie nicht/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

@@ -225,6 +225,26 @@ class VaultBlobsKlein(BaseModel):
     ids: List[str] = Field(..., min_length=1, max_length=100)
 
 
+class VaultEingangAnlegen(BaseModel):
+    """Ein Datensatz fuer den Posteingang: Kennung vom Client, Inhalt nur Chiffrat."""
+
+    id: str = Field(..., pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+    # Druckbares ASCII: der Umschlag ist JSON mit Base64 darin.
+    ciphertext: str = Field(..., min_length=1, max_length=16 * 1024, pattern=r"^[ -~]+$")
+
+
+class VaultEingangDatensatz(BaseModel):
+    id: str
+    ciphertext: str
+    created_at: datetime
+
+
+class VaultEingangListe(BaseModel):
+    eintraege: List[VaultEingangDatensatz]
+    # Kennung, ab der die naechste Seite beginnt; fehlt auf der letzten.
+    weiter: Optional[str] = None
+
+
 class VaultBlobStatus(BaseModel):
     state: str
     chunk_count: int

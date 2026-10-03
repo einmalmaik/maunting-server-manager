@@ -63,6 +63,7 @@ import {
   brauchtNeueApp,
   fassungenZusammenfuehren,
   istBekannteKategorie,
+  istSchreibbareKategorie,
   itemAusUmschlag,
   PAPIERKORB_TAGE,
   umschlagAusItem,
@@ -566,7 +567,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
     const existing = items.find((i) => i.id === id)
     // Was diese Fassung nicht kennt, schreibt sie nicht: sie würde es nur
     // unvollständig verstehen und beim Speichern verfälschen.
-    if (!istBekannteKategorie(existing?.category) || !istBekannteKategorie(itemData.category ?? existing?.category)) {
+    if (!istSchreibbareKategorie(existing?.category) || !istSchreibbareKategorie(itemData.category ?? existing?.category)) {
       throw new TresorFehler(i18n.t('mss.vault.errors.unbekannteArt'))
     }
     const revision = (existing?.revision || 0) + 1
@@ -594,6 +595,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       datei: itemData.datei ?? existing?.datei,
       ordner: 'ordner' in itemData ? itemData.ordner : existing?.ordner,
       album: itemData.album ?? existing?.album,
+      sicherung: itemData.sicherung ?? existing?.sicherung,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       revision,

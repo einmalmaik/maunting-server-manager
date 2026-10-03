@@ -54,6 +54,7 @@ import { UpdateModal } from './UpdateModal'
 import { Wizard } from './Wizard'
 import { VaultView } from './vault/VaultView'
 import { kameraBeobachten } from './vault/kameraSicherung'
+import { eingangBeobachten } from './vault/tresorEingang'
 import { tresorAutoSperrQuelle, useVaultStore } from './vault/vaultStore'
 import {
   beiFremdemSprachstart,
@@ -144,6 +145,8 @@ export function DesktopApp() {
 
   // Kamera-Sicherung: sieht bei offenem Tresor nach neuen Aufnahmen.
   useEffect(() => (isAndroid ? kameraBeobachten() : undefined), [])
+  // Jedes Gerät übernimmt, was ein Telefon bei gesperrtem Tresor gesichert hat.
+  useEffect(() => eingangBeobachten(), [])
 
   const ladeKonfigNeu = useCallback(async () => {
     try {

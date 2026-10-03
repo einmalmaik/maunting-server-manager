@@ -66,6 +66,38 @@ pub async fn medien_stand(app: AppHandle, fenster: WebviewWindow) -> Result<Valu
     ruf(&app, "medienStand", json!({}))
 }
 
+/// Kennung einer Installation: eine UUID, sonst nichts (Alias im Keystore).
+fn pruefe_geraet(geraet: &str) -> Result<(), String> {
+    let teile: Vec<&str> = geraet.split('-').collect();
+    let laengen = [8, 4, 4, 4, 12];
+    let gut = teile.len() == 5
+        && teile.iter().zip(laengen).all(|(t, l)| t.len() == l && t.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+    if gut { Ok(()) } else { Err("Ungültige Gerätekennung".into()) }
+}
+
+#[tauri::command(async)]
+pub async fn medien_sicherung_schluessel(app: AppHandle, fenster: WebviewWindow, geraet: String) -> Result<Value, String> {
+    nur_hauptfenster(&fenster)?;
+    pruefe_geraet(&geraet)?;
+    ruf(&app, "sicherungSchluessel", json!({ "geraet": geraet }))
+}
+
+#[tauri::command(async)]
+pub async fn medien_sicherung_signieren(
+    app: AppHandle,
+    fenster: WebviewWindow,
+    geraet: String,
+    daten: String,
+) -> Result<Value, String> {
+    nur_hauptfenster(&fenster)?;
+    pruefe_geraet(&geraet)?;
+    // Base64 von höchstens 64 KiB.
+    if daten.len() > 88_000 {
+        return Err("Zu viele Daten".into());
+    }
+    ruf(&app, "sicherungSignieren", json!({ "geraet": geraet, "daten": daten }))
+}
+
 #[tauri::command(async)]
 pub async fn medien_aufnahmen(
     app: AppHandle,
@@ -122,5 +154,14 @@ mod tests {
         assert!(pruefe_art("video").is_ok());
         assert!(pruefe_art("content://media/external/file/1").is_err());
         assert!(pruefe_art("").is_err());
+    }
+
+    #[test]
+    fn geraet_nur_als_uuid() {
+        assert!(pruefe_geraet("0f8fad5b-d9cb-469f-a165-70867728950e").is_ok());
+        assert!(pruefe_geraet("0F8FAD5B-D9CB-469F-A165-70867728950E").is_err());
+        assert!(pruefe_geraet("../msm-kamera").is_err());
+        assert!(pruefe_geraet("0f8fad5b-d9cb-469f-a165-70867728950").is_err());
+        assert!(pruefe_geraet("").is_err());
     }
 }

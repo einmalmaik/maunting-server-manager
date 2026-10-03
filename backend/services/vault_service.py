@@ -716,9 +716,10 @@ def set_vault_salt(
 
 
 def _bucket_entfernen(db: Session, bucket_id: str) -> None:
-    """Loescht Eintraege, Besitznachweis, Formatsperre und Dateien des Buckets und beerdigt ihn."""
+    """Loescht Eintraege, Posteingang, Besitznachweis, Formatsperre und Dateien des Buckets und beerdigt ihn."""
     _sperre_bucket(db, bucket_id)
     vault_blob_service.alle_zur_loeschung(db, bucket_id)
+    vault_blob_service.eingang_entfernen(db, bucket_id)
     db.query(VaultEntry).filter(VaultEntry.bucket_id == bucket_id).delete(synchronize_session=False)
     db.query(VaultBlindBucket).filter(VaultBlindBucket.bucket_id == bucket_id).delete(synchronize_session=False)
     db.query(VaultBucketFormat).filter(VaultBucketFormat.bucket_id == bucket_id).delete(synchronize_session=False)

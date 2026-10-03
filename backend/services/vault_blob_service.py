@@ -44,6 +44,7 @@ from models import Role, RoleVaultQuota
 from models.user import User
 from models.vault_blob import VaultBlob
 from models.vault_bucket_tombstone import VaultBucketTombstone
+from models.vault_eingang import VaultEingang
 from services import audit_service
 from services.role_service import effective_user_role_ids
 
@@ -65,6 +66,10 @@ PLATTENRESERVE = 1024 * 1024 * 1024
 # Sammelabruf fuer Miniaturen: nur einteilige Blobs bis zu dieser Groesse.
 KLEIN_GRENZE = 64 * 1024 + CHUNK_UEBERHANG
 KLEIN_MAX_ANZAHL = 100
+# Offene Datensaetze im Posteingang je Bucket (AGENTS.md Punkt 27). Wer so viele
+# ablegt, ohne den Tresor einmal zu entsperren, hat ein anderes Problem.
+EINGANG_HOECHSTENS = 10_000
+EINGANG_SEITE = 200
 
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -104,6 +109,10 @@ class PlatteVoll(SpeicherVoll):
 
 class ZuVieleDateien(SpeicherVoll):
     code = "VAULT_ZU_VIELE_DATEIEN"
+
+
+class EingangVoll(SpeicherVoll):
+    code = "VAULT_EINGANG_VOLL"
 
 
 class TresorZurueckgesetzt(BlobFehler):
@@ -230,10 +239,12 @@ def rolle_speicher_aendern(db: Session, actor_id: int, role_id: int, quota_bytes
 
 
 def belegt(db: Session, bucket_id: str) -> int:
-    return int(
-        db.scalar(select(func.coalesce(func.sum(VaultBlob.bytes_total), 0)).where(VaultBlob.bucket_id == bucket_id))
-        or 0
+    """Dateien und Posteingang zusammen: beides belegt die Platte des Servers."""
+    blobs = db.scalar(select(func.coalesce(func.sum(VaultBlob.bytes_total), 0)).where(VaultBlob.bucket_id == bucket_id))
+    eingang = db.scalar(
+        select(func.coalesce(func.sum(func.length(VaultEingang.ciphertext)), 0)).where(VaultEingang.bucket_id == bucket_id)
     )
+    return int(blobs or 0) + int(eingang or 0)
 
 
 def sperre_bucket(db: Session, bucket_id: str) -> None:
@@ -501,6 +512,56 @@ def alle_zur_loeschung(db: Session, bucket_id: str) -> None:
         .where(VaultBlob.bucket_id == bucket_id)
         .values(state="geloescht", deleted_at=_jetzt() - LOESCHHALTUNG)
     )
+
+
+def eingang_ablegen(db: Session, user: User, bucket_id: str, eingang_id: str, ciphertext: str) -> None:
+    """Legt einen Datensatz in den Posteingang. Dieselbe Kennung mit demselben Inhalt ist kein Fehler.
+
+    Unter der Bucket-Sperre wie das Anlegen eines Blobs: Grabstein, Zahl und
+    Kontingent gelten erst darunter (AGENTS.md Punkt 96).
+    """
+    sperre_bucket(db, bucket_id)
+    if ist_beerdigt(db, bucket_id):
+        raise TresorZurueckgesetzt("Dieser Tresor wurde zurückgesetzt.")
+    vorhanden = db.get(VaultEingang, eingang_id, populate_existing=True)
+    if vorhanden is not None:
+        # Eine Wiederholung nach verlorener Antwort; alles andere ist eine fremde Kennung.
+        if vorhanden.bucket_id == bucket_id and vorhanden.ciphertext == ciphertext:
+            return
+        raise BlobKonflikt("Diese Kennung ist vergeben.")
+    anzahl = int(
+        db.scalar(select(func.count()).select_from(VaultEingang).where(VaultEingang.bucket_id == bucket_id)) or 0
+    )
+    if anzahl >= EINGANG_HOECHSTENS:
+        raise EingangVoll("Der Posteingang dieses Tresors ist voll.")
+    if belegt(db, bucket_id) + len(ciphertext) > quote_fuer(db, user):
+        raise SpeicherVoll("Der Speicher dieses Kontos ist voll.")
+    db.add(VaultEingang(id=eingang_id, bucket_id=bucket_id, ciphertext=ciphertext, created_at=_jetzt()))
+    db.commit()
+
+
+def eingang_liste(db: Session, bucket_id: str, nach: str | None) -> tuple[list[VaultEingang], str | None]:
+    """Eine Seite des Posteingangs, nach Kennung geordnet; dazu die Kennung fuer die naechste Seite."""
+    abfrage = select(VaultEingang).where(VaultEingang.bucket_id == bucket_id)
+    if nach:
+        abfrage = abfrage.where(VaultEingang.id > nach)
+    zeilen = list(db.scalars(abfrage.order_by(VaultEingang.id).limit(EINGANG_SEITE + 1)))
+    if len(zeilen) > EINGANG_SEITE:
+        return zeilen[:EINGANG_SEITE], zeilen[EINGANG_SEITE - 1].id
+    return zeilen, None
+
+
+def eingang_loeschen(db: Session, bucket_id: str, eingang_id: str) -> None:
+    """Loescht einen Datensatz. Schon weg ist kein Fehler: zwei Geraete uebernehmen zugleich."""
+    db.query(VaultEingang).filter(VaultEingang.id == eingang_id, VaultEingang.bucket_id == bucket_id).delete(
+        synchronize_session=False
+    )
+    db.commit()
+
+
+def eingang_entfernen(db: Session, bucket_id: str) -> None:
+    """Fuer Zuruecksetzen und Kontoloeschung: der ganze Posteingang des Buckets. Committet nicht."""
+    db.query(VaultEingang).filter(VaultEingang.bucket_id == bucket_id).delete(synchronize_session=False)
 
 
 def _entfernen(blob_id: str) -> None:

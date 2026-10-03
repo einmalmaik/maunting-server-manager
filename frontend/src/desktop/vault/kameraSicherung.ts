@@ -1,9 +1,12 @@
 /**
  * Kamera-Sicherung (Android): neue Aufnahmen aus DCIM gehen verschlüsselt in
- * den Tresor, solange MSS offen und der Tresor entsperrt ist.
+ * den Tresor, solange MSS offen ist.
  *
- * Gesichert wird das Original Bit für Bit, mit Aufnahmeort. Verschlüsselt und
- * hochgeladen wird wie jede andere Datei (`dateiHinzufuegen`).
+ * Gesichert wird das Original Bit für Bit, mit Aufnahmeort. Bei offenem Tresor
+ * wie jede andere Datei (`dateiHinzufuegen`). Bei gesperrtem Tresor über den
+ * Posteingang (`tresorEingang.ts`): hochgeladen wird gleich, der Eintrag
+ * entsteht beim nächsten Entsperren. Das geht erst, wenn Schlüsselpaar und
+ * Geräteeintrag beim Server liegen (`eingang` im Stand).
  *
  * Was erledigt ist, steht als Marke: alle Aufnahmen bis `bis` sind gesichert
  * oder bewusst übersprungen. Die Marke ist ab Android 11 die Generation der
@@ -23,12 +26,25 @@ import {
   medienPruefsumme,
   medienStand,
   medienZugriff,
+  sicherungSchluessel,
+  sicherungSignieren,
   type Aufnahme,
   type MedienZugriff,
 } from '@/desktop/tauri'
-import { ablageDb, anfrage, fertig, KAMERA } from './tresorAblage'
-import { blobStand } from './tresorBlobApi'
-import { einzeln, type DateiQuelle } from './tresorDateien'
+import { SanitizedApiError } from '@/api/client'
+import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { ablageDb, ablageGeladen, ablageLaden, anfrage, fertig, KAMERA } from './tresorAblage'
+import { bildAngaben } from './tresorBilder'
+import { blobStand, eingangAblegen } from './tresorBlobApi'
+import {
+  dateiVorbereiten,
+  einzeln,
+  uploadsFortsetzen,
+  vorbereitungAbschliessen,
+  vorbereitungVerwerfen,
+  type DateiQuelle,
+} from './tresorDateien'
+import { eingangVerpacken, posteingangEinrichten, type EingangOeffentlich } from './tresorEingang'
 import { sichtbareEintraege } from './tresorOrdner'
 import { getPendingQueue, useVaultStore } from './vaultStore'
 
@@ -44,6 +60,8 @@ export interface KameraStand {
   fassung: string
   gesichert: number
   zuletzt?: number
+  /** Öffentlicher Teil des Posteingangs; fehlt, solange bei gesperrtem Tresor nichts gesichert wird. */
+  eingang?: EingangOeffentlich
 }
 
 /** Warum gerade nichts gesichert wird. */
@@ -87,6 +105,46 @@ function offenerBucket(): string | null {
   return s.isUnlocked && s.userKey && s.bucketId ? s.bucketId : null
 }
 
+async function alleStaende(): Promise<KameraStand[]> {
+  const db = await ablageDb()
+  if (!db) return []
+  return (await anfrage(db.transaction(KAMERA).objectStore(KAMERA).getAll())) as KameraStand[]
+}
+
+/**
+ * Der Bucket, für den gesichert wird: der offene Tresor, sonst der, für den
+ * der Posteingang eingerichtet ist. Die Ablage gehört dem angemeldeten Konto,
+ * fremde Stände gibt es hier nicht (Punkt 50).
+ */
+async function sicherungsBucket(): Promise<string | null> {
+  const offen = offenerBucket()
+  if (offen) return offen
+  return (await alleStaende()).find((s) => s.an && s.eingang)?.bucket ?? null
+}
+
+/**
+ * Richtet bei offenem Tresor den Posteingang ein, falls er fehlt, und räumt
+ * Stände früherer Tresore desselben Kontos ab (nach einem Zurücksetzen).
+ */
+async function eingangBereitmachen(bucket: string): Promise<void> {
+  const db = await ablageDb()
+  if (db) {
+    const alt = (await alleStaende()).filter((s) => s.bucket !== bucket)
+    if (alt.length > 0) {
+      const tx = db.transaction(KAMERA, 'readwrite')
+      for (const s of alt) tx.objectStore(KAMERA).delete(s.bucket)
+      await fertig(tx)
+    }
+  }
+  const stand = await lesen(bucket)
+  if (!stand?.an || stand.eingang) return
+  const eingang = await posteingangEinrichten(bucket, stand.geraet, sicherungSchluessel).catch(() => null)
+  if (!eingang) return
+  const frisch = await lesen(bucket)
+  if (!frisch?.an || frisch.geraet !== stand.geraet) return
+  await schreiben({ ...frisch, eingang })
+}
+
 /**
  * Schaltet ein: fragt nach Zugriff und merkt sich, ab welcher Aufnahme neu
  * zählt. Gesichert wird erst, was danach aufgenommen wird.
@@ -106,8 +164,10 @@ export async function kameraEinschalten(bucket: string): Promise<MedienZugriff> 
     fassung: jetzt.fassung,
     gesichert: alt?.gesichert ?? 0,
     zuletzt: alt?.zuletzt,
+    eingang: weiter ? alt.eingang : undefined,
   })
   void kameraAnstossen(bucket)
+  void eingangBereitmachen(bucket)
   return zugriff
 }
 
@@ -149,7 +209,46 @@ function quellen(geraet: string): Set<string> {
 
 type Ergebnis = 'gesichert' | 'uebersprungen' | 'warten'
 
-async function eineSichern(aufnahme: Aufnahme, stand: KameraStand, bekannt: Set<string>): Promise<Ergebnis> {
+/**
+ * Bei gesperrtem Tresor: Blobs mit rohen Schlüsseln ablegen, den Datensatz
+ * verschlüsselt und unterschrieben in den Posteingang, dann hochladen. Kommt
+ * der Datensatz nicht an, fallen die Blobs wieder aus der Ablage: ohne ihn
+ * kennt niemand ihre Schlüssel.
+ */
+async function inDenPosteingang(datei: File, quelle: DateiQuelle, stand: KameraStand, eingang: EingangOeffentlich): Promise<void> {
+  const bucket = stand.bucket
+  const eintragId = crypto.randomUUID()
+  const { vorschau, miniatur, ...bild } = await bildAngaben(datei)
+  const angaben = await dateiVorbereiten(datei, null, bucket, eintragId, () => !ablageGeladen(bucket), {
+    vorschau,
+    miniatur,
+    original: 'nein',
+  })
+  try {
+    const { original, vorschau: vorschauKopf, miniatur: miniaturKopf } = angaben
+    const umschlag = await eingangVerpacken(
+      { name: datei.name, typ: angaben.typ, geaendert: angaben.geaendert, ...bild, original, vorschau: vorschauKopf, miniatur: miniaturKopf, quelle },
+      bucket,
+      eintragId,
+      eingang,
+      stand.geraet,
+      (daten) => sicherungSignieren(stand.geraet, daten),
+    )
+    await eingangAblegen(bucket, eintragId, umschlag)
+  } catch (err) {
+    await vorbereitungVerwerfen(angaben)
+    throw err
+  }
+  vorbereitungAbschliessen(angaben)
+  void uploadsFortsetzen(bucket)
+}
+
+async function eineSichern(
+  aufnahme: Aufnahme,
+  stand: KameraStand,
+  bekannt: Set<string>,
+  weiter: () => boolean,
+): Promise<Ergebnis> {
   let vorher: { sha256: string; groesse: number }
   try {
     vorher = await medienPruefsumme(aufnahme.id, aufnahme.art)
@@ -165,7 +264,7 @@ async function eineSichern(aufnahme: Aufnahme, stand: KameraStand, bekannt: Set<
     const teil = await medienLesen(aufnahme.id, aufnahme.art, von, Math.min(STUECK, vorher.groesse - von))
     if (teil.length === 0) return 'warten'
     teile.push(teil)
-    if (offenerBucket() !== stand.bucket) return 'warten'
+    if (!weiter()) return 'warten'
   }
   // Wird die Datei gerade geschrieben, stimmen die Bytes nicht mit der Prüfsumme
   // überein. Dann beim nächsten Lauf noch einmal.
@@ -177,17 +276,30 @@ async function eineSichern(aufnahme: Aufnahme, stand: KameraStand, bekannt: Set<
   const name = aufnahme.name || `${aufnahme.art === 'video' ? 'VID' : 'IMG'}_${aufnahme.id}`
   const datei = new File(teile as BlobPart[], name, { type: aufnahme.typ, lastModified: aufnahme.aufgenommen })
   const quelle: DateiQuelle = { geraet: stand.geraet, medienId: aufnahme.id, art: aufnahme.art, sha256: vorher.sha256 }
-  // Das Original liegt schon in der Galerie, eine zweite Kopie im Cache wäre doppelt.
-  await useVaultStore.getState().dateiHinzufuegen(datei, undefined, { quelle, original: 'nein' })
+  if (offenerBucket() === stand.bucket) {
+    // Das Original liegt schon in der Galerie, eine zweite Kopie im Cache wäre doppelt.
+    await useVaultStore.getState().dateiHinzufuegen(datei, undefined, { quelle, original: 'nein' })
+  } else if (stand.eingang) {
+    await inDenPosteingang(datei, quelle, stand, stand.eingang)
+  } else {
+    return 'warten'
+  }
   bekannt.add(schluessel)
   return 'gesichert'
 }
 
 async function sichern(bucket: string): Promise<void> {
-  if (offenerBucket() !== bucket) return
+  const offen = offenerBucket() === bucket
+  const konto = angemeldetesKonto()
   let stand = await lesen(bucket)
-  useKameraSicherung.setState({ stand })
+  if (offen) useKameraSicherung.setState({ stand })
   if (!stand?.an) return
+  if (!offen) {
+    if (!stand.eingang || konto === null) return
+    if (!ablageGeladen(bucket)) await ablageLaden(bucket)
+  }
+  // Offen: solange dieser Tresor offen ist. Gesperrt: solange dasselbe Konto angemeldet ist.
+  const weiter = offen ? () => offenerBucket() === bucket : () => angemeldetesKonto() === konto && ablageGeladen(bucket)
   if (stand.nurWlan && !imWlan()) {
     useKameraSicherung.setState({ warten: 'wlan' })
     return
@@ -211,8 +323,8 @@ async function sichern(bucket: string): Promise<void> {
       const aufnahmen = await medienAufnahmen(stand.bis, JE_RUNDE)
       if (aufnahmen.length === 0) return
       for (const aufnahme of aufnahmen) {
-        if (offenerBucket() !== bucket) return
-        const ergebnis = await eineSichern(aufnahme, stand, bekannt)
+        if (!weiter()) return
+        const ergebnis = await eineSichern(aufnahme, stand, bekannt, weiter)
         if (ergebnis === 'warten') return
         // Frisch lesen: Schalter und Zähler können sich während des Lesens geändert haben (Punkt 45).
         const frisch = await lesen(bucket)
@@ -226,9 +338,19 @@ async function sichern(bucket: string): Promise<void> {
         await schreiben(stand)
       }
     }
-  } catch {
+  } catch (err) {
+    // Zurückgesetzt: dieser Tresor nimmt nichts mehr an, auch kein späterer Lauf.
+    if (err instanceof SanitizedApiError && err.code === 'VAULT_ZURUECKGESETZT') {
+      const db = await ablageDb()
+      if (db) {
+        const tx = db.transaction(KAMERA, 'readwrite')
+        tx.objectStore(KAMERA).delete(bucket)
+        await fertig(tx).catch(() => {})
+      }
+      return
+    }
     // Gesperrt oder gewechselt ist kein Fehler, nur ein Ende.
-    if (offenerBucket() === bucket) useKameraSicherung.setState({ warten: 'fehler' })
+    if (weiter()) useKameraSicherung.setState({ warten: 'fehler' })
   } finally {
     useKameraSicherung.setState({ laeuft: false })
   }
@@ -246,12 +368,16 @@ const TAKT_MS = 60_000
  */
 export function kameraBeobachten(): () => void {
   const anstossen = () => {
-    const bucket = offenerBucket()
-    if (bucket && document.visibilityState === 'visible') void kameraAnstossen(bucket)
+    if (document.visibilityState !== 'visible') return
+    void sicherungsBucket().then((bucket) => {
+      if (bucket) void kameraAnstossen(bucket)
+    })
   }
   const abmelden = useVaultStore.subscribe((s, vorher) => {
     if (s.isUnlocked && s.bucketId && (!vorher.isUnlocked || vorher.bucketId !== s.bucketId)) {
-      void kameraStandLaden(s.bucketId).then(anstossen)
+      const bucket = s.bucketId
+      void kameraStandLaden(bucket).then(anstossen)
+      void eingangBereitmachen(bucket)
     }
     if (!s.isUnlocked && vorher.isUnlocked) useKameraSicherung.setState({ stand: null, warten: null })
   })

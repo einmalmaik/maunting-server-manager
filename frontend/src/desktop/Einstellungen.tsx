@@ -29,6 +29,7 @@ import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { MessengerSicherheitTab } from '@/pages/profile/MessengerSicherheitTab'
 import { DatenexportKarte } from '@/pages/profile/DatenexportKarte'
 import { TresorSicherheitTab } from './vault/TresorSicherheitTab'
+import { SYSTEM_KATEGORIE } from './vault/vaultEintrag'
 import { useVaultStore } from './vault/vaultStore'
 import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 import { Gefahrenzone } from './Gefahrenzone'
@@ -110,7 +111,8 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
           <DatenexportKarte
             tresor={tresorAn ? {
               entsperrt: tresorEntsperrt,
-              eintraege: () => useVaultStore.getState().items,
+              // Schlüssel der Kamera-Sicherung sind keine Daten des Nutzers und gehören in keine Datei.
+              eintraege: () => useVaultStore.getState().items.filter((i) => i.category !== SYSTEM_KATEGORIE),
               entsperren: () => navigate('/tresor'),
             } : undefined}
           />

@@ -9,11 +9,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import 'fake-indexeddb/auto'
+import { SanitizedApiError } from '@/api/client'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 import type { Aufnahme, MedienArt } from '@/desktop/tauri'
 import * as tauri from '@/desktop/tauri'
-import { ablageLoeschen } from './tresorAblage'
-import { blobStand } from './tresorBlobApi'
+import { ablageDb, ablageLoeschen, anfrage, UPLOADS } from './tresorAblage'
+import { blobStand, eingangAblegen } from './tresorBlobApi'
+import { uploadsFortsetzen } from './tresorDateien'
+import { eingangVerpacken, posteingangEinrichten, type EingangInhalt } from './tresorEingang'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import {
   freigebbar,
@@ -42,6 +45,22 @@ vi.mock('@/desktop/tauri', () => ({
   medienLesen: vi.fn(),
   medienPruefsumme: vi.fn(),
   medienPapierkorb: vi.fn(),
+  sicherungSchluessel: vi.fn(),
+  sicherungSignieren: vi.fn(),
+}))
+
+// Verschlüsseln und Unterschreiben prüft `tresorEingang.test.ts`; hier nur, was hineingeht.
+vi.mock('./tresorEingang', () => ({
+  posteingangEinrichten: vi.fn(),
+  eingangVerpacken: vi.fn(async () => 'umschlag'),
+}))
+
+vi.mock('./tresorBilder', () => ({ bildAngaben: vi.fn(async () => ({})) }))
+
+// Hochgeladen wird in den Tests nicht: die Ablage soll so bleiben, wie die Sicherung sie hinterlässt.
+vi.mock('./tresorDateien', async (original) => ({
+  ...(await original<typeof import('./tresorDateien')>()),
+  uploadsFortsetzen: vi.fn(),
 }))
 
 vi.mock('./tresorBlobApi', () => ({
@@ -55,6 +74,7 @@ vi.mock('./tresorBlobApi', () => ({
   chunkLaden: vi.fn(),
   kleineLaden: vi.fn(),
   blobLoeschen: vi.fn(),
+  eingangAblegen: vi.fn(),
 }))
 
 const BUCKET = 'b'.repeat(64)
@@ -170,6 +190,7 @@ beforeEach(() => {
   mediaStoreNachbauen()
   tresorOeffnen()
   useKameraSicherung.setState({ stand: null, laeuft: false, warten: null })
+  vi.mocked(posteingangEinrichten).mockResolvedValue(null)
 })
 
 afterEach(async () => {
@@ -327,6 +348,82 @@ describe('Kamera-Sicherung', () => {
     await kameraVorhandeneSichern(BUCKET)
     await kameraAnstossen(BUCKET)
     expect(hinzugefuegt.map((h) => h.datei.name)).toEqual(['alt.jpg'])
+  })
+})
+
+describe('Kamera-Sicherung bei gesperrtem Tresor', () => {
+  const EINGANG = { id: '11111111-2222-4333-8444-555555555555', pqPublicKey: 'pq', rsaPublicKey: 'rsa' }
+
+  async function eingerichtetUndGesperrt() {
+    vi.mocked(posteingangEinrichten).mockResolvedValue(EINGANG)
+    await eingeschaltet()
+    await vi.waitFor(async () => expect((await kameraStandLaden(BUCKET))?.eingang).toEqual(EINGANG))
+    useVaultStore.setState({ isUnlocked: false, userKey: null, bucketId: null, items: [] })
+  }
+
+  async function uploads(): Promise<{ blobId: string; eintragId: string; eingang?: boolean; bereit: boolean }[]> {
+    const db = (await ablageDb())!
+    return (await anfrage(db.transaction(UPLOADS).objectStore(UPLOADS).getAll())) as never
+  }
+
+  it('lädt hoch und legt einen Datensatz in den Posteingang; einen Eintrag gibt es noch nicht', async () => {
+    await eingerichtetUndGesperrt()
+    const inhalt = bytes(5000, 3)
+    medien.set(3, { art: 'bild', name: 'IMG_3.jpg', typ: 'image/jpeg', bytes: inhalt })
+
+    await kameraAnstossen(BUCKET)
+
+    const store = useVaultStore.getState()
+    expect(store.dateiHinzufuegen).not.toHaveBeenCalled()
+    expect(eingangAblegen).toHaveBeenCalledTimes(1)
+    const [bucket, eintragId, umschlag] = vi.mocked(eingangAblegen).mock.calls[0]
+    expect([bucket, umschlag]).toEqual([BUCKET, 'umschlag'])
+
+    const [daten, verpackBucket, verpackId, schluessel, geraet] = vi.mocked(eingangVerpacken).mock.calls[0]
+    const angaben = daten as EingangInhalt
+    expect([verpackBucket, verpackId, schluessel, geraet]).toEqual([BUCKET, eintragId, EINGANG, (await kameraStandLaden(BUCKET))?.geraet])
+    expect(angaben.name).toBe('IMG_3.jpg')
+    expect(angaben.quelle).toMatchObject({ medienId: 3, art: 'bild', sha256: await sha256(inhalt), geraet })
+    // Die Schlüssel sind roh, nur so lassen sie sich bei der Übernahme wickeln.
+    for (const kopf of [angaben.original, angaben.vorschau, angaben.miniatur]) expect(kopf.schluessel).toMatch(/^[0-9a-f]{64}$/)
+
+    const zeilen = await uploads()
+    expect(zeilen).toHaveLength(3)
+    expect(zeilen.every((z) => z.eingang && z.bereit && z.eintragId === eintragId)).toBe(true)
+    expect(uploadsFortsetzen).toHaveBeenCalledWith(BUCKET)
+    expect((await kameraStandLaden(BUCKET))?.gesichert).toBe(1)
+  })
+
+  it('nimmt die Blobs wieder aus der Ablage, wenn der Datensatz nicht ankommt, und versucht es später noch einmal', async () => {
+    await eingerichtetUndGesperrt()
+    medien.set(3, { art: 'bild', name: 'IMG_3.jpg', typ: 'image/jpeg', bytes: bytes(100, 1) })
+    vi.mocked(eingangAblegen).mockRejectedValueOnce(new Error('offline'))
+
+    await kameraAnstossen(BUCKET)
+    expect(await uploads()).toEqual([])
+    expect((await kameraStandLaden(BUCKET))?.gesichert).toBe(0)
+
+    await kameraAnstossen(BUCKET)
+    expect(eingangAblegen).toHaveBeenCalledTimes(2)
+    expect(await uploads()).toHaveLength(3)
+  })
+
+  it('sichert nichts, solange der Posteingang nicht beim Server eingerichtet ist', async () => {
+    await eingeschaltet()
+    useVaultStore.setState({ isUnlocked: false, userKey: null, bucketId: null, items: [] })
+    medien.set(3, { art: 'bild', name: 'IMG_3.jpg', typ: 'image/jpeg', bytes: bytes(100, 1) })
+    await kameraAnstossen(BUCKET)
+    expect(tauri.medienLesen).not.toHaveBeenCalled()
+    expect(eingangAblegen).not.toHaveBeenCalled()
+  })
+
+  it('hört nach einem Zurücksetzen auf einem anderen Gerät auf und vergisst den Stand', async () => {
+    await eingerichtetUndGesperrt()
+    medien.set(3, { art: 'bild', name: 'IMG_3.jpg', typ: 'image/jpeg', bytes: bytes(100, 1) })
+    vi.mocked(eingangAblegen).mockRejectedValueOnce(new SanitizedApiError('zurückgesetzt', { status: 410, code: 'VAULT_ZURUECKGESETZT' }))
+    await kameraAnstossen(BUCKET)
+    expect(await kameraStandLaden(BUCKET)).toBeNull()
+    expect(await uploads()).toEqual([])
   })
 })
 

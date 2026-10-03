@@ -117,9 +117,13 @@ function hexZuBytes(hex: string): Uint8Array {
 /**
  * Legt einen Blob an: Kennung, Schlüssel, Löschnachweis. `groesse` für die
  * festen Klassen (Miniatur, Vorschau), sonst die Größenklasse von `echt`.
+ *
+ * Ohne `userKey` (Posteingang der Kamera-Sicherung, Tresor gesperrt) steht der
+ * Schlüssel roh im Kopf. Ein solcher Kopf verlässt das Gerät nur hybrid
+ * verschlüsselt (`tresorEingang.ts`) und wird bei der Übernahme gewickelt.
  */
 export async function blobAnlegen(
-  userKey: CryptoKey,
+  userKey: CryptoKey | null,
   eintragId: string,
   echt: number,
   groesse = gepolsterteGroesse(echt),
@@ -128,9 +132,20 @@ export async function blobAnlegen(
   const id = zufallHex(16)
   const roh = generateFileKeyBytes()
   try {
-    const gewickelt = await encryptBytes(roh, userKey, fileKeyAad(kontext(eintragId, id)))
+    const gespeichert = userKey ? await encryptBytes(roh, userKey, fileKeyAad(kontext(eintragId, id))) : bytesToHex(roh)
     const schluessel = await importFileKey(roh)
-    return { kopf: { id, groesse, echt, schluessel: gewickelt, loeschen: zufallHex(32) }, schluessel }
+    return { kopf: { id, groesse, echt, schluessel: gespeichert, loeschen: zufallHex(32) }, schluessel }
+  } finally {
+    roh.fill(0)
+  }
+}
+
+/** Wickelt den rohen Schlüssel eines Posteingang-Kopfs mit dem Tresor-Schlüssel. */
+export async function blobSchluesselWickeln(kopf: BlobKopf, userKey: CryptoKey, eintragId: string): Promise<BlobKopf> {
+  if (!/^[0-9a-f]{64}$/.test(kopf.schluessel)) throw new Error('Kein roher Blob-Schlüssel')
+  const roh = hexZuBytes(kopf.schluessel)
+  try {
+    return { ...kopf, schluessel: await encryptBytes(roh, userKey, fileKeyAad(kontext(eintragId, kopf.id))) }
   } finally {
     roh.fill(0)
   }

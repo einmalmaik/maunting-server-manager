@@ -154,3 +154,31 @@ export async function blobLoeschen(bucket: string, id: string, loeschen: string)
     }),
   )
 }
+
+// ── Posteingang (Kamera-Sicherung bei gesperrtem Tresor, `tresorEingang.ts`) ──
+
+export interface EingangDatensatz {
+  id: string
+  ciphertext: string
+  created_at: string
+}
+
+export async function eingangAblegen(bucket: string, id: string, ciphertext: string): Promise<void> {
+  await mitBucket(() =>
+    api('/api/vault/eingang', {
+      method: 'POST',
+      headers: mitBucketKopf(bucket),
+      body: JSON.stringify({ id, ciphertext }),
+    }),
+  )
+}
+
+/** Eine Seite des Posteingangs; `weiter` ist die Kennung, ab der die nächste beginnt. */
+export function eingangListe(bucket: string, nach?: string): Promise<{ eintraege: EingangDatensatz[]; weiter: string | null }> {
+  const abfrage = nach ? `?nach=${encodeURIComponent(nach)}` : ''
+  return mitBucket(() => api(`/api/vault/eingang${abfrage}`, { headers: mitBucketKopf(bucket) }))
+}
+
+export async function eingangLoeschen(bucket: string, id: string): Promise<void> {
+  await mitBucket(() => api(`/api/vault/eingang/${encodeURIComponent(id)}`, { method: 'DELETE', headers: mitBucketKopf(bucket) }))
+}

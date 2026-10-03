@@ -6,7 +6,7 @@
  * Transport und liegen in `transport.ts`.)
  */
 import { invoke } from '@tauri-apps/api/core'
-import { base64ToBytes } from '@msdis/shield/core'
+import { base64ToBytes, bytesToBase64 } from '@msdis/shield/core'
 import { setRuntimeApiUrl } from '@/config/api'
 
 export type AgentStatus = 'bereit' | 'hoert' | 'denkt' | 'spricht'
@@ -536,6 +536,20 @@ export async function medienLesen(id: number, art: MedienArt, von: number, laeng
 
 export async function medienPruefsumme(id: number, art: MedienArt): Promise<{ sha256: string; groesse: number }> {
   return invoke<{ sha256: string; groesse: number }>('medien_pruefsumme', { id, art })
+}
+
+/**
+ * Öffentlicher Unterschriftsschlüssel dieser Installation (Android Keystore,
+ * ECDSA P-256) als SPKI in Base64. Legt ihn beim ersten Aufruf an.
+ */
+export async function sicherungSchluessel(geraet: string): Promise<string> {
+  return (await invoke<{ spki: string }>('medien_sicherung_schluessel', { geraet })).spki
+}
+
+/** Unterschreibt mit diesem Schlüssel; Ergebnis r ‖ s (64 Bytes), wie DIS `verifyEcdsaP256` es prüft. */
+export async function sicherungSignieren(geraet: string, daten: Uint8Array): Promise<Uint8Array> {
+  const { signatur } = await invoke<{ signatur: string }>('medien_sicherung_signieren', { geraet, daten: bytesToBase64(daten) })
+  return base64ToBytes(signatur)
 }
 
 /** Legt Aufnahmen in den Papierkorb der Galerie; Android fragt selbst nach. */

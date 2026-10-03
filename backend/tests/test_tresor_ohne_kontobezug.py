@@ -20,6 +20,7 @@ Invarianten:
 from __future__ import annotations
 
 import hashlib
+import uuid
 import json
 import secrets
 
@@ -32,7 +33,7 @@ from config import settings
 from models import User
 
 BUCKET = "c" * 64
-TABELLEN = ("vault_user_settings", "vault_hints", "vault_blobs")
+TABELLEN = ("vault_user_settings", "vault_hints", "vault_blobs", "vault_eingang")
 
 
 @pytest.fixture(autouse=True)
@@ -69,6 +70,10 @@ def _tresor_mit_datei(client: TestClient, cookies: dict) -> str:
         headers={**kopf, "Content-Type": "application/octet-stream"},
     ).status_code == 204
     assert client.post(f"/api/vault/blobs/{blob_id}/fertig", cookies=cookies, headers=kopf).status_code == 200
+    antwort = client.post(
+        "/api/vault/eingang", json={"id": str(uuid.uuid4()), "ciphertext": "x" * 100}, cookies=cookies, headers=kopf
+    )
+    assert antwort.status_code == 201, antwort.text
     return blob_id
 
 

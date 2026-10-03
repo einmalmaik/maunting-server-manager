@@ -19,6 +19,18 @@ export function istBekannteKategorie(kategorie: string | undefined): boolean {
   return (BEKANNTE_KATEGORIEN as readonly string[]).includes(kategorie ?? 'login')
 }
 
+/**
+ * Einträge, die die App für sich selbst führt (Kamera-Sicherung: Schlüssel des
+ * Posteingangs, sichernde Geräte). Der Store schreibt sie, angezeigt werden
+ * sie nirgends, denn `istBekannteKategorie` bleibt für sie falsch.
+ */
+export const SYSTEM_KATEGORIE = 'sicherung'
+
+/** Was diese Fassung schreiben darf: was sie anzeigt, und ihre Systemeinträge. */
+export function istSchreibbareKategorie(kategorie: string | undefined): boolean {
+  return istBekannteKategorie(kategorie) || kategorie === SYSTEM_KATEGORIE
+}
+
 /** Was in der Passwortliste steht. Dateien und Ordner haben ihren eigenen Bereich. */
 export const PASSWORT_KATEGORIEN = ['login', 'authenticator', 'secure_note'] as const
 
@@ -54,6 +66,8 @@ export interface VaultItem {
   ordner?: string
   /** Nur bei Alben: die Einträge darin, in dieser Reihenfolge. Die Dateien selbst ändern sich nicht. */
   album?: AlbumAngaben
+  /** Nur bei `SYSTEM_KATEGORIE`. */
+  sicherung?: SicherungAngaben
   createdAt: number
   updatedAt: number
   revision: number
@@ -89,6 +103,7 @@ const AENDERBAR: Record<Exclude<keyof VaultItem, 'id' | 'revision' | 'createdAt'
   trashedAt: true,
   ordner: true,
   album: true,
+  sicherung: true,
 }
 const AENDERBARE_FELDER = Object.keys(AENDERBAR) as (keyof typeof AENDERBAR)[]
 
@@ -114,6 +129,47 @@ function istAlbumAngaben(wert: unknown): wert is AlbumAngaben {
   )
 }
 
+/**
+ * Kamera-Sicherung (`tresorEingang.ts`). Der private Teil des Schlüsselpaars
+ * steht nur hier, also nur im mit dem Tresor-Schlüssel verschlüsselten Umschlag.
+ */
+export type SicherungAngaben =
+  | {
+      art: 'posteingang'
+      id: string
+      /** ML-KEM-768 und RSA-4096 aus DIS `generateHybridKeyPair`. */
+      pqPublicKey: string
+      rsaPublicKey: string
+      pqSecretKey: string
+      rsaPrivateKey: string
+    }
+  | {
+      art: 'geraet'
+      /** Kennung der Installation (`KameraStand.geraet`). */
+      geraet: string
+      /** Öffentlicher ECDSA-P-256-Schlüssel aus dem Android Keystore, SPKI in Base64. */
+      spki: string
+    }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const text = (wert: unknown, hoechstens: number) => typeof wert === 'string' && wert.length > 0 && wert.length <= hoechstens
+
+export function istSicherungAngaben(wert: unknown): wert is SicherungAngaben {
+  if (!wert || typeof wert !== 'object') return false
+  const s = wert as Record<string, unknown>
+  if (s.art === 'posteingang') {
+    return (
+      typeof s.id === 'string' &&
+      UUID.test(s.id) &&
+      text(s.pqPublicKey, 8192) &&
+      text(s.rsaPublicKey, 8192) &&
+      text(s.pqSecretKey, 8192) &&
+      text(s.rsaPrivateKey, 8192)
+    )
+  }
+  return s.art === 'geraet' && typeof s.geraet === 'string' && UUID.test(s.geraet) && text(s.spki, 512)
+}
+
 function zahlOderNichts(wert: unknown): number | undefined {
   return typeof wert === 'number' && Number.isFinite(wert) ? wert : undefined
 }
@@ -130,6 +186,8 @@ export function itemAusUmschlag(id: string, revision: number, payload: Record<st
   if (payload.datei !== undefined && !datei) extra.datei = payload.datei
   const album = istAlbumAngaben(payload.album) ? payload.album : undefined
   if (payload.album !== undefined && !album) extra.album = payload.album
+  const sicherung = istSicherungAngaben(payload.sicherung) ? payload.sicherung : undefined
+  if (payload.sicherung !== undefined && !sicherung) extra.sicherung = payload.sicherung
   return {
     id,
     service: String(payload.service || 'Unbekannt'),
@@ -147,6 +205,7 @@ export function itemAusUmschlag(id: string, revision: number, payload: Record<st
     datei,
     ordner: typeof payload.ordner === 'string' && payload.ordner ? payload.ordner : undefined,
     album,
+    sicherung,
     createdAt: Number(payload.createdAt || Date.now()),
     updatedAt: Number(payload.updatedAt || Date.now()),
     revision,
