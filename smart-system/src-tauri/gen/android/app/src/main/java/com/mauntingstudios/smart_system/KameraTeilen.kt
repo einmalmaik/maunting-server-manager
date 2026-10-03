@@ -14,6 +14,7 @@ import java.io.RandomAccessFile
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.UUID
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -35,6 +36,9 @@ import javax.crypto.spec.SecretKeySpec
 object KameraTeilen {
     class KeinPlatz : IOException()
 
+    /** Die Kopie lässt sich nicht mehr öffnen (Satz fehlt oder verändert). Neue Blobs ändern daran nichts. */
+    class Kaputt : Exception()
+
     private const val GCM = 16
     private const val IV = 12
     private const val SATZ = KameraKrypto.CHUNK + IV + GCM
@@ -47,7 +51,6 @@ object KameraTeilen {
 
     private val DATEI = Regex("^[0-9a-f-]{36}\\.bin$")
     private val SCHLUESSEL = Regex("^[0-9a-f]{64}$")
-    private val UNERWUENSCHT = Regex("[\\p{Cc}\\p{Cf}/\\\\]")
 
     private val zufall = SecureRandom()
 
@@ -88,20 +91,29 @@ object KameraTeilen {
         val d = datei(ctx, auftrag)
         val schluessel = schluessel(auftrag)
         try {
-            RandomAccessFile(d, "r").use { f ->
-                val von = index.toLong() * SATZ
-                val laenge = minOf(SATZ, f.length() - von)
-                if (laenge <= IV + GCM) throw IOException("Satz fehlt")
-                val satz = ByteArray(laenge.toInt())
-                f.seek(von)
-                f.readFully(satz)
-                val c = Cipher.getInstance("AES/GCM/NoPadding")
-                c.init(Cipher.DECRYPT_MODE, SecretKeySpec(schluessel, "AES"), GCMParameterSpec(GCM * 8, satz, 0, IV))
-                c.updateAAD(aad(d.name, index))
-                return c.doFinal(satz, IV, satz.size - IV)
-            }
+            return satz(d, schluessel, index)
         } finally {
             schluessel.fill(0)
+        }
+    }
+
+    /** [Kaputt], wenn der Satz fehlt oder sich nicht öffnen lässt; andere Lesefehler bleiben, was sie sind. */
+    internal fun satz(d: File, schluessel: ByteArray, index: Int): ByteArray {
+        RandomAccessFile(d, "r").use { f ->
+            val von = index.toLong() * SATZ
+            val laenge = minOf(SATZ, f.length() - von)
+            if (laenge <= IV + GCM) throw Kaputt()
+            val satz = ByteArray(laenge.toInt())
+            f.seek(von)
+            f.readFully(satz)
+            val c = Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(Cipher.DECRYPT_MODE, SecretKeySpec(schluessel, "AES"), GCMParameterSpec(GCM * 8, satz, 0, IV))
+            c.updateAAD(aad(d.name, index))
+            try {
+                return c.doFinal(satz, IV, satz.size - IV)
+            } catch (e: AEADBadTagException) {
+                throw Kaputt()
+            }
         }
     }
 
@@ -140,7 +152,7 @@ object KameraTeilen {
         if (groesse >= 0 && ziel.usableSpace < groesse + RESERVE) throw KeinPlatz()
 
         val typ = (ctx.contentResolver.getType(uri) ?: typHinweis ?: "").take(255)
-        name = name.replace(UNERWUENSCHT, "_").trim().take(255).ifEmpty { "Geteilt_${System.currentTimeMillis()}" }
+        name = KameraAuftrag.dateiname(name) { "Geteilt_${System.currentTimeMillis()}" }
 
         val datei = File(ziel, "${UUID.randomUUID()}.bin")
         val schluessel = ByteArray(32).also { zufall.nextBytes(it) }
@@ -177,7 +189,7 @@ object KameraTeilen {
     }
 
     /** Schreibt Satz für Satz; gibt SHA-256 und Größe des Klartexts zurück. */
-    private fun verschluesseln(ein: InputStream, datei: File, schluessel: ByteArray, ziel: File, fortschritt: (Long) -> Unit): Pair<String, Long> {
+    internal fun verschluesseln(ein: InputStream, datei: File, schluessel: ByteArray, ziel: File, fortschritt: (Long) -> Unit): Pair<String, Long> {
         val sha = MessageDigest.getInstance("SHA-256")
         val puffer = ByteArray(KameraKrypto.CHUNK.toInt())
         var echt = 0L

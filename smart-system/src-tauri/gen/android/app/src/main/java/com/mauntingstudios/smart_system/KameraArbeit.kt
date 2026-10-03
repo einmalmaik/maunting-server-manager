@@ -161,7 +161,7 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
 
         val video = aufnahme.art == "video"
         val bilder = KameraBilder.angaben(ctx, if (video) Medien.adresse(aufnahme.id, aufnahme.art) else Medien.original(aufnahme.id, aufnahme.art), video)
-        val name = aufnahme.name.ifEmpty { "${if (video) "VID" else "IMG"}_${aufnahme.id}" }.take(255)
+        val name = KameraAuftrag.dateiname(aufnahme.name) { "${if (video) "VID" else "IMG"}_${aufnahme.id}" }
         val angaben = JSONObject().apply {
             put("name", name)
             put("typ", aufnahme.typ.take(255))
@@ -181,6 +181,10 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
     private fun ausfuehren(server: KameraServer, kennung: String, auftrag: JSONObject) {
         try {
             hochladen(server, kennung, auftrag)
+        } catch (e: KameraTeilen.Kaputt) {
+            // Neu aufgesetzt käme derselbe Fehler bei jedem Lauf wieder, samt neuer Blobs beim Server.
+            verwerfen(server, auftrag)
+            KameraTeilen.entfernen(ctx, auftrag)
         } catch (e: Verloren) {
             verwerfen(server, auftrag)
             val neu = if (auftrag.has("lokal")) {
@@ -277,16 +281,23 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
                 bild.fill(0)
             }
         }
-        val daten = try {
-            if (auftrag.has("lokal")) {
+        val daten = if (auftrag.has("lokal")) {
+            try {
                 KameraTeilen.lesen(ctx, auftrag, index)
-            } else {
-                Medien.lesen(ctx, auftrag.getLong("medienId"), auftrag.getString("art"), von, laenge)
+            } catch (e: FileNotFoundException) {
+                throw Verloren()
             }
-        } catch (e: Exception) {
-            throw Verloren()
+        } else {
+            try {
+                Medien.lesen(ctx, auftrag.getLong("medienId"), auftrag.getString("art"), von, laenge)
+            } catch (e: Exception) {
+                throw Verloren()
+            }
         }
-        if (daten.size != laenge) throw Verloren()
+        if (daten.size != laenge) {
+            daten.fill(0)
+            throw if (auftrag.has("lokal")) KameraTeilen.Kaputt() else Verloren()
+        }
         return daten
     }
 

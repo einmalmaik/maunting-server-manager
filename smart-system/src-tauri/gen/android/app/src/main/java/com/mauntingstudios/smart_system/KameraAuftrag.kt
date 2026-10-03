@@ -24,6 +24,13 @@ object KameraAuftrag {
 
     private val zufall = SecureRandom()
 
+    /** Steuer- und Richtungszeichen (U+202E) und Pfadtrenner: sonst zeigt die Liste einen anderen Namen, als die Datei hat. */
+    private val UNERWUENSCHT = Regex("[\\p{Cc}\\p{Cf}/\\\\]")
+
+    /** Der Name, wie er im Tresor steht, für Aufnahmen wie für geteilte Dateien. */
+    fun dateiname(roh: String, ersatz: () -> String): String =
+        roh.replace(UNERWUENSCHT, "_").trim().take(255).ifEmpty(ersatz)
+
     private fun hex(anzahl: Int) = Medien.hex(ByteArray(anzahl).also { zufall.nextBytes(it) })
 
     private fun kopf(groesse: Long, echt: Long, rolle: String) = JSONObject().apply {
