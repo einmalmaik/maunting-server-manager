@@ -1,6 +1,6 @@
 /**
  * Die Karte der Kamera-Sicherung: einschalten nur bei offenem Tresor und mit
- * vollem Zugriff, „Speicher freigeben“ nur nach Rückfrage.
+ * frischem Nachweis in der Karte, „Speicher freigeben“ nur nach Rückfrage.
  */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
@@ -9,9 +9,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { formatBytes } from '@/lib/format'
+import { useAuthStore } from '@/stores/authStore'
 import { useConfirmStore } from '@/stores/confirmStore'
 import { useToastStore } from '@/stores/toastStore'
 import * as tauri from '@/desktop/tauri'
+import type { KameraStand } from '@/desktop/tauri'
 import * as kamera from './kameraSicherung'
 import { KameraSicherungKarte } from './KameraSicherungKarte'
 import { useVaultStore } from './vaultStore'
@@ -26,12 +28,11 @@ vi.mock('@/desktop/tauri', () => ({
 vi.mock('./kameraSicherung', async () => {
   const { create } = await import('zustand')
   return {
-    useKameraSicherung: create(() => ({ stand: null, laeuft: false, warten: null })),
+    useKameraSicherung: create(() => ({ stand: null })),
     kameraStandLaden: vi.fn(async () => null),
     kameraEinschalten: vi.fn(),
     kameraAusschalten: vi.fn(),
     kameraNurWlan: vi.fn(),
-    kameraAnstossen: vi.fn(),
     kameraVorhandeneSichern: vi.fn(),
     freigebbar: vi.fn(),
     speicherFreigeben: vi.fn(async () => true),
@@ -39,7 +40,9 @@ vi.mock('./kameraSicherung', async () => {
 })
 
 const BUCKET = 'k'.repeat(64)
-const STAND = { bucket: BUCKET, an: true, nurWlan: false, geraet: 'g', bis: 3, fassung: 'gen:1', gesichert: 0 }
+const STAND: KameraStand = { eingerichtet: true, konto: 1, bucket: BUCKET, geraet: 'g', nurWlan: false, gesichert: 0, zuletzt: 0, offen: 0 }
+// Zusammengesetzt, damit im öffentlichen Repo kein Passwort-Literal steht.
+const PASSWORT = 'Konto-' + 'Passwort'
 
 function zeigen() {
   return render(
@@ -53,16 +56,21 @@ function zeigen() {
 const schalter = () => screen.getByRole('switch', { name: i18n.t('mss.vault.kamera.schalter') })
 const toasts = () => useToastStore.getState().toasts.map((t) => t.message)
 
+function anmelden(mehr: Record<string, unknown> = {}) {
+  useAuthStore.setState({ user: { id: 1, has_password: true, two_factor_enabled: false, ...mehr } as never })
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   useToastStore.setState({ toasts: [] })
   useConfirmStore.setState({ pending: null })
   vi.mocked(tauri.medienZugriff).mockResolvedValue({ stand: 'voll', papierkorb: true })
-  kamera.useKameraSicherung.setState({ stand: null, laeuft: false, warten: null })
+  kamera.useKameraSicherung.setState({ stand: null })
   useVaultStore.setState({ isUnlocked: true, bucketId: BUCKET })
+  anmelden()
 })
 
-describe('KameraSicherungKarte', () => {
+describe('Einschalten', () => {
   it('lässt sich bei gesperrtem Tresor nicht einschalten und sagt, warum', () => {
     useVaultStore.setState({ isUnlocked: false })
     zeigen()
@@ -70,35 +78,75 @@ describe('KameraSicherungKarte', () => {
     expect(screen.getByText(i18n.t('mss.vault.kamera.gesperrt'))).toBeInTheDocument()
   })
 
-  it('sagt, wenn nur ausgewählte Fotos freigegeben sind, und bleibt aus', async () => {
-    vi.mocked(kamera.kameraEinschalten).mockResolvedValue({ stand: 'teilweise', papierkorb: true })
+  it('fragt in der Karte nach dem Passwort und schaltet erst mit ihm ein', async () => {
+    vi.mocked(kamera.kameraEinschalten).mockResolvedValue('ok')
     zeigen()
     fireEvent.click(schalter())
+    expect(kamera.kameraEinschalten).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText(i18n.t('mss.vault.kamera.passwortLabel')), { target: { value: PASSWORT } })
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.kamera.einschalten') }))
+    await waitFor(() => expect(kamera.kameraEinschalten).toHaveBeenCalledWith(BUCKET, { password: PASSWORT }))
+    await waitFor(() => expect(screen.queryByLabelText(i18n.t('mss.vault.kamera.passwortLabel'))).toBeNull())
+  })
+
+  it('schickt mit eingerichteter App den Code mit', async () => {
+    anmelden({ two_factor_enabled: true, two_factor_methods: ['totp'] })
+    vi.mocked(kamera.kameraEinschalten).mockResolvedValue('ok')
+    zeigen()
+    fireEvent.click(schalter())
+    const knopf = screen.getByRole('button', { name: i18n.t('mss.vault.kamera.einschalten') })
+    fireEvent.change(screen.getByLabelText(i18n.t('mss.vault.kamera.passwortLabel')), { target: { value: PASSWORT } })
+    expect(knopf).toBeDisabled()
+    fireEvent.change(screen.getByLabelText(i18n.t('mss.vault.kamera.otpLabel')), { target: { value: '123456' } })
+    fireEvent.click(knopf)
+    await waitFor(() =>
+      expect(kamera.kameraEinschalten).toHaveBeenCalledWith(BUCKET, { password: PASSWORT, otp_code: '123456' }),
+    )
+  })
+
+  it('sagt, wenn nur ausgewählte Fotos freigegeben sind', async () => {
+    vi.mocked(kamera.kameraEinschalten).mockResolvedValue('teilweise')
+    zeigen()
+    fireEvent.click(schalter())
+    fireEvent.change(screen.getByLabelText(i18n.t('mss.vault.kamera.passwortLabel')), { target: { value: PASSWORT } })
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.kamera.einschalten') }))
     await waitFor(() => expect(toasts()).toContain(i18n.t('mss.vault.kamera.zugriff.teilweise')))
+  })
+
+  it('fragt an derselben Stelle neu, wenn der Zugang weggefallen ist', () => {
+    kamera.useKameraSicherung.setState({ stand: { ...STAND, warten: 'zugang' } })
+    zeigen()
+    expect(screen.getByText(i18n.t('mss.vault.kamera.warten.zugang'))).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: i18n.t('mss.vault.kamera.neuBestaetigen') })).toBeInTheDocument()
+  })
+
+  it('zählt einen Job für einen anderen Tresor nicht als eingeschaltet', () => {
+    kamera.useKameraSicherung.setState({ stand: { ...STAND, bucket: 'x'.repeat(64) } })
+    zeigen()
     expect(schalter()).not.toBeChecked()
   })
 
-  it('zeigt eingeschaltet WLAN-Schalter, Stand und den fehlenden Zugriff mit Abhilfe', async () => {
-    kamera.useKameraSicherung.setState({ stand: { ...STAND, gesichert: 2, zuletzt: Date.UTC(2026, 9, 3, 12) }, warten: 'zugriff' })
+  it('schaltet aus, ohne zu fragen', async () => {
+    kamera.useKameraSicherung.setState({ stand: STAND })
+    zeigen()
+    fireEvent.click(schalter())
+    await waitFor(() => expect(kamera.kameraAusschalten).toHaveBeenCalled())
+  })
+})
+
+describe('Eingeschaltet', () => {
+  it('zeigt WLAN-Schalter, Stand, offene Aufnahmen und den fehlenden Zugriff mit Abhilfe', async () => {
+    kamera.useKameraSicherung.setState({
+      stand: { ...STAND, gesichert: 2, zuletzt: Date.UTC(2026, 9, 3, 12), offen: 3, warten: 'zugriff' },
+    })
     zeigen()
     expect(schalter()).toBeChecked()
     expect(screen.getByRole('switch', { name: i18n.t('mss.vault.kamera.nurWlan') })).toBeInTheDocument()
-    expect(screen.getByText(/^2 Aufnahmen gesichert/)).toBeInTheDocument()
-    vi.mocked(tauri.medienZugriff).mockResolvedValue({ stand: 'voll', papierkorb: true })
+    expect(screen.getByText(/^2 Aufnahmen gesichert/)).toHaveTextContent(i18n.t('mss.vault.kamera.offen', { count: 3 }))
     fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.kamera.zugriffErteilen') }))
-    await waitFor(() => expect(kamera.kameraAnstossen).toHaveBeenCalledWith(BUCKET))
-    expect(tauri.medienZugriff).toHaveBeenLastCalledWith(true)
-  })
-
-  it('sagt, solange bei gesperrtem Tresor nicht gesichert wird, und schweigt danach', () => {
-    kamera.useKameraSicherung.setState({ stand: STAND })
-    const { unmount } = zeigen()
-    expect(screen.getByText(i18n.t('mss.vault.kamera.eingangFehlt'))).toBeInTheDocument()
-    unmount()
-
-    kamera.useKameraSicherung.setState({ stand: { ...STAND, eingang: { id: 'e', pqPublicKey: 'p', rsaPublicKey: 'r' } } })
-    zeigen()
-    expect(screen.queryByText(i18n.t('mss.vault.kamera.eingangFehlt'))).not.toBeInTheDocument()
+    await waitFor(() => expect(tauri.medienZugriff).toHaveBeenLastCalledWith(true))
+    await waitFor(() => expect(kamera.kameraStandLaden).toHaveBeenCalledTimes(2))
   })
 
   it('gibt Speicher erst nach der Rückfrage frei, mit Zahl und Größe', async () => {
@@ -107,6 +155,7 @@ describe('KameraSicherungKarte', () => {
     zeigen()
     fireEvent.click(await screen.findByRole('button', { name: i18n.t('mss.vault.kamera.freigebenKnopf') }))
     const dialog = await screen.findByRole('dialog')
+    expect(kamera.freigebbar).toHaveBeenCalledWith(BUCKET, 'g')
     expect(dialog).toHaveTextContent(`3 gesicherte Aufnahmen (${formatBytes(3 * 1024 * 1024)})`)
     expect(kamera.speicherFreigeben).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.kamera.freigebenKnopf') }))

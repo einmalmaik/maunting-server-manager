@@ -1,15 +1,16 @@
 /**
- * Posteingang des Tresors: die Kamera-Sicherung bei gesperrtem Tresor.
+ * Posteingang des Tresors: so kommt die Kamera-Sicherung in den Tresor.
  *
- * Ohne Master-Passwort gibt es keinen `userKey` und damit keinen Eintrag. Das
- * Gerät lädt die Dateien trotzdem hoch, mit rohen Blob-Schlüsseln
- * (`blobAnlegen` ohne `userKey`), und legt dazu einen Datensatz ab: Name,
- * Aufnahmedaten und die Köpfe der Blobs samt Schlüsseln, hybrid verschlüsselt
- * mit dem öffentlichen Schlüssel des Tresors (DIS, ML-KEM-768 + RSA-4096) und
- * vom Gerät unterschrieben (ECDSA P-256 im Android Keystore). Beim nächsten
- * Entsperren macht eine App daraus einen normalen Eintrag (`eingangAnstossen`):
- * Schlüssel mit dem `userKey` wickeln, Eintrag speichern, und erst wenn der
- * beim Server angekommen ist, den Datensatz löschen. Neu hochgeladen wird nichts.
+ * Der Hintergrund-Job des Telefons (`KameraArbeit.kt`) hat kein
+ * Master-Passwort, also keinen `userKey` und keinen Eintrag. Er lädt die
+ * Dateien mit rohen Blob-Schlüsseln hoch und legt dazu einen Datensatz ab:
+ * Name, Aufnahmedaten und die Köpfe der Blobs samt Schlüsseln, hybrid
+ * verschlüsselt mit dem öffentlichen Schlüssel des Tresors (ML-KEM-768 +
+ * RSA-4096, in Rust wie DIS: `kamera_krypto.rs`) und vom Gerät unterschrieben
+ * (ECDSA P-256 im Android Keystore). Eine App mit offenem Tresor macht daraus
+ * einen normalen Eintrag (`eingangAnstossen`), sobald alle drei Blobs fertig
+ * beim Server liegen: Schlüssel mit dem `userKey` wickeln, Eintrag speichern,
+ * und erst wenn der beim Server angekommen ist, den Datensatz löschen.
  *
  * Schlüsselpaar und Geräte stehen als Systemeinträge (`SYSTEM_KATEGORIE`) im
  * Tresor, verschlüsselt wie jeder Eintrag. Das Gerät kennt bei gesperrtem
@@ -19,11 +20,12 @@
  * kennen, der dieses Telefon ausliest (AGENTS.md Punkt 41).
  */
 
-import { bytesToBase64, base64ToBytes, utf8ToBytes } from '@msdis/shield/core'
-import { generateHybridKeyPair, hybridDecrypt, hybridEncrypt } from '@msdis/shield/post-quantum'
+import { base64ToBytes, utf8ToBytes } from '@msdis/shield/core'
+import { generateHybridKeyPair, hybridDecrypt } from '@msdis/shield/post-quantum'
 import { importEcdsaP256PublicKeySpki, verifyEcdsaP256 } from '@msdis/shield/signing'
 
-import { blobLoeschen, eingangListe, eingangLoeschen, type EingangDatensatz } from './tresorBlobApi'
+import { SanitizedApiError } from '@/api/client'
+import { blobLoeschen, blobStand, eingangListe, eingangLoeschen, type EingangDatensatz } from './tresorBlobApi'
 import { blobSchluesselWickeln, istBlobKopf, type BlobKopf } from './tresorDatei'
 import { einzeln, istQuelle, type DateiAngaben, type DateiQuelle } from './tresorDateien'
 import { SYSTEM_KATEGORIE, type SicherungAngaben, type VaultItem } from './vaultEintrag'
@@ -31,8 +33,6 @@ import { getPendingQueue, getStoredBlobs, useVaultStore } from './vaultStore'
 
 const FORMAT = 1
 const DOMAENE = 'msm-tresor-eingang-v1'
-/** Der Klartext wird auf ein Vielfaches davon gepolstert: Namen sollen nicht an der Länge auffallen. */
-const POLSTER = 4096
 
 /** Was ein Gerät bei gesperrtem Tresor vom Schlüsselpaar kennt. */
 export interface EingangOeffentlich {
@@ -81,6 +81,18 @@ function zuUnterschreiben(bucket: string, eingangId: string, u: Omit<Umschlag, '
   return utf8ToBytes([DOMAENE, String(u.v), bucket, eingangId, u.schluessel, u.geraet, u.daten].join('\n'))
 }
 
+/** Was beim Server über die Blobs eines Datensatzes steht. */
+async function blobLage(bucket: string, id: string): Promise<'fertig' | 'offen' | 'weg'> {
+  try {
+    const stand = await blobStand(bucket, id)
+    if (stand.state === 'fertig') return 'fertig'
+    return stand.state === 'offen' ? 'offen' : 'weg'
+  } catch (err) {
+    if (err instanceof SanitizedApiError && err.status === 404) return 'weg'
+    throw err
+  }
+}
+
 function zahl(wert: unknown): boolean {
   return wert === undefined || (typeof wert === 'number' && Number.isFinite(wert))
 }
@@ -123,27 +135,6 @@ function istUmschlag(wert: unknown): wert is Umschlag {
     typeof u.daten === 'string' &&
     typeof u.signatur === 'string'
   )
-}
-
-/**
- * Verschlüsselt und unterschreibt einen Datensatz. `unterschreiben` ist der
- * Keystore des Geräts (`sicherungSignieren`).
- */
-export async function eingangVerpacken(
-  inhalt: EingangInhalt,
-  bucket: string,
-  eingangId: string,
-  schluessel: EingangOeffentlich,
-  geraet: string,
-  unterschreiben: (daten: Uint8Array) => Promise<Uint8Array>,
-): Promise<string> {
-  const json = JSON.stringify(inhalt)
-  // Leerzeichen am Ende ändern nichts an JSON.parse.
-  const gepolstert = json.padEnd(Math.ceil((json.length + 1) / POLSTER) * POLSTER, ' ')
-  const daten = await hybridEncrypt(gepolstert, schluessel.pqPublicKey, schluessel.rsaPublicKey, aad(bucket, eingangId))
-  const ohne = { v: FORMAT, schluessel: schluessel.id, geraet, daten } as const
-  const signatur = bytesToBase64(await unterschreiben(zuUnterschreiben(bucket, eingangId, ohne)))
-  return JSON.stringify({ ...ohne, signatur } satisfies Umschlag)
 }
 
 export type Geoeffnet =
@@ -288,6 +279,17 @@ async function einenUebernehmen(
   }
   const { inhalt } = geoeffnet
   const koepfe = [inhalt.original, inhalt.vorschau, inhalt.miniatur]
+
+  // Das Telefon lädt noch hoch: erst übernehmen, wenn alle drei Blobs fertig
+  // sind. Das Original meldet es erst fertig, wenn es noch dieselben Bytes hat.
+  // Ist einer weg (abgebrochen und aufgeräumt), fängt das Telefon neu an.
+  const lagen = await Promise.all(koepfe.map((k) => blobLage(bucket, k.id)))
+  if (lagen.includes('weg')) {
+    for (const k of koepfe) await blobLoeschen(bucket, k.id, k.loeschen).catch(() => {})
+    await eingangLoeschen(bucket, satz.id)
+    return
+  }
+  if (lagen.some((l) => l !== 'fertig')) return
 
   // Dieselbe Aufnahme liegt schon im Tresor (bei gesperrtem Tresor kennt das
   // Gerät seine Einträge nicht). Die zweite Kopie belegte nur Speicher.

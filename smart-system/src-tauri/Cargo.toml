@@ -60,6 +60,11 @@ uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }
 webpki-roots = "1"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
+# Kamera-Sicherung bei geschlossener App (`kamera_krypto.rs`): ML-KEM-768,
+# RSA-OAEP, HKDF und AES-GCM wie DIS im WebView. Keine neue Kiste: rustls
+# bringt aws-lc-rs in derselben Fassung mit, hier wird es nur direkt
+# ansprechbar. Ohne Default-Features, damit keine zweite Variante entsteht.
+aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys"] }
 
 # Lokales Wake-Word (Phase 3): rustpotter erkennt ein aus eigenen Aufnahmen
 # gebautes Referenz-Wakeword komplett offline (Apache-2.0, kein Netzwerk).
@@ -110,6 +115,11 @@ version = "0.25"
 default-features = false
 features = ["png", "jpeg"]
 
+
+[target.'cfg(target_os = "android")'.dependencies]
+# Aufrufe aus dem Hintergrund-Job (`KameraKrypto.kt`). Dieselbe Fassung, die
+# tao auf Android ohnehin mitbringt.
+jni = "0.21"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 tauri = { version = "2", features = ["tray-icon"] }

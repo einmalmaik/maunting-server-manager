@@ -1,24 +1,31 @@
 /**
- * Posteingang des Tresors: was ein Telefon bei gesperrtem Tresor sichert, wird
- * beim nächsten Entsperren ein Eintrag. Mit echter Krypto (DIS hybrid,
- * ECDSA P-256 aus WebCrypto anstelle des Android Keystore).
+ * Posteingang des Tresors: was der Hintergrund-Job eines Telefons sichert,
+ * wird beim nächsten Entsperren ein Eintrag. Mit echter Krypto (DIS hybrid,
+ * ECDSA P-256 aus WebCrypto anstelle des Android Keystore). Verpackt wird hier
+ * so wie in `KameraArbeit.kt`; dass Rust dabei Byte für Byte wie DIS
+ * verschlüsselt, prüft `kameraVektoren.test.ts`.
  *
  * Geprüft wird, was die Übernahme annimmt und was sie verwirft: nur Datensätze
  * eines eingetragenen Geräts mit gültiger Unterschrift, gebunden an Bucket und
- * Kennung, und nur für Aufnahmen dieses Geräts. Gelöscht wird ein Datensatz
- * erst, wenn sein Eintrag beim Server liegt.
+ * Kennung, nur für Aufnahmen dieses Geräts, und erst wenn alle Blobs fertig
+ * beim Server liegen. Gelöscht wird ein Datensatz erst, wenn sein Eintrag beim
+ * Server liegt.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
-import { bytesToBase64 } from '@msdis/shield/core'
+import { bytesToBase64, utf8ToBytes } from '@msdis/shield/core'
+import { importFileKey } from '@msdis/shield/file-encryption'
+import { hybridEncrypt } from '@msdis/shield/post-quantum'
+import { SanitizedApiError } from '@/api/client'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { ablageLoeschen } from './tresorAblage'
-import { blobLoeschen } from './tresorBlobApi'
-import { blobAnlegen, blobSchluessel, chunkEntschluesseln, chunkVerschluesseln, type BlobKopf } from './tresorDatei'
+import { blobLoeschen, blobStand } from './tresorBlobApi'
+import { blobSchluessel, chunkEntschluesseln, chunkVerschluesseln, gepolsterteGroesse, type BlobKopf } from './tresorDatei'
 import type { DateiQuelle } from './tresorDateien'
-import { eingangAnstossen, eingangVerpacken, posteingangEinrichten, type EingangInhalt, type EingangOeffentlich } from './tresorEingang'
+import { eingangAnstossen, posteingangEinrichten, type EingangInhalt, type EingangOeffentlich } from './tresorEingang'
+import { bytesToHex } from './vaultCrypto'
 import { SYSTEM_KATEGORIE } from './vaultEintrag'
 import { useVaultStore, type VaultBlindSyncPayload, type VaultItem } from './vaultStore'
 
@@ -49,12 +56,12 @@ vi.mock('./tresorBlobApi', () => ({
   zurueckgesetztFrage: vi.fn(),
   speicherAbfragen: vi.fn(),
   blobReservieren: vi.fn(),
-  blobStand: vi.fn(),
+  // Was beim Server über die Blobs steht; ohne Angabe ist alles hochgeladen.
+  blobStand: vi.fn(async () => ({ state: 'fertig', chunk_count: 1, vorhanden: [0] })),
   chunkHochladen: vi.fn(),
   blobFertig: vi.fn(),
   chunkLaden: vi.fn(),
   kleineLaden: vi.fn(),
-  eingangAblegen: vi.fn(),
   eingangListe: vi.fn(async (bucket: string, nach?: string) => {
     const eintraege = [...(posteingang.get(bucket) ?? new Map<string, string>()).entries()]
       .filter(([id]) => !nach || id > nach)
@@ -118,11 +125,22 @@ async function tresorOeffnen() {
   })
 }
 
-/** Was das Telefon bei gesperrtem Tresor hochlädt: drei Blobs mit rohen Schlüsseln, der Inhalt im Original. */
+function zufallHex(bytes: number): string {
+  return bytesToHex(crypto.getRandomValues(new Uint8Array(bytes)))
+}
+
+/** Ein Blob-Kopf mit rohem Schlüssel, wie ihn `KameraArbeit.kt` anlegt. */
+async function roherBlob(echt: number, groesse = gepolsterteGroesse(echt)) {
+  const kopf: BlobKopf = { id: zufallHex(16), groesse, echt, schluessel: zufallHex(32), loeschen: zufallHex(32) }
+  const roh = new Uint8Array(kopf.schluessel.match(/../g)!.map((h) => parseInt(h, 16)))
+  return { kopf, schluessel: await importFileKey(roh) }
+}
+
+/** Was das Telefon hochlädt: drei Blobs mit rohen Schlüsseln, der Inhalt im Original. */
 async function aufnahme(eintragId: string, inhalt: Uint8Array, quelle: Partial<DateiQuelle> = {}) {
-  const original = await blobAnlegen(null, eintragId, inhalt.length)
-  const vorschau = await blobAnlegen(null, eintragId, 0, 512 * 1024)
-  const miniatur = await blobAnlegen(null, eintragId, 0, 32 * 1024)
+  const original = await roherBlob(inhalt.length)
+  const vorschau = await roherBlob(0, 512 * 1024)
+  const miniatur = await roherBlob(0, 32 * 1024)
   const chunk = await chunkVerschluesseln(inhalt.slice(), original.kopf, 0, original.schluessel, eintragId)
   const angaben: EingangInhalt = {
     name: 'IMG_1.jpg',
@@ -136,6 +154,17 @@ async function aufnahme(eintragId: string, inhalt: Uint8Array, quelle: Partial<D
   return { angaben, chunk }
 }
 
+/** Wie `verpacken` in `KameraArbeit.kt`: auf 4 KiB gepolstert, hybrid verschlüsselt, unterschrieben. */
+async function verpacken(inhalt: EingangInhalt, bucket: string, eingangId: string, geraet: string, unterschreiben: Geraet['unterschreiben']) {
+  const json = JSON.stringify(inhalt)
+  const bytes = new TextEncoder().encode(json).length
+  const gepolstert = json + ' '.repeat(Math.ceil((bytes + 1) / 4096) * 4096 - bytes)
+  const daten = await hybridEncrypt(gepolstert, schluessel.pqPublicKey, schluessel.rsaPublicKey, `msm-tresor-eingang-v1:${bucket}:${eingangId}`)
+  const signiert = ['msm-tresor-eingang-v1', '1', bucket, eingangId, schluessel.id, geraet, daten].join('\n')
+  const signatur = bytesToBase64(await unterschreiben(utf8ToBytes(signiert)))
+  return JSON.stringify({ v: 1, schluessel: schluessel.id, geraet, daten, signatur })
+}
+
 async function ablegen(
   id: string,
   angaben: EingangInhalt,
@@ -146,7 +175,7 @@ async function ablegen(
     verpacktAls?: string
   },
 ) {
-  const text = await eingangVerpacken(angaben, bucket, verpacktAls, schluessel, geraet.geraet, unterschrift.unterschreiben)
+  const text = await verpacken(angaben, bucket, verpacktAls, geraet.geraet, unterschrift.unterschreiben)
   if (!posteingang.has(BUCKET)) posteingang.set(BUCKET, new Map())
   posteingang.get(BUCKET)!.set(id, text)
 }
@@ -308,6 +337,42 @@ describe('Übernahme beim Entsperren', () => {
     expect(liegtNoch(id)).toBe(false)
     const freigegeben = vi.mocked(blobLoeschen).mock.calls.map(([, blob, loeschen]) => [blob, loeschen])
     expect(freigegeben).toEqual([angaben.original, angaben.vorschau, angaben.miniatur].map((k) => [k.id, k.loeschen]))
+  })
+
+  it('übernimmt erst, wenn das Telefon alle drei Blobs fertig hochgeladen hat', async () => {
+    const id = crypto.randomUUID()
+    const { angaben } = await aufnahme(id, new Uint8Array(10))
+    await ablegen(id, angaben)
+    vi.mocked(blobStand).mockImplementation(async (_bucket, blob) => ({
+      state: blob === angaben.original.id ? 'offen' : 'fertig',
+      chunk_count: 1,
+      vorhanden: [],
+    }))
+
+    await eingangAnstossen(BUCKET)
+    expect(dateiEintraege()).toEqual([])
+    expect(liegtNoch(id)).toBe(true)
+
+    vi.mocked(blobStand).mockImplementation(async () => ({ state: 'fertig', chunk_count: 1, vorhanden: [0] }))
+    await eingangAnstossen(BUCKET)
+    expect(dateiEintraege().map((e) => e.id)).toEqual([id])
+  })
+
+  it('verwirft den Datensatz und gibt die übrigen Blobs frei, wenn einer beim Server weg ist', async () => {
+    const id = crypto.randomUUID()
+    const { angaben } = await aufnahme(id, new Uint8Array(10))
+    await ablegen(id, angaben)
+    // Abgebrochen und vom Server aufgeräumt: das Telefon fängt diese Aufnahme neu an.
+    vi.mocked(blobStand).mockImplementation(async (_bucket, blob) => {
+      if (blob === angaben.original.id) throw new SanitizedApiError('weg', { status: 404 })
+      return { state: 'offen', chunk_count: 1, vorhanden: [] }
+    })
+
+    await eingangAnstossen(BUCKET)
+    expect(dateiEintraege()).toEqual([])
+    expect(liegtNoch(id)).toBe(false)
+    const freigegeben = vi.mocked(blobLoeschen).mock.calls.map(([, blob]) => blob)
+    expect(freigegeben).toEqual([angaben.original.id, angaben.vorschau.id, angaben.miniatur.id])
   })
 
   it('übernimmt nichts bei gesperrtem Tresor', async () => {

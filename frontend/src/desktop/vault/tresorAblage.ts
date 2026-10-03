@@ -82,8 +82,6 @@ export const UPLOAD_CHUNKS = 'upload_chunks'
 export const BLOB_CACHE = 'blob_cache'
 /** Welche Originale offline liegen sollen: angeheftet oder zuletzt geöffnet. */
 export const OFFLINE = 'offline'
-/** Kamera-Sicherung dieses Geräts, je Bucket (`kameraSicherung.ts`). */
-export const KAMERA = 'kamera'
 
 interface Zeile extends StoredEncryptedEntry {
   bucket: string
@@ -179,9 +177,6 @@ function oeffnen(konto: number): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(OFFLINE)) {
         db.createObjectStore(OFFLINE, { keyPath: 'blobId' })
-      }
-      if (!db.objectStoreNames.contains(KAMERA)) {
-        db.createObjectStore(KAMERA, { keyPath: 'bucket' })
       }
     }
     req.onsuccess = () => {

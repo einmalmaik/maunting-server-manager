@@ -6,7 +6,6 @@
  * Transport und liegen in `transport.ts`.)
  */
 import { invoke } from '@tauri-apps/api/core'
-import { base64ToBytes, bytesToBase64 } from '@msdis/shield/core'
 import { setRuntimeApiUrl } from '@/config/api'
 import type { GeplanteErinnerung } from '@/lib/erinnerungsplan'
 
@@ -493,19 +492,6 @@ export async function appNeuStarten(): Promise<void> {
 
 export type MedienArt = 'bild' | 'video'
 
-export interface Aufnahme {
-  id: number
-  /** Woran neu erkannt wird; nur gegen eine Marke aus `medienStand` vergleichen. */
-  marke: number
-  art: MedienArt
-  name: string
-  typ: string
-  groesse: number
-  /** Aufnahmezeit, sonst Zeit des Hinzufügens (ms). */
-  aufgenommen: number
-  geaendert: number
-}
-
 export interface MedienZugriff {
   /** `teilweise`: nur ausgewählte Fotos oder ohne Aufnahmeort. */
   stand: 'voll' | 'teilweise' | 'keiner'
@@ -515,24 +501,6 @@ export interface MedienZugriff {
 
 export async function medienZugriff(anfragen: boolean): Promise<MedienZugriff> {
   return invoke<MedienZugriff>('medien_zugriff', { anfragen })
-}
-
-/**
- * Die Marke, ab der eine Aufnahme als neu gilt, und die Fassung des MediaStore.
- * Ändert sich die Fassung, gelten alte Marken nicht mehr.
- */
-export async function medienStand(): Promise<{ marke: number; fassung: string }> {
-  return invoke<{ marke: number; fassung: string }>('medien_stand')
-}
-
-/** Fertige Aufnahmen aus DCIM mit größerer Marke als `nach`, aufsteigend. */
-export async function medienAufnahmen(nach: number, hoechstens: number): Promise<Aufnahme[]> {
-  return (await invoke<{ aufnahmen: Aufnahme[] }>('medien_aufnahmen', { nach, hoechstens })).aufnahmen
-}
-
-export async function medienLesen(id: number, art: MedienArt, von: number, laenge: number): Promise<Uint8Array> {
-  const { daten } = await invoke<{ daten: string }>('medien_lesen', { id, art, von, laenge })
-  return base64ToBytes(daten)
 }
 
 export async function medienPruefsumme(id: number, art: MedienArt): Promise<{ sha256: string; groesse: number }> {
@@ -547,10 +515,69 @@ export async function sicherungSchluessel(geraet: string): Promise<string> {
   return (await invoke<{ spki: string }>('medien_sicherung_schluessel', { geraet })).spki
 }
 
-/** Unterschreibt mit diesem Schlüssel; Ergebnis r ‖ s (64 Bytes), wie DIS `verifyEcdsaP256` es prüft. */
-export async function sicherungSignieren(geraet: string, daten: Uint8Array): Promise<Uint8Array> {
-  const { signatur } = await invoke<{ signatur: string }>('medien_sicherung_signieren', { geraet, daten: bytesToBase64(daten) })
-  return base64ToBytes(signatur)
+/** Warum der Hintergrund-Job gerade nichts sichert. */
+export type KameraWarten = 'zugriff' | 'wlan' | 'zugang' | 'speicher' | 'fehler'
+
+/** Was der Hintergrund-Job über sich sagt. Den Zugang gibt er nie heraus. */
+export type KameraStand =
+  | { eingerichtet: false }
+  | {
+      eingerichtet: true
+      konto: number
+      bucket: string
+      geraet: string
+      nurWlan: boolean
+      gesichert: number
+      /** Zeitpunkt der letzten gesicherten Aufnahme (ms), 0 ohne. */
+      zuletzt: number
+      /** Aufnahmen, die gerade hochgeladen werden. */
+      offen: number
+      warten?: KameraWarten
+    }
+
+export interface KameraEinrichtung {
+  konto: number
+  /** Herkunft des Panels; nur https (http nur im Debug-Bau). */
+  server: string
+  bucket: string
+  geraet: string
+  zugang: string
+  eingangId: string
+  /** ML-KEM-768 roh und RSA als SPKI, beides Base64. */
+  pq: string
+  rsa: string
+  nurWlan: boolean
+}
+
+/** Schaltet die Sicherung im Hintergrund ein oder erneuert ihren Zugang. */
+export async function kameraEinrichten(e: KameraEinrichtung): Promise<KameraStand> {
+  return invoke<KameraStand>('medien_einrichten', { ...e })
+}
+
+export async function kameraStand(): Promise<KameraStand> {
+  return invoke<KameraStand>('medien_sicherung_stand')
+}
+
+/**
+ * `vorhandene`: auch sichern, was vor dem Einschalten aufgenommen wurde.
+ * `bekannt`: was schon im Tresor liegt (`medienId:sha256`), geht nicht noch einmal hoch.
+ */
+export async function kameraAendern(aenderung: { nurWlan?: boolean; vorhandene?: boolean; bekannt?: string[] }): Promise<KameraStand> {
+  return invoke<KameraStand>('medien_sicherung_aendern', {
+    nurWlan: aenderung.nurWlan ?? null,
+    vorhandene: aenderung.vorhandene ?? false,
+    bekannt: aenderung.bekannt ?? [],
+  })
+}
+
+/** Abmelden, Kontowechsel, Ausschalten: Stand, Zugang und offene Aufträge fallen weg. */
+export async function kameraVergessen(): Promise<void> {
+  await invoke('medien_sicherung_vergessen')
+}
+
+/** Gleich nachsehen, etwa wenn die App wieder vorn ist. */
+export async function kameraJetzt(): Promise<KameraStand> {
+  return invoke<KameraStand>('medien_sicherung_jetzt')
 }
 
 /**

@@ -52,8 +52,6 @@ import {
   uploadsFortsetzen,
   vorbereitungAbschliessen,
   VERSIONEN,
-  type Behalten,
-  type DateiQuelle,
   type DateiVersion,
 } from './tresorDateien'
 import { bildAngaben } from './tresorBilder'
@@ -508,8 +506,7 @@ interface VaultState {
    * Legt eine Datei im Tresor ab: verschlüsselt sie auf dem Gerät, speichert
    * den Eintrag und lädt im Hintergrund hoch. Liefert die Kennung des Eintrags.
    */
-  /** `quelle` und `original` setzt die Kamera-Sicherung (`kameraSicherung.ts`). */
-  dateiHinzufuegen: (datei: File, ordner?: string, optionen?: { quelle?: DateiQuelle; original?: Behalten }) => Promise<string>
+  dateiHinzufuegen: (datei: File, ordner?: string) => Promise<string>
   ordnerAnlegen: (name: string, ordner?: string) => Promise<string>
   albumAnlegen: (name: string, eintraege: string[]) => Promise<string>
   /**
@@ -1407,20 +1404,15 @@ export const useVaultStore = create<VaultState>((set, get) => {
     }
   },
 
-  dateiHinzufuegen: async (datei, ordner, optionen = {}) => {
+  dateiHinzufuegen: async (datei, ordner) => {
     const { userKey, bucketId } = get()
     if (!userKey || !bucketId) throw new TresorFehler(i18n.t('mss.vault.errors.locked'))
     const id = window.crypto.randomUUID()
     const { vorschau, miniatur, ...bild } = await bildAngaben(datei)
-    const angaben = await dateiVorbereiten(datei, userKey, bucketId, id, () => !sitzungOffen(userKey, bucketId), {
-      vorschau,
-      miniatur,
-      original: optionen.original,
-    })
+    const angaben = await dateiVorbereiten(datei, userKey, bucketId, id, () => !sitzungOffen(userKey, bucketId), { vorschau, miniatur })
     try {
       if (!sitzungOffen(userKey, bucketId)) throw new TresorFehler(i18n.t('mss.vault.errors.locked'))
-      const quelle = optionen.quelle ? { quelle: optionen.quelle } : {}
-      await get().saveItem({ id, service: datei.name, category: 'datei', datei: { ...angaben, ...bild, ...quelle }, ordner })
+      await get().saveItem({ id, service: datei.name, category: 'datei', datei: { ...angaben, ...bild }, ordner })
     } finally {
       // Ohne gespeicherten Eintrag verwirft der Uploader die Blobs beim nächsten Lauf.
       vorbereitungAbschliessen(angaben)

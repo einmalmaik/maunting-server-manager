@@ -3037,12 +3037,14 @@ dependencies = [
 name = "maunting-smart-system"
 version = "5.0.4"
 dependencies = [
+ "aws-lc-rs",
  "base64 0.22.1",
  "cpal",
  "dunce",
  "enigo",
  "hound",
  "image",
+ "jni 0.21.1",
  "keyring",
  "reqwest",
  "rustls",

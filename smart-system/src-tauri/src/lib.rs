@@ -37,6 +37,7 @@ mod durchklick;
 mod ducking;
 mod erinnerung;
 mod geheimnisse;
+mod kamera_krypto;
 mod konfig;
 mod medien;
 mod sandbox;
@@ -889,11 +890,12 @@ pub fn run() {
             datei_speichern::datei_speichern_teil,
             datei_speichern::datei_speichern_ende,
             medien::medien_zugriff,
-            medien::medien_stand,
             medien::medien_sicherung_schluessel,
-            medien::medien_sicherung_signieren,
-            medien::medien_aufnahmen,
-            medien::medien_lesen,
+            medien::medien_einrichten,
+            medien::medien_sicherung_stand,
+            medien::medien_sicherung_aendern,
+            medien::medien_sicherung_vergessen,
+            medien::medien_sicherung_jetzt,
             medien::medien_pruefsumme,
             medien::medien_papierkorb,
             erinnerung::erinnerungen_planen,

@@ -3,14 +3,12 @@ package com.mauntingstudios.smart_system
 import android.Manifest
 import android.app.Activity
 import android.content.ContentUris
-import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Base64
+import android.webkit.WebView
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.IntentSenderRequest
-import androidx.core.content.ContextCompat
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -18,31 +16,42 @@ import app.tauri.annotation.Permission
 import app.tauri.annotation.PermissionCallback
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
-import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
-import java.io.FileInputStream
-import java.security.MessageDigest
+import java.util.UUID
 import java.util.concurrent.Executors
-
-@InvokeArg
-class AufnahmenArgs {
-    var nach: Long = 0
-    var hoechstens: Int = 100
-}
 
 @InvokeArg
 class MedienArgs {
     var id: Long = 0
     lateinit var art: String
-    var von: Long = 0
-    var laenge: Int = 0
 }
 
 @InvokeArg
 class SicherungArgs {
     lateinit var geraet: String
-    var daten: String = ""
+}
+
+@InvokeArg
+class EinrichtenArgs {
+    var konto: Long = 0
+    lateinit var server: String
+    lateinit var bucket: String
+    lateinit var geraet: String
+    lateinit var zugang: String
+    lateinit var eingangId: String
+    lateinit var pq: String
+    lateinit var rsa: String
+    var nurWlan: Boolean = false
+}
+
+@InvokeArg
+class AendernArgs {
+    var nurWlan: Boolean? = null
+    /** Auch sichern, was vor dem Einschalten aufgenommen wurde. */
+    var vorhandene: Boolean = false
+    /** Was schon im Tresor liegt (`medienId:sha256`), damit es nicht noch einmal hochgeht. */
+    var bekannt: Array<String> = emptyArray()
 }
 
 @InvokeArg
@@ -52,17 +61,12 @@ class PapierkorbArgs {
 }
 
 /**
- * Lesender Zugriff auf die Kameraaufnahmen dieses Geräts, für die Kamera-Sicherung
- * des Tresors.
+ * Die Kamera-Sicherung des Tresors von der App aus: Zugriff erfragen,
+ * einrichten, Stand zeigen, Speicher freigeben. Gesichert wird nur im
+ * Hintergrund-Job (`KameraArbeit`), auch bei offener App.
  *
- * Nur Kennung und Art kommen von drüben, die Adresse baut dieses Plugin selbst.
- * Eine Adresse von außen wäre ein Weg, beliebige Content-Provider zu lesen,
- * auch den eigenen FileProvider.
- *
- * Gelesen wird das Original mit Aufnahmeort (`setRequireOriginal`). Ohne das
- * entfernt Android den Ort aus den Bytes, und nach „Speicher freigeben“ wäre er
- * für immer weg. Ohne `ACCESS_MEDIA_LOCATION` gilt der Zugriff deshalb als
- * unvollständig.
+ * Gelesen wird das Original mit Aufnahmeort (`Medien.original`). Ohne
+ * `ACCESS_MEDIA_LOCATION` gilt der Zugriff deshalb als unvollständig.
  */
 @TauriPlugin(
     permissions = [
@@ -73,8 +77,14 @@ class PapierkorbArgs {
 )
 class MedienPlugin(private val activity: Activity) : Plugin(activity) {
 
-    // Lesen und Prüfsummen laufen nie auf dem Hauptthread.
+    // Lesen, Prüfsummen, Keystore und Ablage laufen nie auf dem Hauptthread.
     private val arbeit = Executors.newSingleThreadExecutor()
+
+    override fun load(webView: WebView) {
+        super.load(webView)
+        // Nach einem Update oder wenn das System Aufträge verworfen hat: Auslöser wieder aufstellen.
+        arbeit.execute { runCatching { KameraPlan.planen(activity.applicationContext) } }
+    }
 
     private fun aliase(): Array<String> = when {
         Build.VERSION.SDK_INT >= 33 -> arrayOf("medien", "ort")
@@ -82,26 +92,26 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
         else -> arrayOf("speicher")
     }
 
-    private fun erlaubt(name: String): Boolean =
-        ContextCompat.checkSelfPermission(activity, name) == PackageManager.PERMISSION_GRANTED
-
-    /** "voll", "teilweise" (Android 14: nur ausgewählte Fotos) oder "keiner". */
-    private fun stand(): String {
-        val lesen = if (Build.VERSION.SDK_INT >= 33) {
-            erlaubt(Manifest.permission.READ_MEDIA_IMAGES) && erlaubt(Manifest.permission.READ_MEDIA_VIDEO)
-        } else {
-            erlaubt(Manifest.permission.READ_EXTERNAL_STORAGE)
-        }
-        val ort = Build.VERSION.SDK_INT < 29 || erlaubt(Manifest.permission.ACCESS_MEDIA_LOCATION)
-        if (lesen && ort) return "voll"
-        if (lesen) return "teilweise"
-        if (Build.VERSION.SDK_INT >= 34 && erlaubt(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)) return "teilweise"
-        return "keiner"
+    private fun mitStand(): JSObject = JSObject().apply {
+        put("stand", Medien.stand(activity))
+        put("papierkorb", Build.VERSION.SDK_INT >= 30)
     }
 
-    private fun mitStand(): JSObject = JSObject().apply {
-        put("stand", stand())
-        put("papierkorb", Build.VERSION.SDK_INT >= 30)
+    private fun im(invoke: Invoke, fehler: String, aufgabe: () -> JSObject) {
+        arbeit.execute {
+            try {
+                invoke.resolve(aufgabe())
+            } catch (e: Exception) {
+                invoke.reject(e.message ?: fehler)
+            }
+        }
+    }
+
+    private inline fun <reified T> argumente(invoke: Invoke): T? = try {
+        invoke.parseArgs(T::class.java)
+    } catch (e: Exception) {
+        invoke.reject("Unvollständige Anfrage")
+        null
     }
 
     @Command
@@ -111,7 +121,7 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun zugriffAnfragen(invoke: Invoke) {
-        if (stand() == "voll") {
+        if (Medien.stand(activity) == "voll") {
             invoke.resolve(mitStand())
             return
         }
@@ -123,246 +133,119 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve(mitStand())
     }
 
-    private fun basis(art: String): Uri = when (art) {
-        "bild" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-        "video" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        else -> throw IllegalArgumentException("Unbekannte Art")
-    }
-
-    private fun adresse(id: Long, art: String): Uri {
-        if (id <= 0) throw IllegalArgumentException("Ungültige Kennung")
-        val uri = ContentUris.withAppendedId(basis(art), id)
-        return if (Build.VERSION.SDK_INT >= 29) MediaStore.setRequireOriginal(uri) else uri
-    }
-
-    /**
-     * Woran eine Aufnahme als neu erkannt wird. Ab Android 11 die Generation der
-     * letzten Änderung: eine Aufnahme, die noch geschrieben wird (`IS_PENDING`,
-     * etwa ein laufendes Video), bekommt beim Fertigwerden eine neue, höhere
-     * Generation und fällt nicht hinter eine spätere zurück. Davor gibt es nur
-     * die Kennung.
-     */
-    private val markeSpalte =
-        if (Build.VERSION.SDK_INT >= 30) MediaStore.MediaColumns.GENERATION_MODIFIED else MediaStore.MediaColumns._ID
-
-    /** Aufnahmen aus DCIM mit größerer Marke als `nach`, aufsteigend. */
-    private fun suche(basis: Uri, art: String, nach: Long, hoechstens: Int): List<JSObject> {
-        val spalten = mutableListOf(
-            MediaStore.MediaColumns._ID,
-            markeSpalte,
-            MediaStore.MediaColumns.DISPLAY_NAME,
-            MediaStore.MediaColumns.MIME_TYPE,
-            MediaStore.MediaColumns.SIZE,
-            MediaStore.MediaColumns.DATE_ADDED,
-            MediaStore.MediaColumns.DATE_MODIFIED,
-        )
-        if (Build.VERSION.SDK_INT >= 29) spalten.add(MediaStore.MediaColumns.DATE_TAKEN)
-        // Nur die Kamera-Ordner, keine Screenshots und keine Messenger-Bilder.
-        val (ort, ortWert) = if (Build.VERSION.SDK_INT >= 29) {
-            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?" to "DCIM/%"
-        } else {
-            @Suppress("DEPRECATION")
-            "${MediaStore.MediaColumns.DATA} LIKE ?" to "%/DCIM/%"
-        }
-        var auswahl = "$markeSpalte > ? AND $ort"
-        if (Build.VERSION.SDK_INT >= 29) auswahl += " AND ${MediaStore.MediaColumns.IS_PENDING} = 0"
-        val ergebnis = mutableListOf<JSObject>()
-        activity.contentResolver.query(
-            basis,
-            spalten.toTypedArray(),
-            auswahl,
-            arrayOf(nach.toString(), ortWert),
-            "$markeSpalte ASC",
-        )?.use { c ->
-            val iId = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-            val iMarke = c.getColumnIndexOrThrow(markeSpalte)
-            val iName = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-            val iTyp = c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
-            val iGroesse = c.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
-            val iHinzu = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
-            val iGeaendert = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
-            val iAufnahme = if (Build.VERSION.SDK_INT >= 29) c.getColumnIndex(MediaStore.MediaColumns.DATE_TAKEN) else -1
-            while (c.moveToNext() && ergebnis.size < hoechstens) {
-                val aufnahme = if (iAufnahme >= 0 && !c.isNull(iAufnahme)) c.getLong(iAufnahme) else c.getLong(iHinzu) * 1000
-                ergebnis.add(JSObject().apply {
-                    put("id", c.getLong(iId))
-                    put("marke", c.getLong(iMarke))
-                    put("art", art)
-                    put("name", c.getString(iName) ?: "")
-                    put("typ", c.getString(iTyp) ?: "")
-                    put("groesse", c.getLong(iGroesse))
-                    put("aufgenommen", aufnahme)
-                    put("geaendert", c.getLong(iGeaendert) * 1000)
-                })
-            }
-        }
-        return ergebnis
-    }
-
-    @Command
-    fun aufnahmen(invoke: Invoke) {
-        val args = try {
-            invoke.parseArgs(AufnahmenArgs::class.java)
-        } catch (e: Exception) {
-            invoke.reject("Unvollständige Anfrage")
-            return
-        }
-        if (stand() == "keiner") {
-            invoke.reject("Kein Zugriff auf Fotos und Videos", "KEIN_ZUGRIFF")
-            return
-        }
-        val hoechstens = args.hoechstens.coerceIn(1, 500)
-        arbeit.execute {
-            try {
-                // Bilder und Videos teilen sich Kennungen und Generationen der Medientabelle.
-                val alle = (suche(basis("bild"), "bild", args.nach, hoechstens) +
-                    suche(basis("video"), "video", args.nach, hoechstens))
-                    .sortedBy { it.getLong("marke") }
-                    .take(hoechstens)
-                val liste = JSArray()
-                for (eintrag in alle) liste.put(eintrag)
-                invoke.resolve(JSObject().apply { put("aufnahmen", liste) })
-            } catch (e: Exception) {
-                invoke.reject(e.message ?: "Aufnahmen konnten nicht gelesen werden")
-            }
-        }
-    }
-
-    /**
-     * Die Marke, die es gerade gibt (ab hier zählt eine Aufnahme als neu), und
-     * die Fassung des MediaStore. Baut Android ihn neu auf, beginnen die
-     * Generationen von vorn, und eine alte Marke fände nie wieder etwas.
-     */
     /** Öffentlicher Unterschriftsschlüssel dieses Geräts (`SicherungsSchluessel`), legt ihn bei Bedarf an. */
     @Command
     fun sicherungSchluessel(invoke: Invoke) {
-        val args = try {
-            invoke.parseArgs(SicherungArgs::class.java)
-        } catch (e: Exception) {
-            invoke.reject("Unvollständige Anfrage")
-            return
-        }
-        arbeit.execute {
-            try {
-                val spki = SicherungsSchluessel.oeffentlich(args.geraet)
-                invoke.resolve(JSObject().apply { put("spki", Base64.encodeToString(spki, Base64.NO_WRAP)) })
-            } catch (e: Exception) {
-                invoke.reject(e.message ?: "Schlüssel nicht verfügbar")
-            }
+        val args = argumente<SicherungArgs>(invoke) ?: return
+        im(invoke, "Schlüssel nicht verfügbar") {
+            JSObject().apply { put("spki", Base64.encodeToString(SicherungsSchluessel.oeffentlich(args.geraet), Base64.NO_WRAP)) }
         }
     }
 
-    /** Unterschreibt einen Posteingang-Datensatz; `daten` in Base64, höchstens 64 KiB. */
+    /**
+     * Schaltet die Sicherung für einen Tresor ein oder erneuert den Zugang.
+     * Für denselben Tresor, dasselbe Gerät und denselben MediaStore geht es
+     * an der bisherigen Marke weiter; sonst zählt erst, was ab jetzt
+     * aufgenommen wird.
+     */
     @Command
-    fun sicherungSignieren(invoke: Invoke) {
-        val args = try {
-            invoke.parseArgs(SicherungArgs::class.java)
-        } catch (e: Exception) {
-            invoke.reject("Unvollständige Anfrage")
-            return
-        }
-        arbeit.execute {
-            try {
-                val daten = Base64.decode(args.daten, Base64.NO_WRAP)
-                require(daten.size <= 64 * 1024) { "Zu viele Daten" }
-                val signatur = SicherungsSchluessel.unterschreiben(args.geraet, daten)
-                invoke.resolve(JSObject().apply { put("signatur", Base64.encodeToString(signatur, Base64.NO_WRAP)) })
-            } catch (e: Exception) {
-                invoke.reject(e.message ?: "Unterschrift gescheitert")
+    fun einrichten(invoke: Invoke) {
+        val a = argumente<EinrichtenArgs>(invoke) ?: return
+        im(invoke, "Kamera-Sicherung nicht eingerichtet") {
+            val (marke, fassung) = Medien.jetzt(activity)
+            val alt = KameraAblage.lesen(activity)
+            val weiter = alt != null && alt.konto == a.konto && alt.bucket == a.bucket && alt.geraet == a.geraet && alt.server == a.server
+            if (!weiter) {
+                KameraPlan.abbestellen(activity)
+                KameraAblage.vergessen(activity)
             }
+            KameraAblage.setzen(
+                activity,
+                KameraAblage.Stand(
+                    kennung = if (weiter) alt!!.kennung else UUID.randomUUID().toString(),
+                    konto = a.konto,
+                    server = a.server,
+                    bucket = a.bucket,
+                    geraet = a.geraet,
+                    zugang = KameraAblage.zu(a.zugang),
+                    eingangId = a.eingangId,
+                    pq = a.pq,
+                    rsa = a.rsa,
+                    nurWlan = a.nurWlan,
+                    marke = if (weiter && alt!!.fassung == fassung) alt.marke else marke,
+                    markeId = if (weiter && alt!!.fassung == fassung) alt.markeId else KameraAblage.ALLE,
+                    fassung = fassung,
+                    gesichert = if (weiter) alt!!.gesichert else 0,
+                    zuletzt = if (weiter) alt!!.zuletzt else 0,
+                ),
+            )
+            KameraPlan.planen(activity)
+            standJson()
         }
     }
 
-    @Command
-    fun medienStand(invoke: Invoke) {
-        arbeit.execute {
-            try {
-                if (Build.VERSION.SDK_INT >= 30) {
-                    invoke.resolve(JSObject().apply {
-                        put("marke", MediaStore.getGeneration(activity, MediaStore.VOLUME_EXTERNAL))
-                        put("fassung", "gen:" + MediaStore.getVersion(activity, MediaStore.VOLUME_EXTERNAL))
-                    })
-                    return@execute
-                }
-                var hoechste = 0L
-                activity.contentResolver.query(
-                    MediaStore.Files.getContentUri("external"),
-                    arrayOf(MediaStore.MediaColumns._ID),
-                    null,
-                    null,
-                    "${MediaStore.MediaColumns._ID} DESC",
-                )?.use { c -> if (c.moveToFirst()) hoechste = c.getLong(0) }
-                invoke.resolve(JSObject().apply {
-                    put("marke", hoechste)
-                    put("fassung", "id")
-                })
-            } catch (e: Exception) {
-                invoke.reject(e.message ?: "Stand der Aufnahmen unbekannt")
-            }
+    private fun standJson(): JSObject {
+        val s = KameraAblage.lesen(activity) ?: return JSObject().apply { put("eingerichtet", false) }
+        return JSObject().apply {
+            put("eingerichtet", true)
+            put("konto", s.konto)
+            put("bucket", s.bucket)
+            put("geraet", s.geraet)
+            put("nurWlan", s.nurWlan)
+            put("gesichert", s.gesichert)
+            put("zuletzt", s.zuletzt)
+            put("offen", KameraAblage.anzahlAuftraege(activity))
+            if (s.warten != null) put("warten", s.warten)
         }
     }
 
     @Command
-    fun lesen(invoke: Invoke) {
-        val args = try {
-            invoke.parseArgs(MedienArgs::class.java)
-        } catch (e: Exception) {
-            invoke.reject("Unvollständige Anfrage")
-            return
-        }
-        if (args.von < 0 || args.laenge <= 0 || args.laenge > HOECHSTENS_LESEN) {
-            invoke.reject("Ungültiger Ausschnitt")
-            return
-        }
-        arbeit.execute {
-            try {
-                val uri = adresse(args.id, args.art)
-                val puffer = ByteArray(args.laenge)
-                var gelesen = 0
-                activity.contentResolver.openFileDescriptor(uri, "r")?.use { fd ->
-                    FileInputStream(fd.fileDescriptor).use { ein ->
-                        val kanal = ein.channel
-                        kanal.position(args.von)
-                        while (gelesen < puffer.size) {
-                            val n = ein.read(puffer, gelesen, puffer.size - gelesen)
-                            if (n < 0) break
-                            gelesen += n
-                        }
-                    }
-                } ?: throw IllegalStateException("Aufnahme nicht lesbar")
-                // Bytes reisen als Base64 im JSON (AGENTS.md Punkt 69).
-                invoke.resolve(JSObject().apply {
-                    put("daten", Base64.encodeToString(puffer, 0, gelesen, Base64.NO_WRAP))
-                })
-            } catch (e: Exception) {
-                invoke.reject(e.message ?: "Aufnahme nicht lesbar")
+    fun stand(invoke: Invoke) {
+        im(invoke, "Stand unbekannt") { standJson() }
+    }
+
+    @Command
+    fun aendern(invoke: Invoke) {
+        val a = argumente<AendernArgs>(invoke) ?: return
+        im(invoke, "Nicht geändert") {
+            val alt = KameraAblage.lesen(activity) ?: throw IllegalStateException("Die Kamera-Sicherung ist aus")
+            KameraAblage.bekanntDazu(activity, alt.kennung, a.bekannt.filter { BEKANNT.matches(it) })
+            KameraAblage.aendern(activity, alt.kennung) { s ->
+                if (a.vorhandene) s.copy(nurWlan = a.nurWlan ?: s.nurWlan, marke = 0, markeId = KameraAblage.ALLE)
+                else s.copy(nurWlan = a.nurWlan ?: s.nurWlan)
             }
+            KameraPlan.anstossen(activity, ersetzen = a.nurWlan != null && a.nurWlan != alt.nurWlan)
+            standJson()
+        }
+    }
+
+    /** Abmelden, Kontowechsel, Ausschalten. */
+    @Command
+    fun vergessen(invoke: Invoke) {
+        im(invoke, "Nicht vergessen") {
+            KameraPlan.abbestellen(activity)
+            KameraAblage.vergessen(activity)
+            standJson()
+        }
+    }
+
+    /** Die App ist wieder vorn: gleich nachsehen statt auf den Auslöser zu warten. */
+    @Command
+    fun jetzt(invoke: Invoke) {
+        im(invoke, "Nicht angestoßen") {
+            KameraPlan.anstossen(activity)
+            standJson()
         }
     }
 
     @Command
     fun pruefsumme(invoke: Invoke) {
-        val args = try {
-            invoke.parseArgs(MedienArgs::class.java)
-        } catch (e: Exception) {
-            invoke.reject("Unvollständige Anfrage")
-            return
-        }
+        val args = argumente<MedienArgs>(invoke) ?: return
         arbeit.execute {
             try {
-                val sha = MessageDigest.getInstance("SHA-256")
-                var groesse = 0L
-                activity.contentResolver.openInputStream(adresse(args.id, args.art))?.use { ein ->
-                    val puffer = ByteArray(1 shl 20)
-                    while (true) {
-                        val n = ein.read(puffer)
-                        if (n < 0) break
-                        sha.update(puffer, 0, n)
-                        groesse += n
-                    }
-                } ?: throw IllegalStateException("Aufnahme nicht lesbar")
+                val (sha, groesse) = Medien.pruefsumme(activity, args.id, args.art)
                 invoke.resolve(JSObject().apply {
-                    put("sha256", sha.digest().joinToString("") { "%02x".format(it) })
+                    put("sha256", sha)
                     put("groesse", groesse)
                 })
             } catch (e: Exception) {
@@ -381,15 +264,10 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
             invoke.reject("Erst ab Android 11", "ZU_ALT")
             return
         }
-        val args = try {
-            invoke.parseArgs(PapierkorbArgs::class.java)
-        } catch (e: Exception) {
-            invoke.reject("Unvollständige Anfrage")
-            return
-        }
+        val args = argumente<PapierkorbArgs>(invoke) ?: return
         try {
-            val uris = args.bilder.map { ContentUris.withAppendedId(basis("bild"), it) } +
-                args.videos.map { ContentUris.withAppendedId(basis("video"), it) }
+            val uris = args.bilder.map { ContentUris.withAppendedId(Medien.basis("bild"), it) } +
+                args.videos.map { ContentUris.withAppendedId(Medien.basis("video"), it) }
             if (uris.isEmpty() || uris.any { ContentUris.parseId(it) <= 0 }) {
                 invoke.reject("Keine Aufnahmen gewählt")
                 return
@@ -407,7 +285,6 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     companion object {
-        /** Ein Ausschnitt je Aufruf, etwas mehr als ein Tresor-Chunk (4 MiB). */
-        const val HOECHSTENS_LESEN = 8 * 1024 * 1024
+        private val BEKANNT = Regex("^[1-9][0-9]{0,18}:[0-9a-f]{64}$")
     }
 }

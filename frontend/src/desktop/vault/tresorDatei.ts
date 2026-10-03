@@ -118,12 +118,12 @@ function hexZuBytes(hex: string): Uint8Array {
  * Legt einen Blob an: Kennung, Schlüssel, Löschnachweis. `groesse` für die
  * festen Klassen (Miniatur, Vorschau), sonst die Größenklasse von `echt`.
  *
- * Ohne `userKey` (Posteingang der Kamera-Sicherung, Tresor gesperrt) steht der
- * Schlüssel roh im Kopf. Ein solcher Kopf verlässt das Gerät nur hybrid
- * verschlüsselt (`tresorEingang.ts`) und wird bei der Übernahme gewickelt.
+ * Rohe Schlüssel im Kopf gibt es nur aus dem Posteingang: die Kamera-Sicherung
+ * des Telefons legt sie an (`KameraArbeit.kt`), die Übernahme wickelt sie
+ * (`blobSchluesselWickeln`).
  */
 export async function blobAnlegen(
-  userKey: CryptoKey | null,
+  userKey: CryptoKey,
   eintragId: string,
   echt: number,
   groesse = gepolsterteGroesse(echt),
@@ -132,7 +132,7 @@ export async function blobAnlegen(
   const id = zufallHex(16)
   const roh = generateFileKeyBytes()
   try {
-    const gespeichert = userKey ? await encryptBytes(roh, userKey, fileKeyAad(kontext(eintragId, id))) : bytesToHex(roh)
+    const gespeichert = await encryptBytes(roh, userKey, fileKeyAad(kontext(eintragId, id)))
     const schluessel = await importFileKey(roh)
     return { kopf: { id, groesse, echt, schluessel: gespeichert, loeschen: zufallHex(32) }, schluessel }
   } finally {

@@ -46,8 +46,9 @@ def _kopf(cookies: dict) -> dict:
     return {"X-CSRF-Token": marke} if marke else {}
 
 
-def _tresor_mit_datei(client: TestClient, cookies: dict) -> str:
-    """Salz, Hinweis und eine fertige Datei, alles ueber die echten Routen."""
+def _tresor_mit_datei(client: TestClient, cookies: dict, db: Session, user: User) -> str:
+    """Salz, Hinweis und eine fertige Datei ueber die echten Routen, dazu ein Datensatz im Posteingang
+    (den legt nur der Hintergrund-Job ab, hier direkt ueber den Dienst)."""
     kopf = _kopf(cookies)
     assert client.post(
         "/api/vault/salt", json={"kdf_salt": "ab" * 16, "bucket_id": BUCKET}, cookies=cookies, headers=kopf
@@ -70,15 +71,14 @@ def _tresor_mit_datei(client: TestClient, cookies: dict) -> str:
         headers={**kopf, "Content-Type": "application/octet-stream"},
     ).status_code == 204
     assert client.post(f"/api/vault/blobs/{blob_id}/fertig", cookies=cookies, headers=kopf).status_code == 200
-    antwort = client.post(
-        "/api/vault/eingang", json={"id": str(uuid.uuid4()), "ciphertext": "x" * 100}, cookies=cookies, headers=kopf
-    )
-    assert antwort.status_code == 201, antwort.text
+    from services import vault_blob_service
+
+    vault_blob_service.eingang_ablegen(db, user, BUCKET, str(uuid.uuid4()), "x" * 100)
     return blob_id
 
 
 def test_keine_tresortabelle_nennt_das_konto(client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
-    _tresor_mit_datei(client, owner_cookies)
+    _tresor_mit_datei(client, owner_cookies, db, owner_user)
     db.commit()
 
     pruefer = inspect(db.get_bind())
@@ -169,7 +169,7 @@ def test_kontoloeschung_raeumt_den_tresor_ab(client: TestClient, db: Session, ow
     from models import VaultBlindBucket, VaultBlob, VaultBucketFormat, VaultEntry
     from services.auth_service import AuthService
 
-    blob_id = _tresor_mit_datei(client, owner_cookies)
+    blob_id = _tresor_mit_datei(client, owner_cookies, db, owner_user)
     db.add(VaultEntry(id="e-1", bucket_id=BUCKET, ciphertext="sv-vault-v1:x", revision=1, is_deleted=False))
     db.add(VaultBlindBucket(bucket_id=BUCKET, auth_verifier="9" * 64))
     db.add(VaultBucketFormat(bucket_id=BUCKET, min_client_format=2))
@@ -197,7 +197,7 @@ def test_kontoloeschung_ohne_sidecar_loescht_nichts(
     from services.auth_service import AuthService
     from services.dis_client import DisClient, DisSidecarError
 
-    _tresor_mit_datei(client, owner_cookies)
+    _tresor_mit_datei(client, owner_cookies, db, owner_user)
     db.commit()
 
     def kaputt(werte):
@@ -215,7 +215,7 @@ def test_kontoloeschung_ohne_sidecar_loescht_nichts(
 
 
 def test_export_findet_den_tresor(client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
-    _tresor_mit_datei(client, owner_cookies)
+    _tresor_mit_datei(client, owner_cookies, db, owner_user)
     db.commit()
     antwort = client.post(
         "/api/auth/data-export",
@@ -237,15 +237,15 @@ def test_fremdes_konto_bekommt_den_tresor_nicht_im_export(
 ):
     from services import datenexport_service
 
-    _tresor_mit_datei(client, owner_cookies)
+    _tresor_mit_datei(client, owner_cookies, db, owner_user)
     db.commit()
     paket = datenexport_service.exportieren(db, regular_user.id, mit_geheimnissen=False)
     for tabelle in TABELLEN:
         assert tabelle not in paket["tabellen"], tabelle
 
 
-def test_dateien_gehoeren_dem_bucket(client: TestClient, db: Session, owner_cookies: dict):
-    _tresor_mit_datei(client, owner_cookies)
+def test_dateien_gehoeren_dem_bucket(client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
+    _tresor_mit_datei(client, owner_cookies, db, owner_user)
     db.commit()
     from models import VaultBlob
 

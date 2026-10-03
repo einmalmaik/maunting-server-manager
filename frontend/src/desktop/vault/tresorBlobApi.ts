@@ -155,22 +155,13 @@ export async function blobLoeschen(bucket: string, id: string, loeschen: string)
   )
 }
 
-// ── Posteingang (Kamera-Sicherung bei gesperrtem Tresor, `tresorEingang.ts`) ──
+// ── Posteingang (Kamera-Sicherung, `tresorEingang.ts`) ──
+// Abgelegt wird nur vom Hintergrund-Job des Telefons (`KameraArbeit.kt`); die App holt ab.
 
 export interface EingangDatensatz {
   id: string
   ciphertext: string
   created_at: string
-}
-
-export async function eingangAblegen(bucket: string, id: string, ciphertext: string): Promise<void> {
-  await mitBucket(() =>
-    api('/api/vault/eingang', {
-      method: 'POST',
-      headers: mitBucketKopf(bucket),
-      body: JSON.stringify({ id, ciphertext }),
-    }),
-  )
 }
 
 /** Eine Seite des Posteingangs; `weiter` ist die Kennung, ab der die nächste beginnt. */
@@ -181,4 +172,24 @@ export function eingangListe(bucket: string, nach?: string): Promise<{ eintraege
 
 export async function eingangLoeschen(bucket: string, id: string): Promise<void> {
   await mitBucket(() => api(`/api/vault/eingang/${encodeURIComponent(id)}`, { method: 'DELETE', headers: mitBucketKopf(bucket) }))
+}
+
+/**
+ * Zugang für den Hintergrund-Job dieses Telefons. Ein dauerhafter Zugang,
+ * deshalb nur mit frischem Nachweis (AGENTS.md Punkt 21); er fällt mit dieser
+ * Sitzung. Geht nur an die App (`kameraEinrichten`), nie in Speicher oder Log.
+ */
+export async function sicherungszugangAnlegen(bucket: string, nachweis: Record<string, unknown>): Promise<string> {
+  const { zugang } = await mitBucket(() =>
+    api<{ zugang: string }>('/api/vault/sicherung/zugang', {
+      method: 'POST',
+      headers: mitBucketKopf(bucket),
+      body: JSON.stringify(nachweis),
+    }),
+  )
+  return zugang
+}
+
+export async function sicherungszugangEntfernen(): Promise<void> {
+  await api('/api/vault/sicherung/zugang', { method: 'DELETE' })
 }

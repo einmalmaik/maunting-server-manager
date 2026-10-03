@@ -573,23 +573,7 @@ def blob_loeschen(
 
 
 # ── Posteingang (Kamera-Sicherung bei gesperrtem Tresor) ────────────────────
-
-
-@router.post("/eingang", status_code=status.HTTP_201_CREATED)
-@limiter.limit("600/minute")
-def eingang_ablegen(
-    payload: VaultEingangAnlegen,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    bucket: str = Depends(_genannter_bucket),
-    __=Depends(verify_csrf),
-) -> dict[str, str]:
-    try:
-        vault_blob_service.eingang_ablegen(db, current_user, bucket, payload.id, payload.ciphertext)
-    except vault_blob_service.BlobFehler as exc:
-        raise _blob_fehler(exc) from exc
-    return {"id": payload.id}
+# Abgelegt wird nur vom Hintergrund-Job (`/sicherung/eingang`); die App holt ab.
 
 
 @router.get("/eingang", response_model=VaultEingangListe)

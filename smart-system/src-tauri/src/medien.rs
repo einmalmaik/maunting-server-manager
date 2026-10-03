@@ -60,19 +60,18 @@ pub async fn medien_zugriff(app: AppHandle, fenster: WebviewWindow, anfragen: bo
     ruf(&app, if anfragen { "zugriffAnfragen" } else { "zugriff" }, json!({}))
 }
 
-#[tauri::command(async)]
-pub async fn medien_stand(app: AppHandle, fenster: WebviewWindow) -> Result<Value, String> {
-    nur_hauptfenster(&fenster)?;
-    ruf(&app, "medienStand", json!({}))
-}
-
 /// Kennung einer Installation: eine UUID, sonst nichts (Alias im Keystore).
 fn pruefe_geraet(geraet: &str) -> Result<(), String> {
-    let teile: Vec<&str> = geraet.split('-').collect();
-    let laengen = [8, 4, 4, 4, 12];
-    let gut = teile.len() == 5
-        && teile.iter().zip(laengen).all(|(t, l)| t.len() == l && t.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
-    if gut { Ok(()) } else { Err("Ungültige Gerätekennung".into()) }
+    if ist_uuid(geraet) { Ok(()) } else { Err("Ungültige Gerätekennung".into()) }
+}
+
+fn ist_uuid(wert: &str) -> bool {
+    let teile: Vec<&str> = wert.split('-').collect();
+    teile.len() == 5
+        && teile
+            .iter()
+            .zip([8, 4, 4, 4, 12])
+            .all(|(t, l)| t.len() == l && t.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()))
 }
 
 #[tauri::command(async)]
@@ -82,45 +81,141 @@ pub async fn medien_sicherung_schluessel(app: AppHandle, fenster: WebviewWindow,
     ruf(&app, "sicherungSchluessel", json!({ "geraet": geraet }))
 }
 
-#[tauri::command(async)]
-pub async fn medien_sicherung_signieren(
-    app: AppHandle,
-    fenster: WebviewWindow,
-    geraet: String,
-    daten: String,
-) -> Result<Value, String> {
-    nur_hauptfenster(&fenster)?;
-    pruefe_geraet(&geraet)?;
-    // Base64 von höchstens 64 KiB.
-    if daten.len() > 88_000 {
-        return Err("Zu viele Daten".into());
+/// Das Panel, mit dem der Hintergrund-Job spricht. Nur https; http nur im
+/// Debug-Bau (Emulator gegen den Dev-Stack). Keine Anmeldedaten, keine Abfrage.
+fn pruefe_server(server: &str) -> Result<(), String> {
+    let rest = server
+        .strip_prefix("https://")
+        .or_else(|| if cfg!(debug_assertions) { server.strip_prefix("http://") } else { None })
+        .ok_or("Das Panel muss über https erreichbar sein.")?;
+    let gut = !rest.is_empty()
+        && server.len() <= 300
+        && !rest.starts_with('/')
+        && rest.chars().all(|c| c.is_ascii_graphic() && !matches!(c, '@' | '?' | '#' | '\\'));
+    if gut { Ok(()) } else { Err("Ungültige Adresse des Panels".into()) }
+}
+
+/// Was `/api/vault/sicherung/zugang` ausgibt: `msz1.<konto>.<familie>.<geheim>`.
+fn pruefe_zugang(zugang: &str) -> Result<(), String> {
+    let teile: Vec<&str> = zugang.split('.').collect();
+    let gut = teile.len() == 4
+        && teile[0] == "msz1"
+        && zugang.len() <= 256
+        && teile[1..].iter().all(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    if gut { Ok(()) } else { Err("Ungültiger Sicherungszugang".into()) }
+}
+
+/// Der öffentliche Schlüssel des Posteingangs muss sich in Rust nutzen lassen,
+/// bevor der Job ihn bekommt: sonst scheiterte jede Aufnahme erst im Hintergrund.
+fn pruefe_posteingang(pq: &str, rsa: &str) -> Result<(), String> {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let pq = b64.decode(pq).map_err(|_| "Ungültiger Posteingang")?;
+    let rsa = b64.decode(rsa).map_err(|_| "Ungültiger Posteingang")?;
+    crate::kamera_krypto::hybrid_verschluesseln(b"probe", &pq, &rsa, b"probe")
+        .map(|_| ())
+        .map_err(|_| "Ungültiger Posteingang".into())
+}
+
+fn pruefe_bucket(bucket: &str) -> Result<(), String> {
+    if bucket.len() == 64 && bucket.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()) {
+        Ok(())
+    } else {
+        Err("Ungültiger Tresor".into())
     }
-    ruf(&app, "sicherungSignieren", json!({ "geraet": geraet, "daten": daten }))
+}
+
+/// Schaltet die Sicherung ein oder erneuert den Zugang. Der Zugang geht nur
+/// an `MedienPlugin.kt`, das ihn mit einem Keystore-Schlüssel ablegt.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command(async)]
+pub async fn medien_einrichten(
+    app: AppHandle,
+    fenster: WebviewWindow,
+    konto: i64,
+    server: String,
+    bucket: String,
+    geraet: String,
+    zugang: String,
+    eingang_id: String,
+    pq: String,
+    rsa: String,
+    nur_wlan: bool,
+) -> Result<Value, String> {
+    nur_hauptfenster(&fenster)?;
+    if konto <= 0 {
+        return Err("Ungültiges Konto".into());
+    }
+    pruefe_server(&server)?;
+    pruefe_bucket(&bucket)?;
+    pruefe_geraet(&geraet)?;
+    pruefe_zugang(&zugang)?;
+    if !ist_uuid(&eingang_id) {
+        return Err("Ungültiger Posteingang".into());
+    }
+    pruefe_posteingang(&pq, &rsa)?;
+    ruf(
+        &app,
+        "einrichten",
+        json!({
+            "konto": konto, "server": server, "bucket": bucket, "geraet": geraet, "zugang": zugang,
+            "eingangId": eingang_id, "pq": pq, "rsa": rsa, "nurWlan": nur_wlan,
+        }),
+    )
 }
 
 #[tauri::command(async)]
-pub async fn medien_aufnahmen(
-    app: AppHandle,
-    fenster: WebviewWindow,
-    nach: i64,
-    hoechstens: u32,
-) -> Result<Value, String> {
+pub async fn medien_sicherung_stand(app: AppHandle, fenster: WebviewWindow) -> Result<Value, String> {
     nur_hauptfenster(&fenster)?;
-    ruf(&app, "aufnahmen", json!({ "nach": nach.max(0), "hoechstens": hoechstens }))
+    ruf(&app, "stand", json!({}))
+}
+
+/// Höchstens so viele schon gesicherte Aufnahmen je Aufruf.
+const BEKANNT_HOECHSTENS: usize = 100_000;
+
+fn pruefe_bekannt(bekannt: &[String]) -> Result<(), String> {
+    let gut = bekannt.len() <= BEKANNT_HOECHSTENS
+        && bekannt.iter().all(|b| match b.split_once(':') {
+            Some((id, sha)) => {
+                !id.is_empty()
+                    && id.len() <= 19
+                    && !id.starts_with('0')
+                    && id.chars().all(|c| c.is_ascii_digit())
+                    && sha.len() == 64
+                    && sha.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+            }
+            None => false,
+        });
+    if gut { Ok(()) } else { Err("Ungültige Liste gesicherter Aufnahmen".into()) }
 }
 
 #[tauri::command(async)]
-pub async fn medien_lesen(
+pub async fn medien_sicherung_aendern(
     app: AppHandle,
     fenster: WebviewWindow,
-    id: i64,
-    art: String,
-    von: u64,
-    laenge: u32,
+    nur_wlan: Option<bool>,
+    vorhandene: bool,
+    bekannt: Vec<String>,
 ) -> Result<Value, String> {
     nur_hauptfenster(&fenster)?;
-    pruefe_art(&art)?;
-    ruf(&app, "lesen", json!({ "id": id, "art": art, "von": von, "laenge": laenge }))
+    pruefe_bekannt(&bekannt)?;
+    let mut daten = json!({ "vorhandene": vorhandene, "bekannt": bekannt });
+    if let Some(w) = nur_wlan {
+        daten["nurWlan"] = json!(w);
+    }
+    ruf(&app, "aendern", daten)
+}
+
+#[tauri::command(async)]
+pub async fn medien_sicherung_vergessen(app: AppHandle, fenster: WebviewWindow) -> Result<Value, String> {
+    nur_hauptfenster(&fenster)?;
+    ruf(&app, "vergessen", json!({}))
+}
+
+#[tauri::command(async)]
+pub async fn medien_sicherung_jetzt(app: AppHandle, fenster: WebviewWindow) -> Result<Value, String> {
+    nur_hauptfenster(&fenster)?;
+    ruf(&app, "jetzt", json!({}))
 }
 
 #[tauri::command(async)]
@@ -163,5 +258,44 @@ mod tests {
         assert!(pruefe_geraet("../msm-kamera").is_err());
         assert!(pruefe_geraet("0f8fad5b-d9cb-469f-a165-70867728950").is_err());
         assert!(pruefe_geraet("").is_err());
+    }
+
+    #[test]
+    fn server_nur_als_https_ohne_anmeldedaten() {
+        assert!(pruefe_server("https://panel.example.com").is_ok());
+        assert!(pruefe_server("https://panel.example.com:8443/msm").is_ok());
+        assert!(pruefe_server("https://nutzer:pw@panel.example.com").is_err());
+        assert!(pruefe_server("https://panel.example.com/?x=1").is_err());
+        assert!(pruefe_server("https:///panel").is_err());
+        assert!(pruefe_server("ftp://panel.example.com").is_err());
+        assert!(pruefe_server("https://panel example.com").is_err());
+        // Im Debug-Bau (Tests) auch http, für den Emulator gegen den Dev-Stack.
+        assert_eq!(pruefe_server("http://10.0.2.2:8000").is_ok(), cfg!(debug_assertions));
+    }
+
+    #[test]
+    fn zugang_nur_in_seiner_form() {
+        assert!(pruefe_zugang("msz1.12.Ab-c_d.XyZ09").is_ok());
+        assert!(pruefe_zugang("msz1.12.fam").is_err());
+        assert!(pruefe_zugang("msz2.12.fam.geheim").is_err());
+        assert!(pruefe_zugang("msz1.12.fa m.geheim").is_err());
+        assert!(pruefe_zugang("msz1.12.fam.ge\nheim").is_err());
+    }
+
+    #[test]
+    fn bekannt_nur_als_kennung_und_pruefsumme() {
+        let sha = "a".repeat(64);
+        assert!(pruefe_bekannt(&[format!("42:{sha}")]).is_ok());
+        assert!(pruefe_bekannt(&[format!("0:{sha}")]).is_err());
+        assert!(pruefe_bekannt(&[format!("-1:{sha}")]).is_err());
+        assert!(pruefe_bekannt(&[format!("42:{}", "A".repeat(64))]).is_err());
+        assert!(pruefe_bekannt(&["42".into()]).is_err());
+    }
+
+    #[test]
+    fn bucket_nur_als_hex() {
+        assert!(pruefe_bucket(&"0".repeat(64)).is_ok());
+        assert!(pruefe_bucket(&"0".repeat(63)).is_err());
+        assert!(pruefe_bucket(&"g".repeat(64)).is_err());
     }
 }
