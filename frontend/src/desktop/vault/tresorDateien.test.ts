@@ -460,11 +460,11 @@ describe('Tresor-Dateien', () => {
     await tresorOeffnen()
     const id = await useVaultStore.getState().dateiHinzufuegen(foto(9 * 1024 * 1024))
     await vi.waitFor(() => expect(server.puts.length).toBeGreaterThan(0))
+    const original = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.original.id
     setzeAngemeldetesKonto(2)
     const gesendet = server.puts.length
     await new Promise((r) => setTimeout(r, 400))
 
-    const original = useVaultStore.getState().items.find((i) => i.id === id)!.datei!.original.id
     expect(server.puts.length).toBeLessThanOrEqual(gesendet + 1)
     expect(server.blobs.get(original)?.state).not.toBe('fertig')
     expect(await zeilen(UPLOADS)).not.toEqual([])
@@ -1419,9 +1419,9 @@ describe('Review: Negativtests Tresor-Client', () => {
     await useVaultStore.getState().syncWithServer()
     await synchron()
 
-    // Jetzt gleicht Gerät B ab (eigene Ablage, eigene Fassung als Stand).
+    // Jetzt gleicht Gerät B ab: dasselbe Konto, eigene Ablage, eigene Fassung als Stand.
     ablageSchliessen()
-    setzeAngemeldetesKonto(2)
+    globalThis.indexedDB = new IDBFactory()
     await ablageLaden(BUCKET)
     blobsSchreiben(BUCKET, [{ id: 'pw', ciphertext: vonB, revision: revB, is_deleted: false, stand: standB, serverRev: revB }])
     revisionSchreiben(BUCKET, revB)

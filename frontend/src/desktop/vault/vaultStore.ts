@@ -26,6 +26,7 @@ import {
   biometrieSpeicherFragtSelbst,
 } from '../tauri'
 import { meldeErrungenschaft } from '@/lib/errungenschaft'
+import { angemeldetesKonto, beiKontowechsel } from '@/lib/angemeldetesKonto'
 import {
   ablageLaden,
   ablageLoeschen,
@@ -324,6 +325,28 @@ const VAULT_SPERR_PRAEFIX = 'mss:vault'
 const VAULT_BIOMETRICS_ENABLED_KEY = 'mss:vault_biometrics_enabled'
 const VAULT_SERVER_BUCKET_KEY = 'mss:vault_server_bucket'
 const VAULT_BIO_MIGRATED_KEY = 'mss:vault_bio_migrated_v2'
+/** Das Konto, dem Salz, Bucket, Canary und Biometrie-Merker gehören. */
+const VAULT_KONTO_KEY = 'mss:vault_konto'
+
+/** Salz, Bucket, Canary und Biometrie-Merker; die Ablage in IndexedDB trägt ihr Konto selbst. */
+function lokaleKennungenLoeschen(): void {
+  if (typeof localStorage === 'undefined') return
+  localStorage.removeItem(VAULT_SETUP_DONE_KEY)
+  localStorage.removeItem(VAULT_CANARY_KEY)
+  localStorage.removeItem(VAULT_BIOMETRICS_ENABLED_KEY)
+  localStorage.removeItem(VAULT_SERVER_BUCKET_KEY)
+  localStorage.removeItem(VAULT_SALT_KEY)
+  const toRemove: string[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i)
+    if (k && k.startsWith(VAULT_CANARY_PREFIX)) {
+      toRemove.push(k)
+    }
+  }
+  for (const k of toRemove) {
+    localStorage.removeItem(k)
+  }
+}
 
 /**
  * Aktive Migration & Bereinigung vulnerabler Altdaten (SEC-CRIT-01):
@@ -980,24 +1003,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
     // sich davon nichts mehr öffnen, und eine liegengebliebene Warteschlange
     // schöbe alte Umschläge in den nächsten Tresor.
     void ablageLoeschen()
-    if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem(VAULT_SETUP_DONE_KEY)
-      localStorage.removeItem(VAULT_CANARY_KEY)
-      localStorage.removeItem(VAULT_BIOMETRICS_ENABLED_KEY)
-      localStorage.removeItem(VAULT_SERVER_BUCKET_KEY)
-      localStorage.removeItem(VAULT_SALT_KEY)
-
-      const toRemove: string[] = []
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i)
-        if (k && k.startsWith(VAULT_CANARY_PREFIX)) {
-          toRemove.push(k)
-        }
-      }
-      for (const k of toRemove) {
-        localStorage.removeItem(k)
-      }
-    }
+    lokaleKennungenLoeschen()
     set({
       isInitialized: false,
       isUnlocked: false,
@@ -1941,12 +1947,63 @@ export const tresorAutoSperrQuelle: AutoSperrQuelle = {
   sperre: () => useVaultStore.getState().lock(),
 }
 
+/**
+ * Bindet Salz, Bucket, Canary und Biometrie-Merker an das angemeldete Konto.
+ *
+ * Bis 03.10.2026 lagen sie ohne Konto im localStorage. Meldete sich im selben
+ * Browser oder in derselben App ein anderes Konto an, hielt der Tresor sich für
+ * eingerichtet und bot mit Salz und Bucket des vorigen Kontos nur „Entsperren“
+ * an; einrichten konnte das neue Konto ihn nicht (gefunden in der
+ * Laufzeitprobe). Gehören die Angaben einem anderen Konto, fallen sie weg.
+ * Steht kein Inhaber dabei (Stand vor dieser Marke), bleiben sie nur, wenn der
+ * Server für dieses Konto denselben Bucket nennt; ohne Antwort wird nichts
+ * entschieden. Liegt gar nichts da, merkt sie sich nur den Inhaber. Die Ablage
+ * in IndexedDB trägt ihr Konto selbst (`tresorAblage`).
+ */
+export async function kennungenDesKontos(konto: number | null): Promise<void> {
+  if (konto === null || typeof localStorage === 'undefined') return
+  const inhaber = localStorage.getItem(VAULT_KONTO_KEY)
+  if (inhaber === String(konto)) return
+  const lokalerBucket = localStorage.getItem(VAULT_SERVER_BUCKET_KEY)
+  const hatAngaben = lokalerBucket !== null
+    || localStorage.getItem(VAULT_SALT_KEY) !== null
+    || localStorage.getItem(VAULT_SETUP_DONE_KEY) !== null
+  if (!hatAngaben) {
+    localStorage.setItem(VAULT_KONTO_KEY, String(konto))
+    return
+  }
+  let fremd = inhaber !== null
+  if (!fremd && lokalerBucket) {
+    let serverBucket: string | null
+    try {
+      const res = await api<{ bucket_id: string | null }>('/api/vault/salt')
+      serverBucket = res.bucket_id
+    } catch {
+      return
+    }
+    if (angemeldetesKonto() !== konto) return
+    fremd = serverBucket !== lokalerBucket
+  }
+  localStorage.setItem(VAULT_KONTO_KEY, String(konto))
+  if (fremd || !lokalerBucket) {
+    lokaleKennungenLoeschen()
+    useVaultStore.getState().lock()
+    useVaultStore.setState({ isInitialized: false, isBiometricsEnabled: false, failedUnlockAttempts: 0, lockedUntilMs: 0 })
+    await useVaultStore.getState().fetchVaultSalt()
+  }
+}
+
 if (typeof window !== 'undefined') {
+  beiKontowechsel((konto) => {
+    void kennungenDesKontos(konto)
+  })
   setTimeout(() => {
     void useVaultStore.getState().checkBiometricsSupport()
-    if (!getLocalVaultSalt()) {
-      void useVaultStore.getState().fetchVaultSalt()
-    }
+    void kennungenDesKontos(angemeldetesKonto()).then(() => {
+      if (!getLocalVaultSalt()) {
+        void useVaultStore.getState().fetchVaultSalt()
+      }
+    })
   }, 50)
 
   // `mss:fenster-blur` kennt nur der Tresor: das Ereignis kommt aus der App,
