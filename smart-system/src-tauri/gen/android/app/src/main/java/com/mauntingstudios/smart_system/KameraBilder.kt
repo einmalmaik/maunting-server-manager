@@ -6,13 +6,14 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.ExifInterface
 import android.media.MediaMetadataRetriever
+import android.net.Uri
 import android.os.Build
 import java.io.ByteArrayOutputStream
 import java.util.Calendar
 import java.util.TimeZone
 
 /**
- * Miniatur, Vorschau und Aufnahmedaten einer Aufnahme, wie `bildAngaben` in
+ * Miniatur, Vorschau und Aufnahmedaten eines Fotos oder Videos, wie `bildAngaben` in
  * `tresorBilder.ts`: WebP mit höchstens 256 bzw. 1600 px an der langen Kante,
  * so klein, dass es in 32 KiB bzw. 512 KiB passt. Scheitert nie; im Zweifel
  * fehlt etwas, und die Datei zeigt im Tresor ein Symbol statt eines Bildes.
@@ -31,10 +32,11 @@ object KameraBilder {
         var miniatur: ByteArray = ByteArray(0)
     }
 
-    fun angaben(ctx: Context, aufnahme: Aufnahme): Angaben {
+    /** `uri`: bei Fotos das Original mit Aufnahmeort (`Medien.original`), oder eine geteilte Datei. */
+    fun angaben(ctx: Context, uri: Uri, video: Boolean): Angaben {
         val a = Angaben()
         try {
-            val bild = if (aufnahme.art == "video") video(ctx, aufnahme, a) else foto(ctx, aufnahme, a)
+            val bild = if (video) video(ctx, uri, a) else foto(ctx, uri, a)
             if (bild != null) {
                 try {
                     a.vorschau = webp(bild, VORSCHAU_KANTE, KameraKrypto.VORSCHAU.toInt())
@@ -51,8 +53,7 @@ object KameraBilder {
         return a
     }
 
-    private fun foto(ctx: Context, aufnahme: Aufnahme, a: Angaben): Bitmap? {
-        val uri = Medien.original(aufnahme.id, aufnahme.art)
+    private fun foto(ctx: Context, uri: Uri, a: Angaben): Bitmap? {
         val drehung = ctx.contentResolver.openInputStream(uri)?.use { ein ->
             val exif = ExifInterface(ein)
             val hersteller = exif.getAttribute(ExifInterface.TAG_MAKE)?.trim().orEmpty()
@@ -86,10 +87,10 @@ object KameraBilder {
         return gedrehtesBild
     }
 
-    private fun video(ctx: Context, aufnahme: Aufnahme, a: Angaben): Bitmap? {
+    private fun video(ctx: Context, uri: Uri, a: Angaben): Bitmap? {
         val leser = MediaMetadataRetriever()
         try {
-            leser.setDataSource(ctx, Medien.adresse(aufnahme.id, aufnahme.art))
+            leser.setDataSource(ctx, uri)
             val ms = leser.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
             if (ms != null) a.dauer = ms / 1000.0
             val b = leser.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()

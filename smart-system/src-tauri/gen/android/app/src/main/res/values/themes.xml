@@ -24,4 +24,9 @@
         <item name="android:backgroundDimEnabled">false</item>
         <item name="android:windowAnimationStyle">@null</item>
     </style>
+
+    <!-- Für TeilenActivity: ein kleines Fenster mit Fortschritt über der App, aus der geteilt wird. -->
+    <style name="Theme.MSS.Teilen" parent="Theme.MaterialComponents.DayNight.Dialog">
+        <item name="android:windowCloseOnTouchOutside">false</item>
+    </style>
 </resources>

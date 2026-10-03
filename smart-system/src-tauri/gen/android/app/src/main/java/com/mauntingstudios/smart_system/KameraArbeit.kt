@@ -18,21 +18,18 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.security.MessageDigest
-import java.security.SecureRandom
 import java.time.Duration
-import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
  * Die Kamera-Sicherung, auch bei geschlossener App und gesperrtem Tresor.
  *
  * Es gibt nur diesen einen Weg (AGENTS.md Punkt 32): auch bei offener App
- * sichert dieser Job. Jede neue Aufnahme aus DCIM wird zu einem Auftrag:
+ * sichert dieser Job. Jedes neue Foto und Video (`Medien.auswahl`) wird zu einem Auftrag:
  * drei Blobs (Original Bit für Bit, Vorschau, Miniatur) mit eigenen, rohen
  * Schlüsseln und ein Datensatz für den Posteingang, hybrid verschlüsselt mit
  * dem öffentlichen Schlüssel des Tresors und vom Gerät unterschrieben (Format
@@ -53,11 +50,11 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
     private class Verloren : Exception()
 
     private val ctx = applicationContext
-    private val zufall = SecureRandom()
 
     override fun doWork(): Result {
         val stand = KameraAblage.lesen(ctx) ?: return Result.success()
         val kennung = stand.kennung
+        KameraTeilen.aufraeumen(ctx, kennung)
         if (Medien.stand(ctx) != "voll") return warten(kennung, "zugriff")
         if (stand.nurWlan && !imWlan(ctx)) return warten(kennung, "wlan")
 
@@ -116,11 +113,15 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
         // Ein neu aufgebauter MediaStore zählt von vorn; mit der alten Marke fände die Sicherung nie wieder etwas.
         val (jetzt, fassung) = Medien.jetzt(ctx)
         if (fassung != stand.fassung) {
-            stand = KameraAblage.aendern(ctx, kennung) { it.copy(marke = jetzt, markeId = KameraAblage.ALLE, fassung = fassung, screenshotsAb = jetzt) }
+            stand = KameraAblage.aendern(ctx, kennung) { it.copy(marke = jetzt, markeId = KameraAblage.ALLE, fassung = fassung, screenshotsAb = jetzt, weitereAb = jetzt) }
                 ?: throw Abbruch()
         }
+        // Nach dem Update, das die weiteren Ordner brachte: ab jetzt, nicht bis zur letzten Kameraaufnahme zurück.
+        if (stand.weitereAb == KameraAblage.NEU) {
+            stand = KameraAblage.aendern(ctx, kennung) { if (it.weitereAb == KameraAblage.NEU) it.copy(weitereAb = jetzt) else it } ?: throw Abbruch()
+        }
         while (true) {
-            val aufnahmen = Medien.aufnahmen(ctx, stand.marke, stand.markeId, 20, stand.screenshotsAb.takeIf { stand.screenshots })
+            val aufnahmen = Medien.aufnahmen(ctx, stand.marke, stand.markeId, 20, stand.weitereAb, stand.screenshotsAb.takeIf { stand.screenshots })
             if (aufnahmen.isEmpty()) return
             for (aufnahme in aufnahmen) {
                 weiter(kennung)
@@ -138,13 +139,6 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
         }
     }
 
-    private fun hex(anzahl: Int) = Medien.hex(ByteArray(anzahl).also { zufall.nextBytes(it) })
-
-    private fun kopf(groesse: Long, echt: Long, rolle: String) = JSONObject().apply {
-        put("rolle", rolle); put("id", hex(16)); put("groesse", groesse); put("echt", echt)
-        put("schluessel", hex(32)); put("loeschen", hex(32))
-    }
-
     /** Ein Auftrag für eine Aufnahme, oder `null`, wenn sie schon gesichert ist, gerade gesichert wird oder weg ist. */
     private fun vorbereiten(kennung: String, aufnahme: Aufnahme): JSONObject? {
         val stand = KameraAblage.lesen(ctx)?.takeIf { it.kennung == kennung } ?: throw Abbruch()
@@ -156,72 +150,27 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
             return null
         }
         val schluessel = "${aufnahme.id}:$sha"
-        if (schluessel in KameraAblage.bekannt(ctx)) return null
-        if (KameraAblage.auftraege(ctx, kennung).any { "${it.getLong("medienId")}:${it.getString("sha")}" == schluessel }) return null
+        val bekannt = KameraAblage.bekannt(ctx)
+        // `0:` gilt für jede Kennung: eine Datei, die aus dem Tresor aufs Telefon gespeichert oder in ihn geteilt wurde.
+        if (schluessel in bekannt || "0:$sha" in bekannt) return null
+        // Ebenso, wenn dieselbe Datei gerade als geteilte Datei unterwegs ist.
+        if (KameraAblage.auftraege(ctx, kennung).any {
+                (it.has("lokal") && it.getString("sha") == sha) || "${it.optLong("medienId")}:${it.getString("sha")}" == schluessel
+            }
+        ) return null
 
-        val bilder = KameraBilder.angaben(ctx, aufnahme)
-        val id = UUID.randomUUID().toString()
-        val original = kopf(KameraKrypto.gepolstert(groesse), groesse, "original")
-        val vorschau = kopf(KameraKrypto.VORSCHAU, bilder.vorschau.size.toLong(), "vorschau")
-        val miniatur = kopf(KameraKrypto.MINIATUR, bilder.miniatur.size.toLong(), "miniatur")
-        val name = aufnahme.name.ifEmpty { "${if (aufnahme.art == "video") "VID" else "IMG"}_${aufnahme.id}" }.take(255)
-
-        fun ohneRolle(k: JSONObject) = JSONObject(k.toString()).apply { remove("rolle") }
-        val inhalt = JSONObject().apply {
+        val video = aufnahme.art == "video"
+        val bilder = KameraBilder.angaben(ctx, if (video) Medien.adresse(aufnahme.id, aufnahme.art) else Medien.original(aufnahme.id, aufnahme.art), video)
+        val name = aufnahme.name.ifEmpty { "${if (video) "VID" else "IMG"}_${aufnahme.id}" }.take(255)
+        val angaben = JSONObject().apply {
             put("name", name)
             put("typ", aufnahme.typ.take(255))
             put("geaendert", aufnahme.aufgenommen)
-            bilder.aufgenommen?.let { put("aufgenommen", it) }
-            bilder.kamera?.let { put("kamera", it) }
-            bilder.breite?.let { put("breite", it) }
-            bilder.hoehe?.let { put("hoehe", it) }
-            bilder.dauer?.let { put("dauer", it) }
-            put("original", ohneRolle(original))
-            put("vorschau", ohneRolle(vorschau))
-            put("miniatur", ohneRolle(miniatur))
             put("quelle", JSONObject().apply {
                 put("geraet", stand.geraet); put("medienId", aufnahme.id); put("art", aufnahme.art); put("sha256", sha)
             })
         }
-        return JSONObject().apply {
-            put("id", id)
-            put("medienId", aufnahme.id)
-            put("art", aufnahme.art)
-            put("sha", sha)
-            // Kleine Blobs zuerst, das Original zuletzt: es wird erst fertiggemeldet, wenn es noch dieselben Bytes hat.
-            put("blobs", JSONArray().put(miniatur).put(vorschau).put(original))
-            put("vorschau", Base64.encodeToString(bilder.vorschau, Base64.NO_WRAP))
-            put("miniatur", Base64.encodeToString(bilder.miniatur, Base64.NO_WRAP))
-            put("umschlag", verpacken(stand, id, inhalt.toString()))
-            put("angelegt", false)
-        }
-    }
-
-    /** Wie `eingangVerpacken` in `tresorEingang.ts`. */
-    private fun verpacken(stand: KameraAblage.Stand, eingangId: String, json: String): String {
-        // Leerzeichen am Ende ändern nichts an JSON.parse; Namen sollen nicht an der Länge auffallen.
-        // Gezählt in UTF-8-Bytes, so wie sie verschlüsselt werden.
-        val roh = json.toByteArray(Charsets.UTF_8)
-        val gepolstert = roh.copyOf(((roh.size + 1 + POLSTER - 1) / POLSTER) * POLSTER)
-        gepolstert.fill(' '.code.toByte(), roh.size)
-        roh.fill(0)
-        val chiffrat = try {
-            KameraKrypto.hybrid(
-                gepolstert,
-                Base64.decode(stand.pq, Base64.NO_WRAP),
-                Base64.decode(stand.rsa, Base64.NO_WRAP),
-                "$DOMAENE:${stand.bucket}:$eingangId".toByteArray(Charsets.UTF_8),
-            )
-        } finally {
-            gepolstert.fill(0)
-        }
-        val daten = Base64.encodeToString(chiffrat, Base64.NO_WRAP)
-        val signiert = listOf(DOMAENE, FORMAT.toString(), stand.bucket, eingangId, stand.eingangId, stand.geraet, daten).joinToString("\n")
-        val signatur = SicherungsSchluessel.unterschreiben(stand.geraet, signiert.toByteArray(Charsets.UTF_8))
-        return JSONObject().apply {
-            put("v", FORMAT); put("schluessel", stand.eingangId); put("geraet", stand.geraet); put("daten", daten)
-            put("signatur", Base64.encodeToString(signatur, Base64.NO_WRAP))
-        }.toString()
+        return KameraAuftrag.bauen(stand, angaben, bilder, groesse, sha, JSONObject().put("medienId", aufnahme.id).put("art", aufnahme.art))
     }
 
     private fun blobs(auftrag: JSONObject): List<JSONObject> {
@@ -234,10 +183,17 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
             hochladen(server, kennung, auftrag)
         } catch (e: Verloren) {
             verwerfen(server, auftrag)
-            // Noch da (geändert oder beim Server aufgeräumt): einmal neu, mit den Bytes von jetzt.
-            // Ein Auftrag ist schon zugelassen; hier zählt nur, ob die Aufnahme noch da ist.
-            val aufnahme = Medien.aufnahme(ctx, auftrag.getLong("medienId"), auftrag.getString("art"), 0) ?: return
-            val neu = vorbereiten(kennung, aufnahme) ?: return
+            val neu = if (auftrag.has("lokal")) {
+                // Geteilt: die verschlüsselte Kopie liegt noch auf dem Telefon, neue Blobs für sie.
+                val stand = KameraAblage.lesen(ctx)?.takeIf { it.kennung == kennung } ?: throw Abbruch()
+                if (!KameraTeilen.vorhanden(ctx, auftrag)) return
+                KameraAuftrag.neu(stand, auftrag)
+            } else {
+                // Noch da (geändert oder beim Server aufgeräumt): einmal neu, mit den Bytes von jetzt.
+                // Ein Auftrag ist schon zugelassen; hier zählt nur, ob die Aufnahme noch da ist.
+                val aufnahme = Medien.aufnahme(ctx, auftrag.getLong("medienId"), auftrag.getString("art")) ?: return
+                vorbereiten(kennung, aufnahme) ?: return
+            }
             if (!KameraAblage.auftragSchreiben(ctx, kennung, neu)) throw Abbruch()
         }
     }
@@ -288,7 +244,7 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
             } finally {
                 schluessel.fill(0)
             }
-            if (b.getString("rolle") == "original") {
+            if (b.getString("rolle") == "original" && !auftrag.has("lokal")) {
                 val jetzt = try {
                     Medien.pruefsumme(ctx, auftrag.getLong("medienId"), auftrag.getString("art")).first
                 } catch (e: Exception) {
@@ -299,7 +255,13 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
             server.fertig(blobId)
         }
         KameraAblage.auftragEntfernen(ctx, id)
-        KameraAblage.bekanntDazu(ctx, kennung, listOf("${auftrag.getLong("medienId")}:${auftrag.getString("sha")}"))
+        if (auftrag.has("lokal")) {
+            KameraTeilen.entfernen(ctx, auftrag)
+            // Liegt dieselbe Datei in einem gesicherten Ordner, geht sie nicht noch einmal hoch.
+            KameraAblage.bekanntDazu(ctx, kennung, listOf("0:${auftrag.getString("sha")}"))
+        } else {
+            KameraAblage.bekanntDazu(ctx, kennung, listOf("${auftrag.getLong("medienId")}:${auftrag.getString("sha")}"))
+        }
         KameraAblage.aendern(ctx, kennung) { it.copy(gesichert = it.gesichert + 1, zuletzt = System.currentTimeMillis(), warten = null) }
     }
 
@@ -316,7 +278,11 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
             }
         }
         val daten = try {
-            Medien.lesen(ctx, auftrag.getLong("medienId"), auftrag.getString("art"), von, laenge)
+            if (auftrag.has("lokal")) {
+                KameraTeilen.lesen(ctx, auftrag, index)
+            } else {
+                Medien.lesen(ctx, auftrag.getLong("medienId"), auftrag.getString("art"), von, laenge)
+            }
         } catch (e: Exception) {
             throw Verloren()
         }
@@ -355,9 +321,6 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
             return false
         }
 
-        private const val DOMAENE = "msm-tresor-eingang-v1"
-        private const val FORMAT = 1
-        private const val POLSTER = 4096
     }
 }
 
@@ -435,7 +398,9 @@ object KameraPlan {
 
     /** Nach dem Einrichten, nach einem Update und beim Start der App. */
     fun planen(ctx: Context) {
-        if (KameraAblage.lesen(ctx) == null) return
+        val an = KameraAblage.lesen(ctx) != null
+        KameraTeilen.zielSetzen(ctx, an)
+        if (!an) return
         ausloeserAufstellen(ctx)
         WorkManager.getInstance(ctx).enqueueUniquePeriodicWork(
             TAEGLICH,
@@ -446,6 +411,7 @@ object KameraPlan {
     }
 
     fun abbestellen(ctx: Context) {
+        KameraTeilen.zielSetzen(ctx, false)
         val wm = WorkManager.getInstance(ctx)
         wm.cancelUniqueWork(WACHE)
         wm.cancelUniqueWork(TAEGLICH)

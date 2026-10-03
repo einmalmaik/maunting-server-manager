@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import { useToastStore } from '@/stores/toastStore'
 import { usePromptStore } from '@/stores/promptStore'
-import { TresorGalerie, nachbarKachel } from './TresorGalerie'
+import { TresorGalerie, anDiesemTag, nachbarKachel } from './TresorGalerie'
 import { useVaultStore } from './vaultStore'
 import { type VaultItem } from './vaultEintrag'
 
@@ -419,6 +419,60 @@ describe('TresorGalerie', () => {
       fireEvent.keyDown(kacheln[0], { key: 'ArrowLeft' })
       expect(kacheln[0]).toHaveFocus()
     })
+  })
+})
+
+describe('anDiesemTag', () => {
+  const am = (id: string, ms: number, feld: 'aufgenommen' | 'geaendert' = 'aufgenommen'): VaultItem => ({
+    id,
+    service: `${id}.jpg`,
+    username: '',
+    password: '',
+    category: 'datei',
+    createdAt: Date.UTC(2026, 6, 20),
+    updatedAt: 1,
+    revision: 1,
+    datei: { typ: 'image/jpeg', original: kopf(`${id}a`), vorschau: kopf(`${id}b`), miniatur: kopf(`${id}c`), [feld]: ms },
+  })
+
+  it('nimmt Fotos von diesem Kalendertag aus früheren Jahren, das jüngste Jahr zuerst', () => {
+    const heute = new Date(2027, 6, 20, 9, 0)
+    const gruppen = anDiesemTag(
+      [
+        am('vor1', Date.UTC(2026, 6, 20, 23, 30)),
+        am('vor3', Date.UTC(2024, 6, 20, 8)),
+        am('auchVor1', new Date(2026, 6, 20, 12).getTime(), 'geaendert'),
+        am('gestern', Date.UTC(2026, 6, 19, 12)),
+        am('heute', Date.UTC(2027, 6, 20, 7)),
+      ],
+      heute,
+    )
+    expect(gruppen.map((g) => [g.jahre, g.items.map((i) => i.id)])).toEqual([
+      [1, ['vor1', 'auchVor1']],
+      [3, ['vor3']],
+    ])
+  })
+
+  it('zählt das Hochladen nicht als Erinnerung', () => {
+    const ohneDatum = { ...am('x', 0), datei: { typ: 'image/jpeg', original: kopf('xa'), vorschau: kopf('xb'), miniatur: kopf('xc') } }
+    expect(anDiesemTag([ohneDatum], new Date(2027, 6, 20))).toEqual([])
+  })
+
+  it('zeigt die Karte in „Alle“ und öffnet das Foto', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2027, 6, 20, 9, 0))
+    try {
+      useVaultStore.setState({
+        userKey: {} as CryptoKey,
+        items: [am('vor1', Date.UTC(2026, 6, 20, 10)), am('anders', Date.UTC(2026, 6, 3, 10))],
+      })
+      render(<TresorGalerie />)
+      const tag = screen.getByRole('region', { name: 'An diesem Tag' })
+      fireEvent.click(within(tag).getByRole('button', { name: 'Vor einem Jahr, 1 Element' }))
+      expect(await screen.findByRole('dialog')).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

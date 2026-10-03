@@ -352,6 +352,56 @@ describe('Übernahme beim Entsperren', () => {
     expect(liegtNoch(id)).toBe(false)
   })
 
+  it('übernimmt eine aus einer anderen App geteilte Datei, die keine Aufnahme ist', async () => {
+    // Geteilt hat keine Quelle: „Speicher freigeben“ fasst sie nie an, und zweimal geteilt sind zwei Einträge.
+    const ids = [crypto.randomUUID(), crypto.randomUUID()]
+    for (const id of ids) {
+      const { angaben } = await aufnahme(id, new Uint8Array(10))
+      await ablegen(id, { ...angaben, name: 'Rechnung.pdf', typ: 'application/pdf', aufgenommen: undefined, quelle: undefined })
+    }
+
+    await eingangAnstossen(BUCKET)
+    const eintraege = dateiEintraege()
+    expect(eintraege.map((e) => e.id).sort()).toEqual([...ids].sort())
+    for (const e of eintraege) {
+      expect(e).toMatchObject({ service: 'Rechnung.pdf', datei: { typ: 'application/pdf' } })
+      expect(e.datei!.quelle).toBeUndefined()
+    }
+  })
+
+  it('legt eine geteilte Datei nicht an, die das Telefon schon als Aufnahme gesichert hat', async () => {
+    // WhatsApp legt ein Foto in einen gesicherten Ordner, danach teilt es jemand in den Tresor.
+    const aufgenommen = crypto.randomUUID()
+    const erste = await aufnahme(aufgenommen, new Uint8Array(10))
+    await ablegen(aufgenommen, erste.angaben)
+    await eingangAnstossen(BUCKET)
+
+    const id = crypto.randomUUID()
+    const { angaben } = await aufnahme(id, new Uint8Array(10))
+    await ablegen(id, { ...angaben, quelle: undefined, sha256: erste.angaben.quelle!.sha256 })
+
+    await eingangAnstossen(BUCKET)
+    expect(dateiEintraege().map((e) => e.id)).toEqual([aufgenommen])
+    expect(liegtNoch(id)).toBe(false)
+    const freigegeben = vi.mocked(blobLoeschen).mock.calls.map(([, blob]) => blob)
+    expect(freigegeben).toEqual([angaben.original.id, angaben.vorschau.id, angaben.miniatur.id])
+  })
+
+  it('legt eine geteilte Datei an, deren Aufnahme im Papierkorb liegt', async () => {
+    const aufgenommen = crypto.randomUUID()
+    const erste = await aufnahme(aufgenommen, new Uint8Array(10))
+    await ablegen(aufgenommen, erste.angaben)
+    await eingangAnstossen(BUCKET)
+    await useVaultStore.getState().trashItem(aufgenommen)
+
+    const id = crypto.randomUUID()
+    const { angaben } = await aufnahme(id, new Uint8Array(10))
+    await ablegen(id, { ...angaben, quelle: undefined, sha256: erste.angaben.quelle!.sha256 })
+
+    await eingangAnstossen(BUCKET)
+    expect(dateiEintraege().map((e) => e.id).sort()).toEqual([aufgenommen, id].sort())
+  })
+
   it('legt dieselbe Aufnahme kein zweites Mal an und gibt ihre Blobs frei', async () => {
     // Dieselbe Aufnahme zweimal, etwa nach einem neu aufgebauten MediaStore.
     const erste = crypto.randomUUID()

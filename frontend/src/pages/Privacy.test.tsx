@@ -141,11 +141,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.21 vom 2026-10-03 aus (neuer Versuch nach Fehlern)', () => {
+  it('weist die Fassung 3.22 vom 2026-10-04 aus (alle Fotos und Videos, Teilen in den Tresor)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.21`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.22`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -206,13 +206,17 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/Bildschirmfotos .* nur, wenn Sie das eigens einschalten/);
     // 3.21: nach einem Netz- oder Serverfehler fragt das Telefon alle 15 Minuten erneut.
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/nach einem Netz- oder Serverfehler alle 15 Minuten/);
+    // 3.22: nicht mehr nur DCIM, sondern auch Ordner anderer Apps; Teilen in den Tresor.
+    expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).not.toMatch(/Aufnahme im Kamera-Ordner/);
+    expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/Ordner anderer Apps wie Messenger oder Downloads/);
+    expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/„Tresor“ im Teilen-Menü/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-10-03');
-    expect(stand).toHaveTextContent('2026-10-03');
+    expect(stand).toHaveAttribute('datetime', '2026-10-04');
+    expect(stand).toHaveTextContent('2026-10-04');
   });
 
   /**

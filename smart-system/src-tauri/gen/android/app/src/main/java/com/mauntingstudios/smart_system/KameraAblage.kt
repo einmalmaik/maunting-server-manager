@@ -49,6 +49,12 @@ object KameraAblage {
          */
         val screenshotsAb: Long = 0,
         /**
+         * Ordner außerhalb von DCIM (Messenger, Downloads) zählen erst ab dieser
+         * Marke, wie Bildschirmfotos (Punkt 108). `NEU`: der Stand stammt von
+         * vor diesen Ordnern; der nächste Lauf setzt sie auf jetzt.
+         */
+        val weitereAb: Long = NEU,
+        /**
          * Alle Aufnahmen bis zu dieser Stelle sind in einem Auftrag oder erledigt:
          * Marke, und bei gleicher Marke die Kennung (`markeId`). Viele Aufnahmen
          * können dieselbe Generation tragen (eine Transaktion des MediaStore).
@@ -65,7 +71,7 @@ object KameraAblage {
         fun json(): JSONObject = JSONObject().apply {
             put("kennung", kennung); put("konto", konto); put("server", server); put("bucket", bucket)
             put("geraet", geraet); put("zugang", zugang); put("eingangId", eingangId); put("pq", pq); put("rsa", rsa)
-            put("nurWlan", nurWlan); put("screenshots", screenshots); put("screenshotsAb", screenshotsAb); put("marke", marke); put("markeId", markeId); put("fassung", fassung)
+            put("nurWlan", nurWlan); put("screenshots", screenshots); put("screenshotsAb", screenshotsAb); put("weitereAb", weitereAb); put("marke", marke); put("markeId", markeId); put("fassung", fassung)
             put("gesichert", gesichert); put("zuletzt", zuletzt); put("warten", warten ?: JSONObject.NULL)
         }
 
@@ -74,7 +80,7 @@ object KameraAblage {
                 kennung = j.getString("kennung"), konto = j.getLong("konto"), server = j.getString("server"),
                 bucket = j.getString("bucket"), geraet = j.getString("geraet"), zugang = j.getString("zugang"),
                 eingangId = j.getString("eingangId"), pq = j.getString("pq"), rsa = j.getString("rsa"),
-                nurWlan = j.getBoolean("nurWlan"), screenshots = j.optBoolean("screenshots"), screenshotsAb = j.optLong("screenshotsAb"), marke = j.getLong("marke"), markeId = j.optLong("markeId", ALLE),
+                nurWlan = j.getBoolean("nurWlan"), screenshots = j.optBoolean("screenshots"), screenshotsAb = j.optLong("screenshotsAb"), weitereAb = j.optLong("weitereAb", NEU), marke = j.getLong("marke"), markeId = j.optLong("markeId", ALLE),
                 fassung = j.getString("fassung"), gesichert = j.optInt("gesichert"), zuletzt = j.optLong("zuletzt"),
                 warten = if (j.isNull("warten")) null else j.optString("warten"),
             )
@@ -83,6 +89,9 @@ object KameraAblage {
 
     /** `markeId` für „alles mit dieser Marke ist durch“. */
     const val ALLE = Long.MAX_VALUE
+
+    /** `weitereAb` eines Stands von vor den weiteren Ordnern. */
+    const val NEU = -1L
 
     private const val SCHLUESSEL = "msm-kamera-ablage"
     private val sperre = Any()

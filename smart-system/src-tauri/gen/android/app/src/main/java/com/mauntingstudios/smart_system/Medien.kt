@@ -10,7 +10,7 @@ import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import java.security.MessageDigest
 
-/** Eine Aufnahme aus DCIM (auf Wunsch auch ein Bildschirmfoto), so wie der MediaStore sie nennt. */
+/** Ein Foto oder Video des Telefons, so wie der MediaStore es nennt. */
 data class Aufnahme(
     val id: Long,
     val marke: Long,
@@ -85,29 +85,39 @@ object Medien {
 
     /**
      * Die WHERE-Klausel samt Werten: was hinter der Stelle (`nach`, `nachId`)
-     * liegt, fertig ist und in einem gesicherten Ordner. Die Kamera-Ordner
-     * immer; Bildschirmfotos nur, wenn eingeschaltet, und erst ab ihrer
-     * eigenen Marke (AGENTS.md Punkt 108). Manche Hersteller legen sie unter
-     * DCIM ab, deshalb zählen sie dort nicht als Kamera. Messenger-Bilder nie.
+     * liegt und fertig ist. Gesichert werden alle Fotos und Videos des
+     * Telefons, auch aus Messengern und Downloads; Ordner außerhalb von DCIM
+     * aber erst ab `weitereAb` (sie kamen nach der Kamera dazu, AGENTS.md
+     * Punkt 108). Bildschirmfotos nur, wenn eingeschaltet, und erst ab ihrer
+     * eigenen Marke. Manche Hersteller legen sie unter DCIM ab, deshalb zählen
+     * sie dort nicht als Kamera. Sticker (WhatsApp, Telegram, Signal) nie: es
+     * sind Hunderte kleiner Bilder, die niemand sichern will.
      *
      * Rein, damit die Tests sie gegen eine echte SQLite-Datenbank prüfen können.
      */
-    fun auswahl(sdk: Int, nach: Long, nachId: Long, screenshotsAb: Long?, nurId: Long? = null): Pair<String, List<String>> {
+    fun auswahl(sdk: Int, nach: Long, nachId: Long, weitereAb: Long, screenshotsAb: Long?, nurId: Long? = null): Pair<String, List<String>> {
         val marke = markeSpalte(sdk)
-        val (pfad, vor) = if (sdk >= 29) {
+        val (spalte, vor) = if (sdk >= 29) {
             MediaStore.MediaColumns.RELATIVE_PATH to ""
         } else {
             @Suppress("DEPRECATION")
             MediaStore.MediaColumns.DATA to "%/"
         }
-        val kamera = "($pfad LIKE ? AND $pfad NOT LIKE ?)"
-        val bildschirm = "(($pfad LIKE ? OR $pfad LIKE ?) AND $marke > ?)"
-        val ort = if (screenshotsAb != null) "($kamera OR $bildschirm)" else kamera
+        val pfad = "COALESCE($spalte, '')"
+        val bildschirm = "($pfad LIKE ? OR $pfad LIKE ?)"
+        val sonst = "($pfad LIKE ? OR $marke > ?)"
+        val ort = if (screenshotsAb != null) {
+            "(($bildschirm AND $marke > ?) OR (NOT $bildschirm AND $sonst))"
+        } else {
+            "(NOT $bildschirm AND $sonst)"
+        }
         val id = MediaStore.MediaColumns._ID
-        var auswahl = "($marke > ? OR ($marke = ? AND $id > ?)) AND $ort"
+        var auswahl = "($marke > ? OR ($marke = ? AND $id > ?)) AND $pfad NOT LIKE ? AND $ort"
         if (sdk >= 29) auswahl += " AND ${MediaStore.MediaColumns.IS_PENDING} = 0"
-        val werte = mutableListOf(nach.toString(), nach.toString(), nachId.toString(), "${vor}DCIM/%", "${vor}DCIM/Screenshots/%")
-        if (screenshotsAb != null) werte += listOf("${vor}DCIM/Screenshots/%", "${vor}Pictures/Screenshots/%", screenshotsAb.toString())
+        val screenshots = listOf("${vor}DCIM/Screenshots/%", "${vor}Pictures/Screenshots/%")
+        val werte = mutableListOf(nach.toString(), nach.toString(), nachId.toString(), "%Sticker%")
+        if (screenshotsAb != null) werte += screenshots + screenshotsAb.toString()
+        werte += screenshots + listOf("${vor}DCIM/%", weitereAb.toString())
         if (nurId != null) {
             auswahl += " AND $id = ?"
             werte.add(nurId.toString())
@@ -137,24 +147,30 @@ object Medien {
     }
 
     /**
-     * Fertige Aufnahmen aus DCIM hinter der Stelle (`nach`, `nachId`),
+     * Fertige Aufnahmen hinter der Stelle (`nach`, `nachId`),
      * aufsteigend nach Marke und Kennung; Bilder und Videos gemischt. Die
      * Kennung zählt mit, weil viele Aufnahmen dieselbe Generation tragen können.
      */
-    fun aufnahmen(ctx: Context, nach: Long, nachId: Long, hoechstens: Int, screenshotsAb: Long?): List<Aufnahme> =
-        (suche(ctx, "bild", nach, hoechstens, screenshotsAb, nachId = nachId) + suche(ctx, "video", nach, hoechstens, screenshotsAb, nachId = nachId))
+    fun aufnahmen(ctx: Context, nach: Long, nachId: Long, hoechstens: Int, weitereAb: Long, screenshotsAb: Long?): List<Aufnahme> =
+        (suche(ctx, "bild", nach, hoechstens, weitereAb, screenshotsAb, nachId = nachId) + suche(ctx, "video", nach, hoechstens, weitereAb, screenshotsAb, nachId = nachId))
             .sortedWith(compareBy({ it.marke }, { it.id }))
             .take(hoechstens)
 
-    /** Eine Aufnahme nach Kennung, wenn sie noch fertig in einem gesicherten Ordner liegt. */
-    fun aufnahme(ctx: Context, id: Long, art: String, screenshotsAb: Long?): Aufnahme? =
-        suche(ctx, art, 0, 1, screenshotsAb, nurId = id).firstOrNull()
+    /**
+     * Eine Aufnahme nach Kennung, wenn sie noch fertig daliegt. Sie gehört zu
+     * einem Auftrag, der schon zugelassen ist; ihr Ordner wird nicht noch
+     * einmal gefiltert (Punkt 108).
+     */
+    fun aufnahme(ctx: Context, id: Long, art: String): Aufnahme? =
+        suche(ctx, art, 0, 1, 0, 0, nurId = id).firstOrNull()
 
     private fun suche(
         ctx: Context,
         art: String,
         nach: Long,
         hoechstens: Int,
+        /** Ordner außerhalb von DCIM ab dieser Marke. */
+        weitereAb: Long,
         /** Bildschirmfotos ab dieser Marke; `null`: keine. */
         screenshotsAb: Long?,
         nurId: Long? = null,
@@ -170,7 +186,7 @@ object Medien {
             MediaStore.MediaColumns.DATE_MODIFIED,
         )
         if (Build.VERSION.SDK_INT >= 29) spalten.add(MediaStore.MediaColumns.DATE_TAKEN)
-        val (auswahl, werte) = auswahl(Build.VERSION.SDK_INT, nach, nachId, screenshotsAb, nurId)
+        val (auswahl, werte) = auswahl(Build.VERSION.SDK_INT, nach, nachId, weitereAb, screenshotsAb, nurId)
         val ergebnis = mutableListOf<Aufnahme>()
         ctx.contentResolver.query(basis(art), spalten.toTypedArray(), auswahl, werte.toTypedArray(), reihenfolge(Build.VERSION.SDK_INT))?.use { c ->
             val iId = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)

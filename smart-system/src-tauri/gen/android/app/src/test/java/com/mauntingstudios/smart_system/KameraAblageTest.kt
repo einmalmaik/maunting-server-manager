@@ -30,6 +30,7 @@ class KameraAblageTest {
         nurWlan = true,
         screenshots = true,
         screenshotsAb = 156,
+        weitereAb = 170,
         marke = 185,
         markeId = 1_000_000_037,
         fassung = "gen:1409:abc",
@@ -51,11 +52,14 @@ class KameraAblageTest {
         val j = stand().json().apply {
             remove("screenshots")
             remove("screenshotsAb")
+            remove("weitereAb")
             remove("markeId")
         }
         val s = KameraAblage.Stand.aus(JSONObject(j.toString()))
         assertFalse(s.screenshots)
         assertEquals(0L, s.screenshotsAb)
+        // Von vor den weiteren Ordnern: der nächste Lauf setzt sie auf jetzt, nicht auf 0.
+        assertEquals(KameraAblage.NEU, s.weitereAb)
         // Ohne Kennung zur Marke ist alles mit dieser Marke durch, nichts wird doppelt angefangen.
         assertEquals(KameraAblage.ALLE, s.markeId)
         assertEquals(185L, s.marke)

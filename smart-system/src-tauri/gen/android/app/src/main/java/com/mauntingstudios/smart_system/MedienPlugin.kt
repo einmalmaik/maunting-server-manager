@@ -56,7 +56,7 @@ class AendernArgs {
     var screenshots: Boolean? = null
     /** Auch sichern, was vor dem Einschalten aufgenommen wurde. */
     var vorhandene: Boolean = false
-    /** Was schon im Tresor liegt (`medienId:sha256`), damit es nicht noch einmal hochgeht. */
+    /** Was schon im Tresor liegt (`medienId:sha256` oder `0:sha256`), damit es nicht noch einmal hochgeht. */
     var bekannt: Array<String> = emptyArray()
 }
 
@@ -180,6 +180,7 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
                     nurWlan = a.nurWlan,
                     screenshots = if (weiter) alt!!.screenshots else false,
                     screenshotsAb = if (weiter && alt!!.fassung == fassung) alt.screenshotsAb else marke,
+                    weitereAb = if (weiter && alt!!.fassung == fassung) alt.weitereAb else marke,
                     marke = if (weiter && alt!!.fassung == fassung) alt.marke else marke,
                     markeId = if (weiter && alt!!.fassung == fassung) alt.markeId else KameraAblage.ALLE,
                     fassung = fassung,
@@ -242,7 +243,7 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
                     screenshots = a.screenshots ?: s.screenshots,
                     screenshotsAb = if (einschalten) Medien.jetzt(activity).first else s.screenshotsAb,
                 )
-                if (a.vorhandene) neu.copy(marke = 0, markeId = KameraAblage.ALLE, screenshotsAb = 0) else neu
+                if (a.vorhandene) neu.copy(marke = 0, markeId = KameraAblage.ALLE, screenshotsAb = 0, weitereAb = 0) else neu
             }
             KameraPlan.anstossen(activity, ersetzen = a.nurWlan != null && a.nurWlan != alt.nurWlan)
             standJson()
@@ -315,6 +316,7 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     companion object {
-        private val BEKANNT = Regex("^[1-9][0-9]{0,18}:[0-9a-f]{64}$")
+        /** `medienId:sha256`; `0:sha256` gilt für jede Kennung (aus dem Tresor aufs Telefon gespeichert). */
+        private val BEKANNT = Regex("^(0|[1-9][0-9]{0,18}):[0-9a-f]{64}$")
     }
 }

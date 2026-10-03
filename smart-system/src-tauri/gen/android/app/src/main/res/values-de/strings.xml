@@ -1,4 +1,16 @@
 <resources>
     <string name="webview_zu_alt">Die Android System WebView auf diesem Telefon ist zu alt (Version %1$d). MSS braucht mindestens Version %2$d. Aktualisiere „Android System WebView“ im Play Store und öffne MSS danach neu.</string>
     <string name="webview_aktualisieren">WebView aktualisieren</string>
+    <string name="teilen_ziel">Tresor</string>
+    <string name="teilen_laeuft">Wird für den Tresor verschlüsselt …</string>
+    <string name="teilen_fortschritt">Datei %1$d von %2$d: %3$s verschlüsselt</string>
+    <plurals name="teilen_fertig">
+        <item quantity="one">Die Datei kommt in den Tresor. Du siehst sie dort nach dem nächsten Entsperren.</item>
+        <item quantity="other">%1$d Dateien kommen in den Tresor. Du siehst sie dort nach dem nächsten Entsperren.</item>
+    </plurals>
+    <string name="teilen_teilweise">%1$d von %2$d Dateien kommen in den Tresor. Die übrigen ließen sich nicht lesen.</string>
+    <string name="teilen_aus">Die Kamera-Sicherung ist aus. Schalte sie im Tresor ein, dann kannst du hierher teilen.</string>
+    <string name="teilen_keine_datei">Im Tresor lassen sich nur Dateien sichern, kein Text.</string>
+    <string name="teilen_kein_platz">Auf dem Telefon ist nicht genug Platz, um die Datei vorzubereiten.</string>
+    <string name="teilen_fehler">Die Datei ließ sich nicht lesen.</string>
 </resources>

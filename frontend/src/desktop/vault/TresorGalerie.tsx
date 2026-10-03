@@ -137,6 +137,28 @@ function zeitpunkt(item: VaultItem, filter: Filter): { ms: number; utc: boolean 
   return { ms: item.createdAt, utc: false }
 }
 
+/**
+ * Fotos, die an diesem Kalendertag in früheren Jahren entstanden, je Jahr eine
+ * Gruppe, das jüngste Jahr zuerst. Zählt nur das Aufnahmedatum (oder die
+ * Änderung auf dem Gerät), nie das Hochladen: sonst wäre jedes vor einem Jahr
+ * hochgeladene Foto eine Erinnerung.
+ */
+export function anDiesemTag(medien: VaultItem[], jetzt: Date): { jahre: number; items: VaultItem[] }[] {
+  const nachJahren = new Map<number, VaultItem[]>()
+  for (const item of medien) {
+    const aufgenommen = item.datei?.aufgenommen
+    const ms = aufgenommen ?? item.datei?.geaendert
+    if (!ms) continue
+    const d = new Date(ms)
+    // EXIF-Zeit ist Wanduhrzeit, als UTC gespeichert (siehe `zeitpunkt`).
+    const [jahr, monat, tag] = aufgenommen ? [d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()] : [d.getFullYear(), d.getMonth(), d.getDate()]
+    const jahre = jetzt.getFullYear() - jahr
+    if (jahre < 1 || monat !== jetzt.getMonth() || tag !== jetzt.getDate()) continue
+    nachJahren.set(jahre, [...(nachJahren.get(jahre) ?? []), item])
+  }
+  return [...nachJahren.entries()].sort(([a], [b]) => a - b).map(([jahre, items]) => ({ jahre, items }))
+}
+
 /** Ein gemeinsamer IntersectionObserver für alle Kacheln, am Scrollbereich. */
 type Beobachten = (el: Element, melden: (sichtbar: boolean) => void) => () => void
 const SichtbarKontext = createContext<Beobachten | null>(null)
@@ -344,6 +366,31 @@ function AlbumKarte({ album, titelbild, anzahl, onOeffnen }: { album: VaultItem;
   )
 }
 
+function ErinnerungKarte({ jahre, titelbild, anzahl, onOeffnen }: { jahre: number; titelbild: VaultItem; anzahl: number; onOeffnen: () => void }) {
+  const { t } = useTranslation()
+  const url = useMiniatur(titelbild.datei?.miniatur, titelbild.id, true)
+  const titel = t('mss.vault.fotos.vorJahren', { count: jahre })
+  return (
+    <button
+      type="button"
+      onClick={onOeffnen}
+      aria-label={`${titel}, ${t('mss.vault.fotos.album', { count: anzahl })}`}
+      className="group relative block aspect-[3/4] w-32 shrink-0 overflow-hidden rounded-lg bg-surface-container text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+    >
+      {url ? (
+        <img src={url} alt="" draggable={false} className="h-full w-full object-cover transition-transform group-hover:scale-[1.03]" />
+      ) : (
+        <span className="flex h-full w-full items-center justify-center text-on-surface-variant/60">
+          <Images className="h-8 w-8" />
+        </span>
+      )}
+      <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 pb-1.5 pt-6 text-xs font-semibold text-white" aria-hidden>
+        {titel}
+      </span>
+    </button>
+  )
+}
+
 const FILTER: { id: Filter; labelKey: string; icon: LucideIcon }[] = [
   { id: 'alle', labelKey: 'mss.vault.alle', icon: Images },
   { id: 'videos', labelKey: 'mss.vault.fotos.videos', icon: Film },
@@ -435,6 +482,11 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
     if (filter === 'aehnlich' && !album) return auswahlListe
     return auswahlListe.sort((a, b) => zeitpunkt(b, filter).ms - zeitpunkt(a, filter).ms)
   }, [medien, filter, suche, album, albumInhalt, quelle, aehnlich.gruppen])
+  // Nur in „Alle“ ohne Album und Suche; der Tag wechselt beim nächsten Rendern nach Mitternacht.
+  const erinnerungen = useMemo(
+    () => (filter === 'alle' && !album && !suche.trim() ? anDiesemTag(liste, new Date()) : []),
+    [filter, album, suche, liste],
+  )
   // Mehrfachauswahl wie in „Dateien“, in der Reihenfolge des Rasters.
   const wahl = useMehrfachauswahl(liste.map((i) => i.id))
   const { auswahl, leeren: auswahlLeeren, klick: auswahlKlick, langdruck: kachelLangdruck } = wahl
@@ -1079,6 +1131,22 @@ export function TresorGalerie({ suche = '' }: { suche?: string }) {
           />
         ) : (
           <SichtbarKontext.Provider value={beobachten}>
+            {erinnerungen.length > 0 && !auswahl && (
+              <section aria-label={t('mss.vault.fotos.anDiesemTag')} className="mb-4">
+                <h3 className="mb-1.5 text-xs font-semibold text-on-surface">{t('mss.vault.fotos.anDiesemTag')}</h3>
+                <div className="msm-ohne-rollbalken flex gap-2 overflow-x-auto">
+                  {erinnerungen.map(({ jahre, items: tag }) => (
+                    <ErinnerungKarte
+                      key={jahre}
+                      jahre={jahre}
+                      titelbild={tag[0]}
+                      anzahl={tag.length}
+                      onOeffnen={() => setOffen({ id: tag[0].id, index: liste.indexOf(tag[0]) })}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
             {gruppen.map((gruppe) => (
               <section
                 key={gruppe.schluessel}

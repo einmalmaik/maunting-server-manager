@@ -49,7 +49,7 @@ export async function kameraStandLaden(): Promise<KameraStand | null> {
 
 /**
  * Was schon im Tresor liegt, als `medienId:sha256`; geht nicht noch einmal
- * hoch. Von jeder Gerätekennung: nach einem neuen Einrichten hat dasselbe
+ * hoch. `0:sha256` gilt für jede Kennung (`kameraGespeichert`). Von jeder Gerätekennung: nach einem neuen Einrichten hat dasselbe
  * Telefon eine neue, und Kennung samt Prüfsumme meinen trotzdem dieselbe Datei.
  */
 function bekannteAufnahmen(): string[] {
@@ -131,9 +131,24 @@ export async function kameraAusschalten(): Promise<void> {
  * Stand und offene Aufträge auf dem Telefon. Nur die Android-App hat einen Job.
  */
 export async function kameraBeimAbmelden(): Promise<void> {
-  const app = '__TAURI_INTERNALS__' in window || '__TAURI__' in window
-  if (!app || !/android/i.test(navigator.userAgent)) return
+  if (!androidApp()) return
   await kameraAusschalten()
+}
+
+/** Nur die Android-App hat eine Kamera-Sicherung. */
+export function androidApp(): boolean {
+  const app = '__TAURI_INTERNALS__' in window || '__TAURI__' in window
+  return app && /android/i.test(navigator.userAgent)
+}
+
+/**
+ * Eine Datei aus dem Tresor liegt jetzt auf dem Telefon („Auf dem Gerät
+ * speichern“). Ihre Prüfsumme kennt der Job dann, und sie geht nicht als
+ * Kopie wieder hoch, wenn sie in einem gesicherten Ordner wie Downloads liegt.
+ */
+export async function kameraGespeichert(sha256: string): Promise<void> {
+  if (!useKameraSicherung.getState().stand?.eingerichtet) return
+  await kameraAendern({ bekannt: [`0:${sha256}`] }).catch(() => {})
 }
 
 export async function kameraNurWlan(nurWlan: boolean): Promise<void> {

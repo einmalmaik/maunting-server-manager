@@ -9,6 +9,7 @@ import { toast } from '@/stores/toastStore'
 import { zipGrenzenPruefen, zipStrom } from '@/lib/zipSchreiben'
 import { inDerApp } from '@/services/passkeyService'
 import { useVaultStore } from './vaultStore'
+import { androidApp, kameraGespeichert } from './kameraSicherung'
 import { type VaultItem } from './vaultEintrag'
 import type { BlobKopf } from './tresorDatei'
 import { ansichtOeffnen, ansichtSchliessen, klartextTeile } from './tresorDateien'
@@ -137,7 +138,20 @@ export async function aufGeraetSpeichern(
     herunterladen(new Blob(teile, { type: typ }), name)
     return gespeichert(true)
   }
-  return gespeichert(await inDerAppSpeichern(name, bisGesperrt(klartextTeile(kopf, eintragId, userKey), userKey)))
+  // Ein Foto, das unter Android in Downloads landet, nähme die Kamera-Sicherung sonst als neue Aufnahme wieder mit.
+  const pruefsumme = androidApp() && /^(image|video)\//.test(typ) ? await (await import('hash-wasm')).createSHA256() : null
+  pruefsumme?.init()
+  const teile = klartextTeile(kopf, eintragId, userKey)
+  const ok = await inDerAppSpeichern(name, bisGesperrt(pruefsumme ? mitPruefsumme(teile, pruefsumme) : teile, userKey))
+  if (ok && pruefsumme) await kameraGespeichert(pruefsumme.digest('hex'))
+  return gespeichert(ok)
+}
+
+async function* mitPruefsumme(teile: AsyncIterable<Uint8Array>, pruefsumme: { update: (daten: Uint8Array) => unknown }): AsyncGenerator<Uint8Array> {
+  for await (const teil of teile) {
+    pruefsumme.update(teil)
+    yield teil
+  }
 }
 
 /**

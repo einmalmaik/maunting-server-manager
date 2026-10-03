@@ -62,7 +62,10 @@ export interface EingangInhalt {
   original: BlobKopf
   vorschau: BlobKopf
   miniatur: BlobKopf
-  quelle: DateiQuelle
+  /** Nur bei Aufnahmen der Kamera-Sicherung; eine aus einer anderen App geteilte Datei hat keine. */
+  quelle?: DateiQuelle
+  /** Nur bei geteilten Dateien: SHA-256 des Originals. */
+  sha256?: string
 }
 
 /** So liegt ein Datensatz beim Server. Nur `daten` ist verschlüsselt. */
@@ -127,9 +130,9 @@ function istInhalt(wert: unknown, geraet: string): wert is EingangInhalt {
     roherKopf(i.original) &&
     roherKopf(i.vorschau) &&
     roherKopf(i.miniatur) &&
-    istQuelle(i.quelle) &&
     // Ein Gerät spricht nur für seine eigenen Aufnahmen.
-    i.quelle.geraet === geraet
+    (i.quelle === undefined || (istQuelle(i.quelle) && i.quelle.geraet === geraet)) &&
+    (i.sha256 === undefined || (typeof i.sha256 === 'string' && /^[0-9a-f]{64}$/.test(i.sha256)))
   )
 }
 
@@ -328,7 +331,14 @@ async function einenUebernehmen(
 
   // Dieselbe Aufnahme liegt schon im Tresor (bei gesperrtem Tresor kennt das
   // Gerät seine Einträge nicht). Die zweite Kopie belegte nur Speicher.
-  if (store().items.some((i) => gleicheQuelle(i.datei?.quelle, inhalt.quelle))) {
+  // Ebenso eine geteilte Datei, die das Telefon schon aus einem gesicherten
+  // Ordner hochgeladen hat (WhatsApp). Liegt diese im Papierkorb, gilt sie nicht.
+  const quelle = inhalt.quelle
+  const sha = inhalt.sha256
+  const doppelt = quelle
+    ? store().items.some((i) => gleicheQuelle(i.datei?.quelle, quelle))
+    : !!sha && store().items.some((i) => i.datei?.quelle?.sha256 === sha && !i.trashedAt)
+  if (doppelt) {
     for (const k of koepfe) await blobLoeschen(bucket, k.id, k.loeschen).catch(() => {})
     await eingangLoeschen(bucket, satz.id)
     return

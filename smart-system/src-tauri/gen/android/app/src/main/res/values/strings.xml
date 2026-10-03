@@ -3,4 +3,16 @@
     <string name="main_activity_title">"Maunting Smart System"</string>
     <string name="webview_zu_alt">The Android System WebView on this phone is too old (version %1$d). MSS needs at least version %2$d. Update \"Android System WebView\" in the Play Store, then open MSS again.</string>
     <string name="webview_aktualisieren">Update WebView</string>
+    <string name="teilen_ziel">Vault</string>
+    <string name="teilen_laeuft">Encrypting for the vault …</string>
+    <string name="teilen_fortschritt">File %1$d of %2$d: %3$s encrypted</string>
+    <plurals name="teilen_fertig">
+        <item quantity="one">The file is going into the vault. You will see it there after you next unlock.</item>
+        <item quantity="other">%1$d files are going into the vault. You will see them there after you next unlock.</item>
+    </plurals>
+    <string name="teilen_teilweise">%1$d of %2$d files are going into the vault. The others could not be read.</string>
+    <string name="teilen_aus">Camera backup is off. Turn it on in the vault, then you can share files here.</string>
+    <string name="teilen_keine_datei">Only files can be saved in the vault, not text.</string>
+    <string name="teilen_kein_platz">There is not enough space on the phone to prepare the file.</string>
+    <string name="teilen_fehler">The file could not be read.</string>
 </resources>
