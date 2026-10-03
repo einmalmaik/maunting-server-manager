@@ -25,15 +25,6 @@ import type { User } from '@/types'
 
 const CACHED_USER_KEY = 'msm_cached_user'
 
-/** Nur die Android-App hat eine Kamera-Sicherung. */
-function aufAndroid(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    ('__TAURI_INTERNALS__' in window || '__TAURI__' in window) &&
-    /android/i.test(navigator.userAgent)
-  )
-}
-
 function loadCachedUser(): User | null {
   try {
     const raw = localStorage.getItem(CACHED_USER_KEY)
@@ -216,11 +207,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // es austragen könnte. Andersherum bliebe die Zeile für immer stehen.
     await kuendigeMailboxPush()
     await kuendige()
-    // Die Kamera-Sicherung dieses Telefons gehört dem Konto, das sich abmeldet:
-    // Zugang und offene Aufträge fallen mit (AGENTS.md Punkt 50).
-    if (aufAndroid()) {
-      await import('@/desktop/tauri').then(({ kameraVergessen }) => kameraVergessen()).catch(() => {})
-    }
+    await import('@/desktop/vault/kameraSicherung').then((k) => k.kameraBeimAbmelden()).catch(() => {})
     try {
       await api('/auth/logout', { method: 'POST' })
     } catch {

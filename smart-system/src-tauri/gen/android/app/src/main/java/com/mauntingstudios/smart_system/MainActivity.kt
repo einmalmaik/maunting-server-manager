@@ -3,12 +3,19 @@ package com.mauntingstudios.smart_system
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.os.Build
+import android.net.Uri
 import android.os.Bundle
+import android.view.Gravity
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -26,6 +33,13 @@ class MainActivity : TauriActivity() {
 
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
+    // Erst hier: Rust setzt die WebView nach onCreate als Inhalt und überdeckte
+    // einen früher gesetzten Hinweis. `post` kommt nach diesem Setzen.
+    val kennung = webView.settings.userAgentString.orEmpty()
+    if (WebviewPruefung.zuAlt(kennung)) {
+      webView.post { zuAltZeigen(WebviewPruefung.chromeVersion(kennung) ?: 0) }
+      return
+    }
     // Gelesen beim Start der Seite; Änderungen schiebt das Layout nach.
     webView.addJavascriptInterface(object {
       @JavascriptInterface fun unten(): Float = gestenleiste
@@ -48,6 +62,40 @@ class MainActivity : TauriActivity() {
     requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
     super.onCreate(savedInstanceState)
     createNotificationChannels()
+  }
+
+  /** Statt einer weißen Seite: was fehlt und ein Weg dorthin (`WebviewPruefung`). */
+  private fun zuAltZeigen(fassung: Int) {
+    val rand = (32 * resources.displayMetrics.density).toInt()
+    val hinweis = TextView(this).apply {
+      text = getString(R.string.webview_zu_alt, fassung, WebviewPruefung.MINDEST)
+      textSize = 17f
+      setPadding(0, 0, 0, rand)
+    }
+    val knopf = Button(this).apply {
+      text = getString(R.string.webview_aktualisieren)
+      setOnClickListener { webviewAktualisieren() }
+    }
+    setContentView(LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      gravity = Gravity.CENTER
+      setPadding(rand, rand, rand, rand)
+      addView(hinweis)
+      addView(knopf)
+    })
+  }
+
+  private fun webviewAktualisieren() {
+    val paket = "com.google.android.webview"
+    try {
+      startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$paket")))
+    } catch (e: ActivityNotFoundException) {
+      try {
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$paket")))
+      } catch (e: ActivityNotFoundException) {
+        // Weder Store noch Browser: der Text sagt, was zu tun ist.
+      }
+    }
   }
 
   override fun onDestroy() {

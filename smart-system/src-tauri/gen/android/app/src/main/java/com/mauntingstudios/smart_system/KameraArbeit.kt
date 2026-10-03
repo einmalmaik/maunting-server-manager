@@ -1,8 +1,11 @@
 package com.mauntingstudios.smart_system
 
+import android.app.ActivityManager
+import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.Build
 import android.provider.MediaStore
 import android.util.Base64
 import androidx.work.Constraints
@@ -11,6 +14,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
@@ -55,7 +59,7 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
         val stand = KameraAblage.lesen(ctx) ?: return Result.success()
         val kennung = stand.kennung
         if (Medien.stand(ctx) != "voll") return warten(kennung, "zugriff")
-        if (stand.nurWlan && !imWlan()) return warten(kennung, "wlan")
+        if (stand.nurWlan && !imWlan(ctx)) return warten(kennung, "wlan")
 
         val server = try {
             KameraServer(stand.server, KameraAblage.auf(stand.zugang))
@@ -77,14 +81,25 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
                     Result.success()
                 }
                 507 -> warten(kennung, "speicher")
-                429, in 500..599 -> Result.retry()
+                429, in 500..599 -> spaeter(kennung)
                 else -> warten(kennung, "fehler")
             }
         } catch (e: IOException) {
-            Result.retry()
+            spaeter(kennung)
         } catch (e: Exception) {
             warten(kennung, "fehler")
         }
+    }
+
+    /**
+     * Netz oder Server gerade weg. Kein `Result.retry()`: der Lauf wartete dann
+     * mit wachsendem Abstand (bis zu Stunden), und jeder Anstoß, auch eine neue
+     * Aufnahme oder die geöffnete App, hing sich dahinter. So endet er, ein
+     * neuer Versuch kommt nach `SPAETER_MINUTEN`, und jeder Anstoß läuft sofort.
+     */
+    private fun spaeter(kennung: String): Result {
+        KameraPlan.spaeter(ctx)
+        return warten(kennung, "server")
     }
 
     private fun warten(kennung: String, grund: String?): Result {
@@ -94,13 +109,6 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
 
     private fun weiter(kennung: String) {
         if (isStopped || KameraAblage.lesen(ctx)?.kennung != kennung) throw Abbruch()
-    }
-
-    /** Ohne Auskunft über das Netz gilt es nicht als WLAN (AGENTS.md Punkt 58). */
-    private fun imWlan(): Boolean {
-        val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return false
-        val f = cm.getNetworkCapabilities(cm.activeNetwork ?: return false) ?: return false
-        return f.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
     }
 
     private fun neueSichern(server: KameraServer, kennung: String) {
@@ -260,22 +268,26 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
             if (stand.state != "offen") throw Verloren()
             val groesse = b.getLong("groesse")
             val echt = b.getLong("echt")
+            // Genullt auf jedem Weg, auch wenn ein Chunk scheitert oder der Lauf abbricht.
             val schluessel = hexBytes(b.getString("schluessel"))
-            for (i in 0 until KameraKrypto.chunkAnzahl(groesse)) {
-                if (i in stand.vorhanden) continue
-                weiter(kennung)
-                val daten = klartext(auftrag, b.getString("rolle"), groesse, echt, i)
-                try {
-                    server.chunk(blobId, i, KameraKrypto.chunk(schluessel, daten, groesse, echt, i, id, blobId))
-                } catch (e: KameraServer.Fehler) {
-                    // Betrifft nur diesen Blob (falsche Länge, schon fertig); voller Speicher, Netz und Sitzung träfen jeden (Punkt 76).
-                    if (e.status == 404 || e.status == 409 || e.status == 413 || e.status == 422) throw Verloren()
-                    throw e
-                } finally {
-                    daten.fill(0)
+            try {
+                for (i in 0 until KameraKrypto.chunkAnzahl(groesse)) {
+                    if (i in stand.vorhanden) continue
+                    weiter(kennung)
+                    val daten = klartext(auftrag, b.getString("rolle"), groesse, echt, i)
+                    try {
+                        server.chunk(blobId, i, KameraKrypto.chunk(schluessel, daten, groesse, echt, i, id, blobId))
+                    } catch (e: KameraServer.Fehler) {
+                        // Betrifft nur diesen Blob (falsche Länge, schon fertig); voller Speicher, Netz und Sitzung träfen jeden (Punkt 76).
+                        if (e.status == 404 || e.status == 409 || e.status == 413 || e.status == 422) throw Verloren()
+                        throw e
+                    } finally {
+                        daten.fill(0)
+                    }
                 }
+            } finally {
+                schluessel.fill(0)
             }
-            schluessel.fill(0)
             if (b.getString("rolle") == "original") {
                 val jetzt = try {
                     Medien.pruefsumme(ctx, auftrag.getLong("medienId"), auftrag.getString("art")).first
@@ -297,7 +309,11 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
         val von = index * KameraKrypto.CHUNK
         if (rolle != "original") {
             val bild = Base64.decode(auftrag.getString(rolle), Base64.NO_WRAP)
-            return bild.copyOfRange(von.toInt(), von.toInt() + laenge)
+            try {
+                return bild.copyOfRange(von.toInt(), von.toInt() + laenge)
+            } finally {
+                bild.fill(0)
+            }
         }
         val daten = try {
             Medien.lesen(ctx, auftrag.getLong("medienId"), auftrag.getString("art"), von, laenge)
@@ -318,6 +334,27 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
     private fun hexBytes(text: String): ByteArray = ByteArray(text.length / 2) { text.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
 
     companion object {
+        /** Ohne Auskunft über das Netz gilt es nicht als WLAN (AGENTS.md Punkt 58). */
+        fun imWlan(ctx: Context): Boolean {
+            val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return false
+            val f = cm.getNetworkCapabilities(cm.activeNetwork ?: return false) ?: return false
+            return f.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        }
+
+        /**
+         * Ob Android die App im Hintergrund festhält: „Eingeschränkt“ bei Samsung,
+         * Energiesparen bei Xiaomi und anderen setzen genau diese Sperre. Der Job
+         * läuft dann erst, wenn die App offen ist, und kann das selbst nicht melden.
+         */
+        fun gebremst(ctx: Context): Boolean {
+            if (Build.VERSION.SDK_INT >= 28 && ctx.getSystemService(ActivityManager::class.java)?.isBackgroundRestricted == true) return true
+            if (Build.VERSION.SDK_INT >= 30) {
+                val stufe = ctx.getSystemService(UsageStatsManager::class.java)?.appStandbyBucket
+                return stufe == UsageStatsManager.STANDBY_BUCKET_RESTRICTED
+            }
+            return false
+        }
+
         private const val DOMAENE = "msm-tresor-eingang-v1"
         private const val FORMAT = 1
         private const val POLSTER = 4096
@@ -344,24 +381,40 @@ object KameraPlan {
     private const val LAUF = "msm-kamera-lauf"
     private const val WACHE = "msm-kamera-wache"
     private const val TAEGLICH = "msm-kamera-taeglich"
+    private const val SPAETER = "msm-kamera-spaeter"
+    private const val SPAETER_MINUTEN = 15L
     const val AUSLOESER = "msm-kamera-ausloeser"
 
     /**
      * Ein Lauf zur Zeit. Ein Anstoß während eines Laufs hängt einen weiteren an
      * (AGENTS.md Punkt 64); `ersetzen` bricht den laufenden ab, etwa wenn sich
      * „nur im WLAN“ geändert hat. Ein abgebrochener Lauf setzt beim nächsten fort.
+     *
+     * Ein Lauf, der nur wartet (Netzbedingung, Rückzug einer älteren Fassung),
+     * wird ersetzt: angehängt hinge der Anstoß dahinter, und eine neue Aufnahme
+     * wartete Stunden. Fragt WorkManager und blockiert dabei; nie im Hauptthread.
      */
     fun anstossen(ctx: Context, ersetzen: Boolean = false) {
         val stand = KameraAblage.lesen(ctx) ?: return
+        val wm = WorkManager.getInstance(ctx)
+        val laeuft = wm.getWorkInfosForUniqueWork(LAUF).get().any { it.state == WorkInfo.State.RUNNING }
         val lauf = OneTimeWorkRequestBuilder<KameraArbeit>()
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(if (stand.nurWlan) NetworkType.UNMETERED else NetworkType.CONNECTED)
                     .build(),
             )
-            .setBackoffCriteria(androidx.work.BackoffPolicy.EXPONENTIAL, 1, TimeUnit.MINUTES)
             .build()
-        WorkManager.getInstance(ctx).enqueueUniqueWork(LAUF, if (ersetzen) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.APPEND_OR_REPLACE, lauf)
+        wm.enqueueUniqueWork(LAUF, if (ersetzen || !laeuft) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.APPEND_OR_REPLACE, lauf)
+    }
+
+    /** Nächster Versuch nach einem Netz- oder Serverfehler; ersetzt einen schon geplanten. */
+    fun spaeter(ctx: Context) {
+        WorkManager.getInstance(ctx).enqueueUniqueWork(
+            SPAETER,
+            ExistingWorkPolicy.REPLACE,
+            OneTimeWorkRequestBuilder<KameraWache>().setInitialDelay(SPAETER_MINUTEN, TimeUnit.MINUTES).build(),
+        )
     }
 
     /** Wartet auf neue Bilder oder Videos und stößt dann einen Lauf an. */
@@ -397,5 +450,6 @@ object KameraPlan {
         wm.cancelUniqueWork(WACHE)
         wm.cancelUniqueWork(TAEGLICH)
         wm.cancelUniqueWork(LAUF)
+        wm.cancelUniqueWork(SPAETER)
     }
 }

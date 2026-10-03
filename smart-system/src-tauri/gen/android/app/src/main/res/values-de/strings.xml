@@ -1,0 +1,4 @@
+<resources>
+    <string name="webview_zu_alt">Die Android System WebView auf diesem Telefon ist zu alt (Version %1$d). MSS braucht mindestens Version %2$d. Aktualisiere „Android System WebView“ im Play Store und öffne MSS danach neu.</string>
+    <string name="webview_aktualisieren">WebView aktualisieren</string>
+</resources>

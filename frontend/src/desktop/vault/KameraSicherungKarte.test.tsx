@@ -23,6 +23,7 @@ vi.mock('@/desktop/tauri', () => ({
   pruefeBiometrieVerfuegbar: vi.fn().mockResolvedValue(false),
   biometrieSpeicherVerfuegbar: vi.fn().mockResolvedValue(false),
   medienZugriff: vi.fn(),
+  medienEinstellungen: vi.fn(async () => {}),
 }))
 
 vi.mock('./kameraSicherung', async () => {
@@ -160,6 +161,15 @@ describe('Eingeschaltet', () => {
     await waitFor(() => expect(kamera.kameraStandLaden).toHaveBeenCalledTimes(2))
   })
 
+  it('sagt, wenn das Telefon die App im Hintergrund anhält, und führt in die Einstellungen', async () => {
+    // Samsung „Eingeschränkt“, Xiaomi-Energiesparen: der Job läuft erst mit offener App.
+    kamera.useKameraSicherung.setState({ stand: { ...STAND, warten: 'akku' } })
+    zeigen()
+    expect(screen.getByText(i18n.t('mss.vault.kamera.warten.akku'))).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.kamera.einstellungenOeffnen') }))
+    await waitFor(() => expect(tauri.medienEinstellungen).toHaveBeenCalled())
+  })
+
   it('schaltet Screenshots mit eigenem Schalter dazu, standardmäßig aus', async () => {
     kamera.useKameraSicherung.setState({ stand: STAND })
     zeigen()
@@ -175,7 +185,7 @@ describe('Eingeschaltet', () => {
     zeigen()
     fireEvent.click(await screen.findByRole('button', { name: i18n.t('mss.vault.kamera.freigebenKnopf') }))
     const dialog = await screen.findByRole('dialog')
-    expect(kamera.freigebbar).toHaveBeenCalledWith(BUCKET, 'g')
+    expect(kamera.freigebbar).toHaveBeenCalledWith(BUCKET)
     expect(dialog).toHaveTextContent(`3 gesicherte Aufnahmen (${formatBytes(3 * 1024 * 1024)})`)
     expect(kamera.speicherFreigeben).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.kamera.freigebenKnopf') }))
@@ -202,6 +212,15 @@ describe('Eingeschaltet', () => {
     await waitFor(() => expect(toasts()).toContain(i18n.t('mss.vault.kamera.nichtsFreizugeben')))
     expect(screen.queryByRole('dialog')).toBeNull()
   })
+  it('sagt, wenn der Server nicht erreichbar ist, statt „nichts gesichert“', async () => {
+    kamera.useKameraSicherung.setState({ stand: STAND })
+    vi.mocked(kamera.freigebbar).mockResolvedValue({ bilder: [], videos: [], bytes: 0, unerreichbar: true })
+    zeigen()
+    fireEvent.click(await screen.findByRole('button', { name: i18n.t('mss.vault.kamera.freigebenKnopf') }))
+    await waitFor(() => expect(toasts()).toContain(i18n.t('mss.vault.kamera.freigebenUnerreichbar')))
+    expect(toasts()).not.toContain(i18n.t('mss.vault.kamera.nichtsFreizugeben'))
+  })
+
 
   it('bietet unter Android 10 kein Freigeben an, sagt aber warum', async () => {
     vi.mocked(tauri.medienZugriff).mockResolvedValue({ stand: 'voll', papierkorb: false })

@@ -21,6 +21,11 @@
 //! Modul verschlüsselt hat.
 //!
 //! Alles kommt aus `aws-lc-rs`, das über rustls ohnehin im Baum liegt.
+//!
+//! Schlüssel und Klartext liegen in `Zeroizing`: sie werden beim Verlassen
+//! jedes Weges genullt, auch bei einem frühen Fehler. Ein `fill(0)` von Hand
+//! verpasst die Fehlerwege, und der Compiler darf es als tote Schreibarbeit
+//! streichen.
 
 // Außer auf Android ruft nur die Prüfung in `medien.rs` hinein; Chunks verschlüsselt allein der Job.
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -32,6 +37,7 @@ use aws_lc_rs::kem::{EncapsulationKey, ML_KEM_768};
 use aws_lc_rs::rand::{SecureRandom, SystemRandom};
 use aws_lc_rs::rsa::{OaepPublicEncryptingKey, PublicEncryptingKey, OAEP_SHA256_MGF1SHA256};
 use base64::Engine;
+use zeroize::Zeroizing;
 
 /// Klartext je Chunk, `DEFAULT_CHUNK_SIZE` in DIS.
 pub const CHUNK: u64 = 4 * 1024 * 1024;
@@ -56,30 +62,33 @@ fn zufall(laenge: usize) -> Result<Vec<u8>, String> {
     Ok(wert)
 }
 
-/// AES-256-GCM, Ergebnis Chiffrat ‖ Tag.
-fn gcm(schluessel: &[u8], iv: &[u8], aad: &[u8], klartext: Vec<u8>) -> Result<Vec<u8>, String> {
+/// AES-256-GCM, Ergebnis Chiffrat ‖ Tag. Der Puffer hat vorab Platz für den
+/// Tag: wüchse er beim Anhängen, bliebe die alte Kopie des Klartexts ungenullt
+/// im freigegebenen Speicher.
+fn gcm(schluessel: &[u8], iv: &[u8], aad: &[u8], klartext: &[u8]) -> Result<Vec<u8>, String> {
     let key = UnboundKey::new(&AES_256_GCM, schluessel).map_err(|_| "Ungültiger Schlüssel".to_string())?;
     let nonce = Nonce::try_assume_unique_for_key(iv).map_err(|_| "Ungültiger IV".to_string())?;
-    let mut daten = klartext;
+    let mut daten = Zeroizing::new(Vec::with_capacity(klartext.len() + TAG));
+    daten.extend_from_slice(klartext);
     LessSafeKey::new(key)
-        .seal_in_place_append_tag(nonce, Aad::from(aad), &mut daten)
+        .seal_in_place_append_tag(nonce, Aad::from(aad), &mut *daten)
         .map_err(|_| "Verschlüsseln gescheitert".to_string())?;
-    Ok(daten)
+    // Jetzt Chiffrat; was zurückbleibt, ist leer.
+    Ok(std::mem::take(&mut *daten))
 }
 
 /// HKDF-v2 aus DIS: IKM = ML-KEM-Geheimnis ‖ AES-Schlüssel, Salz 32 Nullbytes,
 /// Info = Präfix ‖ RSA-Chiffrat.
-fn hybrid_schluessel(pq_geheimnis: &[u8], aes: &[u8], rsa_chiffrat: &[u8]) -> Result<[u8; 32], String> {
-    let mut ikm = Vec::with_capacity(pq_geheimnis.len() + aes.len());
+fn hybrid_schluessel(pq_geheimnis: &[u8], aes: &[u8], rsa_chiffrat: &[u8]) -> Result<Zeroizing<[u8; 32]>, String> {
+    let mut ikm = Zeroizing::new(Vec::with_capacity(pq_geheimnis.len() + aes.len()));
     ikm.extend_from_slice(pq_geheimnis);
     ikm.extend_from_slice(aes);
     let mut info = HYBRID_INFO.to_vec();
     info.extend_from_slice(rsa_chiffrat);
-    let mut schluessel = [0u8; 32];
+    let mut schluessel = Zeroizing::new([0u8; 32]);
     let prk = Salt::new(HKDF_SHA256, &[0u8; 32]).extract(&ikm);
-    ikm.fill(0);
     prk.expand(&[&info], HKDF_SHA256)
-        .and_then(|okm| okm.fill(&mut schluessel))
+        .and_then(|okm| okm.fill(&mut *schluessel))
         .map_err(|_| "HKDF gescheitert".to_string())?;
     Ok(schluessel)
 }
@@ -103,7 +112,7 @@ pub fn hybrid_verschluesseln(klartext: &[u8], pq_oeffentlich: &[u8], rsa_spki: &
     if rsa.ciphertext_size() != RSA_4096 {
         return Err("Der RSA-Schlüssel hat nicht 4096 Bit".into());
     }
-    let mut aes = zufall(32)?;
+    let aes = Zeroizing::new(zufall(32)?);
     let mut rsa_chiffrat = vec![0u8; RSA_4096];
     let laenge = rsa
         .encrypt(&OAEP_SHA256_MGF1SHA256, &aes, &mut rsa_chiffrat, None)
@@ -111,12 +120,9 @@ pub fn hybrid_verschluesseln(klartext: &[u8], pq_oeffentlich: &[u8], rsa_spki: &
         .len();
     rsa_chiffrat.truncate(laenge);
 
-    let mut schluessel = hybrid_schluessel(pq_geheimnis.as_ref(), &aes, &rsa_chiffrat)?;
-    aes.fill(0);
+    let schluessel = hybrid_schluessel(pq_geheimnis.as_ref(), &aes, &rsa_chiffrat)?;
     let iv = zufall(IV)?;
-    let chiffrat = gcm(&schluessel, &iv, aad, klartext.to_vec());
-    schluessel.fill(0);
-    let chiffrat = chiffrat?;
+    let chiffrat = gcm(&*schluessel, &iv, aad, klartext)?;
 
     let mut aus = Vec::with_capacity(1 + ML_KEM_768_KAPSEL + RSA_4096 + IV + chiffrat.len());
     aus.push(HYBRID_V2);
@@ -220,10 +226,10 @@ pub fn chunk_verschluesseln(
     if daten.len() as u64 != echte_bytes(groesse, echt, index) {
         return Err("Chunk hat die falsche Länge".into());
     }
-    let mut klartext = vec![0u8; chunk_laenge(groesse, index) as usize];
+    let mut klartext = Zeroizing::new(vec![0u8; chunk_laenge(groesse, index) as usize]);
     klartext[..daten.len()].copy_from_slice(daten);
     let iv = zufall(IV)?;
-    let chiffrat = gcm(schluessel, &iv, chunk_aad(eintrag_id, blob_id, groesse, index).as_bytes(), klartext)?;
+    let chiffrat = gcm(schluessel, &iv, chunk_aad(eintrag_id, blob_id, groesse, index).as_bytes(), &klartext)?;
     let mut aus = Vec::with_capacity(IV + chiffrat.len());
     aus.extend_from_slice(&iv);
     aus.extend_from_slice(&chiffrat);
@@ -238,6 +244,7 @@ mod jni_bruecke {
     use jni::objects::{JByteArray, JClass, JString};
     use jni::sys::{jbyteArray, jint, jlong};
     use jni::JNIEnv;
+    use zeroize::Zeroizing;
 
     fn werfen(env: &mut JNIEnv, text: &str) -> jbyteArray {
         let _ = env.throw_new("java/lang/IllegalArgumentException", text);
@@ -246,6 +253,11 @@ mod jni_bruecke {
 
     fn bytes(env: &mut JNIEnv, wert: &JByteArray) -> Result<Vec<u8>, String> {
         env.convert_byte_array(wert).map_err(|_| "Bytes nicht lesbar".to_string())
+    }
+
+    /// Wie `bytes`, für Schlüssel und Klartext: genullt, sobald der Aufruf endet, auf jedem Weg.
+    fn geheim(env: &mut JNIEnv, wert: &JByteArray) -> Result<Zeroizing<Vec<u8>>, String> {
+        bytes(env, wert).map(Zeroizing::new)
     }
 
     fn text(env: &mut JNIEnv, wert: &JString) -> Result<String, String> {
@@ -269,10 +281,8 @@ mod jni_bruecke {
         aad: JByteArray<'l>,
     ) -> jbyteArray {
         let ergebnis = (|| {
-            let mut klar = bytes(&mut env, &klartext)?;
-            let aus = super::hybrid_verschluesseln(&klar, &bytes(&mut env, &pq)?, &bytes(&mut env, &rsa_spki)?, &bytes(&mut env, &aad)?);
-            klar.fill(0);
-            aus
+            let klar = geheim(&mut env, &klartext)?;
+            super::hybrid_verschluesseln(&klar, &bytes(&mut env, &pq)?, &bytes(&mut env, &rsa_spki)?, &bytes(&mut env, &aad)?)
         })();
         zurueck(&mut env, ergebnis)
     }
@@ -294,14 +304,11 @@ mod jni_bruecke {
             if groesse < 0 || echt < 0 || index < 0 {
                 return Err("Negative Größe".to_string());
             }
-            let mut schl = bytes(&mut env, &schluessel)?;
-            let mut klar = bytes(&mut env, &daten)?;
+            let schl = geheim(&mut env, &schluessel)?;
+            let klar = geheim(&mut env, &daten)?;
             let eintrag = text(&mut env, &eintrag_id)?;
             let blob = text(&mut env, &blob_id)?;
-            let aus = super::chunk_verschluesseln(&schl, &klar, groesse as u64, echt as u64, index as u64, &eintrag, &blob);
-            schl.fill(0);
-            klar.fill(0);
-            aus
+            super::chunk_verschluesseln(&schl, &klar, groesse as u64, echt as u64, index as u64, &eintrag, &blob)
         })();
         zurueck(&mut env, ergebnis)
     }
@@ -353,7 +360,7 @@ mod tests {
         let mut puffer = vec![0u8; rsa.min_output_size()];
         let aes = rsa.decrypt(&OAEP_SHA256_MGF1SHA256, rsa_chiffrat, &mut puffer, None).unwrap().to_vec();
         let schluessel = hybrid_schluessel(pq_geheimnis.as_ref(), &aes, rsa_chiffrat).unwrap();
-        oeffnen(&schluessel, iv, aad, aes_chiffrat)
+        oeffnen(&*schluessel, iv, aad, aes_chiffrat)
     }
 
     fn oeffnen(schluessel: &[u8], iv: &[u8], aad: &[u8], chiffrat: &[u8]) -> Vec<u8> {

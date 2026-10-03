@@ -76,8 +76,44 @@ object Medien {
      * Generation und fällt nicht hinter eine spätere zurück. Davor gibt es nur
      * die Kennung (AGENTS.md Punkt 99).
      */
-    private val markeSpalte =
-        if (Build.VERSION.SDK_INT >= 30) MediaStore.MediaColumns.GENERATION_MODIFIED else MediaStore.MediaColumns._ID
+    fun markeSpalte(sdk: Int): String =
+        if (sdk >= 30) MediaStore.MediaColumns.GENERATION_MODIFIED else MediaStore.MediaColumns._ID
+
+
+    /** Sortierung zur Auswahl: nach Marke, bei gleicher Marke nach Kennung. */
+    fun reihenfolge(sdk: Int): String = "${markeSpalte(sdk)} ASC, ${MediaStore.MediaColumns._ID} ASC"
+
+    /**
+     * Die WHERE-Klausel samt Werten: was hinter der Stelle (`nach`, `nachId`)
+     * liegt, fertig ist und in einem gesicherten Ordner. Die Kamera-Ordner
+     * immer; Bildschirmfotos nur, wenn eingeschaltet, und erst ab ihrer
+     * eigenen Marke (AGENTS.md Punkt 108). Manche Hersteller legen sie unter
+     * DCIM ab, deshalb zählen sie dort nicht als Kamera. Messenger-Bilder nie.
+     *
+     * Rein, damit die Tests sie gegen eine echte SQLite-Datenbank prüfen können.
+     */
+    fun auswahl(sdk: Int, nach: Long, nachId: Long, screenshotsAb: Long?, nurId: Long? = null): Pair<String, List<String>> {
+        val marke = markeSpalte(sdk)
+        val (pfad, vor) = if (sdk >= 29) {
+            MediaStore.MediaColumns.RELATIVE_PATH to ""
+        } else {
+            @Suppress("DEPRECATION")
+            MediaStore.MediaColumns.DATA to "%/"
+        }
+        val kamera = "($pfad LIKE ? AND $pfad NOT LIKE ?)"
+        val bildschirm = "(($pfad LIKE ? OR $pfad LIKE ?) AND $marke > ?)"
+        val ort = if (screenshotsAb != null) "($kamera OR $bildschirm)" else kamera
+        val id = MediaStore.MediaColumns._ID
+        var auswahl = "($marke > ? OR ($marke = ? AND $id > ?)) AND $ort"
+        if (sdk >= 29) auswahl += " AND ${MediaStore.MediaColumns.IS_PENDING} = 0"
+        val werte = mutableListOf(nach.toString(), nach.toString(), nachId.toString(), "${vor}DCIM/%", "${vor}DCIM/Screenshots/%")
+        if (screenshotsAb != null) werte += listOf("${vor}DCIM/Screenshots/%", "${vor}Pictures/Screenshots/%", screenshotsAb.toString())
+        if (nurId != null) {
+            auswahl += " AND $id = ?"
+            werte.add(nurId.toString())
+        }
+        return auswahl to werte
+    }
 
     /**
      * Die Marke, die es gerade gibt (ab hier zählt eine Aufnahme als neu), und
@@ -124,39 +160,21 @@ object Medien {
         nurId: Long? = null,
         nachId: Long = KameraAblage.ALLE,
     ): List<Aufnahme> {
+        val marke = markeSpalte(Build.VERSION.SDK_INT)
         val spalten = mutableListOf(
             MediaStore.MediaColumns._ID,
-            markeSpalte,
+            marke,
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.MIME_TYPE,
             MediaStore.MediaColumns.DATE_ADDED,
             MediaStore.MediaColumns.DATE_MODIFIED,
         )
         if (Build.VERSION.SDK_INT >= 29) spalten.add(MediaStore.MediaColumns.DATE_TAKEN)
-        // Die Kamera-Ordner; Bildschirmfotos nur, wenn eingeschaltet. Manche Hersteller legen sie
-        // unter DCIM ab, deshalb zählen sie dort nicht als Kamera. Messenger-Bilder nie.
-        val (pfad, vor) = if (Build.VERSION.SDK_INT >= 29) {
-            MediaStore.MediaColumns.RELATIVE_PATH to ""
-        } else {
-            @Suppress("DEPRECATION")
-            MediaStore.MediaColumns.DATA to "%/"
-        }
-        val kamera = "($pfad LIKE ? AND $pfad NOT LIKE ?)"
-        val bildschirm = "(($pfad LIKE ? OR $pfad LIKE ?) AND $markeSpalte > ?)"
-        val ort = if (screenshotsAb != null) "($kamera OR $bildschirm)" else kamera
-        val id = MediaStore.MediaColumns._ID
-        var auswahl = "($markeSpalte > ? OR ($markeSpalte = ? AND $id > ?)) AND $ort"
-        if (Build.VERSION.SDK_INT >= 29) auswahl += " AND ${MediaStore.MediaColumns.IS_PENDING} = 0"
-        val werte = mutableListOf(nach.toString(), nach.toString(), nachId.toString(), "${vor}DCIM/%", "${vor}DCIM/Screenshots/%")
-        if (screenshotsAb != null) werte += listOf("${vor}DCIM/Screenshots/%", "${vor}Pictures/Screenshots/%", screenshotsAb.toString())
-        if (nurId != null) {
-            auswahl += " AND ${MediaStore.MediaColumns._ID} = ?"
-            werte.add(nurId.toString())
-        }
+        val (auswahl, werte) = auswahl(Build.VERSION.SDK_INT, nach, nachId, screenshotsAb, nurId)
         val ergebnis = mutableListOf<Aufnahme>()
-        ctx.contentResolver.query(basis(art), spalten.toTypedArray(), auswahl, werte.toTypedArray(), "$markeSpalte ASC, $id ASC")?.use { c ->
+        ctx.contentResolver.query(basis(art), spalten.toTypedArray(), auswahl, werte.toTypedArray(), reihenfolge(Build.VERSION.SDK_INT))?.use { c ->
             val iId = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-            val iMarke = c.getColumnIndexOrThrow(markeSpalte)
+            val iMarke = c.getColumnIndexOrThrow(marke)
             val iName = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
             val iTyp = c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
             val iHinzu = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
@@ -181,16 +199,25 @@ object Medien {
     }
 
     /** SHA-256 (hex) und Größe des Originals. `FileNotFoundException`, wenn die Aufnahme nicht mehr da ist. */
-    fun pruefsumme(ctx: Context, id: Long, art: String): Pair<String, Long> {
+    /**
+     * SHA-256 und Größe des Originals. Mit `erwartet` wird eine Datei anderer
+     * Größe nicht gelesen: die Prüfsumme bleibt leer. „Speicher freigeben“
+     * fragt so auch Kennungen eines anderen Telefons an, ohne fremde Videos
+     * ganz durchzurechnen.
+     */
+    fun pruefsumme(ctx: Context, id: Long, art: String, erwartet: Long? = null): Pair<String, Long> {
         val sha = MessageDigest.getInstance("SHA-256")
         var groesse = 0L
-        ctx.contentResolver.openInputStream(original(id, art))?.use { ein ->
-            val puffer = ByteArray(1 shl 20)
-            while (true) {
-                val n = ein.read(puffer)
-                if (n < 0) break
-                sha.update(puffer, 0, n)
-                groesse += n
+        ctx.contentResolver.openFileDescriptor(original(id, art), "r")?.use { fd ->
+            if (erwartet != null && fd.statSize >= 0 && fd.statSize != erwartet) return "" to fd.statSize
+            java.io.FileInputStream(fd.fileDescriptor).use { ein ->
+                val puffer = ByteArray(1 shl 20)
+                while (true) {
+                    val n = ein.read(puffer)
+                    if (n < 0) break
+                    sha.update(puffer, 0, n)
+                    groesse += n
+                }
             }
         } ?: throw java.io.IOException("Aufnahme gerade nicht lesbar")
         return hex(sha.digest()) to groesse

@@ -17,7 +17,7 @@ from sqlalchemy import inspect, text
 
 from dependencies import get_current_user, get_db, session_familie, verify_csrf
 from main import app
-from models import RefreshToken
+from models import RefreshToken, VaultSicherungszugang
 from services import vault_service
 from services.auth_service import AuthService
 from tests.test_vault_blobs import BUCKET, _schluessel, blob_dir, konten  # noqa: F401  (Fixtures)
@@ -164,6 +164,20 @@ def test_faellt_mit_der_sitzungsfamilie(telefon, db):
     antwort = worker.post("/api/vault/sicherung/eingang", json={"id": str(uuid.uuid4()), "ciphertext": "x"})
     assert antwort.status_code == 401
     assert antwort.json()["detail"]["code"] == "VAULT_SICHERUNG_UNGUELTIG"
+    # Eine widerrufene Familie lebt nie wieder auf; der Zugang ist danach nur
+    # noch ein Rest, der Konto und Bucket nennt. Er fällt beim ersten Versuch.
+    db.expire_all()
+    assert db.query(VaultSicherungszugang).count() == 0
+
+
+def test_ein_gesperrtes_konto_behaelt_den_zugang(telefon, db, konten):
+    """Gesperrt ist nicht widerrufen: wird das Konto wieder freigegeben, gilt er wieder."""
+    token = telefon.zugang()
+    konten[0].is_active = False
+    db.commit()
+    assert _als_worker(telefon.worker, token).get(f"/api/vault/sicherung/blobs/{'d' * 32}/status").status_code == 401
+    db.expire_all()
+    assert db.query(VaultSicherungszugang).count() == 1
 
 
 def test_faellt_wenn_die_sitzung_abgelaufen_ist(telefon, db):

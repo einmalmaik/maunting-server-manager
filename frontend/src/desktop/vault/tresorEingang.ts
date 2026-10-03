@@ -34,6 +34,14 @@ import { getPendingQueue, getStoredBlobs, useVaultStore } from './vaultStore'
 const FORMAT = 1
 const DOMAENE = 'msm-tresor-eingang-v1'
 
+/**
+ * Wie lange ein Datensatz auf sein Gerät oder sein Schlüsselpaar wartet. Das
+ * Telefon schreibt keinen Datensatz, bevor beide beim Server liegen
+ * (`posteingangEinrichten`); fehlen sie danach noch, kommen sie nicht mehr,
+ * und unbekannt heißt fremd (AGENTS.md Punkt 58).
+ */
+export const WARTEN_HOECHSTENS_MS = 7 * 24 * 60 * 60 * 1000
+
 /** Was ein Gerät bei gesperrtem Tresor vom Schlüsselpaar kennt. */
 export interface EingangOeffentlich {
   id: string
@@ -182,6 +190,25 @@ export async function eingangOeffnen(
   }
 }
 
+/**
+ * Die Blobs eines Datensatzes, soweit sich sein Inhalt öffnen lässt. Die
+ * Unterschrift zählt hier nicht: es geht nur darum, was beim Verwerfen
+ * mitgeht. Ohne Schlüsselpaar bleiben die Blobs liegen, bis das Aufräumen
+ * des Servers offene Uploads entfernt oder der Tresor zurückgesetzt wird.
+ */
+async function blobsVon(text: string, bucket: string, eingangId: string, schluessel: Posteingang[]): Promise<BlobKopf[]> {
+  try {
+    const umschlag: unknown = JSON.parse(text)
+    if (!istUmschlag(umschlag)) return []
+    const paar = schluessel.find((s) => s.id === umschlag.schluessel)
+    if (!paar) return []
+    const inhalt = JSON.parse(await hybridDecrypt(umschlag.daten, paar.pqSecretKey, paar.rsaPrivateKey, aad(bucket, eingangId))) as Record<string, unknown>
+    return [inhalt?.original, inhalt?.vorschau, inhalt?.miniatur].filter(roherKopf)
+  } catch {
+    return []
+  }
+}
+
 function sicherungen<A extends SicherungAngaben['art']>(items: VaultItem[], art: A): Extract<SicherungAngaben, { art: A }>[] {
   return items
     .filter((i) => i.category === SYSTEM_KATEGORIE && i.sicherung?.art === art && !i.trashedAt)
@@ -272,7 +299,15 @@ async function einenUebernehmen(
   }
 
   const geoeffnet = await eingangOeffnen(satz.ciphertext, bucket, satz.id, schluessel, geraete)
-  if (geoeffnet.ergebnis === 'warten') return
+  if (geoeffnet.ergebnis === 'warten') {
+    // Ohne Frist läge der Datensatz eines verschwundenen Geräts für immer im
+    // Posteingang, und seine Blobs belegten den Speicher.
+    if (Date.now() - Date.parse(satz.created_at) > WARTEN_HOECHSTENS_MS) {
+      for (const k of await blobsVon(satz.ciphertext, bucket, satz.id, schluessel)) await blobLoeschen(bucket, k.id, k.loeschen).catch(() => {})
+      await eingangLoeschen(bucket, satz.id)
+    }
+    return
+  }
   if (geoeffnet.ergebnis === 'verwerfen') {
     await eingangLoeschen(bucket, satz.id)
     return

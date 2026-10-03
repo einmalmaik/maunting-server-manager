@@ -223,10 +223,26 @@ pub async fn medien_sicherung_jetzt(app: AppHandle, fenster: WebviewWindow) -> R
 }
 
 #[tauri::command(async)]
-pub async fn medien_pruefsumme(app: AppHandle, fenster: WebviewWindow, id: i64, art: String) -> Result<Value, String> {
+pub async fn medien_pruefsumme(
+    app: AppHandle,
+    fenster: WebviewWindow,
+    id: i64,
+    art: String,
+    groesse: Option<i64>,
+) -> Result<Value, String> {
     nur_hauptfenster(&fenster)?;
     pruefe_art(&art)?;
-    ruf(&app, "pruefsumme", json!({ "id": id, "art": art }))
+    if groesse.is_some_and(|g| g < 0) {
+        return Err("Ungültige Größe".to_string());
+    }
+    ruf(&app, "pruefsumme", json!({ "id": id, "art": art, "groesse": groesse }))
+}
+
+/// App-Info in den Systemeinstellungen (Hintergrundsperre aufheben).
+#[tauri::command(async)]
+pub async fn medien_einstellungen(app: AppHandle, fenster: WebviewWindow) -> Result<Value, String> {
+    nur_hauptfenster(&fenster)?;
+    ruf(&app, "einstellungen", json!({}))
 }
 
 #[tauri::command(async)]

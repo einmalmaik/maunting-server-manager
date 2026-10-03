@@ -503,8 +503,9 @@ export async function medienZugriff(anfragen: boolean): Promise<MedienZugriff> {
   return invoke<MedienZugriff>('medien_zugriff', { anfragen })
 }
 
-export async function medienPruefsumme(id: number, art: MedienArt): Promise<{ sha256: string; groesse: number }> {
-  return invoke<{ sha256: string; groesse: number }>('medien_pruefsumme', { id, art })
+/** Mit `groesse` rechnet das Telefon eine Datei anderer Größe nicht durch; `sha256` ist dann leer. */
+export async function medienPruefsumme(id: number, art: MedienArt, groesse?: number): Promise<{ sha256: string; groesse: number }> {
+  return invoke<{ sha256: string; groesse: number }>('medien_pruefsumme', { id, art, groesse: groesse ?? null })
 }
 
 /**
@@ -516,7 +517,7 @@ export async function sicherungSchluessel(geraet: string): Promise<string> {
 }
 
 /** Warum der Hintergrund-Job gerade nichts sichert. */
-export type KameraWarten = 'zugriff' | 'wlan' | 'zugang' | 'speicher' | 'fehler'
+export type KameraWarten = 'zugriff' | 'wlan' | 'akku' | 'zugang' | 'speicher' | 'server' | 'fehler'
 
 /** Was der Hintergrund-Job über sich sagt. Den Zugang gibt er nie heraus. */
 export type KameraStand =
@@ -595,6 +596,11 @@ export async function kameraJetzt(): Promise<KameraStand> {
  */
 export async function erinnerungenPlanen(liste: GeplanteErinnerung[]): Promise<void> {
   await invoke('erinnerungen_planen', { liste })
+}
+
+/** Öffnet die App-Info in den Systemeinstellungen (Hintergrundsperre aufheben). */
+export async function medienEinstellungen(): Promise<void> {
+  await invoke('medien_einstellungen')
 }
 
 /** Legt Aufnahmen in den Papierkorb der Galerie; Android fragt selbst nach. */

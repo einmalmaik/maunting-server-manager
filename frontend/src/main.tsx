@@ -41,6 +41,9 @@ import '@fontsource/jetbrains-mono/500.css'
 
 import './index.css'
 import { registerServiceWorker } from './utils/pwa'
+import { randomUuidNachruesten } from './lib/uuidNachruesten'
+
+randomUuidNachruesten()
 
 // Initialize PWA
 registerServiceWorker()

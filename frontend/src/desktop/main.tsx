@@ -13,6 +13,7 @@
  */
 import { invoke } from '@tauri-apps/api/core'
 import { gestenleisteUebernehmen } from '@/lib/gestenleiste'
+import { randomUuidNachruesten } from '@/lib/uuidNachruesten'
 
 interface AppKonfig {
   backend_url: string | null
@@ -30,5 +31,6 @@ async function hochfahren(): Promise<void> {
   await import('./start')
 }
 
+randomUuidNachruesten()
 gestenleisteUebernehmen()
 void hochfahren()

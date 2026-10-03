@@ -3,8 +3,11 @@ package com.mauntingstudios.smart_system
 import android.Manifest
 import android.app.Activity
 import android.content.ContentUris
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.Settings
 import android.util.Base64
 import android.webkit.WebView
 import androidx.activity.result.ActivityResult
@@ -25,6 +28,8 @@ import java.util.concurrent.Executors
 class MedienArgs {
     var id: Long = 0
     lateinit var art: String
+    /** Nur `pruefsumme`: erwartete Größe, sonst wird nicht gerechnet. */
+    var groesse: Long? = null
 }
 
 @InvokeArg
@@ -199,8 +204,24 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
             put("gesichert", s.gesichert)
             put("zuletzt", s.zuletzt)
             put("offen", KameraAblage.anzahlAuftraege(activity))
-            if (s.warten != null) put("warten", s.warten)
+            // Ohne WLAN oder mit Hintergrundsperre startet Android den Job gar nicht; er kann es
+            // also nicht selbst melden, und die Karte sähe aus, als sei alles gesichert.
+            val warten = s.warten?.takeIf { it != "wlan" } ?: when {
+                KameraArbeit.gebremst(activity) -> "akku"
+                s.nurWlan && !KameraArbeit.imWlan(activity) -> "wlan"
+                else -> null
+            }
+            if (warten != null) put("warten", warten)
         }
+    }
+
+    /** App-Info in den Systemeinstellungen; dort hebt man unter „Akku“ die Hintergrundsperre auf. */
+    @Command
+    fun einstellungen(invoke: Invoke) {
+        activity.startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", activity.packageName, null))
+        )
+        invoke.resolve()
     }
 
     @Command
@@ -252,7 +273,7 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
         val args = argumente<MedienArgs>(invoke) ?: return
         arbeit.execute {
             try {
-                val (sha, groesse) = Medien.pruefsumme(activity, args.id, args.art)
+                val (sha, groesse) = Medien.pruefsumme(activity, args.id, args.art, args.groesse)
                 invoke.resolve(JSObject().apply {
                     put("sha256", sha)
                     put("groesse", groesse)

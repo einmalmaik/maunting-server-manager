@@ -141,11 +141,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.20 vom 2026-10-03 aus (Screenshots nur auf Wunsch)', () => {
+  it('weist die Fassung 3.21 vom 2026-10-03 aus (neuer Versuch nach Fehlern)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.20`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.21`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -204,6 +204,8 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/seine IP-Adresse/);
     // 3.20: Bildschirmfotos nur mit eigenem Schalter.
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/Bildschirmfotos .* nur, wenn Sie das eigens einschalten/);
+    // 3.21: nach einem Netz- oder Serverfehler fragt das Telefon alle 15 Minuten erneut.
+    expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/nach einem Netz- oder Serverfehler alle 15 Minuten/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

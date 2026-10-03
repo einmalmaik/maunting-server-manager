@@ -84,6 +84,12 @@ dependencies {
     // dafür; 2.10, weil das Kotlin-Plugin hier 1.9 ist.
     implementation("androidx.work:work-runtime:2.10.5")
     testImplementation("junit:junit:4.13.2")
+    // Nur für die Tests, nicht im APK. Auf der JVM sind org.json und SQLite aus
+    // android.jar bloß Stummel: org.json für den Stand der Kamera-Sicherung,
+    // sqlite-jdbc, um die Auswahl des MediaStore (Medien.auswahl) gegen echtes
+    // SQLite zu prüfen. 3.41.2.2 ist die Fassung mit dem Fix für CVE-2023-32697.
+    testImplementation("org.json:json:20240303")
+    testImplementation("org.xerial:sqlite-jdbc:3.41.2.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
 }

@@ -65,6 +65,9 @@ rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] 
 # bringt aws-lc-rs in derselben Fassung mit, hier wird es nur direkt
 # ansprechbar. Ohne Default-Features, damit keine zweite Variante entsteht.
 aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys"] }
+# Schlüssel und Klartext dort auf jedem Weg nullen, auch bei einem frühen
+# Fehler. Liegt über aws-lc-rs schon im Baum.
+zeroize = "1.9"
 
 # Lokales Wake-Word (Phase 3): rustpotter erkennt ein aus eigenen Aufnahmen
 # gebautes Referenz-Wakeword komplett offline (Apache-2.0, kein Netzwerk).

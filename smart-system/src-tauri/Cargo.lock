@@ -3069,6 +3069,7 @@ dependencies = [
  "windows 0.62.2",
  "windows-strings 0.4.2",
  "xcap",
+ "zeroize",
 ]
 
 [[package]]

@@ -898,6 +898,7 @@ pub fn run() {
             medien::medien_sicherung_jetzt,
             medien::medien_pruefsumme,
             medien::medien_papierkorb,
+            medien::medien_einstellungen,
             erinnerung::erinnerungen_planen,
             updater::update_pruefen,
             updater::update_installieren,

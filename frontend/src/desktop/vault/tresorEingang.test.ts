@@ -21,10 +21,10 @@ import { hybridEncrypt } from '@msdis/shield/post-quantum'
 import { SanitizedApiError } from '@/api/client'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { ablageLoeschen } from './tresorAblage'
-import { blobLoeschen, blobStand } from './tresorBlobApi'
+import { blobLoeschen, blobStand, chunkLaden } from './tresorBlobApi'
 import { blobSchluessel, chunkEntschluesseln, chunkVerschluesseln, gepolsterteGroesse, type BlobKopf } from './tresorDatei'
-import type { DateiQuelle } from './tresorDateien'
-import { eingangAnstossen, posteingangEinrichten, type EingangInhalt, type EingangOeffentlich } from './tresorEingang'
+import { letzterChunkOeffnetSich, type DateiQuelle } from './tresorDateien'
+import { eingangAnstossen, posteingangEinrichten, WARTEN_HOECHSTENS_MS, type EingangInhalt, type EingangOeffentlich } from './tresorEingang'
 import { bytesToHex } from './vaultCrypto'
 import { SYSTEM_KATEGORIE } from './vaultEintrag'
 import { useVaultStore, type VaultBlindSyncPayload, type VaultItem } from './vaultStore'
@@ -49,7 +49,11 @@ vi.mock('@msdis/shield/post-quantum', async (original) => {
 })
 
 /** Der Posteingang des Servers, je Bucket, sortiert nach Kennung wie die Route. */
-const { posteingang } = vi.hoisted(() => ({ posteingang: new Map<string, Map<string, string>>() }))
+const { posteingang, angelegt } = vi.hoisted(() => ({
+  posteingang: new Map<string, Map<string, string>>(),
+  /** Wann der Server einen Datensatz angelegt haben will; ohne Angabe gerade eben. */
+  angelegt: new Map<string, string>(),
+}))
 
 vi.mock('./tresorBlobApi', () => ({
   bucketMelderSetzen: vi.fn(),
@@ -66,7 +70,7 @@ vi.mock('./tresorBlobApi', () => ({
     const eintraege = [...(posteingang.get(bucket) ?? new Map<string, string>()).entries()]
       .filter(([id]) => !nach || id > nach)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([id, ciphertext]) => ({ id, ciphertext }))
+      .map(([id, ciphertext]) => ({ id, ciphertext, created_at: angelegt.get(id) ?? new Date().toISOString() }))
     return { eintraege, weiter: null }
   }),
   eingangLoeschen: vi.fn(async (bucket: string, id: string) => {
@@ -192,6 +196,7 @@ beforeEach(async () => {
   globalThis.indexedDB = new IDBFactory()
   localStorage.clear()
   posteingang.clear()
+  angelegt.clear()
   setzeAngemeldetesKonto(1)
   vi.restoreAllMocks()
   vi.clearAllMocks()
@@ -250,6 +255,16 @@ describe('Übernahme beim Entsperren', () => {
     expect({ ...original, schluessel: '' }).toEqual({ ...angaben.original, schluessel: '' })
     const geoeffnet = await chunkEntschluesseln(chunk, original, 0, await blobSchluessel(original, userKey, id), id)
     expect(new TextDecoder().decode(geoeffnet)).toBe('Foto vom Gipfel')
+
+    // „Speicher freigeben“ glaubt dem Server erst, wenn sich sein letzter Chunk öffnen lässt.
+    vi.mocked(chunkLaden).mockResolvedValueOnce(chunk)
+    expect(await letzterChunkOeffnetSich(original, id, userKey)).toBe(true)
+    const gekippt = chunk.slice()
+    gekippt[20] ^= 1
+    vi.mocked(chunkLaden).mockResolvedValueOnce(gekippt)
+    expect(await letzterChunkOeffnetSich(original, id, userKey)).toBe(false)
+    vi.mocked(chunkLaden).mockRejectedValueOnce(new SanitizedApiError('weg', { status: 404 }))
+    expect(await letzterChunkOeffnetSich(original, id, userKey)).toBe(false)
   })
 
   it('löscht den Datensatz erst, wenn der Eintrag beim Server liegt', async () => {
@@ -296,6 +311,22 @@ describe('Übernahme beim Entsperren', () => {
     await eingangAnstossen(BUCKET)
     expect(dateiEintraege()).toEqual([])
     expect(liegtNoch(id)).toBe(true)
+  })
+
+  it('räumt den Datensatz eines Geräts, das nach einer Woche noch unbekannt ist, samt Blobs ab', async () => {
+    const fremd = await geraetAnlegen('9f8e7d6c-5b4a-4321-8fed-cba987654321')
+    const id = crypto.randomUUID()
+    const { angaben } = await aufnahme(id, new Uint8Array(10), { geraet: fremd.geraet })
+    await ablegen(id, angaben, { geraet: fremd })
+    angelegt.set(id, new Date(Date.now() - WARTEN_HOECHSTENS_MS - 60_000).toISOString())
+
+    await eingangAnstossen(BUCKET)
+    expect(dateiEintraege()).toEqual([])
+    expect(liegtNoch(id)).toBe(false)
+    const freigegeben = vi.mocked(blobLoeschen).mock.calls.map(([, blob, loeschen]) => [blob, loeschen])
+    expect(freigegeben).toEqual(
+      [angaben.original, angaben.vorschau, angaben.miniatur].map((k) => [k.id, k.loeschen]),
+    )
   })
 
   it('verwirft, wenn ein Gerät für die Aufnahmen eines anderen spricht', async () => {

@@ -126,7 +126,13 @@ def pruefen(db: Session, token: str) -> Sicherung:
     if zeile is None:
         raise ZugangUngueltig()
     user = db.get(User, user_id)
-    if user is None or not user.is_active or not _familie_lebt(db, user_id, familie):
+    if user is not None and user.is_active and not _familie_lebt(db, user_id, familie):
+        # Eine widerrufene oder abgelaufene Familie lebt nie wieder auf. Der
+        # Zugang ist danach nur noch ein Rest, der Konto und Bucket nennt; der
+        # Aufrufer committet das Löschen.
+        db.delete(zeile)
+        raise ZugangUngueltig()
+    if user is None or not user.is_active:
         raise ZugangUngueltig()
     konto = vault_service.tresor_konto(user_id)
     if zeile.konto_index != konto.index or zeile.familie_index != familie_index(familie):

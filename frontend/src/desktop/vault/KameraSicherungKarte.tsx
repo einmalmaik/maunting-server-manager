@@ -16,7 +16,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { Button, Switch } from '@/Singra/UI'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { useZweitfaktor, ZweitfaktorFeld } from '@/components/auth/ZweitfaktorNachweis'
-import { medienZugriff } from '@/desktop/tauri'
+import { medienEinstellungen, medienZugriff } from '@/desktop/tauri'
 import { formatBytes, formatZeitpunkt } from '@/lib/format'
 import { useAuthStore } from '@/stores/authStore'
 import { confirm } from '@/stores/confirmStore'
@@ -121,10 +121,10 @@ export function KameraSicherungKarte() {
     if (!bucket || !aktiv) return
     setBeschaeftigt(true)
     try {
-      const freigabe = await freigebbar(bucket, aktiv.geraet)
+      const freigabe = await freigebbar(bucket)
       const anzahl = freigabe.bilder.length + freigabe.videos.length
       if (anzahl === 0) {
-        toast.info(t('mss.vault.kamera.nichtsFreizugeben'))
+        toast.info(t(freigabe.unerreichbar ? 'mss.vault.kamera.freigebenUnerreichbar' : 'mss.vault.kamera.nichtsFreizugeben'))
         return
       }
       const ok = await confirm({
@@ -250,6 +250,11 @@ export function KameraSicherungKarte() {
                 {aktiv.warten === 'zugriff' && (
                   <Button variant="secondary" size="sm" type="button" onClick={() => void zugriffErteilen()}>
                     {t('mss.vault.kamera.zugriffErteilen')}
+                  </Button>
+                )}
+                {aktiv.warten === 'akku' && (
+                  <Button variant="secondary" size="sm" type="button" onClick={() => void medienEinstellungen().catch(() => toast.error(t('mss.vault.kamera.fehler')))}>
+                    {t('mss.vault.kamera.einstellungenOeffnen')}
                   </Button>
                 )}
               </div>

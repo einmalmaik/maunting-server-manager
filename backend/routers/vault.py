@@ -670,6 +670,7 @@ def _sicherung(request: Request, db: Session = Depends(get_db)) -> vault_sicheru
     try:
         sicherung = vault_sicherung_service.pruefen(db, token)
     except vault_sicherung_service.ZugangUngueltig as exc:
+        db.commit()  # ein toter Zugang fällt (``pruefen``)
         raise _mit_code(status.HTTP_401_UNAUTHORIZED, "VAULT_SICHERUNG_UNGUELTIG") from exc
     except vault_sicherung_service.ZugangZurueckgesetzt as exc:
         raise _mit_code(status.HTTP_410_GONE, "VAULT_ZURUECKGESETZT") from exc

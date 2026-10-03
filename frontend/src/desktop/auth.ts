@@ -126,6 +126,8 @@ export const ABGEMELDET = 'mss:abgemeldet'
  */
 export async function abmelden(): Promise<void> {
   const refresh = await invoke<string | null>('refresh_token_laden')
+  // Vor dem Logout, solange die Sitzung den Zugang noch entfernen darf.
+  await import('./vault/kameraSicherung').then((k) => k.kameraBeimAbmelden()).catch(() => {})
   try {
     await api('/auth/logout', {
       method: 'POST',

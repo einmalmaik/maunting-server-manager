@@ -74,7 +74,7 @@ object KameraAblage {
                 kennung = j.getString("kennung"), konto = j.getLong("konto"), server = j.getString("server"),
                 bucket = j.getString("bucket"), geraet = j.getString("geraet"), zugang = j.getString("zugang"),
                 eingangId = j.getString("eingangId"), pq = j.getString("pq"), rsa = j.getString("rsa"),
-                nurWlan = j.getBoolean("nurWlan"), screenshots = j.optBoolean("screenshots"), screenshotsAb = j.optLong("screenshotsAb"),marke = j.getLong("marke"), markeId = j.optLong("markeId", ALLE),
+                nurWlan = j.getBoolean("nurWlan"), screenshots = j.optBoolean("screenshots"), screenshotsAb = j.optLong("screenshotsAb"), marke = j.getLong("marke"), markeId = j.optLong("markeId", ALLE),
                 fassung = j.getString("fassung"), gesichert = j.optInt("gesichert"), zuletzt = j.optLong("zuletzt"),
                 warten = if (j.isNull("warten")) null else j.optString("warten"),
             )
@@ -106,10 +106,25 @@ object KameraAblage {
         return erzeuger.generateKey()
     }
 
+    /** Nullt `daten` danach, auf jedem Weg: Aufrufer geben nur frische Kopien hinein. */
     private fun verschluesseln(daten: ByteArray): ByteArray {
-        val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.ENCRYPT_MODE, schluessel())
-        return c.iv + c.doFinal(daten)
+        try {
+            val c = Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(Cipher.ENCRYPT_MODE, schluessel())
+            return c.iv + c.doFinal(daten)
+        } finally {
+            daten.fill(0)
+        }
+    }
+
+    /** Entschlüsselt zu Text und nullt die Bytes dazwischen. Der Text selbst lässt sich nicht nullen. */
+    private fun textAus(daten: ByteArray): String {
+        val klar = entschluesseln(daten)
+        try {
+            return String(klar)
+        } finally {
+            klar.fill(0)
+        }
     }
 
     private fun entschluesseln(daten: ByteArray): ByteArray {
@@ -119,7 +134,7 @@ object KameraAblage {
     }
 
     fun zu(text: String): String = Base64.encodeToString(verschluesseln(text.toByteArray()), Base64.NO_WRAP)
-    fun auf(text: String): String = String(entschluesseln(Base64.decode(text, Base64.NO_WRAP)))
+    fun auf(text: String): String = textAus(Base64.decode(text, Base64.NO_WRAP))
 
     /** Schreibt neben das Ziel und benennt um: ein Abbruch lässt keine halbe Datei. */
     private fun ablegen(ziel: File, daten: ByteArray) {
@@ -166,20 +181,25 @@ object KameraAblage {
         true
     }
 
+    /**
+     * Ob ein Auftrag mit diesem Fehler verloren ist: mit dem heutigen Schlüssel
+     * nicht zu öffnen (Keystore neu, Datei kaputt) oder kein JSON. Alles andere
+     * (Keystore gerade nicht erreichbar, Lesefehler) beendet nur den Lauf, und
+     * der Auftrag bleibt: die Marke steht schon hinter seiner Aufnahme, gelöscht
+     * wäre sie nie gesichert.
+     */
+    fun unrettbar(e: Exception): Boolean = e is AEADBadTagException || e is JSONException
+
     fun auftraege(ctx: Context, kennung: String): List<JSONObject> = synchronized(sperre) {
         if (lesen(ctx)?.kennung != kennung) return emptyList()
         auftragOrdner(ctx).listFiles { f -> f.name.endsWith(".auftrag") }.orEmpty().sortedBy { it.lastModified() }.mapNotNull { f ->
             try {
-                JSONObject(String(entschluesseln(f.readBytes())))
-            } catch (e: AEADBadTagException) {
-                // Mit dem heutigen Schlüssel nicht zu öffnen (Keystore neu, Datei kaputt): nichts mehr zu retten.
-                f.delete()
-                null
-            } catch (e: JSONException) {
+                JSONObject(textAus(f.readBytes()))
+            } catch (e: Exception) {
+                if (!unrettbar(e)) throw e
                 f.delete()
                 null
             }
-            // Alles andere (Keystore gerade nicht erreichbar, Lesefehler) beendet den Lauf; der Auftrag bleibt.
         }
     }
 

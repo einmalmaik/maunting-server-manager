@@ -7,10 +7,12 @@
  * `kameraVektoren.test.ts` und die Übernahme `tresorEingang.test.ts`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { SanitizedApiError } from '@/api/client'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 import * as tauri from '@/desktop/tauri'
 import type { KameraStand } from '@/desktop/tauri'
 import { blobStand, sicherungszugangAnlegen, sicherungszugangEntfernen } from './tresorBlobApi'
+import { letzterChunkOeffnetSich } from './tresorDateien'
 import { posteingangEinrichten } from './tresorEingang'
 import { useVaultStore, type VaultItem } from './vaultStore'
 import {
@@ -44,6 +46,11 @@ vi.mock('@/desktop/tauri', () => ({
 }))
 
 vi.mock('./tresorEingang', () => ({ posteingangEinrichten: vi.fn() }))
+
+vi.mock('./tresorDateien', async (original) => ({
+  ...(await original<typeof import('./tresorDateien')>()),
+  letzterChunkOeffnetSich: vi.fn(async () => true),
+}))
 
 vi.mock('./tresorBlobApi', () => ({
   bucketMelderSetzen: vi.fn(),
@@ -219,7 +226,7 @@ describe('Speicher freigeben', () => {
       category: 'datei',
       datei: {
         typ: 'image/jpeg',
-        original: { id: `orig-${id}` },
+        original: { id: `orig-${id}`, echt: 100 },
         vorschau: { id: `vor-${id}` },
         miniatur: { id: `min-${id}` },
         quelle: { geraet, medienId, art: 'bild', sha256: await sha256(inhalt) },
@@ -230,27 +237,56 @@ describe('Speicher freigeben', () => {
 
   const inhalt = (n: number) => new Uint8Array(100).fill(n)
 
-  it('nimmt nur, was dieses Gerät gesichert hat, beim Server fertig liegt und in der Galerie unverändert ist', async () => {
+  it('nimmt nur, was beim Server fertig liegt und hier noch genau die gesicherten Bytes hat', async () => {
     const items = [
       await datei('gut', 1, inhalt(1)),
       await datei('offen', 2, inhalt(2)), // Original noch nicht fertig beim Server
       await datei('wartet', 3, inhalt(3)), // Eintrag noch nicht beim Server
       await datei('anders', 4, inhalt(4)), // nach dem Sichern bearbeitet
       await datei('papierkorb', 5, inhalt(5), { trashedAt: Date.now() }),
-      await datei('fremd', 6, inhalt(6), {}, 'anderes-geraet'),
+      await datei('fremd', 6, inhalt(6), {}, 'anderes-geraet'), // Kennung 6 ist hier eine andere Datei
     ]
     useVaultStore.setState({ items })
     localStorage.setItem(`mss:vault_pending_${BUCKET}`, JSON.stringify([{ id: 'wartet', ciphertext: 'x', revision: 0, is_deleted: false }]))
     vi.mocked(blobStand).mockImplementation(async (_b, id) => ({ state: id === 'orig-offen' ? 'offen' : 'fertig', chunk_count: 1, vorhanden: [0] }))
-    vi.mocked(tauri.medienPruefsumme).mockImplementation(async (id) => ({ sha256: await sha256(id === 4 ? inhalt(99) : inhalt(id)), groesse: 100 }))
+    vi.mocked(tauri.medienPruefsumme).mockImplementation(async (id) => ({ sha256: await sha256(id >= 4 ? inhalt(99) : inhalt(id)), groesse: 100 }))
 
-    expect(await freigebbar(BUCKET, GERAET)).toEqual({ bilder: [1], videos: [], bytes: 100 })
+    expect(await freigebbar(BUCKET)).toEqual({ bilder: [1], videos: [], bytes: 100 })
+    // Die erwartete Größe geht mit: eine andere rechnet das Telefon nicht durch.
+    expect(vi.mocked(tauri.medienPruefsumme).mock.calls).toContainEqual([1, 'bild', 100])
   })
 
-  it('nimmt nichts, wenn der Server nicht antwortet', async () => {
+  it('nimmt auch, was dieses Telefon vor dem Abmelden und neuen Einrichten gesichert hat', async () => {
+    // Neues Einrichten vergibt eine neue Gerätekennung; die Aufnahmen von davor
+    // liegen weiter unverändert in der Galerie.
+    useVaultStore.setState({ items: [await datei('vorher', 7, inhalt(7), {}, 'kennung-vor-dem-abmelden'), await datei('jetzt', 8, inhalt(8))] })
+    vi.mocked(blobStand).mockResolvedValue({ state: 'fertig', chunk_count: 1, vorhanden: [0] })
+    vi.mocked(tauri.medienPruefsumme).mockImplementation(async (id) => ({ sha256: await sha256(inhalt(id)), groesse: 100 }))
+    expect(await freigebbar(BUCKET)).toEqual({ bilder: [7, 8], videos: [], bytes: 200 })
+  })
+
+  it('nimmt nichts, dessen letzter Chunk sich beim Server nicht öffnen lässt, auch wenn er „fertig“ meldet', async () => {
+    useVaultStore.setState({ items: [await datei('gut', 1, inhalt(1)), await datei('halb', 2, inhalt(2))] })
+    vi.mocked(blobStand).mockResolvedValue({ state: 'fertig', chunk_count: 1, vorhanden: [0] })
+    vi.mocked(letzterChunkOeffnetSich).mockImplementation(async (kopf) => kopf.id === 'orig-gut')
+    vi.mocked(tauri.medienPruefsumme).mockImplementation(async (id) => ({ sha256: await sha256(inhalt(id)), groesse: 100 }))
+    expect(await freigebbar(BUCKET)).toEqual({ bilder: [1], videos: [], bytes: 100 })
+    expect(vi.mocked(letzterChunkOeffnetSich).mock.calls.map(([kopf, id]) => [kopf.id, id])).toEqual([
+      ['orig-gut', 'gut'],
+      ['orig-halb', 'halb'],
+    ])
+  })
+
+  it('nimmt nichts, wenn der Server nicht antwortet, und sagt das statt „nichts gesichert“', async () => {
     useVaultStore.setState({ items: [await datei('gut', 1, inhalt(1))] })
-    vi.mocked(blobStand).mockRejectedValue(new Error('offline'))
+    vi.mocked(blobStand).mockRejectedValue(new TypeError('Failed to fetch'))
     vi.mocked(tauri.medienPruefsumme).mockResolvedValue({ sha256: await sha256(inhalt(1)), groesse: 100 })
-    expect(await freigebbar(BUCKET, GERAET)).toEqual({ bilder: [], videos: [], bytes: 0 })
+    expect(await freigebbar(BUCKET)).toEqual({ bilder: [], videos: [], bytes: 0, unerreichbar: true })
+  })
+
+  it('hält einen Blob, den der Server nicht kennt, nicht für einen Netzfehler', async () => {
+    useVaultStore.setState({ items: [await datei('gut', 1, inhalt(1))] })
+    vi.mocked(blobStand).mockRejectedValue(new SanitizedApiError('weg', { status: 404 }))
+    expect(await freigebbar(BUCKET)).toEqual({ bilder: [], videos: [], bytes: 0 })
   })
 })

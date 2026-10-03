@@ -29,7 +29,9 @@ import {
 } from '@/desktop/tauri'
 import { getEffectiveApiUrl } from '@/config/api'
 import { angemeldetesKonto, beiKontowechsel } from '@/lib/angemeldetesKonto'
+import { isNetworkOrOfflineError } from '@/lib/networkErrors'
 import { blobStand, sicherungszugangAnlegen, sicherungszugangEntfernen } from './tresorBlobApi'
+import { letzterChunkOeffnetSich } from './tresorDateien'
 import { posteingangEinrichten } from './tresorEingang'
 import { sichtbareEintraege } from './tresorOrdner'
 import { getPendingQueue, useVaultStore } from './vaultStore'
@@ -123,6 +125,17 @@ export async function kameraAusschalten(): Promise<void> {
   useKameraSicherung.setState({ stand: { eingerichtet: false } })
 }
 
+/**
+ * Abmelden, in der App wie im Panel: der Job gehört dem Konto, das sich abmeldet
+ * (Punkt 50). Sein Zugang fällt beim Server, solange die Sitzung noch gilt,
+ * Stand und offene Aufträge auf dem Telefon. Nur die Android-App hat einen Job.
+ */
+export async function kameraBeimAbmelden(): Promise<void> {
+  const app = '__TAURI_INTERNALS__' in window || '__TAURI__' in window
+  if (!app || !/android/i.test(navigator.userAgent)) return
+  await kameraAusschalten()
+}
+
 export async function kameraNurWlan(nurWlan: boolean): Promise<void> {
   useKameraSicherung.setState({ stand: await kameraAendern({ nurWlan }) })
 }
@@ -182,6 +195,8 @@ export function kameraBeobachten(): () => void {
 export interface Freigabe {
   bilder: number[]
   videos: number[]
+  /** Der Server antwortete nicht: „nichts gesichert“ wäre dann falsch. */
+  unerreichbar?: true
   bytes: number
 }
 
@@ -191,21 +206,36 @@ function offenerBucket(): string | null {
 }
 
 /**
- * Was sich aus der Galerie entfernen lässt: nur Aufnahmen dieses Geräts, deren
- * Eintrag beim Server angekommen ist, deren Original dort fertig liegt und
- * deren Datei in DCIM noch genau die gesicherten Bytes hat.
+ * Was sich aus der Galerie entfernen lässt: Aufnahmen, deren Eintrag beim
+ * Server angekommen ist, deren Original dort fertig liegt, deren letzter Chunk
+ * sich vom Server öffnen lässt und deren Datei hier noch genau die gesicherten
+ * Bytes hat. Dem `fertig` des Servers allein glaubt das nicht: danach ist das
+ * Original auf dem Telefon weg.
+ *
+ * Die Gerätekennung zählt nicht. Nach Abmelden und neuem Einrichten bekommt
+ * dasselbe Telefon eine neue, und seine früheren Aufnahmen wären nie mehr
+ * freizugeben gewesen. Ob die Datei dieselbe ist, sagt allein die Prüfsumme;
+ * eine Datei anderer Größe rechnet das Telefon gar nicht erst durch.
  */
-export async function freigebbar(bucket: string, geraet: string): Promise<Freigabe> {
+export async function freigebbar(bucket: string): Promise<Freigabe> {
   const ergebnis: Freigabe = { bilder: [], videos: [], bytes: 0 }
   if (offenerBucket() !== bucket) return ergebnis
   const wartend = new Set(getPendingQueue(bucket).map((e) => e.id))
   for (const item of sichtbareEintraege(useVaultStore.getState().items)) {
     const q = item.datei?.quelle
-    if (!q || q.geraet !== geraet || wartend.has(item.id)) continue
+    if (!q || wartend.has(item.id)) continue
     const original = item.datei!.original
-    const amServer = await blobStand(bucket, original.id).catch(() => null)
-    if (amServer?.state !== 'fertig') continue
-    const jetzt = await medienPruefsumme(q.medienId, q.art).catch(() => null)
+    let amServer
+    try {
+      amServer = await blobStand(bucket, original.id)
+    } catch (err) {
+      if (isNetworkOrOfflineError(err)) ergebnis.unerreichbar = true
+      continue
+    }
+    if (amServer.state !== 'fertig') continue
+    const userKey = useVaultStore.getState().userKey
+    if (!userKey || !(await letzterChunkOeffnetSich(original, item.id, userKey))) continue
+    const jetzt = await medienPruefsumme(q.medienId, q.art, original.echt).catch(() => null)
     if (!jetzt || jetzt.sha256 !== q.sha256) continue
     if (offenerBucket() !== bucket) return { bilder: [], videos: [], bytes: 0 }
     ;(q.art === 'video' ? ergebnis.videos : ergebnis.bilder).push(q.medienId)

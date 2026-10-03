@@ -617,6 +617,25 @@ export async function blobLesen(
   return new Blob(teile, { type: typ })
 }
 
+/**
+ * Ob der Server den letzten Chunk des Blobs so hat, wie ihn das hochladende
+ * Gerät verschlüsselt hat. `fertig` ist nur eine Angabe des Servers; der
+ * letzte Chunk trägt Index und Anzahl in der AAD und belegt, dass der Upload
+ * bis zum Ende kam. Gelesen wird am Cache vorbei, denn es geht um die Kopie
+ * beim Server.
+ */
+export async function letzterChunkOeffnetSich(kopf: BlobKopf, eintragId: string, userKey: CryptoKey): Promise<boolean> {
+  try {
+    const schluessel = await blobSchluessel(kopf, userKey, eintragId)
+    const index = chunkAnzahl(kopf.groesse) - 1
+    const daten = await chunkLaden(kopf.id, index)
+    ;(await chunkEntschluesseln(daten, kopf, index, schluessel, eintragId)).fill(0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /*
  * Offline verfügbar. Miniaturen liegen immer auf dem Gerät. Originale nur,
  * wenn sie angeheftet sind („Offline verfügbar“) oder zuletzt geöffnet
