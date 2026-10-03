@@ -19,6 +19,7 @@ from models.vault_user_setting import VaultUserSetting
 from models.vault_blind_bucket import VaultBlindBucket
 from models.vault_bucket_format import VaultBucketFormat
 from models.vault_bucket_tombstone import VaultBucketTombstone
+from models.vault_sicherungszugang import VaultSicherungszugang
 from schemas.vault import (
     VaultBlindSyncRequest,
     VaultEntryOut,
@@ -716,10 +717,11 @@ def set_vault_salt(
 
 
 def _bucket_entfernen(db: Session, bucket_id: str) -> None:
-    """Loescht Eintraege, Posteingang, Besitznachweis, Formatsperre und Dateien des Buckets und beerdigt ihn."""
+    """Loescht Eintraege, Posteingang, Sicherungszugaenge, Besitznachweis, Formatsperre und Dateien des Buckets und beerdigt ihn."""
     _sperre_bucket(db, bucket_id)
     vault_blob_service.alle_zur_loeschung(db, bucket_id)
     vault_blob_service.eingang_entfernen(db, bucket_id)
+    db.query(VaultSicherungszugang).filter(VaultSicherungszugang.bucket_id == bucket_id).delete(synchronize_session=False)
     db.query(VaultEntry).filter(VaultEntry.bucket_id == bucket_id).delete(synchronize_session=False)
     db.query(VaultBlindBucket).filter(VaultBlindBucket.bucket_id == bucket_id).delete(synchronize_session=False)
     db.query(VaultBucketFormat).filter(VaultBucketFormat.bucket_id == bucket_id).delete(synchronize_session=False)

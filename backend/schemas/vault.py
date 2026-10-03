@@ -138,6 +138,14 @@ class VaultResetRequest(BaseModel):
     confirmation: str = Field(default="", max_length=32)
 
 
+class VaultSicherungszugangAnlegen(BaseModel):
+    """Zugang der Kamera-Sicherung: ein frischer Nachweis wie beim Koppeln eines Geraets."""
+
+    password: Optional[str] = Field(default=None, max_length=256)
+    otp_code: Optional[str] = Field(default=None, pattern=r"^\d{6}$")
+    passkey: Optional[Zweitnachweis] = None
+
+
 class VaultEntryOut(BaseModel):
     id: str
     ciphertext: str

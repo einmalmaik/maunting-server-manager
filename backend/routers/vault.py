@@ -8,7 +8,7 @@ from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import get_current_user, verify_csrf
+from dependencies import get_current_user, session_familie, verify_csrf
 from middleware.rate_limit import auth_rate_limit, limiter
 from models.user import User
 from schemas.vault import (
@@ -19,6 +19,7 @@ from schemas.vault import (
     VaultEingangAnlegen,
     VaultEingangDatensatz,
     VaultEingangListe,
+    VaultSicherungszugangAnlegen,
     VaultSpeicher,
     VaultBlindCheckRequest,
     VaultBlindRegisterRequest,
@@ -31,7 +32,8 @@ from schemas.vault import (
     VaultSyncRequest,
     VaultSyncResponse,
 )
-from services import audit_service, passkey_service, vault_blob_service, vault_service
+from services import audit_service, passkey_service, vault_blob_service, vault_service, vault_sicherung_service
+from services.dis_client import DisSidecarError
 from services.auth_service import AuthService
 from services.panel_settings_service import PanelSettingsService
 
@@ -443,6 +445,10 @@ async def blob_chunk_hochladen(
     bucket: str = Depends(_genannter_bucket),
     __=Depends(verify_csrf),
 ) -> Response:
+    return await _chunk_annehmen(request, db, bucket, blob_id, index)
+
+
+async def _chunk_annehmen(request: Request, db: Session, bucket: str, blob_id: str, index: int) -> Response:
     """Nimmt einen Chunk als rohe Bytes an. Laenge exakt wie angemeldet, sonst 413/422.
 
     Datenbank und Platte laufen im Threadpool. Die Sitzung ist frei, bevor der
@@ -611,4 +617,183 @@ def eingang_loeschen(
     __=Depends(verify_csrf),
 ) -> Response:
     vault_blob_service.eingang_loeschen(db, bucket, eingang_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Kamera-Sicherung ohne offene App (eigener Zugang, vault_sicherung_service) ──
+
+SICHERUNG_KOPF = "X-MSM-Sicherung"
+
+
+@router.post("/sicherung/zugang", status_code=status.HTTP_201_CREATED, dependencies=[Depends(auth_rate_limit)])
+def sicherungszugang_anlegen(
+    payload: VaultSicherungszugangAnlegen,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    konto: vault_service.TresorKonto = Depends(_tresor_konto),
+    bucket: str = Depends(_genannter_bucket),
+    familie: str | None = Depends(session_familie),
+    __=Depends(verify_csrf),
+) -> dict[str, str]:
+    """Zugang fuer die Sicherung auf diesem Geraet; ersetzt den bisherigen derselben Sitzung.
+
+    Ein dauerhafter Zugang, deshalb nur mit frischem Nachweis (AGENTS.md
+    Punkt 21). Ohne Sitzungsfamilie gibt es nichts, woran er fallen koennte.
+    Index und Bucket stehen vor dem Nachweis fest (Punkt 82).
+    """
+    if not familie:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Nur aus einer angemeldeten App.")
+    try:
+        fam_index = vault_sicherung_service.familie_index(familie)
+    except DisSidecarError as exc:
+        raise HTTPException(status_code=503, detail="Der Tresor ist gerade nicht erreichbar.") from exc
+    fehlt = passkey_service.frischer_nachweis_fehlt(
+        db,
+        current_user,
+        password=payload.password,
+        otp_code=payload.otp_code,
+        passkey=payload.passkey.model_dump() if payload.passkey else None,
+        zweck="kamera_sicherung",
+    )
+    if fehlt:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=fehlt)
+    token = vault_sicherung_service.anlegen(db, konto, familie, fam_index, bucket)
+    db.commit()
+    return {"zugang": token}
+
+
+@router.delete("/sicherung/zugang", status_code=status.HTTP_204_NO_CONTENT)
+def sicherungszugang_entfernen(
+    db: Session = Depends(get_db),
+    konto: vault_service.TresorKonto = Depends(_tresor_konto),
+    familie: str | None = Depends(session_familie),
+    __=Depends(verify_csrf),
+) -> Response:
+    if familie:
+        try:
+            vault_sicherung_service.entfernen(db, konto, vault_sicherung_service.familie_index(familie))
+        except DisSidecarError as exc:
+            raise HTTPException(status_code=503, detail="Der Tresor ist gerade nicht erreichbar.") from exc
+        db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _sicherung(request: Request, db: Session = Depends(get_db)) -> vault_sicherung_service.Sicherung:
+    """Der Worker auf dem Telefon. Kein CSRF: der Zugang steht in einem eigenen Kopf, nie in einem Cookie."""
+    token = (request.headers.get(SICHERUNG_KOPF) or "").strip()
+    if not token:
+        raise _mit_code(status.HTTP_401_UNAUTHORIZED, "VAULT_SICHERUNG_UNGUELTIG")
+    try:
+        sicherung = vault_sicherung_service.pruefen(db, token)
+    except vault_sicherung_service.ZugangUngueltig as exc:
+        raise _mit_code(status.HTTP_401_UNAUTHORIZED, "VAULT_SICHERUNG_UNGUELTIG") from exc
+    except vault_sicherung_service.ZugangZurueckgesetzt as exc:
+        raise _mit_code(status.HTTP_410_GONE, "VAULT_ZURUECKGESETZT") from exc
+    except DisSidecarError as exc:
+        raise HTTPException(status_code=503, detail="Der Tresor ist gerade nicht erreichbar.") from exc
+    db.commit()
+    return sicherung
+
+
+@router.post("/sicherung/blobs", status_code=status.HTTP_201_CREATED)
+@limiter.limit("1200/minute")
+def sicherung_blob_anlegen(
+    payload: VaultBlobAnlegen,
+    request: Request,
+    db: Session = Depends(get_db),
+    sicherung: vault_sicherung_service.Sicherung = Depends(_sicherung),
+) -> dict[str, str]:
+    try:
+        vault_blob_service.anlegen(
+            db, sicherung.user, sicherung.bucket, payload.id, payload.chunk_count, payload.bytes_total, payload.delete_verifier
+        )
+    except vault_blob_service.BlobFehler as exc:
+        raise _blob_fehler(exc) from exc
+    return {"id": payload.id}
+
+
+@router.put("/sicherung/blobs/{blob_id}/chunks/{index}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("1200/minute")
+async def sicherung_chunk_hochladen(
+    blob_id: str,
+    index: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    sicherung: vault_sicherung_service.Sicherung = Depends(_sicherung),
+) -> Response:
+    return await _chunk_annehmen(request, db, sicherung.bucket, blob_id, index)
+
+
+@router.get("/sicherung/blobs/{blob_id}/status", response_model=VaultBlobStatus)
+@limiter.limit("1200/minute")
+def sicherung_blob_status(
+    blob_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    sicherung: vault_sicherung_service.Sicherung = Depends(_sicherung),
+) -> VaultBlobStatus:
+    try:
+        blob = vault_blob_service.eigener_blob(db, sicherung.bucket, blob_id)
+    except vault_blob_service.BlobFehler as exc:
+        raise _blob_fehler(exc) from exc
+    return VaultBlobStatus(state=blob.state, chunk_count=blob.chunk_count, vorhanden=vault_blob_service.vorhandene_chunks(blob))
+
+
+@router.post("/sicherung/blobs/{blob_id}/fertig")
+@limiter.limit("1200/minute")
+def sicherung_blob_fertig(
+    blob_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    sicherung: vault_sicherung_service.Sicherung = Depends(_sicherung),
+) -> dict[str, str]:
+    try:
+        vault_blob_service.fertigstellen(db, sicherung.bucket, blob_id)
+    except vault_blob_service.BlobFehler as exc:
+        raise _blob_fehler(exc) from exc
+    return {"state": "fertig"}
+
+
+@router.delete("/sicherung/blobs/{blob_id}")
+@limiter.limit("1200/minute")
+def sicherung_blob_loeschen(
+    blob_id: str,
+    payload: VaultBlobLoeschen,
+    request: Request,
+    db: Session = Depends(get_db),
+    sicherung: vault_sicherung_service.Sicherung = Depends(_sicherung),
+) -> dict[str, str]:
+    """Nur mit dem Loeschnachweis, den allein das Geraet kennt, das den Blob angelegt hat."""
+    try:
+        vault_blob_service.loeschen(db, sicherung.bucket, blob_id, payload.schluessel)
+    except vault_blob_service.BlobFehler as exc:
+        raise _blob_fehler(exc) from exc
+    return {"state": "geloescht"}
+
+
+@router.post("/sicherung/eingang", status_code=status.HTTP_201_CREATED)
+@limiter.limit("600/minute")
+def sicherung_eingang_ablegen(
+    payload: VaultEingangAnlegen,
+    request: Request,
+    db: Session = Depends(get_db),
+    sicherung: vault_sicherung_service.Sicherung = Depends(_sicherung),
+) -> dict[str, str]:
+    try:
+        vault_blob_service.eingang_ablegen(db, sicherung.user, sicherung.bucket, payload.id, payload.ciphertext)
+    except vault_blob_service.BlobFehler as exc:
+        raise _blob_fehler(exc) from exc
+    return {"id": payload.id}
+
+
+@router.delete("/sicherung/eingang/{eingang_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("1200/minute")
+def sicherung_eingang_loeschen(
+    eingang_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    sicherung: vault_sicherung_service.Sicherung = Depends(_sicherung),
+) -> Response:
+    """Fuer einen Datensatz, dessen Datei sich beim Hochladen geaendert hat. Lesen kann der Zugang nichts."""
+    vault_blob_service.eingang_loeschen(db, sicherung.bucket, eingang_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

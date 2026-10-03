@@ -52,7 +52,7 @@ from services import login_challenge_service
 ZWECKE_ANGEMELDET = frozenset({
     "2fa_disable", "device_pairing", "e2ee_reset",
     "password_change", "email_change", "account_delete", "data_export",
-    "oauth_link", "2fa_change", "vault_reset",
+    "oauth_link", "2fa_change", "vault_reset", "kamera_sicherung",
 })
 ZWECKE = ZWECKE_ANGEMELDET | {"login", "oauth_2fa"}
 

@@ -531,10 +531,11 @@ def test_migration_hin_und_zurueck(tmp_path: Path, pg_wegwerf) -> None:
         assert "role_vault_quotas" not in pruefer.get_table_names()
         assert "vault_bucket_tombstones" not in pruefer.get_table_names()
         assert "vault_eingang" not in pruefer.get_table_names()
+        assert "vault_sicherungszugaenge" not in pruefer.get_table_names()
 
         command.upgrade(config, "head")
         pruefer = inspect(engine)
-        assert {"vault_blobs", "vault_bucket_formats", "role_vault_quotas", "vault_bucket_tombstones", "vault_eingang"} <= set(
+        assert {"vault_blobs", "vault_bucket_formats", "role_vault_quotas", "vault_bucket_tombstones", "vault_eingang", "vault_sicherungszugaenge"} <= set(
             pruefer.get_table_names()
         )
         # Seit 20261001_01 haengt ein Blob am Bucket, nicht am Konto.
