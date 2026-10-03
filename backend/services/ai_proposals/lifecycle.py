@@ -157,7 +157,7 @@ from services.ai_proposals.task_proposals import (
 logger = logging.getLogger(__name__)
 
 def proposal_response(proposal: AiActionProposal) -> AiActionProposalResponse:
-    """Ein Vorschlag als Vertrag nach aussen â€” die **einzige** Serialisierung.
+    """Ein Vorschlag als Vertrag nach aussen — die **einzige** Serialisierung.
 
     Sie stand vorher im Router, und der Stream baute sich daneben ein eigenes
     Dict aus sechs Feldern. Das war kein Schoenheitsfehler: `reason` und
@@ -171,7 +171,7 @@ def proposal_response(proposal: AiActionProposal) -> AiActionProposalResponse:
 
     `preview_json` wird bewusst defensiv gelesen: die Vorschau ist Anzeige, kein
     Sicherheitsmerkmal. Eine kaputte Zeile darf die ganze Liste nicht unlesbar
-    machen â€” sie meldet sich als `unavailable`.
+    machen — sie meldet sich als `unavailable`.
     """
     try:
         preview = json.loads(proposal.preview_json)
@@ -198,7 +198,7 @@ def proposal_response(proposal: AiActionProposal) -> AiActionProposalResponse:
         created_at=proposal.created_at,
     )
 
-#: Der Payload-Bau der **globalen** Schreibwerkzeuge â€” Werkzeugname â†’ Bauer.
+#: Der Payload-Bau der **globalen** Schreibwerkzeuge — Werkzeugname → Bauer.
 #:
 #: Hier standen acht `elif`-Zweige mit woertlich demselben Vier-Zeilen-Rumpf,
 #: in dem nur die Payload-Funktion variierte. Die beiden dokumentierten
@@ -212,7 +212,7 @@ def proposal_response(proposal: AiActionProposal) -> AiActionProposalResponse:
 #: Jeder Bauer bekommt dieselben fuenf Groessen; was er nicht braucht, laesst
 #: er liegen. Zwei Feinheiten sind Absicht und keine Nachlaessigkeit:
 #: `propose_server_create` liest `arguments` (mit `reason`/`expected_effect`),
-#: alle anderen `rest` â€” ohne die beiden Schluessel behalten deren
+#: alle anderen `rest` — ohne die beiden Schluessel behalten deren
 #: Schluesselmengenpruefungen ihre exakte Form. Und nur der Blueprint-Wechsel
 #: fragt nach dem Guardian-Rahmen: in einer Reparatur ist er ein anderer
 #: Vorgang.
@@ -305,7 +305,7 @@ def create_proposal(
     * das Audit vermerkt `origin="system"` statt `"ai"`.
 
     Nichts daran erweitert Rechte. Der handelnde Benutzer ist derselbe wie
-    sonst â€” der, der die Freigabe erteilt hat â€”, und `_require_tool_permission`
+    sonst — der, der die Freigabe erteilt hat —, und `_require_tool_permission`
     laeuft unveraendert.
     """
     if tool_name not in WRITE_TOOLS and tool_name not in READ_TOOLS and tool_name not in WORKER_STEUERUNG:
@@ -326,7 +326,7 @@ def create_proposal(
             "Dieses Werkzeug steht in einer geplanten Aufgabe nicht zur Verfuegung"
         )
     if tool_name not in WRITE_TOOLS and rationale_fallback is None:
-        rationale_fallback = (f"AusfÃ¼hrung von {tool_name}", f"Ergebnis von {tool_name}")
+        rationale_fallback = (f"Ausführung von {tool_name}", f"Ergebnis von {tool_name}")
     reason, expected_effect = _rationale(arguments, fallback=rationale_fallback)
     _RATIONALE_KEYS = {
         "reason", "expected_effect", "begruendung", "grund", "rationale",
@@ -391,7 +391,7 @@ def create_proposal(
         # **Der Waechter hinter der Tabelle.** Hier stand frueher
         # `elif tool_name in GLOBAL_WRITE_TOOLS: _server_create_payload(...)`.
         # Das las sich wie eine Mengenzugehoerigkeit, meinte aber genau ein
-        # Werkzeug â€” und jedes zweite globale Schreibwerkzeug waere still in
+        # Werkzeug — und jedes zweite globale Schreibwerkzeug waere still in
         # der Servererstellung gelandet und mit "Servererstellung hat
         # ungueltige Argumente" gescheitert, einer Meldung, die auf die
         # falsche Stelle zeigt. Ein neues globales Schreibwerkzeug bekommt
@@ -405,7 +405,7 @@ def create_proposal(
         server, rest = _resolve_server(db, user, rest)
 
         # Ein Heilungslauf gehoert **einem** Server. `_resolve_server` prueft
-        # nur, ob der Benutzer den genannten sehen darf â€” und der Freigeber darf
+        # nur, ob der Benutzer den genannten sehen darf — und der Freigeber darf
         # in aller Regel mehrere sehen. Ohne diese Zeile koennte ein Modell,
         # das aus einer Logzeile heraus in die Irre gefuehrt wurde, einen
         # Vorfall auf Server A zum Anlass nehmen, an Server B zu schreiben.
@@ -415,13 +415,13 @@ def create_proposal(
             )
 
         # **Das Recht vor der Nutzlast.** Frueher stand diese Pruefung erst
-        # hinter dem Payload-Bau â€” und der liest den Zustand, ueber den er
+        # hinter dem Payload-Bau — und der liest den Zustand, ueber den er
         # urteilt: `_config_patch_payload` holt den Dateiinhalt, um zu zaehlen,
         # wie oft der Suchtext darin vorkommt.
         #
         # Damit war die Ablehnung selbst eine Auskunft. Ein Benutzer mit
         # `server.view` und ohne `server.files.read` bekam auf einen erfundenen
-        # Patch die Antwort "kommt 3-mal vor" â€” ein Orakel, mit dem sich der
+        # Patch die Antwort "kommt 3-mal vor" — ein Orakel, mit dem sich der
         # Inhalt einer Datei Zeichen fuer Zeichen erraten laesst, ohne sie je
         # lesen zu duerfen. Der Vorschlag wurde nie gespeichert und nichts
         # geschrieben; das Leck lag allein in der Reihenfolge.
@@ -430,15 +430,15 @@ def create_proposal(
         # wenn schon der *Versuch* nichts verraet.
         #
         # Fuer Lebenszyklus und Reparatur haengt das Recht am Vorgang, deshalb
-        # wird deren Formpruefung hier vorgezogen â€” sonst bekaeme ein
+        # wird deren Formpruefung hier vorgezogen — sonst bekaeme ein
         # ungueltiger Vorgang die Rechte-Ablehnung statt der Formmeldung, die
         # dem Modell weiterhilft. Beide Pruefungen lesen keinen Zustand; sie
         # verraten also nichts, was die Rechtepruefung schuetzen muesste.
         #
-        # Die SchlÃ¼sselmenge wird hier mitgeprÃ¼ft und nicht noch einmal im
-        # Payload-Bau weiter unten. Dieselbe PrÃ¼fung an zwei Stellen hieÃŸe:
-        # zwei Wertelisten, die auseinanderlaufen kÃ¶nnen, und eine zweite
-        # Meldung fÃ¼r einen Fall, Ã¼ber den die erste schon entschieden hat.
+        # Die Schlüsselmenge wird hier mitgeprüft und nicht noch einmal im
+        # Payload-Bau weiter unten. Dieselbe Prüfung an zwei Stellen hieße:
+        # zwei Wertelisten, die auseinanderlaufen können, und eine zweite
+        # Meldung für einen Fall, über den die erste schon entschieden hat.
         if tool_name == "propose_server_lifecycle":
             _allowed_keys = {"operation", "action", "aktion", "vorgang"}
             if set(rest) - _allowed_keys:
@@ -490,7 +490,7 @@ def create_proposal(
             if name is not None and not isinstance(name, str):
                 raise AiActionValidationError("Backup-Name ist ungueltig")
             # Der Name ist Modelltext und landet in einer Liste, die Menschen
-            # lesen â€” also redigiert und gekuerzt wie jede andere Modellausgabe.
+            # lesen — also redigiert und gekuerzt wie jede andere Modellausgabe.
             sauber = redact_sensitive_text(str(name).strip())[:MAX_BACKUP_NAME_CHARS] if name else ""
             payload = {"name": sauber} if sauber else {}
             preview = {
@@ -520,7 +520,7 @@ def create_proposal(
                 "restart_required": False,
                 # Was tatsaechlich verschwindet. Ohne diese Aufzaehlung waere
                 # "Server loeschen" eine Zusage, deren Umfang der Bestaetigende
-                # raten muesste â€” Backups und S3-Objekte gehen mit.
+                # raten muesste — Backups und S3-Objekte gehen mit.
                 "removes": [
                     "container", "files", "backups", "ports", "database_resources",
                 ],
@@ -551,8 +551,8 @@ def create_proposal(
         elif tool_name == "propose_restart_schedule_set":
             payload, preview = _restart_schedule_payload(server, rest)
             # Kommt der Vorschlag aus einem stehenden Auftrag, wird der Server
-            # mit ihm verknÃ¼pft: das Panel zeigt dann â€žVon der KI verwaltet
-            # (Aufgabe X)", und eine manuelle Ã„nderung deaktiviert genau X.
+            # mit ihm verknüpft: das Panel zeigt dann „Von der KI verwaltet
+            # (Aufgabe X)", und eine manuelle Änderung deaktiviert genau X.
             if aufgabe is not None:
                 payload["ai_task_id"] = aufgabe.task_id
             expected_revision = None
@@ -591,7 +591,7 @@ def create_proposal(
     preview["reason"] = reason
     preview["expected_effect"] = expected_effect
     server_id = server.id if server is not None else None
-    # Fuer serverbezogene Werkzeuge die zweite Pruefung â€” die erste lief vor dem
+    # Fuer serverbezogene Werkzeuge die zweite Pruefung — die erste lief vor dem
     # Payload-Bau. Sie bleibt trotzdem stehen: hier steht die kanonische
     # Nutzlast, und die globalen Werkzeuge kommen nur an dieser Stelle vorbei.
     _require_tool_permission(db, user, server_id, tool_name, payload)
@@ -657,7 +657,7 @@ def create_proposal(
         },
         # "ai" heisst: ein Mensch hat die KI darum gebeten. "system" heisst: ein
         # Ereignis hat sie geweckt, und niemand sass davor. Im Protokoll ist das
-        # der wichtigste Unterschied ueberhaupt â€” wer spaeter fragt, warum um
+        # der wichtigste Unterschied ueberhaupt — wer spaeter fragt, warum um
         # 03:14 Uhr eine Datei geaendert wurde, findet die Antwort in diesem
         # einen Wort. Der Wert stand in `AUDIT_ORIGINS` bereits bereit.
         origin="system" if guardian is not None else "ai",
@@ -670,10 +670,10 @@ def owned_proposal(db: Session, proposal_id: str, user: User) -> AiActionProposa
 
     Zwei Ausgaenge, und die Unterscheidung ist der Punkt:
 
-    - ``None`` heisst **gibt es nicht** â€” unbrauchbare Kennung, oder die Zeile
+    - ``None`` heisst **gibt es nicht** — unbrauchbare Kennung, oder die Zeile
       gehoert jemand anderem. Beides fuehrt zu 404, und das ist richtig so: ob
       ein fremder Vorschlag existiert, ist selbst schon eine Auskunft.
-    - ``AI_ACTION_ACCESS_REVOKED`` heisst **darfst du nicht mehr** â€” die Zeile
+    - ``AI_ACTION_ACCESS_REVOKED`` heisst **darfst du nicht mehr** — die Zeile
       ist da und gehoert dem Anrufer, ihm fehlt nur das Recht zur Sache.
 
     Frueher lief beides in dasselbe ``None`` und damit in dieselbe Meldung
@@ -682,7 +682,7 @@ def owned_proposal(db: Session, proposal_id: str, user: User) -> AiActionProposa
     Recht. Das Vokabular dafuer gibt es laengst, `confirm_proposal` benutzt es.
 
     Die Existenz fremder Zeilen bleibt geschuetzt, weil die ``user_id``-Bedingung
-    schon in der Abfrage steht â€” geworfen wird nur fuer Zeilen, die der Anrufer
+    schon in der Abfrage steht — geworfen wird nur fuer Zeilen, die der Anrufer
     ohnehin besitzt.
     """
     try:
@@ -698,19 +698,19 @@ def owned_proposal(db: Session, proposal_id: str, user: User) -> AiActionProposa
     if proposal.server_id is None:
         # Kein Server, gegen den sich `server.view` pruefen liesse. Das trifft
         # zwei Faelle: ein Erstellungsvorschlag, dessen Server noch nicht
-        # existiert â€” und seit dem `SET NULL` auch ein erledigter Vorschlag,
+        # existiert — und seit dem `SET NULL` auch ein erledigter Vorschlag,
         # dessen Server es nicht mehr gibt.
         #
         # Welches Recht dann gilt, steht in der Werkzeugtabelle und nicht hier.
         # Fest verdrahtet stand hier `servers.create`; fuer einen abgeschlossenen
         # Loeschvorschlag waere das sachfremd gewesen. `_require_tool_permission`
-        # zieht dieselbe Grenze beim Vorschlagen â€” zwei Orte mit zwei Antworten
+        # zieht dieselbe Grenze beim Vorschlagen — zwei Orte mit zwei Antworten
         # sind genau die Sorte Abweichung, die niemand bemerkt.
         werkzeug = WERKZEUGE.get(proposal.tool_name)
         if werkzeug is not None and werkzeug.recht_global and werkzeug.recht:
             if not permission_service.has_global_permission(db, user, werkzeug.recht):
                 raise AiActionStateError("AI_ACTION_ACCESS_REVOKED")
-        # Ein serverbezogenes Werkzeug ohne globales Recht â€” etwa ein
+        # Ein serverbezogenes Werkzeug ohne globales Recht — etwa ein
         # Konfigvorschlag, dessen Server spaeter geloescht wurde. Es gibt kein
         # Recht mehr zu pruefen und nichts mehr zu verraten; der Beleg der
         # eigenen Unterhaltung bleibt sichtbar.
@@ -725,7 +725,7 @@ def _lock_proposal(db: Session, proposal_id: str) -> AiActionProposal:
     """Laedt eine Proposal-Zeile gesperrt und garantiert frisch aus der Datenbank.
 
     `with_for_update()` sperrt zwar die Zeile, liefert ohne `populate_existing()`
-    aber das bereits geladene Objekt aus der Identity Map zurueck â€” also den
+    aber das bereits geladene Objekt aus der Identity Map zurueck — also den
     Stand *vor* der Sperre. Genau dadurch konnten zwei parallele Execute-Aufrufe
     denselben Einmal-Token als noch gueltig sehen.
     """
@@ -787,25 +787,25 @@ def execute_autonomously(
     ihnen vorbei: `confirm_proposal` prueft die Rechte erneut und erzeugt den
     Einmal-Token, `execute_proposal` prueft ein drittes Mal, nimmt den
     Server-Mutex und entwertet den Token atomar. Autonomie ersetzt genau einen
-    Schritt â€” den Klick des Menschen â€” und keinen einzigen der Schutzmechanismen.
+    Schritt — den Klick des Menschen — und keinen einzigen der Schutzmechanismen.
     """
     proposal = owned_proposal(db, proposal_id, user)
     if proposal is None:
         raise AiActionStateError("AI_ACTION_NOT_FOUND")
     if not proposal.autonomous or proposal.requires_confirmation:
         raise AiActionStateError("AI_ACTION_NOT_AUTONOMOUS")
-    # SpÃ¤ter Import wie beim Anlegen: `ai_autonomy_service` liest
-    # `ALWAYS_CONFIRM_TOOLS` aus diesem Modul, am Dateikopf wÃ¤re das ein Zirkel.
+    # Später Import wie beim Anlegen: `ai_autonomy_service` liest
+    # `ALWAYS_CONFIRM_TOOLS` aus diesem Modul, am Dateikopf wäre das ein Zirkel.
     from services.ai_autonomy_service import autonomie_grundlage
 
     # **Die Autonomie wird beim Anlegen entschieden, aber nicht eingefroren.**
     # Zwischen dem Vorschlag und diesem Punkt liegt ein Zeitfenster ohne
-    # Obergrenze â€” ein Vorschlag im Status 'proposed' altert nicht. Ohne diese
-    # PrÃ¼fung Ã¼berlebte eine erteilte Autonomie ihren eigenen Widerruf: der
-    # Betreiber nimmt `ai.autonomous.use` weg oder schaltet die Freigabe fÃ¼r
+    # Obergrenze — ein Vorschlag im Status 'proposed' altert nicht. Ohne diese
+    # Prüfung überlebte eine erteilte Autonomie ihren eigenen Widerruf: der
+    # Betreiber nimmt `ai.autonomous.use` weg oder schaltet die Freigabe für
     # diesen Server ab, und die bereits angelegte Aktion liefe trotzdem noch
-    # ohne RÃ¼ckfrage. Dieselbe Ãœberlegung wie beim zweiten Backup-Nachweis in
-    # `execute_proposal`, nur eine Ebene frÃ¼her.
+    # ohne Rückfrage. Dieselbe Überlegung wie beim zweiten Backup-Nachweis in
+    # `execute_proposal`, nur eine Ebene früher.
     if (
         autonomie_grundlage(
             db, user=user, server_id=proposal.server_id, tool_name=proposal.tool_name
@@ -820,7 +820,7 @@ def execute_autonomously(
         db, proposal_id=proposal_id, user=user, confirmation_token=token
     )
 
-#: Die Ausfuehrung der bestaetigten Schreib- und Lesewerkzeuge â€” Werkzeugname â†’ Funktion.
+#: Die Ausfuehrung der bestaetigten Schreib- und Lesewerkzeuge — Werkzeugname → Funktion.
 _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]] = {
     "propose_server_lifecycle": _ausfuehren_server_lifecycle,
     "propose_backup": _ausfuehren_backup,
@@ -917,13 +917,13 @@ def execute_proposal(
     # ein Zeitfenster ohne Obergrenze: ein Vorschlag im Status 'proposed' altert
     # nicht, und `cleanup_old_backups` raeumt nach `backup_retention_count` auch
     # die verifizierte Zeile ab, auf die sich die erste Pruefung gestuetzt hat.
-    # Der Betreiber konnte das Archiv sogar von Hand loeschen â€” der Endpunkt
+    # Der Betreiber konnte das Archiv sogar von Hand loeschen — der Endpunkt
     # kennt keine Regel, die das letzte nachgewiesene Backup schuetzt.
     #
     # Ohne diese Zeilen loeschte ein Klick auf "Bestaetigen" die Datei, obwohl
     # der Nachweis, mit dem der Vorschlag ueberhaupt entstehen durfte, nicht mehr
-    # existierte. Die Zusage in `ai_tool_registry` â€” geprueft beim Anlegen **und**
-    # vor der Ausfuehrung â€” war bis hierher eine Behauptung.
+    # existierte. Die Zusage in `ai_tool_registry` — geprueft beim Anlegen **und**
+    # vor der Ausfuehrung — war bis hierher eine Behauptung.
     guardian = guardian_aus_lauf(db, proposal.run_id)
     if guardian is not None:
         _verlangt_gesichertes_backup(
@@ -987,7 +987,7 @@ def execute_proposal(
             task_id = ausgefuehrt.task_id
             queued = ausgefuehrt.queued
             # Nur die Servererstellung traegt eine neue Server-ID zurueck. Ab
-            # hier meint `server_id` den frisch angelegten Server â€” daran
+            # hier meint `server_id` den frisch angelegten Server — daran
             # haengen der Fixup-Block gleich unten und das Audit.
             if ausgefuehrt.neuer_server_id is not None:
                 server_id = ausgefuehrt.neuer_server_id
@@ -1008,7 +1008,7 @@ def execute_proposal(
             # Erstellen wuerde diese Zeile nach einem Loeschen genau das
             # rueckgaengig machen, was die Datenbank gerade richtig getan hat:
             # `SET NULL` loest den Bezug auf einen Server, den es nicht mehr
-            # gibt â€” `server_id` waere hier wieder `None`, die lokale Kopie
+            # gibt — `server_id` waere hier wieder `None`, die lokale Kopie
             # `server_id` traegt aber noch die alte Nummer, und der Commit
             # scheiterte an der Fremdschluesselpruefung.
             if (
@@ -1090,7 +1090,7 @@ def _ausfuehrung_protokollieren(
     succeeded: bool,
     extra: dict | None = None,
 ) -> None:
-    """Der Audit-Eintrag einer Ausfuehrung â€” Erfolg und Fehlschlag, eine Form.
+    """Der Audit-Eintrag einer Ausfuehrung — Erfolg und Fehlschlag, eine Form.
 
     Stand als Zehn-Zeilen-Paar zweimal in `execute_proposal`, unterschieden
     nur durch `succeeded` und die Zusatzfelder. Ein neues Detail-Feld musste

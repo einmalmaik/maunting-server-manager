@@ -152,12 +152,12 @@ def _popup_set_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]
     return payload, preview
 
 def _task_set_payload(db: Session, user: User, arguments: dict) -> tuple[dict, dict]:
-    """Nutzlast fuer `propose_task_set` â€” anlegen oder aendern.
+    """Nutzlast fuer `propose_task_set` — anlegen oder aendern.
 
     Der Payload-Bau prueft **vollstaendig**: Zeitzone, Plan, Art, Zustellweg,
     Rechte und die autonome Freigabe. Das ist nicht nur fuer die Vorschau da.
     Ein Modell, dessen Vorschlag erst beim Klick scheitert, hat dem Benutzer
-    eine Karte hingelegt, die nicht haelt â€” und im Chat steht dann eine
+    eine Karte hingelegt, die nicht haelt — und im Chat steht dann eine
     Fehlermeldung an der Stelle, an der eine Zusage stand.
 
     Gespeichert wird hier nichts. `vorschau` arbeitet auf einer losen Aufgabe;
@@ -169,7 +169,7 @@ def _task_set_payload(db: Session, user: User, arguments: dict) -> tuple[dict, d
     roh = arguments.get("task_id")
     # **Eine leere Kennung heisst dasselbe wie keine: anlegen.** Das Schema sagt
     # "weglassen legt neu an", aber ein Modell kann ein Feld schlecht weglassen,
-    # das es gerade gelesen hat â€” es schickt stattdessen `""`. Die Unterscheidung
+    # das es gerade gelesen hat — es schickt stattdessen `""`. Die Unterscheidung
     # zwischen "nicht genannt" und "leer genannt" traegt hier nichts und kostete
     # im Betrieb die haeufigste aller Aufgaben: das Anlegen der ersten.
     if isinstance(roh, str) and not roh.strip():
@@ -192,7 +192,7 @@ def _task_delete_payload(db: Session, user: User, arguments: dict) -> tuple[dict
 
     Die Aufgabe wird **jetzt** aufgeschlagen, damit auf der Karte ihr Name und
     ihr Zeitplan stehen und nicht nur eine Kennung. "Aufgabe
-    a3f2c1â€¦-â€¦ loeschen?" ist keine Frage, die jemand beantworten kann.
+    a3f2c1…-… loeschen?" ist keine Frage, die jemand beantworten kann.
     """
     if set(arguments) != {"task_id"}:
         raise AiActionValidationError("Aufgaben-Tool hat ungueltige Argumente")
@@ -273,7 +273,7 @@ def _ausfuehren_task_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefueh
     # Zeitfenster ohne Obergrenze, und in ihm kann der Betreiber die
     # autonome Freigabe zurueckgenommen haben. Ohne die zweite
     # Pruefung entstuende hier eine handelnde Aufgabe auf Grundlage
-    # einer Freigabe, die es nicht mehr gibt â€” und sie liefe von da
+    # einer Freigabe, die es nicht mehr gibt — und sie liefe von da
     # an jede Nacht.
     #
     # `ai_task_service` prueft beides in `_anwenden`; deshalb steht

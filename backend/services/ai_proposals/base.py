@@ -40,20 +40,20 @@ _LIFECYCLE_RECHTE = {
 
 @dataclass(frozen=True)
 class GuardianKontext:
-    """Der Rahmen eines Laufs, den ein Vorfall ausgeloest hat â€” nicht ein Mensch.
+    """Der Rahmen eines Laufs, den ein Vorfall ausgeloest hat — nicht ein Mensch.
 
     Er wird beim Start des Heilungslaufs gebildet, liegt im Arbeitsgedaechtnis
     des Laufs (`ai_runs.state_json`) und wird bei jeder Runde daraus wieder
     hergestellt. Drei Angaben, und jede traegt eine Schranke:
 
-    * ``server_id`` â€” der **einzige** Server, an dem dieser Lauf arbeiten darf.
+    * ``server_id`` — der **einzige** Server, an dem dieser Lauf arbeiten darf.
       Im gewoehnlichen Chat nennt das Modell die Server-ID selbst; das ist dort
       richtig, weil ein Mensch mitliest. Hier liest niemand mit, und die Eingabe
-      des Modells stammt teilweise aus Serverlogs â€” also aus Text, den ein
+      des Modells stammt teilweise aus Serverlogs — also aus Text, den ein
       Spieler geschrieben haben kann. Der Bezug wird deshalb vorgegeben.
-    * ``incident_id`` â€” welcher Vorfall gemeint ist. Fuer die Notiz-Zeile, den
+    * ``incident_id`` — welcher Vorfall gemeint ist. Fuer die Notiz-Zeile, den
       Bericht und das Audit.
-    * ``incident_created_at`` â€” ab wann ein Backup als Nachweis taugt. Ein
+    * ``incident_created_at`` — ab wann ein Backup als Nachweis taugt. Ein
       Backup von gestern liegt vor der Stoerung und beweist nichts ueber den
       Zustand, den die KI gleich anfasst.
     """
@@ -64,7 +64,7 @@ class GuardianKontext:
 
 @dataclass(frozen=True)
 class AufgabenKontext:
-    """Der Rahmen eines Laufs, den die Uhr ausgeloest hat â€” nicht ein Mensch.
+    """Der Rahmen eines Laufs, den die Uhr ausgeloest hat — nicht ein Mensch.
 
     Das Gegenstueck zu `GuardianKontext` und bewusst **anders geschnitten**. Ein
     Heilungslauf gehoert einem Server; ein stehender Auftrag gehoert keinem. Der
@@ -72,7 +72,7 @@ class AufgabenKontext:
     entscheidet seine Rechteliste, nicht der Auftrag. Es gibt hier deshalb keine
     Serverbindung und keine Backup-Schranke.
 
-    Was bleibt, ist die Werkzeugmenge â€” und die haengt an ``kind``:
+    Was bleibt, ist die Werkzeugmenge — und die haengt an ``kind``:
 
     * ``report`` liest, fasst zusammen und meldet.
     * ``act`` darf zusaetzlich handeln, und zwar nur, soweit `autonomy_allows`
@@ -80,7 +80,7 @@ class AufgabenKontext:
 
     ``channel`` und ``title`` tragen nichts zur Schranke bei und stehen
     trotzdem hier. Sie werden am **Ende** des Laufs gebraucht, fuer den Bericht
-    â€” und die Aufgabe kann bis dahin geloescht worden sein. Ein Bericht, der
+    — und die Aufgabe kann bis dahin geloescht worden sein. Ein Bericht, der
     seinen eigenen Betreff aus einer Zeile holen muesste, die es nicht mehr
     gibt, waere ein Bericht, der ausgerechnet dann ausfaellt, wenn jemand
     aufgeraeumt hat.
@@ -104,7 +104,7 @@ def _json_object(value: str) -> dict:
     return decoded
 
 def _permission_for(tool_name: str, payload: dict) -> tuple[str, ...]:
-    """Die Permission-Keys, die dieses Werkzeug verlangt â€” alle zugleich."""
+    """Die Permission-Keys, die dieses Werkzeug verlangt — alle zugleich."""
     if tool_name == "propose_server_lifecycle":
         recht = _LIFECYCLE_RECHTE.get(str(payload.get("operation")), "")
         return (recht,) if recht else ()
@@ -208,7 +208,7 @@ def _verlangt_gesichertes_backup(
     ausschliesslich gesetzt, nachdem die Datei nachgemessen wurde.
 
     ``seit`` ist der Zeitpunkt des Vorfalls. Ein Backup von gestern beweist
-    nichts ueber den Zustand, den die KI gleich anfasst â€” es liegt vor der
+    nichts ueber den Zustand, den die KI gleich anfasst — es liegt vor der
     Stoerung, und was seitdem passiert ist, holt es nicht zurueck.
 
     Der Fehler ist ein `AiActionStateError` und keine Validierungsmeldung: es
@@ -233,7 +233,7 @@ def _verlangt_gesichertes_backup(
 def guardian_aus_lauf(db: Session, run_id: str | None) -> "GuardianKontext | None":
     """Holt den Guardian-Rahmen eines Vorschlags aus seinem Lauf zurueck.
 
-    `execute_proposal` bekommt keinen Rahmen uebergeben â€” es wird aus dem Router
+    `execute_proposal` bekommt keinen Rahmen uebergeben — es wird aus dem Router
     gerufen, wenn ein Mensch auf "Bestaetigen" klickt, und das kann Stunden nach
     dem Anlegen sein. Der Rahmen lebt im Arbeitsgedaechtnis des Laufs, und der
     Vorschlag traegt dessen Kennung; damit ist er wiederherstellbar, ohne dass
@@ -262,15 +262,15 @@ def guardian_aus_lauf(db: Session, run_id: str | None) -> "GuardianKontext | Non
         # **Derselbe** Parser wie in jeder Laufrunde, keine zweite Auslegung.
         # Hier stand eine Abschrift mit eigener Semantik, und sie war bereits
         # gedriftet: ein vorhandener, aber nicht-dict Rahmen galt hier als
-        # â€žkein Guardian" und liess `execute_proposal` ohne Backup-Nachweis
-        # und ohne Serverbindung weiterlaufen â€” waehrend dieselbe Lage im
+        # „kein Guardian" und liess `execute_proposal` ohne Backup-Nachweis
+        # und ohne Serverbindung weiterlaufen — waehrend dieselbe Lage im
         # Stream ausdruecklich wirft, weil der Verlust des Rahmens die
         # gefaehrliche Richtung ist.
         return guardian_aus_zustand(ai_run_service.zustand_lesen(run) or {})
     except GuardianRahmenUnlesbar as exc:
         # Ein unlesbarer Rahmen ist kein Freibrief. Er heisst: dieser Vorschlag
         # stammt aus einem Lauf, dessen Bedingungen nicht mehr feststellbar sind
-        # â€” und dann wird nicht ausgefuehrt.
+        # — und dann wird nicht ausgefuehrt.
         raise AiActionStateError("AI_BACKUP_UNVERIFIED") from exc
 
 def _utc(value: datetime) -> datetime:
@@ -278,7 +278,7 @@ def _utc(value: datetime) -> datetime:
 
 @dataclass(frozen=True)
 class _AusfuehrungsRahmen:
-    """Die gemeinsamen Groessen einer bestaetigten Ausfuehrung â€” ein Rahmen.
+    """Die gemeinsamen Groessen einer bestaetigten Ausfuehrung — ein Rahmen.
 
     Jede Ausfuehrungsfunktion bekommt denselben Rahmen und laesst liegen, was
     sie nicht braucht. Die Felder sind die festen Kopien aus
@@ -300,7 +300,7 @@ class _AusfuehrungsRahmen:
 
 @dataclass(frozen=True)
 class _Ausgefuehrt:
-    """Das Ergebnis einer Ausfuehrung â€” vollstaendig per Konstruktion.
+    """Das Ergebnis einer Ausfuehrung — vollstaendig per Konstruktion.
 
     In der frueheren elif-Kette waren `result`, `task_id` und `queued`
     nirgends vorinitialisiert; jeder Zweig musste alle drei setzen, und ein

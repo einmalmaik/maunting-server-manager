@@ -114,7 +114,7 @@ def _calendar_event_create_payload(db: Session, user: User, rest: dict) -> tuple
 def _calendar_event_delete_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
     event_id = str(rest.get("event_id", "")).strip()
     if not event_id:
-        raise AiActionValidationError("Termin-LÃ¶schung erfordert event_id")
+        raise AiActionValidationError("Termin-Löschung erfordert event_id")
 
     calendar_id = rest.get("calendar_id")
     payload = {
@@ -132,7 +132,7 @@ def _calendar_event_delete_payload(db: Session, user: User, rest: dict) -> tuple
 def _calendar_event_update_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
     event_id = str(rest.get("event_id", "")).strip()
     if not event_id:
-        raise AiActionValidationError("Termin-Ã„nderung erfordert event_id")
+        raise AiActionValidationError("Termin-Änderung erfordert event_id")
 
     title = rest.get("title")
     start_time = rest.get("start_time")
@@ -255,7 +255,7 @@ def _note_update_payload(db: Session, user: User, rest: dict) -> tuple[dict, dic
 def _note_delete_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
     note_id = str(rest.get("note_id", "")).strip()
     if not note_id:
-        raise AiActionValidationError("Notiz-LÃ¶schung erfordert note_id")
+        raise AiActionValidationError("Notiz-Löschung erfordert note_id")
 
     payload = {"note_id": note_id}
     preview = {

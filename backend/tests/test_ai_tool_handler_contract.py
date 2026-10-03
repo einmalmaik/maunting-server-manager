@@ -79,7 +79,7 @@ def test_eine_binaerdatei_wird_auch_ohne_nullbyte_erkannt() -> None:
 
     Die Funktion hat zwei Wege: das Nullbyte und die Quote der Ersatzzeichen,
     die `errors="replace"` aus undekodierbaren Bytes macht. Der zweite zaehlte
-    bis zum 21.09.2026 nicht `U+FFFD`, sondern die **drei** Zeichen `Ã¯Â¿Â½` —
+    bis zum 21.09.2026 nicht `U+FFFD`, sondern die Zeichenfolge `\\u00c3\\u00af\\u00c2\\u00bf\\u00c2\\u00bd` —
     den Mojibake davon, entstanden, als der Quelltext einmal falsch umkodiert
     wurde. Eine solche Folge erzeugt kein Dekodierer, also traf die Zaehlung
     nie zu, und uebrig blieb allein das Nullbyte.
@@ -349,8 +349,8 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     aufgefallen ist — die Kodierung.** Der deutsche Text in
     `backend/services/ai_tools/` stand doppelt kodiert im Quelltext: jemand hatte
     UTF-8 als **cp1252** gelesen und erneut als UTF-8 geschrieben. Die Dateien
-    waren gültiges UTF-8 und fielen deshalb nie auf, enthielten aber `Ã¤` statt
-    `ä` und `â€”` statt `—`. Das Modell las seit jeher "SchlÃ¤gt das Erstellen
+    waren gültiges UTF-8 und fielen deshalb nie auf, enthielten aber `\\u00c3\\u00a4` statt
+    `ä` und `\\u00e2\\u20ac\\u201d` statt `—`. Das Modell las seit jeher "Schl\\u00c3\\u00a4gt das Erstellen
     einer neuen Notiz vor", und **jeder Umlaut zählte zwei Zeichen statt einem**.
 
     404 Zeilen in sechs Dateien repariert (`zeile.encode('cp1252').decode('utf-8')`,

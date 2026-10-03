@@ -124,7 +124,7 @@ def _config_payload(db: Session, server_id: int, arguments: dict) -> tuple[dict,
     current_revision = str(current["revision"]) if current is not None else None
     if expected is None and current is not None:
         # Eine vorhandene Datei zu ersetzen, ohne zu sagen, welchen Stand man
-        # ersetzt, ist immer ein Fehler â€” egal wie der Vorschlag entstanden ist.
+        # ersetzt, ist immer ein Fehler — egal wie der Vorschlag entstanden ist.
         raise AiActionValidationError(
             "Fuer eine vorhandene Datei ist expected_revision Pflicht"
         )
@@ -138,12 +138,12 @@ def _config_payload(db: Session, server_id: int, arguments: dict) -> tuple[dict,
     # Der Unterschied ist der Punkt: die alte Absicherung glaubte dem Modell,
     # dass es die Datei gesehen hat, sobald es eine Revision vorzeigen konnte.
     # Diese hier misst die Datei selbst. Was das Modell gesehen zu haben
-    # behauptet, spielt keine Rolle mehr â€” und dadurch darf `read_config` die
+    # behauptet, spielt keine Rolle mehr — und dadurch darf `read_config` die
     # Revision jetzt ehrlich immer ausgeben, was die Teilaenderung ueberhaupt
     # erst moeglich macht.
     if len(redact_sensitive_text(old_content)) > MAX_READ_CONFIG_CHARS:
         raise AiActionValidationError(
-            "Diese Datei ist zu gross, um sie als Ganzes zu ersetzen â€” der "
+            "Diese Datei ist zu gross, um sie als Ganzes zu ersetzen — der "
             "Vorschlag wuerde alles loeschen, was nicht gelesen werden konnte. "
             "Nutze propose_config_patch fuer die einzelne Stelle."
         )
@@ -183,7 +183,7 @@ def _config_payload(db: Session, server_id: int, arguments: dict) -> tuple[dict,
 def _zeilenbereich(text: str, start: int, ende: int, umgebung: int) -> tuple[int, int, int]:
     """Dehnt einen Zeichenbereich auf ganze Zeilen samt Umgebung aus.
 
-    Liefert Anfang, Ende und die Nummer der ersten Zeile â€” letztere ist das,
+    Liefert Anfang, Ende und die Nummer der ersten Zeile — letztere ist das,
     woran ein Mensch in der Vorschau erkennt, an welcher Stelle der Datei er
     gerade schaut.
     """
@@ -208,14 +208,14 @@ def _patch_diff(content: str, edits: list[tuple[str, str]], path: str) -> tuple[
     """Baut die Vorschau einer Teilaenderung aus den Ersetzungen selbst.
 
     Bewusst **kein** `difflib`-Lauf ueber die ganze Datei. Der wuerde hier zwei
-    Megabyte-Strings vergleichen, um am Ende drei geaenderte Zeilen zu zeigen â€”
+    Megabyte-Strings vergleichen, um am Ende drei geaenderte Zeilen zu zeigen —
     und das an der Stelle, an der ein Mensch auf eine Bestaetigung wartet. Wo
     etwas passiert, ist ohnehin genau bekannt: `find` steht laut Pruefung genau
     einmal in der Datei. Aus dieser Fundstelle und ein paar Zeilen Umgebung
     entsteht dieselbe Darstellung in linearer Zeit.
 
     Die Zeilennummer gilt zum Zeitpunkt der jeweiligen Ersetzung. Aendert ein
-    frueherer Eintrag die Zeilenzahl, verschiebt sich die Nummer der spaeteren â€”
+    frueherer Eintrag die Zeilenzahl, verschiebt sich die Nummer der spaeteren —
     dieselbe Reihenfolgeabhaengigkeit, die auch `apply_edits` hat.
     """
     zeilen = [f"--- {path}:vorher", f"+++ {path}:nachher"]
@@ -244,22 +244,22 @@ def _config_patch_payload(
 ) -> tuple[dict, dict, str]:
     """Prueft eine Teilaenderung und baut Nutzlast und Vorschau.
 
-    Der Unterschied zu `_config_payload` ist nicht die Berechtigung â€” es ist
-    dasselbe `server.files.write` â€” sondern die Reichweite. Eine Vollersetzung
+    Der Unterschied zu `_config_payload` ist nicht die Berechtigung — es ist
+    dasselbe `server.files.write` — sondern die Reichweite. Eine Vollersetzung
     setzt voraus, dass das Modell die Datei ganz gesehen hat, und scheitert
     deshalb an jeder Datei ueber 24.000 Zeichen. Eine Teilaenderung setzt nur
     voraus, dass es *die eine Stelle* kennt: alles Uebrige bleibt Byte fuer Byte
     stehen, weil es hier gar nicht durchlaeuft.
 
     Daraus folgt auch die gelockerte Geheimnisregel. `_config_payload` weist
-    jede Datei ab, in der irgendwo Zugangsdaten stehen â€” richtig, denn sie
+    jede Datei ab, in der irgendwo Zugangsdaten stehen — richtig, denn sie
     schreibt die ganze Datei neu und wuerde das echte Passwort durch den
     Platzhalter ersetzen, den das Modell gesehen hat. Hier genuegt, dass
     **die beruehrte Stelle** geheimnisfrei ist. Ein Passwort drei Zeilen weiter
     wird nicht angefasst, und getroffen werden kann es auch nicht: das Modell
     kennt von dort nur den Platzhalter, und der steht so nicht in der Datei.
     Ohne diese Lockerung waere eine `serverconfig.xml` dauerhaft nur von Hand
-    aenderbar â€” der Fall, aus dem die ganze Aenderung entstanden ist.
+    aenderbar — der Fall, aus dem die ganze Aenderung entstanden ist.
     """
     if set(arguments) != {"path", "expected_revision", "edits"}:
         raise AiActionValidationError("Patch-Tool hat ungueltige Argumente")
@@ -324,7 +324,7 @@ def _config_patch_payload(
     except EditNotApplicable as exc:
         # Die Trefferzahl gehoert in die Meldung: bei null stimmt der Suchtext
         # nicht, bei mehreren fehlt ihm Kontext. Das Modell kann daraus im
-        # naechsten Zug etwas machen â€” aus "hat nicht geklappt" nicht.
+        # naechsten Zug etwas machen — aus "hat nicht geklappt" nicht.
         nummer = exc.index + 1
         grund = (
             f"Der Suchtext von Ersetzung {nummer} kommt in der Datei nicht vor"
@@ -336,11 +336,11 @@ def _config_patch_payload(
     if new_content == old_content:
         # Derselbe Gedanke wie bei den Trefferzahlen oben: das Modell muss aus
         # der Absage etwas machen koennen. "Aendert nichts" klang nach einem
-        # Fehler im Vorschlag und war eine Sackgasse â€” im Betrieb brach die
+        # Fehler im Vorschlag und war eine Sackgasse — im Betrieb brach die
         # Anfrage an dieser Stelle ab, obwohl die Lage voellig harmlos war: der
         # gewuenschte Wert stand bereits so in der Datei.
         raise AiActionValidationError(
-            "Die Datei saehe danach genau aus wie jetzt â€” der gewuenschte Wert "
+            "Die Datei saehe danach genau aus wie jetzt — der gewuenschte Wert "
             "steht also schon so darin. Das ist kein Fehler: sag dem Benutzer, "
             "dass nichts zu aendern ist, statt es erneut zu versuchen."
         )
@@ -359,7 +359,7 @@ def _config_patch_payload(
     # Die Nutzlast sind die Ersetzungen, nicht der fertige Inhalt: bei einer
     # Datei von einem Megabyte laege der sonst verschluesselt in der Datenbank,
     # fuer eine Aenderung von drei Zeilen. Angewandt wird beim Ausfuehren erneut
-    # â€” auf denselben Stand, denn `expected_revision` laesst keinen anderen zu.
+    # — auf denselben Stand, denn `expected_revision` laesst keinen anderen zu.
     return (
         {"path": path, "edits": [{"find": f, "replace": r} for f, r in edits]},
         preview,
@@ -379,12 +379,12 @@ def _config_set_payload(
     Argument kann das nicht passieren.
 
     **Und warum er den Wunsch mitspeichert.** Ein geschriebener Wert haelt nur,
-    solange der Prozess ihn laesst, dem die Datei gehoert â€” gemessen auf Server
+    solange der Prozess ihn laesst, dem die Datei gehoert — gemessen auf Server
     107, wo ein ausgefuehrter Vorschlag vier Tage spaeter nicht mehr in der
     Datei stand. Deshalb ist das Setzen hier zweiteilig: die Datei jetzt, und
     der Wunsch fuer jeden kuenftigen Start.
 
-    ``expected_revision: null`` legt eine fehlende Datei an â€” derselbe Weg wie
+    ``expected_revision: null`` legt eine fehlende Datei an — derselbe Weg wie
     bei ``propose_config_update``.
     """
     if set(arguments) != {"path", "expected_revision", "entries"}:
@@ -450,7 +450,7 @@ def _config_set_payload(
     #
     # Ohne Schalter: ein gesetzter Wert ist immer auch ein gewollter Wert. Ein
     # Feld "dauerhaft ja/nein" waere eine Entscheidung, die das Modell bei jedem
-    # Aufruf neu faellen muesste â€” und beim ersten Vergessen stuende der
+    # Aufruf neu faellen muesste — und beim ersten Vergessen stuende der
     # Benutzer wieder vor einer Aenderung, die still verschwindet.
     server_config_wishes.setze(
         server.config_wishes_json, datei=path, eintraege=eintraege
@@ -493,7 +493,7 @@ def _rationale(arguments: dict, *, fallback: tuple[str, str] | None) -> tuple[st
     """Zieht Begruendung und erwartete Wirkung aus den Tool-Argumenten.
 
     Zielpunkt 3.6 verlangt beides in der Vorschau. Der Text stammt vom Modell,
-    ist also unvertrauenswuerdig â€” er wird redigiert und gekuerzt und niemals
+    ist also unvertrauenswuerdig — er wird redigiert und gekuerzt und niemals
     als Zusicherung dargestellt.
 
     Ein Skill-Schritt liefert stattdessen einen `fallback`: dort ist die
@@ -545,7 +545,7 @@ def _database_spec_payload(raw: object) -> tuple[dict, int | None]:
 def _server_create_payload(db: Session, arguments: dict, *, user: User | None = None) -> tuple[dict, dict]:
     """Prueft die Argumente einer Servererstellung gegen das Panel-Schema.
 
-    Die eigentliche Validierung â€” Blueprint, Kapazitaet, Ports, Rechte â€” macht
+    Die eigentliche Validierung — Blueprint, Kapazitaet, Ports, Rechte — macht
     `server_provisioning_service`. Hier wird nur so weit geprueft, dass ein
     offensichtlich unbrauchbarer Vorschlag gar nicht erst entsteht.
     """
@@ -657,7 +657,7 @@ def _server_create_payload(db: Session, arguments: dict, *, user: User | None = 
         "public_bind_ip": public_bind_ip or "auto",
         # Ports und Installationsverzeichnis vergibt MSM. Eine Vorschau, die
         # konkrete Ports nennt, waere eine Zusage, die erst die Portvergabe
-        # einloesen kann â€” und die kann bis dahin belegt sein.
+        # einloesen kann — und die kann bis dahin belegt sein.
         "ports": "auto",
         "restart_required": False,
     }
@@ -713,7 +713,7 @@ def _bind_ip_payload(db: Session, server: Server, arguments: dict) -> tuple[dict
     Die Pruefung laeuft bewusst schon hier und nicht erst bei der Ausfuehrung:
     ein Vorschlag, der garantiert scheitert, soll dem Benutzer gar nicht erst
     zur Bestaetigung vorgelegt werden. Vor der Ausfuehrung wird sie trotzdem
-    wiederholt â€” zwischen Vorschlag und Klick koennen Minuten liegen.
+    wiederholt — zwischen Vorschlag und Klick koennen Minuten liegen.
     """
     from services.server_network_service import BindIpRejected, assert_bind_ip_usable
 
@@ -740,7 +740,7 @@ def _bind_ip_payload(db: Session, server: Server, arguments: dict) -> tuple[dict
         "current_kind": _classify_bind_ip(server.public_bind_ip)["kind"],
         "new_kind": _classify_bind_ip(bind_ip)["kind"],
         "current_status": server.status,
-        # Ein laufender Server wird dabei gestoppt und neu angelegt â€” das muss
+        # Ein laufender Server wird dabei gestoppt und neu angelegt — das muss
         # in der Vorschau stehen, nicht in der Ueberraschung danach.
         "restart_required": server.status == "running",
     }
@@ -751,7 +751,7 @@ def _blueprint_change_payload(
     """Baut den abgeleiteten Blueprint **schon beim Vorschlagen**.
 
     Nicht erst beim Ausfuehren, und das ist der Punkt: der Mensch soll sehen,
-    was herauskommt, bevor er zustimmt â€” nicht eine Liste von Aenderungen, deren
+    was herauskommt, bevor er zustimmt — nicht eine Liste von Aenderungen, deren
     Zusammenwirken er im Kopf nachvollziehen muesste. Ein Vorschlag, dessen
     Ergebnis das Schema verletzt, entsteht damit gar nicht erst; sonst
     scheiterte er nach der Bestaetigung, und jemand haette einer Aenderung
@@ -764,16 +764,16 @@ def _blueprint_change_payload(
     Request.
 
     ``reparatur`` heisst: der Vorschlag entsteht in einem Reparaturlauf. Dann
-    muss das Ergebnis Guardian mitbringen â€” sonst ist die Ableitung ein Ziel,
+    muss das Ergebnis Guardian mitbringen — sonst ist die Ableitung ein Ziel,
     auf dem der Wachmann blind waere.
 
     Das kann die Ableitung nicht selbst verschulden: `AENDERBARE_PFADE` kennt
     nur Pfade unter `meta`, `runtime` und `source`, und alles uebrige wird aus der
-    Vorlage tief kopiert â€” ein abgeleiteter Blueprint traegt die Guardian-Bloecke
+    Vorlage tief kopiert — ein abgeleiteter Blueprint traegt die Guardian-Bloecke
     seiner Vorlage immer. Was diese Zeilen abfangen, ist deshalb die
     **guardianlose Vorlage**: leitet ein Reparaturlauf von ihr ab und stellt den
     Server anschliessend darauf um, meldet der Agent nie wieder etwas ueber
-    diesen Server â€” und die Kampagne wartet auf einen Nachweis
+    diesen Server — und die Kampagne wartet auf einen Nachweis
     (`wirkung_belegt`), den es dann nicht mehr geben kann. Der Vorfall waere
     nicht behoben, sondern unbeobachtbar geworden.
     """
@@ -798,7 +798,7 @@ def _blueprint_change_payload(
     if reparatur and not mit_guardian:
         raise AiActionValidationError(
             f"'{arguments['source_id']}' bringt keine Guardian-Ueberwachung mit. "
-            "Eine Ableitung davon koennte diesen Server nicht mehr beobachten â€” "
+            "Eine Ableitung davon koennte diesen Server nicht mehr beobachten — "
             "waehle eine Vorlage mit Guardian."
         )
 
@@ -813,7 +813,7 @@ def _blueprint_change_payload(
         # Ein Mensch, der einer Ableitung zustimmt, soll nicht nachrechnen
         # muessen, ob er dabei den Wachmann verliert.
         "guardian_enabled": mit_guardian,
-        # Was sich wirklich unterscheidet â€” die Zeile, die der Bestaetigende
+        # Was sich wirklich unterscheidet — die Zeile, die der Bestaetigende
         # liest. `changes` allein waere die Absicht, nicht das Ergebnis.
         "env_before": (quelle.get("runtime") or {}).get("env") or {},
         "env_after": (nutzlast.get("runtime") or {}).get("env") or {},
@@ -887,7 +887,7 @@ def _blueprint_delete_payload(db: Session, arguments: dict) -> tuple[dict, dict]
         "blueprint_id": blueprint_id,
         "blueprint_name": (ansicht.get("blueprint") or {}).get("meta", {}).get("name") or blueprint_id,
         # `path` ist das eine Vorschaufeld, das die Bestaetigungskarte immer
-        # rendert â€” unabhaengig von ihrer Tatsachenliste. Ein Loeschvorschlag
+        # rendert — unabhaengig von ihrer Tatsachenliste. Ein Loeschvorschlag
         # ohne Ziel auf der Karte waere die Frage "loeschen?" ohne das Objekt;
         # deshalb steht die ID hier ein zweites Mal unter diesem Namen.
         "path": blueprint_id,
@@ -895,12 +895,12 @@ def _blueprint_delete_payload(db: Session, arguments: dict) -> tuple[dict, dict]
     return payload, preview
 
 def _hoster_integration_payload(db: Session, user: User, arguments: dict) -> tuple[dict, dict]:
-    """Integration anlegen oder aendern â€” validiert, bevor jemand bestaetigt.
+    """Integration anlegen oder aendern — validiert, bevor jemand bestaetigt.
 
     Alles, was `create_integration` spaeter ohnehin prueft, wird hier schon
     geprueft: Slug-Form, Dienstbenutzer, Webhook-Ziel, Kuendigungsfrist. Ein
     Vorschlag, der erst nach der Bestaetigung scheitert, hat den Menschen
-    umsonst zustimmen lassen â€” und die Meldung kommt dann aus einer Schicht, die
+    umsonst zustimmen lassen — und die Meldung kommt dann aus einer Schicht, die
     ihn nicht mehr erreicht.
 
     **Die Vorschau traegt Panel-Tatsachen.** Die Karte zeigt dem Bestaetigenden
@@ -949,7 +949,7 @@ def _hoster_integration_payload(db: Session, user: User, arguments: dict) -> tup
     if isinstance(tage, bool) or not isinstance(tage, int) or not 0 <= tage <= 365:
         raise AiActionValidationError("Kuendigungsfrist muss zwischen 0 und 365 Tagen liegen")
 
-    # Ein fremder Slug faellt sonst erst beim `flush` auf â€” dann als
+    # Ein fremder Slug faellt sonst erst beim `flush` auf — dann als
     # IntegrityError mitten in der Ausfuehrung statt als Formmeldung.
     kollision = (
         db.query(HosterIntegration.id)
@@ -996,13 +996,13 @@ def _hoster_integration_payload(db: Session, user: User, arguments: dict) -> tup
     return payload, preview
 
 def _hoster_product_payload(db: Session, user: User, arguments: dict) -> tuple[dict, dict]:
-    """Produktzuordnung â€” mit **beiden** Rollenschranken.
+    """Produktzuordnung — mit **beiden** Rollenschranken.
 
     `ensure_role_is_delegatable` prueft gegen den Dienstbenutzer der
     Integration, `ensure_actor_may_grant_role` gegen den Menschen, der hier
     gerade schreibt. Beide gelten zusammen; die erste allein ist wertlos, weil
     der Akteur den Dienstbenutzer selbst aussucht. Ohne die zweite waere der
-    KI-Weg schwaecher als der Panel-Knopf â€” und das ist er nie.
+    KI-Weg schwaecher als der Panel-Knopf — und das ist er nie.
     """
     from games import get_plugin
     from services import hoster_integration_service, role_service
@@ -1106,7 +1106,7 @@ def _ai_tarif_role_payload(db: Session, user: User, arguments: dict) -> tuple[di
 
     Die leere Rechteliste ist der Sicherheitsentwurf, nicht eine Sparmassnahme.
     Eine Rolle ohne Permission-Keys kann ueber `ensure_actor_may_grant_role` nie
-    mehr vergeben, als der Akteur selbst hat â€” die Fehlmenge ist immer leer.
+    mehr vergeben, als der Akteur selbst hat — die Fehlmenge ist immer leer.
     Eskalation ist damit **strukturell** ausgeschlossen und nicht durch eine
     Pruefung verhindert, die jemand kuenftig umgehen koennte. Wer einer
     Tarifrolle Rechte geben will, tut das in der Rollenverwaltung.
@@ -1146,7 +1146,7 @@ def _ai_tarif_role_payload(db: Session, user: User, arguments: dict) -> tuple[di
     for feld in ai_limit_service.LIMIT_FIELDS:
         wert = arguments.get(feld)
         if wert is None:
-            # Ein leeres Feld ist eine Aussage und kein vergessener Wert â€” was
+            # Ein leeres Feld ist eine Aussage und kein vergessener Wert — was
             # es aussagt, haengt inzwischen aber am Feld ab. Bei den
             # Kontingenten heisst es "unbegrenzt"; bei `max_memory_entries`
             # heisst es "nichts hinterlegt", und welche Zahl daraus beim Merken
@@ -1155,7 +1155,7 @@ def _ai_tarif_role_payload(db: Session, user: User, arguments: dict) -> tuple[di
             # Hier bleibt das bewusst ohne Fallunterscheidung: dieser Bau
             # schreibt weiter genau das, was der Betreiber gesagt hat. Dass das
             # Modell den Unterschied kennt, *bevor* es `null` setzt, leistet der
-            # Werkzeugtext in `ai_action_service` â€” er ist die einzige Stelle,
+            # Werkzeugtext in `ai_action_service` — er ist die einzige Stelle,
             # an der ein "unbegrenztes Gedaechtnis" noch abbiegen kann.
             limits[feld] = None
             continue
@@ -1178,7 +1178,7 @@ def _ai_tarif_role_payload(db: Session, user: User, arguments: dict) -> tuple[di
     return payload, preview
 
 def _blueprint_switch_payload(server: Server, arguments: dict) -> tuple[dict, dict]:
-    """Bereitet den Wechsel vor â€” mit dem, was dabei wirklich passiert.
+    """Bereitet den Wechsel vor — mit dem, was dabei wirklich passiert.
 
     Der erste Entwurf hat hier zwei schwere Fehler gemacht, beide aus derselben
     Ursache: er kannte den vorhandenen Panel-Weg nicht
@@ -1195,7 +1195,7 @@ def _blueprint_switch_payload(server: Server, arguments: dict) -> tuple[dict, di
 
     **Zweitens verlangte er uebereinstimmende Portrollen.** Der Panel-Weg
     vergibt die Ports neu, kennt also keine solche Bedingung. Die Pruefung hat
-    Wechsel abgelehnt, die ueber den Knopf funktionieren â€” eine erfundene
+    Wechsel abgelehnt, die ueber den Knopf funktionieren — eine erfundene
     Einschraenkung.
 
     Geblieben sind die Vorbedingungen, die der Panel-Weg selbst prueft; sie
@@ -1238,7 +1238,7 @@ def _blueprint_switch_payload(server: Server, arguments: dict) -> tuple[dict, di
     except HTTPException:
         # Der **alte** Blueprint darf fehlen. Ein Server, dessen Community-
         # Vorlage geloescht wurde, ist genau der Fall, in dem man ihn umstellen
-        # will â€” ihn deswegen abzuweisen waere die Falle zugeschnappt. Der
+        # will — ihn deswegen abzuweisen waere die Falle zugeschnappt. Der
         # Panel-Knopf prueft die Quelle ebenfalls nicht, nur das Ziel.
         alt = None
 
@@ -1274,7 +1274,7 @@ def _backup_restore_payload(
     Ausfuehren. Zwei Gruende: ein Vorschlag auf ein Backup eines fremden Servers
     darf gar nicht erst entstehen, und die Vorschau soll nennen, *welchen Stand*
     der Benutzer gleich zurueckholt. "Backup einspielen" ohne Datum ist keine
-    Grundlage fuer eine Zustimmung â€” zwischen dem Backup von gestern und dem von
+    Grundlage fuer eine Zustimmung — zwischen dem Backup von gestern und dem von
     letztem Monat liegt der ganze Unterschied.
     """
     if set(arguments) != {"backup_id"}:
@@ -1304,7 +1304,7 @@ def _backup_restore_payload(
         "backup_created_at": backup.created_at.isoformat() if backup.created_at else None,
         "size_mb": backup.size_mb,
         "current_status": server.status,
-        # Der Server wird gestoppt und **nicht** automatisch wieder gestartet â€”
+        # Der Server wird gestoppt und **nicht** automatisch wieder gestartet —
         # so verhaelt sich der Restore im Panel auch.
         "restart_required": True,
         "irreversible": True,
@@ -1348,23 +1348,23 @@ def _mod_install_payload(db: Session, server: Server, arguments: dict) -> tuple[
         "workshop_id": workshop_id,
         "known_name": bekannt,
         # `path` ist das, was die Karte als Ueberschrift zeigt und was die
-        # Rueckfrage einsetzt ("Die Mod â€ž{{path}}â€œ ... einspielen?"). Ohne den
+        # Rueckfrage einsetzt ("Die Mod „{{path}}“ ... einspielen?"). Ohne den
         # Schluessel stand dort ein leeres Paar Anfuehrungszeichen: der
         # Bestaetigende sollte zustimmen, ohne zu lesen, wozu. Der Name ist die
-        # Auskunft, die Kennung der Rueckfall â€” eine frisch entdeckte Mod hat
+        # Auskunft, die Kennung der Rueckfall — eine frisch entdeckte Mod hat
         # noch keinen Namen im Panel.
         "path": bekannt or workshop_id,
         "already_installed": existing is not None,
         # **Installiert heisst nicht aktiv.** Eine vorhandene, aber
         # ausgeschaltete Mod laedt der Installationspfad zwar herunter, in die
-        # Startzeile kommt sie trotzdem nicht â€” der Server startet ohne sie,
+        # Startzeile kommt sie trotzdem nicht — der Server startet ohne sie,
         # und eine Erfolgsmeldung waere dann falsch. Der Zustand steht deshalb
         # in der Vorschau, damit das Modell danach `propose_mod_toggle`
         # nachlegen kann. Ihn hier still mitzusetzen waere eine zweite
         # Wirkung unter einem fremden Werkzeugnamen.
         "currently_enabled": bool(existing.enabled) if existing is not None else True,
         "current_status": server.status,
-        # Eine Mod wird beim Start geladen â€” ohne Neustart wirkt sie nicht.
+        # Eine Mod wird beim Start geladen — ohne Neustart wirkt sie nicht.
         "restart_required": True,
     }
     return payload, preview
@@ -1373,7 +1373,7 @@ def _mod_toggle_payload(db: Session, server: Server, arguments: dict) -> tuple[d
     """Erwartet die Argumente *ohne* Begruendung und ohne `server_id`.
 
     Die Mod muss es geben: einen Schalter an etwas umzulegen, das nicht
-    installiert ist, ergibt keinen Vorschlag, sondern einen Hinweis â€” und der
+    installiert ist, ergibt keinen Vorschlag, sondern einen Hinweis — und der
     ist als Formfehler die guenstigere Auskunft als ein Vorschlag, der bei der
     Ausfuehrung scheitert.
     """
@@ -1401,7 +1401,7 @@ def _mod_toggle_payload(db: Session, server: Server, arguments: dict) -> tuple[d
     )
     if vorhanden is None:
         raise AiActionValidationError(
-            "Diese Mod ist auf dem Server nicht installiert â€” erst "
+            "Diese Mod ist auf dem Server nicht installiert — erst "
             "propose_mod_install, dann schalten"
         )
 
@@ -1423,11 +1423,11 @@ def _mod_toggle_payload(db: Session, server: Server, arguments: dict) -> tuple[d
     return payload, preview
 
 def _server_repair_payload(server: Server, arguments: dict) -> tuple[dict, dict]:
-    """Nutzlast fuer `propose_server_repair` â€” eine Kennung, sonst nichts.
+    """Nutzlast fuer `propose_server_repair` — eine Kennung, sonst nichts.
 
     Die Enge ist der Zweck. Das Modell liefert genau ein Wort aus `REPARATUREN`,
     und dieses Wort wird geprueft, bevor irgendetwas daraus gemacht wird. Es gibt
-    keinen Pfad, kein Kommando und keinen Containernamen in dieser Nutzlast â€” der
+    keinen Pfad, kein Kommando und keinen Containernamen in dieser Nutzlast — der
     Containername entsteht spaeter aus `container_name_for(server_id)` und nie
     aus einer Eingabe.
 
@@ -1473,12 +1473,12 @@ def _blueprint_startwerte(server: Server) -> tuple[int, int]:
     return int(start.grace_period_seconds), int(start.timeout_seconds)
 
 def _guardian_tuning_payload(server: Server, arguments: dict) -> tuple[dict, dict]:
-    """Nutzlast fuer `propose_guardian_tuning` â€” Zahlen aus einer festen Menge.
+    """Nutzlast fuer `propose_guardian_tuning` — Zahlen aus einer festen Menge.
 
     Der Fall dahinter: die Blueprint gilt fuer **jeden** Server ihres Spiels und
     kann nicht wissen, dass ausgerechnet auf dieser Node zwoelf Instanzen um
     acht Gigabyte streiten. Guardian sieht dort einen Server, der nicht in
-    dreissig Sekunden hochkommt, startet ihn neu, sieht es wieder â€” und nach
+    dreissig Sekunden hochkommt, startet ihn neu, sieht es wieder — und nach
     drei Anlaeufen steht er in Quarantaene, obwohl nichts kaputt ist ausser der
     Erwartung.
 
@@ -1487,7 +1487,7 @@ def _guardian_tuning_payload(server: Server, arguments: dict) -> tuple[dict, dic
     Untergrenze, und ausserhalb des Bereichs wird **abgewiesen** statt geklemmt:
     das Modell soll erfahren, dass es danebenlag, statt stillschweigend etwas
     anderes zu bekommen, als es vorgeschlagen hat. Geklemmt wird trotzdem noch
-    einmal im Compiler â€” dort gegen alles, was nicht durch dieses Werkzeug kam.
+    einmal im Compiler — dort gegen alles, was nicht durch dieses Werkzeug kam.
 
     `reset` ist der Rueckweg und schliesst alles andere aus. Eine Nutzlast, die
     zugleich zuruecksetzt und setzt, haette zwei Bedeutungen und keine davon
@@ -1531,17 +1531,17 @@ def _guardian_tuning_payload(server: Server, arguments: dict) -> tuple[dict, dic
     vorher = gelesene_uebersteuerung(server)
     # Der Nachtrag ist ein Nachtrag: was das Modell nicht nennt, bleibt stehen.
     # Sonst hiesse jede Anpassung einer einzelnen Zahl, alle anderen zu
-    # verlieren â€” und das Modell muesste sie in jedem Aufruf mitschreiben.
+    # verlieren — und das Modell muesste sie in jedem Aufruf mitschreiben.
     nachher: dict[str, int] = {} if zuruecksetzen else {**vorher, **werte}
 
     # Der Agent-Vertrag verlangt startup timeout > grace. Geprueft wird gegen
     # die **wirksamen** Werte: was die Uebersteuerung nicht setzt, kommt aus
-    # der Blueprint â€” genau wie beim Kompilieren. Nur so faellt auch der Fall
+    # der Blueprint — genau wie beim Kompilieren. Nur so faellt auch der Fall
     # auf, in dem das Modell einen Timeout unter eine Ruhezeit senkt, die
     # allein in der Blueprint steht; sonst wuerde der Compiler die explizite
     # Absenkung stillschweigend wieder hochziehen. Die Abweisung ist die
     # Rueckmeldung, aus der das Modell den naechsten Versuch baut. Geprueft
-    # wird nur, wenn dieser Aufruf eine der beiden Schrauben anfasst â€” ein
+    # wird nur, wenn dieser Aufruf eine der beiden Schrauben anfasst — ein
     # Altbestand ist Sache der Compiler-Klemmung, nicht dieser Aenderung.
     if not zuruecksetzen and (
         "startup_grace_period_seconds" in werte or "startup_timeout_seconds" in werte
@@ -1555,7 +1555,7 @@ def _guardian_tuning_payload(server: Server, arguments: dict) -> tuple[dict, dic
         if timeout <= grace:
             raise AiActionValidationError(
                 "startup_timeout_seconds muss groesser sein als "
-                f"startup_grace_period_seconds â€” wirksam waeren timeout={timeout} "
+                f"startup_grace_period_seconds — wirksam waeren timeout={timeout} "
                 f"und grace={grace} (nicht gesetzte Werte kommen aus der "
                 "Blueprint); der Agent lehnt die Kombination ab"
             )
@@ -1578,23 +1578,23 @@ def _guardian_tuning_payload(server: Server, arguments: dict) -> tuple[dict, dic
     return payload, preview
 
 def _aktuelle_restart_zeiten(server: Server) -> list[str]:
-    """Die heute gesetzten festen Neustartzeiten â€” fÃ¼r die Vorher-Spalte der Karte."""
+    """Die heute gesetzten festen Neustartzeiten — für die Vorher-Spalte der Karte."""
     roh = server.restart_times_utc or server.restart_time_utc or ""
     return [teil.strip() for teil in roh.split(",") if teil.strip()]
 
 def _restart_schedule_payload(server: Server, arguments: dict) -> tuple[dict, dict]:
-    """Nutzlast fÃ¼r `propose_restart_schedule_set` â€” die Panel-Felder, nichts sonst.
+    """Nutzlast für `propose_restart_schedule_set` — die Panel-Felder, nichts sonst.
 
     Dieselben Grenzen wie am Panel-Endpunkt (`schemas/server.py`): Intervall
-    1â€“168 Stunden, hÃ¶chstens 12 feste Zeiten, striktes ``HH:MM`` beim
+    1–168 Stunden, höchstens 12 feste Zeiten, striktes ``HH:MM`` beim
     Speichern. Gelesen wird nachsichtig (``"8:00"`` ist eindeutig,
-    `ai_task_service.uhrzeit_pruefen`), gespeichert streng â€” ein Formfehler
+    `ai_task_service.uhrzeit_pruefen`), gespeichert streng — ein Formfehler
     kostet das Modell eine Runde, nie den Zeitplan.
 
-    Intervall und feste Zeiten schlieÃŸen sich aus, wie Ã¼berall sonst: der
+    Intervall und feste Zeiten schließen sich aus, wie überall sonst: der
     Vorschlag verlangt **genau eines** von beiden, solange eingeschaltet wird.
     Beim Ausschalten bleibt der Plan stehen (Wiedereinschalten erinnert ihn),
-    aber neue Planangaben wÃ¤ren eine Aussage ohne Wirkung und werden abgewiesen.
+    aber neue Planangaben wären eine Aussage ohne Wirkung und werden abgewiesen.
     """
     unbekannt = set(arguments) - {"enabled", "interval_hours", "times"}
     if unbekannt:
@@ -1615,8 +1615,8 @@ def _restart_schedule_payload(server: Server, arguments: dict) -> tuple[dict, di
             )
     elif intervall is not None or zeiten is not None:
         raise AiActionValidationError(
-            "enabled:false schaltet den Auto-Neustart aus â€” ohne Planangaben. "
-            "Der bisherige Plan bleibt fÃ¼r ein spÃ¤teres Einschalten stehen."
+            "enabled:false schaltet den Auto-Neustart aus — ohne Planangaben. "
+            "Der bisherige Plan bleibt für ein späteres Einschalten stehen."
         )
 
     times_csv: str | None = None
@@ -1652,8 +1652,8 @@ def _restart_schedule_payload(server: Server, arguments: dict) -> tuple[dict, di
         "mode": "interval" if intervall is not None else ("fixed" if times_csv else None),
         "interval_hours": intervall,
         "times": times_csv.split(",") if times_csv else [],
-        # Beide StÃ¤nde auf der Karte: wer bestÃ¤tigt, soll sehen, was sich
-        # Ã¤ndert â€” nicht nur, was danach gilt.
+        # Beide Stände auf der Karte: wer bestätigt, soll sehen, was sich
+        # ändert — nicht nur, was danach gilt.
         "before": {
             "enabled": bool(server.auto_restart),
             "interval_hours": server.restart_interval_hours,
@@ -1665,13 +1665,13 @@ def _restart_schedule_payload(server: Server, arguments: dict) -> tuple[dict, di
     return payload, preview
 
 def _backup_schedule_payload(server: Server, arguments: dict) -> tuple[dict, dict]:
-    """Nutzlast fÃ¼r `propose_backup_schedule_set` â€” ein Nachtrag, kein Vollbild.
+    """Nutzlast für `propose_backup_schedule_set` — ein Nachtrag, kein Vollbild.
 
-    Was das Modell nicht nennt, bleibt stehen: â€žAufbewahrung auf 10" soll
+    Was das Modell nicht nennt, bleibt stehen: „Aufbewahrung auf 10" soll
     nicht verlangen, dass es Intervall und Vor-Start-Schalter fehlerfrei
     mitschreibt. Dieselben Grenzen wie am Panel-Endpunkt
-    (`routers/backups.py::BackupSettingsRequest`): Intervall 0â€“720 Stunden
-    (0 = aus), Aufbewahrung 1â€“100.
+    (`routers/backups.py::BackupSettingsRequest`): Intervall 0–720 Stunden
+    (0 = aus), Aufbewahrung 1–100.
     """
     unbekannt = set(arguments) - {"backup_on_start", "interval_hours", "retention_count"}
     if unbekannt:
@@ -1680,7 +1680,7 @@ def _backup_schedule_payload(server: Server, arguments: dict) -> tuple[dict, dic
         )
     if not arguments:
         raise AiActionValidationError(
-            "Keine Ã„nderung angegeben. Nenne mindestens eines von "
+            "Keine Änderung angegeben. Nenne mindestens eines von "
             "backup_on_start, interval_hours, retention_count."
         )
 
@@ -1722,7 +1722,7 @@ def _backup_schedule_payload(server: Server, arguments: dict) -> tuple[dict, dic
     return payload, preview
 
 def _file_delete_payload(db: Session, server: Server, arguments: dict) -> tuple[dict, dict, str]:
-    """Nutzlast fuer `propose_file_delete` â€” genau eine vorhandene Datei.
+    """Nutzlast fuer `propose_file_delete` — genau eine vorhandene Datei.
 
     Der Pfad laeuft durch `_config_path` (Formpruefung) und danach durch
     `read_server_text`, das ihn zusaetzlich durch `safe_path` schickt. Zwei
@@ -1736,7 +1736,7 @@ def _file_delete_payload(db: Session, server: Server, arguments: dict) -> tuple[
       Fehlermeldung beim Ausfuehren.
 
     Die Revision wird mitgefuehrt wie beim Schreiben. Aendert sich die Datei
-    zwischen Vorschlag und Bestaetigung, ist es nicht mehr dieselbe â€” und dann
+    zwischen Vorschlag und Bestaetigung, ist es nicht mehr dieselbe — und dann
     soll sie nicht geloescht werden, weil die Begruendung dann nicht mehr gilt.
     """
     if set(arguments) != {"path"}:
@@ -1747,7 +1747,7 @@ def _file_delete_payload(db: Session, server: Server, arguments: dict) -> tuple[
     # Beides sagt `delete_server_text` beim Ausfuehren ohnehin ab. Es hier schon
     # abzuweisen, ist keine doppelte Pruefung um ihrer selbst willen: das Modell
     # bekommt eine Antwort, mit der es weiterarbeiten kann, statt einen
-    # Vorschlag, der im Chat steht und beim Klick scheitert â€” und in einer
+    # Vorschlag, der im Chat steht und beim Klick scheitert — und in einer
     # unbeaufsichtigten Heilung klickt niemand, dort waere der Vorschlag
     # schlicht das Ende des Weges.
     if is_binary_text(inhalt):
@@ -1766,7 +1766,7 @@ def _file_delete_payload(db: Session, server: Server, arguments: dict) -> tuple[
         "current_status": server.status,
         "restart_required": False,
         # Wieviel dabei verschwindet. Eine Sperrdatei hat null Zeilen, eine
-        # Weltkonfiguration hunderte â€” der Unterschied entscheidet darueber, ob
+        # Weltkonfiguration hunderte — der Unterschied entscheidet darueber, ob
         # jemand das ohne Nachsehen bestaetigt.
         "lines": len(inhalt.splitlines()),
         "binary": False,
@@ -1803,7 +1803,7 @@ def _execute_server_create(
 
     Zielpunkt 10 ist hier die Leitplanke: es darf keinen zweiten Weg geben, einen
     Server anzulegen. Deshalb wird genau derselbe Service aufgerufen wie beim
-    Klick im Panel und bei einer Shop-Bestellung â€” inklusive Blueprintpruefung,
+    Klick im Panel und bei einer Shop-Bestellung — inklusive Blueprintpruefung,
     Kapazitaets- und Portvergabe, Installationsstart und kompensierendem
     Rollback. Die KI liefert nur die Wunschwerte.
 
@@ -1856,7 +1856,7 @@ def _execute_bind_ip_update(db: Session, *, server_id: int, payload: dict) -> di
     Interface verschwunden sein.
 
     Der Neuaufbau laeuft ueber dieselbe Funktion wie der Netzwerk-Tab. Es gibt
-    keinen KI-Sonderweg â€” genau das verlangt Zielpunkt 10.
+    keinen KI-Sonderweg — genau das verlangt Zielpunkt 10.
     """
     from services.server_network_service import (
         BindIpRejected,
@@ -1896,13 +1896,13 @@ def _execute_hoster_write(db: Session, *, user: User, tool_name: str, payload: d
     """Fuehrt die drei Shop-Einrichtungsvorschlaege ueber den Panel-Pfad aus.
 
     Ein Weg, kein KI-Sonderweg: gerufen werden `create_integration`,
-    `upsert_product`, `create_role` und `set_role_limit` â€” dieselben Funktionen
+    `upsert_product`, `create_role` und `set_role_limit` — dieselben Funktionen
     wie hinter den Knoepfen in `routers/hoster_admin.py` und
     `routers/ai_settings.py`.
 
     **Der API-Key geht ueber den Rueckgabewert und nirgendwo sonst hin.**
     `AiActionExecuteResponse.result` wird nicht persistiert, steht nicht im
-    Audit und fliesst nicht zum Modell zurueck â€” der Rueckfluss besteht
+    Audit und fliesst nicht zum Modell zurueck — der Rueckfluss besteht
     ausschliesslich aus `status`, `autonomous`, `server_id` und `error_code`.
     Er darf deshalb hier stehen, aber niemals in `preview_json` (Klartext in der
     Datenbank) und niemals im Antworttext.
@@ -2013,7 +2013,7 @@ def _execute_hoster_write(db: Session, *, user: User, tool_name: str, payload: d
         "slug": integration.slug,
         "api_key_hint": integration.api_key_hint,
     }
-    # `secrets` ist der einzige Schluessel, der dieses Modul verlaesst â€” auf dem
+    # `secrets` ist der einzige Schluessel, der dieses Modul verlaesst — auf dem
     # Weg zur Karte, die ihn genau einmal anzeigt, und auf keinem anderen.
     geheimnisse = []
     if api_key:
@@ -2030,7 +2030,7 @@ def _execute_mod_install(db: Session, *, server_id: int, payload: dict) -> dict:
     Zielpunkt 16 bleibt dadurch unangetastet: es entsteht kein eigener
     Downloadbereich und keine Archivuebernahme der KI. Genutzt wird
     `install_mod_bg` mit seinem Install-Lock, seiner Statusfuehrung und seiner
-    Fehlerbehandlung â€” derselbe Code, den auch der Mod-Tab ausloest.
+    Fehlerbehandlung — derselbe Code, den auch der Mod-Tab ausloest.
     """
     from models import Mod
     from routers.mods import install_mod_bg
@@ -2101,7 +2101,7 @@ def _execute_mod_toggle(db: Session, *, server_id: int, payload: dict) -> dict:
 
     `update_modlist` gehoert trotzdem dazu: bei dateibasierten Mods schreibt
     es die `.disabled`-Marken bzw. die Modlisten-Datei. Bei Spielen, die ihre
-    Mods als Startparameter uebergeben (ARK), ist der Aufruf wirkungslos â€”
+    Mods als Startparameter uebergeben (ARK), ist der Aufruf wirkungslos —
     dort entsteht die Liste erst beim Bau des Containers, also mit dem
     naechsten Start.
     """
@@ -2131,7 +2131,7 @@ def _execute_mod_toggle(db: Session, *, server_id: int, payload: dict) -> dict:
         except Exception:
             # Die Wahrheit steht in der Spalte, und die ist geschrieben. Ein
             # gescheitertes Nachziehen der Dateien darf den Vorgang nicht als
-            # fehlgeschlagen ausweisen â€” sonst schaltet die KI erneut und
+            # fehlgeschlagen ausweisen — sonst schaltet die KI erneut und
             # kippt den Zustand zurueck.
             logger.warning(
                 "Modliste nach dem Schalten nicht aktualisiert server_id=%s",
@@ -2149,7 +2149,7 @@ def _execute_file_delete(
     db: Session, *, user: User, server_id: int, payload: dict,
     expected_revision: str | None,
 ) -> dict:
-    """Loescht die eine Datei aus der Nutzlast â€” ueber den Panel-Pfad.
+    """Loescht die eine Datei aus der Nutzlast — ueber den Panel-Pfad.
 
     Kein eigener Loeschweg fuer die KI: `delete_server_text` ist derselbe
     Dienst, den auch der Dateimanager benutzt, mit derselben Sandbox, derselben
@@ -2184,7 +2184,7 @@ def _execute_server_repair(
     """Fuehrt genau eine der Reparaturen aus `REPARATUREN` aus.
 
     Jeder Zweig ruft eine Funktion, die es im Panel schon gibt und die dort von
-    einem Knopf ausgeloest wird. Es entsteht kein neuer Weg an Docker heran â€”
+    einem Knopf ausgeloest wird. Es entsteht kein neuer Weg an Docker heran —
     das waere ein zweiter Ort, an dem Containernamen, Netznamen und Rechte
     richtig sein muessten.
 
@@ -2222,7 +2222,7 @@ def _execute_server_repair(
                 raise AiActionStateError("AI_ACTION_TARGET_MISSING")
             # `repair_bind_mount_permissions` kennt keinen `node`-Parameter und
             # laeuft immer auf dem Panel-Host. Bei einem Server auf einem
-            # entfernten Node repariert sie also das falsche Verzeichnis â€” oder
+            # entfernten Node repariert sie also das falsche Verzeichnis — oder
             # findet es nicht und meldet einen Fehlschlag, obwohl nichts kaputt
             # ist. Denselben Schutz zieht `games/base.py` vor jedem Start.
             node = getattr(server, "node", None)
@@ -2253,14 +2253,14 @@ def _execute_guardian_tuning(
     correlation_id: str,
     incident_id: int | None = None,
 ) -> dict:
-    """Schreibt die Uebersteuerung â€” und nimmt sie zurueck, wenn sie nicht ankommt.
+    """Schreibt die Uebersteuerung — und nimmt sie zurueck, wenn sie nicht ankommt.
 
     Der Rueckweg ist der eigentliche Inhalt dieser Funktion. Ohne ihn haengt die
     Guardian-Synchronisation dieses Servers dauerhaft in einem gespeicherten
     Fehler: `compile_and_sync_desired_state` erhoeht die Generation, der Agent
     lehnt die Nutzlast ab oder kann sie nicht, und jeder folgende
     Reconcile-Takt versucht dieselbe abgelehnte Konfiguration erneut. Der Server
-    bekaeme von da an gar keine Guardian-Aktualisierung mehr â€” auch keine
+    bekaeme von da an gar keine Guardian-Aktualisierung mehr — auch keine
     richtige.
 
     Deshalb: Stand merken, schreiben, synchronisieren, und bei einem Fehlschlag
@@ -2294,7 +2294,7 @@ def _execute_guardian_tuning(
     db.commit()
     db.refresh(server)
 
-    # Ein Server ohne Node hat keinen Agenten, der etwas quittieren koennte â€”
+    # Ein Server ohne Node hat keinen Agenten, der etwas quittieren koennte —
     # das ist kein Fehlschlag, sondern ein Server, der noch nirgends laeuft.
     if server.node_id is not None and not sync_desired_state_to_agent(db, server):
         server.guardian_overrides_json = vorher
@@ -2327,7 +2327,7 @@ def _execute_guardian_tuning(
         # Die Chronikzeile ist zugleich die Herkunftsangabe im Guardian-Reiter
         # (`routers/guardian._herkunft`). Deshalb steht der Vorfall hier: ohne
         # ihn koennte der Reiter zwar sagen "von der KI gesetzt", aber nicht,
-        # woraufhin â€” und genau das ist die Frage, die jemand stellt, der eine
+        # woraufhin — und genau das ist die Frage, die jemand stellt, der eine
         # unerwartete Zahl sieht.
         details=_json.dumps(
             {"overrides": neu, "source": "ai", "incident_id": incident_id},
@@ -2403,7 +2403,7 @@ def _ausfuehren_server_blueprint_switch(db: Session, rahmen: _AusfuehrungsRahmen
     # **loescht das Serververzeichnis**, vergibt die Ports neu und
     # installiert das neue Spiel. Ein Server, bei dem nur die Spalte
     # umgeschrieben wird, traegt danach das Image des neuen
-    # Blueprints ueber den Dateien des alten â€” Datenbank und
+    # Blueprints ueber den Dateien des alten — Datenbank und
     # Wirklichkeit laufen auseinander, und niemand merkt es bis zum
     # naechsten Start.
     from services.server_lifecycle_service import switch_server_blueprint
@@ -2419,7 +2419,7 @@ def _ausfuehren_server_blueprint_switch(db: Session, rahmen: _AusfuehrungsRahmen
             user_id=rahmen.active_user.id,
         )
     except HTTPException as exc:
-        # Die Vorbedingungen werden dort verbindlich geprueft â€”
+        # Die Vorbedingungen werden dort verbindlich geprueft —
         # zwischen Vorschlag und Bestaetigung koennen Minuten
         # liegen, und der Server kann inzwischen gestartet worden
         # sein. Ein fehlgeschlagenes Pflicht-Backup bricht ebenfalls
@@ -2439,7 +2439,7 @@ def _ausfuehren_server_blueprint_switch(db: Session, rahmen: _AusfuehrungsRahmen
 def _ausfuehren_server_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     # Derselbe Aufruf, den der Panel-Router und die Hoster-Anbindung
     # nehmen. `delete_server_completely` prueft `servers.delete`
-    # selbst noch einmal â€” die dritte Pruefung nach `_resolve_server`
+    # selbst noch einmal — die dritte Pruefung nach `_resolve_server`
     # beim Vorschlagen und `_require_tool_permission` beim
     # Bestaetigen. Eine davon zu ueberspringen, waere ein eigener
     # Loeschpfad fuer die KI, und genau den soll es nicht geben.
@@ -2470,7 +2470,7 @@ def _ausfuehren_config_patch(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausge
     # Erneut anwenden statt den fertigen Inhalt mitzuschleppen. Es
     # kommt dasselbe heraus: `expected_revision` laesst nur genau
     # den Stand zu, auf dem die Ersetzungen beim Vorschlagen schon
-    # einmal aufgegangen sind â€” und dieselbe Revision geht gleich
+    # einmal aufgegangen sind — und dieselbe Revision geht gleich
     # noch einmal in `write_server_text`, das den Schreibvorgang
     # unter der Dateisperre gegen sie prueft.
     pfad = str(rahmen.payload["path"])
@@ -2493,14 +2493,14 @@ def _ausfuehren_config_patch(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausge
 
     # **Auch eine Teilaenderung ist dauerhaft.** Ohne das haette die
     # Bestaendigkeit am gewaehlten Werkzeug gehangen: derselbe Wert, per
-    # `propose_config_set` gesetzt, ueberlebt den naechsten Autosave â€” per
+    # `propose_config_set` gesetzt, ueberlebt den naechsten Autosave — per
     # Patch gesetzt nicht. Ein Unterschied, den kein Benutzer sehen kann und
     # den niemand erklaeren koennte.
     #
     # Ein Fehlschlag hier darf die bereits geschriebene Datei nicht
     # zurueckdrehen: der Wert steht, nur seine Wiederherstellung beim naechsten
     # Start fehlt. Das ist der schwaechere von zwei Zustaenden, aber ein
-    # ehrlicher â€” und der Grund steht im Konsolenlog.
+    # ehrlicher — und der Grund steht im Konsolenlog.
     server = db.get(Server, rahmen.server_id) if rahmen.server_id else None
     if server is not None:
         try:
@@ -2513,7 +2513,7 @@ def _ausfuehren_config_patch(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausge
     return _Ausgefuehrt(result=result)
 
 def _ausfuehren_config_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
-    """Schreibt die Werte â€” und merkt sie fuer jeden kuenftigen Start.
+    """Schreibt die Werte — und merkt sie fuer jeden kuenftigen Start.
 
     Beides gehoert zusammen: die Datei allein haelt nur, solange der
     Spielprozess sie laesst (gemessen auf Server 107, wo ein ausgefuehrter
@@ -2531,7 +2531,7 @@ def _ausfuehren_config_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefu
         for e in rahmen.payload["entries"]
     ]
     # Ein serverbezogenes Werkzeug ohne Server ist ein Programmierfehler, kein
-    # Benutzerfehler â€” `_resolve_server` hat ihn beim Anlegen laengst gesetzt.
+    # Benutzerfehler — `_resolve_server` hat ihn beim Anlegen laengst gesetzt.
     if rahmen.server_id is None:
         raise AiActionStateError("AI_ACTION_INVALID")
     server_id = rahmen.server_id
@@ -2663,7 +2663,7 @@ def _ausfuehren_server_create(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausg
 
 def _ausfuehren_blueprint_change(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     # Gespeichert wird die Nutzlast, die beim **Vorschlagen**
-    # entstanden ist â€” nicht eine neu berechnete. Der Mensch hat
+    # entstanden ist — nicht eine neu berechnete. Der Mensch hat
     # genau dieses Ergebnis gesehen und bestaetigt; zwischenzeitlich
     # geaenderte Vorlagen duerfen daran nichts mehr drehen.
     from services import blueprint_service
@@ -2680,7 +2680,7 @@ def _ausfuehren_blueprint_change(db: Session, rahmen: _AusfuehrungsRahmen) -> _A
 def _ausfuehren_blueprint_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     # Die Session dieses Requests geht mit. `delete_community_blueprint`
     # zaehlt vor dem Loeschen die Server, die den Blueprint noch
-    # verwenden â€” und zwar erneut, denn zwischen Vorschlag und Klick
+    # verwenden — und zwar erneut, denn zwischen Vorschlag und Klick
     # kann ein Server angelegt worden sein. Diese Zaehlung muss den
     # Stand sehen, auf dem dieser Request arbeitet; eine eigene
     # Verbindung daneben antwortete auf eine andere Frage als die,
@@ -2705,13 +2705,13 @@ def _ausfuehren_hoster_schreiben(db: Session, rahmen: _AusfuehrungsRahmen) -> _A
     return _Ausgefuehrt(result=result)
 
 def _ausfuehren_restart_schedule_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
-    """Setzt den eingebauten Auto-Neustart-Zeitplan â€” derselbe Weg wie das Panel.
+    """Setzt den eingebauten Auto-Neustart-Zeitplan — derselbe Weg wie das Panel.
 
-    Normalisierung und Scheduler-Sync sind wÃ¶rtlich die des Panel-PATCH
+    Normalisierung und Scheduler-Sync sind wörtlich die des Panel-PATCH
     (`routers/servers.py`): erst `normalize_server_restart_mode` (Intervall
-    und feste Zeiten schlieÃŸen sich aus), dann `sync_server_restart_schedule`
+    und feste Zeiten schließen sich aus), dann `sync_server_restart_schedule`
     **vor** dem Commit, damit Datenbank und APScheduler nicht driften.
-    ZusÃ¤tzlich bekommt der Server das â€žVon der KI verwaltet"-Abzeichen; die
+    Zusätzlich bekommt der Server das „Von der KI verwaltet"-Abzeichen; die
     Aufgaben-Kennung kommt mit, wenn der Vorschlag aus einem stehenden
     Auftrag stammt.
     """
@@ -2728,8 +2728,8 @@ def _ausfuehren_restart_schedule_set(db: Session, rahmen: _AusfuehrungsRahmen) -
     elif p.get("times_csv"):
         zeiten = str(p["times_csv"])
         server.restart_times_utc = zeiten
-        # Legacy-Spiegel wie im Panel: die erste Zeit landet zusÃ¤tzlich im
-        # Einzelfeld, das Ã¤ltere Leser noch kennen.
+        # Legacy-Spiegel wie im Panel: die erste Zeit landet zusätzlich im
+        # Einzelfeld, das ältere Leser noch kennen.
         server.restart_time_utc = zeiten.split(",")[0]
         server.restart_interval_hours = None
 
@@ -2753,10 +2753,10 @@ def _ausfuehren_restart_schedule_set(db: Session, rahmen: _AusfuehrungsRahmen) -
     })
 
 def _ausfuehren_backup_schedule_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
-    """Setzt den eingebauten Auto-Backup-Zeitplan â€” derselbe Weg wie das Panel.
+    """Setzt den eingebauten Auto-Backup-Zeitplan — derselbe Weg wie das Panel.
 
     Ein Nachtrag: nur die Felder aus der Nutzlast werden angefasst. Der
-    Scheduler wird bei einer Intervall-Ã„nderung sofort synchronisiert, wie am
+    Scheduler wird bei einer Intervall-Änderung sofort synchronisiert, wie am
     Panel-Endpunkt (`routers/backups.py`).
     """
     if rahmen.server_id is None:

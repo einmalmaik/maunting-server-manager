@@ -357,7 +357,7 @@ def is_binary_text(content: str) -> bool:
     **Das Ersatzzeichen steht hier als `\\ufffd` und nicht als Zeichen.** Bis zum
     21.09.2026 stand es ausgeschrieben da, und der Quelltext war zwischendurch
     einmal falsch umkodiert worden: aus dem einen `U+FFFD` waren die drei Zeichen
-    `Ã¯Â¿Â½` geworden. Die Zeile zaehlte danach eine Folge, die kein
+    `\\u00c3\\u00af\\u00c2\\u00bf\\u00c2\\u00bd` geworden. Die Zeile zaehlte danach eine Folge, die kein
     `errors="replace"` je erzeugt — die Erkennung lief ins Leere, und uebrig
     blieb allein die Nullbyte-Pruefung. Als Escape kann dasselbe nicht noch
     einmal passieren.
