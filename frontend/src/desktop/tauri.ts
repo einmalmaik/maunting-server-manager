@@ -494,6 +494,8 @@ export type MedienArt = 'bild' | 'video'
 
 export interface Aufnahme {
   id: number
+  /** Woran neu erkannt wird; nur gegen eine Marke aus `medienStand` vergleichen. */
+  marke: number
   art: MedienArt
   name: string
   typ: string
@@ -514,13 +516,17 @@ export async function medienZugriff(anfragen: boolean): Promise<MedienZugriff> {
   return invoke<MedienZugriff>('medien_zugriff', { anfragen })
 }
 
-export async function medienHoechsteId(): Promise<number> {
-  return (await invoke<{ id: number }>('medien_hoechste_id')).id
+/**
+ * Die Marke, ab der eine Aufnahme als neu gilt, und die Fassung des MediaStore.
+ * Ändert sich die Fassung, gelten alte Marken nicht mehr.
+ */
+export async function medienStand(): Promise<{ marke: number; fassung: string }> {
+  return invoke<{ marke: number; fassung: string }>('medien_stand')
 }
 
-/** Aufnahmen aus DCIM mit größerer Kennung als `nachId`, aufsteigend. */
-export async function medienAufnahmen(nachId: number, hoechstens: number): Promise<Aufnahme[]> {
-  return (await invoke<{ aufnahmen: Aufnahme[] }>('medien_aufnahmen', { nachId, hoechstens })).aufnahmen
+/** Fertige Aufnahmen aus DCIM mit größerer Marke als `nach`, aufsteigend. */
+export async function medienAufnahmen(nach: number, hoechstens: number): Promise<Aufnahme[]> {
+  return (await invoke<{ aufnahmen: Aufnahme[] }>('medien_aufnahmen', { nach, hoechstens })).aufnahmen
 }
 
 export async function medienLesen(id: number, art: MedienArt, von: number, laenge: number): Promise<Uint8Array> {

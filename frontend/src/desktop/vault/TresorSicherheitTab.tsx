@@ -124,12 +124,13 @@ export function TresorSicherheitTab() {
 
           <div className="flex items-center justify-between gap-4 pt-2 border-t border-outline-variant/20">
             <div>
-              <span className="text-xs font-medium text-on-surface">{t('mss.vault.beiFensterwechsel')}</span>
+              <span id="tresor-fensterwechsel" className="text-xs font-medium text-on-surface">{t('mss.vault.beiFensterwechsel')}</span>
               <p className="text-label-sm text-on-surface-variant">
                 {t('mss.vault.beiFensterwechselHinweis')}
               </p>
             </div>
             <Switch
+              aria-labelledby="tresor-fensterwechsel"
               checked={lockOnWindowBlur}
               onCheckedChange={setLockOnWindowBlur}
             />
@@ -179,7 +180,7 @@ export function TresorSicherheitTab() {
 
           <div className="flex items-center justify-between gap-4">
             <div>
-              <span className="text-xs font-medium text-on-surface">
+              <span id="tresor-biometrie" className="text-xs font-medium text-on-surface">
                 {t('mss.vault.biometrieSchalter')}
               </span>
               <p className="text-label-sm text-on-surface-variant">
@@ -187,6 +188,7 @@ export function TresorSicherheitTab() {
               </p>
             </div>
             <Switch
+              aria-labelledby="tresor-biometrie"
               checked={isBiometricsEnabled && isBiometricsSupported}
               onCheckedChange={(checked: boolean) => void handleBiometricsToggle(checked)}
               disabled={!isBiometricsSupported || !isInitialized || !isUnlocked}

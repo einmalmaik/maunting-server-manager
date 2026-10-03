@@ -92,13 +92,13 @@ export function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: 
 
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-on-surface">
-          {isAndroid ? 'Beim Handystart ausführen' : t('mss.einstellungen.autostart')}
+          {t(isAndroid ? 'mss.einstellungen.autostartAndroid' : 'mss.einstellungen.autostart')}
         </p>
         <Switch
           checked={autostart === true}
           disabled={autostart === null}
           onCheckedChange={(an) => void autostartUmschalten(an)}
-          aria-label={isAndroid ? 'Beim Handystart ausführen' : t('mss.einstellungen.autostart')}
+          aria-label={t(isAndroid ? 'mss.einstellungen.autostartAndroid' : 'mss.einstellungen.autostart')}
         />
       </div>
 
@@ -141,7 +141,7 @@ export function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: 
       <div className="border-t border-outline-variant/40 pt-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-sm font-medium text-on-surface">System-Updates</p>
+            <p className="text-sm font-medium text-on-surface">{t('mss.einstellungen.systemUpdates')}</p>
           </div>
           <Button
             variant="secondary"

@@ -49,4 +49,16 @@ describe('Tresor-Sicherheit: Leck-Prüfung', () => {
     fireEvent.click(schalter)
     expect(localStorage.getItem(VAULT_LEAK_CHECK_ENABLED_KEY)).toBe('true')
   })
+
+  it('nennt jeden Schalter beim Namen, auch für Screenreader', () => {
+    render(
+      <MemoryRouter>
+        <TresorSicherheitTab />
+      </MemoryRouter>,
+    )
+    // Bis 03.10.2026 standen Fensterwechsel und Fingerabdruck ohne Namen da.
+    for (const schalter of screen.getAllByRole('switch')) expect(schalter).toHaveAccessibleName()
+    expect(screen.getByRole('switch', { name: i18n.t('mss.vault.beiFensterwechsel') })).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: i18n.t('mss.vault.biometrieSchalter') })).toBeInTheDocument()
+  })
 })

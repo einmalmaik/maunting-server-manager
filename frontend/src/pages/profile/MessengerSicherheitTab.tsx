@@ -321,7 +321,7 @@ export function MessengerSicherheitTab() {
             <>
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <span className="text-xs font-medium text-on-surface">
+                  <span id="messenger-biometrie" className="text-xs font-medium text-on-surface">
                     {t('profile.messengerLock.bioSwitch')}
                   </span>
                   <p className="text-label-sm text-on-surface-variant">
@@ -329,6 +329,7 @@ export function MessengerSicherheitTab() {
                   </p>
                 </div>
                 <Switch
+                  aria-labelledby="messenger-biometrie"
                   checked={biometrieAktiv}
                   disabled={laeuft}
                   onCheckedChange={(an) => void biometrieUmschalten(an)}
@@ -396,7 +397,7 @@ export function MessengerSicherheitTab() {
 
           <div className="flex items-center justify-between gap-4 pt-2 border-t border-outline-variant/20">
             <div>
-              <span className="text-xs font-medium text-on-surface">
+              <span id="messenger-fensterwechsel" className="text-xs font-medium text-on-surface">
                 {t('profile.messengerLock.onBlur')}
               </span>
               <p className="text-label-sm text-on-surface-variant">
@@ -404,6 +405,7 @@ export function MessengerSicherheitTab() {
               </p>
             </div>
             <Switch
+              aria-labelledby="messenger-fensterwechsel"
               checked={sperrtBeiFensterwechsel}
               onCheckedChange={(an) => useMessengerSperre.getState().setzeFensterwechsel(an)}
             />

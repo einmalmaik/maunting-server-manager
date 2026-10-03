@@ -37,7 +37,7 @@ vi.mock('@/desktop/tauri', () => ({
   verifiziereBiometrie: vi.fn().mockResolvedValue(false),
   setzeTresorSchutz: vi.fn(),
   medienZugriff: vi.fn(),
-  medienHoechsteId: vi.fn(),
+  medienStand: vi.fn(),
   medienAufnahmen: vi.fn(),
   medienLesen: vi.fn(),
   medienPruefsumme: vi.fn(),
@@ -65,10 +65,31 @@ interface Medium {
   name: string
   typ: string
   bytes: Uint8Array
+  /** Wird noch geschrieben (`IS_PENDING`): der MediaStore liefert sie nicht. */
+  wartend?: boolean
+  marke?: number
 }
 
-/** Der MediaStore des Geräts: Kennung → Aufnahme. */
-let medien: Map<number, Medium>
+/** Generation des MediaStore: jede Änderung bekommt die nächste. */
+let generation: number
+let fassung: string
+
+/** Der MediaStore des Geräts: Kennung → Aufnahme. Anlegen zählt die Generation hoch. */
+class MediaStore extends Map<number, Medium> {
+  set(id: number, m: Medium) {
+    m.marke = ++generation
+    return super.set(id, m)
+  }
+}
+
+/** Die Kamera schreibt eine Aufnahme fertig: neue Generation, wie in Android. */
+function fertigGeschrieben(id: number) {
+  const m = medien.get(id)!
+  m.wartend = false
+  m.marke = ++generation
+}
+
+let medien: MediaStore
 let hinzugefuegt: { datei: File; quelle: unknown; original: unknown }[]
 
 async function sha256(bytes: Uint8Array): Promise<string> {
@@ -89,14 +110,18 @@ function bytes(laenge: number, saat: number): Uint8Array {
 
 function aufnahme(id: number): Aufnahme {
   const m = medien.get(id)!
-  return { id, art: m.art, name: m.name, typ: m.typ, groesse: m.bytes.length, aufgenommen: 1_700_000_000_000 + id, geaendert: 0 }
+  return { id, marke: m.marke!, art: m.art, name: m.name, typ: m.typ, groesse: m.bytes.length, aufgenommen: 1_700_000_000_000 + id, geaendert: 0 }
 }
 
 function mediaStoreNachbauen() {
   vi.mocked(tauri.medienZugriff).mockResolvedValue({ stand: 'voll', papierkorb: true })
-  vi.mocked(tauri.medienHoechsteId).mockImplementation(async () => Math.max(0, ...medien.keys()))
-  vi.mocked(tauri.medienAufnahmen).mockImplementation(async (nachId, hoechstens) =>
-    [...medien.keys()].filter((id) => id > nachId).sort((a, b) => a - b).slice(0, hoechstens).map(aufnahme),
+  vi.mocked(tauri.medienStand).mockImplementation(async () => ({ marke: generation, fassung }))
+  vi.mocked(tauri.medienAufnahmen).mockImplementation(async (nach, hoechstens) =>
+    [...medien.keys()]
+      .map(aufnahme)
+      .filter((a) => !medien.get(a.id)!.wartend && a.marke > nach)
+      .sort((a, b) => a.marke - b.marke)
+      .slice(0, hoechstens),
   )
   vi.mocked(tauri.medienLesen).mockImplementation(async (id, _art, von, laenge) => {
     const m = medien.get(id)
@@ -123,17 +148,14 @@ function tresorOeffnen(items: VaultItem[] = []) {
   })
 }
 
-/** Schaltet die Sicherung ein, als lägen schon Aufnahmen bis `bis` auf dem Gerät. */
-async function eingeschaltet(bis = 0) {
-  const vorher = medien
-  medien = new Map(bis > 0 ? [[bis, { art: 'bild', name: 'alt.jpg', typ: 'image/jpeg', bytes: bytes(10, 1) }]] : [])
+/** Schaltet die Sicherung ein; was jetzt schon im MediaStore liegt, gilt als alt. */
+async function eingeschaltet() {
   // Gesperrt, damit der Lauf, den das Einschalten anstößt, sofort endet und
   // nicht in den Test hineinläuft. Danach genau ein Lauf.
   useVaultStore.setState({ isUnlocked: false })
   await kameraEinschalten(BUCKET)
   useVaultStore.setState({ isUnlocked: true })
   await kameraAnstossen(BUCKET)
-  medien = vorher
   hinzugefuegt = []
 }
 
@@ -141,7 +163,9 @@ beforeEach(() => {
   globalThis.indexedDB = new IDBFactory()
   setzeAngemeldetesKonto(1)
   localStorage.clear()
-  medien = new Map()
+  generation = 0
+  fassung = 'gen:1'
+  medien = new MediaStore()
   hinzugefuegt = []
   mediaStoreNachbauen()
   tresorOeffnen()
@@ -156,9 +180,9 @@ afterEach(async () => {
 
 describe('Kamera-Sicherung', () => {
   it('sichert nur, was nach dem Einschalten aufgenommen wurde, Bit für Bit und ohne zweite Kopie im Cache', async () => {
-    await eingeschaltet(5)
-    const gross = bytes(9 * MiB + 17, 3) // drei Stücke zu 4 MiB
     medien.set(5, { art: 'bild', name: 'vorher.jpg', typ: 'image/jpeg', bytes: bytes(10, 9) })
+    await eingeschaltet()
+    const gross = bytes(9 * MiB + 17, 3) // drei Stücke zu 4 MiB
     medien.set(7, { art: 'video', name: 'VID_7.mp4', typ: 'video/mp4', bytes: gross })
     medien.set(9, { art: 'bild', name: 'IMG_9.jpg', typ: 'image/jpeg', bytes: bytes(1000, 4) })
 
@@ -171,7 +195,7 @@ describe('Kamera-Sicherung', () => {
     expect(video.original).toBe('nein')
     expect(video.quelle).toMatchObject({ medienId: 7, art: 'video', sha256: await sha256(gross) })
     const stand = await kameraStandLaden(BUCKET)
-    expect(stand).toMatchObject({ bisId: 9, gesichert: 2 })
+    expect(stand).toMatchObject({ bis: medien.get(9)!.marke, gesichert: 2 })
   })
 
   it('sichert nichts, solange der Schalter aus ist', async () => {
@@ -194,7 +218,7 @@ describe('Kamera-Sicherung', () => {
     })
     await kameraAnstossen(BUCKET)
     expect(hinzugefuegt).toEqual([])
-    expect((await kameraStandLaden(BUCKET))?.bisId).toBe(0)
+    expect((await kameraStandLaden(BUCKET))?.bis).toBe(0)
 
     await kameraAnstossen(BUCKET)
     expect(hinzugefuegt).toHaveLength(1)
@@ -211,7 +235,42 @@ describe('Kamera-Sicherung', () => {
     ])
     await kameraAnstossen(BUCKET)
     expect(hinzugefuegt).toEqual([])
-    expect((await kameraStandLaden(BUCKET))?.bisId).toBe(4)
+    expect((await kameraStandLaden(BUCKET))?.bis).toBe(medien.get(4)!.marke)
+  })
+
+  it('sichert eine Aufnahme, die erst nach einer späteren fertig wird (Foto während eines Videos)', async () => {
+    await eingeschaltet()
+    medien.set(3, { art: 'video', name: 'VID_3.mp4', typ: 'video/mp4', bytes: bytes(2000, 1), wartend: true })
+    medien.set(4, { art: 'bild', name: 'IMG_4.jpg', typ: 'image/jpeg', bytes: bytes(100, 2) })
+    await kameraAnstossen(BUCKET)
+    expect(hinzugefuegt.map((h) => h.datei.name)).toEqual(['IMG_4.jpg'])
+
+    fertigGeschrieben(3)
+    await kameraAnstossen(BUCKET)
+    expect(hinzugefuegt.map((h) => h.datei.name)).toEqual(['IMG_4.jpg', 'VID_3.mp4'])
+  })
+
+  it('bleibt nach einem neu aufgebauten MediaStore nicht stehen und sichert dabei nichts Altes', async () => {
+    medien.set(1, { art: 'bild', name: 'alt.jpg', typ: 'image/jpeg', bytes: bytes(10, 1) })
+    await eingeschaltet()
+    generation += 1000 // ein lange benutzter MediaStore hat viele Änderungen hinter sich
+    for (let i = 2; i <= 6; i++) medien.set(i, { art: 'bild', name: `${i}.jpg`, typ: 'image/jpeg', bytes: bytes(10, i) })
+    await kameraAnstossen(BUCKET)
+    expect(hinzugefuegt).toHaveLength(5)
+    hinzugefuegt = []
+
+    // Android baut die Datenbank neu: neue Fassung, die Generationen beginnen klein.
+    const alt = [...medien.entries()]
+    generation = 0
+    fassung = 'gen:2'
+    medien = new MediaStore()
+    for (const [id, m] of alt) medien.set(id + 100, { ...m })
+    await kameraAnstossen(BUCKET)
+    expect(hinzugefuegt).toEqual([])
+
+    medien.set(200, { art: 'bild', name: 'neu.jpg', typ: 'image/jpeg', bytes: bytes(10, 77) })
+    await kameraAnstossen(BUCKET)
+    expect(hinzugefuegt.map((h) => h.datei.name)).toEqual(['neu.jpg'])
   })
 
   it('überspringt eine Aufnahme, die inzwischen gelöscht ist, und macht mit der nächsten weiter', async () => {

@@ -6728,7 +6728,9 @@
       "updateCheckError": "Konnte nicht nach Updates suchen.",
       "updateUpToDate": "Maunting Smart System ist auf dem neuesten Stand.",
       "checkingUpdates": "Prüft …",
-      "checkForUpdates": "Auf Updates prüfen"
+      "checkForUpdates": "Auf Updates prüfen",
+      "autostartAndroid": "Beim Handystart ausführen",
+      "systemUpdates": "System-Updates"
     },
     "schliessen": {
       "titel": "MSS schließen?",

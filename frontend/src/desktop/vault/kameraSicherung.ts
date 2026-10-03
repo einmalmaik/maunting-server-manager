@@ -5,8 +5,11 @@
  * Gesichert wird das Original Bit für Bit, mit Aufnahmeort. Verschlüsselt und
  * hochgeladen wird wie jede andere Datei (`dateiHinzufuegen`).
  *
- * Was erledigt ist, steht als Grenze: alle Aufnahmen bis `bisId` sind gesichert
- * oder bewusst übersprungen. Doppelt gesichert wird trotzdem nichts, denn vor
+ * Was erledigt ist, steht als Marke: alle Aufnahmen bis `bis` sind gesichert
+ * oder bewusst übersprungen. Die Marke ist ab Android 11 die Generation der
+ * letzten Änderung, nicht die Kennung: eine Aufnahme, die noch geschrieben
+ * wird (laufendes Video), fiel sonst hinter ein später fertiges Foto zurück
+ * und wurde nie gesichert. Doppelt gesichert wird trotzdem nichts, denn vor
  * jeder Aufnahme wird gegen den Tresor geprüft (Gerät, Kennung, SHA-256).
  *
  * Der Zustand liegt je Bucket in der kontogebundenen Ablage (AGENTS.md Punkt 50).
@@ -15,10 +18,10 @@ import { create } from 'zustand'
 
 import {
   medienAufnahmen,
-  medienHoechsteId,
   medienLesen,
   medienPapierkorb,
   medienPruefsumme,
+  medienStand,
   medienZugriff,
   type Aufnahme,
   type MedienZugriff,
@@ -35,8 +38,10 @@ export interface KameraStand {
   nurWlan: boolean
   /** Zufällige Kennung dieser Installation, je Tresor. */
   geraet: string
-  /** Alle Aufnahmen bis hier sind erledigt. */
-  bisId: number
+  /** Alle Aufnahmen bis zu dieser Marke sind erledigt. */
+  bis: number
+  /** Fassung des MediaStore, zu der `bis` gehört. */
+  fassung: string
   gesichert: number
   zuletzt?: number
 }
@@ -90,13 +95,15 @@ export async function kameraEinschalten(bucket: string): Promise<MedienZugriff> 
   const zugriff = await medienZugriff(true)
   if (zugriff.stand !== 'voll') return zugriff
   const alt = await lesen(bucket)
-  const bisId = alt?.an ? alt.bisId : await medienHoechsteId()
+  const jetzt = await medienStand()
+  const weiter = alt?.an && alt.fassung === jetzt.fassung
   await schreiben({
     bucket,
     an: true,
     nurWlan: alt?.nurWlan ?? false,
     geraet: alt?.geraet ?? crypto.randomUUID(),
-    bisId,
+    bis: weiter ? alt.bis : jetzt.marke,
+    fassung: jetzt.fassung,
     gesichert: alt?.gesichert ?? 0,
     zuletzt: alt?.zuletzt,
   })
@@ -121,7 +128,7 @@ export async function kameraNurWlan(bucket: string, nurWlan: boolean): Promise<v
 export async function kameraVorhandeneSichern(bucket: string): Promise<void> {
   const alt = await lesen(bucket)
   if (!alt?.an) return
-  await schreiben({ ...alt, bisId: 0 })
+  await schreiben({ ...alt, bis: 0 })
   void kameraAnstossen(bucket)
 }
 
@@ -192,9 +199,16 @@ async function sichern(bucket: string): Promise<void> {
   }
   useKameraSicherung.setState({ laeuft: true, warten: null })
   try {
+    // Ein neu aufgebauter MediaStore zählt von vorn; mit der alten Marke fände
+    // die Sicherung nie wieder etwas. Weiter ab dem, was es jetzt gibt, wie beim Einschalten.
+    const jetzt = await medienStand()
+    if (jetzt.fassung !== stand.fassung) {
+      stand = { ...stand, bis: jetzt.marke, fassung: jetzt.fassung }
+      await schreiben(stand)
+    }
     const bekannt = quellen(stand.geraet)
     for (;;) {
-      const aufnahmen = await medienAufnahmen(stand.bisId, JE_RUNDE)
+      const aufnahmen = await medienAufnahmen(stand.bis, JE_RUNDE)
       if (aufnahmen.length === 0) return
       for (const aufnahme of aufnahmen) {
         if (offenerBucket() !== bucket) return
@@ -202,10 +216,10 @@ async function sichern(bucket: string): Promise<void> {
         if (ergebnis === 'warten') return
         // Frisch lesen: Schalter und Zähler können sich während des Lesens geändert haben (Punkt 45).
         const frisch = await lesen(bucket)
-        if (!frisch?.an || frisch.geraet !== stand.geraet) return
+        if (!frisch?.an || frisch.geraet !== stand.geraet || frisch.fassung !== stand.fassung) return
         stand = {
           ...frisch,
-          bisId: Math.max(frisch.bisId, aufnahme.id),
+          bis: Math.max(frisch.bis, aufnahme.marke),
           gesichert: frisch.gesichert + (ergebnis === 'gesichert' ? 1 : 0),
           zuletzt: ergebnis === 'gesichert' ? Date.now() : frisch.zuletzt,
         }

@@ -27,7 +27,7 @@ import java.util.concurrent.Executors
 
 @InvokeArg
 class AufnahmenArgs {
-    var nachId: Long = 0
+    var nach: Long = 0
     var hoechstens: Int = 100
 }
 
@@ -129,10 +129,21 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
         return if (Build.VERSION.SDK_INT >= 29) MediaStore.setRequireOriginal(uri) else uri
     }
 
-    /** Aufnahmen aus DCIM mit größerer Kennung als `nachId`, aufsteigend. */
-    private fun suche(basis: Uri, art: String, nachId: Long, hoechstens: Int): List<JSObject> {
+    /**
+     * Woran eine Aufnahme als neu erkannt wird. Ab Android 11 die Generation der
+     * letzten Änderung: eine Aufnahme, die noch geschrieben wird (`IS_PENDING`,
+     * etwa ein laufendes Video), bekommt beim Fertigwerden eine neue, höhere
+     * Generation und fällt nicht hinter eine spätere zurück. Davor gibt es nur
+     * die Kennung.
+     */
+    private val markeSpalte =
+        if (Build.VERSION.SDK_INT >= 30) MediaStore.MediaColumns.GENERATION_MODIFIED else MediaStore.MediaColumns._ID
+
+    /** Aufnahmen aus DCIM mit größerer Marke als `nach`, aufsteigend. */
+    private fun suche(basis: Uri, art: String, nach: Long, hoechstens: Int): List<JSObject> {
         val spalten = mutableListOf(
             MediaStore.MediaColumns._ID,
+            markeSpalte,
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.MIME_TYPE,
             MediaStore.MediaColumns.SIZE,
@@ -147,17 +158,18 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
             @Suppress("DEPRECATION")
             "${MediaStore.MediaColumns.DATA} LIKE ?" to "%/DCIM/%"
         }
-        var auswahl = "${MediaStore.MediaColumns._ID} > ? AND $ort"
+        var auswahl = "$markeSpalte > ? AND $ort"
         if (Build.VERSION.SDK_INT >= 29) auswahl += " AND ${MediaStore.MediaColumns.IS_PENDING} = 0"
         val ergebnis = mutableListOf<JSObject>()
         activity.contentResolver.query(
             basis,
             spalten.toTypedArray(),
             auswahl,
-            arrayOf(nachId.toString(), ortWert),
-            "${MediaStore.MediaColumns._ID} ASC",
+            arrayOf(nach.toString(), ortWert),
+            "$markeSpalte ASC",
         )?.use { c ->
             val iId = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+            val iMarke = c.getColumnIndexOrThrow(markeSpalte)
             val iName = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
             val iTyp = c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
             val iGroesse = c.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
@@ -168,6 +180,7 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
                 val aufnahme = if (iAufnahme >= 0 && !c.isNull(iAufnahme)) c.getLong(iAufnahme) else c.getLong(iHinzu) * 1000
                 ergebnis.add(JSObject().apply {
                     put("id", c.getLong(iId))
+                    put("marke", c.getLong(iMarke))
                     put("art", art)
                     put("name", c.getString(iName) ?: "")
                     put("typ", c.getString(iTyp) ?: "")
@@ -195,10 +208,10 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
         val hoechstens = args.hoechstens.coerceIn(1, 500)
         arbeit.execute {
             try {
-                // Bilder und Videos teilen sich die Kennungen der Medientabelle.
-                val alle = (suche(basis("bild"), "bild", args.nachId, hoechstens) +
-                    suche(basis("video"), "video", args.nachId, hoechstens))
-                    .sortedBy { it.getLong("id") }
+                // Bilder und Videos teilen sich Kennungen und Generationen der Medientabelle.
+                val alle = (suche(basis("bild"), "bild", args.nach, hoechstens) +
+                    suche(basis("video"), "video", args.nach, hoechstens))
+                    .sortedBy { it.getLong("marke") }
                     .take(hoechstens)
                 val liste = JSArray()
                 for (eintrag in alle) liste.put(eintrag)
@@ -209,11 +222,22 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    /** Die größte Kennung, die es gerade gibt: ab hier zählt eine Aufnahme als neu. */
+    /**
+     * Die Marke, die es gerade gibt (ab hier zählt eine Aufnahme als neu), und
+     * die Fassung des MediaStore. Baut Android ihn neu auf, beginnen die
+     * Generationen von vorn, und eine alte Marke fände nie wieder etwas.
+     */
     @Command
-    fun hoechsteId(invoke: Invoke) {
+    fun medienStand(invoke: Invoke) {
         arbeit.execute {
             try {
+                if (Build.VERSION.SDK_INT >= 30) {
+                    invoke.resolve(JSObject().apply {
+                        put("marke", MediaStore.getGeneration(activity, MediaStore.VOLUME_EXTERNAL))
+                        put("fassung", "gen:" + MediaStore.getVersion(activity, MediaStore.VOLUME_EXTERNAL))
+                    })
+                    return@execute
+                }
                 var hoechste = 0L
                 activity.contentResolver.query(
                     MediaStore.Files.getContentUri("external"),
@@ -222,7 +246,10 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
                     null,
                     "${MediaStore.MediaColumns._ID} DESC",
                 )?.use { c -> if (c.moveToFirst()) hoechste = c.getLong(0) }
-                invoke.resolve(JSObject().apply { put("id", hoechste) })
+                invoke.resolve(JSObject().apply {
+                    put("marke", hoechste)
+                    put("fassung", "id")
+                })
             } catch (e: Exception) {
                 invoke.reject(e.message ?: "Stand der Aufnahmen unbekannt")
             }

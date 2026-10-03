@@ -6728,7 +6728,9 @@
       "updateCheckError": "Could not check for updates.",
       "updateUpToDate": "Maunting Smart System is up to date.",
       "checkingUpdates": "Checking …",
-      "checkForUpdates": "Check for updates"
+      "checkForUpdates": "Check for updates",
+      "autostartAndroid": "Run on phone startup",
+      "systemUpdates": "System updates"
     },
     "schliessen": {
       "titel": "Close MSS?",

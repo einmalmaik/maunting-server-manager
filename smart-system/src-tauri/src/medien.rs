@@ -61,20 +61,20 @@ pub async fn medien_zugriff(app: AppHandle, fenster: WebviewWindow, anfragen: bo
 }
 
 #[tauri::command(async)]
-pub async fn medien_hoechste_id(app: AppHandle, fenster: WebviewWindow) -> Result<Value, String> {
+pub async fn medien_stand(app: AppHandle, fenster: WebviewWindow) -> Result<Value, String> {
     nur_hauptfenster(&fenster)?;
-    ruf(&app, "hoechsteId", json!({}))
+    ruf(&app, "medienStand", json!({}))
 }
 
 #[tauri::command(async)]
 pub async fn medien_aufnahmen(
     app: AppHandle,
     fenster: WebviewWindow,
-    nach_id: i64,
+    nach: i64,
     hoechstens: u32,
 ) -> Result<Value, String> {
     nur_hauptfenster(&fenster)?;
-    ruf(&app, "aufnahmen", json!({ "nachId": nach_id.max(0), "hoechstens": hoechstens }))
+    ruf(&app, "aufnahmen", json!({ "nach": nach.max(0), "hoechstens": hoechstens }))
 }
 
 #[tauri::command(async)]
