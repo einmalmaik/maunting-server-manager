@@ -6,7 +6,7 @@
  * Backend. Ein frisch erzeugter API-Key oder Webhook-Secret wird genau einmal
  * angezeigt und danach verworfen; es gibt keinen Lesepfad dafuer.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import {
@@ -322,6 +322,21 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
   )
 }
 
+function SandboxSchalter({ checked, onCheckedChange }: { checked: boolean; onCheckedChange: (v: boolean) => void }) {
+  const { t } = useTranslation()
+  const name = useId()
+  const hinweis = useId()
+  return (
+    <div className="flex items-center justify-between rounded-xl border border-outline-variant/40 bg-surface-container-low/40 p-4 md:col-span-2">
+      <div className="space-y-0.5">
+        <span id={name} className="block text-sm font-medium text-on-surface">{t('hoster.isSandbox')}</span>
+        <p id={hinweis} className="text-xs text-on-surface-variant">{t('hoster.isSandboxHint')}</p>
+      </div>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} aria-labelledby={name} aria-describedby={hinweis} />
+    </div>
+  )
+}
+
 function Fact({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div>
@@ -442,13 +457,7 @@ function IntegrationForm({
           <NumberStepper value={graceDays} onValueChange={setGraceDays} min={0} max={365} step={1} />
           <p className="text-xs text-on-surface-variant">{t('hoster.graceDaysHint')}</p>
         </label>
-        <div className="flex items-center justify-between rounded-xl border border-outline-variant/40 bg-surface-container-low/40 p-4 md:col-span-2">
-          <div className="space-y-0.5">
-            <span className="block text-sm font-medium text-on-surface">{t('hoster.isSandbox')}</span>
-            <p className="text-xs text-on-surface-variant">{t('hoster.isSandboxHint')}</p>
-          </div>
-          <Switch checked={isSandbox} onCheckedChange={setIsSandbox} />
-        </div>
+        <SandboxSchalter checked={isSandbox} onCheckedChange={setIsSandbox} />
       </fieldset>
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="ghost" disabled={saving} onClick={onCancel}>{t('common.cancel')}</Button>
@@ -537,13 +546,7 @@ function IntegrationEditForm({
         <div className="md:col-span-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
           <p className="text-xs text-on-surface-variant">{t('hoster.serviceUserHint')}</p>
         </div>
-        <div className="flex items-center justify-between rounded-xl border border-outline-variant/40 bg-surface-container-low/40 p-4 md:col-span-2">
-          <div className="space-y-0.5">
-            <span className="block text-sm font-medium text-on-surface">{t('hoster.isSandbox')}</span>
-            <p className="text-xs text-on-surface-variant">{t('hoster.isSandboxHint')}</p>
-          </div>
-          <Switch checked={isSandbox} onCheckedChange={setIsSandbox} />
-        </div>
+        <SandboxSchalter checked={isSandbox} onCheckedChange={setIsSandbox} />
         <label className="flex min-h-10 items-center justify-between gap-4 text-sm text-on-surface md:col-span-2">
           <span>{t('hoster.enabled')}</span>
           <Switch checked={enabled} onCheckedChange={setEnabled} />

@@ -198,12 +198,32 @@ function captureCsrfFromResponse(res: Response): void {
   }
 }
 
+/**
+ * Ein Eintrag aus der Fehlerliste von FastAPI (`[{type, loc, msg, ctx}]`) als
+ * Satz in der App-Sprache. `msg` stammt von Pydantic, ist immer Englisch und
+ * nennt Interna („special-use or reserved name“); bis 03.10.2026 stand er so
+ * in der deutschen Registrierung. Er wird nie gezeigt.
+ */
+function validierungsfehler(eintrag: unknown): string {
+  if (typeof eintrag === 'string') return eintrag
+  const { type, loc, msg, ctx } = (eintrag ?? {}) as { type?: string; loc?: unknown[]; msg?: string; ctx?: Record<string, unknown> }
+  const name = Array.isArray(loc) ? [...loc].reverse().find((teil) => typeof teil === 'string' && teil !== 'body') : null
+  const feld = i18n.t(`errors.validation.fields.${name}`, { defaultValue: i18n.t('errors.validation.fields.unbekannt') })
+  const art = typeof msg === 'string' && /e-?mail/i.test(msg) ? 'email' : type
+  return i18n.t(`errors.validation.${art}`, {
+    feld,
+    min: ctx?.min_length ?? ctx?.ge ?? '',
+    max: ctx?.max_length ?? ctx?.le ?? '',
+    defaultValue: i18n.t('errors.validation.ungueltig', { feld }),
+  })
+}
+
 function extractErrorMessage(detail: unknown): string | null {
   if (detail == null) return null
   if (typeof detail === 'string') return detail
   if (Array.isArray(detail)) {
-    const parts = detail.map((d: any) => d.msg || String(d)).filter(Boolean)
-    return parts.length ? parts.join(', ') : null
+    const parts = detail.map(validierungsfehler).filter(Boolean)
+    return parts.length ? [...new Set(parts)].join(' ') : null
   }
   if (typeof detail === 'object') {
     const obj = detail as Record<string, unknown>

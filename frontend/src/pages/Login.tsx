@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useId } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
@@ -19,6 +19,7 @@ import { sicheresZiel } from '@/lib/sicheresZiel'
 import { passkeyBestaetigen, type PasskeyBestaetigungsOptionen } from '@/services/passkeyService'
 export function Login() {
   const { t } = useTranslation()
+  const feld = useId()
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -312,17 +313,18 @@ export function Login() {
 
             <form onSubmit={handleVerify} className="space-y-4 max-w-xs mx-auto">
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                <label htmlFor={`${feld}-code`} className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t('auth.verificationCode')}
                 </label>
-                <input
+                <Input
+                  id={`${feld}-code`}
                   type="text"
                   inputMode="numeric"
                   pattern="\d{6}"
                   maxLength={6}
                   value={verifyCode}
                   onChange={(e) => setVerifyCode(e.target.value)}
-                  className="msm-input text-center text-2xl tracking-[0.5em] font-mono"
+                  className="text-center text-2xl tracking-[0.5em] font-mono"
                   placeholder="000000"
                   required
                 />
@@ -386,14 +388,14 @@ export function Login() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                <label htmlFor={`${feld}-name`} className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t('auth.username')}
                 </label>
-                <input
+                <Input
+                  id={`${feld}-name`}
                   type="text"
                   value={form.username}
                   onChange={(e) => setForm({ ...form, username: e.target.value })}
-                  className="msm-input"
                   placeholder="admin"
                   required
                   disabled={requires2FA}
@@ -424,12 +426,13 @@ export function Login() {
                   )}
                   {weg !== 'passkey' && (
                   <div>
-                    <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                    <label htmlFor={`${feld}-otp`} className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                       {weg === 'backup'
                         ? t('auth.backupCode')
                         : t('auth.otpCode')}
                     </label>
                     <Input
+                      id={`${feld}-otp`}
                       type="text"
                       value={form.otp}
                       onChange={(e) => setForm({ ...form, otp: e.target.value })}
@@ -553,6 +556,7 @@ function LoginShell({ children }: { children: React.ReactNode }) {
 
 function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: string; onCancel: () => void }) {
   const { t } = useTranslation()
+  const codeFeld = useId()
   const [otp, setOtp] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -733,10 +737,11 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
       {methoden !== null && (weg === 'totp' || weg === 'backup') && (
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+          <label htmlFor={codeFeld} className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
             {weg === 'backup' ? t('auth.backupCode') : t('auth.otpCode')}
           </label>
           <Input
+            id={codeFeld}
             type="text"
             inputMode={weg === 'backup' ? 'text' : 'numeric'}
             maxLength={weg === 'backup' ? 12 : 6}

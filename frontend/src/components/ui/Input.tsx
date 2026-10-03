@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useId } from 'react'
 
 interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'prefix'> {
   label?: string
@@ -8,10 +8,14 @@ interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, '
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ className = '', label, error, prefix, id, ...props }, ref) => {
+    // Ohne `id` vom Aufrufer zeigte das Label auf nichts, und der Name des
+    // Felds kam aus dem Platzhalter („admin“) statt aus der Überschrift.
+    const eigeneId = useId()
+    const feldId = id ?? eigeneId
     return (
       <div className="flex flex-col gap-1.5 w-full">
         {label && (
-          <label htmlFor={id} className="text-sm font-medium text-foreground">
+          <label htmlFor={feldId} className="text-sm font-medium text-foreground">
             {label}
           </label>
         )}
@@ -28,7 +32,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
               {prefix}
             </span>
             <input
-              id={id}
+              id={feldId}
               ref={ref}
               className={`
                 flex-1 bg-transparent px-3 py-2 text-sm text-on-surface placeholder-on-surface-variant outline-none min-w-0
@@ -40,7 +44,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           </div>
         ) : (
           <input
-            id={id}
+            id={feldId}
             ref={ref}
             className={`
               msm-input h-10

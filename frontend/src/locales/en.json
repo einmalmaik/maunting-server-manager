@@ -4,7 +4,12 @@
       "label": "I am human",
       "verifying": "Security check in progress …",
       "verified": "Verified",
-      "error": "Security check failed"
+      "error": "Security check failed",
+      "expired": "Check expired, please confirm again",
+      "loading": "Loading …",
+      "reload": "Reload",
+      "verificationRequired": "Please complete the security check",
+      "waitAlert": "Security check running, one moment please"
     }
   },
   "nav": {
@@ -3898,7 +3903,24 @@
     "hoster_internal_error": "The hoster ran into an internal error. Try again later.",
     "vault_speicher_voll": "Your vault storage is full.",
     "vault_platte_voll": "The server has no free space left.",
-    "vault_zu_viele_dateien": "Your vault has reached the maximum number of files."
+    "vault_zu_viele_dateien": "Your vault has reached the maximum number of files.",
+    "validation": {
+      "fields": {
+        "unbekannt": "An input",
+        "email": "Email address",
+        "username": "Username",
+        "password": "Password",
+        "name": "Name",
+        "code": "Code",
+        "otp_code": "Code"
+      },
+      "missing": "{{feld}} is missing.",
+      "string_too_short": "{{feld}} is too short, at least {{min}} characters.",
+      "string_too_long": "{{feld}} is too long, at most {{max}} characters.",
+      "string_pattern_mismatch": "{{feld}} has an invalid format.",
+      "email": "This email address is not accepted. Please enter a real address.",
+      "ungueltig": "{{feld}} is invalid."
+    }
   },
   "notifications": {
     "activeLabel": "Email notifications: active",
@@ -7743,7 +7765,8 @@
       }
     },
     "send": "Send",
-    "chatMuted": "Muted"
+    "chatMuted": "Muted",
+    "searchInMessages": "Search messages for “{{query}}”"
   },
   "databaseManager": {
     "subtitle": "Manage and edit this server’s PostgreSQL databases.",

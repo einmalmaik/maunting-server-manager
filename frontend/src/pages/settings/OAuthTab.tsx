@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useId, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   KeyRound, Plus, Pencil, Trash2, FlaskConical, Save, Copy, Check, ShieldCheck, X,
@@ -403,13 +403,15 @@ function SwitchRow({
   disabled: boolean
   onChange: (v: boolean) => void
 }) {
+  const name = useId()
+  const hinweis = useId()
   return (
     <div className="flex items-start justify-between gap-4 py-2">
       <div className="flex-1 min-w-0">
-        <p className="font-label-md text-sm text-on-surface font-medium">{label}</p>
-        <p className="font-body-md text-xs text-on-surface-variant mt-0.5">{hint}</p>
+        <p id={name} className="font-label-md text-sm text-on-surface font-medium">{label}</p>
+        <p id={hinweis} className="font-body-md text-xs text-on-surface-variant mt-0.5">{hint}</p>
       </div>
-      <Switch checked={checked} disabled={disabled} onCheckedChange={onChange} />
+      <Switch checked={checked} disabled={disabled} onCheckedChange={onChange} aria-labelledby={name} aria-describedby={hinweis} />
     </div>
   )
 }

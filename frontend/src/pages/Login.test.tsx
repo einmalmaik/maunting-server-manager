@@ -94,6 +94,13 @@ describe('Login — Ziel nach der Anmeldung', () => {
       expect(screen.getByTestId('dashboard')).toBeInTheDocument()
     })
   })
+
+  it('nennt die Felder mit ihrer Überschrift, nicht mit dem Platzhalter', async () => {
+    // Bis 03.10.2026 hießen sie für Screenreader „admin“ und gar nichts.
+    renderLogin()
+    expect(await screen.findByRole('textbox', { name: 'Benutzername' })).toHaveAttribute('placeholder', 'admin')
+    expect(screen.getByLabelText('Passwort')).toHaveAttribute('type', 'password')
+  })
 })
 
 describe('Login — Sicherheitsabfrage sperrt auch den Social Login', () => {

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
@@ -10,13 +10,14 @@ import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { CaptchaWidget, captchaSperrt, type CaptchaStatus } from '@/components/ui/CaptchaWidget'
 import { Shield, ArrowRight, Check, Mail } from 'lucide-react'
-import { Button } from '@/Singra/UI'
+import { Button, Input } from '@/Singra/UI'
 
 import { Spinner } from '@/components/ui/Spinner'
 import { sicheresZiel } from '@/lib/sicheresZiel'
 import { benutzernameFehler } from '@/lib/benutzername'
 export function Register() {
   const { t } = useTranslation()
+  const feld = useId()
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams] = useSearchParams()
@@ -166,17 +167,18 @@ export function Register() {
 
               <form onSubmit={handleVerify} className="space-y-4 max-w-xs mx-auto">
                 <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                  <label htmlFor={`${feld}-code`} className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                     {t('auth.verificationCode')}
                   </label>
-                  <input
+                  <Input
+                    id={`${feld}-code`}
                     type="text"
                     inputMode="numeric"
                     pattern="\d{6}"
                     maxLength={6}
                     value={verifyCode}
                     onChange={(e) => setVerifyCode(e.target.value)}
-                    className="msm-input text-center text-2xl tracking-[0.5em] font-mono"
+                    className="text-center text-2xl tracking-[0.5em] font-mono"
                     placeholder="000000"
                     required
                   />
@@ -223,14 +225,14 @@ export function Register() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+              <label htmlFor={`${feld}-name`} className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                 {t('auth.username')}
               </label>
-              <input
+              <Input
+                id={`${feld}-name`}
                 type="text"
                 value={form.username}
                 onChange={(e) => setForm({ ...form, username: e.target.value })}
-                className="msm-input"
                 placeholder="admin"
                 required
                 minLength={3}
@@ -239,14 +241,14 @@ export function Register() {
             </div>
 
             <div>
-              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+              <label htmlFor={`${feld}-email`} className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                 {t('auth.email')}
               </label>
-              <input
+              <Input
+                id={`${feld}-email`}
                 type="email"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
-                className="msm-input"
                 placeholder="admin@example.com"
                 required
               />

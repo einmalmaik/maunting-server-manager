@@ -328,6 +328,31 @@ describe('api client', () => {
       await expect(api('/test')).rejects.toThrow('Server error')
     })
 
+    it('zeigt Validierungsfehler des Backends übersetzt, nie den englischen Pydantic-Text', async () => {
+      // So kam es bis 03.10.2026 in der deutschen Registrierung an.
+      const roh =
+        'value is not a valid email address: The part after the @-sign is a special-use or reserved name that cannot be used with email.'
+      fetchSpy.mockReturnValueOnce(
+        mockResponse(422, {
+          detail: [
+            { type: 'value_error', loc: ['body', 'email'], msg: roh, ctx: { reason: 'x' } },
+            { type: 'string_too_short', loc: ['body', 'username'], msg: 'String should have at least 3 characters', ctx: { min_length: 3 } },
+            { type: 'missing', loc: ['body', 'irgendwas'], msg: 'Field required' },
+          ],
+        }),
+      )
+
+      const fehler = await api('/auth/register', { method: 'POST', body: '{}' })
+        .then(() => null)
+        .catch((e: SanitizedApiError) => e)
+
+      expect(fehler?.message).toBe(
+        'This email address is not accepted. Please enter a real address. ' +
+          'Username is too short, at least 3 characters. An input is missing.',
+      )
+      expect(fehler?.message).not.toMatch(/value is not|special-use|String should|Field required/)
+    })
+
     it('should throw generic error when body has no detail', async () => {
       fetchSpy.mockReturnValueOnce({
         ok: false,

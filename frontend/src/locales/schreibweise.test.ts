@@ -59,6 +59,14 @@ describe('Schreibweise der Oberflächentexte', () => {
     expect(verstoesse).toEqual([])
   })
 
+  it('de: ein „ schließt mit “, nie mit dem geraden Zeichen', () => {
+    // Bis 03.10.2026 standen 61 Texte wie „{{name}}" in der Oberfläche.
+    const verstoesse = [...flach(de)]
+      .filter(([, text]) => /„[^“"]*"/.test(text))
+      .map(([pfad]) => pfad)
+    expect(verstoesse).toEqual([])
+  })
+
   it('de: „z. B." mit Leerzeichen, wie im Duden', () => {
     const verstoesse = [...flach(de)]
       .filter(([, text]) => /\bz\.B\./.test(text))

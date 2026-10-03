@@ -19,7 +19,7 @@ import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem, KalenderVorkommen } from '@/pages/Calendar'
 import { LEERES_DOKUMENT, ausbreiten, serieLesen } from '@/services/kalenderSerie'
 import { useAuthStore } from '@/stores/authStore'
-import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { angemeldetesKonto, beiKontowechsel } from '@/lib/angemeldetesKonto'
 import { STORAGE_KEYS, getStorageItem, leereOfflineAblage, setStorageItem } from '@/lib/offlineAblage'
 import {
   NOTE_CIPHERTEXT_PREFIX,
@@ -1628,6 +1628,12 @@ export function startLiveSync(): () => void {
   if (abortLiveSync) {
     return abortLiveSync
   }
+  // Ohne Konto gibt es keinen Strom: auf /login und /register lief sonst
+  // endlos `/events/live → 401` samt Refresh-Versuch und Ersatz-Polling.
+  // Nach dem Anmelden startet `initOfflineSync` ihn über `beiKontowechsel`.
+  if (angemeldetesKonto() === null) {
+    return () => {}
+  }
 
   let isCancelled = false
   let stableTimer: ReturnType<typeof setTimeout> | null = null
@@ -1655,7 +1661,8 @@ export function startLiveSync(): () => void {
       clearInterval(fallbackPollingTimer)
       fallbackPollingTimer = null
     }
-    abortLiveSync = null
+    // Ein abgelöster Lauf räumt nur sich selbst ab, nie seinen Nachfolger.
+    if (abortLiveSync === stop) abortLiveSync = null
   }
 
   abortLiveSync = stop
@@ -1773,8 +1780,10 @@ export function startLiveSync(): () => void {
           }
         }
       }
-    } catch {
-      // Stream error or disconnection
+    } catch (err) {
+      // Ein 401 kommt erst, nachdem `apiStream` schon erneuern wollte: die
+      // Sitzung ist weg, und weitere Versuche liefen nur gegen dieselbe Wand.
+      if (!isCancelled && (err as { status?: number } | null)?.status === 401) stop()
     } finally {
       if (stableTimer) {
         clearTimeout(stableTimer)
@@ -1996,7 +2005,11 @@ export function initOfflineSync(): () => void {
   }
 
   isInitialized = true
-  const stopStream = startLiveSync()
+  startLiveSync()
+  const kontowechselAbmelden = beiKontowechsel((konto) => {
+    abortLiveSync?.()
+    if (konto !== null) startLiveSync()
+  })
 
   const handleOnline = () => {
     void replayOutbox()
@@ -2018,7 +2031,8 @@ export function initOfflineSync(): () => void {
   return () => {
     window.removeEventListener('online', handleOnline)
     document.removeEventListener('visibilitychange', handleVisibilityChange)
-    stopStream()
+    kontowechselAbmelden()
+    abortLiveSync?.()
     isInitialized = false
   }
 }

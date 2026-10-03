@@ -141,6 +141,29 @@ describe('CaptchaWidget', () => {
     expect(tokens.at(-1)).toBe('')
   })
 
+  it.each([
+    ['de', 'Ich bin ein Mensch'],
+    ['en', 'I am human'],
+  ])('gibt ALTCHA die Texte in der App-Sprache (%s)', async (sprache, label) => {
+    // ALTCHA 3 liest seine Texte aus `$altcha.i18n` und kennt nur Englisch;
+    // bis 03.10.2026 stand auch auf Deutsch „I'm not a robot“.
+    const texte = new Map<string, Record<string, string>>([['en', { label: "I'm not a robot", footer: 'x' }]])
+    ;(globalThis as any).$altcha = { i18n: { get: (l: string) => texte.get(l), set: (l: string, w: Record<string, string>) => texte.set(l, w) } }
+    await i18n.changeLanguage(sprache)
+    vi.mocked(client.api).mockImplementation(async (pfad: string) =>
+      pfad === '/auth/captcha-challenge' ? { challenge: 'c' } : { enabled: true, provider: 'altcha', site_key: '' },
+    )
+
+    const { container } = render(<CaptchaWidget onVerify={vi.fn()} />)
+
+    await waitFor(() => expect(container.querySelector('altcha-widget')).not.toBeNull())
+    const widget = container.querySelector('altcha-widget')!
+    expect(JSON.parse(widget.getAttribute('configuration')!).language).toBe(sprache)
+    expect(texte.get(sprache)).toMatchObject({ label, footer: 'x' })
+    expect(Object.values(texte.get(sprache)!).join(' ')).not.toMatch(/robot|captcha\.altcha/)
+    delete (globalThis as any).$altcha
+  })
+
   it('rendert das lokale ALTCHA-Widget und verarbeitet Verifikation', async () => {
     vi.mocked(client.api).mockImplementation(async (pfad: string) => {
       if (pfad === '/auth/captcha-challenge') {

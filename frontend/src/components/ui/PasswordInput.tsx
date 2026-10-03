@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useId, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Eye, EyeOff } from 'lucide-react'
 
@@ -11,6 +11,8 @@ export const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputPro
   ({ className = '', label, error, ...props }, ref) => {
     const { t } = useTranslation()
     const [showPassword, setShowPassword] = useState(false)
+    const eigeneId = useId()
+    const feldId = props.id ?? eigeneId
     const timerRef = useRef<NodeJS.Timeout | null>(null)
 
     const handleToggle = () => {
@@ -47,7 +49,7 @@ export const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputPro
     return (
       <div className="flex flex-col gap-1.5 w-full">
         {label && (
-          <label htmlFor={props.id} className="text-sm font-medium text-foreground text-on-surface-variant">
+          <label htmlFor={feldId} className="text-sm font-medium text-foreground text-on-surface-variant">
             {label}
           </label>
         )}
@@ -69,6 +71,7 @@ export const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputPro
               ${className}
             `}
             {...props}
+            id={feldId}
           />
           <button
             type="button"

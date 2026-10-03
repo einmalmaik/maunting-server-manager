@@ -402,14 +402,14 @@ export function PopupTab() {
             {/* Aktiv-Schalter */}
             <div className="flex items-center justify-between pt-2">
               <div>
-                <span className="font-label-lg text-label-lg text-on-surface font-medium block">
+                <span id="popup-aktiv-name" className="font-label-lg text-label-lg text-on-surface font-medium block">
                   {t('popups.fieldIsActive')}
                 </span>
-                <span className="text-body-sm text-on-surface-variant block">
+                <span id="popup-aktiv-hinweis" className="text-body-sm text-on-surface-variant block">
                   {t('popups.fieldIsActiveHint')}
                 </span>
               </div>
-              <Switch checked={isActive} onCheckedChange={setIsActive} />
+              <Switch checked={isActive} onCheckedChange={setIsActive} aria-labelledby="popup-aktiv-name" aria-describedby="popup-aktiv-hinweis" />
             </div>
           </div>
 

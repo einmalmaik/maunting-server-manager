@@ -4490,7 +4490,7 @@ function MessengerSeite() {
                       className="w-full min-h-11 px-2.5 flex items-center gap-2.5 rounded-xl text-left text-xs text-primary hover:bg-surface-container-high/60 transition-colors"
                     >
                       <Search className="w-4 h-4 shrink-0" />
-                      <span className="truncate">„{searchQuery.trim()}" in Nachrichten</span>
+                      <span className="truncate">{t('messenger.searchInMessages', { query: searchQuery.trim() })}</span>
                     </button>
                   )}
                 </div>

@@ -902,6 +902,49 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
 
       stop()
     })
+
+    it('verbindet ohne angemeldetes Konto nicht und fragt auch nicht im Ersatz-Takt', async () => {
+      setzeAngemeldetesKonto(null)
+      vi.mocked(client.apiStream).mockRejectedValue(Object.assign(new Error('nicht angemeldet'), { status: 401 }))
+
+      const stop = startLiveSync()
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(client.apiStream).not.toHaveBeenCalled()
+      expect(client.api).not.toHaveBeenCalled()
+      stop()
+    })
+
+    it('hört nach einem 401 auf, statt im Rückzug weiter anzuklopfen', async () => {
+      vi.mocked(client.apiStream).mockRejectedValue(Object.assign(new Error('Sitzung abgelaufen'), { status: 401 }))
+
+      const stop = startLiveSync()
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(client.apiStream).toHaveBeenCalledTimes(1)
+      stop()
+    })
+
+    it('startet mit dem Anmelden und hält beim Abmelden an', async () => {
+      setzeAngemeldetesKonto(null)
+      vi.mocked(client.apiStream).mockRejectedValue(new Error('Connection dropped'))
+      vi.mocked(client.api).mockResolvedValue([] as any)
+      const cleanup = initOfflineSync()
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(client.apiStream).not.toHaveBeenCalled()
+
+      setzeAngemeldetesKonto(1)
+      await vi.advanceTimersByTimeAsync(10)
+      expect(client.apiStream).toHaveBeenCalledTimes(1)
+
+      setzeAngemeldetesKonto(null)
+      vi.mocked(client.apiStream).mockClear()
+      vi.mocked(client.api).mockClear()
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(client.apiStream).not.toHaveBeenCalled()
+      expect(client.api).not.toHaveBeenCalled()
+      cleanup()
+    })
   })
 
   describe('R7. Automatic Multi-Device E2EE Key Synchronization & Re-decryption', () => {

@@ -14,11 +14,23 @@
  */
 
 let konto: number | null = null
+const beobachter = new Set<(konto: number | null) => void>()
 
 export function setzeAngemeldetesKonto(id: number | null): void {
-  konto = typeof id === 'number' && Number.isFinite(id) ? id : null
+  const neu = typeof id === 'number' && Number.isFinite(id) ? id : null
+  if (neu === konto) return
+  konto = neu
+  for (const melden of beobachter) melden(neu)
 }
 
 export function angemeldetesKonto(): number | null {
   return konto
+}
+
+/** Meldet jeden Wechsel (Anmelden, Abmelden, anderes Konto). Gibt das Abmelden zurück. */
+export function beiKontowechsel(melden: (konto: number | null) => void): () => void {
+  beobachter.add(melden)
+  return () => {
+    beobachter.delete(melden)
+  }
 }

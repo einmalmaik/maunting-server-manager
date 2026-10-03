@@ -141,30 +141,38 @@ export function CaptchaWidget({ onVerify, onStatusChange, resetKey }: CaptchaWid
         .then(([_, challengeData]) => {
           if (!active || !containerRef.current) return
           containerRef.current.innerHTML = ''
+          const lang = (i18n.language || 'de').startsWith('de') ? 'de' : 'en'
+          // ALTCHA 3 kennt kein `strings`-Attribut mehr; die Texte stehen je
+          // Sprache in `$altcha.i18n`, und das Hauptpaket bringt nur Englisch
+          // mit. Ohne diesen Eintrag stand auch in der deutschen Oberfläche
+          // „I'm not a robot“ (bis 03.10.2026).
+          const altchaTexte = (globalThis as { $altcha?: { i18n?: { get: (l: string) => Record<string, string> | undefined; set: (l: string, w: Record<string, string>) => void } } }).$altcha?.i18n
+          altchaTexte?.set(lang, {
+            ...(altchaTexte.get('en') ?? {}),
+            label: t('captcha.altcha.label'),
+            verifying: t('captcha.altcha.verifying'),
+            verified: t('captcha.altcha.verified'),
+            error: t('captcha.altcha.error'),
+            expired: t('captcha.altcha.expired'),
+            loading: t('captcha.altcha.loading'),
+            reload: t('captcha.altcha.reload'),
+            verificationRequired: t('captcha.altcha.verificationRequired'),
+            waitAlert: t('captcha.altcha.waitAlert'),
+          })
           const widget = document.createElement('altcha-widget')
           widget.setAttribute('challenge', JSON.stringify(challengeData))
           widget.setAttribute('auto', 'onload')
-          widget.setAttribute('configuration', JSON.stringify({ hideFooter: true, hideLogo: true }))
+          widget.setAttribute('configuration', JSON.stringify({ hideFooter: true, hideLogo: true, language: lang }))
           widget.setAttribute('hidefooter', 'true')
           widget.setAttribute('hidelogo', 'true')
           widget.style.setProperty('--altcha-border-radius', '0.75rem')
           widget.style.setProperty('--altcha-max-width', '100%')
           if (typeof (widget as any).configure === 'function') {
-            ;(widget as any).configure({ hideFooter: true, hideLogo: true })
+            ;(widget as any).configure({ hideFooter: true, hideLogo: true, language: lang })
           }
-          const lang = (i18n.language || 'de').startsWith('de') ? 'de' : 'en'
           widget.setAttribute('language', lang)
           const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
           widget.setAttribute('theme', isDark ? 'dark' : 'auto')
-          widget.setAttribute(
-            'strings',
-            JSON.stringify({
-              label: t('captcha.altcha.label', 'Ich bin ein Mensch'),
-              verifying: t('captcha.altcha.verifying', 'Sicherheitsprüfung läuft …'),
-              verified: t('captcha.altcha.verified', 'Verifiziert'),
-              error: t('captcha.altcha.error', 'Sicherheitsprüfung fehlgeschlagen'),
-            }),
-          )
 
           const handleStateChange = (ev: Event) => {
             const customEv = ev as CustomEvent
