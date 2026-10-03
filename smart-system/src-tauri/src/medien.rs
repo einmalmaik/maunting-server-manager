@@ -194,6 +194,7 @@ pub async fn medien_sicherung_aendern(
     app: AppHandle,
     fenster: WebviewWindow,
     nur_wlan: Option<bool>,
+    screenshots: Option<bool>,
     vorhandene: bool,
     bekannt: Vec<String>,
 ) -> Result<Value, String> {
@@ -202,6 +203,9 @@ pub async fn medien_sicherung_aendern(
     let mut daten = json!({ "vorhandene": vorhandene, "bekannt": bekannt });
     if let Some(w) = nur_wlan {
         daten["nurWlan"] = json!(w);
+    }
+    if let Some(s) = screenshots {
+        daten["screenshots"] = json!(s);
     }
     ruf(&app, "aendern", daten)
 }

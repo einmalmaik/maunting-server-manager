@@ -33,6 +33,7 @@ vi.mock('./kameraSicherung', async () => {
     kameraEinschalten: vi.fn(),
     kameraAusschalten: vi.fn(),
     kameraNurWlan: vi.fn(),
+    kameraScreenshots: vi.fn(async () => {}),
     kameraVorhandeneSichern: vi.fn(),
     freigebbar: vi.fn(),
     speicherFreigeben: vi.fn(async () => true),
@@ -40,7 +41,17 @@ vi.mock('./kameraSicherung', async () => {
 })
 
 const BUCKET = 'k'.repeat(64)
-const STAND: KameraStand = { eingerichtet: true, konto: 1, bucket: BUCKET, geraet: 'g', nurWlan: false, gesichert: 0, zuletzt: 0, offen: 0 }
+const STAND: KameraStand = {
+  eingerichtet: true,
+  konto: 1,
+  bucket: BUCKET,
+  geraet: 'g',
+  nurWlan: false,
+  screenshots: false,
+  gesichert: 0,
+  zuletzt: 0,
+  offen: 0,
+}
 // Zusammengesetzt, damit im öffentlichen Repo kein Passwort-Literal steht.
 const PASSWORT = 'Konto-' + 'Passwort'
 
@@ -147,6 +158,15 @@ describe('Eingeschaltet', () => {
     fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.vault.kamera.zugriffErteilen') }))
     await waitFor(() => expect(tauri.medienZugriff).toHaveBeenLastCalledWith(true))
     await waitFor(() => expect(kamera.kameraStandLaden).toHaveBeenCalledTimes(2))
+  })
+
+  it('schaltet Screenshots mit eigenem Schalter dazu, standardmäßig aus', async () => {
+    kamera.useKameraSicherung.setState({ stand: STAND })
+    zeigen()
+    const knopf = screen.getByRole('switch', { name: i18n.t('mss.vault.kamera.screenshots') })
+    expect(knopf).not.toBeChecked()
+    fireEvent.click(knopf)
+    await waitFor(() => expect(kamera.kameraScreenshots).toHaveBeenCalledWith(true))
   })
 
   it('gibt Speicher erst nach der Rückfrage frei, mit Zahl und Größe', async () => {

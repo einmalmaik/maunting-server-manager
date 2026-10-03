@@ -73,7 +73,7 @@ async function rsaPaar() {
 }
 
 function eingerichtet(mehr: Partial<Extract<KameraStand, { eingerichtet: true }>> = {}): KameraStand {
-  return { eingerichtet: true, konto: 1, bucket: BUCKET, geraet: GERAET, nurWlan: false, gesichert: 0, zuletzt: 0, offen: 0, ...mehr }
+  return { eingerichtet: true, konto: 1, bucket: BUCKET, geraet: GERAET, nurWlan: false, screenshots: false, gesichert: 0, zuletzt: 0, offen: 0, ...mehr }
 }
 
 beforeEach(async () => {

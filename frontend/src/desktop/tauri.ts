@@ -527,6 +527,8 @@ export type KameraStand =
       bucket: string
       geraet: string
       nurWlan: boolean
+      /** Auch Bildschirmfotos. */
+      screenshots: boolean
       gesichert: number
       /** Zeitpunkt der letzten gesicherten Aufnahme (ms), 0 ohne. */
       zuletzt: number
@@ -559,12 +561,19 @@ export async function kameraStand(): Promise<KameraStand> {
 }
 
 /**
+ * `screenshots`: auch Bildschirmfotos sichern (ab jetzt; ältere über `vorhandene`).
  * `vorhandene`: auch sichern, was vor dem Einschalten aufgenommen wurde.
  * `bekannt`: was schon im Tresor liegt (`medienId:sha256`), geht nicht noch einmal hoch.
  */
-export async function kameraAendern(aenderung: { nurWlan?: boolean; vorhandene?: boolean; bekannt?: string[] }): Promise<KameraStand> {
+export async function kameraAendern(aenderung: {
+  nurWlan?: boolean
+  screenshots?: boolean
+  vorhandene?: boolean
+  bekannt?: string[]
+}): Promise<KameraStand> {
   return invoke<KameraStand>('medien_sicherung_aendern', {
     nurWlan: aenderung.nurWlan ?? null,
+    screenshots: aenderung.screenshots ?? null,
     vorhandene: aenderung.vorhandene ?? false,
     bekannt: aenderung.bekannt ?? [],
   })

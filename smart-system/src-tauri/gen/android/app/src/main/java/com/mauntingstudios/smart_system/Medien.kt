@@ -10,7 +10,7 @@ import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import java.security.MessageDigest
 
-/** Eine Kameraaufnahme aus DCIM, so wie der MediaStore sie nennt. */
+/** Eine Aufnahme aus DCIM (auf Wunsch auch ein Bildschirmfoto), so wie der MediaStore sie nennt. */
 data class Aufnahme(
     val id: Long,
     val marke: Long,
@@ -105,15 +105,25 @@ object Medien {
      * aufsteigend nach Marke und Kennung; Bilder und Videos gemischt. Die
      * Kennung zählt mit, weil viele Aufnahmen dieselbe Generation tragen können.
      */
-    fun aufnahmen(ctx: Context, nach: Long, nachId: Long, hoechstens: Int): List<Aufnahme> =
-        (suche(ctx, "bild", nach, hoechstens, nachId = nachId) + suche(ctx, "video", nach, hoechstens, nachId = nachId))
+    fun aufnahmen(ctx: Context, nach: Long, nachId: Long, hoechstens: Int, screenshotsAb: Long?): List<Aufnahme> =
+        (suche(ctx, "bild", nach, hoechstens, screenshotsAb, nachId = nachId) + suche(ctx, "video", nach, hoechstens, screenshotsAb, nachId = nachId))
             .sortedWith(compareBy({ it.marke }, { it.id }))
             .take(hoechstens)
 
-    /** Eine Aufnahme nach Kennung, wenn sie noch fertig in DCIM liegt. */
-    fun aufnahme(ctx: Context, id: Long, art: String): Aufnahme? = suche(ctx, art, 0, 1, id).firstOrNull()
+    /** Eine Aufnahme nach Kennung, wenn sie noch fertig in einem gesicherten Ordner liegt. */
+    fun aufnahme(ctx: Context, id: Long, art: String, screenshotsAb: Long?): Aufnahme? =
+        suche(ctx, art, 0, 1, screenshotsAb, nurId = id).firstOrNull()
 
-    private fun suche(ctx: Context, art: String, nach: Long, hoechstens: Int, nurId: Long? = null, nachId: Long = KameraAblage.ALLE): List<Aufnahme> {
+    private fun suche(
+        ctx: Context,
+        art: String,
+        nach: Long,
+        hoechstens: Int,
+        /** Bildschirmfotos ab dieser Marke; `null`: keine. */
+        screenshotsAb: Long?,
+        nurId: Long? = null,
+        nachId: Long = KameraAblage.ALLE,
+    ): List<Aufnahme> {
         val spalten = mutableListOf(
             MediaStore.MediaColumns._ID,
             markeSpalte,
@@ -123,17 +133,22 @@ object Medien {
             MediaStore.MediaColumns.DATE_MODIFIED,
         )
         if (Build.VERSION.SDK_INT >= 29) spalten.add(MediaStore.MediaColumns.DATE_TAKEN)
-        // Nur die Kamera-Ordner, keine Screenshots und keine Messenger-Bilder.
-        val (ort, ortWert) = if (Build.VERSION.SDK_INT >= 29) {
-            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?" to "DCIM/%"
+        // Die Kamera-Ordner; Bildschirmfotos nur, wenn eingeschaltet. Manche Hersteller legen sie
+        // unter DCIM ab, deshalb zählen sie dort nicht als Kamera. Messenger-Bilder nie.
+        val (pfad, vor) = if (Build.VERSION.SDK_INT >= 29) {
+            MediaStore.MediaColumns.RELATIVE_PATH to ""
         } else {
             @Suppress("DEPRECATION")
-            "${MediaStore.MediaColumns.DATA} LIKE ?" to "%/DCIM/%"
+            MediaStore.MediaColumns.DATA to "%/"
         }
+        val kamera = "($pfad LIKE ? AND $pfad NOT LIKE ?)"
+        val bildschirm = "(($pfad LIKE ? OR $pfad LIKE ?) AND $markeSpalte > ?)"
+        val ort = if (screenshotsAb != null) "($kamera OR $bildschirm)" else kamera
         val id = MediaStore.MediaColumns._ID
         var auswahl = "($markeSpalte > ? OR ($markeSpalte = ? AND $id > ?)) AND $ort"
         if (Build.VERSION.SDK_INT >= 29) auswahl += " AND ${MediaStore.MediaColumns.IS_PENDING} = 0"
-        val werte = mutableListOf(nach.toString(), nach.toString(), nachId.toString(), ortWert)
+        val werte = mutableListOf(nach.toString(), nach.toString(), nachId.toString(), "${vor}DCIM/%", "${vor}DCIM/Screenshots/%")
+        if (screenshotsAb != null) werte += listOf("${vor}DCIM/Screenshots/%", "${vor}Pictures/Screenshots/%", screenshotsAb.toString())
         if (nurId != null) {
             auswahl += " AND ${MediaStore.MediaColumns._ID} = ?"
             werte.add(nurId.toString())

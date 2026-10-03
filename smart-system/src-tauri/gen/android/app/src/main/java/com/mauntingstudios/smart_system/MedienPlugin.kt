@@ -48,6 +48,7 @@ class EinrichtenArgs {
 @InvokeArg
 class AendernArgs {
     var nurWlan: Boolean? = null
+    var screenshots: Boolean? = null
     /** Auch sichern, was vor dem Einschalten aufgenommen wurde. */
     var vorhandene: Boolean = false
     /** Was schon im Tresor liegt (`medienId:sha256`), damit es nicht noch einmal hochgeht. */
@@ -172,6 +173,8 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
                     pq = a.pq,
                     rsa = a.rsa,
                     nurWlan = a.nurWlan,
+                    screenshots = if (weiter) alt!!.screenshots else false,
+                    screenshotsAb = if (weiter && alt!!.fassung == fassung) alt.screenshotsAb else marke,
                     marke = if (weiter && alt!!.fassung == fassung) alt.marke else marke,
                     markeId = if (weiter && alt!!.fassung == fassung) alt.markeId else KameraAblage.ALLE,
                     fassung = fassung,
@@ -192,6 +195,7 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
             put("bucket", s.bucket)
             put("geraet", s.geraet)
             put("nurWlan", s.nurWlan)
+            put("screenshots", s.screenshots)
             put("gesichert", s.gesichert)
             put("zuletzt", s.zuletzt)
             put("offen", KameraAblage.anzahlAuftraege(activity))
@@ -211,8 +215,13 @@ class MedienPlugin(private val activity: Activity) : Plugin(activity) {
             val alt = KameraAblage.lesen(activity) ?: throw IllegalStateException("Die Kamera-Sicherung ist aus")
             KameraAblage.bekanntDazu(activity, alt.kennung, a.bekannt.filter { BEKANNT.matches(it) })
             KameraAblage.aendern(activity, alt.kennung) { s ->
-                if (a.vorhandene) s.copy(nurWlan = a.nurWlan ?: s.nurWlan, marke = 0, markeId = KameraAblage.ALLE)
-                else s.copy(nurWlan = a.nurWlan ?: s.nurWlan)
+                val einschalten = a.screenshots == true && !s.screenshots
+                val neu = s.copy(
+                    nurWlan = a.nurWlan ?: s.nurWlan,
+                    screenshots = a.screenshots ?: s.screenshots,
+                    screenshotsAb = if (einschalten) Medien.jetzt(activity).first else s.screenshotsAb,
+                )
+                if (a.vorhandene) neu.copy(marke = 0, markeId = KameraAblage.ALLE, screenshotsAb = 0) else neu
             }
             KameraPlan.anstossen(activity, ersetzen = a.nurWlan != null && a.nurWlan != alt.nurWlan)
             standJson()

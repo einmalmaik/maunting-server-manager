@@ -27,6 +27,7 @@ import {
   kameraAusschalten,
   kameraEinschalten,
   kameraNurWlan,
+  kameraScreenshots,
   kameraStandLaden,
   kameraVorhandeneSichern,
   speicherFreigeben,
@@ -218,6 +219,21 @@ export function KameraSicherungKarte() {
                 checked={aktiv.nurWlan}
                 disabled={beschaeftigt}
                 onCheckedChange={(wert: boolean) => void kameraNurWlan(wert).catch(() => toast.error(t('mss.vault.kamera.fehler')))}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <span id="kamera-screenshots" className="text-xs font-medium text-on-surface">
+                  {t('mss.vault.kamera.screenshots')}
+                </span>
+                <p className="text-label-sm text-on-surface-variant">{t('mss.vault.kamera.screenshotsHinweis')}</p>
+              </div>
+              <Switch
+                aria-labelledby="kamera-screenshots"
+                checked={aktiv.screenshots}
+                disabled={beschaeftigt}
+                onCheckedChange={(wert: boolean) => void kameraScreenshots(wert).catch(() => toast.error(t('mss.vault.kamera.fehler')))}
               />
             </div>
 

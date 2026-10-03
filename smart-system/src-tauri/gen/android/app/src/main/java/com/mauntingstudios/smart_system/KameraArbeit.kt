@@ -108,11 +108,11 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
         // Ein neu aufgebauter MediaStore zählt von vorn; mit der alten Marke fände die Sicherung nie wieder etwas.
         val (jetzt, fassung) = Medien.jetzt(ctx)
         if (fassung != stand.fassung) {
-            stand = KameraAblage.aendern(ctx, kennung) { it.copy(marke = jetzt, markeId = KameraAblage.ALLE, fassung = fassung) }
+            stand = KameraAblage.aendern(ctx, kennung) { it.copy(marke = jetzt, markeId = KameraAblage.ALLE, fassung = fassung, screenshotsAb = jetzt) }
                 ?: throw Abbruch()
         }
         while (true) {
-            val aufnahmen = Medien.aufnahmen(ctx, stand.marke, stand.markeId, 20)
+            val aufnahmen = Medien.aufnahmen(ctx, stand.marke, stand.markeId, 20, stand.screenshotsAb.takeIf { stand.screenshots })
             if (aufnahmen.isEmpty()) return
             for (aufnahme in aufnahmen) {
                 weiter(kennung)
@@ -227,7 +227,8 @@ class KameraArbeit(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
         } catch (e: Verloren) {
             verwerfen(server, auftrag)
             // Noch da (geändert oder beim Server aufgeräumt): einmal neu, mit den Bytes von jetzt.
-            val aufnahme = Medien.aufnahme(ctx, auftrag.getLong("medienId"), auftrag.getString("art")) ?: return
+            // Ein Auftrag ist schon zugelassen; hier zählt nur, ob die Aufnahme noch da ist.
+            val aufnahme = Medien.aufnahme(ctx, auftrag.getLong("medienId"), auftrag.getString("art"), 0) ?: return
             val neu = vorbereiten(kennung, aufnahme) ?: return
             if (!KameraAblage.auftragSchreiben(ctx, kennung, neu)) throw Abbruch()
         }

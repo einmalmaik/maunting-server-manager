@@ -127,6 +127,11 @@ export async function kameraNurWlan(nurWlan: boolean): Promise<void> {
   useKameraSicherung.setState({ stand: await kameraAendern({ nurWlan }) })
 }
 
+/** Auch Bildschirmfotos sichern, ab jetzt. */
+export async function kameraScreenshots(screenshots: boolean): Promise<void> {
+  useKameraSicherung.setState({ stand: await kameraAendern({ screenshots }) })
+}
+
 /** Sichert auch, was vor dem Einschalten aufgenommen wurde; was schon im Tresor liegt, nicht. */
 export async function kameraVorhandeneSichern(): Promise<void> {
   useKameraSicherung.setState({ stand: await kameraAendern({ vorhandene: true, bekannt: bekannteAufnahmen() }) })

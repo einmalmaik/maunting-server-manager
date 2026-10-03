@@ -41,6 +41,13 @@ object KameraAblage {
         val pq: String,
         val rsa: String,
         val nurWlan: Boolean,
+        /** Auch Bildschirmfotos sichern (`Pictures/Screenshots`, `DCIM/Screenshots`). */
+        val screenshots: Boolean = false,
+        /**
+         * Bildschirmfotos zählen erst ab dieser Marke: ab dem Einschalten, nicht
+         * rückwirkend bis zur letzten Kameraaufnahme. 0 bei „Vorhandene sichern“.
+         */
+        val screenshotsAb: Long = 0,
         /**
          * Alle Aufnahmen bis zu dieser Stelle sind in einem Auftrag oder erledigt:
          * Marke, und bei gleicher Marke die Kennung (`markeId`). Viele Aufnahmen
@@ -58,7 +65,7 @@ object KameraAblage {
         fun json(): JSONObject = JSONObject().apply {
             put("kennung", kennung); put("konto", konto); put("server", server); put("bucket", bucket)
             put("geraet", geraet); put("zugang", zugang); put("eingangId", eingangId); put("pq", pq); put("rsa", rsa)
-            put("nurWlan", nurWlan); put("marke", marke); put("markeId", markeId); put("fassung", fassung)
+            put("nurWlan", nurWlan); put("screenshots", screenshots); put("screenshotsAb", screenshotsAb); put("marke", marke); put("markeId", markeId); put("fassung", fassung)
             put("gesichert", gesichert); put("zuletzt", zuletzt); put("warten", warten ?: JSONObject.NULL)
         }
 
@@ -67,7 +74,7 @@ object KameraAblage {
                 kennung = j.getString("kennung"), konto = j.getLong("konto"), server = j.getString("server"),
                 bucket = j.getString("bucket"), geraet = j.getString("geraet"), zugang = j.getString("zugang"),
                 eingangId = j.getString("eingangId"), pq = j.getString("pq"), rsa = j.getString("rsa"),
-                nurWlan = j.getBoolean("nurWlan"), marke = j.getLong("marke"), markeId = j.optLong("markeId", ALLE),
+                nurWlan = j.getBoolean("nurWlan"), screenshots = j.optBoolean("screenshots"), screenshotsAb = j.optLong("screenshotsAb"),marke = j.getLong("marke"), markeId = j.optLong("markeId", ALLE),
                 fassung = j.getString("fassung"), gesichert = j.optInt("gesichert"), zuletzt = j.optLong("zuletzt"),
                 warten = if (j.isNull("warten")) null else j.optString("warten"),
             )
