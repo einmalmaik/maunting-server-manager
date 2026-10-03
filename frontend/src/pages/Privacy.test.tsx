@@ -141,11 +141,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.17 vom 2026-10-03 aus (Kamera-Sicherung bei gesperrtem Tresor)', () => {
+  it('weist die Fassung 3.18 vom 2026-10-03 aus (Erinnerungen unter Android ohne Hintergrunddienst)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.17`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.18`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -182,7 +182,6 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.vault.items.dateien')).toMatch(/bis zu 5 frühere Fassungen/);
     expect(i18n.t('privacyPolicy.sections.vault.items.geraet')).toMatch(/512 MiB/);
     expect(i18n.t('privacyPolicy.sections.retention.items.export')).toMatch(/Dateien aus dem Tresor enthält es nicht/);
-    expect(i18n.t('privacyPolicy.sections.desktopApp.items.benachrichtigungen')).toMatch(/nutzt das Mikrofon nicht/);
     expect(screen.getByText(i18n.t('privacyPolicy.sections.vault.items.hinweis'))).toBeInTheDocument();
     // 3.16: Kamera-Sicherung; den Aufnahmeort zog der Tresor nie eigens in den Eintrag, wie 3.15 behauptete.
     expect(screen.getByText(i18n.t('privacyPolicy.sections.vault.items.kamera'))).toBeInTheDocument();
@@ -194,6 +193,10 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/Bei gesperrtem Tresor/);
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/Vom Posteingang sieht die Instanz nur/);
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/der Datenexport enthält sie nicht/);
+    // 3.18: unter Android lief nie ein Dienst, der die Instanz erreichte; Erinnerungen plant jetzt Android selbst.
+    expect(i18n.t('privacyPolicy.sections.desktopApp.items.benachrichtigungen')).toMatch(/Unter Android läuft kein Hintergrunddienst/);
+    expect(i18n.t('privacyPolicy.sections.desktopApp.items.benachrichtigungen')).toMatch(/fragt dafür nicht bei der Instanz nach/);
+    expect(i18n.t('privacyPolicy.sections.desktopApp.items.autostart')).not.toMatch(/Handystart/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

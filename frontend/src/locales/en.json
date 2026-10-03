@@ -3948,7 +3948,12 @@
     "messageInGroup": "New message in the group “{{name}}”",
     "messageFrom": "You have a new message from {{name}}.",
     "messageToastGroup": "💬 New message in “{{name}}”",
-    "messageToastDirect": "💬 New message from {{name}}"
+    "messageToastDirect": "💬 New message from {{name}}",
+    "whenTwoDays": "in 2 days",
+    "whenOneDay": "in 1 day",
+    "whenSoon": "soon",
+    "reminderUntitled": "Event",
+    "reminderPublic": "An event is coming up"
   },
   "updater": {
     "panelUpdateAvailable": "Panel update available",
@@ -4823,8 +4828,8 @@
           "wakeword": "Wake word (off by default): once enabled, the app continuously reads the microphone and compares what it hears against a reference model, entirely on the machine with no network connection. Until the word is recognised, not a single audio sample leaves the process, and nothing is recorded. Continuous listening creates a measurable CPU load (roughly one sixth of a core).",
           "wakewordAufnahmen": "Calibration voice recordings: to train the model you speak your chosen name several times. These are real voice recordings and are kept indefinitely as WAV files in the local app data directory, together with the reference model derived from them. They are never transmitted. They are removed by “Reset” in the wake word settings or by uninstalling.",
           "sprachsitzung": "Voice session: only after the wake word is recognised or the voice shortcut is pressed does the app open an audio channel. In legacy mode it runs through the panel, where pause detection is ephemeral before audio and reply text reach the configured providers. With OpenAI Realtime, the app connects directly to OpenAI over WebRTC while the panel remains responsible for permissions, tools, and accounting through a separate control channel.",
-          "benachrichtigungen": "Background service and notifications: On Windows, the app can listen for the trained wake word in the background; the audio is processed locally and does not leave the computer unless the wake word is recognised. On Android and Windows it delivers notifications in the background. On Android the system shows a notification in the status bar (“Background service active”) meanwhile; this service does not use the microphone. Push notifications for calendar reminders and AI replies can be managed and disabled independently via the notification bell in the panel and the app at any time.",
-          "autostart": "Autostart and background monitoring (enabled by default, can be disabled at any time): On Windows and Android, the application can start automatically in the background on system boot or phone startup to continuously monitor server incidents and due calendar appointments, delivering notifications directly to the system tray or Android status bar (heads-up banner). Requests are made directly to your own MSM instance without third-party relay servers. Autostart can be disabled at any time in the app settings under 'Device Integration' (Windows) or 'Run on phone startup' (Android).",
+          "benachrichtigungen": "Background service and notifications: On Windows, the app can listen for the trained wake word in the background; the audio is processed locally and does not leave the computer unless the wake word is recognised. On Windows it delivers notifications in the background. On Android there is no background service: when you open the app, it schedules reminders for the appointments of the next eight days with Android, including title and start time, stored in the app’s private storage. Android shows them at the scheduled time even when the app is closed, without contacting the instance. The lock screen only says that an appointment is coming up. When you sign out or turn off device notifications, the app removes all scheduled reminders from the device. Push notifications for calendar reminders and AI replies can be managed and disabled independently via the notification bell in the panel and the app at any time.",
+          "autostart": "Autostart on Windows (enabled by default, can be disabled at any time): the application can start in the background on system boot to check for server incidents and due calendar appointments and deliver them as system notifications. Requests go directly to your own MSM instance without third-party servers in between. Autostart can be turned off in the app settings under “Device Integration”. On Android the app does not start by itself; it reports server incidents there only while it is open.",
           "bildschirm": "Screenshots: the AI can look at the main screen. While it operates mouse or keyboard, the app takes a picture after every action on its own so the AI can see the result. The image is downscaled, never written to disk, and transmitted as a tool result to the panel, which stores it encrypted and passes it to the model provider. The provider therefore sees everything visible at that moment, including other windows, messages and open documents. An indicator lights up at the edge of the screen for every capture; it cannot be switched off.",
           "dateien": "Read access to the computer: the AI can inspect drives, folders and disk space, as far as the signed-in Windows user may do so. Drive details as well as folder and file names with sizes are transmitted. File contents are only read and transmitted from the sandbox folder you select yourself. Whether the Windows system area may be read is configured per account in the panel.",
           "schreiben": "Write access: creating and changing files happens exclusively inside the sandbox folder you select. The resolved path is checked so that a link cannot lead out of the folder.",
@@ -6752,7 +6757,6 @@
       "updateUpToDate": "Maunting Smart System is up to date.",
       "checkingUpdates": "Checking …",
       "checkForUpdates": "Check for updates",
-      "autostartAndroid": "Run on phone startup",
       "systemUpdates": "System updates"
     },
     "schliessen": {

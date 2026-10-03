@@ -35,6 +35,7 @@ pub mod discord;
 mod durchklick;
 #[cfg(windows)]
 mod ducking;
+mod erinnerung;
 mod geheimnisse;
 mod konfig;
 mod medien;
@@ -827,7 +828,9 @@ pub fn run() {
             .plugin(biometrie::init_android_schluesselfach())
             .plugin(updater::init_android_installer())
             // Kameraaufnahmen für die Kamera-Sicherung des Tresors.
-            .plugin(medien::init_android_medien());
+            .plugin(medien::init_android_medien())
+            // Terminerinnerungen, die Android auch bei geschlossener App zeigt.
+            .plugin(erinnerung::init_android_erinnerung());
     }
 
     builder
@@ -893,6 +896,7 @@ pub fn run() {
             medien::medien_lesen,
             medien::medien_pruefsumme,
             medien::medien_papierkorb,
+            erinnerung::erinnerungen_planen,
             updater::update_pruefen,
             updater::update_installieren,
             updater::app_neu_starten

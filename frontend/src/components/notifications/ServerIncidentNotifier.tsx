@@ -20,6 +20,8 @@ import { kuendigeMailboxPush } from '@/services/mailboxPush'
 import { useMessengerNotificationStore, playNotificationChime } from '@/stores/messengerNotificationStore'
 import { NotificationService } from '@/services/notificationService'
 import { loadCalendarEventsOfflineFirst } from '@/lib/offlineSync'
+import { erinnerungenAus, PLAN_TAGE, type GeplanteErinnerung } from '@/lib/erinnerungsplan'
+import { CALENDAR_CIPHERTEXT_PREFIX } from '@/services/notesCalendarCrypto'
 import { sendE2eeDeliveryReceipt, checkAndDispatchPendingDeliveryReceipts } from '@/services/deliveryReceiptService'
 
 interface IncidentAlert {
@@ -100,6 +102,25 @@ async function faelligeSerienVorkommen(
   return faellig
 }
 
+/**
+ * In der Android-App meldet nicht diese Schleife Termine, sondern Android
+ * selbst zur geplanten Zeit, auch bei geschlossener App (`lib/erinnerungsplan.ts`).
+ * Beides zugleich meldete jeden Termin zweimal.
+ */
+function aufAndroid(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    ('__TAURI_INTERNALS__' in window || '__TAURI__' in window) &&
+    /android/i.test(navigator.userAgent)
+  )
+}
+
+async function erinnerungenUebergeben(liste: GeplanteErinnerung[]): Promise<void> {
+  // Nachgeladen: im Panel und am Desktop gehört die Brücke nicht ins Startbündel.
+  const { erinnerungenPlanen } = await import('@/desktop/tauri')
+  await erinnerungenPlanen(liste)
+}
+
 const POLL_INTERVAL_MS = 20_000
 const SESSION_INCIDENTS_KEY = 'msm_alerted_incidents'
 const SESSION_REMINDERS_KEY = 'msm_alerted_reminders'
@@ -123,14 +144,21 @@ function saveSeenSet(storageKey: string, set: Set<string>) {
 }
 
 export function ServerIncidentNotifier() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { user, isAuthenticated } = useAuthStore()
   const seenIncidentsRef = useRef<Set<string>>(loadSeenSet(SESSION_INCIDENTS_KEY))
   const seenRemindersRef = useRef<Set<string>>(loadSeenSet(SESSION_REMINDERS_KEY))
   const isPollingRef = useRef(false)
+  // Was zuletzt an Android ging; ohne Änderung wird nicht neu geplant.
+  const planRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!isAuthenticated || !user) {
+      // Abgemeldet: die Erinnerungen des Kontos fallen vom Gerät (AGENTS.md Punkt 50).
+      if (aufAndroid() && planRef.current !== '[]') {
+        planRef.current = '[]'
+        void erinnerungenUebergeben([]).catch(() => {})
+      }
       return
     }
 
@@ -158,6 +186,36 @@ export function ServerIncidentNotifier() {
       // hier entschieden werden — dort steht kein Konto mehr, an dem der
       // Server ihn nachschlagen könnte.
       void kuendigeMailboxPush().then(() => kuendige())
+      if (aufAndroid() && planRef.current !== '[]') {
+        planRef.current = '[]'
+        void erinnerungenUebergeben([]).catch(() => {})
+      }
+    }
+
+    const planen = async () => {
+      const jetzt = Date.now()
+      const { events } = await loadCalendarEventsOfflineFirst(
+        new Date(jetzt).toISOString(),
+        new Date(jetzt + PLAN_TAGE * 86_400_000).toISOString(),
+        undefined,
+        user.id,
+        user.time_zone ?? null,
+      )
+      const format = new Intl.DateTimeFormat(i18n.language, { dateStyle: 'short', timeStyle: 'short' })
+      const plan = erinnerungenAus(
+        events,
+        jetzt,
+        user.id,
+        t,
+        (datum) => format.format(datum),
+        (titel) => titel.startsWith(CALENDAR_CIPHERTEXT_PREFIX),
+      )
+      // Was sofort fällig ist, trägt bei jedem Lauf eine neue Zeit; es zählt
+      // nur, ob es dabei ist.
+      const abdruck = JSON.stringify(plan.map((e) => [e.schluessel, e.zeit > jetzt ? e.zeit : 0, e.titel, e.text]))
+      if (abdruck === planRef.current) return
+      await erinnerungenUebergeben(plan)
+      planRef.current = abdruck
     }
 
     const checkAlerts = async () => {
@@ -187,6 +245,12 @@ export function ServerIncidentNotifier() {
           if (updatedIncidents) {
             saveSeenSet(SESSION_INCIDENTS_KEY, seenIncidentsRef.current)
           }
+        }
+
+        // 2. Termine: in der Android-App plant Android sie selbst.
+        if (aufAndroid()) {
+          await planen().catch(() => {})
+          return
         }
 
         // 2. Fällige Termine (24h / 48h) abrufen

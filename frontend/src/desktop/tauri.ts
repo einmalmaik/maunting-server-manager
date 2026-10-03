@@ -8,6 +8,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { base64ToBytes, bytesToBase64 } from '@msdis/shield/core'
 import { setRuntimeApiUrl } from '@/config/api'
+import type { GeplanteErinnerung } from '@/lib/erinnerungsplan'
 
 export type AgentStatus = 'bereit' | 'hoert' | 'denkt' | 'spricht'
 
@@ -550,6 +551,14 @@ export async function sicherungSchluessel(geraet: string): Promise<string> {
 export async function sicherungSignieren(geraet: string, daten: Uint8Array): Promise<Uint8Array> {
   const { signatur } = await invoke<{ signatur: string }>('medien_sicherung_signieren', { geraet, daten: bytesToBase64(daten) })
   return base64ToBytes(signatur)
+}
+
+/**
+ * Ersetzt die geplanten Terminerinnerungen dieses Geräts (nur Android). Eine
+ * leere Liste nimmt alle weg, etwa beim Abmelden.
+ */
+export async function erinnerungenPlanen(liste: GeplanteErinnerung[]): Promise<void> {
+  await invoke('erinnerungen_planen', { liste })
 }
 
 /** Legt Aufnahmen in den Papierkorb der Galerie; Android fragt selbst nach. */

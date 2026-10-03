@@ -9,9 +9,6 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
     <!-- Kamera-Sicherung des Tresors: liest neue Aufnahmen aus DCIM. Den Ort braucht
@@ -66,19 +63,16 @@
             android:screenOrientation="portrait"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode" />
 
-        <!-- Hintergrunddienst für Server- und Kalender-Benachrichtigungen (in separatem Prozess isoliert) -->
-        <service
-            android:name=".MsmBackgroundAlertService"
-            android:exported="false"
-            android:process=":alert_service"
-            android:foregroundServiceType="dataSync" />
+        <!-- Terminerinnerungen, die die offene App eingeplant hat (Erinnerungen.kt) -->
+        <receiver
+            android:name=".ErinnerungEmpfaenger"
+            android:exported="false" />
 
-        <!-- Autostart nach Geräteneustart oder App-Update -->
+        <!-- Nach Neustart oder Update sind alle Wecker weg; stellt sie neu -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
-            android:exported="true"
-            android:process=":alert_service">
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />

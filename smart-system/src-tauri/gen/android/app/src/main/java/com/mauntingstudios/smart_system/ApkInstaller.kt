@@ -130,7 +130,7 @@ object ApkInstaller {
                 }
             )
 
-            val notification = NotificationCompat.Builder(context, MsmBackgroundAlertService.CHANNEL_ALERTS)
+            val notification = NotificationCompat.Builder(context, Erinnerungen.KANAL)
                 .setSmallIcon(R.mipmap.ic_launcher_foreground)
                 .setContentTitle("MSS Update bereit")
                 .setContentText("Tippe hier, um die Aktualisierung abzuschließen.")

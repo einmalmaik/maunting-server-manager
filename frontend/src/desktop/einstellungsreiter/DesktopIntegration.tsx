@@ -28,47 +28,28 @@ export function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: 
   const [status, setStatus] = useState<AgentStatus>('bereit')
   const [prueftUpdate, setPrueftUpdate] = useState(false)
 
+  // Android hat keinen Autostart mehr: Terminerinnerungen plant die App bei
+  // Android ein, und die zeigt sie auch, wenn die App nie gestartet wurde.
   useEffect(() => {
-    if (isAndroid) {
-      void konfigLaden()
-        .then((cfg) => {
-          setAutostart(cfg.autostart_aktiv ?? true)
-        })
-        .catch(() => setAutostart(true))
-    } else {
-      void isEnabled()
-        .then(setAutostart)
-        .catch(() => setAutostart(null))
-    }
+    if (isAndroid) return
+    void isEnabled()
+      .then(setAutostart)
+      .catch(() => setAutostart(null))
   }, [isAndroid])
 
   async function autostartUmschalten(an: boolean) {
     try {
-      if (isAndroid) {
-        const akt = await konfigLaden().catch(() => null)
-        if (akt) {
-          await konfigSpeichern({ ...akt, autostart_aktiv: an })
-        }
-        setAutostart(an)
-        onKonfigAenderung?.()
-        toast.success(
-          an
-            ? 'Hintergrundüberwachung bei Handystart aktiviert'
-            : 'Hintergrundüberwachung bei Handystart deaktiviert'
-        )
+      if (an) {
+        await enable()
       } else {
-        if (an) {
-          await enable()
-        } else {
-          await disable()
-        }
-        const akt = await konfigLaden().catch(() => null)
-        if (akt) {
-          await konfigSpeichern({ ...akt, autostart_aktiv: an })
-        }
-        setAutostart(an)
-        onKonfigAenderung?.()
+        await disable()
       }
+      const akt = await konfigLaden().catch(() => null)
+      if (akt) {
+        await konfigSpeichern({ ...akt, autostart_aktiv: an })
+      }
+      setAutostart(an)
+      onKonfigAenderung?.()
     } catch {
       toast.error(t('mss.einstellungen.autostartFehler'))
     }
@@ -90,20 +71,18 @@ export function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: 
         {isAndroid ? t('mss.einstellungen.tab.app') : t('mss.einstellungen.desktopIntegration')}
       </h2>
 
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-on-surface">
-          {t(isAndroid ? 'mss.einstellungen.autostartAndroid' : 'mss.einstellungen.autostart')}
-        </p>
-        <Switch
-          checked={autostart === true}
-          disabled={autostart === null}
-          onCheckedChange={(an) => void autostartUmschalten(an)}
-          aria-label={t(isAndroid ? 'mss.einstellungen.autostartAndroid' : 'mss.einstellungen.autostart')}
-        />
-      </div>
-
       {!isAndroid && (
         <>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm text-on-surface">{t('mss.einstellungen.autostart')}</p>
+            <Switch
+              checked={autostart === true}
+              disabled={autostart === null}
+              onCheckedChange={(an) => void autostartUmschalten(an)}
+              aria-label={t('mss.einstellungen.autostart')}
+            />
+          </div>
+
           <ArtefaktInstallationSektion onKonfigAenderung={onKonfigAenderung} />
 
           <Hotkeys />

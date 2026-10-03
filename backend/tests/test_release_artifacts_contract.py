@@ -1,5 +1,6 @@
 """Contracts for split release artifacts and public self-hosting docs."""
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -94,7 +95,7 @@ def test_android_asks_for_no_overlay_and_no_microphone_service() -> None:
 
     `SYSTEM_ALERT_WINDOW` und `FOREGROUND_SERVICE_MICROPHONE` standen seit dem
     ersten Android-Bau im Manifest, ohne dass Kotlin oder Rust sie je nutzte
-    (der einzige Dienst ist `dataSync`). Eine Berechtigung, die niemand braucht,
+    (einen Dienst hat die App nicht mehr). Eine Berechtigung, die niemand braucht,
     ist nur Angriffsfläche; wer sie wieder braucht, nimmt diesen Test mit.
     """
     manifest = (
@@ -103,3 +104,21 @@ def test_android_asks_for_no_overlay_and_no_microphone_service() -> None:
     assert "android.permission.SYSTEM_ALERT_WINDOW" not in manifest
     assert "android.permission.FOREGROUND_SERVICE_MICROPHONE" not in manifest
     assert 'android:foregroundServiceType="microphone' not in manifest
+
+
+def test_android_reminders_need_no_background_service() -> None:
+    """Terminerinnerungen plant die App bei Android, kein Dienst fragt die Instanz.
+
+    Bis 03.10.2026 lief ein Vordergrunddienst in eigenem Prozess, der alle 25 s
+    beim Panel nachfragen sollte, aber Konfiguration und Token am falschen Ort
+    las und nie durchkam. Jetzt stellt `Erinnerungen.kt` Wecker; der Empfänger
+    ist nur für das eigene Paket da, und ohne Dienst entfallen dessen Rechte.
+    """
+    manifest = (
+        ROOT / "smart-system" / "src-tauri" / "gen" / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
+    ).read_text(encoding="utf-8")
+    assert "<service" not in manifest
+    assert "android.permission.FOREGROUND_SERVICE" not in manifest
+    empfaenger = re.search(r'<receiver\s+android:name="\.ErinnerungEmpfaenger"\s+android:exported="false"', manifest)
+    assert empfaenger is not None
+    assert ":alert_service" not in manifest
