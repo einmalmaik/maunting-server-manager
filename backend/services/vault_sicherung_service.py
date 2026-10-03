@@ -78,7 +78,7 @@ def anlegen(db: Session, konto: vault_service.TresorKonto, familie: str, fam_ind
     ``fam_index`` rechnet der Aufrufer vorher, damit ein fehlender Sidecar
     keinen schon verbrauchten Nachweis kostet (Punkt 82).
     """
-    pass
+    entfernen(db, konto, fam_index)
     token = f"{PRAEFIX}.{konto.user_id}.{familie}.{secrets.token_urlsafe(32)}"
     db.add(
         VaultSicherungszugang(
