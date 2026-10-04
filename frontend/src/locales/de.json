@@ -6733,6 +6733,10 @@
         "computerUseLink": "In den Einstellungen ansehen",
         "aktivitaetLaeuft": "KI führt Desktop-Aktion aus"
       },
+      "offline": {
+        "titel": "Braucht Verbindung zum Server",
+        "text": "Diese Einstellungen liegen auf dem Server. Sobald er wieder erreichbar ist, stehen sie hier."
+      },
       "autostart": "Mit Windows starten",
       "autostartFehler": "Autostart ließ sich nicht umstellen.",
       "diagnose": "Diagnose",

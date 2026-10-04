@@ -6,6 +6,11 @@
  * darf (AGENTS.md Punkt 21). Der Nachweis steht in der Karte, kein eigener
  * Dialog. Fällt der Zugang weg (Abmelden, Sitzung entzogen), fragt die Karte
  * an derselben Stelle neu.
+ *
+ * Offline steht der Hauptschalter still: Einschalten braucht den Nachweis beim
+ * Server, und Ausschalten ließe den Zugang dort stehen, während das Telefon ihn
+ * schon vergessen hat. WLAN, Bildschirmfotos und „Vorhandene sichern“ bleiben
+ * Sache des Telefons.
  */
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -35,7 +40,7 @@ import {
 } from './kameraSicherung'
 import { useVaultStore } from './vaultStore'
 
-export function KameraSicherungKarte() {
+export function KameraSicherungKarte({ offline = false }: { offline?: boolean }) {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const { isUnlocked, bucketId } = useVaultStore(useShallow((s) => ({ isUnlocked: s.isUnlocked, bucketId: s.bucketId })))
@@ -142,7 +147,7 @@ export function KameraSicherungKarte() {
     }
   }
 
-  const nachweisZeigen = !!bucket && (nachweisOffen || zugangFehlt)
+  const nachweisZeigen = !!bucket && !offline && (nachweisOffen || zugangFehlt)
 
   return (
     <div className="msm-card p-5 space-y-4">
@@ -168,12 +173,14 @@ export function KameraSicherungKarte() {
             <span id="kamera-sicherung" className="text-xs font-medium text-on-surface">
               {t('mss.vault.kamera.schalter')}
             </span>
-            <p className="text-label-sm text-on-surface-variant">{t('mss.vault.kamera.hinweis')}</p>
+            <p className="text-label-sm text-on-surface-variant">
+              {offline ? t('mss.einstellungen.offline.titel') : t('mss.vault.kamera.hinweis')}
+            </p>
           </div>
           <Switch
             aria-labelledby="kamera-sicherung"
-            checked={!!aktiv || nachweisOffen}
-            disabled={!bucket || beschaeftigt}
+            checked={!!aktiv || (nachweisOffen && !offline)}
+            disabled={!bucket || beschaeftigt || offline}
             onCheckedChange={(wert: boolean) => void umschalten(wert)}
           />
         </div>

@@ -5,7 +5,7 @@
  * im Panel, und hier zaehlt nur die Weiche: wer landet wo, und was passiert,
  * wenn die stille Anmeldung scheitert.
  */
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
@@ -65,7 +65,9 @@ vi.mock('@/pages/Notes', () => ({
   Notes: () => <div data-testid="notizen-seite" />,
 }))
 vi.mock('./Einstellungen', () => ({
-  Einstellungen: () => <div data-testid="einstellungen-seite" />,
+  Einstellungen: ({ offline }: { offline?: boolean }) => (
+    <div data-testid="einstellungen-seite" data-offline={String(Boolean(offline))} />
+  ),
 }))
 vi.mock('@/components/ai/AiMemoryManager', () => ({
   AiMemoryManager: () => <div data-testid="gedaechtnis-seite" />,
@@ -772,8 +774,8 @@ describe('DesktopApp', () => {
       expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
     })
 
-    it('leitet beim Start im Offline-Modus von /einstellungen und /gedaechtnis automatisch auf /tresor um', async () => {
-      localStorage.setItem(LETZTE_ROUTE_KEY, '/einstellungen')
+    it('leitet beim Start im Offline-Modus von /gedaechtnis automatisch auf /tresor um', async () => {
+      localStorage.setItem(LETZTE_ROUTE_KEY, '/gedaechtnis')
       localStorage.setItem('msm_cached_user', JSON.stringify(BENUTZER))
       useAuthStore.setState({ user: BENUTZER, isAuthenticated: true })
 
@@ -793,7 +795,60 @@ describe('DesktopApp', () => {
       await waitFor(() => {
         expect(screen.getByTestId('tresor-seite')).toBeInTheDocument()
       })
-      expect(screen.queryByTestId('einstellungen-seite')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('gedaechtnis-seite')).not.toBeInTheDocument()
+    })
+
+    it('öffnet beim Start im Offline-Modus die zuletzt offenen Einstellungen, im Offline-Zustand', async () => {
+      // Bis 5.1.1 schob die App hier auf den Tresor: Audio, Wake-Word und
+      // Hotkeys waren ohne Panel nicht zu erreichen, obwohl sie auf dem Gerät leben.
+      localStorage.setItem(LETZTE_ROUTE_KEY, '/einstellungen')
+      localStorage.setItem('msm_cached_user', JSON.stringify(BENUTZER))
+      useAuthStore.setState({ user: BENUTZER, isAuthenticated: true })
+
+      konfigMock({
+        backend_url: 'https://api.example.com',
+        sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+        eingerichtet: true,
+      })
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() => Promise.reject(new TypeError('Failed to fetch (Offline)'))),
+      )
+
+      render(<DesktopApp />)
+
+      await waitFor(() => {
+        expect(screen.getByTestId('einstellungen-seite')).toHaveAttribute('data-offline', 'true')
+      })
+      expect(screen.getByText('Offline')).toBeInTheDocument()
+      expect(screen.queryByTestId('tresor-seite')).not.toBeInTheDocument()
+    })
+
+    it('erreicht die Einstellungen offline über das Profilmenü', async () => {
+      localStorage.setItem('msm_cached_user', JSON.stringify(BENUTZER))
+      useAuthStore.setState({ user: BENUTZER, isAuthenticated: true })
+
+      konfigMock({
+        backend_url: 'https://api.example.com',
+        sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+        eingerichtet: true,
+      })
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() => Promise.reject(new TypeError('Failed to fetch (Offline)'))),
+      )
+
+      render(<DesktopApp />)
+      await waitFor(() => expect(screen.getByTestId('tresor-seite')).toBeInTheDocument())
+
+      fireEvent.click(screen.getAllByRole('button', { name: i18n.t('common.openUserMenu') })[0])
+      fireEvent.click(await screen.findByRole('menuitem', { name: i18n.t('mss.app.einstellungen') }))
+
+      await waitFor(() => {
+        expect(screen.getByTestId('einstellungen-seite')).toHaveAttribute('data-offline', 'true')
+      })
     })
 
     it('neutralisiert manipulierte oder bösartige Routen im localStorage sicher ohne Absturz', async () => {
@@ -820,7 +875,7 @@ describe('DesktopApp', () => {
       expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
     })
 
-    it('fängt externe mss:navigiere-zu Events auf verbotene Routen (/ai, /einstellungen) offline ab und leitet auf /tresor', async () => {
+    it('fängt externe mss:navigiere-zu Events auf verbotene Routen (/ai, /gedaechtnis) offline ab und leitet auf /tresor', async () => {
       localStorage.setItem('msm_cached_user', JSON.stringify(BENUTZER))
       useAuthStore.setState({ user: BENUTZER, isAuthenticated: true })
 
@@ -849,12 +904,33 @@ describe('DesktopApp', () => {
         expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
       })
 
-      // Missbrauchsversuch 2: Externes Event auf /einstellungen
-      triggerTauriEvent('mss:navigiere-zu', '/einstellungen')
+      // Missbrauchsversuch 2: Externes Event auf /gedaechtnis
+      triggerTauriEvent('mss:navigiere-zu', '/gedaechtnis')
 
       await waitFor(() => {
         expect(screen.getByTestId('tresor-seite')).toBeInTheDocument()
-        expect(screen.queryByTestId('einstellungen-seite')).not.toBeInTheDocument()
+        expect(screen.queryByTestId('gedaechtnis-seite')).not.toBeInTheDocument()
+      })
+
+      // Missbrauchsversuche 3–6: Ziele, die nur nach Einstellungen aussehen.
+      // Erlaubt ist der Pfad, nicht ein Text, der ihn enthält.
+      for (const ziel of ['/einstellungen/../ai', '/einstellungenx', '/ai?/einstellungen', '/ai#/einstellungen']) {
+        triggerTauriEvent('mss:navigiere-zu', ziel)
+        await waitFor(() => {
+          expect(screen.getByTestId('tresor-seite')).toBeInTheDocument()
+          expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
+          expect(screen.queryByTestId('einstellungen-seite')).not.toBeInTheDocument()
+        })
+      }
+
+      // Die Einstellungen sind offline erlaubt, auch mit vorgewähltem Reiter.
+      triggerTauriEvent('mss:navigiere-zu', '/einstellungen?tab=audio')
+      await waitFor(() => {
+        expect(screen.getByTestId('einstellungen-seite')).toHaveAttribute('data-offline', 'true')
+      })
+      triggerTauriEvent('mss:navigiere-zu', '/tresor')
+      await waitFor(() => {
+        expect(screen.getByTestId('tresor-seite')).toBeInTheDocument()
       })
 
       // Legitime Offline-Routen funktionieren weiterhin
@@ -923,6 +999,39 @@ describe('DesktopApp', () => {
       })
     })
 
+    it('bleibt bei Netzverlust in den Einstellungen und meldet ihnen den Offline-Zustand', async () => {
+      localStorage.setItem(LETZTE_ROUTE_KEY, '/einstellungen')
+      konfigMock({
+        backend_url: 'https://api.example.com',
+        sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+        eingerichtet: true,
+      })
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((eingabe: RequestInfo | URL) => {
+          const url = String(eingabe)
+          const json = (daten: unknown) =>
+            Promise.resolve(new Response(JSON.stringify(daten), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+          if (url.includes('/auth/refresh')) return json({ access_token: 'a', refresh_token: 'r' })
+          if (url.includes('/auth/me')) return json(BENUTZER)
+          return json({ global_permissions: [], server_permissions: {} })
+        }),
+      )
+
+      render(<DesktopApp />)
+      await waitFor(() => {
+        expect(screen.getByTestId('einstellungen-seite')).toHaveAttribute('data-offline', 'false')
+      })
+
+      window.dispatchEvent(new Event('offline'))
+
+      await waitFor(() => {
+        expect(screen.getByText('Offline')).toBeInTheDocument()
+        expect(screen.getByTestId('einstellungen-seite')).toHaveAttribute('data-offline', 'true')
+      })
+      expect(screen.queryByTestId('tresor-seite')).not.toBeInTheDocument()
+    })
+
     it('bleibt stabil bei extrem schnellem Wechsel (Flapping) zwischen online und offline Events', async () => {
       konfigMock({
         backend_url: 'https://api.example.com',
@@ -979,6 +1088,7 @@ describe('DesktopApp', () => {
       await waitFor(() => {
         expect(screen.queryByTestId('tresor-seite')).not.toBeInTheDocument()
         expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
+        expect(screen.queryByTestId('einstellungen-seite')).not.toBeInTheDocument()
       })
     })
   })

@@ -21,7 +21,13 @@ import { Hotkeys } from './Hotkeys'
 
 const STATUS_REIHE: AgentStatus[] = ['bereit', 'hoert', 'denkt', 'spricht']
 
-export function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => void }) {
+export function DesktopIntegration({
+  onKonfigAenderung,
+  offline = false,
+}: {
+  onKonfigAenderung?: () => void
+  offline?: boolean
+}) {
   const { t } = useTranslation()
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
   const [autostart, setAutostart] = useState<boolean | null>(null)
@@ -87,7 +93,9 @@ export function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: 
 
           <Hotkeys />
 
-          <Systembereich />
+          {/* Der Systembereich ist eine Einstellung des Panels. Offline gibt
+              es nichts zu lesen, und ein Klick endete in einem Fehlertoast. */}
+          {!offline && <Systembereich />}
         </>
       )}
 

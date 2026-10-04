@@ -84,12 +84,18 @@ const SPLASH_GESEHEN_KEY = 'mss:splash_gesehen'
 const LETZTE_ROUTE_KEY = 'mss:letzte_route'
 const ERLAUBTE_ROUTEN = ['/ai', '/chat', '/kalender', '/notizen', '/gedaechtnis', '/tresor', '/einstellungen']
 
+/**
+ * Bereiche, die ohne Panel arbeiten. Die Einstellungen stehen immer darin:
+ * Audio, Wake-Word, Hotkeys und Autostart leben auf diesem Gerät, und wer
+ * offline ein Mikrofon umstellen will, darf nicht vor der Tür stehen. Sie
+ * stehen zuletzt, damit der Rückfall ein Inhaltsbereich bleibt.
+ */
 export function getErlaubteOfflineRouten(settings = usePublicSettingsStore.getState()): string[] {
   const routen: string[] = []
   if (settings.vault_enabled) routen.push('/tresor')
   if (settings.calendar_enabled) routen.push('/kalender')
   if (settings.notes_enabled) routen.push('/notizen')
-  if (routen.length === 0) routen.push('/einstellungen')
+  routen.push('/einstellungen')
   return routen
 }
 
@@ -639,7 +645,8 @@ function NavigationEmpfaenger({ isOffline }: { isOffline: boolean }) {
 
         if (isOffline) {
           const offlineRouten = getErlaubteOfflineRouten(publicSettings)
-          if (!offlineRouten.includes(ziel)) {
+          // `/einstellungen?tab=audio` zählt wie `/einstellungen`.
+          if (!offlineRouten.includes(ziel.split(/[?#]/)[0])) {
             navigate(getFallbackOfflineRoute(publicSettings))
             return
           }
@@ -849,7 +856,7 @@ function Hauptseite({
     if (darfTresor) routen.push('/tresor')
     if (darfKalender) routen.push('/kalender')
     if (darfNotizen) routen.push('/notizen')
-    if (routen.length === 0) routen.push('/einstellungen')
+    routen.push('/einstellungen')
     return routen
   }, [darfTresor, darfKalender, darfNotizen])
 
@@ -889,16 +896,12 @@ function Hauptseite({
   )
 
   const profileItems: ProfileDropdownItem[] = [
-    ...(!isOffline
-      ? [
-          {
-            key: 'settings',
-            label: t('mss.app.einstellungen'),
-            icon: <SettingsIcon className="h-4 w-4" />,
-            onClick: () => navigate('/einstellungen'),
-          },
-        ]
-      : []),
+    {
+      key: 'settings',
+      label: t('mss.app.einstellungen'),
+      icon: <SettingsIcon className="h-4 w-4" />,
+      onClick: () => navigate('/einstellungen'),
+    },
     {
       key: 'logout',
       label: t('mss.app.abmelden'),
@@ -1139,20 +1142,18 @@ function Hauptseite({
                 </button>
               )}
 
-              {!isOffline && (
-                <button
-                  type="button"
-                  onClick={() => { navigate('/einstellungen'); setMobileMenuOffen(false); }}
-                  className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
-                    bereich === 'einstellungen'
-                      ? 'bg-primary/15 text-primary border border-primary/30'
-                      : 'text-on-surface hover:bg-surface-container-high'
-                  }`}
-                >
-                  <SettingsIcon className="h-4 w-4" />
-                  <span>{t('mss.app.einstellungen')}</span>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => { navigate('/einstellungen'); setMobileMenuOffen(false); }}
+                className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
+                  bereich === 'einstellungen'
+                    ? 'bg-primary/15 text-primary border border-primary/30'
+                    : 'text-on-surface hover:bg-surface-container-high'
+                }`}
+              >
+                <SettingsIcon className="h-4 w-4" />
+                <span>{t('mss.app.einstellungen')}</span>
+              </button>
             </nav>
 
             <div className="pt-2 border-t border-outline-variant/40">
@@ -1221,7 +1222,7 @@ function Hauptseite({
             </div>
           ) : (
             <div className="mx-auto w-full max-w-3xl flex-1 min-h-0 overflow-y-auto pb-8">
-              <Einstellungen onKonfigAenderung={onKonfigAenderung} />
+              <Einstellungen onKonfigAenderung={onKonfigAenderung} offline={isOffline} />
             </div>
           )}
         </div>

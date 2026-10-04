@@ -6,10 +6,13 @@ import { usePublicLegalSettings } from '@/hooks/usePublicLegalSettings'
 import { Badge, Button } from '@/Singra/UI'
 import { oeffneBrowser } from '../tauri'
 
-export function RechtlichesEinstellungen() {
+export function RechtlichesEinstellungen({ offline = false }: { offline?: boolean }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const legal = usePublicLegalSettings()
+  const impressumAktiv = legal.imprint_enabled && Boolean(legal.imprint_url)
+  // Offline kam die Auskunft nie an. „Inaktiv“ wäre dann eine Behauptung.
+  const impressumUnbekannt = offline && !impressumAktiv
 
   async function impressumOeffnen(url: string) {
     try {
@@ -68,12 +71,12 @@ export function RechtlichesEinstellungen() {
               <h3 className="text-sm font-medium text-on-surface">
                 {t('mss.einstellungen.rechtliches.impressumTitel')}
               </h3>
-              <Badge
-                variant={legal.imprint_enabled && legal.imprint_url ? 'success' : 'default'}
-              >
-                {legal.imprint_enabled && legal.imprint_url
+              <Badge variant={impressumAktiv ? 'success' : 'default'}>
+                {impressumAktiv
                   ? t('mss.einstellungen.rechtliches.impressumAktiv')
-                  : t('mss.einstellungen.rechtliches.impressumInaktiv')}
+                  : impressumUnbekannt
+                    ? t('common.offline')
+                    : t('mss.einstellungen.rechtliches.impressumInaktiv')}
               </Badge>
             </div>
             {legal.imprint_enabled && legal.imprint_url && (

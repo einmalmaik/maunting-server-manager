@@ -6733,6 +6733,10 @@
         "computerUseLink": "View in settings",
         "aktivitaetLaeuft": "AI performing desktop action"
       },
+      "offline": {
+        "titel": "Needs a connection to the server",
+        "text": "These settings live on the server. They will be back here as soon as it can be reached."
+      },
       "autostart": "Start with Windows",
       "autostartFehler": "Autostart could not be changed.",
       "diagnose": "Diagnostics",

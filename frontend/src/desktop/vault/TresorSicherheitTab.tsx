@@ -28,7 +28,7 @@ import { KameraSicherungKarte } from './KameraSicherungKarte'
 
 const istAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
-export function TresorSicherheitTab() {
+export function TresorSicherheitTab({ offline = false }: { offline?: boolean }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
 
@@ -203,7 +203,7 @@ export function TresorSicherheitTab() {
         </div>
       </div>
 
-      {istAndroid && <KameraSicherungKarte />}
+      {istAndroid && <KameraSicherungKarte offline={offline} />}
 
       {/* Biometrie Aktivierungs-Modal */}
       {biometricsModalOpen && (

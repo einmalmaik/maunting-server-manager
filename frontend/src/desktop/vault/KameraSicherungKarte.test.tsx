@@ -56,10 +56,10 @@ const STAND: KameraStand = {
 // Zusammengesetzt, damit im öffentlichen Repo kein Passwort-Literal steht.
 const PASSWORT = 'Konto-' + 'Passwort'
 
-function zeigen() {
+function zeigen(offline = false) {
   return render(
     <MemoryRouter>
-      <KameraSicherungKarte />
+      <KameraSicherungKarte offline={offline} />
       <ConfirmDialog />
     </MemoryRouter>,
   )
@@ -80,6 +80,42 @@ beforeEach(() => {
   kamera.useKameraSicherung.setState({ stand: null })
   useVaultStore.setState({ isUnlocked: true, bucketId: BUCKET })
   anmelden()
+})
+
+describe('ohne Server', () => {
+  it('lässt sich offline nicht einschalten und sagt, warum', () => {
+    zeigen(true)
+    expect(schalter()).toBeDisabled()
+    expect(screen.getByText(i18n.t('mss.einstellungen.offline.titel'))).toBeInTheDocument()
+    fireEvent.click(schalter())
+    expect(screen.queryByLabelText(i18n.t('mss.vault.kamera.passwortLabel'))).toBeNull()
+    expect(kamera.kameraEinschalten).not.toHaveBeenCalled()
+  })
+
+  it('lässt sich offline nicht ausschalten: der Zugang beim Server bliebe sonst stehen', () => {
+    kamera.useKameraSicherung.setState({ stand: STAND })
+    zeigen(true)
+    expect(schalter()).toBeChecked()
+    expect(schalter()).toBeDisabled()
+    fireEvent.click(schalter())
+    expect(kamera.kameraAusschalten).not.toHaveBeenCalled()
+  })
+
+  it('zeigt offline kein Nachweisformular, auch wenn der Zugang weggefallen ist', () => {
+    kamera.useKameraSicherung.setState({ stand: { ...STAND, warten: 'zugang' } })
+    zeigen(true)
+    expect(screen.queryByRole('button', { name: i18n.t('mss.vault.kamera.neuBestaetigen') })).toBeNull()
+  })
+
+  it('WLAN-Schalter bleibt offline Sache des Telefons', async () => {
+    vi.mocked(kamera.kameraNurWlan).mockResolvedValue(undefined as never)
+    kamera.useKameraSicherung.setState({ stand: STAND })
+    zeigen(true)
+    const wlan = screen.getByRole('switch', { name: i18n.t('mss.vault.kamera.nurWlan') })
+    expect(wlan).not.toBeDisabled()
+    fireEvent.click(wlan)
+    await waitFor(() => expect(kamera.kameraNurWlan).toHaveBeenCalledWith(true))
+  })
 })
 
 describe('Einschalten', () => {

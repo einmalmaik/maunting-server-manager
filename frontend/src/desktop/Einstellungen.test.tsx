@@ -71,6 +71,7 @@ vi.mock('@/pages/profile/DatenexportKarte', () => ({
 }))
 
 import i18n from '@/i18n'
+import { api } from '@/api/client'
 import { usePublicSettingsStore, DEFAULT_PUBLIC_SETTINGS } from '@/stores/publicSettingsStore'
 import { Einstellungen } from './Einstellungen'
 import { useVaultStore, type VaultItem } from './vault/vaultStore'
@@ -259,5 +260,106 @@ describe('Einstellungen Component', () => {
     )
 
     expect(await screen.findByRole('tab', { name: txt(reiter), selected: true })).toBeInTheDocument()
+  })
+
+  describe('ohne Server (offline)', () => {
+    const zeichne = (ziel: string, offline = true) =>
+      render(
+        <MemoryRouter initialEntries={[ziel]}>
+          <Einstellungen offline={offline} />
+        </MemoryRouter>,
+      )
+
+    beforeEach(() => {
+      exportTresor = undefined
+    })
+
+    it.each(['konto', 'social'])('?tab=%s zeigt den Serverhinweis statt der Karten und fragt nichts an', async (reiter) => {
+      zeichne(`/einstellungen?tab=${reiter}`)
+
+      expect(await screen.findByText(txt('mss.einstellungen.offline.titel'))).toBeInTheDocument()
+      expect(screen.getByRole('status')).toHaveTextContent(txt('mss.einstellungen.offline.text'))
+      // Der Reiter selbst bleibt gewählt: niemand wird stumm woandershin geschoben.
+      const name = reiter === 'konto' ? 'profile.tabs.account' : 'profile.tabs.social'
+      expect(screen.getByRole('tab', { name: txt(name), selected: true })).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: txt('profile.timezoneTitle') })).not.toBeInTheDocument()
+      expect(exportTresor).toBeUndefined()
+      expect(api).not.toHaveBeenCalled()
+    })
+
+    it('alle Reiter bleiben offline sichtbar', async () => {
+      zeichne('/einstellungen')
+      for (const name of [
+        'profile.tabs.account', 'profile.tabs.security', 'profile.tabs.social', 'mss.einstellungen.tab.desktop',
+        'mss.einstellungen.tab.audio', 'mss.einstellungen.tab.rechtliches', 'mss.einstellungen.tab.gefahr',
+      ]) {
+        expect(await screen.findByRole('tab', { name: txt(name) })).toBeInTheDocument()
+      }
+    })
+
+    it('Desktop: lokale Schalter speichern, der Systembereich des Panels wird nicht angefragt', async () => {
+      zeichne('/einstellungen?tab=desktop')
+
+      const schalter = await screen.findByRole('switch', { name: txt('mss.einstellungen.computerUse.titel') })
+      fireEvent.click(schalter)
+      fireEvent.click(await screen.findByRole('button', { name: txt('mss.einstellungen.computerUse.aktivierenBestaetigen') }))
+
+      await waitFor(() => expect(konfigSpeichernMock).toHaveBeenCalledWith(
+        expect.objectContaining({ computer_use_aktiv: true }),
+      ))
+      expect(api).not.toHaveBeenCalledWith('/ai/settings/desktop')
+      expect(screen.queryByText(txt('mss.systembereich.titel'))).not.toBeInTheDocument()
+      expect(screen.queryByText(txt('mss.einstellungen.offline.titel'))).not.toBeInTheDocument()
+    })
+
+    it('Sicherheit ist offline kein Serverreiter: Messenger-PIN und Tresor stehen da', async () => {
+      usePublicSettingsStore.setState({ ...DEFAULT_PUBLIC_SETTINGS, social_enabled: true, vault_enabled: true, isLoading: false, error: null })
+      zeichne('/einstellungen?tab=sicherheit')
+
+      expect(await screen.findByRole('heading', { name: txt('mss.einstellungen.sicherheit.messenger') })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: txt('mss.einstellungen.sicherheit.tresor') })).toBeInTheDocument()
+      expect(screen.queryByText(txt('mss.einstellungen.offline.titel'))).not.toBeInTheDocument()
+    })
+
+    it('Rechtliches nennt ein unbekanntes Impressum nicht „inaktiv“', async () => {
+      const vorher = { ...mockLegalSettings }
+      mockLegalSettings.imprint_enabled = false
+      mockLegalSettings.imprint_url = ''
+      try {
+        zeichne('/einstellungen?tab=rechtliches')
+        expect(await screen.findByRole('heading', { name: /Betreiber-Impressum/i })).toBeInTheDocument()
+        expect(screen.queryByText(txt('mss.einstellungen.rechtliches.impressumInaktiv'))).not.toBeInTheDocument()
+        expect(screen.getByText(txt('common.offline'))).toBeInTheDocument()
+      } finally {
+        Object.assign(mockLegalSettings, vorher)
+      }
+    })
+
+    it('kommt der Server zurück, erscheint das Konto ohne Neuladen — und verschwindet beim nächsten Ausfall wieder', async () => {
+      const { rerender } = zeichne('/einstellungen?tab=konto')
+      expect(await screen.findByText(txt('mss.einstellungen.offline.titel'))).toBeInTheDocument()
+
+      rerender(
+        <MemoryRouter initialEntries={['/einstellungen?tab=konto']}>
+          <Einstellungen offline={false} />
+        </MemoryRouter>,
+      )
+      expect(await screen.findByRole('heading', { name: txt('profile.timezoneTitle') })).toBeInTheDocument()
+      expect(screen.queryByText(txt('mss.einstellungen.offline.titel'))).not.toBeInTheDocument()
+
+      rerender(
+        <MemoryRouter initialEntries={['/einstellungen?tab=konto']}>
+          <Einstellungen offline />
+        </MemoryRouter>,
+      )
+      expect(await screen.findByText(txt('mss.einstellungen.offline.titel'))).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: txt('profile.timezoneTitle') })).not.toBeInTheDocument()
+    })
+
+    it('online zeigt kein Reiter den Serverhinweis', async () => {
+      zeichne('/einstellungen?tab=konto', false)
+      expect(await screen.findByRole('heading', { name: txt('profile.timezoneTitle') })).toBeInTheDocument()
+      expect(screen.queryByText(txt('mss.einstellungen.offline.titel'))).not.toBeInTheDocument()
+    })
   })
 })

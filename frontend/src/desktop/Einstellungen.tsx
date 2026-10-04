@@ -11,6 +11,11 @@
  *
  * Diese Datei wählt nur den Reiter; die Inhalte liegen je Reiter in
  * `einstellungsreiter/`.
+ *
+ * Offline bleiben alle Reiter sichtbar. Was auf diesem Gerät lebt (Desktop,
+ * Audio, Sicherheit, Rechtliches, Gefahrenzone), geht weiter; Konto und
+ * Sozial liegen auf dem Server und zeigen bis zur Rückkehr nur, dass sie
+ * auf ihn warten — mit einem anderen Symbol schon im Reiter.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -22,10 +27,12 @@ import {
   User,
   Users,
   Volume2,
+  WifiOff,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
+import { Zustandsflaeche } from '@/Singra/UI'
 import { MessengerSicherheitTab } from '@/pages/profile/MessengerSicherheitTab'
 import { DatenexportKarte } from '@/pages/profile/DatenexportKarte'
 import { TresorSicherheitTab } from './vault/TresorSicherheitTab'
@@ -44,6 +51,9 @@ import {
 
 type EinstellungsTab = 'konto' | 'sicherheit' | 'social' | 'desktop' | 'audio' | 'rechtliches' | 'gefahr'
 
+/** Reiter, deren Inhalt nur aus dem Panel kommt. */
+const BRAUCHT_SERVER: ReadonlySet<EinstellungsTab> = new Set(['konto', 'social'])
+
 const FRUEHERE_REITER: Record<string, EinstellungsTab> = {
   profil: 'konto',
   account: 'konto',
@@ -56,7 +66,13 @@ const GRUPPENTITEL = 'font-headline text-title-md font-semibold text-on-surface'
 
 const isAndroidClient = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
-export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () => void }) {
+export function Einstellungen({
+  onKonfigAenderung,
+  offline = false,
+}: {
+  onKonfigAenderung?: () => void
+  offline?: boolean
+}) {
   const { t } = useTranslation()
   const ort = useLocation()
   const navigate = useNavigate()
@@ -66,11 +82,11 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
   const tresorEntsperrt = useVaultStore((s) => s.isUnlocked)
 
   const tabs: TabDef<EinstellungsTab>[] = useMemo(() => [
-    { id: 'konto', labelKey: 'profile.tabs.account', icon: User },
+    { id: 'konto', labelKey: 'profile.tabs.account', icon: offline ? WifiOff : User },
     ...(social || tresorAn
       ? [{ id: 'sicherheit' as const, labelKey: 'profile.tabs.security', icon: Shield }]
       : []),
-    ...(social ? [{ id: 'social' as const, labelKey: 'profile.tabs.social', icon: Users }] : []),
+    ...(social ? [{ id: 'social' as const, labelKey: 'profile.tabs.social', icon: offline ? WifiOff : Users }] : []),
     {
       id: 'desktop',
       labelKey: isAndroidClient ? 'mss.einstellungen.tab.app' : 'mss.einstellungen.tab.desktop',
@@ -79,7 +95,7 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
     { id: 'audio', labelKey: 'mss.einstellungen.tab.audio', icon: Volume2 },
     { id: 'rechtliches', labelKey: 'mss.einstellungen.tab.rechtliches', icon: FileSignature },
     { id: 'gefahr', labelKey: 'mss.einstellungen.tab.gefahr', icon: AlertTriangle, variant: 'danger' },
-  ], [social, tresorAn])
+  ], [social, tresorAn, offline])
 
   const tabAusSuche = useCallback((suche: string): EinstellungsTab => {
     const wunsch = new URLSearchParams(suche).get('tab') ?? ''
@@ -105,7 +121,16 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
         onChange={setTab}
         ariaLabel={t('mss.app.einstellungen')}
       />
-      {tab === 'konto' && (
+      {offline && BRAUCHT_SERVER.has(tab) && (
+        <section className="msm-card">
+          <Zustandsflaeche
+            art="offline"
+            titel={t('mss.einstellungen.offline.titel')}
+            text={t('mss.einstellungen.offline.text')}
+          />
+        </section>
+      )}
+      {tab === 'konto' && !offline && (
         <>
           <KontoEinstellungen />
           <DatenexportKarte
@@ -131,20 +156,20 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
           {tresorAn && (
             <section aria-labelledby="sicherheit-tresor" className="flex flex-col gap-3 pt-2">
               <h2 id="sicherheit-tresor" className={GRUPPENTITEL}>{t('mss.einstellungen.sicherheit.tresor')}</h2>
-              <TresorSicherheitTab />
+              <TresorSicherheitTab offline={offline} />
             </section>
           )}
         </>
       )}
-      {tab === 'social' && <SocialEinstellungen />}
-      {tab === 'desktop' && <DesktopIntegration onKonfigAenderung={onKonfigAenderung} />}
+      {tab === 'social' && !offline && <SocialEinstellungen />}
+      {tab === 'desktop' && <DesktopIntegration onKonfigAenderung={onKonfigAenderung} offline={offline} />}
       {tab === 'audio' && (
         <>
           <AudioEinstellungen />
           <WakewordEinrichtung />
         </>
       )}
-      {tab === 'rechtliches' && <RechtlichesEinstellungen />}
+      {tab === 'rechtliches' && <RechtlichesEinstellungen offline={offline} />}
       {tab === 'gefahr' && <Gefahrenzone />}
     </div>
   )
