@@ -1035,7 +1035,6 @@ export async function saveNoteOffline(
   editingNote?: NoteItem | null
 ): Promise<{ note: NoteItem; queued: boolean }> {
   const now = new Date().toISOString()
-  const localNotes = getOfflineNotes()
   let resultNote: NoteItem
 
   const targetUid = editingNote ? editingNote.note_uid : generateClientEntityId()
@@ -1068,6 +1067,12 @@ export async function saveNoteOffline(
     title: encryptedTitle,
     content: encryptedContent,
   }
+
+  // Erst jetzt lesen, nach dem Verschlüsseln: zwei Speichervorgänge zugleich
+  // lasen sonst denselben Stand, und der zweite überschrieb den ersten. Die
+  // Notiz fehlte dann auf dem Gerät, stand aber in der Warteschlange und
+  // tauchte nach dem Abgleich wieder auf.
+  const localNotes = getOfflineNotes()
 
   if (editingNote) {
     resultNote = {
@@ -1362,6 +1367,73 @@ async function holeGrundbestand(effectiveUid: number): Promise<CalendarEventItem
   return zusammengefuehrt
 }
 
+/** Breitet die Termine des Spiegels zu den Vorkommen im Bereich aus. */
+function vorkommenIm(
+  localEvents: CalendarEventItem[],
+  rangeStart: string,
+  rangeEnd: string,
+  eventType?: string,
+  zeitzone?: string | null,
+): KalenderVorkommen[] {
+  const von = new Date(rangeStart)
+  const bis = new Date(rangeEnd)
+
+  const vorkommen: KalenderVorkommen[] = []
+  for (const ev of localEvents) {
+    if (eventType && eventType !== 'all' && ev.event_type !== eventType) continue
+
+    try {
+      const serie = serieLesen(ev.recurrence)
+      const start = new Date(ev.start)
+      if (isNaN(start.getTime())) continue
+      const rohEnde = ev.end ? new Date(ev.end) : start
+      const ende = isNaN(rohEnde.getTime()) ? start : rohEnde
+
+      for (const v of ausbreiten(serie, start, ende, {
+        ganztaegig: Boolean(ev.all_day),
+        zeitzone,
+        fensterVon: von,
+        fensterBis: bis,
+      })) {
+        vorkommen.push({
+          ...ev,
+          title: v.titel || ev.title,
+          start: v.start.toISOString(),
+          end: v.ende.toISOString(),
+          vorkommen: serie.rrule ? v.schluessel : '',
+          istSerie: Boolean(serie.rrule),
+          // `event_id` ist bei einer Serie für alle Vorkommen dasselbe. Als
+          // React-Schlüssel oder zum Wiederfinden taugt nur beides zusammen.
+          schluessel: serie.rrule ? `${ev.event_id}#${v.schluessel}` : ev.event_id,
+        })
+      }
+    } catch {
+      // Defensiv: Einzelner fehlerhafter Termin soll nicht den gesamten Kalender lahmlegen
+      continue
+    }
+  }
+  vorkommen.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+  return vorkommen
+}
+
+/**
+ * Die Vorkommen im Bereich, nur aus dem lokalen Spiegel, ohne Netz.
+ *
+ * Für die Ansicht, bevor der Server geantwortet hat. Ist er nicht erreichbar,
+ * läuft jede Anfrage erst nach der Zeitgrenze des Betriebssystems ab, auf
+ * Windows nach rund 21 s, und vor dem Termin-Abruf stehen zwei weitere
+ * (Schlüsselabgleich). Bis dahin stand der Kalender leer, obwohl der Spiegel
+ * die Termine hatte.
+ */
+export function kalenderVorkommenLokal(
+  rangeStart: string,
+  rangeEnd: string,
+  eventType?: string,
+  zeitzone?: string | null,
+): KalenderVorkommen[] {
+  return vorkommenIm(getOfflineCalendarEvents(), rangeStart, rangeEnd, eventType, zeitzone)
+}
+
 export async function loadCalendarEventsOfflineFirst(
   rangeStart: string,
   rangeEnd: string,
@@ -1411,44 +1483,7 @@ export async function loadCalendarEventsOfflineFirst(
     isOffline = true
   }
 
-  const von = new Date(rangeStart)
-  const bis = new Date(rangeEnd)
-
-  const vorkommen: KalenderVorkommen[] = []
-  for (const ev of localEvents) {
-    if (eventType && eventType !== 'all' && ev.event_type !== eventType) continue
-
-    try {
-      const serie = serieLesen(ev.recurrence)
-      const start = new Date(ev.start)
-      if (isNaN(start.getTime())) continue
-      const rohEnde = ev.end ? new Date(ev.end) : start
-      const ende = isNaN(rohEnde.getTime()) ? start : rohEnde
-
-      for (const v of ausbreiten(serie, start, ende, {
-        ganztaegig: Boolean(ev.all_day),
-        zeitzone,
-        fensterVon: von,
-        fensterBis: bis,
-      })) {
-        vorkommen.push({
-          ...ev,
-          title: v.titel || ev.title,
-          start: v.start.toISOString(),
-          end: v.ende.toISOString(),
-          vorkommen: serie.rrule ? v.schluessel : '',
-          istSerie: Boolean(serie.rrule),
-          // `event_id` ist bei einer Serie für alle Vorkommen dasselbe. Als
-          // React-Schlüssel oder zum Wiederfinden taugt nur beides zusammen.
-          schluessel: serie.rrule ? `${ev.event_id}#${v.schluessel}` : ev.event_id,
-        })
-      }
-    } catch {
-      // Defensiv: Einzelner fehlerhafter Termin soll nicht den gesamten Kalender lahmlegen
-      continue
-    }
-  }
-  vorkommen.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+  const vorkommen = vorkommenIm(localEvents, rangeStart, rangeEnd, eventType, zeitzone)
 
   if (!isOffline && getOutbox().length > 0) {
     void replayOutbox()
@@ -1473,7 +1508,6 @@ export async function saveCalendarEventOffline(
   },
   formEventId?: string | null
 ): Promise<{ event: CalendarEventItem; queued: boolean }> {
-  const localEvents = getOfflineCalendarEvents()
   let resultEvent: CalendarEventItem
 
   const targetUid = formEventId || generateClientEntityId()
@@ -1507,6 +1541,9 @@ export async function saveCalendarEventOffline(
     location: encryptedLoc,
     recurrence: encryptedRec,
   }
+
+  // Erst nach dem Verschlüsseln lesen (wie bei den Notizen).
+  const localEvents = getOfflineCalendarEvents()
 
   if (formEventId) {
     const existing = localEvents.find((e) => e.event_id === formEventId)

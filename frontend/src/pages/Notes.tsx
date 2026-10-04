@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Archive,
@@ -29,6 +29,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { NotizschluesselHinweis } from '@/components/notes/NotizschluesselHinweis'
 import {
   loadNotesOfflineFirst,
+  getOfflineNotes,
   saveNoteOffline,
   deleteNoteOffline,
   toggleNotePinOffline,
@@ -103,16 +104,28 @@ export function Notes() {
   const [modalTab, setModalTab] = useState<'edit' | 'preview'>('edit')
   const [saving, setSaving] = useState(false)
 
+  // Nur der jüngste Ladelauf darf die Liste setzen (wie im Kalender).
+  const ladeLauf = useRef(0)
+
   const loadNotes = useCallback(async () => {
-    try {
-      setLoading(true)
-      const { notes: data } = await loadNotesOfflineFirst()
-      setNotes(Array.isArray(data) ? data : [])
-    } catch {
-      // Offline fallback
-      setNotes([])
-    } finally {
+    const lauf = ++ladeLauf.current
+    // Zuerst der lokale Spiegel. Ist der Server nicht erreichbar, läuft jede
+    // Anfrage erst nach der Zeitgrenze des Betriebssystems ab, und bis dahin
+    // stand hier nur das Ladegerüst, obwohl die Notizen lokal lagen.
+    const lokal = getOfflineNotes()
+    if (lokal.length > 0) {
+      setNotes(lokal)
       setLoading(false)
+    } else {
+      setLoading(true)
+    }
+    try {
+      const { notes: data } = await loadNotesOfflineFirst()
+      if (lauf === ladeLauf.current) setNotes(Array.isArray(data) ? data : [])
+    } catch {
+      // Der Spiegel steht schon da.
+    } finally {
+      if (lauf === ladeLauf.current) setLoading(false)
     }
   }, [])
 
@@ -160,13 +173,20 @@ export function Notes() {
     setIsModalOpen(true)
   }
 
+  // Riegel gegen Doppelklick. `saving` sperrt den Knopf erst nach dem nächsten
+  // Zeichnen; drei schnelle Klicks legten bis dahin drei Notizen an, von denen
+  // das Gerät nur eine zeigte und der Server später alle drei.
+  const speichertGerade = useRef(false)
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (speichertGerade.current) return
     if (!formTitle.trim()) {
       toast.error(t('notes.titleRequired'))
       return
     }
 
+    speichertGerade.current = true
     try {
       setSaving(true)
       const payload = {
@@ -191,6 +211,7 @@ export function Notes() {
     } catch {
       toast.error(t('notes.saveError'))
     } finally {
+      speichertGerade.current = false
       setSaving(false)
     }
   }
