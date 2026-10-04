@@ -165,6 +165,10 @@ const ABGELOESTE_SCHLUESSEL = [
   'profile.linkedAccounts.linkPasskeyHint',
   'auth.use2FAInstead',
   'auth.usePasskeyInstead',
+  // 04.10.2026: der Wechsel „Stattdessen …" ist einer sichtbaren Wahl
+  // gewichen (`auth.zweitfaktor.wegPasskey`/`wegTotp`, wie beim Login).
+  'auth.zweitfaktor.usePasskey',
+  'auth.zweitfaktor.useCode',
 ]
 
 /** Die Nachfolger muss es geben — sonst wäre das Löschen ein Verlust. */
@@ -210,8 +214,9 @@ const NACHFOLGER = [
   'ai.reasoning.levels.low',
   'ai.reasoning.levels.medium',
   'ai.reasoning.levels.high',
-  'auth.zweitfaktor.usePasskey',
-  'auth.zweitfaktor.useCode',
+  'auth.zweitfaktor.wahl',
+  'auth.zweitfaktor.wegPasskey',
+  'auth.zweitfaktor.wegTotp',
   'auth.zweitfaktor.passkeyHint',
   'auth.zweitfaktor.passkeyHintApp',
   'profile.zweitfaktoren.appEinrichten',

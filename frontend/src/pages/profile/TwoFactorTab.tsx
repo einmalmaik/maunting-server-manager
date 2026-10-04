@@ -37,11 +37,15 @@ interface Einrichtung {
  * Jede Änderung braucht einen Nachweis, der oben in der Karte steht: bei
  * aktiver 2FA ein Faktor, sonst das Passwort. Ein Konto nur mit Social Login
  * hat kein Passwort und richtet den ersten Faktor ohne Nachweis ein.
+ *
+ * Seit 04.10.2026 gibt auch ein Backup-Code einen neuen Faktor frei (und
+ * wird dabei verbraucht). Entfernen, Abschalten und neue Codes bleiben beim
+ * eingerichteten Faktor; mit gewähltem Backup-Code sind sie gesperrt.
  */
 export function TwoFactorTab() {
   const { t } = useTranslation()
   const { user, setUser } = useAuthStore()
-  const faktor = useZweitfaktor()
+  const faktor = useZweitfaktor({ backup: true })
   const an = Boolean(user?.two_factor_enabled)
   const appAktiv = faktor.methoden.includes('totp')
   const brauchtPasswort = !an && user?.has_password !== false
@@ -58,6 +62,10 @@ export function TwoFactorTab() {
 
   const kannBestaetigen = an ? faktor.bereit : !brauchtPasswort || passwort.length > 0
   const gesperrt = laeuft || !kannBestaetigen
+  // Der Backup-Code gibt nur einen neuen Faktor frei; alles, was etwas
+  // wegnimmt, lehnt der Server mit ihm ab.
+  const nurHinzufuegen = an && faktor.wahl === 'backup'
+  const wegnehmenGesperrt = gesperrt || nurHinzufuegen
 
   const passkeysLaden = useCallback(async () => {
     try {
@@ -85,9 +93,9 @@ export function TwoFactorTab() {
     }
   }
 
-  /** Nachweis vor einer Änderung: ein Faktor, ohne 2FA das Passwort. */
+  /** Nachweis vor einem neuen Faktor: ein Faktor oder Backup-Code, ohne 2FA das Passwort. */
   const nachweis = async () => {
-    if (an) return faktor.nachweis('2fa_change')
+    if (an) return faktor.nachweisNeuerFaktor('2fa_change')
     return brauchtPasswort ? { password: passwort } : {}
   }
 
@@ -233,7 +241,10 @@ export function TwoFactorTab() {
         <div className="mb-6 max-w-md space-y-2">
           <p className="text-sm font-medium text-on-surface">{t('profile.zweitfaktoren.nachweisTitel')}</p>
           {an ? (
-            <ZweitfaktorFeld faktor={faktor} id="zweitfaktor-nachweis" disabled={laeuft} />
+            <>
+              <ZweitfaktorFeld faktor={faktor} id="zweitfaktor-nachweis" disabled={laeuft} />
+              {nurHinzufuegen && <p className="msm-field-help">{t('profile.zweitfaktoren.backupNurNeu')}</p>}
+            </>
           ) : (
             <PasswordInput
               id="zweitfaktor-passwort"
@@ -280,7 +291,7 @@ export function TwoFactorTab() {
                   variant="secondary"
                   size="sm"
                   onClick={() => void passkeyEntfernen(eintrag)}
-                  disabled={gesperrt}
+                  disabled={wegnehmenGesperrt}
                   aria-label={t('profile.zweitfaktoren.passkeyEntfernen', {
                     name: eintrag.name || t('profile.zweitfaktoren.passkeyOhneName'),
                   })}
@@ -328,7 +339,7 @@ export function TwoFactorTab() {
             variant="secondary"
             size="sm"
             onClick={() => void appEntfernen()}
-            disabled={gesperrt}
+            disabled={wegnehmenGesperrt}
             className="text-error hover:bg-error/10 hover:text-error"
           >
             <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -398,11 +409,11 @@ export function TwoFactorTab() {
           </h3>
           <p className="text-sm text-on-surface-variant">{t('profile.zweitfaktoren.backupHinweis')}</p>
           <div className="flex flex-wrap gap-3">
-            <Button variant="secondary" onClick={() => void backupCodesNeu()} disabled={gesperrt}>
+            <Button variant="secondary" onClick={() => void backupCodesNeu()} disabled={wegnehmenGesperrt}>
               <RotateCcw className="h-4 w-4" aria-hidden="true" />
               {t('profile.regenerateBackupCodes')}
             </Button>
-            <Button variant="destructive" onClick={() => void ausschalten()} disabled={gesperrt}>
+            <Button variant="destructive" onClick={() => void ausschalten()} disabled={wegnehmenGesperrt}>
               {t('profile.2faDisable')}
             </Button>
           </div>

@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from models import BackupCode, User, UserPasskey
+from models import AuditLog, BackupCode, User, UserPasskey
 from services.auth_service import AuthService
 from services.backup_code_service import BackupCodeService
 from tests._totp import totp_now
@@ -73,6 +73,34 @@ def test_passkey_loescht_die_app_nicht(client: TestClient, db: Session, owner_us
     assert _anmelden(client)["body"]["two_factor_methods"] == ["totp", "passkey"]
     optionen = _anmelden(client)["body"]["passkey_options"]
     assert _anmelden(client, passkey=geraet.bestaetigen(optionen))["status"] == 200
+
+
+def test_am_neuen_handy_weiterer_passkey_per_app_code(
+    client: TestClient, db: Session, owner_user: User, owner_cookies: dict
+):
+    """Fehler 04.10.2026: am Handy ohne Passkey fragte das Profil den Passkey vom PC ab.
+
+    Der Server nahm den App-Code schon immer an. Das Profil waehlt jetzt den
+    zuletzt genutzten Faktor vor und braucht dafuer `two_factor_last_method`.
+    """
+    pc = _passkey_einrichten(client, owner_cookies, name="PC")
+    _totp_aktiv(db, owner_user)
+    assert client.get("/api/auth/me", cookies=owner_cookies).json()["two_factor_last_method"] is None
+
+    # Das Handy meldet sich per App an; den PC-Passkey hat es nicht.
+    client.cookies.clear()
+    anmeldung = _anmelden(client, otp_code=totp_now(GEHEIMNIS))
+    assert anmeldung["status"] == 200, anmeldung["body"]
+    handy_kekse = anmeldung["cookies"]
+    me = client.get("/api/auth/me", cookies=handy_kekse).json()
+    assert me["two_factor_methods"] == ["passkey", "totp"]
+    assert me["two_factor_last_method"] == "totp"
+
+    handy = _passkey_einrichten(client, handy_kekse, {"otp_code": totp_now(GEHEIMNIS, versatz=1)}, name="Handy")
+    assert db.query(UserPasskey).filter(UserPasskey.user_id == owner_user.id).count() == 2
+    client.cookies.clear()
+    optionen = _anmelden(client)["body"]["passkey_options"]
+    assert {c["id"] for c in optionen["allowCredentials"]} == {_b64(pc.kennung), _b64(handy.kennung)}
 
 
 def test_app_neben_passkey_gilt_erst_nach_dem_code(
@@ -143,7 +171,7 @@ def test_social_konto_ohne_passwort_richtet_ohne_nachweis_ein(
 
 
 def test_weiterer_passkey_braucht_einen_faktor(client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
-    """Mit aktiver 2FA reicht das Passwort nicht mehr, und ein Backup-Code auch nicht."""
+    """Mit aktiver 2FA reicht das Passwort nicht mehr, auch kein Backup-Code im Passwortfeld."""
     _passkey_einrichten(client, owner_cookies)
     codes = BackupCodeService.generate_backup_codes(db, owner_user.id)
     for body in (PASSWORT, {"otp_code": "123456"}, {"password": codes[0]}):
@@ -152,6 +180,91 @@ def test_weiterer_passkey_braucht_einen_faktor(client: TestClient, db: Session, 
         )
         assert res.status_code in (403, 422), (body, res.text)
     assert db.query(UserPasskey).count() == 1
+
+
+def test_nur_passkey_konto_legt_am_handy_per_backup_code_einen_passkey_an(
+    client: TestClient, db: Session, owner_user: User, owner_cookies: dict
+):
+    """Entscheidung 04.10.2026: der Passkey vom PC hilft am Handy nicht, die App fehlt.
+
+    Ein Backup-Code meldet an und gibt einen neuen Faktor frei, einmal.
+    """
+    pc = _passkey_einrichten(client, owner_cookies, name="PC")
+    codes = BackupCodeService.generate_backup_codes(db, owner_user.id)
+
+    client.cookies.clear()
+    anmeldung = _anmelden(client, otp_code=codes[0])
+    assert anmeldung["status"] == 200, anmeldung["body"]
+    handy = _passkey_einrichten(client, anmeldung["cookies"], {"backup_code": codes[1]}, name="Handy")
+
+    assert db.query(UserPasskey).filter(UserPasskey.user_id == owner_user.id).count() == 2
+    assert BackupCodeService.get_remaining_count(db, owner_user.id) == 3
+    client.cookies.clear()
+    optionen = _anmelden(client)["body"]["passkey_options"]
+    assert {c["id"] for c in optionen["allowCredentials"]} == {_b64(pc.kennung), _b64(handy.kennung)}
+    eintrag = db.query(AuditLog).filter(AuditLog.action == "auth.2fa.backup.used").one()
+    assert eintrag.user_id == owner_user.id
+
+
+def test_backup_code_gibt_einen_neuen_faktor_nur_einmal_frei(
+    client: TestClient, db: Session, owner_user: User, owner_cookies: dict
+):
+    _passkey_einrichten(client, owner_cookies)
+    codes = BackupCodeService.generate_backup_codes(db, owner_user.id)
+
+    erst = client.post(
+        "/api/auth/2fa/setup", headers=_kopf(owner_cookies), cookies=owner_cookies, json={"backup_code": codes[0]}
+    )
+    assert erst.status_code == 200, erst.text
+    for pfad in ("/api/auth/2fa/passkey/options", "/api/auth/2fa/setup"):
+        noch = client.post(pfad, headers=_kopf(owner_cookies), cookies=owner_cookies, json={"backup_code": codes[0]})
+        assert noch.status_code in (400, 403), (pfad, noch.text)
+    falsch = client.post(
+        "/api/auth/2fa/passkey/options", headers=_kopf(owner_cookies), cookies=owner_cookies,
+        json={"backup_code": "AAAA-AAAA"},
+    )
+    assert falsch.status_code == 403
+    assert "Backup-Code" in falsch.json()["detail"]
+
+
+def test_backup_code_nimmt_nichts_weg(client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
+    """Entfernen, Abschalten und neue Codes bleiben beim eingerichteten Faktor."""
+    _passkey_einrichten(client, owner_cookies)
+    _totp_aktiv(db, owner_user)
+    codes = BackupCodeService.generate_backup_codes(db, owner_user.id)
+    eigene_id = db.query(UserPasskey.id).filter(UserPasskey.user_id == owner_user.id).scalar()
+
+    for pfad in (
+        f"/api/auth/2fa/passkeys/{eigene_id}/remove", "/api/auth/2fa/totp/remove", "/api/auth/2fa/backup/generate",
+    ):
+        res = client.post(pfad, headers=_kopf(owner_cookies), cookies=owner_cookies, json={"backup_code": codes[0]})
+        assert res.status_code == 403, (pfad, res.text)
+        assert "Backup-Code" not in res.json()["detail"]
+    db.refresh(owner_user)
+    assert owner_user.two_factor_methods == ["passkey", "totp"]
+    # Abgewiesen heisst auch: nicht verbraucht.
+    assert BackupCodeService.get_remaining_count(db, owner_user.id) == 5
+
+
+def test_backup_code_verfaellt_nicht_an_der_falschen_adresse(
+    client: TestClient, db: Session, owner_user: User, owner_cookies: dict
+):
+    """Unter fremder Herkunft scheitert das Anlegen ohnehin; der Code darf dabei nicht verfallen.
+
+    Im Betrieb trifft das die App (tauri.localhost), in den Tests gilt die als
+    erlaubt (Debug), deshalb hier eine fremde Adresse.
+    """
+    _passkey_einrichten(client, owner_cookies)
+    codes = BackupCodeService.generate_backup_codes(db, owner_user.id)
+
+    res = client.post(
+        "/api/auth/2fa/passkey/options",
+        headers={**_kopf(owner_cookies), "Origin": "https://fremd.example"},
+        cookies=owner_cookies, json={"backup_code": codes[0]},
+    )
+    assert res.status_code == 400, res.text
+    assert "Adresse des Panels" in res.json()["detail"]
+    assert BackupCodeService.get_remaining_count(db, owner_user.id) == 5
 
 
 def test_backup_codes_nur_mit_faktor(client: TestClient, db: Session, owner_user: User, owner_cookies: dict):

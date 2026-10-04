@@ -19,6 +19,8 @@ export interface User {
   has_password?: boolean
   /** Die aktiven zweiten Faktoren — jede Abfrage bietet nur diese Wege an. */
   two_factor_methods?: Zweitfaktor[]
+  /** Der zuletzt genutzte Faktor; die Abfragen wählen ihn vor. */
+  two_factor_last_method?: string | null
   email_notifications: boolean
   /** Hinweise der KI im Panel. Getrennt von den E-Mails — sie verschickt keine. */
   ai_notifications: boolean

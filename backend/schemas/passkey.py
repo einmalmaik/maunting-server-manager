@@ -93,13 +93,19 @@ class FaktorNachweis(BaseModel):
     """Nachweis, bevor ein zweiter Faktor dazukommt oder wegfaellt.
 
     Bei aktiver 2FA ein eingerichteter Faktor, sonst das Passwort
-    (`passkey_service.frischer_nachweis_fehlt`). Ein Backup-Code gilt hier
-    nicht: er ist der Notausgang, kein Schluessel fuer neue Schluessel.
+    (`passkey_service.frischer_nachweis_fehlt`). Ein Backup-Code gilt nur fuer
+    einen neuen Faktor (App einrichten, Passkey anlegen) und wird dabei
+    verbraucht. Entfernen, Abschalten und neue Codes nimmt er nicht an.
+
+    Bis 04.10.2026 galt er hier gar nicht. Ein Konto nur mit dem Passkey vom
+    PC kam am neuen Handy zwar per Backup-Code hinein, konnte dort aber
+    keinen Passkey anlegen: dafuer verlangte das Profil den Passkey vom PC.
     """
 
     password: str | None = Field(None, max_length=256)
     otp_code: str | None = Field(None, pattern=r"^\d{6}$")
     passkey: Zweitnachweis | None = None
+    backup_code: str | None = Field(None, max_length=16)
 
 
 class PasskeyHinzufuegen(PasskeyAnlage):

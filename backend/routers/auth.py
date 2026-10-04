@@ -1394,12 +1394,16 @@ def delete_account(
 # 2FA mit einem eingerichteten Faktor, sonst mit dem Passwort. Ein Konto nur
 # mit Social Login hat kein Passwort; es darf seinen ersten Faktor ohne
 # Nachweis einrichten (Entscheidung des Betreibers vom 29.09.2026).
+# Einen neuen Faktor darf auch ein Backup-Code freigeben (Entscheidung vom
+# 04.10.2026); er wird dabei verbraucht.
 # `two_factor_enabled` setzt nur `passkey_service.faktoren_nachziehen`.
 
 _MAX_PASSKEYS = 20
 
 
-def _faktor_nachweis(db: Session, user: User, req: FaktorNachweis | None) -> None:
+def _faktor_nachweis(
+    db: Session, user: User, req: FaktorNachweis | None, *, neuer_faktor: bool = False
+) -> None:
     if not user.two_factor_enabled and not user.has_password:
         return
     req = req or FaktorNachweis()
@@ -1410,8 +1414,14 @@ def _faktor_nachweis(db: Session, user: User, req: FaktorNachweis | None) -> Non
         passkey=req.passkey.model_dump() if req.passkey else None,
         zweck="2fa_change",
     )
-    if fehlt:
-        raise HTTPException(status_code=403, detail=fehlt)
+    if not fehlt:
+        return
+    if neuer_faktor and user.two_factor_enabled:
+        if req.backup_code and BackupCodeService.validate_backup_code(db, user.id, req.backup_code):
+            _faktor_audit(db, user, "auth.2fa.backup.used", zweck="neuer_faktor")
+            return
+        fehlt += " Alternativ geht ein Backup-Code."
+    raise HTTPException(status_code=403, detail=fehlt)
 
 
 def _faktor_audit(db: Session, user: User, action: str, **details) -> None:
@@ -1454,7 +1464,7 @@ def setup_2fa(
             status_code=400,
             detail="Die Authenticator-App ist schon eingerichtet. Entferne sie zuerst.",
         )
-    _faktor_nachweis(db, user, req)
+    _faktor_nachweis(db, user, req, neuer_faktor=True)
     secret = DisClient.generate_totp_secret()
     user.two_factor_secret_pending_encrypted = AuthService.encrypt_secret(
         secret, aad=f"msm:user:{user.id}:2fa"
@@ -1547,7 +1557,13 @@ def passkey_anlege_optionen(
     """
     if len(user.passkeys) >= _MAX_PASSKEYS:
         raise HTTPException(status_code=400, detail=f"Höchstens {_MAX_PASSKEYS} Passkeys je Konto.")
-    _faktor_nachweis(db, user, req)
+    # Die Herkunft vor dem Nachweis: ein Backup-Code verfiele sonst fuer
+    # eine Anfrage, die ohnehin scheitert (etwa aus der App, tauri.localhost).
+    try:
+        passkey_service.rp_id_fuer(request.headers.get("origin"))
+    except passkey_service.PasskeyFehler as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _faktor_nachweis(db, user, req, neuer_faktor=True)
     try:
         return passkey_service.anlege_optionen(db, user, request.headers.get("origin"))
     except passkey_service.PasskeyFehler as e:

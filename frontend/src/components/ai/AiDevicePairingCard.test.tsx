@@ -253,7 +253,7 @@ describe('AiDevicePairingCard — nur eingerichtete Faktoren', () => {
       screen.queryByRole('button', { name: i18n.t('ai.profile.devicesProofPasskey') }),
     ).not.toBeInTheDocument()
     // Nur ein Faktor: kein Wechsel zu einem Weg, den das Konto nicht hat.
-    expect(screen.queryByRole('button', { name: i18n.t('auth.zweitfaktor.usePasskey') })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: i18n.t('auth.zweitfaktor.wegPasskey') })).not.toBeInTheDocument()
   })
 
   it('Konto mit beiden: erst der Passkey, per Wechsel der Code', async () => {
@@ -266,7 +266,7 @@ describe('AiDevicePairingCard — nur eingerichtete Faktoren', () => {
     render(<AiDevicePairingCard />)
 
     expect(screen.queryByLabelText(i18n.t('ai.profile.devicesProofOtp'))).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: i18n.t('auth.zweitfaktor.useCode') }))
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('auth.zweitfaktor.wegTotp') }))
     fireEvent.change(screen.getByLabelText(i18n.t('ai.profile.devicesProofOtp')), { target: { value: '123456' } })
     fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.profile.devicesPair') }))
 

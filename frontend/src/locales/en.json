@@ -2851,8 +2851,7 @@
       "codeLabel": "Code from your authenticator app",
       "passkeyHint": "After the click, your passkey will ask for confirmation.",
       "passkeyHintApp": "After the click, your browser opens. Confirm with your passkey there.",
-      "usePasskey": "Confirm with a passkey instead",
-      "useCode": "Enter the code from your app instead",
+      "wahl": "Confirm with",
       "andereMethode": "Other method:",
       "wegPasskey": "Use a passkey",
       "wegTotp": "Use the authenticator app"
@@ -3851,6 +3850,7 @@
       "appGespeichert": "Authenticator app set up.",
       "appEntfernt": "Authenticator app removed.",
       "backupHinweis": "For when neither a passkey nor the app is at hand. Each code works once.",
+      "backupNurNeu": "A backup code only unlocks a new passkey or the authenticator app and is used up afterwards. Removing or turning off needs a passkey or the app.",
       "letzterTitel": "Remove your last factor?",
       "letzterText": "Two-factor sign-in will be off afterwards, and your backup codes expire.",
       "ausschaltenTitel": "Turn off two-factor sign-in?",

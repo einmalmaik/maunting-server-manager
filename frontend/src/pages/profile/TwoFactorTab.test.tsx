@@ -21,10 +21,17 @@ vi.mock('@/api/client', async () => {
 })
 
 const NACHWEIS = { type: 'browser', vorgang: 'v'.repeat(20) }
+const ANLAGE = { id: 'neu', rawId: 'neu', type: 'public-key', response: {} }
 
 vi.mock('@/services/passkeyService', async () => {
   const actual = await vi.importActual<typeof import('@/services/passkeyService')>('@/services/passkeyService')
-  return { ...actual, passkeyNachweis: vi.fn(async () => NACHWEIS), inDerApp: () => false }
+  return {
+    ...actual,
+    passkeyNachweis: vi.fn(async () => NACHWEIS),
+    passkeyAnlegen: vi.fn(async () => ANLAGE),
+    webauthnVerfuegbar: () => true,
+    inDerApp: () => false,
+  }
 })
 
 const QR = 'data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%3E%3C%2Fsvg%3E'
@@ -158,13 +165,91 @@ describe('Mehrere Faktoren', () => {
     expect(await screen.findByText(t('profile.zweitfaktoren.nurEinFaktor'))).toBeInTheDocument()
   })
 
+  it('zeigt beide Wege sichtbar zur Wahl, ohne Vorgeschichte steht der Passkey vorn', () => {
+    anmelden({ two_factor_enabled: true, two_factor_methods: ['passkey', 'totp'] })
+    antworten({ '/auth/2fa/passkeys': [PASSKEYS[0]] })
+    render(<TwoFactorTab />)
+
+    expect(screen.getByRole('button', { name: t('auth.zweitfaktor.wegPasskey') })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: t('auth.zweitfaktor.wegTotp') })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByLabelText(t('auth.zweitfaktor.codeLabel'))).not.toBeInTheDocument()
+  })
+
+  it('am neuen Handy: weiterer Passkey per App-Code, ohne den Passkey vom PC abzufragen', async () => {
+    // Fehler 04.10.2026: Angemeldet per App-Code, trotzdem stand der Passkey
+    // vorn, und "Passkey hinzufuegen" fragte zuerst den Passkey vom PC ab.
+    anmelden({ two_factor_enabled: true, two_factor_methods: ['passkey', 'totp'], two_factor_last_method: 'totp' })
+    antworten({
+      '/auth/2fa/passkeys': [PASSKEYS[0]],
+      '/auth/2fa/passkey/options': { challenge: 'c' },
+      '/auth/2fa/passkey/enable': { id: 2 },
+      '/auth/me': { id: 1, two_factor_enabled: true, two_factor_methods: ['passkey', 'totp'] },
+    })
+    render(<TwoFactorTab />)
+
+    expect(screen.getByRole('button', { name: t('auth.zweitfaktor.wegTotp') })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.change(screen.getByLabelText(t('auth.zweitfaktor.codeLabel')), { target: { value: '654321' } })
+    fireEvent.change(screen.getByLabelText(t('profile.zweitfaktoren.passkeyName')), { target: { value: 'Handy' } })
+    fireEvent.click(screen.getByRole('button', { name: t('profile.zweitfaktoren.passkeyHinzufuegen') }))
+
+    await screen.findByText(t('profile.zweitfaktoren.passkeyGespeichert'))
+    expect(passkeyNachweis).not.toHaveBeenCalled()
+    expect(JSON.parse(String(aufrufe('/auth/2fa/passkey/options')[0][1]?.body))).toEqual({ otp_code: '654321' })
+    expect(JSON.parse(String(aufrufe('/auth/2fa/passkey/enable')[0][1]?.body))).toMatchObject({ name: 'Handy' })
+  })
+
+  it('nur mit dem Passkey vom PC: am Handy gibt ein Backup-Code den neuen Passkey frei', async () => {
+    // Entscheidung 04.10.2026: der Backup-Code gilt fuer einen neuen Faktor, fuer nichts sonst.
+    anmelden({ two_factor_enabled: true, two_factor_methods: ['passkey'] })
+    antworten({
+      '/auth/2fa/passkeys': [PASSKEYS[0]],
+      '/auth/2fa/passkey/options': { challenge: 'c' },
+      '/auth/2fa/passkey/enable': { id: 2 },
+      '/auth/me': { id: 1, two_factor_enabled: true, two_factor_methods: ['passkey'] },
+    })
+    render(<TwoFactorTab />)
+
+    await screen.findByText('PC')
+    fireEvent.click(screen.getByRole('button', { name: t('auth.useBackupCode') }))
+    expect(screen.getByRole('button', { name: t('auth.useBackupCode') })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: t('auth.zweitfaktor.wegPasskey') })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByText(t('profile.zweitfaktoren.backupNurNeu'))).toBeInTheDocument()
+    // Was etwas wegnimmt, nimmt der Server mit dem Backup-Code nicht an.
+    for (const name of [
+      t('profile.zweitfaktoren.passkeyEntfernen', { name: 'PC' }),
+      t('profile.regenerateBackupCodes'),
+      t('profile.2faDisable'),
+    ]) {
+      expect(screen.getByRole('button', { name })).toBeDisabled()
+    }
+    const hinzufuegen = screen.getByRole('button', { name: t('profile.zweitfaktoren.passkeyHinzufuegen') })
+    fireEvent.change(screen.getByLabelText(t('auth.backupCode')), { target: { value: 'abcd-efg' } })
+    expect(hinzufuegen).toBeDisabled()
+    fireEvent.change(screen.getByLabelText(t('auth.backupCode')), { target: { value: 'abcd-efgh' } })
+    fireEvent.click(hinzufuegen)
+
+    await screen.findByText(t('profile.zweitfaktoren.passkeyGespeichert'))
+    expect(passkeyNachweis).not.toHaveBeenCalled()
+    expect(JSON.parse(String(aufrufe('/auth/2fa/passkey/options')[0][1]?.body))).toEqual({ backup_code: 'ABCD-EFGH' })
+  })
+
+  it('ein veralteter letzter Faktor zaehlt nicht: ohne App bleibt es beim Passkey', () => {
+    anmelden({ two_factor_enabled: true, two_factor_methods: ['passkey'], two_factor_last_method: 'totp' })
+    antworten({ '/auth/2fa/passkeys': [PASSKEYS[0]] })
+    render(<TwoFactorTab />)
+
+    expect(screen.queryByLabelText(t('auth.zweitfaktor.codeLabel'))).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: t('auth.zweitfaktor.wegTotp') })).not.toBeInTheDocument()
+    expect(screen.getByText(t('auth.zweitfaktor.passkeyHint'))).toBeInTheDocument()
+  })
+
   it('erneuert Backup-Codes nur mit einem Faktor, hier dem Code aus der App', async () => {
     anmelden({ two_factor_enabled: true, two_factor_methods: ['passkey', 'totp'] })
     antworten({ '/auth/2fa/passkeys': [PASSKEYS[0]], '/auth/2fa/backup/generate': { codes: ['CCCC-DDDD'] } })
     render(<TwoFactorTab />)
 
     const erneuern = screen.getByRole('button', { name: t('profile.regenerateBackupCodes') })
-    fireEvent.click(screen.getByRole('button', { name: t('auth.zweitfaktor.useCode') }))
+    fireEvent.click(screen.getByRole('button', { name: t('auth.zweitfaktor.wegTotp') }))
     expect(erneuern).toBeDisabled()
     fireEvent.change(screen.getByLabelText(t('auth.zweitfaktor.codeLabel')), { target: { value: '654321' } })
     fireEvent.click(erneuern)

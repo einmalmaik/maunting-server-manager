@@ -155,6 +155,10 @@ class UserResponse(BaseModel):
     # Die aktiven Faktoren ("passkey", "totp") — jede Abfrage zeigt nur Wege,
     # die das Konto eingerichtet hat.
     two_factor_methods: list[Literal["passkey", "totp"]] = []
+    # Der zuletzt genutzte Faktor. Die Abfragen im Profil waehlen ihn vor:
+    # wer sich am neuen Handy per App-Code angemeldet hat, hat dort meist
+    # noch keinen Passkey (Fehler 04.10.2026).
+    two_factor_last_method: str | None = None
     email_notifications: bool
     ai_notifications: bool = True
     device_notifications: bool = True

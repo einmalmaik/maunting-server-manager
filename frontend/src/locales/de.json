@@ -2851,8 +2851,7 @@
       "codeLabel": "Code aus der Authenticator-App",
       "passkeyHint": "Nach dem Klick fragt dein Passkey nach.",
       "passkeyHintApp": "Nach dem Klick öffnet sich dein Browser. Dort bestätigst du mit deinem Passkey.",
-      "usePasskey": "Stattdessen mit Passkey bestätigen",
-      "useCode": "Stattdessen den Code aus der App eingeben",
+      "wahl": "Bestätigen mit",
       "andereMethode": "Andere Methode:",
       "wegPasskey": "Passkey verwenden",
       "wegTotp": "Authenticator-App verwenden"
@@ -3851,6 +3850,7 @@
       "appGespeichert": "Authenticator-App eingerichtet.",
       "appEntfernt": "Authenticator-App entfernt.",
       "backupHinweis": "Für den Fall, dass kein Passkey und keine App zur Hand ist. Jeder Code gilt einmal.",
+      "backupNurNeu": "Ein Backup-Code gibt nur einen neuen Passkey oder die Authenticator-App frei und gilt danach nicht mehr. Entfernen und Abschalten gehen nur mit Passkey oder App.",
       "letzterTitel": "Letzten Faktor entfernen?",
       "letzterText": "Danach ist die Zwei-Faktor-Anmeldung aus, und deine Backup-Codes verfallen.",
       "ausschaltenTitel": "Zwei-Faktor-Anmeldung ausschalten?",
