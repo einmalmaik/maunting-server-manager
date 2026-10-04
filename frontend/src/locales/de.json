@@ -134,7 +134,14 @@
     "badgeTeam": "Team: {{name}}",
     "badgeTeamEvent": "Team-Termin",
     "badgeServer": "Server: {{name}}",
-    "badgeNode": "Node / Infrastruktur"
+    "badgeNode": "Node / Infrastruktur",
+    "testReminderNoPopup": "Test-Erinnerung erzeugt. Falls kein Pop-up erscheint, erlaube Benachrichtigungen für diese App in den Einstellungen des Geräts.",
+    "noEventsShort": "Keine Termine",
+    "eventsThisDay_one": "{{count}} Termin an diesem Tag",
+    "eventsThisDay_other": "{{count}} Termine an diesem Tag",
+    "createEventAction": "Termin erstellen",
+    "moreEvents_one": "+{{count}} weiterer",
+    "moreEvents_other": "+{{count}} weitere"
   },
   "pageContext": {
     "overview": "Übersicht",

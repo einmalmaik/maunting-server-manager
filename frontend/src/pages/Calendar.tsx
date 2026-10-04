@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   BellRing,
@@ -32,6 +32,7 @@ import {
   saveCalendarEventOffline,
   deleteCalendarEventOffline,
   getOfflineCalendarEvents,
+  kalenderVorkommenLokal,
   useEntitySync,
 } from '@/lib/offlineSync'
 import {
@@ -208,13 +209,21 @@ export function Calendar() {
   // anderes an, als die Erinnerung meldet.
   const kontoZeitzone = useAuthStore((s) => s.user?.time_zone) || null
 
+  // Nur die jüngste Anfrage darf die Ansicht setzen. Ist der Server nicht
+  // erreichbar, kommt die Antwort für den vorigen Monat erst nach der
+  // Zeitgrenze an und überschriebe sonst den, der gerade zu sehen ist.
+  const ladeLauf = useRef(0)
+
   const fetchEvents = useCallback(() => {
+    const lauf = ++ladeLauf.current
+    // Zuerst der lokale Spiegel, ohne auf das Netz zu warten.
+    setEvents(kalenderVorkommenLokal(rangeStart, rangeEnd, selectedCategory, kontoZeitzone))
     loadCalendarEventsOfflineFirst(rangeStart, rangeEnd, selectedCategory, undefined, kontoZeitzone)
       .then(({ events: data }) => {
-        setEvents(Array.isArray(data) ? data : [])
+        if (lauf === ladeLauf.current) setEvents(Array.isArray(data) ? data : [])
       })
       .catch(() => {
-        setEvents([])
+        // Der Spiegel steht schon da.
       })
   }, [rangeStart, rangeEnd, selectedCategory, kontoZeitzone])
 
@@ -285,8 +294,8 @@ export function Calendar() {
       }>('/calendar/test-reminder', { method: 'POST' })
 
       const sent = await sendeGeraeteBenachrichtigung({
-        titel: `Terminerinnerung (${res.time_hint})`,
-        text: `${res.title} am ${res.start}`,
+        titel: t('notifications.reminderTitle', { wann: res.time_hint }),
+        text: t('notifications.reminderText', { titel: res.title, start: res.start }),
         erzwingen: true,
       })
 
@@ -295,9 +304,7 @@ export function Calendar() {
       } else if (sent) {
         toast.success(t('calendar.testReminderSent'))
       } else {
-        toast.error(
-          'Test-Erinnerung generiert. Falls kein Pop-up erscheint, bitte Benachrichtigungen für diese App in den Smartphone-Einstellungen erlauben.'
-        )
+        toast.error(t('calendar.testReminderNoPopup'))
       }
     } catch {
       toast.error(t('calendar.testReminderError'))
@@ -462,13 +469,19 @@ export function Calendar() {
     formEventId && formVorkommen && formSerie.rrule && formUmfang === 'einzeln',
   )
 
+  // Riegel gegen Doppelklick. `saving` sperrt den Knopf erst nach dem nächsten
+  // Zeichnen; drei schnelle Klicks legten bis dahin drei Termine an.
+  const speichertGerade = useRef(false)
+
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (speichertGerade.current) return
     if (!formTitle.trim()) {
       toast.error(t('calendar.titleRequired'))
       return
     }
 
+    speichertGerade.current = true
     setSaving(true)
     try {
       // Ein einzelnes Vorkommen zu ändern heißt **nicht**, den Termin zu
@@ -527,6 +540,7 @@ export function Calendar() {
     } catch (err: any) {
       toast.error(err.message)
     } finally {
+      speichertGerade.current = false
       setSaving(false)
     }
   }
@@ -880,7 +894,7 @@ export function Calendar() {
           <Button variant="secondary" size="sm" onClick={handleToday}>
             {t('calendar.today')}
           </Button>
-          <Button variant="secondary" size="sm" onClick={handleNext} aria-label="Vor">
+          <Button variant="secondary" size="sm" onClick={handleNext} aria-label={t('common.next')}>
             <ChevronRight className="w-4 h-4" />
           </Button>
           <span className="font-headline text-title-lg font-bold text-on-surface ml-3">
@@ -938,13 +952,9 @@ export function Calendar() {
           <div className="msm-card p-0 overflow-hidden">
           {/* Wochentag-Kopfzeile */}
           <div className="grid grid-cols-7 border-b border-outline-variant/40 bg-surface-container/50 text-center font-label-md text-xs font-semibold uppercase tracking-wider text-on-surface-variant py-2.5">
-            <div>Mo</div>
-            <div>Di</div>
-            <div>Mi</div>
-            <div>Do</div>
-            <div>Fr</div>
-            <div>Sa</div>
-            <div>So</div>
+            {WOCHENTAG_KUERZEL.map((kuerzel) => (
+              <div key={kuerzel}>{t(`calendar.recurrence.weekday.${kuerzel}`)}</div>
+            ))}
           </div>
 
           {/* Tages-Zellen */}
@@ -1005,7 +1015,7 @@ export function Calendar() {
                     })}
                     {dayEvents.length > 3 && (
                       <div className="text-label-sm text-primary/80 font-medium px-1">
-                        +{dayEvents.length - 3} weitere
+                        {t('calendar.moreEvents', { count: dayEvents.length - 3 })}
                       </div>
                     )}
                   </div>
@@ -1051,7 +1061,7 @@ export function Calendar() {
                   >
                     {dayEvents.length === 0 ? (
                       <div className="h-full flex items-center justify-center text-xs text-on-surface-variant/40 italic">
-                        Keine Termine
+                        {t('calendar.noEventsShort')}
                       </div>
                     ) : (
                       dayEvents.map((ev) => {
@@ -1124,7 +1134,7 @@ export function Calendar() {
                       </span>
                       {isToday && (
                         <span className="text-label-sm font-semibold uppercase px-1.5 py-0.5 rounded bg-primary/15 text-primary">
-                          Heute
+                          {t('calendar.today')}
                         </span>
                       )}
                     </div>
@@ -1204,12 +1214,12 @@ export function Calendar() {
                 {currentDate.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
               </h3>
               <p className="text-xs text-on-surface-variant">
-                {getEventsForDay(currentDate).length} Termine für diesen Tag eingetragen
+                {t('calendar.eventsThisDay', { count: getEventsForDay(currentDate).length })}
               </p>
             </div>
             <Button size="sm" onClick={() => openCreateModal(currentDate)} className="gap-1">
               <Plus className="w-4 h-4" />
-              Neuer Termin
+              {t('calendar.createEvent')}
             </Button>
           </div>
 
@@ -1225,7 +1235,7 @@ export function Calendar() {
                   className="mt-4 gap-1.5"
                 >
                   <Plus className="w-4 h-4" />
-                  Termin erstellen
+                  {t('calendar.createEventAction')}
                 </Button>
               </div>
             ) : (
@@ -1246,11 +1256,14 @@ export function Calendar() {
                     className={`p-4 rounded-xl border cursor-pointer transition-all hover:scale-[1.01] ${colorStyle.flaecheStark} ${colorStyle.text} ${colorStyle.rand}`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-headline font-bold text-base">{ev.title}</h4>
+                      {/* min-w-0 + break-words: ein langer Titel ohne Leerzeichen
+                          lief sonst über die Karte hinaus, und die Seite scrollte
+                          seitwärts. */}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <h4 className="font-headline font-bold text-base min-w-0 break-words">{ev.title}</h4>
                         {renderCategoryBadge(ev)}
                       </div>
-                      <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-surface/50">
+                      <span className="shrink-0 text-xs font-mono font-semibold px-2 py-0.5 rounded bg-surface/50">
                         {startStr} – {endStr}
                       </span>
                     </div>

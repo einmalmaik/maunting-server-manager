@@ -107,7 +107,83 @@ describe('Calendar Page Component', () => {
     const dayBtn = screen.getByRole('button', { name: 'Tag' })
     fireEvent.click(dayBtn)
 
-    expect(screen.getByText(/Termine für diesen Tag eingetragen/i)).toBeInTheDocument()
+    expect(screen.getByText('0 Termine an diesem Tag')).toBeInTheDocument()
+  })
+
+  // Die englische Oberfläche (MSS Android, en-US) zeigte bis 10/2026 feste
+  // deutsche Texte: Wochentage „Mo Di Mi …", „Neuer Termin", „Keine Termine",
+  // „Heute" und den Weiter-Knopf als „Vor".
+  it('zeigt in der englischen Oberfläche keine festen deutschen Texte', async () => {
+    vi.mocked(client.api).mockResolvedValue([])
+    await i18n.changeLanguage('en')
+    try {
+      const { container } = render(
+        <MemoryRouter>
+          <Calendar />
+        </MemoryRouter>,
+      )
+
+      for (const tag of ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']) {
+        expect(screen.getAllByText(tag).length).toBeGreaterThan(0)
+      }
+      for (const deutsch of ['Di', 'Mi', 'Do', 'So']) {
+        expect(screen.queryByText(deutsch)).not.toBeInTheDocument()
+      }
+      expect(screen.getByRole('button', { name: 'Next' })).toBeInTheDocument()
+      expect(container.querySelector('[aria-label="Vor"]')).toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Week' }))
+      expect(screen.getAllByText('No events').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('Today').length).toBeGreaterThan(0)
+      expect(screen.queryByText('Keine Termine')).not.toBeInTheDocument()
+      expect(screen.queryByText('Heute')).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Day' }))
+      expect(screen.getByText('0 events on this day')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /New event/ })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Create event/ })).toBeInTheDocument()
+      expect(container.textContent).not.toMatch(/Neuer Termin|Termin erstellen|Termine für diesen Tag/)
+    } finally {
+      await i18n.changeLanguage('de')
+    }
+  })
+
+  // Ein voller Tag in der Monatsansicht zeigte „+2 weitere" auch auf Englisch.
+  // Durchsucht alle drei Ansichten nach deutschen Wörtern.
+  it('zeigt auch mit vollen Tagen auf Englisch kein Deutsch', async () => {
+    const now = new Date()
+    const termine = [1, 2, 3, 4, 5].map((i) => ({
+      id: i,
+      event_id: `evt-voll-${i}`,
+      title: `Full ${i}`,
+      start: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 8 + i, 0, 0).toISOString(),
+      end: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9 + i, 0, 0).toISOString(),
+      color: 'primary',
+      event_type: 'team',
+    }))
+    vi.mocked(client.api).mockImplementation(async (pfad: string) =>
+      pfad.startsWith('/calendar/events') ? termine : [],
+    )
+    await i18n.changeLanguage('en')
+    try {
+      const { container } = render(
+        <MemoryRouter>
+          <Calendar />
+        </MemoryRouter>,
+      )
+      expect(await screen.findByText('+2 more')).toBeInTheDocument()
+
+      const DEUTSCH = /\b(weitere|weiterer|Termine?|Heute|Keine|Neuer|erstellen|für|diesen|eingetragen|Vor)\b/
+      expect(container.textContent).not.toMatch(DEUTSCH)
+      fireEvent.click(screen.getByRole('button', { name: 'Week' }))
+      expect(container.textContent).not.toMatch(DEUTSCH)
+      fireEvent.click(screen.getByRole('button', { name: 'Today' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Day' }))
+      expect(await screen.findByText('5 events on this day')).toBeInTheDocument()
+      expect(container.textContent).not.toMatch(DEUTSCH)
+    } finally {
+      await i18n.changeLanguage('de')
+    }
   })
 
   it('opens create event modal when clicking on a calendar day', async () => {

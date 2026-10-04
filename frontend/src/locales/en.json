@@ -134,7 +134,14 @@
     "badgeTeam": "Team: {{name}}",
     "badgeTeamEvent": "Team event",
     "badgeServer": "Server: {{name}}",
-    "badgeNode": "Node / infrastructure"
+    "badgeNode": "Node / infrastructure",
+    "testReminderNoPopup": "Test reminder created. If no pop-up appears, allow notifications for this app in the device settings.",
+    "noEventsShort": "No events",
+    "eventsThisDay_one": "{{count}} event on this day",
+    "eventsThisDay_other": "{{count}} events on this day",
+    "createEventAction": "Create event",
+    "moreEvents_one": "+{{count}} more",
+    "moreEvents_other": "+{{count}} more"
   },
   "pageContext": {
     "overview": "Overview",
