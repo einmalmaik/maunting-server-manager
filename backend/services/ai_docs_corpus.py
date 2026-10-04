@@ -127,9 +127,10 @@ SEITEN: dict[str, Seite] = {
     ),
 }
 
-# Stand der Datenschutzerklaerung. Er steht als Literal in `Privacy.tsx` und in
-# keiner Sprachdatei — also genau die zwei Angaben, die ein Modell sonst
-# erfindet. Ein Test haelt sie gegen die TSX-Datei.
+# Stand der Datenschutzerklaerung. Er steht als Literal in
+# `frontend/src/pages/datenschutzStand.ts` und in keiner Sprachdatei — also
+# genau die zwei Angaben, die ein Modell sonst erfindet. Ein Test haelt sie
+# gegen diese Datei.
 DATENSCHUTZ_VERSION = "3.22"
 DATENSCHUTZ_STAND = "2026-10-04"
 

@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Outlet } from 'react-router-dom';
 import { Privacy } from './Privacy';
+import { DATENSCHUTZ_VERSION } from './datenschutzStand';
+import { RechtlichesEinstellungen } from '@/desktop/einstellungsreiter/RechtlichesEinstellungen';
 import App from '@/App';
 import { useAuthStore } from '@/stores/authStore';
 import i18n from '@/i18n';
@@ -217,6 +219,21 @@ describe('Privacy page', () => {
     // vergleicht den Text, ein Archiv das Attribut.
     expect(stand).toHaveAttribute('datetime', '2026-10-04');
     expect(stand).toHaveTextContent('2026-10-04');
+  });
+
+  it('nennt in den Einstellungen der App dieselbe Fassung wie die Erklärung selbst', () => {
+    // Bis 04.10.2026 stand dort fest „v2.7", während die Erklärung bei 3.22 war.
+    apiMock.mockResolvedValue({ imprint_enabled: false, imprint_url: '' });
+    renderPrivacy();
+    const nummer = DATENSCHUTZ_VERSION.replaceAll('.', '\\.');
+    expect(screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?${nummer}`))).toBeInTheDocument();
+    const fassung = new RegExp(`v${nummer}$`);
+    const einstellungen = render(
+      <MemoryRouter>
+        <RechtlichesEinstellungen />
+      </MemoryRouter>,
+    );
+    expect(within(einstellungen.container).getByText(fassung)).toBeInTheDocument();
   });
 
   /**

@@ -86,14 +86,18 @@ def test_the_oauth_order_is_the_rendered_order() -> None:
 
 
 def test_the_privacy_date_and_version_match_the_page() -> None:
-    """Beides steht als Literal in `Privacy.tsx` und in keiner Sprachdatei.
+    """Beides steht als Literal in `datenschutzStand.ts` und in keiner Sprachdatei.
 
     Genau die zwei Angaben, die ein Modell auf die Frage "von wann ist die
-    Datenschutzerklaerung?" sonst erfindet.
+    Datenschutzerklaerung?" sonst erfindet. Bis 04.10.2026 standen sie in
+    `Privacy.tsx`; seitdem liest auch die App (Einstellungen > Rechtliches)
+    dieselbe Datei, vorher nannte sie fest "v2.7".
     """
-    quelle = (FRONTEND / "pages" / "Privacy.tsx").read_text(encoding="utf-8")
-    assert f"lastUpdated: '{korpus.DATENSCHUTZ_STAND}'" in quelle
-    assert f"version: '{korpus.DATENSCHUTZ_VERSION}'" in quelle
+    quelle = (FRONTEND / "pages" / "datenschutzStand.ts").read_text(encoding="utf-8")
+    assert f"DATENSCHUTZ_STAND = '{korpus.DATENSCHUTZ_STAND}'" in quelle
+    assert f"DATENSCHUTZ_VERSION = '{korpus.DATENSCHUTZ_VERSION}'" in quelle
+    seite = (FRONTEND / "pages" / "Privacy.tsx").read_text(encoding="utf-8")
+    assert "lastUpdated: DATENSCHUTZ_STAND" in seite and "version: DATENSCHUTZ_VERSION" in seite
 
 
 def test_the_dead_privacy_namespace_never_shows_up() -> None:

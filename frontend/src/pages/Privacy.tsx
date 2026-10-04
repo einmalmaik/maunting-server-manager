@@ -3,8 +3,10 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { LegalDocumentViewer, type LegalDocumentData } from '@/components/ui/LegalDocumentViewer'
 import { meldeErrungenschaft } from '@/lib/errungenschaft'
+import { DATENSCHUTZ_STAND, DATENSCHUTZ_VERSION } from './datenschutzStand'
 
-export function Privacy() {
+/** `zurueck`: wohin der Zurück-Link führt; die App hat weder `/docs` noch `/login`. */
+export function Privacy({ zurueck }: { zurueck?: string } = {}) {
   const { isAuthenticated } = useAuthStore()
   const { t } = useTranslation()
 
@@ -17,8 +19,8 @@ export function Privacy() {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-10-04',
-    version: '3.22',
+    lastUpdated: DATENSCHUTZ_STAND,
+    version: DATENSCHUTZ_VERSION,
     meta: 'Maunting Studios — Sicherheit braucht Vertrauen',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
@@ -239,7 +241,7 @@ export function Privacy() {
   return (
     <LegalDocumentViewer
       document={document}
-      backTo={isAuthenticated ? '/docs' : '/login'}
+      backTo={zurueck ?? (isAuthenticated ? '/docs' : '/login')}
       backLabel={t('common.back')}
       docLabel={t('privacyPolicy.documentLabel')}
       summaryLabel={t('privacyPolicy.summaryLabel')}

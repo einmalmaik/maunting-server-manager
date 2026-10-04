@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 
 import { usePublicLegalSettings } from '@/hooks/usePublicLegalSettings'
+import { DATENSCHUTZ_VERSION } from '@/pages/datenschutzStand'
 import { Badge, Button } from '@/Singra/UI'
 import { oeffneBrowser } from '../tauri'
 
@@ -49,7 +50,7 @@ export function RechtlichesEinstellungen({ offline = false }: { offline?: boolea
               {t('mss.einstellungen.rechtliches.datenschutzTitel')}
             </h3>
             <Badge variant="default">
-              {t('mss.einstellungen.rechtliches.datenschutzVersion', { version: 'v2.7' })}
+              {t('mss.einstellungen.rechtliches.datenschutzVersion', { version: `v${DATENSCHUTZ_VERSION}` })}
             </Badge>
           </div>
           <Button

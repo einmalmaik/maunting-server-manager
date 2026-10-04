@@ -577,8 +577,12 @@ export function DesktopApp() {
         <Route
           path="/privacy"
           element={
-            <div className="mx-auto w-full max-w-4xl p-4 md:p-6">
-              <Privacy />
+            // Die Hülle schneidet ab (`overflow-hidden`); scrollen muss die
+            // Seite selbst. Bis 04.10.2026 fehlte das, der Text blieb stehen.
+            <div className="min-h-0 w-full flex-1 overflow-y-auto overscroll-contain">
+              <div className="mx-auto w-full max-w-4xl p-4 md:p-6">
+                <Privacy zurueck="/einstellungen?tab=rechtliches" />
+              </div>
             </div>
           }
         />
