@@ -109,7 +109,6 @@ from services.ai_tools.geo_tools import (
 )
 from services.ai_tools.system_tools import (
     _desktop_tool_definitions,
-    _execute_set_agent_name,
     _memory_team,
     _execute_remember,
     question_payload,
@@ -398,26 +397,6 @@ def _global_tool_definitions() -> list[dict]:
             "nur mit Namen nennt oder gar nicht benennt.",
             {},
             [],
-        ),
-        _function(
-            "set_agent_name",
-            "Setzt deinen Rufnamen fuer diesen Benutzer — nur auf seinen "
-            "ausdruecklichen Wunsch (\"nenn dich ab jetzt …\"). Ein leerer "
-            "Name stellt den Standardnamen Assistent wieder her. In der "
-            "Desktop-App ist der Name zugleich das Wake-Word; der Benutzer "
-            "bekommt dort von selbst den Vorschlag, es neu zu kalibrieren.",
-            {
-                "name": {
-                    "type": "string",
-                    "maxLength": 32,
-                    "description": (
-                        "Der neue Rufname: 2-32 Zeichen, Buchstaben, Ziffern, "
-                        "Leerzeichen, Punkt, Apostroph oder Bindestrich. "
-                        "Leer = Standardname."
-                    ),
-                },
-            },
-            ["name"],
         ),
         # Wann gemerkt wird und was **nicht** gemerkt wird, steht in
         # `ai_prompt.GEDAECHTNIS` und geht in derselben Anfrage mit: "Nicht
@@ -1839,9 +1818,6 @@ def _execute_global_read_tool(
 
     if tool_name == "remember":
         return _execute_remember(db, user=user, arguments=arguments)
-
-    if tool_name == "set_agent_name":
-        return _execute_set_agent_name(db, user=user, arguments=arguments)
 
     if tool_name == "web_search":
         return _execute_web_search(

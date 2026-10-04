@@ -241,43 +241,6 @@ def _desktop_tool_definitions() -> list[dict]:
         ),
     ]
 
-def _execute_set_agent_name(db: Session, *, user: User, arguments: dict) -> dict:
-    """Setzt den Rufnamen des Assistenten — dasselbe Feld wie der Router
-    PATCH /auth/me/agent-name (users.agent_name), mit derselben Prüfung.
-
-    Kein eigenes Recht: es ist eine persönliche, jederzeit umkehrbare
-    Einstellung des Benutzers, die er im Panel ohnehin selbst ändern darf.
-    Sofort ausgeführt statt vorgeschlagen — dieselbe Einordnung wie
-    `remember` (ai_tool_registry erklärt sie).
-
-    Der neue Name wirkt ab dem nächsten Zug (Lageblock, services/ai_lage.py);
-    das Ergebnis sagt das dem Modell, damit es nichts Falsches verspricht.
-    """
-    from schemas.user import AgentNameUpdateRequest
-
-    if set(arguments) != {"name"}:
-        raise AiActionValidationError("set_agent_name erwartet genau das Feld name")
-    roh = arguments.get("name")
-    if roh is not None and not isinstance(roh, str):
-        raise AiActionValidationError("name muss eine Zeichenkette sein")
-    try:
-        # Dieselbe Wahrheit wie der Router: was das Schema ablehnt, lehnt
-        # auch das Werkzeug ab — ein Formfehler kostet eine Runde, nie mehr.
-        geprueft = AgentNameUpdateRequest(agent_name=roh).agent_name
-    except ValueError as fehler:
-        raise AiActionValidationError(str(fehler)) from fehler
-
-    user.agent_name = geprueft
-    db.commit()
-    return {
-        "agent_name": geprueft,
-        "hinweis": (
-            "Gespeichert. Der Name gilt ab dem naechsten Zug; in der "
-            "Desktop-App schlaegt die App dem Benutzer selbst vor, das "
-            "Wake-Word neu zu kalibrieren."
-        ),
-    }
-
 def _memory_team(
     db: Session, user: User, *, scope: str, arguments: dict
 ) -> tuple[str, int | None, str | None]:

@@ -1,12 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
 import { api } from '@/api/client'
-import { useAuthStore } from '@/stores/authStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
-import type { User } from '@/types'
 import { AiTab } from './AiTab'
 
 /**
@@ -29,9 +27,6 @@ vi.mock('@/api/client', async () => {
       // `undefined`.
       if (path.startsWith('/ai/memory/personal')) {
         return Promise.resolve({ entries: [], total: 0, clearable: 0, limit: 200 })
-      }
-      if (path === '/auth/me/agent-name') {
-        return Promise.resolve({ agent_name: 'Jarvis' })
       }
       if (path === '/auth/devices/pairing') {
         return Promise.resolve({ code: 'ABCD-EFGH-JKLM', expires_at: '', label: '' })
@@ -110,28 +105,16 @@ describe('Profil → KI', () => {
     expect(karte).toHaveTextContent('Keine Grenze hinterlegt')
   })
 
-  it('speichert den Rufnamen des Assistenten über den eigenen Endpunkt', async () => {
-    // Der Name gehört dem Benutzer, nicht dem Betreiber — er wird hier
-    // gesetzt und gilt danach überall (Lageblock, Desktop-App, Panel-Chat).
-    useAuthStore.setState({
-      user: { id: 1, username: 'tester', agent_name: null } as unknown as User,
-      isAuthenticated: true,
-      isLoading: false,
-    })
+  it('bietet kein Namensfeld mehr an: die KI heißt fest Singra', async () => {
+    // Bis 05.10.2026 stand hier eine Karte, mit der jeder Benutzer der KI
+    // einen eigenen Rufnamen gab. Der Name ist seitdem Identität, keine
+    // Einstellung — und der Endpunkt dazu ist entfernt.
     render(<MemoryRouter><AiTab /></MemoryRouter>)
+    await screen.findByLabelText('Persönliches KI-Memory')
 
-    const feld = await screen.findByLabelText('Rufname')
-    fireEvent.change(feld, { target: { value: 'Jarvis' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
-
-    await waitFor(() =>
-      expect(api).toHaveBeenCalledWith('/auth/me/agent-name', {
-        method: 'PATCH',
-        body: JSON.stringify({ agent_name: 'Jarvis' }),
-      }),
-    )
-    // Die Antwort des Backends ist die Wahrheit — sie landet im Auth-Store.
-    await waitFor(() => expect(useAuthStore.getState().user?.agent_name).toBe('Jarvis'))
+    expect(screen.getByRole('heading', { name: 'Singra' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Rufname')).not.toBeInTheDocument()
+    expect(api).not.toHaveBeenCalledWith('/auth/me/agent-name', expect.anything())
   })
 
   it('zeigt keine Skill-Verwaltung mehr, sondern den Weg dorthin', async () => {
@@ -139,7 +122,7 @@ describe('Profil → KI', () => {
     await screen.findByLabelText('Persönliches KI-Memory')
 
     await waitFor(() => expect(screen.queryByLabelText('Skills')).not.toBeInTheDocument())
-    expect(screen.queryByLabelText('Skills des Assistenten')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Skills von Singra')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Teams/ })).toHaveAttribute('href', '/teams')
   })
 })

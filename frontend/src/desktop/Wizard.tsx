@@ -72,9 +72,9 @@ export function Wizard({
     let naechsterIdx = index + 1
     let naechster = REIHENFOLGE[naechsterIdx]
 
-    // Falls der Assistenten-Name bereits existiert, Schritt Personalisierung überspringen
+    // Steht die Zeitzone am Konto schon, hat Personalisierung nichts mehr zu fragen
     const benutzer = useAuthStore.getState().user
-    if (naechster === 'personalisierung' && benutzer?.agent_name) {
+    if (naechster === 'personalisierung' && benutzer?.time_zone) {
       naechsterIdx += 1
       naechster = REIHENFOLGE[naechsterIdx]
     }
@@ -95,9 +95,9 @@ export function Wizard({
   }
 
   useEffect(() => {
-    // Falls direkt beim Startschritt Personalisierung eingestiegen wird, aber Name schon vorliegt
+    // Falls direkt bei Personalisierung eingestiegen wird, die Zeitzone aber schon vorliegt
     const benutzer = useAuthStore.getState().user
-    if (schritt === 'personalisierung' && benutzer?.agent_name && !nurDieserSchritt) {
+    if (schritt === 'personalisierung' && benutzer?.time_zone && !nurDieserSchritt) {
       void weiter()
     }
   }, [])
@@ -492,13 +492,12 @@ function SchrittKopplung({
   )
 }
 
-// ── Schritt 3: Personalisierung (Agent-Name + Zeitzone) ──────────────────
+// ── Schritt 3: Personalisierung (Zeitzone) ──────────────────
 
 function SchrittPersonalisierung({ onWeiter }: { onWeiter: () => Promise<void> }) {
   const { t } = useTranslation()
   const benutzer = useAuthStore((s) => s.user)
   const updateUser = useAuthStore((s) => s.updateUser)
-  const [name, setName] = useState(benutzer?.agent_name ?? '')
   const [zeitzone, setZeitzone] = useState(
     benutzer?.time_zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
   )
@@ -512,28 +511,20 @@ function SchrittPersonalisierung({ onWeiter }: { onWeiter: () => Promise<void> }
   }, [benutzer])
 
   useEffect(() => {
-    if (benutzer?.agent_name && !name) {
-      setName(benutzer.agent_name)
-    }
     if (benutzer?.time_zone) {
       setZeitzone(benutzer.time_zone)
     }
-  }, [benutzer, name])
+  }, [benutzer])
 
   async function speichern() {
     setFehler(null)
     setLaeuft(true)
     try {
-      const agentName = name.trim() || null
-      await api('/auth/me/agent-name', {
-        method: 'PATCH',
-        body: JSON.stringify({ agent_name: agentName }),
-      })
       await api('/auth/me/timezone', {
         method: 'PATCH',
         body: JSON.stringify({ time_zone: zeitzone || null }),
       })
-      updateUser({ agent_name: agentName, time_zone: zeitzone || null })
+      updateUser({ time_zone: zeitzone || null })
       await onWeiter()
     } catch (e) {
       setFehler(e instanceof Error ? e.message : String(e))
@@ -545,15 +536,6 @@ function SchrittPersonalisierung({ onWeiter }: { onWeiter: () => Promise<void> }
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-on-surface-variant">{t('mss.wizard.personalisierungErklaerung')}</p>
-      <div>
-        <Input
-          id="mss-agentname"
-          label={t('mss.wizard.agentnameLabel')}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <p className="msm-field-help">{t('mss.wizard.agentnameHinweis')}</p>
-      </div>
       <div className="flex flex-col gap-1.5">
         <span className="text-sm font-medium text-foreground">{t('mss.wizard.zeitzoneLabel')}</span>
         <Dropdown

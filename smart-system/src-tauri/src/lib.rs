@@ -305,8 +305,8 @@ fn wakeword_aufnehmen(app: tauri::AppHandle, nummer: u8) -> Result<String, Strin
 }
 
 /// Trainiert das Modell und merkt sich das Wort in der Konfiguration —
-/// daran erkennt die App später, dass der Assistent inzwischen anders heißt,
-/// und schlägt die Neukalibrierung vor.
+/// daran erkennt die App später, dass es nicht mehr „Singra“ ist (etwa ein
+/// früher frei gewählter Name), und schlägt die Neukalibrierung vor.
 #[tauri::command(async)]
 fn wakeword_trainieren(app: tauri::AppHandle, wort: String) -> Result<(), String> {
     wakeword::trainieren(&app, &wort)?;

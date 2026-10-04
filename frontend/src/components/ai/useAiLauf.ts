@@ -16,7 +16,7 @@ import {
 } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
 import { toast } from '@/stores/toastStore'
-import { useAuthStore } from '@/stores/authStore'
+import { KI_NAME } from '@/lib/kiName'
 import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
 import { zustellungMelden } from '@/lib/aiZustellung'
 
@@ -386,7 +386,7 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
         // unter der dann "Keine Antwort erhalten" erschien.
         aendere(aktuell!, (message) => {
           if (typeof document !== 'undefined' && document.hidden) {
-            const titel = useAuthStore.getState().user?.agent_name?.trim() || 'Assistent'
+            const titel = KI_NAME
             void sendeGeraeteBenachrichtigung({
               titel,
               text: data?.question || 'Rückfrage der KI',
@@ -397,7 +397,7 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
       } else if (name === 'done') {
         aendere(aktuell!, (message) => {
           if (typeof document !== 'undefined' && document.hidden) {
-            const titel = useAuthStore.getState().user?.agent_name?.trim() || 'Assistent'
+            const titel = KI_NAME
             const vorschau = (message.content || 'Antwort bereit').slice(0, 160)
             void sendeGeraeteBenachrichtigung({
               titel,

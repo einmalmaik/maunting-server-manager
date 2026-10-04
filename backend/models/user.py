@@ -172,13 +172,6 @@ class User(Base):
         Boolean, default=False, nullable=False, server_default=false(),
     )
 
-    # Rufname des Assistenten für dieses Konto (Panel und Smart System).
-    # NULL heisst: Standardname 'Assistent' (services/ai_lage.py). Der Wert fliesst
-    # in den Lageblock als späte system-Nachricht, nie in den statischen
-    # Systemprompt — ein Name im Prompt wäre je Benutzer verschieden und
-    # entwertete das Prompt-Caching des Anbieters an erster Stelle.
-    agent_name: Mapped[str | None] = mapped_column(String(32), nullable=True)
-
     # Vom Benutzer gewählter KI-Zugang — für Chat **und** Sprachmodus. Die Wahl
     # folgt dem Konto, nicht dem Browser: localStorage gehört der Herkunft, und
     # die Desktop-App (tauri.localhost) lief vor diesem Feld still auf dem

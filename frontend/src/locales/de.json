@@ -27,7 +27,7 @@
     "panelDatabase": "Panel-Datenbank",
     "nodes": "Nodes",
     "audit": "Audit",
-    "ai": "KI-Assistent",
+    "ai": "Singra",
     "teams": "Teams",
     "chat": "Messenger"
   },
@@ -194,7 +194,7 @@
       "team": "Im Team geteilt"
     },
     "emptyTitle": "Keine Notizen vorhanden",
-    "emptyDesc": "Erstelle eine neue Notiz oder diktiere sie direkt über den KI-Assistenten.",
+    "emptyDesc": "Erstelle eine neue Notiz oder diktiere sie direkt über Singra.",
     "emptySearch": "Keine passenden Notizen gefunden.",
     "emptySearchDesc": "Passe deine Suchbegriffe oder Filter an.",
     "emptyArchivedTitle": "Keine archivierten Notizen",
@@ -501,14 +501,10 @@
       "geminiSafetyOffHint": "Deaktiviert alle 5 Standard-Sicherheitsfilter (Hassrede, Belästigung, gefährliche Inhalte etc.) auf BLOCK_NONE bei Gemini- und Gemma-Modellen über die Google AI Studio API."
     },
     "profile": {
-      "title": "KI-Assistent",
-      "description": "Gedächtnis und Einstellungen deines Assistenten.",
+      "title": "Singra",
+      "description": "Gedächtnis und Einstellungen von Singra.",
       "skillsMoved": "Eigene Skills verwalten unter",
       "skillsMovedLink": "Teams → Persönlich",
-      "agentNameTitle": "Name des Assistenten",
-      "agentNameDescription": "Persönlicher Rufname (Standard: Assistent).",
-      "agentNameLabel": "Rufname",
-      "agentNameSaved": "Name gespeichert.",
       "devicesTitle": "Geräte koppeln",
       "devicesDescription": "Code zum Verbinden von Desktop- und Mobil-Apps.",
       "devicesApiAddress": "Diese Adresse in der App eintragen",
@@ -591,7 +587,7 @@
         "panel": "Panelweites KI-Gedächtnis"
       },
       "descriptions": {
-        "user": "Persönliche Notizen des Assistenten – nur für dich sichtbar.",
+        "user": "Persönliche Notizen von Singra – nur für dich sichtbar.",
         "server_shared": "Geteiltes Serverwissen: Für alle mit Serverzugriff sichtbar und nutzbar.",
         "team": "Geteiltes Teamwissen: Für alle Teammitglieder einsehbar.",
         "panel": "Panelweites Wissen für alle Benutzer in allen Unterhaltungen."
@@ -685,7 +681,7 @@
         "namedTeam": "Team: {{name}}"
       },
       "origins": {
-        "ai": "von der KI gelernt"
+        "ai": "von Singra gelernt"
       },
       "pending": "wartet auf Freigabe",
       "readOnly": "Integrierte Skills können nicht direkt geändert werden. Lege einen panelweiten Skill mit demselben Schlüssel an, um sie zu überschreiben, oder schalte sie ab.",
@@ -694,11 +690,11 @@
       "keyHint": "Kleinbuchstaben, Ziffern, Bindestriche. Zum Beispiel valheim-ram.",
       "name": "Name",
       "descriptionLabel": "Beschreibung",
-      "descriptionHint": "Was der Skill tut UND wann er passt. Nur diese Zeile entscheidet, ob die KI ihn findet.",
+      "descriptionHint": "Was der Skill tut UND wann er passt. Nur diese Zeile entscheidet, ob Singra ihn findet.",
       "body": "Vorgehensweise",
       "bodyHint": "Fließtext, gern mit Markdown. Beschreibe, was zu prüfen ist, in welcher Reihenfolge und woran man die Ursache erkennt.",
       "enabled": "Skill aktiv",
-      "empty": "Noch kein eigener Skill. Die mitgelieferten stehen der KI trotzdem zur Verfügung.",
+      "empty": "Noch kein eigener Skill. Die mitgelieferten stehen Singra trotzdem zur Verfügung.",
       "save": "Speichern",
       "saved": "Skill gespeichert.",
       "deleted": "Skill gelöscht.",
@@ -717,9 +713,9 @@
       "search": "Skills durchsuchen",
       "noMatches": "Kein Skill passt zur Suche.",
       "manage": "Von dir änderbar",
-      "panelDescription": "Vorgehensweisen, die auf diesem Panel für alle gelten. Was hier steht, liest der Assistent in jedem Gespräch jedes Benutzers.",
+      "panelDescription": "Vorgehensweisen, die auf diesem Panel für alle gelten. Was hier steht, liest Singra in jedem Gespräch jedes Benutzers.",
       "personalDescription": "Deine eigenen Vorgehensweisen. Niemand sonst sieht sie, und die KI liest sie nur in deinen Gesprächen.",
-      "directoryTitle": "Skills des Assistenten",
+      "directoryTitle": "Skills von Singra",
       "directoryDescription": "Aktuell wirksame Skills: integriert, panelweit, persönlich und aus deinen Teams.",
       "directoryManageHint": "Geändert wird ein Skill dort, wo er gilt: persönliche und Team-Skills unter Teams, panelweite in den Einstellungen."
     },
@@ -733,12 +729,12 @@
       "redacted_other": "{{count}} Stellen unkenntlich"
     },
     "chat": {
-      "title": "KI-Assistent",
+      "title": "Singra",
       "selectProvider": "Provider auswählen",
       "provider": "KI-Modell & Anbieter",
       "cleared": "Chatverlauf gelöscht",
       "emptyTitle": "Womit kann ich helfen?",
-      "emptyDescription": "Der Assistent erhält nur den freigegebenen, minimierten Kontext. Prüfe wichtige Aussagen vor operativen Änderungen.",
+      "emptyDescription": "Singra erhält nur den freigegebenen, minimierten Kontext. Prüfe wichtige Aussagen vor operativen Änderungen.",
       "thinking": "Antwort wird erstellt …",
       "noResponse": "Keine Antwort erhalten.",
       "failed": "Diese Antwort konnte nicht abgeschlossen werden.",
@@ -776,7 +772,7 @@
       "reasoning": "Denkt nach …",
       "thinkingNow": "Denkt nach …",
       "thought": "Nachgedacht",
-      "noPermission": "Keine Berechtigung für den KI-Assistenten.",
+      "noPermission": "Keine Berechtigung für Singra.",
       "examples": {
         "logs": "Mein Server startet nicht, schau dir bitte die Logs an.",
         "network": "Mein Minecraft-Server ist an, aber nicht erreichbar. Woran liegt das?",
@@ -791,7 +787,7 @@
       "working": "Arbeitet weiter …",
       "compacted": "Ältere Nachrichten wurden zusammengefasst",
       "edit": "Nachricht bearbeiten",
-      "editHint": "Diese Nachricht und alles danach wird entfernt. Die KI kennt die alte Fassung dann nicht mehr.",
+      "editHint": "Diese Nachricht und alles danach wird entfernt. Singra kennt die alte Fassung dann nicht mehr.",
       "editSend": "Neu senden",
       "reasoningLevel": "Denktiefe",
       "moreSettings": "Weitere Einstellungen dieses Chats",
@@ -1099,7 +1095,6 @@
       "worker_cancel": "Worker abgebrochen",
       "worker_frage": "Rückfrage gestellt",
       "worker_start": "Worker gestartet",
-      "set_agent_name": "Rufname geändert",
       "email_search": "E-Mails durchsucht",
       "email_read": "E-Mail gelesen",
       "calendar_read": "Kalender abgefragt",
@@ -1235,7 +1230,6 @@
       "worker_cancel": "Ich halte den Worker an",
       "worker_frage": "Ich stelle dir eine Frage",
       "worker_start": "Ich starte einen Worker im Hintergrund",
-      "set_agent_name": "Ich gebe mir den neuen Namen",
       "notes_read": "Ich sehe in deinen Notizen nach",
       "popups_read": "Ich sehe die bestehenden Pop-ups durch",
       "voice_leave_region_view": "Ich schließe die Regionenansicht",
@@ -1444,7 +1438,7 @@
     },
     "webSearch": {
       "title": "Websuche & Recherche",
-      "description": "Such- und Recherche-Einstellungen für den Assistenten. Direktes Web-Scraping und freie Websuche sind standardmäßig immer aktiv. Optional kannst du einen Brave-API-Schlüssel oder eine eigene SearXNG-Metasuch-Instanz hinterlegen.",
+      "description": "Such- und Recherche-Einstellungen für Singra. Direktes Web-Scraping und freie Websuche sind standardmäßig immer aktiv. Optional kannst du einen Brave-API-Schlüssel oder eine eigene SearXNG-Metasuch-Instanz hinterlegen.",
       "apiKey": "Brave-Search-API-Schlüssel (Optional)",
       "searxngUrl": "SearXNG-Endpunkt-URL (Optional)",
       "sidecarActive": "Lokaler SearXNG-Sidecar aktiv (Standard: {{url}})",
@@ -1467,7 +1461,7 @@
     },
     "satellite": {
       "title": "Satellitendaten (Copernicus / Sentinel)",
-      "description": "Zugangsdaten für das Copernicus Data Space Ecosystem (CDSE). Ermöglicht der KI den Abruf von Erdbeobachtungs- und Sentinel-Satellitendaten bei regionalen Analysen.",
+      "description": "Zugangsdaten für das Copernicus Data Space Ecosystem (CDSE). Ermöglicht Singra den Abruf von Erdbeobachtungs- und Sentinel-Satellitendaten bei regionalen Analysen.",
       "clientId": "Client ID",
       "clientIdPlaceholder": "Copernicus CDSE Client ID",
       "clientSecret": "Client Secret",
@@ -1677,8 +1671,8 @@
       }
     },
     "memoryNotice": {
-      "title": "Die KI kann sich Dinge über dich merken",
-      "body": "Der Assistent kann sich Vorlieben und projektspezifische Hinweise merken. Diese Notizen werden bei Anfragen an den konfigurierten KI-Anbieter übermittelt. Aktuell ist das Gedächtnis deaktiviert.",
+      "title": "Singra kann sich Dinge über dich merken",
+      "body": "Singra kann sich Vorlieben und projektspezifische Hinweise merken. Diese Notizen werden bei Anfragen an den konfigurierten KI-Anbieter übermittelt. Aktuell ist das Gedächtnis deaktiviert.",
       "enable": "Aktivieren",
       "later": "Später",
       "never": "Nicht mehr fragen",
@@ -1687,8 +1681,8 @@
       "failed": "Die Antwort konnte nicht gespeichert werden."
     },
     "learning": {
-      "title": "Selbstlernen der KI",
-      "description": "Der Assistent hält gelöste Probleme als Skills fest. Team-Skills werden automatisch angelegt. Für panelweite Skills legst du hier die Richtlinie fest (wirksam für alle Benutzer).",
+      "title": "Selbstlernen von Singra",
+      "description": "Singra hält gelöste Probleme als Skills fest. Team-Skills werden automatisch angelegt. Für panelweite Skills legst du hier die Richtlinie fest (wirksam für alle Benutzer).",
       "policy": "Panelweites Lernen",
       "options": {
         "off": "Aus — nur ich lege panelweite Skills an",
@@ -1696,7 +1690,7 @@
         "instant": "Sofort wirksam aus jedem Gespräch"
       },
       "hints": {
-        "off": "Die KI lernt ausschließlich in das jeweilige Team.",
+        "off": "Singra lernt ausschließlich in das jeweilige Team.",
         "review": "Benutzer mit dem Recht „KI-Skills verwalten“ wirken sofort, andere Vorschläge erfordern eine Freigabe.",
         "instant": "Gelerntes Wissen wird sofort panelweit übernommen."
       },
@@ -1707,7 +1701,7 @@
       }
     },
     "question": {
-      "title": "Rückfrage der KI",
+      "title": "Rückfrage von Singra",
       "freeText": "Oder schreib einfach etwas anderes ins Eingabefeld.",
       "answered": "Beantwortet."
     },
@@ -1716,7 +1710,7 @@
       "waitingConfirmation": "Die KI wartet auf deine Bestätigung.",
       "waitingUser": "Die KI hat eine Rückfrage an dich.",
       "failed": "Der KI-Auftrag ist fehlgeschlagen.",
-      "open": "Zum Assistenten",
+      "open": "Zu Singra",
       "guardianCompleted": "Die KI hat eine Guardian-Störung bearbeitet.",
       "guardianWaiting": "Eine Guardian-Reparatur wartet auf deine Freigabe.",
       "guardianFailed": "Eine Guardian-Reparatur ist fehlgeschlagen.",
@@ -1990,7 +1984,7 @@
       "runtimeEnv": "Umgebungsvariablen als Key-Value-Dict. Werte dürfen Port-Platzhalter enthalten: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. Kein {INSTALL_DIR} oder {ENV.<KEY>} in env-Werten.",
       "runtimeStartup": "Startbefehl (wird als argv übergeben, KEINE Shell). Gültige Platzhalter: {SERVER_NAME}, {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}, {INSTALL_DIR}, {MOD_ARG}. {SERVER_NAME} übernimmt den individuellen Namen des MSM-Servers. Zusätzlich {ENV.<KEY>} für eigene Env-Variablen. Verbotene Zeichen: $, Backtick.",
       "runtimeEnsureDirs": "Relative Ordner, die vor jedem Start im Server-Verzeichnis angelegt werden. Geeignet für Profile-, Log-, Cache- oder Runtime-Ordner, die der Startbefehl erwartet.",
-      "runtimeConfigPatches": "Liste von Konfigurations-Patches, die vor dem Start angewendet werden. Jeder Patch muss type, file und value enthalten (sowie section/key für ini oder regex für regex). Sie gelten für alle Server dieses Blueprints. Einzelne Server-Werte können über den Assistenten mit „Einstellung dauerhaft setzen“ definiert werden.",
+      "runtimeConfigPatches": "Liste von Konfigurations-Patches, die vor dem Start angewendet werden. Jeder Patch muss type, file und value enthalten (sowie section/key für ini oder regex für regex). Sie gelten für alle Server dieses Blueprints. Einzelne Server-Werte können über Singra mit „Einstellung dauerhaft setzen“ definiert werden.",
       "runtimeEnableExec": "Exec-Tab aktivieren. Default: false. Self-Hosted, aber Befehle laufen NUR im MSM-verwalteten Container dieses Servers, NIEMALS auf dem Host oder in fremden Containern.",
       "runtimeExecTimeoutSeconds": "Timeout pro Exec-Aufruf in Sekunden (1..600). Default: 60.",
       "logsSources": "Logquellen für Guardian und sichtbare Server-Konsole. stdout zeigt Docker-Ausgabe; sichere relative Dateipfade und einfache Dateinamen-Wildcards werden zusätzlich live verfolgt.",
@@ -2148,7 +2142,7 @@
     },
     "blueprintSwitchedSuccess": "Spiel / Blueprint erfolgreich gewechselt! Pflicht-Backup wurde erzeugt.",
     "checkServerFileUpdates": "Spiel-Updates prüfen",
-    "confirmDelete": "Server wirklich löschen? Alle Daten und das zugehörige Serverwissen des Assistenten werden unwiderruflich entfernt.",
+    "confirmDelete": "Server wirklich löschen? Alle Daten und das zugehörige Serverwissen von Singra werden unwiderruflich entfernt.",
     "confirmSwitchBtn": "Spiel wechseln & Backup erstellen",
     "console": "Konsole",
     "consoleConnecting": "Verbinde …",
@@ -2503,7 +2497,7 @@
     },
     "ai_chat_use": {
       "title": "KI-Chat verwenden",
-      "desc": "Erlaubt die Interaktion mit dem integrierten KI-Assistenten. Rollenlimits und Werkzeugrechte werden im Backend geprüft."
+      "desc": "Erlaubt die Interaktion mit Singra, der integrierten KI. Rollenlimits und Werkzeugrechte werden im Backend geprüft."
     },
     "ai_voice_use": {
       "title": "Sprachmodus nutzen",
@@ -2515,11 +2509,11 @@
     },
     "ai_memory_use": {
       "title": "KI-Gedächtnis nutzen",
-      "desc": "Persönliche und serverspezifische Notizen im Assistenten speichern."
+      "desc": "Persönliche und serverspezifische Notizen bei Singra speichern."
     },
     "ai_skills_use": {
       "title": "KI-Skills nutzen",
-      "desc": "Vom Assistenten erlernte Fähigkeiten und Workflows abrufen."
+      "desc": "Von Singra erlernte Fähigkeiten und Workflows abrufen."
     },
     "ai_skills_manage": {
       "title": "KI-Skills verwalten",
@@ -2531,7 +2525,7 @@
     },
     "ai_satellite_use": {
       "title": "Satelliten- & Regionsanalyse nutzen",
-      "desc": "Ermöglicht der KI Regionsanalysen und das Steuern der Kartenansicht. Ortsname und Koordinaten gehen dabei ohne weitere Einrichtung an OpenStreetMap, Open-Meteo, Reddit, Bluesky und Esri (Kartenbild), mit hinterlegtem Zugang auch an Copernicus, TomTom und MapTiler."
+      "desc": "Ermöglicht Singra Regionsanalysen und das Steuern der Kartenansicht. Ortsname und Koordinaten gehen dabei ohne weitere Einrichtung an OpenStreetMap, Open-Meteo, Reddit, Bluesky und Esri (Kartenbild), mit hinterlegtem Zugang auch an Copernicus, TomTom und MapTiler."
     },
     "ai_autonomous_use": {
       "title": "Autonomen Modus nutzen",
@@ -2555,7 +2549,7 @@
     },
     "ai_mailbox_use": {
       "title": "Postfächer anbinden",
-      "desc": "E-Mail-Postfächer zur Bearbeitung durch den Assistenten verknüpfen."
+      "desc": "E-Mail-Postfächer zur Bearbeitung durch Singra verknüpfen."
     },
     "ai_calendar_use": {
       "title": "Kalender anbinden",
@@ -2563,7 +2557,7 @@
     },
     "ai_notes_use": {
       "title": "Notizen verwalten",
-      "desc": "Notizen, Checklisten und Aufgaben über den Assistenten erstellen und organisieren."
+      "desc": "Notizen, Checklisten und Aufgaben über Singra erstellen und organisieren."
     },
     "ai_usage_read_all": {
       "title": "Gesamte KI-Nutzung einsehen",
@@ -3150,7 +3144,7 @@
     "databases": "Datenbanken",
     "webhooks": "Webhooks",
     "memory": "Serverwissen",
-    "ai": "KI-Assistent"
+    "ai": "Singra"
   },
   "restarts": {
     "subtitle": "Automatische Neustart-Zeitpläne für diesen Server konfigurieren.",
@@ -3663,8 +3657,8 @@
       "templateWebde": "WEB.DE",
       "templateIcloud": "Apple iCloud (App-spezifisch)",
       "protocolHelp": "Du kannst nur IMAP (nur Lesen), nur SMTP (nur Senden) oder beides zusammen eintragen. Mindestens ein Protokoll ist erforderlich.",
-      "imapHelp": "Wird zum Suchen und Lesen von E-Mails durch den KI-Assistenten benötigt.",
-      "smtpHelp": "Wird zum Vorbereiten und Absenden von E-Mails durch den KI-Assistenten benötigt.",
+      "imapHelp": "Wird zum Suchen und Lesen von E-Mails durch Singra benötigt.",
+      "smtpHelp": "Wird zum Vorbereiten und Absenden von E-Mails durch Singra benötigt.",
       "gmailNotice": "Hinweis für Gmail: Google erfordert ein 16-stelliges App-Passwort, sofern 2-Faktor-Authentifizierung aktiv ist.",
       "emailAndNameRequired": "Bitte E-Mail und Bezeichnung angeben.",
       "hostRequired": "Bitte mindestens IMAP-Host (für Empfang) oder SMTP-Host (für Versand) konfigurieren."
@@ -3685,7 +3679,7 @@
       "caldavUsername": "CalDAV-Benutzername",
       "password": "Passwort / App-Passwort",
       "isDefault": "Als Standardkalender verwenden",
-      "protocolHelp": "Wird zum Abfragen von Terminen und Vorbereiten von Termineinträgen durch den KI-Assistenten verwendet. Termine werden erst nach deiner ausdrücklichen Bestätigung erstellt oder geändert.",
+      "protocolHelp": "Wird zum Abfragen von Terminen und Vorbereiten von Termineinträgen durch Singra verwendet. Termine werden erst nach deiner ausdrücklichen Bestätigung erstellt oder geändert.",
       "caldavHelp": "CalDAV-URL deines Kalenders (z. B. Nextcloud, Google CalDAV).",
       "nameAndUrlRequired": "Bitte Bezeichnung und CalDAV-URL angeben."
     },
@@ -4807,7 +4801,7 @@
         }
       },
       "ai": {
-        "heading": "6. KI-Assistent und externe Modellanbieter",
+        "heading": "6. KI-Assistentin Singra und externe Modellanbieter",
         "body": "KI-Funktionen sind optional. Bei Nutzung verarbeitet das Panel die Unterhaltung und überträgt die Nachricht mit einem minimierten, redigierten Kontext an den ausgewählten Modellanbieter. Der Betreiber bestimmt verfügbare Anbieter und muss deren Bedingungen und Rechtsgrundlage dokumentieren.",
         "items": {
           "messages": "Globale und serverbezogene Chatverläufe werden dem Account zugeordnet im Panel gespeichert und können vom Nutzer gelöscht werden. Nachrichten, Titel, Zusammenfassungen, Werkzeugergebnisse und Laufzustand liegen in der Datenbank nur verschlüsselt (DIS AES-256-GCM), ebenso Aufträge, Meldungen und ausgehende Berichtsmails. Eine zugestellte Berichtsmail wird aus dem Ausgangskorb gelöscht. Das schützt Datenbank, Dumps und Backups; das Panel selbst entschlüsselt den Verlauf, um ihn anzuzeigen und an den Modellanbieter zu senden",
@@ -4820,11 +4814,11 @@
           "attachments": "Freigegebene Text-, Konfigurations-, Log- und Bildanhänge werden größen- und typgeprüft, verschlüsselt im Panel gespeichert und zusammen mit der Unterhaltung an den gewählten Modellanbieter übertragen",
           "autonomy": "Der autonome Modus ist optional und muss pro Server oder panelweit ausdrücklich freigegeben werden; freigegebene Aktionen laufen ohne weitere Rückfrage, werden aber unverändert gegen die Berechtigungen des Nutzers geprüft und vollständig im Audit-Log als automatisch ausgeführt festgehalten",
           "tools": "Beim Einsatz von Werkzeugen können begrenzte, redigierte Ausschnitte aus Serverlogs, Konfigurationsdateien, Mod- und Backup-Listen sowie Guardian-Vorfällen an den Modellanbieter übertragen werden; diese Ergebnisse werden für Rückfragen im selben Chat gespeichert und mit dem Chat gelöscht",
-          "noMessenger": "Der Messenger ist für die KI nicht erreichbar: Es gibt kein Werkzeug, das Kontakte, Gruppen oder Verläufe liest, und keines, das eine Nachricht sendet. An den Modellanbieter geht davon nichts, weil es nichts zu holen gibt.",
+          "noMessenger": "Der Messenger ist für Singra nicht erreichbar: Es gibt kein Werkzeug, das Kontakte, Gruppen oder Verläufe liest, und keines, das eine Nachricht sendet. An den Modellanbieter geht davon nichts, weil es nichts zu holen gibt.",
           "voice": "Sprachmodus: Im Legacy-Modus läuft Mikrofon-Audio durch das Panel zur Transkription; Antworttext geht zusätzlich an ElevenLabs. Bei aktiviertem OpenAI Realtime wird Mikrofon-Audio per WebRTC direkt an OpenAI übertragen. Das Panel verbindet sich parallel zur Werkzeugsteuerung und Abrechnung. Gesprochene Sätze werden in diesem Modus nicht als Chatnachrichten gespeichert. Der OpenAI-Schlüssel und die Call-ID bleiben im Backend.",
           "guardian": "Bei erteilter Autonomiefreigabe kann ein Guardian-Vorfall eine Verarbeitung auslösen, ohne dass der Nutzer anwesend ist: übertragen werden Vorfallart, Status und die ohnehin freigegebenen Serverdaten; Logauszüge werden dabei zusätzlich um öffentliche IP-Adressen und E-Mail-Adressen bereinigt. Verbrauch und Verantwortung liegen beim Freigeber. Der Ergebnisbericht per E-Mail enthält modellerzeugten Text.",
           "tasks": "Ein im Chat oder in der Aufgabenliste angelegter stehender Auftrag („KI-Aufgabe“) speichert Name, Auftragstext, Zeitplan, Zeitzone und Zustellweg und löst zum vereinbarten Zeitpunkt eine Verarbeitung aus, ohne dass der Nutzer anwesend ist. Sie läuft im Hintergrund mit den Rechten und dem Kontingent des Anlegenden; bei jedem fälligen Lauf werden Auftragstext und die abgerufenen Serverdaten an den gewählten Modellanbieter übertragen. Auf Wunsch geht das Ergebnis zusätzlich per E-Mail an die hinterlegte Adresse und enthält modellerzeugten Text. Aufträge sind im Chat und in der Aufgabenliste jederzeit auflistbar, pausierbar und löschbar.",
-          "mailboxes": "Verknüpfte E-Mail-Postfächer (IMAP / SMTP): Hinterlegte Zugangsdaten (Passwörter, App-Passwörter oder OAuth-Tokens) werden mit DIS AES-256-GCM verschlüsselt gespeichert und verlassen das Panel niemals im Klartext. E-Mails werden ausschließlich auf Ihre Anweisung hin durchsucht oder gelesen. Der KI-Assistent sendet niemals eigenständig E-Mails: Jeder E-Mail-Versand wird im Chat als Vorschlagskarte mit Betreff, Empfänger und Inhalt vorgelegt und erst nach Ihrer ausdrücklichen manuellen Bestätigung versendet.",
+          "mailboxes": "Verknüpfte E-Mail-Postfächer (IMAP / SMTP): Hinterlegte Zugangsdaten (Passwörter, App-Passwörter oder OAuth-Tokens) werden mit DIS AES-256-GCM verschlüsselt gespeichert und verlassen das Panel niemals im Klartext. E-Mails werden ausschließlich auf Ihre Anweisung hin durchsucht oder gelesen. Singra sendet niemals eigenständig E-Mails: Jeder E-Mail-Versand wird im Chat als Vorschlagskarte mit Betreff, Empfänger und Inhalt vorgelegt und erst nach Ihrer ausdrücklichen manuellen Bestätigung versendet.",
           "calendars": "Integrierter & verknüpfter Kalender: Termine des nativen Kalenders verbleiben in der lokalen Panel-Datenbank unter voller Datenhoheit des Nutzers. Bei externen CalDAV-Konten werden Zugangsdaten über DIS AES-256-GCM verschlüsselt abgelegt. Die KI liest Termine nur auf konkrete Anfrage. Das Erstellen, Ändern oder Löschen von Terminen erzeugt eine verbindliche Vorschlagskarte im Chat und wird erst nach Prüfung durch den Nutzer ausgeführt (im autonomen Modus automatisch protokolliert)."
         }
       },
@@ -4845,7 +4839,7 @@
           "virenscan": "Virenprüfung: Auf Wunsch prüft die App eine Datei mit dem lokal installierten Microsoft Defender, ohne sie zu verändern oder zu entfernen. Der geprüfte Pfad und im Fundfall ein Auszug der Defender-Ausgabe (der Dateipfade und Bedrohungsnamen enthält) gehen an den Modellanbieter.",
           "eingabe": "Maus und Tastatur: Die App zeichnet Ihre Eingaben nicht auf. Es gibt keinen Mitschnitt von Tastenanschlägen oder Mausbewegungen, weder lokal noch übertragen. Umgekehrt kann die KI Maus und Tastatur übernehmen; ist der autonome Modus aus, muss jede Übernahme an Ihrem Rechner bestätigt werden und ist zeitlich befristet. Text, den die KI tippen lässt, stammt aus dem Modell und steht im übertragenen Auftrag.",
           "discordRpc": "Discord Rich Presence (RPC): Wenn auf Ihrem Rechner die Discord-Desktop-App läuft, kann die Desktop-App Ihren Aktivitätsstatus lokal über eine Windows-Pipe an Discord melden (z. B. 'MSS Desktop Companion'). Hierbei werden zu keinem Zeitpunkt Serveradressen, Chatverläufe, IP-Adressen oder vertrauliche Daten übertragen. Die Funktion kann in der Konfigurationsdatei der Desktop-App ('konfig.json' -> 'discord_rpc_aktiv': false) vollständig deaktiviert werden.",
-          "lokal": "Was lokal gespeichert wird: Eine Konfigurationsdatei im Klartext (Panel-Adresse, Sandbox-Pfad, gewählter Assistentenname, Tastenkürzel, Namen der Audiogeräte, Wake-Word-Empfindlichkeit, Status der Erststart-Einführung), die Wake-Word-Aufnahmen samt Modell und im Schlüsselspeicher des Betriebssystems das von ihm verschlüsselte Erneuerungs-Token der gekoppelten Sitzung. Nutzen Sie den biometrischen Schnelleinstieg für Tresor oder Messenger, liegen dort auch deren Schlüssel, für die Messenger-PIN außerdem ein Gerätegeheimnis, das in ihre Ableitung einfließt. Dazu kommen die Offline-Daten von Tresor, Notizen und Messenger, siehe die Abschnitte zum Tresor und zur lokalen Speicherung. Ihr Passwort und Ihr Zwei-Faktor-Code erreichen die App nie; die Anmeldung läuft ausschließlich über den Kopplungscode oder QR-Code aus dem Panel. Die Deinstallation entfernt all das restlos."
+          "lokal": "Was lokal gespeichert wird: Eine Konfigurationsdatei im Klartext (Panel-Adresse, Sandbox-Pfad, Tastenkürzel, Namen der Audiogeräte, Wake-Word-Empfindlichkeit, Status der Erststart-Einführung), die Wake-Word-Aufnahmen samt Modell und im Schlüsselspeicher des Betriebssystems das von ihm verschlüsselte Erneuerungs-Token der gekoppelten Sitzung. Nutzen Sie den biometrischen Schnelleinstieg für Tresor oder Messenger, liegen dort auch deren Schlüssel, für die Messenger-PIN außerdem ein Gerätegeheimnis, das in ihre Ableitung einfließt. Dazu kommen die Offline-Daten von Tresor, Notizen und Messenger, siehe die Abschnitte zum Tresor und zur lokalen Speicherung. Ihr Passwort und Ihr Zwei-Faktor-Code erreichen die App nie; die Anmeldung läuft ausschließlich über den Kopplungscode oder QR-Code aus dem Panel. Die Deinstallation entfernt all das restlos."
         }
       },
       "storage": {
@@ -5988,9 +5982,9 @@
     "selectUser": "Benutzer wählen",
     "memberInvited": "Benutzer eingeladen.",
     "myInvitations": "Einladungen an dich",
-    "myInvitationsHint": "Ein Team teilt sein KI-Wissen und seine Serverrechte mit allen Mitgliedern: Wer beitritt, liest mit — und was seine KI für das Team lernt, lesen die anderen. Deshalb entscheidest nur du, ob du beitrittst.",
+    "myInvitationsHint": "Ein Team teilt sein KI-Wissen und seine Serverrechte mit allen Mitgliedern: Wer beitritt, liest mit — und was Singra für ihn im Team lernt, lesen die anderen. Deshalb entscheidest nur du, ob du beitrittst.",
     "myUpgrades": "Rechteanfragen an dich",
-    "myUpgradesHint": "Diesen Teams gehörst du bereits an — hier geht es nur darum, ob du ihr gemeinsames Wissen künftig auch verwalten darfst. Nimmst du an, lernt deine KI von da an für dieses Team, und was sie dort ablegt, lesen alle Mitglieder. Lehnst du ab, bleibt alles, wie es ist.",
+    "myUpgradesHint": "Diesen Teams gehörst du bereits an — hier geht es nur darum, ob du ihr gemeinsames Wissen künftig auch verwalten darfst. Nimmst du an, lernt Singra von da an für dich in diesem Team, und was sie dort ablegt, lesen alle Mitglieder. Lehnst du ab, bleibt alles, wie es ist.",
     "invitedBy": "eingeladen von {{name}}",
     "acceptInvitation": "Annehmen",
     "declineInvitation": "Ablehnen",
@@ -6029,7 +6023,7 @@
       "save": "Änderung konnte nicht gespeichert werden."
     },
     "knowledge": "KI-Wissen",
-    "knowledgeHint": "Was sich der Assistent für dieses Team merkt und welche Vorgehensweisen er hier gelernt hat. Lesen darf jedes Mitglied; ändern nur, wer unter „Mitglieder“ den passenden Schalter hat.",
+    "knowledgeHint": "Was sich Singra für dieses Team merkt und welche Vorgehensweisen sie hier gelernt hat. Lesen darf jedes Mitglied; ändern nur, wer unter „Mitglieder“ den passenden Schalter hat.",
     "personalKnowledgeHint": "Dein persönliches KI-Wissen. Niemand sonst sieht es, unabhängig von Rechten.",
     "areaLabel": "Bereich",
     "areaPersonal": "Persönlich",
@@ -6055,7 +6049,7 @@
       "updateBereitNeustart": "Update v{{version}} installiert. Neustart …",
       "updateDownloadProzent": "Download: {{prozent}}%",
       "bereiche": "Ansicht",
-      "ki": "KI-Assistent",
+      "ki": "Singra",
       "messenger": "Messenger",
       "kalender": "Kalender",
       "notizen": "Notizen",
@@ -6643,9 +6637,7 @@
       "meldenFehlerTitel": "Geräteschlüssel nicht gemeldet",
       "meldenFehlerHinweis": "Die Kopplung steht, aber das Gerät erscheint noch nicht in deiner Geräteliste. Ohne Freigabe kann es keine Nachrichten, Notizen und Termine lesen.",
       "nochmal": "Nochmal versuchen",
-      "personalisierungErklaerung": "Gib deinem Assistenten einen Namen — so sprichst du ihn an, und so meldet er sich. Beides gilt überall: hier und im Panel.",
-      "agentnameLabel": "Name des Assistenten",
-      "agentnameHinweis": "2–32 Zeichen; leer lassen für den Standardnamen Assistent.",
+      "personalisierungErklaerung": "Singra rechnet Termine und Erinnerungen in deiner Zeitzone. Sie gilt überall: hier und im Panel.",
       "zeitzoneLabel": "Zeitzone",
       "speichert": "Speichert …",
       "weiter": "Weiter",
@@ -6676,9 +6668,9 @@
       "trainiert": "Trainiert …",
       "erkannt": "Erkannt: „{{name}}“ (Score {{score}})",
       "datenschutz": "Lokale Erkennung ohne Audioübertragung.",
-      "rufname": "Rufname",
+      "rufname": "Wake-Word",
       "verfahrenAlt": "Kalibrierung veraltet. Bitte neu einsprechen.",
-      "neuKalibrieren": "Name geändert (früher „{{alt}}“, jetzt „{{neu}}“). Bitte neu einsprechen.",
+      "neuKalibrieren": "Noch auf „{{alt}}“ kalibriert, das Wake-Word ist jetzt „{{neu}}“. Bitte neu einsprechen.",
       "aktiv": "Wake-Word aktiv",
       "lauschtNicht": "Lauschen inaktiv. Bitte Mikrofon prüfen.",
       "schwelle": "Empfindlichkeit",
@@ -6807,7 +6799,7 @@
       "standardSystemMit": "Systemstandard ({{name}})",
       "fehlt": "{{name}} (nicht gefunden)",
       "ducking": "Ton absenken (Ducking)",
-      "duckingHinweis": "Senkt Hintergrundgeräusche und Musik ab, während die KI spricht.",
+      "duckingHinweis": "Senkt Hintergrundgeräusche und Musik ab, während Singra spricht.",
       "verarbeitung": "Mikrofon-Verarbeitung",
       "verarbeitungHinweis": "Chromiums integrierte WebRTC-Filterreihe zur Beseitigung von Störgeräuschen und Hall in Sprachräumen und Sprachaufnahmen.",
       "echo": "Echounterdrückung",
@@ -6827,7 +6819,7 @@
     },
     "kalibrierung": {
       "titel": "Neues Wake-Word?",
-      "frage": "Dein Assistent heißt jetzt „{{neu}}“ — das Wake-Word ist noch auf „{{alt}}“ kalibriert. Du kannst es neu einsprechen; bis dahin hört die App weiter auf „{{alt}}“. Das ist optional.",
+      "frage": "Die KI heißt jetzt fest „{{neu}}“ — das Wake-Word ist noch auf „{{alt}}“ kalibriert. Du kannst es neu einsprechen; bis dahin hört die App weiter auf „{{alt}}“. Das ist optional.",
       "spaeter": "Später",
       "jetzt": "Neu kalibrieren"
     },

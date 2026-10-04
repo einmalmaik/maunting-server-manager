@@ -107,7 +107,7 @@ describe('Wizard: Kopplung', () => {
           )
         }
         if (url.includes('/auth/me')) {
-          return Promise.resolve(json(200, { id: 1, username: 'tester', agent_name: null }))
+          return Promise.resolve(json(200, { id: 1, username: 'tester' }))
         }
         return Promise.resolve(json(200, { global_permissions: [], server_permissions: {} }))
       }),

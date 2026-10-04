@@ -129,8 +129,8 @@ pub struct WakewordStand {
     /// Ob das Lauschen laufen **soll** (konfig.json). `lauscht` sagt, ob der
     /// Thread wirklich läuft — nach einem Mikrofonfehler gehen beide auseinander.
     pub aktiv: bool,
-    /// Auf welches Wort trainiert wurde. Weicht es vom heutigen
-    /// Assistenten-Namen ab, schlägt die UI eine Neukalibrierung vor.
+    /// Auf welches Wort trainiert wurde. Weicht es vom Namen der KI
+    /// („Singra“) ab, schlägt die UI eine Neukalibrierung vor.
     pub wort: Option<String>,
     /// Ob die vorhandene Kalibrierung aus einem älteren Schnittverfahren
     /// stammt (siehe `VERFAHREN`). Dann hilft nur neu einsprechen — an

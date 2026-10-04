@@ -688,7 +688,7 @@ Maunting Service Manager
         titel_sicher = cls.html_text(titel)
 
         teile = [
-            cls._kategorie("KI-Assistent"),
+            cls._kategorie("Singra"),
             cls._ueberschrift(titel_sicher),
             cls._anrede(username),
         ]
@@ -1052,7 +1052,7 @@ Maunting Service Manager — Guardian Engine
             "betreff_ersatz": str(server_name or ""),
             "fakt": (
                 f'Auf dem Server "{server_name}" gab es eine Störung '
-                f"({incident_type}). Der KI-Assistent hat sie eigenständig "
+                f"({incident_type}). Singra hat sie eigenständig "
                 f"bearbeitet. Ergebnis: {zustand}."
             ),
             "fusszeile": (
@@ -1099,7 +1099,7 @@ Maunting Service Manager — Guardian Engine
             "betreff_praefix": EmailService._ai_betreff_praefix(titel),
             "betreff_ersatz": str(server_name or ""),
             "fakt": (
-                f"Der KI-Assistent bearbeitet gerade eine Störung{ziel} und "
+                f"Singra bearbeitet gerade eine Störung{ziel} und "
                 f'braucht dafür deine Zustimmung zu "{tool_name}". Der autonome '
                 "Modus führt diesen Schritt nicht von selbst aus."
             ),
@@ -1139,7 +1139,7 @@ Maunting Service Manager — Guardian Engine
             "betreff_praefix": EmailService._ai_betreff_praefix(titel),
             "betreff_ersatz": str(auftrag_titel or ""),
             "fakt": (
-                f'Dein Auftrag "{auftrag_titel}" an den KI-Assistenten hat '
+                f'Dein Auftrag "{auftrag_titel}" an Singra hat '
                 + ("eine Rückfrage gestellt." if frage else "ein Ergebnis gemeldet.")
             ),
             "fusszeile": "Den vollständigen Verlauf findest du im KI-Chat des Panels.",
@@ -1164,13 +1164,13 @@ Maunting Service Manager — Guardian Engine
         Ohne Zustandswort und ohne Ersatzbetreff: hier gibt es kein Ergebnis zu
         melden, die Mail beweist sich selbst, indem sie ankommt.
         """
-        titel = "Testmail vom KI-Assistenten"
+        titel = "Testmail von Singra"
         return {
             "username": str(username or ""),
             "titel": titel,
             "betreff_praefix": EmailService._ai_betreff_praefix(titel),
             "betreff_ersatz": "",
-            "fakt": "Diese Mail hat der KI-Assistent auf deine Bitte hin verschickt.",
+            "fakt": "Diese Mail hat Singra auf deine Bitte hin verschickt.",
             "fusszeile": None,
         }
 

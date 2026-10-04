@@ -56,7 +56,7 @@ describe('ConnectedCalendarsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: /Kalender hinzufügen/i }))
 
     expect(screen.getByRole('heading', { name: 'Kalender hinzufügen' })).toBeInTheDocument()
-    expect(screen.getByText(/Wird zum Abfragen von Terminen und Vorbereiten von Termineinträgen durch den KI-Assistenten verwendet/i)).toBeInTheDocument()
+    expect(screen.getByText(/Wird zum Abfragen von Terminen und Vorbereiten von Termineinträgen durch Singra verwendet/i)).toBeInTheDocument()
 
     const checkbox = screen.getByRole('checkbox')
     expect(checkbox).toBeInTheDocument()

@@ -106,7 +106,7 @@ THREADS_HOECHSTENS = 1
 #: Der feste Text, der in jeder Zeile mit Fakten als Rueckfall danebensteht.
 #: Als Konstante, weil zwei Zusagen daran haengen: er geht hinaus, wenn das
 #: Modell klemmt — und er geht **nicht** hinaus, wenn es geliefert hat.
-RUECKFALL = "Der Assistent hat keine Zusammenfassung hinterlassen."
+RUECKFALL = "Singra hat keine Zusammenfassung hinterlassen."
 
 
 def _rahmen(*, geschafft: bool = True) -> dict:

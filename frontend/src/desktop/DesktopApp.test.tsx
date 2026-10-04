@@ -110,7 +110,6 @@ const BENUTZER: User = {
   username: 'tester',
   email: 't@example.com',
   is_owner: false,
-  agent_name: 'Jarvis',
 } as unknown as User
 
 const LETZTE_ROUTE_KEY = 'mss:letzte_route'
@@ -186,8 +185,8 @@ describe('DesktopApp', () => {
     await waitFor(() => {
       expect(screen.getByTestId('ki-seite')).toBeInTheDocument()
     })
-    // Der Agent-Name steht in der Kopfleiste — dieselbe Quelle wie im Panel.
-    expect(screen.getByRole('heading', { level: 1, name: 'Jarvis' })).toBeInTheDocument()
+    // Der Name der KI steht in der Kopfleiste.
+    expect(screen.getByRole('heading', { level: 1, name: 'Singra' })).toBeInTheDocument()
   })
 
   it('ohne Sandbox-Ordner bietet die App genau diesen Schritt noch einmal an', async () => {
@@ -654,7 +653,7 @@ describe('DesktopApp', () => {
       expect(within(navigation).getByRole('button', { name: i18n.t(bereich) })).toBeInTheDocument()
     }
 
-    // KI-Assistent, Messenger und Gedächtnis sind offline ausgeblendet
+    // Singra, Messenger und Gedächtnis sind offline ausgeblendet
     expect(screen.queryByText(i18n.t('mss.app.ki'))).not.toBeInTheDocument()
     expect(screen.queryByText(i18n.t('mss.app.messenger'))).not.toBeInTheDocument()
     expect(screen.queryByText(i18n.t('mss.app.gedaechtnis'))).not.toBeInTheDocument()
@@ -708,7 +707,7 @@ describe('DesktopApp', () => {
       // Die Kopfzeile nennt den offenen Bereich; bis 02.10.2026 stand dort immer der Assistent.
       expect(screen.getByRole('heading', { level: 1, name: i18n.t('mss.app.messenger') })).toBeInTheDocument()
     })
-    expect(screen.queryByRole('heading', { level: 1, name: 'Jarvis' })).toBeNull()
+    expect(screen.queryByRole('heading', { level: 1, name: 'Singra' })).toBeNull()
   })
 
   it('setzt in Kopfzeile und Navigation kein natives title; inaktive Reiter nennen ihren Namen per Kurzinfo', async () => {

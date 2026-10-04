@@ -31,6 +31,7 @@ import { AnrufEbene } from '@/components/calling/AnrufEbene'
 import { CrossDeviceCallBanner } from '@/components/calling/CrossDeviceCallBanner'
 import { Avatar, BenachrichtigungsGlocke, Button, Kurzinfo, ProfileDropdown, type ProfileDropdownItem } from '@/Singra/UI'
 import { useHasPermission } from '@/hooks/useHasPermission'
+import { KI_NAME } from '@/lib/kiName'
 import { Ai } from '@/pages/Ai'
 import { Messenger } from '@/pages/Messenger'
 import { Benutzerprofil } from '@/pages/Benutzerprofil'
@@ -69,10 +70,10 @@ import {
   konfigSpeichern,
   updateInstallieren,
   updatePruefen,
-  wakewordStand,
   type AppKonfig,
   type UpdateStatusEvent,
 } from './tauri'
+import { KalibrierungsHinweis } from './KalibrierungsHinweis'
 import { stillAnmeldenDetail } from './transport'
 import { useAuftragsschleife } from './useAuftragsschleife'
 
@@ -742,55 +743,6 @@ function SchliessenDialog() {
   )
 }
 
-function KalibrierungsHinweis() {
-  const { t } = useTranslation()
-  const navigate = useNavigate()
-  const agentName = useAuthStore((s) => s.user?.agent_name?.trim() || 'Assistent')
-  const [altesWort, setAltesWort] = useState<string | null>(null)
-
-  useEffect(() => {
-    void wakewordStand()
-      .then((stand) => {
-        if (stand.trainiert && stand.wort && stand.wort !== agentName) {
-          setAltesWort(stand.wort)
-        }
-      })
-      .catch(() => undefined)
-  }, [])
-
-  if (altesWort === null) return null
-
-  return (
-    <div
-      className="msm-modal-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label={t('mss.kalibrierung.titel')}
-    >
-      <div className="msm-card w-full max-w-sm p-5">
-        <h2 className="text-sm font-medium text-on-surface">{t('mss.kalibrierung.titel')}</h2>
-        <p className="mt-1 text-xs text-on-surface-variant">
-          {t('mss.kalibrierung.frage', { neu: agentName, alt: altesWort })}
-        </p>
-        <div className="mt-4 flex flex-wrap justify-end gap-2">
-          <Button variant="ghost" onClick={() => setAltesWort(null)}>
-            {t('mss.kalibrierung.spaeter')}
-          </Button>
-          <Button
-            autoFocus
-            onClick={() => {
-              setAltesWort(null)
-              navigate('/einstellungen?tab=audio')
-            }}
-          >
-            {t('mss.kalibrierung.jetzt')}
-          </Button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function SprachwacheHaupt() {
   const ort = useLocation()
   const navigate = useNavigate()
@@ -890,9 +842,8 @@ function Hauptseite({
     }
   }, [isOffline, location.pathname, navigate, offlineRouten, fallbackRoute])
 
-  const agentName = user?.agent_name?.trim() || 'Assistent'
   // Am Handy fehlt die Reiterleiste; die Kopfzeile nennt deshalb den offenen Bereich.
-  const kopfTitel = bereich === 'ki' ? agentName : t(BEREICH_TITEL[bereich])
+  const kopfTitel = bereich === 'ki' ? KI_NAME : t(BEREICH_TITEL[bereich])
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
   const { status: presenceStatus, changeStatus: handlePresenceChange } = usePresenceAndActivity(
     !isOffline && darfMessenger,
@@ -1037,7 +988,7 @@ function Hauptseite({
                   size="md"
                 />
                 <div className="min-w-0">
-                  <span className="font-headline font-semibold text-sm text-on-surface block truncate">{user?.username || agentName}</span>
+                  <span className="font-headline font-semibold text-sm text-on-surface block truncate">{user?.username || KI_NAME}</span>
                   <p className="text-xs text-on-surface-variant truncate">{user?.email}</p>
                 </div>
               </div>

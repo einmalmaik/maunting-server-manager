@@ -97,7 +97,7 @@ function nutzer(aiNotifications: boolean) {
   })
 }
 
-/** Verrät, wo der Router gerade steht — sonst liesse sich „Zum Assistenten" nur zählen, nicht prüfen. */
+/** Verrät, wo der Router gerade steht — sonst liesse sich „Zu Singra" nur zählen, nicht prüfen. */
 function Standort() {
   const ort = useLocation()
   return <span data-testid="standort">{`${ort.pathname}${ort.search}`}</span>
@@ -230,7 +230,7 @@ describe('AiRunNotice', () => {
 
     await waitFor(() => expect(fragen('guardian')).toBe(1))
     await vi.advanceTimersByTimeAsync(9_000)
-    fireEvent.click(await screen.findByRole('button', { name: 'Zum Assistenten' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Zu Singra' }))
     await waitFor(() => {
       expect(screen.getByTestId('standort')).toHaveTextContent('/ai?ansicht=guardian')
     })
@@ -243,7 +243,7 @@ describe('AiRunNotice', () => {
 
     await waitFor(() => expect(fragen('primary')).toBe(1))
     await vi.advanceTimersByTimeAsync(9_000)
-    fireEvent.click(await screen.findByRole('button', { name: 'Zum Assistenten' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Zu Singra' }))
     await waitFor(() => {
       expect(screen.getByTestId('standort')).toHaveTextContent(/^\/ai$/)
     })
@@ -325,7 +325,7 @@ describe('AiRunNotice', () => {
       expect(screen.getByRole('status'))
         .toHaveTextContent('Ein Worker wartet auf deine Freigabe.')
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Zum Assistenten' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Zu Singra' }))
     await waitFor(() => {
       expect(screen.getByTestId('standort'))
         .toHaveTextContent('/ai?ansicht=worker&id=konv-worker-1')

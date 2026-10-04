@@ -412,7 +412,7 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
     {
         "id": "ai_first_contact",
         "title": "Erster Kontakt",
-        "description": "Erste Unterhaltung mit dem Singra KI-Assistenten geführt.",
+        "description": "Erste Unterhaltung mit Singra geführt.",
         "category": "ai",
         "points": 15,
         "icon": "sparkles",
@@ -476,7 +476,7 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
     {
         "id": "ai_server_medic",
         "title": "KI-Doktor",
-        "description": "Einen Serverfehler durch die Diagnose des KI-Assistenten behoben.",
+        "description": "Einen Serverfehler durch Singras Diagnose behoben.",
         "category": "ai",
         "points": 35,
         "icon": "activity",
@@ -548,7 +548,7 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
     {
         "id": "ai_hundred_prompts",
         "title": "Dialog-Marathon",
-        "description": "Über 100 fundierte Dialogrunden mit dem Assistenten absolviert.",
+        "description": "Über 100 fundierte Dialogrunden mit Singra absolviert.",
         "category": "ai",
         "points": 60,
         "icon": "message-circle",

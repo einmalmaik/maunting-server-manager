@@ -27,7 +27,7 @@
     "panelDatabase": "Panel database",
     "nodes": "Nodes",
     "audit": "Audit",
-    "ai": "AI assistant",
+    "ai": "Singra",
     "teams": "Teams",
     "chat": "Messenger"
   },
@@ -194,7 +194,7 @@
       "team": "Shared with team"
     },
     "emptyTitle": "No notes yet",
-    "emptyDesc": "Create a new note or dictate one directly through the AI assistant.",
+    "emptyDesc": "Create a new note or dictate one directly through Singra.",
     "emptySearch": "No matching notes found.",
     "emptySearchDesc": "Adjust your search terms or filters.",
     "emptyArchivedTitle": "No archived notes",
@@ -501,14 +501,10 @@
       "geminiSafetyOffHint": "Sets all 5 default safety filters (hate speech, harassment, dangerous content and so on) to BLOCK_NONE for Gemini and Gemma models via the Google AI Studio API."
     },
     "profile": {
-      "title": "AI assistant",
-      "description": "Memory and settings for your assistant.",
+      "title": "Singra",
+      "description": "Memory and settings for Singra.",
       "skillsMoved": "Manage personal skills under",
       "skillsMovedLink": "Teams → personal",
-      "agentNameTitle": "Assistant name",
-      "agentNameDescription": "Personal call name (Default: Assistant).",
-      "agentNameLabel": "Name",
-      "agentNameSaved": "Name saved.",
       "devicesTitle": "Pair devices",
       "devicesDescription": "Code for connecting desktop and mobile apps.",
       "devicesApiAddress": "Enter this address in the app",
@@ -591,7 +587,7 @@
         "panel": "Panel-wide AI memory"
       },
       "descriptions": {
-        "user": "Personal assistant notes – visible only to you.",
+        "user": "Singra’s personal notes – visible only to you.",
         "server_shared": "Shared server knowledge – visible to all users with server access.",
         "team": "Shared team knowledge – visible to all team members.",
         "panel": "Panel-wide knowledge available to all users in chats."
@@ -685,7 +681,7 @@
         "namedTeam": "Team: {{name}}"
       },
       "origins": {
-        "ai": "learned by the assistant"
+        "ai": "learned by Singra"
       },
       "pending": "awaiting approval",
       "readOnly": "Built-in skills cannot be edited directly. Create a panel-wide skill with the same key to override or disable them.",
@@ -694,11 +690,11 @@
       "keyHint": "Lowercase letters, digits, hyphens. For example valheim-ram.",
       "name": "Name",
       "descriptionLabel": "Description",
-      "descriptionHint": "What the skill does AND when it applies. This line alone decides whether the assistant finds it.",
+      "descriptionHint": "What the skill does AND when it applies. This line alone decides whether Singra finds it.",
       "body": "Procedure",
       "bodyHint": "Prose, Markdown welcome. Describe what to check, in what order, and how to recognise the cause.",
       "enabled": "Skill active",
-      "empty": "No skills of your own yet. The bundled ones are available to the assistant regardless.",
+      "empty": "No skills of your own yet. The bundled ones are available to Singra regardless.",
       "save": "Save",
       "saved": "Skill saved.",
       "deleted": "Skill deleted.",
@@ -717,9 +713,9 @@
       "search": "Search skills",
       "noMatches": "No skill matches the search.",
       "manage": "Yours to edit",
-      "panelDescription": "Procedures that apply panel-wide. Whatever is listed here, the assistant reads in every conversation of every user.",
+      "panelDescription": "Procedures that apply panel-wide. Whatever is listed here, Singra reads in every conversation of every user.",
       "personalDescription": "Your own procedures. Nobody else sees them, and the AI reads them only in your conversations.",
-      "directoryTitle": "Assistant skills",
+      "directoryTitle": "Singra’s skills",
       "directoryDescription": "Currently active skills: built-in, panel-wide, personal, and from your teams.",
       "directoryManageHint": "A skill is edited where it applies: personal and team skills under Teams, panel-wide ones in Settings."
     },
@@ -733,12 +729,12 @@
       "redacted_other": "{{count}} spots redacted"
     },
     "chat": {
-      "title": "AI assistant",
+      "title": "Singra",
       "selectProvider": "Select provider",
       "provider": "AI model & provider",
       "cleared": "Chat history cleared",
       "emptyTitle": "How can I help?",
-      "emptyDescription": "The assistant receives only approved, minimized context. Verify important statements before operational changes.",
+      "emptyDescription": "Singra receives only approved, minimized context. Verify important statements before operational changes.",
       "thinking": "Preparing response …",
       "noResponse": "No response received.",
       "failed": "This response could not be completed.",
@@ -776,7 +772,7 @@
       "reasoning": "Thinking …",
       "thinkingNow": "Thinking …",
       "thought": "Thought",
-      "noPermission": "No permission to use the AI assistant.",
+      "noPermission": "No permission to use Singra.",
       "examples": {
         "logs": "My server is not starting, please check the logs.",
         "network": "My Minecraft server is running but unreachable. Why?",
@@ -791,7 +787,7 @@
       "working": "Working …",
       "compacted": "Older messages were summarized",
       "edit": "Edit message",
-      "editHint": "This message and everything after it will be removed. The assistant will no longer know the earlier wording.",
+      "editHint": "This message and everything after it will be removed. Singra will no longer know the earlier wording.",
       "editSend": "Send again",
       "reasoningLevel": "Reasoning depth",
       "moreSettings": "More chat settings",
@@ -1096,7 +1092,6 @@
       "worker_cancel": "Worker cancelled",
       "worker_frage": "Question raised",
       "worker_start": "Worker started",
-      "set_agent_name": "Name changed",
       "email_search": "Emails searched",
       "email_read": "Email read",
       "calendar_read": "Calendar queried",
@@ -1232,7 +1227,6 @@
       "worker_cancel": "Stopping the worker",
       "worker_frage": "Asking you a question",
       "worker_start": "Starting a worker in the background",
-      "set_agent_name": "Taking on my new name",
       "analyze_region": "Analyzing the region and satellite data",
       "control_region_camera": "Adjusting the map view",
       "voice_resolve_latest_proposal": "Processing voice confirmation",
@@ -1444,7 +1438,7 @@
     },
     "webSearch": {
       "title": "Web search & research",
-      "description": "Search and research settings for the assistant. Direct web scraping and free web search are always active by default. Optionally configure a Brave API key or your own SearXNG meta-search instance.",
+      "description": "Search and research settings for Singra. Direct web scraping and free web search are always active by default. Optionally configure a Brave API key or your own SearXNG meta-search instance.",
       "apiKey": "Brave search API key (optional)",
       "searxngUrl": "SearXNG endpoint URL (optional)",
       "sidecarActive": "Local SearXNG sidecar active (default: {{url}})",
@@ -1467,7 +1461,7 @@
     },
     "satellite": {
       "title": "Satellite data (Copernicus / Sentinel)",
-      "description": "Credentials for the Copernicus Data Space Ecosystem (CDSE). Lets the assistant fetch Earth observation and Sentinel satellite data during regional analysis.",
+      "description": "Credentials for the Copernicus Data Space Ecosystem (CDSE). Lets Singra fetch Earth observation and Sentinel satellite data during regional analysis.",
       "clientId": "Client ID",
       "clientIdPlaceholder": "Copernicus CDSE client ID",
       "clientSecret": "Client secret",
@@ -1677,8 +1671,8 @@
       }
     },
     "memoryNotice": {
-      "title": "The assistant can remember things about you",
-      "body": "The assistant can store preferences and project notes. These entries are sent to the configured AI provider with each request. Memory is currently disabled.",
+      "title": "Singra can remember things about you",
+      "body": "Singra can store preferences and project notes. These entries are sent to the configured AI provider with each request. Memory is currently disabled.",
       "enable": "Enable",
       "later": "Later",
       "never": "Stop asking",
@@ -1687,8 +1681,8 @@
       "failed": "Your answer could not be saved."
     },
     "learning": {
-      "title": "Assistant self-learning",
-      "description": "The assistant records solved problems as skills. Team skills are created automatically. Set the policy for panel-wide skills here (effective for all users).",
+      "title": "Singra’s self-learning",
+      "description": "Singra records solved problems as skills. Team skills are created automatically. Set the policy for panel-wide skills here (effective for all users).",
       "policy": "Panel-wide learning",
       "options": {
         "off": "Off — only I create panel-wide skills",
@@ -1696,7 +1690,7 @@
         "instant": "Effective immediately from any conversation"
       },
       "hints": {
-        "off": "The assistant learns only into the respective team.",
+        "off": "Singra learns only into the respective team.",
         "review": "Users with the “manage AI skills” permission take effect immediately; other proposals require approval.",
         "instant": "Learned skills take effect immediately panel-wide."
       },
@@ -1707,7 +1701,7 @@
       }
     },
     "question": {
-      "title": "Question from the assistant",
+      "title": "Question from Singra",
       "freeText": "Or just type something else in the input field.",
       "answered": "Answered."
     },
@@ -1716,7 +1710,7 @@
       "waitingConfirmation": "The AI is waiting for your confirmation.",
       "waitingUser": "The AI has a question for you.",
       "failed": "The AI task failed.",
-      "open": "Open assistant",
+      "open": "Open Singra",
       "guardianCompleted": "The AI worked on a Guardian incident.",
       "guardianWaiting": "A Guardian repair is waiting for your approval.",
       "guardianFailed": "A Guardian repair failed.",
@@ -1990,7 +1984,7 @@
       "runtimeEnv": "Environment variables as a key-value dict. Values may contain port placeholders: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. {INSTALL_DIR} and {ENV.<KEY>} are NOT allowed in env values.",
       "runtimeStartup": "Startup command (passed as argv, NO shell). Valid placeholders: {SERVER_NAME}, {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}, {INSTALL_DIR}, {MOD_ARG}. {SERVER_NAME} uses the individual MSM server name. Also {ENV.<KEY>} for custom env variables. Forbidden characters: $, backtick.",
       "runtimeEnsureDirs": "Relative directories created inside the server directory before each start. Useful for profile, log, cache, or runtime folders expected by startup arguments.",
-      "runtimeConfigPatches": "List of configuration patches applied before startup. Each patch requires type, file, and value (plus section/key for ini or regex for regex). They apply to all servers of this blueprint. Per-server overrides can be configured via the assistant.",
+      "runtimeConfigPatches": "List of configuration patches applied before startup. Each patch requires type, file, and value (plus section/key for ini or regex for regex). They apply to all servers of this blueprint. Per-server overrides can be configured via Singra.",
       "runtimeEnableExec": "Enable the Exec tab. Default: false. Self-hosted, but commands run ONLY inside the MSM-managed container of this server, NEVER on the host or in other containers.",
       "runtimeExecTimeoutSeconds": "Timeout per exec call in seconds (1..600). Default: 60.",
       "logsSources": "Log sources for Guardian and the visible server console. stdout shows Docker output; safe relative file paths and simple filename wildcards are additionally followed live.",
@@ -2503,7 +2497,7 @@
     },
     "ai_chat_use": {
       "title": "Use AI chat",
-      "desc": "Allows interacting with the integrated AI assistant. Role limits and tool permissions are checked in the backend."
+      "desc": "Allows interacting with Singra, the integrated AI. Role limits and tool permissions are checked in the backend."
     },
     "ai_voice_use": {
       "title": "Use voice mode",
@@ -2515,11 +2509,11 @@
     },
     "ai_memory_use": {
       "title": "Use AI memory",
-      "desc": "Store personal and server-specific notes in the assistant."
+      "desc": "Store personal and server-specific notes with Singra."
     },
     "ai_skills_use": {
       "title": "Use AI skills",
-      "desc": "Access skills and workflows learned by the assistant."
+      "desc": "Access skills and workflows learned by Singra."
     },
     "ai_skills_manage": {
       "title": "Manage AI skills",
@@ -2531,7 +2525,7 @@
     },
     "ai_satellite_use": {
       "title": "Use satellite & regional analysis",
-      "desc": "Allows the assistant to analyse regions and steer the map view. The place name and coordinates go to OpenStreetMap, Open-Meteo, Reddit, Bluesky and Esri (map image) without further setup, and with configured access also to Copernicus, TomTom and MapTiler."
+      "desc": "Allows Singra to analyse regions and steer the map view. The place name and coordinates go to OpenStreetMap, Open-Meteo, Reddit, Bluesky and Esri (map image) without further setup, and with configured access also to Copernicus, TomTom and MapTiler."
     },
     "ai_autonomous_use": {
       "title": "Use autonomous mode",
@@ -2555,7 +2549,7 @@
     },
     "ai_mailbox_use": {
       "title": "Connect mailboxes",
-      "desc": "Link email mailboxes for processing by the assistant."
+      "desc": "Link email mailboxes for processing by Singra."
     },
     "ai_calendar_use": {
       "title": "Connect calendars",
@@ -2563,7 +2557,7 @@
     },
     "ai_notes_use": {
       "title": "Manage notes",
-      "desc": "Create and manage personal or team notes, checklists, and tasks through the AI assistant."
+      "desc": "Create and manage personal or team notes, checklists, and tasks through Singra."
     },
     "ai_usage_read_all": {
       "title": "View all users' AI usage",
@@ -2995,7 +2989,7 @@
     "databases": "Databases",
     "webhooks": "Webhooks",
     "memory": "Server knowledge",
-    "ai": "AI assistant"
+    "ai": "Singra"
   },
   "files": {
     "upload": "Upload",
@@ -3663,8 +3657,8 @@
       "templateWebde": "WEB.DE",
       "templateIcloud": "Apple iCloud (App-specific)",
       "protocolHelp": "You can configure only IMAP (read-only), only SMTP (send-only), or both together. At least one protocol is required.",
-      "imapHelp": "Used for searching and reading emails by the AI assistant.",
-      "smtpHelp": "Used for preparing and sending emails by the AI assistant.",
+      "imapHelp": "Used for searching and reading emails by Singra.",
+      "smtpHelp": "Used for preparing and sending emails by Singra.",
       "gmailNotice": "Note for Gmail: Google requires a 16-character App Password if 2-factor authentication is active.",
       "emailAndNameRequired": "Please provide email and name.",
       "hostRequired": "Please configure at least IMAP host (for receiving) or SMTP host (for sending)."
@@ -3685,7 +3679,7 @@
       "caldavUsername": "CalDAV username",
       "password": "Password / app password",
       "isDefault": "Use as default calendar",
-      "protocolHelp": "Used for querying calendar events and preparing schedule drafts by the AI assistant. Events are only created or modified after your explicit approval.",
+      "protocolHelp": "Used for querying calendar events and preparing schedule drafts by Singra. Events are only created or modified after your explicit approval.",
       "caldavHelp": "CalDAV URL of your calendar (e.g. Nextcloud, Google CalDAV).",
       "nameAndUrlRequired": "Please provide name and CalDAV URL."
     },
@@ -4807,7 +4801,7 @@
         }
       },
       "ai": {
-        "heading": "6. AI assistant and external model providers",
+        "heading": "6. AI assistant Singra and external model providers",
         "body": "AI features are optional. When used, the panel processes the conversation and sends the message with minimized, redacted context to the selected model provider. The operator determines available providers and must document their terms and lawful basis.",
         "items": {
           "messages": "Global and server-specific chat histories are linked to the account, stored in the panel, and can be deleted by the user. Messages, titles, summaries, tool results and run state are stored in the database only in encrypted form (DIS AES-256-GCM), as are tasks, notices and outgoing report emails. A delivered report email is deleted from the outbox. This protects the database, dumps and backups; the panel itself decrypts the history to display it and to send it to the model provider",
@@ -4820,11 +4814,11 @@
           "attachments": "Approved text, configuration, log, and image attachments are size- and type-checked, stored encrypted in the panel, and transferred with the conversation to the selected model provider",
           "autonomy": "Autonomous mode is optional and must be granted explicitly, per server or panel-wide; granted actions run without a further prompt but are still checked against the user's permissions unchanged and are recorded in full in the audit log as executed automatically",
           "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat",
-          "noMessenger": "The messenger is out of the assistant's reach: there is no tool that reads contacts, groups, or conversations, and none that sends a message. Nothing from it goes to the model provider, because there is nothing to fetch.",
+          "noMessenger": "The messenger is out of Singra's reach: there is no tool that reads contacts, groups, or conversations, and none that sends a message. Nothing from it goes to the model provider, because there is nothing to fetch.",
           "voice": "Voice mode: in legacy mode, microphone audio passes through the panel for transcription and reply text is additionally sent to ElevenLabs. With OpenAI Realtime enabled, microphone audio is sent directly to OpenAI over WebRTC while the panel connects in parallel for tool control and accounting. Spoken turns are not stored as chat messages in this mode. The OpenAI key and call ID remain in the backend.",
-          "guardian": "With autonomy granted, a Guardian incident can trigger processing while the user is not present: the incident type, its status and the server data already shared with the assistant are transmitted; log excerpts are additionally stripped of public IP addresses and email addresses. Usage and responsibility remain with the grantor. The result report sent by email contains model-generated text.",
+          "guardian": "With autonomy granted, a Guardian incident can trigger processing while the user is not present: the incident type, its status and the server data already shared with Singra are transmitted; log excerpts are additionally stripped of public IP addresses and email addresses. Usage and responsibility remain with the grantor. The result report sent by email contains model-generated text.",
           "tasks": "A standing task created in chat or in the task list (“AI task”) stores its name, instruction, schedule, time zone and delivery channel, and triggers processing at the agreed time while the user is not present. It runs in the background with the permissions and quota of whoever created it; on each due run the instruction and the server data it retrieves are transmitted to the selected model provider. On request the result is additionally sent by email to the stored address and contains model-generated text. Tasks can be listed, paused and deleted from the chat and the task list at any time.",
-          "mailboxes": "Linked email mailboxes (IMAP / SMTP): Stored credentials (passwords, app passwords, or OAuth tokens) are encrypted with DIS AES-256-GCM and never leave the panel in plaintext. Emails are searched or read solely upon your explicit instruction. The AI assistant never sends emails autonomously: every email transmission is presented in the chat as an action proposal card with subject, recipient, and content, and is only sent after your explicit confirmation.",
+          "mailboxes": "Linked email mailboxes (IMAP / SMTP): Stored credentials (passwords, app passwords, or OAuth tokens) are encrypted with DIS AES-256-GCM and never leave the panel in plaintext. Emails are searched or read solely upon your explicit instruction. Singra never sends emails autonomously: every email transmission is presented in the chat as an action proposal card with subject, recipient, and content, and is only sent after your explicit confirmation.",
           "calendars": "Integrated & linked calendar: Events of the native calendar remain within the local panel database under full user data sovereignty. For external CalDAV accounts, credentials are encrypted with DIS AES-256-GCM. The AI only reads events upon specific request. Creating, modifying, or deleting events produces an action proposal card in the chat and is executed only after user confirmation (or logged automatically when autonomous mode is enabled)."
         }
       },
@@ -4845,7 +4839,7 @@
           "virenscan": "Virus check: on request the app checks a file with the locally installed Microsoft Defender, without changing or removing it. The checked path and, if something is found, an excerpt of the Defender output (which contains file paths and threat names) go to the model provider.",
           "eingabe": "Mouse and keyboard: the app does not record your input. There is no capture of keystrokes or mouse movement, neither locally nor transmitted. Conversely the AI can take over mouse and keyboard; with autonomous mode off, every takeover must be confirmed on your machine and is time-limited. Text the AI types originates from the model and is contained in the transmitted job.",
           "discordRpc": "Discord Rich Presence (RPC): If the Discord desktop app is running on your computer, the desktop app can report your activity status locally via a Windows pipe to Discord (e.g. 'MSS Desktop Companion'). No server addresses, chat histories, IP addresses, or sensitive credentials are ever transmitted. This feature can be completely disabled in the desktop app configuration ('konfig.json' -> 'discord_rpc_aktiv': false).",
-          "lokal": "What is stored locally: a plain-text configuration file (panel address, sandbox path, chosen assistant name, shortcuts, audio device names, wake word sensitivity, initial start introduction state), the wake word recordings and model, and in the key store of the operating system the refresh token of the paired session, encrypted by the system. If you use biometric unlock for the vault or the messenger, their keys are stored there too, and for the messenger PIN a device secret that goes into its derivation. On top of that come the offline data of vault, notes and messenger; see the sections on the vault and on local storage. Your password and two-factor code never reach the app; signing in works solely through the pairing code or QR code from the panel. Uninstalling removes all of it completely."
+          "lokal": "What is stored locally: a plain-text configuration file (panel address, sandbox path, shortcuts, audio device names, wake word sensitivity, initial start introduction state), the wake word recordings and model, and in the key store of the operating system the refresh token of the paired session, encrypted by the system. If you use biometric unlock for the vault or the messenger, their keys are stored there too, and for the messenger PIN a device secret that goes into its derivation. On top of that come the offline data of vault, notes and messenger; see the sections on the vault and on local storage. Your password and two-factor code never reach the app; signing in works solely through the pairing code or QR code from the panel. Uninstalling removes all of it completely."
         }
       },
       "storage": {
@@ -5988,9 +5982,9 @@
     "selectUser": "Choose user",
     "memberInvited": "User invited.",
     "myInvitations": "Invitations for you",
-    "myInvitationsHint": "A team shares its AI knowledge and its server permissions with every member: whoever joins reads along — and whatever their assistant learns for the team, the others read. That is why only you decide whether you join.",
+    "myInvitationsHint": "A team shares its AI knowledge and its server permissions with every member: whoever joins reads along — and whatever Singra learns for them in the team, the others read. That is why only you decide whether you join.",
     "myUpgrades": "Permission requests for you",
-    "myUpgradesHint": "You already belong to these teams — this is only about whether you may manage their shared knowledge from now on. If you accept, your assistant starts learning for that team, and whatever it stores there is readable by every member. If you decline, everything stays as it is.",
+    "myUpgradesHint": "You already belong to these teams — this is only about whether you may manage their shared knowledge from now on. If you accept, Singra starts learning for you in that team, and whatever she stores there is readable by every member. If you decline, everything stays as it is.",
     "invitedBy": "invited by {{name}}",
     "acceptInvitation": "Accept",
     "declineInvitation": "Decline",
@@ -6029,7 +6023,7 @@
       "save": "Change could not be saved."
     },
     "knowledge": "AI knowledge",
-    "knowledgeHint": "What the assistant remembers for this team and which procedures it has learned here. Every member can read it; changing it needs the matching switch under “Members”.",
+    "knowledgeHint": "What Singra remembers for this team and which procedures she has learned here. Every member can read it; changing it needs the matching switch under “Members”.",
     "personalKnowledgeHint": "Your personal AI knowledge. Nobody else sees it, regardless of permissions.",
     "areaLabel": "Area",
     "areaPersonal": "Personal",
@@ -6055,7 +6049,7 @@
       "updateBereitNeustart": "Update v{{version}} installed. Restarting …",
       "updateDownloadProzent": "Download: {{prozent}}%",
       "bereiche": "View",
-      "ki": "AI assistant",
+      "ki": "Singra",
       "messenger": "Messenger",
       "kalender": "Calendar",
       "notizen": "Notes",
@@ -6643,9 +6637,7 @@
       "meldenFehlerTitel": "Device key not registered",
       "meldenFehlerHinweis": "Pairing worked, but the device does not appear in your device list yet. Until it is approved it cannot read messages, notes or calendar events.",
       "nochmal": "Try again",
-      "personalisierungErklaerung": "Give your assistant a name — that is how you address it and how it introduces itself. Both apply everywhere: here and in the panel.",
-      "agentnameLabel": "Assistant name",
-      "agentnameHinweis": "2–32 characters; leave empty for the default name Assistant.",
+      "personalisierungErklaerung": "Singra calculates appointments and reminders in your time zone. It applies everywhere: here and in the panel.",
       "zeitzoneLabel": "Time zone",
       "speichert": "Saving …",
       "weiter": "Next",
@@ -6678,7 +6670,7 @@
       "datenschutz": "Local recognition without audio transmission.",
       "rufname": "Wake word",
       "verfahrenAlt": "Calibration outdated. Please re-record.",
-      "neuKalibrieren": "Name changed (previously \"{{alt}}\", now \"{{neu}}\"). Please recalibrate.",
+      "neuKalibrieren": "Still calibrated to \"{{alt}}\"; the wake word is now \"{{neu}}\". Please recalibrate.",
       "aktiv": "Wake word active",
       "lauschtNicht": "Listening inactive. Please check microphone.",
       "schwelle": "Sensitivity",
@@ -6807,7 +6799,7 @@
       "standardSystemMit": "System default ({{name}})",
       "fehlt": "{{name}} (not found)",
       "ducking": "Lower other audio (ducking)",
-      "duckingHinweis": "Lowers background noise and music while the assistant speaks.",
+      "duckingHinweis": "Lowers background noise and music while Singra speaks.",
       "verarbeitung": "Microphone processing",
       "verarbeitungHinweis": "Chromium’s built-in WebRTC filter chain, which removes background noise and echo in voice rooms and recordings.",
       "echo": "Echo cancellation",
@@ -6827,7 +6819,7 @@
     },
     "kalibrierung": {
       "titel": "New wake word?",
-      "frage": "Your assistant is now called “{{neu}}” — the wake word is still calibrated to “{{alt}}”. You can record it again; until then the app keeps listening for “{{alt}}”. This is optional.",
+      "frage": "The AI is now permanently called “{{neu}}” — the wake word is still calibrated to “{{alt}}”. You can record it again; until then the app keeps listening for “{{alt}}”. This is optional.",
       "spaeter": "Later",
       "jetzt": "Recalibrate"
     },

@@ -610,7 +610,7 @@ def _quarantaene_aufheben(db: Session, auftrag: AiGuardianRepair, server: Server
             server_id=int(server.id),
             event_type="guardian_quarantine_clear",
             description=(
-                "Der Assistent hat die Guardian-Quarantaene nach einem "
+                "Singra hat die Guardian-Quarantaene nach einem "
                 "ausgefuehrten Eingriff zur Freigabe angefordert."
             ),
             details=json.dumps(

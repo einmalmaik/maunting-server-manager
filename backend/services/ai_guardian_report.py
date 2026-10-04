@@ -191,7 +191,7 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
     bericht = abschlusstext(db, run, zustand)
     if not bericht:
         bericht = (
-            "Der Assistent hat keinen Abschlussbericht hinterlassen. "
+            "Singra hat keinen Abschlussbericht hinterlassen. "
             "Der Verlauf steht im KI-Chat des Panels."
         )
     bericht = sicherheitsstopp_vermerken(run, bericht)
@@ -270,7 +270,7 @@ def _fakten(felder: dict) -> str:
     zustand = "behoben" if felder.get("geheilt") else "nicht behoben"
     zeilen = [
         "Anlass: die Guardian-Engine hat eine Stoerung gemeldet, "
-        "der Assistent hat sie eigenstaendig bearbeitet.",
+        "Singra hat sie eigenstaendig bearbeitet.",
         f"Server: {felder.get('server_name') or '(ohne Namen)'}",
         f"Art der Stoerung: {felder.get('incident_type') or 'unbekannt'}",
         f"Ergebnis laut Panel: {zustand}",

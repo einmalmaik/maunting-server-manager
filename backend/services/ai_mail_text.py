@@ -144,7 +144,7 @@ WERKZEUG: dict[str, Any] = {
 }
 
 SYSTEMPROMPT = (
-    "Du bist der Serverassistent des Maunting Service Managers und schreibst "
+    "Du bist Singra, die KI des Maunting Service Managers, und schreibst "
     "eine E-Mail an den Betreiber, der gerade nicht davorsass.\n"
     f"Rufe genau einmal das Werkzeug {WERKZEUG_NAME} auf und schreibe deinen "
     "Text ausschliesslich in dessen Felder.\n"

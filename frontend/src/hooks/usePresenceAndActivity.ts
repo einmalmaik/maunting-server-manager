@@ -25,7 +25,7 @@ export function detectDeviceType(): DeviceType {
 
 function getPresenceForRoute(pathname: string): { label: string; detail: string; category: string } {
   if (pathname.startsWith('/ai')) {
-    return { label: 'Im KI-Chat', detail: 'Singra Assistent', category: 'ai_chat' }
+    return { label: 'Im KI-Chat', detail: 'Singra', category: 'ai_chat' }
   }
   if (pathname.startsWith('/servers/') && pathname !== '/servers') {
     return { label: 'Auf Server', detail: 'Server-Administration', category: 'server_admin' }

@@ -1,10 +1,10 @@
 /**
  * Wake-Word-Kalibrierung: zehnmal einsprechen, trainieren, einschalten.
  *
- * **Das Wake-Word ist immer der Name des Assistenten** — es gibt kein
- * eigenes Wortfeld. Wer den Namen ändert (im Chat, im Panel-Profil), bekommt
- * hier den Hinweis, einmal neu zu kalibrieren; bis dahin hört das Modell
- * weiter auf den alten Namen. Der Aktiv-Schalter ist persistent
+ * **Das Wake-Word ist der Name der KI, Singra** — es gibt kein eigenes
+ * Wortfeld. Wer noch auf einen früher frei gewählten Namen kalibriert hat,
+ * bekommt hier den Hinweis, einmal neu einzusprechen; bis dahin hört das
+ * Modell weiter auf das alte Wort. Der Aktiv-Schalter ist persistent
  * (konfig.json): „an" überlebt den Neustart, „aus" heißt aus — nichts
  * schaltet das Mikrofon von selbst wieder ein.
  *
@@ -21,7 +21,7 @@ import { Mic } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button, ProgressBar, Slider, Switch } from '@/Singra/UI'
-import { useAuthStore } from '@/stores/authStore'
+import { KI_NAME } from '@/lib/kiName'
 import {
   konfigLaden,
   konfigSpeichern,
@@ -57,7 +57,6 @@ const SCHWELLE_MAX = 0.75
 
 export function WakewordEinrichtung() {
   const { t } = useTranslation()
-  const agentName = useAuthStore((s) => s.user?.agent_name?.trim() || 'Assistent')
   const [stand, setStand] = useState<WakewordStand>({
     aufnahmen: 0,
     trainiert: false,
@@ -245,17 +244,17 @@ export function WakewordEinrichtung() {
         </p>
       )}
 
-      {/* Assistent-Name als Rufname */}
+      {/* Der Name der KI ist das Wake-Word */}
       <div className="flex items-center gap-2">
         <span className="text-xs text-on-surface-variant">{t('mss.wakeword.rufname')}</span>
-        <span className="text-sm font-medium text-on-surface">{agentName}</span>
+        <span className="text-sm font-medium text-on-surface">{KI_NAME}</span>
       </div>
 
       {/* Der Name hat sich seit dem Training geändert — anbieten, nie
           erzwingen: das Modell hört bis zur Neukalibrierung auf den alten. */}
-      {stand.trainiert && stand.wort && stand.wort !== agentName && (
+      {stand.trainiert && stand.wort && stand.wort !== KI_NAME && (
         <p className="msm-alert-warning">
-          {t('mss.wakeword.neuKalibrieren', { alt: stand.wort, neu: agentName })}
+          {t('mss.wakeword.neuKalibrieren', { alt: stand.wort, neu: KI_NAME })}
         </p>
       )}
 
@@ -288,7 +287,7 @@ export function WakewordEinrichtung() {
         )}
         <Button
           variant="secondary"
-          onClick={() => void aktion('training', () => wakewordTrainieren(agentName))}
+          onClick={() => void aktion('training', () => wakewordTrainieren(KI_NAME))}
           disabled={beschaeftigt !== null || stand.aufnahmen < 3}
         >
           {beschaeftigt === 'training' ? t('mss.wakeword.trainiert') : t('mss.wakeword.trainieren')}

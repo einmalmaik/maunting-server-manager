@@ -32,7 +32,7 @@ from models.ai_conversation import ARTEN, EINZELFENSTER
 from services.ai_usage_service import complete_ai_usage
 
 
-DEFAULT_TITLE = "KI-Assistent"
+DEFAULT_TITLE = "Singra"
 
 #: Der Titel je Art. Die Spalte gab es laengst und niemand las sie; jetzt traegt
 #: sie das, was die Oberflaeche ueber ein Fenster schreibt.

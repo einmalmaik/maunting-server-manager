@@ -32,7 +32,7 @@ from services.achievement_service import AchievementService
 from services.dis_client import DisClient, DisSidecarError
 from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, DataExportRequest, NativeRefreshRequest, LogoutRequest
 from schemas import ResendVerificationRequest
-from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, LocationSharingUpdateRequest, AgentNameUpdateRequest, AiProviderChoiceRequest, UsernameUpdateRequest
+from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, LocationSharingUpdateRequest, AiProviderChoiceRequest, UsernameUpdateRequest
 from schemas.device_pairing import (
     PairedDevice,
     PairingCreated,
@@ -983,25 +983,6 @@ def update_location_sharing(
     user.location_sharing_enabled = req.enabled
     db.commit()
     return {"location_sharing_enabled": user.location_sharing_enabled}
-
-
-@router.patch("/me/agent-name")
-def update_agent_name(
-    req: AgentNameUpdateRequest,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-    _: None = Depends(verify_csrf),
-) -> dict:
-    """Setzt den Rufnamen des Assistenten (None/leer = Standardname 'Assistent').
-
-    Der Name landet im Lageblock (services/ai_lage.py), nie im statischen
-    Systemprompt — sonst waere der Prompt je Benutzer verschieden und das
-    Prompt-Caching des Anbieters tot. Was als Name erlaubt ist, entscheidet
-    allein das Schema (schemas/user.py): eine Zeile, keine Steuerzeichen.
-    """
-    user.agent_name = req.agent_name
-    db.commit()
-    return {"agent_name": user.agent_name}
 
 
 @router.patch("/me/username", response_model=UserResponse, dependencies=[Depends(auth_rate_limit)])

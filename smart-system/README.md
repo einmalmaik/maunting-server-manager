@@ -36,10 +36,11 @@ liegt — nur das X nimmt sie an (`src-tauri/src/durchklick.rs`).
 
 ## Wake-Word
 
-Das Wake-Word ist **immer der Name des Assistenten** (Profil → KI im Panel,
-oder im Chat: „nenn dich …") — ein eigenes Wortfeld gibt es bewusst nicht.
-Nach einer Umbenennung schlägt die App einmal je Start die Neukalibrierung
-vor; das ist optional, bis dahin hört das Modell auf den alten Namen.
+Das Wake-Word ist **der Name der KI: Singra** — ein eigenes Wortfeld gibt es
+bewusst nicht. Wer noch auf einen früher frei gewählten Namen kalibriert hat,
+wird einmal gefragt, ob es neu einsprechen will (je altem Wort, gemerkt in
+`mss:kalibrierung_gefragt`); das ist optional, bis dahin hört das Modell auf
+das alte Wort. In den Audio-Einstellungen bleibt der Hinweis still stehen.
 
 Der Aktiv-Schalter ist persistent (`wakeword_aktiv` in konfig.json): „an"
 überlebt den Neustart und startet das Lauschen beim App-Start, „aus" heißt

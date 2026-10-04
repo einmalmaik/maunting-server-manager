@@ -189,7 +189,7 @@ def sicherheitsstopp_vermerken(run: AiRun, bericht: str) -> str:
     return (
         "Die Sicherheitsüberwachung des KI-Anbieters hat diesen Lauf angehalten. "
         "Nach der Vorgabe des Anbieters wird er nicht automatisch wiederholt; "
-        "was der Assistent bis dahin getan hat, bleibt bestehen und gehört "
+        "was Singra bis dahin getan hat, bleibt bestehen und gehört "
         "von einem Menschen geprüft.\n\n" + bericht
     )
 
@@ -237,7 +237,7 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
     bericht = abschlusstext(db, run, zustand)
     if not bericht:
         bericht = (
-            "Der Assistent hat keine Zusammenfassung hinterlassen. "
+            "Singra hat keine Zusammenfassung hinterlassen. "
             "Der Verlauf steht im KI-Chat des Panels."
         )
     bericht = sicherheitsstopp_vermerken(run, bericht)

@@ -85,7 +85,6 @@ from services.ai_tools.geo_tools import (
 )
 from services.ai_tools.system_tools import (
     _desktop_tool_definitions,
-    _execute_set_agent_name,
     _memory_team,
     _execute_remember,
     question_payload,

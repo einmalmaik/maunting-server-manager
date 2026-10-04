@@ -351,7 +351,7 @@ class TestVerschicktWirdImmer:
             lambda: EmailService.send_ai_test_email("b@test.de", "betreiber"),
         )
 
-        assert "Testmail vom KI-Assistenten" in gesendet["subject"]
+        assert "Testmail von Singra" in gesendet["subject"]
         assert "auf deine Bitte hin verschickt" in gesendet["body"]
         assert "eingerichtete Versandweg" in gesendet["body"]
 

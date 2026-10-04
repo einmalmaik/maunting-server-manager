@@ -44,8 +44,8 @@ pub struct AppKonfig {
     /// `false` heißt physisch aus — kein Pfad startet das Mikrofon, solange
     /// der Benutzer den Schalter nicht selbst umlegt. Vorgabe ist aus.
     pub wakeword_aktiv: bool,
-    /// Auf welches Wort das Modell trainiert wurde (der Assistenten-Name zum
-    /// Zeitpunkt der Kalibrierung). Weicht er vom heutigen Namen ab, schlägt
+    /// Auf welches Wort das Modell trainiert wurde (der Name der KI zum
+    /// Zeitpunkt der Kalibrierung). Weicht er von „Singra“ ab, schlägt
     /// die App eine Neukalibrierung vor — mehr nicht.
     pub wakeword_wort: Option<String>,
     /// Bevorzugtes Eingabegerät (Name, wie Windows ihn führt). `None` heißt:
