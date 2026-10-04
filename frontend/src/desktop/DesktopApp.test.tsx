@@ -637,22 +637,31 @@ describe('DesktopApp', () => {
 
     render(<DesktopApp />)
 
-    // Lokaler Account bleibt sichtbar und Offline-Badge wird angezeigt
+    // Offline gibt es keine KI: die App wechselt in den ersten erlaubten Bereich,
+    // und die Kopfzeile nennt ihn. Bis 04.10.2026 erwartete der Test hier noch
+    // den Namen des Assistenten und war nur grün, wenn er den Moment vor dem
+    // Wechsel traf (auf dem Release-Runner rot).
     await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 1, name: 'Jarvis' })).toBeInTheDocument()
       expect(screen.getByText('Offline')).toBeInTheDocument()
-      // Nur Tresor, Notizen und Kalender werden angezeigt
-      expect(screen.getByText(i18n.t('mss.app.tresor'))).toBeInTheDocument()
-      expect(screen.getByText(i18n.t('mss.app.kalender'))).toBeInTheDocument()
-      expect(screen.getByText(i18n.t('mss.app.notizen', 'Notizen'))).toBeInTheDocument()
-
-      // KI-Assistent, Messenger und Gedächtnis sind offline ausgeblendet
-      expect(screen.queryByText(i18n.t('mss.app.ki'))).not.toBeInTheDocument()
-      expect(screen.queryByText(i18n.t('mss.app.messenger'))).not.toBeInTheDocument()
-      expect(screen.queryByText(i18n.t('mss.app.gedaechtnis'))).not.toBeInTheDocument()
-      expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
-      expect(screen.queryByTestId('messenger-seite')).not.toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 1, name: i18n.t('mss.app.tresor') })).toBeInTheDocument()
     })
+
+    // Nur Tresor, Notizen und Kalender stehen in der Navigation
+    const navigation = screen.getByRole('navigation', { name: i18n.t('mss.app.bereiche') })
+    for (const bereich of ['mss.app.tresor', 'mss.app.kalender', 'mss.app.notizen']) {
+      expect(within(navigation).getByRole('button', { name: i18n.t(bereich) })).toBeInTheDocument()
+    }
+
+    // KI-Assistent, Messenger und Gedächtnis sind offline ausgeblendet
+    expect(screen.queryByText(i18n.t('mss.app.ki'))).not.toBeInTheDocument()
+    expect(screen.queryByText(i18n.t('mss.app.messenger'))).not.toBeInTheDocument()
+    expect(screen.queryByText(i18n.t('mss.app.gedaechtnis'))).not.toBeInTheDocument()
+    expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('messenger-seite')).not.toBeInTheDocument()
+
+    // Der lokale Account bleibt angemeldet
+    expect(useAuthStore.getState().user).toEqual(BENUTZER)
+    expect(localStorage.getItem('msm_cached_user')).not.toBeNull()
   })
 
   it('zeigt den Messenger-Reiter online und rendert die Messenger-Seite beim Navigieren zu /chat', async () => {
