@@ -179,10 +179,19 @@ function realtimeModellOptionen(
       vorhanden.add(model)
     }
   }
+  ausKatalog.sort((a, b) => a.value.localeCompare(b.value, undefined, { sensitivity: 'base', numeric: true }))
   if (currentModel && !vorhanden.has(currentModel)) {
     ausKatalog.unshift({ value: currentModel, label: currentModel })
   }
   return ausKatalog
+}
+
+/**
+ * Sortiert Modelle alphabetisch nach ihrer Kennung (`model_id`).
+ * Durch `numeric: true` stehen z. B. 'gpt-4' vor 'gpt-4o' und 'gemini-1.5' vor 'gemini-2.5'.
+ */
+function sortiereModelleAlphabetisch<T extends { model_id: string }>(a: T, b: T): number {
+  return a.model_id.localeCompare(b.model_id, undefined, { sensitivity: 'base', numeric: true })
 }
 
 /**
@@ -1009,16 +1018,22 @@ function ProviderForm({
                           value={draft.default_model || null}
                           onChange={(default_model) => change({ default_model: default_model || '' })}
                           placeholder={t('ai.providers.modelChoose')}
-                          options={[...models]
-                            .sort((a, b) => Number(b.recommended) - Number(a.recommended))
-                            .map((item) => ({
-                              value: item.model_id,
-                              label: item.model_id,
-                              hint: modellHinweis(item, t),
-                              icon: item.recommended
-                                ? <Star className="h-3.5 w-3.5 fill-current text-primary" aria-hidden="true" />
-                                : undefined,
-                            }))}
+                          searchable
+                          options={[
+                            ...(draft.default_model && !models.some((item) => item.model_id === draft.default_model)
+                              ? [{ value: draft.default_model, label: draft.default_model }]
+                              : []),
+                            ...[...models]
+                              .sort(sortiereModelleAlphabetisch)
+                              .map((item) => ({
+                                value: item.model_id,
+                                label: item.model_id,
+                                hint: modellHinweis(item, t),
+                                icon: item.recommended
+                                  ? <Star className="h-3.5 w-3.5 fill-current text-primary" aria-hidden="true" />
+                                  : undefined,
+                              })),
+                          ]}
                           aria-label={t('ai.providers.model')}
                         />
                       </div>
@@ -1106,6 +1121,7 @@ function ProviderForm({
                     onChange={(transcription_model) => change({
                       transcription_model: transcription_model === KEINE_TRANSKRIPTION ? null : transcription_model,
                     })}
+                    searchable
                     options={[
                       { value: KEINE_TRANSKRIPTION, label: t('ai.providers.transcriptionOff') },
                       ...(draft.transcription_model && !models.some((m) => m.model_id === draft.transcription_model)
@@ -1118,6 +1134,7 @@ function ProviderForm({
                           if (draft.provider_kind === 'openai') return lower.includes('whisper') || lower.includes('audio') || lower.includes('gpt-4o')
                           return true
                         })
+                        .sort(sortiereModelleAlphabetisch)
                         .map((item) => ({
                           value: item.model_id,
                           label: item.model_id,
@@ -1255,7 +1272,7 @@ function ProviderForm({
                           // nachdenken — dieselbe Regel wie oben, umgekehrt.
                           ...[...models]
                             .filter((item) => sprachwegFuer(sprachwege, item.model_id) === null)
-                            .sort((a, b) => Number(b.recommended) - Number(a.recommended))
+                            .sort(sortiereModelleAlphabetisch)
                             .map((item) => ({ value: item.model_id, label: item.model_id, hint: modellHinweis(item, t) })),
                         ]}
                         searchable
@@ -1391,10 +1408,14 @@ function ProviderForm({
                         worker_model: worker_model === KEIN_WORKER ? null : worker_model,
                         worker_reasoning_effort: null,
                       })}
+                      searchable
                       options={[
                         { value: KEIN_WORKER, label: t('ai.providers.workerOff') },
+                        ...(draft.worker_model && !models.some((m) => m.model_id === draft.worker_model)
+                          ? [{ value: draft.worker_model, label: draft.worker_model }]
+                          : []),
                         ...[...models]
-                          .sort((a, b) => Number(b.recommended) - Number(a.recommended))
+                          .sort(sortiereModelleAlphabetisch)
                           .map((item) => ({
                             value: item.model_id,
                             label: item.model_id,
@@ -1491,10 +1512,14 @@ function ProviderForm({
                         ethics_model: ethics_model === KEINE_ETHICS ? null : ethics_model,
                         ethics_reasoning_effort: null,
                       })}
+                      searchable
                       options={[
                         { value: KEINE_ETHICS, label: t('ai.providers.ethicsOff') },
+                        ...(draft.ethics_model && !models.some((m) => m.model_id === draft.ethics_model)
+                          ? [{ value: draft.ethics_model, label: draft.ethics_model }]
+                          : []),
                         ...[...models]
-                          .sort((a, b) => Number(b.recommended) - Number(a.recommended))
+                          .sort(sortiereModelleAlphabetisch)
                           .map((item) => ({
                             value: item.model_id,
                             label: item.model_id,
@@ -1598,16 +1623,22 @@ function ProviderForm({
                         value={draft.default_model || null}
                         onChange={(default_model) => change({ default_model: default_model || '' })}
                         placeholder={t('ai.providers.modelChoose')}
-                        options={[...models]
-                          .sort((a, b) => Number(b.recommended) - Number(a.recommended))
-                          .map((item) => ({
-                            value: item.model_id,
-                            label: item.model_id,
-                            hint: modellHinweis(item, t),
-                            icon: item.recommended
-                              ? <Star className="h-3.5 w-3.5 fill-current text-primary" aria-hidden="true" />
-                              : undefined,
-                          }))}
+                        searchable
+                        options={[
+                          ...(draft.default_model && !models.some((item) => item.model_id === draft.default_model)
+                            ? [{ value: draft.default_model, label: draft.default_model }]
+                            : []),
+                          ...[...models]
+                            .sort(sortiereModelleAlphabetisch)
+                            .map((item) => ({
+                              value: item.model_id,
+                              label: item.model_id,
+                              hint: modellHinweis(item, t),
+                              icon: item.recommended
+                                ? <Star className="h-3.5 w-3.5 fill-current text-primary" aria-hidden="true" />
+                                : undefined,
+                            })),
+                        ]}
                         aria-label={t('ai.providers.ttsModel')}
                       />
                     </div>

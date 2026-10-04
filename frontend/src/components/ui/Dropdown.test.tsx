@@ -204,3 +204,70 @@ describe('Dropdown in der App-Sprache', () => {
     expect(screen.getByText(i18n.t('common.keineEintraege'))).toBeInTheDocument()
   })
 })
+
+describe('Dropdown Suche und Tastaturnavigation', () => {
+  it('filtert Optionen bei Eingabe und wählt mit Enter direkt aus', async () => {
+    feldBei({ top: 80, bottom: 120 })
+    const auswahl = vi.fn()
+    const optionen = [
+      { value: 'gpt-4o', label: 'gpt-4o' },
+      { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash' },
+      { value: 'claude-3-5-sonnet', label: 'claude-3-5-sonnet' },
+    ]
+    render(
+      <Dropdown
+        aria-label="Modell"
+        value={null}
+        onChange={auswahl}
+        options={optionen}
+        searchable
+      />,
+    )
+    const knopf = screen.getByRole('button', { name: 'Modell' })
+    fireEvent.click(knopf)
+
+    const suchfeld = await screen.findByPlaceholderText('Suchen …')
+    await waitFor(() => expect(suchfeld).toHaveFocus())
+
+    // Filtern nach "gemini"
+    fireEvent.change(suchfeld, { target: { value: 'gemini' } })
+    expect(screen.getByRole('option', { name: 'gemini-2.5-flash' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'gpt-4o' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'claude-3-5-sonnet' })).not.toBeInTheDocument()
+
+    // Enter wählt den ersten passenden Treffer aus
+    fireEvent.keyDown(suchfeld, { key: 'Enter' })
+    expect(auswahl).toHaveBeenCalledWith('gemini-2.5-flash')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+
+  it('schließt die Liste bei Escape aus dem Suchfeld und leert die Suche', async () => {
+    feldBei({ top: 80, bottom: 120 })
+    render(
+      <Dropdown
+        aria-label="Modell"
+        value={null}
+        onChange={() => {}}
+        options={[{ value: 'a', label: 'Modell Alpha' }, { value: 'b', label: 'Modell Beta' }]}
+        searchable
+      />,
+    )
+    const knopf = screen.getByRole('button', { name: 'Modell' })
+    fireEvent.click(knopf)
+
+    const suchfeld = await screen.findByPlaceholderText('Suchen …')
+    fireEvent.change(suchfeld, { target: { value: 'Alpha' } })
+    expect(screen.getByRole('option', { name: 'Modell Alpha' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Modell Beta' })).not.toBeInTheDocument()
+
+    fireEvent.keyDown(suchfeld, { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(knopf).toHaveFocus()
+
+    // Erneutes Öffnen zeigt wieder alle Optionen (Suche wurde zurückgesetzt)
+    fireEvent.click(knopf)
+    expect(await screen.findByRole('option', { name: 'Modell Alpha' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Modell Beta' })).toBeInTheDocument()
+  })
+})
+

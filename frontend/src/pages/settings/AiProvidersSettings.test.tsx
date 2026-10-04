@@ -728,4 +728,60 @@ describe('AiProvidersSettings', () => {
       expect(screen.queryByLabelText('Backend-Modell')).not.toBeInTheDocument()
     })
   })
+
+  describe('Modellsuche und alphabetische Sortierung', () => {
+    it('sortiert die Modellliste alphabetisch und filtert über die Suchleiste', async () => {
+      vi.mocked(aiApi.listProviderSettings).mockResolvedValue([{
+        id: 1,
+        name: 'OpenRouter',
+        provider_kind: 'openrouter',
+        default_model: 'anthropic/claude-3-haiku',
+        enabled: true,
+        requires_api_key: true,
+        operator_key_configured: true,
+        operator_key_hint: 'sk-or-...',
+        clear_operator_api_key: false,
+        worker_model: null,
+        worker_reasoning_effort: null,
+        ethics_model: null,
+        ethics_reasoning_effort: null,
+        ethics_mode: 'auto',
+      } as any])
+
+      // Unsortierte Modellliste mit einem empfohlenen Modell mittendrin
+      vi.mocked(aiApi.listCatalogModels).mockResolvedValue([
+        { model_id: 'openai/gpt-4o', name: 'GPT-4o', reasoning: false, efforts: [], default_effort: null, mandatory: false, recommended: false, vision: true, context_tokens: null, max_output_tokens: null, shutdown_date: null },
+        { model_id: 'anthropic/claude-3-5-sonnet', name: 'Claude 3.5 Sonnet', reasoning: true, efforts: ['low', 'high'], default_effort: 'high', mandatory: false, recommended: true, vision: true, context_tokens: null, max_output_tokens: null, shutdown_date: null },
+        { model_id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro', reasoning: true, efforts: ['low'], default_effort: 'low', mandatory: false, recommended: false, vision: true, context_tokens: null, max_output_tokens: null, shutdown_date: null },
+        { model_id: 'anthropic/claude-3-haiku', name: 'Claude 3 Haiku', reasoning: false, efforts: [], default_effort: null, mandatory: false, recommended: false, vision: false, context_tokens: null, max_output_tokens: null, shutdown_date: null },
+      ])
+
+      render(<AiProvidersSettings canWrite />)
+
+      const modellAuswahl = await screen.findByRole('button', { name: 'Standardmodell' })
+      fireEvent.click(modellAuswahl)
+
+      // Optionen in strikt alphabetischer Reihenfolge:
+      // anthropic/claude-3-5-sonnet -> anthropic/claude-3-haiku -> google/gemini-2.5-pro -> openai/gpt-4o
+      const optionen = screen.getAllByRole('option')
+      const texte = optionen.map((o) => o.textContent || '')
+      expect(texte[0]).toContain('anthropic/claude-3-5-sonnet')
+      expect(texte[1]).toContain('anthropic/claude-3-haiku')
+      expect(texte[2]).toContain('google/gemini-2.5-pro')
+      expect(texte[3]).toContain('openai/gpt-4o')
+
+      // Suchfeld testen: tippen von "gemini" filtert die Liste
+      const suchfeld = screen.getByPlaceholderText('Suchen …')
+      fireEvent.change(suchfeld, { target: { value: 'gemini' } })
+
+      expect(screen.getByRole('option', { name: /gemini-2\.5-pro/ })).toBeInTheDocument()
+      expect(screen.queryByRole('option', { name: /gpt-4o/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('option', { name: /claude/ })).not.toBeInTheDocument()
+
+      // Enter wählt das gesuchte Modell aus
+      fireEvent.keyDown(suchfeld, { key: 'Enter' })
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Standardmodell' })).toHaveTextContent('google/gemini-2.5-pro'))
+    })
+  })
 })
+

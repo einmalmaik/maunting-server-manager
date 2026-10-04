@@ -77,6 +77,21 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
         )
       : safeOptions
 
+    // Die Optionen liegen per Portal an `document.body` und damit außerhalb
+    // von `rootRef`. Deshalb hängen die Tasten am Dokument und die Liste wird
+    // über `menuRef` eingesammelt — dasselbe Vorgehen wie in
+    // Singra/UI/ActionMenu.tsx.
+    const optionenSammeln = (): HTMLButtonElement[] =>
+      menuRef.current
+        ? Array.from<HTMLButtonElement>(menuRef.current.querySelectorAll('[role="option"]:not(:disabled)'))
+        : []
+
+    useEffect(() => {
+      if (!open) {
+        setQuery('')
+      }
+    }, [open])
+
     useEffect(() => {
       if (!open) return
       const onClick = (event: MouseEvent) => {
@@ -90,14 +105,6 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
           setOpen(false)
         }
       }
-      // Die Optionen liegen per Portal an `document.body` und damit außerhalb
-      // von `rootRef`. Deshalb hängen die Tasten am Dokument und die Liste wird
-      // über `menuRef` eingesammelt — dasselbe Vorgehen wie in
-      // Singra/UI/ActionMenu.tsx.
-      const optionenSammeln = (): HTMLButtonElement[] =>
-        menuRef.current
-          ? Array.from<HTMLButtonElement>(menuRef.current.querySelectorAll('[role="option"]:not(:disabled)'))
-          : []
       // Escape in der Capture-Phase: vor dem Dialog darunter, der dann
       // `defaultPrevented` sieht und offen bleibt.
       const onEscape = (event: KeyboardEvent) => {
@@ -113,6 +120,10 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
         if (!optionen.length) return
         event.preventDefault()
         const aktuell = optionen.indexOf(document.activeElement as HTMLButtonElement)
+        if (searchable && event.key === 'ArrowUp' && aktuell === 0) {
+          menuRef.current?.querySelector<HTMLInputElement>('input')?.focus()
+          return
+        }
         const naechste =
           event.key === 'Home'
             ? 0
@@ -124,9 +135,17 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
         optionen[naechste].focus()
       }
       // Beim Öffnen wandert der Fokus in die Liste, auf die gewählte Option.
+      // Bei durchsuchbaren Listen landet er direkt im Suchfeld, damit man sofort tippen kann.
       // Erst im nächsten Frame — vorher steht das Menü noch nicht im DOM, weil
       // die Position im Effekt darunter gemessen wird.
       const fokusFrame = window.requestAnimationFrame(() => {
+        if (searchable) {
+          const suche = menuRef.current?.querySelector<HTMLInputElement>('input')
+          if (suche) {
+            suche.focus()
+            return
+          }
+        }
         const optionen = optionenSammeln()
         const gewaehlt = optionen.find((option) => option.getAttribute('aria-selected') === 'true')
         ;(gewaehlt ?? optionen[0])?.focus()
@@ -140,7 +159,7 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
         document.removeEventListener('keydown', onEscape, true)
         window.cancelAnimationFrame(fokusFrame)
       }
-    }, [open])
+    }, [open, searchable])
 
     useEffect(() => {
       if (!open) return
@@ -253,7 +272,29 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
                           placeholder={searchPlaceholder ?? t('common.suchenPunkte')}
                           className="msm-input w-full py-1.5 pl-8 pr-2 text-xs"
                           onClick={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              setOpen(false)
+                              rootRef.current?.querySelector<HTMLButtonElement>('button')?.focus()
+                              return
+                            }
+                            if (e.key === 'ArrowDown') {
+                              e.preventDefault()
+                              optionenSammeln()[0]?.focus()
+                              return
+                            }
+                            if (e.key === 'Enter') {
+                              const ersteOption = filteredOptions.find((opt) => !opt.disabled)
+                              if (ersteOption) {
+                                e.preventDefault()
+                                onChange(ersteOption.value)
+                                setOpen(false)
+                                rootRef.current?.querySelector<HTMLButtonElement>('button')?.focus()
+                                return
+                              }
+                            }
+                            e.stopPropagation()
+                          }}
                         />
                       </div>
                     </div>
