@@ -19,8 +19,15 @@
  * es und beginnt die Sitzung; ESC oder der Schliessen-Knopf beenden sie und
  * verstecken es wieder. Eine eigene Sitzung im Hauptfenster beendet die
  * hiesige (`beiFremdemSprachstart`) — nie zwei Mikrofone zugleich.
+ *
+ * **Karten.** Gibt Singra per Stimme einen Auftrag an den Rechner, fragt Rust
+ * ohne autonomen Modus mit einer Bestätigungskarte. Die erscheint auch hier,
+ * kompakt über dem Schwarm (`KartenHuelle`): wer mit dem Overlay spricht,
+ * schaut nicht ins versteckte Hauptfenster. Das Fenster wächst dafür nach oben
+ * (`overlay_karte`), nimmt auf der Karte Klicks an und schließt sich nicht von
+ * selbst, solange eine Karte steht oder ein Auftrag unterwegs ist.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { MapPin, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -32,6 +39,9 @@ import {
   registriereAudioVerarbeitung,
 } from '@/components/ai/voice/audioGeraete'
 import { useSprachsitzung, type Sprachzustand } from '@/components/ai/voice/useSprachsitzung'
+import { Aufraeumkarte } from './Aufraeumkarte'
+import { DesktopAktionKarte } from './DesktopAktionKarte'
+import { Uebernahmekarte } from './Uebernahmekarte'
 import { istAngemeldet, stillAnmelden } from './transport'
 import {
   OVERLAY_SCHAUFENSTER,
@@ -42,7 +52,7 @@ import {
   sprachstartMelden,
   sprachzustandVerdrahten,
 } from './sprachKoordination'
-import { konfigLaden, overlaySichtbar, overlayTrefferflaechen } from './tauri'
+import { konfigLaden, overlayKarte, overlaySichtbar, overlayTrefferflaechen } from './tauri'
 
 /**
  * Nach so viel Stille geht das Overlay von selbst zu. Großzügig genug für
@@ -50,6 +60,14 @@ import { konfigLaden, overlaySichtbar, overlayTrefferflaechen } from './tauri'
  * Wake-Words kein offenes Mikrofon hinterlässt.
  */
 const STILLE_SCHLIESST_MS = 20_000
+
+/**
+ * Steht eine Karte, wächst das Fenster (`overlay_karte`: 380 → 680). Die Karte
+ * beginnt unter dem X (`KARTE_OBEN_PX`) und nimmt sich, was sie braucht; dem
+ * Schwarm samt Untertiteln bleibt darunter mindestens `SCHWARM_REST_PX`.
+ */
+const KARTE_OBEN_PX = 48
+const SCHWARM_REST_PX = 170
 
 /**
  * Schrift und Knopf stehen ohne Kasten über fremdem Untergrund — mal einem
@@ -85,6 +103,7 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
     werkzeug,
     werkzeugLaeuft,
     werkzeugStarts,
+    rechnerWartet,
     fehler,
     geoData,
     regionalContextActive,
@@ -101,6 +120,15 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
   const untertitel = useRef<HTMLDivElement>(null)
   const knopf = useRef<HTMLButtonElement>(null)
   const [uebervoll, setUebervoll] = useState(false)
+  // Wie viele Bestätigungskarten gerade hier stehen (`KartenHuelle` meldet).
+  const [kartenZahl, setKartenZahl] = useState(0)
+  const kartenBereich = useRef<HTMLDivElement>(null)
+  // Wie hoch die Karten gerade sind — der Schwarm rückt darunter.
+  const [kartenHoehe, setKartenHoehe] = useState(0)
+  const karteSichtbar = useCallback((offen: boolean) => {
+    setKartenZahl((zahl) => Math.max(0, zahl + (offen ? 1 : -1)))
+  }, [])
+  const karteOffen = kartenZahl > 0
 
   // Frameless und transparent: der Fensterhintergrund kommt vom Panel-
   // Stylesheet und muss hier weg, sonst schwebt ein dunkles Rechteck (nur im Desktop-Fenstermodus).
@@ -188,7 +216,12 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
 
   useEffect(() => {
     const taste = (ereignis: KeyboardEvent) => {
-      if (ereignis.key === 'Escape') schliessen()
+      if (ereignis.key !== 'Escape') return
+      // Steht eine Karte, gehört ESC ihr (ablehnen, `KartenHuelle`) — nicht
+      // dem Ende der Sitzung. Am DOM geprüft und nicht nur über die
+      // Reihenfolge der Hörer: die ist nicht überall dieselbe.
+      if (document.querySelector('[data-overlay-karte]')) return
+      schliessen()
     }
     window.addEventListener('keydown', taste)
     return () => window.removeEventListener('keydown', taste)
@@ -216,10 +249,20 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
     // Im Schaufenster gibt es kein Mikrofon, das die Frist schützen müsste —
     // wer die Formen durchprobiert, soll nicht nach 20 s im Dunkeln stehen.
     if (!sichtbar || schaufenster || (zustand !== 'bereit' && zustand !== 'aus')) return
+    // Wer eine Karte liest oder auf den Rechner wartet, schweigt — und meint
+    // trotzdem nicht „Schluss“.
+    if (karteOffen || rechnerWartet) return
     const frist = window.setTimeout(() => schliessen(), STILLE_SCHLIESST_MS)
     return () => window.clearTimeout(frist)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sichtbar, schaufenster, zustand])
+  }, [sichtbar, schaufenster, zustand, karteOffen, rechnerWartet])
+
+  // Platz und Fokus für die Karte — und danach zurück. Auch versteckt: ein
+  // Fenster, das mit Karte zuging, soll beim nächsten Mal nicht zu groß sein.
+  useEffect(() => {
+    if (inApp) return
+    void overlayKarte(karteOffen).catch(() => undefined)
+  }, [inApp, karteOffen])
 
   // Laufen die Untertitel oben hinaus? Erst dann blendet die Maske die
   // älteste Zeile aus. `justify-end` schiebt das Zuviel nach oben, wo es kein
@@ -237,17 +280,40 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
   // Auf dem Desktop sieht man vom Fenster nur den Schwarm — der Rest ist
   // durchsichtig und soll Klicks an das weitergeben, was darunter liegt. Nur
   // das X nimmt sie an, mit etwas Rand für den Zeiger.
+  // Steht eine Karte, nimmt auch sie Klicks an; ihre Größe ändert sich mit
+  // dem Inhalt (nächste Karte der Schlange), deshalb der ResizeObserver.
   useEffect(() => {
     if (inApp || !sichtbar) return
     const melden = () => {
       const x = knopf.current?.getBoundingClientRect()
       if (!x) return
-      void overlayTrefferflaechen([[x.left - 4, x.top - 4, x.width + 8, x.height + 8]]).catch(() => undefined)
+      const flaechen: Array<[number, number, number, number]> = [
+        [x.left - 4, x.top - 4, x.width + 8, x.height + 8],
+      ]
+      // Auf den sichtbaren Kartenbereich beschnitten: was darin weggescrollt
+      // ist, soll keine Klicks vom Desktop darunter abfangen.
+      const bereich = kartenBereich.current?.getBoundingClientRect()
+      for (const karte of document.querySelectorAll('[data-overlay-karte]')) {
+        const r = karte.getBoundingClientRect()
+        const oben = bereich ? Math.max(r.top, bereich.top) : r.top
+        const unten = bereich ? Math.min(r.bottom, bereich.bottom) : r.bottom
+        if (unten > oben) flaechen.push([r.left, oben, r.width, unten - oben])
+      }
+      void overlayTrefferflaechen(flaechen).catch(() => undefined)
+      setKartenHoehe(kartenBereich.current?.getBoundingClientRect().height ?? 0)
     }
     melden()
     window.addEventListener('resize', melden)
-    return () => window.removeEventListener('resize', melden)
-  }, [inApp, sichtbar])
+    const beobachter =
+      typeof ResizeObserver !== 'undefined' && kartenBereich.current
+        ? new ResizeObserver(melden)
+        : null
+    if (beobachter && kartenBereich.current) beobachter.observe(kartenBereich.current)
+    return () => {
+      window.removeEventListener('resize', melden)
+      beobachter?.disconnect()
+    }
+  }, [inApp, sichtbar, kartenZahl])
 
   // Solange keine Sitzung angefordert wurde, zeigt das (ohnehin versteckte)
   // Fenster nichts — sonst blitzte beim App-Start ein leerer Schwarm auf.
@@ -288,14 +354,33 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
     >
       {/* Die Leinwand reicht bis hinter die Untertitel: der Schwarm blendet
           zu ihrem Rand hin aus, statt an einer Kante abzubrechen. */}
-      <Schwarm
-        zustand={figur}
-        pegel={pegel}
-        ort={ort}
-        impulse={werkzeugStarts}
-        vorfuehrung={schaufenster}
-        className="pointer-events-none absolute inset-x-0 top-0 bottom-10"
-      />
+      <div
+        className="pointer-events-none absolute inset-x-0 bottom-10"
+        style={{ top: karteOffen ? KARTE_OBEN_PX + kartenHoehe + 8 : 0 }}
+      >
+        <Schwarm
+          zustand={figur}
+          pegel={pegel}
+          ort={ort}
+          impulse={werkzeugStarts}
+          vorfuehrung={schaufenster}
+          className="pointer-events-none absolute inset-0"
+        />
+      </div>
+
+      {/* Die Karten nur im Desktop-Overlay: in der App stehen sie ohnehin
+          im Fenster darunter. */}
+      {!inApp && !schaufenster && (
+        <div
+          ref={kartenBereich}
+          className="pointer-events-none absolute inset-x-3 z-20 flex flex-col gap-2 overflow-y-auto"
+          style={{ top: KARTE_OBEN_PX, maxHeight: `calc(100% - ${KARTE_OBEN_PX + SCHWARM_REST_PX}px)` }}
+        >
+          <DesktopAktionKarte offenerAuftragId={null} kompakt onSichtbar={karteSichtbar} />
+          <Uebernahmekarte offenerAuftragId={null} kompakt onSichtbar={karteSichtbar} />
+          <Aufraeumkarte offenerAuftragId={null} kompakt onSichtbar={karteSichtbar} />
+        </div>
+      )}
 
       <button
         ref={knopf}

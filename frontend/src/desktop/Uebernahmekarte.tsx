@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/Singra/UI'
 import { formatDauer } from '@/lib/format'
 import { ergebnisMelden } from './desktopJobs'
+import { KartenHuelle, type KartenHuellenProps } from './KartenHuelle'
 import { karteErledigtMelden, useKarteErledigt } from './karteErledigt'
 import { uebernahmeFreigeben, uebernahmeRest, uebernahmeWiderrufen } from './tauri'
 
@@ -39,7 +40,11 @@ interface Anfragenutzlast {
 
 export const EREIGNIS_UEBERNAHME = 'mss:uebernahme-anfrage'
 
-export function Uebernahmekarte({ offenerAuftragId }: { offenerAuftragId: string | null }) {
+export function Uebernahmekarte({
+  offenerAuftragId,
+  kompakt = false,
+  onSichtbar,
+}: { offenerAuftragId: string | null } & KartenHuellenProps) {
   const { t } = useTranslation()
   const [anfrage, setAnfrage] = useState<Anfrage | null>(null)
   const [rest, setRest] = useState(0)
@@ -114,29 +119,35 @@ export function Uebernahmekarte({ offenerAuftragId }: { offenerAuftragId: string
 
   if (anfrage) {
     return (
-      <div className="msm-modal-overlay">
-        <div className="msm-card w-full max-w-md p-6">
-          <h2 className="text-lg font-semibold text-on-surface">
-            {t('mss.uebernahme.frage')}
-          </h2>
-          <p className="mt-3 text-sm text-on-surface-variant">{anfrage.anliegen}</p>
-          <p className="mt-3 text-xs text-on-surface-variant">
-            {t('mss.uebernahme.erklaerung', { minuten: anfrage.minuten })}
-          </p>
-          <div className="mt-5 flex gap-2">
-            <Button onClick={() => void entscheiden(true)}>
-              {t('mss.uebernahme.freigeben')}
-            </Button>
-            <Button variant="secondary" onClick={() => void entscheiden(false)}>
-              {t('mss.uebernahme.ablehnen')}
-            </Button>
-          </div>
+      <KartenHuelle
+        kompakt={kompakt}
+        onSichtbar={onSichtbar}
+        beschriftung={t('mss.uebernahme.frage')}
+        breite="max-w-md"
+        onAbbrechen={() => void entscheiden(false)}
+      >
+        <h2 className="text-lg font-semibold text-on-surface">
+          {t('mss.uebernahme.frage')}
+        </h2>
+        <p className="mt-3 text-sm text-on-surface-variant">{anfrage.anliegen}</p>
+        <p className="mt-3 text-xs text-on-surface-variant">
+          {t('mss.uebernahme.erklaerung', { minuten: anfrage.minuten })}
+        </p>
+        <div className="mt-5 flex gap-2">
+          <Button onClick={() => void entscheiden(true)}>
+            {t('mss.uebernahme.freigeben')}
+          </Button>
+          <Button variant="secondary" onClick={() => void entscheiden(false)}>
+            {t('mss.uebernahme.ablehnen')}
+          </Button>
         </div>
-      </div>
+      </KartenHuelle>
     )
   }
 
-  if (rest > 0) {
+  // Die laufende Übernahme zeigt das Hauptfenster; im Overlay läge die
+  // Anzeige über dem Schwarm.
+  if (rest > 0 && !kompakt) {
     return (
       <div className="msm-card fixed bottom-4 right-4 z-30 flex items-center gap-3 px-4 py-2 text-xs">
         <span className="mss-blase inline-block h-2 w-2 rounded-full bg-primary" />

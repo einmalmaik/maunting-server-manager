@@ -304,6 +304,29 @@ def ergebnisse(db: Session, job_ids: list[str]) -> list[dict]:
     return ausgabe
 
 
+def abgeschlossene(
+    db: Session, *, user_id: int, job_ids: list[str]
+) -> list[tuple[str, dict]]:
+    """Welche dieser Auftraege fertig sind — je ``(kennung, ergebnis)``.
+
+    Der Weg der Sprachsitzung (`ai_voice.desktop_auftraege`): sie parkt nicht,
+    sondern fragt im Sekundentakt nach. Vorher wird aufgeraeumt, damit ein
+    Auftrag, dessen Rechner aus ist, als Verfall ankommt und nicht nie. Offene
+    fehlen in der Antwort; ein verschwundener steht als
+    ``DESKTOP_JOB_NOT_FOUND`` darin (`ergebnisse`).
+    """
+    _aufraeumen(db, user_id=user_id)
+    fertig: list[tuple[str, dict]] = []
+    for job_id in job_ids:
+        job = db.get(DesktopJob, job_id)
+        if job is not None and job.user_id != user_id:
+            continue
+        if job is not None and job.status not in ABGESCHLOSSEN:
+            continue
+        fertig.append((job_id, ergebnisse(db, [job_id])[0]))
+    return fertig
+
+
 def _aufraeumen(db: Session, *, user_id: int) -> None:
     """Verfallene Auftraege schliessen, haengende zurueck in die Schlange."""
     jetzt = _jetzt()

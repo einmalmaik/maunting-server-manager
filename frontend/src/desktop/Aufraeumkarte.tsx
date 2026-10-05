@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/Singra/UI'
 import { formatBytes } from '@/lib/format'
 import { ergebnisMelden } from './desktopJobs'
+import { KartenHuelle, type KartenHuellenProps } from './KartenHuelle'
 import { karteErledigtMelden, useKarteErledigt, wartetNichts } from './karteErledigt'
 import {
   aufraeumenAblehnen,
@@ -35,7 +36,11 @@ export const EREIGNIS_AUFRAEUMEN = 'mss:aufraeumen-anfrage'
 /** Wie viele Pfade die Karte zeigt, bevor sie zusammenfasst. */
 const SICHTBAR = 12
 
-export function Aufraeumkarte({ offenerAuftragId }: { offenerAuftragId: string | null }) {
+export function Aufraeumkarte({
+  offenerAuftragId,
+  kompakt = false,
+  onSichtbar,
+}: { offenerAuftragId: string | null } & KartenHuellenProps) {
   const { t } = useTranslation()
   const [plan, setPlan] = useState<(Aufraeumplan & { auftragId: string }) | null>(null)
   const [laeuft, setLaeuft] = useState(false)
@@ -128,62 +133,65 @@ export function Aufraeumkarte({ offenerAuftragId }: { offenerAuftragId: string |
       ? 'mss.aufraeumen.warnungGemischt'
       : 'mss.aufraeumen.warnungWeich'
 
+  const frage = t(leeren ? 'mss.aufraeumen.frageLeeren' : hart
+    ? 'mss.aufraeumen.frageHart'
+    : 'mss.aufraeumen.fragePapierkorb')
+
   return (
-    <div className="msm-modal-overlay">
-      <div className="msm-card w-full max-w-lg p-6">
-        <h2 className="text-lg font-semibold text-on-surface">
-          {t(leeren ? 'mss.aufraeumen.frageLeeren' : hart
-            ? 'mss.aufraeumen.frageHart'
-            : 'mss.aufraeumen.fragePapierkorb')}
-        </h2>
-        <p className="mt-3 text-sm text-on-surface-variant">{plan.grund}</p>
+    <KartenHuelle
+      kompakt={kompakt}
+      onSichtbar={onSichtbar}
+      beschriftung={frage}
+      onAbbrechen={() => void entscheiden(false)}
+    >
+      <h2 className="text-lg font-semibold text-on-surface">{frage}</h2>
+      <p className="mt-3 text-sm text-on-surface-variant">{plan.grund}</p>
 
-        {!leeren && (
-          <>
-            <ul className="mt-4 max-h-56 overflow-y-auto text-xs text-on-surface-variant">
-              {plan.posten.slice(0, SICHTBAR).map((posten) => (
-                <li
-                  key={posten.pfad}
-                  className="flex items-baseline justify-between gap-3 border-b border-outline-variant/40 py-1 last:border-0"
-                >
-                  <span className="min-w-0 break-all font-mono">
-                    {posten.pfad}
-                  </span>
-                  <span className="shrink-0 tabular-nums">
-                    {posten.ungefaehr ? '≥ ' : ''}{posten.bytes === null ? '' : formatBytes(posten.bytes)}
-                    {posten.zone === 'system' ? ` · ${t('mss.aufraeumen.system')}` : ''}
-                    {posten.zone === 'muell' ? ` · ${t('mss.aufraeumen.sofortWeg')}` : ''}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            {plan.posten.length > SICHTBAR && (
-              <p className="mt-2 text-xs text-on-surface-variant">
-                {t('mss.aufraeumen.weitere', { anzahl: plan.posten.length - SICHTBAR })}
-              </p>
-            )}
-            <p className="mt-3 text-xs text-on-surface-variant">
-              {t('mss.aufraeumen.summe', {
-                anzahl: plan.posten.length,
-                groesse: formatBytes(summe),
-              })}
+      {!leeren && (
+        <>
+          <ul className={`mt-4 ${kompakt ? 'max-h-32' : 'max-h-56'} overflow-y-auto text-xs text-on-surface-variant`}>
+            {plan.posten.slice(0, SICHTBAR).map((posten) => (
+              <li
+                key={posten.pfad}
+                className="flex items-baseline justify-between gap-3 border-b border-outline-variant/40 py-1 last:border-0"
+              >
+                <span className="min-w-0 break-all font-mono">
+                  {posten.pfad}
+                </span>
+                <span className="shrink-0 tabular-nums">
+                  {posten.ungefaehr ? '≥ ' : ''}{posten.bytes === null ? '' : formatBytes(posten.bytes)}
+                  {posten.zone === 'system' ? ` · ${t('mss.aufraeumen.system')}` : ''}
+                  {posten.zone === 'muell' ? ` · ${t('mss.aufraeumen.sofortWeg')}` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {plan.posten.length > SICHTBAR && (
+            <p className="mt-2 text-xs text-on-surface-variant">
+              {t('mss.aufraeumen.weitere', { anzahl: plan.posten.length - SICHTBAR })}
             </p>
-          </>
-        )}
+          )}
+          <p className="mt-3 text-xs text-on-surface-variant">
+            {t('mss.aufraeumen.summe', {
+              anzahl: plan.posten.length,
+              groesse: formatBytes(summe),
+            })}
+          </p>
+        </>
+      )}
 
-        <p className="mt-3 text-xs text-on-surface-variant">
-          {t(warnung, { anzahl: sofortWeg.length })}
-        </p>
+      <p className="mt-3 text-xs text-on-surface-variant">
+        {t(warnung, { anzahl: sofortWeg.length })}
+      </p>
 
-        <div className="mt-5 flex gap-2">
-          <Button disabled={laeuft} onClick={() => void entscheiden(true)}>
-            {t(hart || leeren ? 'mss.aufraeumen.jaHart' : 'mss.aufraeumen.jaWeich')}
-          </Button>
-          <Button variant="secondary" disabled={laeuft} onClick={() => void entscheiden(false)}>
-            {t('mss.aufraeumen.nein')}
-          </Button>
-        </div>
+      <div className="mt-5 flex gap-2">
+        <Button disabled={laeuft} onClick={() => void entscheiden(true)}>
+          {t(hart || leeren ? 'mss.aufraeumen.jaHart' : 'mss.aufraeumen.jaWeich')}
+        </Button>
+        <Button variant="secondary" disabled={laeuft} onClick={() => void entscheiden(false)}>
+          {t('mss.aufraeumen.nein')}
+        </Button>
       </div>
-    </div>
+    </KartenHuelle>
   )
 }

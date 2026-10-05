@@ -83,11 +83,10 @@ def _geraeteauftrag(
 ) -> DesktopJob:
     """Ein Auftrag mit (oder ohne) Geraetekennung.
 
-    Der Werkzeugname ist mit Bedacht `desktop_system` und nicht eines der
-    beiden, die auf einen Menschen warten koennen: die bekaemen die lange
-    Frist (`_wartet_auf_menschen`) und fallen nicht mehr in die Warteschlange
-    zurueck — ein Verhalten, das mit der Geraetebindung nichts zu tun hat und
-    die Tests hier nur truebte.
+    Mit Bedacht autonom: ohne Autonomie wartet der Auftrag auf eine Karte,
+    bekaeme die lange Frist (`_wartet_auf_menschen`) und fiele nicht mehr in
+    die Warteschlange zurueck — ein Verhalten, das mit der Geraetebindung
+    nichts zu tun hat und die Tests hier nur truebte.
     """
     return desktop_job_service.anlegen(
         db,
@@ -95,7 +94,7 @@ def _geraeteauftrag(
         run_id=run.id,
         tool_call_id=ruf,
         tool_name="desktop_system",
-        arguments={"aktion": "bildschirm"},
+        arguments={"aktion": "bildschirm", "autonom": True},
         familie=familie,
     )
 

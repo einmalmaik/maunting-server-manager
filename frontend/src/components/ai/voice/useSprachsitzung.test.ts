@@ -327,6 +327,27 @@ describe('useSprachsitzung', () => {
     expect(haken.result.current.werkzeug).toBeNull()
   })
 
+  it('weiss, solange ein Auftrag am Rechner unterwegs ist', async () => {
+    // Computer-Use per Stimme: das Ergebnis kommt erst nach der Karte am
+    // Rechner. Bis dahin darf das Overlay nicht wegen Stille schliessen.
+    const haken = await sitzung()
+    expect(haken.result.current.rechnerWartet).toBe(false)
+
+    act(() => leitung().simulateMessage({ art: 'desktop_auftrag', zustand: 'offen', auftrag_id: 'a' }))
+    act(() => leitung().simulateMessage({ art: 'desktop_auftrag', zustand: 'offen', auftrag_id: 'b' }))
+    expect(haken.result.current.rechnerWartet).toBe(true)
+
+    act(() => leitung().simulateMessage({ art: 'desktop_auftrag', zustand: 'fertig', auftrag_id: 'a' }))
+    expect(haken.result.current.rechnerWartet).toBe(true)
+    act(() => leitung().simulateMessage({ art: 'desktop_auftrag', zustand: 'fertig', auftrag_id: 'b' }))
+    expect(haken.result.current.rechnerWartet).toBe(false)
+
+    // Mit der Sitzung endet das Warten.
+    act(() => leitung().simulateMessage({ art: 'desktop_auftrag', zustand: 'offen', auftrag_id: 'c' }))
+    act(() => haken.result.current.beenden())
+    expect(haken.result.current.rechnerWartet).toBe(false)
+  })
+
   it('folgt dem strukturierten Regionalfokus ohne Sprachheuristik', async () => {
     const haken = await sitzung()
 

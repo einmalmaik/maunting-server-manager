@@ -37,6 +37,7 @@ from services.ai_stream.read_tools import (
     voice_werkzeug_ausfuehren,
     werkzeugergebnis_umschlag,
 )
+from services.ai_voice import desktop_auftraege
 from services.ai_voice import interactions as voice_interactions
 from services.ai_voice.contracts import Lage, MAX_SITZUNGSSEKUNDEN, voice_tool_frame
 from services.ai_voice.realtime_session import (
@@ -220,6 +221,19 @@ class GeminiLiveSitzung:
         self._gestartet: set[str] = set()
         self._beendet = False
         self._setup_fertig = asyncio.Event()
+        #: Aufträge an den Rechner (Computer-Use per Stimme), wie bei Realtime
+        #: (`desktop_auftraege`): übergeben im Werkzeug, nachgereicht von
+        #: `_desktop_ergebnisse_zustellen`.
+        self._desktop = desktop_auftraege.SprachAuftraege(
+            user_id=user_id,
+            conversation_id=vorbereitung.conversation_id,
+            herkunft=herkunft,
+            familie=familie,
+        )
+        self._sieht: tuple[bool | None] | None = None
+        #: Spricht das Modell gerade? Ein ``clientContent`` mittendrin
+        #: unterbräche es; die Nachreichung wartet deshalb auf das Zugende.
+        self._modell_spricht = False
 
     def _fremdtext(self, text: object) -> str:
         """Fremdtext zu einer Zeile, die man dem Browser zeigen kann.
@@ -409,6 +423,21 @@ class GeminiLiveSitzung:
                 fehler = "Werkzeug konnte nicht ausgeführt werden"
                 wert = {"error": fehler}
                 anzeige = {"tool_name": name, "failed": True, "code": "REALTIME_TOOL_FAILED"}
+        elif desktop_auftraege.ist_desktop(name):
+            if self._sieht is None:
+                self._sieht = (await desktop_auftraege.modell_sieht(
+                    self.http, self.v.provider_kind, self.v.model, self.v.api_key
+                ),)
+            wert, fehler, anzeige, auftrag_id = await desktop_auftraege.uebergeben(
+                self._desktop,
+                ProviderToolCall(id=call_id, name=name, arguments=argumente),
+                sieht=self._sieht[0],
+                frist=GEMINI_TOOL_TIMEOUT_SECONDS,
+            )
+            if auftrag_id is not None:
+                await self._panel_senden(
+                    {"art": "desktop_auftrag", "zustand": "offen", "auftrag_id": auftrag_id}
+                )
         else:
             call = ProviderToolCall(id=call_id, name=name, arguments=argumente)
             try:
@@ -577,10 +606,12 @@ class GeminiLiveSitzung:
                 server_content = event.get("serverContent")
                 if server_content:
                     if server_content.get("interrupted"):
+                        self._modell_spricht = False
                         await self._panel_senden({"art": "zustand", "zustand": "hoert"})
 
                     model_turn = server_content.get("modelTurn")
                     if model_turn:
+                        self._modell_spricht = True
                         for part in model_turn.get("parts", []):
                             text = part.get("text")
                             if text:
@@ -597,6 +628,7 @@ class GeminiLiveSitzung:
                                     pass
 
                     if server_content.get("turnComplete"):
+                        self._modell_spricht = False
                         self.lage.laeufe += 1
                         await self._panel_senden({"art": "zustand", "zustand": "hoert"})
 
@@ -656,6 +688,42 @@ class GeminiLiveSitzung:
                     "code": "GEMINI_LIVE_CLOSED",
                     "detail": grund,
                 })
+
+    async def _desktop_ergebnisse_zustellen(self) -> None:
+        """Reicht fertige Rechner-Aufträge nach, sobald das Modell schweigt.
+
+        Dasselbe Muster wie `RealtimeSitzung._desktop_ergebnisse_zustellen`,
+        nur mit Googles Rahmen: ein ``clientContent``-Zug mit Text und, wenn
+        das Modell Bilder liest, dem Bildschirmfoto als ``inlineData``.
+        """
+        wartend: list[dict] = []
+        while not self._beendet:
+            await asyncio.sleep(1)
+            if self._desktop.offen:
+                try:
+                    fertig = await asyncio.to_thread(self._desktop.fertige_abholen)
+                except Exception as exc:
+                    await self._debug_senden("GEMINI_DESKTOP_POLL_FAILED", hint=type(exc).__name__)
+                    fertig = []
+                for auftrag_id, eintrag in fertig:
+                    wartend.append(eintrag)
+                    await self._panel_senden(
+                        {"art": "desktop_auftrag", "zustand": "fertig", "auftrag_id": auftrag_id}
+                    )
+            if not wartend or self._modell_spricht or self._google_ws is None:
+                continue
+            sieht = self._sieht[0] if self._sieht is not None else None
+            text, bilder = desktop_auftraege.meldung(wartend, sieht=sieht)
+            wartend = []
+            try:
+                await self._google_ws.send(json.dumps({
+                    "clientContent": {
+                        "turns": [{"role": "user", "parts": desktop_auftraege.gemini_teile(text, bilder)}],
+                        "turnComplete": True,
+                    }
+                }))
+            except Exception:
+                await self._debug_senden("GEMINI_DESKTOP_DELIVERY_FAILED", hint="send failed")
 
     def _build_setup_payload(
         self,
@@ -792,9 +860,10 @@ class GeminiLiveSitzung:
             watchdog_task = asyncio.create_task(_handshake_watchdog())
             client_task = asyncio.create_task(self._client_lesen())
             google_task = asyncio.create_task(self._google_lesen())
+            desktop_task = asyncio.create_task(self._desktop_ergebnisse_zustellen())
 
             done, pending = await asyncio.wait(
-                {client_task, google_task},
+                {client_task, google_task, desktop_task},
                 timeout=MAX_SITZUNGSSEKUNDEN,
                 return_when=asyncio.FIRST_COMPLETED,
             )

@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/Singra/UI'
 import { ergebnisMelden } from './desktopJobs'
+import { KartenHuelle, type KartenHuellenProps } from './KartenHuelle'
 import { karteErledigtMelden, useKarteErledigt, wartetNichts } from './karteErledigt'
 import {
   desktopAktionAblehnen,
@@ -44,9 +45,11 @@ function iconFuerWerkzeug(werkzeug: string) {
 
 export function DesktopAktionKarte({
   offenerAuftragId,
+  kompakt = false,
+  onSichtbar,
 }: {
   offenerAuftragId: string | null
-}) {
+} & KartenHuellenProps) {
   const { t } = useTranslation()
   const [warteschlange, setWarteschlange] = useState<DesktopAktionAnfrage[]>([])
   const [busy, setBusy] = useState(false)
@@ -133,51 +136,49 @@ export function DesktopAktionKarte({
   const Icon = iconFuerWerkzeug(anfrage.werkzeug)
 
   return (
-    <div
-      className="msm-modal-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label={anfrage.titel}
+    <KartenHuelle
+      kompakt={kompakt}
+      onSichtbar={onSichtbar}
+      beschriftung={anfrage.titel}
+      onAbbrechen={() => void entscheiden(false)}
     >
-      <div className="msm-card w-full max-w-lg p-6 shadow-panel">
-        <div className="flex items-start gap-3">
-          <div className="rounded-lg bg-primary/10 p-2.5 text-primary shrink-0">
-            <Icon className="h-5 w-5" aria-hidden="true" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h2 className="font-headline text-title-lg font-semibold text-on-surface">
-                {anfrage.titel}
-              </h2>
-              <span className="inline-flex items-center gap-1 rounded-full bg-status-warning/10 px-2 py-0.5 text-xs font-medium text-status-warning">
-                <ShieldAlert className="h-3 w-3" aria-hidden="true" />
-                {t('mss.aktion.freigabeErforderlich')}
-              </span>
-            </div>
-            <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
-              {anfrage.beschreibung}
-            </p>
-          </div>
+      <div className="flex items-start gap-3">
+        <div className="rounded-lg bg-primary/10 p-2.5 text-primary shrink-0">
+          <Icon className="h-5 w-5" aria-hidden="true" />
         </div>
-
-        <div className="mt-6 flex items-center justify-end gap-3 border-t border-outline-variant/30 pt-4">
-          <Button
-            variant="ghost"
-            disabled={busy}
-            onClick={() => void entscheiden(false)}
-          >
-            {t('mss.aktion.ablehnen')}
-          </Button>
-          <Button
-            variant="primary"
-            autoFocus
-            disabled={busy}
-            onClick={() => void entscheiden(true)}
-          >
-            {t('mss.aktion.bestaetigen')}
-          </Button>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h2 className="font-headline text-title-lg font-semibold text-on-surface">
+              {anfrage.titel}
+            </h2>
+            <span className="inline-flex items-center gap-1 rounded-full bg-status-warning/10 px-2 py-0.5 text-xs font-medium text-status-warning">
+              <ShieldAlert className="h-3 w-3" aria-hidden="true" />
+              {t('mss.aktion.freigabeErforderlich')}
+            </span>
+          </div>
+          <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
+            {anfrage.beschreibung}
+          </p>
         </div>
       </div>
-    </div>
+
+      <div className={`${kompakt ? 'mt-4' : 'mt-6'} flex items-center justify-end gap-3 border-t border-outline-variant/30 pt-4`}>
+        <Button
+          variant="ghost"
+          disabled={busy}
+          onClick={() => void entscheiden(false)}
+        >
+          {t('mss.aktion.ablehnen')}
+        </Button>
+        <Button
+          variant="primary"
+          autoFocus
+          disabled={busy}
+          onClick={() => void entscheiden(true)}
+        >
+          {t('mss.aktion.bestaetigen')}
+        </Button>
+      </div>
+    </KartenHuelle>
   )
 }

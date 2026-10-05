@@ -370,6 +370,48 @@ fn wakeword_zuruecksetzen(app: tauri::AppHandle) -> Result<(), String> {
     wakeword::zuruecksetzen(&app)
 }
 
+/// Höhe des Overlays in CSS-Pixeln — wie in `tauri.conf.json` und, solange eine
+/// Bestätigungskarte darin steht, mit Platz für sie über dem Schwarm.
+const OVERLAY_HOEHE: f64 = 380.0;
+const OVERLAY_HOEHE_MIT_KARTE: f64 = 680.0;
+
+/// Die Karte im Overlay (Computer-Use per Stimme): das Fenster wächst um die
+/// Karte, gleichmäßig nach oben und unten, damit es nicht vom Platz springt,
+/// und holt sich den Fokus — sonst kämen ESC und Enter beim Fenster darunter
+/// an. Ohne Karte zurück auf die Ausgangshöhe.
+///
+/// Synchron und damit auf dem Hauptthread: die Getter darin blockieren
+/// aus einem Nebenfaden (`am_hauptthread`).
+#[tauri::command]
+fn overlay_karte(app: tauri::AppHandle, offen: bool) -> Result<(), String> {
+    let fenster = app
+        .get_webview_window("overlay")
+        .ok_or("Overlay-Fenster fehlt")?;
+    let faktor = fenster.scale_factor().map_err(|e| e.to_string())?;
+    let groesse = fenster
+        .inner_size()
+        .map_err(|e| e.to_string())?
+        .to_logical::<f64>(faktor);
+    let ziel = if offen { OVERLAY_HOEHE_MIT_KARTE } else { OVERLAY_HOEHE };
+    if (groesse.height - ziel).abs() >= 1.0 {
+        let lage = fenster
+            .outer_position()
+            .map_err(|e| e.to_string())?
+            .to_logical::<f64>(faktor);
+        let versatz = (ziel - groesse.height) / 2.0;
+        fenster
+            .set_size(tauri::LogicalSize::new(groesse.width, ziel))
+            .map_err(|e| e.to_string())?;
+        fenster
+            .set_position(tauri::LogicalPosition::new(lage.x, (lage.y - versatz).max(0.0)))
+            .map_err(|e| e.to_string())?;
+    }
+    if offen {
+        fenster.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn overlay_sichtbar(app: tauri::AppHandle, sichtbar: bool) -> Result<(), String> {
     let fenster = app
@@ -883,6 +925,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             setze_status,
             overlay_sichtbar,
+            overlay_karte,
             overlay_testen,
             durchklick::overlay_trefferflaechen,
             audio_geraete,

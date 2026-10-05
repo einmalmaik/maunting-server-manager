@@ -105,6 +105,12 @@ interface Ergebnis {
   werkzeugLaeuft: boolean
   /** Zählt die Werkzeugstarts; jeder neue schickt einen Lichtring durch den Schwarm. */
   werkzeugStarts: number
+  /**
+   * Ein Auftrag an den Rechner ist unterwegs (Computer-Use per Stimme): das
+   * Ergebnis kommt erst nach der Karte am Rechner. Solange gilt die Sitzung
+   * als beschäftigt, auch wenn gerade niemand spricht.
+   */
+  rechnerWartet: boolean
   /** Was schiefging, als Übersetzungsschlüssel. `null`, wenn nichts. */
   fehler: string | null
   fehlerWerkzeug: string | null
@@ -310,6 +316,7 @@ export function useSprachsitzung(
   const [abgelaufen, setAbgelaufen] = useState(false)
   const [werkzeugLaeuft, setWerkzeugLaeuft] = useState(false)
   const [werkzeugStarts, setWerkzeugStarts] = useState(0)
+  const [rechnerAuftraege, setRechnerAuftraege] = useState<string[]>([])
   const intentRevision = useRef(0)
 
   const ws = useRef<WebSocket | null>(null)
@@ -358,6 +365,7 @@ export function useSprachsitzung(
     setZustand('aus')
     setWerkzeug(null)
     setWerkzeugLaeuft(false)
+    setRechnerAuftraege([])
     setIntentErkannt(null)
     setRegionalFocus(null)
     setRegionalContextActive(true)
@@ -800,6 +808,16 @@ export function useSprachsitzung(
           )
           break
         }
+        case 'desktop_auftrag': {
+          const id = typeof nachricht.auftrag_id === 'string' ? nachricht.auftrag_id : null
+          if (!id) break
+          setRechnerAuftraege((offen) =>
+            nachricht.zustand === 'offen'
+              ? offen.includes(id) ? offen : [...offen, id]
+              : offen.filter((kennung) => kennung !== id),
+          )
+          break
+        }
         case 'vorschlag':
           // Nur der Anstoss, die Liste neu zu laden. Was auf der Karte steht,
           // kommt aus der Vorschlagsliste des Panels und nicht aus diesem
@@ -882,6 +900,9 @@ export function useSprachsitzung(
       ws.current = null
       setWerkzeug(null)
       setWerkzeugLaeuft(false)
+      // Mit der Sitzung endet auch das Warten: ihr Ergebnis hätte niemand
+      // mehr, dem es zugestellt würde (`desktop_auftraege`).
+      setRechnerAuftraege([])
 
       if (planmaessig.current && gewollt.current) {
         voiceDebug('VOICE_ABGELAUFEN_RECONNECT')
@@ -947,6 +968,7 @@ export function useSprachsitzung(
     werkzeug,
     werkzeugLaeuft,
     werkzeugStarts,
+    rechnerWartet: rechnerAuftraege.length > 0,
     fehlerWerkzeug,
     fehlerCode,
     debugCode,

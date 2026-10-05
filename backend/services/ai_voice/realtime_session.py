@@ -32,6 +32,7 @@ from services.ai_stream.read_tools import (
     werkzeugergebnis_umschlag,
 )
 from services.ai_tool_registry import GEHIRN_TOOLS, VOICE_CONTROL_TOOLS, WORKER_STEUERUNG, herkunft_schnitt
+from services.ai_voice import desktop_auftraege
 from services.ai_voice import interactions as voice_interactions
 from services.ai_voice.contracts import Lage, MAX_SITZUNGSSEKUNDEN, voice_tool_frame
 from services.ai_voice_debug import emit as voice_debug
@@ -214,8 +215,16 @@ def angebotene_werkzeuge(db: Session, *, provider: AiProvider, user: User, herku
         "read_user_permissions",
         "list_roles",
     }
-    from services.tool_selection_port import HOTSET
-    keep_static = (HOTSET | realtime_static_extra | VOICE_CONTROL_TOOLS) & erlaubt
+    from services.tool_selection_port import HOTSET, pflichtwerkzeuge
+    # Aus der App gehören Sehen, Zeigen und Programmstarten immer dazu
+    # (`pflichtwerkzeuge`). Bis zum 05.10.2026 schnitt diese Liste sie weg:
+    # Computer-Use per Stimme gab es trotz Schalter nicht.
+    keep_static = (
+        HOTSET
+        | realtime_static_extra
+        | VOICE_CONTROL_TOOLS
+        | pflichtwerkzeuge(frozenset(erlaubt), herkunft)
+    ) & erlaubt
     if keep_static:
         tools = [t for t in tools if t.get("name") in keep_static]
     try:
@@ -430,6 +439,17 @@ class RealtimeSitzung:
         self._vorschlaege = voice_interactions.OffeneVorschlaege()
         self._tool_tasks: set[asyncio.Task] = set()
         self._region_tasks: set[asyncio.Task] = set()
+        #: Aufträge an den Rechner (Computer-Use per Stimme): übergeben im
+        #: Werkzeug, nachgereicht von `_desktop_ergebnisse_zustellen`.
+        self._desktop = desktop_auftraege.SprachAuftraege(
+            user_id=user_id,
+            conversation_id=vorbereitung.conversation_id,
+            herkunft=herkunft,
+            familie=familie,
+        )
+        #: Liest das Modell Bilder? In einem Tupel, damit „unbekannt“
+        #: (``None``) von „noch nicht gefragt“ zu unterscheiden bleibt.
+        self._sieht: tuple[bool | None] | None = None
         self._tool_schloss = asyncio.Semaphore(_werkzeug_nebenlaeufigkeit())
         self._tool_folgeantwort_ausstehend = False
         self._tool_folgeantwort_schloss = asyncio.Lock()
@@ -681,6 +701,10 @@ class RealtimeSitzung:
                             wert = {"error": fehler}
                             anzeige = {"tool_name": name, "failed": True, "code": "REALTIME_TOOL_FAILED", "reason": "execution_error"}
                             vorschlaege = []
+                    elif desktop_auftraege.ist_desktop(name):
+                        wert, fehler, anzeige, vorschlaege = await self._desktop_uebergeben(
+                            call_id, name, argumente
+                        )
                     else:
                         call = ProviderToolCall(id=call_id, name=name, arguments=argumente)
                         try:
@@ -718,6 +742,101 @@ class RealtimeSitzung:
         await self._ergebnis_zustellen(call_id, name, wert)
         if fehler:
             await self._panel_senden({"art": "zustand", "zustand": "denkt"})
+
+    async def _modell_sieht(self) -> bool | None:
+        """Liest das antwortende Modell Bilder? ``None`` heißt „unbekannt“.
+
+        Wie im Chat (`_sieht_nicht`): nur ein ausdrückliches ``False`` hält
+        das Bildschirmfoto zurück. Gefragt wird einmal je Sitzung; bei GPT-Live
+        nach dem Backend-Modell, denn das liest die Meldung.
+        """
+        if self._sieht is None:
+            self._sieht = (await desktop_auftraege.modell_sieht(
+                self.http,
+                self.v.provider_kind,
+                getattr(self.v, "backend_model", "") or self.v.model,
+                self.v.api_key,
+            ),)
+        return self._sieht[0]
+
+    async def _desktop_uebergeben(
+        self, call_id: str, name: str, argumente: dict
+    ) -> tuple[dict, str | None, dict, list[dict]]:
+        """Legt den Auftrag an den Rechner an und antwortet sofort.
+
+        Das Ergebnis kommt später (`_desktop_ergebnisse_zustellen`); auf den
+        Menschen vor der Karte zu warten, sprengte die Werkzeugfrist.
+        """
+        wert, fehler, anzeige, auftrag_id = await desktop_auftraege.uebergeben(
+            self._desktop,
+            ProviderToolCall(id=call_id, name=name, arguments=argumente),
+            sieht=await self._modell_sieht(),
+            frist=REALTIME_TOOL_TIMEOUT_SECONDS,
+        )
+        if auftrag_id is not None:
+            await self._panel_senden(
+                {"art": "desktop_auftrag", "zustand": "offen", "auftrag_id": auftrag_id}
+            )
+        return wert, fehler, anzeige, []
+
+    def _ruhig(self) -> bool:
+        """Niemand spricht, keine Antwort und kein Werkzeug offen."""
+        return not (
+            self._user_spricht
+            or self._assistant_spricht
+            or self._response_aktiv
+            or self._tool_tasks
+            or self._sideband is None
+            or self._schliesst
+        )
+
+    async def _desktop_ergebnisse_zustellen(self) -> None:
+        """Reicht fertige Rechner-Aufträge in einer Gesprächspause nach.
+
+        Im Sekundentakt, solange etwas offen ist. Ein fertiges Ergebnis wartet
+        wie ein Regionsnachtrag auf die Pause und unterbricht nie einen Satz.
+        Die Datenbank ist die Wahrheit: die Meldung der App landet womöglich auf
+        einem anderen Arbeitsprozess.
+
+        Ältere Bildschirmfotos bleiben im Gespräch des Anbieters stehen (anders
+        als im Chat, `_alte_bilder_entwerten`): ein Eintrag dort lässt sich nur
+        über seine Kennung löschen, und eine Sitzung ist ohnehin nach
+        `MAX_SITZUNGSSEKUNDEN` vorbei. `MAX_OFFENE` deckelt die Zahl.
+        """
+        wartend: list[dict] = []
+        while True:
+            await asyncio.sleep(1)
+            if self._desktop.offen:
+                # Ein Datenbankfehler beendet nicht die ganze Sitzung (das
+                # erste Ende eines Nebenlaufs beendet alle, `_laufen`).
+                try:
+                    fertig = await asyncio.to_thread(self._desktop.fertige_abholen)
+                except Exception as exc:
+                    voice_debug("REALTIME_DESKTOP_POLL_FAILED", hint=type(exc).__name__)
+                    fertig = []
+                for auftrag_id, eintrag in fertig:
+                    wartend.append(eintrag)
+                    await self._panel_senden(
+                        {"art": "desktop_auftrag", "zustand": "fertig", "auftrag_id": auftrag_id}
+                    )
+            if not wartend or not self._ruhig():
+                continue
+            text, bilder = desktop_auftraege.meldung(wartend, sieht=await self._modell_sieht())
+            async with self._response_schloss:
+                if not self._ruhig():
+                    continue
+                wartend = []
+                try:
+                    self._response_aktiv = True
+                    await self._sideband.send(json.dumps(self._eintrag_rahmen({
+                        "type": "message",
+                        "role": "user",
+                        "content": desktop_auftraege.openai_inhalt(text, bilder),
+                    })))
+                    await self._sideband.send(json.dumps(self._antwort_rahmen()))
+                except Exception:
+                    self._response_aktiv = False
+                    await self._debug_senden("REALTIME_DESKTOP_DELIVERY_FAILED", hint="sideband send failed")
 
     async def _tool_folgeantwort_starten(self) -> None:
         async with self._tool_folgeantwort_schloss:
@@ -1119,7 +1238,12 @@ class RealtimeSitzung:
 
     def _nebenlaeufe(self) -> list:
         """Was während der Sitzung nebeneinander läuft; das erste Ende beendet alle."""
-        return [self._sideband_lesen(), self._panel_lesen(), self._meldungen_zustellen()]
+        return [
+            self._sideband_lesen(),
+            self._panel_lesen(),
+            self._meldungen_zustellen(),
+            self._desktop_ergebnisse_zustellen(),
+        ]
 
     async def _laufen(self) -> None:
         aufgaben = {asyncio.create_task(lauf) for lauf in self._nebenlaeufe()}

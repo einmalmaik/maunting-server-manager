@@ -18,6 +18,9 @@ const starten = vi.fn()
 const beenden = vi.fn()
 const overlaySichtbar = vi.fn()
 const trefferflaechen = vi.fn((_flaechen: unknown) => Promise.resolve())
+const overlayKarte = vi.fn((_offen: boolean) => Promise.resolve())
+const aktionAblehnen = vi.fn((_id: string) => Promise.resolve())
+const ergebnisMelden = vi.fn((..._args: unknown[]) => Promise.resolve())
 
 let sitzung: {
   zustand: Sprachzustand
@@ -26,6 +29,7 @@ let sitzung: {
   werkzeug: string | null
   werkzeugLaeuft: boolean
   werkzeugStarts: number
+  rechnerWartet: boolean
   fehler: string | null
   geoData: AiRegionalAnalysis | null
   regionalContextActive: boolean
@@ -44,6 +48,7 @@ vi.mock('@tauri-apps/api/event', () => ({
       if (hoerer.get(name) === rueckruf) hoerer.delete(name)
     })
   },
+  emit: () => Promise.resolve(),
 }))
 
 vi.mock('@/components/ai/voice/useSprachsitzung', () => ({
@@ -77,6 +82,19 @@ vi.mock('./tauri', () => ({
   konfigLaden: () => Promise.reject(new Error('im Test keine Konfiguration')),
   overlaySichtbar: (sichtbar: boolean) => overlaySichtbar(sichtbar),
   overlayTrefferflaechen: (flaechen: unknown) => trefferflaechen(flaechen),
+  overlayKarte: (offen: boolean) => overlayKarte(offen),
+  // Was die Karten im Overlay brauchen (`DesktopAktionKarte` & Co.).
+  desktopAktionBestaetigen: vi.fn().mockResolvedValue({}),
+  desktopAktionAblehnen: (id: string) => aktionAblehnen(id),
+  uebernahmeFreigeben: vi.fn().mockResolvedValue(undefined),
+  uebernahmeRest: () => Promise.resolve(0),
+  uebernahmeWiderrufen: vi.fn().mockResolvedValue(undefined),
+  aufraeumenBestaetigen: vi.fn().mockResolvedValue({}),
+  aufraeumenAblehnen: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('./desktopJobs', () => ({
+  ergebnisMelden: (...args: unknown[]) => ergebnisMelden(...args),
 }))
 
 vi.mock('./sprachKoordination', async (original) => ({
@@ -124,6 +142,9 @@ describe('OverlayFenster', () => {
     beenden.mockClear()
     overlaySichtbar.mockClear()
     trefferflaechen.mockClear()
+    overlayKarte.mockClear()
+    aktionAblehnen.mockClear()
+    ergebnisMelden.mockClear()
     schwarm.zuletzt = null
     sitzung = {
       zustand: 'bereit',
@@ -132,6 +153,7 @@ describe('OverlayFenster', () => {
       werkzeug: null,
       werkzeugLaeuft: false,
       werkzeugStarts: 0,
+      rechnerWartet: false,
       fehler: null,
       geoData: null,
       regionalContextActive: true,
@@ -350,5 +372,73 @@ describe('OverlayFenster', () => {
     } finally {
       mass.mockRestore()
     }
+  })
+
+  describe('Karten im Overlay', () => {
+    const ANFRAGE = {
+      auftrag_id: 'job-klick',
+      werkzeug: 'desktop_steuern',
+      titel: 'Klicken',
+      beschreibung: 'Die KI möchte auf „Start“ klicken.',
+      argumente: { aktion: 'klick' },
+    }
+
+    it('zeigt die Karte kompakt, macht Platz und nimmt auf ihr Klicks an', async () => {
+      // Wer mit dem Overlay spricht, schaut nicht ins versteckte Hauptfenster.
+      const mass = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+        { left: 12, top: 48, width: 456, height: 160, right: 468, bottom: 208, x: 12, y: 48, toJSON: () => ({}) } as DOMRect,
+      )
+      try {
+        const { container } = await offen({ zustand: 'denkt' })
+        await senden('mss:aktion-anfrage', ANFRAGE)
+
+        expect(await screen.findByText('Klicken')).toBeInTheDocument()
+        const karte = container.querySelector('[data-overlay-karte]') as HTMLElement
+        expect(karte).not.toBeNull()
+        // Kein Kasten: die Schwarm-DNA bleibt.
+        expect(container.querySelector('.msm-modal-overlay')).toBeNull()
+        expect(karte.className).toContain('pointer-events-auto')
+
+        await waitFor(() => expect(overlayKarte).toHaveBeenLastCalledWith(true))
+        await waitFor(() =>
+          expect(trefferflaechen).toHaveBeenLastCalledWith(
+            expect.arrayContaining([[12, 48, 456, 160]]),
+          ),
+        )
+      } finally {
+        mass.mockRestore()
+      }
+    })
+
+    it('ESC lehnt die Karte ab und lässt die Sitzung stehen', async () => {
+      await offen({ zustand: 'denkt' })
+      await senden('mss:aktion-anfrage', ANFRAGE)
+      await screen.findByText('Klicken')
+
+      fireEvent.keyDown(window, { key: 'Escape' })
+
+      await waitFor(() => expect(aktionAblehnen).toHaveBeenCalledWith('job-klick'))
+      expect(beenden).not.toHaveBeenCalled()
+      await waitFor(() => expect(screen.queryByText('Klicken')).not.toBeInTheDocument())
+      await waitFor(() => expect(overlayKarte).toHaveBeenLastCalledWith(false))
+      // Ohne Karte schließt ESC wieder die Sitzung.
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(beenden).toHaveBeenCalledOnce()
+    })
+
+    it('schließt sich nicht von selbst, solange eine Karte steht oder der Rechner arbeitet', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      await offen({ zustand: 'bereit', rechnerWartet: true })
+      act(() => {
+        vi.advanceTimersByTime(60_000)
+      })
+      expect(beenden).not.toHaveBeenCalled()
+    })
+
+    it('in der App zeigt das Overlay keine eigenen Karten', async () => {
+      const { container } = await offen({}, true)
+      await waitFor(() => expect(hoerer.has('mss:aktion-anfrage')).toBe(false))
+      expect(container.querySelector('[data-overlay-karte]')).toBeNull()
+    })
   })
 })

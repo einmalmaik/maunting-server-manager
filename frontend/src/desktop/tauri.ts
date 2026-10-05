@@ -106,6 +106,15 @@ export async function overlayTrefferflaechen(flaechen: Array<[number, number, nu
 }
 
 /**
+ * Steht im Overlay eine Bestätigungskarte? Dann wird es höher (Platz für die
+ * Karte über dem Schwarm) und holt sich den Fokus, damit ESC und Enter dort
+ * ankommen. Danach zurück auf die Ausgangsgröße.
+ */
+export async function overlayKarte(offen: boolean): Promise<void> {
+  await invoke('overlay_karte', { offen })
+}
+
+/**
  * Der Overlay-Testknopf: startet die Sprachsitzung im Overlay bzw. beendet
  * sie — exakt derselbe Weg wie der Sprach-Hotkey und das Wake-Word.
  */
