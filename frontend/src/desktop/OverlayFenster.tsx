@@ -38,7 +38,12 @@ import {
   registriereAudioGeraete,
   registriereAudioVerarbeitung,
 } from '@/components/ai/voice/audioGeraete'
-import { useSprachsitzung, type Sprachzustand } from '@/components/ai/voice/useSprachsitzung'
+import {
+  useSprachsitzung,
+  type Sprachmodus,
+  type Sprachzustand,
+} from '@/components/ai/voice/useSprachsitzung'
+import { aiApi } from '@/api/ai'
 import { Aufraeumkarte } from './Aufraeumkarte'
 import { DesktopAktionKarte } from './DesktopAktionKarte'
 import { Uebernahmekarte } from './Uebernahmekarte'
@@ -96,6 +101,16 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
   // das Panel beim Modellwechsel dorthin schreibt. Vorher las dieses Fenster
   // den localStorage, der hier leer ist, und lief still auf dem ersten
   // verfuegbaren Zugang statt auf dem gewaehlten.
+  //
+  // Der **Sprachweg** dagegen muss vor dem Start feststehen: Realtime und
+  // GPT-Live handeln WebRTC aus, der alte Weg schickt Ton über den Socket.
+  // Bis zum 05.10.2026 startete das Overlay immer auf dem alten Weg — mit
+  // eingerichtetem Realtime-Zugang wartete der Server auf ein WebRTC-Angebot,
+  // bekam Tonpakete und brach ab (`REALTIME_INTERNAL_ERROR`). Zu sehen war
+  // nur „Verbindung zum Sprachmodus verloren“, bei jedem Versuch.
+  const [modus, setModus] = useState<Sprachmodus>('legacy')
+  const [startBitte, setStartBitte] = useState(0)
+  const startErledigt = useRef(0)
   const {
     zustand,
     abgelaufen,
@@ -110,7 +125,7 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
     pegel,
     starten,
     beenden,
-  } = useSprachsitzung(null)
+  } = useSprachsitzung(null, modus)
   const [sichtbar, setSichtbar] = useState(false)
   // Schaufenster: das Fenster zeigt sich mit dem Schwarm, aber ohne Mikrofon
   // und ohne Leitung — der Testknopf der Einstellungen. Die Diagnose-Knöpfe
@@ -165,14 +180,31 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
             })
           })
           .catch(() => undefined)
+        // Dieselbe Frage wie das Panel vor seinem Sprachmodus (`Ai.tsx`).
+        // Scheitert sie, bleibt der letzte bekannte Weg; der Socket sagt dann
+        // selbst, was fehlt.
+        await aiApi
+          .getVoiceConfig()
+          .then((konfiguration) => {
+            if (konfiguration.mode) setModus(konfiguration.mode)
+          })
+          .catch(() => undefined)
         await sprachstartMelden('overlay')
-        await starten()
+        // Gestartet wird erst nach dem Rendern mit dem neuen Weg: `starten`
+        // trägt ihn in sich, das hier gefangene wäre das alte.
+        setStartBitte((zahl) => zahl + 1)
       })()
     })
     return () => {
       void abo.then((weg) => weg())
     }
-  }, [starten])
+  }, [])
+
+  useEffect(() => {
+    if (startBitte <= startErledigt.current) return
+    startErledigt.current = startBitte
+    void starten()
+  }, [startBitte, starten])
 
   // Das Schaufenster (Testknopf): zeigen ohne Sitzung. Kein Mikrofon, keine
   // Anmeldung, keine Leitung — nur der Schwarm und der Zustandstext.

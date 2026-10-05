@@ -255,7 +255,7 @@ function adresse(providerId?: number | null): string {
   return providerId ? `${base}?provider_id=${providerId}` : base
 }
 
-type Sprachmodus = 'legacy' | 'openai_realtime' | 'openai_live' | 'gemini_live'
+export type Sprachmodus = 'legacy' | 'openai_realtime' | 'openai_live' | 'gemini_live'
 
 /**
  * Die Modi, deren Ton per WebRTC direkt zum Anbieter läuft — und wie.

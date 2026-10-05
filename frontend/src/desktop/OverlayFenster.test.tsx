@@ -19,6 +19,7 @@ const beenden = vi.fn()
 const overlaySichtbar = vi.fn()
 const trefferflaechen = vi.fn((_flaechen: unknown) => Promise.resolve())
 const overlayKarte = vi.fn((_offen: boolean) => Promise.resolve())
+const sprachkonfiguration = vi.fn(() => Promise.resolve({ available: true, mode: 'legacy' as string }))
 const aktionAblehnen = vi.fn((_id: string) => Promise.resolve())
 const ergebnisMelden = vi.fn((..._args: unknown[]) => Promise.resolve())
 
@@ -52,7 +53,13 @@ vi.mock('@tauri-apps/api/event', () => ({
 }))
 
 vi.mock('@/components/ai/voice/useSprachsitzung', () => ({
-  useSprachsitzung: () => ({ ...sitzung, pegel: () => 0, starten, beenden }),
+  useSprachsitzung: (_providerId: unknown, modus?: string) => {
+    return { ...sitzung, pegel: () => 0, starten: () => starten(modus), beenden }
+  },
+}))
+
+vi.mock('@/api/ai', () => ({
+  aiApi: { getVoiceConfig: () => sprachkonfiguration() },
 }))
 
 vi.mock('@/components/ai/voice/Schwarm', async (original) => ({
@@ -179,6 +186,24 @@ describe('OverlayFenster', () => {
     await waitFor(() => expect(starten).toHaveBeenCalledOnce())
     expect(schwarm.zuletzt).toMatchObject({ zustand: 'listening', vorfuehrung: false })
     expect(screen.getByText(i18n.t('ai.voice.zustand.hoert'))).toBeInTheDocument()
+  })
+
+  it('startet auf dem Sprachweg des Backends, nicht auf dem alten', async () => {
+    // Bis zum 05.10.2026 startete das Overlay immer `legacy`. Mit einem
+    // Realtime-Zugang wartete der Server auf ein WebRTC-Angebot, bekam Ton und
+    // brach ab — „Verbindung zum Sprachmodus verloren“ bei jedem Versuch.
+    sprachkonfiguration.mockResolvedValueOnce({ available: true, mode: 'openai_realtime' })
+    await offen()
+
+    await waitFor(() => expect(starten).toHaveBeenCalledOnce())
+    expect(starten).toHaveBeenCalledWith('openai_realtime')
+  })
+
+  it('startet trotzdem, wenn die Sprachkonfiguration nicht kommt', async () => {
+    sprachkonfiguration.mockRejectedValueOnce(new Error('offline'))
+    await offen()
+    await waitFor(() => expect(starten).toHaveBeenCalledOnce())
+    expect(starten).toHaveBeenCalledWith('legacy')
   })
 
   it('zeigt im Schaufenster ohne Mikrofon, und die Diagnose-Knoepfe waehlen die Form', async () => {
