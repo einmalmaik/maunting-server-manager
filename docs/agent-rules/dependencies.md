@@ -565,6 +565,9 @@ Alternativen (gemessen, nicht geschätzt):
     (`ai_limit_service.MAX_MEMORY_ENTRIES_MAX` — die 100, die hier ursprünglich
     stand, ist seit 2026-08-15 nur noch der Ausgangswert je Rolle) ist ein
     Skalarprodukt in Python weiterhin schneller als der Datenbank-Roundtrip.
+    Seit 2026-10-05 heißt „Unbegrenzt“ an der Rolle wirklich unbegrenzt; die
+    5.000 deckeln nur noch eingetragene Zahlen. Wer viele Bereiche deutlich
+    darüber sieht, prüft diese Rechnung neu.
     Der Deckel stieg am 2026-08-19 von 1.000 auf 5.000, und damit war die hier
     verlangte Neuprüfung fällig; sie ging noch einmal für Python aus. Gemessen
     an diesem Tag bei 5.000 Zeilen: das Skalarprodukt selbst kostet 38 ms, das

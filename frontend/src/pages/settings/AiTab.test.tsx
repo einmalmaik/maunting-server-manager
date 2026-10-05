@@ -198,13 +198,12 @@ describe('AiTab', () => {
     render(<AiTab />)
     fireEvent.click(await screen.findByRole('tab', { name: /Rollen & Kontingente/i }))
 
-    // Vier Unwahrheiten trug dieses Feld: die Beschriftung las sich wie ein
+    // Drei Unwahrheiten trug dieses Feld: die Beschriftung las sich wie ein
     // Vorrat je Benutzer (gezählt wird je Bereich, und wieviele es davon gibt,
-    // bestimmt der Benutzer selbst), „Unbegrenzt" heißt hier seit dem Rückfall
-    // auf die Systemgrenze nicht mehr unbegrenzt, im Teambereich entscheidet
-    // die Rolle des Gründers, und das geteilte Serverwissen hängt an gar keiner
-    // Rolle. Alles vier zieht allein der Hinweis gerade — deshalb muss er am
-    // Feld hängen, nicht irgendwo.
+    // bestimmt der Benutzer selbst), im Teambereich entscheidet die Rolle des
+    // Gründers, und das geteilte Serverwissen hängt an gar keiner Rolle. Alle
+    // drei zieht allein der Hinweis gerade — deshalb muss er am Feld hängen,
+    // nicht irgendwo.
     //
     // Gesucht wird über den Locale-Schlüssel statt über einen abgeschriebenen
     // Halbsatz, und geprüft wird nur die Verdrahtung. Hier stand vorher
@@ -243,18 +242,18 @@ describe('AiTab', () => {
     // Der Grund, warum die Beschreibung nicht allein am Zahlenfeld hängen darf:
     // ist „Unbegrenzt" an, ist das Feld `disabled` und damit aus der
     // Tabreihenfolge. Vorgelesen bekäme man dann nur noch „Unbegrenzt: Max.
-    // Memory-Einträge je Bereich: ai-vip, Umschalter, aktiviert" — und gerade in
-    // diesem Zustand ist „Unbegrenzt" die Unwahrheit, weil das Backend auf die
-    // Systemgrenze zurückfällt. Der Test schaltet deshalb wirklich um, statt
-    // nur das Attribut im Ausgangszustand zu zählen.
+    // Memory-Einträge je Bereich: ai-vip, Umschalter, aktiviert" — ohne den
+    // Hinweis, dass Server- und Panelwissen trotzdem eine feste Grenze haben.
+    // Der Test schaltet deshalb wirklich um, statt nur das Attribut im
+    // Ausgangszustand zu zählen.
     fireEvent.click(schalter)
 
     expect(schalter).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByLabelText('Max. Memory-Einträge je Bereich: ai-vip')).toBeDisabled()
     expect(schalter).toHaveAttribute('aria-describedby', hinweis.id)
 
-    // Und wieder nur an diesem einen: an den übrigen Schaltern sagt
-    // „Unbegrenzt" weiterhin die Wahrheit und braucht keine Fußnote.
+    // Und wieder nur an diesem einen: die übrigen Schalter brauchen keine
+    // Fußnote.
     expect(screen.getByRole('switch', {
       name: 'Unbegrenzt: Tägliches Tokenlimit: ai-vip',
     })).not.toHaveAttribute('aria-describedby')
@@ -263,18 +262,12 @@ describe('AiTab', () => {
     })).not.toHaveAttribute('aria-describedby')
   })
 
-  it('nennt die Ausnahme des Memory-Feldes auch in den beiden allgemeinen Regeltexten', async () => {
-    // Die Karte erklärt sich aus drei Texten, und zwei davon standen dem
-    // dritten entgegen: `ruleHelp` über dem Raster und `notConfiguredHint`
-    // daneben versprechen „unbegrenzt", solange keine Rolle etwas hinterlegt
-    // hat — für die Memory-Einträge ist das seit dem Rückfall auf die
-    // Systemgrenze das Gegenteil dessen, was eine Zeile tiefer im Feldhinweis
-    // steht. Beides wird zuerst gelesen, und beide Leserichtungen kosten:
-    // wer oben las, legte an der großzügigen Rolle „Unbegrenzt" um und nahm ihr
-    // damit jeden Beitrag; wer das leere Feld für offen hielt, plante gegen eine
-    // Zahl, die das Panel nie durchsetzt. Kein Test hat die beiden Schlüssel je
-    // gelesen — der Wächter am Feldhinweis prüft nur `maxMemoryEntriesHint` und
-    // wäre grün geblieben.
+  it('nimmt das Memory-Feld in den allgemeinen Regeltexten nicht mehr aus', async () => {
+    // `ruleHelp` und `notConfiguredHint` versprechen „unbegrenzt", solange
+    // keine Rolle etwas hinterlegt hat. Bis zum 05.10.2026 nahmen beide die
+    // Memory-Einträge davon aus, weil das Backend dort auf eine Systemgrenze
+    // von 100 zurückfiel — trotz eingeschaltetem „Unbegrenzt". Seit „Unbegrenzt"
+    // auch dort unbegrenzt heißt, wäre jede verbliebene Ausnahme eine Lüge.
     vi.mocked(client.api).mockImplementation((pfad: string) => (
       pfad === '/ai/settings/role-limits' ? Promise.resolve([blankRow]) : respond(pfad)
     ) as never)
@@ -287,19 +280,13 @@ describe('AiTab', () => {
     await screen.findByText(i18n.t('aiSettings.ruleHelp'))
     screen.getByText(i18n.t('aiSettings.notConfiguredHint'))
 
-    // Gesucht wird die Ausnahme über die Beschriftung des Feldes, das sie
-    // betrifft, und die kommt aus derselben Locale statt aus einer Kopie hier.
-    // Die Systemgrenze bleibt bewusst draußen: ihre Zahl gehört dem
-    // Backend-Wächter `test_der_hinweis_nennt_genau_die_systemgrenze_aus_dem_code`,
-    // der sie an MAX_SYSTEM_SCOPE_ENTRIES bindet — eine zweite Fassung hier
-    // würde bei jeder pflichtgemäßen Änderung rot, ohne dass etwas falsch ist.
-    // Beide Sprachen, weil die englische Fassung sonst still zurückfallen
-    // könnte auf einen Satz, der die Ausnahme nicht kennt.
+    // Gesucht wird über die Beschriftung des Feldes aus derselben Locale statt
+    // über eine Kopie hier. Beide Sprachen, weil jede ihre eigene Fassung trägt.
     for (const sprache of ['de', 'en'] as const) {
       const text = i18n.getFixedT(sprache)
       const feld = text('aiSettings.maxMemoryEntries')
-      expect(text('aiSettings.ruleHelp')).toContain(feld)
-      expect(text('aiSettings.notConfiguredHint')).toContain(feld)
+      expect(text('aiSettings.ruleHelp')).not.toContain(feld)
+      expect(text('aiSettings.notConfiguredHint')).not.toContain(feld)
     }
   })
 

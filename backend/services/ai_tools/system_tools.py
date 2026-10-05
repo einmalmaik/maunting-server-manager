@@ -20,7 +20,6 @@ from services.ai_tools.base import (
     _resolve_server,
     _MEMORY_TEAM_SCHEMA,
     _MEMORY_KEY_RE,
-    _MAX_SCOPE_ENTRIES,
     MAX_QUESTION_OPTIONS,
     MAX_QUESTION_CHARS,
     MAX_OPTION_CHARS,

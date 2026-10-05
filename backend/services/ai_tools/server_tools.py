@@ -78,7 +78,6 @@ from services.ai_tools.base import (
     _MEMORY_TEAM_SCHEMA,
     _PLAN_SCHEMA,
     _MEMORY_KEY_RE,
-    _MAX_SCOPE_ENTRIES,
     _function,
     _server_function,
     _vorfall_versuche,
@@ -261,14 +260,10 @@ def _global_tool_definitions() -> list[dict]:
             "Kuendigungsfrist, ihre Produktzuordnungen, die vergebenen Slugs, "
             "die Benutzer, die als Dienstbenutzer taugen, und die Rollen, die "
             "**dieser** Benutzer vergeben darf — samt ihrem KI-Kontingent.\n"
-            "Beim Kontingent gilt dieselbe Ausnahme wie beim Anlegen: fehlt "
-            "`ai_limits` ganz oder steht `max_memory_entries` darin auf `null`, "
-            "sagt diese Rolle zum Gedaechtnisvorrat **nichts** — weder "
-            f"'unbegrenzt' noch '{_MAX_SCOPE_ENTRIES}'. Es gewinnt die hoechste "
-            "gesetzte Zahl unter allen Rollen ihres Traegers; die Systemgrenze "
-            f"von {_MAX_SCOPE_ENTRIES} Eintraegen greift erst, wenn keine seiner "
-            "Rollen eine Zahl traegt. Was ein einzelner Kunde am Ende hat, ist "
-            "hier also nicht ablesbar.\n"
+            "`null` heisst in jedem Kontingentfeld unbegrenzt, auch bei "
+            "`max_memory_entries`. Unter allen Rollen eines Kunden gewinnt der "
+            "hoechste Wert; was ein einzelner Kunde am Ende hat, ist hier also "
+            "nicht ablesbar.\n"
             "**Ruf das auf, bevor du etwas zur Shop-Einrichtung vorschlaegst.** "
             "Slug, Dienstbenutzer und Produktkennung sind nichts, was man raten "
             "kann; ein geratener Wert erzeugt einen Vorschlag, den der Benutzer "
@@ -766,17 +761,10 @@ def _global_tool_definitions() -> list[dict]:
                     "type": ["integer", "null"],
                     "minimum": 0,
                     "description": (
-                        "Memory-Eintraege je Bereich. `null` heisst hier "
-                        "**nicht** unbegrenzt, sondern 'nichts hinterlegt': "
-                        "die Rolle traegt zum Vorrat dann nichts bei. Es "
-                        "gewinnt die hoechste gesetzte Zahl unter allen Rollen "
-                        f"des Kunden; die Systemgrenze von {_MAX_SCOPE_ENTRIES} "
-                        "Eintraegen greift erst, wenn keine davon eine Zahl "
-                        "traegt. `null` taugt damit zu keinem der beiden "
-                        "Wuensche: 'unbegrenztes Gedaechtnis' braucht eine "
-                        "Zahl, die du dem Benutzer nennst, und senken kann "
-                        "eine zusaetzliche Rolle gar nicht — dafuer muss die "
-                        "Zahl der bestehenden Rolle sinken."
+                        "Memory-Eintraege je Bereich; `null` heisst unbegrenzt, "
+                        "0 sperrt. Es gewinnt der hoechste Wert unter allen "
+                        "Rollen des Kunden — senken kann eine zusaetzliche "
+                        "Rolle nicht, dafuer muss die bestehende sinken."
                     ),
                 },
                 **_RATIONALE_SCHEMA,

@@ -817,8 +817,8 @@ export interface AiMemoryImportPreview {
   total_valid: number
   total_conflicts: number
   total_secrets_blocked: number
-  /** Wieviele neue Schlüssel der Bereich noch fasst. Ersetzen kostet keinen Platz. */
-  available_slots: number
+  /** Wieviele neue Schlüssel der Bereich noch fasst; `null` heißt unbegrenzt. Ersetzen kostet keinen Platz. */
+  available_slots: number | null
   /** Ob die KI persönliche Einträge heute liest — sonst bleibt der Import liegen. */
   memory_enabled: boolean
 }

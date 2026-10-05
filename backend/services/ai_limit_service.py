@@ -4,13 +4,12 @@ Die Regeln sind absichtlich klein und deterministisch:
 - hat *keine* Rolle des Benutzers eine Konfiguration, gilt „unbegrenzt“,
 - unter den konfigurierten Rollen gewinnt der höchste Wert.
 
-Die zweite Regel ist die einzige, die für *jedes* Feld gilt. Was ein leeres Feld
-wert ist, hängt dagegen am Feld: bei den Kontingenten ist ``None`` selbst ein
-Wert, nämlich „unbegrenzt“ und damit der höchste — deshalb gewinnt er. Beim
-Memory-Vorrat ist ``None`` gar kein Wert, sondern eine Abwesenheit, und eine
-Abwesenheit trägt nichts bei. Hier stand früher „ein explizites ``None`` gewinnt
-als unbegrenzt“ als dritte Regel; das galt, solange jedes Feld ein Kontingent
-war. Welche Felder wie gelesen werden, steht bei ``FELDER_OHNE_UNBEGRENZT``.
+Ein leeres Feld (``None``) ist in **jedem** Feld ein Wert, nämlich „unbegrenzt“
+und damit der höchste — deshalb gewinnt er. Das gilt seit dem 05.10.2026 auch
+für den Memory-Vorrat: dort hieß ``None`` vorher „nichts hinterlegt“ und wurde
+beim Merken zur festen Systemgrenze von 100. Der Betreiber sah in der Maske
+aber „Unbegrenzt“ eingeschaltet und bekam 100 — eine Zusage, die das Panel
+nicht hielt. „Unbegrenzt“ heißt jetzt überall unbegrenzt, 0 heißt überall 0.
 
 Die erste Regel ist bewusst so und war früher anders: eine leere Zeilenmenge
 ergab über ``max(..., default=0)`` ein effektives Limit von **0** und damit eine
@@ -57,10 +56,10 @@ DICTATION_MINUTES_LIMIT_MAX = 100_000
 MAX_REASONING_EFFORT_MAX = 6
 # Deckel für das konfigurierbare Rollenlimit. Er begrenzt **einen Bereich**,
 # nicht eine Anfrage — und er ist eine Obergrenze für das, was der Betreiber
-# überhaupt einstellen darf, nicht eine Zahl, die irgendwo von selbst gilt. Wer
-# nichts hinterlegt, bleibt bei `MAX_SYSTEM_SCOPE_ENTRIES`; das Anheben dieser
-# Zahl verändert deshalb keine bestehende Installation, es macht nur mehr
-# einstellbar. Hier stand vorher, 1_000 statt 10_000 verhindere eine Selbst-DoS
+# als **Zahl** einstellen darf, nicht eine Zahl, die irgendwo von selbst gilt.
+# Über ihm liegt nur noch „Unbegrenzt“ (``None``) — wie bei den Kontingenten
+# auch dann, wenn keine Rolle des Benutzers etwas hinterlegt hat. Wer die
+# Kosten unten begrenzen will, trägt eine Zahl ein. Hier stand vorher, 1_000 statt 10_000 verhindere eine Selbst-DoS
 # — eine Schutzwirkung, die diese Zahl nicht leisten kann, und deshalb war sie
 # das Gefährlichste, was hier stehen konnte: sie beruhigt an der Stelle, an der
 # jemand nachrechnen müsste.
@@ -112,7 +111,9 @@ MAX_REASONING_EFFORT_MAX = 6
 #
 # 5.000 ist danach die Zahl, bei der der Abruf im Zehntelsekundenbereich
 # bleibt und die Verwaltungsansicht in Sekunden statt Minuten. „Unbegrenzt"
-# wäre keine dieser beiden.
+# garantiert keine dieser beiden — es ist trotzdem wählbar, weil die Rechnung
+# dem gehört, der den Schalter umlegt, und weil der Kontextaufbau über
+# `MAX_CONTEXT_ROWS` gedeckelt bleibt, egal wie groß der Vorrat ist.
 MAX_MEMORY_ENTRIES_MAX = 5_000
 # Feste Systemgrenze fuer die Bereiche, die an keiner Benutzerrolle haengen:
 # `server_shared` gehoert der Anlage, `panel` dem Betreiber. Das Kontingent des
@@ -127,9 +128,10 @@ MAX_MEMORY_ENTRIES_MAX = 5_000
 # Schluss aendert das nichts: unbegrenzt hiesse in beiden Faellen unbegrenzter
 # Prefill, und weil an diesen Bereichen keine Rolle haengt, gaebe es auch
 # niemanden, ueber den der Betreiber es wieder einfangen koennte.
-# Dieselbe Zahl ist zugleich der Rueckfall fuer die rollengebundenen Bereiche,
-# solange der Betreiber dort nichts hinterlegt hat — es ist genau die Grenze,
-# die vorher fest im Memory-Service stand, siehe `resolve_scope_memory_limit`.
+# Fuer die rollengebundenen Bereiche ist diese Zahl seit dem 05.10.2026 *kein*
+# Rueckfall mehr: dort heisst ein leeres Feld unbegrenzt, siehe
+# `resolve_scope_memory_limit`. Sie gilt nur noch fuer Bereiche ohne Rolle und
+# fuer einen Bereich, der sich nicht aufloesen laesst.
 MAX_SYSTEM_SCOPE_ENTRIES = 100
 
 LIMIT_FIELDS = (
@@ -149,30 +151,12 @@ LIMIT_FIELDS = (
     # Auch kein Kontingent, sondern ein Vorrat: wieviele Memory-Eintraege je
     # Bereich bestehen duerfen. Steht hier, weil ein Tarif den Vorrat ueber die
     # Rolle verkaufen koennen soll, statt dass eine Konstante im Memory-Service
-    # fuer alle entscheidet. Von den Regeln oben passt die tragende — "der
-    # hoechste Wert der konfigurierten Rollen gewinnt" — unveraendert; nur
-    # "None heisst unbegrenzt" passt nicht, siehe FELDER_OHNE_UNBEGRENZT.
+    # fuer alle entscheidet. Es folgt denselben Regeln wie die Kontingente:
+    # der hoechste Wert gewinnt, ``None`` heisst unbegrenzt. Bis zum
+    # 05.10.2026 hiess ``None`` hier „nichts hinterlegt“ und wurde beim Merken
+    # zu ``MAX_SYSTEM_SCOPE_ENTRIES`` — waehrend die Maske „Unbegrenzt“ zeigte.
     "max_memory_entries",
 )
-# Felder, in denen ein leeres Feld *kein* Wert ist. Ueberall sonst ist ``None``
-# der groesste denkbare Wert („unbegrenzt“) und gewinnt deshalb ueber jede Zahl.
-# Beim Memory-Vorrat ist es umgekehrt: ``resolve_scope_memory_limit`` loest
-# ``None`` zu MAX_SYSTEM_SCOPE_ENTRIES auf, und diese 100 ist der *kleinste*
-# sinnvolle Ausgang, nicht der groesste. Liesse man ``None`` dort gewinnen, kaeme
-# genau das Gegenteil der Zusage heraus, unter der dieses Feld gebaut wurde:
-#   - ein VIP mit 800 fiele auf 100, sobald er zusaetzlich eine Bestandsrolle
-#     bekommt, deren Feld die Migration auf NULL gesetzt hat — eine weitere
-#     Rolle wuerde ihm also etwas wegnehmen, statt zu erhoehen;
-#   - eine ausdrueckliche 0 („diese Rolle darf sich nichts merken“) verloere
-#     gegen jede beliebige leere Rolle, und die Sperre waere wirkungslos.
-# Ein leeres Feld heisst hier deshalb „diese Rolle sagt zum Vorrat nichts“ und
-# traegt genau soviel bei wie eine Rolle ganz ohne Zeile: nichts. Sagen alle
-# Rollen nichts, bleibt es bei ``None`` — eine Zahl macht daraus erst
-# ``resolve_scope_memory_limit``.
-# Bewusst eine benannte Menge und kein Feldname mitten in ``_resolve_field``:
-# ein kuenftiges Feld soll sich hier ausdruecklich einordnen muessen, statt die
-# Lesart des Nachbarn stillschweigend zu erben.
-FELDER_OHNE_UNBEGRENZT = frozenset({"max_memory_entries"})
 LIMIT_MAXIMA = {
     "daily_token_limit": TOKEN_LIMIT_MAX,
     "weekly_token_limit": TOKEN_LIMIT_MAX,
@@ -202,15 +186,9 @@ class EffectiveAiLimits:
     monthly_dictation_minutes_limit: int | None
     #: Hoechste erlaubte Denkstufe als Rang; ``None`` heisst unbegrenzt.
     max_reasoning_effort: int | None
-    #: Rohe Rollenaufloesung des Memory-Vorrats je Bereich. ``None`` heisst hier
-    #: nicht „unbegrenzt“ wie bei den Feldern darueber, sondern „der Betreiber
-    #: hat nichts hinterlegt“ — und zwar in *keiner* Rolle des Benutzers; eine
-    #: einzelne leere Rolle neben einer gesetzten ergibt kein ``None``, siehe
-    #: ``FELDER_OHNE_UNBEGRENZT``. Es ist damit genau das leere Feld, das der
-    #: Betreiber in den Einstellungen sieht, und ebenfalls anders als oben
-    #: *nicht* die Zahl, die beim Merken gilt: die macht erst
-    #: ``resolve_scope_memory_limit`` daraus. Wer hier vergleicht statt dort,
-    #: laesst den Vorrat unbegrenzt.
+    #: Memory-Vorrat je rollengebundenem Bereich; ``None`` heisst unbegrenzt.
+    #: Welche Grenze in welchem Bereich gilt (Team am Gruender, Systembereiche
+    #: fest), entscheidet ``resolve_scope_memory_limit``.
     max_memory_entries: int | None
 
 
@@ -255,20 +233,13 @@ def _resolve_field(rows: list[RoleAiLimit], field: str) -> int | None:
     ``resolve_effective_limits`` vorher, weil er eine andere Bedeutung hat
     („gar keine Politik hinterlegt“ statt „auf 0 gesetzt“).
 
-    Aufgelöst wird für alle Felder gleich: der höchste Wert gewinnt.
-    Unterschiedlich ist allein, ob ein leeres Feld überhaupt ein Wert ist. Für
-    die Felder aus ``FELDER_OHNE_UNBEGRENZT`` ist es keiner, deshalb wird dort
-    über die *gesetzten* Werte maximiert statt beim ersten ``None``
-    auszusteigen — sonst nähme eine zusätzliche leere Rolle einer Rolle mit Zahl
-    ihren Vorrat weg. Sind dort alle Felder leer, bleibt es bei ``None``: „keine
-    der Rollen hat etwas hinterlegt“ ist weiterhin eine eigene Aussage und nicht
-    heimlich schon die Zahl, die später beim Merken gilt.
+    Aufgelöst wird für alle Felder gleich: der höchste Wert gewinnt, und
+    ``None`` („unbegrenzt“) ist der höchste.
     """
     configured = [getattr(row, field) for row in rows]
-    if field not in FELDER_OHNE_UNBEGRENZT and any(value is None for value in configured):
+    if any(value is None for value in configured):
         return None
-    gesetzt = [int(value) for value in configured if value is not None]
-    return max(gesetzt) if gesetzt else None
+    return max(int(value) for value in configured)
 
 
 UNLIMITED_AI_LIMITS = EffectiveAiLimits(**{field: None for field in LIMIT_FIELDS})
@@ -297,33 +268,19 @@ def resolve_scope_memory_limit(
     user: User,
     team_id: int | None = None,
     server_id: int | None = None,
-) -> int:
+) -> int | None:
     """Wieviele Memory-Eintraege in *diesem* Bereich stehen duerfen.
 
-    Der Rueckgabewert ist immer eine Zahl; ein „unbegrenzt“ gibt es hier nicht.
-    Sagt keine einzige Rolle des Benutzers etwas zum Vorrat — die
-    Rollenaufloesung also ``None`` —, gilt ``MAX_SYSTEM_SCOPE_ENTRIES``.
+    ``None`` heisst unbegrenzt — dieselbe Lesart wie bei jedem anderen Feld
+    dieses Moduls und dieselbe, die der Schalter „Unbegrenzt“ in der Maske
+    verspricht. Eine 0 ist eine Sperre („diese Rolle darf sich nichts
+    merken“), kein fehlender Wert.
 
-    ``max_memory_entries`` ist damit das einzige Feld des Moduls, bei dem ein
-    leeres Feld **nicht** „unbegrenzt“ heisst; genau deshalb steht es in
-    ``FELDER_OHNE_UNBEGRENZT``. Das hat einen Grund. Bei den Kontingenten kostet
-    „unbegrenzt“ Geld, und ob er das ausgeben will, ist die Entscheidung des
-    Betreibers — ein nicht gesetztes Tokenlimit schadet niemandem ausser seiner
-    eigenen Rechnung. Ein Memory-Eintrag kostet dagegen Latenz in **jeder**
-    Anfrage: auch in denen, die mit ihm gar nichts zu tun haben, und bei
-    fremden Benutzern, sobald er in einem geteilten Bereich steht. „Der
-    Betreiber hat nichts hinterlegt“ kann deshalb nicht „gar keine Grenze“
-    heissen; er wuerde eine Politik bezahlen, die er nie gewaehlt hat.
-
-    Vorher stand diese Grenze als feste 100 im Memory-Service. Sie verschwindet
-    nicht, sie wird verschiebbar: 100 ist ab jetzt der Ausgangswert, den der
-    Betreiber bis ``MAX_MEMORY_ENTRIES_MAX`` anheben oder bis auf 0 senken
-    kann. Solange er nichts setzt, aendert sich fuer niemanden etwas.
-
-    ``EffectiveAiLimits.max_memory_entries`` behaelt dabei seine alte
-    Bedeutung: das ist die rohe Rollenaufloesung fuer die Einstellungsmaske,
-    ``None`` heisst dort „nichts hinterlegt“. Erst hier wird daraus die Zahl,
-    die beim Merken gilt — die beiden sind nicht dasselbe.
+    Bis zum 05.10.2026 kam hier immer eine Zahl heraus: ein leeres Feld wurde
+    zu ``MAX_SYSTEM_SCOPE_ENTRIES``. Wer in der Maske „Unbegrenzt“ eingeschaltet
+    hatte, konnte trotzdem nur 100 Eintraege speichern. Die Kosten eines grossen
+    Vorrats stehen bei ``MAX_MEMORY_ENTRIES_MAX``; der Kontextaufbau ist davon
+    unabhaengig ueber ``MAX_CONTEXT_ROWS`` gedeckelt.
 
     Wem der Vorrat gehoert, entscheidet der Bereich:
 
@@ -349,21 +306,10 @@ def resolve_scope_memory_limit(
     weder oeffnen noch sperren.
     """
     if scope in ("user", "server"):
-        rollenlimit = resolve_effective_limits(db, user).max_memory_entries
-        # Ausdruecklich gegen ``None`` und nicht ueber ``x or FALLBACK``: ein
-        # ``or`` verschluckt auch die 0 und macht aus dem hinterlegten „diese
-        # Rolle darf sich gar nichts merken“ stillschweigend die 100 — das
-        # genaue Gegenteil dessen, was der Betreiber eingetragen hat. Diese
-        # Pruefung lief eine Fassung lang ins Leere, weil die 0 hier gar nicht
-        # mehr ankam: sie verlor in ``_resolve_field`` gegen jede leere
-        # Nachbarrolle. Beide Haelften gehoeren zusammen.
-        return MAX_SYSTEM_SCOPE_ENTRIES if rollenlimit is None else rollenlimit
+        return resolve_effective_limits(db, user).max_memory_entries
     if scope == "team":
         team = db.get(Team, team_id) if team_id is not None else None
         founder = db.get(User, team.owner_user_id) if team is not None else None
         if founder is not None:
-            # Dieselbe ausdrueckliche Pruefung wie oben, und aus demselben
-            # Grund: eine 0 des Gruenders ist eine Ansage, kein fehlender Wert.
-            rollenlimit = resolve_effective_limits(db, founder).max_memory_entries
-            return MAX_SYSTEM_SCOPE_ENTRIES if rollenlimit is None else rollenlimit
+            return resolve_effective_limits(db, founder).max_memory_entries
     return MAX_SYSTEM_SCOPE_ENTRIES

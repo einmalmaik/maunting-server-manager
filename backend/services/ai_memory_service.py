@@ -571,7 +571,8 @@ def scope_entries(
     braucht das heute genau einer: `panel` und `server_shared` hängen an der
     festen `ai_limit_service.MAX_SYSTEM_SCOPE_ENTRIES` und passen damit immer
     auf eine Seite, `team` hängt am Rollenlimit seines Gründers und darf seit
-    dem 19.08.2026 bis zu 5.000 Einträge fassen. Jeder davon kostet beim Öffnen
+    dem 19.08.2026 bis zu 5.000 Einträge fassen, seit dem 05.10.2026 bei
+    „Unbegrenzt“ beliebig viele. Jeder davon kostet beim Öffnen
     einen eigenen Roundtrip zum DIS-Sidecar — gemessen 10,3 s bei 5.000 Zeilen,
     also dieselbe Wartezeit, gegen die die Profilansicht längst geschützt ist.
 
@@ -866,15 +867,15 @@ def upsert_entry(
         # Systemgrenze. Eine zweite Zahl hier daneben wäre eine zweite Wahrheit,
         # die mit der ersten auseinanderläuft.
         #
-        # Die Auflösung gibt immer eine Zahl zurück, nie „unbegrenzt“: hat der
-        # Betreiber nichts hinterlegt, gilt dort weiterhin die alte 100. Die
-        # Zählung läuft deshalb ausnahmslos — und ihr Ergebnis steht in einer
-        # Variablen, weil die Meldung es gleich noch braucht.
+        # ``None`` heißt unbegrenzt — dann gibt es nichts zu zählen und nichts
+        # zu sperren. Eine 0 ist dagegen eine Zahl und läuft durch die Zählung.
+        # Das Ergebnis steht in einer Variablen, weil die Meldung es gleich
+        # noch braucht.
         grenze = ai_limit_service.resolve_scope_memory_limit(
             db, scope, user, team_id=normalized_team_id, server_id=normalized_server_id,
         )
-        bestand = _bestand_unter_sperre(db, identity)
-        if bestand >= grenze:
+        bestand = _bestand_unter_sperre(db, identity) if grenze is not None else 0
+        if grenze is not None and bestand >= grenze:
             # Hier steht die **Tatsache**, in Sätzen, die ein Mensch versteht —
             # und nichts sonst. Vorher stand hier eine Regieanweisung an das
             # Modell („Sag dem Benutzer …“, „Suche mit search_memory …“). Diese
@@ -1092,12 +1093,12 @@ class Importabgleich:
     ``aehnlich`` steht parallel zur Kandidatenliste: der nächstliegende
     Bestandseintrag unter einem **anderen** Schlüssel ab `IMPORT_HINWEIS_AB`
     als (Schlüssel, Klartext, Ähnlichkeit) oder ``None``. ``frei`` ist,
-    wieviele neue Einträge der Bereich noch fasst.
+    wieviele neue Einträge der Bereich noch fasst — ``None`` heißt unbegrenzt.
     """
 
     gleicher_schluessel: dict[str, str | None]
     aehnlich: list[tuple[str, str, float] | None]
-    frei: int
+    frei: int | None
 
 
 def importabgleich(
@@ -1184,7 +1185,7 @@ def importabgleich(
             else None
             for fund in treffer
         ],
-        frei=max(0, grenze - len(bestand)),
+        frei=None if grenze is None else max(0, grenze - len(bestand)),
     )
 
 

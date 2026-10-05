@@ -24,25 +24,16 @@ DictationMinutesLimit = Annotated[int | None, Field(ge=0, le=DICTATION_MINUTES_L
 #: Denktiefe als Rang: 0 = gar nicht, 1 = minimal … 6 = max. ``None`` heißt
 #: unbegrenzt — dieselbe Bedeutung wie bei den Kontingenten darüber.
 ReasoningLimit = Annotated[int | None, Field(ge=0, le=MAX_REASONING_EFFORT_MAX)]
-#: Memory-Einträge je Bereich. ``None`` heißt hier als einzigem Feld dieser
-#: Datei *nicht* unbegrenzt, sondern „nichts hinterlegt“; welche Zahl beim
-#: Merken tatsächlich gilt, entscheidet allein
-#: ``ai_limit_service.resolve_scope_memory_limit``. Die Obergrenze ist keine
-#: Willkür und liegt deutlich unter den Kontingenten darüber — warum, steht bei
+#: Memory-Einträge je Bereich. ``None`` heißt unbegrenzt, wie bei den
+#: Kontingenten darüber. Die Obergrenze für eine *Zahl* ist keine Willkür und
+#: liegt deutlich unter den Kontingenten — warum, steht bei
 #: ``ai_limit_service.MAX_MEMORY_ENTRIES_MAX``.
 MemoryLimit = Annotated[int | None, Field(ge=0, le=MAX_MEMORY_ENTRIES_MAX)]
 
 
 class AiLimitsBase(BaseModel):
-    """Vollständiges Limit-Set; ``None`` bedeutet bei den Kontingenten
-    explizit unbegrenzt.
-
-    Für ``max_memory_entries`` gilt dieser Satz nicht, und das ist am Vertrag
-    nicht abzulesen: die Antwort gibt ein gesetztes ``null`` brav zurück, die
-    Zahl, die beim Merken greift, steht nirgends darin. Wer gegen diesen
-    Vertrag baut, liest die verbindliche Auflösung deshalb in
-    ``ai_limit_service.resolve_scope_memory_limit`` — nicht hier.
-    """
+    """Vollständiges Limit-Set; ``None`` bedeutet in jedem Feld explizit
+    unbegrenzt."""
 
     daily_token_limit: TokenLimit
     weekly_token_limit: TokenLimit

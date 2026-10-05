@@ -93,22 +93,8 @@ def _ai_limits(db: Session, rolle: Role) -> dict | None:
         # Konfiguration in `resolve_effective_limits` **unbegrenzt**, nicht
         # "null Tokens".
         return None
-    # Ein Feld dieser Liste liest sich anders als seine Nachbarn, und das Modell
-    # sieht es ihm nicht an: bei `max_memory_entries` heisst `null` nicht
-    # unbegrenzt, sondern "nichts hinterlegt" — durchgesetzt wird dann
-    # `MAX_SYSTEM_SCOPE_ENTRIES`, siehe `resolve_scope_memory_limit`. Fuer den
-    # Fall darueber gilt dasselbe: auch die Rolle ganz ohne Zeile hat beim
-    # Vorrat keine offene Grenze, sondern dieselbe Systemgrenze.
-    #
-    # Das ist hier keine Feinheit, sondern der Lesepfad, ueber den das Modell
-    # bestehende Tarifrollen ueberhaupt erst kennenlernt: auf "Was enthaelt der
-    # Enterprise-Tarif?" antwortete es nach der Lesart der Nachbarfelder
-    # "Gedaechtnis: unbegrenzt", und der Betreiber verkaufte danach genau das —
-    # waehrend der Kunde denselben Vorrat bekommt wie im Gratistarif. Der
-    # Vorbehalt steht deshalb in der Werkzeugbeschreibung von
-    # `read_hoster_setup` (`ai_action_service`), woertlich wie beim
-    # Schreib-Werkzeug `propose_ai_tarif_role`. Kaeme ein weiteres Feld dieser
-    # Art dazu, waere hier wieder nichts zu aendern und dort schon.
+    # `null` heisst in jedem Feld unbegrenzt, seit dem 05.10.2026 auch bei
+    # `max_memory_entries` — das Modell darf es also ueberall gleich lesen.
     return {feld: getattr(row, feld) for feld in ai_limit_service.LIMIT_FIELDS}
 
 

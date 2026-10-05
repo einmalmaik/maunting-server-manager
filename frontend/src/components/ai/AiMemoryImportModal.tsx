@@ -126,7 +126,10 @@ export function AiMemoryImportModal({ open, onOpenChange, scope, onImported }: P
 
   const ausgewaehlt = useMemo(() => zeilen.filter((zeile) => zeile.auswahl), [zeilen])
   const neue = ausgewaehlt.filter((zeile) => !eintrag(zeile).replace_existing).length
-  const zuviel = vorschau ? Math.max(0, neue - vorschau.available_slots) : 0
+  // `null` heißt unbegrenzt: dann ist nichts zu viel.
+  const zuviel = vorschau && vorschau.available_slots !== null
+    ? Math.max(0, neue - vorschau.available_slots)
+    : 0
   const ungueltig = ausgewaehlt.some((zeile) => !gueltig(zeile))
   const gesperrt = zeilen.filter((zeile) => zeile.item.status === 'has_secret').length
   const bekannt = zeilen.filter((zeile) => istIdentisch(zeile.item)).length

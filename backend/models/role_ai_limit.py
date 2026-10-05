@@ -5,11 +5,8 @@ bewusst „unbegrenzt“. Fehlt der Datensatz, trägt die Rolle nichts bei; ist 
 keine Rolle des Benutzers konfiguriert, gilt unbegrenzt. Die Auflösungsregeln
 stehen einmalig in ``services/ai_limit_service``.
 
-„Kontingentspalten“ steht hier, seit es eine Spalte gibt, für die der Satz
-nicht gilt: bei ``max_memory_entries`` ist NULL kein Wert, sondern eine
-Abwesenheit — siehe den Kommentar an der Spalte. Wer diese Datei als Quelle für
-die Bedeutung einer Spalte liest, darf die Zeilen also nicht über einen Kamm
-scheren; ein Auswerter, der das täte, hielte den Vorrat für offen.
+Das gilt seit dem 05.10.2026 auch für ``max_memory_entries``; vorher hieß NULL
+dort „nichts hinterlegt“ und wurde beim Merken zur festen Systemgrenze.
 """
 
 from datetime import datetime, timezone
@@ -69,14 +66,9 @@ class RoleAiLimit(Base):
     # gleich — ein Tarif konnte keinen größeren Wissensvorrat verkaufen, und der
     # Betreiber konnte ihn auch nicht kürzen.
     #
-    # Kein Verbrauch, sondern ein Vorrat. Dieselbe wie oben ist davon nur die
-    # Auflösung über mehrere Rollen — der höchste Wert gewinnt. Ein leeres Feld
-    # dagegen heißt hier nicht „unbegrenzt“, sondern „diese Rolle sagt zum
-    # Vorrat nichts“; welche Zahl beim Merken gilt, wenn keine Rolle etwas sagt,
-    # entscheidet allein ``ai_limit_service.resolve_scope_memory_limit``. Wer
-    # NULL hier wie in den Zeilen darüber liest, hält den Vorrat für offen und
-    # baut einen Auswerter, der etwas anderes meldet, als das Panel durchsetzt.
-    # Warum der Deckel bewusst niedrig liegt, steht bei
+    # Kein Verbrauch, sondern ein Vorrat — aufgelöst wie die Spalten darüber:
+    # der höchste Wert gewinnt, NULL heißt unbegrenzt. Warum der Deckel für
+    # eine Zahl bewusst niedrig liegt, steht bei
     # ``ai_limit_service.MAX_MEMORY_ENTRIES_MAX``.
     max_memory_entries: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(

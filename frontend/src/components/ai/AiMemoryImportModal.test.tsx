@@ -211,6 +211,13 @@ describe('AiMemoryImportModal', () => {
     expect(screen.getByRole('button', { name: '2 importieren' })).toBeEnabled()
   })
 
+  it('kennt bei unbegrenztem Vorrat kein Zuviel', async () => {
+    await bisZurVorschau(MISCHUNG, { available_slots: null })
+
+    expect(screen.queryByText(/Zu wenig Platz/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '2 importieren' })).toBeEnabled()
+  })
+
   it('meldet Übersprungenes und lädt die Liste nach einem Import neu', async () => {
     vi.mocked(aiApi.executeMemoryImport).mockResolvedValue({
       imported_count: 1, updated_count: 0, skipped_count: 1,

@@ -151,8 +151,8 @@ class AiMemoryImportPreviewResponse(BaseModel):
     total_conflicts: int
     total_secrets_blocked: int
     #: Wieviele **neue** Schlüssel der Bereich noch fasst. Überschreiben kostet
-    #: keinen Platz.
-    available_slots: int
+    #: keinen Platz. ``None`` heißt unbegrenzt.
+    available_slots: int | None
     #: Ob die KI persönliche Einträge heute überhaupt liest. Ein Import in ein
     #: ausgeschaltetes Gedächtnis ist erlaubt — er bleibt nur liegen, bis der
     #: Schalter umgelegt wird, und das soll niemand erst hinterher merken.

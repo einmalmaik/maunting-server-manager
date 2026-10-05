@@ -61,17 +61,8 @@ def _role_response(db: Session, role: Role) -> AiRoleLimitsResponse:
     unbegrenzt, siehe ``ai_limit_service``) — und ein unbeabsichtigtes Speichern
     haette die Rolle hart gesperrt. ``configured`` bleibt der ehrliche
     Unterschied zwischen „nichts hinterlegt“ und „ausdruecklich unbegrenzt
-    gesetzt“.
-
-    „Bei den Kontingenten“ steht in dem Satz, seit ``max_memory_entries``
-    mitfaehrt: dort heisst ein leeres Feld nicht unbegrenzt, sondern „diese
-    Rolle sagt zum Vorrat nichts“, und durchgesetzt wird dann die Systemgrenze.
-    Diese Antwort gibt beide Faelle als dasselbe ``null`` heraus und kann es
-    nicht anders — sie zeigt den gespeicherten Zustand, nicht die Aufloesung.
-    Wer gegen diesen Endpunkt baut, liest deshalb
-    ``ai_limit_service.resolve_scope_memory_limit`` als die verbindliche
-    Aufloesung und nicht das ``null`` hier; sonst meldet eine Tarifuebersicht
-    „Gedaechtnis: unbegrenzt“, waehrend das Panel eine Zahl durchsetzt.
+    gesetzt“. Das gilt fuer jedes Feld, seit dem 05.10.2026 auch fuer
+    ``max_memory_entries``.
     """
     row = ai_limit_service.get_role_limit(db, role.id)
     values = {
@@ -119,23 +110,11 @@ def update_role_limits(
     values = req.model_dump()
     try:
         ai_limit_service.set_role_limit(db, role.id, values)
-        # Ein leeres Feld heisst nicht mehr ueberall dasselbe: bei den
-        # Kontingenten „unbegrenzt“, bei ``max_memory_entries`` dagegen „der
-        # Betreiber hat nichts hinterlegt“ — durchgesetzt wird dort die
-        # Systemgrenze. Frueher trug der Trail beides als ``unlimited_fields``.
-        # Ein Kommentar, der sich irrt, kostet eine Lesestunde; dieser Eintrag
-        # beurkundet dauerhaft eine Betreiberhandlung. Wer ihn im Streitfall
-        # liest — „warum merkt sich die KI nur 100 Dinge, obwohl unbegrenzt
-        # eingetragen war“ —, fand dort schwarz auf weiss, der Betreiber habe
-        # unbegrenzt gesetzt. Gesetzt hat er nichts, und er sucht den Fehler
-        # danach im Memory-Service statt im leeren Feld.
-        #
-        # Die Zuordnung „welches Feld liest ``None`` wie“ wird hier bewusst nur
-        # benutzt und nicht ein zweites Mal getroffen; sie steht einmal in
-        # ``FELDER_OHNE_UNBEGRENZT``. Ein kuenftiges Feld dieser Art ordnet sich
-        # dort ein und ist damit auch in diesem Protokoll sofort richtig
-        # beschrieben, statt still in den falschen Schluessel zu rutschen.
-        leere_felder = {field for field, value in values.items() if value is None}
+        # Ein leeres Feld heisst in jedem Feld „unbegrenzt“ — seit dem
+        # 05.10.2026 auch bei ``max_memory_entries``. Vorher stand das
+        # Memory-Feld hier getrennt unter ``unset_fields``, weil es beim Merken
+        # zur Systemgrenze wurde; ein aelterer Trail kann diesen Schluessel
+        # deshalb noch tragen.
         audit_service.record_privileged_action(
             db,
             user_id=actor.id,
@@ -145,14 +124,7 @@ def update_role_limits(
             details={
                 "configured_fields": list(ai_limit_service.LIMIT_FIELDS),
                 "unlimited_fields": sorted(
-                    leere_felder - ai_limit_service.FELDER_OHNE_UNBEGRENZT
-                ),
-                # Beide Listen immer mitschreiben, auch leer: eine fehlende
-                # Liste liesse sich spaeter als „damals gab es das Feld noch
-                # nicht“ oder als „nichts leer gelassen“ lesen, und im Trail ist
-                # das ein Unterschied.
-                "unset_fields": sorted(
-                    leere_felder & ai_limit_service.FELDER_OHNE_UNBEGRENZT
+                    field for field, value in values.items() if value is None
                 ),
             },
         )

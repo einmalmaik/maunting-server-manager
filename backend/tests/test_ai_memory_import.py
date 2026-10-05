@@ -180,7 +180,8 @@ def test_preview_writes_nothing_and_never_echoes_a_secret(
     assert daten["detected_source"] == "Gemini"
     assert daten["total_detected"] == 7
     assert daten["total_secrets_blocked"] == 1
-    assert daten["available_slots"] == 100
+    # Leeres Feld heisst unbegrenzt — dann gibt es keine Platzzahl.
+    assert daten["available_slots"] is None
     gesperrt = [item for item in daten["items"] if item["status"] == "has_secret"]
     assert len(gesperrt) == 1
     # Weder im Wert noch im Schlüssel — der Schlüssel entsteht aus den ersten
@@ -194,7 +195,7 @@ def test_preview_marks_an_existing_key_and_a_similar_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     modell_ersetzen(monkeypatch, _themen)
-    _freischalten(db, regular_user)
+    _freischalten(db, regular_user, max_memory_entries=100)
     ai_memory_service.upsert_entry(
         db, user=regular_user, scope="user", server_id=None,
         key="name", value="Heißt Alexander",

@@ -65,30 +65,11 @@ export interface AiRoleLimits {
    * bei „25" nicht 25 Eintraege, sondern 25 persoenliche plus 25 je Server
    * plus 25 je selbst gegruendetem Team.
    *
-   * `null` heisst hier — anders als bei den Kontingenten darueber — *nicht*
-   * unbegrenzt: das Backend faellt auf MAX_SYSTEM_SCOPE_ENTRIES zurueck,
-   * sobald die Rollenaufloesung keine Zahl liefert (`resolve_scope_memory_limit`
-   * in services/ai_limit_service.py). Die Zahl stand hier ausgeschrieben und
-   * war damit eine zweite, ungebundene Fassung derselben Konstante — die
-   * Waechter im Backend halten die Locale-Texte und den Feld-Deckel an ihr
-   * fest, dieser Docblock lag ausserhalb dessen, was sie lesen, und haette die
-   * alte Zahl ueberlebt. Ohne diesen Rueckfall waere die Grenze auf jeder
-   * Bestandsanlage ersatzlos weggefallen, denn nach der Migration traegt jede
-   * Rolle NULL — und ein Vorrat ohne jede Grenze wächst weiter, solange die KI
-   * schreibt.
-   *
-   * Hier stand als Begründung „und der Leseweg hat keinen Deckel: jeder
-   * sichtbare Eintrag wird bei jeder Chatanfrage einzeln entschlüsselt". Das
-   * stimmt seit `MAX_CONTEXT_ROWS` nicht mehr: der Kontextaufbau kürzt die
-   * Zeilen auf diesen Deckel, bevor er sie entschlüsselt. Ungedeckelt sind
-   * seither nur noch der Bestand selbst und die Verwaltungsansicht im Profil,
-   * die bewusst alles zeigt, weil man dort aufräumen will.
-   *
-   * Der Rueckfall greift benutzerweit, nicht je Rollenkarte: ein leeres Feld
-   * traegt in der Rollenaufloesung nichts mehr bei (FELDER_OHNE_UNBEGRENZT),
-   * damit eine zusaetzliche Rolle den Vorrat nie senkt. Die Systemgrenze gilt
-   * also erst, wenn *keine* Rolle des Benutzers eine Zahl traegt — was diese
-   * Karte zeigt, ist nur eine der Rollen, die er tragen kann.
+   * `null` heisst unbegrenzt — dieselbe Bedeutung wie bei den Kontingenten
+   * darueber, 0 sperrt. Bis zum 05.10.2026 machte das Backend aus `null` hier
+   * still die Systemgrenze von 100, waehrend der Schalter „Unbegrenzt" zeigte.
+   * Der Kontextaufbau bleibt auch bei unbegrenztem Vorrat ueber
+   * `MAX_CONTEXT_ROWS` gedeckelt.
    *
    * Team-Gedaechtnis zaehlt gegen das Limit des Team-Gruenders, nicht gegen das
    * des schreibenden Mitglieds. Das ist an der Oberflaeche sonst nicht zu
@@ -134,21 +115,17 @@ const FIELD_DEFINITIONS: Array<{
   /**
    * Ein ruhiger Satz unter dem Feld, fuer die Faelle, in denen Beschriftung und
    * Schalter allein in die Irre fuehren. Bisher hat das kein Feld gebraucht;
-   * `max_memory_entries` braucht es, weil dort viererlei nicht selbsterklaerend
-   * ist: die Zahl gilt je Bereich, „Unbegrenzt" bedeutet die Systemgrenze, im
-   * Teambereich entscheidet die Rolle des Gruenders statt der des Schreibenden,
-   * und Anlagen- wie Panelwissen haengen an gar keiner Rolle.
+   * `max_memory_entries` braucht es, weil dort dreierlei nicht selbsterklaerend
+   * ist: die Zahl gilt je Bereich, im Teambereich entscheidet die Rolle des
+   * Gruenders statt der des Schreibenden, und Anlagen- wie Panelwissen haengen
+   * an gar keiner Rolle.
    *
-   * Zweimal hat dieser Satz schon gelogen, und beide Male, weil er eine
-   * Rollenkarte beschrieb, wo das Backend benutzerweit aufloest. Erst zaehlte
-   * er den Teambereich auf, als sei er von der eingestellten Zahl gedeckelt —
-   * wer „basic" auf 5 setzt, deckelt damit aber kein einziges Team, dessen
-   * Gruender eine andere Rolle traegt; ein Basic-Kunde schreibt im Team eines
-   * VIP-Gruenders weiterhin dessen 500. Dann versprach er die Systemgrenze
-   * „ohne eigene Zahl": das stimmte, solange ein leeres Feld jede Zahl
-   * verdraengte, und wurde falsch, als es nichts mehr beitrug. Wer heute an der
-   * knappen Rolle plant, plant fuer Benutzer, die daneben eine grosszuegige
-   * tragen — und die gewinnt.
+   * Schon einmal hat dieser Satz gelogen, weil er eine Rollenkarte beschrieb,
+   * wo das Backend benutzerweit aufloest: er zaehlte den Teambereich auf, als
+   * sei er von der eingestellten Zahl gedeckelt — wer „basic" auf 5 setzt,
+   * deckelt damit aber kein einziges Team, dessen Gruender eine andere Rolle
+   * traegt; ein Basic-Kunde schreibt im Team eines VIP-Gruenders weiterhin
+   * dessen 500.
    *
    * Optional, damit die uebrigen Felder unveraendert bleiben — sie sagen genau
    * das, was ihre Beschriftung sagt.
@@ -367,13 +344,6 @@ export function AiTab() {
               <h3 className="font-headline text-title-lg font-semibold text-on-surface">{t('aiSettings.title')}</h3>
             </div>
             <p className="max-w-3xl text-sm text-on-surface-variant">{t('aiSettings.description')}</p>
-            {/* Der Regeltext steht ueber dem Feldraster und wird zuerst gelesen —
-                er muss deshalb selbst sagen, wo er nicht gilt. Bis eben drehte er
-                die Sonderregel des Memory-Feldes genau um („eine explizit
-                unbegrenzte Rolle gewinnt ueber begrenzte Rollen"), waehrend der
-                Feldhinweis eine Zeile tiefer das Gegenteil sagte. Wer oben las,
-                legte an der grosszuegigen Rolle „Unbegrenzt" um — und nahm ihr
-                damit jeden Beitrag, statt ihr einen zu geben. */}
             <p className="mt-2 max-w-3xl text-xs text-on-surface-variant">{t('aiSettings.ruleHelp')}</p>
           </div>
 
@@ -413,12 +383,6 @@ export function AiTab() {
                 )}
               </div>
 
-              {/* Derselbe Grund wie beim Regeltext darueber, nur naeher am Schaden:
-                  dieser Kasten erscheint genau an einer Rolle, deren Memory-Feld
-                  leer ist. „Solange keine Rolle konfiguriert ist, gilt unbegrenzt"
-                  stimmt fuer die Kontingente und nicht fuer den Vorrat — wer daraus
-                  schloss, ein leeres Feld lasse das Gedaechtnis offen, plante gegen
-                  eine Zahl, die das Panel nie durchsetzt. */}
               {!selected.configured && (
                 <p className="mb-5 rounded-lg border border-outline-variant/40 bg-surface-container-low/45 p-3 text-xs leading-5 text-on-surface-variant">
                   {t('aiSettings.notConfiguredHint')}

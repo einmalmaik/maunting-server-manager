@@ -26,7 +26,6 @@ from services.ai_action_errors import (
     AiActionValidationError,
 )
 from services.ai_redaction import redact_sensitive_text
-from services.ai_limit_service import MAX_SYSTEM_SCOPE_ENTRIES as _MAX_SCOPE_ENTRIES
 
 logger = logging.getLogger(__name__)
 

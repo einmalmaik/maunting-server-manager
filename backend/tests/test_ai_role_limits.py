@@ -598,25 +598,16 @@ def test_memory_limit_kommt_aus_der_rolle(db: Session, regular_user: User) -> No
     ).count() == 1
 
 
-def test_eine_leere_zusatzrolle_nimmt_dem_vorrat_nichts_weg(
+def test_eine_unbegrenzte_zusatzrolle_hebt_den_vorrat_auf(
     db: Session,
     regular_user: User,
 ) -> None:
-    """Zwei Rollen ergeben eine Grenze — und die zweite kann nur erhoehen.
+    """Zwei Rollen ergeben eine Grenze — und „Unbegrenzt“ ist die hoechste.
 
-    Hier stand vorher {10, leer} -> 100 als Sollverhalten, also der Fehler
-    selbst: eine Rolle mit leerem Feld verdraengte den Wert der anderen. In
-    *dieser* Richtung faellt das nicht auf, weil die Zahl dabei zufaellig
-    steigt. Wehtun tut der Fehler andersherum, und so ist der Test jetzt
-    gebaut: den hoeheren Wert traegt die zweite Rolle. Ein VIP mit 800
-    bekommt zusaetzlich eine Bestandsrolle, deren Feld die Migration auf NULL
-    gesetzt hat — bliebe der alte Stand, haette ihm diese zusaetzliche Rolle
-    700 Eintraege *genommen*. Das ist das Gegenteil der Zusage aus dem
-    Moduldocstring von `ai_limit_service`.
-
-    Ein leeres Feld heisst beim Gedaechtnis deshalb weder „unbegrenzt“ noch
-    „100“, sondern „diese Rolle sagt zum Vorrat nichts“ — und traegt so viel
-    bei wie eine Rolle ganz ohne Zeile: nichts.
+    Bis zum 05.10.2026 stand hier das Gegenteil: ein leeres Feld trug beim
+    Gedaechtnis nichts bei, aus {10, unbegrenzt} wurde 10 und aus
+    {unbegrenzt} die Systemgrenze 100 — obwohl der Schalter in der Maske
+    „Unbegrenzt“ zeigte. Jetzt gilt dieselbe Regel wie bei den Kontingenten.
     """
     knapp, _ = _zwei_memory_rollen(db, regular_user, "ai-memory-hoechster", 10, 800)
 
@@ -625,31 +616,28 @@ def test_eine_leere_zusatzrolle_nimmt_dem_vorrat_nichts_weg(
     set_role_limit(db, knapp.id, _limits(max_memory_entries=None))
     db.commit()
 
-    assert resolve_effective_limits(db, regular_user).max_memory_entries == 800
-    assert resolve_scope_memory_limit(db, "user", regular_user) == 800
+    assert resolve_effective_limits(db, regular_user).max_memory_entries is None
+    assert resolve_scope_memory_limit(db, "user", regular_user) is None
 
 
-def test_eine_ausdrueckliche_null_haelt_gegen_eine_leere_rolle(
+def test_eine_unbegrenzte_rolle_schlaegt_eine_gesperrte(
     db: Session,
     regular_user: User,
 ) -> None:
-    """Wer das Gedaechtnis abschaltet, hat es abgeschaltet.
+    """{0, unbegrenzt} ist unbegrenzt — wie bei jedem Kontingent.
 
-    Die 0 ist eine Ansage — „diese Rolle darf sich nichts merken“ —, das leere
-    Feld daneben sagt gar nichts. Vorher gewann das Nichts: aus {0, leer} wurde
-    die Systemgrenze, der Betreiber sah seine Sperre in der Maske stehen und
-    die KI merkte munter weiter. Eine Sperre, die jede beliebige zweite Rolle
-    aufhebt, ist keine.
+    Die 0 sperrt nur, solange keine andere Rolle des Benutzers mehr erlaubt.
+    Eine Sperre, die eine grosszuegigere Rolle nicht aufhebt, waere ein Riegel,
+    den kein Tarif mehr aufbekommt.
     """
-    _zwei_memory_rollen(db, regular_user, "ai-memory-null-gegen-leer", 0, None)
+    _zwei_memory_rollen(db, regular_user, "ai-memory-null-gegen-offen", 0, None)
 
-    assert resolve_effective_limits(db, regular_user).max_memory_entries == 0
-    assert resolve_scope_memory_limit(db, "user", regular_user) == 0
-    # Und die Sperre wird auch durchgesetzt, nicht nur aufgeloest.
-    with pytest.raises(HTTPException) as exc:
-        _merken(db, regular_user, "notiz.0")
-    assert exc.value.status_code == 409
-    db.rollback()
+    assert resolve_effective_limits(db, regular_user).max_memory_entries is None
+    assert resolve_scope_memory_limit(db, "user", regular_user) is None
+    _merken(db, regular_user, "notiz.0")
+    assert db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == f"user:{regular_user.id}"
+    ).count() == 1
 
 
 def test_eine_zusaetzliche_rolle_erhoeht_den_vorrat(
@@ -669,42 +657,33 @@ def test_eine_zusaetzliche_rolle_erhoeht_den_vorrat(
     assert resolve_scope_memory_limit(db, "user", regular_user) == 500
 
 
-def test_schweigen_aller_rollen_wird_erst_beim_merken_zu_einer_zahl(
+def test_unbegrenzt_in_allen_rollen_bleibt_auch_beim_merken_unbegrenzt(
     db: Session,
     regular_user: User,
 ) -> None:
-    """„Nichts hinterlegt“ und „100“ sind zwei Aussagen; nur die erste ist wahr.
+    """Maske und Durchsetzung sagen dasselbe: „Unbegrenzt“ ist unbegrenzt.
 
-    Sagt keine der Rollen etwas zum Vorrat, bleibt die rohe Aufloesung
-    ``None`` — genau das leere Feld, das der Betreiber in der Maske sieht. Erst
-    beim Merken wird daraus ``MAX_SYSTEM_SCOPE_ENTRIES``. Geprueft werden
-    beide Seiten getrennt, weil sie verschiedene Fragen beantworten: wer die
-    Maske gegen die Durchsetzung haelt, liest dort ein „unbegrenzt“ heraus, das
-    nie jemand eingetragen hat.
+    Vorher wurde ``None`` erst beim Merken zu ``MAX_SYSTEM_SCOPE_ENTRIES`` —
+    die rohe Aufloesung und die durchgesetzte Grenze widersprachen sich.
     """
-    _zwei_memory_rollen(db, regular_user, "ai-memory-stumm", None, None)
+    _zwei_memory_rollen(db, regular_user, "ai-memory-offen", None, None)
 
     assert resolve_effective_limits(db, regular_user).max_memory_entries is None
-    assert resolve_scope_memory_limit(
-        db, "user", regular_user
-    ) == MAX_SYSTEM_SCOPE_ENTRIES
+    assert resolve_scope_memory_limit(db, "user", regular_user) is None
 
 
-def test_die_sonderregel_des_vorrats_faerbt_nicht_auf_die_kontingente_ab(
+def test_der_vorrat_liest_ein_leeres_feld_wie_die_kontingente(
     db: Session,
     regular_user: User,
 ) -> None:
-    """Nur der Memory-Vorrat liest ein leeres Feld als Schweigen.
+    """Ein leeres Feld heisst in jedem Feld dasselbe: unbegrenzt.
 
-    Bei den Kontingenten ist ein leeres Feld weiterhin selbst ein Wert,
-    naemlich „unbegrenzt“ — und damit der hoechste, der gewinnt. Haette die
-    Korrektur am Vorrat sie mitgerissen, waere aus einem ausdruecklich
-    unbegrenzten Tageslimit still die Zahl der Nachbarrolle geworden: eine
-    Verschaerfung, die kein Betreiber eingetragen hat. Beide Lesarten stehen
-    hier absichtlich in *einer* Zeilenmenge nebeneinander.
+    Beide Felder stehen absichtlich in *einer* Zeilenmenge nebeneinander und
+    jeweils einmal leer, einmal mit Zahl — eine Sonderregel fuer eines von
+    beiden faellt hier sofort auf.
     """
-    offen = _role(db, "ai-memory-nebenwirkung-offen")
-    begrenzt = _role(db, "ai-memory-nebenwirkung-begrenzt")
+    offen = _role(db, "ai-memory-gleich-offen")
+    begrenzt = _role(db, "ai-memory-gleich-begrenzt")
     set_role_limit(
         db, offen.id, _limits(daily_token_limit=None, max_memory_entries=800)
     )
@@ -717,55 +696,39 @@ def test_die_sonderregel_des_vorrats_faerbt_nicht_auf_die_kontingente_ab(
     effective = resolve_effective_limits(db, regular_user)
 
     assert effective.daily_token_limit is None
-    assert effective.max_memory_entries == 800
+    assert effective.max_memory_entries is None
 
 
-def test_ohne_konfigurierte_rolle_gilt_weiter_die_alte_feste_grenze(
+def test_ohne_konfigurierte_rolle_ist_der_vorrat_unbegrenzt(
     db: Session,
     regular_user: User,
 ) -> None:
-    """Diese Aenderung nimmt niemandem etwas und gibt niemandem etwas.
+    """Ohne jede Rollenkonfiguration gilt unbegrenzt — wie bei den Kontingenten.
 
-    Nach der Migration traegt **jede** Bestandsrolle NULL, und eine frische
-    Installation hat gar keine Rollenkonfiguration. Genau dort muss weiterhin
-    die Grenze gelten, die bis eben als Konstante im Memory-Service stand —
-    sonst waere aus einer konfigurierbaren Grenze auf jeder Anlage still eine
-    fehlende geworden. Der Leseweg haette das ausgebadet: er laedt alle
-    sichtbaren Zeilen ohne LIMIT und entschluesselt jede einzeln ueber den
-    DIS-Sidecar, bei jeder Chatanfrage.
-
-    Die Einstellungsmaske zeigt daneben unveraendert ein leeres Feld. „Nichts
-    hinterlegt“ und „100“ sind zwei verschiedene Aussagen; nur die erste ist
-    wahr, solange der Betreiber nichts gesetzt hat.
+    Die Maske zeigt eine solche Rolle mit eingeschaltetem „Unbegrenzt“; das
+    Backend setzt seit dem 05.10.2026 genau das durch statt still 100.
     """
     assert resolve_effective_limits(db, regular_user).max_memory_entries is None
-    assert resolve_scope_memory_limit(
-        db, "user", regular_user
-    ) == MAX_SYSTEM_SCOPE_ENTRIES
+    assert resolve_scope_memory_limit(db, "user", regular_user) is None
 
 
-def test_ohne_konfigurierte_rolle_greift_die_grenze_auch_beim_merken(
+def test_unbegrenzt_laesst_mehr_als_die_systemgrenze_zu(
     db: Session,
     regular_user: User,
 ) -> None:
-    """Der unkonfigurierte Fall wird nicht nur aufgeloest, er wird durchgesetzt.
+    """Der gemeldete Fehler: „Unbegrenzt“ eingeschaltet, trotzdem bei 100 Schluss.
 
-    Die Aufloesung daneben koennte richtig sein und die Zaehlung im
-    Memory-Service trotzdem uebersprungen werden — genau so war es einen Stand
-    lang, weil ein „unbegrenzt“ die Zaehlung ganz umging. Deshalb prueft dieser
-    Test nicht die Zahl, sondern die Absage.
+    Die Aufloesung allein belegt das nicht — die Zaehlung im Memory-Service
+    koennte trotzdem an einer festen Zahl abbrechen. Deshalb wird wirklich
+    ueber ``MAX_SYSTEM_SCOPE_ENTRIES`` hinaus gemerkt.
     """
-    for nummer in range(MAX_SYSTEM_SCOPE_ENTRIES):
+    _memory_role(db, regular_user, "ai-memory-unbegrenzt", None)
+    for nummer in range(MAX_SYSTEM_SCOPE_ENTRIES + 1):
         _merken(db, regular_user, f"notiz.{nummer}")
 
-    with pytest.raises(HTTPException) as exc:
-        _merken(db, regular_user, "notiz.zuviel")
-
-    assert exc.value.status_code == 409
-    db.rollback()
     assert db.query(AiMemoryEntry).filter(
         AiMemoryEntry.scope_identity == f"user:{regular_user.id}"
-    ).count() == MAX_SYSTEM_SCOPE_ENTRIES
+    ).count() == MAX_SYSTEM_SCOPE_ENTRIES + 1
 
 
 def test_teamwissen_haengt_am_gruender_nicht_am_schreiber(
@@ -1408,33 +1371,16 @@ def _letzter_limit_trail(db: Session, role: Role) -> dict:
     return json.loads(eintrag.details or "{}")
 
 
-def test_der_audit_trail_nennt_ein_leeres_gedaechtnisfeld_nicht_unbegrenzt(
+def test_der_audit_trail_nennt_ein_leeres_gedaechtnisfeld_unbegrenzt(
     client: TestClient,
     db: Session,
     owner_cookies: dict,
 ) -> None:
-    """Was der Trail „unbegrenzt“ nennt, muss auch unbegrenzt sein.
+    """Was der Trail „unbegrenzt“ nennt, ist jetzt auch beim Gedaechtnis unbegrenzt.
 
-    Ein leeres Feld heisst nicht mehr ueberall dasselbe: bei den Kontingenten
-    „unbegrenzt“, bei ``max_memory_entries`` dagegen „der Betreiber hat nichts
-    hinterlegt“ — durchgesetzt wird dort die Systemgrenze. Der Trail trug
-    frueher beides als ``unlimited_fields``, und ausgerechnet dieses Artefakt
-    bleibt dauerhaft stehen und wird im Streitfall gelesen: „warum merkt sich
-    die KI nur 100 Dinge, obwohl unbegrenzt eingetragen war“. Dort stand dann
-    schwarz auf weiss, der Betreiber habe unbegrenzt gesetzt. Gesetzt hat er
-    nichts, und er sucht den Fehler danach im Memory-Service statt im leeren
-    Feld.
-
-    Gedeckt war die Trennung von keinem Test — wer die beiden Listen spaeter
-    wieder zusammenfasst, bekam bis hierhin eine gruene Suite. Geprueft wird
-    deshalb an konkreten Feldnamen und nicht ueber ``FELDER_OHNE_UNBEGRENZT``:
-    aus der Menge abgeleitet bliebe der Test auch dann gruen, wenn dort
-    versehentlich ein Kontingentfeld landet.
-
-    Die dritte Zusage ist die leiseste: beide Listen stehen auch dann im
-    Protokoll, wenn sie leer sind. Eine fehlende Liste liesse sich spaeter als
-    „damals gab es das Feld noch nicht“ **oder** als „nichts leer gelassen“
-    lesen, und im Trail ist das ein Unterschied.
+    Bis zum 05.10.2026 stand das leere Memory-Feld getrennt unter
+    ``unset_fields``, weil es beim Merken zur Systemgrenze wurde. Seitdem
+    gehoert es zu den unbegrenzten Feldern wie jedes andere.
     """
     role = _role(db, "ai-memory-audit")
 
@@ -1448,22 +1394,12 @@ def test_der_audit_trail_nennt_ein_leeres_gedaechtnisfeld_nicht_unbegrenzt(
         assert antwort.status_code == 200, antwort.text
         return _letzter_limit_trail(db, role)
 
-    # Ueberall `.get(...)`: eine fehlende Liste soll als fehlende Liste
-    # scheitern und nicht als KeyError mitten im Test. Genau darum geht es im
-    # dritten Fall.
     leeres_gedaechtnisfeld = speichern(max_memory_entries=None)
-    assert leeres_gedaechtnisfeld.get("unset_fields") == ["max_memory_entries"]
-    assert leeres_gedaechtnisfeld.get("unlimited_fields") == []
-
-    # Und andersherum, sonst belegt der Fall darueber nur, dass irgendetwas
-    # sortiert wurde: beim Kontingent ist das leere Feld weiterhin eine Ansage.
-    leeres_kontingent = speichern(monthly_token_limit=None)
-    assert leeres_kontingent.get("unlimited_fields") == ["monthly_token_limit"]
-    assert leeres_kontingent.get("unset_fields") == []
+    assert leeres_gedaechtnisfeld.get("unlimited_fields") == ["max_memory_entries"]
+    assert "unset_fields" not in leeres_gedaechtnisfeld
 
     nichts_leer = speichern(max_memory_entries=250)
     assert nichts_leer.get("unlimited_fields") == []
-    assert nichts_leer.get("unset_fields") == []
 
 
 # ── Dieselben Zahlen, zweimal aufgeschrieben ──────────────────────────
@@ -1528,9 +1464,8 @@ def _zahlen(satz: str) -> set[int]:
 def test_der_hinweis_nennt_genau_die_systemgrenze_aus_dem_code(sprache: str) -> None:
     """Die 100 unter dem Feld ist eine Zusage, kein Beispiel.
 
-    Sie sagt dem Betreiber, was fuer eine nicht konfigurierte Rolle gilt — und
-    unter genau dieser Zusage („strikt additiv, fuer niemanden aendert sich
-    etwas“) ist das Feld gebaut worden. Verschiebt jemand
+    Sie sagt dem Betreiber, welche feste Grenze fuer Server- und Panelwissen
+    gilt, die an keiner Rolle haengen. Verschiebt jemand
     ``MAX_SYSTEM_SCOPE_ENTRIES``, ohne den Satz anzufassen, steht in der Maske
     weiter eine Zahl, die niemanden mehr betrifft, und der Betreiber plant seine
     Tarife danach.

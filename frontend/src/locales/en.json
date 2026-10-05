@@ -289,10 +289,10 @@
   "aiSettings": {
     "title": "AI quotas by role",
     "description": "Configure token, request, concurrency, and cost limits separately from role permissions. Enforced by the backend.",
-    "ruleHelp": "If no role has a quota configured, usage is unlimited. Once at least one role is configured, the highest limit applies; an explicitly unlimited role wins over limited ones. A value of 0 blocks the quota. Exception for “Max memory entries per scope”: The system limit applies only when no role of the user sets a value.",
+    "ruleHelp": "If no role has a quota configured, usage is unlimited. Once at least one role is configured, the highest limit applies; an explicitly unlimited role wins over limited ones. A value of 0 blocks the quota.",
     "selectRole": "Role",
     "notConfigured": "Not configured",
-    "notConfiguredHint": "No quota stored for this role yet. Usage is unlimited by default (except for “Max memory entries per scope”, where the system limit applies). Saving writes the values shown here.",
+    "notConfiguredHint": "No quota stored for this role yet. Usage is unlimited by default. Saving writes the values shown here.",
     "dailyTokens": "Daily token limit",
     "weeklyTokens": "Weekly token limit",
     "monthlyTokens": "Monthly token limit",
@@ -310,7 +310,7 @@
     "saveFailed": "AI limits could not be saved.",
     "saved": "AI limits saved.",
     "maxMemoryEntries": "Max memory entries per scope",
-    "maxMemoryEntriesHint": "Applies per personal area (counted separately for general and per-server entries). An empty field keeps the default: The system limit of 100 entries applies when no role sets a value. For team knowledge, the founder's role applies. Server knowledge and panel-wide memory always follow the system limit.",
+    "maxMemoryEntriesHint": "Applies per personal area (counted separately for general and per-server entries). For team knowledge, the founder's role applies. Server knowledge and panel-wide memory are not tied to a role and have a fixed system limit of 100 entries.",
     "maxReasoningEffort": "Maximum reasoning depth",
     "worker": {
       "title": "Worker limits",
