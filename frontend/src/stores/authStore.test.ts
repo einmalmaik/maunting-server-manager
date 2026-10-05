@@ -243,6 +243,22 @@ describe('authStore', () => {
       await useAuthStore.getState().checkAuth()
       await vi.waitFor(() => expect(zonenAufrufe()).toHaveLength(2))
     })
+
+    it('fragt nach einer Ablehnung des Servers nicht erneut', async () => {
+      // Der Android-Emulator meldet "+00:00" — keine IANA-Zone, der Server
+      // antwortet 422, und das ändert sich bei der nächsten Prüfung nicht.
+      antworten({ id: 504, username: 'versatz', time_zone: null }, async () => {
+        throw Object.assign(new Error('ungültige Zeitzone'), { status: 422 })
+      })
+
+      await useAuthStore.getState().checkAuth()
+      await vi.waitFor(() => expect(zonenAufrufe()).toHaveLength(1))
+      await useAuthStore.getState().checkAuth()
+      await Promise.resolve()
+
+      expect(zonenAufrufe()).toHaveLength(1)
+      expect(useAuthStore.getState().user?.time_zone).toBeNull()
+    })
   })
 
   describe('logout', () => {

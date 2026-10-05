@@ -113,8 +113,13 @@ async function zeitzoneNachziehen(user: User, get: () => AuthState): Promise<voi
     if (res?.time_zone && aktuell?.id === user.id && !aktuell.time_zone) {
       get().updateUser({ time_zone: res.time_zone })
     }
-  } catch {
-    zoneVersucht.delete(user.id)
+  } catch (fehler) {
+    // Nur ein Netz- oder Serverfehler ist beim nächsten Mal vielleicht weg.
+    // Ein 4xx kommt genauso wieder: die Zone dieses Geräts kennt der Server
+    // nicht (der Android-Emulator meldet "+00:00", gesehen am 05.10.2026),
+    // und jede Anmeldeprüfung schickte dieselbe abgelehnte Anfrage noch mal.
+    const status = (fehler as { status?: number | null } | null)?.status
+    if (!status || status >= 500) zoneVersucht.delete(user.id)
   }
 }
 
