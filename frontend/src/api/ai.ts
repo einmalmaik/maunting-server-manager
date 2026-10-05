@@ -401,6 +401,11 @@ export interface AiToolUse {
   /** Fehlercode des fehlgeschlagenen Werkzeugaufrufs. */
   error_code?: string | null
   /**
+   * An den Rechner des Benutzers übergeben, Ergebnis steht noch aus. Es kommt
+   * mit der nächsten Nachricht — „Programm gestartet“ wäre hier eine Behauptung.
+   */
+  uebergeben?: boolean
+  /**
    * Themengruppe aus `ai_tool_registry` (`memory`, `skill`, `docs`).
    *
    * Steuert allein das Symbol. Vorher riet das Frontend sie an einem

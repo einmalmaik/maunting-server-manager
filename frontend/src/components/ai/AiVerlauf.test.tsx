@@ -121,3 +121,54 @@ describe('gruppiert', () => {
     }
   })
 })
+
+describe('AiAntwortblase: Übergabe an den Rechner', () => {
+  // Gefunden am 05.10.2026 in der Dev-App: während am Rechner die Karte auf
+  // die Bestätigung wartete, stand unter der Bitte „Keine Antwort erhalten.“
+  const nachricht = (sections: AiSection[] | undefined): AiMessage => ({
+    id: 'm1',
+    role: 'assistant',
+    content: '',
+    reasoning: null,
+    question: null,
+    status: 'complete',
+    provider_id: null,
+    model: null,
+    created_at: '2026-10-05T16:29:55Z',
+    sections,
+  })
+
+  it('zeigt die Übergabe offen und behauptet kein Ergebnis', async () => {
+    const { render, screen } = await import('@testing-library/react')
+    const { AiAntwortblase, KEINE_AUFRUFE } = await import('./AiVerlauf')
+    render(
+      <AiAntwortblase
+        message={nachricht([
+          { art: 'tool', werkzeug: { tool_name: 'desktop_launch_app', server_id: null, uebergeben: true } },
+        ])}
+        beantwortet={false}
+        busy={false}
+        laufendeWerkzeuge={KEINE_AUFRUFE}
+        onAnswer={null}
+      />,
+    )
+    expect(screen.getByText('An deinen Rechner übergeben – das Ergebnis folgt')).toBeTruthy()
+    expect(screen.queryByText('Programm gestartet')).toBeNull()
+    expect(screen.queryByText('Keine Antwort erhalten.')).toBeNull()
+  })
+
+  it('ohne jeden Abschnitt bleibt der Hinweis „Keine Antwort“', async () => {
+    const { render, screen } = await import('@testing-library/react')
+    const { AiAntwortblase, KEINE_AUFRUFE } = await import('./AiVerlauf')
+    render(
+      <AiAntwortblase
+        message={nachricht(undefined)}
+        beantwortet={false}
+        busy={false}
+        laufendeWerkzeuge={KEINE_AUFRUFE}
+        onAnswer={null}
+      />,
+    )
+    expect(screen.getByText('Keine Antwort erhalten.')).toBeTruthy()
+  })
+})

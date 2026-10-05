@@ -780,6 +780,7 @@
       },
       "toolFailed": "Fehlgeschlagen",
       "toolFailedToggle": "Fehlerdetails ein- oder ausblenden",
+      "toolHandedOver": "An deinen Rechner übergeben – das Ergebnis folgt",
       "toolFailedGeneric": "Aufruf fehlgeschlagen oder Dienst nicht verfügbar.",
       "toolsUsed_one": "{{count}} Werkzeug verwendet",
       "toolsUsed_other": "{{count}} Werkzeuge verwendet",

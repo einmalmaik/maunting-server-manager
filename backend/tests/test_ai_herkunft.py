@@ -231,6 +231,75 @@ class TestRundenbudget:
                     rundendeckel=8,
                 )
 
+    def test_der_verlauf_zeigt_die_uebergabe(self):
+        """Ohne Abschnitt stand unter der Bitte „Keine Antwort erhalten.“
+
+        Gefunden am 05.10.2026 in der Dev-App: Singra legte den Auftrag an, am
+        Rechner wartete die Karte, und die geparkte Nachricht war leer.
+        """
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from services import ai_run_broker, desktop_job_service
+        from services.ai_stream import interactions
+        from services.ai_stream_service import _desktop_behandeln
+        from services.openai_compatible_adapter import ProviderToolCall, StreamUsage
+
+        class _Sitzung:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def commit(self):
+                pass
+
+            def get(self, *_):
+                return SimpleNamespace(expires_at=datetime.now(timezone.utc))
+
+        usage = StreamUsage()
+        usage.tool_calls = [
+            ProviderToolCall(id="c1", name="desktop_launch_app", arguments={"name": "calc"})
+        ]
+        gemeldet: list[tuple[str, dict]] = []
+        with (
+            patch.object(interactions, "SessionLocal", _Sitzung),
+            patch.object(interactions, "_desktop_argumente", lambda *_a, **_k: {}),
+            patch.object(
+                desktop_job_service, "anlegen", lambda *_a, **_k: SimpleNamespace(id="j1")
+            ),
+            patch.object(
+                ai_run_broker,
+                "veroeffentlichen",
+                lambda _run, ereignis, daten: gemeldet.append((ereignis, daten)),
+            ),
+        ):
+            frist, _ = _desktop_behandeln(
+                current_usage=usage,
+                run_id="r-1",
+                user_id=1,
+                herkunft="desktop",
+                provider_messages=[],
+                zustand={"rounds": 0},
+                rundentext="",
+                rundendeckel=8,
+            )
+
+        assert frist is not None
+        assert gemeldet == [
+            (
+                "tool",
+                {
+                    "tool_name": "desktop_launch_app",
+                    "server_id": None,
+                    "gruppe": "desktop",
+                    "uebergeben": True,
+                },
+            )
+        ]
+
 
 class TestRouterSchnitt:
     """Der semantische Router schneidet den Katalog auf wenige Werkzeuge.

@@ -19,6 +19,7 @@ from services.ai_proposal_service import GuardianKontext
 from services.ai_redaction import redact_sensitive_text
 from services.ai_stream.context import familie_aus_zustand
 from services.ai_stream.read_tools import (
+    _anzeigeeintrag,
     _aufrufnachricht,
     _runde_zaehlen,
     _rundenfehler_nachrichten,
@@ -399,6 +400,16 @@ def _desktop_behandeln(
             (db.get(DesktopJob, job_id).expires_at for job_id in job_ids),
             default=None,
         )
+
+    # Der Verlauf zeigt, was an den Rechner ging. Bis zum 05.10.2026 stand hier
+    # nichts: die geparkte Nachricht hatte weder Text noch Abschnitt, und unter
+    # der Bitte stand „Keine Antwort erhalten.“ — während am Rechner die Karte
+    # auf die Bestätigung wartete. `uebergeben` statt eines Ergebnisses: ob es
+    # geklappt hat, weiß erst die nächste Nachricht.
+    for call in auftraege:
+        anzeige = _anzeigeeintrag(call, None, None)
+        anzeige["uebergeben"] = True
+        ai_run_broker.veroeffentlichen(run_id, "tool", anzeige)
 
     # Die Antworten kommen **vor** dem Parken in den Verlauf: nach dem Wecken
     # setzt das Segment auf genau diesen `provider_messages` auf, und eine

@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react'
-import { AlertTriangle, BookOpen, Bot, BrainCircuit, Calendar, CalendarClock, ChevronDown, ChevronRight, Globe2, Loader2, Mail, Sparkles, User, Wrench } from 'lucide-react'
+import { AlertTriangle, BookOpen, Bot, BrainCircuit, Calendar, CalendarClock, ChevronDown, ChevronRight, Globe2, Loader2, Mail, Monitor, Sparkles, User, Wrench } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Kurzinfo } from '@/Singra/UI'
 
@@ -309,8 +309,14 @@ function AiWerkzeugzeile({ tool }: { tool: AiToolUse }) {
                     ? <Calendar className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
                     : gruppe === 'geo'
                       ? <Globe2 className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
-                      : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
-        <span>{skillLabel ?? t(`ai.tools.${tool.tool_name}`, { defaultValue: tool.tool_name })}</span>
+                      : tool.uebergeben
+                        ? <Monitor className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
+                        : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
+        <span>
+          {skillLabel ?? (tool.uebergeben
+            ? t('ai.chat.toolHandedOver')
+            : t(`ai.tools.${tool.tool_name}`, { defaultValue: tool.tool_name }))}
+        </span>
         {/* Ausklappbare Fehlerdetails beim Klick auf den Fehlschlag */}
         {tool.failed && (
           <Kurzinfo text={t('ai.chat.toolFailedToggle')}>
@@ -365,11 +371,14 @@ function AiWerkzeuggruppe(
   },
 ) {
   const { t } = useTranslation()
-  const [offen, setOffen] = useState(offenVoreingestellt)
+  // Eine Übergabe an den Rechner bleibt offen: sie ist die ganze Auskunft
+  // dieser Nachricht, zugeklappt stünde nur „1 Werkzeug“ da.
+  const vorgabe = offenVoreingestellt || werkzeuge.some((werkzeug) => werkzeug.uebergeben)
+  const [offen, setOffen] = useState(vorgabe)
   // Waechst die Gruppe waehrend des Schreibens weiter, soll sie offen bleiben —
   // und beim Uebergang auf "fertig" zugehen, ohne eine Entscheidung des
   // Benutzers zu ueberschreiben, die es vorher gar nicht geben konnte.
-  useEffect(() => { setOffen(offenVoreingestellt) }, [offenVoreingestellt])
+  useEffect(() => { setOffen(vorgabe) }, [vorgabe])
 
   // Die Zeile "es geht weiter" stand früher hier drin, einmal je Rückgabe.
   // Sie gehört nicht der Gruppe: sie sagt etwas über die **Antwort**, nicht

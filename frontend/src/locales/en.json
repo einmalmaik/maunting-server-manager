@@ -780,6 +780,7 @@
       },
       "toolFailed": "Failed",
       "toolFailedToggle": "Show or hide error details",
+      "toolHandedOver": "Handed to your computer – result follows",
       "toolFailedGeneric": "Execution failed or service unavailable.",
       "toolsUsed_one": "{{count}} tool used",
       "toolsUsed_other": "{{count}} tools used",
