@@ -230,10 +230,12 @@ pub fn zuruecksetzen(app: &AppHandle) -> Result<(), String> {
 
 /// Legt den Aktiv-Schalter um und vergisst das trainierte Wort.
 fn schalter_aus(app: &AppHandle) -> Result<(), String> {
-    let mut konfig = crate::konfig::laden(app)?;
-    konfig.wakeword_aktiv = false;
-    konfig.wakeword_wort = None;
-    crate::konfig::speichern(app, &konfig)
+    crate::konfig::aendern(app, |k| {
+        k.wakeword_aktiv = false;
+        k.wakeword_wort = None;
+        Ok(())
+    })
+    .map(|_| ())
 }
 
 /// Stoppt das Lauschen und löscht Aufnahmen, Modell und Verfahrensmarke.

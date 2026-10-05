@@ -230,3 +230,83 @@ class TestRundenbudget:
                     rundentext="",
                     rundendeckel=8,
                 )
+
+
+class TestRouterSchnitt:
+    """Der semantische Router schneidet den Katalog auf wenige Werkzeuge.
+
+    Aus der App durfte er dabei bis zum 05.10.2026 auch die Desktop-Werkzeuge
+    wegschneiden: "klick auf Start" traf selten die Beschreibung von
+    `desktop_steuern`, und Singra sagte bei eingeschaltetem Computer-Use, sie
+    komme nicht an den Rechner.
+    """
+
+    def _katalog(self, herkunft: str, rolle: str = "voll") -> set[str]:
+        import asyncio
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from services import ai_stream_service
+        from services.semantic_tool_router_adapter import SemanticToolRouterAdapter
+
+        vorbereitung = ai_stream_service._Vorbereitung(
+            run_id="r1",
+            user_id=1,
+            conversation_id="c1",
+            provider=SimpleNamespace(
+                provider_kind="openrouter", default_model="schnell", worker_model="gruendlich"
+            ),
+            api_key=None,
+            message_id="m1",
+            usage_event_id=1,
+            request_id="req1",
+            reasoning=False,
+            reasoning_effort=None,
+            token_price_micro_usd_per_million=None,
+            zustand={},
+            angebotene_werkzeuge=ALLE,
+        )
+        zustand = {"provider_messages": [{"role": "user", "content": "Klick bitte auf Start"}]}
+
+        async def _kein_modell(*args, **kwargs):
+            return None
+
+        # Der Router waehlt bewusst daneben — wie ohne passende Beschreibung.
+        with (
+            patch.object(ai_stream_service.ai_model_catalog, "finde", _kein_modell),
+            patch.object(SemanticToolRouterAdapter, "warm", lambda self, erlaubt: None),
+            patch.object(
+                SemanticToolRouterAdapter,
+                "select",
+                lambda self, query, erlaubt, top_k=5: ["calendar_read"],
+            ),
+        ):
+            tools, *_ = asyncio.run(ai_stream_service._werkzeuge_und_grenze(
+                client=None,
+                vorbereitung=vorbereitung,
+                guardian=None,
+                aufgabe=None,
+                rolle=rolle,
+                herkunft=herkunft,
+                zustand=zustand,
+            ))
+        return {str(t["function"]["name"]) for t in tools}
+
+    def test_aus_der_app_bleiben_sehen_zeigen_starten(self):
+        from services.ai_tool_registry import GEHIRN_DESKTOP
+
+        for rolle in ("voll", "gehirn"):
+            namen = self._katalog("desktop", rolle)
+            assert GEHIRN_DESKTOP <= namen, rolle
+            # Der Router hat trotzdem geschnitten — nicht einfach alles offen.
+            assert len(namen) < len(ALLE), rolle
+
+    def test_aus_dem_panel_kommt_nichts_dazu(self):
+        assert not (self._katalog("panel") & DESKTOP_TOOLS)
+
+    def test_pflichtwerkzeuge_oeffnen_kein_fehlendes_recht(self):
+        from services.tool_selection_port import pflichtwerkzeuge
+
+        assert pflichtwerkzeuge(frozenset({"list_my_servers"}), "desktop") == frozenset()
+        assert pflichtwerkzeuge(ALLE, "panel") == frozenset()
+        assert pflichtwerkzeuge(frozenset({"desktop_system"}), "desktop") == {"desktop_system"}

@@ -14,7 +14,7 @@ const wakewordStandMock = vi.fn()
 
 vi.mock('./tauri', () => ({
   konfigLaden: vi.fn().mockResolvedValue({ wakeword_aktiv: false, wakeword_schwelle: 0.45 }),
-  konfigSpeichern: vi.fn().mockResolvedValue(undefined),
+  konfigAendern: vi.fn().mockResolvedValue({ wakeword_aktiv: false, wakeword_schwelle: 0.45 }),
   wakewordAufnehmen: vi.fn().mockResolvedValue(undefined),
   wakewordLauschen: vi.fn().mockResolvedValue(undefined),
   wakewordStand: () => wakewordStandMock(),

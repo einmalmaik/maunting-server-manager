@@ -4,7 +4,8 @@
  *
  * Jeder Schritt ist eine kleine lokale Komponente mit einem einzigen
  * Auftrag; der Wizard hält nur den Schrittzeiger und reicht Ergebnisse
- * weiter. Persistiert wird sofort nach jedem Schritt (`konfig_speichern`) —
+ * weiter. Persistiert wird sofort nach jedem Schritt (`konfig_aendern`, nur
+ * die Felder des Schritts) —
  * ein Abbruch mittendrin verliert nichts außer dem Rest des Weges.
  *
  * Eine Eigenheit hat der erste Schritt: nach dem Speichern der Adresse lädt
@@ -28,7 +29,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { QrScannerModal } from './QrScannerModal'
 import { WakewordEinrichtung } from './WakewordEinrichtung'
 import { erreichbar, geraetMelden, koppeln } from './auth'
-import { konfigSpeichern, type AppKonfig } from './tauri'
+import { konfigAendern, type AppKonfig } from './tauri'
 
 export type Schritt = 'backend' | 'kopplung' | 'personalisierung' | 'sandbox' | 'wakeword'
 
@@ -63,9 +64,7 @@ export function Wizard({
     setStand(k)
 
     if (nurDieserSchritt) {
-      const fertig = { ...k, eingerichtet: true }
-      await konfigSpeichern(fertig)
-      onFertig(fertig)
+      onFertig(await konfigAendern({ eingerichtet: true }))
       return
     }
     const index = REIHENFOLGE.indexOf(schritt)
@@ -89,9 +88,7 @@ export function Wizard({
       setSchritt(naechster)
       return
     }
-    const fertig = { ...k, eingerichtet: true }
-    await konfigSpeichern(fertig)
-    onFertig(fertig)
+    onFertig(await konfigAendern({ eingerichtet: true }))
   }
 
   useEffect(() => {
@@ -207,7 +204,7 @@ function SchrittBackend({ stand }: { stand: AppKonfig }) {
       } catch (e) {
         throw e instanceof SyntaxError ? new Error(t('mss.wizard.antwortIstWebseite')) : e
       }
-      await konfigSpeichern({ ...stand, backend_url: bereinigt })
+      await konfigAendern({ backend_url: bereinigt })
       // Neustart statt Weiterreichen: siehe Kopfkommentar.
       window.location.reload()
     } catch (e) {
@@ -594,8 +591,7 @@ function SchrittSandbox({
   async function speichern() {
     setFehler(null)
     try {
-      const neu = { ...stand, sandbox_pfad: pfad || null, eingerichtet: true }
-      await konfigSpeichern(neu)
+      const neu = await konfigAendern({ sandbox_pfad: pfad || null, eingerichtet: true })
       await onWeiter(neu)
     } catch (e) {
       setFehler(e instanceof Error ? e.message : String(e))

@@ -6731,6 +6731,7 @@
       },
       "autostart": "Start with Windows",
       "autostartFehler": "Autostart could not be changed.",
+      "speichernFehler": "The setting could not be saved.",
       "diagnose": "Diagnostics",
       "status": {
         "bereit": "Ready",

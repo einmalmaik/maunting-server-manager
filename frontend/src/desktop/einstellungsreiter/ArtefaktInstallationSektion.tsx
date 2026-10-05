@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Badge, Button, Slider, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
-import { konfigLaden, konfigSpeichern, sandboxVerfuegbar, type AppKonfig } from '../tauri'
+import { konfigAendern, konfigLaden, sandboxVerfuegbar, type AppKonfig } from '../tauri'
 
 export function ArtefaktInstallationSektion({ onKonfigAenderung }: { onKonfigAenderung?: () => void }) {
   const { t } = useTranslation()
@@ -18,57 +18,60 @@ export function ArtefaktInstallationSektion({ onKonfigAenderung }: { onKonfigAen
     void sandboxVerfuegbar().then(setSandboxOk).catch(() => setSandboxOk(false))
   }, [])
 
+  // Nur die eigenen Felder, frisch in Rust gemischt (`konfigAendern`) — nie
+  // eine alte Kopie der ganzen Konfiguration, die fremde Schalter zurücksetzt.
+  // Schlägt das Speichern fehl, gilt wieder der gespeicherte Stand.
+  async function aendern(felder: Partial<AppKonfig>) {
+    const vorher = konfig
+    if (!vorher) return
+    setKonfig({ ...vorher, ...felder })
+    try {
+      setKonfig(await konfigAendern(felder))
+      onKonfigAenderung?.()
+    } catch {
+      setKonfig(vorher)
+      toast.error(t('mss.einstellungen.speichernFehler'))
+    }
+  }
+
   async function toggle(an: boolean) {
     if (!konfig) return
     if (an) {
       setDialogOffen(true)
     } else {
-      const neu = { ...konfig, artifact_install_aktiv: false }
-      setKonfig(neu)
-      await konfigSpeichern(neu).catch(() => {})
-      onKonfigAenderung?.()
+      await aendern({ artifact_install_aktiv: false })
     }
   }
 
   async function bestaetigenAktivieren() {
     if (!konfig) return
-    const neu = { ...konfig, artifact_install_aktiv: true }
-    setKonfig(neu)
     setDialogOffen(false)
-    await konfigSpeichern(neu).catch(() => {})
-    onKonfigAenderung?.()
+    await aendern({ artifact_install_aktiv: true })
   }
 
   async function downloadLimitAendern(gib: number) {
     if (!konfig) return
     const bytes = Math.max(1, Math.min(100, gib)) * 1024 * 1024 * 1024
-    const neu = { ...konfig, max_download_bytes: bytes }
-    setKonfig(neu)
-    await konfigSpeichern(neu).catch(() => {})
-    onKonfigAenderung?.()
+    await aendern({ max_download_bytes: bytes })
   }
 
   async function suchwurzelHinzufuegen() {
     if (!konfig) return
+    let gewaehlt: string | string[] | null
     try {
-      const gewaehlt = await ordnerDialog({ directory: true, multiple: false })
-      if (typeof gewaehlt === 'string' && gewaehlt && !konfig.search_roots.includes(gewaehlt)) {
-        const neu = { ...konfig, search_roots: [...konfig.search_roots, gewaehlt] }
-        setKonfig(neu)
-        await konfigSpeichern(neu).catch(() => {})
-        onKonfigAenderung?.()
-      }
+      gewaehlt = await ordnerDialog({ directory: true, multiple: false })
     } catch {
       toast.error(t('mss.einstellungen.artefakte.ordnerFehler'))
+      return
+    }
+    if (typeof gewaehlt === 'string' && gewaehlt && !konfig.search_roots.includes(gewaehlt)) {
+      await aendern({ search_roots: [...konfig.search_roots, gewaehlt] })
     }
   }
 
   async function suchwurzelEntfernen(pfad: string) {
     if (!konfig) return
-    const neu = { ...konfig, search_roots: konfig.search_roots.filter((w) => w !== pfad) }
-    setKonfig(neu)
-    await konfigSpeichern(neu).catch(() => {})
-    onKonfigAenderung?.()
+    await aendern({ search_roots: konfig.search_roots.filter((w) => w !== pfad) })
   }
 
   const limitGiB = Math.round((konfig?.max_download_bytes ?? 10 * 1024 * 1024 * 1024) / (1024 * 1024 * 1024))

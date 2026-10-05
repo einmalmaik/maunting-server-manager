@@ -289,7 +289,9 @@ pub fn download(
     url_str: &str,
     sha256_herausgeber: Option<&str>,
 ) -> Result<Value, String> {
-    let konfig = konfig::laden(app).unwrap_or_default();
+    // Ein Lesefehler ist ein benannter Fehler, keine Standardkonfiguration
+    // (siehe `auftrag::ausfuehren`).
+    let konfig = konfig::laden(app).map_err(|e| format!("Desktop-Einstellungen nicht lesbar: {e}"))?;
     if !konfig.artifact_install_aktiv {
         return Err(
             "Artefakt-Installationen sind in den Desktop-Einstellungen deaktiviert. Der Benutzer kann die Funktion dort aktivieren."
@@ -503,7 +505,7 @@ pub fn pruefen_und_sandbox(app: &AppHandle, artifact_id: &str) -> Result<Value, 
 // ── Software & Game Locator ─────────────────────────────────────────────────
 
 pub fn locator_ausfuehren(app: &AppHandle) -> Result<Value, String> {
-    let konfig = konfig::laden(app).unwrap_or_default();
+    let konfig = konfig::laden(app).map_err(|e| format!("Desktop-Einstellungen nicht lesbar: {e}"))?;
     let mut registry = HashMap::new();
     let mut ziele = Vec::new();
 

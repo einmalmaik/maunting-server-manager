@@ -270,7 +270,65 @@ fn backend_url_verboten(url: &str) -> bool {
         .any(|lokal| host == *lokal || host.starts_with(&format!("{lokal}:")))
 }
 
+/// Ein Schreiber zur Zeit — für jedes Laden-Ändern-Speichern.
+///
+/// Bis zum 05.10.2026 speicherte jeder Einstellungsbereich das **ganze**
+/// Objekt aus einer Kopie, die er beim Öffnen geladen hatte. Zwei Bereiche auf
+/// demselben Reiter (Computer-Use und Artefakt-Installationen) schrieben sich
+/// damit gegenseitig alte Werte zurück: wer nach dem Einschalten von
+/// Computer-Use am Download-Limit zog, schaltete es stillschweigend wieder aus,
+/// während die Anzeige „Aktiv" behielt. `aendern` lädt deshalb unter diesem
+/// Schloss frisch und mischt nur die geänderten Felder ein.
+static SCHREIBSCHLOSS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn speichern(app: &AppHandle, konfig: &AppKonfig) -> Result<(), String> {
+    let _schloss = SCHREIBSCHLOSS
+        .lock()
+        .unwrap_or_else(|vergiftet| vergiftet.into_inner());
+    speichern_unter_schloss(app, konfig)
+}
+
+/// Lädt frisch, lässt `aenderung` daran arbeiten und speichert — als eine
+/// Einheit unter `SCHREIBSCHLOSS`. Gibt den gespeicherten Stand zurück.
+pub fn aendern(
+    app: &AppHandle,
+    aenderung: impl FnOnce(&mut AppKonfig) -> Result<(), String>,
+) -> Result<AppKonfig, String> {
+    let _schloss = SCHREIBSCHLOSS
+        .lock()
+        .unwrap_or_else(|vergiftet| vergiftet.into_inner());
+    let mut konfig = laden(app)?;
+    aenderung(&mut konfig)?;
+    speichern_unter_schloss(app, &konfig)?;
+    Ok(konfig)
+}
+
+/// Mischt die Felder von `patch` (ein JSON-Objekt) in `konfig` ein. Ein Feld,
+/// das `AppKonfig` nicht kennt, ist ein Fehler — ein Tippfehler im Frontend
+/// soll auffallen und nicht still verpuffen.
+pub fn felder_einmischen(konfig: &mut AppKonfig, patch: serde_json::Value) -> Result<(), String> {
+    let serde_json::Value::Object(felder) = patch else {
+        return Err("Die Änderung muss ein Objekt sein.".into());
+    };
+    let mut ganz = serde_json::to_value(&*konfig).map_err(|e| e.to_string())?;
+    let ziel = ganz
+        .as_object_mut()
+        .ok_or("Die Konfiguration ist kein Objekt.")?;
+    for (name, wert) in felder {
+        if !ziel.contains_key(&name) {
+            return Err(format!("Unbekannte Einstellung: '{name}'"));
+        }
+        ziel.insert(name, wert);
+    }
+    *konfig = serde_json::from_value(ganz).map_err(|e| format!("Ungültige Einstellung: {e}"))?;
+    Ok(())
+}
+
+/// Schreibt atomar: erst eine Nachbardatei, dann `rename` darüber. Ein
+/// gleichzeitiger Leser (der Auftragslauf liest bei **jedem** Auftrag) sieht
+/// damit immer eine ganze Datei — vorher konnte er eine halb geschriebene
+/// erwischen, und `unwrap_or_default` machte daraus „Computer-Use aus".
+fn speichern_unter_schloss(app: &AppHandle, konfig: &AppKonfig) -> Result<(), String> {
     if let Some(sandbox) = konfig.sandbox_pfad.as_deref() {
         if sandbox_pfad_verboten(sandbox) {
             return Err("Die Sandbox muss ein eigener Ordner in den Dateien des \
@@ -289,14 +347,24 @@ pub fn speichern(app: &AppHandle, konfig: &AppKonfig) -> Result<(), String> {
         }
     }
     let text = serde_json::to_string_pretty(konfig).map_err(|e| e.to_string())?;
-    std::fs::write(pfad(app)?, text).map_err(|e| e.to_string())
+    atomar_schreiben(&pfad(app)?, &text)
+}
+
+fn atomar_schreiben(ziel: &Path, text: &str) -> Result<(), String> {
+    let zwischen = ziel.with_extension("json.neu");
+    std::fs::write(&zwischen, text).map_err(|e| e.to_string())?;
+    // Auf Windows ersetzt `rename` eine vorhandene Datei (MOVEFILE_REPLACE_EXISTING).
+    std::fs::rename(&zwischen, ziel).map_err(|e| {
+        let _ = std::fs::remove_file(&zwischen);
+        e.to_string()
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        aus_text, backend_url_verboten, sandbox_pfad_verboten, AppKonfig, HOTKEY_FENSTER_VORGABE,
-        HOTKEY_SPRACHE_VORGABE,
+        atomar_schreiben, aus_text, backend_url_verboten, felder_einmischen,
+        sandbox_pfad_verboten, AppKonfig, HOTKEY_FENSTER_VORGABE, HOTKEY_SPRACHE_VORGABE,
     };
 
     #[test]
@@ -511,5 +579,39 @@ mod tests {
         let alt = r#"{"eingerichtet": true}"#;
         let geladen = aus_text(alt).unwrap();
         assert!(!geladen.computer_use_aktiv);
+    }
+
+    /// Der Anlass vom 05.10.2026: ein Bereich, der nur sein Feld ändert, darf
+    /// das Feld eines anderen Bereichs nicht zurückdrehen.
+    #[test]
+    fn einmischen_aendert_nur_die_genannten_felder() {
+        let mut konfig = AppKonfig {
+            computer_use_aktiv: true,
+            ..AppKonfig::default()
+        };
+        felder_einmischen(&mut konfig, serde_json::json!({"artifact_install_aktiv": true})).unwrap();
+        assert!(konfig.computer_use_aktiv, "Computer-Use darf nicht zurückfallen");
+        assert!(konfig.artifact_install_aktiv);
+    }
+
+    #[test]
+    fn einmischen_weist_unbekanntes_und_falsche_typen_ab() {
+        let mut konfig = AppKonfig::default();
+        assert!(felder_einmischen(&mut konfig, serde_json::json!({"computer_use": true})).is_err());
+        assert!(felder_einmischen(&mut konfig, serde_json::json!({"computer_use_aktiv": "ja"})).is_err());
+        assert!(felder_einmischen(&mut konfig, serde_json::json!([1, 2])).is_err());
+        assert!(!konfig.computer_use_aktiv, "ein Fehlschlag ändert nichts");
+    }
+
+    #[test]
+    fn atomares_schreiben_ersetzt_die_datei_ohne_reste() {
+        let ordner = std::env::temp_dir().join(format!("mss-konfig-{}", std::process::id()));
+        std::fs::create_dir_all(&ordner).unwrap();
+        let ziel = ordner.join("konfig.json");
+        atomar_schreiben(&ziel, "{\"a\": 1}").unwrap();
+        atomar_schreiben(&ziel, "{\"a\": 2}").unwrap();
+        assert_eq!(std::fs::read_to_string(&ziel).unwrap(), "{\"a\": 2}");
+        assert!(!ordner.join("konfig.json.neu").exists());
+        let _ = std::fs::remove_dir_all(&ordner);
     }
 }

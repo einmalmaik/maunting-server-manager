@@ -6731,6 +6731,7 @@
       },
       "autostart": "Mit Windows starten",
       "autostartFehler": "Autostart ließ sich nicht umstellen.",
+      "speichernFehler": "Die Einstellung ließ sich nicht speichern.",
       "diagnose": "Diagnose",
       "status": {
         "bereit": "Bereit",

@@ -41,9 +41,10 @@ from services.dis_client import DisClient
 logger = logging.getLogger(__name__)
 
 # Drei Minuten. Lang genug fuer eine Dateiaktion samt Nachfrage im Overlay,
-# kurz genug, dass niemand vor einem stehengebliebenen Chat sitzt. Die
-# Uebernahme-Bestaetigung hat ihre eigene, laengere Frist (der Mensch soll
-# lesen duerfen) — siehe FRIST_BESTAETIGUNG_SEKUNDEN.
+# kurz genug, dass niemand vor einem stehengebliebenen Chat sitzt. Jeder
+# Auftrag mit Bestaetigungskarte hat eine eigene, laengere Frist (der Mensch
+# soll lesen duerfen) — siehe FRIST_BESTAETIGUNG_SEKUNDEN und
+# `_wartet_auf_menschen`.
 FRIST_SEKUNDEN = 180
 FRIST_BESTAETIGUNG_SEKUNDEN = 600
 ABHOLFRIST_SEKUNDEN = 90
@@ -57,6 +58,19 @@ ABHOLFRIST_SEKUNDEN = 90
 # jedem Fehlerbild Zeit, sich zu zeigen.
 AUFBEWAHRUNG_STUNDEN = 24
 
+# Die Werkzeuge, die ohne autonomen Modus eine Bestaetigungskarte zeigen
+# (`auftrag::ausfuehren`, Schritt 4; `desktop_steuern` mit `freigabe` ueber
+# die Uebernahmekarte).
+KARTENPFLICHTIG = frozenset(
+    {
+        "desktop_steuern",
+        "desktop_system",
+        "desktop_launch_app",
+        "desktop_dateien",
+        "desktop_artifact",
+    }
+)
+
 
 def _wartet_auf_menschen(tool_name: str, arguments: dict) -> bool:
     """Kann dieser Auftrag an einer menschlichen Entscheidung haengenbleiben?
@@ -64,12 +78,12 @@ def _wartet_auf_menschen(tool_name: str, arguments: dict) -> bool:
     Wenn ja, bekommt er die lange Frist: 180 Sekunden reichen nicht, um eine
     Liste von zwanzig Pfaden zu lesen und zu entscheiden.
 
-    Frueher genuegte dafuer der Werkzeugname (`desktop_takeover_control`).
-    Seit die Bitte um die Freigabe eine **Aktion** von `desktop_steuern` ist
-    (23.08.2026, Katalogbudget), muessen die Argumente mitgelesen werden —
-    sonst bekaeme auch jeder einzelne Klick zehn Minuten Frist, und ein
-    Rechner, der zwischendurch ausgeht, liesse den Lauf entsprechend lange
-    stehen.
+    Ohne autonomen Modus zeigt **jedes** kartenpflichtige Werkzeug eine Karte
+    (`KARTENPFLICHTIG`), nicht nur die Bitte um die Freigabe. Bis zum
+    05.10.2026 bekam ein einzelner Klick trotzdem nur die kurze Frist: nach
+    90 Sekunden fiel der Auftrag als "nicht abgeholt" zurueck, nach 180
+    verfiel er — waehrend der Mensch noch las. Computer-Use ohne Autonomie
+    ging damit praktisch nie.
 
     `desktop_aufraeumen` zeigt seine Karte nur bei ausgeschaltetem autonomem
     Modus, bekommt die lange Frist aber immer: welcher Fall eintritt, hat das
@@ -79,12 +93,12 @@ def _wartet_auf_menschen(tool_name: str, arguments: dict) -> bool:
     """
     if tool_name == "desktop_aufraeumen":
         return True
-    if tool_name != "desktop_steuern" or arguments.get("aktion") != "freigabe":
+    if tool_name not in KARTENPFLICHTIG:
         return False
     # Im autonomen Modus antwortet der Rechner sofort und zeigt gar keine
-    # Karte (`auftrag::steuern`). Hier wartet dann niemand, und die lange
+    # Karte (`auftrag::ausfuehren`). Hier wartet dann niemand, und die lange
     # Frist waere nur eine lange Wartezeit fuer den Fall, dass der Rechner
-    # aus ist.
+    # aus ist. `autonom` setzt das Panel (`_desktop_argumente`), nie das Modell.
     return not arguments.get("autonom")
 
 

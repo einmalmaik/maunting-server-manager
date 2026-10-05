@@ -51,6 +51,23 @@ mod virenscan;
 mod wakeword;
 mod zonen;
 
+/// Die Startargumente der WebView2-Umgebung, fuer **jedes** Fenster gleich.
+///
+/// Alle Fenster teilen eine Umgebung (ein Datenordner); WebView2 lehnt ein
+/// Fenster mit abweichenden Argumenten ab. Deshalb stehen sie hier und in
+/// `tauri.conf.json` (`main`, `overlay`) wortgleich — ein Test prueft das.
+///
+/// Der erste Teil sind die Vorgaben von wry, die mit eigenen Argumenten
+/// sonst entfallen. Der Rest haelt die Auftragsschleife wach: versteckt im
+/// Infobereich (und waehrend jeder Sprachsitzung) drosselte WebView2 ihre
+/// Timer, und ein Auftrag an den Rechner wartete Minuten auf seine Abholung.
+pub const BROWSER_ARGUMENTE: &str = concat!(
+    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection",
+    " --disable-background-timer-throttling",
+    " --disable-renderer-backgrounding",
+    " --disable-backgrounding-occluded-windows",
+);
+
 use tauri::{Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 #[cfg(not(target_os = "android"))]
@@ -119,6 +136,18 @@ fn konfig_laden(app: tauri::AppHandle) -> Result<konfig::AppKonfig, String> {
 #[tauri::command(async)]
 fn konfig_speichern(app: tauri::AppHandle, konfig: konfig::AppKonfig) -> Result<(), String> {
     konfig::speichern(&app, &konfig)
+}
+
+/// Ändert nur die übergebenen Felder — frisch geladen, unter dem Schreibschloss.
+/// Der Weg für jeden Einstellungsbereich, der ein einzelnes Feld umlegt
+/// (`konfig::aendern`); `konfig_speichern` bleibt für den Assistenten, der
+/// das ganze Objekt anlegt.
+#[tauri::command(async)]
+fn konfig_aendern(
+    app: tauri::AppHandle,
+    felder: serde_json::Value,
+) -> Result<konfig::AppKonfig, String> {
+    konfig::aendern(&app, |k| konfig::felder_einmischen(k, felder))
 }
 
 /// Refresh-Token in den OS-Tresor bzw. Sandbox-Speicher. Das Access-Token wird
@@ -310,9 +339,11 @@ fn wakeword_aufnehmen(app: tauri::AppHandle, nummer: u8) -> Result<String, Strin
 #[tauri::command(async)]
 fn wakeword_trainieren(app: tauri::AppHandle, wort: String) -> Result<(), String> {
     wakeword::trainieren(&app, &wort)?;
-    let mut konfig = konfig::laden(&app)?;
-    konfig.wakeword_wort = Some(wort.trim().to_string());
-    konfig::speichern(&app, &konfig)
+    konfig::aendern(&app, |k| {
+        k.wakeword_wort = Some(wort.trim().to_string());
+        Ok(())
+    })
+    .map(|_| ())
 }
 
 /// Der **eine** Schalter fürs Wake-Word: startet/stoppt den Lausch-Thread und
@@ -327,9 +358,11 @@ fn wakeword_lauschen(app: tauri::AppHandle, an: bool) -> Result<(), String> {
     } else {
         wakeword::lauschen_stoppen();
     }
-    let mut konfig = konfig::laden(&app)?;
-    konfig.wakeword_aktiv = an;
-    konfig::speichern(&app, &konfig)
+    konfig::aendern(&app, |k| {
+        k.wakeword_aktiv = an;
+        Ok(())
+    })
+    .map(|_| ())
 }
 
 #[tauri::command(async)]
@@ -595,7 +628,7 @@ fn hotkeys_setzen(
     fenster: Option<String>,
     sprache: Option<String>,
 ) -> Result<(), String> {
-    let mut konfig = konfig::laden(&app)?;
+    let konfig = konfig::laden(&app)?;
     #[cfg(not(target_os = "android"))]
     {
         if let Err(fehler) = hotkeys_registrieren(&app, fenster.as_deref(), sprache.as_deref()) {
@@ -607,9 +640,12 @@ fn hotkeys_setzen(
             return Err(fehler);
         }
     }
-    konfig.hotkey_fenster = fenster;
-    konfig.hotkey_sprache = sprache;
-    konfig::speichern(&app, &konfig)
+    konfig::aendern(&app, |k| {
+        k.hotkey_fenster = fenster;
+        k.hotkey_sprache = sprache;
+        Ok(())
+    })
+    .map(|_| ())
 }
 
 /// Beendet die App wirklich — der eine Ausgang des Schließen-Dialogs.
@@ -853,6 +889,7 @@ pub fn run() {
             ducking,
             konfig_laden,
             konfig_speichern,
+            konfig_aendern,
             refresh_token_speichern,
             refresh_token_laden,
             refresh_token_loeschen,
@@ -980,6 +1017,22 @@ pub fn run() {
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::hotkey_pruefen;
+
+    #[test]
+    fn jedes_fenster_startet_mit_denselben_browserargumenten() {
+        let konf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let fenster = konf["app"]["windows"].as_array().unwrap();
+        assert!(!fenster.is_empty());
+        for f in fenster {
+            assert_eq!(
+                f["additionalBrowserArgs"].as_str(),
+                Some(super::BROWSER_ARGUMENTE),
+                "Fenster {}",
+                f["label"]
+            );
+        }
+    }
 
     #[test]
     fn gaengige_kombinationen_gehen_durch() {

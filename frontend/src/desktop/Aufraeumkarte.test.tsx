@@ -25,6 +25,8 @@ const bestaetigenMock = vi.fn()
 const ablehnenMock = vi.fn()
 const ergebnisMeldenMock = vi.fn()
 let ereignisRuf: ((e: { payload: unknown }) => void) | null = null
+let erledigtRuf: ((e: { payload: unknown }) => void) | null = null
+const emitMock = vi.fn()
 
 vi.mock('react-i18next', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-i18next')>()
@@ -37,9 +39,17 @@ vi.mock('react-i18next', async (importOriginal) => {
 })
 
 vi.mock('@tauri-apps/api/event', () => ({
-  listen: (_name: string, rueckruf: (e: { payload: unknown }) => void) => {
-    ereignisRuf = rueckruf
+  // `mss:karte-erledigt` hat seinen eigenen Rückruf; `emit` stellt wie der
+  // Tauri-Bus an jedes Fenster zu, auch an das sendende.
+  listen: (name: string, rueckruf: (e: { payload: unknown }) => void) => {
+    if (name === 'mss:karte-erledigt') erledigtRuf = rueckruf
+    else ereignisRuf = rueckruf
     return Promise.resolve(() => {})
+  },
+  emit: (name: string, payload: unknown) => {
+    emitMock(name, payload)
+    if (name === 'mss:karte-erledigt') erledigtRuf?.({ payload })
+    return Promise.resolve()
   },
 }))
 
@@ -72,6 +82,7 @@ async function zeigen(plan: unknown = PLAN) {
 describe('Aufraeumkarte', () => {
   beforeEach(() => {
     ereignisRuf = null
+    erledigtRuf = null
     bestaetigenMock.mockReset().mockResolvedValue({ geloescht: 2 })
     ablehnenMock.mockReset().mockResolvedValue(undefined)
     ergebnisMeldenMock.mockReset().mockResolvedValue(undefined)

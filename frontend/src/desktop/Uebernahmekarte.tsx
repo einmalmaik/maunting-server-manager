@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/Singra/UI'
 import { formatDauer } from '@/lib/format'
 import { ergebnisMelden } from './desktopJobs'
+import { karteErledigtMelden, useKarteErledigt } from './karteErledigt'
 import { uebernahmeFreigeben, uebernahmeRest, uebernahmeWiderrufen } from './tauri'
 
 interface Anfrage {
@@ -74,6 +75,11 @@ export function Uebernahmekarte({ offenerAuftragId }: { offenerAuftragId: string
     }
   }, [])
 
+  // In einem anderen Fenster beantwortet (Overlay oder Hauptfenster).
+  useKarteErledigt((auftragId) => {
+    setAnfrage((offen) => (offen?.auftragId === auftragId ? null : offen))
+  })
+
   // Eine laufende Übernahme muss man sehen. Eine, die man nicht sieht, wäre
   // die schlechteste Fassung dieser Funktion.
   useEffect(() => {
@@ -86,6 +92,10 @@ export function Uebernahmekarte({ offenerAuftragId }: { offenerAuftragId: string
   const entscheiden = useCallback(
     async (erteilt: boolean) => {
       if (!anfrage) return
+      // Zuerst die anderen Fenster schließen: ein zweiter Klick dort würde
+      // sonst ein zweites, womöglich gegenteiliges Ergebnis melden.
+      setAnfrage(null)
+      karteErledigtMelden(anfrage.auftragId)
       if (erteilt) {
         await uebernahmeFreigeben(anfrage.minuten)
       }
@@ -98,7 +108,6 @@ export function Uebernahmekarte({ offenerAuftragId }: { offenerAuftragId: string
           ? 'Der Benutzer hat die Übernahme freigegeben. Sie endet nach der genannten Zeit von selbst.'
           : 'Der Benutzer hat die Übernahme abgelehnt. Frag nicht sofort erneut — such einen Weg ohne Maus und Tastatur.',
       })
-      setAnfrage(null)
     },
     [anfrage],
   )

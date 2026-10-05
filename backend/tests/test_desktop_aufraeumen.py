@@ -176,22 +176,41 @@ class TestLangeFrist:
             "desktop_steuern", {"aktion": "freigabe", "anliegen": "..."}
         )
 
-    def test_ein_klick_bekommt_sie_nicht(self):
-        """Der Preis des Zusammenlegens: die Frist haengt am Argument.
+    def test_ein_klick_mit_karte_bekommt_sie(self):
+        """Ohne autonomen Modus wartet auch ein Klick auf seine Karte.
 
-        Bekaeme jeder Klick zehn Minuten, stuende ein Lauf nach einem
-        abgestuerzten Rechner entsprechend lange still.
+        Bis zum 05.10.2026 bekam er die kurze Frist und fiel nach 90 s als
+        "nicht abgeholt" zurueck, waehrend der Mensch noch las.
         """
+        for werkzeug, argumente in [
+            ("desktop_steuern", {"aktion": "klick", "x": 10, "y": 20, "autonom": False}),
+            ("desktop_system", {"aktion": "bildschirm", "autonom": False}),
+            ("desktop_launch_app", {"programm": "notepad", "autonom": False}),
+            ("desktop_dateien", {"aktion": "auflisten", "autonom": False}),
+            ("desktop_artifact", {"aktion": "locate", "autonom": False}),
+        ]:
+            assert desktop_job_service._wartet_auf_menschen(werkzeug, argumente), werkzeug
+
+    def test_ein_autonomer_klick_bekommt_sie_nicht(self):
+        """Ohne Karte wartet niemand: die lange Frist hiesse nur, dass ein
+        Lauf nach einem abgestuerzten Rechner lange still steht."""
         assert not desktop_job_service._wartet_auf_menschen(
-            "desktop_steuern", {"aktion": "klick", "x": 10, "y": 20}
+            "desktop_steuern", {"aktion": "klick", "x": 10, "y": 20, "autonom": True}
         )
+        assert not desktop_job_service._wartet_auf_menschen(
+            "desktop_system", {"aktion": "bildschirm", "autonom": True}
+        )
+
+    def test_ein_fremdes_werkzeug_bekommt_sie_nicht(self):
+        assert not desktop_job_service._wartet_auf_menschen("server_status", {})
 
     def test_aufraeumen_bekommt_sie_immer(self):
         assert desktop_job_service._wartet_auf_menschen("desktop_aufraeumen", {})
 
     def test_ein_fehlendes_argument_ist_kein_absturz(self):
-        assert not desktop_job_service._wartet_auf_menschen("desktop_steuern", {})
-        assert not desktop_job_service._wartet_auf_menschen("desktop_system", {})
+        # Ohne `autonom` gilt die Karte — die vorsichtige Lesart.
+        assert desktop_job_service._wartet_auf_menschen("desktop_steuern", {})
+        assert desktop_job_service._wartet_auf_menschen("desktop_system", {})
 
 
 class TestEinstellung:

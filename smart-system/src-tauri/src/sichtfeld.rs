@@ -183,6 +183,9 @@ fn fenster_zeigen(app: &AppHandle) -> Result<(), String> {
         // oben liegt und Klicks durchlaesst, ist genau das, was man sonst bei
         // Schadsoftware sucht — dieses sagt, was es ist.
         .title("MSS sieht den Bildschirm")
+        // Dieselbe WebView2-Umgebung wie Haupt- und Overlay-Fenster; mit
+        // anderen Argumenten liesse sie sich gar nicht bauen.
+        .additional_browser_args(crate::BROWSER_ARGUMENTE)
         .inner_size(BREITE, HOEHE)
         .resizable(false)
         .decorations(false)

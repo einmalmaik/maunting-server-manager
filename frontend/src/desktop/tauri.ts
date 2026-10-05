@@ -68,6 +68,20 @@ export async function konfigSpeichern(konfig: AppKonfig): Promise<void> {
   await invoke('konfig_speichern', { konfig })
 }
 
+/**
+ * Ändert nur die genannten Felder — Rust lädt frisch und speichert unter
+ * einem Schloss (`konfig::aendern`). Liefert den gespeicherten Stand.
+ *
+ * Der Weg für jeden Einstellungsbereich, der ein einzelnes Feld umlegt. Bis
+ * zum 05.10.2026 speicherte jeder Bereich `{...konfig, feld}` aus seiner Kopie
+ * vom Öffnen; zwei Bereiche auf einem Reiter drehten sich damit gegenseitig
+ * zurück, und Computer-Use stand still auf „aus“, während „Aktiv“ angezeigt
+ * wurde.
+ */
+export async function konfigAendern(felder: Partial<AppKonfig>): Promise<AppKonfig> {
+  return await invoke<AppKonfig>('konfig_aendern', { felder })
+}
+
 export async function sandboxVerfuegbar(): Promise<boolean> {
   return await invoke<boolean>('sandbox_verfuegbar')
 }

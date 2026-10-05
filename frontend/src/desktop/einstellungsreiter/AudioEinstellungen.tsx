@@ -11,8 +11,8 @@ import { toast } from '@/stores/toastStore'
 import {
   audioGeraete,
   duckingSetzen,
+  konfigAendern,
   konfigLaden,
-  konfigSpeichern,
   wakewordLauschen,
   type AppKonfig,
   type AudioGeraete,
@@ -59,10 +59,12 @@ export function AudioEinstellungen() {
 
   async function waehlen(feld: 'audio_eingabe' | 'audio_ausgabe', wert: string) {
     if (!konfig) return
-    const neu: AppKonfig = { ...konfig, [feld]: wert === '' ? null : wert }
-    setKonfig(neu)
+    const vorher = konfig
+    setKonfig({ ...konfig, [feld]: wert === '' ? null : wert })
     try {
-      await konfigSpeichern(neu)
+      // Nur das eine Feld, frisch in Rust gemischt — die Kopie hier ist alt.
+      const neu = await konfigAendern({ [feld]: wert === '' ? null : wert })
+      setKonfig(neu)
       // Sofort wirksam für Sitzungen in diesem Fenster; das Overlay lädt die
       // Wahl bei jedem Sitzungsstart frisch, Rust (Wake-Word) liest sie je
       // Aufnahme selbst.
@@ -74,6 +76,7 @@ export function AudioEinstellungen() {
         await wakewordLauschen(true)
       }
     } catch (fehler) {
+      setKonfig(vorher)
       toast.error(String(fehler))
     }
   }
@@ -145,9 +148,7 @@ export function AudioEinstellungen() {
       speicherTimer.current = null
       void (async () => {
         try {
-          const aktuell = await konfigLaden()
-          await konfigSpeichern({
-            ...aktuell,
+          await konfigAendern({
             audio_echo: neu.audio_echo,
             audio_rauschen: neu.audio_rauschen,
             audio_autogain: neu.audio_autogain,

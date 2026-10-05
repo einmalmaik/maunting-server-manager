@@ -407,6 +407,26 @@ pub fn steuern(argumente: &Value) -> Result<Value, String> {
     if argumente["autonom"].as_bool() != Some(true) {
         pruefen()?;
     }
+    handgriff(argumente)
+}
+
+/// Ein Handgriff, den der Benutzer auf seiner Karte **ausdrücklich** bestätigt
+/// hat — die Karte ist die Freigabe für genau diesen einen Auftrag.
+///
+/// Bis zum 05.10.2026 lief auch dieser Weg durch `pruefen()`: der Benutzer
+/// sah „Die KI möchte klicken bei (412|88)", sagte Ja, und bekam „Keine
+/// gueltige Freigabe" zurück, weil zusätzlich eine befristete Übernahme hätte
+/// laufen müssen. Ohne autonomen Modus ging damit kein einziger Klick.
+///
+/// Die Uhr in `FREIGABE` läuft hier bewusst nicht an: das Ja gilt dem
+/// gezeigten Handgriff, nicht den nächsten fünf Minuten. Aufrufen darf das
+/// nur `auftrag::desktop_aktion_bestaetigen`, und der nimmt die Argumente aus
+/// seinem eigenen Wartplatz, nicht aus dem Renderer.
+pub fn steuern_bestaetigt(argumente: &Value) -> Result<Value, String> {
+    handgriff(argumente)
+}
+
+fn handgriff(argumente: &Value) -> Result<Value, String> {
     let aktion = argumente["aktion"].as_str().unwrap_or("");
     if aktion == "folge" {
         return folge(argumente);
@@ -507,6 +527,17 @@ mod tests {
         // seit dem 23.08.2026 ohne Freigabe (`desktop_system`), steuern nicht.
         let fehler = steuern(&json!({ "aktion": "klick" })).unwrap_err();
         assert!(fehler.contains("Keine gueltige Freigabe"), "{fehler}");
+    }
+
+    #[test]
+    fn eine_bestaetigte_karte_braucht_keine_uebernahme() {
+        widerrufen().unwrap();
+        // Wie beim autonomen Modus: unter Windows klickt das wirklich, im
+        // CI gibt es keine Maus. Geprueft wird nur, dass die Schranke weg ist.
+        if let Err(fehler) = steuern_bestaetigt(&json!({ "aktion": "klick" })) {
+            assert!(!fehler.contains("Keine gueltige Freigabe"), "{fehler}");
+        }
+        assert_eq!(restsekunden(), 0, "das Ja gilt nur diesem Handgriff");
     }
 
     #[test]

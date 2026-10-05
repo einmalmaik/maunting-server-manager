@@ -21,12 +21,16 @@ const mockKonfig = {
 }
 
 const konfigLadenMock = vi.fn().mockResolvedValue(mockKonfig)
-const konfigSpeichernMock = vi.fn().mockResolvedValue(undefined)
+// Rust mischt nur die genannten Felder ein und gibt den gespeicherten Stand zurück.
+const konfigAendernMock = vi.fn(async (felder: Record<string, unknown>) => ({
+  ...(await konfigLadenMock()),
+  ...felder,
+}))
 const oeffneBrowserMock = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('./tauri', () => ({
   konfigLaden: () => konfigLadenMock(),
-  konfigSpeichern: (k: unknown) => konfigSpeichernMock(k),
+  konfigAendern: (felder: Record<string, unknown>) => konfigAendernMock(felder),
   oeffneBrowser: (url: string) => oeffneBrowserMock(url),
   audioGeraete: vi.fn().mockResolvedValue({ eingaenge: [], ausgaenge: [], standard_eingang: null, standard_ausgang: null }),
   duckingSetzen: vi.fn().mockResolvedValue(undefined),
@@ -73,6 +77,7 @@ vi.mock('@/pages/profile/DatenexportKarte', () => ({
 import i18n from '@/i18n'
 import { api } from '@/api/client'
 import { usePublicSettingsStore, DEFAULT_PUBLIC_SETTINGS } from '@/stores/publicSettingsStore'
+import { toast } from '@/stores/toastStore'
 import { Einstellungen } from './Einstellungen'
 import { useVaultStore, type VaultItem } from './vault/vaultStore'
 
@@ -176,10 +181,58 @@ describe('Einstellungen Component', () => {
     const confirmBtn = screen.getByRole('button', { name: txt('mss.einstellungen.computerUse.aktivierenBestaetigen') })
     fireEvent.click(confirmBtn)
 
-    await waitFor(() => expect(konfigSpeichernMock).toHaveBeenCalledWith(
-      expect.objectContaining({ computer_use_aktiv: true })
-    ))
+    // Nur das eigene Feld — keine Kopie der ganzen Konfiguration, die einen
+    // anderen Bereich zurücksetzen könnte.
+    await waitFor(() => expect(konfigAendernMock).toHaveBeenCalledWith({ computer_use_aktiv: true }))
+    expect(switchBtn).toHaveAttribute('aria-checked', 'true')
     expect(onKonfigChange).toHaveBeenCalled()
+  })
+
+  it('Computer-Use: scheitert das Speichern, bleibt der Schalter aus und es gibt eine Meldung', async () => {
+    // Früher schluckte `.catch(() => {})` den Fehler, und der Schalter zeigte
+    // „Aktiv“, obwohl Rust weiter „aus“ las.
+    const fehlerMeldung = vi.spyOn(toast, 'error')
+    konfigAendernMock.mockRejectedValueOnce(new Error('Zugriff verweigert'))
+    render(
+      <MemoryRouter>
+        <Einstellungen />
+      </MemoryRouter>,
+    )
+
+    const switchBtn = await screen.findByRole('switch', { name: txt('mss.einstellungen.computerUse.titel') })
+    fireEvent.click(switchBtn)
+    fireEvent.click(await screen.findByRole('button', { name: txt('mss.einstellungen.computerUse.aktivierenBestaetigen') }))
+
+    await waitFor(() => expect(fehlerMeldung).toHaveBeenCalledWith(txt('mss.einstellungen.speichernFehler')))
+    expect(switchBtn).toHaveAttribute('aria-checked', 'false')
+    fehlerMeldung.mockRestore()
+  })
+
+  it('Artefakte nach Computer-Use: der zweite Bereich setzt den ersten nicht zurück', async () => {
+    // Beide Bereiche hielten je eine eigene Kopie der Konfiguration; der
+    // Artefakt-Schalter schrieb seine alte Kopie samt `computer_use_aktiv:
+    // false` zurück. Jetzt schickt jeder Bereich nur sein Feld.
+    konfigLadenMock.mockResolvedValue({
+      ...mockKonfig,
+      artifact_install_aktiv: false,
+      max_download_bytes: 10 * 1024 * 1024 * 1024,
+      search_roots: [],
+    })
+    render(
+      <MemoryRouter>
+        <Einstellungen />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('switch', { name: txt('mss.einstellungen.computerUse.titel') }))
+    fireEvent.click(await screen.findByRole('button', { name: txt('mss.einstellungen.computerUse.aktivierenBestaetigen') }))
+    await waitFor(() => expect(konfigAendernMock).toHaveBeenCalledWith({ computer_use_aktiv: true }))
+
+    fireEvent.click(await screen.findByRole('switch', { name: txt('mss.einstellungen.artefakte.titel') }))
+    fireEvent.click(await screen.findByRole('button', { name: txt('mss.einstellungen.artefakte.aktivierenBestaetigen') }))
+
+    await waitFor(() => expect(konfigAendernMock).toHaveBeenCalledTimes(2))
+    expect(konfigAendernMock).toHaveBeenLastCalledWith({ artifact_install_aktiv: true })
   })
 
   it('deaktiviert Computer-Use Schalter auf Android und zeigt Hinweis', async () => {
@@ -304,9 +357,7 @@ describe('Einstellungen Component', () => {
       fireEvent.click(schalter)
       fireEvent.click(await screen.findByRole('button', { name: txt('mss.einstellungen.computerUse.aktivierenBestaetigen') }))
 
-      await waitFor(() => expect(konfigSpeichernMock).toHaveBeenCalledWith(
-        expect.objectContaining({ computer_use_aktiv: true }),
-      ))
+      await waitFor(() => expect(konfigAendernMock).toHaveBeenCalledWith({ computer_use_aktiv: true }))
       expect(api).not.toHaveBeenCalledWith('/ai/settings/desktop')
       expect(screen.queryByText(txt('mss.systembereich.titel'))).not.toBeInTheDocument()
       expect(screen.queryByText(txt('mss.einstellungen.offline.titel'))).not.toBeInTheDocument()

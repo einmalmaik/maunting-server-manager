@@ -18,11 +18,21 @@ const freigebenMock = vi.fn()
 const restMock = vi.fn()
 const ergebnisMeldenMock = vi.fn()
 let ereignisRuf: ((e: { payload: unknown }) => void) | null = null
+let erledigtRuf: ((e: { payload: unknown }) => void) | null = null
+const emitMock = vi.fn()
 
 vi.mock('@tauri-apps/api/event', () => ({
-  listen: (_name: string, rueckruf: (e: { payload: unknown }) => void) => {
-    ereignisRuf = rueckruf
+  // `mss:karte-erledigt` hat seinen eigenen Rückruf; `emit` stellt wie der
+  // Tauri-Bus an jedes Fenster zu, auch an das sendende.
+  listen: (name: string, rueckruf: (e: { payload: unknown }) => void) => {
+    if (name === 'mss:karte-erledigt') erledigtRuf = rueckruf
+    else ereignisRuf = rueckruf
     return Promise.resolve(() => {})
+  },
+  emit: (name: string, payload: unknown) => {
+    emitMock(name, payload)
+    if (name === 'mss:karte-erledigt') erledigtRuf?.({ payload })
+    return Promise.resolve()
   },
 }))
 
@@ -43,6 +53,7 @@ const ANLIEGEN = 'Das Fenster lässt sich nur per Klick schließen'
 describe('Uebernahmekarte', () => {
   beforeEach(() => {
     ereignisRuf = null
+    erledigtRuf = null
     freigebenMock.mockReset().mockResolvedValue(undefined)
     // Keine laufende Freigabe — sonst zeigt die Karte den Reststreifen.
     restMock.mockReset().mockResolvedValue(0)
@@ -105,5 +116,15 @@ describe('Uebernahmekarte', () => {
     expect(ok).toBe(true)
     expect(inhalt).toMatchObject({ freigegeben: false, minuten: 0 })
     expect(freigebenMock).not.toHaveBeenCalled()
+  })
+
+  it('schließt die Frage, wenn ein anderes Fenster sie beantwortet hat', async () => {
+    render(<Uebernahmekarte offenerAuftragId={null} />)
+    await waitFor(() => expect(erledigtRuf).not.toBeNull())
+    ereignisRuf!({ payload: { anliegen: ANLIEGEN, minuten: 3, auftrag_id: 'job-neu' } })
+    expect(await screen.findByText(ANLIEGEN)).toBeInTheDocument()
+
+    erledigtRuf!({ payload: { auftrag_id: 'job-neu' } })
+    await waitFor(() => expect(screen.queryByText(ANLIEGEN)).not.toBeInTheDocument())
   })
 })

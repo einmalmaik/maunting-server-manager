@@ -6,6 +6,10 @@
  * erfordert eine manuelle, transparente Bestätigung durch den Benutzer.
  *
  * Nur zwei eindeutige Optionen: „Ja / Bestätigen“ oder „Nein / Ablehnen“.
+ *
+ * Mehrere Anfragen warten in einer Schlange und erscheinen nacheinander, die
+ * älteste zuerst — Rust hält für jede einen eigenen Platz (`auftrag.rs`,
+ * `WARTENDE_AKTIONEN`), eine neue verdrängt keine ältere mehr.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
@@ -14,6 +18,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/Singra/UI'
 import { ergebnisMelden } from './desktopJobs'
+import { karteErledigtMelden, useKarteErledigt, wartetNichts } from './karteErledigt'
 import {
   desktopAktionAblehnen,
   desktopAktionBestaetigen,
@@ -43,8 +48,15 @@ export function DesktopAktionKarte({
   offenerAuftragId: string | null
 }) {
   const { t } = useTranslation()
-  const [anfrage, setAnfrage] = useState<DesktopAktionAnfrage | null>(null)
+  const [warteschlange, setWarteschlange] = useState<DesktopAktionAnfrage[]>([])
   const [busy, setBusy] = useState(false)
+  const anfrage = warteschlange[0] ?? null
+
+  const entfernen = useCallback((auftragId: string) => {
+    setWarteschlange((liste) => liste.filter((a) => a.auftrag_id !== auftragId))
+  }, [])
+  // In einem anderen Fenster beantwortet (Overlay oder Hauptfenster).
+  useKarteErledigt(entfernen)
 
   const rueckfallId = useRef<string | null>(null)
   useEffect(() => {
@@ -55,13 +67,20 @@ export function DesktopAktionKarte({
     const abmelden = listen<DesktopAktionAnfrage>(EREIGNIS_AKTION, (ereignis) => {
       const auftragId = ereignis.payload.auftrag_id || rueckfallId.current
       if (!auftragId) return
-      setAnfrage({
+      const neu: DesktopAktionAnfrage = {
         auftrag_id: auftragId,
         werkzeug: ereignis.payload.werkzeug,
         titel: ereignis.payload.titel,
         beschreibung: ereignis.payload.beschreibung,
         argumente: ereignis.payload.argumente || {},
-      })
+      }
+      // Dieselbe Kennung ein zweites Mal (erneut zugestellter Auftrag) ersetzt
+      // ihren Eintrag an seiner Stelle, statt eine zweite Karte anzuhängen.
+      setWarteschlange((liste) =>
+        liste.some((a) => a.auftrag_id === auftragId)
+          ? liste.map((a) => (a.auftrag_id === auftragId ? neu : a))
+          : [...liste, neu],
+      )
     })
     return () => {
       void abmelden.then((weg) => weg())
@@ -89,19 +108,24 @@ export function DesktopAktionKarte({
           )
         }
       } catch (fehler) {
-        const text = fehler instanceof Error ? fehler.message : String(fehler)
-        await ergebnisMelden(
-          anfrage.auftrag_id,
-          false,
-          { fehler: text },
-          'DESKTOP_TOOL_FAILED',
-        )
+        // Schon anderswo beantwortet oder in Rust verfallen: das Ergebnis
+        // steht bereits oder kommt als Verfall — kein zweites, falsches.
+        if (!wartetNichts(fehler)) {
+          const text = fehler instanceof Error ? fehler.message : String(fehler)
+          await ergebnisMelden(
+            anfrage.auftrag_id,
+            false,
+            { fehler: text },
+            'DESKTOP_TOOL_FAILED',
+          )
+        }
       } finally {
         setBusy(false)
-        setAnfrage(null)
+        entfernen(anfrage.auftrag_id)
+        karteErledigtMelden(anfrage.auftrag_id)
       }
     },
-    [anfrage, busy],
+    [anfrage, busy, entfernen],
   )
 
   if (!anfrage) return null

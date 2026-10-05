@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/Singra/UI'
 import { formatBytes } from '@/lib/format'
 import { ergebnisMelden } from './desktopJobs'
+import { karteErledigtMelden, useKarteErledigt, wartetNichts } from './karteErledigt'
 import {
   aufraeumenAblehnen,
   aufraeumenBestaetigen,
@@ -66,6 +67,11 @@ export function Aufraeumkarte({ offenerAuftragId }: { offenerAuftragId: string |
     }
   }, [])
 
+  // In einem anderen Fenster beantwortet (Overlay oder Hauptfenster).
+  useKarteErledigt((auftragId) => {
+    setPlan((offen) => (offen?.auftragId === auftragId ? null : offen))
+  })
+
   const entscheiden = useCallback(
     async (ja: boolean) => {
       if (!plan || laeuft) return
@@ -89,11 +95,15 @@ export function Aufraeumkarte({ offenerAuftragId }: { offenerAuftragId: string |
         const ergebnis = await aufraeumenBestaetigen()
         await ergebnisMelden(plan.auftragId, true, ergebnis)
       } catch (fehler) {
-        const text = fehler instanceof Error ? fehler.message : String(fehler)
-        await ergebnisMelden(plan.auftragId, false, { fehler: text }, 'DESKTOP_TOOL_FAILED')
+        // Schon anderswo beantwortet: dort steht das Ergebnis bereits.
+        if (!wartetNichts(fehler)) {
+          const text = fehler instanceof Error ? fehler.message : String(fehler)
+          await ergebnisMelden(plan.auftragId, false, { fehler: text }, 'DESKTOP_TOOL_FAILED')
+        }
       } finally {
         setLaeuft(false)
         setPlan(null)
+        karteErledigtMelden(plan.auftragId)
       }
     },
     [plan, laeuft],

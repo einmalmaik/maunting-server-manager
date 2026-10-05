@@ -15,7 +15,7 @@ import { geraetVeroeffentlichen, sicherheitsnummer } from '@/services/e2eeGeraet
 import { MessengerVerschlossenError } from '@/services/lokaleVersiegelung'
 import { holeVerlaufAb } from '@/services/verlaufsUebergabe'
 import { useAuthStore } from '@/stores/authStore'
-import { konfigLaden, konfigSpeichern } from './tauri'
+import { konfigAendern } from './tauri'
 import { setzeAccessToken, sitzungVerwerfen } from './transport'
 
 interface TokenAntwort {
@@ -74,8 +74,7 @@ export async function koppeln(code: string, bezeichnung: string): Promise<Kopplu
   setzeAccessToken(antwort.access_token)
   await invoke('refresh_token_speichern', { token: antwort.refresh_token })
   try {
-    const k = await konfigLaden()
-    await konfigSpeichern({ ...k, eingerichtet: true })
+    await konfigAendern({ eingerichtet: true })
   } catch {}
   await useAuthStore.getState().checkAuth()
 

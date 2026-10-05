@@ -3,7 +3,8 @@ import { AlertTriangle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Badge, Button, Switch } from '@/Singra/UI'
-import { konfigLaden, konfigSpeichern, type AppKonfig } from '../tauri'
+import { toast } from '@/stores/toastStore'
+import { konfigAendern, konfigLaden, type AppKonfig } from '../tauri'
 
 export function ComputerUseSektion({ onKonfigAenderung }: { onKonfigAenderung?: () => void }) {
   const { t } = useTranslation()
@@ -14,25 +15,31 @@ export function ComputerUseSektion({ onKonfigAenderung }: { onKonfigAenderung?: 
     void konfigLaden().then(setKonfig).catch(() => {})
   }, [])
 
+  // Nur das eigene Feld, frisch in Rust gemischt (`konfigAendern`). Angezeigt
+  // wird, was gespeichert ist — schlägt das Speichern fehl, bleibt der alte
+  // Stand stehen, statt „Aktiv“ vorzutäuschen.
+  async function setzen(an: boolean) {
+    try {
+      setKonfig(await konfigAendern({ computer_use_aktiv: an }))
+      onKonfigAenderung?.()
+    } catch {
+      toast.error(t('mss.einstellungen.speichernFehler'))
+    }
+  }
+
   async function toggle(an: boolean) {
     if (!konfig) return
     if (an) {
       setDialogOffen(true)
     } else {
-      const neu = { ...konfig, computer_use_aktiv: false }
-      setKonfig(neu)
-      await konfigSpeichern(neu).catch(() => {})
-      onKonfigAenderung?.()
+      await setzen(false)
     }
   }
 
   async function bestaetigenAktivieren() {
     if (!konfig) return
-    const neu = { ...konfig, computer_use_aktiv: true }
-    setKonfig(neu)
     setDialogOffen(false)
-    await konfigSpeichern(neu).catch(() => {})
-    onKonfigAenderung?.()
+    await setzen(true)
   }
 
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)

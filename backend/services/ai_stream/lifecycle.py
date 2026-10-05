@@ -857,7 +857,7 @@ async def _werkzeuge_und_grenze(
     ]
     try:
         from services.semantic_tool_router_adapter import SemanticToolRouterAdapter, gruppen_nachbarn
-        from services.tool_selection_port import HOTSET
+        from services.tool_selection_port import HOTSET, pflichtwerkzeuge
         import logging
         _log = logging.getLogger(__name__)
         def _content_text(c) -> str:
@@ -882,7 +882,11 @@ async def _werkzeuge_und_grenze(
                     break
         if not letzte:
             letzte = str(zustand.get("query", "") if isinstance(zustand, dict) else "").strip()[:500]
-        hot_and_topk = len([n for n in HOTSET if n in erlaubt]) + 5
+        # Was der Router nie wegschneidet: der Grundstock und, aus der App,
+        # die Desktop-Werkzeuge (`pflichtwerkzeuge`).
+        pflicht = pflichtwerkzeuge(frozenset(erlaubt), herkunft)
+        hot = [n for n in HOTSET if n in erlaubt]
+        hot_and_topk = len(set(hot) | pflicht) + 5
         if letzte and len(erlaubt) > hot_and_topk:
             router = SemanticToolRouterAdapter({str(e.get("function", {}).get("name")): e for e in tools})
             import asyncio
@@ -893,8 +897,7 @@ async def _werkzeuge_und_grenze(
             except RuntimeError:
                 router.warm(frozenset(erlaubt))
                 routed = router.select(letzte, frozenset(erlaubt), top_k=5)
-            hot = [n for n in HOTSET if n in erlaubt]
-            keep = set(hot) | set(routed) | set(gruppen_nachbarn(routed, frozenset(erlaubt)))
+            keep = set(hot) | pflicht | set(routed) | set(gruppen_nachbarn(routed, frozenset(erlaubt)))
             tools = [e for e in tools if str(e.get("function", {}).get("name")) in keep]
             _log.info("Tool-Routing: erlaubt=%d keep=%d routed=%s query=%.80s", len(erlaubt), len(keep), routed, letzte)
     except Exception as exc:

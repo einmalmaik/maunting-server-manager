@@ -161,7 +161,7 @@ describe('Wizard: Kopplung', () => {
     await screen.findByText(await sicherheitsnummer(OEFFENTLICH))
 
     invokeMock.mockImplementation(async (befehl: string) => {
-      if (befehl === 'konfig_speichern') throw new Error('Platte voll')
+      if (befehl === 'konfig_aendern') throw new Error('Platte voll')
       return null
     })
     fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.wizard.weiter') }))
@@ -285,7 +285,7 @@ describe('Wizard: Adresse', () => {
       expect(screen.getByText(i18n.t('mss.wizard.adresseSchema'))).toBeInTheDocument()
     })
     expect(holen).not.toHaveBeenCalled()
-    expect(invokeMock).not.toHaveBeenCalledWith('konfig_speichern', expect.anything())
+    expect(invokeMock).not.toHaveBeenCalledWith('konfig_aendern', expect.anything())
   })
 
   it('laesst https und den eigenen Rechner durch', async () => {

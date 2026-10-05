@@ -869,7 +869,9 @@ class TestFristen:
             run_id=run.id,
             tool_call_id="call-1",
             tool_name="desktop_dateien",
-            arguments={},
+            # Autonom: ohne Karte wartet niemand, also haengt ein langes
+            # Abholen wirklich (mit Karte siehe den Test darunter).
+            arguments={"autonom": True},
         )
         db.commit()
         geholt = desktop_job_service.naechster(db, user_id=regular_user.id)

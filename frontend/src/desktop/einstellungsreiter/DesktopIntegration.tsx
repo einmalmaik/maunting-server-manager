@@ -7,8 +7,7 @@ import { Button, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { OVERLAY_ZUSTAND_TEST } from '../sprachKoordination'
 import {
-  konfigLaden,
-  konfigSpeichern,
+  konfigAendern,
   overlayTesten,
   setzeStatus,
   updatePruefen,
@@ -50,10 +49,7 @@ export function DesktopIntegration({
       } else {
         await disable()
       }
-      const akt = await konfigLaden().catch(() => null)
-      if (akt) {
-        await konfigSpeichern({ ...akt, autostart_aktiv: an })
-      }
+      await konfigAendern({ autostart_aktiv: an })
       setAutostart(an)
       onKonfigAenderung?.()
     } catch {

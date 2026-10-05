@@ -23,8 +23,8 @@ import { useTranslation } from 'react-i18next'
 import { Button, ProgressBar, Slider, Switch } from '@/Singra/UI'
 import { KI_NAME } from '@/lib/kiName'
 import {
+  konfigAendern,
   konfigLaden,
-  konfigSpeichern,
   wakewordAufnehmen,
   wakewordLauschen,
   wakewordStand,
@@ -139,8 +139,7 @@ export function WakewordEinrichtung() {
       schwelleTimer.current = null
       void (async () => {
         try {
-          const aktuell = await konfigLaden()
-          await konfigSpeichern({ ...aktuell, wakeword_schwelle: wert })
+          const aktuell = await konfigAendern({ wakeword_schwelle: wert })
           if (aktuell.wakeword_aktiv) {
             await wakewordLauschen(false)
             await wakewordLauschen(true)

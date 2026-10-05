@@ -66,8 +66,8 @@ import {
   appBeenden,
   appNeuStarten,
   hauptfensterVerstecken,
+  konfigAendern,
   konfigLaden,
-  konfigSpeichern,
   updateInstallieren,
   updatePruefen,
   type AppKonfig,
@@ -167,11 +167,7 @@ export function DesktopApp() {
     try {
       localStorage.setItem(SPLASH_GESEHEN_KEY, 'true')
     } catch {}
-    void konfigLaden().then((k) => {
-      if (!k.splash_gesehen) {
-        void konfigSpeichern({ ...k, splash_gesehen: true })
-      }
-    }).catch(() => {})
+    void konfigAendern({ splash_gesehen: true }).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -239,9 +235,8 @@ export function DesktopApp() {
 
         // Bei 'erfolg': Konfiguration als eingerichtet absichern
         if (!geladen.eingerichtet) {
-          const aktualisiert = { ...geladen, eingerichtet: true }
-          setKonfig(aktualisiert)
-          void konfigSpeichern(aktualisiert)
+          setKonfig({ ...geladen, eingerichtet: true })
+          void konfigAendern({ eingerichtet: true }).then(setKonfig).catch(() => {})
         }
 
         // checkAuth mit Timeout absichern

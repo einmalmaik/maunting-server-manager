@@ -68,7 +68,24 @@ const BESTAETIGUNGSFRIST: Duration = Duration::from_secs(600);
 const KARTENBUDGET: Duration = Duration::from_secs(20);
 
 static WARTEND: Mutex<Option<Wartend>> = Mutex::new(None);
-static WARTENDE_AKTION: Mutex<Option<WartendeAktion>> = Mutex::new(None);
+/// Alle allgemeinen Aktionen, die gerade auf ihre Karte warten.
+///
+/// Bis zum 05.10.2026 war das **ein** Platz. Das Panel schickt aber bewusst
+/// mehrere Desktop-Aufrufe je Runde (`_desktop_behandeln`), und jeder neue
+/// Auftrag ueberschrieb den wartenden: die Karte zeigte nur den letzten, die
+/// fruehren verfielen ohne Antwort. Jetzt hat jede Aktion ihren Platz, gefunden
+/// wird sie ueber die Kennung ihres Auftrags.
+static WARTENDE_AKTIONEN: Mutex<Vec<WartendeAktion>> = Mutex::new(Vec::new());
+
+/// Mehr wartende Karten nimmt die App nicht an. Das Panel legt hoechstens ein
+/// paar Auftraege je Runde an; was darueber liegt, ist ein Fehler im Lauf.
+const MAX_WARTENDE_AKTIONEN: usize = 8;
+
+/// Der Anfang jeder Meldung, die sagt: zu dieser Kennung wartet nichts (mehr).
+/// Die Oberflaeche erkennt daran, dass ein anderes Fenster die Karte schon
+/// beantwortet hat, und meldet **keinen** Fehlschlag ans Panel — sonst
+/// gewaenne womoeglich dieser Fehlschlag gegen das echte Ergebnis.
+pub const NICHTS_WARTET: &str = "MSS_NICHTS_WARTET";
 
 fn wartend_setzen(plan: Option<Wartend>) -> Option<Wartend> {
     let mut stand = WARTEND
@@ -77,19 +94,42 @@ fn wartend_setzen(plan: Option<Wartend>) -> Option<Wartend> {
     std::mem::replace(&mut *stand, plan)
 }
 
-fn wartende_aktion_setzen(aktion: Option<WartendeAktion>) -> Option<WartendeAktion> {
-    let mut stand = WARTENDE_AKTION
+/// Reiht eine wartende Aktion ein. Verfallene fallen dabei heraus; eine
+/// zweite Aktion mit derselben Kennung (der Auftrag wurde erneut zugestellt)
+/// ersetzt die erste, statt doppelt zu stehen.
+fn aktion_einreihen(aktion: WartendeAktion) -> Result<(), String> {
+    let mut stand = WARTENDE_AKTIONEN
         .lock()
         .unwrap_or_else(|vergiftet| vergiftet.into_inner());
-    std::mem::replace(&mut *stand, aktion)
+    let jetzt = Instant::now();
+    stand.retain(|w| w.bis > jetzt && w.auftrag_id != aktion.auftrag_id);
+    if stand.len() >= MAX_WARTENDE_AKTIONEN {
+        return Err(format!(
+            "Es warten schon {MAX_WARTENDE_AKTIONEN} Aktionen auf eine Bestätigung. \
+             Erst die offenen beantworten lassen."
+        ));
+    }
+    stand.push(aktion);
+    Ok(())
+}
+
+/// Nimmt genau die Aktion dieses Auftrags heraus — und nur diese.
+fn aktion_entnehmen(auftrag_id: &str) -> Option<WartendeAktion> {
+    let mut stand = WARTENDE_AKTIONEN
+        .lock()
+        .unwrap_or_else(|vergiftet| vergiftet.into_inner());
+    let stelle = stand.iter().position(|w| w.auftrag_id == auftrag_id)?;
+    Some(stand.remove(stelle))
 }
 
 /// Fuehrt den wartenden Plan aus. Ruft die Karte nach dem Klick auf "Ja".
 pub fn aufraeumen_bestaetigen() -> Result<Value, String> {
-    let plan = wartend_setzen(None).ok_or(
-        "Es wartet gerade kein Aufraeumauftrag. Vermutlich ist er verfallen \
-         oder wurde schon beantwortet.",
-    )?;
+    let plan = wartend_setzen(None).ok_or_else(|| {
+        format!(
+            "{NICHTS_WARTET}: Es wartet gerade kein Aufraeumauftrag. Vermutlich ist \
+             er verfallen oder wurde schon beantwortet."
+        )
+    })?;
     if Instant::now() > plan.bis {
         return Err(format!(
             "Der Aufraeumauftrag ist verfallen: zwischen der Frage und dem \
@@ -119,40 +159,51 @@ fn aufraeumen_ausfuehren(plan: &Wartend) -> Result<Value, String> {
 }
 
 /// Bestätigt eine wartende allgemeine Desktop-Aktion und führt sie aus.
+///
+/// Entnommen wird **vor** jeder weiteren Pruefung: ein zweites Fenster, das
+/// dieselbe Karte zeigt, findet danach nichts mehr und bekommt `NICHTS_WARTET`.
 pub fn desktop_aktion_bestaetigen(app: &AppHandle, auftrag_id: &str) -> Result<Value, String> {
-    let mut stand = WARTENDE_AKTION
-        .lock()
-        .unwrap_or_else(|vergiftet| vergiftet.into_inner());
-    let wartend = stand.take().ok_or(
-        "Es wartet gerade keine Aktion zur Bestätigung. Vermutlich ist sie verfallen \
-         oder wurde bereits beantwortet.",
-    )?;
-    if wartend.auftrag_id != auftrag_id {
-        return Err("Die Auftrags-ID stimmt nicht mit der wartenden Aktion überein.".into());
-    }
+    let wartend = aktion_entnehmen(auftrag_id).ok_or_else(|| {
+        format!(
+            "{NICHTS_WARTET}: Zu diesem Auftrag wartet keine Aktion. Vermutlich ist \
+             sie verfallen oder wurde bereits beantwortet."
+        )
+    })?;
     if Instant::now() > wartend.bis {
         return Err("Die Bestätigungsfrist ist abgelaufen. Es wurde nichts ausgeführt.".into());
+    }
+    // Der Schalter gilt im Augenblick der Ausfuehrung, nicht in dem der Frage:
+    // wer Computer-Use ausschaltet, waehrend die Karte offen ist, meint es so.
+    if steuert_oder_sieht(&wartend.werkzeug, &wartend.argumente) {
+        let konfig = crate::konfig::laden(app)
+            .map_err(|e| format!("Desktop-Einstellungen nicht lesbar: {e}"))?;
+        if !konfig.computer_use_aktiv {
+            return Err(COMPUTER_USE_AUS.into());
+        }
     }
     match wartend.werkzeug.as_str() {
         "desktop_dateien" => dateien(wartend.sandbox_pfad, &wartend.argumente),
         "desktop_launch_app" => starten(app, &wartend.argumente),
         "desktop_system" => system::ausfuehren(app, &wartend.argumente),
-        "desktop_steuern" => steuern_und_ansehen(app, &wartend.argumente),
+        "desktop_steuern" => steuern_bestaetigt_und_ansehen(app, &wartend.argumente),
         "desktop_artifact" => crate::artefakt::ausfuehren(app, &wartend.argumente),
         andere => Err(format!("Unbekanntes Werkzeug: '{andere}'")),
     }
 }
 
+const COMPUTER_USE_AUS: &str = "Computer-Use ist in den Desktop-Einstellungen deaktiviert. Der \
+     Benutzer kann es in den Einstellungen aktivieren.";
+
+/// Was unter den Schalter Computer-Use faellt: Maus/Tastatur und das Bild
+/// vom Bildschirm.
+fn steuert_oder_sieht(werkzeug: &str, argumente: &Value) -> bool {
+    werkzeug == "desktop_steuern"
+        || (werkzeug == "desktop_system" && argumente["aktion"].as_str() == Some("bildschirm"))
+}
+
 /// Lehnt eine wartende allgemeine Desktop-Aktion ab.
 pub fn desktop_aktion_ablehnen(auftrag_id: &str) -> Result<(), String> {
-    let mut stand = WARTENDE_AKTION
-        .lock()
-        .unwrap_or_else(|vergiftet| vergiftet.into_inner());
-    if let Some(ref wartend) = *stand {
-        if wartend.auftrag_id == auftrag_id {
-            stand.take();
-        }
-    }
+    aktion_entnehmen(auftrag_id);
     Ok(())
 }
 
@@ -311,21 +362,19 @@ pub fn ausfuehren(
 
     #[cfg(not(target_os = "android"))]
     {
-    let app_konfig = konfig::laden(app).unwrap_or_default();
+    // Ein Lesefehler ist ein benannter Fehler und **nicht** die
+    // Standardkonfiguration. Bis zum 05.10.2026 stand hier
+    // `unwrap_or_default()`: eine halb geschriebene Datei hiess still
+    // "Computer-Use aus", und Singra meldete dem Benutzer einen Schalter, den
+    // er laengst umgelegt hatte.
+    let app_konfig = konfig::laden(app)
+        .map_err(|e| format!("Desktop-Einstellungen nicht lesbar: {e}"))?;
 
     // 1. Computer-Use Sicherheitsgrenze:
     // Ist Computer-Use in den Einstellungen deaktiviert, werden Steuerungen und
     // Bildschirmaufnahmen ausnahmslos blockiert.
-    if !app_konfig.computer_use_aktiv
-        && (werkzeug == "desktop_steuern"
-            || (werkzeug == "desktop_system"
-                && argumente["aktion"].as_str() == Some("bildschirm")))
-    {
-        return Err(
-            "Computer-Use ist in den Desktop-Einstellungen deaktiviert. Der \
-             Benutzer kann es in den Einstellungen aktivieren."
-                .into(),
-        );
+    if !app_konfig.computer_use_aktiv && steuert_oder_sieht(werkzeug, argumente) {
+        return Err(COMPUTER_USE_AUS.into());
     }
 
     // 1b. Artefakt-Installationen Sicherheitsgrenze:
@@ -368,7 +417,7 @@ pub fn ausfuehren(
         sandbox_pfad,
         bis: Instant::now() + BESTAETIGUNGSFRIST,
     };
-    wartende_aktion_setzen(Some(wartend));
+    aktion_einreihen(wartend)?;
 
     if let Err(fehler) = app.emit(
         EREIGNIS_AKTION,
@@ -380,7 +429,7 @@ pub fn ausfuehren(
             "argumente": argumente,
         }),
     ) {
-        wartende_aktion_setzen(None);
+        aktion_entnehmen(&id);
         return Err(format!("Bestätigungskarte nicht anzeigbar: {fehler}"));
     }
     Ok(None)
@@ -404,7 +453,18 @@ const NACH_DER_AKTION: Duration = Duration::from_millis(400);
 /// Scheitert nur das Foto, bleibt die Aktion ein Erfolg — sie ist passiert.
 /// Das Modell erfaehrt es ueber `bild_fehler` und kann selbst nachsehen.
 fn steuern_und_ansehen(app: &AppHandle, argumente: &Value) -> Result<Value, String> {
-    let mut ergebnis = uebernahme::steuern(argumente)?;
+    let ergebnis = uebernahme::steuern(argumente)?;
+    mit_bild(app, argumente, ergebnis)
+}
+
+/// Dasselbe nach einer bestätigten Karte — ohne die befristete Übernahme
+/// (`uebernahme::steuern_bestaetigt`).
+fn steuern_bestaetigt_und_ansehen(app: &AppHandle, argumente: &Value) -> Result<Value, String> {
+    let ergebnis = uebernahme::steuern_bestaetigt(argumente)?;
+    mit_bild(app, argumente, ergebnis)
+}
+
+fn mit_bild(app: &AppHandle, argumente: &Value, mut ergebnis: Value) -> Result<Value, String> {
     if argumente["bild"].as_bool() == Some(false) {
         return Ok(ergebnis);
     }
@@ -790,38 +850,58 @@ mod tests {
         assert!(!text.contains("Bildschirm"), "{text}");
     }
 
-    #[test]
-    fn wartende_desktop_aktion_laesst_sich_ablehnen() {
-        let _lock = TEST_MUTEX.lock().unwrap();
-        let wartend = WartendeAktion {
-            auftrag_id: "test-auftrag-123".to_string(),
+    fn wartende(auftrag_id: &str, bis: Instant) -> WartendeAktion {
+        WartendeAktion {
+            auftrag_id: auftrag_id.to_string(),
             werkzeug: "desktop_system".to_string(),
             argumente: json!({ "aktion": "laufwerke" }),
             sandbox_pfad: None,
-            bis: Instant::now() + Duration::from_secs(60),
-        };
-        wartende_aktion_setzen(Some(wartend));
+            bis,
+        }
+    }
 
-        assert!(desktop_aktion_ablehnen("test-auftrag-123").is_ok());
-        assert!(wartende_aktion_setzen(None).is_none());
+    fn leeren() {
+        WARTENDE_AKTIONEN.lock().unwrap().clear();
     }
 
     #[test]
-    fn verfallene_desktop_aktion_wird_abgewiesen() {
+    fn wartende_desktop_aktion_laesst_sich_ablehnen() {
         let _lock = TEST_MUTEX.lock().unwrap();
-        let wartend = WartendeAktion {
-            auftrag_id: "test-auftrag-expired".to_string(),
-            werkzeug: "desktop_system".to_string(),
-            argumente: json!({ "aktion": "laufwerke" }),
-            sandbox_pfad: None,
-            bis: Instant::now() - Duration::from_secs(1),
-        };
-        wartende_aktion_setzen(Some(wartend));
+        leeren();
+        aktion_einreihen(wartende("test-auftrag-123", Instant::now() + Duration::from_secs(60))).unwrap();
 
-        // Ohne laufende AppHandle schlägt die Ausführung fehl, aber hier schlägt die Frist vorher zu:
-        let lock = WARTENDE_AKTION.lock().unwrap();
-        assert!(lock.as_ref().unwrap().bis < Instant::now());
-        drop(lock);
-        wartende_aktion_setzen(None);
+        assert!(desktop_aktion_ablehnen("test-auftrag-123").is_ok());
+        assert!(aktion_entnehmen("test-auftrag-123").is_none());
+    }
+
+    /// Der Anlass vom 05.10.2026: zwei Auftraege in einer Runde, der zweite
+    /// ueberschrieb den ersten, und der erste verfiel ohne Antwort.
+    #[test]
+    fn zwei_wartende_aktionen_verdraengen_einander_nicht() {
+        let _lock = TEST_MUTEX.lock().unwrap();
+        leeren();
+        let bis = Instant::now() + Duration::from_secs(60);
+        aktion_einreihen(wartende("erster", bis)).unwrap();
+        aktion_einreihen(wartende("zweiter", bis)).unwrap();
+
+        // Eine fremde Kennung nimmt nichts mit — vorher wurde erst entnommen
+        // und dann verglichen, und die wartende Aktion war danach weg.
+        assert!(aktion_entnehmen("dritter").is_none());
+        assert_eq!(aktion_entnehmen("erster").unwrap().auftrag_id, "erster");
+        assert_eq!(aktion_entnehmen("zweiter").unwrap().auftrag_id, "zweiter");
+    }
+
+    #[test]
+    fn verfallene_fallen_beim_einreihen_heraus_und_die_obergrenze_greift() {
+        let _lock = TEST_MUTEX.lock().unwrap();
+        leeren();
+        aktion_einreihen(wartende("alt", Instant::now() - Duration::from_secs(1))).unwrap();
+        let bis = Instant::now() + Duration::from_secs(60);
+        for nummer in 0..MAX_WARTENDE_AKTIONEN {
+            aktion_einreihen(wartende(&format!("a{nummer}"), bis)).unwrap();
+        }
+        assert!(aktion_entnehmen("alt").is_none(), "verfallen");
+        assert!(aktion_einreihen(wartende("zu-viel", bis)).is_err());
+        leeren();
     }
 }
