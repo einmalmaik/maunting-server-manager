@@ -385,7 +385,7 @@ def _ical_zeit_lesen(roh: str, tz: timezone | ZoneInfo) -> datetime | None:
 
 
 def _ical_zeit_schreiben(dt: datetime, ganztaegig: bool, tz: timezone | ZoneInfo) -> str:
-    """Zurueck in die Form, in der CalDAV-Termine bisher schon geliefert wurden.
+    """Ein Zeitpunkt im iCal-Kompaktformat, fuer Export und CalDAV-Schreiben.
 
     Bei einem ganzen Tag zaehlt das **lokale** Datum. Ueber UTC formatiert
     verliert jede Zone oestlich von Greenwich einen Tag: Berliner Mitternacht
@@ -462,6 +462,36 @@ def _serie_fuer_caldav(recurrence: str | None) -> Serie:
     return serie
 
 
+def _ical_parameter(parameter: str | None, name: str) -> str:
+    """Der Wert eines Eigenschaftsparameters (``;TZID=Europe/Berlin``) oder ``""``."""
+    for teil in (parameter or "").split(";"):
+        schluessel, _, wert = teil.partition("=")
+        if schluessel.strip().upper() == name:
+            return wert.strip().strip('"')
+    return ""
+
+
+def _ical_zone(parameter: str | None, ersatz: str | None) -> str | None:
+    """Die Zone einer Zeitangabe: ihre TZID, wenn sie eine IANA-Kennung ist.
+
+    Google und Nextcloud schreiben ``DTSTART;TZID=Europe/Berlin:…``. Bis zum
+    05.10.2026 wurde der Parameter verworfen und jede naive Zeit als Ortszeit
+    des **Benutzers** gelesen — ein Termin aus einem New Yorker Kalender sass
+    damit sechs Stunden daneben. Eine TZID, die keine IANA-Kennung ist (Outlook
+    schreibt gern ``W. Europe Standard Time``), faellt auf die Benutzerzone
+    zurueck: das ist das bisherige Verhalten, und fuer die meisten dieser
+    Kalender auch die richtige Zone.
+    """
+    kennung = _ical_parameter(parameter, "TZID")
+    if kennung:
+        try:
+            ZoneInfo(kennung)
+            return kennung
+        except (ZoneInfoNotFoundError, ValueError, ModuleNotFoundError):
+            pass
+    return ersatz
+
+
 def _parse_vevents(
     ical_text: str,
     *,
@@ -480,6 +510,16 @@ def _parse_vevents(
     andere Kalender durchaus schreiben) fallen auf das bisherige Verhalten
     zurueck: ein Vorkommen am Ursprungsdatum. Das ist unvollstaendig, aber es
     erfindet nichts.
+
+    **Ausgegeben wird dieselbe Form wie bei nativen Terminen**
+    (`_iso_utc`, dazu ``all_day``). Bis zum 05.10.2026 kamen DTSTART und DTEND
+    roh aus der ICS-Datei: ``20261026T090000Z``, eine naive Ortszeit ohne ihre
+    TZID oder ``20261026``. Die Kalenderansicht machte daraus mit
+    ``new Date(…)`` ein ungueltiges Datum, und Singra bekam Zeitpunkte, die
+    `ai_lage.ortszeit_anhaengen` nicht umrechnen konnte. Ein ganzer Tag beginnt
+    wie nativ um Mitternacht der Benutzerzone und endet exklusiv um Mitternacht
+    des Folgetags; das lokale Datum bleibt dabei erhalten. Was sich nicht
+    lesen laesst, bleibt roh stehen, statt erfunden zu werden.
     """
     events: list[dict[str, Any]] = []
     tz = zeitzone_von(tz_name)
@@ -496,23 +536,46 @@ def _parse_vevents(
 
         start_roh = dtstart_m.group(2).strip() if dtstart_m else ""
         ende_roh = dtend_m.group(2).strip() if dtend_m else ""
-        ganztaegig = "VALUE=DATE" in (dtstart_m.group(1) or "") if dtstart_m else False
+        start_parameter = dtstart_m.group(1) if dtstart_m else None
+        ganztaegig = (
+            _ical_parameter(start_parameter, "VALUE").upper() == "DATE"
+            or re.fullmatch(r"\d{8}", start_roh) is not None
+        )
+
+        # Die Zone, in der dieser Termin gedacht ist: seine TZID, sonst die
+        # des Benutzers. Ein ganzer Tag hat keine — er liegt im lokalen Datum.
+        terminzone_name = tz_name if ganztaegig else _ical_zone(start_parameter, tz_name)
+        terminzone = zeitzone_von(terminzone_name)
+        endzone_name = (
+            tz_name if ganztaegig
+            else _ical_zone(dtend_m.group(1) if dtend_m else None, terminzone_name)
+        )
+
+        start_dt = _ical_zeit_lesen(start_roh, terminzone)
+        ende_dt = _ical_zeit_lesen(ende_roh, zeitzone_von(endzone_name))
+        if ende_dt is None and start_dt is not None and not ende_roh:
+            # RFC 5545: ohne DTEND dauert ein ganzer Tag einen Tag, ein
+            # Zeitpunkt keine Zeit.
+            ende_dt = (
+                (start_dt.astimezone(tz) + timedelta(days=1)).astimezone(timezone.utc)
+                if ganztaegig else start_dt
+            )
 
         grund = {
             "event_id": uid_m.group(1).strip() if uid_m else str(uuid.uuid4()),
             "title": summary_m.group(1).strip() if summary_m else "Ohne Titel",
-            "start": start_roh,
-            "end": ende_roh,
+            "start": _iso_utc(start_dt) if start_dt is not None else start_roh,
+            "end": _iso_utc(ende_dt) if ende_dt is not None else ende_roh,
+            "all_day": ganztaegig,
             "description": desc_m.group(1).strip() if desc_m else "",
             "location": loc_m.group(1).strip() if loc_m else "",
         }
 
-        start_dt = _ical_zeit_lesen(start_roh, tz)
         if not rrule_m or start_dt is None:
             events.append(grund)
             continue
 
-        ende_dt = _ical_zeit_lesen(ende_roh, tz) or start_dt
+        ende_dt = ende_dt or start_dt
 
         try:
             regel = regel_lesen(rrule_m.group(1).strip())
@@ -521,12 +584,18 @@ def _parse_vevents(
             events.append(grund)
             continue
 
+        # Ausnahmetage im lokalen Datum **der Terminzone** — derselben, in der
+        # `ausbreiten` die Vorkommen rechnet. Jede EXDATE-Zeile kann ihre
+        # eigene TZID tragen.
         ausnahmen: set[str] = set()
-        for zeile in re.findall(r"^EXDATE(?:;[^:]+)?:(.+)$", block, re.MULTILINE):
+        for parameter, zeile in re.findall(r"^EXDATE(;[^:]+)?:(.+)$", block, re.MULTILINE):
+            zeilenzone = zeitzone_von(
+                terminzone_name if ganztaegig else _ical_zone(parameter, terminzone_name)
+            )
             for stueck in zeile.split(","):
-                ausgenommen = _ical_zeit_lesen(stueck, tz)
+                ausgenommen = _ical_zeit_lesen(stueck, zeilenzone)
                 if ausgenommen is not None:
-                    ausnahmen.add(ausgenommen.astimezone(tz).date().isoformat())
+                    ausnahmen.add(ausgenommen.astimezone(terminzone).date().isoformat())
 
         serie = Serie(rrule=regel_schreiben(regel), ausnahmen=frozenset(ausnahmen))
         for v in ausbreiten(
@@ -534,13 +603,13 @@ def _parse_vevents(
             start_dt,
             ende_dt,
             ganztaegig=ganztaegig,
-            zeitzone=tz_name,
+            zeitzone=terminzone_name,
             fenster_von=von,
             fenster_bis=bis,
         ):
             eintrag = dict(grund)
-            eintrag["start"] = _ical_zeit_schreiben(v.start, ganztaegig, tz)
-            eintrag["end"] = _ical_zeit_schreiben(v.ende, ganztaegig, tz)
+            eintrag["start"] = _iso_utc(v.start)
+            eintrag["end"] = _iso_utc(v.ende)
             eintrag["vorkommen"] = v.schluessel
             eintrag["ist_serie"] = True
             events.append(eintrag)

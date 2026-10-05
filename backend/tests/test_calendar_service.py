@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 import pytest
 from models import User, UserCalendar, CalendarEvent
 from services.calendar_service import CalendarService
@@ -874,9 +875,11 @@ def test_caldav_import_liest_endlich_die_rrule():
     assert all(e["event_id"] == "abc123@google.com" for e in events)
     # Und das ausgegebene Datum selbst, nicht nur der Vorkommensschluessel:
     # der wird lokal gerechnet und war auch dann richtig, als `start` einen
-    # Tag danebenlag. Ohne diese Zeile faellt so etwas durch.
-    assert [e["start"] for e in events] == ["20260314", "20280314"]
-    assert [e["end"] for e in events] == ["20260315", "20280315"]
+    # Tag danebenlag. Ohne diese Zeile faellt so etwas durch. Seit dem
+    # 05.10.2026 in der Form nativer Termine: Berliner Mitternacht in UTC.
+    assert [e["start"] for e in events] == ["2026-03-13T23:00:00Z", "2028-03-13T23:00:00Z"]
+    assert [e["end"] for e in events] == ["2026-03-14T23:00:00Z", "2028-03-14T23:00:00Z"]
+    assert all(e["all_day"] is True for e in events)
 
 
 def test_caldav_ganztag_behaelt_sein_datum_oestlich_von_greenwich():
@@ -897,8 +900,9 @@ def test_caldav_ganztag_behaelt_sein_datum_oestlich_von_greenwich():
             tz_name=zone,
         )
         assert len(events) == 1, zone
-        assert events[0]["start"] == "20260314", f"{zone} ({verschiebung}) verschiebt den Tag"
-        assert events[0]["end"] == "20260315", f"{zone} ({verschiebung}) verschiebt das Ende"
+        assert _lokales_datum(events[0]["start"], zone) == "2026-03-14", f"{zone} ({verschiebung}) verschiebt den Tag"
+        assert _lokales_datum(events[0]["end"], zone) == "2026-03-15", f"{zone} ({verschiebung}) verschiebt das Ende"
+        assert _lokale_uhrzeit(events[0]["start"], zone) == "00:00", zone
 
     # Westlich von Greenwich war es nie kaputt — aber es muss auch so bleiben.
     events = _parse_vevents(
@@ -907,7 +911,8 @@ def test_caldav_ganztag_behaelt_sein_datum_oestlich_von_greenwich():
         bis=datetime(2027, 1, 1, tzinfo=timezone.utc),
         tz_name="America/Los_Angeles",
     )
-    assert events[0]["start"] == "20260314"
+    assert events[0]["start"] == "2026-03-14T07:00:00Z"
+    assert _lokales_datum(events[0]["start"], "America/Los_Angeles") == "2026-03-14"
 
 
 def test_caldav_import_faellt_bei_fremden_regeln_auf_das_alte_verhalten_zurueck():
@@ -928,7 +933,8 @@ def test_caldav_import_faellt_bei_fremden_regeln_auf_das_alte_verhalten_zurueck(
         tz_name="Europe/Berlin",
     )
     assert len(events) == 1
-    assert events[0]["start"] == "19950314"
+    assert events[0]["start"] == "1995-03-13T23:00:00Z"
+    assert events[0]["all_day"] is True
     assert "vorkommen" not in events[0]
 
 
@@ -940,8 +946,105 @@ def test_caldav_import_ohne_rrule_bleibt_wie_bisher():
     )
     events = _parse_vevents(ical, tz_name="Europe/Berlin")
     assert len(events) == 1
-    assert events[0]["start"] == "19950314"
+    assert events[0]["start"] == "1995-03-13T23:00:00Z"
+    assert events[0]["end"] == "1995-03-14T23:00:00Z"
     assert events[0]["title"] == "Geburtstag Lisa"
+
+
+def _lokales_datum(iso: str, zone: str) -> str:
+    return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(ZoneInfo(zone)).date().isoformat()
+
+
+def _lokale_uhrzeit(iso: str, zone: str) -> str:
+    return f"{datetime.fromisoformat(iso.replace('Z', '+00:00')).astimezone(ZoneInfo(zone)):%H:%M}"
+
+
+def _vevent(*zeilen: str) -> str:
+    return "\n".join(
+        ("BEGIN:VCALENDAR", "VERSION:2.0", "BEGIN:VEVENT", "UID:x@example.com", "SUMMARY:Termin",
+         *zeilen, "END:VEVENT", "END:VCALENDAR")
+    )
+
+
+def test_caldav_zeiten_kommen_in_der_form_nativer_termine():
+    """Bis zum 05.10.2026 kamen DTSTART und DTEND roh aus der ICS-Datei.
+
+    ``20261026T090000Z`` las die Kalenderansicht mit ``new Date(…)`` als
+    ungueltiges Datum, und Singra bekam einen Zeitpunkt, den
+    `ai_lage.ortszeit_anhaengen` nicht erkannte.
+    """
+    from services import ai_lage
+    from services.calendar_service import _parse_vevents
+
+    utc, = _parse_vevents(_vevent("DTSTART:20261026T090000Z", "DTEND:20261026T100000Z"), tz_name="Europe/Berlin")
+    assert (utc["start"], utc["end"], utc["all_day"]) == ("2026-10-26T09:00:00Z", "2026-10-26T10:00:00Z", False)
+    assert ai_lage.ortszeit_anhaengen(utc, "Europe/Berlin")["start_lokal"] == "Mo 26.10.2026 10:00"
+
+    # Naiv heisst: Ortszeit des Benutzers — nach der Zeitumstellung +01:00.
+    naiv, = _parse_vevents(_vevent("DTSTART:20261026T100000", "DTEND:20261026T110000"), tz_name="Europe/Berlin")
+    assert naiv["start"] == "2026-10-26T09:00:00Z"
+
+
+def test_caldav_beachtet_die_tzid_des_termins():
+    """Ein Termin aus einem New Yorker Kalender sass in Berlin sechs Stunden daneben."""
+    from services.calendar_service import _parse_vevents
+
+    termin, = _parse_vevents(
+        _vevent("DTSTART;TZID=America/New_York:20261026T100000", 'DTEND;TZID="America/New_York":20261026T110000'),
+        tz_name="Europe/Berlin",
+    )
+    assert termin["start"] == "2026-10-26T14:00:00Z", "10:00 New York (EDT) ist 14:00Z"
+    assert termin["end"] == "2026-10-26T15:00:00Z"
+
+    # Keine IANA-Kennung: die Benutzerzone, wie bisher.
+    outlook, = _parse_vevents(
+        _vevent("DTSTART;TZID=W. Europe Standard Time:20261026T100000"), tz_name="Europe/Berlin"
+    )
+    assert outlook["start"] == "2026-10-26T09:00:00Z"
+    assert outlook["end"] == outlook["start"], "ohne DTEND dauert ein Zeitpunkt keine Zeit"
+
+
+def test_caldav_serie_rechnet_in_der_zone_des_termins():
+    """New York stellt am 01.11. um, Berlin am 25.10.
+
+    In der Benutzerzone ausgebreitet laege die Woche dazwischen eine Stunde
+    daneben, und der EXDATE aus New York traefe kein Vorkommen.
+    """
+    from services.calendar_service import _parse_vevents
+
+    events = _parse_vevents(
+        _vevent(
+            "DTSTART;TZID=America/New_York:20261019T100000",
+            "DTEND;TZID=America/New_York:20261019T110000",
+            "RRULE:FREQ=WEEKLY",
+            "EXDATE;TZID=America/New_York:20261102T100000",
+        ),
+        von=datetime(2026, 10, 18, tzinfo=timezone.utc),
+        bis=datetime(2026, 11, 15, tzinfo=timezone.utc),
+        tz_name="Europe/Berlin",
+    )
+    assert [e["start"] for e in events] == [
+        "2026-10-19T14:00:00Z",
+        "2026-10-26T14:00:00Z",
+        "2026-11-09T15:00:00Z",
+    ], "der 02.11. ist ausgenommen, ab dann gilt EST"
+    assert all(_lokale_uhrzeit(e["start"], "America/New_York") == "10:00" for e in events)
+
+
+def test_caldav_ganztag_ohne_dtend_dauert_einen_tag():
+    from services.calendar_service import _parse_vevents
+
+    tag, = _parse_vevents(_vevent("DTSTART;VALUE=DATE:20261026"), tz_name="Europe/Berlin")
+    assert tag["all_day"] is True
+    assert (tag["start"], tag["end"]) == ("2026-10-25T23:00:00Z", "2026-10-26T23:00:00Z")
+
+
+def test_caldav_unlesbare_zeit_bleibt_roh():
+    """Was sich nicht lesen laesst, wird nicht erfunden."""
+    from services.calendar_service import _parse_vevents
+
+    kaputt, = _parse_vevents(_vevent("DTSTART:morgen frueh"), tz_name="Europe/Berlin")
+    assert kaputt["start"] == "morgen frueh"
 
 
 # ── CalDAV-Schreiben ──────────────────────────────────────────────────────
