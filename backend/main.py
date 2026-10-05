@@ -1049,7 +1049,7 @@ def redoc_ui(_: object = Depends(require_global("panel.settings.read"))):
 
 @app.get("/api/version")
 def app_version():
-    return {"name": settings.app_name, "version": "5.1.5"}
+    return {"name": settings.app_name, "version": "5.1.6"}
 
 
 @app.get("/api/health")
