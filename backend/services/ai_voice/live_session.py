@@ -68,6 +68,7 @@ from services.ai_voice.realtime_session import (
     RealtimeVorbereitung,
     angebotene_werkzeuge,
     gedaechtnis,
+    lage_abschnitt,
     gedaechtnis_anhang,
     reservieren,
     sprachregel,
@@ -146,7 +147,7 @@ def _faehigkeit(tool: dict) -> str | None:
     return f"- {name}: {satz}" if satz else f"- {name}"
 
 
-def live_anweisungen(tools: list[dict], sprache: str, memory: str = "") -> str:
+def live_anweisungen(tools: list[dict], sprache: str, memory: str = "", lage: str = "") -> str:
     """Die Anweisungen an die Stimme — Rolle, Ton und wann sie abgibt.
 
     Aufgebaut nach der Vorlage aus „Prompting GPT-Live": die drei Überschriften
@@ -190,10 +191,11 @@ def live_anweisungen(tools: list[dict], sprache: str, memory: str = "") -> str:
         "Delegiere, bevor du eine Antwort gibst, die von Backend-Arbeit abhängt. Rate kein "
         "Ergebnis, während du wartest, und melde eine Aktion erst als erledigt, wenn das "
         "Backend es bestätigt hat.",
+        *((lage,) if lage else ()),
     )) + gedaechtnis_anhang(memory)
 
 
-def backend_anweisungen(basis_prompt: str, memory: str = "") -> str:
+def backend_anweisungen(basis_prompt: str, memory: str = "", lage: str = "") -> str:
     """Die Anweisungen an das Backend-Modell.
 
     Die drei Abschnitte sind die aus „Start with your existing backend prompt":
@@ -218,6 +220,7 @@ def backend_anweisungen(basis_prompt: str, memory: str = "") -> str:
         "Gib die relevanten Fakten, den aktuellen Stand der Aufgabe und den nächsten Schritt "
         "zurück. Melde eine Aktion erst als erledigt, wenn das Werkzeug den Erfolg bestätigt. "
         "Ist das Ergebnis unklar, sag das und was geprüft werden muss.",
+        *((lage,) if lage else ()),
     )) + gedaechtnis_anhang(memory)
 
 
@@ -240,6 +243,9 @@ def vorbereiten(
     tools = angebotene_werkzeuge(db, provider=provider, user=user, herkunft=herkunft)
     sprache = provider.realtime_language or "auto"
     memory = gedaechtnis(db, user)
+    # Einmal gebaut, an Stimme **und** Backend: beide sollen dieselbe Uhr
+    # lesen (`realtime_session.lage_abschnitt`).
+    lage = lage_abschnitt(db, user)
     basis_prompt = ai_prompt.build(
         gesprochen=True,
         rolle="live",
@@ -256,13 +262,13 @@ def vorbereiten(
         reasoning_effort=provider.realtime_reasoning_effort,
         language=sprache,
         api_key=api_key,
-        instructions=live_anweisungen(tools, sprache, memory),
+        instructions=live_anweisungen(tools, sprache, memory, lage),
         tools=tools,
         conversation_id=conversation_id,
         usage_event_id=usage_event_id,
         disable_safety=bool(getattr(provider, "disable_safety", False)),
         backend_model=backend,
-        backend_instructions=backend_anweisungen(basis_prompt, memory),
+        backend_instructions=backend_anweisungen(basis_prompt, memory, lage),
     )
 
 

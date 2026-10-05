@@ -193,6 +193,58 @@ describe('authStore', () => {
     })
   })
 
+  describe('Zeitzone nachziehen', () => {
+    const geraeteZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    const rechte = { is_owner: false, role_id: null, role_name: null, global_keys: [], server_keys: {} }
+
+    function antworten(user: object, zone: () => Promise<unknown>) {
+      vi.mocked(client.api).mockImplementation(async (pfad: string) => {
+        if (pfad === '/auth/me') return user
+        if (pfad === '/auth/me/timezone') return zone()
+        return rechte
+      })
+    }
+
+    function zonenAufrufe() {
+      return vi.mocked(client.api).mock.calls.filter(([pfad]) => pfad === '/auth/me/timezone')
+    }
+
+    it('hinterlegt die Zone des Geräts, wenn das Konto keine hat', async () => {
+      antworten({ id: 501, username: 'ohnezone', time_zone: null }, async () => ({ time_zone: geraeteZone }))
+
+      await useAuthStore.getState().checkAuth()
+
+      await vi.waitFor(() => expect(useAuthStore.getState().user?.time_zone).toBe(geraeteZone))
+      expect(zonenAufrufe()).toEqual([
+        ['/auth/me/timezone', { method: 'PATCH', body: JSON.stringify({ time_zone: geraeteZone }) }],
+      ])
+    })
+
+    it('überschreibt eine gewählte Zone nie', async () => {
+      antworten({ id: 502, username: 'mitzone', time_zone: 'America/New_York' }, async () => ({ time_zone: 'x' }))
+
+      await useAuthStore.getState().checkAuth()
+      await Promise.resolve()
+
+      expect(zonenAufrufe()).toHaveLength(0)
+      expect(useAuthStore.getState().user?.time_zone).toBe('America/New_York')
+    })
+
+    it('schluckt einen Fehler und versucht es bei der nächsten Prüfung erneut', async () => {
+      antworten({ id: 503, username: 'wackel', time_zone: null }, async () => {
+        throw new Error('offline')
+      })
+
+      await useAuthStore.getState().checkAuth()
+      await vi.waitFor(() => expect(zonenAufrufe()).toHaveLength(1))
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().user?.time_zone).toBeNull()
+
+      await useAuthStore.getState().checkAuth()
+      await vi.waitFor(() => expect(zonenAufrufe()).toHaveLength(2))
+    })
+  })
+
   describe('logout', () => {
     it('should call /auth/logout and clear state', async () => {
       vi.mocked(client.api).mockResolvedValueOnce({})

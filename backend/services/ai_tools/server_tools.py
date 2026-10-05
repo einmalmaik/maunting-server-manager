@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -128,6 +129,9 @@ from services.ai_tools.user_tools import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Ein Kalenderende ohne Uhrzeit (`calendar_read`), ISO oder iCal-Kurzform.
+_NUR_DATUM = re.compile(r"\d{4}-\d{2}-\d{2}|\d{8}")
 
 def _global_tool_definitions() -> list[dict]:
     """Werkzeuge ohne Serverbezug: Serverliste, Blueprints, Kapazitaet, Anlage."""
@@ -1919,7 +1923,7 @@ def _execute_global_read_tool(
         # Ursprungsdatum nicht. Serien, deren Regel der Server nicht lesen kann
         # (E2EE), erscheinen als einzelner Termin — dort steht ohnehin schon
         # der Umschlag im Titel.
-        from datetime import timedelta as _zeitspanne
+        from datetime import date as _datum, timedelta as _zeitspanne
 
         from services.calendar_service import _parse_datetime as _kalender_zeit
 
@@ -1929,7 +1933,17 @@ def _execute_global_read_tool(
         # was "was steht an" gewoehnlich meint.
         jetzt = datetime.now(timezone.utc)
         von = _kalender_zeit(start_date, user=user) if start_date else jetzt - _zeitspanne(days=30)
-        bis = _kalender_zeit(end_date, user=user) if end_date else jetzt + _zeitspanne(days=365)
+        if end_date and _NUR_DATUM.fullmatch(end_date.strip()):
+            # Ein reines Datum als Ende meint den **ganzen** Tag. Bis zum
+            # 05.10.2026 galt Mitternacht zu Beginn dieses Tages: Singra fragte
+            # „bis 2026-10-26“ und bekam den Zahnarzttermin am 26.10. um 10 Uhr
+            # nicht mit. Das Fensterende ist deshalb Mitternacht des Folgetags,
+            # in der Benutzerzone gerechnet und nicht als UTC + 24 h — über eine
+            # Zeitumstellung ist ein Tag 23 oder 25 Stunden lang.
+            folgetag = _datum.fromisoformat(end_date.strip()) + _zeitspanne(days=1)
+            bis = _kalender_zeit(folgetag.isoformat(), user=user)
+        else:
+            bis = _kalender_zeit(end_date, user=user) if end_date else jetzt + _zeitspanne(days=365)
 
         events = CalendarService.vorkommen_im_fenster(
             db, user=user, calendar_id=calendar_id, von=von, bis=bis

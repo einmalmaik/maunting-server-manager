@@ -16,7 +16,7 @@ from fastapi import HTTPException
 from database import SessionLocal
 from models import AiMessage, AiToolResult, User
 import services.ai_stream as ai_stream
-from services import ai_run_broker, ai_run_service, audit_service
+from services import ai_lage, ai_run_broker, ai_run_service, audit_service
 from services.ai_action_errors import AiActionStateError, AiActionValidationError
 from services.ai_action_service import angebotene_werkzeuge, execute_read_tool
 from services.ai_chat_service import get_owned_conversation
@@ -307,6 +307,9 @@ def _werkzeug_ausfuehren(
         user = db.get(User, user_id)
         if user is None or not user.is_active:
             raise AiActionValidationError("AI-Zugriff wurde entzogen")
+        # Gelesen, solange `user` an einer Sitzung haengt; angewandt wird sie
+        # unten am Choke Point.
+        zone = ai_lage.gewaehlte_zone(user)
         try:
             wert = ai_stream.execute_read_tool(
                 db, user=user, tool_name=call.name, arguments=call.arguments,
@@ -369,6 +372,13 @@ def _werkzeug_ausfuehren(
     #
     # Ausserhalb der Sitzung, weil Schwaerzen reine Textarbeit ist und eine
     # offene Transaktion waehrenddessen nichts zu suchen hat.
+    #
+    # Davor die Ortszeit neben jeden Zeitpunkt (`ai_lage.ortszeit_anhaengen`):
+    # Werkzeuge sprechen UTC, und umgerechnet hat bis zum 05.10.2026 das Modell
+    # selbst — mit dem Versatz von heute, auch fuer Termine hinter der
+    # Zeitumstellung. Hier, weil auch die Sprachwege und `AiToolResult` diesen
+    # Wert bekommen.
+    wert = ai_lage.ortszeit_anhaengen(wert, zone)
     return _ergebnis_schwaerzen(wert, freitext=call.name in _FREITEXT_WERKZEUGE), None
 
 

@@ -80,6 +80,44 @@ interface AuthState {
  */
 let raeumungen = 0
 
+/** Konten, für die diese Seite die Zeitzone schon nachzuziehen versucht hat. */
+const zoneVersucht = new Set<number>()
+
+/**
+ * Hinterlegt die Zeitzone des Geräts am Konto, solange dort keine steht.
+ *
+ * Ohne Zone rechnet Singra in UTC (`backend/services/ai_lage.py`), und gesetzt
+ * wurde sie bis zum 05.10.2026 nur von Hand im Profil oder im Desktop-
+ * Assistenten — die meisten Konten hatten keine, und Singra nannte jede
+ * Uhrzeit um den vollen Versatz falsch. Eine gewählte Zone wird nie
+ * überschrieben. Schlägt der Aufruf fehl, versucht es die nächste Anmeldeprüfung.
+ */
+async function zeitzoneNachziehen(user: User, get: () => AuthState): Promise<void> {
+  if (user.time_zone || zoneVersucht.has(user.id)) return
+  let zone = ''
+  try {
+    zone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+  } catch {
+    return
+  }
+  if (!zone) return
+  zoneVersucht.add(user.id)
+  try {
+    const res = await api<{ time_zone: string | null }>('/auth/me/timezone', {
+      method: 'PATCH',
+      body: JSON.stringify({ time_zone: zone }),
+    })
+    // Nur übernehmen, was der Server bestätigt — und nur, wenn noch dasselbe
+    // Konto angemeldet ist und inzwischen keine Zone gewählt wurde.
+    const aktuell = get().user
+    if (res?.time_zone && aktuell?.id === user.id && !aktuell.time_zone) {
+      get().updateUser({ time_zone: res.time_zone })
+    }
+  } catch {
+    zoneVersucht.delete(user.id)
+  }
+}
+
 const initialCachedUser = loadCachedUser()
 // Der Start aus dem Zwischenspeicher geht nicht durch `saveCachedUser`, also
 // hier. Ohne diese Zeile stünde der Messenger nach einem Neuladen ohne Konto da
@@ -99,6 +137,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   finishLogin: async (user) => {
     saveCachedUser(user)
     set({ user, isAuthenticated: true, isLoading: false })
+    void zeitzoneNachziehen(user, get)
     await usePermissionsStore.getState().refresh()
   },
 
@@ -235,6 +274,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ user, isAuthenticated: true, isLoading: false })
       // Permissions parallel laden — Frontend-Permission-Checks wissen damit Bescheid.
       void usePermissionsStore.getState().refresh()
+      void zeitzoneNachziehen(user, get)
     } catch (err) {
       // Wurde inzwischen geräumt, ist nichts mehr zu tun: ein zweiter Griff
       // würde nur eine danach begonnene Anmeldung wieder abräumen.

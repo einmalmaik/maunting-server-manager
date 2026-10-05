@@ -13,7 +13,7 @@ from fastapi import HTTPException
 
 from models import AiActionProposal, AiConversation, Server, User, AuditLog
 from schemas.ai_action import AiActionProposalResponse
-from services import audit_service, permission_service
+from services import ai_lage, audit_service, permission_service
 from services.ai_action_errors import AiActionStateError, AiActionValidationError
 from services.ai_redaction import redact_sensitive_text
 from services.dis_client import DisClient
@@ -1026,8 +1026,16 @@ def execute_proposal(
                         conversation_id=proposal.conversation_id,
                         run_id=proposal.run_id,
                         tool_name=tool_name,
+                        # Mit Ortszeit neben jedem Zeitpunkt, wie am Choke
+                        # Point der Lesewerkzeuge (`read_tools`): diese Zeile
+                        # liest das Modell in der Folgerunde. Nur die
+                        # gespeicherte Kopie — `result` geht unverändert an
+                        # den Aufrufer.
                         result_json=json.dumps(
-                            result if isinstance(result, dict) else {"result": result},
+                            ai_lage.ortszeit_anhaengen(
+                                result if isinstance(result, dict) else {"result": result},
+                                ai_lage.gewaehlte_zone(active_user),
+                            ),
                             ensure_ascii=True,
                             separators=(",", ":"),
                             default=str,

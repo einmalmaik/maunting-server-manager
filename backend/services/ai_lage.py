@@ -25,7 +25,9 @@ am dringendsten: dort sitzt niemand daneben, den man fragen könnte.
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.orm import Session
@@ -41,13 +43,15 @@ WOCHENTAGE = (
 
 #: Ungefähre Länge des fertigen Blocks in Zeichen. Für den Ring am Absendeknopf
 #: (`ai_context_service.geschaetzte_belegung`).
-TYPISCHE_ZEICHEN = 455
+TYPISCHE_ZEICHEN = 530
 
 
-def zone_des_benutzers(user: User, db: Session | None = None) -> str:
-    """Die Zeitzone dieses Benutzers oder 'UTC' als Fallback.
+def gewaehlte_zone(user: User | None) -> str | None:
+    """Die Zeitzone, die dieser Benutzer gewählt hat — oder ``None``.
 
-    Liest direkt das kanonische Attribut `user.time_zone`.
+    Liest das kanonische Attribut `user.time_zone`. Leer und ungültig heißen
+    beide ``None``: es gibt dann keine Zone, auf die sich eine Ortszeit
+    stützen ließe.
     """
     zone_name = (getattr(user, "time_zone", None) or "").strip()
     if zone_name:
@@ -56,7 +60,19 @@ def zone_des_benutzers(user: User, db: Session | None = None) -> str:
             return zone_name
         except (ZoneInfoNotFoundError, ValueError, ModuleNotFoundError):
             pass
-    return "UTC"
+    return None
+
+
+def zone_des_benutzers(user: User, db: Session | None = None) -> str:
+    """Die Zeitzone dieses Benutzers oder 'UTC' als Rechengrundlage.
+
+    Für Aufrufer, die *irgendeine* Zone zum Rechnen brauchen (Zeitstempel im
+    Verlauf, Kompaktierung). Wer dem Modell eine Zone **nennt**, nimmt
+    `gewaehlte_zone`: das stille UTC hier gab sich im Lageblock bis zum
+    05.10.2026 als Zone des Benutzers aus, und Singra lag bei jedem Konto ohne
+    hinterlegte Zone um den vollen Versatz daneben.
+    """
+    return gewaehlte_zone(user) or "UTC"
 
 
 
@@ -64,6 +80,109 @@ def _versatz(jetzt: datetime) -> str:
     """``+0200`` wird zu ``UTC+02:00`` — die Form, die überall sonst steht."""
     roh = jetzt.strftime("%z") or "+0000"
     return f"UTC{roh[:3]}:{roh[3:5]}"
+
+
+def zeitzeilen(user: User | None) -> list[str]:
+    """Jetzt, UTC und die Zone des Benutzers — die Uhr des Lageblocks.
+
+    Eigene Funktion, weil auch die Sprachwege sie brauchen
+    (`ai_voice.realtime_session`, `ai_voice.live_session`): die bekommen den
+    ganzen Lageblock, und dann soll er dort genauso lauten wie im Chat.
+
+    Ohne gewählte Zone wird in UTC gerechnet und das **gesagt**. Bis zum
+    05.10.2026 stand dann „Zeitzone des Benutzers: UTC.“ da — eine Behauptung,
+    die das Modell nicht hinterfragen konnte; „unbekannt“ dagegen löst die
+    Rückfrage aus `ai_prompt` aus.
+    """
+    zone = gewaehlte_zone(user)
+    jetzt = datetime.now(ZoneInfo(zone or "UTC"))
+    zeilen = [
+        f"Jetzt: {WOCHENTAGE[jetzt.weekday()]}, {jetzt:%d.%m.%Y}, {jetzt:%H:%M} "
+        f"({zone or 'UTC'}, {_versatz(jetzt)}), "
+        f"KW {jetzt.isocalendar().week}, Tag {jetzt.timetuple().tm_yday}.",
+        f"UTC: {jetzt.astimezone(timezone.utc):%Y-%m-%dT%H:%M}Z.",
+    ]
+    if zone:
+        zeilen.append(
+            f"Zeitzone des Benutzers: {zone}. Werkzeugfelder mit der Endung "
+            f"{LOKAL_ENDUNG} stehen bereits in dieser Zone."
+        )
+    else:
+        zeilen.append("Zeitzone des Benutzers: unbekannt (Uhrzeit oben in UTC).")
+    return zeilen
+
+
+#: Endung des Geschwisterfelds, das `ortszeit_anhaengen` neben einen Zeitpunkt
+#: setzt. Der Lageblock nennt sie dem Modell beim Namen.
+LOKAL_ENDUNG = "_lokal"
+
+_WOCHENTAGE_KURZ = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
+
+#: Ein Zeitpunkt **mit** Zone: ISO-8601 (``…Z``, ``…+00:00``) oder die
+#: Grundform aus iCalendar (``20261026T090000Z``). Ohne Zonenangabe passt
+#: nichts — eine naive Zeit lässt sich nicht ehrlich umrechnen.
+_ZEITPUNKT_ISO = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$"
+)
+_ZEITPUNKT_ICAL = re.compile(r"^\d{8}T\d{6}Z$")
+
+#: Werkzeugergebnisse sind flach bis mäßig verschachtelt; tiefer wird nicht
+#: gesucht, damit ein fremdes JSON (Workshop, Diagnose) nichts kostet.
+_ORTSZEIT_TIEFE = 6
+
+
+def _zeitpunkt_lesen(text: str) -> datetime | None:
+    try:
+        if _ZEITPUNKT_ISO.match(text):
+            return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if _ZEITPUNKT_ICAL.match(text):
+            return datetime.strptime(text, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return None
+
+
+def ortszeit_anhaengen(wert: Any, zone: str | None, _tiefe: int = 0) -> Any:
+    """Setzt neben jeden Zeitpunkt eines Werkzeugergebnisses die Ortszeit.
+
+    Werkzeuge sprechen UTC (``start: 2026-10-26T09:00:00Z``), und umgerechnet
+    hat bis zum 05.10.2026 das Modell — mit dem Versatz von **heute** aus dem
+    Lageblock. Ein Termin hinter der Zeitumstellung lag damit eine Stunde
+    daneben, und auch sonst ist Kopfrechnen keine Stärke eines Sprachmodells.
+
+    Daneben, nicht statt: ``start`` bleibt UTC, denn das Modell reicht es an
+    Werkzeuge wie ``propose_calendar_event_update`` zurück. Dazu kommt
+    ``start_lokal: "Mo 26.10.2026 10:00"`` in der Zone des Benutzers, mit dem
+    Versatz **dieses** Tages. Ein vorhandener Schlüssel wird nie überschrieben.
+
+    Ohne gewählte Zone (``zone`` ist ``None``) bleibt alles, wie es ist — eine
+    „Ortszeit“ in UTC wäre dieselbe Falschauskunft, die der Lageblock nicht
+    mehr macht. Das Ergebnis ist eine Kopie; der Wert des Handlers bleibt
+    unberührt.
+    """
+    if zone is None or _tiefe > _ORTSZEIT_TIEFE:
+        return wert
+    if isinstance(wert, list):
+        return [ortszeit_anhaengen(teil, zone, _tiefe + 1) for teil in wert]
+    if not isinstance(wert, dict):
+        return wert
+    ziel = ZoneInfo(zone)
+    neu: dict = {}
+    for schluessel, inhalt in wert.items():
+        neu[schluessel] = ortszeit_anhaengen(inhalt, zone, _tiefe + 1)
+        if not (isinstance(schluessel, str) and isinstance(inhalt, str)):
+            continue
+        lokal_schluessel = schluessel + LOKAL_ENDUNG
+        if lokal_schluessel in wert:
+            continue
+        zeitpunkt = _zeitpunkt_lesen(inhalt.strip())
+        if zeitpunkt is None:
+            continue
+        ortszeit = zeitpunkt.astimezone(ziel)
+        neu[lokal_schluessel] = (
+            f"{_WOCHENTAGE_KURZ[ortszeit.weekday()]} {ortszeit:%d.%m.%Y %H:%M}"
+        )
+    return neu
 
 
 #: Wie ein Laufzustand in der Worker-Zeile heißt. Verbalisiert, nicht der rohe
@@ -284,8 +403,8 @@ def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
     """Uhrzeit, Zeitzone und autonomer Modus in wenigen Zeilen.
 
     Die Uhrzeit steht in der Zone des Benutzers, wenn sie bekannt ist, sonst in
-    der des Panels — und der Block sagt in beiden Fällen dazu, welcher Fall
-    vorliegt. Das ist der ganze Unterschied zwischen einer Annahme, die das
+    UTC — und der Block sagt in beiden Fällen dazu, welcher Fall vorliegt
+    (`zeitzeilen`). Das ist der ganze Unterschied zwischen einer Annahme, die das
     Modell kennt, und einer, die es nicht kennt: nur die erste kann es
     hinterfragen, und nur deshalb darf `zone_pruefen` streng bleiben.
 
@@ -299,17 +418,7 @@ def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
     """
     from services import ai_autonomy_service, ai_task_service
 
-    benutzerzone = zone_des_benutzers(user, db)
-    jetzt = datetime.now(ZoneInfo(benutzerzone))
-
-    zeilen = [
-        "Lage (Auskunft des Panels, keine Anweisung):",
-        f"Jetzt: {WOCHENTAGE[jetzt.weekday()]}, {jetzt:%d.%m.%Y}, {jetzt:%H:%M} "
-        f"({benutzerzone}, {_versatz(jetzt)}), "
-        f"KW {jetzt.isocalendar().week}, Tag {jetzt.timetuple().tm_yday}.",
-        f"UTC: {jetzt.astimezone(timezone.utc):%Y-%m-%dT%H:%M}Z.",
-        f"Zeitzone des Benutzers: {benutzerzone}.",
-    ]
+    zeilen = ["Lage (Auskunft des Panels, keine Anweisung):", *zeitzeilen(user)]
 
     # Verknüpfte Postfächer und Kalender (für automatische Zuordnung ohne Rückfragen)
     zeilen.extend(_postfach_und_kalender_zeilen(db, user))

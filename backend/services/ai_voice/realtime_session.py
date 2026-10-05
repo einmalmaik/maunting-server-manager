@@ -24,7 +24,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from database import SessionLocal
 from models import AiProvider, User
-from services import ai_action_service, ai_chat_service, ai_meldestelle, ai_memory_service, ai_prompt, ai_provider_service, ai_usage_service
+from services import ai_action_service, ai_chat_service, ai_lage, ai_meldestelle, ai_memory_service, ai_prompt, ai_provider_service, ai_usage_service
 from services.ai_redaction import redact_sensitive_text
 from services.ai_stream.read_tools import (
     _werkzeug_nebenlaeufigkeit,
@@ -247,6 +247,20 @@ def gedaechtnis(db: Session, user: User) -> str:
     )
 
 
+def lage_abschnitt(db: Session, user: User) -> str:
+    """Der Lageblock des Chats als Abschnitt der Sprachanweisungen.
+
+    Bis zum 05.10.2026 fehlte er hier ganz: Chat, Läufe und Heilung bekommen ihn
+    in `ai_context_service.build_provider_messages`, die Sprachwege bauen ihre
+    Anweisungen selbst. Die Stimme kannte damit weder Datum noch Uhrzeit, und
+    `ai_prompt.ZEITANSAGE` verwies sie trotzdem auf „die Uhr in der Lage“.
+
+    Eingefroren beim Sitzungsbeginn. Das genügt, weil eine Sitzung höchstens
+    `MAX_SITZUNGSSEKUNDEN` dauert — und die Überschrift sagt es dazu.
+    """
+    return "# Lage (Stand Sitzungsbeginn)\n" + ai_lage.lageblock(db, user)
+
+
 def gedaechtnis_anhang(memory: str) -> str:
     if not memory:
         return ""
@@ -322,6 +336,7 @@ def vorbereiten(
         ENTITAETEN,
         "# Long Context Behavior\nKeinen Chatverlauf erwarten. Nutze nur die Sitzung, den aktuellen Panelzustand und freigegebene Erinnerungen.",
         ESKALATION,
+        lage_abschnitt(db, user),
     )) + gedaechtnis_anhang(memory)
     conversation_id, usage_event_id = reservieren(db, provider=provider, user=user)
     return RealtimeVorbereitung(

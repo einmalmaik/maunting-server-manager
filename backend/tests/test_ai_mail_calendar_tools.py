@@ -1,5 +1,6 @@
 import json
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
@@ -83,6 +84,39 @@ def test_calendar_read_tool_dispatches_cleanly(db: Session, mailbox_user: User):
         assert res["count"] == 1
         assert res["events"][0]["title"] == "Team Sync"
         mock_events.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("ende", "erwartet"),
+    [
+        # Der Tag der Zeitumstellung hat 25 Stunden: Fensterende ist
+        # Mitternacht des 26.10. in Berlin, nicht 24 h nach Mitternacht.
+        ("2026-10-25", datetime(2026, 10, 25, 23, 0, tzinfo=timezone.utc)),
+        ("20261026", datetime(2026, 10, 26, 23, 0, tzinfo=timezone.utc)),
+        # Mit Uhrzeit gilt sie genau so, wie sie dasteht.
+        ("2026-10-26T08:00:00Z", datetime(2026, 10, 26, 8, 0, tzinfo=timezone.utc)),
+    ],
+)
+def test_calendar_read_ein_reines_enddatum_meint_den_ganzen_tag(
+    db: Session, mailbox_user: User, ende: str, erwartet: datetime
+):
+    """Bis zum 05.10.2026 galt „bis 2026-10-26“ als Mitternacht zu Beginn des Tages.
+
+    Im Panel fragte Singra genau so und fand den Zahnarzttermin am 26.10. um
+    10 Uhr nicht — und meldete einen leeren Kalender.
+    """
+    mailbox_user.time_zone = "Europe/Berlin"
+    db.commit()
+    with patch(
+        "services.calendar_service.CalendarService.vorkommen_im_fenster", return_value=[]
+    ) as fenster:
+        ai_action_service._execute_global_read_tool(
+            db,
+            user=mailbox_user,
+            tool_name="calendar_read",
+            arguments={"start_date": "2026-10-01", "end_date": ende},
+        )
+    assert fenster.call_args.kwargs["bis"] == erwartet
 
 
 @pytest.mark.parametrize(

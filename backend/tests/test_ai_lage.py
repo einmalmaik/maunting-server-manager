@@ -429,15 +429,23 @@ def test_hinterlegte_benutzer_zeitzone_wird_im_lageblock_verwendet(db: Session) 
     assert "Zeitzone des Benutzers: America/New_York." in block
 
 
-def test_ohne_hinterlegte_zone_wird_utc_als_fallback_verwendet(db: Session) -> None:
-    """Hat der Benutzer keine Zeitzone gewählt, fällt das Panel deterministisch auf UTC zurück."""
+def test_ohne_hinterlegte_zone_rechnet_der_block_in_utc_und_sagt_unbekannt(db: Session) -> None:
+    """Gerechnet wird in UTC, behauptet wird es nicht.
+
+    Bis zum 05.10.2026 stand hier „Zeitzone des Benutzers: UTC.“ — für das
+    Modell eine Tatsache, und Singra lag bei jedem Konto ohne Zone um den
+    vollen Versatz daneben. „unbekannt“ löst die Rückfrage aus `ai_prompt` aus.
+    """
     user = _benutzer(db, "ohnezone", "ai.chat.use")
     user.time_zone = None
     db.commit()
 
     assert ai_lage.zone_des_benutzers(user) == "UTC"
+    assert ai_lage.gewaehlte_zone(user) is None
     block = ai_lage.lageblock(db, user)
-    assert "Zeitzone des Benutzers: UTC." in block
+    assert "Zeitzone des Benutzers: unbekannt (Uhrzeit oben in UTC)." in block
+    assert "Zeitzone des Benutzers: UTC" not in block
+    assert ai_lage.LOKAL_ENDUNG not in block
 
 
 def test_ungueltige_zeitzone_am_benutzer_faellt_auf_utc_zurueck(db: Session) -> None:
@@ -447,8 +455,77 @@ def test_ungueltige_zeitzone_am_benutzer_faellt_auf_utc_zurueck(db: Session) -> 
     db.commit()
 
     assert ai_lage.zone_des_benutzers(user) == "UTC"
+    assert ai_lage.gewaehlte_zone(user) is None
     block = ai_lage.lageblock(db, user)
-    assert "Zeitzone des Benutzers: UTC." in block
+    assert "Zeitzone des Benutzers: unbekannt" in block
+
+
+def test_mit_zone_nennt_der_block_die_lokal_felder(db: Session) -> None:
+    """Das Modell soll die `_lokal`-Felder lesen, statt selbst umzurechnen."""
+    user = _benutzer(db, "lokalfelder", "ai.chat.use")
+    user.time_zone = "Europe/Berlin"
+    db.commit()
+
+    block = ai_lage.lageblock(db, user)
+    assert f"Werkzeugfelder mit der Endung {ai_lage.LOKAL_ENDUNG}" in block
+
+
+# ── Ortszeit in Werkzeugergebnissen ───────────────────────────────────────
+
+
+def test_ortszeit_folgt_der_zeitumstellung() -> None:
+    """Vor dem 25.10.2026 gilt in Berlin +02:00, danach +01:00.
+
+    Genau das verfehlte das Modell, als es selbst umrechnete: es nahm den
+    Versatz von heute für jeden Termin.
+    """
+    ergebnis = ai_lage.ortszeit_anhaengen(
+        {"events": [
+            {"title": "vorher", "start": "2026-10-24T08:00:00Z"},
+            {"title": "nachher", "start": "2026-10-26T09:00:00Z"},
+        ]},
+        "Europe/Berlin",
+    )
+    vorher, nachher = ergebnis["events"]
+    assert vorher["start_lokal"] == "Sa 24.10.2026 10:00"
+    assert nachher["start_lokal"] == "Mo 26.10.2026 10:00"
+    # Das Original bleibt UTC — das Modell reicht es an Werkzeuge zurück.
+    assert nachher["start"] == "2026-10-26T09:00:00Z"
+
+
+def test_ortszeit_liest_iso_mit_versatz_und_die_ical_grundform() -> None:
+    ergebnis = ai_lage.ortszeit_anhaengen(
+        {
+            "next_run": "2026-10-05T06:30:00.123456+00:00",
+            "occurrence": "20261026T090000Z",
+            "plan": "taeglich um 08:30 (Europe/Berlin)",
+            "datum_naiv": "2026-10-05T06:30:00",
+            "zahl": 3,
+        },
+        "Europe/Berlin",
+    )
+    assert ergebnis["next_run_lokal"] == "Mo 05.10.2026 08:30"
+    assert ergebnis["occurrence_lokal"] == "Mo 26.10.2026 10:00"
+    # Ohne Zonenangabe gibt es nichts ehrlich umzurechnen.
+    assert "datum_naiv_lokal" not in ergebnis
+    assert "plan_lokal" not in ergebnis
+    assert ergebnis["zahl"] == 3
+
+
+def test_ortszeit_ohne_zone_aendert_nichts() -> None:
+    """Eine „Ortszeit“ in UTC wäre die Falschauskunft, die der Block nicht mehr macht."""
+    wert = {"start": "2026-10-26T09:00:00Z"}
+    assert ai_lage.ortszeit_anhaengen(wert, None) == {"start": "2026-10-26T09:00:00Z"}
+
+
+def test_ortszeit_ueberschreibt_nichts_und_laesst_das_original_stehen() -> None:
+    wert = {"start": "2026-10-26T09:00:00Z", "start_lokal": "vom Handler"}
+    ergebnis = ai_lage.ortszeit_anhaengen(wert, "Europe/Berlin")
+    assert ergebnis["start_lokal"] == "vom Handler"
+
+    roh = {"start": "2026-10-26T09:00:00Z"}
+    ai_lage.ortszeit_anhaengen(roh, "Europe/Berlin")
+    assert roh == {"start": "2026-10-26T09:00:00Z"}
 
 
 
