@@ -169,7 +169,9 @@ class TestNachreichen:
 
         (kennung, eintrag), = auftraege.fertige_abholen()
         assert kennung == auftrag_id
-        assert eintrag["error_code"] == "DESKTOP_JOB_EXPIRED"
+        # Nie abgeholt: seit 05.10.2026 mit eigenem Code und Grund, damit das
+        # Modell es nicht alle drei Minuten wieder versucht.
+        assert eintrag["error_code"] == "DESKTOP_JOB_NOT_PICKED_UP"
 
 
 class _Panel:

@@ -743,7 +743,8 @@ class TestFristen:
         db.expire_all()
         ergebnis = desktop_job_service.ergebnisse(db, [job.id])[0]
         assert ergebnis["status"] == "expired"
-        assert ergebnis["error_code"] == "DESKTOP_JOB_EXPIRED"
+        # Nie abgeholt — der benannte Fehlschlag sagt das seit 05.10.2026.
+        assert ergebnis["error_code"] == "DESKTOP_JOB_NOT_PICKED_UP"
 
     def test_ein_verpuffter_weckruf_wird_im_takt_nachgeholt(
         self, db: Session, regular_user: User
@@ -947,6 +948,78 @@ class TestFristen:
         assert db.get(DesktopJob, job.id).status == "expired"
         # Zweimal aufrufen weckt nicht zweimal — der Auftrag ist geschlossen.
         assert desktop_job_service.verfallene_wecken(db) == 0
+
+    def _kartenauftrag(self, db: Session, user: User) -> DesktopJob:
+        run = _lauf(db, user)
+        job = desktop_job_service.anlegen(
+            db,
+            user_id=user.id,
+            run_id=run.id,
+            tool_call_id="call-1",
+            tool_name="desktop_launch_app",
+            arguments={"name": "calc"},
+        )
+        db.commit()
+        assert desktop_job_service._lange_frist(job), "Vorbedingung: Kartenauftrag"
+        return job
+
+    def test_unabgeholt_verfaellt_er_nach_der_kurzen_frist(
+        self, db: Session, regular_user: User
+    ):
+        """Die Android-App holt nichts ab (05.10.2026).
+
+        Mit der langen Frist wartete Singra zehn Minuten auf ein Bildschirmfoto,
+        das kein Gerät je aufnehmen würde.
+        """
+        job = self._kartenauftrag(db, regular_user)
+        job.created_at = datetime.now(timezone.utc) - timedelta(
+            seconds=desktop_job_service.FRIST_SEKUNDEN + 1
+        )
+        db.commit()
+
+        assert desktop_job_service.verfallene_wecken(db) == 1
+        db.expire_all()
+        assert db.get(DesktopJob, job.id).status == "expired"
+        # Und das Modell erfährt, warum — sonst versucht es es alle drei
+        # Minuten wieder, bis das Rundenbudget leer ist.
+        (ergebnis,) = desktop_job_service.ergebnisse(db, [job.id])
+        assert ergebnis["error_code"] == "DESKTOP_JOB_NOT_PICKED_UP"
+        assert "Nicht erneut versuchen" in ergebnis["grund"]
+
+    def test_abgeholt_und_verfallen_bleibt_ein_verfall(self, db: Session, regular_user: User):
+        job = self._kartenauftrag(db, regular_user)
+        job.status = "taken"
+        job.taken_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+        job.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+
+        assert desktop_job_service.verfallene_wecken(db) == 1
+        (ergebnis,) = desktop_job_service.ergebnisse(db, [job.id])
+        assert ergebnis["error_code"] == "DESKTOP_JOB_EXPIRED"
+        assert "grund" not in ergebnis
+
+    def test_abgeholt_behaelt_er_die_lange_frist(self, db: Session, regular_user: User):
+        """Die Gegenrichtung: vor der Karte steht ein Mensch, der liest."""
+        job = self._kartenauftrag(db, regular_user)
+        job.created_at = datetime.now(timezone.utc) - timedelta(
+            seconds=desktop_job_service.FRIST_SEKUNDEN + 1
+        )
+        job.status = "taken"
+        job.taken_at = datetime.now(timezone.utc) - timedelta(
+            seconds=desktop_job_service.FRIST_SEKUNDEN
+        )
+        db.commit()
+
+        assert desktop_job_service.verfallene_wecken(db) == 0
+        db.expire_all()
+        assert db.get(DesktopJob, job.id).status == "taken"
+
+    def test_ein_frischer_unabgeholter_bleibt(self, db: Session, regular_user: User):
+        job = self._kartenauftrag(db, regular_user)
+
+        assert desktop_job_service.verfallene_wecken(db) == 0
+        db.expire_all()
+        assert db.get(DesktopJob, job.id).status == "pending"
 
     def test_offene_zaehlt_nur_was_noch_unterwegs_ist(self, db: Session, regular_user: User):
         run = _lauf(db, regular_user)

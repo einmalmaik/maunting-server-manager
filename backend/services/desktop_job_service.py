@@ -31,7 +31,7 @@ import json
 import logging
 from uuid import uuid4
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from models import DesktopJob
@@ -111,6 +111,36 @@ def _lange_frist(job: DesktopJob) -> bool:
     nur um dieselbe Frage zu beantworten, waere Arbeit ohne Erkenntnis.
     """
     return (job.expires_at - job.created_at).total_seconds() > FRIST_SEKUNDEN
+
+
+NICHT_ABGEHOLT_GRUND = (
+    "Kein Gerät hat diesen Auftrag abgeholt. Entweder läuft die Desktop-App "
+    "auf dem Rechner nicht, oder die Bitte kam von einem Gerät, das den "
+    "Rechner nicht bedienen kann (die Android-App kann das nie). Nicht erneut "
+    "versuchen: sag dem Benutzer, dass das nur aus der geöffneten "
+    "Desktop-App an seinem Rechner geht."
+)
+
+
+def _faellig(jetzt: datetime):
+    """Wann ein offener Auftrag verfällt: an seiner Frist — oder früher,
+    wenn ihn kein Gerät abgeholt hat.
+
+    Die lange Frist (`FRIST_BESTAETIGUNG_SEKUNDEN`) ist für den Menschen vor
+    der Karte da, und eine Karte gibt es erst, wenn ein Rechner den Auftrag
+    geholt hat. Holt ihn keiner, gilt die kurze. Gefunden am 05.10.2026:
+    Die Android-App ist ein gekoppeltes Gerät ohne Auftragsschleife
+    (`useAuftragsschleife`). Ein Bildschirmfoto aus ihrem Chat lag zehn
+    Minuten unabgeholt, und so lange wartete Singra. Dasselbe gilt für einen
+    Rechner, dessen App geschlossen ist.
+    """
+    return or_(
+        DesktopJob.expires_at <= jetzt,
+        and_(
+            DesktopJob.status == "pending",
+            DesktopJob.created_at <= jetzt - timedelta(seconds=FRIST_SEKUNDEN),
+        ),
+    )
 
 
 def _aad(job_id: str) -> str:
@@ -298,6 +328,13 @@ def ergebnisse(db: Session, job_ids: list[str]) -> list[dict]:
                 eintrag["error_code"] = "DESKTOP_JOB_RESULT_UNREADABLE"
             else:
                 eintrag["ergebnis" if job.status == "done" else "grund"] = daten
+        elif job.status == "expired" and job.taken_at is None:
+            # Nie abgeholt heißt: auf diesem Weg kommt nichts an. Ohne den Grund
+            # las das Modell nur „verfallen“ und versuchte es erneut, alle drei
+            # Minuten, bis das Rundenbudget leer war (05.10.2026, aus dem Chat
+            # der Android-App).
+            eintrag["error_code"] = "DESKTOP_JOB_NOT_PICKED_UP"
+            eintrag["grund"] = NICHT_ABGEHOLT_GRUND
         elif job.status == "expired":
             eintrag["error_code"] = "DESKTOP_JOB_EXPIRED"
         ausgabe.append(eintrag)
@@ -336,7 +373,7 @@ def _aufraeumen(db: Session, *, user_id: int) -> None:
         .filter(
             DesktopJob.user_id == user_id,
             DesktopJob.status.in_(("pending", "taken")),
-            DesktopJob.expires_at <= jetzt,
+            _faellig(jetzt),
         )
         .all()
     )
@@ -390,7 +427,7 @@ def verfallene_wecken(db: Session) -> int:
         db.query(DesktopJob)
         .filter(
             DesktopJob.status.in_(("pending", "taken")),
-            DesktopJob.expires_at <= jetzt,
+            _faellig(jetzt),
         )
         .all()
     )
