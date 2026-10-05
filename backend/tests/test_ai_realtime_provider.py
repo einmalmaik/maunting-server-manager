@@ -229,7 +229,8 @@ def test_realtime_session_uses_semantic_vad_without_transcription() -> None:
         "interrupt_response": False,
     }
     assert "transcription" not in config["audio"]["input"]
-    assert config["max_output_tokens"] == 32_768
+    # 1–4096 oder "inf" (OpenAI-Realtime-Vertrag). 32_768 brachte HTTP 504.
+    assert config["max_output_tokens"] == "inf"
 
 
 def test_realtime_starts_workers_but_does_not_steer_them(db: Session, regular_user, monkeypatch) -> None:
@@ -1162,3 +1163,101 @@ def test_realtime_migration_carries_provider_and_usage_columns(tmp_path: Path, p
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+class _Panel:
+    def __init__(self):
+        self.sent = []
+
+    async def send_json(self, value):
+        self.sent.append(value)
+
+
+class _Seitenkanal:
+    """Spielt eine feste Ereignisfolge ab, wie der Seitenkanal von OpenAI."""
+
+    def __init__(self, ereignisse):
+        self._ereignisse = [json.dumps(e) for e in ereignisse]
+        self.sent = []
+
+    async def send(self, value):
+        self.sent.append(value)
+
+    def __aiter__(self):
+        return self._fluss()
+
+    async def _fluss(self):
+        for roh in self._ereignisse:
+            yield roh
+
+
+async def _abspielen(monkeypatch, ereignisse) -> list[dict]:
+    panel = _Panel()
+    session = realtime_session.RealtimeSitzung(
+        panel,
+        vorbereitung=_vorbereitung(),
+        user_id=7,
+        http_client=None,
+        herkunft="panel",
+        familie=None,
+    )
+    session._sideband = _Seitenkanal(ereignisse)
+    monkeypatch.setattr(session, "_verbrauch", lambda _event: None)
+    await session._sideband_lesen()
+    return panel.sent
+
+
+def _leer_gemeldet(gesendet: list[dict]) -> bool:
+    return any(n.get("grund") == "leere_antwort" for n in gesendet)
+
+
+@pytest.mark.asyncio
+async def test_gesprochene_antwort_ueber_webrtc_ist_nicht_leer(monkeypatch) -> None:
+    """Über WebRTC kommt kein `response.output_audio.delta` (05.10.2026).
+
+    Bis dahin stand nach jedem gesprochenen Satz „Das hat gerade nicht
+    geklappt.“ im Overlay — die Erkennung sah nur die Deltas.
+    """
+    gesendet = await _abspielen(monkeypatch, [
+        {"type": "input_audio_buffer.speech_stopped"},
+        {"type": "response.created"},
+        {"type": "output_audio_buffer.started"},
+        {"type": "response.output_audio_transcript.delta", "delta": "Hallo"},
+        {"type": "response.done", "response": {"status": "completed", "output": [
+            {"type": "message", "content": [{"type": "output_audio", "transcript": "Hallo"}]},
+        ]}},
+    ])
+    assert not _leer_gemeldet(gesendet)
+    assert {"art": "zustand", "zustand": "spricht"} in gesendet
+
+
+@pytest.mark.asyncio
+async def test_ausgabeliste_genuegt_auch_ohne_puffer_ereignis(monkeypatch) -> None:
+    gesendet = await _abspielen(monkeypatch, [
+        {"type": "input_audio_buffer.speech_stopped"},
+        {"type": "response.done", "response": {"status": "completed", "output": [
+            {"type": "message", "content": [{"type": "output_audio", "transcript": "Hallo"}]},
+        ]}},
+    ])
+    assert not _leer_gemeldet(gesendet)
+
+
+@pytest.mark.asyncio
+async def test_ein_werkzeugaufruf_ist_keine_leere_antwort(monkeypatch) -> None:
+    gesendet = await _abspielen(monkeypatch, [
+        {"type": "input_audio_buffer.speech_stopped"},
+        {"type": "response.done", "response": {"status": "completed", "output": [
+            {"type": "function_call", "name": "desktop_system", "call_id": "c1", "arguments": "{}"},
+        ]}},
+    ])
+    assert not _leer_gemeldet(gesendet)
+
+
+@pytest.mark.asyncio
+async def test_wirklich_stumme_antwort_wird_weiter_gemeldet(monkeypatch) -> None:
+    """Die Gegenrichtung: die Meldung selbst bleibt, wo sie stimmt."""
+    gesendet = await _abspielen(monkeypatch, [
+        {"type": "input_audio_buffer.speech_stopped"},
+        {"type": "response.done", "response": {"status": "completed", "output": []}},
+    ])
+    assert _leer_gemeldet(gesendet)

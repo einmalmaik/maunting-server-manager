@@ -47,7 +47,13 @@ MAX_TOOL_ARGUMENTE_ZEICHEN = 32 * 1024
 # weiterhin; dies ist nur kein zusätzliches, künstliches Sprachlimit mehr.
 # Großzügige Obergrenze für lange Audioantworten. Der Nutzer kann jederzeit
 # per VAD unterbrechen; das frühere 2.048er Sprachlimit bleibt bewusst weg.
-MAX_OUTPUT_TOKENS = 32_768
+#
+# `"inf"` heißt laut API „das Maximum des Modells“; eine Zahl darf nur 1 bis
+# 4096 sein. Hier stand bis zum 05.10.2026 `32_768` — außerhalb des Vertrags,
+# und OpenAI beantwortete es zuletzt mit **HTTP 504 nach 16 Sekunden** statt
+# mit einem 400. Jede Realtime-Sitzung scheiterte am Aufbau, im Overlay stand
+# nur „Das hat gerade nicht geklappt.“
+MAX_OUTPUT_TOKENS = "inf"
 REALTIME_TOOL_TIMEOUT_SECONDS = 12.0
 _CALL_ID = re.compile(r"^[A-Za-z0-9_-]{1,160}$")
 _SPRACHNAMEN = {"de": "Deutsch", "en": "Englisch"}
@@ -564,6 +570,28 @@ class RealtimeSitzung:
         except Exception:
             pass
 
+    @staticmethod
+    def _antwort_ohne_ausgabe(response: dict) -> bool:
+        """Blieb diese Antwort wirklich stumm — ohne Ton und ohne Werkzeug?
+
+        Über WebRTC schickt OpenAI **keine** `response.output_audio.delta`: der
+        Ton läuft über die Medienspur, Seitenkanal und Datenkanal sehen nur
+        Steuerereignisse. Bis zum 05.10.2026 hing die Erkennung allein an den
+        Deltas, und jede gesprochene Antwort galt als leer — nach jedem Satz
+        stand in der Oberfläche „Das hat gerade nicht geklappt.“ Die
+        Ausgabeliste in `response.done` sagt es auf jedem Weg: ein Teil
+        `output_audio` heißt gesprochen, ein `function_call` heißt gearbeitet.
+        """
+        for eintrag in response.get("output") or []:
+            if not isinstance(eintrag, dict):
+                continue
+            if eintrag.get("type") == "function_call":
+                return False
+            for teil in eintrag.get("content") or []:
+                if isinstance(teil, dict) and teil.get("type") in {"output_audio", "audio"}:
+                    return False
+        return True
+
     def _realtime_endpoint(self) -> tuple[str, dict[str, str], str]:
         if self.v.provider_kind == "azure_openai":
             base = self.v.base_url.rstrip("/")
@@ -990,10 +1018,17 @@ class RealtimeSitzung:
                 await self._panel_senden({"art": "zustand", "zustand": "denkt"})
             elif art == "response.created":
                 self._response_aktiv = True
-            elif art in {"response.output_audio.delta", "response.audio.delta"}:
+            elif art in {
+                "response.output_audio.delta",
+                "response.audio.delta",
+                # Der WebRTC-Weg: dort kommen keine Deltas, nur der Puffer.
+                "output_audio_buffer.started",
+            }:
                 self._assistant_spricht = True
                 self._antwort_hat_audio = True
                 await self._panel_senden({"art": "zustand", "zustand": "spricht"})
+            elif art == "output_audio_buffer.stopped":
+                self._assistant_spricht = False
             elif art == "response.output_item.added":
                 item = event.get("item") or {}
                 if item.get("type") == "function_call" and isinstance(item.get("name"), str):
@@ -1094,7 +1129,11 @@ class RealtimeSitzung:
                         "message": (ex_msg or "")[:400],
                     })
                 if not self._tool_tasks:
-                    if status == "completed" and not self._antwort_hat_audio:
+                    if (
+                        status == "completed"
+                        and not self._antwort_hat_audio
+                        and self._antwort_ohne_ausgabe(response)
+                    ):
                         await self._debug_senden("REALTIME_LEERE_ANTWORT", hint="kein Audio")
                         await self._panel_senden({"art": "stoerung", "grund": "leere_antwort"})
                         await self._panel_senden({"art": "debug", "code": "REALTIME_LEERE_ANTWORT", "hint": "Modell blieb stumm"})
