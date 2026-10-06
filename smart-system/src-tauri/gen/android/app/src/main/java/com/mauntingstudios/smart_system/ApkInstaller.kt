@@ -50,35 +50,44 @@ object ApkInstaller {
             val sessionId = packageInstaller.createSession(params)
             val session = packageInstaller.openSession(sessionId)
 
-            FileInputStream(apkFile).use { input ->
-                session.openWrite("package_apk", 0, apkFile.length()).use { output ->
-                    input.copyTo(output)
-                    session.fsync(output)
+            try {
+                FileInputStream(apkFile).use { input ->
+                    session.openWrite("base.apk", 0, apkFile.length()).use { output ->
+                        input.copyTo(output)
+                        session.fsync(output)
+                    }
                 }
+
+                val intent = Intent(context, InstallStatusReceiver::class.java).apply {
+                    action = ACTION_INSTALL_STATUS
+                    putExtra("apk_path", apkPath)
+                }
+
+                val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                } else {
+                    PendingIntent.FLAG_UPDATE_CURRENT
+                }
+
+                val pendingIntent = PendingIntent.getBroadcast(
+                    context,
+                    sessionId,
+                    intent,
+                    flags
+                )
+
+                session.commit(pendingIntent.intentSender)
+                session.close()
+                Log.i(TAG, "PackageInstaller Session $sessionId erfolgreich initiiert.")
+                return true
+            } catch (sessionEx: Exception) {
+                try {
+                    session.abandon()
+                } catch (abandonEx: Exception) {
+                    Log.w(TAG, "Konnte abgebrochene Session nicht verwerfen: ${abandonEx.message}")
+                }
+                throw sessionEx
             }
-
-            val intent = Intent(context, InstallStatusReceiver::class.java).apply {
-                action = ACTION_INSTALL_STATUS
-                putExtra("apk_path", apkPath)
-            }
-
-            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            } else {
-                PendingIntent.FLAG_UPDATE_CURRENT
-            }
-
-            val pendingIntent = PendingIntent.getBroadcast(
-                context,
-                sessionId,
-                intent,
-                flags
-            )
-
-            session.commit(pendingIntent.intentSender)
-            session.close()
-            Log.i(TAG, "PackageInstaller Session $sessionId erfolgreich initiiert.")
-            return true
         } catch (e: Exception) {
             Log.w(TAG, "PackageInstaller fehlgeschlagen, weiche auf FileProvider aus: ${e.message}")
         }
