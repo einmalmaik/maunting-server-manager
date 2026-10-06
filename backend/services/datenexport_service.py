@@ -113,6 +113,7 @@ AUSGESCHLOSSEN: dict[str, str] = {
     "ai_action_proposals.confirmation_token_hash": "Hash eines Bestaetigungstokens",
     "ai_action_approvals.token_hash": "Hash eines Bestaetigungstokens",
     "ai_memory_entries.key_index": "Suchindex (HMAC) zum Namen",
+    "ai_memory_themen.name_index": "Suchindex (HMAC) zum Thema",
     "ai_memory_entries.embedding_bytes": "Suchvektor, aus dem Eintrag berechnet",
     "ai_skills.embedding_json": "Suchvektor, aus dem Eintrag berechnet",
     "chat_media.ciphertext_blob": "Ende-zu-Ende verschluesselt, der Schluessel steht nur in der Nachricht",
@@ -155,6 +156,14 @@ ZEILEN_AAD: dict[str, Callable[[dict], str]] = {
         if int(z.get("aad_version") or 1) >= 2 else f"msm:ai:memory:{z['id']}"
     ),
     "ai_memory_entries.key_encrypted": lambda z: f"msm:ai:memory:key:{z['scope_identity']}:{z['id']}",
+    "ai_memory_entries.titel_encrypted": lambda z: f"msm:ai:memory:titel:{z['scope_identity']}:{z['id']}",
+    "ai_memory_themen.name_encrypted": lambda z: f"msm:ai:memory:thema:{z['scope_identity']}:{z['id']}",
+    "ai_memory_versionen.text_encrypted": lambda z: (
+        f"msm:ai:memory:version:text:{z['scope_identity']}:{z['memory_id']}:{z['id']}"
+    ),
+    "ai_memory_versionen.titel_encrypted": lambda z: (
+        f"msm:ai:memory:version:titel:{z['scope_identity']}:{z['memory_id']}:{z['id']}"
+    ),
     "ai_attachments.content_encrypted": lambda z: f"msm:ai:attachment:{z['id']}:content",
     "ai_attachments.extracted_text_encrypted": lambda z: f"msm:ai:attachment:{z['id']}:text",
     "ai_action_proposals.payload_encrypted": lambda z: f"msm:ai:action-proposal:v1:{z['id']}",

@@ -142,7 +142,7 @@ def test_der_zeilendeckel_wandert_mit_dem_budget(
     ai_memory_service.provider_memory_context(
         db, regular_user, query="Was weisst du?"
     )
-    beim_sockel = zaehler[0]
+    beim_sockel = zaehler.texte
     ai_memory_service.provider_memory_context(
         db, regular_user, query="Was weisst du?",
         budget=4 * ai_memory_service.MAX_CONTEXT_CHARS,
@@ -150,7 +150,7 @@ def test_der_zeilendeckel_wandert_mit_dem_budget(
 
     assert beim_sockel == 3
     # Viermal soviel Platz, viermal soviele Kandidaten — und nicht mehr.
-    assert zaehler[0] - beim_sockel == 12
+    assert zaehler.texte - beim_sockel == 12
 
 
 def test_frequently_used_entries_survive_a_foreign_language_question(
@@ -481,26 +481,12 @@ def test_one_unreadable_entry_does_not_take_the_whole_chat_down(
     Suche traegt eigene Folgen — dort scheitert nicht der Lauf, sondern das
     Werkzeug `search_memory` mitten in einer Antwort.
     """
-    from services.dis_client import DisClient, DisDecryptionError
+    from tests._entschluesselung import unlesbar_machen
 
     _allow_memory(db, regular_user)
     kaputt = _write(db, regular_user, "kaputt", "Unlesbarer Wert")
     _write(db, regular_user, "heil", "Lesbarer Wert")
-    # Die Kennung **hier** festhalten und nicht in der Attrappe von der Zeile
-    # lesen: die Attrappe laeuft in einem Arbeitsthread von
-    # `_entschluesseln_nebenlaeufig`, und ein Zugriff auf ein SQLAlchemy-Objekt
-    # koennte dort nachladen — auf einer Sitzung, die nur dem Hauptthread
-    # gehoert. Genau die Trennung, die der Dienst selbst einhaelt.
-    kaputte_id = kaputt.id
-
-    echt = DisClient.decrypt
-
-    def stolpert(payload, *, aad):
-        if aad.endswith(kaputte_id):
-            raise DisDecryptionError("AAD passt nicht mehr")
-        return echt(payload, aad=aad)
-
-    monkeypatch.setattr(DisClient, "decrypt", staticmethod(stolpert))
+    unlesbar_machen(monkeypatch, kaputt.id)
 
     block = ai_memory_service.provider_memory_context(db, regular_user, query="Was weisst du?")
 
@@ -609,35 +595,18 @@ def test_recency_beats_an_old_never_used_entry(
     assert "Lange her" not in block
 
 
-def _zaehle_entschluesselungen(monkeypatch: pytest.MonkeyPatch) -> list[int]:
-    """Zaehlt die Aufrufe von `DisClient.decrypt` — die Groesse, um die es geht.
+def _zaehle_entschluesselungen(monkeypatch: pytest.MonkeyPatch):
+    """Zaehlt die geoeffneten Erinnerungstexte — die Groesse, um die es geht.
 
-    Jeder Aufruf ist ein eigener HTTP-Roundtrip zum DIS-Sidecar. An der
-    Laenge des Ergebnisses laesst sich das nicht ablesen: der Block wird danach
-    ohnehin auf `MAX_CONTEXT_CHARS` gekuerzt und sieht mit und ohne Deckel
-    gleich aus. Gemessen werden muss der Aufwand, nicht das Ergebnis.
-
-    Die Sperre ist keine Vorsicht auf Vorrat: seit `_entschluesseln` die Zeilen
-    zu mehreren gleichzeitig oeffnet, laeuft diese Attrappe in mehreren Threads,
-    und `zaehler[0] += 1` ist Lesen, Rechnen und Schreiben in drei Schritten.
-    Ohne sie zaehlte der Test gelegentlich zu wenig und waere launisch statt
-    aussagekraeftig.
+    An der Laenge des Ergebnisses laesst sich das nicht ablesen: der Block wird
+    danach ohnehin auf `MAX_CONTEXT_CHARS` gekuerzt und sieht mit und ohne
+    Deckel gleich aus. Gemessen werden muss der Aufwand, nicht das Ergebnis.
+    Seit die Texte gebuendelt durch den Sidecar gehen, ist das die Zahl der
+    Texte und nicht mehr die der Aufrufe (`tests._entschluesselung`).
     """
-    import threading
+    from tests._entschluesselung import mitzaehlen
 
-    from services.dis_client import DisClient
-
-    zaehler = [0]
-    sperre = threading.Lock()
-    echt = DisClient.decrypt
-
-    def mitzaehlen(payload, *, aad):
-        with sperre:
-            zaehler[0] += 1
-        return echt(payload, aad=aad)
-
-    monkeypatch.setattr(DisClient, "decrypt", staticmethod(mitzaehlen))
-    return zaehler
+    return mitzaehlen(monkeypatch)
 
 
 def _server_mit_notiz(db: Session, user: User, nummer: int, wert: str) -> None:
@@ -684,7 +653,7 @@ def test_eine_anfrage_entschluesselt_nie_mehr_als_der_deckel_erlaubt(
 
     assert block is not None
     # Sieben Bereiche waeren sieben Entschluesselungen gewesen.
-    assert zaehler[0] == 3
+    assert zaehler.texte == 3
 
 
 def test_unterhalb_des_deckels_bleibt_alles_wie_es_war(
@@ -708,7 +677,7 @@ def test_unterhalb_des_deckels_bleibt_alles_wie_es_war(
     )
 
     assert "Erster Wert" in block and "Zweiter Wert" in block
-    assert zaehler[0] == 2
+    assert zaehler.texte == 2
     # Und der Block behauptet nicht, es fehle etwas.
     assert "gekuerzt" not in block.lower() and "nicht alles" not in block.lower()
 
@@ -846,52 +815,39 @@ def test_der_hinweis_zaehlt_auch_was_die_vorauswahl_wegwarf(
     assert len([zeile for zeile in block.splitlines() if zeile.startswith("[user")]) == 2
 
 
-def test_der_abruf_oeffnet_die_zeilen_gleichzeitig(
+def test_der_abruf_oeffnet_alle_zeilen_in_einem_aufruf(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Die Wartezeit am Sidecar darf nicht mit der Zahl der Eintraege wachsen.
 
-    Jede Zeile ist ein eigener HTTP-Roundtrip, und daran ist fast nichts
-    Rechnung — der Sidecar oeffnet ein paar hundert Byte, alles andere ist der
-    Weg hin und zurueck. Nacheinander addiert sich genau diese Wartezeit vor dem
-    ersten Byte der Antwort: gemessen 150 bis 600 ms bei 300 Zeilen, und in der
-    ungedeckelten Profilansicht (`personal_entries`) 10,3 s bei 5.000.
+    Am Oeffnen einer Zeile ist fast nichts Rechnung — der Sidecar entschluesselt
+    ein paar hundert Byte, alles andere ist der Weg hin und zurueck. Zeile fuer
+    Zeile addierte sich genau diese Wartezeit vor dem ersten Byte der Antwort:
+    gemessen 150 bis 600 ms bei 300 Zeilen und 10,3 s bei 5.000. Bis Gedaechtnis
+    v2 liefen dafuer acht Einzelaufrufe zugleich in Threads; seitdem gehen alle
+    Texte zusammen durch `/decrypt-many`.
 
-    Die Sperre in diesem Test ist zugleich die Pruefung. Jede der ersten beiden
-    Entschluesselungen wartet an derselben Schranke, und die oeffnet nur, wenn
-    beide zugleich davorstehen. Liefe der Abruf wieder Zeile fuer Zeile, kaeme
-    die zweite nie an — die erste liefe in den Zeitablauf der Schranke und der
-    Test schluege fehl, statt lediglich langsamer zu sein.
+    Gezaehlt wird darum beides: kein einziger Einzelaufruf, und alle vier Texte
+    in **demselben** Stapel. Wer auf den Einzelweg zurueckfaellt, faellt hier
+    auf, statt nur langsamer zu werden.
     """
-    import threading
-
-    from services.dis_client import DisClient
-
     _allow_memory(db, regular_user)
     for nummer in range(4):
         _write(db, regular_user, f"eintrag{nummer}", f"Wert {nummer}")
-
-    schranke = threading.Barrier(2, timeout=5)
-    sperre = threading.Lock()
-    gesehen: list[str] = []
-    echt = DisClient.decrypt
-
-    def wartet_aufeinander(payload, *, aad):
-        with sperre:
-            zuerst = len(gesehen) < 2
-            gesehen.append(aad)
-        if zuerst:
-            schranke.wait()
-        return echt(payload, aad=aad)
-
-    monkeypatch.setattr(DisClient, "decrypt", staticmethod(wartet_aufeinander))
+    zaehler = _zaehle_entschluesselungen(monkeypatch)
 
     block = ai_memory_service.provider_memory_context(
         db, regular_user, query="Was weisst du?"
     )
 
+    from tests._entschluesselung import ist_text
+
     assert block is not None
     assert len(block.splitlines()) == 4
+    assert zaehler.einzeln == []
+    mit_text = [aads for aads in zaehler.stapel if any(ist_text(aad) for aad in aads)]
+    assert len(mit_text) == 1
+    assert sum(1 for aad in mit_text[0] if ist_text(aad)) == 4
 
 
 def test_die_suche_entschluesselt_ebenfalls_nicht_alles(
@@ -914,5 +870,5 @@ def test_die_suche_entschluesselt_ebenfalls_nicht_alles(
         db, regular_user, query="wartungsfenster"
     )
 
-    assert zaehler[0] == 3
+    assert zaehler.texte == 3
     assert "wartungsfenster" in [row.key for row, _value, _score in treffer]

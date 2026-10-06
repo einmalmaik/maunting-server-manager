@@ -1,4 +1,5 @@
 import {
+  Archive,
   BookOpen,
   Brain,
   BrainCircuit,
@@ -8,20 +9,46 @@ import {
   ChevronsUpDown,
   Download,
   Flame,
+  History,
   Pencil,
   Plus,
+  RotateCcw,
   Save,
   ShieldAlert,
+  Tag,
   Trash2,
   X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { aiApi, type AiMemoryEntry, type AiMemoryPage } from '@/api/ai'
+import {
+  aiApi,
+  type AiMemoryAnsicht,
+  type AiMemoryEntry,
+  type AiMemoryFassung,
+  type AiMemoryPage,
+  type AiMemoryThema,
+} from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { Button, Kurzinfo, Pagination, Switch } from '@/Singra/UI'
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  Dropdown,
+  Input,
+  Kurzinfo,
+  Pagination,
+  Switch,
+  TabBar,
+  Textarea,
+  Versionsliste,
+  type TabDef,
+} from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
@@ -50,13 +77,74 @@ interface Props {
 
 const CHUNK_SIZE = 30
 
+/** So lange lässt sich zurückholen, was Singra vergessen hat (`VERGESSEN_TAGE`). */
+const VERGESSEN_TAGE = 30
+
+const ANSICHTEN: TabDef<AiMemoryAnsicht>[] = [
+  { id: 'aktiv', labelKey: 'ai.memory.ansichten.aktiv', icon: Brain },
+  { id: 'vergessen', labelKey: 'ai.memory.ansichten.vergessen', icon: Archive },
+]
+
+/**
+ * Gleichnamige Themen werden ein Filter.
+ *
+ * Im Profil stehen zwei Bereiche in einer Liste (allgemein und zu einzelnen
+ * Servern), und jeder hat seine eigenen Themen. „Familie“ allgemein und
+ * „familie“ zu Server 62 sind für den Menschen dasselbe Wort.
+ */
+interface Themengruppe {
+  schluessel: string
+  name: string
+  ids: string[]
+  anzahl: number
+}
+
+function themenGruppieren(themen: AiMemoryThema[]): Themengruppe[] {
+  const gruppen = new Map<string, Themengruppe>()
+  for (const thema of themen) {
+    const schluessel = thema.name.toLocaleLowerCase()
+    const gruppe = gruppen.get(schluessel)
+    if (gruppe) {
+      gruppe.ids.push(thema.id)
+      gruppe.anzahl += thema.anzahl
+    } else {
+      gruppen.set(schluessel, { schluessel, name: thema.name, ids: [thema.id], anzahl: thema.anzahl })
+    }
+  }
+  return [...gruppen.values()]
+}
+
+function kuerzen(text: string, laenge = 60): string {
+  const flach = text.replace(/\s+/g, ' ').trim()
+  return flach.length > laenge ? `${flach.slice(0, laenge).trimEnd()} …` : flach
+}
+
+/** Titel, sonst der lesbar gemachte Name aus dem Altbestand — oder nichts. */
+function ueberschrift(entry: AiMemoryEntry): string | null {
+  if (entry.titel) return entry.titel
+  return entry.key ? formatMemoryKey(entry.key) : null
+}
+
+/** Wie eine Erinnerung in Rückfragen und Knopfnamen heißt. */
+function benennung(entry: AiMemoryEntry): string {
+  return ueberschrift(entry) ?? kuerzen(entry.value)
+}
+
+interface Ladeziel {
+  seite?: number
+  groesse?: number
+  ansicht?: AiMemoryAnsicht
+  themaIds?: string[]
+}
+
 /**
  * Erinnerungen einsehen und pflegen im kompakten Logbuch-Stil.
  *
- * Zeigt Einträge standardmäßig eingeklappt als Notizbuch-Zeilen mit
- * formatierten Titeln, diskreten Metadaten (Gemerkt am, Häufigkeit)
- * und progressivem Lazy-Scrolling für optimale Performance auch bei
- * Hunderten Einträgen über Web, Desktop (Tauri) und Mobile hinweg.
+ * Seit Gedächtnis v2 ist eine Erinnerung ein bis fünf Sätze ohne Namen, mit
+ * Titel und Thema daneben. Jede Änderung legt den Stand davor als Fassung ab
+ * („Verlauf“), und was Singra vergisst, steht 30 Tage unter „Vergessen“, bevor
+ * es endgültig weg ist. Altbestand behält seinen Namen, bis er umgeschrieben
+ * ist.
  */
 export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   const { t, i18n } = useTranslation()
@@ -70,15 +158,21 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   const [gesamt, setGesamt] = useState(0)
   const [loeschbar, setLoeschbar] = useState(0)
   const [seitengroesse, setSeitengroesse] = useState(0)
+  const [ansicht, setAnsicht] = useState<AiMemoryAnsicht>('aktiv')
+  const [themen, setThemen] = useState<AiMemoryThema[]>([])
+  const [themaWahl, setThemaWahl] = useState('')
   const [enabled, setEnabled] = useState(false)
   const [suche, setSuche] = useState('')
   const [herkunft, setHerkunft] = useState<Herkunft>('all')
-  const [key, setKey] = useState('')
-  const [value, setValue] = useState('')
+  const [text, setText] = useState('')
+  const [titel, setTitel] = useState('')
+  const [thema, setThema] = useState('')
   const [bearbeitet, setBearbeitet] = useState<AiMemoryEntry | null>(null)
   const [serverNamen, setServerNamen] = useState<Map<number, string>>(new Map())
   const [busy, setBusy] = useState(false)
   const [importOffen, setImportOffen] = useState(false)
+  const [verlauf, setVerlauf] = useState<{ entry: AiMemoryEntry; fassungen: AiMemoryFassung[] } | null>(null)
+  const [verlaufHolt, setVerlaufHolt] = useState<string | null>(null)
 
   // Accordion-Zustand: Standardmäßig alle eingeklappt
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
@@ -87,12 +181,22 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   const [renderedLimit, setRenderedLimit] = useState(CHUNK_SIZE)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
   const formRef = useRef<HTMLFormElement | null>(null)
-  const valueInputRef = useRef<HTMLInputElement | null>(null)
+  const textRef = useRef<HTMLTextAreaElement | null>(null)
 
-  const holen = (offset: number): Promise<AiMemoryPage> => (
+  const themenGruppen = useMemo(() => themenGruppieren(themen), [themen])
+  const gewaehlteIds = themenGruppen.find((gruppe) => gruppe.schluessel === themaWahl)?.ids ?? []
+
+  const holen = (offset: number, zielAnsicht: AiMemoryAnsicht, themaIds: string[]): Promise<AiMemoryPage> => {
+    const filter = { status: zielAnsicht, thema: themaIds }
+    return scope.kind === 'user'
+      ? aiApi.listPersonalMemory(offset, filter)
+      : aiApi.listScopeMemory(memoryScopeName(scope), serverId, teamId, offset, filter)
+  }
+
+  const themenHolen = (): Promise<AiMemoryThema[]> => (
     scope.kind === 'user'
-      ? aiApi.listPersonalMemory(offset)
-      : aiApi.listScopeMemory(memoryScopeName(scope), serverId, teamId, offset)
+      ? aiApi.listPersonalTopics()
+      : aiApi.listScopeTopics(memoryScopeName(scope), serverId, teamId)
   )
 
   const uebernehmen = (ladung: AiMemoryPage, zielSeite: number) => {
@@ -103,55 +207,83 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     setSeite(zielSeite)
   }
 
-  const laden = async (zielSeite = seite, groesse = seitengroesse) => {
-    const ladung = await holen(Math.max(0, zielSeite - 1) * groesse)
+  const laden = async ({
+    seite: zielSeite = seite,
+    groesse = seitengroesse,
+    ansicht: zielAnsicht = ansicht,
+    themaIds = gewaehlteIds,
+  }: Ladeziel = {}): Promise<AiMemoryPage> => {
+    const ladung = await holen(Math.max(0, zielSeite - 1) * groesse, zielAnsicht, themaIds)
     const letzte = Math.max(1, Math.ceil(ladung.total / ladung.limit))
-    if (zielSeite > letzte) return laden(letzte, ladung.limit)
+    if (zielSeite > letzte) {
+      return laden({ seite: letzte, groesse: ladung.limit, ansicht: zielAnsicht, themaIds })
+    }
     uebernehmen(ladung, zielSeite)
+    return ladung
+  }
+
+  /**
+   * Nach jeder Änderung: die Themen neu zählen und die Seite neu holen. Steht
+   * unter dem gewählten Thema nichts mehr, fällt der Filter weg, statt eine
+   * leere Liste zu zeigen, die wie ein leeres Gedächtnis aussieht.
+   */
+  const nachAenderung = async (zielSeite = seite): Promise<AiMemoryPage> => {
+    const neue = await themenHolen().catch(() => themen)
+    setThemen(neue)
+    const gruppe = themenGruppieren(neue).find((eintrag) => eintrag.schluessel === themaWahl)
+    if (!gruppe && themaWahl) setThemaWahl('')
+    return laden({ seite: zielSeite, themaIds: gruppe?.ids ?? [] })
+  }
+
+  const formLeeren = () => {
+    setText(''); setTitel(''); setThema(''); setBearbeitet(null)
   }
 
   useEffect(() => {
     if (!allowed) return
     let active = true
-    setSuche(''); setHerkunft('all'); setKey(''); setValue(''); setBearbeitet(null)
+    setSuche(''); setHerkunft('all'); setAnsicht('aktiv'); setThemaWahl('')
+    setText(''); setTitel(''); setThema(''); setBearbeitet(null)
     setExpandedIds(new Set())
     Promise.all([
-      holen(0),
+      holen(0, 'aktiv', []),
       aiApi.getMemoryPreference(),
       scope.kind === 'user'
         ? api<ServerOption[]>('/servers').catch(() => [] as ServerOption[])
         : Promise.resolve([] as ServerOption[]),
+      themenHolen().catch(() => [] as AiMemoryThema[]),
     ])
-      .then(([ladung, preference, servers]) => {
+      .then(([ladung, preference, servers, geladeneThemen]) => {
         if (!active) return
         uebernehmen(ladung, 1)
         setEnabled(preference.enabled)
         setServerNamen(new Map(servers.map((row) => [row.id, row.name])))
+        setThemen(geladeneThemen)
       })
       .catch(() => { if (active) toast.error(t('ai.memory.errors.load')) })
     return () => { active = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowed, scope.kind, teamId, serverId, t])
 
+  // Die Reihenfolge ist die des Servers: an ihr ist die Seite geschnitten
+  // (`_SEITENORDNUNG`, im Vergessenen das Vergessensdatum). Wer hier anders
+  // sortierte, zeigte eine Seite in einer anderen Ordnung, als sie entstand.
   const sichtbar = useMemo(() => {
     const nadel = suche.trim().toLowerCase()
     return entries
       .filter((entry) => herkunft === 'all' || entry.origin === herkunft)
       .filter((entry) => !nadel
-        || entry.key.toLowerCase().includes(nadel)
-        || formatMemoryKey(entry.key).toLowerCase().includes(nadel)
-        || entry.value.toLowerCase().includes(nadel))
-      .sort((a, b) => {
-        const links = a.last_used_at ? Date.parse(a.last_used_at) : 0
-        const rechts = b.last_used_at ? Date.parse(b.last_used_at) : 0
-        return rechts - links || a.key.localeCompare(b.key)
-      })
+        || entry.value.toLowerCase().includes(nadel)
+        || (entry.titel ?? '').toLowerCase().includes(nadel)
+        || (entry.thema?.name ?? '').toLowerCase().includes(nadel)
+        || (entry.key ?? '').toLowerCase().includes(nadel)
+        || formatMemoryKey(entry.key ?? '').toLowerCase().includes(nadel))
   }, [entries, herkunft, suche])
 
   // Zurücksetzen des Lazy-Loading-Limits beim Filtern
   useEffect(() => {
     setRenderedLimit(CHUNK_SIZE)
-  }, [suche, herkunft, seite])
+  }, [suche, herkunft, seite, ansicht, themaWahl])
 
   // Progressive Anzeige limitieren
   const displayEntries = useMemo(() => {
@@ -193,52 +325,110 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     }
   }
 
+  const imAktuellen = ansicht === 'aktiv'
   const werkzeugleiste = entries.length > 3 || suche !== '' || herkunft !== 'all'
   const seitenzahl = seitengroesse > 0 ? Math.max(1, Math.ceil(gesamt / seitengroesse)) : 1
 
   if (!allowed) return null
 
+  const fehlermeldung = (error: unknown, ersatz: string) => (
+    error instanceof SanitizedApiError ? error.message : t(ersatz)
+  )
+
   const blaettern = (naechste: number) => {
     setBusy(true)
-    void laden(naechste)
+    void laden({ seite: naechste })
+      .catch(() => toast.error(t('ai.memory.errors.load')))
+      .finally(() => setBusy(false))
+  }
+
+  const ansichtWechseln = (naechste: AiMemoryAnsicht) => {
+    if (naechste === ansicht) return
+    setAnsicht(naechste)
+    setSuche(''); setHerkunft('all'); setThemaWahl('')
+    formLeeren()
+    setExpandedIds(new Set())
+    setBusy(true)
+    void laden({ seite: 1, ansicht: naechste, themaIds: [] })
+      .catch(() => toast.error(t('ai.memory.errors.load')))
+      .finally(() => setBusy(false))
+  }
+
+  const themaWaehlen = (schluessel: string) => {
+    setThemaWahl(schluessel)
+    setBusy(true)
+    void laden({ seite: 1, themaIds: themenGruppen.find((g) => g.schluessel === schluessel)?.ids ?? [] })
       .catch(() => toast.error(t('ai.memory.errors.load')))
       .finally(() => setBusy(false))
   }
 
   const speichern = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!key.trim() || !value.trim() || busy) return
+    const satz = text.trim()
+    if (!satz || busy) return
     setBusy(true)
+    const titelWert = titel.trim() || null
+    const themaWert = thema.trim() || null
     try {
-      const feld = { key: key.trim(), value: value.trim() }
-      await aiApi.saveMemory(
-        bearbeitet?.scope === 'server' && bearbeitet.server_id !== null
-          ? { scope: 'server', server_id: bearbeitet.server_id, ...feld }
-          : scope.kind === 'team'
-            ? { scope: 'team', team_id: scope.teamId, ...feld }
+      if (bearbeitet !== null) {
+        // Über die Kennung, nicht über den Bereich: eine Servernotiz bleibt
+        // dabei, wo sie ist, statt als persönliche Kopie neu zu entstehen.
+        await aiApi.updateMemory(bearbeitet.id, {
+          text: satz, titel: titelWert, thema: themaWert, fassung: bearbeitet.fassung,
+        })
+      } else {
+        await aiApi.createMemory({
+          ...(scope.kind === 'team'
+            ? { scope: 'team', team_id: scope.teamId }
             : scope.kind === 'server_shared'
-              ? { scope: 'server_shared', server_id: scope.serverId, ...feld }
-              : { scope: scope.kind, ...feld },
-      )
-      setKey(''); setValue(''); setBearbeitet(null)
-      await laden()
+              ? { scope: 'server_shared', server_id: scope.serverId }
+              : { scope: scope.kind }),
+          text: satz, titel: titelWert, thema: themaWert,
+        })
+      }
+      formLeeren()
+      await nachAenderung()
       toast.success(t('ai.memory.saved'))
     } catch (error: unknown) {
-      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.memory.errors.save'))
+      toast.error(fehlermeldung(error, 'ai.memory.errors.save'))
+      // Jemand anderes war schneller (ein zweites Fenster, die Pflege im
+      // Hintergrund). Der eigene Text bleibt im Formular; die Liste zeigt den
+      // Stand, gegen den er jetzt gespeichert würde.
+      if (bearbeitet !== null && error instanceof SanitizedApiError && error.status === 409) {
+        const frisch = await laden().catch(() => null)
+        const neu = frisch?.entries.find((row) => row.id === bearbeitet.id)
+        if (neu) {
+          setBearbeitet(neu)
+          setExpandedIds((prev) => new Set(prev).add(neu.id))
+        }
+      }
     } finally { setBusy(false) }
   }
 
   const entfernen = async (entry: AiMemoryEntry) => {
     if (!await confirm({
-      message: t('ai.memory.deleteConfirm', { key: entry.key }),
+      message: t(imAktuellen ? 'ai.memory.deleteConfirm' : 'ai.memory.deleteForeverConfirm', {
+        name: benennung(entry),
+      }),
       confirmText: t('common.delete'), danger: true,
     })) return
     setBusy(true)
     try {
       await aiApi.deleteMemory(entry.id)
-      if (bearbeitet?.id === entry.id) { setKey(''); setValue(''); setBearbeitet(null) }
-      await laden()
+      if (bearbeitet?.id === entry.id) formLeeren()
+      await nachAenderung()
     } catch { toast.error(t('ai.memory.errors.delete')) } finally { setBusy(false) }
+  }
+
+  const zurueckholen = async (entry: AiMemoryEntry) => {
+    setBusy(true)
+    try {
+      await aiApi.restoreMemory(entry.id)
+      await nachAenderung()
+      toast.success(t('ai.memory.restored'))
+    } catch (error: unknown) {
+      toast.error(fehlermeldung(error, 'ai.memory.errors.restore'))
+    } finally { setBusy(false) }
   }
 
   const allesEntfernen = async () => {
@@ -250,17 +440,18 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     setBusy(true)
     try {
       const { removed } = await aiApi.clearMemory(memoryScopeName(scope), teamId, serverId)
-      setKey(''); setValue(''); setBearbeitet(null)
-      await laden(1)
+      formLeeren()
+      await nachAenderung(1)
       toast.success(t('ai.memory.cleared', { count: removed }))
     } catch (error: unknown) {
-      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.memory.errors.delete'))
+      toast.error(fehlermeldung(error, 'ai.memory.errors.delete'))
     } finally { setBusy(false) }
   }
 
   const bearbeiten = (entry: AiMemoryEntry) => {
-    setKey(entry.key)
-    setValue(entry.value)
+    setText(entry.value)
+    setTitel(entry.titel ?? '')
+    setThema(entry.thema?.name ?? '')
     setBearbeitet(entry)
     // Beim Bearbeiten den Eintrag aufklappen
     setExpandedIds((prev) => new Set(prev).add(entry.id))
@@ -268,8 +459,29 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       if (typeof formRef.current?.scrollIntoView === 'function') {
         formRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
       }
-      valueInputRef.current?.focus()
+      textRef.current?.focus()
     }, 50)
+  }
+
+  const verlaufOeffnen = async (entry: AiMemoryEntry) => {
+    setBusy(true)
+    try {
+      setVerlauf({ entry, fassungen: await aiApi.listMemoryVersions(entry.id) })
+    } catch { toast.error(t('ai.memory.errors.history')) } finally { setBusy(false) }
+  }
+
+  const fassungZurueckholen = async (fassungId: string) => {
+    if (verlauf === null) return
+    setVerlaufHolt(fassungId)
+    try {
+      await aiApi.restoreMemoryVersion(verlauf.entry.id, fassungId, verlauf.entry.fassung)
+      setVerlauf(null)
+      if (bearbeitet?.id === verlauf.entry.id) formLeeren()
+      await nachAenderung()
+      toast.success(t('ai.memory.versionRestored'))
+    } catch (error: unknown) {
+      toast.error(fehlermeldung(error, 'ai.memory.errors.save'))
+    } finally { setVerlaufHolt(null) }
   }
 
   const herkunftsFilter = (
@@ -291,6 +503,27 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       ))}
     </div>
   )
+
+  const themenFilter = imAktuellen && themenGruppen.length > 0 && (
+    <Dropdown
+      value={themaWahl}
+      onChange={themaWaehlen}
+      disabled={busy}
+      searchable={themenGruppen.length > 8}
+      aria-label={t('ai.memory.themaFilter')}
+      className="w-full sm:w-56"
+      options={[
+        { value: '', label: t('ai.memory.alleThemen') },
+        ...themenGruppen.map((gruppe) => ({
+          value: gruppe.schluessel, label: gruppe.name, hint: String(gruppe.anzahl),
+        })),
+      ]}
+    />
+  )
+
+  const leerText = imAktuellen
+    ? (entries.length === 0 ? t(`ai.memory.empty.${scope.kind}`) : t('ai.memory.noMatches'))
+    : (entries.length === 0 ? t('ai.memory.emptyForgotten') : t('ai.memory.noMatches'))
 
   return (
     <AiKnowledgeShell
@@ -314,11 +547,13 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
           />
         </label>
       ) : undefined}
-      note={scope.kind === 'user'
-        ? t('ai.memory.enabledScopeHint')
-        : scope.kind === 'server_shared'
-          ? t('ai.memory.serverSharedHint')
-          : undefined}
+      note={!imAktuellen
+        ? t('ai.memory.forgottenHint')
+        : scope.kind === 'user'
+          ? t('ai.memory.enabledScopeHint')
+          : scope.kind === 'server_shared'
+            ? t('ai.memory.serverSharedHint')
+            : undefined}
       search={werkzeugleiste
         ? {
           value: suche,
@@ -328,6 +563,14 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
         : undefined}
       filters={(
         <>
+          <TabBar
+            tabs={ANSICHTEN}
+            active={ansicht}
+            onChange={ansichtWechseln}
+            ariaLabel={t('ai.memory.ansichtLabel')}
+            embedded
+          />
+          {themenFilter}
           {werkzeugleiste && herkunftsFilter}
           {sichtbar.length > 1 && (
             <Kurzinfo text={allExpanded ? t('ai.memory.collapseAll') : t('ai.memory.expandAll')} className="sm:!hidden">
@@ -345,13 +588,13 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
               </Button>
             </Kurzinfo>
           )}
-          {darfAendern && (
+          {darfAendern && imAktuellen && (
             <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={() => setImportOffen(true)}>
               <Download className="h-4 w-4" aria-hidden="true" />
               {t('ai.memory.import.button')}
             </Button>
           )}
-          {darfAendern && entries.length > 0 && (
+          {darfAendern && imAktuellen && entries.length > 0 && (
             <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void allesEntfernen()}>
               <Trash2 className="h-4 w-4" aria-hidden="true" />
               {t('ai.memory.clearAll')}
@@ -365,8 +608,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
           : t('ai.memory.count', { shown: sichtbar.length, total: entries.length }))
         : undefined}
     >
-      {/* Schneller, kompakter Logbuch-Eingabebereich direkt oben greifbar */}
-      {darfAendern && (
+      {darfAendern && imAktuellen && (
         <form
           ref={formRef}
           className="rounded-xl border border-outline-variant/40 bg-surface-container-low/40 p-3 sm:p-4 space-y-3"
@@ -377,38 +619,39 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
             <span>{bearbeitet !== null ? t('ai.memory.editEntry') : t('ai.memory.newEntry')}</span>
           </div>
 
-          <div className="grid gap-2.5 sm:grid-cols-[14rem_minmax(0,1fr)]">
-            <label className="space-y-1">
-              <span className="sr-only">{t('ai.memory.key')}</span>
-              <input
-                className="msm-input text-xs sm:text-sm"
-                pattern="[A-Za-z0-9_.-]+"
-                maxLength={64}
-                value={key}
-                disabled={busy || bearbeitet !== null}
-                onChange={(event) => setKey(event.target.value)}
-                placeholder={t('ai.memory.keyPlaceholder')}
-                aria-label={t('ai.memory.key')}
-              />
-            </label>
-            <label className="space-y-1">
-              <span className="sr-only">{t('ai.memory.value')}</span>
-              <input
-                ref={valueInputRef}
-                className="msm-input text-xs sm:text-sm"
-                maxLength={2000}
-                value={value}
-                disabled={busy}
-                onChange={(event) => setValue(event.target.value)}
-                placeholder={t('ai.memory.valuePlaceholder')}
-                aria-label={t('ai.memory.value')}
-              />
-            </label>
+          <Textarea
+            ref={textRef}
+            rows={2}
+            className="min-h-16"
+            maxLength={2000}
+            value={text}
+            disabled={busy}
+            onChange={(event) => setText(event.target.value)}
+            placeholder={t('ai.memory.textPlaceholder')}
+            aria-label={t('ai.memory.text')}
+          />
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            <Input
+              maxLength={120}
+              value={titel}
+              disabled={busy}
+              onChange={(event) => setTitel(event.target.value)}
+              placeholder={t('ai.memory.titel')}
+              aria-label={t('ai.memory.titel')}
+            />
+            <Input
+              maxLength={60}
+              value={thema}
+              disabled={busy}
+              onChange={(event) => setThema(event.target.value)}
+              placeholder={t('ai.memory.thema')}
+              aria-label={t('ai.memory.thema')}
+            />
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
             <div className="flex items-center gap-2">
-              <Button type="submit" size="sm" disabled={busy || !key.trim() || !value.trim()}>
+              <Button type="submit" size="sm" disabled={busy || !text.trim()}>
                 {bearbeitet === null ? (
                   <Plus className="h-4 w-4" aria-hidden="true" />
                 ) : (
@@ -417,13 +660,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
                 {bearbeitet === null ? t('ai.memory.add') : t('settings.save')}
               </Button>
               {bearbeitet !== null && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => { setKey(''); setValue(''); setBearbeitet(null) }}
-                >
+                <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={formLeeren}>
                   <X className="h-4 w-4" aria-hidden="true" />
                   {t('common.cancel')}
                 </Button>
@@ -443,7 +680,8 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
         {displayEntries.map((entry) => {
           const isExpanded = expandedIds.has(entry.id)
           const isEditing = bearbeitet?.id === entry.id
-          const formattedTitle = formatMemoryKey(entry.key)
+          const kopf = ueberschrift(entry)
+          const name = benennung(entry)
 
           return (
             <article
@@ -476,9 +714,20 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
 
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs sm:text-sm font-medium text-on-surface group-hover:text-primary transition-colors">
-                        {formattedTitle}
+                      {/* Ohne Titel ist der Satz selbst die Zeile. */}
+                      <span className={`text-xs sm:text-sm font-medium text-on-surface group-hover:text-primary transition-colors ${
+                        kopf === null && !isExpanded ? 'line-clamp-2' : ''
+                      }`}
+                      >
+                        {kopf ?? (isExpanded ? kuerzen(entry.value) : entry.value)}
                       </span>
+
+                      {entry.thema && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/40 bg-surface-container px-2 py-0.5 text-label-sm text-on-surface-variant">
+                          <Tag className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          {entry.thema.name}
+                        </span>
+                      )}
 
                       {/* Server-Zugehörigkeit */}
                       {entry.scope === 'server' && entry.server_id !== null && (
@@ -514,8 +763,8 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
                       )}
                     </div>
 
-                    {/* Auszug / Vorschau des Werts im eingeklappten Zustand */}
-                    {!isExpanded && (
+                    {/* Auszug des Satzes im eingeklappten Zustand, wenn oben ein Titel steht */}
+                    {!isExpanded && kopf !== null && (
                       <p className="mt-0.5 truncate text-xs text-on-surface-variant max-w-md sm:max-w-xl">
                         {entry.value}
                       </p>
@@ -523,26 +772,38 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
                   </div>
                 </button>
 
-                {/* Aktionen (Bearbeiten / Löschen) */}
                 {darfAendern && (
                   <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => bearbeiten(entry)}
-                      aria-label={`${t('ai.memory.edit')}: ${entry.key}`}
-                    >
-                      <Pencil className="h-4 w-4" aria-hidden="true" />
-                    </Button>
+                    {imAktuellen ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => bearbeiten(entry)}
+                        aria-label={`${t('ai.memory.edit')}: ${name}`}
+                      >
+                        <Pencil className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void zurueckholen(entry)}
+                        aria-label={`${t('ai.memory.restore')}: ${name}`}
+                      >
+                        <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    )}
                     <Button
                       type="button"
                       size="sm"
                       variant="ghost"
                       disabled={busy}
                       onClick={() => void entfernen(entry)}
-                      aria-label={`${t('ai.memory.delete')}: ${entry.key}`}
+                      aria-label={`${t(imAktuellen ? 'ai.memory.delete' : 'ai.memory.deleteForever')}: ${name}`}
                     >
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </Button>
@@ -558,9 +819,14 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
                   </div>
 
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-on-surface-variant border-t border-outline-variant/20 pt-2">
-                    <span className="font-mono text-label-sm text-on-surface-variant/80">
-                      {t('ai.memory.rawKey', { key: entry.key })}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                      <span>{t(`ai.memory.quellen.${entry.quelle}`)}</span>
+                      {entry.key && (
+                        <span className="font-mono text-label-sm text-on-surface-variant/80">
+                          {t('ai.memory.rawKey', { key: entry.key })}
+                        </span>
+                      )}
+                    </div>
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                       {entry.created_at && (
@@ -572,6 +838,31 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
                         <span>
                           {t('ai.memory.lastUsedAt', { date: formatMemoryDate(entry.last_used_at, i18n.language) })}
                         </span>
+                      )}
+                      {entry.vergessen_am && (
+                        <span>
+                          {t('ai.memory.forgottenUntil', {
+                            date: formatMemoryDate(entry.vergessen_am, i18n.language),
+                            until: formatMemoryDate(
+                              new Date(Date.parse(entry.vergessen_am) + VERGESSEN_TAGE * 86_400_000).toISOString(),
+                              i18n.language,
+                            ),
+                          })}
+                        </span>
+                      )}
+                      {/* Ohne Änderung gibt es keine frühere Fassung. */}
+                      {entry.fassung > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => void verlaufOeffnen(entry)}
+                          aria-label={`${t('ai.memory.history')}: ${name}`}
+                        >
+                          <History className="h-4 w-4" aria-hidden="true" />
+                          {t('ai.memory.history')}
+                        </Button>
                       )}
                     </div>
                   </div>
@@ -608,7 +899,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
 
         {sichtbar.length === 0 && (
           <p className="rounded-xl border border-dashed border-outline-variant/50 px-4 py-5 text-sm text-on-surface-variant text-center">
-            {entries.length === 0 ? t(`ai.memory.empty.${scope.kind}`) : t('ai.memory.noMatches')}
+            {leerText}
           </p>
         )}
       </div>
@@ -618,9 +909,39 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
           open={importOffen}
           onOpenChange={setImportOffen}
           scope={scope}
-          onImported={() => laden(1).catch(() => toast.error(t('ai.memory.errors.load')))}
+          onImported={async () => {
+            try { await nachAenderung(1) } catch { toast.error(t('ai.memory.errors.load')) }
+          }}
         />
       )}
+
+      <Dialog open={verlauf !== null} onOpenChange={(offen) => { if (!offen && verlaufHolt === null) setVerlauf(null) }}>
+        <DialogContent className="max-w-xl" aria-labelledby="ai-memory-verlauf-titel">
+          <DialogHeader className="pr-14">
+            <DialogTitle id="ai-memory-verlauf-titel" className="flex items-center gap-2">
+              <History className="h-5 w-5" aria-hidden="true" />
+              {t('ai.memory.historyTitle')}
+            </DialogTitle>
+            <DialogDescription>{t('ai.memory.historyDescription')}</DialogDescription>
+          </DialogHeader>
+          <div className="px-4 py-4 sm:px-6">
+            {verlauf !== null && (
+              <Versionsliste
+                versionen={verlauf.fassungen.map((fassung) => ({
+                  id: fassung.id,
+                  zeit: Date.parse(fassung.erstellt),
+                  text: fassung.titel ? `${fassung.titel} — ${fassung.text}` : fassung.text,
+                  hinweis: t(`ai.memory.gruende.${fassung.grund}`),
+                }))}
+                onWiederherstellen={darfAendern && verlauf.entry.status === 'aktiv'
+                  ? (id) => void fassungZurueckholen(id)
+                  : undefined}
+                laeuft={verlaufHolt}
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Pagination
         page={seite}

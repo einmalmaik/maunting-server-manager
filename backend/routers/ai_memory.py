@@ -1,5 +1,7 @@
 """Einsehbares, editierbares und abschaltbares AI-Memory."""
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -8,6 +10,9 @@ from dependencies import require_global, verify_csrf
 from models import AiMemoryEntry, AiMemoryPreference, User
 from schemas.ai_memory import (
     AiMemoryClearResponse,
+    AiMemoryCreate,
+    AiMemoryFassung,
+    AiMemoryFassungZurueck,
     AiMemoryImportPreviewRequest,
     AiMemoryImportPreviewResponse,
     AiMemoryImportRequest,
@@ -17,7 +22,9 @@ from schemas.ai_memory import (
     AiMemoryPreferenceResponse,
     AiMemoryPreferenceWrite,
     AiMemoryResponse,
-    AiMemoryWrite,
+    AiMemoryThema,
+    AiMemoryThemaRef,
+    AiMemoryUpdate,
     MemoryScope,
 )
 from services import ai_memory_import_service, ai_memory_service
@@ -26,15 +33,40 @@ from services.dis_client import DisSidecarError
 
 router = APIRouter(prefix="/api/ai/memory", tags=["ai-memory"])
 
+#: Was eine Liste zeigt: was gilt, oder was die KI vergessen hat.
+Ansicht = Literal["aktiv", "vergessen"]
 
-def _response(row: AiMemoryEntry, value: str) -> AiMemoryResponse:
+
+def _response(
+    row: AiMemoryEntry, value: str, themen: dict[str, str] | None = None
+) -> AiMemoryResponse:
+    name = (themen or {}).get(row.thema_id or "")
     return AiMemoryResponse(
         id=row.id, scope=row.scope, server_id=row.server_id, team_id=row.team_id,
-        key=row.key,
-        value=value, origin=row.origin, use_count=row.use_count,
+        key=row.key or None,
+        value=value, titel=row.titel,
+        thema=AiMemoryThemaRef(id=row.thema_id, name=name) if row.thema_id and name else None,
+        art=row.art, quelle=row.quelle, wichtigkeit=row.wichtigkeit,
+        origin=row.origin, status=row.status, vergessen_am=row.vergessen_am,
+        fassung=row.fassung, use_count=row.use_count,
         last_used_at=row.last_used_at,
         created_at=row.created_at, updated_at=row.updated_at,
     )
+
+
+def _einzeln(db: Session, row: AiMemoryEntry, value: str) -> AiMemoryResponse:
+    """Antwort fuer genau eine Erinnerung, mit dem Namen ihres Themas."""
+    return _response(row, value, ai_memory_service.themennamen(db, [row.thema_id]))
+
+
+def _themenfilter(thema: list[str] | None) -> list[str] | None:
+    """Ein Themenfilter nennt Kennungen; mehr als eine, weil die Profilansicht
+    gleichnamige Themen aus zwei Bereichen zu einem Filter zusammenfasst."""
+    if not thema:
+        return None
+    if len(thema) > 50 or any(len(kennung) > 36 for kennung in thema):
+        raise HTTPException(status_code=422, detail="Ungültiger Themenfilter")
+    return thema
 
 
 def _page(seite: ai_memory_service.Gedaechtnisseite) -> AiMemoryPage:
@@ -45,7 +77,7 @@ def _page(seite: ai_memory_service.Gedaechtnisseite) -> AiMemoryPage:
     und den nächsten Offset, statt die Zahl noch einmal zu kennen.
     """
     return AiMemoryPage(
-        entries=[_response(row, value) for row, value in seite.eintraege],
+        entries=[_response(row, value, seite.themen) for row, value in seite.eintraege],
         total=seite.gesamt,
         clearable=seite.loeschbar,
         limit=ai_memory_service.PERSONAL_PAGE_SIZE,
@@ -68,9 +100,9 @@ def list_memory(
     brauchen; wieviel er öffnet, entscheidet der Bereich.
     """
     try:
-        return [_response(row, value) for row, value in ai_memory_service.list_entries(
-            db, user, scope, server_id, team_id
-        )]
+        eintraege = ai_memory_service.list_entries(db, user, scope, server_id, team_id)
+        themen = ai_memory_service.themennamen(db, [row.thema_id for row, _ in eintraege])
+        return [_response(row, value, themen) for row, value in eintraege]
     except DisSidecarError as exc:
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
 
@@ -78,6 +110,8 @@ def list_memory(
 @router.get("/personal", response_model=AiMemoryPage)
 def list_personal_memory(
     offset: int = Query(default=0, ge=0),
+    status: Ansicht = Query(default="aktiv"),
+    thema: list[str] | None = Query(default=None),
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.memory.use")),
 ) -> AiMemoryPage:
@@ -99,7 +133,9 @@ def list_personal_memory(
     bestellen.
     """
     try:
-        return _page(ai_memory_service.personal_entries(db, user, offset=offset))
+        return _page(ai_memory_service.personal_entries(
+            db, user, offset=offset, status=status, themen=_themenfilter(thema)
+        ))
     except DisSidecarError as exc:
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
 
@@ -110,6 +146,8 @@ def list_memory_page(
     server_id: int | None = Query(default=None, ge=1),
     team_id: int | None = Query(default=None, ge=1),
     offset: int = Query(default=0, ge=0),
+    status: Ansicht = Query(default="aktiv"),
+    thema: list[str] | None = Query(default=None),
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.memory.use")),
 ) -> AiMemoryPage:
@@ -129,25 +167,66 @@ def list_memory_page(
     """
     try:
         return _page(ai_memory_service.scope_entries(
-            db, user, scope, server_id, team_id, offset=offset
+            db, user, scope, server_id, team_id, offset=offset, status=status,
+            themen=_themenfilter(thema),
         ))
     except DisSidecarError as exc:
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
 
 
-@router.put("", response_model=AiMemoryResponse)
-def save_memory(
-    payload: AiMemoryWrite,
+@router.get("/personal/themen", response_model=list[AiMemoryThema])
+def list_personal_topics(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.memory.use")),
+) -> list[AiMemoryThema]:
+    """Die Themen der eigenen Erinnerungen mit ihrer Zahl, fuer den Filter."""
+    try:
+        return [
+            AiMemoryThema(id=zeile.id, name=zeile.name, anzahl=zeile.anzahl)
+            for zeile in ai_memory_service.personal_themen(db, user)
+        ]
+    except DisSidecarError as exc:
+        raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
+
+
+@router.get("/themen", response_model=list[AiMemoryThema])
+def list_scope_topics(
+    scope: MemoryScope = Query(...),
+    server_id: int | None = Query(default=None, ge=1),
+    team_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.memory.use")),
+) -> list[AiMemoryThema]:
+    """Die Themen eines Bereichs mit ihrer Zahl, fuer den Filter."""
+    try:
+        return [
+            AiMemoryThema(id=zeile.id, name=zeile.name, anzahl=zeile.anzahl)
+            for zeile in ai_memory_service.scope_themen(db, user, scope, server_id, team_id)
+        ]
+    except DisSidecarError as exc:
+        raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
+
+
+@router.post("", response_model=AiMemoryResponse, status_code=status.HTTP_201_CREATED)
+def create_memory(
+    payload: AiMemoryCreate,
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.memory.use")),
     _: None = Depends(verify_csrf),
 ) -> AiMemoryResponse:
+    """Legt eine Erinnerung an, wie ein Mensch sie eintraegt.
+
+    Bis Gedaechtnis v2 (06.10.2026) stand hier `PUT` mit Name und Wert, und
+    derselbe Name ueberschrieb. Eine Erinnerung hat keinen Namen mehr; wer
+    eine bestehende aendern will, nimmt `PATCH /{id}`.
+    """
     try:
-        row, value = ai_memory_service.upsert_entry(
+        row, text = ai_memory_service.erinnerung_anlegen(
             db, user=user, scope=payload.scope, server_id=payload.server_id,
-            team_id=payload.team_id, key=payload.key, value=payload.value,
+            team_id=payload.team_id, text=payload.text, titel=payload.titel,
+            thema=payload.thema, quelle="eingetragen", origin="user",
         )
-        return _response(row, value)
+        return _einzeln(db, row, text)
     except DisSidecarError as exc:
         db.rollback()
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
@@ -221,6 +300,91 @@ def delete_memory(
     _: None = Depends(verify_csrf),
 ) -> None:
     ai_memory_service.delete_entry(db, user, entry_id)
+
+
+@router.patch("/{entry_id}", response_model=AiMemoryResponse)
+def update_memory(
+    entry_id: str,
+    payload: AiMemoryUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.memory.use")),
+    _: None = Depends(verify_csrf),
+) -> AiMemoryResponse:
+    """Aendert Text, Titel oder Thema; der Stand davor bleibt als Fassung lesbar."""
+    genannt = payload.model_fields_set
+    try:
+        row, text = ai_memory_service.erinnerung_aendern(
+            db, user=user, entry_id=entry_id, text=payload.text,
+            titel=payload.titel if "titel" in genannt else ai_memory_service.UNVERAENDERT,
+            thema=payload.thema if "thema" in genannt else ai_memory_service.UNVERAENDERT,
+            erwartete_fassung=payload.fassung, von="user", grund="bearbeitet",
+        )
+        return _einzeln(db, row, text)
+    except DisSidecarError as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
+
+
+@router.post("/{entry_id}/zurueckholen", response_model=AiMemoryResponse)
+def restore_memory(
+    entry_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.memory.use")),
+    _: None = Depends(verify_csrf),
+) -> AiMemoryResponse:
+    """Holt eine Erinnerung zurueck, die die KI vergessen hat.
+
+    Sie zaehlt danach wieder gegen das Rollenlimit; ist der Bereich voll,
+    antwortet der Server 409 mit dem Stand.
+    """
+    try:
+        row, text = ai_memory_service.erinnerung_zurueckholen(db, user=user, entry_id=entry_id)
+        return _einzeln(db, row, text)
+    except DisSidecarError as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
+
+
+@router.get("/{entry_id}/fassungen", response_model=list[AiMemoryFassung])
+def list_memory_versions(
+    entry_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.memory.use")),
+) -> list[AiMemoryFassung]:
+    """Die frueheren Fassungen einer Erinnerung, die juengste zuerst."""
+    try:
+        return [
+            AiMemoryFassung(
+                id=fassung.id, text=fassung.text, titel=fassung.titel,
+                grund=fassung.grund, von=fassung.von, erstellt=fassung.erstellt,
+            )
+            for fassung in ai_memory_service.fassungen(db, user=user, entry_id=entry_id)
+        ]
+    except DisSidecarError as exc:
+        raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
+
+
+@router.post(
+    "/{entry_id}/fassungen/{fassung_id}/zurueckholen", response_model=AiMemoryResponse
+)
+def restore_memory_version(
+    entry_id: str,
+    fassung_id: str,
+    payload: AiMemoryFassungZurueck,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.memory.use")),
+    _: None = Depends(verify_csrf),
+) -> AiMemoryResponse:
+    """Setzt eine Erinnerung auf eine fruehere Fassung zurueck."""
+    try:
+        row, text = ai_memory_service.fassung_zurueckholen(
+            db, user=user, entry_id=entry_id, fassung_id=fassung_id,
+            erwartete_fassung=payload.fassung,
+        )
+        return _einzeln(db, row, text)
+    except DisSidecarError as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
 
 
 def _preference_response(db: Session, user: User) -> AiMemoryPreferenceResponse:

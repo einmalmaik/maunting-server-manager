@@ -754,14 +754,74 @@ export interface AiMemoryEntry {
   scope: 'user' | 'server' | 'server_shared' | 'team' | 'panel'
   server_id: number | null
   team_id: number | null
-  key: string
+  /**
+   * Nur Altbestand trägt noch einen Namen. Seit Gedächtnis v2 ist eine
+   * Erinnerung ein bis fünf Sätze, die ohne Gespräch verständlich sind.
+   */
+  key: string | null
+  /** Der Text der Erinnerung. */
   value: string
+  titel: string | null
+  thema: { id: string; name: string } | null
+  art: AiMemoryArt | null
+  quelle: AiMemoryQuelle
+  wichtigkeit: number
   /** "user" = selbst hinterlegt, "ai" = von der KI gemerkt. */
   origin: 'user' | 'ai'
+  /** `vergessen`: von der KI vergessen, 30 Tage zurückholbar. */
+  status: AiMemoryAnsicht
+  vergessen_am: string | null
+  /**
+   * Zählt jede Änderung. Wer ändert, schickt die Fassung mit, die er gesehen
+   * hat; hat inzwischen jemand anderes geschrieben, antwortet der Server 409.
+   */
+  fassung: number
   use_count: number
   last_used_at: string | null
   created_at: string
   updated_at: string
+}
+
+/** Woher eine Erinnerung stammt — siehe `ai_memory_service.QUELLEN`. */
+export type AiMemoryQuelle = 'eingetragen' | 'gespraech' | 'import' | 'pflege'
+
+export type AiMemoryArt =
+  | 'fakt' | 'vorliebe' | 'anweisung' | 'ereignis' | 'plan' | 'beziehung' | 'wissen'
+
+/** Was eine Liste zeigt: was gilt, oder was die KI vergessen hat. */
+export type AiMemoryAnsicht = 'aktiv' | 'vergessen'
+
+/** Ein Thema einer Ansicht und wie viele geltende Erinnerungen darunter stehen. */
+export interface AiMemoryThema {
+  id: string
+  name: string
+  anzahl: number
+}
+
+/** Eine frühere Fassung einer Erinnerung, die jüngste kommt zuerst. */
+export interface AiMemoryFassung {
+  id: string
+  text: string
+  titel: string | null
+  grund: 'bearbeitet' | 'aktualisiert' | 'zusammengefuehrt' | 'aufgenommen' | 'umgeschrieben' | 'wiederhergestellt'
+  /** Wer die Änderung gemacht hat, die diese Fassung abgelöst hat. */
+  von: 'user' | 'ai'
+  erstellt: string
+}
+
+/** Was eine Seite außer dem Offset noch einschränkt. */
+export interface AiMemoryFilter {
+  status?: AiMemoryAnsicht
+  /** Kennungen von Themen; gleichnamige aus zwei Bereichen gehen zusammen. */
+  thema?: string[]
+}
+
+function memoryFilter({ status = 'aktiv', thema = [] }: AiMemoryFilter = {}): string {
+  return `&status=${status}${thema.map((id) => `&thema=${encodeURIComponent(id)}`).join('')}`
+}
+
+function memoryScopeQuery(scope: AiMemoryEntry['scope'], serverId?: number, teamId?: number): string {
+  return `scope=${scope}${serverId ? `&server_id=${serverId}` : ''}${teamId ? `&team_id=${teamId}` : ''}`
 }
 
 /**
@@ -1602,7 +1662,7 @@ export const aiApi = {
    * und jede Zeile beim Öffnen eine Entschlüsselung kostet.
    */
   listMemory: (scope: AiMemoryEntry['scope'], serverId?: number, teamId?: number) => api<AiMemoryEntry[]>(
-    `/ai/memory?scope=${scope}${serverId ? `&server_id=${serverId}` : ''}${teamId ? `&team_id=${teamId}` : ''}`,
+    `/ai/memory?${memoryScopeQuery(scope, serverId, teamId)}`,
   ),
   /**
    * Eine Seite eines Bereichs: Teamwissen, panelweites Wissen, das Wissen einer
@@ -1617,9 +1677,9 @@ export const aiApi = {
    */
   listScopeMemory: (
     scope: AiMemoryEntry['scope'], serverId?: number, teamId?: number, offset = 0,
+    filter: AiMemoryFilter = {},
   ) => api<AiMemoryPage>(
-    `/ai/memory/page?scope=${scope}${serverId ? `&server_id=${serverId}` : ''}`
-    + `${teamId ? `&team_id=${teamId}` : ''}&offset=${offset}`,
+    `/ai/memory/page?${memoryScopeQuery(scope, serverId, teamId)}&offset=${offset}${memoryFilter(filter)}`,
   ),
   /**
    * Eine Seite von allem, was einem selbst gehört: persönlich **und**
@@ -1635,10 +1695,33 @@ export const aiApi = {
    * Server und sagt es in `limit` — er bezahlt sie in Entschlüsselungen, und
    * eine Grenze, die der Client setzen darf, ist keine.
    */
-  listPersonalMemory: (offset = 0) => api<AiMemoryPage>(`/ai/memory/personal?offset=${offset}`),
-  saveMemory: (payload: { scope: AiMemoryEntry['scope']; server_id?: number; team_id?: number; key: string; value: string }) => api<AiMemoryEntry>('/ai/memory', {
-    method: 'PUT', body: JSON.stringify(payload),
-  }),
+  listPersonalMemory: (offset = 0, filter: AiMemoryFilter = {}) => api<AiMemoryPage>(
+    `/ai/memory/personal?offset=${offset}${memoryFilter(filter)}`,
+  ),
+  /** Die Themen der eigenen Erinnerungen, allgemein und zu Servern. */
+  listPersonalTopics: () => api<AiMemoryThema[]>('/ai/memory/personal/themen'),
+  listScopeTopics: (scope: AiMemoryEntry['scope'], serverId?: number, teamId?: number) =>
+    api<AiMemoryThema[]>(`/ai/memory/themen?${memoryScopeQuery(scope, serverId, teamId)}`),
+  /** Legt eine Erinnerung an; das Kontingent des Bereichs gilt (409, wenn voll). */
+  createMemory: (payload: {
+    scope: AiMemoryEntry['scope']; server_id?: number; team_id?: number
+    text: string; titel?: string | null; thema?: string | null
+  }) => api<AiMemoryEntry>('/ai/memory', { method: 'POST', body: JSON.stringify(payload) }),
+  /**
+   * Ändert Text, Titel oder Thema. Was nicht im Aufruf steht, bleibt; `null`
+   * bei Titel oder Thema entfernt es. Der Stand davor bleibt als Fassung.
+   */
+  updateMemory: (id: string, payload: {
+    text?: string; titel?: string | null; thema?: string | null; fassung: number
+  }) => api<AiMemoryEntry>(`/ai/memory/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  /** Holt eine vergessene Erinnerung zurück; sie zählt dann wieder mit. */
+  restoreMemory: (id: string) => api<AiMemoryEntry>(`/ai/memory/${id}/zurueckholen`, { method: 'POST' }),
+  listMemoryVersions: (id: string) => api<AiMemoryFassung[]>(`/ai/memory/${id}/fassungen`),
+  restoreMemoryVersion: (id: string, fassungId: string, fassung: number) => api<AiMemoryEntry>(
+    `/ai/memory/${id}/fassungen/${fassungId}/zurueckholen`,
+    { method: 'POST', body: JSON.stringify({ fassung }) },
+  ),
+  /** Löscht endgültig, auch was die KI nur vergessen hat. */
   deleteMemory: (id: string) => api(`/ai/memory/${id}`, { method: 'DELETE' }),
   /**
    * Leert einen ganzen Bereich und meldet, wie viele Einträge das waren.

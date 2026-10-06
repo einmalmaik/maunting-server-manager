@@ -34,9 +34,9 @@ def test_memory_api_stores_ciphertext_and_returns_owned_plaintext(
     _enable_memory(db, regular_user)
     value = "Antwortsprache ist Deutsch"
 
-    saved = client.put(
+    saved = client.post(
         "/api/ai/memory",
-        json={"scope": "user", "key": "language", "value": value},
+        json={"scope": "user", "text": value},
         cookies=user_cookies,
         headers=_csrf(user_cookies),
     )
@@ -44,7 +44,11 @@ def test_memory_api_stores_ciphertext_and_returns_owned_plaintext(
         "/api/ai/memory?scope=user", cookies=user_cookies
     )
 
-    assert saved.status_code == 200
+    assert saved.status_code == 201
+    assert saved.json()["value"] == value
+    # Ein Satz ohne Namen: so sieht seit Gedaechtnis v2 jede neue Erinnerung aus.
+    assert saved.json()["key"] is None
+    assert saved.json()["quelle"] == "eingetragen"
     assert listed.status_code == 200
     assert listed.json()[0]["value"] == value
     row = db.query(AiMemoryEntry).one()
@@ -60,9 +64,9 @@ def test_memory_rejects_secret_like_content_without_persistence(
 ) -> None:
     _enable_memory(db, regular_user)
 
-    response = client.put(
+    response = client.post(
         "/api/ai/memory",
-        json={"scope": "user", "key": "bad", "value": "api_key=do-not-store-this"},
+        json={"scope": "user", "text": "api_key=do-not-store-this"},
         cookies=user_cookies,
         headers=_csrf(user_cookies),
     )
@@ -79,24 +83,25 @@ def test_panel_memory_write_requires_settings_permission_but_is_visible(
     owner_cookies: dict,
 ) -> None:
     _enable_memory(db, regular_user)
-    denied = client.put(
+    wartung = "Wartung ist sonntags um 03:00 UTC."
+    denied = client.post(
         "/api/ai/memory",
-        json={"scope": "panel", "key": "maintenance", "value": "Sonntag 03:00 UTC"},
+        json={"scope": "panel", "text": wartung},
         cookies=user_cookies,
         headers=_csrf(user_cookies),
     )
-    created = client.put(
+    created = client.post(
         "/api/ai/memory",
-        json={"scope": "panel", "key": "maintenance", "value": "Sonntag 03:00 UTC"},
+        json={"scope": "panel", "text": wartung},
         cookies=owner_cookies,
         headers=_csrf(owner_cookies),
     )
     visible = client.get("/api/ai/memory?scope=panel", cookies=user_cookies)
 
     assert denied.status_code == 403
-    assert created.status_code == 200
+    assert created.status_code == 201
     assert visible.status_code == 200
-    assert visible.json()[0]["key"] == "maintenance"
+    assert visible.json()[0]["value"] == wartung
 
 
 def test_disabled_memory_is_not_added_to_provider_context(
@@ -115,12 +120,12 @@ def test_disabled_memory_is_not_added_to_provider_context(
         cookies=user_cookies,
         headers=_csrf(user_cookies),
     ).status_code == 200
-    assert client.put(
+    assert client.post(
         "/api/ai/memory",
-        json={"scope": "user", "key": "language", "value": "Deutsch bevorzugt"},
+        json={"scope": "user", "text": "Deutsch bevorzugt"},
         cookies=user_cookies,
         headers=_csrf(user_cookies),
-    ).status_code == 200
+    ).status_code == 201
     conversation = AiConversation(
         id=str(uuid4()), user_id=regular_user.id, server_id=None, title="Memory"
     )
@@ -214,23 +219,16 @@ def test_persoenliche_ansicht_blaettert_statt_still_zu_deckeln(
     gerechnet wurde.
     """
     from services import ai_memory_service
-    from services.dis_client import DisClient
+    from tests._entschluesselung import mitzaehlen
 
     _enable_memory(db, regular_user)
     monkeypatch.setattr(ai_memory_service, "PERSONAL_PAGE_SIZE", 3)
     _fuellen(db, regular_user, 5)
 
-    echt = DisClient.decrypt
-    aufrufe: list[str] = []
-
-    def zaehlend(payload, *, aad):
-        aufrufe.append(aad)
-        return echt(payload, aad=aad)
-
-    monkeypatch.setattr(DisClient, "decrypt", staticmethod(zaehlend))
+    zaehler = mitzaehlen(monkeypatch)
 
     erste = client.get("/api/ai/memory/personal", cookies=user_cookies)
-    aufrufe_erste = len(aufrufe)
+    texte_erste, aufrufe_erste = zaehler.texte, zaehler.aufrufe
     zweite = client.get("/api/ai/memory/personal?offset=3", cookies=user_cookies)
 
     assert erste.status_code == 200
@@ -238,8 +236,10 @@ def test_persoenliche_ansicht_blaettert_statt_still_zu_deckeln(
     assert len(seite["entries"]) == 3
     assert seite["total"] == 5
     assert seite["limit"] == 3
-    # Genau eine Entschluesselung je gezeigter Zeile — nicht je vorhandener.
-    assert aufrufe_erste == 3
+    # Genau ein Text je gezeigter Zeile — nicht je vorhandener —, und alle
+    # zusammen in einem Roundtrip.
+    assert texte_erste == 3
+    assert aufrufe_erste == 1
 
     assert zweite.status_code == 200
     assert len(zweite.json()["entries"]) == 2

@@ -19,12 +19,47 @@ from pydantic import BaseModel, Field
 MemoryScope = Literal["user", "server", "server_shared", "team", "panel"]
 
 
-class AiMemoryWrite(BaseModel):
+#: Was fuer eine Aussage eine Erinnerung ist (`ai_memory_service.ARTEN`).
+MemoryArt = Literal["fakt", "vorliebe", "anweisung", "ereignis", "plan", "beziehung", "wissen"]
+#: Woher sie kommt (`ai_memory_service.QUELLEN`).
+MemoryQuelle = Literal["eingetragen", "gespraech", "import", "pflege"]
+
+
+class AiMemoryCreate(BaseModel):
+    """Eine Erinnerung, wie ein Mensch sie eintraegt: ein Satz, mehr nicht.
+
+    Titel und Thema sind freiwillig. Einen Namen gibt es nicht mehr; er war
+    bis Gedaechtnis v2 (06.10.2026) die Identitaet einer Erinnerung, und
+    dieselbe Sache unter zwei Namen stand zweimal da.
+    """
+
     scope: MemoryScope
     server_id: int | None = Field(default=None, ge=1)
     team_id: int | None = Field(default=None, ge=1)
-    key: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
-    value: str = Field(min_length=1, max_length=2000)
+    text: str = Field(min_length=1, max_length=2000)
+    titel: str | None = Field(default=None, max_length=120)
+    thema: str | None = Field(default=None, max_length=60)
+
+
+class AiMemoryUpdate(BaseModel):
+    """Aenderung an einer Erinnerung. Was fehlt, bleibt, wie es ist.
+
+    ``titel`` und ``thema`` unterscheiden "nicht genannt" (bleibt) von
+    ``null`` (entfernen); deshalb liest der Router `model_fields_set`.
+    ``fassung`` ist die Fassung, die der Aendernde gesehen hat: hat
+    inzwischen jemand anderes geschrieben, lehnt der Server mit 409 ab.
+    """
+
+    text: str | None = Field(default=None, min_length=1, max_length=2000)
+    titel: str | None = Field(default=None, max_length=120)
+    thema: str | None = Field(default=None, max_length=60)
+    fassung: int = Field(ge=1)
+
+
+class AiMemoryFassungZurueck(BaseModel):
+    """Zurueck auf eine fruehere Fassung — mit der Fassung, die man gesehen hat."""
+
+    fassung: int = Field(ge=1)
 
 
 class AiMemoryPreferenceWrite(BaseModel):
@@ -43,20 +78,60 @@ class AiMemoryNoticeAnswer(BaseModel):
     hide_future: bool = False
 
 
+class AiMemoryThemaRef(BaseModel):
+    id: str
+    name: str
+
+
 class AiMemoryResponse(BaseModel):
     id: str
     scope: MemoryScope
     server_id: int | None
     team_id: int | None = None
-    key: str
+    #: Der alte Name, nur bei Altbestand. Neue Erinnerungen haben keinen.
+    key: str | None = None
+    #: Der Text der Erinnerung (der Feldname stammt aus der Zeit von Name und Wert).
     value: str
+    titel: str | None = None
+    thema: AiMemoryThemaRef | None = None
+    art: MemoryArt | None = None
+    quelle: MemoryQuelle = "eingetragen"
+    wichtigkeit: int = 3
     # "user" = du hast es hinterlegt, "ai" = die KI hat es sich gemerkt.
     # Sichtbar, damit niemand raten muss, woher ein Eintrag stammt.
     origin: Literal["user", "ai"] = "user"
+    #: ``vergessen`` heisst: die KI hat sie auf Wunsch vergessen, sie laesst
+    #: sich bis `vergessen_am` plus 30 Tage zurueckholen.
+    status: Literal["aktiv", "vergessen"] = "aktiv"
+    vergessen_am: datetime | None = None
+    #: Die Fassung, die eine Aenderung als gesehen mitschickt.
+    fassung: int = 1
     use_count: int = 0
     last_used_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class AiMemoryThema(BaseModel):
+    """Ein Thema einer Ansicht und wieviele geltende Erinnerungen darunter stehen."""
+
+    id: str
+    name: str
+    anzahl: int
+
+
+class AiMemoryFassung(BaseModel):
+    """Eine fruehere Fassung einer Erinnerung."""
+
+    id: str
+    text: str
+    titel: str | None = None
+    #: ``bearbeitet``, ``aktualisiert``, ``zusammengefuehrt``, ``aufgenommen``,
+    #: ``umgeschrieben`` oder ``wiederhergestellt``.
+    grund: str
+    #: Wer die Aenderung gemacht hat, die diese Fassung abgeloest hat.
+    von: Literal["user", "ai"]
+    erstellt: datetime
 
 
 class AiMemoryPage(BaseModel):

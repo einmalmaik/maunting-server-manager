@@ -550,16 +550,16 @@
         "team": "Für dieses Team ist noch nichts gemerkt.",
         "panel": "Panelweit ist noch nichts gemerkt."
       },
-      "key": "Schlüssel, z. B. response.language",
-      "value": "Präferenz",
-      "saved": "Memory-Eintrag gespeichert.",
-      "delete": "Memory-Eintrag löschen",
-      "deleteConfirm": "Den Memory-Eintrag „{{key}}“ wirklich löschen?",
+      "saved": "Erinnerung gespeichert.",
+      "delete": "Erinnerung löschen",
+      "deleteConfirm": "Die Erinnerung „{{name}}“ wirklich löschen?",
       "secretHint": "Keine Passwörter oder API-Keys hinterlegen (Übertragung an KI-Provider).",
       "errors": {
         "load": "KI-Memory konnte nicht geladen werden.",
         "save": "KI-Memory konnte nicht gespeichert werden.",
-        "delete": "Memory-Eintrag konnte nicht gelöscht werden."
+        "delete": "Erinnerung konnte nicht gelöscht werden.",
+        "restore": "Erinnerung konnte nicht zurückgeholt werden.",
+        "history": "Verlauf konnte nicht geladen werden."
       },
       "originAi": "von der KI gemerkt",
       "usedCount_one": "{{count}}× verwendet",
@@ -607,8 +607,42 @@
       "showingCount": "{{shown}} von {{total}} geladen",
       "newEntry": "Neuer Eintrag",
       "editEntry": "Eintrag bearbeiten",
-      "keyPlaceholder": "z. B. vorliebe-getraenke",
-      "valuePlaceholder": "Wert oder Präferenz eingeben …",
+      "text": "Erinnerung",
+      "textPlaceholder": "z. B. Der Benutzer bevorzugt kurze Antworten auf Deutsch.",
+      "titel": "Titel (optional)",
+      "thema": "Thema (optional)",
+      "themaFilter": "Nach Thema filtern",
+      "alleThemen": "Alle Themen",
+      "ansichtLabel": "Ansicht",
+      "ansichten": {
+        "aktiv": "Aktuell",
+        "vergessen": "Vergessen"
+      },
+      "quellen": {
+        "eingetragen": "Von Hand eingetragen",
+        "gespraech": "Aus einem Gespräch",
+        "import": "Aus einem Import",
+        "pflege": "Von Singra zusammengeführt"
+      },
+      "gruende": {
+        "bearbeitet": "Bearbeitet",
+        "aktualisiert": "Von Singra aktualisiert",
+        "zusammengefuehrt": "Von Singra zusammengeführt",
+        "aufgenommen": "In eine andere Erinnerung aufgenommen",
+        "umgeschrieben": "Von Singra in Sätze umgeschrieben",
+        "wiederhergestellt": "Durch eine frühere Fassung ersetzt"
+      },
+      "history": "Verlauf",
+      "historyTitle": "Frühere Fassungen",
+      "historyDescription": "Jede Änderung legt den Stand davor ab. Die letzten 20 bleiben erhalten.",
+      "versionRestored": "Frühere Fassung zurückgeholt.",
+      "restore": "Zurückholen",
+      "restored": "Erinnerung zurückgeholt.",
+      "deleteForever": "Endgültig löschen",
+      "deleteForeverConfirm": "„{{name}}“ endgültig löschen? Das lässt sich nicht rückgängig machen.",
+      "forgottenHint": "Was Singra vergisst, gilt nicht mehr und zählt nicht mehr mit. Es bleibt 30 Tage hier und lässt sich zurückholen; danach ist es endgültig gelöscht.",
+      "forgottenUntil": "Vergessen am {{date}}, zurückholbar bis {{until}}",
+      "emptyForgotten": "Hier ist nichts vergessen.",
       "import": {
         "button": "Importieren",
         "title": "Erinnerungen importieren",

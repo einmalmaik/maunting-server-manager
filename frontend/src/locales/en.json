@@ -550,16 +550,16 @@
         "team": "Nothing is remembered for this team yet.",
         "panel": "Nothing is remembered panel-wide yet."
       },
-      "key": "Key, for example response.language",
-      "value": "Preference",
-      "saved": "Memory entry saved.",
-      "delete": "Delete memory entry",
-      "deleteConfirm": "Really delete the memory entry “{{key}}”?",
+      "saved": "Memory saved.",
+      "delete": "Delete memory",
+      "deleteConfirm": "Really delete the memory “{{name}}”?",
       "secretHint": "Do not store passwords or API keys (sent to AI provider).",
       "errors": {
         "load": "AI memory could not be loaded.",
         "save": "AI memory could not be saved.",
-        "delete": "Memory entry could not be deleted."
+        "delete": "Memory could not be deleted.",
+        "restore": "Memory could not be restored.",
+        "history": "History could not be loaded."
       },
       "originAi": "remembered by the AI",
       "usedCount_one": "used {{count}}×",
@@ -607,8 +607,42 @@
       "showingCount": "{{shown}} of {{total}} loaded",
       "newEntry": "New entry",
       "editEntry": "Edit entry",
-      "keyPlaceholder": "e.g. response.language",
-      "valuePlaceholder": "Enter value or preference …",
+      "text": "Memory",
+      "textPlaceholder": "e.g. The user prefers short answers in German.",
+      "titel": "Title (optional)",
+      "thema": "Topic (optional)",
+      "themaFilter": "Filter by topic",
+      "alleThemen": "All topics",
+      "ansichtLabel": "View",
+      "ansichten": {
+        "aktiv": "Current",
+        "vergessen": "Forgotten"
+      },
+      "quellen": {
+        "eingetragen": "Entered by hand",
+        "gespraech": "From a conversation",
+        "import": "From an import",
+        "pflege": "Merged by Singra"
+      },
+      "gruende": {
+        "bearbeitet": "Edited",
+        "aktualisiert": "Updated by Singra",
+        "zusammengefuehrt": "Merged by Singra",
+        "aufgenommen": "Absorbed into another memory",
+        "umgeschrieben": "Rewritten into sentences by Singra",
+        "wiederhergestellt": "Replaced by an earlier version"
+      },
+      "history": "History",
+      "historyTitle": "Earlier versions",
+      "historyDescription": "Every change keeps the previous state. The last 20 are kept.",
+      "versionRestored": "Earlier version restored.",
+      "restore": "Restore",
+      "restored": "Memory restored.",
+      "deleteForever": "Delete permanently",
+      "deleteForeverConfirm": "Permanently delete “{{name}}”? This cannot be undone.",
+      "forgottenHint": "What Singra forgets no longer applies and no longer counts. It stays here for 30 days and can be restored; after that it is deleted for good.",
+      "forgottenUntil": "Forgotten on {{date}}, restorable until {{until}}",
+      "emptyForgotten": "Nothing has been forgotten here.",
       "import": {
         "button": "Import",
         "title": "Import memories",

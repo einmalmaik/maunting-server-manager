@@ -1,9 +1,10 @@
 /**
- * Frühere Fassungen einer Datei: Zeitpunkt, Größe und „Wiederherstellen“.
+ * Frühere Fassungen einer Datei oder eines Textes: Zeitpunkt, Größe oder
+ * Wortlaut, und „Wiederherstellen“.
  *
- * Woher die Fassungen kommen (Server, Tresor), weiß die Liste nicht. Ohne
- * `onWiederherstellen` zeigt sie nur an. Auf dunklem Grund (Lichtbox) setzt
- * `aufDunkel` die Farben auf Weiß.
+ * Woher die Fassungen kommen (Server, Tresor, Gedächtnis), weiß die Liste
+ * nicht. Ohne `onWiederherstellen` zeigt sie nur an. Auf dunklem Grund
+ * (Lichtbox) setzt `aufDunkel` die Farben auf Weiß.
  */
 import { useTranslation } from 'react-i18next'
 import { LoaderCircle } from 'lucide-react'
@@ -15,7 +16,12 @@ export interface Fassung {
   id: string
   /** Zeitpunkt in Millisekunden. */
   zeit: number
-  groesse: number
+  /** Größe in Byte — bei Dateien. */
+  groesse?: number
+  /** Der Wortlaut der Fassung — bei kurzen Texten statt der Größe. */
+  text?: string
+  /** Eine Zeile neben dem Zeitpunkt, etwa wer geändert hat. */
+  hinweis?: string
 }
 
 export interface VersionslisteProps {
@@ -32,16 +38,32 @@ export function Versionsliste({ versionen, onWiederherstellen, laeuft = null, au
   const neben = aufDunkel ? 'text-white/55' : 'text-on-surface-variant'
 
   if (versionen.length === 0) return <p className={cx('text-label-sm', neben)}>{t('common.versionen.leer')}</p>
+  const mitText = versionen.some((fassung) => fassung.text !== undefined)
   return (
-    <ul aria-label={t('common.versionen.titel')} className="max-h-56 space-y-1 overflow-y-auto pr-1">
+    <ul
+      aria-label={t('common.versionen.titel')}
+      className={cx('space-y-1 overflow-y-auto pr-1', mitText ? 'max-h-[60vh]' : 'max-h-56')}
+    >
       {versionen.map((fassung) => (
         <li
           key={fassung.id}
-          className={cx('flex items-center gap-2 rounded-md px-2 py-1.5', aufDunkel ? 'hover:bg-white/10' : 'hover:bg-surface-container-highest/70')}
+          className={cx(
+            'flex gap-2 rounded-md px-2 py-1.5',
+            fassung.text !== undefined ? 'items-start' : 'items-center',
+            aufDunkel ? 'hover:bg-white/10' : 'hover:bg-surface-container-highest/70',
+          )}
         >
           <div className="min-w-0 flex-1">
-            <p className={cx('text-label-sm', haupt)}>{formatZeitpunkt(fassung.zeit, i18n.language)}</p>
-            <p className={cx('font-mono text-label-sm', neben)}>{formatBytes(fassung.groesse)}</p>
+            <p className={cx('text-label-sm', haupt)}>
+              {formatZeitpunkt(fassung.zeit, i18n.language)}
+              {fassung.hinweis && <span className={neben}> · {fassung.hinweis}</span>}
+            </p>
+            {fassung.groesse !== undefined && (
+              <p className={cx('font-mono text-label-sm', neben)}>{formatBytes(fassung.groesse)}</p>
+            )}
+            {fassung.text !== undefined && (
+              <p className={cx('mt-0.5 whitespace-pre-wrap break-words text-sm', haupt)}>{fassung.text}</p>
+            )}
           </div>
           {onWiederherstellen && (
             <Button

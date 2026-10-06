@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { aiApi, type AiMemoryEntry, type AiMemoryPage } from '@/api/ai'
@@ -6,15 +6,22 @@ import * as client from '@/api/client'
 import i18n from '@/i18n'
 import { confirm } from '@/stores/confirmStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
+import { toast } from '@/stores/toastStore'
 import { AiMemoryManager } from './AiMemoryManager'
 
 vi.mock('@/api/ai', () => ({
   aiApi: {
     listScopeMemory: vi.fn(),
     listPersonalMemory: vi.fn(),
+    listPersonalTopics: vi.fn(),
+    listScopeTopics: vi.fn(),
     getMemoryPreference: vi.fn(),
     setMemoryPreference: vi.fn(),
-    saveMemory: vi.fn(),
+    createMemory: vi.fn(),
+    updateMemory: vi.fn(),
+    restoreMemory: vi.fn(),
+    listMemoryVersions: vi.fn(),
+    restoreMemoryVersion: vi.fn(),
     deleteMemory: vi.fn(),
     clearMemory: vi.fn(),
   },
@@ -26,7 +33,9 @@ vi.mock('@/api/client', async () => {
 })
 
 vi.mock('@/stores/confirmStore', () => ({ confirm: vi.fn() }))
+vi.mock('@/stores/toastStore', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
+/** Altbestand: ein Name und ein Wert, wie bis Gedächtnis v2 alles aussah. */
 const entry: AiMemoryEntry = {
   id: '00000000-0000-0000-0000-000000000101',
   scope: 'user',
@@ -34,7 +43,15 @@ const entry: AiMemoryEntry = {
   team_id: null,
   key: 'response.language',
   value: 'Synthetic test preference',
+  titel: null,
+  thema: null,
+  art: null,
+  quelle: 'eingetragen',
+  wichtigkeit: 3,
   origin: 'user',
+  status: 'aktiv',
+  vergessen_am: null,
+  fassung: 1,
   use_count: 0,
   last_used_at: null,
   created_at: '2026-08-01T12:00:00Z',
@@ -48,8 +65,27 @@ const learned: AiMemoryEntry = {
   key: 'ram.bevorzugt',
   value: '8 GB',
   origin: 'ai',
+  quelle: 'gespraech',
   use_count: 4,
   last_used_at: '2026-08-05T09:00:00Z',
+}
+
+/** Seit Gedächtnis v2: ein Satz ohne Namen. */
+const satz: AiMemoryEntry = {
+  ...entry,
+  id: '00000000-0000-0000-0000-000000000110',
+  key: null,
+  value: 'Der Benutzer startet seine Server am liebsten abends.',
+}
+
+/** Ein Satz mit Titel und Thema, der schon einmal geändert wurde. */
+const mitTitel: AiMemoryEntry = {
+  ...satz,
+  id: '00000000-0000-0000-0000-000000000111',
+  value: 'Backups laufen jede Nacht um drei Uhr.',
+  titel: 'Backupzeit',
+  thema: { id: 'thema-betrieb', name: 'Betrieb' },
+  fassung: 2,
 }
 
 /**
@@ -78,6 +114,9 @@ const bereichsSeite = (
   entries: rows, total: rows.length, clearable: rows.length, limit: 200, ...rest,
 })
 
+/** Der Filter, mit dem jede Liste ohne Auswahl geholt wird. */
+const OHNE_FILTER = { status: 'aktiv', thema: [] }
+
 /** Genug Einträge, damit Suche, Filter und Zähler überhaupt erscheinen. */
 const viele: AiMemoryEntry[] = [
   entry,
@@ -96,11 +135,19 @@ describe('AiMemoryManager', () => {
     })
     vi.mocked(aiApi.listScopeMemory).mockReset().mockResolvedValue(bereichsSeite([entry]))
     vi.mocked(aiApi.listPersonalMemory).mockReset().mockResolvedValue(seite([entry]))
+    vi.mocked(aiApi.listPersonalTopics).mockReset().mockResolvedValue([])
+    vi.mocked(aiApi.listScopeTopics).mockReset().mockResolvedValue([])
     vi.mocked(aiApi.deleteMemory).mockClear()
     vi.mocked(aiApi.getMemoryPreference).mockReset().mockResolvedValue({ enabled: true, notice_due: false, notice_hidden: false })
     vi.mocked(aiApi.setMemoryPreference).mockReset().mockResolvedValue({ enabled: false, notice_due: false, notice_hidden: false })
-    vi.mocked(aiApi.saveMemory).mockReset().mockResolvedValue(entry)
+    vi.mocked(aiApi.createMemory).mockReset().mockResolvedValue(satz)
+    vi.mocked(aiApi.updateMemory).mockReset().mockResolvedValue(entry)
+    vi.mocked(aiApi.restoreMemory).mockReset().mockResolvedValue(entry)
+    vi.mocked(aiApi.listMemoryVersions).mockReset().mockResolvedValue([])
+    vi.mocked(aiApi.restoreMemoryVersion).mockReset().mockResolvedValue(mitTitel)
     vi.mocked(aiApi.clearMemory).mockReset().mockResolvedValue({ removed: 4 })
+    vi.mocked(toast.error).mockClear()
+    vi.mocked(toast.success).mockClear()
     // Die Antwort auf die Rückfrage setzt der einzelne Test. Stünde sie in der
     // Attrappe, könnte kein Test mehr zeigen, dass überhaupt gefragt wird.
     vi.mocked(confirm).mockReset().mockResolvedValue(true)
@@ -115,11 +162,11 @@ describe('AiMemoryManager', () => {
     vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite(viele))
     render(<AiMemoryManager />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Memory-Eintrag löschen: ram.bevorzugt' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Erinnerung löschen: RAM: Bevorzugt' }))
     await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
-      // Der Schlüssel steht in der Frage: „wirklich löschen?" allein sagt nicht,
-      // was gleich verschwindet.
-      message: 'Den Memory-Eintrag „ram.bevorzugt“ wirklich löschen?',
+      // Die Erinnerung steht in der Frage: „wirklich löschen?" allein sagt
+      // nicht, was gleich verschwindet.
+      message: 'Die Erinnerung „RAM: Bevorzugt“ wirklich löschen?',
       danger: true,
     })))
     expect(aiApi.deleteMemory).not.toHaveBeenCalled()
@@ -131,19 +178,36 @@ describe('AiMemoryManager', () => {
     expect(screen.getByText('8 GB')).toBeInTheDocument()
   })
 
-  it('loads explicit entries and persists the opt-out without exposing hidden values', async () => {
+  it('legt einen Satz an und speichert die Abschaltung', async () => {
     render(<AiMemoryManager />)
 
     expect(await screen.findByText('Synthetic test preference')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('switch', { name: 'Memory im KI-Kontext verwenden' }))
     await waitFor(() => expect(aiApi.setMemoryPreference).toHaveBeenCalledWith(false))
 
-    fireEvent.change(screen.getByLabelText('Schlüssel, z. B. response.language'), { target: { value: 'answer.format' } })
-    fireEvent.change(screen.getByLabelText('Präferenz'), { target: { value: 'Use concise synthetic output' } })
+    fireEvent.change(screen.getByLabelText('Erinnerung'), {
+      target: { value: '  Der Benutzer mag kurze Antworten.  ' },
+    })
+    fireEvent.change(screen.getByLabelText('Thema (optional)'), { target: { value: 'Stil' } })
     fireEvent.click(screen.getByRole('button', { name: 'Hinzufügen' }))
-    await waitFor(() => expect(aiApi.saveMemory).toHaveBeenCalledWith({
-      scope: 'user', key: 'answer.format', value: 'Use concise synthetic output',
+    await waitFor(() => expect(aiApi.createMemory).toHaveBeenCalledWith({
+      scope: 'user', text: 'Der Benutzer mag kurze Antworten.', titel: null, thema: 'Stil',
     }))
+    // Danach zählen die Themen neu, denn eines kann gerade entstanden sein.
+    await waitFor(() => expect(aiApi.listPersonalTopics).toHaveBeenCalledTimes(2))
+  })
+
+  it('zeigt einen Satz ohne Namen als Satz und einen mit Titel unter dem Titel', async () => {
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([satz, mitTitel]))
+    render(<AiMemoryManager />)
+
+    expect(await screen.findByText(satz.value)).toBeInTheDocument()
+    expect(screen.getByText('Backupzeit')).toBeInTheDocument()
+    expect(screen.getByText('Betrieb')).toBeInTheDocument()
+    // Kein Rohschlüssel und kein leerer Name davor.
+    fireEvent.click(screen.getByRole('button', { name: /Backupzeit/, expanded: false }))
+    expect(screen.getByText('Von Hand eingetragen')).toBeInTheDocument()
+    expect(screen.queryByText(/^Schlüssel:/)).toBeNull()
   })
 
   it('marks what the AI remembered on its own and how often it was used', async () => {
@@ -203,21 +267,55 @@ describe('AiMemoryManager', () => {
     await waitFor(() => expect(aiApi.clearMemory).toHaveBeenCalledWith('user', undefined, undefined))
   })
 
-  it('edits an entry in place instead of demanding the key again', async () => {
+  it('ändert eine Erinnerung über ihre Kennung und mit der gesehenen Fassung', async () => {
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([mitTitel]))
     render(<AiMemoryManager />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Erinnerung bearbeiten: response.language' }))
-    const schluessel = screen.getByLabelText('Schlüssel, z. B. response.language') as HTMLInputElement
-    expect(schluessel.value).toBe('response.language')
-    // Der Schluessel ist die Identitaet des Fakts — beim Bearbeiten gesperrt,
-    // sonst legt ein Tippfehler stillschweigend einen zweiten Eintrag an.
-    expect(schluessel).toBeDisabled()
+    fireEvent.click(await screen.findByRole('button', { name: 'Erinnerung bearbeiten: Backupzeit' }))
+    expect(screen.getByLabelText('Erinnerung')).toHaveValue('Backups laufen jede Nacht um drei Uhr.')
+    expect(screen.getByLabelText('Titel (optional)')).toHaveValue('Backupzeit')
+    expect(screen.getByLabelText('Thema (optional)')).toHaveValue('Betrieb')
 
-    fireEvent.change(screen.getByLabelText('Präferenz'), { target: { value: 'Deutsch' } })
+    fireEvent.change(screen.getByLabelText('Erinnerung'), { target: { value: 'Backups laufen um vier Uhr.' } })
+    fireEvent.change(screen.getByLabelText('Titel (optional)'), { target: { value: '' } })
     fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
-    await waitFor(() => expect(aiApi.saveMemory).toHaveBeenCalledWith({
-      scope: 'user', key: 'response.language', value: 'Deutsch',
+
+    // Ein geleerter Titel geht als `null` hinaus: entfernen, nicht „unverändert".
+    await waitFor(() => expect(aiApi.updateMemory).toHaveBeenCalledWith(mitTitel.id, {
+      text: 'Backups laufen um vier Uhr.', titel: null, thema: 'Betrieb', fassung: 2,
     }))
+    expect(aiApi.createMemory).not.toHaveBeenCalled()
+  })
+
+  it('zeigt bei einem Konflikt den neuen Stand und speichert danach gegen ihn', async () => {
+    // Ein zweites Fenster oder die Pflege im Hintergrund war schneller. Der
+    // eigene Text bleibt stehen; der zweite Versuch schickt die Fassung, die
+    // jetzt in der Liste steht — und nicht wieder die alte.
+    const neuerStand = { ...mitTitel, value: 'Backups laufen um fünf Uhr.', fassung: 3 }
+    vi.mocked(aiApi.listPersonalMemory)
+      .mockResolvedValueOnce(seite([mitTitel]))
+      .mockResolvedValue(seite([neuerStand]))
+    vi.mocked(aiApi.updateMemory)
+      .mockRejectedValueOnce(new client.SanitizedApiError(
+        'Die Erinnerung wurde inzwischen geändert. Lade neu und versuch es noch einmal.', { status: 409 },
+      ))
+      .mockResolvedValue(neuerStand)
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Erinnerung bearbeiten: Backupzeit' }))
+    fireEvent.change(screen.getByLabelText('Erinnerung'), { target: { value: 'Backups laufen um vier Uhr.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      'Die Erinnerung wurde inzwischen geändert. Lade neu und versuch es noch einmal.',
+    ))
+    expect(await screen.findAllByText('Backups laufen um fünf Uhr.')).not.toHaveLength(0)
+    expect(screen.getByLabelText('Erinnerung')).toHaveValue('Backups laufen um vier Uhr.')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+    await waitFor(() => expect(aiApi.updateMemory).toHaveBeenLastCalledWith(mitTitel.id, expect.objectContaining({
+      text: 'Backups laufen um vier Uhr.', fassung: 3,
+    })))
   })
 
   it('shows team knowledge read-only without the manage switch', async () => {
@@ -228,9 +326,10 @@ describe('AiMemoryManager', () => {
     render(<AiMemoryManager scope={{ kind: 'team', teamId: 7, canManage: false }} />)
 
     expect(await screen.findByText('Synthetic test preference')).toBeInTheDocument()
-    expect(aiApi.listScopeMemory).toHaveBeenCalledWith('team', undefined, 7, 0)
+    expect(aiApi.listScopeMemory).toHaveBeenCalledWith('team', undefined, 7, 0, OHNE_FILTER)
+    expect(aiApi.listScopeTopics).toHaveBeenCalledWith('team', undefined, 7)
     expect(screen.queryByRole('button', { name: 'Hinzufügen' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Memory-Eintrag löschen/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Erinnerung löschen/ })).not.toBeInTheDocument()
     // Der Gedaechtnis-Schalter ist eine persoenliche Einstellung und hat in
     // einer Teamansicht nichts verloren.
     expect(screen.queryByRole('switch')).not.toBeInTheDocument()
@@ -280,24 +379,24 @@ describe('AiMemoryManager', () => {
   })
 
   it('ändert eine Servernotiz an Ort und Stelle statt eine persönliche Kopie anzulegen', async () => {
-    // Ohne den Bereich des Eintrags geht die Korrektur als `scope: 'user'`
-    // hinaus. Das Backend sucht dann unter `user:{id}`, findet die Notiz dort
-    // nicht und legt eine zweite Zeile mit demselben Schlüssel an: die alte
-    // wirkt mit dem alten Wert weiter, und ab da gehen beide Werte gemeinsam in
-    // jedes Gespräch über diesen Server.
+    // Bis Gedächtnis v2 ging eine Korrektur über Bereich und Schlüssel hinaus,
+    // und ohne den Bereich des Eintrags landete sie unter `user:{id}` — eine
+    // zweite Zeile, und beide Werte gingen in jedes Gespräch über diesen
+    // Server. Seitdem geht sie über die Kennung; einen Bereich gibt es dabei
+    // gar nicht mehr zu verwechseln.
     vi.mocked(client.api).mockResolvedValue([{ id: 62, name: 'DayZ-1' }])
-    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([
-      { ...entry, id: '...-107', scope: 'server', server_id: 62, key: 'start-timeout', value: 'braucht 120s' },
-    ]))
+    const notiz = { ...entry, id: '...-107', scope: 'server' as const, server_id: 62, key: 'start-timeout', value: 'braucht 120s' }
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([notiz]))
     render(<AiMemoryManager />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Erinnerung bearbeiten: start-timeout' }))
-    fireEvent.change(screen.getByLabelText('Präferenz'), { target: { value: 'braucht 300s' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Erinnerung bearbeiten: Start Timeout' }))
+    fireEvent.change(screen.getByLabelText('Erinnerung'), { target: { value: 'braucht 300s' } })
     fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
 
-    await waitFor(() => expect(aiApi.saveMemory).toHaveBeenCalledWith({
-      scope: 'server', server_id: 62, key: 'start-timeout', value: 'braucht 300s',
+    await waitFor(() => expect(aiApi.updateMemory).toHaveBeenCalledWith('...-107', {
+      text: 'braucht 300s', titel: null, thema: null, fassung: 1,
     }))
+    expect(aiApi.createMemory).not.toHaveBeenCalled()
   })
 
   /** Das Wissen einer Anlage, wie es vom Serverreiter kommt. */
@@ -312,14 +411,13 @@ describe('AiMemoryManager', () => {
     render(<AiMemoryManager scope={serverBereich} />)
 
     expect(await screen.findByText('Nach dem Start neu laden')).toBeInTheDocument()
-    expect(aiApi.listScopeMemory).toHaveBeenCalledWith('server_shared', 62, undefined, 0)
+    expect(aiApi.listScopeMemory).toHaveBeenCalledWith('server_shared', 62, undefined, 0, OHNE_FILTER)
 
-    fireEvent.change(screen.getByLabelText('Schlüssel, z. B. response.language'), { target: { value: 'ports' } })
-    fireEvent.change(screen.getByLabelText('Präferenz'), { target: { value: 'Aussen 30015' } })
+    fireEvent.change(screen.getByLabelText('Erinnerung'), { target: { value: 'Der Port außen ist 30015.' } })
     fireEvent.click(screen.getByRole('button', { name: 'Hinzufügen' }))
 
-    await waitFor(() => expect(aiApi.saveMemory).toHaveBeenCalledWith({
-      scope: 'server_shared', server_id: 62, key: 'ports', value: 'Aussen 30015',
+    await waitFor(() => expect(aiApi.createMemory).toHaveBeenCalledWith({
+      scope: 'server_shared', server_id: 62, text: 'Der Port außen ist 30015.', titel: null, thema: null,
     }))
   })
 
@@ -347,12 +445,12 @@ describe('AiMemoryManager', () => {
     vi.mocked(aiApi.listScopeMemory).mockResolvedValue(bereichsSeite([wissen]))
     const { rerender } = render(<AiMemoryManager scope={serverBereich} />)
     await waitFor(() => expect(aiApi.listScopeMemory)
-      .toHaveBeenCalledWith('server_shared', 62, undefined, 0))
+      .toHaveBeenCalledWith('server_shared', 62, undefined, 0, OHNE_FILTER))
 
     rerender(<AiMemoryManager scope={{ kind: 'server_shared', serverId: 84, canManage: true }} />)
 
     await waitFor(() => expect(aiApi.listScopeMemory)
-      .toHaveBeenCalledWith('server_shared', 84, undefined, 0))
+      .toHaveBeenCalledWith('server_shared', 84, undefined, 0, OHNE_FILTER))
   })
 
   it('sagt auf dem Serverreiter, dass die Kollegen mitlesen', async () => {
@@ -377,7 +475,7 @@ describe('AiMemoryManager', () => {
 
     expect(await screen.findByText('Nach dem Start neu laden')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /löschen/i })).toBeNull()
-    expect(screen.queryByLabelText('Präferenz')).toBeNull()
+    expect(screen.queryByLabelText('Erinnerung')).toBeNull()
   })
 
   it('behält Suchfeld und Herkunftsfilter, solange sie noch etwas bewirken', async () => {
@@ -393,7 +491,7 @@ describe('AiMemoryManager', () => {
     render(<AiMemoryManager />)
 
     fireEvent.change(await screen.findByLabelText('Erinnerungen durchsuchen'), { target: { value: 'ram' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Memory-Eintrag löschen: ram.bevorzugt' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Erinnerung löschen: RAM: Bevorzugt' }))
     await waitFor(() => expect(aiApi.deleteMemory).toHaveBeenCalledWith(learned.id))
 
     const feld = await screen.findByLabelText('Erinnerungen durchsuchen')
@@ -427,7 +525,7 @@ describe('AiMemoryManager', () => {
 
     // Der Offset ist die zweite Seite, nicht der zweite Eintrag: die Größe
     // bestimmt der Server und sagt sie in `limit`.
-    await waitFor(() => expect(aiApi.listPersonalMemory).toHaveBeenLastCalledWith(4))
+    await waitFor(() => expect(aiApi.listPersonalMemory).toHaveBeenLastCalledWith(4, OHNE_FILTER))
     expect(await screen.findByText('Seite 2 von 1250')).toBeInTheDocument()
   })
 
@@ -445,7 +543,7 @@ describe('AiMemoryManager', () => {
     fireEvent.change(screen.getByLabelText('Diese Seite durchsuchen'), { target: { value: 'berlin' } })
     fireEvent.click(screen.getByRole('button', { name: 'Weiter' }))
 
-    await waitFor(() => expect(aiApi.listPersonalMemory).toHaveBeenLastCalledWith(4))
+    await waitFor(() => expect(aiApi.listPersonalMemory).toHaveBeenLastCalledWith(4, OHNE_FILTER))
     expect(screen.getByLabelText('Diese Seite durchsuchen')).toHaveValue('berlin')
   })
 
@@ -478,7 +576,7 @@ describe('AiMemoryManager', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Weiter' }))
 
     // Ein Nachschlag auf Offset 0 statt einer leeren Seite 2.
-    await waitFor(() => expect(aiApi.listPersonalMemory).toHaveBeenLastCalledWith(0))
+    await waitFor(() => expect(aiApi.listPersonalMemory).toHaveBeenLastCalledWith(0, OHNE_FILTER))
     expect(await screen.findByText('Europe/Berlin')).toBeInTheDocument()
     // Eine Seite bleibt übrig, also verschwindet die Leiste ganz.
     expect(screen.queryByRole('navigation', { name: 'Seitennavigation' })).toBeNull()
@@ -499,7 +597,7 @@ describe('AiMemoryManager', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Weiter' }))
 
     await waitFor(() => expect(aiApi.listScopeMemory)
-      .toHaveBeenLastCalledWith('team', undefined, 7, 4))
+      .toHaveBeenLastCalledWith('team', undefined, 7, 4, OHNE_FILTER))
     expect(await screen.findByText('Seite 2 von 1250')).toBeInTheDocument()
   })
 
@@ -530,6 +628,109 @@ describe('AiMemoryManager', () => {
     expect(await screen.findByText('Europe/Berlin')).toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: 'Seitennavigation' })).toBeNull()
     expect(screen.getByLabelText('Erinnerungen durchsuchen')).toBeInTheDocument()
+  })
+
+  it('fasst gleichnamige Themen zu einem Filter zusammen und filtert beim Server', async () => {
+    // „Familie“ allgemein und „familie“ zu einem Server sind zwei Themen in
+    // zwei Bereichen, für den Menschen aber ein Wort. Gefiltert wird beim
+    // Server: die Liste ist eine Seite, ein Filter darüber fände nur sie.
+    vi.mocked(aiApi.listPersonalTopics).mockResolvedValue([
+      { id: 'thema-allgemein', name: 'Familie', anzahl: 2 },
+      { id: 'thema-server', name: 'familie', anzahl: 1 },
+      { id: 'thema-arbeit', name: 'Arbeit', anzahl: 4 },
+    ])
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([satz]))
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Nach Thema filtern' }))
+    const optionen = await screen.findAllByRole('option')
+    expect(optionen.map((option) => option.textContent)).toEqual(['Alle Themen', 'Familie3', 'Arbeit4'])
+    fireEvent.click(screen.getByRole('option', { name: /Familie/ }))
+
+    await waitFor(() => expect(aiApi.listPersonalMemory).toHaveBeenLastCalledWith(0, {
+      status: 'aktiv', thema: ['thema-allgemein', 'thema-server'],
+    }))
+  })
+
+  it('zeigt Vergessenes mit Zurückholen und endgültigem Löschen, ohne Formular', async () => {
+    const vergessen: AiMemoryEntry = {
+      ...satz, id: '...-501', status: 'vergessen', origin: 'ai', quelle: 'gespraech',
+      vergessen_am: '2026-10-01T08:00:00Z',
+    }
+    vi.mocked(aiApi.listPersonalMemory)
+      .mockResolvedValueOnce(seite([entry]))
+      .mockResolvedValue(seite([vergessen]))
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Vergessen' }))
+
+    await waitFor(() => expect(aiApi.listPersonalMemory).toHaveBeenLastCalledWith(0, {
+      status: 'vergessen', thema: [],
+    }))
+    expect(await screen.findByText(/30 Tage hier/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Erinnerung')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Alle löschen' })).toBeNull()
+
+    const name = 'Der Benutzer startet seine Server am liebsten abends.'
+    fireEvent.click(screen.getByRole('button', { name: /^Der Benutzer startet/, expanded: false }))
+    expect(screen.getByText('Vergessen am 01.10.2026, zurückholbar bis 31.10.2026')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: `Zurückholen: ${name}` }))
+    await waitFor(() => expect(aiApi.restoreMemory).toHaveBeenCalledWith('...-501'))
+
+    fireEvent.click(screen.getByRole('button', { name: `Endgültig löschen: ${name}` }))
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      message: `„${name}“ endgültig löschen? Das lässt sich nicht rückgängig machen.`,
+    })))
+    await waitFor(() => expect(aiApi.deleteMemory).toHaveBeenCalledWith('...-501'))
+  })
+
+  it('sagt beim Zurückholen, wenn der Bereich voll ist', async () => {
+    // Was zurückkommt, zählt wieder gegen das Kontingent der Rolle. Ist es
+    // erschöpft, sagt der Server mit Stand und Grenze, woran es liegt.
+    const vergessen: AiMemoryEntry = { ...satz, id: '...-502', status: 'vergessen', vergessen_am: '2026-10-01T08:00:00Z' }
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([vergessen]))
+    vi.mocked(aiApi.restoreMemory).mockRejectedValue(new client.SanitizedApiError(
+      'Voll — dein Gedächtnis führt 100 von 100 erlaubten Einträgen. Einer muss weichen, bevor ein neuer passt.',
+      { status: 409 },
+    ))
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Vergessen' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Zurückholen:/ }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      'Voll — dein Gedächtnis führt 100 von 100 erlaubten Einträgen. Einer muss weichen, bevor ein neuer passt.',
+    ))
+  })
+
+  it('zeigt frühere Fassungen und holt eine davon zurück', async () => {
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([mitTitel]))
+    vi.mocked(aiApi.listMemoryVersions).mockResolvedValue([{
+      id: 'fassung-1', text: 'Backups laufen jede Nacht um zwei Uhr.', titel: 'Backupzeit',
+      grund: 'bearbeitet', von: 'user', erstellt: '2026-10-05T10:00:00Z',
+    }])
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Backupzeit/, expanded: false }))
+    fireEvent.click(screen.getByRole('button', { name: 'Verlauf: Backupzeit' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Backupzeit — Backups laufen jede Nacht um zwei Uhr.')).toBeInTheDocument()
+    expect(within(dialog).getByText(/Bearbeitet/)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Wiederherstellen' }))
+
+    await waitFor(() => expect(aiApi.restoreMemoryVersion).toHaveBeenCalledWith(mitTitel.id, 'fassung-1', 2))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('bietet keinen Verlauf an, wo es keinen geben kann', async () => {
+    // Fassung 1 heißt: nie geändert, also keine frühere Fassung.
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([satz]))
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Der Benutzer startet/, expanded: false }))
+    expect(screen.queryByRole('button', { name: /^Verlauf/ })).toBeNull()
   })
 
   it('formatiert technische Schlüssel automatisch in lesbaren Logbuch-Text', async () => {
@@ -640,6 +841,20 @@ describe('AiMemoryManager', () => {
     expect(screen.queryByText('Dark')).toBeNull()
   })
 
+  it('findet Sätze auch über Titel und Thema', async () => {
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([
+      satz, mitTitel,
+      { ...satz, id: '...-601', value: 'Der Benutzer mag Katzen.' },
+      { ...satz, id: '...-602', value: 'Der Benutzer wohnt am Meer.' },
+    ]))
+    render(<AiMemoryManager />)
+
+    fireEvent.change(await screen.findByLabelText('Erinnerungen durchsuchen'), { target: { value: 'betrieb' } })
+
+    expect(screen.getByText('Backupzeit')).toBeInTheDocument()
+    expect(screen.queryByText('Der Benutzer mag Katzen.')).toBeNull()
+  })
+
   it('begrenzt die Anzeige bei vielen Einträgen initial und lädt per Klick progressiv nach (Lazy Loading)', async () => {
     const vieleEintraege: AiMemoryEntry[] = Array.from({ length: 45 }, (_, i) => ({
       ...entry,
@@ -671,20 +886,17 @@ describe('AiMemoryManager', () => {
     expect(await screen.findByText('Synthetic test preference')).toBeInTheDocument()
 
     // Klick auf Bearbeiten-Button
-    const editBtn = screen.getByRole('button', { name: 'Erinnerung bearbeiten: response.language' })
+    const editBtn = screen.getByRole('button', { name: 'Erinnerung bearbeiten: Response: Language' })
     fireEvent.click(editBtn)
 
     // Formular zeigt "Eintrag bearbeiten" und hat vorbelegte Werte
     expect(screen.getByText('Eintrag bearbeiten')).toBeInTheDocument()
-    const keyInput = screen.getByLabelText('Schlüssel, z. B. response.language')
-    const valInput = screen.getByLabelText('Präferenz')
-    expect(keyInput).toHaveValue('response.language')
-    expect(valInput).toHaveValue('Synthetic test preference')
+    expect(screen.getByLabelText('Erinnerung')).toHaveValue('Synthetic test preference')
 
     // Schließen / Abbrechen
     const cancelBtn = screen.getByRole('button', { name: 'Abbrechen' })
     fireEvent.click(cancelBtn)
     expect(screen.getByText('Neuer Eintrag')).toBeInTheDocument()
+    expect(screen.getByLabelText('Erinnerung')).toHaveValue('')
   })
 })
-

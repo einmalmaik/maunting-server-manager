@@ -1211,7 +1211,7 @@ async def _e2ee_envelope_cleanup_task() -> None:
     """Regelmäßiger Hintergrund-Task zur Durchsetzung der 30-Tage-Vorhaltefrist für E2EE-Umschläge."""
     from services.chat_media_service import ChatMediaService
     from services.social_service import SocialService
-    from services import vault_blob_service
+    from services import ai_memory_service, vault_blob_service
     def _worker() -> None:
         db = SessionLocal()
         try:
@@ -1220,6 +1220,8 @@ async def _e2ee_envelope_cleanup_task() -> None:
                 ("Anhang", ChatMediaService.cleanup_expired_media),
                 ("Story", SocialService.cleanup_expired_stories),
                 ("Tresor-Datei", vault_blob_service.aufraeumen),
+                # Was die KI vergessen hat, bleibt 30 Tage zurueckholbar.
+                ("Vergessene-Erinnerung", ai_memory_service.vergessene_aufraeumen),
             ):
                 try:
                     cleanup(db)

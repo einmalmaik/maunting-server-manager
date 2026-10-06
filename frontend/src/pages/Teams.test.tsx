@@ -42,8 +42,9 @@ vi.mock('@/api/client', async () => {
   const leereSeite = { entries: [], total: 0, clearable: 0, limit: 200 }
   return {
     ...actual,
+    // Die Themen eines Bereichs sind eine Liste, keine Seite (Gedächtnis v2).
     api: vi.fn().mockImplementation(async (pfad: string) =>
-      typeof pfad === 'string' && pfad.includes('/ai/memory/') ? leereSeite : []
+      typeof pfad === 'string' && pfad.includes('/ai/memory/') && !pfad.includes('themen') ? leereSeite : []
     ),
   }
 })
@@ -197,7 +198,7 @@ describe('Teams', () => {
     // ohne sie gäbe es keine Auswahl, gegen die die Einladungsfilterung
     // überhaupt prüfbar wäre.
     vi.mocked(api).mockImplementation((async (pfad: string) => {
-      if (typeof pfad === 'string' && pfad.includes('/ai/memory/')) {
+      if (typeof pfad === 'string' && pfad.includes('/ai/memory/') && !pfad.includes('themen')) {
         return { entries: [], total: 0, clearable: 0, limit: 200 }
       }
       if (pfad === '/admin/users') return alleBenutzer

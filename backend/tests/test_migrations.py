@@ -322,3 +322,111 @@ def test_email_spalte_faellt_erst_nach_dem_verschluesseln(pg_wegwerf, monkeypatc
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+# ── 20261006_01 — Gedächtnis v2: Sätze statt Schlüssel ──────────────────────
+
+
+def test_gedaechtnis_saetze_hin_und_zurueck(pg_wegwerf):
+    """Altbestand behält seinen Namen, und der Rückbau lässt nichts Namenloses zurück.
+
+    Hinweg: jede bestehende Zeile gilt (``aktiv``), steht in Fassung 1 und hat
+    eine Quelle — was die KI gemerkt hat, kommt aus einem Gespräch.
+
+    Rückweg: der alte Stand kennt weder namenlose Zeilen noch ``vergessen``.
+    Eine namenlose bekommt einen Namen im Klartext, den der alte Stand beim
+    Start selbst verschlüsselt; eine vergessene fällt weg, statt nach dem
+    Rückbau wieder zu gelten.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, inspect, text
+    from sqlalchemy.exc import IntegrityError
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+
+    db_url = pg_wegwerf("gedaechtnis-v2")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    zeitpunkt = "'2026-10-01 00:00:00+00'"
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+        command.downgrade(config, "20261005_01")
+
+        tabellen = set(inspect(engine).get_table_names())
+        assert "ai_memory_themen" not in tabellen and "ai_memory_versionen" not in tabellen
+        spalten = {s["name"]: s for s in inspect(engine).get_columns("ai_memory_entries")}
+        assert "titel_encrypted" not in spalten and "status" not in spalten
+        assert spalten["key_encrypted"]["nullable"] is False
+
+        with engine.begin() as conn:
+            for kennung, herkunft in (("alt-ki", "ai"), ("alt-mensch", "user")):
+                conn.execute(text(
+                    "INSERT INTO ai_memory_entries (id, scope, scope_identity, key_encrypted, "
+                    "value_encrypted, origin, aad_version, use_count, created_at, updated_at) "
+                    f"VALUES (:id, 'user', 'user:1', :name, 'x', :herkunft, 2, 0, {zeitpunkt}, {zeitpunkt})"
+                ), {"id": kennung, "name": f"name-{kennung}", "herkunft": herkunft})
+
+        command.upgrade(config, "20261006_01")
+
+        with engine.connect() as conn:
+            zeilen = {
+                z.id: z for z in conn.execute(text(
+                    "SELECT id, quelle, status, fassung, wichtigkeit, key_encrypted "
+                    "FROM ai_memory_entries"
+                ))
+            }
+        assert zeilen["alt-ki"].quelle == "gespraech"
+        assert zeilen["alt-mensch"].quelle == "eingetragen"
+        for zeile in zeilen.values():
+            assert (zeile.status, zeile.fassung, zeile.wichtigkeit) == ("aktiv", 1, 3)
+            # Der Name bleibt, wo er war; umgeschrieben wird erst in Stufe 2.
+            assert zeile.key_encrypted.startswith("name-")
+        spalten = {s["name"]: s for s in inspect(engine).get_columns("ai_memory_entries")}
+        assert spalten["key_encrypted"]["nullable"] is True
+        # Die Prüfungen stehen in der Datenbank und nicht nur im Modell.
+        with pytest.raises(IntegrityError):
+            with engine.begin() as conn:
+                conn.execute(text("UPDATE ai_memory_entries SET status = 'weg' WHERE id = 'alt-ki'"))
+
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO ai_memory_entries (id, scope, scope_identity, key_encrypted, "
+                "value_encrypted, origin, aad_version, use_count, created_at, updated_at, status) "
+                "VALUES ('1234567890abcdef', 'user', 'user:1', NULL, 'x', 'user', 2, 0, "
+                f"{zeitpunkt}, {zeitpunkt}, 'aktiv'), "
+                "('vergessen-1', 'user', 'user:1', NULL, 'x', 'ai', 2, 0, "
+                f"{zeitpunkt}, {zeitpunkt}, 'vergessen')"
+            ))
+            conn.execute(text(
+                "INSERT INTO ai_memory_versionen (id, memory_id, scope_identity, text_encrypted, "
+                f"grund, von, created_at) VALUES ('f1', 'alt-ki', 'user:1', 'x', 'bearbeitet', 'user', {zeitpunkt})"
+            ))
+
+        command.downgrade(config, "20261005_01")
+
+        with engine.connect() as conn:
+            zeilen = {
+                z.id: z for z in conn.execute(text(
+                    "SELECT id, key_encrypted, key_index FROM ai_memory_entries"
+                ))
+            }
+        assert set(zeilen) == {"alt-ki", "alt-mensch", "1234567890abcdef"}
+        assert zeilen["1234567890abcdef"].key_encrypted == "erinnerung-12345678"
+        assert zeilen["1234567890abcdef"].key_index is None
+        assert "ai_memory_versionen" not in set(inspect(engine).get_table_names())
+        spalten = {s["name"]: s for s in inspect(engine).get_columns("ai_memory_entries")}
+        assert spalten["key_encrypted"]["nullable"] is False
+
+        # Und wieder hinauf: der Hinweg verträgt einen Stand, der schon einmal oben war.
+        command.upgrade(config, "head")
+        assert {"ai_memory_themen", "ai_memory_versionen"} <= set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+        settings.database_url = vorher

@@ -716,7 +716,7 @@ def test_ein_unlesbarer_eintrag_nimmt_nicht_die_ganze_uebersicht_mit(
     konnte man den Störenfried auch nicht, weil man keine Kennung zu sehen
     bekam.
     """
-    from services.dis_client import DisClient, DisDecryptionError
+    from tests._entschluesselung import unlesbar_machen
 
     _allow(db, regular_user, "ai.memory.use")
     kaputt, _ = ai_memory_service.upsert_entry(
@@ -724,16 +724,7 @@ def test_ein_unlesbarer_eintrag_nimmt_nicht_die_ganze_uebersicht_mit(
         key="kaputt", value="Unlesbarer Wert",
     )
     _remember(db, regular_user, "heil", "Lesbarer Wert")
-    kaputte_id = kaputt.id
-
-    echt = DisClient.decrypt
-
-    def stolpert(payload, *, aad):
-        if aad.endswith(kaputte_id):
-            raise DisDecryptionError("AAD passt nicht mehr")
-        return echt(payload, aad=aad)
-
-    monkeypatch.setattr(DisClient, "decrypt", staticmethod(stolpert))
+    unlesbar_machen(monkeypatch, kaputt.id)
 
     uebersicht = ai_memory_service.list_entries(db, regular_user, "user", None)
     assert [row.key for row, _wert in uebersicht] == ["heil"]
@@ -758,15 +749,12 @@ def test_ein_toter_sidecar_bleibt_ein_ehrlicher_fehler(
     Genau darin unterscheidet sich der Helfer der Oberfläche vom Helfer des
     Chats, und nur darin.
     """
-    from services.dis_client import DisClient, DisSidecarError
+    from services.dis_client import DisSidecarError
+    from tests._entschluesselung import sidecar_tot
 
     _allow(db, regular_user, "ai.memory.use")
     _remember(db, regular_user, "heil", "Lesbarer Wert")
-
-    def tot(payload, *, aad):
-        raise DisSidecarError("Sidecar nicht erreichbar")
-
-    monkeypatch.setattr(DisClient, "decrypt", staticmethod(tot))
+    sidecar_tot(monkeypatch)
 
     with pytest.raises(DisSidecarError):
         ai_memory_service.list_entries(db, regular_user, "user", None)
@@ -954,33 +942,27 @@ def test_die_teamansicht_blaettert_statt_alles_auf_einmal_zu_oeffnen(
     200 bräuchte der Test 205 Einträge und ein angehobenes Rollenlimit und
     prüfte dann zwei Dinge auf einmal.
     """
-    from services.dis_client import DisClient
+    from tests._entschluesselung import mitzaehlen
 
     _allow(db, regular_user, "ai.memory.use", "teams.create")
     team = _team_mit_wissen(db, regular_user, 5)
     monkeypatch.setattr(ai_memory_service, "PERSONAL_PAGE_SIZE", 3)
-
-    echt = DisClient.decrypt
-    geoeffnet: list[str] = []
-
-    def zaehlend(payload, *, aad):
-        geoeffnet.append(aad)
-        return echt(payload, aad=aad)
-
-    monkeypatch.setattr(DisClient, "decrypt", staticmethod(zaehlend))
+    zaehler = mitzaehlen(monkeypatch)
 
     erste = ai_memory_service.scope_entries(
         db, regular_user, "team", None, team.id
     )
-    aufrufe_erste = len(geoeffnet)
+    texte_erste, aufrufe_erste = zaehler.texte, zaehler.aufrufe
     zweite = ai_memory_service.scope_entries(
         db, regular_user, "team", None, team.id, offset=3
     )
 
     assert len(erste.eintraege) == 3
     assert erste.gesamt == 5
-    # Genau eine Entschlüsselung je gezeigter Zeile — nicht je vorhandener.
-    assert aufrufe_erste == 3
+    # Genau ein Text je gezeigter Zeile — nicht je vorhandener —, in einem
+    # Roundtrip.
+    assert texte_erste == 3
+    assert aufrufe_erste == 1
 
     # Zusammen genau die fünf, ohne Überlappung und ohne Lücke.
     assert len(zweite.eintraege) == 2
