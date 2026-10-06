@@ -200,8 +200,11 @@ def downgrade() -> None:
         op.execute("DELETE FROM ai_memory_entries WHERE status = 'vergessen'")
     # Klartext mit Absicht: der alte Stand erkennt ihn am fehlenden Praefix
     # und verschluesselt ihn beim Start mit Index (`schluessel_nachziehen`).
+    # Die ganze Kennung (47 von 64 Zeichen): mit acht Zeichen stiessen bei
+    # unbegrenztem Vorrat zwei Namen eines Bereichs zusammen, und das UNIQUE
+    # auf dem Index liess danach jeden Start scheitern.
     op.execute(
-        "UPDATE ai_memory_entries SET key_encrypted = 'erinnerung-' || substr(id, 1, 8), "
+        "UPDATE ai_memory_entries SET key_encrypted = 'erinnerung-' || id, "
         "key_index = NULL WHERE key_encrypted IS NULL"
     )
 

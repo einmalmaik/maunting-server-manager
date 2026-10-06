@@ -182,6 +182,10 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   const sentinelRef = useRef<HTMLDivElement | null>(null)
   const formRef = useRef<HTMLFormElement | null>(null)
   const textRef = useRef<HTMLTextAreaElement | null>(null)
+  // Jede Ladung bekommt eine Nummer, übernommen wird nur die jüngste. Sonst
+  // konnte eine langsame Antwort für „Aktuell“ nach dem Wechsel auf
+  // „Vergessen“ eintreffen und die falsche Liste unter den Reiter legen.
+  const ladeNummer = useRef(0)
 
   const themenGruppen = useMemo(() => themenGruppieren(themen), [themen])
   const gewaehlteIds = themenGruppen.find((gruppe) => gruppe.schluessel === themaWahl)?.ids ?? []
@@ -213,7 +217,9 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     ansicht: zielAnsicht = ansicht,
     themaIds = gewaehlteIds,
   }: Ladeziel = {}): Promise<AiMemoryPage> => {
+    const nummer = ++ladeNummer.current
     const ladung = await holen(Math.max(0, zielSeite - 1) * groesse, zielAnsicht, themaIds)
+    if (nummer !== ladeNummer.current) return ladung
     const letzte = Math.max(1, Math.ceil(ladung.total / ladung.limit))
     if (zielSeite > letzte) {
       return laden({ seite: letzte, groesse: ladung.limit, ansicht: zielAnsicht, themaIds })
@@ -245,6 +251,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     setSuche(''); setHerkunft('all'); setAnsicht('aktiv'); setThemaWahl('')
     setText(''); setTitel(''); setThema(''); setBearbeitet(null)
     setExpandedIds(new Set())
+    const nummer = ++ladeNummer.current
     Promise.all([
       holen(0, 'aktiv', []),
       aiApi.getMemoryPreference(),
@@ -255,7 +262,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     ])
       .then(([ladung, preference, servers, geladeneThemen]) => {
         if (!active) return
-        uebernehmen(ladung, 1)
+        if (nummer === ladeNummer.current) uebernehmen(ladung, 1)
         setEnabled(preference.enabled)
         setServerNamen(new Map(servers.map((row) => [row.id, row.name])))
         setThemen(geladeneThemen)
@@ -343,7 +350,9 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   }
 
   const ansichtWechseln = (naechste: AiMemoryAnsicht) => {
-    if (naechste === ansicht) return
+    // Nicht mitten in einer Änderung: deren Nachladen gehört zur Ansicht, in
+    // der sie begonnen hat.
+    if (naechste === ansicht || busy) return
     setAnsicht(naechste)
     setSuche(''); setHerkunft('all'); setThemaWahl('')
     formLeeren()
@@ -394,12 +403,23 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       // Jemand anderes war schneller (ein zweites Fenster, die Pflege im
       // Hintergrund). Der eigene Text bleibt im Formular; die Liste zeigt den
       // Stand, gegen den er jetzt gespeichert würde.
+      //
+      // Geholt wird die eine Zeile und nicht nur die Seite: die Ordnung folgt
+      // dem letzten Gebrauch, und eine Erinnerung, die inzwischen auf einer
+      // anderen Seite steht, hielt sonst ihre alte Fassung — jedes weitere
+      // Speichern wäre wieder 409 gewesen.
       if (bearbeitet !== null && error instanceof SanitizedApiError && error.status === 409) {
-        const frisch = await laden().catch(() => null)
-        const neu = frisch?.entries.find((row) => row.id === bearbeitet.id)
-        if (neu) {
+        const [neu] = await Promise.all([
+          aiApi.getMemory(bearbeitet.id).catch(() => null),
+          laden().catch(() => null),
+        ])
+        if (neu && neu.status === 'aktiv') {
           setBearbeitet(neu)
           setExpandedIds((prev) => new Set(prev).add(neu.id))
+        } else {
+          // Vergessen oder gelöscht: es gibt keinen Stand mehr, gegen den
+          // gespeichert würde. Der Text bleibt und wird neu angelegt.
+          setBearbeitet(null)
         }
       }
     } finally { setBusy(false) }
@@ -481,6 +501,12 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       toast.success(t('ai.memory.versionRestored'))
     } catch (error: unknown) {
       toast.error(fehlermeldung(error, 'ai.memory.errors.save'))
+      if (error instanceof SanitizedApiError && error.status === 409) {
+        // Der Verlauf gehört zu einem Stand, den es nicht mehr gibt. Er geht
+        // zu, die Liste kommt neu; beim nächsten Öffnen gilt die frische Fassung.
+        setVerlauf(null)
+        await nachAenderung().catch(() => null)
+      }
     } finally { setVerlaufHolt(null) }
   }
 

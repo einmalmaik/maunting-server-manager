@@ -19,6 +19,7 @@ vi.mock('@/api/ai', () => ({
     setMemoryPreference: vi.fn(),
     createMemory: vi.fn(),
     updateMemory: vi.fn(),
+    getMemory: vi.fn(),
     restoreMemory: vi.fn(),
     listMemoryVersions: vi.fn(),
     restoreMemoryVersion: vi.fn(),
@@ -142,6 +143,7 @@ describe('AiMemoryManager', () => {
     vi.mocked(aiApi.setMemoryPreference).mockReset().mockResolvedValue({ enabled: false, notice_due: false, notice_hidden: false })
     vi.mocked(aiApi.createMemory).mockReset().mockResolvedValue(satz)
     vi.mocked(aiApi.updateMemory).mockReset().mockResolvedValue(entry)
+    vi.mocked(aiApi.getMemory).mockReset().mockResolvedValue(entry)
     vi.mocked(aiApi.restoreMemory).mockReset().mockResolvedValue(entry)
     vi.mocked(aiApi.listMemoryVersions).mockReset().mockResolvedValue([])
     vi.mocked(aiApi.restoreMemoryVersion).mockReset().mockResolvedValue(mitTitel)
@@ -300,6 +302,7 @@ describe('AiMemoryManager', () => {
         'Die Erinnerung wurde inzwischen geändert. Lade neu und versuch es noch einmal.', { status: 409 },
       ))
       .mockResolvedValue(neuerStand)
+    vi.mocked(aiApi.getMemory).mockResolvedValue(neuerStand)
     render(<AiMemoryManager />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Erinnerung bearbeiten: Backupzeit' }))
@@ -316,6 +319,66 @@ describe('AiMemoryManager', () => {
     await waitFor(() => expect(aiApi.updateMemory).toHaveBeenLastCalledWith(mitTitel.id, expect.objectContaining({
       text: 'Backups laufen um vier Uhr.', fassung: 3,
     })))
+  })
+
+  it('holt nach einem Konflikt die Erinnerung selbst, auch wenn sie nicht mehr auf der Seite steht', async () => {
+    // Die Ordnung folgt dem letzten Gebrauch: nach dem Neuladen steht die
+    // Erinnerung auf einer anderen Seite. Bis 06.10.2026 blieb dann die alte
+    // Fassung stehen, und jedes weitere Speichern bekam wieder 409.
+    const neuerStand = { ...mitTitel, value: 'Backups laufen um fünf Uhr.', fassung: 3 }
+    vi.mocked(aiApi.listPersonalMemory)
+      .mockResolvedValueOnce(seite([mitTitel]))
+      .mockResolvedValue(seite([satz]))
+    vi.mocked(aiApi.updateMemory)
+      .mockRejectedValueOnce(new client.SanitizedApiError('Geändert.', { status: 409 }))
+      .mockResolvedValue(neuerStand)
+    vi.mocked(aiApi.getMemory).mockResolvedValue(neuerStand)
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Erinnerung bearbeiten: Backupzeit' }))
+    fireEvent.change(screen.getByLabelText('Erinnerung'), { target: { value: 'Backups laufen um vier Uhr.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+    await waitFor(() => expect(aiApi.getMemory).toHaveBeenCalledWith(mitTitel.id))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Speichern' }))
+    await waitFor(() => expect(aiApi.updateMemory).toHaveBeenLastCalledWith(mitTitel.id, expect.objectContaining({
+      text: 'Backups laufen um vier Uhr.', fassung: 3,
+    })))
+  })
+
+  it('legt den Text neu an, wenn die bearbeitete Erinnerung inzwischen vergessen ist', async () => {
+    vi.mocked(aiApi.listPersonalMemory)
+      .mockResolvedValueOnce(seite([mitTitel]))
+      .mockResolvedValue(seite([]))
+    vi.mocked(aiApi.updateMemory).mockRejectedValueOnce(new client.SanitizedApiError(
+      'Diese Erinnerung ist vergessen. Hol sie zuerst zurück.', { status: 409 },
+    ))
+    vi.mocked(aiApi.getMemory).mockResolvedValue({ ...mitTitel, status: 'vergessen' })
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Erinnerung bearbeiten: Backupzeit' }))
+    fireEvent.change(screen.getByLabelText('Erinnerung'), { target: { value: 'Backups laufen um vier Uhr.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+
+    expect(await screen.findByRole('button', { name: 'Hinzufügen' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Erinnerung')).toHaveValue('Backups laufen um vier Uhr.')
+  })
+
+  it('legt keine langsame Antwort für Aktuell unter den Reiter Vergessen', async () => {
+    let erste: (ladung: AiMemoryPage) => void = () => {}
+    vi.mocked(aiApi.listPersonalMemory)
+      .mockImplementationOnce(() => new Promise((fertig) => { erste = fertig }))
+      .mockResolvedValue(seite([], { total: 0 }))
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Vergessen' }))
+    expect(await screen.findByText('Hier ist nichts vergessen.')).toBeInTheDocument()
+    erste(seite([mitTitel]))
+
+    await waitFor(() => expect(aiApi.getMemoryPreference).toHaveBeenCalled())
+    await new Promise((weiter) => setTimeout(weiter, 0))
+    expect(screen.queryByText('Backupzeit')).toBeNull()
+    expect(screen.getByText('Hier ist nichts vergessen.')).toBeInTheDocument()
   })
 
   it('shows team knowledge read-only without the manage switch', async () => {
@@ -722,6 +785,27 @@ describe('AiMemoryManager', () => {
 
     await waitFor(() => expect(aiApi.restoreMemoryVersion).toHaveBeenCalledWith(mitTitel.id, 'fassung-1', 2))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('schließt den Verlauf und lädt neu, wenn die Fassung inzwischen eine andere ist', async () => {
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([mitTitel]))
+    vi.mocked(aiApi.listMemoryVersions).mockResolvedValue([{
+      id: 'fassung-1', text: 'Backups laufen jede Nacht um zwei Uhr.', titel: 'Backupzeit',
+      grund: 'bearbeitet', von: 'user', erstellt: '2026-10-05T10:00:00Z',
+    }])
+    vi.mocked(aiApi.restoreMemoryVersion).mockRejectedValueOnce(new client.SanitizedApiError(
+      'Die Erinnerung wurde inzwischen geändert. Lade neu und versuch es noch einmal.', { status: 409 },
+    ))
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Backupzeit/, expanded: false }))
+    fireEvent.click(screen.getByRole('button', { name: 'Verlauf: Backupzeit' }))
+    const dialog = await screen.findByRole('dialog')
+    const geladen = vi.mocked(aiApi.listPersonalMemory).mock.calls.length
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Wiederherstellen' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(vi.mocked(aiApi.listPersonalMemory).mock.calls.length).toBeGreaterThan(geladen))
   })
 
   it('bietet keinen Verlauf an, wo es keinen geben kann', async () => {

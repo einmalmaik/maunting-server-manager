@@ -681,3 +681,226 @@ def test_der_export_enthaelt_titel_thema_und_fassungen_im_klartext(
         "Erster Stand.", "Überschrift",
     )
     assert paket["manifest"]["unlesbare_werte"] == 0
+
+
+# ── Befunde der Prüfung vom 06.10.2026 ──────────────────────────────────
+
+
+def test_zwei_aenderungen_zugleich_verlieren_keinen_stand(
+    db: Session, regular_user: User
+) -> None:
+    """Wer einen veralteten Stand ändert, bekommt 409 — auch im selben Augenblick.
+
+    Bis 06.10.2026 las `_zeile` die Erinnerung aus der Sitzung, ohne Sperre.
+    Hatte eine zweite Sitzung inzwischen geschrieben, bestand die alte
+    `fassung` die Prüfung, und der Text der zweiten Sitzung war weg — auch
+    aus den Fassungen.
+    """
+    import database as db_module
+
+    _erlauben(db, regular_user)
+    row = _anlegen(db, regular_user, "Backups laufen um drei Uhr.")
+    gesehen = row.fassung
+
+    zweite = db_module.SessionLocal()
+    try:
+        ai_memory_service.erinnerung_aendern(
+            zweite, user=zweite.get(User, regular_user.id), entry_id=row.id,
+            text="Backups laufen um vier Uhr.", erwartete_fassung=gesehen,
+        )
+    finally:
+        zweite.close()
+
+    with pytest.raises(HTTPException) as fehler:
+        ai_memory_service.erinnerung_aendern(
+            db, user=regular_user, entry_id=row.id,
+            text="Backups laufen um fünf Uhr.", erwartete_fassung=gesehen,
+        )
+    assert fehler.value.status_code == 409
+    db.rollback()
+
+    seite = ai_memory_service.personal_entries(db, regular_user)
+    assert [wert for _row, wert in seite.eintraege] == ["Backups laufen um vier Uhr."]
+    assert [f.text for f in ai_memory_service.fassungen(
+        db, user=regular_user, entry_id=row.id,
+    )] == ["Backups laufen um drei Uhr."]
+
+
+def test_ein_fremdes_thema_bleibt_verschlossen(db: Session, regular_user: User) -> None:
+    """Die eigene Erinnerung zeigt keinen Themennamen aus einem fremden Bereich.
+
+    Gestellt wird der Fall, gegen den die AAD steht: jemand mit
+    Schreibzugriff auf die Datenbank hängt seine Erinnerung an das Thema
+    eines anderen. Der Name des fremden Themas bleibt zu.
+    """
+    jonas = _zweiter(db)
+    _erlauben(db, regular_user)
+    _erlauben(db, jonas)
+    fremd = _anlegen(db, jonas, "Jonas plant eine Reise.", thema="Geheimprojekt")
+    eigen = _anlegen(db, regular_user, "Der Benutzer trinkt Tee.")
+    db.execute(
+        text("UPDATE ai_memory_entries SET thema_id = :thema WHERE id = :id"),
+        {"thema": fremd.thema_id, "id": eigen.id},
+    )
+    db.commit()
+
+    seite = ai_memory_service.personal_entries(db, regular_user)
+    assert "Geheimprojekt" not in seite.themen.values()
+    assert ai_memory_service.personal_themen(db, regular_user) == []
+    db.expire_all()
+    assert ai_memory_service.themennamen(
+        db, [(fremd.thema_id, eigen.scope_identity)]
+    ) == {}
+
+
+def _beim_loeschen(db: Session, modell, aktion) -> None:
+    """Führt ``aktion`` aus, kurz bevor diese Sitzung Zeilen von ``modell`` löscht.
+
+    So entsteht genau die Lücke zwischen Auswahl und Löschen, in der ein
+    anderer Schreiber zum Zug kommt.
+    """
+    from sqlalchemy import event
+
+    erledigt: list[bool] = []
+
+    def dazwischen(zustand) -> None:
+        if (
+            not erledigt and zustand.is_delete and zustand.bind_mapper is not None
+            and zustand.bind_mapper.class_ is modell
+        ):
+            erledigt.append(True)
+            aktion()
+
+    event.listen(db, "do_orm_execute", dazwischen)
+    try:
+        ai_memory_service.vergessene_aufraeumen(db)
+    finally:
+        event.remove(db, "do_orm_execute", dazwischen)
+    assert erledigt, "der Löschschritt kam nie"
+
+
+def test_eine_zurueckgeholte_erinnerung_ueberlebt_das_aufraeumen(
+    db: Session, regular_user: User
+) -> None:
+    import database as db_module
+
+    _erlauben(db, regular_user)
+    row = _anlegen(db, regular_user, "Backups laufen um drei Uhr.")
+    ai_memory_service.erinnerung_vergessen(db, user=regular_user, entry_id=row.id)
+    db.execute(
+        text("UPDATE ai_memory_entries SET vergessen_am = :alt WHERE id = :id"),
+        {"alt": datetime.now(timezone.utc) - timedelta(days=31), "id": row.id},
+    )
+    db.commit()
+
+    def zurueckholen() -> None:
+        zweite = db_module.SessionLocal()
+        try:
+            ai_memory_service.erinnerung_zurueckholen(
+                zweite, user=zweite.get(User, regular_user.id), entry_id=row.id,
+            )
+        finally:
+            zweite.close()
+
+    _beim_loeschen(db, AiMemoryEntry, zurueckholen)
+
+    db.expire_all()
+    geblieben = db.get(AiMemoryEntry, row.id)
+    assert geblieben is not None and geblieben.status == "aktiv"
+
+
+def test_ein_wieder_benutztes_thema_ueberlebt_das_aufraeumen(
+    db: Session, regular_user: User
+) -> None:
+    import database as db_module
+
+    _erlauben(db, regular_user)
+    alt = _anlegen(db, regular_user, "Der Benutzer fährt Rad.", thema="Alltag")
+    thema_id = alt.thema_id
+    ai_memory_service.delete_entry(db, regular_user, alt.id)
+    db.execute(
+        text("UPDATE ai_memory_themen SET updated_at = :alt WHERE id = :id"),
+        {"alt": datetime.now(timezone.utc) - timedelta(hours=2), "id": thema_id},
+    )
+    db.commit()
+    neu: list[str] = []
+
+    def wieder_benutzen() -> None:
+        zweite = db_module.SessionLocal()
+        try:
+            row, _ = ai_memory_service.erinnerung_anlegen(
+                zweite, user=zweite.get(User, regular_user.id), scope="user",
+                text="Der Benutzer geht zu Fuß zur Arbeit.", thema="alltag",
+            )
+            neu.append(row.id)
+        finally:
+            zweite.close()
+
+    _beim_loeschen(db, AiMemoryTopic, wieder_benutzen)
+
+    db.expire_all()
+    assert db.get(AiMemoryTopic, thema_id) is not None
+    assert db.get(AiMemoryEntry, neu[0]).thema_id == thema_id
+
+
+def test_der_import_nennt_seine_quelle_und_holt_vergessenes_zurueck(
+    client: TestClient, db: Session, regular_user: User, user_cookies: dict
+) -> None:
+    """Die Vorschau zählt nur, was gilt; die Übernahme jetzt auch.
+
+    Ein vergessener Eintrag unter demselben Namen hieß in der Vorschau
+    "neu" und wurde dann als "vorhanden" übersprungen. Und was über den
+    Import kam, stand in der Ansicht als "Von Hand eingetragen".
+    """
+    _erlauben(db, regular_user)
+    row, _ = ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="user", server_id=None,
+        key="vorlieben.getraenk", value="Trinkt Kaffee.",
+    )
+    ai_memory_service.erinnerung_vergessen(db, user=regular_user, entry_id=row.id)
+
+    antwort = client.post(
+        "/api/ai/memory/import",
+        json={"scope": "user", "items": [
+            {"key": "vorlieben.getraenk", "value": "Trinkt Tee."},
+            {"key": "hobby.schach", "value": "Spielt Schach im Verein."},
+        ]},
+        cookies=user_cookies, headers=_csrf(user_cookies),
+    )
+
+    assert antwort.status_code == 200, antwort.text
+    assert (antwort.json()["imported_count"], antwort.json()["skipped_count"]) == (2, 0)
+    db.expire_all()
+    zeilen = db.query(AiMemoryEntry).filter(AiMemoryEntry.owner_user_id == regular_user.id).all()
+    assert {(z.status, z.quelle) for z in zeilen} == {("aktiv", "import")}
+    assert len(zeilen) == 2
+
+
+def test_eine_einzelne_erinnerung_kommt_auch_vergessen_aber_nur_zu_ihr_selbst(
+    client: TestClient, db: Session, regular_user: User, user_cookies: dict
+) -> None:
+    """Nach einem Konflikt holt die Ansicht die Erinnerung selbst.
+
+    Die Liste ist nach dem letzten Gebrauch geordnet: nach dem Neuladen kann
+    die Erinnerung auf einer anderen Seite stehen. Ist sie inzwischen
+    vergessen, legt die Ansicht den Text neu an, statt ins Leere zu speichern
+    — dafür muss sie den Status sehen.
+    """
+    _erlauben(db, regular_user)
+    row = _anlegen(db, regular_user, "Backups laufen um drei Uhr.")
+
+    eigene = client.get(f"/api/ai/memory/{row.id}", cookies=user_cookies)
+    assert eigene.status_code == 200, eigene.text
+    assert (eigene.json()["value"], eigene.json()["status"]) == ("Backups laufen um drei Uhr.", "aktiv")
+
+    ai_memory_service.erinnerung_vergessen(db, user=regular_user, entry_id=row.id)
+    vergessen = client.get(f"/api/ai/memory/{row.id}", cookies=user_cookies)
+    assert vergessen.json()["status"] == "vergessen"
+
+    fremder = _zweiter(db)
+    _erlauben(db, fremder)
+    fremde = _anlegen(db, fremder, "Ein privater Satz.")
+    assert client.get(f"/api/ai/memory/{fremde.id}", cookies=user_cookies).status_code == 404
+    # Die festen Pfade daneben treffen weiter ihre eigenen Routen.
+    assert client.get("/api/ai/memory/preference", cookies=user_cookies).status_code == 200
+    assert client.get("/api/ai/memory/personal", cookies=user_cookies).status_code == 200

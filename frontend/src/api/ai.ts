@@ -1715,6 +1715,8 @@ export const aiApi = {
     text?: string; titel?: string | null; thema?: string | null; fassung: number
   }) => api<AiMemoryEntry>(`/ai/memory/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   /** Holt eine vergessene Erinnerung zurück; sie zählt dann wieder mit. */
+  /** Eine Erinnerung, wie sie jetzt steht — nach einem 409 beim Speichern. */
+  getMemory: (id: string) => api<AiMemoryEntry>(`/ai/memory/${id}`),
   restoreMemory: (id: string) => api<AiMemoryEntry>(`/ai/memory/${id}/zurueckholen`, { method: 'POST' }),
   listMemoryVersions: (id: string) => api<AiMemoryFassung[]>(`/ai/memory/${id}/fassungen`),
   restoreMemoryVersion: (id: string, fassungId: string, fassung: number) => api<AiMemoryEntry>(

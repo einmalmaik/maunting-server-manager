@@ -418,7 +418,7 @@ def test_gedaechtnis_saetze_hin_und_zurueck(pg_wegwerf):
                 ))
             }
         assert set(zeilen) == {"alt-ki", "alt-mensch", "1234567890abcdef"}
-        assert zeilen["1234567890abcdef"].key_encrypted == "erinnerung-12345678"
+        assert zeilen["1234567890abcdef"].key_encrypted == "erinnerung-1234567890abcdef"
         assert zeilen["1234567890abcdef"].key_index is None
         assert "ai_memory_versionen" not in set(inspect(engine).get_table_names())
         spalten = {s["name"]: s for s in inspect(engine).get_columns("ai_memory_entries")}

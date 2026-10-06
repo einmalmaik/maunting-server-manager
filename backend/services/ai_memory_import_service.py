@@ -561,8 +561,12 @@ def execute_import(
             uebersprungen.append(AiMemoryImportSkipped(key=item.key, reason="duplicate"))
             continue
         gesehen.add(item.key)
+        # Nur was gilt, wie in der Vorschau (`importabgleich`). Ein vergessener
+        # Eintrag unter diesem Namen hiesse dort "neu" und hier "vorhanden";
+        # `upsert_entry` holt ihn zurück und prüft dabei das Kontingent.
         vorhanden = db.query(AiMemoryEntry.id).filter(
-            ai_memory_service.schluessel_bedingung(db, identity, [item.key])
+            ai_memory_service.schluessel_bedingung(db, identity, [item.key]),
+            AiMemoryEntry.status == "aktiv",
         ).first() is not None
         if vorhanden and not item.replace_existing:
             uebersprungen.append(AiMemoryImportSkipped(key=item.key, reason="exists"))
@@ -604,6 +608,7 @@ def _uebernehmen(
         ai_memory_service.upsert_entry(
             db, user=user, scope=request.scope, server_id=request.server_id,
             team_id=request.team_id, key=item.key, value=item.value, origin="user",
+            quelle="import",
         )
     except ai_memory_service.MemoryScopeVoll:
         db.rollback()

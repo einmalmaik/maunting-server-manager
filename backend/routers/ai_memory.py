@@ -1,6 +1,7 @@
 """Einsehbares, editierbares und abschaltbares AI-Memory."""
 
 from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -56,7 +57,9 @@ def _response(
 
 def _einzeln(db: Session, row: AiMemoryEntry, value: str) -> AiMemoryResponse:
     """Antwort fuer genau eine Erinnerung, mit dem Namen ihres Themas."""
-    return _response(row, value, ai_memory_service.themennamen(db, [row.thema_id]))
+    return _response(
+        row, value, ai_memory_service.themennamen(db, [(row.thema_id, row.scope_identity)])
+    )
 
 
 def _themenfilter(thema: list[str] | None) -> list[str] | None:
@@ -101,7 +104,9 @@ def list_memory(
     """
     try:
         eintraege = ai_memory_service.list_entries(db, user, scope, server_id, team_id)
-        themen = ai_memory_service.themennamen(db, [row.thema_id for row, _ in eintraege])
+        themen = ai_memory_service.themennamen(
+            db, [(row.thema_id, row.scope_identity) for row, _ in eintraege]
+        )
         return [_response(row, value, themen) for row, value in eintraege]
     except DisSidecarError as exc:
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
@@ -384,6 +389,25 @@ def restore_memory_version(
         return _einzeln(db, row, text)
     except DisSidecarError as exc:
         db.rollback()
+        raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
+
+
+@router.get("/{entry_id:uuid}", response_model=AiMemoryResponse)
+def get_memory(
+    entry_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.memory.use")),
+) -> AiMemoryResponse:
+    """Eine Erinnerung, wie sie jetzt steht.
+
+    Der Pfadtyp ``uuid`` ist Absicht: nur eine Kennung passt hierher, und
+    `/preference`, `/personal` und die anderen festen Pfade fallen nicht in
+    diese Route, egal in welcher Reihenfolge sie stehen.
+    """
+    try:
+        row, value = ai_memory_service.erinnerung_lesen(db, user=user, entry_id=str(entry_id))
+        return _einzeln(db, row, value)
+    except DisSidecarError as exc:
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
 
 

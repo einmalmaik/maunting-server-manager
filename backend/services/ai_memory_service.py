@@ -1,6 +1,6 @@
 """Ownership, DIS-Schutz, Secret-Abweisung und Abruf fuer AI-Memory."""
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
@@ -688,7 +688,9 @@ def _seite(
         eintraege=eintraege,
         gesamt=gesamt,
         loeschbar=gesamt if loeschbar is None else loeschbar,
-        themen=themennamen(basis.session, [row.thema_id for row, _wert in eintraege]),
+        themen=themennamen(
+            basis.session, [(row.thema_id, row.scope_identity) for row, _wert in eintraege]
+        ),
     )
 
 
@@ -1123,6 +1125,7 @@ def upsert_entry(
         row.status = "aktiv"
         row.vergessen_am = None
         row.origin = origin
+        row.quelle = quelle or ("gespraech" if origin == "ai" else "eingetragen")
         action = "ai.memory.created"
     elif row is None:
         _platz_sicherstellen(
@@ -1285,9 +1288,14 @@ def thema_fuer(
         return None
     index = DisClient.blind_index([f"{identity}\nthema\n{normal.casefold()}"])[0]
     jetzt = datetime.now(timezone.utc)
+    # Gesperrt: räumt `vergessene_aufraeumen` dieses Thema gerade ab, wartet
+    # die Abfrage auf dessen Ende und findet dann nichts, statt eine Zeile zu
+    # benutzen, die es gleich nicht mehr gibt.
     thema = (
         db.query(AiMemoryTopic)
         .filter(AiMemoryTopic.scope_identity == identity, AiMemoryTopic.name_index == index)
+        .with_for_update()
+        .populate_existing()
         .first()
     )
     if thema is not None:
@@ -1313,16 +1321,30 @@ def thema_fuer(
     return thema
 
 
-def themennamen(db: Session, thema_ids: Sequence[str | None]) -> dict[str, str]:
-    """Klartext der Themennamen zu diesen Kennungen, in einem Sidecar-Aufruf.
+def themennamen(db: Session, paare: Iterable[tuple[str | None, str]]) -> dict[str, str]:
+    """Klartext der Themennamen, in einem Sidecar-Aufruf.
+
+    ``paare`` sind (Thema, Bereich) der Erinnerungen, die gezeigt werden.
+    Geöffnet wird ein Name nur, wenn das Thema in genau diesem Bereich steht.
+    Die AAD des Namens bindet ihn an sein eigenes Thema, nicht an die
+    Erinnerung: wer per Datenbankzugriff die `thema_id` seiner Erinnerung auf
+    ein fremdes Thema zeigen ließ, bekam bis 06.10.2026 dessen Namen im
+    Klartext — genau der Weg, den die AAD bei Text, Titel und Fassungen
+    versperrt.
 
     Ein Name, der sich nicht oeffnen laesst, fehlt im Ergebnis; die
     Erinnerung erscheint dann ohne Thema, statt die Seite zu kippen.
     """
-    gesucht = sorted({kennung for kennung in thema_ids if kennung})
+    gesucht = {(kennung, bereich) for kennung, bereich in paare if kennung}
     if not gesucht:
         return {}
-    themen = db.query(AiMemoryTopic).filter(AiMemoryTopic.id.in_(gesucht)).all()
+    themen = [
+        thema
+        for thema in db.query(AiMemoryTopic)
+        .filter(AiMemoryTopic.id.in_(sorted({kennung for kennung, _ in gesucht})))
+        .all()
+        if (thema.id, thema.scope_identity) in gesucht
+    ]
     klartexte = _sammeln([(thema.name_encrypted, thema.name_aad()) for thema in themen])
     return {
         thema.id: klar for thema, klar in zip(themen, klartexte) if klar is not None
@@ -1346,18 +1368,28 @@ MAX_THEMEN_LISTE = 300
 
 
 def _themen_der_ansicht(db: Session, basis: Query) -> list[Themenzeile]:
+    # Nur Themen aus dem Bereich der Erinnerung selbst (siehe `themennamen`).
     zahlen = (
-        basis.filter(AiMemoryEntry.status == "aktiv", AiMemoryEntry.thema_id.is_not(None))
-        .with_entities(AiMemoryEntry.thema_id, func.count(AiMemoryEntry.id))
-        .group_by(AiMemoryEntry.thema_id)
+        basis.filter(AiMemoryEntry.status == "aktiv")
+        .join(
+            AiMemoryTopic,
+            and_(
+                AiMemoryTopic.id == AiMemoryEntry.thema_id,
+                AiMemoryTopic.scope_identity == AiMemoryEntry.scope_identity,
+            ),
+        )
+        .with_entities(
+            AiMemoryEntry.thema_id, AiMemoryEntry.scope_identity, func.count(AiMemoryEntry.id)
+        )
+        .group_by(AiMemoryEntry.thema_id, AiMemoryEntry.scope_identity)
         .order_by(func.count(AiMemoryEntry.id).desc(), AiMemoryEntry.thema_id)
         .limit(MAX_THEMEN_LISTE)
         .all()
     )
-    namen = themennamen(db, [kennung for kennung, _anzahl in zahlen])
+    namen = themennamen(db, [(kennung, bereich) for kennung, bereich, _anzahl in zahlen])
     zeilen = [
         Themenzeile(id=kennung, name=namen[kennung], anzahl=int(anzahl))
-        for kennung, anzahl in zahlen
+        for kennung, _bereich, anzahl in zahlen
         if kennung in namen
     ]
     return sorted(zeilen, key=lambda zeile: (zeile.name.casefold(), zeile.id))
@@ -1737,6 +1769,23 @@ def fassung_zurueckholen(
     )
 
 
+def erinnerung_lesen(db: Session, *, user: User, entry_id: str) -> tuple[AiMemoryEntry, str]:
+    """Eine Erinnerung, wie sie jetzt steht — fuer die Ansicht nach einem 409.
+
+    Wer beim Speichern an einer neueren Fassung gescheitert ist, braucht genau
+    diese eine Zeile, nicht die Seite: steht sie inzwischen auf einer anderen
+    Seite (die Ordnung folgt dem letzten Gebrauch), fand die Ansicht sie dort
+    nicht und hielt an der alten Fassung fest — jedes weitere Speichern bekam
+    wieder 409. Eine Zeile, die sich nicht oeffnen laesst, heisst 404 wie auf
+    der Seite, wo sie still fehlt.
+    """
+    row = _zeile(db, user, entry_id, aendern=False)
+    geoeffnet = _entschluesseln_lesbare([row])
+    if not geoeffnet:
+        raise HTTPException(status_code=404, detail="Memory-Eintrag nicht gefunden")
+    return geoeffnet[0]
+
+
 #: Wieviele Zeilen ein Aufraeumlauf hoechstens loescht. Der Rest kommt im
 #: naechsten Lauf dran; eine einzelne Anweisung ueber hunderttausend Zeilen
 #: hielte Sperren, die der Chat danach zu spueren bekaeme.
@@ -1760,27 +1809,36 @@ def vergessene_aufraeumen(db: Session, *, jetzt: datetime | None = None) -> int:
         .limit(_AUFRAEUMEN_JE_LAUF)
         .all()
     ]
+    # Gelöscht wird mit denselben Bedingungen, unter denen ausgewählt wurde.
+    # Zwischen beiden Schritten kann jemand eine Erinnerung zurückholen oder
+    # ein Thema wieder benutzen; beide halten dabei die Zeile gesperrt, und
+    # PostgreSQL prüft die Bedingungen nach dem Warten an der neuen Fassung
+    # der Zeile. Mit der Kennung allein fiele die zurückgeholte Erinnerung
+    # trotzdem weg.
+    geloescht = 0
     if abgelaufen:
-        db.query(AiMemoryEntry).filter(AiMemoryEntry.id.in_(abgelaufen)).delete(
-            synchronize_session=False
-        )
+        geloescht = db.query(AiMemoryEntry).filter(
+            AiMemoryEntry.id.in_(abgelaufen),
+            AiMemoryEntry.status == "vergessen",
+            AiMemoryEntry.vergessen_am < frist,
+        ).delete(synchronize_session=False)
+    ruhig_seit = jetzt - timedelta(hours=1)
     benutzt = select(AiMemoryEntry.thema_id).where(AiMemoryEntry.thema_id.is_not(None))
     verwaist = [
         kennung
         for (kennung,) in db.query(AiMemoryTopic.id)
-        .filter(
-            AiMemoryTopic.updated_at < jetzt - timedelta(hours=1),
-            AiMemoryTopic.id.not_in(benutzt),
-        )
+        .filter(AiMemoryTopic.updated_at < ruhig_seit, AiMemoryTopic.id.not_in(benutzt))
         .limit(_AUFRAEUMEN_JE_LAUF)
         .all()
     ]
     if verwaist:
-        db.query(AiMemoryTopic).filter(AiMemoryTopic.id.in_(verwaist)).delete(
-            synchronize_session=False
-        )
+        db.query(AiMemoryTopic).filter(
+            AiMemoryTopic.id.in_(verwaist),
+            AiMemoryTopic.updated_at < ruhig_seit,
+            AiMemoryTopic.id.not_in(benutzt),
+        ).delete(synchronize_session=False)
     db.commit()
-    return len(abgelaufen)
+    return geloescht
 
 
 def aehnlicher_eintrag(
@@ -2022,7 +2080,22 @@ def _zeile(db: Session, user: User, entry_id: str, *, aendern: bool) -> AiMemory
         canonical = str(UUID(entry_id))
     except (TypeError, ValueError, AttributeError) as exc:
         raise HTTPException(status_code=404, detail="Memory-Eintrag nicht gefunden") from exc
-    row = db.get(AiMemoryEntry, canonical)
+    if aendern:
+        # Gesperrt und frisch gelesen. Ohne Sperre lasen zwei gleichzeitige
+        # Änderungen dieselbe `fassung`, bestanden beide die Prüfung, und die
+        # zweite schrieb über die erste hinweg — deren Text stand danach weder
+        # in der Erinnerung noch in ihren Fassungen. `populate_existing`, weil
+        # `db.get` eine Zeile aus der Sitzung zurückgäbe, ohne die Datenbank
+        # zu fragen.
+        row = (
+            db.query(AiMemoryEntry)
+            .filter(AiMemoryEntry.id == canonical)
+            .with_for_update()
+            .populate_existing()
+            .one_or_none()
+        )
+    else:
+        row = db.get(AiMemoryEntry, canonical)
     erlaubt = row is not None and (
         _darf_aendern(db, user, row) if aendern else _darf_lesen(db, user, row)
     )
