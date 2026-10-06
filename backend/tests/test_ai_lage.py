@@ -529,6 +529,60 @@ def test_ortszeit_ueberschreibt_nichts_und_laesst_das_original_stehen() -> None:
 
 
 
+# ── Das Gedächtnis ────────────────────────────────────────────────────────
+
+
+def test_die_lage_sagt_ob_singra_sich_etwas_merken_kann(db: Session) -> None:
+    """Drei Zustände, drei Zeilen — damit Singra nichts zusagt, was nie geschieht.
+
+    Bis Stufe 2 des Gedächtnisses sah das Modell erst an der Absage von
+    `remember`, dass der Schalter aus ist; dort stand auch, dass es das dann
+    einmal sagen soll. Anlass war die Betreibermeldung vom 22.08.2026 „die KI
+    merkt sich auch gar nichts“: das Modell versuchte es, scheiterte und
+    schwieg, alles korrekt. Heute schreibt der Hintergrund, eine Absage gibt
+    es nicht mehr. Was daraus folgt, steht im Prompt
+    (`ai_prompt.GEDAECHTNIS`: „versprich nichts“), ob es zutrifft, nur hier.
+    """
+    ohne_recht = _benutzer(db, "ohnegedaechtnis", "ai.chat.use")
+    assert (
+        "Gedächtnis: für dieses Konto nicht freigegeben, gemerkt wird nichts."
+        in ai_lage.lageblock(db, ohne_recht)
+    )
+
+    user = _benutzer(db, "mitgedaechtnis", "ai.chat.use", "ai.memory.use")
+    # Der Ausgangszustand jedes Kontos: aus, bis jemand zustimmt — und die
+    # Zeile sagt, wo der Schalter sitzt.
+    assert (
+        "Gedächtnis: ausgeschaltet (Profil → KI), Persönliches wird nicht gemerkt."
+        in ai_lage.lageblock(db, user)
+    )
+
+    ai_memory_service.set_preference(db, user, True)
+    assert "Gedächtnis: eingeschaltet." in ai_lage.lageblock(db, user)
+
+
+def test_im_sprachgespraech_sagt_die_lage_ob_mitgeschrieben_wird(db: Session) -> None:
+    """Eingeschaltet heißt in einer Sprachsitzung nicht, dass mitgeschrieben wird.
+
+    Realtime hört den Menschen nur mit einem Abschriftmodell des Zugangs, und
+    ohne Schalter entsteht gar keine Mitschrift — auch nicht für Team- und
+    Serverwissen, das der Schreiber aus getippten Gesprächen ohne den Schalter
+    liest. Die Zeile sagte trotzdem „eingeschaltet“ und die Stimme versprach,
+    sich zu merken, was niemand aufschrieb (Prüfbefund vom 06.10.2026).
+    """
+    user = _benutzer(db, "sprechend", "ai.chat.use", "ai.memory.use")
+    assert (
+        "Gedächtnis: ausgeschaltet (Profil → KI), aus einem Sprachgespräch wird nichts gemerkt."
+        in ai_lage.lageblock(db, user, mitschrift=False)
+    )
+
+    ai_memory_service.set_preference(db, user, True)
+    assert "Gedächtnis: eingeschaltet." in ai_lage.lageblock(db, user, mitschrift=True)
+    ohne_abschrift = ai_lage.lageblock(db, user, mitschrift=False)
+    assert "Gedächtnis: in diesem Sprachgespräch aus" in ohne_abschrift
+    assert "kein Abschriftmodell" in ohne_abschrift
+
+
 # ── Der autonome Modus ────────────────────────────────────────────────────
 
 
@@ -561,6 +615,10 @@ def test_der_autonome_modus_steht_so_im_block_wie_darf_handeln_ihn_liest(
     # Löschen einer Notiz eine Karte an, die nie kam (Probe am selben Tag).
     assert "auch das Löschen eigener Notizen" in block
     assert "nur Unumkehrbares" not in block
+    # Erinnerungen löscht seit Stufe 2 des Gedächtnisses kein Werkzeug mehr,
+    # sondern der Hintergrund auf Wunsch des Menschen — die Zeile darf sie
+    # nicht mehr unter dem anbieten, was sofort läuft.
+    assert "und Erinnerungen" not in block
 
 
 def test_eine_freigabe_fuer_einen_server_verspricht_keinen_sofortlauf_ueberall(

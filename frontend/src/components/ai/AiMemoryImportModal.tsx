@@ -57,8 +57,8 @@ function istIdentisch(item: AiMemoryImportPreviewItem): boolean {
  * Was eine Zeile ans Backend schickt.
  *
  * „Ähnlich" legt standardmäßig einen **eigenen** Eintrag an und ersetzt nur
- * auf ausdrücklichen Wunsch — dieselbe Abwägung wie in
- * `ai_memory_service.DUPLIKAT_AB`: ein fälschlich zusammengelegter Fakt ist
+ * auf ausdrücklichen Wunsch — dieselbe Abwägung wie bei
+ * `ai_memory_service.IMPORT_HINWEIS_AB`: ein fälschlich zusammengelegter Fakt ist
  * teurer als ein doppelter. Ein belegter Schlüssel wird ersetzt, solange der
  * Benutzer ihn nicht umbenennt; wer umbenennt, will einen neuen Eintrag.
  */

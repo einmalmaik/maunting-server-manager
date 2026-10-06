@@ -1027,11 +1027,13 @@ async def _ai_tasks_task() -> None:
     der ein Termin eingehalten wird. Feiner waere unehrlich: der Lauf selbst
     dauert laenger als eine Minute.
 
-    **Fuenf Handgriffe, einzeln gekapselt** (die Zwei-Block-Form aus
+    **Sieben Handgriffe, einzeln gekapselt** (die Zwei-Block-Form aus
     `_ai_guardian_task`): faellige Auftraege starten, geparkte Worker wecken
     (``waiting_wake`` mit verstrichener Frist), Laeufe nachholen, deren
     Bestaetigung im falschen Moment kam, verfallene Desktop-Auftraege
-    schliessen, offene Meldungen zustellen, wenn das Gespraech Ruhe hat.
+    schliessen, offene Meldungen zustellen, wenn das Gespraech Ruhe hat,
+    ruhende Gespraeche fuer das Gedaechtnis nachlesen und alte Erinnerungen
+    in Saetze umschreiben.
     Scheitert einer, laufen die anderen trotzdem.
     """
     from database import SessionLocal
@@ -1094,6 +1096,29 @@ async def _ai_tasks_task() -> None:
         except Exception as exc:
             db.rollback()
             logger.warning("Error in AI delivery task: %s", exc)
+        try:
+            from services import ai_gedaechtnis_schreiber
+
+            # Gespräche, die seit fünf Minuten ruhen, liest das Gedächtnis
+            # nach. Die Durchgänge laufen nebenher und halten diesen Takt
+            # nicht auf: einer dauert so lange wie ein Modellaufruf.
+            begonnen = ai_gedaechtnis_schreiber.faellige_starten(db)
+            if begonnen:
+                logger.info("KI-Gedaechtnis: %s Durchgang/Durchgaenge begonnen", begonnen)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Error in AI memory writer: %s", exc)
+        try:
+            from services import ai_gedaechtnis_altbestand
+
+            # Erinnerungen aus der Zeit vor Gedächtnis v2 werden Sätze,
+            # je Takt höchstens zwei Bereiche, ebenfalls nebenher.
+            bereiche = ai_gedaechtnis_altbestand.faellige_starten(db)
+            if bereiche:
+                logger.info("KI-Gedaechtnis: Altbestand in %s Bereich(en) begonnen", len(bereiche))
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Error in AI memory rewrite: %s", exc)
     finally:
         db.close()
 

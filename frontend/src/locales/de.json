@@ -543,7 +543,7 @@
       "devicePairedAt": "Gekoppelt am"
     },
     "memory": {
-      "enabled": "Memory im KI-Kontext verwenden",
+      "enabled": "Erinnerungen aus Gesprächen anlegen und verwenden",
       "empty": {
         "user": "Noch keine persönlichen Memory-Einträge vorhanden.",
         "server_shared": "Für diesen Server ist noch nichts gemerkt.",
@@ -1702,12 +1702,16 @@
           "estimate": "geschätzt",
           "none": "kein Preis",
           "unknown": "Unbekannt"
+        },
+        "purposes": {
+          "memory": "Gedächtnis",
+          "ethics": "Ethik-Beratung"
         }
       }
     },
     "memoryNotice": {
       "title": "Singra kann sich Dinge über dich merken",
-      "body": "Singra kann sich Vorlieben und projektspezifische Hinweise merken. Diese Notizen werden bei Anfragen an den konfigurierten KI-Anbieter übermittelt. Aktuell ist das Gedächtnis deaktiviert.",
+      "body": "Singra kann deine Gespräche im Hintergrund noch einmal lesen, auch Sprachgespräche, und festhalten, was sich zu merken lohnt. Dafür geht das Gespräch ein weiteres Mal an den konfigurierten KI-Anbieter, und das Gemerkte wird bei späteren Anfragen mitgeschickt. Das Gedächtnis ist aus, bis du es einschaltest.",
       "enable": "Aktivieren",
       "later": "Später",
       "never": "Nicht mehr fragen",
@@ -4845,6 +4849,7 @@
           "usage": "Provider, Modell, Tokenreservierung, tatsächlicher oder konservativ geschätzter Verbrauch und Zeitpunkte werden zur Kontingentdurchsetzung gespeichert; Preiswerte werden ohne belastbare Preisquelle nicht behauptet",
           "memory": "Optionale Memory-Einträge werden samt ihrem Namen verschlüsselt und an ihren Bereich gebunden gespeichert, sind jederzeit einsehbar und löschbar. Es gibt fünf Bereiche: persönliche und persönliche serverbezogene Einträge sieht niemand außer dem Nutzer selbst; teambezogene sehen alle Mitglieder des jeweiligen Teams; das Wissen eines Servers sehen alle, die diesen Server sehen dürfen, und es bleibt bestehen, wenn der Verfasser das Panel verlässt; panelweite Einträge sieht jeder Nutzer des Panels",
           "memoryConsent": "Das persönliche Gedächtnis ist standardmäßig deaktiviert und wird erst nach ausdrücklicher Zustimmung im Chat aktiv. Die Zustimmung ist jederzeit widerrufbar und umfasst auch eigene serverbezogene Notizen. Geteilte Bereiche (Team, Server, panelweit) enthalten Betriebswissen ohne Personenbezug.",
+          "memoryReading": "Nach Zustimmung zum persönlichen Gedächtnis liest ein Hintergrundschritt getippte und gesprochene Gespräche mit Singra noch einmal, um Erinnerungen anzulegen, zu aktualisieren, zusammenzuführen oder auf Wunsch zu vergessen: ein getipptes Gespräch nach einigen Minuten Ruhe, in langen Gesprächen auch zwischendurch, nach „merk dir“ oder „vergiss“ sofort; ein gesprochenes an seinem Ende. Dafür gehen das Gespräch, redigiert und ohne Werkzeugergebnisse, und vorhandene Einträge der betroffenen Bereiche ein weiteres Mal an den konfigurierten Modellanbieter. Ins persönliche Gedächtnis kommt nur, was nach der Zustimmung gesagt wurde; dafür wird ihr Zeitpunkt gespeichert. Die Mitschrift eines Sprachgesprächs entsteht nur dafür und nur mit dieser Zustimmung; sie liegt bis zum Lesen im Arbeitsspeicher des Panels, wird nirgends gespeichert und verfällt ungelesen, wenn die Zustimmung während des Gesprächs widerrufen wird. Verbrauch und Kosten zählen zum KI-Kontingent des Nutzers. Darf der Nutzer Team- oder Serverwissen pflegen, liest der Hintergrundschritt getippte Gespräche auch ohne diese Zustimmung, dann aber nur für diese geteilten Bereiche mit Betriebswissen ohne Personenbezug. Einträge aus der Zeit davor, die noch einen Namen statt eines Satzes tragen, schreibt derselbe Schritt einmalig in Sätze um; dafür gehen sie ein weiteres Mal an den Modellanbieter: persönliche nur mit dieser Zustimmung und auf das Kontingent des Nutzers, Teamwissen auf das des Teamgründers, Server- und panelweites Wissen auf das des Betreibers.",
           "memorySearch": "Die Bedeutungssuche des Gedächtnisses rechnet mit einem lokalen Modell im Panel. Nur wenn dieses Modell fehlt und der Betreiber ausdrücklich einen Ersatzanbieter gewählt hat (Google AI Studio oder OpenAI, Standard: keiner), rechnet sie dort. Dann gehen Gedächtnistexte, Skillbeschreibungen und Chatfragen im Klartext an diesen Anbieter, unabhängig vom im Chat gewählten Modellanbieter.",
           "attachments": "Freigegebene Text-, Konfigurations-, Log- und Bildanhänge werden größen- und typgeprüft, verschlüsselt im Panel gespeichert und zusammen mit der Unterhaltung an den gewählten Modellanbieter übertragen",
           "autonomy": "Der autonome Modus ist optional und muss pro Server oder panelweit ausdrücklich freigegeben werden; freigegebene Aktionen laufen ohne weitere Rückfrage, werden aber unverändert gegen die Berechtigungen des Nutzers geprüft und vollständig im Audit-Log als automatisch ausgeführt festgehalten",

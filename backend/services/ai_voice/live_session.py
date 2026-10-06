@@ -70,6 +70,7 @@ from services.ai_voice.realtime_session import (
     gedaechtnis,
     lage_abschnitt,
     gedaechtnis_anhang,
+    mitschreiben,
     reservieren,
     sprachregel,
 )
@@ -243,9 +244,12 @@ def vorbereiten(
     tools = angebotene_werkzeuge(db, provider=provider, user=user, herkunft=herkunft)
     sprache = provider.realtime_language or "auto"
     memory = gedaechtnis(db, user)
+    # GPT-Live schreibt beide Seiten selbst ab: mit der Einwilligung hört der
+    # Schreiber mit, ohne Abschriftmodell.
+    schreibt_mit = mitschreiben(db, user)
     # Einmal gebaut, an Stimme **und** Backend: beide sollen dieselbe Uhr
     # lesen (`realtime_session.lage_abschnitt`).
-    lage = lage_abschnitt(db, user)
+    lage = lage_abschnitt(db, user, mitschrift=schreibt_mit)
     basis_prompt = ai_prompt.build(
         gesprochen=True,
         rolle="live",
@@ -269,6 +273,7 @@ def vorbereiten(
         disable_safety=bool(getattr(provider, "disable_safety", False)),
         backend_model=backend,
         backend_instructions=backend_anweisungen(basis_prompt, memory, lage),
+        mitschreiben=schreibt_mit,
     )
 
 
@@ -421,6 +426,10 @@ class LiveSitzung(RealtimeSitzung):
         self._zuletzt_gesagt = 0.0
         self._bereit_gemeldet = True
         self._geschlossen = False
+
+    def _schreibt_mit(self) -> bool:
+        """GPT-Live schickt die Abschrift beider Seiten ohnehin, ohne Aufpreis."""
+        return self.v.mitschreiben
 
     # ── Rahmen ────────────────────────────────────────────────────────
 
@@ -717,6 +726,7 @@ class LiveSitzung(RealtimeSitzung):
             self._zuletzt_sprach = "ich"
             self._eingabe = ""
         self._eingabe = (self._eingabe + stueck)[-MAX_ABSCHRIFT_ZEICHEN:]
+        self._mitschrift.stueck("ich", stueck)
         if not self._user_spricht:
             self._user_spricht = True
             self.lage.aeusserungen += 1
@@ -730,6 +740,7 @@ class LiveSitzung(RealtimeSitzung):
         self._zuletzt_gesagt = time.monotonic()
         self._bereit_gemeldet = False
         self._zuletzt_sprach = "ki"
+        self._mitschrift.stueck("ki", stueck)
         if not self._assistant_spricht:
             self._assistant_spricht = True
             await self._panel_senden({"art": "zustand", "zustand": "spricht"})

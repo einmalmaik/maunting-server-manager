@@ -149,13 +149,25 @@ export function AiUsageSettings() {
                   // Herkunft ist etwas anderes als eine geschätzte: bei ihr
                   // wurde nicht geraten, es ist nur nicht mehr feststellbar.
                   const herkunft = event.cost_source ?? 'unknown'
+                  // Nicht jede Zeile ist eine Frage des Benutzers: den
+                  // Gedächtnisschreiber und die Ethik-Beratung bucht MSM für
+                  // ihn. Ohne die Angabe stünde eine Anfrage da, zu der er
+                  // keine Frage findet.
+                  const zweck = event.zweck === 'gedaechtnis'
+                    ? t('ai.usage.events.purposes.memory')
+                    : event.zweck === 'ethik'
+                      ? t('ai.usage.events.purposes.ethics')
+                      : null
                   return (
                     <tr key={event.id} className="border-b border-outline-variant/20 last:border-0">
                       <td className="py-2 pr-4 whitespace-nowrap text-on-surface-variant">
                         {zeitpunkt.format(new Date(event.created_at))}
                       </td>
                       <td className="py-2 pr-4 text-on-surface-variant">{event.username}</td>
-                      <td className="py-2 pr-4 text-on-surface-variant">{event.model ?? '—'}</td>
+                      <td className="py-2 pr-4 text-on-surface-variant">
+                        {event.model ?? '—'}
+                        {zweck && <span className="block text-xs">{zweck}</span>}
+                      </td>
                       <td className="py-2 pr-4 text-right tabular-nums text-on-surface-variant">
                         {event.prompt_tokens === null ? '—' : numbers.format(event.prompt_tokens)}
                       </td>

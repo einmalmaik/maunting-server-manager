@@ -20,7 +20,6 @@ GOLDEN = [
     ("Schalte Mod 7 aus", "propose_mod_toggle"),
     ("Wie richte ich Auto-Backup ein?", "search_docs"),
     ("Suche aktuelle Valheim Ports im Netz", "web_search"),
-    ("Merke: ich hoste Valheim", "remember"),
     ("Was weisst du ueber meine Spielvorlieben?", "search_memory"),
     ("Welche Termine habe ich heute?", "calendar_read"),
     ("Schick Testmail", "send_test_email"),
@@ -57,7 +56,6 @@ def test_hotset_always_in_shortlist():
     assert "list_my_servers" in short
     assert "analyze_region" in short
     assert "web_search" in short
-    assert "remember" in short
     assert "search_memory" in short
     assert "notes_read" in short
     assert "learn_skill" in short

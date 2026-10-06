@@ -48,8 +48,10 @@ MSM nicht selbst anbindet. Eine Mod ist ausführbarer Code auf dem Server des
 Betreibers — sie hat denselben Anspruch auf Herkunftsprüfung wie ein
 Systempaket.
 
-## 5. Was du festhalten solltest
+## 5. Was das Gedächtnis behalten soll
 
 Ein Modkonflikt, den du einmal aufgelöst hast, wiederholt sich. "Mod A und Mod
 B vertragen sich in Version X nicht" ist eine Eigenschaft der Sache und gilt
-für jeden — also Teamwissen, keine persönliche Vorliebe.
+für jeden — also Teamwissen, keine persönliche Vorliebe. Sag ihn in deiner
+Antwort so, mit den Versionen; das Gedächtnis übernimmt ihn nach dem
+Gespräch.

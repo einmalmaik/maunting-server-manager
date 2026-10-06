@@ -184,7 +184,7 @@ describe('AiMemoryManager', () => {
     render(<AiMemoryManager />)
 
     expect(await screen.findByText('Synthetic test preference')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('switch', { name: 'Memory im KI-Kontext verwenden' }))
+    fireEvent.click(screen.getByRole('switch', { name: 'Erinnerungen aus Gesprächen anlegen und verwenden' }))
     await waitFor(() => expect(aiApi.setMemoryPreference).toHaveBeenCalledWith(false))
 
     fireEvent.change(screen.getByLabelText('Erinnerung'), {
@@ -523,7 +523,7 @@ describe('AiMemoryManager', () => {
     render(<AiMemoryManager scope={{ kind: 'server_shared', serverId: 62, canManage: true }} />)
 
     expect(await screen.findByText(/alle Kollegen/i)).toBeInTheDocument()
-    expect(screen.queryByRole('switch', { name: 'Memory im KI-Kontext verwenden' })).toBeNull()
+    expect(screen.queryByRole('switch', { name: 'Erinnerungen aus Gesprächen anlegen und verwenden' })).toBeNull()
   })
 
   it('zeigt fremdes Serverwissen ohne Änderungsknöpfe, wenn man nur lesen darf', async () => {

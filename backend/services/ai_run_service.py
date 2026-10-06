@@ -206,7 +206,7 @@ def arbeitsspeicher_leeren(run: AiRun, zustand: dict | None = None) -> dict:
     steht der entschlüsselte Gedächtnisblock des Benutzers im Klartext —
     `build_provider_messages` hängt ihn als eigene Nachricht an. `state_json`
     ist eine gewöhnliche Textspalte, und es gab keinen Weg, der sie je wieder
-    leerte: weder `forget_memory`, das die verschlüsselte Zeile in
+    leerte: weder das Vergessen, das die verschlüsselte Zeile in
     `ai_memory_entries` entfernt, noch das Leeren des Chatverlaufs. Ein Eintrag,
     den der Benutzer nur über Profil > Memory hinterlegt und später gelöscht
     hat, stand danach dauerhaft im Klartext daneben — die Verschlüsselung mit

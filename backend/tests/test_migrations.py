@@ -430,3 +430,107 @@ def test_gedaechtnis_saetze_hin_und_zurueck(pg_wegwerf):
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+# ── 20261006_02 — Gedächtnis v2: der Hintergrund schreibt ───────────────────
+
+
+def test_gedaechtnis_schreiber_hin_und_zurueck(pg_wegwerf):
+    """Bestehende Gespräche beginnen beim Update, und der Zweck kommt mit.
+
+    Hinweg: jedes vorhandene Gespräch bekommt die Marke „jetzt“ — sonst läse
+    der erste Takt nach dem Update den ganzen Verlauf jedes Benutzers auf
+    einmal. Die Verbrauchszeile kennt den Zweck ``gedaechtnis``.
+
+    Rückweg: der alte Stand kennt nur ``ethik``. Eine Zeile mit
+    ``gedaechtnis`` bleibt und zählt dort als Anfrage, die MSM für den
+    Benutzer stellt, statt den Rückbau an der Prüfung scheitern zu lassen.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, inspect, text
+    from sqlalchemy.exc import IntegrityError
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+
+    db_url = pg_wegwerf("gedaechtnis-schreiber")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+        command.downgrade(config, "20261006_01")
+        spalten = {s["name"] for s in inspect(engine).get_columns("ai_conversations")}
+        assert "gedaechtnis_bis" not in spalten, "Vorbedingung: der Stand vor 20261006_02"
+
+        with engine.begin() as conn:
+            # Über die Tabelle des Modells: deren Vorgaben füllen die übrigen
+            # Pflichtspalten, die hier niemanden interessieren.
+            conn.execute(models.User.__table__.insert().values(
+                id=1, username="jonas", password_hash="x",
+            ))
+            conn.execute(text(
+                "INSERT INTO ai_conversations (id, kind, user_id, title, created_at, updated_at) "
+                "VALUES ('g1', 'primary', 1, 'x', '2026-10-01 00:00:00+00', '2026-10-01 00:00:00+00')"
+            ))
+
+        command.upgrade(config, "20261006_02")
+
+        with engine.connect() as conn:
+            zeile = conn.execute(text(
+                "SELECT gedaechtnis_bis, gedaechtnis_bis_id, gedaechtnis_faellig, "
+                "gedaechtnis_fehlversuche, updated_at FROM ai_conversations"
+            )).one()
+        assert zeile.gedaechtnis_bis is not None and zeile.gedaechtnis_bis_id is None
+        assert (zeile.gedaechtnis_faellig, zeile.gedaechtnis_fehlversuche) == (None, 0)
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO ai_usage_events (request_id, user_id, status, reserved_tokens, "
+                "reserved_cost_microunits, accounted_tokens, accounted_cost_microunits, "
+                "zweck, created_at) VALUES ('r1', 1, 'completed', 1, 0, 1, 0, 'gedaechtnis', now())"
+            ))
+        with pytest.raises(IntegrityError):
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "INSERT INTO ai_usage_events (request_id, user_id, status, reserved_tokens, "
+                    "reserved_cost_microunits, accounted_tokens, accounted_cost_microunits, "
+                    "zweck, created_at) VALUES ('r2', 1, 'completed', 1, 0, 1, 0, 'erfunden', now())"
+                ))
+
+        command.downgrade(config, "20261006_01")
+
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT zweck FROM ai_usage_events")).scalar_one() == "ethik"
+        spalten = {s["name"] for s in inspect(engine).get_columns("ai_conversations")}
+        assert not {s for s in spalten if s.startswith("gedaechtnis_")}
+
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
+
+def test_jeder_erlaubte_zweck_passt_in_seine_spalte(db) -> None:
+    """AGENTS.md 119: jeder Wert, den die Prüfung erlaubt, wird einmal gespeichert."""
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    from models import AiUsageEvent, User
+    from services.ai_usage_service import ZWECKE
+
+    benutzer = User(username=f"zweck-{uuid4().hex[:6]}", email=f"{uuid4().hex[:6]}@test.de", password_hash="x")
+    db.add(benutzer)
+    db.flush()
+    for zweck in ZWECKE:
+        db.add(AiUsageEvent(
+            request_id=str(uuid4()), user_id=benutzer.id, status="completed",
+            reserved_tokens=1, reserved_cost_microunits=0, accounted_tokens=1,
+            accounted_cost_microunits=0, zweck=zweck, created_at=datetime.now(timezone.utc),
+        ))
+    db.commit()
+    assert {e.zweck for e in db.query(AiUsageEvent).filter(AiUsageEvent.user_id == benutzer.id)} == set(ZWECKE)

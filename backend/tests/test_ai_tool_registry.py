@@ -214,7 +214,7 @@ def test_jedes_loeschwerkzeug_ist_entschieden() -> None:
         if name.endswith("_delete") or name.startswith("forget_")
     }
     # Sonst prueft die Zeile darunter nichts.
-    assert {"propose_file_delete", "forget_memory", "forget_skill"} <= loeschwerkzeuge
+    assert {"propose_file_delete", "forget_skill"} <= loeschwerkzeuge
 
     gesperrt = ai_tool_registry.ALWAYS_CONFIRM_TOOLS
     eigene = ai_tool_registry.EIGENE_DATEN_LOESCHEN

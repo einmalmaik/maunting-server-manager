@@ -107,7 +107,7 @@ def freigabe_einholen(
 
     Entschieden wird mit derselben Frage wie im Chat, `autonomy_allows`. Mit
     Freigabe läuft ein Lesewerkzeug also sofort, außer es löscht
-    (`forget_memory`) oder das Stundenbudget ist aufgebraucht. Die
+    (`forget_skill`) oder das Stundenbudget ist aufgebraucht. Die
     Sitzungsbefehle (`VOICE_CONTROL_TOOLS`) kommen hier nicht an: sie lesen
     nichts und ändern nichts, sie schalten die Ansicht.
     """

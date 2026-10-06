@@ -862,12 +862,6 @@ SZENARIEN: list[Szenario] = [
                      "Modell allein braucht.",
     ),
     Szenario(
-        name="memory_schreiben",
-        auftrag="Servus erstmal, ich bin Maik und ich hoste hauptsaechlich Valheim.",
-        erwartet=frozenset({"remember"}),
-        beschreibung="Ungefragtes Merken.",
-    ),
-    Szenario(
         name="memory_lesen",
         auftrag="Was weisst du eigentlich ueber meine Spielvorlieben?",
         erwartet=frozenset({"search_memory"}),
@@ -898,7 +892,7 @@ SZENARIEN: list[Szenario] = [
                 ),
             },
         ],
-        erwartet=frozenset({"learn_skill", "remember"}),
+        erwartet=frozenset({"learn_skill"}),
         beschreibung="Lernt die KI aus einer geloesten Sache?",
     ),
     Szenario(

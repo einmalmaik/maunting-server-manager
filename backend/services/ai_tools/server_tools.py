@@ -75,9 +75,7 @@ from services.ai_tools.base import (
     _MUTEX_TOOLS,
     _RATIONALE_SCHEMA,
     _RATIONALE_REQUIRED,
-    _MEMORY_TEAM_SCHEMA,
     _PLAN_SCHEMA,
-    _MEMORY_KEY_RE,
     _function,
     _server_function,
     _vorfall_versuche,
@@ -109,11 +107,8 @@ from services.ai_tools.geo_tools import (
 )
 from services.ai_tools.system_tools import (
     _desktop_tool_definitions,
-    _memory_team,
-    _execute_remember,
     question_payload,
     _execute_search_memory,
-    _execute_forget_memory,
     _execute_forget_skill,
     _execute_search_docs,
     _execute_read_docs,
@@ -397,95 +392,6 @@ def _global_tool_definitions() -> list[dict]:
             {},
             [],
         ),
-        # Wann gemerkt wird und was **nicht** gemerkt wird, steht in
-        # `ai_prompt.GEDAECHTNIS` und geht in derselben Anfrage mit: "Nicht
-        # merken: Zwischenergebnisse, Logauszuege, Tagesform …" und
-        # "Aktualisierst du einen bekannten Fakt, verwende denselben
-        # Schluessel erneut". Beides stand hier ein zweites Mal und ist
-        # gestrichen. Das Verbot von Zugangsdaten bleibt: es steht nirgends
-        # sonst — `ai_prompt.GEHEIMNISSE` verbietet das *Ausgeben*, nicht das
-        # Merken.
-        _function(
-            "remember",
-            "Merkt sich eine dauerhafte Vorliebe oder Eigenheit. Niemals "
-            "Passwoerter, Schluessel oder Tokens merken.\n"
-            # Der Bereich wird in dieser Reihenfolge bestimmt, und zwar an
-            # **beobachtbaren** Merkmalen des Satzes statt an einer Definition.
-            # Zweimal gemessen (siehe ai_prompt.py): eine Reihenfolge konkreter
-            # Merkmale trifft das Modell zuverlaessiger als eine noch so genaue
-            # Beschreibung dessen, was ein Bereich "bedeutet".
-            #
-            # Hier stand vorher woertlich die Beschreibung dieses neuen
-            # Bereichs — "eine Eigenschaft der Anlage, die fuer alle Kollegen
-            # gilt" — und zeigte auf `team`. Bliebe der Satz stehen, aenderte
-            # sich am beobachteten Verhalten gar nichts.
-            #
-            # **Die Merkmale waren aber rein sprachlich, und das war zu eng.**
-            # Sie setzten voraus, dass der Benutzer den Satz gesagt hat: Regel
-            # 1 sucht "ich"/"mein", Regel 3 sucht "wir"/"bei uns". Was die KI
-            # selbst herausfindet, enthaelt keines dieser Woerter — es landete
-            # ueber Regel 4 pauschal bei `user` oder wurde gar nicht erst
-            # gemerkt. Gemessen am 19.08.2026: 7 Eintraege insgesamt, davon
-            # **null** im Team-Bereich, juengster vom 16.08. Deshalb steht vor
-            # der sprachlichen Reihenfolge jetzt die inhaltliche Frage, wem
-            # eine Erkenntnis gehoert.
-            "Wahl des Bereichs:\n"
-            "Zuerst inhaltlich: Betrifft es **eine Person** (ihre Vorliebe, "
-            "ihre Arbeitsweise, ihre Ausstattung), ist es persoenlich. "
-            "Betrifft es **die Anlage** — wie ein Server sich verhaelt, wie "
-            "hier gearbeitet wird, was du selbst ueber eine Einrichtung "
-            "herausgefunden hast —, gehoert es dem Server oder dem Team, auch "
-            "wenn niemand \"wir\" gesagt hat.\n"
-            "Dann genauer, in dieser Reihenfolge pruefen:\n"
-            "1. Persoenlich und zu genau einem Server: scope=server. "
-            "Persoenlich ohne Serverbezug: scope=user (\"ich trinke am liebsten Mio Mio\", \"ich heisse Maik\", \"ich nehme immer 8 GB\").\n"
-            "2. Es geht um genau einen Server, dessen Nummer aus einem "
-            "Werkzeugergebnis stammt, und gilt fuer jeden, der ihn bedient: "
-            "scope=server_shared mit dieser server_id (\"dieser Server "
-            "braucht nach dem Start zwei Minuten\").\n"
-            "3. Es gilt fuer die ganze Anlage oder die Arbeitsweise des Teams: "
-            "scope=team (\"vor einem Update wird gesichert\").\n"
-            "4. Sonst scope=user.\n"
-            "Pruefsatz fuer 2 und 3: der Eintrag muss wahr bleiben, egal wer "
-            "ihn liest. Im Zweifel persoenlich.",
-            {
-                "scope": {
-                    "type": "string",
-                    "enum": ["user", "server", "server_shared", "team"],
-                    "description": (
-                        "user = persoenlich, nur fuer diesen Benutzer. "
-                        "server = persoenlich, aber nur zu diesem Server. "
-                        "server_shared = gehoert dem Server selbst, sichtbar "
-                        "fuer alle, die ihn sehen duerfen. "
-                        "team = geteilt mit allen Kollegen im Team."
-                    ),
-                },
-                "server_id": {
-                    "type": ["integer", "null"],
-                    "description": (
-                        "Nur bei scope=server oder scope=server_shared, dort "
-                        "aber Pflicht. Sonst null."
-                    ),
-                },
-                **_MEMORY_TEAM_SCHEMA,
-                "key": {
-                    "type": "string",
-                    "maxLength": 64,
-                    "description": "Kurzer stabiler Bezeichner, z. B. vorlieben.getraenke, favoriten.snack, ram.bevorzugt.",
-                },
-                "value": {"type": "string", "maxLength": 2_000},
-                "replace_user_entry": {
-                    "type": "boolean",
-                    "description": (
-                        "Nur setzen, wenn der Benutzer die Korrektur "
-                        "ausdruecklich verlangt hat (\"nein, er heisst Rex\"). "
-                        "Ueberschreibt dann einen Eintrag, den er selbst "
-                        "hinterlegt hat. Ohne ausdrueckliche Bitte weglassen."
-                    ),
-                },
-            },
-            ["scope", "key", "value"],
-        ),
         _function(
             "ask_user",
             "Stellt dem Benutzer eine Frage mit anklickbaren Vorschlaegen. "
@@ -526,13 +432,12 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "search_memory",
-            "Durchsucht das Gedaechtnis nach Bedeutung. Nutze es, bevor du "
-            "etwas loeschst oder korrigierst — und wenn der Benutzer wissen "
-            "will, was du ueber ein Thema gespeichert hast. Findet auch, was "
-            "anders formuliert ist: \"mein Hund\" findet einen Eintrag, in dem "
-            "nur der Name des Hundes steht. Liefert Bereich, Schluessel und "
-            "Inhalt, dazu server_id oder team_id — die braucht "
-            "`forget_memory` wieder.",
+            "Durchsucht das Gedaechtnis nach Bedeutung. Nutze es, wenn der "
+            "Benutzer wissen will, was du ueber ein Thema weisst, oder wenn "
+            "dir etwas fehlt, das nicht im Memory-Block steht. Findet auch, "
+            "was anders formuliert ist: \"mein Hund\" findet einen Eintrag, "
+            "in dem nur der Name des Hundes steht. Liefert Bereich und Inhalt. "
+            "Merken und Vergessen geschehen nach dem Gespraech von selbst.",
             {
                 "query": {
                     "type": "string",
@@ -541,38 +446,6 @@ def _global_tool_definitions() -> list[dict]:
                 },
             },
             ["query"],
-        ),
-        _function(
-            "forget_memory",
-            "Loescht benannte Eintraege aus dem Gedaechtnis. Rufe **immer "
-            "zuerst** `search_memory` auf und nenne dem Benutzer, was du "
-            "gefunden hast — geloescht wird ausschliesslich, was du hier "
-            "namentlich auffuehrst, nie ein Suchbegriff. Eine unscharfe "
-            "Aehnlichkeit darf entscheiden, was jemand zu sehen bekommt, aber "
-            "nicht, was verschwindet.",
-            {
-                "scope": {
-                    "type": "string",
-                    "enum": ["user", "server", "server_shared", "team"],
-                    "description": "Bereich aus dem Suchergebnis.",
-                },
-                "server_id": {
-                    "type": ["integer", "null"],
-                    "description": (
-                        "Nur bei scope=server oder scope=server_shared, dort "
-                        "aber Pflicht: die server_id aus dem Suchergebnis. "
-                        "Sonst null."
-                    ),
-                },
-                "keys": {
-                    "type": "array",
-                    "maxItems": 25,
-                    "items": {"type": "string", "maxLength": 64},
-                    "description": "Die Schluessel aus dem Suchergebnis.",
-                },
-                **_MEMORY_TEAM_SCHEMA,
-            },
-            ["scope", "keys"],
         ),
         _function(
             "forget_skill",
@@ -1808,9 +1681,6 @@ def _execute_global_read_tool(
         kennung = _positive_int(roh, name="integration_id", default=0, minimum=1)
         return ai_hoster_tools.integration_guide(db, user=user, integration_id=kennung)
 
-    if tool_name == "remember":
-        return _execute_remember(db, user=user, arguments=arguments)
-
     if tool_name == "web_search":
         return _execute_web_search(
             db, user=user, arguments=arguments, prefetch_session_id=prefetch_session_id
@@ -1834,9 +1704,6 @@ def _execute_global_read_tool(
 
     if tool_name == "search_memory":
         return _execute_search_memory(db, user=user, arguments=arguments)
-
-    if tool_name == "forget_memory":
-        return _execute_forget_memory(db, user=user, arguments=arguments)
 
     if tool_name == "forget_skill":
         return _execute_forget_skill(db, user=user, arguments=arguments)

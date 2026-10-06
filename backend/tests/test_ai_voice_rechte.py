@@ -195,7 +195,7 @@ def test_ein_abgewiesener_vorschlag_reisst_die_sitzung_nicht_ab(
 
 @pytest.mark.parametrize(
     "werkzeug",
-    ["propose_file_delete", "propose_note_delete", "forget_memory"],
+    ["propose_file_delete", "propose_note_delete", "forget_skill"],
 )
 def test_ein_gesprochenes_ja_loescht_nichts(db, owner_user, monkeypatch, werkzeug) -> None:
     """Löschen bestätigt nur der Klick auf die Karte, nie die Stimme.

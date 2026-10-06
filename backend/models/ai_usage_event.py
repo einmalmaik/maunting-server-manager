@@ -42,7 +42,7 @@ class AiUsageEvent(Base):
             name="ck_ai_usage_events_cost_source",
         ),
         CheckConstraint(
-            "zweck IS NULL OR zweck IN ('ethik')",
+            "zweck IS NULL OR zweck IN ('ethik', 'gedaechtnis')",
             name="ck_ai_usage_events_zweck",
         ),
     )
@@ -133,7 +133,9 @@ class AiUsageEvent(Base):
     # Wozu die Anfrage diente, wenn nicht der Benutzer sie gestellt hat.
     # ``None`` ist eine Anfrage des Benutzers: Chat, Stimme, Abschrift,
     # Verdichtung. 'ethik' ist eine Beratung der Ethics Engine vor einem
-    # Werkzeug (`ai_ethics_service`). Sie kostet wie jede andere und zählt in
-    # Tokens und Kosten, aber nicht als Anfrage pro Minute — siehe
-    # `ai_usage_service.nachtraeglich_buchen`.
+    # Werkzeug (`ai_ethics_service`), 'gedaechtnis' ein Durchgang des
+    # Gedächtnisschreibers (`ai_gedaechtnis_schreiber`). Beide kosten wie jede
+    # andere und zählen in Tokens und Kosten, aber nicht als Anfrage pro
+    # Minute und nicht als gleichzeitiger Vorgang — siehe
+    # `ai_usage_service.reserve_ai_usage` und `nachtraeglich_buchen`.
     zweck: Mapped[str | None] = mapped_column(String(16), nullable=True)

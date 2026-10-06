@@ -40,6 +40,9 @@ class AiMemoryPreference(Base):
     # "Nicht mehr anzeigen". Schaltet den Hinweis ab, nicht das Gedaechtnis —
     # aktivieren laesst es sich danach weiterhin unter Profil > Memory.
     notice_hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Wann zuletzt eingeschaltet. Persoenliches schreibt der Gedaechtnisschreiber
+    # nur aus dem, was seitdem gesagt wurde (`ai_memory_service.einwilligung_seit`).
+    eingeschaltet_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AiMemoryEntry(Base):

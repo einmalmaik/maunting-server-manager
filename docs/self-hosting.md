@@ -534,6 +534,29 @@ vor der Migration `20261001_01` enthalten in `vault_user_settings`,
 Präfix erst beim nächsten Speichern, weil dort E2EE-, DIS- und alte
 Klartextwerte nebeneinander liegen.
 
+## Gedächtnis nach dem Update auf Gedächtnis v2
+
+Seit Gedächtnis v2 (Oktober 2026) ist eine Erinnerung ein Satz statt eines
+Namens mit Wert, und geschrieben wird sie im Hintergrund, nicht mehr vom
+Chatmodell. Erinnerungen aus der Zeit davor schreibt das Panel nach dem Update
+einmalig in Sätze um (`services/ai_gedaechtnis_altbestand.py`): je Bereich 25
+Einträge in einem Modellaufruf, höchstens zwei Bereiche zugleich, im
+Minutentakt. Der alte Stand bleibt in den früheren Fassungen der Erinnerung
+lesbar und lässt sich zurückholen.
+
+Dafür gehen die Einträge einmal an einen Modellanbieter, und das kostet
+Aufrufe. Gebucht wird mit dem Zweck „Gedächtnis“ (sichtbar in der
+Verbrauchsübersicht):
+
+- persönliche Erinnerungen und eigene Servernotizen beim Benutzer selbst, über
+  seinen Zugang, und nur, wenn er dem Gedächtnis zugestimmt hat. Ohne Zustimmung
+  bleiben seine Einträge, wie sie sind, und funktionieren weiter.
+- Teamwissen beim Gründer des Teams.
+- Server- und panelweites Wissen beim Betreiberkonto.
+
+Ohne eingerichteten KI-Zugang passiert nichts; die Umstellung beginnt, sobald
+einer da ist.
+
 ## Tresor-Cloud: Dateien im Tresor
 
 Die App legt im Tresor auch Dateien ab: Fotos, Videos, Dokumente. Sie werden
@@ -1169,7 +1192,7 @@ bestätigt werden.
 
 Standard ist der unterstützte Modus: die KI analysiert, schlägt vor, wartet. Gemäß dem Grundsatz **„Sicherheit braucht Vertrauen“ / „Schutz braucht Vertrauen“** gilt:
 - **Autonomie-Modus AUS (Standard):** Jede Handlung und jedes Werkzeug der KI (ausnahmslos: Lesewerkzeuge wie `read_server_status`, `web_search`, das Deklarieren von Hintergrund-Workern `worker_start` sowie Schreib- und Verwaltungswerkzeuge) erfordert eine manuelle Bestätigung durch den Benutzer über eine Bestätigungskarte (mit „Bestätigen“ und „Ablehnen“).
-- **Autonomie-Modus AN:** Die KI darf Werkzeuge eigenständig und ohne Bestätigung im Chat und Hintergrund ausführen. Nachgefragt wird nur noch, wo ein Fehler den Server, seine Daten oder fremde Rechte trifft: Server löschen, zurücksetzen oder neu installieren, Dateien löschen, Backup einspielen, Blueprint oder Rolle löschen, Rechte anderer Benutzer entziehen oder kritisch bzw. global vergeben, Shop-Anbindung, Shop-Produkte, Tarif-Rolle und neue Zugangsdaten. Eigene Notizen, Termine, Aufgaben, DNS-Einträge, Erinnerungen und Skills löscht die KI ohne Rückfrage, ebenso auf dem eigenen Rechner (dort geht Gelöschtes in den Papierkorb). Eine Rolle anlegen oder eine Rolle ändern, die noch niemand trägt, fragt nicht, auch mit kritischen Rechten; gefragt wird, wenn sie einem Benutzer zugewiesen wird. Trägt sie schon jemand, fragt ihre Änderung wie eine Vergabe an diese Benutzer. Das gilt im Chat, in der Stimme, in Hintergrund-Workern und auf dem Rechner.
+- **Autonomie-Modus AN:** Die KI darf Werkzeuge eigenständig und ohne Bestätigung im Chat und Hintergrund ausführen. Nachgefragt wird nur noch, wo ein Fehler den Server, seine Daten oder fremde Rechte trifft: Server löschen, zurücksetzen oder neu installieren, Dateien löschen, Backup einspielen, Blueprint oder Rolle löschen, Rechte anderer Benutzer entziehen oder kritisch bzw. global vergeben, Shop-Anbindung, Shop-Produkte, Tarif-Rolle und neue Zugangsdaten. Eigene Notizen, Termine, Aufgaben, DNS-Einträge und Skills löscht die KI ohne Rückfrage, ebenso auf dem eigenen Rechner (dort geht Gelöschtes in den Papierkorb). Erinnerungen vergisst das Gedächtnis im Hintergrund, wenn der Benutzer es im Gespräch verlangt — in beiden Modi, 30 Tage zurückholbar. Eine Rolle anlegen oder eine Rolle ändern, die noch niemand trägt, fragt nicht, auch mit kritischen Rechten; gefragt wird, wenn sie einem Benutzer zugewiesen wird. Trägt sie schon jemand, fragt ihre Änderung wie eine Vergabe an diese Benutzer. Das gilt im Chat, in der Stimme, in Hintergrund-Workern und auf dem Rechner.
 - **Bestätigt wird immer per Klick auf die Karte**, im Chat wie in der Sprachansicht; ein gesprochenes „Ja" führt nichts aus, ein „Nein" lehnt ab. Die Sprachansicht zeigt jede offene Karte, auch die eines Hintergrund-Workers. Im Worker-Fenster sind Karten nur zu sehen.
 - **Hintergrund-Aufgaben & Guardian-Heilung:** Geplante Aufgaben (`ai_tasks`) und automatische Guardian-Reparaturläufe können im Hintergrund nur dann eigenständig arbeiten, wenn der Autonomie-Modus für den betreffenden Benutzer bzw. Server aktiv freigegeben ist.
 

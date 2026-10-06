@@ -54,8 +54,8 @@ ROHERGEBNIS = {"runtime": {"env": {"RCON_PASSWORD": "hunter2"}}}
 
 
 def _benutzer(db: Session, user: User, *, autonom: bool) -> AiConversation:
-    """Rechte für Chat und Gedächtnis, auf Wunsch die Autonomie-Freigabe dazu."""
-    rechte = ["ai.chat.use", "ai.memory.use"]
+    """Rechte für Chat und Skills, auf Wunsch die Autonomie-Freigabe dazu."""
+    rechte = ["ai.chat.use", "ai.skills.use"]
     if autonom:
         rechte.append("ai.autonomous.use")
     rolle = Role(name=f"loeschen-{uuid4().hex[:8]}", description=None, is_system=False)
@@ -99,7 +99,7 @@ def test_mit_freigabe_fragt_nur_das_gesperrte_loeschen(
     eigene = [n for n in LOESCHWERKZEUGE if n in ai_tool_registry.EIGENE_DATEN_LOESCHEN]
     # Sonst prüfen die Schleifen nichts.
     assert {"propose_file_delete", "propose_role_delete"} <= set(gesperrt)
-    assert {"forget_memory", "propose_note_delete"} <= set(eigene)
+    assert {"forget_skill", "propose_note_delete"} <= set(eigene)
 
     for name in gesperrt:
         assert not ai_autonomy_service.autonomy_allows(
@@ -122,8 +122,8 @@ def test_vergessen_laeuft_mit_freigabe_ohne_karte(
         db,
         user=regular_user,
         conversation=unterhaltung,
-        tool_name="forget_memory",
-        arguments={"scope": "user", "keys": ["lieblingsfarbe"], "server_id": None},
+        tool_name="forget_skill",
+        arguments={"skill_key": "backup-vor-update"},
         correlation_id=str(uuid4()),
     )
 
@@ -135,7 +135,7 @@ def test_ohne_freigabe_nennt_die_vergessen_karte_was_verschwindet(
     db: Session, regular_user: User
 ) -> None:
     """Die Karte nennt, was verschwindet, nicht nur den Werkzeugnamen: wer
-    zustimmt, soll wissen, welche Einträge weg sind.
+    zustimmt, soll wissen, welcher Skill weg ist.
     """
     unterhaltung = _benutzer(db, regular_user, autonom=False)
 
@@ -143,8 +143,8 @@ def test_ohne_freigabe_nennt_die_vergessen_karte_was_verschwindet(
         db,
         user=regular_user,
         conversation=unterhaltung,
-        tool_name="forget_memory",
-        arguments={"scope": "user", "keys": ["lieblingsfarbe"], "server_id": None},
+        tool_name="forget_skill",
+        arguments={"skill_key": "backup-vor-update"},
         correlation_id=str(uuid4()),
     )
 
@@ -152,8 +152,7 @@ def test_ohne_freigabe_nennt_die_vergessen_karte_was_verschwindet(
     assert vorschlag.requires_confirmation is True
     assert vorschlag.autonomous is False
     vorschau = json.loads(vorschlag.preview_json)
-    assert vorschau["memory_scope"] == "user"
-    assert vorschau["memory_keys"] == ["lieblingsfarbe"]
+    assert vorschau["skill_key"] == "backup-vor-update"
 
 
 # ── Ein bestätigter Lesevorschlag ist so geschwärzt wie ein direkter ──────
@@ -360,8 +359,8 @@ def test_vergessen_bestaetigt_nur_der_klick(db: Session, regular_user: User) -> 
         regular_user.id,
         ProviderToolCall(
             id="ruf-1",
-            name="forget_memory",
-            arguments={"scope": "user", "keys": ["lieblingsfarbe"], "server_id": None},
+            name="forget_skill",
+            arguments={"skill_key": "backup-vor-update"},
         ),
         conversation_id=unterhaltung.id,
     )

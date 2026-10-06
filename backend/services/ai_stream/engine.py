@@ -132,6 +132,23 @@ async def _fruehe_leseaufgaben_filtern(
         await asyncio.gather(*verworfen, return_exceptions=True)
 
 
+async def _gedaechtnis_vormerken(conversation_id: str) -> None:
+    """Das Gedächtnis liest nach, sobald das Gespräch ruht.
+
+    Seit Gedächtnis v2, Stufe 2 schreibt nicht mehr das Modell mitten in der
+    Antwort, sondern `ai_gedaechtnis_schreiber` im Hintergrund — fünf Minuten
+    nach dem letzten Lauf, sofort, wenn der Mensch „merk dir“ gesagt hat.
+    **Nach** dem Abschluss: der Benutzer wartet nicht darauf, und ein Fehler
+    hier kostet nur einen Durchgang, nie die Antwort.
+    """
+    try:
+        from services import ai_gedaechtnis_schreiber
+
+        await ai_gedaechtnis_schreiber.nach_dem_lauf(conversation_id)
+    except Exception as exc:  # noqa: BLE001 - das Gedächtnis hält keinen Lauf auf
+        logger.info("Gedaechtnis nicht vorgemerkt error=%s", type(exc).__name__)
+
+
 async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = None) -> None:
     """Fuehrt einen Lauf aus, bis er fertig ist, fragt oder auf einen Menschen wartet.
 
@@ -805,6 +822,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             ai_stream._lauf_abschliessen(
                 run_id, status="waiting_user", stop_reason="question", zustand=zustand
             )
+            await _gedaechtnis_vormerken(conversation_id)
             if worker is not None:
                 # Die Frage eines Workers erreicht den Menschen nie direkt —
                 # sie geht als Meldung mit Worker-ID an die Meldestelle, und
@@ -874,6 +892,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             stop_reason="budget" if budget_erschoepft else "done",
             zustand=zustand,
         )
+        await _gedaechtnis_vormerken(conversation_id)
     except asyncio.CancelledError:
         # Der Prozess faehrt herunter. Nicht mehr als ehrlich abschliessen.
         await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)

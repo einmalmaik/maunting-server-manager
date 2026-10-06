@@ -18,8 +18,6 @@ from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, Role, RolePermission, User
 from services import (
-    ai_action_errors,
-    ai_action_service,
     ai_embedding_service,
     ai_memory_service,
     permission_service,
@@ -497,55 +495,6 @@ def test_one_unreadable_entry_does_not_take_the_whole_chat_down(
     treffer = ai_memory_service.search_entries(db, regular_user, query="Wert")
 
     assert [row.key for row, _value, _score in treffer] == ["heil"]
-
-
-def test_remember_requires_the_memory_permission(db: Session, regular_user: User) -> None:
-    """Wer sein Memory nicht nutzen darf, bekommt auch keines geschrieben."""
-    with pytest.raises(ai_action_errors.AiActionValidationError):
-        ai_action_service.execute_read_tool(
-            db, user=regular_user, tool_name="remember",
-            arguments={"scope": "user", "key": "test", "value": "Wert"},
-        )
-
-
-def test_remember_rejects_secrets_and_the_panel_scope(
-    db: Session, regular_user: User
-) -> None:
-    """Zwei Grenzen, die das Werkzeug nicht verschieben darf."""
-    _allow_memory(db, regular_user)
-
-    # Panelweites Memory gilt fuer alle Benutzer — das ist eine
-    # Betreiberentscheidung und nicht die der KI.
-    with pytest.raises(ai_action_errors.AiActionValidationError):
-        ai_action_service.execute_read_tool(
-            db, user=regular_user, tool_name="remember",
-            arguments={"scope": "panel", "key": "regel", "value": "Wert"},
-        )
-
-    with pytest.raises(ai_action_errors.AiActionValidationError):
-        ai_action_service.execute_read_tool(
-            db, user=regular_user, tool_name="remember",
-            arguments={
-                "scope": "user", "key": "zugang",
-                "value": "api_key=sk-abcdefghijklmnopqrstuvwxyz012345",
-            },
-        )
-
-
-def test_remember_stores_a_preference_with_its_origin(
-    db: Session, regular_user: User
-) -> None:
-    _allow_memory(db, regular_user)
-
-    result = ai_action_service.execute_read_tool(
-        db, user=regular_user, tool_name="remember",
-        arguments={"scope": "user", "key": "ram.bevorzugt", "value": "8 GB"},
-    )
-
-    assert result["remembered"] is True
-    (row,) = [r for r in db.query(AiMemoryEntry).all() if r.key == "ram.bevorzugt"]
-    assert row.origin == "ai"
-    assert row.scope == "user"
 
 
 def test_a_disabled_memory_is_not_read_at_all(db: Session, regular_user: User) -> None:

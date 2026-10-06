@@ -318,6 +318,11 @@ class AiUsageEventEntry(BaseModel):
     cost_micro_usd: int
     #: 'provider' | 'estimate' | 'none' | None (Bestandszeile ohne Herkunft).
     cost_source: str | None = None
+    #: Wozu MSM die Anfrage fuer den Benutzer gestellt hat: 'ethik' (Beratung
+    #: vor einem Werkzeug) oder 'gedaechtnis' (der Gedaechtnisschreiber liest
+    #: im Hintergrund). ``None`` hat der Benutzer selbst gefragt. Ohne die
+    #: Angabe stuende eine Zeile da, zu der niemand eine Frage findet.
+    zweck: str | None = None
 
 
 class AiUsageEvents(BaseModel):

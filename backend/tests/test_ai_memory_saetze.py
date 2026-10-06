@@ -527,31 +527,6 @@ def test_saetze_ohne_namen_bekommen_keinen_namensindex(db: Session, regular_user
     assert all(row.key_index is None for row in ohne_namen)
 
 
-def test_der_doppelabgleich_sieht_auch_saetze_ohne_namen(
-    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`key_index != x` ist für eine Zeile ohne Index nicht wahr, sondern NULL.
-
-    Ohne den ausdrücklichen Zweig für ``IS NULL`` fiele jeder Satz aus dem
-    Vergleich, und die KI legte neben ihm ein Doppel an.
-    """
-    from services.ai_embedding_service import EMBEDDING_DIMENSIONS
-    from tests._einbettung import modell_ersetzen
-
-    modell_ersetzen(
-        monkeypatch, lambda texte: [[1.0] + [0.0] * (EMBEDDING_DIMENSIONS - 1) for _ in texte]
-    )
-    _erlauben(db, regular_user)
-    satz = _anlegen(db, regular_user, "Der Benutzer spielt am liebsten Factorio.")
-
-    treffer = ai_memory_service.aehnlicher_eintrag(
-        db, scope_kennung=f"user:{regular_user.id}", key="lieblingsspiel",
-        value="Factorio ist das Lieblingsspiel",
-    )
-
-    assert treffer is not None and treffer[0].id == satz.id
-
-
 # ── Über die Routen ─────────────────────────────────────────────────────
 
 

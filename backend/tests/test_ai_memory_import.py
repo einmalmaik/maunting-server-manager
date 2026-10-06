@@ -224,15 +224,17 @@ def test_preview_marks_an_existing_key_and_a_similar_entry(
     assert daten["available_slots"] == 98
 
 
-def test_preview_hints_below_the_merge_threshold_but_not_at_unrelated_facts(
+def test_preview_hints_at_a_near_fact_but_not_at_unrelated_ones(
     client: TestClient, db: Session, regular_user: User, user_cookies: dict,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Die Vorschau zeigt schon ab `IMPORT_HINWEIS_AB`, nicht erst ab `DUPLIKAT_AB`.
+    """Die Vorschau zeigt schon ab `IMPORT_HINWEIS_AB`, und nur dort.
 
     Gemessen: "Antworte auf Deutsch." zu "Antworte immer auf Deutsch." liegt
-    beim echten Modell bei 0,61 — unter der Duplikatschwelle. Mit ihr bliebe
-    genau das typische Doppel eines Imports unbemerkt.
+    beim echten Modell bei 0,61. Die Duplikatschwelle, mit der `remember` bis
+    Stufe 2 des Gedaechtnisses Doppel abwies, lag bei 0,70 — mit ihr bliebe
+    genau das typische Doppel eines Imports unbemerkt. Die Vorschau hat
+    deshalb ihre eigene, niedrigere.
     """
     import math
 
@@ -258,7 +260,6 @@ def test_preview_hints_below_the_merge_threshold_but_not_at_unrelated_facts(
     ).json()
 
     status = {item["key"]: item["status"] for item in daten["items"]}
-    assert 0.6 < ai_memory_service.DUPLIKAT_AB
     assert status == {"nah": "similar_existing", "fern": "new"}
 
 

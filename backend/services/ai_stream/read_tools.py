@@ -282,8 +282,8 @@ def _werkzeug_ausfuehren(
     SQLAlchemy-Sitzung gehoert dem Thread, der sie geoeffnet hat. Sie
     weiterzureichen waere genau die Art Fehler, die erst unter Last auffaellt.
 
-    Der Commit steht hier, weil manches "Lese"-Werkzeug schreibt: `remember`
-    legt einen Eintrag an, `learn_skill` einen Skill, `forget_memory` loescht.
+    Der Commit steht hier, weil manches "Lese"-Werkzeug schreibt:
+    `learn_skill` legt einen Skill an, `forget_skill` loescht einen.
     Frueher committete die gemeinsame Sitzung am Ende der Runde fuer alle
     zusammen; jetzt steht jeder Aufruf fuer sich. Das ist die bessere
     Aufteilung — ein gescheiterter Nachbaraufruf nimmt einem gemerkten Namen
@@ -1135,7 +1135,7 @@ async def _tool_followup_messages(
             # deshalb etwas anderes als die oben: dort lief der Aufruf nicht,
             # hier lief er und sein Ergebnis passte nicht mehr. Ein Modell, das
             # die falsche Auskunft bekommt, holte ein bereits erledigtes
-            # `remember` ein zweites Mal.
+            # `learn_skill` ein zweites Mal.
             if erledigt > 1 and spent >= ai_stream.MAX_TOOL_RESULT_CHARS_PER_ROUND:
                 deferred.append((call, (
                     "Der Aufruf lief, aber sein Ergebnis passte nicht mehr in "

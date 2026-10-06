@@ -25,8 +25,7 @@ _KANDIDATEN = 5
 def _schreibt(name: str) -> bool:
     """Ob ein Werkzeug handelt — dann wählt es nie die Textsuche allein.
 
-    Dazu zählt, was immer bestätigt werden muss (`forget_memory` ist der
-    Art nach ein Lesewerkzeug, löscht aber).
+    Dazu zählt, was immer bestätigt werden muss.
     """
     spec = WERKZEUGE.get(name)
     if spec is None:
@@ -270,7 +269,7 @@ def dispatch_voice_action(
 
     # Dieselbe Frage wie auf dem geraden Weg: ohne Freigabe erst die Karte.
     # Der Umweg über `execute_server_action` erreicht jedes Werkzeug des
-    # Benutzers, auch `forget_memory`; an ihm vorbei durfte keines laufen.
+    # Benutzers, auch `forget_skill`; an ihm vorbei durfte keines laufen.
     # Hat ein Chatlauf schon gefragt, bleibt nur das Löschen übrig.
     beratung = voice_interactions.ethik_anstossen(user_id, target_call)
     karte = None

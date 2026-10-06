@@ -371,6 +371,32 @@ describe('AiTab', () => {
     expect(tabelle).toHaveTextContent('3,51')
   })
 
+  it('kennzeichnet Anfragen, die MSM für den Benutzer stellt', async () => {
+    // Der Gedächtnisschreiber liest im Hintergrund und bucht beim Benutzer.
+    // Ohne Kennzeichnung stünde eine Zeile da, zu der er keine Frage findet.
+    vi.mocked(client.api).mockImplementation((path: string) => {
+      if (path.startsWith('/ai/usage/events')) {
+        return Promise.resolve({
+          entries: [{
+            id: 1, created_at: '2026-10-06T18:00:00Z', user_id: 9,
+            username: 'viel-verbraucher', model: 'schreibmodell', tokens: 1_000,
+            prompt_tokens: 900, completion_tokens: 100, cached_tokens: null,
+            cache_write_tokens: null, reasoning_tokens: null, provider_requests: 1,
+            cost_micro_usd: 0, cost_source: 'estimate', zweck: 'gedaechtnis',
+          }],
+          has_more: false,
+          cost_policy: usage.cost_policy,
+        }) as never
+      }
+      return respond(path) as never
+    })
+    render(<AiTab />)
+    fireEvent.click(await screen.findByRole('tab', { name: /Verbrauch & Kosten/i }))
+
+    const zeile = (await screen.findByText('schreibmodell')).closest('tr')
+    expect(zeile).toHaveTextContent('Gedächtnis')
+  })
+
   it('zeigt die KI-Nutzung nicht ohne ai.usage.read.all', async () => {
     // Der Kern dieses Rechts: es hängt **nicht** an panel.settings.read. Wer
     // Kontingente einstellen darf, sieht damit nicht automatisch, wer wieviel

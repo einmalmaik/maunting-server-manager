@@ -543,7 +543,7 @@
       "devicePairedAt": "Paired on"
     },
     "memory": {
-      "enabled": "Use memory in AI context",
+      "enabled": "Create memories from conversations and use them",
       "empty": {
         "user": "No personal memory entries exist yet.",
         "server_shared": "Nothing is remembered for this server yet.",
@@ -1702,12 +1702,16 @@
           "estimate": "estimated",
           "none": "no price",
           "unknown": "Unknown"
+        },
+        "purposes": {
+          "memory": "Memory",
+          "ethics": "Ethics check"
         }
       }
     },
     "memoryNotice": {
       "title": "Singra can remember things about you",
-      "body": "Singra can store preferences and project notes. These entries are sent to the configured AI provider with each request. Memory is currently disabled.",
+      "body": "Singra can reread your conversations in the background, voice conversations included, and note what is worth remembering. To do so, the conversation is sent to the configured AI provider once more, and what has been noted is sent along with later requests. Memory is off until you turn it on.",
       "enable": "Enable",
       "later": "Later",
       "never": "Stop asking",
@@ -4845,6 +4849,7 @@
           "usage": "Provider, model, token reservation, actual or conservatively estimated usage, and timestamps are stored to enforce quotas; monetary cost is not claimed without an authoritative price source",
           "memory": "Optional memory entries, including their names, are stored encrypted and cryptographically bound to their scope, and can be reviewed and deleted at any time. There are five scopes: personal entries and personal server-scoped notes are visible to nobody but the user; team entries are visible to every member of that team; a server's own knowledge is visible to everyone allowed to see that server and remains when its author leaves the panel; panel-wide entries are visible to every user of the panel",
           "memoryConsent": "Personal memory is disabled by default and activates only after explicit consent in chat. Consent can be revoked at any time and includes server-specific notes. Shared scopes (team, server, panel-wide) contain operational knowledge without personal data.",
+          "memoryReading": "With consent to personal memory, a background step rereads typed and spoken conversations with Singra to create, update, merge or, on request, forget memories: a typed conversation after a few minutes of quiet, in long conversations also along the way, and right away after “remember this” or “forget that”; a spoken one when it ends. For this, the conversation, redacted and without tool results, and existing entries of the affected scopes are sent to the configured model provider once more. Only what was said after consent was given goes into personal memory; the time of consent is stored for this. The transcript of a voice conversation exists only for this purpose and only with this consent; it is held in the panel's working memory until it has been read, is never stored, and is discarded unread if consent is withdrawn during the conversation. Usage and cost count toward the user's AI quota. If the user may maintain team or server knowledge, the background step also reads typed conversations without this consent, but only for these shared scopes, which hold operational knowledge without personal data. Entries from before this, which still carry a name instead of a sentence, are rewritten into sentences once by the same step; for this they are sent to the model provider once more: personal ones only with this consent and on the user's quota, team knowledge on the team founder's, server and panel-wide knowledge on the operator's.",
           "memorySearch": "Semantic search in memory runs on a local model inside the panel. Only if that model is missing and the operator has explicitly chosen a fallback provider (Google AI Studio or OpenAI, default: none) does it run there. Memory texts, skill descriptions and chat questions are then sent to that provider in plain text, regardless of the model provider selected for chat.",
           "attachments": "Approved text, configuration, log, and image attachments are size- and type-checked, stored encrypted in the panel, and transferred with the conversation to the selected model provider",
           "autonomy": "Autonomous mode is optional and must be granted explicitly, per server or panel-wide; granted actions run without a further prompt but are still checked against the user's permissions unchanged and are recorded in full in the audit log as executed automatically",

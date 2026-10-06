@@ -40,6 +40,7 @@ from services.ai_stream.read_tools import (
 from services.ai_voice import desktop_auftraege
 from services.ai_voice import interactions as voice_interactions
 from services.ai_voice.contracts import Lage, MAX_SITZUNGSSEKUNDEN, voice_tool_frame
+from services.ai_voice.mitschrift import Mitschrift
 from services.ai_voice.realtime_session import (
     MAX_TOOL_ARGUMENTE_ZEICHEN,
     RealtimeVorbereitung,
@@ -234,6 +235,8 @@ class GeminiLiveSitzung:
         #: Spricht das Modell gerade? Ein ``clientContent`` mittendrin
         #: unterbräche es; die Nachreichung wartet deshalb auf das Zugende.
         self._modell_spricht = False
+        #: Für den Gedächtnisschreiber (`realtime_session.mitschreiben`).
+        self._mitschrift = Mitschrift(vorbereitung.mitschreiben)
 
     def _fremdtext(self, text: object) -> str:
         """Fremdtext zu einer Zeile, die man dem Browser zeigen kann.
@@ -605,8 +608,17 @@ class GeminiLiveSitzung:
                 # Inhalte vom Modell
                 server_content = event.get("serverContent")
                 if server_content:
+                    # Die Abschriften beider Seiten, wenn mitgeschrieben wird
+                    # (`_build_setup_payload`). Die des Menschen kommt „ohne
+                    # zugesicherte Reihenfolge“; gesammelt wird deshalb je Zug.
+                    for feld, sprecher in (("inputTranscription", "ich"), ("outputTranscription", "ki")):
+                        abschrift = server_content.get(feld)
+                        if isinstance(abschrift, dict) and isinstance(abschrift.get("text"), str):
+                            self._mitschrift.zug(sprecher, abschrift["text"])
+
                     if server_content.get("interrupted"):
                         self._modell_spricht = False
+                        self._mitschrift.zug_ende()
                         await self._panel_senden({"art": "zustand", "zustand": "hoert"})
 
                     model_turn = server_content.get("modelTurn")
@@ -629,6 +641,7 @@ class GeminiLiveSitzung:
 
                     if server_content.get("turnComplete"):
                         self._modell_spricht = False
+                        self._mitschrift.zug_ende()
                         self.lage.laeufe += 1
                         await self._panel_senden({"art": "zustand", "zustand": "hoert"})
 
@@ -784,6 +797,12 @@ class GeminiLiveSitzung:
             }
         if gemini_tools:
             setup_payload["setup"]["tools"] = [{"functionDeclarations": gemini_tools}]
+        if self.v.mitschreiben:
+            # Felder von ``setup`` selbst, nicht von ``generationConfig``
+            # (ai.google.dev/api/live, BidiGenerateContentSetup). Leer heißt:
+            # Sprache selbst erkennen.
+            setup_payload["setup"]["inputAudioTranscription"] = {}
+            setup_payload["setup"]["outputAudioTranscription"] = {}
 
         return setup_payload
 
@@ -903,6 +922,7 @@ class GeminiLiveSitzung:
             if self._google_ws is not None:
                 with contextlib.suppress(Exception):
                     await self._google_ws.close()
+            self._mitschrift.abgeben(user_id=self.user_id, provider_id=self.v.provider_id)
             await asyncio.to_thread(self._abschliessen)
             ai_meldestelle.realtime_sitzung_ende(self.user_id)
 

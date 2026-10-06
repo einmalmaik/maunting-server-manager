@@ -42,6 +42,9 @@ MICROUNITS_PER_CENT = 10_000
 MAX_COST_MICROUNITS = MONTHLY_COST_LIMIT_CENTS_MAX * MICROUNITS_PER_CENT
 # `AiUsageEvent.zweck` einer Beratung der Ethics Engine.
 ZWECK_ETHIK = "ethik"
+# `AiUsageEvent.zweck` eines Durchgangs des Gedächtnisschreibers.
+ZWECK_GEDAECHTNIS = "gedaechtnis"
+ZWECKE = (ZWECK_ETHIK, ZWECK_GEDAECHTNIS)
 
 
 class AiQuotaExceeded(ValueError):
@@ -154,8 +157,20 @@ def reserve_ai_usage(
     minimum_cost_headroom_microunits: int = 0,
     realtime: bool = False,
     dictation_seconds: int = 0,
+    zweck: str | None = None,
 ) -> AiUsageEvent:
-    """Reserviert eine Anfrage atomar oder liefert dieselbe Reservierung erneut."""
+    """Reserviert eine Anfrage atomar oder liefert dieselbe Reservierung erneut.
+
+    ``zweck`` steht für eine Anfrage, die MSM für den Benutzer stellt und nicht
+    er selbst (`ZWECKE`). Sie zählt in Tokens und Kosten wie jede andere, aber
+    weder als Anfrage pro Minute noch als gleichzeitiger Vorgang — in beide
+    Richtungen: sie wird an diesen beiden Grenzen nicht abgewiesen, und sie
+    belegt dort keinen Platz. Sonst wiese der Gedächtnisschreiber, der nach
+    einer Antwort im Hintergrund liest, bei *gleichzeitigen Vorgängen* = 1 die
+    nächste Frage des Benutzers ab.
+    """
+    if zweck is not None and zweck not in ZWECKE:
+        raise ValueError(f"Unbekannter Zweck: {zweck}")
     request_key = _canonical_request_id(request_id)
     if (
         estimated_tokens < 0
@@ -209,18 +224,21 @@ def reserve_ai_usage(
         .scalar()
         or 0
     )
-    _ensure_within(limits.requests_per_minute, int(minute_count), 1, "requests_per_minute")
+    if zweck is None:
+        _ensure_within(limits.requests_per_minute, int(minute_count), 1, "requests_per_minute")
 
     concurrent = (
         db.query(func.count(AiUsageEvent.id))
         .filter(
             AiUsageEvent.user_id == user.id,
             AiUsageEvent.status == "reserved",
+            AiUsageEvent.zweck.is_(None),
         )
         .scalar()
         or 0
     )
-    _ensure_within(limits.concurrent_operations, int(concurrent), 1, "concurrent_operations")
+    if zweck is None:
+        _ensure_within(limits.concurrent_operations, int(concurrent), 1, "concurrent_operations")
     _ensure_within(
         limits.daily_token_limit,
         _sum_since(db, user.id, day_start, AiUsageEvent.accounted_tokens),
@@ -274,6 +292,7 @@ def reserve_ai_usage(
         accounted_tokens=estimated_tokens,
         accounted_cost_microunits=estimated_cost_microunits,
         dictation_seconds=dictation_seconds if dictation_seconds > 0 else None,
+        zweck=zweck,
         created_at=current_time,
     )
     try:
@@ -473,6 +492,8 @@ def reservierung_abrechnen(
     estimated_actual_tokens: int,
     token_price_micro_usd_per_million: int | None,
     gescheitert: bool = False,
+    rollenpreise: tuple[int | None, int | None, int | None] | None = None,
+    geschaetzte_teile: tuple[int, int] | None = None,
 ) -> bool:
     """Findet die Reservierung zu ``request_id`` und schliesst sie ab.
 
@@ -486,6 +507,10 @@ def reservierung_abrechnen(
     **Committet nicht.** Der Aufrufer entscheidet, was mit in die Transaktion
     gehoert — die Verdichtung schreibt ihre Zusammenfassung im selben Commit.
     ``False`` heisst: keine offene Reservierung gefunden, nichts gebucht.
+
+    ``rollenpreise`` und ``geschaetzte_teile`` gehen unverändert an
+    `abrechnung`: wer nicht das Standardmodell gerufen hat (der
+    Gedächtnisschreiber ruft das Worker-Modell), bucht dessen Tarif.
     """
     event = (
         db.query(AiUsageEvent)
@@ -502,6 +527,8 @@ def reservierung_abrechnen(
         reserved_tokens=event.reserved_tokens,
         estimated_actual_tokens=estimated_actual_tokens,
         token_price_micro_usd_per_million=token_price_micro_usd_per_million,
+        rollenpreise=rollenpreise,
+        geschaetzte_teile=geschaetzte_teile,
     )
     complete_ai_usage(
         db, event,
@@ -808,6 +835,8 @@ class AiUsageEventRow:
     provider_requests: int | None
     cost_micro_usd: int
     cost_source: str | None
+    #: `AiUsageEvent.zweck`: ``None`` hat der Benutzer selbst gefragt.
+    zweck: str | None = None
 
 
 #: Wieviele Einzelzeilen eine Seite hoechstens traegt. Die Aufstellung ist ein
@@ -886,6 +915,7 @@ def usage_events(
             provider_requests=event.provider_requests,
             cost_micro_usd=int(event.accounted_cost_microunits or 0),
             cost_source=event.cost_source,
+            zweck=event.zweck,
         )
         for event, username in rohdaten[:gefragt]
     ], mehr

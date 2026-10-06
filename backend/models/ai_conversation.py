@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     String,
     false,
     text,
@@ -79,6 +80,11 @@ class AiConversation(Base):
             name="ck_ai_conversations_kind",
         ),
         Index("ix_ai_conversations_user_updated", "user_id", "updated_at"),
+        Index(
+            "ix_ai_conversations_gedaechtnis_faellig",
+            "gedaechtnis_faellig",
+            postgresql_where=text("gedaechtnis_faellig IS NOT NULL"),
+        ),
         # Partiell: Eindeutigkeit gilt nur fuer die EINZELFENSTER-Arten.
         # Worker-Fenster gibt es je Benutzer beliebig oft — die Kappe dafuer
         # liegt im Werkzeug-Handler und beim Betreiber-Deckel, nicht im Schema.
@@ -111,6 +117,29 @@ class AiConversation(Base):
     # davor fliessen nicht mehr einzeln in eine Anfrage (Kontextkompression).
     summarized_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    # Die Marke des Gedächtnisschreibers (`ai_gedaechtnis_schreiber`): bis
+    # wohin er das Gespräch gelesen hat. Ein **Paar** aus Zeitstempel und
+    # Kennung, verglichen wie `(created_at, id)` — dieselbe Ordnung wie im
+    # Verlauf. Ein Zeitstempel allein ließe eine Nachricht mit demselben
+    # Zeitstempel wie das Fensterende für immer aus (das Problem, das die
+    # Faltung mit dem Schrumpfen ihres Fensters löst). Ohne Kennung gilt nur
+    # der Zeitstempel: so steht die Marke nach der Migration.
+    gedaechtnis_bis: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    gedaechtnis_bis_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Wann der nächste Durchgang fällig ist; ``NULL`` heißt: nichts zu tun.
+    gedaechtnis_faellig: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Bis wann ein Durchgang das Gespräch hält. Abgelaufen heißt: der Prozess
+    # ist mittendrin gestorben, der nächste darf übernehmen.
+    gedaechtnis_sperre: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    gedaechtnis_fehlversuche: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=0, server_default="0"
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False

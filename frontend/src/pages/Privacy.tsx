@@ -136,6 +136,12 @@ export function Privacy({ zurueck }: { zurueck?: string } = {}) {
           // der Verschluesselung — sie schuetzt die Datenbank, nicht die
           // Uebertragung an den Modellanbieter.
           t('privacyPolicy.sections.ai.items.memoryConsent'),
+          // Gedaechtnis v2 (10/2026): das Chatmodell schreibt nicht mehr selbst,
+          // ein Hintergrundschritt liest das Gespraech danach noch einmal. Das
+          // ist eine zweite Uebertragung an den Modellanbieter, ohne Eingabe
+          // und bei Sprachgespraechen aus einer Mitschrift, die sonst nirgends
+          // steht. Deshalb ein eigener Punkt direkt hinter der Zustimmung.
+          t('privacyPolicy.sections.ai.items.memoryReading'),
           t('privacyPolicy.sections.ai.items.memorySearch'),
           t('privacyPolicy.sections.ai.items.attachments'),
           // Zielpunkt 17: der autonome Modus veraendert, wer eine Aktion

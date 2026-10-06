@@ -51,7 +51,7 @@ class Werkzeug:
     installieren, Dateien loeschen, Backup einspielen, Blueprint oder Rolle
     loeschen, Rechte anderer Benutzer (die stehen am Aufruf, `verlangt_klick`),
     Shop-Anbindung, Tarif-Rolle und Zugangsdaten. Was nur die eigenen Daten des
-    Benutzers loescht — Notiz, Termin, Aufgabe, DNS-Eintrag, Erinnerung, Skill —
+    Benutzers loescht — Notiz, Termin, Aufgabe, DNS-Eintrag, Skill —
     laeuft autonom (`EIGENE_DATEN_LOESCHEN`).
 
     Dazwischen lag die Regel vom 23.09.2026, "jedes Loeschen fragt", nachdem
@@ -209,8 +209,8 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # Die stehenden Auftraege. `list_tasks` liest nur, was diesem Benutzer
     # gehoert.
     #
-    # `send_test_email` steht hier aus demselben Grund wie `remember` weiter
-    # unten: das Kriterium fuer die Bestaetigungspflicht ist nicht "aendert
+    # `send_test_email` steht hier aus demselben Grund wie `learn_skill`
+    # weiter unten: das Kriterium fuer die Bestaetigungspflicht ist nicht "aendert
     # etwas", sondern "fasst einen Server an". Eine Mail an die **eigene**
     # hinterlegte Adresse tut das nicht — und einen Empfaengerparameter gibt es
     # bewusst nicht, sonst waere MSM ueber die KI ein Mailversender fuer Fremde.
@@ -220,25 +220,21 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "list_tasks": Werkzeug("global_read", gruppe="tasks"),
     "send_test_email": Werkzeug("global_read", gruppe="tasks"),
 
-    # `remember` und `forget_memory` schreiben, stehen aber bei den
-    # Lesewerkzeugen. Der Unterschied zwischen den Mengen ist nicht "aendert
-    # etwas", sondern "fasst einen Server an und braucht deshalb eine
-    # Bestaetigung". Ein gemerkter Satz im Profil des Benutzers tut das nicht.
-    #
-    # Vergessen laeuft im autonomen Modus ohne Karte: es loescht nur das eigene
-    # Gedaechtnis (`EIGENE_DATEN_LOESCHEN`). Ohne Freigabe geht es wie jedes
-    # Werkzeug als Karte zur Bestaetigung.
-    "remember": Werkzeug("global_read", gruppe="memory", angebot=("ai.memory.use",)),
+    # Das Gedaechtnis liest die KI nur noch. Geschrieben und vergessen wird
+    # seit Stufe 2 (06.10.2026) nach dem Gespraech, im Hintergrund
+    # (`ai_gedaechtnis_schreiber`); `remember` und `forget_memory` gibt es
+    # nicht mehr.
     "search_memory": Werkzeug(
         "global_read", gruppe="memory", angebot=("ai.memory.use",)
     ),
-    "forget_memory": Werkzeug(
-        "global_read", gruppe="memory", angebot=("ai.memory.use",)
-    ),
 
-    # Dasselbe fuer Skills, mit einem zweiten Grund: **Prosa fuehrt nichts
-    # aus.** Ein gelernter Skill kann nichts, was das Modell nicht ohnehin
-    # duerfte — er aendert nur, wie es an eine Aufgabe herangeht.
+    # `learn_skill` und `forget_skill` schreiben, stehen aber bei den
+    # Lesewerkzeugen. Der Unterschied zwischen den Mengen ist nicht "aendert
+    # etwas", sondern "fasst einen Server an und braucht deshalb eine
+    # Bestaetigung". Ein Skill tut das nicht, und **Prosa fuehrt nichts
+    # aus**: ein gelernter Skill kann nichts, was das Modell nicht ohnehin
+    # duerfte — er aendert nur, wie es an eine Aufgabe herangeht. Vergessen
+    # laeuft im autonomen Modus ohne Karte (`EIGENE_DATEN_LOESCHEN`).
     "read_skill": Werkzeug("global_read", gruppe="skill", angebot=("ai.skills.use",)),
     "learn_skill": Werkzeug("global_read", gruppe="skill", angebot=("ai.skills.use",)),
     "forget_skill": Werkzeug(
@@ -998,7 +994,6 @@ ALWAYS_CONFIRM_TOOLS = (
 #: oder bei `immer_bestaetigen` stehen
 #: (`test_jedes_loeschwerkzeug_ist_entschieden`).
 EIGENE_DATEN_LOESCHEN = frozenset({
-    "forget_memory",
     "forget_skill",
     "propose_note_delete",
     "propose_calendar_event_delete",
@@ -1104,9 +1099,10 @@ def worker_ausschluss() -> frozenset[str]:
       liegt selbst darin und ist gerade der Ersatz: der Worker fragt ueber
       die Meldestelle, nie direkt in ein Gespraech hinein;
     * die Memory-Werkzeuge — Datenminimierung: ein Worker arbeitet einen
-      Auftrag ab und soll weder persoenliche Erinnerungen lesen noch aus
-      unbeaufsichtigt gelesenem Material dauerhafte anlegen. Sein Wissen
-      steht im Auftragstext, den das Gehirn formuliert hat.
+      Auftrag ab und soll keine persoenlichen Erinnerungen lesen. Sein
+      Wissen steht im Auftragstext, den das Gehirn formuliert hat.
+      Geschrieben wird das Gedaechtnis ohnehin nur noch aus dem Gespraech
+      mit dem Menschen (`ai_gedaechtnis_schreiber`).
 
     Als Funktion nach dem Vorbild von `aufgaben_tools`: die Fallunterscheidung
     wohnt in der Registry, nicht beim Aufrufer.

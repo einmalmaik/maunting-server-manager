@@ -129,29 +129,13 @@ VERBLASSEN_AB = 0.35
 #: den ein Mensch nimmt, wenn ihm etwas "auf der Zunge liegt".
 VERBLASST_ZEICHEN = 60
 
-#: Wieviel Aehnlichkeit einen bestehenden Eintrag zum Duplikat macht.
-#:
-#: Konflikte loest das Gedaechtnis ueber den Schluessel: derselbe Key wird
-#: ueberschrieben. Das ist sauber, solange die KI den vorhandenen Schluessel
-#: wiederfindet — und genau das ist die Schwachstelle. `ram.vorgabe`,
-#: `standard_ram`, `speicher.default` sind drei Namen fuer denselben Fakt, und
-#: keiner faellt jemandem auf, bis der Bereich voll ist und sich drei Antworten
-#: widersprechen.
-#:
-#: 0,70 ist bewusst hoch. Das Modell trennt Unverwandtes sicher (`Zeitzone` zu
-#: `Pizza` 0,04), aber Verwandtes traegt es nicht immer weit genug (`Sicherung`
-#: zu `backup` nur 0,27). Eine niedrige Schwelle wuerde deshalb echte,
-#: verschiedene Eintraege zusammenwerfen — und ein faelschlich
-#: zusammengelegter Fakt ist teurer als ein doppelter.
-DUPLIKAT_AB = 0.70
-
 #: Ab wieviel Aehnlichkeit die Import-Vorschau einen Bestandseintrag daneben
 #: zeigt (`importabgleich`).
 #:
-#: Niedriger als `DUPLIKAT_AB`, weil hier nichts zusammengelegt wird: die
-#: Vorschau stellt den alten Eintrag nur daneben, und ersetzt wird allein auf
-#: Klick. Der teure Fehler, gegen den `DUPLIKAT_AB` hoch steht, kann hier also
-#: nicht passieren — der billige (ein Doppel, weil der Hinweis fehlte) schon.
+#: Niedrig, weil hier nichts zusammengelegt wird: die Vorschau stellt den
+#: alten Eintrag nur daneben, und ersetzt wird allein auf Klick. Ein
+#: faelschlich zusammengelegter Fakt kann hier also nicht entstehen — ein
+#: Doppel, weil der Hinweis fehlte, schon.
 #: Gemessen am 25.09.2026 mit potion-multilingual-128M, Bestand gegen typische
 #: Importzeilen (Schlüssel ohne Kategoriepräfix, siehe
 #: `ai_memory_import_service.normalize_key`): derselbe Fakt 0,59 bis 0,87
@@ -228,12 +212,12 @@ class MemoryScopeVoll(HTTPException):
     ein Satz für einen **Menschen**, denn über den Router legt der Benutzer
     selbst einen Eintrag an und liest die Meldung als Toast.
 
-    Die drei Zahlen daneben sind für die eine Stelle da, die aus derselben
-    Tatsache eine Anweisung an das *Modell* macht (`_execute_remember`). Ohne
-    sie müsste die auf den Meldungstext horchen, um „gesperrt“ von „genau
-    voll“ von „nachträglich gesenkt“ zu unterscheiden — und jede Umformulierung
-    hier änderte drüben stillschweigend das Verhalten, ohne dass ein Test es
-    merkt.
+    Die drei Zahlen daneben sind für Aufrufer da, die „gesperrt“ von „genau
+    voll“ von „nachträglich gesenkt“ unterscheiden wollen, ohne auf den
+    Meldungstext zu horchen — jede Umformulierung hier änderte dort sonst
+    stillschweigend das Verhalten. Bis Stufe 2 des Gedächtnisses machte
+    `remember` daraus eine Anweisung an das Modell; der Gedächtnisschreiber
+    kennt den freien Platz vorher (`ai_gedaechtnis_schreiber._bereiche`).
     """
 
     def __init__(self, *, bereich: str, bestand: int, grenze: int, detail: str) -> None:
@@ -422,10 +406,11 @@ def scope_identity(
         # Nummer erlaubt. Eine erfundene ID kam so bis zum `db.commit()` durch
         # und scheiterte erst am Fremdschluessel auf `servers.id`; der
         # IntegrityError-Handler weiter unten deutet das als Schreibkonflikt und
-        # antwortet "Bitte erneut versuchen". Das Modell befolgt diese
-        # Aufforderung und wiederholt denselben aussichtslosen Aufruf, statt mit
+        # antwortet "Bitte erneut versuchen". Das Modell, das bis Stufe 2 des
+        # Gedaechtnisses selbst schrieb, befolgte diese Aufforderung und
+        # wiederholte denselben aussichtslosen Aufruf, statt mit
         # `list_my_servers` nach der richtigen Nummer zu suchen. Die Diagnose
-        # muss stimmen, sonst fuehrt sie das Modell in die Irre.
+        # muss stimmen, sonst fuehrt sie jeden Leser in die Irre.
         #
         # Ein nicht existierender und ein nicht sichtbarer Server bleiben
         # ununterscheidbar — dieselbe Zusage wie in `_resolve_server`: sonst
@@ -495,8 +480,56 @@ def _preference_row(db: Session, user_id: int) -> AiMemoryPreference:
     return row
 
 
+def _einschalten(db: Session, row: AiMemoryPreference) -> None:
+    """Das Gedaechtnis wird eingeschaltet: der Schreiber liest ab jetzt.
+
+    Was in der Zeit ohne Einwilligung gesagt wurde, liest niemand nach — wer
+    den Schalter umlegt, soll nicht schlagartig ein Gedaechtnis ueber die Zeit
+    davor bekommen (`ai_gedaechtnis_schreiber`). Die Marke jedes Gespraechs
+    rueckt deshalb auf jetzt, und der Zeitpunkt bleibt an der Einwilligung
+    stehen (`einwilligung_seit`): auch der Zusammenhang vor der Marke darf
+    nicht aus der Zeit davor stammen. ``updated_at`` bleibt stehen: das
+    Gespraech ist dadurch nicht neuer geworden.
+    """
+    from models import AiConversation
+    from sqlalchemy import update
+
+    jetzt = datetime.now(timezone.utc)
+    db.execute(
+        update(AiConversation)
+        .where(AiConversation.user_id == row.user_id)
+        .values(
+            gedaechtnis_bis=jetzt,
+            gedaechtnis_bis_id=None,
+            updated_at=AiConversation.updated_at,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    row.eingeschaltet_am = jetzt
+    row.enabled = True
+
+
+def einwilligung_seit(db: Session, user_id: int) -> datetime | None:
+    """Seit wann das Gedaechtnis ohne Unterbrechung eingeschaltet ist; ``None``: aus.
+
+    Fuer den Gedaechtnisschreiber: Persoenliches schreibt er nur aus dem, was
+    seitdem gesagt wurde. Eine eingeschaltete Zeile ohne Zeitpunkt ist an
+    `_einschalten` vorbei entstanden (die Migration hat jeder eingeschalteten
+    Zeile einen gegeben); sie gilt als schon immer eingeschaltet — ab 1970,
+    was jede Datenbank darstellen kann.
+    """
+    row = db.get(AiMemoryPreference, user_id)
+    if row is None or not row.enabled:
+        return None
+    if row.eingeschaltet_am is None:
+        return datetime.fromtimestamp(0, timezone.utc)
+    return _utc(row.eingeschaltet_am)
+
+
 def set_preference(db: Session, user: User, enabled: bool) -> AiMemoryPreference:
     row = _preference_row(db, user.id)
+    if enabled and not row.enabled:
+        _einschalten(db, row)
     row.enabled = enabled
     db.commit()
     db.refresh(row)
@@ -532,8 +565,8 @@ def record_notice_answer(
     Schalter erreichbar.
     """
     row = _preference_row(db, user.id)
-    if enable:
-        row.enabled = True
+    if enable and not row.enabled:
+        _einschalten(db, row)
     if hide_future:
         row.notice_hidden = True
     row.notice_last_shown_at = datetime.now(timezone.utc)
@@ -739,7 +772,7 @@ def personal_entries(
     `list_entries` fragt genau eine Scope-Kennung ab und braucht dafuer bei
     serverbezogenen Notizen eine konkrete `server_id`. Damit war der Bereich
     ueber die Oberflaeche nicht erreichbar: die KI schreibt solche Notizen
-    (`remember` mit scope='server'), sie fliessen in jeden Chat und zaehlen
+    (scope='server'), sie fliessen in jeden Chat und zaehlen
     gegen die Bereichsgrenze — sehen oder loeschen konnte man sie nicht.
 
     Serverbezogene Eintraege bleiben persoenlich (`owner_user_id` ist gesetzt,
@@ -871,26 +904,11 @@ def _bereichsname(
     if scope == "server_shared":
         return f"das Wissen von Server {server_id}"
     if scope == "team":
-        # Der Name, nicht die Nummer — und das ist keine Kosmetik. Ein Team
-        # sprechen `remember` und `forget_memory` ausschliesslich über
-        # `team="<Name>"` an, aufgelöst über Namensgleichheit in
-        # `team_service.learning_team`; ein Werkzeug, das eine Nummer in einen
-        # Namen übersetzt, gibt es nicht. „Team 42“ benennt für das Modell also
-        # nichts, was es ansprechen könnte: die Auflage „nur Einträge aus genau
-        # diesem Bereich“ wäre damit nicht befolgbar, und dem Benutzer könnte es
-        # den vollen Bereich nur als Nummer nennen.
-        #
-        # Der Schaden bleibt nicht beim Nichtstun. Schlüssel sind bewusst stabil
-        # und wiederholen sich über Teams hinweg — wer den Bereich nicht treffen
-        # kann, greift den gleichnamigen Treffer des falschen Teams und löscht
-        # dort.
-        #
-        # Und deshalb der **ansprechbare** Name statt des blanken: Teamnamen
-        # sind nur je Gründer eindeutig. Ist der Benutzer in zwei Teams namens
-        # „Alpha“, benennt „Alpha“ beide — aus der Sackgasse von oben würde
-        # damit dasselbe Löschen im falschen Team, nur über einen Umweg.
-        # `ansprechbarer_name` hängt dann den Gründer an, und genau diese Form
-        # wählt in `learning_team` wieder genau ein Team aus.
+        # Der Name, nicht die Nummer: diese Absage liest ein Mensch, und
+        # „Team 42“ benennt für ihn nichts. Der **ansprechbare** Name statt
+        # des blanken, weil Teamnamen nur je Gründer eindeutig sind — ist der
+        # Benutzer in zwei Teams namens „Alpha“, benennt „Alpha“ beide, und
+        # `ansprechbarer_name` hängt dann den Gründer an.
         ziel = db.get(Team, team_id) if team_id is not None else None
         if ziel is not None and ziel.name:
             from services import team_service
@@ -1019,9 +1037,9 @@ def _platz_sicherstellen(
         # legt der Benutzer selbst einen Eintrag an, und `detail` wird ihm
         # als Toast vorgesetzt. Er las dort eine Anweisung an eine dritte
         # Instanz, über ihn selbst, mit Werkzeugnamen, die er nicht hat. Ein
-        # Text, der beiden dienen soll, dient keinem — was das Modell tun
-        # oder lassen soll, steht deshalb in `_execute_remember`, an der
-        # Naht zum Modell.
+        # Text, der beiden dienen soll, dient keinem. (Bis Stufe 2 übersetzte
+        # `remember` die Tatsache für das Modell; der Gedächtnisschreiber
+        # kennt den freien Platz heute vorher.)
         #
         # Der Bereich steht in jedem der drei Sätze, und das ist keine
         # Höflichkeit: nur er sagt, **wo** es klemmt. „Voll“ ohne Bereich
@@ -1046,10 +1064,7 @@ def _platz_sicherstellen(
         #   der über seinen eigenen Leser hinwegredet, denn dieses `detail`
         #   liest der Benutzer selbst als Toast, und die zwei Sätze davor
         #   duzen ihn. Derselbe Fehler wie die frühere Regieanweisung im
-        #   0-Fall, nur eine Stufe leiser. Als Anweisung gebraucht wird der
-        #   Gedanke ohnehin nur vom Modell, und dort steht er schon: „Nenne
-        #   dem Benutzer den Stand und frag, was weg soll“ in
-        #   `_execute_remember`.
+        #   0-Fall, nur eine Stufe leiser.
         #
         # Verdrängt wird bewusst nichts von selbst: was ein Mensch gesagt
         # hat, wirft das Panel nicht ungefragt weg.
@@ -1083,21 +1098,22 @@ def _platz_sicherstellen(
 
 def upsert_entry(
     db: Session, *, user: User, scope: str, server_id: int | None, key: str, value: str,
-    origin: str = "user", team_id: int | None = None, replace_user_entry: bool = False,
-    quelle: str | None = None,
+    origin: str = "user", team_id: int | None = None, quelle: str | None = None,
 ) -> tuple[AiMemoryEntry, str]:
     """Legt einen Eintrag an oder ueberschreibt ihn unter demselben Schluessel.
 
     Das Ueberschreiben ist die Konfliktaufloesung des Gedaechtnisses: "ich will
     jetzt 16 GB" ersetzt "8 GB", statt beides nebeneinander stehen zu lassen.
-    Deshalb ist der Schluessel die Identitaet eines Fakts — und deshalb bekommt
-    die KI im Werkzeugtext die ausdrueckliche Anweisung, einen vorhandenen
-    Schluessel wiederzuverwenden, statt einen fuenften aehnlichen anzulegen.
+    Deshalb ist der Schluessel die Identitaet eines Fakts — und deshalb bekam
+    die KI, solange sie selbst schrieb (bis Stufe 2), die Anweisung, einen
+    vorhandenen Schluessel wiederzuverwenden, statt einen aehnlichen anzulegen.
 
     ``origin`` unterscheidet eine Ansage des Benutzers von einer Ableitung der
     KI. Eine Ableitung ueberschreibt bewusst **keine** ausdrueckliche Ansage:
     was der Benutzer selbst gesagt hat, darf die KI nicht stillschweigend
-    korrigieren.
+    korrigieren. Die ausdrueckliche Korrektur (`replace_user_entry`) gab es
+    nur fuer `remember`; seit Stufe 2 aendert der Gedaechtnisschreiber ueber
+    `erinnerung_aendern`, mit der Nachricht des Menschen als Beleg.
 
     Der Weg der Namen, und damit Altbestand: seit Gedaechtnis v2 legt
     `erinnerung_anlegen` Erinnerungen ohne Namen an. Was hier entsteht, kommt
@@ -1143,34 +1159,20 @@ def upsert_entry(
         row.key_index = _schluessel_indizes(identity, [key])[0]
         db.add(row)
         action = "ai.memory.created"
-    elif origin == "ai" and row.origin == "user" and not replace_user_entry:
+    elif origin == "ai" and row.origin == "user":
         # Der Schutz gilt gegen die *stillschweigende* Korrektur: die KI leitet
         # nebenbei etwas ab und ueberschreibt damit, was der Benutzer selbst
-        # gesagt hat. Verlangt er die Korrektur ausdruecklich, ist genau das
-        # erwuenscht — dafuer gibt es `replace_user_entry`.
+        # gesagt hat.
         raise HTTPException(
             status_code=409,
-            detail=(
-                "Dieser Eintrag stammt vom Benutzer. Ueberschreibe ihn nur, wenn "
-                "der Benutzer die Korrektur ausdruecklich verlangt hat — dann mit "
-                "replace_user_entry=true. Lege keinen zweiten aehnlichen Schluessel an."
-            ),
+            detail="Dieser Eintrag stammt vom Benutzer und wird nicht still überschrieben.",
         )
     else:
-        # Eine ausdrueckliche Ansage bleibt eine ausdrueckliche Ansage.
-        # Vorher stand hier bedingungslos `row.origin = origin`: eine einmal vom
-        # Benutzer verlangte Korrektur (`replace_user_entry`) stufte den Eintrag
-        # dauerhaft auf "ai" herunter — und der Schutz im Zweig darueber haengt
-        # genau an diesem Feld. Er galt danach fuer immer nicht mehr, die
-        # naechste beilaeufige Ableitung der KI durfte den Wert wieder
-        # stillschweigend ersetzen. Das ist das Gegenteil dessen, was der
-        # Docstring zusichert.
-        #
-        # Nur diese eine Richtung ist gesperrt. Die Hochstufung "ai" -> "user"
-        # bleibt erlaubt: wer eine Ableitung selbst bestaetigt, macht sie damit
-        # zu seiner eigenen Ansage und sie verdient den Schutz.
-        if not (origin == "ai" and row.origin == "user"):
-            row.origin = origin
+        # Die Herabstufung "user" -> "ai" hat der Zweig darueber schon
+        # abgewiesen. Die Hochstufung "ai" -> "user" bleibt erlaubt: wer eine
+        # Ableitung selbst bestaetigt, macht sie damit zu seiner eigenen Ansage
+        # und sie verdient den Schutz.
+        row.origin = origin
         # Der Stand davor bleibt als Fassung lesbar, wie bei jeder Aenderung
         # seit Gedaechtnis v2. Gelesen wird vor dem Umstellen der AAD unten.
         # Ein Stand, der sich nicht mehr oeffnen laesst, wird ohne Fassung
@@ -1562,7 +1564,7 @@ def erinnerung_aendern(
     Aendert ein Mensch den Text, ist es danach seine Aussage (``origin``
     wird ``user``). Die KI (``von='ai'``) aendert Text oder Titel einer
     Aussage des Menschen nur mit ``ueberschreibt_mensch``: derselbe Schutz wie
-    beim Namen (`upsert_entry`, ``replace_user_entry``). Thema, Art und
+    beim Namen (`upsert_entry`). Thema, Art und
     Wichtigkeit ordnet sie dagegen frei zu; das sagt nichts anderes, als der
     Mensch gesagt hat.
     """
@@ -1769,6 +1771,197 @@ def fassung_zurueckholen(
     )
 
 
+def erinnerung_aufnehmen(
+    db: Session,
+    *,
+    user: User,
+    ziel_id: str,
+    quelle_id: str,
+    ueberschreibt_mensch: bool = False,
+    commit: bool = True,
+) -> AiMemoryEntry:
+    """Eine Erinnerung geht in einer anderen auf — die Haelfte einer Synthese.
+
+    Die andere Haelfte, den neuen Text des Ziels, schreibt der Aufrufer vorher
+    mit `erinnerung_aendern` (Grund ``zusammengefuehrt``). Hier wird der Text
+    der aufgehenden Erinnerung zu einer frueheren Fassung **des Ziels**
+    (Grund ``aufgenommen``) — im Verlauf des Ziels steht danach, woraus es
+    entstanden ist —, und die aufgehende wird vergessen: 30 Tage
+    zurueckholbar, wie alles, was die KI vergisst.
+
+    Nur innerhalb eines Bereichs: eine persoenliche Notiz darf nicht im
+    Teamwissen aufgehen, sonst laese sie das Team. Eine Erinnerung des
+    Menschen geht nur mit ``ueberschreibt_mensch`` auf — derselbe Schutz wie
+    beim Aendern ihres Textes.
+    """
+    ziel = _zeile(db, user, ziel_id, aendern=True)
+    quelle = _zeile(db, user, quelle_id, aendern=True)
+    if ziel.id == quelle.id or ziel.scope_identity != quelle.scope_identity:
+        raise HTTPException(
+            status_code=422,
+            detail="Zusammengefuehrt wird nur innerhalb eines Bereichs.",
+        )
+    if ziel.status != "aktiv" or quelle.status != "aktiv":
+        raise HTTPException(
+            status_code=409,
+            detail="Diese Erinnerung ist vergessen. Hol sie zuerst zurück.",
+        )
+    if quelle.origin == "user" and not ueberschreibt_mensch:
+        raise HTTPException(
+            status_code=409,
+            detail="Diese Erinnerung stammt vom Benutzer und wird nicht still überschrieben.",
+        )
+    _schluessel_laden([quelle])
+    text = DisClient.decrypt(quelle.value_encrypted, aad=_aad(quelle))
+    _fassung_ablegen(
+        db, ziel, text, quelle.titel or quelle.key, grund="aufgenommen", von="ai"
+    )
+    erinnerung_vergessen(db, user=user, entry_id=quelle.id, commit=False)
+    if commit:
+        db.commit()
+    return ziel
+
+
+def _name_als_titel(name: str) -> str | None:
+    """Der alte Name als Titel: aus `backup.zeitpunkt` wird „Backup zeitpunkt“.
+
+    Punkte und Unterstriche trennten im Namen Wörter, die ein Titel mit
+    Leerzeichen trennt; mehr als den ersten Buchstaben fasst die Umstellung
+    nicht an. Einen Titel daraus zu formulieren, ist Sache des Modells.
+    """
+    lesbar = " ".join(name.replace("_", " ").replace(".", " ").split())
+    if not lesbar:
+        return None
+    try:
+        return _titel_pruefen(lesbar[:1].upper() + lesbar[1:])
+    except HTTPException:
+        return None
+
+
+def altbestand_umschreiben(
+    db: Session,
+    *,
+    user: User,
+    entry_id: str,
+    text: str | None,
+    titel: str | None = None,
+    thema: object = UNVERAENDERT,
+    art: object = UNVERAENDERT,
+    wichtigkeit: int | None = None,
+    erwartete_fassung: int | None = None,
+) -> AiMemoryEntry:
+    """Bringt eine Erinnerung mit Namen in die Form von Gedächtnis v2.
+
+    Danach hat sie weder Namen noch Index und ist ein Satz wie jede neue
+    (`ai_gedaechtnis_altbestand`). ``text`` ist der Satz, den das Modell aus
+    Name und Wert gemacht hat; der Stand davor bleibt als Fassung (Grund
+    ``umgeschrieben``), mit dem Namen als Titel — wer wissen will, was vorher
+    dastand, findet es im Verlauf. Die Fassung entsteht auch, wenn der Text
+    bleibt: sonst stünde der Name nirgends mehr. ``text=None`` stellt
+    mechanisch um: der Wert bleibt der Text, der Name wird der Titel. Einen
+    Titel, den die Erinnerung schon trägt, hat ein Mensch gesetzt; er bleibt.
+
+    Die Herkunft bleibt, wie sie ist, und anders als in `erinnerung_aendern`
+    gibt es keinen Schutz für die Aussage des Menschen: umgeschrieben wird
+    ihre Form, nicht ihr Inhalt, und ihr Wortlaut steht daneben in der Fassung.
+    Committet nicht.
+    """
+    row = _zeile(db, user, entry_id, aendern=True)
+    if row.status != "aktiv":
+        raise HTTPException(
+            status_code=409,
+            detail="Diese Erinnerung ist vergessen. Hol sie zuerst zurück.",
+        )
+    if erwartete_fassung is not None and int(row.fassung or 1) != erwartete_fassung:
+        raise HTTPException(
+            status_code=409,
+            detail="Die Erinnerung wurde inzwischen geändert. Lade neu und versuch es noch einmal.",
+        )
+    if row.key_encrypted is None:
+        return row
+    _schluessel_laden([row])
+    name = row.key
+    alter_text = DisClient.decrypt(row.value_encrypted, aad=_aad(row))
+    alter_titel = row.titel
+    neuer_text = alter_text if text is None else _safe_value(text)
+    neuer_titel = alter_titel or (_titel_pruefen(titel) if titel else None) or _name_als_titel(name)
+    _fassung_ablegen(
+        db, row, alter_text, name or alter_titel or None, grund="umgeschrieben", von="ai"
+    )
+    if neuer_text != alter_text:
+        row.aad_version = 2
+        row.value_encrypted = DisClient.encrypt(neuer_text, aad=_aad(row))
+    if thema is not UNVERAENDERT:
+        gefunden = thema_fuer(
+            db, identity=row.scope_identity, owner_id=row.owner_user_id,
+            server_id=row.server_id, team_id=row.team_id, name=thema,
+        )
+        row.thema_id = gefunden.id if gefunden is not None else None
+    if art is not UNVERAENDERT:
+        row.art = _art_pruefen(art)
+    if wichtigkeit is not None:
+        row.wichtigkeit = _wichtigkeit_pruefen(wichtigkeit)
+    row.key_encrypted = None
+    row.key_index = None
+    row.__dict__.pop("_key_klartext", None)
+    row.titel = neuer_titel
+    # Nach dem Titel: der Vektor entsteht aus Titel und Text, nicht mehr aus
+    # dem Namen (`_einbettungstext`).
+    refresh_embedding(db, row, neuer_text)
+    row.fassung = int(row.fassung or 1) + 1
+    row.updated_at = datetime.now(timezone.utc)
+    audit_service.record_privileged_action(
+        db, user_id=user.id, action="ai.memory.updated", target_type="ai_memory",
+        target_id=row.id,
+        details=_protokolldetails(
+            row, origin="ai", grund="umgeschrieben" if text is not None else "umgestellt",
+        ),
+        origin="ai",
+    )
+    db.flush()
+    return row
+
+
+def aehnlichkeit_zu_texten(
+    db: Session, rows: list[AiMemoryEntry], texte: list[str]
+) -> list[float | None]:
+    """Je Zeile die hoechste Bedeutungsaehnlichkeit zu einem der Texte.
+
+    Fuer den Gedaechtnisschreiber: er vergleicht den Bestand nicht mit einer
+    Frage, sondern mit jeder Nachricht eines Gespraechsausschnitts einzeln.
+    Ein Ausschnitt ueber drei Dinge, zu einem Vektor vermischt, traefe keines
+    davon.
+
+    ``None`` wie in `_similarities`: kein Vergleich moeglich (kein Modell,
+    kein Vektor aus demselben Modell), nicht "unaehnlich". Gerechnet wird als
+    eine Matrix, nicht je Text — bei einem unbegrenzten Vorrat sind das sonst
+    hunderttausend Vektoren je Nachricht.
+    """
+    texte = [text for text in texte if text and text.strip()]
+    if not rows or not texte:
+        return [None] * len(rows)
+    kodierung = ai_embedding_service.encode(texte, db=db)
+    if kodierung is None or len(kodierung.vektoren) != len(texte):
+        return [None] * len(rows)
+    gespeichert = [_stored_vector(row, kodierung.modell) for row in rows]
+    bekannt = [index for index, vektor in enumerate(gespeichert) if vektor is not None]
+    if not bekannt:
+        return [None] * len(rows)
+    try:
+        import numpy as np
+
+        matrix = np.asarray([gespeichert[index] for index in bekannt], dtype="float32")
+        fragen = np.asarray(kodierung.vektoren, dtype="float32")
+        beste = (matrix @ fragen.T).max(axis=1).tolist()
+    except Exception as exc:  # noqa: BLE001 - ohne Vergleich gilt die Ersatzordnung
+        logger.warning("Aehnlichkeit zum Ausschnitt fehlgeschlagen error=%s", type(exc).__name__)
+        return [None] * len(rows)
+    ergebnis: list[float | None] = [None] * len(rows)
+    for index, wert in zip(bekannt, beste):
+        ergebnis[index] = float(wert)
+    return ergebnis
+
+
 def erinnerung_lesen(db: Session, *, user: User, entry_id: str) -> tuple[AiMemoryEntry, str]:
     """Eine Erinnerung, wie sie jetzt steht — fuer die Ansicht nach einem 409.
 
@@ -1841,68 +2034,6 @@ def vergessene_aufraeumen(db: Session, *, jetzt: datetime | None = None) -> int:
     return geloescht
 
 
-def aehnlicher_eintrag(
-    db: Session,
-    *,
-    scope_kennung: str,
-    key: str,
-    value: str,
-    schwelle: float = DUPLIKAT_AB,
-) -> tuple[AiMemoryEntry, float] | None:
-    """Der naechstliegende Bestandseintrag im selben Bereich — oder ``None``.
-
-    **Wozu:** Das Ueberschreiben ueber den Schluessel loest Konflikte nur,
-    wenn derselbe Schluessel wiedergefunden wird. Legt die KI stattdessen
-    einen aehnlichen neuen an, stehen zwei Antworten auf dieselbe Frage
-    nebeneinander — und beim naechsten Abruf gewinnt der Zufall.
-
-    Verglichen wird **Schluessel und Wert** zusammen, wie beim Einbetten
-    (`_embedding_source`). Der Schluessel allein truege zu wenig ("ram" gegen
-    "speicher"), der Wert allein zu viel Rauschen.
-
-    Ohne Modell gibt die Funktion ``None`` zurueck statt zu raten. Ein
-    Wortabgleich als Ersatz waere hier gefaehrlich: zwei Eintraege ueber
-    denselben Server teilen fast alle Woerter, ohne dasselbe zu sagen.
-
-    Sucht **nur im eigenen Bereich** (`scope_kennung`). Ein persoenlicher
-    Eintrag darf nie gegen einen fremden oder geteilten geprueft werden — das
-    waere ein Leseweg ueber die Bereichsgrenze hinweg, und sei es nur ueber
-    ein Aehnlichkeitsmass.
-    """
-    kodierung = ai_embedding_service.encode([_embedding_source(key, value)], db=db)
-    if kodierung is None or not kodierung.vektoren:
-        return None
-
-    # Vektor und Zeile zusammen halten: die Filterung oben hat `None`
-    # ausgeschlossen, aber der Typpruefer sieht das nicht — und ein zweites
-    # `_stored_vector` je Zeile wäre ein zweites Lesen der Vektorspalte.
-    paare: list[tuple[AiMemoryEntry, Sequence[float]]] = []
-    eigener = _schluessel_indizes(scope_kennung, [key])[0]
-    _index_nachziehen(db, scope_kennung)
-    # `IS NULL` ausdruecklich: Zeilen ohne Namen (Gedaechtnis v2) haben keinen
-    # Index, und `NULL != x` ist in SQL nicht wahr, sondern unbekannt; ohne den
-    # ersten Zweig fielen genau sie aus dem Vergleich.
-    for row in db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity == scope_kennung,
-        AiMemoryEntry.status == "aktiv",
-        or_(AiMemoryEntry.key_index.is_(None), AiMemoryEntry.key_index != eigener),
-    ).all():
-        vektor = _stored_vector(row, kodierung.modell)
-        if vektor is not None:
-            paare.append((row, vektor))
-    if not paare:
-        return None
-
-    werte = ai_embedding_service.similarity(
-        kodierung.vektoren[0], [vektor for _row, vektor in paare]
-    )
-    bester: tuple[AiMemoryEntry, float] | None = None
-    for (row, _vektor), wert in zip(paare, werte):
-        if wert >= schwelle and (bester is None or wert > bester[1]):
-            bester = (row, float(wert))
-    return bester
-
-
 @dataclass(frozen=True)
 class Importabgleich:
     """Was ein Bereich zu einer Liste von Importkandidaten schon weiß.
@@ -1930,10 +2061,9 @@ def importabgleich(
 ) -> Importabgleich:
     """Gleicht Importkandidaten in **einem** Durchgang gegen den Bereich ab.
 
-    Dieselbe Frage wie `aehnlicher_eintrag`, nur für viele Kandidaten auf
-    einmal. Jene Funktion liest je Aufruf alle Vektoren des Bereichs; bei 200
-    importierten Fakten gegen 5.000 Einträge wären das eine Million gelesene
-    Vektoren statt 5.000. Hier wird der Bereich einmal gelesen, einmal
+    Für viele Kandidaten auf einmal. Je Kandidat alle Vektoren des Bereichs
+    zu lesen hieße bei 200 importierten Fakten gegen 5.000 Einträge eine
+    Million gelesene Vektoren statt 5.000. Hier wird der Bereich einmal gelesen, einmal
     eingebettet, und entschlüsselt werden nur die Zeilen, die in der Vorschau
     auch erscheinen.
 
@@ -2645,7 +2775,7 @@ def _vektoren_nachziehen(db: Session, decoded: list[tuple[AiMemoryEntry, str]]) 
     dort, wo der entschlüsselte Wert schon in der Hand liegt — beim Abruf in
     den Kontext. Damit holt die erste Anfrage nach einem Neustart mit
     funktionierendem Modell alles auf, und zwar höchstens einmal je Zeile.
-    Ein Aufruf für alle offenen Zeilen, wie `aehnlicher_eintrag` es auch tut.
+    Ein Aufruf für alle offenen Zeilen.
 
     Bewusst nur an dieser einen Stelle: `list_entries`, `scope_entries` und
     `personal_entries` sind Verwaltungsansichten, dort gehört kein Rechenschritt
@@ -2963,10 +3093,8 @@ def _memory_line(
     elif row.scope == "team":
         # Die Nummer, nicht der Name — anders als in der Absage
         # (`_bereichsname`) und im Suchergebnis (`_execute_search_memory`), und
-        # das ist kein Versehen. Dort geht es ums **Ansprechen**: das Team ist
-        # das Ziel eines naechsten Aufrufs, und dafuer taugt nur der Name, den
-        # `remember` und `forget_memory` als `team="<Name>"` entgegennehmen.
-        # Hier geht es ums **Unterscheiden**: die Zeile soll sagen, dass zwei
+        # das ist kein Versehen. Dort liest ein Mensch mit, und dem sagt nur
+        # der Name etwas. Hier geht es ums **Unterscheiden**: die Zeile soll sagen, dass zwei
         # widersprechende Antworten aus zwei verschiedenen Teams stammen, und
         # dafuer reicht eine beliebige stabile Marke.
         #
@@ -2974,7 +3102,7 @@ def _memory_line(
         # keine Sitzung und ist eine reine Formatierung; ihn zu holen hiesse,
         # die Signatur und beide Kontextaufbauten zu aendern und im
         # schlechtesten Fall je Zeile ein `db.get(Team, …)` zu bezahlen — bei
-        # jeder Nachricht neu, waehrend die Suche einmal je Loeschabsicht
+        # jeder Nachricht neu, waehrend die Suche nur auf Nachfrage
         # laeuft. Dazu geht jede Zeile gegen dieselben 6.000 Zeichen; ein Name
         # je Zeile verdraengt Eintraege, statt welche zu erklaeren.
         scope = f"team:{row.team_id}"
@@ -3389,49 +3517,3 @@ def search_entries(
         row.last_used_at = now
     db.flush()
     return treffer
-
-
-def delete_by_keys(
-    db: Session, user: User, *, scope: str, keys: list[str], team_id: int | None = None,
-    server_id: int | None = None,
-) -> list[str]:
-    """Loescht genau die benannten Schluessel eines Bereichs.
-
-    Bewusst **nicht** nach Suchbegriff. Eine unscharfe Aehnlichkeit entscheidet
-    darueber, was ein Mensch zu sehen bekommt — sie darf nicht darueber
-    entscheiden, was verschwindet. Der Weg ist deshalb zweistufig: erst suchen
-    und zeigen, dann die gefundenen Schluessel ausdruecklich loeschen.
-
-    Rechte wie beim Schreiben: persoenliche Eintraege gehoeren dem Benutzer,
-    Team-Eintraege verlangen `can_manage_memory`, panelweite
-    `panel.settings.write`, das Wissen einer Anlage `server.config.write`.
-    """
-    identity, _owner_id, normalized_server_id, normalized_team_id = scope_identity(
-        db, user, scope, server_id, team_id
-    )
-    _assert_may_write(db, user, scope, normalized_team_id, normalized_server_id)
-
-    wanted = [key for key in keys if isinstance(key, str) and key.strip()]
-    if not wanted:
-        return []
-    rows = (
-        db.query(AiMemoryEntry)
-        .filter(schluessel_bedingung(db, identity, wanted))
-        .all()
-    )
-    removed: list[str] = []
-    for row in rows:
-        audit_service.record_privileged_action(
-            db, user_id=user.id, action="ai.memory.deleted", target_type="ai_memory",
-            target_id=row.id,
-            details={
-                "scope": row.scope, "key": row.key,
-                **({"server_id": row.server_id} if row.server_id else {}),
-                **({"team_id": row.team_id} if row.team_id else {}),
-            },
-            origin="ai",
-        )
-        removed.append(row.key)
-        db.delete(row)
-    db.commit()
-    return sorted(removed)

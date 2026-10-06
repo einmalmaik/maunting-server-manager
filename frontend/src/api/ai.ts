@@ -408,9 +408,14 @@ export interface AiToolUse {
   /**
    * Themengruppe aus `ai_tool_registry` (`memory`, `skill`, `docs`).
    *
-   * Steuert allein das Symbol. Vorher riet das Frontend sie an einem
-   * hartkodierten `tool_name === 'remember'` nach und lag bei `search_memory`
-   * und `forget_memory` daneben.
+   * Steuert allein das Symbol und wird mit dem Aufruf abgelegt, nicht beim
+   * Anzeigen nachgeschlagen. Ältere Verläufe können deshalb noch Abschnitte
+   * von `remember` und `forget_memory` mit `gruppe: 'memory'` enthalten,
+   * obwohl Singra diese Werkzeuge seit Gedächtnis v2 nicht mehr hat; sie
+   * zeigen weiter das Gedächtnissymbol, und ihre Beschriftungen
+   * (`ai.tools.remember` usw.) bleiben in den Sprachdateien. Vorher riet das
+   * Frontend die Gruppe am Werkzeugnamen nach und lag bei `search_memory`
+   * daneben.
    */
   gruppe?: string | null
   /**
@@ -1062,6 +1067,11 @@ export interface AiUsageEvent {
   cost_micro_usd: number
   /** `null` bei Zeilen aus der Zeit vor der Aufschlüsselung. */
   cost_source: 'provider' | 'estimate' | 'none' | null
+  /**
+   * Wozu MSM die Anfrage für den Benutzer gestellt hat: Ethik-Beratung vor
+   * einem Werkzeug oder der Gedächtnisschreiber. `null` hat er selbst gefragt.
+   */
+  zweck?: 'ethik' | 'gedaechtnis' | null
 }
 
 export interface AiUsageEvents {
