@@ -297,6 +297,15 @@ def _iso_utc(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _format_reminder_time(dt: datetime, user: User | None = None, all_day: bool = False) -> str:
+    """Formatiert einen Zeitpunkt für Erinnerungen (E-Mail, Push, Desktop) in der Zeitzone des Benutzers."""
+    tz = _user_timezone(user)
+    lokal = dt.astimezone(tz)
+    if all_day:
+        return lokal.strftime("%d.%m.%Y (ganztägig)")
+    return lokal.strftime("%d.%m.%Y um %H:%M Uhr")
+
+
 def _parse_datetime(
     dt_input: str | datetime,
     user: User | None = None,
@@ -1815,7 +1824,8 @@ class CalendarService:
 
                 title = _anzeigetitel(ev.get("title", ""))
                 loc = _anzeigeort(ev.get("location", ""))
-                start_formatted = start_dt.strftime("%d.%m.%Y um %H:%M Uhr")
+                all_day = bool(ev.get("all_day"))
+                start_formatted = _format_reminder_time(start_dt, user=user, all_day=all_day)
 
                 # 1. E-Mail Benachrichtigung
                 if user.email_notifications and user.email:
@@ -1841,7 +1851,8 @@ class CalendarService:
     async def send_test_reminder(cls, db: Session, user: User) -> dict[str, Any]:
         """Sendet einen sofortigen Test-Erinnerungsdurchlauf für den eingeloggten Benutzer."""
         title = "Test-Termin: Server-Wartung & Backup-Check"
-        tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+        tz = _user_timezone(user)
+        tomorrow = datetime.now(tz) + timedelta(days=1)
         start_formatted = tomorrow.strftime("%d.%m.%Y um 14:00 Uhr")
         loc = "MSM Leitstand"
         time_hint = "in 1 Tag"
@@ -1921,11 +1932,13 @@ class CalendarService:
 
             event_id = str(ev.get("event_id", ""))
             vorkommen = str(ev.get("vorkommen") or "")
+            all_day = bool(ev.get("all_day"))
             reminders.append(
                 {
                     "event_id": event_id,
                     "title": ev.get("title", "Termin"),
-                    "start": start_dt.strftime("%d.%m.%Y um %H:%M Uhr"),
+                    "start": _format_reminder_time(start_dt, user=user, all_day=all_day),
+                    "start_iso": _iso_utc(start_dt),
                     "location": ev.get("location", ""),
                     "time_hint": time_hint,
                     "vorkommen": vorkommen,

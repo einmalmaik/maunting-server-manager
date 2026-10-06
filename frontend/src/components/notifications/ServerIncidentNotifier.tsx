@@ -40,6 +40,7 @@ interface CalendarDueReminder {
   event_id: string
   title: string
   start: string
+  start_iso?: string
   location: string
   time_hint: string
   key: string
@@ -268,10 +269,14 @@ export function ServerIncidentNotifier() {
               seenRemindersRef.current.add(rem.key)
               updatedReminders = true
 
+              const startText = rem.start_iso
+                ? new Date(rem.start_iso).toLocaleString(i18n.language || 'de-DE', { dateStyle: 'short', timeStyle: 'short' })
+                : rem.start
+
               // Push-Benachrichtigung (OS Windows / Android)
               void sendeGeraeteBenachrichtigung({
                 titel: t('notifications.reminderTitle', { wann: rem.time_hint }),
-                text: t('notifications.reminderText', { titel: rem.title, start: rem.start }),
+                text: t('notifications.reminderText', { titel: rem.title, start: startText }),
               })
 
               // Pop-up Toast im Interface
