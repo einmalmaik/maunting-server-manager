@@ -34,7 +34,6 @@ object ApkInstaller {
 
 
         // 1. Primär: PackageInstaller.Session
-        var session: PackageInstaller.Session? = null
         try {
             val packageInstaller = context.packageManager.packageInstaller
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
@@ -49,44 +48,47 @@ object ApkInstaller {
             }
 
             val sessionId = packageInstaller.createSession(params)
-            session = packageInstaller.openSession(sessionId)
+            val session = packageInstaller.openSession(sessionId)
 
-            FileInputStream(apkFile).use { input ->
-                session.openWrite("base.apk", 0, apkFile.length()).use { output ->
-                    input.copyTo(output)
-                    session.fsync(output)
-                }
-            }
-
-            val intent = Intent(context, InstallStatusReceiver::class.java).apply {
-                action = ACTION_INSTALL_STATUS
-                putExtra("apk_path", apkPath)
-            }
-
-            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            } else {
-                PendingIntent.FLAG_UPDATE_CURRENT
-            }
-
-            val pendingIntent = PendingIntent.getBroadcast(
-                context,
-                sessionId,
-                intent,
-                flags
-            )
-
-            session.commit(pendingIntent.intentSender)
-            session.close()
-            session = null
-            Log.i(TAG, "PackageInstaller Session $sessionId erfolgreich initiiert.")
-            return true
-        } catch (e: Exception) {
             try {
-                session?.abandon()
-            } catch (abandonEx: Exception) {
-                Log.w(TAG, "Konnte abgebrochene Session nicht verwerfen: ${abandonEx.message}")
+                FileInputStream(apkFile).use { input ->
+                    session.openWrite("base.apk", 0, apkFile.length()).use { output ->
+                        input.copyTo(output)
+                        session.fsync(output)
+                    }
+                }
+
+                val intent = Intent(context, InstallStatusReceiver::class.java).apply {
+                    action = ACTION_INSTALL_STATUS
+                    putExtra("apk_path", apkPath)
+                }
+
+                val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                } else {
+                    PendingIntent.FLAG_UPDATE_CURRENT
+                }
+
+                val pendingIntent = PendingIntent.getBroadcast(
+                    context,
+                    sessionId,
+                    intent,
+                    flags
+                )
+
+                session.commit(pendingIntent.intentSender)
+                session.close()
+                Log.i(TAG, "PackageInstaller Session $sessionId erfolgreich initiiert.")
+                return true
+            } catch (sessionEx: Exception) {
+                try {
+                    session.abandon()
+                } catch (abandonEx: Exception) {
+                    Log.w(TAG, "Konnte abgebrochene Session nicht verwerfen: ${abandonEx.message}")
+                }
+                throw sessionEx
             }
+        } catch (e: Exception) {
             Log.w(TAG, "PackageInstaller fehlgeschlagen, weiche auf FileProvider aus: ${e.message}")
         }
 
