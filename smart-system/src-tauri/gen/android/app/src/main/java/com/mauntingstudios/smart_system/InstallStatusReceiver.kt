@@ -62,6 +62,9 @@ class InstallStatusReceiver : BroadcastReceiver() {
                     // Stille Bereinigung
                 }
             }
+            PackageInstaller.STATUS_FAILURE_ABORTED -> {
+                Log.i("InstallStatusReceiver", "Update vom Nutzer abgebrochen (STATUS_FAILURE_ABORTED).")
+            }
             else -> {
                 Log.w("InstallStatusReceiver", "PackageInstaller Status: $status ($message). Versuche Fallback auf FileProvider...")
                 if (!apkPath.isNullOrEmpty()) {

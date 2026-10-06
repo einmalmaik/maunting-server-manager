@@ -34,6 +34,7 @@ object ApkInstaller {
 
 
         // 1. Primär: PackageInstaller.Session
+        var session: PackageInstaller.Session? = null
         try {
             val packageInstaller = context.packageManager.packageInstaller
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
@@ -48,10 +49,10 @@ object ApkInstaller {
             }
 
             val sessionId = packageInstaller.createSession(params)
-            val session = packageInstaller.openSession(sessionId)
+            session = packageInstaller.openSession(sessionId)
 
             FileInputStream(apkFile).use { input ->
-                session.openWrite("package_apk", 0, apkFile.length()).use { output ->
+                session.openWrite("base.apk", 0, apkFile.length()).use { output ->
                     input.copyTo(output)
                     session.fsync(output)
                 }
@@ -77,9 +78,15 @@ object ApkInstaller {
 
             session.commit(pendingIntent.intentSender)
             session.close()
+            session = null
             Log.i(TAG, "PackageInstaller Session $sessionId erfolgreich initiiert.")
             return true
         } catch (e: Exception) {
+            try {
+                session?.abandon()
+            } catch (abandonEx: Exception) {
+                Log.w(TAG, "Konnte abgebrochene Session nicht verwerfen: ${abandonEx.message}")
+            }
             Log.w(TAG, "PackageInstaller fehlgeschlagen, weiche auf FileProvider aus: ${e.message}")
         }
 
