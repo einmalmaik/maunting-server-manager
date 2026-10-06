@@ -167,9 +167,15 @@ class AiProviderCreate(BaseModel):
     ethics_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     ethics_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     ethics_cache_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    memory_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    memory_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    memory_cache_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     standard_enabled: bool = False
     worker_enabled: bool = False
     ethics_enabled: bool = False
+    # Ohne Angabe entscheidet das Modell: eingetragen heisst eingeschaltet
+    # (Gedaechtnis v2, Stufe 3 — "waehlt das Modell aus und fertig").
+    memory_enabled: bool | None = None
     transcription_enabled: bool = False
     realtime_enabled: bool = False
     # Nur fuer einen Sprachzugang von Bedeutung; bei einem Chatzugang bleibt das
@@ -209,6 +215,9 @@ class AiProviderCreate(BaseModel):
     ethics_model: Modellkennung = Field(default=None, max_length=256)
     ethics_reasoning_effort: Stufenwort = Field(default=None, max_length=16)
     ethics_mode: str = Field(default="auto", max_length=32)
+    # Das Modell fuer das Gedaechtnis: liest Gespraeche und Importe. Leer
+    # heisst: das eines anderen Zugangs, sonst das Standardmodell.
+    memory_model: Modellkennung = Field(default=None, max_length=256)
     azure_resource_name: Ressourcenname = Field(default=None, max_length=64)
     # Deaktiviert standardmäßige Sicherheitsfilter (z. B. Google AI Studio BLOCK_NONE)
     disable_safety: bool = False
@@ -234,9 +243,13 @@ class AiProviderUpdate(BaseModel):
     ethics_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     ethics_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     ethics_cache_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    memory_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    memory_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    memory_cache_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     standard_enabled: bool | None = None
     worker_enabled: bool | None = None
     ethics_enabled: bool | None = None
+    memory_enabled: bool | None = None
     transcription_enabled: bool | None = None
     realtime_enabled: bool | None = None
     # Wie beim Preis eine Zeile darueber gibt es hier zwei verschiedene Dinge,
@@ -269,6 +282,7 @@ class AiProviderUpdate(BaseModel):
     ethics_model: Modellkennung = Field(default=None, max_length=256)
     ethics_reasoning_effort: Stufenwort = Field(default=None, max_length=16)
     ethics_mode: str | None = Field(default=None, max_length=32)
+    memory_model: Modellkennung = Field(default=None, max_length=256)
     # Wie die Felder darueber: „nicht mitgeschickt" laesst den Namen stehen,
     # ausdrueckliches ``null`` (bzw. leeres Feld) nimmt ihn zurueck. Der
     # Unterschied zaehlt hier doppelt — ein geaenderter Ressourcenname loescht
@@ -314,11 +328,13 @@ class AiProviderResponse(BaseModel):
     standard_enabled: bool = False
     worker_enabled: bool = False
     ethics_enabled: bool = False
+    memory_enabled: bool = False
     transcription_enabled: bool = False
     realtime_enabled: bool = False
     standard_cache_price_micro_usd_per_million: int | None = None
     worker_cache_price_micro_usd_per_million: int | None = None
     ethics_cache_price_micro_usd_per_million: int | None = None
+    memory_cache_price_micro_usd_per_million: int | None = None
     #: Die Worker-Rolle des Zugangs, roh aus der Zeile. ``None`` heisst „keine
     #: Worker-Rolle konfiguriert" (Ein-Modell-Betrieb). Nur der Betreiber sieht
     #: das — `AiProviderAvailableResponse` traegt es bewusst nicht: der Kunde
@@ -328,6 +344,7 @@ class AiProviderResponse(BaseModel):
     ethics_model: str | None = None
     ethics_reasoning_effort: str | None = None
     ethics_mode: str = "auto"
+    memory_model: str | None = None
     #: Der Azure-Ressourcenname, roh aus der Zeile — wie `default_voice`
     #: ungeprueft gelesen und aus demselben Grund: eine 500 beim blossen
     #: Anzeigen waere die schlechteste Art, dem Betreiber einen Formfehler
@@ -349,6 +366,8 @@ class AiProviderResponse(BaseModel):
     ethics_input_price_micro_usd_per_million: int | None = None
     ethics_output_price_micro_usd_per_million: int | None = None
     ethics_cache_price_micro_usd_per_million: int | None = None
+    memory_input_price_micro_usd_per_million: int | None = None
+    memory_output_price_micro_usd_per_million: int | None = None
     updated_at: datetime
 
 

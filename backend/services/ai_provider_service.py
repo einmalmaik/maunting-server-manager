@@ -146,6 +146,15 @@ def fuer_ethics(provider: AiProvider) -> bool:
     )
 
 
+def fuer_gedaechtnis(provider: AiProvider) -> bool:
+    return bool(
+        provider.enabled
+        and spricht(provider, ai_provider_registry.CHAT)
+        and bool(getattr(provider, "memory_enabled", False))
+        and (getattr(provider, "memory_model", None) or "").strip()
+    )
+
+
 def _hint(secret: str) -> str:
     return "********" + secret[-4:] if len(secret) >= 4 else "********"
 
@@ -350,6 +359,14 @@ def _assert_worker_rolle(
 
 
 ETHICS_MODI = ("off", "auto", "always", "critical")
+
+#: Die Preise der vier Textrollen — Standard, Worker, Ethik, Gedächtnis —, je
+#: Eingabe, Ausgabe und Cache.
+ROLLENPREISFELDER = tuple(
+    f"{rolle}_{art}_price_micro_usd_per_million"
+    for rolle in ("standard", "worker", "ethics", "memory")
+    for art in ("input", "output", "cache")
+)
 
 #: Die Preisfelder der Realtime-API — Token, getrennt nach Text und Audio.
 REALTIME_PREISFELDER = (
@@ -619,9 +636,13 @@ def create_provider(
     ethics_input_price_micro_usd_per_million: int | None = None,
     ethics_output_price_micro_usd_per_million: int | None = None,
     ethics_cache_price_micro_usd_per_million: int | None = None,
+    memory_input_price_micro_usd_per_million: int | None = None,
+    memory_output_price_micro_usd_per_million: int | None = None,
+    memory_cache_price_micro_usd_per_million: int | None = None,
     standard_enabled: bool | None = None,
     worker_enabled: bool | None = None,
     ethics_enabled: bool | None = None,
+    memory_enabled: bool | None = None,
     transcription_enabled: bool | None = None,
     realtime_enabled: bool | None = None,
     # Optional: ohne Stimme gibt es über diesen Zugang keinen Sprachmodus. Eine
@@ -656,6 +677,11 @@ def create_provider(
     ethics_model: str | None = None,
     ethics_reasoning_effort: str | None = None,
     ethics_mode: str = "auto",
+    # Optional: das Modell, das Gespräche und Importe für das Gedächtnis liest.
+    # Ohne es gilt das eines anderen Zugangs, sonst das Standardmodell. Braucht
+    # kein Standardmodell am selben Zugang: gewählt wird es über alle Zugänge
+    # (`ai_gedaechtnis_schreiber.gedaechtnis_anbieter`).
+    memory_model: str | None = None,
     # Optional: der Name der Azure-Ressource dieses Zugangs. Nur Anbieter mit
     # ``ressource_noetig`` brauchen ihn; bei allen anderen bleibt er leer und
     # unbeachtet. Er wird trotzdem **nicht** gegen `provider_kind` geprüft —
@@ -680,11 +706,13 @@ def create_provider(
     ethikmodell, ethikstufe, ethikmodus = _assert_ethics_rolle(
         ethics_model, ethics_reasoning_effort, ethics_mode, modell
     )
+    gedaechtnismodell = (memory_model or "").strip() or None
     kind = _assert_kind(provider_kind)
     automatic_prices: dict[str, object] = {
         "default_model": modell,
         "worker_model": arbeitsmodell,
         "ethics_model": ethikmodell,
+        "memory_model": gedaechtnismodell,
         "standard_input_price_micro_usd_per_million": standard_input_price_micro_usd_per_million,
         "standard_output_price_micro_usd_per_million": standard_output_price_micro_usd_per_million,
         "standard_cache_price_micro_usd_per_million": standard_cache_price_micro_usd_per_million,
@@ -694,6 +722,9 @@ def create_provider(
         "ethics_input_price_micro_usd_per_million": ethics_input_price_micro_usd_per_million,
         "ethics_output_price_micro_usd_per_million": ethics_output_price_micro_usd_per_million,
         "ethics_cache_price_micro_usd_per_million": ethics_cache_price_micro_usd_per_million,
+        "memory_input_price_micro_usd_per_million": memory_input_price_micro_usd_per_million,
+        "memory_output_price_micro_usd_per_million": memory_output_price_micro_usd_per_million,
+        "memory_cache_price_micro_usd_per_million": memory_cache_price_micro_usd_per_million,
     }
     ai_model_price_service.fill_missing_role_prices(kind, automatic_prices)
     schluessel = _assert_key_passt(kind, operator_api_key)
@@ -720,9 +751,13 @@ def create_provider(
         ethics_input_price_micro_usd_per_million=automatic_prices["ethics_input_price_micro_usd_per_million"],
         ethics_output_price_micro_usd_per_million=automatic_prices["ethics_output_price_micro_usd_per_million"],
         ethics_cache_price_micro_usd_per_million=automatic_prices["ethics_cache_price_micro_usd_per_million"],
+        memory_input_price_micro_usd_per_million=automatic_prices["memory_input_price_micro_usd_per_million"],
+        memory_output_price_micro_usd_per_million=automatic_prices["memory_output_price_micro_usd_per_million"],
+        memory_cache_price_micro_usd_per_million=automatic_prices["memory_cache_price_micro_usd_per_million"],
         standard_enabled=bool(modell) if standard_enabled is None else bool(standard_enabled and modell),
         worker_enabled=bool(arbeitsmodell) if worker_enabled is None else bool(worker_enabled and arbeitsmodell),
         ethics_enabled=bool(ethikmodell) if ethics_enabled is None else bool(ethics_enabled and ethikmodell),
+        memory_enabled=bool(gedaechtnismodell) if memory_enabled is None else bool(memory_enabled and gedaechtnismodell),
         transcription_enabled=bool(gehoer) if transcription_enabled is None else bool(transcription_enabled and gehoer),
         realtime_enabled=bool((realtime_model or "").strip()) if realtime_enabled is None else bool(realtime_enabled and (realtime_model or "").strip()),
         default_voice=stimme,
@@ -742,6 +777,7 @@ def create_provider(
         ethics_model=ethikmodell,
         ethics_reasoning_effort=ethikstufe,
         ethics_mode=ethikmodus,
+        memory_model=gedaechtnismodell,
         azure_resource_name=ressource,
         disable_safety=bool(disable_safety),
     )
@@ -838,23 +874,19 @@ def update_provider(
         values["ethics_mode"] if "ethics_mode" in values else provider.ethics_mode,
         new_default_model,
     )
+    new_memory_model = (
+        (values["memory_model"] or "").strip() or None
+        if "memory_model" in values
+        else provider.memory_model
+    )
     price_values: dict[str, object] = {
         "default_model": new_default_model,
         "worker_model": new_worker_model,
         "ethics_model": new_ethics_model,
+        "memory_model": new_memory_model,
         **{
             field: values[field] if field in values else getattr(provider, field)
-            for field in (
-                "standard_input_price_micro_usd_per_million",
-                "standard_output_price_micro_usd_per_million",
-                "standard_cache_price_micro_usd_per_million",
-                "worker_input_price_micro_usd_per_million",
-                "worker_output_price_micro_usd_per_million",
-                "worker_cache_price_micro_usd_per_million",
-                "ethics_input_price_micro_usd_per_million",
-                "ethics_output_price_micro_usd_per_million",
-                "ethics_cache_price_micro_usd_per_million",
-            )
+            for field in ROLLENPREISFELDER
         },
     }
     ai_model_price_service.fill_missing_role_prices(provider.provider_kind, price_values)
@@ -868,10 +900,12 @@ def update_provider(
     provider.ethics_model = new_ethics_model
     provider.ethics_reasoning_effort = new_ethics_effort
     provider.ethics_mode = new_ethics_mode
+    provider.memory_model = new_memory_model
     for flag, model in (
         ("standard_enabled", new_default_model),
         ("worker_enabled", new_worker_model),
         ("ethics_enabled", new_ethics_model),
+        ("memory_enabled", new_memory_model),
         ("transcription_enabled", new_transcription_model),
     ):
         if flag in values:
@@ -920,17 +954,7 @@ def update_provider(
         provider.token_price_micro_usd_per_million = values[
             "token_price_micro_usd_per_million"
         ]
-    for field in (
-        "standard_input_price_micro_usd_per_million",
-        "standard_output_price_micro_usd_per_million",
-        "standard_cache_price_micro_usd_per_million",
-        "worker_input_price_micro_usd_per_million",
-        "worker_output_price_micro_usd_per_million",
-        "worker_cache_price_micro_usd_per_million",
-        "ethics_input_price_micro_usd_per_million",
-        "ethics_output_price_micro_usd_per_million",
-        "ethics_cache_price_micro_usd_per_million",
-    ):
+    for field in ROLLENPREISFELDER:
         if field in values or price_values[field] != getattr(provider, field):
             setattr(provider, field, price_values[field])
     if clear_operator_api_key:

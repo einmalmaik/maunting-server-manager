@@ -57,7 +57,12 @@ from database import SessionLocal
 from models import AiConversation, AiMemoryEntry, AiMessage, AiProvider, AiRun, Server, Team, User
 from models.dis_text import vorab_entschluesselt
 from services import ai_lage, ai_limit_service, ai_memory_service, ai_reasoning, permission_service
-from services.ai_provider_service import anbieter_ohne_auswahl, fuer_chat, fuer_worker, resolve_api_key
+from services.ai_provider_service import (
+    anbieter_ohne_auswahl,
+    fuer_chat,
+    fuer_gedaechtnis,
+    resolve_api_key,
+)
 from services.ai_redaction import redact_sensitive_text
 from services.dis_client import DisDecryptionError, DisSidecarError
 from services.ai_usage_service import (
@@ -1019,9 +1024,12 @@ def _bereiche(db: Session, user: User, auftrag: Auftrag, persoenlich: bool) -> l
     return bereiche
 
 
-def _bestand(db: Session, bereiche: list[Bereich], auftrag: Auftrag) -> list[Kandidat]:
-    """Was der Schreiber vom Bestand sieht: je Bereich das Naheliegende."""
-    texte = [zeile.text for zeile in auftrag.zeilen if zeile.nummer]
+def _bestand(db: Session, bereiche: list[Bereich], texte: list[str]) -> list[Kandidat]:
+    """Was der Schreiber vom Bestand sieht: je Bereich das, was den Texten am nächsten ist.
+
+    Die Texte sind die neuen Nachrichten eines Ausschnitts oder die Absätze
+    eines importierten Teils (`ai_memory_import_service`).
+    """
     kandidaten: list[Kandidat] = []
     for bereich in bereiche:
         # Feste Ordnung: derselbe Bestand ergibt denselben Text, und die
@@ -1080,18 +1088,39 @@ def _themen(db: Session, bereiche: list[Bereich]) -> list[str]:
     return sorted(set(ai_memory_service.themennamen(db, paare).values()), key=str.casefold)
 
 
-def _anbieter(
+def _mit_gedaechtnismodell(
+    provider: AiProvider,
+) -> tuple[AiProvider, str, tuple[int | None, int | None, int | None]]:
+    return provider, str(provider.memory_model).strip(), (
+        provider.memory_input_price_micro_usd_per_million,
+        provider.memory_output_price_micro_usd_per_million,
+        provider.memory_cache_price_micro_usd_per_million,
+    )
+
+
+def gedaechtnis_anbieter(
     db: Session, user: User, bevorzugt: int | None
 ) -> tuple[AiProvider, str, tuple[int | None, int | None, int | None]] | None:
-    """Zugang, Modell und Rollenpreise: das Arbeitsmodell, sonst das Chatmodell.
+    """Zugang, Modell und Rollenpreise für alles, was das Gedächtnis liest.
 
-    Der Zugang der letzten Antwort im Ausschnitt, sonst der am Konto gewählte,
-    sonst `anbieter_ohne_auswahl`. Das Lesen eines Gesprächs ist Arbeit, kein
-    Gespräch — deshalb das Worker-Modell, wo eines eingerichtet ist.
+    Schreiber, Altbestand und Import nehmen denselben Weg — der Reihe nach
+    (Betreiberentscheid 07.10.2026, so einfach wie möglich):
+
+    1. das Gedächtnismodell des Zugangs, mit dem gesprochen wird: der der
+       letzten Antwort im Ausschnitt, sonst der am Konto gewählte, sonst
+       `anbieter_ohne_auswahl`;
+    2. sonst das Gedächtnismodell eines anderen aktiven Zugangs, der einen
+       Betreiberschlüssel hat oder keinen braucht, der älteste zuerst — wer es
+       nur bei Google einrichtet, dessen Gedächtnis liest auch Gespräche, die
+       über OpenAI liefen;
+    3. sonst das Standardmodell des Zugangs aus 1. Ohne eigene Einrichtung
+       läuft das Gedächtnis also weiter.
+
+    Bis 07.10. stand an der Stelle von 1 und 2 das Worker-Modell. Ein eigener
+    Platz sagt, was er tut; der Worker arbeitet an Aufträgen.
     """
-    kandidaten = [bevorzugt, getattr(user, "ai_provider_id", None)]
     provider = None
-    for kennung in kandidaten:
+    for kennung in (bevorzugt, getattr(user, "ai_provider_id", None)):
         if kennung:
             gefunden = db.get(AiProvider, kennung)
             if gefunden is not None and fuer_chat(gefunden):
@@ -1099,14 +1128,24 @@ def _anbieter(
                 break
     if provider is None:
         provider = anbieter_ohne_auswahl(db, user)
+    if provider is not None and fuer_gedaechtnis(provider):
+        return _mit_gedaechtnismodell(provider)
+    for kandidat in (
+        db.query(AiProvider)
+        .filter(
+            AiProvider.enabled.is_(True),
+            AiProvider.memory_enabled.is_(True),
+            AiProvider.memory_model.isnot(None),
+        )
+        .order_by(AiProvider.id.asc())
+        .all()
+    ):
+        if fuer_gedaechtnis(kandidat) and (
+            not kandidat.requires_api_key or kandidat.operator_api_key_encrypted
+        ):
+            return _mit_gedaechtnismodell(kandidat)
     if provider is None:
         return None
-    if fuer_worker(provider):
-        return provider, str(provider.worker_model), (
-            provider.worker_input_price_micro_usd_per_million,
-            provider.worker_output_price_micro_usd_per_million,
-            provider.worker_cache_price_micro_usd_per_million,
-        )
     return provider, str(provider.default_model), (
         provider.standard_input_price_micro_usd_per_million,
         provider.standard_output_price_micro_usd_per_million,
@@ -1219,8 +1258,8 @@ def _vorbereiten(auftrag: Auftrag, jetzt: datetime) -> _Vorbereitet | Ergebnis:
         bereiche = _bereiche(db, user, auftrag, persoenlich)
         if not bereiche:
             return Ergebnis("leer")
-        kandidaten = _bestand(db, bereiche, auftrag)
-        gewaehlt = _anbieter(db, user, auftrag.provider_id)
+        kandidaten = _bestand(db, bereiche, [z.text for z in auftrag.zeilen if z.nummer])
+        gewaehlt = gedaechtnis_anbieter(db, user, auftrag.provider_id)
         if gewaehlt is None:
             return Ergebnis("spaeter")
         provider, modell, preise = gewaehlt
@@ -1712,6 +1751,7 @@ __all__ = [
     "aus_mitschrift",
     "durchgang",
     "faellige_starten",
+    "gedaechtnis_anbieter",
     "nach_dem_lauf",
     "schreiben",
     "starten",

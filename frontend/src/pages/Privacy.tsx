@@ -142,6 +142,10 @@ export function Privacy({ zurueck }: { zurueck?: string } = {}) {
           // und bei Sprachgespraechen aus einer Mitschrift, die sonst nirgends
           // steht. Deshalb ein eigener Punkt direkt hinter der Zustimmung.
           t('privacyPolicy.sections.ai.items.memoryReading'),
+          // Gedaechtnis v2, Stufe 3 (10/2026): der Import liest mit dem
+          // Gedaechtnis-Modell statt mit einem Parser im Panel. Der eingefuegte
+          // Text geht damit an einen Anbieter, vorher ging er nirgends hin.
+          t('privacyPolicy.sections.ai.items.memoryImport'),
           t('privacyPolicy.sections.ai.items.memorySearch'),
           t('privacyPolicy.sections.ai.items.attachments'),
           // Zielpunkt 17: der autonome Modus veraendert, wer eine Aktion

@@ -382,7 +382,7 @@ def _vorbereiten(identity: str, jetzt: datetime) -> _Vorbereitet | Umschrieb:
                 "Gedaechtnis-Altbestand: %s Zeilen nicht lesbar scope=%s", len(rows), rows[0].scope
             )
             return Umschrieb("unlesbar")
-        gewaehlt = schreiber._anbieter(db, zahler, None)
+        gewaehlt = schreiber.gedaechtnis_anbieter(db, zahler, None)
         if gewaehlt is None:
             return Umschrieb("spaeter")
         provider, modell, preise = gewaehlt

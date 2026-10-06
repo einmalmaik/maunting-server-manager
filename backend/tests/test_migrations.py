@@ -515,6 +515,65 @@ def test_gedaechtnis_schreiber_hin_und_zurueck(pg_wegwerf):
         settings.database_url = vorher
 
 
+# ── 20261007_01 — Gedächtnis v2: ein eigenes Modell ─────────────────────────
+
+
+def test_gedaechtnismodell_hin_und_zurueck(pg_wegwerf):
+    """Ein bestehender Zugang bekommt den Platz leer und ausgeschaltet.
+
+    Dann liest das Gedächtnis mit dem eines anderen Zugangs oder dem
+    Standardmodell weiter — das Update ändert nichts am laufenden Betrieb.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, inspect, text
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+
+    db_url = pg_wegwerf("gedaechtnis-modell")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    neue = {
+        "memory_model", "memory_enabled", "memory_input_price_micro_usd_per_million",
+        "memory_output_price_micro_usd_per_million", "memory_cache_price_micro_usd_per_million",
+    }
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+        command.downgrade(config, "20261006_02")
+        assert not neue & {s["name"] for s in inspect(engine).get_columns("ai_providers")}
+
+        with engine.begin() as conn:
+            # Von Hand statt über die Tabelle des Modells: die kennt den Platz
+            # schon und schriebe ihn mit, den es auf diesem Stand nicht gibt.
+            conn.execute(text(
+                "INSERT INTO ai_providers (id, name, provider_kind, default_model, enabled, "
+                "requires_api_key, created_at, updated_at) "
+                "VALUES (1, 'Bestand', 'openrouter', 'model-a', true, false, now(), now())"
+            ))
+        command.upgrade(config, "20261007_01")
+
+        assert neue <= {s["name"] for s in inspect(engine).get_columns("ai_providers")}
+        with engine.connect() as conn:
+            zeile = conn.execute(text(
+                "SELECT memory_model, memory_enabled, memory_input_price_micro_usd_per_million "
+                "FROM ai_providers"
+            )).one()
+        assert tuple(zeile) == (None, False, None)
+
+        command.downgrade(config, "20261006_02")
+        assert not neue & {s["name"] for s in inspect(engine).get_columns("ai_providers")}
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
+
 def test_jeder_erlaubte_zweck_passt_in_seine_spalte(db) -> None:
     """AGENTS.md 119: jeder Wert, den die Prüfung erlaubt, wird einmal gespeichert."""
     from datetime import datetime, timezone

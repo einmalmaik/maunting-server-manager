@@ -1,9 +1,10 @@
-import { ArrowLeft, Check, ClipboardCopy, ClipboardPaste, Download, Pencil } from 'lucide-react'
+import { ArrowLeft, Check, ClipboardCopy, ClipboardPaste, Download, Loader2, Pencil } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
   aiApi,
+  type AiMemoryImportItem,
   type AiMemoryImportPreview,
   type AiMemoryImportPreviewItem,
   type AiMemoryImportTarget,
@@ -24,19 +25,14 @@ import { toast } from '@/stores/toastStore'
 import { type AiKnowledgeScope, memoryScopeName, scopeServerId, scopeTeamId } from './knowledgeScope'
 import { memoryImportPrompt } from './memoryImportPrompt'
 
-/** Dasselbe Muster wie `AiMemoryImportItem.key` im Backend. */
-const SCHLUESSEL_RE = /^[A-Za-z0-9_.-]{1,64}$/
 const MAX_TEXT = 100_000
 const MAX_WERT = 2_000
-/** Die Reihenfolge der Abschnitte im Auszugs-Prompt; Unbekanntes kommt zuletzt. */
-const KATEGORIEN = ['demografie', 'vorlieben', 'soziales', 'projekte', 'anweisung', 'allgemein']
 
 interface Zeile {
   item: AiMemoryImportPreviewItem
-  key: string
-  value: string
+  text: string
   auswahl: boolean
-  /** Nur bei „ähnlich": statt eines eigenen Eintrags den bestehenden ersetzen. */
+  /** Nur mit Bestand: den bestehenden Eintrag ersetzen statt einen eigenen anzulegen. */
   ersetzen: boolean
 }
 
@@ -44,55 +40,48 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   scope: AiKnowledgeScope
-  /** Nach einem Import mit mindestens einem geschriebenen Eintrag. */
+  /** Nach einem Import mit mindestens einer geschriebenen Erinnerung. */
   onImported: () => void | Promise<void>
-}
-
-/** Schon wortgleich gespeichert — dann gibt es nichts zu übernehmen. */
-function istIdentisch(item: AiMemoryImportPreviewItem): boolean {
-  return item.status === 'exact_duplicate' && item.existing_value === item.value
 }
 
 /**
  * Was eine Zeile ans Backend schickt.
  *
- * „Ähnlich" legt standardmäßig einen **eigenen** Eintrag an und ersetzt nur
- * auf ausdrücklichen Wunsch — dieselbe Abwägung wie bei
- * `ai_memory_service.IMPORT_HINWEIS_AB`: ein fälschlich zusammengelegter Fakt ist
- * teurer als ein doppelter. Ein belegter Schlüssel wird ersetzt, solange der
- * Benutzer ihn nicht umbenennt; wer umbenennt, will einen neuen Eintrag.
+ * Schlägt das Modell vor, einen Eintrag zu ersetzen, ist das die Vorgabe:
+ * meist sind es Bruchstücke eines früheren Imports, die im neuen Satz
+ * aufgehen. Wer abwählt, legt einen eigenen Eintrag an.
  */
-function eintrag(zeile: Zeile): { key: string; value: string; replace_existing: boolean } {
-  const value = zeile.value.trim()
-  if (zeile.item.status === 'similar_existing' && zeile.ersetzen && zeile.item.existing_key) {
-    return { key: zeile.item.existing_key, value, replace_existing: true }
-  }
-  const key = zeile.key.trim()
+function eintrag(zeile: Zeile): AiMemoryImportItem {
+  const { item } = zeile
   return {
-    key,
-    value,
-    replace_existing: zeile.item.status === 'exact_duplicate' && key === zeile.item.key,
+    text: zeile.text.trim(),
+    titel: item.titel,
+    thema: item.thema,
+    art: item.art,
+    wichtigkeit: item.wichtigkeit,
+    ersetzt: zeile.ersetzen ? item.ersetzt.map(({ id, fassung }) => ({ id, fassung })) : [],
   }
 }
 
 function gueltig(zeile: Zeile): boolean {
-  const { key, value } = eintrag(zeile)
-  return SCHLUESSEL_RE.test(key) && value.length > 0 && value.length <= MAX_WERT
+  const text = zeile.text.trim()
+  return text.length > 0 && text.length <= MAX_WERT
 }
 
 /**
- * Memory Bridge: Erinnerungen aus ChatGPT, Gemini oder Claude übernehmen.
+ * Erinnerungen importieren: aus ChatGPT, Gemini oder Claude — oder aus einem
+ * eigenen Text, etwa Notizen oder einer Lebensgeschichte.
  *
  * Zwei Bildschirme statt eines Formulars: erst Prompt kopieren und Antwort
- * einfügen, dann aussuchen. Wenig Text, weil der Weg selbst schon fremd genug
- * ist — was nur bei Bedarf zählt (Prompt, Schlüssel, Beleg), liegt hinter
- * einem Klick. Auf dem Telefon füllt der Dialog den Bildschirm.
+ * einfügen, dann aussuchen. Den Text liest das Gedächtnis-Modell; dass er
+ * dafür einmal an den Anbieter geht, steht über dem Feld, bevor er abgeschickt
+ * wird. Die Vorschau ordnet nach Thema und schreibt nichts.
  *
  * Aus der Liste fällt heraus, worüber es nichts zu entscheiden gibt: Gesperrtes
- * (Zugangsdaten) und wortgleich Gespeichertes stehen nur als Zahl darüber.
+ * (Zugangsdaten) und schon Gespeichertes stehen nur als Zahl darüber.
  *
- * Geschrieben wird erst beim letzten Klick; die Vorschau selbst speichert
- * nichts. Das Ziel ist der Bereich, in dem der Knopf steht.
+ * Geschrieben wird erst beim letzten Klick. Das Ziel ist der Bereich, in dem
+ * der Knopf steht.
  */
 export function AiMemoryImportModal({ open, onOpenChange, scope, onImported }: Props) {
   const { t, i18n } = useTranslation()
@@ -125,26 +114,35 @@ export function AiMemoryImportModal({ open, onOpenChange, scope, onImported }: P
   }, [kopiert])
 
   const ausgewaehlt = useMemo(() => zeilen.filter((zeile) => zeile.auswahl), [zeilen])
-  const neue = ausgewaehlt.filter((zeile) => !eintrag(zeile).replace_existing).length
+  const ersetzend = ausgewaehlt.filter((zeile) => zeile.ersetzen && zeile.item.ersetzt.length > 0)
+  const neue = ausgewaehlt.length - ersetzend.length
+  // Wer ersetzt, kostet keinen Platz, und jeder weitere ersetzte Eintrag geht
+  // im ersten auf und macht einen frei — die Übernahme schreibt Ersetzungen
+  // deshalb zuerst.
+  const frei = ersetzend.reduce((summe, zeile) => summe + zeile.item.ersetzt.length - 1, 0)
   // `null` heißt unbegrenzt: dann ist nichts zu viel.
   const zuviel = vorschau && vorschau.available_slots !== null
-    ? Math.max(0, neue - vorschau.available_slots)
+    ? Math.max(0, neue - vorschau.available_slots - frei)
     : 0
   const ungueltig = ausgewaehlt.some((zeile) => !gueltig(zeile))
-  const gesperrt = zeilen.filter((zeile) => zeile.item.status === 'has_secret').length
-  const bekannt = zeilen.filter((zeile) => istIdentisch(zeile.item)).length
-  const waehlbar = zeilen
-    .map((zeile, index) => ({ zeile, index }))
-    .filter(({ zeile }) => zeile.item.status !== 'has_secret' && !istIdentisch(zeile.item))
-  const gruppen = KATEGORIEN
-    .map((kategorie) => ({
-      kategorie,
-      eintraege: waehlbar.filter(({ zeile }) => (
-        KATEGORIEN.includes(zeile.item.category) ? zeile.item.category : 'allgemein'
-      ) === kategorie),
-    }))
-    .filter((gruppe) => gruppe.eintraege.length > 0)
-  const alleGewaehlt = waehlbar.length > 0 && waehlbar.every(({ zeile }) => zeile.auswahl)
+  const alleGewaehlt = zeilen.length > 0 && zeilen.every((zeile) => zeile.auswahl)
+
+  // Nach Thema, gleich geschriebene zusammen; ohne Thema zuletzt.
+  const gruppen = useMemo(() => {
+    const nachThema = new Map<string, { name: string | null; eintraege: { zeile: Zeile; index: number }[] }>()
+    zeilen.forEach((zeile, index) => {
+      const name = zeile.item.thema?.trim() || null
+      const schluessel = name?.toLocaleLowerCase() ?? ''
+      const gruppe = nachThema.get(schluessel) ?? { name, eintraege: [] }
+      gruppe.eintraege.push({ zeile, index })
+      nachThema.set(schluessel, gruppe)
+    })
+    return [...nachThema.values()].sort((a, b) => {
+      if (a.name === null) return 1
+      if (b.name === null) return -1
+      return a.name.localeCompare(b.name, i18n.language)
+    })
+  }, [zeilen, i18n.language])
 
   const kopieren = async () => {
     try {
@@ -161,7 +159,9 @@ export function AiMemoryImportModal({ open, onOpenChange, scope, onImported }: P
     setBusy(true)
     try {
       const ergebnis = await aiApi.importMemoryPreview({ ...ziel, raw_text: text })
-      if (ergebnis.items.length === 0) {
+      const nichts = ergebnis.items.length === 0 && ergebnis.total_known === 0
+        && ergebnis.unread_parts === 0 && ergebnis.total_secrets_blocked === 0
+      if (nichts) {
         toast.info(t('ai.memory.import.nothingFound'))
         return
       }
@@ -169,10 +169,9 @@ export function AiMemoryImportModal({ open, onOpenChange, scope, onImported }: P
       setBearbeitet(null)
       setZeilen(ergebnis.items.map((item) => ({
         item,
-        key: item.key,
-        value: item.value,
-        auswahl: item.status === 'new' || item.status === 'similar_existing',
-        ersetzen: false,
+        text: item.text,
+        auswahl: true,
+        ersetzen: item.ersetzt.length > 0,
       })))
     } catch (error: unknown) {
       toast.error(error instanceof SanitizedApiError ? error.message : t('ai.memory.import.failed'))
@@ -223,24 +222,21 @@ export function AiMemoryImportModal({ open, onOpenChange, scope, onImported }: P
 
   const alleUmschalten = () => {
     const auswahl = !alleGewaehlt
-    const indizes = new Set(waehlbar.map(({ index }) => index))
-    setZeilen((vorher) => vorher.map((zeile, i) => (indizes.has(i) ? { ...zeile, auswahl } : zeile)))
+    setZeilen((vorher) => vorher.map((zeile) => ({ ...zeile, auswahl })))
   }
 
   const zeileAnzeigen = (zeile: Zeile, index: number) => {
     const { item } = zeile
     const offen = bearbeitet === index
-    const schluesselFalsch = zeile.auswahl && !zeile.ersetzen && !SCHLUESSEL_RE.test(zeile.key.trim())
-    const ersetzt = zeile.auswahl && eintrag(zeile).replace_existing
+    const ersetzt = zeile.auswahl && zeile.ersetzen && item.ersetzt.length > 0
+    const [erstes, ...weitere] = item.ersetzt
     return (
       <li
-        key={`${item.key}-${index}`}
+        key={index}
         className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 transition-colors ${
-          schluesselFalsch
-            ? 'border-status-destructive/60 bg-primary/5'
-            : zeile.auswahl
-              ? 'border-primary/40 bg-primary/5'
-              : 'border-outline-variant/30 bg-surface-container-lowest/60'
+          zeile.auswahl
+            ? 'border-primary/40 bg-primary/5'
+            : 'border-outline-variant/30 bg-surface-container-lowest/60'
         }`}
       >
         {/* Der Rand um das Kästchen vergrößert die Trefferfläche auf Fingerbreite. */}
@@ -249,61 +245,37 @@ export function AiMemoryImportModal({ open, onOpenChange, scope, onImported }: P
             checked={zeile.auswahl}
             disabled={busy}
             onCheckedChange={(checked) => aendern(index, { auswahl: checked })}
-            aria-label={t('ai.memory.import.select', { key: item.key })}
+            aria-label={t('ai.memory.import.select', { title: item.titel ?? zeile.text.slice(0, 40) })}
           />
         </label>
 
         <div className="min-w-0 flex-1 space-y-1.5">
+          {item.titel && <p className="break-words text-xs font-semibold text-on-surface">{item.titel}</p>}
           {offen ? (
-            <div className="space-y-2">
-              <textarea
-                className="msm-input min-h-[4.5rem] text-sm"
-                maxLength={MAX_WERT}
-                value={zeile.value}
-                disabled={busy}
-                autoFocus
-                onChange={(event) => aendern(index, { value: event.target.value })}
-                aria-label={t('ai.memory.import.valueLabel')}
-              />
-              <input
-                className="msm-input font-mono text-xs"
-                maxLength={64}
-                value={zeile.ersetzen && item.existing_key ? item.existing_key : zeile.key}
-                disabled={busy || zeile.ersetzen}
-                aria-invalid={schluesselFalsch}
-                onChange={(event) => aendern(index, { key: event.target.value })}
-                aria-label={t('ai.memory.import.keyLabel')}
-              />
-              {item.evidence && (
-                <p className="break-words text-label-sm italic text-on-surface-variant/80">
-                  {t('ai.memory.import.evidence', { text: item.evidence })}
-                </p>
-              )}
-            </div>
+            <textarea
+              className="msm-input min-h-[4.5rem] text-sm"
+              maxLength={MAX_WERT}
+              value={zeile.text}
+              disabled={busy}
+              autoFocus
+              onChange={(event) => aendern(index, { text: event.target.value })}
+              aria-label={t('ai.memory.import.valueLabel')}
+            />
           ) : (
             <button
               type="button"
               className="block w-full break-words text-left text-sm text-on-surface"
               onClick={() => setBearbeitet(index)}
             >
-              {zeile.value}
+              {zeile.text}
             </button>
           )}
-          {schluesselFalsch && (
-            <p className="text-label-sm text-status-destructive">{t('ai.memory.import.invalidKey')}</p>
-          )}
 
-          {item.status === 'exact_duplicate' && (
-            <p className="break-words text-xs text-on-surface-variant">
-              {item.existing_value === null
-                ? t('ai.memory.import.previousUnreadable')
-                : t('ai.memory.import.previous', { value: item.existing_value })}
-            </p>
-          )}
-          {item.status === 'similar_existing' && item.existing_value !== null && (
+          {erstes && (
             <div className="flex flex-wrap items-center gap-2 text-xs text-on-surface-variant">
               <span className="min-w-0 break-words">
-                {t('ai.memory.import.similarTo', { value: item.existing_value })}
+                {t('ai.memory.import.replacesText', { value: erstes.text })}
+                {weitere.length > 0 && ` ${t('ai.memory.import.replacesMore', { count: weitere.length })}`}
               </span>
               {zeile.auswahl && (
                 <button
@@ -326,9 +298,6 @@ export function AiMemoryImportModal({ open, onOpenChange, scope, onImported }: P
 
         <div className="flex shrink-0 items-center gap-1">
           {ersetzt && <Badge variant="warning">{t('ai.memory.import.replaces')}</Badge>}
-          {item.status === 'similar_existing' && !ersetzt && (
-            <Badge variant="info">{t('ai.memory.import.similar')}</Badge>
-          )}
           <Button
             type="button"
             size="sm"
@@ -396,6 +365,7 @@ export function AiMemoryImportModal({ open, onOpenChange, scope, onImported }: P
                     </Button>
                   )}
                 </div>
+                <p className="text-xs text-on-surface-variant">{t('ai.memory.import.providerNotice')}</p>
                 <textarea
                   className="msm-input min-h-[9rem] font-mono text-xs"
                   maxLength={MAX_TEXT}
@@ -411,20 +381,27 @@ export function AiMemoryImportModal({ open, onOpenChange, scope, onImported }: P
             <section className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-semibold text-on-surface">
-                  {t('ai.memory.import.found', { count: waehlbar.length })}
+                  {t('ai.memory.import.found', { count: zeilen.length })}
                 </p>
-                {waehlbar.length > 1 && (
+                {zeilen.length > 1 && (
                   <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={alleUmschalten}>
                     {alleGewaehlt ? t('ai.memory.import.selectNone') : t('ai.memory.import.selectAll')}
                   </Button>
                 )}
               </div>
 
-              {(gesperrt > 0 || bekannt > 0 || !vorschau.memory_enabled
-                || vorschau.total_detected > vorschau.items.length) && (
+              {(vorschau.total_secrets_blocked > 0 || vorschau.total_known > 0 || vorschau.unread_parts > 0
+                || !vorschau.memory_enabled || vorschau.total_detected > vorschau.items.length) && (
                 <ul className="space-y-1 text-xs text-on-surface-variant">
-                  {gesperrt > 0 && <li>{t('ai.memory.import.blocked', { count: gesperrt })}</li>}
-                  {bekannt > 0 && <li>{t('ai.memory.import.known', { count: bekannt })}</li>}
+                  {vorschau.total_secrets_blocked > 0 && (
+                    <li>{t('ai.memory.import.blocked', { count: vorschau.total_secrets_blocked })}</li>
+                  )}
+                  {vorschau.total_known > 0 && (
+                    <li>{t('ai.memory.import.known', { count: vorschau.total_known })}</li>
+                  )}
+                  {vorschau.unread_parts > 0 && (
+                    <li className="text-status-warning">{t('ai.memory.import.unread', { count: vorschau.unread_parts })}</li>
+                  )}
                   {vorschau.total_detected > vorschau.items.length && (
                     <li>{t('ai.memory.import.truncated', { found: vorschau.total_detected, max: vorschau.items.length })}</li>
                   )}
@@ -433,10 +410,10 @@ export function AiMemoryImportModal({ open, onOpenChange, scope, onImported }: P
               )}
 
               {gruppen.map((gruppe) => (
-                <div key={gruppe.kategorie} className="space-y-2">
+                <div key={gruppe.name ?? ''} className="space-y-2">
                   {gruppen.length > 1 && (
                     <p className="text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">
-                      {t(`ai.memory.import.categories.${gruppe.kategorie}`)}
+                      {gruppe.name ?? t('ai.memory.import.noTopic')}
                     </p>
                   )}
                   <ul className="space-y-2">
@@ -460,7 +437,8 @@ export function AiMemoryImportModal({ open, onOpenChange, scope, onImported }: P
                 {t('common.cancel')}
               </Button>
               <Button type="button" disabled={busy || !rohtext.trim()} onClick={() => void pruefen()}>
-                {t('ai.memory.import.analyze')}
+                {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                {busy ? t('ai.memory.import.reading') : t('ai.memory.import.analyze')}
               </Button>
             </>
           ) : (

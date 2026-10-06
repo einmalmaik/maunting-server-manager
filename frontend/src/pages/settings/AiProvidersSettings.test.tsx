@@ -729,6 +729,46 @@ describe('AiProvidersSettings', () => {
     })
   })
 
+  describe('Gedächtnis', () => {
+    it('schaltet mit der Modellwahl ein und speichert Modell und Schalter', async () => {
+      // „Wählt das Modell aus und fertig“ (Betreiber, 07.10.2026): kein
+      // zweiter Klick auf den Schalter, damit das Gewählte auch gilt.
+      render(<AiProvidersSettings canWrite />)
+
+      const auswahl = await screen.findByRole('button', { name: 'Gedächtnis-Modell' })
+      const schalter = screen.getByRole('switch', { name: 'Gedächtnis-Rolle aktiv' })
+      expect(auswahl).toHaveTextContent('Kein eigenes Gedächtnis-Modell')
+      expect(schalter).toBeDisabled()
+
+      fireEvent.click(auswahl)
+      fireEvent.click(screen.getByRole('option', { name: /anthropic\/claude-opus-5/ }))
+
+      await waitFor(() => expect(schalter).toHaveAttribute('aria-checked', 'true'))
+      fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+      await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(4, expect.objectContaining({
+        memory_model: 'anthropic/claude-opus-5',
+        memory_enabled: true,
+      })))
+    })
+
+    it('pausiert mit dem Schalter, ohne das Modell zu vergessen', async () => {
+      vi.mocked(aiApi.listProviderSettings).mockResolvedValue([{
+        ...provider, memory_model: 'anthropic/claude-opus-5', memory_enabled: true,
+      }])
+      render(<AiProvidersSettings canWrite />)
+
+      const schalter = await screen.findByRole('switch', { name: 'Gedächtnis-Rolle aktiv' })
+      await waitFor(() => expect(schalter).toHaveAttribute('aria-checked', 'true'))
+      fireEvent.click(schalter)
+      fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+
+      await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(4, expect.objectContaining({
+        memory_model: 'anthropic/claude-opus-5',
+        memory_enabled: false,
+      })))
+    })
+  })
+
   describe('Modellsuche und alphabetische Sortierung', () => {
     it('sortiert die Modellliste alphabetisch und filtert über die Suchleiste', async () => {
       vi.mocked(aiApi.listProviderSettings).mockResolvedValue([{

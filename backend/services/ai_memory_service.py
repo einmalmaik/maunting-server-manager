@@ -129,22 +129,6 @@ VERBLASSEN_AB = 0.35
 #: den ein Mensch nimmt, wenn ihm etwas "auf der Zunge liegt".
 VERBLASST_ZEICHEN = 60
 
-#: Ab wieviel Aehnlichkeit die Import-Vorschau einen Bestandseintrag daneben
-#: zeigt (`importabgleich`).
-#:
-#: Niedrig, weil hier nichts zusammengelegt wird: die Vorschau stellt den
-#: alten Eintrag nur daneben, und ersetzt wird allein auf Klick. Ein
-#: faelschlich zusammengelegter Fakt kann hier also nicht entstehen — ein
-#: Doppel, weil der Hinweis fehlte, schon.
-#: Gemessen am 25.09.2026 mit potion-multilingual-128M, Bestand gegen typische
-#: Importzeilen (Schlüssel ohne Kategoriepräfix, siehe
-#: `ai_memory_import_service.normalize_key`): derselbe Fakt 0,59 bis 0,87
-#: ("Antworte auf Deutsch." zu "Antworte immer auf Deutsch." 0,59; "Berlin"
-#: zu "Wohnt in Berlin." 0,86), verschiedene Fakten höchstens 0,31 ("Hat eine
-#: Schwester namens Mia" zu "Hat einen Bruder namens Tom." 0,31). 0,45 liegt
-#: in der Lücke.
-IMPORT_HINWEIS_AB = 0.45
-
 #: Wieviel Abrufstaerke ein frisch gemerkter Eintrag mitbringt.
 #:
 #: Ohne diesen Startwert waere jeder neue Eintrag sofort blass: er hat noch
@@ -2035,109 +2019,76 @@ def vergessene_aufraeumen(db: Session, *, jetzt: datetime | None = None) -> int:
 
 
 @dataclass(frozen=True)
-class Importabgleich:
-    """Was ein Bereich zu einer Liste von Importkandidaten schon weiß.
+class Importziel:
+    """Wohin ein Import schreibt: der Bereich, geprüft wie beim Schreiben.
 
-    ``gleicher_schluessel`` nennt je belegtem Kandidatenschlüssel den Klartext,
-    der dort heute steht — ``None``, wenn er sich nicht mehr öffnen lässt.
-    ``aehnlich`` steht parallel zur Kandidatenliste: der nächstliegende
-    Bestandseintrag unter einem **anderen** Schlüssel ab `IMPORT_HINWEIS_AB`
-    als (Schlüssel, Klartext, Ähnlichkeit) oder ``None``. ``frei`` ist,
-    wieviele neue Einträge der Bereich noch fasst — ``None`` heißt unbegrenzt.
+    ``grenze`` ist das Kontingent der Rolle für diesen Bereich — ``None``
+    unbegrenzt, 0 gesperrt —, ``frei`` wieviele neue Erinnerungen er noch
+    fasst (``None`` unbegrenzt). Gezählt wird wie in `_platz_sicherstellen`:
+    nur, was gilt.
     """
 
-    gleicher_schluessel: dict[str, str | None]
-    aehnlich: list[tuple[str, str, float] | None]
+    identity: str
+    server_id: int | None
+    team_id: int | None
+    grenze: int | None
     frei: int | None
 
 
-def importabgleich(
-    db: Session,
-    user: User,
-    scope: str,
-    server_id: int | None,
-    team_id: int | None,
-    kandidaten: list[tuple[str, str]],
-) -> Importabgleich:
-    """Gleicht Importkandidaten in **einem** Durchgang gegen den Bereich ab.
+def importziel(
+    db: Session, user: User, scope: str, server_id: int | None, team_id: int | None
+) -> Importziel:
+    """Prüft den Zielbereich eines Imports, bevor etwas gelesen wird.
 
-    Für viele Kandidaten auf einmal. Je Kandidat alle Vektoren des Bereichs
-    zu lesen hieße bei 200 importierten Fakten gegen 5.000 Einträge eine
-    Million gelesene Vektoren statt 5.000. Hier wird der Bereich einmal gelesen, einmal
-    eingebettet, und entschlüsselt werden nur die Zeilen, die in der Vorschau
-    auch erscheinen.
-
-    Geprüft werden dieselben Rechte wie beim Schreiben: wer in diesen Bereich
-    nicht schreiben darf, bekommt die Absage schon in der Vorschau und nicht
-    erst nach dem Aussuchen.
+    Dieselben Rechte wie beim Schreiben: wer in diesen Bereich nicht schreiben
+    darf, bekommt die Absage vor dem Modellaufruf der Vorschau — nicht erst,
+    nachdem der Text beim Anbieter war und der Benutzer ausgesucht hat.
     """
     identity, _owner, sid, tid = scope_identity(db, user, scope, server_id, team_id)
     _assert_may_write(db, user, scope, tid, sid)
-
-    bestand = db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity == identity, AiMemoryEntry.status == "aktiv"
-    ).all()
-    _schluessel_laden(bestand)
-    nach_schluessel = {row.key: row for row in bestand if row.key}
-    treffer: list[tuple[AiMemoryEntry, float] | None] = [None] * len(kandidaten)
-
-    kodierung = (
-        ai_embedding_service.encode(
-            [_embedding_source(key, value) for key, value in kandidaten], db=db
-        )
-        if kandidaten and bestand
-        else None
-    )
-    if kodierung is not None and len(kodierung.vektoren) == len(kandidaten):
-        paare: list[tuple[AiMemoryEntry, Sequence[float]]] = []
-        for row in bestand:
-            vektor = _stored_vector(row, kodierung.modell)
-            if vektor is not None:
-                paare.append((row, vektor))
-        vektoren = [vektor for _row, vektor in paare]
-        for index, (key, _value) in enumerate(kandidaten):
-            if not paare:
-                break
-            werte = ai_embedding_service.similarity(kodierung.vektoren[index], vektoren)
-            for (row, _vektor), wert in zip(paare, werte):
-                # Derselbe Schlüssel ist kein Doppel, sondern ein Überschreiben —
-                # das meldet `gleicher_schluessel`.
-                if row.key == key or wert < IMPORT_HINWEIS_AB:
-                    continue
-                bisher = treffer[index]
-                if bisher is None or wert > bisher[1]:
-                    treffer[index] = (row, float(wert))
-
-    gebraucht: dict[str, AiMemoryEntry] = {}
-    for key, _value in kandidaten:
-        if key in nach_schluessel:
-            gebraucht[nach_schluessel[key].id] = nach_schluessel[key]
-    for fund in treffer:
-        if fund is not None:
-            gebraucht[fund[0].id] = fund[0]
-    klartext = {row.id: value for row, value in _entschluesseln_lesbare(list(gebraucht.values()))}
-
     grenze = ai_limit_service.resolve_scope_memory_limit(
         db, scope, user, team_id=tid, server_id=sid,
     )
-    return Importabgleich(
-        # Auch eine Zeile, die sich nicht mehr öffnen lässt, belegt ihren
-        # Schlüssel — ``None`` sagt "besetzt, Inhalt unlesbar".
-        gleicher_schluessel={
-            key: klartext.get(nach_schluessel[key].id)
-            for key, _value in kandidaten
-            if key in nach_schluessel
-        },
-        # Eine Zeile, die sich nicht öffnen lässt, taugt nicht als Vergleich:
-        # der Benutzer soll sehen, womit er abwägt.
-        aehnlich=[
-            (fund[0].key, klartext[fund[0].id], fund[1])
-            if fund is not None and fund[0].id in klartext
-            else None
-            for fund in treffer
-        ],
-        frei=None if grenze is None else max(0, grenze - len(bestand)),
+    bestand = (
+        db.query(AiMemoryEntry.id)
+        .filter(AiMemoryEntry.scope_identity == identity, AiMemoryEntry.status == "aktiv")
+        .count()
     )
+    return Importziel(
+        identity=identity, server_id=sid, team_id=tid, grenze=grenze,
+        frei=None if grenze is None else max(0, grenze - int(bestand)),
+    )
+
+
+def aehnlichkeit_je_text(
+    db: Session, rows: list[AiMemoryEntry], texte: list[str]
+) -> list[float | None]:
+    """Je Text die höchste Bedeutungsähnlichkeit zu einer der Zeilen.
+
+    Die Umkehrung von `aehnlichkeit_zu_texten`, für den Import: dort wird
+    nicht gefragt, welcher Bestand zu einem Gespräch passt, sondern ob ein
+    vorgeschlagener Satz schon dasteht. Alle Sätze in einem Aufruf des
+    Modells — bei einem Ersatzanbieter für die Einbettung wäre einer je Satz
+    ein HTTP-Aufruf je Satz. ``None`` heißt: kein Vergleich möglich.
+    """
+    if not rows or not texte:
+        return [None] * len(texte)
+    kodierung = ai_embedding_service.encode(texte, db=db)
+    if kodierung is None or len(kodierung.vektoren) != len(texte):
+        return [None] * len(texte)
+    gespeichert = [_stored_vector(row, kodierung.modell) for row in rows]
+    vorhanden = [vektor for vektor in gespeichert if vektor is not None]
+    if not vorhanden:
+        return [None] * len(texte)
+    try:
+        import numpy as np
+
+        matrix = np.asarray(vorhanden, dtype="float32")
+        fragen = np.asarray(kodierung.vektoren, dtype="float32")
+        return [float(wert) for wert in (fragen @ matrix.T).max(axis=1).tolist()]
+    except Exception as exc:  # noqa: BLE001 - ohne Vergleich bleibt der Satz in der Vorschau
+        logger.warning("Aehnlichkeit der Importsaetze fehlgeschlagen error=%s", type(exc).__name__)
+        return [None] * len(texte)
 
 
 def _darf_aendern(db: Session, user: User, row: AiMemoryEntry) -> bool:

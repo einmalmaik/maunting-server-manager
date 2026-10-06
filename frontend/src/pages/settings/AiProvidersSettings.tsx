@@ -36,6 +36,7 @@ interface ProviderDraft extends AiProviderWrite {
  */
 const KEIN_WORKER = '__aus__'
 const KEINE_ETHICS = '__aus__'
+const KEIN_GEDAECHTNIS = '__aus__'
 const KEINE_TRANSKRIPTION = '__aus__'
 /** Keine Denkstufe des Sprachwegs — die Vorgabe des Modells gilt. */
 const KEINE_SPRACHSTUFE = '__aus__'
@@ -264,9 +265,13 @@ const EMPTY_PROVIDER: ProviderDraft = {
   ethics_input_price_micro_usd_per_million: null,
   ethics_output_price_micro_usd_per_million: null,
   ethics_cache_price_micro_usd_per_million: null,
+  memory_input_price_micro_usd_per_million: null,
+  memory_output_price_micro_usd_per_million: null,
+  memory_cache_price_micro_usd_per_million: null,
   standard_enabled: false,
   worker_enabled: false,
   ethics_enabled: false,
+  memory_enabled: false,
   transcription_enabled: false,
   realtime_enabled: false,
   // Keine Vorbelegung, bei beiden. Es gibt weder eine Standardstimme noch ein
@@ -295,6 +300,9 @@ const EMPTY_PROVIDER: ProviderDraft = {
   ethics_model: null,
   ethics_reasoning_effort: null,
   ethics_mode: 'auto',
+  // Ohne eigenes Modell liest das Gedächtnis mit dem eines anderen Zugangs,
+  // sonst mit dem Standardmodell (`gedaechtnis_anbieter`).
+  memory_model: null,
   // Nur Anbieter mit `ressource_noetig` brauchen ihn; ohne Vorbelegung, weil
   // MSM die Ressourcen des fremden Kontos nicht kennt.
   azure_resource_name: null,
@@ -319,9 +327,13 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     ethics_input_price_micro_usd_per_million: provider.ethics_input_price_micro_usd_per_million,
     ethics_output_price_micro_usd_per_million: provider.ethics_output_price_micro_usd_per_million,
     ethics_cache_price_micro_usd_per_million: provider.ethics_cache_price_micro_usd_per_million ?? null,
+    memory_input_price_micro_usd_per_million: provider.memory_input_price_micro_usd_per_million ?? null,
+    memory_output_price_micro_usd_per_million: provider.memory_output_price_micro_usd_per_million ?? null,
+    memory_cache_price_micro_usd_per_million: provider.memory_cache_price_micro_usd_per_million ?? null,
     standard_enabled: provider.standard_enabled ?? Boolean(provider.default_model),
     worker_enabled: provider.worker_enabled ?? Boolean(provider.worker_model),
     ethics_enabled: provider.ethics_enabled ?? Boolean(provider.ethics_model),
+    memory_enabled: provider.memory_enabled ?? false,
     transcription_enabled: provider.transcription_enabled ?? Boolean(provider.transcription_model),
     realtime_enabled: provider.realtime_enabled ?? provider.realtime_default ?? false,
     default_voice: provider.default_voice,
@@ -343,6 +355,7 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     ethics_model: provider.ethics_model,
     ethics_reasoning_effort: provider.ethics_reasoning_effort,
     ethics_mode: provider.ethics_mode || 'auto',
+    memory_model: provider.memory_model ?? null,
     azure_resource_name: provider.azure_resource_name,
     disable_safety: provider.disable_safety ?? false,
     operator_api_key: '',
@@ -434,9 +447,13 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
       ethics_input_price_micro_usd_per_million: draft.ethics_input_price_micro_usd_per_million ?? null,
       ethics_output_price_micro_usd_per_million: draft.ethics_output_price_micro_usd_per_million ?? null,
       ethics_cache_price_micro_usd_per_million: draft.ethics_cache_price_micro_usd_per_million ?? null,
+      memory_input_price_micro_usd_per_million: draft.memory_input_price_micro_usd_per_million ?? null,
+      memory_output_price_micro_usd_per_million: draft.memory_output_price_micro_usd_per_million ?? null,
+      memory_cache_price_micro_usd_per_million: draft.memory_cache_price_micro_usd_per_million ?? null,
       standard_enabled: draft.id ? Boolean(draft.standard_enabled && draft.default_model?.trim()) : Boolean(draft.default_model?.trim()),
       worker_enabled: draft.id ? Boolean(draft.worker_enabled && draft.worker_model?.trim()) : Boolean(draft.worker_model?.trim()),
       ethics_enabled: draft.id ? Boolean(draft.ethics_enabled && draft.ethics_model?.trim()) : Boolean(draft.ethics_model?.trim()),
+      memory_enabled: draft.id ? Boolean(draft.memory_enabled && draft.memory_model?.trim()) : Boolean(draft.memory_model?.trim()),
       transcription_enabled: draft.id ? Boolean(draft.transcription_enabled && draft.transcription_model?.trim()) : Boolean(draft.transcription_model?.trim()),
       realtime_enabled: draft.id ? Boolean((draft.realtime_enabled || draft.realtime_default) && draft.realtime_model?.trim()) : Boolean(draft.realtime_model?.trim()),
       ...(protokoll === 'tts' ? { default_voice: draft.default_voice?.trim() || null } : {}),
@@ -454,6 +471,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
               ? draft.ethics_reasoning_effort || null
               : null,
             ethics_mode: draft.ethics_mode || 'auto',
+            memory_model: draft.memory_model?.trim() || null,
             ...(sprachwege.length > 0 ? {
               realtime_default: Boolean(draft.realtime_default || draft.realtime_enabled),
               realtime_enabled: Boolean(draft.realtime_enabled || draft.realtime_default),
@@ -732,7 +750,10 @@ function ProviderForm({
    * einem Modell, das seine Liste nicht fuehrt.
    */
   const [einzelmodelle, setEinzelmodelle] = useState<Record<string, AiCatalogModel | null>>({})
-  const kennungen = [draft.default_model?.trim(), draft.worker_model?.trim(), draft.ethics_model?.trim()]
+  const kennungen = [
+    draft.default_model?.trim(), draft.worker_model?.trim(), draft.ethics_model?.trim(),
+    draft.memory_model?.trim(),
+  ]
     .filter((wert): wert is string => Boolean(wert))
     .join(' ')
   useEffect(() => {
@@ -767,6 +788,9 @@ function ProviderForm({
   // Das Modell der Ethics Engine — ebenfalls aus demselben Katalog.
   const ethicsModell = models?.find((item) => item.model_id === draft.ethics_model)
     ?? nachgeschlagen(draft.ethics_model)
+  // Das Modell des Gedächtnisses — ebenfalls aus demselben Katalog.
+  const gedaechtnisModell = models?.find((item) => item.model_id === draft.memory_model)
+    ?? nachgeschlagen(draft.memory_model)
   // Kommt aus dem Katalog, nicht aus der Oberflaeche: fuehrt der Anbieter die
   // empfohlene Kennung nicht mehr, gibt es hier `null` und die Empfehlung
   // verschwindet von selbst — statt auf ein Modell zu zeigen, das es nicht gibt.
@@ -802,6 +826,7 @@ function ProviderForm({
   const ethicsModellId = useId()
   const ethicsStufeId = useId()
   const ethicsModusId = useId()
+  const gedaechtnisModellId = useId()
   const ttsModellId = useId()
   const ressourceId = useId()
   const realtimeModelId = useId()
@@ -1599,6 +1624,83 @@ function ProviderForm({
                   <p className="msm-field-help">{t('ai.providers.ethicsEffortHint')}</p>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Gedächtnis */}
+        {spec?.protokoll === 'chat_completions' && (
+          <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                  🧠 {t('ai.providers.memorySection')}
+                </h4>
+                <p className="msm-field-help mt-1">{t('ai.providers.memoryHint')}</p>
+              </div>
+              <Switch
+                checked={Boolean(draft.memory_enabled)}
+                onCheckedChange={(memory_enabled) => change({ memory_enabled })}
+                disabled={!draft.memory_model?.trim()}
+                aria-label={t('ai.providers.memoryEnabled')}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                {models && models.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <label htmlFor={gedaechtnisModellId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                      {t('ai.providers.memoryModel')}
+                    </label>
+                    <Dropdown
+                      id={gedaechtnisModellId}
+                      value={draft.memory_model || KEIN_GEDAECHTNIS}
+                      // Modell wählen heißt einschalten: „wählt das Modell aus und
+                      // fertig“ (Betreiber, 07.10.2026). Der Schalter bleibt zum Pausieren.
+                      onChange={(memory_model) => change({
+                        memory_model: memory_model === KEIN_GEDAECHTNIS ? null : memory_model,
+                        memory_enabled: memory_model !== KEIN_GEDAECHTNIS,
+                      })}
+                      searchable
+                      options={[
+                        { value: KEIN_GEDAECHTNIS, label: t('ai.providers.memoryOff') },
+                        ...(draft.memory_model && !models.some((m) => m.model_id === draft.memory_model)
+                          ? [{ value: draft.memory_model, label: draft.memory_model }]
+                          : []),
+                        ...[...models]
+                          .sort(sortiereModelleAlphabetisch)
+                          .map((item) => ({
+                            value: item.model_id,
+                            label: item.model_id,
+                            hint: modellHinweis(item, t),
+                          })),
+                      ]}
+                      aria-label={t('ai.providers.memoryModel')}
+                    />
+                  </div>
+                ) : (
+                  <ProviderInput
+                    label={t('ai.providers.memoryModel')}
+                    value={draft.memory_model ?? ''}
+                    onChange={(memory_model) => change({
+                      memory_model: memory_model || null,
+                      memory_enabled: Boolean(memory_model.trim()),
+                    })}
+                  />
+                )}
+                {gedaechtnisModell && <ModelCapabilities model={gedaechtnisModell} />}
+                {draft.memory_model && (
+                  <ModellPreisPaar
+                    policy={waehrung}
+                    inputValue={draft.memory_input_price_micro_usd_per_million ?? null}
+                    outputValue={draft.memory_output_price_micro_usd_per_million ?? null}
+                    cacheValue={draft.memory_cache_price_micro_usd_per_million ?? null}
+                    onInputChange={(value) => change({ memory_input_price_micro_usd_per_million: value })}
+                    onOutputChange={(value) => change({ memory_output_price_micro_usd_per_million: value })}
+                    onCacheChange={(value) => change({ memory_cache_price_micro_usd_per_million: value })}
+                  />
+                )}
+              </div>
             </div>
           </div>
         )}

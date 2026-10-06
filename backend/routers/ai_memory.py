@@ -1,5 +1,6 @@
 """Einsehbares, editierbares und abschaltbares AI-Memory."""
 
+import asyncio
 from typing import Literal
 from uuid import UUID
 
@@ -238,20 +239,28 @@ def create_memory(
 
 
 @router.post("/import/preview", response_model=AiMemoryImportPreviewResponse)
-def preview_memory_import(
+async def preview_memory_import(
     payload: AiMemoryImportPreviewRequest,
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.memory.use")),
     _: None = Depends(verify_csrf),
 ) -> AiMemoryImportPreviewResponse:
-    """Zerlegt die Antwort einer fremden KI und gleicht sie mit dem Bereich ab.
+    """Liest den Text mit dem Gedächtnismodell und gleicht ihn mit dem Bereich ab.
 
-    Schreibt nichts. Ein POST trotzdem, weil der Text bis zu 100.000 Zeichen
-    lang sein darf und persönlich ist — in einer URL landete er in jedem
-    Zugriffsprotokoll.
+    Schreibt nichts, geht aber an den Anbieter — gebucht beim Benutzer.
+    Ein POST, weil der Text bis zu 100.000 Zeichen lang sein darf und
+    persönlich ist: in einer URL landete er in jedem Zugriffsprotokoll.
+    Asynchron, weil die Teile beim Anbieter nebeneinander laufen; Datenbank und
+    Sidecar arbeitet der Dienst in Threads ab, mit eigenen Sitzungen.
     """
+    user_id = user.id
+    # Die Sitzung der Anfrage (aus der Anmeldung) gibt ihre Verbindung zurück,
+    # bevor gelesen wird: das kann Minuten dauern, und dreißig offene
+    # Vorschauen hielten sonst den ganzen Pool. Der Dienst nimmt sich für jede
+    # kurze Datenbankarbeit eine eigene.
+    await asyncio.to_thread(db.close)
     try:
-        return ai_memory_import_service.analyze_preview(db, user, payload)
+        return await ai_memory_import_service.vorschau(user_id, payload)
     except DisSidecarError as exc:
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
 
@@ -263,14 +272,13 @@ def execute_memory_import(
     user: User = Depends(require_global("ai.memory.use")),
     _: None = Depends(verify_csrf),
 ) -> AiMemoryImportResponse:
-    """Übernimmt die in der Vorschau ausgewählten Einträge.
+    """Übernimmt die in der Vorschau ausgewählten Erinnerungen.
 
     Fällt der Sidecar mittendrin aus, stehen die bis dahin geschriebenen
-    Einträge bereits fest — jeder wird einzeln festgeschrieben. Ein erneuter
-    Import meldet sie dann als vorhanden, statt sie doppelt anzulegen.
+    bereits fest — jede wird einzeln festgeschrieben.
     """
     try:
-        return ai_memory_import_service.execute_import(db, user, payload)
+        return ai_memory_import_service.uebernehmen(db, user, payload)
     except DisSidecarError as exc:
         db.rollback()
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc

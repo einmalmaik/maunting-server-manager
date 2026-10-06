@@ -87,6 +87,7 @@ export interface AiProviderAdmin {
    * Der Modus / die Zoning-Stufe: 'off' | 'auto' | 'always' | 'critical'.
    */
   ethics_mode: 'off' | 'auto' | 'always' | 'critical'
+  memory_model?: string | null
   /**
    * Der Name der Azure-Ressource dieses Zugangs — das eine Stueck Adresse, das
    * MSM nicht selbst weiss. Nur Anbieter mit `ressource_noetig` brauchen ihn;
@@ -120,9 +121,13 @@ export interface AiProviderAdmin {
   ethics_input_price_micro_usd_per_million?: number | null
   ethics_output_price_micro_usd_per_million?: number | null
   ethics_cache_price_micro_usd_per_million?: number | null
+  memory_input_price_micro_usd_per_million?: number | null
+  memory_output_price_micro_usd_per_million?: number | null
+  memory_cache_price_micro_usd_per_million?: number | null
   standard_enabled?: boolean
   worker_enabled?: boolean
   ethics_enabled?: boolean
+  memory_enabled?: boolean
   transcription_enabled?: boolean
   realtime_enabled?: boolean
   updated_at: string
@@ -860,32 +865,44 @@ export interface AiMemoryPage {
   limit: number
 }
 
-/** Was die Vorschau über einen erkannten Fakt sagt — siehe `schemas/ai_memory.py`. */
-export type AiMemoryImportStatus = 'new' | 'exact_duplicate' | 'similar_existing' | 'has_secret'
+/** Ein Bestandseintrag, den ein Vorschlag ersetzen würde (Fassung für die Gegenprobe). */
+export interface AiMemoryImportBisher {
+  id: string
+  fassung: number
+  text: string
+  titel: string | null
+}
 
+/** Eine Erinnerung, wie das Gedächtnismodell sie aus dem Text gelesen hat. */
 export interface AiMemoryImportPreviewItem {
-  key: string
-  value: string
-  category: string
-  evidence: string | null
-  status: AiMemoryImportStatus
-  existing_key: string | null
-  /** `null` auch dann, wenn der Schlüssel belegt, sein Inhalt aber unlesbar ist. */
-  existing_value: string | null
-  similarity: number | null
+  text: string
+  titel: string | null
+  thema: string | null
+  art: AiMemoryArt | null
+  wichtigkeit: number
+  /** Was darin aufgeht; leer heißt neu. */
+  ersetzt: AiMemoryImportBisher[]
 }
 
 export interface AiMemoryImportPreview {
   detected_source: string | null
   items: AiMemoryImportPreviewItem[]
   total_detected: number
-  total_valid: number
-  total_conflicts: number
+  total_known: number
   total_secrets_blocked: number
-  /** Wieviele neue Schlüssel der Bereich noch fasst; `null` heißt unbegrenzt. Ersetzen kostet keinen Platz. */
+  unread_parts: number
+  /** `null` heißt unbegrenzt. */
   available_slots: number | null
-  /** Ob die KI persönliche Einträge heute liest — sonst bleibt der Import liegen. */
   memory_enabled: boolean
+}
+
+export interface AiMemoryImportItem {
+  text: string
+  titel?: string | null
+  thema?: string | null
+  art?: AiMemoryArt | null
+  wichtigkeit?: number
+  ersetzt?: { id: string; fassung: number }[]
 }
 
 export interface AiMemoryImportTarget {
@@ -899,7 +916,7 @@ export interface AiMemoryImportResult {
   imported_count: number
   updated_count: number
   skipped_count: number
-  skipped: { key: string; reason: 'exists' | 'full' | 'rejected' | 'duplicate' | 'conflict' }[]
+  skipped: { index: number; reason: 'full' | 'rejected' | 'duplicate' | 'conflict' }[]
 }
 
 export interface AiMemoryPreference {
@@ -1309,9 +1326,13 @@ export interface AiProviderWrite {
   ethics_input_price_micro_usd_per_million?: number | null
   ethics_output_price_micro_usd_per_million?: number | null
   ethics_cache_price_micro_usd_per_million?: number | null
+  memory_input_price_micro_usd_per_million?: number | null
+  memory_output_price_micro_usd_per_million?: number | null
+  memory_cache_price_micro_usd_per_million?: number | null
   standard_enabled?: boolean
   worker_enabled?: boolean
   ethics_enabled?: boolean
+  memory_enabled?: boolean
   transcription_enabled?: boolean
   realtime_enabled?: boolean
   /**
@@ -1343,6 +1364,7 @@ export interface AiProviderWrite {
   ethics_model?: string | null
   ethics_reasoning_effort?: string | null
   ethics_mode?: 'off' | 'auto' | 'always' | 'critical'
+  memory_model?: string | null
   /**
    * Wie `default_voice`: „nicht genannt" laesst den Namen stehen,
    * ausdrueckliches `null` nimmt ihn zurueck. Der Unterschied zaehlt hier
@@ -1758,7 +1780,8 @@ export const aiApi = {
   answerMemoryNotice: (enable: boolean, hideFuture: boolean) => api<AiMemoryPreference>('/ai/memory/notice', {
     method: 'POST', body: JSON.stringify({ enable, hide_future: hideFuture }),
   }),
-  /** Zerlegt die Antwort einer fremden KI und gleicht sie ab — schreibt nichts. */
+  /** Lässt den Text vom Gedächtnis-Modell lesen und gleicht ab — schreibt nichts.
+   *  Ein langer Text geht in Teilen; das kann einige Sekunden dauern. */
   importMemoryPreview: (payload: AiMemoryImportTarget & { raw_text: string }) =>
     api<AiMemoryImportPreview>('/ai/memory/import/preview', {
       method: 'POST', body: JSON.stringify(payload),
@@ -1766,7 +1789,8 @@ export const aiApi = {
   /** Übernimmt die ausgewählten Einträge; übersprungene kommen mit Grund zurück. */
   executeMemoryImport: (
     payload: AiMemoryImportTarget & {
-      items: { key: string; value: string; replace_existing: boolean }[]
+      source_provider?: string
+      items: AiMemoryImportItem[]
     },
   ) => api<AiMemoryImportResult>('/ai/memory/import', {
     method: 'POST', body: JSON.stringify(payload),

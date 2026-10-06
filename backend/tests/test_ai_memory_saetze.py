@@ -818,27 +818,25 @@ def test_ein_wieder_benutztes_thema_ueberlebt_das_aufraeumen(
     assert db.get(AiMemoryEntry, neu[0]).thema_id == thema_id
 
 
-def test_der_import_nennt_seine_quelle_und_holt_vergessenes_zurueck(
+def test_der_import_nennt_seine_quelle_und_vergessenes_haelt_ihn_nicht_auf(
     client: TestClient, db: Session, regular_user: User, user_cookies: dict
 ) -> None:
-    """Die Vorschau zählt nur, was gilt; die Übernahme jetzt auch.
+    """Was über den Import kam, stand in der Ansicht als "Von Hand eingetragen".
 
-    Ein vergessener Eintrag unter demselben Namen hieß in der Vorschau
-    "neu" und wurde dann als "vorhanden" übersprungen. Und was über den
-    Import kam, stand in der Ansicht als "Von Hand eingetragen".
+    Und ein vergessener Satz hält einen neuen nicht auf. Bis Stufe 3 hing das
+    am Namen: ein vergessener Eintrag unter demselben Namen hieß in der
+    Vorschau "neu" und wurde dann als "vorhanden" übersprungen. Seither
+    kommen Sätze ohne Namen; vergessen bleibt vergessen, neu ist neu.
     """
     _erlauben(db, regular_user)
-    row, _ = ai_memory_service.upsert_entry(
-        db, user=regular_user, scope="user", server_id=None,
-        key="vorlieben.getraenk", value="Trinkt Kaffee.",
-    )
+    row = _anlegen(db, regular_user, "Der Benutzer trinkt Kaffee.")
     ai_memory_service.erinnerung_vergessen(db, user=regular_user, entry_id=row.id)
 
     antwort = client.post(
         "/api/ai/memory/import",
         json={"scope": "user", "items": [
-            {"key": "vorlieben.getraenk", "value": "Trinkt Tee."},
-            {"key": "hobby.schach", "value": "Spielt Schach im Verein."},
+            {"text": "Der Benutzer trinkt Kaffee."},
+            {"text": "Der Benutzer spielt Schach im Verein."},
         ]},
         cookies=user_cookies, headers=_csrf(user_cookies),
     )
@@ -847,8 +845,10 @@ def test_der_import_nennt_seine_quelle_und_holt_vergessenes_zurueck(
     assert (antwort.json()["imported_count"], antwort.json()["skipped_count"]) == (2, 0)
     db.expire_all()
     zeilen = db.query(AiMemoryEntry).filter(AiMemoryEntry.owner_user_id == regular_user.id).all()
-    assert {(z.status, z.quelle) for z in zeilen} == {("aktiv", "import")}
-    assert len(zeilen) == 2
+    assert sorted((z.status, z.quelle) for z in zeilen if z.id != row.id) == [
+        ("aktiv", "import"), ("aktiv", "import"),
+    ]
+    assert db.get(AiMemoryEntry, row.id).status == "vergessen"
 
 
 def test_eine_einzelne_erinnerung_kommt_auch_vergessen_aber_nur_zu_ihr_selbst(

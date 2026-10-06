@@ -106,6 +106,7 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         standard_enabled=bool(getattr(provider, "standard_enabled", bool(provider.default_model))),
         worker_enabled=bool(getattr(provider, "worker_enabled", bool(provider.worker_model))),
         ethics_enabled=bool(getattr(provider, "ethics_enabled", bool(provider.ethics_model))),
+        memory_enabled=bool(getattr(provider, "memory_enabled", False)),
         transcription_enabled=bool(getattr(provider, "transcription_enabled", bool(provider.transcription_model))),
         realtime_enabled=bool(getattr(provider, "realtime_enabled", provider.realtime_default)),
         worker_model=provider.worker_model,
@@ -113,6 +114,7 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         ethics_model=provider.ethics_model,
         ethics_reasoning_effort=provider.ethics_reasoning_effort,
         ethics_mode=provider.ethics_mode or "auto",
+        memory_model=provider.memory_model,
         azure_resource_name=provider.azure_resource_name,
         disable_safety=bool(getattr(provider, "disable_safety", False)),
         enabled=provider.enabled,
@@ -129,6 +131,9 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         ethics_input_price_micro_usd_per_million=provider.ethics_input_price_micro_usd_per_million,
         ethics_output_price_micro_usd_per_million=provider.ethics_output_price_micro_usd_per_million,
         ethics_cache_price_micro_usd_per_million=getattr(provider, "ethics_cache_price_micro_usd_per_million", None),
+        memory_input_price_micro_usd_per_million=provider.memory_input_price_micro_usd_per_million,
+        memory_output_price_micro_usd_per_million=provider.memory_output_price_micro_usd_per_million,
+        memory_cache_price_micro_usd_per_million=provider.memory_cache_price_micro_usd_per_million,
         updated_at=provider.updated_at,
     )
 
@@ -316,6 +321,7 @@ async def test_provider(
         provider.default_model
         or provider.worker_model
         or provider.ethics_model
+        or provider.memory_model
         or (
             # `bekannt` und nicht `ALLE`: das Paket fuehrt keinen solchen
             # Namen. Die Zeile warf einen AttributeError, sobald ein Zugang
