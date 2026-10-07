@@ -67,7 +67,11 @@ FAELLIG_JE_LAUF = 20
 NACHBARN = 30
 #: Ab dieser Ähnlichkeit gilt ein Eintrag als Nachbar. Darunter gibt es
 #: nichts zusammenzuführen, und ohne Nachbarn fragt die Pflege nicht.
-NAH_AB = 0.55
+#: Gemessen am 07.10.2026 mit dem lokalen Modell: Sätze, die dasselbe sagen,
+#: lagen bei 0,52 bis 0,91 („Backups laufen nachts um drei“ gegen „Die
+#: Sicherung startet täglich um 3 Uhr“ 0,52), verschiedene Fakten desselben
+#: Themas bei 0,12 bis 0,62. Was darüber mitkommt, entscheidet das Modell.
+NAH_AB = 0.5
 #: Findet ein Takt nichts, schaut erst der nach dieser Pause wieder.
 LEERLAUF = timedelta(minutes=15)
 #: Nach so vielen unbrauchbaren Antworten gilt der Lauf als ohne Änderung.

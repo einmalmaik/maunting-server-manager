@@ -25,6 +25,7 @@ from services import (
     permission_service,
 )
 from services.role_service import set_user_roles
+from tests._einbettung import ohne_modell
 
 
 def _allow_memory(db: Session, user: User) -> None:
@@ -133,6 +134,9 @@ def test_der_zeilendeckel_wandert_mit_dem_budget(
     und zwar genau bei den vielen kurzen Einträgen, für die der Deckel
     überhaupt gemacht ist.
     """
+    # Ohne Modell: sonst kämen Kandidaten aus dem Vektorspeicher dazu, und
+    # gezählt würde, was auf dieser Maschine liegt, nicht der Deckel.
+    ohne_modell(monkeypatch)
     _allow_memory(db, regular_user)
     for nummer in range(20):
         _write(db, regular_user, f"eintrag{nummer:02d}", f"Wert {nummer}")
@@ -607,6 +611,7 @@ def test_eine_anfrage_entschluesselt_nie_mehr_als_der_deckel_erlaubt(
     und jede Zeile kostet einen synchronen Sidecar-Roundtrip **vor** dem Schnitt
     auf 6.000 Zeichen, weil sich erst am Klartext messen laesst, was hineinpasst.
     """
+    ohne_modell(monkeypatch)
     _allow_memory(db, regular_user)
     _write(db, regular_user, "grundregel", "Immer erst das Backup pruefen")
     for nummer in range(6):
@@ -823,6 +828,7 @@ def test_die_suche_entschluesselt_ebenfalls_nicht_alles(
     Seit Stufe 4 oeffnet sie nur die Kandidaten aus Wortindex und
     Vektorspeicher — hier ohne Modell genau den einen, dessen Wort passt.
     """
+    ohne_modell(monkeypatch)
     _allow_memory(db, regular_user)
     for nummer in range(6):
         _write(db, regular_user, f"belanglos{nummer}", f"Fuellwert {nummer}")

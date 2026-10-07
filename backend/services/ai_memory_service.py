@@ -83,8 +83,8 @@ RECENCY_HALFLIFE_DAYS = 7.0
 #: Ab welchem Reiz eine Erinnerung als von der Frage **getroffen** gilt
 #: (`_reiz`): dann kommt sie „passend zur Frage“ mit und zählt als gebraucht.
 #: Ein gemeinsames Wort hebt auf 0,75, über die Bedeutung allein reicht eine
-#: Ähnlichkeit ab 0,35 — in großen Bereichen auch weniger, wenn die Zeile klar
-#: aus dem Rauschen ragt (`ai_gedaechtnis_abruf.BEDEUTUNG_BODEN`).
+#: Ähnlichkeit ab 0,35 — in großen Bereichen zählt stattdessen, ob die Zeile
+#: aus dem Rauschen ragt (`ai_gedaechtnis_abruf.BEDEUTUNG_ABSTAND`).
 #:
 #: Bis Stufe 4 hieß die Zahl `VERBLASSEN_AB` und kürzte außerdem Einträge im
 #: Block, die lange niemand gebraucht hatte. Seit der Abruf auswählt, was
@@ -2503,6 +2503,12 @@ def _bewertung(
 #: Länge der Nonce vor dem verschlüsselten Vektor — die Größe, für die AES-GCM
 #: ausgelegt ist.
 _VEKTOR_NONCE = 12
+
+#: Wie lang eine verpackte Vektorspalte des heutigen Modells ist: Nonce, Vektor
+#: und das 16 Byte lange Siegel. Jede andere Länge ist offen — unverpackt
+#: (`_liegt_im_klartext`) oder aus einem Modell mit anderer Ausgabegröße —, und
+#: der Takt rechnet sie neu (`ai_gedaechtnis_abruf.nachziehen`).
+GEPACKT_BYTES = _VEKTOR_NONCE + EMBEDDING_BYTES + 16
 
 
 @lru_cache(maxsize=1)

@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import AiMemoryBegriff, AiMemoryEntry, User
 from services import ai_embedding_service, ai_memory_service, permission_service
-from services.ai_embedding_service import EMBEDDING_BYTES, EMBEDDING_DIMENSIONS
+from services.ai_embedding_service import EMBEDDING_DIMENSIONS
 from services.dis_client import DisSidecarError
 
 
@@ -59,24 +59,30 @@ KANDIDATEN = 60
 #: Treffer, die eine Suche in der Verwaltung höchstens zeigt.
 MAX_SUCHTREFFER = 50
 #: Wieviele Vektoren der Speicher eines Prozesses höchstens hält (je Vektor
-#: 1 KB): darüber fällt der am längsten nicht gefragte Bereich heraus und wird
+#: 1,5 KB, also bis 375 MB): darüber fällt der am längsten nicht gefragte Bereich heraus und wird
 #: beim nächsten Mal neu geladen.
 MAX_IM_SPEICHER = 250_000
 #: Wieviele Erinnerungen der Takt je Lauf nachzieht (`nachziehen`).
 NACHZIEHEN_JE_TAKT = 1_000
 #: Über die Bedeutung allein gilt sonst ab `ai_memory_service.TREFFER_AB`
-#: (0,35) als getroffen. In einem großen Bereich reicht weniger, wenn eine
-#: Zeile klar aus dem Rauschen ragt: mindestens `BEDEUTUNG_BODEN` und
-#: `BEDEUTUNG_ABSTAND` über dem 99. Perzentil des Bereichs (`_Bedeutung.trifft`).
+#: (0,35) als getroffen. In einem großen Bereich zählt stattdessen, ob eine
+#: Zeile aus dem Rauschen ragt: `BEDEUTUNG_ABSTAND` über dem 99. Perzentil
+#: des Bereichs, mindestens `BEDEUTUNG_BODEN`, höchstens `BEDEUTUNG_DECKEL`
+#: (`_Bedeutung.trifft`). Das kann weniger als 0,35 sein — ein ruhiger Bereich
+#: lässt eine Antwort über Sprachen hinweg durch — oder mehr, wenn viele
+#: Zeilen der Frage ähneln.
 #:
-#: Gemessen am 07.10.2026 an 100.000 Einträgen mit dem lokalen Modell: auf
-#: englische Fragen stand die deutsche Antwort meist auf Platz 1, aber mit
-#: 0,22 bis 0,32 bei einem Rauschen um 0,12 bis 0,18 — und fiel an 0,35 heraus.
-#: Unter `BEDEUTUNG_AB_ZEILEN` Zeilen sagt ein Perzentil nichts; dort gilt
-#: allein die feste Schwelle.
+#: Gemessen am 07.10.2026 mit `paraphrase-multilingual-MiniLM-L12-v2`, acht
+#: Erinnerungen zwischen 20.000 Störsätzen: mit Abstand 0,08 und Deckel 0,35
+#: (geeicht auf das Modell davor) kamen zu einer Frage bis zu 211 Zeilen mit,
+#: weil das Rauschen dieses Modells breiter liegt. Mit 0,15 und 0,5 höchstens
+#: drei, zehn fremde Fragen brachten zusammen zwei; getroffen wurden 15 von 16
+#: (die sechzehnte trifft über ihr Wort). Unter `BEDEUTUNG_AB_ZEILEN` liegt das
+#: 99. Perzentil zwischen den Antworten selbst; dort gilt die feste Schwelle.
 BEDEUTUNG_BODEN = 0.2
-BEDEUTUNG_ABSTAND = 0.08
-BEDEUTUNG_AB_ZEILEN = 100
+BEDEUTUNG_ABSTAND = 0.15
+BEDEUTUNG_DECKEL = 0.5
+BEDEUTUNG_AB_ZEILEN = 1_000
 #: Wie weit das Nachladen zurückschaut. Zwei Schreiber, die sich beim Festschreiben
 #: überholen, tragen Zeiten in falscher Reihenfolge ein; ohne den Nachlauf fiele
 #: der langsamere durch das Raster.
@@ -359,10 +365,15 @@ class _Bedeutung:
 
         Daran hängt beides: ob sie „passend zur Frage“ mitkommt und ob sie als
         gebraucht zählt. Eine Stelle, damit beides dieselbe Antwort bekommt.
+
+        Ein gemeinsames Wort trifft immer (`ai_memory_service._reiz`). Die
+        Bedeutung allein misst sich an der Schwelle des Bereichs, die in einem
+        großen Bereich über `TREFFER_AB` liegen kann — dort zählte bis zum
+        07.10.2026 trotzdem jede Zeile ab 0,35, und die Schwelle senkte nur.
         """
-        wert = self.wert(row)
-        if ai_memory_service._reiz(wert, bezug) >= ai_memory_service.TREFFER_AB:
+        if bezug and ai_memory_service._reiz(None, bezug) >= ai_memory_service.TREFFER_AB:
             return True
+        wert = self.wert(row)
         schwelle = self.schwellen.get(row.scope_identity, ai_memory_service.TREFFER_AB)
         return wert is not None and wert >= schwelle
 
@@ -415,8 +426,7 @@ def _bedeutung(db: Session, kennungen: list[str], texte: list[str]) -> _Bedeutun
                 stelle = int(len(werte) * 0.99)
                 rauschen = float(np.partition(werte, stelle)[stelle])
                 schwellen[kennung] = min(
-                    ai_memory_service.TREFFER_AB,
-                    max(BEDEUTUNG_BODEN, rauschen + BEDEUTUNG_ABSTAND),
+                    BEDEUTUNG_DECKEL, max(BEDEUTUNG_BODEN, rauschen + BEDEUTUNG_ABSTAND)
                 )
         return _Bedeutung(je_bereich, schwellen)
     except Exception as exc:  # noqa: BLE001 - ohne Bedeutung bleiben die Wörter
@@ -770,7 +780,10 @@ def nachziehen(stapel: int = NACHZIEHEN_JE_TAKT) -> int:
     """Vektor und Wortindex für Erinnerungen, die noch keine haben. Läuft im Takt.
 
     Offen ist eine Zeile ohne `indiziert_am` (vor Stufe 4 entstanden), und bei
-    geladenem Modell eine ohne Vektor aus diesem Modell oder mit unverpacktem.
+    geladenem Modell eine ohne Vektor aus diesem Modell oder mit einem, der
+    nicht verpackt die heutige Länge hat (`ai_memory_service.GEPACKT_BYTES`):
+    unverpackt aus dem Bestand oder von einem Rückfall, der vor dem
+    Modellwechsel am 07.10.2026 noch 256 Zahlen lieferte.
     Je Lauf höchstens ``stapel``, in einem Aufruf geöffnet; was zuletzt dran
     war, kommt zuletzt wieder. Antwortet der Sidecar nicht, bleibt alles
     offen — sonst stünden Zeilen als erledigt da, deren Wörter fehlen.
@@ -782,7 +795,7 @@ def nachziehen(stapel: int = NACHZIEHEN_JE_TAKT) -> int:
             offen += [
                 AiMemoryEntry.embedding_model.is_(None),
                 AiMemoryEntry.embedding_model != modell,
-                func.length(AiMemoryEntry.embedding_bytes) == EMBEDDING_BYTES,
+                func.length(AiMemoryEntry.embedding_bytes) != ai_memory_service.GEPACKT_BYTES,
             ]
         rows = (
             db.query(AiMemoryEntry)

@@ -288,9 +288,11 @@ def test_ohne_erlaubnis_des_betreibers_verlaesst_nichts_das_haus(
     db.commit()
     gesendet: list[str] = []
     monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
+    monkeypatch.setattr(ai_embedding_service, "lokal_bereit", lambda: False)
     monkeypatch.setattr(
         ai_embedding_service, "encode_ueber_anbieter",
-        lambda texts, **_: gesendet.extend(texts) or [[0.1] * 256 for _ in texts],
+        lambda texts, **_: gesendet.extend(texts)
+        or [[0.1] * ai_embedding_service.EMBEDDING_DIMENSIONS for _ in texts],
     )
     _allow_memory(db, regular_user)
 
@@ -326,7 +328,9 @@ def test_mit_openai_als_rueckfall_rechnet_openai_und_nur_openai(
 
     antwort = MagicMock()
     antwort.status_code = 200
-    antwort.json.return_value = {"data": [{"index": 0, "embedding": [0.5] * 256}]}
+    antwort.json.return_value = {
+        "data": [{"index": 0, "embedding": [0.5] * ai_embedding_service.EMBEDDING_DIMENSIONS}]
+    }
     gesendet: list[dict] = []
 
     class Client:
@@ -347,7 +351,8 @@ def test_mit_openai_als_rueckfall_rechnet_openai_und_nur_openai(
     assert kodierung is not None
     assert kodierung.modell == "openai:text-embedding-3-small"
     assert [(g["url"], g["model"], g["dimensions"]) for g in gesendet] == [
-        ("https://api.openai.com/v1/embeddings", "text-embedding-3-small", 256),
+        ("https://api.openai.com/v1/embeddings", "text-embedding-3-small",
+         ai_embedding_service.EMBEDDING_DIMENSIONS),
     ]
     assert ai_embedding_service.aktives_modell(db=db) == "openai:text-embedding-3-small"
 

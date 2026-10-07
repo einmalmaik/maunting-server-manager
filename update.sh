@@ -524,11 +524,11 @@ log "Aktualisiere Python-Abhängigkeiten..."
 prepare_app_venv "$MSM_DIR/backend" "Python-Backend" false
 ok "Backend Dependencies aktualisiert"
 
-# Lokales Embeddingmodell fuer die KI-Gedaechtnissuche (~507 MB).
+# Lokales Embeddingmodell fuer die KI-Gedaechtnissuche (~470 MB).
 # Bewusst hier und nicht zur Laufzeit: das Panel laedt im Betrieb niemals
 # Gewichte aus dem Internet nach. Ein Fehlschlag bricht das Update nicht ab —
 # ohne Modell laeuft die Suche ohne Vektoren weiter.
-log "Stelle KI-Embeddingmodell bereit (einmalig, ~507 MB)..."
+log "Stelle KI-Embeddingmodell bereit (einmalig, ~470 MB)..."
 su - msm -c "
     cd $MSM_DIR/backend
     source venv/bin/activate

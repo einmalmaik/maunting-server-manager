@@ -45,23 +45,25 @@ docker==7.1.0
 boto3==1.43.40
 
 # --- Lokale Embeddings fuer das KI-Gedaechtnis ---
-# model2vec: statische Satz-Embeddings, gekapselt in services/ai_embedding_service.py.
+# onnxruntime + tokenizers: das Satzmodell paraphrase-multilingual-MiniLM-L12-v2
+# (Apache-2.0), gekapselt in services/ai_embedding_service.py.
 # Warum lokal: OpenRouter bietet nachweislich kein kostenloses Embedding-Modell
 # (402 bei text-embedding-3-small, 400 bei openrouter/free). Eine Suche, die
 # einen bezahlten Account voraussetzt, waere fuer einen Teil der Betreiber tot.
-# Warum diese Bibliothek: statische Embeddings sind eine vorberechnete Tabelle
-# plus Mittelung — kein neuronales Netz zur Laufzeit, also kein torch und keine
-# ONNX-Runtime. Gemessener Abhaengigkeitsbaum: 23 Pakete gegenueber 35 bei
-# mem0ai, ohne Telemetriepaket (mem0ai verlangt posthog, was
-# docs/agent-rules/dependencies.md unter harte Verbote listet), ohne zweites
-# Provider-SDK neben unserem SSRF-gepinnten Adapter und ohne Kollision mit
-# httpx==0.27.0 (mem0ai verlangt >=0.28).
+# Warum diese Pakete: **keines ist neu im Baum.** onnxruntime kommt ueber
+# pipecat-ai (~=1.24.3) fuer die Sprachpipeline, tokenizers kam bis zum
+# 07.10.2026 ueber model2vec, das hier vorher stand. Gepinnt werden beide, weil
+# ai_embedding_service sie jetzt direkt benutzt. Kein torch.
+# Der Wechsel von model2vec (statische Embeddings, potion-multilingual-128M) ist
+# gemessen: 14 statt 11 von 16 Fragen fanden die richtige Erinnerung auf
+# Platz 1, Einzelheiten in docs/agent-rules/dependencies.md.
 # Beruehrt keine Secrets: der Dienst bekommt nur den bereits entschluesselten
 # Erinnerungstext und liefert Zahlen zurueck. Kein Netzzugriff zur Laufzeit —
 # die Gewichte kommen einmalig ueber install.sh/update.sh.
-# Exit-Plan: ai_embedding_service kapselt die gesamte Nutzung; faellt die
-# Bibliothek weg, liefert encode() None und die Suche laeuft ohne Vektoren.
-model2vec==0.8.2
+# Exit-Plan: ai_embedding_service kapselt die gesamte Nutzung; faellt eine der
+# Bibliotheken weg, liefert encode() None und die Suche laeuft ohne Vektoren.
+onnxruntime==1.24.4
+tokenizers==0.21.1
 
 # --- WebSocket-Client fuer den Sprachmodus ---
 # websockets: die ausgehende Verbindung zur Stimme
@@ -100,8 +102,9 @@ websockets==16.0
 # damit ein defektes optionales Voice-Paket weder Anmeldung noch Serverbetrieb
 # blockiert. Sicherheitsentscheidung und Exit-Plan: docs/agent-rules/dependencies.md.
 pipecat-ai==1.8.1
-# Transitiv durch model2vec, hier gepinnt, weil ai_embedding_service direkt
-# damit rechnet (Normalisierung, Skalarprodukt).
+# Transitiv durch onnxruntime und pipecat-ai, hier gepinnt, weil
+# ai_embedding_service direkt damit rechnet (Mittelung, Normalisierung,
+# Skalarprodukt).
 numpy==2.5.1
 # Ebenfalls transitiv (huggingface_hub verlangt pyyaml>=5.1), hier gepinnt,
 # weil ai_skill_service direkt damit den Frontmatter der mitgelieferten

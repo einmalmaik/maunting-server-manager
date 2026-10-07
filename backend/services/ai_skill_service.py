@@ -501,9 +501,10 @@ def skill_index(db: Session, user: User, query: str = "") -> list[SkillView]:
     ist gemessen worden und trägt nicht. Gegen die neun mitgelieferten Skills:
     eine reine Konfigurationsfrage ("wieviel Holz bekomme ich pro Baum") liegt
     bei `node-problem` auf 0,49, waehrend die passende Frage nach Erreichbarkeit
-    ihren eigenen Skill nur auf 0,37 bringt. Statische Embeddings messen die
-    thematische Naehe zu "Gameserver", nicht die Frage "ist das ueberhaupt eine
-    Stoerung" — und genau die entscheidet hier. Jede Schwelle wuerde also
+    ihren eigenen Skill nur auf 0,37 bringt (gemessen mit dem früheren,
+    statischen Modell). Auch ein Satzmodell misst die thematische Naehe zu
+    "Gameserver", nicht die Frage "ist das ueberhaupt eine Stoerung" — und
+    genau die entscheidet hier. Jede Schwelle wuerde also
     richtige Treffer verwerfen und falsche behalten.
     Die Unterscheidung steht deshalb dort, wo sie hingehoert: in den
     Beschreibungen (jede sagt auch, wann sie *nicht* gilt) und in der Kopfzeile

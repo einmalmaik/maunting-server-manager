@@ -80,7 +80,7 @@ class AiMemoryEntry(Base):
     ist die Absage trotzdem: zur Menge, ab der sich ein Index lohnt, ist es
     keine Zehnerpotenz mehr, sondern Faktor zwei. Der nächste Anstieg des
     Deckels ist die Prüfung, die diesmal noch ausgegangen ist; sie steht in
-    ``docs/agent-rules/dependencies.md`` bei ``model2vec``.
+    ``docs/agent-rules/dependencies.md`` bei den lokalen Embeddings.
     """
 
     __tablename__ = "ai_memory_entries"

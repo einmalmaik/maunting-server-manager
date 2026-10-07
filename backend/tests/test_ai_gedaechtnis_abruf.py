@@ -188,10 +188,12 @@ def test_im_grossen_bereich_reicht_weniger_wenn_es_aus_dem_rauschen_ragt(
     """0,25 liegt unter 0,35 — trifft aber, wenn sonst alles bei null liegt.
 
     Gemessen an 100.000 Einträgen: über Sprachen hinweg stand die Antwort auf
-    Platz 1 und fiel an der festen Schwelle heraus. Unter 100 Zeilen sagt das
-    Rauschen nichts, dort gilt weiter 0,35.
+    Platz 1 und fiel an der festen Schwelle heraus. In einem kleinen Bereich
+    sagt das Rauschen nichts, dort gilt weiter 0,35. Wie klein, ist hier auf
+    100 heruntergesetzt, damit der Test nicht tausend Zeilen anlegt.
     """
     modell_ersetzen(monkeypatch, _schraeg)
+    monkeypatch.setattr(ai_gedaechtnis_abruf, "BEDEUTUNG_AB_ZEILEN", 100)
     _freigeben(db, regular_user)
     _merken(db, regular_user, "Jonas mag den Leuchtturm in Hörnum.", alter_tage=30)
     _fuellen(db, regular_user, fuellung)
@@ -199,6 +201,41 @@ def test_im_grossen_bereich_reicht_weniger_wenn_es_aus_dem_rauschen_ragt(
     abruf = ai_gedaechtnis_abruf.abrufen(db, regular_user, "Seezeichen?", budget=1_200)
 
     assert ("Leuchtturm" in (abruf.passend or "")) is erwartet
+
+
+def _verrauscht(texte: list[str]) -> list[list[float]]:
+    """Wie `_schraeg`, aber das Rauschen liegt bei 0,4 und das Ziel bei 0,45."""
+    vektoren = []
+    for text in texte:
+        vektor = [0.0] * ai_embedding_service.EMBEDDING_DIMENSIONS
+        if "Seezeichen" in text:
+            vektor[0] = 1.0
+        else:
+            naehe = 0.45 if "Leuchtturm" in text else 0.4
+            vektor[0], vektor[1 if "Leuchtturm" in text else 2] = naehe, (1 - naehe ** 2) ** 0.5
+        vektoren.append(vektor)
+    return vektoren
+
+
+def test_im_verrauschten_bereich_reicht_auch_die_feste_schwelle_nicht(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ähnelt alles der Frage, muss eine Zeile weiter herausragen als 0,35.
+
+    Die Gegenrichtung zum Test darüber. Bis zum Modellwechsel am 07.10.2026
+    war die Schwelle großer Bereiche bei 0,35 gedeckelt; mit dem Satzmodell
+    kamen damit zu „Wo wohnt meine Schwester?“ 211 Zeilen mit, die alle ein
+    wenig nach Familie klangen.
+    """
+    modell_ersetzen(monkeypatch, _verrauscht)
+    monkeypatch.setattr(ai_gedaechtnis_abruf, "BEDEUTUNG_AB_ZEILEN", 100)
+    _freigeben(db, regular_user)
+    _merken(db, regular_user, "Jonas mag den Leuchtturm in Hörnum.", alter_tage=30)
+    _fuellen(db, regular_user, 120)
+
+    abruf = ai_gedaechtnis_abruf.abrufen(db, regular_user, "Seezeichen?", budget=1_200)
+
+    assert abruf.passend is None
 
 def test_eine_anfrage_oeffnet_nur_kopf_und_kandidaten(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch,

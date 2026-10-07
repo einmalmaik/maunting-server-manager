@@ -531,9 +531,10 @@ Exit-Plan:
 
 ---
 
-## model2vec + numpy — Lokale Embeddings für das KI-Gedächtnis
+## onnxruntime + tokenizers + numpy — Lokale Embeddings für das KI-Gedächtnis
 
-Stand: 2026-08-08
+Stand: 2026-10-07 (bis dahin model2vec mit `potion-multilingual-128M`, seit
+2026-08-08)
 
 Problem:
   Die Auswahl der Erinnerungen bei knappem Kontextbudget lief über
@@ -557,7 +558,10 @@ Alternativen (gemessen, nicht geschätzt):
     SSRF-geschützten Ausgangspfad. `openai>=1.90.0` wäre ein zweites
     Provider-SDK neben dem eigenen Adapter, ohne dessen IP-Pinning.
   - fastembed: 30 Pakete, davon `onnxruntime` als großes Binärpaket. Kein
-    Ausschlussgrund, aber deutlich mehr Fläche bei gleichem Nutzen.
+    Ausschlussgrund, aber deutlich mehr Fläche bei gleichem Nutzen. (Am
+    2026-10-07 war `onnxruntime` über pipecat-ai ohnehin im Baum; der
+    Wechsel unten braucht fastembed trotzdem nicht — zwanzig Zeilen um
+    `InferenceSession` reichen.)
   - Postgres-Volltextsuche: sprachgebunden und damit am Problem vorbei.
   - pgvector: MSM verwaltet seinen PostgreSQL selbst mit `postgres:17-alpine`
     (config.managed_postgres_image), das die Erweiterung nicht enthält. Ein
@@ -583,42 +587,74 @@ Alternativen (gemessen, nicht geschätzt):
     dann ohne den Ausweg, dass zuerst das Format an der Reihe wäre.
 
 Security:
-  `model2vec` berührt weder Secrets noch Server-Verbindungen. Der Dienst
+  Die Bibliotheken berühren weder Secrets noch Server-Verbindungen. Der Dienst
   bekommt bereits entschlüsselten Erinnerungstext und liefert Zahlen zurück.
   Kein Netzwerkzugriff zur Laufzeit: die Gewichte kommen einmalig über
   `backend/scripts/fetch_embedding_model.py`, aufgerufen aus install.sh und
   update.sh. Ein Panel, das im Betrieb Gewichte nachlädt, wäre eine
   Supply-Chain-Fläche und ist ausdrücklich ausgeschlossen.
 
-  Der berechnete Vektor liegt unverschlüsselt neben dem weiterhin
-  DIS-verschlüsselten Wert. Begründung: der `key` derselben Zeile steht ohnehin
-  im Klartext und verrät mehr als 256 Gleitkommazahlen, aus denen sich der Text
-  nicht rekonstruieren lässt. Der Gewinn ist konkret — die Auswahl findet vor
-  dem Entschlüsseln statt, was pro Chatnachricht dutzende Sidecar-Aufrufe
-  spart. Restrisiko benannt: wer die Datenbank besitzt, kann mit den Vektoren
-  Vermutungen über Inhalte bestätigen, den Text aber nicht lesen.
+  Der Vektor liegt seit 2026-08-23 unter AES-GCM mit einem Schlüssel aus dem
+  Panel-Secret, nicht mehr im Klartext (`ai_memory_service._vektorschluessel`).
+  Das zählt seit dem Wechsel auf ein Satzmodell mehr als vorher: aus
+  kontextuellen Satzvektoren lässt sich kurzer Text teilweise zurückgewinnen
+  (Inversionsangriffe wie vec2text). Gegen bloßen Datenbankzugriff schützt die
+  Verschlüsselung. Wer zusätzlich die Panel-Umgebung hat, kommt an die Vektoren
+  — aber ebenso an den Wortindex (`ai_memory_begriffe`, HMAC mit einem Schlüssel
+  aus demselben Secret), aus dem sich die Wörter jeder Erinnerung per
+  Wörterbuch zurückrechnen lassen. Die Inversion gibt diesem Angreifer wenig,
+  was er nicht schon hat. Der Wert selbst bleibt stärker geschützt, sein
+  Schlüssel liegt im Sidecar.
 
 Transitive Fläche und Lizenz:
-  23 Pakete, im Wesentlichen numpy, tokenizers, huggingface_hub. MIT.
-  `huggingface_hub` verlangt `httpx<1,>=0.23.0` und ist damit mit unserem
-  `httpx==0.27.0` verträglich — geprüft per Auflösungstest.
+  Kein neues Paket. `onnxruntime` (MIT) kommt über pipecat-ai
+  (`onnxruntime~=1.24.3`), `tokenizers` (Apache-2.0) mit `huggingface_hub`
+  kam vorher über model2vec und steht jetzt selbst da. Weggefallen sind
+  model2vec und, soweit nichts anderes sie zieht, `safetensors`, `joblib`,
+  `jinja2`. `huggingface_hub` verlangt `httpx<1,>=0.23.0` und ist damit mit
+  unserem `httpx==0.27.0` verträglich.
 
 Modell:
-  `minishlab/potion-multilingual-128M`, MIT, rund 507 MB. Statische
-  Embeddings, also eine vorberechnete Tabelle plus Mittelung — kein neuronales
-  Netz zur Laufzeit, daher kein torch und keine ONNX-Runtime.
+  `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, Apache-2.0,
+  die ONNX-Fassung in voller Genauigkeit, rund 470 MB, 384 Zahlen je Vektor.
+  Ein Satzmodell mit 118 Mio. Parametern, gerechnet mit der ONNX-Runtime auf
+  zwei Kernen; kein torch.
 
-  Gemessene Grenzen, damit niemand mehr erwartet als es kann: `Zeitzone` zu
-  `timezone` 0,62, aber `Sicherung` zu `backup` nur 0,27. Unverwandtes trennt
-  es zuverlässig (nahe 0,0). In einem kleinen Vergleich über acht Fragen traf
-  Wortabgleich 5, Embedding 6, beide kombiniert 6. Deshalb ersetzt die
-  Bedeutungssuche den Wortabgleich nicht, sondern ergänzt ihn — im
-  Gameserver-Umfeld besteht viel Fachsprache aus Lehnwörtern, die wörtlich in
-  deutschen Einträgen stehen.
+  Gemessen am 2026-10-07 gegen den Vorgänger `potion-multilingual-128M`
+  (statische Embeddings, MIT, 507 MB), acht Erinnerungen in 20.000
+  Störsätzen und 16 thematisch nahen Störern („Der Bruder wohnt in Hamburg“),
+  je eine deutsche und eine englische Frage:
+
+  | | potion | MiniLM |
+  |---|---|---|
+  | richtige Erinnerung auf Platz 1 | 11 von 16 | 14 von 16 |
+  | „Was für ein Auto fahre ich?“ → „roter Kombi“ | Platz 1.025 | Platz 1 |
+  | „How much memory …“ → „Arbeitsspeicher“ | Platz 179 | Platz 1 |
+  | je Frage | 0,2 ms | 6 ms |
+  | Nachrechnen | 1.500 / s | 300 / s |
+
+  Die beiden Fehlgriffe von MiniLM sind Zweideutigkeiten („Backup der Fotos“
+  gegen das des Servers), die richtige stand dort auf Platz 2. Ebenfalls
+  gemessen und verworfen: `multilingual-e5-small` (16 von 16 unter den ersten
+  fünf, aber unverwandte Fragen kamen auf dieselbe Ähnlichkeit wie
+  zutreffende — keine Schwelle möglich), `granite-embedding-107m-multilingual`
+  (15 von 16), die int8-Fassung von MiniLM (gleiche Güte, aber auf AVX-512
+  bzw. ARM64 zugeschnitten).
+
+  Die Bedeutungssuche ersetzt den Wortabgleich weiterhin nicht, sondern
+  ergänzt ihn — im Gameserver-Umfeld besteht viel Fachsprache aus
+  Lehnwörtern, die wörtlich in deutschen Einträgen stehen.
+
+  Der Wechsel braucht keine Migration: gespeicherte Vektoren tragen die
+  Kennung ihres Modells, und der Takt (`ai_gedaechtnis_abruf.nachziehen`)
+  rechnet alles mit fremder Kennung oder fremder Länge neu, 1.000 Zeilen je
+  Lauf. `scripts/fetch_embedding_model.py` lädt das neue Modell und entfernt
+  danach das alte.
 
 Kapselung:
   Ausschließlich `services/ai_embedding_service.py`. Kein anderer Modulteil
-  importiert model2vec oder numpy direkt.
+  importiert onnxruntime oder tokenizers; numpy rechnen außerdem die
+  Vektorspeicher des Abrufs und der Pflege.
 
 Exit-Plan:
   `encode()` liefert `None`, wenn das Modell fehlt oder nicht lädt — die
@@ -649,7 +685,7 @@ Warum nicht selbst parsen:
 
 Warum diese:
   `pyyaml` steckt ohnehin im Abhängigkeitsbaum — `huggingface_hub` verlangt
-  `pyyaml>=5.1`, und `huggingface_hub` kommt über `model2vec`. Es wird hier nur
+  `pyyaml>=5.1`, und `huggingface_hub` kommt über `tokenizers`. Es wird hier nur
   ausdrücklich gepinnt, weil `ai_skill_service` es direkt benutzt: eine
   Bibliothek, auf die man sich verlässt, gehört in requirements.txt und nicht
   in den Zufall eines transitiven Baums.
