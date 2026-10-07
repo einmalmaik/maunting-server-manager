@@ -39,9 +39,9 @@ nichts davon. Sie übersetzt nur zwischen „gesprochen" und „getippt", und di
 **Eine Äusserung ist eine Anfrage.** Das ist der eine Punkt, an dem sich für
 den Betreiber etwas ändert: wo eine Sprachsitzung früher **eine** Buchung war,
 sind es jetzt **zwei je Zug** — eine für die Abschrift
-(`_abschrift_verbuchen`) und eine für den Lauf. Ein Rollenlimit
-``requests_per_minute`` von fünf zerreisst damit ein Gespräch, das vorher
-durchlief. Ohne gesetztes Limit (``None``, die Vorgabe) passiert nichts.
+(`_abschrift_verbuchen`) und eine für den Lauf. Beide zählen auf die
+Tokenlimits; ein Limit je Minute, das ein Gespräch zerreissen könnte, gibt es
+seit dem 07.10.2026 nicht mehr.
 """
 
 from __future__ import annotations
@@ -498,10 +498,8 @@ class Sprachbruecke:
             # Ein erschoepftes Kontingent kommt hier als **Rueckgabewert** an,
             # nicht als Ausnahme: `lauf_beginnen_nebenher` faengt
             # `AiQuotaExceeded` selbst und liefert `(None, ("AI_QUOTA_…", …))`.
-            # Genau diese zweite Buchung des Zugs (die erste ist die Abschrift)
-            # trifft ein `requests_per_minute`-Limit zuerst — ohne den `grund`
-            # hoerte der Sprechende „etwas ist kaputt", wo „warte eine Minute"
-            # die Auskunft ist.
+            # Ohne den `grund` hoerte der Sprechende „etwas ist kaputt", wo
+            # „das Kontingent ist aufgebraucht" die Auskunft ist.
             if code.startswith("AI_QUOTA_"):
                 await self._senden({"art": "stoerung", "grund": "kontingent"})
             else:

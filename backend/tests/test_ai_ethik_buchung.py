@@ -207,13 +207,13 @@ def test_rollenpreise_rechnen_mit_der_geschaetzten_aufteilung() -> None:
 async def test_ausgeschoepfte_grenzen_verhindern_den_rat_nicht(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Der Lauf hält seine Reservierung, alle Grenzen sind voll — beraten wird trotzdem.
+    """Der Lauf hält seine Reservierung, die Tokengrenze ist voll — beraten wird trotzdem.
 
-    Mit einer Reservierung vor der Beratung schwiege die Engine bei
-    *gleichzeitigen Vorgängen* = 1 immer: der Lauf selbst belegt den Platz.
+    Mit einer Reservierung vor der Beratung schwiege die Engine immer dann,
+    wenn der Lauf selbst den Rest des Tages belegt.
     """
     anbieter = _mit_preisen(db)
-    _grenzen(db, regular_user, concurrent_operations=1, requests_per_minute=1, daily_token_limit=10)
+    _grenzen(db, regular_user, daily_token_limit=10)
     reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=10)
     db.commit()
     _ethikmodell(monkeypatch)
@@ -229,14 +229,9 @@ async def test_ausgeschoepfte_grenzen_verhindern_den_rat_nicht(
 async def test_die_beratung_zaehlt_in_tokens_nicht_als_anfrage(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Die nächste Reservierung sieht die Tokens, aber keine Anfrage.
-
-    *Anfragen pro Minute* wird zuerst geprüft. Fällt die Reservierung an der
-    Tagesgrenze, ist sie an der Minutengrenze vorbeigekommen — obwohl die
-    Beratung in derselben Minute lag und die Grenze eins ist.
-    """
+    """Die nächste Reservierung sieht die Tokens der Beratung."""
     anbieter = _mit_preisen(db)
-    _grenzen(db, regular_user, requests_per_minute=1, daily_token_limit=1_500)
+    _grenzen(db, regular_user, daily_token_limit=1_500)
     _ethikmodell(monkeypatch)
     await _beraten(regular_user, anbieter)
 

@@ -194,20 +194,20 @@ async def test_auch_die_lauf_buchung_meldet_ihr_kontingent_mit_grund(
 ) -> None:
     """Die **zweite** Buchung des Zugs — der Lauf — trifft die Grenze zuerst.
 
-    Ein `requests_per_minute`-Limit zaehlt beide Buchungen; die Abschrift
-    (klein, zuerst) geht dann noch durch, der Lauf (die zweite Zaehlung)
-    nicht mehr. Und dieser Fehler kommt nicht als Ausnahme an:
-    `lauf_beginnen_nebenher` faengt `AiQuotaExceeded` selbst und liefert
-    `(None, ("AI_QUOTA_…", …))` zurueck. Ohne die Weiche am Rueckgabewert
-    hoerte der Sprechende „etwas ist kaputt", wo „warte eine Minute" die
-    Auskunft ist — genau der Fall, fuer den `grund` gebaut wurde.
+    Ein knappes Tokenlimit laesst die Abschrift (klein, zuerst) noch durch,
+    den Lauf (gross, danach) nicht mehr. Und dieser Fehler kommt nicht als
+    Ausnahme an: `lauf_beginnen_nebenher` faengt `AiQuotaExceeded` selbst und
+    liefert `(None, ("AI_QUOTA_…", …))` zurueck. Ohne die Weiche am
+    Rueckgabewert hoerte der Sprechende „etwas ist kaputt", wo „das Kontingent
+    ist aufgebraucht" die Auskunft ist — genau der Fall, fuer den `grund`
+    gebaut wurde.
     """
     from services import ai_stream_service
 
     zugang = _zugang(db)
 
     async def abgelehnt(**_kwargs):
-        return None, ("AI_QUOTA_REQUESTS_PER_MINUTE", "ai.chat.errors.quota")
+        return None, ("AI_QUOTA_DAILY_TOKEN_LIMIT", "ai.chat.errors.quota")
 
     monkeypatch.setattr(ai_stream_service, "lauf_beginnen_nebenher", abgelehnt)
     bruecke = _Attrappe(owner_user.id, zugang.id)

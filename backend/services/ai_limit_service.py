@@ -46,9 +46,7 @@ from services.role_service import effective_user_role_ids
 # NumericValueOutOfRange laufen — den der Router als „gleichzeitige Änderung“
 # (HTTP 409) meldet, also mit einer Ursache, die es gar nicht gibt.
 TOKEN_LIMIT_MAX = 2_147_483_647
-REQUESTS_PER_MINUTE_MAX = 10_000
-CONCURRENT_OPERATIONS_MAX = 100
-MONTHLY_COST_LIMIT_CENTS_MAX = 1_000_000_000
+REALTIME_MINUTES_LIMIT_MAX = 100_000
 DICTATION_MINUTES_LIMIT_MAX = 100_000
 # Hoechster Rang aus `ai_reasoning.RANGFOLGE` (minimal..max). Bewusst als Zahl
 # hier statt als Import: dieses Modul soll nicht von der Denklogik abhaengen,
@@ -128,14 +126,15 @@ MAX_MEMORY_ENTRIES_MAX = 5_000
 # fuer einen Bereich, der sich nicht aufloesen laesst.
 MAX_SYSTEM_SCOPE_ENTRIES = 100
 
+# Bis zum 07.10.2026 standen hier außerdem Anfragen pro Minute, gleichzeitige
+# KI-Vorgänge und zwei Kostenlimits in Cent. Die Tokenlimits decken die Kosten
+# ab, und Anfragen pro Minute begrenzt das Panel ohnehin je IP; die Liste war
+# dem Betreiber zu lang und zur Hälfte unverständlich.
 LIMIT_FIELDS = (
     "daily_token_limit",
     "weekly_token_limit",
     "monthly_token_limit",
-    "requests_per_minute",
-    "concurrent_operations",
-    "monthly_cost_limit_cents",
-    "monthly_realtime_cost_limit_cents",
+    "monthly_realtime_minutes_limit",
     "monthly_dictation_minutes_limit",
     # Kein Kontingent, sondern eine Obergrenze fuer die Denktiefe — passt aber
     # in genau dieselbe Aufloesung: "None heisst unbegrenzt", "der hoechste
@@ -155,10 +154,7 @@ LIMIT_MAXIMA = {
     "daily_token_limit": TOKEN_LIMIT_MAX,
     "weekly_token_limit": TOKEN_LIMIT_MAX,
     "monthly_token_limit": TOKEN_LIMIT_MAX,
-    "requests_per_minute": REQUESTS_PER_MINUTE_MAX,
-    "concurrent_operations": CONCURRENT_OPERATIONS_MAX,
-    "monthly_cost_limit_cents": MONTHLY_COST_LIMIT_CENTS_MAX,
-    "monthly_realtime_cost_limit_cents": MONTHLY_COST_LIMIT_CENTS_MAX,
+    "monthly_realtime_minutes_limit": REALTIME_MINUTES_LIMIT_MAX,
     "monthly_dictation_minutes_limit": DICTATION_MINUTES_LIMIT_MAX,
     "max_reasoning_effort": MAX_REASONING_EFFORT_MAX,
     "max_memory_entries": MAX_MEMORY_ENTRIES_MAX,
@@ -172,10 +168,8 @@ class EffectiveAiLimits:
     daily_token_limit: int | None
     weekly_token_limit: int | None
     monthly_token_limit: int | None
-    requests_per_minute: int | None
-    concurrent_operations: int | None
-    monthly_cost_limit_cents: int | None
-    monthly_realtime_cost_limit_cents: int | None
+    #: Monatliche Sprachsitzungszeit in Minuten; ``None`` heisst unbegrenzt.
+    monthly_realtime_minutes_limit: int | None
     #: Monatliches Diktier- und Transkriptionszeitlimit in Minuten; ``None`` heisst unbegrenzt.
     monthly_dictation_minutes_limit: int | None
     #: Hoechste erlaubte Denkstufe als Rang; ``None`` heisst unbegrenzt.

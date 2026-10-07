@@ -1806,13 +1806,20 @@ die Deutung — ein Codeblock ist vorgelesen nichts als Satzzeichen.
 
 ### Kontingent
 
-Im Realtime-Modus belegt jede Sitzung eine logische Anfrage und einen
-gleichzeitigen Vorgang. Jede abgeschlossene OpenAI-Antwort erhöht die Zahl der
+Im Realtime-Modus (Realtime, GPT-Live, Gemini Live) ist jede Sitzung eine
+logische Anfrage. Jede abgeschlossene Antwort erhöht die Zahl der
 Provideranfragen. Text- und Audiotokens werden für Ein- und Ausgabe getrennt
 gespeichert und mit den vier hinterlegten Preisen bewertet. Cached Input wird
 zum jeweiligen normalen Eingabepreis berechnet. Vor Sitzungsbeginn und nach
-jeder Antwort gelten dieselben Rollenlimits wie im Chat; Antworten sind
+jeder Antwort gelten dieselben Tokenlimits wie im Chat; Antworten sind
 serverseitig auf 512 Ausgabetokens begrenzt.
+
+Dazu kommt das Rollenlimit **Sprachminuten im Monat**: gezählt wird, wie lange
+eine Sitzung offen war, auf allen drei Wegen gleich. Eine Sitzung beginnt nur
+mit mindestens einer Sekunde Rest und endet von selbst, wenn der Rest
+aufgebraucht ist; die Oberfläche meldet dann das Kontingent statt „abgelaufen".
+Bis zum 07.10.2026 stand an dieser Stelle ein Kostenlimit in Cent; beim Umstieg
+wurde ein gesperrtes (0) zu 0 Minuten, jeder andere Betrag zu „unbegrenzt".
 
 Die folgende Abrechnung beschreibt den Legacy-Modus:
 
@@ -1820,13 +1827,11 @@ Die folgende Abrechnung beschreibt den Legacy-Modus:
 den Betreiber etwas geändert hat: wo eine Sprachsitzung früher **eine** Buchung
 war, bucht jetzt jeder Zug zweimal — einmal die Abschrift des Gesprochenen,
 einmal den Lauf selbst, beide über denselben Weg gezählt wie eine getippte
-Nachricht. Ein Rollenlimit *Anfragen pro Minute* von fünf zerreisst damit ein
-Gespräch, das vorher durchlief. Ohne gesetztes Limit passiert nichts.
+Nachricht.
 
-Der Gewinn ist, dass Tokengrenzen und Kostengrenze den Sprachmodus genauso
-binden wie den Chat: dieselbe Rechnung, dieselben vom Anbieter gemeldeten
-Zahlen, derselbe gepflegte Rückfallpreis am Zugang. Die früheren Lücken — „die
-Kostengrenze bindet den Sprachmodus überhaupt nicht" und „das Zuhören läuft an
+Der Gewinn ist, dass die Tokengrenzen den Sprachmodus genauso binden wie den
+Chat: dieselbe Rechnung, dieselben vom Anbieter gemeldeten Zahlen, derselbe
+gepflegte Rückfallpreis am Zugang. Die frühere Lücke — „das Zuhören läuft an
 allen Grenzen vorbei" — gibt es nicht mehr.
 
 Eine Eigenheit hat die Abschrift-Buchung: sie erfolgt **nach** dem Hören, nicht

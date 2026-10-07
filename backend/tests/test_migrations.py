@@ -722,3 +722,72 @@ def test_jeder_erlaubte_zweck_passt_in_seine_spalte(db) -> None:
         ))
     db.commit()
     assert {e.zweck for e in db.query(AiUsageEvent).filter(AiUsageEvent.user_id == benutzer.id)} == set(ZWECKE)
+
+
+def test_ki_limits_umbau_hin_und_zurueck(pg_wegwerf):
+    """Ein gesperrtes Echtzeitbudget bleibt gesperrt, jeder Betrag wird unbegrenzt.
+
+    Cent lassen sich nicht in Minuten umrechnen, ohne einen Preis zu raten.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, inspect, text
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+
+    db_url = pg_wegwerf("ki-limits-umbau")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    alte = {"requests_per_minute", "concurrent_operations", "monthly_cost_limit_cents",
+            "monthly_realtime_cost_limit_cents"}
+
+    def spalten(tabelle: str) -> set[str]:
+        return {s["name"] for s in inspect(engine).get_columns(tabelle)}
+
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+        command.downgrade(config, "20261008_02")
+        assert alte <= spalten("role_ai_limits")
+        assert "monthly_realtime_minutes_limit" not in spalten("role_ai_limits")
+        assert "realtime_seconds" not in spalten("ai_usage_events")
+
+        with engine.begin() as conn:
+            for rid, cent in ((1, 0), (2, 500), (3, None)):
+                conn.execute(text(
+                    "INSERT INTO roles (id, name, is_system, created_at) "
+                    "VALUES (:i, :n, false, now())"
+                ), {"i": rid, "n": f"rolle-{rid}"})
+                conn.execute(text(
+                    "INSERT INTO role_ai_limits (role_id, daily_token_limit, requests_per_minute, "
+                    "monthly_realtime_cost_limit_cents, updated_at) VALUES (:i, 100, 5, :c, now())"
+                ), {"i": rid, "c": cent})
+        command.upgrade(config, "20261008_03")
+
+        assert not alte & spalten("role_ai_limits")
+        assert "realtime_seconds" in spalten("ai_usage_events")
+        with engine.connect() as conn:
+            zeilen = dict(conn.execute(text(
+                "SELECT role_id, monthly_realtime_minutes_limit FROM role_ai_limits"
+            )).all())
+            tokens = conn.execute(text("SELECT DISTINCT daily_token_limit FROM role_ai_limits")).all()
+        assert zeilen == {1: 0, 2: None, 3: None}
+        assert tokens == [(100,)]
+
+        command.downgrade(config, "20261008_02")
+        assert alte <= spalten("role_ai_limits")
+        assert "realtime_seconds" not in spalten("ai_usage_events")
+        with engine.connect() as conn:
+            gesperrt = conn.execute(text(
+                "SELECT role_id FROM role_ai_limits WHERE monthly_realtime_cost_limit_cents = 0"
+            )).scalars().all()
+        assert gesperrt == [1]
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+        settings.database_url = vorher

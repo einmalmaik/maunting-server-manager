@@ -1955,8 +1955,6 @@ async def test_ai_benchmark(
 # Was dabei gemessen wird, ist bewusst nicht "wie schnell ist die KI". Gemessen
 # wird, **welche Grenze zuerst zuschlaegt** und bei welcher Stufe:
 #
-#   * das Kontingent je Benutzer (`ai_limit_service.concurrent_operations`,
-#     geprueft in `ai_usage_service.reserve_ai_usage`),
 #   * der Verbindungspool der Datenbank (`database.py`: pool_size=10,
 #     max_overflow=20, pool_timeout=60 — nur bei PostgreSQL),
 #   * die Kanalgrenze des Vermittlers (`ai_run_broker.MAX_KANAELE` = 256),
@@ -2549,12 +2547,6 @@ def _engpassbericht(stufen: list[Stufe]) -> list[str]:
             "auf den Anbieter wartet."
         )
     zeilen.append(
-        "  UNGEMESSEN: die Nebenlaeuferschranke je Benutzer "
-        "(concurrent_operations) greift im Chatpfad nie, weil ein Benutzer "
-        "genau eine Unterhaltung hat und eine neue Nachricht den laufenden Lauf "
-        "abloest. Sie zaehlt fuer Aufgaben- und Guardian-Laeufe."
-    )
-    zeilen.append(
         "  GEMESSEN auf einer eigenen PostgreSQL-Datenbank mit den Poolwerten "
         "aus database.py (nicht auf der geteilten Verbindung der Suite)."
     )
@@ -2707,10 +2699,6 @@ async def test_ai_last_gleichzeitigkeit(
                     "database.max_overflow": POOL_MAX_OVERFLOW,
                     "database.pool_timeout": POOL_TIMEOUT,
                     "ai_stream_service._leseplaetze": 8,
-                    "ai_limit_service.concurrent_operations": (
-                        "im Chatpfad wirkungslos, da ein Benutzer eine "
-                        "Unterhaltung hat und der Vorgaenger abgeloest wird"
-                    ),
                 },
                 "stufen": [stufe.als_dict() for stufe in stufen],
             },

@@ -123,6 +123,9 @@ class RealtimeVorbereitung:
     #: sie nicht mit; GPT-Live und Gemini-Live brauchen keins.
     mitschreiben: bool = False
     mitschrift_modell: str = ""
+    #: Wie lange die Sitzung höchstens dauert, in Sekunden: die feste Grenze
+    #: oder das, was vom Minutenlimit der Rolle noch übrig ist (`hoechstdauer`).
+    hoechstdauer: float = MAX_SITZUNGSSEKUNDEN
 
     def __post_init__(self):
         if self.tools is None:
@@ -316,12 +319,23 @@ def gedaechtnis_anhang(memory: str) -> str:
     )
 
 
+def hoechstdauer(db: Session, user: User) -> float:
+    """Wie lange eine Sitzung dieses Benutzers jetzt höchstens laufen darf.
+
+    Die feste Grenze, außer das Minutenlimit der Rolle lässt weniger übrig.
+    Gilt auf allen drei Sprachwegen; danach endet die Sitzung mit
+    „Kontingent“ statt mit „abgelaufen“ (`RealtimeSitzung.fuehren`).
+    """
+    rest = ai_usage_service.realtime_restsekunden(db, user)
+    return float(MAX_SITZUNGSSEKUNDEN if rest is None else min(MAX_SITZUNGSSEKUNDEN, rest))
+
+
 def reservieren(db: Session, *, provider: AiProvider, user: User) -> tuple[str, int]:
     """Gespräch und Verbrauchszeile der Sitzung — (conversation_id, usage_event_id).
 
     Die Sitzung selbst ist die logische Anfrage; gebucht wird erst, was der
     Anbieter bestätigt. Ob überhaupt noch Luft ist, entscheidet hier die
-    Reservierung — mit Mindestluft, sobald der Zugang einen Preis führt.
+    Reservierung: ein Token und eine Sekunde vom Minutenlimit.
     """
     conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
     usage_event = ai_usage_service.reserve_ai_usage(
@@ -335,9 +349,6 @@ def reservieren(db: Session, *, provider: AiProvider, user: User) -> tuple[str, 
         provider_id=provider.id,
         model=provider.realtime_model,
         minimum_token_headroom=1,
-        minimum_cost_headroom_microunits=(
-            1 if any(int(getattr(provider, feld) or 0) for feld in ai_provider_service.realtime_preisfelder(provider)) else 0
-        ),
         realtime=True,
     )
     db.commit()
@@ -414,7 +425,19 @@ def vorbereiten(
         disable_safety=bool(getattr(provider, "disable_safety", False)),
         mitschreiben=schreibt_mit,
         mitschrift_modell=mitschrift_modell,
+        hoechstdauer=hoechstdauer(db, user),
     )
+
+
+def zeit_um(v: RealtimeVorbereitung) -> dict:
+    """Was das Panel hört, wenn die Höchstdauer einer Sitzung erreicht ist.
+
+    Hat das Minutenlimit sie gekürzt, ist es eine Kontingentstörung — die
+    Oberfläche sagt dann, warum, statt nur „abgelaufen“.
+    """
+    if v.hoechstdauer < MAX_SITZUNGSSEKUNDEN:
+        return {"art": "stoerung", "grund": "realtime_kontingent"}
+    return {"art": "abgelaufen"}
 
 
 def _session_config(v: RealtimeVorbereitung) -> dict:
@@ -1191,7 +1214,7 @@ class RealtimeSitzung:
                 except ai_usage_service.AiQuotaExceeded as exc:
                     grund = (
                         "realtime_kontingent"
-                        if exc.reason == "monthly_realtime_cost_limit_cents"
+                        if exc.reason == "monthly_realtime_minutes_limit"
                         else "kontingent"
                     )
                     await self._debug_senden("REALTIME_QUOTA", hint=grund)
@@ -1368,11 +1391,11 @@ class RealtimeSitzung:
             await self._panel_senden({"art": "webrtc_answer", "sdp": answer})
             await self._panel_senden({"art": "zustand", "zustand": "bereit"})
             await asyncio.wait_for(
-                self._laufen(), timeout=MAX_SITZUNGSSEKUNDEN
+                self._laufen(), timeout=self.v.hoechstdauer
             )
         except asyncio.TimeoutError:
             self.lage.abgelaufen = True
-            await self._panel_senden({"art": "abgelaufen"})
+            await self._panel_senden(zeit_um(self.v))
         except WebSocketDisconnect:
             pass
         except RealtimeSitzungsfehler as exc:

@@ -217,7 +217,7 @@ class AiProvider(Base):
     # gebucht. Hierher greift die Abrechnung erst, wenn der Anbieter schweigt —
     # und markiert die Zeile dann als `cost_source='estimate'`, damit niemand
     # eine Schaetzung fuer eine Messung haelt. Ohne Wert bleiben die Kosten bei
-    # null und das rollenbasierte Kostenlimit greift nicht; MSM raet keinen Preis.
+    # null; MSM raet keinen Preis.
     token_price_micro_usd_per_million: Mapped[int | None] = mapped_column(
         BigInteger, nullable=True
     )

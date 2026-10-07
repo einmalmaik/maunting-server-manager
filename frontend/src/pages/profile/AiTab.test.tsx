@@ -49,8 +49,7 @@ vi.mock('@/api/client', async () => {
           },
           limits: {
             daily_token_limit: 1_000, weekly_token_limit: null,
-            monthly_token_limit: null, requests_per_minute: null,
-            concurrent_operations: null, monthly_cost_limit_cents: null,
+            monthly_token_limit: null, monthly_realtime_minutes_limit: null,
             role_ids: [],
           },
         })

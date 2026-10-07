@@ -70,6 +70,7 @@ from services.ai_voice.realtime_session import (
     gedaechtnis,
     lage_abschnitt,
     gedaechtnis_anhang,
+    hoechstdauer,
     mitschreiben,
     reservieren,
     sprachregel,
@@ -274,6 +275,7 @@ def vorbereiten(
         backend_model=backend,
         backend_instructions=backend_anweisungen(basis_prompt, memory, lage),
         mitschreiben=schreibt_mit,
+        hoechstdauer=hoechstdauer(db, user),
     )
 
 
@@ -657,7 +659,7 @@ class LiveSitzung(RealtimeSitzung):
         except ai_usage_service.AiQuotaExceeded as exc:
             grund = (
                 "realtime_kontingent"
-                if exc.reason == "monthly_realtime_cost_limit_cents"
+                if exc.reason == "monthly_realtime_minutes_limit"
                 else "kontingent"
             )
             await self._debug_senden("REALTIME_QUOTA", hint=grund)

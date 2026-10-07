@@ -39,11 +39,12 @@ from services.ai_stream.read_tools import (
 )
 from services.ai_voice import desktop_auftraege
 from services.ai_voice import interactions as voice_interactions
-from services.ai_voice.contracts import Lage, MAX_SITZUNGSSEKUNDEN, voice_tool_frame
+from services.ai_voice.contracts import Lage, voice_tool_frame
 from services.ai_voice.mitschrift import Mitschrift
 from services.ai_voice.realtime_session import (
     MAX_TOOL_ARGUMENTE_ZEICHEN,
     RealtimeVorbereitung,
+    zeit_um,
 )
 from services.ai_redaction import redact_sensitive_text
 from services.ai_voice_debug import emit as voice_debug
@@ -684,7 +685,7 @@ class GeminiLiveSitzung:
                         # endet, `fuehren` schliesst und rechnet ab.
                         grund = (
                             "realtime_kontingent"
-                            if exc.reason == "monthly_realtime_cost_limit_cents"
+                            if exc.reason == "monthly_realtime_minutes_limit"
                             else "kontingent"
                         )
                         await self._debug_senden("REALTIME_QUOTA", hint=grund)
@@ -883,7 +884,7 @@ class GeminiLiveSitzung:
 
             done, pending = await asyncio.wait(
                 {client_task, google_task, desktop_task},
-                timeout=MAX_SITZUNGSSEKUNDEN,
+                timeout=self.v.hoechstdauer,
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if not done:
@@ -894,7 +895,7 @@ class GeminiLiveSitzung:
                 task.cancel()
             await asyncio.gather(watchdog_task, *pending, return_exceptions=True)
             if not done:
-                await self._panel_senden({"art": "abgelaufen"})
+                await self._panel_senden(zeit_um(self.v))
             for task in done:
                 task.result()
         except WebSocketDisconnect:

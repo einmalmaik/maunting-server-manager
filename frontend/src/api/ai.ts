@@ -1117,10 +1117,7 @@ export interface AiUsageMine extends AiUsageEntry {
     daily_token_limit: number | null
     weekly_token_limit: number | null
     monthly_token_limit: number | null
-    requests_per_minute: number | null
-    concurrent_operations: number | null
-    monthly_cost_limit_cents: number | null
-    monthly_realtime_cost_limit_cents: number | null
+    monthly_realtime_minutes_limit: number | null
     monthly_dictation_minutes_limit: number | null
     role_ids: number[]
   }

@@ -713,7 +713,7 @@ async def stream_chat_completion(
     und Gemini 3.5 Flash ``default_enabled: true``. Ohne ausdrueckliches
     ``enabled: false`` dachte das Modell also weiter und wurde abgerechnet —
     der Schalter blendete nur die Denkschritte aus. Fuer ein Panel mit
-    Kostenlimits je Rolle ist das die falsche Voreinstellung; ein
+    Tokenlimits je Rolle ist das die falsche Voreinstellung; ein
     Kostenschalter darf sich nicht auf Anbieterdefaults verlassen. Bei
     Anbietern ohne eine Denk-Marke in ``anfrage_erweiterungen`` bleibt genau
     dieses Restrisiko bestehen — dort kann MSM das Denken schlicht nicht

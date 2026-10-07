@@ -283,9 +283,7 @@ def main() -> int:
             daily_token_limit=tokens,
             weekly_token_limit=tokens * 5,
             monthly_token_limit=tokens * 20,
-            requests_per_minute=20,
-            concurrent_operations=2,
-            monthly_cost_limit_cents=1000,
+            monthly_realtime_minutes_limit=5,
             max_reasoning_effort=3,
         ))
         tarife[name] = rolle

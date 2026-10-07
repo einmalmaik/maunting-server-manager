@@ -41,10 +41,7 @@ const row: AiRoleLimits = {
   daily_token_limit: 10_000,
   weekly_token_limit: 50_000,
   monthly_token_limit: 200_000,
-  requests_per_minute: 20,
-  concurrent_operations: 2,
-  monthly_cost_limit_cents: 5_000,
-  monthly_realtime_cost_limit_cents: 2_500,
+  monthly_realtime_minutes_limit: 30,
   monthly_dictation_minutes_limit: 120,
   max_memory_entries: 250,
   // Rang 4 = "hoch". Diese Rolle darf tief denken lassen, aber nicht maximal.
@@ -60,10 +57,7 @@ const blankRow: AiRoleLimits = {
   daily_token_limit: null,
   weekly_token_limit: null,
   monthly_token_limit: null,
-  requests_per_minute: null,
-  concurrent_operations: null,
-  monthly_cost_limit_cents: null,
-  monthly_realtime_cost_limit_cents: null,
+  monthly_realtime_minutes_limit: null,
   monthly_dictation_minutes_limit: null,
   max_memory_entries: null,
   max_reasoning_effort: null,
@@ -139,10 +133,7 @@ describe('AiTab', () => {
           daily_token_limit: 10_000,
           weekly_token_limit: 50_000,
           monthly_token_limit: null,
-          requests_per_minute: 20,
-          concurrent_operations: 2,
-          monthly_cost_limit_cents: 5_000,
-          monthly_realtime_cost_limit_cents: 2_500,
+          monthly_realtime_minutes_limit: 30,
           monthly_dictation_minutes_limit: 120,
           // Die Reihenfolge ist hier bedeutsam: verglichen werden zwei
           // Zeichenketten, und der Rumpf entsteht in der Reihenfolge von
@@ -223,7 +214,7 @@ describe('AiTab', () => {
     // einen, der etwas zu sagen hat, mit übersehen lassen.
     expect(screen.getAllByText(i18n.t('aiSettings.maxMemoryEntriesHint'))).toHaveLength(1)
     expect(screen.getByLabelText('Tägliches Tokenlimit: ai-vip')).not.toHaveAttribute('aria-describedby')
-    expect(screen.getByLabelText('Monatliches Kostenlimit (Cent): ai-vip')).not.toHaveAttribute('aria-describedby')
+    expect(screen.getByLabelText('Monatliches Tokenlimit: ai-vip')).not.toHaveAttribute('aria-describedby')
     // Auch die Auswahl, nicht nur die Zahlenfelder: sie ist das einzige Feld
     // mit einem anderen Bauteil und würde einen Fehler dort sonst verstecken.
     expect(screen.getByLabelText('Höchste Denkstufe: ai-vip')).not.toHaveAttribute('aria-describedby')

@@ -626,9 +626,8 @@ def _global_tool_definitions() -> list[dict]:
                 "daily_token_limit": {"type": ["integer", "null"], "minimum": 0},
                 "weekly_token_limit": {"type": ["integer", "null"], "minimum": 0},
                 "monthly_token_limit": {"type": ["integer", "null"], "minimum": 0},
-                "requests_per_minute": {"type": ["integer", "null"], "minimum": 0},
-                "concurrent_operations": {"type": ["integer", "null"], "minimum": 0},
-                "monthly_cost_limit_cents": {"type": ["integer", "null"], "minimum": 0},
+                "monthly_realtime_minutes_limit": {"type": ["integer", "null"], "minimum": 0},
+                "monthly_dictation_minutes_limit": {"type": ["integer", "null"], "minimum": 0},
                 "max_reasoning_effort": {"type": ["integer", "null"], "minimum": 0},
                 "max_memory_entries": {
                     "type": ["integer", "null"],

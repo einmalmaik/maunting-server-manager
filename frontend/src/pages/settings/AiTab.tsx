@@ -49,10 +49,7 @@ export interface AiRoleLimits {
   daily_token_limit: number | null
   weekly_token_limit: number | null
   monthly_token_limit: number | null
-  requests_per_minute: number | null
-  concurrent_operations: number | null
-  monthly_cost_limit_cents: number | null
-  monthly_realtime_cost_limit_cents: number | null
+  monthly_realtime_minutes_limit: number | null
   monthly_dictation_minutes_limit: number | null
   /**
    * Wieviele Memory-Eintraege in **je einem Bereich** liegen duerfen — hier
@@ -137,10 +134,14 @@ const FIELD_DEFINITIONS: Array<{
   { key: 'daily_token_limit', labelKey: 'aiSettings.dailyTokens', max: 2_147_483_647, step: 1_000 },
   { key: 'weekly_token_limit', labelKey: 'aiSettings.weeklyTokens', max: 2_147_483_647, step: 10_000 },
   { key: 'monthly_token_limit', labelKey: 'aiSettings.monthlyTokens', max: 2_147_483_647, step: 10_000 },
-  { key: 'requests_per_minute', labelKey: 'aiSettings.requestsPerMinute', max: 10_000, step: 1 },
-  { key: 'concurrent_operations', labelKey: 'aiSettings.concurrentOperations', max: 100, step: 1 },
-  { key: 'monthly_cost_limit_cents', labelKey: 'aiSettings.monthlyCostCents', max: 1_000_000_000, step: 100 },
-  { key: 'monthly_realtime_cost_limit_cents', labelKey: 'aiSettings.monthlyRealtimeCostCents', max: 1_000_000_000, step: 100 },
+  // Muss `REALTIME_MINUTES_LIMIT_MAX` im Backend entsprechen.
+  {
+    key: 'monthly_realtime_minutes_limit',
+    labelKey: 'aiSettings.monthlyRealtimeMinutes',
+    max: 100_000,
+    step: 5,
+    hintKey: 'aiSettings.monthlyRealtimeMinutesHint',
+  },
   {
     key: 'monthly_dictation_minutes_limit',
     labelKey: 'aiSettings.monthlyDictationMinutes',

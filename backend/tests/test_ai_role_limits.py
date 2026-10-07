@@ -118,7 +118,7 @@ def test_unconfigured_role_does_not_lift_a_configured_one(
     effective = resolve_effective_limits(db, regular_user)
 
     assert effective.daily_token_limit == 100
-    assert effective.requests_per_minute == 0
+    assert effective.monthly_realtime_minutes_limit == 0
 
 
 def test_unconfigured_role_is_listed_as_unlimited_not_zero(
@@ -145,8 +145,8 @@ def test_service_rejects_invalid_internal_limit_values(db: Session) -> None:
     role = _role(db, "ai-invalid-internal")
     with pytest.raises(ValueError, match="daily_token_limit"):
         set_role_limit(db, role.id, _limits(daily_token_limit=True))
-    with pytest.raises(ValueError, match="requests_per_minute"):
-        set_role_limit(db, role.id, _limits(requests_per_minute=10_001))
+    with pytest.raises(ValueError, match="monthly_realtime_minutes_limit"):
+        set_role_limit(db, role.id, _limits(monthly_realtime_minutes_limit=100_001))
 
 
 def test_erlaubte_maxima_passen_in_die_spaltenbreite() -> None:
@@ -173,12 +173,12 @@ def test_highest_limit_and_explicit_unlimited_win(
     set_role_limit(
         db,
         standard.id,
-        _limits(daily_token_limit=1_000, requests_per_minute=5),
+        _limits(daily_token_limit=1_000, monthly_realtime_minutes_limit=5),
     )
     set_role_limit(
         db,
         vip.id,
-        _limits(daily_token_limit=10_000, requests_per_minute=None),
+        _limits(daily_token_limit=10_000, monthly_realtime_minutes_limit=None),
     )
     db.commit()
     set_user_roles(db, regular_user, [standard.id, vip.id])
@@ -186,7 +186,7 @@ def test_highest_limit_and_explicit_unlimited_win(
     effective = resolve_effective_limits(db, regular_user)
 
     assert effective.daily_token_limit == 10_000
-    assert effective.requests_per_minute is None
+    assert effective.monthly_realtime_minutes_limit is None
     assert effective.weekly_token_limit == 0
 
 
@@ -201,9 +201,7 @@ def test_owner_updates_limits_atomically_and_audited(
         daily_token_limit=25_000,
         weekly_token_limit=100_000,
         monthly_token_limit=None,
-        requests_per_minute=20,
-        concurrent_operations=2,
-        monthly_cost_limit_cents=5_000,
+        monthly_realtime_minutes_limit=30,
     )
 
     response = client.put(
@@ -235,7 +233,7 @@ def test_update_rejects_partial_negative_and_extreme_payloads(
     cases = [
         {"daily_token_limit": 1},
         _limits(daily_token_limit=-1),
-        _limits(requests_per_minute=10_001),
+        _limits(monthly_realtime_minutes_limit=100_001),
     ]
 
     for payload in cases:
@@ -307,9 +305,7 @@ def _enable_usage(db: Session, user: User, role: Role, **overrides: int | None) 
         daily_token_limit=10_000,
         weekly_token_limit=10_000,
         monthly_token_limit=10_000,
-        requests_per_minute=10,
-        concurrent_operations=2,
-        monthly_cost_limit_cents=100,
+        monthly_realtime_minutes_limit=None,
     )
     values.update(overrides)
     set_role_limit(
@@ -367,11 +363,16 @@ def test_usage_reservation_counts_retry_exactly_once(
     assert completed_retry.accounted_tokens == 450
 
 
-def test_usage_reservation_enforces_tokens_rpm_and_concurrency(
+def test_usage_reservation_enforces_tokens(
     db: Session,
     regular_user: User,
 ) -> None:
-    """Alle synchron prüfbaren Limits greifen vor einem späteren Provider-Aufruf."""
+    """Die Tokenlimits greifen vor einem späteren Provider-Aufruf.
+
+    Anfragen pro Minute und gleichzeitige Vorgänge sind am 07.10.2026
+    entfallen: eine zweite Anfrage in derselben Minute geht durch, solange
+    Tokens übrig sind.
+    """
     role = _role(db, "ai-enforced-usage")
     _enable_usage(
         db,
@@ -380,8 +381,6 @@ def test_usage_reservation_enforces_tokens_rpm_and_concurrency(
         daily_token_limit=100,
         weekly_token_limit=100,
         monthly_token_limit=100,
-        requests_per_minute=1,
-        concurrent_operations=1,
     )
     now = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
     event = reserve_ai_usage(
@@ -393,14 +392,15 @@ def test_usage_reservation_enforces_tokens_rpm_and_concurrency(
     )
     db.commit()
 
-    with pytest.raises(AiQuotaExceeded, match="requests_per_minute"):
-        reserve_ai_usage(
-            db,
-            regular_user,
-            request_id=uuid4(),
-            estimated_tokens=1,
-            now=now,
-        )
+    zweite = reserve_ai_usage(
+        db,
+        regular_user,
+        request_id=uuid4(),
+        estimated_tokens=1,
+        now=now,
+    )
+    assert zweite.status == "reserved"
+    fail_ai_usage(db, zweite)
 
     complete_ai_usage(db, event, actual_tokens=80, actual_cost_microunits=0, now=now)
     db.commit()
@@ -420,7 +420,7 @@ def test_failed_usage_frees_reservation_and_conflicting_retry_is_rejected(
 ) -> None:
     """Fehler erfinden keinen Verbrauch; UUID-Reuse mit anderer Payload bleibt verboten."""
     role = _role(db, "ai-failed-usage")
-    _enable_usage(db, regular_user, role, concurrent_operations=1)
+    _enable_usage(db, regular_user, role)
     request_id = uuid4()
     event = reserve_ai_usage(
         db,
@@ -428,13 +428,6 @@ def test_failed_usage_frees_reservation_and_conflicting_retry_is_rejected(
         request_id=request_id,
         estimated_tokens=50,
     )
-    with pytest.raises(AiQuotaExceeded, match="concurrent_operations"):
-        reserve_ai_usage(
-            db,
-            regular_user,
-            request_id=uuid4(),
-            estimated_tokens=1,
-        )
     fail_ai_usage(db, event)
     db.commit()
 
@@ -454,6 +447,97 @@ def test_failed_usage_frees_reservation_and_conflicting_retry_is_rejected(
             request_id=request_id,
             estimated_tokens=51,
         )
+
+
+# ── Sprachminuten ──────────────────────────────────────────────────────
+
+
+def _sprachsitzung(db: Session, user: User, *, vor_sekunden: int = 0) -> AiUsageEvent:
+    """Eröffnet eine Sprachsitzung, die ``vor_sekunden`` begonnen hat."""
+    event = reserve_ai_usage(
+        db, user, request_id=uuid4(), estimated_tokens=0,
+        minimum_token_headroom=1, realtime=True,
+    )
+    event.created_at = datetime.now(timezone.utc) - timedelta(seconds=vor_sekunden)
+    db.commit()
+    return event
+
+
+def test_null_sprachminuten_sperren_die_sitzung_vor_dem_beginn(
+    db: Session, regular_user: User,
+) -> None:
+    role = _role(db, "ai-ohne-sprache")
+    _enable_usage(db, regular_user, role, monthly_realtime_minutes_limit=0)
+
+    with pytest.raises(AiQuotaExceeded, match="monthly_realtime_minutes_limit"):
+        _sprachsitzung(db, regular_user)
+    # Der Chat bleibt davon unberührt.
+    assert reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=10).status == "reserved"
+
+
+def test_die_sitzung_zaehlt_ihre_dauer_und_endet_an_der_minutengrenze(
+    db: Session, regular_user: User,
+) -> None:
+    """Gezählt wird die Zeit, die die Sitzung offen war — nicht Audiotokens."""
+    from services.ai_usage_service import realtime_restsekunden, realtime_verbrauch_ergaenzen
+
+    role = _role(db, "ai-eine-sprachminute")
+    _enable_usage(db, regular_user, role, monthly_realtime_minutes_limit=1)
+    event = _sprachsitzung(db, regular_user, vor_sekunden=30)
+    assert event.realtime_seconds == 0
+
+    werte = dict(text_input=1, text_output=1, audio_input=1, audio_output=1, cost_microunits=0)
+    realtime_verbrauch_ergaenzen(db, event_id=event.id, **werte)
+    db.commit()
+    assert 30 <= event.realtime_seconds < 40
+    assert 20 <= realtime_restsekunden(db, regular_user) <= 30
+
+    event.created_at = datetime.now(timezone.utc) - timedelta(seconds=90)
+    db.commit()
+    with pytest.raises(AiQuotaExceeded, match="monthly_realtime_minutes_limit"):
+        realtime_verbrauch_ergaenzen(db, event_id=event.id, **werte)
+    db.rollback()
+    # Schon gelaufene Zeit wird trotzdem gebucht, sonst begänne der nächste
+    # Anlauf wieder unter der Grenze.
+    realtime_verbrauch_ergaenzen(db, event_id=event.id, grenzen_pruefen=False, **werte)
+    db.commit()
+    assert event.realtime_seconds >= 90
+    assert realtime_restsekunden(db, regular_user) == 0
+    with pytest.raises(AiQuotaExceeded, match="monthly_realtime_minutes_limit"):
+        _sprachsitzung(db, regular_user)
+
+
+def test_die_sitzung_endet_mit_dem_rest_der_minuten(
+    db: Session, regular_user: User,
+) -> None:
+    """Die Höchstdauer einer Sitzung ist der Rest — und die Meldung sagt, warum."""
+    from services.ai_voice.contracts import MAX_SITZUNGSSEKUNDEN
+    from services.ai_voice.realtime_session import RealtimeVorbereitung, hoechstdauer, zeit_um
+
+    assert hoechstdauer(db, regular_user) == MAX_SITZUNGSSEKUNDEN, "ohne Limit die feste Grenze"
+    assert zeit_um(RealtimeVorbereitung(provider_id=1)) == {"art": "abgelaufen"}
+
+    role = _role(db, "ai-zwei-sprachminuten")
+    _enable_usage(db, regular_user, role, monthly_realtime_minutes_limit=2)
+    assert hoechstdauer(db, regular_user) == 120
+    gekuerzt = RealtimeVorbereitung(provider_id=1, hoechstdauer=hoechstdauer(db, regular_user))
+    assert zeit_um(gekuerzt) == {"art": "stoerung", "grund": "realtime_kontingent"}
+
+
+def test_eine_sitzung_ohne_antwort_kostet_keine_minuten(
+    db: Session, regular_user: User,
+) -> None:
+    from services.ai_usage_service import realtime_restsekunden, realtime_sitzung_abschliessen
+
+    role = _role(db, "ai-sitzung-ohne-antwort")
+    _enable_usage(db, regular_user, role, monthly_realtime_minutes_limit=1)
+    event = _sprachsitzung(db, regular_user, vor_sekunden=50)
+
+    realtime_sitzung_abschliessen(db, event.id)
+    db.commit()
+
+    assert event.status == "failed"
+    assert realtime_restsekunden(db, regular_user) == 60
 
 
 def _memory_role(

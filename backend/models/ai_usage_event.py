@@ -111,6 +111,11 @@ class AiUsageEvent(Base):
     realtime_audio_output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Dauer der Diktat- bzw. STT-Transkriptionsaufnahme in Sekunden (provider-neutral).
     dictation_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Wie lange eine Sprachsitzung bisher lief, in Sekunden; nur bei
+    # Sprachsitzungen gesetzt. Wächst mit jeder Buchung und beim Abschluss
+    # (`ai_usage_service.realtime_verbrauch_ergaenzen`) — daran hängt das
+    # Minutenlimit der Rolle.
+    realtime_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Wieviele Anbieteranfragen in dieser Zeile stecken. Eine Chatnachricht ist
     # nicht eine Anfrage: jede Werkzeugrunde ruft den Anbieter erneut und
     # schickt den gewachsenen Verlauf komplett mit. Ohne diese Zahl sieht eine

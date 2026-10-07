@@ -149,11 +149,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.26 vom 2026-10-07 aus (die Pflege liest nachts noch einmal)', () => {
+  it('weist die Fassung 3.27 vom 2026-10-07 aus (Sprachsitzungen zählen ihre Dauer)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.26`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.27`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -228,6 +228,8 @@ describe('Privacy page', () => {
     // 3.26: nachts liest die Pflege neue Einträge mit ihren Nachbarn noch einmal.
     expect(i18n.t('privacyPolicy.sections.ai.items.memoryReading')).toMatch(/Nachts führt derselbe Schritt Einträge zusammen/);
     expect(i18n.t('privacyPolicy.sections.ai.items.memoryReading')).toMatch(/ohne einen Ausgang zu behaupten/);
+    // 3.27: die Sprachminuten je Rolle brauchen die Dauer jeder Sitzung.
+    expect(i18n.t('privacyPolicy.sections.ai.items.usage')).toMatch(/bei Sprachsitzungen deren Dauer/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

@@ -18,8 +18,8 @@ from sqlalchemy.orm import Session
 
 from models import AiMessage, AiUsageEvent, User
 from services.ai_limit_service import (
-    MONTHLY_COST_LIMIT_CENTS_MAX,
     TOKEN_LIMIT_MAX,
+    EffectiveAiLimits,
     resolve_effective_limits,
 )
 
@@ -36,10 +36,12 @@ ACTIVE_STATUSES = ("reserved", "completed")
 # Fehlerquelle in genau der Zahl, die stimmen soll. In die Anzeigewaehrung geht
 # es erst in der Oberflaeche (`services/ai_kosten.py`).
 MICROUNITS_PER_CENT = 10_000
-# Die Obergrenze jeder einzelnen Kostenangabe. Stand vorher an drei Stellen als
-# Produkt ausgeschrieben — einmal in der Reservierung, einmal beim Abschluss,
-# einmal beim Klemmen im Stream.
-MAX_COST_MICROUNITS = MONTHLY_COST_LIMIT_CENTS_MAX * MICROUNITS_PER_CENT
+# Die Obergrenze jeder einzelnen Kostenangabe: zehn Millionen Dollar, also
+# kein Limit, sondern ein Schutz gegen unsinnige Anbieterzahlen. Stand vorher an
+# drei Stellen als Produkt ausgeschrieben — einmal in der Reservierung, einmal
+# beim Abschluss, einmal beim Klemmen im Stream — und hing bis zum 07.10.2026
+# am Höchstwert des monatlichen Kostenlimits, das seitdem entfallen ist.
+MAX_COST_MICROUNITS = 1_000_000_000 * MICROUNITS_PER_CENT
 # `AiUsageEvent.zweck` einer Beratung der Ethics Engine.
 ZWECK_ETHIK = "ethik"
 # `AiUsageEvent.zweck` eines Durchgangs des Gedächtnisschreibers.
@@ -109,31 +111,36 @@ def _sum_since(db: Session, user_id: int, since: datetime, column) -> int:
     return int(value or 0)
 
 
-def _sum_realtime_since(db: Session, user_id: int, since: datetime) -> int:
-    """Summiert nur Echtzeit-Sprachsitzungen — erkannt am Buchungsweg.
+def _realtime_sekunden_limit(limits: EffectiveAiLimits) -> int | None:
+    """Das Minutenlimit der Sprachsitzungen in Sekunden; ``None`` heisst unbegrenzt.
 
-    Hier stand ``model LIKE 'gpt-realtime%'``, und das zählte genau einen der
-    drei Sprachwege: Gemini Live (``gemini-…``) lief am Monatsdeckel für
-    Realtime vorbei, und GPT-Live (``gpt-live-1``) hätte es ebenso getan. Jede
-    Sprachsitzung bucht aber über `realtime_verbrauch_ergaenzen`, und nur die
-    setzt die Realtime-Tokenspalten — auch auf ``0``, wenn eine Buchung nur
-    Kosten trägt. Eine gesetzte Spalte ist damit das Merkmal, und es hängt an
-    keinem Namen, den der nächste Anbieter anders schreibt.
-
-    Eine Reservierung ohne jede Buchung bleibt draussen; sie hat nichts
-    gekostet (`accounted_cost_microunits` ist dort ``0``).
+    Gezählt wird die Zeit, die eine Sitzung offen war (`realtime_seconds`),
+    auf allen drei Sprachwegen gleich — nicht Audiotokens, die jeder Anbieter
+    anders zählt.
     """
-    value = (
-        db.query(func.coalesce(func.sum(AiUsageEvent.accounted_cost_microunits), 0))
-        .filter(
-            AiUsageEvent.user_id == user_id,
-            AiUsageEvent.status.in_(ACTIVE_STATUSES),
-            AiUsageEvent.created_at >= since,
-            AiUsageEvent.realtime_text_input_tokens.isnot(None),
-        )
-        .scalar()
-    )
-    return int(value or 0)
+    minuten = limits.monthly_realtime_minutes_limit
+    return None if minuten is None else minuten * 60
+
+
+def _sitzungssekunden(event: AiUsageEvent, jetzt: datetime) -> int:
+    """Wie lange die Sitzung dieser Zeile bisher läuft, in ganzen Sekunden."""
+    begonnen = event.created_at
+    if begonnen.tzinfo is None:
+        begonnen = begonnen.replace(tzinfo=timezone.utc)
+    return max(int(event.realtime_seconds or 0), int((jetzt - begonnen).total_seconds()))
+
+
+def realtime_restsekunden(db: Session, user: User) -> int | None:
+    """Wie viele Sekunden Sprachsitzung dieser Monat noch hergibt; ``None`` = unbegrenzt.
+
+    Eine Sprachsitzung endet spätestens dann (`RealtimeVorbereitung.hoechstdauer`).
+    Offene Sitzungen zählen mit dem Stand ihrer letzten Buchung.
+    """
+    limit = _realtime_sekunden_limit(resolve_effective_limits(db, user))
+    if limit is None:
+        return None
+    _, _, monat = _period_starts(datetime.now(timezone.utc))
+    return max(0, limit - _sum_since(db, user.id, monat, AiUsageEvent.realtime_seconds))
 
 
 def _ensure_within(limit: int | None, current: int, requested: int, reason: str) -> None:
@@ -154,7 +161,6 @@ def reserve_ai_usage(
     model: str | None = None,
     now: datetime | None = None,
     minimum_token_headroom: int = 0,
-    minimum_cost_headroom_microunits: int = 0,
     realtime: bool = False,
     dictation_seconds: int = 0,
     zweck: str | None = None,
@@ -162,12 +168,12 @@ def reserve_ai_usage(
     """Reserviert eine Anfrage atomar oder liefert dieselbe Reservierung erneut.
 
     ``zweck`` steht für eine Anfrage, die MSM für den Benutzer stellt und nicht
-    er selbst (`ZWECKE`). Sie zählt in Tokens und Kosten wie jede andere, aber
-    weder als Anfrage pro Minute noch als gleichzeitiger Vorgang — in beide
-    Richtungen: sie wird an diesen beiden Grenzen nicht abgewiesen, und sie
-    belegt dort keinen Platz. Sonst wiese der Gedächtnisschreiber, der nach
-    einer Antwort im Hintergrund liest, bei *gleichzeitigen Vorgängen* = 1 die
-    nächste Frage des Benutzers ab.
+    er selbst (`ZWECKE`). Sie zählt in Tokens und Kosten wie jede andere; die
+    Verbrauchsübersicht weist sie getrennt aus.
+
+    ``realtime`` eröffnet eine Sprachsitzung: sie braucht mindestens eine
+    Sekunde vom Minutenlimit der Rolle, und ihre Zeile zählt ab jetzt Sekunden
+    (`realtime_seconds`).
     """
     if zweck is not None and zweck not in ZWECKE:
         raise ValueError(f"Unbekannter Zweck: {zweck}")
@@ -179,8 +185,6 @@ def reserve_ai_usage(
         or estimated_cost_microunits > MAX_COST_MICROUNITS
         or minimum_token_headroom < 0
         or minimum_token_headroom > TOKEN_LIMIT_MAX
-        or minimum_cost_headroom_microunits < 0
-        or minimum_cost_headroom_microunits > MAX_COST_MICROUNITS
         or dictation_seconds < 0
     ):
         raise ValueError("Geschätzter AI-Verbrauch liegt außerhalb des erlaubten Bereichs")
@@ -208,37 +212,6 @@ def reserve_ai_usage(
     day_start, week_start, month_start = _period_starts(current_time)
     limits = resolve_effective_limits(db, user)
     pruef_tokens = max(estimated_tokens, minimum_token_headroom)
-    pruef_kosten = max(estimated_cost_microunits, minimum_cost_headroom_microunits)
-
-    minute_count = (
-        db.query(func.count(AiUsageEvent.id))
-        .filter(
-            AiUsageEvent.user_id == user.id,
-            AiUsageEvent.status.in_(ACTIVE_STATUSES),
-            AiUsageEvent.created_at >= current_time - timedelta(minutes=1),
-            # Nur Anfragen des Benutzers. Eine Beratung der Ethics Engine hat
-            # er nicht gestellt; zählte sie mit, beendete bei fünf Anfragen pro
-            # Minute die Engine den Lauf, den sie nur beraten soll.
-            AiUsageEvent.zweck.is_(None),
-        )
-        .scalar()
-        or 0
-    )
-    if zweck is None:
-        _ensure_within(limits.requests_per_minute, int(minute_count), 1, "requests_per_minute")
-
-    concurrent = (
-        db.query(func.count(AiUsageEvent.id))
-        .filter(
-            AiUsageEvent.user_id == user.id,
-            AiUsageEvent.status == "reserved",
-            AiUsageEvent.zweck.is_(None),
-        )
-        .scalar()
-        or 0
-    )
-    if zweck is None:
-        _ensure_within(limits.concurrent_operations, int(concurrent), 1, "concurrent_operations")
     _ensure_within(
         limits.daily_token_limit,
         _sum_since(db, user.id, day_start, AiUsageEvent.accounted_tokens),
@@ -257,18 +230,12 @@ def reserve_ai_usage(
         pruef_tokens,
         "monthly_token_limit",
     )
-    _ensure_within(
-        None if limits.monthly_cost_limit_cents is None else limits.monthly_cost_limit_cents * MICROUNITS_PER_CENT,
-        _sum_since(db, user.id, month_start, AiUsageEvent.accounted_cost_microunits),
-        pruef_kosten,
-        "monthly_cost_limit_cents",
-    )
     if realtime:
         _ensure_within(
-            None if limits.monthly_realtime_cost_limit_cents is None else limits.monthly_realtime_cost_limit_cents * MICROUNITS_PER_CENT,
-            _sum_realtime_since(db, user.id, month_start),
-            pruef_kosten,
-            "monthly_realtime_cost_limit_cents",
+            _realtime_sekunden_limit(limits),
+            _sum_since(db, user.id, month_start, AiUsageEvent.realtime_seconds),
+            1,
+            "monthly_realtime_minutes_limit",
         )
     if dictation_seconds > 0 or limits.monthly_dictation_minutes_limit is not None:
         if limits.monthly_dictation_minutes_limit is not None:
@@ -292,6 +259,7 @@ def reserve_ai_usage(
         accounted_tokens=estimated_tokens,
         accounted_cost_microunits=estimated_cost_microunits,
         dictation_seconds=dictation_seconds if dictation_seconds > 0 else None,
+        realtime_seconds=0 if realtime else None,
         zweck=zweck,
         created_at=current_time,
     )
@@ -433,17 +401,18 @@ def nachtraeglich_buchen(
     zwei Gründen, die beide darauf hinauslaufen, dass die Engine sonst den Lauf
     aufhielte, den sie nur beraten soll:
 
-    * Der Lauf hält während der Beratung seine eigene Reservierung. Bei
-      *gleichzeitigen Vorgängen* = 1 würde jede Beratung abgewiesen, und die
+    * Der Lauf hält während der Beratung seine eigene Reservierung. Schöpft
+      sie den Rest des Tages aus, würde jede Beratung abgewiesen, und die
       Engine schwiege ausgerechnet bei den enger gehaltenen Benutzern.
-    * Eine Reservierung ist eine Zeile, und *Anfragen pro Minute* zählt Zeilen.
+    * Bis zum 07.10.2026 zählte *Anfragen pro Minute* Zeilen; eine
+      Reservierung je Beratung hätte den Lauf an dieser Grenze aufgehalten.
 
     Gezählt wird der Verbrauch trotzdem: die Zeile steht in Tokens und Kosten
     wie jede andere, in der Aufstellung und in den Summen, gegen die die
     nächste Reservierung prüft. Dieselbe Regel wie bei
     `realtime_verbrauch_ergaenzen` mit ``grenzen_pruefen=False``: angefallene
     Kosten zu verschweigen hiesse, dass der nächste Anlauf wieder unter der
-    Grenze beginnt. Nur als Anfrage pro Minute zählt sie nicht (``zweck``).
+    Grenze beginnt.
 
     Die Zeile entsteht gleich als ``completed``, eine offene Reservierung gibt
     es nie. **Committet nicht**, wie `reservierung_abrechnen`.
@@ -605,6 +574,9 @@ def fail_ai_usage(db: Session, event: AiUsageEvent) -> AiUsageEvent:
     event.accounted_tokens = 0
     event.accounted_cost_microunits = 0
     event.dictation_seconds = None
+    # Eine Sprachsitzung, die nie eine Antwort bekam, kostet auch keine Minuten.
+    if event.realtime_seconds is not None:
+        event.realtime_seconds = 0
     event.completed_at = datetime.now(timezone.utc)
     db.flush()
     return event
@@ -650,6 +622,9 @@ def realtime_verbrauch_ergaenzen(
     lief, und zählt ``0``. Ohne diese Unterscheidung stünde nach einem Gespräch
     von zehn Minuten eine dreistellige Anfragezahl da.
 
+    Jede Buchung schreibt außerdem fort, wie lange die Sitzung schon läuft
+    (`realtime_seconds`), und prüft damit das Minutenlimit der Rolle.
+
     ``grenzen_pruefen=False`` bucht, ohne die Grenzen des Benutzers zu prüfen.
     Das ist für Verbrauch, der **schon angefallen** ist: GPT-Live meldet die
     Dauer erst, nachdem sie gelaufen ist. Überschreitet sie dabei eine Grenze,
@@ -676,8 +651,9 @@ def realtime_verbrauch_ergaenzen(
         raise AiQuotaExceeded("realtime_session_limit")
 
     user = db.query(User).filter(User.id == event.user_id).with_for_update().one()
+    now = datetime.now(timezone.utc)
+    sekunden = _sitzungssekunden(event, now)
     if grenzen_pruefen:
-        now = datetime.now(timezone.utc)
         day, week, month = _period_starts(now)
         limits = resolve_effective_limits(db, user)
         # Die Summen enthalten den bisherigen Wert dieser offenen Zeile. Nur die
@@ -685,18 +661,15 @@ def realtime_verbrauch_ergaenzen(
         _ensure_within(limits.daily_token_limit, _sum_since(db, user.id, day, AiUsageEvent.accounted_tokens), delta_tokens, "daily_token_limit")
         _ensure_within(limits.weekly_token_limit, _sum_since(db, user.id, week, AiUsageEvent.accounted_tokens), delta_tokens, "weekly_token_limit")
         _ensure_within(limits.monthly_token_limit, _sum_since(db, user.id, month, AiUsageEvent.accounted_tokens), delta_tokens, "monthly_token_limit")
+        # Die Summe enthält den bisherigen Stand dieser Zeile; gezählt wird
+        # deren neuer an seiner Stelle.
         _ensure_within(
-            None if limits.monthly_cost_limit_cents is None else limits.monthly_cost_limit_cents * MICROUNITS_PER_CENT,
-            _sum_since(db, user.id, month, AiUsageEvent.accounted_cost_microunits),
-            cost_microunits,
-            "monthly_cost_limit_cents",
+            _realtime_sekunden_limit(limits),
+            _sum_since(db, user.id, month, AiUsageEvent.realtime_seconds) - int(event.realtime_seconds or 0),
+            sekunden,
+            "monthly_realtime_minutes_limit",
         )
-        _ensure_within(
-            None if limits.monthly_realtime_cost_limit_cents is None else limits.monthly_realtime_cost_limit_cents * MICROUNITS_PER_CENT,
-            _sum_realtime_since(db, user.id, month),
-            cost_microunits,
-            "monthly_realtime_cost_limit_cents",
-        )
+    event.realtime_seconds = sekunden
     event.accounted_tokens = neue_tokens
     event.reserved_tokens = neue_tokens
     event.accounted_cost_microunits = neue_kosten
@@ -718,8 +691,10 @@ def realtime_sitzung_abschliessen(db: Session, event_id: int) -> None:
     if not event.provider_requests:
         fail_ai_usage(db, event)
         return
+    jetzt = datetime.now(timezone.utc)
+    event.realtime_seconds = _sitzungssekunden(event, jetzt)
     event.status = "completed"
-    event.completed_at = datetime.now(timezone.utc)
+    event.completed_at = jetzt
     db.flush()
 
 
@@ -963,11 +938,11 @@ def verwaiste_reservierungen_abgleichen(db) -> int:
     Stirbt der Prozess zwischen Reservierung und Abschluss — ein Kill loest
     `asyncio.CancelledError` aus, und das ist eine BaseException, die weder der
     Anbieterfehler-Zweig hier noch das `except Exception` des Aufrufers faengt —
-    bleibt das Ereignis fuer immer auf `reserved`. Das ist nicht bloss
-    Buchhaltung: der Nebenlaeufigkeitszaehler in `reserve_ai_usage` zaehlt
-    reservierte Ereignisse **ohne Zeitfenster**. Bei `concurrent_operations = 2`
-    genuegen zwei solcher Abbrueche, und der Benutzer bekommt dauerhaft
-    AiQuotaExceeded, obwohl nichts laeuft — von selbst loest sich das nie.
+    bleibt das Ereignis fuer immer auf `reserved` — von selbst loest sich das
+    nie. Bis zum 07.10.2026 sperrte das den Benutzer: das Rollenlimit
+    gleichzeitiger Vorgaenge zaehlte reservierte Ereignisse ohne Zeitfenster.
+    Das Limit ist entfallen; geschlossen wird trotzdem, damit keine Anfrage
+    fuer immer als laufend gilt.
 
     Abgerechnet wird konservativ mit dem reservierten Wert, aus demselben Grund
     wie beim Stream-Wiederanlauf: nach einem Abbruch ist unbekannt, wie viele

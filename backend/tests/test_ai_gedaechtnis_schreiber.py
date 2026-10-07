@@ -49,7 +49,6 @@ from services import (
 )
 from services.ai_gedaechtnis_schreiber import WERKZEUG_NAME
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
-from services.ai_usage_service import AiQuotaExceeded, reserve_ai_usage
 from services.auth_service import AuthService
 from services.openai_compatible_adapter import AiProviderRequestError, ProviderToolCall, StreamChunk
 from services.role_service import set_user_roles
@@ -1131,27 +1130,6 @@ def test_ein_belegtes_gespraech_liest_kein_zweiter(db: Session, regular_user: Us
 
 
 # ── Buchung ─────────────────────────────────────────────────────────────
-
-
-def test_der_hintergrund_haelt_keinen_chat_auf(db: Session, regular_user: User) -> None:
-    """Bei einem gleichzeitigen Vorgang blockieren sich Chat und Schreiber nicht."""
-    _rolle(db, regular_user, concurrent_operations=1, requests_per_minute=1)
-    reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=10)
-    db.commit()
-    # Der Chat hält seinen einen Vorgang, die Minute ist voll — der
-    # Schreiber läuft trotzdem.
-    reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=10, zweck="gedaechtnis")
-    db.commit()
-    # Umgekehrt belegt der Schreiber keinen Platz: nach dem Chatlauf passt der
-    # nächste wieder hinein, obwohl der Schreiber noch reserviert hat.
-    db.query(AiUsageEvent).filter(
-        AiUsageEvent.user_id == regular_user.id, AiUsageEvent.zweck.is_(None)
-    ).update({"status": "completed", "created_at": datetime.now(timezone.utc) - timedelta(minutes=2)})
-    db.commit()
-    reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=10)
-    db.commit()
-    with pytest.raises(AiQuotaExceeded):
-        reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=10)
 
 
 def test_ein_ausgeschoepftes_kontingent_stellt_zurueck(db: Session, regular_user: User, monkeypatch) -> None:
