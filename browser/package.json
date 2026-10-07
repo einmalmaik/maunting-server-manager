@@ -1,0 +1,13 @@
+{
+  "name": "maunting-secure-browser",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MSB - Maunting Secure Browser, datenschutzorientierter Browser auf Tauri-v2-Basis",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}

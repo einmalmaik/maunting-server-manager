@@ -1,0 +1,30 @@
+[package]
+name = "maunting-secure-browser"
+version = "1.0.0"
+description = "MSB - Maunting Secure Browser auf Tauri v2"
+edition = "2021"
+rust-version = "1.88"
+
+[lib]
+name = "maunting_secure_browser_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [
+    "image-png",
+    "webview-data-url",
+] }
+tauri-plugin-notification = "2"
+tauri-plugin-biometric = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+keyring = "4"
+base64 = "0.22"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }

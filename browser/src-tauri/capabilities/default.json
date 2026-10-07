@@ -1,0 +1,11 @@
+{
+  "identifier": "default",
+  "description": "Standardrechte für den Maunting Secure Browser",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "notification:default",
+    "biometric:default"
+  ]
+}
