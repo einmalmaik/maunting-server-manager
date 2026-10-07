@@ -6,6 +6,7 @@ import {
   Trash2,
   Check,
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useBrowserStore } from '../../services/browserStore'
 import { SEARCH_ENGINES } from '../../services/searchEngines'
 import { GlobeIcon } from '../newtab/brandIcons'
@@ -13,6 +14,7 @@ import { getSearchEngineIcon } from '../newtab/searchEngineIcons'
 import { WallpaperManager } from '../newtab/WallpaperManager'
 
 export function SettingsView() {
+  const { t } = useTranslation()
   const {
     searchEngine,
     setSearchEngine,
@@ -51,7 +53,7 @@ export function SettingsView() {
   return (
     <div className="flex flex-col h-full text-foreground select-none overflow-hidden">
       {/* Sub-Nav Tabs */}
-      <div className="flex border-b border-border bg-muted/20 text-xs overflow-x-auto no-scrollbar">
+      <div className="flex border-b border-border bg-muted/20 text-xs overflow-x-auto msm-ohne-rollbalken">
         <button
           onClick={() => setActiveTab('suche')}
           className={`flex items-center gap-1.5 px-3 py-2 border-b-2 font-medium transition-colors shrink-0 ${
@@ -61,7 +63,7 @@ export function SettingsView() {
           }`}
         >
           <GlobeIcon className="w-3.5 h-3.5" />
-          <span>Suche</span>
+          <span>{t('browser.settings.tabSearch')}</span>
         </button>
 
         <button
@@ -73,7 +75,7 @@ export function SettingsView() {
           }`}
         >
           <Shield className="w-3.5 h-3.5" />
-          <span>Schutz</span>
+          <span>{t('browser.settings.tabPrivacy')}</span>
         </button>
 
         <button
@@ -85,7 +87,7 @@ export function SettingsView() {
           }`}
         >
           <Palette className="w-3.5 h-3.5" />
-          <span>Design</span>
+          <span>{t('browser.settings.tabDesign')}</span>
         </button>
 
         <button
@@ -97,7 +99,7 @@ export function SettingsView() {
           }`}
         >
           <Link className="w-3.5 h-3.5" />
-          <span>Kopplung</span>
+          <span>{t('browser.settings.tabCoupling')}</span>
         </button>
       </div>
 
@@ -107,9 +109,9 @@ export function SettingsView() {
         {activeTab === 'suche' && (
           <div className="space-y-4">
             <div>
-              <h4 className="font-semibold text-sm mb-1">Standard-Suchmaschine</h4>
+              <h4 className="font-semibold text-sm mb-1">{t('browser.settings.searchTitle')}</h4>
               <p className="text-muted-foreground text-label-sm mb-3">
-                Wird bei Suchanfragen in der Omnibox und auf neuen Tabs verwendet.
+                {t('browser.settings.searchDesc')}
               </p>
 
               <div className="space-y-2">
@@ -164,17 +166,17 @@ export function SettingsView() {
         {activeTab === 'datenschutz' && (
           <div className="space-y-4">
             <div>
-              <h4 className="font-semibold text-sm mb-1">Integrierter Werbe- & Trackerschutz</h4>
+              <h4 className="font-semibold text-sm mb-1">{t('browser.settings.privacyTitle')}</h4>
               <p className="text-muted-foreground text-label-sm mb-3">
-                Basiert auf der nativen Brave adblock-rs Filter-Engine in Rust.
+                {t('browser.settings.privacyAdblockDesc')}
               </p>
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-card">
                   <div>
-                    <div className="font-semibold">Werbung & Tracker blockieren</div>
+                    <div className="font-semibold">{t('browser.settings.privacyAdblock')}</div>
                     <div className="text-label-sm text-muted-foreground">
-                      Unterdrückt Werbung, Popups und Telemetrie
+                      {t('browser.shield.strict')}
                     </div>
                   </div>
                   <button
@@ -193,9 +195,9 @@ export function SettingsView() {
 
                 <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-card">
                   <div>
-                    <div className="font-semibold">Vergiss mich beim Schließen</div>
+                    <div className="font-semibold">{t('browser.settings.forgetOnClose')}</div>
                     <div className="text-label-sm text-muted-foreground">
-                      Löscht Cookies und LocalStorage eines Tabs beim Beenden
+                      {t('browser.settings.forgetOnCloseDesc')}
                     </div>
                   </div>
                   <input
@@ -209,16 +211,16 @@ export function SettingsView() {
             </div>
 
             <div className="pt-2 border-t border-border">
-              <h4 className="font-semibold text-xs mb-2">Browserdaten bereinigen</h4>
+              <h4 className="font-semibold text-xs mb-2">{t('browser.settings.clearData')}</h4>
               <button
                 onClick={() => {
                   clearBrowserData({ history: true, cache: true })
-                  alert('Verlauf und Cache wurden erfolgreich bereinigt!')
+                  alert(t('browser.settings.dataCleared'))
                 }}
                 className="flex items-center gap-2 px-3 py-2 rounded-xl bg-status-destructive/10 text-status-destructive hover:bg-status-destructive/20 border border-status-destructive/20 transition-colors font-medium text-xs w-full justify-center"
               >
                 <Trash2 className="w-4 h-4" />
-                <span>Verlauf & Cache jetzt leeren</span>
+                <span>{t('browser.settings.clearData')}</span>
               </button>
             </div>
           </div>
@@ -228,26 +230,26 @@ export function SettingsView() {
         {activeTab === 'design' && (
           <div className="space-y-4">
             <div>
-              <h4 className="font-semibold text-sm mb-1">Farbschema</h4>
+              <h4 className="font-semibold text-sm mb-1">{t('browser.settings.designTitle')}</h4>
               <p className="text-muted-foreground text-label-sm mb-3">
-                Das Maunting-Design ist auf das dunkle Farbschema optimiert. Ein heller Modus wird nicht unterstützt.
+                {t('browser.settings.themeDesc')}
               </p>
 
               <div className="p-3 rounded-xl border border-border bg-card flex items-center justify-between">
                 <div>
-                  <div className="text-xs font-semibold text-foreground">Dunkles Theme</div>
-                  <div className="text-label-sm text-muted-foreground">Standardmäßig aktiv</div>
+                  <div className="text-xs font-semibold text-foreground">{t('browser.wallpaper.themeDark')}</div>
+                  <div className="text-label-sm text-muted-foreground">{t('browser.shield.active')}</div>
                 </div>
                 <div className="px-2.5 py-1 rounded-md bg-primary/10 text-primary text-xs font-medium border border-primary/20">
-                  Aktiv
+                  {t('browser.shield.active')}
                 </div>
               </div>
             </div>
 
             <div className="pt-3 border-t border-border">
-              <h4 className="font-semibold text-sm mb-1">Startseiten-Hintergrund</h4>
+              <h4 className="font-semibold text-sm mb-1">{t('browser.wallpaper.title')}</h4>
               <p className="text-muted-foreground text-label-sm mb-3">
-                Wähle ein vordefiniertes Designthema oder lade ein eigenes Hintergrundbild hoch.
+                {t('browser.wallpaper.presets')}
               </p>
               <WallpaperManager isModal={false} />
             </div>
@@ -261,7 +263,7 @@ export function SettingsView() {
               <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
                 <div className="flex items-center gap-2 text-status-success font-semibold text-sm">
                   <Check className="w-4 h-4" />
-                  <span>Mit MSM-Server verbunden</span>
+                  <span>{t('browser.settings.coupledWith', { server: backendUrl })}</span>
                 </div>
                 <div className="text-label-sm text-muted-foreground space-y-1">
                   <div>Server: <span className="font-mono text-foreground">{backendUrl}</span></div>
@@ -269,29 +271,27 @@ export function SettingsView() {
                 </div>
 
                 <div className="pt-2 border-t border-border flex justify-between items-center">
-                  <span className="text-xs text-muted-foreground">Kopplung aufheben</span>
+                  <span className="text-xs text-muted-foreground">{t('browser.settings.decouple')}</span>
                   <button
                     onClick={decouple}
                     className="px-3 py-1.5 rounded-lg bg-status-destructive/10 text-status-destructive hover:bg-status-destructive/20 font-medium text-xs transition-colors"
                   >
-                    Trennen
+                    {t('browser.settings.decouple')}
                   </button>
                 </div>
               </div>
             ) : (
               <form onSubmit={handlePair} className="space-y-3">
                 <div>
-                  <h4 className="font-semibold text-sm mb-1">Gerät mit MSM koppeln</h4>
+                  <h4 className="font-semibold text-sm mb-1">{t('browser.settings.couplingTitle')}</h4>
                   <p className="text-muted-foreground text-label-sm mb-3">
-                    Öffne im MSM-Panel „Profil → Geräte → Gerät koppeln“ und gib den 12-stelligen
-                    Code hier ein. Dadurch wird dein DIS-Passworttresor, Messenger und die KI
-                    freigeschaltet.
+                    {t('browser.settings.couplingDesc')}
                   </p>
                 </div>
 
                 <div>
                   <label className="text-label-sm font-semibold text-muted-foreground block mb-1">
-                    MSM Server-Adresse:
+                    {t('browser.settings.serverAddress')}:
                   </label>
                   <input
                     type="text"
@@ -304,7 +304,7 @@ export function SettingsView() {
 
                 <div>
                   <label className="text-label-sm font-semibold text-muted-foreground block mb-1">
-                    12-stelliger Kopplungscode:
+                    {t('browser.settings.pairingCode')}:
                   </label>
                   <input
                     type="text"
@@ -321,7 +321,7 @@ export function SettingsView() {
                   disabled={!pairingCode.trim() || isPairingLoading}
                   className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-xs hover:bg-primary/90 transition-colors disabled:opacity-40 shadow-sm"
                 >
-                  {isPairingLoading ? 'Kopplung wird geprüft...' : 'Jetzt koppeln'}
+                  {isPairingLoading ? t('browser.settings.connectNow') + '...' : t('browser.settings.connectNow')}
                 </button>
               </form>
             )}

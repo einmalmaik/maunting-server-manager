@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { TabStrip } from './modules/chrome/TabStrip'
 import { NavigationBar } from './modules/chrome/NavigationBar'
 import { Omnibox } from './modules/chrome/Omnibox'
@@ -8,7 +8,13 @@ import { NewTabPage } from './modules/newtab/NewTabPage'
 import { PasswordPrompt, type SavePromptData } from './modules/autofill/PasswordPrompt'
 import { PaymentConfirm } from './modules/autofill/PaymentConfirm'
 import { useBrowserStore } from './services/browserStore'
-import { GlobeIcon } from './modules/newtab/brandIcons'
+import {
+  nativeTabBoundsAnpassen,
+  setupTauriListeners,
+  nativeAdblockStatus,
+  nativeTabSichtbarkeitSetzen,
+  nativeHauptfensterFokussieren,
+} from './services/tauriBridge'
 
 export function BrowserApp() {
   const {
@@ -19,14 +25,98 @@ export function BrowserApp() {
     reloadActiveTab,
     toggleDrawer,
     setOpenDrawer,
+    openDrawer,
     theme,
+    incrementBlockCount,
+    updateTab,
   } = useBrowserStore()
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
+  const containerRef = useRef<HTMLElement>(null)
 
   // Simulation für Password Prompt & Payment Confirm
   const [savePromptData, setSavePromptData] = useState<SavePromptData | null>(null)
   const [showPaymentConfirm, setShowPaymentConfirm] = useState(false)
+
+  // Synchronisation von Tauri Events & Statistiken
+  useEffect(() => {
+    let cleanup: (() => void) | undefined
+
+    setupTauriListeners({
+      onAdblockEvent: (e) => {
+        incrementBlockCount(e.typ === 'tracker' ? 'tracker' : 'ad')
+      },
+      onTabNavigated: (e) => {
+        updateTab(e.id, { url: e.url, title: e.url, isLoading: false })
+      },
+    }).then((fn) => {
+      cleanup = fn
+    })
+
+    nativeAdblockStatus().then((stats) => {
+      if (stats) {
+        // Optional initiale Adblock-Zähler angleichen
+      }
+    })
+
+    return () => {
+      cleanup?.()
+    }
+  }, [incrementBlockCount, updateTab])
+
+  // Native Webview Bounds synchronisieren (bei Resize & Drawer-Wechsel)
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+
+    const updateBounds = () => {
+      const rect = el.getBoundingClientRect()
+      // Nur aktualisieren wenn Maße gültig sind
+      if (rect.width > 0 && rect.height > 0) {
+        void nativeTabBoundsAnpassen(rect.left, rect.top, rect.width, rect.height)
+      }
+    }
+
+    const observer = new ResizeObserver(updateBounds)
+    observer.observe(el)
+    updateBounds()
+
+    window.addEventListener('resize', updateBounds)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', updateBounds)
+    }
+  }, [openDrawer])
+
+  // Wenn ein Drawer oder modaler Dialog offen ist, native Webview ausblenden, damit Klicks & Scrollen voll funktionieren
+  useEffect(() => {
+    if (openDrawer !== 'none' || showPaymentConfirm || savePromptData !== null) {
+      void nativeTabSichtbarkeitSetzen(false)
+    } else {
+      void nativeTabSichtbarkeitSetzen(true)
+    }
+  }, [openDrawer, showPaymentConfirm, savePromptData])
+
+  // Bei Klick in HTML Inputs (Omnibox, Einstellungen etc.) OS-Fokus auf Hauptfenster sicherstellen
+  useEffect(() => {
+    const handleFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        void nativeHauptfensterFokussieren()
+      }
+    }
+
+    window.addEventListener('focusin', handleFocusIn)
+    return () => {
+      window.removeEventListener('focusin', handleFocusIn)
+    }
+  }, [])
 
   // Global Keyboard Shortcuts
   useEffect(() => {
@@ -88,59 +178,15 @@ export function BrowserApp() {
         <SidebarContainer />
 
         {/* Webview / Content Viewport */}
-        <main className="flex-1 h-full overflow-hidden bg-background relative flex flex-col">
+        <main
+          ref={containerRef}
+          className="flex-1 h-full overflow-hidden bg-background relative flex flex-col"
+        >
           {isBlankPage ? (
             <NewTabPage />
           ) : (
-            <div className="flex-1 w-full h-full flex flex-col items-center justify-center p-6 text-center select-text bg-muted/20">
-              <div className="max-w-md w-full p-6 bg-card border border-border rounded-2xl shadow-xl flex flex-col items-center">
-                <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-3">
-                  <GlobeIcon className="w-6 h-6" />
-                </div>
-                <h3 className="text-sm font-semibold text-foreground mb-1">
-                  {activeTab?.title || 'Externe Webseite geladen'}
-                </h3>
-                <p className="text-xs text-muted-foreground font-mono truncate max-w-full mb-4">
-                  {activeTab?.url}
-                </p>
-                <div className="p-3 bg-muted/50 rounded-xl text-left text-label-sm text-muted-foreground space-y-1.5 w-full mb-4">
-                  <div className="flex justify-between">
-                    <span>Engine:</span>
-                    <span className="font-semibold text-foreground">Microsoft Edge WebView2 (Chromium)</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>adblock-rs Filter:</span>
-                    <span className="text-status-success font-semibold">Aktiv</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>DIS Form-Erkennung:</span>
-                    <span className="text-status-success font-semibold">Scharfgeschaltet</span>
-                  </div>
-                </div>
-
-                <div className="flex gap-2 w-full">
-                  <button
-                    onClick={() => {
-                      setSavePromptData({
-                        domain: new URL(activeTab?.url || 'https://example.com').hostname,
-                        url: activeTab?.url || '',
-                        username: 'test.user@beispiel.de',
-                        password: 'GeheimesPasswort123!',
-                      })
-                    }}
-                    className="flex-1 py-2 rounded-xl bg-muted hover:bg-muted/80 text-xs font-medium text-foreground transition-colors"
-                  >
-                    Login simulieren
-                  </button>
-                  <button
-                    onClick={() => setShowPaymentConfirm(true)}
-                    className="flex-1 py-2 rounded-xl bg-muted hover:bg-muted/80 text-xs font-medium text-foreground transition-colors"
-                  >
-                    Kreditkarte testen
-                  </button>
-                </div>
-              </div>
-            </div>
+            /* Wenn externe Webseite geladen ist, rendert der native Child-Webview direkt in diesem Bereich */
+            <div className="flex-1 w-full h-full bg-transparent pointer-events-none" />
           )}
         </main>
       </div>

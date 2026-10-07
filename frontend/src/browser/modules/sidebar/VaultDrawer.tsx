@@ -135,7 +135,7 @@ export function VaultDrawer() {
                 <button
                   onClick={() => copyToClipboard(entry.username, `user-${entry.id}`)}
                   className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                  title="Benutzername kopieren"
+                  aria-label="Benutzername kopieren"
                 >
                   {copiedField === `user-${entry.id}` ? (
                     <Check className="w-3 h-3 text-status-success" />
@@ -154,14 +154,14 @@ export function VaultDrawer() {
                   <button
                     onClick={() => toggleReveal(entry.id)}
                     className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                    title={isRevealed ? 'Passwort verbergen' : 'Passwort anzeigen'}
+                    aria-label={isRevealed ? 'Passwort verbergen' : 'Passwort anzeigen'}
                   >
                     {isRevealed ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                   </button>
                   <button
                     onClick={() => copyToClipboard(entry.password, `pw-${entry.id}`)}
                     className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                    title="Passwort kopieren"
+                    aria-label="Passwort kopieren"
                   >
                     {copiedField === `pw-${entry.id}` ? (
                       <Check className="w-3 h-3 text-status-success" />

@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { Shield, ShieldAlert, ShieldCheck, Check, Power } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useBrowserStore } from '../../services/browserStore'
 
 export function ShieldBadge() {
+  const { t } = useTranslation()
   const {
     adblockEnabled,
     blockedAdsCount,
@@ -16,7 +18,7 @@ export function ShieldBadge() {
   const popupRef = useRef<HTMLDivElement>(null)
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
-  let domain = 'Diese Seite'
+  let domain = t('browser.shield.thisPage')
   try {
     if (activeTab?.url && !activeTab.url.startsWith('about:')) {
       domain = new URL(activeTab.url).hostname
@@ -41,7 +43,7 @@ export function ShieldBadge() {
     <div className="relative" ref={popupRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        title={adblockEnabled ? 'MSB Schutz aktiv' : 'Schutz pausiert'}
+        aria-label={adblockEnabled ? t('browser.shield.active') : t('browser.shield.paused')}
         className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
           adblockEnabled
             ? 'text-status-success hover:bg-muted'
@@ -64,7 +66,7 @@ export function ShieldBadge() {
             <div className="flex items-center gap-2">
               <Shield className="w-5 h-5 text-status-success" />
               <div>
-                <h4 className="text-sm font-semibold leading-tight">MSB Schutz</h4>
+                <h4 className="text-sm font-semibold leading-tight">{t('browser.shield.title')}</h4>
                 <p className="text-xs text-muted-foreground truncate max-w-[140px]">{domain}</p>
               </div>
             </div>
@@ -75,7 +77,7 @@ export function ShieldBadge() {
                   ? 'bg-muted border-border text-status-success hover:bg-muted/80'
                   : 'bg-muted border-border text-muted-foreground hover:bg-muted/80'
               }`}
-              title={adblockEnabled ? 'Schutz deaktivieren' : 'Schutz aktivieren'}
+              aria-label={adblockEnabled ? t('browser.shield.disable') : t('browser.shield.enable')}
             >
               <Power className="w-4 h-4" />
             </button>
@@ -83,28 +85,27 @@ export function ShieldBadge() {
 
           <div className="py-3 space-y-2 text-xs">
             <div className="flex justify-between items-center py-1">
-              <span className="text-muted-foreground">Werbung & Popups</span>
+              <span className="text-muted-foreground">{t('browser.shield.adsBlocked')}</span>
               <span className="font-semibold px-2 py-0.5 rounded bg-muted">
-                {blockedAdsCount} blockiert
+                {t('browser.shield.blockedCount', { count: blockedAdsCount })}
               </span>
             </div>
             <div className="flex justify-between items-center py-1">
-              <span className="text-muted-foreground">Tracker & Fingerprinting</span>
+              <span className="text-muted-foreground">{t('browser.shield.trackersBlocked')}</span>
               <span className="font-semibold px-2 py-0.5 rounded bg-muted">
-                {blockedTrackersCount} blockiert
+                {t('browser.shield.blockedCount', { count: blockedTrackersCount })}
               </span>
             </div>
             <div className="flex justify-between items-center py-1">
-              <span className="text-muted-foreground">Verschlüsselung</span>
+              <span className="text-muted-foreground">{t('browser.shield.privacyMode')}</span>
               <span className="text-status-success font-medium flex items-center gap-1">
-                <Check className="w-3 h-3" /> HTTPS erzwungen
+                <Check className="w-3 h-3" /> {t('browser.shield.httpsEnforced')}
               </span>
             </div>
           </div>
 
           <div className="pt-2 border-t border-border flex justify-between items-center text-label-sm text-muted-foreground">
-            <span>Powered by adblock-rs</span>
-            <span className="text-primary font-medium">Brave-Technologie</span>
+            <span>{t('browser.shield.strict')}</span>
           </div>
         </div>
       )}

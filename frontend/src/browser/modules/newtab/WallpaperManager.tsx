@@ -8,35 +8,41 @@ import {
   X,
   Sparkles,
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useBrowserStore } from '../../services/browserStore'
 
 export const WALLPAPER_PRESETS = [
   {
     id: 'none',
+    nameKey: 'browser.wallpaper.themeDark',
     name: 'Standard Dunkel',
     css: '',
     preview: 'bg-background',
   },
   {
     id: 'cyber-deep',
+    nameKey: 'browser.wallpaper.cyberDeep',
     name: 'Cyber Deep',
     css: 'linear-gradient(135deg, #090a1a 0%, #17153b 50%, #0c0d1b 100%)',
     preview: 'bg-gradient-to-br from-background via-primary/20 to-background',
   },
   {
     id: 'emerald-glow',
+    nameKey: 'browser.wallpaper.emeraldGlow',
     name: 'Emerald Glow',
     css: 'linear-gradient(135deg, #021a14 0%, #063c2c 50%, #03120e 100%)',
     preview: 'bg-gradient-to-br from-background via-status-success/20 to-background',
   },
   {
     id: 'cosmic-void',
+    nameKey: 'browser.wallpaper.cosmicVoid',
     name: 'Cosmic Void',
     css: 'linear-gradient(135deg, #050b14 0%, #0d2137 50%, #030712 100%)',
     preview: 'bg-gradient-to-br from-background via-muted to-background',
   },
   {
     id: 'obsidian-mesh',
+    nameKey: 'browser.wallpaper.obsidianMesh',
     name: 'Obsidian Mesh',
     css: 'radial-gradient(circle at 50% 50%, #1c1d24 0%, #0b0c10 100%)',
     preview: 'bg-muted',
@@ -49,6 +55,7 @@ interface WallpaperManagerProps {
 }
 
 export function WallpaperManager({ onClose, isModal = false }: WallpaperManagerProps) {
+  const { t } = useTranslation()
   const {
     customWallpaper,
     wallpaperBlur,
@@ -94,13 +101,13 @@ export function WallpaperManager({ onClose, isModal = false }: WallpaperManagerP
         <div className="flex items-center justify-between pb-3 border-b border-border">
           <div className="flex items-center gap-2">
             <Image className="w-4 h-4 text-primary" />
-            <h3 className="font-semibold text-sm text-foreground">Startseite anpassen</h3>
+            <h3 className="font-semibold text-sm text-foreground">{t('browser.wallpaper.title')}</h3>
           </div>
           {onClose && (
             <button
               onClick={onClose}
               className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-              title="Schließen"
+              aria-label={t('browser.window.close')}
             >
               <X className="w-4 h-4" />
             </button>
@@ -112,7 +119,7 @@ export function WallpaperManager({ onClose, isModal = false }: WallpaperManagerP
       <div>
         <label className="text-xs font-semibold text-foreground flex items-center gap-1.5 mb-2">
           <Sparkles className="w-3.5 h-3.5 text-primary" />
-          Themen & Farbverläufe
+          {t('browser.wallpaper.presets')}
         </label>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {WALLPAPER_PRESETS.map((preset) => {
@@ -135,7 +142,9 @@ export function WallpaperManager({ onClose, isModal = false }: WallpaperManagerP
                 >
                   {isSelected && <Check className="w-4 h-4 text-primary" />}
                 </div>
-                <div className="text-label-sm font-medium text-foreground truncate">{preset.name}</div>
+                <div className="text-label-sm font-medium text-foreground truncate">
+                  {t(preset.nameKey as any, preset.name)}
+                </div>
               </button>
             )
           })}
@@ -146,7 +155,7 @@ export function WallpaperManager({ onClose, isModal = false }: WallpaperManagerP
       <div className="pt-2 border-t border-border space-y-2.5">
         <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
           <Upload className="w-3.5 h-3.5 text-primary" />
-          Eigenes Hintergrundbild
+          {t('browser.wallpaper.upload')}
         </label>
 
         <div className="flex gap-2">
@@ -163,7 +172,7 @@ export function WallpaperManager({ onClose, isModal = false }: WallpaperManagerP
             className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-card border border-border hover:bg-muted hover:border-primary/50 text-foreground text-xs font-medium transition-colors"
           >
             <Upload className="w-3.5 h-3.5 text-muted-foreground" />
-            <span>Datei auswählen</span>
+            <span>{t('browser.wallpaper.upload')}</span>
           </button>
 
           {customWallpaper && (
@@ -171,10 +180,10 @@ export function WallpaperManager({ onClose, isModal = false }: WallpaperManagerP
               type="button"
               onClick={handleReset}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground text-xs font-medium transition-colors"
-              title="Auf Standard zurücksetzen"
+              aria-label={t('browser.wallpaper.reset')}
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>Standard</span>
+              <span>{t('browser.wallpaper.reset')}</span>
             </button>
           )}
         </div>
@@ -185,14 +194,14 @@ export function WallpaperManager({ onClose, isModal = false }: WallpaperManagerP
             type="text"
             value={urlInput}
             onChange={(e) => setUrlInput(e.target.value)}
-            placeholder="Oder Bild-URL einfügen (https://...)"
+            placeholder={t('browser.wallpaper.orUrl')}
             className="flex-1 bg-card border border-border rounded-xl px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary"
           />
           <button
             type="submit"
             className="px-3 py-1.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-medium transition-colors shrink-0"
           >
-            Laden
+            {t('browser.wallpaper.apply')}
           </button>
         </form>
       </div>
@@ -202,13 +211,13 @@ export function WallpaperManager({ onClose, isModal = false }: WallpaperManagerP
         <div className="pt-2 border-t border-border space-y-3">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
             <Sliders className="w-3.5 h-3.5 text-primary" />
-            <span>Darstellungs-Filter</span>
+            <span>{t('browser.settings.designTitle')}</span>
           </div>
 
           {/* Dimmer */}
           <div className="space-y-1">
             <div className="flex justify-between text-label-sm text-muted-foreground">
-              <span>Abdunkelung (Kontrast)</span>
+              <span>{t('browser.wallpaper.dim')}</span>
               <span>{wallpaperDim}%</span>
             </div>
             <input
@@ -224,7 +233,7 @@ export function WallpaperManager({ onClose, isModal = false }: WallpaperManagerP
           {/* Weichzeichner */}
           <div className="space-y-1">
             <div className="flex justify-between text-label-sm text-muted-foreground">
-              <span>Unschärfe (Blur)</span>
+              <span>{t('browser.wallpaper.blur')}</span>
               <span>{wallpaperBlur}px</span>
             </div>
             <input

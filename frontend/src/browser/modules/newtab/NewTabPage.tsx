@@ -6,6 +6,7 @@ import {
   Sparkles,
   Palette,
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useBrowserStore } from '../../services/browserStore'
 import { SEARCH_ENGINES } from '../../services/searchEngines'
 import { YouTubeIcon, GitHubIcon, WikipediaIcon, RedditIcon } from './brandIcons'
@@ -20,6 +21,7 @@ const DEFAULT_TOP_SITES = [
 ]
 
 export function NewTabPage() {
+  const { t } = useTranslation()
   const {
     searchEngine,
     navigateActiveTab,
@@ -48,11 +50,11 @@ export function NewTabPage() {
   const handleQuickAiSummary = () => {
     if (!query.trim() || !isCoupled) return
     setShowAiSummary(true)
-    setAiSummaryText('Singra fasst die Suchergebnisse zusammen...')
+    setAiSummaryText(t('browser.newtab.summarizing'))
 
     setTimeout(() => {
       setAiSummaryText(
-        `Zusammenfassung zu „${query}“:\n\nBasierend auf aktuellen Quellen liefert die Suche verifizierte Informationen ohne Tracker-Speicherung. Die Daten wurden rein lokal im Browser zwischengespeichert.`
+        t('browser.newtab.summaryResult', { query })
       )
     }, 1200)
   }
@@ -93,7 +95,7 @@ export function NewTabPage() {
       <div className="relative z-10 w-full max-w-4xl mx-auto flex justify-end items-center pt-2">
         <div className="flex items-center gap-2 bg-card/60 backdrop-blur-md border border-border px-3 py-1.5 rounded-xl text-xs text-muted-foreground shadow-sm">
           <ShieldCheck className="w-4 h-4 text-status-success" />
-          <span>{blockedAdsCount + blockedTrackersCount} Tracker & Werbung neutralisiert</span>
+          <span>{t('browser.shield.neutralizedCount', { count: blockedAdsCount + blockedTrackersCount })}</span>
         </div>
       </div>
 
@@ -118,14 +120,14 @@ export function NewTabPage() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Mit ${currentEngine.name} suchen oder Adresse eingeben...`}
+              placeholder={t('browser.omnibox.searchOrEnter', { engine: currentEngine.name })}
               className="w-full bg-transparent border-none outline-none text-foreground text-sm placeholder:text-muted-foreground/60 px-2"
               autoFocus
             />
             <button
               type="submit"
               className="p-2.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shrink-0 shadow-sm"
-              title="Suchen"
+              aria-label={t('browser.settings.tabSearch')}
             >
               <Search className="w-4 h-4" />
             </button>
@@ -139,7 +141,7 @@ export function NewTabPage() {
               className="mt-2.5 mx-auto flex items-center gap-1.5 text-xs text-primary bg-primary/10 hover:bg-primary/20 border border-primary/20 px-3 py-1.5 rounded-full transition-colors"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Singra Suche anfordern</span>
+              <span>{t('browser.newtab.aiSummary')}</span>
             </button>
           )}
         </form>
@@ -150,13 +152,13 @@ export function NewTabPage() {
             <div className="flex justify-between items-center mb-2 pb-2 border-b border-border">
               <div className="flex items-center gap-2 font-semibold text-primary">
                 <Sparkles className="w-4 h-4" />
-                <span>Singra Such-Synthese</span>
+                <span>{t('browser.newtab.aiSummary')}</span>
               </div>
               <button
                 onClick={() => setShowAiSummary(false)}
                 className="text-muted-foreground hover:text-foreground text-xs"
               >
-                Schließen
+                {t('browser.window.close')}
               </button>
             </div>
             <p className="whitespace-pre-line text-foreground/90 leading-relaxed">
@@ -195,10 +197,10 @@ export function NewTabPage() {
           type="button"
           onClick={() => setShowWallpaperModal(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-card/50 hover:bg-card backdrop-blur-md border border-border/60 hover:border-border text-muted-foreground hover:text-foreground text-xs transition-all shadow-sm"
-          title="Hintergrunddesign anpassen"
+          aria-label={t('browser.newtab.customizeBackground')}
         >
           <Palette className="w-3.5 h-3.5 text-primary" />
-          <span>Hintergrund anpassen</span>
+          <span>{t('browser.newtab.customizeBackground')}</span>
         </button>
       </div>
 

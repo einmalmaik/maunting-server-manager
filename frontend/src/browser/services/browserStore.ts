@@ -1,6 +1,15 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { baueZielUrl } from './searchEngines'
+import {
+  nativeTabErstellen,
+  nativeTabAktivieren,
+  nativeTabSchliessen,
+  nativeTabNavigieren,
+  nativeTabZurueck,
+  nativeTabVorwaerts,
+  nativeTabNeuLaden,
+} from './tauriBridge'
 
 export interface Tab {
   id: string
@@ -98,6 +107,8 @@ interface BrowserState {
   pinTab: (id: string) => void
   navigateActiveTab: (input: string) => void
   reloadActiveTab: () => void
+  goBackActiveTab: () => void
+  goForwardActiveTab: () => void
 
   // Lesezeichen & Verlauf
   addBookmark: (url: string, title: string) => void
@@ -202,11 +213,16 @@ export const useBrowserStore = create<BrowserState>()(
           tabs: [...state.tabs, newTab],
           activeTabId: id,
         }))
+
+        // Nativen Tab in Tauri erzeugen
+        void nativeTabErstellen(url, isIncognito)
         return id
       },
 
       closeTab: (id: string) => {
         const { tabs, activeTabId, createTab } = get()
+        void nativeTabSchliessen(id)
+
         if (tabs.length <= 1) {
           // Letzten Tab geschlossen -> neuen leeren Tab öffnen
           const newId = createTab()
@@ -234,6 +250,7 @@ export const useBrowserStore = create<BrowserState>()(
 
       activateTab: (id: string) => {
         set({ activeTabId: id })
+        void nativeTabAktivieren(id)
       },
 
       updateTab: (id: string, partial: Partial<Tab>) => {
@@ -269,6 +286,9 @@ export const useBrowserStore = create<BrowserState>()(
           ),
         }))
 
+        // Nativen Webview zur Ziel-URL navigieren
+        void nativeTabNavigieren(activeTabId, targetUrl)
+
         if (!currentTab?.isIncognito && !targetUrl.startsWith('about:')) {
           addHistoryEntry(targetUrl, targetUrl)
         }
@@ -276,12 +296,12 @@ export const useBrowserStore = create<BrowserState>()(
 
       reloadActiveTab: () => {
         const { activeTabId } = get()
+        void nativeTabNeuLaden(activeTabId)
         set((state) => ({
           tabs: state.tabs.map((tab) =>
             tab.id === activeTabId ? { ...tab, isLoading: true } : tab
           ),
         }))
-        // Simulation Ladeende
         setTimeout(() => {
           set((state) => ({
             tabs: state.tabs.map((tab) =>
@@ -289,6 +309,16 @@ export const useBrowserStore = create<BrowserState>()(
             ),
           }))
         }, 600)
+      },
+
+      goBackActiveTab: () => {
+        const { activeTabId } = get()
+        void nativeTabZurueck(activeTabId)
+      },
+
+      goForwardActiveTab: () => {
+        const { activeTabId } = get()
+        void nativeTabVorwaerts(activeTabId)
       },
 
       addBookmark: (url: string, title: string) => {

@@ -104,7 +104,7 @@ export function SingraDrawer() {
               ? 'bg-primary text-primary-foreground shadow-sm animate-pulse'
               : 'bg-muted text-muted-foreground hover:text-foreground'
           }`}
-          title={isVoiceActive ? 'Voice-Modus aktiv' : 'Voice-Modus im Hintergrund starten'}
+          aria-label={isVoiceActive ? 'Voice-Modus aktiv' : 'Voice-Modus im Hintergrund starten'}
         >
           {isVoiceActive ? <Radio className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
           <span>{isVoiceActive ? 'Live Audio' : 'Voice'}</span>

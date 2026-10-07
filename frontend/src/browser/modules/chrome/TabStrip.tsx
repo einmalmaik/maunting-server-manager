@@ -1,16 +1,23 @@
 import { Plus, X, EyeOff, Loader2, Pin, Minus, Square } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { useTranslation } from 'react-i18next'
 import { useBrowserStore } from '../../services/browserStore'
 import { GlobeIcon } from '../newtab/brandIcons'
+import {
+  nativeFensterMinimieren,
+  nativeFensterMaximierenUmschalten,
+  nativeFensterSchliessen,
+} from '../../services/tauriBridge'
 
 export function TabStrip() {
+  const { t } = useTranslation()
   const { tabs, activeTabId, createTab, closeTab, activateTab } = useBrowserStore()
 
   const handleMinimize = async () => {
     try {
-      await getCurrentWindow().minimize()
+      await nativeFensterMinimieren()
     } catch {
-      // Nicht in Tauri-Umgebung
+      await getCurrentWindow().minimize().catch(() => {})
     }
   }
 
@@ -26,17 +33,17 @@ export function TabStrip() {
 
   const handleToggleMaximize = async () => {
     try {
-      await getCurrentWindow().toggleMaximize()
+      await nativeFensterMaximierenUmschalten()
     } catch {
-      // Nicht in Tauri-Umgebung
+      await getCurrentWindow().toggleMaximize().catch(() => {})
     }
   }
 
   const handleClose = async () => {
     try {
-      await getCurrentWindow().close()
+      await nativeFensterSchliessen()
     } catch {
-      // Nicht in Tauri-Umgebung
+      await getCurrentWindow().close().catch(() => {})
     }
   }
 
@@ -51,7 +58,7 @@ export function TabStrip() {
       <div
         data-tauri-drag-region
         onMouseDown={handleDragStart}
-        className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto no-scrollbar h-full pt-1"
+        className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto msm-ohne-rollbalken h-full pt-1"
       >
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId
@@ -72,7 +79,7 @@ export function TabStrip() {
                 {tab.isLoading ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
                 ) : tab.isIncognito ? (
-                  <span title="Inkognito-Tab">
+                  <span aria-label={t('browser.tab.newPrivateTab')}>
                     <EyeOff className="w-3.5 h-3.5 text-primary" />
                   </span>
                 ) : tab.favicon ? (
@@ -84,7 +91,7 @@ export function TabStrip() {
 
               {/* Titel */}
               <span className="truncate flex-1">
-                {tab.title || 'Neuer Tab'}
+                {tab.title || t('browser.tab.newTab')}
               </span>
 
               {/* Pin Indicator */}
@@ -99,7 +106,7 @@ export function TabStrip() {
                   closeTab(tab.id)
                 }}
                 className="opacity-0 group-hover:opacity-100 hover:bg-muted-foreground/20 p-0.5 rounded transition-all shrink-0"
-                title="Tab schließen (Strg+W)"
+                aria-label={`${t('browser.tab.closeTab')} (Strg+W)`}
               >
                 <X className="w-3 h-3" />
               </button>
@@ -115,14 +122,14 @@ export function TabStrip() {
           <button
             onClick={() => createTab()}
             className="p-1 hover:bg-muted rounded-md text-muted-foreground hover:text-foreground transition-colors"
-            title="Neuer Tab (Strg+T)"
+            aria-label={`${t('browser.tab.newTab')} (Strg+T)`}
           >
             <Plus className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => createTab('about:blank', true)}
             className="p-1 hover:bg-muted rounded-md text-muted-foreground hover:text-primary transition-colors"
-            title="Neuer privater Tab"
+            aria-label={t('browser.tab.newPrivateTab')}
           >
             <EyeOff className="w-3.5 h-3.5" />
           </button>
@@ -145,21 +152,21 @@ export function TabStrip() {
         <button
           onClick={handleMinimize}
           className="h-full px-3 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors flex items-center justify-center"
-          title="Minimieren"
+          aria-label={t('browser.window.minimize')}
         >
           <Minus className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={handleToggleMaximize}
           className="h-full px-3 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors flex items-center justify-center"
-          title="Maximieren / Wiederherstellen"
+          aria-label={t('browser.window.maximize')}
         >
-          <Square className="w-3 h-3" />
+          <Square className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={handleClose}
           className="h-full px-3 hover:bg-status-destructive hover:text-white text-muted-foreground transition-colors flex items-center justify-center"
-          title="Schließen"
+          aria-label={t('browser.window.close')}
         >
           <X className="w-3.5 h-3.5" />
         </button>

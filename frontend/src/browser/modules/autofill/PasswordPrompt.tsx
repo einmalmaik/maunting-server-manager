@@ -54,7 +54,7 @@ export function PasswordPrompt({ data, onSave, onDismiss }: PasswordPromptProps)
         <button
           onClick={onDismiss}
           className="p-2 rounded-xl bg-muted hover:bg-muted/80 text-muted-foreground transition-colors"
-          title="Verwerfen"
+          aria-label="Verwerfen"
         >
           <X className="w-4 h-4" />
         </button>

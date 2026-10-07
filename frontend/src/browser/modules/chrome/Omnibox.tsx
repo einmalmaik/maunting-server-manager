@@ -6,6 +6,7 @@ import {
   ChevronDown,
   X,
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useBrowserStore } from '../../services/browserStore'
 import { SEARCH_ENGINES } from '../../services/searchEngines'
 import { ShieldBadge } from './ShieldBadge'
@@ -13,6 +14,7 @@ import { GlobeIcon } from '../newtab/brandIcons'
 import { getSearchEngineIcon } from '../newtab/searchEngineIcons'
 
 export function Omnibox() {
+  const { t } = useTranslation()
   const {
     tabs,
     activeTabId,
@@ -90,7 +92,7 @@ export function Omnibox() {
           <button
             onClick={() => setShowEngineMenu(!showEngineMenu)}
             className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            title={`Aktuelle Suchmaschine: ${currentEngine.name} (Klicken zum Wechseln)`}
+            aria-label={t('browser.omnibox.currentEngine', { engine: currentEngine.name })}
           >
             <span className="text-primary flex items-center">{getSearchEngineIcon(searchEngine, 'w-3.5 h-3.5')}</span>
             <ChevronDown className="w-3 h-3 opacity-60" />
@@ -99,7 +101,7 @@ export function Omnibox() {
           {showEngineMenu && (
             <div className="absolute left-0 mt-2 w-56 bg-popover/95 backdrop-blur-md border border-border rounded-xl shadow-xl py-1 z-50 animate-scale-in">
               <div className="px-3 py-1.5 text-label-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                Suchmaschine wählen
+                {t('browser.omnibox.selectEngine')}
               </div>
               {Object.values(SEARCH_ENGINES).map((engine) => (
                 <button
@@ -130,7 +132,7 @@ export function Omnibox() {
           {activeTab?.url?.startsWith('about:') ? (
             <Search className="w-3.5 h-3.5 opacity-60" />
           ) : isHttps ? (
-            <span title="Sichere HTTPS-Verbindung">
+            <span aria-label={t('browser.omnibox.secureHttps')}>
               <Lock className="w-3.5 h-3.5 text-status-success" />
             </span>
           ) : (
@@ -150,7 +152,7 @@ export function Omnibox() {
           }}
           onBlur={() => setIsFocused(false)}
           onKeyDown={handleKeyDown}
-          placeholder={`Mit ${currentEngine.name} suchen oder Adresse eingeben...`}
+          placeholder={t('browser.omnibox.searchOrEnter', { engine: currentEngine.name })}
           className="w-full bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground/60 select-text font-normal"
         />
 
@@ -171,7 +173,7 @@ export function Omnibox() {
             className={`p-1 rounded hover:bg-muted mr-1 transition-colors ${
               bookmarked ? 'text-status-warning' : 'text-muted-foreground hover:text-foreground'
             }`}
-            title={bookmarked ? 'Lesezeichen entfernen' : 'Lesezeichen hinzufügen'}
+            aria-label={bookmarked ? t('browser.omnibox.bookmarkRemove') : t('browser.omnibox.bookmarkAdd')}
           >
             <Star className={`w-3.5 h-3.5 ${bookmarked ? 'fill-current' : ''}`} />
           </button>

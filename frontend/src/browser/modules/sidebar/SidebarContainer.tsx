@@ -1,4 +1,5 @@
 import { X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useBrowserStore } from '../../services/browserStore'
 import { MessengerDrawer } from './MessengerDrawer'
 import { SingraDrawer } from './SingraDrawer'
@@ -6,6 +7,7 @@ import { VaultDrawer } from './VaultDrawer'
 import { SettingsView } from '../settings/SettingsView'
 
 export function SidebarContainer() {
+  const { t } = useTranslation()
   const { openDrawer, setOpenDrawer, history, bookmarks, removeBookmark, navigateActiveTab, clearHistory } =
     useBrowserStore()
 
@@ -16,18 +18,18 @@ export function SidebarContainer() {
       {/* Oberer Titelbalken */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted/40 select-none">
         <span className="text-xs font-semibold text-foreground uppercase tracking-wider">
-          {openDrawer === 'messenger' && 'MSM Messenger'}
-          {openDrawer === 'ai' && 'Singra KI-Begleiter'}
-          {openDrawer === 'vault' && 'Passworttresor'}
-          {openDrawer === 'settings' && 'Browser-Einstellungen'}
-          {openDrawer === 'bookmarks' && 'Lesezeichen'}
-          {openDrawer === 'history' && 'Verlauf'}
-          {openDrawer === 'downloads' && 'Downloads'}
+          {openDrawer === 'messenger' && t('browser.sidebar.messenger')}
+          {openDrawer === 'ai' && t('browser.sidebar.ai')}
+          {openDrawer === 'vault' && t('browser.sidebar.vault')}
+          {openDrawer === 'settings' && t('browser.sidebar.settings')}
+          {openDrawer === 'bookmarks' && t('browser.sidebar.bookmarks')}
+          {openDrawer === 'history' && t('browser.sidebar.history')}
+          {openDrawer === 'downloads' && t('browser.sidebar.downloads')}
         </span>
         <button
           onClick={() => setOpenDrawer('none')}
           className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-          title="Seitenleiste schließen (Esc)"
+          aria-label={`${t('browser.sidebar.close')} (Esc)`}
         >
           <X className="w-4 h-4" />
         </button>
@@ -44,7 +46,7 @@ export function SidebarContainer() {
         {openDrawer === 'bookmarks' && (
           <div className="flex-1 overflow-y-auto p-3 space-y-2 text-xs">
             {bookmarks.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">Keine Lesezeichen vorhanden</p>
+              <p className="text-muted-foreground text-center py-8">{t('browser.sidebar.noBookmarks')}</p>
             ) : (
               bookmarks.map((bm) => (
                 <div
@@ -62,7 +64,7 @@ export function SidebarContainer() {
                       removeBookmark(bm.url)
                     }}
                     className="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-status-destructive transition-all"
-                    title="Lesezeichen löschen"
+                    aria-label={t('browser.sidebar.deleteBookmark')}
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -80,12 +82,12 @@ export function SidebarContainer() {
                 onClick={clearHistory}
                 className="text-label-sm text-status-destructive hover:underline font-medium"
               >
-                Verlauf leeren
+                {t('browser.sidebar.clearHistory')}
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-2 text-xs">
               {history.length === 0 ? (
-                <p className="text-muted-foreground text-center py-8">Verlauf ist leer</p>
+                <p className="text-muted-foreground text-center py-8">{t('browser.sidebar.noHistory')}</p>
               ) : (
                 history.map((h) => (
                   <div
@@ -105,7 +107,7 @@ export function SidebarContainer() {
         {/* Downloads Liste */}
         {openDrawer === 'downloads' && (
           <div className="p-4 text-center text-xs text-muted-foreground">
-            Keine aktiven Downloads
+            {t('browser.sidebar.downloads')}
           </div>
         )}
       </div>

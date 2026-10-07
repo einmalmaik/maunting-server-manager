@@ -11,9 +11,11 @@ import {
   Shield,
   User,
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useBrowserStore, type DrawerType } from '../../services/browserStore'
 
 export function SidebarNavigation() {
+  const { t } = useTranslation()
   const {
     openDrawer,
     toggleDrawer,
@@ -27,37 +29,37 @@ export function SidebarNavigation() {
   const navItems: { id: DrawerType; label: string; icon: React.ReactNode; show: boolean }[] = [
     {
       id: 'messenger',
-      label: 'MSM Messenger',
+      label: t('browser.sidebar.messenger'),
       icon: <MessageSquare className="w-5 h-5 text-primary" />,
       show: isCoupled && isMessengerEnabled,
     },
     {
       id: 'ai',
-      label: 'Singra KI-Begleiter',
+      label: t('browser.sidebar.ai'),
       icon: <Sparkles className="w-5 h-5 text-primary" />,
       show: isCoupled && isAiEnabled,
     },
     {
       id: 'vault',
-      label: 'DIS Passwortmanager',
+      label: t('browser.sidebar.vault'),
       icon: <Lock className="w-5 h-5 text-status-success" />,
       show: isCoupled && isVaultEnabled,
     },
     {
       id: 'bookmarks',
-      label: 'Lesezeichen',
+      label: t('browser.sidebar.bookmarks'),
       icon: <Star className="w-5 h-5" />,
       show: true,
     },
     {
       id: 'history',
-      label: 'Verlauf',
+      label: t('browser.sidebar.history'),
       icon: <Clock className="w-5 h-5" />,
       show: true,
     },
     {
       id: 'downloads',
-      label: 'Downloads',
+      label: t('browser.sidebar.downloads'),
       icon: <Download className="w-5 h-5" />,
       show: true,
     },
@@ -86,7 +88,7 @@ export function SidebarNavigation() {
                     ? 'bg-primary/20 text-primary shadow-sm'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`}
-                title={item.label}
+                aria-label={item.label}
               >
                 {item.icon}
                 {isActive && (
@@ -104,7 +106,7 @@ export function SidebarNavigation() {
           <button
             onClick={() => toggleDrawer('settings')}
             className="p-2 rounded-xl text-status-warning hover:bg-muted transition-colors"
-            title="Mit MSM-Server koppeln"
+            aria-label={t('browser.sidebar.pairWithServer')}
           >
             <Link className="w-4 h-4 animate-pulse" />
           </button>
@@ -118,7 +120,7 @@ export function SidebarNavigation() {
               ? 'bg-primary/20 text-primary shadow-sm'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground'
           }`}
-          title="Browser-Einstellungen"
+          aria-label={t('browser.sidebar.settings')}
         >
           <Settings className="w-5 h-5" />
         </button>
@@ -127,7 +129,7 @@ export function SidebarNavigation() {
         <div
           onClick={() => toggleDrawer('settings')}
           className="w-8 h-8 rounded-full bg-muted border border-border flex items-center justify-center text-xs font-semibold cursor-pointer hover:border-primary transition-colors overflow-hidden"
-          title={isCoupled ? `Angemeldet als ${pairedUser?.username || 'Benutzer'}` : 'Nicht gekoppelt'}
+          aria-label={isCoupled ? t('browser.sidebar.loggedInAs', { user: pairedUser?.username || t('browser.sidebar.defaultUser') }) : t('browser.sidebar.notCoupled')}
         >
           {pairedUser?.avatarUrl ? (
             <img src={pairedUser.avatarUrl} alt="" className="w-full h-full object-cover" />
