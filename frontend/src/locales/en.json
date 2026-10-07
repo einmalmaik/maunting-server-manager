@@ -836,7 +836,7 @@
     },
     "context": {
       "title": "Context and summarization",
-      "description": "Context capacity is determined by the selected model catalog. Configure how full the context may get before older conversation history is summarized.",
+      "description": "Context capacity is determined by the selected model catalog, capped at 44,000 tokens per request. Configure how full the context may get before older conversation history is summarized.",
       "threshold": "Summarize at",
       "percent": "{{percent}}% of the window",
       "saved": "Compaction mark saved",

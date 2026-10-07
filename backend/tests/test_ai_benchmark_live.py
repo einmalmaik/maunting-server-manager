@@ -209,6 +209,9 @@ BENCH_MODEL = os.environ.get("MSM_BENCH_AI_MODEL", "openai/gpt-5.6-luna").strip(
 BENCH_BASE_URL = os.environ.get(
     "MSM_BENCH_AI_BASE_URL", "https://openrouter.ai/api/v1"
 ).strip()
+#: Die Anbieterart des Zugangs. Mit ``openai`` und ``MSM_BENCH_AI_MODEL=gpt-6-luna``
+#: misst der Benchmark mit einem OpenAI-Schlüssel direkt.
+BENCH_KIND = os.environ.get("MSM_BENCH_AI_KIND", "openrouter").strip()
 BENCH_LABEL = os.environ.get("MSM_BENCH_LABEL", "baseline").strip()
 #: Wie oft jedes Szenario laeuft. Eine einzelne Messung gegen ein
 #: Sprachmodell ist Rauschen — dasselbe Szenario schwankt zwischen zwei
@@ -1035,8 +1038,8 @@ SZENARIEN: list[Szenario] = [
 
 def _provider(db: Session) -> AiProvider:
     provider = AiProvider(
-        name="OpenRouter (benchmark)",
-        provider_kind="openrouter",
+        name=f"{BENCH_KIND} (benchmark)",
+        provider_kind=BENCH_KIND,
         default_model=BENCH_MODEL,
         enabled=True,
         requires_api_key=True,

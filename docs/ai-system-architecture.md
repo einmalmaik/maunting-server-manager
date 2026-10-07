@@ -91,7 +91,10 @@ Chat und Legacy Voice teilen `AiRun` plus `ai_run_broker`. Eine Realtime-Verbind
 `backend/routers/ai_chat.py` nimmt eine Nachricht entgegen, authentifiziert den Benutzer über die normale Session, prüft die Chat-Berechtigung und wählt einen zulässigen Provider. Der Router legt nicht selbst die Fachlogik fest. Er:
 
 1. redigiert die Nachricht (`redact_sensitive_text`),
-2. ermittelt Denkstufe und Kontextfenster,
+2. ermittelt Denkstufe und Kontextfenster (nutzbar höchstens
+   `ai_context_window.ANFRAGE_DECKEL_TOKENS` = 44.000 Token je Anfrage, auch
+   bei Modellen mit größerem Fenster; was darüber hinausgeht, fasst die
+   Zusammenfassung ab der Faltmarke dieses Deckels zusammen),
 3. übergibt nur IDs und freigegebene Eingabewerte an `lauf_beginnen_nebenher`,
 4. eröffnet und abonniert den Broker vor dem Start des Runs,
 5. liefert den Broker als SSE-Stream zurück.

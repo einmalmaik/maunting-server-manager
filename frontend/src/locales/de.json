@@ -836,7 +836,7 @@
     },
     "context": {
       "title": "Kontext und Zusammenfassung",
-      "description": "Die Kontextgröße richtet sich nach dem gewählten Modell (aus dem Modellkatalog des Anbieters). Hier legst du fest, ab welchem Füllstand ältere Gesprächsabschnitte zusammengefasst werden.",
+      "description": "Die Kontextgröße richtet sich nach dem gewählten Modell (aus dem Modellkatalog des Anbieters), höchstens 44.000 Token je Anfrage. Hier legst du fest, ab welchem Füllstand ältere Gesprächsabschnitte zusammengefasst werden.",
       "threshold": "Zusammenfassen ab",
       "percent": "{{percent}} % des Fensters",
       "saved": "Faltmarke gespeichert",
