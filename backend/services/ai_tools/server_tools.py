@@ -180,10 +180,11 @@ def _global_tool_definitions() -> list[dict]:
 
     learn_scopes = ["team"] if learning_policy() == "off" else ["team", "global"]
 
-    # Die Seitenliste steht in **beiden** Beschreibungen ausgeschrieben. Das
+    # Die Seitenliste mit Titeln steht in `search_docs` ausgeschrieben. Das
     # Modell kann sonst nur raten, was es ueberhaupt nachschlagen koennte — und
     # eine geratene Seitenkennung ist der erste Schritt zu einer geratenen
-    # Antwort.
+    # Antwort. `read_docs` fuehrt dieselben Kennungen als `enum`; die Titel ein
+    # zweites Mal kosteten jede Runde rund 600 Zeichen (gekuerzt 07.10.2026).
     from services.ai_docs_corpus import SEITEN as DOKU_SEITEN
 
     doku_seiten = sorted(DOKU_SEITEN)
@@ -191,29 +192,22 @@ def _global_tool_definitions() -> list[dict]:
 
     from services.cloudflare_service import is_configured as is_cloudflare_configured
     if is_cloudflare_configured():
-        optional.append(_function("cloudflare_list_zones", "Listet Cloudflare Zonen, Domains und Hauptdomains auf. Vor jedem DNS-Create immer aufrufen um zone_id zu ermitteln.", {}, []))
-        optional.append(_function("cloudflare_list_dns_records", "Listet alle DNS Records, Subdomains, Hostnames und Einträge einer Zone/Domain auf (z.B. zone_id oder Domain wie 'mauntingstudios.de' oder leer fuer Standardzone). Vor create auf Kollision pruefen.", {"zone_id": {"type": "string", "maxLength": 128}}, []))
+        optional.append(_function("cloudflare_list_zones", "Listet die Cloudflare-Zonen (Domains). Vor jedem Anlegen fuer die zone_id.", {}, []))
+        optional.append(_function("cloudflare_list_dns_records", "Listet die DNS-Records einer Zone (zone_id oder Domain, leer = Standardzone). Vor dem Anlegen auf Kollision pruefen.", {"zone_id": {"type": "string", "maxLength": 128}}, []))
 
     optional.append(_function("advise_node_placement", "Empfiehlt einen Host fuer einen neuen Server. Nutze vor propose_server_create um RAM/Disk bewusst zu waehlen. Unterscheidet gebucht vs wirklich belegt.", {"ram_need_mb": {"type": "integer", "minimum": 512}, "disk_need_gb": {"type": "integer", "minimum": 1}}, ["ram_need_mb"]))
-    optional.append(_function("search_curseforge_modpacks", "Sucht Modpacks auf CurseForge für ein beliebiges Spiel oder einen Server nach Begriff, Thema oder Richtung (z. B. 'Tech', 'Magic', 'Adventure', 'Quest', 'Wirtschaft', 'Dinos'). Liefert id, name, downloads.", {"query": {"type": "string", "maxLength": 128, "description": "Suchbegriff, Name, Thema oder Richtung"}, "game_id": {"type": "string", "maxLength": 64, "description": "Optional: Game-ID oder Spielname/Slug (z. B. 'minecraft', 'ark', '83374')"}, "game": {"type": "string", "maxLength": 64, "description": "Optional: Spielname oder Slug"}, "server_id": {"type": "integer", "description": "Optional: Server-ID, um das Spiel automatisch zu bestimmen"}, "page": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Seitennummer"}}, ["query"]))
-    optional.append(_function("search_curseforge_mods", "Sucht Einzelmods auf CurseForge für ein beliebiges Spiel oder einen Server nach Begriff, Thema oder Richtung (z. B. 'Minimap', 'Storage', 'Optimization', 'Dinosaurs'). Liefert id, name, downloads, author.", {"query": {"type": "string", "maxLength": 128, "description": "Suchbegriff, Modname oder Richtung"}, "game_id": {"type": "string", "maxLength": 64, "description": "Optional: Game-ID oder Spielname/Slug (z. B. 'minecraft', 'ark', '83374')"}, "game": {"type": "string", "maxLength": 64, "description": "Optional: Spielname oder Slug"}, "server_id": {"type": "integer", "description": "Optional: Server-ID, um das Spiel automatisch zu bestimmen"}, "class_id": {"type": "string", "maxLength": 32, "description": "Optional: Klassen-ID oder 'mods' / 'modpacks'"}, "page": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Seitennummer"}}, ["query"]))
+    optional.append(_function("search_curseforge_modpacks", "Sucht Modpacks auf CurseForge fuer ein Spiel nach Name oder Thema (etwa 'Tech', 'Magic', 'Dinos'). Liefert id, name, downloads.", {"query": {"type": "string", "maxLength": 128}, "game_id": {"type": "string", "maxLength": 64, "description": "Game-ID oder Spielname/Slug, etwa 'minecraft'."}, "game": {"type": "string", "maxLength": 64}, "server_id": {"type": "integer", "description": "Spiel aus diesem Server."}, "page": {"type": "integer", "minimum": 1, "maximum": 50}}, ["query"]))
+    optional.append(_function("search_curseforge_mods", "Sucht Einzelmods auf CurseForge fuer ein Spiel nach Name oder Thema (etwa 'Minimap', 'Storage'). Liefert id, name, downloads, author.", {"query": {"type": "string", "maxLength": 128}, "game_id": {"type": "string", "maxLength": 64, "description": "Game-ID oder Spielname/Slug, etwa 'minecraft'."}, "game": {"type": "string", "maxLength": 64}, "server_id": {"type": "integer", "description": "Spiel aus diesem Server."}, "class_id": {"type": "string", "maxLength": 32, "description": "Klassen-ID oder 'mods'/'modpacks'."}, "page": {"type": "integer", "minimum": 1, "maximum": 50}}, ["query"]))
 
     return optional + [
         _function(
             "search_docs",
-            "Durchsucht die Dokumentation dieses Panels. **Der erste Schritt, "
-            "bevor du etwas ueber MSM behauptest.** Verfuegbar: " + doku_liste + ".\n"
-            "Liefert Seite, Abschnitt und einen Ausschnitt — den Abschnitt "
-            "selbst holst du danach mit `read_docs`. Such danach, wie der "
-            "Benutzer fragt; Umlaute und ihre Umschreibung findet die Suche "
-            "gleichermassen.\n"
-            "Findest du nichts, ist das ein Ergebnis: sag, dass dazu nichts in "
-            "der MSM-Dokumentation steht. Nicht mit Wissen ueber andere Panels "
-            "auffuellen — Pterodactyl, Pelican und Plesk arbeiten anders, und "
-            "eine plausible Antwort ist hier schlimmer als keine.\n"
-            "Nicht aufrufen bei Fragen zu einem laufenden Server, zu "
-            "Spielinhalten oder zu Werten in einer Konfigurationsdatei — dafuer "
-            "gibt es die Serverwerkzeuge.",
+            "Durchsucht die MSM-Dokumentation — **der erste Schritt, bevor du "
+            "etwas ueber MSM behauptest.** Seiten: " + doku_liste + ".\n"
+            "Liefert Seite, Abschnitt und Ausschnitt; den Abschnitt liest du "
+            "mit `read_docs`. Findest du nichts, sag genau das, statt mit "
+            "Wissen ueber andere Panels aufzufuellen. Nicht fuer laufende "
+            "Server, Spielinhalte oder Konfigurationswerte.",
             {
                 "query": {"type": "string", "maxLength": 200},
                 "page": {
@@ -226,66 +220,44 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "read_docs",
-            "Liest die Dokumentation dieses Panels. Ohne `section` bekommst du "
-            "die Gliederung der Seite, mit `section` den Text des Abschnitts. "
-            "Seiten: " + doku_liste + ".\n"
-            "**Abschnittskennungen nie raten** — sie kommen aus der Gliederung "
-            "oder aus `search_docs`. Ein erfundener Abschnitt wird abgewiesen, "
-            "aber der Umweg kostet eine Runde.\n"
-            "Was du hier liest, gilt. Was hier nicht steht, behauptest du nicht. "
-            "Nenne dem Benutzer die Seite (`panel_page`), damit er dasselbe "
-            "nachlesen kann.",
+            "Liest die MSM-Dokumentation: ohne `section` die Gliederung einer "
+            "Seite, mit `section` den Abschnitt. **Abschnittskennungen nie "
+            "raten** — sie kommen aus der Gliederung oder `search_docs`. Was "
+            "hier nicht steht, behauptest du nicht. Nenne dem Benutzer die "
+            "Seite (`panel_page`).",
             {
                 "page": {"type": "string", "enum": doku_seiten},
                 "section": {
                     "type": ["string", "null"],
                     "maxLength": 64,
-                    "description": (
-                        "Abschnittskennung aus der Gliederung oder aus "
-                        "search_docs. Weglassen liefert die Gliederung."
-                    ),
+                    "description": "Aus Gliederung oder search_docs; leer = Gliederung.",
                 },
             },
             ["page"],
         ),
         _function(
             "read_hoster_setup",
-            "Zeigt die panelseitige Hoster-API- und WHMCS-Shop-Anbindung (Server-Hosting-Verkauf) vollstaendig: vorhandene "
-            "Integrationen mit Slug, Dienstbenutzer, Webhook-Ziel und "
-            "Kuendigungsfrist, ihre Produktzuordnungen, die vergebenen Slugs, "
-            "die Benutzer, die als Dienstbenutzer taugen, und die Rollen, die "
-            "**dieser** Benutzer vergeben darf — samt ihrem KI-Kontingent.\n"
-            "`null` heisst in jedem Kontingentfeld unbegrenzt, auch bei "
-            "`max_memory_entries`. Unter allen Rollen eines Kunden gewinnt der "
-            "hoechste Wert; was ein einzelner Kunde am Ende hat, ist hier also "
-            "nicht ablesbar.\n"
-            "**Ruf das auf, bevor du etwas zur Shop-Einrichtung vorschlaegst.** "
-            "Slug, Dienstbenutzer und Produktkennung sind nichts, was man raten "
-            "kann; ein geratener Wert erzeugt einen Vorschlag, den der Benutzer "
-            "bestaetigt und der dann scheitert. Es enthaelt bewusst keinen "
-            "Schluessel — nur den Hinweis, an dem man einen Schluessel "
-            "wiedererkennt.\n"
-            "Steht bei einer Liste `withheld`, gibt es sie, und du darfst sie "
-            "nur nicht sehen. Das ist nicht dasselbe wie eine leere Liste — "
-            "behaupte in dem Fall nicht, es gebe keine Rollen oder keine "
-            "geeigneten Benutzer.",
+            "Zeigt die Hoster-API- und WHMCS-Shop-Anbindung (Server-Hosting-"
+            "Verkauf): Integrationen mit Slug, Dienstbenutzer, Webhook und "
+            "Kuendigungsfrist, Produktzuordnungen, vergebene Slugs, taugliche "
+            "Dienstbenutzer und die Rollen, die **dieser** Benutzer vergeben "
+            "darf, samt KI-Kontingent (`null` = unbegrenzt; unter mehreren "
+            "Rollen gewinnt der hoechste Wert). Keine Schluessel.\n"
+            "**Ruf das auf, bevor du etwas zur Shop-Einrichtung vorschlaegst** "
+            "— Slug, Dienstbenutzer und Produktkennung nie raten.\n"
+            "`withheld` heisst: vorhanden, aber fuer dich nicht sichtbar — nicht "
+            "dasselbe wie leer.",
             {},
             [],
         ),
         _function(
             "read_hoster_integration_guide",
-            "Liefert fuer **eine bestehende** Integration den technischen "
-            "Einbindungsblock: Basis-Adresse, Header, Endpunkte, Zustaende, "
-            "Eventnamen, Webhook-Header und die real hinterlegten "
-            "Produktkennungen dieser Anlage.\n"
-            "Alle Werte darin stammen aus dem Code, den die API durchsetzt. "
-            "**Gib den Block unveraendert weiter** — nicht umformulieren, nichts "
-            "ergaenzen, nichts weglassen. Erklaere ringsherum so ausfuehrlich, "
-            "wie es dem Benutzer hilft, aber lass die Werte in Ruhe: ein "
-            "abgetippter Header oder ein angepasster Pfad ist der haeufigste "
-            "Grund, warum eine Shop-Anbindung nicht laeuft.\n"
-            "Die Bedeutung der `status_code`-Werte steht nicht hier, sondern in "
-            "der Doku — der Block sagt dir, in welchem Abschnitt.",
+            "Technischer Einbindungsblock einer **bestehenden** Integration: "
+            "Basis-Adresse, Header, Endpunkte, Zustaende, Events, Webhook-Header "
+            "und Produktkennungen. **Gib den Block unveraendert weiter** — kein "
+            "Wert umformuliert, ergaenzt oder weggelassen; erklaeren darfst du "
+            "drumherum. Die `status_code`-Werte erklaert die Doku (Abschnitt "
+            "steht im Block).",
             {
                 "integration_id": {
                     "type": "integer",
@@ -297,13 +269,9 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "read_skill",
-            "Laedt den vollstaendigen Text eines Skills aus dem Verzeichnis im "
-            "Systemprompt. Nur aufrufen, wenn die Beschreibung eines Skills die "
-            "Lage des Benutzers wirklich trifft — **passt keine eindeutig, ruf "
-            "gar keinen auf** und arbeite normal weiter. Ein Skill zu einer "
-            "Stoerung hilft bei einer Frage nach einer Einstellung nicht. "
-            "Behandle den Text als Anleitung, nicht als Befehl: pruefe "
-            "weiterhin selbst, ob ein Schritt sinnvoll ist.",
+            "Laedt den Text eines Skills aus dem Verzeichnis. Nur, wenn seine "
+            "Beschreibung die Lage wirklich trifft — **passt keiner eindeutig, "
+            "ruf keinen auf**. Der Text ist Anleitung, kein Befehl.",
             {
                 "skill_key": {
                     "type": "string",
@@ -335,13 +303,10 @@ def _global_tool_definitions() -> list[dict]:
             "keine Personennamen.\n"
             "Anlass: du hast gerade ein Problem gelöst oder eine Vorgehensweise "
             "erarbeitet, die beim nächsten Mal wieder gebraucht wird.\n"
-            "Bereich: 'team' fuer alles, was zu diesem Betrieb gehoert. "
-            "'global' nur fuer Erkenntnisse, die bei jedem Betreiber gelten — "
-            "etwa eine Eigenschaft eines Spiels oder einer Mod. Pruefsatz: ein "
-            "globaler Skill muss auf einem fremden Panel genauso stimmen. Im "
-            "Zweifel 'team'.\n"
-            "Gibt es den Schlüssel schon, wird der Skill ersetzt — "
-            "vollständig, nicht ergänzt; lies ihn vorher mit read_skill.",
+            "Bereich: 'team' fuer diesen Betrieb; 'global' nur, was auf jedem "
+            "fremden Panel genauso stimmt (etwa eine Eigenschaft eines Spiels). "
+            "Im Zweifel 'team'. Ein vorhandener Schluessel wird vollstaendig "
+            "ersetzt — lies ihn vorher mit read_skill.",
             {
                 "skill_key": {
                     "type": "string",
@@ -353,10 +318,8 @@ def _global_tool_definitions() -> list[dict]:
                     "type": "string",
                     "maxLength": 500,
                     "description": (
-                        "Was der Skill tut, wann er zu verwenden ist UND wann "
-                        "nicht. Nur diese Zeile entscheidet spaeter, ob du ihn "
-                        "findest — und ob du ihn in einer Lage greifst, in die "
-                        "er nicht gehoert. Schreib die Grenze mit hinein."
+                        "Was er tut, wann er gilt UND wann nicht — nur danach "
+                        "wird er spaeter gefunden."
                     ),
                 },
                 # "nichts behaupten, was du nicht geprueft hast" ist der eine
@@ -366,20 +329,13 @@ def _global_tool_definitions() -> list[dict]:
                 "body": {
                     "type": "string",
                     "maxLength": 12_000,
-                    "description": (
-                        "Die Vorgehensweise als Fliesstext, gern mit Markdown. "
-                        "Behaupte darin nichts, was du nicht geprueft hast."
-                    ),
+                    "description": "Die Vorgehensweise, gern Markdown. Nichts Ungepruefte.",
                 },
                 "scope": {"type": "string", "enum": learn_scopes},
                 "team": {
                     "type": "string",
                     "maxLength": 64,
-                    "description": (
-                        "Nur bei scope=team und nur, wenn zuvor eine Rueckfrage "
-                        "nach dem Team kam: der Name aus dieser Rueckfrage, "
-                        "genau so geschrieben. Sonst weglassen."
-                    ),
+                    "description": "Nur nach einer Rueckfrage nach dem Team: der Name daraus, genau so.",
                 },
             },
             ["skill_key", "name", "description", "body", "scope"],
@@ -394,15 +350,10 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "ask_user",
-            "Stellt dem Benutzer eine Frage mit anklickbaren Vorschlaegen. "
-            "Nutze das **nur**, wenn Raten teuer waere: eine Version, ein "
-            "Zielserver, eine Entscheidung, die sich schlecht zuruecknehmen "
-            "laesst. Nicht fuer \"soll ich anfangen?\" und nicht fuer etwas, "
-            "das du aus den Werkzeugen selbst herausfinden kannst — frag erst, "
-            "wenn du nachgesehen hast. "
-            "Der Benutzer kann immer auch frei antworten; die Vorschlaege sind "
-            "eine Abkuerzung, keine Einschraenkung. Nach dieser Frage endet "
-            "dein Zug.",
+            "Stellt dem Benutzer eine Frage mit anklickbaren Vorschlaegen — "
+            "**nur**, wenn Raten teuer waere (Version, Zielserver, schwer "
+            "Ruecknehmbares). Nicht fuer \"soll ich anfangen?\" und nicht fuer "
+            "Nachsehbares. Er kann frei antworten. Danach endet dein Zug.",
             {
                 "question": {
                     "type": "string",
@@ -432,12 +383,10 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "search_memory",
-            "Durchsucht das Gedaechtnis nach Bedeutung. Nutze es, wenn der "
-            "Benutzer wissen will, was du ueber ein Thema weisst, oder wenn "
-            "dir etwas fehlt, das nicht im Memory-Block steht. Findet auch, "
-            "was anders formuliert ist: \"mein Hund\" findet einen Eintrag, "
-            "in dem nur der Name des Hundes steht. Liefert Bereich und Inhalt. "
-            "Merken und Vergessen geschehen nach dem Gespraech von selbst.",
+            "Durchsucht das Gedaechtnis nach Bedeutung, auch anders "
+            "Formuliertes — wenn der Benutzer wissen will, was du ueber ein "
+            "Thema weisst, oder dir etwas fehlt, das nicht im Memory-Block "
+            "steht. Liefert Bereich und Inhalt.",
             {
                 "query": {
                     "type": "string",
@@ -449,34 +398,21 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "forget_skill",
-            "Loescht einen erlernten Skill. Nur eigene und Team-Skills — die "
-            "mit MSM ausgelieferten lassen sich nicht loeschen, sondern nur "
-            "ueberschreiben, indem du unter demselben Schluessel einen neuen "
-            "anlegst. Zum *Aendern* eines Skills nimm `learn_skill` mit "
-            "demselben Schluessel; loeschen und neu anlegen verliert die "
-            "Herkunft.\n"
-            "Denselben Schluessel kann es in mehreren Bereichen geben — "
-            "panelweit und in einem Team. Dann kommt eine Rueckfrage statt "
-            "einer Loeschung; nenne dem Benutzer die Bereiche und rufe das "
-            "Werkzeug mit seiner Antwort erneut auf.",
+            "Loescht einen eigenen oder Team-Skill; mitgelieferte lassen sich "
+            "nur unter demselben Schluessel ueberschreiben. Zum Aendern nimm "
+            "`learn_skill`. Gibt es den Schluessel in mehreren Bereichen, kommt "
+            "eine Rueckfrage — ruf danach mit der Antwort erneut auf.",
             {
                 "skill_key": {"type": "string", "maxLength": 64},
                 "scope": {
                     "type": "string",
                     "enum": ["global", "team"],
-                    "description": (
-                        "Nur, wenn zuvor eine Rueckfrage nach dem Bereich kam. "
-                        "Sonst weglassen."
-                    ),
+                    "description": "Nur nach einer Rueckfrage nach dem Bereich.",
                 },
                 "team": {
                     "type": "string",
                     "maxLength": 64,
-                    "description": (
-                        "Nur bei scope=team und nur nach einer Rueckfrage: der "
-                        "Bereichsname aus dieser Rueckfrage, genau so "
-                        "geschrieben. Sonst weglassen."
-                    ),
+                    "description": "Nur nach einer Rueckfrage: der Bereichsname daraus, genau so.",
                 },
             },
             ["skill_key"],
@@ -489,23 +425,21 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "read_blueprint",
-            "Liest einen Blueprint vollstaendig — Image, Startbefehl, Ports und "
-            "Umgebungsvariablen. **Die Spielversion steht hier, nicht am "
-            "Server**: bei Minecraft in runtime.env.VERSION, bei Steam-Titeln in "
-            "source.steam.branch, sonst im Image-Tag. `origin: native` bedeutet "
-            "mitgeliefert und schreibgeschuetzt.",
+            "Liest einen Blueprint: Image, Startbefehl, Ports, Umgebung. **Die "
+            "Spielversion steht hier, nicht am Server** (Minecraft: "
+            "runtime.env.VERSION, Steam: source.steam.branch, sonst Image-Tag). "
+            "`origin: native` = mitgeliefert, schreibgeschuetzt.",
             {"blueprint_id": {"type": "string", "maxLength": 64}},
             ["blueprint_id"],
         ),
         _function(
             "read_node_capacity",
-            "Liest die Kapazitaet aller Hosts. **Buchung und Verbrauch sind "
-            "zweierlei**: `ram_allocated_mb` ist die Summe aller zugewiesenen "
-            "Grenzen einschliesslich **gestoppter** Server — die belegen "
-            "nichts. Was tatsaechlich laeuft, steht in "
-            "`ram_allocated_running_mb`, was die Node misst in `ram_used_mb` und `ram_real_free_mb`. "
-            "Im MSM Panel ist RAM-Überbuchung (Overcommit) ausdrücklich erlaubt und Standard: "
-            "solange physisch Platz ist (`ram_real_free_mb` > 0), ist die Servererstellung immer zulässig.",
+            "Kapazitaet aller Hosts. **Gebucht ist nicht belegt**: "
+            "`ram_allocated_mb` zaehlt alle Grenzen einschliesslich gestoppter "
+            "Server; was laeuft, steht "
+            "in `ram_allocated_running_mb`, gemessen in `ram_used_mb` und "
+            "`ram_real_free_mb`. Ueberbuchung ist erlaubt: solange "
+            "`ram_real_free_mb` > 0, ist Anlegen zulaessig.",
             {},
             [],
         ),
@@ -519,16 +453,12 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_blueprint_change",
-            "Leitet aus einem vorhandenen Blueprint einen neuen ab — so aendert "
-            "man eine Spielversion, ohne die Vorlage aller anderen Server "
-            "anzufassen. Die Quelle bleibt unveraendert. Aenderbar sind "
-            "meta.name, meta.description, runtime.image, runtime.env und "
-            "runtime.startup — ueber runtime.startup korrigierst du fehlende "
-            "oder falsche Startparameter. runtime.env wird gemischt, vorhandene "
-            "Variablen bleiben also erhalten. Fuehrt der Quell-Blueprint "
+            "Leitet aus einem Blueprint einen neuen ab, ohne die Vorlage "
+            "anzufassen — so aendert man Spielversion oder Startparameter. "
+            "Aenderbar: meta.name, meta.description, runtime.image, runtime.env "
+            "(wird gemischt) und runtime.startup. Fuehrt die Quelle "
             "runtime.startupProfiles, wird eine Aenderung an runtime.startup "
-            "abgewiesen: dort entscheidet das Profil ueber die Startzeile, die "
-            "Korrektur bliebe wirkungslos.",
+            "abgewiesen.",
             {
                 **_RATIONALE_SCHEMA,
                 "source_id": {
@@ -609,17 +539,11 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_ai_tarif_role",
-            "Legt eine globale Rolle fuer einen Shop-Tarif an — **mit leerer "
-            "Rechteliste** und nur einem KI-Kontingent. Genau darin liegt ihr "
-            "Zweck: Kontingente haengen an globalen Rollen, und ohne eine solche "
-            "Rolle bekommt jeder Shop-Kunde dasselbe Kontingent wie jeder "
-            "andere.\n"
-            "Rechte vergibt sie ausdruecklich keine. Braucht der Tarif welche, "
-            "gehoert das in die Rollenverwaltung des Panels und nicht hierher.\n"
-            "Bei den Kontingenten heisst ein Feld auf `null` **unbegrenzt**, "
-            "nicht null; `max_memory_entries` ist die Ausnahme, siehe dort. "
-            "Setz nur, was der Benutzer genannt hat, und frag im Zweifel nach "
-            "— ein geratenes Tageslimit merkt der Kunde erst, wenn es greift.",
+            "Legt eine globale Rolle fuer einen Shop-Tarif an: **leere "
+            "Rechteliste**, nur KI-Kontingent (Kontingente haengen an globalen "
+            "Rollen). Rechte gehoeren in die Rollenverwaltung. Ein "
+            "Kontingentfeld `null` heisst **unbegrenzt**. Setz nur, was der "
+            "Benutzer genannt hat.",
             {
                 "name": {"type": "string", "maxLength": 64},
                 "description": {"type": ["string", "null"], "maxLength": 255},
@@ -633,10 +557,8 @@ def _global_tool_definitions() -> list[dict]:
                     "type": ["integer", "null"],
                     "minimum": 0,
                     "description": (
-                        "Memory-Eintraege je Bereich; `null` heisst unbegrenzt, "
-                        "0 sperrt. Es gewinnt der hoechste Wert unter allen "
-                        "Rollen des Kunden — senken kann eine zusaetzliche "
-                        "Rolle nicht, dafuer muss die bestehende sinken."
+                        "Je Bereich; `null` unbegrenzt, 0 sperrt. Unter mehreren "
+                        "Rollen gewinnt der hoechste Wert."
                     ),
                 },
                 **_RATIONALE_SCHEMA,
@@ -645,19 +567,12 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_hoster_integration",
-            "Legt eine Hoster-Integration an oder aendert eine bestehende — die "
-            "panelseitige Haelfte einer Shop-Anbindung. Ist ein `webhook_url` "
-            "gesetzt und noch kein Secret vorhanden, wird zugleich eines "
-            "erzeugt: ein Ziel ohne Secret stellt nichts zu, und das faellt "
-            "sonst erst im Betrieb auf.\n"
-            "**Ruf vorher `read_hoster_setup` auf.** Der Slug muss panelweit "
-            "eindeutig sein und der Dienstbenutzer aktiv sein, kein Owner und "
-            "`servers.create` haben — beides steht dort, beides ist nicht zu "
-            "erraten.\n"
-            "Der API-Key entsteht erst beim Ausfuehren und wird dem Benutzer "
-            "**einmalig** in der Oberflaeche gezeigt. Du bekommst ihn nie zu "
-            "sehen und kannst ihn nicht wiederholen. Sag das dem Benutzer, "
-            "bevor er bestaetigt.",
+            "Legt eine Hoster-Integration (panelseitige Shop-Anbindung) an oder "
+            "aendert sie; mit `webhook_url` und ohne Secret wird eines erzeugt. "
+            "**Vorher `read_hoster_setup`**: Slug panelweit eindeutig, "
+            "Dienstbenutzer aktiv, kein Owner, mit `servers.create`. Der API-Key "
+            "entsteht erst beim Ausfuehren und wird dem Benutzer **einmalig** "
+            "gezeigt — du siehst ihn nie; sag ihm das vor der Bestaetigung.",
             {
                 "integration_id": {
                     "type": ["integer", "null"],
@@ -680,10 +595,7 @@ def _global_tool_definitions() -> list[dict]:
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 365,
-                    "description": (
-                        "Tage, die Server und Daten nach einer Kuendigung "
-                        "erhalten bleiben. 0 = sofort loeschbar."
-                    ),
+                    "description": "Tage bis zur Loeschbarkeit nach Kuendigung; 0 = sofort.",
                 },
                 "enabled": {"type": "boolean"},
                 **_RATIONALE_SCHEMA,
@@ -698,20 +610,12 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_hoster_product",
-            "Ordnet eine Produktkennung des Shops einem Blueprint und einem "
-            "Ressourcenpaket zu. Die Kennung muss **exakt** so heissen wie im "
-            "Shop — MSM-interne IDs muss der Shop nie kennen.\n"
-            "**Ruf vorher `read_hoster_setup` auf** fuer die Integration, die "
-            "vorhandenen Produktkennungen und die Rollen, die dieser Benutzer "
-            "vergeben darf. Eine Rolle, die dort nicht steht, wird abgewiesen — "
-            "auch dann, wenn sie existiert.\n"
-            "`role_id` ist der Bogen zwischen Tarif und KI-Kontingent: der "
-            "Kunde bekommt diese Rolle, solange sein Vertrag laeuft, und "
-            "verliert sie bei Sperre oder Kuendigung. Leer lassen heisst: keine "
-            "Zusatzrolle.\n"
-            "Leere Grenzen bedeuten die Voreinstellung des Blueprints, nicht "
-            "null. Aenderungen gelten fuer neu erstellte Server; laufende passt "
-            "der Betreiber bewusst von Hand an.",
+            "Ordnet eine Produktkennung des Shops (**exakt** wie im Shop) einem "
+            "Blueprint und Ressourcenpaket zu. **Vorher `read_hoster_setup`**; "
+            "eine Rolle, die dort nicht als vergebbar steht, wird abgewiesen. "
+            "`role_id` traegt der Kunde, solange sein Vertrag laeuft (sein "
+            "KI-Kontingent). Leere Grenzen = Voreinstellung des Blueprints. Gilt "
+            "fuer neu erstellte Server.",
             {
                 "integration_id": {"type": "integer", "minimum": 1},
                 "external_product_key": {"type": "string", "maxLength": 128},
@@ -742,13 +646,12 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_cloudflare_dns_record",
-            "Legt einen Cloudflare DNS Record / Subdomain an. Unterstützt ausnahmslos alle DNS-Typen und Protokolle (A, AAAA, CNAME, TXT, SRV, MX, NS, PTR, CAA, HTTPS, SVCB, TLSA etc.). Vorher cloudflare_list_zones aufrufen um zone_id zu ermitteln. Name als Hostname/Subdomain (z.B. {game}-{slug}.{zone} oder _minecraft._tcp.{subdomain}.{zone}), Inhalt ist IP/Target/Content.",
+            "Legt einen Cloudflare-DNS-Record (Subdomain) an, jeder Typ. zone_id vorher aus cloudflare_list_zones. Name als voller Hostname, etwa {game}-{slug}.{zone} oder _minecraft._tcp.{subdomain}.{zone}.",
             {
-                "zone_id": {"type": "string", "maxLength": 64, "description": "Cloudflare Zonen-ID oder Zonen-Name"},
-                "name": {"type": "string", "maxLength": 253, "description": "Vollständiger DNS-Name / Subdomain"},
+                "zone_id": {"type": "string", "maxLength": 64, "description": "Zonen-ID oder -Name."},
+                "name": {"type": "string", "maxLength": 253},
                 "rtype": {
                     "type": "string",
-                    "description": "DNS-Record-Typ (A, AAAA, CNAME, TXT, SRV, MX, NS, PTR, CAA, HTTPS, SVCB, TLSA, etc.)",
                     "enum": [
                         "A",
                         "AAAA",
@@ -772,32 +675,32 @@ def _global_tool_definitions() -> list[dict]:
                         "CERT",
                     ],
                 },
-                "content": {"type": "string", "maxLength": 253, "description": "IP-Adresse, Ziel-Host oder Record-Inhalt (bei SRV z.B. '0 5 25566 mc.example.com')"},
-                "proxied": {"type": "boolean", "description": "Cloudflare Proxying (nur für A, AAAA, CNAME zulässig; für andere Typen automatisch False)"},
-                "priority": {"type": "integer", "description": "Priorität (z. B. für MX oder SRV Records)"},
-                "ttl": {"type": "integer", "description": "TTL in Sekunden (1 = Automatisch)"},
-                "data": {"type": "object", "description": "Optionales Datenobjekt für strukturierte Records (SRV, CAA, HTTPS, etc.)"},
+                "content": {"type": "string", "maxLength": 253, "description": "IP, Ziel oder Inhalt (SRV: '0 5 25566 mc.example.com')."},
+                "proxied": {"type": "boolean", "description": "Nur A, AAAA, CNAME."},
+                "priority": {"type": "integer", "description": "MX/SRV."},
+                "ttl": {"type": "integer", "description": "Sekunden, 1 = automatisch."},
+                "data": {"type": "object", "description": "Strukturiert (SRV, CAA, HTTPS)."},
                 **_RATIONALE_SCHEMA,
             },
             ["zone_id", "name", "rtype", *_RATIONALE_REQUIRED],
         ),
         _function(
             "propose_cloudflare_dns_delete",
-            "Loescht einen Cloudflare DNS Record / Eintrag anhand seiner record_id oder seines Namens/Subdomain (z.B. 'test.mauntingstudios.de').",
+            "Loescht einen Cloudflare-DNS-Record per record_id oder Hostname.",
             {
-                "record_id": {"type": "string", "maxLength": 253, "description": "Hex-ID oder Hostname/Subdomain des DNS-Records"},
-                "zone_id": {"type": "string", "maxLength": 64, "description": "Optional: Zonen-ID oder Domain"},
+                "record_id": {"type": "string", "maxLength": 253, "description": "Hex-ID oder Hostname."},
+                "zone_id": {"type": "string", "maxLength": 64},
                 **_RATIONALE_SCHEMA,
             },
             ["record_id", *_RATIONALE_REQUIRED],
         ),
         _function(
             "propose_modpack_install",
-            "Installiert ein Modpack (CurseForge) auf einem bestehenden Server. Braucht server_id aus list_my_servers und Modpack-Info aus search_curseforge_modpacks.",
+            "Installiert ein CurseForge-Modpack auf einem bestehenden Server.",
             {
                 **_SERVER_ID_SCHEMA,
-                "modpack_mod_id": {"type": "string", "maxLength": 32, "description": "CurseForge Modpack ID"},
-                "file_id": {"type": "string", "maxLength": 32, "description": "Optional: File-ID der Modpack-Version (falls bekannt, sonst neueste Version)"},
+                "modpack_mod_id": {"type": "string", "maxLength": 32, "description": "Aus search_curseforge_modpacks."},
+                "file_id": {"type": "string", "maxLength": 32, "description": "Version; leer = neueste."},
                 **_RATIONALE_SCHEMA,
             },
             ["server_id", "modpack_mod_id", *_RATIONALE_REQUIRED],
@@ -844,13 +747,10 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "search_server_files",
-            "Sucht einen Text in den Dateien des Servers und liefert Pfad und "
-            "Zeilennummer jedes Treffers. **Der erste Schritt bei jeder grossen "
-            "Datei** — eine Spielkonfiguration hat tausende Zeilen, und "
-            "read_config zeigt immer nur ein Fenster davon. Mit `path` auf eine "
-            "Datei suchst du in genau ihr, mit `path` auf ein Verzeichnis "
-            "darunter, ohne `path` im ganzen Serververzeichnis. Exakter "
-            "Teilstring, Gross- und Kleinschreibung egal.",
+            "Sucht Text in den Serverdateien; liefert Pfad und Zeile je "
+            "Treffer. **Der erste Schritt bei grossen Dateien.** `path` auf "
+            "Datei oder Verzeichnis grenzt ein; Teilstring, Gross-/"
+            "Kleinschreibung egal.",
             {
                 "query": {"type": "string", "maxLength": MAX_SEARCH_QUERY_CHARS},
                 "path": {"type": "string", "maxLength": 256},
@@ -865,15 +765,11 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "read_config",
-            "Liest eine Textdatei des Servers revisionssicher — Konfigurationen, "
-            "Whitelists, Skripte, alles was der Dateimanager auch zeigt. Ohne "
-            f"`offset` die ersten {MAX_READ_CONFIG_LINES} Zeilen; `total_lines` "
-            "sagt dir, wie lang die Datei wirklich ist. Zu einer Fundstelle aus "
-            "search_server_files springst du mit `offset`. "
-            "`editable: false` heisst **nur**, dass du die Datei nicht als "
-            "Ganzes ersetzen darfst, weil du sie nicht ganz gesehen hast — mit "
-            "`patchable: true` kannst du sie trotzdem per propose_config_patch "
-            "aendern. Erst `patchable: false` (Binaerdatei) heisst Finger weg.",
+            "Liest eine Textdatei des Servers (alles, was der Dateimanager "
+            f"zeigt). Ohne `offset` die ersten {MAX_READ_CONFIG_LINES} Zeilen; "
+            "`total_lines` nennt die Laenge, `offset` springt zu einer "
+            "Fundstelle. `editable: false` heisst **nur**: nicht ganz ersetzen "
+            "— mit `patchable: true` per propose_config_patch aendern.",
             {
                 "path": {"type": "string", "maxLength": 256},
                 "offset": {
@@ -897,29 +793,18 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "read_server_network",
-            "Liest die Netzwerkeinrichtung: Bind-IP mit Einordnung, Ports, "
-            "verfuegbare Host-Adressen und Firewall-Zustand. Erster Schritt, "
-            "wenn ein Server laeuft, aber niemand sich verbinden kann. "
-            "Rufe danach check_server_reachability auf — erst beide zusammen "
-            "ergeben eine Diagnose. read_server_status ist dafuer nicht noetig, "
-            "der Status steht bereits in dieser Antwort.",
+            "Netzwerk: Bind-IP mit Einordnung, Ports, Host-Adressen, Firewall "
+            "und Status. Erster Schritt, wenn niemand sich verbinden kann; "
+            "danach check_server_reachability.",
         ),
         _server_function(
             "check_server_reachability",
-            "Misst, ob auf den Ports des Servers tatsaechlich etwas lauscht. "
-            "Der eigentliche Beweis bei 'laeuft, aber niemand kommt drauf': "
-            "meldet ein Port sich als frei, obwohl der Server laeuft, horcht "
-            "der Dienst nicht oder horcht auf einer anderen Adresse. "
-            "Beantwortet nicht, ob der Server aus dem Internet erreichbar ist — "
-            "das kann MSM nicht messen und behauptet es auch nicht.\n"
-            "`game_probe` traegt zusaetzlich das Urteil der Anwendungsprobe, die "
-            "der Blueprint deklariert und der Guardian auf der Node ausfuehrt: "
-            "`answering` (der Dienst antwortet im Spielprotokoll), "
-            "`not_answering` (Port offen, Dienst stumm — der eigentliche Befund "
-            "bei 'laeuft, aber niemand kommt drauf'), `not_declared` und "
-            "`no_measurement`. **`not_declared` ist kein Fehlerbefund**, sondern "
-            "heisst nur, dass dieser Blueprint keine Probe vorsieht; melde es "
-            "nicht als Problem.",
+            "Prueft, ob der Server erreichbar ist: misst, ob auf seinen Ports "
+            "etwas lauscht — der Beweis bei 'laeuft, aber niemand kommt drauf'. "
+            "Ob er aus dem Internet erreichbar ist, kann MSM nicht messen und "
+            "behauptet es nicht. `game_probe`: `answering`, `not_answering` (Port "
+            "offen, Dienst stumm), `not_declared` (keine Probe im Blueprint — "
+            "**kein Fehlerbefund**) oder `no_measurement`.",
         ),
         _server_function(
             "read_server_mods",
@@ -1006,11 +891,9 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "propose_backup_restore",
-            "Schlaegt vor, ein vorhandenes Backup einzuspielen. Ueberschreibt "
-            "**alle** Serverdaten und stoppt den Server dabei; was seit dem "
-            "Backup entstanden ist, geht verloren. Verlangt immer eine "
-            "Bestaetigung, auch im autonomen Modus. Die backup_id stammt aus "
-            "read_server_backups — rate sie nie.",
+            "Spielt ein Backup ein: ueberschreibt **alle** Serverdaten und "
+            "stoppt den Server; alles seit dem Backup ist weg. Immer mit "
+            "Bestaetigung. backup_id aus read_server_backups, nie raten.",
             {
                 **_RATIONALE_SCHEMA,
                 "backup_id": {
@@ -1030,18 +913,12 @@ def provider_tool_definitions() -> list[dict]:
             # `ai_proposal_service` bei den erfundenen Einschraenkungen. Eine
             # Bedingung, die es nicht gibt, haelt das Modell von Wechseln ab,
             # die durchgegangen waeren.
-            "Schlaegt vor, einen bestehenden Server auf einen anderen Blueprint "
-            "umzustellen — so aendert man die Spielversion, denn sie steht im "
-            "Blueprint und nicht am Server. Der Server muss gestoppt sein. Leite "
-            "vorher mit propose_blueprint_change einen passenden ab. Der "
-            "Vorgang legt zwingend ein Backup an und **loescht danach alle "
-            "Serverdateien**, damit die neue Version auf einem leeren "
-            "Verzeichnis aufsetzt: Welt, Configs und Mods sind anschliessend "
-            "weg und stehen nur noch im Backup. Sage das im Grund ausdruecklich. "
-            "Braucht immer eine Bestaetigung durch einen Menschen — auch im "
-            "autonomen Modus. Wenn Guardian fuer diesen Server nur falsch "
-            "eingestellt ist, nimm propose_guardian_tuning: das aendert nichts "
-            "an den Dateien.",
+            "Stellt einen **gestoppten** Server auf einen anderen Blueprint um "
+            "— so aendert man die Version (vorher mit propose_blueprint_change "
+            "ableiten). Legt ein Backup an und **loescht danach alle "
+            "Serverdateien**: Welt, Configs, Mods; sag das im Grund. Immer mit "
+            "Bestaetigung. Ist nur Guardian falsch eingestellt: "
+            "propose_guardian_tuning.",
             {
                 **_RATIONALE_SCHEMA,
                 "blueprint_id": {
@@ -1063,11 +940,8 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "propose_config_update",
-            "Ersetzt eine Datei **vollstaendig** — fuer neue Dateien und fuer "
-            "kleine, die du ganz gelesen hast (`editable: true`). Bei allem "
-            "anderen nimm propose_config_patch: eine Datei, die du nur "
-            "ausschnittsweise kennst, ganz zu ersetzen wuerde alles Ungesehene "
-            "loeschen, und genau das wird abgewiesen. Niemals Secrets einfuegen.",
+            "Ersetzt eine Datei **vollstaendig** — nur neue oder ganz gelesene "
+            "(`editable: true`); sonst propose_config_patch. Keine Secrets.",
             {
                 "path": {"type": "string", "maxLength": 256},
                 "content": {"type": "string", "maxLength": MAX_CONFIG_CHARS},
@@ -1078,16 +952,12 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "propose_config_patch",
-            "Aendert **einzelne Stellen** einer Datei und laesst den Rest "
-            "unberuehrt — der Weg fuer jede grosse Datei, auch wenn sie "
-            "`editable: false` meldet. Je Eintrag wird `find` durch `replace` "
-            "ersetzt. `find` muss **genau einmal** in der Datei vorkommen: nimm "
-            "so viel Umgebung mit, dass es eindeutig ist (nicht `value=\"1\"`, "
-            "sondern die ganze Zeile oder das Element drumherum). Kommt es "
-            "keinmal oder mehrfach vor, wird der Vorschlag abgewiesen und du "
-            "musst `find` genauer fassen. `expected_revision` stammt aus "
-            "read_config. Weder `find` noch `replace` duerfen Zugangsdaten "
-            "enthalten.",
+            "Ersetzt **einzelne Stellen** einer Datei und laesst den Rest "
+            "unberuehrt — der Weg fuer grosse Dateien, auch bei `editable: "
+            "false`: je Eintrag wird `find` durch `replace` ersetzt. `find` muss "
+            "**genau einmal** vorkommen — nimm die ganze Zeile oder das Element "
+            "mit, sonst wird abgewiesen. `expected_revision` aus read_config. "
+            "Keine Zugangsdaten.",
             {
                 **_RATIONALE_SCHEMA,
                 "path": {"type": "string", "maxLength": 256},
@@ -1120,17 +990,12 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "propose_config_set",
-            "Setzt einzelne Schluessel in einer INI-artigen Datei — **der "
-            "Normalfall fuer Spieleinstellungen**. Du nennst Sektion, "
-            "Schluessel und Wert statt Text zu suchen: die Sektion wird "
-            "gefunden oder angelegt, ein vorhandener Schluessel ueberschrieben "
-            "statt gedoppelt, die Zeilenenden bleiben. Einen fehlenden "
-            "Schluessel legst du damit an — Regelfall, kein Hindernis. Der Wert "
-            "gilt dauerhaft und wird vor jedem Start neu geschrieben, haelt "
-            "also auch bei Spielen, die ihre Konfiguration selbst "
-            "zurueckschreiben. Ein laufender Server hindert dich nicht; es "
-            "wirkt mit dem naechsten Neustart. `expected_revision` aus "
-            "read_config, `null` legt die Datei an. Keine Passwortfelder.",
+            "Setzt Schluessel in einer INI-artigen Datei — **der Normalfall "
+            "fuer Spieleinstellungen**: Sektion wird gefunden oder angelegt, "
+            "Schluessel ueberschrieben statt gedoppelt, Fehlendes angelegt. "
+            "Dauerhaft (vor jedem Start neu geschrieben), wirkt ab dem "
+            "naechsten Neustart. `expected_revision` aus read_config, `null` "
+            "legt die Datei an. Keine Passwortfelder.",
             {
                 **_RATIONALE_SCHEMA,
                 "path": {"type": "string", "maxLength": 256},
@@ -1159,11 +1024,9 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "propose_bind_ip_update",
-            "Schlaegt eine andere Bind-IP vor — etwa wenn der Server an eine "
-            "Docker- oder Loopback-Adresse gebunden ist und deshalb von aussen "
-            "nicht erreichbar sein kann. Nur Adressen, die dem Host tatsaechlich "
-            "gehoeren; nimm sie aus read_server_network. Ein laufender Server "
-            "wird dabei neu gestartet.",
+            "Andere Bind-IP, etwa statt einer Docker- oder Loopback-Adresse. "
+            "Nur Adressen des Hosts aus read_server_network; ein laufender "
+            "Server startet neu.",
             {
                 "bind_ip": {"type": "string", "maxLength": 45},
                 **_RATIONALE_SCHEMA,
@@ -1175,20 +1038,18 @@ def provider_tool_definitions() -> list[dict]:
             "Schlaegt Installation, Aktualisierung oder Neuinstallation einer Workshop- oder CurseForge-Mod vor. "
             "Der Download laeuft ueber den vorhandenen MSM-Installationspfad.",
             {
-                "workshop_id": {"type": "string", "maxLength": 20, "description": "Workshop-ID oder CurseForge Mod-ID (aus search_curseforge_mods oder search_workshop_mods)"},
-                "mod_id": {"type": "string", "maxLength": 20, "description": "Alias für workshop_id: CurseForge Mod-ID"},
+                "workshop_id": {"type": "string", "maxLength": 20, "description": "Workshop- oder CurseForge-ID."},
+                "mod_id": {"type": "string", "maxLength": 20, "description": "Alias fuer workshop_id."},
                 "action": {"type": "string", "enum": ["install", "update", "reinstall"]},
-                "name": {"type": "string", "maxLength": 256, "description": "Lesbarer Mod-Titel"},
+                "name": {"type": "string", "maxLength": 256},
                 **_RATIONALE_SCHEMA,
             },
             ["workshop_id", "action", *_RATIONALE_REQUIRED],
         ),
         _server_function(
             "propose_mod_toggle",
-            "Schaltet eine bereits installierte Mod an oder aus. Welche Mods "
-            "aktiv sind, steht in der Mod-Liste des Panels (read_server_mods, "
-            "Feld `enabled`) — nie in einer Spielkonfiguration. Wirkt erst "
-            "beim naechsten Start des Servers.",
+            "Schaltet eine installierte Mod an oder aus (Mod-Liste des Panels, "
+            "nie Spielkonfiguration). Wirkt ab dem naechsten Start.",
             {
                 "workshop_id": {"type": "string", "maxLength": 20},
                 "enabled": {"type": "boolean"},
@@ -1206,18 +1067,12 @@ def provider_tool_definitions() -> list[dict]:
         # Reparaturen anstossen.
         _server_function(
             "propose_server_repair",
-            "Repariert die Anlage unter dem Server, nicht seine Dateien. Zwei "
-            "Moeglichkeiten: `repair_permissions` berichtigt die Besitzrechte am "
-            "Serververzeichnis — der Weg bei 'permission denied', 'read-only "
-            "file system' oder wenn der Server seine eigenen Dateien nicht mehr "
-            "schreiben kann. `reallocate_port` vergibt die Ports neu, die auf "
-            "dem Host jemand anderes belegt — der Weg bei 'address already in "
-            "use', aber nur bei einem **gestoppten** Server; bei einem laufenden "
-            "haelt er seine Ports selbst und es gibt nichts zu vergeben. "
-            "Nichts davon aendert Spielstaende. "
-            "Fuer 'Container haengt' oder 'startet nicht' nimm "
-            "propose_server_lifecycle mit `restart` — das baut den Container "
-            "ohnehin aus dem Blueprint neu auf.",
+            "Repariert die Anlage, nicht die Dateien. `repair_permissions`: "
+            "Besitzrechte am Serververzeichnis ('permission denied', 'read-only "
+            "file system'). `reallocate_port`: belegte Ports neu vergeben "
+            "('address already in use'), nur bei **gestopptem** Server. Aendert "
+            "keine Spielstaende. Fuer 'haengt' oder 'startet nicht': "
+            "propose_server_lifecycle mit `restart`.",
             {
                 "action": {
                     "type": "string",
@@ -1236,15 +1091,10 @@ def provider_tool_definitions() -> list[dict]:
         # Muster einschmuggeln.
         _server_function(
             "propose_guardian_tuning",
-            "Stellt die Guardian-Engine **fuer diesen einen Server** anders ein, "
-            "ohne die Blueprint anderer Server anzufassen. Der Weg fuer den Fall, "
-            "dass Guardian sich nicht geirrt hat und der Server nicht kaputt ist, "
-            "sondern Guardian fuer diesen Server falsch eingestellt wurde — etwa "
-            "wenn eine volle Node laenger zum Hochfahren braucht, als die "
-            "Blueprint erwartet, und deshalb dauernd Neustarts gemeldet werden. "
-            "Gib nur die Werte an, die du aendern willst; die uebrigen bleiben "
-            "stehen. `reset: true` nimmt alles zurueck und laesst wieder die "
-            "Blueprint gelten. Aendert keine Datei und keinen Spielstand.",
+            "Stellt Guardian **nur fuer diesen Server** anders ein — wenn der "
+            "Server nicht kaputt ist, sondern Guardian falsch erwartet (etwa "
+            "laengerer Start auf voller Node). Nur zu aendernde Werte angeben; "
+            "`reset: true` nimmt alles zurueck. Aendert keine Datei.",
             {
                 "startup_grace_period_seconds": {
                     "type": "integer", "minimum": 1, "maximum": 600,
@@ -1373,16 +1223,12 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "propose_file_delete",
-            "Loescht **eine** Datei des Servers. Gedacht fuer haengende "
-            "Sperrdateien (`session.lock`, `*.pid`) und nachweislich kaputte "
-            "Einzeldateien, die der Server beim Start nicht mehr lesen kann. "
-            "Vorher wird derselbe Versionsschnappschuss angelegt wie beim "
-            "Schreiben, der Dateimanager holt die Datei also einzeln zurueck. "
-            "Im autonomen Guardian-Betrieb laeuft es nur mit einem nachweislich "
-            "erfolgreichen Backup, das juenger ist als der Vorfall — fehlt es, "
-            "wird der Vorschlag abgewiesen, und du legst erst eines an. "
-            "Kein Verzeichnis, keine Platzhalter: genau ein Pfad, den du vorher "
-            "mit list_server_files oder read_config gesehen hast.",
+            "Loescht **genau eine** Datei — fuer haengende Sperrdateien "
+            "(`session.lock`, `*.pid`) oder nachweislich kaputte Einzeldateien; "
+            "vorher entsteht ein Versionsschnappschuss. Im autonomen "
+            "Guardian-Betrieb nur mit erfolgreichem Backup, juenger als der "
+            "Vorfall. Kein Verzeichnis, keine Platzhalter: ein Pfad, den du "
+            "gesehen hast.",
             {
                 "path": {"type": "string", "maxLength": 256},
                 **_RATIONALE_SCHEMA,

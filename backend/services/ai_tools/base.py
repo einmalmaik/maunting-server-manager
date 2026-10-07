@@ -102,12 +102,12 @@ _RATIONALE_SCHEMA = {
     "reason": {
         "type": "string",
         "maxLength": MAX_REASON_CHARS,
-        "description": "Kurze Begruendung, warum diese Aktion vorgeschlagen wird",
+        "description": "Warum, ein Satz.",
     },
     "expected_effect": {
         "type": "string",
         "maxLength": MAX_REASON_CHARS,
-        "description": "Erwartete Auswirkung auf den Server oder Dienst",
+        "description": "Was sich dadurch aendert, ein Satz.",
     },
 }
 _RATIONALE_REQUIRED = ["reason", "expected_effect"]

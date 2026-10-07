@@ -191,15 +191,10 @@ def _desktop_tool_definitions() -> list[dict]:
         ),
         _function(
             "desktop_artifact",
-            "Verwaltet Desktop-Artefakte (Software, Mods, Installer). "
-            "aktion='download': Lädt Datei via HTTPS in Quarantäne. "
-            "aktion='pruefen': SHA-256- und Defender-Scan. "
-            "aktion='sandbox': Startet isolierte Windows Sandbox zur Prüfung. "
-            "aktion='locator': Sucht Spiel- und Softwareinstallationen. "
-            "aktion='deploy': Installiert Artefakt mit Snapshot-Manifest. "
-            "aktion='rollback': Stellt vorherigen Snapshot-Zustand wieder her. "
-            "aktion='installer': Startet Setup-Installer im Benutzerkontext. "
-            "aktion='status': Prüft Quarantäne- und Sandbox-Status.",
+            "Desktop-Artefakte (Software, Mods, Installer): download (HTTPS in "
+            "Quarantäne), pruefen (SHA-256 und Defender), sandbox (Windows "
+            "Sandbox), locator (Installationen finden), deploy (mit Snapshot), "
+            "rollback, installer (Setup im Benutzerkontext), status.",
             {
                 "aktion": {
                     "type": "string",
@@ -211,27 +206,27 @@ def _desktop_tool_definitions() -> list[dict]:
                 "url": {
                     "type": "string",
                     "maxLength": 1000,
-                    "description": "HTTPS-Download-URL des Artefakts.",
+                    "description": "HTTPS.",
                 },
                 "artifact_id": {
                     "type": "string",
                     "maxLength": 64,
-                    "description": "Opake Kennung des heruntergeladenen Artefakts.",
+                    "description": "Aus download.",
                 },
                 "target_id": {
                     "type": "string",
                     "maxLength": 64,
-                    "description": "Opake Kennung des Installationsziels aus locator.",
+                    "description": "Aus locator.",
                 },
                 "sha256": {
                     "type": "string",
                     "maxLength": 64,
-                    "description": "Erwarteter SHA-256-Hash des Herausgebers.",
+                    "description": "Hash des Herausgebers.",
                 },
                 "installer_args": {
                     "type": "array",
                     "items": {"type": "string", "maxLength": 200},
-                    "description": "Optionale Argumente für Installer.",
+                    "description": "Installer-Argumente.",
                 },
             },
             ["aktion"],
