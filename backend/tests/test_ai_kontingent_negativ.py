@@ -472,7 +472,9 @@ def test_endgueltige_werkzeuge_behalten_ihre_warnung() -> None:
 
 def test_der_katalog_ist_json_und_ohne_mojibake() -> None:
     text = json.dumps(_katalog(), ensure_ascii=False)
-    for kaputt in ("Ã¤", "Ã¶", "Ã¼", "ÃŸ", "â€"):
+    # Die kaputten Formen gerechnet statt hingeschrieben: als Literal hielte
+    # test_quelltext_ohne_mojibake diese Datei selbst für doppelt kodiert.
+    for kaputt in [z.encode("utf-8").decode("cp1252") for z in ("ä", "ö", "ü", "ß", "–")]:
         assert kaputt not in text
 
 

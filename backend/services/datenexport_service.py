@@ -46,6 +46,7 @@ FORMAT = "msm-datenexport-v1"
 #: bewusst blind (E2EE ohne Kontozuordnung), oder Panelbetrieb, bei dem das
 #: Konto nur Dienstkonto ist.
 OHNE_KONTOBEZUG: dict[str, str] = {
+    "ai_memory_pflege": "Betriebsstand der naechtlichen Pflege: Bereichskennung und zwei Zeitpunkte, kein Inhalt",
     "ai_providers": "Panel-Einstellung",
     "backups": "Server-Daten",
     "change_events": "Server-Daten",
