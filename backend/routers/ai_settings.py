@@ -107,7 +107,17 @@ def update_role_limits(
     role = db.query(Role).filter(Role.id == role_id).first()
     if role is None:
         raise HTTPException(status_code=404, detail="Rolle nicht gefunden")
-    values = req.model_dump()
+    # Nur, was der Aufrufer genannt hat. Ein Feld, das fehlt, behält seinen
+    # gespeicherten Wert, statt zu „unbegrenzt“ zu werden: ein noch offenes
+    # altes Browserfenster kennt die Minutenfelder nicht und hätte beim
+    # Speichern still eine Sperre aufgehoben. Ein ausdrückliches ``null`` ist
+    # weiter „unbegrenzt“.
+    genannt = req.model_dump(exclude_unset=True)
+    bisher = ai_limit_service.get_role_limit(db, role.id)
+    values = {
+        feld: genannt[feld] if feld in genannt else (getattr(bisher, feld) if bisher else None)
+        for feld in ai_limit_service.LIMIT_FIELDS
+    }
     try:
         ai_limit_service.set_role_limit(db, role.id, values)
         # Ein leeres Feld heisst in jedem Feld „unbegrenzt“ — seit dem
@@ -730,6 +740,8 @@ def _entry(row: ai_usage_service.AiUsageSummary) -> AiUsageEntry:
         cost_month_micro_usd=row.cost_month_microunits,
         requests_month=row.requests_month,
         last_request_at=row.last_request_at,
+        realtime_seconds_month=row.realtime_seconds_month,
+        dictation_seconds_month=row.dictation_seconds_month,
     )
 
 

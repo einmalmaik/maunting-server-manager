@@ -180,6 +180,42 @@ class EffectiveAiLimits:
     max_memory_entries: int | None
 
 
+#: Felder eines Limit-Sets von vor dem 07.10.2026 (Migration 20261008_03).
+ALTE_FELDER = (
+    "requests_per_minute",
+    "concurrent_operations",
+    "monthly_cost_limit_cents",
+    "monthly_realtime_cost_limit_cents",
+)
+
+
+def altes_set_umschreiben(werte: dict) -> dict:
+    """Ein Limit-Set in alten Feldern, umgeschrieben wie die Migration es tut.
+
+    Ein KI-Vorschlag für eine Tarifrolle (`propose_ai_tarif_role`), der vor dem
+    Umbau entstand und erst danach bestätigt wird, trägt noch die alten
+    Schlüssel. `set_role_limit` wiese ihn als unvollständig ab, und der Benutzer
+    läse eine Meldung über die Hoster-Anbindung. Dieselbe Regel wie in der
+    Migration: eine ``0`` in Anfragen/Minute, Gleichzeitigkeit oder Kosten
+    sperrte und sperrt weiter; Echtzeitkosten ``0`` werden 0 Minuten, jeder
+    andere Betrag unbegrenzt. Ein Set ohne alte Felder kommt unverändert zurück.
+    """
+    if not set(werte) & set(ALTE_FELDER):
+        return dict(werte)
+    neu = {feld: werte.get(feld) for feld in LIMIT_FIELDS}
+    if "monthly_realtime_cost_limit_cents" in werte and "monthly_realtime_minutes_limit" not in werte:
+        neu["monthly_realtime_minutes_limit"] = (
+            0 if werte["monthly_realtime_cost_limit_cents"] == 0 else None
+        )
+    if any(werte.get(feld) == 0 for feld in ALTE_FELDER[:3]):
+        for feld in (
+            "daily_token_limit", "weekly_token_limit", "monthly_token_limit",
+            "monthly_realtime_minutes_limit", "monthly_dictation_minutes_limit",
+        ):
+            neu[feld] = 0
+    return neu
+
+
 def get_role_limit(db: Session, role_id: int) -> RoleAiLimit | None:
     """Liest eine explizite Rollenkonfiguration oder ``None``."""
     return db.query(RoleAiLimit).filter(RoleAiLimit.role_id == role_id).first()

@@ -1056,6 +1056,9 @@ export interface AiUsageEntry {
   requests_month: number
   /** Letzte Anfrage im ausgewerteten Zeitraum, nicht die letzte überhaupt. */
   last_request_at: string | null
+  /** Sprach- und Diktiersekunden der letzten 30 Tage. */
+  realtime_seconds_month: number
+  dictation_seconds_month: number
 }
 
 /** Alle Benutzer mit Verbrauch. Wer nichts verbraucht hat, fehlt. */

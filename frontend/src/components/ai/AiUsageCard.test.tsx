@@ -24,6 +24,8 @@ function usage(tokensToday: number, dailyLimit: number | null): AiUsageMine {
     cost_month_micro_usd: 0,
     requests_month: 0,
     last_request_at: null,
+    realtime_seconds_month: 0,
+    dictation_seconds_month: 0,
     cost_policy: {
       currency: 'EUR',
       usd_rate: '0.92',
@@ -52,6 +54,21 @@ describe('AiUsageCard', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('de')
     vi.mocked(aiApi.getMyUsage).mockReset()
+  })
+
+  it('zeigt verbrauchte Sprachminuten gegen ihre Grenze', async () => {
+    vi.mocked(aiApi.getMyUsage).mockResolvedValue({
+      ...usage(0, null),
+      realtime_seconds_month: 270,
+      limits: { ...usage(0, null).limits, monthly_realtime_minutes_limit: 5 },
+    })
+    render(<AiUsageCard />)
+
+    const bar = await screen.findByRole('progressbar', { name: 'Sprachminuten · 30 Tage' })
+    expect(bar).toHaveAttribute('aria-valuenow', '90')
+    expect(screen.getByText('4,5')).toBeInTheDocument()
+    // Ohne Grenze und ohne Verbrauch keine Diktat-Kachel.
+    expect(screen.queryByText('Diktierminuten · 30 Tage')).not.toBeInTheDocument()
   })
 
   it('nennt eine Grenze von 0 eine Sperre und nicht „keine Grenze“', async () => {

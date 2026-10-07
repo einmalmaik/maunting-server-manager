@@ -38,11 +38,22 @@ export function AiUsageCard() {
   const numbers = new Intl.NumberFormat(i18n.language)
   const kosten = betragFormatieren(data.cost_month_micro_usd, data.cost_policy, i18n.language)
 
-  const periods: Array<{ key: string; used: number; limit: number | null }> = [
-    { key: 'today', used: data.tokens_today, limit: data.limits.daily_token_limit },
-    { key: 'week', used: data.tokens_week, limit: data.limits.weekly_token_limit },
-    { key: 'month', used: data.tokens_month, limit: data.limits.monthly_token_limit },
+  const minuten = new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 1 })
+  const periods: Array<{ key: string; used: number; limit: number | null; format: Intl.NumberFormat }> = [
+    { key: 'today', used: data.tokens_today, limit: data.limits.daily_token_limit, format: numbers },
+    { key: 'week', used: data.tokens_week, limit: data.limits.weekly_token_limit, format: numbers },
+    { key: 'month', used: data.tokens_month, limit: data.limits.monthly_token_limit, format: numbers },
   ]
+  // Sprach- und Diktierminuten nur, wo es etwas zu sagen gibt: eine Grenze
+  // oder Verbrauch. Wer nie spricht und keine Grenze hat, braucht keine Kachel
+  // mit „0 Minuten, keine Grenze".
+  const sprache = [
+    { key: 'voiceMinutes', sekunden: data.realtime_seconds_month, limit: data.limits.monthly_realtime_minutes_limit ?? null },
+    { key: 'dictationMinutes', sekunden: data.dictation_seconds_month, limit: data.limits.monthly_dictation_minutes_limit ?? null },
+  ]
+  for (const { key, sekunden, limit } of sprache) {
+    if (limit !== null || sekunden > 0) periods.push({ key, used: sekunden / 60, limit, format: minuten })
+  }
 
   return (
     <section className="msm-card space-y-4 p-6" aria-labelledby="ai-usage-mine-title">
@@ -55,7 +66,7 @@ export function AiUsageCard() {
       <p className="max-w-3xl text-sm text-on-surface-variant">{t('ai.usage.mineDescription')}</p>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {periods.map(({ key, used, limit }) => {
+        {periods.map(({ key, used, limit, format }) => {
           // Drei Zustände, nicht zwei. `null` heißt „keine Grenze hinterlegt“,
           // 0 heißt „gesperrt“ — und das ist das Gegenteil davon. Vorher fielen
           // beide in denselben Zweig, sodass ausgerechnet der Gesperrte unter
@@ -72,10 +83,10 @@ export function AiUsageCard() {
                 {t(`ai.usage.${key}`)}
               </p>
               <p className="text-lg font-semibold tabular-nums text-on-surface">
-                {numbers.format(used)}
+                {format.format(used)}
                 {limit !== null && (
                   <span className="text-sm font-normal text-on-surface-variant">
-                    {' / '}{numbers.format(limit)}
+                    {' / '}{format.format(limit)}
                   </span>
                 )}
               </p>

@@ -271,6 +271,9 @@ class AiUsageEntry(BaseModel):
     cost_month_micro_usd: int
     requests_month: int
     last_request_at: datetime | None = None
+    #: Sprach- und Diktiersekunden der letzten 30 Tage.
+    realtime_seconds_month: int = 0
+    dictation_seconds_month: int = 0
 
 
 class AiUsageEventEntry(BaseModel):

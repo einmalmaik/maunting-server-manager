@@ -1676,6 +1676,8 @@
       "noLimit": "Keine Grenze hinterlegt",
       "blocked": "Gesperrt: Für diesen Zeitraum ist kein Kontingent freigegeben.",
       "mineCost": "Letzte 30 Tage: {{requests}} Anfragen, {{cost}} Kosten.",
+      "voiceMinutes": "Sprachminuten · 30 Tage",
+      "dictationMinutes": "Diktierminuten · 30 Tage",
       "errors": {
         "load": "KI-Nutzung konnte nicht geladen werden."
       },

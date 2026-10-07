@@ -7,7 +7,7 @@ verhindert zusätzlich Doppelzählung bei Retries.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -835,6 +835,11 @@ class AiUsageSummary:
     cost_month_microunits: int
     requests_month: int
     last_request_at: datetime | None
+    #: Sprach- und Diktiersekunden im 30-Tage-Fenster — dieselben Fenster, gegen
+    #: die die Minutenlimits prüfen. Bis zum 07.10.2026 stand nur das Limit in
+    #: der Ansicht, der Verbrauch nirgends.
+    realtime_seconds_month: int = 0
+    dictation_seconds_month: int = 0
 
 
 def _since(column, threshold: datetime):
@@ -865,6 +870,8 @@ def _usage_rows(
             _since(AiUsageEvent.accounted_tokens, month_start).label("tokens_month"),
             _since(AiUsageEvent.accounted_cost_microunits, month_start).label("cost_month"),
             _since(1, month_start).label("requests_month"),
+            _since(func.coalesce(AiUsageEvent.realtime_seconds, 0), month_start).label("realtime_seconds"),
+            _since(func.coalesce(AiUsageEvent.dictation_seconds, 0), month_start).label("dictation_seconds"),
             func.max(AiUsageEvent.created_at).label("last_request_at"),
         )
         .join(User, User.id == AiUsageEvent.user_id)
@@ -887,6 +894,8 @@ def _usage_rows(
             cost_month_microunits=int(row.cost_month or 0),
             requests_month=int(row.requests_month or 0),
             last_request_at=row.last_request_at,
+            realtime_seconds_month=int(row.realtime_seconds or 0),
+            dictation_seconds_month=int(row.dictation_seconds or 0),
         )
         for row in query.all()
     ]
@@ -1022,12 +1031,17 @@ def usage_for_user(db: Session, user: User, *, now: datetime | None = None) -> A
     nicht eine leere Ansicht, die nach einem Fehler aussieht.
     """
     rows = _usage_rows(db, user_id=user.id, now=now)
-    if rows:
-        return rows[0]
-    return AiUsageSummary(
+    zeile = rows[0] if rows else AiUsageSummary(
         user_id=user.id, username=user.username, tokens_today=0, tokens_week=0,
         tokens_month=0, cost_month_microunits=0, requests_month=0, last_request_at=None,
     )
+    # Die eigenen Sprachsekunden genau so, wie die Sperre sie zählt: eine
+    # offene Sitzung mit ihrer bisherigen Laufzeit (`_sprachsekunden_seit`).
+    # Die Übersicht aller Benutzer nimmt den gebuchten Stand — eine Abfrage
+    # für alle statt einer je Zeile.
+    jetzt = now or datetime.now(timezone.utc)
+    _, _, monat = _period_starts(jetzt)
+    return replace(zeile, realtime_seconds_month=_sprachsekunden_seit(db, user.id, monat, jetzt))
 
 
 def verwaiste_reservierungen_abgleichen(db) -> int:

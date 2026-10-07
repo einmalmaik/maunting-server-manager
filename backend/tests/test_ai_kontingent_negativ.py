@@ -474,3 +474,98 @@ def test_der_katalog_ist_json_und_ohne_mojibake() -> None:
     text = json.dumps(_katalog(), ensure_ascii=False)
     for kaputt in ("Ã¤", "Ã¶", "Ã¼", "ÃŸ", "â€"):
         assert kaputt not in text
+
+
+# ── Die drei kleinen Punkte vom 07.10.2026 ─────────────────────────────
+
+
+def test_ein_altes_formular_hebt_die_minutensperre_nicht_auf(
+    client, db: Session, owner_cookies: dict,
+) -> None:
+    """Ein Feld, das der Aufrufer nicht nennt, behält seinen Wert.
+
+    Ein noch offenes Browserfenster von vor dem Umbau schickt die Minutenfelder
+    nicht. Früher wurden sie dabei zu „unbegrenzt“. Ein ausdrückliches ``null``
+    bleibt „unbegrenzt“.
+    """
+    rolle = Role(name="ki-altes-fenster", description=None, is_system=False)
+    db.add(rolle)
+    db.commit()
+    set_role_limit(db, rolle.id, {**{f: None for f in LIMIT_FIELDS},
+                                  "monthly_realtime_minutes_limit": 0,
+                                  "monthly_dictation_minutes_limit": 5})
+    db.commit()
+    kopf = {"X-CSRF-Token": owner_cookies.get("__Secure-csrf_token", "")}
+
+    alt = client.put(
+        f"/api/ai/settings/role-limits/{rolle.id}",
+        json={"daily_token_limit": 1_000, "weekly_token_limit": None, "monthly_token_limit": None,
+              "requests_per_minute": 30, "monthly_realtime_cost_limit_cents": 500},
+        cookies=owner_cookies, headers=kopf,
+    )
+    assert alt.status_code == 200
+    assert (alt.json()["monthly_realtime_minutes_limit"], alt.json()["monthly_dictation_minutes_limit"]) == (0, 5)
+    assert alt.json()["daily_token_limit"] == 1_000
+
+    neu = client.put(
+        f"/api/ai/settings/role-limits/{rolle.id}",
+        json={"daily_token_limit": 1_000, "weekly_token_limit": None, "monthly_token_limit": None,
+              "monthly_realtime_minutes_limit": None},
+        cookies=owner_cookies, headers=kopf,
+    )
+    assert neu.json()["monthly_realtime_minutes_limit"] is None
+
+
+def test_der_eigene_verbrauch_nennt_die_minuten(
+    client, db: Session, owner_user: User, owner_cookies: dict,
+) -> None:
+    """Gezeigt wird, was die Sperre zählt — eine offene Sitzung mit ihrer Laufzeit."""
+    _rolle(db, owner_user, "ki-minuten-sichtbar", monthly_realtime_minutes_limit=10)
+    _sprachsitzung(db, owner_user, vor_sekunden=90)
+    diktat = reserve_ai_usage(db, owner_user, request_id=uuid4(), estimated_tokens=1, dictation_seconds=42)
+    diktat.status = "completed"
+    db.commit()
+
+    antwort = client.get("/api/ai/usage/me", cookies=owner_cookies)
+
+    assert antwort.status_code == 200
+    assert 90 <= antwort.json()["realtime_seconds_month"] < 120
+    assert antwort.json()["dictation_seconds_month"] == 42
+
+
+def test_ein_alter_tarifvorschlag_wird_umgeschrieben_statt_abgewiesen() -> None:
+    from services.ai_limit_service import altes_set_umschreiben
+
+    alt = {"daily_token_limit": 5_000, "weekly_token_limit": None, "monthly_token_limit": None,
+           "requests_per_minute": 20, "concurrent_operations": 2,
+           "monthly_cost_limit_cents": None, "monthly_realtime_cost_limit_cents": 300,
+           "monthly_dictation_minutes_limit": 10, "max_reasoning_effort": 3,
+           "max_memory_entries": None}
+    neu = altes_set_umschreiben(alt)
+    assert set(neu) == set(LIMIT_FIELDS)
+    assert (neu["daily_token_limit"], neu["monthly_realtime_minutes_limit"], neu["max_reasoning_effort"]) == (5_000, None, 3)
+
+    gesperrt = altes_set_umschreiben({**alt, "requests_per_minute": 0})
+    assert all(gesperrt[f] == 0 for f in ("daily_token_limit", "weekly_token_limit", "monthly_token_limit",
+                                           "monthly_realtime_minutes_limit", "monthly_dictation_minutes_limit"))
+    assert altes_set_umschreiben({**alt, "monthly_realtime_cost_limit_cents": 0})["monthly_realtime_minutes_limit"] == 0
+
+    aktuell = {f: 7 for f in LIMIT_FIELDS}
+    assert altes_set_umschreiben(aktuell) == aktuell
+
+
+def test_ein_alter_tarifvorschlag_legt_die_rolle_an(db: Session, owner_user: User) -> None:
+    """Der ganze Weg: der gespeicherte Vorschlag trägt alte Schlüssel, die Bestätigung gelingt."""
+    from models import RoleAiLimit
+    from services.ai_proposals import server_proposals
+
+    nutzlast = {"name": "Tarif-Alt", "description": None, "limits": {
+        "daily_token_limit": 5_000, "weekly_token_limit": None, "monthly_token_limit": None,
+        "requests_per_minute": 0, "concurrent_operations": None, "monthly_cost_limit_cents": None,
+        "monthly_realtime_cost_limit_cents": None, "monthly_dictation_minutes_limit": None,
+        "max_reasoning_effort": None, "max_memory_entries": None}}
+    ergebnis = server_proposals._execute_hoster_write(
+        db, user=owner_user, tool_name="propose_ai_tarif_role", payload=nutzlast,
+    )
+    zeile = db.query(RoleAiLimit).filter(RoleAiLimit.role_id == ergebnis["role_id"]).one()
+    assert zeile.daily_token_limit == 0

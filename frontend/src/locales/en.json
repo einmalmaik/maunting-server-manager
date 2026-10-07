@@ -1676,6 +1676,8 @@
       "noLimit": "No limit configured",
       "blocked": "Blocked: no quota is granted for this period.",
       "mineCost": "Last 30 days: {{requests}} requests, {{cost}} in cost.",
+      "voiceMinutes": "Voice minutes · 30 days",
+      "dictationMinutes": "Dictation minutes · 30 days",
       "errors": {
         "load": "AI usage could not be loaded."
       },
