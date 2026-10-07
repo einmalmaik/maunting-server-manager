@@ -4,12 +4,12 @@ import {
   Search,
   Star,
   ChevronDown,
-  Globe,
   X,
 } from 'lucide-react'
 import { useBrowserStore } from '../../services/browserStore'
 import { SEARCH_ENGINES } from '../../services/searchEngines'
 import { ShieldBadge } from './ShieldBadge'
+import { GlobeIcon } from '../newtab/brandIcons'
 
 export function Omnibox() {
   const {
@@ -131,7 +131,7 @@ export function Omnibox() {
               <Lock className="w-3.5 h-3.5 text-status-success" />
             </span>
           ) : (
-            <Globe className="w-3.5 h-3.5 opacity-60" />
+            <GlobeIcon className="w-3.5 h-3.5 opacity-60" />
           )}
         </div>
 

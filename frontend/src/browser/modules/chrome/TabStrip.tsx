@@ -1,6 +1,7 @@
-import { Plus, X, Globe, EyeOff, Loader2, Pin, Minus, Square } from 'lucide-react'
+import { Plus, X, EyeOff, Loader2, Pin, Minus, Square } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useBrowserStore } from '../../services/browserStore'
+import { GlobeIcon } from '../newtab/brandIcons'
 
 export function TabStrip() {
   const { tabs, activeTabId, createTab, closeTab, activateTab } = useBrowserStore()
@@ -77,7 +78,7 @@ export function TabStrip() {
                 ) : tab.favicon ? (
                   <img src={tab.favicon} alt="" className="w-3.5 h-3.5 rounded-sm" />
                 ) : (
-                  <Globe className="w-3.5 h-3.5 opacity-70" />
+                  <GlobeIcon className="w-3.5 h-3.5 opacity-70" />
                 )}
               </div>
 

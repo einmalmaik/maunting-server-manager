@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import {
-  Globe,
   Shield,
   Palette,
   Link,
@@ -9,6 +8,7 @@ import {
 } from 'lucide-react'
 import { useBrowserStore } from '../../services/browserStore'
 import { SEARCH_ENGINES } from '../../services/searchEngines'
+import { GlobeIcon } from '../newtab/brandIcons'
 
 export function SettingsView() {
   const {
@@ -58,7 +58,7 @@ export function SettingsView() {
               : 'border-transparent text-muted-foreground hover:text-foreground'
           }`}
         >
-          <Globe className="w-3.5 h-3.5" />
+          <GlobeIcon className="w-3.5 h-3.5" />
           <span>Suche</span>
         </button>
 

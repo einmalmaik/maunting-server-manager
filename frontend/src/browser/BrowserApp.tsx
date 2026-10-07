@@ -8,7 +8,7 @@ import { NewTabPage } from './modules/newtab/NewTabPage'
 import { PasswordPrompt, type SavePromptData } from './modules/autofill/PasswordPrompt'
 import { PaymentConfirm } from './modules/autofill/PaymentConfirm'
 import { useBrowserStore } from './services/browserStore'
-import { Globe } from 'lucide-react'
+import { GlobeIcon } from './modules/newtab/brandIcons'
 
 export function BrowserApp() {
   const {
@@ -95,7 +95,7 @@ export function BrowserApp() {
             <div className="flex-1 w-full h-full flex flex-col items-center justify-center p-6 text-center select-text bg-muted/20">
               <div className="max-w-md w-full p-6 bg-card border border-border rounded-2xl shadow-xl flex flex-col items-center">
                 <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-3">
-                  <Globe className="w-6 h-6" />
+                  <GlobeIcon className="w-6 h-6" />
                 </div>
                 <h3 className="text-sm font-semibold text-foreground mb-1">
                   {activeTab?.title || 'Externe Webseite geladen'}
