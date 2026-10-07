@@ -129,6 +129,7 @@ interface BrowserState {
   setWallpaperDim: (dim: number) => void
   toggleAdblock: () => void
   incrementBlockCount: (type: 'ad' | 'tracker') => void
+  setBlockedStats: (ads: number, trackers: number) => void
 
   // Kopplung
   setCouplingData: (backendUrl: string, token: string, user: { username: string; email?: string }) => void
@@ -171,8 +172,8 @@ export const useBrowserStore = create<BrowserState>()(
       ],
       downloads: [],
 
-      blockedAdsCount: 42,
-      blockedTrackersCount: 88,
+      blockedAdsCount: 0,
+      blockedTrackersCount: 0,
       adblockEnabled: true,
       trackerSchutzEnabled: true,
       forgetOnClose: false,
@@ -271,6 +272,7 @@ export const useBrowserStore = create<BrowserState>()(
         const { activeTabId, searchEngine, searxngUrl, addHistoryEntry, tabs } = get()
         const targetUrl = baueZielUrl(input, searchEngine, searxngUrl ?? undefined)
         const currentTab = tabs.find((t) => t.id === activeTabId)
+        const isBlank = targetUrl === 'about:blank' || targetUrl.startsWith('about:')
 
         set((state) => ({
           tabs: state.tabs.map((tab) =>
@@ -278,8 +280,8 @@ export const useBrowserStore = create<BrowserState>()(
               ? {
                   ...tab,
                   url: targetUrl,
-                  title: targetUrl.startsWith('about:') ? 'Neuer Tab' : targetUrl,
-                  isLoading: true,
+                  title: isBlank ? 'Neuer Tab' : targetUrl,
+                  isLoading: !isBlank,
                   canGoBack: true,
                 }
               : tab
@@ -289,7 +291,18 @@ export const useBrowserStore = create<BrowserState>()(
         // Nativen Webview zur Ziel-URL navigieren
         void nativeTabNavigieren(activeTabId, targetUrl)
 
-        if (!currentTab?.isIncognito && !targetUrl.startsWith('about:')) {
+        // Sicherheits-Timeout: Ladezustand nach maximal 6 Sekunden beenden, falls keine Events feuern
+        if (!isBlank) {
+          setTimeout(() => {
+            set((state) => ({
+              tabs: state.tabs.map((tab) =>
+                tab.id === activeTabId && tab.isLoading ? { ...tab, isLoading: false } : tab
+              ),
+            }))
+          }, 6000)
+        }
+
+        if (!currentTab?.isIncognito && !isBlank) {
           addHistoryEntry(targetUrl, targetUrl)
         }
       },
@@ -393,6 +406,10 @@ export const useBrowserStore = create<BrowserState>()(
         } else {
           set((state) => ({ blockedTrackersCount: state.blockedTrackersCount + 1 }))
         }
+      },
+
+      setBlockedStats: (ads: number, trackers: number) => {
+        set({ blockedAdsCount: ads, blockedTrackersCount: trackers })
       },
 
       setCouplingData: (backendUrl, token, user) => {

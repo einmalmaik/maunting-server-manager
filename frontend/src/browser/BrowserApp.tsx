@@ -28,6 +28,7 @@ export function BrowserApp() {
     openDrawer,
     theme,
     incrementBlockCount,
+    setBlockedStats,
     updateTab,
   } = useBrowserStore()
 
@@ -47,7 +48,13 @@ export function BrowserApp() {
         incrementBlockCount(e.typ === 'tracker' ? 'tracker' : 'ad')
       },
       onTabNavigated: (e) => {
-        updateTab(e.id, { url: e.url, title: e.url, isLoading: false })
+        updateTab(e.id, { url: e.url, title: e.url.startsWith('about:') ? 'Neuer Tab' : e.url })
+      },
+      onPageLoading: (e) => {
+        updateTab(e.id, { url: e.url, isLoading: true })
+      },
+      onPageLoaded: (e) => {
+        updateTab(e.id, { url: e.url, title: e.url.startsWith('about:') ? 'Neuer Tab' : e.url, isLoading: false })
       },
     }).then((fn) => {
       cleanup = fn
@@ -55,14 +62,14 @@ export function BrowserApp() {
 
     nativeAdblockStatus().then((stats) => {
       if (stats) {
-        // Optional initiale Adblock-Zähler angleichen
+        setBlockedStats(stats.geblockte_anzeigen, stats.geblockte_tracker)
       }
     })
 
     return () => {
       cleanup?.()
     }
-  }, [incrementBlockCount, updateTab])
+  }, [incrementBlockCount, setBlockedStats, updateTab])
 
   // Native Webview Bounds synchronisieren (bei Resize & Drawer-Wechsel)
   useEffect(() => {

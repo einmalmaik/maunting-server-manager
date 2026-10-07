@@ -150,6 +150,8 @@ export async function nativeAdblockStatus(): Promise<{
 export async function setupTauriListeners(callbacks: {
   onAdblockEvent?: (event: { typ: string; url: string; tab_id: string }) => void
   onTabNavigated?: (event: { id: string; url: string }) => void
+  onPageLoading?: (event: { id: string; url: string }) => void
+  onPageLoaded?: (event: { id: string; url: string }) => void
   onTabsChanged?: () => void
 }): Promise<() => void> {
   if (!isTauriEnv()) return () => {}
@@ -168,6 +170,22 @@ export async function setupTauriListeners(callbacks: {
     const un = await listen<{ id: string; url: string }>(
       'msb:tab_navigiert',
       (e) => callbacks.onTabNavigated?.(e.payload)
+    )
+    unlistenFns.push(un)
+  }
+
+  if (callbacks.onPageLoading) {
+    const un = await listen<{ id: string; url: string }>(
+      'msb:tab_laedt',
+      (e) => callbacks.onPageLoading?.(e.payload)
+    )
+    unlistenFns.push(un)
+  }
+
+  if (callbacks.onPageLoaded) {
+    const un = await listen<{ id: string; url: string }>(
+      'msb:tab_geladen',
+      (e) => callbacks.onPageLoaded?.(e.payload)
     )
     unlistenFns.push(un)
   }

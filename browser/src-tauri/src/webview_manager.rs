@@ -70,6 +70,7 @@ fn erstelle_oder_zeige_child_webview(
                 let _ = wv.navigate(parsed);
             }
             let _ = wv.show();
+            let _ = wv.set_focus();
         } else {
             let _ = wv.hide();
         }
@@ -89,8 +90,34 @@ fn erstelle_oder_zeige_child_webview(
     let app_handle_nav = app.clone();
     let tab_id_nav = tab_id.to_string();
 
+    let app_handle_load = app.clone();
+    let tab_id_load = tab_id.to_string();
+
     let mut builder = WebviewBuilder::<Wry>::new(webview_label, WebviewUrl::External(parsed_url))
         .initialization_script(&combined_init)
+        .on_page_load(move |_wv: tauri::Webview, payload: tauri::webview::PageLoadPayload<'_>| {
+            let url_str = payload.url().as_str();
+            match payload.event() {
+                tauri::webview::PageLoadEvent::Started => {
+                    let _ = app_handle_load.emit(
+                        "msb:tab_laedt",
+                        serde_json::json!({
+                            "id": tab_id_load,
+                            "url": url_str,
+                        }),
+                    );
+                }
+                tauri::webview::PageLoadEvent::Finished => {
+                    let _ = app_handle_load.emit(
+                        "msb:tab_geladen",
+                        serde_json::json!({
+                            "id": tab_id_load,
+                            "url": url_str,
+                        }),
+                    );
+                }
+            }
+        })
         .on_navigation(move |url: &tauri::Url| {
             let url_str = url.as_str();
             match pruefe_url_block(url_str) {
@@ -144,6 +171,7 @@ fn erstelle_oder_zeige_child_webview(
         .map_err(|e| format!("Fehler beim Hinzufügen der Webview: {}", e))?;
 
     let _ = wv.show();
+    let _ = wv.set_focus();
     Ok(())
 }
 
@@ -345,21 +373,43 @@ pub fn tab_navigieren(
                 }
             }
         }
-        if let Some(tab) = tabs_guard.get_mut(&tab_id) {
-            tab.url = bereinigte_url.clone();
-            tab.title = if bereinigte_url == "about:blank" {
+        let tab = tabs_guard.entry(tab_id.clone()).or_insert_with(|| TabItem {
+            id: tab_id.clone(),
+            url: bereinigte_url.clone(),
+            title: if bereinigte_url == "about:blank" {
                 "Neuer Tab".to_string()
             } else {
                 bereinigte_url.clone()
-            };
-            tab.ist_lade_vorgang = bereinigte_url != "about:blank";
-            tab.kann_zurueck = true;
-        }
+            },
+            favicon: None,
+            ist_aktiv: true,
+            ist_lade_vorgang: bereinigte_url != "about:blank",
+            kann_zurueck: false,
+            kann_vorwaerts: false,
+            ist_angeheftet: false,
+            ist_inkognito: false,
+        });
+        tab.url = bereinigte_url.clone();
+        tab.title = if bereinigte_url == "about:blank" {
+            "Neuer Tab".to_string()
+        } else {
+            bereinigte_url.clone()
+        };
+        tab.ist_lade_vorgang = bereinigte_url != "about:blank";
+        tab.kann_zurueck = true;
+
         let mut aktiver_guard = state.aktiver_tab_id.lock().unwrap();
         *aktiver_guard = Some(tab_id.clone());
     }
 
     erstelle_oder_zeige_child_webview(&app, &state, &tab_id, &bereinigte_url)?;
+    let _ = app.emit(
+        "msb:tab_navigiert",
+        serde_json::json!({
+            "id": tab_id,
+            "url": bereinigte_url,
+        }),
+    );
     let _ = app.emit("msb:tabs_geaendert", ());
     Ok(())
 }
