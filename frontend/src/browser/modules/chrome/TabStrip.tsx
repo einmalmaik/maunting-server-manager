@@ -2,7 +2,6 @@ import { Plus, X, EyeOff, Loader2, Pin, Minus, Square } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useTranslation } from 'react-i18next'
 import { useBrowserStore } from '../../services/browserStore'
-import { GlobeIcon } from '../newtab/brandIcons'
 import {
   nativeFensterMinimieren,
   nativeFensterMaximierenUmschalten,
@@ -85,7 +84,7 @@ export function TabStrip() {
                 ) : tab.favicon ? (
                   <img src={tab.favicon} alt="" className="w-3.5 h-3.5 rounded-sm" />
                 ) : (
-                  <GlobeIcon className="w-3.5 h-3.5 opacity-70" />
+                  <img src="/msp.png" alt="" className="w-3.5 h-3.5 rounded-full object-contain" />
                 )}
               </div>
 

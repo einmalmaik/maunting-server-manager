@@ -102,11 +102,13 @@ export function NewTabPage() {
       {/* Mitte: Logo & Suchfeld */}
       <div className="relative z-10 w-full max-w-2xl mx-auto flex flex-col items-center my-auto">
         <div className="text-center mb-6">
-          <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center justify-center gap-3">
-            <span className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
-              <Shield className="w-7 h-7" />
-            </span>
-            Maunting Secure Browser
+          <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center justify-center gap-3.5">
+            <img
+              src="/msp.png"
+              alt="Maunting Secure Browser"
+              className="w-10 h-10 object-contain rounded-full shadow-lg ring-2 ring-primary/40"
+            />
+            <span>Maunting Secure Browser</span>
           </h1>
         </div>
 

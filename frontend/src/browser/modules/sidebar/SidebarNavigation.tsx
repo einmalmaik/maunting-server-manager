@@ -69,9 +69,13 @@ export function SidebarNavigation() {
     <aside className="w-12 bg-muted/70 backdrop-blur-md border-r border-border flex flex-col items-center justify-between py-2 select-none z-30 shrink-0">
       {/* Obere Nav-Gruppe */}
       <div className="flex flex-col items-center gap-1.5 w-full">
-        {/* App Logo / Shield */}
-        <div className="p-2 mb-1 text-primary">
-          <Shield className="w-5 h-5" />
+        {/* App Logo */}
+        <div className="p-1 mb-1">
+          <img
+            src="/msp.png"
+            alt="MSB"
+            className="w-6 h-6 object-contain rounded-full shadow-sm ring-1 ring-primary/30"
+          />
         </div>
 
         {navItems
