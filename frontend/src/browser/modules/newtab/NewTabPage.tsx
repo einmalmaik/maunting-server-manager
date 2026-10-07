@@ -4,10 +4,13 @@ import {
   ShieldCheck,
   Shield,
   Sparkles,
+  Palette,
 } from 'lucide-react'
 import { useBrowserStore } from '../../services/browserStore'
 import { SEARCH_ENGINES } from '../../services/searchEngines'
 import { YouTubeIcon, GitHubIcon, WikipediaIcon, RedditIcon } from './brandIcons'
+import { getSearchEngineIcon } from './searchEngineIcons'
+import { WallpaperManager } from './WallpaperManager'
 
 const DEFAULT_TOP_SITES = [
   { title: 'YouTube', url: 'https://www.youtube.com', Icon: YouTubeIcon },
@@ -25,11 +28,14 @@ export function NewTabPage() {
     isCoupled,
     isAiEnabled,
     customWallpaper,
+    wallpaperBlur,
+    wallpaperDim,
   } = useBrowserStore()
 
   const [query, setQuery] = useState('')
   const [showAiSummary, setShowAiSummary] = useState(false)
   const [aiSummaryText, setAiSummaryText] = useState('')
+  const [showWallpaperModal, setShowWallpaperModal] = useState(false)
 
   const currentEngine = SEARCH_ENGINES[searchEngine] || SEARCH_ENGINES.google
 
@@ -51,17 +57,40 @@ export function NewTabPage() {
     }, 1200)
   }
 
+  const isGradient = customWallpaper?.startsWith('linear-gradient') || customWallpaper?.startsWith('radial-gradient')
+
   return (
-    <div
-      className="flex-1 h-full overflow-y-auto flex flex-col items-center justify-between p-6 select-text"
-      style={{
-        backgroundImage: customWallpaper ? `url(${customWallpaper})` : undefined,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-      }}
-    >
+    <div className="relative flex-1 h-full overflow-hidden flex flex-col justify-between p-6 select-text">
+      {/* Hintergrund-Ebene: Entweder Farbverlauf oder Bild */}
+      {customWallpaper && (
+        <>
+          {isGradient ? (
+            <div
+              className="absolute inset-0 z-0 pointer-events-none transition-all duration-300"
+              style={{ background: customWallpaper }}
+            />
+          ) : (
+            <div
+              className="absolute inset-0 z-0 pointer-events-none bg-cover bg-center transition-all duration-300"
+              style={{
+                backgroundImage: `url(${customWallpaper})`,
+                filter: wallpaperBlur > 0 ? `blur(${wallpaperBlur}px)` : undefined,
+                transform: wallpaperBlur > 0 ? 'scale(1.05)' : undefined,
+              }}
+            />
+          )}
+
+          {/* Dimmer-Ebene für perfekten Textkontrast */}
+          <div
+            className="absolute inset-0 z-0 pointer-events-none transition-all duration-300"
+            style={{ backgroundColor: `rgba(0, 0, 0, ${wallpaperDim / 100})` }}
+          />
+        </>
+      )}
+
+      {/* Inhalt: Liegt über dem Hintergrund (z-10) */}
       {/* Obere Leiste: Schutz-Status */}
-      <div className="w-full max-w-4xl flex justify-end items-center pt-2">
+      <div className="relative z-10 w-full max-w-4xl mx-auto flex justify-end items-center pt-2">
         <div className="flex items-center gap-2 bg-card/60 backdrop-blur-md border border-border px-3 py-1.5 rounded-xl text-xs text-muted-foreground shadow-sm">
           <ShieldCheck className="w-4 h-4 text-status-success" />
           <span>{blockedAdsCount + blockedTrackersCount} Tracker & Werbung neutralisiert</span>
@@ -69,7 +98,7 @@ export function NewTabPage() {
       </div>
 
       {/* Mitte: Logo & Suchfeld */}
-      <div className="w-full max-w-2xl flex flex-col items-center my-auto">
+      <div className="relative z-10 w-full max-w-2xl mx-auto flex flex-col items-center my-auto">
         <div className="text-center mb-6">
           <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center justify-center gap-3">
             <span className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
@@ -79,10 +108,12 @@ export function NewTabPage() {
           </h1>
         </div>
 
-        {/* Suchfeld */}
+        {/* Suchfeld mit echtem SVG-Logo */}
         <form onSubmit={handleSearch} className="w-full relative">
           <div className="relative flex items-center w-full bg-card/80 backdrop-blur-xl border border-border/80 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 rounded-2xl shadow-lg transition-all p-2">
-            <span className="text-xl px-2">{currentEngine.icon}</span>
+            <div className="px-2.5 text-primary flex items-center justify-center shrink-0">
+              {getSearchEngineIcon(searchEngine, 'w-5 h-5')}
+            </div>
             <input
               type="text"
               value={query}
@@ -158,8 +189,23 @@ export function NewTabPage() {
         </div>
       </div>
 
-      {/* Unten: Minimaler Spacer */}
-      <div className="h-6" />
+      {/* Unten: Button zum Anpassen des Hintergrunds */}
+      <div className="relative z-10 w-full max-w-4xl mx-auto flex justify-end items-center pb-2">
+        <button
+          type="button"
+          onClick={() => setShowWallpaperModal(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-card/50 hover:bg-card backdrop-blur-md border border-border/60 hover:border-border text-muted-foreground hover:text-foreground text-xs transition-all shadow-sm"
+          title="Hintergrunddesign anpassen"
+        >
+          <Palette className="w-3.5 h-3.5 text-primary" />
+          <span>Hintergrund anpassen</span>
+        </button>
+      </div>
+
+      {/* Wallpaper Manager Modal */}
+      {showWallpaperModal && (
+        <WallpaperManager isModal onClose={() => setShowWallpaperModal(false)} />
+      )}
     </div>
   )
 }

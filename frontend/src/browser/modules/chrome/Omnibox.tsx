@@ -10,6 +10,7 @@ import { useBrowserStore } from '../../services/browserStore'
 import { SEARCH_ENGINES } from '../../services/searchEngines'
 import { ShieldBadge } from './ShieldBadge'
 import { GlobeIcon } from '../newtab/brandIcons'
+import { getSearchEngineIcon } from '../newtab/searchEngineIcons'
 
 export function Omnibox() {
   const {
@@ -91,7 +92,7 @@ export function Omnibox() {
             className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             title={`Aktuelle Suchmaschine: ${currentEngine.name} (Klicken zum Wechseln)`}
           >
-            <span className="text-sm leading-none">{currentEngine.icon}</span>
+            <span className="text-primary flex items-center">{getSearchEngineIcon(searchEngine, 'w-3.5 h-3.5')}</span>
             <ChevronDown className="w-3 h-3 opacity-60" />
           </button>
 
@@ -111,7 +112,9 @@ export function Omnibox() {
                     engine.id === searchEngine ? 'bg-primary/10 text-primary font-medium' : 'text-foreground'
                   }`}
                 >
-                  <span className="text-base">{engine.icon}</span>
+                  <div className="w-4 h-4 flex items-center justify-center shrink-0 text-primary">
+                    {getSearchEngineIcon(engine.id, 'w-4 h-4')}
+                  </div>
                   <div className="truncate">
                     <div className="font-medium leading-tight">{engine.name}</div>
                     <div className="text-label-sm text-muted-foreground truncate">{engine.description}</div>

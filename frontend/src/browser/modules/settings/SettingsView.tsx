@@ -9,6 +9,8 @@ import {
 import { useBrowserStore } from '../../services/browserStore'
 import { SEARCH_ENGINES } from '../../services/searchEngines'
 import { GlobeIcon } from '../newtab/brandIcons'
+import { getSearchEngineIcon } from '../newtab/searchEngineIcons'
+import { WallpaperManager } from '../newtab/WallpaperManager'
 
 export function SettingsView() {
   const {
@@ -121,9 +123,11 @@ export function SettingsView() {
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <span className="text-lg">{engine.icon}</span>
+                      <div className="w-5 h-5 flex items-center justify-center shrink-0 text-primary">
+                        {getSearchEngineIcon(engine.id, 'w-5 h-5')}
+                      </div>
                       <div>
-                        <div>{engine.name}</div>
+                        <div className="font-medium text-foreground">{engine.name}</div>
                         <div className="text-label-sm text-muted-foreground">{engine.description}</div>
                       </div>
                     </div>
@@ -240,11 +244,12 @@ export function SettingsView() {
               </div>
             </div>
 
-            <div className="pt-2 border-t border-border">
-              <h4 className="font-semibold text-sm mb-1">Individuelle Anpassung</h4>
-              <p className="text-muted-foreground text-label-sm">
-                Akzentfarben, benutzerdefinierte Hintergrundbilder und Layout-Optionen werden hier im nächsten Schritt konfiguriert.
+            <div className="pt-3 border-t border-border">
+              <h4 className="font-semibold text-sm mb-1">Startseiten-Hintergrund</h4>
+              <p className="text-muted-foreground text-label-sm mb-3">
+                Wähle ein vordefiniertes Designthema oder lade ein eigenes Hintergrundbild hoch.
               </p>
+              <WallpaperManager isModal={false} />
             </div>
           </div>
         )}

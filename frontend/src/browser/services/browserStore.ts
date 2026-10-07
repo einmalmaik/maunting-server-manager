@@ -83,6 +83,8 @@ interface BrowserState {
   // UI & Personalisierung
   theme: 'system' | 'dark' | 'light'
   customWallpaper: string | null
+  wallpaperBlur: number
+  wallpaperDim: number
   openDrawer: DrawerType
   isMessengerEnabled: boolean
   isAiEnabled: boolean
@@ -112,6 +114,8 @@ interface BrowserState {
   setSearchEngine: (engine: string) => void
   setSearxngUrl: (url: string | null) => void
   setCustomWallpaper: (wallpaper: string | null) => void
+  setWallpaperBlur: (blur: number) => void
+  setWallpaperDim: (dim: number) => void
   toggleAdblock: () => void
   incrementBlockCount: (type: 'ad' | 'tracker') => void
 
@@ -173,6 +177,8 @@ export const useBrowserStore = create<BrowserState>()(
 
       theme: 'system',
       customWallpaper: null,
+      wallpaperBlur: 0,
+      wallpaperDim: 40,
       openDrawer: 'none',
       isMessengerEnabled: true,
       isAiEnabled: true,
@@ -344,6 +350,8 @@ export const useBrowserStore = create<BrowserState>()(
       setSearchEngine: (searchEngine) => set({ searchEngine }),
       setSearxngUrl: (searxngUrl) => set({ searxngUrl }),
       setCustomWallpaper: (customWallpaper) => set({ customWallpaper }),
+      setWallpaperBlur: (wallpaperBlur) => set({ wallpaperBlur }),
+      setWallpaperDim: (wallpaperDim) => set({ wallpaperDim }),
 
       toggleAdblock: () => {
         set((state) => ({ adblockEnabled: !state.adblockEnabled }))
@@ -388,6 +396,8 @@ export const useBrowserStore = create<BrowserState>()(
         searxngUrl: state.searxngUrl,
         theme: state.theme,
         customWallpaper: state.customWallpaper,
+        wallpaperBlur: state.wallpaperBlur,
+        wallpaperDim: state.wallpaperDim,
         adblockEnabled: state.adblockEnabled,
         trackerSchutzEnabled: state.trackerSchutzEnabled,
         forgetOnClose: state.forgetOnClose,
