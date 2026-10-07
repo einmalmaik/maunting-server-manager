@@ -323,7 +323,7 @@ def hoechstdauer(db: Session, user: User) -> float:
     """Wie lange eine Sitzung dieses Benutzers jetzt höchstens laufen darf.
 
     Die feste Grenze, außer das Minutenlimit der Rolle lässt weniger übrig.
-    Gilt auf allen drei Sprachwegen; danach endet die Sitzung mit
+    Gilt auf allen Sprachwegen, auch dem klassischen (`routers.ai_voice`); danach endet die Sitzung mit
     „Kontingent“ statt mit „abgelaufen“ (`RealtimeSitzung.fuehren`).
     """
     rest = ai_usage_service.realtime_restsekunden(db, user)
@@ -586,17 +586,30 @@ class RealtimeSitzung:
         # auf null abrunden. Gebucht wird deshalb die Differenz des kumulierten
         # Preises; nach der letzten Antwort entspricht sie exakt der Gesamtnutzung.
         kosten = gesamtkosten - self._verbrauch_kosten
+        werte = {
+            "event_id": self.v.usage_event_id,
+            "text_input": ti,
+            "text_output": to,
+            "audio_input": ai,
+            "audio_output": ao,
+            "cost_microunits": kosten,
+        }
         with SessionLocal() as db:
-            ai_usage_service.realtime_verbrauch_ergaenzen(
-                db,
-                event_id=self.v.usage_event_id,
-                text_input=ti,
-                text_output=to,
-                audio_input=ai,
-                audio_output=ao,
-                cost_microunits=kosten,
-            )
-            db.commit()
+            try:
+                ai_usage_service.realtime_verbrauch_ergaenzen(db, **werte)
+                db.commit()
+            except ai_usage_service.AiQuotaExceeded as exc:
+                # Die Antwort ist gesprochen und bezahlt; die Grenze beendet
+                # die Sitzung, verschweigt aber nicht, was sie gekostet hat —
+                # sonst begänne der nächste Anlauf wieder darunter. Derselbe
+                # Weg wie bei GPT-Live und Gemini Live.
+                db.rollback()
+                if exc.reason == "realtime_session_limit":
+                    raise
+                ai_usage_service.realtime_verbrauch_ergaenzen(db, grenzen_pruefen=False, **werte)
+                db.commit()
+                self._verbrauch_kosten = gesamtkosten
+                raise
         self._verbrauch_kosten = gesamtkosten
 
     def _abschrift_zaehlen(self, usage: object, text: str) -> None:

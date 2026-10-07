@@ -8,6 +8,11 @@
   Minuten umrechnen, ohne einen Preis zu raten: ``0`` (gesperrt) bleibt ``0``,
   jeder andere Betrag wird „unbegrenzt“ — die Tokenlimits gelten weiter auch
   für Sprachsitzungen.
+- Eine ``0`` in einem der entfallenden Felder **sperrte** die Rolle: jede
+  Reservierung prüfte ``requests_per_minute`` und ``concurrent_operations``,
+  und ein Kostenlimit von ``0`` war die Art, „keine KI“ zu sagen. Fiele das
+  Feld still weg, hätte so eine Rolle danach unbegrenzt Chat und Stimme. Sie
+  bekommt deshalb vorher alle verbleibenden Kontingente auf ``0``.
 - ``ai_usage_events.realtime_seconds``: wie lange eine Sprachsitzung lief.
 
 Revision ID: 20261008_03
@@ -40,6 +45,14 @@ def upgrade() -> None:
     with op.batch_alter_table("role_ai_limits") as batch:
         if "monthly_realtime_minutes_limit" not in limits:
             batch.add_column(sa.Column("monthly_realtime_minutes_limit", sa.Integer(), nullable=True))
+    sperrfelder = [spalte for spalte in ENTFALLEN if spalte in limits]
+    if sperrfelder:
+        op.execute(
+            "UPDATE role_ai_limits SET daily_token_limit = 0, weekly_token_limit = 0, "
+            "monthly_token_limit = 0, monthly_realtime_minutes_limit = 0, "
+            "monthly_dictation_minutes_limit = 0 WHERE "
+            + " OR ".join(f"{spalte} = 0" for spalte in sperrfelder)
+        )
     if "monthly_realtime_cost_limit_cents" in limits:
         op.execute(
             "UPDATE role_ai_limits SET monthly_realtime_minutes_limit = 0 "

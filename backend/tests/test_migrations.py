@@ -767,6 +767,16 @@ def test_ki_limits_umbau_hin_und_zurueck(pg_wegwerf):
                     "INSERT INTO role_ai_limits (role_id, daily_token_limit, requests_per_minute, "
                     "monthly_realtime_cost_limit_cents, updated_at) VALUES (:i, 100, 5, :c, now())"
                 ), {"i": rid, "c": cent})
+            for rid, feld in ((4, "requests_per_minute"), (5, "concurrent_operations"),
+                              (6, "monthly_cost_limit_cents")):
+                conn.execute(text(
+                    "INSERT INTO roles (id, name, is_system, created_at) "
+                    "VALUES (:i, :n, false, now())"
+                ), {"i": rid, "n": f"rolle-{rid}"})
+                conn.execute(text(
+                    f"INSERT INTO role_ai_limits (role_id, daily_token_limit, {feld}, updated_at) "
+                    "VALUES (:i, NULL, 0, now())"
+                ), {"i": rid})
         command.upgrade(config, "20261008_03")
 
         assert not alte & spalten("role_ai_limits")
@@ -775,9 +785,17 @@ def test_ki_limits_umbau_hin_und_zurueck(pg_wegwerf):
             zeilen = dict(conn.execute(text(
                 "SELECT role_id, monthly_realtime_minutes_limit FROM role_ai_limits"
             )).all())
-            tokens = conn.execute(text("SELECT DISTINCT daily_token_limit FROM role_ai_limits")).all()
-        assert zeilen == {1: 0, 2: None, 3: None}
-        assert tokens == [(100,)]
+            tokens = conn.execute(text("SELECT DISTINCT daily_token_limit FROM role_ai_limits ORDER BY 1")).all()
+        assert zeilen == {1: 0, 2: None, 3: None, 4: 0, 5: 0, 6: 0}
+        assert tokens == [(0,), (100,)]
+        with engine.connect() as conn:
+            gesperrt = conn.execute(text(
+                "SELECT role_id FROM role_ai_limits WHERE daily_token_limit = 0 "
+                "AND weekly_token_limit = 0 AND monthly_token_limit = 0 "
+                "AND monthly_dictation_minutes_limit = 0 ORDER BY role_id"
+            )).scalars().all()
+        # Eine 0 in einem entfallenden Feld sperrte — und sperrt weiter.
+        assert gesperrt == [4, 5, 6]
 
         command.downgrade(config, "20261008_02")
         assert alte <= spalten("role_ai_limits")
@@ -786,7 +804,7 @@ def test_ki_limits_umbau_hin_und_zurueck(pg_wegwerf):
             gesperrt = conn.execute(text(
                 "SELECT role_id FROM role_ai_limits WHERE monthly_realtime_cost_limit_cents = 0"
             )).scalars().all()
-        assert gesperrt == [1]
+        assert sorted(gesperrt) == [1, 4, 5, 6]
         command.upgrade(config, "head")
     finally:
         engine.dispose()

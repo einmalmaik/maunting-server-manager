@@ -48,6 +48,8 @@ async def hoeren(
     )
     if zugang is None:
         return HoerErgebnis(abschrift=None, grund="anbieter")
+    if await asyncio.to_thread(_aussichtslos, user_id):
+        return HoerErgebnis(abschrift=None, grund="kontingent")
     messwerte = StreamUsage()
     try:
         wortlaut = await ai_stt.hoeren(
@@ -82,6 +84,16 @@ def zugang_holen(
         schluessel = resolve_api_key(db, zugang, user_id)
         db.expunge(zugang)
         return zugang, schluessel
+
+
+def _aussichtslos(user_id: int) -> bool:
+    """Ob die Buchung danach sicher ablehnte (`ai_usage_service.abschrift_aussichtslos`)."""
+
+    from services import ai_usage_service
+
+    with SessionLocal() as db:
+        benutzer = db.get(User, user_id)
+        return benutzer is not None and ai_usage_service.abschrift_aussichtslos(db, benutzer) is not None
 
 
 def abschrift_verbuchen(

@@ -1984,8 +1984,8 @@ async def test_the_compaction_reports_itself_before_the_run_ends(
     _fake_stream(monkeypatch, [], text="Fertig.")
 
     async def _faltet(*, client, user_id, conversation_id, provider_id,
-                      context_chars=None) -> bool:
-        del client, user_id, conversation_id, provider_id, context_chars
+                      context_chars=None, anfrage_zeichen=None) -> bool:
+        del client, user_id, conversation_id, provider_id, context_chars, anfrage_zeichen
         # Eine echte Faltung spricht mit dem Anbieter. Der Haltepunkt, den sie
         # dabei zwangsläufig hat, gehört in die Nachstellung.
         await asyncio.sleep(0)

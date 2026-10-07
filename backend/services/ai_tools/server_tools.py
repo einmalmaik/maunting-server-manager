@@ -196,8 +196,8 @@ def _global_tool_definitions() -> list[dict]:
         optional.append(_function("cloudflare_list_dns_records", "Listet die DNS-Records einer Zone (zone_id oder Domain, leer = Standardzone). Vor dem Anlegen auf Kollision pruefen.", {"zone_id": {"type": "string", "maxLength": 128}}, []))
 
     optional.append(_function("advise_node_placement", "Empfiehlt einen Host fuer einen neuen Server. Nutze vor propose_server_create um RAM/Disk bewusst zu waehlen. Unterscheidet gebucht vs wirklich belegt.", {"ram_need_mb": {"type": "integer", "minimum": 512}, "disk_need_gb": {"type": "integer", "minimum": 1}}, ["ram_need_mb"]))
-    optional.append(_function("search_curseforge_modpacks", "Sucht Modpacks auf CurseForge fuer ein Spiel nach Name oder Thema (etwa 'Tech', 'Magic', 'Dinos'). Liefert id, name, downloads.", {"query": {"type": "string", "maxLength": 128}, "game_id": {"type": "string", "maxLength": 64, "description": "Game-ID oder Spielname/Slug, etwa 'minecraft'."}, "game": {"type": "string", "maxLength": 64}, "server_id": {"type": "integer", "description": "Spiel aus diesem Server."}, "page": {"type": "integer", "minimum": 1, "maximum": 50}}, ["query"]))
-    optional.append(_function("search_curseforge_mods", "Sucht Einzelmods auf CurseForge fuer ein Spiel nach Name oder Thema (etwa 'Minimap', 'Storage'). Liefert id, name, downloads, author.", {"query": {"type": "string", "maxLength": 128}, "game_id": {"type": "string", "maxLength": 64, "description": "Game-ID oder Spielname/Slug, etwa 'minecraft'."}, "game": {"type": "string", "maxLength": 64}, "server_id": {"type": "integer", "description": "Spiel aus diesem Server."}, "class_id": {"type": "string", "maxLength": 32, "description": "Klassen-ID oder 'mods'/'modpacks'."}, "page": {"type": "integer", "minimum": 1, "maximum": 50}}, ["query"]))
+    optional.append(_function("search_curseforge_modpacks", "Sucht Modpacks auf CurseForge fuer ein Spiel nach Name oder Thema (etwa 'Tech', 'Magic', 'Dinos'). Liefert id, name, downloads.", {"query": {"type": "string", "maxLength": 128}, "game_id": {"type": "string", "maxLength": 64, "description": "Game-ID oder Spielname/Slug, etwa 'minecraft'."}, "game": {"type": "string", "maxLength": 64, "description": "Spielname, wenn die game_id fehlt."}, "server_id": {"type": "integer", "description": "Spiel aus diesem Server."}, "page": {"type": "integer", "minimum": 1, "maximum": 50}}, ["query"]))
+    optional.append(_function("search_curseforge_mods", "Sucht Einzelmods auf CurseForge fuer ein Spiel nach Name oder Thema (etwa 'Minimap', 'Storage'). Liefert id, name, downloads, author.", {"query": {"type": "string", "maxLength": 128}, "game_id": {"type": "string", "maxLength": 64, "description": "Game-ID oder Spielname/Slug, etwa 'minecraft'."}, "game": {"type": "string", "maxLength": 64, "description": "Spielname, wenn die game_id fehlt."}, "server_id": {"type": "integer", "description": "Spiel aus diesem Server."}, "class_id": {"type": "string", "maxLength": 32, "description": "Klassen-ID oder 'mods'/'modpacks'."}, "page": {"type": "integer", "minimum": 1, "maximum": 50}}, ["query"]))
 
     return optional + [
         _function(
@@ -329,7 +329,7 @@ def _global_tool_definitions() -> list[dict]:
                 "body": {
                     "type": "string",
                     "maxLength": 12_000,
-                    "description": "Die Vorgehensweise, gern Markdown. Nichts Ungepruefte.",
+                    "description": "Die Vorgehensweise, gern Markdown. Behaupte nichts Ungeprueftes.",
                 },
                 "scope": {"type": "string", "enum": learn_scopes},
                 "team": {
@@ -398,7 +398,7 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "forget_skill",
-            "Loescht einen eigenen oder Team-Skill; mitgelieferte lassen sich "
+            "Loescht einen erlernten Skill, also eine gelernte Vorgehensweise (eigen oder Team); mitgelieferte lassen sich "
             "nur unter demselben Schluessel ueberschreiben. Zum Aendern nimm "
             "`learn_skill`. Gibt es den Schluessel in mehreren Bereichen, kommt "
             "eine Rueckfrage — ruf danach mit der Antwort erneut auf.",
@@ -543,7 +543,7 @@ def _global_tool_definitions() -> list[dict]:
             "Rechteliste**, nur KI-Kontingent (Kontingente haengen an globalen "
             "Rollen). Rechte gehoeren in die Rollenverwaltung. Ein "
             "Kontingentfeld `null` heisst **unbegrenzt**. Setz nur, was der "
-            "Benutzer genannt hat.",
+            "Benutzer genannt hat, und frag im Zweifel nach.",
             {
                 "name": {"type": "string", "maxLength": 64},
                 "description": {"type": ["string", "null"], "maxLength": 255},
@@ -614,7 +614,8 @@ def _global_tool_definitions() -> list[dict]:
             "Blueprint und Ressourcenpaket zu. **Vorher `read_hoster_setup`**; "
             "eine Rolle, die dort nicht als vergebbar steht, wird abgewiesen. "
             "`role_id` traegt der Kunde, solange sein Vertrag laeuft (sein "
-            "KI-Kontingent). Leere Grenzen = Voreinstellung des Blueprints. Gilt "
+            "KI-Kontingent; leer = keine Zusatzrolle). Leere Grenzen = "
+            "Voreinstellung des Blueprints. Gilt "
             "fuer neu erstellte Server.",
             {
                 "integration_id": {"type": "integer", "minimum": 1},
@@ -799,10 +800,11 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "check_server_reachability",
-            "Prueft, ob der Server erreichbar ist: misst, ob auf seinen Ports "
-            "etwas lauscht — der Beweis bei 'laeuft, aber niemand kommt drauf'. "
-            "Ob er aus dem Internet erreichbar ist, kann MSM nicht messen und "
-            "behauptet es nicht. `game_probe`: `answering`, `not_answering` (Port "
+            "Prueft, ob der Server **auf dem Host** erreichbar ist: ob auf "
+            "seinen Ports etwas lauscht und ob er im Spielprotokoll antwortet — "
+            "der Beweis bei 'laeuft, aber niemand kommt drauf'. Ob er aus dem "
+            "Internet erreichbar ist, kann MSM nicht messen; sag das nie zu. "
+            "`game_probe`: `answering`, `not_answering` (Port "
             "offen, Dienst stumm), `not_declared` (keine Probe im Blueprint — "
             "**kein Fehlerbefund**) oder `no_measurement`.",
         ),
@@ -916,8 +918,8 @@ def provider_tool_definitions() -> list[dict]:
             "Stellt einen **gestoppten** Server auf einen anderen Blueprint um "
             "— so aendert man die Version (vorher mit propose_blueprint_change "
             "ableiten). Legt ein Backup an und **loescht danach alle "
-            "Serverdateien**: Welt, Configs, Mods; sag das im Grund. Immer mit "
-            "Bestaetigung. Ist nur Guardian falsch eingestellt: "
+            "Serverdateien**: Welt, Configs, Mods; sag das im Grund. Ist nur "
+            "Guardian falsch eingestellt: "
             "propose_guardian_tuning.",
             {
                 **_RATIONALE_SCHEMA,
@@ -1038,7 +1040,7 @@ def provider_tool_definitions() -> list[dict]:
             "Schlaegt Installation, Aktualisierung oder Neuinstallation einer Workshop- oder CurseForge-Mod vor. "
             "Der Download laeuft ueber den vorhandenen MSM-Installationspfad.",
             {
-                "workshop_id": {"type": "string", "maxLength": 20, "description": "Workshop- oder CurseForge-ID."},
+                "workshop_id": {"type": "string", "maxLength": 20, "description": "Aus search_curseforge_mods oder search_workshop_mods."},
                 "mod_id": {"type": "string", "maxLength": 20, "description": "Alias fuer workshop_id."},
                 "action": {"type": "string", "enum": ["install", "update", "reinstall"]},
                 "name": {"type": "string", "maxLength": 256},
@@ -1227,7 +1229,7 @@ def provider_tool_definitions() -> list[dict]:
             "(`session.lock`, `*.pid`) oder nachweislich kaputte Einzeldateien; "
             "vorher entsteht ein Versionsschnappschuss. Im autonomen "
             "Guardian-Betrieb nur mit erfolgreichem Backup, juenger als der "
-            "Vorfall. Kein Verzeichnis, keine Platzhalter: ein Pfad, den du "
+            "Vorfall — fehlt es, leg erst eines an. Kein Verzeichnis, keine Platzhalter: ein Pfad, den du "
             "gesehen hast.",
             {
                 "path": {"type": "string", "maxLength": 256},

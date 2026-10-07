@@ -133,7 +133,10 @@ def aus_modell(modell: Modell | None) -> Fenster:
     Modell mit 4.096 Token angewandt waere er schlicht falsch, und die Anfrage
     liefe nicht knapper, sondern gar nicht.
     """
-    if modell is None or not modell.kontext_tokens:
+    # Ein Fenster von null oder darunter ist ein kaputter Katalogwert, kein
+    # winziges Modell: als "bekannt" gaelte es mit einem Token, und jede Anfrage
+    # wuerde bis auf nichts gefaltet.
+    if modell is None or not modell.kontext_tokens or modell.kontext_tokens <= 0:
         return unbekannt()
     fenster = modell.kontext_tokens
     reserve = min(modell.max_ausgabe_tokens or RESERVE_AUSGABE_TOKENS, fenster // 4)

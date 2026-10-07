@@ -1815,11 +1815,21 @@ jeder Antwort gelten dieselben Tokenlimits wie im Chat; Antworten sind
 serverseitig auf 512 Ausgabetokens begrenzt.
 
 Dazu kommt das Rollenlimit **Sprachminuten im Monat**: gezählt wird, wie lange
-eine Sitzung offen war, auf allen drei Wegen gleich. Eine Sitzung beginnt nur
+eine Sitzung offen war, auf allen Wegen gleich — Realtime, GPT-Live, Gemini Live
+und der klassische Weg (Gehör, Chat, Stimme). Eine Sitzung beginnt nur
 mit mindestens einer Sekunde Rest und endet von selbst, wenn der Rest
 aufgebraucht ist; die Oberfläche meldet dann das Kontingent statt „abgelaufen".
+Offene Sitzungen zählen dabei mit ihrer bisherigen Laufzeit: ein zweiter Tab
+bekommt nur, was der erste übrig lässt.
 Bis zum 07.10.2026 stand an dieser Stelle ein Kostenlimit in Cent; beim Umstieg
 wurde ein gesperrtes (0) zu 0 Minuten, jeder andere Betrag zu „unbegrenzt".
+Eine Rolle, die über *Anfragen pro Minute*, *gleichzeitige Vorgänge* oder ein
+Kostenlimit von 0 gesperrt war, bekam dabei alle Kontingente auf 0 — sie bleibt
+gesperrt.
+
+Das **Diktat** fragt den Anbieter gar nicht erst, wenn die Diktierminuten oder
+ein Tokenlimit schon aufgebraucht sind: die Abschrift würde danach ohnehin
+abgewiesen, bezahlt hätte sie der Betreiber trotzdem.
 
 Die folgende Abrechnung beschreibt den Legacy-Modus:
 

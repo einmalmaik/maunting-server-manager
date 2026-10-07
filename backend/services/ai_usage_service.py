@@ -115,7 +115,7 @@ def _realtime_sekunden_limit(limits: EffectiveAiLimits) -> int | None:
     """Das Minutenlimit der Sprachsitzungen in Sekunden; ``None`` heisst unbegrenzt.
 
     Gezählt wird die Zeit, die eine Sitzung offen war (`realtime_seconds`),
-    auf allen drei Sprachwegen gleich — nicht Audiotokens, die jeder Anbieter
+    auf allen Sprachwegen gleich, auch dem klassischen — nicht Audiotokens, die jeder Anbieter
     anders zählt.
     """
     minuten = limits.monthly_realtime_minutes_limit
@@ -123,24 +123,57 @@ def _realtime_sekunden_limit(limits: EffectiveAiLimits) -> int | None:
 
 
 def _sitzungssekunden(event: AiUsageEvent, jetzt: datetime) -> int:
-    """Wie lange die Sitzung dieser Zeile bisher läuft, in ganzen Sekunden."""
+    """Wie lange die Sitzung dieser Zeile bisher läuft, in ganzen Sekunden.
+
+    Die Wanduhr höchstens bis zur festen Sitzungsgrenze: länger läuft keine
+    Sitzung (`hoechstdauer`). Mehr hiesse, einer Zeile, deren Prozess starb,
+    die ganze Zeit bis zum nächsten Panelstart anzurechnen.
+    """
+    from services.ai_voice.contracts import MAX_SITZUNGSSEKUNDEN
+
     begonnen = event.created_at
     if begonnen.tzinfo is None:
         begonnen = begonnen.replace(tzinfo=timezone.utc)
-    return max(int(event.realtime_seconds or 0), int((jetzt - begonnen).total_seconds()))
+    wanduhr = min(int((jetzt - begonnen).total_seconds()), MAX_SITZUNGSSEKUNDEN)
+    return max(int(event.realtime_seconds or 0), wanduhr)
+
+
+def _sprachsekunden_seit(
+    db: Session, user_id: int, seit: datetime, jetzt: datetime, *, ohne: int | None = None
+) -> int:
+    """Sprachsekunden seit ``seit`` — offene Sitzungen nach der Wanduhr.
+
+    Eine offene Sitzung schreibt ihre Dauer erst mit der nächsten Antwort fort.
+    Zählte nur dieser Stand, bekäme ein zweiter Tab beim Start den vollen Rest
+    als Höchstdauer, und zwei Tabs redeten zusammen doppelt so lange, wie die
+    Rolle erlaubt. ``ohne`` lässt die Zeile aus, für die gerade gerechnet wird.
+    """
+    zeilen = db.query(AiUsageEvent).filter(
+        AiUsageEvent.user_id == user_id,
+        AiUsageEvent.status.in_(ACTIVE_STATUSES),
+        AiUsageEvent.created_at >= seit,
+        AiUsageEvent.realtime_seconds.isnot(None),
+    )
+    if ohne is not None:
+        zeilen = zeilen.filter(AiUsageEvent.id != ohne)
+    return sum(
+        _sitzungssekunden(zeile, jetzt) if zeile.status == "reserved" else int(zeile.realtime_seconds or 0)
+        for zeile in zeilen
+    )
 
 
 def realtime_restsekunden(db: Session, user: User) -> int | None:
     """Wie viele Sekunden Sprachsitzung dieser Monat noch hergibt; ``None`` = unbegrenzt.
 
     Eine Sprachsitzung endet spätestens dann (`RealtimeVorbereitung.hoechstdauer`).
-    Offene Sitzungen zählen mit dem Stand ihrer letzten Buchung.
+    Offene Sitzungen zählen mit ihrer bisherigen Laufzeit (`_sprachsekunden_seit`).
     """
     limit = _realtime_sekunden_limit(resolve_effective_limits(db, user))
     if limit is None:
         return None
-    _, _, monat = _period_starts(datetime.now(timezone.utc))
-    return max(0, limit - _sum_since(db, user.id, monat, AiUsageEvent.realtime_seconds))
+    jetzt = datetime.now(timezone.utc)
+    _, _, monat = _period_starts(jetzt)
+    return max(0, limit - _sprachsekunden_seit(db, user.id, monat, jetzt))
 
 
 def _ensure_within(limit: int | None, current: int, requested: int, reason: str) -> None:
@@ -233,7 +266,7 @@ def reserve_ai_usage(
     if realtime:
         _ensure_within(
             _realtime_sekunden_limit(limits),
-            _sum_since(db, user.id, month_start, AiUsageEvent.realtime_seconds),
+            _sprachsekunden_seit(db, user.id, month_start, current_time),
             1,
             "monthly_realtime_minutes_limit",
         )
@@ -582,6 +615,36 @@ def fail_ai_usage(db: Session, event: AiUsageEvent) -> AiUsageEvent:
     return event
 
 
+def abschrift_aussichtslos(db: Session, user: User, *, now: datetime | None = None) -> str | None:
+    """Die Grenze, an der eine Abschrift jetzt **sicher** scheitert, sonst ``None``.
+
+    Gebucht wird eine Abschrift erst danach (`transcription.abschrift_verbuchen`):
+    eine Reservierung davor würfe eine Äusserung weg, die womöglich noch
+    hineinpasst. Ist aber gar nichts mehr übrig, lehnt die Buchung sicher ab —
+    und der Anbieter hätte umsonst zugehört, auf Rechnung des Betreibers und so
+    oft, wie jemand auf den Knopf drückt. Genau diesen Fall fängt das vorher ab
+    und keinen anderen.
+    """
+    day_start, week_start, month_start = _period_starts(now or datetime.now(timezone.utc))
+    limits = resolve_effective_limits(db, user)
+    diktat = limits.monthly_dictation_minutes_limit
+    grenzen = (
+        (limits.daily_token_limit, day_start, AiUsageEvent.accounted_tokens, "daily_token_limit"),
+        (limits.weekly_token_limit, week_start, AiUsageEvent.accounted_tokens, "weekly_token_limit"),
+        (limits.monthly_token_limit, month_start, AiUsageEvent.accounted_tokens, "monthly_token_limit"),
+        (
+            None if diktat is None else diktat * 60,
+            month_start,
+            AiUsageEvent.dictation_seconds,
+            "monthly_dictation_minutes_limit",
+        ),
+    )
+    for limit, seit, spalte, grund in grenzen:
+        if limit is not None and _sum_since(db, user.id, seit, spalte) >= limit:
+            return grund
+    return None
+
+
 def get_user_dictation_quota(db: Session, user: User) -> dict[str, int | None]:
     """Berechnet die monatliche Diktiergrenze und den bisherigen Verbrauch in Sekunden."""
     now = datetime.now(timezone.utc)
@@ -661,12 +724,14 @@ def realtime_verbrauch_ergaenzen(
         _ensure_within(limits.daily_token_limit, _sum_since(db, user.id, day, AiUsageEvent.accounted_tokens), delta_tokens, "daily_token_limit")
         _ensure_within(limits.weekly_token_limit, _sum_since(db, user.id, week, AiUsageEvent.accounted_tokens), delta_tokens, "weekly_token_limit")
         _ensure_within(limits.monthly_token_limit, _sum_since(db, user.id, month, AiUsageEvent.accounted_tokens), delta_tokens, "monthly_token_limit")
-        # Die Summe enthält den bisherigen Stand dieser Zeile; gezählt wird
-        # deren neuer an seiner Stelle.
+        # Die anderen Sitzungen nach der Wanduhr, diese mit ihrem neuen Stand.
+        # Begann sie im Vormonat, gehört ihre Zeit dorthin (`_sum_since` zählt
+        # nach `created_at`) und belastet diesen Monat nicht.
+        begonnen = event.created_at if event.created_at.tzinfo else event.created_at.replace(tzinfo=timezone.utc)
         _ensure_within(
             _realtime_sekunden_limit(limits),
-            _sum_since(db, user.id, month, AiUsageEvent.realtime_seconds) - int(event.realtime_seconds or 0),
-            sekunden,
+            _sprachsekunden_seit(db, user.id, month, now, ohne=event.id),
+            sekunden if begonnen >= month else 0,
             "monthly_realtime_minutes_limit",
         )
     event.realtime_seconds = sekunden
@@ -969,6 +1034,10 @@ def verwaiste_reservierungen_abgleichen(db) -> int:
             # zustaendig. Der kennt zusaetzlich deren Zustand und darf eine
             # gerade erst begonnene Anfrage nicht faelschlich abschliessen.
             continue
+        if event.realtime_seconds is not None:
+            # Eine Sprachsitzung, deren Prozess starb: die Zeit seit ihrer
+            # letzten Buchung ist gelaufen, auch wenn niemand sie mehr schrieb.
+            event.realtime_seconds = _sitzungssekunden(event, jetzt)
         complete_ai_usage(
             db,
             event,

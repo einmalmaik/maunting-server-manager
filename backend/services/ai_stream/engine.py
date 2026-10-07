@@ -875,6 +875,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 conversation_id=conversation_id,
                 provider_id=vorbereitung.provider.id,
                 context_chars=zustand.get("context_chars"),
+                anfrage_zeichen=zustand.get("anfrage_zeichen"),
             ):
                 ai_run_broker.veroeffentlichen(
                     run_id, "compacted", {"conversation_id": conversation_id}

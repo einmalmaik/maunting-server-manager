@@ -130,7 +130,7 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                 "end_date": {
                     "type": "string",
                     "maxLength": 32,
-                    "description": "Enddatum (z. B. YYYY-MM-DD oder ISO-8601).",
+                    "description": "Wie start_date.",
                 },
                 "calendar_id": {
                     "type": "integer",
@@ -140,7 +140,7 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_email_send",
-            "Schlägt eine E-Mail über ein verknüpftes Postfach vor; versendet erst nach Bestätigung.",
+            "Schlägt eine E-Mail über ein verknüpftes Postfach vor.",
             {
                 "recipient": {
                     "type": "string",

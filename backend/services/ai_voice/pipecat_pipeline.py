@@ -24,6 +24,7 @@ from typing import Any, Awaitable, Callable, TYPE_CHECKING
 from starlette.websockets import WebSocketDisconnect
 
 from services.ai_voice.contracts import (
+    MAX_SITZUNGSSEKUNDEN,
     MAX_STEUERRAHMEN_ZEICHEN,
     MAX_TONRAHMEN_BYTES,
     ZUSTAND_BEREIT,
@@ -167,7 +168,12 @@ if pipecat_verfuegbar():
                     rest = ende - time.monotonic()
                     if rest <= 0:
                         self._bridge._lage.abgelaufen = True
-                        await self._bridge._senden({"art": "abgelaufen"})
+                        # Wie `realtime_session.zeit_um`: endet die Sitzung vor
+                        # der festen Grenze, waren es die Sprachminuten.
+                        if self._bridge._hoechstdauer < MAX_SITZUNGSSEKUNDEN:
+                            await self._bridge._senden({"art": "stoerung", "grund": "realtime_kontingent"})
+                        else:
+                            await self._bridge._senden({"art": "abgelaufen"})
                         break
                     try:
                         nachricht = await asyncio.wait_for(self._bridge._browser.receive(), timeout=rest)
