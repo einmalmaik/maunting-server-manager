@@ -47,6 +47,38 @@ ZWECK_ETHIK = "ethik"
 # `AiUsageEvent.zweck` eines Durchgangs des Gedächtnisschreibers.
 ZWECK_GEDAECHTNIS = "gedaechtnis"
 ZWECKE = (ZWECK_ETHIK, ZWECK_GEDAECHTNIS)
+# Die drei Fenster der Tokenlimits — und der Minutenlimits, die am längsten
+# hängen. Seit dem 07.10.2026 **rollend** statt Kalendertag, ISO-Woche und
+# Kalendermonat: wer kurz vor Mitternacht sein Tageskontingent ausschöpfte,
+# hatte es um Mitternacht wieder voll und konnte in zehn Minuten das Doppelte
+# verbrauchen; und ein Monatslimit, am Ersten aufgebraucht, sperrte vier Wochen
+# am Stück. Ein Verbrauch zählt jetzt genau so lange, wie sein Fenster dauert,
+# und fällt dann einzeln heraus. Die Feldnamen (`daily_token_limit` …) sind
+# geblieben; die Oberfläche nennt die Fenster beim Namen.
+FENSTER_TAG = timedelta(hours=24)
+FENSTER_WOCHE = timedelta(days=7)
+FENSTER_MONAT = timedelta(days=30)
+# Wie viel ein **gelesenes** Cache-Token aufs Tokenlimit zählt, in Prozent.
+# Der Anbieter berechnet es mit einem Bruchteil des Eingabepreises — OpenAI und
+# Anthropic ein Zehntel, manche Modelle noch weniger. Zählte es voll, leerte
+# eine lange Werkzeugkette, deren Präfix in jeder Runde aus dem Cache kommt,
+# das Kontingent fünf- bis zehnmal schneller, als ihre Kosten es rechtfertigen;
+# Anthropic rechnet solche Tokens gar nicht auf seine Limits an. Ein fester
+# Anteil statt des Katalogpreises je Modell: das Limit soll für den Benutzer
+# nachvollziehbar bleiben und nicht mit dem gewählten Modell schwanken.
+# Geschriebene Cache-Tokens zählen voll.
+CACHE_ANRECHNUNG_PROZENT = 10
+
+
+def angerechnete_tokens(gesamt: int, zwischengespeichert: int | None) -> int:
+    """Was ``gesamt`` Tokens aufs Kontingent zählen, wenn ``zwischengespeichert``
+    davon aus dem Cache gelesen wurden (`CACHE_ANRECHNUNG_PROZENT`).
+
+    Aufgerundet: ein gelesenes Token zählt nie null.
+    """
+    gesamt = max(0, int(gesamt))
+    gelesen = min(gesamt, max(0, int(zwischengespeichert or 0)))
+    return gesamt - gelesen + (gelesen * CACHE_ANRECHNUNG_PROZENT + 99) // 100
 
 
 class AiQuotaExceeded(ValueError):
@@ -91,11 +123,8 @@ def _canonical_request_id(request_id: str | UUID) -> str:
 
 
 def _period_starts(now: datetime) -> tuple[datetime, datetime, datetime]:
-    """Berechnet UTC-Tages-, ISO-Wochen- und Monatsanfang."""
-    day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    week = day - timedelta(days=day.weekday())
-    month = day.replace(day=1)
-    return day, week, month
+    """Beginn der drei rollenden Fenster: vor 24 Stunden, 7 und 30 Tagen."""
+    return now - FENSTER_TAG, now - FENSTER_WOCHE, now - FENSTER_MONAT
 
 
 def _sum_since(db: Session, user_id: int, since: datetime, column) -> int:
@@ -369,12 +398,15 @@ def abrechnung(
     Betrag und damit **nie** echte Kosten.
     """
     if usage.total_tokens is not None:
-        tokens = usage.total_tokens
+        roh = usage.total_tokens
     elif failed:
-        tokens = reserved_tokens
+        roh = reserved_tokens
     else:
-        tokens = estimated_actual_tokens
-    tokens = min(TOKEN_LIMIT_MAX, max(0, tokens))
+        roh = estimated_actual_tokens
+    roh = min(TOKEN_LIMIT_MAX, max(0, roh))
+    # Aufs Kontingent zählt der Cache anteilig; die **Kosten** unten rechnen mit
+    # allen Tokens, denn der Rückfallpreis ist ein Preis auf alles.
+    tokens = angerechnete_tokens(roh, usage.cached_tokens if usage.total_tokens is not None else 0)
 
     if usage.vom_anbieter and usage.cost_micro_usd is not None:
         return tokens, min(MAX_COST_MICROUNITS, max(0, usage.cost_micro_usd)), "provider"
@@ -382,7 +414,7 @@ def abrechnung(
     if rollenkosten is not None:
         return tokens, min(MAX_COST_MICROUNITS, rollenkosten), "estimate"
     if token_price_micro_usd_per_million:
-        kosten = (tokens * int(token_price_micro_usd_per_million)) // 1_000_000
+        kosten = (roh * int(token_price_micro_usd_per_million)) // 1_000_000
         return tokens, min(MAX_COST_MICROUNITS, kosten), "estimate"
     return tokens, 0, "none"
 
@@ -672,8 +704,13 @@ def realtime_verbrauch_ergaenzen(
     cost_microunits: int,
     anfragen: int = 1,
     grenzen_pruefen: bool = True,
+    zwischengespeichert: int = 0,
 ) -> AiUsageEvent:
     """Ergänzt eine laufende Realtime-Sitzung atomar um eine Buchung.
+
+    ``zwischengespeichert`` ist der Teil der Eingabe, den der Anbieter aus dem
+    Cache gelesen hat; er steckt schon in ``text_input``/``audio_input`` und
+    zählt aufs Kontingent nur anteilig (`angerechnete_tokens`).
 
     ``anfragen`` ist, wieviele Anbieteranfragen diese Buchung zählt. Bei
     Realtime und Gemini Live ist jede Buchung eine Antwort, also ``1``. GPT-Live
@@ -696,7 +733,7 @@ def realtime_verbrauch_ergaenzen(
     erst mit Prüfung, und nur nach einer Ablehnung ein zweites Mal ohne. Die
     Obergrenze einer einzelnen Zeile (``realtime_session_limit``) gilt immer.
     """
-    werte = (text_input, text_output, audio_input, audio_output, cost_microunits, anfragen)
+    werte = (text_input, text_output, audio_input, audio_output, cost_microunits, anfragen, zwischengespeichert)
     if any(wert < 0 for wert in werte):
         raise ValueError("Realtime-Verbrauch darf nicht negativ sein")
     event = (
@@ -707,7 +744,10 @@ def realtime_verbrauch_ergaenzen(
     )
     if event.status != "reserved":
         raise AiUsageConflict("Realtime-Sitzung ist bereits abgeschlossen")
-    delta_tokens = text_input + text_output + audio_input + audio_output
+    delta_tokens = angerechnete_tokens(
+        text_input + text_output + audio_input + audio_output,
+        min(zwischengespeichert, text_input + audio_input),
+    )
     neue_tokens = int(event.accounted_tokens or 0) + delta_tokens
     neue_kosten = int(event.accounted_cost_microunits or 0) + cost_microunits
     if neue_tokens > TOKEN_LIMIT_MAX or neue_kosten > MAX_COST_MICROUNITS:
@@ -725,8 +765,8 @@ def realtime_verbrauch_ergaenzen(
         _ensure_within(limits.weekly_token_limit, _sum_since(db, user.id, week, AiUsageEvent.accounted_tokens), delta_tokens, "weekly_token_limit")
         _ensure_within(limits.monthly_token_limit, _sum_since(db, user.id, month, AiUsageEvent.accounted_tokens), delta_tokens, "monthly_token_limit")
         # Die anderen Sitzungen nach der Wanduhr, diese mit ihrem neuen Stand.
-        # Begann sie im Vormonat, gehört ihre Zeit dorthin (`_sum_since` zählt
-        # nach `created_at`) und belastet diesen Monat nicht.
+        # Begann sie vor dem Fenster, liegt ihre Zeit davor (`_sum_since` zählt
+        # nach `created_at`) und belastet das Fenster nicht.
         begonnen = event.created_at if event.created_at.tzinfo else event.created_at.replace(tzinfo=timezone.utc)
         _ensure_within(
             _realtime_sekunden_limit(limits),
@@ -812,9 +852,8 @@ def _usage_rows(
 ) -> list[AiUsageSummary]:
     current_time = now or datetime.now(timezone.utc)
     day_start, week_start, month_start = _period_starts(current_time)
-    # Die ISO-Woche kann vor dem Monatsanfang beginnen — am Ersten eines Monats
-    # regelmaessig. Wer hier nur ab Monatsanfang laedt, zeigt in den ersten
-    # Tagen eine zu niedrige Wochenzahl.
+    # Das 30-Tage-Fenster umfasst die beiden kürzeren; `min` bleibt, damit
+    # niemand die Fenster umstellt und still eine zu niedrige Wochenzahl zeigt.
     earliest = min(week_start, month_start)
 
     query = (

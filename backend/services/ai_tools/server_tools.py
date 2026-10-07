@@ -547,11 +547,11 @@ def _global_tool_definitions() -> list[dict]:
             {
                 "name": {"type": "string", "maxLength": 64},
                 "description": {"type": ["string", "null"], "maxLength": 255},
-                "daily_token_limit": {"type": ["integer", "null"], "minimum": 0},
-                "weekly_token_limit": {"type": ["integer", "null"], "minimum": 0},
-                "monthly_token_limit": {"type": ["integer", "null"], "minimum": 0},
-                "monthly_realtime_minutes_limit": {"type": ["integer", "null"], "minimum": 0},
-                "monthly_dictation_minutes_limit": {"type": ["integer", "null"], "minimum": 0},
+                "daily_token_limit": {"type": ["integer", "null"], "minimum": 0, "description": "Je rollende 24 Stunden."},
+                "weekly_token_limit": {"type": ["integer", "null"], "minimum": 0, "description": "Je rollende 7 Tage."},
+                "monthly_token_limit": {"type": ["integer", "null"], "minimum": 0, "description": "Je rollende 30 Tage."},
+                "monthly_realtime_minutes_limit": {"type": ["integer", "null"], "minimum": 0, "description": "Sprachminuten je 30 Tage."},
+                "monthly_dictation_minutes_limit": {"type": ["integer", "null"], "minimum": 0, "description": "Diktierminuten je 30 Tage."},
                 "max_reasoning_effort": {"type": ["integer", "null"], "minimum": 0},
                 "max_memory_entries": {
                     "type": ["integer", "null"],

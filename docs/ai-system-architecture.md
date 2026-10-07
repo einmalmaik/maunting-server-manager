@@ -42,6 +42,8 @@ MSM besitzt einen Chat-Rand und zwei wählbare Voice-Transporte:
 
 Chat und Legacy Voice teilen `AiRun` plus `ai_run_broker`. Eine Realtime-Verbindung führt dagegen einen flüchtigen Gesprächskontext beim Anbieter und legt keine gesprochenen Nachrichten im Chat ab. Gemeinsam bleiben der serverseitige Werkzeugkatalog, die Rechteprüfung, der Vorschlagsfluss, Worker, Schwärzung und Kontingente.
 
+Die Kontingente rechnen in rollenden Fenstern (`ai_usage_service.FENSTER_TAG`, `_WOCHE`, `_MONAT`: 24 Stunden, 7 und 30 Tage), nicht nach Kalendertag oder -monat; die Feldnamen `daily_…`/`monthly_…` sind geblieben. Angerechnet wird je Anfrage `angerechnete_tokens`: aus dem Cache gelesene Eingabetokens zählen zu `CACHE_ANRECHNUNG_PROZENT` (10 %), alles andere voll. Die Verbrauchsansicht zeigt dieselbe Zahl, die die Sperre prüft.
+
 ## Systemübersicht
 
 ```text

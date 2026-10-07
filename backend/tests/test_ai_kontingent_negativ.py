@@ -93,14 +93,13 @@ def test_zwei_gleichzeitige_sitzungen_werden_an_der_grenze_gestoppt(
         _sprachsitzung(db, regular_user, vor_sekunden=0)
 
 
-def test_eine_sitzung_aus_dem_vormonat_belastet_den_neuen_nicht(
+def test_eine_sitzung_vor_dem_fenster_belastet_es_nicht(
     db: Session, regular_user: User,
 ) -> None:
-    """Ihre Zeit gehört zum Monat, in dem sie begann — und wird nicht doppelt abgezogen."""
-    _rolle(db, regular_user, "ki-monatswechsel", monthly_realtime_minutes_limit=1)
+    """Ihre Zeit liegt vor dem 30-Tage-Fenster — und wird nicht doppelt abgezogen."""
+    _rolle(db, regular_user, "ki-fensterrand", monthly_realtime_minutes_limit=1)
     alt = _sprachsitzung(db, regular_user, vor_sekunden=0)
-    jetzt = datetime.now(timezone.utc)
-    alt.created_at = jetzt.replace(day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(seconds=30)
+    alt.created_at = datetime.now(timezone.utc) - timedelta(days=30, seconds=30)
     db.commit()
     werte = dict(text_input=1, text_output=1, audio_input=1, audio_output=1, cost_microunits=0)
 
@@ -138,6 +137,111 @@ def test_negative_sprachwerte_werden_nicht_gutgeschrieben(
         )
     with pytest.raises(ValueError):
         reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=1, dictation_seconds=-60)
+
+
+# ── Rollende Fenster und Cache-Anrechnung ──────────────────────────────
+
+
+def _gebucht(db: Session, user: User, tokens: int, *, vor: timedelta) -> None:
+    event = reserve_ai_usage(db, user, request_id=uuid4(), estimated_tokens=tokens)
+    event.status = "completed"
+    event.created_at = datetime.now(timezone.utc) - vor
+    db.commit()
+
+
+def test_der_tag_ist_rollend_und_nicht_um_mitternacht_wieder_voll(
+    db: Session, regular_user: User,
+) -> None:
+    """Was vor 23 Stunden verbraucht wurde, zählt noch; was vor 25 Stunden, nicht mehr.
+
+    Mit Kalendertagen hätte jemand um 23:55 alles ausschöpfen und um 00:05
+    dasselbe noch einmal verbrauchen können.
+    """
+    _rolle(db, regular_user, "ki-rollend", daily_token_limit=1_000, weekly_token_limit=1_500)
+    _gebucht(db, regular_user, 900, vor=timedelta(hours=23))
+
+    with pytest.raises(AiQuotaExceeded, match="daily_token_limit"):
+        reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=200)
+    db.rollback()
+
+
+def test_nach_24_stunden_faellt_ein_verbrauch_aus_dem_tag_aber_nicht_aus_der_woche(
+    db: Session, regular_user: User,
+) -> None:
+    _rolle(db, regular_user, "ki-rollend-woche", daily_token_limit=1_000, weekly_token_limit=1_000)
+    _gebucht(db, regular_user, 900, vor=timedelta(hours=25))
+
+    with pytest.raises(AiQuotaExceeded, match="weekly_token_limit"):
+        reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=200)
+    db.rollback()
+    # Nach acht Tagen ist auch die Woche frei.
+    db.query(AiUsageEvent).filter(AiUsageEvent.accounted_tokens == 900).update(
+        {"created_at": datetime.now(timezone.utc) - timedelta(days=8)}
+    )
+    db.commit()
+    assert reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=200).status == "reserved"
+
+
+def test_aus_dem_cache_gelesene_tokens_zaehlen_zu_einem_zehntel() -> None:
+    from services.ai_usage_service import angerechnete_tokens
+
+    assert angerechnete_tokens(10_000, None) == 10_000
+    assert angerechnete_tokens(10_000, 9_000) == 1_000 + 900
+    # Ein gelesenes Token zählt nie null, und mehr als alles kann nicht gelesen sein.
+    assert angerechnete_tokens(1, 1) == 1
+    assert angerechnete_tokens(100, 5_000) == 10
+    assert angerechnete_tokens(100, -7) == 100
+
+
+def test_die_abrechnung_rechnet_den_cache_an() -> None:
+    from services.openai_compatible_adapter import StreamUsage
+
+    usage = StreamUsage()
+    usage.prompt_tokens, usage.completion_tokens = 20_000, 500
+    usage.total_tokens, usage.cached_tokens = 20_500, 18_000
+    tokens, _kosten, _herkunft = ai_usage_service.abrechnung(
+        usage, reserved_tokens=30_000, estimated_actual_tokens=20_500,
+    )
+    assert tokens == 2_000 + 500 + 1_800
+
+
+def test_die_kosten_rechnen_weiter_mit_allen_tokens() -> None:
+    """Der Rabatt gilt dem Kontingent, nicht der Rechnung: der Rückfallpreis ist ein Preis auf alles."""
+    from services.openai_compatible_adapter import StreamUsage
+
+    usage = StreamUsage()
+    usage.total_tokens, usage.cached_tokens = 10_000, 9_000
+    tokens, kosten, herkunft = ai_usage_service.abrechnung(
+        usage, reserved_tokens=10_000, estimated_actual_tokens=10_000,
+        token_price_micro_usd_per_million=1_000_000,
+    )
+    assert (tokens, kosten, herkunft) == (1_900, 10_000, "estimate")
+
+
+def test_sprachbuchung_rechnet_den_cache_an_und_bleibt_bei_ungereimten_zahlen_heil(
+    db: Session, regular_user: User,
+) -> None:
+    _rolle(db, regular_user, "ki-sprachcache", monthly_realtime_minutes_limit=10)
+    sitzung = _sprachsitzung(db, regular_user, vor_sekunden=5)
+    realtime_verbrauch_ergaenzen(
+        db, event_id=sitzung.id, text_input=1_000, text_output=100,
+        audio_input=0, audio_output=0, cost_microunits=0, zwischengespeichert=900,
+    )
+    db.commit()
+    assert sitzung.accounted_tokens == 100 + 90 + 100
+    assert sitzung.realtime_text_input_tokens == 1_000
+    # Ein Anbieter, der mehr Cache meldet als Eingabe, schenkt nichts darüber hinaus.
+    realtime_verbrauch_ergaenzen(
+        db, event_id=sitzung.id, text_input=10, text_output=50,
+        audio_input=0, audio_output=0, cost_microunits=0, zwischengespeichert=10_000,
+    )
+    db.commit()
+    assert sitzung.accounted_tokens == 290 + 1 + 50
+    with pytest.raises(ValueError):
+        realtime_verbrauch_ergaenzen(
+            db, event_id=sitzung.id, text_input=10, text_output=0,
+            audio_input=0, audio_output=0, cost_microunits=0, zwischengespeichert=-1,
+        )
 
 
 # ── Diktat ─────────────────────────────────────────────────────────────

@@ -117,11 +117,11 @@ describe('AiTab', () => {
     render(<AiTab />)
     fireEvent.click(await screen.findByRole('tab', { name: /Rollen & Kontingente/i }))
     await screen.findByRole('switch', {
-      name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i,
+      name: /Unbegrenzt: Tokenlimit je 30 Tage: ai-vip/i,
     })
 
     fireEvent.click(screen.getByRole('switch', {
-      name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i,
+      name: /Unbegrenzt: Tokenlimit je 30 Tage: ai-vip/i,
     }))
     vi.mocked(client.api).mockResolvedValue({ ...row, monthly_token_limit: null })
     fireEvent.click(screen.getByRole('button', { name: /Speichern: ai-vip/i }))
@@ -158,15 +158,15 @@ describe('AiTab', () => {
     // Vorauswahl faellt auf die bereits konfigurierte Rolle: dort gibt es
     // etwas zu sehen. Die unkonfigurierte Rolle ist gleichzeitig unsichtbar —
     // genau das war vorher das Problem, alle Rollen standen untereinander.
-    await screen.findByRole('switch', { name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i })
+    await screen.findByRole('switch', { name: /Unbegrenzt: Tokenlimit je 30 Tage: ai-vip/i })
     expect(screen.queryByRole('switch', { name: /: user$/i })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Rolle' }))
     fireEvent.click(screen.getByRole('option', { name: /user/i }))
 
-    await screen.findByRole('switch', { name: /Unbegrenzt: Monatliches Tokenlimit: user/i })
+    await screen.findByRole('switch', { name: /Unbegrenzt: Tokenlimit je 30 Tage: user/i })
     expect(
-      screen.queryByRole('switch', { name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i }),
+      screen.queryByRole('switch', { name: /Unbegrenzt: Tokenlimit je 30 Tage: ai-vip/i }),
     ).not.toBeInTheDocument()
   })
 
@@ -179,7 +179,7 @@ describe('AiTab', () => {
     // wie ein gespeichertes Nulllimit aussehen. Wer das versehentlich
     // speichert, sperrt die KI fuer alle Traeger dieser Rolle.
     const unlimited = await screen.findByRole('switch', {
-      name: /Unbegrenzt: Tägliches Tokenlimit: user/i,
+      name: /Unbegrenzt: Tokenlimit je 24 Stunden: user/i,
     })
     expect(unlimited).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByText(/noch kein Kontingent gespeichert/i)).toBeInTheDocument()
@@ -213,8 +213,8 @@ describe('AiTab', () => {
     // Beschriftung sagt; ein Hinweis an jedem wäre Dekoration und würde den
     // einen, der etwas zu sagen hat, mit übersehen lassen.
     expect(screen.getAllByText(i18n.t('aiSettings.maxMemoryEntriesHint'))).toHaveLength(1)
-    expect(screen.getByLabelText('Tägliches Tokenlimit: ai-vip')).not.toHaveAttribute('aria-describedby')
-    expect(screen.getByLabelText('Monatliches Tokenlimit: ai-vip')).not.toHaveAttribute('aria-describedby')
+    expect(screen.getByLabelText('Tokenlimit je 24 Stunden: ai-vip')).not.toHaveAttribute('aria-describedby')
+    expect(screen.getByLabelText('Tokenlimit je 30 Tage: ai-vip')).not.toHaveAttribute('aria-describedby')
     // Auch die Auswahl, nicht nur die Zahlenfelder: sie ist das einzige Feld
     // mit einem anderen Bauteil und würde einen Fehler dort sonst verstecken.
     expect(screen.getByLabelText('Höchste Denkstufe: ai-vip')).not.toHaveAttribute('aria-describedby')
@@ -246,7 +246,7 @@ describe('AiTab', () => {
     // Und wieder nur an diesem einen: die übrigen Schalter brauchen keine
     // Fußnote.
     expect(screen.getByRole('switch', {
-      name: 'Unbegrenzt: Tägliches Tokenlimit: ai-vip',
+      name: 'Unbegrenzt: Tokenlimit je 24 Stunden: ai-vip',
     })).not.toHaveAttribute('aria-describedby')
     expect(screen.getByRole('switch', {
       name: 'Unbegrenzt: Höchste Denkstufe: ai-vip',
@@ -309,7 +309,7 @@ describe('AiTab', () => {
   it('zeigt auch beim Speichern nicht die rohe Browsermeldung', async () => {
     render(<AiTab />)
     fireEvent.click(await screen.findByRole('tab', { name: /Rollen & Kontingente/i }))
-    await screen.findByRole('switch', { name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i })
+    await screen.findByRole('switch', { name: /Unbegrenzt: Tokenlimit je 30 Tage: ai-vip/i })
 
     vi.mocked(client.api).mockRejectedValueOnce(new TypeError('Failed to fetch'))
     fireEvent.click(screen.getByRole('button', { name: /Speichern: ai-vip/i }))

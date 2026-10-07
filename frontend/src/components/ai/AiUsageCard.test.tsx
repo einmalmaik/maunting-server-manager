@@ -68,7 +68,7 @@ describe('AiUsageCard', () => {
     vi.mocked(aiApi.getMyUsage).mockResolvedValue(usage(0, 0))
     render(<AiUsageCard />)
 
-    const bar = await screen.findByRole('progressbar', { name: 'Heute' })
+    const bar = await screen.findByRole('progressbar', { name: '24 Stunden' })
     expect(bar).toHaveAttribute('aria-valuenow', '100')
     expect(bar.firstElementChild?.className).toContain('bg-status-destructive')
   })
@@ -77,7 +77,7 @@ describe('AiUsageCard', () => {
     vi.mocked(aiApi.getMyUsage).mockResolvedValue(usage(950, 1_000))
     render(<AiUsageCard />)
 
-    const bar = await screen.findByRole('progressbar', { name: 'Heute' })
+    const bar = await screen.findByRole('progressbar', { name: '24 Stunden' })
     expect(bar.firstElementChild?.className).toContain('bg-status-destructive')
   })
 
@@ -85,7 +85,7 @@ describe('AiUsageCard', () => {
     vi.mocked(aiApi.getMyUsage).mockResolvedValue(usage(50, 1_000))
     render(<AiUsageCard />)
 
-    const bar = await screen.findByRole('progressbar', { name: 'Heute' })
+    const bar = await screen.findByRole('progressbar', { name: '24 Stunden' })
     // Die Ruhefarbe von `Singra/UI/ProgressBar` — dieselbe wie bei den
     // CPU-/RAM-Balken, seit die Karte den Balken nicht mehr selbst nachbaut.
     expect(bar.firstElementChild?.className).toContain('bg-secondary')

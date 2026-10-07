@@ -573,7 +573,9 @@ class RealtimeSitzung:
         to = self._tokenzahl(ausgang, "text_tokens")
         ao = self._tokenzahl(ausgang, "audio_tokens")
         # Cached Input ist in text/audio bereits enthalten und wird bewusst zum
-        # normalen jeweiligen Eingabepreis gebucht.
+        # normalen jeweiligen Eingabepreis gebucht. Aufs Kontingent zählt er
+        # nur anteilig (`ai_usage_service.angerechnete_tokens`).
+        gelesen = self._tokenzahl(eingang, "cached_tokens")
         preise = self._preise_laden()
         deltas = (ti, to, ai, ao)
         for index, wert in enumerate(deltas):
@@ -593,6 +595,7 @@ class RealtimeSitzung:
             "audio_input": ai,
             "audio_output": ao,
             "cost_microunits": kosten,
+            "zwischengespeichert": gelesen,
         }
         with SessionLocal() as db:
             try:

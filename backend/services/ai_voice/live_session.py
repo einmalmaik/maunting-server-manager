@@ -571,7 +571,10 @@ class LiveSitzung(RealtimeSitzung):
 
     # ── Verbrauch ─────────────────────────────────────────────────────
 
-    def _buchen(self, *, text_input: int = 0, text_output: int = 0, kosten: int, anfragen: int) -> None:
+    def _buchen(
+        self, *, text_input: int = 0, text_output: int = 0, kosten: int, anfragen: int,
+        zwischengespeichert: int = 0,
+    ) -> None:
         """Bucht Verbrauch, der schon angefallen ist — notfalls über die Grenze.
 
         Erst mit Prüfung; lehnt die Grenze ab, wird dieselbe Buchung ohne
@@ -587,6 +590,7 @@ class LiveSitzung(RealtimeSitzung):
             "audio_output": 0,
             "cost_microunits": kosten,
             "anfragen": anfragen,
+            "zwischengespeichert": zwischengespeichert,
         }
         with SessionLocal() as db:
             try:
@@ -637,6 +641,8 @@ class LiveSitzung(RealtimeSitzung):
             usage = antwort.get("usage") if isinstance(antwort.get("usage"), dict) else {}
             ti = self._tokenzahl(usage, "input_tokens")
             to = self._tokenzahl(usage, "output_tokens")
+            details = usage.get("input_tokens_details")
+            gelesen = self._tokenzahl(details, "cached_tokens") if isinstance(details, dict) else 0
             summe_ein = self._verbrauch_tokens[0] + ti
             summe_aus = self._verbrauch_tokens[1] + to
             # Zwischengespeicherte Eingabe steckt in ``input_tokens`` und wird
@@ -644,7 +650,10 @@ class LiveSitzung(RealtimeSitzung):
             gesamt = (summe_ein * self._preise[0] + summe_aus * self._preise[1]) // 1_000_000
             kosten = max(0, gesamt - self._verbrauch_kosten)
             try:
-                self._buchen(text_input=ti, text_output=to, kosten=kosten, anfragen=1)
+                self._buchen(
+                    text_input=ti, text_output=to, kosten=kosten, anfragen=1,
+                    zwischengespeichert=gelesen,
+                )
             except ai_usage_service.AiQuotaExceeded as exc:
                 if exc.reason != "realtime_session_limit":
                     self._verbrauch_tokens[0], self._verbrauch_tokens[1] = summe_ein, summe_aus

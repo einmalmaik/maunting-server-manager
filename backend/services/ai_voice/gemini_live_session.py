@@ -332,6 +332,8 @@ class GeminiLiveSitzung:
             "audio_input": deltas[2],
             "audio_output": deltas[3],
             "cost_microunits": max(0, gesamtkosten - self._verbrauch_kosten),
+            # Aufs Kontingent nur anteilig (`ai_usage_service.angerechnete_tokens`).
+            "zwischengespeichert": min(ein, _anzahl(usage, "cachedContentTokenCount")),
         }
         with SessionLocal() as db:
             try:

@@ -1814,7 +1814,7 @@ zum jeweiligen normalen Eingabepreis berechnet. Vor Sitzungsbeginn und nach
 jeder Antwort gelten dieselben Tokenlimits wie im Chat; Antworten sind
 serverseitig auf 512 Ausgabetokens begrenzt.
 
-Dazu kommt das Rollenlimit **Sprachminuten im Monat**: gezählt wird, wie lange
+Dazu kommt das Rollenlimit **Sprachminuten je 30 Tage**: gezählt wird, wie lange
 eine Sitzung offen war, auf allen Wegen gleich — Realtime, GPT-Live, Gemini Live
 und der klassische Weg (Gehör, Chat, Stimme). Eine Sitzung beginnt nur
 mit mindestens einer Sekunde Rest und endet von selbst, wenn der Rest
