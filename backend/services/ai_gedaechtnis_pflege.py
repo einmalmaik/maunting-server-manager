@@ -11,11 +11,32 @@ Zwei Dinge, die der Schreiber im Gespräch nicht leisten kann:
 * **Pflege mit dem Gedächtnismodell**, je Bereich, nachts in der Zone des
   Zahlers (`NACHT`): Einträge, die seit der letzten Pflege neu oder geändert
   sind, gehen mit ihren ähnlichsten Nachbarn an das Modell, dazu Pläne und
-  Termine, deren Tag vorbei ist (`faellig_am`). Das Modell darf zwei Dinge:
+  Termine, deren Tag vorbei ist (`faellig_am`). Das Modell darf drei Dinge:
   zusammenführen, was dasselbe sagt (vor allem aus dem umgeschriebenen
-  Altbestand, der bewusst nichts zusammenführt), und Abgelaufenes in die
-  Vergangenheit setzen, ohne einen Ausgang zu behaupten. Steht nichts
-  Ähnliches da und ist nichts fällig, fragt die Pflege gar nicht.
+  Altbestand, der bewusst nichts zusammenführt), Abgelaufenes in die
+  Vergangenheit setzen, ohne einen Ausgang zu behaupten, und **Schlüsse
+  ziehen**. Steht nichts Ähnliches da und ist nichts fällig, fragt die Pflege
+  gar nicht.
+
+**Schlüsse.** Folgt aus zwei oder mehr Einträgen zusammen etwas, das keiner
+allein sagt, legt die Pflege es als eigenen Eintrag an (`art = 'schluss'`),
+gebunden an seine Belege (`AiMemoryBeleg`). Erfinden darf sie dabei nichts,
+und darauf verlässt sich nicht allein der Prompt:
+
+* im Code (`_schluesse_vorpruefen`): mindestens zwei Belege, keiner davon
+  selbst ein Schluss; keine Zahl, die in keinem Beleg steht; kein Wort, mit
+  dem ein Satz vermutet statt folgert; kurz; keine bloße Wiederholung;
+  höchstens `SCHLUESSE_JE_LAUF`;
+* in einem zweiten, getrennten Aufruf (`_schluesse_pruefen`): ein Prüfer
+  sieht je Schluss nur dessen Belege und sagt, ob er zwingend daraus folgt.
+  Gespeichert wird nur, was er ausdrücklich bestätigt. Scheitert die
+  Prüfung oder fehlt das Kontingent dafür, wird nichts geschlossen;
+* danach: ein Schluss gilt nur, solange seine Belege gelten. Ändert sich
+  einer, wird er vergessen oder gelöscht, vergisst das Gedächtnis den
+  Schluss mit (`ai_memory_service._schluesse_entkraeften`).
+
+Ein Schluss geht in keiner Zusammenführung auf und ist kein Beleg für
+einen weiteren: Schlüsse auf Schlüssen trügen jeden Fehler weiter.
 
 **Was geschützt bleibt.** Einträge des Menschen behalten ihren Wortlaut;
 nur ein abgelaufener Plan wird umgeschrieben, und der alte Satz bleibt als
@@ -33,6 +54,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -78,6 +100,19 @@ LEERLAUF = timedelta(minutes=15)
 MAX_UNBRAUCHBAR = 3
 #: Geschätzte Ausgabe für die Reservierung, dazu ein Viertel der Zeichen.
 AUSGABE_SCHAETZUNG = 600
+#: Höchstens so viele Schlüsse je Lauf und Bereich.
+SCHLUESSE_JE_LAUF = 3
+#: Ein Schluss ist ein, zwei Sätze.
+MAX_SCHLUSS_ZEICHEN = 400
+#: Wörter, mit denen ein Satz vermutet, statt zu folgern. Ein Schluss, der
+#: eines davon braucht, folgt nicht zwingend.
+_VERMUTUNG = re.compile(
+    r"\b(vermutlich|wahrscheinlich|vielleicht|möglicherweise|eventuell|womöglich|"
+    r"anscheinend|offenbar|offensichtlich|scheinbar|dürfte|dürften|könnte|könnten|"
+    r"probably|likely|maybe|perhaps|possibly|apparently|presumably|seems?|might)\b",
+    re.IGNORECASE,
+)
+_ZAHL = re.compile(r"\d+")
 #: Ab dieser Stunde (UTC) rechnet der erste Takt des Tages den Kopfrang neu.
 RANG_STUNDE_UTC = 3
 
@@ -96,10 +131,20 @@ WERKZEUG: dict[str, Any] = {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "aktion": {"type": "string", "enum": ["zusammenfuehren", "zeit"]},
+                            "aktion": {
+                                "type": "string", "enum": ["zusammenfuehren", "zeit", "schluss"],
+                            },
                             "eintrag": {
                                 "type": "string",
-                                "description": "E-Nummer: der bleibende oder der fällige Eintrag.",
+                                "description": (
+                                    "E-Nummer: der bleibende oder der fällige Eintrag. "
+                                    "Bei schluss weglassen."
+                                ),
+                            },
+                            "belege": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Nur bei schluss: alle E-Nummern, aus denen er folgt, mindestens zwei.",
                             },
                             "aufgenommen": {
                                 "type": "array",
@@ -109,16 +154,16 @@ WERKZEUG: dict[str, Any] = {
                             "text": {
                                 "type": "string",
                                 "description": (
-                                    "Der ganze neue Stand, ein bis fünf Sätze. Bei zeit immer; "
-                                    "bei zusammenfuehren weglassen, wenn ein Eintrag vom "
-                                    "Benutzer bleibt."
+                                    "Der ganze neue Stand, ein bis fünf Sätze. Bei zeit und "
+                                    "schluss immer; bei zusammenfuehren weglassen, wenn ein "
+                                    "Eintrag vom Benutzer bleibt."
                                 ),
                             },
                             "titel": {"type": "string", "description": "Zwei bis sechs Wörter."},
                             "thema": {"type": "string", "description": "Ein oder zwei Wörter."},
                             "wichtigkeit": {"type": "integer", "minimum": 1, "maximum": 5},
                         },
-                        "required": ["aktion", "eintrag"],
+                        "required": ["aktion"],
                     },
                 },
             },
@@ -129,10 +174,11 @@ WERKZEUG: dict[str, Any] = {
 
 SYSTEMPROMPT = """Du pflegst nachts das Gedächtnis von Singra, der KI eines Gameserver-Panels. Du bekommst Einträge eines Bereichs: neue oder geänderte [neu], Pläne und Termine, deren Tag vorbei ist [fällig], und ähnliche aus dem Bestand.
 
-Du darfst zwei Dinge tun, sonst nichts:
+Du darfst drei Dinge tun, sonst nichts:
 - zusammenfuehren: Sagen Einträge dasselbe oder gehören sie zur selben Sache, wird einer daraus. eintrag bleibt, aufgenommen geht in ihm auf. text ist der ganze neue Stand mit allem, was davon gilt – nichts erfinden, nichts Geltendes weglassen; widersprechen sie sich, gilt der jüngere.
-  Einträge „vom Benutzer“ behalten ihren Wortlaut. Ist einer dabei, ist er eintrag, die von Singra sind aufgenommen, und text lässt du weg. Zwei vom Benutzer führst du nicht zusammen.
+  Einträge „vom Benutzer“ behalten ihren Wortlaut. Ist einer dabei, ist er eintrag, die von Singra sind aufgenommen, und text lässt du weg. Zwei vom Benutzer führst du nicht zusammen. Einen „Schluss“ führst du mit nichts zusammen.
 - zeit: Ein [fällig]-Eintrag beschreibt etwas, dessen Tag vorbei ist. Schreib in text den neuen Satz in der Vergangenheit, ohne einen Ausgang zu behaupten: aus „Der Benutzer plant für Juli 2026 eine Reise nach Singapur.“ wird „Der Benutzer plante für Juli 2026 eine Reise nach Singapur.“ Dass es stattfand, schreibst du nur, wenn ein anderer Eintrag es sagt.
+- schluss: Folgt aus zwei oder mehr Einträgen zusammen etwas, das keiner allein sagt, schreib es in text als neuen Eintrag, ein bis zwei Sätze; belege nennt alle E-Nummern, aus denen er folgt. Er muss zwingend aus ihnen folgen: jede Angabe darin steht in einem Beleg oder ergibt sich ohne weiteres Wissen aus ihnen. Keine Vermutung, kein Motiv, keine Bewertung, keine Verallgemeinerung, kein Wissen von außen, keine Zahl und kein Name, der nicht dasteht. Aus „Die Backups von Nordwind laufen täglich um 3 Uhr.“ und „Nordwind startet täglich um 3 Uhr neu.“ folgt „Backup und Neustart von Nordwind fallen beide auf 3 Uhr.“ – dass der Benutzer früh aufsteht, folgt aus nichts davon. Ein „Schluss“ ist kein Beleg, und was einer schon sagt, schließt du nicht noch einmal. Höchstens drei.
 
 Was nur ähnlich klingt, bleibt getrennt. Im Zweifel nichts – eine leere Liste ist oft die richtige Antwort. Schreib in der Sprache der Einträge."""
 
@@ -144,6 +190,11 @@ class _Posten:
     fassung: int
     vom_menschen: bool
     faellig: bool
+    #: Selbst ein Schluss: kein Beleg, geht in nichts auf.
+    schluss: bool = False
+    #: Der Text, wie das Modell ihn las — für die Prüfung der Schlüsse. Nur im
+    #: Speicher, solange der Lauf dauert.
+    text: str = field(default="", repr=False)
 
 
 @dataclass
@@ -156,6 +207,7 @@ class Pflege:
     zusammengefuehrt: int = 0
     umgeschrieben: int = 0
     verworfen: int = 0
+    geschlossen: int = 0
 
 
 @dataclass(repr=False)
@@ -433,7 +485,10 @@ def _nachricht(
     zeilen = []
     for index, (row, text_, marke) in enumerate(geoeffnet):
         angelegt = ai_memory_service._utc(row.created_at).astimezone(zone)
-        herkunft = "vom Benutzer" if row.origin == "user" else "von Singra"
+        herkunft = (
+            "Schluss von Singra" if row.art == ai_memory_service.SCHLUSS
+            else "vom Benutzer" if row.origin == "user" else "von Singra"
+        )
         titel = schreiber._flach(row.titel or "")
         zeilen.append(
             f"E{index + 1}{marke} (angelegt {angelegt:%d.%m.%Y}, {herkunft}"
@@ -524,8 +579,9 @@ def _vorbereiten(identity: str, jetzt: datetime) -> _Vorbereitet | Pflege:
             _Posten(
                 f"E{index + 1}", row.id, int(row.fassung or 1),
                 row.origin == "user", row.id in faellig_ids,
+                schluss=row.art == ai_memory_service.SCHLUSS, text=text_,
             )
-            for index, (row, _t) in enumerate(geoeffnet)
+            for index, (row, text_) in enumerate(geoeffnet)
         ]
         db.refresh(provider)
         db.expunge(provider)
@@ -548,6 +604,8 @@ async def _lauf(identity: str, unbrauchbar_bisher: int) -> Pflege:
         v.provider, v.api_key, v.modell, v.messages, WERKZEUG
     )
     aenderungen = None if gescheitert or aufruf is None else _aenderungen_lesen(aufruf.arguments)
+    kandidaten = _schluesse_vorpruefen(aenderungen or [], v.posten)
+    bestaetigt = await _schluesse_pruefen(v, kandidaten) if kandidaten else set()
 
     def _abrechnen_und_anwenden() -> Pflege:
         with SessionLocal() as db:
@@ -564,7 +622,7 @@ async def _lauf(identity: str, unbrauchbar_bisher: int) -> Pflege:
             zahler = db.get(User, v.zahler_id)
             if zahler is None:
                 return Pflege("spaeter")
-            ergebnis = _anwenden(db, zahler, v.posten, aenderungen or [])
+            ergebnis = _anwenden(db, zahler, v.posten, aenderungen or [], bestaetigt)
             # Was fällig war, ist jetzt gelesen — umgeschrieben oder nicht.
             # Sonst käme derselbe Plan jede Nacht wieder, und jede Nacht
             # kostet einen Aufruf.
@@ -607,15 +665,29 @@ class _Lage:
     verbraucht: set[str] = field(default_factory=set)
 
 
-def _anwenden(db: Session, zahler: User, posten: list[_Posten], aenderungen: list[dict]) -> Pflege:
+def _anwenden(
+    db: Session,
+    zahler: User,
+    posten: list[_Posten],
+    aenderungen: list[dict],
+    bestaetigt: set[int] | frozenset[int] = frozenset(),
+) -> Pflege:
     """Jede Änderung in einem Sicherungspunkt; was nicht passt, wird verworfen.
+
+    Schlüsse kommen zuletzt und nur, wenn der Prüfer sie bestätigt hat
+    (``bestaetigt``: ihre Stellen in ``aenderungen``). Hat dieser Lauf einen
+    ihrer Belege schon geändert, las der Prüfer einen alten Stand: dann nicht.
 
     `DisSidecarError` bleibt ungefangen: antwortet die Verschlüsselung nicht,
     scheitert der ganze Lauf und kommt wieder.
     """
     lage = _Lage({p.kennung: p for p in posten})
     ergebnis = Pflege("ok")
-    for roh in aenderungen:
+    schluesse: list[tuple[int, dict]] = []
+    for stelle, roh in enumerate(aenderungen):
+        if _aktion(roh) == "schluss":
+            schluesse.append((stelle, roh))
+            continue
         try:
             with db.begin_nested():
                 aktion = _einzeln(db, zahler, roh, lage)
@@ -626,11 +698,221 @@ def _anwenden(db: Session, zahler: User, posten: list[_Posten], aenderungen: lis
             ergebnis.umgeschrieben += 1
         else:
             ergebnis.zusammengefuehrt += 1
+    for stelle, roh in schluesse:
+        if stelle not in bestaetigt:
+            ergebnis.verworfen += 1
+            continue
+        try:
+            with db.begin_nested():
+                _schluss(db, zahler, roh, lage)
+        except (_Verworfen, DisDecryptionError, HTTPException):
+            ergebnis.verworfen += 1
+            continue
+        ergebnis.geschlossen += 1
     return ergebnis
 
 
+def _aktion(roh: dict) -> str:
+    return str(roh.get("aktion") or "").strip().casefold()
+
+
+def _belege(roh: dict, posten: dict[str, _Posten]) -> list[_Posten]:
+    """Die Belege eines Schlusses, nachsichtig gelesen.
+
+    Nennt das Modell sie nicht unter ``belege``, sondern wie bei einer
+    Zusammenführung unter ``eintrag`` und ``aufgenommen``, ist dasselbe
+    gemeint.
+    """
+    kennungen = schreiber._kennungen(roh.get("belege"), "E") or [
+        *schreiber._kennungen(roh.get("eintrag"), "E"),
+        *schreiber._kennungen(roh.get("aufgenommen"), "E"),
+    ]
+    return [posten[k] for k in dict.fromkeys(kennungen) if k in posten]
+
+
+def _schluss(db: Session, zahler: User, roh: dict, lage: _Lage) -> None:
+    belege = _belege(roh, lage.posten)
+    if any(p.kennung in lage.verbraucht for p in belege):
+        raise _Verworfen("beleg_geaendert")
+    zeilen = {
+        row.id: row for row in db.query(AiMemoryEntry)
+        .filter(AiMemoryEntry.id.in_([p.id for p in belege])).all()
+    }
+    if any(
+        p.id not in zeilen or int(zeilen[p.id].fassung or 1) != p.fassung for p in belege
+    ):
+        raise _Verworfen("beleg_geaendert")
+    # So wichtig wie gewünscht, aber nie wichtiger als der wichtigste Beleg.
+    obergrenze = max(int(row.wichtigkeit or 3) for row in zeilen.values())
+    wichtigkeit = min(schreiber._wichtigkeit(roh) or 2, obergrenze)
+    titel = schreiber._wahlweise(roh, "titel")
+    thema = schreiber._wahlweise(roh, "thema")
+    ai_memory_service.schluss_anlegen(
+        db, user=zahler, belege=[p.id for p in belege],
+        text=schreiber._flach(roh.get("text") or ""),
+        titel=None if titel is ai_memory_service.UNVERAENDERT else titel,
+        thema=None if thema is ai_memory_service.UNVERAENDERT else thema,
+        wichtigkeit=wichtigkeit,
+    )
+
+
+# ── Schlüsse prüfen ──────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class _Kandidat:
+    #: Stelle in der Liste der Änderungen.
+    stelle: int
+    text: str
+    belege: tuple[_Posten, ...]
+
+
+def _schluesse_vorpruefen(aenderungen: list[dict], posten: list[_Posten]) -> list[_Kandidat]:
+    """Was ohne Modell zu sehen ist: Schlüsse, die schon an der Form scheitern.
+
+    Durch kommt höchstens `SCHLUESSE_JE_LAUF`; die übrigen verwirft
+    `_anwenden`, weil der Prüfer sie nie bestätigt.
+    """
+    nach_kennung = {p.kennung: p for p in posten}
+    vorhanden = {" ".join(p.text.split()).casefold() for p in posten}
+    kandidaten: list[_Kandidat] = []
+    for stelle, roh in enumerate(aenderungen):
+        if len(kandidaten) >= SCHLUESSE_JE_LAUF:
+            break
+        if _aktion(roh) != "schluss":
+            continue
+        text_ = schreiber._flach(roh.get("text") if isinstance(roh.get("text"), str) else "")
+        belege = _belege(roh, nach_kennung)
+        if (
+            len(belege) < 2
+            or any(p.schluss for p in belege)
+            or not text_
+            or len(text_) > MAX_SCHLUSS_ZEICHEN
+            or text_.casefold() in vorhanden
+            or _VERMUTUNG.search(text_)
+        ):
+            continue
+        # Keine Zahl, die nicht in einem Beleg steht: Uhrzeiten, Daten, Mengen
+        # sind das Erste, was ein Modell beim Folgern dazuerfindet.
+        zahlen_belege = {z for p in belege for z in _ZAHL.findall(p.text)}
+        if any(z not in zahlen_belege for z in _ZAHL.findall(text_)):
+            continue
+        kandidaten.append(_Kandidat(stelle, text_, tuple(belege)))
+    return kandidaten
+
+
+PRUEF_NAME = "schluesse_pruefen"
+
+PRUEFWERKZEUG: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": PRUEF_NAME,
+        "description": "Trage für jeden Schluss ein, ob er aus seinen Belegen folgt.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "urteile": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "schluss": {"type": "string", "description": "S-Nummer."},
+                            "grund": {"type": "string", "description": "Ein kurzer Satz, zuerst."},
+                            "belegt": {"type": "boolean"},
+                        },
+                        "required": ["schluss", "grund", "belegt"],
+                    },
+                },
+            },
+            "required": ["urteile"],
+        },
+    },
+}
+
+PRUEFPROMPT = """Du prüfst Schlüsse, die aus Erinnerungen gezogen wurden, bevor sie gespeichert werden. Zu jedem Schluss bekommst du nur seine Belege.
+
+belegt ist true nur, wenn der Schluss zwingend aus den Belegen zusammen folgt: jede Angabe darin steht in einem Beleg oder ergibt sich ohne weiteres Wissen aus ihnen.
+belegt ist false, wenn er etwas hinzufügt – eine Vermutung, ein Motiv, eine Bewertung, eine Verallgemeinerung, Wissen von außen, eine Zahl, einen Namen oder eine Zeit, die nicht dasteht –, wenn er nur einen einzelnen Beleg wiederholt oder wenn er einem Beleg widerspricht.
+
+Schreib zuerst den Grund, dann das Urteil. Im Zweifel false."""
+
+
+def _urteile_lesen(argumente: Any, anzahl: int) -> set[int]:
+    """Die Stellen (ab 0) der Schlüsse, die der Prüfer ausdrücklich bestätigt."""
+    if isinstance(argumente, str):
+        try:
+            argumente = json.loads(argumente)
+        except (TypeError, ValueError):
+            return set()
+    if isinstance(argumente, dict):
+        argumente = argumente.get("urteile", argumente.get("verdicts"))
+    if not isinstance(argumente, list):
+        return set()
+    ja: set[int] = set()
+    nein: set[int] = set()
+    for urteil in argumente:
+        if not isinstance(urteil, dict):
+            continue
+        wert = urteil.get("belegt", urteil.get("supported"))
+        bestaetigt = wert is True or (isinstance(wert, str) and wert.strip().casefold() in {"true", "ja", "yes"})
+        for kennung in schreiber._kennungen(urteil.get("schluss"), "S"):
+            stelle = int(kennung[1:]) - 1
+            if 0 <= stelle < anzahl:
+                (ja if bestaetigt else nein).add(stelle)
+    # Zwei Urteile über denselben Schluss, die sich widersprechen: nein.
+    return ja - nein
+
+
+async def _schluesse_pruefen(v: _Vorbereitet, kandidaten: list[_Kandidat]) -> set[int]:
+    """Der zweite Blick: ein eigener Aufruf, der je Schluss nur dessen Belege sieht.
+
+    Der Prüfer weiß nichts vom übrigen Bereich und nichts davon, warum der
+    Schluss gezogen wurde — er soll nur sagen, ob er dasteht. Gebucht wie der
+    erste Aufruf, beim selben Zahler. Gibt die Stellen der bestätigten
+    Schlüsse in der Liste der Änderungen zurück; scheitert etwas, keine.
+    """
+    teile = []
+    for nummer, kandidat in enumerate(kandidaten, start=1):
+        belege = "\n".join(f"- {schreiber._flach(p.text)}" for p in kandidat.belege)
+        teile.append(f"S{nummer}: {kandidat.text}\nBelege:\n{belege}")
+    inhalt = "\n\n".join(teile)
+    messages = [
+        {"role": "system", "content": PRUEFPROMPT},
+        {"role": "user", "content": inhalt},
+    ]
+    eingabe = max(1, (len(PRUEFPROMPT) + len(inhalt)) // 4)
+    ausgabe = 80 * len(kandidaten)
+
+    def _reservieren() -> Any | None:
+        with SessionLocal() as db:
+            zahler = db.get(User, v.zahler_id)
+            if zahler is None:
+                return None
+            return schreiber._reservieren(db, zahler, v.provider, v.modell, v.preise, eingabe, ausgabe)
+
+    request_id = await asyncio.to_thread(_reservieren)
+    if request_id is None:
+        return set()
+    usage, aufruf, gescheitert = await schreiber._formular(
+        v.provider, v.api_key, v.modell, messages, PRUEFWERKZEUG
+    )
+
+    def _abrechnen() -> None:
+        with SessionLocal() as db:
+            schreiber._abrechnen(
+                db, request_id, usage, aufruf,
+                provider=v.provider, preise=v.preise, eingabe=eingabe, gescheitert=gescheitert,
+            )
+            db.commit()
+
+    await asyncio.to_thread(_abrechnen)
+    if gescheitert or aufruf is None:
+        return set()
+    return {kandidaten[stelle].stelle for stelle in _urteile_lesen(aufruf.arguments, len(kandidaten))}
+
+
 def _einzeln(db: Session, zahler: User, roh: dict, lage: _Lage) -> str:
-    aktion = str(roh.get("aktion") or "").strip().casefold()
+    aktion = _aktion(roh)
     ziel = next(
         (lage.posten[k] for k in schreiber._kennungen(roh.get("eintrag"), "E") if k in lage.posten),
         None,
@@ -662,6 +944,10 @@ def _einzeln(db: Session, zahler: User, roh: dict, lage: _Lage) -> str:
     ]
     if not andere:
         raise _Verworfen("nichts_aufzunehmen")
+    if ziel.schluss or any(p.schluss for p in andere):
+        # Ein Schluss hängt an seinen Belegen; zusammengeführt sagte er etwas,
+        # das keiner geprüft hat.
+        raise _Verworfen("schluss")
     menschen = [p for p in andere if p.vom_menschen]
     if len(menschen) == 1 and not ziel.vom_menschen and neuer_text is None:
         # Nachsichtig gelesen: das Modell drehte in der Probe vom 07.10.2026

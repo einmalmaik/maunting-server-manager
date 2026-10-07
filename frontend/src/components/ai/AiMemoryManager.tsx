@@ -10,6 +10,7 @@ import {
   Download,
   Flame,
   History,
+  Lightbulb,
   Pencil,
   Pin,
   PinOff,
@@ -821,8 +822,13 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
                         </span>
                       )}
 
-                      {/* KI-Herkunftsbadge */}
-                      {entry.origin === 'ai' && (
+                      {/* KI-Herkunftsbadge; ein Schluss sagt, dass er gefolgert ist */}
+                      {entry.art === 'schluss' ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-label-sm text-primary">
+                          <Lightbulb className="h-3 w-3" aria-hidden="true" />
+                          {t('ai.memory.schluss')}
+                        </span>
+                      ) : entry.origin === 'ai' && (
                         <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-label-sm text-primary">
                           <BrainCircuit className="h-3 w-3" aria-hidden="true" />
                           {t('ai.memory.originAi')}
@@ -917,6 +923,24 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
                   <div className="rounded-lg border border-outline-variant/30 bg-surface-container-lowest/90 p-3 text-sm text-on-surface whitespace-pre-wrap break-words leading-relaxed">
                     {entry.value}
                   </div>
+
+                  {/* Ein Schluss zeigt, woraus er folgt — nachprüfbar statt geglaubt */}
+                  {entry.belege && entry.belege.length > 0 && (
+                    <div className="space-y-1.5 text-xs text-on-surface-variant">
+                      <p className="font-medium text-on-surface">{t('ai.memory.folgtAus')}</p>
+                      <ul className="space-y-1">
+                        {entry.belege.map((beleg) => (
+                          <li
+                            key={beleg.id}
+                            className="rounded-md border border-outline-variant/30 bg-surface-container-lowest/60 px-2.5 py-1.5 text-on-surface break-words"
+                          >
+                            {beleg.text}
+                          </li>
+                        ))}
+                      </ul>
+                      <p>{t('ai.memory.schlussHinweis')}</p>
+                    </div>
+                  )}
 
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-on-surface-variant border-t border-outline-variant/20 pt-2">
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1">

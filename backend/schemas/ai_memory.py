@@ -19,8 +19,11 @@ from pydantic import BaseModel, Field
 MemoryScope = Literal["user", "server", "server_shared", "team", "panel"]
 
 
-#: Was fuer eine Aussage eine Erinnerung ist (`ai_memory_service.ARTEN`).
-MemoryArt = Literal["fakt", "vorliebe", "anweisung", "ereignis", "plan", "beziehung", "wissen"]
+#: Was fuer eine Aussage eine Erinnerung ist (`ai_memory_service.ARTEN`), dazu
+#: ``schluss``: von der naechtlichen Pflege aus anderen geschlossen.
+MemoryArt = Literal[
+    "fakt", "vorliebe", "anweisung", "ereignis", "plan", "beziehung", "wissen", "schluss",
+]
 #: Woher sie kommt (`ai_memory_service.QUELLEN`).
 MemoryQuelle = Literal["eingetragen", "gespraech", "import", "pflege"]
 
@@ -89,6 +92,13 @@ class AiMemoryThemaRef(BaseModel):
     name: str
 
 
+class AiMemoryBelegRef(BaseModel):
+    """Eine Erinnerung, aus der ein Schluss folgt."""
+
+    id: str
+    text: str
+
+
 class AiMemoryResponse(BaseModel):
     id: str
     scope: MemoryScope
@@ -114,6 +124,9 @@ class AiMemoryResponse(BaseModel):
     fassung: int = 1
     #: Steht immer im Kopf jedes Gesprächs (`ai_gedaechtnis_abruf`).
     angeheftet: bool = False
+    #: Nur bei einem Schluss: die Erinnerungen, aus denen er folgt. Aendert
+    #: sich eine davon, vergisst das Gedaechtnis den Schluss.
+    belege: list[AiMemoryBelegRef] = Field(default_factory=list)
     use_count: int = 0
     last_used_at: datetime | None = None
     created_at: datetime

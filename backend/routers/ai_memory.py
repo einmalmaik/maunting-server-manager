@@ -12,6 +12,7 @@ from dependencies import require_global, verify_csrf
 from models import AiMemoryEntry, AiMemoryPreference, User
 from schemas.ai_memory import (
     AiMemoryAnheften,
+    AiMemoryBelegRef,
     AiMemoryClearResponse,
     AiMemoryCreate,
     AiMemoryFassung,
@@ -41,7 +42,10 @@ Ansicht = Literal["aktiv", "vergessen"]
 
 
 def _response(
-    row: AiMemoryEntry, value: str, themen: dict[str, str] | None = None
+    row: AiMemoryEntry,
+    value: str,
+    themen: dict[str, str] | None = None,
+    belege: dict[str, list[tuple[str, str]]] | None = None,
 ) -> AiMemoryResponse:
     name = (themen or {}).get(row.thema_id or "")
     return AiMemoryResponse(
@@ -52,6 +56,7 @@ def _response(
         art=row.art, quelle=row.quelle, wichtigkeit=row.wichtigkeit,
         origin=row.origin, status=row.status, vergessen_am=row.vergessen_am,
         fassung=row.fassung, angeheftet=bool(row.angeheftet), use_count=row.use_count,
+        belege=[AiMemoryBelegRef(id=kennung, text=text) for kennung, text in (belege or {}).get(row.id, [])],
         last_used_at=row.last_used_at,
         created_at=row.created_at, updated_at=row.updated_at,
     )
@@ -60,7 +65,8 @@ def _response(
 def _einzeln(db: Session, row: AiMemoryEntry, value: str) -> AiMemoryResponse:
     """Antwort fuer genau eine Erinnerung, mit dem Namen ihres Themas."""
     return _response(
-        row, value, ai_memory_service.themennamen(db, [(row.thema_id, row.scope_identity)])
+        row, value, ai_memory_service.themennamen(db, [(row.thema_id, row.scope_identity)]),
+        ai_memory_service.belege_je_schluss(db, [row]),
     )
 
 
@@ -74,15 +80,16 @@ def _themenfilter(thema: list[str] | None) -> list[str] | None:
     return thema
 
 
-def _page(seite: ai_memory_service.Gedaechtnisseite) -> AiMemoryPage:
+def _page(db: Session, seite: ai_memory_service.Gedaechtnisseite) -> AiMemoryPage:
     """Eine Seite des Dienstes als Antwort — für beide Seitenrouten dieselbe.
 
     ``limit`` kommt aus dem Dienst und nicht aus der Anfrage: er bezahlt eine
     Seite in Sidecar-Roundtrips. Die Oberfläche rechnet daraus ihre Seitenzahl
     und den nächsten Offset, statt die Zahl noch einmal zu kennen.
     """
+    belege = ai_memory_service.belege_je_schluss(db, [row for row, _value in seite.eintraege])
     return AiMemoryPage(
-        entries=[_response(row, value, seite.themen) for row, value in seite.eintraege],
+        entries=[_response(row, value, seite.themen, belege) for row, value in seite.eintraege],
         total=seite.gesamt,
         clearable=seite.loeschbar,
         limit=ai_memory_service.PERSONAL_PAGE_SIZE,
@@ -109,7 +116,8 @@ def list_memory(
         themen = ai_memory_service.themennamen(
             db, [(row.thema_id, row.scope_identity) for row, _ in eintraege]
         )
-        return [_response(row, value, themen) for row, value in eintraege]
+        belege = ai_memory_service.belege_je_schluss(db, [row for row, _ in eintraege])
+        return [_response(row, value, themen, belege) for row, value in eintraege]
     except DisSidecarError as exc:
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
 
@@ -144,7 +152,7 @@ def list_personal_memory(
     Treffer, das Passendste zuerst.
     """
     try:
-        return _page(ai_memory_service.personal_entries(
+        return _page(db, ai_memory_service.personal_entries(
             db, user, offset=offset, status=status, themen=_themenfilter(thema), suche=suche,
         ))
     except DisSidecarError as exc:
@@ -178,7 +186,7 @@ def list_memory_page(
     Seite.
     """
     try:
-        return _page(ai_memory_service.scope_entries(
+        return _page(db, ai_memory_service.scope_entries(
             db, user, scope, server_id, team_id, offset=offset, status=status,
             themen=_themenfilter(thema), suche=suche,
         ))

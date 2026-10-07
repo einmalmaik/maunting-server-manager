@@ -791,6 +791,11 @@ export interface AiMemoryEntry {
    * Angabe (ein Server vor 5.2) heißt es nein.
    */
   angeheftet?: boolean
+  /**
+   * Nur bei einem Schluss: die Erinnerungen, aus denen er folgt. Ändert sich
+   * eine davon, vergisst das Gedächtnis den Schluss.
+   */
+  belege?: { id: string; text: string }[]
   use_count: number
   last_used_at: string | null
   created_at: string
@@ -802,6 +807,8 @@ export type AiMemoryQuelle = 'eingetragen' | 'gespraech' | 'import' | 'pflege'
 
 export type AiMemoryArt =
   | 'fakt' | 'vorliebe' | 'anweisung' | 'ereignis' | 'plan' | 'beziehung' | 'wissen'
+  /** Von der nächtlichen Pflege aus mindestens zwei anderen geschlossen. */
+  | 'schluss'
 
 /** Was eine Liste zeigt: was gilt, oder was die KI vergessen hat. */
 export type AiMemoryAnsicht = 'aktiv' | 'vergessen'

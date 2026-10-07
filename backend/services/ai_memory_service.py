@@ -22,6 +22,7 @@ from sqlalchemy.orm import Query, Session
 from config import settings
 from models import (
     AiMemoryBegriff,
+    AiMemoryBeleg,
     AiMemoryEntry,
     AiMemoryPreference,
     AiMemoryTopic,
@@ -154,6 +155,12 @@ _STAPEL_ZEICHEN = 4 * 1024 * 1024
 #: Was für eine Aussage eine Erinnerung ist. Dieselbe Liste hält die Datenbank
 #: (`ck_ai_memory_entries_art`).
 ARTEN = ("fakt", "vorliebe", "anweisung", "ereignis", "plan", "beziehung", "wissen")
+#: Ein Schluss der nächtlichen Pflege (`ai_gedaechtnis_pflege`): er folgt aus
+#: mindestens zwei Erinnerungen desselben Bereichs und gilt nur, solange sie
+#: gelten (`AiMemoryBeleg`, `_schluesse_entkraeften`). Kein anderer Schreibweg
+#: legt ihn an; darum steht er nicht in `ARTEN`, die Schreiber und Import dem
+#: Modell zur Wahl geben.
+SCHLUSS = "schluss"
 #: Woher eine Erinnerung kommt (`ck_ai_memory_entries_quelle`).
 QUELLEN = ("eingetragen", "gespraech", "import", "pflege")
 #: Warum es eine frühere Fassung gibt (`ck_ai_memory_versionen_grund`).
@@ -1276,7 +1283,7 @@ def _themenname(name: str | None) -> str | None:
 
 
 def _art_pruefen(art: str | None) -> str | None:
-    if art is not None and art not in ARTEN:
+    if art is not None and art not in (*ARTEN, SCHLUSS):
         raise HTTPException(status_code=422, detail="Unbekannte Art der Erinnerung")
     return art
 
@@ -1609,6 +1616,16 @@ def erinnerung_aendern(
                 detail="Diese Erinnerung stammt vom Benutzer und wird nicht still überschrieben.",
             )
         _fassung_ablegen(db, row, alter_text, alter_titel, grund=grund, von=von)
+        if neuer_text != alter_text:
+            # Was aus dem alten Text geschlossen war, gilt nicht mehr.
+            _schluesse_entkraeften(db, [row.id], user_id=user.id)
+            if row.art == SCHLUSS:
+                # Wer einen Schluss umschreibt, macht ihn zu einer eigenen
+                # Aussage: sie hängt danach nicht mehr an ihren Belegen.
+                db.query(AiMemoryBeleg).filter(AiMemoryBeleg.schluss_id == row.id).delete(
+                    synchronize_session=False
+                )
+                row.art = None
         row.aad_version = 2
         row.value_encrypted = DisClient.encrypt(neuer_text, aad=_aad(row))
         row.titel = neuer_titel
@@ -1719,11 +1736,116 @@ def erinnerung_vergessen(
             db, user_id=user.id, action="ai.memory.forgotten", target_type="ai_memory",
             target_id=row.id, details=_protokolldetails(row), origin="ai",
         )
+        _schluesse_entkraeften(db, [row.id], user_id=user.id)
         db.flush()
         _vergessene_begrenzen(db, row.scope_identity)
     if commit:
         db.commit()
     return row
+
+
+def _schluesse_entkraeften(db: Session, beleg_ids: list[str], *, user_id: int) -> int:
+    """Vergisst die geltenden Schlüsse, die sich auf einen dieser Belege stützen.
+
+    Ein Schluss folgt aus seinen Belegen und aus nichts sonst
+    (`ai_gedaechtnis_pflege`). Ändert sich der Text eines Belegs, wird er
+    vergessen oder gelöscht, ist der Schluss nicht mehr gedeckt — auch wenn
+    er zufällig weiter stimmen mag. Vergessen statt gelöscht: 30 Tage
+    zurückholbar wie alles, was die KI vergisst, und die nächste Pflege darf
+    ihn aus dem neuen Stand wieder ziehen. Committet nicht.
+    """
+    if not beleg_ids:
+        return 0
+    zeilen = (
+        db.query(AiMemoryEntry)
+        .join(AiMemoryBeleg, AiMemoryBeleg.schluss_id == AiMemoryEntry.id)
+        .filter(AiMemoryBeleg.beleg_id.in_(beleg_ids), AiMemoryEntry.status == "aktiv")
+        .all()
+    )
+    if not zeilen:
+        return 0
+    jetzt = datetime.now(timezone.utc)
+    for row in zeilen:
+        row.status = "vergessen"
+        row.vergessen_am = jetzt
+        row.updated_at = jetzt
+        audit_service.record_privileged_action(
+            db, user_id=user_id, action="ai.memory.forgotten", target_type="ai_memory",
+            target_id=row.id, details=_protokolldetails(row, grund="beleg_entfallen"),
+            origin="ai",
+        )
+    db.flush()
+    for identity in {row.scope_identity for row in zeilen}:
+        _vergessene_begrenzen(db, identity)
+    return len(zeilen)
+
+
+def schluss_anlegen(
+    db: Session,
+    *,
+    user: User,
+    belege: list[str],
+    text: str,
+    titel: str | None = None,
+    thema: str | None = None,
+    wichtigkeit: int = 2,
+) -> tuple[AiMemoryEntry, str]:
+    """Legt einen Schluss der Pflege an, gebunden an seine Belege. Committet nicht.
+
+    Die Belege müssen gelten, dürfen selbst keine Schlüsse sein und müssen alle
+    im selben Bereich liegen — dort landet auch der Schluss. Rechte und
+    Kontingent wie bei jeder Erinnerung (`erinnerung_anlegen`).
+    """
+    eindeutig = list(dict.fromkeys(belege))
+    if len(eindeutig) < 2:
+        raise HTTPException(status_code=422, detail="Ein Schluss braucht mindestens zwei Belege.")
+    zeilen = db.query(AiMemoryEntry).filter(AiMemoryEntry.id.in_(eindeutig)).all()
+    if (
+        len(zeilen) != len(eindeutig)
+        or any(row.status != "aktiv" or row.art == SCHLUSS for row in zeilen)
+        or len({row.scope_identity for row in zeilen}) != 1
+    ):
+        raise HTTPException(status_code=409, detail="Die Belege des Schlusses gelten nicht mehr.")
+    erste = zeilen[0]
+    row, sauber = erinnerung_anlegen(
+        db, user=user, scope=erste.scope, server_id=erste.server_id, team_id=erste.team_id,
+        text=text, titel=titel, thema=thema, art=SCHLUSS, wichtigkeit=wichtigkeit,
+        quelle="pflege", origin="ai", commit=False,
+    )
+    if row.scope_identity != erste.scope_identity:
+        raise HTTPException(status_code=409, detail="Ein Schluss bleibt im Bereich seiner Belege.")
+    for beleg_id in eindeutig:
+        db.add(AiMemoryBeleg(schluss_id=row.id, beleg_id=beleg_id))
+    db.flush()
+    return row, sauber
+
+
+def belege_je_schluss(
+    db: Session, rows: Iterable[AiMemoryEntry]
+) -> dict[str, list[tuple[str, str]]]:
+    """Je Schluss seine Belege als (Kennung, Text), für die Ansicht.
+
+    Ein Sidecar-Aufruf für alle Belege einer Seite. Ein Beleg, der sich nicht
+    öffnen lässt, fehlt; vergessene stehen mit da — im Reiter „Vergessen“
+    zeigt ein Schluss so, woran er hing.
+    """
+    schluesse = [row.id for row in rows if row.art == SCHLUSS]
+    if not schluesse:
+        return {}
+    paare = db.query(AiMemoryBeleg.schluss_id, AiMemoryBeleg.beleg_id).filter(
+        AiMemoryBeleg.schluss_id.in_(schluesse)
+    ).all()
+    if not paare:
+        return {}
+    zeilen = db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.id.in_({beleg for _schluss, beleg in paare})
+    ).all()
+    texte = {row.id: text for row, text in _entschluesseln_lesbare(zeilen)}
+    ergebnis: dict[str, list[tuple[str, str]]] = {}
+    for schluss, beleg in sorted(paare):
+        if beleg in texte:
+            ergebnis.setdefault(schluss, []).append((beleg, texte[beleg]))
+    return ergebnis
 
 
 def erinnerung_zurueckholen(
@@ -2275,6 +2397,7 @@ def delete_entry(db: Session, user: User, entry_id: str) -> None:
         details=_protokolldetails(row),
         origin="direct",
     )
+    _schluesse_entkraeften(db, [row.id], user_id=user.id)
     db.delete(row)
     db.commit()
 
@@ -2887,6 +3010,10 @@ def _memory_line(row: AiMemoryEntry, value: str) -> str:
     # ist es bewusst nicht: er soll frei formulierbar bleiben.
     flattened = " ".join(str(value).splitlines())
     origin = "gesagt" if row.origin == "user" else "gemerkt"
+    if row.art == SCHLUSS:
+        # Weder gesagt noch gemerkt: aus anderen Zeilen gefolgert. Singra soll
+        # es nicht als Aussage des Menschen wiedergeben.
+        origin = "geschlossen"
     # Bei serverbezogenen Eintraegen muss die ID mit dran: sonst weiss das
     # Modell nicht, auf welchen der Server sich die Notiz bezieht, und wendet
     # eine Eigenheit von Server 62 versehentlich auf Server 84 an. Bei Teams

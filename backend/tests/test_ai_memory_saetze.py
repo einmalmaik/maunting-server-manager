@@ -330,7 +330,7 @@ def test_jeder_erlaubte_wert_passt_in_seine_spalte(db: Session, regular_user: Us
     _erlauben(db, regular_user)
     row = _anlegen(db, regular_user, "Backups laufen um drei Uhr.")
     for spalte, werte in (
-        ("art", ai_memory_service.ARTEN),
+        ("art", (*ai_memory_service.ARTEN, ai_memory_service.SCHLUSS)),
         ("quelle", ai_memory_service.QUELLEN),
         ("status", ai_memory_service.ANSICHTEN),
     ):

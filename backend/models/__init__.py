@@ -11,7 +11,7 @@ from .ai_action_proposal import AiActionProposal
 from .ai_autonomy_grant import AiAutonomyGrant
 from .ai_tool_result import AiToolResult
 from .ai_memory import (
-    AiMemoryBegriff, AiMemoryEntry, AiMemoryPflege, AiMemoryPreference, AiMemoryTopic, AiMemoryVersion,
+    AiMemoryBegriff, AiMemoryBeleg, AiMemoryEntry, AiMemoryPflege, AiMemoryPreference, AiMemoryTopic, AiMemoryVersion,
 )
 from .ai_skill import AiSkill
 from .ai_attachment import AiAttachment
@@ -101,7 +101,7 @@ from .chat_media import ChatMedia
 __all__ = [
     "User", "UserRole", "RoleAiLimit", "RoleVaultQuota", "AiUsageEvent", "OperationTask",
     "AiProvider", "AiConversation", "AiMessage", "AiActionProposal",
-    "AiMemoryBegriff", "AiMemoryEntry", "AiMemoryPflege", "AiMemoryPreference", "AiMemoryTopic", "AiMemoryVersion",
+    "AiMemoryBegriff", "AiMemoryBeleg", "AiMemoryEntry", "AiMemoryPflege", "AiMemoryPreference", "AiMemoryTopic", "AiMemoryVersion",
     "AiSkill", "AiAttachment",
     "AiAutonomyGrant", "AiToolResult", "AiRun", "AiGuardianNotice",
     "AiGuardianRepair", "AiTask", "AiActionApproval",

@@ -809,3 +809,63 @@ def test_ki_limits_umbau_hin_und_zurueck(pg_wegwerf):
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+def test_gedaechtnisschluesse_hin_und_zurueck(pg_wegwerf):
+    """Die Art fasst ``schluss`` erst nach dem Update; zurück gehen die Schlüsse mit.
+
+    Ohne ihre Belege sähen sie im alten Stand aus wie Gesagtes.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, inspect, text
+    from sqlalchemy.exc import IntegrityError
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+
+    db_url = pg_wegwerf("gedaechtnis-schluesse")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    zeile = (
+        "INSERT INTO ai_memory_entries (id, scope, scope_identity, value_encrypted, origin, "
+        "aad_version, use_count, wichtigkeit, art, created_at, updated_at) "
+        "VALUES (:i, 'panel', 'panel', 'x', 'ai', 2, 0, 3, :a, now(), now())"
+    )
+
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+        command.downgrade(config, "20261008_03")
+        assert not inspect(engine).has_table("ai_memory_belege")
+        with pytest.raises(IntegrityError):
+            with engine.begin() as conn:
+                conn.execute(text(zeile), {"i": "s0", "a": "schluss"})
+
+        command.upgrade(config, "20261008_04")
+
+        assert inspect(engine).has_table("ai_memory_belege")
+        with engine.begin() as conn:
+            for kennung, art in (("b1", "fakt"), ("b2", None), ("s1", "schluss")):
+                conn.execute(text(zeile), {"i": kennung, "a": art})
+            for beleg in ("b1", "b2"):
+                conn.execute(text(
+                    "INSERT INTO ai_memory_belege (schluss_id, beleg_id) VALUES ('s1', :b)"
+                ), {"b": beleg})
+            # Ein gelöschter Beleg nimmt seine Zeile mit, der Schluss bleibt.
+            conn.execute(text("DELETE FROM ai_memory_entries WHERE id = 'b2'"))
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT beleg_id FROM ai_memory_belege")).scalars().all() == ["b1"]
+
+        command.downgrade(config, "20261008_03")
+        assert not inspect(engine).has_table("ai_memory_belege")
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT id FROM ai_memory_entries ORDER BY id")).scalars().all() == ["b1"]
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+        settings.database_url = vorher

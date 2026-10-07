@@ -96,7 +96,8 @@ class AiMemoryEntry(Base):
         CheckConstraint("origin IN ('user', 'ai')", name="ck_ai_memory_entries_origin"),
         CheckConstraint(
             "art IS NULL OR art IN ("
-            "'fakt', 'vorliebe', 'anweisung', 'ereignis', 'plan', 'beziehung', 'wissen')",
+            "'fakt', 'vorliebe', 'anweisung', 'ereignis', 'plan', 'beziehung', 'wissen', "
+            "'schluss')",
             name="ck_ai_memory_entries_art",
         ),
         CheckConstraint(
@@ -420,6 +421,27 @@ class AiMemoryBegriff(Base):
 
     begriff: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     memory_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("ai_memory_entries.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class AiMemoryBeleg(Base):
+    """Worauf ein Schluss der Pflege sich stützt: je Beleg eine Zeile.
+
+    Ein Schluss (`art = 'schluss'`) folgt aus mindestens zwei Erinnerungen
+    desselben Bereichs (`ai_gedaechtnis_pflege`). Er gilt nur, solange sie
+    gelten: ändert sich der Text eines Belegs oder wird er vergessen oder
+    gelöscht, vergisst das Gedächtnis den Schluss mit
+    (`ai_memory_service._schluesse_entkraeften`). Nur Kennungen, kein Inhalt.
+    """
+
+    __tablename__ = "ai_memory_belege"
+    __table_args__ = (Index("ix_ai_memory_belege_beleg", "beleg_id"),)
+
+    schluss_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("ai_memory_entries.id", ondelete="CASCADE"), primary_key=True
+    )
+    beleg_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("ai_memory_entries.id", ondelete="CASCADE"), primary_key=True
     )
 

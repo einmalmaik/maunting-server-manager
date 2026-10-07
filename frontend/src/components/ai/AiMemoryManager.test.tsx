@@ -214,6 +214,33 @@ describe('AiMemoryManager', () => {
     expect(screen.queryByText(/^Schlüssel:/)).toBeNull()
   })
 
+  it('zeigt einen Schluss als Schluss und nennt, woraus er folgt', async () => {
+    const schluss: AiMemoryEntry = {
+      ...satz,
+      id: '00000000-0000-0000-0000-000000000120',
+      value: 'Backup und Neustart von Nordwind fallen beide auf 3 Uhr.',
+      titel: 'Zeitkonflikt',
+      art: 'schluss',
+      origin: 'ai',
+      quelle: 'pflege',
+      belege: [
+        { id: 'b1', text: 'Die Backups von Nordwind laufen täglich um 3 Uhr.' },
+        { id: 'b2', text: 'Nordwind startet täglich um 3 Uhr neu.' },
+      ],
+    }
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([schluss]))
+    render(<AiMemoryManager />)
+
+    expect(await screen.findByText('Schluss von Singra')).toBeInTheDocument()
+    expect(screen.queryByText('von der KI gemerkt')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Zeitkonflikt/, expanded: false }))
+    expect(screen.getByText('Folgt aus')).toBeInTheDocument()
+    expect(screen.getByText('Die Backups von Nordwind laufen täglich um 3 Uhr.')).toBeInTheDocument()
+    expect(screen.getByText('Nordwind startet täglich um 3 Uhr neu.')).toBeInTheDocument()
+    expect(screen.getByText(/vergisst sie den Schluss/)).toBeInTheDocument()
+    expect(screen.getByText('Aus Singras nächtlicher Pflege')).toBeInTheDocument()
+  })
+
   it('marks what the AI remembered on its own and how often it was used', async () => {
     // Ohne diese Kennzeichnung waere nicht erkennbar, ob ein Eintrag eine
     // eigene Ansage ist oder eine Ableitung der KI — und genau daran haengt,

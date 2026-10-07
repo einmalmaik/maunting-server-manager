@@ -29,7 +29,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, AiMemoryVersion, AiProvider, AiUsageEvent, Role, RolePermission, User
-from services import ai_gedaechtnis_schreiber, ai_memory_import_service, ai_memory_service, ai_reasoning
+from services import ai_embedding_service, ai_gedaechtnis_schreiber, ai_memory_import_service, ai_memory_service, ai_reasoning
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
 from services.ai_memory_import_service import WERKZEUG_NAME, teile
 from services.openai_compatible_adapter import AiProviderRequestError, ProviderToolCall, StreamChunk
@@ -240,7 +240,7 @@ def test_fast_gleiches_gilt_als_schon_gespeichert(
     def rechner(texte: list[str]) -> list[list[float]]:
         vektoren = []
         for text in texte:
-            vektor = [0.0] * 256
+            vektor = [0.0] * ai_embedding_service.EMBEDDING_DIMENSIONS
             vektor[0 if "Köln" in text else 1 + len(text) % 200] = 1.0
             vektoren.append(vektor)
         return vektoren
