@@ -1120,6 +1120,22 @@ async def _ai_tasks_task() -> None:
             db.rollback()
             logger.warning("Error in AI memory rewrite: %s", exc)
         try:
+            from services import ai_gedaechtnis_pflege
+
+            # Einmal am Tag: was „im Kopf“ steht, nach Wichtigkeit × Präsenz.
+            # Eine Abfrage über alle Erinnerungen, darum im Thread.
+            gerechnet = await asyncio.to_thread(ai_gedaechtnis_pflege.rang_takt)
+            if gerechnet is not None:
+                logger.info("KI-Gedaechtnis: Kopfrang fuer %s Erinnerung(en) gerechnet", gerechnet)
+            # Nachts je Bereich: Doppel zusammenführen, Abgelaufenes in die
+            # Vergangenheit setzen. Nebenher wie der Schreiber.
+            gepflegt = ai_gedaechtnis_pflege.faellige_starten(db)
+            if gepflegt:
+                logger.info("KI-Gedaechtnis: Pflege in %s Bereich(en) begonnen", len(gepflegt))
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Error in AI memory care: %s", exc)
+        try:
             from services import ai_gedaechtnis_abruf
 
             # Vektor und Wortindex für Erinnerungen, die noch keine haben

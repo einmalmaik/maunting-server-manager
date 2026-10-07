@@ -7,6 +7,7 @@ from functools import lru_cache
 import hashlib
 import hmac
 import logging
+import math
 import os
 import re
 from uuid import UUID, uuid4
@@ -91,6 +92,18 @@ RECENCY_HALFLIFE_DAYS = 7.0
 #: nichts mehr zu kürzen; die Präsenz über die Zeit regelt die Pflege
 #: (Stufe 5).
 TREFFER_AB = 0.35
+
+#: Die Stärke einer Erinnerung wie beim Menschen: ihre Präsenz fällt ohne
+#: Gebrauch mit e^(−Tage / Haltbarkeit). Die Haltbarkeit beginnt bei der
+#: Wichtigkeit — eine Nebensache ist nach einer Woche ohne Gebrauch auf gut ein
+#: Drittel gefallen, eine Allergie erst nach einem Jahr — und wächst mit jedem
+#: Gebrauch (`haltbarkeit_nach_gebrauch`). Daraus folgt nur, was „im Kopf“
+#: steht (`kopf_rang`); gelöscht oder gekürzt wird nichts. Was den Kopf
+#: verlässt, kommt zurück, sobald eine Frage es trifft.
+HALTBARKEIT_START = {1: 7.0, 2: 14.0, 3: 30.0, 4: 90.0, 5: 365.0}
+#: Länger hält nichts: auch was oft gebraucht wurde, darf nach zehn Jahren
+#: ohne Gebrauch den Kopf verlassen.
+MAX_HALTBARKEIT_TAGE = 3_650.0
 _WORD_RE = re.compile(r"[\w]+", re.UNICODE)
 #: Wörter, die in fast jedem Satz stehen und deshalb nichts treffen.
 #:
@@ -1154,6 +1167,7 @@ def upsert_entry(
             scope=scope, scope_identity=identity, value_encrypted="",
             origin=origin, aad_version=2,
             quelle=quelle or ("gespraech" if origin == "ai" else "eingetragen"),
+            kopf_rang=3.0,  # Standardwichtigkeit bei Präsenz 1
         )
         # Erst jetzt: die AAD des Namens braucht ID und Bereich der Zeile.
         row.key = key
@@ -1507,7 +1521,7 @@ def erinnerung_anlegen(
         aad_version=2, quelle=quelle, quelle_ref=quelle_ref, art=art,
         wichtigkeit=wichtigkeit, faellig_am=faellig_am, status="aktiv", fassung=1,
         thema_id=gefunden.id if gefunden is not None else None,
-        created_at=jetzt, updated_at=jetzt,
+        created_at=jetzt, updated_at=jetzt, kopf_rang=float(wichtigkeit),
     )
     row.value_encrypted = DisClient.encrypt(sauber, aad=_aad(row))
     row.titel = sauberer_titel
@@ -1553,6 +1567,7 @@ def erinnerung_aendern(
     von: str = "user",
     grund: str = "bearbeitet",
     ueberschreibt_mensch: bool = False,
+    faellig_am: object = UNVERAENDERT,
     commit: bool = True,
 ) -> tuple[AiMemoryEntry, str]:
     """Aendert eine Erinnerung und legt den Stand davor als Fassung ab.
@@ -1615,7 +1630,11 @@ def erinnerung_aendern(
         geaendert = True
     if wichtigkeit is not None and wichtigkeit != row.wichtigkeit:
         row.wichtigkeit = _wichtigkeit_pruefen(wichtigkeit)
+        row.kopf_rang = kopf_rang(row, datetime.now(timezone.utc))
         geaendert = True
+    if faellig_am is not UNVERAENDERT and faellig_am != row.faellig_am:
+        # Ein Datum allein ist keine neue Fassung: der Satz bleibt derselbe.
+        row.faellig_am = faellig_am
     if geaendert:
         row.fassung = int(row.fassung or 1) + 1
         row.updated_at = datetime.now(timezone.utc)
@@ -1932,6 +1951,7 @@ def altbestand_umschreiben(
         row.art = _art_pruefen(art)
     if wichtigkeit is not None:
         row.wichtigkeit = _wichtigkeit_pruefen(wichtigkeit)
+        row.kopf_rang = kopf_rang(row, datetime.now(timezone.utc))
     row.key_encrypted = None
     row.key_index = None
     row.__dict__.pop("_key_klartext", None)
@@ -2351,6 +2371,45 @@ def _reiz(similarity: float | None, overlap: int) -> float:
         # zwei auf volle Präsenz.
         reiz = max(reiz, min(1.0, 0.5 + 0.25 * overlap))
     return reiz
+
+
+def haltbarkeit(row: AiMemoryEntry) -> float:
+    """Die Haltbarkeit in Tagen; ohne Gebrauch der Startwert der Wichtigkeit."""
+    if row.haltbarkeit_tage:
+        return float(row.haltbarkeit_tage)
+    return HALTBARKEIT_START.get(int(row.wichtigkeit or 3), HALTBARKEIT_START[3])
+
+
+def _tage_seit_gebrauch(row: AiMemoryEntry, jetzt: datetime) -> float:
+    zuletzt = row.last_used_at or row.created_at or jetzt
+    return max(0.0, (jetzt - _utc(zuletzt)).total_seconds() / 86_400)
+
+
+def praesenz(row: AiMemoryEntry, jetzt: datetime) -> float:
+    """Wie präsent eine Erinnerung ist — 1,0 frisch gebraucht, gegen 0 vergessen."""
+    return math.exp(-_tage_seit_gebrauch(row, jetzt) / haltbarkeit(row))
+
+
+def kopf_rang(row: AiMemoryEntry, jetzt: datetime) -> float:
+    """Wichtigkeit × Präsenz: danach ordnet sich, was „im Kopf“ steht.
+
+    Dieselbe Rechnung macht die Pflege für alle Zeilen auf einmal in SQL
+    (`ai_gedaechtnis_pflege.rang_auffrischen`).
+    """
+    return int(row.wichtigkeit or 3) * praesenz(row, jetzt)
+
+
+def haltbarkeit_nach_gebrauch(row: AiMemoryEntry, jetzt: datetime) -> float:
+    """Die Haltbarkeit nach einem Gebrauch jetzt — mit Abstandseffekt.
+
+    Wer etwas kurz hintereinander zweimal braucht, festigt es wenig (×1,2);
+    wer es nach einer langen Pause wieder braucht, viel (bis ×2,2). Gemessen
+    wird die Pause an der bisherigen Haltbarkeit: eine Woche ist für eine
+    Nebensache lang, für eine Allergie kurz.
+    """
+    bisher = haltbarkeit(row)
+    pause = min(1.0, _tage_seit_gebrauch(row, jetzt) / bisher)
+    return min(MAX_HALTBARKEIT_TAGE, bisher * (1.2 + pause))
 
 
 def _relevance(

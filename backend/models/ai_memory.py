@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -113,11 +114,11 @@ class AiMemoryEntry(Base):
         Index("ix_ai_memory_team", "team_id"),
         Index("ix_ai_memory_identity_status", "scope_identity", "status"),
         # Was „im Kopf“ steht, wählt die Datenbank (`ai_gedaechtnis_abruf`):
-        # angeheftet, dann wichtig, dann neu. Mit diesem Index liest sie dafür
-        # bei 100.000 Einträgen eines Bereichs nur die ersten Zeilen.
+        # angeheftet, dann nach `kopf_rang`, dann neu. Mit diesem Index liest
+        # sie dafür bei 100.000 Einträgen eines Bereichs nur die ersten Zeilen.
         Index(
             "ix_ai_memory_kopf",
-            "scope_identity", "status", "angeheftet", "wichtigkeit", "created_at", "id",
+            "scope_identity", "status", "angeheftet", "kopf_rang", "created_at", "id",
         ),
     )
 
@@ -261,6 +262,19 @@ class AiMemoryEntry(Base):
     # an dieser Spalte und an `updated_at`, ob sich in einem Bereich etwas
     # geändert hat.
     indiziert_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Nach wie vielen Tagen ohne Gebrauch die Präsenz auf 1/e gefallen ist.
+    # NULL heißt: noch nie gebraucht, es gilt der Startwert der Wichtigkeit
+    # (`ai_memory_service.HALTBARKEIT_START`). Jeder Gebrauch verlängert sie,
+    # umso mehr, je länger die Pause davor war.
+    haltbarkeit_tage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Wichtigkeit × Präsenz, wie die Pflege sie zuletzt gerechnet hat: danach
+    # ordnet sich, was „im Kopf“ steht. Gerechnet wird einmal am Tag
+    # (`ai_gedaechtnis_pflege.rang_auffrischen`), nicht je Anfrage — sonst
+    # änderte sich der Kopf mit jeder Frage, und der Zwischenspeicher beim
+    # Anbieter bräche. Neue Einträge beginnen bei ihrer Wichtigkeit.
+    kopf_rang: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
@@ -408,6 +422,22 @@ class AiMemoryBegriff(Base):
     memory_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("ai_memory_entries.id", ondelete="CASCADE"), primary_key=True
     )
+
+
+class AiMemoryPflege(Base):
+    """Wie weit die nächtliche Pflege einen Bereich gelesen hat.
+
+    ``gepflegt_bis``: Einträge, die danach geändert wurden, sieht die nächste
+    Pflege an (`ai_gedaechtnis_pflege`). ``gelaufen_am``: wann sie zuletzt
+    lief — nach anderthalb Tagen läuft sie auch tagsüber, falls das Panel
+    nachts aus ist.
+    """
+
+    __tablename__ = "ai_memory_pflege"
+
+    scope_identity: Mapped[str] = mapped_column(String(128), primary_key=True)
+    gepflegt_bis: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    gelaufen_am: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class AiMemoryVersion(Base):

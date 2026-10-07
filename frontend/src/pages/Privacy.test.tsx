@@ -149,11 +149,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.25 vom 2026-10-07 aus (die Suche legt Prüfwerte je Wort ab)', () => {
+  it('weist die Fassung 3.26 vom 2026-10-07 aus (die Pflege liest nachts noch einmal)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.25`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.26`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -225,6 +225,9 @@ describe('Privacy page', () => {
     // 3.25: für die Suche ein Prüfwert je Wort, nur mit dem Panelschlüssel lesbar.
     expect(i18n.t('privacyPolicy.sections.ai.items.memorySearch')).toMatch(/für jedes Wort einen Prüfwert/);
     expect(i18n.t('privacyPolicy.sections.ai.items.memorySearch')).toMatch(/mit der Erinnerung gelöscht/);
+    // 3.26: nachts liest die Pflege neue Einträge mit ihren Nachbarn noch einmal.
+    expect(i18n.t('privacyPolicy.sections.ai.items.memoryReading')).toMatch(/Nachts führt derselbe Schritt Einträge zusammen/);
+    expect(i18n.t('privacyPolicy.sections.ai.items.memoryReading')).toMatch(/ohne einen Ausgang zu behaupten/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

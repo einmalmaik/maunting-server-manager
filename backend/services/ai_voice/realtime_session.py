@@ -260,7 +260,7 @@ def gedaechtnis(db: Session, user: User) -> str:
     """Was im Gedächtnis „im Kopf“ steht — leer ohne ``ai.memory.use``.
 
     Eine Sitzung beginnt ohne Frage, also gibt es nur den Kopf: angeheftet,
-    wichtig, neu (`ai_gedaechtnis_abruf`). Einzelnes holt die Stimme mit
+    dann nach Wichtigkeit × Präsenz (`ai_gedaechtnis_abruf`). Einzelnes holt die Stimme mit
     `search_memory`. Bis Stufe 4 stand hier eine feste Ersatzfrage, nach der
     eine zufällige Auswahl mitkam.
     """

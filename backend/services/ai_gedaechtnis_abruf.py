@@ -9,10 +9,12 @@ jeder Frage — der Zwischenspeicher des Anbieters traf danach nie.
 
 Jetzt sind es zwei Teile:
 
-* **Im Kopf** — angeheftet, dann wichtig, dann neu; gewählt von der Datenbank
-  (`ix_ai_memory_kopf`), geöffnet werden nur diese Zeilen. Der Teil hängt
-  nicht an der Frage und bleibt bytegleich, bis jemand schreibt: er steht vor
-  dem Verlauf und wird zwischengespeichert. Passt der ganze Bestand hinein,
+* **Im Kopf** — angeheftet, dann nach Wichtigkeit × Präsenz (`kopf_rang`,
+  einmal am Tag von der Pflege gerechnet), dann neu; gewählt von der
+  Datenbank (`ix_ai_memory_kopf`), geöffnet werden nur diese Zeilen. Der Teil
+  hängt nicht an der Frage und bleibt bytegleich, bis jemand schreibt oder
+  die Pflege neu rechnet: er steht vor dem Verlauf und wird
+  zwischengespeichert. Passt der ganze Bestand hinein,
   steht er ganz hier, wie bisher.
 * **Passend zur Frage** — nur wenn nicht alles im Kopf steht. Gesucht wird
   zweigleisig ohne Klartext: nach Bedeutung im Vektorspeicher dieses
@@ -510,11 +512,17 @@ def _treffer(
 
 
 def _gebraucht(db: Session, rows: list[AiMemoryEntry]) -> None:
-    """Gebraucht ist, wen die Frage getroffen hat — Anzeigen ist kein Gebrauch."""
+    """Gebraucht ist, wen die Frage getroffen hat — Anzeigen ist kein Gebrauch.
+
+    Jeder Gebrauch verlängert die Haltbarkeit
+    (`ai_memory_service.haltbarkeit_nach_gebrauch`). Den Kopf ändert das erst
+    mit der nächsten Rechnung der Pflege, nicht mitten im Gespräch.
+    """
     if not rows:
         return
     jetzt = _jetzt()
     for row in rows:
+        row.haltbarkeit_tage = ai_memory_service.haltbarkeit_nach_gebrauch(row, jetzt)
         row.use_count = int(row.use_count or 0) + 1
         row.last_used_at = jetzt
     db.flush()
@@ -556,7 +564,7 @@ def _kopf(
         .filter(AiMemoryEntry.scope_identity.in_(kennungen), AiMemoryEntry.status == "aktiv")
         .order_by(
             AiMemoryEntry.angeheftet.desc(),
-            AiMemoryEntry.wichtigkeit.desc(),
+            AiMemoryEntry.kopf_rang.desc(),
             AiMemoryEntry.created_at.desc(),
             AiMemoryEntry.id.desc(),
         )
@@ -667,7 +675,7 @@ def anlagenwissen(db: Session, user: User, server_id: int, query: str = "") -> s
         .filter(AiMemoryEntry.scope_identity == kennung, AiMemoryEntry.status == "aktiv")
         .order_by(
             AiMemoryEntry.angeheftet.desc(),
-            AiMemoryEntry.wichtigkeit.desc(),
+            AiMemoryEntry.kopf_rang.desc(),
             AiMemoryEntry.created_at.desc(),
             AiMemoryEntry.id.desc(),
         )

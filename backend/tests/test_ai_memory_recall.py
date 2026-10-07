@@ -20,6 +20,7 @@ from models import AiMemoryEntry, Role, RolePermission, User
 from services import (
     ai_embedding_service,
     ai_gedaechtnis_abruf,
+    ai_gedaechtnis_pflege,
     ai_memory_service,
     permission_service,
 )
@@ -155,11 +156,12 @@ def test_der_zeilendeckel_wandert_mit_dem_budget(
 def test_im_kopf_entscheidet_die_wichtigkeit_nicht_die_nutzung(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Was ohne passende Frage vorn steht, legt die Wichtigkeit fest.
+    """Was ohne passende Frage vorn steht, legt Wichtigkeit × Präsenz fest.
 
     Bis Stufe 4 entschied bei einer fremdsprachigen Frage die Nutzung: was
-    oft abgerufen wurde, blieb. Das Zählwerk hängt aber an Fragen von gestern;
-    der Kopf soll das tragen, was immer gilt (`ai_gedaechtnis_abruf._kopf`).
+    oft abgerufen wurde, blieb. Die Zahl der Abrufe hängt aber an Fragen von
+    gestern; der Kopf trägt, was wichtig ist und noch präsent
+    (`ai_gedaechtnis_pflege.rang_auffrischen`).
     """
     _allow_memory(db, regular_user)
     wichtig = _write(db, regular_user, "wichtig", "Etwas dauerhaft Wichtiges")
@@ -169,6 +171,8 @@ def test_im_kopf_entscheidet_die_wichtigkeit_nicht_die_nutzung(
     oft.use_count = 15
     oft.last_used_at = datetime.now(timezone.utc)
     ballast.wichtigkeit = 1
+    db.commit()
+    ai_gedaechtnis_pflege.rang_auffrischen(db)
     db.commit()
 
     # Die Hälfte von 120 fasst genau eine Zeile.
@@ -534,7 +538,8 @@ def test_recency_beats_an_old_never_used_entry(
 ) -> None:
     """Frisch Gemerktes braucht eine Chance, obwohl ihm die Historie fehlt.
 
-    Bei gleicher Wichtigkeit steht im Kopf das Neuere vorn.
+    Bei gleicher Wichtigkeit steht im Kopf das Präsentere vorn; ein Eintrag,
+    den 120 Tage niemand gebraucht hat, ist es nicht mehr.
     """
     _allow_memory(db, regular_user)
     old = _write(db, regular_user, "alt", "Lange her und nie gebraucht")
@@ -544,6 +549,8 @@ def test_recency_beats_an_old_never_used_entry(
     old.last_used_at = None
     fresh.last_used_at = None
     ballast.wichtigkeit = 1
+    db.commit()
+    ai_gedaechtnis_pflege.rang_auffrischen(db)
     db.commit()
 
     # Die Hälfte von 120 fasst genau eine Zeile.

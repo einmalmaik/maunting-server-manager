@@ -43,7 +43,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -195,6 +195,13 @@ WERKZEUG: dict[str, Any] = {
                                 "enum": list(ai_memory_service.ARTEN),
                             },
                             "wichtigkeit": {"type": "integer", "minimum": 1, "maximum": 5},
+                            "bis": {
+                                "type": "string",
+                                "description": (
+                                    "Nur bei Plänen und Terminen: der Tag, ab dem sie "
+                                    "vorbei sind, als JJJJ-MM-TT."
+                                ),
+                            },
                             "beleg": {
                                 "type": "array",
                                 "items": {"type": "string"},
@@ -217,7 +224,7 @@ Eine gute Erinnerung
 - gilt über dieses Gespräch hinaus: Vorlieben, Gewohnheiten, Lebensumstände, Menschen und Beziehungen, Pläne, Anweisungen an Singra, Eigenheiten seiner Server und was sich dort bewährt hat.
 - kann auch sagen, wie der Mensch redet – knapp oder ausführlich, direkt oder umsichtig, mit Fachbegriffen oder ohne –, wenn es mehr ist als die Laune eines Abends: „Der Benutzer schreibt knapp und ohne Höflichkeitsfloskeln.“ Das ist persönlich.
 - nennt Zeit absolut. „Im Juli“ in einer Nachricht vom Juni 2026 heißt „im Juli 2026“, „morgen“ wird ein Datum.
-- lässt einen Plan einen Plan sein. Aus „Ich fahre im Juli nach Singapur“ wird „Der Benutzer plant für Juli 2026 eine Reise nach Singapur.“ Ob er gefahren ist, steht erst fest, wenn er es erzählt.
+- lässt einen Plan einen Plan sein. Aus „Ich fahre im Juli nach Singapur“ wird „Der Benutzer plant für Juli 2026 eine Reise nach Singapur.“ Ob er gefahren ist, steht erst fest, wenn er es erzählt. Unter bis steht der Tag, ab dem der Plan vorbei ist (hier 2026-08-01); danach setzt ihn die Pflege in die Vergangenheit.
 
 Was nur für den Moment zählt, gehört nicht hinein: die Aufgabe, an der die beiden gerade sitzen, Zwischenstände, Höflichkeiten, was Singra eben nachgeschlagen hat. Was ein Server oder ein Werkzeug ausgegeben hat, ist eine Messung von damals. Ein Schluss, den Singra daraus zieht und der über den Moment hinaus gilt, kann Serverwissen sein. Zugangsdaten, Passwörter, Schlüssel und Token stehen nie im Gedächtnis.
 
@@ -1555,6 +1562,22 @@ def _art(roh: dict) -> Any:
     return wert if wert in ai_memory_service.ARTEN else ai_memory_service.UNVERAENDERT
 
 
+def _bis(roh: dict) -> Any:
+    """Der Tag, ab dem ein Plan vorbei ist — oder `UNVERAENDERT`, wenn keiner taugt.
+
+    Nur ein Tag zwischen 2000 und 2100: was das Modell sonst hineinschreibt,
+    ist kein Datum, und ein Plan ohne Tag bleibt einfach ein Plan.
+    """
+    wert = roh.get("bis")
+    if not isinstance(wert, str):
+        return ai_memory_service.UNVERAENDERT
+    try:
+        tag = date.fromisoformat(wert.strip()[:10])
+    except ValueError:
+        return ai_memory_service.UNVERAENDERT
+    return tag if 2000 <= tag.year <= 2100 else ai_memory_service.UNVERAENDERT
+
+
 def _wichtigkeit(roh: dict) -> int | None:
     wert = roh.get("wichtigkeit")
     try:
@@ -1658,6 +1681,7 @@ def _einzeln(db: Session, user: User, roh: dict, lage: _Lage) -> str:
             raise _Verworfen("doppelt")
         thema = _wahlweise(roh, "thema")
         art = _art(roh)
+        bis = _bis(roh)
         ai_memory_service.erinnerung_anlegen(
             db,
             user=user,
@@ -1672,6 +1696,7 @@ def _einzeln(db: Session, user: User, roh: dict, lage: _Lage) -> str:
             quelle="gespraech",
             quelle_ref=_quelle_ref(lage, belege),
             origin="ai",
+            faellig_am=None if bis is ai_memory_service.UNVERAENDERT else bis,
             commit=False,
         )
         return "neu"
@@ -1707,6 +1732,7 @@ def _einzeln(db: Session, user: User, roh: dict, lage: _Lage) -> str:
             von="ai",
             grund="aktualisiert",
             ueberschreibt_mensch=vom_menschen,
+            faellig_am=_bis(roh),
             commit=False,
         )
         lage.verbraucht.add(ziel.kennung)
@@ -1737,6 +1763,7 @@ def _einzeln(db: Session, user: User, roh: dict, lage: _Lage) -> str:
         von="ai",
         grund="zusammengefuehrt",
         ueberschreibt_mensch=vom_menschen,
+        faellig_am=_bis(roh),
         commit=False,
     )
     for kandidat in andere:
