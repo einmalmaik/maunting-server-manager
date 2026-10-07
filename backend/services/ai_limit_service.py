@@ -72,18 +72,12 @@ MAX_REASONING_EFFORT_MAX = 6
 # sichtbare Server reichen für 30.000. Dagegen hilft eine Zahl je Bereich
 # grundsätzlich nicht.
 #
-# Teuer sind davon aber nur die Zeilen, die auch entschlüsselt werden, und die
-# sind gedeckelt: `provider_memory_context` kürzt die geladene Menge in
-# `_vorauswahl` auf `MAX_CONTEXT_ROWS`, **bevor** `_entschluesseln` sie beim
-# DIS-Sidecar öffnet — seit dem 19.08.2026 zu acht gleichzeitig statt Zeile für
-# Zeile, was die Wartezeit teilt, aber nichts an der Zahl der Roundtrips
-# ändert: gedeckelt bleibt sie durch `MAX_CONTEXT_ROWS`. Bewerten kann `_vorauswahl`
-# ohne Klartext, weil Vektor, Nutzung, Aktualität und der Schlüssel
-# unverschlüsselt an der Zeile stehen. Eine Chatanfrage kostet damit so viele
-# Roundtrips und nicht „Bereiche × Deckel". Die Zahl steht bewusst nicht hier:
-# sie gehört zum Kontextaufbau und wird dort begründet. Nachzulesen statt zu
-# glauben ist das in `test_eine_anfrage_entschluesselt_nie_mehr_als_der_deckel_erlaubt`
-# (backend/tests/test_ai_memory_recall.py).
+# Seit Gedächtnis v2, Stufe 4 lädt eine Chatanfrage davon nichts mehr am
+# Stück (`ai_gedaechtnis_abruf`): „im Kopf“ wählt die Datenbank und öffnet
+# höchstens `MAX_CONTEXT_ROWS`, was zur Frage passt, kommt aus Vektorspeicher
+# und Wortindex über höchstens 2 × 60 Kandidaten. Nachzulesen in
+# `backend/tests/test_ai_gedaechtnis_abruf.py`. Die Messung unten beschreibt
+# den Abruf davor.
 #
 # Warum dann überhaupt eine Grenze, und warum diese? Drei Kosten wachsen mit
 # dem Bestand, und zwei davon zahlt nicht der, der ihn angehäuft hat. Gemessen
@@ -112,8 +106,8 @@ MAX_REASONING_EFFORT_MAX = 6
 # 5.000 ist danach die Zahl, bei der der Abruf im Zehntelsekundenbereich
 # bleibt und die Verwaltungsansicht in Sekunden statt Minuten. „Unbegrenzt"
 # garantiert keine dieser beiden — es ist trotzdem wählbar, weil die Rechnung
-# dem gehört, der den Schalter umlegt, und weil der Kontextaufbau über
-# `MAX_CONTEXT_ROWS` gedeckelt bleibt, egal wie groß der Vorrat ist.
+# dem gehört, der den Schalter umlegt, und weil der Abruf seit Stufe 4 nicht
+# mehr mit dem Vorrat wächst.
 MAX_MEMORY_ENTRIES_MAX = 5_000
 # Feste Systemgrenze fuer die Bereiche, die an keiner Benutzerrolle haengen:
 # `server_shared` gehoert der Anlage, `panel` dem Betreiber. Das Kontingent des
@@ -279,8 +273,8 @@ def resolve_scope_memory_limit(
     Bis zum 05.10.2026 kam hier immer eine Zahl heraus: ein leeres Feld wurde
     zu ``MAX_SYSTEM_SCOPE_ENTRIES``. Wer in der Maske „Unbegrenzt“ eingeschaltet
     hatte, konnte trotzdem nur 100 Eintraege speichern. Die Kosten eines grossen
-    Vorrats stehen bei ``MAX_MEMORY_ENTRIES_MAX``; der Kontextaufbau ist davon
-    unabhaengig ueber ``MAX_CONTEXT_ROWS`` gedeckelt.
+    Vorrats stehen bei ``MAX_MEMORY_ENTRIES_MAX``; der Abruf in den Kontext
+    waechst seit Stufe 4 nicht mehr mit ihm (``ai_gedaechtnis_abruf``).
 
     Wem der Vorrat gehoert, entscheidet der Bereich:
 

@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from models import AiMemoryEntry, Role, RolePermission, User
 from services import (
     ai_embedding_service,
+    ai_gedaechtnis_abruf,
     ai_memory_service,
     permission_service,
 )
@@ -151,29 +152,32 @@ def test_der_zeilendeckel_wandert_mit_dem_budget(
     assert zaehler.texte - beim_sockel == 12
 
 
-def test_frequently_used_entries_survive_a_foreign_language_question(
+def test_im_kopf_entscheidet_die_wichtigkeit_nicht_die_nutzung(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Nutzung ist der sprachunabhaengige Anteil der Auswahl.
+    """Was ohne passende Frage vorn steht, legt die Wichtigkeit fest.
 
-    Ein Wortabgleich greift nur innerhalb einer Sprache. Fragt jemand auf
-    Englisch, waere ein rein lexikalisches Ranking blind — dann entscheidet,
-    was sich in der Vergangenheit als wichtig erwiesen hat.
+    Bis Stufe 4 entschied bei einer fremdsprachigen Frage die Nutzung: was
+    oft abgerufen wurde, blieb. Das Zählwerk hängt aber an Fragen von gestern;
+    der Kopf soll das tragen, was immer gilt (`ai_gedaechtnis_abruf._kopf`).
     """
     _allow_memory(db, regular_user)
-    important = _write(db, regular_user, "wichtig", "Etwas dauerhaft Wichtiges")
-    _write(db, regular_user, "unwichtig", "Etwas nie Gebrauchtes")
-    important.use_count = 15
-    important.last_used_at = datetime.now(timezone.utc)
+    wichtig = _write(db, regular_user, "wichtig", "Etwas dauerhaft Wichtiges")
+    oft = _write(db, regular_user, "oft", "Etwas oft Gebrauchtes")
+    ballast = _write(db, regular_user, "ballast", "Ein langer Eintrag, damit nicht alles ins Budget passt")
+    wichtig.wichtigkeit = 5
+    oft.use_count = 15
+    oft.last_used_at = datetime.now(timezone.utc)
+    ballast.wichtigkeit = 1
     db.commit()
-    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_CHARS", 60)
 
+    # Die Hälfte von 120 fasst genau eine Zeile.
     block = ai_memory_service.provider_memory_context(
-        db, regular_user, query="please summarise my setup"
+        db, regular_user, query="please summarise my setup", budget=120
     )
 
     assert "dauerhaft Wichtiges" in block
-    assert "nie Gebrauchtes" not in block
+    assert "oft Gebrauchtes" not in block
 
 
 def test_nutzung_schlaegt_nie_den_bezug_zur_frage(
@@ -402,9 +406,11 @@ def test_the_prefilter_alone_holds_for_a_user_without_any_server(
         ai_memory_service.permission_service, "has_server_permission",
         lambda **_kwargs: True,
     )
-    rows = ai_memory_service._visible_scope_rows(db, regular_user)
+    kennungen = ai_gedaechtnis_abruf.sichtbare_bereiche(
+        db, regular_user, persoenlich=True, anlage=True
+    )
 
-    assert [row for row in rows if row.scope == "server"] == []
+    assert [kennung for kennung in kennungen if kennung.startswith("server:")] == []
 
 
 def test_a_server_seen_only_through_a_team_keeps_its_memory(
@@ -526,18 +532,23 @@ def test_memory_of_one_user_never_reaches_another(
 def test_recency_beats_an_old_never_used_entry(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Frisch Gemerktes braucht eine Chance, obwohl ihm die Historie fehlt."""
+    """Frisch Gemerktes braucht eine Chance, obwohl ihm die Historie fehlt.
+
+    Bei gleicher Wichtigkeit steht im Kopf das Neuere vorn.
+    """
     _allow_memory(db, regular_user)
     old = _write(db, regular_user, "alt", "Lange her und nie gebraucht")
     fresh = _write(db, regular_user, "neu", "Gerade eben gemerkt")
-    old.updated_at = datetime.now(timezone.utc) - timedelta(days=120)
+    ballast = _write(db, regular_user, "ballast", "Ein langer Eintrag, damit nicht alles ins Budget passt")
+    old.created_at = datetime.now(timezone.utc) - timedelta(days=120)
     old.last_used_at = None
     fresh.last_used_at = None
+    ballast.wichtigkeit = 1
     db.commit()
-    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_CHARS", 60)
 
+    # Die Hälfte von 120 fasst genau eine Zeile.
     block = ai_memory_service.provider_memory_context(
-        db, regular_user, query="unrelated question in english"
+        db, regular_user, query="unrelated question in english", budget=120
     )
 
     assert "Gerade eben gemerkt" in block
@@ -610,9 +621,9 @@ def test_unterhalb_des_deckels_bleibt_alles_wie_es_war(
 ) -> None:
     """Der Deckel ist kein stiller Umbau der Auswahl.
 
-    Solange weniger Zeilen anfallen als er erlaubt, reicht `_vorauswahl` sie
-    unveraendert durch — dieselben Eintraege, dieselbe Reihenfolge, dieselbe
-    Zahl an Entschluesselungen. Sonst haette diese Aenderung den Normalfall
+    Solange weniger Zeilen anfallen als er erlaubt, steht alles im Kopf
+    (`ai_gedaechtnis_abruf._kopf`) — dieselben Eintraege, dieselbe Zahl an
+    Entschluesselungen. Sonst haette diese Aenderung den Normalfall
     angefasst, um einen Randfall zu retten.
     """
     _allow_memory(db, regular_user)
@@ -631,20 +642,20 @@ def test_unterhalb_des_deckels_bleibt_alles_wie_es_war(
     assert "gekuerzt" not in block.lower() and "nicht alles" not in block.lower()
 
 
-def test_die_vorauswahl_nimmt_die_passenden_und_nicht_die_ersten(
+def test_was_nicht_in_den_kopf_passt_kommt_auf_die_frage_nach(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Gekuerzt wird nach Rang, nicht nach Reihenfolge.
+    """Der Kopf ist gekuerzt, die Antwort fehlt trotzdem nicht.
 
-    Die Vorauswahl laeuft vor der Entschluesselung und kennt den Wert deshalb
-    nicht — wohl aber den Schluessel, den gespeicherten Vektor und das Alter.
-    Genau davon muss sie Gebrauch machen: ein blosses "nimm die ersten N" waere
-    hier rot, weil der gesuchte Eintrag zuletzt angelegt wurde.
+    Der gesuchte Eintrag ist der aelteste und steht deshalb nicht im Kopf; der
+    Wortindex findet ihn, ohne einen Text zu oeffnen.
     """
     _allow_memory(db, regular_user)
+    gesucht = _write(db, regular_user, "wartungsfenster", "Sonntags ab drei Uhr")
+    gesucht.created_at = datetime.now(timezone.utc) - timedelta(days=30)
+    db.commit()
     for nummer in range(6):
         _write(db, regular_user, f"belanglos{nummer}", f"Fuellwert {nummer}")
-    _write(db, regular_user, "wartungsfenster", "Sonntags ab drei Uhr")
     monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 2)
 
     block = ai_memory_service.provider_memory_context(
@@ -654,42 +665,40 @@ def test_die_vorauswahl_nimmt_die_passenden_und_nicht_die_ersten(
     assert "Sonntags ab drei Uhr" in block
 
 
-def test_die_vorauswahl_folgt_der_frage_und_nicht_der_nutzung(
+def test_hinten_kommt_was_die_frage_trifft_und_nicht_was_oft_gebraucht_wurde(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Vor dem Entschluesseln zaehlt nur, was mit der Frage zu tun hat.
+    """Was nach dem Kopf mitkommt, entscheidet allein die Frage.
 
-    Diese Stufe entscheidet nicht, welcher Eintrag *besser* ist, sondern welcher
-    ueberhaupt geoeffnet und damit dem Modell gezeigt wird. Solange die Nutzung
-    dort mitzaehlte, gewann eine oft gebrauchte Zeile gegen eine, die die Frage
-    woertlich trifft — und zwar umso sicherer, je groesser der Vorrat wird: bei
-    5.000 Eintraegen bildeten Nutzung und Aktualitaet die Schwelle des letzten
-    Platzes allein, waehrend die Bedeutung hoechstens ein Drittel davon
-    beisteuern konnte. Gemessen ueberlebten damit 4 von 10 gesuchten Eintraegen
-    den Schnitt, ohne den Nutzungsterm 7.
-
-    Der Nutzungsanteil ist damit nicht abgeschafft, er steht eine Stufe spaeter
-    (siehe `test_frequently_used_entries_survive_a_foreign_language_question`).
-    Hier ist er falsch, weil er nichts ueber die Frage aussagt.
+    Solange die Nutzung bei der Auswahl mitzaehlte, gewann eine oft gebrauchte
+    Zeile gegen eine, die die Frage woertlich trifft — und zwar umso sicherer,
+    je groesser der Vorrat wird: gemessen am 19.08.2026 bei 5.000 Eintraegen
+    ueberlebten damit 4 von 10 gesuchten Eintraegen den Schnitt, ohne den
+    Nutzungsterm 7. Seit Stufe 4 kommt hinten nur mit, wen die Frage trifft;
+    die Nutzung ordnet hoechstens die Treffer untereinander.
     """
     _allow_memory(db, regular_user)
-    vielgenutzt = _write(db, regular_user, "lieblingsfarbe", "Blau, seit jeher")
-    vielgenutzt.use_count = 20
-    vielgenutzt.last_used_at = datetime.now(timezone.utc)
     gesucht = _write(db, regular_user, "wartungsfenster", "Sonntags ab drei Uhr")
-    # Der gesuchte Eintrag ist zusaetzlich der aeltere und nie gebrauchte —
-    # nach jedem Massstab ausser dem Bezug zur Frage der schlechtere.
-    gesucht.last_used_at = datetime.now(timezone.utc) - timedelta(days=30)
+    # Der gesuchte Eintrag ist der aeltere und nie gebrauchte — nach jedem
+    # Massstab ausser dem Bezug zur Frage der schlechtere.
+    gesucht.created_at = datetime.now(timezone.utc) - timedelta(days=30)
+    for nummer in range(3):
+        vielgenutzt = _write(db, regular_user, f"farbe{nummer}", f"Blau, seit jeher {nummer}")
+        vielgenutzt.use_count = 20
+        vielgenutzt.last_used_at = datetime.now(timezone.utc)
+        vielgenutzt.created_at = datetime.now(timezone.utc) - timedelta(days=40)
+    _write(db, regular_user, "neu", "Gerade eben gemerkt")
     db.commit()
-    # Genau eine Zeile ueberlebt die Vorauswahl. Welche, ist die ganze Frage.
+    # Im Kopf steht genau eine Zeile: die neueste.
     monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 1)
 
-    block = ai_memory_service.provider_memory_context(
+    abruf = ai_gedaechtnis_abruf.abrufen(
         db, regular_user, query="Wann ist das wartungsfenster?"
     )
 
-    assert "Sonntags ab drei Uhr" in block
-    assert "Blau" not in block
+    assert abruf.passend is not None
+    assert "Sonntags ab drei Uhr" in abruf.passend
+    assert "Blau" not in abruf.passend
 
 
 def _achsen_encode(texts: list[str]) -> list[list[float]]:
@@ -711,12 +720,12 @@ def _achsen_encode(texts: list[str]) -> list[list[float]]:
 def test_wer_gekuerzt_bekommt_erfaehrt_es_auch(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Hat die Vorauswahl gekuerzt, sagt der Block es — wie beim Budgetschnitt.
+    """Hat der Zeilendeckel gekuerzt, sagt der Block es — wie beim Budgetschnitt.
 
     Ein stilles Weglassen waere die Unehrlichkeit, gegen die der Hinweis
     ueberhaupt existiert: das Modell soll aus einer Luecke nicht schliessen, es
-    gebe nichts. Der Hinweis haengt bisher am Budget; die zweite Engstelle muss
-    ihn genauso setzen.
+    gebe nichts. Der Hinweis haengt nicht nur am Budget; die zweite Engstelle
+    muss ihn genauso setzen.
     """
     _allow_memory(db, regular_user)
     for nummer in range(5):
@@ -738,13 +747,13 @@ def test_wer_gekuerzt_bekommt_erfaehrt_es_auch(
     assert zusatz, "der gekuerzte Block traegt keinen Hinweis auf das Fehlende"
 
 
-def test_der_hinweis_zaehlt_auch_was_die_vorauswahl_wegwarf(
+def test_der_hinweis_zaehlt_auch_was_der_kopf_nie_oeffnete(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Eine 0 im Hinweis behauptet Vollstaendigkeit — genau verkehrt herum.
 
-    Die Zahl stand als `len(decoded) - len(selected)`. Kuerzt allein die
-    Vorauswahl und passt der Rest danach ins Budget, ist das ausnahmslos 0: das
+    Die Zahl stand als `len(decoded) - len(selected)`. Kuerzt allein der
+    Zeilendeckel und passt der Rest danach ins Budget, ist das ausnahmslos 0: das
     Modell las "0 weitere Eintraege wurden aus Platzgruenden ausgelassen",
     nachdem bei 5.000 Eintraegen 4.700 Zeilen nie entschluesselt worden waren.
     Den Hinweis gibt es, damit das Modell aus einer Luecke nicht schliesst, es
@@ -753,7 +762,7 @@ def test_der_hinweis_zaehlt_auch_was_die_vorauswahl_wegwarf(
     _allow_memory(db, regular_user)
     for nummer in range(5):
         _write(db, regular_user, f"eintrag{nummer}", f"Wert {nummer}")
-    # Nur die Vorauswahl kuerzt: fuenf kurze Zeilen passen locker ins Budget.
+    # Nur der Zeilendeckel kuerzt: fuenf kurze Zeilen passen locker ins Budget.
     monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 2)
 
     block = ai_memory_service.provider_memory_context(
@@ -804,20 +813,18 @@ def test_die_suche_entschluesselt_ebenfalls_nicht_alles(
 ) -> None:
     """`search_memory` gab fuenfzehn Treffer zurueck und oeffnete dafuer alles.
 
-    Derselbe Deckel, derselbe Grund — und die Treffer bleiben die besten: die
-    Vorauswahl bewertet nach denselben Kriterien, die `search_entries` gleich
-    danach anlegt, nur ohne den Wert.
+    Seit Stufe 4 oeffnet sie nur die Kandidaten aus Wortindex und
+    Vektorspeicher — hier ohne Modell genau den einen, dessen Wort passt.
     """
     _allow_memory(db, regular_user)
     for nummer in range(6):
         _write(db, regular_user, f"belanglos{nummer}", f"Fuellwert {nummer}")
     _write(db, regular_user, "wartungsfenster", "Sonntags ab drei Uhr")
-    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 3)
     zaehler = _zaehle_entschluesselungen(monkeypatch)
 
     treffer = ai_memory_service.search_entries(
         db, regular_user, query="wartungsfenster"
     )
 
-    assert zaehler.texte == 3
+    assert zaehler.texte == 1
     assert "wartungsfenster" in [row.key for row, _value, _score in treffer]

@@ -150,7 +150,7 @@ def test_teamwissen_haengt_nicht_am_persoenlichen_schalter(
     """Die Einwilligung gilt dem eigenen Gedaechtnis, nicht dem des Teams.
 
     Vorher endete `provider_memory_context` bei fehlender Einwilligung sofort,
-    und `_visible_scope_rows` enthaelt auch die Teamzeilen. Wer sein eigenes
+    und die sichtbaren Bereiche enthalten auch die Teams. Wer sein eigenes
     Gedaechtnis abschaltete, nahm dem Assistenten damit still das Wissen aller
     seiner Teams — an einer Stelle, an der niemand danach sucht.
 

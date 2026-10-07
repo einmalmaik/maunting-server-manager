@@ -32,7 +32,7 @@ from models import (
     ServerPermission,
     User,
 )
-from services import ai_limit_service, ai_memory_service
+from services import ai_gedaechtnis_abruf, ai_limit_service, ai_memory_service
 from services.auth_service import AuthService
 from services.role_service import set_user_roles
 
@@ -402,10 +402,12 @@ def test_the_row_check_holds_even_when_the_prefilter_lets_everything_through(
         ai_memory_service.permission_service, "list_visible_server_ids",
         lambda *_args, **_kwargs: None,
     )
-    rows = ai_memory_service._visible_scope_rows(db, regular_user)
+    kennungen = ai_gedaechtnis_abruf.sichtbare_bereiche(
+        db, regular_user, persoenlich=True, anlage=True
+    )
 
-    assert [row.server_id for row in rows if row.scope == "server_shared"] == [
-        eigener.id
+    assert [kennung for kennung in kennungen if kennung.endswith(":shared")] == [
+        f"server:{eigener.id}:shared"
     ]
 
 
@@ -838,7 +840,7 @@ def test_the_permission_is_asked_once_per_server_not_once_per_row(
         return echt(**felder)
 
     monkeypatch.setattr(permission_service, "has_server_permission", _zaehlen)
-    zeilen = ai_memory_service._visible_scope_rows(db, user)
+    kennungen = ai_gedaechtnis_abruf.sichtbare_bereiche(db, user, persoenlich=True, anlage=True)
 
-    assert len([zeile for zeile in zeilen if zeile.scope == "server_shared"]) == 10
+    assert f"server:{server.id}:shared" in kennungen
     assert gefragt == [server.id]

@@ -574,6 +574,67 @@ def test_gedaechtnismodell_hin_und_zurueck(pg_wegwerf):
         settings.database_url = vorher
 
 
+
+def test_gedaechtnisabruf_hin_und_zurueck(pg_wegwerf):
+    """Bestehende Erinnerungen sind nicht angeheftet und warten aufs Nachziehen.
+
+    ``indiziert_am`` bleibt NULL — daran erkennt der Takt, was er noch
+    rechnen muss (`ai_gedaechtnis_abruf.nachziehen`). Der Wortindex startet
+    leer und verschwindet beim Zurückgehen samt Index.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, inspect, text
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+
+    db_url = pg_wegwerf("gedaechtnis-abruf")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    neue = {"angeheftet", "indiziert_am"}
+
+    def spalten() -> set[str]:
+        return {s["name"] for s in inspect(engine).get_columns("ai_memory_entries")}
+
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+        command.downgrade(config, "20261007_01")
+        assert not neue & spalten()
+        assert not inspect(engine).has_table("ai_memory_begriffe")
+
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO ai_memory_entries (id, scope, scope_identity, value_encrypted, "
+                "origin, aad_version, use_count, created_at, updated_at) "
+                "VALUES ('e1', 'panel', 'panel', 'x', 'user', 2, 0, now(), now())"
+            ))
+        command.upgrade(config, "20261008_01")
+
+        assert neue <= spalten()
+        assert "ix_ai_memory_kopf" in {
+            i["name"] for i in inspect(engine).get_indexes("ai_memory_entries")
+        }
+        with engine.connect() as conn:
+            zeile = conn.execute(text(
+                "SELECT angeheftet, indiziert_am FROM ai_memory_entries"
+            )).one()
+            assert conn.execute(text("SELECT count(*) FROM ai_memory_begriffe")).scalar() == 0
+        assert tuple(zeile) == (False, None)
+
+        command.downgrade(config, "20261007_01")
+        assert not neue & spalten()
+        assert not inspect(engine).has_table("ai_memory_begriffe")
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
 def test_jeder_erlaubte_zweck_passt_in_seine_spalte(db) -> None:
     """AGENTS.md 119: jeder Wert, den die Prüfung erlaubt, wird einmal gespeichert."""
     from datetime import datetime, timezone

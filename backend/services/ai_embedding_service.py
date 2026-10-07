@@ -467,11 +467,12 @@ def _rueckfall_zugang(db: Session | None) -> tuple[str, str, str, str] | None:
 def aktives_modell(*, db: Session | None = None) -> str | None:
     """Die Kennung, die `encode` jetzt liefern würde, ohne etwas zu rechnen.
 
-    Gebraucht von `ai_memory_service._vektoren_nachziehen`: dort muss vor dem
-    Rechnen feststehen, welche gespeicherten Vektoren zum heutigen Modell
-    passen und welche neu müssen. Ändert sich die Quelle zwischen dieser Frage
-    und dem Rechnen, schadet das nicht: gespeichert wird die Kennung aus der
-    `Kodierung`, und der nächste Abruf holt den Rest nach.
+    Gebraucht von `ai_memory_service.indizes_nachziehen` und dem Takt
+    (`ai_gedaechtnis_abruf.nachziehen`): dort muss vor dem Rechnen feststehen,
+    welche gespeicherten Vektoren zum heutigen Modell passen und welche neu
+    müssen. Ändert sich die Quelle zwischen dieser Frage und dem Rechnen,
+    schadet das nicht: gespeichert wird die Kennung aus der `Kodierung`, und
+    der nächste Takt holt den Rest nach.
     """
     if _load() is not None:
         return MODEL_TAG

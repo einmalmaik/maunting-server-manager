@@ -1,7 +1,7 @@
 """Modellersatz für `ai_embedding_service` in Tests.
 
 `encode` liefert eine `Kodierung` — Vektoren samt Modellkennung —, und
-`ai_memory_service._vektoren_nachziehen` fragt vorher `aktives_modell`. Ein
+`ai_memory_service.indizes_nachziehen` fragt vorher `aktives_modell`. Ein
 Ersatz muss beide Seiten gleich beantworten, sonst prüft der Test einen
 Zustand, den es im Betrieb nicht gibt.
 """

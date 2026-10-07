@@ -528,6 +528,10 @@ def clean_db():
     # leaken Werte zwischen Tests (z. B. oauth.allow_registration=true aus
     # einem frueheren Test).
     PanelSettingsService.invalidate_cache()
+    # Der Vektorspeicher des Gedächtnisabrufs hält Bereiche über Tests hinweg;
+    # die Tabellen sind geleert, dieselben Kennungen kommen wieder.
+    from services import ai_gedaechtnis_abruf
+    ai_gedaechtnis_abruf.leeren()
     PanelSettingsService.set("captcha_enabled", "false")
     session = db_module.SessionLocal()
     try:

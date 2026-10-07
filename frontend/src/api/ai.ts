@@ -786,6 +786,11 @@ export interface AiMemoryEntry {
    * hat; hat inzwischen jemand anderes geschrieben, antwortet der Server 409.
    */
   fassung: number
+  /**
+   * Steht in jedem Gespräch vorn „im Kopf“. Nur Menschen heften an; ohne
+   * Angabe (ein Server vor 5.2) heißt es nein.
+   */
+  angeheftet?: boolean
   use_count: number
   last_used_at: string | null
   created_at: string
@@ -824,10 +829,18 @@ export interface AiMemoryFilter {
   status?: AiMemoryAnsicht
   /** Kennungen von Themen; gleichnamige aus zwei Bereichen gehen zusammen. */
   thema?: string[]
+  /**
+   * Durchsucht den ganzen Bestand statt einer Seite, nach Bedeutung und
+   * Wörtern; die Antwort sind die Treffer, das Passendste zuerst.
+   */
+  suche?: string
 }
 
-function memoryFilter({ status = 'aktiv', thema = [] }: AiMemoryFilter = {}): string {
-  return `&status=${status}${thema.map((id) => `&thema=${encodeURIComponent(id)}`).join('')}`
+function memoryFilter({ status = 'aktiv', thema = [], suche = '' }: AiMemoryFilter = {}): string {
+  const nadel = suche.trim()
+  return `&status=${status}${thema.map((id) => `&thema=${encodeURIComponent(id)}`).join('')}${
+    nadel ? `&suche=${encodeURIComponent(nadel)}` : ''
+  }`
 }
 
 function memoryScopeQuery(scope: AiMemoryEntry['scope'], serverId?: number, teamId?: number): string {
@@ -1746,10 +1759,14 @@ export const aiApi = {
   updateMemory: (id: string, payload: {
     text?: string; titel?: string | null; thema?: string | null; fassung: number
   }) => api<AiMemoryEntry>(`/ai/memory/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
-  /** Holt eine vergessene Erinnerung zurück; sie zählt dann wieder mit. */
   /** Eine Erinnerung, wie sie jetzt steht — nach einem 409 beim Speichern. */
   getMemory: (id: string) => api<AiMemoryEntry>(`/ai/memory/${id}`),
+  /** Holt eine vergessene Erinnerung zurück; sie zählt dann wieder mit. */
   restoreMemory: (id: string) => api<AiMemoryEntry>(`/ai/memory/${id}/zurueckholen`, { method: 'POST' }),
+  /** Heftet an oder löst — ohne neue Fassung, darum ohne `fassung`. */
+  pinMemory: (id: string, angeheftet: boolean) => api<AiMemoryEntry>(
+    `/ai/memory/${id}/anheften`, { method: 'POST', body: JSON.stringify({ angeheftet }) },
+  ),
   listMemoryVersions: (id: string) => api<AiMemoryFassung[]>(`/ai/memory/${id}/fassungen`),
   restoreMemoryVersion: (id: string, fassungId: string, fassung: number) => api<AiMemoryEntry>(
     `/ai/memory/${id}/fassungen/${fassungId}/zurueckholen`,

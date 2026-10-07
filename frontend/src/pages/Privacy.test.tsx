@@ -149,11 +149,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.24 vom 2026-10-07 aus (der Import liest mit dem Gedächtnis-Modell)', () => {
+  it('weist die Fassung 3.25 vom 2026-10-07 aus (die Suche legt Prüfwerte je Wort ab)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.24`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.25`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -222,6 +222,9 @@ describe('Privacy page', () => {
     expect(screen.getByText(i18n.t('privacyPolicy.sections.ai.items.memoryReading'))).toBeInTheDocument();
     // 3.24: ein eigenes Gedächtnis-Modell, und der Import geht an einen Anbieter.
     expect(screen.getByText(i18n.t('privacyPolicy.sections.ai.items.memoryImport'))).toBeInTheDocument();
+    // 3.25: für die Suche ein Prüfwert je Wort, nur mit dem Panelschlüssel lesbar.
+    expect(i18n.t('privacyPolicy.sections.ai.items.memorySearch')).toMatch(/für jedes Wort einen Prüfwert/);
+    expect(i18n.t('privacyPolicy.sections.ai.items.memorySearch')).toMatch(/mit der Erinnerung gelöscht/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

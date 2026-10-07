@@ -1119,6 +1119,17 @@ async def _ai_tasks_task() -> None:
         except Exception as exc:
             db.rollback()
             logger.warning("Error in AI memory rewrite: %s", exc)
+        try:
+            from services import ai_gedaechtnis_abruf
+
+            # Vektor und Wortindex für Erinnerungen, die noch keine haben
+            # (Bestand vor Stufe 4, ein Modell, das beim Schreiben fehlte).
+            # Eigene Sitzung in einem Thread: Sidecar und Modell blockieren.
+            nachgezogen = await asyncio.to_thread(ai_gedaechtnis_abruf.nachziehen)
+            if nachgezogen:
+                logger.info("KI-Gedaechtnis: %s Erinnerung(en) fuer den Abruf nachgezogen", nachgezogen)
+        except Exception as exc:
+            logger.warning("Error in AI memory indexing: %s", exc)
     finally:
         db.close()
 

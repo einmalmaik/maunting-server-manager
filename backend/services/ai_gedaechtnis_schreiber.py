@@ -1030,19 +1030,24 @@ def _bestand(db: Session, bereiche: list[Bereich], texte: list[str]) -> list[Kan
     Die Texte sind die neuen Nachrichten eines Ausschnitts oder die Absätze
     eines importierten Teils (`ai_memory_import_service`).
     """
+    from services import ai_gedaechtnis_abruf
+
     kandidaten: list[Kandidat] = []
     for bereich in bereiche:
         # Feste Ordnung: derselbe Bestand ergibt denselben Text, und die
         # Kennungen E1, E2 … bedeuten bei jedem Durchgang dasselbe.
-        rows = (
-            db.query(AiMemoryEntry)
-            .filter(
-                AiMemoryEntry.scope_identity == bereich.identity,
-                AiMemoryEntry.status == "aktiv",
-            )
-            .order_by(AiMemoryEntry.created_at.asc(), AiMemoryEntry.id.asc())
-            .all()
+        abfrage = db.query(AiMemoryEntry).filter(
+            AiMemoryEntry.scope_identity == bereich.identity,
+            AiMemoryEntry.status == "aktiv",
         )
+        if _bestand_zahl(db, bereich.identity) > MAX_BESTAND_JE_BEREICH:
+            # Ein großer Bereich wird nicht ganz geladen: die Kandidaten kommen
+            # aus Vektorspeicher und Wortindex (Stufe 4), höchstens das
+            # Doppelte dessen, was der Schreiber sieht.
+            abfrage = abfrage.filter(AiMemoryEntry.id.in_(
+                ai_gedaechtnis_abruf.naechste(db, bereich.identity, texte, MAX_BESTAND_JE_BEREICH)
+            ))
+        rows = abfrage.order_by(AiMemoryEntry.created_at.asc(), AiMemoryEntry.id.asc()).all()
         if len(rows) > MAX_BESTAND_JE_BEREICH:
             werte = dict(zip(
                 [row.id for row in rows],

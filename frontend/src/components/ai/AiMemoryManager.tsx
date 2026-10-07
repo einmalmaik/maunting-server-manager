@@ -11,6 +11,8 @@ import {
   Flame,
   History,
   Pencil,
+  Pin,
+  PinOff,
   Plus,
   RotateCcw,
   Save,
@@ -76,6 +78,10 @@ interface Props {
 }
 
 const CHUNK_SIZE = 30
+
+/** Ab so vielen Zeichen sucht der Server im ganzen Bestand, nach dieser Pause. */
+const SUCHE_AB = 2
+const SUCHE_PAUSE_MS = 300
 
 /** So lange lässt sich zurückholen, was Singra vergessen hat (`VERGESSEN_TAGE`). */
 const VERGESSEN_TAGE = 30
@@ -173,6 +179,11 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   const [importOffen, setImportOffen] = useState(false)
   const [verlauf, setVerlauf] = useState<{ entry: AiMemoryEntry; fassungen: AiMemoryFassung[] } | null>(null)
   const [verlaufHolt, setVerlaufHolt] = useState<string | null>(null)
+  // Die Treffer des Servers, solange über mehr als eine Seite gesucht wird;
+  // `null` heißt: es gilt die geladene Seite.
+  const [treffer, setTreffer] = useState<AiMemoryEntry[] | null>(null)
+  // Zählt jede Änderung, damit eine laufende Suche danach neu fragt.
+  const [stand, setStand] = useState(0)
 
   // Accordion-Zustand: Standardmäßig alle eingeklappt
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
@@ -234,6 +245,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
    * leere Liste zu zeigen, die wie ein leeres Gedächtnis aussieht.
    */
   const nachAenderung = async (zielSeite = seite): Promise<AiMemoryPage> => {
+    setStand((wert) => wert + 1)
     const neue = await themenHolen().catch(() => themen)
     setThemen(neue)
     const gruppe = themenGruppieren(neue).find((eintrag) => eintrag.schluessel === themaWahl)
@@ -272,12 +284,39 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowed, scope.kind, teamId, serverId, t])
 
+  const seitenzahl = seitengroesse > 0 ? Math.max(1, Math.ceil(gesamt / seitengroesse)) : 1
+  // Passt alles auf eine Seite, sucht die Liste selbst. Sonst fragt sie den
+  // Server, der den ganzen Bestand kennt — sonst fände die Suche nur, was
+  // zufällig auf der geladenen Seite steht. Vergessenes hat höchstens eine
+  // Handvoll Seiten und bleibt bei der Seite.
+  const imGanzen = ansicht === 'aktiv' && seitenzahl > 1 && suche.trim().length >= SUCHE_AB
+  const themaSchluessel = gewaehlteIds.join(',')
+
+  useEffect(() => {
+    if (!imGanzen) {
+      setTreffer(null)
+      return
+    }
+    let aktiv = true
+    const zeitgeber = setTimeout(() => {
+      const filter = { status: 'aktiv' as const, thema: gewaehlteIds, suche }
+      void (scope.kind === 'user'
+        ? aiApi.listPersonalMemory(0, filter)
+        : aiApi.listScopeMemory(memoryScopeName(scope), serverId, teamId, 0, filter))
+        .then((ladung) => { if (aktiv) setTreffer(ladung.entries) })
+        .catch(() => { if (aktiv) toast.error(t('ai.memory.errors.load')) })
+    }, SUCHE_PAUSE_MS)
+    return () => { aktiv = false; clearTimeout(zeitgeber) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imGanzen, suche, themaSchluessel, stand, scope.kind, serverId, teamId])
+
   // Die Reihenfolge ist die des Servers: an ihr ist die Seite geschnitten
-  // (`_SEITENORDNUNG`, im Vergessenen das Vergessensdatum). Wer hier anders
-  // sortierte, zeigte eine Seite in einer anderen Ordnung, als sie entstand.
+  // (`_SEITENORDNUNG`, im Vergessenen das Vergessensdatum), und die Treffer
+  // einer Suche stehen nach Passung. Wer hier anders sortierte, zeigte eine
+  // Liste in einer anderen Ordnung, als sie entstand.
   const sichtbar = useMemo(() => {
-    const nadel = suche.trim().toLowerCase()
-    return entries
+    const nadel = treffer === null ? suche.trim().toLowerCase() : ''
+    return (treffer ?? entries)
       .filter((entry) => herkunft === 'all' || entry.origin === herkunft)
       .filter((entry) => !nadel
         || entry.value.toLowerCase().includes(nadel)
@@ -285,7 +324,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
         || (entry.thema?.name ?? '').toLowerCase().includes(nadel)
         || (entry.key ?? '').toLowerCase().includes(nadel)
         || formatMemoryKey(entry.key ?? '').toLowerCase().includes(nadel))
-  }, [entries, herkunft, suche])
+  }, [entries, treffer, herkunft, suche])
 
   // Zurücksetzen des Lazy-Loading-Limits beim Filtern
   useEffect(() => {
@@ -334,7 +373,6 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
 
   const imAktuellen = ansicht === 'aktiv'
   const werkzeugleiste = entries.length > 3 || suche !== '' || herkunft !== 'all'
-  const seitenzahl = seitengroesse > 0 ? Math.max(1, Math.ceil(gesamt / seitengroesse)) : 1
 
   if (!allowed) return null
 
@@ -468,6 +506,16 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     } finally { setBusy(false) }
   }
 
+  const anheften = async (entry: AiMemoryEntry) => {
+    setBusy(true)
+    try {
+      await aiApi.pinMemory(entry.id, !entry.angeheftet)
+      await nachAenderung()
+    } catch (error: unknown) {
+      toast.error(fehlermeldung(error, 'ai.memory.errors.save'))
+    } finally { setBusy(false) }
+  }
+
   const bearbeiten = (entry: AiMemoryEntry) => {
     setText(entry.value)
     setTitel(entry.titel ?? '')
@@ -584,7 +632,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
         ? {
           value: suche,
           onChange: setSuche,
-          label: seitenzahl > 1 ? t('ai.memory.searchPage') : t('ai.memory.search'),
+          label: seitenzahl > 1 && imAktuellen ? t('ai.memory.searchAll') : t('ai.memory.search'),
         }
         : undefined}
       filters={(
@@ -629,9 +677,11 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
         </>
       )}
       count={werkzeugleiste
-        ? (seitenzahl > 1
-          ? t('ai.memory.countPage', { shown: sichtbar.length, total: entries.length })
-          : t('ai.memory.count', { shown: sichtbar.length, total: entries.length }))
+        ? (treffer !== null
+          ? t('ai.memory.countSearch', { count: sichtbar.length })
+          : seitenzahl > 1
+            ? t('ai.memory.countPage', { shown: sichtbar.length, total: entries.length })
+            : t('ai.memory.count', { shown: sichtbar.length, total: entries.length }))
         : undefined}
     >
       {darfAendern && imAktuellen && (
@@ -748,6 +798,13 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
                         {kopf ?? (isExpanded ? kuerzen(entry.value) : entry.value)}
                       </span>
 
+                      {entry.angeheftet && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-label-sm text-primary">
+                          <Pin className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          {t('ai.memory.pinned')}
+                        </span>
+                      )}
+
                       {entry.thema && (
                         <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/40 bg-surface-container px-2 py-0.5 text-label-sm text-on-surface-variant">
                           <Tag className="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -800,6 +857,23 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
 
                 {darfAendern && (
                   <div className="flex shrink-0 items-center gap-1">
+                    {imAktuellen && (
+                      <Kurzinfo text={t('ai.memory.pinHint')}>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          aria-pressed={entry.angeheftet === true}
+                          onClick={() => void anheften(entry)}
+                          aria-label={`${t(entry.angeheftet ? 'ai.memory.unpin' : 'ai.memory.pin')}: ${name}`}
+                        >
+                          {entry.angeheftet
+                            ? <PinOff className="h-4 w-4" aria-hidden="true" />
+                            : <Pin className="h-4 w-4" aria-hidden="true" />}
+                        </Button>
+                      </Kurzinfo>
+                    )}
                     {imAktuellen ? (
                       <Button
                         type="button"
@@ -969,9 +1043,10 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
         </DialogContent>
       </Dialog>
 
+      {/* Treffer einer Suche im ganzen Bestand haben keine Seiten. */}
       <Pagination
-        page={seite}
-        pageCount={seitenzahl}
+        page={treffer === null ? seite : 1}
+        pageCount={treffer === null ? seitenzahl : 1}
         label={t('ai.memory.total', { count: gesamt })}
         disabled={busy}
         onChange={blaettern}

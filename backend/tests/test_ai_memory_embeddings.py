@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, Role, RolePermission, User
-from services import ai_embedding_service, ai_memory_service
+from services import ai_embedding_service, ai_gedaechtnis_abruf, ai_memory_service
 from services.ai_embedding_service import MODEL_TAG
 from services.role_service import set_user_roles
 from tests._einbettung import modell_ersetzen, ohne_modell
@@ -230,7 +230,7 @@ def _vektoren_fuer(texts: list[str]) -> list[list[float]]:
     ]
 
 
-def test_a_missing_vector_is_recomputed_on_the_next_recall(
+def test_a_missing_vector_is_recomputed_in_the_next_tick(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Eine Ausfallphase des Modells darf keinen Eintrag dauerhaft blind machen.
@@ -242,17 +242,18 @@ def test_a_missing_vector_is_recomputed_on_the_next_recall(
     eines abgebrochenen Downloads etwas merkte, hatte einen Eintrag, der für
     Bedeutungsrang und Verblassen-Reiz für immer unsichtbar blieb.
 
-    Nachgezogen wird dort, wo der Klartext ohnehin offenliegt: beim Abruf in
-    den Kontext.
+    Nachgezogen wird im Takt (`ai_gedaechtnis_abruf.nachziehen`), über den
+    ganzen Bestand — nicht nur das, was eine Anfrage gerade öffnet.
     """
     _allow_memory(db, regular_user)
     ohne_modell(monkeypatch)
     row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
 
-    # Das Modell ist wieder da — die nächste Anfrage muss aufholen.
+    # Das Modell ist wieder da — der nächste Takt muss aufholen.
     modell_ersetzen(monkeypatch, _vektoren_fuer)
-    ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
+    assert ai_gedaechtnis_abruf.nachziehen() == 1
 
+    db.expire_all()
     db.refresh(row)
     assert row.embedding_model == MODEL_TAG
     vektor = ai_memory_service._stored_vector(row, MODEL_TAG)
@@ -287,11 +288,12 @@ def test_ein_google_vektor_wird_neu_gerechnet_sobald_das_lokale_modell_zurueck_i
     row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
     assert row.embedding_model == "google:text-embedding-004"
 
-    # Das lokale Modell ist wieder da; der nächste Abruf muss den Eintrag in
+    # Das lokale Modell ist wieder da; der nächste Takt muss den Eintrag in
     # dessen Raum holen, statt den Google-Vektor als lokalen zu lesen.
     monkeypatch.setattr(ai_embedding_service, "_load", lambda: _FakeModel())
-    ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
+    assert ai_gedaechtnis_abruf.nachziehen() == 1
 
+    db.expire_all()
     db.refresh(row)
     assert row.embedding_model == MODEL_TAG
     vektor = ai_memory_service._stored_vector(row, MODEL_TAG)
@@ -469,13 +471,11 @@ def test_ein_klartextvektor_aus_dem_bestand_wird_weiter_gelesen_und_ersetzt(
 
     Bis zum 23.08.2026 lagen die rohen float32-Bytes in der Spalte. Sie
     kurzerhand fuer ungueltig zu erklaeren waere der bequemere Weg gewesen und
-    haette das Gedaechtnis schlechter gemacht, als es war: in einem Bereich mit
-    tausenden Eintraegen kommen je Anfrage nur `MAX_CONTEXT_ROWS` Zeilen bis zum
-    Nachziehen, und was die Vorauswahl ohne Bedeutungsanteil nie nach vorn
-    bringt, kaeme dort nie an — die Zeile bliebe dauerhaft ohne Vektor.
+    haette das Gedaechtnis schlechter gemacht, als es war: bis der Vektor neu
+    gerechnet ist, faende die Bedeutung die Zeile nicht.
 
-    Beide Haelften gehoeren deshalb zusammen: gelesen wie bisher, und beim
-    naechsten Abruf in den Kontext verpackt neu geschrieben.
+    Beide Haelften gehoeren deshalb zusammen: gelesen wie bisher, und im
+    naechsten Takt (`ai_gedaechtnis_abruf.nachziehen`) verpackt neu geschrieben.
     """
     _allow_memory(db, regular_user)
     modell_ersetzen(monkeypatch, _vektoren_fuer)
@@ -486,8 +486,8 @@ def test_ein_klartextvektor_aus_dem_bestand_wird_weiter_gelesen_und_ersetzt(
 
     assert ai_memory_service._stored_vector(row, MODEL_TAG) is not None, "kein Rueckschritt"
 
-    ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
-    db.commit()
+    assert ai_gedaechtnis_abruf.nachziehen() == 1
+    db.expire_all()
     db.refresh(row)
 
     assert row.embedding_bytes != klartext

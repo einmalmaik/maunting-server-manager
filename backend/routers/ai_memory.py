@@ -11,6 +11,7 @@ from database import get_db
 from dependencies import require_global, verify_csrf
 from models import AiMemoryEntry, AiMemoryPreference, User
 from schemas.ai_memory import (
+    AiMemoryAnheften,
     AiMemoryClearResponse,
     AiMemoryCreate,
     AiMemoryFassung,
@@ -50,7 +51,7 @@ def _response(
         thema=AiMemoryThemaRef(id=row.thema_id, name=name) if row.thema_id and name else None,
         art=row.art, quelle=row.quelle, wichtigkeit=row.wichtigkeit,
         origin=row.origin, status=row.status, vergessen_am=row.vergessen_am,
-        fassung=row.fassung, use_count=row.use_count,
+        fassung=row.fassung, angeheftet=bool(row.angeheftet), use_count=row.use_count,
         last_used_at=row.last_used_at,
         created_at=row.created_at, updated_at=row.updated_at,
     )
@@ -118,6 +119,7 @@ def list_personal_memory(
     offset: int = Query(default=0, ge=0),
     status: Ansicht = Query(default="aktiv"),
     thema: list[str] | None = Query(default=None),
+    suche: str | None = Query(default=None, max_length=200),
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.memory.use")),
 ) -> AiMemoryPage:
@@ -137,10 +139,13 @@ def list_personal_memory(
     beim Dienst: sie wird in Sidecar-Roundtrips bezahlt, und ein ``limit`` in
     der Anfrage waere die Einladung, sich 5.000 Entschluesselungen auf einmal zu
     bestellen.
+
+    ``suche`` durchsucht den ganzen Bestand statt der Seite und liefert die
+    Treffer, das Passendste zuerst.
     """
     try:
         return _page(ai_memory_service.personal_entries(
-            db, user, offset=offset, status=status, themen=_themenfilter(thema)
+            db, user, offset=offset, status=status, themen=_themenfilter(thema), suche=suche,
         ))
     except DisSidecarError as exc:
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
@@ -154,6 +159,7 @@ def list_memory_page(
     offset: int = Query(default=0, ge=0),
     status: Ansicht = Query(default="aktiv"),
     thema: list[str] | None = Query(default=None),
+    suche: str | None = Query(default=None, max_length=200),
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.memory.use")),
 ) -> AiMemoryPage:
@@ -174,7 +180,7 @@ def list_memory_page(
     try:
         return _page(ai_memory_service.scope_entries(
             db, user, scope, server_id, team_id, offset=offset, status=status,
-            themen=_themenfilter(thema),
+            themen=_themenfilter(thema), suche=suche,
         ))
     except DisSidecarError as exc:
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
@@ -331,6 +337,25 @@ def update_memory(
             titel=payload.titel if "titel" in genannt else ai_memory_service.UNVERAENDERT,
             thema=payload.thema if "thema" in genannt else ai_memory_service.UNVERAENDERT,
             erwartete_fassung=payload.fassung, von="user", grund="bearbeitet",
+        )
+        return _einzeln(db, row, text)
+    except DisSidecarError as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
+
+
+@router.post("/{entry_id}/anheften", response_model=AiMemoryResponse)
+def pin_memory(
+    entry_id: str,
+    payload: AiMemoryAnheften,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.memory.use")),
+    _: None = Depends(verify_csrf),
+) -> AiMemoryResponse:
+    """Heftet an oder löst — ohne neue Fassung, ohne Fassungsprüfung."""
+    try:
+        row, text = ai_memory_service.erinnerung_anheften(
+            db, user=user, entry_id=entry_id, angeheftet=payload.angeheftet,
         )
         return _einzeln(db, row, text)
     except DisSidecarError as exc:

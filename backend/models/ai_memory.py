@@ -3,6 +3,7 @@
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Date,
@@ -17,7 +18,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
 
@@ -66,7 +67,7 @@ class AiMemoryEntry(Base):
     Wort), dann an der Zahl: 100 ist seit dem konfigurierbaren Rollenlimit nur
     noch der Ausgangswert, ein Bereich fasst bis zu 5.000 Einträge
     (``ai_limit_service.MAX_MEMORY_ENTRIES_MAX``). So viel geht nicht mehr am
-    Stueck mit, deshalb waehlt ``provider_memory_context`` aus.
+    Stueck mit, deshalb waehlt der Abruf aus (``ai_gedaechtnis_abruf``).
 
     Ihr zweiter Teil traegt weiter: der Vektor kam als zusaetzliche Spalte und
     nicht als Umbau, und einen Vektor*index* gibt es nach wie vor bewusst nicht.
@@ -111,6 +112,13 @@ class AiMemoryEntry(Base):
         Index("ix_ai_memory_owner_scope", "owner_user_id", "scope"),
         Index("ix_ai_memory_team", "team_id"),
         Index("ix_ai_memory_identity_status", "scope_identity", "status"),
+        # Was „im Kopf“ steht, wählt die Datenbank (`ai_gedaechtnis_abruf`):
+        # angeheftet, dann wichtig, dann neu. Mit diesem Index liest sie dafür
+        # bei 100.000 Einträgen eines Bereichs nur die ersten Zeilen.
+        Index(
+            "ix_ai_memory_kopf",
+            "scope_identity", "status", "angeheftet", "wichtigkeit", "created_at", "id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -242,8 +250,26 @@ class AiMemoryEntry(Base):
     # Womit gerechnet wurde. Passt es nicht zum geladenen Modell, wird der
     # Vektor ignoriert statt falsche Aehnlichkeiten zu liefern.
     embedding_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Steht immer „im Kopf“, vor allem anderen (`ai_gedaechtnis_abruf`). Heftet
+    # nur ein Mensch an; der Schreiber im Hintergrund fasst es nicht an.
+    angeheftet: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    # Wann Vektor und Wortindex zuletzt aus dem Text gerechnet wurden. NULL
+    # heißt noch nie: dann holt der Takt es nach
+    # (`ai_gedaechtnis_abruf.nachziehen`). Der Vektorspeicher des Abrufs liest
+    # an dieser Spalte und an `updated_at`, ob sich in einem Bereich etwas
+    # geändert hat.
+    indiziert_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    # Der Wortindex. Ersetzt wird er als Ganzes, wenn sich der Text ändert
+    # (`ai_memory_service.refresh_embedding`); gelöscht mit der Zeile von der
+    # Datenbank (ON DELETE CASCADE), ohne ihn vorher zu laden.
+    begriffe: Mapped[list["AiMemoryBegriff"]] = relationship(
+        cascade="all, delete-orphan", passive_deletes=True
+    )
 
     @hybrid_property
     def key(self) -> str:
@@ -356,6 +382,32 @@ class AiMemoryTopic(Base):
 
     def name_aad(self) -> str:
         return f"msm:ai:memory:thema:{self.scope_identity}:{self.id}"
+
+
+class AiMemoryBegriff(Base):
+    """Ein Wort einer Erinnerung als Prüfwert — der Wortindex des Abrufs.
+
+    Der Abruf sucht bei großen Gedächtnissen zweigleisig: nach Bedeutung über
+    die Vektoren und nach Wörtern über diese Tabelle. Die Wörter einer Frage
+    werden genauso zu Prüfwerten und in der Datenbank nachgeschlagen, ohne dass
+    ein einziger Text geöffnet wird (`ai_gedaechtnis_abruf`).
+
+    Der Prüfwert ist ein HMAC über Bereich und Wort, die ersten acht Byte als
+    Zahl, mit einem Schlüssel aus dem Panel-Secret — wie beim Vektor
+    (`ai_memory_service._begriff_schluessel`). Derselbe Schutz und dieselbe
+    Grenze: wer nur die Datenbank hat, liest kein Wort; wer auch die
+    Panel-Umgebung hat, kann Wörter durchprobieren. Der Bereich steckt im
+    Prüfwert, damit ein Wort in zwei Bereichen nicht als dasselbe erkennbar ist
+    und eine Frage nur in den Bereichen trifft, für die sie gerechnet wurde.
+    """
+
+    __tablename__ = "ai_memory_begriffe"
+    __table_args__ = (Index("ix_ai_memory_begriffe_eintrag", "memory_id"),)
+
+    begriff: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    memory_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("ai_memory_entries.id", ondelete="CASCADE"), primary_key=True
+    )
 
 
 class AiMemoryVersion(Base):

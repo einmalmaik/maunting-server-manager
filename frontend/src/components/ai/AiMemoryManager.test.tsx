@@ -21,6 +21,7 @@ vi.mock('@/api/ai', () => ({
     updateMemory: vi.fn(),
     getMemory: vi.fn(),
     restoreMemory: vi.fn(),
+    pinMemory: vi.fn(),
     listMemoryVersions: vi.fn(),
     restoreMemoryVersion: vi.fn(),
     deleteMemory: vi.fn(),
@@ -145,6 +146,7 @@ describe('AiMemoryManager', () => {
     vi.mocked(aiApi.updateMemory).mockReset().mockResolvedValue(entry)
     vi.mocked(aiApi.getMemory).mockReset().mockResolvedValue(entry)
     vi.mocked(aiApi.restoreMemory).mockReset().mockResolvedValue(entry)
+    vi.mocked(aiApi.pinMemory).mockReset().mockResolvedValue({ ...entry, angeheftet: true })
     vi.mocked(aiApi.listMemoryVersions).mockReset().mockResolvedValue([])
     vi.mocked(aiApi.restoreMemoryVersion).mockReset().mockResolvedValue(mitTitel)
     vi.mocked(aiApi.clearMemory).mockReset().mockResolvedValue({ removed: 4 })
@@ -592,22 +594,61 @@ describe('AiMemoryManager', () => {
     expect(await screen.findByText('Seite 2 von 1250')).toBeInTheDocument()
   })
 
-  it('sagt in der Suchbeschriftung, dass sie nur diese Seite kennt', async () => {
-    // Der Wert liegt verschlüsselt in der Datenbank; eine Suche über den ganzen
-    // Bestand hieße, alle 5.000 Zeilen zu öffnen — genau das, wogegen die
-    // Seitenweise gebaut ist. Sie kann also nur die geladene Seite durchsuchen,
-    // und dann muss sie das auch sagen.
+  it('sucht bei mehr als einer Seite im ganzen Bestand, nicht nur auf der Seite', async () => {
+    // Bis Stufe 4 kannte die Suche nur die geladene Seite: den ganzen Bestand
+    // zu durchsuchen hieß, alle 5.000 Zeilen zu öffnen. Seitdem sucht der
+    // Server nach Bedeutung und Wörtern und öffnet nur die Kandidaten — und
+    // findet dabei auch, was kein Wort mit der Suche teilt.
+    const kaffee: AiMemoryEntry = { ...satz, id: '...-900', value: 'Trinkt Kaffee schwarz.' }
+    vi.mocked(aiApi.listPersonalMemory).mockImplementation(async (_offset, filter) => (
+      filter?.suche ? seite([kaffee]) : grosserVorrat
+    ))
+    render(<AiMemoryManager />)
+
+    const feld = await screen.findByLabelText('Alle Erinnerungen durchsuchen')
+    fireEvent.change(feld, { target: { value: 'coffee' } })
+
+    expect(await screen.findByText('Trinkt Kaffee schwarz.')).toBeInTheDocument()
+    expect(aiApi.listPersonalMemory).toHaveBeenLastCalledWith(0, { ...OHNE_FILTER, suche: 'coffee' })
+    expect(screen.getByText('1 Treffer im ganzen Gedächtnis')).toBeInTheDocument()
+    // Treffer haben keine Seiten.
+    expect(screen.queryByRole('navigation', { name: 'Seitennavigation' })).toBeNull()
+
+    // Wer die Suche leert, ist wieder auf seiner Seite.
+    fireEvent.change(feld, { target: { value: '' } })
+    expect(await screen.findByText('Seite 1 von 1250')).toBeInTheDocument()
+    expect(screen.queryByText('Trinkt Kaffee schwarz.')).toBeNull()
+  })
+
+  it('fragt den Server erst ab zwei Zeichen', async () => {
     vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(grosserVorrat)
     render(<AiMemoryManager />)
 
-    expect(await screen.findByLabelText('Diese Seite durchsuchen')).toBeInTheDocument()
-    // Und der Filter bleibt beim Blättern stehen, statt sich stillschweigend zu
-    // leeren: die Suche gilt weiter, nur eben für die nächste Seite.
-    fireEvent.change(screen.getByLabelText('Diese Seite durchsuchen'), { target: { value: 'berlin' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Weiter' }))
+    fireEvent.change(await screen.findByLabelText('Alle Erinnerungen durchsuchen'), {
+      target: { value: 'b' },
+    })
+    await new Promise((fertig) => setTimeout(fertig, 400))
 
-    await waitFor(() => expect(aiApi.listPersonalMemory).toHaveBeenLastCalledWith(4, OHNE_FILTER))
-    expect(screen.getByLabelText('Diese Seite durchsuchen')).toHaveValue('berlin')
+    expect(aiApi.listPersonalMemory).toHaveBeenCalledTimes(1)
+  })
+
+  it('heftet an und löst wieder, ohne die Fassung', async () => {
+    // Angeheftet steht eine Erinnerung in jedem Gespräch vorn. Am Inhalt
+    // ändert das nichts, darum gibt es keine Fassung und kein 409.
+    vi.mocked(aiApi.listPersonalMemory)
+      .mockResolvedValueOnce(seite([mitTitel]))
+      .mockResolvedValue(seite([{ ...mitTitel, angeheftet: true }]))
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('button', { name: `Anheften: ${mitTitel.titel}` }))
+
+    await waitFor(() => expect(aiApi.pinMemory).toHaveBeenCalledWith(mitTitel.id, true))
+    expect(await screen.findByText('Angeheftet')).toBeInTheDocument()
+    const loesen = screen.getByRole('button', { name: `Lösen: ${mitTitel.titel}` })
+    expect(loesen).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(loesen)
+    await waitFor(() => expect(aiApi.pinMemory).toHaveBeenLastCalledWith(mitTitel.id, false))
   })
 
   it('fragt beim Leeren nach der Zahl des Servers, nicht nach der Seitenlänge', async () => {

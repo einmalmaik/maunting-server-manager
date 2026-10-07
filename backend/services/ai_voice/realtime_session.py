@@ -257,16 +257,21 @@ def sprachregel(sprache: str) -> str:
 
 
 def gedaechtnis(db: Session, user: User) -> str:
-    """Freigegebene Erinnerungen — leer ohne ``ai.memory.use``."""
+    """Was im Gedächtnis „im Kopf“ steht — leer ohne ``ai.memory.use``.
+
+    Eine Sitzung beginnt ohne Frage, also gibt es nur den Kopf: angeheftet,
+    wichtig, neu (`ai_gedaechtnis_abruf`). Einzelnes holt die Stimme mit
+    `search_memory`. Bis Stufe 4 stand hier eine feste Ersatzfrage, nach der
+    eine zufällige Auswahl mitkam.
+    """
     if ai_memory_service is None:
         return ""
+    from services import ai_gedaechtnis_abruf
     from services.permission_service import has_global_permission
 
     if not has_global_permission(db, user, "ai.memory.use"):
         return ""
-    return ai_memory_service.provider_memory_context(
-        db, user, "aktuelles Sprachgespräch", None, budget=8_000
-    )
+    return ai_gedaechtnis_abruf.abrufen(db, user, "", None, budget=8_000).kopf or ""
 
 
 def mitschreiben(db: Session, user: User) -> bool:

@@ -56,6 +56,12 @@ class AiMemoryUpdate(BaseModel):
     fassung: int = Field(ge=1)
 
 
+class AiMemoryAnheften(BaseModel):
+    """Anheften oder lösen: angeheftet steht eine Erinnerung immer im Kopf."""
+
+    angeheftet: bool
+
+
 class AiMemoryFassungZurueck(BaseModel):
     """Zurueck auf eine fruehere Fassung — mit der Fassung, die man gesehen hat."""
 
@@ -106,6 +112,8 @@ class AiMemoryResponse(BaseModel):
     vergessen_am: datetime | None = None
     #: Die Fassung, die eine Aenderung als gesehen mitschickt.
     fassung: int = 1
+    #: Steht immer im Kopf jedes Gesprächs (`ai_gedaechtnis_abruf`).
+    angeheftet: bool = False
     use_count: int = 0
     last_used_at: datetime | None = None
     created_at: datetime
