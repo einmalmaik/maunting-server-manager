@@ -18,7 +18,7 @@ use tauri::AppHandle;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
     take_pwstr, AcceleratorKeyPressedEventHandler, ContainsFullScreenElementChangedEventHandler,
-    DOMContentLoadedEventHandler, ExecuteScriptCompletedHandler, FaviconChangedEventHandler,
+    DOMContentLoadedEventHandler, ExecuteScriptCompletedHandler, FaviconChangedEventHandler, GetFaviconCompletedHandler,
     HistoryChangedEventHandler, NavigationStartingEventHandler, ProcessFailedEventHandler,
     SourceChangedEventHandler, WebResourceRequestedEventHandler,
 };
@@ -101,12 +101,24 @@ pub(super) unsafe fn einrichten(
         let (app, id) = (app.clone(), id.to_string());
         core15.add_FaviconChanged(
             &FaviconChangedEventHandler::create(Box::new(move |sender, _| {
-                if let Some(core15) = sender.and_then(|s| s.cast::<ICoreWebView2_15>().ok()) {
-                    let url = text(|p| core15.FaviconUri(p));
-                    let url = (url.starts_with("https://") || url.starts_with("http://")).then_some(url);
-                    melden(&app, TabEreignis::Favicon { id: id.clone(), url });
+                let Some(core15) = sender.and_then(|s| s.cast::<ICoreWebView2_15>().ok()) else { return Ok(()) };
+                let url = text(|p| core15.FaviconUri(p));
+                if !(url.starts_with("https://") || url.starts_with("http://")) {
+                    melden(&app, TabEreignis::Favicon { id: id.clone(), url: None });
+                    return Ok(());
                 }
-                Ok(())
+                // Das Bild aus der Webview, als Data-Adresse: die Oberfläche lud
+                // die Adresse sonst selbst, mit ihrem Profil und am Schild vorbei
+                // (bis 09.10.2026).
+                let (app, id) = (app.clone(), id.clone());
+                core15.GetFavicon(
+                    COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG,
+                    &GetFaviconCompletedHandler::create(Box::new(move |fehler, strom| {
+                        let bild = fehler.ok().and(strom).and_then(|s| unsafe { favicon_lesen(&s) });
+                        melden(&app, TabEreignis::Favicon { id, url: bild });
+                        Ok(())
+                    })),
+                )
             })),
             &mut token,
         )?;
@@ -306,6 +318,26 @@ unsafe fn kosmetik_anwenden(core: &ICoreWebView2) {
 }
 
 const OHNE_ANTWORT: Option<&ICoreWebView2ExecuteScriptCompletedHandler> = None;
+
+/// Ein Favicon als `data:image/png;base64,…`; `None`, wenn leer oder größer als 32 KiB.
+unsafe fn favicon_lesen(strom: &windows::Win32::System::Com::IStream) -> Option<String> {
+    use base64::Engine;
+    const HOECHSTENS: usize = 32 * 1024;
+    let mut bild = Vec::new();
+    let mut puffer = [0u8; 4096];
+    loop {
+        let mut gelesen = 0u32;
+        strom.Read(puffer.as_mut_ptr().cast(), puffer.len() as u32, Some(&mut gelesen)).ok().ok()?;
+        if gelesen == 0 {
+            break;
+        }
+        bild.extend_from_slice(&puffer[..gelesen as usize]);
+        if bild.len() > HOECHSTENS {
+            return None;
+        }
+    }
+    (!bild.is_empty()).then(|| format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bild)))
+}
 
 #[cfg(test)]
 mod tests {

@@ -6,6 +6,7 @@ import { useEffect } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+import { ablage, ADRESSE_MAX, kurzerTitel } from './ablage'
 import { useEinstellungenStore, type VerlaufFrist } from './einstellungenStore'
 
 export interface Eintrag {
@@ -45,6 +46,9 @@ export const useVerlaufStore = create<VerlaufZustand>()(
 
       besucht: (url, titel) =>
         set((s) => {
+          // Eine Adresse, die eine Seite beliebig lang machen kann, kommt nicht in den Verlauf.
+          if (url.length > ADRESSE_MAX) return s
+          titel = kurzerTitel(titel)
           const jetzt = Date.now()
           const [letzter] = s.verlauf
           if (letzter && letzter.url === url && jetzt - letzter.zeit < ZUSAMMENFASSEN_MS) {
@@ -58,7 +62,7 @@ export const useVerlaufStore = create<VerlaufZustand>()(
           const index = s.verlauf.findIndex((e) => e.url === url)
           if (index !== 0) return s
           const verlauf = [...s.verlauf]
-          verlauf[0] = { ...verlauf[0], titel }
+          verlauf[0] = { ...verlauf[0], titel: kurzerTitel(titel) }
           return { verlauf }
         }),
 
@@ -92,7 +96,7 @@ export const useVerlaufStore = create<VerlaufZustand>()(
           return { lesezeichen }
         }),
     }),
-    { name: 'msb:verlauf', version: 1 },
+    { name: 'msb:verlauf', version: 1, storage: ablage },
   ),
 )
 

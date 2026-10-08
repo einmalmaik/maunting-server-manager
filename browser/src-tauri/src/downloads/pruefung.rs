@@ -59,6 +59,21 @@ mod tests {
         assert_eq!(quelle("data:text/plain,x"), None);
     }
 
+    /// Probe am echten NTFS: auch eine Datei, die eine Seite im Skript baut
+    /// (`data:`, `blob:`), trägt eine Herkunftsmarke. Ohne Quelle schreibt
+    /// Windows Zone 4 („eingeschränkt“), strenger als die Internetzone.
+    #[test]
+    fn auch_eine_datei_aus_dem_skript_traegt_die_herkunftsmarke() {
+        for (nr, url) in ["data:text/plain,harmlos", "blob:https://example.com/123", "https://example.com/a.txt"].into_iter().enumerate() {
+            let datei = std::env::temp_dir().join(format!("msb-marke-{}-{nr}.txt", std::process::id()));
+            std::fs::write(&datei, b"harmlos").unwrap();
+            assert!(pruefen(&datei, url));
+            let marke = std::fs::read_to_string(format!("{}:Zone.Identifier", datei.display())).unwrap_or_default();
+            std::fs::remove_file(&datei).unwrap();
+            assert!(marke.contains("ZoneId=3") || marke.contains("ZoneId=4"), "{url}: {marke:?}");
+        }
+    }
+
     /// Legt die EICAR-Prüfdatei an; Defender meldet dabei einen Fund. Nur von
     /// Hand: `cargo test -- --ignored eicar`, und `TMP` darf nicht vom
     /// Virenschutz ausgenommen sein.

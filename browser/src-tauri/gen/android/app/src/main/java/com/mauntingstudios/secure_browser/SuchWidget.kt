@@ -33,6 +33,30 @@ class SuchWidget : AppWidgetProvider() {
       zeichnen(context, verwalter, verwalter.getAppWidgetIds(ComponentName(context, SuchWidget::class.java)))
     }
 
+    /**
+     * `liegt`: schon auf dem Startbildschirm. `anheftbar`: der Startbildschirm
+     * nimmt es auf Bitte auf. `nein`: geht nur von Hand.
+     */
+    fun lage(context: Context): String {
+      val verwalter = AppWidgetManager.getInstance(context)
+      return when {
+        verwalter.getAppWidgetIds(ComponentName(context, SuchWidget::class.java)).isNotEmpty() -> "liegt"
+        verwalter.isRequestPinAppWidgetSupported -> "anheftbar"
+        else -> "nein"
+      }
+    }
+
+    /**
+     * Bittet den Startbildschirm, das Widget aufzunehmen; er fragt selbst
+     * nach. Eine andere Suchleiste (Google beim Pixel) kann keine App
+     * entfernen, das Widget kommt dazu.
+     */
+    fun anheften(context: Context): Boolean {
+      val verwalter = AppWidgetManager.getInstance(context)
+      return verwalter.isRequestPinAppWidgetSupported &&
+        verwalter.requestPinAppWidget(ComponentName(context, SuchWidget::class.java), null, null)
+    }
+
     private fun zeichnen(context: Context, verwalter: AppWidgetManager, kennungen: IntArray) {
       val bildsuche = context.getSharedPreferences(ABLAGE, Context.MODE_PRIVATE).getBoolean(BILDSUCHE, false)
       val ansicht = RemoteViews(context.packageName, R.layout.widget_suche).apply {

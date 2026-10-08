@@ -95,6 +95,23 @@ describe('Passwort erzeugen und nach der Registrierung speichern', () => {
     expect(screen.getByRole('button', { name: 'Starkes Passwort vorschlagen' })).toBeInTheDocument()
   })
 
+  // Bis 09.10.2026 legte jedes Absenden mit dem erzeugten Passwort einen
+  // Eintrag an; die Seite kennt es und kann beliebig oft abschicken.
+  it('speichert ein erzeugtes Passwort nur einmal ohne Rückfrage, danach fragt es', async () => {
+    fokus()
+    leiste()
+    await warten()
+    const [passwort] = fuellungen()
+    absenden(passwort!)
+    await warten()
+    absenden(passwort!, 'zweiter@neu.example')
+    await warten()
+    absenden(passwort!, 'dritter@neu.example')
+    await warten()
+    expect(saveItem).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Speichern' })).toBeInTheDocument()
+  })
+
   it('fragt wie bisher, wenn ein anderes Passwort abgeschickt wurde', async () => {
     fokus()
     leiste()

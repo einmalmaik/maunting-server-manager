@@ -6,6 +6,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+import { ablage, passend } from './ablage'
 import type { SuchmaschinenId } from './searchEngines'
 
 export type Hintergrund = 'schlicht' | 'nacht' | 'wald' | 'tiefsee' | 'eigen'
@@ -89,6 +90,8 @@ interface EinstellungenZustand {
   speicherSparen: boolean
   /** Hosts, deren Tabs nie schlafen. */
   schlafAusnahmen: string[]
+  /** Am Handy: das Angebot, das Such-Widget auf den Startbildschirm zu legen, ist erledigt. */
+  widgetAngeboten: boolean
 
   setzen: (teil: Partial<Omit<EinstellungenZustand, 'setzen' | 'umschalten'>>) => void
   umschalten: (was: Ausblendbar) => void
@@ -134,6 +137,7 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       schlafenNach: 30,
       speicherSparen: false,
       schlafAusnahmen: [],
+      widgetAngeboten: false,
 
       setzen: (teil) => set(teil),
       umschalten: (was) =>
@@ -146,8 +150,9 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
     {
       name: 'msb:einstellungen',
       version: 1,
+      storage: ablage,
       merge: (gespeichert, aktuell) => {
-        const g = (gespeichert ?? {}) as Partial<EinstellungenZustand>
+        const g = passend(aktuell, gespeichert)
         return { ...aktuell, ...g, schnellzugriffe: g.schnellzugriffe ?? bisherigeKacheln() ?? aktuell.schnellzugriffe }
       },
     },

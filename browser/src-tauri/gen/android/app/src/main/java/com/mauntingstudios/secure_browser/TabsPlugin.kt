@@ -9,7 +9,10 @@ import android.util.Base64
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
+import android.webkit.ServiceWorkerClient
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
@@ -25,6 +28,7 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import org.json.JSONObject
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.UUID
 
@@ -32,7 +36,7 @@ import java.util.UUID
 @InvokeArg class LadenArgs { lateinit var id: String; lateinit var url: String; var privat = false }
 @InvokeArg class VorneArgs { var vorne: String? = null }
 @InvokeArg class RahmenArgs { var x = 0.0; var y = 0.0; var breite = 0.0; var hoehe = 0.0 }
-@InvokeArg class SkriptArgs { lateinit var id: String; lateinit var skript: String }
+@InvokeArg class AktionArgs { lateinit var id: String; lateinit var aktion: String }
 @InvokeArg class AntwortArgs { var nr = 0L; lateinit var antwort: String }
 @InvokeArg class SuchenArgs { lateinit var id: String; lateinit var richtung: String; var begriff = "" }
 @InvokeArg class FuellenArgs { lateinit var id: String; lateinit var fuer: String; lateinit var nachricht: String }
@@ -114,9 +118,31 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     val profil = if (privat) privatProfil else SEITEN
     ProfileStore.getInstance().getOrCreateProfile(profil)
     Tab(this, activity, id, privat, profil).also {
+      if (mitWorkerPruefung.add(profil)) workerPruefen(profil)
       it.sichtbar(false)
       inhalt.addView(it.webView, platz())
     }
+  }
+
+  /** Profile, deren Service Worker schon geprüft werden. */
+  private val mitWorkerPruefung = HashSet<String>()
+
+  /**
+   * Anfragen eines Service Workers sieht `shouldInterceptRequest` des Tabs
+   * nicht; Schild und Jugendschutz prüfen sie deshalb je Profil hier. Bis
+   * 09.10.2026 lud eine Seite mit Service Worker darüber, was die Sperre
+   * abweisen sollte. Die Seite steht nicht fest: der Referer, sonst die Adresse.
+   */
+  private fun workerPruefen(name: String) {
+    val profil = ProfileStore.getInstance().getProfile(name) ?: return
+    profil.serviceWorkerController.setServiceWorkerClient(object : ServiceWorkerClient() {
+      override fun shouldInterceptRequest(anfrage: WebResourceRequest): WebResourceResponse? {
+        val url = anfrage.url.toString()
+        val seite = anfrage.requestHeaders["Referer"] ?: url
+        if (!TabsBruecke.anfrage("", url, seite, false, anfrage.requestHeaders["Accept"].orEmpty())) return null
+        return WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
+      }
+    })
   }
 
   @Command
@@ -183,11 +209,18 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     zurueckPruefen()
   }
 
+  /** Zurück, Vor, Neu laden, Anhalten über die WebView, nie als Skript der Seite. */
   @Command
-  fun ausfuehren(invoke: Invoke) {
-    val a = invoke.parseArgs(SkriptArgs::class.java)
+  fun aktion(invoke: Invoke) {
+    val a = invoke.parseArgs(AktionArgs::class.java)
     aufUi(invoke) {
-      tab(a.id).webView.evaluateJavascript(a.skript, null)
+      val ansicht = tab(a.id).webView
+      when (a.aktion) {
+        "zurueck" -> ansicht.goBack()
+        "vor" -> ansicht.goForward()
+        "neu_laden" -> ansicht.reload()
+        else -> ansicht.stopLoading()
+      }
       null
     }
   }
@@ -296,6 +329,16 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
       activity.getSystemService(InputMethodManager::class.java).showSoftInput(ansicht, InputMethodManager.SHOW_IMPLICIT)
       null
     }
+  }
+
+  @Command
+  fun widgetLage(invoke: Invoke) {
+    aufUi(invoke) { JSObject().put("lage", SuchWidget.lage(activity)) }
+  }
+
+  @Command
+  fun widgetAnheften(invoke: Invoke) {
+    aufUi(invoke) { JSObject().put("ok", SuchWidget.anheften(activity)) }
   }
 
   @Command

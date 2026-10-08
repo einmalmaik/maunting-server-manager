@@ -1,6 +1,9 @@
 /**
  * Die Startseite eines neuen Tabs: Suche, Schnellzugriffe, Widgets,
  * Hintergrund. Kacheln und Widgets stehen unter `start/`.
+ *
+ * Am Handy gibt es ein Suchfeld, die Leiste unten; hier steht dann nur die
+ * Wahl der Suchmaschine. Ein zweites Feld daneben war schmal und tat dasselbe.
  */
 import { useState } from 'react'
 import { EyeOff, Search, SlidersHorizontal } from 'lucide-react'
@@ -9,10 +12,12 @@ import { useTranslation } from 'react-i18next'
 import { Button, Dropdown, Input } from '@/Singra/UI'
 
 import { MarkenSymbol } from '../marken'
+import { istAndroid } from '../services/plattform'
 import { useEinstellungenStore, type Hintergrund } from '../services/einstellungenStore'
 import { SUCHMASCHINEN, suchmaschine, type SuchmaschinenId } from '../services/searchEngines'
 import { useTabsStore } from '../services/tabsStore'
 import { Schnellzugriffe } from './start/Schnellzugriffe'
+import { WidgetAngebot } from './start/WidgetAngebot'
 import { Widgets } from './start/Widgets'
 
 export const HINTERGRUENDE: Record<Exclude<Hintergrund, 'eigen'>, string> = {
@@ -40,6 +45,19 @@ export function Startseite({ privat }: { privat: boolean }) {
   const setzen = useEinstellungenStore((s) => s.setzen)
   const [text, setText] = useState('')
   const suche = suchmaschine(sucheId)
+  const handy = istAndroid()
+  const wahl = (
+    <Dropdown
+      aria-label={t('browser.start.suchmaschine')}
+      value={sucheId}
+      onChange={(v) => setzen({ suchmaschine: v as SuchmaschinenId })}
+      options={SUCHMASCHINEN.map((s) => ({
+        value: s.id,
+        label: s.name,
+        icon: <MarkenSymbol marke={s.marke} />,
+      }))}
+    />
+  )
 
   return (
     <div className="relative flex h-full flex-col items-center overflow-y-auto px-6 pb-8 pt-[14vh]" style={hintergrundStil(hintergrund, eigenesBild)}>
@@ -60,40 +78,34 @@ export function Startseite({ privat }: { privat: boolean }) {
           </div>
         )}
 
-        <form
-          className="flex w-full items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (text.trim()) eingeben(text)
-          }}
-        >
-          <div className="w-40 shrink-0">
-            <Dropdown
-              aria-label={t('browser.start.suchmaschine')}
-              value={sucheId}
-              onChange={(v) => setzen({ suchmaschine: v as SuchmaschinenId })}
-              options={SUCHMASCHINEN.map((s) => ({
-                value: s.id,
-                label: s.name,
-                icon: <MarkenSymbol marke={s.marke} />,
-              }))}
-            />
-          </div>
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-on-surface-variant" aria-hidden="true" />
-            <Input
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              aria-label={t('browser.start.suchen')}
-              placeholder={t('browser.adresse.platzhalter', { suchmaschine: suche.name })}
-              className="pl-9"
-              autoComplete="off"
-              spellCheck={false}
-              autoFocus
-            />
-          </div>
-        </form>
+        {handy ? (
+          <div className="w-full max-w-xs">{wahl}</div>
+        ) : (
+          <form
+            className="flex w-full items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (text.trim()) eingeben(text)
+            }}
+          >
+            <div className="w-40 shrink-0">{wahl}</div>
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-on-surface-variant" aria-hidden="true" />
+              <Input
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                aria-label={t('browser.start.suchen')}
+                placeholder={t('browser.adresse.platzhalter', { suchmaschine: suche.name })}
+                className="pl-9"
+                autoComplete="off"
+                spellCheck={false}
+                autoFocus
+              />
+            </div>
+          </form>
+        )}
 
+        {handy && !privat && <WidgetAngebot />}
         <Schnellzugriffe />
         <Widgets privat={privat} />
         {!privat && (

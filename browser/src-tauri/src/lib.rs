@@ -118,6 +118,8 @@ pub fn run() {
             browserdaten::seitenrecht_zuruecksetzen,
             widget::widget_start,
             widget::widget_stand,
+            widget::widget_lage,
+            widget::widget_anheften,
             widget::bildsuche,
             widget::tastatur_zeigen,
         ])
@@ -179,6 +181,19 @@ mod tests {
 
         assert_eq!(manifest, registriert);
         assert_eq!(erlaubt, registriert);
+    }
+
+    /// Die Oberfläche hält Tresor und Sitzung. Sie lädt kein Bild von einer
+    /// Adresse, die eine Seite nennt (Favicons kommen als Data-Adresse aus der
+    /// Webview), und führt keinen Text als Skript aus (bis 09.10.2026 beides
+    /// erlaubt, ohne dass ein Baustein es brauchte).
+    #[test]
+    fn die_oberflaeche_laedt_keine_fremden_bilder_und_kein_eval() {
+        let konfig: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let csp = konfig["app"]["security"]["csp"].as_str().unwrap();
+        let quelle = |name: &str| csp.split(';').map(str::trim).find(|d| d.starts_with(name)).unwrap().to_string();
+        assert_eq!(quelle("img-src"), "img-src 'self' data: blob:");
+        assert!(!quelle("script-src").contains("'unsafe-eval'"));
     }
 
     /// Das Token der Kopplung liegt unter Android verschlüsselt im Schlüsselfach,

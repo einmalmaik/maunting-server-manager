@@ -35,7 +35,13 @@ export function Hostliste({
       setFehler(t('browser.einstellungen.ausnahmeUngueltig'))
       return
     }
-    if (!eintraege.includes(host) && eintraege.length < max) setzen([...eintraege, host])
+    if (!eintraege.includes(host)) {
+      if (eintraege.length >= max) {
+        setFehler(t('browser.einstellungen.listeVoll', { max }))
+        return
+      }
+      setzen([...eintraege, host])
+    }
     setEingabe('')
   }
 

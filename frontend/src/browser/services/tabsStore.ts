@@ -13,6 +13,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+import { ablage, ADRESSE_MAX, kurzerTitel, passend } from './ablage'
 import { useDownloadsStore } from './downloadsStore'
 import { useEinstellungenStore } from './einstellungenStore'
 import { useFormulare } from './formulare'
@@ -136,6 +137,14 @@ export const useTabsStore = create<TabsZustand>()(
       const finden = (id: string) => get().tabs.find((t) => t.id === id)
 
       /** Lädt eine Adresse im Tab; legt dabei die Webview an, falls nötig. */
+      /**
+       * Nach `tab_laden`: die Webview nach vorn, wenn der Tab noch vorn ist und
+       * keine Seite der Oberfläche zeigt. Unter Android meldet Rust die Sperre,
+       * bevor `tab_laden` zurückkommt; die leere Webview lag sonst über der
+       * Sperrseite (bis 09.10.2026).
+       */
+      const nachVorn = (id: string) => (get().aktivId === id && !finden(id)?.fehler ? nativ.tabAktivieren(id) : null)
+
       const laden = (id: string, url: string) => {
         const tab = finden(id)
         if (!tab) return
@@ -149,7 +158,7 @@ export const useTabsStore = create<TabsZustand>()(
         aendern(id, { url, laedt: true, abgestuerzt: false, fehler: null, nativDa: true, ruhe: null })
         void nativ
           .tabLaden(id, url, tab.privat)
-          .then(() => (get().aktivId === id ? nativ.tabAktivieren(id) : null))
+          .then(() => nachVorn(id))
           .catch(() => aendern(id, { laedt: false }))
       }
 
@@ -163,7 +172,7 @@ export const useTabsStore = create<TabsZustand>()(
           aendern(id, { url: bild.url, laedt: true, nativDa: true })
           void nativ
             .bildsuche(id, false, bild)
-            .then(() => (get().aktivId === id ? nativ.tabAktivieren(id) : null))
+            .then(() => nachVorn(id))
             .catch(() => aendern(id, { laedt: false, url: '' }))
           return id
         },
@@ -198,10 +207,13 @@ export const useTabsStore = create<TabsZustand>()(
           useRueckfragen.getState().tabWeg(id)
           entwicklerTabWeg(id)
           useFormulare.getState().tabWeg(id)
-          if (tab.url) {
+          const rest = tabs.filter((t) => t.id !== id)
+          if (tab.privat && !rest.some((t) => t.privat)) {
+            // Die private Sitzung ist zu (Android leert ihr Profil): keine ihrer Seiten lässt sich zurückholen.
+            set((s) => ({ geschlossen: s.geschlossen.filter((g) => !g.privat) }))
+          } else if (tab.url) {
             set((s) => ({ geschlossen: [{ url: tab.url, privat: tab.privat }, ...s.geschlossen].slice(0, 20) }))
           }
-          const rest = tabs.filter((t) => t.id !== id)
           if (rest.length === 0) {
             const neu = leererTab(neueTabId())
             set({ tabs: [neu], aktivId: neu.id })
@@ -410,22 +422,44 @@ export const useTabsStore = create<TabsZustand>()(
     {
       name: 'msb:tabs',
       version: 1,
+      storage: ablage,
       partialize: (s) => {
         const tabs = s.tabs
           .filter((t) => !t.privat)
-          .map((t) => ({ ...leererTab(t.id), url: t.url, titel: t.titel, favicon: t.favicon }))
+          .map((t) => ({
+            ...leererTab(t.id),
+            // Zu lang (eine Seite kann das): beim nächsten Start nur die Herkunft.
+            url: t.url.length > ADRESSE_MAX ? herkunftVon(t.url) : t.url,
+            titel: kurzerTitel(t.titel),
+            favicon: t.favicon && t.favicon.length <= FAVICON_MAX ? t.favicon : null,
+          }))
         const aktivId = tabs.some((t) => t.id === s.aktivId) ? s.aktivId : tabs[0]?.id
         return { tabs, aktivId }
       },
       merge: (gespeichert, aktuell) => {
-        const g = gespeichert as Partial<TabsZustand> | undefined
-        if (!g?.tabs?.length || !g.aktivId) return aktuell
-        // Felder, die eine frühere Fassung nicht kannte, kommen aus dem leeren Tab.
-        return { ...aktuell, tabs: g.tabs.map((t) => ({ ...leererTab(t.id), ...t })), aktivId: g.aktivId }
+        const g = (gespeichert ?? {}) as { tabs?: unknown; aktivId?: unknown }
+        // Nur Tabs mit gültiger Kennung und von ihnen nur, was `partialize`
+        // schreibt, mit dem richtigen Typ; der Rest kommt aus dem leeren Tab.
+        const tabs = (Array.isArray(g.tabs) ? g.tabs : [])
+          .filter((t): t is { id: string } => typeof t?.id === 'string' && /^tab-[A-Za-z0-9-]{1,40}$/.test(t.id))
+          .map((t) => ({ ...leererTab(t.id), ...passend({ url: '', titel: '', favicon: null as string | null }, t) }))
+        const aktivId = tabs.find((t) => t.id === g.aktivId)?.id
+        return aktivId ? { ...aktuell, tabs, aktivId } : aktuell
       },
     },
   ),
 )
+
+/** Ein Favicon (unter Android eine Data-Adresse) wird nur bis zu dieser Länge gespeichert. */
+const FAVICON_MAX = 64 * 1024
+
+function herkunftVon(url: string): string {
+  try {
+    return `${new URL(url).origin}/`
+  } catch {
+    return ''
+  }
+}
 
 export function useAktiverTab(): Tab | undefined {
   return useTabsStore((s) => s.tabs.find((t) => t.id === s.aktivId))

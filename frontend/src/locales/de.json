@@ -4857,7 +4857,7 @@
           "ausfuellen": "Ausfüllen aus dem Tresor: Anmeldedaten, Zahlungskarten und Bankkonten entschlüsselt der Browser auf dem Rechner und setzt sie nur in die Seite ein, für die sie gelten. Zahlungsdaten gibt es nur über HTTPS und erst nach Windows Hello oder dem Master-Passwort.",
           "passwoerter": "Neue Passwörter: Bei einer Registrierung erzeugt der Browser auf dem Rechner ein starkes Passwort und speichert es nach dem Absenden im Tresor. Ist der Tresor gesperrt, verschlüsselt er die Anmeldung mit dem öffentlichen Schlüssel Ihres Tresor-Posteingangs und legt sie dort ab; die Instanz sieht nur den verschlüsselten Datensatz, übernommen wird er beim nächsten Entsperren. Ein Master-Passwort hält der Browser dafür nicht im Speicher.",
           "kopplung": "Kopplung mit MSM (freiwillig): Gekoppelt zeigt der Browser Singra, Messenger, Notizen, Kalender und Tresor Ihrer Instanz in der Seitenleiste; dafür gelten die Abschnitte oben. Die Anmeldung liegt unter Windows in der Windows-Anmeldeinformationsverwaltung, unter Android verschlüsselt mit einem Schlüssel aus dem Android-Keystore. Jedes dieser Module lässt sich in den Einstellungen ausblenden, die Kopplung jederzeit trennen.",
-          "android": "Unter Android: Safe Browsing und die Nutzungsstatistik der WebView sind abgeschaltet, besuchte Adressen gehen dafür nicht an Google. Normale Tabs haben ein eigenes Profil, getrennt von der Oberfläche des Browsers. Der Browser nimmt sich von der Android-Datensicherung und vom Umzug auf ein neues Gerät aus: Cookies, Verlauf und die Anmeldung der Kopplung bleiben auf diesem Telefon. Private Tabs teilen sich ein Profil auf dem Telefon; Cookies, Website-Speicher und Cache darin werden gelöscht, sobald der letzte private Tab geschlossen ist, den Ordner entfernt der nächste Start. Downloads lädt der Download-Dienst von Android, der dafür Adresse, Cookies und User-Agent der Seite bekommt; eine Virenprüfung gibt es nicht. Den eingeschränkten Modus von YouTube kann der Browser hier nicht einschalten. Zahlungsdaten setzt er erst nach der Bildschirmsperre des Telefons (Fingerabdruck, Gesicht oder PIN) oder dem Master-Passwort ein.",
+          "android": "Unter Android: Safe Browsing und die Nutzungsstatistik der WebView sind abgeschaltet, besuchte Adressen gehen dafür nicht an Google. Normale Tabs haben ein eigenes Profil, getrennt von der Oberfläche des Browsers; getrennt sind damit Cookies und Speicher, den Prozess der WebView teilen sich Seiten und Oberfläche unter Android aber. Der Browser nimmt sich von der Android-Datensicherung und vom Umzug auf ein neues Gerät aus: Cookies, Verlauf und die Anmeldung der Kopplung bleiben auf diesem Telefon. Private Tabs teilen sich ein Profil auf dem Telefon; Cookies, Website-Speicher und Cache darin werden gelöscht, sobald der letzte private Tab geschlossen ist, den Ordner entfernt der nächste Start. Downloads lädt der Browser selbst in den Ordner „Download“; Cookies schickt er dabei nur an die Seite, der sie gehören, auch nach einer Weiterleitung. Eine Virenprüfung gibt es nicht. Den eingeschränkten Modus von YouTube kann der Browser hier nicht einschalten. Zahlungsdaten setzt er erst nach der Bildschirmsperre des Telefons (Fingerabdruck, Gesicht oder PIN) oder dem Master-Passwort ein.",
           "widget": "Such-Widget unter Android: Was Sie in das Mikrofon sprechen, wandelt der Spracherkennungsdienst des Telefons in Text um, meist Google; der Browser bekommt nur den Text. Ein Foto nimmt die Kamera-App auf. Der Browser verkleinert es, entfernt Ort und andere Metadaten, schickt es an die Bildsuche der gewählten Suchmaschine (Google Lens oder Bing) und löscht es danach vom Telefon. Kamera- oder Mikrofonrecht hat der Browser selbst nicht."
         }
       },
@@ -8497,6 +8497,7 @@
     "noRoles": "Es gibt noch keine Rollen."
   },
   "browser": {
+    "ablageVoll": "Der Browser kann nichts mehr speichern, der lokale Speicher ist voll. Lösche den Verlauf oder ein eigenes Hintergrundbild.",
     "tabs": {
       "liste": "Tabs",
       "neu": "Neuer Tab",
@@ -8554,6 +8555,10 @@
       "titel": "Maunting Secure Browser",
       "suchen": "Suchen",
       "suchmaschine": "Suchmaschine",
+      "widgetTitel": "Suche auf dem Startbildschirm",
+      "widgetText": "Das Such-Widget öffnet den Secure Browser direkt vom Startbildschirm: zum Tippen, Sprechen oder für die Bildsuche.",
+      "widgetAnheften": "Widget hinzufügen",
+      "widgetSpaeter": "Nicht jetzt",
       "schnellzugriff": "Schnellzugriff",
       "privatTitel": "Privater Tab",
       "privatText": "Seiten aus privaten Tabs landen nicht im Verlauf. Cookies und Cache liegen nur im Speicher und verschwinden, wenn der letzte private Tab geschlossen ist. Downloads und Lesezeichen bleiben.",
@@ -8640,7 +8645,8 @@
         "pruefung": "Wird vom Virenschutz geprüft",
         "fertig": "Fertig",
         "blockiert": "Vom Virenschutz blockiert und gelöscht",
-        "fehler": "Fehlgeschlagen"
+        "fehler": "Fehlgeschlagen",
+        "speicher": "Abgebrochen: zu wenig Speicher auf dem Gerät"
       }
     },
     "hintergrund": {
@@ -8662,6 +8668,7 @@
       "ausnahmeEntfernenName": "Ausnahme {{host}} entfernen",
       "vergessen": "Beim Schließen vergessen",
       "vergessenHinweis": "Löscht Cookies, Cache und Website-Daten, wenn du den Browser schließt. Verlauf und Lesezeichen bleiben.",
+      "vergessenHinweisAndroid": "Löscht Cookies, Cache und Website-Daten beim nächsten Start des Browsers: Android sagt einer App nicht zuverlässig, wann sie geschlossen wird. Verlauf und Lesezeichen bleiben.",
       "datenLoeschen": "Browserdaten löschen",
       "datenLoeschenTitel": "Browserdaten löschen?",
       "datenLoeschenText": "Cookies, Cache, Website-Daten und Verlauf werden gelöscht ({{zeitraum}}). Auf vielen Seiten bist du danach abgemeldet. Lesezeichen und die Kopplung mit MSM bleiben.",
@@ -8791,12 +8798,13 @@
       "wachBleibenHinweis": "Tabs dieser Seiten schlafen nie.",
       "ausnahmeSeite": "Seite",
       "ausnahmeHinzufuegen": "Hinzufügen",
+      "listeVoll": "Die Liste ist voll ({{max}} Einträge). Entferne erst einen.",
       "ausnahmeUngueltig": "Das ist keine Domain.",
       "eintragEntfernen": "Entfernen",
       "eintragEntfernenName": "{{host}} entfernen",
       "downloadFragen": "Bei jedem Download fragen",
       "downloadFragenHinweis": "Vor dem Laden fragt der Browser, wo die Datei hin soll.",
-      "downloadsAndroid": "Downloads landen im Ordner „Download“ des Telefons. Android lädt sie über seinen Download-Dienst und meldet sie in der Benachrichtigung. Eine Virenprüfung wie unter Windows gibt es hier nicht.",
+      "downloadsAndroid": "Downloads landen im Ordner „Download“ des Telefons. Der Browser lädt sie selbst und zeigt den Stand in seiner Download-Liste. Bleibt er lange im Hintergrund, kann Android einen großen Download abbrechen. Eine Virenprüfung wie unter Windows gibt es hier nicht.",
       "virenschutzHinweis": "Jede Datei prüft zuerst der Virenschutz von Windows. Erst danach liegt sie im Ordner; was er ablehnt, löscht der Browser."
     },
     "kopplung": {
@@ -9320,6 +9328,7 @@
       "gesperrtTitel": "Diese Seite ist gesperrt",
       "gesperrtText": "{{host}} gehört zu „{{kategorie}}“. So ist es im Jugend- und Suchtschutz eingestellt.",
       "gesperrtEigene": "{{host}} steht in deinen eigenen Sperren.",
+      "gesperrtAdresse": "{{host}} ist eine IP-Adresse. Solange der Jugend- und Suchtschutz Kategorien sperrt, öffnet der Browser Seiten im Internet nur über ihren Namen.",
       "zurStartseite": "Zur Startseite",
       "einstellungen": "Schutz-Einstellungen",
       "dauerTage_one": "{{count}} Tag, {{zeit}}",

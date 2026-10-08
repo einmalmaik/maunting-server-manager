@@ -13,13 +13,13 @@ const HOST = /^[a-z0-9.-]{1,253}$/
 /** Ein Host für die Ausnahmeliste aus einer Eingabe wie `youtube.com` oder einer ganzen Adresse; `null`, wenn keiner. */
 export function ausnahmeHost(eingabe: string): string | null {
   const text = eingabe.trim().toLowerCase().replace(/^\*\./, '')
-  let host = text
-  if (/^https?:\/\//.test(text)) {
-    try {
-      host = new URL(text).hostname
-    } catch {
-      return null
-    }
+  // Immer über `URL`, auch ohne Schema: sonst blieb `bücher.de` ohne
+  // Punycode und galt als ungültig, mit `https://` davor aber nicht (bis 09.10.2026).
+  let host: string
+  try {
+    host = new URL(/^https?:\/\//.test(text) ? text : `https://${text}`).hostname
+  } catch {
+    return null
   }
   host = host.replace(/^www\./, '')
   return HOST.test(host) && host.includes('.') && !host.startsWith('.') && !host.endsWith('.') ? host : null

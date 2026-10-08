@@ -51,6 +51,8 @@ const BEFEHLE: &[&str] = &[
     "seitenrecht_zuruecksetzen",
     "widget_start",
     "widget_stand",
+    "widget_lage",
+    "widget_anheften",
     "bildsuche",
     "tastatur_zeigen",
 ];

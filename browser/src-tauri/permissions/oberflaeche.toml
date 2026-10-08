@@ -48,6 +48,8 @@ permissions = [
   "allow-seitenrecht-zuruecksetzen",
   "allow-widget-start",
   "allow-widget-stand",
+  "allow-widget-lage",
+  "allow-widget-anheften",
   "allow-bildsuche",
   "allow-tastatur-zeigen",
 ]

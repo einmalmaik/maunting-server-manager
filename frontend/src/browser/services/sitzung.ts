@@ -100,12 +100,18 @@ export function useSitzungsLauf(): void {
   // Lebenszeichen des Geräts; scheitert es am Netz, gilt der Browser als offline.
   useEffect(() => {
     if (stand !== 'an') return
+    // Scheitert ein Herzschlag erst nach dem Abmelden, gilt er nicht mehr:
+    // er schrieb sonst „offline“, und der Browser galt wieder als gekoppelt (bis 09.10.2026).
+    let aktiv = true
     const takt = setInterval(() => {
       api('/auth/devices/heartbeat', { method: 'POST' }).catch((fehler) => {
-        if (isNetworkOrOfflineError(fehler)) useSitzung.getState().setzen('offline')
+        if (aktiv && isNetworkOrOfflineError(fehler)) useSitzung.getState().setzen('offline')
       })
     }, HERZSCHLAG_MS)
-    return () => clearInterval(takt)
+    return () => {
+      aktiv = false
+      clearInterval(takt)
+    }
   }, [stand])
 
   // Aus dem Offline-Zustand selbst herausfinden: `online` allein meldet nur

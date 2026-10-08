@@ -115,7 +115,12 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_anfr
     if hauptframe == JNI_TRUE {
         return JNI_FALSE;
     }
-    ja(schild::pruefen(app, &tab, &url, &seite, AnfrageArt::raten(&url, &accept)))
+    let art = AnfrageArt::raten(&url, &accept);
+    // Ein Service Worker gehört keinem Tab (`TabsPlugin.workerPruefen`): blocken ja, zählen nicht.
+    if id_pruefen(&tab).is_err() {
+        return ja(schild::einstufen(&url, &seite, art).is_some());
+    }
+    ja(schild::pruefen(app, &tab, &url, &seite, art))
 }
 
 /// Eine neue Seite im Tab: der Zähler des Schilds beginnt von vorn.
@@ -159,8 +164,8 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_glei
 }
 
 /// Der Dateiname eines Downloads, bereinigt wie unter Windows; leer, wenn
-/// die Sperre die Adresse nicht erlaubt (der Download-Dienst folgt
-/// Weiterleitungen selbst, an `anfrage` vorbei).
+/// die Sperre die Adresse nicht erlaubt. `Herunterladen.kt` fragt das vor
+/// jeder Weiterleitung eines Downloads; die gehen an `anfrage` vorbei.
 #[no_mangle]
 pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_dateiname<'l>(
     mut env: JNIEnv<'l>,

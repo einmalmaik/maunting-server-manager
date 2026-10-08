@@ -79,8 +79,10 @@ pub fn schliessen(app: &AppHandle, id: &str) {
     senden(app, "schliessen", json!({ "id": id }));
 }
 
-pub fn ausfuehren(app: &AppHandle, id: &str, skript: &str) {
-    senden(app, "ausfuehren", json!({ "id": id, "skript": skript }));
+/// Zurück, Vor, Neu laden, Anhalten (`tab_aktion`).
+pub fn aktion(app: &AppHandle, id: &str, aktion: &str) -> Result<(), String> {
+    senden(app, "aktion", json!({ "id": id, "aktion": aktion }));
+    Ok(())
 }
 
 #[derive(serde::Deserialize)]
@@ -141,6 +143,24 @@ pub fn widget_start(app: &AppHandle) -> Result<Option<Value>, String> {
 /// Ob das Widget die Kamera zeigt.
 pub fn widget_stand(app: &AppHandle, bildsuche: bool) -> Result<(), String> {
     rufen::<Leer>(app, "widgetStand", json!({ "bildsuche": bildsuche })).map(|_| ())
+}
+
+/// `liegt`, `anheftbar` oder `nein` (`SuchWidget.lage`).
+pub fn widget_lage(app: &AppHandle) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    struct Lage {
+        lage: String,
+    }
+    rufen::<Lage>(app, "widgetLage", json!({})).map(|l| l.lage)
+}
+
+/// Bittet den Startbildschirm, das Widget aufzunehmen.
+pub fn widget_anheften(app: &AppHandle) -> Result<bool, String> {
+    #[derive(serde::Deserialize)]
+    struct Ok {
+        ok: bool,
+    }
+    rufen::<Ok>(app, "widgetAnheften", json!({})).map(|o| o.ok)
 }
 
 /// Zeigt die Tastatur für das fokussierte Feld der Oberfläche.

@@ -135,7 +135,7 @@ fn engines_bauen(app: &AppHandle) {
 
 /// Holt eine Liste und nimmt sie nur, wenn `passt` sie als Liste erkennt.
 pub(super) async fn holen(url: &str, passt: fn(&str) -> bool) -> Result<String, String> {
-    let antwort = crate::netz::client(Duration::from_secs(60))?
+    let mut antwort = crate::netz::client(Duration::from_secs(60))?
         .get(url)
         .send()
         .await
@@ -146,11 +146,16 @@ pub(super) async fn holen(url: &str, passt: fn(&str) -> bool) -> Result<String, 
     if antwort.content_length().is_some_and(|l| l as usize > HOECHSTENS_BYTES) {
         return Err("Liste zu groß".into());
     }
-    let bytes = antwort.bytes().await.map_err(|e| e.to_string())?;
-    if bytes.len() > HOECHSTENS_BYTES {
-        return Err("Liste zu groß".into());
+    // Stückweise mit Grenze: ohne `Content-Length` las `bytes()` sonst alles
+    // in den Speicher, bevor die Grenze griff.
+    let mut bytes = Vec::new();
+    while let Some(teil) = antwort.chunk().await.map_err(|e| e.to_string())? {
+        if bytes.len() + teil.len() > HOECHSTENS_BYTES {
+            return Err("Liste zu groß".into());
+        }
+        bytes.extend_from_slice(&teil);
     }
-    let text = String::from_utf8(bytes.to_vec()).map_err(|_| "Liste ist kein UTF-8".to_string())?;
+    let text = String::from_utf8(bytes).map_err(|_| "Liste ist kein UTF-8".to_string())?;
     if !passt(&text) {
         return Err("Antwort ist keine Filterliste".into());
     }

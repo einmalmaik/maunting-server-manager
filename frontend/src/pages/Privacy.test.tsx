@@ -143,11 +143,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.35 vom 2026-10-09 aus (Jugendschutz misst an der Netzzeit, Serie bleibt auf dem Gerät)', () => {
+  it('weist die Fassung 3.36 vom 2026-10-09 aus (Android-Downloads ohne den Download-Dienst, geteilter WebView-Prozess)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.35`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.36`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -226,7 +226,6 @@ describe('Privacy page', () => {
     // 3.33: der Browser unter Android; private Tabs liegen dort bis zum letzten auf dem Telefon, Sprache und Foto gehen an fremde Dienste.
     expect(i18n.t('privacyPolicy.sections.browser.items.privat')).toMatch(/^Private Tabs .* Unter Windows liegen ihre Cookies/);
     expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/Private Tabs teilen sich ein Profil auf dem Telefon/);
-    expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/Adresse, Cookies und User-Agent der Seite/);
     expect(i18n.t('privacyPolicy.sections.browser.items.widget')).toMatch(/Spracherkennungsdienst des Telefons/);
     expect(i18n.t('privacyPolicy.sections.browser.items.widget')).toMatch(/Bildsuche der gewählten Suchmaschine/);
     // 3.34: das Token liegt unter Android im Keystore-Fach, Sicherung und Umzug sind ausgeschlossen.
@@ -236,6 +235,9 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.browser.items.schutz')).toMatch(/an der Uhrzeit, die raw\.githubusercontent\.com .* nennt/);
     expect(i18n.t('privacyPolicy.sections.browser.items.schutz')).toMatch(/zählt er nur auf dem Gerät; die Zahl geht an keinen Dienst und nicht an MSM/);
     expect(i18n.t('privacyPolicy.sections.browser.items.schutz')).toMatch(/DuckDuckGo und Brave/);
+    // 3.36: Android-Downloads lädt der Browser selbst; Cookies gehen nicht mehr an den Download-Dienst.
+    expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/Cookies schickt er dabei nur an die Seite, der sie gehören/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/den Prozess der WebView teilen sich Seiten und Oberfläche unter Android/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

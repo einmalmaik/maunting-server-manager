@@ -21,8 +21,12 @@ pub(super) unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -
             let (Some(core), Some(args)) = (sender, args) else { return Ok(()) };
             let roh = text(|p| args.TryGetWebMessageAsString(p));
             let Some(meldung) = lesen(&roh) else { return Ok(()) };
+            // `Source()` der Webview ist nach dem Commit schon die neue Seite,
+            // während eine späte Nachricht noch vom alten Dokument kommt.
+            // `args.Source()` nennt den Absender; beide müssen passen.
             let url = text(|p| core.Source(p));
-            if url.starts_with("https://") || url.starts_with("http://") {
+            let absender = text(|p| args.Source(p));
+            if (url.starts_with("https://") || url.starts_with("http://")) && gleiche_herkunft(&url, &absender) {
                 melden(&app, TabEreignis::Formular { id: id.clone(), url, meldung });
             }
             Ok(())

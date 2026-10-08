@@ -10,7 +10,7 @@ import { nativ } from '../services/nativ'
 import { istAndroid } from '../services/plattform'
 import { Abschnitt, Aktionszeile, Schalterzeile } from './bausteine'
 
-/** Unter Android legt der Download-Dienst des Systems ab: kein Ordner, keine Rückfrage, kein Virenschutz. */
+/** Unter Android lädt der Browser selbst nach „Download“: kein Ordner, keine Rückfrage, kein Virenschutz. */
 function DownloadsAndroid() {
   const { t } = useTranslation()
   return (

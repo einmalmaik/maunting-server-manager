@@ -141,6 +141,8 @@ pub enum DownloadStand {
     /// Der Virenschutz hat die Datei abgelehnt; sie ist gelöscht.
     Blockiert,
     Fehler,
+    /// Auf dem Gerät war kein Platz mehr (Android).
+    Speicher,
 }
 
 pub fn melden(app: &AppHandle, ereignis: TabEreignis) {
@@ -235,7 +237,7 @@ const APP_HOSTS: [&str; 3] = ["tauri.localhost", "ipc.localhost", "asset.localho
 /// Darf ein Tab diese Adresse als Seite öffnen?
 pub fn navigation_erlaubt(url: &url::Url) -> bool {
     match url.scheme() {
-        "http" | "https" => !url.host_str().is_some_and(|h| APP_HOSTS.contains(&h)),
+        "http" | "https" => !url.host_str().is_some_and(|h| APP_HOSTS.contains(&h.trim_end_matches('.'))),
         // Leere Seite, Blob- und Data-Adressen, die eine Seite selbst erzeugt.
         "about" | "blob" | "data" => true,
         _ => false,
@@ -290,6 +292,7 @@ pub fn tab_laden(
 ) -> Result<(), String> {
     id_pruefen(&id)?;
     let ziel = ziel_pruefen(&url)?;
+    crate::schild::schutz_dienst::bereit();
     eintragen(&tabs, &id, privat);
     plattform::laden(&app, &tabs, &id, ziel, privat)
 }
@@ -331,19 +334,17 @@ pub fn tab_schliessen(app: AppHandle, tabs: State<'_, Tabs>, id: String) -> Resu
     Ok(())
 }
 
-/// Zurück, Vor, Neu laden, Anhalten.
+/// Zurück, Vor, Neu laden, Anhalten: über die Webview, nie als Skript der
+/// Seite. Als `history.back()` konnte eine Seite den Zurück-Knopf abschalten,
+/// indem sie `History.prototype.back` überschrieb, und eine hängende Seite
+/// ließ sich nicht anhalten (bis 09.10.2026).
 #[tauri::command(async)]
 pub fn tab_aktion(app: AppHandle, id: String, aktion: String) -> Result<(), String> {
     id_pruefen(&id)?;
-    let skript = match aktion.as_str() {
-        "zurueck" => "history.back()",
-        "vor" => "history.forward()",
-        "neu_laden" => "location.reload()",
-        "anhalten" => "window.stop()",
-        _ => return Err("Unbekannte Aktion".into()),
-    };
-    plattform::ausfuehren(&app, &id, skript);
-    Ok(())
+    if !matches!(aktion.as_str(), "zurueck" | "vor" | "neu_laden" | "anhalten") {
+        return Err("Unbekannte Aktion".into());
+    }
+    plattform::aktion(&app, &id, &aktion)
 }
 
 /// Wo der Inhaltsbereich im Fenster liegt (logische Pixel).
@@ -491,6 +492,9 @@ mod tests {
         assert!(ziel_pruefen("about:blank").is_err());
         assert!(ziel_pruefen("data:text/html,hallo").is_err());
         assert!(ziel_pruefen("http://tauri.localhost/").is_err());
+        // Mit Punkt am Ende derselbe Host; bis 09.10.2026 galt er als fremd.
+        assert!(ziel_pruefen("https://ipc.localhost./konfig_laden").is_err());
+        assert!(!navigation_erlaubt(&url::Url::parse("http://TAURI.localhost./browser.html").unwrap()));
     }
 
     #[test]

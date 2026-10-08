@@ -21,7 +21,9 @@ export function Sperrseite({ tab }: { tab: Tab }) {
   const text =
     tab.gesperrt === 'eigene'
       ? t('browser.schutz.gesperrtEigene', { host })
-      : t('browser.schutz.gesperrtText', { host, kategorie: t(`browser.schutz.kategorie.${tab.gesperrt}`, { defaultValue: '' }) })
+      : tab.gesperrt === 'adresse'
+        ? t('browser.schutz.gesperrtAdresse', { host })
+        : t('browser.schutz.gesperrtText', { host, kategorie: t(`browser.schutz.kategorie.${tab.gesperrt}`, { defaultValue: '' }) })
 
   return (
     <div className="flex h-full items-center justify-center p-6">

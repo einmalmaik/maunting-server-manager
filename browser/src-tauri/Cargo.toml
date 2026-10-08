@@ -20,6 +20,8 @@ schluesselfach = { path = "../../crates/schluesselfach" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"
+# Favicons (Windows) und Standbilder (Android) reisen als Base64; schon im Baum, über Tauri.
+base64 = "0.22"
 # Werbe- und Trackerfilter von Brave (MPL-2.0), dieselbe Engine wie in Brave.
 # Ohne `single-thread`: die Engine liegt hinter einem RwLock und wird aus dem
 # UI-Thread (WebView2) und aus dem Ladefaden der Listen angefasst.
@@ -51,6 +53,8 @@ windows = { version = "0.62", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     # IAttachmentExecute: Downloads durch den Virenschutz von Windows prüfen.
     "Win32_UI_Shell",
+    # SHOpenFolderAndSelectItems: einen Download im Explorer zeigen.
+    "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
 ] }
 windows-core = "0.62"
@@ -60,8 +64,6 @@ tauri-plugin-biometric = "2"
 # JNI für die Tab-WebViews (`tabs/android/bruecke.rs`), dieselbe Fassung wie
 # die Kamera-Krypto des Smart Systems.
 jni = "0.21"
-# Standbild der Tabs kommt von Kotlin als Base64 (schon im Baum, über Tauri).
-base64 = "0.22"
 # reqwest prüft Zertifikate per rustls-platform-verifier; unter Android braucht
 # der eine Initialisierung samt Kotlin-Teil und wirft ohne sie bei jeder
 # Anfrage. Wie das Smart System (`erstelle_android_client`): rustls mit den

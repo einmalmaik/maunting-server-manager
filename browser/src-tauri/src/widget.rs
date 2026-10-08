@@ -34,6 +34,31 @@ pub fn widget_stand(app: AppHandle, bildsuche: bool) -> Result<(), String> {
     }
 }
 
+/// Liegt das Widget schon auf dem Startbildschirm (`liegt`), lässt es sich
+/// per Bitte ablegen (`anheftbar`) oder nur von Hand (`nein`)?
+#[tauri::command(async)]
+pub fn widget_lage(app: AppHandle) -> Result<String, String> {
+    #[cfg(target_os = "android")]
+    return crate::tabs::android::widget_lage(&app);
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok("nein".into())
+    }
+}
+
+/// Bittet den Startbildschirm, das Widget aufzunehmen; der fragt selbst nach.
+#[tauri::command(async)]
+pub fn widget_anheften(app: AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    return crate::tabs::android::widget_anheften(&app);
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(false)
+    }
+}
+
 /// Nach der Suche aus dem Widget: die Tastatur für die Adresszeile, die
 /// die Oberfläche fokussiert hat (ein `focus()` aus Skript zeigt sie nicht).
 #[tauri::command(async)]
@@ -68,6 +93,7 @@ pub fn bildsuche(
     id_pruefen(&id)?;
     feld_pruefen(&feld)?;
     let ziel = ziel_pruefen(&url)?;
+    crate::schild::schutz_dienst::bereit();
     if ziel.scheme() != "https" || weg(&url) != Weg::Laden {
         return Err("Diese Bildsuche kann der Browser nicht öffnen.".into());
     }

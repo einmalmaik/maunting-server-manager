@@ -37,7 +37,7 @@ function nacheinander<T = void>(befehl: string, args?: Record<string, unknown>):
 }
 
 /** `pruefung`: geladen, der Virenschutz prüft; `blockiert`: er hat die Datei abgelehnt, sie ist gelöscht. */
-export type DownloadStand = 'start' | 'pruefung' | 'fertig' | 'blockiert' | 'fehler'
+export type DownloadStand = 'start' | 'pruefung' | 'fertig' | 'blockiert' | 'fehler' | 'speicher'
 
 /** Was Rust aus einem Tab meldet (`TabEreignis` in `tabs/mod.rs`). */
 export type TabEreignis =
@@ -171,6 +171,9 @@ export const nativ = {
   /** Was das Such-Widget angestoßen hat, einmal (`widget.rs`). */
   widgetStart: () => rufen<WidgetStart | null>('widget_start'),
   widgetStand: (bildsuche: boolean) => rufen('widget_stand', { bildsuche }),
+  widgetLage: () => rufen<'liegt' | 'anheftbar' | 'nein'>('widget_lage'),
+  /** Der Startbildschirm fragt danach selbst; `false`, wenn er die Bitte nicht annimmt. */
+  widgetAnheften: () => rufen<boolean>('widget_anheften'),
   tastaturZeigen: () => rufen('tastatur_zeigen'),
   /** Schickt das Foto des Widgets im Tab `id` an die Bildsuche. */
   bildsuche: (id: string, privat: boolean, bild: { url: string; feld: string; base64?: boolean }) =>

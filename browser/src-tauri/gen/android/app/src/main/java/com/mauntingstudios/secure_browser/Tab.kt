@@ -74,6 +74,8 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
 
   /** Rückweg zu `seite.js` im obersten Rahmen der aktuellen Seite. */
   private var kanal: JavaScriptReplyProxy? = null
+  /** Herkunft des Dokuments, dem [kanal] gehört (`sourceOrigin`, nicht `webView.url`). */
+  private var kanalHerkunft = ""
   private var tippX = 0f
   private var tippY = 0f
 
@@ -82,10 +84,14 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
     WebViewCompat.setProfile(webView, profil)
     einstellen(webView.settings)
     WebViewCompat.addDocumentStartJavaScript(webView, TabsBruecke.seitenskript(), setOf("*"))
-    WebViewCompat.addWebMessageListener(webView, "msbKanal", setOf("*")) { view, nachricht, _, hauptrahmen, antwort ->
+    WebViewCompat.addWebMessageListener(webView, "msbKanal", setOf("*")) { view, nachricht, quelle, hauptrahmen, antwort ->
       val text = nachricht.data
-      if (hauptrahmen && text != null) {
+      // `view.url` ist nach `loadUrl` schon die neue Adresse, während noch das
+      // alte Dokument spricht. Zählt nur, wenn beide dieselbe Herkunft haben.
+      val herkunft = quelle.toString()
+      if (hauptrahmen && text != null && TabsBruecke.gleicheHerkunft(view.url.orEmpty(), herkunft)) {
         kanal = antwort
+        kanalHerkunft = herkunft
         // Teile einer Datei (`Herunterladen.kt`) und das Hallo, das den Rückweg
         // öffnet, bleiben hier; alles andere entscheidet Rust.
         val art = if (text.startsWith("{\"t\":")) runCatching { JSONObject(text) }.getOrNull() else null
@@ -176,7 +182,7 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
   /** Füllt, wenn der Tab noch auf der Herkunft von [fuer] steht. */
   fun fuellen(fuer: String, nachricht: String): Boolean {
     val k = kanal ?: return false
-    if (!TabsBruecke.gleicheHerkunft(webView.url.orEmpty(), fuer)) return false
+    if (!TabsBruecke.gleicheHerkunft(kanalHerkunft, fuer) || !TabsBruecke.gleicheHerkunft(webView.url.orEmpty(), fuer)) return false
     k.postMessage(nachricht)
     return true
   }
@@ -242,6 +248,7 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
       seite = url
       kanal = null
+      kanalHerkunft = ""
       plugin.herunterladen.seiteWeg(id)
       TabsBruecke.seitenwechsel(id)
       stumm = abgewiesen == url

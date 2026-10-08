@@ -116,7 +116,7 @@ fn gross_oder_ziffer(text: &str, von: usize, bis: usize) -> bool {
 
 /// Ein Name ohne Steuer- und Richtungszeichen.
 fn name_passt(name: &Option<String>) -> bool {
-    let unsichtbar = |z: char| z.is_control() || matches!(z, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}');
+    let unsichtbar = |z: char| z.is_control() || crate::downloads::ist_unsichtbar(z);
     name.as_ref().is_none_or(|n| n.chars().count() <= NAME_MAX && !n.chars().any(unsichtbar))
 }
 
@@ -221,6 +221,9 @@ mod tests {
         assert!(mit(|k| k.monat = Some(13)).is_err());
         assert!(mit(|k| k.pruefnummer = Some("12a".into())).is_err());
         assert!(mit(|k| k.inhaber = Some("a\u{202E}b".into())).is_err());
+        // Bis 09.10.2026 kannte `name_passt` nur vier Bereiche unsichtbarer Zeichen.
+        assert!(mit(|k| k.inhaber = Some("Ada\u{061C}Lovelace".into())).is_err());
+        assert!(mit(|k| k.inhaber = Some("Ada\u{00AD}".into())).is_err());
         let beides = Fuellen { karte: Some(karte()), passwort: Some("x".into()), ..Default::default() };
         assert!(beides.pruefen().is_err());
         let konto = |iban: &str| Fuellen { konto: Some(Konto { iban: iban.into(), inhaber: None, bic: Some("COBADEFFXXX".into()) }), ..Default::default() }.pruefen();

@@ -43,6 +43,17 @@ describe('Anmeldefelder im Tab', () => {
     expect(anmeldungenFuer(items, 'https://example.com/login').map((i) => i.username)).toEqual(['ada'])
   })
 
+  // Bis 09.10.2026 ging eine HTTPS-Anmeldung auch in die http-Seite desselben Hosts.
+  it('bietet einer Seite ohne HTTPS nur Anmeldungen an, die für http gespeichert sind', () => {
+    const items = [
+      eintrag({ url: 'https://bank.example/', username: 'sicher' }),
+      eintrag({ url: 'bank.example', username: 'ohne-schema' }),
+      eintrag({ url: 'http://bank.example/', username: 'alt' }),
+    ]
+    expect(anmeldungenFuer(items, 'http://bank.example/login').map((i) => i.username)).toEqual(['alt'])
+    expect(anmeldungenFuer(items, 'https://bank.example/login').map((i) => i.username).sort()).toEqual(['alt', 'ohne-schema', 'sicher'])
+  })
+
   it('fragt nicht, wenn die Anmeldung genau so im Tresor steht, und bietet sonst Aktualisieren oder Speichern', () => {
     const items = [eintrag({ url: 'https://example.com/', username: 'ada', password: 'alt' })]
     const a = { url: 'https://example.com/login', benutzer: 'ada', passwort: 'alt' }

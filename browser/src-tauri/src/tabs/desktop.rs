@@ -259,13 +259,18 @@ pub fn schliessen(app: &AppHandle, id: &str) {
     });
 }
 
-pub fn ausfuehren(app: &AppHandle, id: &str, skript: &str) {
-    let skript = skript.to_string();
-    let _ = mit_tab(app, id, move |tab| unsafe {
-        tab.core
-            .ExecuteScript(&HSTRING::from(skript), None::<&ICoreWebView2ExecuteScriptCompletedHandler>)
-            .map_err(fehler)
-    });
+/// Zurück, Vor, Neu laden, Anhalten (`tab_aktion`).
+pub fn aktion(app: &AppHandle, id: &str, aktion: &str) -> Result<(), String> {
+    let aktion = aktion.to_string();
+    mit_tab(app, id, move |tab| unsafe {
+        match aktion.as_str() {
+            "zurueck" => tab.core.GoBack(),
+            "vor" => tab.core.GoForward(),
+            "neu_laden" => tab.core.Reload(),
+            _ => tab.core.Stop(),
+        }
+        .map_err(fehler)
+    })
 }
 
 /// Ein Tab will den ganzen Bildschirm (Video) oder gibt ihn zurück. Läuft als

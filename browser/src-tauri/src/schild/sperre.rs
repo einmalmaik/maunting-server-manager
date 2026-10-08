@@ -7,6 +7,11 @@
 //! freigibt; die genaueste Angabe gilt. Mit „Erwachsene“ kommt die sichere
 //! Suche dazu: Google, Bing, DuckDuckGo und Brave bekommen ihren Parameter,
 //! YouTube den eingeschränkten Modus per Kopfzeile.
+//!
+//! Solange eine Kategorie aktiv ist, öffnet der Browser öffentliche Adressen
+//! nur über ihren Namen: eine Seite unter ihrer IP-Adresse stand in keiner
+//! Liste und lud (bis 09.10.2026). Geräte im eigenen Netz (Router, NAS) und
+//! IP-Adressen in den Ausnahmen bleiben erreichbar.
 
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock, RwLock};
@@ -17,6 +22,8 @@ use super::kategorien::Kategorie;
 pub enum Grund {
     Kategorie(Kategorie),
     Eigene,
+    /// Eine öffentliche IP-Adresse statt eines Namens.
+    Adresse,
 }
 
 impl Grund {
@@ -24,6 +31,7 @@ impl Grund {
         match self {
             Grund::Kategorie(k) => k.name(),
             Grund::Eigene => "eigene",
+            Grund::Adresse => "adresse",
         }
     }
 }
@@ -61,6 +69,26 @@ fn host_von(url: &str) -> Option<String> {
     Some(u.host_str()?.trim_end_matches('.').to_ascii_lowercase())
 }
 
+/// `Some(true)` für eine öffentliche IP-Adresse, `Some(false)` für eine im
+/// eigenen Netz oder auf dem Gerät, `None` für einen Namen.
+fn ip_oeffentlich(url: &str) -> Option<bool> {
+    let ip = match url::Url::parse(url).ok()?.host()? {
+        url::Host::Domain(_) => return None,
+        url::Host::Ipv4(v4) => v4,
+        url::Host::Ipv6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => v4,
+            None => {
+                let erstes = v6.segments()[0];
+                let lokal = v6.is_loopback() || v6.is_unspecified() || erstes & 0xfe00 == 0xfc00 || erstes & 0xffc0 == 0xfe80;
+                return Some(!lokal);
+            }
+        },
+    };
+    let [a, b, ..] = ip.octets();
+    let cgnat = a == 100 && (64..128).contains(&b);
+    Some(!(ip.is_private() || ip.is_loopback() || ip.is_link_local() || ip.is_unspecified() || cgnat))
+}
+
 /// Der Host und seine Elterndomains, ohne die nackte Endung.
 fn mit_eltern(host: &str) -> impl Iterator<Item = &str> {
     std::iter::successors(Some(host), |h| h.split_once('.').map(|(_, rest)| rest)).filter(|h| h.contains('.'))
@@ -72,6 +100,9 @@ impl Sperre {
             return None;
         }
         let host = host_von(url)?;
+        if ip_oeffentlich(url) == Some(true) && !self.listen.is_empty() && !self.ausnahmen.contains(host.as_str()) {
+            return Some(Grund::Adresse);
+        }
         // Die genaueste Angabe gilt: eine eigene Sperre von `mail.google.com`
         // schlägt die Ausnahme `google.com` und umgekehrt. Auf derselben
         // Ebene gewinnt die Sperre.
@@ -176,6 +207,33 @@ mod tests {
         assert_eq!(s.einstufen("https://a.zeitfresser.example/"), Some(Grund::Eigene));
         assert_eq!(s.einstufen("msb://einstellungen"), None);
         assert_eq!(Sperre::default().einstufen("https://casino.example/"), None);
+    }
+
+    #[test]
+    fn oeffentliche_ip_adressen_nur_mit_kategorien() {
+        let mut s = sperre();
+        s.ausnahmen.insert("203.0.113.7".into());
+        assert_eq!(s.einstufen("https://93.184.215.14/"), Some(Grund::Adresse));
+        assert_eq!(s.einstufen("http://1572395790/"), Some(Grund::Adresse), "Dezimalform derselben Adresse");
+        assert_eq!(s.einstufen("https://[2606:4700::1111]/"), Some(Grund::Adresse));
+        assert_eq!(s.einstufen("https://[::ffff:5db8:d70e]/"), Some(Grund::Adresse));
+        for frei in [
+            "http://192.168.178.1/",
+            "http://10.0.2.2:8791/",
+            "http://127.0.0.1/",
+            "http://100.64.1.2/",
+            "http://169.254.1.1/",
+            "http://[::1]/",
+            "http://[fd00::1]/",
+            "http://[fe80::1]/",
+            "https://203.0.113.7/",
+        ] {
+            assert_eq!(s.einstufen(frei), None, "{frei}");
+        }
+        s.listen.clear();
+        assert_eq!(s.einstufen("https://93.184.215.14/"), None, "ohne Kategorie bleibt die Adresse offen");
+        s.eigene.insert("93.184.215.14".into());
+        assert_eq!(s.einstufen("https://93.184.215.14/"), Some(Grund::Eigene));
     }
 
     #[test]

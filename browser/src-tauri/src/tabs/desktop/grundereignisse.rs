@@ -79,8 +79,13 @@ pub(super) unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -
                 let Some(args) = args else { return Ok(()) };
                 // Nie ein Fenster: die Oberfläche öffnet einen Tab, wenn sie will.
                 args.SetHandled(true)?;
+                // Nur nach einem Klick oder einer Taste. Den Popup-Blocker von
+                // Chromium gibt es in der WebView2 nicht; ohne diese Prüfung
+                // machte jedes `window.open` einer Seite einen Tab auf (bis 09.10.2026).
+                let mut geste = windows::core::BOOL::default();
+                args.IsUserInitiated(&mut geste)?;
                 let url = super::webview2::text(|p| args.Uri(p));
-                if url::Url::parse(&url).is_ok_and(|u| navigation_erlaubt(&u) && matches!(u.scheme(), "http" | "https")) {
+                if geste.as_bool() && url::Url::parse(&url).is_ok_and(|u| navigation_erlaubt(&u) && matches!(u.scheme(), "http" | "https")) {
                     melden(&app, TabEreignis::NeuerTab { id: id.clone(), url });
                 }
                 Ok(())

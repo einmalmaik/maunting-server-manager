@@ -4857,7 +4857,7 @@
           "ausfuellen": "Filling from the vault: the browser decrypts logins, payment cards and bank accounts on the computer and inserts them only into the site they belong to. Payment data is only offered over HTTPS and only after Windows Hello or the master password.",
           "passwoerter": "New passwords: when you register, the browser generates a strong password on the computer and saves it to the vault after you submit. If the vault is locked, it encrypts the login with the public key of your vault inbox and stores it there; the instance only sees the encrypted record, which is taken over the next time you unlock. The browser keeps no master password in memory for this.",
           "kopplung": "Pairing with MSM (optional): once paired, the browser shows Singra, Messenger, Notes, Calendar and Vault of your instance in the sidebar; the sections above apply to them. The sign-in is kept in the Windows Credential Manager on Windows and, on Android, encrypted with a key from the Android Keystore. Each of these modules can be hidden in the settings, and the pairing can be removed at any time.",
-          "android": "On Android: Safe Browsing and the WebView usage statistics are off, so visited addresses are not sent to Google for them. Normal tabs have their own profile, apart from the browser interface. The browser opts out of Android backup and of transfers to a new device: cookies, history and the pairing sign-in stay on this phone. Private tabs share one profile on the phone; its cookies, site storage and cache are deleted once the last private tab is closed, and the next start removes the folder. Downloads go through the Android download service, which receives the address, cookies and user agent of the site for this; there is no virus check. The browser cannot turn on YouTube's restricted mode here. Payment data is only inserted after the phone's screen lock (fingerprint, face or PIN) or the master password.",
+          "android": "On Android: Safe Browsing and the WebView usage statistics are off, so visited addresses are not sent to Google for them. Normal tabs have their own profile, apart from the browser interface; this separates cookies and storage, but on Android sites and the interface share the WebView process. The browser opts out of Android backup and of transfers to a new device: cookies, history and the pairing sign-in stay on this phone. Private tabs share one profile on the phone; its cookies, site storage and cache are deleted once the last private tab is closed, and the next start removes the folder. The browser downloads files itself into the “Download” folder; it sends cookies only to the site they belong to, also after a redirect. There is no virus check. The browser cannot turn on YouTube's restricted mode here. Payment data is only inserted after the phone's screen lock (fingerprint, face or PIN) or the master password.",
           "widget": "Search widget on Android: what you say into the microphone is turned into text by the phone's speech recognition service, usually Google; the browser only receives the text. A photo is taken by the camera app. The browser shrinks it, removes the location and other metadata, sends it to the image search of the chosen search engine (Google Lens or Bing) and then deletes it from the phone. The browser itself has no camera or microphone permission."
         }
       },
@@ -8497,6 +8497,7 @@
     "noRoles": "There are no roles yet."
   },
   "browser": {
+    "ablageVoll": "The browser can no longer save anything because local storage is full. Clear your history or remove a custom background image.",
     "tabs": {
       "liste": "Tabs",
       "neu": "New tab",
@@ -8554,6 +8555,10 @@
       "titel": "Maunting Secure Browser",
       "suchen": "Search",
       "suchmaschine": "Search engine",
+      "widgetTitel": "Search from your home screen",
+      "widgetText": "The search widget opens Secure Browser straight from the home screen, to type, speak or search with a photo.",
+      "widgetAnheften": "Add widget",
+      "widgetSpaeter": "Not now",
       "schnellzugriff": "Shortcuts",
       "privatTitel": "Private tab",
       "privatText": "Pages from private tabs stay out of your history. Cookies and cache are kept in memory only and are gone once the last private tab is closed. Downloads and bookmarks stay.",
@@ -8640,7 +8645,8 @@
         "pruefung": "Being checked by the antivirus",
         "fertig": "Done",
         "blockiert": "Blocked by the antivirus and deleted",
-        "fehler": "Failed"
+        "fehler": "Failed",
+        "speicher": "Stopped: not enough storage on the device"
       }
     },
     "hintergrund": {
@@ -8662,6 +8668,7 @@
       "ausnahmeEntfernenName": "Remove exception {{host}}",
       "vergessen": "Forget when closing",
       "vergessenHinweis": "Deletes cookies, cache and site data when you close the browser. History and bookmarks stay.",
+      "vergessenHinweisAndroid": "Deletes cookies, cache and site data the next time the browser starts, because Android does not reliably tell an app when it is closed. History and bookmarks stay.",
       "datenLoeschen": "Clear browsing data",
       "datenLoeschenTitel": "Clear browsing data?",
       "datenLoeschenText": "Cookies, cache, site data and history are deleted ({{zeitraum}}). You will be signed out of many sites. Bookmarks and the MSM pairing stay.",
@@ -8791,12 +8798,13 @@
       "wachBleibenHinweis": "Tabs from these sites never sleep.",
       "ausnahmeSeite": "Site",
       "ausnahmeHinzufuegen": "Add",
+      "listeVoll": "The list is full ({{max}} entries). Remove one first.",
       "ausnahmeUngueltig": "That is not a domain.",
       "eintragEntfernen": "Remove",
       "eintragEntfernenName": "Remove {{host}}",
       "downloadFragen": "Ask for every download",
       "downloadFragenHinweis": "Before downloading, the browser asks where the file should go.",
-      "downloadsAndroid": "Downloads go to the phone’s “Download” folder. Android fetches them with its download service and shows them in a notification. There is no antivirus check like on Windows.",
+      "downloadsAndroid": "Downloads go to the phone’s “Download” folder. The browser fetches them itself and shows their progress in its download list. If it stays in the background for a long time, Android may stop a large download. There is no antivirus check like on Windows.",
       "virenschutzHinweis": "Every file is checked by the Windows antivirus first. Only then does it land in the folder; the browser deletes anything it rejects."
     },
     "kopplung": {
@@ -9320,6 +9328,7 @@
       "gesperrtTitel": "This site is blocked",
       "gesperrtText": "{{host}} is in “{{kategorie}}”. That is how youth and habit protection is set up.",
       "gesperrtEigene": "{{host}} is on your own block list.",
+      "gesperrtAdresse": "{{host}} is an IP address. While youth and habit protection blocks categories, the browser opens internet sites only by their name.",
       "zurStartseite": "Go to start page",
       "einstellungen": "Protection settings",
       "dauerTage_one": "{{count}} day, {{zeit}}",

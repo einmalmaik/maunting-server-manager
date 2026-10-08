@@ -80,10 +80,37 @@ fn sperre_bauen(app: &AppHandle, r: &Regeln) -> Sperre {
     }
 }
 
-/// Baut die Sperre aus den geltenden Regeln und holt fehlende Listen nach.
-fn anwenden(app: &AppHandle) {
+/// Die Sperre steht nach dem Start; bis dahin wartet `tab_laden` ([`bereit`]).
+static BEREIT: AtomicBool = AtomicBool::new(false);
+
+/// Baut die Sperre aus den Regeln, die gerade gelten. Einer zur Zeit, und die
+/// Regeln werden erst unter dem Schloss gelesen: zwei Läufe nebeneinander
+/// (ein Befehl, der Faden für fällige Anträge, nachgeladene Listen) setzten
+/// sonst in beliebiger Reihenfolge, und ein älterer Stand konnte zuletzt gelten.
+fn neu_bauen(app: &AppHandle) -> Regeln {
+    static BAUEN: Mutex<()> = Mutex::new(());
+    let _schloss = BAUEN.lock().unwrap();
     let regeln = app.state::<SchutzZustand>().0.lock().unwrap().regeln.clone();
     sperre::setzen(sperre_bauen(app, &regeln));
+    BEREIT.store(true, Ordering::Release);
+    regeln
+}
+
+/// Wartet beim Start höchstens zehn Sekunden auf die Sperre. Wiederhergestellte
+/// Tabs luden sonst, bevor die Listen gelesen waren, auch gesperrte Seiten.
+/// Nie auf dem UI-Faden (Regel 122): nur aus `async`-Befehlen.
+pub fn bereit() {
+    for _ in 0..200 {
+        if BEREIT.load(Ordering::Acquire) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Baut die Sperre aus den geltenden Regeln und holt fehlende Listen nach.
+fn anwenden(app: &AppHandle) {
+    let regeln = neu_bauen(app);
     let _ = app.emit_to("main", EREIGNIS, ());
     if !regeln.aktiv {
         return;
@@ -91,8 +118,7 @@ fn anwenden(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         if kategorien::erneuern(&app, &regeln.kategorien).await {
-            let regeln = app.state::<SchutzZustand>().0.lock().unwrap().regeln.clone();
-            let _ = tauri::async_runtime::spawn_blocking(move || sperre::setzen(sperre_bauen(&app, &regeln))).await;
+            let _ = tauri::async_runtime::spawn_blocking(move || neu_bauen(&app)).await;
         }
     });
 }

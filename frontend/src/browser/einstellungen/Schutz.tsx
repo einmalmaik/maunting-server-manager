@@ -76,7 +76,7 @@ function Schild() {
       )}
       <Schalterzeile
         name={t('browser.einstellungen.vergessen')}
-        hinweis={t('browser.einstellungen.vergessenHinweis')}
+        hinweis={t(istAndroid() ? 'browser.einstellungen.vergessenHinweisAndroid' : 'browser.einstellungen.vergessenHinweis')}
         an={konfig?.vergessen_beim_schliessen ?? false}
         aendern={(v) => void setzen({ vergessen_beim_schliessen: v })}
       />

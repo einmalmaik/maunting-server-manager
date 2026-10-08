@@ -38,6 +38,12 @@ export interface Erzeugt {
   passwort: string | null
   /** Auf dieser Seite schon eingesetzt; eine neue Seite setzt es neu ein (Fehlversuch, zweiter Schritt). */
   eingesetzt: boolean
+  /**
+   * Einmal ohne Rückfrage zum Speichern abgeschickt. Danach fragt der Browser
+   * wieder: die Seite kennt das Passwort und könnte es sonst mit immer neuen
+   * Benutzernamen abschicken, und jedes Mal entstünde ein Eintrag.
+   */
+  verbraucht?: boolean
   seit: number
 }
 
@@ -95,11 +101,13 @@ export const useFormulare = create<FormulareZustand>()((set, get) => ({
     } else {
       const schritt = get().schritt[id]
       const frueher = schritt && schritt.host === hostVon(url) && Date.now() - schritt.seit < SCHRITT_MS ? schritt.wert : ''
-      const erzeugt = get().erzeugtFuer(id, url)?.passwort === meldung.passwort
+      const e = get().erzeugtFuer(id, url)
+      const erzeugt = !!e && !e.verbraucht && e.passwort === meldung.passwort
       set((s) => ({
         abgeschickt: { ...s.abgeschickt, [id]: { url, benutzer: meldung.benutzer || frueher, passwort: meldung.passwort, ...(erzeugt && { erzeugt }) } },
         feld: ohne(s.feld, id),
         schritt: ohne(s.schritt, id),
+        ...(erzeugt && e && { erzeugt: { ...s.erzeugt, [id]: { ...e, verbraucht: true } } }),
       }))
     }
   },
@@ -125,12 +133,23 @@ export const useFormulare = create<FormulareZustand>()((set, get) => ({
     set((s) => ({ feld: ohne(s.feld, tab), abgeschickt: ohne(s.abgeschickt, tab), schritt: ohne(s.schritt, tab), erzeugt: ohne(s.erzeugt, tab) })),
 }))
 
-/** Anmeldungen im Tresor für die Seite: gleicher Host, ohne `www.`. */
+/** Anmeldungen im Tresor für die Seite: gleicher Host, ohne `www.`, und auf http nur http-Einträge. */
 export function anmeldungenFuer(items: VaultItem[], url: string): VaultItem[] {
   const host = hostVon(url)
   if (!host) return []
+  // Eine Seite ohne HTTPS bekommt nur, was ausdrücklich für http gespeichert
+  // wurde; sonst liefert jemand im Netz die http-Seite aus und liest mit.
+  const unsicher = /^http:/i.test(url)
   return items
-    .filter((i) => (i.category ?? 'login') === 'login' && !i.trashedAt && !i.archivedAt && hostVon(i.url) === host && i.password)
+    .filter(
+      (i) =>
+        (i.category ?? 'login') === 'login' &&
+        !i.trashedAt &&
+        !i.archivedAt &&
+        hostVon(i.url) === host &&
+        (!unsicher || /^http:/i.test(i.url ?? '')) &&
+        i.password,
+    )
     .sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0) || a.username.localeCompare(b.username))
 }
 

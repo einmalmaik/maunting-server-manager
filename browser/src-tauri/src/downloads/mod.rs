@@ -40,37 +40,89 @@ pub fn ordner(app: &AppHandle) -> PathBuf {
         .unwrap_or_else(std::env::temp_dir)
 }
 
+/// Höchstens so viele Zeichen; die Endung bleibt beim Kürzen erhalten.
+const HOECHSTENS_NAME: usize = 180;
+const HOECHSTENS_ENDUNG: usize = 16;
+
+/// Zeichen, die nichts zeigen oder die Leserichtung umkehren. Mit ihnen sähe
+/// `rechnung\u{202E}fdp.exe` aus wie `rechnungexe.pdf`. Dieselbe Liste wie im
+/// Smart System (`datei_speichern.rs`).
+pub fn ist_unsichtbar(z: char) -> bool {
+    matches!(
+        z,
+        '\u{00AD}'
+            | '\u{034F}'
+            | '\u{061C}'
+            | '\u{115F}'..='\u{1160}'
+            | '\u{17B4}'..='\u{17B5}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{2028}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{3164}'
+            | '\u{FEFF}'
+            | '\u{FFA0}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0000}'..='\u{E007F}'
+    )
+}
+
+/// Windows-Gerätenamen gelten mit jeder Endung (`aux.txt`) und mit
+/// Leerzeichen vor dem Punkt (`CON .txt`).
+fn ist_geraetename(name: &str) -> bool {
+    let stamm = name.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    matches!(stamm.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
+        || ((stamm.starts_with("COM") || stamm.starts_with("LPT"))
+            && stamm.chars().count() == 4
+            && stamm.chars().nth(3).is_some_and(|z| z.is_ascii_digit() || "¹²³".contains(z)))
+}
+
+/// Kürzt auf `HOECHSTENS_NAME` Zeichen und behält die Endung. Am Ende bleibt
+/// kein Punkt und kein Leerzeichen: Windows wirft beides beim Anlegen weg, und
+/// aus `….exe.` würde `….exe`.
+fn kuerzen(name: &str) -> String {
+    if name.chars().count() <= HOECHSTENS_NAME {
+        return name.to_string();
+    }
+    if let Some((stamm, endung)) = name.rsplit_once('.') {
+        let laenge = endung.chars().count();
+        if (1..=HOECHSTENS_ENDUNG).contains(&laenge) {
+            let stamm: String = stamm.chars().take(HOECHSTENS_NAME - 1 - laenge).collect();
+            let stamm = stamm.trim_end_matches(['.', ' ']);
+            if !stamm.is_empty() {
+                return format!("{stamm}.{endung}");
+            }
+        }
+    }
+    let name: String = name.chars().take(HOECHSTENS_NAME).collect();
+    name.trim_end_matches(['.', ' ']).to_string()
+}
+
 /// Bereinigt einen Dateinamen, den eine Webseite vorschlägt: keine Pfade,
-/// keine Steuer- und Richtungszeichen (`rechnung\u{202E}fdp.exe`), keine
-/// reservierten Windows-Namen.
+/// keine Steuer-, Richtungs- und unsichtbaren Zeichen, keine reservierten
+/// Windows-Namen, und ein langer Name behält seine Endung.
 pub fn sicherer_name(name: &str) -> String {
     let basis = name.rsplit(['/', '\\']).next().unwrap_or_default();
-    let mut sauber: String = basis
+    let sauber: String = basis
         .chars()
         .map(|c| {
-            if c.is_control()
-                || matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')
-                || matches!(c as u32, 0x200B..=0x200F | 0x202A..=0x202E | 0x2066..=0x2069 | 0xFEFF)
-            {
+            if c.is_control() || ist_unsichtbar(c) || matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*') {
                 '_'
             } else {
                 c
             }
         })
         .collect();
-    sauber = sauber.trim().trim_matches('.').to_string();
+    let sauber = kuerzen(sauber.trim().trim_start_matches('.').trim_end_matches(['.', ' ']));
     if sauber.is_empty() {
-        sauber = "download".into();
+        "download".into()
+    } else if ist_geraetename(&sauber) {
+        kuerzen(&format!("_{sauber}"))
+    } else {
+        sauber
     }
-    let stamm = sauber.split('.').next().unwrap_or_default().to_ascii_uppercase();
-    const RESERVIERT: [&str; 22] = [
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-    ];
-    if RESERVIERT.contains(&stamm.as_str()) {
-        sauber = format!("_{sauber}");
-    }
-    sauber.chars().take(180).collect()
 }
 
 /// Ein freier Pfad im Ordner: `datei.pdf`, sonst `datei (1).pdf` usw.
@@ -132,17 +184,37 @@ pub fn download_zeigen(app: AppHandle, pfad: String) -> Result<(), String> {
             return Err("Die Datei liegt nicht im Download-Ordner.".into());
         }
         #[cfg(windows)]
-        {
-            std::process::Command::new("explorer")
-                .arg(format!("/select,{}", datei.display()))
-                .spawn()
-                .map_err(|e| e.to_string())?;
-        }
+        return im_explorer_zeigen(&datei);
         #[cfg(not(windows))]
         {
             let _ = datei;
+            Ok(())
         }
-        Ok(())
+    }
+}
+
+/// Öffnet den Ordner der Datei im Explorer und wählt sie aus. Über die Shell,
+/// nicht als `explorer /select,<pfad>`: Explorer liest Kommas im Namen, den
+/// eine Seite vorschlägt, als Trenner seiner Argumente (bis 09.10.2026).
+#[cfg(windows)]
+fn im_explorer_zeigen(datei: &Path) -> Result<(), String> {
+    use windows::core::HSTRING;
+    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::{ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems};
+    unsafe {
+        let com = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let eintrag = ILCreateFromPathW(&HSTRING::from(datei.as_os_str()));
+        let ergebnis = if eintrag.is_null() {
+            Err("Die Datei gibt es nicht mehr.".to_string())
+        } else {
+            let ergebnis = SHOpenFolderAndSelectItems(eintrag, None, 0).map_err(|e| e.to_string());
+            ILFree(Some(eintrag));
+            ergebnis
+        };
+        if com.is_ok() {
+            CoUninitialize();
+        }
+        ergebnis
     }
 }
 
@@ -164,6 +236,47 @@ mod tests {
         assert_eq!(sicherer_name("aux.txt"), "_aux.txt");
         assert_eq!(sicherer_name("..."), "download");
         assert_eq!(sicherer_name("a:b?.pdf"), "a_b_.pdf");
+    }
+
+    /// AGENTS.md 83. Bis 09.10.2026 schnitt `sicherer_name` nach 180 Zeichen
+    /// ab: die Endung fiel weg, oder aus `….exe<Füllung>.txt` wurde `….exe`.
+    #[test]
+    fn ein_langer_name_behaelt_seine_endung() {
+        assert!(sicherer_name(&format!("{}.pdf", "a".repeat(300))).ends_with(".pdf"));
+        let vorschlag = format!("{}.exe{}.txt", "a".repeat(176), "b".repeat(20));
+        assert!(sicherer_name(&vorschlag).ends_with(".txt"));
+        assert!(name_fuer("https://x.example/a", Path::new(&vorschlag)).ends_with(".txt"));
+        let ohne_endung = sicherer_name(&format!("{}.exe.{}", "x".repeat(175), "y".repeat(40)));
+        assert!(ohne_endung.chars().count() <= 180 && !ohne_endung.ends_with('.'));
+    }
+
+    /// Windows wirft einen Punkt am Ende beim Anlegen weg; aus `….exe.` würde `….exe`.
+    #[cfg(windows)]
+    #[test]
+    fn das_dateisystem_legt_an_was_der_name_sagt() {
+        let name = sicherer_name(&format!("{}.exe.txt", "x".repeat(175)));
+        let ordner = std::env::temp_dir().join(format!("msb-name-{}", std::process::id()));
+        std::fs::create_dir_all(&ordner).unwrap();
+        std::fs::write(ordner.join(&name), b"MZ").unwrap();
+        let angelegt: Vec<String> =
+            std::fs::read_dir(&ordner).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        std::fs::remove_dir_all(&ordner).unwrap();
+        assert_eq!(angelegt, [name]);
+    }
+
+    #[test]
+    fn alle_geraetenamen_bekommen_einen_strich() {
+        for name in ["CONIN$.txt", "CONOUT$.log", "COM¹.txt", "LPT³.pdf", "COM0.txt", "LPT0.txt", "CON .txt", "nul"] {
+            assert!(sicherer_name(name).starts_with('_'), "{name}");
+        }
+        assert_eq!(sicherer_name("COM10.txt"), "COM10.txt");
+    }
+
+    #[test]
+    fn unsichtbare_zeichen_fallen_aus_dem_namen() {
+        for z in ['\u{061C}', '\u{00AD}', '\u{2060}', '\u{2064}', '\u{180E}', '\u{3164}', '\u{E0041}', '\u{FFF9}'] {
+            assert_eq!(sicherer_name(&format!("rechnung{z}.pdf")), "rechnung_.pdf", "U+{:04X}", z as u32);
+        }
     }
 
     #[test]

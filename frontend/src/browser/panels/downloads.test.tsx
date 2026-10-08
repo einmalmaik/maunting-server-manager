@@ -15,7 +15,7 @@ const { useDownloadsStore } = await import('../services/downloadsStore')
 const { DownloadsPanel } = await import('./Downloads')
 const { Downloads } = await import('../einstellungen/Downloads')
 
-const melde = (nr: number, stand: 'start' | 'pruefung' | 'fertig' | 'blockiert' | 'fehler', datei: string) =>
+const melde = (nr: number, stand: 'start' | 'pruefung' | 'fertig' | 'blockiert' | 'fehler' | 'speicher', datei: string) =>
   useDownloadsStore.getState().ereignis({ art: 'download', id: 'tab-a', nr, stand, url: 'https://example.com/datei.zip', datei })
 
 beforeEach(() => {
@@ -53,6 +53,14 @@ describe('Downloads mit Virenschutz', () => {
     // „Liste leeren“ lässt laufende Prüfungen stehen.
     fireEvent.click(screen.getByRole('button', { name: 'Liste leeren' }))
     expect(useDownloadsStore.getState().downloads.map((d) => d.nr)).toEqual([1])
+  })
+
+  it('sagt, wenn ein Download am vollen Gerät abbricht', () => {
+    melde(1, 'start', 'gross.iso')
+    melde(1, 'speicher', 'gross.iso')
+    render(<DownloadsPanel />)
+    const zeile = screen.getByText('gross.iso').closest('li')!
+    expect(within(zeile).getByText('Abgebrochen: zu wenig Speicher auf dem Gerät')).toBeInTheDocument()
   })
 
   it('schaltet „Bei jedem Download fragen“ in der Gerätekonfiguration', async () => {
