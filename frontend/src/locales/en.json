@@ -4713,7 +4713,7 @@
   },
   "privacyPolicy": {
     "title": "Privacy policy",
-    "intro": "In a time of increasing digital surveillance and dwindling privacy, Maunting Studios stands for the counter-model: protection requires trust. This policy describes transparently and comprehensively all data flows of the Maunting Service Manager and the Desktop App. We never track or surveil anyone covertly: all actions are transparent, auditable, self-hosted, and remain under the complete control of the user.",
+    "intro": "In a time of increasing digital surveillance and dwindling privacy, Maunting Studios stands for the counter-model: protection requires trust. This policy describes transparently and comprehensively all data flows of the Maunting Service Manager, the Desktop App and the Maunting Secure Browser. We never track or surveil anyone covertly: all actions are transparent, auditable, self-hosted, and remain under the complete control of the user.",
     "callout": "Summary: Maunting Studios – Security requires trust. Full data sovereignty, no hidden tracking, sensitive features (such as Computer-Use) are disabled by default, and every AI action remains transparently controllable.",
     "documentLabel": "MSM privacy",
     "summaryLabel": "Data protection",
@@ -4841,6 +4841,24 @@
           "eingabe": "Mouse and keyboard: the app does not record your input. There is no capture of keystrokes or mouse movement, neither locally nor transmitted. Conversely the AI can take over mouse and keyboard; with autonomous mode off, every takeover must be confirmed on your machine and is time-limited. Text the AI types originates from the model and is contained in the transmitted job.",
           "discordRpc": "Discord Rich Presence (RPC): If the Discord desktop app is running on your computer, the desktop app can report your activity status locally via a Windows pipe to Discord (e.g. 'MSS Desktop Companion'). No server addresses, chat histories, IP addresses, or sensitive credentials are ever transmitted. This feature can be completely disabled in the desktop app configuration ('konfig.json' -> 'discord_rpc_aktiv': false).",
           "lokal": "What is stored locally: a plain-text configuration file (panel address, sandbox path, shortcuts, audio device names, wake word sensitivity, initial start introduction state), the wake word recordings and model, and in the key store of the operating system the refresh token of the paired session, encrypted by the system. If you use biometric unlock for the vault or the messenger, their keys are stored there too, and for the messenger PIN a device secret that goes into its derivation. On top of that come the offline data of vault, notes and messenger; see the sections on the vault and on local storage. Your password and two-factor code never reach the app; signing in works solely through the pairing code or QR code from the panel. Uninstalling removes all of it completely."
+        }
+      },
+      "browser": {
+        "heading": "Maunting Secure Browser",
+        "body": "The Maunting Secure Browser is a standalone browser for Windows and Android. On Windows it shows web pages with the Microsoft Edge WebView2 runtime, which Windows provides and updates; on Android with the Android System WebView, which Google updates through the Play Store. Unless it is paired with an MSM instance, it talks to no Maunting Studios server. There is no telemetry.",
+        "items": {
+          "lokal": "On the computer: history, bookmarks, open tabs (address, title, site icon) and settings stay in the app folder and go to no server, not even your instance. Cookies, cache and site storage live in a separate profile, apart from Microsoft Edge.",
+          "privat": "Private tabs add nothing to the history and show no site icon. On Windows, their cookies and site storage live only in memory and disappear once the last private tab is closed; until then all private tabs share this session. “Forget on close” (off by default) deletes the cookies, cache and site storage of normal tabs when you quit; history and bookmarks stay.",
+          "verbindungen": "Connections: the pages you open and the search engine you chose receive your requests directly. For the ad and tracker blocker, the browser downloads the filter lists from easylist.to at most every four days, without cookie, identifier or referrer; easylist.to sees your IP address. For normal tabs, the interface fetches the site icon once more directly from the site.",
+          "schutz": "Youth and habit protection (off by default): the browser checks on the computer whether a site is blocked; no address goes to any service for this. For “Adult content”, “Gambling” and “Social networks” it downloads the category’s list only once the category is on, and after that at most every four days, from raw.githubusercontent.com, without cookie, identifier or referrer. GitHub sees your IP address and which list you download. With “Adult content” on, the browser adds the safe search parameter to searches on Google, Bing and DuckDuckGo and sends YouTube the header for restricted mode.",
+          "downloads": "Downloads: every file first downloads into a folder of the browser, where the antivirus registered with Windows checks it (usually Microsoft Defender). Only then does it move to the downloads folder. Depending on the antivirus settings, suspicious files or information about them go to its vendor; you control that in the antivirus settings, not in the browser.",
+          "microsoft": "Microsoft: SmartScreen is off, so visited addresses are not sent to Microsoft for checking. If a tab crashes, no crash report goes to Microsoft. Diagnostic data of the WebView2 runtime follows your Windows setting under “Diagnostics & feedback”; a part that Microsoft classifies as required is sent regardless.",
+          "rechte": "A site gets camera, microphone, location, notifications and similar permissions only after you agree in a prompt from the browser.",
+          "ausfuellen": "Filling from the vault: the browser decrypts logins, payment cards and bank accounts on the computer and inserts them only into the site they belong to. Payment data is only offered over HTTPS and only after Windows Hello or the master password.",
+          "passwoerter": "New passwords: when you register, the browser generates a strong password on the computer and saves it to the vault after you submit. If the vault is locked, it encrypts the login with the public key of your vault inbox and stores it there; the instance only sees the encrypted record, which is taken over the next time you unlock. The browser keeps no master password in memory for this.",
+          "kopplung": "Pairing with MSM (optional): once paired, the browser shows Singra, Messenger, Notes, Calendar and Vault of your instance in the sidebar; the sections above apply to them. The sign-in is kept in the Windows Credential Manager on Windows and, on Android, encrypted with a key from the Android Keystore. Each of these modules can be hidden in the settings, and the pairing can be removed at any time.",
+          "android": "On Android: Safe Browsing and the WebView usage statistics are off, so visited addresses are not sent to Google for them. Normal tabs have their own profile, apart from the browser interface. Private tabs share one profile on the phone; its cookies, site storage and cache are deleted once the last private tab is closed, and the next start removes the folder. Downloads go through the Android download service, which receives the address, cookies and user agent of the site for this; there is no virus check. The browser cannot turn on YouTube's restricted mode here. Payment data is only inserted after the phone's screen lock (fingerprint, face or PIN) or the master password.",
+          "widget": "Search widget on Android: what you say into the microphone is turned into text by the phone's speech recognition service, usually Google; the browser only receives the text. A photo is taken by the camera app. The browser shrinks it, removes the location and other metadata, sends it to the image search of the chosen search engine (Google Lens or Bing) and then deletes it from the phone. The browser itself has no camera or microphone permission."
         }
       },
       "storage": {
@@ -8486,7 +8504,16 @@
       "neuKuerzel": "New tab (Ctrl+T)",
       "privatKuerzel": "Private tab (Ctrl+Shift+N)",
       "privat": "Private",
-      "schliessen": "Close {{titel}}"
+      "schliessen": "Close {{titel}}",
+      "tonAn": "Unmute “{{titel}}”",
+      "stumm": "Mute “{{titel}}”",
+      "tonAnKurz": "Unmute",
+      "stummKurz": "Mute",
+      "ruhe": {
+        "schlaf": "sleeping",
+        "verworfen": "memory released"
+      },
+      "anzahl": "All tabs ({{anzahl}})"
     },
     "fenster": {
       "minimieren": "Minimize",
@@ -8529,7 +8556,34 @@
       "suchmaschine": "Search engine",
       "schnellzugriff": "Shortcuts",
       "privatTitel": "Private tab",
-      "privatText": "Pages from private tabs stay out of your history. Cookies and cache are kept in memory only and are gone once the last private tab is closed. Downloads and bookmarks stay."
+      "privatText": "Pages from private tabs stay out of your history. Cookies and cache are kept in memory only and are gone once the last private tab is closed. Downloads and bookmarks stay.",
+      "hinzufuegenTitel": "Add shortcut",
+      "bearbeiten": "Edit",
+      "bearbeitenTitel": "Edit shortcut",
+      "adresse": "Address",
+      "name": "Name",
+      "adresseUngueltig": "That is not a web address.",
+      "entfernt": "Removed “{{name}}”",
+      "nachVorn": "Move earlier",
+      "nachHinten": "Move later",
+      "anpassen": "Customize start page",
+      "heute": "Today",
+      "morgen": "Tomorrow",
+      "ganztags": "all day",
+      "keineTermine": "No events in the next 7 days",
+      "keineNotizen": "No notes yet",
+      "nichtLesbar": "Title not readable",
+      "widget": {
+        "uhr": "Clock",
+        "termine": "Upcoming events",
+        "notizen": "Recent notes",
+        "zuletzt": "Recently visited"
+      },
+      "nichtLesbarAlle": "Not readable on this device yet",
+      "oeffnen": {
+        "kalender": "Open calendar",
+        "notizen": "Open notes"
+      }
     },
     "leiste": {
       "name": "Sidebar",
@@ -8543,7 +8597,8 @@
       "downloads": "Downloads",
       "einstellungen": "Settings",
       "koppeln": "Pair",
-      "mitZahl": "{{name}}, {{zahl}} new"
+      "mitZahl": "{{name}}, {{zahl}} new",
+      "menue": "Menu"
     },
     "panel": {
       "schliessen": "Close panel",
@@ -8555,10 +8610,17 @@
       "suchen": "Search",
       "keineTreffer": "No results",
       "entfernen": "Remove",
-      "entfernenName": "Remove {{titel}}"
+      "entfernenName": "Remove {{titel}}",
+      "aktionen": "Actions",
+      "aktionenName": "Actions for {{titel}}"
     },
     "lesezeichen": {
-      "leer": "No bookmarks yet. The star in the address bar adds one."
+      "leer": "No bookmarks yet. The star in the address bar adds one.",
+      "umbenennen": "Rename",
+      "umbenennenTitel": "Rename bookmark",
+      "umbenennenText": "Name of the bookmark",
+      "nachOben": "Move up",
+      "nachUnten": "Move down"
     },
     "verlauf": {
       "leer": "Your history is empty.",
@@ -8571,9 +8633,13 @@
       "listeLeeren": "Clear list",
       "zeigen": "Show in folder",
       "zeigenName": "Show {{name}} in folder",
+      "zeigenAndroid": "Show in Downloads",
+      "zeigenNameAndroid": "Show {{name}} in Downloads",
       "stand": {
         "start": "Downloading",
+        "pruefung": "Being checked by the antivirus",
         "fertig": "Done",
+        "blockiert": "Blocked by the antivirus and deleted",
         "fehler": "Failed"
       }
     },
@@ -8585,10 +8651,8 @@
       "eigen": "Your image"
     },
     "einstellungen": {
-      "suche": "Search",
       "searxngAdresse": "Address of your SearXNG instance",
       "searxngUngueltig": "Only https:// addresses without credentials; http:// only for localhost.",
-      "schutz": "Protection and privacy",
       "schild": "Block ads and trackers",
       "schildHinweis": "Applies to every site except the exceptions below.",
       "listeEingebaut": "{{name}}: not downloaded yet, built-in base rules active",
@@ -8600,22 +8664,140 @@
       "vergessenHinweis": "Deletes cookies, cache and site data when you close the browser. History and bookmarks stay.",
       "datenLoeschen": "Clear browsing data",
       "datenLoeschenTitel": "Clear browsing data?",
-      "datenLoeschenText": "Cookies, cache, site data and your history are deleted. You'll be signed out of most sites. Bookmarks and the MSM pairing stay.",
+      "datenLoeschenText": "Cookies, cache, site data and history are deleted ({{zeitraum}}). You will be signed out of many sites. Bookmarks and the MSM pairing stay.",
       "datenGeloescht": "Browsing data cleared",
-      "downloads": "Downloads",
       "ordnerWaehlen": "Choose folder",
       "ordnerStandard": "Default folder",
-      "darstellung": "Appearance",
       "hintergrund": "Start page background",
       "bildWaehlen": "Choose your own image",
       "bildZuGross": "Please choose an image under 3 MB.",
-      "leiste": "In the sidebar",
       "kopplung": "MSM pairing",
       "gekoppeltMit": "Paired with {{adresse}}",
       "gekoppeltOffline": "Paired with {{adresse}}, currently unreachable",
       "trennen": "Unpair",
       "trennenTitel": "Unpair this browser?",
-      "trennenText": "The browser signs out of the panel. Singra, Messenger, notes, calendar and vault come back only after pairing again."
+      "trennenText": "The browser signs out of the panel. Singra, Messenger, notes, calendar and vault come back only after pairing again.",
+      "titel": "Settings",
+      "kategorie": {
+        "allgemein": "General",
+        "suche": "Search",
+        "schutz": "Privacy",
+        "verlauf": "History and data",
+        "passwoerter": "Passwords",
+        "downloads": "Downloads",
+        "design": "Design",
+        "dienste": "MSM services",
+        "ueber": "About",
+        "leistung": "Performance",
+        "jugendschutz": "Youth and habit protection"
+      },
+      "beimStart": "On startup",
+      "start": {
+        "letzte": "Tabs from last time",
+        "startseite": "New start page"
+      },
+      "sprache": "Language",
+      "spracheName": {
+        "de": "Deutsch",
+        "en": "English"
+      },
+      "suchmaschineHinweis": "For what you type in the address bar and on the start page.",
+      "rechte": "Site permissions",
+      "rechteLeer": "No site has been allowed or blocked anything yet.",
+      "rechteFehler": "The permissions could not be loaded.",
+      "rechtErlaubt": "Allowed",
+      "rechtBlockiert": "Blocked",
+      "rechtZuruecksetzen": "Reset",
+      "rechtZuruecksetzenName": "Reset {{recht}} for {{herkunft}}",
+      "rechtName": {
+        "mikrofon": "Microphone",
+        "kamera": "Camera",
+        "standort": "Location",
+        "benachrichtigungen": "Notifications",
+        "zwischenablage": "Read clipboard",
+        "downloads": "Multiple downloads",
+        "dateien": "Files",
+        "sensoren": "Motion sensors",
+        "midi": "MIDI devices",
+        "fenster": "Window management",
+        "schriften": "Local fonts"
+      },
+      "verlaufBehalten": "Delete history automatically",
+      "verlaufBehaltenHinweis": "Older entries go at startup and every hour.",
+      "frist": {
+        "immer": "Never",
+        "woche": "Older than a week",
+        "monat": "Older than a month",
+        "halbjahr": "Older than 6 months",
+        "jahr": "Older than a year"
+      },
+      "datenLoeschenHinweis": "Cookies, cache, site data and history. Bookmarks stay.",
+      "datenLoeschenAndroid": "Android always clears cookies, site storage and cache completely, not from a point in time. The browser history is cleared as well.",
+      "zeitraum": {
+        "stunde": "Last hour",
+        "tag": "Last 24 hours",
+        "woche": "Last 7 days",
+        "monat": "Last 4 weeks",
+        "alles": "All time"
+      },
+      "loeschen": "Delete",
+      "brauchtKopplung": "Needs the MSM pairing and the vault.",
+      "ausfuellen": "Offer to fill in and save sign-ins",
+      "erzeugen": "Fill in strong passwords automatically",
+      "erzeugenHinweis": "When signing up or changing a password; saved in the vault.",
+      "zahlungen": "Offer to fill in cards and accounts",
+      "zahlungenHinweis": "Only over HTTPS and after Windows Hello or the master password.",
+      "zahlungenHinweisAndroid": "Only over HTTPS and after the screen lock (fingerprint, face or PIN) or the master password.",
+      "ordner": "Save to",
+      "nichtGekoppelt": "Not paired with MSM",
+      "version": "Version {{version}}",
+      "datenschutz": "Privacy policy",
+      "datenschutzStand": "Version {{version}}",
+      "oeffnen": "Open",
+      "aufbau": "Layout",
+      "leisteOrt": "Modules and lists",
+      "ort": {
+        "menue": "In the menu (☰)",
+        "links": "Bar on the left",
+        "rechts": "Bar on the right",
+        "oben": "Icons at the top"
+      },
+      "panelSeite": "Panel side",
+      "seite": {
+        "rechts": "Right",
+        "links": "Left"
+      },
+      "eintraege": "Entries",
+      "knoepfe": "Buttons",
+      "knopf": {
+        "neuLaden": "Reload",
+        "schild": "Ad and tracker shield",
+        "stern": "Bookmark star",
+        "privaterTab": "Private tab"
+      },
+      "nachObenName": "Move {{name}} up",
+      "nachUntenName": "Move {{name}} down",
+      "startseite": "Start page",
+      "startseiteHinweis": "Events and notes appear when the browser is paired with MSM. Private tabs show only the clock.",
+      "hintergrundTabs": "Background tabs",
+      "schlafenNach": "Sleep after",
+      "schlafenHinweis": "A sleeping tab is frozen and uses less memory. Tabs playing sound never sleep.",
+      "minuten_one": "{{count}} minute",
+      "minuten_other": "{{count}} minutes",
+      "nie": "Never",
+      "speicherSparen": "Save memory",
+      "speicherSparenHinweis": "Tabs left in the background for an hour release their memory completely and reload when you open them. Anything typed into those pages is lost. Private tabs are excluded.",
+      "wachBleiben": "Always awake",
+      "wachBleibenHinweis": "Tabs from these sites never sleep.",
+      "ausnahmeSeite": "Site",
+      "ausnahmeHinzufuegen": "Add",
+      "ausnahmeUngueltig": "That is not a domain.",
+      "eintragEntfernen": "Remove",
+      "eintragEntfernenName": "Remove {{host}}",
+      "downloadFragen": "Ask for every download",
+      "downloadFragenHinweis": "Before downloading, the browser asks where the file should go.",
+      "downloadsAndroid": "Downloads go to the phone’s “Download” folder. Android fetches them with its download service and shows them in a notification. There is no antivirus check like on Windows.",
+      "virenschutzHinweis": "Every file is checked by the Windows antivirus first. Only then does it land in the folder; the browser deletes anything it rejects."
     },
     "kopplung": {
       "titel": "Pair with MSM",
@@ -8715,7 +8897,7 @@
       "nichtVerfuegbar": "Not available for this element.",
       "keineTreffer": "No matches",
       "keineEigenschaften": "No properties",
-      "imDomZeigen": "Reveal in Elements",
+      "imDomZeigen": "Reveal in the elements tree",
       "kopieren": "Copy",
       "kopiert": "Copied to clipboard",
       "kopierenFehler": "Copying failed.",
@@ -9098,6 +9280,63 @@
         "eigenes": "Use my own password",
         "gespeichert": "New password for {{host}} saved in the vault"
       }
+    },
+    "schutz": {
+      "an": "Protection on",
+      "anHinweis": "Blocks the chosen sites in every tab, private tabs included.",
+      "grenzen": "This slows down a quick impulse. It is not the operating system's parental control: uninstalling the browser, switching to another one or editing its settings file by hand gets around it.",
+      "kategorien": "Blocked categories",
+      "kategorie": {
+        "erwachsene": "Adult content",
+        "gluecksspiel": "Gambling",
+        "sozial": "Social networks",
+        "spiele": "Games",
+        "shopping": "Shopping"
+      },
+      "kategorieHinweis": {
+        "erwachsene": "Also turns on safe search for Google, Bing and DuckDuckGo and YouTube's restricted mode.",
+        "erwachseneAndroid": "Also turns on safe search for Google, Bing and DuckDuckGo. On Android the browser cannot turn on YouTube's restricted mode.",
+        "gluecksspiel": "Betting sites, online casinos and lotteries.",
+        "sozial": "Facebook, Instagram, TikTok, X, Reddit and more.",
+        "spiele": "The large game sites and stores. Add others under “Your blocks”.",
+        "shopping": "The large online shops. Add others under “Your blocks”."
+      },
+      "listeLaedt": "The full list is loading. Until then the browser blocks the best-known sites.",
+      "eigene": "Your blocks",
+      "eigeneHinweis": "These sites are blocked, including all their subdomains.",
+      "ausnahmen": "Always allowed",
+      "ausnahmenHinweis": "No category blocks these sites.",
+      "huerdeTitel": "Protection against switching off quickly",
+      "huerde": "Before loosening",
+      "huerdeHinweis": "Making it stricter applies at once. Loosening it means waiting this long or typing out a text that changes every time.",
+      "huerdeMinuten_one": "Wait {{count}} minute",
+      "huerdeMinuten_other": "Wait {{count}} minutes",
+      "huerdeStunden_one": "Wait {{count}} hour",
+      "huerdeStunden_other": "Wait {{count}} hours",
+      "huerdeAbtippen": "Type out a long text",
+      "wartetTitel": "Loosening pending",
+      "giltIn": "Applies in",
+      "lockerung": {
+        "aus": "Turn protection off",
+        "nichtMehr": "Stop blocking {{name}}",
+        "erlauben": "Always allow {{host}}",
+        "huerde": "Before loosening: {{name}}"
+      },
+      "behalten": "Keep protection",
+      "abtippenHinweis": "Type out the text and the change applies. Pasting is disabled here.",
+      "abtippenFeld": "Typed text",
+      "lockern": "Loosen",
+      "textFalsch": "The text doesn't match yet.",
+      "zuSchnell": "Nobody types that fast. Try again in {{zeit}}.",
+      "fehler": "The protection settings couldn't be changed.",
+      "gesperrtTitel": "This site is blocked",
+      "gesperrtText": "{{host}} is in “{{kategorie}}”. That is how youth and habit protection is set up.",
+      "gesperrtEigene": "{{host}} is on your own block list.",
+      "zurStartseite": "Go to start page",
+      "einstellungen": "Protection settings"
+    },
+    "widget": {
+      "keineBildsuche": "The chosen search engine has no image search. Choose Google or Bing in the settings under “Search”."
     }
   }
 }

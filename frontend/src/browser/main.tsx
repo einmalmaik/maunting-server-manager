@@ -7,6 +7,7 @@
 import { invoke } from '@tauri-apps/api/core'
 
 import { geraeteArtSetzen } from '@/desktop/geraeteArt'
+import { gestenleisteUebernehmen } from '@/lib/gestenleiste'
 import { randomUuidNachruesten } from '@/lib/uuidNachruesten'
 
 async function hochfahren(): Promise<void> {
@@ -22,6 +23,8 @@ async function hochfahren(): Promise<void> {
 }
 
 randomUuidNachruesten()
+// Android: die Gestenleiste unten, die ältere WebViews nicht melden (Punkt 87).
+gestenleisteUebernehmen()
 // Die Kopplung meldet dem Panel, dass hier der Browser koppelt, nicht MSS.
 geraeteArtSetzen('browser')
 void hochfahren()

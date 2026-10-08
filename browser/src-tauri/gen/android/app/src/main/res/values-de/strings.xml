@@ -1,0 +1,11 @@
+<resources>
+    <string name="webview_zu_alt">Die Android System WebView auf diesem Telefon ist zu alt (Version %1$d). Der Browser braucht eine neuere, damit Seiten nicht an den Speicher der App kommen. Aktualisiere „Android System WebView“ im Play Store und öffne den Browser danach neu.</string>
+    <string name="webview_aktualisieren">WebView aktualisieren</string>
+    <string name="widget_name">Browser-Suche</string>
+    <string name="widget_beschreibung">Mit der gewählten Suchmaschine suchen, per Sprache oder mit einem Foto</string>
+    <string name="widget_hinweis">Suchen oder Adresse eingeben</string>
+    <string name="widget_sprache">Spracheingabe</string>
+    <string name="widget_kamera">Mit einem Foto suchen</string>
+    <string name="widget_keine_sprache">Auf diesem Telefon gibt es keine Spracherkennung. Tippe die Suche stattdessen ein.</string>
+    <string name="widget_keine_kamera">Auf diesem Telefon gibt es keine Kamera-App.</string>
+</resources>

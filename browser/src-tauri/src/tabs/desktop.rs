@@ -30,10 +30,15 @@ use super::{melden, TabEreignis, Tabs};
 mod entwickler;
 mod formulare;
 mod grundereignisse;
+mod herunterladen;
 mod ohne_edge;
 mod rueckfragen;
+mod schlaf;
 mod standbild;
 mod webview2;
+
+pub(crate) use rueckfragen::{recht_art, recht_name};
+pub use schlaf::{ruhen, stumm};
 
 pub(crate) struct Nativ {
     pub controller: ICoreWebView2Controller,
@@ -101,6 +106,8 @@ fn umgebung(app: &AppHandle) -> Result<ICoreWebView2Environment, String> {
     let optionen = webview2_com::CoreWebView2EnvironmentOptions::default();
     unsafe {
         optionen.set_additional_browser_arguments(BROWSER_ARGUMENTE.to_string());
+        // Absturzberichte der Tabs bleiben auf dem Rechner (Datenschutzerklärung 3.30).
+        optionen.set_is_custom_crash_reporting_enabled(true);
         CreateCoreWebView2EnvironmentWithOptions(
             PCWSTR::null(),
             &HSTRING::from(profil.as_os_str()),
@@ -167,23 +174,28 @@ fn anlegen(app: &AppHandle, id: &str, privat: bool) -> Result<ICoreWebView2, Str
             .map_err(fehler)?;
         grundereignisse::anbinden(app, id, &core).map_err(fehler)?;
         formulare::anbinden(app, id, &core).map_err(fehler)?;
+        schlaf::anbinden(app, id, &core).map_err(fehler)?;
         webview2::einrichten(app, id, controller.clone(), umgebung.clone()).map_err(fehler)?;
     }
     NATIV.with(|n| n.borrow_mut().insert(id.to_string(), Nativ { controller, core: core.clone(), umgebung, privat }));
     Ok(core)
 }
 
-/// Zeigt den vorderen Tab, versteckt alle anderen.
+/// Zeigt den vorderen Tab, versteckt alle anderen. Der vordere wacht auf,
+/// auch wenn ein Dialog ihn gerade verdeckt (`schlaf.rs`).
 pub fn sichtbarkeit(app: &AppHandle, tabs: &Tabs) {
-    let sichtbar: HashMap<String, bool> = {
+    let stand: HashMap<String, (bool, bool)> = {
         let z = tabs.0.lock().unwrap();
-        z.tabs.keys().map(|id| (id.clone(), z.sichtbar(id))).collect()
+        let vorne = |id: &str| z.vollbild.as_deref().or(z.aktiv.as_deref()) == Some(id);
+        z.tabs.keys().map(|id| (id.clone(), (z.sichtbar(id), vorne(id)))).collect()
     };
+    let app2 = app.clone();
     let _ = app.run_on_main_thread(move || {
         NATIV.with(|n| {
             for (id, tab) in n.borrow().iter() {
-                let zeigen = sichtbar.get(id).copied().unwrap_or(false);
+                let (zeigen, vorne) = stand.get(id).copied().unwrap_or((false, false));
                 unsafe {
+                    schlaf::zeigen(&app2, id, tab, vorne);
                     let _ = tab.controller.SetIsVisible(zeigen);
                 }
             }

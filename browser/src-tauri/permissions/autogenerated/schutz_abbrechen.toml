@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-schutz-abbrechen"
+description = "Enables the schutz_abbrechen command without any pre-configured scope."
+commands.allow = ["schutz_abbrechen"]
+
+[[permission]]
+identifier = "deny-schutz-abbrechen"
+description = "Denies the schutz_abbrechen command without any pre-configured scope."
+commands.deny = ["schutz_abbrechen"]

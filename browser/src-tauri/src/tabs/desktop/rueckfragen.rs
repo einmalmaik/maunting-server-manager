@@ -91,21 +91,27 @@ pub fn vergessen(tab: &str) {
     }
 }
 
-fn recht_name(art: COREWEBVIEW2_PERMISSION_KIND) -> &'static str {
-    match art {
-        COREWEBVIEW2_PERMISSION_KIND_MICROPHONE => "mikrofon",
-        COREWEBVIEW2_PERMISSION_KIND_CAMERA => "kamera",
-        COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION => "standort",
-        COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS => "benachrichtigungen",
-        COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ => "zwischenablage",
-        COREWEBVIEW2_PERMISSION_KIND_MULTIPLE_AUTOMATIC_DOWNLOADS => "downloads",
-        COREWEBVIEW2_PERMISSION_KIND_FILE_READ_WRITE => "dateien",
-        COREWEBVIEW2_PERMISSION_KIND_OTHER_SENSORS => "sensoren",
-        COREWEBVIEW2_PERMISSION_KIND_MIDI_SYSTEM_EXCLUSIVE_MESSAGES => "midi",
-        COREWEBVIEW2_PERMISSION_KIND_WINDOW_MANAGEMENT => "fenster",
-        COREWEBVIEW2_PERMISSION_KIND_LOCAL_FONTS => "schriften",
-        _ => "sonstiges",
-    }
+/// Die Rechte, die eine Seite erfragen kann, mit ihrem Namen in der Oberfläche.
+const RECHTE: &[(COREWEBVIEW2_PERMISSION_KIND, &str)] = &[
+    (COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, "mikrofon"),
+    (COREWEBVIEW2_PERMISSION_KIND_CAMERA, "kamera"),
+    (COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION, "standort"),
+    (COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS, "benachrichtigungen"),
+    (COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ, "zwischenablage"),
+    (COREWEBVIEW2_PERMISSION_KIND_MULTIPLE_AUTOMATIC_DOWNLOADS, "downloads"),
+    (COREWEBVIEW2_PERMISSION_KIND_FILE_READ_WRITE, "dateien"),
+    (COREWEBVIEW2_PERMISSION_KIND_OTHER_SENSORS, "sensoren"),
+    (COREWEBVIEW2_PERMISSION_KIND_MIDI_SYSTEM_EXCLUSIVE_MESSAGES, "midi"),
+    (COREWEBVIEW2_PERMISSION_KIND_WINDOW_MANAGEMENT, "fenster"),
+    (COREWEBVIEW2_PERMISSION_KIND_LOCAL_FONTS, "schriften"),
+];
+
+pub(crate) fn recht_name(art: COREWEBVIEW2_PERMISSION_KIND) -> &'static str {
+    RECHTE.iter().find(|(a, _)| *a == art).map_or("sonstiges", |(_, n)| n)
+}
+
+pub(crate) fn recht_art(name: &str) -> Option<COREWEBVIEW2_PERMISSION_KIND> {
+    RECHTE.iter().find(|(_, n)| *n == name).map(|(a, _)| *a)
 }
 
 /// Höchstens so viel markierten Text gibt das Menü weiter (für „Suchen nach …“).

@@ -73,4 +73,20 @@ describe('Name der Leistensymbole', () => {
     await warten(VERZOEGERUNG_MS)
     expect(gesendet()).toEqual([])
   })
+
+  it('steht bei einer Leiste rechts links neben dem Symbol', async () => {
+    function Rechts() {
+      return (
+        <button type="button" aria-label="Kalender" {...useLeistenname('Kalender', 'links')}>
+          x
+        </button>
+      )
+    }
+    render(<Rechts />)
+    const knopf = screen.getByLabelText('Kalender')
+    knopf.getBoundingClientRect = () => ({ left: 900, right: 940, top: 100, bottom: 140, width: 40, height: 40, x: 900, y: 100, toJSON: () => null })
+    fireEvent.pointerEnter(knopf, { pointerType: 'mouse' })
+    await warten(VERZOEGERUNG_MS)
+    expect(kurzinfo.mock.calls.at(-1)?.[0]).toMatchObject({ text: 'Kalender', x: 892, y: 120, richtung: 'links' })
+  })
 })

@@ -1,5 +1,6 @@
 /**
- * Der Name eines Symbols der Leiste links, rechts daneben.
+ * Der Name eines Symbols der Leiste, auf der Seite zur Seite hin: rechts
+ * daneben, steht die Leiste rechts, links daneben.
  *
  * Rechts der Leiste liegt die Seite, ein eigenes Fenster über der Oberfläche:
  * eine `Kurzinfo` dort wäre unsichtbar. Windows zeichnet die Blase deshalb
@@ -53,10 +54,13 @@ function senden(blase: Record<string, unknown> | null): void {
 let sichtbar = false
 let wartet: ReturnType<typeof setTimeout> | undefined
 
-function zeigen(element: Element, text: string): void {
+export type Richtung = 'rechts' | 'links'
+
+function zeigen(element: Element, text: string, richtung: Richtung): void {
   const r = element.getBoundingClientRect()
   sichtbar = true
-  senden({ text, x: r.right + ABSTAND, y: r.top + r.height / 2, ...farbenLesen() })
+  const x = richtung === 'rechts' ? r.right + ABSTAND : r.left - ABSTAND
+  senden({ text, x, y: r.top + r.height / 2, richtung, ...farbenLesen() })
 }
 
 export function namenVerbergen(): void {
@@ -73,20 +77,20 @@ function spaeterVerbergen(): void {
 }
 
 /** Handler für ein Symbol der Leiste. */
-export function useLeistenname(text: string) {
+export function useLeistenname(text: string, richtung: Richtung = 'rechts') {
   return {
     onPointerEnter: (e: PointerEvent<HTMLElement>) => {
       if (e.pointerType !== 'mouse') return
       const element = e.currentTarget
       clearTimeout(wartet)
       // Von Symbol zu Symbol wandert eine offene Blase ohne neue Wartezeit.
-      if (sichtbar) zeigen(element, text)
-      else wartet = setTimeout(() => zeigen(element, text), VERZOEGERUNG_MS)
+      if (sichtbar) zeigen(element, text, richtung)
+      else wartet = setTimeout(() => zeigen(element, text, richtung), VERZOEGERUNG_MS)
     },
     onPointerLeave: spaeterVerbergen,
     onPointerDown: namenVerbergen,
     onFocus: (e: FocusEvent<HTMLElement>) => {
-      if (e.currentTarget.matches(':focus-visible')) zeigen(e.currentTarget, text)
+      if (e.currentTarget.matches(':focus-visible')) zeigen(e.currentTarget, text, richtung)
     },
     onBlur: namenVerbergen,
   }

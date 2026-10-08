@@ -15,14 +15,32 @@ export interface Suchmaschine {
   marke: Marke
   /** `%s` wird durch den kodierten Suchbegriff ersetzt. */
   vorlage: string
+  /**
+   * Bildsuche des Such-Widgets: dorthin geht das Foto als `multipart/form-data`
+   * im Feld `feld`, bei `base64` als Text statt als Datei. Beide Adressen sind
+   * am 08.10.2026 per Hochladen geprüft.
+   */
+  bild?: { url: string; feld: string; base64?: boolean }
 }
 
 export const SUCHMASCHINEN: Suchmaschine[] = [
   { id: 'duckduckgo', name: 'DuckDuckGo', marke: 'duckduckgo', vorlage: 'https://duckduckgo.com/?q=%s' },
   { id: 'brave', name: 'Brave Search', marke: 'brave', vorlage: 'https://search.brave.com/search?q=%s' },
   { id: 'ecosia', name: 'Ecosia', marke: 'ecosia', vorlage: 'https://www.ecosia.org/search?q=%s' },
-  { id: 'google', name: 'Google', marke: 'google', vorlage: 'https://www.google.com/search?q=%s' },
-  { id: 'bing', name: 'Bing', marke: 'bing', vorlage: 'https://www.bing.com/search?q=%s' },
+  {
+    id: 'google',
+    name: 'Google',
+    marke: 'google',
+    vorlage: 'https://www.google.com/search?q=%s',
+    bild: { url: 'https://lens.google.com/v3/upload', feld: 'encoded_image' },
+  },
+  {
+    id: 'bing',
+    name: 'Bing',
+    marke: 'bing',
+    vorlage: 'https://www.bing.com/search?q=%s',
+    bild: { url: 'https://www.bing.com/images/search?view=detailv2&iss=sbiupload', feld: 'imageBin', base64: true },
+  },
   { id: 'searxng', name: 'SearXNG', marke: 'searxng', vorlage: '' },
 ]
 

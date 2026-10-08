@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-schutz-bestaetigen"
+description = "Enables the schutz_bestaetigen command without any pre-configured scope."
+commands.allow = ["schutz_bestaetigen"]
+
+[[permission]]
+identifier = "deny-schutz-bestaetigen"
+description = "Denies the schutz_bestaetigen command without any pre-configured scope."
+commands.deny = ["schutz_bestaetigen"]

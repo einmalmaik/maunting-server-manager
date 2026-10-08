@@ -32,6 +32,8 @@ pub struct Konfig {
     pub schild_ausnahmen: Vec<String>,
     /// Zielordner für Downloads. `None` = Download-Ordner des Systems.
     pub download_ordner: Option<String>,
+    /// Vor jedem Download fragen, wohin die Datei soll.
+    pub download_fragen: bool,
     /// Cookies, Cache und Website-Daten beim Schließen löschen.
     pub vergessen_beim_schliessen: bool,
 }
@@ -44,6 +46,7 @@ impl Default for Konfig {
             schild_aktiv: true,
             schild_ausnahmen: Vec::new(),
             download_ordner: None,
+            download_fragen: false,
             vergessen_beim_schliessen: false,
         }
     }

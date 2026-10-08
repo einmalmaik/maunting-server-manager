@@ -11,9 +11,12 @@ pub mod downloads;
 pub mod fenster;
 pub mod konfig;
 pub mod kurzinfo;
+#[cfg(windows)]
+pub mod mixer;
 pub mod schild;
 pub mod seite;
 pub mod tabs;
+pub mod widget;
 
 use tauri::Manager;
 
@@ -64,6 +67,9 @@ pub fn run() {
             schild::konfig_uebernehmen(&konfig);
             app.manage(konfig::KonfigZustand(std::sync::Mutex::new(konfig)));
             schild::listen::starten(handle);
+            downloads::quarantaene::beim_start(handle);
+            schild::schutz::starten(handle);
+            tabs::ruhe::starten(handle.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -94,12 +100,24 @@ pub fn run() {
             tabs::formular::tab_fuellen,
             tabs::tabs_zuruecksetzen,
             tabs::oberflaeche_fokussieren,
+            tabs::ruhe::tabs_leistung,
+            tabs::tab_stumm,
             schild::schild_stand,
+            schild::schutz::schutz_stand,
+            schild::schutz::schutz_aendern,
+            schild::schutz::schutz_abbrechen,
+            schild::schutz::schutz_bestaetigen,
             downloads::download_zeigen,
             downloads::download_ordner,
             fenster::fenster_aktion,
             kurzinfo::kurzinfo,
             browserdaten::seitendaten_loeschen,
+            browserdaten::seitenrechte,
+            browserdaten::seitenrecht_zuruecksetzen,
+            widget::widget_start,
+            widget::widget_stand,
+            widget::bildsuche,
+            widget::tastatur_zeigen,
         ])
         .on_window_event(|fenster, ereignis| {
             // „Beim Schließen vergessen“: erst die Seitendaten löschen, dann

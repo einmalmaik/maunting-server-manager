@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bildsuche"
+description = "Enables the bildsuche command without any pre-configured scope."
+commands.allow = ["bildsuche"]
+
+[[permission]]
+identifier = "deny-bildsuche"
+description = "Denies the bildsuche command without any pre-configured scope."
+commands.deny = ["bildsuche"]

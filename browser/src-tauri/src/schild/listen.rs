@@ -31,7 +31,7 @@ pub const LISTEN: [Liste; 3] = [
     Liste { name: "easyprivacy", url: "https://easylist.to/easylist/easyprivacy.txt", art: Treffer::Tracker },
 ];
 
-const ERNEUERN_NACH: Duration = Duration::from_secs(4 * 24 * 3600);
+pub(super) const ERNEUERN_NACH: Duration = Duration::from_secs(4 * 24 * 3600);
 /// Größer ist keine der Listen; was darüber liegt, ist keine Filterliste.
 const HOECHSTENS_BYTES: usize = 16 * 1024 * 1024;
 
@@ -93,7 +93,7 @@ pub fn engine_aus(texte: &[&str]) -> Engine {
     Engine::new_with_filter_set(satz)
 }
 
-fn ordner(app: &AppHandle) -> Option<PathBuf> {
+pub(super) fn ordner(app: &AppHandle) -> Option<PathBuf> {
     let o = app.path().app_local_data_dir().ok()?.join("filterlisten");
     std::fs::create_dir_all(&o).ok()?;
     Some(o)
@@ -103,7 +103,7 @@ fn datei(app: &AppHandle, liste: &Liste) -> Option<PathBuf> {
     Some(ordner(app)?.join(format!("{}.txt", liste.name)))
 }
 
-fn alter(pfad: &PathBuf) -> Option<Duration> {
+pub(super) fn alter(pfad: &PathBuf) -> Option<Duration> {
     let geaendert = std::fs::metadata(pfad).ok()?.modified().ok()?;
     SystemTime::now().duration_since(geaendert).ok()
 }
@@ -133,12 +133,13 @@ fn engines_bauen(app: &AppHandle) {
     }
 }
 
-async fn holen(liste: &Liste) -> Result<String, String> {
+/// Holt eine Liste und nimmt sie nur, wenn `passt` sie als Liste erkennt.
+pub(super) async fn holen(url: &str, passt: fn(&str) -> bool) -> Result<String, String> {
     let antwort = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
         .build()
         .map_err(|e| e.to_string())?
-        .get(liste.url)
+        .get(url)
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -153,7 +154,7 @@ async fn holen(liste: &Liste) -> Result<String, String> {
         return Err("Liste zu groß".into());
     }
     let text = String::from_utf8(bytes.to_vec()).map_err(|_| "Liste ist kein UTF-8".to_string())?;
-    if !ist_filterliste(&text) {
+    if !passt(&text) {
         return Err("Antwort ist keine Filterliste".into());
     }
     Ok(text)
@@ -172,7 +173,7 @@ pub fn starten(app: &AppHandle) {
             if alter(&pfad).is_some_and(|a| a < ERNEUERN_NACH) {
                 continue;
             }
-            match holen(liste).await {
+            match holen(liste.url, ist_filterliste).await {
                 Ok(text) => {
                     let teil = pfad.with_extension("txt.part");
                     if std::fs::write(&teil, text).is_ok() && std::fs::rename(&teil, &pfad).is_ok() {

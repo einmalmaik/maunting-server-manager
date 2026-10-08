@@ -1097,7 +1097,8 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
           `sticky` ist eine Position und liegt damit von selbst über der
           Schicht; ihr undurchsichtiger Grund deckt sie dort ab. */}
       <header className="flex flex-nowrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/30 bg-surface-container-low px-2.5 py-2 sm:px-4 sm:py-2.5 shrink-0 sticky top-0 z-20 overflow-x-auto msm-ohne-rollbalken">
-        <div className="w-40 sm:w-56 max-w-[240px] shrink-0">
+        {/* Schrumpft im schmalen Browser-Panel, damit die Knöpfe daneben Platz haben. */}
+        <div className="min-w-24 flex-1 max-w-56 sm:w-56 sm:flex-none">
           <Dropdown
             value={providerId ? String(providerId) : null}
             onChange={waehleProvider}

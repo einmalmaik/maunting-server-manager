@@ -15,18 +15,100 @@ export const EIGENES_BILD_MAX_BYTES = 3 * 1024 * 1024
 
 export type Modul = 'singra' | 'messenger' | 'notizen' | 'kalender' | 'tresor'
 
+/** Was in Leiste oder Menü steht und sich ordnen lässt: die Module und die Listen des Browsers. */
+export type Leistenziel = Modul | 'lesezeichen' | 'verlauf' | 'downloads'
+
+/** Knöpfe in Kopf- und Navigationsleiste, die man ausblenden kann. */
+export type Knopf = 'neuLaden' | 'schild' | 'stern' | 'privaterTab'
+export const KNOEPFE: Knopf[] = ['neuLaden', 'schild', 'stern', 'privaterTab']
+
+export type Ausblendbar = Leistenziel | Knopf
+
+/**
+ * Wo die Einträge stehen: hinter dem Menüknopf (☰) in der Navigationsleiste,
+ * als Leiste links oder rechts, oder als kleine Symbole oben.
+ */
+export type Leistenort = 'menue' | 'links' | 'rechts' | 'oben'
+
+/** Eine Kachel der Startseite. */
+export interface Schnellzugriff {
+  url: string
+  titel: string
+}
+
+/** Mehr Kacheln passen nicht sinnvoll auf die Startseite. */
+export const SCHNELLZUGRIFFE_MAX = 24
+
+export const VORGABE_SCHNELLZUGRIFFE: Schnellzugriff[] = [
+  { url: 'https://www.wikipedia.org/', titel: 'Wikipedia' },
+  { url: 'https://www.youtube.com/', titel: 'YouTube' },
+  { url: 'https://github.com/', titel: 'GitHub' },
+  { url: 'https://www.reddit.com/', titel: 'Reddit' },
+]
+
+/** Kästen unter den Schnellzugriffen; Termine und Notizen nur gekoppelt. */
+export type Widget = 'uhr' | 'termine' | 'notizen' | 'zuletzt'
+export const WIDGETS: Widget[] = ['uhr', 'termine', 'notizen', 'zuletzt']
+
+/** Nach wie vielen Minuten im Hintergrund ein Tab schläft; 0 heißt nie. */
+export const SCHLAFEN_NACH = [5, 15, 30, 60, 0] as const
+export type SchlafenNach = (typeof SCHLAFEN_NACH)[number]
+
+/** Wie lange der Verlauf bleibt; Älteres fällt beim Start und stündlich weg (`useVerlaufFrist`). */
+export type VerlaufFrist = 'immer' | 'woche' | 'monat' | 'halbjahr' | 'jahr'
+
 interface EinstellungenZustand {
   suchmaschine: SuchmaschinenId
   searxngUrl: string | null
   hintergrund: Hintergrund
   eigenesBild: string | null
-  /** Module der Seitenleiste, die der Nutzer ausgeblendet hat. */
-  ausgeblendet: Modul[]
+  /** Was der Nutzer ausgeblendet hat: Einträge und Knöpfe. */
+  ausgeblendet: Ausblendbar[]
+  leiste: Leistenort
+  /** Auf welcher Seite der Seite das Panel aufgeht. */
+  panelSeite: 'links' | 'rechts'
+  /** Eigene Reihenfolge der Einträge; was fehlt, steht dahinter in der Grundordnung. */
+  anordnung: Leistenziel[]
   /** Breite des Seitenpanels in Pixeln. */
   panelBreite: number
+  /** Nach dem Start: die Tabs vom letzten Mal oder eine leere Startseite. */
+  beimStart: 'letzte' | 'startseite'
+  verlaufBehalten: VerlaufFrist
+  /** Gespeicherte Anmeldungen einfügen und nach dem Absenden speichern anbieten. */
+  ausfuellen: boolean
+  /** Bei Registrierung und Passwortwechsel selbst ein starkes Passwort einsetzen. */
+  erzeugen: boolean
+  zahlungen: boolean
+  schnellzugriffe: Schnellzugriff[]
+  /** Eigene Reihenfolge der Widgets; was fehlt, folgt in der Grundordnung. */
+  widgetOrdnung: Widget[]
+  /** „Zuletzt besucht“ ist anfangs aus: die Startseite zeigt sonst den Verlauf jedem, der mitschaut. */
+  widgetsAus: Widget[]
+  schlafenNach: SchlafenNach
+  /** Tabs, die eine Stunde im Hintergrund lagen, geben ihren Speicher ganz frei und laden beim Zeigen neu. */
+  speicherSparen: boolean
+  /** Hosts, deren Tabs nie schlafen. */
+  schlafAusnahmen: string[]
 
-  setzen: (teil: Partial<Omit<EinstellungenZustand, 'setzen' | 'modulUmschalten'>>) => void
-  modulUmschalten: (modul: Modul) => void
+  setzen: (teil: Partial<Omit<EinstellungenZustand, 'setzen' | 'umschalten'>>) => void
+  umschalten: (was: Ausblendbar) => void
+}
+
+/**
+ * Bis zu eigenen Kacheln zeigte die Startseite die ersten acht Lesezeichen.
+ * Wer welche hatte, behält sie als Kacheln, statt dass dort Fremdes steht.
+ */
+function bisherigeKacheln(): Schnellzugriff[] | null {
+  try {
+    const lesezeichen = JSON.parse(localStorage.getItem('msb:verlauf') ?? 'null')?.state?.lesezeichen
+    if (!Array.isArray(lesezeichen) || lesezeichen.length === 0) return null
+    return lesezeichen
+      .filter((l): l is Schnellzugriff => typeof l?.url === 'string' && typeof l?.titel === 'string')
+      .slice(0, 8)
+      .map(({ url, titel }) => ({ url, titel }))
+  } catch {
+    return null
+  }
 }
 
 export const useEinstellungenStore = create<EinstellungenZustand>()(
@@ -37,16 +119,37 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       hintergrund: 'schlicht',
       eigenesBild: null,
       ausgeblendet: [],
+      leiste: 'menue',
+      panelSeite: 'rechts',
+      anordnung: [],
       panelBreite: 420,
+      beimStart: 'letzte',
+      verlaufBehalten: 'immer',
+      ausfuellen: true,
+      erzeugen: true,
+      zahlungen: true,
+      schnellzugriffe: VORGABE_SCHNELLZUGRIFFE,
+      widgetOrdnung: [],
+      widgetsAus: ['zuletzt'],
+      schlafenNach: 30,
+      speicherSparen: false,
+      schlafAusnahmen: [],
 
       setzen: (teil) => set(teil),
-      modulUmschalten: (modul) =>
+      umschalten: (was) =>
         set((s) => ({
-          ausgeblendet: s.ausgeblendet.includes(modul)
-            ? s.ausgeblendet.filter((m) => m !== modul)
-            : [...s.ausgeblendet, modul],
+          ausgeblendet: s.ausgeblendet.includes(was) ? s.ausgeblendet.filter((m) => m !== was) : [...s.ausgeblendet, was],
         })),
     }),
-    { name: 'msb:einstellungen', version: 1 },
+    // Neue Felder brauchen keine neue Version: was der gespeicherte Stand
+    // nicht kennt, kommt aus den Vorgaben oben (flaches Zusammenführen).
+    {
+      name: 'msb:einstellungen',
+      version: 1,
+      merge: (gespeichert, aktuell) => {
+        const g = (gespeichert ?? {}) as Partial<EinstellungenZustand>
+        return { ...aktuell, ...g, schnellzugriffe: g.schnellzugriffe ?? bisherigeKacheln() ?? aktuell.schnellzugriffe }
+      },
+    },
   ),
 )

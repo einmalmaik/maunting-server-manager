@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Das Such-Widget (SuchWidget.kt): eine Pille in den Farben der Oberfläche
+     (surface-container-high, on-surface), Ziele 48 dp. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="56dp"
+    android:layout_gravity="center_vertical"
+    android:background="@drawable/widget_hintergrund"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="8dp"
+    android:paddingEnd="4dp">
+
+    <LinearLayout
+        android:id="@+id/widget_feld"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:background="@drawable/widget_druck"
+        android:contentDescription="@string/widget_hinweis"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:importantForAccessibility="no"
+            android:src="@mipmap/ic_launcher_round" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:ellipsize="end"
+            android:importantForAccessibility="no"
+            android:maxLines="1"
+            android:text="@string/widget_hinweis"
+            android:textColor="#A9BDC3"
+            android:textSize="16sp" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/widget_sprache"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="@drawable/widget_druck"
+        android:contentDescription="@string/widget_sprache"
+        android:padding="12dp"
+        android:src="@drawable/widget_mikrofon" />
+
+    <ImageView
+        android:id="@+id/widget_kamera"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="@drawable/widget_druck"
+        android:contentDescription="@string/widget_kamera"
+        android:padding="12dp"
+        android:src="@drawable/widget_kamera"
+        android:visibility="gone" />
+</LinearLayout>

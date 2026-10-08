@@ -143,11 +143,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.29 vom 2026-10-08 aus (Zahlungskarten und Bankkonten im Tresor)', () => {
+  it('weist die Fassung 3.33 vom 2026-10-08 aus (Browser unter Android und Such-Widget)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.29`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.33`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -214,6 +214,21 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/„Tresor“ im Teilen-Menü/);
     // 3.29: Karten und Bankkonten sind eigene Einträge im Tresor.
     expect(i18n.t('privacyPolicy.sections.vault.items.eintraege')).toMatch(/Zahlungskarten, Bankkonten/);
+    // 3.30: der Browser hat einen eigenen Abschnitt; Absturzberichte der Tabs gehen nicht an Microsoft.
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.browser.heading'))).toBeInTheDocument();
+    expect(i18n.t('privacyPolicy.sections.browser.items.verbindungen')).toMatch(/easylist\.to sieht dabei Ihre IP-Adresse/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.microsoft')).toMatch(/kein Absturzbericht an Microsoft/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.passwoerter')).toMatch(/Ein Master-Passwort hält der Browser dafür nicht im Speicher/);
+    // 3.31: Kategorielisten des Jugend- und Suchtschutzes kommen von GitHub, nur für aktive Kategorien.
+    expect(i18n.t('privacyPolicy.sections.browser.items.schutz')).toMatch(/GitHub sieht dabei Ihre IP-Adresse und welche Liste Sie laden/);
+    // 3.32: Downloads prüft der Virenschutz von Windows, der je nach Einstellung Proben an seinen Hersteller schickt.
+    expect(i18n.t('privacyPolicy.sections.browser.items.downloads')).toMatch(/gehen verdächtige Dateien oder Angaben über sie an dessen Hersteller/);
+    // 3.33: der Browser unter Android; private Tabs liegen dort bis zum letzten auf dem Telefon, Sprache und Foto gehen an fremde Dienste.
+    expect(i18n.t('privacyPolicy.sections.browser.items.privat')).toMatch(/^Private Tabs .* Unter Windows liegen ihre Cookies/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/Private Tabs teilen sich ein Profil auf dem Telefon/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/Adresse, Cookies und User-Agent der Seite/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.widget')).toMatch(/Spracherkennungsdienst des Telefons/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.widget')).toMatch(/Bildsuche der gewählten Suchmaschine/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

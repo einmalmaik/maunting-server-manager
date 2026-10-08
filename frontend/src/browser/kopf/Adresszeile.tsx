@@ -119,7 +119,7 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
         aria-expanded={offen}
         aria-controls={listenId}
         aria-activedescendant={offen ? `${listenId}-${markiert}` : undefined}
-        className="h-9 rounded-full bg-surface-container-low pl-9 text-body-sm"
+        className="h-9 rounded-full bg-surface-container-low pl-9 text-body-sm [@media(pointer:coarse)]:h-11"
         onFocus={(e) => e.currentTarget.select()}
         onBlur={() => setTimeout(beenden, 120)}
         onChange={(e) => {

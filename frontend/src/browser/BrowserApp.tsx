@@ -1,12 +1,16 @@
 /**
  * Die Oberfläche des Maunting Secure Browsers.
  *
- * Oben Tabs und Navigation, links die Seitenleiste, in der Mitte die Seite
- * (eine Webview von Rust), rechts ein Panel für Lesezeichen, Verlauf,
- * Downloads, Einstellungen und, gekoppelt, die Seiten von MSS. Welches Panel
+ * Oben Tabs und Navigation, in der Mitte die Seite (eine Webview von Rust),
+ * am Handy statt oben eine Leiste unten (`HandyLeiste`, wie Chrome mit
+ * Adressleiste unten) und darüber nur der Rand der Statusleiste,
+ * daneben die Seitenleiste, falls gewählt (sonst stehen ihre Einträge im
+ * Menü oder oben), und ein Panel für Lesezeichen, Verlauf,
+ * Downloads und, gekoppelt, die Seiten von MSS. Die Einstellungen sind eine
+ * eigene Seite im Tab (`einstellungen/`). Welches Panel
  * offen ist, sagt die Route des MemoryRouters (`leiste/module.ts`).
  */
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 
 import { BrowserBestaetigungDialog } from '@/components/BrowserBestaetigungDialog'
@@ -23,6 +27,7 @@ import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 import { useCallStore } from '@/stores/useCallStore'
 
 import type { AdresszeileGriff } from './kopf/Adresszeile'
+import { HandyLeiste } from './kopf/HandyLeiste'
 import { Kopfleiste } from './kopf/Kopfleiste'
 import { Navigationsleiste } from './kopf/Navigationsleiste'
 import { Suchleiste } from './kopf/Suchleiste'
@@ -31,13 +36,18 @@ import { Seitenleiste } from './leiste/Seitenleiste'
 import { FormularLeiste } from './seite/FormularLeiste'
 import { Meldungsleiste } from './seite/Meldungsleiste'
 import { Seitenflaeche } from './seite/Seitenflaeche'
+import { useEinstellungenStore } from './services/einstellungenStore'
 import { useGeraetKonfig } from './services/geraetKonfig'
 import { kuerzelAusfuehren, useKuerzel, type KuerzelZiele } from './services/kuerzel'
 import { tabEreignisse } from './services/nativ'
+import { useLeistung } from './services/leistung'
+import { istAndroid } from './services/plattform'
 import { istGekoppelt, useSitzung, useSitzungsLauf } from './services/sitzung'
 import { useTabsStore } from './services/tabsStore'
 import { einrichten as gesperrtEinrichten } from './services/tresorGesperrt'
+import { useWidget } from './services/widget'
 import { useUeberdeckungBeobachten } from './services/ueberdeckung'
+import { useVerlaufFrist } from './services/verlaufStore'
 
 export function BrowserApp() {
   return (
@@ -81,9 +91,14 @@ function Wurzel() {
   const social = usePublicSettingsStore((s) => s.social_enabled)
   const tresorOffen = useVaultStore((s) => s.isUnlocked)
   const anruf = useCallStore((s) => s.state !== 'idle')
+  const leiste = useEinstellungenStore((s) => s.leiste)
+  const panelSeite = useEinstellungenStore((s) => s.panelSeite)
+  const handy = istAndroid()
 
   useSitzungsLauf()
   useUeberdeckungBeobachten()
+  useVerlaufFrist()
+  useLeistung()
   // Dieselben Schlösser wie in MSS: Tresor und Messenger sperren sich selbst.
   useAutoSperre(tresorAutoSperrQuelle, tresorOffen)
   useMessengerSperreBereitschaft()
@@ -114,21 +129,40 @@ function Wurzel() {
   )
   useKuerzel(ziele)
   useTabEreignisse(ziele)
+  const startseite = useCallback(() => navigate('/'), [navigate])
+  useWidget(ziele.adresszeile, startseite)
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-background text-on-surface">
-      <Kopfleiste />
-      <Navigationsleiste ref={adresszeile} />
+    <div
+      className={`flex h-dvh flex-col overflow-hidden bg-background text-on-surface ${handy ? 'pl-[var(--msm-links-sicher)] pr-[var(--msm-rechts-sicher)]' : ''}`}
+    >
+      {handy ? (
+        // Unter Statusleiste und Kamera liegt nichts, was man antippen muss.
+        <div aria-hidden="true" className="h-[var(--msm-oben-sicher)] shrink-0 bg-surface-container" />
+      ) : (
+        <>
+          <Kopfleiste />
+          <Navigationsleiste ref={adresszeile} />
+        </>
+      )}
       <Suchleiste />
-      <div className="flex min-h-0 flex-1">
-        <Seitenleiste />
+      <div className="flex min-h-0 flex-1 bg-surface-container">
+        {!handy && leiste === 'links' && <Seitenleiste seite="links" />}
+        {!handy && panelSeite === 'links' && <Panel seite="links" />}
         <div className="flex min-w-0 flex-1 flex-col">
           <Meldungsleiste />
           <FormularLeiste />
           <Seitenflaeche />
         </div>
-        <Panel />
+        {!handy && panelSeite === 'rechts' && <Panel seite="rechts" />}
+        {!handy && leiste === 'rechts' && <Seitenleiste seite="rechts" />}
       </div>
+      {handy && (
+        <>
+          <HandyLeiste ref={adresszeile} />
+          <Panel seite="voll" />
+        </>
+      )}
 
       {angemeldet && <PanelPopupModal />}
       {/* Das Anruffenster deckt alles ab und hat kein aria-modal: die Seite

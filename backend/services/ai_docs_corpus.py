@@ -121,7 +121,7 @@ SEITEN: dict[str, Seite] = {
         # Wie `Privacy.tsx` rendert, nicht wie `de.json` sortiert.
         reihenfolge=(
             "scope", "accounts", "infrastructure", "protection", "messenger", "vault",
-            "providers", "ai", "desktopApp", "hoster", "credentials", "storage",
+            "providers", "ai", "desktopApp", "browser", "hoster", "credentials", "storage",
             "retention", "responsibility",
         ),
     ),
@@ -131,7 +131,7 @@ SEITEN: dict[str, Seite] = {
 # `frontend/src/pages/datenschutzStand.ts` und in keiner Sprachdatei — also
 # genau die zwei Angaben, die ein Modell sonst erfindet. Ein Test haelt sie
 # gegen diese Datei.
-DATENSCHUTZ_VERSION = "3.29"
+DATENSCHUTZ_VERSION = "3.33"
 DATENSCHUTZ_STAND = "2026-10-08"
 
 # `de.json` fuehrt neben `privacyPolicy` einen zweiten, **toten** Namensraum

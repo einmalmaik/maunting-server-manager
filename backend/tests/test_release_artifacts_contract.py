@@ -6,6 +6,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+# Jede Android-App im Repo: Smart System und Secure Browser.
+ANDROID_APPS = [
+    ROOT / "smart-system" / "src-tauri" / "gen" / "android",
+    ROOT / "browser" / "src-tauri" / "gen" / "android",
+]
 
 
 def test_release_workflow_publishes_explicit_component_assets() -> None:
@@ -56,7 +61,6 @@ def test_canonical_docs_cover_deployment_and_secret_free_enrollment() -> None:
 
 def test_android_signing_key_never_lives_in_the_repo() -> None:
     """Bis 5.0.4 lagen Keystore und Passwort im oeffentlichen Repo."""
-    android = ROOT / "smart-system" / "src-tauri" / "gen" / "android"
     eingecheckt = subprocess.run(
         ["git", "ls-files", "*.keystore", "*.jks", "*.p12", "*.pfx"],
         cwd=ROOT,
@@ -65,9 +69,11 @@ def test_android_signing_key_never_lives_in_the_repo() -> None:
         check=True,
     ).stdout.split()
     assert eingecheckt == []
-    gradle = (android / "app" / "build.gradle.kts").read_text(encoding="utf-8")
-    assert "storePassword" not in gradle
-    assert "keyPassword" not in gradle
+    for android in ANDROID_APPS:
+        gradle = (android / "app" / "build.gradle.kts").read_text(encoding="utf-8")
+        assert "storePassword" not in gradle, android
+        assert "keyPassword" not in gradle, android
+        assert "signingConfig" not in gradle, android
 
     workflow = (ROOT / ".github" / "workflows" / "release-artifacts.yml").read_text(
         encoding="utf-8"
@@ -84,10 +90,9 @@ def test_android_webview_hears_network_changes() -> None:
     Kein `online`-Ereignis: Tresor und Notizen merkten bis 01.10.2026 nicht,
     wenn das Netz zurückkam (Emulator-Probe mit Flugmodus).
     """
-    manifest = (
-        ROOT / "smart-system" / "src-tauri" / "gen" / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
-    ).read_text(encoding="utf-8")
-    assert 'android:name="android.permission.ACCESS_NETWORK_STATE"' in manifest
+    for android in ANDROID_APPS:
+        manifest = (android / "app" / "src" / "main" / "AndroidManifest.xml").read_text(encoding="utf-8")
+        assert 'android:name="android.permission.ACCESS_NETWORK_STATE"' in manifest, android
 
 
 def test_android_asks_for_no_overlay_and_no_microphone_service() -> None:

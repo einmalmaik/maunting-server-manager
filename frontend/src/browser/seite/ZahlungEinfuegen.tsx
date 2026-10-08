@@ -1,8 +1,8 @@
 /**
  * Karte oder Bankkonto aus dem Tresor in ein Bezahlformular. Nie ohne
- * Bestätigung: Windows Hello, sonst das Master-Passwort des Tresors. Nur über
- * HTTPS; `tab_fuellen` prüft das noch einmal und füllt nur auf derselben
- * Herkunft.
+ * Bestätigung: Windows Hello bzw. die Bildschirmsperre unter Android, sonst
+ * das Master-Passwort des Tresors. Nur über HTTPS; `tab_fuellen` prüft das
+ * noch einmal und füllt nur auf derselben Herkunft.
  */
 import { useMemo, useState, type FormEvent } from 'react'
 import { CreditCard, Landmark } from 'lucide-react'
@@ -39,7 +39,7 @@ export function ZahlungEinfuegen({ tab, url, art }: { tab: string; url: string; 
   const passende = useMemo(() => (offen ? zahlungsmittel(items).filter((i) => i.zahlung.art === art) : []), [offen, items, art])
   const [wahl, setWahl] = useState<string | null>(null)
   const [laeuft, setLaeuft] = useState(false)
-  // Wartet auf das Master-Passwort, wenn es kein Windows Hello gibt.
+  // Wartet auf das Master-Passwort, wenn es keine Biometrie gibt.
   const [passwortFrage, setPasswortFrage] = useState<{ text: string; fertig: (ok: boolean) => void } | null>(null)
   const host = hostVon(url)
   const rahmen = { name: t('browser.formular.zahlung.leiste'), symbol: art === 'konto' ? Landmark : CreditCard, onSchliessen: () => weg(tab) }

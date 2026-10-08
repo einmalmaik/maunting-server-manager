@@ -982,14 +982,33 @@ export function Calendar() {
                       {date.getDate()}
                     </span>
                     {dayEvents.length > 0 && (
-                      <span className="text-label-sm text-on-surface-variant px-1 font-mono">
+                      <span className="hidden md:inline text-label-sm text-on-surface-variant px-1 font-mono">
                         {dayEvents.length}
                       </span>
                     )}
                   </div>
 
+                  {/* Schmal (Handy, Browser-Panel) passt kein Titel in die Zelle:
+                      dort Punkte in den Terminfarben, ein Tipp zeigt den Tag. */}
+                  {dayEvents.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setCurrentDate(date)
+                        setViewMode('day')
+                      }}
+                      aria-label={t('calendar.eventsThisDay', { count: dayEvents.length })}
+                      className="md:hidden flex min-h-6 w-full flex-1 flex-wrap content-start gap-1 pt-1"
+                    >
+                      {dayEvents.slice(0, 6).map((ev) => (
+                        <span key={ev.schluessel} aria-hidden="true" className={`h-1.5 w-1.5 rounded-full bg-current ${farbwahl(ev.color).text}`} />
+                      ))}
+                    </button>
+                  )}
+
                   {/* Event Chips */}
-                  <div className="space-y-1 overflow-hidden">
+                  <div className="hidden md:block space-y-1 overflow-hidden">
                     {dayEvents.slice(0, 3).map((ev) => {
                       const colorStyle = farbwahl(ev.color)
                       const timeStr = new Date(ev.start).toLocaleTimeString(locale, {
@@ -1008,13 +1027,14 @@ export function Calendar() {
                           {ev.event_type === 'team' && <Users className="w-2.5 h-2.5 shrink-0 opacity-90 text-status-success" />}
                           {ev.event_type === 'server' && <Server className={`w-2.5 h-2.5 shrink-0 opacity-90 ${SERVER_TON.text}`} />}
                           {ev.event_type === 'node' && <Network className="w-2.5 h-2.5 shrink-0 opacity-90 text-status-warning" />}
-                          <span className="font-semibold shrink-0">{timeStr}</span>
-                          <span className="truncate">{ev.title}</span>
+                          {/* Schmal (Handy, Browser-Panel) reicht der Platz nur für den Titel. */}
+                          <span className="hidden lg:inline font-semibold shrink-0">{timeStr}</span>
+                          <span className="min-w-0 truncate">{ev.title}</span>
                         </div>
                       )
                     })}
                     {dayEvents.length > 3 && (
-                      <div className="text-label-sm text-primary/80 font-medium px-1">
+                      <div className="text-label-sm text-primary/80 font-medium px-1 truncate">
                         {t('calendar.moreEvents', { count: dayEvents.length - 3 })}
                       </div>
                     )}

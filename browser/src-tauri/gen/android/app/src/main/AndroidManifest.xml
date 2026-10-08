@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Ohne sie meldet Android dem WebView keine Netzwechsel: navigator.onLine
+         bliebe immer true (AGENTS.md Punkt 74). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.maunting_secure_browser"
+        android:usesCleartextTraffic="${usesCleartextTraffic}">
+        <!-- Wie unter Windows (SmartScreen aus, keine Diagnose): Safe Browsing
+             schickt Adressen an Google, die Metriken Nutzungsdaten der WebView. -->
+        <meta-data android:name="android.webkit.WebView.EnableSafeBrowsing" android:value="false" />
+        <meta-data android:name="android.webkit.WebView.MetricsOptOut" android:value="true" />
+        <!-- Drehen ist erlaubt (Videos im Vollbild); `configChanges` hält die
+             Activity samt Tabs dabei am Leben. -->
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:launchMode="singleTask"
+            android:label="@string/main_activity_title"
+            android:name=".MainActivity"
+            android:windowSoftInputMode="adjustResize"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Trägt nur den BiometricPrompt vor dem Android-Keystore
+             (Schluesselfach.kt); durchsichtig, nicht exportiert. -->
+        <activity
+            android:name=".SchluesselfachActivity"
+            android:theme="@style/Theme.MSB.Schluesselfach"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode" />
+
+        <!-- Such-Widget (SuchWidget.kt); was es anstößt, läuft über die
+             WidgetActivity, die keine fremde App erreicht. -->
+        <receiver
+            android:name=".SuchWidget"
+            android:label="@string/widget_name"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_suche" />
+        </receiver>
+        <activity
+            android:name=".WidgetActivity"
+            android:theme="@style/Theme.MSB.Schluesselfach"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode" />
+
+        <provider
+          android:name="androidx.core.content.FileProvider"
+          android:authorities="${applicationId}.fileprovider"
+          android:exported="false"
+          android:grantUriPermissions="true">
+          <meta-data
+            android:name="android.support.FILE_PROVIDER_PATHS"
+            android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>

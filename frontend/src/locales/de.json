@@ -4713,7 +4713,7 @@
   },
   "privacyPolicy": {
     "title": "Datenschutzerklärung",
-    "intro": "In einer Zeit zunehmender digitaler Überwachung und schwindender Privatsphäre setzt Maunting Studios das Gegenmodell: Schutz braucht Vertrauen. Diese Erklärung beschreibt transparent und lückenlos alle Datenflüsse des Maunting Service Managers und der Desktop-App. Wir überwachen niemanden heimlich: Alle Aktionen sind transparent, auditierbar, self-hosted und liegen vollständig unter der Kontrolle des Nutzers.",
+    "intro": "In einer Zeit zunehmender digitaler Überwachung und schwindender Privatsphäre setzt Maunting Studios das Gegenmodell: Schutz braucht Vertrauen. Diese Erklärung beschreibt transparent und lückenlos alle Datenflüsse des Maunting Service Managers, der Desktop-App und des Maunting Secure Browsers. Wir überwachen niemanden heimlich: Alle Aktionen sind transparent, auditierbar, self-hosted und liegen vollständig unter der Kontrolle des Nutzers.",
     "callout": "Kurzfassung: Maunting Studios – Schutz braucht Vertrauen. Volle Datenhoheit, kein heimliches Tracking, risikobehaftete Funktionen (wie Computer-Use) sind standardmäßig deaktiviert und jede KI-Aktion ist für Sie transparent kontrollier- und abschaltbar.",
     "documentLabel": "MSM Datenschutz",
     "summaryLabel": "Datenschutz",
@@ -4841,6 +4841,24 @@
           "eingabe": "Maus und Tastatur: Die App zeichnet Ihre Eingaben nicht auf. Es gibt keinen Mitschnitt von Tastenanschlägen oder Mausbewegungen, weder lokal noch übertragen. Umgekehrt kann die KI Maus und Tastatur übernehmen; ist der autonome Modus aus, muss jede Übernahme an Ihrem Rechner bestätigt werden und ist zeitlich befristet. Text, den die KI tippen lässt, stammt aus dem Modell und steht im übertragenen Auftrag.",
           "discordRpc": "Discord Rich Presence (RPC): Wenn auf Ihrem Rechner die Discord-Desktop-App läuft, kann die Desktop-App Ihren Aktivitätsstatus lokal über eine Windows-Pipe an Discord melden (z. B. 'MSS Desktop Companion'). Hierbei werden zu keinem Zeitpunkt Serveradressen, Chatverläufe, IP-Adressen oder vertrauliche Daten übertragen. Die Funktion kann in der Konfigurationsdatei der Desktop-App ('konfig.json' -> 'discord_rpc_aktiv': false) vollständig deaktiviert werden.",
           "lokal": "Was lokal gespeichert wird: Eine Konfigurationsdatei im Klartext (Panel-Adresse, Sandbox-Pfad, Tastenkürzel, Namen der Audiogeräte, Wake-Word-Empfindlichkeit, Status der Erststart-Einführung), die Wake-Word-Aufnahmen samt Modell und im Schlüsselspeicher des Betriebssystems das von ihm verschlüsselte Erneuerungs-Token der gekoppelten Sitzung. Nutzen Sie den biometrischen Schnelleinstieg für Tresor oder Messenger, liegen dort auch deren Schlüssel, für die Messenger-PIN außerdem ein Gerätegeheimnis, das in ihre Ableitung einfließt. Dazu kommen die Offline-Daten von Tresor, Notizen und Messenger, siehe die Abschnitte zum Tresor und zur lokalen Speicherung. Ihr Passwort und Ihr Zwei-Faktor-Code erreichen die App nie; die Anmeldung läuft ausschließlich über den Kopplungscode oder QR-Code aus dem Panel. Die Deinstallation entfernt all das restlos."
+        }
+      },
+      "browser": {
+        "heading": "Maunting Secure Browser",
+        "body": "Der Maunting Secure Browser ist ein eigenständiger Browser für Windows und Android. Unter Windows zeigt er Webseiten mit der Laufzeit Microsoft Edge WebView2, die Windows bereitstellt und aktualisiert, unter Android mit der Android System WebView, die Google über den Play Store aktualisiert. Ohne Kopplung mit einer MSM-Instanz spricht er mit keinem Server von Maunting Studios. Es gibt keine Telemetrie.",
+        "items": {
+          "lokal": "Auf dem Rechner: Verlauf, Lesezeichen, geöffnete Tabs (Adresse, Titel, Seitensymbol) und Einstellungen liegen nur im App-Ordner und gehen an keinen Server, auch nicht an Ihre Instanz. Cookies, Cache und Website-Speicher liegen in einem eigenen Profil, getrennt von Microsoft Edge.",
+          "privat": "Private Tabs legen nichts im Verlauf ab und zeigen kein Seitensymbol. Unter Windows liegen ihre Cookies und ihr Website-Speicher nur im Arbeitsspeicher und verschwinden, wenn der letzte private Tab geschlossen ist; bis dahin teilen sich alle privaten Tabs diese Sitzung. „Beim Schließen vergessen“ (standardmäßig aus) löscht beim Beenden Cookies, Cache und Website-Speicher der normalen Tabs; Verlauf und Lesezeichen bleiben.",
+          "verbindungen": "Verbindungen: Die Seiten, die Sie öffnen, und die gewählte Suchmaschine bekommen Ihre Anfragen direkt. Für den Werbe- und Trackerschutz lädt der Browser höchstens alle vier Tage die Filterlisten von easylist.to, ohne Cookie, Kennung und Referer; easylist.to sieht dabei Ihre IP-Adresse. Das Seitensymbol eines normalen Tabs holt die Oberfläche noch einmal direkt von der Seite.",
+          "schutz": "Jugend- und Suchtschutz (standardmäßig aus): Ob eine Seite gesperrt ist, prüft der Browser auf dem Rechner; dafür geht keine Adresse an einen Dienst. Für „Inhalte für Erwachsene“, „Glücksspiel“ und „Soziale Netzwerke“ lädt er die Liste der Kategorie erst, wenn sie an ist, und danach höchstens alle vier Tage von raw.githubusercontent.com, ohne Cookie, Kennung und Referer. GitHub sieht dabei Ihre IP-Adresse und welche Liste Sie laden. Mit „Inhalte für Erwachsene“ hängt der Browser an Suchen bei Google, Bing und DuckDuckGo den Parameter für die sichere Suche an und schickt YouTube die Kopfzeile für den eingeschränkten Modus.",
+          "downloads": "Downloads: Jede Datei lädt zuerst in einen Ordner des Browsers und wird dort vom Virenschutz geprüft, den Windows kennt (meist Microsoft Defender). Erst danach kommt sie in den Download-Ordner. Je nach Einstellung des Virenschutzes gehen verdächtige Dateien oder Angaben über sie an dessen Hersteller; das regeln Sie in den Einstellungen des Virenschutzes, nicht im Browser.",
+          "microsoft": "Microsoft: SmartScreen ist abgeschaltet, besuchte Adressen gehen nicht zur Prüfung an Microsoft. Stürzt ein Tab ab, geht kein Absturzbericht an Microsoft. Diagnosedaten der WebView2-Laufzeit richten sich nach Ihrer Windows-Einstellung unter „Diagnose und Feedback“; ein Teil davon, den Microsoft als erforderlich einstuft, wird unabhängig davon gesendet.",
+          "rechte": "Kamera, Mikrofon, Standort, Benachrichtigungen und ähnliche Rechte bekommt eine Seite nur nach Ihrer Zustimmung in einer Rückfrage des Browsers.",
+          "ausfuellen": "Ausfüllen aus dem Tresor: Anmeldedaten, Zahlungskarten und Bankkonten entschlüsselt der Browser auf dem Rechner und setzt sie nur in die Seite ein, für die sie gelten. Zahlungsdaten gibt es nur über HTTPS und erst nach Windows Hello oder dem Master-Passwort.",
+          "passwoerter": "Neue Passwörter: Bei einer Registrierung erzeugt der Browser auf dem Rechner ein starkes Passwort und speichert es nach dem Absenden im Tresor. Ist der Tresor gesperrt, verschlüsselt er die Anmeldung mit dem öffentlichen Schlüssel Ihres Tresor-Posteingangs und legt sie dort ab; die Instanz sieht nur den verschlüsselten Datensatz, übernommen wird er beim nächsten Entsperren. Ein Master-Passwort hält der Browser dafür nicht im Speicher.",
+          "kopplung": "Kopplung mit MSM (freiwillig): Gekoppelt zeigt der Browser Singra, Messenger, Notizen, Kalender und Tresor Ihrer Instanz in der Seitenleiste; dafür gelten die Abschnitte oben. Die Anmeldung liegt unter Windows in der Windows-Anmeldeinformationsverwaltung, unter Android verschlüsselt mit einem Schlüssel aus dem Android-Keystore. Jedes dieser Module lässt sich in den Einstellungen ausblenden, die Kopplung jederzeit trennen.",
+          "android": "Unter Android: Safe Browsing und die Nutzungsstatistik der WebView sind abgeschaltet, besuchte Adressen gehen dafür nicht an Google. Normale Tabs haben ein eigenes Profil, getrennt von der Oberfläche des Browsers. Private Tabs teilen sich ein Profil auf dem Telefon; Cookies, Website-Speicher und Cache darin werden gelöscht, sobald der letzte private Tab geschlossen ist, den Ordner entfernt der nächste Start. Downloads lädt der Download-Dienst von Android, der dafür Adresse, Cookies und User-Agent der Seite bekommt; eine Virenprüfung gibt es nicht. Den eingeschränkten Modus von YouTube kann der Browser hier nicht einschalten. Zahlungsdaten setzt er erst nach der Bildschirmsperre des Telefons (Fingerabdruck, Gesicht oder PIN) oder dem Master-Passwort ein.",
+          "widget": "Such-Widget unter Android: Was Sie in das Mikrofon sprechen, wandelt der Spracherkennungsdienst des Telefons in Text um, meist Google; der Browser bekommt nur den Text. Ein Foto nimmt die Kamera-App auf. Der Browser verkleinert es, entfernt Ort und andere Metadaten, schickt es an die Bildsuche der gewählten Suchmaschine (Google Lens oder Bing) und löscht es danach vom Telefon. Kamera- oder Mikrofonrecht hat der Browser selbst nicht."
         }
       },
       "storage": {
@@ -8486,7 +8504,16 @@
       "neuKuerzel": "Neuer Tab (Strg+T)",
       "privatKuerzel": "Privater Tab (Strg+Umschalt+N)",
       "privat": "Privat",
-      "schliessen": "{{titel}} schließen"
+      "schliessen": "{{titel}} schließen",
+      "tonAn": "Ton für „{{titel}}“ einschalten",
+      "stumm": "„{{titel}}“ stummschalten",
+      "tonAnKurz": "Ton an",
+      "stummKurz": "Stummschalten",
+      "ruhe": {
+        "schlaf": "schläft",
+        "verworfen": "Speicher freigegeben"
+      },
+      "anzahl": "Alle Tabs ({{anzahl}})"
     },
     "fenster": {
       "minimieren": "Minimieren",
@@ -8529,7 +8556,34 @@
       "suchmaschine": "Suchmaschine",
       "schnellzugriff": "Schnellzugriff",
       "privatTitel": "Privater Tab",
-      "privatText": "Seiten aus privaten Tabs landen nicht im Verlauf. Cookies und Cache liegen nur im Speicher und verschwinden, wenn der letzte private Tab geschlossen ist. Downloads und Lesezeichen bleiben."
+      "privatText": "Seiten aus privaten Tabs landen nicht im Verlauf. Cookies und Cache liegen nur im Speicher und verschwinden, wenn der letzte private Tab geschlossen ist. Downloads und Lesezeichen bleiben.",
+      "hinzufuegenTitel": "Schnellzugriff hinzufügen",
+      "bearbeiten": "Bearbeiten",
+      "bearbeitenTitel": "Schnellzugriff bearbeiten",
+      "adresse": "Adresse",
+      "name": "Name",
+      "adresseUngueltig": "Das ist keine Webadresse.",
+      "entfernt": "„{{name}}“ entfernt",
+      "nachVorn": "Nach vorn",
+      "nachHinten": "Nach hinten",
+      "anpassen": "Startseite anpassen",
+      "heute": "Heute",
+      "morgen": "Morgen",
+      "ganztags": "ganztägig",
+      "keineTermine": "Keine Termine in den nächsten 7 Tagen",
+      "keineNotizen": "Noch keine Notizen",
+      "nichtLesbar": "Titel nicht lesbar",
+      "widget": {
+        "uhr": "Uhr",
+        "termine": "Nächste Termine",
+        "notizen": "Letzte Notizen",
+        "zuletzt": "Zuletzt besucht"
+      },
+      "nichtLesbarAlle": "Auf diesem Gerät noch nicht lesbar",
+      "oeffnen": {
+        "kalender": "Kalender öffnen",
+        "notizen": "Notizen öffnen"
+      }
     },
     "leiste": {
       "name": "Seitenleiste",
@@ -8543,7 +8597,8 @@
       "downloads": "Downloads",
       "einstellungen": "Einstellungen",
       "koppeln": "Koppeln",
-      "mitZahl": "{{name}}, {{zahl}} neu"
+      "mitZahl": "{{name}}, {{zahl}} neu",
+      "menue": "Menü"
     },
     "panel": {
       "schliessen": "Panel schließen",
@@ -8555,10 +8610,17 @@
       "suchen": "Durchsuchen",
       "keineTreffer": "Keine Treffer",
       "entfernen": "Entfernen",
-      "entfernenName": "{{titel}} entfernen"
+      "entfernenName": "{{titel}} entfernen",
+      "aktionen": "Aktionen",
+      "aktionenName": "Aktionen für {{titel}}"
     },
     "lesezeichen": {
-      "leer": "Noch keine Lesezeichen. Der Stern in der Adresszeile setzt eins."
+      "leer": "Noch keine Lesezeichen. Der Stern in der Adresszeile setzt eins.",
+      "umbenennen": "Umbenennen",
+      "umbenennenTitel": "Lesezeichen umbenennen",
+      "umbenennenText": "Name des Lesezeichens",
+      "nachOben": "Nach oben",
+      "nachUnten": "Nach unten"
     },
     "verlauf": {
       "leer": "Der Verlauf ist leer.",
@@ -8571,9 +8633,13 @@
       "listeLeeren": "Liste leeren",
       "zeigen": "Im Ordner zeigen",
       "zeigenName": "{{name}} im Ordner zeigen",
+      "zeigenAndroid": "In den Downloads zeigen",
+      "zeigenNameAndroid": "{{name}} in den Downloads zeigen",
       "stand": {
         "start": "Wird geladen",
+        "pruefung": "Wird vom Virenschutz geprüft",
         "fertig": "Fertig",
+        "blockiert": "Vom Virenschutz blockiert und gelöscht",
         "fehler": "Fehlgeschlagen"
       }
     },
@@ -8585,10 +8651,8 @@
       "eigen": "Eigenes Bild"
     },
     "einstellungen": {
-      "suche": "Suche",
       "searxngAdresse": "Adresse deiner SearXNG-Instanz",
       "searxngUngueltig": "Nur https://-Adressen ohne Zugangsdaten, http:// nur für localhost.",
-      "schutz": "Schutz und Privatsphäre",
       "schild": "Werbung und Tracker blockieren",
       "schildHinweis": "Gilt für alle Seiten außer den Ausnahmen darunter.",
       "listeEingebaut": "{{name}}: noch nicht geladen, eingebaute Grundregeln aktiv",
@@ -8600,22 +8664,140 @@
       "vergessenHinweis": "Löscht Cookies, Cache und Website-Daten, wenn du den Browser schließt. Verlauf und Lesezeichen bleiben.",
       "datenLoeschen": "Browserdaten löschen",
       "datenLoeschenTitel": "Browserdaten löschen?",
-      "datenLoeschenText": "Cookies, Cache, Website-Daten und der Verlauf werden gelöscht. Auf den meisten Seiten bist du danach abgemeldet. Lesezeichen und die Kopplung mit MSM bleiben.",
+      "datenLoeschenText": "Cookies, Cache, Website-Daten und Verlauf werden gelöscht ({{zeitraum}}). Auf vielen Seiten bist du danach abgemeldet. Lesezeichen und die Kopplung mit MSM bleiben.",
       "datenGeloescht": "Browserdaten gelöscht",
-      "downloads": "Downloads",
       "ordnerWaehlen": "Ordner wählen",
       "ordnerStandard": "Standardordner",
-      "darstellung": "Darstellung",
       "hintergrund": "Hintergrund der Startseite",
       "bildWaehlen": "Eigenes Bild wählen",
       "bildZuGross": "Bitte ein Bild unter 3 MB wählen.",
-      "leiste": "In der Seitenleiste",
       "kopplung": "MSM-Kopplung",
       "gekoppeltMit": "Gekoppelt mit {{adresse}}",
       "gekoppeltOffline": "Gekoppelt mit {{adresse}}, gerade nicht erreichbar",
       "trennen": "Kopplung aufheben",
       "trennenTitel": "Kopplung aufheben?",
-      "trennenText": "Der Browser meldet sich beim Panel ab. Singra, Messenger, Notizen, Kalender und Tresor sind hier erst nach einer neuen Kopplung wieder da."
+      "trennenText": "Der Browser meldet sich beim Panel ab. Singra, Messenger, Notizen, Kalender und Tresor sind hier erst nach einer neuen Kopplung wieder da.",
+      "titel": "Einstellungen",
+      "kategorie": {
+        "allgemein": "Allgemein",
+        "suche": "Suche",
+        "schutz": "Datenschutz",
+        "verlauf": "Verlauf und Daten",
+        "passwoerter": "Passwörter",
+        "downloads": "Downloads",
+        "design": "Design",
+        "dienste": "MSM-Dienste",
+        "ueber": "Über",
+        "leistung": "Leistung",
+        "jugendschutz": "Jugend- und Suchtschutz"
+      },
+      "beimStart": "Beim Start",
+      "start": {
+        "letzte": "Tabs vom letzten Mal",
+        "startseite": "Neue Startseite"
+      },
+      "sprache": "Sprache",
+      "spracheName": {
+        "de": "Deutsch",
+        "en": "English"
+      },
+      "suchmaschineHinweis": "Für Eingaben in der Adresszeile und auf der Startseite.",
+      "rechte": "Website-Berechtigungen",
+      "rechteLeer": "Noch keine Seite hat etwas erlaubt oder blockiert bekommen.",
+      "rechteFehler": "Die Berechtigungen ließen sich nicht laden.",
+      "rechtErlaubt": "Erlaubt",
+      "rechtBlockiert": "Blockiert",
+      "rechtZuruecksetzen": "Zurücksetzen",
+      "rechtZuruecksetzenName": "{{recht}} für {{herkunft}} zurücksetzen",
+      "rechtName": {
+        "mikrofon": "Mikrofon",
+        "kamera": "Kamera",
+        "standort": "Standort",
+        "benachrichtigungen": "Benachrichtigungen",
+        "zwischenablage": "Zwischenablage lesen",
+        "downloads": "Mehrere Downloads",
+        "dateien": "Dateien",
+        "sensoren": "Bewegungssensoren",
+        "midi": "MIDI-Geräte",
+        "fenster": "Fensterverwaltung",
+        "schriften": "Lokale Schriften"
+      },
+      "verlaufBehalten": "Verlauf automatisch löschen",
+      "verlaufBehaltenHinweis": "Älteres fällt beim Start und stündlich weg.",
+      "frist": {
+        "immer": "Nie",
+        "woche": "Älter als eine Woche",
+        "monat": "Älter als einen Monat",
+        "halbjahr": "Älter als 6 Monate",
+        "jahr": "Älter als ein Jahr"
+      },
+      "datenLoeschenHinweis": "Cookies, Cache, Website-Daten und Verlauf. Lesezeichen bleiben.",
+      "datenLoeschenAndroid": "Android löscht Cookies, Website-Speicher und Cache immer ganz, nicht ab einem Zeitpunkt. Der Verlauf des Browsers wird mit gelöscht.",
+      "zeitraum": {
+        "stunde": "Letzte Stunde",
+        "tag": "Letzte 24 Stunden",
+        "woche": "Letzte 7 Tage",
+        "monat": "Letzte 4 Wochen",
+        "alles": "Gesamte Zeit"
+      },
+      "loeschen": "Löschen",
+      "brauchtKopplung": "Braucht die Kopplung mit MSM und den Tresor.",
+      "ausfuellen": "Anmeldungen einfügen und speichern anbieten",
+      "erzeugen": "Starke Passwörter selbst einsetzen",
+      "erzeugenHinweis": "Bei Registrierung und Passwortwechsel; gespeichert im Tresor.",
+      "zahlungen": "Karten und Konten einfügen anbieten",
+      "zahlungenHinweis": "Nur über HTTPS und nach Windows Hello oder Master-Passwort.",
+      "zahlungenHinweisAndroid": "Nur über HTTPS und nach der Bildschirmsperre (Fingerabdruck, Gesicht oder PIN) oder dem Master-Passwort.",
+      "ordner": "Speicherort",
+      "nichtGekoppelt": "Nicht mit MSM gekoppelt",
+      "version": "Version {{version}}",
+      "datenschutz": "Datenschutzerklärung",
+      "datenschutzStand": "Fassung {{version}}",
+      "oeffnen": "Öffnen",
+      "aufbau": "Aufbau",
+      "leisteOrt": "Module und Listen",
+      "ort": {
+        "menue": "Im Menü (☰)",
+        "links": "Leiste links",
+        "rechts": "Leiste rechts",
+        "oben": "Symbole oben"
+      },
+      "panelSeite": "Seite des Panels",
+      "seite": {
+        "rechts": "Rechts",
+        "links": "Links"
+      },
+      "eintraege": "Einträge",
+      "knoepfe": "Knöpfe",
+      "knopf": {
+        "neuLaden": "Neu laden",
+        "schild": "Werbe- und Trackerschutz",
+        "stern": "Lesezeichen-Stern",
+        "privaterTab": "Privater Tab"
+      },
+      "nachObenName": "{{name}} nach oben",
+      "nachUntenName": "{{name}} nach unten",
+      "startseite": "Startseite",
+      "startseiteHinweis": "Termine und Notizen erscheinen, wenn der Browser mit MSM gekoppelt ist. Private Tabs zeigen nur die Uhr.",
+      "hintergrundTabs": "Tabs im Hintergrund",
+      "schlafenNach": "Schlafen nach",
+      "schlafenHinweis": "Ein schlafender Tab ist eingefroren und braucht weniger Speicher. Tabs mit Ton schlafen nie.",
+      "minuten_one": "{{count}} Minute",
+      "minuten_other": "{{count}} Minuten",
+      "nie": "Nie",
+      "speicherSparen": "Speicher sparen",
+      "speicherSparenHinweis": "Tabs, die eine Stunde im Hintergrund lagen, geben ihren Speicher ganz frei und laden beim Öffnen neu. Eingaben in diesen Seiten gehen dabei verloren. Private Tabs sind ausgenommen.",
+      "wachBleiben": "Immer wach",
+      "wachBleibenHinweis": "Tabs dieser Seiten schlafen nie.",
+      "ausnahmeSeite": "Seite",
+      "ausnahmeHinzufuegen": "Hinzufügen",
+      "ausnahmeUngueltig": "Das ist keine Domain.",
+      "eintragEntfernen": "Entfernen",
+      "eintragEntfernenName": "{{host}} entfernen",
+      "downloadFragen": "Bei jedem Download fragen",
+      "downloadFragenHinweis": "Vor dem Laden fragt der Browser, wo die Datei hin soll.",
+      "downloadsAndroid": "Downloads landen im Ordner „Download“ des Telefons. Android lädt sie über seinen Download-Dienst und meldet sie in der Benachrichtigung. Eine Virenprüfung wie unter Windows gibt es hier nicht.",
+      "virenschutzHinweis": "Jede Datei prüft zuerst der Virenschutz von Windows. Erst danach liegt sie im Ordner; was er ablehnt, löscht der Browser."
     },
     "kopplung": {
       "titel": "Mit MSM koppeln",
@@ -9098,6 +9280,63 @@
         "eigenes": "Eigenes Passwort",
         "gespeichert": "Neues Passwort für {{host}} im Tresor gespeichert"
       }
+    },
+    "schutz": {
+      "an": "Schutz an",
+      "anHinweis": "Sperrt die gewählten Seiten in allen Tabs, auch in privaten.",
+      "grenzen": "Der Schutz bremst den schnellen Impuls. Eine Kindersicherung des Betriebssystems ist er nicht: Wer den Browser deinstalliert, einen anderen nimmt oder die Einstellungsdatei von Hand ändert, kommt an ihm vorbei.",
+      "kategorien": "Gesperrte Kategorien",
+      "kategorie": {
+        "erwachsene": "Inhalte für Erwachsene",
+        "gluecksspiel": "Glücksspiel",
+        "sozial": "Soziale Netzwerke",
+        "spiele": "Spiele",
+        "shopping": "Shopping"
+      },
+      "kategorieHinweis": {
+        "erwachsene": "Dazu sichere Suche bei Google, Bing und DuckDuckGo und der eingeschränkte Modus von YouTube.",
+        "erwachseneAndroid": "Dazu sichere Suche bei Google, Bing und DuckDuckGo. Den eingeschränkten Modus von YouTube kann der Browser unter Android nicht einschalten.",
+        "gluecksspiel": "Wettanbieter, Online-Casinos und Lotterien.",
+        "sozial": "Facebook, Instagram, TikTok, X, Reddit und weitere.",
+        "spiele": "Die großen Spieleseiten und -shops. Weitere trägst du unter „Eigene Sperren“ ein.",
+        "shopping": "Die großen Onlineshops. Weitere trägst du unter „Eigene Sperren“ ein."
+      },
+      "listeLaedt": "Die vollständige Liste wird geladen. Bis dahin sperrt der Browser die bekanntesten Seiten.",
+      "eigene": "Eigene Sperren",
+      "eigeneHinweis": "Diese Seiten sind gesperrt, mit allen Unterseiten.",
+      "ausnahmen": "Immer erlaubt",
+      "ausnahmenHinweis": "Diese Seiten sperrt keine Kategorie.",
+      "huerdeTitel": "Schutz vor schnellem Abschalten",
+      "huerde": "Vor dem Lockern",
+      "huerdeHinweis": "Verschärfen gilt sofort. Wer lockert, wartet so lange oder tippt einen Text ab, der jedes Mal neu ist.",
+      "huerdeMinuten_one": "{{count}} Minute warten",
+      "huerdeMinuten_other": "{{count}} Minuten warten",
+      "huerdeStunden_one": "{{count}} Stunde warten",
+      "huerdeStunden_other": "{{count}} Stunden warten",
+      "huerdeAbtippen": "Langen Text abtippen",
+      "wartetTitel": "Lockerung wartet",
+      "giltIn": "Gilt in",
+      "lockerung": {
+        "aus": "Schutz ausschalten",
+        "nichtMehr": "{{name}} nicht mehr sperren",
+        "erlauben": "{{host}} immer erlauben",
+        "huerde": "Vor dem Lockern: {{name}}"
+      },
+      "behalten": "Schutz behalten",
+      "abtippenHinweis": "Tippe den Text ab, dann gilt die Lockerung. Einfügen geht hier nicht.",
+      "abtippenFeld": "Abgetippter Text",
+      "lockern": "Lockern",
+      "textFalsch": "Der Text stimmt noch nicht.",
+      "zuSchnell": "So schnell tippt niemand. Versuch es in {{zeit}} noch einmal.",
+      "fehler": "Der Schutz ließ sich nicht ändern.",
+      "gesperrtTitel": "Diese Seite ist gesperrt",
+      "gesperrtText": "{{host}} gehört zu „{{kategorie}}“. So ist es im Jugend- und Suchtschutz eingestellt.",
+      "gesperrtEigene": "{{host}} steht in deinen eigenen Sperren.",
+      "zurStartseite": "Zur Startseite",
+      "einstellungen": "Schutz-Einstellungen"
+    },
+    "widget": {
+      "keineBildsuche": "Die gewählte Suchmaschine sucht keine Bilder. Wähle Google oder Bing in den Einstellungen unter „Suche“."
     }
   }
 }

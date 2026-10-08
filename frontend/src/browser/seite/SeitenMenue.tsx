@@ -33,6 +33,7 @@ import type { ActionMenuItem } from '@/Singra/UI/ActionMenu'
 import { useAnsicht } from '../entwickler/werkzeuge'
 import { useEinstellungenStore } from '../services/einstellungenStore'
 import { nativ } from '../services/nativ'
+import { istAndroid } from '../services/plattform'
 import { useFrageDesTabs, useRueckfragen } from '../services/rueckfragen'
 import { baueZielUrl, suchmaschine } from '../services/searchEngines'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
@@ -138,7 +139,8 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
     items.push(...nativEintrag('back', items.length > 0), ...nativEintrag('forward'), ...nativEintrag('reload'), ...nativEintrag('saveAs'))
     items.push(eigen('drucken', t('browser.menue.drucken'), <Printer />, () => void nativ.tabDrucken(tab.id)))
   }
-  items.push(
+  // Entwicklerwerkzeuge gibt es auf Android nicht.
+  if (!istAndroid()) items.push(
     eigen(
       'untersuchen',
       t('browser.menue.untersuchen'),

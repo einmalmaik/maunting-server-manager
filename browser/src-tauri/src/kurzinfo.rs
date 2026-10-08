@@ -7,17 +7,35 @@
 //! in einem kleinen Fenster, das dem Hauptfenster gehört: es liegt über
 //! Oberfläche und Tabs, nimmt weder Fokus noch Maus und geht mit dem
 //! Hauptfenster weg. Die Seite merkt davon nichts, anders als beim Verdecken.
+//!
+//! Steht die Leiste rechts, steht der Name links vom Symbol (`Richtung::Links`).
+//!
+//! Auf Android liegt nichts neben der Seite; dort tut der Befehl nichts.
+#![cfg_attr(not(windows), allow(dead_code))]
 
 use serde::Deserialize;
 use tauri::AppHandle;
 
-/// Eine Blase: Text, linke Kante und senkrechte Mitte in CSS-Pixeln der
-/// Oberfläche, Farben als RGB aus den Design-Tokens.
+/// Wohin die Blase vom Punkt `x`/`y` aus wächst.
+#[derive(Deserialize, Default, Clone, Copy, PartialEq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum Richtung {
+    /// `x` ist die linke Kante, `y` die senkrechte Mitte.
+    #[default]
+    Rechts,
+    /// `x` ist die rechte Kante, `y` die senkrechte Mitte.
+    Links,
+}
+
+/// Eine Blase: Text, Ankerpunkt in CSS-Pixeln der Oberfläche, Farben als RGB
+/// aus den Design-Tokens.
 #[derive(Deserialize)]
 pub struct Blase {
     text: String,
     x: f64,
     y: f64,
+    #[serde(default)]
+    richtung: Richtung,
     hintergrund: [u8; 3],
     schrift: [u8; 3],
     rand: [u8; 3],
@@ -41,6 +59,14 @@ const HOECHSTENS: usize = 80;
 fn gekuerzt(text: &str) -> String {
     let unsichtbar = |z: char| matches!(z, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}');
     text.chars().filter(|&z| !z.is_control() && !unsichtbar(z)).take(HOECHSTENS).collect()
+}
+
+/// Linke Kante der Blase in Bildschirmpixeln.
+fn linke_kante(x: i32, breite: i32, richtung: Richtung) -> i32 {
+    match richtung {
+        Richtung::Rechts => x,
+        Richtung::Links => x - breite,
+    }
 }
 
 #[cfg(windows)]
@@ -155,7 +181,8 @@ mod fenster {
         let hoch = groesse.cy + px(8.0);
         let mut punkt = POINT { x: px(b.x), y: px(b.y) };
         let _ = ClientToScreen(besitzer, &mut punkt);
-        let _ = SetWindowPos(f, Some(HWND_TOP), punkt.x, punkt.y - hoch / 2, breite, hoch, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        let links = super::linke_kante(punkt.x, breite, b.richtung);
+        let _ = SetWindowPos(f, Some(HWND_TOP), links, punkt.y - hoch / 2, breite, hoch, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         let _ = InvalidateRect(Some(f), None, true);
     }
 
@@ -211,7 +238,15 @@ mod fenster {
 
 #[cfg(test)]
 mod tests {
-    use super::gekuerzt;
+    use super::{gekuerzt, linke_kante, Blase, Richtung};
+
+    #[test]
+    fn eine_blase_links_endet_am_punkt() {
+        assert_eq!(linke_kante(500, 80, Richtung::Rechts), 500);
+        assert_eq!(linke_kante(500, 80, Richtung::Links), 420);
+        let ohne: Blase = serde_json::from_str(r#"{"text":"a","x":1,"y":2,"hintergrund":[0,0,0],"schrift":[0,0,0],"rand":[0,0,0]}"#).unwrap();
+        assert_eq!(ohne.richtung, Richtung::Rechts);
+    }
 
     #[test]
     fn steuerzeichen_fallen_und_lange_texte_werden_gekuerzt() {

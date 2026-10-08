@@ -42,17 +42,26 @@ windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
+    # Name und Symbol im Lautstärkemixer (`mixer.rs`).
+    "Win32_Media_Audio",
     "Win32_System_LibraryLoader",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_UI_Input_KeyboardAndMouse",
+    # IAttachmentExecute: Downloads durch den Virenschutz von Windows prüfen.
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
 windows-core = "0.62"
 
 [target.'cfg(target_os = "android")'.dependencies]
 tauri-plugin-biometric = "2"
+# JNI für die Tab-WebViews (`tabs/android/bruecke.rs`), dieselbe Fassung wie
+# die Kamera-Krypto des Smart Systems.
 jni = "0.21"
+# Standbild der Tabs kommt von Kotlin als Base64 (schon im Baum, über Tauri).
+base64 = "0.22"
 
 # Das Schild prüft jede Anfrage auf dem UI-Faden der WebView2. Ohne Optimierung
 # brauchte die Engine dafür bis 57 ms je Anfrage, und `tauri dev` stand beim

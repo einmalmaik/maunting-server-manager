@@ -10,7 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import { useToastStore } from '@/stores/toastStore'
 import { usePromptStore } from '@/stores/promptStore'
-import { TresorGalerie, anDiesemTag, nachbarKachel } from './TresorGalerie'
+import { nachbarKachel } from '@/Singra/UI/Rasterfokus'
+
+import { TresorGalerie, anDiesemTag } from './TresorGalerie'
 import { useVaultStore } from './vaultStore'
 import { type VaultItem } from './vaultEintrag'
 

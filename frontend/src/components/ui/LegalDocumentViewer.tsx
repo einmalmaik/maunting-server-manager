@@ -22,6 +22,8 @@ export interface LegalDocumentData {
 interface LegalDocumentViewerProps {
   document: LegalDocumentData
   backTo: string
+  /** Statt der Route: wohin „Zurück“ führt, wo es keine gibt (Browser). */
+  onBack?: () => void
   backLabel: string
   docLabel: string
   summaryLabel: string
@@ -32,6 +34,7 @@ interface LegalDocumentViewerProps {
 export function LegalDocumentViewer({
   document,
   backTo,
+  onBack,
   backLabel,
   docLabel,
   summaryLabel,
@@ -44,6 +47,14 @@ export function LegalDocumentViewer({
       <div className="relative z-10 mx-auto max-w-3xl px-4 py-10 md:py-14">
         <Link
           to={backTo}
+          onClick={
+            onBack
+              ? (e) => {
+                  e.preventDefault()
+                  onBack()
+                }
+              : undefined
+          }
           className="inline-flex items-center gap-1.5 text-xs font-medium text-on-surface-variant transition-colors hover:text-on-surface"
         >
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />

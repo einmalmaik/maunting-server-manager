@@ -110,6 +110,27 @@ describe('Calendar Page Component', () => {
     expect(screen.getByText('0 Termine an diesem Tag')).toBeInTheDocument()
   })
 
+  // Im schmalen Browser-Panel zeigte eine Monatszelle nur die Uhrzeit, der
+  // Titel bekam keinen Platz (08.10.2026). Schmal stehen dort Punkte, und ein
+  // Tipp öffnet den Tag mit allen Titeln.
+  it('öffnet aus den Punkten einer Monatszelle den Tag statt eines neuen Termins', async () => {
+    const now = new Date()
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0).toISOString()
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 13, 0, 0).toISOString()
+    vi.mocked(client.api).mockResolvedValue([{ id: 1, event_id: 'evt-punkt', title: 'Zahnarzt', start, end, color: 'primary' }])
+
+    render(
+      <MemoryRouter>
+        <Calendar />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '1 Termin an diesem Tag' }))
+    expect(await screen.findByText('1 Termin an diesem Tag')).toBeInTheDocument()
+    expect(screen.getByText('Zahnarzt')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
   // Die englische Oberfläche (MSS Android, en-US) zeigte bis 10/2026 feste
   // deutsche Texte: Wochentage „Mo Di Mi …", „Neuer Termin", „Keine Termine",
   // „Heute" und den Weiter-Knopf als „Vor".

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-seitenrechte"
+description = "Enables the seitenrechte command without any pre-configured scope."
+commands.allow = ["seitenrechte"]
+
+[[permission]]
+identifier = "deny-seitenrechte"
+description = "Denies the seitenrechte command without any pre-configured scope."
+commands.deny = ["seitenrechte"]

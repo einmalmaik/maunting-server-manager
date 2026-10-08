@@ -1,5 +1,7 @@
 /**
- * Zurück, Vor, Neu laden, die Adresszeile, das Schild und der Stern.
+ * Zurück, Vor, Neu laden, die Adresszeile, das Schild und der Stern, dahinter
+ * je nach Einstellung das Menü oder die Symbole der Module (`Modulmenue.tsx`).
+ * Neu laden, Schild und Stern lassen sich ausblenden.
  *
  * Kurzinfos stehen hier über den Knöpfen (`lage="oben"`): darunter beginnt die
  * Seite, und eine Webview liegt immer über der Oberfläche.
@@ -10,25 +12,17 @@ import { useTranslation } from 'react-i18next'
 
 import { Ankerfenster, Kurzinfo, Switch } from '@/Singra/UI'
 
+import { useEinstellungenStore } from '../services/einstellungenStore'
+
 import { schildPausiert, seitenHost, useGeraetKonfig } from '../services/geraetKonfig'
+import { istIntern } from '../services/intern'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 import { useVerlaufStore } from '../services/verlaufStore'
 import { Adresszeile, type AdresszeileGriff } from './Adresszeile'
+import { Knopf, KNOPF } from './knopf'
+import { Modulmenue, ModuleOben } from './Modulmenue'
 
-const KNOPF =
-  'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface disabled:opacity-40 disabled:hover:bg-transparent'
-
-function Knopf({ name, onClick, disabled, children, aktiv }: { name: string; onClick: () => void; disabled?: boolean; children: React.ReactNode; aktiv?: boolean }) {
-  return (
-    <Kurzinfo text={name} lage="oben">
-      <button type="button" onClick={onClick} disabled={disabled} aria-label={name} aria-pressed={aktiv} className={KNOPF}>
-        {children}
-      </button>
-    </Kurzinfo>
-  )
-}
-
-function Schild() {
+export function Schild() {
   const { t } = useTranslation()
   const tab = useAktiverTab()
   const konfig = useGeraetKonfig((s) => s.konfig)
@@ -105,11 +99,14 @@ export const Navigationsleiste = forwardRef<AdresszeileGriff>(function Navigatio
   const lesezeichen = useVerlaufStore((s) => s.lesezeichen)
   const umschalten = useVerlaufStore((s) => s.lesezeichenUmschalten)
 
+  const ausgeblendet = useEinstellungenStore((s) => s.ausgeblendet)
+  const leiste = useEinstellungenStore((s) => s.leiste)
+
   const webseite = !!tab?.url.startsWith('http')
   const gemerkt = webseite && lesezeichen.some((l) => l.url === tab!.url)
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-1 border-b border-outline-variant bg-surface-container px-2">
+    <div className="flex h-12 shrink-0 items-center gap-1 bg-surface-container px-2">
       <Knopf name={t('browser.nav.zurueck')} onClick={() => aktion('zurueck')} disabled={!tab?.zurueck}>
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
       </Knopf>
@@ -120,13 +117,14 @@ export const Navigationsleiste = forwardRef<AdresszeileGriff>(function Navigatio
         <Knopf name={t('browser.nav.anhalten')} onClick={() => aktion('anhalten')}>
           <X className="h-4 w-4" aria-hidden="true" />
         </Knopf>
-      ) : (
-        <Knopf name={t('browser.nav.neuLaden')} onClick={() => aktion('neu_laden')} disabled={!tab?.url}>
+      ) : ausgeblendet.includes('neuLaden') ? null : (
+        <Knopf name={t('browser.nav.neuLaden')} onClick={() => aktion('neu_laden')} disabled={!tab?.url || istIntern(tab.url)}>
           <RotateCw className="h-4 w-4" aria-hidden="true" />
         </Knopf>
       )}
       <Adresszeile ref={adresszeile} />
-      <Schild />
+      {!ausgeblendet.includes('schild') && <Schild />}
+      {!ausgeblendet.includes('stern') && (
       <Knopf
         name={gemerkt ? t('browser.nav.lesezeichenEntfernen') : t('browser.nav.lesezeichenSetzen')}
         onClick={() => tab && umschalten(tab.url, tab.titel)}
@@ -135,6 +133,9 @@ export const Navigationsleiste = forwardRef<AdresszeileGriff>(function Navigatio
       >
         <Star className={`h-4 w-4 ${gemerkt ? 'fill-primary text-primary' : ''}`} aria-hidden="true" />
       </Knopf>
+      )}
+      {leiste === 'oben' && <ModuleOben />}
+      {leiste === 'menue' && <Modulmenue />}
     </div>
   )
 })

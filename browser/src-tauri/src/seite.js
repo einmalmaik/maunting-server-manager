@@ -1,16 +1,24 @@
 // Läuft in jedem Rahmen jeder Seite, vor allen Skripten der Seite (seite.rs).
 (() => {
-  // Die Brücke zur WebView2 wird hier eingefangen und aus `window` entfernt,
-  // bevor ein Skript der Seite läuft: die Seite sieht sie nie, und sie
-  // verriete die Einbettung.
-  const bruecke = window.chrome && window.chrome.webview
+  // Die Brücke wird hier eingefangen und aus `window` entfernt, bevor ein
+  // Skript der Seite läuft: die Seite sieht sie nie, und sie verriete die
+  // Einbettung. Unter Windows ist es `chrome.webview` der WebView2, unter
+  // Android `msbKanal` (`addWebMessageListener` in `Tab.kt`).
+  const bruecke = (window.chrome && window.chrome.webview) || window.msbKanal
+  const android = bruecke === window.msbKanal
   try {
     delete window.chrome.webview
+  } catch (_) {}
+  try {
+    delete window.msbKanal
   } catch (_) {}
   // Formulare nur im obersten Rahmen: dessen Adresse kennt der Browser.
   if (!bruecke || window !== window.top) return
 
   const senden = bruecke.postMessage.bind(bruecke)
+  // Unter Android antwortet `Tab.kt` nur auf eine Seite, die schon etwas
+  // geschickt hat: das Hallo öffnet den Rückweg (für `datei`).
+  if (android) senden('{"t":"da"}')
   const wert = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
   const json = JSON.stringify
   const NEU = /regist|signup|sign-up|sign_up|join|create|erstell|confirm|repeat|wiederhol|bestätig|bestaetig/i
@@ -229,9 +237,54 @@
     }
   }
 
+  // Android lädt `blob:` und `data:` nicht selbst (`Herunterladen.kt`): die
+  // Seite holt die Datei und gibt sie in Teilen weiter, jeden erst, wenn der
+  // vorige geschrieben ist. Den Namen aus `download` kennt nur die Seite.
+  const holen = window.fetch.bind(window)
+  const quittungen = new Map()
+  const TEIL = 256 * 1024
+  const dateiGeben = async (nr, url) => {
+    const a = [...document.querySelectorAll('a[download]')].find((x) => x.href === url)
+    const name = a ? a.getAttribute('download') : ''
+    const geben = (teil) => {
+      senden(json({ t: 'teil', nr, name, ...teil }))
+      return new Promise((weiter) => quittungen.set(nr, weiter))
+    }
+    try {
+      const leser = (await holen(url)).body.getReader()
+      for (;;) {
+        const { done, value } = await leser.read()
+        if (done) break
+        for (let i = 0; i < value.length; i += TEIL) {
+          const stueck = value.subarray(i, i + TEIL)
+          let bin = ''
+          for (let j = 0; j < stueck.length; j += 0x8000) bin += String.fromCharCode.apply(null, stueck.subarray(j, j + 0x8000))
+          if (!(await geben({ daten: btoa(bin) }))) return leser.cancel()
+        }
+      }
+      senden(json({ t: 'teil', nr, name, ende: true }))
+    } catch (_) {
+      senden(json({ t: 'teil', nr, fehler: true }))
+    }
+  }
+
   // Gefüllt wird nur auf Anweisung des Browsers, nach einem Klick in seiner Leiste.
+  // Android liefert Nachrichten nur als Text.
   bruecke.addEventListener('message', (e) => {
-    const d = e.data
+    let d = e.data
+    if (typeof d === 'string') {
+      try {
+        d = JSON.parse(d)
+      } catch (_) {
+        return
+      }
+    }
+    if (d && d.t === 'datei' && android) return void dateiGeben(d.nr, d.url)
+    if (d && d.t === 'weiter' && quittungen.has(d.nr)) {
+      const weiter = quittungen.get(d.nr)
+      quittungen.delete(d.nr)
+      return weiter(d.ok === true)
+    }
     if (!d || d.t !== 'fuellen') return
     if (d.karte || d.konto) return zahlungFuellen(d)
     const b = zuletzt && zuletzt.isConnected ? bereich(zuletzt) : document

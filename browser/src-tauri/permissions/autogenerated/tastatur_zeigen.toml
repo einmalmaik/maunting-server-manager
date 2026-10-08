@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tastatur-zeigen"
+description = "Enables the tastatur_zeigen command without any pre-configured scope."
+commands.allow = ["tastatur_zeigen"]
+
+[[permission]]
+identifier = "deny-tastatur-zeigen"
+description = "Denies the tastatur_zeigen command without any pre-configured scope."
+commands.deny = ["tastatur_zeigen"]

@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">"Maunting Secure Browser"</string>
+    <string name="main_activity_title">"Maunting Secure Browser"</string>
+    <string name="webview_zu_alt">The Android System WebView on this phone is too old (version %1$d). The browser needs a newer version so that pages cannot read the app\'s storage. Update \"Android System WebView\" in the Play Store, then open the browser again.</string>
+    <string name="webview_aktualisieren">Update WebView</string>
+    <string name="widget_name">Browser search</string>
+    <string name="widget_beschreibung">Search with your chosen search engine, by voice or with a photo</string>
+    <string name="widget_hinweis">Search or enter address</string>
+    <string name="widget_sprache">Voice search</string>
+    <string name="widget_kamera">Search with a photo</string>
+    <string name="widget_keine_sprache">This phone has no speech recognition. Type your search instead.</string>
+    <string name="widget_keine_kamera">This phone has no camera app.</string>
+</resources>

@@ -1,13 +1,15 @@
 /**
- * Die Downloads dieser Sitzung. Rust legt die Datei in den gewählten Ordner
- * (`downloads.rs`) und meldet Start und Ende; die Liste hier ist nur Anzeige
- * und überdauert keinen Neustart.
+ * Die Downloads dieser Sitzung. Rust lädt in die Quarantäne, lässt den
+ * Virenschutz prüfen und legt die Datei dann ab (`downloads/`); es meldet
+ * jeden Schritt unter derselben `nr`. Die Liste hier ist nur Anzeige und
+ * überdauert keinen Neustart.
  */
 import { create } from 'zustand'
 
 import type { DownloadStand, TabEreignis } from './nativ'
 
 export interface Download {
+  nr: number
   url: string
   datei: string | null
   stand: DownloadStand
@@ -29,20 +31,18 @@ export const useDownloadsStore = create<DownloadsZustand>()((set) => ({
 
   ereignis: (e) =>
     set((s) => {
-      if (e.stand === 'start') {
+      const index = s.downloads.findIndex((d) => d.nr === e.nr)
+      if (index < 0) {
         return {
-          downloads: [{ url: e.url, datei: e.datei, stand: 'start', zeit: Date.now() }, ...s.downloads],
+          downloads: [{ nr: e.nr, url: e.url, datei: e.datei, stand: e.stand, zeit: Date.now() }, ...s.downloads],
           neu: s.neu + 1,
         }
       }
-      // Das Ende gehört zum jüngsten laufenden Download derselben Adresse.
-      const index = s.downloads.findIndex((d) => d.url === e.url && d.stand === 'start')
-      if (index < 0) return s
       const downloads = [...s.downloads]
       downloads[index] = { ...downloads[index], stand: e.stand, datei: e.datei ?? downloads[index].datei }
       return { downloads }
     }),
 
   gesehen: () => set({ neu: 0 }),
-  leeren: () => set((s) => ({ downloads: s.downloads.filter((d) => d.stand === 'start') })),
+  leeren: () => set((s) => ({ downloads: s.downloads.filter((d) => d.stand === 'start' || d.stand === 'pruefung') })),
 }))

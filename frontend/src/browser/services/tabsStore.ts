@@ -3,8 +3,9 @@
  * Titel und Kennungen; Rust zeigt nur an (`nativ.ts`).
  *
  * Ein Tab ohne Adresse ist die Startseite: dafür gibt es keine Webview, die
- * Oberfläche zeichnet sie selbst. Sobald der Tab eine Seite öffnet, entsteht
- * die Webview, und ab dann meldet Rust, was darin geschieht.
+ * Oberfläche zeichnet sie selbst. Ebenso die Seiten des Browsers selbst
+ * (`msb://einstellungen`, `intern.ts`). Sobald der Tab eine Seite öffnet,
+ * entsteht die Webview, und ab dann meldet Rust, was darin geschieht.
  *
  * Normale Tabs überdauern einen Neustart (nur Adresse, Titel, Favicon).
  * Private Tabs nie, und ihre Seiten landen nicht im Verlauf.
@@ -15,9 +16,10 @@ import { persist } from 'zustand/middleware'
 import { useDownloadsStore } from './downloadsStore'
 import { useEinstellungenStore } from './einstellungenStore'
 import { useFormulare } from './formulare'
+import { interneAdresse, interneSeite, istIntern } from './intern'
 import { nativ, type TabEreignis } from './nativ'
 import { useRueckfragen } from './rueckfragen'
-import { baueZielUrl } from './searchEngines'
+import { baueZielUrl, type Suchmaschine } from './searchEngines'
 import { useVerlaufStore } from './verlaufStore'
 import { protokollEreignis, tabWeg as entwicklerTabWeg } from '../entwickler/werkzeuge'
 
@@ -35,14 +37,21 @@ export interface Tab {
   werbung: number
   tracker: number
   abgestuerzt: boolean
-  /** Die Seite ließ sich nicht laden (`grund` aus `ohne_edge.rs`). */
+  /** Die Seite ließ sich nicht laden (`grund` aus `ohne_edge.rs`) oder ist `gesperrt`. */
   fehler: string | null
+  /** Warum der Jugend- und Suchtschutz die Seite sperrt: Kategorie oder `eigene`. */
+  gesperrt: string | null
   /** Ziel des Links unter dem Zeiger. */
   status: string
   /** Suche in der Seite; `aktuell` ab 0. */
   treffer: { aktuell: number; anzahl: number } | null
   /** Rust hat für diesen Tab eine Webview. */
   nativDa: boolean
+  /** Die Seite spielt Ton. */
+  ton: boolean
+  stumm: boolean
+  /** Eingefroren (`schlaf`) oder ohne Webview, um Speicher zu sparen (`verworfen`). */
+  ruhe: 'schlaf' | 'verworfen' | null
 }
 
 interface Geschlossen {
@@ -62,7 +71,13 @@ interface TabsZustand {
   eingeben: (eingabe: string, id?: string) => void
   oeffnen: (url: string, id?: string) => void
   startseite: (id?: string) => void
+  /** Öffnet die Einstellungen (`teil`: Kategorie) im vorhandenen Tab oder einem neuen. */
+  einstellungen: (teil?: string) => void
+  /** Ein neuer Tab, der das Foto des Such-Widgets an die Bildsuche schickt (`widget.rs`). */
+  bildsuche: (bild: NonNullable<Suchmaschine['bild']>) => string
   aktion: (aktion: 'zurueck' | 'vor' | 'neu_laden' | 'anhalten', id?: string) => void
+  /** Schaltet den Ton des Tabs stumm oder wieder an. */
+  stummSchalten: (id: string) => void
   wiederherstellen: () => void
   wechseln: (richtung: 1 | -1) => void
   verschieben: (id: string, nachIndex: number) => void
@@ -89,13 +104,28 @@ function leererTab(id: string, privat = false): Tab {
     tracker: 0,
     abgestuerzt: false,
     fehler: null,
+    gesperrt: null,
     status: '',
     treffer: null,
     nativDa: false,
+    ton: false,
+    stumm: false,
+    ruhe: null,
   }
 }
 
 const START_ID = neueTabId()
+
+/**
+ * Wahr nur beim ersten Hochfahren nach dem Start der App; ein Neuladen der
+ * Oberfläche (nach der Kopplung) behält `sessionStorage` und ist keiner.
+ */
+function ersterStart(): boolean {
+  const schluessel = 'msb:gestartet'
+  if (sessionStorage.getItem(schluessel)) return false
+  sessionStorage.setItem(schluessel, '1')
+  return true
+}
 
 export const useTabsStore = create<TabsZustand>()(
   persist(
@@ -109,7 +139,14 @@ export const useTabsStore = create<TabsZustand>()(
       const laden = (id: string, url: string) => {
         const tab = finden(id)
         if (!tab) return
-        aendern(id, { url, laedt: true, abgestuerzt: false, fehler: null, nativDa: true })
+        if (istIntern(url)) {
+          // Die Oberfläche zeichnet die Seite; eine Webview hätte hier nichts zu zeigen.
+          if (tab.nativDa) void nativ.tabSchliessen(id)
+          aendern(id, { ...leererTab(id, tab.privat), url })
+          if (get().aktivId === id) void nativ.tabAktivieren(null)
+          return
+        }
+        aendern(id, { url, laedt: true, abgestuerzt: false, fehler: null, nativDa: true, ruhe: null })
         void nativ
           .tabLaden(id, url, tab.privat)
           .then(() => (get().aktivId === id ? nativ.tabAktivieren(id) : null))
@@ -120,6 +157,16 @@ export const useTabsStore = create<TabsZustand>()(
         tabs: [leererTab(START_ID)],
         aktivId: START_ID,
         geschlossen: [],
+
+        bildsuche: (bild) => {
+          const id = get().neuerTab()
+          aendern(id, { url: bild.url, laedt: true, nativDa: true })
+          void nativ
+            .bildsuche(id, false, bild)
+            .then(() => (get().aktivId === id ? nativ.tabAktivieren(id) : null))
+            .catch(() => aendern(id, { laedt: false, url: '' }))
+          return id
+        },
 
         neuerTab: (url, optionen = {}) => {
           const id = neueTabId()
@@ -174,17 +221,23 @@ export const useTabsStore = create<TabsZustand>()(
           const tab = finden(id)
           if (!tab) return
           set({ aktivId: id })
-          if (tab.url && !tab.nativDa) {
+          const seite = !!tab.url && !istIntern(tab.url)
+          if (seite && !tab.nativDa) {
             // Wiederhergestellter oder im Hintergrund geöffneter Tab.
             laden(id, tab.url)
             return
           }
-          // Startseite, Absturz und Fehlerseite zeichnet die Oberfläche; die
-          // Webview käme sonst darüber.
-          void nativ.tabAktivieren(tab.url && !tab.abgestuerzt && !tab.fehler ? id : null)
+          // Startseite, eigene Seiten, Absturz und Fehlerseite zeichnet die
+          // Oberfläche; die Webview käme sonst darüber.
+          void nativ.tabAktivieren(seite && !tab.abgestuerzt && !tab.fehler ? id : null)
         },
 
         eingeben: (eingabe, id = get().aktivId) => {
+          const intern = interneSeite(eingabe.trim())
+          if (intern) {
+            laden(id, interneAdresse(intern.seite, intern.teil))
+            return
+          }
           const { suchmaschine, searxngUrl } = useEinstellungenStore.getState()
           const ziel = baueZielUrl(eingabe, suchmaschine, searxngUrl ?? undefined)
           if (!ziel) return
@@ -199,6 +252,20 @@ export const useTabsStore = create<TabsZustand>()(
           if (tab.nativDa) void nativ.tabSchliessen(id)
           aendern(id, { ...leererTab(id, tab.privat) })
           if (get().aktivId === id) void nativ.tabAktivieren(null)
+        },
+
+        einstellungen: (teil) => {
+          const adresse = interneAdresse('einstellungen', teil)
+          const { tabs, aktivId } = get()
+          const offen = tabs.find((t) => !t.privat && interneSeite(t.url)?.seite === 'einstellungen')
+          if (offen) {
+            if (teil) laden(offen.id, adresse)
+            get().aktivieren(offen.id)
+            return
+          }
+          const aktiv = finden(aktivId)
+          if (aktiv && !aktiv.url && !aktiv.privat) laden(aktivId, adresse)
+          else get().neuerTab(adresse)
         },
 
         aktion: (aktion, id = get().aktivId) => {
@@ -216,6 +283,11 @@ export const useTabsStore = create<TabsZustand>()(
           if (!letzter) return
           set({ geschlossen: rest })
           get().neuerTab(letzter.url, { privat: letzter.privat })
+        },
+
+        stummSchalten: (id) => {
+          const tab = finden(id)
+          if (tab?.nativDa) void nativ.tabStumm(id, !tab.stumm).catch(() => null)
         },
 
         wechseln: (richtung) => {
@@ -248,6 +320,10 @@ export const useTabsStore = create<TabsZustand>()(
               break
             case 'fehlerseite':
               aendern(e.id, { laedt: false, fehler: e.grund, url: e.url || tab.url })
+              if (get().aktivId === e.id) void nativ.tabAktivieren(null)
+              break
+            case 'gesperrt':
+              aendern(e.id, { laedt: false, fehler: 'gesperrt', gesperrt: e.grund, url: e.url })
               if (get().aktivId === e.id) void nativ.tabAktivieren(null)
               break
             case 'status':
@@ -287,6 +363,8 @@ export const useTabsStore = create<TabsZustand>()(
               aendern(e.id, { favicon: e.url })
               break
             case 'neuer_tab':
+              // Eigene Seiten öffnet nur die Oberfläche, nie eine Webseite.
+              if (istIntern(e.url)) break
               get().neuerTab(e.url, { privat: tab.privat, nach: e.id })
               break
             case 'schild':
@@ -299,6 +377,15 @@ export const useTabsStore = create<TabsZustand>()(
             case 'download':
               useDownloadsStore.getState().ereignis(e)
               break
+            case 'ton':
+              aendern(e.id, { ton: e.spielt, stumm: e.stumm })
+              break
+            case 'schlaf':
+              if (tab.ruhe !== 'verworfen') aendern(e.id, { ruhe: e.schlaeft ? 'schlaf' : null })
+              break
+            case 'verworfen':
+              aendern(e.id, { ruhe: 'verworfen', nativDa: false, laedt: false, ton: false })
+              break
             default:
               break
           }
@@ -308,7 +395,14 @@ export const useTabsStore = create<TabsZustand>()(
           // Webviews aus einem früheren Lauf der Oberfläche (Neuladen nach
           // der Kopplung) gehören zu keinem Tab mehr.
           await nativ.tabsZuruecksetzen().catch(() => null)
-          set((s) => ({ tabs: s.tabs.map((t) => ({ ...t, nativDa: false, laedt: false })) }))
+          if (ersterStart() && useEinstellungenStore.getState().beimStart === 'startseite') {
+            // Die Tabs vom letzten Mal bleiben über „Tab wiederherstellen“ erreichbar.
+            const neu = leererTab(neueTabId())
+            const vorher = get().tabs.filter((t) => t.url).map((t) => ({ url: t.url, privat: false }))
+            set({ tabs: [neu], aktivId: neu.id, geschlossen: vorher.reverse().slice(0, 20) })
+          } else {
+            set((s) => ({ tabs: s.tabs.map((t) => ({ ...t, nativDa: false, laedt: false })) }))
+          }
           get().aktivieren(get().aktivId)
         },
       }
@@ -335,4 +429,11 @@ export const useTabsStore = create<TabsZustand>()(
 
 export function useAktiverTab(): Tab | undefined {
   return useTabsStore((s) => s.tabs.find((t) => t.id === s.aktivId))
+}
+
+/** Eine Seite aus einer Liste oder Kachel: im vorderen Tab, mit Strg oder mittlerer Taste in einem neuen. */
+export function seiteOeffnen(url: string, neuerTab: boolean) {
+  const tabs = useTabsStore.getState()
+  if (neuerTab) tabs.neuerTab(url, { hintergrund: true })
+  else tabs.oeffnen(url)
 }

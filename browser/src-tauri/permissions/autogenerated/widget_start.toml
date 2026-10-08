@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-widget-start"
+description = "Enables the widget_start command without any pre-configured scope."
+commands.allow = ["widget_start"]
+
+[[permission]]
+identifier = "deny-widget-start"
+description = "Denies the widget_start command without any pre-configured scope."
+commands.deny = ["widget_start"]

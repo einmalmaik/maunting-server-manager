@@ -5,8 +5,11 @@ import { LegalDocumentViewer, type LegalDocumentData } from '@/components/ui/Leg
 import { meldeErrungenschaft } from '@/lib/errungenschaft'
 import { DATENSCHUTZ_STAND, DATENSCHUTZ_VERSION } from './datenschutzStand'
 
-/** `zurueck`: wohin der Zurück-Link führt; die App hat weder `/docs` noch `/login`. */
-export function Privacy({ zurueck }: { zurueck?: string } = {}) {
+/**
+ * `zurueck`: wohin der Zurück-Link führt; die App hat weder `/docs` noch `/login`.
+ * `zurueckAktion`: statt einer Route, im Browser zurück in die Einstellungen.
+ */
+export function Privacy({ zurueck, zurueckAktion }: { zurueck?: string; zurueckAktion?: () => void } = {}) {
   const { isAuthenticated } = useAuthStore()
   const { t } = useTranslation()
 
@@ -189,6 +192,25 @@ export function Privacy({ zurueck }: { zurueck?: string } = {}) {
         ],
       },
       {
+        // Der Maunting Secure Browser (MSB).
+        heading: t('privacyPolicy.sections.browser.heading'),
+        body: t('privacyPolicy.sections.browser.body'),
+        items: [
+          t('privacyPolicy.sections.browser.items.lokal'),
+          t('privacyPolicy.sections.browser.items.privat'),
+          t('privacyPolicy.sections.browser.items.verbindungen'),
+          t('privacyPolicy.sections.browser.items.schutz'),
+          t('privacyPolicy.sections.browser.items.downloads'),
+          t('privacyPolicy.sections.browser.items.microsoft'),
+          t('privacyPolicy.sections.browser.items.rechte'),
+          t('privacyPolicy.sections.browser.items.ausfuellen'),
+          t('privacyPolicy.sections.browser.items.passwoerter'),
+          t('privacyPolicy.sections.browser.items.kopplung'),
+          t('privacyPolicy.sections.browser.items.android'),
+          t('privacyPolicy.sections.browser.items.widget'),
+        ],
+      },
+      {
         // Phase 6: nur sichtbar relevant, wenn ein Hoster angebunden ist —
         // der Abschnitt erklaert aber unabhaengig davon, was MSM in dem Fall
         // speichert und was ausdruecklich nicht.
@@ -242,6 +264,7 @@ export function Privacy({ zurueck }: { zurueck?: string } = {}) {
     <LegalDocumentViewer
       document={document}
       backTo={zurueck ?? (isAuthenticated ? '/docs' : '/login')}
+      onBack={zurueckAktion}
       backLabel={t('common.back')}
       docLabel={t('privacyPolicy.documentLabel')}
       summaryLabel={t('privacyPolicy.summaryLabel')}

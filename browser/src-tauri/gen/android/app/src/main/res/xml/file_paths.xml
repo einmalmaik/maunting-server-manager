@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nur der eine Ordner, den die Kamera-App des Widgets beschreiben darf; nie
+     der ganze Speicher. -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+  <cache-path name="fotos" path="fotos/" />
+</paths>

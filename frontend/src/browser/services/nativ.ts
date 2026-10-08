@@ -36,7 +36,8 @@ function nacheinander<T = void>(befehl: string, args?: Record<string, unknown>):
   return lauf
 }
 
-export type DownloadStand = 'start' | 'fertig' | 'fehler'
+/** `pruefung`: geladen, der Virenschutz prüft; `blockiert`: er hat die Datei abgelehnt, sie ist gelöscht. */
+export type DownloadStand = 'start' | 'pruefung' | 'fertig' | 'blockiert' | 'fehler'
 
 /** Was Rust aus einem Tab meldet (`TabEreignis` in `tabs/mod.rs`). */
 export type TabEreignis =
@@ -47,7 +48,8 @@ export type TabEreignis =
   | { art: 'favicon'; id: string; url: string | null }
   | { art: 'neuer_tab'; id: string; url: string }
   | { art: 'taste'; id: string; taste: string }
-  | { art: 'download'; id: string; stand: DownloadStand; url: string; datei: string | null }
+  /** `datei`: der Name, bei `fertig` der volle Pfad. `nr` kennzeichnet den Download über alle Meldungen. */
+  | { art: 'download'; id: string; nr: number; stand: DownloadStand; url: string; datei: string | null }
   | { art: 'schild'; id: string; werbung: number; tracker: number }
   | { art: 'absturz'; id: string }
   | { art: 'vollbild'; id: string; an: boolean }
@@ -68,8 +70,14 @@ export type TabEreignis =
   | { art: 'recht'; id: string; nr: number; recht: string; herkunft: string }
   | { art: 'anmeldung'; id: string; nr: number; herkunft: string; bereich: string }
   | { art: 'fehlerseite'; id: string; url: string; grund: string }
+  /** Der Jugend- und Suchtschutz sperrt die Seite; `grund` ist die Kategorie oder `eigene`. */
+  | { art: 'gesperrt'; id: string; url: string; grund: string }
   | { art: 'status'; id: string; text: string }
   | { art: 'treffer'; id: string; aktuell: number; anzahl: number }
+  | { art: 'ton'; id: string; spielt: boolean; stumm: boolean }
+  | { art: 'schlaf'; id: string; schlaeft: boolean }
+  /** Die Webview ist weg, um Speicher zu sparen; beim Zeigen lädt der Tab neu. */
+  | { art: 'verworfen'; id: string }
   /** Ein Ereignis des DevTools-Protokolls für die Entwicklerwerkzeuge (`desktop/entwickler.rs`). */
   | { art: 'protokoll'; id: string; methode: string; daten: Record<string, unknown> }
 
@@ -108,6 +116,13 @@ export async function tabEreignisse(rueckruf: (e: TabEreignis) => void): Promise
   return listen<TabEreignis>('msb:tab', (e) => rueckruf(e.payload))
 }
 
+/** Was eine Seite erlaubt oder verboten bekam (`browserdaten.rs`). */
+export interface Seitenrecht {
+  art: string
+  herkunft: string
+  erlaubt: boolean
+}
+
 export const nativ = {
   tabLaden: (id: string, url: string, privat: boolean) => nacheinander('tab_laden', { id, url, privat }),
   tabAktivieren: (id: string | null) => nacheinander('tab_aktivieren', { id }),
@@ -130,14 +145,68 @@ export const nativ = {
   /** Nur, wenn der Tab noch auf der Herkunft von `fuer` steht; sonst lehnt Rust ab. */
   tabFuellen: (id: string, fuer: string, werte: Fuellen) => rufen('tab_fuellen', { id, fuer, werte }),
   oberflaecheFokussieren: () => rufen('oberflaeche_fokussieren'),
+  tabStumm: (id: string, stumm: boolean) => rufen('tab_stumm', { id, stumm }),
+  /** `schlafenMinuten: null`: Tabs schlafen nie (`tabs/ruhe.rs`). */
+  tabsLeistung: (schlafenMinuten: number | null, verwerfen: boolean, ausnahmen: string[]) =>
+    rufen('tabs_leistung', { schlafenMinuten, verwerfen, ausnahmen }),
   fensterAktion: (aktion: 'minimieren' | 'maximieren' | 'schliessen') => rufen('fenster_aktion', { aktion }),
   /** Namensblase über der Seite (`kurzinfo.rs`); `null` verbirgt sie. */
   kurzinfo: (blase: Record<string, unknown> | null) => rufen('kurzinfo', { blase }),
   downloadZeigen: (pfad: string) => rufen('download_zeigen', { pfad }),
   downloadOrdner: () => rufen<string>('download_ordner'),
-  seitendatenLoeschen: () => rufen('seitendaten_loeschen'),
+  /** `seit` in Millisekunden seit 1970; ohne: alles. */
+  seitendatenLoeschen: (seit?: number) => rufen('seitendaten_loeschen', { seit: seit ?? null }),
+  seitenrechte: () => rufen<Seitenrecht[]>('seitenrechte'),
+  seitenrechtZuruecksetzen: (art: string, herkunft: string) => rufen('seitenrecht_zuruecksetzen', { art, herkunft }),
   schildStand: () =>
     rufen<{ aktiv: boolean; listen: { name: string; alter_sekunden: number | null }[] }>('schild_stand'),
+  schutzStand: () => rufen<SchutzStand>('schutz_stand'),
+  /** Strengeres gilt sofort, Lockeres wird ein Antrag (`schild/schutz.rs`). */
+  schutzAendern: (regeln: SchutzRegeln) => rufen<SchutzStand>('schutz_aendern', { regeln }),
+  schutzAbbrechen: () => rufen<SchutzStand>('schutz_abbrechen'),
+  /** Wirft `text_falsch` oder `zu_schnell`. */
+  schutzBestaetigen: (text: string) => rufen<SchutzStand>('schutz_bestaetigen', { text }),
+  /** Was das Such-Widget angestoßen hat, einmal (`widget.rs`). */
+  widgetStart: () => rufen<WidgetStart | null>('widget_start'),
+  widgetStand: (bildsuche: boolean) => rufen('widget_stand', { bildsuche }),
+  tastaturZeigen: () => rufen('tastatur_zeigen'),
+  /** Schickt das Foto des Widgets im Tab `id` an die Bildsuche. */
+  bildsuche: (id: string, privat: boolean, bild: { url: string; feld: string; base64?: boolean }) =>
+    nacheinander('bildsuche', { id, privat, url: bild.url, feld: bild.feld, base64: bild.base64 ?? false }),
+}
+
+export type WidgetStart = { art: 'suche' } | { art: 'text'; text: string } | { art: 'bild' }
+
+/** Ein neuer Anstoß des Such-Widgets, während der Browser läuft. */
+export async function widgetAnstoesse(rueckruf: () => void): Promise<() => void> {
+  if (!istTauri()) return () => {}
+  return listen('msb:widget', () => rueckruf())
+}
+
+export type SchutzKategorie = 'erwachsene' | 'gluecksspiel' | 'sozial' | 'spiele' | 'shopping'
+
+export type Huerde = { art: 'countdown'; minuten: number } | { art: 'abtippen' }
+
+/** Die Regeln des Jugend- und Suchtschutzes (`Regeln` in `schild/schutz.rs`). */
+export interface SchutzRegeln {
+  aktiv: boolean
+  kategorien: SchutzKategorie[]
+  eigene: string[]
+  ausnahmen: string[]
+  huerde: Huerde
+}
+
+export interface SchutzStand {
+  regeln: SchutzRegeln
+  /** Eine Lockerung, die noch wartet; `text` nur beim Abtippen. */
+  antrag: { ziel: SchutzRegeln; rest_sekunden: number; text: string | null } | null
+  listen: { kategorie: SchutzKategorie; nachgeladen: boolean; alter_sekunden: number | null }[]
+}
+
+/** Rust meldet `msb:schutz`, wenn sich die geltenden Regeln ändern. */
+export async function schutzEreignisse(rueckruf: () => void): Promise<() => void> {
+  if (!istTauri()) return () => {}
+  return listen('msb:schutz', () => rueckruf())
 }
 
 /** Die Felder der Gerätekonfiguration (`konfig.rs`). */
@@ -147,6 +216,7 @@ export interface BrowserKonfig {
   schild_aktiv: boolean
   schild_ausnahmen: string[]
   download_ordner: string | null
+  download_fragen: boolean
   vergessen_beim_schliessen: boolean
 }
 

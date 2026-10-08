@@ -1,53 +1,25 @@
 /**
- * Die Startseite eines neuen Tabs: Suche, Schnellzugriffe, Hintergrund.
- *
- * Die Schnellzugriffe sind die ersten Lesezeichen; ohne Lesezeichen stehen
- * dort ein paar bekannte Seiten. Symbole kommen aus `marken.tsx` oder sind ein
- * Buchstabe: die Startseite lädt nichts von fremden Servern.
+ * Die Startseite eines neuen Tabs: Suche, Schnellzugriffe, Widgets,
+ * Hintergrund. Kacheln und Widgets stehen unter `start/`.
  */
 import { useState } from 'react'
-import { EyeOff, Search } from 'lucide-react'
+import { EyeOff, Search, SlidersHorizontal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { Dropdown, Input } from '@/Singra/UI'
+import { Button, Dropdown, Input } from '@/Singra/UI'
 
-import { MarkenSymbol, type Marke } from '../marken'
+import { MarkenSymbol } from '../marken'
 import { useEinstellungenStore, type Hintergrund } from '../services/einstellungenStore'
-import { seitenHost } from '../services/geraetKonfig'
 import { SUCHMASCHINEN, suchmaschine, type SuchmaschinenId } from '../services/searchEngines'
 import { useTabsStore } from '../services/tabsStore'
-import { useVerlaufStore } from '../services/verlaufStore'
+import { Schnellzugriffe } from './start/Schnellzugriffe'
+import { Widgets } from './start/Widgets'
 
 export const HINTERGRUENDE: Record<Exclude<Hintergrund, 'eigen'>, string> = {
   schlicht: 'none',
   nacht: 'linear-gradient(135deg, #090a1a 0%, #17153b 50%, #0c0d1b 100%)',
   wald: 'linear-gradient(135deg, #021a14 0%, #063c2c 50%, #03120e 100%)',
   tiefsee: 'linear-gradient(135deg, #050b14 0%, #0d2137 50%, #030712 100%)',
-}
-
-const BEKANNTE: { host: string; marke: Marke }[] = [
-  { host: 'wikipedia.org', marke: 'wikipedia' },
-  { host: 'youtube.com', marke: 'youtube' },
-  { host: 'github.com', marke: 'github' },
-  { host: 'reddit.com', marke: 'reddit' },
-  { host: 'duckduckgo.com', marke: 'duckduckgo' },
-  { host: 'google.com', marke: 'google' },
-  { host: 'bing.com', marke: 'bing' },
-  { host: 'ecosia.org', marke: 'ecosia' },
-  { host: 'search.brave.com', marke: 'brave' },
-]
-
-const VORGABEN = [
-  { url: 'https://de.wikipedia.org/', titel: 'Wikipedia' },
-  { url: 'https://www.youtube.com/', titel: 'YouTube' },
-  { url: 'https://github.com/', titel: 'GitHub' },
-  { url: 'https://www.reddit.com/', titel: 'Reddit' },
-]
-
-function markeFuer(url: string): Marke | null {
-  const host = seitenHost(url)
-  if (!host) return null
-  return BEKANNTE.find((b) => host === b.host || host.endsWith(`.${b.host}`))?.marke ?? null
 }
 
 export function hintergrundStil(hintergrund: Hintergrund, eigenesBild: string | null): React.CSSProperties {
@@ -61,15 +33,16 @@ export function hintergrundStil(hintergrund: Hintergrund, eigenesBild: string | 
 export function Startseite({ privat }: { privat: boolean }) {
   const { t } = useTranslation()
   const eingeben = useTabsStore((s) => s.eingeben)
-  const oeffnen = useTabsStore((s) => s.oeffnen)
-  const lesezeichen = useVerlaufStore((s) => s.lesezeichen)
-  const { suchmaschine: sucheId, hintergrund, eigenesBild, setzen } = useEinstellungenStore()
+  const einstellungen = useTabsStore((s) => s.einstellungen)
+  const sucheId = useEinstellungenStore((s) => s.suchmaschine)
+  const hintergrund = useEinstellungenStore((s) => s.hintergrund)
+  const eigenesBild = useEinstellungenStore((s) => s.eigenesBild)
+  const setzen = useEinstellungenStore((s) => s.setzen)
   const [text, setText] = useState('')
   const suche = suchmaschine(sucheId)
-  const schnell = lesezeichen.length > 0 ? lesezeichen.slice(0, 8) : VORGABEN
 
   return (
-    <div className="relative flex h-full flex-col items-center overflow-y-auto px-6 pt-[14vh]" style={hintergrundStil(hintergrund, eigenesBild)}>
+    <div className="relative flex h-full flex-col items-center overflow-y-auto px-6 pb-8 pt-[14vh]" style={hintergrundStil(hintergrund, eigenesBild)}>
       {hintergrund === 'eigen' && eigenesBild && <div className="pointer-events-none absolute inset-0 bg-surface/50" />}
       <div className="relative flex w-full max-w-2xl flex-col items-center gap-8">
         <div className="flex items-center gap-3">
@@ -121,29 +94,14 @@ export function Startseite({ privat }: { privat: boolean }) {
           </div>
         </form>
 
-        <nav aria-label={t('browser.start.schnellzugriff')} className="grid w-full grid-cols-4 gap-3 sm:grid-cols-8">
-          {schnell.map((s) => {
-            const marke = markeFuer(s.url)
-            const host = seitenHost(s.url) ?? s.url
-            return (
-              <button
-                key={s.url}
-                type="button"
-                onClick={() => oeffnen(s.url)}
-                className="group flex flex-col items-center gap-2 rounded-lg p-2 hover:bg-surface-container/80"
-              >
-                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-container-high text-on-surface group-hover:bg-surface-container-highest">
-                  {marke ? (
-                    <MarkenSymbol marke={marke} className="h-6 w-6" />
-                  ) : (
-                    <span className="text-title-md uppercase" aria-hidden="true">{host.charAt(0)}</span>
-                  )}
-                </span>
-                <span className="w-full truncate text-center text-label-sm text-on-surface-variant">{s.titel || host}</span>
-              </button>
-            )
-          })}
-        </nav>
+        <Schnellzugriffe />
+        <Widgets privat={privat} />
+        {!privat && (
+          <Button variant="ghost" size="sm" onClick={() => einstellungen('design')} className="self-end">
+            <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+            {t('browser.start.anpassen')}
+          </Button>
+        )}
       </div>
     </div>
   )

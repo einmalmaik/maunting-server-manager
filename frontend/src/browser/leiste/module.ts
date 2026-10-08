@@ -18,7 +18,6 @@ export type PanelId =
   | 'lesezeichen'
   | 'verlauf'
   | 'downloads'
-  | 'einstellungen'
   | 'koppeln'
   | 'entwickler'
 
@@ -47,7 +46,8 @@ export const BROWSER_EINTRAEGE: Leisteneintrag[] = [
   { id: 'downloads', symbol: Download, name: 'browser.leiste.downloads' },
 ]
 
-export const EINSTELLUNGEN_EINTRAG: Leisteneintrag = { id: 'einstellungen', symbol: Settings, name: 'browser.leiste.einstellungen' }
+/** Kein Panel: die Einstellungen sind eine eigene Seite im Tab (`msb://einstellungen`). */
+export const EINSTELLUNGEN_EINTRAG = { symbol: Settings, name: 'browser.leiste.einstellungen' }
 
 export const KOPPELN_EINTRAG: Leisteneintrag = { id: 'koppeln', symbol: Link2, name: 'browser.leiste.koppeln' }
 
@@ -58,7 +58,7 @@ export const ENTWICKLER_EINTRAG: Leisteneintrag = { id: 'entwickler', symbol: Co
 export function panelAusPfad(pfad: string): PanelId | null {
   const erstes = pfad.split('/')[1] ?? ''
   if (erstes === 'user') return 'chat'
-  const alle: string[] = [...MSM_EINTRAEGE, ...BROWSER_EINTRAEGE, EINSTELLUNGEN_EINTRAG].map((e) => e.id)
+  const alle: string[] = [...MSM_EINTRAEGE, ...BROWSER_EINTRAEGE].map((e) => e.id)
   if (erstes === 'koppeln' || erstes === 'entwickler' || alle.includes(erstes)) return erstes as PanelId
   return null
 }

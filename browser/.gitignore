@@ -1,3 +1,10 @@
 node_modules/
 /src-tauri/target/
-/src-tauri/gen/
+# Erzeugt bei jedem Bau. gen/android wird getrackt wie im Smart System,
+# ohne Bauordner und lokale Einstellungen (siehe gen/android/.gitignore).
+/src-tauri/gen/schemas/
+/src-tauri/gen/android/.gradle/
+/src-tauri/gen/android/.idea/
+/src-tauri/gen/android/app/build/
+/src-tauri/gen/android/buildSrc/build/
+/src-tauri/gen/android/local.properties

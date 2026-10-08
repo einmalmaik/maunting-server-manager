@@ -6,6 +6,9 @@
  * Ohne Kopplung gibt es keinen Tresor und keine Leiste. Bei gesperrtem
  * Tresor wird nichts eingefügt; gespeichert wird dann über den Posteingang
  * (`tresorGesperrt.ts`), wenn dieser Browser dafür eingerichtet ist.
+ *
+ * Was angeboten wird, schalten drei Einstellungen (Passwörter und Zahlungen).
+ * Ein schon erzeugtes Passwort wird immer gespeichert: es steht sonst nirgends.
  */
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -17,6 +20,7 @@ import { generateSecurePassword } from '@/desktop/vault/vaultCrypto'
 import { useVaultStore } from '@/desktop/vault/vaultStore'
 import { toast } from '@/stores/toastStore'
 
+import { useEinstellungenStore } from '../services/einstellungenStore'
 import { anmeldungenFuer, speicherFrage, useFormulare, type Abgeschickt, type Feld } from '../services/formulare'
 import { nativ } from '../services/nativ'
 import { istGekoppelt, useSitzung } from '../services/sitzung'
@@ -31,16 +35,20 @@ export function FormularLeiste() {
   const gekoppelt = istGekoppelt(useSitzung((s) => s.stand))
   const feld = useFormulare((s) => (tab ? s.feld[tab.id] : undefined))
   const abgeschickt = useFormulare((s) => (tab ? s.abgeschickt[tab.id] : undefined))
+  const ausfuellen = useEinstellungenStore((s) => s.ausfuellen)
+  const erzeugen = useEinstellungenStore((s) => s.erzeugen)
+  const zahlungen = useEinstellungenStore((s) => s.zahlungen)
   if (!tab || !gekoppelt || tab.privat) return null
   if (abgeschickt?.erzeugt) return <ErzeugtSpeichern key={`g-${tab.id}`} tab={tab.id} />
-  if (abgeschickt) return <Speichern key={`s-${tab.id}`} tab={tab.id} a={abgeschickt} />
-  if (feld?.zahlung) return <ZahlungEinfuegen key={`z-${tab.id}-${feld.url}-${feld.zahlung}`} tab={tab.id} url={feld.url} art={feld.zahlung} />
-  if (feld?.sicher && feld.passwort) {
-    const ersatz = <Einfuegen tab={tab.id} feld={feld} />
-    return <PasswortErzeugen key={`p-${tab.id}-${feld.url}`} tab={tab.id} url={feld.url} ersatz={ersatz} />
+  if (abgeschickt) return ausfuellen ? <Speichern key={`s-${tab.id}`} tab={tab.id} a={abgeschickt} /> : null
+  if (feld?.zahlung) {
+    return zahlungen ? <ZahlungEinfuegen key={`z-${tab.id}-${feld.url}-${feld.zahlung}`} tab={tab.id} url={feld.url} art={feld.zahlung} /> : null
   }
-  if (feld) return <Einfuegen key={`e-${tab.id}-${feld.url}`} tab={tab.id} feld={feld} />
-  return null
+  const einfuegen = feld && ausfuellen ? <Einfuegen key={`e-${tab.id}-${feld.url}`} tab={tab.id} feld={feld} /> : null
+  if (feld?.sicher && feld.passwort && erzeugen) {
+    return <PasswortErzeugen key={`p-${tab.id}-${feld.url}`} tab={tab.id} url={feld.url} ersatz={einfuegen} />
+  }
+  return einfuegen
 }
 
 function Einfuegen({ tab, feld }: { tab: string; feld: Feld }) {

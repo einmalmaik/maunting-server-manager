@@ -17,15 +17,17 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Instant;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 pub mod formular;
+pub mod ruhe;
 #[cfg(windows)]
 mod desktop;
 #[cfg(windows)]
-pub(crate) use desktop::im_profil;
+pub(crate) use desktop::{im_profil, recht_art, recht_name};
 #[cfg(target_os = "android")]
 pub mod android;
 
@@ -51,8 +53,10 @@ pub enum TabEreignis {
     /// Ein Tastenkürzel, das im Tab gedrückt wurde und dem Browser gehört
     /// (Strg+T, Strg+L, …).
     Taste { id: String, taste: String },
+    /// Ein Download; `nr` kennzeichnet ihn über alle Meldungen hinweg.
     Download {
         id: String,
+        nr: u64,
         stand: DownloadStand,
         url: String,
         datei: Option<String>,
@@ -88,10 +92,21 @@ pub enum TabEreignis {
     Anmeldung { id: String, nr: u64, herkunft: String, bereich: String },
     /// Die Seite ließ sich nicht laden.
     Fehlerseite { id: String, url: String, grund: String },
+    /// Der Jugend- und Suchtschutz sperrt die Seite; `grund` ist die
+    /// Kategorie oder `eigene`.
+    Gesperrt { id: String, url: String, grund: String },
     /// Ziel des Links unter dem Zeiger, leer, wenn keiner.
     Status { id: String, text: String },
     /// Stand der Suche in der Seite (`aktuell` ab 1, 0 ohne aktiven Treffer).
     Treffer { id: String, aktuell: i32, anzahl: i32 },
+    /// Die Seite spielt Ton oder hört damit auf; `stumm`, wenn der Tab
+    /// stummgeschaltet ist.
+    Ton { id: String, spielt: bool, stumm: bool },
+    /// Der Tab schläft (`ruhe.rs`) oder ist wieder wach.
+    Schlaf { id: String, schlaeft: bool },
+    /// Die Webview des Tabs ist weg, um Speicher zu sparen. Die Adresse
+    /// behält die Oberfläche; beim nächsten Zeigen lädt sie neu.
+    Verworfen { id: String },
     /// Ein Ereignis des DevTools-Protokolls für die Entwicklerwerkzeuge,
     /// unverändert bis auf Kürzungen (`desktop/entwickler.rs`).
     Protokoll { id: String, methode: String, daten: serde_json::Value },
@@ -105,7 +120,7 @@ pub struct MenueEintrag {
 }
 
 /// Die Antwort der Oberfläche auf eine Rückfrage der Seite.
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Serialize, serde::Deserialize)]
 #[serde(tag = "art", rename_all = "snake_case")]
 pub enum Antwort {
     /// `None`: die Oberfläche hat selbst gehandelt oder nichts gewählt.
@@ -120,7 +135,11 @@ pub enum Antwort {
 #[serde(rename_all = "snake_case")]
 pub enum DownloadStand {
     Start,
+    /// Geladen, der Virenschutz prüft.
+    Pruefung,
     Fertig,
+    /// Der Virenschutz hat die Datei abgelehnt; sie ist gelöscht.
+    Blockiert,
     Fehler,
 }
 
@@ -139,6 +158,8 @@ pub struct Rahmen {
 #[derive(Debug, Clone)]
 pub struct TabDaten {
     pub privat: bool,
+    /// Seit wann der Tab nicht vorne liegt; `None`, solange er vorne ist.
+    pub verborgen_seit: Option<Instant>,
 }
 
 pub struct Zustand {
@@ -151,6 +172,7 @@ pub struct Zustand {
     pub verdeckt: bool,
     /// Ein Tab zeigt gerade ein Video im Vollbild.
     pub vollbild: Option<String>,
+    pub leistung: ruhe::Leistung,
 }
 
 #[derive(Default)]
@@ -164,6 +186,7 @@ impl Default for Zustand {
             rahmen: Rahmen { x: 0.0, y: 0.0, breite: 800.0, hoehe: 600.0 },
             verdeckt: false,
             vollbild: None,
+            leistung: ruhe::Leistung::default(),
         }
     }
 }
@@ -175,6 +198,17 @@ impl Zustand {
             return v == id;
         }
         !self.verdeckt && self.aktiv.as_deref() == Some(id)
+    }
+
+    /// Legt `id` nach vorne; der bisherige vordere Tab gilt ab `jetzt` als verborgen.
+    pub fn aktiv_setzen(&mut self, id: Option<String>, jetzt: Instant) {
+        if let Some(alt) = self.aktiv.take().and_then(|a| self.tabs.get_mut(&a)) {
+            alt.verborgen_seit.get_or_insert(jetzt);
+        }
+        if let Some(neu) = id.as_ref().and_then(|i| self.tabs.get_mut(i)) {
+            neu.verborgen_seit = None;
+        }
+        self.aktiv = id;
     }
 }
 
@@ -205,6 +239,33 @@ pub fn navigation_erlaubt(url: &url::Url) -> bool {
     }
 }
 
+/// Was mit einer Navigation im Tab geschieht. Dieselbe Entscheidung für
+/// WebView2 (`desktop/grundereignisse.rs`) und Android (`android/bruecke.rs`),
+/// auch für Weiterleitungen, nicht nur für die erste Adresse.
+#[derive(Debug, PartialEq)]
+pub enum Weg {
+    Laden,
+    /// Keine Seite, die ein Tab öffnen darf (`navigation_erlaubt`).
+    Verboten,
+    /// Der Jugend- und Suchtschutz sperrt sie; die Kategorie oder `eigene`.
+    Gesperrt(&'static str),
+    /// Dieselbe Suche mit erzwungener sicherer Suche (`schild/sperre.rs`).
+    Umleiten(String),
+}
+
+pub fn weg(url: &str) -> Weg {
+    if !url::Url::parse(url).is_ok_and(|u| navigation_erlaubt(&u)) {
+        return Weg::Verboten;
+    }
+    if let Some(grund) = crate::schild::sperre::gesperrt(url) {
+        return Weg::Gesperrt(grund.name());
+    }
+    match crate::schild::sperre::sichere_suche(url) {
+        Some(sicher) => Weg::Umleiten(sicher),
+        None => Weg::Laden,
+    }
+}
+
 /// Adressen, die die Oberfläche zum Öffnen schickt: nur Webseiten.
 pub fn ziel_pruefen(url: &str) -> Result<url::Url, String> {
     let geparst = url::Url::parse(url).map_err(|_| "Ungültige Adresse".to_string())?;
@@ -226,8 +287,15 @@ pub fn tab_laden(
 ) -> Result<(), String> {
     id_pruefen(&id)?;
     let ziel = ziel_pruefen(&url)?;
-    tabs.0.lock().unwrap().tabs.entry(id.clone()).or_insert(TabDaten { privat });
+    eintragen(&tabs, &id, privat);
     plattform::laden(&app, &tabs, &id, ziel, privat)
+}
+
+/// Merkt sich einen Tab, bevor seine Webview entsteht.
+pub(crate) fn eintragen(tabs: &Tabs, id: &str, privat: bool) {
+    let mut z = tabs.0.lock().unwrap();
+    let vorne = z.aktiv.as_deref() == Some(id);
+    z.tabs.entry(id.to_string()).or_insert(TabDaten { privat, verborgen_seit: (!vorne).then(Instant::now) });
 }
 
 /// Legt einen Tab nach vorne. `None` heißt: kein Tab mit Webview vorne (etwa
@@ -237,7 +305,7 @@ pub fn tab_aktivieren(app: AppHandle, tabs: State<'_, Tabs>, id: Option<String>)
     if let Some(id) = &id {
         id_pruefen(id)?;
     }
-    tabs.0.lock().unwrap().aktiv = id;
+    tabs.0.lock().unwrap().aktiv_setzen(id, Instant::now());
     plattform::sichtbarkeit(&app, &tabs);
     Ok(())
 }
@@ -333,7 +401,7 @@ pub fn tabs_zuruecksetzen(app: AppHandle, tabs: State<'_, Tabs>) -> Result<(), S
     let ids: Vec<String> = {
         let mut z = tabs.0.lock().unwrap();
         let ids = z.tabs.keys().cloned().collect();
-        *z = Zustand { rahmen: z.rahmen, ..Zustand::default() };
+        *z = Zustand { rahmen: z.rahmen, leistung: z.leistung.clone(), ..Zustand::default() };
         ids
     };
     for id in ids {
@@ -341,6 +409,19 @@ pub fn tabs_zuruecksetzen(app: AppHandle, tabs: State<'_, Tabs>) -> Result<(), S
         plattform::schliessen(&app, &id);
     }
     Ok(())
+}
+
+/// Schaltet den Ton eines Tabs stumm oder wieder an.
+#[tauri::command(async)]
+pub fn tab_stumm(app: AppHandle, id: String, stumm: bool) -> Result<(), String> {
+    id_pruefen(&id)?;
+    #[cfg(windows)]
+    return plattform::stumm(&app, &id, stumm);
+    #[cfg(not(windows))]
+    {
+        let _ = (app, stumm);
+        Ok(())
+    }
 }
 
 /// Gibt der Oberfläche den Tastaturfokus zurück (Klick in die Adresszeile,
@@ -390,6 +471,15 @@ mod tests {
         assert!(!navigation_erlaubt(&u("tauri://localhost/")));
         assert!(!navigation_erlaubt(&u("file:///C:/Windows/win.ini")));
         assert!(!navigation_erlaubt(&u("javascript:alert(1)")));
+    }
+
+    #[test]
+    fn navigation_entscheidet_ohne_webview() {
+        assert_eq!(weg("https://example.com/"), Weg::Laden);
+        assert_eq!(weg("http://tauri.localhost/browser.html"), Weg::Verboten);
+        assert_eq!(weg("file:///C:/Windows/win.ini"), Weg::Verboten);
+        assert_eq!(weg("intent://scan/#Intent;scheme=zxing;end"), Weg::Verboten);
+        assert_eq!(weg("kaputt"), Weg::Verboten);
     }
 
     #[test]

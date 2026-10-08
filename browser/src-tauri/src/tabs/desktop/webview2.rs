@@ -1,8 +1,9 @@
 //! Was Tauri von der WebView2 nicht herausgibt, hängt hier direkt daran.
 //!
-//! - jede Anfrage eines Tabs (auch aus Iframes und Workern) geht durch das
-//!   Schild und wird bei einem Treffer mit 403 beantwortet, bevor sie das
-//!   Netz erreicht;
+//! - jede Anfrage eines Tabs (auch aus Iframes und Workern) geht durch den
+//!   Jugend- und Suchtschutz und das Schild und wird bei einem Treffer mit
+//!   403 beantwortet, bevor sie das Netz erreicht; Anfragen an YouTube
+//!   bekommen bei sicherer Suche den eingeschränkten Modus;
 //! - Adresse, Zurück/Vor und Favicon, auch bei `history.pushState`;
 //! - Kosmetik: nach `DOMContentLoaded` blendet ein Stylesheet die Werbeplätze
 //!   aus, die die Filterlisten für diese Seite kennen;
@@ -24,7 +25,7 @@ use webview2_com::{
 use windows::core::{Interface, BOOL, HSTRING, PWSTR};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
 
-use crate::schild::{self, AnfrageArt};
+use crate::schild::{self, sperre, AnfrageArt};
 use crate::tabs::{melden, TabEreignis};
 
 pub(super) unsafe fn text(lesen: impl FnOnce(*mut PWSTR) -> windows::core::Result<()>) -> String {
@@ -36,7 +37,7 @@ pub(super) unsafe fn text(lesen: impl FnOnce(*mut PWSTR) -> windows::core::Resul
     }
 }
 
-unsafe fn quelle(core: &ICoreWebView2) -> String {
+pub(super) unsafe fn quelle(core: &ICoreWebView2) -> String {
     text(|p| core.Source(p))
 }
 
@@ -131,11 +132,17 @@ pub(super) unsafe fn einrichten(
                 let url = text(|p| anfrage.Uri(p));
                 let mut kontext = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
                 args.ResourceContext(&mut kontext)?;
-                if kontext == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT && *hauptadresse.borrow() == url {
+                // Was der Jugend- und Suchtschutz sperrt, kommt auch nicht als
+                // Iframe, Bild oder Skript einer anderen Seite.
+                let gesperrt = sperre::gesperrt(&url).is_some();
+                if !gesperrt && sperre::youtube_einschraenken(&url) {
+                    anfrage.Headers()?.SetHeader(&HSTRING::from("YouTube-Restrict"), &HSTRING::from("Strict"))?;
+                }
+                if !gesperrt && kontext == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT && *hauptadresse.borrow() == url {
                     return Ok(());
                 }
                 let seite = quelle(&core);
-                if schild::pruefen(&app, &id, &url, &seite, anfrage_art(kontext)) {
+                if gesperrt || schild::pruefen(&app, &id, &url, &seite, anfrage_art(kontext)) {
                     let antwort = umgebung.CreateWebResourceResponse(
                         None,
                         403,
@@ -246,6 +253,7 @@ pub(crate) fn kuerzel(taste: u32, strg: bool, umschalt: bool, alt: bool) -> Opti
     const F6: u32 = 0x75;
     const F7: u32 = 0x76;
     const F12: u32 = 0x7B;
+    const KOMMA: u32 = 0xBC;
     let buchstabe = char::from_u32(taste).filter(|c| c.is_ascii_uppercase());
     match (strg, umschalt, alt, buchstabe, taste) {
         (true, false, false, Some('T'), _) => Some("neuer_tab"),
@@ -266,6 +274,7 @@ pub(crate) fn kuerzel(taste: u32, strg: bool, umschalt: bool, alt: bool) -> Opti
         (true, false, false, Some('P'), _) => Some("drucken"),
         (true, true, false, Some('I' | 'J' | 'C'), _) | (false, false, false, None, F12) => Some("entwickler"),
         (false, false, false, None, F7) => Some("still"),
+        (true, false, false, None, KOMMA) => Some("einstellungen"),
         _ => None,
     }
 }
@@ -277,7 +286,7 @@ unsafe fn kosmetik_anwenden(core: &ICoreWebView2) {
     let url = quelle(core);
     let Some(kosmetik) = schild::kosmetik(&url) else { return };
     if !kosmetik.css.is_empty() {
-        let _ = core.ExecuteScript(&HSTRING::from(stil_skript(&kosmetik.css)), OHNE_ANTWORT);
+        let _ = core.ExecuteScript(&HSTRING::from(schild::stil_skript(&kosmetik.css)), OHNE_ANTWORT);
     }
     if kosmetik.generichide {
         return;
@@ -285,11 +294,11 @@ unsafe fn kosmetik_anwenden(core: &ICoreWebView2) {
     let ausnahmen = kosmetik.ausnahmen;
     let core_spaeter = core.clone();
     let _ = core.ExecuteScript(
-        &HSTRING::from(KLASSEN_SAMMELN),
+        &HSTRING::from(schild::KLASSEN_SAMMELN),
         &ExecuteScriptCompletedHandler::create(Box::new(move |fehler, json| {
             fehler?;
             if let Some(css) = schild::allgemeine_kosmetik(&url, &json, &ausnahmen) {
-                let _ = core_spaeter.ExecuteScript(&HSTRING::from(stil_skript(&css)), OHNE_ANTWORT);
+                let _ = core_spaeter.ExecuteScript(&HSTRING::from(schild::stil_skript(&css)), OHNE_ANTWORT);
             }
             Ok(())
         })),
@@ -297,23 +306,6 @@ unsafe fn kosmetik_anwenden(core: &ICoreWebView2) {
 }
 
 const OHNE_ANTWORT: Option<&ICoreWebView2ExecuteScriptCompletedHandler> = None;
-
-/// Sammelt Klassen und IDs der Seite, höchstens je 4000.
-const KLASSEN_SAMMELN: &str = r#"(() => {
-  const k = new Set(), i = new Set();
-  for (const el of document.querySelectorAll('[class],[id]')) {
-    if (el.id && i.size < 4000) i.add(el.id);
-    for (const c of el.classList) { if (k.size < 4000) k.add(c); }
-  }
-  return { k: [...k], i: [...i] };
-})()"#;
-
-fn stil_skript(css: &str) -> String {
-    let css = serde_json::to_string(css).unwrap_or_else(|_| "\"\"".into());
-    format!(
-        "(() => {{ const s = document.createElement('style'); s.dataset.msb = 'schild'; s.textContent = {css}; (document.head || document.documentElement).appendChild(s); }})()"
-    )
-}
 
 #[cfg(test)]
 mod tests {
@@ -333,6 +325,7 @@ mod tests {
         assert_eq!(kuerzel(0x7B, false, false, false), Some("entwickler"));
         assert_eq!(kuerzel('I' as u32, true, true, false), Some("entwickler"));
         assert_eq!(kuerzel('P' as u32, true, false, false), Some("drucken"));
+        assert_eq!(kuerzel(0xBC, true, false, false), Some("einstellungen"));
         assert_eq!(kuerzel('A' as u32, true, false, false), None);
         assert_eq!(kuerzel('T' as u32, false, false, false), None);
     }

@@ -29,6 +29,7 @@ export type Kuerzel =
   | 'zuruecksuchen'
   | 'drucken'
   | 'entwickler'
+  | 'einstellungen'
   | 'still'
 
 /** Was die Wurzel für Kürzel tun lässt, die über die Tabs hinausgehen. */
@@ -90,6 +91,9 @@ export function kuerzelAusfuehren(taste: string, ziele: KuerzelZiele): void {
     case 'entwickler':
       ziele.panel('entwickler')
       break
+    case 'einstellungen':
+      tabs.einstellungen()
+      break
     case 'still':
       break
   }
@@ -119,6 +123,7 @@ export function kuerzelAusTaste(e: KeyboardEvent): Kuerzel | null {
     if (taste === 'f') return 'suchen'
     if (taste === 'g') return 'weitersuchen'
     if (taste === 'p') return 'drucken'
+    if (taste === ',') return 'einstellungen'
     return null
   }
   if (e.altKey && !strg && taste === 's') return 'singra'

@@ -1,9 +1,10 @@
 /**
  * Die Downloads dieser Sitzung. „Im Ordner zeigen“ öffnet den Explorer an der
- * Datei; Rust lässt das nur innerhalb des Download-Ordners zu.
+ * Datei; Rust lässt das nur innerhalb des Download-Ordners zu. Unter Android
+ * öffnet er die Download-Liste des Systems.
  */
 import { useEffect } from 'react'
-import { CheckCircle2, FileDown, FolderOpen, Loader2, XCircle } from 'lucide-react'
+import { CheckCircle2, FileDown, FolderOpen, Loader2, ShieldAlert, XCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button, Kurzinfo } from '@/Singra/UI'
@@ -11,6 +12,7 @@ import { Zustandsflaeche } from '@/Singra/UI/Zustandsflaeche'
 
 import { useDownloadsStore } from '../services/downloadsStore'
 import { nativ } from '../services/nativ'
+import { istAndroid } from '../services/plattform'
 
 function dateiname(pfad: string | null, url: string): string {
   if (pfad) return pfad.split(/[\\/]/).pop() || pfad
@@ -26,6 +28,7 @@ export function DownloadsPanel() {
   const downloads = useDownloadsStore((s) => s.downloads)
   const gesehen = useDownloadsStore((s) => s.gesehen)
   const leeren = useDownloadsStore((s) => s.leeren)
+  const android = istAndroid()
 
   useEffect(() => {
     gesehen()
@@ -46,11 +49,13 @@ export function DownloadsPanel() {
         {downloads.map((d) => {
           const name = dateiname(d.datei, d.url)
           return (
-            <li key={`${d.url}-${d.zeit}`} className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-surface-container-high">
-              {d.stand === 'start' ? (
+            <li key={d.nr} className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-surface-container-high">
+              {d.stand === 'start' || d.stand === 'pruefung' ? (
                 <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" aria-hidden="true" />
               ) : d.stand === 'fertig' ? (
                 <CheckCircle2 className="h-4 w-4 shrink-0 text-status-success" aria-hidden="true" />
+              ) : d.stand === 'blockiert' ? (
+                <ShieldAlert className="h-4 w-4 shrink-0 text-status-destructive" aria-hidden="true" />
               ) : (
                 <XCircle className="h-4 w-4 shrink-0 text-status-destructive" aria-hidden="true" />
               )}
@@ -59,12 +64,12 @@ export function DownloadsPanel() {
                 <span className="block text-label-sm text-on-surface-variant">{t(`browser.downloads.stand.${d.stand}`)}</span>
               </span>
               {d.stand === 'fertig' && d.datei && (
-                <Kurzinfo text={t('browser.downloads.zeigen')} seite="ende">
+                <Kurzinfo text={t(android ? 'browser.downloads.zeigenAndroid' : 'browser.downloads.zeigen')} seite="ende">
                   <button
                     type="button"
                     onClick={() => void nativ.downloadZeigen(d.datei!)}
-                    aria-label={t('browser.downloads.zeigenName', { name })}
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface"
+                    aria-label={t(android ? 'browser.downloads.zeigenNameAndroid' : 'browser.downloads.zeigenName', { name })}
+                    className="flex h-7 w-7 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface"
                   >
                     <FolderOpen className="h-4 w-4" aria-hidden="true" />
                   </button>

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-schutz-aendern"
+description = "Enables the schutz_aendern command without any pre-configured scope."
+commands.allow = ["schutz_aendern"]
+
+[[permission]]
+identifier = "deny-schutz-aendern"
+description = "Denies the schutz_aendern command without any pre-configured scope."
+commands.deny = ["schutz_aendern"]

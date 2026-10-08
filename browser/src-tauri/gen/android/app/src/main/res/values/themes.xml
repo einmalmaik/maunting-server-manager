@@ -1,0 +1,21 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.maunting_secure_browser" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    </style>
+
+    <!--
+        Für SchluesselfachActivity: sie trägt nur den BiometricPrompt, der als
+        eigenes Systemfenster darüber liegt, und soll selbst nicht zu sehen sein.
+        `BiometricPrompt` verlangt eine AppCompat-Activity und damit ein
+        AppCompat-Theme. Ebenso WidgetActivity, die nur Spracherkennung oder
+        Kamera startet.
+    -->
+    <style name="Theme.MSB.Schluesselfach" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>

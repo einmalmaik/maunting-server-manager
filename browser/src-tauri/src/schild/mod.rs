@@ -21,7 +21,10 @@ use tauri::AppHandle;
 use crate::konfig::Konfig;
 use crate::tabs::{melden, TabEreignis};
 
+pub mod kategorien;
 pub mod listen;
+pub mod schutz;
+pub mod sperre;
 
 /// Art einer Anfrage, wie die WebView sie meldet.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -40,6 +43,32 @@ pub enum AnfrageArt {
 }
 
 impl AnfrageArt {
+    /// Android nennt keine Art, nur Adresse und Kopfzeilen: geraten aus
+    /// `Accept` und Endung. Was unklar bleibt, ist `Sonstiges`; Regeln ohne
+    /// Typangabe greifen dann trotzdem.
+    pub fn raten(url: &str, accept: &str) -> AnfrageArt {
+        let accept = accept.to_ascii_lowercase();
+        if accept.starts_with("text/html") {
+            return AnfrageArt::Dokument;
+        }
+        if accept.starts_with("text/css") {
+            return AnfrageArt::Stylesheet;
+        }
+        if accept.starts_with("image/") {
+            return AnfrageArt::Bild;
+        }
+        let pfad = url.split(['?', '#']).next().unwrap_or("").to_ascii_lowercase();
+        let endung = pfad.rsplit_once('/').map_or("", |(_, name)| name).rsplit_once('.').map_or("", |(_, e)| e);
+        match endung {
+            "js" | "mjs" => AnfrageArt::Skript,
+            "css" => AnfrageArt::Stylesheet,
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "svg" | "ico" => AnfrageArt::Bild,
+            "woff" | "woff2" | "ttf" | "otf" => AnfrageArt::Schrift,
+            "mp4" | "webm" | "m3u8" | "m4s" | "mp3" | "ogg" => AnfrageArt::Medien,
+            _ => AnfrageArt::Sonstiges,
+        }
+    }
+
     /// Die Bezeichnung, die die Filterlisten verwenden (`$script`, `$subdocument`, …).
     fn als_filtertyp(self) -> &'static str {
         match self {
@@ -200,6 +229,25 @@ pub fn kosmetik(url: &str) -> Option<Kosmetik> {
     Some(Kosmetik { css: verstecken(css), generichide, ausnahmen })
 }
 
+/// Sammelt Klassen und IDs der Seite, höchstens je 4000; die Antwort geht an
+/// [`allgemeine_kosmetik`].
+pub const KLASSEN_SAMMELN: &str = r#"(() => {
+  const k = new Set(), i = new Set();
+  for (const el of document.querySelectorAll('[class],[id]')) {
+    if (el.id && i.size < 4000) i.add(el.id);
+    for (const c of el.classList) { if (k.size < 4000) k.add(c); }
+  }
+  return { k: [...k], i: [...i] };
+})()"#;
+
+/// Hängt CSS der Kosmetik als eigenes `<style>` an die Seite.
+pub fn stil_skript(css: &str) -> String {
+    let css = serde_json::to_string(css).unwrap_or_else(|_| "\"\"".into());
+    format!(
+        "(() => {{ const s = document.createElement('style'); s.dataset.msb = 'schild'; s.textContent = {css}; (document.head || document.documentElement).appendChild(s); }})()"
+    )
+}
+
 #[derive(serde::Deserialize)]
 struct KlassenUndIds {
     #[serde(default)]
@@ -244,6 +292,17 @@ mod tests {
         engine_setzen(Treffer::Werbung, listen::engine_aus(&[werbung]));
         engine_setzen(Treffer::Tracker, listen::engine_aus(&[tracker]));
         konfig_uebernehmen(&Konfig::default());
+    }
+
+    #[test]
+    fn android_raet_die_art_einer_anfrage() {
+        use AnfrageArt::*;
+        assert_eq!(AnfrageArt::raten("https://x.example/a.js?v=2", "*/*"), Skript);
+        assert_eq!(AnfrageArt::raten("https://x.example/frame", "text/html,application/xhtml+xml"), Dokument);
+        assert_eq!(AnfrageArt::raten("https://x.example/p", "image/avif,image/webp"), Bild);
+        assert_eq!(AnfrageArt::raten("https://x.example/s.CSS", ""), Stylesheet);
+        assert_eq!(AnfrageArt::raten("https://x.example/api/daten", "application/json"), Sonstiges);
+        assert_eq!(AnfrageArt::raten("https://x.example/ordner.js/", "*/*"), Sonstiges);
     }
 
     // Die Engine ist global; die Tests laufen deshalb in einem.

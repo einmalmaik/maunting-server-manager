@@ -1,0 +1,393 @@
+package com.mauntingstudios.secure_browser
+
+import android.app.Activity
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.print.PrintManager
+import android.util.Base64
+import android.view.View
+import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.widget.FrameLayout
+import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.webkit.ProfileStore
+import app.tauri.annotation.Command
+import app.tauri.annotation.InvokeArg
+import app.tauri.annotation.TauriPlugin
+import app.tauri.plugin.Invoke
+import app.tauri.plugin.JSObject
+import app.tauri.plugin.Plugin
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.util.UUID
+
+@InvokeArg class TabArgs { lateinit var id: String }
+@InvokeArg class LadenArgs { lateinit var id: String; lateinit var url: String; var privat = false }
+@InvokeArg class VorneArgs { var vorne: String? = null }
+@InvokeArg class RahmenArgs { var x = 0.0; var y = 0.0; var breite = 0.0; var hoehe = 0.0 }
+@InvokeArg class SkriptArgs { lateinit var id: String; lateinit var skript: String }
+@InvokeArg class AntwortArgs { var nr = 0L; lateinit var antwort: String }
+@InvokeArg class SuchenArgs { lateinit var id: String; lateinit var richtung: String; var begriff = "" }
+@InvokeArg class FuellenArgs { lateinit var id: String; lateinit var fuer: String; lateinit var nachricht: String }
+@InvokeArg class WidgetArgs { var bildsuche = false }
+@InvokeArg class BildsucheArgs { lateinit var id: String; var privat = false; lateinit var url: String; lateinit var feld: String; var base64 = false }
+
+/**
+ * Die Tabs unter Android (`src/tabs/android.rs`): je Tab eine WebView über
+ * der Oberfläche, im Inhaltsbereich, den die Oberfläche in CSS-Pixeln nennt.
+ *
+ * Rust ruft von einem eigenen Faden; jeder Befehl läuft auf dem UI-Faden und
+ * antwortet erst dort. Seiten liegen im Profil [SEITEN], private Tabs
+ * gemeinsam in einem eigenen, wie ein Inkognito-Fenster. Die Oberfläche
+ * bleibt im Standardprofil.
+ *
+ * Ein Profil, das in diesem Prozess eine WebView hatte, lässt Android nicht
+ * löschen („Cannot delete in-use profile“, auch nach `destroy`). Schließt der
+ * letzte private Tab, leert der Browser deshalb Cookies, Speicher und Cache
+ * des privaten Profils sofort; den Ordner löscht der nächste Start.
+ */
+@TauriPlugin
+class TabsPlugin(private val activity: Activity) : Plugin(activity) {
+  private val tabs = HashMap<String, Tab>()
+  private var vorne: String? = null
+  private var rahmen = RahmenArgs()
+  private var vollbild: Pair<View, WebChromeClient.CustomViewCallback>? = null
+  private val privatProfil = PRIVAT + UUID.randomUUID()
+  private val inhalt: ViewGroup get() = activity.findViewById(android.R.id.content)
+  private var oberflaeche: WebView? = null
+  val herunterladen by lazy { Herunterladen(activity) }
+
+  /** Zurück gehört dem Tab, solange er vorne liegt und zurück kann; sonst der Oberfläche. */
+  private val zurueck = object : OnBackPressedCallback(false) {
+    override fun handleOnBackPressed() {
+      if (vollbild != null) return vollbildBeenden()
+      vorne?.let { tabs[it] }?.webView?.goBack()
+    }
+  }
+
+  override fun load(webView: WebView) {
+    oberflaeche = webView
+    activity.runOnUiThread {
+      // Nach dem Rückweg von Tauri angemeldet und damit vor ihm gefragt.
+      (activity as AppCompatActivity).onBackPressedDispatcher.addCallback(activity, zurueck)
+      // Private Profile früherer Läufe; jetzt hat sie keine WebView.
+      val store = ProfileStore.getInstance()
+      store.allProfileNames.filter { it.startsWith(PRIVAT) }.forEach { runCatching { store.deleteProfile(it) } }
+    }
+  }
+
+  private fun aufUi(invoke: Invoke, tun: () -> JSObject?) {
+    activity.runOnUiThread {
+      try {
+        val antwort = tun()
+        if (antwort != null) invoke.resolve(antwort) else invoke.resolve()
+      } catch (e: Exception) {
+        invoke.reject(e.message ?: e.toString())
+      }
+    }
+  }
+
+  private fun tab(id: String): Tab = tabs[id] ?: throw IllegalStateException("Kein Tab $id")
+
+  fun zurueckPruefen() {
+    val tab = vorne?.let { tabs[it] }
+    zurueck.isEnabled = vollbild != null || tab?.webView?.canGoBack() == true
+  }
+
+  @Command
+  fun laden(invoke: Invoke) {
+    val a = invoke.parseArgs(LadenArgs::class.java)
+    aufUi(invoke) {
+      tabHolen(a.id, a.privat).laden(a.url)
+      null
+    }
+  }
+
+  private fun tabHolen(id: String, privat: Boolean): Tab = tabs.getOrPut(id) {
+    val profil = if (privat) privatProfil else SEITEN
+    ProfileStore.getInstance().getOrCreateProfile(profil)
+    Tab(this, activity, id, privat, profil).also {
+      it.sichtbar(false)
+      inhalt.addView(it.webView, platz())
+    }
+  }
+
+  @Command
+  fun sichtbarkeit(invoke: Invoke) {
+    val a = invoke.parseArgs(VorneArgs::class.java)
+    aufUi(invoke) {
+      vorne = a.vorne
+      for ((id, tab) in tabs) tab.sichtbar(id == vorne)
+      zurueckPruefen()
+      null
+    }
+  }
+
+  @Command
+  fun rahmen(invoke: Invoke) {
+    val a = invoke.parseArgs(RahmenArgs::class.java)
+    aufUi(invoke) {
+      rahmen = a
+      for (tab in tabs.values) tab.webView.layoutParams = platz()
+      null
+    }
+  }
+
+  /** Der Inhaltsbereich in Gerätepixeln. */
+  private fun platz(): FrameLayout.LayoutParams {
+    val d = activity.resources.displayMetrics.density
+    return FrameLayout.LayoutParams((rahmen.breite * d).toInt(), (rahmen.hoehe * d).toInt()).apply {
+      leftMargin = (rahmen.x * d).toInt()
+      topMargin = (rahmen.y * d).toInt()
+    }
+  }
+
+  @Command
+  fun schliessen(invoke: Invoke) {
+    val a = invoke.parseArgs(TabArgs::class.java)
+    aufUi(invoke) {
+      tabs.remove(a.id)?.let { wegraeumen(it) }
+      if (vorne == a.id) vorne = null
+      zurueckPruefen()
+      null
+    }
+  }
+
+  private fun wegraeumen(tab: Tab) {
+    Rueckfragen.tabWeg(tab.id)
+    herunterladen.seiteWeg(tab.id)
+    inhalt.removeView(tab.webView)
+    if (tab.privat && tabs.values.none { it.privat }) profilLeeren(tab.profil, tab.webView)
+    tab.webView.destroy()
+  }
+
+  /** Cookies, Speicher und Cache eines Profils; [ansicht] liegt darin (für den Cache). */
+  private fun profilLeeren(name: String, ansicht: WebView) {
+    val profil = ProfileStore.getInstance().getOrCreateProfile(name)
+    profil.cookieManager.removeAllCookies(null)
+    profil.cookieManager.flush()
+    profil.webStorage.deleteAllData()
+    ansicht.clearCache(true)
+  }
+
+  /** Der Renderer ist weg: die WebView ist tot; `laden` legt eine neue an. */
+  fun abgestuerzt(tab: Tab) {
+    tabs.remove(tab.id)?.let { wegraeumen(it) }
+    zurueckPruefen()
+  }
+
+  @Command
+  fun ausfuehren(invoke: Invoke) {
+    val a = invoke.parseArgs(SkriptArgs::class.java)
+    aufUi(invoke) {
+      tab(a.id).webView.evaluateJavascript(a.skript, null)
+      null
+    }
+  }
+
+  @Command
+  fun standbild(invoke: Invoke) {
+    val a = invoke.parseArgs(TabArgs::class.java)
+    aufUi(invoke) {
+      val ansicht = tab(a.id).webView
+      val bild = Bitmap.createBitmap(ansicht.width.coerceAtLeast(1), ansicht.height.coerceAtLeast(1), Bitmap.Config.RGB_565)
+      ansicht.draw(Canvas(bild))
+      val bytes = ByteArrayOutputStream().also { bild.compress(Bitmap.CompressFormat.JPEG, 80, it) }.toByteArray()
+      bild.recycle()
+      JSObject().put("jpeg", Base64.encodeToString(bytes, Base64.NO_WRAP))
+    }
+  }
+
+  @Command
+  fun antworten(invoke: Invoke) {
+    val a = invoke.parseArgs(AntwortArgs::class.java)
+    aufUi(invoke) {
+      Rueckfragen.antworten(a.nr, JSONObject(a.antwort))
+      null
+    }
+  }
+
+  @Command
+  fun suchen(invoke: Invoke) {
+    val a = invoke.parseArgs(SuchenArgs::class.java)
+    aufUi(invoke) {
+      val ansicht = tab(a.id).webView
+      when (a.richtung) {
+        "start" -> ansicht.findAllAsync(a.begriff)
+        "weiter" -> ansicht.findNext(true)
+        "zurueck" -> ansicht.findNext(false)
+        else -> ansicht.clearMatches()
+      }
+      null
+    }
+  }
+
+  @Command
+  fun fuellen(invoke: Invoke) {
+    val a = invoke.parseArgs(FuellenArgs::class.java)
+    aufUi(invoke) {
+      if (!tab(a.id).fuellen(a.fuer, a.nachricht)) throw IllegalStateException("Die Seite hat inzwischen gewechselt")
+      null
+    }
+  }
+
+  @Command
+  fun drucken(invoke: Invoke) {
+    val a = invoke.parseArgs(TabArgs::class.java)
+    aufUi(invoke) {
+      val ansicht = tab(a.id).webView
+      val name = ansicht.title?.takeIf { it.isNotBlank() } ?: "Seite"
+      activity.getSystemService(PrintManager::class.java).print(name, ansicht.createPrintDocumentAdapter(name), null)
+      null
+    }
+  }
+
+  /** Cookies, Speicher und Cache im Profil [SEITEN]; private Profile fallen mit ihrem Tab. */
+  @Command
+  fun datenLeeren(invoke: Invoke) {
+    aufUi(invoke) {
+      val offen = tabs.values.firstOrNull { !it.privat }?.webView
+      val ansicht = offen ?: WebView(activity).also { androidx.webkit.WebViewCompat.setProfile(it, SEITEN) }
+      profilLeeren(SEITEN, ansicht)
+      if (offen == null) ansicht.destroy()
+      null
+    }
+  }
+
+  @Command
+  fun downloadsZeigen(invoke: Invoke) {
+    aufUi(invoke) {
+      herunterladen.zeigen()
+      null
+    }
+  }
+
+  /** Was das Such-Widget angestoßen hat (`WidgetActivity`), einmal. */
+  @Command
+  fun startAbholen(invoke: Invoke) {
+    aufUi(invoke) {
+      val start = WidgetActivity.wartend
+      WidgetActivity.wartend = null
+      JSObject().put("start", start ?: JSONObject.NULL)
+    }
+  }
+
+  /** Ein neuer Anstoß, während der Browser schon läuft: die Oberfläche holt ihn ab. */
+  override fun onNewIntent(intent: Intent) {
+    if (WidgetActivity.wartend != null) TabsBruecke.widget()
+  }
+
+  /**
+   * Die Tastatur für das Feld, das die Oberfläche gerade fokussiert hat. Ein
+   * `focus()` aus Skript zeigt sie nicht, wenn kein Tippen vorausging (Widget).
+   */
+  @Command
+  fun tastaturZeigen(invoke: Invoke) {
+    aufUi(invoke) {
+      val ansicht = oberflaeche ?: return@aufUi null
+      ansicht.requestFocus()
+      activity.getSystemService(InputMethodManager::class.java).showSoftInput(ansicht, InputMethodManager.SHOW_IMPLICIT)
+      null
+    }
+  }
+
+  @Command
+  fun widgetStand(invoke: Invoke) {
+    val a = invoke.parseArgs(WidgetArgs::class.java)
+    aufUi(invoke) {
+      SuchWidget.bildsucheSetzen(activity, a.bildsuche)
+      // Ohne Bildsuche geht ein wartendes Foto nirgends mehr hin.
+      if (!a.bildsuche) WidgetActivity.foto(activity).delete()
+      null
+    }
+  }
+
+  /**
+   * Schickt das Foto des Widgets an die Bildsuche: eine Seite im Tab baut das
+   * Formular und sendet es ab (`Tab.bildsuche`). Die Datei ist danach weg.
+   */
+  @Command
+  fun bildsuche(invoke: Invoke) {
+    val a = invoke.parseArgs(BildsucheArgs::class.java)
+    aufUi(invoke) {
+      val datei = WidgetActivity.foto(activity)
+      if (!datei.exists()) throw IllegalStateException("Kein Foto")
+      val daten = try {
+        Base64.encodeToString(datei.readBytes(), Base64.NO_WRAP)
+      } finally {
+        datei.delete()
+      }
+      val ziel = JSONObject().put("url", a.url).put("feld", a.feld).put("base64", a.base64)
+      tabHolen(a.id, a.privat).bildsuche(a.url, BILDSUCHE.replace("ZIEL", ziel.toString()).replace("DATEN", daten))
+      null
+    }
+  }
+
+  fun vollbildZeigen(ansicht: View, rueckruf: WebChromeClient.CustomViewCallback) {
+    vollbild?.let { vollbildBeenden() }
+    vollbild = ansicht to rueckruf
+    inhalt.addView(ansicht, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+    val leisten = WindowCompat.getInsetsController(activity.window, inhalt)
+    leisten.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+    leisten.hide(WindowInsetsCompat.Type.systemBars())
+    zurueckPruefen()
+  }
+
+  fun vollbildBeenden() {
+    val (ansicht, rueckruf) = vollbild ?: return
+    vollbild = null
+    inhalt.removeView(ansicht)
+    WindowCompat.getInsetsController(activity.window, inhalt).show(WindowInsetsCompat.Type.systemBars())
+    rueckruf.onCustomViewHidden()
+    zurueckPruefen()
+  }
+
+  fun dateiWaehlen(intent: Intent, fertig: (Int, Intent?) -> Unit) {
+    (activity as MainActivity).launchActivityForResult(intent) { r ->
+      fertig(r?.resultCode ?: Activity.RESULT_CANCELED, r?.data)
+    }
+  }
+
+  companion object {
+    const val SEITEN = "seiten"
+    const val PRIVAT = "privat-"
+
+    /**
+     * Die Seite, die das Foto abschickt. Google nimmt es als Datei, Bing als
+     * Base64-Text (`base64`). `ZIEL` ist JSON, in dem `JSONObject` auch `/`
+     * maskiert; ein `</script>` kann darin nicht stehen.
+     */
+    private const val BILDSUCHE = """<!doctype html><meta name="viewport" content="width=device-width"><script>
+(() => {
+  const z = ZIEL, d = "DATEN"
+  const f = document.createElement('form')
+  f.method = 'post'
+  f.enctype = 'multipart/form-data'
+  f.action = z.url
+  const e = document.createElement('input')
+  e.name = z.feld
+  if (z.base64) {
+    e.type = 'hidden'
+    e.value = d
+  } else {
+    e.type = 'file'
+    const b = atob(d), u = new Uint8Array(b.length)
+    for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i)
+    const t = new DataTransfer()
+    t.items.add(new File([u], 'bild.jpg', { type: 'image/jpeg' }))
+    e.files = t.files
+  }
+  f.append(e)
+  document.documentElement.append(f)
+  f.submit()
+})()
+</script>"""
+  }
+}

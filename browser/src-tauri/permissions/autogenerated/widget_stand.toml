@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-widget-stand"
+description = "Enables the widget_stand command without any pre-configured scope."
+commands.allow = ["widget_stand"]
+
+[[permission]]
+identifier = "deny-widget-stand"
+description = "Denies the widget_stand command without any pre-configured scope."
+commands.deny = ["widget_stand"]

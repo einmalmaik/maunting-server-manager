@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "devUrl": "http://localhost:1450"
+  },
+  "bundle": {
+    "android": {
+      "debugApplicationIdSuffix": ".dev",
+      "minSdkVersion": 29
+    }
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "MSB — Maunting Secure Browser",
+        "url": "browser.html",
+        "resizable": true
+      }
+    ]
+  }
+}

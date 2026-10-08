@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-schutz-stand"
+description = "Enables the schutz_stand command without any pre-configured scope."
+commands.allow = ["schutz_stand"]
+
+[[permission]]
+identifier = "deny-schutz-stand"
+description = "Denies the schutz_stand command without any pre-configured scope."
+commands.deny = ["schutz_stand"]

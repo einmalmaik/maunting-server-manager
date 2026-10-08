@@ -23,6 +23,7 @@ const { useFormulare } = await import('../services/formulare')
 const { useSitzung } = await import('../services/sitzung')
 const { useTabsStore } = await import('../services/tabsStore')
 const { useVaultStore } = await import('@/desktop/vault/vaultStore')
+const { useEinstellungenStore } = await import('../services/einstellungenStore')
 
 const tab = useTabsStore.getState().aktivId!
 const leiste = () =>
@@ -39,6 +40,7 @@ describe('Leiste für Anmeldungen', () => {
     ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
     useSitzung.setState({ stand: 'an' })
     useFormulare.setState({ feld: {}, abgeschickt: {}, schritt: {} })
+    useEinstellungenStore.setState({ ausfuellen: true, erzeugen: true, zahlungen: true })
     useVaultStore.setState({
       isUnlocked: true,
       items: [{ id: 'e1', service: 'example.com', url: 'https://example.com/', username: 'ada', password: 'Gipfel', createdAt: 0, updatedAt: 0, revision: 1 }],
@@ -90,5 +92,19 @@ describe('Leiste für Anmeldungen', () => {
     leiste()
     expect(screen.queryByRole('region')).not.toBeInTheDocument()
     useTabsStore.setState((s) => ({ tabs: s.tabs.map((t) => (t.id === tab ? { ...t, privat: false } : t)) }))
+  })
+
+  it('bietet nichts an, wenn Ausfüllen und Zahlungen abgeschaltet sind', async () => {
+    useEinstellungenStore.setState({ ausfuellen: false, zahlungen: false })
+    act(() => useFormulare.setState({ feld: { [tab]: { url: 'https://example.com/login', neu: false } } }))
+    const { unmount } = leiste()
+    expect(screen.queryByRole('region')).not.toBeInTheDocument()
+    unmount()
+    act(() => useFormulare.setState({ feld: { [tab]: { url: 'https://example.com/kasse', neu: false, zahlung: 'karte' } } }))
+    leiste()
+    expect(screen.queryByRole('region')).not.toBeInTheDocument()
+    act(() => useFormulare.setState({ feld: {}, abgeschickt: { [tab]: { url: 'https://example.com/login', benutzer: 'ada', passwort: 'Neu-1' } } }))
+    await act(() => Promise.resolve())
+    expect(screen.queryByRole('button', { name: 'Speichern' })).not.toBeInTheDocument()
   })
 })
