@@ -161,11 +161,13 @@ export const nativ = {
   schildStand: () =>
     rufen<{ aktiv: boolean; listen: { name: string; alter_sekunden: number | null }[] }>('schild_stand'),
   schutzStand: () => rufen<SchutzStand>('schutz_stand'),
-  /** Strengeres gilt sofort, Lockeres wird ein Antrag (`schild/schutz.rs`). */
+  /** Strengeres gilt sofort, Lockeres wird ein Antrag (`schild/schutz.rs`). Wirft `ohne_netz`, `gebunden`, `abkuehlen`. */
   schutzAendern: (regeln: SchutzRegeln) => rufen<SchutzStand>('schutz_aendern', { regeln }),
+  /** Bindet den Schutz für `tage` Tage oder verlängert. */
+  schutzBinden: (tage: number) => rufen<SchutzStand>('schutz_binden', { tage }),
   schutzAbbrechen: () => rufen<SchutzStand>('schutz_abbrechen'),
-  /** Wirft `text_falsch` oder `zu_schnell`. */
-  schutzBestaetigen: (text: string) => rufen<SchutzStand>('schutz_bestaetigen', { text }),
+  /** Wirft `ohne_netz`, `zu_frueh`, `verfallen` oder `kein_antrag`. */
+  schutzBestaetigen: () => rufen<SchutzStand>('schutz_bestaetigen'),
   /** Was das Such-Widget angestoßen hat, einmal (`widget.rs`). */
   widgetStart: () => rufen<WidgetStart | null>('widget_start'),
   widgetStand: (bildsuche: boolean) => rufen('widget_stand', { bildsuche }),
@@ -185,21 +187,28 @@ export async function widgetAnstoesse(rueckruf: () => void): Promise<() => void>
 
 export type SchutzKategorie = 'erwachsene' | 'gluecksspiel' | 'sozial' | 'spiele' | 'shopping'
 
-export type Huerde = { art: 'countdown'; minuten: number } | { art: 'abtippen' }
-
 /** Die Regeln des Jugend- und Suchtschutzes (`Regeln` in `schild/schutz.rs`). */
 export interface SchutzRegeln {
   aktiv: boolean
   kategorien: SchutzKategorie[]
   eigene: string[]
   ausnahmen: string[]
-  huerde: Huerde
+  /** 24, 72 oder 168 (`WARTEZEITEN` in `schutz.rs`). */
+  wartezeit_stunden: number
 }
 
 export interface SchutzStand {
   regeln: SchutzRegeln
-  /** Eine Lockerung, die noch wartet; `text` nur beim Abtippen. */
-  antrag: { ziel: SchutzRegeln; rest_sekunden: number; text: string | null } | null
+  /** Eine Lockerung: bis `rest_sekunden` wartet sie, danach lässt sie sich `fenster_sekunden` lang bestätigen. */
+  antrag: { ziel: SchutzRegeln; rest_sekunden: number; fenster_sekunden: number } | null
+  /** So lange lässt sich nichts lockern. */
+  gebunden_sekunden: number
+  /** So lange kein neuer Antrag (nach Abbruch oder Verfall). */
+  abkuehlen_sekunden: number
+  /** Tage ohne gesperrte Seite; bleibt auf dem Gerät. */
+  serie: { tage: number; rekord: number }
+  /** Die Schutzdatei war nicht zu lesen; es gilt alles gesperrt. */
+  beschaedigt: boolean
   listen: { kategorie: SchutzKategorie; nachgeladen: boolean; alter_sekunden: number | null }[]
 }
 

@@ -144,6 +144,9 @@ pub enum DownloadStand {
 }
 
 pub fn melden(app: &AppHandle, ereignis: TabEreignis) {
+    if matches!(ereignis, TabEreignis::Gesperrt { .. }) {
+        crate::schild::schutz_dienst::treffer(app);
+    }
     let _ = app.emit_to("main", EREIGNIS, ereignis);
 }
 

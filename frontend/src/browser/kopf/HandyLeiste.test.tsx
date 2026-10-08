@@ -102,7 +102,7 @@ describe('Am Handy', () => {
   })
 
   it('verspricht keinen eingeschränkten Modus von YouTube und kein Windows Hello', async () => {
-    const regeln = { aktiv: false, kategorien: [], eigene: [], ausnahmen: [], huerde: { art: 'countdown' as const, minuten: 15 } }
+    const regeln = { aktiv: false, kategorien: [], eigene: [], ausnahmen: [], wartezeit_stunden: 24 }
     vi.spyOn(nativ, 'schutzStand').mockResolvedValue({ regeln, antrag: null, listen: [] })
     const { unmount } = zeigen(<EinstellungenSeite teil="jugendschutz" />)
     expect(await screen.findByText(/Den eingeschränkten Modus von YouTube kann der Browser unter Android nicht einschalten/)).toBeInTheDocument()

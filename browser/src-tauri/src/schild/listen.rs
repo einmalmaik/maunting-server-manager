@@ -135,10 +135,7 @@ fn engines_bauen(app: &AppHandle) {
 
 /// Holt eine Liste und nimmt sie nur, wenn `passt` sie als Liste erkennt.
 pub(super) async fn holen(url: &str, passt: fn(&str) -> bool) -> Result<String, String> {
-    let antwort = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|e| e.to_string())?
+    let antwort = crate::netz::client(Duration::from_secs(60))?
         .get(url)
         .send()
         .await

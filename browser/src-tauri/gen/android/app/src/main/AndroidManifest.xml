@@ -5,7 +5,13 @@
          bliebe immer true (AGENTS.md Punkt 74). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Keine Datensicherung und kein Umzug aufs neue Gerät: Cookies der Seiten,
+         Verlauf und das Fach mit dem Token gehören diesem Gerät. allowBackup
+         reicht ab Android 12 nicht für den Umzug, deshalb dataExtractionRules. -->
     <application
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/datensicherung"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.maunting_secure_browser"

@@ -92,11 +92,11 @@ pub fn init_android_schluesselfach<R: tauri::Runtime>() -> tauri::plugin::TauriP
 
 #[cfg(target_os = "android")]
 #[derive(serde::Deserialize)]
-struct WertAntwort {
+pub(crate) struct WertAntwort {
     /// Fehlt, wenn nichts hinterlegt ist: `JSObject.put(key, null)` nimmt den
     /// Schlüssel drüben heraus, statt ihn auf null zu setzen.
     #[serde(default)]
-    wert: Option<String>,
+    pub(crate) wert: Option<String>,
 }
 
 #[cfg(target_os = "android")]
@@ -113,7 +113,7 @@ struct JaNein {
 /// `#[tauri::command(async)]` auslösen: auf dem Hauptthread stünde die Anwendung
 /// und der Prompt käme gar nicht erst auf den Bildschirm.
 #[cfg(target_os = "android")]
-fn android_ruf<T: serde::de::DeserializeOwned>(
+pub(crate) fn android_ruf<T: serde::de::DeserializeOwned>(
     app: &AppHandle,
     befehl: &str,
     daten: serde_json::Value,

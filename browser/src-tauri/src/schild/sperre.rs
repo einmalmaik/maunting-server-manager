@@ -4,9 +4,9 @@
 //!
 //! Gesperrt ist ein Host, wenn er oder eine seiner Elterndomains in einer
 //! aktiven Kategorie oder in der eigenen Liste steht und keine Ausnahme ihn
-//! freigibt. Mit „Erwachsene“ kommt die sichere Suche dazu: Google, Bing und
-//! DuckDuckGo bekommen ihren Parameter, YouTube den eingeschränkten Modus per
-//! Kopfzeile.
+//! freigibt; die genaueste Angabe gilt. Mit „Erwachsene“ kommt die sichere
+//! Suche dazu: Google, Bing, DuckDuckGo und Brave bekommen ihren Parameter,
+//! YouTube den eingeschränkten Modus per Kopfzeile.
 
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock, RwLock};
@@ -72,11 +72,16 @@ impl Sperre {
             return None;
         }
         let host = host_von(url)?;
-        if mit_eltern(&host).any(|h| self.ausnahmen.contains(h)) {
-            return None;
-        }
-        if mit_eltern(&host).any(|h| self.eigene.contains(h)) {
-            return Some(Grund::Eigene);
+        // Die genaueste Angabe gilt: eine eigene Sperre von `mail.google.com`
+        // schlägt die Ausnahme `google.com` und umgekehrt. Auf derselben
+        // Ebene gewinnt die Sperre.
+        for h in mit_eltern(&host) {
+            if self.eigene.contains(h) {
+                return Some(Grund::Eigene);
+            }
+            if self.ausnahmen.contains(h) {
+                return None;
+            }
         }
         self.listen
             .iter()
@@ -97,15 +102,18 @@ pub fn sicher_umschreiben(url: &str) -> Option<String> {
     if u.scheme() != "https" && u.scheme() != "http" {
         return None;
     }
-    let host = u.host_str()?.to_ascii_lowercase();
+    let host = u.host_str()?.trim_end_matches('.').to_ascii_lowercase();
     let host = host.trim_start_matches("www.");
     let pfad = u.path();
+    let suche = u.query_pairs().any(|(k, _)| k == "q");
     let (name, wert) = if (host.starts_with("google.") || host.contains(".google.")) && (pfad == "/search" || pfad.starts_with("/images")) {
         ("safe", "active")
     } else if host == "bing.com" && pfad.ends_with("/search") {
         ("adlt", "strict")
-    } else if host == "duckduckgo.com" && u.query_pairs().any(|(k, _)| k == "q") {
+    } else if matches!(host, "duckduckgo.com" | "html.duckduckgo.com" | "lite.duckduckgo.com") && suche {
         ("kp", "1")
+    } else if host == "search.brave.com" && suche {
+        ("safesearch", "strict")
     } else {
         return None;
     };
@@ -188,5 +196,38 @@ mod tests {
         assert_eq!(sicher_umschreiben("https://www.bing.com/images/search?q=x").unwrap(), "https://www.bing.com/images/search?q=x&adlt=strict");
         assert_eq!(sicher_umschreiben("https://duckduckgo.com/?q=x&kp=-2").unwrap(), "https://duckduckgo.com/?q=x&kp=1");
         assert_eq!(sicher_umschreiben("https://duckduckgo.com/about"), None);
+        assert_eq!(sicher_umschreiben("https://search.brave.com/search?q=x&safesearch=off").unwrap(), "https://search.brave.com/search?q=x&safesearch=strict");
+    }
+
+    /// Bugjagd 08.10.2026: ein Punkt am Host und DuckDuckGo ohne JavaScript
+    /// umgingen die sichere Suche.
+    #[test]
+    fn sichere_suche_auch_mit_punkt_am_host_und_ohne_javascript() {
+        for url in [
+            "https://www.bing.com./search?q=x&adlt=off",
+            "https://duckduckgo.com./?q=x&kp=-2",
+            "https://html.duckduckgo.com/html/?q=x&kp=-2",
+            "https://lite.duckduckgo.com/lite/?q=x&kp=-2",
+            "https://search.brave.com./search?q=x",
+        ] {
+            assert!(sicher_umschreiben(url).is_some(), "nicht umgeschrieben: {url}");
+        }
+    }
+
+    /// Bugjagd 08.10.2026: die Ausnahme der Elterndomain hob die eigene Sperre
+    /// einer Unterdomain auf.
+    #[test]
+    fn die_genaueste_angabe_gilt() {
+        let mut s = sperre();
+        s.eigene = ["mail.google.com".to_string(), "google.de".to_string()].into_iter().collect();
+        s.ausnahmen = ["google.com".to_string(), "maps.google.de".to_string(), "casino.example".to_string()].into_iter().collect();
+        assert_eq!(s.einstufen("https://mail.google.com/"), Some(Grund::Eigene));
+        assert_eq!(s.einstufen("https://x.mail.google.com/"), Some(Grund::Eigene));
+        assert_eq!(s.einstufen("https://google.com/"), None);
+        assert_eq!(s.einstufen("https://google.de/"), Some(Grund::Eigene));
+        assert_eq!(s.einstufen("https://maps.google.de/"), None);
+        assert_eq!(s.einstufen("https://live.casino.example/"), None, "die Ausnahme schlägt weiter die Kategorie");
+        s.eigene.insert("casino.example".into());
+        assert_eq!(s.einstufen("https://casino.example/"), Some(Grund::Eigene), "auf derselben Ebene gewinnt die Sperre");
     }
 }

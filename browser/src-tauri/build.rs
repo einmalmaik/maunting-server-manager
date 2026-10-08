@@ -39,6 +39,7 @@ const BEFEHLE: &[&str] = &[
     "schild_stand",
     "schutz_stand",
     "schutz_aendern",
+    "schutz_binden",
     "schutz_abbrechen",
     "schutz_bestaetigen",
     "download_zeigen",

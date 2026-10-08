@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-schutz-binden"
+description = "Enables the schutz_binden command without any pre-configured scope."
+commands.allow = ["schutz_binden"]
+
+[[permission]]
+identifier = "deny-schutz-binden"
+description = "Denies the schutz_binden command without any pre-configured scope."
+commands.deny = ["schutz_binden"]

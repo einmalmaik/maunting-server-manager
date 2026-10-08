@@ -62,6 +62,12 @@ tauri-plugin-biometric = "2"
 jni = "0.21"
 # Standbild der Tabs kommt von Kotlin als Base64 (schon im Baum, über Tauri).
 base64 = "0.22"
+# reqwest prüft Zertifikate per rustls-platform-verifier; unter Android braucht
+# der eine Initialisierung samt Kotlin-Teil und wirft ohne sie bei jeder
+# Anfrage. Wie das Smart System (`erstelle_android_client`): rustls mit den
+# Wurzeln von Mozilla (`netz.rs`), rustls liegt über reqwest schon im Baum.
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
+webpki-roots = "1"
 
 # Das Schild prüft jede Anfrage auf dem UI-Faden der WebView2. Ohne Optimierung
 # brauchte die Engine dafür bis 57 ms je Anfrage, und `tauri dev` stand beim

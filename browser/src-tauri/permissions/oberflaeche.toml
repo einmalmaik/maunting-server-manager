@@ -36,6 +36,7 @@ permissions = [
   "allow-schild-stand",
   "allow-schutz-stand",
   "allow-schutz-aendern",
+  "allow-schutz-binden",
   "allow-schutz-abbrechen",
   "allow-schutz-bestaetigen",
   "allow-download-zeigen",

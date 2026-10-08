@@ -143,11 +143,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.33 vom 2026-10-08 aus (Browser unter Android und Such-Widget)', () => {
+  it('weist die Fassung 3.35 vom 2026-10-09 aus (Jugendschutz misst an der Netzzeit, Serie bleibt auf dem Gerät)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.33`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.35`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -229,13 +229,20 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/Adresse, Cookies und User-Agent der Seite/);
     expect(i18n.t('privacyPolicy.sections.browser.items.widget')).toMatch(/Spracherkennungsdienst des Telefons/);
     expect(i18n.t('privacyPolicy.sections.browser.items.widget')).toMatch(/Bildsuche der gewählten Suchmaschine/);
+    // 3.34: das Token liegt unter Android im Keystore-Fach, Sicherung und Umzug sind ausgeschlossen.
+    expect(i18n.t('privacyPolicy.sections.browser.items.kopplung')).toMatch(/unter Android verschlüsselt mit einem Schlüssel aus dem Android-Keystore/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/nimmt sich von der Android-Datensicherung und vom Umzug auf ein neues Gerät aus/);
+    // 3.35: Lockern misst an der Uhrzeit von GitHub; die Serie ohne Sperrtreffer geht nirgendwohin.
+    expect(i18n.t('privacyPolicy.sections.browser.items.schutz')).toMatch(/an der Uhrzeit, die raw\.githubusercontent\.com .* nennt/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.schutz')).toMatch(/zählt er nur auf dem Gerät; die Zahl geht an keinen Dienst und nicht an MSM/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.schutz')).toMatch(/DuckDuckGo und Brave/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-10-08');
-    expect(stand).toHaveTextContent('2026-10-08');
+    expect(stand).toHaveAttribute('datetime', '2026-10-09');
+    expect(stand).toHaveTextContent('2026-10-09');
   });
 
   it('nennt in den Einstellungen der App dieselbe Fassung wie die Erklärung selbst', () => {

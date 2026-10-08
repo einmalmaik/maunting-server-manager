@@ -13,6 +13,7 @@ pub mod konfig;
 pub mod kurzinfo;
 #[cfg(windows)]
 pub mod mixer;
+pub mod netz;
 pub mod schild;
 pub mod seite;
 pub mod tabs;
@@ -68,7 +69,7 @@ pub fn run() {
             app.manage(konfig::KonfigZustand(std::sync::Mutex::new(konfig)));
             schild::listen::starten(handle);
             downloads::quarantaene::beim_start(handle);
-            schild::schutz::starten(handle);
+            schild::schutz_dienst::starten(handle);
             tabs::ruhe::starten(handle.clone());
             Ok(())
         })
@@ -103,10 +104,11 @@ pub fn run() {
             tabs::ruhe::tabs_leistung,
             tabs::tab_stumm,
             schild::schild_stand,
-            schild::schutz::schutz_stand,
-            schild::schutz::schutz_aendern,
-            schild::schutz::schutz_abbrechen,
-            schild::schutz::schutz_bestaetigen,
+            schild::schutz_dienst::schutz_stand,
+            schild::schutz_dienst::schutz_aendern,
+            schild::schutz_dienst::schutz_binden,
+            schild::schutz_dienst::schutz_abbrechen,
+            schild::schutz_dienst::schutz_bestaetigen,
             downloads::download_zeigen,
             downloads::download_ordner,
             fenster::fenster_aktion,
@@ -177,5 +179,55 @@ mod tests {
 
         assert_eq!(manifest, registriert);
         assert_eq!(erlaubt, registriert);
+    }
+
+    /// Das Token der Kopplung liegt unter Android verschlüsselt im Schlüsselfach,
+    /// nie als Datei, und das Gerät gibt weder Token noch Cookies an eine
+    /// Sicherung oder ein neues Gerät (bis 08.10.2026 lag es im Klartext).
+    #[test]
+    fn das_token_liegt_nie_im_klartext_und_nicht_in_der_sicherung() {
+        let token = include_str!("../../../crates/schluesselfach/src/geheimnisse.rs");
+        let code = token.split("#[cfg(test)]").next().unwrap();
+        assert!(!code.contains("fs::write"), "Token wird als Datei geschrieben");
+        assert!(code.contains("\"session_refresh_token\""));
+
+        let manifest = include_str!("../gen/android/app/src/main/AndroidManifest.xml");
+        assert!(manifest.contains("android:allowBackup=\"false\""));
+        assert!(manifest.contains("android:dataExtractionRules=\"@xml/datensicherung\""));
+        let regeln = include_str!("../gen/android/app/src/main/res/xml/datensicherung.xml");
+        for teil in ["<cloud-backup>", "<device-transfer>"] {
+            let block = regeln.split(teil).nth(1).unwrap().split("</").next().unwrap();
+            for bereich in ["root", "file", "database", "sharedpref", "external"] {
+                assert!(block.contains(&format!("domain=\"{bereich}\" path=\".\"")), "{teil} sichert {bereich}");
+            }
+        }
+    }
+
+    /// Das Schlüsselfach unter Android ist in MSS und MSB dieselbe Datei; nur das
+    /// Paket unterscheidet sich. Eine Kopie, die still veraltet, träfe Keystore
+    /// und Biometrie.
+    #[test]
+    fn das_schluesselfach_ist_in_beiden_apps_gleich() {
+        let ohne_paket = |s: &str| s.replace("
+", "
+").lines().filter(|z| !z.starts_with("package ")).collect::<Vec<_>>().join("
+");
+        let paare = [
+            (
+                include_str!("../gen/android/app/src/main/java/com/mauntingstudios/secure_browser/Schluesselfach.kt"),
+                include_str!("../../../smart-system/src-tauri/gen/android/app/src/main/java/com/mauntingstudios/smart_system/Schluesselfach.kt"),
+            ),
+            (
+                include_str!("../gen/android/app/src/main/java/com/mauntingstudios/secure_browser/SchluesselfachPlugin.kt"),
+                include_str!("../../../smart-system/src-tauri/gen/android/app/src/main/java/com/mauntingstudios/smart_system/SchluesselfachPlugin.kt"),
+            ),
+            (
+                include_str!("../gen/android/app/src/main/java/com/mauntingstudios/secure_browser/SchluesselfachActivity.kt"),
+                include_str!("../../../smart-system/src-tauri/gen/android/app/src/main/java/com/mauntingstudios/smart_system/SchluesselfachActivity.kt"),
+            ),
+        ];
+        for (msb, mss) in paare {
+            assert_eq!(ohne_paket(msb), ohne_paket(mss));
+        }
     }
 }

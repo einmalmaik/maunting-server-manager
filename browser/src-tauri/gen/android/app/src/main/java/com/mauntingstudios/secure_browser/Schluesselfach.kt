@@ -37,6 +37,8 @@ import javax.crypto.spec.GCMParameterSpec
  * - **ohne Bestätigung** (`authNoetig = false`): hardwaregebunden, aber ohne
  *   Abfrage. Hier liegt das Gerätegeheimnis des Messengers, das allein nichts
  *   öffnet und nur als zweite Hälfte in die Ableitung aus dem PIN eingeht.
+ *   Und das Refresh-Token der Kopplung (`session_refresh_token`, nur der
+ *   Browser): die App meldet sich beim Start selbst an, eine Abfrage ginge nicht.
  *   Dieselbe Aufteilung wie auf Windows, wo dieses Fach ebenfalls ohne Hello
  *   gelesen wird: eine Abfrage dort machte das reine PIN-Entsperren unmöglich.
  */
@@ -51,12 +53,13 @@ object Schluesselfach {
         "vault_biometric_key",
         "messenger_biometric_key",
         "messenger_device_secret",
+        "session_refresh_token",
     )
 
-    /** Dieses Fach wird ohne Abfrage gelesen. Siehe Klassenkommentar. */
-    private const val FACH_OHNE_ABFRAGE = "messenger_device_secret"
+    /** Diese Fächer werden ohne Abfrage gelesen. Siehe Klassenkommentar. */
+    private val FAECHER_OHNE_ABFRAGE = setOf("messenger_device_secret", "session_refresh_token")
 
-    fun brauchtBestaetigung(fach: String): Boolean = fach != FACH_OHNE_ABFRAGE
+    fun brauchtBestaetigung(fach: String): Boolean = fach !in FAECHER_OHNE_ABFRAGE
 
     fun pruefeFach(fach: String) {
         require(fach in ERLAUBTE_FAECHER) { "Unbekanntes Schlüsselfach: $fach" }

@@ -1,23 +1,29 @@
 /**
- * Eine Lockerung des Jugend- und Suchtschutzes, die noch wartet: was sich
- * ändern soll, und entweder der Countdown oder der Text zum Abtippen.
- * „Schutz behalten“ nimmt sie jederzeit zurück. Ob die Hürde genommen ist,
- * prüft Rust; Einfügen sperrt hier nur die Oberfläche.
+ * Eine Lockerung des Jugend- und Suchtschutzes: was sich ändern soll, wie
+ * lange sie noch wartet und danach das Fenster von einer Stunde, in dem sie
+ * sich bestätigen lässt. „Schutz behalten“ nimmt sie jederzeit zurück. Ob es
+ * soweit ist, misst Rust an der Uhrzeit aus dem Netz (`schild/schutz.rs`).
  */
-import { useState } from 'react'
 import { Clock } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 
-import { Button, Textarea } from '@/Singra/UI'
+import { Button } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 
-import type { Huerde, SchutzRegeln, SchutzStand } from '../services/nativ'
-import { dauerText } from '../services/schutz'
+import type { SchutzRegeln, SchutzStand } from '../services/nativ'
+import { dauerText, uebrig } from '../services/schutz'
 
-export function huerdeName(t: TFunction, h: Huerde): string {
-  if (h.art === 'abtippen') return t('browser.schutz.huerdeAbtippen')
-  return h.minuten >= 60 ? t('browser.schutz.huerdeStunden', { count: h.minuten / 60 }) : t('browser.schutz.huerdeMinuten', { count: h.minuten })
+const FEHLER = ['ohne_netz', 'gebunden', 'abkuehlen', 'zu_frueh', 'verfallen', 'kein_antrag'] as const
+
+/** Ein Fehlercode aus `schutz.rs` als Satz. */
+export function fehlerText(t: TFunction, fehler: unknown): string {
+  const code = String(fehler)
+  return (FEHLER as readonly string[]).includes(code) ? t(`browser.schutz.fehlerCode.${code}`) : t('browser.schutz.fehler')
+}
+
+export function wartezeitName(t: TFunction, stunden: number): string {
+  return stunden >= 48 ? t('browser.schutz.wartezeitTage', { count: stunden / 24 }) : t('browser.schutz.wartezeitStunden', { count: stunden })
 }
 
 /** Was der Antrag gegenüber den geltenden Regeln lockert, als Sätze. */
@@ -27,82 +33,28 @@ export function lockerungen(t: TFunction, alt: SchutzRegeln, ziel: SchutzRegeln)
     ...alt.kategorien.filter((k) => !ziel.kategorien.includes(k)).map((k) => t('browser.schutz.lockerung.nichtMehr', { name: t(`browser.schutz.kategorie.${k}`) })),
     ...alt.eigene.filter((h) => !ziel.eigene.includes(h)).map((host) => t('browser.schutz.lockerung.nichtMehr', { name: host })),
     ...ziel.ausnahmen.filter((h) => !alt.ausnahmen.includes(h)).map((host) => t('browser.schutz.lockerung.erlauben', { host })),
-    ...(JSON.stringify(alt.huerde) !== JSON.stringify(ziel.huerde) ? [t('browser.schutz.lockerung.huerde', { name: huerdeName(t, ziel.huerde) })] : []),
+    ...(ziel.wartezeit_stunden < alt.wartezeit_stunden ? [t('browser.schutz.lockerung.wartezeit', { name: wartezeitName(t, ziel.wartezeit_stunden) })] : []),
   ]
-}
-
-function gleich(a: string, b: string): boolean {
-  const woerter = (s: string) => s.trim().split(/\s+/).join(' ')
-  return woerter(a) === woerter(b)
-}
-
-function Abtippen({ text, rest, bestaetigen }: { text: string; rest: number; bestaetigen: (text: string) => Promise<unknown> }) {
-  const { t } = useTranslation()
-  const [eingabe, setEingabe] = useState('')
-  const [fehler, setFehler] = useState<string | null>(null)
-  const sperren = (e: React.SyntheticEvent) => e.preventDefault()
-
-  const senden = () => {
-    if (!gleich(text, eingabe)) {
-      setFehler(t('browser.schutz.textFalsch'))
-      return
-    }
-    bestaetigen(eingabe).catch((e: unknown) => {
-      setFehler(String(e) === 'zu_schnell' ? t('browser.schutz.zuSchnell', { zeit: dauerText(rest) }) : t('browser.schutz.textFalsch'))
-    })
-  }
-
-  return (
-    <form
-      className="flex flex-col gap-3"
-      onSubmit={(e) => {
-        e.preventDefault()
-        senden()
-      }}
-    >
-      <p className="text-body-sm text-on-surface">{t('browser.schutz.abtippenHinweis')}</p>
-      <p className="select-none rounded-lg bg-surface-container px-3 py-2 font-mono text-body-sm leading-relaxed text-on-surface" onCopy={sperren}>
-        {text}
-      </p>
-      <Textarea
-        aria-label={t('browser.schutz.abtippenFeld')}
-        value={eingabe}
-        rows={3}
-        onChange={(e) => {
-          setEingabe(e.target.value)
-          setFehler(null)
-        }}
-        onPaste={sperren}
-        onDrop={sperren}
-        autoComplete="off"
-        autoCorrect="off"
-        spellCheck={false}
-        error={fehler ?? undefined}
-      />
-      <div>
-        <Button type="submit" variant="secondary">
-          {t('browser.schutz.lockern')}
-        </Button>
-      </div>
-    </form>
-  )
 }
 
 export function Lockerung({
   stand,
-  rest,
+  vergangen,
   abbrechen,
   bestaetigen,
 }: {
   stand: SchutzStand
-  rest: number
+  vergangen: number
   abbrechen: () => Promise<unknown>
-  bestaetigen: (text: string) => Promise<unknown>
+  bestaetigen: () => Promise<unknown>
 }) {
   const { t } = useTranslation()
   const antrag = stand.antrag
   if (!antrag) return null
   const liste = lockerungen(t, stand.regeln, antrag.ziel)
+  const rest = uebrig(antrag.rest_sekunden, vergangen)
+  const fenster = rest > 0 ? antrag.fenster_sekunden : uebrig(antrag.fenster_sekunden, vergangen - antrag.rest_sekunden)
+  const melden = (e: unknown) => toast.error(fehlerText(t, e))
 
   return (
     <section className="msm-card flex flex-col gap-3 border border-status-warning/40 p-5" aria-labelledby="schutz-lockerung">
@@ -117,17 +69,29 @@ export function Lockerung({
           <li key={satz}>{satz}</li>
         ))}
       </ul>
-      {antrag.text ? (
-        <Abtippen text={antrag.text} rest={rest} bestaetigen={bestaetigen} />
-      ) : (
+      {rest > 0 ? (
+        <>
+          <p className="text-body-sm text-on-surface">
+            {t('browser.schutz.bestaetigenIn')} <span className="font-mono tabular-nums">{dauerText(t, rest)}</span>
+          </p>
+          <p className="text-label-sm text-on-surface-variant">{t('browser.schutz.fensterHinweis')}</p>
+        </>
+      ) : fenster > 0 ? (
         <p className="text-body-sm text-on-surface">
-          {t('browser.schutz.giltIn')} <span className="font-mono tabular-nums">{dauerText(rest)}</span>
+          {t('browser.schutz.fensterOffen')} <span className="font-mono tabular-nums">{dauerText(t, fenster)}</span>
         </p>
+      ) : (
+        <p className="text-body-sm text-on-surface">{t('browser.schutz.fehlerCode.verfallen')}</p>
       )}
-      <div>
-        <Button type="button" variant="primary" onClick={() => void abbrechen().catch(() => toast.error(t('browser.schutz.fehler')))}>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="primary" onClick={() => void abbrechen().catch(melden)}>
           {t('browser.schutz.behalten')}
         </Button>
+        {rest === 0 && fenster > 0 && (
+          <Button type="button" variant="secondary" onClick={() => void bestaetigen().catch(melden)}>
+            {t('browser.schutz.lockern')}
+          </Button>
+        )}
       </div>
     </section>
   )

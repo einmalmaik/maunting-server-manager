@@ -23,7 +23,9 @@ use crate::tabs::{melden, TabEreignis};
 
 pub mod kategorien;
 pub mod listen;
+pub mod netzzeit;
 pub mod schutz;
+pub mod schutz_dienst;
 pub mod sperre;
 
 /// Art einer Anfrage, wie die WebView sie meldet.
