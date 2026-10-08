@@ -84,10 +84,20 @@ def test_ohne_genannten_bucket_nichts(als, konten):
     assert client.get("/api/vault/eingang").status_code == 400
 
 
-def test_die_app_legt_nichts_ab(als, konten):
-    """Abgelegt wird nur vom Hintergrund-Job; den Weg aus der offenen App gibt es nicht mehr (AGENTS.md Punkt 32)."""
-    antwort = als(konten[0]).post("/api/vault/eingang", json={"id": str(uuid.uuid4()), "ciphertext": "x"})
-    assert antwort.status_code == 405
+def test_der_browser_legt_mit_sitzung_in_den_eigenen_bucket(als, konten, db):
+    """Der Browser speichert bei gesperrtem Tresor ueber den Posteingang, mit seiner Sitzung."""
+    eins = als(konten[0])
+    eingang_id = str(uuid.uuid4())
+    assert eins.post("/api/vault/eingang", json={"id": eingang_id, "ciphertext": "zugang-1"}).status_code == 201
+    assert [e["id"] for e in eins.get("/api/vault/eingang").json()["eintraege"]] == [eingang_id]
+
+    zwei = als(konten[1])
+    zwei.headers["X-MSM-Vault-Bucket"] = BUCKET[konten[0].id]
+    antwort = zwei.post("/api/vault/eingang", json={"id": str(uuid.uuid4()), "ciphertext": "fremd"})
+    assert antwort.status_code == 410
+    del zwei.headers["X-MSM-Vault-Bucket"]
+    assert zwei.post("/api/vault/eingang", json={"id": str(uuid.uuid4()), "ciphertext": "x"}).status_code == 400
+    assert db.query(VaultEingang).count() == 1
 
 
 def test_nach_dem_zuruecksetzen_ist_der_posteingang_weg_und_das_telefon_draussen(als, konten, db, telefon):

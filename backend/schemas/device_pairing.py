@@ -8,6 +8,8 @@ zweiter Weg, auf dem er in ein Protokoll geraet.
 
 from datetime import datetime
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from schemas.passkey import Zweitnachweis
@@ -40,6 +42,9 @@ class PairingRedeemRequest(BaseModel):
 
     code: str = Field(min_length=8, max_length=64)
     label: str = Field(default="", max_length=MAX_BEZEICHNUNG)
+    # Welche App koppelt. Nur `desktop` (MSS) bekommt die Werkzeuge fuer den
+    # Rechner; der Browser (MSB) ist fuer die KI eine Panel-Sitzung.
+    geraet: Literal["desktop", "browser"] = "desktop"
 
 
 class PairedDevice(BaseModel):

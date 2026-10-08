@@ -1,5 +1,8 @@
+import { Fragment } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { LucideIcon } from 'lucide-react'
+
+import { Kurzinfo } from '@/Singra/UI/Kurzinfo'
 
 /**
  * Definiert einen einzelnen Tab fuer den gemeinsamen {@link TabBar}.
@@ -11,7 +14,8 @@ import type { LucideIcon } from 'lucide-react'
 export interface TabDef<TId extends string> {
   id: TId
   labelKey: string
-  icon: LucideIcon
+  /** Ohne Symbol bleibt nur der Name (dichte Leisten wie in den Entwicklerwerkzeugen). */
+  icon?: LucideIcon
   /** Wird in der Tabs-Reihenfolge zuerst versteckt (z.B. fuer Danger-Zone). */
   variant?: 'default' | 'danger'
   /** Optionale Zahl hinter dem Namen, etwa die Mitglieder eines Teams. */
@@ -34,6 +38,12 @@ interface TabBarProps<TId extends string> {
    * Ab md wie gewohnt.
    */
   einzeilig?: boolean
+  /**
+   * Kleiner und enger, für Werkzeugleisten in schmalen Panels. Unter md zeigen
+   * Reiter mit Symbol nur das Symbol, der gewählte behält seinen Namen; den
+   * Namen der übrigen nennt eine Kurzinfo.
+   */
+  kompakt?: boolean
 }
 
 /**
@@ -41,14 +51,14 @@ interface TabBarProps<TId extends string> {
  * damit beide Seiten dasselbe Verhalten, dieselben i18n-Keys und dasselbe Design
  * teilen. Die Auswahl der Tabs liegt weiterhin in der jeweiligen Orchestrator-Komponente.
  */
-export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel, embedded = false, einzeilig = false }: TabBarProps<TId>) {
+export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel, embedded = false, einzeilig = false, kompakt = false }: TabBarProps<TId>) {
   const { t } = useTranslation()
 
   return (
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className={`${embedded ? 'rounded-lg bg-surface-container-low/50 p-1' : 'msm-card p-2'} inline-flex flex-wrap gap-1 ${
+      className={`${embedded ? `rounded-lg bg-surface-container-low/50 ${kompakt ? 'p-0.5' : 'p-1'}` : 'msm-card p-2'} inline-flex flex-wrap ${kompakt ? 'gap-0.5' : 'gap-1'} ${
         einzeilig ? 'max-md:flex max-md:w-full max-md:flex-nowrap max-md:overflow-x-auto msm-ohne-rollbalken' : ''
       }`}
     >
@@ -56,9 +66,10 @@ export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel, 
         const Icon = tab.icon
         const isActive = active === tab.id
         const isDanger = tab.variant === 'danger'
-        return (
+        const name = t(tab.labelKey)
+        const nurSymbol = kompakt && !!Icon && !isActive
+        const knopf = (
           <button
-            key={tab.id}
             type="button"
             role="tab"
             aria-selected={isActive}
@@ -66,7 +77,7 @@ export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel, 
               onChange(tab.id)
               if (einzeilig) e.currentTarget.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
             }}
-            className={`px-4 py-2 rounded-md text-sm font-medium inline-flex shrink-0 items-center gap-2 transition-colors ${
+            className={`${kompakt ? `gap-1.5 px-2.5 py-1 text-xs [@media(pointer:coarse)]:min-h-11 ${nurSymbol ? 'max-md:px-1.5' : ''}` : 'gap-2 px-4 py-2 text-sm'} rounded-md font-medium inline-flex shrink-0 items-center transition-colors ${
               einzeilig ? 'max-md:min-h-11' : ''
             } ${
               isActive
@@ -78,8 +89,8 @@ export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel, 
                   : 'text-on-surface-variant hover:bg-surface-container-high'
             }`}
           >
-            <Icon className="w-4 h-4" />
-            {t(tab.labelKey)}
+            {Icon && <Icon className={kompakt ? 'h-3.5 w-3.5' : 'h-4 w-4'} aria-hidden="true" />}
+            {nurSymbol ? <span className="max-md:sr-only">{name}</span> : name}
             {tab.badge !== undefined && (
               <>
                 {/* Ohne Trenner liest ein Screenreader „Papierkorb1“. */}
@@ -90,6 +101,14 @@ export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel, 
               </>
             )}
           </button>
+        )
+        // Die Hülle bleibt beim Wechsel des Reiters dieselbe, sonst verlöre der Knopf den Fokus.
+        return kompakt ? (
+          <Kurzinfo key={tab.id} text={name} className={nurSymbol ? 'md:!hidden' : '!hidden'}>
+            {knopf}
+          </Kurzinfo>
+        ) : (
+          <Fragment key={tab.id}>{knopf}</Fragment>
         )
       })}
     </div>

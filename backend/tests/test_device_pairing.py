@@ -194,6 +194,39 @@ class TestEinloesen:
         rt = AuthService.validate_refresh_token(db, tokens["refresh_token"])
         assert rt is not None and rt.geraet == "desktop"
 
+    def test_der_browser_koppelt_dauerhaft_ohne_rechnerwerkzeuge(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        _mit_chatrecht(db, regular_user)
+        code = _code_erzeugen(client, user_cookies)["code"]
+
+        antwort = client.post(
+            "/api/auth/devices/redeem", json={"code": code, "label": "MSB", "geraet": "browser"}
+        )
+        assert antwort.status_code == 200, antwort.text
+        tokens = antwort.json()
+        # Kein `desktop`-Anspruch: die KI bietet dem Browser keine Werkzeuge
+        # fuer den Rechner an.
+        assert AuthService.decode_token(tokens["access_token"]).get("geraet") == "browser"
+        rt = AuthService.validate_refresh_token(db, tokens["refresh_token"])
+        assert rt is not None and rt.geraet == "browser"
+        expires_at = rt.expires_at if rt.expires_at.tzinfo else rt.expires_at.replace(tzinfo=timezone.utc)
+        assert (expires_at - datetime.now(timezone.utc)).days >= 3600
+
+        zweite = client.post("/api/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+        assert zweite.status_code == 200
+        assert AuthService.decode_token(zweite.json()["access_token"]).get("geraet") == "browser"
+
+    def test_eine_unbekannte_geraeteart_wird_abgewiesen(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        _mit_chatrecht(db, regular_user)
+        code = _code_erzeugen(client, user_cookies)["code"]
+        antwort = client.post("/api/auth/devices/redeem", json={"code": code, "geraet": "server"})
+        assert antwort.status_code == 422
+        # Der Code bleibt einloesbar: abgewiesen wurde die Anfrage, nicht der Code.
+        assert client.post("/api/auth/devices/redeem", json={"code": code}).status_code == 200
+
     def test_die_herkunft_ueberlebt_die_rotation(
         self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
     ):
@@ -609,6 +642,11 @@ class TestHerkunftAmToken:
         )
         assert session_herkunft(_Anfrage(panel)) == "panel"
         assert session_herkunft(_Anfrage(desktop)) == "desktop"
+        browser = AuthService.create_access_token(
+            {"sub": regular_user.username, "user_id": regular_user.id, "jti": "c",
+             "geraet": "browser"}
+        )
+        assert session_herkunft(_Anfrage(browser)) == "panel"
         # Alles Unklare faellt auf die engere Seite.
         assert session_herkunft(_Anfrage(None)) == "panel"
         assert session_herkunft(_Anfrage("kaputt")) == "panel"

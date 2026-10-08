@@ -2,6 +2,10 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 
+import autoprefixer from 'autoprefixer'
+import tailwindcss from 'tailwindcss'
+
+import { breitenAlsContainer } from './vite.breitenAlsContainer'
 import { fontsourceWoff2Only } from './vite.fontsource'
 
 /**
@@ -19,6 +23,10 @@ export default defineConfig({
     alias: {
       '@': resolve(__dirname, 'src'),
     },
+  },
+  css: {
+    // Wie `postcss.config.js`, dazu die Breakpoints je Bereich statt je Fenster.
+    postcss: { plugins: [tailwindcss(), autoprefixer(), breitenAlsContainer()] },
   },
   clearScreen: false,
   server: {

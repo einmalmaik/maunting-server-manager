@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "oberflaeche",
+  "description": "Rechte der Browser-Oberfläche. Sie gelten nur für die Webview `main`, nicht für das Fenster: im Fenster liegen auch die Tabs, und die bekommen keine Rechte.",
+  "webviews": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "dialog:allow-open",
+    "notification:default",
+    "oberflaeche"
+  ]
+}

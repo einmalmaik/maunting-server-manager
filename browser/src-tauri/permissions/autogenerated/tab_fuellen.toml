@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tab-fuellen"
+description = "Enables the tab_fuellen command without any pre-configured scope."
+commands.allow = ["tab_fuellen"]
+
+[[permission]]
+identifier = "deny-tab-fuellen"
+description = "Denies the tab_fuellen command without any pre-configured scope."
+commands.deny = ["tab_fuellen"]

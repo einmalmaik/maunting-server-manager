@@ -143,11 +143,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.22 vom 2026-10-04 aus (alle Fotos und Videos, Teilen in den Tresor)', () => {
+  it('weist die Fassung 3.29 vom 2026-10-08 aus (Zahlungskarten und Bankkonten im Tresor)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.22`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.29`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -212,13 +212,15 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).not.toMatch(/Aufnahme im Kamera-Ordner/);
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/Ordner anderer Apps wie Messenger oder Downloads/);
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/„Tresor“ im Teilen-Menü/);
+    // 3.29: Karten und Bankkonten sind eigene Einträge im Tresor.
+    expect(i18n.t('privacyPolicy.sections.vault.items.eintraege')).toMatch(/Zahlungskarten, Bankkonten/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-10-04');
-    expect(stand).toHaveTextContent('2026-10-04');
+    expect(stand).toHaveAttribute('datetime', '2026-10-08');
+    expect(stand).toHaveTextContent('2026-10-08');
   });
 
   it('nennt in den Einstellungen der App dieselbe Fassung wie die Erklärung selbst', () => {

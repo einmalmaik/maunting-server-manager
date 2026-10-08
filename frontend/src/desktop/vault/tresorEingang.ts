@@ -20,19 +20,18 @@
  * kennen, der dieses Telefon ausliest (AGENTS.md Punkt 41).
  */
 
-import { base64ToBytes, utf8ToBytes } from '@msdis/shield/core'
+import { base64ToBytes } from '@msdis/shield/core'
 import { generateHybridKeyPair, hybridDecrypt } from '@msdis/shield/post-quantum'
 import { importEcdsaP256PublicKeySpki, verifyEcdsaP256 } from '@msdis/shield/signing'
 
 import { SanitizedApiError } from '@/api/client'
+import { aad, istUmschlag, zuUnterschreiben, type EingangOeffentlich } from './eingangFormat'
+import { istZugang, zugangUebernehmen, type EingangZugang } from './eingangZugang'
 import { blobLoeschen, blobStand, eingangListe, eingangLoeschen, type EingangDatensatz } from './tresorBlobApi'
 import { blobSchluesselWickeln, istBlobKopf, type BlobKopf } from './tresorDatei'
 import { einzeln, istQuelle, type DateiAngaben, type DateiQuelle } from './tresorDateien'
 import { SYSTEM_KATEGORIE, type SicherungAngaben, type VaultItem } from './vaultEintrag'
 import { getPendingQueue, getStoredBlobs, useVaultStore } from './vaultStore'
-
-const FORMAT = 1
-const DOMAENE = 'msm-tresor-eingang-v1'
 
 /**
  * Wie lange ein Datensatz auf sein Gerät oder sein Schlüsselpaar wartet. Das
@@ -42,15 +41,8 @@ const DOMAENE = 'msm-tresor-eingang-v1'
  */
 export const WARTEN_HOECHSTENS_MS = 7 * 24 * 60 * 60 * 1000
 
-/** Was ein Gerät bei gesperrtem Tresor vom Schlüsselpaar kennt. */
-export interface EingangOeffentlich {
-  id: string
-  pqPublicKey: string
-  rsaPublicKey: string
-}
-
-/** Was in einem Datensatz steht. Die Blob-Köpfe tragen rohe Schlüssel. */
-export interface EingangInhalt {
+/** Eine Aufnahme oder geteilte Datei. Die Blob-Köpfe tragen rohe Schlüssel. */
+export interface EingangDatei {
   name: string
   typ: string
   geaendert?: number
@@ -68,29 +60,11 @@ export interface EingangInhalt {
   sha256?: string
 }
 
-/** So liegt ein Datensatz beim Server. Nur `daten` ist verschlüsselt. */
-interface Umschlag {
-  v: typeof FORMAT
-  /** Kennung des Schlüsselpaars. */
-  schluessel: string
-  /** Kennung des Geräts, das unterschrieben hat. */
-  geraet: string
-  daten: string
-  /** r ‖ s in Base64. */
-  signatur: string
-}
+/** Was in einem Datensatz steht: eine Datei (Telefon) oder Zugangsdaten (Browser). */
+export type EingangInhalt = EingangDatei | EingangZugang
 
 type Posteingang = Extract<SicherungAngaben, { art: 'posteingang' }>
 type Geraet = Extract<SicherungAngaben, { art: 'geraet' }>
-
-function aad(bucket: string, eingangId: string): string {
-  return `${DOMAENE}:${bucket}:${eingangId}`
-}
-
-/** Was unterschrieben wird: alles am Umschlag außer der Unterschrift, gebunden an Bucket und Kennung. */
-function zuUnterschreiben(bucket: string, eingangId: string, u: Omit<Umschlag, 'signatur'>): Uint8Array {
-  return utf8ToBytes([DOMAENE, String(u.v), bucket, eingangId, u.schluessel, u.geraet, u.daten].join('\n'))
-}
 
 /** Was beim Server über die Blobs eines Datensatzes steht. */
 async function blobLage(bucket: string, id: string): Promise<'fertig' | 'offen' | 'weg'> {
@@ -115,6 +89,7 @@ function roherKopf(wert: unknown): wert is BlobKopf {
 function istInhalt(wert: unknown, geraet: string): wert is EingangInhalt {
   if (!wert || typeof wert !== 'object') return false
   const i = wert as Record<string, unknown>
+  if (i.art !== undefined) return istZugang(wert)
   return (
     typeof i.name === 'string' &&
     i.name.length > 0 &&
@@ -133,18 +108,6 @@ function istInhalt(wert: unknown, geraet: string): wert is EingangInhalt {
     // Ein Gerät spricht nur für seine eigenen Aufnahmen.
     (i.quelle === undefined || (istQuelle(i.quelle) && i.quelle.geraet === geraet)) &&
     (i.sha256 === undefined || (typeof i.sha256 === 'string' && /^[0-9a-f]{64}$/.test(i.sha256)))
-  )
-}
-
-function istUmschlag(wert: unknown): wert is Umschlag {
-  if (!wert || typeof wert !== 'object') return false
-  const u = wert as Record<string, unknown>
-  return (
-    u.v === FORMAT &&
-    typeof u.schluessel === 'string' &&
-    typeof u.geraet === 'string' &&
-    typeof u.daten === 'string' &&
-    typeof u.signatur === 'string'
   )
 }
 
@@ -316,6 +279,11 @@ async function einenUebernehmen(
     return
   }
   const { inhalt } = geoeffnet
+  if ('art' in inhalt) {
+    if (store().userKey !== userKey || store().bucketId !== bucket) return
+    await zugangUebernehmen(bucket, satz.id, inhalt)
+    return
+  }
   const koepfe = [inhalt.original, inhalt.vorschau, inhalt.miniatur]
 
   // Das Telefon lädt noch hoch: erst übernehmen, wenn alle drei Blobs fertig
@@ -398,3 +366,5 @@ export function eingangBeobachten(): () => void {
     }
   })
 }
+
+export type { EingangOeffentlich }

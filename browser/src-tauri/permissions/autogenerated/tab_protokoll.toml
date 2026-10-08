@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tab-protokoll"
+description = "Enables the tab_protokoll command without any pre-configured scope."
+commands.allow = ["tab_protokoll"]
+
+[[permission]]
+identifier = "deny-tab-protokoll"
+description = "Denies the tab_protokoll command without any pre-configured scope."
+commands.deny = ["tab_protokoll"]

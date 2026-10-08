@@ -23,6 +23,11 @@ _pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 logger = logging.getLogger("msm.auth_service")
 
 
+# Apps, die ueber einen Kopplungscode zu ihrer Sitzung kommen: MSS und MSB.
+# Ihre Refresh-Token leben so lange wie die Kopplung.
+GEKOPPELTE_GERAETE = ("desktop", "browser")
+
+
 class AuthService:
     # ── Password ──
     @staticmethod
@@ -130,7 +135,7 @@ class AuthService:
         token_hash = AuthService._hash_token(plain_token)
         token_family = family or secrets.token_urlsafe(16)
 
-        is_paired = (geraet == "desktop")
+        is_paired = geraet in GEKOPPELTE_GERAETE
         if not is_paired and token_family:
             from models.device_pairing import DevicePairing
             is_paired = (

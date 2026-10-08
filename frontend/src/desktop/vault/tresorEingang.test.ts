@@ -20,6 +20,7 @@ import { importFileKey } from '@msdis/shield/file-encryption'
 import { hybridEncrypt } from '@msdis/shield/post-quantum'
 import { SanitizedApiError } from '@/api/client'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { eingangVerpacken } from './eingangFormat'
 import { ablageLoeschen } from './tresorAblage'
 import { blobLoeschen, blobStand, chunkLaden } from './tresorBlobApi'
 import { blobSchluessel, chunkEntschluesseln, chunkVerschluesseln, gepolsterteGroesse, type BlobKopf } from './tresorDatei'
@@ -27,7 +28,7 @@ import { letzterChunkOeffnetSich, type DateiQuelle } from './tresorDateien'
 import { eingangAnstossen, posteingangEinrichten, WARTEN_HOECHSTENS_MS, type EingangInhalt, type EingangOeffentlich } from './tresorEingang'
 import { bytesToHex } from './vaultCrypto'
 import { SYSTEM_KATEGORIE } from './vaultEintrag'
-import { useVaultStore, type VaultBlindSyncPayload, type VaultItem } from './vaultStore'
+import { getPendingQueue, useVaultStore, type VaultBlindSyncPayload, type VaultItem } from './vaultStore'
 
 vi.mock('../tauri', () => ({
   FACH_TRESOR: 'vault_biometric_key',
@@ -464,5 +465,61 @@ describe('Übernahme beim Entsperren', () => {
 
     await eingangAnstossen(BUCKET)
     expect(liegtNoch(id)).toBe(true)
+  })
+})
+
+describe('Zugangsdaten aus dem Browser', () => {
+  /** Wie der Browser bei gesperrtem Tresor ablegt: nur mit dem öffentlichen Schlüssel. */
+  async function zugangAblegen(id: string, zugang: Record<string, unknown>, geraet = telefon) {
+    const text = await eingangVerpacken(zugang, BUCKET, id, schluessel, geraet.geraet, geraet.unterschreiben)
+    if (!posteingang.has(BUCKET)) posteingang.set(BUCKET, new Map())
+    posteingang.get(BUCKET)!.set(id, text)
+  }
+  const zugang = { art: 'zugang', url: 'https://www.example.com/login', benutzer: 'ada@example.com', passwort: 'Gipfel-2026!', zeit: 1_790_000_000_000 }
+  const anmeldungen = () => useVaultStore.getState().items.filter((i) => (i.category ?? 'login') === 'login')
+
+  it('macht beim Entsperren einen Eintrag daraus und löscht den Datensatz erst danach', async () => {
+    const id = crypto.randomUUID()
+    await zugangAblegen(id, zugang)
+    // Der Datensatz verrät seine Länge nicht.
+    expect(JSON.parse(posteingang.get(BUCKET)!.get(id)!).daten.length).toBeGreaterThan(4096)
+
+    await eingangAnstossen(BUCKET)
+    expect(anmeldungen()).toEqual([
+      expect.objectContaining({ id, service: 'example.com', url: zugang.url, username: zugang.benutzer, password: zugang.passwort }),
+    ])
+    await useVaultStore.getState().syncWithServer()
+    // Das Speichern stößt selbst einen Abgleich an; erst danach liegt der Eintrag beim Server.
+    await vi.waitFor(() => expect(getPendingQueue(BUCKET)).toEqual([]))
+    await eingangAnstossen(BUCKET)
+    expect(liegtNoch(id)).toBe(false)
+  })
+
+  it('legt dieselben Zugangsdaten nicht zweimal an, ein geändertes Passwort schon', async () => {
+    await useVaultStore.getState().saveItem({ service: 'example.com', url: 'https://example.com', username: zugang.benutzer, password: zugang.passwort })
+    const gleich = crypto.randomUUID()
+    const neu = crypto.randomUUID()
+    await zugangAblegen(gleich, zugang)
+    await zugangAblegen(neu, { ...zugang, passwort: 'Neu-2026!' })
+
+    await eingangAnstossen(BUCKET)
+    expect(liegtNoch(gleich)).toBe(false)
+    expect(anmeldungen().map((i) => i.password).sort()).toEqual(['Gipfel-2026!', 'Neu-2026!'])
+  })
+
+  it('verwirft, was nicht von einem eingetragenen Gerät kommt oder keine Webadresse trägt', async () => {
+    const fremd = crypto.randomUUID()
+    const skript = crypto.randomUUID()
+    await zugangAblegen(fremd, zugang, await geraetAnlegen('unbekannt'))
+    // Die unbekannte Kennung wartet; ein falsch unterschriebener Datensatz eines bekannten Geräts fällt.
+    const gefaelscht = crypto.randomUUID()
+    await zugangAblegen(gefaelscht, zugang, { ...(await geraetAnlegen()), geraet: GERAET })
+    await zugangAblegen(skript, { ...zugang, url: 'javascript:alert(1)' })
+
+    await eingangAnstossen(BUCKET)
+    expect(anmeldungen()).toEqual([])
+    expect(liegtNoch(fremd)).toBe(true)
+    expect(liegtNoch(gefaelscht)).toBe(false)
+    expect(liegtNoch(skript)).toBe(false)
   })
 })

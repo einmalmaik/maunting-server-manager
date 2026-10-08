@@ -172,7 +172,7 @@ function adresseErlaubt(url: string): boolean {
   return LOKALE_HOSTS.some((lokal) => host === lokal || host.startsWith(`${lokal}:`))
 }
 
-function SchrittBackend({ stand }: { stand: AppKonfig }) {
+export function SchrittBackend({ stand }: { stand: Pick<AppKonfig, 'backend_url'> }) {
   const { t } = useTranslation()
   const [url, setUrl] = useState(() => (stand.backend_url ? stand.backend_url.replace(/^https:\/\//i, '') : ''))
   const [fehler, setFehler] = useState<string | null>(null)
@@ -246,12 +246,12 @@ function SchrittBackend({ stand }: { stand: AppKonfig }) {
 
 // ── Schritt 2: Kopplung ──────────────────────────────────────────────────
 
-function SchrittKopplung({
+export function SchrittKopplung({
   stand,
   onWeiter,
   onZurueck,
 }: {
-  stand?: AppKonfig
+  stand?: Pick<AppKonfig, 'backend_url'>
   onWeiter: (neuerStand?: AppKonfig) => Promise<void>
   onZurueck?: () => void
 }) {

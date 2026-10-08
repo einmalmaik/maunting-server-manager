@@ -70,4 +70,17 @@ describe('TabBar', () => {
 
     expect(screen.getByRole('tab', { name: /^mss\.vault\.papierkorb,\s?1$/ })).toBeInTheDocument()
   })
+
+  it('kompakt: Reiter mit Symbol behalten ihren Namen und bleiben beim Wechsel derselbe Knopf', () => {
+    const { rerender } = render(<TabBar tabs={tabs} active="general" onChange={() => {}} ariaLabel="Werkzeuge" embedded kompakt />)
+    const email = screen.getByRole('tab', { name: 'settings.tabs.email' })
+    // Unter md nur das Symbol, der Name bleibt für Screenreader.
+    expect(email.querySelector('[class~="max-md:sr-only"]')).toHaveTextContent('settings.tabs.email')
+    expect(email.className).not.toMatch(/max-md:min-h-11/)
+
+    email.focus()
+    rerender(<TabBar tabs={tabs} active="email" onChange={() => {}} ariaLabel="Werkzeuge" embedded kompakt />)
+    expect(screen.getByRole('tab', { name: 'settings.tabs.email' })).toBe(email)
+    expect(document.activeElement).toBe(email)
+  })
 })

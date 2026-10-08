@@ -1,0 +1,9 @@
+/*
+ * Bereiche, nach deren Breite sich die Seiten richten (siehe
+ * `vite.breitenAlsContainer.ts`): die ganze Oberfläche und der Inhalt des
+ * Seitenpanels. `size`, damit auch Höhen in `cqh` am Bereich hängen.
+ */
+body,
+.msb-bereich {
+  container: msb / size;
+}

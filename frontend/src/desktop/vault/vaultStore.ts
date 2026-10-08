@@ -70,6 +70,7 @@ import {
   VAULT_TOMBSTONE_MARKER,
   type VaultItem,
 } from './vaultEintrag'
+import { istZahlungAngaben, ZAHLUNG_KATEGORIE } from './zahlung'
 
 const PAPIERKORB_MS = PAPIERKORB_TAGE * 24 * 60 * 60 * 1000
 
@@ -438,6 +439,10 @@ export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error'
 /** Felder einer Änderung, dazu Blobs, auf die danach keine Fassung mehr zeigt. */
 type Aenderung = Partial<VaultItem> & { loeschBlobs?: { id: string; loeschen: string }[] }
 
+/** So oft darf das Master-Passwort beim Bestätigen falsch sein, dann sperrt sich der Tresor. */
+export const BESTAETIGEN_FEHLVERSUCHE = 5
+let bestaetigenFehlversuche = 0
+
 interface VaultState {
   isInitialized: boolean
   isUnlocked: boolean
@@ -468,6 +473,12 @@ interface VaultState {
   initializeVault: (masterPassword: string) => Promise<boolean>
   unlock: (masterPassword: string) => Promise<boolean>
   unlockWithBiometrics: () => Promise<boolean>
+  /**
+   * Bestätigt bei offenem Tresor, dass hier jemand das Master-Passwort kennt
+   * (Einfügen einer Karte ohne Windows Hello). Nach {@link BESTAETIGEN_FEHLVERSUCHE}
+   * falschen Versuchen sperrt sich der Tresor.
+   */
+  masterPasswortStimmt: (masterPassword: string) => Promise<boolean>
   enableBiometrics: (masterPassword: string) => Promise<boolean>
   disableBiometrics: () => Promise<void>
   checkBiometricsSupport: () => Promise<boolean>
@@ -616,11 +627,16 @@ export const useVaultStore = create<VaultState>((set, get) => {
       ordner: 'ordner' in itemData ? itemData.ordner : existing?.ordner,
       album: itemData.album ?? existing?.album,
       sicherung: itemData.sicherung ?? existing?.sicherung,
+      zahlung: itemData.zahlung ?? existing?.zahlung,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       revision,
       extra: existing?.extra,
     } satisfies Record<keyof VaultItem, unknown>
+    // Eine Karte ohne gültige Angaben liest jedes Gerät danach als fremd und verliert sie aus der Ansicht.
+    if (updatedItem.category === ZAHLUNG_KATEGORIE && !istZahlungAngaben(updatedItem.zahlung)) {
+      throw new TresorFehler(i18n.t('mss.vault.zahlung.ungueltig'))
+    }
 
     // Die Fassung vom Server, auf der diese Änderung aufsetzt: die vor einer
     // noch nicht gesendeten eigenen Änderung, sonst die im Cache.
@@ -876,6 +892,25 @@ export const useVaultStore = create<VaultState>((set, get) => {
       set({ isBiometricsSupported: false, isBiometricsEnabled: false })
       return false
     }
+  },
+
+  masterPasswortStimmt: async (masterPassword: string) => {
+    const { bucketId, isUnlocked } = get()
+    const salt = getLocalVaultSalt()
+    if (!isUnlocked || !bucketId || !salt) return false
+    const abgeleitet = await deriveVaultKeys(masterPassword, salt)
+    // Inzwischen gesperrt oder ein anderer Tresor: das Ergebnis gilt nicht mehr.
+    if (!get().isUnlocked || get().bucketId !== bucketId) return false
+    if (abgeleitet.bucketId === bucketId) {
+      bestaetigenFehlversuche = 0
+      return true
+    }
+    bestaetigenFehlversuche += 1
+    if (bestaetigenFehlversuche >= BESTAETIGEN_FEHLVERSUCHE) {
+      bestaetigenFehlversuche = 0
+      get().lock()
+    }
+    return false
   },
 
   enableBiometrics: async (masterPassword: string) => {

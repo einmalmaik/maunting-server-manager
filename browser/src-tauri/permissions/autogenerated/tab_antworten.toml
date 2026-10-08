@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tab-antworten"
+description = "Enables the tab_antworten command without any pre-configured scope."
+commands.allow = ["tab_antworten"]
+
+[[permission]]
+identifier = "deny-tab-antworten"
+description = "Denies the tab_antworten command without any pre-configured scope."
+commands.deny = ["tab_antworten"]

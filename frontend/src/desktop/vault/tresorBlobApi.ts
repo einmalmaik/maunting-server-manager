@@ -170,6 +170,13 @@ export function eingangListe(bucket: string, nach?: string): Promise<{ eintraege
   return mitBucket(() => api(`/api/vault/eingang${abfrage}`, { headers: mitBucketKopf(bucket) }))
 }
 
+/** Ein Datensatz aus dem Browser bei gesperrtem Tresor (`tresorGesperrt.ts`). Nur Chiffrat. */
+export async function eingangAblegen(bucket: string, id: string, ciphertext: string): Promise<void> {
+  await mitBucket(() =>
+    api('/api/vault/eingang', { method: 'POST', headers: mitBucketKopf(bucket), body: JSON.stringify({ id, ciphertext }) }),
+  )
+}
+
 export async function eingangLoeschen(bucket: string, id: string): Promise<void> {
   await mitBucket(() => api(`/api/vault/eingang/${encodeURIComponent(id)}`, { method: 'DELETE', headers: mitBucketKopf(bucket) }))
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-schild-stand"
+description = "Enables the schild_stand command without any pre-configured scope."
+commands.allow = ["schild_stand"]
+
+[[permission]]
+identifier = "deny-schild-stand"
+description = "Denies the schild_stand command without any pre-configured scope."
+commands.deny = ["schild_stand"]

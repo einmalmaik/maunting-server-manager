@@ -572,8 +572,28 @@ def blob_loeschen(
     return {"state": "geloescht"}
 
 
-# ── Posteingang (Kamera-Sicherung bei gesperrtem Tresor) ────────────────────
-# Abgelegt wird nur vom Hintergrund-Job (`/sicherung/eingang`); die App holt ab.
+# ── Posteingang (bei gesperrtem Tresor) ─────────────────────────────────────
+# Abgelegt wird vom Hintergrund-Job der Kamera-Sicherung (`/sicherung/eingang`)
+# und vom Browser, der Zugangsdaten bei gesperrtem Tresor speichert (hier, mit
+# Sitzung). Eine App mit offenem Tresor holt ab.
+
+
+@router.post("/eingang", status_code=status.HTTP_201_CREATED)
+@limiter.limit("120/minute")
+def eingang_ablegen(
+    payload: VaultEingangAnlegen,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    bucket: str = Depends(_genannter_bucket),
+    __=Depends(verify_csrf),
+) -> dict[str, str]:
+    """Nur Chiffrat. Uebernommen wird ein Datensatz erst mit der Unterschrift eines eingetragenen Geraets."""
+    try:
+        vault_blob_service.eingang_ablegen(db, current_user, bucket, payload.id, payload.ciphertext)
+    except vault_blob_service.BlobFehler as exc:
+        raise _blob_fehler(exc) from exc
+    return {"id": payload.id}
 
 
 @router.get("/eingang", response_model=VaultEingangListe)

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tab-drucken"
+description = "Enables the tab_drucken command without any pre-configured scope."
+commands.allow = ["tab_drucken"]
+
+[[permission]]
+identifier = "deny-tab-drucken"
+description = "Denies the tab_drucken command without any pre-configured scope."
+commands.deny = ["tab_drucken"]

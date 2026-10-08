@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tabs-zuruecksetzen"
+description = "Enables the tabs_zuruecksetzen command without any pre-configured scope."
+commands.allow = ["tabs_zuruecksetzen"]
+
+[[permission]]
+identifier = "deny-tabs-zuruecksetzen"
+description = "Denies the tabs_zuruecksetzen command without any pre-configured scope."
+commands.deny = ["tabs_zuruecksetzen"]

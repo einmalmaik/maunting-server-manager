@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-messenger-geraetegeheimnis"
+description = "Enables the messenger_geraetegeheimnis command without any pre-configured scope."
+commands.allow = ["messenger_geraetegeheimnis"]
+
+[[permission]]
+identifier = "deny-messenger-geraetegeheimnis"
+description = "Denies the messenger_geraetegeheimnis command without any pre-configured scope."
+commands.deny = ["messenger_geraetegeheimnis"]

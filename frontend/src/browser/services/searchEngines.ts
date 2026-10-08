@@ -1,113 +1,86 @@
-export interface SearchEngine {
-  id: string
+/**
+ * Suchmaschinen und die Entscheidung „Adresse oder Suchbegriff“.
+ *
+ * Die Adresszeile fragt keine Suchmaschine nach Vorschlägen: jeder Tastendruck
+ * ginge sonst an Google & Co. Vorschläge kommen nur aus Verlauf und
+ * Lesezeichen auf dem Gerät.
+ */
+import type { Marke } from '../marken'
+
+export type SuchmaschinenId = 'google' | 'duckduckgo' | 'ecosia' | 'brave' | 'bing' | 'searxng'
+
+export interface Suchmaschine {
+  id: SuchmaschinenId
   name: string
-  searchUrl: string
-  suggestUrl?: string
-  icon: string
-  description: string
+  marke: Marke
+  /** `%s` wird durch den kodierten Suchbegriff ersetzt. */
+  vorlage: string
 }
 
-export const SEARCH_ENGINES: Record<string, SearchEngine> = {
-  google: {
-    id: 'google',
-    name: 'Google',
-    searchUrl: 'https://www.google.com/search?q=%s',
-    icon: '🌐',
-    description: 'Standard-Suchmaschine weltweit',
-  },
-  ecosia: {
-    id: 'ecosia',
-    name: 'Ecosia',
-    searchUrl: 'https://www.ecosia.org/search?q=%s',
-    icon: '🌳',
-    description: 'Pflanzt Bäume mit deinen Suchanfragen',
-  },
-  duckduckgo: {
-    id: 'duckduckgo',
-    name: 'DuckDuckGo',
-    searchUrl: 'https://duckduckgo.com/?q=%s',
-    icon: '🦆',
-    description: 'Privatsphäre ohne Tracking',
-  },
-  brave: {
-    id: 'brave',
-    name: 'Brave Search',
-    searchUrl: 'https://search.brave.com/search?q=%s',
-    icon: '🦁',
-    description: 'Unabhängiger Suchindex ohne Nutzerprofiling',
-  },
-  bing: {
-    id: 'bing',
-    name: 'Microsoft Bing',
-    searchUrl: 'https://www.bing.com/search?q=%s',
-    icon: '🔍',
-    description: 'Microsoft Websuche',
-  },
-  searxng: {
-    id: 'searxng',
-    name: 'Eigenes SearXNG (MSM)',
-    searchUrl: '%s/search?q=%q',
-    icon: '🛡️',
-    description: 'Dein selbstgehosteter Meta-Such-Dienst',
-  },
+export const SUCHMASCHINEN: Suchmaschine[] = [
+  { id: 'duckduckgo', name: 'DuckDuckGo', marke: 'duckduckgo', vorlage: 'https://duckduckgo.com/?q=%s' },
+  { id: 'brave', name: 'Brave Search', marke: 'brave', vorlage: 'https://search.brave.com/search?q=%s' },
+  { id: 'ecosia', name: 'Ecosia', marke: 'ecosia', vorlage: 'https://www.ecosia.org/search?q=%s' },
+  { id: 'google', name: 'Google', marke: 'google', vorlage: 'https://www.google.com/search?q=%s' },
+  { id: 'bing', name: 'Bing', marke: 'bing', vorlage: 'https://www.bing.com/search?q=%s' },
+  { id: 'searxng', name: 'SearXNG', marke: 'searxng', vorlage: '' },
+]
+
+export function suchmaschine(id: string): Suchmaschine {
+  return SUCHMASCHINEN.find((s) => s.id === id) ?? SUCHMASCHINEN[0]
 }
 
-/**
- * Prüft, ob eine Eingabe eine direkte Web-Adresse (URL/Domain/IP) ist
- * oder als Suchbegriff behandelt werden soll.
- */
-export function istUrl(eingabe: string): boolean {
-  const getrimmt = eingabe.trim()
-  if (!getrimmt) return false
+const SCHEMA = /^[a-z][a-z0-9+.-]*:/i
+const LOKAL = /^(localhost|\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d{1,5})?([/?#].*)?$/i
+const DOMAIN = /^([a-z0-9¡-￿-]+\.)+[a-z¡-￿]{2,}(:\d{1,5})?([/?#].*)?$/i
 
-  // Hat Schema (http://, https://, file://, about:)
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//i.test(getrimmt) || getrimmt.startsWith('about:')) {
-    return true
+/** Adresse oder Suchbegriff? Mit Leerzeichen ist es immer eine Suche. */
+export function istAdresse(eingabe: string): boolean {
+  const text = eingabe.trim()
+  if (!text || /\s/.test(text)) return false
+  if (/^https?:\/\//i.test(text) || text === 'about:blank') return true
+  // `localhost:3000` beginnt wie ein Schema, ist aber keins.
+  if (LOKAL.test(text)) return true
+  if (SCHEMA.test(text) && !DOMAIN.test(text)) return false
+  return DOMAIN.test(text)
+}
+
+/** Die Suchadresse für einen Begriff, oder `null`, wenn die Maschine nicht eingerichtet ist. */
+export function suchAdresse(begriff: string, id: string, searxngUrl?: string | null): string | null {
+  const q = encodeURIComponent(begriff.trim())
+  if (id === 'searxng') {
+    const basis = searxngBasis(searxngUrl)
+    return basis ? `${basis}/search?q=${q}` : null
   }
+  return suchmaschine(id).vorlage.replace('%s', q)
+}
 
-  // Leerzeichen enthalten -> mit hoher Wahrscheinlichkeit Suchbegriff
-  if (/\s/.test(getrimmt)) {
-    return false
+/** Nur `https://` (oder `http://` auf dem eigenen Rechner), ohne Zugangsdaten. */
+export function searxngBasis(url?: string | null): string | null {
+  if (!url) return null
+  try {
+    const u = new URL(url.trim())
+    const lokal = ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)
+    if (u.protocol !== 'https:' && !(u.protocol === 'http:' && lokal)) return null
+    if (u.username || u.password) return null
+    return `${u.origin}${u.pathname.replace(/\/+$/, '')}`
+  } catch {
+    return null
   }
-
-  // Lokale Adressen (localhost, 127.0.0.1, IP-Adressen)
-  if (/^(localhost|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?(\/.*)?$/i.test(getrimmt)) {
-    return true
-  }
-
-  // Domain mit gültiger TLD (z.B. example.com, heise.de)
-  if (/^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)+(\/.*)?$/i.test(getrimmt)) {
-    return true
-  }
-
-  return false
 }
 
 /**
- * Baut die vollständige Ziel-URL aus einer Omnibox-Eingabe.
+ * Was die Adresszeile lädt. Leere Eingabe: nichts. Eine Adresse ohne Schema
+ * bekommt `https://`, auf dem eigenen Rechner `http://`. Alles andere ist ein
+ * Suchbegriff; ist SearXNG gewählt, aber nicht eingerichtet, sucht
+ * DuckDuckGo, statt dass nichts passiert.
  */
-export function baueZielUrl(
-  eingabe: string,
-  engineId: string = 'google',
-  searxngCustomUrl?: string
-): string {
-  const getrimmt = eingabe.trim()
-  if (!getrimmt) return 'about:blank'
-
-  if (istUrl(getrimmt)) {
-    if (getrimmt.startsWith('about:')) return getrimmt
-    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//i.test(getrimmt)) {
-      return `https://${getrimmt}`
-    }
-    return getrimmt
+export function baueZielUrl(eingabe: string, id: string, searxngUrl?: string | null): string | null {
+  const text = eingabe.trim()
+  if (!text) return null
+  if (istAdresse(text)) {
+    if (/^(https?:\/\/|about:)/i.test(text)) return text
+    return LOKAL.test(text) ? `http://${text}` : `https://${text}`
   }
-
-  // Suchmaschine nutzen
-  if (engineId === 'searxng' && searxngCustomUrl) {
-    const basis = searxngCustomUrl.replace(/\/+$/, '')
-    return `${basis}/search?q=${encodeURIComponent(getrimmt)}`
-  }
-
-  const engine = SEARCH_ENGINES[engineId] || SEARCH_ENGINES.google
-  return engine.searchUrl.replace('%s', encodeURIComponent(getrimmt))
+  return suchAdresse(text, id, searxngUrl) ?? suchAdresse(text, 'duckduckgo')
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tab-suchen"
+description = "Enables the tab_suchen command without any pre-configured scope."
+commands.allow = ["tab_suchen"]
+
+[[permission]]
+identifier = "deny-tab-suchen"
+description = "Denies the tab_suchen command without any pre-configured scope."
+commands.deny = ["tab_suchen"]

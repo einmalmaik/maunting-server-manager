@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tab-standbild"
+description = "Enables the tab_standbild command without any pre-configured scope."
+commands.allow = ["tab_standbild"]
+
+[[permission]]
+identifier = "deny-tab-standbild"
+description = "Denies the tab_standbild command without any pre-configured scope."
+commands.deny = ["tab_standbild"]

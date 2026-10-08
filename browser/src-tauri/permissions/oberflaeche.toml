@@ -1,0 +1,40 @@
+# Alles, was die Oberfläche des Browsers (Webview `main`) aufrufen darf.
+# Tabs bekommen nichts davon, siehe `capabilities/oberflaeche.json`.
+[[set]]
+identifier = "oberflaeche"
+description = "Befehle der Browser-Oberfläche"
+permissions = [
+  "allow-konfig-laden",
+  "allow-konfig-aendern",
+  "allow-refresh-token-speichern",
+  "allow-refresh-token-laden",
+  "allow-refresh-token-loeschen",
+  "allow-biometrie-verfuegbar",
+  "allow-biometrie-verifizieren",
+  "allow-biometrie-speichern",
+  "allow-biometrie-entsperren",
+  "allow-biometrie-loeschen",
+  "allow-biometrie-speicher-verfuegbar",
+  "allow-biometrie-speicher-fragt-selbst",
+  "allow-messenger-geraetegeheimnis",
+  "allow-tab-laden",
+  "allow-tab-aktivieren",
+  "allow-tab-schliessen",
+  "allow-tab-aktion",
+  "allow-tabs-rahmen",
+  "allow-tabs-verdecken",
+  "allow-tab-standbild",
+  "allow-tab-antworten",
+  "allow-tab-protokoll",
+  "allow-tab-suchen",
+  "allow-tab-drucken",
+  "allow-tab-fuellen",
+  "allow-tabs-zuruecksetzen",
+  "allow-oberflaeche-fokussieren",
+  "allow-schild-stand",
+  "allow-download-zeigen",
+  "allow-download-ordner",
+  "allow-fenster-aktion",
+  "allow-kurzinfo",
+  "allow-seitendaten-loeschen",
+]

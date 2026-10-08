@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tab-schliessen"
+description = "Enables the tab_schliessen command without any pre-configured scope."
+commands.allow = ["tab_schliessen"]
+
+[[permission]]
+identifier = "deny-tab-schliessen"
+description = "Denies the tab_schliessen command without any pre-configured scope."
+commands.deny = ["tab_schliessen"]

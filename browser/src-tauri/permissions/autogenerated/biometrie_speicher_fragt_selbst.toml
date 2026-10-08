@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-biometrie-speicher-fragt-selbst"
+description = "Enables the biometrie_speicher_fragt_selbst command without any pre-configured scope."
+commands.allow = ["biometrie_speicher_fragt_selbst"]
+
+[[permission]]
+identifier = "deny-biometrie-speicher-fragt-selbst"
+description = "Denies the biometrie_speicher_fragt_selbst command without any pre-configured scope."
+commands.deny = ["biometrie_speicher_fragt_selbst"]

@@ -42,6 +42,7 @@ from schemas.device_pairing import (
     VerlaufAntwort,
 )
 from services import AuthService, EmailService, audit_service
+from services.auth_service import GEKOPPELTE_GERAETE
 from services import bild_upload
 from services import datenexport_service
 from services import device_pairing_service
@@ -720,8 +721,9 @@ def redeem_device_pairing(
 
     # Erst hier entsteht die Sitzung, und mit ihr die Familie. `geraet` macht
     # sie zur Desktop-Sitzung: nur sie bekommt die Werkzeuge fuer den Rechner
-    # angeboten (`ai_tool_registry.herkunft_schnitt`).
-    tokens = issue_session(response, db, user, geraet="desktop")
+    # angeboten (`ai_tool_registry.herkunft_schnitt`). Der Browser koppelt
+    # genauso, bleibt fuer die KI aber eine Panel-Sitzung.
+    tokens = issue_session(response, db, user, geraet=req.geraet)
     rt = AuthService.validate_refresh_token(db, tokens.refresh_token)
     if rt is not None:
         if req.label.strip():
@@ -888,7 +890,7 @@ def refresh(
         # dies eine Wiederholung und bekommt denselben Nachfolger.
 
     recent_rt = AuthService.find_recently_used_refresh_token(db, refresh_value, max_age_seconds=30)
-    if recent_rt and (not body_token or recent_rt.geraet == "desktop" or device_pairing_service.ist_gekoppelt(db, recent_rt.family)):
+    if recent_rt and (not body_token or recent_rt.geraet in GEKOPPELTE_GERAETE or device_pairing_service.ist_gekoppelt(db, recent_rt.family)):
         user = AuthService.get_user_by_id(db, recent_rt.user_id)
         if user and user.is_active:
             # Wurde der Nachfolger selbst schon weiterrotiert, ist das keine

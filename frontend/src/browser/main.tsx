@@ -1,29 +1,27 @@
-import { StrictMode } from 'react'
-import ReactDOM from 'react-dom/client'
+/**
+ * Einstieg des Browsers, zweistufig wie MSS (`desktop/main.tsx`): erst die
+ * Panel-Adresse aus der Gerätekonfiguration holen und setzen, dann den Rest
+ * laden. `config/api.ts` liest die Adresse beim Laden des Moduls; kein
+ * statischer Import hier darf es erreichen.
+ */
+import { invoke } from '@tauri-apps/api/core'
 
-import '@fontsource/inter/400.css'
-import '@fontsource/inter/500.css'
-import '@fontsource/inter/600.css'
-import '@fontsource/manrope/600.css'
-import '@fontsource/manrope/700.css'
-import '@fontsource/manrope/800.css'
-import '@fontsource/ibm-plex-sans/500.css'
-import '@fontsource/ibm-plex-sans/600.css'
-import '@fontsource/jetbrains-mono/400.css'
-import '@fontsource/jetbrains-mono/500.css'
+import { geraeteArtSetzen } from '@/desktop/geraeteArt'
+import { randomUuidNachruesten } from '@/lib/uuidNachruesten'
 
-import { textBereit } from '@/i18n'
-import '@/index.css'
+async function hochfahren(): Promise<void> {
+  try {
+    const konfig = await invoke<{ backend_url: string | null }>('konfig_laden')
+    if (konfig.backend_url) {
+      ;(globalThis as { __MSM_API_URL?: string }).__MSM_API_URL = konfig.backend_url
+    }
+  } catch {
+    // Ohne Konfiguration startet der Browser ungekoppelt.
+  }
+  await import('./start')
+}
 
-import { ErrorBoundary } from '@/components/ErrorBoundary'
-import { BrowserApp } from './BrowserApp'
-
-void textBereit.finally(() => {
-  ReactDOM.createRoot(document.getElementById('root')!).render(
-    <StrictMode>
-      <ErrorBoundary>
-        <BrowserApp />
-      </ErrorBoundary>
-    </StrictMode>
-  )
-})
+randomUuidNachruesten()
+// Die Kopplung meldet dem Panel, dass hier der Browser koppelt, nicht MSS.
+geraeteArtSetzen('browser')
+void hochfahren()

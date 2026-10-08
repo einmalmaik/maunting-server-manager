@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tabs-rahmen"
+description = "Enables the tabs_rahmen command without any pre-configured scope."
+commands.allow = ["tabs_rahmen"]
+
+[[permission]]
+identifier = "deny-tabs-rahmen"
+description = "Denies the tabs_rahmen command without any pre-configured scope."
+commands.deny = ["tabs_rahmen"]

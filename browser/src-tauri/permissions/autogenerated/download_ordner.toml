@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-download-ordner"
+description = "Enables the download_ordner command without any pre-configured scope."
+commands.allow = ["download_ordner"]
+
+[[permission]]
+identifier = "deny-download-ordner"
+description = "Denies the download_ordner command without any pre-configured scope."
+commands.deny = ["download_ordner"]

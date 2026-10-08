@@ -15,6 +15,7 @@ import { geraetVeroeffentlichen, sicherheitsnummer } from '@/services/e2eeGeraet
 import { MessengerVerschlossenError } from '@/services/lokaleVersiegelung'
 import { holeVerlaufAb } from '@/services/verlaufsUebergabe'
 import { useAuthStore } from '@/stores/authStore'
+import { geraeteArt } from './geraeteArt'
 import { konfigAendern } from './tauri'
 import { setzeAccessToken, sitzungVerwerfen } from './transport'
 
@@ -69,7 +70,7 @@ export interface Kopplungsergebnis {
 export async function koppeln(code: string, bezeichnung: string): Promise<Kopplungsergebnis> {
   const antwort = await api<TokenAntwort>('/auth/devices/redeem', {
     method: 'POST',
-    body: JSON.stringify({ code, label: bezeichnung }),
+    body: JSON.stringify({ code, label: bezeichnung, geraet: geraeteArt() }),
   })
   setzeAccessToken(antwort.access_token)
   await invoke('refresh_token_speichern', { token: antwort.refresh_token })

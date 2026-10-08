@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-biometrie-verfuegbar"
+description = "Enables the biometrie_verfuegbar command without any pre-configured scope."
+commands.allow = ["biometrie_verfuegbar"]
+
+[[permission]]
+identifier = "deny-biometrie-verfuegbar"
+description = "Denies the biometrie_verfuegbar command without any pre-configured scope."
+commands.deny = ["biometrie_verfuegbar"]

@@ -13,6 +13,8 @@ import {
   File as FileIcon,
   Fingerprint,
   Folder,
+  CreditCard,
+  Landmark,
   FolderLock,
   Images,
   HelpCircle,
@@ -48,6 +50,8 @@ import { QrScannerModal } from './QrScannerModal'
 import { TresorZuruecksetzen } from './TresorZuruecksetzen'
 import { TresorDateiBereich } from './TresorDateiBereich'
 import { TresorGalerie } from './TresorGalerie'
+import { TresorZahlung } from './TresorZahlung'
+import { verdeckt } from './zahlung'
 import { inhaltVon } from './tresorOrdner'
 import { useMiniatur } from './tresorMiniaturen'
 import { formatBytes } from '@/lib/format'
@@ -58,7 +62,7 @@ import { PAPIERKORB_TAGE, istBekannteKategorie, istPasswortKategorie, type Vault
 import { DisBadge } from '@/components/DisBadge'
 import { fehlerText } from './tresorFehler'
 
-type Ansicht = 'tresor' | 'fotos' | 'dateien' | 'archiv' | 'papierkorb'
+type Ansicht = 'tresor' | 'fotos' | 'dateien' | 'zahlung' | 'archiv' | 'papierkorb'
 
 const TAG_MS = 24 * 60 * 60 * 1000
 
@@ -476,6 +480,7 @@ export function VaultView() {
     { id: 'tresor', labelKey: 'mss.vault.ansicht.tresor', icon: Shield },
     { id: 'fotos', labelKey: 'mss.vault.ansicht.fotos', icon: Images },
     { id: 'dateien', labelKey: 'mss.vault.ansicht.dateien', icon: FolderLock },
+    { id: 'zahlung', labelKey: 'mss.vault.ansicht.zahlung', icon: CreditCard },
     { id: 'archiv', labelKey: 'mss.vault.ansicht.archiv', icon: Archive },
     {
       id: 'papierkorb',
@@ -825,7 +830,16 @@ export function VaultView() {
   // ── HILFSKOMPONENTE: ZEILE IN LISTE / TABELLE ──
   const renderItemRow = (item: VaultItem) => {
     const istDatei = !istPasswortKategorie(item.category)
-    const ItemBrand = item.category === 'ordner' ? Folder : item.category === 'album' ? Images : istDatei ? FileIcon : getBrandIcon(item.service, item.url)
+    const ItemBrand =
+      item.category === 'ordner'
+        ? Folder
+        : item.category === 'album'
+          ? Images
+          : item.zahlung
+            ? item.zahlung.art === 'konto' ? Landmark : CreditCard
+            : istDatei
+              ? FileIcon
+              : getBrandIcon(item.service, item.url)
     const isRevealed = revealedPasswordId === item.id
     const itemTotp = totpCodes[item.id]
 
@@ -858,7 +872,9 @@ export function VaultView() {
 
             {istDatei ? (
               <div className="mt-0.5 text-label-sm text-on-surface-variant">
-                {item.category === 'ordner'
+                {item.zahlung
+                  ? verdeckt(item.zahlung)
+                  : item.category === 'ordner'
                   ? t('mss.vault.dateien.ordner')
                   : item.album
                     ? t('mss.vault.fotos.album', { count: item.album.eintraege.length })
@@ -1244,6 +1260,10 @@ export function VaultView() {
         <TresorGalerie suche={searchQuery} />
       ) : ansicht === 'dateien' ? (
         <TresorDateiBereich suche={searchQuery} />
+      ) : ansicht === 'zahlung' ? (
+        <div className="flex-1 overflow-y-auto px-4 py-3">
+          <TresorZahlung suche={searchQuery} />
+        </div>
       ) : (
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
         {ansicht === 'papierkorb' && ansichtsItems.length > 0 && (

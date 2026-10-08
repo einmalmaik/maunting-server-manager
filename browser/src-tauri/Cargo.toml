@@ -13,19 +13,50 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [
-    "unstable",
-    "image-png",
-    "webview-data-url",
-] }
+tauri = { version = "2", features = ["image-png"] }
 tauri-plugin-notification = "2"
-tauri-plugin-biometric = "2"
 tauri-plugin-dialog = "2"
-tauri-plugin-fs = "2"
+schluesselfach = { path = "../../crates/schluesselfach" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+url = "2"
+# Werbe- und Trackerfilter von Brave (MPL-2.0), dieselbe Engine wie in Brave.
+# Ohne `single-thread`: die Engine liegt hinter einem RwLock und wird aus dem
+# UI-Thread (WebView2) und aus dem Ladefaden der Listen angefasst.
+adblock = { version = "0.13", default-features = false, features = [
+    "embedded-domain-resolver",
+    "full-regex-handling",
+] }
+# Filterlisten holen. rustls statt OpenSSL, damit Windows und Android gleich bauen.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
 keyring = "4"
-base64 = "0.22"
-sha2 = "0.10"
-uuid = { version = "1", features = ["v4"] }
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }
+
+[target.'cfg(windows)'.dependencies]
+# Dieselben Versionen, die wry mitbringt: die Schnittstellen der WebView2
+# (Anfragen filtern, Adresse, Verlauf, Favicon) gibt Tauri nicht selbst heraus.
+webview2-com = "0.39"
+windows = { version = "0.62", features = [
+    "Security_Credentials_UI",
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.62"
+
+[target.'cfg(target_os = "android")'.dependencies]
+tauri-plugin-biometric = "2"
+jni = "0.21"
+
+# Das Schild prüft jede Anfrage auf dem UI-Faden der WebView2. Ohne Optimierung
+# brauchte die Engine dafür bis 57 ms je Anfrage, und `tauri dev` stand beim
+# Laden einer Seite über eine Sekunde lang (10/2026). Abhängigkeiten werden
+# deshalb auch im Entwicklungsbau optimiert.
+[profile.dev.package."*"]
+opt-level = 3

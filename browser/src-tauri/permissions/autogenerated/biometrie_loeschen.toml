@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-biometrie-loeschen"
+description = "Enables the biometrie_loeschen command without any pre-configured scope."
+commands.allow = ["biometrie_loeschen"]
+
+[[permission]]
+identifier = "deny-biometrie-loeschen"
+description = "Denies the biometrie_loeschen command without any pre-configured scope."
+commands.deny = ["biometrie_loeschen"]

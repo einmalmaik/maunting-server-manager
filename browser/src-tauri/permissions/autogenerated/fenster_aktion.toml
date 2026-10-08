@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-fenster-aktion"
+description = "Enables the fenster_aktion command without any pre-configured scope."
+commands.allow = ["fenster_aktion"]
+
+[[permission]]
+identifier = "deny-fenster-aktion"
+description = "Denies the fenster_aktion command without any pre-configured scope."
+commands.deny = ["fenster_aktion"]

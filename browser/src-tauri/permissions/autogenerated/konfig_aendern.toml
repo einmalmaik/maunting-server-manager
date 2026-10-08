@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-konfig-aendern"
+description = "Enables the konfig_aendern command without any pre-configured scope."
+commands.allow = ["konfig_aendern"]
+
+[[permission]]
+identifier = "deny-konfig-aendern"
+description = "Denies the konfig_aendern command without any pre-configured scope."
+commands.deny = ["konfig_aendern"]

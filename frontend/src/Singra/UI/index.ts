@@ -20,6 +20,7 @@ export { DateTimePicker, type DateTimePickerProps } from '@/components/ui/DateTi
 export { NumberStepper } from '@/components/ui/NumberStepper'
 export { Switch } from '@/components/ui/Switch'
 export { ActionMenu, type ActionMenuItem } from './ActionMenu'
+export { Ankerfenster, type AnkerfensterProps } from './Ankerfenster'
 export { ProgressBar, StackedProgressBar, type Segment } from './ProgressBar'
 export { Slider } from './Slider'
 export { ResourceMetricCard } from './ResourceMetricCard'

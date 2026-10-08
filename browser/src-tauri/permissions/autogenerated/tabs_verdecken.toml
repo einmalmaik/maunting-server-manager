@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tabs-verdecken"
+description = "Enables the tabs_verdecken command without any pre-configured scope."
+commands.allow = ["tabs_verdecken"]
+
+[[permission]]
+identifier = "deny-tabs-verdecken"
+description = "Denies the tabs_verdecken command without any pre-configured scope."
+commands.deny = ["tabs_verdecken"]

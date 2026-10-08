@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kurzinfo"
+description = "Enables the kurzinfo command without any pre-configured scope."
+commands.allow = ["kurzinfo"]
+
+[[permission]]
+identifier = "deny-kurzinfo"
+description = "Denies the kurzinfo command without any pre-configured scope."
+commands.deny = ["kurzinfo"]

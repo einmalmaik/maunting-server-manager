@@ -5,6 +5,7 @@
  * speichert und gleicht ab.
  */
 import { dateiBlobs, istDateiAngaben, VERSIONEN, type DateiAngaben } from './tresorDateien'
+import { istZahlungAngaben, type ZahlungAngaben } from './zahlung'
 
 /**
  * Die Arten von Einträgen, die diese Fassung der App anzeigen und bearbeiten
@@ -12,7 +13,7 @@ import { dateiBlobs, istDateiAngaben, VERSIONEN, type DateiAngaben } from './tre
  * Speicher, damit der Sync ihn nicht verliert, erscheint aber nirgends und
  * wird nicht geschrieben.
  */
-export const BEKANNTE_KATEGORIEN = ['login', 'authenticator', 'secure_note', 'datei', 'ordner', 'album'] as const
+export const BEKANNTE_KATEGORIEN = ['login', 'authenticator', 'secure_note', 'datei', 'ordner', 'album', 'zahlung'] as const
 export type VaultKategorie = (typeof BEKANNTE_KATEGORIEN)[number]
 
 export function istBekannteKategorie(kategorie: string | undefined): boolean {
@@ -31,7 +32,7 @@ export function istSchreibbareKategorie(kategorie: string | undefined): boolean 
   return istBekannteKategorie(kategorie) || kategorie === SYSTEM_KATEGORIE
 }
 
-/** Was in der Passwortliste steht. Dateien und Ordner haben ihren eigenen Bereich. */
+/** Was in der Passwortliste steht. Dateien, Ordner und Zahlungsmittel haben ihren eigenen Bereich. */
 export const PASSWORT_KATEGORIEN = ['login', 'authenticator', 'secure_note'] as const
 
 export function istPasswortKategorie(kategorie: string | undefined): boolean {
@@ -68,6 +69,8 @@ export interface VaultItem {
   album?: AlbumAngaben
   /** Nur bei `SYSTEM_KATEGORIE`. */
   sicherung?: SicherungAngaben
+  /** Nur bei Art `zahlung`: Karte oder Bankkonto (`zahlung.ts`). */
+  zahlung?: ZahlungAngaben
   createdAt: number
   updatedAt: number
   revision: number
@@ -104,6 +107,7 @@ const AENDERBAR: Record<Exclude<keyof VaultItem, 'id' | 'revision' | 'createdAt'
   ordner: true,
   album: true,
   sicherung: true,
+  zahlung: true,
 }
 const AENDERBARE_FELDER = Object.keys(AENDERBAR) as (keyof typeof AENDERBAR)[]
 
@@ -188,6 +192,8 @@ export function itemAusUmschlag(id: string, revision: number, payload: Record<st
   if (payload.album !== undefined && !album) extra.album = payload.album
   const sicherung = istSicherungAngaben(payload.sicherung) ? payload.sicherung : undefined
   if (payload.sicherung !== undefined && !sicherung) extra.sicherung = payload.sicherung
+  const zahlung = istZahlungAngaben(payload.zahlung) ? payload.zahlung : undefined
+  if (payload.zahlung !== undefined && !zahlung) extra.zahlung = payload.zahlung
   return {
     id,
     service: String(payload.service || 'Unbekannt'),
@@ -206,6 +212,7 @@ export function itemAusUmschlag(id: string, revision: number, payload: Record<st
     ordner: typeof payload.ordner === 'string' && payload.ordner ? payload.ordner : undefined,
     album,
     sicherung,
+    zahlung,
     createdAt: Number(payload.createdAt || Date.now()),
     updatedAt: Number(payload.updatedAt || Date.now()),
     revision,

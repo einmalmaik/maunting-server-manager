@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-seitendaten-loeschen"
+description = "Enables the seitendaten_loeschen command without any pre-configured scope."
+commands.allow = ["seitendaten_loeschen"]
+
+[[permission]]
+identifier = "deny-seitendaten-loeschen"
+description = "Denies the seitendaten_loeschen command without any pre-configured scope."
+commands.deny = ["seitendaten_loeschen"]
