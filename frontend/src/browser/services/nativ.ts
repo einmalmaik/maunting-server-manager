@@ -75,7 +75,7 @@ export type TabEreignis =
 
 /** Was `seite.js` meldet (`Meldung` in `tabs/formular.rs`). */
 export type FormularMeldung =
-  | { t: 'feld'; passwort: boolean; neu: boolean }
+  | { t: 'feld'; passwort: boolean; neu: boolean; sicher?: boolean }
   | { t: 'absenden'; benutzer: string; passwort: string; neu: boolean }
   | { t: 'benutzer'; wert: string }
   /** Ein Feld für eine Zahlungskarte oder ein Bankkonto hat den Fokus. */

@@ -19,8 +19,15 @@ pub const PASSWORT_MAX: usize = 1024;
 #[serde(tag = "t", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Meldung {
     /// Ein Benutzer- oder Passwortfeld hat den Fokus. `neu`: ein neues
-    /// Passwort (Registrierung, Wechsel).
-    Feld { passwort: bool, neu: bool },
+    /// Passwort (Registrierung, Wechsel). `sicher`: eindeutig ein neues
+    /// Passwort (`new-password` oder Passwort samt Wiederholung); nur dann
+    /// erzeugt der Browser eines von selbst.
+    Feld {
+        passwort: bool,
+        neu: bool,
+        #[serde(default)]
+        sicher: bool,
+    },
     /// Abgeschickt mit Passwort.
     Absenden { benutzer: String, passwort: String, neu: bool },
     /// Abgeschickt ohne Passwort: erster Schritt einer mehrstufigen Anmeldung.
@@ -40,7 +47,7 @@ pub enum ZahlArt {
 impl std::fmt::Debug for Meldung {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Meldung::Feld { passwort, neu } => write!(f, "Feld {{ passwort: {passwort}, neu: {neu} }}"),
+            Meldung::Feld { passwort, neu, sicher } => write!(f, "Feld {{ passwort: {passwort}, neu: {neu}, sicher: {sicher} }}"),
             Meldung::Absenden { neu, .. } => write!(f, "Absenden {{ neu: {neu}, .. }}"),
             Meldung::Benutzer { .. } => write!(f, "Benutzer {{ .. }}"),
             Meldung::Zahlung { art } => write!(f, "Zahlung {{ art: {art:?} }}"),
@@ -178,7 +185,8 @@ mod tests {
 
     #[test]
     fn nimmt_nur_bekannte_und_knappe_meldungen() {
-        assert!(matches!(lesen(r#"{"t":"feld","passwort":true,"neu":false}"#), Some(Meldung::Feld { passwort: true, neu: false })));
+        assert!(matches!(lesen(r#"{"t":"feld","passwort":true,"neu":false}"#), Some(Meldung::Feld { passwort: true, neu: false, sicher: false })));
+        assert!(matches!(lesen(r#"{"t":"feld","passwort":true,"neu":true,"sicher":true}"#), Some(Meldung::Feld { sicher: true, .. })));
         assert!(lesen(r#"{"t":"absenden","benutzer":"a","passwort":"","neu":false}"#).is_none());
         assert!(lesen(r#"{"t":"feld","passwort":true,"neu":false,"url":"https://bank.example"}"#).is_none());
         assert!(lesen(r#"{"t":"fuellen","passwort":"x"}"#).is_none());

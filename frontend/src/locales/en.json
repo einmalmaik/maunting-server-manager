@@ -9055,7 +9055,7 @@
       "nichtJetzt": "Not now",
       "gewechselt": "The page has changed in the meantime. Nothing was filled in.",
       "vorschlagen": "Suggest a strong password",
-      "neuGesperrt": "New password for {{host}}: the browser suggests one and saves it afterwards, even while the vault is locked.",
+      "neuGesperrt": "New password for {{host}}: the browser can suggest a strong one.",
       "gesperrt": "There may be sign-in details for {{host}} in your vault. Unlock the vault to fill them in.",
       "entsperren": "Unlock vault",
       "neu": "New password for {{host}}",
@@ -9091,6 +9091,12 @@
         "falsch": "The master password is wrong.",
         "gesperrtNachFehlern": "Too many wrong attempts. The vault is now locked.",
         "bestaetigen": "Confirm"
+      },
+      "erzeugen": {
+        "eingesetzt": "Strong password for {{host}} filled in. After you submit, the browser saves it in the vault.",
+        "eingesetztGesperrt": "Strong password for {{host}} filled in. After you submit, the browser puts it into the vault encrypted, without unlocking it.",
+        "eigenes": "Use my own password",
+        "gespeichert": "New password for {{host}} saved in the vault"
       }
     }
   }

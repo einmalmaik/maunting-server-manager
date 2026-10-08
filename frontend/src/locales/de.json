@@ -9055,7 +9055,7 @@
       "nichtJetzt": "Nicht jetzt",
       "gewechselt": "Die Seite hat inzwischen gewechselt. Es wurde nichts eingefügt.",
       "vorschlagen": "Starkes Passwort vorschlagen",
-      "neuGesperrt": "Neues Passwort für {{host}}: Der Browser schlägt eins vor und speichert es danach, auch bei gesperrtem Tresor.",
+      "neuGesperrt": "Neues Passwort für {{host}}: Der Browser kann ein starkes vorschlagen.",
       "gesperrt": "Für {{host}} liegen vielleicht Anmeldedaten im Tresor. Zum Einfügen den Tresor entsperren.",
       "entsperren": "Tresor entsperren",
       "neu": "Neues Passwort für {{host}}",
@@ -9091,6 +9091,12 @@
         "falsch": "Das Master-Passwort stimmt nicht.",
         "gesperrtNachFehlern": "Zu viele falsche Versuche. Der Tresor ist jetzt gesperrt.",
         "bestaetigen": "Bestätigen"
+      },
+      "erzeugen": {
+        "eingesetzt": "Starkes Passwort für {{host}} eingesetzt. Nach dem Absenden speichert der Browser es im Tresor.",
+        "eingesetztGesperrt": "Starkes Passwort für {{host}} eingesetzt. Nach dem Absenden legt der Browser es verschlüsselt in den Tresor, ohne ihn zu entsperren.",
+        "eigenes": "Eigenes Passwort",
+        "gespeichert": "Neues Passwort für {{host}} im Tresor gespeichert"
       }
     }
   }

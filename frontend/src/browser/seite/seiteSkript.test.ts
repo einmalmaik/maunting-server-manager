@@ -102,3 +102,51 @@ describe('Zahlungsfelder in der Seite', () => {
     expect(wert('#nummer')).toBe('')
   })
 })
+
+describe('Neue Passwörter in der Seite', () => {
+  beforeEach(() => {
+    gesendet.length = 0
+  })
+
+  const feldMeldung = (sel: string) => {
+    gesendet.length = 0
+    const el = document.querySelector(sel) as HTMLInputElement
+    el.focus()
+    fokus(el)
+    return gesendet.filter((m) => (m as { t: string }).t === 'feld').at(-1)
+  }
+
+  it('füllt beim Wechsel nur die neuen Felder, das bisherige Passwort bleibt, der Fokus auch', () => {
+    document.body.innerHTML = `
+      <form><input id="alt" type="password" autocomplete="current-password" value="Bisher-1">
+      <input id="neu1" type="password"><input id="neu2" type="password"></form>
+      <form><input id="alt3" type="password" value="Bisher-2"><input id="n3a" type="password"><input id="n3b" type="password"></form>`
+    expect(feldMeldung('#neu1')).toEqual({ t: 'feld', passwort: true, neu: true, sicher: true })
+    empfangen({ data: { t: 'fuellen', benutzer: null, passwort: null, neu: 'Erzeugt-1' } })
+    expect([wert('#alt'), wert('#neu1'), wert('#neu2')]).toEqual(['Bisher-1', 'Erzeugt-1', 'Erzeugt-1'])
+    expect(document.activeElement?.id).toBe('neu1')
+
+    // Ohne Auszeichnung: von drei Feldern ist das erste das bisherige.
+    feldMeldung('#n3a')
+    empfangen({ data: { t: 'fuellen', benutzer: null, passwort: null, neu: 'Erzeugt-2' } })
+    expect([wert('#alt3'), wert('#n3a'), wert('#n3b')]).toEqual(['Bisher-2', 'Erzeugt-2', 'Erzeugt-2'])
+  })
+
+  it('erzeugt nur bei eindeutigen Formularen von selbst', () => {
+    document.body.innerHTML = `
+      <form action="/session/create"><input id="login" type="password"></form>
+      <form><input id="reg" type="password" autocomplete="new-password"></form>`
+    expect(feldMeldung('#login')).toEqual({ t: 'feld', passwort: true, neu: true, sicher: false })
+    expect(feldMeldung('#reg')).toEqual({ t: 'feld', passwort: true, neu: true, sicher: true })
+  })
+
+  it('erkennt eine Registrierung an ihrem Hauptknopf, nicht an einem zweiten Knopf', () => {
+    // Aufbau wie bei Nitrado (08.10.2026): ein Passwortfeld, keine Auszeichnung, keine Adresse.
+    document.body.innerHTML = `
+      <form><input type="email" name="email"><input id="einzeln" type="password" name="password"><button type="submit">Registrieren</button></form>
+      <form><input type="email" name="email"><input id="anmelden" type="password" name="password"><button>Anmelden</button><button>Registrieren</button></form>`
+    // Gleiche Meldungen hintereinander schickt die Seite nur einmal: erst die andere.
+    expect(feldMeldung('#anmelden')).toEqual({ t: 'feld', passwort: true, neu: false, sicher: false })
+    expect(feldMeldung('#einzeln')).toEqual({ t: 'feld', passwort: true, neu: true, sicher: true })
+  })
+})

@@ -23,6 +23,7 @@ import { istGekoppelt, useSitzung } from '../services/sitzung'
 import { useAktiverTab } from '../services/tabsStore'
 import { eingerichtet, speichern as gesperrtSpeichern } from '../services/tresorGesperrt'
 import { Leiste } from './FormularRahmen'
+import { ErzeugtSpeichern, PasswortErzeugen } from './PasswortErzeugen'
 import { ZahlungEinfuegen } from './ZahlungEinfuegen'
 
 export function FormularLeiste() {
@@ -31,8 +32,13 @@ export function FormularLeiste() {
   const feld = useFormulare((s) => (tab ? s.feld[tab.id] : undefined))
   const abgeschickt = useFormulare((s) => (tab ? s.abgeschickt[tab.id] : undefined))
   if (!tab || !gekoppelt || tab.privat) return null
+  if (abgeschickt?.erzeugt) return <ErzeugtSpeichern key={`g-${tab.id}`} tab={tab.id} />
   if (abgeschickt) return <Speichern key={`s-${tab.id}`} tab={tab.id} a={abgeschickt} />
   if (feld?.zahlung) return <ZahlungEinfuegen key={`z-${tab.id}-${feld.url}-${feld.zahlung}`} tab={tab.id} url={feld.url} art={feld.zahlung} />
+  if (feld?.sicher && feld.passwort) {
+    const ersatz = <Einfuegen tab={tab.id} feld={feld} />
+    return <PasswortErzeugen key={`p-${tab.id}-${feld.url}`} tab={tab.id} url={feld.url} ersatz={ersatz} />
+  }
   if (feld) return <Einfuegen key={`e-${tab.id}-${feld.url}`} tab={tab.id} feld={feld} />
   return null
 }
@@ -57,7 +63,16 @@ function Einfuegen({ tab, feld }: { tab: string; feld: Feld }) {
   }
 
   const vorschlagen = feld.neu && (
-    <Button size="sm" variant="secondary" onClick={() => void fuellen({ benutzer: null, passwort: null, neu: generateSecurePassword(20, true) })}>
+    <Button
+      size="sm"
+      variant="secondary"
+      onClick={() => {
+        const neu = generateSecurePassword(20, true)
+        // Wie ein von selbst erzeugtes: nach dem Absenden ohne Rückfrage gespeichert.
+        useFormulare.getState().erzeugtMerken(tab, feld.url, neu)
+        void fuellen({ benutzer: null, passwort: null, neu })
+      }}
+    >
       {t('browser.formular.vorschlagen')}
     </Button>
   )

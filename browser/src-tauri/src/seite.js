@@ -15,6 +15,8 @@
   const json = JSON.stringify
   const NEU = /regist|signup|sign-up|sign_up|join|create|erstell|confirm|repeat|wiederhol|bestätig|bestaetig/i
   const BENUTZER = /user|login|e-?mail|benutzer|konto|account|anmelde|identifier/i
+  const BISHER = /current|old.?pass|altes|bisherig|aktuelles/i
+  const REGISTRIEREN = /regist|sign ?up|(konto|account) (erstellen|anlegen)|create (an |your )?account|jetzt beitreten|join now/i
   const SENDEN = /anmeld|einlog|log ?in|sign ?in|sign ?up|weiter|next|continue|regist|erstell|create|submit|senden|bestätig/i
 
   const sichtbar = (el) => el.getClientRects().length > 0 && !el.disabled && !el.readOnly
@@ -64,12 +66,40 @@
     return /username|email/.test(el.getAttribute('autocomplete') || '') || BENUTZER.test(merkmale(el))
   }
 
+  // Der Knopf, den Enter auslöst (der erste Absendeknopf): sein Text sagt, wofür
+  // das Formular ist. Ein zweiter Knopf „Registrieren“ neben „Anmelden“ zählt nicht.
+  function hauptknopf(b) {
+    if (b === document) return ''
+    const k = b.querySelector('button:not([type]), button[type=submit], input[type=submit]')
+    return k ? [k.textContent, k.value, merkmale(k)].join(' ') : ''
+  }
+
   // Ein neues Passwort: Registrierung oder Wechsel, hier schlägt der Browser eines vor.
+  // Das bisherige Passwort eines Wechselformulars ist nie neu: es wird nicht überschrieben.
   function istNeu(feld) {
-    if ((feld.getAttribute('autocomplete') || '').includes('new-password')) return true
+    const autocomplete = feld.getAttribute('autocomplete') || ''
+    if (autocomplete.includes('current-password') || BISHER.test(merkmale(feld))) return false
+    if (autocomplete.includes('new-password')) return true
     const b = bereich(feld)
-    if (passwoerter(b).length >= 2) return true
+    const alle = passwoerter(b)
+    // Bisheriges, neues, Wiederholung: das erste ist das bisherige.
+    if (alle.length >= 3) return alle[0] !== feld
+    if (alle.length === 2) return true
+    if (REGISTRIEREN.test(hauptknopf(b))) return true
     return b !== document && NEU.test([b.id, b.name, b.getAttribute('action'), merkmale(feld)].join(' '))
+  }
+
+  // Eindeutig neu: so ausgezeichnet, mit Wiederholung oder mit „Registrieren“
+  // als Hauptknopf. Nur dann erzeugt der Browser von selbst ein Passwort; ein
+  // Anmeldeformular mit „create“ in der Adresse bekommt keins.
+  function istSicherNeu(feld) {
+    if (!istNeu(feld)) return false
+    const b = bereich(feld)
+    return (
+      (feld.getAttribute('autocomplete') || '').includes('new-password') ||
+      passwoerter(b).filter(istNeu).length >= 2 ||
+      REGISTRIEREN.test(hauptknopf(b))
+    )
   }
 
   // Das letzte Benutzerfeld vor dem Passwort, sonst das erste.
@@ -98,7 +128,8 @@
       const passwort = el.type === 'password'
       if (!passwort && !istBenutzer(el)) return
       zuletzt = el
-      const meldung = json({ t: 'feld', passwort, neu: passwoerter(bereich(el)).some(istNeu) })
+      const pws = passwoerter(bereich(el))
+      const meldung = json({ t: 'feld', passwort, neu: pws.some(istNeu), sicher: pws.some(istSicherNeu) })
       if (meldung === gemeldet) return
       gemeldet = meldung
       senden(meldung)
@@ -206,8 +237,10 @@
     const b = zuletzt && zuletzt.isConnected ? bereich(zuletzt) : document
     const pws = passwoerter(b)
     if (typeof d.neu === 'string') {
-      const neue = pws.filter(istNeu)
-      for (const el of neue.length ? neue : pws) setzen(el, d.neu)
+      // Der Fokus bleibt, wo der Nutzer gerade tippt.
+      const aktiv = document.activeElement
+      for (const el of pws.filter(istNeu)) setzen(el, d.neu)
+      if (aktiv instanceof HTMLElement && aktiv.isConnected) aktiv.focus()
       return
     }
     if (typeof d.benutzer === 'string') {

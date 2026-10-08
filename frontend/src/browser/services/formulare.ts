@@ -22,6 +22,23 @@ export interface Feld {
   neu: boolean
   /** Ein Feld für Karte oder Konto: angeboten werden Zahlungsmittel, nie Anmeldungen. */
   zahlung?: 'karte' | 'konto'
+  /** Das Feld mit dem Fokus ist ein Passwortfeld. */
+  passwort?: boolean
+  /** Eindeutig ein neues Passwort: hier erzeugt der Browser eines von selbst. */
+  sicher?: boolean
+}
+
+/**
+ * Ein vom Browser erzeugtes Passwort für eine Seite in diesem Tab. Es liegt nur
+ * im Speicher der Oberfläche, bis es abgeschickt und gespeichert ist; `null`
+ * heißt, der Nutzer wollte ein eigenes.
+ */
+export interface Erzeugt {
+  host: string
+  passwort: string | null
+  /** Auf dieser Seite schon eingesetzt; eine neue Seite setzt es neu ein (Fehlversuch, zweiter Schritt). */
+  eingesetzt: boolean
+  seit: number
 }
 
 /** Abgeschickt; wartet auf „Speichern“ oder „Nicht jetzt“. */
@@ -29,6 +46,8 @@ export interface Abgeschickt {
   url: string
   benutzer: string
   passwort: string
+  /** Genau das Passwort, das der Browser hier erzeugt hat: es wird ohne Rückfrage gespeichert. */
+  erzeugt?: boolean
 }
 
 /** So lange gilt der Benutzer aus dem ersten Schritt einer mehrstufigen Anmeldung. */
@@ -39,7 +58,14 @@ interface FormulareZustand {
   abgeschickt: Record<string, Abgeschickt>
   /** Erster Schritt einer mehrstufigen Anmeldung: nur der Benutzer. */
   schritt: Record<string, { host: string; wert: string; seit: number }>
+  erzeugt: Record<string, Erzeugt>
   ereignis: (e: FormularEreignis) => void
+  /** Merkt sich ein erzeugtes Passwort (oder `null`: ein eigenes) für die Seite im Tab. */
+  erzeugtMerken: (tab: string, url: string, passwort: string | null) => void
+  /** Ein erzeugtes Passwort, das noch gilt, für diese Seite. */
+  erzeugtFuer: (tab: string, url: string) => Erzeugt | null
+  /** Nimmt die abgeschickte Anmeldung heraus; wer sie bekommt, kümmert sich allein darum. */
+  abgeschicktNehmen: (tab: string) => Abgeschickt | null
   /** Neue Seite im Tab: das Angebot zum Einfügen fällt, die Frage zum Speichern bleibt. */
   laedt: (tab: string) => void
   feldWeg: (tab: string) => void
@@ -58,9 +84,10 @@ export const useFormulare = create<FormulareZustand>()((set, get) => ({
   feld: {},
   abgeschickt: {},
   schritt: {},
+  erzeugt: {},
   ereignis: ({ id, url, meldung }) => {
     if (meldung.t === 'feld') {
-      set((s) => ({ feld: { ...s.feld, [id]: { url, neu: meldung.neu } } }))
+      set((s) => ({ feld: { ...s.feld, [id]: { url, neu: meldung.neu, passwort: meldung.passwort, sicher: !!meldung.sicher } } }))
     } else if (meldung.t === 'zahlung') {
       set((s) => ({ feld: { ...s.feld, [id]: { url, neu: false, zahlung: meldung.art } } }))
     } else if (meldung.t === 'benutzer') {
@@ -68,17 +95,34 @@ export const useFormulare = create<FormulareZustand>()((set, get) => ({
     } else {
       const schritt = get().schritt[id]
       const frueher = schritt && schritt.host === hostVon(url) && Date.now() - schritt.seit < SCHRITT_MS ? schritt.wert : ''
+      const erzeugt = get().erzeugtFuer(id, url)?.passwort === meldung.passwort
       set((s) => ({
-        abgeschickt: { ...s.abgeschickt, [id]: { url, benutzer: meldung.benutzer || frueher, passwort: meldung.passwort } },
+        abgeschickt: { ...s.abgeschickt, [id]: { url, benutzer: meldung.benutzer || frueher, passwort: meldung.passwort, ...(erzeugt && { erzeugt }) } },
         feld: ohne(s.feld, id),
         schritt: ohne(s.schritt, id),
       }))
     }
   },
-  laedt: (tab) => set((s) => ({ feld: ohne(s.feld, tab) })),
+  erzeugtMerken: (tab, url, passwort) =>
+    set((s) => ({ erzeugt: { ...s.erzeugt, [tab]: { host: hostVon(url), passwort, eingesetzt: true, seit: Date.now() } } })),
+  erzeugtFuer: (tab, url) => {
+    const e = get().erzeugt[tab]
+    return e && e.host === hostVon(url) && Date.now() - e.seit < SCHRITT_MS ? e : null
+  },
+  abgeschicktNehmen: (tab) => {
+    const a = get().abgeschickt[tab] ?? null
+    if (a) set((s) => ({ abgeschickt: ohne(s.abgeschickt, tab) }))
+    return a
+  },
+  laedt: (tab) =>
+    set((s) => {
+      const e = s.erzeugt[tab]
+      return { feld: ohne(s.feld, tab), erzeugt: e ? { ...s.erzeugt, [tab]: { ...e, eingesetzt: false } } : s.erzeugt }
+    }),
   feldWeg: (tab) => set((s) => ({ feld: ohne(s.feld, tab) })),
   abgeschicktWeg: (tab) => set((s) => ({ abgeschickt: ohne(s.abgeschickt, tab) })),
-  tabWeg: (tab) => set((s) => ({ feld: ohne(s.feld, tab), abgeschickt: ohne(s.abgeschickt, tab), schritt: ohne(s.schritt, tab) })),
+  tabWeg: (tab) =>
+    set((s) => ({ feld: ohne(s.feld, tab), abgeschickt: ohne(s.abgeschickt, tab), schritt: ohne(s.schritt, tab), erzeugt: ohne(s.erzeugt, tab) })),
 }))
 
 /** Anmeldungen im Tresor für die Seite: gleicher Host, ohne `www.`. */
