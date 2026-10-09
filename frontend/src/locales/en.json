@@ -4870,7 +4870,7 @@
         "items": {
           "lokal": "On the computer: history, bookmarks, open tabs (address, title, site icon), settings and the number of ad and tracker requests blocked since installation (without addresses) stay in the app folder and go to no server, not even your instance. Cookies, cache and site storage live in a separate profile, apart from Microsoft Edge.",
           "privat": "Private tabs add nothing to the history and show no site icon. On Windows, their cookies and site storage live only in memory and disappear once the last private tab is closed; until then all private tabs share this session. “Forget on close” (off by default) deletes the cookies, cache and site storage of normal tabs when you quit; history and bookmarks stay.",
-          "verbindungen": "Connections: the pages you open and the search engine you chose receive your requests directly. For the ad and tracker blocker, the browser downloads the filter lists from easylist.to and the list against cookie notices from secure.fanboy.co.nz at most every four days, without cookie, identifier or referrer; both servers see your IP address. The site icon comes from the tab’s WebView; the interface does not load any address of the site for it.",
+          "verbindungen": "Connections: the pages you open and the search engine you chose receive your requests directly. For the ad and tracker blocker, the browser downloads the filter lists from easylist.to and the list against cookie notices from secure.fanboy.co.nz at most every four days, without cookie, identifier or referrer; both servers see your IP address. The site icon comes from the tab’s WebView; the interface does not load any address of the site for it. The browser downloads language data for translation from Mozilla only when you ask for it (see “Translation”).",
           "https": "HTTPS first and clean links: the browser opens an address starting with “http://” encrypted first. If the site can’t do that, it loads it as given and remembers this until you quit, in memory only. Addresses on your own computer, in your own network and with their own port stay as they are. With the ad and tracker blocker on, the browser removes known tracking parameters such as “utm_source”, “fbclid” or “gclid” from every address a tab opens. Where the bundled rules of autoconsent (DuckDuckGo) can, it rejects cookie notices, and it hides known notices that cannot be rejected; it never gives consent. The rules ship with the browser, no request goes out for them. The site stores the rejection as after your own click, usually as a cookie.",
           "schutz": "Youth and habit protection (off by default): the browser checks on the computer whether a site is blocked; no address goes to any service for this. For “Adult content”, “Gambling” and “Social networks” it downloads the category’s list only once the category is on, and after that at most every four days, from raw.githubusercontent.com, without cookie, identifier or referrer. GitHub sees your IP address and which list you download. With “Adult content” on, the browser adds the safe search parameter to searches on Google, Bing, DuckDuckGo and Brave and sends YouTube the header for restricted mode. Loosening the protection takes at least one day; the browser measures the waiting time against the time that raw.githubusercontent.com states in its reply to a request without content, not against the device clock. This request is only sent when you request, confirm or withdraw a loosening or commit yourself. How many days the browser went without a blocked page is only counted on the device; the number is not sent to any service, MSM included.",
           "downloads": "Downloads: every file first downloads into a folder of the browser, where the antivirus registered with Windows checks it (usually Microsoft Defender). Only then does it move to the downloads folder. Depending on the antivirus settings, suspicious files or information about them go to its vendor; you control that in the antivirus settings, not in the browser.",
@@ -4883,7 +4883,8 @@
           "msmSuche": "MSM search (paired only): when the browser is paired with MSM and no other search engine is chosen, search terms from the address bar and the start page go to your MSM instance. It passes them to its own SearXNG instance, which asks the search engines the operator configured there; they see the server’s address, not yours. The term is sent by POST, and the panel writes it to no log. Only title, address and text of the results come back, and the results page loads no images. If the youth protection for adult content is on, the browser asks for strict safe search.",
           "nachrichten": "News (paired only): the start page fetches headlines from your MSM instance, at most every 30 minutes. The instance asks its SearXNG instance for today’s news on fixed topics, the same for every account. The topics and keywords you chose stay in the browser; filtering happens on the device. The last fetched set is kept in the browser so the start page can show something offline. The tiles show title, address and age, no images.",
           "android": "On Android: Safe Browsing and the WebView usage statistics are off, so visited addresses are not sent to Google for them. Normal tabs have their own profile, apart from the browser interface; this separates cookies and storage, but on Android sites and the interface share the WebView process. The browser opts out of Android backup and of transfers to a new device: cookies, history and the pairing sign-in stay on this phone. Private tabs share one profile on the phone; its cookies, site storage and cache are deleted once the last private tab is closed, and the next start removes the folder. The browser downloads files itself into the “Download” folder; it sends cookies only to the site they belong to, also after a redirect. There is no virus check. The browser cannot turn on YouTube's restricted mode here. Payment data is only inserted after the phone's screen lock (fingerprint, face or PIN) or the master password. If you set it as the default browser or pick it when opening a link, links from other apps open in a new, normal tab.",
-          "widget": "Search widget on Android: what you say into the microphone is turned into text by the phone's speech recognition service, usually Google; the browser only receives the text. A photo is taken by the camera app. The browser shrinks it, removes the location and other metadata, sends it to the image search of the chosen search engine (Google Lens or Bing) and then deletes it from the phone. The browser itself has no camera or microphone permission."
+          "widget": "Search widget on Android: what you say into the microphone is turned into text by the phone's speech recognition service, usually Google; the browser only receives the text. A photo is taken by the camera app. The browser shrinks it, removes the location and other metadata, sends it to the image search of the chosen search engine (Google Lens or Bing) and then deletes it from the phone. The browser itself has no camera or microphone permission.",
+          "uebersetzung": "Translation: The browser translates pages on your device, using the Firefox translation engine (Bergamot). The page text is not sent to any service or to MSM. The first time you translate a language, the browser downloads its language data from Mozilla (firefox-settings-attachments.cdn.mozilla.net) after you agree, without cookies or referrer; Mozilla sees your IP address and which languages you download. The language data stays in the browser until you remove it in the settings."
         }
       },
       "storage": {
@@ -8912,7 +8913,42 @@
       "suchen": "Search {{maschine}} for “{{text}}”",
       "drucken": "Print …",
       "untersuchen": "Inspect",
-      "anSingra": "Hand over to Singra"
+      "anSingra": "Hand over to Singra",
+      "uebersetzen": "Translate"
+    },
+    "uebersetzung": {
+      "name": "Translation",
+      "schliessen": "Close translation",
+      "erkennen": "Detecting the page language …",
+      "laden": "Downloading language data from Mozilla: {{geladen}} of {{gesamt}}",
+      "ladenName": "Downloading language data",
+      "laeuft_one": "Translating the page … {{count}} text done",
+      "laeuft_other": "Translating the page … {{count}} texts done",
+      "fertig": "Translated from {{von}} to {{nach}}",
+      "original": "Show original",
+      "nochmal": "Try again",
+      "waehlen": "Choose the page language and the target language.",
+      "zustimmung": "For these languages the browser downloads {{groesse}} of language data from Mozilla once. The page text stays on your device.",
+      "bereit": "The page is translated on your device.",
+      "von": "Page language",
+      "vonLeer": "Choose language",
+      "nach": "Translate to",
+      "uebersetzen": "Translate",
+      "ladenUndUebersetzen": "Download and translate",
+      "fehler": {
+        "netz": "The language data could not be downloaded. Check your connection.",
+        "pruefsumme": "The downloaded language data did not match the expected version and was discarded.",
+        "paar": "There is no translation for these languages.",
+        "seite": "The page did not respond. Reload it and try again.",
+        "engine": "The translation failed."
+      },
+      "erklaerung": "Pages are translated on your device; their text is not sent to any service. The browser downloads the language data from Mozilla the first time you translate a language.",
+      "keine": "No language data downloaded yet.",
+      "paar": "{{von}} → {{nach}}",
+      "entfernen": "Remove",
+      "entfernenName": "Remove {{paar}}",
+      "alle": "All language data",
+      "alleEntfernen": "Remove all"
     },
     "dialog": {
       "titel": "{{herkunft}} says",

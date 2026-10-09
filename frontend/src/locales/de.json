@@ -4870,7 +4870,7 @@
         "items": {
           "lokal": "Auf dem Rechner: Verlauf, Lesezeichen, geöffnete Tabs (Adresse, Titel, Seitensymbol), Einstellungen und die Zahl der seit der Installation geblockten Werbe- und Trackeranfragen (ohne Adressen) liegen nur im App-Ordner und gehen an keinen Server, auch nicht an Ihre Instanz. Cookies, Cache und Website-Speicher liegen in einem eigenen Profil, getrennt von Microsoft Edge.",
           "privat": "Private Tabs legen nichts im Verlauf ab und zeigen kein Seitensymbol. Unter Windows liegen ihre Cookies und ihr Website-Speicher nur im Arbeitsspeicher und verschwinden, wenn der letzte private Tab geschlossen ist; bis dahin teilen sich alle privaten Tabs diese Sitzung. „Beim Schließen vergessen“ (standardmäßig aus) löscht beim Beenden Cookies, Cache und Website-Speicher der normalen Tabs; Verlauf und Lesezeichen bleiben.",
-          "verbindungen": "Verbindungen: Die Seiten, die Sie öffnen, und die gewählte Suchmaschine bekommen Ihre Anfragen direkt. Für den Werbe- und Trackerschutz lädt der Browser höchstens alle vier Tage die Filterlisten von easylist.to und die Liste gegen Cookie-Hinweise von secure.fanboy.co.nz, ohne Cookie, Kennung und Referer; beide Server sehen dabei Ihre IP-Adresse. Das Seitensymbol liefert die WebView des Tabs; die Oberfläche lädt dafür keine Adresse der Seite.",
+          "verbindungen": "Verbindungen: Die Seiten, die Sie öffnen, und die gewählte Suchmaschine bekommen Ihre Anfragen direkt. Für den Werbe- und Trackerschutz lädt der Browser höchstens alle vier Tage die Filterlisten von easylist.to und die Liste gegen Cookie-Hinweise von secure.fanboy.co.nz, ohne Cookie, Kennung und Referer; beide Server sehen dabei Ihre IP-Adresse. Das Seitensymbol liefert die WebView des Tabs; die Oberfläche lädt dafür keine Adresse der Seite. Sprachdaten für die Übersetzung lädt der Browser nur auf Ihren Wunsch von Mozilla (siehe „Übersetzung“).",
           "https": "HTTPS zuerst und saubere Links: Eine Adresse mit „http://“ öffnet der Browser zuerst verschlüsselt. Kann die Seite das nicht, lädt er sie wie angegeben und merkt sich das bis zum Beenden, nur im Arbeitsspeicher. Adressen auf dem eigenen Rechner, im eigenen Netz und mit eigenem Port bleiben, wie sie sind. Ist der Werbe- und Trackerschutz an, nimmt der Browser bekannte Tracking-Parameter wie „utm_source“, „fbclid“ oder „gclid“ aus jeder Adresse, die ein Tab öffnet, Cookie-Hinweise lehnt er ab, wo die mitgelieferten Regeln von autoconsent (DuckDuckGo) das können, und blendet bekannte Hinweise aus, die sich nicht ablehnen lassen; eine Einwilligung gibt er nie. Die Regeln liegen im Browser, dafür geht keine Anfrage hinaus. Die Seite speichert die Ablehnung wie nach einem eigenen Klick, meist als Cookie.",
           "schutz": "Jugend- und Suchtschutz (standardmäßig aus): Ob eine Seite gesperrt ist, prüft der Browser auf dem Rechner; dafür geht keine Adresse an einen Dienst. Für „Inhalte für Erwachsene“, „Glücksspiel“ und „Soziale Netzwerke“ lädt er die Liste der Kategorie erst, wenn sie an ist, und danach höchstens alle vier Tage von raw.githubusercontent.com, ohne Cookie, Kennung und Referer. GitHub sieht dabei Ihre IP-Adresse und welche Liste Sie laden. Mit „Inhalte für Erwachsene“ hängt der Browser an Suchen bei Google, Bing, DuckDuckGo und Brave den Parameter für die sichere Suche an und schickt YouTube die Kopfzeile für den eingeschränkten Modus. Wer den Schutz lockern will, wartet mindestens einen Tag; die Wartezeit misst der Browser an der Uhrzeit, die raw.githubusercontent.com in der Antwort auf eine Anfrage ohne Inhalt nennt, nicht an der Uhr des Geräts. Diese Anfrage geht nur beim Beantragen, Bestätigen, Zurücknehmen und Binden hinaus. Wie viele Tage der Browser ohne gesperrte Seite war, zählt er nur auf dem Gerät; die Zahl geht an keinen Dienst und nicht an MSM.",
           "downloads": "Downloads: Jede Datei lädt zuerst in einen Ordner des Browsers und wird dort vom Virenschutz geprüft, den Windows kennt (meist Microsoft Defender). Erst danach kommt sie in den Download-Ordner. Je nach Einstellung des Virenschutzes gehen verdächtige Dateien oder Angaben über sie an dessen Hersteller; das regeln Sie in den Einstellungen des Virenschutzes, nicht im Browser.",
@@ -4883,7 +4883,8 @@
           "msmSuche": "MSM-Suche (nur gekoppelt): Ist der Browser mit MSM gekoppelt und keine andere Suchmaschine gewählt, gehen Suchbegriffe aus Adresszeile und Startseite an Ihre MSM-Instanz. Sie fragt damit ihre eigene SearXNG-Instanz, und diese die Suchmaschinen, die der Betreiber dort eingestellt hat; die sehen die Adresse des Servers, nicht Ihre. Der Begriff geht per POST, das Panel schreibt ihn in kein Protokoll. Zurück kommen nur Titel, Adresse und Text der Treffer, die Trefferseite lädt keine Bilder. Ist der Jugendschutz für Erwachsenen-Inhalte an, verlangt der Browser die strenge sichere Suche.",
           "nachrichten": "Nachrichten (nur gekoppelt): Die Startseite holt Schlagzeilen von Ihrer MSM-Instanz, höchstens alle 30 Minuten. Die Instanz fragt dafür ihre SearXNG-Instanz nach Nachrichten des Tages zu festen Themen, für alle Konten gleich. Welche Themen und Schlagworte Sie gewählt haben, bleibt im Browser; gefiltert wird auf dem Gerät. Der zuletzt geholte Stand liegt im Browser, damit die Startseite ohne Netz etwas zeigt. Die Kacheln zeigen Titel, Adresse und Alter, keine Bilder.",
           "android": "Unter Android: Safe Browsing und die Nutzungsstatistik der WebView sind abgeschaltet, besuchte Adressen gehen dafür nicht an Google. Normale Tabs haben ein eigenes Profil, getrennt von der Oberfläche des Browsers; getrennt sind damit Cookies und Speicher, den Prozess der WebView teilen sich Seiten und Oberfläche unter Android aber. Der Browser nimmt sich von der Android-Datensicherung und vom Umzug auf ein neues Gerät aus: Cookies, Verlauf und die Anmeldung der Kopplung bleiben auf diesem Telefon. Private Tabs teilen sich ein Profil auf dem Telefon; Cookies, Website-Speicher und Cache darin werden gelöscht, sobald der letzte private Tab geschlossen ist, den Ordner entfernt der nächste Start. Downloads lädt der Browser selbst in den Ordner „Download“; Cookies schickt er dabei nur an die Seite, der sie gehören, auch nach einer Weiterleitung. Eine Virenprüfung gibt es nicht. Den eingeschränkten Modus von YouTube kann der Browser hier nicht einschalten. Zahlungsdaten setzt er erst nach der Bildschirmsperre des Telefons (Fingerabdruck, Gesicht oder PIN) oder dem Master-Passwort ein. Ist er als Standardbrowser festgelegt oder wählen Sie ihn beim Öffnen aus, öffnen Links aus anderen Apps in einem neuen, normalen Tab.",
-          "widget": "Such-Widget unter Android: Was Sie in das Mikrofon sprechen, wandelt der Spracherkennungsdienst des Telefons in Text um, meist Google; der Browser bekommt nur den Text. Ein Foto nimmt die Kamera-App auf. Der Browser verkleinert es, entfernt Ort und andere Metadaten, schickt es an die Bildsuche der gewählten Suchmaschine (Google Lens oder Bing) und löscht es danach vom Telefon. Kamera- oder Mikrofonrecht hat der Browser selbst nicht."
+          "widget": "Such-Widget unter Android: Was Sie in das Mikrofon sprechen, wandelt der Spracherkennungsdienst des Telefons in Text um, meist Google; der Browser bekommt nur den Text. Ein Foto nimmt die Kamera-App auf. Der Browser verkleinert es, entfernt Ort und andere Metadaten, schickt es an die Bildsuche der gewählten Suchmaschine (Google Lens oder Bing) und löscht es danach vom Telefon. Kamera- oder Mikrofonrecht hat der Browser selbst nicht.",
+          "uebersetzung": "Übersetzung: Seiten übersetzt der Browser auf dem Gerät, mit der Übersetzungs-Engine von Firefox (Bergamot). Der Text der Seite geht an keinen Dienst und nicht an MSM. Beim ersten Übersetzen einer Sprache lädt der Browser nach Ihrer Zustimmung deren Sprachdaten von Mozilla (firefox-settings-attachments.cdn.mozilla.net), ohne Cookie und Referer; Mozilla sieht dabei Ihre IP-Adresse und welche Sprachen Sie laden. Die Sprachdaten bleiben im Browser, bis Sie sie in den Einstellungen entfernen."
         }
       },
       "storage": {
@@ -8912,7 +8913,42 @@
       "suchen": "Mit {{maschine}} nach „{{text}}“ suchen",
       "drucken": "Drucken …",
       "untersuchen": "Untersuchen",
-      "anSingra": "An Singra übergeben"
+      "anSingra": "An Singra übergeben",
+      "uebersetzen": "Übersetzen"
+    },
+    "uebersetzung": {
+      "name": "Übersetzung",
+      "schliessen": "Übersetzung schließen",
+      "erkennen": "Erkennt die Sprache der Seite …",
+      "laden": "Lädt Sprachdaten von Mozilla: {{geladen}} von {{gesamt}}",
+      "ladenName": "Sprachdaten laden",
+      "laeuft_one": "Übersetzt die Seite … {{count}} Text fertig",
+      "laeuft_other": "Übersetzt die Seite … {{count}} Texte fertig",
+      "fertig": "Von {{von}} nach {{nach}} übersetzt",
+      "original": "Original anzeigen",
+      "nochmal": "Erneut versuchen",
+      "waehlen": "Wähle die Sprache der Seite und die Zielsprache.",
+      "zustimmung": "Für diese Sprachen lädt der Browser einmalig {{groesse}} Sprachdaten von Mozilla. Der Text der Seite bleibt auf dem Gerät.",
+      "bereit": "Die Seite wird auf dem Gerät übersetzt.",
+      "von": "Sprache der Seite",
+      "vonLeer": "Sprache wählen",
+      "nach": "Übersetzen nach",
+      "uebersetzen": "Übersetzen",
+      "ladenUndUebersetzen": "Laden und übersetzen",
+      "fehler": {
+        "netz": "Die Sprachdaten ließen sich nicht laden. Prüfe die Verbindung.",
+        "pruefsumme": "Die geladenen Sprachdaten passen nicht zur erwarteten Fassung und wurden verworfen.",
+        "paar": "Für diese Sprachen gibt es keine Übersetzung.",
+        "seite": "Die Seite hat nicht geantwortet. Lade sie neu und versuch es noch einmal.",
+        "engine": "Die Übersetzung ist gescheitert."
+      },
+      "erklaerung": "Seiten werden auf dem Gerät übersetzt, ihr Text geht an keinen Dienst. Die Sprachdaten lädt der Browser beim ersten Übersetzen einer Sprache von Mozilla.",
+      "keine": "Noch keine Sprachdaten geladen.",
+      "paar": "{{von}} → {{nach}}",
+      "entfernen": "Entfernen",
+      "entfernenName": "{{paar}} entfernen",
+      "alle": "Alle Sprachdaten",
+      "alleEntfernen": "Alle entfernen"
     },
     "dialog": {
       "titel": "{{herkunft}} meldet",

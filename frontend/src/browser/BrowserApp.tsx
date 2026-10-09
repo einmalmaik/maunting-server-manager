@@ -33,6 +33,7 @@ import { Navigationsleiste } from './kopf/Navigationsleiste'
 import { Suchleiste } from './kopf/Suchleiste'
 import { Panel } from './leiste/Panel'
 import { Seitenleiste } from './leiste/Seitenleiste'
+import { useOhneEdgeMenue } from './seite/EigenesMenue'
 import { FormularLeiste } from './seite/FormularLeiste'
 import { Meldungsleiste } from './seite/Meldungsleiste'
 import { Seitenflaeche } from './seite/Seitenflaeche'
@@ -49,6 +50,7 @@ import { einrichten as gesperrtEinrichten } from './services/tresorGesperrt'
 import { useWidget } from './services/widget'
 import { useUeberdeckungBeobachten } from './services/ueberdeckung'
 import { useVerlaufFrist } from './services/verlaufStore'
+import { Uebersetzungsleiste } from './uebersetzung/Uebersetzungsleiste'
 
 export function BrowserApp() {
   return (
@@ -85,6 +87,7 @@ function Wurzel() {
   const adresszeile = useRef<AdresszeileGriff>(null)
   const pfad = useRef(pathname)
   pfad.current = pathname
+  useOhneEdgeMenue()
 
   const stand = useSitzung((s) => s.stand)
   const gekoppelt = istGekoppelt(stand)
@@ -154,6 +157,7 @@ function Wurzel() {
         <div className="flex min-w-0 flex-1 flex-col">
           <Meldungsleiste />
           <FormularLeiste />
+          <Uebersetzungsleiste />
           <Seitenflaeche />
         </div>
         {!handy && panelSeite === 'rechts' && <Panel seite="rechts" />}

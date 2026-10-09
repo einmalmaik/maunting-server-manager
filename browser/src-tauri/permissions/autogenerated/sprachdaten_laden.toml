@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sprachdaten-laden"
+description = "Enables the sprachdaten_laden command without any pre-configured scope."
+commands.allow = ["sprachdaten_laden"]
+
+[[permission]]
+identifier = "deny-sprachdaten-laden"
+description = "Denies the sprachdaten_laden command without any pre-configured scope."
+commands.deny = ["sprachdaten_laden"]

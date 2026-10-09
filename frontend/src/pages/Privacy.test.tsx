@@ -243,6 +243,8 @@ describe('Privacy page', () => {
     // 3.37: die Cookie-Liste kommt von einem weiteren Server; das Seitensymbol holt die Oberfläche nicht mehr selbst.
     expect(i18n.t('privacyPolicy.sections.browser.items.verbindungen')).toMatch(/secure\.fanboy\.co\.nz/);
     expect(i18n.t('privacyPolicy.sections.browser.items.verbindungen')).not.toMatch(/direkt von der Seite/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.uebersetzung')).toMatch(/Der Text der Seite geht an keinen Dienst .*Mozilla .firefox-settings-attachments\.cdn\.mozilla\.net/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.verbindungen')).toMatch(/Übersetzung/);
     // 3.38: Cookie-Hinweise lehnt der Browser ab (autoconsent), ohne Anfrage nach außen.
     expect(i18n.t('privacyPolicy.sections.browser.items.https')).toMatch(/eine Einwilligung gibt er nie/);
     expect(i18n.t('privacyPolicy.sections.browser.items.https')).toMatch(/autoconsent \(DuckDuckGo\).*keine Anfrage hinaus/);

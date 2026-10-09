@@ -5,7 +5,7 @@
  * (`msb:tab`). Außerhalb von Tauri (Tests, Vite im normalen Browser) tun die
  * Befehle nichts: die Oberfläche bleibt bedienbar, nur ohne Seiteninhalt.
  */
-import { invoke } from '@tauri-apps/api/core'
+import { Channel, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
 export function istTauri(): boolean {
@@ -81,6 +81,8 @@ export type TabEreignis =
   | { art: 'verworfen'; id: string }
   /** Ein Ereignis des DevTools-Protokolls für die Entwicklerwerkzeuge (`desktop/entwickler.rs`). */
   | { art: 'protokoll'; id: string; methode: string; daten: Record<string, unknown> }
+  /** Ein Stück Text der Seite zum Übersetzen, nur auf Anfrage `nr` (`tabs/uebersetzung.rs`); leer: fertig. */
+  | { art: 'texte'; id: string; nr: number; sprache: string; texte: string[] }
 
 /** Was `seite.js` meldet (`Meldung` in `tabs/formular.rs`). */
 export type FormularMeldung =
@@ -146,6 +148,19 @@ export const nativ = {
   /** Nur, wenn der Tab noch auf der Herkunft von `fuer` steht; sonst lehnt Rust ab. */
   /** Mit `rahmen` gehen Zahlungsdaten nur an Rahmen dieser Herkunft (`formular::Zahlrahmen`). */
   tabFuellen: (id: string, fuer: string, werte: Fuellen, rahmen?: string) => rufen('tab_fuellen', { id, fuer, werte, ...(rahmen && { rahmen }) }),
+  /** Ein Schritt der Übersetzung an die Seite; die Antwort kommt als Ereignis `texte`. */
+  tabUebersetzen: (id: string, fuer: string, nr: number, schritt: 'start' | 'weiter' | 'original', texte?: string[]) =>
+    rufen('tab_uebersetzen', { id, fuer, nr, schritt, texte: texte ?? null }),
+  /**
+   * Eine Datei der Sprachdaten von Mozilla, nur aus der festen Liste
+   * (`sprachdaten.rs`); `fortschritt` bekommt die bisher geladenen Bytes.
+   * Wirft `unbekannt`, `netz` oder `groesse`.
+   */
+  sprachdatenLaden: (ort: string, fortschritt: (bytes: number) => void) => {
+    const kanal = new Channel<number>()
+    kanal.onmessage = fortschritt
+    return rufen<ArrayBuffer>('sprachdaten_laden', { ort, fortschritt: kanal })
+  },
   oberflaecheFokussieren: () => rufen('oberflaeche_fokussieren'),
   tabStumm: (id: string, stumm: boolean) => rufen('tab_stumm', { id, stumm }),
   /** `schlafenMinuten: null`: Tabs schlafen nie (`tabs/ruhe.rs`). */

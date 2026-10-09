@@ -25,6 +25,7 @@ pub mod ereignis;
 pub mod formular;
 pub mod https;
 pub mod ruhe;
+pub mod uebersetzung;
 pub mod weg;
 #[cfg(windows)]
 mod desktop;
@@ -137,6 +138,23 @@ pub fn tab_aktivieren(app: AppHandle, tabs: State<'_, Tabs>, id: Option<String>)
     Ok(())
 }
 
+/// Eine Nachricht von `seite.js` aus dem obersten Rahmen, auf beiden
+/// Plattformen. `url` ist die Adresse aus der Webview; dass der Absender
+/// dieselbe Herkunft hat, ist schon geprüft (Punkt 134).
+pub fn nachricht_oben(app: &AppHandle, id: &str, url: &str, roh: &str) {
+    if let Some(stueck) = uebersetzung::lesen(roh) {
+        uebersetzung::stueck(app, id, url, stueck);
+    } else if let Some(meldung) = formular::lesen(roh) {
+        formular::oben(app, id, url, meldung);
+    }
+}
+
+/// Die Seite im Tab wechselt oder der Tab geht: was an ihr hing, gilt nicht mehr.
+pub fn seite_vergessen(id: &str) {
+    formular::vergessen(id);
+    uebersetzung::vergessen(id);
+}
+
 #[tauri::command(async)]
 pub fn tab_schliessen(app: AppHandle, tabs: State<'_, Tabs>, id: String) -> Result<(), String> {
     id_pruefen(&id)?;
@@ -151,7 +169,7 @@ pub fn tab_schliessen(app: AppHandle, tabs: State<'_, Tabs>, id: String) -> Resu
         }
     }
     crate::schild::tab_vergessen(&id);
-    formular::vergessen(&id);
+    seite_vergessen(&id);
     plattform::schliessen(&app, &id);
     Ok(())
 }

@@ -69,7 +69,7 @@ pub(super) unsafe fn einrichten(
                 if let Some(args) = args {
                     *hauptadresse.borrow_mut() = text(|p| args.Uri(p));
                     schild::seitenwechsel(&app, &id);
-                    crate::tabs::formular::vergessen(&id);
+                    crate::tabs::seite_vergessen(&id);
                 }
                 Ok(())
             })),

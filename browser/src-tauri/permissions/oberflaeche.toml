@@ -29,6 +29,8 @@ permissions = [
   "allow-tab-suchen",
   "allow-tab-drucken",
   "allow-tab-fuellen",
+  "allow-tab-uebersetzen",
+  "allow-sprachdaten-laden",
   "allow-tabs-zuruecksetzen",
   "allow-oberflaeche-fokussieren",
   "allow-tabs-leistung",

@@ -14,7 +14,7 @@ use webview2_com::{FrameCreatedEventHandler, FrameDestroyedEventHandler, FrameWe
 use windows::core::{Interface, HSTRING};
 
 use super::webview2::text;
-use crate::tabs::formular::{self, gleiche_herkunft, lesen};
+use crate::tabs::formular::{self, gleiche_herkunft};
 
 /// So viele Rahmen einer Seite merkt sich ein Tab; Werbung lädt Rahmen nach,
 /// die ältesten fallen heraus.
@@ -34,14 +34,13 @@ pub(super) unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -
             move |sender, args| {
                 let (Some(core), Some(args)) = (sender, args) else { return Ok(()) };
                 let roh = text(|p| args.TryGetWebMessageAsString(p));
-                let Some(meldung) = lesen(&roh) else { return Ok(()) };
                 // `Source()` der Webview ist nach dem Commit schon die neue Seite,
                 // während eine späte Nachricht noch vom alten Dokument kommt.
                 // `args.Source()` nennt den Absender; beide müssen passen.
                 let url = text(|p| core.Source(p));
                 let absender = text(|p| args.Source(p));
                 if gleiche_herkunft(&url, &absender) {
-                    formular::oben(&app, &id, &url, meldung);
+                    crate::tabs::nachricht_oben(&app, &id, &url, &roh);
                 }
                 Ok(())
             }

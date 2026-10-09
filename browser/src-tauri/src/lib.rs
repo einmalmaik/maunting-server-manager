@@ -19,6 +19,7 @@ pub mod mixer;
 pub mod netz;
 pub mod schild;
 pub mod seite;
+pub mod sprachdaten;
 pub mod tabs;
 pub mod widget;
 
@@ -121,6 +122,8 @@ pub fn run() {
             tabs::tab_suchen,
             tabs::tab_drucken,
             tabs::formular::tab_fuellen,
+            tabs::uebersetzung::tab_uebersetzen,
+            sprachdaten::sprachdaten_laden,
             tabs::tabs_zuruecksetzen,
             tabs::oberflaeche_fokussieren,
             tabs::ruhe::tabs_leistung,

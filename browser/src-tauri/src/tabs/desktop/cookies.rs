@@ -7,6 +7,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::sync::mpsc;
 
 use tauri::AppHandle;
 use webview2_com::AddScriptToExecuteOnDocumentCreatedCompletedHandler;
@@ -18,12 +19,14 @@ thread_local! {
     static FASSUNG: Cell<u64> = const { Cell::new(0) };
 }
 
-/// Meldet das Skript am Tab an. UI-Faden.
-pub(super) unsafe fn anmelden(id: &str, core: &ICoreWebView2) -> windows::core::Result<()> {
+/// Meldet das Skript am Tab an. UI-Faden. Der Empfänger meldet, wann es gilt.
+pub(super) unsafe fn anmelden(id: &str, core: &ICoreWebView2) -> windows::core::Result<mpsc::Receiver<windows::core::Result<()>>> {
     let (id, fassung, core_spaeter) = (id.to_string(), FASSUNG.get(), core.clone());
+    let (tx, rx) = mpsc::channel();
     core.AddScriptToExecuteOnDocumentCreated(
         &HSTRING::from(crate::cookies::skript()),
         &AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(move |fehler, kennung| {
+            let _ = tx.send(fehler.clone());
             fehler?;
             if fassung == FASSUNG.get() {
                 KENNUNGEN.with(|k| k.borrow_mut().insert(id, kennung));
@@ -32,7 +35,8 @@ pub(super) unsafe fn anmelden(id: &str, core: &ICoreWebView2) -> windows::core::
             }
             Ok(())
         })),
-    )
+    )?;
+    Ok(rx)
 }
 
 /// Ersetzt das Skript in allen Tabs; gilt ab dem nächsten Dokument.

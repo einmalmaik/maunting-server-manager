@@ -1,7 +1,7 @@
 //! JNI für `TabsBruecke.kt`: was Kotlin aus den Tab-WebViews an Rust gibt.
 //!
 //! Entschieden wird mit denselben Funktionen wie unter Windows: `tabs::weg`
-//! für Navigationen, `schild::pruefen` für Anfragen, `formular::lesen` für
+//! für Navigationen, `schild::pruefen` für Anfragen, `tabs::nachricht_oben` für
 //! Nachrichten von `seite.js`. Adressen nimmt Kotlin aus der WebView, nie aus
 //! einer Nachricht der Seite.
 //!
@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::schild::{self, AnfrageArt};
 use crate::tabs::ereignis::von_kotlin;
-use crate::tabs::formular::{self, gleiche_herkunft, lesen};
+use crate::tabs::formular::{self, gleiche_herkunft};
 use crate::tabs::{id_pruefen, melden, vorab, weg, TabEreignis, Vorab, Weg};
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
@@ -137,7 +137,7 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_seit
     if let Some(app) = APP.get() {
         schild::seitenwechsel(app, &tab);
     }
-    formular::vergessen(&tab);
+    super::super::seite_vergessen(&tab);
 }
 
 /// Eine Nachricht von `seite.js` aus dem obersten Rahmen; `url` aus der WebView.
@@ -150,9 +150,8 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_nach
     roh: JString<'l>,
 ) {
     let (id, url, roh) = (text(&mut env, &tab), text(&mut env, &url), text(&mut env, &roh));
-    let (Some(app), Some(meldung)) = (APP.get(), lesen(&roh)) else { return };
-    if id_pruefen(&id).is_ok() {
-        formular::oben(app, &id, &url, meldung);
+    if let (Some(app), Ok(())) = (APP.get(), id_pruefen(&id)) {
+        super::super::nachricht_oben(app, &id, &url, &roh);
     }
 }
 

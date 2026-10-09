@@ -22,6 +22,7 @@ import { SeitenMenue } from './SeitenMenue'
 import { Sperrseite } from './Sperrseite'
 import { MsmSuche, useZurueckZurSuche } from './MsmSuche'
 import { Startseite } from './Startseite'
+import { useEigenesMenue } from './EigenesMenue'
 
 const EinstellungenSeite = lazy(() => import('../einstellungen/EinstellungenSeite').then((m) => ({ default: m.EinstellungenSeite })))
 
@@ -60,10 +61,11 @@ export function Seitenflaeche() {
   const standbild = useStandbild((s) => s.bild)
   useRahmenMelden(flaeche)
   useZurueckZurSuche(tab)
+  const eigenes = useEigenesMenue(tab)
   const intern = tab ? interneSeite(tab.url) : null
 
   return (
-    <main ref={flaeche} className="relative min-w-0 flex-1 overflow-hidden bg-surface">
+    <main ref={flaeche} onContextMenu={eigenes.oeffnen} className="relative min-w-0 flex-1 overflow-hidden bg-surface">
       {!tab?.url ? (
         <Startseite privat={!!tab?.privat} />
       ) : intern?.seite === 'suche' ? (
@@ -101,6 +103,7 @@ export function Seitenflaeche() {
         <img src={standbild.url} alt="" aria-hidden="true" draggable={false} className="h-full w-full select-none" />
       ) : null}
       <SeitenMenue flaeche={flaeche} />
+      {eigenes.ansicht}
       <SeitenDialoge />
     </main>
   )

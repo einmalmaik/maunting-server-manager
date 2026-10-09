@@ -296,6 +296,79 @@
     }
   }
 
+  // Übersetzen (`tabs/uebersetzung.rs`): die Seite gibt ihren Text nur auf
+  // Anfrage des Browsers heraus, in Stücken, und bekommt nur Text zurück. Er
+  // geht per `nodeValue` bzw. als Attribut hinein, nie als HTML. Was die Seite
+  // inzwischen selbst geändert hat, bleibt, wie sie es will.
+  const NICHT_UEBERSETZEN =
+    'script,style,noscript,template,code,pre,kbd,samp,var,textarea,select,svg,math,[translate="no"],.notranslate,[contenteditable]:not([contenteditable="false"])'
+  const UEBERSETZT_ATTRIBUTE = ['alt', 'placeholder', 'title', 'aria-label']
+  const STUECK_TEXTE = 100
+  const STUECK_ZEICHEN = 32 * 1024
+  const TEXT_MAX = 2000
+  const BUCHSTABE = /\p{L}/u
+  // Je Ziel: Knoten, Attribut (null: Text), Original, Übersetzung.
+  let arbeit = null
+
+  function textSammeln() {
+    const ziele = []
+    const nehmen = (knoten, attribut, text) => {
+      if (text && text.length <= TEXT_MAX && BUCHSTABE.test(text)) ziele.push([knoten, attribut, text, null])
+    }
+    const wurzel = document.body || document.documentElement
+    const lauf = document.createTreeWalker(wurzel, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+      acceptNode: (k) => (k.nodeType === 1 && k.matches(NICHT_UEBERSETZEN) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    })
+    for (let k = lauf.currentNode; k; k = lauf.nextNode()) {
+      if (k.nodeType === 3) nehmen(k, null, k.nodeValue)
+      else for (const a of UEBERSETZT_ATTRIBUTE) if (k.hasAttribute(a)) nehmen(k, a, k.getAttribute(a))
+    }
+    return ziele
+  }
+
+  const jetzt = (z) => (z[1] ? z[0].getAttribute(z[1]) : z[0].nodeValue)
+  const schreiben = (z, wert) => (z[1] ? z[0].setAttribute(z[1], wert) : (z[0].nodeValue = wert))
+
+  function naechstesStueck() {
+    const texte = []
+    let zeichen = 0
+    arbeit.stueck = []
+    while (arbeit.pos < arbeit.ziele.length && texte.length < STUECK_TEXTE) {
+      const z = arbeit.ziele[arbeit.pos]
+      if (texte.length && zeichen + z[2].length > STUECK_ZEICHEN) break
+      texte.push(z[2])
+      zeichen += z[2].length
+      arbeit.stueck.push(z)
+      arbeit.pos++
+    }
+    return texte
+  }
+
+  function zurueck() {
+    if (arbeit) for (const z of arbeit.ziele) if (z[3] !== null && jetzt(z) === z[3]) schreiben(z, z[2])
+    arbeit = null
+  }
+
+  function uebersetzen(d) {
+    if (typeof d.nr !== 'number') return
+    if (d.schritt === 'original') return zurueck()
+    if (d.schritt === 'start') {
+      zurueck()
+      arbeit = { ziele: textSammeln(), pos: 0, stueck: [] }
+    } else if (d.schritt === 'weiter') {
+      if (!arbeit || !Array.isArray(d.texte) || d.texte.length !== arbeit.stueck.length) return
+      arbeit.stueck.forEach((z, i) => {
+        const u = d.texte[i]
+        if (typeof u === 'string' && jetzt(z) === z[2]) {
+          schreiben(z, u)
+          z[3] = u
+        }
+      })
+    } else return
+    const sprache = (document.documentElement.getAttribute('lang') || '').slice(0, 35).replace(/[^A-Za-z0-9_-]/g, '')
+    senden(json({ t: 'texte', nr: d.nr, sprache, texte: naechstesStueck() }))
+  }
+
   // Android lädt `blob:` und `data:` nicht selbst (`Herunterladen.kt`): die
   // Seite holt die Datei und gibt sie in Teilen weiter, jeden erst, wenn der
   // vorige geschrieben ist. Den Namen aus `download` kennt nur die Seite.
@@ -327,10 +400,11 @@
     }
   }
 
-  // Gefüllt wird nur auf Anweisung des Browsers, nach einem Klick in seiner Leiste.
+  // Gefüllt und übersetzt wird nur auf Anweisung des Browsers, nach einem Klick in seiner Leiste.
   bruecke.addEventListener('message', (e) => {
     const d = nachricht(e.data)
     if (d && d.t === 'datei' && android) return void dateiGeben(d.nr, d.url)
+    if (d && d.t === 'uebersetzen') return void uebersetzen(d)
     if (d && d.t === 'weiter' && quittungen.has(d.nr)) {
       const weiter = quittungen.get(d.nr)
       quittungen.delete(d.nr)

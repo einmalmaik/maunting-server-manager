@@ -32,6 +32,8 @@ const BEFEHLE: &[&str] = &[
     "tab_suchen",
     "tab_drucken",
     "tab_fuellen",
+    "tab_uebersetzen",
+    "sprachdaten_laden",
     "tabs_zuruecksetzen",
     "oberflaeche_fokussieren",
     "tabs_leistung",

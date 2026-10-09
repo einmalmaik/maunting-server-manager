@@ -24,6 +24,7 @@ import { leererTab, neueTabId, webviewZeigen, type Tab } from './tab'
 import { ereignisAnwenden } from './tabEreignis'
 import { tabsSpeichern } from './tabsAblage'
 import { tabWeg as entwicklerTabWeg } from '../entwickler/werkzeuge'
+import { useUebersetzung } from '../uebersetzung/ablauf'
 
 interface Geschlossen {
   url: string
@@ -161,6 +162,7 @@ export const useTabsStore = create<TabsZustand>()(
           useRueckfragen.getState().tabWeg(id)
           entwicklerTabWeg(id)
           useFormulare.getState().tabWeg(id)
+          useUebersetzung.getState().seiteWeg(id)
           const rest = tabs.filter((t) => t.id !== id)
           if (tab.privat && !rest.some((t) => t.privat)) {
             // Die private Sitzung ist zu (Android leert ihr Profil): keine ihrer Seiten lässt sich zurückholen.

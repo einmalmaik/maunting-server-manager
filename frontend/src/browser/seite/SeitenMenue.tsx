@@ -19,6 +19,7 @@ import {
   Download,
   ExternalLink,
   Image as ImageIcon,
+  Languages,
   Link2,
   Printer,
   RotateCw,
@@ -40,6 +41,7 @@ import { useFrageDesTabs, useRueckfragen } from '../services/rueckfragen'
 import { baueZielUrl, suchmaschine } from '../services/searchEngines'
 import { suchName } from '../services/suchwahl'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
+import { useUebersetzen } from '../uebersetzung/ablauf'
 
 /** Befehle der WebView2, die das Menü anbietet, in dieser Reihenfolge. */
 const NATIV: Record<string, ReactNode> = {
@@ -69,6 +71,7 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
   const maschine = useWirksameSuche()
   const searxng = useEinstellungenStore((s) => s.searxngUrl)
   const anSingra = useAnSingra(tab)
+  const uebersetzen = useUebersetzen(tab)
 
   if (!tab || frage?.art !== 'kontextmenue') return null
   const menue = frage
@@ -142,6 +145,7 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
   if (!menue.link && !menue.bild && !menue.auswahl && !menue.bearbeitbar) {
     items.push(...nativEintrag('back', items.length > 0), ...nativEintrag('forward'), ...nativEintrag('reload'), ...nativEintrag('saveAs'))
     items.push(eigen('drucken', t('browser.menue.drucken'), <Printer />, () => void nativ.tabDrucken(tab.id)))
+    if (uebersetzen) items.push(eigen('uebersetzen', t('browser.menue.uebersetzen'), <Languages />, uebersetzen))
     if (anSingra) items.push(eigen('singra', t('browser.menue.anSingra'), <Bot />, anSingra))
   }
   // Entwicklerwerkzeuge gibt es auf Android nicht.

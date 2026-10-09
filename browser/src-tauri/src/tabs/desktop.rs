@@ -21,7 +21,9 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
-use webview2_com::{CreateCoreWebView2ControllerCompletedHandler, CreateCoreWebView2EnvironmentCompletedHandler};
+use webview2_com::{
+    AddScriptToExecuteOnDocumentCreatedCompletedHandler, CreateCoreWebView2ControllerCompletedHandler, CreateCoreWebView2EnvironmentCompletedHandler,
+};
 use windows::core::{Interface, HSTRING, PCWSTR};
 use windows::Win32::Foundation::{E_POINTER, HWND, RECT};
 
@@ -173,9 +175,21 @@ fn anlegen(app: &AppHandle, id: &str, privat: bool) -> Result<ICoreWebView2, Str
         // bevor die Seite läuft, und nimmt es ihr weg.
         einstellungen.SetIsWebMessageEnabled(true).map_err(fehler)?;
         einstellungen.SetAreHostObjectsAllowed(false).map_err(fehler)?;
-        core.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(crate::seite::SKRIPT), None)
-            .map_err(fehler)?;
-        cookies::anmelden(id, &core).map_err(fehler)?;
+        // Beide Skripte gelten erst, wenn WebView2 die Anmeldung bestätigt hat.
+        // `laden` navigiert gleich danach; kam die erste Seite schnell (Cache),
+        // lief sie sonst ohne `seite.js` und sah `chrome.webview` (bis 10/2026).
+        let (tx, rx) = mpsc::channel();
+        core.AddScriptToExecuteOnDocumentCreated(
+            &HSTRING::from(crate::seite::SKRIPT),
+            &AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(move |ergebnis, _| {
+                let _ = tx.send(ergebnis);
+                Ok(())
+            })),
+        )
+        .map_err(fehler)?;
+        webview2_com::wait_with_pump(rx).map_err(fehler)?.map_err(fehler)?;
+        let cookies_da = cookies::anmelden(id, &core).map_err(fehler)?;
+        webview2_com::wait_with_pump(cookies_da).map_err(fehler)?.map_err(fehler)?;
         grundereignisse::anbinden(app, id, &core).map_err(fehler)?;
         formulare::anbinden(app, id, &core).map_err(fehler)?;
         schlaf::anbinden(app, id, &core).map_err(fehler)?;

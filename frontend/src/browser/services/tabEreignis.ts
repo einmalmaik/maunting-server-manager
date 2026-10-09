@@ -12,6 +12,7 @@ import { useRueckfragen } from './rueckfragen'
 import type { Tab } from './tab'
 import { useVerlaufStore } from './verlaufStore'
 import { protokollEreignis } from '../entwickler/werkzeuge'
+import { useUebersetzung } from '../uebersetzung/ablauf'
 
 /** Was `tabsStore` dafür hergibt. */
 export interface TabZugriff {
@@ -29,6 +30,7 @@ export function ereignisAnwenden(e: TabEreignis, z: TabZugriff): void {
     case 'laedt':
       z.aendern(e.id, { laedt: true, url: e.url, abgestuerzt: false, fehler: null, status: '' })
       useFormulare.getState().laedt(e.id)
+      useUebersetzung.getState().seiteWeg(e.id)
       // Zurück aus einer Fehlerseite: die Webview wieder nach vorn.
       if (tab.fehler) z.zeigen(e.id)
       break
@@ -54,6 +56,9 @@ export function ereignisAnwenden(e: TabEreignis, z: TabZugriff): void {
       break
     case 'formular':
       useFormulare.getState().ereignis(e)
+      break
+    case 'texte':
+      useUebersetzung.getState().texte(e)
       break
     case 'protokoll':
       protokollEreignis(e.id, e.methode, e.daten)

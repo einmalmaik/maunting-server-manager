@@ -94,6 +94,9 @@ pub enum TabEreignis {
     /// Ein Ereignis des DevTools-Protokolls für die Entwicklerwerkzeuge,
     /// unverändert bis auf Kürzungen (`desktop/entwickler.rs`).
     Protokoll { id: String, methode: String, daten: serde_json::Value },
+    /// Ein Stück Text der Seite zum Übersetzen, als Antwort auf eine Anfrage
+    /// der Oberfläche (`uebersetzung.rs`). Leere `texte`: fertig.
+    Texte { id: String, nr: u32, sprache: String, texte: Vec<String> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,7 +142,7 @@ impl TabEreignis {
             | Vollbild { id, .. } | Formular { id, .. } | Kontextmenue { id, .. } | Dialog { id, .. }
             | Recht { id, .. } | Anmeldung { id, .. } | Fehlerseite { id, .. } | Gesperrt { id, .. }
             | Status { id, .. } | Treffer { id, .. } | Ton { id, .. } | Schlaf { id, .. } | Verworfen { id }
-            | Protokoll { id, .. } => id,
+            | Protokoll { id, .. } | Texte { id, .. } => id,
         }
     }
 }
@@ -147,7 +150,7 @@ impl TabEreignis {
 /// Ein Ereignis, das Kotlin als JSON meldet (`Tab.melden`, `Herunterladen`,
 /// `TabChrome`). Es wird in [`TabEreignis`] gelesen, also mit jedem Feld und
 /// Typ geprüft; bis 09.10.2026 prüfte Rust nur `art` und `id` und gab den
-/// Rest roh weiter. Schild, Gesperrt und Formular meldet nur Rust; Vollbild
+/// Rest roh weiter. Schild, Gesperrt, Formular und Texte meldet nur Rust; Vollbild
 /// zeigt Kotlin selbst, Rechte lehnt es ab, und Protokoll, Status, Ton und
 /// Schlaf gibt es auf Android nicht.
 pub fn von_kotlin(json: &str) -> Option<TabEreignis> {

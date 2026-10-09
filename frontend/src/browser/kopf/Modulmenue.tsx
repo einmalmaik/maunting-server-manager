@@ -7,7 +7,7 @@
  * Neu laden, Lesezeichen und die Suche in der Seite, wie im Menü von Chrome.
  */
 import { useRef, useState } from 'react'
-import { ArrowRight, Bot, Menu, RotateCw, Search, Star, X } from 'lucide-react'
+import { ArrowRight, Bot, Languages, Menu, RotateCw, Search, Star, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Ankerfenster } from '@/Singra/UI'
@@ -20,6 +20,7 @@ import { istGekoppelt, useSitzung } from '../services/sitzung'
 import { useSuche } from '../services/suche'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 import { useVerlaufStore } from '../services/verlaufStore'
+import { useUebersetzen } from '../uebersetzung/ablauf'
 import { Knopf, Zahl } from './knopf'
 
 interface Ziel {
@@ -72,6 +73,7 @@ function HandyAktionen({ schliessen }: { schliessen: () => void }) {
   const umschalten = useVerlaufStore((s) => s.lesezeichenUmschalten)
   const suchen = useSuche((s) => s.oeffnen)
   const anSingra = useAnSingra(tab)
+  const uebersetzen = useUebersetzen(tab)
   const webseite = !!tab && istWebseite(tab.url)
   const gemerkt = webseite && lesezeichen.some((l) => l.url === tab!.url)
   const und = (tun: () => void) => () => {
@@ -94,6 +96,11 @@ function HandyAktionen({ schliessen }: { schliessen: () => void }) {
       <Knopf name={t('browser.suche.feld')} onClick={und(suchen)} disabled={!webseite}>
         <Search className="h-5 w-5" aria-hidden="true" />
       </Knopf>
+      {uebersetzen && (
+        <Knopf name={t('browser.menue.uebersetzen')} onClick={und(uebersetzen)}>
+          <Languages className="h-5 w-5" aria-hidden="true" />
+        </Knopf>
+      )}
       {anSingra && (
         <Knopf name={t('browser.menue.anSingra')} onClick={und(anSingra)}>
           <Bot className="h-5 w-5" aria-hidden="true" />
