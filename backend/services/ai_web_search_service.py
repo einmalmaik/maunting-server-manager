@@ -38,6 +38,7 @@ import ipaddress
 import os
 import re
 import urllib.parse
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -330,14 +331,19 @@ def searxng_treffer(
     seite: int = 1,
     sicher: bool = False,
     sprache: str | None = None,
+    kategorie: str | None = None,
+    zeitraum: str | None = None,
     s_url: str | None = None,
 ) -> list[dict]:
-    """Treffer der SearXNG-Instanz, fuer die KI und die MSM-Suche des Browsers.
+    """Treffer der SearXNG-Instanz, fuer die KI und den Browser (Suche, Nachrichten).
 
     Nur oeffentliche http(s)-Adressen; eine Adresse ueber ``MAX_URL_CHARS``
     faellt weg, statt gekuerzt auf eine andere Seite zu zeigen. ``sicher``
-    verlangt die strenge sichere Suche. Wirft ``WebSearchUnavailable``, wenn
-    keine Instanz eingerichtet ist oder sie nicht antwortet.
+    verlangt die strenge sichere Suche, ``kategorie`` und ``zeitraum`` gehen
+    als ``categories`` und ``time_range`` an SearXNG. Nennt SearXNG ein
+    Datum, steht es als ``published`` (ISO, UTC) dabei. Wirft
+    ``WebSearchUnavailable``, wenn keine Instanz eingerichtet ist oder sie
+    nicht antwortet.
     """
     target_url = s_url or searxng_url()
     if not target_url:
@@ -347,6 +353,10 @@ def searxng_treffer(
         params["safesearch"] = 2
     if sprache:
         params["language"] = sprache
+    if kategorie:
+        params["categories"] = kategorie
+    if zeitraum:
+        params["time_range"] = zeitraum
     try:
         resp = _http_client().get(
             f"{target_url.rstrip('/')}/search",
@@ -370,12 +380,29 @@ def searxng_treffer(
             continue
         u = str(r.get("url") or "")
         if len(u) <= MAX_URL_CHARS and _is_safe_public_url(u):
-            hits.append({
+            hit = {
                 "title": redact_sensitive_text(str(r.get("title") or ""))[:MAX_TITLE_CHARS],
                 "url": u,
                 "snippet": redact_sensitive_text(str(r.get("content") or ""))[:MAX_SNIPPET_CHARS],
-            })
+            }
+            published = _zeitpunkt(r.get("publishedDate"))
+            if published:
+                hit["published"] = published
+            hits.append(hit)
     return hits
+
+
+def _zeitpunkt(wert: object) -> str | None:
+    """Ein Datum aus SearXNG als ISO in UTC; was sich nicht lesen laesst, faellt weg."""
+    if not isinstance(wert, str) or not wert or len(wert) > 40:
+        return None
+    try:
+        zeit = datetime.fromisoformat(wert.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if zeit.tzinfo is None:
+        zeit = zeit.replace(tzinfo=timezone.utc)
+    return zeit.astimezone(timezone.utc).isoformat()
 
 
 def _search_searxng(query: str, limit: int = MAX_RESULTS, s_url: str | None = None) -> list[dict]:

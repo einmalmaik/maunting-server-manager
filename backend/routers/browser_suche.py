@@ -1,30 +1,34 @@
-"""Die MSM-Suche des Secure Browsers.
+"""Die MSM-Suche und die Nachrichten des Secure Browsers.
 
 Ein gekoppelter Browser sucht über die SearXNG-Instanz des eigenen Servers,
 dieselbe, die auch Singra benutzt (`ai_web_search_service.searxng_treffer`).
 Die Suchbegriffe gehen per POST, damit sie in keinem Zugriffslog stehen, und
 werden hier nicht geloggt. Zurück kommen nur Titel, Adresse und Text, keine
 Bilder: die Trefferseite lädt nichts von fremden Servern.
+
+Die Nachrichten (`services/browser_nachrichten_service.py`) sind für alle
+Konten gleich; Themen und Schlagworte filtert der Browser selbst.
 """
 
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from limits import parse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StringConstraints
 
 from dependencies import get_current_user, verify_csrf
 from middleware.rate_limit import limiter
 from models.user import User
-from services import ai_web_search_service
+from services import ai_web_search_service, browser_nachrichten_service
 from services.ai_web_search_service import WebSearchUnavailable
 
 router = APIRouter(prefix="/api/browser", tags=["browser"])
 
 TREFFER_JE_SEITE = 10
 _grenze = parse("60/minute")
+_nachrichten_grenze = parse("30/minute")
 
 
 class SucheAnfrage(BaseModel):
@@ -63,3 +67,18 @@ def suchen(
     return {
         "treffer": [{"titel": t["title"], "url": t["url"], "inhalt": t["snippet"]} for t in treffer],
     }
+
+
+@router.get("/nachrichten")
+def nachrichten(
+    sprache: Annotated[str, Query(pattern=r"^[a-z]{2}$")] = "en",
+    user: User = Depends(get_current_user),
+) -> dict:
+    if not limiter.limiter.hit(_nachrichten_grenze, f"browser-nachrichten:{user.id}"):
+        raise _mit_code(429, "BROWSER_NACHRICHTEN_ZU_VIELE")
+    try:
+        return browser_nachrichten_service.nachrichten(sprache)
+    except WebSearchUnavailable as exc:
+        if exc.code == "AI_WEB_SEARCH_NOT_CONFIGURED":
+            raise _mit_code(503, "BROWSER_NACHRICHTEN_NICHT_EINGERICHTET") from exc
+        raise _mit_code(502, "BROWSER_NACHRICHTEN_NICHT_ERREICHBAR") from exc

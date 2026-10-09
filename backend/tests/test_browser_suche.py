@@ -155,3 +155,117 @@ def test_die_grenze_gilt_je_konto(searxng: dict) -> None:
     assert stati[:60] == [200] * 60
     assert stati[60] == 429
     assert _app(konto=19).post("/api/browser/suche", json={"q": "x"}).status_code == 200
+
+
+# --- Nachrichten -------------------------------------------------------------
+
+from services import browser_nachrichten_service  # noqa: E402
+
+
+@pytest.fixture
+def nachrichten(searxng: dict, monkeypatch: pytest.MonkeyPatch) -> dict:
+    browser_nachrichten_service.vergessen()
+    uhr = {"jetzt": 1000.0}
+    monkeypatch.setattr(browser_nachrichten_service.time, "monotonic", lambda: uhr["jetzt"])
+    searxng["uhr"] = uhr
+    yield searxng
+    browser_nachrichten_service.vergessen()
+
+
+def _news(*urls: str) -> _Antwort:
+    return _Antwort({"results": [
+        {"url": u, "title": f"T {u}", "content": "x" * 500, "publishedDate": "2026-10-09T08:15:00Z"} for u in urls
+    ]})
+
+
+def test_nachrichten_nur_angemeldet(nachrichten: dict) -> None:
+    assert _app(angemeldet=False).get("/api/browser/nachrichten").status_code == 401
+    assert nachrichten["anfragen"] == []
+
+
+def test_nachrichten_fragen_je_thema_nach_news_des_tages_mit_sicherer_suche(nachrichten: dict) -> None:
+    nachrichten["antwort"] = _news("https://a.example/1")
+    antwort = _app(konto=31).get("/api/browser/nachrichten?sprache=de")
+    assert antwort.status_code == 200
+    assert len(nachrichten["anfragen"]) == len(browser_nachrichten_service.THEMEN)
+    begriffe = sorted(a["params"]["q"] for a in nachrichten["anfragen"])
+    assert begriffe == sorted(t["de"] for t in browser_nachrichten_service.THEMEN.values())
+    for a in nachrichten["anfragen"]:
+        assert a["params"]["categories"] == "news"
+        assert a["params"]["time_range"] == "day"
+        assert a["params"]["safesearch"] == 2
+        assert a["params"]["language"] == "de"
+    eintrag = antwort.json()["themen"]["technik"][0]
+    assert eintrag == {
+        "titel": "T https://a.example/1",
+        "url": "https://a.example/1",
+        "inhalt": "x" * browser_nachrichten_service.INHALT_MAX,
+        "zeit": "2026-10-09T08:15:00+00:00",
+    }
+
+
+def test_nachrichten_nur_https_ohne_doppelte(nachrichten: dict) -> None:
+    nachrichten["antwort"] = _news("http://a.example/1", "https://b.example/2", "https://b.example/2", "https://c.example/3")
+    themen = _app(konto=32).get("/api/browser/nachrichten").json()["themen"]
+    assert [e["url"] for e in themen["sport"]] == ["https://b.example/2", "https://c.example/3"]
+
+
+def test_nachrichten_holen_hoechstens_alle_dreissig_minuten(nachrichten: dict) -> None:
+    nachrichten["antwort"] = _news("https://a.example/1")
+    client = _app(konto=33)
+    client.get("/api/browser/nachrichten?sprache=de")
+    themen = len(browser_nachrichten_service.THEMEN)
+    nachrichten["uhr"]["jetzt"] += browser_nachrichten_service.FRISCH_S - 1
+    client.get("/api/browser/nachrichten?sprache=de")
+    _app(konto=34).get("/api/browser/nachrichten?sprache=de")
+    assert len(nachrichten["anfragen"]) == themen
+    nachrichten["uhr"]["jetzt"] += 2
+    client.get("/api/browser/nachrichten?sprache=de")
+    assert len(nachrichten["anfragen"]) == 2 * themen
+
+
+def test_nachrichten_kennen_nur_zwei_sprachen(nachrichten: dict) -> None:
+    _app(konto=35).get("/api/browser/nachrichten?sprache=fr")
+    _app(konto=35).get("/api/browser/nachrichten?sprache=xy")
+    assert {a["params"]["language"] for a in nachrichten["anfragen"]} == {"en"}
+    assert len(nachrichten["anfragen"]) == len(browser_nachrichten_service.THEMEN)
+    assert _app(konto=35).get("/api/browser/nachrichten?sprache=deu").status_code == 422
+
+
+def test_scheitert_searxng_bleibt_der_alte_stand(nachrichten: dict) -> None:
+    nachrichten["antwort"] = _news("https://a.example/1")
+    client = _app(konto=36)
+    erster = client.get("/api/browser/nachrichten").json()
+    nachrichten["uhr"]["jetzt"] += browser_nachrichten_service.FRISCH_S + 1
+    nachrichten["antwort"] = ConnectionError("weg")
+    antwort = client.get("/api/browser/nachrichten")
+    assert antwort.status_code == 200
+    assert antwort.json() == erster
+    # Vor dem nächsten Versuch vergehen zwei Minuten.
+    vorher = len(nachrichten["anfragen"])
+    client.get("/api/browser/nachrichten")
+    assert len(nachrichten["anfragen"]) == vorher
+
+
+def test_ohne_stand_und_ohne_searxng_ein_fehler_mit_code(nachrichten: dict) -> None:
+    nachrichten["antwort"] = ConnectionError("weg")
+    antwort = _app(konto=37).get("/api/browser/nachrichten")
+    assert antwort.status_code == 502
+    assert antwort.json()["detail"]["code"] == "BROWSER_NACHRICHTEN_NICHT_ERREICHBAR"
+
+
+def test_nachrichten_ohne_eingerichtete_instanz(monkeypatch: pytest.MonkeyPatch, nachrichten: dict) -> None:
+    monkeypatch.setattr(ai_web_search_service, "searxng_url", lambda: None)
+    antwort = _app(konto=38).get("/api/browser/nachrichten")
+    assert antwort.status_code == 503
+    assert antwort.json()["detail"]["code"] == "BROWSER_NACHRICHTEN_NICHT_EINGERICHTET"
+    assert nachrichten["anfragen"] == []
+
+
+def test_ein_unlesbares_datum_faellt_weg(nachrichten: dict) -> None:
+    nachrichten["antwort"] = _Antwort({"results": [
+        {"url": "https://a.example/1", "title": "A", "publishedDate": "gestern"},
+        {"url": "https://a.example/2", "title": "B", "publishedDate": 12},
+    ]})
+    themen = _app(konto=39).get("/api/browser/nachrichten").json()["themen"]
+    assert [e["zeit"] for e in themen["politik"]] == [None, None]

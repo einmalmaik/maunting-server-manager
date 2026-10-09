@@ -4881,6 +4881,7 @@
           "updates": "Updates unter Windows: Kurz nach jedem Start fragt der Browser bei GitHub nach der Datei des jüngsten Releases, ohne Cookie und Kennung; GitHub sieht dabei Ihre IP-Adresse. Abschalten lässt sich das unter „Über“. Ein Update lädt der Browser erst auf Ihren Klick, prüft seine Signatur und startet den Installer. Unter Android aktualisiert er sich nicht selbst.",
           "kopplung": "Kopplung mit MSM (freiwillig): Gekoppelt zeigt der Browser Singra, Messenger, Notizen, Kalender und Tresor Ihrer Instanz in der Seitenleiste; dafür gelten die Abschnitte oben. Die Anmeldung liegt unter Windows in der Windows-Anmeldeinformationsverwaltung, unter Android verschlüsselt mit einem Schlüssel aus dem Android-Keystore. Jedes dieser Module lässt sich in den Einstellungen ausblenden, die Kopplung jederzeit trennen.",
           "msmSuche": "MSM-Suche (nur gekoppelt): Ist der Browser mit MSM gekoppelt und keine andere Suchmaschine gewählt, gehen Suchbegriffe aus Adresszeile und Startseite an Ihre MSM-Instanz. Sie fragt damit ihre eigene SearXNG-Instanz, und diese die Suchmaschinen, die der Betreiber dort eingestellt hat; die sehen die Adresse des Servers, nicht Ihre. Der Begriff geht per POST, das Panel schreibt ihn in kein Protokoll. Zurück kommen nur Titel, Adresse und Text der Treffer, die Trefferseite lädt keine Bilder. Ist der Jugendschutz für Erwachsenen-Inhalte an, verlangt der Browser die strenge sichere Suche.",
+          "nachrichten": "Nachrichten (nur gekoppelt): Die Startseite holt Schlagzeilen von Ihrer MSM-Instanz, höchstens alle 30 Minuten. Die Instanz fragt dafür ihre SearXNG-Instanz nach Nachrichten des Tages zu festen Themen, für alle Konten gleich. Welche Themen und Schlagworte Sie gewählt haben, bleibt im Browser; gefiltert wird auf dem Gerät. Der zuletzt geholte Stand liegt im Browser, damit die Startseite ohne Netz etwas zeigt. Die Kacheln zeigen Titel, Adresse und Alter, keine Bilder.",
           "android": "Unter Android: Safe Browsing und die Nutzungsstatistik der WebView sind abgeschaltet, besuchte Adressen gehen dafür nicht an Google. Normale Tabs haben ein eigenes Profil, getrennt von der Oberfläche des Browsers; getrennt sind damit Cookies und Speicher, den Prozess der WebView teilen sich Seiten und Oberfläche unter Android aber. Der Browser nimmt sich von der Android-Datensicherung und vom Umzug auf ein neues Gerät aus: Cookies, Verlauf und die Anmeldung der Kopplung bleiben auf diesem Telefon. Private Tabs teilen sich ein Profil auf dem Telefon; Cookies, Website-Speicher und Cache darin werden gelöscht, sobald der letzte private Tab geschlossen ist, den Ordner entfernt der nächste Start. Downloads lädt der Browser selbst in den Ordner „Download“; Cookies schickt er dabei nur an die Seite, der sie gehören, auch nach einer Weiterleitung. Eine Virenprüfung gibt es nicht. Den eingeschränkten Modus von YouTube kann der Browser hier nicht einschalten. Zahlungsdaten setzt er erst nach der Bildschirmsperre des Telefons (Fingerabdruck, Gesicht oder PIN) oder dem Master-Passwort ein. Ist er als Standardbrowser festgelegt oder wählen Sie ihn beim Öffnen aus, öffnen Links aus anderen Apps in einem neuen, normalen Tab.",
           "widget": "Such-Widget unter Android: Was Sie in das Mikrofon sprechen, wandelt der Spracherkennungsdienst des Telefons in Text um, meist Google; der Browser bekommt nur den Text. Ein Foto nimmt die Kamera-App auf. Der Browser verkleinert es, entfernt Ort und andere Metadaten, schickt es an die Bildsuche der gewählten Suchmaschine (Google Lens oder Bing) und löscht es danach vom Telefon. Kamera- oder Mikrofonrecht hat der Browser selbst nicht."
         }
@@ -8607,12 +8608,19 @@
         "uhr": "Uhr",
         "termine": "Nächste Termine",
         "notizen": "Letzte Notizen",
-        "zuletzt": "Zuletzt besucht"
+        "zuletzt": "Zuletzt besucht",
+        "nachrichten": "Nachrichten"
       },
       "nichtLesbarAlle": "Auf diesem Gerät noch nicht lesbar",
       "oeffnen": {
         "kalender": "Kalender öffnen",
         "notizen": "Notizen öffnen"
+      },
+      "nachrichten": {
+        "keine": "Gerade keine Nachrichten",
+        "keineZuWorten": "Heute nichts zu deinen Schlagworten",
+        "fehler": "Nachrichten gerade nicht erreichbar",
+        "nichtEingerichtet": "Auf dem MSM-Server läuft keine SearXNG-Instanz."
       }
     },
     "leiste": {
@@ -8836,7 +8844,7 @@
       "nachObenName": "{{name}} nach oben",
       "nachUntenName": "{{name}} nach unten",
       "startseite": "Startseite",
-      "startseiteHinweis": "Termine und Notizen erscheinen, wenn der Browser mit MSM gekoppelt ist. Private Tabs zeigen nur die Uhr.",
+      "startseiteHinweis": "Termine, Notizen und Nachrichten erscheinen, wenn der Browser mit MSM gekoppelt ist. Private Tabs zeigen nur die Uhr.",
       "hintergrundTabs": "Tabs im Hintergrund",
       "schlafenNach": "Schlafen nach",
       "schlafenHinweis": "Ein schlafender Tab ist eingefroren und braucht weniger Speicher. Tabs mit Ton schlafen nie.",
@@ -8858,7 +8866,22 @@
       "downloadsAndroid": "Downloads landen im Ordner „Download“ des Telefons. Der Browser lädt sie selbst und zeigt den Stand in seiner Download-Liste. Bleibt er lange im Hintergrund, kann Android einen großen Download abbrechen. Eine Virenprüfung wie unter Windows gibt es hier nicht.",
       "virenschutzHinweis": "Jede Datei prüft zuerst der Virenschutz von Windows. Erst danach liegt sie im Ordner; was er ablehnt, löscht der Browser.",
       "suchStandard": "Standard ({{name}})",
-      "msmSuche": "MSM-Suche"
+      "msmSuche": "MSM-Suche",
+      "nachrichten": {
+        "themen": "Themen der Nachrichten",
+        "keinThema": "Kein Thema",
+        "worte": "Schlagworte",
+        "worteHinweis": "Durch Komma getrennt. Gefiltert wird nur auf diesem Gerät.",
+        "wortePlatzhalter": "z. B. Linux, Raumfahrt",
+        "thema": {
+          "technik": "Technik",
+          "gaming": "Gaming",
+          "politik": "Politik",
+          "wirtschaft": "Wirtschaft",
+          "wissenschaft": "Wissenschaft",
+          "sport": "Sport"
+        }
+      }
     },
     "kopplung": {
       "titel": "Mit MSM koppeln",

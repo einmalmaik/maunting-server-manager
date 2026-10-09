@@ -1,10 +1,11 @@
 /**
  * Die Kästen unter den Schnellzugriffen, in der Reihenfolge aus den
- * Einstellungen (Design). Termine und Notizen gibt es nur gekoppelt und nur,
- * wenn das Modul sichtbar ist; ein privater Tab zeigt nur die Uhr.
+ * Einstellungen (Design). Termine, Notizen und Nachrichten gibt es nur
+ * gekoppelt, Termine und Notizen nur, wenn das Modul sichtbar ist; ein
+ * privater Tab zeigt nur die Uhr.
  */
 import type { ReactNode } from 'react'
-import { Calendar, Clock, History, StickyNote, type LucideIcon } from 'lucide-react'
+import { Calendar, Clock, History, Newspaper, StickyNote, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 
@@ -14,18 +15,19 @@ import { seitenHost } from '../../services/geraetKonfig'
 import { istGekoppelt, useSitzung } from '../../services/sitzung'
 import { seiteOeffnen } from '../../services/tabsStore'
 import { useVerlaufStore } from '../../services/verlaufStore'
+import { auswahl, useNachrichten } from './nachrichtenDaten'
 import { ANZAHL, useJetzt, useNotizen, useTermine, type Termin } from './widgetDaten'
 
-export const WIDGET_SYMBOLE: Record<Widget, LucideIcon> = { uhr: Clock, termine: Calendar, notizen: StickyNote, zuletzt: History }
+export const WIDGET_SYMBOLE: Record<Widget, LucideIcon> = { uhr: Clock, termine: Calendar, notizen: StickyNote, zuletzt: History, nachrichten: Newspaper }
 
 /** Die Widgets in der Reihenfolge des Nutzers; was die Ordnung nicht nennt, folgt in der Grundordnung. */
 export function widgetsGeordnet(ordnung: Widget[]): Widget[] {
   return [...ordnung.filter((w) => WIDGETS.includes(w)), ...WIDGETS.filter((w) => !ordnung.includes(w))]
 }
 
-function Karte({ titel, symbol: Symbol, children }: { titel: string; symbol: LucideIcon; children: ReactNode }) {
+function Karte({ titel, symbol: Symbol, breit, children }: { titel: string; symbol: LucideIcon; breit?: boolean; children: ReactNode }) {
   return (
-    <section className="flex min-w-0 flex-col gap-3 rounded-xl bg-surface-container/80 p-4 backdrop-blur">
+    <section className={`flex min-w-0 flex-col gap-3 rounded-xl bg-surface-container/80 p-4 backdrop-blur ${breit ? 'sm:col-span-2' : ''}`}>
       <h2 className="flex items-center gap-2 text-label-md text-on-surface-variant">
         <Symbol className="h-4 w-4" aria-hidden="true" />
         {titel}
@@ -161,6 +163,48 @@ function Zuletzt() {
   )
 }
 
+/** „vor 3 Stunden“ in der App-Sprache; ohne Zeit nichts. */
+export function alter(zeit: string | null, jetzt: number, sprache: string): string | null {
+  const t = zeit ? Date.parse(zeit) : NaN
+  if (Number.isNaN(t)) return null
+  const minuten = Math.max(0, Math.round((jetzt - t) / 60_000))
+  const fmt = new Intl.RelativeTimeFormat(sprache, { numeric: 'auto' })
+  if (minuten < 60) return fmt.format(-minuten, 'minute')
+  if (minuten < 24 * 60) return fmt.format(-Math.round(minuten / 60), 'hour')
+  return fmt.format(-Math.round(minuten / (24 * 60)), 'day')
+}
+
+function Nachrichten({ jetzt }: { jetzt: number }) {
+  const { t, i18n } = useTranslation()
+  const themen = useEinstellungenStore((s) => s.nachrichtenThemen)
+  const worte = useEinstellungenStore((s) => s.nachrichtenWorte)
+  const { stand, fehler } = useNachrichten()
+  const meldungen = stand ? auswahl(stand, themen, worte) : null
+  return (
+    <Karte titel={t('browser.start.widget.nachrichten')} symbol={Newspaper} breit>
+      {!stand && fehler && <Leer text={t(fehler === 'nichtEingerichtet' ? 'browser.start.nachrichten.nichtEingerichtet' : 'browser.start.nachrichten.fehler')} />}
+      {meldungen?.length === 0 && <Leer text={t(worte.trim() ? 'browser.start.nachrichten.keineZuWorten' : 'browser.start.nachrichten.keine')} />}
+      {meldungen && meldungen.length > 0 && (
+        <ul className="grid sm:grid-cols-2 sm:gap-x-3">
+          {meldungen.map((m) => {
+            const host = seitenHost(m.url) ?? m.url
+            const wann = alter(m.zeit, jetzt, i18n.language)
+            return (
+              <Zeile
+                key={m.url}
+                oben={m.titel || host}
+                unten={wann ? `${host} · ${wann}` : host}
+                onClick={(ctrl) => seiteOeffnen(m.url, ctrl)}
+                onAuxClick={() => seiteOeffnen(m.url, true)}
+              />
+            )
+          })}
+        </ul>
+      )}
+    </Karte>
+  )
+}
+
 export function Widgets({ privat }: { privat: boolean }) {
   const ordnung = useEinstellungenStore((s) => s.widgetOrdnung)
   const aus = useEinstellungenStore((s) => s.widgetsAus)
@@ -173,6 +217,7 @@ export function Widgets({ privat }: { privat: boolean }) {
     if (privat) return w === 'uhr'
     if (w === 'termine') return gekoppelt && module.has('kalender')
     if (w === 'notizen') return gekoppelt && module.has('notizen')
+    if (w === 'nachrichten') return gekoppelt
     return true
   }
   const gezeigt = widgetsGeordnet(ordnung).filter(da)
@@ -181,7 +226,17 @@ export function Widgets({ privat }: { privat: boolean }) {
   return (
     <div className="grid w-full gap-3 sm:grid-cols-2">
       {gezeigt.map((w) =>
-        w === 'uhr' ? <Uhr key={w} jetzt={jetzt} /> : w === 'termine' ? <Termine key={w} jetzt={jetzt} /> : w === 'notizen' ? <Notizen key={w} jetzt={jetzt} /> : <Zuletzt key={w} />,
+        w === 'uhr' ? (
+          <Uhr key={w} jetzt={jetzt} />
+        ) : w === 'termine' ? (
+          <Termine key={w} jetzt={jetzt} />
+        ) : w === 'notizen' ? (
+          <Notizen key={w} jetzt={jetzt} />
+        ) : w === 'nachrichten' ? (
+          <Nachrichten key={w} jetzt={jetzt} />
+        ) : (
+          <Zuletzt key={w} />
+        ),
       )}
     </div>
   )

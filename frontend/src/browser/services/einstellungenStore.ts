@@ -49,8 +49,12 @@ export const VORGABE_SCHNELLZUGRIFFE: Schnellzugriff[] = [
 ]
 
 /** Kästen unter den Schnellzugriffen; Termine und Notizen nur gekoppelt. */
-export type Widget = 'uhr' | 'termine' | 'notizen' | 'zuletzt'
-export const WIDGETS: Widget[] = ['uhr', 'termine', 'notizen', 'zuletzt']
+export type Widget = 'uhr' | 'termine' | 'notizen' | 'zuletzt' | 'nachrichten'
+export const WIDGETS: Widget[] = ['uhr', 'termine', 'notizen', 'zuletzt', 'nachrichten']
+
+/** Themen der Nachrichten; die Suchbegriffe dazu stehen im Backend (`browser_nachrichten_service.THEMEN`). */
+export type NachrichtenThema = 'technik' | 'gaming' | 'politik' | 'wirtschaft' | 'wissenschaft' | 'sport'
+export const NACHRICHTEN_THEMEN: NachrichtenThema[] = ['technik', 'gaming', 'politik', 'wirtschaft', 'wissenschaft', 'sport']
 
 /** Nach wie vielen Minuten im Hintergrund ein Tab schläft; 0 heißt nie. */
 export const SCHLAFEN_NACH = [5, 15, 30, 60, 0] as const
@@ -87,6 +91,10 @@ interface EinstellungenZustand {
   widgetOrdnung: Widget[]
   /** „Zuletzt besucht“ ist anfangs aus: die Startseite zeigt sonst den Verlauf jedem, der mitschaut. */
   widgetsAus: Widget[]
+  /** Welche Themen das Nachrichten-Widget zeigt; gefiltert wird nur hier, der Server liefert allen dasselbe. */
+  nachrichtenThemen: NachrichtenThema[]
+  /** Schlagworte, durch Komma getrennt; leer heißt alles aus den Themen. */
+  nachrichtenWorte: string
   schlafenNach: SchlafenNach
   /** Tabs, die eine Stunde im Hintergrund lagen, geben ihren Speicher ganz frei und laden beim Zeigen neu. */
   speicherSparen: boolean
@@ -138,6 +146,8 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       schnellzugriffe: VORGABE_SCHNELLZUGRIFFE,
       widgetOrdnung: [],
       widgetsAus: ['zuletzt'],
+      nachrichtenThemen: NACHRICHTEN_THEMEN,
+      nachrichtenWorte: '',
       schlafenNach: 30,
       speicherSparen: false,
       schlafAusnahmen: [],

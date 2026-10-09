@@ -4881,6 +4881,7 @@
           "updates": "Updates on Windows: shortly after each start, the browser asks GitHub for the file of the latest release, without cookies or identifiers; GitHub sees your IP address. You can turn this off under “About”. The browser only downloads an update when you click, checks its signature and starts the installer. On Android it does not update itself.",
           "kopplung": "Pairing with MSM (optional): once paired, the browser shows Singra, Messenger, Notes, Calendar and Vault of your instance in the sidebar; the sections above apply to them. The sign-in is kept in the Windows Credential Manager on Windows and, on Android, encrypted with a key from the Android Keystore. Each of these modules can be hidden in the settings, and the pairing can be removed at any time.",
           "msmSuche": "MSM search (paired only): when the browser is paired with MSM and no other search engine is chosen, search terms from the address bar and the start page go to your MSM instance. It passes them to its own SearXNG instance, which asks the search engines the operator configured there; they see the server’s address, not yours. The term is sent by POST, and the panel writes it to no log. Only title, address and text of the results come back, and the results page loads no images. If the youth protection for adult content is on, the browser asks for strict safe search.",
+          "nachrichten": "News (paired only): the start page fetches headlines from your MSM instance, at most every 30 minutes. The instance asks its SearXNG instance for today’s news on fixed topics, the same for every account. The topics and keywords you chose stay in the browser; filtering happens on the device. The last fetched set is kept in the browser so the start page can show something offline. The tiles show title, address and age, no images.",
           "android": "On Android: Safe Browsing and the WebView usage statistics are off, so visited addresses are not sent to Google for them. Normal tabs have their own profile, apart from the browser interface; this separates cookies and storage, but on Android sites and the interface share the WebView process. The browser opts out of Android backup and of transfers to a new device: cookies, history and the pairing sign-in stay on this phone. Private tabs share one profile on the phone; its cookies, site storage and cache are deleted once the last private tab is closed, and the next start removes the folder. The browser downloads files itself into the “Download” folder; it sends cookies only to the site they belong to, also after a redirect. There is no virus check. The browser cannot turn on YouTube's restricted mode here. Payment data is only inserted after the phone's screen lock (fingerprint, face or PIN) or the master password. If you set it as the default browser or pick it when opening a link, links from other apps open in a new, normal tab.",
           "widget": "Search widget on Android: what you say into the microphone is turned into text by the phone's speech recognition service, usually Google; the browser only receives the text. A photo is taken by the camera app. The browser shrinks it, removes the location and other metadata, sends it to the image search of the chosen search engine (Google Lens or Bing) and then deletes it from the phone. The browser itself has no camera or microphone permission."
         }
@@ -8607,12 +8608,19 @@
         "uhr": "Clock",
         "termine": "Upcoming events",
         "notizen": "Recent notes",
-        "zuletzt": "Recently visited"
+        "zuletzt": "Recently visited",
+        "nachrichten": "News"
       },
       "nichtLesbarAlle": "Not readable on this device yet",
       "oeffnen": {
         "kalender": "Open calendar",
         "notizen": "Open notes"
+      },
+      "nachrichten": {
+        "keine": "No news right now",
+        "keineZuWorten": "Nothing for your keywords today",
+        "fehler": "News are not available right now",
+        "nichtEingerichtet": "Your MSM server has no SearXNG instance running."
       }
     },
     "leiste": {
@@ -8836,7 +8844,7 @@
       "nachObenName": "Move {{name}} up",
       "nachUntenName": "Move {{name}} down",
       "startseite": "Start page",
-      "startseiteHinweis": "Events and notes appear when the browser is paired with MSM. Private tabs show only the clock.",
+      "startseiteHinweis": "Appointments, notes and news appear once the browser is paired with MSM. Private tabs only show the clock.",
       "hintergrundTabs": "Background tabs",
       "schlafenNach": "Sleep after",
       "schlafenHinweis": "A sleeping tab is frozen and uses less memory. Tabs playing sound never sleep.",
@@ -8858,7 +8866,22 @@
       "downloadsAndroid": "Downloads go to the phone’s “Download” folder. The browser fetches them itself and shows their progress in its download list. If it stays in the background for a long time, Android may stop a large download. There is no antivirus check like on Windows.",
       "virenschutzHinweis": "Every file is checked by the Windows antivirus first. Only then does it land in the folder; the browser deletes anything it rejects.",
       "suchStandard": "Default ({{name}})",
-      "msmSuche": "MSM search"
+      "msmSuche": "MSM search",
+      "nachrichten": {
+        "themen": "News topics",
+        "keinThema": "No topic",
+        "worte": "Keywords",
+        "worteHinweis": "Separated by commas. Filtering happens on this device only.",
+        "wortePlatzhalter": "e.g. Linux, space travel",
+        "thema": {
+          "technik": "Technology",
+          "gaming": "Gaming",
+          "politik": "Politics",
+          "wirtschaft": "Business",
+          "wissenschaft": "Science",
+          "sport": "Sports"
+        }
+      }
     },
     "kopplung": {
       "titel": "Pair with MSM",

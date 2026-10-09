@@ -1,20 +1,29 @@
 /**
  * Wie der Browser aussieht: wo die Einträge stehen, auf welcher Seite das
  * Panel aufgeht, was in welcher Reihenfolge zu sehen ist, welche Knöpfe da
- * sind, die Widgets und der Hintergrund der Startseite.
+ * sind, die Widgets samt Nachrichten und der Hintergrund der Startseite.
  */
 import { useTranslation } from 'react-i18next'
 
-import { FileButton, Kurzinfo } from '@/Singra/UI'
+import { FileButton, Input, Kurzinfo, MultiSelect } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 
 import { HINTERGRUENDE, hintergrundStil } from '../seite/Startseite'
 import { WIDGET_SYMBOLE, widgetsGeordnet } from '../seite/start/Widgets'
-import { EIGENES_BILD_MAX_BYTES, KNOEPFE, useEinstellungenStore, type Hintergrund, type Leistenort, type Widget } from '../services/einstellungenStore'
+import {
+  EIGENES_BILD_MAX_BYTES,
+  KNOEPFE,
+  NACHRICHTEN_THEMEN,
+  useEinstellungenStore,
+  type Hintergrund,
+  type Leistenort,
+  type NachrichtenThema,
+  type Widget,
+} from '../services/einstellungenStore'
 import { Anordnung } from './Anordnung'
 import { istAndroid } from '../services/plattform'
 import { Ordnungsliste, verschoben } from './Ordnungsliste'
-import { Abschnitt, Auswahlzeile, Schalterzeile } from './bausteine'
+import { Abschnitt, Aktionszeile, Auswahlzeile, Schalterzeile } from './bausteine'
 
 const ORTE: Leistenort[] = ['menue', 'links', 'rechts', 'oben']
 
@@ -73,7 +82,40 @@ function Startwidgets() {
         verschieben={(von, nach) => setzen({ widgetOrdnung: verschoben(ordnung, von, nach) })}
         umschalten={(w) => setzen({ widgetsAus: aus.includes(w as Widget) ? aus.filter((a) => a !== w) : [...aus, w as Widget] })}
       />
+      {!aus.includes('nachrichten') && <Nachrichtenwahl />}
     </Abschnitt>
+  )
+}
+
+/** Themen und Schlagworte bleiben auf dem Gerät; der Server liefert allen dieselben Nachrichten. */
+function Nachrichtenwahl() {
+  const { t } = useTranslation()
+  const themen = useEinstellungenStore((s) => s.nachrichtenThemen)
+  const worte = useEinstellungenStore((s) => s.nachrichtenWorte)
+  const setzen = useEinstellungenStore((s) => s.setzen)
+  return (
+    <>
+      <Aktionszeile name={t('browser.einstellungen.nachrichten.themen')}>
+        <MultiSelect
+          aria-label={t('browser.einstellungen.nachrichten.themen')}
+          placeholder={t('browser.einstellungen.nachrichten.keinThema')}
+          options={NACHRICHTEN_THEMEN.map((thema) => ({ value: thema, label: t(`browser.einstellungen.nachrichten.thema.${thema}`) }))}
+          values={themen}
+          onChange={(v) => setzen({ nachrichtenThemen: v as NachrichtenThema[] })}
+          className="w-56 max-w-full"
+        />
+      </Aktionszeile>
+      <Aktionszeile name={t('browser.einstellungen.nachrichten.worte')} hinweis={t('browser.einstellungen.nachrichten.worteHinweis')}>
+        <Input
+          aria-label={t('browser.einstellungen.nachrichten.worte')}
+          placeholder={t('browser.einstellungen.nachrichten.wortePlatzhalter')}
+          value={worte}
+          maxLength={200}
+          onChange={(e) => setzen({ nachrichtenWorte: e.target.value })}
+          className="w-56 max-w-full"
+        />
+      </Aktionszeile>
+    </>
   )
 }
 
