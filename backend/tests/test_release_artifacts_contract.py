@@ -84,6 +84,42 @@ def test_android_signing_key_never_lives_in_the_repo() -> None:
     assert "--lineage" in signieren and "--rotation-min-sdk-version 28" in signieren
 
 
+
+def test_secure_browser_kommt_vollstaendig_und_signiert_ins_release() -> None:
+    """MSB wird mit dem v*-Release gebaut; ohne eine seiner Dateien scheitert er.
+
+    Bis 09.10.2026 baute kein Workflow den Browser, und der Release zaehlte
+    seine Dateien nur, statt sie zu pruefen.
+    """
+    workflows = ROOT / ".github" / "workflows"
+    release = (workflows / "release-artifacts.yml").read_text(encoding="utf-8")
+    bau = (workflows / "browser-build.yml").read_text(encoding="utf-8")
+    assert "uses: ./.github/workflows/browser-build.yml" in release
+    assert "build-browser]" in release
+    assert "continue-on-error" not in release
+    for datei in (
+        "MauntingSecureBrowser-Setup.exe",
+        "MauntingSecureBrowser-Setup.exe.sig",
+        "latest-msb.json",
+        "MauntingSecureBrowser.apk",
+        "MauntingSmartSystem.apk",
+    ):
+        assert datei in release.split("name: Verify release assets", 1)[1], datei
+
+    # Android nur aus den Secrets, mit eigenem Schluessel ohne Abfolge.
+    assert "bash scripts/android-apk-signieren-msb.sh" in bau
+    assert "secrets.MSB_ANDROID_KEYSTORE_B64" in bau
+    signieren = (ROOT / "scripts" / "android-apk-signieren-msb.sh").read_text(encoding="utf-8")
+    assert '"${MSB_ANDROID_KEYSTORE_B64:?fehlt}"' in signieren
+    assert "APK Signature Scheme v3): true" in signieren
+
+    # Der Updater des Browsers liest die Datei, die das Sammelskript schreibt.
+    sammeln = (ROOT / "scripts" / "collect-browser-artifacts.py").read_text(encoding="utf-8")
+    assert 'MANIFEST = "latest-msb.json"' in sammeln
+    konfig = (ROOT / "browser" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8")
+    assert "releases/latest/download/latest-msb.json" in konfig
+    assert "TAURI_SIGNING_PRIVATE_KEY" in bau
+
 def test_android_webview_hears_network_changes() -> None:
     """Ohne ACCESS_NETWORK_STATE bleibt navigator.onLine im WebView immer true.
 

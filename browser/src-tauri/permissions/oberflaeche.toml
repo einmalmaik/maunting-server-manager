@@ -55,4 +55,6 @@ permissions = [
   "allow-standardbrowser",
   "allow-standardbrowser-werden",
   "allow-standardbrowser-einstellungen",
+  "allow-update-pruefen",
+  "allow-update-installieren",
 ]

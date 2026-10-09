@@ -1,0 +1,188 @@
+name: Build Secure Browser
+
+# Baut den Maunting Secure Browser (MSB) fuer Windows und Android. Wird von
+# `release-artifacts.yml` aufgerufen; veroeffentlicht wird dort, in einem
+# Release mit MSM und MSS und mit derselben Version (AGENTS.md, Punkt 11).
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Versionslabel bei manuellem Lauf (z. B. v5.2.0)"
+        required: false
+        type: string
+
+jobs:
+  windows:
+    name: Build Secure Browser (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            browser/package-lock.json
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: browser/src-tauri
+
+      - name: Resolve artifact version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            RAW_TAG="${GITHUB_REF_NAME}"
+          elif [[ -n "${INPUT_VERSION}" ]]; then
+            RAW_TAG="${INPUT_VERSION}"
+          else
+            RAW_TAG="v$(node -p "require('./frontend/package.json').version")"
+          fi
+          [[ "$RAW_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]
+          echo "tag=${RAW_TAG}" >> "$GITHUB_OUTPUT"
+          python scripts/sync-tauri-version.py "${RAW_TAG#v}"
+
+      - name: Install UI dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Tauri CLI
+        working-directory: browser
+        run: npm ci
+
+      # Der Bau der Oberflaeche prueft i18n und Klassen (`npm run check`) und tsc.
+      - name: Build browser UI
+        working-directory: frontend
+        run: npm run build:browser
+
+      - name: Rust tests
+        working-directory: browser/src-tauri
+        run: cargo test
+
+      - name: Build installer
+        working-directory: browser
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build
+
+      - name: Collect installer and latest-msb.json
+        shell: bash
+        run: python scripts/collect-browser-artifacts.py "${{ steps.version.outputs.tag }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: msb-windows
+          path: browser-release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  android:
+    name: Build Secure Browser (Android APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            browser/package-lock.json
+
+      # Dieselben ABIs wie die Splits in `gen/android/app/build.gradle.kts`.
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: browser/src-tauri
+
+      - name: Resolve artifact version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            RAW_TAG="${GITHUB_REF_NAME}"
+          elif [[ -n "${INPUT_VERSION}" ]]; then
+            RAW_TAG="${INPUT_VERSION}"
+          else
+            RAW_TAG="v$(node -p "require('./frontend/package.json').version")"
+          fi
+          python scripts/sync-tauri-version.py "${RAW_TAG#v}"
+
+      - name: Install UI dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Tauri CLI
+        working-directory: browser
+        run: npm ci
+
+      - name: Build Android APK
+        working-directory: browser
+        run: |
+          chmod +x src-tauri/gen/android/gradlew
+          npx tauri android build --apk --target aarch64 --target armv7 --target x86_64
+
+      # Erst nach dem Bau: `tauri.settings.gradle` legt die CLI dabei an.
+      # Die Tests brauchen keine Rust-Bibliothek.
+      - name: Kotlin unit tests
+        working-directory: browser/src-tauri/gen/android
+        run: ./gradlew --no-daemon :app:testUniversalDebugUnitTest
+
+      # Gradle baut unsigniert; der Schluessel liegt nur in den Secrets.
+      # Fehlt ein Secret, bricht das Skript ab, statt ein unsigniertes APK
+      # zu veroeffentlichen.
+      - name: Sign Android APKs
+        shell: bash
+        env:
+          MSB_ANDROID_KEYSTORE_B64: ${{ secrets.MSB_ANDROID_KEYSTORE_B64 }}
+          MSB_ANDROID_KEYSTORE_PASSWORT: ${{ secrets.MSB_ANDROID_KEYSTORE_PASSWORT }}
+        run: |
+          mapfile -t roh < <(find browser/src-tauri/gen/android/app/build/outputs/apk -type f -name "*-release-unsigned.apk")
+          [ "${#roh[@]}" -gt 0 ] || { echo "Keine unsignierten Release-APKs gefunden." >&2; exit 1; }
+          bash scripts/android-apk-signieren-msb.sh "${roh[@]}"
+
+      - name: Collect Android APK
+        shell: bash
+        run: |
+          mkdir -p browser-android
+          universal=$(find browser/src-tauri/gen/android/app/build/outputs/apk -type f -name "*universal-release.apk" | head -n 1)
+          [ -n "$universal" ] || { echo "Kein signiertes Universal-APK gefunden." >&2; exit 1; }
+          cp -v "$universal" browser-android/MauntingSecureBrowser.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: msb-android
+          path: browser-android/MauntingSecureBrowser.apk
+          if-no-files-found: error
+          retention-days: 7

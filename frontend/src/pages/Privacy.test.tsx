@@ -143,11 +143,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.38 vom 2026-10-09 aus (Cookie-Hinweise werden abgelehnt)', () => {
+  it('weist die Fassung 3.39 vom 2026-10-09 aus (Updates fragen GitHub)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.38`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.39`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -245,6 +245,9 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.browser.items.https')).toMatch(/eine Einwilligung gibt er nie/);
     expect(i18n.t('privacyPolicy.sections.browser.items.https')).toMatch(/autoconsent \(DuckDuckGo\).*keine Anfrage hinaus/);
     expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/Links aus anderen Apps in einem neuen, normalen Tab/);
+    // 3.39: unter Windows fragt der Browser beim Start GitHub nach Updates.
+    expect(i18n.t('privacyPolicy.sections.browser.items.updates')).toMatch(/fragt der Browser bei GitHub/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.updates')).toMatch(/erst auf Ihren Klick/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

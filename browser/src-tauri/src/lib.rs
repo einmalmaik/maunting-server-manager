@@ -6,6 +6,7 @@
 //! (`capabilities/oberflaeche.json`), und weil `build.rs` alle Befehle im
 //! App-Manifest nennt, prüft Tauri jeden Aufruf gegen diese Rechte.
 
+pub mod aktualisieren;
 pub mod browserdaten;
 pub mod cookies;
 pub mod datei;
@@ -48,8 +49,23 @@ pub fn run() {
         kontext.package_info_mut().name = name.into();
     }
 
+    let builder = tauri::Builder::default();
+
+    // Das Single-Instance-Plugin kommt als erstes: ein zweiter Aufruf (Link
+    // von außen) endet sofort, sein Link öffnet hier als Tab.
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_single_instance::init(|app, argumente, _| {
+            widget::link_aufnehmen(app, &argumente);
+            if let Some(fenster) = app.get_webview_window("main") {
+                let _ = fenster.unminimize();
+                let _ = fenster.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_updater::Builder::new().build());
+
     #[allow(unused_mut)]
-    let mut builder = tauri::Builder::default()
+    let mut builder = builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init());
 
@@ -74,6 +90,8 @@ pub fn run() {
             downloads::quarantaene::beim_start(handle);
             schild::schutz_dienst::starten(handle);
             tabs::ruhe::starten(handle.clone());
+            #[cfg(desktop)]
+            widget::link_aufnehmen(handle, &std::env::args().collect::<Vec<_>>());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -128,6 +146,8 @@ pub fn run() {
             widget::standardbrowser,
             widget::standardbrowser_werden,
             widget::standardbrowser_einstellungen,
+            aktualisieren::update_pruefen,
+            aktualisieren::update_installieren,
         ])
         .on_window_event(|fenster, ereignis| {
             // „Beim Schließen vergessen“: erst die Seitendaten löschen, dann

@@ -1,8 +1,9 @@
 name: Release deployment artifacts
 
-# Baut alle Deployment-Artefakte für einen Release (Panel, Frontend, Agent)
-# sowie den Windows-Desktop-Installer (MSS) und veröffentlicht alle Dateien
-# gemeinsam in einem einzigen GitHub-Release.
+# Baut alle Deployment-Artefakte für einen Release (Panel, Frontend, Agent),
+# Smart System (MSS) und Secure Browser (MSB, `browser-build.yml`) für Windows
+# und Android und veröffentlicht alle Dateien gemeinsam in einem einzigen
+# GitHub-Release.
 
 on:
   push:
@@ -334,9 +335,16 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  build-browser:
+    name: Secure Browser
+    uses: ./.github/workflows/browser-build.yml
+    with:
+      version: ${{ inputs.version }}
+    secrets: inherit
+
   publish-release:
     name: Publish unified GitHub release
-    needs: [build-linux-artifacts, build-windows-desktop, build-android-apk]
+    needs: [build-linux-artifacts, build-windows-desktop, build-android-apk, build-browser]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -355,7 +363,16 @@ jobs:
         with:
           name: msm-mobile-android
           path: final-release
-        continue-on-error: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: msb-windows
+          path: final-release
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: msb-android
+          path: final-release
 
       - name: Generate unified SHA256SUMS
         working-directory: final-release
@@ -378,7 +395,7 @@ jobs:
           for kandidat in "docs/patchnotes/${TAG}-release-notes.md" "docs/patchnotes/${TAG}-hotfix-notes.md"; do
             if [ -f "$kandidat" ]; then notes="$kandidat"; break; fi
           done
-          title="MSM / MSS $TAG"
+          title="MSM / MSS / MSB $TAG"
           if [ -n "$notes" ]; then
             # "# Hotfix v5.0.1 — Thema" wird zu "MSM / MSS v5.0.1 — Hotfix: Thema".
             kopf=$(head -n1 "$notes")
@@ -389,7 +406,7 @@ jobs:
             fi
           else
             notes="$RUNNER_TEMP/release-notes.md"
-            echo "Einheitlicher Release: Panel, Frontend, Node-Agent sowie Maunting Smart System Desktop- (Windows) und Mobile-Installer (Android APK)." > "$notes"
+            echo "Einheitlicher Release: Panel, Frontend, Node-Agent, Maunting Smart System und Maunting Secure Browser für Windows und Android." > "$notes"
           fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --verify-tag --draft --title "$title" --notes-file "$notes"
@@ -399,3 +416,24 @@ jobs:
           case "$TAG" in *-*) latest=false ;; esac
           gh release edit "$TAG" --title "$title" --notes-file "$notes" --draft=false --latest="$latest"
           gh release view "$TAG" --json isDraft,name,assets --jq '"\(.name) | Entwurf: \(.isDraft) | \(.assets | length) Dateien"'
+
+      # Ein Release gilt erst, wenn jede Datei daliegt, die ein Updater oder
+      # die Doku nennt (AGENTS.md, Punkt 11). Bis 5.2.0 zaehlte dieser Schritt
+      # nur die Dateien, und ein fehlendes APK fiel nicht auf.
+      - name: Verify release assets
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          vorhanden="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          fehlt=0
+          pflicht=(
+            "msm-panel-$TAG.tar.gz" "msm-frontend-$TAG.tar.gz" "msm-agent-$TAG.tar.gz" SHA256SUMS
+            MauntingSmartSystem-Setup.exe latest.json MauntingSmartSystem.apk
+            MauntingSecureBrowser-Setup.exe MauntingSecureBrowser-Setup.exe.sig latest-msb.json MauntingSecureBrowser.apk
+          )
+          for datei in "${pflicht[@]}"; do
+            grep -qxF "$datei" <<<"$vorhanden" || { echo "Fehlt im Release: $datei" >&2; fehlt=1; }
+          done
+          exit "$fehlt"

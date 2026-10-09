@@ -1,6 +1,6 @@
 [package]
 name = "maunting-secure-browser"
-version = "1.0.0"
+version = "5.1.7"
 description = "MSB - Maunting Secure Browser auf Tauri v2"
 edition = "2021"
 rust-version = "1.88"
@@ -34,6 +34,11 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 keyring = "4"
+# Updates unter Windows (`aktualisieren.rs`), dasselbe Plugin wie im Smart System.
+tauri-plugin-updater = "2"
+# Ein Link von außen öffnet als Tab im laufenden Browser, nicht als zweites
+# Fenster, das um dasselbe WebView2-Profil streitet (`widget/ohne.rs`).
+tauri-plugin-single-instance = "2"
 
 [target.'cfg(windows)'.dependencies]
 # Dieselben Versionen, die wry mitbringt: die Schnittstellen der WebView2
@@ -47,6 +52,8 @@ windows = { version = "0.62", features = [
     # Name und Symbol im Lautstärkemixer (`mixer.rs`).
     "Win32_Media_Audio",
     "Win32_System_LibraryLoader",
+    # Ist der Browser der Standardbrowser? Nur lesend (`widget/ohne/windows_standard.rs`).
+    "Win32_System_Registry",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Diagnostics_ToolHelp",

@@ -58,6 +58,8 @@ const BEFEHLE: &[&str] = &[
     "standardbrowser",
     "standardbrowser_werden",
     "standardbrowser_einstellungen",
+    "update_pruefen",
+    "update_installieren",
 ];
 
 fn main() {

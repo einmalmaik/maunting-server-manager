@@ -36,6 +36,7 @@ import { Seitenleiste } from './leiste/Seitenleiste'
 import { FormularLeiste } from './seite/FormularLeiste'
 import { Meldungsleiste } from './seite/Meldungsleiste'
 import { Seitenflaeche } from './seite/Seitenflaeche'
+import { useAktualisierung } from './services/aktualisierung'
 import { useEinstellungenStore } from './services/einstellungenStore'
 import { useGeraetKonfig } from './services/geraetKonfig'
 import { kuerzelAusfuehren, useKuerzel, type KuerzelZiele } from './services/kuerzel'
@@ -131,6 +132,7 @@ function Wurzel() {
   useTabEreignisse(ziele)
   const startseite = useCallback(() => navigate('/'), [navigate])
   useWidget(ziele.adresszeile, startseite)
+  useAktualisierung()
 
   return (
     <div

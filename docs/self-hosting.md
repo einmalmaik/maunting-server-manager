@@ -108,16 +108,15 @@ Cookie-Einstellungen; Details stehen in `frontend/.env.example` und
 
 ### MSS — Maunting Smart System (Desktop-App, optional)
 
-Der Workflow `.github/workflows/smart-system-release.yml` baut den
-Windows-Installer der Desktop-App. Er läuft auf **`smart-v*`-Tags** und
-bewusst nicht auf `v*`: auf `v*` liegen bereits zwei Workflows, die je einen
-Draft-Release zum selben Tag anlegen, und die Desktop-App folgt ohnehin einem
-eigenen Takt — ein Panel-Update erzwingt keinen neuen Installer.
+`.github/workflows/release-artifacts.yml` baut den Windows-Installer der
+Desktop-App auf **`v*`-Tags** mit, in derselben Version wie das Panel.
 
-- `Maunting Smart System_<VERSION>_x64-setup.exe`: NSIS-Installer, nur Windows.
+- `MauntingSmartSystem-Setup.exe`: NSIS-Installer, nur Windows.
   Die App ist Windows-spezifisch (Audio-Ducking über WASAPI, Übernahme von
   Maus und Tastatur, Anmeldeinformations-Manager als Tresor).
-- `SHA256SUMS.txt`: Prüfsumme des Installers, als Actions-Artefakt.
+- `latest.json`: Manifest für den Updater der App, signiert mit dem Secret
+  `TAURI_SIGNING_PRIVATE_KEY`.
+- `SHA256SUMS`: Prüfsummen aller Dateien des Releases.
 
 **Android-App.** Das APK (`MauntingSmartSystem.apk`) baut
 `.github/workflows/release-artifacts.yml` auf `v*`-Tags mit. Gradle liefert es
@@ -257,6 +256,31 @@ Windows. Der Weg in der App räumt zusätzlich auf, was der Windows-Uninstaller
 stehen lässt: Einstellungen, die Stimmaufnahmen des Wake-Words, den Eintrag im
 Anmeldeinformations-Manager und den Autostart. Der Sandbox-Ordner bleibt — er
 gehört dem Benutzer.
+
+### MSB — Maunting Secure Browser (optional)
+
+Den Browser für Windows und Android baut `.github/workflows/browser-build.yml`,
+aufgerufen von `release-artifacts.yml` auf denselben **`v*`-Tags** und mit
+derselben Version wie Panel und MSS (`scripts/sync-tauri-version.py`). Der
+Release schlägt fehl, wenn eine der folgenden Dateien fehlt:
+
+- `MauntingSecureBrowser-Setup.exe` und `MauntingSecureBrowser-Setup.exe.sig`:
+  NSIS-Installer und seine Signatur für den Updater.
+- `latest-msb.json`: Manifest für den Updater des Browsers. `latest.json`
+  gehört dem Smart System; beide Apps prüfen gegen denselben Schlüssel
+  (`TAURI_SIGNING_PRIVATE_KEY`). Installiert wird erst auf Klick, ein
+  Entwicklungsbau installiert nie.
+- `MauntingSecureBrowser.apk`: Gradle liefert es unsigniert;
+  `scripts/android-apk-signieren-msb.sh` signiert es (APK Signature Scheme v3, ab Android 10) aus den Secrets
+  `MSB_ANDROID_KEYSTORE_B64` und `MSB_ANDROID_KEYSTORE_PASSWORT` (Alias
+  `msb-release`). Fehlt eines, bricht der Lauf ab. Unter Android aktualisiert
+  sich der Browser nicht selbst.
+
+Der Installer meldet den Browser bei Windows für http und https an (ProgID
+`MSBURL`); festlegen kann ihn nur der Nutzer in den Windows-Einstellungen. Ohne
+Kopplung spricht der Browser mit keinem Server von Maunting Studios. Auch
+dieser Installer ist nicht signiert; vor der Installation die Prüfsumme aus
+`SHA256SUMS` vergleichen.
 
 ## Was die Oberfläche im Browser nachlädt
 

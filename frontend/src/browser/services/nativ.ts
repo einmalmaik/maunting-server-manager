@@ -175,15 +175,19 @@ export const nativ = {
   /** Der Startbildschirm fragt danach selbst; `false`, wenn er die Bitte nicht annimmt. */
   widgetAnheften: () => rufen<boolean>('widget_anheften'),
   tastaturZeigen: () => rufen('tastatur_zeigen'),
-  /** Ist der Browser der Standardbrowser? Nur Android, sonst `false`. */
+  /** Ist der Browser der Standardbrowser? Android und Windows, sonst `false`. */
   standardbrowser: () => rufen<boolean>('standardbrowser'),
-  /** Android fragt selbst; danach der Stand. */
+  /** Android fragt selbst, Windows zeigt seine Standard-Apps; danach der Stand. */
   standardbrowserWerden: () => rufen<boolean>('standardbrowser_werden'),
-  /** Die Standard-Apps in den Android-Einstellungen. */
+  /** Die Standard-Apps in den Einstellungen des Systems. */
   standardbrowserEinstellungen: () => rufen<boolean>('standardbrowser_einstellungen'),
   /** Schickt das Foto des Widgets im Tab `id` an die Bildsuche. */
   bildsuche: (id: string, privat: boolean, bild: { url: string; feld: string; base64?: boolean }) =>
     nacheinander('bildsuche', { id, privat, url: bild.url, feld: bild.feld, base64: bild.base64 ?? false }),
+  /** Die neuere Version aus dem jüngsten Release, sonst `null` (`aktualisieren.rs`). */
+  updatePruefen: () => rufen<string | null>('update_pruefen'),
+  /** Lädt, prüft die Signatur und startet den Installer; der Browser endet dabei. */
+  updateInstallieren: () => rufen('update_installieren'),
 }
 
 export type WidgetStart =

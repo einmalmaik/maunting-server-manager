@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, ArrowRightLeft, BellRing, Database, FileArchive, GitBranch, KeyRound, Mic, MonitorSmartphone, Network, PhoneCall, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRightLeft, BellRing, Database, FileArchive, GitBranch, KeyRound, Mic, Globe, MonitorSmartphone, Network, PhoneCall, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
 import { CodeBlock } from '@/components/docs/CodeBlock'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Sprungleiste, SPRUNGZIEL_ABSTAND } from '@/Singra/UI/Sprungleiste'
@@ -85,6 +85,7 @@ export function SelfHostingDocs() {
           { id: 'messenger-calls', label: t('docsSelfHosting.calls.title') },
           { id: 'push-notifications', label: t('docsSelfHosting.push.title') },
           { id: 'smart-system', label: t('docsSelfHosting.smartSystem.title') },
+          { id: 'secure-browser', label: t('docsSelfHosting.secureBrowser.title') },
         ]}
       />
 
@@ -514,6 +515,33 @@ export function SelfHostingDocs() {
         <div className="mt-4 flex gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 p-4 text-status-warning">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
           <p className="text-sm leading-6">{t('docsSelfHosting.smartSystem.unsigned')}</p>
+        </div>
+      </section>
+
+      {/* Der Browser kommt im selben Release wie Panel und MSS. */}
+      <section aria-labelledby="secure-browser" className="msm-card mb-10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <Globe className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h2 id="secure-browser" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>
+              {t('docsSelfHosting.secureBrowser.title')}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
+              {t('docsSelfHosting.secureBrowser.intro')}
+            </p>
+          </div>
+        </div>
+        <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
+          {(['artifact', 'updates', 'android', 'standard'] as const).map(item => (
+            <div key={item} className="bg-surface-container p-4">
+              <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.secureBrowser.${item}.title`)}</dt>
+              <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.secureBrowser.${item}.body`)}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-4 flex gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 p-4 text-status-warning">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <p className="text-sm leading-6">{t('docsSelfHosting.secureBrowser.unsigned')}</p>
         </div>
       </section>
 

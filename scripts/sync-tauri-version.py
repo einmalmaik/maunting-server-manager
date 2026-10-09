@@ -53,6 +53,25 @@ if rec_cargo.exists():
     rec_content = re.sub(r'(^\[package\][\s\S]*?^version\s*=\s*)"[^"]+"', rf'\g<1>"{tag}"', rec_content, flags=re.MULTILINE)
     rec_cargo.write_text(rec_content, encoding="utf-8")
 
+# Maunting Secure Browser: dieselbe Version wie MSM und MSS (gemeinsamer v*-Tag)
+browser_conf = Path("browser/src-tauri/tauri.conf.json")
+if browser_conf.exists():
+    browser_data = json.loads(browser_conf.read_text(encoding="utf-8"))
+    browser_data["version"] = tag
+    browser_conf.write_text(json.dumps(browser_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+browser_cargo = Path("browser/src-tauri/Cargo.toml")
+if browser_cargo.exists():
+    browser_content = browser_cargo.read_text(encoding="utf-8")
+    browser_content = re.sub(r'(^\[package\][\s\S]*?^version\s*=\s*)"[^"]+"', rf'\g<1>"{tag}"', browser_content, flags=re.MULTILINE)
+    browser_cargo.write_text(browser_content, encoding="utf-8")
+
+browser_pkg = Path("browser/package.json")
+if browser_pkg.exists():
+    browser_pkg_data = json.loads(browser_pkg.read_text(encoding="utf-8"))
+    browser_pkg_data["version"] = tag
+    browser_pkg.write_text(json.dumps(browser_pkg_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
 # Backend /api/version synchronisieren
 backend_main = Path("backend/main.py")
 if backend_main.exists():

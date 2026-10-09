@@ -92,6 +92,8 @@ interface EinstellungenZustand {
   schlafAusnahmen: string[]
   /** Am Handy: das Angebot, das Such-Widget auf den Startbildschirm zu legen, ist erledigt. */
   widgetAngeboten: boolean
+  /** Unter Windows kurz nach dem Start bei GitHub nach einer neuen Version fragen. */
+  updatesSuchen: boolean
 
   setzen: (teil: Partial<Omit<EinstellungenZustand, 'setzen' | 'umschalten'>>) => void
   umschalten: (was: Ausblendbar) => void
@@ -138,6 +140,7 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       speicherSparen: false,
       schlafAusnahmen: [],
       widgetAngeboten: false,
+      updatesSuchen: true,
 
       setzen: (teil) => set(teil),
       umschalten: (was) =>

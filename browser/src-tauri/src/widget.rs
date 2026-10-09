@@ -3,7 +3,7 @@
 //! Foto für die Bildsuche, und Links aus anderen Apps (`WidgetPlugin.kt`).
 //! Was anstößt, holt die Oberfläche ab (`widget_start`); jeden neuen Anstoß
 //! meldet Rust als [`EREIGNIS`]. Dazu, ob der Browser der Standardbrowser
-//! ist. Auf dem Desktop gibt es nichts davon, die Befehle tun nichts.
+//! ist. Auf dem Desktop kommen nur Links von außen (`ohne.rs`).
 
 use serde_json::Value;
 use tauri::{AppHandle, State};
@@ -18,6 +18,8 @@ use android as plattform;
 mod ohne;
 #[cfg(not(target_os = "android"))]
 use ohne as plattform;
+#[cfg(not(target_os = "android"))]
+pub use ohne::link_aufnehmen;
 
 use crate::tabs::{id_pruefen, weg, ziel_pruefen, Tabs, Weg};
 

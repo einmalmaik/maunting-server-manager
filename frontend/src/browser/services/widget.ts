@@ -14,7 +14,7 @@ import { toast } from '@/stores/toastStore'
 import i18n from '@/i18n'
 
 import { useEinstellungenStore } from './einstellungenStore'
-import { nativ, widgetAnstoesse, type WidgetStart } from './nativ'
+import { istTauri, nativ, widgetAnstoesse, type WidgetStart } from './nativ'
 import { istWebseite } from './intern'
 import { istAndroid } from './plattform'
 import { baueZielUrl, suchmaschine } from './searchEngines'
@@ -58,8 +58,9 @@ export function useWidget(adresszeile: () => void, startseite: () => void): void
     if (istAndroid()) void nativ.widgetStand(Boolean(suchmaschine(id).bild)).catch(() => null)
   }, [id])
 
+  // Unter Windows kommen nur Links von außen (`widget/ohne.rs`).
   useEffect(() => {
-    if (!istAndroid()) return
+    if (!istTauri()) return
     const abholen = () =>
       void nativ
         .widgetStart()

@@ -4338,7 +4338,7 @@
       "intro": "Optional Desktop App for Windows: the same ongoing chat as in the browser, a wake word trained offline, and work inside a folder the user picks. The app does not replace the panel — it is a second way into the same conversation, with the same permissions and a computer attached.",
       "artifact": {
         "title": "Installer",
-        "body": "The smart-system-release.yml workflow builds the NSIS installer on smart-v* tags, deliberately separate from the panel releases. Windows only: audio ducking, takeover and the credential vault are Windows features."
+        "body": "release-artifacts.yml builds the NSIS installer on v* tags (MauntingSmartSystem-Setup.exe), together with latest.json for the app's updater. Windows only: audio ducking, takeover and the credential vault are Windows features."
       },
       "oberflaeche": {
         "title": "One interface",
@@ -4369,6 +4369,27 @@
         "body": "In the app under Settings → Danger zone. Cleans up remaining app data: config, voice recordings, vault entry, and autostart. The sandbox folder remains untouched."
       },
       "unsigned": "The installer is not signed. Windows SmartScreen may show an unknown publisher warning; proceed via “More info”. Verify the SHA256 sum from the release to confirm integrity."
+    },
+    "secureBrowser": {
+      "title": "MSB — Maunting Secure Browser",
+      "intro": "Optional browser for Windows and Android with an ad and tracker filter, parental controls and autofill from the vault. Without pairing it talks to no Maunting Studios server; once paired it shows the instance's Singra, messenger, notes, calendar and vault in its sidebar.",
+      "artifact": {
+        "title": "Installer",
+        "body": "release-artifacts.yml builds it on v* tags through browser-build.yml, with the same version as the panel and MSS: MauntingSecureBrowser-Setup.exe and its signature (.exe.sig). If a file is missing from the release, the run fails."
+      },
+      "updates": {
+        "title": "Updates",
+        "body": "The browser reads latest-msb.json from the latest release and checks the signature against the same key as MSS (secret TAURI_SIGNING_PRIVATE_KEY); latest.json belongs to the Smart System. Nothing is installed until the user clicks, and a development build never installs."
+      },
+      "android": {
+        "title": "Android app",
+        "body": "The same pipeline builds MauntingSecureBrowser.apk. Gradle produces it unsigned; scripts/android-apk-signieren-msb.sh signs it (APK Signature Scheme v3, Android 10 and later) from the secrets MSB_ANDROID_KEYSTORE_B64 and MSB_ANDROID_KEYSTORE_PASSWORT (alias msb-release). If one is missing, the run fails. On Android the browser does not update itself."
+      },
+      "standard": {
+        "title": "Default browser",
+        "body": "The installer registers the browser with Windows for http and https (ProgID MSBURL). Only the user can make it the default, in the Windows settings; uninstalling removes the entries again."
+      },
+      "unsigned": "The browser installer has no code signature either. SmartScreen reports an unknown publisher; compare the checksum from SHA256SUMS before installing."
     },
     "compatibility": {
       "title": "PostgreSQL only for new installations",
@@ -4857,6 +4878,7 @@
           "rechte": "A site gets camera, microphone, location, notifications and similar permissions only after you agree in a prompt from the browser.",
           "ausfuellen": "Filling from the vault: the browser decrypts logins, payment cards and bank accounts on the computer and inserts them only into the site they belong to. Payment data is only offered over HTTPS and only after Windows Hello or the master password.",
           "passwoerter": "New passwords: when you register, the browser generates a strong password on the computer and saves it to the vault after you submit. If the vault is locked, it encrypts the login with the public key of your vault inbox and stores it there; the instance only sees the encrypted record, which is taken over the next time you unlock. The browser keeps no master password in memory for this.",
+          "updates": "Updates on Windows: shortly after each start, the browser asks GitHub for the file of the latest release, without cookies or identifiers; GitHub sees your IP address. You can turn this off under “About”. The browser only downloads an update when you click, checks its signature and starts the installer. On Android it does not update itself.",
           "kopplung": "Pairing with MSM (optional): once paired, the browser shows Singra, Messenger, Notes, Calendar and Vault of your instance in the sidebar; the sections above apply to them. The sign-in is kept in the Windows Credential Manager on Windows and, on Android, encrypted with a key from the Android Keystore. Each of these modules can be hidden in the settings, and the pairing can be removed at any time.",
           "android": "On Android: Safe Browsing and the WebView usage statistics are off, so visited addresses are not sent to Google for them. Normal tabs have their own profile, apart from the browser interface; this separates cookies and storage, but on Android sites and the interface share the WebView process. The browser opts out of Android backup and of transfers to a new device: cookies, history and the pairing sign-in stay on this phone. Private tabs share one profile on the phone; its cookies, site storage and cache are deleted once the last private tab is closed, and the next start removes the folder. The browser downloads files itself into the “Download” folder; it sends cookies only to the site they belong to, also after a redirect. There is no virus check. The browser cannot turn on YouTube's restricted mode here. Payment data is only inserted after the phone's screen lock (fingerprint, face or PIN) or the master password. If you set it as the default browser or pick it when opening a link, links from other apps open in a new, normal tab.",
           "widget": "Search widget on Android: what you say into the microphone is turned into text by the phone's speech recognition service, usually Google; the browser only receives the text. A photo is taken by the camera app. The browser shrinks it, removes the location and other metadata, sends it to the image search of the chosen search engine (Google Lens or Bing) and then deletes it from the phone. The browser itself has no camera or microphone permission."
@@ -8657,6 +8679,18 @@
       "tiefsee": "Deep sea",
       "eigen": "Your image"
     },
+    "update": {
+      "name": "Updates",
+      "hinweis": "Asks GitHub for a new version. Nothing is installed until you click.",
+      "pruefen": "Check now",
+      "aktuell": "You have the latest version.",
+      "da": "Version {{version}} is available.",
+      "installieren": "Install and restart",
+      "nichtErreicht": "GitHub could not be reached. Try again later.",
+      "fehler": "The update could not be installed.",
+      "beimStart": "Check for updates at startup",
+      "beimStartHinweis": "Once per start, shortly after launch. GitHub sees your IP address."
+    },
     "einstellungen": {
       "searxngAdresse": "Address of your SearXNG instance",
       "searxngUngueltig": "Only https:// addresses without credentials; http:// only for localhost.",
@@ -8669,7 +8703,12 @@
         "nichtGefragt": "Android didn’t ask? After two “No” answers it only works in the Android settings under “Default apps”.",
         "festlegen": "Set as default",
         "einstellungen": "Open Android settings",
-        "fehler": "Android did not open the setting."
+        "fehler": "Android did not open the setting.",
+        "istWindows": "Links from other programs open here.",
+        "nichtWindows": "Links from mail, Teams and other programs open in another browser.",
+        "festlegenWindows": "Set in Windows",
+        "gefragtWindows": "In the Windows settings, click “Set default” for “Maunting Secure Browser”.",
+        "fehlerWindows": "Windows did not open the settings."
       },
       "listeEingebaut": "{{name}}: not downloaded yet, built-in base rules active",
       "listeStand": "{{name}}: updated {{stunden}} h ago",
