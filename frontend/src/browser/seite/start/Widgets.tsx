@@ -44,8 +44,9 @@ function Zeile({ oben, unten, onClick, onAuxClick }: { oben: string; unten: stri
         onAuxClick={(ev) => ev.button === 1 && onAuxClick?.()}
         className="flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left hover:bg-surface-container-high"
       >
-        <span className="truncate text-body-sm text-on-surface">{oben}</span>
-        <span className="truncate text-label-sm text-on-surface-variant">{unten}</span>
+        {/* Ohne max-w-full ragt langer Text unter Android (WebView 124) aus dem Knopf. */}
+        <span className="max-w-full truncate text-body-sm text-on-surface">{oben}</span>
+        <span className="max-w-full truncate text-label-sm text-on-surface-variant">{unten}</span>
       </button>
     </li>
   )

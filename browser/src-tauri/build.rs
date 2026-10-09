@@ -37,6 +37,7 @@ const BEFEHLE: &[&str] = &[
     "tabs_leistung",
     "tab_stumm",
     "schild_stand",
+    "schild_gesamt",
     "schutz_stand",
     "schutz_aendern",
     "schutz_binden",

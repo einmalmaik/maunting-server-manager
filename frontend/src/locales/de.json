@@ -4868,7 +4868,7 @@
         "heading": "Maunting Secure Browser",
         "body": "Der Maunting Secure Browser ist ein eigenständiger Browser für Windows und Android. Unter Windows zeigt er Webseiten mit der Laufzeit Microsoft Edge WebView2, die Windows bereitstellt und aktualisiert, unter Android mit der Android System WebView, die Google über den Play Store aktualisiert. Ohne Kopplung mit einer MSM-Instanz spricht er mit keinem Server von Maunting Studios. Es gibt keine Telemetrie.",
         "items": {
-          "lokal": "Auf dem Rechner: Verlauf, Lesezeichen, geöffnete Tabs (Adresse, Titel, Seitensymbol) und Einstellungen liegen nur im App-Ordner und gehen an keinen Server, auch nicht an Ihre Instanz. Cookies, Cache und Website-Speicher liegen in einem eigenen Profil, getrennt von Microsoft Edge.",
+          "lokal": "Auf dem Rechner: Verlauf, Lesezeichen, geöffnete Tabs (Adresse, Titel, Seitensymbol), Einstellungen und die Zahl der seit der Installation geblockten Werbe- und Trackeranfragen (ohne Adressen) liegen nur im App-Ordner und gehen an keinen Server, auch nicht an Ihre Instanz. Cookies, Cache und Website-Speicher liegen in einem eigenen Profil, getrennt von Microsoft Edge.",
           "privat": "Private Tabs legen nichts im Verlauf ab und zeigen kein Seitensymbol. Unter Windows liegen ihre Cookies und ihr Website-Speicher nur im Arbeitsspeicher und verschwinden, wenn der letzte private Tab geschlossen ist; bis dahin teilen sich alle privaten Tabs diese Sitzung. „Beim Schließen vergessen“ (standardmäßig aus) löscht beim Beenden Cookies, Cache und Website-Speicher der normalen Tabs; Verlauf und Lesezeichen bleiben.",
           "verbindungen": "Verbindungen: Die Seiten, die Sie öffnen, und die gewählte Suchmaschine bekommen Ihre Anfragen direkt. Für den Werbe- und Trackerschutz lädt der Browser höchstens alle vier Tage die Filterlisten von easylist.to und die Liste gegen Cookie-Hinweise von secure.fanboy.co.nz, ohne Cookie, Kennung und Referer; beide Server sehen dabei Ihre IP-Adresse. Das Seitensymbol liefert die WebView des Tabs; die Oberfläche lädt dafür keine Adresse der Seite.",
           "https": "HTTPS zuerst und saubere Links: Eine Adresse mit „http://“ öffnet der Browser zuerst verschlüsselt. Kann die Seite das nicht, lädt er sie wie angegeben und merkt sich das bis zum Beenden, nur im Arbeitsspeicher. Adressen auf dem eigenen Rechner, im eigenen Netz und mit eigenem Port bleiben, wie sie sind. Ist der Werbe- und Trackerschutz an, nimmt der Browser bekannte Tracking-Parameter wie „utm_source“, „fbclid“ oder „gclid“ aus jeder Adresse, die ein Tab öffnet, Cookie-Hinweise lehnt er ab, wo die mitgelieferten Regeln von autoconsent (DuckDuckGo) das können, und blendet die übrigen aus; eine Einwilligung gibt er nie. Die Regeln liegen im Browser, dafür geht keine Anfrage hinaus. Die Seite speichert die Ablehnung wie nach einem eigenen Klick, meist als Cookie.",
@@ -8566,9 +8566,10 @@
       "knopfAus": "Schutz aus",
       "werbung": "Werbung",
       "tracker": "Tracker",
+      "seitInstallation": "Seit der Installation: {{werbung}} Werbung · {{tracker}} Tracker",
       "aufDieserSeite": "Schutz auf dieser Seite",
       "globalAus": "Der Schutz ist in den Einstellungen ausgeschaltet.",
-      "hinweis": "Geblockt wird nach EasyList, EasyList Germany, EasyPrivacy und der EasyList Cookie List; was Cookie-Hinweise zeigt, zählt als Werbung. Cookie-Hinweise lehnt der Browser nach den Regeln von autoconsent (DuckDuckGo) ab. Die Zahlen gelten für die geöffnete Seite."
+      "hinweis": "Geblockt wird nach EasyList, EasyList Germany, EasyPrivacy und der EasyList Cookie List; was Cookie-Hinweise zeigt, zählt als Werbung. Cookie-Hinweise lehnt der Browser nach den Regeln von autoconsent (DuckDuckGo) ab. Die Kacheln zählen nur die geöffnete Seite."
     },
     "seite": {
       "abgestuerztTitel": "Diese Seite ist abgestürzt",

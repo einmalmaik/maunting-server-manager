@@ -87,6 +87,7 @@ pub fn run() {
             schild::konfig_uebernehmen(&konfig);
             app.manage(konfig::KonfigZustand(std::sync::Mutex::new(konfig)));
             schild::listen::starten(handle);
+            schild::gesamt::starten(handle);
             downloads::quarantaene::beim_start(handle);
             schild::schutz_dienst::starten(handle);
             tabs::ruhe::starten(handle.clone());
@@ -125,6 +126,7 @@ pub fn run() {
             tabs::ruhe::tabs_leistung,
             tabs::tab_stumm,
             schild::schild_stand,
+            schild::gesamt::schild_gesamt,
             schild::schutz_dienst::schutz_stand,
             schild::schutz_dienst::schutz_aendern,
             schild::schutz_dienst::schutz_binden,
@@ -154,6 +156,9 @@ pub fn run() {
             // beenden. Das Fenster bleibt dafür einen Moment stehen.
             if let tauri::WindowEvent::CloseRequested { api, .. } = ereignis {
                 let app = fenster.app_handle().clone();
+                if fenster.label() == "main" {
+                    schild::gesamt::speichern(&app);
+                }
                 let vergessen = app
                     .try_state::<konfig::KonfigZustand>()
                     .is_some_and(|k| k.0.lock().unwrap().vergessen_beim_schliessen);

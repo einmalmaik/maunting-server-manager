@@ -2,7 +2,7 @@
 //!
 //! - jede Anfrage eines Tabs (auch aus Iframes und Workern) geht durch den
 //!   Jugend- und Suchtschutz und das Schild und wird bei einem Treffer mit
-//!   403 beantwortet, bevor sie das Netz erreicht; Anfragen an YouTube
+//!   403 beantwortet (ein Ping mit 204), bevor sie das Netz erreicht; Anfragen an YouTube
 //!   bekommen bei sicherer Suche den eingeschränkten Modus;
 //! - Adresse, Zurück/Vor und Favicon, auch bei `history.pushState`;
 //! - Kosmetik: nach `DOMContentLoaded` blendet ein Stylesheet die Werbeplätze
@@ -152,16 +152,18 @@ pub(super) unsafe fn einrichten(
                 if matches!(entscheid, Vorab::Laden { youtube: true } | Vorab::Schild { youtube: true }) {
                     anfrage.Headers()?.SetHeader(&HSTRING::from("YouTube-Restrict"), &HSTRING::from("Strict"))?;
                 }
+                let art = anfrage_art(kontext);
                 let blocken = match entscheid {
                     Vorab::Blocken(_) => true,
                     Vorab::Laden { .. } => false,
-                    Vorab::Schild { .. } => schild::pruefen(&app, &id, &url, &quelle(&core), anfrage_art(kontext)),
+                    Vorab::Schild { .. } => schild::pruefen(&app, &id, &url, &quelle(&core), art),
                 };
                 if blocken {
+                    let (status, text) = art.sperrantwort();
                     let antwort = umgebung.CreateWebResourceResponse(
                         None,
-                        403,
-                        &HSTRING::from("Blocked by MSB"),
+                        status,
+                        &HSTRING::from(text),
                         &HSTRING::from(""),
                     )?;
                     args.SetResponse(&antwort)?;
@@ -202,8 +204,10 @@ pub(super) unsafe fn einrichten(
     {
         let (app, id) = (app.clone(), id.to_string());
         core.add_ProcessFailed(
-            &ProcessFailedEventHandler::create(Box::new(move |_, _| {
-                melden(&app, TabEreignis::Absturz { id: id.clone() });
+            &ProcessFailedEventHandler::create(Box::new(move |_, args| {
+                if let Some(args) = args {
+                    super::absturz::verarbeiten(&app, &id, &args);
+                }
                 Ok(())
             })),
             &mut token,

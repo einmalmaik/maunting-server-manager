@@ -160,6 +160,8 @@ export const nativ = {
   seitenrechtZuruecksetzen: (art: string, herkunft: string) => rufen('seitenrecht_zuruecksetzen', { art, herkunft }),
   schildStand: () =>
     rufen<{ aktiv: boolean; listen: { name: string; alter_sekunden: number | null }[] }>('schild_stand'),
+  /** Seit der Installation geblockt, nur diese zwei Zahlen (`schild/gesamt.rs`). */
+  schildGesamt: () => rufen<{ werbung: number; tracker: number }>('schild_gesamt'),
   schutzStand: () => rufen<SchutzStand>('schutz_stand'),
   /** Strengeres gilt sofort, Lockeres wird ein Antrag (`schild/schutz.rs`). Wirft `ohne_netz`, `gebunden`, `abkuehlen`. */
   schutzAendern: (regeln: SchutzRegeln) => rufen<SchutzStand>('schutz_aendern', { regeln }),

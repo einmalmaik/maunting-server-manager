@@ -27,6 +27,7 @@ use windows::Win32::Foundation::{E_POINTER, HWND, RECT};
 
 use super::{melden, TabEreignis, Tabs};
 
+mod absturz;
 mod cookies;
 mod entwickler;
 mod formulare;

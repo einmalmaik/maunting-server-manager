@@ -110,6 +110,15 @@ describe('Widgets', () => {
     expect(screen.getAllByRole('heading').map((h) => h.textContent)).toEqual(['Uhr'])
   })
 
+  // jsdom misst nicht; die Probe gehört ins Gerät (Emulator, WebView 124).
+  it('kürzt lange Titel, statt sie aus der Kachel ragen zu lassen', () => {
+    useEinstellungenStore.setState({ widgetsAus: [] })
+    useVerlaufStore.setState({ verlauf: [{ url: 'https://example.org/', titel: 'Ein sehr langer Titel '.repeat(10), zeit: 1 }] })
+    zeigen(<Widgets privat={false} />)
+    const zeile = screen.getByRole('button', { name: /Ein sehr langer Titel/ })
+    for (const text of zeile.querySelectorAll('span')) expect(text).toHaveClass('max-w-full', 'truncate')
+  })
+
   it('folgt der Reihenfolge aus den Einstellungen', () => {
     useEinstellungenStore.setState({ widgetsAus: [], widgetOrdnung: ['zuletzt'] })
     zeigen(<Widgets privat={false} />)

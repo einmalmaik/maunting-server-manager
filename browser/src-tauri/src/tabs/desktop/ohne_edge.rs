@@ -175,7 +175,8 @@ mod tests {
         assert_eq!(gemeldet, GRUENDE);
 
         // Android meldet dieselben Gründe (`Tab.grund`).
-        let kotlin = include_str!("../../../gen/android/app/src/main/java/com/mauntingstudios/secure_browser/Tab.kt");
+        // Der Windows-Runner checkt mit CRLF aus.
+        let kotlin = include_str!("../../../gen/android/app/src/main/java/com/mauntingstudios/secure_browser/Tab.kt").replace("\r\n", "\n");
         let grund = &kotlin[kotlin.find("fun grund(").unwrap()..];
         let grund = &grund[..grund.find("\n    }\n").unwrap()];
         for wort in grund.split('"').skip(1).step_by(2) {

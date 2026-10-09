@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-schild-gesamt"
+description = "Enables the schild_gesamt command without any pre-configured scope."
+commands.allow = ["schild_gesamt"]
+
+[[permission]]
+identifier = "deny-schild-gesamt"
+description = "Denies the schild_gesamt command without any pre-configured scope."
+commands.deny = ["schild_gesamt"]

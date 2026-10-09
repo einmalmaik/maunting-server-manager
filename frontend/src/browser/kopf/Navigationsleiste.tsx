@@ -6,7 +6,7 @@
  * Kurzinfos stehen hier über den Knöpfen (`lage="oben"`): darunter beginnt die
  * Seite, und eine Webview liegt immer über der Oberfläche.
  */
-import { forwardRef, useRef, useState } from 'react'
+import { forwardRef, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, RotateCw, ShieldCheck, ShieldOff, Star, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -16,6 +16,7 @@ import { useEinstellungenStore } from '../services/einstellungenStore'
 
 import { schildPausiert, seitenHost, useGeraetKonfig } from '../services/geraetKonfig'
 import { istIntern, istWebseite } from '../services/intern'
+import { nativ } from '../services/nativ'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 import { useVerlaufStore } from '../services/verlaufStore'
 import { Adresszeile, type AdresszeileGriff } from './Adresszeile'
@@ -23,13 +24,19 @@ import { Knopf, KNOPF } from './knopf'
 import { Modulmenue, ModuleOben } from './Modulmenue'
 
 export function Schild() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const tab = useAktiverTab()
   const konfig = useGeraetKonfig((s) => s.konfig)
   const aendern = useGeraetKonfig((s) => s.aendern)
   const aktion = useTabsStore((s) => s.aktion)
   const anker = useRef<HTMLButtonElement>(null)
   const [offen, setOffen] = useState(false)
+  const [gesamt, setGesamt] = useState<{ werbung: number; tracker: number } | null>(null)
+
+  useEffect(() => {
+    if (offen) void nativ.schildGesamt().then(setGesamt).catch(() => null)
+  }, [offen])
+  const zahl = (n: number) => n.toLocaleString(i18n.language)
 
   const host = tab ? seitenHost(tab.url) : null
   const global = konfig?.schild_aktiv ?? true
@@ -76,6 +83,11 @@ export function Schild() {
             <dd className="text-title-md tabular-nums">{tab?.tracker ?? 0}</dd>
           </div>
         </dl>
+        {gesamt && (
+          <p className="mt-2 text-label-sm tabular-nums text-on-surface-variant">
+            {t('browser.schild.seitInstallation', { werbung: zahl(gesamt.werbung), tracker: zahl(gesamt.tracker) })}
+          </p>
+        )}
         {!global ? (
           <p className="mt-3 text-body-sm text-on-surface-variant">{t('browser.schild.globalAus')}</p>
         ) : host ? (

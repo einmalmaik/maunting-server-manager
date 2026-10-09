@@ -4868,7 +4868,7 @@
         "heading": "Maunting Secure Browser",
         "body": "The Maunting Secure Browser is a standalone browser for Windows and Android. On Windows it shows web pages with the Microsoft Edge WebView2 runtime, which Windows provides and updates; on Android with the Android System WebView, which Google updates through the Play Store. Unless it is paired with an MSM instance, it talks to no Maunting Studios server. There is no telemetry.",
         "items": {
-          "lokal": "On the computer: history, bookmarks, open tabs (address, title, site icon) and settings stay in the app folder and go to no server, not even your instance. Cookies, cache and site storage live in a separate profile, apart from Microsoft Edge.",
+          "lokal": "On the computer: history, bookmarks, open tabs (address, title, site icon), settings and the number of ad and tracker requests blocked since installation (without addresses) stay in the app folder and go to no server, not even your instance. Cookies, cache and site storage live in a separate profile, apart from Microsoft Edge.",
           "privat": "Private tabs add nothing to the history and show no site icon. On Windows, their cookies and site storage live only in memory and disappear once the last private tab is closed; until then all private tabs share this session. “Forget on close” (off by default) deletes the cookies, cache and site storage of normal tabs when you quit; history and bookmarks stay.",
           "verbindungen": "Connections: the pages you open and the search engine you chose receive your requests directly. For the ad and tracker blocker, the browser downloads the filter lists from easylist.to and the list against cookie notices from secure.fanboy.co.nz at most every four days, without cookie, identifier or referrer; both servers see your IP address. The site icon comes from the tab’s WebView; the interface does not load any address of the site for it.",
           "https": "HTTPS first and clean links: the browser opens an address starting with “http://” encrypted first. If the site can’t do that, it loads it as given and remembers this until you quit, in memory only. Addresses on your own computer, in your own network and with their own port stay as they are. With the ad and tracker blocker on, the browser removes known tracking parameters such as “utm_source”, “fbclid” or “gclid” from every address a tab opens, Where the bundled rules of autoconsent (DuckDuckGo) can, it rejects cookie notices and hides the rest; it never gives consent. The rules ship with the browser, no request goes out for them. The site stores the rejection as after your own click, usually as a cookie.",
@@ -8566,9 +8566,10 @@
       "knopfAus": "Protection off",
       "werbung": "Ads",
       "tracker": "Trackers",
+      "seitInstallation": "Since installation: {{werbung}} ads · {{tracker}} trackers",
       "aufDieserSeite": "Protection on this site",
       "globalAus": "Protection is switched off in the settings.",
-      "hinweis": "Blocking uses EasyList, EasyList Germany, EasyPrivacy and the EasyList Cookie List; whatever shows cookie notices counts as ads. Cookie notices are rejected with the rules of autoconsent (DuckDuckGo). The numbers are for the open page."
+      "hinweis": "Blocking uses EasyList, EasyList Germany, EasyPrivacy and the EasyList Cookie List; whatever shows cookie notices counts as ads. Cookie notices are rejected with the rules of autoconsent (DuckDuckGo). The tiles count only the open page."
     },
     "seite": {
       "abgestuerztTitel": "This page crashed",

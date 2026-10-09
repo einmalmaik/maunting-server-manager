@@ -21,6 +21,7 @@ use tauri::AppHandle;
 use crate::konfig::Konfig;
 use crate::tabs::{melden, TabEreignis};
 
+pub mod gesamt;
 pub mod kategorien;
 pub mod listen;
 pub mod netzzeit;
@@ -85,6 +86,16 @@ impl AnfrageArt {
             AnfrageArt::Websocket => "websocket",
             AnfrageArt::Ping => "ping",
             AnfrageArt::Sonstiges => "other",
+        }
+    }
+
+    /// Status und Text für eine geblockte Anfrage. Ein Ping (`sendBeacon`,
+    /// `<a ping>`) erwartet keine Antwort; 204 sieht für die Seite aus wie
+    /// angenommen, ein 403 meldet sie mancherorts als Fehler weiter.
+    pub fn sperrantwort(self) -> (i32, &'static str) {
+        match self {
+            AnfrageArt::Ping => (204, "No Content"),
+            _ => (403, "Blocked by MSB"),
         }
     }
 }
@@ -188,6 +199,7 @@ pub fn einstufen(url: &str, seite: &str, art: AnfrageArt) -> Option<Treffer> {
 /// steigt, und die Oberfläche erfährt den neuen Stand.
 pub fn pruefen(app: &AppHandle, tab: &str, url: &str, seite: &str, art: AnfrageArt) -> bool {
     let Some(treffer) = einstufen(url, seite, art) else { return false };
+    gesamt::zaehlen(treffer);
     let (werbung, tracker) = {
         let mut zaehler = SCHILD.zaehler.lock().unwrap();
         let eintrag = zaehler.entry(tab.to_string()).or_default();
@@ -305,6 +317,14 @@ pub fn schild_stand(app: AppHandle) -> SchildStand {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ein_geblockter_ping_bekommt_204() {
+        assert_eq!(AnfrageArt::Ping.sperrantwort().0, 204);
+        for art in [AnfrageArt::Dokument, AnfrageArt::Skript, AnfrageArt::Xhr, AnfrageArt::Bild, AnfrageArt::Sonstiges] {
+            assert_eq!(art.sperrantwort().0, 403, "{art:?}");
+        }
+    }
 
     fn mit_regeln(werbung: &str, tracker: &str) {
         engine_setzen(Treffer::Werbung, listen::engine_aus(&[werbung]));
