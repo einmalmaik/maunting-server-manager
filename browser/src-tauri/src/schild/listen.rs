@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use adblock::lists::{FilterSet, ParseOptions};
+use adblock::lists::{FilterSet, ParseOptions, RuleTypes};
 use adblock::Engine;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -20,22 +20,37 @@ pub struct Liste {
     pub name: &'static str,
     pub url: &'static str,
     pub art: Treffer,
+    pub regeln: RuleTypes,
 }
 
 pub const LISTEN: [Liste; 4] = [
-    Liste { name: "easylist", url: "https://easylist.to/easylist/easylist.txt", art: Treffer::Werbung },
+    Liste {
+        name: "easylist",
+        url: "https://easylist.to/easylist/easylist.txt",
+        art: Treffer::Werbung,
+        regeln: RuleTypes::All,
+    },
     Liste {
         name: "easylistgermany",
         url: "https://easylist.to/easylistgermany/easylistgermany.txt",
         art: Treffer::Werbung,
+        regeln: RuleTypes::All,
     },
-    Liste { name: "easyprivacy", url: "https://easylist.to/easylist/easyprivacy.txt", art: Treffer::Tracker },
-    // Blendet Cookie-Hinweise aus und blockt die Skripte, die sie zeigen.
-    // Wer den Hinweis nicht beantwortet, hat nichts zugestimmt.
+    Liste {
+        name: "easyprivacy",
+        url: "https://easylist.to/easylist/easyprivacy.txt",
+        art: Treffer::Tracker,
+        regeln: RuleTypes::All,
+    },
+    // Blockt die Skripte, die Cookie-Hinweise zeigen. Ausblenden darf sie
+    // nicht: autoconsent (`cookies.rs`) lehnt nur ab, was es sieht, und bei
+    // TCF gilt das „berechtigte Interesse“, bis jemand widerspricht. Was
+    // autoconsent findet, verdeckt es selbst, bis es abgelehnt hat.
     Liste {
         name: "easylist-cookie",
         url: "https://secure.fanboy.co.nz/fanboy-cookiemonster.txt",
         art: Treffer::Werbung,
+        regeln: RuleTypes::NetworkOnly,
     },
 ];
 
@@ -94,9 +109,14 @@ pub const EINGEBAUT_TRACKER: &str = "\
 ";
 
 pub fn engine_aus(texte: &[&str]) -> Engine {
+    let mit: Vec<(&str, RuleTypes)> = texte.iter().map(|t| (*t, RuleTypes::All)).collect();
+    engine_mit(&mit)
+}
+
+fn engine_mit(texte: &[(&str, RuleTypes)]) -> Engine {
     let mut satz = FilterSet::new(false);
-    for text in texte {
-        satz.add_filter_list(text.to_string(), ParseOptions::default());
+    for (text, regeln) in texte {
+        satz.add_filter_list(text.to_string(), ParseOptions { rule_types: *regeln, ..ParseOptions::default() });
     }
     Engine::new_with_filter_set(satz)
 }
@@ -124,21 +144,26 @@ pub fn ist_filterliste(text: &str) -> bool {
 
 fn engines_bauen(app: &AppHandle) {
     for art in [Treffer::Werbung, Treffer::Tracker] {
-        let eingebaut = match art {
-            Treffer::Werbung => EINGEBAUT_WERBUNG,
-            Treffer::Tracker => EINGEBAUT_TRACKER,
-        };
-        let mut texte = vec![eingebaut.to_string()];
-        for liste in LISTEN.iter().filter(|l| l.art == art) {
-            if let Some(text) = datei(app, liste).and_then(|p| std::fs::read_to_string(p).ok()) {
-                if ist_filterliste(&text) {
-                    texte.push(text);
-                }
-            }
-        }
-        let refs: Vec<&str> = texte.iter().map(String::as_str).collect();
-        engine_setzen(art, engine_aus(&refs));
+        let lesen = |liste: &Liste| datei(app, liste).and_then(|p| std::fs::read_to_string(p).ok());
+        engine_setzen(art, engine_fuer(art, lesen));
     }
+}
+
+/// Eingebaute Regeln plus jede geladene Liste dieser Art, mit den Regeln,
+/// die die Liste beitragen darf.
+fn engine_fuer(art: Treffer, lesen: impl Fn(&Liste) -> Option<String>) -> Engine {
+    let eingebaut = match art {
+        Treffer::Werbung => EINGEBAUT_WERBUNG,
+        Treffer::Tracker => EINGEBAUT_TRACKER,
+    };
+    let mut texte = vec![(eingebaut.to_string(), RuleTypes::All)];
+    for liste in LISTEN.iter().filter(|l| l.art == art) {
+        if let Some(text) = lesen(liste).filter(|t| ist_filterliste(t)) {
+            texte.push((text, liste.regeln));
+        }
+    }
+    let refs: Vec<(&str, RuleTypes)> = texte.iter().map(|(t, r)| (t.as_str(), *r)).collect();
+    engine_mit(&refs)
 }
 
 /// Holt eine Liste und nimmt sie nur, wenn `passt` sie als Liste erkennt.
@@ -247,5 +272,34 @@ mod tests {
         )
         .unwrap();
         assert!(t.check_network_request(&r).should_block());
+    }
+
+    /// Die Cookie-Liste blockt Skripte, blendet aber nichts aus: sonst sieht
+    /// autoconsent den Hinweis nicht und lehnt nicht ab.
+    #[test]
+    fn die_cookie_liste_blendet_nichts_aus() {
+        let engine = engine_fuer(Treffer::Werbung, |liste| {
+            Some(match liste.name {
+                "easylist" => "! Title: EasyList\n##.anzeige-oben\nladen.example##.anzeige-seite\n".into(),
+                "easylist-cookie" => {
+                    "! Title: Cookie\n##.cookie-hinweis\nladen.example##.cookie-seite\n||cookie-skript.example^\n".into()
+                }
+                _ => return None,
+            })
+        });
+        let css = engine.url_cosmetic_resources("https://laden.example/").hide_selectors;
+        assert!(css.contains(".anzeige-seite"), "{css:?}");
+        assert!(!css.contains(".cookie-seite"), "{css:?}");
+        let klassen = ["anzeige-oben".to_string(), "cookie-hinweis".to_string()];
+        let allgemein = engine.hidden_class_id_selectors(&klassen, &Vec::<String>::new(), &Default::default());
+        assert_eq!(allgemein, vec![".anzeige-oben".to_string()]);
+        let r = adblock::request::Request::new(
+            "https://cookie-skript.example/banner.js",
+            "https://laden.example/",
+            "script",
+            "GET",
+        )
+        .unwrap();
+        assert!(engine.check_network_request(&r).should_block());
     }
 }

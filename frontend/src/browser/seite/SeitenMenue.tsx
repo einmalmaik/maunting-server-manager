@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
   ArrowRight,
+  Bot,
   ClipboardPaste,
   Code,
   Copy,
@@ -31,6 +32,7 @@ import { Kontextmenue } from '@/Singra/UI'
 import type { ActionMenuItem } from '@/Singra/UI/ActionMenu'
 
 import { useAnsicht } from '../entwickler/werkzeuge'
+import { useAnSingra } from '../services/anSingra'
 import { useEinstellungenStore, useWirksameSuche } from '../services/einstellungenStore'
 import { nativ } from '../services/nativ'
 import { istAndroid } from '../services/plattform'
@@ -66,6 +68,7 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
   const neuerTab = useTabsStore((s) => s.neuerTab)
   const maschine = useWirksameSuche()
   const searxng = useEinstellungenStore((s) => s.searxngUrl)
+  const anSingra = useAnSingra(tab)
 
   if (!tab || frage?.art !== 'kontextmenue') return null
   const menue = frage
@@ -139,6 +142,7 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
   if (!menue.link && !menue.bild && !menue.auswahl && !menue.bearbeitbar) {
     items.push(...nativEintrag('back', items.length > 0), ...nativEintrag('forward'), ...nativEintrag('reload'), ...nativEintrag('saveAs'))
     items.push(eigen('drucken', t('browser.menue.drucken'), <Printer />, () => void nativ.tabDrucken(tab.id)))
+    if (anSingra) items.push(eigen('singra', t('browser.menue.anSingra'), <Bot />, anSingra))
   }
   // Entwicklerwerkzeuge gibt es auf Android nicht.
   if (!istAndroid()) items.push(

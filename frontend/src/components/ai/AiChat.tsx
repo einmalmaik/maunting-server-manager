@@ -46,6 +46,7 @@ import { RegionalAnalysisLayout } from './geo/RegionalAnalysisLayout'
 import type { NewsItem } from './geo/RegionalInfoPanel'
 import { applyGeoCameraCommand, normalizeGeoCameraCommand, normalizeRegionalAnalysis } from './geo/regionalAnalysis'
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
+import { AI_ENTWURF_EVENT, entwurfNehmen } from '@/lib/aiEntwurf'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { starteAufnahme, type Aufnahme } from './voice/audioAufnahme'
 import { AI_IS_BETA } from './AiBetaBanner'
@@ -380,6 +381,19 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
       window.removeEventListener('msm:ai-chat-cleared', handleCleared)
     }
   }, [merkSchluessel, providerId])
+
+  // Ein übergebener Entwurf (`lib/aiEntwurf.ts`) kommt ins Eingabefeld, nie direkt in den Chat.
+  useEffect(() => {
+    const nehmen = () => {
+      const text = entwurfNehmen()
+      if (!text) return
+      setInput((bisher) => (bisher.trim() ? `${bisher}\n\n${text}` : text).slice(0, 16_000))
+      requestAnimationFrame(() => inputRef.current?.focus())
+    }
+    nehmen()
+    window.addEventListener(AI_ENTWURF_EVENT, nehmen)
+    return () => window.removeEventListener(AI_ENTWURF_EVENT, nehmen)
+  }, [])
 
   useEffect(() => {
     // StrictMode fuehrt Setup/Cleanup in Entwicklung absichtlich doppelt aus.

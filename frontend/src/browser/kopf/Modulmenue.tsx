@@ -7,13 +7,14 @@
  * Neu laden, Lesezeichen und die Suche in der Seite, wie im Menü von Chrome.
  */
 import { useRef, useState } from 'react'
-import { ArrowRight, Menu, RotateCw, Search, Star, X } from 'lucide-react'
+import { ArrowRight, Bot, Menu, RotateCw, Search, Star, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Ankerfenster } from '@/Singra/UI'
 
 import { useLeistenEintraege, useLeistenZahlen, useLeistenZiele } from '../leiste/eintraege'
 import { EINSTELLUNGEN_EINTRAG, KOPPELN_EINTRAG, type Leisteneintrag } from '../leiste/module'
+import { useAnSingra } from '../services/anSingra'
 import { istIntern, istWebseite } from '../services/intern'
 import { istGekoppelt, useSitzung } from '../services/sitzung'
 import { useSuche } from '../services/suche'
@@ -70,6 +71,7 @@ function HandyAktionen({ schliessen }: { schliessen: () => void }) {
   const lesezeichen = useVerlaufStore((s) => s.lesezeichen)
   const umschalten = useVerlaufStore((s) => s.lesezeichenUmschalten)
   const suchen = useSuche((s) => s.oeffnen)
+  const anSingra = useAnSingra(tab)
   const webseite = !!tab && istWebseite(tab.url)
   const gemerkt = webseite && lesezeichen.some((l) => l.url === tab!.url)
   const und = (tun: () => void) => () => {
@@ -92,6 +94,11 @@ function HandyAktionen({ schliessen }: { schliessen: () => void }) {
       <Knopf name={t('browser.suche.feld')} onClick={und(suchen)} disabled={!webseite}>
         <Search className="h-5 w-5" aria-hidden="true" />
       </Knopf>
+      {anSingra && (
+        <Knopf name={t('browser.menue.anSingra')} onClick={und(anSingra)}>
+          <Bot className="h-5 w-5" aria-hidden="true" />
+        </Knopf>
+      )}
       {tab?.laedt ? (
         <Knopf name={t('browser.nav.anhalten')} onClick={und(() => aktion('anhalten'))}>
           <X className="h-5 w-5" aria-hidden="true" />

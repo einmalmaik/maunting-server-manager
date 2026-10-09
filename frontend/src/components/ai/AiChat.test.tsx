@@ -17,6 +17,7 @@ import {
 import * as client from '@/api/client'
 import i18n from '@/i18n'
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
+import { entwurfUebergeben } from '@/lib/aiEntwurf'
 import { aiChatPreferenceKeys } from '@/lib/aiChatPreferences'
 import { useAuthStore } from '@/stores/authStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
@@ -343,6 +344,19 @@ describe('AiChat', () => {
 
     const flaeche = screen.getByText(i18n.t('ai.attachments.drop'))
     expect(flaeche.closest('[aria-live]')).toBeNull()
+  })
+
+  it('legt einen übergebenen Entwurf ins Eingabefeld und schickt ihn nicht ab', async () => {
+    const { streamAiMessage } = await import('@/api/ai')
+    entwurfUebergeben('Seite A\nhttps://a.example/')
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
+    await screen.findByText('synthetic-note.txt')
+    expect(screen.getByLabelText('Nachricht')).toHaveValue('Seite A\nhttps://a.example/')
+    // Kommt bei offenem Chat ein zweiter, hängt er an das Getippte an.
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Fasse zusammen:' } })
+    act(() => entwurfUebergeben('https://b.example/'))
+    expect(screen.getByLabelText('Nachricht')).toHaveValue('Fasse zusammen:\n\nhttps://b.example/')
+    expect(streamAiMessage).not.toHaveBeenCalled()
   })
 
   it('sends the chosen reasoning level along with the message', async () => {
