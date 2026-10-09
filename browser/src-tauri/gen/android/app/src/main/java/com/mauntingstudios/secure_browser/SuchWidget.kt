@@ -13,7 +13,7 @@ import android.widget.RemoteViews
  * Das Such-Widget auf dem Startbildschirm: Suchfeld, Mikrofon und Kamera.
  * Jeder Teil öffnet `WidgetActivity` mit seiner Aktion. Die Kamera steht nur
  * da, wenn die gewählte Suchmaschine Bilder sucht; das meldet die Oberfläche
- * bei jedem Wechsel (`TabsPlugin.widgetStand`).
+ * bei jedem Wechsel (`WidgetPlugin.stand`).
  */
 class SuchWidget : AppWidgetProvider() {
   override fun onUpdate(context: Context, verwalter: AppWidgetManager, kennungen: IntArray) {

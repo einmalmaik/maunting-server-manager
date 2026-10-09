@@ -6,6 +6,7 @@
  */
 import { useEffect } from 'react'
 
+import { istWebseite } from './intern'
 import { nativ } from './nativ'
 import { useSuche } from './suche'
 import { useTabsStore } from './tabsStore'
@@ -66,7 +67,7 @@ export function kuerzelAusfuehren(taste: string, ziele: KuerzelZiele): void {
       break
     case 'lesezeichen': {
       const tab = tabs.tabs.find((t) => t.id === tabs.aktivId)
-      if (tab?.url.startsWith('http')) useVerlaufStore.getState().lesezeichenUmschalten(tab.url, tab.titel)
+      if (tab && istWebseite(tab.url)) useVerlaufStore.getState().lesezeichenUmschalten(tab.url, tab.titel)
       break
     }
     case 'verlauf':
@@ -99,7 +100,10 @@ export function kuerzelAusfuehren(taste: string, ziele: KuerzelZiele): void {
   }
 }
 
-/** Dieselbe Zuordnung wie `kuerzel` in `webview2.rs`. */
+/**
+ * Dieselbe Zuordnung wie `kuerzel` in `webview2.rs`, dazu Strg+R und F5: die
+ * meldet Rust nicht, in einer Seite lädt die WebView2 selbst neu.
+ */
 export function kuerzelAusTaste(e: KeyboardEvent): Kuerzel | null {
   const strg = e.ctrlKey || e.metaKey
   const taste = e.key.toLowerCase()

@@ -1,0 +1,11 @@
+[
+  { "host": "seite.example", "ausnahmen": ["seite.example"], "pausiert": true },
+  { "host": "news.seite.example", "ausnahmen": ["seite.example"], "pausiert": true },
+  { "host": "andereseite.example", "ausnahmen": ["seite.example"], "pausiert": false },
+  { "host": "seite.example", "ausnahmen": [], "pausiert": false },
+  { "host": "x.de", "ausnahmen": ["de"], "pausiert": false },
+  { "host": "drucker.intranet", "ausnahmen": ["intranet"], "pausiert": false },
+  { "host": "localhost", "ausnahmen": ["localhost"], "pausiert": true },
+  { "host": "intranet", "ausnahmen": ["intranet"], "pausiert": true },
+  { "host": "192.168.0.1", "ausnahmen": ["192.168.0.1"], "pausiert": true }
+]

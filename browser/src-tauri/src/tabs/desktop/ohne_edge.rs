@@ -149,3 +149,42 @@ pub fn drucken(app: &AppHandle, id: &str) -> Result<(), String> {
             .map_err(|e| e.to_string())
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Die Gründe, für die die Oberfläche eine Fehlerseite hat (`browser.fehlerseite.*`).
+    const GRUENDE: [&str; 6] = ["adresse", "offline", "zeit", "verbindung", "zertifikat", "unbekannt"];
+
+    #[test]
+    fn jede_fehlerseite_hat_text_auf_beiden_plattformen() {
+        let gemeldet = [
+            COREWEBVIEW2_WEB_ERROR_STATUS_HOST_NAME_NOT_RESOLVED,
+            COREWEBVIEW2_WEB_ERROR_STATUS_DISCONNECTED,
+            COREWEBVIEW2_WEB_ERROR_STATUS_TIMEOUT,
+            COREWEBVIEW2_WEB_ERROR_STATUS_CANNOT_CONNECT,
+            COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_EXPIRED,
+            COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN,
+        ]
+        .map(fehler_art);
+        assert_eq!(gemeldet, GRUENDE);
+
+        // Android meldet dieselben Gründe (`Tab.grund`).
+        let kotlin = include_str!("../../../gen/android/app/src/main/java/com/mauntingstudios/secure_browser/Tab.kt");
+        let grund = &kotlin[kotlin.find("fun grund(").unwrap()..];
+        let grund = &grund[..grund.find("\n    }\n").unwrap()];
+        for wort in grund.split('"').skip(1).step_by(2) {
+            assert!(GRUENDE.contains(&wort), "Tab.grund meldet {wort}");
+        }
+
+        for sprache in [include_str!("../../../../../frontend/src/locales/de.json"), include_str!("../../../../../frontend/src/locales/en.json")] {
+            let texte: serde_json::Value = serde_json::from_str(sprache).unwrap();
+            for g in GRUENDE {
+                for teil in ["Titel", "Text"] {
+                    assert!(texte["browser"]["fehlerseite"][format!("{g}{teil}")].is_string(), "{g}{teil}");
+                }
+            }
+        }
+    }
+}

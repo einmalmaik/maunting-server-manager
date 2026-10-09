@@ -7,6 +7,7 @@
 //! App-Manifest nennt, prüft Tauri jeden Aufruf gegen diese Rechte.
 
 pub mod browserdaten;
+pub mod datei;
 pub mod downloads;
 pub mod fenster;
 pub mod konfig;
@@ -56,7 +57,8 @@ pub fn run() {
         builder = builder
             .plugin(tauri_plugin_biometric::init())
             .plugin(schluesselfach::biometrie::init_android_schluesselfach())
-            .plugin(tabs::android::init());
+            .plugin(tabs::android::init())
+            .plugin(widget::init());
     }
 
     builder

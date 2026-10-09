@@ -25,8 +25,8 @@ use webview2_com::{
 use windows::core::{Interface, BOOL, HSTRING, PWSTR};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
 
-use crate::schild::{self, sperre, AnfrageArt};
-use crate::tabs::{melden, TabEreignis};
+use crate::schild::{self, AnfrageArt};
+use crate::tabs::{melden, vorab, TabEreignis, Vorab};
 
 pub(super) unsafe fn text(lesen: impl FnOnce(*mut PWSTR) -> windows::core::Result<()>) -> String {
     let mut wert = PWSTR::null();
@@ -145,16 +145,19 @@ pub(super) unsafe fn einrichten(
                 let mut kontext = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
                 args.ResourceContext(&mut kontext)?;
                 // Was der Jugend- und Suchtschutz sperrt, kommt auch nicht als
-                // Iframe, Bild oder Skript einer anderen Seite.
-                let gesperrt = sperre::gesperrt(&url).is_some();
-                if !gesperrt && sperre::youtube_einschraenken(&url) {
+                // Iframe, Bild oder Skript einer anderen Seite. Die Seite selbst
+                // meldet `NavigationStarting` als gesperrt (`grundereignisse.rs`).
+                let hauptdokument = kontext == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT && *hauptadresse.borrow() == url;
+                let entscheid = vorab(&url, hauptdokument);
+                if matches!(entscheid, Vorab::Laden { youtube: true } | Vorab::Schild { youtube: true }) {
                     anfrage.Headers()?.SetHeader(&HSTRING::from("YouTube-Restrict"), &HSTRING::from("Strict"))?;
                 }
-                if !gesperrt && kontext == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT && *hauptadresse.borrow() == url {
-                    return Ok(());
-                }
-                let seite = quelle(&core);
-                if gesperrt || schild::pruefen(&app, &id, &url, &seite, anfrage_art(kontext)) {
+                let blocken = match entscheid {
+                    Vorab::Blocken(_) => true,
+                    Vorab::Laden { .. } => false,
+                    Vorab::Schild { .. } => schild::pruefen(&app, &id, &url, &quelle(&core), anfrage_art(kontext)),
+                };
+                if blocken {
                     let antwort = umgebung.CreateWebResourceResponse(
                         None,
                         403,

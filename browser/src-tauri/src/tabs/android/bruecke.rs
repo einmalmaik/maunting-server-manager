@@ -16,8 +16,9 @@ use jni::JNIEnv;
 use tauri::{AppHandle, Emitter};
 
 use crate::schild::{self, AnfrageArt};
+use crate::tabs::ereignis::von_kotlin;
 use crate::tabs::formular::{gleiche_herkunft, lesen};
-use crate::tabs::{id_pruefen, melden, weg, TabEreignis, Weg, EREIGNIS};
+use crate::tabs::{id_pruefen, melden, vorab, weg, TabEreignis, Vorab, Weg};
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
 
@@ -37,22 +38,6 @@ fn ja(wert: bool) -> jboolean {
     if wert { JNI_TRUE } else { JNI_FALSE }
 }
 
-/// Was Kotlin selbst melden darf. Schild, Gesperrt und Formular meldet nur
-/// Rust. Vollbild zeigt Kotlin selbst, Rechte lehnt es ab, und Protokoll,
-/// Status, Ton und Schlaf gibt es auf Android nicht.
-const ARTEN: [&str; 13] = [
-    "laedt", "geladen", "adresse", "titel", "favicon", "neuer_tab", "absturz", "kontextmenue", "dialog", "anmeldung",
-    "fehlerseite", "treffer", "download",
-];
-
-/// Ein Ereignis eines Tabs, als JSON in der Form von [`TabEreignis`].
-fn ereignis_pruefen(json: &str) -> Option<serde_json::Value> {
-    let wert: serde_json::Value = serde_json::from_str(json).ok()?;
-    let art = wert.get("art")?.as_str()?;
-    let id = wert.get("id")?.as_str()?;
-    (ARTEN.contains(&art) && id_pruefen(id).is_ok()).then_some(wert)
-}
-
 #[no_mangle]
 pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_melden<'l>(
     mut env: JNIEnv<'l>,
@@ -60,8 +45,8 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_meld
     json: JString<'l>,
 ) {
     let json = text(&mut env, &json);
-    if let (Some(app), Some(wert)) = (APP.get(), ereignis_pruefen(&json)) {
-        let _ = app.emit_to("main", EREIGNIS, wert);
+    if let (Some(app), Some(ereignis)) = (APP.get(), von_kotlin(&json)) {
+        melden(app, ereignis);
     }
 }
 
@@ -89,10 +74,10 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_weg<
     zurueck(&mut env, &antwort)
 }
 
-/// `true`: blocken. Hier zählen Sperre und Schild für alles, was die Seite
-/// nachlädt. Die Seite selbst prüft `weg`; ein Formular, das per POST
-/// abschickt, kommt aber nur hier vorbei, deshalb sperrt die Sperre auch
-/// den Hauptrahmen und meldet es.
+/// `true`: blocken. Dieselbe Entscheidung wie unter Windows ([`vorab`]).
+/// Die Seite selbst prüft `weg`; ein Formular, das per POST abschickt, kommt
+/// aber nur hier vorbei, deshalb gilt sie auch für den Hauptrahmen, und eine
+/// Sperre dort wird gemeldet.
 #[no_mangle]
 pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_anfrage<'l>(
     mut env: JNIEnv<'l>,
@@ -106,14 +91,17 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_anfr
     let (tab, url, seite, accept) =
         (text(&mut env, &tab), text(&mut env, &url), text(&mut env, &seite), text(&mut env, &accept));
     let Some(app) = APP.get() else { return JNI_FALSE };
-    if let Some(grund) = schild::sperre::gesperrt(&url) {
-        if hauptframe == JNI_TRUE && id_pruefen(&tab).is_ok() {
-            melden(app, TabEreignis::Gesperrt { id: tab, url, grund: grund.name().into() });
+    let hauptrahmen = hauptframe == JNI_TRUE;
+    match vorab(&url, hauptrahmen) {
+        Vorab::Blocken(grund) => {
+            if let (Some(grund), true, Ok(())) = (grund, hauptrahmen, id_pruefen(&tab)) {
+                melden(app, TabEreignis::Gesperrt { id: tab, url, grund: grund.into() });
+            }
+            return JNI_TRUE;
         }
-        return JNI_TRUE;
-    }
-    if hauptframe == JNI_TRUE {
-        return JNI_FALSE;
+        Vorab::Laden { .. } => return JNI_FALSE,
+        // Den YouTube-Kopf kann Android nicht setzen (Datenschutzerklärung, Jugendschutz).
+        Vorab::Schild { .. } => {}
     }
     let art = AnfrageArt::raten(&url, &accept);
     // Ein Service Worker gehört keinem Tab (`TabsPlugin.workerPruefen`): blocken ja, zählen nicht.

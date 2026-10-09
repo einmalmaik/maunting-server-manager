@@ -4,16 +4,17 @@
  * laden. `config/api.ts` liest die Adresse beim Laden des Moduls; kein
  * statischer Import hier darf es erreichen.
  */
-import { invoke } from '@tauri-apps/api/core'
-
 import { geraeteArtSetzen } from '@/desktop/geraeteArt'
 import { gestenleisteUebernehmen } from '@/lib/gestenleiste'
 import { randomUuidNachruesten } from '@/lib/uuidNachruesten'
 
+// Nur die Brücke zu Rust: `nativ.ts` importiert nichts aus der App.
+import { konfig as geraetKonfig } from './services/nativ'
+
 async function hochfahren(): Promise<void> {
   try {
-    const konfig = await invoke<{ backend_url: string | null }>('konfig_laden')
-    if (konfig.backend_url) {
+    const konfig = await geraetKonfig.laden()
+    if (konfig?.backend_url) {
       ;(globalThis as { __MSM_API_URL?: string }).__MSM_API_URL = konfig.backend_url
     }
   } catch {

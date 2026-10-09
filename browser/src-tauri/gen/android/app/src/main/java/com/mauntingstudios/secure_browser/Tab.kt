@@ -326,7 +326,7 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
 
     private fun ohneAbfrage(url: String) = url.substringBefore('#').substringBefore('?')
 
-    /** Gründe wie in `tabsStore`: adresse, offline, zeit, verbindung, zertifikat, unbekannt. */
+    /** Gründe wie `fehler_art` in `tabs/desktop/ohne_edge.rs`: adresse, offline, zeit, verbindung, zertifikat, unbekannt. */
     fun grund(context: Context, code: Int): String {
       val netz = context.getSystemService(ConnectivityManager::class.java)?.activeNetwork
       if (netz == null) return "offline"

@@ -136,8 +136,7 @@ pub async fn erneuern(app: &AppHandle, kategorien: &[Kategorie]) -> bool {
         }
         match holen(&url, ist_hostliste).await {
             Ok(text) => {
-                let teil = pfad.with_extension("txt.part");
-                if std::fs::write(&teil, text).is_ok() && std::fs::rename(&teil, &pfad).is_ok() {
+                if crate::datei::ersetzen(&pfad, text).is_ok() {
                     neu = true;
                 }
             }

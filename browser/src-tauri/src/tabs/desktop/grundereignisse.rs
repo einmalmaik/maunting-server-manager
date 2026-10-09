@@ -13,8 +13,6 @@ use windows::core::HSTRING;
 
 use crate::tabs::{melden, navigation_erlaubt, weg, TabEreignis, Weg};
 
-/// Was sonst der Webview-Baustein von Tauri meldet: erlaubte Navigation,
-/// Laden, Titel, neue Fenster, Downloads.
 pub(super) unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -> windows::core::Result<()> {
     let mut token = 0i64;
     {

@@ -15,7 +15,7 @@ import { Ankerfenster, Kurzinfo, Switch } from '@/Singra/UI'
 import { useEinstellungenStore } from '../services/einstellungenStore'
 
 import { schildPausiert, seitenHost, useGeraetKonfig } from '../services/geraetKonfig'
-import { istIntern } from '../services/intern'
+import { istIntern, istWebseite } from '../services/intern'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 import { useVerlaufStore } from '../services/verlaufStore'
 import { Adresszeile, type AdresszeileGriff } from './Adresszeile'
@@ -102,7 +102,7 @@ export const Navigationsleiste = forwardRef<AdresszeileGriff>(function Navigatio
   const ausgeblendet = useEinstellungenStore((s) => s.ausgeblendet)
   const leiste = useEinstellungenStore((s) => s.leiste)
 
-  const webseite = !!tab?.url.startsWith('http')
+  const webseite = !!tab && istWebseite(tab.url)
   const gemerkt = webseite && lesezeichen.some((l) => l.url === tab!.url)
 
   return (

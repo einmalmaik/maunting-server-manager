@@ -63,9 +63,8 @@ fn laden(app: &AppHandle) -> Schutz {
 
 fn speichern(app: &AppHandle, schutz: &Schutz) -> Result<(), String> {
     let ziel = pfad(app).ok_or("Konfigurationsordner unbekannt")?;
-    let teil = ziel.with_extension("json.part");
     let json = serde_json::to_string_pretty(schutz).map_err(|e| e.to_string())?;
-    std::fs::write(&teil, json).and_then(|_| std::fs::rename(&teil, &ziel)).map_err(|e| format!("Schutz nicht gespeichert: {e}"))
+    crate::datei::ersetzen(&ziel, json).map_err(|e| format!("Schutz nicht gespeichert: {e}"))
 }
 
 fn sperre_bauen(app: &AppHandle, r: &Regeln) -> Sperre {

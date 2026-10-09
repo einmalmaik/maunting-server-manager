@@ -3,7 +3,7 @@
 //! Hier steht nur, was die native Seite liest (Panel-Adresse, Schild,
 //! Download-Ordner). Darstellung, Suchmaschine und Startseite bleiben in der
 //! Oberfläche. Kein Token, kein Geheimnis: das Refresh-Token liegt im
-//! Schlüsselbund (`geheimnisse.rs`), das Access-Token nur im Speicher der
+//! Schlüsselbund (Crate `schluesselfach`), das Access-Token nur im Speicher der
 //! Oberfläche.
 //!
 //! Die Befehle heißen wie in MSS (`konfig_laden`, `konfig_aendern`), damit die
@@ -98,12 +98,7 @@ fn hat_fremde_felder(roh: &serde_json::Value) -> bool {
 
 fn speichern(app: &AppHandle, konfig: &Konfig) -> Result<(), String> {
     let json = serde_json::to_string_pretty(konfig).map_err(|e| e.to_string())?;
-    let ziel = pfad(app)?;
-    // Erst daneben schreiben, dann umbenennen: ein Absturz mitten im Schreiben
-    // hinterlässt keine halbe Datei.
-    let teil = ziel.with_extension("json.part");
-    fs::write(&teil, json).map_err(|e| format!("Konfiguration nicht schreibbar: {e}"))?;
-    fs::rename(&teil, &ziel).map_err(|e| format!("Konfiguration nicht schreibbar: {e}"))
+    crate::datei::ersetzen(&pfad(app)?, json).map_err(|e| format!("Konfiguration nicht schreibbar: {e}"))
 }
 
 const LOKALE_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
@@ -165,12 +160,12 @@ pub fn felder_einmischen(basis: &Konfig, felder: serde_json::Value) -> Result<Ko
     Ok(konfig)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn konfig_laden(zustand: State<'_, KonfigZustand>) -> Konfig {
     zustand.0.lock().unwrap().clone()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn konfig_aendern(
     app: AppHandle,
     zustand: State<'_, KonfigZustand>,

@@ -8,7 +8,6 @@ import android.print.PrintManager
 import android.util.Base64
 import android.view.View
 import android.view.ViewGroup
-import android.view.inputmethod.InputMethodManager
 import android.webkit.ServiceWorkerClient
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -40,7 +39,6 @@ import java.util.UUID
 @InvokeArg class AntwortArgs { var nr = 0L; lateinit var antwort: String }
 @InvokeArg class SuchenArgs { lateinit var id: String; lateinit var richtung: String; var begriff = "" }
 @InvokeArg class FuellenArgs { lateinit var id: String; lateinit var fuer: String; lateinit var nachricht: String }
-@InvokeArg class WidgetArgs { var bildsuche = false }
 @InvokeArg class BildsucheArgs { lateinit var id: String; var privat = false; lateinit var url: String; lateinit var feld: String; var base64 = false }
 
 /**
@@ -65,7 +63,6 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   private var vollbild: Pair<View, WebChromeClient.CustomViewCallback>? = null
   private val privatProfil = PRIVAT + UUID.randomUUID()
   private val inhalt: ViewGroup get() = activity.findViewById(android.R.id.content)
-  private var oberflaeche: WebView? = null
   val herunterladen by lazy { Herunterladen(activity) }
 
   /** Zurück gehört dem Tab, solange er vorne liegt und zurück kann; sonst der Oberfläche. */
@@ -77,24 +74,12 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   override fun load(webView: WebView) {
-    oberflaeche = webView
     activity.runOnUiThread {
       // Nach dem Rückweg von Tauri angemeldet und damit vor ihm gefragt.
       (activity as AppCompatActivity).onBackPressedDispatcher.addCallback(activity, zurueck)
       // Private Profile früherer Läufe; jetzt hat sie keine WebView.
       val store = ProfileStore.getInstance()
       store.allProfileNames.filter { it.startsWith(PRIVAT) }.forEach { runCatching { store.deleteProfile(it) } }
-    }
-  }
-
-  private fun aufUi(invoke: Invoke, tun: () -> JSObject?) {
-    activity.runOnUiThread {
-      try {
-        val antwort = tun()
-        if (antwort != null) invoke.resolve(antwort) else invoke.resolve()
-      } catch (e: Exception) {
-        invoke.reject(e.message ?: e.toString())
-      }
     }
   }
 
@@ -108,7 +93,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun laden(invoke: Invoke) {
     val a = invoke.parseArgs(LadenArgs::class.java)
-    aufUi(invoke) {
+    aufUi(activity, invoke) {
       tabHolen(a.id, a.privat).laden(a.url)
       null
     }
@@ -148,7 +133,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun sichtbarkeit(invoke: Invoke) {
     val a = invoke.parseArgs(VorneArgs::class.java)
-    aufUi(invoke) {
+    aufUi(activity, invoke) {
       vorne = a.vorne
       for ((id, tab) in tabs) tab.sichtbar(id == vorne)
       zurueckPruefen()
@@ -159,7 +144,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun rahmen(invoke: Invoke) {
     val a = invoke.parseArgs(RahmenArgs::class.java)
-    aufUi(invoke) {
+    aufUi(activity, invoke) {
       rahmen = a
       for (tab in tabs.values) tab.webView.layoutParams = platz()
       null
@@ -178,7 +163,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun schliessen(invoke: Invoke) {
     val a = invoke.parseArgs(TabArgs::class.java)
-    aufUi(invoke) {
+    aufUi(activity, invoke) {
       tabs.remove(a.id)?.let { wegraeumen(it) }
       if (vorne == a.id) vorne = null
       zurueckPruefen()
@@ -213,7 +198,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun aktion(invoke: Invoke) {
     val a = invoke.parseArgs(AktionArgs::class.java)
-    aufUi(invoke) {
+    aufUi(activity, invoke) {
       val ansicht = tab(a.id).webView
       when (a.aktion) {
         "zurueck" -> ansicht.goBack()
@@ -228,7 +213,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun standbild(invoke: Invoke) {
     val a = invoke.parseArgs(TabArgs::class.java)
-    aufUi(invoke) {
+    aufUi(activity, invoke) {
       val ansicht = tab(a.id).webView
       val bild = Bitmap.createBitmap(ansicht.width.coerceAtLeast(1), ansicht.height.coerceAtLeast(1), Bitmap.Config.RGB_565)
       ansicht.draw(Canvas(bild))
@@ -241,7 +226,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun antworten(invoke: Invoke) {
     val a = invoke.parseArgs(AntwortArgs::class.java)
-    aufUi(invoke) {
+    aufUi(activity, invoke) {
       Rueckfragen.antworten(a.nr, JSONObject(a.antwort))
       null
     }
@@ -250,7 +235,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun suchen(invoke: Invoke) {
     val a = invoke.parseArgs(SuchenArgs::class.java)
-    aufUi(invoke) {
+    aufUi(activity, invoke) {
       val ansicht = tab(a.id).webView
       when (a.richtung) {
         "start" -> ansicht.findAllAsync(a.begriff)
@@ -265,7 +250,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun fuellen(invoke: Invoke) {
     val a = invoke.parseArgs(FuellenArgs::class.java)
-    aufUi(invoke) {
+    aufUi(activity, invoke) {
       if (!tab(a.id).fuellen(a.fuer, a.nachricht)) throw IllegalStateException("Die Seite hat inzwischen gewechselt")
       null
     }
@@ -274,7 +259,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun drucken(invoke: Invoke) {
     val a = invoke.parseArgs(TabArgs::class.java)
-    aufUi(invoke) {
+    aufUi(activity, invoke) {
       val ansicht = tab(a.id).webView
       val name = ansicht.title?.takeIf { it.isNotBlank() } ?: "Seite"
       activity.getSystemService(PrintManager::class.java).print(name, ansicht.createPrintDocumentAdapter(name), null)
@@ -285,7 +270,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   /** Cookies, Speicher und Cache im Profil [SEITEN]; private Profile fallen mit ihrem Tab. */
   @Command
   fun datenLeeren(invoke: Invoke) {
-    aufUi(invoke) {
+    aufUi(activity, invoke) {
       val offen = tabs.values.firstOrNull { !it.privat }?.webView
       val ansicht = offen ?: WebView(activity).also { androidx.webkit.WebViewCompat.setProfile(it, SEITEN) }
       profilLeeren(SEITEN, ansicht)
@@ -296,58 +281,8 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
 
   @Command
   fun downloadsZeigen(invoke: Invoke) {
-    aufUi(invoke) {
+    aufUi(activity, invoke) {
       herunterladen.zeigen()
-      null
-    }
-  }
-
-  /** Was das Such-Widget angestoßen hat (`WidgetActivity`), einmal. */
-  @Command
-  fun startAbholen(invoke: Invoke) {
-    aufUi(invoke) {
-      val start = WidgetActivity.wartend
-      WidgetActivity.wartend = null
-      JSObject().put("start", start ?: JSONObject.NULL)
-    }
-  }
-
-  /** Ein neuer Anstoß, während der Browser schon läuft: die Oberfläche holt ihn ab. */
-  override fun onNewIntent(intent: Intent) {
-    if (WidgetActivity.wartend != null) TabsBruecke.widget()
-  }
-
-  /**
-   * Die Tastatur für das Feld, das die Oberfläche gerade fokussiert hat. Ein
-   * `focus()` aus Skript zeigt sie nicht, wenn kein Tippen vorausging (Widget).
-   */
-  @Command
-  fun tastaturZeigen(invoke: Invoke) {
-    aufUi(invoke) {
-      val ansicht = oberflaeche ?: return@aufUi null
-      ansicht.requestFocus()
-      activity.getSystemService(InputMethodManager::class.java).showSoftInput(ansicht, InputMethodManager.SHOW_IMPLICIT)
-      null
-    }
-  }
-
-  @Command
-  fun widgetLage(invoke: Invoke) {
-    aufUi(invoke) { JSObject().put("lage", SuchWidget.lage(activity)) }
-  }
-
-  @Command
-  fun widgetAnheften(invoke: Invoke) {
-    aufUi(invoke) { JSObject().put("ok", SuchWidget.anheften(activity)) }
-  }
-
-  @Command
-  fun widgetStand(invoke: Invoke) {
-    val a = invoke.parseArgs(WidgetArgs::class.java)
-    aufUi(invoke) {
-      SuchWidget.bildsucheSetzen(activity, a.bildsuche)
-      // Ohne Bildsuche geht ein wartendes Foto nirgends mehr hin.
-      if (!a.bildsuche) WidgetActivity.foto(activity).delete()
       null
     }
   }
@@ -359,7 +294,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun bildsuche(invoke: Invoke) {
     val a = invoke.parseArgs(BildsucheArgs::class.java)
-    aufUi(invoke) {
+    aufUi(activity, invoke) {
       val datei = WidgetActivity.foto(activity)
       if (!datei.exists()) throw IllegalStateException("Kein Foto")
       val daten = try {
@@ -367,8 +302,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
       } finally {
         datei.delete()
       }
-      val ziel = JSONObject().put("url", a.url).put("feld", a.feld).put("base64", a.base64)
-      tabHolen(a.id, a.privat).bildsuche(a.url, BILDSUCHE.replace("ZIEL", ziel.toString()).replace("DATEN", daten))
+      tabHolen(a.id, a.privat).bildsuche(a.url, BildsucheSeite.bauen(a.url, a.feld, a.base64, daten))
       null
     }
   }
@@ -401,36 +335,5 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   companion object {
     const val SEITEN = "seiten"
     const val PRIVAT = "privat-"
-
-    /**
-     * Die Seite, die das Foto abschickt. Google nimmt es als Datei, Bing als
-     * Base64-Text (`base64`). `ZIEL` ist JSON, in dem `JSONObject` auch `/`
-     * maskiert; ein `</script>` kann darin nicht stehen.
-     */
-    private const val BILDSUCHE = """<!doctype html><meta name="viewport" content="width=device-width"><script>
-(() => {
-  const z = ZIEL, d = "DATEN"
-  const f = document.createElement('form')
-  f.method = 'post'
-  f.enctype = 'multipart/form-data'
-  f.action = z.url
-  const e = document.createElement('input')
-  e.name = z.feld
-  if (z.base64) {
-    e.type = 'hidden'
-    e.value = d
-  } else {
-    e.type = 'file'
-    const b = atob(d), u = new Uint8Array(b.length)
-    for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i)
-    const t = new DataTransfer()
-    t.items.add(new File([u], 'bild.jpg', { type: 'image/jpeg' }))
-    e.files = t.files
-  }
-  f.append(e)
-  document.documentElement.append(f)
-  f.submit()
-})()
-</script>"""
   }
 }

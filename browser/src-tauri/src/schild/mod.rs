@@ -137,15 +137,22 @@ pub fn aktiv_fuer(seite: &str) -> bool {
         return false;
     }
     let Some(h) = host(seite) else { return true };
-    let ausnahmen = SCHILD.ausnahmen.read().unwrap();
-    let mut rest = h.as_str();
+    !pausiert(&h, &SCHILD.ausnahmen.read().unwrap())
+}
+
+/// Steht der Host oder eine Elterndomain mit Punkt in den Ausnahmen? Der Host
+/// selbst zählt auch ohne Punkt (`localhost`). Die Oberfläche zeigt dasselbe
+/// (`schildPausiert` in `geraetKonfig.ts`, gleiche Fälle in
+/// `schildAusnahmen.faelle.json`).
+fn pausiert(host: &str, ausnahmen: &HashSet<String>) -> bool {
+    let mut rest = host;
     loop {
         if ausnahmen.contains(rest) {
-            return false;
+            return true;
         }
         match rest.split_once('.') {
             Some((_, eltern)) if eltern.contains('.') => rest = eltern,
-            _ => return true,
+            _ => return false,
         }
     }
 }
@@ -193,7 +200,7 @@ pub fn seitenwechsel(app: &AppHandle, tab: &str) {
     }
 }
 
-pub fn tab_vergessen(_app: &AppHandle, tab: &str) {
+pub fn tab_vergessen(tab: &str) {
     SCHILD.zaehler.lock().unwrap().remove(tab);
 }
 
@@ -294,6 +301,21 @@ mod tests {
         engine_setzen(Treffer::Werbung, listen::engine_aus(&[werbung]));
         engine_setzen(Treffer::Tracker, listen::engine_aus(&[tracker]));
         konfig_uebernehmen(&Konfig::default());
+    }
+
+    #[test]
+    fn ausnahmen_gelten_wie_in_der_oberflaeche() {
+        #[derive(serde::Deserialize)]
+        struct Fall {
+            host: String,
+            ausnahmen: HashSet<String>,
+            pausiert: bool,
+        }
+        let faelle: Vec<Fall> =
+            serde_json::from_str(include_str!("../../../../frontend/src/browser/services/schildAusnahmen.faelle.json")).unwrap();
+        for f in faelle {
+            assert_eq!(pausiert(&f.host, &f.ausnahmen), f.pausiert, "{} mit {:?}", f.host, f.ausnahmen);
+        }
     }
 
     #[test]

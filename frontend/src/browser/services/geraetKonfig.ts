@@ -36,7 +36,19 @@ export function seitenHost(url: string): string | null {
   }
 }
 
-/** Dieselbe Regel wie `aktiv_fuer` in `schild/mod.rs`: auch übergeordnete Domains zählen. */
+/**
+ * Dieselbe Regel wie `pausiert` in `schild/mod.rs`: der Host selbst oder eine
+ * Elterndomain mit Punkt. Bis 09.10.2026 zählte hier auch eine Ausnahme nur
+ * auf die Endung (`de`), die Rust nie anwendet. Beide prüfen
+ * `schildAusnahmen.faelle.json`.
+ */
 export function schildPausiert(host: string, ausnahmen: string[]): boolean {
-  return ausnahmen.some((a) => host === a || host.endsWith(`.${a}`))
+  let rest = host
+  for (;;) {
+    if (ausnahmen.includes(rest)) return true
+    const punkt = rest.indexOf('.')
+    const eltern = rest.slice(punkt + 1)
+    if (punkt < 0 || !eltern.includes('.')) return false
+    rest = eltern
+  }
 }

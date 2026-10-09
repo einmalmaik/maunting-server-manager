@@ -272,3 +272,11 @@ fn der_stand_zaehlt_bis_zum_fenster_und_im_fenster() {
     assert_eq!((a(T + 24 * H + 600).rest_sekunden, a(T + 24 * H + 600).fenster_sekunden), (0, H - 600));
     assert_eq!(a(T + 30 * H).fenster_sekunden, 0);
 }
+
+#[test]
+fn die_oberflaeche_bietet_dieselben_grenzen_an() {
+    let oberflaeche = include_str!("../../../../frontend/src/browser/einstellungen/Jugendschutz.tsx");
+    let wartezeiten = WARTEZEITEN.map(|w| format!("'{w}'")).join(", ");
+    assert!(oberflaeche.contains(&format!("const WARTEZEITEN = [{wartezeiten}] as const")), "WARTEZEITEN in Jugendschutz.tsx");
+    assert!(oberflaeche.contains(&format!("const HOSTS_MAX = {HOSTS_MAX}\n")), "HOSTS_MAX in Jugendschutz.tsx");
+}

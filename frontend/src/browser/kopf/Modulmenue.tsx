@@ -14,7 +14,7 @@ import { Ankerfenster } from '@/Singra/UI'
 
 import { useLeistenEintraege, useLeistenZahlen, useLeistenZiele } from '../leiste/eintraege'
 import { EINSTELLUNGEN_EINTRAG, KOPPELN_EINTRAG, type Leisteneintrag } from '../leiste/module'
-import { istIntern } from '../services/intern'
+import { istIntern, istWebseite } from '../services/intern'
 import { istGekoppelt, useSitzung } from '../services/sitzung'
 import { useSuche } from '../services/suche'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
@@ -70,7 +70,7 @@ function HandyAktionen({ schliessen }: { schliessen: () => void }) {
   const lesezeichen = useVerlaufStore((s) => s.lesezeichen)
   const umschalten = useVerlaufStore((s) => s.lesezeichenUmschalten)
   const suchen = useSuche((s) => s.oeffnen)
-  const webseite = !!tab?.url.startsWith('http')
+  const webseite = !!tab && istWebseite(tab.url)
   const gemerkt = webseite && lesezeichen.some((l) => l.url === tab!.url)
   const und = (tun: () => void) => () => {
     schliessen()

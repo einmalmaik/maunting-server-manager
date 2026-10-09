@@ -71,10 +71,7 @@ pub fn starten(app: AppHandle) {
             (z.faellig(Instant::now()), z.leistung.ausnahmen.clone())
         };
         if !faellig.is_empty() {
-            #[cfg(windows)]
             super::plattform::ruhen(&app, faellig, ausnahmen);
-            #[cfg(not(windows))]
-            let _ = (faellig, ausnahmen);
         }
     });
 }

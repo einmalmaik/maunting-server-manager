@@ -9,6 +9,11 @@ const PRAEFIX = 'msb://'
 export const INTERNE_SEITEN = ['einstellungen'] as const
 export type InterneSeite = (typeof INTERNE_SEITEN)[number]
 
+/** Eine Seite aus dem Netz (http oder https), keine eigene und keine leere. */
+export function istWebseite(url: string): boolean {
+  return /^https?:\/\//i.test(url)
+}
+
 export function istIntern(url: string): boolean {
   return url.startsWith(PRAEFIX)
 }

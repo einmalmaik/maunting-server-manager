@@ -57,8 +57,7 @@ pub fn kurzinfo(app: AppHandle, blase: Option<Blase>) -> Result<(), String> {
 const HOECHSTENS: usize = 80;
 
 fn gekuerzt(text: &str) -> String {
-    let unsichtbar = |z: char| matches!(z, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}');
-    text.chars().filter(|&z| !z.is_control() && !unsichtbar(z)).take(HOECHSTENS).collect()
+    text.chars().filter(|&z| !z.is_control() && !crate::downloads::ist_unsichtbar(z)).take(HOECHSTENS).collect()
 }
 
 /// Linke Kante der Blase in Bildschirmpixeln.
@@ -251,6 +250,8 @@ mod tests {
     #[test]
     fn steuerzeichen_fallen_und_lange_texte_werden_gekuerzt() {
         assert_eq!(gekuerzt("Mes\u{202E}\nsenger"), "Messenger");
+        // Dieselbe Liste wie für Dateinamen: Trennhilfe, Füller und unsichtbare Operatoren.
+        assert_eq!(gekuerzt("Mes\u{00AD}sen\u{115F}g\u{2062}er"), "Messenger");
         assert_eq!(gekuerzt(&"a".repeat(200)).len(), 80);
     }
 }

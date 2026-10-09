@@ -69,10 +69,6 @@ const MARKEN: Record<Marke, Teil | { teile: Teil[] }> = {
   },
 }
 
-export function istMarke(name: string): name is Marke {
-  return name in MARKEN
-}
-
 export function MarkenSymbol({ marke, className = 'h-4 w-4' }: { marke: Marke; className?: string }) {
   const symbol = MARKEN[marke]
   const teile = 'teile' in symbol ? symbol.teile : [symbol]

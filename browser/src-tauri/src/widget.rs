@@ -6,6 +6,17 @@
 use serde_json::Value;
 use tauri::{AppHandle, State};
 
+#[cfg(target_os = "android")]
+mod android;
+#[cfg(target_os = "android")]
+pub use android::init;
+#[cfg(target_os = "android")]
+use android as plattform;
+#[cfg(not(target_os = "android"))]
+mod ohne;
+#[cfg(not(target_os = "android"))]
+use ohne as plattform;
+
 use crate::tabs::{id_pruefen, weg, ziel_pruefen, Tabs, Weg};
 
 pub const EREIGNIS: &str = "msb:widget";
@@ -13,63 +24,33 @@ pub const EREIGNIS: &str = "msb:widget";
 /// `{art: "suche" | "text" | "bild", text?}` oder nichts.
 #[tauri::command(async)]
 pub fn widget_start(app: AppHandle) -> Result<Option<Value>, String> {
-    #[cfg(target_os = "android")]
-    return crate::tabs::android::widget_start(&app);
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = app;
-        Ok(None)
-    }
+    plattform::start(&app)
 }
 
 /// Die gewählte Suchmaschine sucht Bilder: das Widget zeigt die Kamera.
 #[tauri::command(async)]
 pub fn widget_stand(app: AppHandle, bildsuche: bool) -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    return crate::tabs::android::widget_stand(&app, bildsuche);
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = (app, bildsuche);
-        Ok(())
-    }
+    plattform::stand(&app, bildsuche)
 }
 
 /// Liegt das Widget schon auf dem Startbildschirm (`liegt`), lässt es sich
 /// per Bitte ablegen (`anheftbar`) oder nur von Hand (`nein`)?
 #[tauri::command(async)]
 pub fn widget_lage(app: AppHandle) -> Result<String, String> {
-    #[cfg(target_os = "android")]
-    return crate::tabs::android::widget_lage(&app);
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = app;
-        Ok("nein".into())
-    }
+    plattform::lage(&app)
 }
 
 /// Bittet den Startbildschirm, das Widget aufzunehmen; der fragt selbst nach.
 #[tauri::command(async)]
 pub fn widget_anheften(app: AppHandle) -> Result<bool, String> {
-    #[cfg(target_os = "android")]
-    return crate::tabs::android::widget_anheften(&app);
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = app;
-        Ok(false)
-    }
+    plattform::anheften(&app)
 }
 
 /// Nach der Suche aus dem Widget: die Tastatur für die Adresszeile, die
 /// die Oberfläche fokussiert hat (ein `focus()` aus Skript zeigt sie nicht).
 #[tauri::command(async)]
 pub fn tastatur_zeigen(app: AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    return crate::tabs::android::tastatur_zeigen(&app);
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = app;
-        Ok(())
-    }
+    plattform::tastatur_zeigen(&app)
 }
 
 /// Ein Formularfeld der Suchmaschine: nur Buchstaben und `_`.
@@ -98,13 +79,7 @@ pub fn bildsuche(
         return Err("Diese Bildsuche kann der Browser nicht öffnen.".into());
     }
     crate::tabs::eintragen(&tabs, &id, privat);
-    #[cfg(target_os = "android")]
-    return crate::tabs::android::bildsuche(&app, &tabs, &id, privat, ziel, &feld, base64);
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = (app, base64);
-        Err("Die Bildsuche gibt es nur auf Android.".into())
-    }
+    plattform::bildsuche(&app, &tabs, &id, privat, ziel, &feld, base64)
 }
 
 #[cfg(test)]

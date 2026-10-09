@@ -176,20 +176,14 @@ pub fn download_zeigen(app: AppHandle, pfad: String) -> Result<(), String> {
         let _ = pfad;
         crate::tabs::android::downloads_zeigen(&app)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(windows)]
     {
         let datei = PathBuf::from(&pfad).canonicalize().map_err(|_| "Die Datei gibt es nicht mehr.".to_string())?;
         let erlaubt = ordner(&app).canonicalize().map_err(|e| e.to_string())?;
         if !datei.starts_with(&erlaubt) && !FERTIG.lock().unwrap().contains(&datei) {
             return Err("Die Datei liegt nicht im Download-Ordner.".into());
         }
-        #[cfg(windows)]
-        return im_explorer_zeigen(&datei);
-        #[cfg(not(windows))]
-        {
-            let _ = datei;
-            Ok(())
-        }
+        im_explorer_zeigen(&datei)
     }
 }
 

@@ -88,7 +88,7 @@ class WidgetActivity : AppCompatActivity() {
     /** Längste Kante des Fotos, das an die Suchmaschine geht. */
     private const val KANTE = 1600
 
-    /** Was der Browser beim nächsten Abholen öffnet (`TabsPlugin.startAbholen`). */
+    /** Was der Browser beim nächsten Abholen öffnet (`WidgetPlugin.startAbholen`). */
     @Volatile var wartend: JSONObject? = null
 
     fun rohFoto(context: Context) = File(context.cacheDir, "fotos/aufnahme.jpg")

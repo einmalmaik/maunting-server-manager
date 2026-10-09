@@ -23,7 +23,7 @@ use tauri::{AppHandle, Manager, Wry};
 
 use super::{Antwort, Tabs};
 
-const PAKET: &str = "com.mauntingstudios.secure_browser";
+pub(crate) const PAKET: &str = "com.mauntingstudios.secure_browser";
 
 struct Kotlin(PluginHandle<Wry>);
 
@@ -131,42 +131,17 @@ pub fn downloads_zeigen(app: &AppHandle) -> Result<(), String> {
     rufen::<Leer>(app, "downloadsZeigen", json!({})).map(|_| ())
 }
 
-/// Was das Such-Widget angestoßen hat, einmal (`WidgetActivity.kt`).
-pub fn widget_start(app: &AppHandle) -> Result<Option<Value>, String> {
-    #[derive(serde::Deserialize)]
-    struct Start {
-        start: Option<Value>,
-    }
-    rufen::<Start>(app, "startAbholen", json!({})).map(|s| s.start)
+/// Ton je Tab gibt es unter Android nicht; die Oberfläche bietet ihn nicht an.
+pub fn stumm(_: &AppHandle, _: &str, _: bool) -> Result<(), String> {
+    Ok(())
 }
 
-/// Ob das Widget die Kamera zeigt.
-pub fn widget_stand(app: &AppHandle, bildsuche: bool) -> Result<(), String> {
-    rufen::<Leer>(app, "widgetStand", json!({ "bildsuche": bildsuche })).map(|_| ())
-}
+/// Die Oberfläche bekommt den Fokus unter Android mit dem Tippen selbst.
+pub fn oberflaeche_fokussieren(_: &AppHandle) {}
 
-/// `liegt`, `anheftbar` oder `nein` (`SuchWidget.lage`).
-pub fn widget_lage(app: &AppHandle) -> Result<String, String> {
-    #[derive(serde::Deserialize)]
-    struct Lage {
-        lage: String,
-    }
-    rufen::<Lage>(app, "widgetLage", json!({})).map(|l| l.lage)
-}
-
-/// Bittet den Startbildschirm, das Widget aufzunehmen.
-pub fn widget_anheften(app: &AppHandle) -> Result<bool, String> {
-    #[derive(serde::Deserialize)]
-    struct Ok {
-        ok: bool,
-    }
-    rufen::<Ok>(app, "widgetAnheften", json!({})).map(|o| o.ok)
-}
-
-/// Zeigt die Tastatur für das fokussierte Feld der Oberfläche.
-pub fn tastatur_zeigen(app: &AppHandle) -> Result<(), String> {
-    rufen::<Leer>(app, "tastaturZeigen", json!({})).map(|_| ())
-}
+/// Schlafen und Verwerfen gibt es unter Android nicht; das System beendet
+/// Renderer selbst, wenn der Speicher knapp wird (`Tab.kt`, `absturz`).
+pub fn ruhen(_: &AppHandle, _: Vec<(String, super::ruhe::Ruhe)>, _: Vec<String>) {}
 
 /// Lädt im Tab die Seite, die das Foto des Widgets an `ziel` schickt.
 pub fn bildsuche(app: &AppHandle, tabs: &Tabs, id: &str, privat: bool, ziel: url::Url, feld: &str, base64: bool) -> Result<(), String> {
