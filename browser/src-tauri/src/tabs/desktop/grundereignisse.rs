@@ -1,7 +1,7 @@
 //! Was sonst der Webview-Baustein von Tauri meldet: erlaubte Navigation,
 //! Laden, Titel, neue Fenster und Downloads eines Tabs. Seiten, die der
-//! Jugend- und Suchtschutz sperrt, laden gar nicht erst; Suchen ohne sichere
-//! Suche laden mit ihr (`schild/sperre.rs`).
+//! Jugend- und Suchtschutz sperrt, laden gar nicht erst; was `tabs::weg`
+//! umschreibt (HTTPS, Tracking-Parameter, sichere Suche), lädt neu.
 
 use tauri::AppHandle;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
@@ -22,7 +22,9 @@ pub(super) unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -
                 let Some(args) = args else { return Ok(()) };
                 let url = super::webview2::text(|p| args.Uri(p));
                 // Auch Weiterleitungen kommen hier vorbei, nicht nur die erste Adresse.
-                match weg(&url) {
+                let mut weiterleitung = windows::core::BOOL::default();
+                args.IsRedirected(&mut weiterleitung)?;
+                match weg(&url, weiterleitung.as_bool()) {
                     Weg::Verboten => args.SetCancel(true),
                     Weg::Gesperrt(grund) => {
                         melden(&app, TabEreignis::Gesperrt { id: id.clone(), url, grund: grund.into() });

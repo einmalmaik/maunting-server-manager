@@ -1,6 +1,7 @@
 /**
  * Was das Such-Widget anstößt, öffnet der Browser in einem neuen Tab: das
- * Gesagte als Suche, ein Foto bei der Bildsuche der gewählten Suchmaschine.
+ * Gesagte als Suche, ein Foto bei der Bildsuche der gewählten Suchmaschine,
+ * einen Link aus einer anderen App als Seite.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -30,8 +31,17 @@ describe('Such-Widget', () => {
     widgetAusfuehren({ art: 'text', text: 'example.com' }, adresszeile)
     expect(useTabsStore.getState().tabs.map((t) => t.url)).toEqual([
       'https://duckduckgo.com/?q=wetter%20berlin',
-      'https://example.com',
+      // HTTPS versucht der Browser selbst, mit Rückfall (`tabs/https.rs`).
+      'http://example.com',
     ])
+  })
+
+  it('öffnet einen Link aus einer anderen App in einem neuen Tab, nur Webseiten', () => {
+    widgetAusfuehren({ art: 'link', url: 'https://example.com/artikel?id=3' }, adresszeile)
+    widgetAusfuehren({ art: 'link', url: 'javascript:alert(1)' }, adresszeile)
+    widgetAusfuehren({ art: 'link', url: 'file:///sdcard/Download/a.html' }, adresszeile)
+    expect(useTabsStore.getState().tabs.map((t) => t.url)).toEqual(['https://example.com/artikel?id=3'])
+    expect(adresszeile).not.toHaveBeenCalled()
   })
 
   it('öffnet für die Suche einen leeren Tab mit der Adresszeile', () => {

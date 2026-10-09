@@ -16,8 +16,14 @@ object TabsBruecke {
   /** Ein Ereignis eines Tabs als JSON in der Form von `TabEreignis`. */
   @JvmStatic external fun melden(json: String)
 
-  /** `""` laden, `"-"` nicht laden, sonst die Adresse, die stattdessen lädt. */
-  @JvmStatic external fun weg(tab: String, url: String): String
+  /**
+   * `""` laden, `"-"` nicht laden, sonst die Adresse, die stattdessen lädt.
+   * [weiterleitung]: der Server hat hierher umgeleitet.
+   */
+  @JvmStatic external fun weg(tab: String, url: String, weiterleitung: Boolean): String
+
+  /** Nach einem Ladefehler die Adresse mit `http://`, wenn Rust sie hochgestuft hat, sonst `""`. */
+  @JvmStatic external fun rueckfall(url: String): String
 
   /** `true`: blocken. Läuft auf einem Faden der WebView. */
   @JvmStatic external fun anfrage(tab: String, url: String, seite: String, hauptframe: Boolean, accept: String): Boolean

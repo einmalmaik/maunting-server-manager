@@ -21,6 +21,19 @@ pub fn anheften(_: &AppHandle) -> Result<bool, String> {
     Ok(false)
 }
 
+/// Unter Windows wählt man den Standardbrowser in den Windows-Einstellungen.
+pub fn standardbrowser(_: &AppHandle) -> Result<bool, String> {
+    Ok(false)
+}
+
+pub fn standardbrowser_werden(_: &AppHandle) -> Result<bool, String> {
+    Err("Nur unter Android.".into())
+}
+
+pub fn standardbrowser_einstellungen(_: &AppHandle) -> Result<bool, String> {
+    Err("Nur unter Android.".into())
+}
+
 pub fn tastatur_zeigen(_: &AppHandle) -> Result<(), String> {
     Ok(())
 }

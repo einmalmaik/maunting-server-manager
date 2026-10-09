@@ -1,9 +1,10 @@
 //! Filterlisten: eingebaut, zwischengespeichert, im Hintergrund erneuert.
 //!
-//! Die Listen kommen von easylist.to. Der Browser fragt dort höchstens alle
-//! vier Tage nach; bis dahin gilt die Fassung im App-Ordner. Mehr als die
-//! IP-Adresse und den Abruf selbst erfährt der Server nicht: kein Cookie,
-//! keine Kennung, kein Referer.
+//! Die Listen kommen von easylist.to, die Liste gegen Cookie-Hinweise von
+//! secure.fanboy.co.nz (EasyList Cookie List, dieselben Betreuer). Der
+//! Browser fragt dort höchstens alle vier Tage nach; bis dahin gilt die
+//! Fassung im App-Ordner. Mehr als die IP-Adresse und den Abruf selbst
+//! erfährt der Server nicht: kein Cookie, keine Kennung, kein Referer.
 
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
@@ -21,7 +22,7 @@ pub struct Liste {
     pub art: Treffer,
 }
 
-pub const LISTEN: [Liste; 3] = [
+pub const LISTEN: [Liste; 4] = [
     Liste { name: "easylist", url: "https://easylist.to/easylist/easylist.txt", art: Treffer::Werbung },
     Liste {
         name: "easylistgermany",
@@ -29,6 +30,13 @@ pub const LISTEN: [Liste; 3] = [
         art: Treffer::Werbung,
     },
     Liste { name: "easyprivacy", url: "https://easylist.to/easylist/easyprivacy.txt", art: Treffer::Tracker },
+    // Blendet Cookie-Hinweise aus und blockt die Skripte, die sie zeigen.
+    // Wer den Hinweis nicht beantwortet, hat nichts zugestimmt.
+    Liste {
+        name: "easylist-cookie",
+        url: "https://secure.fanboy.co.nz/fanboy-cookiemonster.txt",
+        art: Treffer::Werbung,
+    },
 ];
 
 pub(super) const ERNEUERN_NACH: Duration = Duration::from_secs(4 * 24 * 3600);

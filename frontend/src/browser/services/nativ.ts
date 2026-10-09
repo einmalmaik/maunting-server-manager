@@ -168,19 +168,30 @@ export const nativ = {
   schutzAbbrechen: () => rufen<SchutzStand>('schutz_abbrechen'),
   /** Wirft `ohne_netz`, `zu_frueh`, `verfallen` oder `kein_antrag`. */
   schutzBestaetigen: () => rufen<SchutzStand>('schutz_bestaetigen'),
-  /** Was das Such-Widget angestoßen hat, einmal (`widget.rs`). */
+  /** Was das Such-Widget oder ein Link aus einer anderen App angestoßen hat, einmal (`widget.rs`). */
   widgetStart: () => rufen<WidgetStart | null>('widget_start'),
   widgetStand: (bildsuche: boolean) => rufen('widget_stand', { bildsuche }),
   widgetLage: () => rufen<'liegt' | 'anheftbar' | 'nein'>('widget_lage'),
   /** Der Startbildschirm fragt danach selbst; `false`, wenn er die Bitte nicht annimmt. */
   widgetAnheften: () => rufen<boolean>('widget_anheften'),
   tastaturZeigen: () => rufen('tastatur_zeigen'),
+  /** Ist der Browser der Standardbrowser? Nur Android, sonst `false`. */
+  standardbrowser: () => rufen<boolean>('standardbrowser'),
+  /** Android fragt selbst; danach der Stand. */
+  standardbrowserWerden: () => rufen<boolean>('standardbrowser_werden'),
+  /** Die Standard-Apps in den Android-Einstellungen. */
+  standardbrowserEinstellungen: () => rufen<boolean>('standardbrowser_einstellungen'),
   /** Schickt das Foto des Widgets im Tab `id` an die Bildsuche. */
   bildsuche: (id: string, privat: boolean, bild: { url: string; feld: string; base64?: boolean }) =>
     nacheinander('bildsuche', { id, privat, url: bild.url, feld: bild.feld, base64: bild.base64 ?? false }),
 }
 
-export type WidgetStart = { art: 'suche' } | { art: 'text'; text: string } | { art: 'bild' }
+export type WidgetStart =
+  | { art: 'suche' }
+  | { art: 'text'; text: string }
+  | { art: 'bild' }
+  /** Ein Link aus einer anderen App (`WidgetPlugin.linkAufnehmen`). */
+  | { art: 'link'; url: string }
 
 /** Ein neuer Anstoß des Such-Widgets, während der Browser läuft. */
 export async function widgetAnstoesse(rueckruf: () => void): Promise<() => void> {

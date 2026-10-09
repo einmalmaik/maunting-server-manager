@@ -89,8 +89,11 @@ export function searxngBasis(url?: string | null): string | null {
 
 /**
  * Was die Adresszeile lädt. Leere Eingabe: nichts. Eine Adresse ohne Schema
- * bekommt `https://`, auf dem eigenen Rechner `http://`. Alles andere ist ein
- * Suchbegriff; ist SearXNG gewählt, aber nicht eingerichtet, sucht
+ * bekommt `http://`: HTTPS versucht der Browser dann selbst und fällt zurück,
+ * wenn die Seite es nicht kann (`tabs/https.rs`). Mit fest `https://` davor
+ * gab es für solche Seiten nur die Fehlerseite (bis 09.10.2026), und ein
+ * eigener Server mit Port bekam HTTPS, das er nicht spricht. Alles andere
+ * ist ein Suchbegriff; ist SearXNG gewählt, aber nicht eingerichtet, sucht
  * DuckDuckGo, statt dass nichts passiert.
  */
 export function baueZielUrl(eingabe: string, id: string, searxngUrl?: string | null): string | null {
@@ -98,7 +101,7 @@ export function baueZielUrl(eingabe: string, id: string, searxngUrl?: string | n
   if (!text) return null
   if (istAdresse(text)) {
     if (/^(https?:\/\/|about:)/i.test(text)) return text
-    return LOKAL.test(text) ? `http://${text}` : `https://${text}`
+    return `http://${text}`
   }
   return suchAdresse(text, id, searxngUrl) ?? suchAdresse(text, 'duckduckgo')
 }

@@ -6,5 +6,5 @@
  * `privacyPolicy.*` ändert, zieht hier Version und Datum nach — und in
  * `backend/services/ai_docs_corpus.py` (ein Test hält beide gleich).
  */
-export const DATENSCHUTZ_VERSION = '3.36'
+export const DATENSCHUTZ_VERSION = '3.37'
 export const DATENSCHUTZ_STAND = '2026-10-09'

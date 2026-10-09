@@ -143,11 +143,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.36 vom 2026-10-09 aus (Android-Downloads ohne den Download-Dienst, geteilter WebView-Prozess)', () => {
+  it('weist die Fassung 3.37 vom 2026-10-09 aus (HTTPS zuerst, Tracking-Parameter, Cookie-Hinweise, Links aus anderen Apps)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.36`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.37`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -216,7 +216,7 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.vault.items.eintraege')).toMatch(/Zahlungskarten, Bankkonten/);
     // 3.30: der Browser hat einen eigenen Abschnitt; Absturzberichte der Tabs gehen nicht an Microsoft.
     expect(screen.getByText(i18n.t('privacyPolicy.sections.browser.heading'))).toBeInTheDocument();
-    expect(i18n.t('privacyPolicy.sections.browser.items.verbindungen')).toMatch(/easylist\.to sieht dabei Ihre IP-Adresse/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.verbindungen')).toMatch(/easylist\.to .* beide Server sehen dabei Ihre IP-Adresse/);
     expect(i18n.t('privacyPolicy.sections.browser.items.microsoft')).toMatch(/kein Absturzbericht an Microsoft/);
     expect(i18n.t('privacyPolicy.sections.browser.items.passwoerter')).toMatch(/Ein Master-Passwort hält der Browser dafür nicht im Speicher/);
     // 3.31: Kategorielisten des Jugend- und Suchtschutzes kommen von GitHub, nur für aktive Kategorien.
@@ -238,6 +238,11 @@ describe('Privacy page', () => {
     // 3.36: Android-Downloads lädt der Browser selbst; Cookies gehen nicht mehr an den Download-Dienst.
     expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/Cookies schickt er dabei nur an die Seite, der sie gehören/);
     expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/den Prozess der WebView teilen sich Seiten und Oberfläche unter Android/);
+    // 3.37: die Cookie-Liste kommt von einem weiteren Server; das Seitensymbol holt die Oberfläche nicht mehr selbst.
+    expect(i18n.t('privacyPolicy.sections.browser.items.verbindungen')).toMatch(/secure\.fanboy\.co\.nz/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.verbindungen')).not.toMatch(/direkt von der Seite/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.https')).toMatch(/eine Einwilligung gibt er dabei nicht/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/Links aus anderen Apps in einem neuen, normalen Tab/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

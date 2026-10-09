@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-standardbrowser-werden"
+description = "Enables the standardbrowser_werden command without any pre-configured scope."
+commands.allow = ["standardbrowser_werden"]
+
+[[permission]]
+identifier = "deny-standardbrowser-werden"
+description = "Denies the standardbrowser_werden command without any pre-configured scope."
+commands.deny = ["standardbrowser_werden"]

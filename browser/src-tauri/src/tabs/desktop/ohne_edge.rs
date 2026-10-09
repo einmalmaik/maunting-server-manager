@@ -51,6 +51,10 @@ pub unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -> windo
                 }
                 if !erfolg.as_bool() && http == 0 && status != COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
                     let url = text(|p| core.Source(p));
+                    // Eben erst auf HTTPS hochgestuft: die Seite kann es nicht.
+                    if let Some(unverschluesselt) = crate::tabs::https::rueckfall(&url) {
+                        return core.Navigate(&windows::core::HSTRING::from(unverschluesselt));
+                    }
                     melden(&app, TabEreignis::Fehlerseite { id: id.clone(), url, grund: fehler_art(status).into() });
                 }
                 Ok(())

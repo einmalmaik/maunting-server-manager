@@ -145,7 +145,7 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
   /** Lädt [url] nach Prüfung durch Rust; `loadUrl` geht an `shouldOverrideUrlLoading` vorbei. */
   fun laden(url: String) {
     bild = null
-    when (val ziel = TabsBruecke.weg(id, url)) {
+    when (val ziel = TabsBruecke.weg(id, url, false)) {
       "-" -> return
       "" -> webView.loadUrl(url)
       else -> webView.loadUrl(ziel)
@@ -226,7 +226,7 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
       // Rahmen prüft `anfrage` beim Laden; Rust entscheidet über die Seite.
       if (!anfrage.isForMainFrame) return false
       if (bildZurueck(anfrage)) return true
-      return when (val ziel = TabsBruecke.weg(id, anfrage.url.toString())) {
+      return when (val ziel = TabsBruecke.weg(id, anfrage.url.toString(), anfrage.isRedirect)) {
         "" -> false
         "-" -> true
         else -> {
@@ -277,12 +277,21 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
       if (!anfrage.isForMainFrame) return
       // Abgebrochen hat der Browser selbst (geblockt, Download, neue Navigation).
       if (fehler.description?.contains("ERR_ABORTED") == true) return
+      if (zurueckfallen(view, anfrage.url.toString())) return
       melden("fehlerseite", "url" to anfrage.url.toString(), "grund" to grund(view.context, fehler.errorCode))
     }
 
     override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, fehler: SslError) {
       handler.cancel()
-      if (fehler.url == seite) melden("fehlerseite", "url" to fehler.url, "grund" to "zertifikat")
+      if (fehler.url != seite || zurueckfallen(view, fehler.url)) return
+      melden("fehlerseite", "url" to fehler.url, "grund" to "zertifikat")
+    }
+
+    /** Eben erst auf HTTPS hochgestuft, und die Seite kann es nicht: wie angegeben laden. */
+    private fun zurueckfallen(view: WebView, url: String): Boolean {
+      val ziel = TabsBruecke.rueckfall(url).takeIf { it.isNotEmpty() } ?: return false
+      view.loadUrl(ziel)
+      return true
     }
 
     override fun onReceivedHttpAuthRequest(view: WebView, handler: HttpAuthHandler, host: String, bereich: String) {

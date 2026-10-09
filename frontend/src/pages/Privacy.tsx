@@ -199,6 +199,7 @@ export function Privacy({ zurueck, zurueckAktion }: { zurueck?: string; zurueckA
           t('privacyPolicy.sections.browser.items.lokal'),
           t('privacyPolicy.sections.browser.items.privat'),
           t('privacyPolicy.sections.browser.items.verbindungen'),
+          t('privacyPolicy.sections.browser.items.https'),
           t('privacyPolicy.sections.browser.items.schutz'),
           t('privacyPolicy.sections.browser.items.downloads'),
           t('privacyPolicy.sections.browser.items.microsoft'),

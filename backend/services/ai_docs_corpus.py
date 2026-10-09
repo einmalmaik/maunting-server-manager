@@ -131,7 +131,7 @@ SEITEN: dict[str, Seite] = {
 # `frontend/src/pages/datenschutzStand.ts` und in keiner Sprachdatei — also
 # genau die zwei Angaben, die ein Modell sonst erfindet. Ein Test haelt sie
 # gegen diese Datei.
-DATENSCHUTZ_VERSION = "3.36"
+DATENSCHUTZ_VERSION = "3.37"
 DATENSCHUTZ_STAND = "2026-10-09"
 
 # `de.json` fuehrt neben `privacyPolicy` einen zweiten, **toten** Namensraum

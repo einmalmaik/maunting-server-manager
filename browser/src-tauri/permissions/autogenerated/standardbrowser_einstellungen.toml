@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-standardbrowser-einstellungen"
+description = "Enables the standardbrowser_einstellungen command without any pre-configured scope."
+commands.allow = ["standardbrowser_einstellungen"]
+
+[[permission]]
+identifier = "deny-standardbrowser-einstellungen"
+description = "Denies the standardbrowser_einstellungen command without any pre-configured scope."
+commands.deny = ["standardbrowser_einstellungen"]

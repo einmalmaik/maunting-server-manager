@@ -124,6 +124,9 @@ pub fn run() {
             widget::widget_anheften,
             widget::bildsuche,
             widget::tastatur_zeigen,
+            widget::standardbrowser,
+            widget::standardbrowser_werden,
+            widget::standardbrowser_einstellungen,
         ])
         .on_window_event(|fenster, ereignis| {
             // „Beim Schließen vergessen“: erst die Seitendaten löschen, dann

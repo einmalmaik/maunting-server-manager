@@ -57,6 +57,23 @@ pub fn anheften(app: &AppHandle) -> Result<bool, String> {
     rufen::<Ok>(app, "anheften", json!({})).map(|o| o.ok)
 }
 
+#[derive(serde::Deserialize)]
+struct Standard {
+    standard: bool,
+}
+
+pub fn standardbrowser(app: &AppHandle) -> Result<bool, String> {
+    rufen::<Standard>(app, "standard", json!({})).map(|s| s.standard)
+}
+
+pub fn standardbrowser_werden(app: &AppHandle) -> Result<bool, String> {
+    rufen::<Standard>(app, "standardWerden", json!({})).map(|s| s.standard)
+}
+
+pub fn standardbrowser_einstellungen(app: &AppHandle) -> Result<bool, String> {
+    rufen::<Standard>(app, "einstellungen", json!({})).map(|s| s.standard)
+}
+
 pub fn tastatur_zeigen(app: &AppHandle) -> Result<(), String> {
     rufen::<Leer>(app, "tastaturZeigen", json!({})).map(|_| ())
 }

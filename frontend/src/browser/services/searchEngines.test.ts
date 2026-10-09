@@ -32,7 +32,9 @@ describe('baueZielUrl', () => {
   })
 
   it('ergänzt das Schema passend', () => {
-    expect(baueZielUrl('youtube.com', 'google')).toBe('https://youtube.com')
+    // HTTPS stuft Rust hoch, mit Rückfall (`tabs/https.rs`).
+    expect(baueZielUrl('youtube.com', 'google')).toBe('http://youtube.com')
+    expect(baueZielUrl('mein-server.de:8080/admin', 'google')).toBe('http://mein-server.de:8080/admin')
     expect(baueZielUrl('localhost:8000', 'google')).toBe('http://localhost:8000')
     expect(baueZielUrl('https://github.com', 'google')).toBe('https://github.com')
   })

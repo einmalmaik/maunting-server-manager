@@ -27,6 +27,7 @@ pub mod netzzeit;
 pub mod schutz;
 pub mod schutz_dienst;
 pub mod sperre;
+pub mod verfolgung;
 
 /// Art einer Anfrage, wie die WebView sie meldet.
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -39,19 +39,29 @@ pub enum Weg {
     Verboten,
     /// Der Jugend- und Suchtschutz sperrt sie; die Kategorie oder `eigene`.
     Gesperrt(&'static str),
-    /// Dieselbe Suche mit erzwungener sicherer Suche (`schild/sperre.rs`).
+    /// Stattdessen diese Adresse: verschlüsselt (`https.rs`), ohne
+    /// Tracking-Parameter (`schild/verfolgung.rs`) oder mit erzwungener
+    /// sicherer Suche (`schild/sperre.rs`).
     Umleiten(String),
 }
 
-pub fn weg(url: &str) -> Weg {
-    if !url::Url::parse(url).is_ok_and(|u| navigation_erlaubt(&u)) {
+/// `weiterleitung`: der Server hat hierher umgeleitet (`https::hochstufen`).
+pub fn weg(url: &str, weiterleitung: bool) -> Weg {
+    let Some(geparst) = url::Url::parse(url).ok().filter(navigation_erlaubt) else {
         return Weg::Verboten;
+    };
+    let mut ziel = super::https::hochstufen(&geparst, weiterleitung).unwrap_or_else(|| geparst.clone());
+    if crate::schild::aktiv_fuer(ziel.as_str()) {
+        if let Some(sauber) = crate::schild::verfolgung::ohne_verfolgung(&ziel) {
+            ziel = sauber;
+        }
     }
-    if let Some(grund) = crate::schild::sperre::gesperrt(url) {
+    if let Some(grund) = crate::schild::sperre::gesperrt(ziel.as_str()) {
         return Weg::Gesperrt(grund.name());
     }
-    match crate::schild::sperre::sichere_suche(url) {
+    match crate::schild::sperre::sichere_suche(ziel.as_str()) {
         Some(sicher) => Weg::Umleiten(sicher),
+        None if ziel != geparst => Weg::Umleiten(ziel.into()),
         None => Weg::Laden,
     }
 }
@@ -143,11 +153,25 @@ mod tests {
 
     #[test]
     fn navigation_entscheidet_ohne_webview() {
-        assert_eq!(weg("https://example.com/"), Weg::Laden);
-        assert_eq!(weg("http://tauri.localhost/browser.html"), Weg::Verboten);
-        assert_eq!(weg("file:///C:/Windows/win.ini"), Weg::Verboten);
-        assert_eq!(weg("intent://scan/#Intent;scheme=zxing;end"), Weg::Verboten);
-        assert_eq!(weg("kaputt"), Weg::Verboten);
+        assert_eq!(weg("https://example.com/", false), Weg::Laden);
+        assert_eq!(weg("http://tauri.localhost/browser.html", false), Weg::Verboten);
+        assert_eq!(weg("file:///C:/Windows/win.ini", false), Weg::Verboten);
+        assert_eq!(weg("intent://scan/#Intent;scheme=zxing;end", false), Weg::Verboten);
+        assert_eq!(weg("kaputt", false), Weg::Verboten);
+        assert_eq!(weg("http://localhost:5173/", false), Weg::Laden);
+    }
+
+    #[test]
+    fn eine_navigation_laedt_verschluesselt_und_ohne_tracking_parameter() {
+        assert_eq!(
+            weg("http://weg.example.com/a?utm_source=mail&id=3", false),
+            Weg::Umleiten("https://weg.example.com/a?id=3".into())
+        );
+        assert_eq!(weg("https://weg2.example.com/?fbclid=x", false), Weg::Umleiten("https://weg2.example.com/".into()));
+        // Was schon sauber ist, lädt; sonst kreiste die Umleitung.
+        assert_eq!(weg("https://weg2.example.com/", false), Weg::Laden);
+        // Der Entwicklungsserver bleibt bei http; Tracking-Parameter fallen auch dort.
+        assert_eq!(weg("http://localhost:3000/?utm_source=x", false), Weg::Umleiten("http://localhost:3000/".into()));
     }
 
     #[test]

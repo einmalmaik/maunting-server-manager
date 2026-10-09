@@ -23,6 +23,7 @@ use tauri::{AppHandle, Manager, State};
 
 pub mod ereignis;
 pub mod formular;
+pub mod https;
 pub mod ruhe;
 pub mod weg;
 #[cfg(windows)]

@@ -51,16 +51,18 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_meld
 }
 
 /// `""`: laden. `"-"`: nicht laden (verboten oder gesperrt; gesperrt meldet
-/// Rust selbst). Sonst die Adresse, die stattdessen lädt (sichere Suche).
+/// Rust selbst). Sonst die Adresse, die stattdessen lädt (HTTPS, ohne
+/// Tracking-Parameter, sichere Suche).
 #[no_mangle]
 pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_weg<'l>(
     mut env: JNIEnv<'l>,
     _: JClass<'l>,
     tab: JString<'l>,
     url: JString<'l>,
+    weiterleitung: jboolean,
 ) -> jstring {
     let (tab, url) = (text(&mut env, &tab), text(&mut env, &url));
-    let antwort = match weg(&url) {
+    let antwort = match weg(&url, weiterleitung != JNI_FALSE) {
         Weg::Laden => String::new(),
         Weg::Verboten => "-".into(),
         Weg::Gesperrt(grund) => {
@@ -71,6 +73,19 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_weg<
         }
         Weg::Umleiten(sicher) => sicher,
     };
+    zurueck(&mut env, &antwort)
+}
+
+/// Die Seite ließ sich nicht laden: die Adresse mit `http://`, wenn der
+/// Browser sie eben erst hochgestuft hat, sonst `""` (Fehlerseite).
+#[no_mangle]
+pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_rueckfall<'l>(
+    mut env: JNIEnv<'l>,
+    _: JClass<'l>,
+    url: JString<'l>,
+) -> jstring {
+    let url = text(&mut env, &url);
+    let antwort = crate::tabs::https::rueckfall(&url).unwrap_or_default();
     zurueck(&mut env, &antwort)
 }
 

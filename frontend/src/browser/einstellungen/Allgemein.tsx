@@ -3,7 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { normalizePanelLanguage, panelLanguageCodes, type PanelLanguageCode } from '@/config/panelLocales'
 
 import { useEinstellungenStore } from '../services/einstellungenStore'
+import { istAndroid } from '../services/plattform'
 import { Abschnitt, Auswahlzeile } from './bausteine'
+import { Standardbrowser } from './Standardbrowser'
 
 export function Allgemein() {
   const { t, i18n } = useTranslation()
@@ -26,6 +28,7 @@ export function Allgemein() {
         optionen={panelLanguageCodes.map((code) => ({ value: code, label: t(`browser.einstellungen.spracheName.${code}`) }))}
         aendern={(code) => void i18n.changeLanguage(code)}
       />
+      {istAndroid() && <Standardbrowser />}
     </Abschnitt>
   )
 }

@@ -119,6 +119,12 @@ mod tests {
     use super::*;
     use crate::tabs::TabDaten;
 
+    /// Ein Tag nach jetzt: `Instant` minus Stunden kippt unter Windows, wenn
+    /// der Rechner kürzer läuft (die Tests waren nach jedem Neustart rot).
+    fn jetzt() -> Instant {
+        Instant::now() + Duration::from_secs(24 * 3600)
+    }
+
     fn zustand(tabs: &[(&str, bool, Option<u64>)], jetzt: Instant) -> Zustand {
         let mut z = Zustand::default();
         for (id, privat, minuten) in tabs {
@@ -130,14 +136,14 @@ mod tests {
 
     #[test]
     fn verborgene_tabs_schlafen_nach_der_wartezeit() {
-        let jetzt = Instant::now();
+        let jetzt = jetzt();
         let z = zustand(&[("tab-a", false, Some(31)), ("tab-b", false, Some(29)), ("tab-c", false, None)], jetzt);
         assert_eq!(z.faellig(jetzt), vec![("tab-a".to_string(), Ruhe::Schlafen)]);
     }
 
     #[test]
     fn der_vordere_und_der_im_vollbild_schlafen_nie() {
-        let jetzt = Instant::now();
+        let jetzt = jetzt();
         let mut z = zustand(&[("tab-a", false, Some(90)), ("tab-b", false, Some(90))], jetzt);
         z.aktiv = Some("tab-a".into());
         z.vollbild = Some("tab-b".into());
@@ -150,7 +156,7 @@ mod tests {
 
     #[test]
     fn verworfen_wird_nur_mit_speicher_sparen_und_nie_privat() {
-        let jetzt = Instant::now();
+        let jetzt = jetzt();
         let mut z = zustand(&[("tab-a", false, Some(61)), ("tab-p", true, Some(61))], jetzt);
         let mut f = z.faellig(jetzt);
         f.sort_by(|a, b| a.0.cmp(&b.0));
@@ -163,7 +169,7 @@ mod tests {
 
     #[test]
     fn nie_heisst_nie() {
-        let jetzt = Instant::now();
+        let jetzt = jetzt();
         let mut z = zustand(&[("tab-a", false, Some(120))], jetzt);
         z.leistung.schlafen_nach = None;
         assert!(z.faellig(jetzt).is_empty());
@@ -171,7 +177,7 @@ mod tests {
 
     #[test]
     fn nach_vorne_geholt_zaehlt_die_zeit_neu() {
-        let jetzt = Instant::now();
+        let jetzt = jetzt();
         let mut z = zustand(&[("tab-a", false, Some(90)), ("tab-b", false, None)], jetzt);
         z.aktiv = Some("tab-b".into());
         z.aktiv_setzen(Some("tab-a".into()), jetzt);

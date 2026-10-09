@@ -55,6 +55,9 @@ const BEFEHLE: &[&str] = &[
     "widget_anheften",
     "bildsuche",
     "tastatur_zeigen",
+    "standardbrowser",
+    "standardbrowser_werden",
+    "standardbrowser_einstellungen",
 ];
 
 fn main() {

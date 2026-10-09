@@ -52,4 +52,7 @@ permissions = [
   "allow-widget-anheften",
   "allow-bildsuche",
   "allow-tastatur-zeigen",
+  "allow-standardbrowser",
+  "allow-standardbrowser-werden",
+  "allow-standardbrowser-einstellungen",
 ]

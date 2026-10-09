@@ -44,7 +44,8 @@ beforeEach(() => {
 
 describe('Adresse einer Kachel', () => {
   it('nimmt nur Webadressen ohne Zugangsdaten', () => {
-    expect(kachelAdresse('github.com')).toBe('https://github.com/')
+    // Ohne Schema `http://`: HTTPS versucht der Browser beim Öffnen selbst (`tabs/https.rs`).
+    expect(kachelAdresse('github.com')).toBe('http://github.com/')
     expect(kachelAdresse('localhost:3000')).toBe('http://localhost:3000/')
     expect(kachelAdresse('javascript:alert(1)')).toBeNull()
     expect(kachelAdresse('https://nutzer:geheim@example.com')).toBeNull()
@@ -82,7 +83,7 @@ describe('Schnellzugriffe', () => {
     expect(within(dialog).getByText('Das ist keine Webadresse.')).toBeInTheDocument()
     fireEvent.change(within(dialog).getByLabelText('Adresse'), { target: { value: 'codeberg.org' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Speichern' }))
-    expect(useEinstellungenStore.getState().schnellzugriffe.at(-1)).toEqual({ url: 'https://codeberg.org/', titel: 'codeberg.org' })
+    expect(useEinstellungenStore.getState().schnellzugriffe.at(-1)).toEqual({ url: 'http://codeberg.org/', titel: 'codeberg.org' })
   })
 
   it('entfernt per Menü und holt mit Rückgängig zurück', () => {
