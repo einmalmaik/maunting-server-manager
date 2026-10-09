@@ -4,11 +4,16 @@
 //! Adresse, zu der sie gehören, nimmt Rust aus der Webview selbst, nie aus der
 //! Meldung. Gefüllt wird nur, wenn der Tab noch auf derselben Herkunft steht,
 //! für die die Oberfläche den Eintrag ausgesucht hat.
+//!
+//! Zahlungsfelder dürfen auch in einem Rahmen liegen ([`Zahlrahmen`]).
+
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use super::{id_pruefen, plattform};
+use super::{id_pruefen, melden, plattform, TabEreignis};
 
 /// Länger wird nichts aus einer Seite angenommen.
 pub const ROH_MAX: usize = 4096;
@@ -34,6 +39,9 @@ pub enum Meldung {
     Benutzer { wert: String },
     /// Ein Feld für eine Zahlungskarte oder ein Bankkonto hat den Fokus.
     Zahlung { art: ZahlArt },
+    /// Ein Rahmen der Seite hat den Fokus, sichtbar und über HTTPS; `None`:
+    /// keiner (mehr). Geht nicht an die Oberfläche, nur an [`Zahlrahmen`].
+    Rahmen { herkunft: Option<String> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +59,7 @@ impl std::fmt::Debug for Meldung {
             Meldung::Absenden { neu, .. } => write!(f, "Absenden {{ neu: {neu}, .. }}"),
             Meldung::Benutzer { .. } => write!(f, "Benutzer {{ .. }}"),
             Meldung::Zahlung { art } => write!(f, "Zahlung {{ art: {art:?} }}"),
+            Meldung::Rahmen { herkunft } => write!(f, "Rahmen {{ herkunft: {herkunft:?} }}"),
         }
     }
 }
@@ -67,8 +76,129 @@ pub fn lesen(roh: &str) -> Option<Meldung> {
             !passwort.is_empty() && passwort.chars().count() <= PASSWORT_MAX && benutzer.chars().count() <= BENUTZER_MAX
         }
         Meldung::Benutzer { wert } => !wert.is_empty() && wert.chars().count() <= BENUTZER_MAX,
+        Meldung::Rahmen { herkunft } => herkunft.as_deref().is_none_or(|h| https_herkunft(h).as_deref() == Some(h)),
     };
     passt.then_some(meldung)
+}
+
+/// Was ein Unterrahmen sagen darf: dass er da ist, und dass ein Zahlungsfeld
+/// den Fokus hat. Anmeldungen gibt es nur im obersten Rahmen.
+#[derive(Deserialize)]
+#[serde(tag = "t", rename_all = "snake_case", deny_unknown_fields)]
+enum RahmenMeldung {
+    Da,
+    Zahlung { art: ZahlArt },
+}
+
+/// Die Herkunft einer HTTPS-Adresse (`https://host[:port]`), sonst `None`.
+fn https_herkunft(url: &str) -> Option<String> {
+    let url = url::Url::parse(url).ok()?;
+    (url.scheme() == "https").then(|| url.origin().ascii_serialization())
+}
+
+fn herkunft(url: &str) -> String {
+    url::Url::parse(url).map(|u| u.origin().ascii_serialization()).unwrap_or_default()
+}
+
+/// Kassen wie Stripe oder Adyen legen ihre Felder in Rahmen einer fremden
+/// Herkunft, Adyen jedes Feld in einen eigenen. Angeboten wird eine Karte
+/// dort nur, wenn die oberste Seite einen sichtbaren Rahmen mit Fokus meldet
+/// (`oben`) und ein Rahmen derselben Herkunft ein Zahlungsfeld mit Fokus
+/// (`unten`). Beides kommt über verschiedene Wege, in beliebiger Reihenfolge.
+/// Ein Werberahmen kann sich so nicht als Kasse ausgeben: die oberste Seite
+/// nennt ihn nur, wenn er den Fokus hat, und füllen lässt die Oberfläche nur
+/// die Herkunft, die sie dem Nutzer gezeigt hat.
+#[derive(Default, Debug, PartialEq)]
+struct Zahlrahmen {
+    /// Herkunft der obersten Seite; wechselt sie, fängt alles von vorn an.
+    seite: String,
+    oben: Option<String>,
+    unten: Option<(String, ZahlArt)>,
+    gemeldet: bool,
+}
+
+enum Aenderung {
+    Oben(Option<String>),
+    Unten(String, ZahlArt),
+}
+
+impl Zahlrahmen {
+    /// Nimmt eine Meldung auf; `Some`, wenn die Oberfläche jetzt das
+    /// Einfügen in diesen Rahmen anbieten soll.
+    fn aendern(&mut self, seite: &str, aenderung: Aenderung) -> Option<(String, ZahlArt)> {
+        if self.seite != seite {
+            *self = Zahlrahmen { seite: seite.to_string(), ..Default::default() };
+        }
+        match aenderung {
+            Aenderung::Oben(h) => {
+                if h != self.oben {
+                    self.gemeldet = false;
+                }
+                self.oben = h;
+            }
+            Aenderung::Unten(h, art) => {
+                if self.unten.as_ref() != Some(&(h.clone(), art)) {
+                    self.gemeldet = false;
+                }
+                self.unten = Some((h, art));
+            }
+        }
+        match (&self.oben, &self.unten) {
+            (Some(o), Some((u, art))) if o == u && !self.gemeldet => {
+                self.gemeldet = true;
+                Some((o.clone(), *art))
+            }
+            _ => None,
+        }
+    }
+
+    fn gilt(&self, seite: &str, rahmen: &str) -> bool {
+        !seite.is_empty()
+            && self.seite == seite
+            && self.oben.as_deref() == Some(rahmen)
+            && self.unten.as_ref().is_some_and(|(u, _)| u == rahmen)
+    }
+}
+
+static ZAHLRAHMEN: LazyLock<Mutex<HashMap<String, Zahlrahmen>>> = LazyLock::new(Default::default);
+
+fn zahlrahmen(app: &AppHandle, id: &str, url: &str, aenderung: Aenderung) {
+    let anbieten = ZAHLRAHMEN.lock().unwrap().entry(id.to_string()).or_default().aendern(&herkunft(url), aenderung);
+    if let Some((rahmen, art)) = anbieten {
+        let (id, url) = (id.to_string(), url.to_string());
+        melden(app, TabEreignis::Formular { id, url, meldung: Meldung::Zahlung { art }, rahmen: Some(rahmen) });
+    }
+}
+
+/// Eine Meldung des obersten Rahmens; `url` ist die Adresse aus der Webview.
+pub fn oben(app: &AppHandle, id: &str, url: &str, meldung: Meldung) {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return;
+    }
+    match meldung {
+        Meldung::Rahmen { herkunft } => zahlrahmen(app, id, url, Aenderung::Oben(herkunft)),
+        meldung => melden(app, TabEreignis::Formular { id: id.to_string(), url: url.to_string(), meldung, rahmen: None }),
+    }
+}
+
+/// Eine Nachricht aus einem Unterrahmen. `url` ist die Adresse der obersten
+/// Seite, `absender` die des Rahmens, beide aus der Webview. Gibt die
+/// Herkunft des Rahmens zurück, wenn er als Ziel fürs Füllen in Frage kommt.
+pub fn unten(app: &AppHandle, id: &str, url: &str, absender: &str, roh: &str) -> Option<String> {
+    if roh.len() > ROH_MAX || !url.starts_with("https://") {
+        return None;
+    }
+    let rahmen = https_herkunft(absender)?;
+    match serde_json::from_str::<RahmenMeldung>(roh).ok()? {
+        RahmenMeldung::Da => {}
+        RahmenMeldung::Zahlung { art } => zahlrahmen(app, id, url, Aenderung::Unten(rahmen.clone(), art)),
+    }
+    Some(rahmen)
+}
+
+/// Der Tab ist zu.
+pub fn vergessen(id: &str) {
+    ZAHLRAHMEN.lock().unwrap().remove(id);
 }
 
 /// Was die Oberfläche einfüllen lässt. `neu` füllt alle Felder für ein neues
@@ -165,9 +295,11 @@ pub fn gleiche_herkunft(a: &str, b: &str) -> bool {
     }
 }
 
-/// Füllt Anmeldedaten in den Tab, wenn er noch auf der Herkunft von `fuer` steht.
+/// Füllt Anmeldedaten in den Tab, wenn er noch auf der Herkunft von `fuer`
+/// steht. Mit `rahmen` gehen Zahlungsdaten an die Rahmen dieser Herkunft,
+/// wenn [`Zahlrahmen`] sie noch als Kasse kennt.
 #[tauri::command(async)]
-pub fn tab_fuellen(app: AppHandle, id: String, fuer: String, werte: Fuellen) -> Result<(), String> {
+pub fn tab_fuellen(app: AppHandle, id: String, fuer: String, rahmen: Option<String>, werte: Fuellen) -> Result<(), String> {
     id_pruefen(&id)?;
     werte.pruefen()?;
     // Zahlungsdaten gehen nie über eine unverschlüsselte Verbindung.
@@ -176,7 +308,16 @@ pub fn tab_fuellen(app: AppHandle, id: String, fuer: String, werte: Fuellen) -> 
     }
     let mut nachricht = serde_json::to_value(&werte).map_err(|e| e.to_string())?;
     nachricht["t"] = "fuellen".into();
-    plattform::fuellen(&app, &id, &fuer, nachricht.to_string())
+    let Some(rahmen) = rahmen else {
+        return plattform::fuellen(&app, &id, &fuer, nachricht.to_string());
+    };
+    let gilt = ZAHLRAHMEN.lock().unwrap().get(&id).is_some_and(|z| z.gilt(&herkunft(&fuer), &rahmen));
+    if !werte.zahlung() || !gilt {
+        return Err("Das Formular ist nicht mehr da".into());
+    }
+    // Der Rahmen prüft selbst noch einmal, ob er auf dieser Herkunft steht.
+    nachricht["herkunft"] = rahmen.clone().into();
+    plattform::fuellen_rahmen(&app, &id, &fuer, &rahmen, nachricht.to_string())
 }
 
 #[cfg(test)]
@@ -229,6 +370,78 @@ mod tests {
         let konto = |iban: &str| Fuellen { konto: Some(Konto { iban: iban.into(), inhaber: None, bic: Some("COBADEFFXXX".into()) }), ..Default::default() }.pruefen();
         assert!(konto("DE89370400440532013000").is_ok());
         assert!(konto("de89370400440532013000").is_err());
+    }
+
+    #[test]
+    fn ein_rahmen_meldet_seine_herkunft_nur_als_https() {
+        assert!(matches!(lesen(r#"{"t":"rahmen","herkunft":"https://js.stripe.com"}"#), Some(Meldung::Rahmen { herkunft: Some(_) })));
+        assert!(matches!(lesen(r#"{"t":"rahmen","herkunft":null}"#), Some(Meldung::Rahmen { herkunft: None })));
+        for falsch in ["http://js.stripe.com", "https://js.stripe.com/pfad", "https://JS.stripe.com", "javascript:1", ""] {
+            let roh = serde_json::json!({ "t": "rahmen", "herkunft": falsch }).to_string();
+            assert!(lesen(&roh).is_none(), "{falsch}");
+        }
+    }
+
+    #[test]
+    fn ein_unterrahmen_darf_nur_da_und_zahlung_sagen() {
+        let lesen = |roh: &str| serde_json::from_str::<RahmenMeldung>(roh).ok();
+        assert!(matches!(lesen(r#"{"t":"da"}"#), Some(RahmenMeldung::Da)));
+        assert!(matches!(lesen(r#"{"t":"zahlung","art":"konto"}"#), Some(RahmenMeldung::Zahlung { art: ZahlArt::Konto })));
+        assert!(lesen(r#"{"t":"feld","passwort":true,"neu":false}"#).is_none());
+        assert!(lesen(r#"{"t":"absenden","benutzer":"a","passwort":"b","neu":false}"#).is_none());
+        assert!(lesen(r#"{"t":"rahmen","herkunft":null}"#).is_none());
+        assert_eq!(https_herkunft("https://js.stripe.com/v3/elements-inner-card.html").as_deref(), Some("https://js.stripe.com"));
+        assert_eq!(https_herkunft("http://js.stripe.com/"), None);
+        assert_eq!(https_herkunft("about:srcdoc"), None);
+    }
+
+    const KASSE: &str = "https://laden.example";
+    const STRIPE: &str = "https://js.stripe.com";
+
+    fn oben(z: &mut Zahlrahmen, h: Option<&str>) -> Option<(String, ZahlArt)> {
+        z.aendern(KASSE, Aenderung::Oben(h.map(String::from)))
+    }
+
+    fn unten(z: &mut Zahlrahmen, h: &str) -> Option<(String, ZahlArt)> {
+        z.aendern(KASSE, Aenderung::Unten(h.into(), ZahlArt::Karte))
+    }
+
+    /// Angeboten wird nur, wenn die oberste Seite und der Rahmen dieselbe
+    /// Herkunft nennen, egal, wer zuerst ankommt.
+    #[test]
+    fn ein_rahmen_braucht_die_bestaetigung_der_obersten_seite() {
+        let anbieten = Some((STRIPE.to_string(), ZahlArt::Karte));
+        let mut z = Zahlrahmen::default();
+        assert_eq!(unten(&mut z, STRIPE), None);
+        assert_eq!(oben(&mut z, Some(STRIPE)), anbieten);
+        assert!(z.gilt(KASSE, STRIPE));
+
+        let mut z = Zahlrahmen::default();
+        assert_eq!(oben(&mut z, Some(STRIPE)), None);
+        assert_eq!(unten(&mut z, STRIPE), anbieten);
+        // Einmal angeboten reicht, bis der Fokus wechselt.
+        assert_eq!(unten(&mut z, STRIPE), None);
+        assert_eq!(oben(&mut z, None), None);
+        assert!(!z.gilt(KASSE, STRIPE));
+        assert_eq!(oben(&mut z, Some(STRIPE)), anbieten);
+    }
+
+    #[test]
+    fn ein_fremder_rahmen_bekommt_nichts() {
+        let mut z = Zahlrahmen::default();
+        oben(&mut z, Some(STRIPE));
+        // Ein Werberahmen meldet ein Kartenfeld, hat aber nicht den Fokus der Seite.
+        assert_eq!(unten(&mut z, "https://werbung.example"), None);
+        assert!(!z.gilt(KASSE, "https://werbung.example"));
+        assert!(!z.gilt(KASSE, STRIPE));
+        // Die Seite wechselt: was vorher galt, gilt nicht mehr.
+        let mut z = Zahlrahmen::default();
+        oben(&mut z, Some(STRIPE));
+        unten(&mut z, STRIPE);
+        assert!(z.gilt(KASSE, STRIPE));
+        assert!(!z.gilt("https://anderer.example", STRIPE));
+        assert_eq!(z.aendern("https://anderer.example", Aenderung::Oben(Some(STRIPE.into()))), None);
+        assert!(!z.gilt("https://anderer.example", STRIPE));
     }
 
     #[test]

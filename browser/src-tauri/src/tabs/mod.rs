@@ -151,6 +151,7 @@ pub fn tab_schliessen(app: AppHandle, tabs: State<'_, Tabs>, id: String) -> Resu
         }
     }
     crate::schild::tab_vergessen(&id);
+    formular::vergessen(&id);
     plattform::schliessen(&app, &id);
     Ok(())
 }

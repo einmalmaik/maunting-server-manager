@@ -46,8 +46,15 @@ pub enum TabEreignis {
     /// Ein Video oder eine Seite will den ganzen Bildschirm.
     Vollbild { id: String, an: bool },
     /// Ein Anmeldefeld der Seite (`formular.rs`). `url` ist die Adresse
-    /// des Tabs, nicht eine Angabe der Seite.
-    Formular { id: String, url: String, meldung: formular::Meldung },
+    /// des Tabs, nicht eine Angabe der Seite. `rahmen`: das Zahlungsfeld
+    /// liegt in einem Rahmen dieser Herkunft (`formular::Zahlrahmen`).
+    Formular {
+        id: String,
+        url: String,
+        meldung: formular::Meldung,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rahmen: Option<String>,
+    },
     /// Rechtsklick. `x`/`y` in Pixeln der Webview; die Einträge sind die
     /// Befehle der WebView2, die gerade gehen.
     Kontextmenue {

@@ -150,3 +150,38 @@ describe('Neue Passwörter in der Seite', () => {
     expect(feldMeldung('#einzeln')).toEqual({ t: 'feld', passwort: true, neu: true, sicher: true })
   })
 })
+
+describe('Rahmen einer Kasse', () => {
+  beforeEach(() => {
+    gesendet.length = 0
+    document.body.innerHTML = `
+      <iframe id="stripe" src="https://js.stripe.com/v3/elements-inner-card.html"></iframe>
+      <iframe id="unsicher" src="http://zahlung.example/feld"></iframe>
+      <iframe id="winzig" src="https://werbung.example/" data-groesse="1,1"></iframe>
+      <input id="email" type="email" name="email">`
+  })
+  const rahmen = () => gesendet.filter((m) => (m as { t?: string }).t === 'rahmen')
+
+  it('meldet den Rahmen mit Fokus nur mit seiner Herkunft, und nur sichtbar und über HTTPS', () => {
+    fokus(document.querySelector('#stripe')!)
+    expect(rahmen()).toEqual([{ t: 'rahmen', herkunft: 'https://js.stripe.com' }])
+    fokus(document.querySelector('#unsicher')!)
+    fokus(document.querySelector('#stripe')!)
+    fokus(document.querySelector('#winzig')!)
+    expect(rahmen()).toEqual([
+      { t: 'rahmen', herkunft: 'https://js.stripe.com' },
+      { t: 'rahmen', herkunft: null },
+      { t: 'rahmen', herkunft: 'https://js.stripe.com' },
+      { t: 'rahmen', herkunft: null },
+    ])
+  })
+
+  it('nimmt den Rahmen zurück, sobald ein Feld der Seite den Fokus hat', () => {
+    fokus(document.querySelector('#stripe')!)
+    fokus(document.querySelector('#email')!)
+    expect(rahmen()).toEqual([
+      { t: 'rahmen', herkunft: 'https://js.stripe.com' },
+      { t: 'rahmen', herkunft: null },
+    ])
+  })
+})

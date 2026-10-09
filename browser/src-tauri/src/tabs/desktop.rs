@@ -256,6 +256,7 @@ pub fn schliessen(app: &AppHandle, id: &str) {
     let _ = app.run_on_main_thread(move || {
         rueckfragen::vergessen(&id);
         cookies::vergessen(&id);
+        formulare::vergessen(&id);
         if let Some(tab) = NATIV.with(|n| n.borrow_mut().remove(&id)) {
             unsafe {
                 let _ = tab.controller.Close();
@@ -326,6 +327,10 @@ pub fn suchen(app: &AppHandle, id: &str, richtung: String, begriff: String) -> R
 
 pub fn fuellen(app: &AppHandle, id: &str, fuer: &str, nachricht: String) -> Result<(), String> {
     formulare::fuellen(app, id, fuer, nachricht)
+}
+
+pub fn fuellen_rahmen(app: &AppHandle, id: &str, fuer: &str, rahmen: &str, nachricht: String) -> Result<(), String> {
+    formulare::fuellen_rahmen(app, id, fuer, rahmen, nachricht)
 }
 
 pub fn drucken(app: &AppHandle, id: &str) -> Result<(), String> {

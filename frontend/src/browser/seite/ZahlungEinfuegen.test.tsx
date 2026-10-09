@@ -31,7 +31,8 @@ const leiste = () =>
       <FormularLeiste />
     </MemoryRouter>,
   )
-const feld = (url: string, zahlung?: 'karte' | 'konto') => act(() => useFormulare.setState({ feld: { [tab]: { url, neu: false, zahlung } } }))
+const feld = (url: string, zahlung?: 'karte' | 'konto', rahmen?: string) =>
+  act(() => useFormulare.setState({ feld: { [tab]: { url, neu: false, zahlung, rahmen } } }))
 const gefuellt = () => gerufen.filter((g) => g.befehl === 'tab_fuellen')
 const warten = () => act(() => new Promise((fertig) => setTimeout(fertig, 0)))
 
@@ -66,6 +67,17 @@ describe('Zahlungsmittel einfügen', () => {
         args: { id: tab, fuer: 'https://shop.example/kasse', werte: { benutzer: null, passwort: null, neu: null, karte: { nummer: karte.nummer, inhaber: 'Ada', monat: 12, jahr: 2030, pruefnummer: '123' } } },
       },
     ])
+  })
+
+  it('nennt bei einem Kartenfeld in einem Rahmen dessen Anbieter und füllt nur dorthin', async () => {
+    feld('https://shop.example/kasse', 'karte', 'https://js.stripe.com')
+    leiste()
+    expect(screen.getByText('Karte für shop.example aus dem Tresor, in das Formular von js.stripe.com. Eingefügt wird erst nach Bestätigung.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '•••• 1111 einfügen' }))
+    await warten()
+    const frage = gerufen.find((g) => g.befehl === 'biometrie_verifizieren')
+    expect(frage?.args.nachricht).toBe('Privatkarte •••• 1111 auf shop.example in das Formular von js.stripe.com einfügen')
+    expect(gefuellt().map((g) => [g.args.fuer, g.args.rahmen])).toEqual([['https://shop.example/kasse', 'https://js.stripe.com']])
   })
 
   it('füllt nichts, wenn Windows Hello abgelehnt wird', async () => {

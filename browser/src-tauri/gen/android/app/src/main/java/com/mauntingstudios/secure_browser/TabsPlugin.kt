@@ -38,7 +38,7 @@ import java.util.UUID
 @InvokeArg class AktionArgs { lateinit var id: String; lateinit var aktion: String }
 @InvokeArg class AntwortArgs { var nr = 0L; lateinit var antwort: String }
 @InvokeArg class SuchenArgs { lateinit var id: String; lateinit var richtung: String; var begriff = "" }
-@InvokeArg class FuellenArgs { lateinit var id: String; lateinit var fuer: String; lateinit var nachricht: String }
+@InvokeArg class FuellenArgs { lateinit var id: String; lateinit var fuer: String; var rahmen: String? = null; lateinit var nachricht: String }
 @InvokeArg class BildsucheArgs { lateinit var id: String; var privat = false; lateinit var url: String; lateinit var feld: String; var base64 = false }
 
 /**
@@ -260,7 +260,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   fun fuellen(invoke: Invoke) {
     val a = invoke.parseArgs(FuellenArgs::class.java)
     aufUi(activity, invoke) {
-      if (!tab(a.id).fuellen(a.fuer, a.nachricht)) throw IllegalStateException("Die Seite hat inzwischen gewechselt")
+      if (!tab(a.id).fuellen(a.fuer, a.rahmen, a.nachricht)) throw IllegalStateException("Die Seite hat inzwischen gewechselt")
       null
     }
   }

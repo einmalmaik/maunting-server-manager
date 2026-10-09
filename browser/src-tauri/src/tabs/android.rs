@@ -121,6 +121,11 @@ pub fn fuellen(app: &AppHandle, id: &str, fuer: &str, nachricht: String) -> Resu
     rufen::<Leer>(app, "fuellen", json!({ "id": id, "fuer": fuer, "nachricht": nachricht })).map(|_| ())
 }
 
+/// Wie [`fuellen`], an jeden Unterrahmen der Herkunft `rahmen`, den Kotlin kennt.
+pub fn fuellen_rahmen(app: &AppHandle, id: &str, fuer: &str, rahmen: &str, nachricht: String) -> Result<(), String> {
+    rufen::<Leer>(app, "fuellen", json!({ "id": id, "fuer": fuer, "rahmen": rahmen, "nachricht": nachricht })).map(|_| ())
+}
+
 /// Cookies, Speicher und Cache im Profil `seiten`; private Profile fallen
 /// ohnehin mit ihrem Tab.
 pub fn daten_leeren(app: &AppHandle) -> Result<(), String> {

@@ -12,14 +12,18 @@
   try {
     delete window.msbKanal
   } catch (_) {}
-  // Formulare nur im obersten Rahmen: dessen Adresse kennt der Browser.
-  if (!bruecke || window !== window.top) return
+  if (!bruecke) return
+  // Anmeldungen nur im obersten Rahmen, dessen Adresse der Browser kennt. In
+  // Unterrahmen nur Zahlungsfelder: Kassen wie Stripe oder Adyen liegen in
+  // iframes (`tabs::formular::Zahlrahmen`).
+  const oben = window === window.top
 
   const senden = bruecke.postMessage.bind(bruecke)
-  // Unter Android antwortet `Tab.kt` nur auf eine Seite, die schon etwas
-  // geschickt hat: das Hallo öffnet den Rückweg (für `datei`).
-  if (android) senden('{"t":"da"}')
+  // Das Hallo öffnet den Rückweg: unter Android antwortet `Tab.kt` nur auf eine
+  // Seite, die schon etwas geschickt hat, und ein Unterrahmen nennt so seine Herkunft.
+  if (android || !oben) senden('{"t":"da"}')
   const wert = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+  const auswahlWert = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')
   const json = JSON.stringify
   const NEU = /regist|signup|sign-up|sign_up|join|create|erstell|confirm|repeat|wiederhol|bestätig|bestaetig/i
   const BENUTZER = /user|login|e-?mail|benutzer|konto|account|anmelde|identifier/i
@@ -66,6 +70,41 @@
     return treffer ? treffer[0] : null
   }
   const zahlArt = (rolle) => (KONTO_ROLLEN.includes(rolle) ? 'konto' : 'karte')
+
+  // Android liefert Nachrichten nur als Text.
+  function nachricht(d) {
+    if (typeof d !== 'string') return d
+    try {
+      return JSON.parse(d)
+    } catch (_) {
+      return null
+    }
+  }
+
+  if (!oben) {
+    let gemeldetHier = ''
+    document.addEventListener(
+      'focusin',
+      (e) => {
+        const rolle = zahlRolle(e.target)
+        if (!rolle) return
+        const meldung = json({ t: 'zahlung', art: zahlArt(rolle) })
+        if (meldung !== gemeldetHier) senden((gemeldetHier = meldung))
+      },
+      true,
+    )
+    // Der Browser schickt Zahlungsdaten nur an Rahmen der Herkunft, die der
+    // Nutzer bestätigt hat; ein Rahmen, der inzwischen woanders steht, füllt
+    // nicht. Auch eine Fehlerseite nicht: verbietet das Ziel das Einbetten,
+    // nennt die WebView2 als Absender die angefragte Adresse, die Herkunft
+    // hier ist aber "null". Gefüllt wird der ganze Rahmen: bei Adyen liegt
+    // jedes Feld in einem eigenen.
+    bruecke.addEventListener('message', (e) => {
+      const d = nachricht(e.data)
+      if (d && d.t === 'fuellen' && (d.karte || d.konto) && d.herkunft === location.origin) zahlungFuellen(d, document)
+    })
+    return
+  }
 
   function istBenutzer(el) {
     if (zahlRolle(el)) return false
@@ -121,10 +160,31 @@
   let zahlZuletzt = null
   let gemeldet = ''
 
+  // Welcher Rahmen den Fokus hat: nur seine Herkunft, und nur, wenn er sich
+  // sehen lässt und über HTTPS lädt. Ein Rahmen bekommt Zahlungsdaten nur,
+  // wenn diese Meldung und seine eigene dieselbe Herkunft nennen.
+  let rahmenGemeldet = null
+  function rahmenMelden(el) {
+    let herkunft = null
+    if (el instanceof HTMLIFrameElement && wirklichSichtbar(el)) {
+      try {
+        herkunft = new URL(el.src, location.href).origin
+      } catch (_) {}
+      if (!herkunft || !herkunft.startsWith('https://')) herkunft = null
+    }
+    if (herkunft === rahmenGemeldet) return
+    rahmenGemeldet = herkunft
+    senden(json({ t: 'rahmen', herkunft }))
+  }
+  // Geht der Fokus in einen Rahmen, verliert das Fenster ihn; den Rahmen
+  // nennt erst danach `activeElement`.
+  window.addEventListener('blur', () => setTimeout(() => rahmenMelden(document.activeElement), 0))
+
   document.addEventListener(
     'focusin',
     (e) => {
       const el = e.target
+      rahmenMelden(el)
       const rolle = zahlRolle(el)
       if (rolle) {
         zahlZuletzt = el
@@ -188,7 +248,6 @@
     el.dispatchEvent(new Event('change', { bubbles: true }))
   }
 
-  const auswahlWert = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')
   // In einer Auswahl die Option, deren Wert oder Text einem der Kandidaten entspricht.
   function waehlen(el, kandidaten) {
     const option = [...el.options].find((o) => kandidaten.includes(o.value.trim()) || kandidaten.includes(o.text.trim()))
@@ -211,12 +270,12 @@
     return stil.visibility === 'visible' && Number(stil.opacity) >= 0.1
   }
 
-  function zahlungFuellen(d) {
-    if (!zahlZuletzt || !zahlZuletzt.isConnected) return
+  // `b`: das Formular des Zahlungsfeldes mit dem Fokus, im Rahmen einer Kasse der ganze Rahmen.
+  function zahlungFuellen(d, b) {
     const art = d.karte ? 'karte' : 'konto'
     const z = d.karte || d.konto
     const zwei = (n) => String(n).padStart(2, '0')
-    for (const el of bereich(zahlZuletzt).querySelectorAll('input, select')) {
+    for (const el of b.querySelectorAll('input, select')) {
       const rolle = zahlRolle(el)
       if (!rolle || zahlArt(rolle) !== art || !wirklichSichtbar(el)) continue
       const hinweis = (el.getAttribute('placeholder') || '') + ' ' + (el.maxLength > 0 ? el.maxLength : '')
@@ -269,16 +328,8 @@
   }
 
   // Gefüllt wird nur auf Anweisung des Browsers, nach einem Klick in seiner Leiste.
-  // Android liefert Nachrichten nur als Text.
   bruecke.addEventListener('message', (e) => {
-    let d = e.data
-    if (typeof d === 'string') {
-      try {
-        d = JSON.parse(d)
-      } catch (_) {
-        return
-      }
-    }
+    const d = nachricht(e.data)
     if (d && d.t === 'datei' && android) return void dateiGeben(d.nr, d.url)
     if (d && d.t === 'weiter' && quittungen.has(d.nr)) {
       const weiter = quittungen.get(d.nr)
@@ -286,7 +337,10 @@
       return weiter(d.ok === true)
     }
     if (!d || d.t !== 'fuellen') return
-    if (d.karte || d.konto) return zahlungFuellen(d)
+    if (d.karte || d.konto) {
+      if (zahlZuletzt && zahlZuletzt.isConnected) zahlungFuellen(d, bereich(zahlZuletzt))
+      return
+    }
     const b = zuletzt && zuletzt.isConnected ? bereich(zuletzt) : document
     const pws = passwoerter(b)
     if (typeof d.neu === 'string') {

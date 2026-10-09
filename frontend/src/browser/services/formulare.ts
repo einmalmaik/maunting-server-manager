@@ -22,6 +22,8 @@ export interface Feld {
   neu: boolean
   /** Ein Feld für Karte oder Konto: angeboten werden Zahlungsmittel, nie Anmeldungen. */
   zahlung?: 'karte' | 'konto'
+  /** Das Zahlungsfeld liegt in einem Rahmen dieser Herkunft; nur dorthin wird gefüllt. */
+  rahmen?: string
   /** Das Feld mit dem Fokus ist ein Passwortfeld. */
   passwort?: boolean
   /** Eindeutig ein neues Passwort: hier erzeugt der Browser eines von selbst. */
@@ -91,11 +93,11 @@ export const useFormulare = create<FormulareZustand>()((set, get) => ({
   abgeschickt: {},
   schritt: {},
   erzeugt: {},
-  ereignis: ({ id, url, meldung }) => {
+  ereignis: ({ id, url, meldung, rahmen }) => {
     if (meldung.t === 'feld') {
       set((s) => ({ feld: { ...s.feld, [id]: { url, neu: meldung.neu, passwort: meldung.passwort, sicher: !!meldung.sicher } } }))
     } else if (meldung.t === 'zahlung') {
-      set((s) => ({ feld: { ...s.feld, [id]: { url, neu: false, zahlung: meldung.art } } }))
+      set((s) => ({ feld: { ...s.feld, [id]: { url, neu: false, zahlung: meldung.art, ...(rahmen && { rahmen }) } } }))
     } else if (meldung.t === 'benutzer') {
       set((s) => ({ schritt: { ...s.schritt, [id]: { host: hostVon(url), wert: meldung.wert, seit: Date.now() } } }))
     } else {

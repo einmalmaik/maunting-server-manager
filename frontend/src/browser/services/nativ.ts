@@ -53,7 +53,8 @@ export type TabEreignis =
   | { art: 'schild'; id: string; werbung: number; tracker: number }
   | { art: 'absturz'; id: string }
   | { art: 'vollbild'; id: string; an: boolean }
-  | { art: 'formular'; id: string; url: string; meldung: FormularMeldung }
+  /** `rahmen`: das Zahlungsfeld liegt in einem Rahmen dieser Herkunft (Stripe, Adyen). */
+  | { art: 'formular'; id: string; url: string; meldung: FormularMeldung; rahmen?: string }
   | {
       art: 'kontextmenue'
       id: string
@@ -143,7 +144,8 @@ export const nativ = {
     rufen('tab_suchen', { id, richtung, begriff }),
   tabDrucken: (id: string) => rufen('tab_drucken', { id }),
   /** Nur, wenn der Tab noch auf der Herkunft von `fuer` steht; sonst lehnt Rust ab. */
-  tabFuellen: (id: string, fuer: string, werte: Fuellen) => rufen('tab_fuellen', { id, fuer, werte }),
+  /** Mit `rahmen` gehen Zahlungsdaten nur an Rahmen dieser Herkunft (`formular::Zahlrahmen`). */
+  tabFuellen: (id: string, fuer: string, werte: Fuellen, rahmen?: string) => rufen('tab_fuellen', { id, fuer, werte, ...(rahmen && { rahmen }) }),
   oberflaecheFokussieren: () => rufen('oberflaeche_fokussieren'),
   tabStumm: (id: string, stumm: boolean) => rufen('tab_stumm', { id, stumm }),
   /** `schlafenMinuten: null`: Tabs schlafen nie (`tabs/ruhe.rs`). */

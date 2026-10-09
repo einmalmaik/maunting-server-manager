@@ -3,6 +3,9 @@
  * Bestätigung: Windows Hello bzw. die Bildschirmsperre unter Android, sonst
  * das Master-Passwort des Tresors. Nur über HTTPS; `tab_fuellen` prüft das
  * noch einmal und füllt nur auf derselben Herkunft.
+ *
+ * Liegt das Feld in einem Rahmen (`rahmen`, etwa Stripe), nennen Leiste und
+ * Rückfrage dessen Anbieter, und gefüllt wird nur dorthin.
  */
 import { useMemo, useState, type FormEvent } from 'react'
 import { CreditCard, Landmark } from 'lucide-react'
@@ -30,7 +33,7 @@ export function zahlungWerte(z: ZahlungAngaben): Fuellen {
   return { ...leer, karte: { nummer: z.nummer, inhaber, monat: z.monat ?? null, jahr: z.jahr ?? null, pruefnummer: z.pruefnummer ?? null } }
 }
 
-export function ZahlungEinfuegen({ tab, url, art }: { tab: string; url: string; art: Art }) {
+export function ZahlungEinfuegen({ tab, url, rahmen, art }: { tab: string; url: string; rahmen?: string; art: Art }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const offen = useVaultStore((s) => s.isUnlocked)
@@ -42,12 +45,13 @@ export function ZahlungEinfuegen({ tab, url, art }: { tab: string; url: string; 
   // Wartet auf das Master-Passwort, wenn es keine Biometrie gibt.
   const [passwortFrage, setPasswortFrage] = useState<{ text: string; fertig: (ok: boolean) => void } | null>(null)
   const host = hostVon(url)
-  const rahmen = { name: t('browser.formular.zahlung.leiste'), symbol: art === 'konto' ? Landmark : CreditCard, onSchliessen: () => weg(tab) }
+  const anbieter = rahmen ? hostVon(rahmen) : null
+  const leiste = { name: t('browser.formular.zahlung.leiste'), symbol: art === 'konto' ? Landmark : CreditCard, onSchliessen: () => weg(tab) }
 
-  if (!url.startsWith('https://')) return <Leiste {...rahmen} text={t('browser.formular.zahlung.unsicher', { host })} />
+  if (!url.startsWith('https://')) return <Leiste {...leiste} text={t('browser.formular.zahlung.unsicher', { host })} />
   if (!offen) {
     return (
-      <Leiste {...rahmen} text={t(`browser.formular.zahlung.${art}Gesperrt`, { host })}>
+      <Leiste {...leiste} text={t(`browser.formular.zahlung.${art}Gesperrt`, { host })}>
         <Button size="sm" variant="ghost" onClick={() => navigate('/tresor')}>
           {t('browser.formular.entsperren')}
         </Button>
@@ -66,7 +70,8 @@ export function ZahlungEinfuegen({ tab, url, art }: { tab: string; url: string; 
     setLaeuft(true)
     try {
       const name = `${eintrag.service} ${verdeckt(eintrag.zahlung)}`
-      if (!(await bestaetigen(t('browser.formular.zahlung.hello', { name, host })))) {
+      const frage = anbieter ? t('browser.formular.zahlung.helloRahmen', { name, host, rahmen: anbieter }) : t('browser.formular.zahlung.hello', { name, host })
+      if (!(await bestaetigen(frage))) {
         toast.info(t('browser.formular.zahlung.nichtBestaetigt'))
         return
       }
@@ -74,7 +79,7 @@ export function ZahlungEinfuegen({ tab, url, art }: { tab: string; url: string; 
       const tresor = useVaultStore.getState()
       const z = tresor.isUnlocked ? tresor.items.find((i) => i.id === eintrag.id && !i.trashedAt)?.zahlung : undefined
       if (!z || z.art !== art) return
-      await nativ.tabFuellen(tab, url, zahlungWerte(z))
+      await nativ.tabFuellen(tab, url, zahlungWerte(z), rahmen)
       weg(tab)
     } catch {
       toast.error(t('browser.formular.gewechselt'))
@@ -84,7 +89,7 @@ export function ZahlungEinfuegen({ tab, url, art }: { tab: string; url: string; 
   }
 
   return (
-    <Leiste {...rahmen} text={t(`browser.formular.zahlung.${art}Text`, { host })}>
+    <Leiste {...leiste} text={anbieter ? t(`browser.formular.zahlung.${art}Rahmen`, { host, rahmen: anbieter }) : t(`browser.formular.zahlung.${art}Text`, { host })}>
       {passende.length > 1 && (
         <div className="w-60">
           <Dropdown

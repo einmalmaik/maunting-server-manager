@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::schild::{self, AnfrageArt};
 use crate::tabs::ereignis::von_kotlin;
-use crate::tabs::formular::{gleiche_herkunft, lesen};
+use crate::tabs::formular::{self, gleiche_herkunft, lesen};
 use crate::tabs::{id_pruefen, melden, vorab, weg, TabEreignis, Vorab, Weg};
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
@@ -137,6 +137,7 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_seit
     if let Some(app) = APP.get() {
         schild::seitenwechsel(app, &tab);
     }
+    formular::vergessen(&tab);
 }
 
 /// Eine Nachricht von `seite.js` aus dem obersten Rahmen; `url` aus der WebView.
@@ -150,9 +151,30 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_nach
 ) {
     let (id, url, roh) = (text(&mut env, &tab), text(&mut env, &url), text(&mut env, &roh));
     let (Some(app), Some(meldung)) = (APP.get(), lesen(&roh)) else { return };
-    if id_pruefen(&id).is_ok() && (url.starts_with("https://") || url.starts_with("http://")) {
-        melden(app, TabEreignis::Formular { id, url, meldung });
+    if id_pruefen(&id).is_ok() {
+        formular::oben(app, &id, &url, meldung);
     }
+}
+
+/// Eine Nachricht von `seite.js` aus einem Unterrahmen (`formular::unten`).
+/// `url` ist die Adresse der WebView, `absender` die Herkunft des Rahmens.
+/// Gibt die Herkunft zurück, wenn der Rahmen fürs Füllen in Frage kommt, sonst "".
+#[no_mangle]
+pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_rahmen<'l>(
+    mut env: JNIEnv<'l>,
+    _: JClass<'l>,
+    tab: JString<'l>,
+    url: JString<'l>,
+    absender: JString<'l>,
+    roh: JString<'l>,
+) -> jstring {
+    let (id, url) = (text(&mut env, &tab), text(&mut env, &url));
+    let (absender, roh) = (text(&mut env, &absender), text(&mut env, &roh));
+    let herkunft = match APP.get() {
+        Some(app) if id_pruefen(&id).is_ok() => formular::unten(app, &id, &url, &absender, &roh),
+        _ => None,
+    };
+    zurueck(&mut env, &herkunft.unwrap_or_default())
 }
 
 #[no_mangle]

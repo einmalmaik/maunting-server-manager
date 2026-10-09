@@ -77,6 +77,12 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
   private var kanal: JavaScriptReplyProxy? = null
   /** Herkunft des Dokuments, dem [kanal] gehört (`sourceOrigin`, nicht `webView.url`). */
   private var kanalHerkunft = ""
+  /**
+   * Rückwege zu den Unterrahmen der Seite, mit ihrer Herkunft: Kassen wie
+   * Stripe oder Adyen liegen in Rahmen (`formular::Zahlrahmen`). Höchstens
+   * [RAHMEN_MAX]; Werbung lädt Rahmen nach, die ältesten fallen heraus.
+   */
+  private val rahmen = ArrayDeque<Pair<String, JavaScriptReplyProxy>>()
   private var tippX = 0f
   private var tippY = 0f
   /** Das Cookie-Skript (`cookies.rs`); trägt den Stand des Schilds. */
@@ -93,6 +99,15 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
       // `view.url` ist nach `loadUrl` schon die neue Adresse, während noch das
       // alte Dokument spricht. Zählt nur, wenn beide dieselbe Herkunft haben.
       val herkunft = quelle.toString()
+      if (!hauptrahmen && text != null) {
+        // Ein Rahmen, der woanders hin lädt, meldet sich mit der neuen Herkunft.
+        val h = TabsBruecke.rahmen(id, view.url.orEmpty(), herkunft, text)
+        rahmen.removeAll { it.second === antwort }
+        if (h.isNotEmpty()) {
+          if (rahmen.size >= RAHMEN_MAX) rahmen.removeFirst()
+          rahmen.addLast(h to antwort)
+        }
+      }
       if (hauptrahmen && text != null && TabsBruecke.gleicheHerkunft(view.url.orEmpty(), herkunft)) {
         kanal = antwort
         kanalHerkunft = herkunft
@@ -189,10 +204,20 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
     return true
   }
 
-  /** Füllt, wenn der Tab noch auf der Herkunft von [fuer] steht. */
-  fun fuellen(fuer: String, nachricht: String): Boolean {
+  /**
+   * Füllt, wenn der Tab noch auf der Herkunft von [fuer] steht: die Seite
+   * selbst, oder mit [ziel] jeden Rahmen dieser Herkunft. Ob der Rahmen das
+   * darf, hat Rust schon entschieden; `seite.js` im Rahmen prüft die Herkunft noch einmal.
+   */
+  fun fuellen(fuer: String, ziel: String?, nachricht: String): Boolean {
+    if (!TabsBruecke.gleicheHerkunft(webView.url.orEmpty(), fuer)) return false
+    if (ziel != null) {
+      val ziele = rahmen.filter { it.first == ziel }
+      for ((_, k) in ziele) k.postMessage(nachricht)
+      return ziele.isNotEmpty()
+    }
     val k = kanal ?: return false
-    if (!TabsBruecke.gleicheHerkunft(kanalHerkunft, fuer) || !TabsBruecke.gleicheHerkunft(webView.url.orEmpty(), fuer)) return false
+    if (!TabsBruecke.gleicheHerkunft(kanalHerkunft, fuer)) return false
     k.postMessage(nachricht)
     return true
   }
@@ -259,6 +284,7 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
       seite = url
       kanal = null
       kanalHerkunft = ""
+      rahmen.clear()
       plugin.herunterladen.seiteWeg(id)
       TabsBruecke.seitenwechsel(id)
       stumm = abgewiesen == url
@@ -339,6 +365,9 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
 
     /** Was eine abgewiesene Seite nicht meldet (`stumm`). */
     private val STUMM = setOf("geladen", "titel", "favicon")
+
+    /** So viele Rahmen einer Seite merkt sich ein Tab ([rahmen]). */
+    private const val RAHMEN_MAX = 64
 
     /** So lange darf ein Umweg der Bildsuche dauern (eine Zustimmungsseite liest man). */
     private const val BILD_FRIST = 10 * 60 * 1000L

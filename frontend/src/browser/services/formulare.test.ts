@@ -25,6 +25,13 @@ describe('Anmeldefelder im Tab', () => {
     expect(useFormulare.getState().abgeschickt[TAB].benutzer).toBe('')
   })
 
+  it('merkt sich bei einem Kartenfeld den Rahmen, in dem es liegt, und vergisst ihn beim nächsten Feld', () => {
+    useFormulare.getState().ereignis({ art: 'formular', id: TAB, url: 'https://shop.example/', meldung: { t: 'zahlung', art: 'karte' }, rahmen: 'https://js.stripe.com' })
+    expect(useFormulare.getState().feld[TAB]).toEqual({ url: 'https://shop.example/', neu: false, zahlung: 'karte', rahmen: 'https://js.stripe.com' })
+    melden('https://shop.example/', { t: 'zahlung', art: 'karte' })
+    expect(useFormulare.getState().feld[TAB]).toEqual({ url: 'https://shop.example/', neu: false, zahlung: 'karte' })
+  })
+
   it('vergisst beim Laden einer neuen Seite das Angebot zum Einfügen, nicht die Frage zum Speichern', () => {
     melden('https://example.com/login', { t: 'absenden', benutzer: 'ada', passwort: 'x', neu: false })
     melden('https://example.com/start', { t: 'feld', passwort: true, neu: false })

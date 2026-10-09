@@ -42,7 +42,8 @@ export function FormularLeiste() {
   if (abgeschickt?.erzeugt) return <ErzeugtSpeichern key={`g-${tab.id}`} tab={tab.id} />
   if (abgeschickt) return ausfuellen ? <Speichern key={`s-${tab.id}`} tab={tab.id} a={abgeschickt} /> : null
   if (feld?.zahlung) {
-    return zahlungen ? <ZahlungEinfuegen key={`z-${tab.id}-${feld.url}-${feld.zahlung}`} tab={tab.id} url={feld.url} art={feld.zahlung} /> : null
+    const schluessel = `z-${tab.id}-${feld.url}-${feld.rahmen}-${feld.zahlung}`
+    return zahlungen ? <ZahlungEinfuegen key={schluessel} tab={tab.id} url={feld.url} rahmen={feld.rahmen} art={feld.zahlung} /> : null
   }
   const einfuegen = feld && ausfuellen ? <Einfuegen key={`e-${tab.id}-${feld.url}`} tab={tab.id} feld={feld} /> : null
   if (feld?.sicher && feld.passwort && erzeugen) {
