@@ -11,9 +11,11 @@ import { useTranslation } from 'react-i18next'
 import { useAnkerLage } from '@/Singra/UI/Ankerlage'
 import { Input } from '@/Singra/UI'
 
-import { useEinstellungenStore } from '../services/einstellungenStore'
+import { useEinstellungenStore, useWirksameSuche } from '../services/einstellungenStore'
+import { msmSucheBegriff } from '../services/intern'
 import { nativ } from '../services/nativ'
 import { baueZielUrl, istAdresse, suchmaschine } from '../services/searchEngines'
+import { suchName } from '../services/suchwahl'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 import { useVerlaufStore, vorschlaege, type Eintrag } from '../services/verlaufStore'
 
@@ -32,7 +34,7 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
   const tab = useAktiverTab()
   const eingeben = useTabsStore((s) => s.eingeben)
   const oeffnen = useTabsStore((s) => s.oeffnen)
-  const suche = useEinstellungenStore((s) => suchmaschine(s.suchmaschine))
+  const suche = suchmaschine(useWirksameSuche())
   const searxngUrl = useEinstellungenStore((s) => s.searxngUrl)
   const verlauf = useVerlaufStore((s) => s.verlauf)
   const lesezeichen = useVerlaufStore((s) => s.lesezeichen)
@@ -45,7 +47,9 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
   const [tippt, setTippt] = useState(false)
   const [markiert, setMarkiert] = useState(0)
 
-  const adresse = tab?.url ?? ''
+  // Bei der MSM-Suche steht der Begriff da, nicht `msb://suche?q=…`.
+  const begriff = tab ? msmSucheBegriff(tab.url) : null
+  const adresse = begriff ?? tab?.url ?? ''
   useEffect(() => {
     if (!tippt) setText(adresse)
   }, [adresse, tippt, tab?.id])
@@ -91,7 +95,7 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
   return (
     <div ref={huelle} className="relative min-w-0 flex-1">
       <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-on-surface-variant">
-        {tippt || !adresse ? (
+        {tippt || !adresse || begriff ? (
           <Search className="h-4 w-4" aria-hidden="true" />
         ) : sicher ? (
           <Lock className="h-4 w-4 text-status-success" aria-label={t('browser.adresse.sicher')} role="img" />
@@ -112,7 +116,7 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
         ref={feld}
         value={text}
         aria-label={t('browser.adresse.label')}
-        placeholder={t('browser.adresse.platzhalter', { suchmaschine: suche.name })}
+        placeholder={t('browser.adresse.platzhalter', { suchmaschine: suchName(suche, t) })}
         spellCheck={false}
         autoComplete="off"
         role="combobox"
@@ -182,7 +186,7 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
                   {v.art === 'eingabe'
                     ? istAdresse(v.titel)
                       ? v.url
-                      : t('browser.adresse.suchenMit', { begriff: v.titel, suchmaschine: suche.name })
+                      : t('browser.adresse.suchenMit', { begriff: v.titel, suchmaschine: suchName(suche, t) })
                     : v.titel}
                 </span>
                 {v.art !== 'eingabe' && <span className="max-w-[40%] truncate text-label-sm text-on-surface-variant">{v.url}</span>}

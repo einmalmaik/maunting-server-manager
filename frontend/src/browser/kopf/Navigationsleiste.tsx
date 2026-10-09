@@ -119,7 +119,7 @@ export const Navigationsleiste = forwardRef<AdresszeileGriff>(function Navigatio
 
   return (
     <div className="flex h-12 shrink-0 items-center gap-1 bg-surface-container px-2">
-      <Knopf name={t('browser.nav.zurueck')} onClick={() => aktion('zurueck')} disabled={!tab?.zurueck}>
+      <Knopf name={t('browser.nav.zurueck')} onClick={() => aktion('zurueck')} disabled={!tab?.zurueck && !tab?.vorher}>
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
       </Knopf>
       <Knopf name={t('browser.nav.vor')} onClick={() => aktion('vor')} disabled={!tab?.vor}>

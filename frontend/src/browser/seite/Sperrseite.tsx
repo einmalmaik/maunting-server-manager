@@ -29,8 +29,8 @@ export function Sperrseite({ tab }: { tab: Tab }) {
     <div className="flex h-full items-center justify-center p-6">
       <Zustandsflaeche art="leer" ansagen icon={<ShieldBan className="h-10 w-10" />} titel={t('browser.schutz.gesperrtTitel')} text={text}>
         <div className="flex flex-wrap justify-center gap-2">
-          <Button type="button" variant="secondary" onClick={() => (tab.zurueck ? aktion('zurueck', tab.id) : startseite(tab.id))}>
-            {tab.zurueck ? t('browser.nav.zurueck') : t('browser.schutz.zurStartseite')}
+          <Button type="button" variant="secondary" onClick={() => (tab.zurueck || tab.vorher ? aktion('zurueck', tab.id) : startseite(tab.id))}>
+            {tab.zurueck || tab.vorher ? t('browser.nav.zurueck') : t('browser.schutz.zurStartseite')}
           </Button>
           <Button type="button" variant="ghost" onClick={() => einstellungen('jugendschutz')}>
             {t('browser.schutz.einstellungen')}

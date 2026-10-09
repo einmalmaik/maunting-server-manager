@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { baueZielUrl, istAdresse, searxngBasis, SUCHMASCHINEN } from './searchEngines'
+import { msmSucheAdresse, msmSucheBegriff } from './intern'
+import { baueZielUrl, istAdresse, searxngBasis, SUCHMASCHINEN, suchmaschine, wirksameSuche } from './searchEngines'
 
 describe('istAdresse', () => {
   it('erkennt Adressen mit und ohne Schema', () => {
@@ -24,11 +25,18 @@ describe('istAdresse', () => {
 
 describe('baueZielUrl', () => {
   it('baut für jede Suchmaschine eine Suchadresse', () => {
-    for (const s of SUCHMASCHINEN.filter((s) => s.id !== 'searxng')) {
+    for (const s of SUCHMASCHINEN.filter((s) => s.id !== 'searxng' && s.id !== 'msm')) {
       const ziel = baueZielUrl('hauptstadt deutschland', s.id)!
       expect(new URL(ziel).protocol).toBe('https:')
       expect(ziel).toContain('hauptstadt%20deutschland')
     }
+  })
+
+  it('sucht mit der MSM-Suche auf der eigenen Seite, nie im Netz', () => {
+    const ziel = baueZielUrl('  Wetter Köln  ', 'msm')!
+    expect(ziel).toBe(msmSucheAdresse('Wetter Köln'))
+    expect(msmSucheBegriff(ziel)).toBe('Wetter Köln')
+    expect(baueZielUrl('heise.de', 'msm')).toBe('http://heise.de')
   })
 
   it('ergänzt das Schema passend', () => {
@@ -63,5 +71,29 @@ describe('searxngBasis', () => {
     expect(searxngBasis('http://s.example')).toBeNull()
     expect(searxngBasis('https://u:p@s.example')).toBeNull()
     expect(searxngBasis('kein link')).toBeNull()
+  })
+})
+
+describe('wirksameSuche', () => {
+  it('nimmt ohne eigene Wahl gekoppelt die MSM-Suche, sonst DuckDuckGo', () => {
+    expect(wirksameSuche(null, true)).toBe('msm')
+    expect(wirksameSuche(null, false)).toBe('duckduckgo')
+  })
+
+  it('behält eine eigene Wahl, gekoppelt wie ungekoppelt', () => {
+    expect(wirksameSuche('brave', true)).toBe('brave')
+    expect(wirksameSuche('brave', false)).toBe('brave')
+    expect(wirksameSuche('duckduckgo', true)).toBe('duckduckgo')
+  })
+
+  it('fällt nach dem Entkoppeln von der MSM-Suche auf DuckDuckGo zurück', () => {
+    expect(wirksameSuche('msm', true)).toBe('msm')
+    expect(wirksameSuche('msm', false)).toBe('duckduckgo')
+  })
+
+  it('liest einen unbekannten Wert wie keine Wahl', () => {
+    expect(wirksameSuche('altavista', true)).toBe('msm')
+    expect(wirksameSuche('altavista', false)).toBe('duckduckgo')
+    expect(suchmaschine('altavista').id).toBe('duckduckgo')
   })
 })

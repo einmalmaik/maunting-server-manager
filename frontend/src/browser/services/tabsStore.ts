@@ -14,9 +14,9 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-import { useEinstellungenStore } from './einstellungenStore'
+import { useEinstellungenStore, wirksameSucheJetzt } from './einstellungenStore'
 import { useFormulare } from './formulare'
-import { interneAdresse, interneSeite, istIntern } from './intern'
+import { interneAdresse, interneSeite, istIntern, istWebseite } from './intern'
 import { nativ, type TabEreignis } from './nativ'
 import { useRueckfragen } from './rueckfragen'
 import { baueZielUrl, type Suchmaschine } from './searchEngines'
@@ -93,17 +93,23 @@ export const useTabsStore = create<TabsZustand>()(
       }
 
       /** Lädt eine Adresse im Tab; legt dabei die Webview an, falls nötig. */
-      const laden = (id: string, url: string) => {
+      /** `rueck`: der Tab geht seinen gemerkten Rückweg und merkt sich danach keinen. */
+      const laden = (id: string, url: string, rueck = false) => {
         const tab = finden(id)
         if (!tab) return
         if (istIntern(url)) {
           // Die Oberfläche zeichnet die Seite; eine Webview hätte hier nichts zu zeigen.
           if (tab.nativDa) void nativ.tabSchliessen(id)
-          aendern(id, { ...leererTab(id, tab.privat), url })
+          // Von einer Webseite in die MSM-Suche führt Zurück auf die Seite.
+          const vorher = !rueck && interneSeite(url)?.seite === 'suche' && istWebseite(tab.url) ? tab.url : null
+          aendern(id, { ...leererTab(id, tab.privat), url, vorher })
           zeigen(id)
           return
         }
-        aendern(id, { url, laedt: true, abgestuerzt: false, fehler: null, nativDa: true, ruhe: null })
+        // Aus der MSM-Suche heraus merkt sich der Tab den Rückweg; eine
+        // weitere Seite in derselben Webview behält ihn.
+        const vorher = rueck ? null : interneSeite(tab.url)?.seite === 'suche' ? tab.url : tab.nativDa ? tab.vorher : null
+        aendern(id, { url, laedt: true, abgestuerzt: false, fehler: null, nativDa: true, ruhe: null, vorher })
         void nativ
           .tabLaden(id, url, tab.privat)
           .then(() => zeigen(id))
@@ -193,11 +199,12 @@ export const useTabsStore = create<TabsZustand>()(
         eingeben: (eingabe, id = get().aktivId) => {
           const intern = interneSeite(eingabe.trim())
           if (intern) {
-            laden(id, interneAdresse(intern.seite, intern.teil))
+            // Die Suche behält ihren Begriff, samt Schreibweise.
+            laden(id, intern.seite === 'suche' ? eingabe.trim() : interneAdresse(intern.seite, intern.teil))
             return
           }
-          const { suchmaschine, searxngUrl } = useEinstellungenStore.getState()
-          const ziel = baueZielUrl(eingabe, suchmaschine, searxngUrl ?? undefined)
+          const { searxngUrl } = useEinstellungenStore.getState()
+          const ziel = baueZielUrl(eingabe, wirksameSucheJetzt(), searxngUrl ?? undefined)
           if (!ziel) return
           laden(id, ziel)
         },
@@ -228,6 +235,10 @@ export const useTabsStore = create<TabsZustand>()(
 
         aktion: (aktion, id = get().aktivId) => {
           const tab = finden(id)
+          if (aktion === 'zurueck' && tab && !tab.zurueck && tab.vorher) {
+            laden(id, tab.vorher, true)
+            return
+          }
           if (!tab?.nativDa) return
           if (aktion === 'neu_laden' && (tab.abgestuerzt || tab.fehler)) {
             laden(id, tab.url)

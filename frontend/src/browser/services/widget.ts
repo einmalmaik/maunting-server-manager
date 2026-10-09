@@ -13,7 +13,7 @@ import { useEffect } from 'react'
 import { toast } from '@/stores/toastStore'
 import i18n from '@/i18n'
 
-import { useEinstellungenStore } from './einstellungenStore'
+import { useEinstellungenStore, useWirksameSuche, wirksameSucheJetzt } from './einstellungenStore'
 import { istTauri, nativ, widgetAnstoesse, type WidgetStart } from './nativ'
 import { istWebseite } from './intern'
 import { istAndroid } from './plattform'
@@ -22,7 +22,8 @@ import { useTabsStore } from './tabsStore'
 
 export function widgetAusfuehren(start: WidgetStart, adresszeile: () => void): void {
   const tabs = useTabsStore.getState()
-  const { suchmaschine: id, searxngUrl } = useEinstellungenStore.getState()
+  const { searxngUrl } = useEinstellungenStore.getState()
+  const id = wirksameSucheJetzt()
   if (start.art === 'link') {
     // Ob ein Tab die Adresse laden darf, prüft Rust beim Laden (`tabs::weg`).
     if (istWebseite(start.url)) tabs.neuerTab(start.url)
@@ -52,7 +53,7 @@ export function widgetAusfuehren(start: WidgetStart, adresszeile: () => void): v
 }
 
 export function useWidget(adresszeile: () => void, startseite: () => void): void {
-  const id = useEinstellungenStore((s) => s.suchmaschine)
+  const id = useWirksameSuche()
 
   useEffect(() => {
     if (istAndroid()) void nativ.widgetStand(Boolean(suchmaschine(id).bild)).catch(() => null)

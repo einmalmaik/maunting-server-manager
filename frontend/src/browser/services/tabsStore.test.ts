@@ -14,6 +14,7 @@ const { useTabsStore } = await import('./tabsStore')
 const { useEinstellungenStore } = await import('./einstellungenStore')
 const { useVerlaufFrist, useVerlaufStore } = await import('./verlaufStore')
 const { kuerzelAusTaste } = await import('./kuerzel')
+const { useSitzung } = await import('./sitzung')
 
 const warten = () => new Promise((r) => setTimeout(r, 0))
 const befehle = () => gerufen.map((g) => g.befehl)
@@ -79,6 +80,79 @@ describe('Seiten des Browsers im Tab', () => {
 
   it('Strg+Komma öffnet die Einstellungen', () => {
     expect(kuerzelAusTaste(new KeyboardEvent('keydown', { key: ',', ctrlKey: true }))).toBe('einstellungen')
+  })
+})
+
+describe('MSM-Suche im Tab', () => {
+  beforeEach(() => {
+    ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+    useTabsStore.setState({
+      tabs: [{ ...useTabsStore.getState().tabs[0], id: 'tab-start', url: '', nativDa: false, vorher: null, zurueck: false }],
+      aktivId: 'tab-start',
+      geschlossen: [],
+    })
+    useEinstellungenStore.setState({ suchmaschine: null })
+    useSitzung.setState({ stand: 'aus' })
+    gerufen.length = 0
+  })
+
+  it('sucht ungekoppelt ohne eigene Wahl mit DuckDuckGo', async () => {
+    useTabsStore.getState().eingeben('wetter köln')
+    expect(aktiv().url).toBe('https://duckduckgo.com/?q=wetter%20k%C3%B6ln')
+    await warten()
+    expect(befehle()).toContain('tab_laden')
+  })
+
+  it('sucht gekoppelt auf der eigenen Seite, ohne Webview', () => {
+    useSitzung.setState({ stand: 'an' })
+    useTabsStore.getState().eingeben('  Wetter Köln ')
+    expect(aktiv()).toMatchObject({ url: 'msb://suche?q=Wetter%20K%C3%B6ln', nativDa: false })
+    expect(befehle()).not.toContain('tab_laden')
+  })
+
+  it('behält gekoppelt eine eigene Wahl', () => {
+    useSitzung.setState({ stand: 'an' })
+    useEinstellungenStore.setState({ suchmaschine: 'brave' })
+    useTabsStore.getState().eingeben('wetter')
+    expect(aktiv().url).toBe('https://search.brave.com/search?q=wetter')
+  })
+
+  it('führt von einem Treffer mit Zurück zur Suche, auch über eine zweite Seite', async () => {
+    useSitzung.setState({ stand: 'an' })
+    useTabsStore.getState().eingeben('wetter')
+    const suche = aktiv().url
+    useTabsStore.getState().oeffnen('https://wetter.example/')
+    expect(aktiv().vorher).toBe(suche)
+    useTabsStore.getState().oeffnen('https://wetter.example/morgen')
+    expect(aktiv().vorher).toBe(suche)
+    await warten()
+    gerufen.length = 0
+    useTabsStore.getState().aktion('zurueck')
+    await warten()
+    expect(aktiv()).toMatchObject({ url: suche, nativDa: false, vorher: null })
+    expect(befehle()).toContain('tab_schliessen')
+    expect(befehle()).not.toContain('tab_aktion')
+  })
+
+  it('lässt die Webview zurückgehen, solange sie selbst eine Seite davor hat', async () => {
+    useSitzung.setState({ stand: 'an' })
+    useTabsStore.getState().eingeben('wetter')
+    useTabsStore.getState().oeffnen('https://wetter.example/')
+    useTabsStore.getState().ereignis({ art: 'adresse', id: aktiv().id, url: 'https://wetter.example/b', zurueck: true, vor: false })
+    await warten()
+    gerufen.length = 0
+    useTabsStore.getState().aktion('zurueck')
+    await warten()
+    expect(befehle()).toEqual(['tab_aktion'])
+  })
+
+  it('führt von der Suche zurück auf die Seite davor', async () => {
+    useSitzung.setState({ stand: 'an' })
+    useTabsStore.getState().oeffnen('https://vorher.example/')
+    useTabsStore.getState().eingeben('wetter')
+    expect(aktiv().vorher).toBe('https://vorher.example/')
+    useTabsStore.getState().aktion('zurueck')
+    expect(aktiv()).toMatchObject({ url: 'https://vorher.example/', nativDa: true, vorher: null })
   })
 })
 

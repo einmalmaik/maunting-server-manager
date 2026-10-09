@@ -3,9 +3,9 @@ import { useTranslation } from 'react-i18next'
 
 import { Input } from '@/Singra/UI'
 
-import { MarkenSymbol } from '../marken'
 import { useEinstellungenStore } from '../services/einstellungenStore'
-import { searxngBasis, SUCHMASCHINEN, type SuchmaschinenId } from '../services/searchEngines'
+import { searxngBasis } from '../services/searchEngines'
+import { useSuchwahl } from '../services/suchwahl'
 import { Abschnitt, Auswahlzeile } from './bausteine'
 
 export function Suche() {
@@ -13,16 +13,17 @@ export function Suche() {
   const suchmaschine = useEinstellungenStore((s) => s.suchmaschine)
   const searxngUrl = useEinstellungenStore((s) => s.searxngUrl)
   const setzen = useEinstellungenStore((s) => s.setzen)
+  const suchwahl = useSuchwahl()
   const [adresse, setAdresse] = useState(searxngUrl ?? '')
   const gueltig = !adresse.trim() || searxngBasis(adresse) !== null
   return (
     <Abschnitt titel={t('browser.einstellungen.kategorie.suche')}>
-      <Auswahlzeile<SuchmaschinenId>
+      <Auswahlzeile
         name={t('browser.start.suchmaschine')}
         hinweis={t('browser.einstellungen.suchmaschineHinweis')}
-        wert={suchmaschine}
-        optionen={SUCHMASCHINEN.map((s) => ({ value: s.id, label: s.name, icon: <MarkenSymbol marke={s.marke} /> }))}
-        aendern={(v) => setzen({ suchmaschine: v })}
+        wert={suchwahl.wert}
+        optionen={suchwahl.optionen}
+        aendern={suchwahl.aendern}
       />
       {suchmaschine === 'searxng' && (
         <Input

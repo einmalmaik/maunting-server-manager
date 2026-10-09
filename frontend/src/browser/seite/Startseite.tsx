@@ -11,10 +11,10 @@ import { useTranslation } from 'react-i18next'
 
 import { Button, Dropdown, Input } from '@/Singra/UI'
 
-import { MarkenSymbol } from '../marken'
 import { istAndroid } from '../services/plattform'
-import { useEinstellungenStore, type Hintergrund } from '../services/einstellungenStore'
-import { SUCHMASCHINEN, suchmaschine, type SuchmaschinenId } from '../services/searchEngines'
+import { useEinstellungenStore, useWirksameSuche, type Hintergrund } from '../services/einstellungenStore'
+import { suchmaschine } from '../services/searchEngines'
+import { suchName, useSuchwahl } from '../services/suchwahl'
 import { useTabsStore } from '../services/tabsStore'
 import { Schnellzugriffe } from './start/Schnellzugriffe'
 import { WidgetAngebot } from './start/WidgetAngebot'
@@ -39,23 +39,18 @@ export function Startseite({ privat }: { privat: boolean }) {
   const { t } = useTranslation()
   const eingeben = useTabsStore((s) => s.eingeben)
   const einstellungen = useTabsStore((s) => s.einstellungen)
-  const sucheId = useEinstellungenStore((s) => s.suchmaschine)
   const hintergrund = useEinstellungenStore((s) => s.hintergrund)
   const eigenesBild = useEinstellungenStore((s) => s.eigenesBild)
-  const setzen = useEinstellungenStore((s) => s.setzen)
   const [text, setText] = useState('')
-  const suche = suchmaschine(sucheId)
+  const suche = suchmaschine(useWirksameSuche())
+  const suchwahl = useSuchwahl()
   const handy = istAndroid()
   const wahl = (
     <Dropdown
       aria-label={t('browser.start.suchmaschine')}
-      value={sucheId}
-      onChange={(v) => setzen({ suchmaschine: v as SuchmaschinenId })}
-      options={SUCHMASCHINEN.map((s) => ({
-        value: s.id,
-        label: s.name,
-        icon: <MarkenSymbol marke={s.marke} />,
-      }))}
+      value={suchwahl.wert}
+      onChange={suchwahl.aendern}
+      options={suchwahl.optionen}
     />
   )
 
@@ -88,14 +83,14 @@ export function Startseite({ privat }: { privat: boolean }) {
               if (text.trim()) eingeben(text)
             }}
           >
-            <div className="w-40 shrink-0">{wahl}</div>
+            <div className="w-48 shrink-0">{wahl}</div>
             <div className="relative flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-on-surface-variant" aria-hidden="true" />
               <Input
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 aria-label={t('browser.start.suchen')}
-                placeholder={t('browser.adresse.platzhalter', { suchmaschine: suche.name })}
+                placeholder={t('browser.adresse.platzhalter', { suchmaschine: suchName(suche, t) })}
                 className="pl-9"
                 autoComplete="off"
                 spellCheck={false}

@@ -33,6 +33,12 @@ export interface Tab {
   stumm: boolean
   /** Eingefroren (`schlaf`) oder ohne Webview, um Speicher zu sparen (`verworfen`). */
   ruhe: 'schlaf' | 'verworfen' | null
+  /**
+   * Die MSM-Suche, aus der die Seite geöffnet wurde. Die Webview kennt sie
+   * nicht in ihrem Verlauf; Zurück führt dorthin, wenn die Webview selbst
+   * nicht mehr zurück kann.
+   */
+  vorher: string | null
 }
 
 /**
@@ -68,5 +74,6 @@ export function leererTab(id: string, privat = false): Tab {
     ton: false,
     stumm: false,
     ruhe: null,
+    vorher: null,
   }
 }

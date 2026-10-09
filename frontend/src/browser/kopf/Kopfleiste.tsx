@@ -4,18 +4,20 @@
  * (`data-tauri-drag-region`), ein Doppelklick maximiert.
  */
 import { useState, type DragEvent } from 'react'
-import { EyeOff, Globe, Loader2, Minus, Moon, Plus, Settings, Square, Volume2, VolumeX, X } from 'lucide-react'
+import { EyeOff, Globe, Loader2, Minus, Moon, Plus, Search, Settings, Square, Volume2, VolumeX, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Kurzinfo } from '@/Singra/UI'
 
 import { useEinstellungenStore } from '../services/einstellungenStore'
-import { interneSeite } from '../services/intern'
+import { interneSeite, msmSucheBegriff } from '../services/intern'
 import { nativ } from '../services/nativ'
 import { useTabsStore, type Tab } from '../services/tabsStore'
 
-/** `namen`: wie die Tabs ohne eigene Seite heißen (neuer Tab, Einstellungen). */
+/** `namen`: wie die Tabs ohne eigene Seite heißen (neuer Tab, Einstellungen). Die MSM-Suche heißt wie ihr Begriff. */
 export function tabTitel(tab: Tab, namen: { neu: string; einstellungen: string }): string {
+  const begriff = msmSucheBegriff(tab.url)
+  if (begriff) return begriff
   if (interneSeite(tab.url)) return namen.einstellungen
   if (tab.titel) return tab.titel
   if (!tab.url) return namen.neu
@@ -30,6 +32,7 @@ export function TabSymbol({ tab }: { tab: Tab }) {
   const [kaputt, setKaputt] = useState<string | null>(null)
   if (tab.laedt) return <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden="true" />
   if (tab.privat) return <EyeOff className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+  if (interneSeite(tab.url)?.seite === 'suche') return <Search className="h-3.5 w-3.5 text-on-surface-variant" aria-hidden="true" />
   if (interneSeite(tab.url)) return <Settings className="h-3.5 w-3.5 text-on-surface-variant" aria-hidden="true" />
   // Private Tabs zeigen nie ein Favicon: die Oberfläche hätte es sonst in
   // ihrem eigenen Cache, außerhalb der privaten Sitzung.

@@ -48,6 +48,7 @@ from .vault import router as vault_router
 from .sync_events import router as sync_events_router, sync_alias_router
 from .social import router as social_router
 from .social_calls import router as social_calls_router, admin_router as livekit_admin_router
+from .browser_suche import router as browser_suche_router
 
 __all__ = [
     "auth_router",
@@ -103,4 +104,5 @@ __all__ = [
     "social_router",
     "social_calls_router",
     "livekit_admin_router",
+    "browser_suche_router",
 ]  # noqa: E501

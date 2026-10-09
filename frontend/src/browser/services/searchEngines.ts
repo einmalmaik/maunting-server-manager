@@ -6,13 +6,15 @@
  * Lesezeichen auf dem Gerät.
  */
 import type { Marke } from '../marken'
+import { msmSucheAdresse } from './intern'
 
-export type SuchmaschinenId = 'google' | 'duckduckgo' | 'ecosia' | 'brave' | 'bing' | 'searxng'
+export type SuchmaschinenId = 'msm' | 'google' | 'duckduckgo' | 'ecosia' | 'brave' | 'bing' | 'searxng'
 
 export interface Suchmaschine {
   id: SuchmaschinenId
   name: string
-  marke: Marke
+  /** Ohne Marke: die MSM-Suche, sie trägt das Logo des Browsers. */
+  marke?: Marke
   /** `%s` wird durch den kodierten Suchbegriff ersetzt. */
   vorlage: string
   /**
@@ -24,6 +26,8 @@ export interface Suchmaschine {
 }
 
 export const SUCHMASCHINEN: Suchmaschine[] = [
+  // Die SearXNG-Instanz des eigenen Servers, nur gekoppelt (`wirksameSuche`).
+  { id: 'msm', name: 'MSM', vorlage: '' },
   { id: 'duckduckgo', name: 'DuckDuckGo', marke: 'duckduckgo', vorlage: 'https://duckduckgo.com/?q=%s' },
   { id: 'brave', name: 'Brave Search', marke: 'brave', vorlage: 'https://search.brave.com/search?q=%s' },
   { id: 'ecosia', name: 'Ecosia', marke: 'ecosia', vorlage: 'https://www.ecosia.org/search?q=%s' },
@@ -45,7 +49,18 @@ export const SUCHMASCHINEN: Suchmaschine[] = [
 ]
 
 export function suchmaschine(id: string): Suchmaschine {
-  return SUCHMASCHINEN.find((s) => s.id === id) ?? SUCHMASCHINEN[0]
+  return SUCHMASCHINEN.find((s) => s.id === id) ?? suchmaschine('duckduckgo')
+}
+
+/**
+ * Welche Suche gilt. Ohne eigene Wahl (`null`) sucht ein gekoppelter Browser
+ * über den eigenen Server, sonst DuckDuckGo. Die MSM-Suche gibt es nur
+ * gekoppelt; wer sie gewählt hat und entkoppelt, sucht mit DuckDuckGo.
+ */
+export function wirksameSuche(gewaehlt: string | null, gekoppelt: boolean): SuchmaschinenId {
+  const bekannt = SUCHMASCHINEN.find((s) => s.id === gewaehlt)?.id ?? null
+  if (bekannt === 'msm' && !gekoppelt) return 'duckduckgo'
+  return bekannt ?? (gekoppelt ? 'msm' : 'duckduckgo')
 }
 
 const SCHEMA = /^[a-z][a-z0-9+.-]*:/i
@@ -65,6 +80,7 @@ export function istAdresse(eingabe: string): boolean {
 
 /** Die Suchadresse für einen Begriff, oder `null`, wenn die Maschine nicht eingerichtet ist. */
 export function suchAdresse(begriff: string, id: string, searxngUrl?: string | null): string | null {
+  if (id === 'msm') return begriff.trim() ? msmSucheAdresse(begriff) : null
   const q = encodeURIComponent(begriff.trim())
   if (id === 'searxng') {
     const basis = searxngBasis(searxngUrl)

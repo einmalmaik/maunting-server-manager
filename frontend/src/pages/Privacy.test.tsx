@@ -227,6 +227,7 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.browser.items.privat')).toMatch(/^Private Tabs .* Unter Windows liegen ihre Cookies/);
     expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/Private Tabs teilen sich ein Profil auf dem Telefon/);
     expect(i18n.t('privacyPolicy.sections.browser.items.widget')).toMatch(/Spracherkennungsdienst des Telefons/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.msmSuche')).toMatch(/gehen Suchbegriffe .* an Ihre MSM-Instanz/);
     expect(i18n.t('privacyPolicy.sections.browser.items.widget')).toMatch(/Bildsuche der gewählten Suchmaschine/);
     // 3.34: das Token liegt unter Android im Keystore-Fach, Sicherung und Umzug sind ausgeschlossen.
     expect(i18n.t('privacyPolicy.sections.browser.items.kopplung')).toMatch(/unter Android verschlüsselt mit einem Schlüssel aus dem Android-Keystore/);

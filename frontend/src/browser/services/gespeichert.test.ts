@@ -64,4 +64,19 @@ describe('Gespeicherter Stand mit falschen Typen', () => {
     expect(useEinstellungenStore.getState()).toMatchObject({ panelBreite: 500, ausgeblendet: ['schild'] })
     expect('unbekannt' in useEinstellungenStore.getState()).toBe(false)
   })
+
+  it('macht aus der alten Vorgabe DuckDuckGo die Werkseinstellung und behält eine andere Wahl', async () => {
+    localStorage.setItem('msb:einstellungen', JSON.stringify({ state: { suchmaschine: 'duckduckgo' }, version: 1 }))
+    await useEinstellungenStore.persist.rehydrate()
+    expect(useEinstellungenStore.getState().suchmaschine).toBeNull()
+
+    localStorage.setItem('msb:einstellungen', JSON.stringify({ state: { suchmaschine: 'brave' }, version: 1 }))
+    await useEinstellungenStore.persist.rehydrate()
+    expect(useEinstellungenStore.getState().suchmaschine).toBe('brave')
+
+    // Ab Version 2 ist DuckDuckGo eine eigene Wahl.
+    localStorage.setItem('msb:einstellungen', JSON.stringify({ state: { suchmaschine: 'duckduckgo' }, version: 2 }))
+    await useEinstellungenStore.persist.rehydrate()
+    expect(useEinstellungenStore.getState().suchmaschine).toBe('duckduckgo')
+  })
 })

@@ -323,32 +323,65 @@ def is_configured() -> bool:
         return False
 
 
-def _search_searxng(query: str, limit: int = MAX_RESULTS, s_url: str | None = None) -> list[dict]:
+def searxng_treffer(
+    query: str,
+    *,
+    limit: int = MAX_RESULTS,
+    seite: int = 1,
+    sicher: bool = False,
+    sprache: str | None = None,
+    s_url: str | None = None,
+) -> list[dict]:
+    """Treffer der SearXNG-Instanz, fuer die KI und die MSM-Suche des Browsers.
+
+    Nur oeffentliche http(s)-Adressen; eine Adresse ueber ``MAX_URL_CHARS``
+    faellt weg, statt gekuerzt auf eine andere Seite zu zeigen. ``sicher``
+    verlangt die strenge sichere Suche. Wirft ``WebSearchUnavailable``, wenn
+    keine Instanz eingerichtet ist oder sie nicht antwortet.
+    """
     target_url = s_url or searxng_url()
     if not target_url:
-        return []
+        raise WebSearchUnavailable("AI_WEB_SEARCH_NOT_CONFIGURED")
+    params: dict[str, str | int] = {"q": query, "format": "json", "pageno": seite}
+    if sicher:
+        params["safesearch"] = 2
+    if sprache:
+        params["language"] = sprache
     try:
         resp = _http_client().get(
             f"{target_url.rstrip('/')}/search",
-            params={"q": query, "format": "json"},
+            params=params,
             headers={"Accept": "application/json"},
         )
         if resp.status_code != 200:
-            return []
+            raise WebSearchUnavailable("AI_WEB_SEARCH_REJECTED")
         data = resp.json()
-        raw = data.get("results") or []
-        hits = []
-        for r in raw[:limit]:
-            u = str(r.get("url") or "")
-            if _is_safe_public_url(u):
-                hits.append({
-                    "title": redact_sensitive_text(str(r.get("title") or ""))[:MAX_TITLE_CHARS],
-                    "url": u[:MAX_URL_CHARS],
-                    "snippet": redact_sensitive_text(str(r.get("content") or ""))[:MAX_SNIPPET_CHARS],
-                })
-        return hits
+    except WebSearchUnavailable:
+        raise
     except Exception as exc:
-        logger.debug("SearXNG query failed: %s", exc)
+        logger.debug("SearXNG nicht erreichbar error=%s", type(exc).__name__)
+        raise WebSearchUnavailable("AI_WEB_SEARCH_UNAVAILABLE") from exc
+    raw = data.get("results") if isinstance(data, dict) else None
+    hits = []
+    for r in raw if isinstance(raw, list) else []:
+        if len(hits) >= limit:
+            break
+        if not isinstance(r, dict):
+            continue
+        u = str(r.get("url") or "")
+        if len(u) <= MAX_URL_CHARS and _is_safe_public_url(u):
+            hits.append({
+                "title": redact_sensitive_text(str(r.get("title") or ""))[:MAX_TITLE_CHARS],
+                "url": u,
+                "snippet": redact_sensitive_text(str(r.get("content") or ""))[:MAX_SNIPPET_CHARS],
+            })
+    return hits
+
+
+def _search_searxng(query: str, limit: int = MAX_RESULTS, s_url: str | None = None) -> list[dict]:
+    try:
+        return searxng_treffer(query, limit=limit, s_url=s_url)
+    except WebSearchUnavailable:
         return []
 
 

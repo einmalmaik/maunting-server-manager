@@ -7,7 +7,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 import { ablage, passend } from './ablage'
-import type { SuchmaschinenId } from './searchEngines'
+import { wirksameSuche, type SuchmaschinenId } from './searchEngines'
+import { istGekoppelt, useSitzung } from './sitzung'
 
 export type Hintergrund = 'schlicht' | 'nacht' | 'wald' | 'tiefsee' | 'eigen'
 
@@ -59,7 +60,8 @@ export type SchlafenNach = (typeof SCHLAFEN_NACH)[number]
 export type VerlaufFrist = 'immer' | 'woche' | 'monat' | 'halbjahr' | 'jahr'
 
 interface EinstellungenZustand {
-  suchmaschine: SuchmaschinenId
+  /** `null`: keine eigene Wahl; welche Suche dann gilt, sagt `wirksameSuche`. */
+  suchmaschine: SuchmaschinenId | null
   searxngUrl: string | null
   hintergrund: Hintergrund
   eigenesBild: string | null
@@ -119,7 +121,7 @@ function bisherigeKacheln(): Schnellzugriff[] | null {
 export const useEinstellungenStore = create<EinstellungenZustand>()(
   persist(
     (set) => ({
-      suchmaschine: 'duckduckgo',
+      suchmaschine: null,
       searxngUrl: null,
       hintergrund: 'schlicht',
       eigenesBild: null,
@@ -152,8 +154,16 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
     // nicht kennt, kommt aus den Vorgaben oben (flaches Zusammenführen).
     {
       name: 'msb:einstellungen',
-      version: 1,
+      version: 2,
       storage: ablage,
+      // Bis Version 1 war DuckDuckGo die Vorgabe und stand gespeichert da wie
+      // eine eigene Wahl. Es wird zur Werkseinstellung, damit ein gekoppelter
+      // Browser über den eigenen Server sucht.
+      migrate: (gespeichert, version) => {
+        const g = gespeichert as Record<string, unknown> | null
+        if (version < 2 && g && g.suchmaschine === 'duckduckgo') return { ...g, suchmaschine: null }
+        return g
+      },
       merge: (gespeichert, aktuell) => {
         const g = passend(aktuell, gespeichert)
         return { ...aktuell, ...g, schnellzugriffe: g.schnellzugriffe ?? bisherigeKacheln() ?? aktuell.schnellzugriffe }
@@ -161,3 +171,14 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
     },
   ),
 )
+
+/** Die Suche, die gerade gilt (`wirksameSuche`), außerhalb von React. */
+export function wirksameSucheJetzt(): SuchmaschinenId {
+  return wirksameSuche(useEinstellungenStore.getState().suchmaschine, istGekoppelt(useSitzung.getState().stand))
+}
+
+export function useWirksameSuche(): SuchmaschinenId {
+  const gewaehlt = useEinstellungenStore((s) => s.suchmaschine)
+  const gekoppelt = useSitzung((s) => istGekoppelt(s.stand))
+  return wirksameSuche(gewaehlt, gekoppelt)
+}

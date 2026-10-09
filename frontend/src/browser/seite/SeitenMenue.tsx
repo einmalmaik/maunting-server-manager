@@ -31,11 +31,12 @@ import { Kontextmenue } from '@/Singra/UI'
 import type { ActionMenuItem } from '@/Singra/UI/ActionMenu'
 
 import { useAnsicht } from '../entwickler/werkzeuge'
-import { useEinstellungenStore } from '../services/einstellungenStore'
+import { useEinstellungenStore, useWirksameSuche } from '../services/einstellungenStore'
 import { nativ } from '../services/nativ'
 import { istAndroid } from '../services/plattform'
 import { useFrageDesTabs, useRueckfragen } from '../services/rueckfragen'
 import { baueZielUrl, suchmaschine } from '../services/searchEngines'
+import { suchName } from '../services/suchwahl'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 
 /** Befehle der WebView2, die das Menü anbietet, in dieser Reihenfolge. */
@@ -63,7 +64,7 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
   const frage = useFrageDesTabs(tab?.id)
   const antworten = useRueckfragen((s) => s.antworten)
   const neuerTab = useTabsStore((s) => s.neuerTab)
-  const maschine = useEinstellungenStore((s) => s.suchmaschine)
+  const maschine = useWirksameSuche()
   const searxng = useEinstellungenStore((s) => s.searxngUrl)
 
   if (!tab || frage?.art !== 'kontextmenue') return null
@@ -129,7 +130,7 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
     if (ziel) {
       const kurz = auswahl.length > 24 ? `${auswahl.slice(0, 24)}…` : auswahl
       items.push(
-        eigen('suchen', t('browser.menue.suchen', { maschine: suchmaschine(maschine).name, text: kurz }), <Search />, () =>
+        eigen('suchen', t('browser.menue.suchen', { maschine: suchName(suchmaschine(maschine), t), text: kurz }), <Search />, () =>
           neuerTab(ziel, { nach: tab.id, privat: tab.privat }),
         ),
       )
