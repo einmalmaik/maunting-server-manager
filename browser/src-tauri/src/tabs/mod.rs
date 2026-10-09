@@ -259,6 +259,12 @@ pub fn seitenprofil(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         .map_err(|e| format!("Datenordner unbekannt: {e}"))
 }
 
+/// Setzt das Cookie-Skript in allen Tabs neu (`crate::cookies`): es trägt
+/// den Stand des Schilds und gilt ab dem nächsten Dokument.
+pub fn cookies_erneuern(app: &AppHandle) {
+    plattform::cookies_erneuern(app);
+}
+
 #[cfg(windows)]
 use desktop as plattform;
 #[cfg(target_os = "android")]

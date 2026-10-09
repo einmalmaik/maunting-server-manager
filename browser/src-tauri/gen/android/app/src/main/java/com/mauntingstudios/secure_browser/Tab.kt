@@ -20,6 +20,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.ScriptHandler
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -78,12 +79,15 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
   private var kanalHerkunft = ""
   private var tippX = 0f
   private var tippY = 0f
+  /** Das Cookie-Skript (`cookies.rs`); trägt den Stand des Schilds. */
+  private var cookies: ScriptHandler? = null
 
   init {
     // Vor allem anderen: danach lässt sich das Profil nicht mehr wählen.
     WebViewCompat.setProfile(webView, profil)
     einstellen(webView.settings)
     WebViewCompat.addDocumentStartJavaScript(webView, TabsBruecke.seitenskript(), setOf("*"))
+    cookiesErneuern()
     WebViewCompat.addWebMessageListener(webView, "msbKanal", setOf("*")) { view, nachricht, quelle, hauptrahmen, antwort ->
       val text = nachricht.data
       // `view.url` ist nach `loadUrl` schon die neue Adresse, während noch das
@@ -143,6 +147,12 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
   }
 
   /** Lädt [url] nach Prüfung durch Rust; `loadUrl` geht an `shouldOverrideUrlLoading` vorbei. */
+  /** Ersetzt das Cookie-Skript; gilt ab dem nächsten Dokument. */
+  fun cookiesErneuern() {
+    cookies?.remove()
+    cookies = WebViewCompat.addDocumentStartJavaScript(webView, TabsBruecke.cookiesskript(), setOf("*"))
+  }
+
   fun laden(url: String) {
     bild = null
     when (val ziel = TabsBruecke.weg(id, url, false)) {

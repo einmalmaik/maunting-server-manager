@@ -202,6 +202,15 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_seit
     zurueck(&mut env, crate::seite::SKRIPT)
 }
 
+/// Das Cookie-Skript mit dem heutigen Stand des Schilds (`crate::cookies`).
+#[no_mangle]
+pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_cookiesskript<'l>(
+    mut env: JNIEnv<'l>,
+    _: JClass<'l>,
+) -> jstring {
+    zurueck(&mut env, &crate::cookies::skript())
+}
+
 /// Das Skript, das die seitenspezifische Kosmetik einsetzt; leer, wenn nichts.
 #[no_mangle]
 pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_kosmetik<'l>(

@@ -175,7 +175,13 @@ pub fn konfig_aendern(
     let neu = felder_einmischen(&aktuell, felder)?;
     speichern(&app, &neu)?;
     crate::schild::konfig_uebernehmen(&neu);
+    let schild_anders = neu.schild_aktiv != aktuell.schild_aktiv || neu.schild_ausnahmen != aktuell.schild_ausnahmen;
     *aktuell = neu.clone();
+    drop(aktuell);
+    // Erst nach dem Lösen der Sperre: das wartet auf den UI-Faden.
+    if schild_anders {
+        crate::tabs::cookies_erneuern(&app);
+    }
     Ok(neu)
 }
 

@@ -79,6 +79,11 @@ pub fn schliessen(app: &AppHandle, id: &str) {
     senden(app, "schliessen", json!({ "id": id }));
 }
 
+/// Kotlin holt das Skript je Tab über `TabsBruecke.cookiesskript`.
+pub fn cookies_erneuern(app: &AppHandle) {
+    senden(app, "cookies", json!({}));
+}
+
 /// Zurück, Vor, Neu laden, Anhalten (`tab_aktion`).
 pub fn aktion(app: &AppHandle, id: &str, aktion: &str) -> Result<(), String> {
     senden(app, "aktion", json!({ "id": id, "aktion": aktion }));

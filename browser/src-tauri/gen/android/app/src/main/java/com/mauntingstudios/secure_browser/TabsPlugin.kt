@@ -171,6 +171,15 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  /** Das Schild hat sich geändert: jeder Tab bekommt das Cookie-Skript neu. */
+  @Command
+  fun cookies(invoke: Invoke) {
+    aufUi(activity, invoke) {
+      tabs.values.forEach { it.cookiesErneuern() }
+      null
+    }
+  }
+
   private fun wegraeumen(tab: Tab) {
     Rueckfragen.tabWeg(tab.id)
     herunterladen.seiteWeg(tab.id)

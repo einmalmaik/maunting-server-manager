@@ -141,6 +141,14 @@ pub fn aktiv_fuer(seite: &str) -> bool {
     !pausiert(&h, &SCHILD.ausnahmen.read().unwrap())
 }
 
+/// Schalter und Ausnahmen, wie sie das Cookie-Skript in jedem Rahmen prüft
+/// (`crate::cookies`).
+pub fn stand_fuer_seiten() -> (bool, Vec<String>) {
+    let mut ausnahmen: Vec<String> = SCHILD.ausnahmen.read().unwrap().iter().cloned().collect();
+    ausnahmen.sort();
+    (SCHILD.aktiv.load(Ordering::Relaxed), ausnahmen)
+}
+
 /// Steht der Host oder eine Elterndomain mit Punkt in den Ausnahmen? Der Host
 /// selbst zählt auch ohne Punkt (`localhost`). Die Oberfläche zeigt dasselbe
 /// (`schildPausiert` in `geraetKonfig.ts`, gleiche Fälle in

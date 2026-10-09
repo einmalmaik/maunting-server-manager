@@ -43,6 +43,9 @@ object TabsBruecke {
 
   @JvmStatic external fun seitenskript(): String
 
+  /** Das Cookie-Skript mit dem heutigen Stand des Schilds (`cookies.rs`). */
+  @JvmStatic external fun cookiesskript(): String
+
   /** Skript mit der Kosmetik dieser Seite, leer, wenn keine. */
   @JvmStatic external fun kosmetik(url: String): String
 

@@ -143,11 +143,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.37 vom 2026-10-09 aus (HTTPS zuerst, Tracking-Parameter, Cookie-Hinweise, Links aus anderen Apps)', () => {
+  it('weist die Fassung 3.38 vom 2026-10-09 aus (Cookie-Hinweise werden abgelehnt)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.37`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.38`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -241,7 +241,9 @@ describe('Privacy page', () => {
     // 3.37: die Cookie-Liste kommt von einem weiteren Server; das Seitensymbol holt die Oberfläche nicht mehr selbst.
     expect(i18n.t('privacyPolicy.sections.browser.items.verbindungen')).toMatch(/secure\.fanboy\.co\.nz/);
     expect(i18n.t('privacyPolicy.sections.browser.items.verbindungen')).not.toMatch(/direkt von der Seite/);
-    expect(i18n.t('privacyPolicy.sections.browser.items.https')).toMatch(/eine Einwilligung gibt er dabei nicht/);
+    // 3.38: Cookie-Hinweise lehnt der Browser ab (autoconsent), ohne Anfrage nach außen.
+    expect(i18n.t('privacyPolicy.sections.browser.items.https')).toMatch(/eine Einwilligung gibt er nie/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.https')).toMatch(/autoconsent \(DuckDuckGo\).*keine Anfrage hinaus/);
     expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/Links aus anderen Apps in einem neuen, normalen Tab/);
 
     const stand = container.querySelector('time');

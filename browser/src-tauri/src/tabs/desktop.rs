@@ -27,6 +27,7 @@ use windows::Win32::Foundation::{E_POINTER, HWND, RECT};
 
 use super::{melden, TabEreignis, Tabs};
 
+mod cookies;
 mod entwickler;
 mod formulare;
 mod grundereignisse;
@@ -38,6 +39,7 @@ mod standbild;
 mod webview2;
 
 pub(crate) use rueckfragen::{recht_art, recht_name};
+pub use cookies::erneuern as cookies_erneuern;
 pub use schlaf::{ruhen, stumm};
 
 pub(crate) struct Nativ {
@@ -172,6 +174,7 @@ fn anlegen(app: &AppHandle, id: &str, privat: bool) -> Result<ICoreWebView2, Str
         einstellungen.SetAreHostObjectsAllowed(false).map_err(fehler)?;
         core.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(crate::seite::SKRIPT), None)
             .map_err(fehler)?;
+        cookies::anmelden(id, &core).map_err(fehler)?;
         grundereignisse::anbinden(app, id, &core).map_err(fehler)?;
         formulare::anbinden(app, id, &core).map_err(fehler)?;
         schlaf::anbinden(app, id, &core).map_err(fehler)?;
@@ -251,6 +254,7 @@ pub fn schliessen(app: &AppHandle, id: &str) {
     let id = id.to_string();
     let _ = app.run_on_main_thread(move || {
         rueckfragen::vergessen(&id);
+        cookies::vergessen(&id);
         if let Some(tab) = NATIV.with(|n| n.borrow_mut().remove(&id)) {
             unsafe {
                 let _ = tab.controller.Close();

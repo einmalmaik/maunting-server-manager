@@ -7,6 +7,7 @@
 //! App-Manifest nennt, prüft Tauri jeden Aufruf gegen diese Rechte.
 
 pub mod browserdaten;
+pub mod cookies;
 pub mod datei;
 pub mod downloads;
 pub mod fenster;
