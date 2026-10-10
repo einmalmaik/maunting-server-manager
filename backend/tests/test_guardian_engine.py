@@ -318,7 +318,13 @@ def test_grouped_incident_delivery_updates_parent_status_and_attempts(
     assert json.loads(parent.attempts)[-1]["result"] == "recovered"
 
 
-def test_database_failure_sends_no_incident_ack(db: Session) -> None:
+def test_database_failure_sends_no_incident_ack(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "services.guardian_incident_service._notify_guardian_incident",
+        lambda *_args, **_kwargs: None,
+    )
     server = _server()
     server.id = None
     db.add(server)
@@ -337,7 +343,13 @@ def test_database_failure_sends_no_incident_ack(db: Session) -> None:
     client.acknowledge_incidents.assert_not_called()
 
 
-def test_ack_failure_after_commit_keeps_panel_incident(db: Session) -> None:
+def test_ack_failure_after_commit_keeps_panel_incident(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "services.guardian_incident_service._notify_guardian_incident",
+        lambda *_args, **_kwargs: None,
+    )
     server = _server()
     server.id = None
     db.add(server)
