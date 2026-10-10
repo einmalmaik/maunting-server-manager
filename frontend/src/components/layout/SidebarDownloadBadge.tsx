@@ -12,13 +12,13 @@ interface SidebarDownloadBadgeProps {
 /**
  * Die Kachel am Fuss der Seitenleiste, mit der sich eine App herunterladen laesst.
  *
- * Existiert, weil {@link DesktopAppDownloadBadge} und {@link StoryFableBadge} dieselben gut
+ * Existiert, weil {@link DesktopAppDownloadBadge} und {@link BrowserDownloadBadge} dieselben gut
  * zwei Dutzend Tailwind-Klassen Zeichen fuer Zeichen doppelt trugen. Eine Kachel haette sich
  * dadurch bei jeder Gestaltungsaenderung von der anderen entfernt, ohne dass das jemandem
  * auffaellt — zwei Kacheln direkt uebereinander, die nicht mehr gleich aussehen.
  *
  * Bewusst nur die Darstellung: Ob eine Kachel ueberhaupt erscheint, entscheidet jede Seite
- * selbst. Die Vorgaben sind verschieden (MSS an, Story Fable aus), und genau darin liegt eine
+ * selbst. Die Vorgaben sind verschieden (MSS an, Browser an), und genau darin liegt eine
  * Aussage, die keine gemeinsame Abstraktion verwischen darf.
  */
 export function SidebarDownloadBadge({ href, icon, title, subtext, tooltip }: SidebarDownloadBadgeProps) {

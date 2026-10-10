@@ -38,6 +38,7 @@ export interface PanelSettings {
   singra_webhook_secret_source: 'env' | 'panel' | 'none'
   updates_automatic: boolean
   desktop_app_download_enabled: boolean
+  browser_download_enabled: boolean
   story_fable_download_enabled: boolean
   calendar_enabled: boolean
   notes_enabled: boolean
@@ -105,6 +106,7 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   singra_webhook_secret_source: 'none',
   updates_automatic: false,
   desktop_app_download_enabled: true,
+  browser_download_enabled: true,
   story_fable_download_enabled: false,
   calendar_enabled: true,
   notes_enabled: true,

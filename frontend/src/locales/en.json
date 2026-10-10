@@ -3504,8 +3504,8 @@
       "passwordSaved": "Backup password saved"
     },
     "loadFailed": "Loading failed",
-    "storyFablePromo": "Show Story Fable notice",
-    "storyFablePromoHint": "Displays a notice about Maunting Story Fable above the MSS download in the sidebar. Only enable this once an APK has been published — otherwise the link leads nowhere."
+    "browserPromo": "Show MSB Browser notice",
+    "browserPromoHint": "Displays a notice about Maunting Secure Browser above the MSS download in the sidebar."
   },
   "profile": {
     "title": "Profile",
@@ -6154,7 +6154,11 @@
       "menueOeffnen": "Open menu",
       "keinChatrecht": "Your account lacks permission for AI chat (ai.chat.use). Contact your administrator to grant access.",
       "gedaechtnis": "Memory",
-      "tresor": "Vault"
+      "tresor": "Vault",
+      "browserInstallieren": "Install MSB Browser",
+      "browserLadenAndroid": "Get MSB Browser",
+      "browserDownloadSubtext": "Hardened, private web browser for Windows",
+      "browserDownloadSubtextAndroid": "Hardened, private web browser for Android"
     },
     "updateModal": {
       "titelVerfuegbar": "Update available",
@@ -7026,9 +7030,11 @@
     "androidTooltip": "Download Maunting Smart System Android app",
     "androidLabel": "App for Android (.apk)"
   },
-  "storyFableBadge": {
-    "label": "The story forgets nothing.",
-    "tooltip": "Get Maunting Story Fable as an Android app (APK, sideload)"
+  "browserBadge": {
+    "tooltip": "Download Maunting Secure Browser for Windows",
+    "label": "Secure Web Browser",
+    "androidTooltip": "Download Maunting Secure Browser for Android",
+    "androidLabel": "Browser for Android (.apk)"
   },
   "calls": {
     "incoming": "Incoming call",

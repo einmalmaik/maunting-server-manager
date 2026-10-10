@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { listen } from '@tauri-apps/api/event'
-import { Bot, BrainCircuit, Calendar as CalendarIcon, Eye, KeyRound, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, WifiOff, X } from 'lucide-react'
+import { Bot, BrainCircuit, Calendar as CalendarIcon, Eye, Globe, KeyRound, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, WifiOff, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { api, isNetworkOrOfflineError } from '@/api/client'
@@ -69,6 +69,7 @@ import {
   hauptfensterVerstecken,
   konfigAendern,
   konfigLaden,
+  oeffneBrowser,
   updateInstallieren,
   updatePruefen,
   type AppKonfig,
@@ -855,6 +856,17 @@ function Hauptseite({
       onClick: () => navigate('/einstellungen'),
     },
     {
+      key: 'browser',
+      label: isAndroid ? t('mss.app.browserLadenAndroid') : t('mss.app.browserInstallieren'),
+      icon: <Globe className="h-4 w-4" />,
+      onClick: () => {
+        const downloadUrl = isAndroid
+          ? 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser.apk'
+          : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser-Setup.exe'
+        void oeffneBrowser(downloadUrl)
+      },
+    },
+    {
       key: 'logout',
       label: t('mss.app.abmelden'),
       icon: <LogOut className="h-4 w-4" />,
@@ -1108,7 +1120,21 @@ function Hauptseite({
               </button>
             </nav>
 
-            <div className="pt-2 border-t border-outline-variant/40">
+            <div className="pt-2 border-t border-outline-variant/40 space-y-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOffen(false)
+                  const downloadUrl = isAndroid
+                    ? 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser.apk'
+                    : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser-Setup.exe'
+                  void oeffneBrowser(downloadUrl)
+                }}
+                className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium text-on-surface hover:bg-surface-container-high transition-colors"
+              >
+                <Globe className="h-4 w-4 text-primary" />
+                <span>{isAndroid ? t('mss.app.browserLadenAndroid') : t('mss.app.browserInstallieren')}</span>
+              </button>
               <button
                 type="button"
                 onClick={() => { setMobileMenuOffen(false); void abmelden(); }}

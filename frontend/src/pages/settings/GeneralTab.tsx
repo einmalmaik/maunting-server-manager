@@ -50,6 +50,7 @@ export function GeneralTab() {
           time_format: settings.time_format,
           updates_automatic: settings.updates_automatic,
           desktop_app_download_enabled: settings.desktop_app_download_enabled,
+          browser_download_enabled: settings.browser_download_enabled,
           story_fable_download_enabled: settings.story_fable_download_enabled,
           calendar_enabled: settings.calendar_enabled,
           notes_enabled: settings.notes_enabled,
@@ -68,6 +69,7 @@ export function GeneralTab() {
         social_enabled: settings.social_enabled,
         vault_enabled: settings.vault_enabled,
         desktop_app_download_enabled: settings.desktop_app_download_enabled,
+        browser_download_enabled: settings.browser_download_enabled,
         story_fable_download_enabled: settings.story_fable_download_enabled,
       })
       void usePublicSettingsStore.getState().refresh()
@@ -208,17 +210,17 @@ export function GeneralTab() {
               <label className="flex items-center justify-between gap-4">
                 <span className="block">
                   <span className="block font-headline text-body-md text-primary font-semibold">
-                    {t('settings.storyFablePromo')}
+                    {t('settings.browserPromo')}
                   </span>
                   <span className="block font-body text-xs text-on-surface-variant">
-                    {t('settings.storyFablePromoHint')}
+                    {t('settings.browserPromoHint')}
                   </span>
                 </span>
                 <Switch
-                  checked={settings.story_fable_download_enabled}
-                  onCheckedChange={(checked) => setSettings({ ...settings, story_fable_download_enabled: checked })}
+                  checked={settings.browser_download_enabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, browser_download_enabled: checked })}
                   disabled={!canWrite}
-                  aria-label={t('settings.storyFablePromo')}
+                  aria-label={t('settings.browserPromo')}
                 />
               </label>
             </div>

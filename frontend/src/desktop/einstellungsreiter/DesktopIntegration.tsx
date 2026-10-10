@@ -15,6 +15,7 @@ import {
 } from '../tauri'
 import { ComputerUseSektion } from './ComputerUseSektion'
 import { ArtefaktInstallationSektion } from './ArtefaktInstallationSektion'
+import { BrowserInstallationSektion } from './BrowserInstallationSektion'
 import { Systembereich } from './Systembereich'
 import { Hotkeys } from './Hotkeys'
 
@@ -120,6 +121,8 @@ export function DesktopIntegration({
           </Button>
         </div>
       </div>
+
+      <BrowserInstallationSektion />
 
       <div className="border-t border-outline-variant/40 pt-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

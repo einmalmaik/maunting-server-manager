@@ -3,6 +3,7 @@ import { api } from '@/api/client'
 
 export interface PublicSettings {
   desktop_app_download_enabled: boolean
+  browser_download_enabled: boolean
   story_fable_download_enabled: boolean
   imprint_enabled: boolean
   imprint_url: string
@@ -14,6 +15,7 @@ export interface PublicSettings {
 
 export const DEFAULT_PUBLIC_SETTINGS: PublicSettings = {
   desktop_app_download_enabled: true,
+  browser_download_enabled: true,
   story_fable_download_enabled: false,
   imprint_enabled: false,
   imprint_url: '',
@@ -37,6 +39,10 @@ function loadCachedSettings(): PublicSettings {
           typeof parsed.desktop_app_download_enabled === 'boolean'
             ? parsed.desktop_app_download_enabled
             : DEFAULT_PUBLIC_SETTINGS.desktop_app_download_enabled,
+        browser_download_enabled:
+          typeof parsed.browser_download_enabled === 'boolean'
+            ? parsed.browser_download_enabled
+            : DEFAULT_PUBLIC_SETTINGS.browser_download_enabled,
         story_fable_download_enabled:
           typeof parsed.story_fable_download_enabled === 'boolean'
             ? parsed.story_fable_download_enabled
@@ -110,6 +116,10 @@ export const usePublicSettingsStore = create<PublicSettingsState>((set, get) => 
             typeof remote.desktop_app_download_enabled === 'boolean'
               ? remote.desktop_app_download_enabled
               : get().desktop_app_download_enabled,
+          browser_download_enabled:
+            typeof remote.browser_download_enabled === 'boolean'
+              ? remote.browser_download_enabled
+              : get().browser_download_enabled,
           story_fable_download_enabled:
             typeof remote.story_fable_download_enabled === 'boolean'
               ? remote.story_fable_download_enabled
@@ -157,6 +167,8 @@ export const usePublicSettingsStore = create<PublicSettingsState>((set, get) => 
       const updated: PublicSettings = {
         desktop_app_download_enabled:
           partial.desktop_app_download_enabled ?? get().desktop_app_download_enabled,
+        browser_download_enabled:
+          partial.browser_download_enabled ?? get().browser_download_enabled,
         story_fable_download_enabled:
           partial.story_fable_download_enabled ?? get().story_fable_download_enabled,
         imprint_enabled: partial.imprint_enabled ?? get().imprint_enabled,

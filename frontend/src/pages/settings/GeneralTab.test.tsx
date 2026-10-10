@@ -59,6 +59,7 @@ describe('GeneralTab', () => {
     const erwarteteSchluessel = [
       'updates_automatic',
       'desktop_app_download_enabled',
+      'browser_download_enabled',
       'story_fable_download_enabled',
       'calendar_enabled',
       'notes_enabled',
