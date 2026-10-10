@@ -175,27 +175,29 @@ def test_the_periods_are_counted_separately(db: Session, regular_user: User) -> 
     assert summe.requests_month == 3
 
 
-def test_a_week_reaching_into_the_previous_month_is_complete(
+def test_die_fenster_rollen_und_enden_jetzt(
     db: Session, regular_user: User,
 ) -> None:
-    """Die ISO-Woche beginnt regelmaessig vor dem Monatsanfang.
+    """Seit dem 07.10.2026 rollend: 24 Stunden, 7 und 30 Tage bis jetzt.
 
-    Am 1. März 2026 — einem Sonntag — liegt der Wochenanfang im Februar. Wer die
-    Auswertung nur ab Monatsanfang laedt, zeigt an solchen Tagen eine zu
-    niedrige Wochenzahl: der Verbrauch vom Donnerstag davor faellt heraus,
-    obwohl er in derselben Woche liegt und gegen dasselbe Wochenlimit zaehlt.
+    Am 1. März 2026 hätte die Kalenderrechnung den Verbrauch vom Vortag zur
+    Woche, aber nicht mehr zum Monat gezählt. Rollend zählt er zu beiden, und
+    zum Tag nur, solange er keine 24 Stunden alt ist.
     """
     now = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
-    _, week_start, month_start = _period_starts(now)
-    assert week_start < month_start
+    day_start, week_start, month_start = _period_starts(now)
+    assert (now - day_start, now - week_start, now - month_start) == (
+        timedelta(hours=24), timedelta(days=7), timedelta(days=30)
+    )
 
-    _spend(db, regular_user, tokens=500, when=week_start + timedelta(days=2))
+    _spend(db, regular_user, tokens=500, when=now - timedelta(hours=23))
+    _spend(db, regular_user, tokens=40, when=now - timedelta(hours=25))
+    _spend(db, regular_user, tokens=3, when=now - timedelta(days=8))
+    _spend(db, regular_user, tokens=7_000, when=now - timedelta(days=31))
 
     summe = usage_for_user(db, regular_user, now=now)
 
-    assert summe.tokens_week == 500
-    # Und der Monat bleibt trotzdem sauber getrennt: die Zeile liegt davor.
-    assert summe.tokens_month == 0
+    assert (summe.tokens_today, summe.tokens_week, summe.tokens_month) == (500, 540, 543)
 
 
 def test_failed_requests_do_not_count(db: Session, regular_user: User) -> None:

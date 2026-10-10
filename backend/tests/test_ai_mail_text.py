@@ -321,9 +321,9 @@ class TestVerschicktWirdImmer:
     ):
         """Eine offene Reservierung zaehlt dauerhaft gegen das Kontingent.
 
-        `reserve_ai_usage` zaehlt reservierte Ereignisse **ohne Zeitfenster**.
-        Zwei stehengebliebene genuegen bei `concurrent_operations = 2`, und der
-        Benutzer bekommt fuer immer eine Absage, obwohl nichts laeuft.
+        `reserve_ai_usage` zaehlt reservierte Ereignisse mit ihrem geschaetzten
+        Wert in jedes Tokenlimit; eine stehengebliebene hielte ihn fest, obwohl
+        nichts laeuft.
         """
         _verfassen(
             db, regular_user, monkeypatch,

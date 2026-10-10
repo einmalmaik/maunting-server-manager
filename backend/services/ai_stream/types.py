@@ -82,7 +82,7 @@ MAX_WRITE_ROUNDS = 24
 #
 # **Was sie nicht kann:** einen Thread abbrechen. `asyncio.wait_for` bricht das
 # Warten ab, nicht die Arbeit. Der Aufruf läuft im Threadpool weiter und darf
-# zu Ende committen — bei `remember`, `learn_skill` und `forget_memory` ist das
+# zu Ende committen — bei `learn_skill` und `forget_skill` ist das
 # eine echte Schreibung, von der das Modell nichts mehr erfährt. Genau deshalb
 # sagt die Meldung an das Modell *nicht* "fehlgeschlagen", sondern "nicht
 # abgewartet, prüfe nach".

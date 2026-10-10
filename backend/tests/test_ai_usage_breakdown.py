@@ -411,3 +411,23 @@ def test_eine_bestandszeile_behauptet_keine_herkunft(
     assert zeile.cost_source is None
     assert zeile.prompt_tokens is None
     assert zeile.provider_requests is None
+
+
+def test_die_aufstellung_nennt_den_zweck(db: Session, regular_user: User) -> None:
+    """Den Gedächtnisschreiber bucht MSM beim Benutzer — die Zeile sagt das.
+
+    Er liest im Hintergrund, Minuten nach der letzten Antwort. Ohne den Zweck
+    stünde eine Anfrage in der Aufstellung, zu der der Benutzer keine Frage
+    findet, und sähe aus wie ein Fehler in der Abrechnung.
+    """
+    for zweck in (None, "gedaechtnis"):
+        ereignis = reserve_ai_usage(
+            db, regular_user, request_id=uuid4(), estimated_tokens=10,
+            estimated_cost_microunits=0, zweck=zweck,
+        )
+        complete_ai_usage(db, ereignis, actual_tokens=10, actual_cost_microunits=0)
+    db.commit()
+
+    zeilen, _mehr = usage_events(db, user_id=regular_user.id)
+
+    assert sorted(zeile.zweck or "" for zeile in zeilen) == ["", "gedaechtnis"]

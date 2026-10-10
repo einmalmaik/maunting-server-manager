@@ -10,11 +10,16 @@ HOTSET = frozenset({
     "control_region_camera",
     "web_search",
     "search_docs",
+    # Ohne `read_docs` findet `search_docs` nur Ausschnitte: den Abschnitt
+    # selbst liest erst sie. Bis zum 07.10.2026 kam sie ueber die Seitentitel
+    # in ihrer Beschreibung ins Angebot; seit die nur noch in `search_docs`
+    # stehen, fiel sie bei Fragen wie „Wie funktioniert die Hoster-API?“ aus
+    # den Top 5.
+    "read_docs",
     "calendar_read",
     "notes_read",
     "propose_calendar_event_create",
     "propose_note_create",
-    "remember",
     "search_memory",
     "learn_skill",
     "worker_start",

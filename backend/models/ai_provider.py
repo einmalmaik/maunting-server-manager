@@ -164,6 +164,18 @@ class AiProvider(Base):
     ethics_reasoning_effort: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # Der Modus / die Zoning-Stufe: 'off', 'auto', 'always', 'critical'. Standard: 'auto'.
     ethics_mode: Mapped[str] = mapped_column(String(32), default="auto", server_default="auto", nullable=False)
+    # Das Modell fuer das Gedaechtnis — die sechste Funktion an derselben Zeile:
+    # es liest im Hintergrund Gespraeche und importierte Texte und schreibt
+    # daraus Erinnerungen (`ai_gedaechtnis_schreiber.gedaechtnis_anbieter`).
+    # Lesen ist Fleissarbeit, keine Ueberlegung — deshalb ohne Denkstufe.
+    #
+    # ``None`` heisst nicht „kein Gedaechtnis": dann gilt das Gedaechtnismodell
+    # eines anderen Zugangs und ohne ein solches das Standardmodell.
+    memory_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    memory_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
+    memory_input_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    memory_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    memory_cache_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Der Name der Azure-Ressource dieses Zugangs — das eine Stück Adresse, das
     # MSM nicht selbst weiß.
     #
@@ -205,7 +217,7 @@ class AiProvider(Base):
     # gebucht. Hierher greift die Abrechnung erst, wenn der Anbieter schweigt —
     # und markiert die Zeile dann als `cost_source='estimate'`, damit niemand
     # eine Schaetzung fuer eine Messung haelt. Ohne Wert bleiben die Kosten bei
-    # null und das rollenbasierte Kostenlimit greift nicht; MSM raet keinen Preis.
+    # null; MSM raet keinen Preis.
     token_price_micro_usd_per_million: Mapped[int | None] = mapped_column(
         BigInteger, nullable=True
     )

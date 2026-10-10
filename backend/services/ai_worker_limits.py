@@ -39,8 +39,8 @@ STANDARD_WORKER = 15
 MIN_WORKER = 1
 #: Obergrenze der Einstellung, nicht des Bedarfs: mehr als 15 gleichzeitige
 #: Auftraege **eines** Benutzers sind kein Arbeitsstil mehr, sondern eine
-#: Schleife — und jeder davon zahlt auf `concurrent_operations` und
-#: `requests_per_minute` desselben Benutzers ein.
+#: Schleife — und jeder davon zahlt auf die Tokenlimits desselben Benutzers
+#: ein.
 MAX_WORKER = 15
 
 #: Wieviele Werkzeugrunden ein einzelner Worker-Lauf hoechstens bekommt.

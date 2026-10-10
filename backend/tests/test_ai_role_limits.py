@@ -31,8 +31,7 @@ from models import (
     Server,
     User,
 )
-from services import ai_action_service, ai_memory_service, team_service
-from services.ai_action_errors import AiActionValidationError
+from services import ai_memory_service, team_service
 from services.ai_limit_service import (
     LIMIT_FIELDS,
     LIMIT_MAXIMA,
@@ -119,7 +118,7 @@ def test_unconfigured_role_does_not_lift_a_configured_one(
     effective = resolve_effective_limits(db, regular_user)
 
     assert effective.daily_token_limit == 100
-    assert effective.requests_per_minute == 0
+    assert effective.monthly_realtime_minutes_limit == 0
 
 
 def test_unconfigured_role_is_listed_as_unlimited_not_zero(
@@ -146,8 +145,8 @@ def test_service_rejects_invalid_internal_limit_values(db: Session) -> None:
     role = _role(db, "ai-invalid-internal")
     with pytest.raises(ValueError, match="daily_token_limit"):
         set_role_limit(db, role.id, _limits(daily_token_limit=True))
-    with pytest.raises(ValueError, match="requests_per_minute"):
-        set_role_limit(db, role.id, _limits(requests_per_minute=10_001))
+    with pytest.raises(ValueError, match="monthly_realtime_minutes_limit"):
+        set_role_limit(db, role.id, _limits(monthly_realtime_minutes_limit=100_001))
 
 
 def test_erlaubte_maxima_passen_in_die_spaltenbreite() -> None:
@@ -174,12 +173,12 @@ def test_highest_limit_and_explicit_unlimited_win(
     set_role_limit(
         db,
         standard.id,
-        _limits(daily_token_limit=1_000, requests_per_minute=5),
+        _limits(daily_token_limit=1_000, monthly_realtime_minutes_limit=5),
     )
     set_role_limit(
         db,
         vip.id,
-        _limits(daily_token_limit=10_000, requests_per_minute=None),
+        _limits(daily_token_limit=10_000, monthly_realtime_minutes_limit=None),
     )
     db.commit()
     set_user_roles(db, regular_user, [standard.id, vip.id])
@@ -187,7 +186,7 @@ def test_highest_limit_and_explicit_unlimited_win(
     effective = resolve_effective_limits(db, regular_user)
 
     assert effective.daily_token_limit == 10_000
-    assert effective.requests_per_minute is None
+    assert effective.monthly_realtime_minutes_limit is None
     assert effective.weekly_token_limit == 0
 
 
@@ -202,9 +201,7 @@ def test_owner_updates_limits_atomically_and_audited(
         daily_token_limit=25_000,
         weekly_token_limit=100_000,
         monthly_token_limit=None,
-        requests_per_minute=20,
-        concurrent_operations=2,
-        monthly_cost_limit_cents=5_000,
+        monthly_realtime_minutes_limit=30,
     )
 
     response = client.put(
@@ -236,7 +233,7 @@ def test_update_rejects_partial_negative_and_extreme_payloads(
     cases = [
         {"daily_token_limit": 1},
         _limits(daily_token_limit=-1),
-        _limits(requests_per_minute=10_001),
+        _limits(monthly_realtime_minutes_limit=100_001),
     ]
 
     for payload in cases:
@@ -308,9 +305,7 @@ def _enable_usage(db: Session, user: User, role: Role, **overrides: int | None) 
         daily_token_limit=10_000,
         weekly_token_limit=10_000,
         monthly_token_limit=10_000,
-        requests_per_minute=10,
-        concurrent_operations=2,
-        monthly_cost_limit_cents=100,
+        monthly_realtime_minutes_limit=None,
     )
     values.update(overrides)
     set_role_limit(
@@ -368,11 +363,16 @@ def test_usage_reservation_counts_retry_exactly_once(
     assert completed_retry.accounted_tokens == 450
 
 
-def test_usage_reservation_enforces_tokens_rpm_and_concurrency(
+def test_usage_reservation_enforces_tokens(
     db: Session,
     regular_user: User,
 ) -> None:
-    """Alle synchron prüfbaren Limits greifen vor einem späteren Provider-Aufruf."""
+    """Die Tokenlimits greifen vor einem späteren Provider-Aufruf.
+
+    Anfragen pro Minute und gleichzeitige Vorgänge sind am 07.10.2026
+    entfallen: eine zweite Anfrage in derselben Minute geht durch, solange
+    Tokens übrig sind.
+    """
     role = _role(db, "ai-enforced-usage")
     _enable_usage(
         db,
@@ -381,8 +381,6 @@ def test_usage_reservation_enforces_tokens_rpm_and_concurrency(
         daily_token_limit=100,
         weekly_token_limit=100,
         monthly_token_limit=100,
-        requests_per_minute=1,
-        concurrent_operations=1,
     )
     now = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
     event = reserve_ai_usage(
@@ -394,14 +392,15 @@ def test_usage_reservation_enforces_tokens_rpm_and_concurrency(
     )
     db.commit()
 
-    with pytest.raises(AiQuotaExceeded, match="requests_per_minute"):
-        reserve_ai_usage(
-            db,
-            regular_user,
-            request_id=uuid4(),
-            estimated_tokens=1,
-            now=now,
-        )
+    zweite = reserve_ai_usage(
+        db,
+        regular_user,
+        request_id=uuid4(),
+        estimated_tokens=1,
+        now=now,
+    )
+    assert zweite.status == "reserved"
+    fail_ai_usage(db, zweite)
 
     complete_ai_usage(db, event, actual_tokens=80, actual_cost_microunits=0, now=now)
     db.commit()
@@ -421,7 +420,7 @@ def test_failed_usage_frees_reservation_and_conflicting_retry_is_rejected(
 ) -> None:
     """Fehler erfinden keinen Verbrauch; UUID-Reuse mit anderer Payload bleibt verboten."""
     role = _role(db, "ai-failed-usage")
-    _enable_usage(db, regular_user, role, concurrent_operations=1)
+    _enable_usage(db, regular_user, role)
     request_id = uuid4()
     event = reserve_ai_usage(
         db,
@@ -429,13 +428,6 @@ def test_failed_usage_frees_reservation_and_conflicting_retry_is_rejected(
         request_id=request_id,
         estimated_tokens=50,
     )
-    with pytest.raises(AiQuotaExceeded, match="concurrent_operations"):
-        reserve_ai_usage(
-            db,
-            regular_user,
-            request_id=uuid4(),
-            estimated_tokens=1,
-        )
     fail_ai_usage(db, event)
     db.commit()
 
@@ -455,6 +447,97 @@ def test_failed_usage_frees_reservation_and_conflicting_retry_is_rejected(
             request_id=request_id,
             estimated_tokens=51,
         )
+
+
+# ── Sprachminuten ──────────────────────────────────────────────────────
+
+
+def _sprachsitzung(db: Session, user: User, *, vor_sekunden: int = 0) -> AiUsageEvent:
+    """Eröffnet eine Sprachsitzung, die ``vor_sekunden`` begonnen hat."""
+    event = reserve_ai_usage(
+        db, user, request_id=uuid4(), estimated_tokens=0,
+        minimum_token_headroom=1, realtime=True,
+    )
+    event.created_at = datetime.now(timezone.utc) - timedelta(seconds=vor_sekunden)
+    db.commit()
+    return event
+
+
+def test_null_sprachminuten_sperren_die_sitzung_vor_dem_beginn(
+    db: Session, regular_user: User,
+) -> None:
+    role = _role(db, "ai-ohne-sprache")
+    _enable_usage(db, regular_user, role, monthly_realtime_minutes_limit=0)
+
+    with pytest.raises(AiQuotaExceeded, match="monthly_realtime_minutes_limit"):
+        _sprachsitzung(db, regular_user)
+    # Der Chat bleibt davon unberührt.
+    assert reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=10).status == "reserved"
+
+
+def test_die_sitzung_zaehlt_ihre_dauer_und_endet_an_der_minutengrenze(
+    db: Session, regular_user: User,
+) -> None:
+    """Gezählt wird die Zeit, die die Sitzung offen war — nicht Audiotokens."""
+    from services.ai_usage_service import realtime_restsekunden, realtime_verbrauch_ergaenzen
+
+    role = _role(db, "ai-eine-sprachminute")
+    _enable_usage(db, regular_user, role, monthly_realtime_minutes_limit=1)
+    event = _sprachsitzung(db, regular_user, vor_sekunden=30)
+    assert event.realtime_seconds == 0
+
+    werte = dict(text_input=1, text_output=1, audio_input=1, audio_output=1, cost_microunits=0)
+    realtime_verbrauch_ergaenzen(db, event_id=event.id, **werte)
+    db.commit()
+    assert 30 <= event.realtime_seconds < 40
+    assert 20 <= realtime_restsekunden(db, regular_user) <= 30
+
+    event.created_at = datetime.now(timezone.utc) - timedelta(seconds=90)
+    db.commit()
+    with pytest.raises(AiQuotaExceeded, match="monthly_realtime_minutes_limit"):
+        realtime_verbrauch_ergaenzen(db, event_id=event.id, **werte)
+    db.rollback()
+    # Schon gelaufene Zeit wird trotzdem gebucht, sonst begänne der nächste
+    # Anlauf wieder unter der Grenze.
+    realtime_verbrauch_ergaenzen(db, event_id=event.id, grenzen_pruefen=False, **werte)
+    db.commit()
+    assert event.realtime_seconds >= 90
+    assert realtime_restsekunden(db, regular_user) == 0
+    with pytest.raises(AiQuotaExceeded, match="monthly_realtime_minutes_limit"):
+        _sprachsitzung(db, regular_user)
+
+
+def test_die_sitzung_endet_mit_dem_rest_der_minuten(
+    db: Session, regular_user: User,
+) -> None:
+    """Die Höchstdauer einer Sitzung ist der Rest — und die Meldung sagt, warum."""
+    from services.ai_voice.contracts import MAX_SITZUNGSSEKUNDEN
+    from services.ai_voice.realtime_session import RealtimeVorbereitung, hoechstdauer, zeit_um
+
+    assert hoechstdauer(db, regular_user) == MAX_SITZUNGSSEKUNDEN, "ohne Limit die feste Grenze"
+    assert zeit_um(RealtimeVorbereitung(provider_id=1)) == {"art": "abgelaufen"}
+
+    role = _role(db, "ai-zwei-sprachminuten")
+    _enable_usage(db, regular_user, role, monthly_realtime_minutes_limit=2)
+    assert hoechstdauer(db, regular_user) == 120
+    gekuerzt = RealtimeVorbereitung(provider_id=1, hoechstdauer=hoechstdauer(db, regular_user))
+    assert zeit_um(gekuerzt) == {"art": "stoerung", "grund": "realtime_kontingent"}
+
+
+def test_eine_sitzung_ohne_antwort_kostet_keine_minuten(
+    db: Session, regular_user: User,
+) -> None:
+    from services.ai_usage_service import realtime_restsekunden, realtime_sitzung_abschliessen
+
+    role = _role(db, "ai-sitzung-ohne-antwort")
+    _enable_usage(db, regular_user, role, monthly_realtime_minutes_limit=1)
+    event = _sprachsitzung(db, regular_user, vor_sekunden=50)
+
+    realtime_sitzung_abschliessen(db, event.id)
+    db.commit()
+
+    assert event.status == "failed"
+    assert realtime_restsekunden(db, regular_user) == 60
 
 
 def _memory_role(
@@ -504,10 +587,11 @@ def _zwei_memory_rollen(
 
 #: Sachlich verschiedene Inhalte fuer die Testeintraege.
 #:
-#: Gebraucht seit der Duplikatpruefung (`ai_memory_service.aehnlicher_eintrag`,
-#: 19.08.2026): stuenden in allen Eintraegen Varianten desselben Satzes, wuerde
-#: der naechste Aufruf an der Aehnlichkeit scheitern statt an der Mengengrenze,
-#: um die es hier geht. Die Themen sind bewusst weit auseinander.
+#: Eingefuehrt fuer die Duplikatpruefung von `remember` (19.08.2026, mit Stufe 2
+#: des Gedaechtnisses entfallen): stuenden in allen Eintraegen Varianten
+#: desselben Satzes, scheiterte der naechste Aufruf an der Aehnlichkeit statt an
+#: der Mengengrenze, um die es hier geht. Die Themen sind bewusst weit
+#: auseinander.
 _THEMEN = (
     "Startzeit liegt bei vier Minuten.",
     "Der Kartenwechsel braucht eine Bestaetigung.",
@@ -523,11 +607,11 @@ _THEMEN = (
 
 
 def _merken(db: Session, user: User, key: str, **bezug: int | None) -> None:
-    """Legt einen Eintrag ueber denselben Weg an, den auch die KI nimmt.
+    """Legt einen Eintrag ueber den Namensweg an (`upsert_entry`).
 
     Der Wert traegt den Schluessel **und** einen sachlich anderen Inhalt. Bis
-    zum 19.08.2026 stand hier schlicht ``f"Wert zu {key}"`` — mit der neuen
-    Duplikatpruefung (`aehnlicher_eintrag`) waeren `notiz.0` bis `notiz.6`
+    zum 19.08.2026 stand hier schlicht ``f"Wert zu {key}"`` — mit der
+    Duplikatpruefung von `remember` waeren `notiz.0` bis `notiz.6`
     damit sieben Fassungen desselben Satzes, und der achte Aufruf scheiterte
     an der Aehnlichkeit statt an der Mengengrenze, um die es diesen Tests
     geht. Verschiedene Themen halten die Faelle auseinander.
@@ -785,8 +869,8 @@ def test_die_absage_nennt_die_grenze_die_wirklich_gilt(
     """Ist der Bereich genau voll, stehen Bestand *und* Grenze in der Absage.
 
     Naehme sie weiterhin die alte feste 100, stuende dort eine Zahl, die
-    niemanden mehr betrifft — und das Modell suchte den Fehler bei sich statt
-    beim Vorrat. Gemessen wird deshalb gegen ``MAX_SYSTEM_SCOPE_ENTRIES``:
+    niemanden mehr betrifft — und wer sie liest, suchte den Fehler bei sich
+    statt beim Vorrat. Gemessen wird deshalb gegen ``MAX_SYSTEM_SCOPE_ENTRIES``:
     hier stand vorher ``"100" not in meldung``, ausgerechnet der Test gegen
     eine veraltete Zahl schrieb sie selbst als Literal fest.
 
@@ -811,14 +895,16 @@ def test_die_absage_nennt_die_grenze_die_wirklich_gilt(
     assert str(MAX_SYSTEM_SCOPE_ENTRIES) not in meldung
     # Genau voll heisst „einer muss weichen“, nicht „keiner“: der neue Eintrag
     # will ja auch noch hinein. Eine Meldung, die hier `bestand - grenze`
-    # rechnete, schickte das Modell mit „0 weichen“ ohne Loeschung sofort in
+    # rechnete, schickte ihren Leser mit „0 weichen“ ohne Loeschung sofort in
     # denselben Fehlschlag zurueck.
     assert "Einer muss weichen" in meldung
     # Werkzeugnamen stehen hier bewusst nicht mehr: derselbe Satz geht ueber
-    # `routers/ai_memory.py` als Toast an einen Menschen, der weder
-    # `search_memory` noch `forget_memory` hat. Was das *Modell* tun soll, steht
-    # an der Naht in `_execute_remember` — und wird weiter unten dort geprueft.
-    assert "search_memory" not in meldung and "forget_memory" not in meldung
+    # `routers/ai_memory.py` als Toast an einen Menschen, der keine Werkzeuge
+    # hat. Bis Stufe 2 des Gedaechtnisses machte `remember` aus ihm einen Rat
+    # an das Modell; der Gedaechtnisschreiber sieht den freien Platz vorher.
+    # Gesucht wird jeder Bezeichner aus dem Code, nicht eine Namensliste, die
+    # mit dem naechsten Werkzeug veraltet.
+    assert re.search(r"\b[a-z]+_[a-z_]+\b", meldung) is None, meldung
     db.rollback()
 
 
@@ -829,15 +915,10 @@ def test_die_absage_nennt_den_bereich_um_den_es_geht(
     """Jede Absage sagt, *wo* es klemmt — sonst gilt sie fuer alles.
 
     „Voll“ ohne Bereich liest sich wie „das Gedaechtnis ist voll“ und stimmt
-    dann fuer jeden anderen Vorrat des Benutzers nicht. Beim Server ist die
-    Nummer der richtige Name: `remember` und `forget_memory` sprechen eine
-    Anlage ueber `server_id` an, und `list_my_servers` liefert genau diese
-    Nummer. Beim Team ist es umgekehrt — dort gibt es nur den Namen, siehe den
-    Test dazu weiter unten.
-
-    Die Warnung, nur im eigenen Bereich zu loeschen, stand frueher hier. Sie
-    ist eine Anweisung an das Modell und deshalb an die Naht gewandert; geprueft
-    wird sie in `test_die_volle_absage_nennt_dem_modell_beide_werkzeuge`.
+    dann fuer jeden anderen Vorrat des Benutzers nicht. Beim Server steht die
+    Nummer — so sprachen ihn `remember` und `forget_memory` an, solange das
+    Modell selbst schrieb (bis Stufe 2 des Gedaechtnisses). Beim Team steht
+    der Name, siehe den Test dazu weiter unten.
     """
     _memory_role(db, regular_user, "ai-memory-bereichsname", 2, "server.view")
     anlage = _server(db, "bereichsname")
@@ -854,7 +935,7 @@ def test_die_absage_nennt_den_bereich_um_den_es_geht(
 
     # Der Name folgt wirklich dem Ziel. Ohne diese zweite Haelfte belegt die
     # Nummer oben nichts: ein fest eingebauter Serverbezug saehe genauso aus,
-    # und das Modell schickte seine Loeschung weiterhin in den falschen Vorrat.
+    # und wer aufraeumt, raeumte im falschen Vorrat.
     for nummer in range(2):
         _merken(db, regular_user, f"notiz.{nummer}")
 
@@ -874,12 +955,11 @@ def test_die_absage_bei_null_raet_nicht_zum_loeschen(
     """Wo nichts hineinpasst, ist „raeum auf“ kein Rat, sondern ein Schaden.
 
     Der Ausweg im Test darueber setzt voraus, dass Platz frei werden *kann*.
-    Bei einer Grenze von 0 ist das nicht so: ein Modell, das dem Text folgt,
-    loescht der Reihe nach den gesamten Bereich des Benutzers — und scheitert
-    danach trotzdem. Deshalb darf hier weder `forget_memory` noch
-    `search_memory` stehen, und die Absage muss die Ursache nennen, damit das
-    Modell sie dem Benutzer sagen kann statt sie fuer einen eigenen Fehler zu
-    halten.
+    Bei einer Grenze von 0 ist das nicht so: wer dem Text folgt, loescht der
+    Reihe nach den gesamten Bereich — und scheitert danach trotzdem. Bis
+    Stufe 2 des Gedaechtnisses war das ein folgsames Modell mit
+    `forget_memory`; heute ist es der Mensch vor dem Toast. Die Absage nennt
+    deshalb die Ursache und keinen Ausweg.
 
     Dazu die zweite Zusage: derselbe Satz geht ueber `routers/ai_memory.py` als
     Toast an einen Menschen, der gerade selbst einen Eintrag angelegt hat. Er
@@ -893,8 +973,8 @@ def test_die_absage_bei_null_raet_nicht_zum_loeschen(
 
     meldung = str(exc.value.detail)
     assert exc.value.status_code == 409
-    assert "forget_memory" not in meldung
-    assert "search_memory" not in meldung
+    assert re.search(r"\b[a-z]+_[a-z_]+\b", meldung) is None, meldung
+    assert "weichen" not in meldung
     assert "freigegeben" in meldung
     assert "Benutzer" not in meldung
     # Auch hier steht das Ziel im Text: „nicht freigegeben“ ohne Bereich liest
@@ -957,19 +1037,15 @@ def test_die_absage_nennt_das_team_beim_namen_und_nicht_bei_der_nummer(
     db: Session,
     regular_user: User,
 ) -> None:
-    """Ein volles Team wird so benannt, wie das Modell es ansprechen kann.
+    """Ein volles Team wird so benannt, wie ein Mensch es kennt.
 
-    `remember` und `forget_memory` erreichen ein Team ausschliesslich ueber
-    `team="<Name>"`, aufgeloest ueber Namensgleichheit; ein Werkzeug, das eine
-    Nummer in einen Namen uebersetzt, gibt es nicht. „Team 3“ benennt fuer das
-    Modell also nichts, was es ansprechen koennte — und dem Benutzer koennte es
-    den vollen Bereich nur als Nummer nennen.
+    Die Absage liest ein Mensch als Toast, und „Team 3“ benennt fuer ihn
+    nichts — Teams kennt er beim Namen. Bis Stufe 2 des Gedaechtnisses las sie
+    auch das Modell, und fuer das galt dasselbe: `remember` und
+    `forget_memory` erreichten ein Team ausschliesslich ueber `team="<Name>"`.
 
-    Der Schaden bliebe nicht beim Nichtstun. Schluessel sind bewusst stabil und
-    wiederholen sich ueber Teams hinweg: wer den Bereich nicht trifft, greift
-    den gleichnamigen Treffer des falschen Teams und loescht dort. Deshalb ist
-    die zweite Haelfte der Zusage ein Verbot — steht im Satz eine Zahl, wo der
-    Name hingehoert, ist dieser Test rot.
+    Deshalb ist die zweite Haelfte der Zusage ein Verbot — steht im Satz eine
+    Zahl, wo der Name hingehoert, ist dieser Test rot.
     """
     _memory_role(db, regular_user, "ai-memory-teamname", 2, "teams.create")
     team = team_service.create_team(db, user=regular_user, name="Nachtschicht")
@@ -1001,10 +1077,10 @@ def test_die_absage_nennt_ist_und_soll_nach_einer_senkung(
     eines und versuch es erneut“ waere eine Anleitung zu so vielen
     Fehlschlaegen, wie der Bereich zu viel hat. Die Meldung nennt deshalb beide
     Zahlen, die dritte, auf die es ankommt (wieviele weichen muessen), und den
-    Grund, damit das Modell die Senkung nicht fuer einen eigenen Fehler haelt.
+    Grund, damit niemand die Senkung fuer einen eigenen Fehler haelt.
 
     Zum Loeschen fordert sie trotzdem nicht auf: bei 100 Eintraegen und Grenze
-    20 bekaeme das Modell hier sonst einen Auftrag ueber 81 Stueck. Und sie
+    20 bekaeme der Leser hier sonst einen Auftrag ueber 81 Stueck. Und sie
     spricht ueber niemanden in der dritten Person — warum, steht unten an der
     Zeile, die das prueft.
     """
@@ -1026,7 +1102,7 @@ def test_die_absage_nennt_ist_und_soll_nach_einer_senkung(
     assert "führt 7 Einträge, erlaubt sind 3" in meldung
     assert "nachträglich gesenkt" in meldung
     # 7 - 3 + 1, nicht 7 - 3: der neue Eintrag will ja auch noch hinein. Und
-    # ausdruecklich eine Zahl statt „eines“ — sonst zaehlt das Modell die
+    # ausdruecklich eine Zahl statt „eines“ — sonst zaehlt der Leser die
     # Fehlschlaege einzeln ab, fuenf Mal, und gibt vorher auf.
     assert f"{7 - 3 + 1} müssen weichen" in meldung
     # Auskunft, kein Auftrag. Wer weichen soll, weiss weder der Dienst noch das
@@ -1042,126 +1118,12 @@ def test_die_absage_nennt_ist_und_soll_nach_einer_senkung(
     # wie im 0-Fall-Test, und zwar ohne den Artikel: „Sag dem Benutzer …“ waere
     # genauso ueber ihn hinweggeredet wie „der Benutzer entscheidet“.
     #
-    # Der Gedanke selbst ist nicht weg, er steht nur dort, wo er hingehoert —
-    # als Anweisung an das Modell in `_execute_remember`, geprueft in
-    # `test_die_gesenkte_absage_schickt_das_modell_zum_benutzer`. Die Zusage
-    # dieses Tests sind die drei Zahlen darueber.
+    # Der Gedanke selbst ist nicht weg: seit Stufe 2 des Gedaechtnisses
+    # vergisst der Hintergrund nur, was der Mensch im Gespraech verlangt
+    # (`test_ai_gedaechtnis_schreiber.test_vergessen_nur_auf_wunsch_des_menschen`).
+    # Die Zusage dieses Tests sind die drei Zahlen darueber.
     assert "Benutzer" not in meldung
     db.rollback()
-
-
-# ── Die Naht zum Modell ───────────────────────────────────────────────
-#
-# Die Tests darueber lesen `detail` aus dem Dienst — den Satz, den ein Mensch
-# als Toast bekommt. Was das *Modell* mit der Absage anfangen soll, steht
-# dahinter in `_execute_remember` und ist in jedem der drei Faelle ein anderer
-# Rat. Geprueft wird er deshalb auf dem Weg, den die KI wirklich nimmt: ueber
-# `execute_read_tool` und die `AiActionValidationError`, die dort ankommt.
-# Ein Test gegen `_execute_remember` allein saehe nicht, ob die Ausnahme des
-# Dienstes ueberhaupt bis hierher durchkommt.
-
-
-def _merkendes_modell(db: Session, user: User, name: str, entries: int | None) -> Role:
-    """Ein Benutzer, fuer den das Modell wirklich schreiben darf.
-
-    Der Werkzeugweg prueft zwei Dinge, die der Dienst darunter nicht kennt: das
-    Recht ``ai.memory.use`` und den Einwilligungsschalter. Fehlt eines davon,
-    kommt eine Absage ueber die Einwilligung zurueck statt einer ueber den
-    Vorrat — und der Test prueft gruen den falschen Satz.
-    """
-    rolle = _memory_role(db, user, name, entries, "ai.memory.use")
-    ai_memory_service.set_preference(db, user, True)
-    return rolle
-
-
-def _modell_merkt(db: Session, user: User, key: str) -> None:
-    """Derselbe Vorgang wie `_merken`, aber ueber das Werkzeug der KI."""
-    ai_action_service.execute_read_tool(
-        db, user=user, tool_name="remember",
-        arguments={"scope": "user", "key": key, "value": f"Wert zu {key}"},
-    )
-
-
-def test_die_gesperrte_absage_haelt_das_modell_vom_naechsten_versuch_ab(
-    db: Session,
-    regular_user: User,
-) -> None:
-    """Bei Grenze 0 bekommt das Modell einen Schlusspunkt, keinen Auftrag.
-
-    Hier kann kein Aufraeumen Platz schaffen. Stuende auch nur einer der beiden
-    Werkzeugnamen im Rat, loeschte ein folgsames Modell der Reihe nach den
-    gesamten Bereich und scheiterte danach trotzdem.
-    """
-    _merkendes_modell(db, regular_user, "ai-modell-gesperrt", 0)
-
-    with pytest.raises(AiActionValidationError) as exc:
-        _modell_merkt(db, regular_user, "notiz.0")
-
-    ansage = str(exc.value)
-    assert "Versuch es nicht erneut" in ansage
-    assert "search_memory" not in ansage
-    assert "forget_memory" not in ansage
-    # Und die Tatsache aus dem Dienst steht weiterhin davor — ohne sie wuesste
-    # das Modell nicht, was es dem Benutzer sagen soll.
-    assert "freigegeben" in ansage
-    assert db.query(AiMemoryEntry).count() == 0
-
-
-def test_die_volle_absage_nennt_dem_modell_beide_werkzeuge(
-    db: Session,
-    regular_user: User,
-) -> None:
-    """Genau voll ist der eine Fall, in dem Aufraeumen wirklich hilft.
-
-    Ohne diesen Rat hoert die KI fuer den Bereich schlicht auf zu lernen,
-    obwohl beide Werkzeuge vor ihr liegen. Die Auflage daneben ist genauso
-    wichtig: `search_memory` nimmt allein eine Suchanfrage und rankt ueber
-    alles, was der Benutzer sehen darf — ohne den Zusatz raeumte das Modell die
-    persoenlichen Notizen ab, waehrend die volle Anlage voll bliebe.
-    """
-    _merkendes_modell(db, regular_user, "ai-modell-voll", 2)
-    for nummer in range(2):
-        _merken(db, regular_user, f"notiz.{nummer}")
-
-    with pytest.raises(AiActionValidationError) as exc:
-        _modell_merkt(db, regular_user, "notiz.zuviel")
-
-    ansage = str(exc.value)
-    assert "search_memory" in ansage
-    assert "forget_memory" in ansage
-    assert "aus genau diesem Bereich" in ansage
-    assert "2 von 2 erlaubten" in ansage
-    assert db.query(AiMemoryEntry).count() == 2
-
-
-def test_die_gesenkte_absage_schickt_das_modell_zum_benutzer(
-    db: Session,
-    regular_user: User,
-) -> None:
-    """Steht ein Bereich ueber seiner Grenze, fragt das Modell und loescht nicht.
-
-    Das ist die Zusage, um die es dieser Runde geht. Bei 100 Eintraegen und
-    einer nachtraeglich auf 20 gesenkten Grenze duerfte hier kein Loeschauftrag
-    ueber 81 Eintraege stehen: `search_memory` liefert hoechstens fuenfzehn
-    Treffer, und zwar die zur Frage relevantesten. Wer daraus dutzende
-    wegraeumt, loescht nicht, was nicht mehr gilt, sondern was zuletzt gebraucht
-    wurde — `forget_memory` fragt vorher niemanden.
-    """
-    rolle = _merkendes_modell(db, regular_user, "ai-modell-gesenkt", 7)
-    for nummer in range(7):
-        _merken(db, regular_user, f"notiz.{nummer}")
-    set_role_limit(db, rolle.id, _limits(max_memory_entries=3))
-    db.commit()
-
-    with pytest.raises(AiActionValidationError) as exc:
-        _modell_merkt(db, regular_user, "notiz.neu")
-
-    ansage = str(exc.value)
-    assert "forget_memory" not in ansage
-    assert "frag" in ansage
-    assert "Benutzer" in ansage
-    # Nichts ist weg: der Fehlschlag allein darf keinen Bestand kosten.
-    assert db.query(AiMemoryEntry).count() == 7
 
 
 def test_systembereiche_kennen_das_rollenlimit_nicht(

@@ -19,12 +19,56 @@ from pydantic import BaseModel, Field
 MemoryScope = Literal["user", "server", "server_shared", "team", "panel"]
 
 
-class AiMemoryWrite(BaseModel):
+#: Was fuer eine Aussage eine Erinnerung ist (`ai_memory_service.ARTEN`), dazu
+#: ``schluss``: von der naechtlichen Pflege aus anderen geschlossen.
+MemoryArt = Literal[
+    "fakt", "vorliebe", "anweisung", "ereignis", "plan", "beziehung", "wissen", "schluss",
+]
+#: Woher sie kommt (`ai_memory_service.QUELLEN`).
+MemoryQuelle = Literal["eingetragen", "gespraech", "import", "pflege"]
+
+
+class AiMemoryCreate(BaseModel):
+    """Eine Erinnerung, wie ein Mensch sie eintraegt: ein Satz, mehr nicht.
+
+    Titel und Thema sind freiwillig. Einen Namen gibt es nicht mehr; er war
+    bis Gedaechtnis v2 (06.10.2026) die Identitaet einer Erinnerung, und
+    dieselbe Sache unter zwei Namen stand zweimal da.
+    """
+
     scope: MemoryScope
     server_id: int | None = Field(default=None, ge=1)
     team_id: int | None = Field(default=None, ge=1)
-    key: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
-    value: str = Field(min_length=1, max_length=2000)
+    text: str = Field(min_length=1, max_length=2000)
+    titel: str | None = Field(default=None, max_length=120)
+    thema: str | None = Field(default=None, max_length=60)
+
+
+class AiMemoryUpdate(BaseModel):
+    """Aenderung an einer Erinnerung. Was fehlt, bleibt, wie es ist.
+
+    ``titel`` und ``thema`` unterscheiden "nicht genannt" (bleibt) von
+    ``null`` (entfernen); deshalb liest der Router `model_fields_set`.
+    ``fassung`` ist die Fassung, die der Aendernde gesehen hat: hat
+    inzwischen jemand anderes geschrieben, lehnt der Server mit 409 ab.
+    """
+
+    text: str | None = Field(default=None, min_length=1, max_length=2000)
+    titel: str | None = Field(default=None, max_length=120)
+    thema: str | None = Field(default=None, max_length=60)
+    fassung: int = Field(ge=1)
+
+
+class AiMemoryAnheften(BaseModel):
+    """Anheften oder lösen: angeheftet steht eine Erinnerung immer im Kopf."""
+
+    angeheftet: bool
+
+
+class AiMemoryFassungZurueck(BaseModel):
+    """Zurueck auf eine fruehere Fassung — mit der Fassung, die man gesehen hat."""
+
+    fassung: int = Field(ge=1)
 
 
 class AiMemoryPreferenceWrite(BaseModel):
@@ -43,20 +87,72 @@ class AiMemoryNoticeAnswer(BaseModel):
     hide_future: bool = False
 
 
+class AiMemoryThemaRef(BaseModel):
+    id: str
+    name: str
+
+
+class AiMemoryBelegRef(BaseModel):
+    """Eine Erinnerung, aus der ein Schluss folgt."""
+
+    id: str
+    text: str
+
+
 class AiMemoryResponse(BaseModel):
     id: str
     scope: MemoryScope
     server_id: int | None
     team_id: int | None = None
-    key: str
+    #: Der alte Name, nur bei Altbestand. Neue Erinnerungen haben keinen.
+    key: str | None = None
+    #: Der Text der Erinnerung (der Feldname stammt aus der Zeit von Name und Wert).
     value: str
+    titel: str | None = None
+    thema: AiMemoryThemaRef | None = None
+    art: MemoryArt | None = None
+    quelle: MemoryQuelle = "eingetragen"
+    wichtigkeit: int = 3
     # "user" = du hast es hinterlegt, "ai" = die KI hat es sich gemerkt.
     # Sichtbar, damit niemand raten muss, woher ein Eintrag stammt.
     origin: Literal["user", "ai"] = "user"
+    #: ``vergessen`` heisst: die KI hat sie auf Wunsch vergessen, sie laesst
+    #: sich bis `vergessen_am` plus 30 Tage zurueckholen.
+    status: Literal["aktiv", "vergessen"] = "aktiv"
+    vergessen_am: datetime | None = None
+    #: Die Fassung, die eine Aenderung als gesehen mitschickt.
+    fassung: int = 1
+    #: Steht immer im Kopf jedes Gesprächs (`ai_gedaechtnis_abruf`).
+    angeheftet: bool = False
+    #: Nur bei einem Schluss: die Erinnerungen, aus denen er folgt. Aendert
+    #: sich eine davon, vergisst das Gedaechtnis den Schluss.
+    belege: list[AiMemoryBelegRef] = Field(default_factory=list)
     use_count: int = 0
     last_used_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class AiMemoryThema(BaseModel):
+    """Ein Thema einer Ansicht und wieviele geltende Erinnerungen darunter stehen."""
+
+    id: str
+    name: str
+    anzahl: int
+
+
+class AiMemoryFassung(BaseModel):
+    """Eine fruehere Fassung einer Erinnerung."""
+
+    id: str
+    text: str
+    titel: str | None = None
+    #: ``bearbeitet``, ``aktualisiert``, ``zusammengefuehrt``, ``aufgenommen``,
+    #: ``umgeschrieben`` oder ``wiederhergestellt``.
+    grund: str
+    #: Wer die Aenderung gemacht hat, die diese Fassung abgeloest hat.
+    von: Literal["user", "ai"]
+    erstellt: datetime
 
 
 class AiMemoryPage(BaseModel):
@@ -107,31 +203,14 @@ class AiMemoryClearResponse(BaseModel):
     removed: int
 
 
-#: Was die Vorschau über einen erkannten Fakt sagt.
-#:
-#: * ``new``              — der Bereich kennt nichts Vergleichbares.
-#: * ``exact_duplicate``  — unter diesem Schlüssel steht schon etwas; übernommen
-#:   wird nur mit ``replace_existing``.
-#: * ``similar_existing`` — ein anderer Schlüssel sagt vermutlich dasselbe.
-#: * ``has_secret``       — sieht nach Zugangsdaten aus und wird nie gespeichert.
-MemoryImportStatus = Literal["new", "exact_duplicate", "similar_existing", "has_secret"]
-
-#: Wieviele Fakten ein Import höchstens trägt. Jeder kostet beim Übernehmen
-#: eine Verschlüsselung im DIS-Sidecar und eine Einbettung.
+#: Wieviele Erinnerungen ein Import höchstens trägt. Jede kostet beim
+#: Übernehmen eine Verschlüsselung im DIS-Sidecar und eine Einbettung.
 MAX_IMPORT_ITEMS = 200
-
-
-class AiMemoryImportPreviewItem(BaseModel):
-    key: str
-    value: str
-    category: str
-    evidence: str | None = None
-    status: MemoryImportStatus
-    existing_key: str | None = None
-    #: ``None`` auch dann, wenn der Schlüssel belegt, sein Inhalt aber nicht
-    #: mehr lesbar ist.
-    existing_value: str | None = None
-    similarity: float | None = None
+#: Wie viele bestehende Einträge eine importierte Erinnerung höchstens
+#: ersetzen darf. So viele bietet der Bestand je Teil an (40 je Bereich), und
+#: dieselbe Zahl kappt die Vorschau — sonst scheiterte die Übernahme eines
+#: großen Zusammenführens am Schema.
+MAX_IMPORT_ERSETZT = 40
 
 
 class AiMemoryImportPreviewRequest(BaseModel):
@@ -142,15 +221,44 @@ class AiMemoryImportPreviewRequest(BaseModel):
     source_provider: str | None = Field(default=None, max_length=40)
 
 
+class AiMemoryImportBisher(BaseModel):
+    """Ein Bestandseintrag, den ein Vorschlag ersetzen würde.
+
+    ``fassung`` geht beim Übernehmen zurück: hat ihn inzwischen jemand
+    geändert, wird nicht still überschrieben.
+    """
+
+    id: str
+    fassung: int
+    text: str
+    titel: str | None = None
+
+
+class AiMemoryImportPreviewItem(BaseModel):
+    """Eine Erinnerung, wie das Gedächtnismodell sie aus dem Text gelesen hat."""
+
+    text: str
+    titel: str | None = None
+    thema: str | None = None
+    art: MemoryArt | None = None
+    wichtigkeit: int = 3
+    #: Was darin aufgeht — der erste Eintrag bekommt den neuen Text, die
+    #: übrigen werden in ihn aufgenommen. Leer heißt: eine neue Erinnerung.
+    ersetzt: list[AiMemoryImportBisher] = []
+
+
 class AiMemoryImportPreviewResponse(BaseModel):
     detected_source: str | None
     items: list[AiMemoryImportPreviewItem]
-    #: Alles, was der Text hergab — auch jenseits von ``MAX_IMPORT_ITEMS``.
+    #: Alles, was das Modell vorschlug — auch jenseits von ``MAX_IMPORT_ITEMS``.
     total_detected: int
-    total_valid: int
-    total_conflicts: int
-    total_secrets_blocked: int
-    #: Wieviele **neue** Schlüssel der Bereich noch fasst. Überschreiben kostet
+    #: Was schon genau so dasteht; es erscheint nicht in ``items``.
+    total_known: int = 0
+    #: Was nach Zugangsdaten aussah; es wird nie gespeichert und nie gezeigt.
+    total_secrets_blocked: int = 0
+    #: Teile des Textes, die das Modell nicht gelesen hat (Anbieter, Kontingent).
+    unread_parts: int = 0
+    #: Wieviele **neue** Erinnerungen der Bereich noch fasst. Ersetzen kostet
     #: keinen Platz. ``None`` heißt unbegrenzt.
     available_slots: int | None
     #: Ob die KI persönliche Einträge heute überhaupt liest. Ein Import in ein
@@ -159,10 +267,18 @@ class AiMemoryImportPreviewResponse(BaseModel):
     memory_enabled: bool = True
 
 
+class AiMemoryImportErsetzt(BaseModel):
+    id: str = Field(min_length=1, max_length=36)
+    fassung: int = Field(ge=1)
+
+
 class AiMemoryImportItem(BaseModel):
-    key: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
-    value: str = Field(min_length=1, max_length=2000)
-    replace_existing: bool = False
+    text: str = Field(min_length=1, max_length=2000)
+    titel: str | None = Field(default=None, max_length=120)
+    thema: str | None = Field(default=None, max_length=60)
+    art: MemoryArt | None = None
+    wichtigkeit: int = Field(default=3, ge=1, le=5)
+    ersetzt: list[AiMemoryImportErsetzt] = Field(default_factory=list, max_length=MAX_IMPORT_ERSETZT)
 
 
 class AiMemoryImportRequest(BaseModel):
@@ -174,12 +290,12 @@ class AiMemoryImportRequest(BaseModel):
 
 
 class AiMemoryImportSkipped(BaseModel):
-    key: str
-    #: ``exists`` (Schlüssel belegt, Ersetzen nicht gewählt), ``full``
-    #: (Bereich voll), ``rejected`` (ungültig oder Zugangsdaten), ``duplicate``
-    #: (derselbe Schlüssel zweimal in einer Anfrage), ``conflict`` (gleichzeitig
-    #: geändert).
-    reason: Literal["exists", "full", "rejected", "duplicate", "conflict"]
+    #: Die Stelle in ``items`` der Anfrage.
+    index: int
+    #: ``full`` (Bereich voll oder gesperrt), ``rejected`` (ungültig,
+    #: Zugangsdaten, fremder Eintrag), ``duplicate`` (derselbe Eintrag zweimal
+    #: ersetzt), ``conflict`` (inzwischen geändert oder vergessen).
+    reason: Literal["full", "rejected", "duplicate", "conflict"]
 
 
 class AiMemoryImportResponse(BaseModel):

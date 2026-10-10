@@ -89,6 +89,12 @@ MAX_SOURCE_CHARS = 60_000
 # dass nach der Reserve fast nichts uebrig bleibt. Darunter waere der Ruf kein
 # Falten mehr, sondern ein Providerruf um seiner selbst willen.
 MIN_SOURCE_CHARS = 4_000
+# Wieviel faltbarer Verlauf mindestens dasteht, bevor eine volle **Anfrage**
+# allein das Falten ausloest (`needs_compaction`, ``anfrage_zeichen``) — als
+# Anteil am Budget. Steht der Platz vor allem bei Prompt und Katalog, gibt es
+# darunter nichts, was eine Zusammenfassung retten koennte, und jeder Zug
+# kostete einen Providerruf fuer ein paar Zeilen.
+MIN_FALTBAR_ANTEIL = 10
 # Wieviele Zeichen eine zusammengefasste Zeile ungefaehr braucht. Nur zur
 # Umrechnung der Laengenvorgabe in eine Satzzahl, die im Prompt stehen kann:
 # "hoechstens 34.560 Zeichen" ist keine Anweisung, mit der ein Modell etwas
@@ -199,22 +205,44 @@ def _quellgrenze(context_chars: int | None) -> int:
 
 
 def needs_compaction(
-    db, conversation: AiConversation, context_chars: int | None = None
+    db,
+    conversation: AiConversation,
+    context_chars: int | None = None,
+    anfrage_zeichen: int | None = None,
 ) -> bool:
-    """Prueft ohne Providerruf, ob sich das Falten ueberhaupt lohnt."""
+    """Prueft ohne Providerruf, ob sich das Falten ueberhaupt lohnt.
+
+    Zwei Ausloeser. Der alte misst nur den faltbaren Verlauf gegen die Marke.
+    Das genuegt, solange das Budget gross ist gegen Prompt und Katalog — seit
+    dem Anfragedeckel (`ai_context_window.ANFRAGE_DECKEL_TOKENS`, 176.000
+    Zeichen) ist es das nicht mehr: Systemprompt, Gedaechtnis, Werkzeugblock
+    und Katalog belegen davon leicht 90.000, der Verlauf wurde ab rund 80.000
+    Zeichen still von hinten abgeschnitten, gefaltet erst ab 132.000.
+
+    Deshalb der zweite: ``anfrage_zeichen`` ist, was die letzte Anfrage
+    tatsaechlich trug, Katalog eingeschlossen (`_werkzeuge_und_grenze`).
+    Erreicht sie die Marke, wird gefaltet — sofern genug faltbarer Verlauf
+    dasteht, dass es etwas bringt (``MIN_FALTBAR_ANTEIL``).
+    """
     rows = _pending_messages(db, conversation)
     if len(rows) <= KEEP_RECENT_MESSAGES:
         return False
     foldable = rows[: len(rows) - KEEP_RECENT_MESSAGES]
+    faltbar = sum(len(_message_content_for_provider(row)) for row in foldable)
+    if (
+        context_chars
+        and anfrage_zeichen is not None
+        and anfrage_zeichen >= faltschwelle(context_chars)
+        and faltbar >= context_chars * MIN_FALTBAR_ANTEIL // 100
+    ):
+        return True
     # Gemessen wird der Text, den der Anbieter spaeter tatsaechlich saehe. Mit
     # `row.content` zaehlte eine Rueckfrage als 0 Zeichen, obwohl sie mitsamt
     # ihren Vorschlaegen in die Zusammenfassung geht — die Schwelle waere je
     # nach Gespraechsverlauf deutlich zu spaet erreicht. Redigiert wird hier
     # nicht: das kostet Rechenzeit bei jedem Streamende und aendert an der
     # Laenge praktisch nichts.
-    return sum(
-        len(_message_content_for_provider(row)) for row in foldable
-    ) >= faltschwelle(context_chars)
+    return faltbar >= faltschwelle(context_chars)
 
 
 def _pending_messages(db, conversation: AiConversation) -> list[AiMessage]:
@@ -293,6 +321,7 @@ async def compact_conversation(
     conversation_id: str,
     provider_id: int,
     context_chars: int | None = None,
+    anfrage_zeichen: int | None = None,
 ) -> bool:
     """Faltet den aelteren Teil zusammen. Liefert True, wenn etwas passiert ist.
 
@@ -315,7 +344,7 @@ async def compact_conversation(
             return False
         if provider is None or not provider.enabled:
             return False
-        if not needs_compaction(db, conversation, context_chars):
+        if not needs_compaction(db, conversation, context_chars, anfrage_zeichen):
             return False
 
         rows = _pending_messages(db, conversation)

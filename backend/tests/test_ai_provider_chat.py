@@ -1069,54 +1069,6 @@ def test_finalization_settles_usage_even_if_the_message_is_gone(
     assert settled.accounted_tokens == 150
 
 
-def test_cost_limit_actually_blocks_once_a_token_price_is_configured(
-    client: TestClient,
-    db: Session,
-    regular_user: User,
-    user_cookies: dict,
-    user_csrf_token: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Das monatliche Kostenlimit muss wirken, nicht nur konfigurierbar sein.
-
-    Ohne Preisquelle wurde jeder Verbrauch mit null Kosten verbucht — ein
-    Betreiber konnte ein Limit setzen und war trotzdem ungeschuetzt. Mit
-    gepflegtem Providerpreis greift die Grenze und der Provider wird gar nicht
-    erst aufgerufen.
-    """
-    _enable_chat(db, regular_user)
-    role = db.query(Role).filter(Role.name == f"ai-chat-{regular_user.id}").one()
-    set_role_limit(db, role.id, {
-        **{field: None for field in LIMIT_FIELDS},
-        "monthly_cost_limit_cents": 1,
-    })
-    db.commit()
-    provider = _provider(db, monkeypatch)
-    # 100.000 Cent je Million Tokens: schon eine kleine Anfrage sprengt 1 Cent.
-    provider.token_price_micro_usd_per_million = 100_000 * MICROUNITS_PER_CENT
-    db.commit()
-    calls = 0
-
-    async def forbidden_provider(*_args, **_kwargs):
-        nonlocal calls
-        calls += 1
-        yield StreamChunk("content", "unexpected")
-
-    monkeypatch.setattr("services.ai_stream_service.stream_chat_completion", forbidden_provider)
-    created = client.get("/api/ai/conversation", cookies=user_cookies).json()
-    response = client.post(
-        "/api/ai/conversation/messages/stream",
-        json={"content": "Hallo", "provider_id": provider.id, "request_id": str(uuid4())},
-        cookies=user_cookies,
-        headers={"X-CSRF-Token": user_csrf_token},
-    )
-
-    assert response.status_code == 200
-    assert "AI_QUOTA_MONTHLY_COST_LIMIT_CENTS" in response.text
-    assert calls == 0
-    assert db.query(AiUsageEvent).count() == 0
-
-
 def test_without_a_token_price_cost_stays_zero_and_the_limit_does_not_fire(
     db: Session,
     monkeypatch: pytest.MonkeyPatch,

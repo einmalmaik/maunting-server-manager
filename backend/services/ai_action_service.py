@@ -50,9 +50,7 @@ from services.ai_tools.base import (
     _MUTEX_TOOLS,
     _RATIONALE_SCHEMA,
     _RATIONALE_REQUIRED,
-    _MEMORY_TEAM_SCHEMA,
     _PLAN_SCHEMA,
-    _MEMORY_KEY_RE,
     _function,
     _server_function,
     _vorfall_versuche,
@@ -85,11 +83,8 @@ from services.ai_tools.geo_tools import (
 )
 from services.ai_tools.system_tools import (
     _desktop_tool_definitions,
-    _memory_team,
-    _execute_remember,
     question_payload,
     _execute_search_memory,
-    _execute_forget_memory,
     _execute_forget_skill,
     _execute_search_docs,
     _execute_read_docs,

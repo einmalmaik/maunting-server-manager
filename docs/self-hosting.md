@@ -565,6 +565,29 @@ vor der Migration `20261001_01` enthalten in `vault_user_settings`,
 Präfix erst beim nächsten Speichern, weil dort E2EE-, DIS- und alte
 Klartextwerte nebeneinander liegen.
 
+## Gedächtnis nach dem Update auf Gedächtnis v2
+
+Seit Gedächtnis v2 (Oktober 2026) ist eine Erinnerung ein Satz statt eines
+Namens mit Wert, und geschrieben wird sie im Hintergrund, nicht mehr vom
+Chatmodell. Erinnerungen aus der Zeit davor schreibt das Panel nach dem Update
+einmalig in Sätze um (`services/ai_gedaechtnis_altbestand.py`): je Bereich 25
+Einträge in einem Modellaufruf, höchstens zwei Bereiche zugleich, im
+Minutentakt. Der alte Stand bleibt in den früheren Fassungen der Erinnerung
+lesbar und lässt sich zurückholen.
+
+Dafür gehen die Einträge einmal an einen Modellanbieter, und das kostet
+Aufrufe. Gebucht wird mit dem Zweck „Gedächtnis“ (sichtbar in der
+Verbrauchsübersicht):
+
+- persönliche Erinnerungen und eigene Servernotizen beim Benutzer selbst, über
+  seinen Zugang, und nur, wenn er dem Gedächtnis zugestimmt hat. Ohne Zustimmung
+  bleiben seine Einträge, wie sie sind, und funktionieren weiter.
+- Teamwissen beim Gründer des Teams.
+- Server- und panelweites Wissen beim Betreiberkonto.
+
+Ohne eingerichteten KI-Zugang passiert nichts; die Umstellung beginnt, sobald
+einer da ist.
+
 ## Tresor-Cloud: Dateien im Tresor
 
 Die App legt im Tresor auch Dateien ab: Fotos, Videos, Dokumente. Sie werden
@@ -1200,7 +1223,7 @@ bestätigt werden.
 
 Standard ist der unterstützte Modus: die KI analysiert, schlägt vor, wartet. Gemäß dem Grundsatz **„Sicherheit braucht Vertrauen“ / „Schutz braucht Vertrauen“** gilt:
 - **Autonomie-Modus AUS (Standard):** Jede Handlung und jedes Werkzeug der KI (ausnahmslos: Lesewerkzeuge wie `read_server_status`, `web_search`, das Deklarieren von Hintergrund-Workern `worker_start` sowie Schreib- und Verwaltungswerkzeuge) erfordert eine manuelle Bestätigung durch den Benutzer über eine Bestätigungskarte (mit „Bestätigen“ und „Ablehnen“).
-- **Autonomie-Modus AN:** Die KI darf Werkzeuge eigenständig und ohne Bestätigung im Chat und Hintergrund ausführen. Nachgefragt wird nur noch, wo ein Fehler den Server, seine Daten oder fremde Rechte trifft: Server löschen, zurücksetzen oder neu installieren, Dateien löschen, Backup einspielen, Blueprint oder Rolle löschen, Rechte anderer Benutzer entziehen oder kritisch bzw. global vergeben, Shop-Anbindung, Shop-Produkte, Tarif-Rolle und neue Zugangsdaten. Eigene Notizen, Termine, Aufgaben, DNS-Einträge, Erinnerungen und Skills löscht die KI ohne Rückfrage, ebenso auf dem eigenen Rechner (dort geht Gelöschtes in den Papierkorb). Eine Rolle anlegen oder eine Rolle ändern, die noch niemand trägt, fragt nicht, auch mit kritischen Rechten; gefragt wird, wenn sie einem Benutzer zugewiesen wird. Trägt sie schon jemand, fragt ihre Änderung wie eine Vergabe an diese Benutzer. Das gilt im Chat, in der Stimme, in Hintergrund-Workern und auf dem Rechner.
+- **Autonomie-Modus AN:** Die KI darf Werkzeuge eigenständig und ohne Bestätigung im Chat und Hintergrund ausführen. Nachgefragt wird nur noch, wo ein Fehler den Server, seine Daten oder fremde Rechte trifft: Server löschen, zurücksetzen oder neu installieren, Dateien löschen, Backup einspielen, Blueprint oder Rolle löschen, Rechte anderer Benutzer entziehen oder kritisch bzw. global vergeben, Shop-Anbindung, Shop-Produkte, Tarif-Rolle und neue Zugangsdaten. Eigene Notizen, Termine, Aufgaben, DNS-Einträge und Skills löscht die KI ohne Rückfrage, ebenso auf dem eigenen Rechner (dort geht Gelöschtes in den Papierkorb). Erinnerungen vergisst das Gedächtnis im Hintergrund, wenn der Benutzer es im Gespräch verlangt — in beiden Modi, 30 Tage zurückholbar. Eine Rolle anlegen oder eine Rolle ändern, die noch niemand trägt, fragt nicht, auch mit kritischen Rechten; gefragt wird, wenn sie einem Benutzer zugewiesen wird. Trägt sie schon jemand, fragt ihre Änderung wie eine Vergabe an diese Benutzer. Das gilt im Chat, in der Stimme, in Hintergrund-Workern und auf dem Rechner.
 - **Bestätigt wird immer per Klick auf die Karte**, im Chat wie in der Sprachansicht; ein gesprochenes „Ja" führt nichts aus, ein „Nein" lehnt ab. Die Sprachansicht zeigt jede offene Karte, auch die eines Hintergrund-Workers. Im Worker-Fenster sind Karten nur zu sehen.
 - **Hintergrund-Aufgaben & Guardian-Heilung:** Geplante Aufgaben (`ai_tasks`) und automatische Guardian-Reparaturläufe können im Hintergrund nur dann eigenständig arbeiten, wenn der Autonomie-Modus für den betreffenden Benutzer bzw. Server aktiv freigegeben ist.
 
@@ -1814,13 +1837,30 @@ die Deutung — ein Codeblock ist vorgelesen nichts als Satzzeichen.
 
 ### Kontingent
 
-Im Realtime-Modus belegt jede Sitzung eine logische Anfrage und einen
-gleichzeitigen Vorgang. Jede abgeschlossene OpenAI-Antwort erhöht die Zahl der
+Im Realtime-Modus (Realtime, GPT-Live, Gemini Live) ist jede Sitzung eine
+logische Anfrage. Jede abgeschlossene Antwort erhöht die Zahl der
 Provideranfragen. Text- und Audiotokens werden für Ein- und Ausgabe getrennt
 gespeichert und mit den vier hinterlegten Preisen bewertet. Cached Input wird
 zum jeweiligen normalen Eingabepreis berechnet. Vor Sitzungsbeginn und nach
-jeder Antwort gelten dieselben Rollenlimits wie im Chat; Antworten sind
+jeder Antwort gelten dieselben Tokenlimits wie im Chat; Antworten sind
 serverseitig auf 512 Ausgabetokens begrenzt.
+
+Dazu kommt das Rollenlimit **Sprachminuten je 30 Tage**: gezählt wird, wie lange
+eine Sitzung offen war, auf allen Wegen gleich — Realtime, GPT-Live, Gemini Live
+und der klassische Weg (Gehör, Chat, Stimme). Eine Sitzung beginnt nur
+mit mindestens einer Sekunde Rest und endet von selbst, wenn der Rest
+aufgebraucht ist; die Oberfläche meldet dann das Kontingent statt „abgelaufen".
+Offene Sitzungen zählen dabei mit ihrer bisherigen Laufzeit: ein zweiter Tab
+bekommt nur, was der erste übrig lässt.
+Bis zum 07.10.2026 stand an dieser Stelle ein Kostenlimit in Cent; beim Umstieg
+wurde ein gesperrtes (0) zu 0 Minuten, jeder andere Betrag zu „unbegrenzt".
+Eine Rolle, die über *Anfragen pro Minute*, *gleichzeitige Vorgänge* oder ein
+Kostenlimit von 0 gesperrt war, bekam dabei alle Kontingente auf 0 — sie bleibt
+gesperrt.
+
+Das **Diktat** fragt den Anbieter gar nicht erst, wenn die Diktierminuten oder
+ein Tokenlimit schon aufgebraucht sind: die Abschrift würde danach ohnehin
+abgewiesen, bezahlt hätte sie der Betreiber trotzdem.
 
 Die folgende Abrechnung beschreibt den Legacy-Modus:
 
@@ -1828,13 +1868,11 @@ Die folgende Abrechnung beschreibt den Legacy-Modus:
 den Betreiber etwas geändert hat: wo eine Sprachsitzung früher **eine** Buchung
 war, bucht jetzt jeder Zug zweimal — einmal die Abschrift des Gesprochenen,
 einmal den Lauf selbst, beide über denselben Weg gezählt wie eine getippte
-Nachricht. Ein Rollenlimit *Anfragen pro Minute* von fünf zerreisst damit ein
-Gespräch, das vorher durchlief. Ohne gesetztes Limit passiert nichts.
+Nachricht.
 
-Der Gewinn ist, dass Tokengrenzen und Kostengrenze den Sprachmodus genauso
-binden wie den Chat: dieselbe Rechnung, dieselben vom Anbieter gemeldeten
-Zahlen, derselbe gepflegte Rückfallpreis am Zugang. Die früheren Lücken — „die
-Kostengrenze bindet den Sprachmodus überhaupt nicht" und „das Zuhören läuft an
+Der Gewinn ist, dass die Tokengrenzen den Sprachmodus genauso binden wie den
+Chat: dieselbe Rechnung, dieselben vom Anbieter gemeldeten Zahlen, derselbe
+gepflegte Rückfallpreis am Zugang. Die frühere Lücke — „das Zuhören läuft an
 allen Grenzen vorbei" — gibt es nicht mehr.
 
 Eine Eigenheit hat die Abschrift-Buchung: sie erfolgt **nach** dem Hören, nicht

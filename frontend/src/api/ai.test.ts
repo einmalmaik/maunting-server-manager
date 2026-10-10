@@ -129,4 +129,36 @@ describe('aiApi memory URLs', () => {
 
     expect(gerufen).toHaveBeenCalledWith('/ai/memory?scope=server_shared&server_id=62')
   })
+
+  it('blättert mit Ansicht und Themen, gleichnamige Themen als zwei Kennungen', async () => {
+    const gerufen = vi.spyOn(client, 'api').mockResolvedValue({ entries: [], total: 0, clearable: 0, limit: 200 })
+
+    await aiApi.listScopeMemory('team', undefined, 7, 200, { status: 'vergessen', thema: ['a', 'b'] })
+    await aiApi.listPersonalMemory()
+
+    expect(gerufen).toHaveBeenNthCalledWith(
+      1, '/ai/memory/page?scope=team&team_id=7&offset=200&status=vergessen&thema=a&thema=b',
+    )
+    expect(gerufen).toHaveBeenNthCalledWith(2, '/ai/memory/personal?offset=0&status=aktiv')
+  })
+
+  it('legt an, ändert mit Fassung und holt zurück — jeweils unter der Kennung', async () => {
+    const gerufen = vi.spyOn(client, 'api').mockResolvedValue({})
+
+    await aiApi.createMemory({ scope: 'user', text: 'Ein Satz.', titel: null, thema: 'Stil' })
+    await aiApi.updateMemory('e1', { text: 'Neu.', fassung: 3 })
+    await aiApi.restoreMemory('e1')
+    await aiApi.restoreMemoryVersion('e1', 'f1', 4)
+
+    expect(gerufen).toHaveBeenNthCalledWith(1, '/ai/memory', {
+      method: 'POST', body: JSON.stringify({ scope: 'user', text: 'Ein Satz.', titel: null, thema: 'Stil' }),
+    })
+    expect(gerufen).toHaveBeenNthCalledWith(2, '/ai/memory/e1', {
+      method: 'PATCH', body: JSON.stringify({ text: 'Neu.', fassung: 3 }),
+    })
+    expect(gerufen).toHaveBeenNthCalledWith(3, '/ai/memory/e1/zurueckholen', { method: 'POST' })
+    expect(gerufen).toHaveBeenNthCalledWith(4, '/ai/memory/e1/fassungen/f1/zurueckholen', {
+      method: 'POST', body: JSON.stringify({ fassung: 4 }),
+    })
+  })
 })

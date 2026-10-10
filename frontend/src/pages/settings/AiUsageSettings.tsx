@@ -47,6 +47,7 @@ export function AiUsageSettings() {
   if (loading || !data) return null
 
   const numbers = new Intl.NumberFormat(i18n.language)
+  const minuten = new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 1 })
   const geld = (micro: number) => betragFormatieren(micro, data.cost_policy, i18n.language)
   const zeitpunkt = new Intl.DateTimeFormat(i18n.language, {
     day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -76,6 +77,7 @@ export function AiUsageSettings() {
                   <th scope="col" className="py-2 pr-4 text-right">{t('ai.usage.today')}</th>
                   <th scope="col" className="py-2 pr-4 text-right">{t('ai.usage.week')}</th>
                   <th scope="col" className="py-2 pr-4 text-right">{t('ai.usage.month')}</th>
+                  <th scope="col" className="py-2 pr-4 text-right">{t('ai.usage.voiceMinutes')}</th>
                   <th scope="col" className="py-2 pr-4 text-right">{t('ai.usage.requests')}</th>
                   <th scope="col" className="py-2 text-right">{t('ai.usage.cost')}</th>
                 </tr>
@@ -87,6 +89,7 @@ export function AiUsageSettings() {
                     <td className="py-2 pr-4 text-right tabular-nums text-on-surface-variant">{numbers.format(entry.tokens_today)}</td>
                     <td className="py-2 pr-4 text-right tabular-nums text-on-surface-variant">{numbers.format(entry.tokens_week)}</td>
                     <td className="py-2 pr-4 text-right tabular-nums text-on-surface">{numbers.format(entry.tokens_month)}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums text-on-surface-variant">{minuten.format((entry.realtime_seconds_month ?? 0) / 60)}</td>
                     <td className="py-2 pr-4 text-right tabular-nums text-on-surface-variant">{numbers.format(entry.requests_month)}</td>
                     <td className="py-2 text-right tabular-nums text-on-surface">{geld(entry.cost_month_micro_usd).primaer}</td>
                   </tr>
@@ -97,7 +100,7 @@ export function AiUsageSettings() {
                   <td className="py-2 pr-4 text-on-surface">{t('ai.usage.total')}</td>
                   <td colSpan={2} />
                   <td className="py-2 pr-4 text-right tabular-nums text-on-surface">{numbers.format(data.total_tokens_month)}</td>
-                  <td />
+                  <td colSpan={2} />
                   <td className="py-2 text-right tabular-nums text-on-surface">
                     {geld(data.total_cost_month_micro_usd).primaer}
                     {geld(data.total_cost_month_micro_usd).sekundaer && (
@@ -149,13 +152,25 @@ export function AiUsageSettings() {
                   // Herkunft ist etwas anderes als eine geschätzte: bei ihr
                   // wurde nicht geraten, es ist nur nicht mehr feststellbar.
                   const herkunft = event.cost_source ?? 'unknown'
+                  // Nicht jede Zeile ist eine Frage des Benutzers: den
+                  // Gedächtnisschreiber und die Ethik-Beratung bucht MSM für
+                  // ihn. Ohne die Angabe stünde eine Anfrage da, zu der er
+                  // keine Frage findet.
+                  const zweck = event.zweck === 'gedaechtnis'
+                    ? t('ai.usage.events.purposes.memory')
+                    : event.zweck === 'ethik'
+                      ? t('ai.usage.events.purposes.ethics')
+                      : null
                   return (
                     <tr key={event.id} className="border-b border-outline-variant/20 last:border-0">
                       <td className="py-2 pr-4 whitespace-nowrap text-on-surface-variant">
                         {zeitpunkt.format(new Date(event.created_at))}
                       </td>
                       <td className="py-2 pr-4 text-on-surface-variant">{event.username}</td>
-                      <td className="py-2 pr-4 text-on-surface-variant">{event.model ?? '—'}</td>
+                      <td className="py-2 pr-4 text-on-surface-variant">
+                        {event.model ?? '—'}
+                        {zweck && <span className="block text-xs">{zweck}</span>}
+                      </td>
                       <td className="py-2 pr-4 text-right tabular-nums text-on-surface-variant">
                         {event.prompt_tokens === null ? '—' : numbers.format(event.prompt_tokens)}
                       </td>

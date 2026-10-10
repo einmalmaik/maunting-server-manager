@@ -322,3 +322,550 @@ def test_email_spalte_faellt_erst_nach_dem_verschluesseln(pg_wegwerf, monkeypatc
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+# ── 20261006_01 — Gedächtnis v2: Sätze statt Schlüssel ──────────────────────
+
+
+def test_gedaechtnis_saetze_hin_und_zurueck(pg_wegwerf):
+    """Altbestand behält seinen Namen, und der Rückbau lässt nichts Namenloses zurück.
+
+    Hinweg: jede bestehende Zeile gilt (``aktiv``), steht in Fassung 1 und hat
+    eine Quelle — was die KI gemerkt hat, kommt aus einem Gespräch.
+
+    Rückweg: der alte Stand kennt weder namenlose Zeilen noch ``vergessen``.
+    Eine namenlose bekommt einen Namen im Klartext, den der alte Stand beim
+    Start selbst verschlüsselt; eine vergessene fällt weg, statt nach dem
+    Rückbau wieder zu gelten.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, inspect, text
+    from sqlalchemy.exc import IntegrityError
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+
+    db_url = pg_wegwerf("gedaechtnis-v2")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    zeitpunkt = "'2026-10-01 00:00:00+00'"
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+        command.downgrade(config, "20261005_01")
+
+        tabellen = set(inspect(engine).get_table_names())
+        assert "ai_memory_themen" not in tabellen and "ai_memory_versionen" not in tabellen
+        spalten = {s["name"]: s for s in inspect(engine).get_columns("ai_memory_entries")}
+        assert "titel_encrypted" not in spalten and "status" not in spalten
+        assert spalten["key_encrypted"]["nullable"] is False
+
+        with engine.begin() as conn:
+            for kennung, herkunft in (("alt-ki", "ai"), ("alt-mensch", "user")):
+                conn.execute(text(
+                    "INSERT INTO ai_memory_entries (id, scope, scope_identity, key_encrypted, "
+                    "value_encrypted, origin, aad_version, use_count, created_at, updated_at) "
+                    f"VALUES (:id, 'user', 'user:1', :name, 'x', :herkunft, 2, 0, {zeitpunkt}, {zeitpunkt})"
+                ), {"id": kennung, "name": f"name-{kennung}", "herkunft": herkunft})
+
+        command.upgrade(config, "20261006_01")
+
+        with engine.connect() as conn:
+            zeilen = {
+                z.id: z for z in conn.execute(text(
+                    "SELECT id, quelle, status, fassung, wichtigkeit, key_encrypted "
+                    "FROM ai_memory_entries"
+                ))
+            }
+        assert zeilen["alt-ki"].quelle == "gespraech"
+        assert zeilen["alt-mensch"].quelle == "eingetragen"
+        for zeile in zeilen.values():
+            assert (zeile.status, zeile.fassung, zeile.wichtigkeit) == ("aktiv", 1, 3)
+            # Der Name bleibt, wo er war; umgeschrieben wird erst in Stufe 2.
+            assert zeile.key_encrypted.startswith("name-")
+        spalten = {s["name"]: s for s in inspect(engine).get_columns("ai_memory_entries")}
+        assert spalten["key_encrypted"]["nullable"] is True
+        # Die Prüfungen stehen in der Datenbank und nicht nur im Modell.
+        with pytest.raises(IntegrityError):
+            with engine.begin() as conn:
+                conn.execute(text("UPDATE ai_memory_entries SET status = 'weg' WHERE id = 'alt-ki'"))
+
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO ai_memory_entries (id, scope, scope_identity, key_encrypted, "
+                "value_encrypted, origin, aad_version, use_count, created_at, updated_at, status) "
+                "VALUES ('1234567890abcdef', 'user', 'user:1', NULL, 'x', 'user', 2, 0, "
+                f"{zeitpunkt}, {zeitpunkt}, 'aktiv'), "
+                "('vergessen-1', 'user', 'user:1', NULL, 'x', 'ai', 2, 0, "
+                f"{zeitpunkt}, {zeitpunkt}, 'vergessen')"
+            ))
+            conn.execute(text(
+                "INSERT INTO ai_memory_versionen (id, memory_id, scope_identity, text_encrypted, "
+                f"grund, von, created_at) VALUES ('f1', 'alt-ki', 'user:1', 'x', 'bearbeitet', 'user', {zeitpunkt})"
+            ))
+
+        command.downgrade(config, "20261005_01")
+
+        with engine.connect() as conn:
+            zeilen = {
+                z.id: z for z in conn.execute(text(
+                    "SELECT id, key_encrypted, key_index FROM ai_memory_entries"
+                ))
+            }
+        assert set(zeilen) == {"alt-ki", "alt-mensch", "1234567890abcdef"}
+        assert zeilen["1234567890abcdef"].key_encrypted == "erinnerung-1234567890abcdef"
+        assert zeilen["1234567890abcdef"].key_index is None
+        assert "ai_memory_versionen" not in set(inspect(engine).get_table_names())
+        spalten = {s["name"]: s for s in inspect(engine).get_columns("ai_memory_entries")}
+        assert spalten["key_encrypted"]["nullable"] is False
+
+        # Und wieder hinauf: der Hinweg verträgt einen Stand, der schon einmal oben war.
+        command.upgrade(config, "head")
+        assert {"ai_memory_themen", "ai_memory_versionen"} <= set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
+
+# ── 20261006_02 — Gedächtnis v2: der Hintergrund schreibt ───────────────────
+
+
+def test_gedaechtnis_schreiber_hin_und_zurueck(pg_wegwerf):
+    """Bestehende Gespräche beginnen beim Update, und der Zweck kommt mit.
+
+    Hinweg: jedes vorhandene Gespräch bekommt die Marke „jetzt“ — sonst läse
+    der erste Takt nach dem Update den ganzen Verlauf jedes Benutzers auf
+    einmal. Die Verbrauchszeile kennt den Zweck ``gedaechtnis``.
+
+    Rückweg: der alte Stand kennt nur ``ethik``. Eine Zeile mit
+    ``gedaechtnis`` bleibt und zählt dort als Anfrage, die MSM für den
+    Benutzer stellt, statt den Rückbau an der Prüfung scheitern zu lassen.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, inspect, text
+    from sqlalchemy.exc import IntegrityError
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+
+    db_url = pg_wegwerf("gedaechtnis-schreiber")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+        command.downgrade(config, "20261006_01")
+        spalten = {s["name"] for s in inspect(engine).get_columns("ai_conversations")}
+        assert "gedaechtnis_bis" not in spalten, "Vorbedingung: der Stand vor 20261006_02"
+
+        with engine.begin() as conn:
+            # Über die Tabelle des Modells: deren Vorgaben füllen die übrigen
+            # Pflichtspalten, die hier niemanden interessieren.
+            conn.execute(models.User.__table__.insert().values(
+                id=1, username="jonas", password_hash="x",
+            ))
+            conn.execute(text(
+                "INSERT INTO ai_conversations (id, kind, user_id, title, created_at, updated_at) "
+                "VALUES ('g1', 'primary', 1, 'x', '2026-10-01 00:00:00+00', '2026-10-01 00:00:00+00')"
+            ))
+
+        command.upgrade(config, "20261006_02")
+
+        with engine.connect() as conn:
+            zeile = conn.execute(text(
+                "SELECT gedaechtnis_bis, gedaechtnis_bis_id, gedaechtnis_faellig, "
+                "gedaechtnis_fehlversuche, updated_at FROM ai_conversations"
+            )).one()
+        assert zeile.gedaechtnis_bis is not None and zeile.gedaechtnis_bis_id is None
+        assert (zeile.gedaechtnis_faellig, zeile.gedaechtnis_fehlversuche) == (None, 0)
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO ai_usage_events (request_id, user_id, status, reserved_tokens, "
+                "reserved_cost_microunits, accounted_tokens, accounted_cost_microunits, "
+                "zweck, created_at) VALUES ('r1', 1, 'completed', 1, 0, 1, 0, 'gedaechtnis', now())"
+            ))
+        with pytest.raises(IntegrityError):
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "INSERT INTO ai_usage_events (request_id, user_id, status, reserved_tokens, "
+                    "reserved_cost_microunits, accounted_tokens, accounted_cost_microunits, "
+                    "zweck, created_at) VALUES ('r2', 1, 'completed', 1, 0, 1, 0, 'erfunden', now())"
+                ))
+
+        command.downgrade(config, "20261006_01")
+
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT zweck FROM ai_usage_events")).scalar_one() == "ethik"
+        spalten = {s["name"] for s in inspect(engine).get_columns("ai_conversations")}
+        assert not {s for s in spalten if s.startswith("gedaechtnis_")}
+
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
+
+# ── 20261007_01 — Gedächtnis v2: ein eigenes Modell ─────────────────────────
+
+
+def test_gedaechtnismodell_hin_und_zurueck(pg_wegwerf):
+    """Ein bestehender Zugang bekommt den Platz leer und ausgeschaltet.
+
+    Dann liest das Gedächtnis mit dem eines anderen Zugangs oder dem
+    Standardmodell weiter — das Update ändert nichts am laufenden Betrieb.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, inspect, text
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+
+    db_url = pg_wegwerf("gedaechtnis-modell")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    neue = {
+        "memory_model", "memory_enabled", "memory_input_price_micro_usd_per_million",
+        "memory_output_price_micro_usd_per_million", "memory_cache_price_micro_usd_per_million",
+    }
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+        command.downgrade(config, "20261006_02")
+        assert not neue & {s["name"] for s in inspect(engine).get_columns("ai_providers")}
+
+        with engine.begin() as conn:
+            # Von Hand statt über die Tabelle des Modells: die kennt den Platz
+            # schon und schriebe ihn mit, den es auf diesem Stand nicht gibt.
+            conn.execute(text(
+                "INSERT INTO ai_providers (id, name, provider_kind, default_model, enabled, "
+                "requires_api_key, created_at, updated_at) "
+                "VALUES (1, 'Bestand', 'openrouter', 'model-a', true, false, now(), now())"
+            ))
+        command.upgrade(config, "20261007_01")
+
+        assert neue <= {s["name"] for s in inspect(engine).get_columns("ai_providers")}
+        with engine.connect() as conn:
+            zeile = conn.execute(text(
+                "SELECT memory_model, memory_enabled, memory_input_price_micro_usd_per_million "
+                "FROM ai_providers"
+            )).one()
+        assert tuple(zeile) == (None, False, None)
+
+        command.downgrade(config, "20261006_02")
+        assert not neue & {s["name"] for s in inspect(engine).get_columns("ai_providers")}
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
+
+
+def test_gedaechtnisabruf_hin_und_zurueck(pg_wegwerf):
+    """Bestehende Erinnerungen sind nicht angeheftet und warten aufs Nachziehen.
+
+    ``indiziert_am`` bleibt NULL — daran erkennt der Takt, was er noch
+    rechnen muss (`ai_gedaechtnis_abruf.nachziehen`). Der Wortindex startet
+    leer und verschwindet beim Zurückgehen samt Index.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, inspect, text
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+
+    db_url = pg_wegwerf("gedaechtnis-abruf")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    neue = {"angeheftet", "indiziert_am"}
+
+    def spalten() -> set[str]:
+        return {s["name"] for s in inspect(engine).get_columns("ai_memory_entries")}
+
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+        command.downgrade(config, "20261007_01")
+        assert not neue & spalten()
+        assert not inspect(engine).has_table("ai_memory_begriffe")
+
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO ai_memory_entries (id, scope, scope_identity, value_encrypted, "
+                "origin, aad_version, use_count, created_at, updated_at) "
+                "VALUES ('e1', 'panel', 'panel', 'x', 'user', 2, 0, now(), now())"
+            ))
+        command.upgrade(config, "20261008_01")
+
+        assert neue <= spalten()
+        assert "ix_ai_memory_kopf" in {
+            i["name"] for i in inspect(engine).get_indexes("ai_memory_entries")
+        }
+        with engine.connect() as conn:
+            zeile = conn.execute(text(
+                "SELECT angeheftet, indiziert_am FROM ai_memory_entries"
+            )).one()
+            assert conn.execute(text("SELECT count(*) FROM ai_memory_begriffe")).scalar() == 0
+        assert tuple(zeile) == (False, None)
+
+        command.downgrade(config, "20261007_01")
+        assert not neue & spalten()
+        assert not inspect(engine).has_table("ai_memory_begriffe")
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
+
+def test_gedaechtnispflege_hin_und_zurueck(pg_wegwerf):
+    """Bestehende Erinnerungen bekommen ihren Kopfrang gleich beim Update.
+
+    Sonst stünden sie alle bei 0 hinter jedem neuen Eintrag, bis die Pflege
+    zum ersten Mal rechnet. Die Haltbarkeit bleibt leer: es gilt der
+    Startwert der Wichtigkeit.
+    """
+    import math
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, inspect, text
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+
+    db_url = pg_wegwerf("gedaechtnis-pflege")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    neue = {"haltbarkeit_tage", "kopf_rang"}
+
+    def spalten() -> set[str]:
+        return {s["name"] for s in inspect(engine).get_columns("ai_memory_entries")}
+
+    def kopfindex() -> list[str]:
+        return next(
+            i["column_names"] for i in inspect(engine).get_indexes("ai_memory_entries")
+            if i["name"] == "ix_ai_memory_kopf"
+        )
+
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+        command.downgrade(config, "20261008_01")
+        assert not neue & spalten()
+        assert "wichtigkeit" in kopfindex()
+
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO ai_memory_entries (id, scope, scope_identity, value_encrypted, "
+                "origin, aad_version, use_count, wichtigkeit, created_at, updated_at) "
+                "VALUES ('e1', 'panel', 'panel', 'x', 'user', 2, 0, 4, "
+                "now() - interval '90 days', now())"
+            ))
+        command.upgrade(config, "20261008_02")
+
+        assert neue <= spalten()
+        assert "kopf_rang" in kopfindex() and "wichtigkeit" not in kopfindex()
+        assert inspect(engine).has_table("ai_memory_pflege")
+        with engine.connect() as conn:
+            rang, haltbarkeit = conn.execute(text(
+                "SELECT kopf_rang, haltbarkeit_tage FROM ai_memory_entries"
+            )).one()
+        assert rang == pytest.approx(4 * math.exp(-1), rel=1e-3)
+        assert haltbarkeit is None
+
+        command.downgrade(config, "20261008_01")
+        assert not neue & spalten()
+        assert not inspect(engine).has_table("ai_memory_pflege")
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
+def test_jeder_erlaubte_zweck_passt_in_seine_spalte(db) -> None:
+    """AGENTS.md 119: jeder Wert, den die Prüfung erlaubt, wird einmal gespeichert."""
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    from models import AiUsageEvent, User
+    from services.ai_usage_service import ZWECKE
+
+    benutzer = User(username=f"zweck-{uuid4().hex[:6]}", email=f"{uuid4().hex[:6]}@test.de", password_hash="x")
+    db.add(benutzer)
+    db.flush()
+    for zweck in ZWECKE:
+        db.add(AiUsageEvent(
+            request_id=str(uuid4()), user_id=benutzer.id, status="completed",
+            reserved_tokens=1, reserved_cost_microunits=0, accounted_tokens=1,
+            accounted_cost_microunits=0, zweck=zweck, created_at=datetime.now(timezone.utc),
+        ))
+    db.commit()
+    assert {e.zweck for e in db.query(AiUsageEvent).filter(AiUsageEvent.user_id == benutzer.id)} == set(ZWECKE)
+
+
+def test_ki_limits_umbau_hin_und_zurueck(pg_wegwerf):
+    """Ein gesperrtes Echtzeitbudget bleibt gesperrt, jeder Betrag wird unbegrenzt.
+
+    Cent lassen sich nicht in Minuten umrechnen, ohne einen Preis zu raten.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, inspect, text
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+
+    db_url = pg_wegwerf("ki-limits-umbau")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    alte = {"requests_per_minute", "concurrent_operations", "monthly_cost_limit_cents",
+            "monthly_realtime_cost_limit_cents"}
+
+    def spalten(tabelle: str) -> set[str]:
+        return {s["name"] for s in inspect(engine).get_columns(tabelle)}
+
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+        command.downgrade(config, "20261008_02")
+        assert alte <= spalten("role_ai_limits")
+        assert "monthly_realtime_minutes_limit" not in spalten("role_ai_limits")
+        assert "realtime_seconds" not in spalten("ai_usage_events")
+
+        with engine.begin() as conn:
+            for rid, cent in ((1, 0), (2, 500), (3, None)):
+                conn.execute(text(
+                    "INSERT INTO roles (id, name, is_system, created_at) "
+                    "VALUES (:i, :n, false, now())"
+                ), {"i": rid, "n": f"rolle-{rid}"})
+                conn.execute(text(
+                    "INSERT INTO role_ai_limits (role_id, daily_token_limit, requests_per_minute, "
+                    "monthly_realtime_cost_limit_cents, updated_at) VALUES (:i, 100, 5, :c, now())"
+                ), {"i": rid, "c": cent})
+            for rid, feld in ((4, "requests_per_minute"), (5, "concurrent_operations"),
+                              (6, "monthly_cost_limit_cents")):
+                conn.execute(text(
+                    "INSERT INTO roles (id, name, is_system, created_at) "
+                    "VALUES (:i, :n, false, now())"
+                ), {"i": rid, "n": f"rolle-{rid}"})
+                conn.execute(text(
+                    f"INSERT INTO role_ai_limits (role_id, daily_token_limit, {feld}, updated_at) "
+                    "VALUES (:i, NULL, 0, now())"
+                ), {"i": rid})
+        command.upgrade(config, "20261008_03")
+
+        assert not alte & spalten("role_ai_limits")
+        assert "realtime_seconds" in spalten("ai_usage_events")
+        with engine.connect() as conn:
+            zeilen = dict(conn.execute(text(
+                "SELECT role_id, monthly_realtime_minutes_limit FROM role_ai_limits"
+            )).all())
+            tokens = conn.execute(text("SELECT DISTINCT daily_token_limit FROM role_ai_limits ORDER BY 1")).all()
+        assert zeilen == {1: 0, 2: None, 3: None, 4: 0, 5: 0, 6: 0}
+        assert tokens == [(0,), (100,)]
+        with engine.connect() as conn:
+            gesperrt = conn.execute(text(
+                "SELECT role_id FROM role_ai_limits WHERE daily_token_limit = 0 "
+                "AND weekly_token_limit = 0 AND monthly_token_limit = 0 "
+                "AND monthly_dictation_minutes_limit = 0 ORDER BY role_id"
+            )).scalars().all()
+        # Eine 0 in einem entfallenden Feld sperrte — und sperrt weiter.
+        assert gesperrt == [4, 5, 6]
+
+        command.downgrade(config, "20261008_02")
+        assert alte <= spalten("role_ai_limits")
+        assert "realtime_seconds" not in spalten("ai_usage_events")
+        with engine.connect() as conn:
+            gesperrt = conn.execute(text(
+                "SELECT role_id FROM role_ai_limits WHERE monthly_realtime_cost_limit_cents = 0"
+            )).scalars().all()
+        assert sorted(gesperrt) == [1, 4, 5, 6]
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
+
+def test_gedaechtnisschluesse_hin_und_zurueck(pg_wegwerf):
+    """Die Art fasst ``schluss`` erst nach dem Update; zurück gehen die Schlüsse mit.
+
+    Ohne ihre Belege sähen sie im alten Stand aus wie Gesagtes.
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from sqlalchemy import create_engine, inspect, text
+    from sqlalchemy.exc import IntegrityError
+
+    import models  # noqa: F401
+    from config import settings
+    from database import Base
+
+    db_url = pg_wegwerf("gedaechtnis-schluesse")
+    vorher = settings.database_url
+    settings.database_url = db_url
+    config = _memory_migration_config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    zeile = (
+        "INSERT INTO ai_memory_entries (id, scope, scope_identity, value_encrypted, origin, "
+        "aad_version, use_count, wichtigkeit, art, created_at, updated_at) "
+        "VALUES (:i, 'panel', 'panel', 'x', 'ai', 2, 0, 3, :a, now(), now())"
+    )
+
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+        command.downgrade(config, "20261008_03")
+        assert not inspect(engine).has_table("ai_memory_belege")
+        with pytest.raises(IntegrityError):
+            with engine.begin() as conn:
+                conn.execute(text(zeile), {"i": "s0", "a": "schluss"})
+
+        command.upgrade(config, "20261008_04")
+
+        assert inspect(engine).has_table("ai_memory_belege")
+        with engine.begin() as conn:
+            for kennung, art in (("b1", "fakt"), ("b2", None), ("s1", "schluss")):
+                conn.execute(text(zeile), {"i": kennung, "a": art})
+            for beleg in ("b1", "b2"):
+                conn.execute(text(
+                    "INSERT INTO ai_memory_belege (schluss_id, beleg_id) VALUES ('s1', :b)"
+                ), {"b": beleg})
+            # Ein gelöschter Beleg nimmt seine Zeile mit, der Schluss bleibt.
+            conn.execute(text("DELETE FROM ai_memory_entries WHERE id = 'b2'"))
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT beleg_id FROM ai_memory_belege")).scalars().all() == ["b1"]
+
+        command.downgrade(config, "20261008_03")
+        assert not inspect(engine).has_table("ai_memory_belege")
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT id FROM ai_memory_entries ORDER BY id")).scalars().all() == ["b1"]
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+        settings.database_url = vorher

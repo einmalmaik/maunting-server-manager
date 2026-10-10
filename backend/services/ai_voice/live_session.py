@@ -70,6 +70,8 @@ from services.ai_voice.realtime_session import (
     gedaechtnis,
     lage_abschnitt,
     gedaechtnis_anhang,
+    hoechstdauer,
+    mitschreiben,
     reservieren,
     sprachregel,
 )
@@ -243,9 +245,12 @@ def vorbereiten(
     tools = angebotene_werkzeuge(db, provider=provider, user=user, herkunft=herkunft)
     sprache = provider.realtime_language or "auto"
     memory = gedaechtnis(db, user)
+    # GPT-Live schreibt beide Seiten selbst ab: mit der Einwilligung hört der
+    # Schreiber mit, ohne Abschriftmodell.
+    schreibt_mit = mitschreiben(db, user)
     # Einmal gebaut, an Stimme **und** Backend: beide sollen dieselbe Uhr
     # lesen (`realtime_session.lage_abschnitt`).
-    lage = lage_abschnitt(db, user)
+    lage = lage_abschnitt(db, user, mitschrift=schreibt_mit)
     basis_prompt = ai_prompt.build(
         gesprochen=True,
         rolle="live",
@@ -269,6 +274,8 @@ def vorbereiten(
         disable_safety=bool(getattr(provider, "disable_safety", False)),
         backend_model=backend,
         backend_instructions=backend_anweisungen(basis_prompt, memory, lage),
+        mitschreiben=schreibt_mit,
+        hoechstdauer=hoechstdauer(db, user),
     )
 
 
@@ -422,6 +429,10 @@ class LiveSitzung(RealtimeSitzung):
         self._bereit_gemeldet = True
         self._geschlossen = False
 
+    def _schreibt_mit(self) -> bool:
+        """GPT-Live schickt die Abschrift beider Seiten ohnehin, ohne Aufpreis."""
+        return self.v.mitschreiben
+
     # ── Rahmen ────────────────────────────────────────────────────────
 
     def _befehl(self, art: str, **felder: object) -> dict:
@@ -560,7 +571,10 @@ class LiveSitzung(RealtimeSitzung):
 
     # ── Verbrauch ─────────────────────────────────────────────────────
 
-    def _buchen(self, *, text_input: int = 0, text_output: int = 0, kosten: int, anfragen: int) -> None:
+    def _buchen(
+        self, *, text_input: int = 0, text_output: int = 0, kosten: int, anfragen: int,
+        zwischengespeichert: int = 0,
+    ) -> None:
         """Bucht Verbrauch, der schon angefallen ist — notfalls über die Grenze.
 
         Erst mit Prüfung; lehnt die Grenze ab, wird dieselbe Buchung ohne
@@ -576,6 +590,7 @@ class LiveSitzung(RealtimeSitzung):
             "audio_output": 0,
             "cost_microunits": kosten,
             "anfragen": anfragen,
+            "zwischengespeichert": zwischengespeichert,
         }
         with SessionLocal() as db:
             try:
@@ -626,6 +641,8 @@ class LiveSitzung(RealtimeSitzung):
             usage = antwort.get("usage") if isinstance(antwort.get("usage"), dict) else {}
             ti = self._tokenzahl(usage, "input_tokens")
             to = self._tokenzahl(usage, "output_tokens")
+            details = usage.get("input_tokens_details")
+            gelesen = self._tokenzahl(details, "cached_tokens") if isinstance(details, dict) else 0
             summe_ein = self._verbrauch_tokens[0] + ti
             summe_aus = self._verbrauch_tokens[1] + to
             # Zwischengespeicherte Eingabe steckt in ``input_tokens`` und wird
@@ -633,7 +650,10 @@ class LiveSitzung(RealtimeSitzung):
             gesamt = (summe_ein * self._preise[0] + summe_aus * self._preise[1]) // 1_000_000
             kosten = max(0, gesamt - self._verbrauch_kosten)
             try:
-                self._buchen(text_input=ti, text_output=to, kosten=kosten, anfragen=1)
+                self._buchen(
+                    text_input=ti, text_output=to, kosten=kosten, anfragen=1,
+                    zwischengespeichert=gelesen,
+                )
             except ai_usage_service.AiQuotaExceeded as exc:
                 if exc.reason != "realtime_session_limit":
                     self._verbrauch_tokens[0], self._verbrauch_tokens[1] = summe_ein, summe_aus
@@ -648,7 +668,7 @@ class LiveSitzung(RealtimeSitzung):
         except ai_usage_service.AiQuotaExceeded as exc:
             grund = (
                 "realtime_kontingent"
-                if exc.reason == "monthly_realtime_cost_limit_cents"
+                if exc.reason == "monthly_realtime_minutes_limit"
                 else "kontingent"
             )
             await self._debug_senden("REALTIME_QUOTA", hint=grund)
@@ -717,6 +737,7 @@ class LiveSitzung(RealtimeSitzung):
             self._zuletzt_sprach = "ich"
             self._eingabe = ""
         self._eingabe = (self._eingabe + stueck)[-MAX_ABSCHRIFT_ZEICHEN:]
+        self._mitschrift.stueck("ich", stueck)
         if not self._user_spricht:
             self._user_spricht = True
             self.lage.aeusserungen += 1
@@ -730,6 +751,7 @@ class LiveSitzung(RealtimeSitzung):
         self._zuletzt_gesagt = time.monotonic()
         self._bereit_gemeldet = False
         self._zuletzt_sprach = "ki"
+        self._mitschrift.stueck("ki", stueck)
         if not self._assistant_spricht:
             self._assistant_spricht = True
             await self._panel_senden({"art": "zustand", "zustand": "spricht"})

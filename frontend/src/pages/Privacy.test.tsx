@@ -47,6 +47,12 @@ const KI_PUNKTE = [
   'usage',
   'memory',
   'memoryConsent',
+  // Seit 10/2026: das Gespräch geht für das Gedächtnis ein zweites Mal an den
+  // Modellanbieter. Steht direkt hinter der Zustimmung, an der es hängt.
+  'memoryReading',
+  // Seit 10/2026: der Import liest mit dem Gedächtnis-Modell; der eingefügte
+  // Text geht dafür an einen Anbieter.
+  'memoryImport',
   'memorySearch',
   'attachments',
   'autonomy',
@@ -143,7 +149,7 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.39 vom 2026-10-09 aus (Updates fragen GitHub)', () => {
+  it('weist die Fassung 3.39 vom 2026-10-10 aus (Updates fragen GitHub)', () => {
     const { container } = renderPrivacy();
 
     expect(
@@ -212,6 +218,21 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).not.toMatch(/Aufnahme im Kamera-Ordner/);
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/Ordner anderer Apps wie Messenger oder Downloads/);
     expect(i18n.t('privacyPolicy.sections.vault.items.kamera')).toMatch(/„Tresor“ im Teilen-Menü/);
+    // 3.23: das Gedächtnis schreibt ein Hintergrundschritt, der das Gespräch noch einmal liest.
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.ai.items.memoryReading'))).toBeInTheDocument();
+    // 3.24: ein eigenes Gedächtnis-Modell, und der Import geht an einen Anbieter.
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.ai.items.memoryImport'))).toBeInTheDocument();
+    // 3.25: für die Suche ein Prüfwert je Wort, nur mit dem Panelschlüssel lesbar.
+    expect(i18n.t('privacyPolicy.sections.ai.items.memorySearch')).toMatch(/für jedes Wort einen Prüfwert/);
+    expect(i18n.t('privacyPolicy.sections.ai.items.memorySearch')).toMatch(/mit der Erinnerung gelöscht/);
+    // 3.26: nachts liest die Pflege neue Einträge mit ihren Nachbarn noch einmal.
+    expect(i18n.t('privacyPolicy.sections.ai.items.memoryReading')).toMatch(/Nachts führt derselbe Schritt Einträge zusammen/);
+    expect(i18n.t('privacyPolicy.sections.ai.items.memoryReading')).toMatch(/ohne einen Ausgang zu behaupten/);
+    // 3.27: die Sprachminuten je Rolle brauchen die Dauer jeder Sitzung.
+    expect(i18n.t('privacyPolicy.sections.ai.items.usage')).toMatch(/bei Sprachsitzungen deren Dauer/);
+    // 3.28: nachts zieht die Pflege Schlüsse, geprüft gegen genau ihre Belege.
+    expect(i18n.t('privacyPolicy.sections.ai.items.memoryReading')).toMatch(/zwingend aus mindestens zwei vorhandenen Einträgen/);
+    expect(i18n.t('privacyPolicy.sections.ai.items.memoryReading')).toMatch(/sobald einer davon geändert, vergessen oder gelöscht wird/);
     // 3.29: Karten und Bankkonten sind eigene Einträge im Tresor.
     expect(i18n.t('privacyPolicy.sections.vault.items.eintraege')).toMatch(/Zahlungskarten, Bankkonten/);
     // 3.30: der Browser hat einen eigenen Abschnitt; Absturzberichte der Tabs gehen nicht an Microsoft.
@@ -262,8 +283,8 @@ describe('Privacy page', () => {
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-10-09');
-    expect(stand).toHaveTextContent('2026-10-09');
+    expect(stand).toHaveAttribute('datetime', '2026-10-10');
+    expect(stand).toHaveTextContent('2026-10-10');
   });
 
   it('nennt in den Einstellungen der App dieselbe Fassung wie die Erklärung selbst', () => {
@@ -354,8 +375,71 @@ describe('Privacy page', () => {
     // Guardian-Kopplung, zehn danach, elf seit den stehenden KI-Aufgaben,
     // dreizehn seit verknüpften Postfächern und Kalendern, vierzehn mit
     // Sprachmodus, fuenfzehn seit die KI den Messenger nicht mehr erreicht,
-    // sechzehn seit dem Google-Rückfall der Bedeutungssuche (24.09.2026).
-    expect(gerendert).toHaveLength(16);
+    // sechzehn seit dem Google-Rückfall der Bedeutungssuche (24.09.2026),
+    // siebzehn seit ein Hintergrundschritt das Gedächtnis schreibt (06.10.2026),
+    // achtzehn seit der Import mit dem Gedächtnis-Modell liest (07.10.2026).
+    expect(gerendert).toHaveLength(18);
+  });
+
+  /**
+   * Seit Gedächtnis v2 schreibt nicht mehr das Chatmodell, sondern ein
+   * Hintergrundschritt, der das Gespräch danach noch einmal an den
+   * Modellanbieter schickt — bei einem Sprachgespräch als Mitschrift, die sonst
+   * nirgends steht. Die Erklärung sagt das in beiden Sprachen, dazu, auf wessen
+   * Kontingent es geht und was ohne Zustimmung trotzdem gelesen wird — und
+   * dass Einträge mit Namen dafür einmal umgeschrieben werden.
+   */
+  /**
+   * Seit Gedächtnis v2, Stufe 3 liest den Import das Gedächtnis-Modell. Bis
+   * dahin zerlegte ein Parser im Panel den Text, und er ging nirgends hin.
+   */
+  it('nennt, dass der Import an das Gedächtnis-Modell geht und was davon bleibt, in beiden Sprachen', () => {
+    const de = i18n.t('privacyPolicy.sections.ai.items.memoryImport', { lng: 'de' })
+    expect(de).toMatch(/übernommen wird, an das Gedächtnis-Modell/)
+    // Ein langer Text geht in Teilen, und sein Anfang geht mit jedem mit.
+    expect(de).toMatch(/in Teilen, jeder mit den ersten 1\.500 Zeichen des Textes/)
+    expect(de).toMatch(/über „Einfügen“ übernommen/)
+    expect(de).toMatch(/Vorher werden erkannte Zugangsdaten entfernt/)
+    expect(de).toMatch(/passende vorhandene Einträge und die Themennamen des Zielbereichs mit/)
+    expect(de).toMatch(/den eingefügten Text selbst speichert das Panel nicht/)
+    expect(de).toMatch(/zählen zum KI-Kontingent des Nutzers/)
+    const en = i18n.t('privacyPolicy.sections.ai.items.memoryImport', { lng: 'en' })
+    expect(en).toMatch(/a long text is sent in parts, each with the first 1,500 characters/)
+    expect(en).toMatch(/taken over via “Paste”/)
+    expect(en).toMatch(/Recognized credentials are removed first/)
+    expect(en).toMatch(/matching existing entries and the topic names of the target scope are sent along/)
+    expect(en).toMatch(/the panel does not store the pasted text itself/)
+    expect(en).toMatch(/count toward the user's AI quota/)
+  });
+
+  it('nennt das zweite Lesen des Gesprächs für das Gedächtnis, in beiden Sprachen', () => {
+    const de = i18n.t('privacyPolicy.sections.ai.items.memoryReading', { lng: 'de' })
+    expect(de).toMatch(/ein weiteres Mal an einen Modellanbieter, und zwar an das Gedächtnis-Modell/)
+    expect(de).toMatch(/vorhandene Einträge samt Themennamen der betroffenen Bereiche/)
+    // Seit 3.24: es kann ein anderer Anbieter sein als der des Gesprächs.
+    expect(de).toMatch(/sonst das eines anderen Anbieters; ist keines eingerichtet, das Standardmodell/)
+    expect(de).toMatch(/Mitschrift eines Sprachgesprächs entsteht nur dafür/)
+    expect(de).toMatch(/wird nirgends gespeichert/)
+    expect(de).toMatch(/zählen zum KI-Kontingent des Nutzers/)
+    expect(de).toMatch(/auch ohne diese Zustimmung, dann aber nur für diese geteilten Bereiche/)
+    // Die Grenze der Zustimmung: ihr Zeitpunkt, und ein Widerruf mitten im Gespräch.
+    expect(de).toMatch(/dafür wird ihr Zeitpunkt gespeichert/)
+    expect(de).toMatch(/verfällt ungelesen, wenn die Zustimmung während des Gesprächs widerrufen wird/)
+    // Der Altbestand mit Namen geht zum Umschreiben einmal an den Anbieter.
+    expect(de).toMatch(/einmalig in Sätze um/)
+    expect(de).toMatch(/Teamwissen auf das des Teamgründers/)
+    const en = i18n.t('privacyPolicy.sections.ai.items.memoryReading', { lng: 'en' })
+    expect(en).toMatch(/sent to a model provider once more, namely to the memory model/)
+    expect(en).toMatch(/existing entries of the affected scopes, with their topic names/)
+    expect(en).toMatch(/otherwise that of another provider; if none is set up, the standard model/)
+    expect(en).toMatch(/transcript of a voice conversation exists only for this purpose/)
+    expect(en).toMatch(/is never stored/)
+    expect(en).toMatch(/the time of consent is stored for this/)
+    expect(en).toMatch(/discarded unread if consent is withdrawn during the conversation/)
+    expect(en).toMatch(/count toward the user's AI quota/)
+    expect(en).toMatch(/without this consent, but only for these shared scopes/)
+    expect(en).toMatch(/rewritten into sentences once/)
+    expect(en).toMatch(/team knowledge on the team founder's/)
   });
 });
 

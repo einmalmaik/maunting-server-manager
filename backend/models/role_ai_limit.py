@@ -30,12 +30,13 @@ class RoleAiLimit(Base):
     daily_token_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     weekly_token_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     monthly_token_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    requests_per_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    concurrent_operations: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    monthly_cost_limit_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Eigener Monatsdeckel für die deutlich teurere Realtime-Audioabrechnung.
-    # Das allgemeine Kostenlimit bleibt zusätzlich wirksam.
-    monthly_realtime_cost_limit_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Wie viele Minuten Sprachsitzung (Realtime, GPT-Live, Gemini Live) im
+    # Monat. Bis zum 07.10.2026 stand hier ein Kostenbetrag; Minuten versteht
+    # der Betreiber, ohne den Preis je Audiotoken zu kennen. Die Tokenlimits
+    # gelten für Sprachsitzungen zusätzlich. Anfragen pro Minute, gleichzeitige
+    # Vorgänge und das monatliche Kostenlimit sind am selben Tag entfallen
+    # (Migration 20261008_03).
+    monthly_realtime_minutes_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Monatliches Diktier- und Transkriptionszeitlimit in Minuten (provider-neutral).
     monthly_dictation_minutes_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Wie tief Benutzer dieser Rolle die KI nachdenken lassen dürfen — als Rang

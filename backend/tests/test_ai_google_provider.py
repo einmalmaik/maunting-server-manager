@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import replace
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import quote_plus
 from uuid import uuid4
@@ -288,9 +289,11 @@ def test_ohne_erlaubnis_des_betreibers_verlaesst_nichts_das_haus(
     db.commit()
     gesendet: list[str] = []
     monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
+    monkeypatch.setattr(ai_embedding_service, "lokal_bereit", lambda: False)
     monkeypatch.setattr(
         ai_embedding_service, "encode_ueber_anbieter",
-        lambda texts, **_: gesendet.extend(texts) or [[0.1] * 256 for _ in texts],
+        lambda texts, **_: gesendet.extend(texts)
+        or [[0.1] * ai_embedding_service.EMBEDDING_DIMENSIONS for _ in texts],
     )
     _allow_memory(db, regular_user)
 
@@ -326,7 +329,9 @@ def test_mit_openai_als_rueckfall_rechnet_openai_und_nur_openai(
 
     antwort = MagicMock()
     antwort.status_code = 200
-    antwort.json.return_value = {"data": [{"index": 0, "embedding": [0.5] * 256}]}
+    antwort.json.return_value = {
+        "data": [{"index": 0, "embedding": [0.5] * ai_embedding_service.EMBEDDING_DIMENSIONS}]
+    }
     gesendet: list[dict] = []
 
     class Client:
@@ -347,7 +352,8 @@ def test_mit_openai_als_rueckfall_rechnet_openai_und_nur_openai(
     assert kodierung is not None
     assert kodierung.modell == "openai:text-embedding-3-small"
     assert [(g["url"], g["model"], g["dimensions"]) for g in gesendet] == [
-        ("https://api.openai.com/v1/embeddings", "text-embedding-3-small", 256),
+        ("https://api.openai.com/v1/embeddings", "text-embedding-3-small",
+         ai_embedding_service.EMBEDDING_DIMENSIONS),
     ]
     assert ai_embedding_service.aktives_modell(db=db) == "openai:text-embedding-3-small"
 
@@ -944,13 +950,15 @@ def test_gemini_live_ueberspringt_leere_und_kaputte_meldungen(db: Session, owner
 async def test_gemini_live_grenze_beendet_die_sitzung_ohne_die_kosten_zu_verschweigen(
     db: Session, owner_user: User, monkeypatch
 ) -> None:
-    # Ein Cent Realtime-Budget; die eine Runde kostet 2 Cent.
+    # Eine Sprachminute im Monat; die Sitzung läuft schon zwei.
     monkeypatch.setattr(
         ai_usage_service,
         "resolve_effective_limits",
-        lambda _db, _user: replace(ai_limit_service.UNLIMITED_AI_LIMITS, monthly_realtime_cost_limit_cents=1),
+        lambda _db, _user: replace(ai_limit_service.UNLIMITED_AI_LIMITS, monthly_realtime_minutes_limit=1),
     )
     vorb = _gemini_zugang(db, owner_user, realtime_audio_output_price_micro_usd_per_million=200_000_000)
+    db.get(AiUsageEvent, vorb.usage_event_id).created_at -= timedelta(minutes=2)
+    db.commit()
     panel = MagicMock()
     panel.send_json = AsyncMock()
     sitzung = _gemini_buchung(vorb, panel)
@@ -1420,7 +1428,10 @@ def test_thinking_ohne_anbieterangabe_bleibt_unbekannt(model):
 
 @pytest.mark.asyncio
 async def test_live_zeitlimit_meldet_ablauf_und_beendet_leser(monkeypatch):
+    from dataclasses import replace as ersetzen
+
     from services.ai_voice import gemini_live_session as live
+    from services.ai_voice import realtime_session
     sitzung, panel = _gemini_sitzung()
     beendet = []
 
@@ -1430,7 +1441,9 @@ async def test_live_zeitlimit_meldet_ablauf_und_beendet_leser(monkeypatch):
         finally:
             beendet.append(True)
 
-    monkeypatch.setattr(live, "MAX_SITZUNGSSEKUNDEN", 0.01)
+    # Die feste Grenze, nicht das Minutenlimit: daher „abgelaufen“.
+    monkeypatch.setattr(realtime_session, "MAX_SITZUNGSSEKUNDEN", 0.01)
+    sitzung.v = ersetzen(sitzung.v, hoechstdauer=0.01)
     monkeypatch.setattr(live.websockets, "connect", AsyncMock(return_value=AsyncMock()))
     monkeypatch.setattr(sitzung, "_client_lesen", lesen)
     monkeypatch.setattr(sitzung, "_google_lesen", lesen)

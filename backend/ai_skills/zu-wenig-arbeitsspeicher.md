@@ -54,9 +54,10 @@ Verbrauch als Begründung. Ist keine Luft da, sag das deutlich: die Lösung ist
 dann weniger Last oder mehr Hardware, nicht eine andere Zahl in der
 Konfiguration.
 
-## Merk dir, was du gelernt hast
+## Sag, was du gemessen hast
 
 Wenn du für ein bestimmtes Blueprint oder Modpack einen belastbaren Wert
 gemessen hast, ist das eine Eigenschaft der Anlage und keine Vorliebe einer
-Person — also Teamwissen. Halte es fest, damit der nächste Fall nicht wieder
-bei null anfängt.
+Person — also Teamwissen. Nenn ihn in deiner Antwort als Feststellung, mit
+Blueprint oder Modpack dazu: das Gedächtnis übernimmt ihn nach dem Gespräch,
+und der nächste Fall fängt nicht wieder bei null an.

@@ -46,10 +46,68 @@ pub fn erstelle_android_client() -> Result<reqwest::Client, String> {
 
     reqwest::Client::builder()
         .user_agent("MauntingSmartSystem-Android")
-        .timeout(std::time::Duration::from_secs(15))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(30))
         .use_preconfigured_tls(tls_config)
         .build()
         .map_err(|e| format!("Konnte Android-HTTP-Client nicht erstellen: {e}"))
+}
+
+#[cfg(target_os = "android")]
+pub fn erstelle_android_download_client() -> Result<reqwest::Client, String> {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let mut root_store = rustls::RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let tls_config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+    // Für den Download großer APK-Dateien (> 100 MB):
+    // Kein starrer Gesamt-Timeout (der zuvor jeden Download nach 15 Sekunden abbrach),
+    // sondern ein Connect-Timeout von 30s und ein Read-Timeout von 60s.
+    reqwest::Client::builder()
+        .user_agent("MauntingSmartSystem-Android")
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .read_timeout(std::time::Duration::from_secs(60))
+        .use_preconfigured_tls(tls_config)
+        .build()
+        .map_err(|e| format!("Konnte Android-Download-Client nicht erstellen: {e}"))
+}
+
+/// Prüft, ob eine Datei ein vollständiges, unbeschädigtes APK (ZIP-Archiv) ist:
+/// - Datei existiert und ist mindestens 10 MB groß (ein echtes MSS-Release-APK hat > 50-100 MB).
+/// - Beginnt mit der ZIP-Header-Signatur `PK\x03\x04` ([0x50, 0x4B, 0x03, 0x04]).
+/// - Endet mit dem End-of-Central-Directory Record `PK\x05\x06` ([0x50, 0x4B, 0x05, 0x06])
+///   innerhalb der letzten 65557 Bytes. Bricht ein Download mittendrin ab, fehlt dieser Record zwingend.
+pub fn ist_valides_apk(pfad: &std::path::Path) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = std::fs::File::open(pfad) else {
+        return false;
+    };
+    let Ok(meta) = file.metadata() else {
+        return false;
+    };
+    let len = meta.len();
+    if len < 10_000_000 {
+        return false;
+    }
+
+    let mut header = [0u8; 4];
+    if file.read_exact(&mut header).is_err() || header != [0x50, 0x4B, 0x03, 0x04] {
+        return false;
+    }
+
+    let tail_len = (len.min(65557)) as usize;
+    if file.seek(SeekFrom::End(-(tail_len as i64))).is_err() {
+        return false;
+    }
+
+    let mut tail_buffer = vec![0u8; tail_len];
+    if file.read_exact(&mut tail_buffer).is_err() {
+        return false;
+    }
+
+    tail_buffer.windows(4).any(|w| w == [0x50, 0x4B, 0x05, 0x06])
 }
 
 #[cfg(target_os = "android")]
@@ -207,9 +265,16 @@ pub async fn update_installieren(app: AppHandle) -> Result<(), String> {
             let ziel_version = info.neue_version.clone().unwrap_or_default();
 
             let bereits_im_cache = if apk_pfad.exists() && !ziel_version.is_empty() {
-                std::fs::read_to_string(&version_pfad)
-                    .map(|v| v.trim() == ziel_version)
-                    .unwrap_or(false)
+                if ist_valides_apk(&apk_pfad) {
+                    std::fs::read_to_string(&version_pfad)
+                        .map(|v| v.trim() == ziel_version)
+                        .unwrap_or(false)
+                } else {
+                    println!("[MSS Android Updater] Cached APK ist unvollständig oder ungültig. Cache wird bereinigt …");
+                    let _ = std::fs::remove_file(&apk_pfad);
+                    let _ = std::fs::remove_file(&version_pfad);
+                    false
+                }
             } else {
                 false
             };
@@ -227,43 +292,116 @@ pub async fn update_installieren(app: AppHandle) -> Result<(), String> {
                 return Ok(());
             }
 
-            let _ = app.emit("mss:update-status", serde_json::json!({
+            let _ = app_handle.emit("mss:update-status", serde_json::json!({
                 "status": "laedt",
                 "prozent": 0
             }));
 
-            let client = erstelle_android_client()?;
+            let client = erstelle_android_download_client()?;
 
-            let mut resp = client.get(&url).send().await.map_err(|e| format!("Download fehlgeschlagen: {e}"))?;
+            let mut resp = client.get(&url).send().await.map_err(|e| {
+                let fehler = format!("Download fehlgeschlagen: {e}");
+                let _ = app_handle.emit("mss:update-status", serde_json::json!({
+                    "status": "fehler",
+                    "fehler": &fehler
+                }));
+                fehler
+            })?;
+
             if !resp.status().is_success() {
-                return Err(format!("Download-Server antwortete mit Status: {}", resp.status()));
+                let fehler = format!("Download-Server antwortete mit Status: {}", resp.status());
+                let _ = app_handle.emit("mss:update-status", serde_json::json!({
+                    "status": "fehler",
+                    "fehler": &fehler
+                }));
+                return Err(fehler);
             }
 
             let gesamt_len = resp.content_length();
             let mut heruntergeladen: u64 = 0;
             let tmp_apk = cache_dir.join("MauntingSmartSystem.apk.tmp");
+            let _ = std::fs::remove_file(&tmp_apk);
             let mut file = std::fs::File::create(&tmp_apk)
-                .map_err(|e| format!("Konnte temporäre APK nicht anlegen: {e}"))?;
+                .map_err(|e| {
+                    let fehler = format!("Konnte temporäre APK nicht anlegen: {e}");
+                    let _ = app_handle.emit("mss:update-status", serde_json::json!({
+                        "status": "fehler",
+                        "fehler": &fehler
+                    }));
+                    fehler
+                })?;
 
             use std::io::Write;
-            while let Ok(Some(chunk)) = resp.chunk().await {
-                file.write_all(&chunk)
-                    .map_err(|e| format!("Fehler beim Schreiben der APK: {e}"))?;
-                heruntergeladen += chunk.len() as u64;
-                if let Some(gesamt) = gesamt_len {
-                    if gesamt > 0 {
-                        let prozent = (heruntergeladen as f64 / gesamt as f64 * 100.0) as u32;
+            loop {
+                match resp.chunk().await {
+                    Ok(Some(chunk)) => {
+                        if let Err(e) = file.write_all(&chunk) {
+                            drop(file);
+                            let _ = std::fs::remove_file(&tmp_apk);
+                            let fehler = format!("Fehler beim Schreiben der APK: {e}");
+                            let _ = app_handle.emit("mss:update-status", serde_json::json!({
+                                "status": "fehler",
+                                "fehler": &fehler
+                            }));
+                            return Err(fehler);
+                        }
+                        heruntergeladen += chunk.len() as u64;
+                        if let Some(gesamt) = gesamt_len {
+                            if gesamt > 0 {
+                                let prozent = (heruntergeladen as f64 / gesamt as f64 * 100.0) as u32;
+                                let _ = app_handle.emit("mss:update-status", serde_json::json!({
+                                    "status": "laedt",
+                                    "prozent": prozent
+                                }));
+                            }
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        drop(file);
+                        let _ = std::fs::remove_file(&tmp_apk);
+                        let fehler = format!("Download nach {heruntergeladen} Bytes abgebrochen: {e}");
                         let _ = app_handle.emit("mss:update-status", serde_json::json!({
-                            "status": "laedt",
-                            "prozent": prozent
+                            "status": "fehler",
+                            "fehler": &fehler
                         }));
+                        return Err(fehler);
                     }
                 }
             }
             drop(file);
 
+            if let Some(gesamt) = gesamt_len {
+                if gesamt > 0 && heruntergeladen != gesamt {
+                    let _ = std::fs::remove_file(&tmp_apk);
+                    let fehler = format!("APK unvollständig empfangen: {heruntergeladen} von {gesamt} Bytes.");
+                    let _ = app_handle.emit("mss:update-status", serde_json::json!({
+                        "status": "fehler",
+                        "fehler": &fehler
+                    }));
+                    return Err(fehler);
+                }
+            }
+
+            if !ist_valides_apk(&tmp_apk) {
+                let _ = std::fs::remove_file(&tmp_apk);
+                let fehler = "Heruntergeladene APK-Datei ist ungültig oder beschädigt.".to_string();
+                let _ = app_handle.emit("mss:update-status", serde_json::json!({
+                    "status": "fehler",
+                    "fehler": &fehler
+                }));
+                return Err(fehler);
+            }
+
             std::fs::rename(&tmp_apk, &apk_pfad)
-                .map_err(|e| format!("Konnte APK nicht finalisieren: {e}"))?;
+                .map_err(|e| {
+                    let fehler = format!("Konnte APK nicht finalisieren: {e}");
+                    let _ = app_handle.emit("mss:update-status", serde_json::json!({
+                        "status": "fehler",
+                        "fehler": &fehler
+                    }));
+                    fehler
+                })?;
             let _ = std::fs::write(&version_pfad, &ziel_version);
 
             let _ = app_handle.emit("mss:update-status", serde_json::json!({
@@ -271,13 +409,26 @@ pub async fn update_installieren(app: AppHandle) -> Result<(), String> {
                 "prozent": 100
             }));
 
-            installiere_android_apk(&app_handle, &apk_pfad)?;
+            if let Err(e) = installiere_android_apk(&app_handle, &apk_pfad) {
+                let fehler = format!("Installation fehlgeschlagen: {e}");
+                let _ = app_handle.emit("mss:update-status", serde_json::json!({
+                    "status": "fehler",
+                    "fehler": &fehler
+                }));
+                return Err(fehler);
+            }
+
             let _ = app_handle.emit("mss:update-status", serde_json::json!({
                 "status": "installiert_android"
             }));
             Ok(())
         } else {
-            Err("Keine APK-Download-URL gefunden".to_string())
+            let fehler = "Keine APK-Download-URL gefunden".to_string();
+            let _ = app.emit("mss:update-status", serde_json::json!({
+                "status": "fehler",
+                "fehler": &fehler
+            }));
+            Err(fehler)
         }
     }
 }
@@ -433,9 +584,15 @@ pub fn pruefe_und_installiere_update_hintergrund(app_handle: AppHandle) {
                                     let version_pfad = cache_dir.join("MauntingSmartSystem.apk.version");
 
                                     let bereits_im_cache = if apk_pfad.exists() && !ziel_version.is_empty() {
-                                        std::fs::read_to_string(&version_pfad)
-                                            .map(|v| v.trim() == ziel_version)
-                                            .unwrap_or(false)
+                                        if ist_valides_apk(&apk_pfad) {
+                                            std::fs::read_to_string(&version_pfad)
+                                                .map(|v| v.trim() == ziel_version)
+                                                .unwrap_or(false)
+                                        } else {
+                                            let _ = std::fs::remove_file(&apk_pfad);
+                                            let _ = std::fs::remove_file(&version_pfad);
+                                            false
+                                        }
                                     } else {
                                         false
                                     };
@@ -445,12 +602,44 @@ pub fn pruefe_und_installiere_update_hintergrund(app_handle: AppHandle) {
                                         if let Err(err) = installiere_android_apk(&handle, &apk_pfad) {
                                             eprintln!("[MSS Android Updater] Automatische Installation: {err}");
                                         }
-                                    } else if let Ok(client) = erstelle_android_client() {
-                                        if let Ok(resp) = client.get(&download_url).send().await {
+                                    } else if let Ok(client) = erstelle_android_download_client() {
+                                        if let Ok(mut resp) = client.get(&download_url).send().await {
                                             if resp.status().is_success() {
-                                                if let Ok(bytes) = resp.bytes().await {
-                                                    let tmp_apk = cache_dir.join("MauntingSmartSystem.apk.tmp");
-                                                    if std::fs::write(&tmp_apk, &bytes).is_ok() {
+                                                let gesamt_len = resp.content_length();
+                                                let tmp_apk = cache_dir.join("MauntingSmartSystem.apk.tmp");
+                                                let _ = std::fs::remove_file(&tmp_apk);
+                                                if let Ok(mut file) = std::fs::File::create(&tmp_apk) {
+                                                    use std::io::Write;
+                                                    let mut download_ok = true;
+                                                    let mut heruntergeladen: u64 = 0;
+                                                    loop {
+                                                        match resp.chunk().await {
+                                                            Ok(Some(chunk)) => {
+                                                                if file.write_all(&chunk).is_err() {
+                                                                    download_ok = false;
+                                                                    break;
+                                                                }
+                                                                heruntergeladen += chunk.len() as u64;
+                                                            }
+                                                            Ok(None) => break,
+                                                            Err(e) => {
+                                                                eprintln!("[MSS Android Updater] Hintergrund-Download unterbrochen: {e}");
+                                                                download_ok = false;
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                    drop(file);
+
+                                                    if download_ok {
+                                                        if let Some(gesamt) = gesamt_len {
+                                                            if gesamt > 0 && heruntergeladen != gesamt {
+                                                                download_ok = false;
+                                                            }
+                                                        }
+                                                    }
+
+                                                    if download_ok && ist_valides_apk(&tmp_apk) {
                                                         let _ = std::fs::rename(&tmp_apk, &apk_pfad);
                                                         let _ = std::fs::write(&version_pfad, &ziel_version);
                                                         println!("[MSS Android Updater] APK v{ziel_version} im Hintergrund heruntergeladen. Starte automatische Installation …");
@@ -470,6 +659,8 @@ pub fn pruefe_und_installiere_update_hintergrund(app_handle: AppHandle) {
                                                             "apk_pfad": apk_pfad.to_string_lossy().to_string(),
                                                             "notizen": info.notizen
                                                         }));
+                                                    } else {
+                                                        let _ = std::fs::remove_file(&tmp_apk);
                                                     }
                                                 }
                                             }
@@ -522,7 +713,57 @@ mod tests {
             .with_no_client_auth();
         let client = reqwest::Client::builder()
             .use_preconfigured_tls(tls_config)
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .read_timeout(std::time::Duration::from_secs(60))
             .build();
         assert!(client.is_ok());
+    }
+
+    #[test]
+    fn ist_valides_apk_prueft_existenz_mindestgroesse_und_zip_struktur() {
+        use std::io::Write;
+        let temp_dir = std::env::temp_dir();
+
+        // 1. Nicht existierende Datei
+        let nicht_da = temp_dir.join("mss_test_nicht_existent.apk");
+        assert!(!ist_valides_apk(&nicht_da));
+
+        // 2. Datei zu klein (< 10 MB)
+        let zu_klein = temp_dir.join("mss_test_zu_klein.apk");
+        std::fs::write(&zu_klein, &[0x50, 0x4B, 0x03, 0x04, 0x00, 0x00]).unwrap();
+        assert!(!ist_valides_apk(&zu_klein));
+        let _ = std::fs::remove_file(&zu_klein);
+
+        // 3. Datei >= 10 MB, aber falscher Header (kein ZIP)
+        let kein_zip = temp_dir.join("mss_test_kein_zip.apk");
+        {
+            let mut f = std::fs::File::create(&kein_zip).unwrap();
+            f.write_all(&[0x00; 10_000_050]).unwrap();
+        }
+        assert!(!ist_valides_apk(&kein_zip));
+        let _ = std::fs::remove_file(&kein_zip);
+
+        // 4. Datei >= 10 MB, ZIP-Header vorhanden, aber EOCD fehlt (abgebrochener Download)
+        let unvollstaendig = temp_dir.join("mss_test_unvollstaendig.apk");
+        {
+            let mut f = std::fs::File::create(&unvollstaendig).unwrap();
+            f.write_all(&[0x50, 0x4B, 0x03, 0x04]).unwrap();
+            f.write_all(&vec![0xAA; 10_000_050]).unwrap();
+        }
+        assert!(!ist_valides_apk(&unvollstaendig));
+        let _ = std::fs::remove_file(&unvollstaendig);
+
+        // 5. Datei >= 10 MB, ZIP-Header vorhanden und EOCD am Ende vorhanden (vollständig)
+        let vollstaendig = temp_dir.join("mss_test_vollstaendig.apk");
+        {
+            let mut f = std::fs::File::create(&vollstaendig).unwrap();
+            f.write_all(&[0x50, 0x4B, 0x03, 0x04]).unwrap();
+            f.write_all(&vec![0x00; 10_000_000]).unwrap();
+            // EOCD Signatur + 18 Dummy Bytes
+            f.write_all(&[0x50, 0x4B, 0x05, 0x06]).unwrap();
+            f.write_all(&[0x00; 18]).unwrap();
+        }
+        assert!(ist_valides_apk(&vollstaendig));
+        let _ = std::fs::remove_file(&vollstaendig);
     }
 }

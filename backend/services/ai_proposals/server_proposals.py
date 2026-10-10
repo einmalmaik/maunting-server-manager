@@ -1910,7 +1910,9 @@ def _execute_hoster_write(db: Session, *, user: User, tool_name: str, payload: d
             rolle = role_service.create_role(
                 db, payload["name"], payload.get("description"), []
             )
-            ai_limit_service.set_role_limit(db, rolle.id, dict(payload["limits"]))
+            ai_limit_service.set_role_limit(
+                db, rolle.id, ai_limit_service.altes_set_umschreiben(payload["limits"])
+            )
             db.commit()
             return {"role_id": rolle.id, "name": rolle.name, "permissions": []}
 

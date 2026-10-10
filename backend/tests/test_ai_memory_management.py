@@ -1,13 +1,14 @@
-"""Die KI findet Erinnerungen nach Bedeutung und loescht sie auf Zuruf.
+"""Die KI findet Erinnerungen nach Bedeutung; der Dienst verwaltet sie.
 
-Der Fall aus der Beschreibung: *"loesch alles was ich ueber meinen Hund gesagt
-habe"*. Das setzt zweierlei voraus — die Eintraege zu **finden**, auch wenn das
-Wort "Hund" gar nicht darin vorkommt, und sie danach gezielt zu **loeschen**.
+Der Fall aus der Beschreibung: *"was weisst du ueber meinen Hund?"*. Das setzt
+voraus, die Eintraege zu **finden**, auch wenn das Wort "Hund" gar nicht darin
+vorkommt — dafuer liegt neben jedem Eintrag ein Vektor.
 
-Beides ist bewusst getrennt. Eine Vektoraehnlichkeit von 0,4 ist eine
-brauchbare Grundlage dafuer, jemandem etwas anzuzeigen, und eine schlechte
-dafuer, es zu vernichten. Deshalb sucht das Modell zuerst, nennt was es
-gefunden hat, und loescht danach benannte Schluessel.
+Geloescht hat die KI frueher selbst, ueber `forget_memory` und benannte
+Schluessel. Seit Stufe 2 des Gedaechtnisses (06.10.2026) vergisst der
+Hintergrund, was der Mensch im Gespraech verlangt (`test_ai_gedaechtnis_schreiber`).
+Hier bleiben die Suche und was der Dienst unter der Oberflaeche zusagt:
+Uebersicht, Blaettern, Loeschen, die Grenzen der Bereiche.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, Role, RolePermission, Team, User
 from services import ai_action_service, ai_embedding_service, ai_memory_service, team_service
-from services.ai_action_errors import AiActionValidationError
 from services.auth_service import AuthService
 from services.role_service import set_user_roles
 
@@ -52,10 +52,6 @@ def _remember(db: Session, user: User, key: str, value: str) -> None:
     )
 
 
-def _keys_of(result: dict) -> set[str]:
-    return {item["key"] for item in result["results"]}
-
-
 # ── Finden ────────────────────────────────────────────────────────────
 
 
@@ -63,16 +59,25 @@ def test_search_finds_entries_the_user_can_see(db: Session, regular_user: User) 
     _allow(db, regular_user, "ai.memory.use")
     _remember(db, regular_user, "hund.name", "Mein Hund heisst Bello")
     _remember(db, regular_user, "ram.bevorzugt", "8 GB fuer neue Server")
+    ai_memory_service.erinnerung_anlegen(
+        db, user=regular_user, scope="user",
+        text="Der Hund des Benutzers mag Schnee.", titel="Hund im Winter",
+    )
 
     result = ai_action_service.execute_read_tool(
         db, user=regular_user, tool_name="search_memory",
         arguments={"query": "Hund"},
     )
 
-    assert "hund.name" in _keys_of(result)
-    # Der Klartext gehoert dazu: wer loeschen soll, muss sehen was.
-    treffer = next(item for item in result["results"] if item["key"] == "hund.name")
-    assert "Bello" in treffer["value"]
+    # Der Klartext gehoert dazu: wer antworten soll, muss sehen was.
+    nach_text = {item["text"]: item for item in result["results"]}
+    altbestand = nach_text["Mein Hund heisst Bello"]
+    satz = nach_text["Der Hund des Benutzers mag Schnee."]
+    assert altbestand["origin"] == satz["origin"] == "user"
+    # Altbestand traegt seinen Namen weiter mit: dort ist er Teil der Aussage.
+    assert altbestand["key"] == "hund.name"
+    # Ein Satz hat keinen, dafuer einen Titel.
+    assert "key" not in satz and satz["titel"] == "Hund im Winter"
     # Fremdtext bleibt als solcher gekennzeichnet.
     assert result["untrusted"] is True
 
@@ -120,499 +125,84 @@ def test_search_finds_what_is_worded_differently(
     )
 
     # Der Hundeeintrag muss vor dem Backupeintrag stehen.
-    assert result["results"][0]["key"] == "bello"
+    assert "Golden Retriever" in result["results"][0]["text"]
 
 
-def test_ein_team_treffer_traegt_den_namen_und_nicht_nur_die_nummer(
+def test_ein_team_treffer_sagt_aus_welchem_team_er_stammt(
     db: Session, regular_user: User
 ) -> None:
-    """Ein Treffer muss in dem Bereich ansprechbar sein, aus dem er stammt.
+    """Zwei Teams namens "Alpha", zwei Wartungsfenster — welches gilt wo?
 
-    Die volle Absage aus `ai_memory_service` nennt den Bereich beim **Namen**
-    und macht daraus eine Auflage: „nur Eintraege aus genau diesem Bereich“.
-    `remember` und `forget_memory` erreichen ein Team aber ausschliesslich ueber
-    `team="<Name>"`; ein Werkzeug, das eine Nummer in einen Namen uebersetzt,
-    gibt es nicht. Trug ein Treffer nur `team_id`, war die Auflage fuer das
-    Modell schlicht nicht befolgbar.
+    Singra soll sagen, woher etwas kommt (`ai_prompt.GEDAECHTNIS`). Ein Treffer
+    nur mit dem Bereich "team" liesse die beiden Wartungsfenster
+    ununterscheidbar nebeneinander stehen, und die Antwort ordnete eines dem
+    falschen Team zu. Die Nummer half dem Modell dabei nie: ein Werkzeug, das
+    sie in einen Namen uebersetzt, gibt es nicht. Bis Stufe 2 des Gedaechtnisses
+    trug der Treffer sie trotzdem, als Rueckweg fuer `forget_memory`; seitdem
+    steht nur der Name da.
 
-    Folgenlos bliebe das nicht. Schluessel sind bewusst stabil und wiederholen
-    sich ueber Teams hinweg — deshalb steht derselbe Schluessel hier in beiden
-    Teams. Ohne den Namen stehen die zwei Treffer ununterscheidbar nebeneinander,
-    das Modell greift den falschen, und `forget_memory` loescht den noch
-    gueltigen Eintrag, waehrend der veraltete bleibt. Mit nur einem Team waere
-    dieser Test gruen, ohne davon irgendetwas zu belegen.
-    """
-    _allow(db, regular_user, "ai.memory.use", "teams.create")
-    alpha = team_service.create_team(db, user=regular_user, name="Alpha")
-    beta = team_service.create_team(db, user=regular_user, name="Beta")
-    for team, wert in (
-        (alpha, "Wartungsfenster ist sonntags um 20 Uhr"),
-        (beta, "Wartungsfenster ist mittwochs um 6 Uhr"),
-    ):
-        ai_memory_service.upsert_entry(
-            db, user=regular_user, scope="team", server_id=None, team_id=team.id,
-            key="wartungsfenster", value=wert,
-        )
-
-    result = ai_action_service.execute_read_tool(
-        db, user=regular_user, tool_name="search_memory",
-        arguments={"query": "Wartungsfenster"},
-    )
-
-    # Genau der Fall, um den es geht: ein Schluessel, zwei Bereiche.
-    assert _keys_of(result) == {"wartungsfenster"}
-    treffer = [item for item in result["results"] if item["scope"] == "team"]
-    assert len(treffer) == 2
-    # `.get` und nicht `[...]`: fehlt der Name, soll der Test das als fehlenden
-    # Namen melden und nicht als KeyError.
-    nach_namen = {item.get("team"): item for item in treffer}
-    assert set(nach_namen) == {"Alpha", "Beta"}
-    # Der Name muss zum Bereich gehoeren und nicht bloss vorhanden sein — sonst
-    # bliebe der Test auch gruen, wenn beide Treffer denselben Namen truegen.
-    assert nach_namen["Alpha"]["team_id"] == alpha.id
-    assert nach_namen["Beta"]["team_id"] == beta.id
-    # Die Nummer bleibt daneben stehen: sie ist der Fremdschluessel, ueber den
-    # die Oberflaeche denselben Eintrag findet.
-    assert {item["team_id"] for item in treffer} == {alpha.id, beta.id}
-
-
-# ── Loeschen ──────────────────────────────────────────────────────────
-
-
-def test_deletion_removes_exactly_the_named_keys(
-    db: Session, regular_user: User
-) -> None:
-    _allow(db, regular_user, "ai.memory.use")
-    _remember(db, regular_user, "hund.name", "Mein Hund heisst Bello")
-    _remember(db, regular_user, "hund.rasse", "Golden Retriever")
-    _remember(db, regular_user, "ram.bevorzugt", "8 GB fuer neue Server")
-
-    result = ai_action_service.execute_read_tool(
-        db, user=regular_user, tool_name="forget_memory",
-        arguments={"scope": "user", "keys": ["hund.name", "hund.rasse"]},
-    )
-
-    assert result["forgotten"] == ["hund.name", "hund.rasse"]
-    verbleibend = {
-        row.key for row in
-        db.query(AiMemoryEntry).filter(
-            AiMemoryEntry.scope_identity == f"user:{regular_user.id}"
-        ).all()
-    }
-    assert verbleibend == {"ram.bevorzugt"}
-
-
-def test_a_key_that_does_not_exist_is_reported(db: Session, regular_user: User) -> None:
-    """Sonst meldet das Modell ein Loeschen, das nie stattgefunden hat."""
-    _allow(db, regular_user, "ai.memory.use")
-    _remember(db, regular_user, "hund.name", "Mein Hund heisst Bello")
-
-    result = ai_action_service.execute_read_tool(
-        db, user=regular_user, tool_name="forget_memory",
-        arguments={"scope": "user", "keys": ["hund.name", "gibt.es.nicht"]},
-    )
-
-    assert result["forgotten"] == ["hund.name"]
-    assert result["not_found"] == ["gibt.es.nicht"]
-
-
-def test_deletion_cannot_reach_another_users_memory(
-    db: Session, regular_user: User
-) -> None:
-    """Derselbe Schluessel bei zwei Benutzern sind zwei verschiedene Zeilen."""
-    other = _user(db, "andere")
-    _allow(db, regular_user, "ai.memory.use")
-    _allow(db, other, "ai.memory.use")
-    _remember(db, regular_user, "zeitzone", "Europe/Berlin")
-    _remember(db, other, "zeitzone", "America/New_York")
-
-    ai_action_service.execute_read_tool(
-        db, user=regular_user, tool_name="forget_memory",
-        arguments={"scope": "user", "keys": ["zeitzone"]},
-    )
-
-    uebrig = [r for r in db.query(AiMemoryEntry).all() if r.key == "zeitzone"]
-    assert len(uebrig) == 1
-    assert uebrig[0].scope_identity == f"user:{other.id}"
-
-
-def test_panel_memory_is_out_of_reach(db: Session, regular_user: User) -> None:
-    """Was fuer alle gilt, loescht die KI nicht auf Zuruf eines Einzelnen."""
-    _allow(db, regular_user, "ai.memory.use")
-
-    with pytest.raises(AiActionValidationError):
-        ai_action_service.execute_read_tool(
-            db, user=regular_user, tool_name="forget_memory",
-            arguments={"scope": "panel", "keys": ["irgendwas"]},
-        )
-
-
-def test_team_deletion_requires_the_switch(db: Session, regular_user: User) -> None:
-    colleague = _user(db, "kollege")
-    _allow(db, regular_user, "ai.memory.use", "teams.create")
-    _allow(db, colleague, "ai.memory.use")
-    team = team_service.create_team(db, user=regular_user, name="Betrieb")
-    team_service.invite_member(
-        db, team=team, user=regular_user, new_user_id=colleague.id,
-        can_manage_skills=False, can_manage_memory=False,
-    )
-    team_service.accept_invitation(db, user=colleague, team_id=team.id)
-    ai_memory_service.upsert_entry(
-        db, user=regular_user, scope="team", server_id=None, team_id=team.id,
-        key="valheim.ram", value="Valheim braucht mindestens 6 GB",
-    )
-
-    # Der Kollege darf das Teamwissen nicht pflegen — sein Loeschversuch
-    # landet deshalb im persoenlichen Bereich und laesst das Team unberuehrt.
-    ai_action_service.execute_read_tool(
-        db, user=colleague, tool_name="forget_memory",
-        arguments={"scope": "team", "keys": ["valheim.ram"]},
-    )
-
-    assert db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity == f"team:{team.id}"
-    ).count() == 1
-
-
-def test_die_team_id_trifft_das_gleichnamige_nachbarteam_nicht(
-    db: Session, regular_user: User
-) -> None:
-    """Zwei Teams namens "Alpha", ein Schlüssel — weg ist genau einer.
-
-    Teamnamen sind nur je Gründer eindeutig (`_assert_name_is_free` lässt
-    Gleichnamigkeit ausdrücklich zu). Solange `forget_memory` ein Team
-    ausschließlich über `team="<Name>"` erreichte, war "Alpha" für diesen
-    Benutzer keine Adresse: `learning_team` fragte zurück, und seine Rückfrage
-    unterschied die beiden Kandidaten über den Gründer — eine Angabe, die im
-    Suchtreffer nicht stand. Das Modell konnte seinen Treffer keinem der beiden
-    Angebote zuordnen, wählte eines und traf zur Hälfte das falsche. Folgenlos
-    ist das nicht: Schlüssel sind bewusst stabil und wiederholen sich über Teams
-    hinweg, drüben steht also etwas zu treffen — deshalb liegt hier in beiden
-    Teams derselbe Schlüssel.
-
-    Geprüft wird der ganze Rückweg und nicht das Argument allein: der Treffer
-    aus der Suche muss die Nummer **mitbringen**, sonst kann das Modell sie
-    nicht zurückreichen.
+    Teamnamen sind nur je Gruender eindeutig (`_assert_name_is_free`). Mit zwei
+    verschieden benannten Teams waere dieser Test gruen, ohne den eigentlichen
+    Fall zu belegen — deshalb heissen hier beide gleich, und der Name muss den
+    Gruender mitbringen (`team_service.ansprechbarer_name`).
     """
     zweiter = _user(db, "zweiter")
     kollege = _user(db, "kollege")
-    _allow(db, regular_user, "teams.create")
-    _allow(db, zweiter, "teams.create")
+    _allow(db, regular_user, "teams.create", "ai.memory.use")
+    _allow(db, zweiter, "teams.create", "ai.memory.use")
     _allow(db, kollege, "ai.memory.use")
     eins = team_service.create_team(db, user=regular_user, name="Alpha")
     zwei = team_service.create_team(db, user=zweiter, name="Alpha")
-    for team, owner in ((eins, regular_user), (zwei, zweiter)):
+    for team, gruender, wert in (
+        (eins, regular_user, "Das Wartungsfenster ist sonntags um 20 Uhr."),
+        (zwei, zweiter, "Das Wartungsfenster ist mittwochs um 6 Uhr."),
+    ):
         team_service.invite_member(
-            db, team=team, user=owner, new_user_id=kollege.id,
-            can_manage_skills=True, can_manage_memory=True,
+            db, team=team, user=gruender, new_user_id=kollege.id,
+            can_manage_skills=False, can_manage_memory=False,
         )
         team_service.accept_invitation(db, user=kollege, team_id=team.id)
-    for team, wert in (
-        (eins, "Wartungsfenster ist sonntags um 20 Uhr"),
-        (zwei, "Wartungsfenster ist mittwochs um 6 Uhr"),
-    ):
-        ai_memory_service.upsert_entry(
-            db, user=kollege, scope="team", server_id=None, team_id=team.id,
-            key="wartungsfenster", value=wert,
+        ai_memory_service.erinnerung_anlegen(
+            db, user=gruender, scope="team", team_id=team.id, text=wert,
         )
 
-    gefunden = ai_action_service.execute_read_tool(
+    result = ai_action_service.execute_read_tool(
         db, user=kollege, tool_name="search_memory",
         arguments={"query": "Wartungsfenster"},
     )
-    treffer = [item for item in gefunden["results"] if item["scope"] == "team"]
-    assert len(treffer) == 2, "Beide Teams müssen im Suchergebnis stehen"
-    gemeint = next(item for item in treffer if item.get("team_id") == eins.id)
 
-    ergebnis = ai_action_service.execute_read_tool(
-        db, user=kollege, tool_name="forget_memory",
-        arguments={
-            "scope": "team", "team_id": gemeint["team_id"],
-            "keys": ["wartungsfenster"],
-        },
-    )
-
-    assert ergebnis["forgotten"] == ["wartungsfenster"]
-    # Und das Ergebnis sagt auch, **wo** — sonst wäre "im Team gelöscht" bei
-    # zwei gleichnamigen Teams keine Auskunft.
-    assert ergebnis["team_id"] == eins.id
-    assert db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity == f"team:{eins.id}"
-    ).count() == 0
-    assert db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity == f"team:{zwei.id}"
-    ).count() == 1
+    # `.get` und nicht `[...]`: fehlt der Name, soll der Test das als fehlenden
+    # Namen melden und nicht als KeyError.
+    treffer = {
+        item.get("team"): item["text"]
+        for item in result["results"] if item["scope"] == "team"
+    }
+    assert treffer == {
+        f"Alpha ({regular_user.username})": "Das Wartungsfenster ist sonntags um 20 Uhr.",
+        "Alpha (zweiter)": "Das Wartungsfenster ist mittwochs um 6 Uhr.",
+    }
+    # Die Nummer geht nicht mehr mit hinaus: sie war nur fuer das Loeschen da.
+    assert all("team_id" not in item for item in result["results"])
 
 
-def test_eine_fremde_team_id_loescht_und_schreibt_nichts(
-    db: Session, regular_user: User
-) -> None:
-    """Die Nummer wählt aus, sie berechtigt nicht.
-
-    Sie kommt aus einem Werkzeugergebnis, also aus derselben Richtung wie jeder
-    andere Modelltext — geraten ist sie schnell. Dass eine erfundene Nummer
-    nichts trifft, entscheidet nicht das Werkzeug, sondern
-    `ai_memory_service.scope_identity`: ohne Mitgliedschaft ein 404, und zwar
-    ohne Auskunft darüber, ob es das Team überhaupt gibt.
-    """
-    fremder = _user(db, "fremder")
-    _allow(db, regular_user, "ai.memory.use")
-    _allow(db, fremder, "teams.create")
-    fremd = team_service.create_team(db, user=fremder, name="Geheim")
-    ai_memory_service.upsert_entry(
-        db, user=fremder, scope="team", server_id=None, team_id=fremd.id,
-        key="wartungsfenster", value="Sonntags um 20 Uhr",
-    )
-
-    with pytest.raises(AiActionValidationError):
-        ai_action_service.execute_read_tool(
-            db, user=regular_user, tool_name="forget_memory",
-            arguments={
-                "scope": "team", "team_id": fremd.id, "keys": ["wartungsfenster"],
-            },
-        )
-    with pytest.raises(AiActionValidationError):
-        ai_action_service.execute_read_tool(
-            db, user=regular_user, tool_name="remember",
-            arguments={
-                "scope": "team", "team_id": fremd.id,
-                "key": "ram.minimum", "value": "Mindestens 6 GB",
-            },
-        )
-
-    # Nichts gelöscht und nichts dazugeschrieben — auch nicht still im
-    # persönlichen Bereich.
-    assert db.query(AiMemoryEntry).count() == 1
-    assert db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity == f"team:{fremd.id}"
-    ).count() == 1
-
-
-def test_eine_team_id_ohne_verwaltungsschalter_loescht_nichts(
-    db: Session, regular_user: User
-) -> None:
-    """Die Nummer überspringt die Auswahl, nicht die Berechtigung.
-
-    Über den Namen kam dieser Fall gar nicht erst an: `learning_teams` führt nur
-    Teams mit gesetztem Schalter, ein Mitglied ohne ihn landete im persönlichen
-    Bereich. Die Nummer geht an dieser Auswahl vorbei — und muss deshalb an
-    `_assert_may_write` hängenbleiben, sonst wäre der genauere Weg zugleich der
-    laxere.
-    """
-    kollege = _user(db, "kollege")
-    _allow(db, regular_user, "teams.create")
-    _allow(db, kollege, "ai.memory.use")
-    team = team_service.create_team(db, user=regular_user, name="Betrieb")
-    team_service.invite_member(
-        db, team=team, user=regular_user, new_user_id=kollege.id,
-        can_manage_skills=False, can_manage_memory=False,
-    )
-    team_service.accept_invitation(db, user=kollege, team_id=team.id)
-    ai_memory_service.upsert_entry(
-        db, user=regular_user, scope="team", server_id=None, team_id=team.id,
-        key="valheim.ram", value="Valheim braucht mindestens 6 GB",
-    )
-
-    with pytest.raises(AiActionValidationError):
-        ai_action_service.execute_read_tool(
-            db, user=kollege, tool_name="forget_memory",
-            arguments={
-                "scope": "team", "team_id": team.id, "keys": ["valheim.ram"],
-            },
-        )
-
-    assert db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity == f"team:{team.id}"
-    ).count() == 1
-
-
-def test_deletion_without_the_permission_is_refused(
-    db: Session, regular_user: User
-) -> None:
-    with pytest.raises(AiActionValidationError):
-        ai_action_service.execute_read_tool(
-            db, user=regular_user, tool_name="forget_memory",
-            arguments={"scope": "user", "keys": ["egal"]},
-        )
-
-
-def test_an_empty_key_list_is_refused(db: Session, regular_user: User) -> None:
-    """Ohne Schluessel gibt es nichts zu loeschen — und kein "alles"."""
-    _allow(db, regular_user, "ai.memory.use")
-
-    with pytest.raises(AiActionValidationError):
-        ai_action_service.execute_read_tool(
-            db, user=regular_user, tool_name="forget_memory",
-            arguments={"scope": "user", "keys": []},
-        )
-
-
-# ── Korrigieren ───────────────────────────────────────────────────────
-
-
-def test_the_ai_does_not_silently_overwrite_what_the_user_said(
-    db: Session, regular_user: User
-) -> None:
-    """Der Schutz gilt gegen die *stillschweigende* Korrektur.
-
-    Die KI leitet nebenbei etwas ab und ueberschreibt damit, was der Benutzer
-    selbst gesagt hat — das soll nicht passieren.
-    """
-    _allow(db, regular_user, "ai.memory.use")
-    _remember(db, regular_user, "hund.name", "Mein Hund heisst Bello")
-
-    with pytest.raises(AiActionValidationError) as exc:
-        ai_action_service.execute_read_tool(
-            db, user=regular_user, tool_name="remember",
-            arguments={
-                "scope": "user", "key": "hund.name", "value": "Mein Hund heisst Rex",
-            },
-        )
-    # Die Meldung muss den richtigen Weg nennen. Frueher stand dort "verwende
-    # einen anderen Schluessel" — genau das erzeugt die Dubletten, die wir
-    # vermeiden wollen.
-    assert "replace_user_entry" in str(exc.value)
-
-
-def test_an_explicit_correction_overwrites_instead_of_duplicating(
-    db: Session, regular_user: User
-) -> None:
-    """"Nein, er heisst Rex" soll nicht zu zwei Hunden fuehren.
-
-    Verlangt der Benutzer die Korrektur ausdruecklich, ist das Ueberschreiben
-    genau das Gewuenschte — der Schutz oben zielt auf etwas anderes.
-    """
-    _allow(db, regular_user, "ai.memory.use")
-    _remember(db, regular_user, "hund.name", "Mein Hund heisst Bello")
-
-    ai_action_service.execute_read_tool(
-        db, user=regular_user, tool_name="remember",
-        arguments={
-            "scope": "user", "key": "hund.name", "value": "Mein Hund heisst Rex",
-            "replace_user_entry": True,
-        },
-    )
-
-    rows = db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity == f"user:{regular_user.id}"
-    ).all()
-    assert len(rows) == 1
-    _row, value = ai_memory_service.list_entries(db, regular_user, "user", None)[0]
-    assert "Rex" in value
-
-
-def test_ein_zweites_team_macht_das_merken_nicht_unmoeglich(
-    db: Session, regular_user: User
-) -> None:
-    """Der Fall, in dem Teamwissen bisher gar nicht entstehen konnte.
-
-    Bei zwei verwaltbaren Teams gab `learning_team` nur den Rueckfragetext
-    zurueck — und `remember` hatte kein Argument, mit dem sich die Antwort
-    haette einloesen lassen. Das Modell fragte, bekam eine Antwort, fragte
-    wieder. Teamwissen war ab dem zweiten Team unerreichbar.
-    """
-    _allow(db, regular_user, "ai.memory.use", "teams.create")
-    eins = team_service.create_team(db, user=regular_user, name="Ops")
-    team_service.create_team(db, user=regular_user, name="Support")
-
-    ohne = ai_action_service.execute_read_tool(
-        db, user=regular_user, tool_name="remember",
-        arguments={"scope": "team", "key": "ram.minimum", "value": "Mindestens 6 GB"},
-    )
-    assert ohne["remembered"] is False
-    assert "Ops" in ohne["ask_user"] and "Support" in ohne["ask_user"]
-
-    mit = ai_action_service.execute_read_tool(
-        db, user=regular_user, tool_name="remember",
-        arguments={
-            "scope": "team", "key": "ram.minimum",
-            "value": "Mindestens 6 GB", "team": "Ops",
-        },
-    )
-    assert mit["remembered"] is True
-    assert mit["scope"] == "team" and mit["team_id"] == eins.id
-    assert db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity == f"team:{eins.id}"
-    ).count() == 1
-
-
-def test_ein_erfundenes_team_landet_nirgends(db: Session, regular_user: User) -> None:
-    """Der Name waehlt aus, er berechtigt nicht.
-
-    Trifft er keinen Kandidaten, gibt es dieselbe Rueckfrage wie ohne ihn — und
-    vor allem keinen Eintrag irgendwo. Ein stiller Rueckfall ins persoenliche
-    Gedaechtnis waere hier das Schlimmste: der Benutzer glaubt, es steht im
-    Team, und niemand ausser ihm sieht es.
-    """
-    _allow(db, regular_user, "ai.memory.use", "teams.create")
-    team_service.create_team(db, user=regular_user, name="Ops")
-    team_service.create_team(db, user=regular_user, name="Support")
-
-    ergebnis = ai_action_service.execute_read_tool(
-        db, user=regular_user, tool_name="remember",
-        arguments={
-            "scope": "team", "key": "ram.minimum",
-            "value": "Mindestens 6 GB", "team": "Gibt-Es-Nicht",
-        },
-    )
-    assert ergebnis["remembered"] is False
-    assert "Gibt-Es-Nicht" not in ergebnis["ask_user"]
-    assert db.query(AiMemoryEntry).count() == 0
-
-
-def test_wer_wissen_pflegen_darf_schreibt_ins_team_und_nicht_zu_sich(
-    db: Session, regular_user: User
-) -> None:
-    """Der Schalter am Mitglied entscheidet — und zwar der richtige.
-
-    Der Weg dorthin fragte fest `can_manage_skills` ab, obwohl fuer
-    Erinnerungen `can_manage_memory` gilt. Ein Mitglied mit
-    `memory=True, skills=False` bekam sein „merk dir fuers Team" still ins
-    persoenliche Gedaechtnis geschrieben: kein Fehler, keine Meldung, nur der
-    falsche Ort — und niemand im Team sah es je.
-    """
-    colleague = _user(db, "kollege")
-    _allow(db, regular_user, "ai.memory.use", "teams.create")
-    _allow(db, colleague, "ai.memory.use")
-    team = team_service.create_team(db, user=regular_user, name="Betrieb")
-    team_service.invite_member(
-        db, team=team, user=regular_user, new_user_id=colleague.id,
-        can_manage_skills=False, can_manage_memory=True,
-    )
-    team_service.accept_invitation(db, user=colleague, team_id=team.id)
-
-    ergebnis = ai_action_service.execute_read_tool(
-        db, user=colleague, tool_name="remember",
-        arguments={
-            "scope": "team", "key": "valheim.ram",
-            "value": "Valheim braucht mindestens 6 GB",
-        },
-    )
-
-    assert ergebnis["remembered"] is True
-    assert ergebnis["scope"] == "team", "Der Eintrag darf nicht persoenlich werden"
-    assert db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity == f"team:{team.id}"
-    ).count() == 1
-    assert db.query(AiMemoryEntry).filter(
-        AiMemoryEntry.scope_identity == f"user:{colleague.id}"
-    ).count() == 0
+# ── Was der Dienst unter der Oberflaeche zusagt ───────────────────────
 
 
 def test_eine_volle_absage_benennt_das_gemeinte_team_eindeutig(
     db: Session, regular_user: User
 ) -> None:
-    """Der Bereich in der Absage muss derselbe sein, den man danach ansprechen kann.
+    """Der Bereich in der Absage muss genau ein Team benennen.
 
-    Die volle Absage nennt den Bereich beim Namen und macht daraus eine
-    Auflage: „nur Einträge aus genau diesem Bereich“. Teamnamen sind aber nur
-    je Gründer eindeutig — hiess der Bereich schlicht „Alpha“, benannte er
-    zwei Teams auf einmal, und `learning_team` konnte daraus keines wählen.
-    Das blieb nicht folgenlos: Schlüssel wiederholen sich über Teams hinweg,
-    also gibt es im anderen Team etwas zu treffen.
+    Die volle Absage nennt den Bereich beim Namen; lesen tut sie ein Mensch,
+    als Toast. Teamnamen sind aber nur je Gründer eindeutig — hiess der Bereich
+    schlicht „Alpha“, benannte er zwei Teams auf einmal, und wer daraufhin
+    aufräumte, räumte womöglich im falschen. Bis Stufe 2 des Gedächtnisses las
+    die Absage auch das Modell und sprach das Team danach über `learning_team`
+    an.
 
     Geprüft wird deshalb nicht der Wortlaut, sondern der Rückweg — der Name
-    aus der Absage muss genau das Team auswählen, über das sie sprach.
+    aus der Absage muss über `learning_team` genau das Team auswählen, über
+    das sie sprach.
     """
     from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
 
@@ -663,8 +253,9 @@ def test_servernotizen_stehen_im_persoenlichen_bereich(
 ) -> None:
     """Serverbezogene Notizen sind persoenlich — und waren nirgends sichtbar.
 
-    Die KI schreibt sie (`remember` mit scope='server'), sie fliessen in jedes
-    Gespraech und zaehlen gegen die 100er-Grenze. `list_entries` fragt aber
+    Die KI schreibt sie (seit Stufe 2 des Gedaechtnisses der Hintergrund, in
+    den Bereich `server`), sie fliessen in jedes Gespraech und zaehlen gegen
+    das Rollenlimit. `list_entries` fragt aber
     genau eine Scope-Kennung ab und braucht dafuer eine konkrete `server_id` —
     wer alle seine Notizen sehen wollte, haette die Server raten muessen. In der
     Oberflaeche gab es sie deshalb nicht.
@@ -716,7 +307,7 @@ def test_ein_unlesbarer_eintrag_nimmt_nicht_die_ganze_uebersicht_mit(
     konnte man den Störenfried auch nicht, weil man keine Kennung zu sehen
     bekam.
     """
-    from services.dis_client import DisClient, DisDecryptionError
+    from tests._entschluesselung import unlesbar_machen
 
     _allow(db, regular_user, "ai.memory.use")
     kaputt, _ = ai_memory_service.upsert_entry(
@@ -724,16 +315,7 @@ def test_ein_unlesbarer_eintrag_nimmt_nicht_die_ganze_uebersicht_mit(
         key="kaputt", value="Unlesbarer Wert",
     )
     _remember(db, regular_user, "heil", "Lesbarer Wert")
-    kaputte_id = kaputt.id
-
-    echt = DisClient.decrypt
-
-    def stolpert(payload, *, aad):
-        if aad.endswith(kaputte_id):
-            raise DisDecryptionError("AAD passt nicht mehr")
-        return echt(payload, aad=aad)
-
-    monkeypatch.setattr(DisClient, "decrypt", staticmethod(stolpert))
+    unlesbar_machen(monkeypatch, kaputt.id)
 
     uebersicht = ai_memory_service.list_entries(db, regular_user, "user", None)
     assert [row.key for row, _wert in uebersicht] == ["heil"]
@@ -758,15 +340,12 @@ def test_ein_toter_sidecar_bleibt_ein_ehrlicher_fehler(
     Genau darin unterscheidet sich der Helfer der Oberfläche vom Helfer des
     Chats, und nur darin.
     """
-    from services.dis_client import DisClient, DisSidecarError
+    from services.dis_client import DisSidecarError
+    from tests._entschluesselung import sidecar_tot
 
     _allow(db, regular_user, "ai.memory.use")
     _remember(db, regular_user, "heil", "Lesbarer Wert")
-
-    def tot(payload, *, aad):
-        raise DisSidecarError("Sidecar nicht erreichbar")
-
-    monkeypatch.setattr(DisClient, "decrypt", staticmethod(tot))
+    sidecar_tot(monkeypatch)
 
     with pytest.raises(DisSidecarError):
         ai_memory_service.list_entries(db, regular_user, "user", None)
@@ -825,8 +404,9 @@ def test_ein_persoenliches_team_nimmt_kein_teamwissen(
 
     Er laege unter `team:{persoenlich}`: die persoenliche Ansicht zeigt
     `scope='user'`, und eine Teamansicht gibt es fuer das Ein-Mann-Team nicht.
-    Der KI-Weg stuft laengst auf `scope='user'` herunter — die Regel gehoert
-    deshalb an den Dienst und nicht in die Aufrufer.
+    Der Gedaechtnisschreiber bietet das persoenliche Team gar nicht erst an
+    (`_bereiche`) — die Regel gehoert trotzdem an den Dienst und nicht in die
+    Aufrufer.
     """
     _allow(db, regular_user, "ai.memory.use")
     persoenlich = team_service.personal_team(db, regular_user)
@@ -851,70 +431,30 @@ def test_eine_erfundene_server_id_heisst_server_nicht_gefunden(
 
     Ein Benutzer mit pauschalem `server.view` (hier ueber die Rolle, beim Owner
     genauso) kommt an `has_server_permission` vorbei, ohne dass der Server je
-    geladen wird. Nannte das Modell eine Nummer, die es gar nicht gibt, wurde
-    die Zeile angelegt und erst der Fremdschluessel beim Commit warf sie
-    zurueck — als "Bitte erneut versuchen". Das Modell befolgte die
-    Aufforderung und wiederholte denselben aussichtslosen Aufruf, statt mit
-    `list_my_servers` nach der richtigen Nummer zu suchen.
+    geladen wird. Eine Nummer, die es gar nicht gibt, ergab eine Zeile, die
+    erst der Fremdschluessel beim Commit zurueckwarf — als "Bitte erneut
+    versuchen". Das Modell, das bis Stufe 2 des Gedaechtnisses selbst schrieb,
+    wiederholte darauf denselben aussichtslosen Aufruf, statt mit
+    `list_my_servers` nach der richtigen Nummer zu suchen. Die Pruefung sitzt
+    in `scope_identity` und gilt damit fuer jeden Schreibweg.
     """
+    from fastapi import HTTPException
+
     _allow(db, regular_user, "ai.memory.use", "server.view")
 
-    with pytest.raises(AiActionValidationError) as exc:
-        ai_action_service.execute_read_tool(
-            db, user=regular_user, tool_name="remember",
-            arguments={
-                "scope": "server", "server_id": 424242,
-                "key": "startzeit", "value": "Startet nur mit erhoehtem Timeout",
-            },
+    with pytest.raises(HTTPException) as exc:
+        ai_memory_service.erinnerung_anlegen(
+            db, user=regular_user, scope="server", server_id=424242,
+            text="Startet nur mit erhoehtem Timeout.",
         )
-    # Die Diagnose entscheidet, was das Modell als naechstes tut.
-    assert "Server nicht gefunden" in str(exc.value)
-    assert "erneut versuchen" not in str(exc.value)
+    # Die Diagnose entscheidet, was der Leser als naechstes tut.
+    assert exc.value.status_code == 404
+    assert "Server nicht gefunden" in str(exc.value.detail)
+    assert "erneut versuchen" not in str(exc.value.detail)
     db.rollback()
     assert db.query(AiMemoryEntry).filter(
         AiMemoryEntry.server_id == 424242
     ).count() == 0
-
-
-def test_eine_erlaubte_korrektur_nimmt_dem_eintrag_nicht_dauerhaft_den_schutz(
-    db: Session, regular_user: User
-) -> None:
-    """Nach "nein, korrigier das" bleibt es trotzdem eine Ansage des Benutzers.
-
-    Vorher stufte die ausdruecklich erlaubte Korrektur den Eintrag auf
-    `origin='ai'` herunter. Der Schutz gegen das stillschweigende Ueberschreiben
-    haengt aber genau an diesem Feld — er galt danach fuer immer nicht mehr, und
-    die naechste beilaeufige Ableitung der KI durfte den Wert ohne
-    `replace_user_entry` ersetzen.
-    """
-    _allow(db, regular_user, "ai.memory.use")
-    _remember(db, regular_user, "ram.bevorzugt", "Ich nehme immer 16 GB")
-
-    ai_action_service.execute_read_tool(
-        db, user=regular_user, tool_name="remember",
-        arguments={
-            "scope": "user", "key": "ram.bevorzugt",
-            "value": "Ich nehme immer 8 GB", "replace_user_entry": True,
-        },
-    )
-
-    zeile = db.query(AiMemoryEntry).filter(
-        ai_memory_service.schluessel_bedingung(db, f"user:{regular_user.id}", ["ram.bevorzugt"])
-    ).one()
-    assert zeile.origin == "user"
-
-    # Und deshalb greift der Schutz beim naechsten Mal wieder.
-    with pytest.raises(AiActionValidationError) as exc:
-        ai_action_service.execute_read_tool(
-            db, user=regular_user, tool_name="remember",
-            arguments={
-                "scope": "user", "key": "ram.bevorzugt",
-                "value": "Ich nehme immer 4 GB",
-            },
-        )
-    assert "replace_user_entry" in str(exc.value)
-    _row, wert = ai_memory_service.list_entries(db, regular_user, "user", None)[0]
-    assert "8 GB" in wert
 
 
 # ── Blättern ─────────────────────────────────────────────────────────
@@ -954,33 +494,27 @@ def test_die_teamansicht_blaettert_statt_alles_auf_einmal_zu_oeffnen(
     200 bräuchte der Test 205 Einträge und ein angehobenes Rollenlimit und
     prüfte dann zwei Dinge auf einmal.
     """
-    from services.dis_client import DisClient
+    from tests._entschluesselung import mitzaehlen
 
     _allow(db, regular_user, "ai.memory.use", "teams.create")
     team = _team_mit_wissen(db, regular_user, 5)
     monkeypatch.setattr(ai_memory_service, "PERSONAL_PAGE_SIZE", 3)
-
-    echt = DisClient.decrypt
-    geoeffnet: list[str] = []
-
-    def zaehlend(payload, *, aad):
-        geoeffnet.append(aad)
-        return echt(payload, aad=aad)
-
-    monkeypatch.setattr(DisClient, "decrypt", staticmethod(zaehlend))
+    zaehler = mitzaehlen(monkeypatch)
 
     erste = ai_memory_service.scope_entries(
         db, regular_user, "team", None, team.id
     )
-    aufrufe_erste = len(geoeffnet)
+    texte_erste, aufrufe_erste = zaehler.texte, zaehler.aufrufe
     zweite = ai_memory_service.scope_entries(
         db, regular_user, "team", None, team.id, offset=3
     )
 
     assert len(erste.eintraege) == 3
     assert erste.gesamt == 5
-    # Genau eine Entschlüsselung je gezeigter Zeile — nicht je vorhandener.
-    assert aufrufe_erste == 3
+    # Genau ein Text je gezeigter Zeile — nicht je vorhandener —, in einem
+    # Roundtrip.
+    assert texte_erste == 3
+    assert aufrufe_erste == 1
 
     # Zusammen genau die fünf, ohne Überlappung und ohne Lücke.
     assert len(zweite.eintraege) == 2
@@ -1069,112 +603,3 @@ def test_eine_bereichsseite_bleibt_hinter_der_mitgliedschaft(
     with pytest.raises(HTTPException) as fehler:
         ai_memory_service.scope_entries(db, fremder, "team", None, team.id)
     assert fehler.value.status_code == 404
-
-
-# ── Wenn das Merken selbst schiefgeht ─────────────────────────────────
-
-
-def test_ein_stummer_sidecar_kostet_die_notiz_und_nicht_den_lauf(
-    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Ein Gedächtnis ist eine Beigabe: es darf fehlen, nicht im Weg stehen.
-
-    `upsert_entry` verschlüsselt über den Sidecar. Antwortet der nicht, kommt
-    von dort eine gewöhnliche Ausnahme — keine `HTTPException`, und
-    `_execute_remember` fing nur die. Sie flog durch die Werkzeugschicht bis in
-    den Segmentfang des Streams: der ganze Lauf endete mit `AI_STREAM_FAILED`
-    und der Benutzer verlor die komplette Antwort, wegen einer Notiz, die das
-    Modell nebenbei und lautlos machen sollte.
-
-    Die andere Hälfte steht weiter oben: beim **Lesen** über die
-    Verwaltungsansicht muss derselbe Fehler nach wie vor durchkommen.
-    """
-    from services.dis_client import DisClient, DisSidecarError
-
-    _allow(db, regular_user, "ai.memory.use")
-
-    def tot(payload, *, aad):
-        raise DisSidecarError("Sidecar nicht erreichbar")
-
-    monkeypatch.setattr(DisClient, "encrypt", staticmethod(tot))
-
-    ergebnis = ai_action_service.execute_read_tool(
-        db, user=regular_user, tool_name="remember",
-        arguments={
-            "scope": "user", "key": "ram.vorgabe",
-            "value": "Fuer neue Server immer 16 GB Arbeitsspeicher.",
-        },
-    )
-
-    assert ergebnis["remembered"] is False
-    assert ergebnis["reason"] == "memory_unavailable"
-    # Das Modell soll weiterarbeiten und nicht denselben Aufruf wiederholen,
-    # bis die Runden alle sind.
-    assert "nicht noch einmal" in ergebnis["message"]
-    # Und die halb angefangene Zeile bleibt nicht in der Sitzung liegen.
-    assert db.query(AiMemoryEntry).count() == 0
-
-
-def test_ein_vorhandener_schluessel_ist_kein_doppel_sondern_das_update(
-    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Die Absage empfiehlt einen Aufruf — den darf sie nicht selbst abweisen.
-
-    `aehnlicher_eintrag` schließt nur den identischen Schlüssel aus. Stehen im
-    Bereich schon zwei ähnliche Altlasten nebeneinander — `ram.vorgabe` neben
-    `standard_ram`, genau der Bestand, gegen den die Prüfung gebaut ist —, fand
-    der Aufruf mit dem einen Schlüssel den anderen und umgekehrt: zwei Absagen,
-    die aufeinander verweisen, bis die Runden aufgebraucht sind. Ein
-    ausdrücklich gewünschtes "ich will jetzt 16 GB" scheiterte dabei still.
-
-    Der Bedeutungsvergleich wird hier ersetzt statt gemessen: das
-    Einbettungsmodell fehlt auf vielen Rechnern (dann liefert
-    `aehnlicher_eintrag` bewusst `None`), die Weiche davor gilt trotzdem.
-    """
-    _allow(db, regular_user, "ai.memory.use")
-    for key, value in (
-        ("ram.vorgabe", "Fuer neue Server immer 8 GB."),
-        ("standard_ram", "Neue Server bekommen 8 GB."),
-    ):
-        # `origin="ai"`, weil hier die Duplikatweiche gemessen wird und nicht
-        # der Schutz vor dem Überschreiben einer Ansage des Benutzers.
-        ai_memory_service.upsert_entry(
-            db, user=regular_user, scope="user", server_id=None,
-            key=key, value=value, origin="ai",
-        )
-    (altlast,) = [r for r in db.query(AiMemoryEntry).all() if r.key == "standard_ram"]
-
-    # Jeder Aufruf findet ein Doppel — so verhält sich der Bestand oben.
-    monkeypatch.setattr(
-        ai_memory_service, "aehnlicher_eintrag", lambda db, **kwargs: (altlast, 0.91),
-    )
-
-    ergebnis = ai_action_service.execute_read_tool(
-        db, user=regular_user, tool_name="remember",
-        arguments={
-            "scope": "user", "key": "ram.vorgabe",
-            "value": "Fuer neue Server immer 16 GB.",
-        },
-    )
-
-    assert ergebnis["remembered"] is True
-    werte = {
-        row.key: value
-        for row, value in ai_memory_service.list_entries(db, regular_user, "user", None)
-    }
-    assert "16 GB" in werte["ram.vorgabe"]
-    # Kein dritter Schlüssel: überschrieben, nicht verdoppelt.
-    assert set(werte) == {"ram.vorgabe", "standard_ram"}
-
-    # Die Schranke selbst bleibt stehen — ein wirklich neuer Schlüssel wird
-    # weiterhin abgewiesen, mit dem Namen des vorhandenen daneben.
-    absage = ai_action_service.execute_read_tool(
-        db, user=regular_user, tool_name="remember",
-        arguments={
-            "scope": "user", "key": "speicher.default",
-            "value": "Neue Server bekommen 16 GB.",
-        },
-    )
-    assert absage["remembered"] is False
-    assert absage["reason"] == "duplicate"
-    assert absage["existing_key"] == "standard_ram"

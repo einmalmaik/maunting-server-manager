@@ -300,8 +300,10 @@ def test_gedaechtnis_und_skills_bleiben_dem_beaufsichtigten_chat_vorbehalten() -
     """Aus einem Lauf ohne Zuschauer wird nichts Dauerhaftes gelernt.
 
     Die Werkzeugergebnisse enthalten Serverlogs — Text, den ein Spieler
-    geschrieben haben kann. Ein `remember` daraus stuende danach in jedem
-    weiteren Lauf im Kontext, und niemand hat es je gesehen.
+    geschrieben haben kann. Ein `learn_skill` daraus stuende danach in jedem
+    weiteren Lauf im Kontext, und niemand hat es je gesehen. Das Gedaechtnis
+    schreibt seit Stufe 2 nur noch der Hintergrund, und der liest keine
+    Fenster ohne Menschen (`test_ai_gedaechtnis_schreiber`).
 
     Gegen die beiden Gruppen aus der Registry gefragt und nicht gegen eine
     Namensliste: hier standen `forget`, `read_memories` und `propose_skill_save`

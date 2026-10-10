@@ -235,7 +235,7 @@ async def test_switching_off_says_so_explicitly(
     Opus 5, Sonnet 5 und Gemini 3.5 Flash `default_enabled: true`, OpenAI setzt
     ab GPT-5.5 auf `medium`. Der ausgeschaltete Schalter hat also nicht das
     Nachdenken abgestellt, sondern nur seine Anzeige — bezahlt wurde es weiter.
-    Fuer ein Panel, dessen Rollen ein `monthly_cost_limit_cents` tragen, ist das
+    Fuer ein Panel, dessen Rollen ein Tokenlimit tragen, ist das
     kein Schoenheitsfehler.
     """
     sent: dict = {}

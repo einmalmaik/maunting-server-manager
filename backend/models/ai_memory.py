@@ -1,21 +1,25 @@
 """Verschluesseltes, explizit steuerbares AI-Memory."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
     LargeBinary,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
 )
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
 
@@ -38,6 +42,9 @@ class AiMemoryPreference(Base):
     # "Nicht mehr anzeigen". Schaltet den Hinweis ab, nicht das Gedaechtnis —
     # aktivieren laesst es sich danach weiterhin unter Profil > Memory.
     notice_hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Wann zuletzt eingeschaltet. Persoenliches schreibt der Gedaechtnisschreiber
+    # nur aus dem, was seitdem gesagt wurde (`ai_memory_service.einwilligung_seit`).
+    eingeschaltet_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AiMemoryEntry(Base):
@@ -61,7 +68,7 @@ class AiMemoryEntry(Base):
     Wort), dann an der Zahl: 100 ist seit dem konfigurierbaren Rollenlimit nur
     noch der Ausgangswert, ein Bereich fasst bis zu 5.000 Einträge
     (``ai_limit_service.MAX_MEMORY_ENTRIES_MAX``). So viel geht nicht mehr am
-    Stueck mit, deshalb waehlt ``provider_memory_context`` aus.
+    Stueck mit, deshalb waehlt der Abruf aus (``ai_gedaechtnis_abruf``).
 
     Ihr zweiter Teil traegt weiter: der Vektor kam als zusaetzliche Spalte und
     nicht als Umbau, und einen Vektor*index* gibt es nach wie vor bewusst nicht.
@@ -73,7 +80,7 @@ class AiMemoryEntry(Base):
     ist die Absage trotzdem: zur Menge, ab der sich ein Index lohnt, ist es
     keine Zehnerpotenz mehr, sondern Faktor zwei. Der nächste Anstieg des
     Deckels ist die Prüfung, die diesmal noch ausgegangen ist; sie steht in
-    ``docs/agent-rules/dependencies.md`` bei ``model2vec``.
+    ``docs/agent-rules/dependencies.md`` bei den lokalen Embeddings.
     """
 
     __tablename__ = "ai_memory_entries"
@@ -87,9 +94,33 @@ class AiMemoryEntry(Base):
             name="ck_ai_memory_entries_scope",
         ),
         CheckConstraint("origin IN ('user', 'ai')", name="ck_ai_memory_entries_origin"),
+        CheckConstraint(
+            "art IS NULL OR art IN ("
+            "'fakt', 'vorliebe', 'anweisung', 'ereignis', 'plan', 'beziehung', 'wissen', "
+            "'schluss')",
+            name="ck_ai_memory_entries_art",
+        ),
+        CheckConstraint(
+            "quelle IN ('eingetragen', 'gespraech', 'import', 'pflege')",
+            name="ck_ai_memory_entries_quelle",
+        ),
+        CheckConstraint(
+            "wichtigkeit BETWEEN 1 AND 5", name="ck_ai_memory_entries_wichtigkeit"
+        ),
+        CheckConstraint(
+            "status IN ('aktiv', 'vergessen')", name="ck_ai_memory_entries_status"
+        ),
         UniqueConstraint("scope_identity", "key_index", name="uq_ai_memory_scope_key_index"),
         Index("ix_ai_memory_owner_scope", "owner_user_id", "scope"),
         Index("ix_ai_memory_team", "team_id"),
+        Index("ix_ai_memory_identity_status", "scope_identity", "status"),
+        # Was „im Kopf“ steht, wählt die Datenbank (`ai_gedaechtnis_abruf`):
+        # angeheftet, dann nach `kopf_rang`, dann neu. Mit diesem Index liest
+        # sie dafür bei 100.000 Einträgen eines Bereichs nur die ersten Zeilen.
+        Index(
+            "ix_ai_memory_kopf",
+            "scope_identity", "status", "angeheftet", "kopf_rang", "created_at", "id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -116,9 +147,66 @@ class AiMemoryEntry(Base):
     # NULL im Index heisst Altbestand von vor der Umstellung, `key_encrypted`
     # traegt dann noch den Klartext. `ai_memory_service.schluessel_bedingung`
     # zieht beides im betroffenen Bereich nach, bevor gesucht wird.
-    key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    #
+    # Seit Gedaechtnis v2 (06.10.2026) ist der Name Altbestand. Eine
+    # Erinnerung ist ein Satz, kein Paar aus Name und Wert: unter zwei Namen
+    # stand dieselbe Sache zweimal, und eine Biografie liess sich in Namen gar
+    # nicht fassen. Neue Zeilen haben deshalb keinen Namen (beide Spalten
+    # NULL); alte behalten ihn, bis die Pflege sie in Saetze umschreibt.
+    key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     key_index: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Der Text der Erinnerung: ein bis fuenf Saetze, die ohne das Gespraech
+    # verstaendlich sind. Der Spaltenname stammt aus der Zeit von Name und Wert.
     value_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    # Ein kurzer Titel fuer die Liste, verschluesselt wie der Text. Optional:
+    # wer selbst etwas eintraegt, schreibt nur den Satz.
+    titel_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Das Thema, unter dem die Erinnerung steht ("Familie", "Arbeit").
+    # Verliert sie es, bleibt sie stehen, nur ohne Thema.
+    thema_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey(
+            "ai_memory_themen.id", ondelete="SET NULL", name="fk_ai_memory_entries_thema_id"
+        ),
+        nullable=True, index=True,
+    )
+    # Was fuer eine Aussage es ist. Im Klartext wie `origin`: eine Art verraet
+    # nichts ueber den Inhalt, und Pflege und Abruf filtern danach.
+    # `plan` ist eigens da: ein Plan bleibt ein Plan, bis jemand sagt, wie er
+    # ausging (siehe `faellig_am`).
+    art: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Woher die Erinnerung kommt: selbst eingetragen, aus einem Gespraech, aus
+    # einem Import oder von der Pflege zusammengefuehrt. `origin` daneben sagt
+    # etwas anderes, naemlich wer sie verbuergt.
+    quelle: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="eingetragen", server_default="eingetragen"
+    )
+    # Worauf sich die Quelle bezieht (Import-ID mit Abschnitt, Unterhaltung).
+    # Nur Kennungen, nie Inhalt.
+    quelle_ref: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # 1 (Nebensache) bis 5 (darf nie fehlen, etwa eine Allergie). Bestimmt,
+    # wie langsam eine Erinnerung verblasst.
+    wichtigkeit: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=3, server_default="3"
+    )
+    # Wann das Beschriebene stattfinden soll, nur bei Plaenen und Terminen.
+    # Ist der Tag vorbei, formuliert die Pflege die Erinnerung als Plan in der
+    # Vergangenheit um, ohne einen Ausgang zu behaupten. Im Klartext, weil die
+    # Pflege danach sucht; ein Datum ohne den Satz dazu sagt nichts.
+    faellig_am: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # `vergessen` heisst: die KI hat sie auf Wunsch vergessen. Sie zaehlt nicht
+    # mehr, erscheint nirgends mehr im Kontext und wird nach 30 Tagen geloescht
+    # (`ai_memory_service.VERGESSEN_TAGE`). Bis dahin laesst sie sich
+    # zurueckholen, falls die KI den Wunsch falsch verstanden hat. Was ein
+    # Mensch in der Oberflaeche loescht, ist sofort weg.
+    status: Mapped[str] = mapped_column(
+        String(12), nullable=False, default="aktiv", server_default="aktiv"
+    )
+    vergessen_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Zaehlt jede inhaltliche Aenderung. Wer aendert, nennt die Fassung, die er
+    # gesehen hat; passt sie nicht mehr, hat inzwischen jemand anderes
+    # geschrieben (die Pflege im Hintergrund oder ein zweites Fenster).
+    fassung: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     # "user" = ausdruecklich hinterlegt, "ai" = von der KI gemerkt.
     origin: Mapped[str] = mapped_column(String(8), nullable=False, default="user")
     # Welche AAD beim Verschluesseln verwendet wurde. 1 = nur die Eintrags-ID,
@@ -164,8 +252,39 @@ class AiMemoryEntry(Base):
     # Womit gerechnet wurde. Passt es nicht zum geladenen Modell, wird der
     # Vektor ignoriert statt falsche Aehnlichkeiten zu liefern.
     embedding_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Steht immer „im Kopf“, vor allem anderen (`ai_gedaechtnis_abruf`). Heftet
+    # nur ein Mensch an; der Schreiber im Hintergrund fasst es nicht an.
+    angeheftet: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    # Wann Vektor und Wortindex zuletzt aus dem Text gerechnet wurden. NULL
+    # heißt noch nie: dann holt der Takt es nach
+    # (`ai_gedaechtnis_abruf.nachziehen`). Der Vektorspeicher des Abrufs liest
+    # an dieser Spalte und an `updated_at`, ob sich in einem Bereich etwas
+    # geändert hat.
+    indiziert_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Nach wie vielen Tagen ohne Gebrauch die Präsenz auf 1/e gefallen ist.
+    # NULL heißt: noch nie gebraucht, es gilt der Startwert der Wichtigkeit
+    # (`ai_memory_service.HALTBARKEIT_START`). Jeder Gebrauch verlängert sie,
+    # umso mehr, je länger die Pause davor war.
+    haltbarkeit_tage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Wichtigkeit × Präsenz, wie die Pflege sie zuletzt gerechnet hat: danach
+    # ordnet sich, was „im Kopf“ steht. Gerechnet wird einmal am Tag
+    # (`ai_gedaechtnis_pflege.rang_auffrischen`), nicht je Anfrage — sonst
+    # änderte sich der Kopf mit jeder Frage, und der Zwischenspeicher beim
+    # Anbieter bräche. Neue Einträge beginnen bei ihrer Wichtigkeit.
+    kopf_rang: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    # Der Wortindex. Ersetzt wird er als Ganzes, wenn sich der Text ändert
+    # (`ai_memory_service.refresh_embedding`); gelöscht mit der Zeile von der
+    # Datenbank (ON DELETE CASCADE), ohne ihn vorher zu laden.
+    begriffe: Mapped[list["AiMemoryBegriff"]] = relationship(
+        cascade="all, delete-orphan", passive_deletes=True
+    )
 
     @hybrid_property
     def key(self) -> str:
@@ -206,3 +325,185 @@ class AiMemoryEntry(Base):
         # An Bereich und Zeile gebunden wie der Wert (`ai_memory_service._aad`):
         # wer den Namen in eine fremde Zeile kopiert, bekommt ihn nicht lesbar.
         return f"msm:ai:memory:key:{self.scope_identity}:{self.id}"
+
+    @hybrid_property
+    def titel(self) -> str | None:
+        """Der Titel im Klartext, wie beim Namen einmal entschluesselt und gemerkt.
+
+        Fuer viele Zeilen fuellt `ai_memory_service._oeffnen` den Speicher in
+        einem Sidecar-Aufruf zusammen mit dem Text.
+        """
+        if "_titel_klartext" in self.__dict__:
+            return self.__dict__["_titel_klartext"]
+        roh = self.titel_encrypted
+        klar: str | None = None
+        if roh:
+            from services.dis_client import DisClient
+
+            klar = DisClient.decrypt(roh, aad=self.titel_aad()) if DisClient.ist_verschluesselt(roh) else roh
+        self._titel_klartext = klar
+        return klar
+
+    @titel.inplace.setter
+    def _titel_setzen(self, wert: str | None) -> None:
+        from services.dis_client import DisClient
+
+        self.titel_encrypted = DisClient.encrypt(wert, aad=self.titel_aad()) if wert else None
+        self._titel_klartext = wert or None
+
+    @titel.inplace.expression
+    @classmethod
+    def _titel_in_sql(cls):
+        raise AttributeError(
+            "AiMemoryEntry.titel ist verschluesselt und in SQL nicht vergleichbar"
+        )
+
+    def titel_aad(self) -> str:
+        return f"msm:ai:memory:titel:{self.scope_identity}:{self.id}"
+
+
+class AiMemoryTopic(Base):
+    """Ein Thema eines Bereichs, unter dem Erinnerungen zusammenstehen.
+
+    Je Bereich (``scope_identity``) eine Zeile je Name. Der Name ist
+    verschluesselt, denn auch ein Thema kann viel sagen ("Scheidung"); die
+    Eindeutigkeit liegt wie beim alten Namen der Erinnerung auf einem
+    HMAC-Index aus dem Sidecar, gebunden an den Bereich.
+
+    Die Fremdschluessel stehen wie bei den Erinnerungen: das Thema geht mit
+    dem Benutzer, dem Server oder dem Team, dem sein Bereich gehoert.
+    """
+
+    __tablename__ = "ai_memory_themen"
+    __table_args__ = (
+        UniqueConstraint("scope_identity", "name_index", name="uq_ai_memory_themen_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    scope_identity: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    owner_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    server_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    team_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    name_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    name_index: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    def name_aad(self) -> str:
+        return f"msm:ai:memory:thema:{self.scope_identity}:{self.id}"
+
+
+class AiMemoryBegriff(Base):
+    """Ein Wort einer Erinnerung als Prüfwert — der Wortindex des Abrufs.
+
+    Der Abruf sucht bei großen Gedächtnissen zweigleisig: nach Bedeutung über
+    die Vektoren und nach Wörtern über diese Tabelle. Die Wörter einer Frage
+    werden genauso zu Prüfwerten und in der Datenbank nachgeschlagen, ohne dass
+    ein einziger Text geöffnet wird (`ai_gedaechtnis_abruf`).
+
+    Der Prüfwert ist ein HMAC über Bereich und Wort, die ersten acht Byte als
+    Zahl, mit einem Schlüssel aus dem Panel-Secret — wie beim Vektor
+    (`ai_memory_service._begriff_schluessel`). Derselbe Schutz und dieselbe
+    Grenze: wer nur die Datenbank hat, liest kein Wort; wer auch die
+    Panel-Umgebung hat, kann Wörter durchprobieren. Der Bereich steckt im
+    Prüfwert, damit ein Wort in zwei Bereichen nicht als dasselbe erkennbar ist
+    und eine Frage nur in den Bereichen trifft, für die sie gerechnet wurde.
+    """
+
+    __tablename__ = "ai_memory_begriffe"
+    __table_args__ = (Index("ix_ai_memory_begriffe_eintrag", "memory_id"),)
+
+    begriff: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    memory_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("ai_memory_entries.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class AiMemoryBeleg(Base):
+    """Worauf ein Schluss der Pflege sich stützt: je Beleg eine Zeile.
+
+    Ein Schluss (`art = 'schluss'`) folgt aus mindestens zwei Erinnerungen
+    desselben Bereichs (`ai_gedaechtnis_pflege`). Er gilt nur, solange sie
+    gelten: ändert sich der Text eines Belegs oder wird er vergessen oder
+    gelöscht, vergisst das Gedächtnis den Schluss mit
+    (`ai_memory_service._schluesse_entkraeften`). Nur Kennungen, kein Inhalt.
+    """
+
+    __tablename__ = "ai_memory_belege"
+    __table_args__ = (Index("ix_ai_memory_belege_beleg", "beleg_id"),)
+
+    schluss_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("ai_memory_entries.id", ondelete="CASCADE"), primary_key=True
+    )
+    beleg_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("ai_memory_entries.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class AiMemoryPflege(Base):
+    """Wie weit die nächtliche Pflege einen Bereich gelesen hat.
+
+    ``gepflegt_bis``: Einträge, die danach geändert wurden, sieht die nächste
+    Pflege an (`ai_gedaechtnis_pflege`). ``gelaufen_am``: wann sie zuletzt
+    lief — nach anderthalb Tagen läuft sie auch tagsüber, falls das Panel
+    nachts aus ist.
+    """
+
+    __tablename__ = "ai_memory_pflege"
+
+    scope_identity: Mapped[str] = mapped_column(String(128), primary_key=True)
+    gepflegt_bis: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    gelaufen_am: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AiMemoryVersion(Base):
+    """Eine fruehere Fassung einer Erinnerung.
+
+    Jede Aenderung legt den Stand davor hier ab, ob ein Mensch ihn geaendert
+    hat oder die Pflege im Hintergrund. Daraus folgt die Zusage des
+    Gedaechtnisses: was die KI zusammenfuehrt oder umschreibt, laesst sich
+    nachlesen und zurueckholen. Je Erinnerung bleiben die juengsten
+    `ai_memory_service.MAX_VERSIONEN`.
+
+    Text und Titel sind an Bereich, Erinnerung und diese Zeile gebunden
+    (`ai_memory_service._versions_aad`), wie der Text der Erinnerung selbst:
+    eine Fassung, die jemand per Datenbankzugriff unter eine fremde
+    Erinnerung oder in einen fremden Bereich haengt, ist dort unlesbar.
+    """
+
+    __tablename__ = "ai_memory_versionen"
+    __table_args__ = (
+        CheckConstraint(
+            "grund IN ('bearbeitet', 'aktualisiert', 'zusammengefuehrt', 'aufgenommen', "
+            "'umgeschrieben', 'wiederhergestellt')",
+            name="ck_ai_memory_versionen_grund",
+        ),
+        CheckConstraint("von IN ('user', 'ai')", name="ck_ai_memory_versionen_von"),
+        Index("ix_ai_memory_versionen_eintrag", "memory_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    memory_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("ai_memory_entries.id", ondelete="CASCADE"), nullable=False
+    )
+    # Der Bereich der Erinnerung, hier noch einmal: die AAD der Fassung
+    # braucht ihn, und wer sie lesen will (der Datenexport), hat nur diese
+    # Zeile vor sich.
+    scope_identity: Mapped[str] = mapped_column(String(128), nullable=False)
+    text_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    titel_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Warum es diese Fassung gibt: `bearbeitet` (ein Mensch), `aktualisiert`
+    # und `zusammengefuehrt` (die Pflege), `aufgenommen` (der Text einer
+    # zweiten Erinnerung, die in dieser aufgegangen ist), `umgeschrieben`
+    # (alter Eintrag in Satzform gebracht), `wiederhergestellt` (der Stand vor
+    # dem Zurueckholen einer aelteren Fassung).
+    grund: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Wer die Aenderung gemacht hat, die diese Fassung abgeloest hat.
+    von: Mapped[str] = mapped_column(String(8), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)

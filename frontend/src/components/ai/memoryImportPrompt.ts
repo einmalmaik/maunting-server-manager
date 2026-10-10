@@ -3,13 +3,13 @@
  * bisherige KI, deren Antwort fügt er im Import wieder ein.
  *
  * Er steht hier und nicht in der Sprachdatei: er ist ein Text **an eine
- * Maschine**, dessen Form der Parser in `backend/services/ai_memory_import_service.py`
- * wiedererkennen muss — die fünf Abschnitte, die Unterpunkte „Beleg:“ und die
- * Schlusszeile „Importiert aus:“. Wer eine Überschrift hier ändert, prüft dort
- * `KATEGORIEN` und `_UEBERSCHRIFT_ANFANG`.
+ * Maschine**. Die Antwort liest seit Gedächtnis v2, Stufe 3 das
+ * Gedächtnis-Modell (`backend/services/ai_memory_import_service.py`); an
+ * Abschnitten und Unterpunkten hängt dort nichts mehr, ein eigener Text geht
+ * genauso. Wiedererkannt wird nur noch die Schlusszeile „Importiert aus:“ /
+ * „Imported from:“ (`_QUELLE_RE`) — sie nennt die Quelle.
  *
- * Zwei Fassungen, weil die fremde KI in der Sprache des Prompts antwortet und
- * der Parser beide Sprachen liest.
+ * Zwei Fassungen, weil die fremde KI in der Sprache des Prompts antwortet.
  */
 const DEUTSCH = `Hilf mir, Kontext von einem KI-Assistenten in einen anderen zu importieren. Deine Aufgabe ist es, unsere bisherigen Unterhaltungen durchzugehen und zusammenzufassen, was du über mich weißt.
 

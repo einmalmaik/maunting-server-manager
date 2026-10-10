@@ -42,6 +42,8 @@ MSM besitzt einen Chat-Rand und zwei wählbare Voice-Transporte:
 
 Chat und Legacy Voice teilen `AiRun` plus `ai_run_broker`. Eine Realtime-Verbindung führt dagegen einen flüchtigen Gesprächskontext beim Anbieter und legt keine gesprochenen Nachrichten im Chat ab. Gemeinsam bleiben der serverseitige Werkzeugkatalog, die Rechteprüfung, der Vorschlagsfluss, Worker, Schwärzung und Kontingente.
 
+Die Kontingente rechnen in rollenden Fenstern (`ai_usage_service.FENSTER_TAG`, `_WOCHE`, `_MONAT`: 24 Stunden, 7 und 30 Tage), nicht nach Kalendertag oder -monat; die Feldnamen `daily_…`/`monthly_…` sind geblieben. Angerechnet wird je Anfrage `angerechnete_tokens`: aus dem Cache gelesene Eingabetokens zählen zu `CACHE_ANRECHNUNG_PROZENT` (10 %), alles andere voll. Die Verbrauchsansicht zeigt dieselbe Zahl, die die Sperre prüft.
+
 ## Systemübersicht
 
 ```text
@@ -91,7 +93,10 @@ Chat und Legacy Voice teilen `AiRun` plus `ai_run_broker`. Eine Realtime-Verbind
 `backend/routers/ai_chat.py` nimmt eine Nachricht entgegen, authentifiziert den Benutzer über die normale Session, prüft die Chat-Berechtigung und wählt einen zulässigen Provider. Der Router legt nicht selbst die Fachlogik fest. Er:
 
 1. redigiert die Nachricht (`redact_sensitive_text`),
-2. ermittelt Denkstufe und Kontextfenster,
+2. ermittelt Denkstufe und Kontextfenster (nutzbar höchstens
+   `ai_context_window.ANFRAGE_DECKEL_TOKENS` = 44.000 Token je Anfrage, auch
+   bei Modellen mit größerem Fenster; was darüber hinausgeht, fasst die
+   Zusammenfassung ab der Faltmarke dieses Deckels zusammen),
 3. übergibt nur IDs und freigegebene Eingabewerte an `lauf_beginnen_nebenher`,
 4. eröffnet und abonniert den Broker vor dem Start des Runs,
 5. liefert den Broker als SSE-Stream zurück.
@@ -114,7 +119,10 @@ die WebRTC-Sitzung serverseitig und verbindet anschließend einen Sideband-
 WebSocket mit derselben Call-ID. Call-ID und API-Schlüssel bleiben im Backend.
 Der Browser erhält nur die SDP-Antwort; Audio läuft danach nicht durch das
 Panel. Realtime lädt Erinnerungen und den aktuellen Systemprompt, jedoch keinen
-Chatverlauf und keine Eingabetranskription. Ohne aktive Auswahl bleibt der
+Chatverlauf. Eine Eingabetranskription läuft nur bei eingeschaltetem Gedächtnis
+(Recht `ai.memory.use` und Zustimmung) und nur, wenn der Zugang ein
+Transkriptionsmodell hat; sie dient allein der Mitschrift für den
+Gedächtnisschreiber (siehe Erinnerungen). Ohne aktive Auswahl bleibt der
 Legacy-Weg unverändert. Die Betreiberkonfiguration nutzt Modell, Stimme,
 Antwortsprache und Semantic-VAD. Bei einem Realtime-2-Modell kommt zusätzlich
 die feste Denkstufe hinzu; für Realtime-1.5 wird sie nicht gesendet.
@@ -201,7 +209,7 @@ Der Kontext hat ein Budget. Vor jeder Provider-Runde verkürzt die Engine älter
 | Rolle | Wann | Werkzeugraum |
 |---|---|---|
 | `voll` | Standard oder kein konfiguriertes Worker-Modell | herkömmlicher vollständiger, berechtigungsgefilterter Katalog |
-| `gehirn` | primärer Chat, Worker-Modell konfiguriert, Recht `ai.background.use` vorhanden | Erinnerungen, Worker-Steuerung und eng begrenzte Desktop-Funktionen |
+| `gehirn` | primärer Chat, Worker-Modell konfiguriert, Recht `ai.background.use` vorhanden | Erinnerungen nachschlagen, Worker-Steuerung und eng begrenzte Desktop-Funktionen |
 | `worker` | Unterhaltung vom Typ Worker | Arbeitswerkzeuge, aber kein Start weiterer Worker |
 
 Guardian- und Aufgabenläufe erhalten zusätzlich engere Werkzeugmengen. Die Rolle wird im Run-Zustand eingefroren. Eine Modellantwort kann ihre Rolle, Herkunft oder Gerätefamilie nicht über Tool-Argumente erweitern.
@@ -209,6 +217,33 @@ Guardian- und Aufgabenläufe erhalten zusätzlich engere Werkzeugmengen. Die Rol
 ### Erinnerungen
 
 `ai_memory_service.py` trennt persönliche, serverbezogene, geteilte Server-, Team- und Panel-Scopes. Die Scope-Kennung wird zentral aus Benutzer, Server und Team gebildet. Erinnerungen sind standardmäßig deaktiviert. Gespeicherte Inhalte und Embeddings werden verschlüsselt bzw. über die dafür vorgesehenen Schutzpfade behandelt; AAD bindet Einträge an ihren Scope, sodass ein Datenbank-Umhängen sie nicht lesbar macht.
+
+Seit Gedächtnis v2 ist eine Erinnerung ein bis fünf Sätze mit Titel, Thema, Art und Wichtigkeit. Jede Änderung legt den Stand davor als Fassung ab, Vergessenes lässt sich 30 Tage zurückholen. Einträge aus der Zeit davor tragen noch einen Schlüssel, bis `ai_gedaechtnis_altbestand.py` sie im Takt des Schreibers umschreibt: je Bereich 25 Einträge in einem Modellaufruf, höchstens zwei Bereiche zugleich. Die Aussage und ihre Herkunft bleiben; der Stand davor bleibt als Fassung (Grund `umgeschrieben`, der alte Name als Titel), auch wenn der Text gleich bleibt. Einen Titel, den ein Mensch schon gesetzt hat, behält der Eintrag. Was in der Antwort fehlt, wird mechanisch umgestellt (Wert bleibt Text, Name wird Titel), ebenso ein Stapel nach drei unbrauchbaren Antworten; ein Ausfall des Anbieters stellt nichts mechanisch um. Es zahlt beim eigenen Bereich der Besitzer, nur mit Zustimmung und `ai.memory.use`, bei Teamwissen der Gründer, bei Anlagen- und Panelwissen das Betreiberkonto (`zweck='gedaechtnis'`). Ohne Zahler wartet der Bereich.
+
+Das Chatmodell schreibt nicht ins Gedächtnis. Es bekommt das Gedächtnis in zwei Teilen im Kontext und schlägt mit `search_memory` nach. Ausgewählt wird in `ai_gedaechtnis_abruf.py`, ohne den Bestand zu laden:
+
+- **Im Kopf** (vor dem Verlauf, bytegleich zwischen zwei Fragen und damit zwischengespeichert): passt alles ins Budget, alles; sonst auf der Hälfte des Budgets das Angeheftete, dann nach `kopf_rang` (Wichtigkeit × Präsenz), dann das Neueste, per Index aus der Datenbank, mit einem Hinweis auf die Zahl der ausgelassenen Einträge. Anheften kann nur ein Mensch, ohne neue Fassung.
+- **Passend zur Frage** (nach dem Verlauf, vor der Lage): nur wenn etwas ausgelassen ist, und nur, was die Frage trifft. Kandidaten kommen aus einem Vektorspeicher im Prozess (je Bereich eine Matrix, frisch gehalten über Anzahl, `updated_at` und `indiziert_am`, höchstens 250.000 Vektoren) und aus dem Wortindex `ai_memory_begriffe` (je Wort ein HMAC über Bereich und Wort mit einem aus dem Panel-Secret abgeleiteten Schlüssel, ohne Füllwörter), je höchstens 60. Geöffnet werden nur Kopf und Kandidaten, egal wie groß der Bestand ist.
+- **Gebraucht** ist, wen die Frage trifft, im Kopf wie hinten; gezeigt zu werden zählt nicht. Die Stimme bekommt zu Beginn nur den Kopf. Die Suche der Verwaltung (`suche`) geht denselben Weg über den ganzen Bestand und zählt nicht.
+- **Stärke:** Präsenz = e^(−Tage seit Gebrauch / Haltbarkeit). Die Haltbarkeit beginnt bei der Wichtigkeit (1 → 7 Tage, 3 → 30, 5 → 365) und wächst mit jedem Gebrauch um das 1,2- bis 2,2-Fache, je länger die Pause war (höchstens zehn Jahre). `kopf_rang` rechnet die Pflege einmal am Tag in einer Abfrage neu (`ai_gedaechtnis_pflege.rang_takt`, ab 03:00 UTC), nicht je Anfrage: sonst bräche der Zwischenspeicher. Gelöscht oder gekürzt wird nichts; was den Kopf verlässt, kommt auf einen Treffer hinten wieder.
+- **Nachziehen:** Vektor und Wortindex entstehen beim Schreiben. Zeilen ohne `indiziert_am`, ohne Vektor des geladenen Modells oder mit einem Vektor anderer Länge (unverpackt oder aus einem früheren Modell) rechnet der Takt nach, 1.000 je Lauf; ohne Sidecar bleibt alles offen. Das lokale Modell ist seit 07.10.2026 `paraphrase-multilingual-MiniLM-L12-v2` (ONNX-Runtime, 384 Zahlen, rund 6 ms je Frage); ein Modellwechsel heilt sich über diesen Takt, ohne Migration.
+
+Geschrieben wird im Hintergrund (`ai_gedaechtnis_schreiber.py`):
+
+- **Wann:** fünf Minuten, nachdem das Gespräch ruht, spätestens dreißig Minuten nach der ältesten ungelesenen Nachricht; nach „merk dir“ oder „vergiss“ sofort. Gelesen wird nur der Dauerchat, kein Worker- oder Auftragsfenster. Ein Sprachgespräch kommt an seinem Ende als Mitschrift (`ai_voice/mitschrift.py`), aus allen drei Sprachwegen (OpenAI Realtime, GPT-Live, Gemini Live). Die Mitschrift entsteht nur mit Recht und Zustimmung und wird nirgends gespeichert; war die Zustimmung am Ende aus oder zwischendurch aus, liest sie niemand. Der Lageblock der Sprachsitzung sagt, ob mitgeschrieben wird (Realtime ohne Transkriptionsmodell: nein).
+- **Was:** Nachrichten des Menschen, Singras Antworten und Berichte der Worker, redigiert und ohne Werkzeugergebnisse; dazu der passende Bestand der Bereiche, in die geschrieben werden darf.
+- **Wie:** ein erzwungener Werkzeugaufruf mit Änderungen (neu, ändern, zusammenführen, vergessen), jede mit einer Nachricht als Beleg. Bereiche und Einträge heißen dabei nur B1…/E1…: was nicht angeboten wurde, ist nicht erreichbar. Teamwissen, Vergessen und jede Änderung an einer Aussage des Menschen brauchen eine Nachricht des Menschen als Beleg.
+- **Grenzen:** Persönliches nur mit Zustimmung, und nur aus dem, was danach gesagt wurde: `ai_memory_preferences.eingeschaltet_am` begrenzt auch den Zusammenhang vor der Marke, und ein Ausschnitt, der vor dem Einschalten gelesen wurde, schreibt nichts Persönliches. Server- und Teamwissen hängen am Schreibrecht (`server.config.write`, Team-Schalter `can_manage_memory`), nicht am Schalter. Das Kontingent der Rolle gilt: 0 heißt kein Aufruf, ohne Grenze unbegrenzt.
+- **Modell:** der Platz „Gedächtnis“ am Zugang (`memory_model`, Schalter `memory_enabled`, eigene Rollenpreise aus dem Katalog), gewählt von `gedaechtnis_anbieter`: das Gedächtnismodell des Zugangs, über den gesprochen wurde (letzte Antwort im Ausschnitt, sonst Kontowahl, sonst `anbieter_ohne_auswahl`); sonst das eines anderen aktiven Zugangs, der einen Betreiberschlüssel hat oder keinen braucht, der älteste zuerst; sonst das Standardmodell. Bis 07.10.2026 stand hier das Worker-Modell. Schreiber, Altbestand und Import nehmen denselben Weg.
+- **Kosten:** ein Modellaufruf je Durchgang, beim Benutzer gebucht mit `zweck='gedaechtnis'`. Bei OpenAI Realtime kommt die Eingabetranskription derselben Sitzung dazu.
+- **Fehlschlag:** die Marke bleibt stehen, der Durchgang kommt mit Rückstellung wieder (5 Minuten bis 6 Stunden); ein neuer Chatlauf zieht sie nicht vor. Nach fünf Fehlschlägen am selben Ausschnitt wird er übersprungen. Scheitert schon das Lesen, wird nur bei einer Nachricht übersprungen, die sich nicht entschlüsseln lässt; ein stummer Sidecar wird abgewartet.
+- **Lesen:** in einem Thread, gebündelt entschlüsselt, nie im Ereignisloop. Ohne `ai.memory.use` wird nichts entschlüsselt, das Ungelesene gilt als gelesen.
+
+Die Pflege (`ai_gedaechtnis_pflege.py`) liest nachts (02–06 Uhr in der Zone des Zahlers, nach 36 Stunden ohne Pflege auch tagsüber) je Bereich, was seit der letzten Pflege neu oder geändert ist (20 je Lauf, Stand in `ai_memory_pflege`), dazu Pläne, deren Tag vorbei ist (`faellig_am`, vom Schreiber über das Feld `bis` gesetzt). Ähnliche Einträge (Vektor ≥ 0,5, aus dem Vektorspeicher, ohne Modellaufruf) kommen mit. Gibt es weder Ähnliches noch Fälliges, fragt sie nicht. Das Gedächtnismodell darf zusammenführen (das Ergebnis übernimmt höchste Wichtigkeit, Haltbarkeit, Anheftung und die Summe der Abrufe) und Abgelaufenes in die Vergangenheit setzen, ohne einen Ausgang zu behaupten. Einträge des Menschen gehen nirgends auf und behalten ihren Text, außer bei einem abgelaufenen Plan; der Stand davor bleibt als Fassung. Fällige, die das Modell nicht umschreibt, verlieren ihr Datum, damit sie nicht jede Nacht wiederkommen. Bereiche mit Altbestand warten, bis er umgeschrieben ist. Zahler, Kontingent und Buchung wie beim Altbestand.
+
+**Schlüsse.** Als Drittes darf das Modell Schlüsse ziehen: was aus zwei oder mehr Einträgen zusammen zwingend folgt, wird ein eigener Eintrag (`art = 'schluss'`, `quelle = 'pflege'`), gebunden an seine Belege (`ai_memory_belege`). Erfinden darf es dabei nichts, und dafür sorgen drei Stufen: der Code verwirft vorab, was an der Form scheitert (weniger als zwei Belege, ein Schluss als Beleg, eine Zahl, die in keinem Beleg steht, Vermutungswörter wie „vermutlich“/„probably“, bloße Wiederholung, über 400 Zeichen, mehr als drei je Lauf); ein zweiter, getrennter Aufruf (`_schluesse_pruefen`) sieht je Schluss nur dessen Belege und muss ihn ausdrücklich bestätigen, sonst wird nichts gespeichert; und ein Schluss gilt nur, solange seine Belege gelten — ändert sich der Text eines Belegs, wird er vergessen, gelöscht oder aufgenommen, vergisst das Gedächtnis den Schluss mit (`ai_memory_service._schluesse_entkraeften`, 30 Tage zurückholbar). Ein Schluss geht in keiner Zusammenführung auf und ist nie wichtiger als sein wichtigster Beleg; wer seinen Text ändert, macht ihn zu einer eigenen Aussage ohne Belege. Im Kontext steht er als `geschlossen`, in der Ansicht mit „Folgt aus“ und den Belegen.
+
+Der Import (`ai_memory_import_service.py`) liest ebenfalls mit dem Gedächtnismodell, nicht mehr mit einem Parser. Der Text (bis 100.000 Zeichen, eine Antwort auf den Auszugs-Prompt oder ein eigener) wird redigiert und an Absätzen in Teile von höchstens 16.000 Zeichen geschnitten; jeder Teil trägt die Überschrift, unter der er steht, und die ersten 1.500 Zeichen des Textes als Zusammenhang, dazu die Themennamen des Zielbereichs. Je Teil ein erzwungener Werkzeugaufruf, höchstens vier zugleich, mit dem passenden Bestand des Zielbereichs (E1…): das Modell schlägt Sätze mit Titel, Thema, Art und Wichtigkeit vor und darf Bestand ersetzen. Überschriften werden keine Erinnerung. Die Vorschau schreibt nichts. Was schon dasteht (gleich oder Ähnlichkeit ab 0,95), fällt heraus und wird gezählt, ebenso Gesperrtes mit Zugangsdaten und ungelesene Teile; liest der Anbieter keinen Teil, gibt es eine Absage. Geschrieben wird erst nach der Auswahl: Ersetzen legt eine Fassung an (Fassungsprüfung, Konflikt statt stillem Überschreiben), weitere ersetzte Einträge werden vergessen. Neues zählt gegen das Kontingent wie von Hand: eine Zahl, unbegrenzt, 0 sperrt Vorschau und Übernahme. Gebucht wird beim importierenden Benutzer mit `zweck='gedaechtnis'`; Reservieren und Abrechnen der Teile laufen hintereinander, nur die Aufrufe beim Anbieter nebeneinander. Je Benutzer liest ein Import zugleich (sonst 429); die Sitzung der Anfrage gibt ihre Verbindung vor dem Lesen zurück.
 
 Preferences sollen die Auswahl und Priorisierung beeinflussen. Sie dürfen Sicherheits-, Wetter- oder andere allgemein wichtige Informationen nicht durch eine bloße Modellbehauptung unterdrücken.
 
@@ -279,7 +314,7 @@ Nach einer Provider-Runde führt `ai_stream.read_tools._tool_followup_messages` 
 `ai_action_service.execute_read_tool` ist der Dispatcher. Er prüft, dass der Name ein Read-Tool ist, löst gegebenenfalls den Server auf, prüft Rechte und delegiert an den passenden Ausführer. Beispiele:
 
 - Serverstatus, Logs, Dateien und Backups;
-- persönliche erlaubte Erinnerungen;
+- Erinnerungen nachschlagen (`search_memory`, nur lesend);
 - Dokumentation und Skills;
 - Websuche;
 - Kalender-Lesezugriffe;
@@ -408,7 +443,7 @@ Autonomiepolitik entsteht.
 | Modellstream | `backend/services/ai_stream/engine.py`, `backend/services/openai_compatible_adapter.py`, `backend/services/openai_responses_adapter.py`, `backend/services/anthropic_messages_adapter.py` |
 | Tools | `backend/services/ai_tool_registry.py`, `backend/services/ai_action_service.py`, `backend/services/ai_stream/read_tools.py`, `backend/services/ai_stream/write_tools.py` |
 | Kontext/Rollen | `backend/services/ai_context_service.py`, `backend/services/ai_stream/context.py`, `backend/services/ai_prompt.py` |
-| Erinnerungen | `backend/services/ai_memory_service.py` |
+| Erinnerungen | `backend/services/ai_memory_service.py`, `backend/services/ai_gedaechtnis_abruf.py`, `backend/services/ai_gedaechtnis_pflege.py`, `backend/services/ai_gedaechtnis_schreiber.py`, `backend/services/ai_gedaechtnis_altbestand.py`, `backend/services/ai_voice/mitschrift.py` |
 | Intent und Prefetch | `backend/services/ai_intent_classifier.py` |
 | Geo/Satellit/Region | `backend/services/ai_geo_service.py`, `backend/services/ai_satellite_service.py`, `backend/services/ai_regional_connectors_service.py` |
 | Frontend Voice | `frontend/src/components/ai/voice/useSprachsitzung.ts` |

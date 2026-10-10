@@ -399,7 +399,44 @@ def _postfach_und_kalender_zeilen(db: Session, user: User) -> list[str]:
     return zeilen
 
 
-def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
+def _gedaechtniszeile(db: Session, user: User, mitschrift: bool | None = None) -> str:
+    """Ob sich Singra etwas merken kann — damit sie nichts zusagt, was nie geschieht.
+
+    Seit Stufe 2 des Gedächtnisses (06.10.2026) schreibt der Hintergrund nach
+    dem Gespräch (`ai_gedaechtnis_schreiber`). Bis dahin sah das Modell an der
+    Absage von `remember` (`memory_disabled`), dass der Schalter aus ist; heute
+    steht es nur noch hier. Dieselbe Frage wie beim Schreiber: das Recht, dann
+    der Schalter.
+
+    ``mitschrift`` gibt es nur im Sprachgespräch: ob es mitgeschrieben wird
+    (`realtime_session.mitschreiben`). Ohne Mitschrift bleibt davon nichts,
+    auch kein Server- oder Teamwissen, das der Schreiber aus getippten
+    Gesprächen ohne den Schalter liest — und Realtime schreibt den Menschen
+    nur mit einem Abschriftmodell des Zugangs mit.
+    """
+    from services import ai_memory_service
+    from services.permission_service import has_global_permission
+
+    if not has_global_permission(db, user, "ai.memory.use"):
+        return "Gedächtnis: für dieses Konto nicht freigegeben, gemerkt wird nichts."
+    eingeschaltet = ai_memory_service.preference(db, user.id)
+    if mitschrift is None:
+        if eingeschaltet:
+            return "Gedächtnis: eingeschaltet."
+        return "Gedächtnis: ausgeschaltet (Profil → KI), Persönliches wird nicht gemerkt."
+    if mitschrift:
+        return "Gedächtnis: eingeschaltet."
+    if eingeschaltet:
+        return (
+            "Gedächtnis: in diesem Sprachgespräch aus – der Zugang hat kein Abschriftmodell, "
+            "Gesprochenes schreibt niemand mit; gemerkt wird nur, was getippt wird."
+        )
+    return "Gedächtnis: ausgeschaltet (Profil → KI), aus einem Sprachgespräch wird nichts gemerkt."
+
+
+def lageblock(
+    db: Session, user: User, *, mit_workern: bool = False, mitschrift: bool | None = None
+) -> str:
     """Uhrzeit, Zeitzone und autonomer Modus in wenigen Zeilen.
 
     Die Uhrzeit steht in der Zone des Benutzers, wenn sie bekannt ist, sonst in
@@ -415,6 +452,9 @@ def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
     ``mit_workern`` hängt die Zeile über die Hintergrund-Aufträge an — nur für
     Gehirn-Läufe (`_worker_zeile`); die Vorgabe False hält den Block für alle
     anderen Aufrufer byteweise beim Alten.
+
+    ``mitschrift`` setzen nur die Sprachwege: ob ihr Gespräch mitgeschrieben
+    wird (`_gedaechtniszeile`).
     """
     from services import ai_autonomy_service, ai_task_service
 
@@ -422,6 +462,7 @@ def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
 
     # Verknüpfte Postfächer und Kalender (für automatische Zuordnung ohne Rückfragen)
     zeilen.extend(_postfach_und_kalender_zeilen(db, user))
+    zeilen.append(_gedaechtniszeile(db, user, mitschrift))
 
     # Die Worker-Zeile steht **vor** dem Autonomie-Teil, weil der bei
     # inaktivem Modus früh zurückkehrt — sonst fehlte sie genau den Benutzern
@@ -494,8 +535,8 @@ def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
         )
         sofortlauf = (
             "Schreibvorschläge im Gespräch laufen damit sofort, ohne Klick des "
-            "Benutzers, auch das Löschen eigener Notizen, Termine, Aufgaben "
-            "und Erinnerungen. Eine Karte bekommt nur, was Server, Dateien, "
+            "Benutzers, auch das Löschen eigener Notizen, Termine und "
+            "Aufgaben. Eine Karte bekommt nur, was Server, Dateien, "
             "Backups, Blueprints, Rollen oder die Rechte anderer trifft; ob "
             "ein Vorschlag wartet, sagt sein Ergebnis."
         )

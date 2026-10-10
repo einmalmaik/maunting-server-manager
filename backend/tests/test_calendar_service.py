@@ -838,6 +838,84 @@ def test_erinnerungsmail_nennt_keinen_chiffretext(db_session, test_user):
     assert _anzeigeort("Bahnhofstrasse 1") == "Bahnhofstrasse 1"
 
 
+def test_erinnerungs_uhrzeit_beachtet_benutzerzeitzone(db_session, test_user):
+    """Terminerinnerungen muessen die Uhrzeit in der Benutzerzeitzone ausgeben.
+
+    Ein Termin um 13:30 in Berlin (UTC+2 im Sommer) wird als 11:30Z gespeichert.
+    In Pop-ups und Erinnerungen muss '13:30 Uhr' stehen, nicht '11:30 Uhr'.
+    """
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+
+    test_user.device_notifications = True
+    test_user.time_zone = "Europe/Berlin"
+    db_session.commit()
+
+    # Termin in 24 Stunden, z. B. um 13:30
+    tz = ZoneInfo("Europe/Berlin")
+    morgen_lokal = datetime.now(tz) + timedelta(hours=24)
+    # Lokale Zeit auf 13:30 festsetzen
+    morgen_lokal = morgen_lokal.replace(hour=13, minute=30, second=0, microsecond=0)
+    # Sicherstellen, dass er innerhalb des 49h-Fensters liegt (z.B. ~24h in der Zukunft)
+    jetzt = datetime.now(timezone.utc)
+    start_utc = morgen_lokal.astimezone(timezone.utc)
+    if not (23.0 <= (start_utc - jetzt).total_seconds() / 3600.0 <= 49.0):
+        # Dynamisch 24h vorauslegen
+        morgen_lokal = (jetzt + timedelta(hours=24)).astimezone(tz)
+
+    start_str = morgen_lokal.strftime("%Y-%m-%d %H:%M")
+    end_str = (morgen_lokal + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+
+    ev = CalendarService.create_event(
+        db=db_session,
+        user=test_user,
+        title="Wichtiger Termin",
+        start_time=start_str,
+        end_time=end_str,
+    )
+
+    faellig = CalendarService.get_due_reminders(db_session, test_user)
+    treffer = [r for r in faellig if r["event_id"] == ev["event_id"]]
+    assert len(treffer) == 1, "Termin muss in fälligen Erinnerungen auftauchen"
+    r = treffer[0]
+
+    erwartete_uhrzeit = morgen_lokal.strftime("%H:%M")
+    assert f"um {erwartete_uhrzeit} Uhr" in r["start"], (
+        f"Erwartete lokale Uhrzeit '{erwartete_uhrzeit}' in '{r['start']}', "
+        f"nicht die UTC-Stunde!"
+    )
+    assert "start_iso" in r, "start_iso muss für Clients vorhanden sein"
+
+
+def test_erinnerungs_uhrzeit_ganztaegig(db_session, test_user):
+    """Ganztägige Termine dürfen keine Uhrzeit 'um 00:00 Uhr' tragen, sondern '(ganztägig)'."""
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+
+    test_user.device_notifications = True
+    test_user.time_zone = "Europe/Berlin"
+    db_session.commit()
+
+    tz = ZoneInfo("Europe/Berlin")
+    morgen_lokal = (datetime.now(timezone.utc) + timedelta(hours=24)).astimezone(tz)
+    start_str = morgen_lokal.strftime("%Y-%m-%d 00:00")
+    end_str = morgen_lokal.strftime("%Y-%m-%d 23:59")
+
+    ev = CalendarService.create_event(
+        db=db_session,
+        user=test_user,
+        title="Ganztags-Event",
+        start_time=start_str,
+        end_time=end_str,
+        all_day=True,
+    )
+
+    faellig = CalendarService.get_due_reminders(db_session, test_user)
+    treffer = [r for r in faellig if r["event_id"] == ev["event_id"]]
+    assert len(treffer) == 1
+    assert "(ganztägig)" in treffer[0]["start"], f"Erwartet '(ganztägig)', erhalten: {treffer[0]['start']}"
+
+
 # ── CalDAV-Import ─────────────────────────────────────────────────────────
 
 

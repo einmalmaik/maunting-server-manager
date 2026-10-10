@@ -209,7 +209,7 @@ class TestRollenableitung:
 
 
 _ANGEBOT = frozenset({
-    "remember", "search_memory", "forget_memory",
+    "search_memory",
     "worker_start", "worker_cancel", "worker_antwort",
     "wait_until", "worker_frage", "ask_user",
     "list_my_servers", "read_server_status",
@@ -259,7 +259,7 @@ class TestKatalogschnitt:
     def test_das_gehirn_bekommt_lesewerkzeuge_gedaechtnis_und_steuerung(self) -> None:
         namen = _katalog("gehirn")
         assert namen == {
-            "remember", "search_memory", "forget_memory",
+            "search_memory",
             "worker_start", "worker_cancel", "worker_antwort",
             "list_my_servers", "read_server_status",
         }
@@ -268,14 +268,14 @@ class TestKatalogschnitt:
         namen = _katalog("worker")
         assert "read_server_status" in namen and "list_my_servers" in namen
         assert "wait_until" in namen and "worker_frage" in namen
-        assert namen & {"remember", "search_memory", "forget_memory"} == set()
+        assert "search_memory" not in namen
         assert namen & {"worker_start", "worker_cancel", "worker_antwort"} == set()
         assert "ask_user" not in namen
 
     def test_der_voll_betrieb_kennt_keinen_hintergrund(self) -> None:
         namen = _katalog("voll")
         assert "read_server_status" in namen and "ask_user" in namen
-        assert "remember" in namen
+        assert "search_memory" in namen
         assert namen & {
             "worker_start", "worker_cancel", "worker_antwort",
             "wait_until", "worker_frage",
@@ -301,7 +301,7 @@ class TestKatalogschnitt:
         assert namen == set(_ANGEBOT) & GUARDIAN_HEILUNG_TOOLS
         assert namen, "Der Schnitt darf nicht leer sein, sonst sagt der Test nichts"
         assert "ask_user" not in namen
-        assert "remember" not in namen
+        assert "search_memory" not in namen
 
 
 # ── Spiegelschranke (die Zusage hinter der Fuehrung) ──────────────────────
@@ -777,7 +777,7 @@ class TestWorkerFrage:
         assert zustand["rounds"] == 1
 
 
-@pytest.mark.parametrize("rolle,werkzeug", [("voll", "worker_start"), ("voll", "worker_frage"), ("worker", "worker_start"), ("worker", "remember")])
+@pytest.mark.parametrize("rolle,werkzeug", [("voll", "worker_start"), ("voll", "worker_frage"), ("worker", "worker_start"), ("worker", "search_memory")])
 def test_vorschlaege_respektieren_rollenausschluss(db: Session, rolle, werkzeug) -> None:
     """Auch Vorschlaege duerfen den Rollenausschluss nicht umgehen."""
     usage = StreamUsage()

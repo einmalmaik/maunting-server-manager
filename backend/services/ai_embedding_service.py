@@ -7,18 +7,24 @@ Suche einen bezahlten Account voraussetzt, waere fuer einen Teil der Betreiber
 schlicht tot. Deshalb rechnet MSM selbst — offline, ohne Tokenkosten, ohne dass
 Erinnerungen fuer die *Suche* das Haus verlassen.
 
-Warum `model2vec` und nicht mehr: Es sind **statische** Embeddings, also eine
-vorberechnete Tabelle plus Mittelung — kein neuronales Netz zur Laufzeit. Damit
-kommt es ohne torch und ohne ONNX-Runtime aus. Gemessen: 23 Pakete statt 35 bei
-mem0ai, kein Telemetriepaket, keine Kollision mit unserem gepinnten
-`httpx==0.27.0`, kein zweites Provider-SDK neben dem eigenen Adapter.
+Warum dieses Modell: `paraphrase-multilingual-MiniLM-L12-v2` ist ein kleines
+Satzmodell (118 Mio. Parameter, Apache-2.0), das über 50 Sprachen in einen Raum
+legt. Gerechnet wird es mit der ONNX-Runtime, ohne torch; die Runtime ist über
+die Sprachpipeline (pipecat) ohnehin im Prozess, `tokenizers` zerlegt den Text.
 
-**Was diese Suche nicht ist.** Statische Embeddings kennen keinen Satzkontext.
-Gemessen an Wortpaaren: `Zeitzone`/`timezone` 0,62, aber `Sicherung`/`backup`
-nur 0,27 — die Sprachbruecke traegt ungleichmaessig. Unverwandtes trennt das
-Modell zuverlaessig (nahe 0,0), aber es ersetzt kein Sprachmodell. Deshalb ist
-die Aehnlichkeit in `ai_memory_service` nur *ein* Signal neben Wortabgleich,
-Nutzung und Aktualitaet.
+Bis zum 07.10.2026 rechnete hier `potion-multilingual-128M`, statische
+Embeddings — eine Tabelle je Wort, gemittelt. Gemessen an 20.000 Störsätzen,
+16 harten Störern und 16 Fragen (deutsch und englisch) auf acht Erinnerungen:
+die richtige stand bei potion 11-mal auf Platz 1, hier 14-mal; die übrigen
+zwei sind echte Zweideutigkeiten („Backup der Fotos“ gegen das des Servers)
+und stehen auf Platz 2. potion fand „Was für ein Auto fahre ich?“ gegen
+„roten Kombi“ erst auf Platz 1.025 und „memory“ gegen „Arbeitsspeicher“ auf
+Platz 179, weil ein Wortmittel keinen Satz kennt. Der Preis: rund 6 ms je
+Frage statt 0,2 ms und etwa 300 Einträge je Sekunde beim Nachrechnen.
+
+**Was diese Suche nicht ist.** Ein Satzmodell ist kein Sprachmodell: es misst
+Nähe, nicht Zutreffen. Deshalb ist die Ähnlichkeit in `ai_gedaechtnis_abruf`
+nur *ein* Signal neben dem Wortabgleich.
 
 **Fehlt das Modell, faellt nichts aus.** Ein abgebrochener Download oder ein
 unvollstaendiges Update darf das Panel nicht lahmlegen: dann liefert
@@ -63,11 +69,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Ausgabegroesse von `potion-multilingual-128M`. Fest verdrahtet, damit ein
-# gespeicherter Vektor erkennbar nicht mehr zum geladenen Modell passt.
-EMBEDDING_DIMENSIONS = 256
+# Ausgabegroesse des lokalen Modells. Fest verdrahtet, damit ein gespeicherter
+# Vektor erkennbar nicht mehr zum geladenen Modell passt. Der Rückfall fragt
+# dieselbe Länge an (`encode_ueber_anbieter`). Bis zum 07.10.2026 waren es 256
+# (potion); solche Vektoren bestehen die Längenprüfung nicht mehr und werden im
+# Takt neu gerechnet (`ai_gedaechtnis_abruf.nachziehen`).
+EMBEDDING_DIMENSIONS = 384
 
-# Wieviele Bytes ein gespeicherter Vektor belegt: 256 Zahlen zu je vier. Auch
+# Wieviele Bytes ein gespeicherter Vektor belegt: 384 Zahlen zu je vier. Auch
 # diese Zahl ist fest, und deshalb ist eine abweichende Länge kein kurzer
 # Vektor, sondern ein beschädigter — siehe `bytes_zu_vektor`.
 EMBEDDING_BYTES = EMBEDDING_DIMENSIONS * 4
@@ -78,7 +87,17 @@ EMBEDDING_BYTES = EMBEDDING_DIMENSIONS * 4
 # den beiden Diensten, die sie brauchen: Gedächtnis und Fertigkeiten lasen die
 # Kennung früher je als eigenes Literal, und wer eines davon beim Modellwechsel
 # übersieht, bekommt in genau einem der beiden Bereiche stille Falschtreffer.
-MODEL_TAG = "potion-multilingual-128M"
+MODEL_TAG = "paraphrase-multilingual-MiniLM-L12-v2"
+
+# Wie viele Tokens das Modell von einem Text liest; der Rest fällt weg. Es ist
+# auf 128 trainiert, kann 512. 256 decken rund 1.000 Zeichen — mehr hat eine
+# Erinnerung praktisch nie, und für jedes Wort darüber hinaus gibt es den
+# Wortindex.
+MAX_TOKENS = 256
+
+# Wie viele Kerne eine Rechnung höchstens belegt. Das Panel teilt sich die
+# Maschine mit Gameservern; eine Frage braucht mit zwei Kernen rund 6 ms.
+THREADS = 2
 
 # Die Anbieter, bei denen `encode` ersatzweise rechnen darf, mit dem
 # Einbettungsmodell, das genommen wird, wenn der Zugang keines vorgibt. Beide
@@ -92,11 +111,11 @@ RUECKFALL_MODELLE: dict[str, str] = {
 }
 
 # Breite der Spalte `embedding_model` in beiden Tabellen. Ein Rückfallvektor
-# trägt `<anbieter>:<modell>` (`_tag`). Alle Räume haben 256 Zahlen und bestehen
-# jede Längenprüfung — getrennt hält sie allein diese Kennung. Vorher trug auch
-# ein Google-Vektor `MODEL_TAG`, und sobald das lokale Modell zurück war,
-# verglich die Suche potion-Fragen mit Google-Einträgen: Zahlen ohne Bedeutung,
-# und nichts meldete es.
+# trägt `<anbieter>:<modell>` (`_tag`). Alle Räume haben gleich viele Zahlen und
+# bestehen jede Längenprüfung — getrennt hält sie allein diese Kennung. Vorher
+# trug auch ein Google-Vektor `MODEL_TAG`, und sobald das lokale Modell zurück
+# war, verglich die Suche lokale Fragen mit Google-Einträgen: Zahlen ohne
+# Bedeutung, und nichts meldete es.
 _TAG_MAX = 64
 
 # Panel-Einstellung: bei welchem Anbieter `encode` ohne lokales Modell rechnen
@@ -149,23 +168,29 @@ _letzter_fehlschlag: float | None = None
 def model_path() -> Path:
     """Verzeichnis des lokalen Modells.
 
-    Bewusst *kein* Modellname, der zur Laufzeit nachgeladen wird: `model2vec`
-    wuerde einen unbekannten Namen bei HuggingFace suchen. Ein Panel, das im
-    Betrieb Gewichte aus dem Internet nachlaedt, ist eine Supply-Chain-Flaeche,
-    die wir nicht wollen. Das Modell kommt einmalig beim Update.
+    Bewusst ein Verzeichnis und *kein* Modellname, der zur Laufzeit aufgelöst
+    wird. Ein Panel, das im Betrieb Gewichte aus dem Internet nachlaedt, ist
+    eine Supply-Chain-Flaeche, die wir nicht wollen. Das Modell kommt einmalig
+    beim Update (`scripts/fetch_embedding_model.py`).
     """
     configured = (settings.ai_embedding_model_dir or "").strip()
     if configured:
         return Path(configured)
-    return Path(__file__).resolve().parent.parent / "ml-models" / "potion-multilingual-128M"
+    return Path(__file__).resolve().parent.parent / "ml-models" / MODEL_TAG
+
+
+#: Die beiden Dateien, ohne die nichts gerechnet wird — relativ zu `model_path`,
+#: in der Anordnung des Modell-Repositorys.
+GEWICHTE = "onnx/model.onnx"
+ZERLEGER = "tokenizer.json"
 
 
 def is_available() -> bool:
     """Laesst sich hier ein Vektor berechnen? Ohne das Modell zu laden.
 
     Geprueft werden **beide** Voraussetzungen: die Gewichte auf der Platte und
-    die Bibliothek im Interpreter. Vorher zaehlten nur die Dateien — in einer
-    Umgebung mit heruntergeladenem Modell, aber fehlendem `model2vec` meldete
+    die Bibliotheken im Interpreter. Vorher zaehlten nur die Dateien — in einer
+    Umgebung mit heruntergeladenem Modell, aber fehlender Bibliothek meldete
     die Funktion "verfuegbar", und `encode` lieferte trotzdem nichts. Wer sich
     darauf verliess (etwa eine Testvorbedingung), bekam einen Fehlschlag
     gemeldet, wo ein sauberes Ueberspringen richtig gewesen waere.
@@ -180,10 +205,10 @@ def is_available() -> bool:
     from importlib.util import find_spec
 
     path = model_path()
-    if not ((path / "config.json").is_file() and (path / "model.safetensors").is_file()):
+    if not ((path / GEWICHTE).is_file() and (path / ZERLEGER).is_file()):
         return False
     try:
-        return find_spec("model2vec") is not None
+        return find_spec("onnxruntime") is not None and find_spec("tokenizers") is not None
     except (ImportError, ValueError):
         return False
 
@@ -293,9 +318,7 @@ def _load():
             _letzter_fehlschlag = time.monotonic()
             return None
         try:
-            from model2vec import StaticModel
-
-            _model = StaticModel.from_pretrained(str(path))
+            _model = _Modell(path)
             _letzter_fehlschlag = None
             logger.info("AI-Embeddingmodell geladen: %s", path)
         except Exception as exc:
@@ -310,6 +333,52 @@ def _load():
     return _model
 
 
+class _Modell:
+    """Das lokale Satzmodell: Zerleger, ONNX-Sitzung, Mittelung.
+
+    Gemittelt wird über die Tokens ohne Füllzeichen — so ist das Modell
+    trainiert (`1_Pooling` im Modell-Repository). Normalisiert wird erst in
+    `encode`, für beide Quellen gleich.
+    """
+
+    #: Wie viele Texte eine Rechnung zusammen nimmt. Begrenzt den Speicher,
+    #: wenn der Takt tausend Erinnerungen auf einmal nachrechnet.
+    STAPEL = 32
+
+    def __init__(self, path: Path) -> None:
+        import onnxruntime
+        from tokenizers import Tokenizer
+
+        zerleger = Tokenizer.from_file(str(path / ZERLEGER))
+        zerleger.enable_truncation(MAX_TOKENS)
+        if zerleger.padding is None:
+            zerleger.enable_padding()
+        optionen = onnxruntime.SessionOptions()
+        optionen.intra_op_num_threads = THREADS
+        optionen.inter_op_num_threads = 1
+        self._sitzung = onnxruntime.InferenceSession(
+            str(path / GEWICHTE), optionen, providers=["CPUExecutionProvider"]
+        )
+        self._eingaenge = {e.name for e in self._sitzung.get_inputs()}
+        self._zerleger = zerleger
+
+    def encode(self, texts: list[str]):
+        import numpy as np
+
+        teile = []
+        for anfang in range(0, len(texts), self.STAPEL):
+            zerlegt = self._zerleger.encode_batch(texts[anfang:anfang + self.STAPEL])
+            ids = np.array([z.ids for z in zerlegt], dtype=np.int64)
+            maske = np.array([z.attention_mask for z in zerlegt], dtype=np.int64)
+            eingabe = {"input_ids": ids, "attention_mask": maske}
+            if "token_type_ids" in self._eingaenge:
+                eingabe["token_type_ids"] = np.zeros_like(ids)
+            tokens = self._sitzung.run(None, eingabe)[0]
+            gewicht = maske[..., None].astype(np.float32)
+            teile.append((tokens * gewicht).sum(axis=1) / np.maximum(gewicht.sum(axis=1), 1.0))
+        return np.vstack(teile)
+
+
 def encode_ueber_anbieter(
     texts: list[str],
     *,
@@ -318,7 +387,7 @@ def encode_ueber_anbieter(
     model: str,
     client: Any | None = None,
 ) -> list[list[float]] | None:
-    """Berechnet 256-dimensionale normalisierte Vektoren über `/embeddings`.
+    """Berechnet normalisierte Vektoren in `EMBEDDING_DIMENSIONS` über `/embeddings`.
 
     Google AI Studio und OpenAI sprechen hier dieselbe Form; der Unterschied
     liegt allein in ``base_url`` und ``model``.
@@ -431,8 +500,8 @@ def _tag(anbieter: str, modell: str) -> str:
     """Die Kennung eines Rückfallvektors: Anbieter plus gerechnetes Modell.
 
     Das Modell steht mit darin, weil `text-embedding-004` und
-    `text-embedding-3-small` ebenso wenig in einen Raum gehören wie potion und
-    Google. ``models/`` fällt weg wie in `encode_ueber_anbieter`, damit dieselbe
+    `text-embedding-3-small` ebenso wenig in einen Raum gehören wie das lokale
+    Modell und Google. ``models/`` fällt weg wie in `encode_ueber_anbieter`, damit dieselbe
     Wahl dieselbe Kennung ergibt, gleich wie der Betreiber sie geschrieben hat.
     """
     if modell.startswith("models/"):
@@ -467,11 +536,12 @@ def _rueckfall_zugang(db: Session | None) -> tuple[str, str, str, str] | None:
 def aktives_modell(*, db: Session | None = None) -> str | None:
     """Die Kennung, die `encode` jetzt liefern würde, ohne etwas zu rechnen.
 
-    Gebraucht von `ai_memory_service._vektoren_nachziehen`: dort muss vor dem
-    Rechnen feststehen, welche gespeicherten Vektoren zum heutigen Modell
-    passen und welche neu müssen. Ändert sich die Quelle zwischen dieser Frage
-    und dem Rechnen, schadet das nicht: gespeichert wird die Kennung aus der
-    `Kodierung`, und der nächste Abruf holt den Rest nach.
+    Gebraucht von `ai_memory_service.indizes_nachziehen` und dem Takt
+    (`ai_gedaechtnis_abruf.nachziehen`): dort muss vor dem Rechnen feststehen,
+    welche gespeicherten Vektoren zum heutigen Modell passen und welche neu
+    müssen. Ändert sich die Quelle zwischen dieser Frage und dem Rechnen,
+    schadet das nicht: gespeichert wird die Kennung aus der `Kodierung`, und
+    der nächste Takt holt den Rest nach.
     """
     if _load() is not None:
         return MODEL_TAG
@@ -543,7 +613,7 @@ def vektor_zu_bytes(vektor: Sequence[float]) -> bytes:
     schrieb sie nur als Ziffernfolge aus und musste sie Ziffer für Ziffer
     zurückrechnen.
 
-    Die Form auf der Platte ist 256 native ``float`` hintereinander, ohne
+    Die Form auf der Platte ist `EMBEDDING_DIMENSIONS` native ``float`` hintereinander, ohne
     Rahmen und ohne Kopf. Auf jeder Plattform, auf der MSM läuft (x86-64,
     ARM64), sind das vier Bytes je Zahl in Little-Endian; ein Umzug der
     Datenbank auf eine Maschine mit anderer Byte-Reihenfolge oder anderer
@@ -568,8 +638,9 @@ def bytes_zu_vektor(roh: bytes | None) -> Sequence[float] | None:
 
     Eine Länge, die nicht zu `EMBEDDING_BYTES` passt, gilt als beschädigt
     und damit als *fehlend*. Sie klaglos zu lesen hieße, drei Zahlen gegen
-    256 zu vergleichen — das schlüge dann irgendwo weit weg von der Ursache
-    fehl, statt hier einen Eintrag ohne Bedeutungsanteil zu ergeben.
+    384 zu vergleichen — das schlüge dann irgendwo weit weg von der Ursache
+    fehl, statt hier einen Eintrag ohne Bedeutungsanteil zu ergeben. Dasselbe
+    gilt für einen Vektor aus einem früheren Modell mit anderer Länge.
     """
     if not roh or len(roh) != EMBEDDING_BYTES:
         return None

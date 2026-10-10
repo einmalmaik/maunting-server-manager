@@ -432,6 +432,12 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     Anleitung steht in `ai_prompt.DATENBANK_STUDIO`. Nachgemessen: aus der App
     **97.353** Zeichen; aus dem Panel **91.873**. Die Luft beträgt **647
     Zeichen**. Angeboten wird beides nur, wer Datenbankrechte hat.
+
+    **07.10.2026: gesenkt auf 80.000.** Die Beschreibungen wurden gekürzt
+    (Prosa und Wiederholungen aus dem Systemprompt, keine Regel): aus der App
+    **76.923** Zeichen, aus dem Panel **71.851**. Der freigewordene Platz ist
+    nicht das Budget des nächsten Werkzeugs — darum steht der Deckel wieder
+    knapp darüber.
      """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(
@@ -445,7 +451,7 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
             ],
             ensure_ascii=False,
         )
-        assert len(katalog) < 98_000, (
+        assert len(katalog) < 80_000, (
             f"Der Werkzeugkatalog der Herkunft '{herkunft}' ist auf "
             f"{len(katalog)} Zeichen gewachsen. Er geht in jeder Runde mit und "
             "taucht in keiner Budgetrechnung auf."

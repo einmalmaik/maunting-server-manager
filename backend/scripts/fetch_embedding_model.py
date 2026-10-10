@@ -5,8 +5,10 @@ Laufzeit **nie** Gewichte nach: ein Server-Manager, der im Betrieb Dateien aus
 dem Internet holt und ausfuehrt, waere eine Supply-Chain-Flaeche, die wir nicht
 wollen. Deshalb passiert das genau hier, unter Kontrolle des Betreibers.
 
-Der Download ist rund 507 MB. Ist das Modell bereits vollstaendig vorhanden,
-passiert nichts.
+Der Download ist rund 470 MB. Ist das Modell bereits vollstaendig vorhanden,
+passiert nichts. Liegt danach noch das Vorgaengermodell daneben
+(`potion-multilingual-128M`, bis 07.10.2026), wird es entfernt — das Panel
+liest es nicht mehr, und es belegt rund 507 MB.
 
 **Ein Fehlschlag ist kein Installationsfehler.** Ohne Modell laeuft die
 Gedaechtnissuche ohne Vektoren weiter — schlechter, aber vollstaendig
@@ -18,26 +20,37 @@ meldet den Zustand im Klartext.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from pathlib import Path
 
 
-REPO = "minishlab/potion-multilingual-128M"
-# Nur was zum Rechnen gebraucht wird. Das Repository enthaelt zusaetzlich eine
-# ONNX-Fassung derselben Gewichte (~512 MB), die MSM nicht verwendet.
+REPO = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+# Nur was zum Rechnen gebraucht wird: die ONNX-Gewichte in voller Genauigkeit
+# und der Zerleger. Das Repository enthaelt dieselben Gewichte zusaetzlich fuer
+# torch und in quantisierten Fassungen; die int8-Fassungen sind auf bestimmte
+# Prozessoren (AVX-512, ARM64) zugeschnitten, und welcher hier rechnet, weiss
+# das Skript nicht.
 PATTERNS = [
-    "model.safetensors",
+    "onnx/model.onnx",
     "tokenizer.json",
-    "tokenizer_config.json",
-    "special_tokens_map.json",
-    "config.json",
     "README.md",
 ]
-REQUIRED = ("config.json", "model.safetensors", "tokenizer.json")
+REQUIRED = ("onnx/model.onnx", "tokenizer.json")
+ORDNER = "paraphrase-multilingual-MiniLM-L12-v2"
+VORGAENGER = "potion-multilingual-128M"
 
 
 def target_dir() -> Path:
-    return Path(__file__).resolve().parent.parent / "ml-models" / "potion-multilingual-128M"
+    return Path(__file__).resolve().parent.parent / "ml-models" / ORDNER
+
+
+def vorgaenger_entfernen(destination: Path) -> None:
+    """Entfernt das Vorgaengermodell, wenn es neben dem heutigen liegt."""
+    alt = destination.parent / VORGAENGER
+    if alt.is_dir():
+        shutil.rmtree(alt, ignore_errors=True)
+        print(f"[ai] Vorgaengermodell entfernt: {alt}")
 
 
 def vollstaendig(destination: Path) -> bool:
@@ -54,7 +67,7 @@ def vollstaendig(destination: Path) -> bool:
     Geprueft wird der Tokenizer, weil er der einzige grosse **Text** im Paket
     ist und das ganze Laden an ihm haengt. Die Gewichte pruefen wir hier
     bewusst nicht: sie sind binaer, ein Vollstaendigkeitstest hiesse, 507 MB
-    zu lesen, und `safetensors` meldet einen Schaden beim Laden selbst.
+    zu lesen, und die ONNX-Runtime meldet einen Schaden beim Laden selbst.
     """
     if not all((destination / name).is_file() for name in REQUIRED):
         return False
@@ -73,6 +86,7 @@ def main() -> int:
     destination = target_dir()
     if vollstaendig(destination):
         print(f"[ai] Embeddingmodell bereits vorhanden: {destination}")
+        vorgaenger_entfernen(destination)
         return 0
 
     # Lag schon etwas da, war es kaputt — dann ist der Zwischenspeicher
@@ -92,7 +106,7 @@ def main() -> int:
         )
         return 0
 
-    print(f"[ai] Lade Embeddingmodell {REPO} (~507 MB) nach {destination} ...")
+    print(f"[ai] Lade Embeddingmodell {REPO} (~470 MB) nach {destination} ...")
     try:
         destination.mkdir(parents=True, exist_ok=True)
         snapshot_download(
@@ -119,6 +133,7 @@ def main() -> int:
         return 0
 
     print("[ai] Embeddingmodell bereit.")
+    vorgaenger_entfernen(destination)
     return 0
 
 

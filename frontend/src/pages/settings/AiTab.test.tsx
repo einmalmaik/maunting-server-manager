@@ -41,10 +41,7 @@ const row: AiRoleLimits = {
   daily_token_limit: 10_000,
   weekly_token_limit: 50_000,
   monthly_token_limit: 200_000,
-  requests_per_minute: 20,
-  concurrent_operations: 2,
-  monthly_cost_limit_cents: 5_000,
-  monthly_realtime_cost_limit_cents: 2_500,
+  monthly_realtime_minutes_limit: 30,
   monthly_dictation_minutes_limit: 120,
   max_memory_entries: 250,
   // Rang 4 = "hoch". Diese Rolle darf tief denken lassen, aber nicht maximal.
@@ -60,10 +57,7 @@ const blankRow: AiRoleLimits = {
   daily_token_limit: null,
   weekly_token_limit: null,
   monthly_token_limit: null,
-  requests_per_minute: null,
-  concurrent_operations: null,
-  monthly_cost_limit_cents: null,
-  monthly_realtime_cost_limit_cents: null,
+  monthly_realtime_minutes_limit: null,
   monthly_dictation_minutes_limit: null,
   max_memory_entries: null,
   max_reasoning_effort: null,
@@ -123,11 +117,11 @@ describe('AiTab', () => {
     render(<AiTab />)
     fireEvent.click(await screen.findByRole('tab', { name: /Rollen & Kontingente/i }))
     await screen.findByRole('switch', {
-      name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i,
+      name: /Unbegrenzt: Tokenlimit je 30 Tage: ai-vip/i,
     })
 
     fireEvent.click(screen.getByRole('switch', {
-      name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i,
+      name: /Unbegrenzt: Tokenlimit je 30 Tage: ai-vip/i,
     }))
     vi.mocked(client.api).mockResolvedValue({ ...row, monthly_token_limit: null })
     fireEvent.click(screen.getByRole('button', { name: /Speichern: ai-vip/i }))
@@ -139,10 +133,7 @@ describe('AiTab', () => {
           daily_token_limit: 10_000,
           weekly_token_limit: 50_000,
           monthly_token_limit: null,
-          requests_per_minute: 20,
-          concurrent_operations: 2,
-          monthly_cost_limit_cents: 5_000,
-          monthly_realtime_cost_limit_cents: 2_500,
+          monthly_realtime_minutes_limit: 30,
           monthly_dictation_minutes_limit: 120,
           // Die Reihenfolge ist hier bedeutsam: verglichen werden zwei
           // Zeichenketten, und der Rumpf entsteht in der Reihenfolge von
@@ -167,15 +158,15 @@ describe('AiTab', () => {
     // Vorauswahl faellt auf die bereits konfigurierte Rolle: dort gibt es
     // etwas zu sehen. Die unkonfigurierte Rolle ist gleichzeitig unsichtbar —
     // genau das war vorher das Problem, alle Rollen standen untereinander.
-    await screen.findByRole('switch', { name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i })
+    await screen.findByRole('switch', { name: /Unbegrenzt: Tokenlimit je 30 Tage: ai-vip/i })
     expect(screen.queryByRole('switch', { name: /: user$/i })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Rolle' }))
     fireEvent.click(screen.getByRole('option', { name: /user/i }))
 
-    await screen.findByRole('switch', { name: /Unbegrenzt: Monatliches Tokenlimit: user/i })
+    await screen.findByRole('switch', { name: /Unbegrenzt: Tokenlimit je 30 Tage: user/i })
     expect(
-      screen.queryByRole('switch', { name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i }),
+      screen.queryByRole('switch', { name: /Unbegrenzt: Tokenlimit je 30 Tage: ai-vip/i }),
     ).not.toBeInTheDocument()
   })
 
@@ -188,7 +179,7 @@ describe('AiTab', () => {
     // wie ein gespeichertes Nulllimit aussehen. Wer das versehentlich
     // speichert, sperrt die KI fuer alle Traeger dieser Rolle.
     const unlimited = await screen.findByRole('switch', {
-      name: /Unbegrenzt: Tägliches Tokenlimit: user/i,
+      name: /Unbegrenzt: Tokenlimit je 24 Stunden: user/i,
     })
     expect(unlimited).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByText(/noch kein Kontingent gespeichert/i)).toBeInTheDocument()
@@ -222,8 +213,8 @@ describe('AiTab', () => {
     // Beschriftung sagt; ein Hinweis an jedem wäre Dekoration und würde den
     // einen, der etwas zu sagen hat, mit übersehen lassen.
     expect(screen.getAllByText(i18n.t('aiSettings.maxMemoryEntriesHint'))).toHaveLength(1)
-    expect(screen.getByLabelText('Tägliches Tokenlimit: ai-vip')).not.toHaveAttribute('aria-describedby')
-    expect(screen.getByLabelText('Monatliches Kostenlimit (Cent): ai-vip')).not.toHaveAttribute('aria-describedby')
+    expect(screen.getByLabelText('Tokenlimit je 24 Stunden: ai-vip')).not.toHaveAttribute('aria-describedby')
+    expect(screen.getByLabelText('Tokenlimit je 30 Tage: ai-vip')).not.toHaveAttribute('aria-describedby')
     // Auch die Auswahl, nicht nur die Zahlenfelder: sie ist das einzige Feld
     // mit einem anderen Bauteil und würde einen Fehler dort sonst verstecken.
     expect(screen.getByLabelText('Höchste Denkstufe: ai-vip')).not.toHaveAttribute('aria-describedby')
@@ -255,7 +246,7 @@ describe('AiTab', () => {
     // Und wieder nur an diesem einen: die übrigen Schalter brauchen keine
     // Fußnote.
     expect(screen.getByRole('switch', {
-      name: 'Unbegrenzt: Tägliches Tokenlimit: ai-vip',
+      name: 'Unbegrenzt: Tokenlimit je 24 Stunden: ai-vip',
     })).not.toHaveAttribute('aria-describedby')
     expect(screen.getByRole('switch', {
       name: 'Unbegrenzt: Höchste Denkstufe: ai-vip',
@@ -318,7 +309,7 @@ describe('AiTab', () => {
   it('zeigt auch beim Speichern nicht die rohe Browsermeldung', async () => {
     render(<AiTab />)
     fireEvent.click(await screen.findByRole('tab', { name: /Rollen & Kontingente/i }))
-    await screen.findByRole('switch', { name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i })
+    await screen.findByRole('switch', { name: /Unbegrenzt: Tokenlimit je 30 Tage: ai-vip/i })
 
     vi.mocked(client.api).mockRejectedValueOnce(new TypeError('Failed to fetch'))
     fireEvent.click(screen.getByRole('button', { name: /Speichern: ai-vip/i }))
@@ -369,6 +360,32 @@ describe('AiTab', () => {
     // diese Seite überhaupt aufruft.
     expect(tabelle).toHaveTextContent('Gesamt')
     expect(tabelle).toHaveTextContent('3,51')
+  })
+
+  it('kennzeichnet Anfragen, die MSM für den Benutzer stellt', async () => {
+    // Der Gedächtnisschreiber liest im Hintergrund und bucht beim Benutzer.
+    // Ohne Kennzeichnung stünde eine Zeile da, zu der er keine Frage findet.
+    vi.mocked(client.api).mockImplementation((path: string) => {
+      if (path.startsWith('/ai/usage/events')) {
+        return Promise.resolve({
+          entries: [{
+            id: 1, created_at: '2026-10-06T18:00:00Z', user_id: 9,
+            username: 'viel-verbraucher', model: 'schreibmodell', tokens: 1_000,
+            prompt_tokens: 900, completion_tokens: 100, cached_tokens: null,
+            cache_write_tokens: null, reasoning_tokens: null, provider_requests: 1,
+            cost_micro_usd: 0, cost_source: 'estimate', zweck: 'gedaechtnis',
+          }],
+          has_more: false,
+          cost_policy: usage.cost_policy,
+        }) as never
+      }
+      return respond(path) as never
+    })
+    render(<AiTab />)
+    fireEvent.click(await screen.findByRole('tab', { name: /Verbrauch & Kosten/i }))
+
+    const zeile = (await screen.findByText('schreibmodell')).closest('tr')
+    expect(zeile).toHaveTextContent('Gedächtnis')
   })
 
   it('zeigt die KI-Nutzung nicht ohne ai.usage.read.all', async () => {

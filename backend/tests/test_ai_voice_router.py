@@ -589,3 +589,92 @@ def test_die_gespeicherte_modellwahl_traegt_den_sprachmodus(
     zugaenge = ai_voice.sprachzugang(db, owner_user, bevorzugter_provider_id=erster.id)
     assert zugaenge is not None
     assert zugaenge[1].id == erster.id
+
+
+def test_ohne_sprachminuten_spricht_auch_der_klassische_weg_nicht(
+    client: TestClient, db, owner_user, monkeypatch
+) -> None:
+    """0 Sprachminuten sperren jeden Sprachweg, nicht nur Realtime.
+
+    Bis zum 07.10.2026 prüfte nur die Realtime-Vorbereitung die Minuten. Ein
+    Panel ohne Realtime-Zugang sprach über Gehör, Chat und Stimme weiter, und
+    die Sitzung zählte nicht einmal ihre Dauer. Die Absage kommt als
+    Kontingentmeldung, nicht als nacktes 1008: der Benutzer ist angemeldet und
+    soll wissen, warum.
+    """
+    from models import Role
+    from services import ai_voice_bridge
+    from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
+    from services.auth_service import AuthService
+    from services.role_service import set_user_roles
+    from dependencies import WS_BEARER_PROTOKOLL
+
+    _beide(db)
+    rolle = Role(name="ohne-sprache", description=None, is_system=False)
+    db.add(rolle)
+    db.commit()
+    set_role_limit(db, rolle.id, {**{f: None for f in LIMIT_FIELDS}, "monthly_realtime_minutes_limit": 0})
+    db.commit()
+    set_user_roles(db, owner_user, [rolle.id])
+    gebaut: list[bool] = []
+
+    class _Bruecke:
+        def __init__(self, browser, **kwargs) -> None:
+            gebaut.append(True)
+
+        async def fuehren(self):
+            return ai_voice_bridge.Lage()
+
+    monkeypatch.setattr(ai_voice_bridge, "Sprachbruecke", _Bruecke)
+    marke = AuthService.create_access_token({
+        "sub": owner_user.username, "user_id": owner_user.id, "jti": "ws-ohne-minuten",
+    })
+
+    with client.websocket_connect(
+        "/api/ai/voice/ws", subprotocols=[WS_BEARER_PROTOKOLL, marke], headers=ORIGIN,
+    ) as ws:
+        assert ws.receive_json() == {"art": "stoerung", "grund": "realtime_kontingent"}
+
+    assert gebaut == []
+
+
+def test_der_klassische_weg_bucht_seine_dauer(
+    client: TestClient, db, owner_user, monkeypatch
+) -> None:
+    """Mit einem Lauf zählt die Sitzung ihre Zeit, wie die anderen Sprachwege."""
+    from models import AiUsageEvent
+    from services import ai_voice_bridge
+    from services.auth_service import AuthService
+    from dependencies import WS_BEARER_PROTOKOLL
+
+    _beide(db)
+
+    class _Bruecke:
+        def __init__(self, browser, **kwargs) -> None:
+            self._lage = ai_voice_bridge.Lage()
+
+        async def fuehren(self):
+            self._lage.laeufe = 2
+            return self._lage
+
+    monkeypatch.setattr(ai_voice_bridge, "Sprachbruecke", _Bruecke)
+    marke = AuthService.create_access_token({
+        "sub": owner_user.username, "user_id": owner_user.id, "jti": "ws-dauer",
+    })
+
+    with client.websocket_connect(
+        "/api/ai/voice/ws", subprotocols=[WS_BEARER_PROTOKOLL, marke], headers=ORIGIN,
+    ):
+        pass
+
+    # Gebucht wird nach dem Schliessen; der Testclient wartet darauf nicht.
+    import time
+
+    for _ in range(50):
+        db.expire_all()
+        sitzung = db.query(AiUsageEvent).filter(AiUsageEvent.realtime_seconds.isnot(None)).one()
+        if sitzung.status != "reserved":
+            break
+        time.sleep(0.05)
+    assert sitzung.status == "completed"
+    assert sitzung.provider_requests == 2

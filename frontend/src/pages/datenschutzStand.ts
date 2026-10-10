@@ -7,4 +7,4 @@
  * `backend/services/ai_docs_corpus.py` (ein Test hält beide gleich).
  */
 export const DATENSCHUTZ_VERSION = '3.39'
-export const DATENSCHUTZ_STAND = '2026-10-09'
+export const DATENSCHUTZ_STAND = '2026-10-10'

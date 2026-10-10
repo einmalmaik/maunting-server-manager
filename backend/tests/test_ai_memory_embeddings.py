@@ -19,14 +19,13 @@ from __future__ import annotations
 
 import struct
 import sys
-import types
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, Role, RolePermission, User
-from services import ai_embedding_service, ai_memory_service
+from services import ai_embedding_service, ai_gedaechtnis_abruf, ai_memory_service
 from services.ai_embedding_service import MODEL_TAG
 from services.role_service import set_user_roles
 from tests._einbettung import modell_ersetzen, ohne_modell
@@ -65,7 +64,7 @@ def test_without_a_model_nothing_breaks(
 ) -> None:
     """Fehlt das Modell, laeuft das Gedaechtnis ohne Vektoren weiter.
 
-    Das ist der wichtigste Test dieser Datei: ein 507-MB-Download darf keine
+    Das ist der wichtigste Test dieser Datei: ein 470-MB-Download darf keine
     Betriebsvoraussetzung sein. Wer ihn nicht hat, bekommt eine schlechtere
     Auswahl — kein kaputtes Panel.
     """
@@ -118,7 +117,7 @@ def test_a_stumbled_load_is_retried_after_the_window(
     """Ein einmal gescheitertes Laden darf nicht bis zum Neustart gelten.
 
     Der Fall aus dem Betrieb: die Gewichte werden gerade entpackt, ein Update
-    läuft, der Speicher ist für einen Moment knapp — ``from_pretrained`` wirft.
+    läuft, der Speicher ist für einen Moment knapp — das Laden wirft.
     Vorher merkte sich der Dienst das für den Rest des Prozesslebens; das
     Gedächtnis arbeitete bis zum nächsten Neustart des Panels ohne
     Bedeutungssuche weiter, und niemand erfuhr davon.
@@ -129,17 +128,13 @@ def test_a_stumbled_load_is_retried_after_the_window(
     """
     versuche: list[str] = []
 
-    class FakeStaticModel:
-        @staticmethod
-        def from_pretrained(pfad: str) -> _FakeModel:
-            versuche.append(pfad)
-            if len(versuche) == 1:
-                raise RuntimeError("Gewichte unvollstaendig")
-            return _FakeModel()
+    def laden(pfad) -> _FakeModel:
+        versuche.append(str(pfad))
+        if len(versuche) == 1:
+            raise RuntimeError("Gewichte unvollstaendig")
+        return _FakeModel()
 
-    fake_modul = types.ModuleType("model2vec")
-    fake_modul.StaticModel = FakeStaticModel  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "model2vec", fake_modul)
+    monkeypatch.setattr(ai_embedding_service, "_Modell", laden)
     # Die Dateien liegen da — genau der Fall, den `is_available` nicht sieht.
     monkeypatch.setattr(ai_embedding_service, "is_available", lambda: True)
 
@@ -230,7 +225,7 @@ def _vektoren_fuer(texts: list[str]) -> list[list[float]]:
     ]
 
 
-def test_a_missing_vector_is_recomputed_on_the_next_recall(
+def test_a_missing_vector_is_recomputed_in_the_next_tick(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Eine Ausfallphase des Modells darf keinen Eintrag dauerhaft blind machen.
@@ -242,17 +237,18 @@ def test_a_missing_vector_is_recomputed_on_the_next_recall(
     eines abgebrochenen Downloads etwas merkte, hatte einen Eintrag, der für
     Bedeutungsrang und Verblassen-Reiz für immer unsichtbar blieb.
 
-    Nachgezogen wird dort, wo der Klartext ohnehin offenliegt: beim Abruf in
-    den Kontext.
+    Nachgezogen wird im Takt (`ai_gedaechtnis_abruf.nachziehen`), über den
+    ganzen Bestand — nicht nur das, was eine Anfrage gerade öffnet.
     """
     _allow_memory(db, regular_user)
     ohne_modell(monkeypatch)
     row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
 
-    # Das Modell ist wieder da — die nächste Anfrage muss aufholen.
+    # Das Modell ist wieder da — der nächste Takt muss aufholen.
     modell_ersetzen(monkeypatch, _vektoren_fuer)
-    ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
+    assert ai_gedaechtnis_abruf.nachziehen() == 1
 
+    db.expire_all()
     db.refresh(row)
     assert row.embedding_model == MODEL_TAG
     vektor = ai_memory_service._stored_vector(row, MODEL_TAG)
@@ -287,11 +283,12 @@ def test_ein_google_vektor_wird_neu_gerechnet_sobald_das_lokale_modell_zurueck_i
     row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
     assert row.embedding_model == "google:text-embedding-004"
 
-    # Das lokale Modell ist wieder da; der nächste Abruf muss den Eintrag in
+    # Das lokale Modell ist wieder da; der nächste Takt muss den Eintrag in
     # dessen Raum holen, statt den Google-Vektor als lokalen zu lesen.
     monkeypatch.setattr(ai_embedding_service, "_load", lambda: _FakeModel())
-    ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
+    assert ai_gedaechtnis_abruf.nachziehen() == 1
 
+    db.expire_all()
     db.refresh(row)
     assert row.embedding_model == MODEL_TAG
     vektor = ai_memory_service._stored_vector(row, MODEL_TAG)
@@ -385,8 +382,8 @@ def test_a_written_vector_lands_in_the_byte_column(
 def test_a_truncated_byte_vector_counts_as_missing(db: Session) -> None:
     """Eine falsche Byteslänge ist ein beschädigter Vektor, kein kurzer.
 
-    Die Länge steht fest bei 256 Zahlen. Würde eine abgeschnittene Zeile
-    klaglos als drei Zahlen gelesen, verglichen numpy sie gegen 256 — und der
+    Die Länge steht fest (`EMBEDDING_DIMENSIONS`). Würde eine abgeschnittene
+    Zeile klaglos als drei Zahlen gelesen, verglichen numpy sie gegen 384 — und der
     ganze Stapel scheiterte an einer Stelle, die mit der Ursache nichts mehr zu
     tun hat. Fehlend ist die einzige ehrliche Lesart.
     """
@@ -408,7 +405,7 @@ def test_the_stored_form_is_a_bare_run_of_float32() -> None:
     wieder gelesen. Ohne diesen Test wäre ein Wechsel des Zahlentyps — von
     ``float`` auf ``double`` etwa — eine Zeile Code und ein Bestand, den
     danach niemand mehr entziffert. Festgehalten ist deshalb genau das, was
-    ein anderer Leser annehmen darf: 256 Zahlen zu vier Bytes, hintereinander,
+    ein anderer Leser annehmen darf: `EMBEDDING_DIMENSIONS` Zahlen zu vier Bytes, hintereinander,
     ohne Rahmen und ohne Kopf.
 
     Der Vergleich läuft über ``struct`` und nicht über dieselbe Funktion,
@@ -469,13 +466,11 @@ def test_ein_klartextvektor_aus_dem_bestand_wird_weiter_gelesen_und_ersetzt(
 
     Bis zum 23.08.2026 lagen die rohen float32-Bytes in der Spalte. Sie
     kurzerhand fuer ungueltig zu erklaeren waere der bequemere Weg gewesen und
-    haette das Gedaechtnis schlechter gemacht, als es war: in einem Bereich mit
-    tausenden Eintraegen kommen je Anfrage nur `MAX_CONTEXT_ROWS` Zeilen bis zum
-    Nachziehen, und was die Vorauswahl ohne Bedeutungsanteil nie nach vorn
-    bringt, kaeme dort nie an — die Zeile bliebe dauerhaft ohne Vektor.
+    haette das Gedaechtnis schlechter gemacht, als es war: bis der Vektor neu
+    gerechnet ist, faende die Bedeutung die Zeile nicht.
 
-    Beide Haelften gehoeren deshalb zusammen: gelesen wie bisher, und beim
-    naechsten Abruf in den Kontext verpackt neu geschrieben.
+    Beide Haelften gehoeren deshalb zusammen: gelesen wie bisher, und im
+    naechsten Takt (`ai_gedaechtnis_abruf.nachziehen`) verpackt neu geschrieben.
     """
     _allow_memory(db, regular_user)
     modell_ersetzen(monkeypatch, _vektoren_fuer)
@@ -486,13 +481,43 @@ def test_ein_klartextvektor_aus_dem_bestand_wird_weiter_gelesen_und_ersetzt(
 
     assert ai_memory_service._stored_vector(row, MODEL_TAG) is not None, "kein Rueckschritt"
 
-    ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
-    db.commit()
+    assert ai_gedaechtnis_abruf.nachziehen() == 1
+    db.expire_all()
     db.refresh(row)
 
     assert row.embedding_bytes != klartext
     assert klartext not in row.embedding_bytes
     assert ai_memory_service._stored_vector(row, MODEL_TAG) is not None
+
+
+def test_ein_vektor_frueherer_laenge_wird_neu_gerechnet(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Rückfall behält seine Kennung, aber nicht seine Länge.
+
+    Bis zum Modellwechsel am 07.10.2026 fragte der Rückfall 256 Zahlen an,
+    seither 384. Eine OpenAI-Zeile von vorher trägt dieselbe Kennung wie eine
+    von heute; an der Kennung allein sähe der Takt nicht, dass sie neu muss,
+    und die Zeile bliebe für immer ohne Bedeutung. Er erkennt sie an der Länge.
+    """
+    kennung = "openai:text-embedding-3-small"
+    _allow_memory(db, regular_user)
+    modell_ersetzen(monkeypatch, _vektoren_fuer, modell=kennung)
+    row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
+    row.embedding_bytes = ai_memory_service._vektor_verschluesseln(
+        ai_embedding_service.vektor_zu_bytes([1.0] + [0.0] * 255)
+    )
+    db.commit()
+    assert ai_memory_service._stored_vector(row, kennung) is None
+
+    assert ai_gedaechtnis_abruf.nachziehen() == 1
+    db.expire_all()
+    db.refresh(row)
+
+    assert len(row.embedding_bytes) == ai_memory_service.GEPACKT_BYTES
+    vektor = ai_memory_service._stored_vector(row, kennung)
+    assert vektor is not None and len(vektor) == ai_embedding_service.EMBEDDING_DIMENSIONS
+    assert ai_gedaechtnis_abruf.nachziehen() == 0, "danach ist nichts mehr offen"
 
 
 # ── Mit Modell ────────────────────────────────────────────────────────────
@@ -518,14 +543,22 @@ def test_writing_an_entry_stores_a_usable_vector(
 def test_a_foreign_language_question_finds_the_german_entry(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Der Fall, fuer den die 507 MB da sind.
+    """Der Fall, fuer den die 470 MB da sind.
 
-    "quel jeu je prefere" hat mit "lieblingsspiel: Am liebsten spiele ich
-    Enshrouded" kein einziges Wort gemeinsam. Wortabgleich liefert hier null;
-    die Bedeutungssuche findet den Eintrag.
+    "quelle voiture est-ce que je conduis" hat mit "fahrzeug: Ich fahre einen
+    roten Kombi" kein einziges Wort gemeinsam. Wortabgleich liefert hier null;
+    die Bedeutungssuche findet den Eintrag (0,61, die anderen höchstens 0,16).
+
+    Bis zum Modellwechsel am 07.10.2026 stand hier "quel jeu je prefere" gegen
+    "lieblingsspiel: Am liebsten spiele ich Enshrouded". Das Satzmodell setzt
+    das Paar nur auf 0,17 — der kleingeschriebene Altbestandsname davor drückt
+    es; als Satz mit Titel sind es 0,25 — und damit unter die feste Schwelle
+    kleiner Bereiche. Platz 1 ist es weiterhin. Das Vorgängermodell fand
+    dafür "Auto" gegen "Kombi" erst auf Platz 1.025.
     """
     ai_embedding_service.reset_for_tests()
     _allow_memory(db, regular_user)
+    _write(db, regular_user, "fahrzeug", "Ich fahre einen roten Kombi")
     _write(db, regular_user, "lieblingsspiel", "Am liebsten spiele ich Enshrouded")
     _write(db, regular_user, "wartung", "Nur am Wochenende erreichbar")
     _write(db, regular_user, "backup.zeitpunkt", "Sicherungen laufen nachts um drei")
@@ -533,10 +566,10 @@ def test_a_foreign_language_question_finds_the_german_entry(
     monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_CHARS", 70)
 
     block = ai_memory_service.provider_memory_context(
-        db, regular_user, query="quel jeu je prefere?"
+        db, regular_user, query="quelle voiture est-ce que je conduis?"
     )
 
-    assert "Enshrouded" in block
+    assert "Kombi" in block
 
 
 @needs_model
@@ -603,10 +636,9 @@ def test_ein_beschaedigtes_modell_gilt_nicht_als_vorhanden(tmp_path) -> None:
     sys.path.insert(0, str(_backend_pfad()))
     from scripts.fetch_embedding_model import vollstaendig
 
-    ordner = tmp_path / "potion"
-    ordner.mkdir()
-    (ordner / "config.json").write_text("{}", encoding="utf-8")
-    (ordner / "model.safetensors").write_bytes(b"gewichte")
+    ordner = tmp_path / "minilm"
+    (ordner / "onnx").mkdir(parents=True)
+    (ordner / "onnx" / "model.onnx").write_bytes(b"gewichte")
     (ordner / "tokenizer.json").write_text(
         '{"model":{"vocab":[["a",-1.0],["b",-2.', encoding="utf-8"
     )
@@ -624,11 +656,33 @@ def test_ein_fehlendes_stueck_gilt_ebenfalls_nicht_als_vorhanden(tmp_path) -> No
     sys.path.insert(0, str(_backend_pfad()))
     from scripts.fetch_embedding_model import vollstaendig
 
-    ordner = tmp_path / "potion"
+    ordner = tmp_path / "minilm"
     ordner.mkdir()
-    (ordner / "config.json").write_text("{}", encoding="utf-8")
+    (ordner / "tokenizer.json").write_text("{}", encoding="utf-8")
 
     assert vollstaendig(ordner) is False
+
+
+def test_das_update_raeumt_nur_das_vorgaengermodell_weg(tmp_path) -> None:
+    """Nach dem Wechsel am 07.10.2026 lägen sonst 507 MB ungelesen daneben.
+
+    Entfernt wird genau der Ordner des Vorgängers neben dem heutigen Modell —
+    nicht das heutige, nicht ein anderer Nachbar.
+    """
+    sys.path.insert(0, str(_backend_pfad()))
+    from scripts.fetch_embedding_model import ORDNER, VORGAENGER, vorgaenger_entfernen
+
+    heute = tmp_path / ORDNER
+    (heute / "onnx").mkdir(parents=True)
+    (tmp_path / VORGAENGER).mkdir()
+    (tmp_path / VORGAENGER / "model.safetensors").write_bytes(b"alt")
+    (tmp_path / "etwas-anderes").mkdir()
+
+    vorgaenger_entfernen(heute)
+
+    assert not (tmp_path / VORGAENGER).exists()
+    assert (heute / "onnx").is_dir()
+    assert (tmp_path / "etwas-anderes").is_dir()
 
 
 def _backend_pfad():

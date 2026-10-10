@@ -914,6 +914,13 @@ async def _werkzeuge_und_grenze(
     # Zuschnitt ändert sich `tools` nicht mehr — auch die Schlussrunde
     # schickt den Katalog mit und verbietet nur noch seine Benutzung.
     katalog_zeichen = len(json.dumps(tools, ensure_ascii=False))
+    # Wie voll die erste Anfrage dieses Segments ist, Katalog eingeschlossen.
+    # Daran entscheidet das Laufende, ob gefaltet wird
+    # (`ai_compaction_service.needs_compaction`) — der Verlauf allein sagt das
+    # unter dem Anfragedeckel zu spaet.
+    zustand["anfrage_zeichen"] = (
+        message_character_count(zustand.get("provider_messages") or []) + katalog_zeichen
+    )
     # Zwischenspeichern des Prompts, sofern dieses Modell es ausdruecklich
     # verlangt. Einmal je Segment ermittelt und nicht je Runde: der Katalog
     # antwortet zwar aus seinem eigenen Speicher, aber die Antwort kann sich

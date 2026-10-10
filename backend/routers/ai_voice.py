@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 from typing import Callable
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from fastapi.concurrency import run_in_threadpool
@@ -51,7 +52,11 @@ from services import (
 from services.permission_service import has_global_permission
 from services.ai_voice.live_session import LiveSitzung, vorbereiten as live_vorbereiten
 from services.ai_voice.pipecat_pipeline import pipecat_verfuegbar
-from services.ai_voice.realtime_session import RealtimeSitzung, vorbereiten as realtime_vorbereiten
+from services.ai_voice.realtime_session import (
+    RealtimeSitzung,
+    hoechstdauer,
+    vorbereiten as realtime_vorbereiten,
+)
 from services.ai_voice.sprachwege import GEMINI_LIVE, OPENAI_LIVE, OPENAI_REALTIME, Sprachweg
 from services.ai_voice.transcription import hoeren as transkribieren
 
@@ -390,6 +395,14 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
                     user=user,
                     herkunft=herkunft,
                 )
+            except ai_usage_service.AiQuotaExceeded as exc:
+                # Kein Fehler, sondern eine Auskunft, und der Benutzer ist
+                # angemeldet: er bekommt sie wie am Ende einer Sitzung, statt
+                # eines nackten 1008, den die Oberfläche nur als „Anbieter
+                # gestört" lesen kann.
+                db.rollback()
+                await _kontingent_melden(websocket, exc)
+                return
             except Exception as exc:
                 # Kein Anbieterfehler, Schlüssel oder Quotendetail verlässt
                 # den noch nicht aufgebauten authentifizierten Kanal.
@@ -448,6 +461,20 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
             benutzer_id = user.id
             hoeren_id = hoeren.id
             denken_id = denken.id
+            # Auch der klassische Weg (Gehör, Chat, Stimme) ist ein Gespräch
+            # und zählt gegen die Sprachminuten — sonst sperrten 0 Minuten nur
+            # Panels, die zufällig einen Realtime-Zugang haben.
+            try:
+                sprach_event_id = ai_usage_service.reserve_ai_usage(
+                    db, user, request_id=uuid4(), estimated_tokens=0,
+                    minimum_token_headroom=1, realtime=True,
+                ).id
+                db.commit()
+            except ai_usage_service.AiQuotaExceeded as exc:
+                db.rollback()
+                await _kontingent_melden(websocket, exc)
+                return
+            sprach_hoechstdauer = hoechstdauer(db, user)
         # Aus demselben Token wie die Identitaet — eine gekoppelte App traegt
         # `geraet="desktop"` im Anspruch, und ihre Sprachlaeufe bekommen damit
         # dieselbe Werkzeugmenge wie ihr getippter Chat.
@@ -496,6 +523,7 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
         stimm_adresse=stimm_adresse,
         stimm_schluessel=stimm_schluessel,
         http_client=websocket.app.state.ai_http_client,
+        hoechstdauer=sprach_hoechstdauer,
         herkunft=herkunft,
         familie=familie,
     )
@@ -514,10 +542,47 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
             benutzer_id, type(fehler).__name__,
         )
     finally:
+        await run_in_threadpool(_klassische_sitzung_abschliessen, sprach_event_id, bruecke)
         from starlette.websockets import WebSocketState
 
         if websocket.client_state is WebSocketState.CONNECTED:
             await websocket.close()
+
+
+def _klassische_sitzung_abschliessen(event_id: int, bruecke) -> None:
+    """Bucht die Dauer einer klassischen Sprachsitzung.
+
+    Die Tokens buchen die Läufe und das Gehör selbst; hier geht es nur um die
+    Zeit. Ohne einen einzigen Lauf zählt die Sitzung nicht — dieselbe Regel
+    wie bei Realtime (`realtime_sitzung_abschliessen`).
+    """
+    laeufe = int(getattr(getattr(bruecke, "_lage", None), "laeufe", 0) or 0)
+    with SessionLocal() as db:
+        try:
+            if laeufe:
+                ai_usage_service.realtime_verbrauch_ergaenzen(
+                    db, event_id=event_id, text_input=0, text_output=0,
+                    audio_input=0, audio_output=0, cost_microunits=0,
+                    anfragen=laeufe, grenzen_pruefen=False,
+                )
+            ai_usage_service.realtime_sitzung_abschliessen(db, event_id)
+            db.commit()
+        except Exception as fehler:  # noqa: BLE001 - das Ende darf nicht am Buchen scheitern
+            db.rollback()
+            logger.warning("Sprachdauer nicht gebucht error=%s", type(fehler).__name__)
+
+
+async def _kontingent_melden(websocket: WebSocket, exc: Exception) -> None:
+    """Nimmt die Verbindung an, sagt, welches Kontingent fehlt, und schliesst."""
+    grund = (
+        "realtime_kontingent"
+        if getattr(exc, "reason", None) == "monthly_realtime_minutes_limit"
+        else "kontingent"
+    )
+    logger.info("Sprachsitzung ohne Kontingent abgelehnt: grund=%s", grund)
+    await websocket.accept(subprotocol=ws_subprotokoll(websocket))
+    await websocket.send_json({"art": "stoerung", "grund": grund})
+    await websocket.close()
 
 
 def _gespraech_holen(db: Session, user: User) -> str:

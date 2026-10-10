@@ -1027,11 +1027,13 @@ async def _ai_tasks_task() -> None:
     der ein Termin eingehalten wird. Feiner waere unehrlich: der Lauf selbst
     dauert laenger als eine Minute.
 
-    **Fuenf Handgriffe, einzeln gekapselt** (die Zwei-Block-Form aus
+    **Sieben Handgriffe, einzeln gekapselt** (die Zwei-Block-Form aus
     `_ai_guardian_task`): faellige Auftraege starten, geparkte Worker wecken
     (``waiting_wake`` mit verstrichener Frist), Laeufe nachholen, deren
     Bestaetigung im falschen Moment kam, verfallene Desktop-Auftraege
-    schliessen, offene Meldungen zustellen, wenn das Gespraech Ruhe hat.
+    schliessen, offene Meldungen zustellen, wenn das Gespraech Ruhe hat,
+    ruhende Gespraeche fuer das Gedaechtnis nachlesen und alte Erinnerungen
+    in Saetze umschreiben.
     Scheitert einer, laufen die anderen trotzdem.
     """
     from database import SessionLocal
@@ -1094,6 +1096,56 @@ async def _ai_tasks_task() -> None:
         except Exception as exc:
             db.rollback()
             logger.warning("Error in AI delivery task: %s", exc)
+        try:
+            from services import ai_gedaechtnis_schreiber
+
+            # Gespräche, die seit fünf Minuten ruhen, liest das Gedächtnis
+            # nach. Die Durchgänge laufen nebenher und halten diesen Takt
+            # nicht auf: einer dauert so lange wie ein Modellaufruf.
+            begonnen = ai_gedaechtnis_schreiber.faellige_starten(db)
+            if begonnen:
+                logger.info("KI-Gedaechtnis: %s Durchgang/Durchgaenge begonnen", begonnen)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Error in AI memory writer: %s", exc)
+        try:
+            from services import ai_gedaechtnis_altbestand
+
+            # Erinnerungen aus der Zeit vor Gedächtnis v2 werden Sätze,
+            # je Takt höchstens zwei Bereiche, ebenfalls nebenher.
+            bereiche = ai_gedaechtnis_altbestand.faellige_starten(db)
+            if bereiche:
+                logger.info("KI-Gedaechtnis: Altbestand in %s Bereich(en) begonnen", len(bereiche))
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Error in AI memory rewrite: %s", exc)
+        try:
+            from services import ai_gedaechtnis_pflege
+
+            # Einmal am Tag: was „im Kopf“ steht, nach Wichtigkeit × Präsenz.
+            # Eine Abfrage über alle Erinnerungen, darum im Thread.
+            gerechnet = await asyncio.to_thread(ai_gedaechtnis_pflege.rang_takt)
+            if gerechnet is not None:
+                logger.info("KI-Gedaechtnis: Kopfrang fuer %s Erinnerung(en) gerechnet", gerechnet)
+            # Nachts je Bereich: Doppel zusammenführen, Abgelaufenes in die
+            # Vergangenheit setzen. Nebenher wie der Schreiber.
+            gepflegt = ai_gedaechtnis_pflege.faellige_starten(db)
+            if gepflegt:
+                logger.info("KI-Gedaechtnis: Pflege in %s Bereich(en) begonnen", len(gepflegt))
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Error in AI memory care: %s", exc)
+        try:
+            from services import ai_gedaechtnis_abruf
+
+            # Vektor und Wortindex für Erinnerungen, die noch keine haben
+            # (Bestand vor Stufe 4, ein Modell, das beim Schreiben fehlte).
+            # Eigene Sitzung in einem Thread: Sidecar und Modell blockieren.
+            nachgezogen = await asyncio.to_thread(ai_gedaechtnis_abruf.nachziehen)
+            if nachgezogen:
+                logger.info("KI-Gedaechtnis: %s Erinnerung(en) fuer den Abruf nachgezogen", nachgezogen)
+        except Exception as exc:
+            logger.warning("Error in AI memory indexing: %s", exc)
     finally:
         db.close()
 
@@ -1211,7 +1263,7 @@ async def _e2ee_envelope_cleanup_task() -> None:
     """Regelmäßiger Hintergrund-Task zur Durchsetzung der 30-Tage-Vorhaltefrist für E2EE-Umschläge."""
     from services.chat_media_service import ChatMediaService
     from services.social_service import SocialService
-    from services import vault_blob_service
+    from services import ai_memory_service, vault_blob_service
     def _worker() -> None:
         db = SessionLocal()
         try:
@@ -1220,6 +1272,8 @@ async def _e2ee_envelope_cleanup_task() -> None:
                 ("Anhang", ChatMediaService.cleanup_expired_media),
                 ("Story", SocialService.cleanup_expired_stories),
                 ("Tresor-Datei", vault_blob_service.aufraeumen),
+                # Was die KI vergessen hat, bleibt 30 Tage zurueckholbar.
+                ("Vergessene-Erinnerung", ai_memory_service.vergessene_aufraeumen),
             ):
                 try:
                     cleanup(db)

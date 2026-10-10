@@ -42,7 +42,7 @@ class AiUsageEvent(Base):
             name="ck_ai_usage_events_cost_source",
         ),
         CheckConstraint(
-            "zweck IS NULL OR zweck IN ('ethik')",
+            "zweck IS NULL OR zweck IN ('ethik', 'gedaechtnis')",
             name="ck_ai_usage_events_zweck",
         ),
     )
@@ -111,6 +111,11 @@ class AiUsageEvent(Base):
     realtime_audio_output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Dauer der Diktat- bzw. STT-Transkriptionsaufnahme in Sekunden (provider-neutral).
     dictation_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Wie lange eine Sprachsitzung bisher lief, in Sekunden; nur bei
+    # Sprachsitzungen gesetzt. Wächst mit jeder Buchung und beim Abschluss
+    # (`ai_usage_service.realtime_verbrauch_ergaenzen`) — daran hängt das
+    # Minutenlimit der Rolle.
+    realtime_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Wieviele Anbieteranfragen in dieser Zeile stecken. Eine Chatnachricht ist
     # nicht eine Anfrage: jede Werkzeugrunde ruft den Anbieter erneut und
     # schickt den gewachsenen Verlauf komplett mit. Ohne diese Zahl sieht eine
@@ -133,7 +138,9 @@ class AiUsageEvent(Base):
     # Wozu die Anfrage diente, wenn nicht der Benutzer sie gestellt hat.
     # ``None`` ist eine Anfrage des Benutzers: Chat, Stimme, Abschrift,
     # Verdichtung. 'ethik' ist eine Beratung der Ethics Engine vor einem
-    # Werkzeug (`ai_ethics_service`). Sie kostet wie jede andere und zählt in
-    # Tokens und Kosten, aber nicht als Anfrage pro Minute — siehe
-    # `ai_usage_service.nachtraeglich_buchen`.
+    # Werkzeug (`ai_ethics_service`), 'gedaechtnis' ein Durchgang des
+    # Gedächtnisschreibers (`ai_gedaechtnis_schreiber`). Beide kosten wie jede
+    # andere und zählen in Tokens und Kosten, aber nicht als Anfrage pro
+    # Minute und nicht als gleichzeitiger Vorgang — siehe
+    # `ai_usage_service.reserve_ai_usage` und `nachtraeglich_buchen`.
     zweck: Mapped[str | None] = mapped_column(String(16), nullable=True)

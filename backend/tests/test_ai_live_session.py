@@ -18,6 +18,7 @@ import json
 import threading
 import time
 from dataclasses import replace
+from datetime import timedelta
 from uuid import uuid4
 
 import httpx
@@ -659,15 +660,17 @@ async def test_backend_token_zaehlen_je_antwort_genau_einmal(db: Session, owner_
 async def test_eine_grenze_beendet_die_sitzung_ohne_die_kosten_zu_verschweigen(
     db: Session, owner_user, monkeypatch
 ) -> None:
-    # Ein Cent Realtime-Budget im Monat; die Anlage allein kostet 1,25 Cent.
+    # Eine Sprachminute im Monat; die Sitzung läuft schon zwei.
     monkeypatch.setattr(
         ai_usage_service,
         "resolve_effective_limits",
-        lambda _db, _user: replace(ai_limit_service.UNLIMITED_AI_LIMITS, monthly_realtime_cost_limit_cents=1),
+        lambda _db, _user: replace(ai_limit_service.UNLIMITED_AI_LIMITS, monthly_realtime_minutes_limit=1),
     )
     _verbindung(monkeypatch, Sideband())
     panel = Panel()
     vorbereitung = _vorbereitung(db, owner_user)
+    _zeile(db, vorbereitung.usage_event_id).created_at -= timedelta(minutes=2)
+    db.commit()
 
     with pytest.raises(RealtimeSitzungsfehler, match="REALTIME_QUOTA"):
         await _sitzung(vorbereitung, panel=panel)._handshake(ANGEBOT)
@@ -915,7 +918,7 @@ async def test_an_der_zeitgrenze_enden_alle_nebenlaeufe_vor_dem_schliessen(
     panel = Panel({"art": "webrtc_offer", "sdp": ANGEBOT})
     sideband = EinLeserSideband(beim_schliessen=(_geschlossen("close_requested", 30),))
     _verbindung(monkeypatch, sideband)
-    vorbereitung = _vorbereitung(db, owner_user)
+    vorbereitung = _vorbereitung(db, owner_user, hoechstdauer=0.2)
     sitzung = _sitzung(vorbereitung, panel=panel)
 
     lage = await asyncio.wait_for(sitzung.fuehren(), timeout=10)

@@ -118,20 +118,20 @@ def test_im_chat_fragt_auch_vergessen_kein_zweites_mal(db: Session, regular_user
     from services.ai_tools.server_tools import execute_read_tool
 
     with patch("services.ai_voice.voice_dispatcher.ai_action_service.angebotene_werkzeuge") as mock_angebot:
-        mock_angebot.return_value = frozenset({"forget_memory", "list_my_servers"})
+        mock_angebot.return_value = frozenset({"forget_skill", "list_my_servers"})
         with patch(
             "services.ai_stream.write_tools._persist_write_proposals",
             side_effect=AssertionError("eine zweite Karte"),
         ), patch("services.ai_stream.read_tools._werkzeug_ausfuehren") as mock_exec:
-            mock_exec.return_value = ({"forgotten": ["urlaub"]}, None)
+            mock_exec.return_value = ({"forgotten": "backup-vor-update"}, None)
 
             wert = execute_read_tool(
                 db, user=regular_user, tool_name="execute_server_action",
-                arguments={"tool_name": "forget_memory", "parameters": {"key": "urlaub"}},
+                arguments={"tool_name": "forget_skill", "parameters": {"skill_key": "backup-vor-update"}},
             )
 
-    assert wert["executed_tool"] == "forget_memory"
-    assert wert["data"] == {"forgotten": ["urlaub"]}
+    assert wert["executed_tool"] == "forget_skill"
+    assert wert["data"] == {"forgotten": "backup-vor-update"}
     mock_exec.assert_called_once()
 
 

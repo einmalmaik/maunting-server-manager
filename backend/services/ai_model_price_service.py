@@ -1,4 +1,4 @@
-"""Preisauflösung für die drei textbasierten Modellrollen.
+"""Preisauflösung für die vier textbasierten Modellrollen.
 
 OpenRouter veröffentlicht Tokenpreise im öffentlichen Modellkatalog. Für
 OpenAI und Azure wird derselbe Katalog nur für OpenAI-Modellkennungen befragt;
@@ -76,6 +76,7 @@ def fill_missing_role_prices(provider_kind: str, values: dict[str, Any]) -> None
         ("standard", "default_model"),
         ("worker", "worker_model"),
         ("ethics", "ethics_model"),
+        ("memory", "memory_model"),
     ):
         input_field = f"{role}_input_price_micro_usd_per_million"
         output_field = f"{role}_output_price_micro_usd_per_million"

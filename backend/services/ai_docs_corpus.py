@@ -132,7 +132,7 @@ SEITEN: dict[str, Seite] = {
 # genau die zwei Angaben, die ein Modell sonst erfindet. Ein Test haelt sie
 # gegen diese Datei.
 DATENSCHUTZ_VERSION = "3.39"
-DATENSCHUTZ_STAND = "2026-10-09"
+DATENSCHUTZ_STAND = "2026-10-10"
 
 # `de.json` fuehrt neben `privacyPolicy` einen zweiten, **toten** Namensraum
 # `privacy` — sieben Schluessel, darunter "6. Verschluesselte Cloud-Backups

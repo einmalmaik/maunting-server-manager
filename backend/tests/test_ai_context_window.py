@@ -40,14 +40,14 @@ def _saubere_einstellung():
 
 
 def test_a_known_window_is_used_almost_entirely() -> None:
-    """Der Sinn der Uebung: ein grosses Fenster wird auch gefuellt."""
-    fenster = ai_context_window.aus_modell(_modell(128_000, 16_384))
+    """Unter dem Deckel wird ein bekanntes Fenster auch gefuellt."""
+    fenster = ai_context_window.aus_modell(_modell(40_000, 4_096))
 
     assert fenster.bekannt is True
-    assert fenster.fenster_tokens == 128_000
+    assert fenster.fenster_tokens == 40_000
     # Ausgabegrenze ab, dann der Sicherheitsabschlag — deutlich mehr als die
     # 6.000 Token, die vorher fuer jedes Modell galten.
-    assert fenster.nutzbar_tokens == int((128_000 - 16_384) * ai_context_window.SICHERHEIT)
+    assert fenster.nutzbar_tokens == int((40_000 - 4_096) * ai_context_window.SICHERHEIT)
     assert fenster.zeichen == fenster.nutzbar_tokens * ai_context_window.ZEICHEN_JE_TOKEN
 
 
@@ -59,22 +59,30 @@ def test_a_generous_output_limit_never_eats_more_than_a_quarter() -> None:
     abgezogen schnitte das ein Viertel des Kontexts weg, das in der Praxis
     niemand fuer eine Antwort braucht.
     """
-    fenster = ai_context_window.aus_modell(_modell(128_000, 32_768))
+    fenster = ai_context_window.aus_modell(_modell(40_000, 32_768))
 
     assert fenster.nutzbar_tokens == int(
-        (128_000 - 128_000 // 4) * ai_context_window.SICHERHEIT
+        (40_000 - 40_000 // 4) * ai_context_window.SICHERHEIT
     )
 
 
-def test_a_million_token_window_reaches_the_history() -> None:
+def test_a_million_token_window_stops_at_the_request_cap() -> None:
+    """Ein riesiges Fenster heisst nicht, dass jede Anfrage es fuellt.
+
+    Bis zum 07.10.2026 waren hier ueber 800.000 Token nutzbar, und eine lange
+    Unterhaltung schob rund 200.000 in jede Anfrage.
+    """
     fenster = ai_context_window.aus_modell(_modell(1_000_000, 65_536))
     grenzen = ai_context_service.teilbudgets(fenster.zeichen)
 
-    assert fenster.nutzbar_tokens > 800_000
-    # Der frueher feste Deckel von 20 Nachrichten war bei einem solchen Fenster
-    # die eigentliche Ursache des Vergessens — das Zeichenbudget kam nie zum
-    # Zug.
-    assert grenzen.historie_zeilen == 2_000
+    assert fenster.fenster_tokens == 1_000_000
+    assert fenster.nutzbar_tokens == ai_context_window.ANFRAGE_DECKEL_TOKENS
+    assert fenster.zeichen == ai_context_window.ANFRAGE_DECKEL_TOKENS * ai_context_window.ZEICHEN_JE_TOKEN
+    # Bei 3,6 Zeichen je Token, wie Deutsch gemessen laeuft, bleibt eine volle
+    # Anfrage unter 50.000 Token.
+    assert fenster.zeichen / 3.6 < 50_000
+    # Der feste Deckel von 20 Nachrichten bleibt trotzdem weit hinter uns.
+    assert grenzen.historie_zeilen > 20
 
 
 def test_a_model_that_reserves_its_whole_window_for_output_still_works() -> None:
@@ -87,7 +95,7 @@ def test_a_model_that_reserves_its_whole_window_for_output_still_works() -> None
     fenster = ai_context_window.aus_modell(_modell(262_144, 262_144))
 
     assert fenster.bekannt is True
-    assert fenster.nutzbar_tokens > 150_000
+    assert fenster.nutzbar_tokens == ai_context_window.ANFRAGE_DECKEL_TOKENS
 
 
 def test_a_genuinely_small_window_is_respected_not_raised() -> None:
@@ -331,7 +339,7 @@ async def test_the_window_is_fetched_with_a_key_when_the_catalog_needs_one(
     assert gesehen["schluessel"], "der Katalog wurde ohne Schluessel gefragt"
     assert fenster.bekannt is True
     assert fenster.fenster_tokens == 1_050_000
-    assert fenster.nutzbar_tokens > 500_000, (
+    assert fenster.nutzbar_tokens == ai_context_window.ANFRAGE_DECKEL_TOKENS, (
         "das Fenster fiel auf den Rueckfall zurueck"
     )
 

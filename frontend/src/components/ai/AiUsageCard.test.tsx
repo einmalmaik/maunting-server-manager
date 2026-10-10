@@ -24,6 +24,8 @@ function usage(tokensToday: number, dailyLimit: number | null): AiUsageMine {
     cost_month_micro_usd: 0,
     requests_month: 0,
     last_request_at: null,
+    realtime_seconds_month: 0,
+    dictation_seconds_month: 0,
     cost_policy: {
       currency: 'EUR',
       usd_rate: '0.92',
@@ -35,10 +37,7 @@ function usage(tokensToday: number, dailyLimit: number | null): AiUsageMine {
       daily_token_limit: dailyLimit,
       weekly_token_limit: null,
       monthly_token_limit: null,
-      requests_per_minute: null,
-      concurrent_operations: null,
-      monthly_cost_limit_cents: null,
-      monthly_realtime_cost_limit_cents: null,
+      monthly_realtime_minutes_limit: null,
       monthly_dictation_minutes_limit: null,
       role_ids: [],
     },
@@ -57,6 +56,21 @@ describe('AiUsageCard', () => {
     vi.mocked(aiApi.getMyUsage).mockReset()
   })
 
+  it('zeigt verbrauchte Sprachminuten gegen ihre Grenze', async () => {
+    vi.mocked(aiApi.getMyUsage).mockResolvedValue({
+      ...usage(0, null),
+      realtime_seconds_month: 270,
+      limits: { ...usage(0, null).limits, monthly_realtime_minutes_limit: 5 },
+    })
+    render(<AiUsageCard />)
+
+    const bar = await screen.findByRole('progressbar', { name: 'Sprachminuten · 30 Tage' })
+    expect(bar).toHaveAttribute('aria-valuenow', '90')
+    expect(screen.getByText('4,5')).toBeInTheDocument()
+    // Ohne Grenze und ohne Verbrauch keine Diktat-Kachel.
+    expect(screen.queryByText('Diktierminuten · 30 Tage')).not.toBeInTheDocument()
+  })
+
   it('nennt eine Grenze von 0 eine Sperre und nicht „keine Grenze“', async () => {
     vi.mocked(aiApi.getMyUsage).mockResolvedValue(usage(0, 0))
     render(<AiUsageCard />)
@@ -71,7 +85,7 @@ describe('AiUsageCard', () => {
     vi.mocked(aiApi.getMyUsage).mockResolvedValue(usage(0, 0))
     render(<AiUsageCard />)
 
-    const bar = await screen.findByRole('progressbar', { name: 'Heute' })
+    const bar = await screen.findByRole('progressbar', { name: '24 Stunden' })
     expect(bar).toHaveAttribute('aria-valuenow', '100')
     expect(bar.firstElementChild?.className).toContain('bg-status-destructive')
   })
@@ -80,7 +94,7 @@ describe('AiUsageCard', () => {
     vi.mocked(aiApi.getMyUsage).mockResolvedValue(usage(950, 1_000))
     render(<AiUsageCard />)
 
-    const bar = await screen.findByRole('progressbar', { name: 'Heute' })
+    const bar = await screen.findByRole('progressbar', { name: '24 Stunden' })
     expect(bar.firstElementChild?.className).toContain('bg-status-destructive')
   })
 
@@ -88,7 +102,7 @@ describe('AiUsageCard', () => {
     vi.mocked(aiApi.getMyUsage).mockResolvedValue(usage(50, 1_000))
     render(<AiUsageCard />)
 
-    const bar = await screen.findByRole('progressbar', { name: 'Heute' })
+    const bar = await screen.findByRole('progressbar', { name: '24 Stunden' })
     // Die Ruhefarbe von `Singra/UI/ProgressBar` — dieselbe wie bei den
     // CPU-/RAM-Balken, seit die Karte den Balken nicht mehr selbst nachbaut.
     expect(bar.firstElementChild?.className).toContain('bg-secondary')

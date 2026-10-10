@@ -33,6 +33,15 @@ describe('Versionsliste', () => {
     }
   })
 
+  it('zeigt bei einem Text den Wortlaut statt einer Größe', () => {
+    const { container } = render(<Versionsliste versionen={[{
+      id: 't1', zeit: Date.UTC(2026, 9, 6, 9), text: 'Der Benutzer spielt abends.', hinweis: 'Bearbeitet',
+    }]} />)
+    expect(screen.getByText('Der Benutzer spielt abends.')).toBeInTheDocument()
+    expect(screen.getByText(/Bearbeitet/)).toBeInTheDocument()
+    expect(container.querySelector('.font-mono')).toBeNull()
+  })
+
   it('zeigt ohne Schreibrecht nur an und sagt, wenn es nichts gibt', () => {
     const { rerender } = render(<Versionsliste versionen={versionen} />)
     expect(screen.queryByRole('button')).toBeNull()

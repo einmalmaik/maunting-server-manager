@@ -25,6 +25,8 @@ vi.mock('@/api/client', async () => {
       // Ein `[]` an dieser Stelle wäre genau der Fall, den der Kommentar oben
       // meint — die Komponente läse `entries` aus einem Array und bekäme
       // `undefined`.
+      // Die Themen daneben sind eine Liste (Gedaechtnis v2).
+      if (path === '/ai/memory/personal/themen') return Promise.resolve([])
       if (path.startsWith('/ai/memory/personal')) {
         return Promise.resolve({ entries: [], total: 0, clearable: 0, limit: 200 })
       }
@@ -47,8 +49,7 @@ vi.mock('@/api/client', async () => {
           },
           limits: {
             daily_token_limit: 1_000, weekly_token_limit: null,
-            monthly_token_limit: null, requests_per_minute: null,
-            concurrent_operations: null, monthly_cost_limit_cents: null,
+            monthly_token_limit: null, monthly_realtime_minutes_limit: null,
             role_ids: [],
           },
         })

@@ -99,7 +99,6 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                 },
                 "mailbox_id": {
                     "type": "integer",
-                    "description": "Optionale ID des Postfachs.",
                 },
             },
             [],
@@ -115,7 +114,6 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                 },
                 "mailbox_id": {
                     "type": "integer",
-                    "description": "Optionale ID des Postfachs.",
                 },
             },
             ["message_id"],
@@ -127,34 +125,30 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                 "start_date": {
                     "type": "string",
                     "maxLength": 32,
-                    "description": "Startdatum (z. B. YYYY-MM-DD oder ISO-8601).",
+                    "description": "YYYY-MM-DD oder ISO-8601.",
                 },
                 "end_date": {
                     "type": "string",
                     "maxLength": 32,
-                    "description": "Enddatum (z. B. YYYY-MM-DD oder ISO-8601).",
+                    "description": "Wie start_date.",
                 },
                 "calendar_id": {
                     "type": "integer",
-                    "description": "Optionale Kalender-ID.",
                 },
             },
             [],
         ),
         _function(
             "propose_email_send",
-            "Schlägt das Verfassen und Versenden einer E-Mail über ein verknüpftes Postfach vor. "
-            "Erfordert zwingend eine Bestätigung des Benutzers vor dem tatsächlichen Versand.",
+            "Schlägt eine E-Mail über ein verknüpftes Postfach vor.",
             {
                 "recipient": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "Empfänger-E-Mail-Adresse.",
                 },
                 "subject": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "Betreff der E-Mail.",
                 },
                 "body_text": {
                     "type": "string",
@@ -164,11 +158,10 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                 "body_html": {
                     "type": "string",
                     "maxLength": 16000,
-                    "description": "Optionaler HTML-Inhalt.",
                 },
                 "mailbox_id": {
                     "type": "integer",
-                    "description": "Optionales Absender-Postfach. Fehlt es, wird das Standard-Postfach genutzt.",
+                    "description": "Absender-Postfach; leer = Standard.",
                 },
                 **_RATIONALE_SCHEMA,
             },
@@ -176,28 +169,25 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_calendar_event_create",
-            "Schlägt einen neuen Termin im verknüpften Kalender vor (kann mehrfach aufgerufen werden für mehrere Termine in einem Tagesplan; Standard-Dauer 1 Stunde wenn keine Endzeit genannt). "
-            "Erfordert die Freigabe des Benutzers.",
+            "Schlägt einen neuen Termin vor (je Termin ein Aufruf; ohne genannte Endzeit eine Stunde).",
             {
                 "title": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "Titel des Termins.",
                 },
                 "start_time": {
                     "type": "string",
                     "maxLength": 32,
-                    "description": "Startzeit (z. B. 2026-08-26 14:00 oder ISO-8601).",
+                    "description": "Etwa 2026-08-26 14:00 oder ISO-8601.",
                 },
                 "end_time": {
                     "type": "string",
                     "maxLength": 32,
-                    "description": "Endzeit (z. B. 2026-08-26 15:00 oder ISO-8601).",
+                    "description": "Wie start_time.",
                 },
                 "description": {
                     "type": "string",
                     "maxLength": 2000,
-                    "description": "Optionale Beschreibung / Agenda.",
                 },
                 "location": {
                     "type": "string",
@@ -206,24 +196,23 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                 },
                 "calendar_id": {
                     "type": "integer",
-                    "description": "Optionale Kalender-ID.",
                 },
                 "event_type": {
                     "type": "string",
                     "enum": ["personal", "team", "server", "node"],
-                    "description": "Semantische Kategorie des Termins: personal (privat, Standard), team (Team-Termin), server (Server-Wartung), node (Node-Infrastruktur).",
+                    "description": "Standard personal; server = Wartung, node = Infrastruktur.",
                 },
                 "team_id": {
                     "type": "integer",
-                    "description": "Optionale Team-ID für Team-Termine (event_type=team).",
+                    "description": "Bei event_type=team.",
                 },
                 "server_id": {
                     "type": "integer",
-                    "description": "Optionale Server-ID für Server-Wartungstermine (event_type=server).",
+                    "description": "Bei event_type=server.",
                 },
                 "color": {
                     "type": "string",
-                    "description": "Optionale Farbe (z. B. blue, green, purple, amber, red, cyan).",
+                    "description": "blue, green, purple, amber, red oder cyan.",
                 },
                 "recurrence": _WIEDERHOLUNG_SCHEMA,
                 **_RATIONALE_SCHEMA,
@@ -232,23 +221,21 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_calendar_event_update",
-            "Schlägt die Anpassung oder Verschiebung eines bestehenden Termins im Kalender vor (nur wenn ein Termin explizit geändert werden soll, für neue Termine propose_calendar_event_create nutzen). "
-            "Erfordert die Freigabe des Benutzers.",
+            "Ändert oder verschiebt einen bestehenden Termin (neue: propose_calendar_event_create). Nur genannte Felder ändern sich.",
             {
                 "event_id": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "ID oder UID des zu ändernden Termins aus calendar_read.",
+                    "description": "Aus calendar_read.",
                 },
                 "title": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "Neuer Titel des Termins (optional).",
                 },
                 "start_time": {
                     "type": "string",
                     "maxLength": 32,
-                    "description": "Neue Startzeit (z. B. 2026-08-26 15:00 oder ISO-8601).",
+                    "description": "Etwa 2026-08-26 15:00 oder ISO-8601.",
                 },
                 "end_time": {
                     "type": "string",
@@ -258,33 +245,26 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                 "description": {
                     "type": "string",
                     "maxLength": 2000,
-                    "description": "Neue Beschreibung / Agenda.",
                 },
                 "location": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "Neuer Ort oder Link.",
                 },
                 "calendar_id": {
                     "type": "integer",
-                    "description": "Optionale Kalender-ID.",
                 },
                 "event_type": {
                     "type": "string",
                     "enum": ["personal", "team", "server", "node"],
-                    "description": "Kategorie anpassen: personal, team, server, node.",
                 },
                 "team_id": {
                     "type": "integer",
-                    "description": "Optionale Team-ID.",
                 },
                 "server_id": {
                     "type": "integer",
-                    "description": "Optionale Server-ID.",
                 },
                 "color": {
                     "type": "string",
-                    "description": "Optionale Farbe.",
                 },
                 "recurrence": _WIEDERHOLUNG_SCHEMA,
                 **_RATIONALE_SCHEMA,
@@ -302,7 +282,6 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                 },
                 "calendar_id": {
                     "type": "integer",
-                    "description": "Optionale Kalender-ID.",
                 },
                 **_RATIONALE_SCHEMA,
             },
@@ -310,9 +289,8 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
         ),
         _function(
             "popups_read",
-            "Listet die Panel-Pop-ups und Ankündigungen auf: Kennung, Titel, Text, "
-            "Zeitfenster und ob sie aktiv sind. Der Schritt vor jeder Änderung: "
-            "die `popup_id` für propose_popup_set kommt von hier.",
+            "Listet die Panel-Pop-ups (Ankündigungen) mit Kennung, Titel, Text, "
+            "Zeitfenster und Aktivität — die `popup_id` für propose_popup_set.",
             {
                 "only_active": {
                     "type": "boolean",
@@ -323,49 +301,46 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_popup_set",
-            "Schlägt ein Panel-weites Pop-up / eine Ankündigung vor: ohne `popup_id` "
-            "als neues, mit `popup_id` aus popups_read als Änderung des bestehenden. "
-            "Der Inhalt soll im sauberen Markdown-Format formuliert sein, menschlich "
-            "und frei von künstlichen KI-Schablonen oder Gedankenstrich-Ketten. "
-            "Erfordert zwingend die Freigabe des Benutzers über eine Vorschlagskarte.",
+            "Schlägt ein panelweites Pop-up (Ankündigung) vor: ohne `popup_id` "
+            "neu, mit `popup_id` aus popups_read als Änderung. Inhalt in sauberem "
+            "Markdown, menschlich, ohne KI-Schablonen oder Gedankenstrich-Ketten.",
             {
                 "popup_id": {
                     "type": "integer",
-                    "description": "Kennung aus popups_read. Weglassen legt ein neues Pop-up an.",
+                    "description": "Leer = neues Pop-up.",
                 },
                 "title": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "Prägnanter Titel des Pop-ups.",
                 },
                 "content_markdown": {
                     "type": "string",
                     "maxLength": 32000,
-                    "description": "Vollständiger Textinhalt als Markdown. Beim Ändern der ganze neue Text, kein Ausschnitt.",
+                    "description": "Beim Ändern der ganze neue Text.",
                 },
                 "is_active": {
                     "type": "boolean",
-                    "description": "Ob das Pop-up aktiv geschaltet sein soll (Standard beim Anlegen: true).",
+                    "description": "Beim Anlegen Standard true.",
                 },
                 "start_at": {
                     "type": ["string", "null"],
                     "maxLength": 32,
-                    "description": "Optionales Startdatum (ISO-8601, z. B. 2026-08-26T12:00:00Z). null entfernt es.",
+                    "description": "ISO-8601; null entfernt.",
                 },
                 "end_at": {
                     "type": ["string", "null"],
                     "maxLength": 32,
-                    "description": "Optionales Enddatum (ISO-8601). null entfernt es.",
+                    "description": "ISO-8601; null entfernt.",
                 },
                 "button_text": {
                     "type": ["string", "null"],
                     "maxLength": 100,
-                    "description": "Optionale Beschriftung eines zusätzlichen Aktions-Buttons (z. B. 'Mehr erfahren'). null entfernt ihn.",
+                    "description": "Zusätzlicher Button; null entfernt.",
                 },
                 "button_url": {
                     "type": ["string", "null"],
                     "maxLength": 2048,
-                    "description": "Optionale Web-Adresse für den Aktions-Button (http:// oder https://). null entfernt sie.",
+                    "description": "http(s); null entfernt.",
                 },
                 **_RATIONALE_SCHEMA,
             },
@@ -378,67 +353,64 @@ def _notes_tool_definitions() -> list[dict]:
     return [
         _function(
             "notes_read",
-            "Liest oder durchsucht die Notizen des Benutzers. Kann nach Suchbegriff, Kategorie oder Team filtern.",
+            "Liest oder durchsucht die Notizen des Benutzers.",
             {
                 "query": {
                     "type": "string",
                     "maxLength": 200,
-                    "description": "Optionaler Suchbegriff im Titel oder Inhalt der Notiz.",
                 },
                 "category": {
                     "type": "string",
                     "maxLength": 64,
-                    "description": "Optionaler Kategorie-Filter (z. B. shopping, todo, work, idea, meeting, personal).",
+                    "description": "shopping, todo, work, idea, meeting oder personal.",
                 },
                 "team_id": {
                     "type": "integer",
-                    "description": "Optionale Team-ID (0 = nur persönliche Notizen).",
+                    "description": "0 = nur persönliche.",
                 },
                 "is_pinned": {
                     "type": "boolean",
-                    "description": "Optional: Nur angepinnte Notizen filtern.",
                 },
             },
             [],
         ),
         _function(
             "propose_note_create",
-            "Schlägt das Erstellen einer neuen Notiz, Checkliste oder Einkaufsliste vor. "
-            "Inhalte sollen übersichtlich und prägnant formatiert werden (z. B. Markdown, Checklisten [ ] / [x], "
-            "oder Einkaufslisten mit geschätzten Richtpreisen und Gesamtsumme).",
+            "Schlägt eine neue Notiz, Checkliste oder Einkaufsliste vor. Übersichtlich "
+            "in Markdown, Checklisten als [ ] / [x], Einkaufslisten mit geschätzten "
+            "Richtpreisen und Gesamtsumme.",
             {
                 "title": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "Prägnanter Titel der Notiz (z. B. 'Einkaufsliste Edeka', 'Projekt-Todos').",
+                    "description": "Etwa 'Einkaufsliste Edeka'.",
                 },
                 "content": {
                     "type": "string",
                     "maxLength": 32000,
-                    "description": "Vollständiger Inhalt der Notiz (strukturiertes Markdown, Checklisten, Mengenangaben).",
+                    "description": "Markdown.",
                 },
                 "category": {
                     "type": "string",
                     "maxLength": 64,
-                    "description": "Kategorie: 'personal', 'shopping', 'todo', 'work', 'idea' oder 'meeting'.",
+                    "description": "personal, shopping, todo, work, idea oder meeting.",
                 },
                 "color": {
                     "type": "string",
                     "maxLength": 32,
-                    "description": "Farbakzent: 'primary' (blau), 'emerald' (grün), 'amber' (gelb/orange), 'rose' (rot), 'purple' (lila), 'cyan'.",
+                    "description": "primary, emerald, amber, rose, purple oder cyan.",
                 },
                 "is_pinned": {
                     "type": "boolean",
-                    "description": "Ob die Notiz oben angepinnt werden soll (Standard: false).",
                 },
                 "note_type": {
                     "type": "string",
                     "maxLength": 32,
-                    "description": "'personal' (privat) oder 'team' (im Team geteilt).",
+                    "description": "personal oder team.",
                 },
                 "team_id": {
                     "type": "integer",
-                    "description": "Optionale Team-ID, falls note_type 'team' ist.",
+                    "description": "Bei note_type team.",
                 },
                 **_RATIONALE_SCHEMA,
             },
@@ -456,39 +428,31 @@ def _notes_tool_definitions() -> list[dict]:
                 "title": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "Optionaler neuer Titel.",
                 },
                 "content": {
                     "type": "string",
                     "maxLength": 32000,
-                    "description": "Optionaler aktualisierter Inhalt.",
                 },
                 "category": {
                     "type": "string",
                     "maxLength": 64,
-                    "description": "Optionale Kategorie.",
                 },
                 "color": {
                     "type": "string",
                     "maxLength": 32,
-                    "description": "Optionaler Farbakzent.",
                 },
                 "is_pinned": {
                     "type": "boolean",
-                    "description": "Pin-Status ändern.",
                 },
                 "is_archived": {
                     "type": "boolean",
-                    "description": "Archivierungsstatus ändern.",
                 },
                 "note_type": {
                     "type": "string",
                     "maxLength": 32,
-                    "description": "'personal' oder 'team'.",
                 },
                 "team_id": {
                     "type": "integer",
-                    "description": "Optionale Team-ID.",
                 },
                 **_RATIONALE_SCHEMA,
             },
@@ -510,27 +474,23 @@ def _notes_tool_definitions() -> list[dict]:
         _function(
             "execute_server_action",
             "Führt eine Server-, Mod-, Backup-, Konfigurations- oder Verwaltungsaktion aus, "
-            "für die kein direktes Schnellwerkzeug im aktuellen Aufrufsatz vorliegt (z. B. Ports abfragen, "
-            "Mods suchen/installieren, Backup anlegen/wiederherstellen, Konfigurationen ändern, Aufgaben planen). "
-            "Gib die gewünschte Anweisung als 'action' und optional 'server_id' an.",
+            "für die gerade kein eigenes Werkzeug angeboten ist (etwa Ports abfragen, Mods "
+            "installieren, Backup anlegen, Aufgaben planen).",
             {
                 "action": {
                     "type": "string",
                     "maxLength": 500,
-                    "description": "Die auszuführende Aktion oder Abfrage in natürlicher Sprache.",
+                    "description": "In natürlicher Sprache.",
                 },
                 "server_id": {
                     "type": "integer",
-                    "description": "Optionale ID des betroffenen Servers.",
                 },
                 "tool_name": {
                     "type": "string",
                     "maxLength": 64,
-                    "description": "Optionaler expliziter Werkzeugname.",
                 },
                 "parameters": {
                     "type": "object",
-                    "description": "Optionale strukturierte Zusatzparameter.",
                 },
             },
             ["action"],

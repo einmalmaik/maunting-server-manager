@@ -127,7 +127,8 @@ async def test_die_beratung_steht_mit_dem_ethikpreis_beim_benutzer(
     assert zeile.status == "completed"
     assert zeile.provider_id == anbieter.id
     assert zeile.model == "ethik-modell"
-    assert zeile.accounted_tokens == 1_200
+    # 600 frisch, 400 aus dem Cache zu einem Zehntel, 200 Ausgabe.
+    assert zeile.accounted_tokens == 600 + 40 + 200
     assert (zeile.prompt_tokens, zeile.completion_tokens, zeile.cached_tokens) == (1_000, 200, 400)
     assert zeile.provider_requests == 1
     # 600 frische Eingabe, 400 aus dem Cache, 200 Ausgabe, je zu ihrem Preis.
@@ -207,13 +208,13 @@ def test_rollenpreise_rechnen_mit_der_geschaetzten_aufteilung() -> None:
 async def test_ausgeschoepfte_grenzen_verhindern_den_rat_nicht(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Der Lauf hält seine Reservierung, alle Grenzen sind voll — beraten wird trotzdem.
+    """Der Lauf hält seine Reservierung, die Tokengrenze ist voll — beraten wird trotzdem.
 
-    Mit einer Reservierung vor der Beratung schwiege die Engine bei
-    *gleichzeitigen Vorgängen* = 1 immer: der Lauf selbst belegt den Platz.
+    Mit einer Reservierung vor der Beratung schwiege die Engine immer dann,
+    wenn der Lauf selbst den Rest des Tages belegt.
     """
     anbieter = _mit_preisen(db)
-    _grenzen(db, regular_user, concurrent_operations=1, requests_per_minute=1, daily_token_limit=10)
+    _grenzen(db, regular_user, daily_token_limit=10)
     reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=10)
     db.commit()
     _ethikmodell(monkeypatch)
@@ -222,30 +223,25 @@ async def test_ausgeschoepfte_grenzen_verhindern_den_rat_nicht(
 
     assert hinweise["w1"]["einschaetzung"] == "review"
     ethik = [zeile for zeile in _buchungen(db, regular_user) if zeile.zweck == "ethik"]
-    assert [zeile.accounted_tokens for zeile in ethik] == [1_200]
+    assert [zeile.accounted_tokens for zeile in ethik] == [600 + 40 + 200]
 
 
 @pytest.mark.asyncio
 async def test_die_beratung_zaehlt_in_tokens_nicht_als_anfrage(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Die nächste Reservierung sieht die Tokens, aber keine Anfrage.
-
-    *Anfragen pro Minute* wird zuerst geprüft. Fällt die Reservierung an der
-    Tagesgrenze, ist sie an der Minutengrenze vorbeigekommen — obwohl die
-    Beratung in derselben Minute lag und die Grenze eins ist.
-    """
+    """Die nächste Reservierung sieht die Tokens der Beratung."""
     anbieter = _mit_preisen(db)
-    _grenzen(db, regular_user, requests_per_minute=1, daily_token_limit=1_500)
+    _grenzen(db, regular_user, daily_token_limit=1_500)
     _ethikmodell(monkeypatch)
     await _beraten(regular_user, anbieter)
 
     with pytest.raises(AiQuotaExceeded) as abgewiesen:
-        reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=400)
+        reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=700)
     db.rollback()
 
     assert abgewiesen.value.reason == "daily_token_limit"
-    reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=300)
+    reserve_ai_usage(db, regular_user, request_id=uuid4(), estimated_tokens=600)
 
 
 # ── Was nichts kostet, und was nichts aufhält ──────────────────────────────
@@ -272,7 +268,8 @@ async def test_eine_unbrauchbare_antwort_kostet_trotzdem(
 
     assert await _beraten(regular_user, anbieter) == {}
     [zeile] = _buchungen(db, regular_user)
-    assert zeile.accounted_tokens == 1_200
+    # 600 frisch, 400 aus dem Cache zu einem Zehntel, 200 Ausgabe.
+    assert zeile.accounted_tokens == 600 + 40 + 200
 
 
 @pytest.mark.asyncio

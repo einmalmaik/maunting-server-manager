@@ -75,7 +75,9 @@ def test_the_rules_with_an_observed_cause_are_still_there() -> None:
     # "richte ein" endete beim Vorschlag, der Server lief nie.
     assert '"richte ein" heisst' in prompt and "anlegen" in prompt
     # Ein Name passte in keine der genannten Kategorien und blieb ungemerkt.
-    assert "ungefragt" in prompt
+    # Seit Stufe 2 des Gedaechtnisses entscheidet das der Hintergrund nach
+    # dem Gespraech, nicht ein Stichwort des Benutzers.
+    assert "Hintergrundschritt nach dem Gespraech" in prompt
     # Die KI konnte nicht loeschen und sagte es; jetzt kann sie es, und der
     # Umfang muss vor der Bestaetigung auf dem Tisch liegen.
     assert "**Backups**" in prompt and "nie ohne Bestaetigung" in prompt
@@ -203,33 +205,25 @@ def test_gesprochen_ist_ein_schalter_und_kein_zweiter_prompt() -> None:
     assert not hasattr(ai_prompt, "fuer_sprache")
 
 
-def test_drei_werkzeuge_beziehen_ihren_anlass_aus_diesen_bloecken() -> None:
-    """Die Beschreibungen dreier Werkzeuge sind gekürzt, weil das hier steht.
+def test_zwei_werkzeuge_beziehen_ihren_anlass_aus_diesen_bloecken() -> None:
+    """Die Beschreibungen zweier Werkzeuge sind gekürzt, weil das hier steht.
 
     `propose_task_set`, `remember` und `learn_skill` waren zusammen 7.481 der
     46.032 Zeichen des Werkzeugkatalogs und erklärten dasselbe ein zweites Mal,
     was AUFGABEN, GEDAECHTNIS und SKILLS in **derselben** Anfrage sagen. Das
     Doppelte ist in den Beschreibungen gestrichen, nicht im Prompt.
+    `remember` gibt es seit Stufe 2 des Gedächtnisses nicht mehr.
 
     Wer einen dieser Blöcke herausnimmt oder an eine Bedingung hängt, nimmt den
-    drei Werkzeugen damit ihren Anlass: das Modell erführe nirgends mehr, wann
-    es einen stehenden Auftrag anlegt, wann es sich etwas ungefragt merkt und
-    wann es einen Skill lernt. Dann gehört der gestrichene Text zurück in die
-    Beschreibung — der Anlass darf nicht zwischen beiden Stellen verlorengehen.
+    Werkzeugen damit ihren Anlass: das Modell erführe nirgends mehr, wann es
+    einen stehenden Auftrag anlegt und wann es einen Skill lernt. Dann gehört
+    der gestrichene Text zurück in die Beschreibung — der Anlass darf nicht
+    zwischen beiden Stellen verlorengehen.
     """
     prompt = ai_prompt.build()
 
     # AUFGABEN trägt den Anlass von propose_task_set.
     assert "Stehende Auftraege" in prompt and "propose_task_set" in prompt
-    # GEDAECHTNIS trägt den von remember, samt Ausschlussliste.
-    #
-    # Der Anlass steht seit dem 19.08.2026 nicht mehr am Wortlaut des
-    # Benutzers ("sagt der Benutzer …"), sondern am Wert der Information:
-    # was die KI **selbst** herausfindet, ist ein gleichwertiger Anlass.
-    assert "Zwei gleichwertige Anlaesse" in prompt
-    assert "du findest" in prompt and "waehrend der Arbeit etwas heraus" in prompt
-    assert "in einem Monat noch wahr" in prompt
-    assert "Nicht merken:" in prompt
     # SKILLS trägt den von learn_skill, samt Bauplan des Skilltextes.
     assert "Halte mit `learn_skill` fest" in prompt
     assert "was zu pruefen ist, in welcher Reihenfolge" in prompt
@@ -641,10 +635,9 @@ def test_the_worker_is_the_one_who_learns_skills() -> None:
 
     assert "learn_skill" in worker
     assert "Der Anlass ist deine Arbeit selbst" in worker
-    # Und kein Gedaechtnis: der Block waere eine Anleitung fuer Werkzeuge,
-    # die der Worker gar nicht hat.
+    # Und kein Gedaechtnis: der Block beschreibt das Gedaechtnis des
+    # Gespraechs mit dem Menschen, und das fuehrt der Worker nicht.
     assert ai_prompt.GEDAECHTNIS not in worker
-    assert ai_prompt.GEDAECHTNIS_AUFRAEUMEN not in worker
 
 
 def test_der_skillblock_nennt_den_fall_ohne_werkzeug() -> None:
@@ -670,41 +663,38 @@ def test_the_brain_has_memory_and_skills() -> None:
     gehirn = ai_prompt.build(rolle="gehirn")
 
     assert ai_prompt.GEDAECHTNIS in gehirn
-    assert ai_prompt.GEDAECHTNIS_AUFRAEUMEN in gehirn
     assert ai_prompt.SKILLS in gehirn
 
 
-def test_memory_is_triggered_by_worth_not_by_wording() -> None:
-    """Der Ausloeser ist der Wert der Information, nicht ihr Wortlaut.
+def test_was_singra_herausfindet_sagt_sie_damit_es_gemerkt_wird() -> None:
+    """Der Anlass ist der Wert der Information, nicht ihr Wortlaut.
 
-    Vorher hing alles an "Sagt der Benutzer …", und die Bereichswahl suchte
-    woertlich nach "ich"/"mein" bzw. "wir"/"bei uns". Was die KI selbst
-    herausfand, enthielt keines dieser Woerter. Der Bestand am 19.08.2026:
-    7 Eintraege insgesamt, **null** im Team-Bereich, juengster vom 16.08. —
+    Vorher hing alles an "Sagt der Benutzer …". Was die KI selbst herausfand,
+    enthielt keines der gesuchten Woerter. Der Bestand am 19.08.2026: 7
+    Eintraege insgesamt, **null** im Team-Bereich, juengster vom 16.08. —
     waehrend in den Tagen danach ARK-Konfiguration, Dateirechte, Provider und
     Stimme durchgearbeitet wurden.
+
+    Seit Stufe 2 waegt der Hintergrund ab, was bleibt
+    (`test_ai_gedaechtnis_schreiber`). Er liest aber keine Werkzeugergebnisse:
+    was Singra findet, muss sie sagen, sonst ist es nach dem Gespraech weg.
     """
-    assert "Zwei gleichwertige Anlaesse" in ai_prompt.GEDAECHTNIS
-    # Der Pruefsatz ersetzt die Stichwortsuche.
-    assert "in einem Monat noch wahr" in ai_prompt.GEDAECHTNIS
-    assert "schneller ans Ziel bringen" in ai_prompt.GEDAECHTNIS
-    # Und der Benutzer muss nichts sagen.
-    assert "muss niemand" in ai_prompt.GEDAECHTNIS
-    assert "du bemerkst es und haeltst es fest" in ai_prompt.GEDAECHTNIS
+    assert "Findest du bei der Arbeit etwas heraus" in ai_prompt.GEDAECHTNIS
+    assert "sag es in deiner Antwort als Feststellung" in ai_prompt.GEDAECHTNIS
+    assert "Werkzeugergebnisse" in ai_prompt.GEDAECHTNIS
+    # Und kein Werkzeug mehr, das es zu rufen gaelte.
+    assert "kein Werkzeug" in ai_prompt.GEDAECHTNIS
+    assert "remember" not in ai_prompt.build()
 
 
-def test_the_team_boundary_follows_content_not_pronouns() -> None:
-    """"wir" ist kein Kriterium, sondern ein Zufall der Formulierung.
+def test_ein_ausgeschaltetes_gedaechtnis_bekommt_keine_zusage() -> None:
+    """Bis Stufe 2 meldete `remember` den Schalter (`memory_disabled`).
 
-    Persoenliches und Geteiltes duerfen sich nicht vermischen — aber die
-    Grenze verlaeuft danach, **wem** eine Erkenntnis gehoert, nicht danach,
-    welches Fuerwort gefallen ist.
+    Heute steht er im Lageblock, und der Prompt sagt, was daraus folgt:
+    nichts versprechen, einmal sagen, wo der Schalter sitzt.
     """
-    assert "was **eine Person** betrifft" in ai_prompt.GEDAECHTNIS
-    assert "was **die Anlage** betrifft" in ai_prompt.GEDAECHTNIS
-    assert "nicht danach, ob das Wort" in ai_prompt.GEDAECHTNIS
-    # Die Zusage, die dabei nicht fallen darf.
-    assert "Im Zweifel persoenlich" in ai_prompt.GEDAECHTNIS
+    assert "versprich nichts" in ai_prompt.GEDAECHTNIS
+    assert "einmal, nicht in jeder Antwort" in ai_prompt.GEDAECHTNIS
 
 
 # ── Die Sprechweise ───────────────────────────────────────────────────
@@ -736,21 +726,6 @@ def test_the_assistant_adapts_the_form_not_the_words() -> None:
     assert "Deine Stimme bleibt deine" in block
 
 
-def test_style_observation_is_a_lasting_note_not_a_mood() -> None:
-    """Eine Laune ist keine Sprechweise.
-
-    Ohne diese Abgrenzung wuerde jede schlechtgelaunte Nachricht als
-    dauerhafter Charakterzug abgelegt — und die KI zoege daraus Schluesse
-    ueber einen Menschen, die er nie gezogen haben wollte.
-    """
-    block = ai_prompt.SPRECHWEISE
-
-    assert "nicht eine Laune eines Abends" in block
-    assert "ueber Tage gilt" in block
-    # Und sie gehoert der Person, nicht der Anlage.
-    assert "persoenlich" in block
-
-
 def test_the_tone_adapts_but_never_the_substance() -> None:
     """**Die Grenze.** Ein knapper Ton darf keine Warnung verschlucken.
 
@@ -771,8 +746,8 @@ def test_only_the_one_who_talks_to_the_human_adapts() -> None:
 
     Er redet nie mit dem Menschen — sein Bericht geht an das Gehirn, das
     daraus in eigener Stimme formuliert. Eine Sprechweise anzugleichen, die
-    er nie zu hoeren bekommt, waere sinnlos; und festhalten koennte er sie
-    ohnehin nicht, ihm fehlen die Gedaechtniswerkzeuge.
+    er nie zu hoeren bekommt, waere sinnlos; und gemerkt wird sie aus dem
+    Gespraech mit dem Menschen, nicht aus seinem Auftrag.
     """
     assert ai_prompt.SPRECHWEISE in ai_prompt.build()
     assert ai_prompt.SPRECHWEISE in ai_prompt.build(rolle="gehirn")

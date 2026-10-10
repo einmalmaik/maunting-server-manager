@@ -556,9 +556,9 @@ def test_an_orphaned_reservation_is_released_at_startup(
     """Eine Reservierung ohne Nachricht sperrt sonst fuer immer.
 
     Die Verdichtung ist der einzige Pfad, der Kontingent bucht, ohne eine
-    `AiMessage` anzulegen. Der Zaehler fuer `concurrent_operations` kennt kein
-    Zeitfenster: bleibt so eine Zeile nach einem Prozessabbruch auf `reserved`,
-    bekommt der Benutzer dauerhaft AiQuotaExceeded, obwohl nichts laeuft.
+    `AiMessage` anzulegen. Bleibt so eine Zeile nach einem Prozessabbruch auf
+    `reserved`, gilt die Anfrage fuer immer als laufend; bis zum 07.10.2026
+    sperrte das ueber das Limit gleichzeitiger Vorgaenge den Benutzer.
     """
     provider = _provider(db)
     verwaist = str(uuid4())

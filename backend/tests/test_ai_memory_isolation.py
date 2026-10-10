@@ -545,35 +545,43 @@ def test_every_team_audit_entry_names_the_team(
     Ort, an dem die Zuordnung ueberlebt — bei einem Benutzer in mehreren Teams
     war "scope: team" allein nicht zuzuordnen.
 
-    Geprueft werden alle vier Schreibwege auf einmal, weil die Details in jedem
-    einzeln zusammengesetzt werden und drei davon den vierten nicht mitziehen.
+    Geprueft werden alle Schreibwege auf einmal, weil die Details nicht in
+    allen gleich zusammengesetzt werden und keiner den anderen mitzieht. Das
+    Loeschen ueber Schluessel (`delete_by_keys`, der Weg von `forget_memory`)
+    gibt es seit Stufe 2 des Gedaechtnisses nicht mehr; vergessen wird ueber
+    `erinnerung_vergessen`, zurueckholbar.
     """
     import json
 
     from models import AuditLog
 
     team = _team(db, regular_user)
-    for key in ("wartung", "backup", "ports"):
+    for key in ("wartung", "backup"):
         ai_memory_service.upsert_entry(
             db, user=regular_user, scope="team", server_id=None, team_id=team.id,
             key=key, value=f"Notiz zu {key}",
         )
+    satz, _ = ai_memory_service.erinnerung_anlegen(
+        db, user=regular_user, scope="team", team_id=team.id,
+        text="Ports werden nur nach Absprache geoeffnet.",
+    )
+    ai_memory_service.erinnerung_aendern(
+        db, user=regular_user, entry_id=satz.id,
+        text="Ports oeffnet nur, wer Dienst hat.",
+    )
+    ai_memory_service.erinnerung_vergessen(db, user=regular_user, entry_id=satz.id)
+    ai_memory_service.erinnerung_zurueckholen(db, user=regular_user, entry_id=satz.id)
     db.commit()
     eintraege = ai_memory_service.list_entries(db, regular_user, "team", None, team.id)
 
     ai_memory_service.delete_entry(db, regular_user, eintraege[0][0].id)
-    ai_memory_service.delete_by_keys(
-        db, regular_user, scope="team", keys=["ports"], team_id=team.id
-    )
     ai_memory_service.delete_all_entries(db, regular_user, "team", None, team.id)
 
-    zeilen = db.query(AuditLog).filter(
-        AuditLog.action.in_([
-            "ai.memory.created", "ai.memory.deleted", "ai.memory.cleared",
-        ])
-    ).all()
-    assert {zeile.action for zeile in zeilen} == {
-        "ai.memory.created", "ai.memory.deleted", "ai.memory.cleared"
+    aktionen = {
+        "ai.memory.created", "ai.memory.updated", "ai.memory.forgotten",
+        "ai.memory.restored", "ai.memory.deleted", "ai.memory.cleared",
     }
+    zeilen = db.query(AuditLog).filter(AuditLog.action.in_(aktionen)).all()
+    assert {zeile.action for zeile in zeilen} == aktionen
     for zeile in zeilen:
         assert json.loads(zeile.details or "{}").get("team_id") == team.id, zeile.action

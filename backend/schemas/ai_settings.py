@@ -6,20 +6,16 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, SecretStr
 
 from services.ai_limit_service import (
-    CONCURRENT_OPERATIONS_MAX,
     DICTATION_MINUTES_LIMIT_MAX,
     MAX_MEMORY_ENTRIES_MAX,
     MAX_REASONING_EFFORT_MAX,
-    MONTHLY_COST_LIMIT_CENTS_MAX,
-    REQUESTS_PER_MINUTE_MAX,
+    REALTIME_MINUTES_LIMIT_MAX,
     TOKEN_LIMIT_MAX,
 )
 
 
 TokenLimit = Annotated[int | None, Field(ge=0, le=TOKEN_LIMIT_MAX)]
-RequestLimit = Annotated[int | None, Field(ge=0, le=REQUESTS_PER_MINUTE_MAX)]
-ConcurrencyLimit = Annotated[int | None, Field(ge=0, le=CONCURRENT_OPERATIONS_MAX)]
-CostLimit = Annotated[int | None, Field(ge=0, le=MONTHLY_COST_LIMIT_CENTS_MAX)]
+RealtimeMinutesLimit = Annotated[int | None, Field(ge=0, le=REALTIME_MINUTES_LIMIT_MAX)]
 DictationMinutesLimit = Annotated[int | None, Field(ge=0, le=DICTATION_MINUTES_LIMIT_MAX)]
 #: Denktiefe als Rang: 0 = gar nicht, 1 = minimal … 6 = max. ``None`` heißt
 #: unbegrenzt — dieselbe Bedeutung wie bei den Kontingenten darüber.
@@ -38,10 +34,7 @@ class AiLimitsBase(BaseModel):
     daily_token_limit: TokenLimit
     weekly_token_limit: TokenLimit
     monthly_token_limit: TokenLimit
-    requests_per_minute: RequestLimit
-    concurrent_operations: ConcurrencyLimit
-    monthly_cost_limit_cents: CostLimit
-    monthly_realtime_cost_limit_cents: CostLimit = None
+    monthly_realtime_minutes_limit: RealtimeMinutesLimit = None
     monthly_dictation_minutes_limit: DictationMinutesLimit = None
     # Kein Kontingent, sondern eine Obergrenze. Steht trotzdem hier, weil der
     # Betreiber sie an derselben Stelle setzt und dieselbe Auflösung über
@@ -278,6 +271,9 @@ class AiUsageEntry(BaseModel):
     cost_month_micro_usd: int
     requests_month: int
     last_request_at: datetime | None = None
+    #: Sprach- und Diktiersekunden der letzten 30 Tage.
+    realtime_seconds_month: int = 0
+    dictation_seconds_month: int = 0
 
 
 class AiUsageEventEntry(BaseModel):
@@ -318,6 +314,11 @@ class AiUsageEventEntry(BaseModel):
     cost_micro_usd: int
     #: 'provider' | 'estimate' | 'none' | None (Bestandszeile ohne Herkunft).
     cost_source: str | None = None
+    #: Wozu MSM die Anfrage fuer den Benutzer gestellt hat: 'ethik' (Beratung
+    #: vor einem Werkzeug) oder 'gedaechtnis' (der Gedaechtnisschreiber liest
+    #: im Hintergrund). ``None`` hat der Benutzer selbst gefragt. Ohne die
+    #: Angabe stuende eine Zeile da, zu der niemand eine Frage findet.
+    zweck: str | None = None
 
 
 class AiUsageEvents(BaseModel):

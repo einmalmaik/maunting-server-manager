@@ -35,8 +35,10 @@ from services.ai_tool_registry import GEHIRN_TOOLS, VOICE_CONTROL_TOOLS, WORKER_
 from services.ai_voice import desktop_auftraege
 from services.ai_voice import interactions as voice_interactions
 from services.ai_voice.contracts import Lage, MAX_SITZUNGSSEKUNDEN, voice_tool_frame
+from services.ai_voice.mitschrift import Mitschrift
+from services.ai_voice.sprachwege import GEMINI_LIVE
 from services.ai_voice_debug import emit as voice_debug
-from services.openai_compatible_adapter import ProviderToolCall
+from services.openai_compatible_adapter import ProviderToolCall, StreamUsage
 
 
 MAX_SDP_ZEICHEN = 64 * 1024
@@ -116,6 +118,14 @@ class RealtimeVorbereitung:
     conversation_id: str = ""
     usage_event_id: int = 0
     disable_safety: bool = False
+    #: Für den Gedächtnisschreiber mitschreiben (`mitschreiben`) — und womit
+    #: Realtime die Worte des Menschen abschreibt. Ohne Modell hört Realtime
+    #: sie nicht mit; GPT-Live und Gemini-Live brauchen keins.
+    mitschreiben: bool = False
+    mitschrift_modell: str = ""
+    #: Wie lange die Sitzung höchstens dauert, in Sekunden: die feste Grenze
+    #: oder das, was vom Minutenlimit der Rolle noch übrig ist (`hoechstdauer`).
+    hoechstdauer: float = MAX_SITZUNGSSEKUNDEN
 
     def __post_init__(self):
         if self.tools is None:
@@ -250,19 +260,40 @@ def sprachregel(sprache: str) -> str:
 
 
 def gedaechtnis(db: Session, user: User) -> str:
-    """Freigegebene Erinnerungen — leer ohne ``ai.memory.use``."""
+    """Was im Gedächtnis „im Kopf“ steht — leer ohne ``ai.memory.use``.
+
+    Eine Sitzung beginnt ohne Frage, also gibt es nur den Kopf: angeheftet,
+    dann nach Wichtigkeit × Präsenz (`ai_gedaechtnis_abruf`). Einzelnes holt die Stimme mit
+    `search_memory`. Bis Stufe 4 stand hier eine feste Ersatzfrage, nach der
+    eine zufällige Auswahl mitkam.
+    """
     if ai_memory_service is None:
         return ""
+    from services import ai_gedaechtnis_abruf
     from services.permission_service import has_global_permission
 
     if not has_global_permission(db, user, "ai.memory.use"):
         return ""
-    return ai_memory_service.provider_memory_context(
-        db, user, "aktuelles Sprachgespräch", None, budget=8_000
-    )
+    return ai_gedaechtnis_abruf.abrufen(db, user, "", None, budget=8_000).kopf or ""
 
 
-def lage_abschnitt(db: Session, user: User) -> str:
+def mitschreiben(db: Session, user: User) -> bool:
+    """Wird die Sitzung für das Gedächtnis mitgeschrieben?
+
+    Nur mit ``ai.memory.use`` und eingeschaltetem Gedächtnis, auf allen drei
+    Wegen gleich. Das ist enger als beim getippten Chat, aus dem der Schreiber
+    geteiltes Betriebswissen (Team, Server) auch ohne den Schalter liest: eine
+    Mitschrift entsteht eigens für das Gedächtnis, und bei Realtime kostet sie
+    eine eigene Abschrift. Ohne Schalter entsteht sie gar nicht.
+    """
+    from services.permission_service import has_global_permission
+
+    if not has_global_permission(db, user, "ai.memory.use"):
+        return False
+    return ai_memory_service.preference(db, user.id)
+
+
+def lage_abschnitt(db: Session, user: User, *, mitschrift: bool) -> str:
     """Der Lageblock des Chats als Abschnitt der Sprachanweisungen.
 
     Bis zum 05.10.2026 fehlte er hier ganz: Chat, Läufe und Heilung bekommen ihn
@@ -272,8 +303,11 @@ def lage_abschnitt(db: Session, user: User) -> str:
 
     Eingefroren beim Sitzungsbeginn. Das genügt, weil eine Sitzung höchstens
     `MAX_SITZUNGSSEKUNDEN` dauert — und die Überschrift sagt es dazu.
+    ``mitschrift``: ob diese Sitzung für das Gedächtnis mitgeschrieben wird.
+    Die Zeile darüber sagt sonst „eingeschaltet“, und die Stimme verspräche,
+    sich zu merken, was niemand aufschreibt.
     """
-    return "# Lage (Stand Sitzungsbeginn)\n" + ai_lage.lageblock(db, user)
+    return "# Lage (Stand Sitzungsbeginn)\n" + ai_lage.lageblock(db, user, mitschrift=mitschrift)
 
 
 def gedaechtnis_anhang(memory: str) -> str:
@@ -285,12 +319,23 @@ def gedaechtnis_anhang(memory: str) -> str:
     )
 
 
+def hoechstdauer(db: Session, user: User) -> float:
+    """Wie lange eine Sitzung dieses Benutzers jetzt höchstens laufen darf.
+
+    Die feste Grenze, außer das Minutenlimit der Rolle lässt weniger übrig.
+    Gilt auf allen Sprachwegen, auch dem klassischen (`routers.ai_voice`); danach endet die Sitzung mit
+    „Kontingent“ statt mit „abgelaufen“ (`RealtimeSitzung.fuehren`).
+    """
+    rest = ai_usage_service.realtime_restsekunden(db, user)
+    return float(MAX_SITZUNGSSEKUNDEN if rest is None else min(MAX_SITZUNGSSEKUNDEN, rest))
+
+
 def reservieren(db: Session, *, provider: AiProvider, user: User) -> tuple[str, int]:
     """Gespräch und Verbrauchszeile der Sitzung — (conversation_id, usage_event_id).
 
     Die Sitzung selbst ist die logische Anfrage; gebucht wird erst, was der
     Anbieter bestätigt. Ob überhaupt noch Luft ist, entscheidet hier die
-    Reservierung — mit Mindestluft, sobald der Zugang einen Preis führt.
+    Reservierung: ein Token und eine Sekunde vom Minutenlimit.
     """
     conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
     usage_event = ai_usage_service.reserve_ai_usage(
@@ -304,9 +349,6 @@ def reservieren(db: Session, *, provider: AiProvider, user: User) -> tuple[str, 
         provider_id=provider.id,
         model=provider.realtime_model,
         minimum_token_headroom=1,
-        minimum_cost_headroom_microunits=(
-            1 if any(int(getattr(provider, feld) or 0) for feld in ai_provider_service.realtime_preisfelder(provider)) else 0
-        ),
         realtime=True,
     )
     db.commit()
@@ -329,6 +371,18 @@ def vorbereiten(
     tools = angebotene_werkzeuge(db, provider=provider, user=user, herkunft=herkunft)
     sprache = provider.realtime_language or "auto"
     memory = gedaechtnis(db, user)
+    schreibt_mit = mitschreiben(db, user)
+    mitschrift_modell = (
+        (provider.transcription_model or "").strip()
+        if ai_provider_service.fuer_transcription(provider)
+        else ""
+    )
+    # Gemini-Live liefert die Abschrift beider Seiten selbst; OpenAI-Realtime
+    # hört den Menschen nur mit einem Abschriftmodell (`RealtimeSitzung._schreibt_mit`).
+    weg = ai_provider_service.sprachweg(provider)
+    hoert_mit = schreibt_mit and (
+        bool(mitschrift_modell) or (weg is not None and weg.name == GEMINI_LIVE.name)
+    )
     basis_prompt = ai_prompt.build(
         gesprochen=True,
         rolle="realtime",
@@ -351,7 +405,7 @@ def vorbereiten(
         ENTITAETEN,
         "# Long Context Behavior\nKeinen Chatverlauf erwarten. Nutze nur die Sitzung, den aktuellen Panelzustand und freigegebene Erinnerungen.",
         ESKALATION,
-        lage_abschnitt(db, user),
+        lage_abschnitt(db, user, mitschrift=hoert_mit),
     )) + gedaechtnis_anhang(memory)
     conversation_id, usage_event_id = reservieren(db, provider=provider, user=user)
     return RealtimeVorbereitung(
@@ -369,7 +423,21 @@ def vorbereiten(
         conversation_id=conversation_id,
         usage_event_id=usage_event_id,
         disable_safety=bool(getattr(provider, "disable_safety", False)),
+        mitschreiben=schreibt_mit,
+        mitschrift_modell=mitschrift_modell,
+        hoechstdauer=hoechstdauer(db, user),
     )
+
+
+def zeit_um(v: RealtimeVorbereitung) -> dict:
+    """Was das Panel hört, wenn die Höchstdauer einer Sitzung erreicht ist.
+
+    Hat das Minutenlimit sie gekürzt, ist es eine Kontingentstörung — die
+    Oberfläche sagt dann, warum, statt nur „abgelaufen“.
+    """
+    if v.hoechstdauer < MAX_SITZUNGSSEKUNDEN:
+        return {"art": "stoerung", "grund": "realtime_kontingent"}
+    return {"art": "abgelaufen"}
 
 
 def _session_config(v: RealtimeVorbereitung) -> dict:
@@ -397,7 +465,17 @@ def _session_config(v: RealtimeVorbereitung) -> dict:
     }
     if v.reasoning_effort:
         config["reasoning"] = {"effort": v.reasoning_effort}
+    if v.mitschreiben and v.mitschrift_modell:
+        # Die Worte des Menschen schreibt Realtime nur mit einem eigenen
+        # Modell ab. Das kostet nach dessen Preis und wird als Gedächtnis
+        # gebucht (`RealtimeSitzung._abschrift_buchen`).
+        config["audio"]["input"]["transcription"] = {"model": v.mitschrift_modell}
     return config
+
+
+def _kennung(wert: object) -> str:
+    """Die Kennung eines Eintrags im Gespräch des Anbieters, oder leer."""
+    return wert if isinstance(wert, str) and len(wert) <= 256 else ""
 
 
 def _call_id(location: str | None) -> str:
@@ -470,6 +548,16 @@ class RealtimeSitzung:
         #: Rückruf einer beim Abbau abgebrochenen Werkzeugaufgabe
         #: (`_tool_task_fertig`) noch eine Fortsetzung an.
         self._schliesst = False
+        #: Für den Gedächtnisschreiber; nimmt nichts an, wenn der Benutzer das
+        #: Gedächtnis nicht benutzt.
+        self._mitschrift = Mitschrift(self._schreibt_mit())
+        #: Was die Abschriften gekostet haben: Eingabe, Ausgabe, geschätzt,
+        #: Anfragen. Gebucht wird einmal, am Ende (`_abschrift_buchen`).
+        self._abschrift_verbrauch = [0, 0, 0, 0]
+
+    def _schreibt_mit(self) -> bool:
+        """Realtime hört die Worte des Menschen nur mit einem Abschriftmodell mit."""
+        return self.v.mitschreiben and bool(self.v.mitschrift_modell)
 
     @staticmethod
     def _tokenzahl(daten: dict, name: str) -> int:
@@ -485,7 +573,9 @@ class RealtimeSitzung:
         to = self._tokenzahl(ausgang, "text_tokens")
         ao = self._tokenzahl(ausgang, "audio_tokens")
         # Cached Input ist in text/audio bereits enthalten und wird bewusst zum
-        # normalen jeweiligen Eingabepreis gebucht.
+        # normalen jeweiligen Eingabepreis gebucht. Aufs Kontingent zählt er
+        # nur anteilig (`ai_usage_service.angerechnete_tokens`).
+        gelesen = self._tokenzahl(eingang, "cached_tokens")
         preise = self._preise_laden()
         deltas = (ti, to, ai, ao)
         for index, wert in enumerate(deltas):
@@ -498,18 +588,99 @@ class RealtimeSitzung:
         # auf null abrunden. Gebucht wird deshalb die Differenz des kumulierten
         # Preises; nach der letzten Antwort entspricht sie exakt der Gesamtnutzung.
         kosten = gesamtkosten - self._verbrauch_kosten
+        werte = {
+            "event_id": self.v.usage_event_id,
+            "text_input": ti,
+            "text_output": to,
+            "audio_input": ai,
+            "audio_output": ao,
+            "cost_microunits": kosten,
+            "zwischengespeichert": gelesen,
+        }
         with SessionLocal() as db:
-            ai_usage_service.realtime_verbrauch_ergaenzen(
+            try:
+                ai_usage_service.realtime_verbrauch_ergaenzen(db, **werte)
+                db.commit()
+            except ai_usage_service.AiQuotaExceeded as exc:
+                # Die Antwort ist gesprochen und bezahlt; die Grenze beendet
+                # die Sitzung, verschweigt aber nicht, was sie gekostet hat —
+                # sonst begänne der nächste Anlauf wieder darunter. Derselbe
+                # Weg wie bei GPT-Live und Gemini Live.
+                db.rollback()
+                if exc.reason == "realtime_session_limit":
+                    raise
+                ai_usage_service.realtime_verbrauch_ergaenzen(db, grenzen_pruefen=False, **werte)
+                db.commit()
+                self._verbrauch_kosten = gesamtkosten
+                raise
+        self._verbrauch_kosten = gesamtkosten
+
+    def _abschrift_zaehlen(self, usage: object, text: str) -> None:
+        """Was die Abschrift einer Äußerung gekostet hat.
+
+        Token-Modelle melden Ein- und Ausgabe. Nach Dauer abgerechnete
+        (``whisper-1``) oder stumme werden geschätzt wie beim Diktat
+        (`transcription.abschrift_verbuchen`).
+        """
+        usage = usage if isinstance(usage, dict) else {}
+        ein = self._tokenzahl(usage, "input_tokens")
+        aus = self._tokenzahl(usage, "output_tokens")
+        if ein or aus:
+            self._abschrift_verbrauch[0] += ein
+            self._abschrift_verbrauch[1] += aus
+        else:
+            self._abschrift_verbrauch[2] += max(1, len(text) // 4)
+        self._abschrift_verbrauch[3] += 1
+
+    def _abschrift_buchen(self) -> None:
+        """Bucht die Abschriften der Sitzung als eine Zeile mit Zweck Gedächtnis.
+
+        Ohne Grenzprüfung (`nachtraeglich_buchen`): die Kosten sind angefallen,
+        und die Sitzung selbst stand unter ihrer eigenen Reservierung. Gerechnet
+        wird mit dem gepflegten Preis des Zugangs, wie beim Diktat — einen
+        eigenen für das Abschriftmodell führt der Zugang nicht.
+        """
+        ein, aus, geschaetzt, anfragen = self._abschrift_verbrauch
+        if not anfragen:
+            return
+        gemessen = ein + aus
+        with SessionLocal() as db:
+            benutzer = db.get(User, self.user_id)
+            if benutzer is None:
+                return
+            zugang = db.get(AiProvider, self.v.provider_id)
+            ai_usage_service.nachtraeglich_buchen(
                 db,
-                event_id=self.v.usage_event_id,
-                text_input=ti,
-                text_output=to,
-                audio_input=ai,
-                audio_output=ao,
-                cost_microunits=kosten,
+                benutzer,
+                zweck=ai_usage_service.ZWECK_GEDAECHTNIS,
+                usage=StreamUsage(
+                    total_tokens=gemessen + geschaetzt,
+                    prompt_tokens=ein if gemessen else None,
+                    completion_tokens=aus if gemessen else None,
+                    anfragen=anfragen,
+                ),
+                estimated_actual_tokens=gemessen + geschaetzt,
+                provider_id=zugang.id if zugang is not None else None,
+                model=self.v.mitschrift_modell or None,
+                token_price_micro_usd_per_million=(
+                    zugang.token_price_micro_usd_per_million if zugang is not None else None
+                ),
             )
             db.commit()
-        self._verbrauch_kosten = gesamtkosten
+        self._abschrift_verbrauch = [0, 0, 0, 0]
+
+    def _antwort_abschreiben(self, response: dict) -> None:
+        """Die Abschrift jeder gesprochenen Antwort aus ``response.done``.
+
+        Meist steht sie schon da (``response.output_audio_transcript.done``);
+        dann gilt die erste Fassung (`Mitschrift.einsetzen`).
+        """
+        for eintrag in response.get("output") or []:
+            if not isinstance(eintrag, dict) or eintrag.get("type") != "message":
+                continue
+            for teil in eintrag.get("content") or []:
+                if isinstance(teil, dict) and isinstance(teil.get("transcript"), str):
+                    self._mitschrift.einsetzen(_kennung(eintrag.get("id")), "ki", teil["transcript"])
 
     def _preise_laden(self) -> tuple[int, int, int, int]:
         with SessionLocal() as db:
@@ -1033,6 +1204,19 @@ class RealtimeSitzung:
                 item = event.get("item") or {}
                 if item.get("type") == "function_call" and isinstance(item.get("name"), str):
                     await self._tool_start(item.get("call_id") or item.get("id") or str(uuid4()), item["name"])
+                elif item.get("type") == "message":
+                    self._mitschrift.vormerken(_kennung(item.get("id")), "ki")
+            elif art == "input_audio_buffer.committed":
+                # Die Äußerung steht fest, ihre Abschrift kommt später — auch
+                # erst nach der Antwort. Ihr Platz in der Mitschrift nicht.
+                self._mitschrift.vormerken(_kennung(event.get("item_id")), "ich")
+            elif art == "conversation.item.input_audio_transcription.completed":
+                text = event.get("transcript") if isinstance(event.get("transcript"), str) else ""
+                self._mitschrift.einsetzen(_kennung(event.get("item_id")), "ich", text)
+                self._abschrift_zaehlen(event.get("usage"), text)
+            elif art in {"response.output_audio_transcript.done", "response.audio_transcript.done"}:
+                text = event.get("transcript") if isinstance(event.get("transcript"), str) else ""
+                self._mitschrift.einsetzen(_kennung(event.get("item_id")), "ki", text)
             elif art == "response.function_call_arguments.done":
                 task = asyncio.create_task(self._tool_ausfuehren(event))
                 self._tool_tasks.add(task)
@@ -1040,12 +1224,13 @@ class RealtimeSitzung:
             elif art == "response.done":
                 response = event.get("response") or {}
                 status = response.get("status")
+                self._antwort_abschreiben(response)
                 try:
                     await asyncio.to_thread(self._verbrauch, event)
                 except ai_usage_service.AiQuotaExceeded as exc:
                     grund = (
                         "realtime_kontingent"
-                        if exc.reason == "monthly_realtime_cost_limit_cents"
+                        if exc.reason == "monthly_realtime_minutes_limit"
                         else "kontingent"
                     )
                     await self._debug_senden("REALTIME_QUOTA", hint=grund)
@@ -1222,11 +1407,11 @@ class RealtimeSitzung:
             await self._panel_senden({"art": "webrtc_answer", "sdp": answer})
             await self._panel_senden({"art": "zustand", "zustand": "bereit"})
             await asyncio.wait_for(
-                self._laufen(), timeout=MAX_SITZUNGSSEKUNDEN
+                self._laufen(), timeout=self.v.hoechstdauer
             )
         except asyncio.TimeoutError:
             self.lage.abgelaufen = True
-            await self._panel_senden({"art": "abgelaufen"})
+            await self._panel_senden(zeit_um(self.v))
         except WebSocketDisconnect:
             pass
         except RealtimeSitzungsfehler as exc:
@@ -1258,6 +1443,9 @@ class RealtimeSitzung:
                 except Exception as exc:
                     voice_debug("REALTIME_CLOSE_UNCONFIRMED", hint=type(exc).__name__)
                 await self._sideband.close()
+            # Vor der Abrechnung: scheitert die, geht die Mitschrift trotzdem
+            # an den Schreiber.
+            self._mitschrift.abgeben(user_id=self.user_id, provider_id=self.v.provider_id)
             await asyncio.to_thread(self._abschliessen)
             ai_meldestelle.realtime_sitzung_ende(self.user_id)
         return self.lage
@@ -1274,6 +1462,10 @@ class RealtimeSitzung:
         with SessionLocal() as db:
             ai_usage_service.realtime_sitzung_abschliessen(db, self.v.usage_event_id)
             db.commit()
+        try:
+            self._abschrift_buchen()
+        except Exception as exc:  # noqa: BLE001
+            voice_debug("REALTIME_TRANSCRIPT_USAGE_FAILED", hint=type(exc).__name__)
 
     def _nebenlaeufe(self) -> list:
         """Was während der Sitzung nebeneinander läuft; das erste Ende beendet alle."""

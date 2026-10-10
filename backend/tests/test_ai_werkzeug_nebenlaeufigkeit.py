@@ -239,10 +239,10 @@ async def test_ein_haengender_aufruf_haelt_die_runde_nicht_fest(
 
     abgelaufen = nachrichten[1]["content"]
     # **Der Wortlaut ist die Zusage, nicht die Verzierung.** `wait_for` bricht
-    # das Warten ab, nicht den Thread: `remember` darf danach noch committen.
-    # Ein Modell, dem hier "fehlgeschlagen" gesagt wird, wiederholt den Aufruf
-    # und legt den Eintrag ein zweites Mal an. Es gibt gegen diese Doppelung
-    # keine Sperre — nur diesen Satz.
+    # das Warten ab, nicht den Thread: ein schreibendes Werkzeug darf danach
+    # noch committen. Ein Modell, dem hier "fehlgeschlagen" gesagt wird,
+    # wiederholt den Aufruf und schreibt ein zweites Mal. Es gibt gegen diese
+    # Doppelung keine Sperre — nur diesen Satz.
     assert "nicht weiter abgewartet" in abgelaufen
     assert "wiederhole ihn nicht blind" in abgelaufen
     # Und die uebrigen drei haben ihre Daten.

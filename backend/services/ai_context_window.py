@@ -58,6 +58,20 @@ SICHERHEIT = 0.9
 #: Platz fuer die Antwort, wenn der Katalog keine Ausgabegrenze nennt. Sie geht
 #: vom Fenster ab: Eingabe und Ausgabe teilen es sich.
 RESERVE_AUSGABE_TOKENS = 8_192
+#: Mehr Eingabe bekommt keine Anfrage, wie gross das Fenster auch ist.
+#:
+#: Bis zum 07.10.2026 fuellte MSM jedes bekannte Fenster bis zur Faltmarke.
+#: Bei einem Modell mit einer Million Token hiess das: eine lange Unterhaltung
+#: schob rund 200.000 Token in **jede** Anfrage — bezahlt je Runde, auch fuer
+#: eine Frage, die nur das letzte Drittel brauchte. Und ein ueberfuellter
+#: Kontext macht die Antwort nicht besser, sondern unschaerfer.
+#:
+#: 44.000 und nicht 50.000, weil vier Zeichen je Token fuer Deutsch zu
+#: guenstig sind (siehe ``SICHERHEIT``): gemessen sind es eher 3,6. Damit
+#: bleibt eine volle Anfrage beim Anbieter unter 50.000 Token. Was darueber
+#: hinausgeht, faltet die Zusammenfassung — sie setzt an der Faltmarke dieses
+#: Deckels an und nicht mehr an der des Fensters.
+ANFRAGE_DECKEL_TOKENS = 44_000
 #: Was gilt, wenn ueber das Modell nichts bekannt ist. 6.000 Token sind die
 #: 24.000 Zeichen, die vor dieser Aenderung fuer jedes Modell galten — der
 #: Rueckfall ist damit wortwoertlich der alte Zustand.
@@ -104,7 +118,7 @@ def aus_modell(modell: Modell | None) -> Fenster:
     """Rechnet ein Katalogmodell in ein nutzbares Budget um.
 
     Rein rechnend, ohne Netz und ohne Datenbank — deshalb pruefbar, ohne etwas
-    zu stellen.
+    zu stellen. Nutzbar ist hoechstens ``ANFRAGE_DECKEL_TOKENS``.
 
     Die Reserve wird auf ein Viertel des Fensters geklemmt, und das ist kein
     theoretischer Fall: der Katalog fuehrt Modelle, deren
@@ -119,11 +133,14 @@ def aus_modell(modell: Modell | None) -> Fenster:
     Modell mit 4.096 Token angewandt waere er schlicht falsch, und die Anfrage
     liefe nicht knapper, sondern gar nicht.
     """
-    if modell is None or not modell.kontext_tokens:
+    # Ein Fenster von null oder darunter ist ein kaputter Katalogwert, kein
+    # winziges Modell: als "bekannt" gaelte es mit einem Token, und jede Anfrage
+    # wuerde bis auf nichts gefaltet.
+    if modell is None or not modell.kontext_tokens or modell.kontext_tokens <= 0:
         return unbekannt()
     fenster = modell.kontext_tokens
     reserve = min(modell.max_ausgabe_tokens or RESERVE_AUSGABE_TOKENS, fenster // 4)
-    nutzbar = max(int((fenster - reserve) * SICHERHEIT), 1)
+    nutzbar = min(max(int((fenster - reserve) * SICHERHEIT), 1), ANFRAGE_DECKEL_TOKENS)
     return Fenster(
         bekannt=True,
         fenster_tokens=fenster,

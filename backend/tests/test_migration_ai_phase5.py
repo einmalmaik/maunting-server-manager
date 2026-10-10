@@ -21,6 +21,12 @@ def test_ai_phase5_migration_roundtrip(tmp_path: Path, pg_wegwerf) -> None:
     config.set_main_option("script_location", str(backend_dir / "migrations"))
     try:
         Base.metadata.create_all(engine)
+        # Tabellen späterer Migrationen, die an ai_memory_entries hängen
+        # (Gedächtnis v2: Fassungen, Wortindex, Belege). Auf einer Datenbank
+        # im Stand 20260801_06 gibt es sie noch nicht; mit ihnen ließe sich
+        # die Tabelle beim Downgrade nicht löschen.
+        for spaet in ("ai_memory_belege", "ai_memory_begriffe", "ai_memory_versionen"):
+            Base.metadata.tables[spaet].drop(engine)
         command.stamp(config, "20260801_06")
         command.downgrade(config, "20260801_05")
         phase4_tables = inspect(engine).get_table_names()
