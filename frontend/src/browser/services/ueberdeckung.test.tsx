@@ -23,12 +23,14 @@ function Wurzel() {
 
 describe('Sichtbarkeit der Tabs', () => {
   beforeEach(() => {
+    document.body.innerHTML = ''
     offen.length = 0
     ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
     URL.createObjectURL = vi.fn(() => 'blob:standbild')
     URL.revokeObjectURL = vi.fn()
   })
   afterEach(() => {
+    document.body.innerHTML = ''
     delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
   })
 

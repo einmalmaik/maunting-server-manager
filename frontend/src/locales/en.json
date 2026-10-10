@@ -7032,7 +7032,7 @@
   },
   "browserBadge": {
     "tooltip": "Download Maunting Secure Browser for Windows",
-    "label": "Secure Web Browser",
+    "label": "Secure web browser",
     "androidTooltip": "Download Maunting Secure Browser for Android",
     "androidLabel": "Browser for Android (.apk)"
   },
