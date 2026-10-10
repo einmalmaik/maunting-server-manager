@@ -46,6 +46,7 @@ import { useMessengerNotificationStore } from '@/stores/messengerNotificationSto
 import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 import { ABGEMELDET, abmelden } from './auth'
 import { Einstellungen } from './Einstellungen'
+import { Titelleiste } from './Titelleiste'
 import { Splash } from './Splash'
 import { OverlayFenster } from './OverlayFenster'
 import { Aufraeumkarte } from './Aufraeumkarte'
@@ -591,6 +592,7 @@ export function DesktopApp() {
     <MemoryRouter initialEntries={[getInitialRoute(isOffline)]}>
       <NavigationEmpfaenger isOffline={isOffline} />
       <div className="relative h-[100dvh] max-h-[100dvh] w-full overflow-hidden bg-background text-on-surface pb-[var(--msm-unten-sicher)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] flex flex-col">
+        <Titelleiste />
         <div className="msm-deep-grid pointer-events-none absolute inset-0 opacity-30" />
         {phase === 'bereit' && publicSettings.social_enabled && <CrossDeviceCallBanner />}
         <div className="relative z-10 flex h-full max-h-full min-h-0 flex-1 flex-col overflow-hidden">{inhalt}</div>

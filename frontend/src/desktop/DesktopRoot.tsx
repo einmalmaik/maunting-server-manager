@@ -12,6 +12,7 @@ import {
 } from '@/components/ai/voice/audioGeraete'
 import { DesktopApp } from './DesktopApp'
 import { OverlayFenster } from './OverlayFenster'
+import { TextMenue } from './TextMenue'
 import { konfigLaden } from './tauri'
 
 export function DesktopRoot() {
@@ -38,5 +39,10 @@ export function DesktopRoot() {
       .catch(() => undefined)
   }, [])
 
-  return overlay ? <OverlayFenster /> : <DesktopApp />
+  return (
+    <>
+      {overlay ? <OverlayFenster /> : <DesktopApp />}
+      <TextMenue />
+    </>
+  )
 }

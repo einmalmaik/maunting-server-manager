@@ -564,11 +564,16 @@ fn ist_eigene_oberflaeche(uri: &str) -> bool {
 /// Standort und fremde Adressen behalten das Standardverhalten. Ohne die
 /// Kamera bliebe jeder Videoanruf sofort wieder stehen: `getUserMedia` mit
 /// Video würde nie beantwortet und der Anruf bräche direkt wieder ab.
+///
+/// Dasselbe gilt für das Lesen der Zwischenablage: „Einfügen“ im eigenen
+/// Rechtsklick-Menü (`TextMenue.tsx`) wartete ohne Freigabe für immer
+/// (10.10.2026). Gelesen wird nur auf diesen Klick hin.
 #[cfg(windows)]
 fn medien_freigeben(app: &tauri::AppHandle) {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_CAMERA,
-        COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+        COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE,
+        COREWEBVIEW2_PERMISSION_STATE_ALLOW,
     };
     use webview2_com::{take_pwstr, PermissionRequestedEventHandler};
     // Bewusst nicht `windows::core::PWSTR`: unser `windows` (0.62, WASAPI)
@@ -591,6 +596,7 @@ fn medien_freigeben(app: &tauri::AppHandle) {
                     args.PermissionKind(&mut art)?;
                     if art != COREWEBVIEW2_PERMISSION_KIND_MICROPHONE
                         && art != COREWEBVIEW2_PERMISSION_KIND_CAMERA
+                        && art != COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ
                     {
                         return Ok(());
                     }

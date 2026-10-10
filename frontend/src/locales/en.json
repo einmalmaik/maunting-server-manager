@@ -6088,6 +6088,16 @@
     "memberCount_one": "{{count}} member"
   },
   "mss": {
+    "fenster": {
+      "minimieren": "Minimize",
+      "maximieren": "Maximize",
+      "schliessen": "Close"
+    },
+    "textmenue": {
+      "name": "Text menu",
+      "kopieren": "Copy",
+      "einfuegen": "Paste"
+    },
     "app": {
       "startet": "Starting …",
       "sucheNachUpdates": "Checking for updates …",
