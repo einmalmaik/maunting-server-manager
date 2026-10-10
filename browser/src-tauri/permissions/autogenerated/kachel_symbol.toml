@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kachel-symbol"
+description = "Enables the kachel_symbol command without any pre-configured scope."
+commands.allow = ["kachel_symbol"]
+
+[[permission]]
+identifier = "deny-kachel-symbol"
+description = "Denies the kachel_symbol command without any pre-configured scope."
+commands.deny = ["kachel_symbol"]

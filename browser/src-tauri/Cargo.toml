@@ -34,6 +34,10 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 # Gleiche Site für Download-Cookies unter Android (`downloads::gleiche_site`).
 # Die Public-Suffix-Liste liegt über adblock schon im Baum.
 psl = "2"
+# Symbole der Kacheln (`kachelsymbol.rs`): Bilder aus dem Netz dekodiert Rust,
+# nicht die Oberfläche. Schon im Baum über Tauri (`image-png`); `ico` ist ein
+# Dekoder im selben Paket, kein neues.
+image = { version = "0.25", default-features = false, features = ["png", "ico"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 keyring = "4"

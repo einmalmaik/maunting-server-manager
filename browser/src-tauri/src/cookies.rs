@@ -31,8 +31,9 @@ pub fn skript() -> String {
     let (aktiv, ausnahmen) = crate::schild::stand_fuer_seiten();
     let schild = serde_json::json!({ "aktiv": aktiv, "ausnahmen": ausnahmen });
     format!(
-        "(() => {{\n{rumpf}\nconst SCHILD = {schild};\nconst REGELN = {regeln};\n{EINGANG}\n}})();\n",
+        "(() => {{\n{rumpf}\nconst SCHILD = {schild};\nconst REGELN = {regeln};\nconst ZEICHEN = '{zeichen}';\n{EINGANG}\n}})();\n",
         rumpf = *RUMPF,
+        zeichen = *crate::seite::ZEICHEN,
         regeln = *REGELN_TEXT,
     )
 }
@@ -61,12 +62,15 @@ mod tests {
         assert!(holen.contains("const VERSION = '") && holen.contains("const INTEGRITAET = 'sha512-"));
     }
 
-    /// Weder Zustimmen noch Melden: `optIn` und die Heuristik ab `tier1`
-    /// klicken „Akzeptieren“.
+    /// Kein Zustimmen: `optIn` und die Heuristik ab `tier1` klicken
+    /// „Akzeptieren“. Gemeldet wird nur eine echte Ablehnung, über das
+    /// Ereignis dieser Sitzung.
     #[test]
     fn lehnt_nur_ab() {
         assert!(EINGANG.contains("autoAction: 'optOut'") && EINGANG.contains("heuristicMode: 'reject'"));
         assert!(!EINGANG.contains("'optIn'") && !EINGANG.contains("'tier"));
-        assert!(EINGANG.contains("new AutoConsent(() => Promise.resolve())"));
+        assert!(EINGANG.contains("new AutoConsent(nachricht)"));
+        assert!(EINGANG.contains("m.type === 'autoconsentDone' && !m.isCosmetic"));
+        assert!(skript().contains(&format!("const ZEICHEN = '{}';", *crate::seite::ZEICHEN)));
     }
 }

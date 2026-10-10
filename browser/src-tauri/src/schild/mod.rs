@@ -16,7 +16,7 @@ use std::sync::{LazyLock, Mutex, RwLock};
 use adblock::request::Request;
 use adblock::Engine;
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::konfig::Konfig;
 use crate::tabs::{melden, TabEreignis};
@@ -114,6 +114,8 @@ pub struct Schild {
     ausnahmen: RwLock<HashSet<String>>,
     /// Geblockte Anfragen je Tab seit dem letzten Seitenwechsel.
     zaehler: Mutex<HashMap<String, (u32, u32)>>,
+    /// Tabs, deren aktuelle Seite schon eine Cookie-Ablehnung gezählt hat.
+    cookies: Mutex<HashSet<String>>,
 }
 
 static SCHILD: LazyLock<Schild> = LazyLock::new(|| Schild {
@@ -122,6 +124,7 @@ static SCHILD: LazyLock<Schild> = LazyLock::new(|| Schild {
     aktiv: AtomicBool::new(true),
     ausnahmen: RwLock::new(HashSet::new()),
     zaehler: Mutex::new(HashMap::new()),
+    cookies: Mutex::new(HashSet::new()),
 });
 
 /// Übernimmt Schalter und Ausnahmen aus der Konfiguration.
@@ -199,22 +202,50 @@ pub fn einstufen(url: &str, seite: &str, art: AnfrageArt) -> Option<Treffer> {
 /// steigt, und die Oberfläche erfährt den neuen Stand.
 pub fn pruefen(app: &AppHandle, tab: &str, url: &str, seite: &str, art: AnfrageArt) -> bool {
     let Some(treffer) = einstufen(url, seite, art) else { return false };
-    gesamt::zaehlen(treffer);
-    let (werbung, tracker) = {
+    let ((werbung, tracker), erster) = {
         let mut zaehler = SCHILD.zaehler.lock().unwrap();
         let eintrag = zaehler.entry(tab.to_string()).or_default();
+        let erster = *eintrag == (0, 0);
         match treffer {
             Treffer::Werbung => eintrag.0 += 1,
             Treffer::Tracker => eintrag.1 += 1,
         }
-        *eintrag
+        (*eintrag, erster)
     };
+    if zaehlt_insgesamt(app, tab) {
+        gesamt::zaehlen(treffer);
+        if erster {
+            gesamt::seite_zaehlen();
+        }
+    }
     melden(app, TabEreignis::Schild { id: tab.to_string(), werbung, tracker });
     true
 }
 
+/// Private Tabs hinterlassen keine Spur, auch keine Zahl (Punkt 158); ein
+/// unbekannter Tab zählt ebenso nicht.
+fn zaehlt_insgesamt(app: &AppHandle, tab: &str) -> bool {
+    let tabs = app.state::<crate::tabs::Tabs>();
+    let z = tabs.0.lock().unwrap();
+    z.tabs.get(tab).is_some_and(|t| !t.privat)
+}
+
+/// Das Cookie-Skript hat auf der Seite im Tab einen Hinweis abgelehnt
+/// (`seite.js` meldet es, `tabs::cookies_gemeldet`). Gezählt
+/// wird höchstens eine Ablehnung je Seitenaufruf, sonst könnte die Seite die
+/// Statistik mit eigenen Meldungen treiben.
+pub fn cookies_abgelehnt(app: &AppHandle, tab: &str) {
+    if !SCHILD.cookies.lock().unwrap().insert(tab.to_string()) {
+        return;
+    }
+    if zaehlt_insgesamt(app, tab) {
+        gesamt::cookie_zaehlen();
+    }
+}
+
 /// Neue Seite im Tab: der Zähler beginnt von vorn.
 pub fn seitenwechsel(app: &AppHandle, tab: &str) {
+    SCHILD.cookies.lock().unwrap().remove(tab);
     let vorher = SCHILD.zaehler.lock().unwrap().remove(tab);
     if vorher.is_some() {
         melden(app, TabEreignis::Schild { id: tab.to_string(), werbung: 0, tracker: 0 });
@@ -223,6 +254,7 @@ pub fn seitenwechsel(app: &AppHandle, tab: &str) {
 
 pub fn tab_vergessen(tab: &str) {
     SCHILD.zaehler.lock().unwrap().remove(tab);
+    SCHILD.cookies.lock().unwrap().remove(tab);
 }
 
 /// Was nach dem Laden einer Seite ausgeblendet wird.

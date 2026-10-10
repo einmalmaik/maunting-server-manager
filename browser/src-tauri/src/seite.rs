@@ -9,4 +9,36 @@
 //! Felder bauen und dasselbe abschicken. Die Adresse nimmt Rust deshalb aus
 //! der Webview, und gefüllt wird nur auf derselben Herkunft.
 
-pub const SKRIPT: &str = include_str!("seite.js");
+//!
+//! Das Cookie-Skript meldet eine Ablehnung über ein Ereignis, dessen Name je
+//! Sitzung zufällig ist ([`ZEICHEN`]); `seite.js` gibt sie an den Browser
+//! weiter. Ohne den Namen kann die Seite keine Ablehnung vortäuschen, und mit
+//! ihm höchstens eine je Seitenaufruf (`schild::cookies_abgelehnt`).
+
+use std::collections::hash_map::RandomState;
+use std::hash::BuildHasher;
+use std::sync::LazyLock;
+
+/// Zufälliger Ereignisname dieser Sitzung, 128 Bit.
+pub static ZEICHEN: LazyLock<String> = LazyLock::new(|| {
+    let zufall = RandomState::new();
+    format!("msb{:016x}{:016x}", zufall.hash_one(1u8), zufall.hash_one(2u8))
+});
+
+const PLATZHALTER: &str = "__MSB_ZEICHEN__";
+
+pub static SKRIPT: LazyLock<String> = LazyLock::new(|| include_str!("seite.js").replace(PLATZHALTER, &ZEICHEN));
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn der_ereignisname_steht_eingesetzt_und_ist_zufaellig() {
+        assert_eq!(include_str!("seite.js").matches(PLATZHALTER).count(), 1);
+        assert!(SKRIPT.contains(&format!("'{}'", *ZEICHEN)) && !SKRIPT.contains(PLATZHALTER));
+        assert!(ZEICHEN.len() == 35 && ZEICHEN[3..].bytes().all(|b| b.is_ascii_hexdigit()));
+        let anders = RandomState::new();
+        assert_ne!(*ZEICHEN, format!("msb{:016x}{:016x}", anders.hash_one(1u8), anders.hash_one(2u8)));
+    }
+}

@@ -13,6 +13,7 @@ pub mod datei;
 pub mod downloads;
 pub mod erweiterungen;
 pub mod fenster;
+pub mod kachelsymbol;
 pub mod konfig;
 pub mod kurzinfo;
 #[cfg(windows)]
@@ -135,6 +136,8 @@ pub fn run() {
             tabs::tab_stumm,
             schild::schild_stand,
             schild::gesamt::schild_gesamt,
+            kachelsymbol::kachel_symbol,
+            kachelsymbol::kachel_symbole_behalten,
             schild::schutz_dienst::schutz_stand,
             schild::schutz_dienst::schutz_aendern,
             schild::schutz_dienst::schutz_binden,

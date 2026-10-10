@@ -5,10 +5,10 @@
  * Das Raster ist ein Tab-Halt, die Pfeile wandern darin (AGENTS.md Punkt 88);
  * Strg+Pfeil links/rechts verschiebt die Kachel, Ziehen mit der Maus auch.
  * Rechtsklick oder die Menütaste öffnen Bearbeiten, Verschieben, Entfernen.
- * Symbole kommen aus `marken.tsx` oder sind ein Buchstabe: die Startseite lädt
- * nichts von fremden Servern.
+ * Das Symbol holt Rust von der Website selbst (`KachelSymbol.tsx`), auch
+ * nach dem Anlegen oder Ändern einer Kachel; Symbole entfernter Kacheln gehen mit.
  */
-import { useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react'
 import { ArrowLeft, ArrowRight, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -17,35 +17,18 @@ import { Kontextmenue } from '@/Singra/UI/Kontextmenue'
 import { nachbarKachel } from '@/Singra/UI/Rasterfokus'
 import { toast } from '@/stores/toastStore'
 
-import { MarkenSymbol, type Marke } from '../../marken'
 import { SCHNELLZUGRIFFE_MAX, useEinstellungenStore, type Schnellzugriff } from '../../services/einstellungenStore'
 import { seitenHost } from '../../services/geraetKonfig'
+import { nativ } from '../../services/nativ'
 import { seiteOeffnen } from '../../services/tabsStore'
 import { verschoben } from '../../einstellungen/Ordnungsliste'
 import { KachelDialog } from './KachelDialog'
-
-const BEKANNTE: { host: string; marke: Marke }[] = [
-  { host: 'wikipedia.org', marke: 'wikipedia' },
-  { host: 'youtube.com', marke: 'youtube' },
-  { host: 'github.com', marke: 'github' },
-  { host: 'reddit.com', marke: 'reddit' },
-  { host: 'duckduckgo.com', marke: 'duckduckgo' },
-  { host: 'google.com', marke: 'google' },
-  { host: 'bing.com', marke: 'bing' },
-  { host: 'ecosia.org', marke: 'ecosia' },
-  { host: 'search.brave.com', marke: 'brave' },
-]
-
-function markeFuer(url: string): Marke | null {
-  const host = seitenHost(url)
-  if (!host) return null
-  return BEKANNTE.find((b) => host === b.host || host.endsWith(`.${b.host}`))?.marke ?? null
-}
+import { KachelSymbol } from './KachelSymbol'
 
 const ZIEHEN = 'text/msb-kachel'
 
 const KACHEL = 'group flex flex-col items-center gap-2 rounded-lg p-2 outline-none hover:bg-surface-container/80 focus-visible:ring-2 focus-visible:ring-primary'
-const RUND = 'flex h-12 w-12 items-center justify-center rounded-full bg-surface-container-high text-on-surface group-hover:bg-surface-container-highest'
+const RUND = 'flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-surface-container-high text-on-surface group-hover:bg-surface-container-highest'
 
 type Bearbeiten = { art: 'neu' } | { art: 'aendern'; index: number }
 
@@ -63,6 +46,12 @@ export function Schnellzugriffe() {
   const tabHalt = Math.min(halt, voll ? liste.length - 1 : liste.length)
 
   const speichern = (neu: Schnellzugriff[]) => setzen({ schnellzugriffe: neu })
+
+  // Symbole entfernter oder geänderter Kacheln fallen vom Gerät.
+  const adressen = liste.map((s) => s.url).join('\n')
+  useEffect(() => {
+    void nativ.kachelSymboleBehalten(adressen ? adressen.split('\n') : []).catch(() => null)
+  }, [adressen])
 
   const verschieben = (von: number, nach: number) => {
     if (nach < 0 || nach >= liste.length) return
@@ -134,7 +123,6 @@ export function Schnellzugriffe() {
     <nav aria-label={t('browser.start.schnellzugriff')} className="w-full">
       <ul ref={raster} onKeyDown={taste} className="grid w-full grid-cols-4 gap-3 sm:grid-cols-8">
         {liste.map((s, i) => {
-          const marke = markeFuer(s.url)
           const host = seitenHost(s.url) ?? s.url
           return (
             <li
@@ -162,7 +150,7 @@ export function Schnellzugriffe() {
                 className={`${KACHEL} w-full`}
               >
                 <span className={RUND}>
-                  {marke ? <MarkenSymbol marke={marke} className="h-6 w-6" /> : <span className="text-title-md uppercase" aria-hidden="true">{host.charAt(0)}</span>}
+                  <KachelSymbol url={s.url} host={host} />
                 </span>
                 <span className="w-full truncate text-center text-label-sm text-on-surface-variant">{s.titel || host}</span>
               </button>

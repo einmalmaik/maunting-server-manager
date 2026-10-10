@@ -186,7 +186,7 @@ fn anlegen(app: &AppHandle, id: &str, privat: bool) -> Result<ICoreWebView2, Str
         // lief sie sonst ohne `seite.js` und sah `chrome.webview` (bis 10/2026).
         let (tx, rx) = mpsc::channel();
         core.AddScriptToExecuteOnDocumentCreated(
-            &HSTRING::from(crate::seite::SKRIPT),
+            &HSTRING::from(crate::seite::SKRIPT.as_str()),
             &AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(move |ergebnis, _| {
                 let _ = tx.send(ergebnis);
                 Ok(())

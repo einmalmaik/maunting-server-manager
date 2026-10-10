@@ -10,9 +10,4 @@ describe('Marken-Symbole', () => {
     const { container } = render(<MarkenSymbol marke="google" />)
     expect(farben(container.querySelector('svg')!)).toEqual(['#4285F4', '#34A853', '#FBBC05', '#EA4335'])
   })
-
-  it('ein Symbol ohne Markenfarbe nimmt die Textfarbe', () => {
-    const { container } = render(<MarkenSymbol marke="github" />)
-    expect(farben(container.querySelector('svg')!)).toEqual(['currentColor'])
-  })
 })

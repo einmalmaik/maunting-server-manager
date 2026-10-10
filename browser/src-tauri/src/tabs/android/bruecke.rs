@@ -259,7 +259,7 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_seit
     mut env: JNIEnv<'l>,
     _: JClass<'l>,
 ) -> jstring {
-    zurueck(&mut env, crate::seite::SKRIPT)
+    zurueck(&mut env, &crate::seite::SKRIPT)
 }
 
 /// Das Cookie-Skript mit dem heutigen Stand des Schilds (`crate::cookies`).

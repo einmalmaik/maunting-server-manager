@@ -50,6 +50,8 @@ permissions = [
   "allow-tab-stumm",
   "allow-schild-stand",
   "allow-schild-gesamt",
+  "allow-kachel-symbol",
+  "allow-kachel-symbole-behalten",
   "allow-schutz-stand",
   "allow-schutz-aendern",
   "allow-schutz-binden",

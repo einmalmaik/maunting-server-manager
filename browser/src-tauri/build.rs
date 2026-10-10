@@ -53,6 +53,8 @@ const BEFEHLE: &[&str] = &[
     "tab_stumm",
     "schild_stand",
     "schild_gesamt",
+    "kachel_symbol",
+    "kachel_symbole_behalten",
     "schutz_stand",
     "schutz_aendern",
     "schutz_binden",

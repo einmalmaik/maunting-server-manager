@@ -72,6 +72,7 @@ function Startwidgets() {
   const { t } = useTranslation()
   const ordnung = widgetsGeordnet(useEinstellungenStore((s) => s.widgetOrdnung))
   const aus = useEinstellungenStore((s) => s.widgetsAus)
+  const statistikZeigen = useEinstellungenStore((s) => s.statistikZeigen)
   const setzen = useEinstellungenStore((s) => s.setzen)
   return (
     <Abschnitt titel={t('browser.einstellungen.startseite')}>
@@ -83,6 +84,12 @@ function Startwidgets() {
         umschalten={(w) => setzen({ widgetsAus: aus.includes(w as Widget) ? aus.filter((a) => a !== w) : [...aus, w as Widget] })}
       />
       {!aus.includes('nachrichten') && <Nachrichtenwahl />}
+      <Schalterzeile
+        name={t('browser.einstellungen.statistik')}
+        hinweis={t('browser.einstellungen.statistikHinweis')}
+        an={statistikZeigen}
+        aendern={(an) => setzen({ statistikZeigen: an })}
+      />
     </Abschnitt>
   )
 }

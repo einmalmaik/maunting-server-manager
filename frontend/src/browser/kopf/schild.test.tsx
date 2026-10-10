@@ -18,10 +18,12 @@ describe('Schild-Fenster', () => {
     befehle.invoke.mockReset()
   })
 
-  it('nennt, was seit der Installation geblockt wurde, erst beim Öffnen', async () => {
+  // Was insgesamt geblockt wurde, steht seit 10.10.2026 auf der Startseite (`SchildStatistik.tsx`).
+  it('zeigt nur die Zahlen der Seite, nicht die Gesamtzahl', async () => {
     render(<Schild />)
-    expect(befehle.invoke).not.toHaveBeenCalledWith('schild_gesamt', undefined)
     fireEvent.click(screen.getByRole('button', { name: /Schutz/ }))
-    expect(await screen.findByText('Seit der Installation: 18.420 Werbung · 6.311 Tracker')).toBeInTheDocument()
+    await screen.findByRole('dialog')
+    expect(befehle.invoke).not.toHaveBeenCalledWith('schild_gesamt', undefined)
+    expect(screen.queryByText(/18\.420|Installation/)).not.toBeInTheDocument()
   })
 })

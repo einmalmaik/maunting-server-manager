@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kachel-symbole-behalten"
+description = "Enables the kachel_symbole_behalten command without any pre-configured scope."
+commands.allow = ["kachel_symbole_behalten"]
+
+[[permission]]
+identifier = "deny-kachel-symbole-behalten"
+description = "Denies the kachel_symbole_behalten command without any pre-configured scope."
+commands.deny = ["kachel_symbole_behalten"]

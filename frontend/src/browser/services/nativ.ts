@@ -8,6 +8,16 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
+export interface SchildGesamt {
+  werbung: number
+  tracker: number
+  /** Cookie-Hinweise, die abgelehnt wurden (nicht nur ausgeblendet). */
+  cookies: number
+  /** Seitenaufrufe, auf denen mindestens eine Anfrage geblockt wurde. */
+  seiten: number
+  seit: number
+}
+
 export function istTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
@@ -186,8 +196,12 @@ export const nativ = {
   seitenrechtZuruecksetzen: (art: string, herkunft: string) => rufen('seitenrecht_zuruecksetzen', { art, herkunft }),
   schildStand: () =>
     rufen<{ aktiv: boolean; listen: { name: string; alter_sekunden: number | null }[] }>('schild_stand'),
-  /** Seit der Installation geblockt, nur diese zwei Zahlen (`schild/gesamt.rs`). */
-  schildGesamt: () => rufen<{ werbung: number; tracker: number }>('schild_gesamt'),
+  /** Was das Schild geschafft hat, nur Zahlen (`schild/gesamt.rs`); `seit` in Sekunden, 0 heißt unbekannt. */
+  schildGesamt: () => rufen<SchildGesamt>('schild_gesamt'),
+  /** Symbol einer Kachel als `data:`-PNG, von Rust geholt und neu kodiert (`kachelsymbol.rs`). */
+  kachelSymbol: (url: string) => rufen<string | null>('kachel_symbol', { url }),
+  /** Löscht die Symbole aller Kacheln, die nicht mehr in der Liste stehen. */
+  kachelSymboleBehalten: (adressen: string[]) => rufen('kachel_symbole_behalten', { adressen }),
   schutzStand: () => rufen<SchutzStand>('schutz_stand'),
   /** Strengeres gilt sofort, Lockeres wird ein Antrag (`schild/schutz.rs`). Wirft `ohne_netz`, `gebunden`, `abkuehlen`. */
   schutzAendern: (regeln: SchutzRegeln) => rufen<SchutzStand>('schutz_aendern', { regeln }),

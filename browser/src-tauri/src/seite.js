@@ -22,6 +22,10 @@
   // Das Hallo öffnet den Rückweg: unter Android antwortet `Tab.kt` nur auf eine
   // Seite, die schon etwas geschickt hat, und ein Unterrahmen nennt so seine Herkunft.
   if (android || !oben) senden('{"t":"da"}')
+  // Das Cookie-Skript meldet eine Ablehnung über ein Ereignis, dessen Name
+  // nur der Browser kennt (seite.rs); hier geht sie an den Browser weiter,
+  // der höchstens eine je Seitenaufruf zählt.
+  window.addEventListener('__MSB_ZEICHEN__', () => senden('{"t":"cookies"}'))
   const wert = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
   const auswahlWert = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')
   const json = JSON.stringify

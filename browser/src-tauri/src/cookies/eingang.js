@@ -1,11 +1,14 @@
 // Der Teil des Cookie-Skripts, der autoconsent startet (cookies.rs). Davor
 // stehen autoconsent selbst (`AutoConsent`, `filterCompactRules`), `SCHILD`
-// ({ aktiv, ausnahmen }) und `REGELN` als Text. Läuft in jedem Rahmen jeder
+// ({ aktiv, ausnahmen }), `REGELN` als Text und `ZEICHEN`, der Ereignisname
+// dieser Sitzung (seite.rs). Läuft in jedem Rahmen jeder
 // Seite, vor den Skripten der Seite.
 
 // Lehnt ab, nie zu: „Akzeptieren“ klickt autoconsent nur beim Zustimmen und
-// in den höheren Stufen der Heuristik. Gemeldet wird nichts, die Nachrichten
-// fallen weg.
+// in den höheren Stufen der Heuristik. Gemeldet wird nur eine gelungene
+// Ablehnung für die Statistik der Startseite (`autoconsentDone`); ein Hinweis,
+// der nur ausgeblendet wurde (`isCosmetic`), zählt nicht. Die übrigen
+// Nachrichten fallen weg.
 const KONFIG = {
   enabled: true,
   autoAction: 'optOut',
@@ -38,9 +41,17 @@ function pausiert(host, ausnahmen) {
   }
 }
 
+// Eingefangen, bevor ein Skript der Seite sie ersetzen kann.
+const ausloesen = window.dispatchEvent.bind(window)
+const Ereignis = Event
+function nachricht(m) {
+  if (m && m.type === 'autoconsentDone' && !m.isCosmetic) ausloesen(new Ereignis(ZEICHEN))
+  return Promise.resolve()
+}
+
 const host = obersterHost()
 if (host && SCHILD.aktiv && !pausiert(host, SCHILD.ausnahmen)) {
   const regeln = filterCompactRules(JSON.parse(REGELN), { url: location.href, mainFrame: window === window.top })
-  const consent = new AutoConsent(() => Promise.resolve())
+  const consent = new AutoConsent(nachricht)
   consent.initialize(KONFIG, { autoconsent: [], compact: regeln })
 }

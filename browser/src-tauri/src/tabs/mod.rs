@@ -145,11 +145,28 @@ pub fn tab_aktivieren(app: AppHandle, tabs: State<'_, Tabs>, id: Option<String>)
 /// Plattformen. `url` ist die Adresse aus der Webview; dass der Absender
 /// dieselbe Herkunft hat, ist schon geprüft (Punkt 134).
 pub fn nachricht_oben(app: &AppHandle, id: &str, url: &str, roh: &str) {
+    if cookies_gemeldet(app, id, roh) {
+        return;
+    }
     if let Some(stueck) = uebersetzung::lesen(roh) {
         uebersetzung::stueck(app, id, url, stueck);
     } else if let Some(meldung) = formular::lesen(roh) {
         formular::oben(app, id, url, meldung);
     }
+}
+
+/// Was `seite.js` schickt, wenn das Cookie-Skript in einem Rahmen der Seite
+/// einen Hinweis abgelehnt hat (`cookies/eingang.js`).
+pub const COOKIES_ABGELEHNT: &str = r#"{"t":"cookies"}"#;
+
+/// Zählt eine Cookie-Ablehnung, aus dem obersten Rahmen wie aus einem
+/// Unterrahmen; `true`, wenn `roh` diese Meldung war.
+pub fn cookies_gemeldet(app: &AppHandle, id: &str, roh: &str) -> bool {
+    let ja = roh == COOKIES_ABGELEHNT;
+    if ja {
+        crate::schild::cookies_abgelehnt(app, id);
+    }
+    ja
 }
 
 /// Die Seite im Tab wechselt oder der Tab geht: was an ihr hing, gilt nicht mehr.

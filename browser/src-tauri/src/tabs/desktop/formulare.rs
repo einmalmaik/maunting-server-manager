@@ -71,6 +71,9 @@ unsafe fn rahmen_anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -> wi
                         return Ok(());
                     };
                     let roh = text(|p| args.TryGetWebMessageAsString(p));
+                    if crate::tabs::cookies_gemeldet(&app, &id, &roh) {
+                        return Ok(());
+                    }
                     let absender = text(|p| args.Source(p));
                     let herkunft = formular::unten(&app, &id, &url, &absender, &roh);
                     if let Ok(rahmen) = rahmen.cast::<ICoreWebView2Frame2>() {

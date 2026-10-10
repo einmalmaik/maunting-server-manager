@@ -106,6 +106,12 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
         antwort.postMessage("{\"t\":\"gesperrt\"}")
         return@addWebMessageListener
       }
+      // Eine Cookie-Ablehnung zählt aus jedem Rahmen; sie ändert nichts an der
+      // Liste der Rahmen, die Zahlungsfelder haben.
+      if (text == COOKIES_ABGELEHNT) {
+        TabsBruecke.nachricht(id, view.url.orEmpty(), text)
+        return@addWebMessageListener
+      }
       if (!hauptrahmen && text != null) {
         // Ein Rahmen, der woanders hin lädt, meldet sich mit der neuen Herkunft.
         val h = TabsBruecke.rahmen(id, view.url.orEmpty(), herkunft, text)
@@ -375,6 +381,9 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
 
     /** So viele Rahmen einer Seite merkt sich ein Tab ([rahmen]). */
     private const val RAHMEN_MAX = 64
+
+    /** Wie `tabs::COOKIES_ABGELEHNT`; `seite.js` schickt es nach einer Ablehnung. */
+    private const val COOKIES_ABGELEHNT = "{\"t\":\"cookies\"}"
 
     /** So lange darf ein Umweg der Bildsuche dauern (eine Zustimmungsseite liest man). */
     private const val BILD_FRIST = 10 * 60 * 1000L

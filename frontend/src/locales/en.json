@@ -4868,9 +4868,9 @@
         "heading": "Maunting Secure Browser",
         "body": "The Maunting Secure Browser is a standalone browser for Windows and Android. On Windows it shows web pages with the Microsoft Edge WebView2 runtime, which Windows provides and updates; on Android with the Android System WebView, which Google updates through the Play Store. Unless it is paired with an MSM instance, it talks to no Maunting Studios server. There is no telemetry.",
         "items": {
-          "lokal": "On the computer: history, bookmarks, open tabs (address, title, site icon), settings and the number of ad and tracker requests blocked since installation (without addresses) stay in the app folder and go to no server, not even your instance. Cookies, cache and site storage live in a separate profile, apart from Microsoft Edge.",
+          "lokal": "On the computer: history, bookmarks, open tabs (address, title, site icon), settings, the icons of your tiles and the shield statistics stay in the app folder and go to no server, not even your instance. The statistics are numbers without addresses: blocked ad and tracker requests, declined cookie notices, page loads with blocks and the day counting started; private tabs are not counted. Cookies, cache and site storage live in a separate profile, apart from Microsoft Edge.",
           "privat": "Private tabs add nothing to the history and show no site icon. On Windows, their cookies and site storage live only in memory and disappear once the last private tab is closed; until then all private tabs share this session. “Forget on close” (off by default) deletes the cookies, cache and site storage of normal tabs when you quit; history and bookmarks stay.",
-          "verbindungen": "Connections: the pages you open and the search engine you chose receive your requests directly. For the ad and tracker blocker, the browser downloads the filter lists from easylist.to and the list against cookie notices from secure.fanboy.co.nz at most every four days, without cookie, identifier or referrer; both servers see your IP address. The site icon comes from the tab’s WebView; the interface does not load any address of the site for it. The browser downloads language data for translation from Mozilla only when you ask for it (see “Translation”). Extensions are downloaded from Google only when you ask (see “Extensions”).",
+          "verbindungen": "Connections: the pages you open and the search engine you chose receive your requests directly. For the ad and tracker blocker, the browser downloads the filter lists from easylist.to and the list against cookie notices from secure.fanboy.co.nz at most every four days, without cookie, identifier or referrer; both servers see your IP address. The site icon comes from the tab’s WebView; the interface does not load any address of the site for it. For the tiles on the start page, the browser fetches the home page and icon of each website when you add or change a tile and after that at most every 30 days, without cookie or referrer; the website sees your IP address. The browser downloads language data for translation from Mozilla only when you ask for it (see “Translation”). Extensions are downloaded from Google only when you ask (see “Extensions”).",
           "https": "HTTPS first and clean links: the browser opens an address starting with “http://” encrypted first. If the site can’t do that, it loads it as given and remembers this until you quit, in memory only. Addresses on your own computer, in your own network and with their own port stay as they are. With the ad and tracker blocker on, the browser removes known tracking parameters such as “utm_source”, “fbclid” or “gclid” from every address a tab opens. Where the bundled rules of autoconsent (DuckDuckGo) can, it rejects cookie notices, and it hides known notices that cannot be rejected; it never gives consent. The rules ship with the browser, no request goes out for them. The site stores the rejection as after your own click, usually as a cookie.",
           "schutz": "Youth and habit protection (off by default): the browser checks on the computer whether a site is blocked; no address goes to any service for this. For “Adult content”, “Gambling” and “Social networks” it downloads the category’s list only once the category is on, and after that at most every four days, from raw.githubusercontent.com, without cookie, identifier or referrer. GitHub sees your IP address and which list you download. With “Adult content” on, the browser adds the safe search parameter to searches on Google, Bing, DuckDuckGo and Brave and sends YouTube the header for restricted mode. Loosening the protection takes at least one day; the browser measures the waiting time against the time that raw.githubusercontent.com states in its reply to a request without content, not against the device clock. This request is only sent when you request, confirm or withdraw a loosening or commit yourself. How many days the browser went without a blocked page is only counted on the device; the number is not sent to any service, MSM included.",
           "downloads": "Downloads: every file first downloads into a folder of the browser, where the antivirus registered with Windows checks it (usually Microsoft Defender). Only then does it move to the downloads folder. Depending on the antivirus settings, suspicious files or information about them go to its vendor; you control that in the antivirus settings, not in the browser.",
@@ -8580,7 +8580,6 @@
       "knopfAus": "Protection off",
       "werbung": "Ads",
       "tracker": "Trackers",
-      "seitInstallation": "Since installation: {{werbung}} ads · {{tracker}} trackers",
       "aufDieserSeite": "Protection on this site",
       "globalAus": "Protection is switched off in the settings.",
       "hinweis": "Blocking uses EasyList, EasyList Germany, EasyPrivacy and the EasyList Cookie List; whatever shows cookie notices counts as ads. Cookie notices are rejected with the rules of autoconsent (DuckDuckGo). The tiles count only the open page."
@@ -8633,6 +8632,21 @@
         "keineZuWorten": "Nothing for your keywords today",
         "fehler": "News are not available right now",
         "nichtEingerichtet": "Your MSM server has no SearXNG instance running."
+      },
+      "statistik": {
+        "titel": "What the shield blocked for you",
+        "seit": "Since {{datum}}, counted only on this device",
+        "nurHier": "Counted only on this device",
+        "werbung": "Ads",
+        "tracker": "Trackers",
+        "cookies": "Cookie notices declined",
+        "seiten": "Pages with blocks",
+        "daten": "Data saved",
+        "zeit": "Processing time saved",
+        "etwa": "≈ {{wert}}",
+        "schaetzung": "Ads, trackers and cookie notices are counted, private tabs are not. Data and processing time are estimates: about 500 KB and half a second per page with blocks, the median from a 2019 measurement by Brave.",
+        "quelle": "About the measurement",
+        "weiter": "Statistics"
       }
     },
     "leiste": {
@@ -8896,7 +8910,9 @@
           "wissenschaft": "Science",
           "sport": "Sports"
         }
-      }
+      },
+      "statistik": "Statistics on the start page",
+      "statistikHinweis": "What the shield blocked. Only numbers, they stay on this device."
     },
     "kopplung": {
       "titel": "Pair with MSM",

@@ -95,6 +95,8 @@ interface EinstellungenZustand {
   nachrichtenThemen: NachrichtenThema[]
   /** Schlagworte, durch Komma getrennt; leer heißt alles aus den Themen. */
   nachrichtenWorte: string
+  /** Unter der Startseite, was das Schild geblockt hat (`seite/start/SchildStatistik.tsx`). */
+  statistikZeigen: boolean
   schlafenNach: SchlafenNach
   /** Tabs, die eine Stunde im Hintergrund lagen, geben ihren Speicher ganz frei und laden beim Zeigen neu. */
   speicherSparen: boolean
@@ -148,6 +150,7 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       widgetsAus: ['zuletzt'],
       nachrichtenThemen: NACHRICHTEN_THEMEN,
       nachrichtenWorte: '',
+      statistikZeigen: true,
       schlafenNach: 30,
       speicherSparen: false,
       schlafAusnahmen: [],
