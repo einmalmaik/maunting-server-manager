@@ -60,7 +60,7 @@ function Aufbau() {
         <Anordnung />
       </Abschnitt>
       <Abschnitt titel={t('browser.einstellungen.knoepfe')}>
-        {KNOEPFE.map((k) => (
+        {KNOEPFE.filter((k) => k !== 'erweiterungen' || !istAndroid()).map((k) => (
           <Schalterzeile key={k} name={t(`browser.einstellungen.knopf.${k}`)} an={!ausgeblendet.includes(k)} aendern={() => umschalten(k)} />
         ))}
       </Abschnitt>

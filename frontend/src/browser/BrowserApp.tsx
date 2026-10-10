@@ -42,6 +42,7 @@ import { useEinstellungenStore } from './services/einstellungenStore'
 import { useGeraetKonfig } from './services/geraetKonfig'
 import { kuerzelAusfuehren, useKuerzel, type KuerzelZiele } from './services/kuerzel'
 import { tabEreignisse } from './services/nativ'
+import { erweiterungenStarten } from './erweiterungen/erweiterungen'
 import { useLeistung } from './services/leistung'
 import { istAndroid } from './services/plattform'
 import { istGekoppelt, useSitzung, useSitzungsLauf } from './services/sitzung'
@@ -119,6 +120,15 @@ function Wurzel() {
   useEffect(() => {
     void useGeraetKonfig.getState().laden()
     void useTabsStore.getState().hochfahren()
+  }, [])
+  useEffect(() => {
+    let aus: (() => void) | null = null
+    let weg = false
+    void erweiterungenStarten().then((f) => (weg ? f() : (aus = f)))
+    return () => {
+      weg = true
+      aus?.()
+    }
   }, [])
 
   const ziele = useMemo<KuerzelZiele>(

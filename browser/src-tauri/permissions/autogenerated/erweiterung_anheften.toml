@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-erweiterung-anheften"
+description = "Enables the erweiterung_anheften command without any pre-configured scope."
+commands.allow = ["erweiterung_anheften"]
+
+[[permission]]
+identifier = "deny-erweiterung-anheften"
+description = "Denies the erweiterung_anheften command without any pre-configured scope."
+commands.deny = ["erweiterung_anheften"]

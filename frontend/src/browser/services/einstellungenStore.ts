@@ -21,8 +21,8 @@ export type Modul = 'singra' | 'messenger' | 'notizen' | 'kalender' | 'tresor'
 export type Leistenziel = Modul | 'lesezeichen' | 'verlauf' | 'downloads'
 
 /** Knöpfe in Kopf- und Navigationsleiste, die man ausblenden kann. */
-export type Knopf = 'neuLaden' | 'schild' | 'stern' | 'screenshot' | 'privaterTab'
-export const KNOEPFE: Knopf[] = ['neuLaden', 'schild', 'stern', 'screenshot', 'privaterTab']
+export type Knopf = 'neuLaden' | 'schild' | 'stern' | 'screenshot' | 'erweiterungen' | 'privaterTab'
+export const KNOEPFE: Knopf[] = ['neuLaden', 'schild', 'stern', 'screenshot', 'erweiterungen', 'privaterTab']
 
 export type Ausblendbar = Leistenziel | Knopf
 

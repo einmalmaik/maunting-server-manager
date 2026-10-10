@@ -31,12 +31,14 @@ pub mod weg;
 #[cfg(windows)]
 mod desktop;
 #[cfg(windows)]
-pub(crate) use desktop::{im_profil, recht_art, recht_name};
+pub(crate) use desktop::{
+    erweiterung_laden, erweiterung_popup, erweiterung_popup_schliessen, erweiterungen_abgleichen, im_profil, recht_art, recht_name,
+};
 #[cfg(target_os = "android")]
 pub mod android;
 
 pub use ereignis::{melden, Antwort, DownloadStand, MenueEintrag, TabEreignis, EREIGNIS};
-pub use weg::{id_pruefen, navigation_erlaubt, vorab, weg, ziel_pruefen, Vorab, Weg};
+pub use weg::{erweiterungen_setzen, id_pruefen, navigation_erlaubt, vorab, weg, ziel_pruefen, Vorab, Weg};
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
 pub struct Rahmen {

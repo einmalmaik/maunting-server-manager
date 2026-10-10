@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-erweiterung-verwerfen"
+description = "Enables the erweiterung_verwerfen command without any pre-configured scope."
+commands.allow = ["erweiterung_verwerfen"]
+
+[[permission]]
+identifier = "deny-erweiterung-verwerfen"
+description = "Denies the erweiterung_verwerfen command without any pre-configured scope."
+commands.deny = ["erweiterung_verwerfen"]

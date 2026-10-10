@@ -111,6 +111,10 @@ pub fn bereit() {
 fn anwenden(app: &AppHandle) {
     let regeln = neu_bauen(app);
     let _ = app.emit_to("main", EREIGNIS, ());
+    // Erweiterungen könnten Sperre und Schild umgehen (Proxy, VPN): bei
+    // aktivem Schutz laufen keine.
+    #[cfg(windows)]
+    crate::erweiterungen::schutz_geaendert(app);
     if !regeln.aktiv {
         return;
     }

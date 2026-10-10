@@ -22,6 +22,8 @@ import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 import { useVerlaufStore } from '../services/verlaufStore'
 import { Adresszeile, type AdresszeileGriff } from './Adresszeile'
 import { AufnahmeKnopf } from '../aufnahme/AufnahmeKnopf'
+import { erweiterungenMoeglich } from '../erweiterungen/erweiterungen'
+import { ErweiterungenKnopf } from '../erweiterungen/ErweiterungenKnopf'
 import { Knopf, KNOPF } from './knopf'
 import { Modulmenue, ModuleOben } from './Modulmenue'
 
@@ -149,6 +151,7 @@ export const Navigationsleiste = forwardRef<AdresszeileGriff>(function Navigatio
       </Knopf>
       )}
       {!ausgeblendet.includes('screenshot') && <AufnahmeKnopf />}
+      {erweiterungenMoeglich() && !ausgeblendet.includes('erweiterungen') && <ErweiterungenKnopf />}
       {leiste === 'oben' && <ModuleOben />}
       {leiste === 'menue' && <Modulmenue />}
     </div>

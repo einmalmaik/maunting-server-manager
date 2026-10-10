@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-erweiterung-popup-schliessen"
+description = "Enables the erweiterung_popup_schliessen command without any pre-configured scope."
+commands.allow = ["erweiterung_popup_schliessen"]
+
+[[permission]]
+identifier = "deny-erweiterung-popup-schliessen"
+description = "Denies the erweiterung_popup_schliessen command without any pre-configured scope."
+commands.deny = ["erweiterung_popup_schliessen"]

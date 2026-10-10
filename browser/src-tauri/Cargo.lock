@@ -2429,6 +2429,7 @@ dependencies = [
  "jni 0.21.1",
  "keyring",
  "reqwest",
+ "ring",
  "rustls",
  "schluesselfach",
  "serde",
@@ -2445,6 +2446,7 @@ dependencies = [
  "webview2-com",
  "windows",
  "windows-core",
+ "zip",
 ]
 
 [[package]]
@@ -6102,6 +6104,7 @@ checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
 dependencies = [
  "arbitrary",
  "crc32fast",
+ "flate2",
  "indexmap 2.14.2",
  "memchr",
 ]

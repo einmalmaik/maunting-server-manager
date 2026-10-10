@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-erweiterungen-entwicklermodus"
+description = "Enables the erweiterungen_entwicklermodus command without any pre-configured scope."
+commands.allow = ["erweiterungen_entwicklermodus"]
+
+[[permission]]
+identifier = "deny-erweiterungen-entwicklermodus"
+description = "Denies the erweiterungen_entwicklermodus command without any pre-configured scope."
+commands.deny = ["erweiterungen_entwicklermodus"]

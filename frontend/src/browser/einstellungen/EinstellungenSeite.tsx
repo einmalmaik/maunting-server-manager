@@ -14,6 +14,7 @@ import { Allgemein } from './Allgemein'
 import { Design } from './Design'
 import { Dienste } from './Dienste'
 import { Downloads } from './Downloads'
+import { Erweiterungen } from './Erweiterungen'
 import { Jugendschutz } from './Jugendschutz'
 import { istAndroid } from '../services/plattform'
 import { DATENSCHUTZ_TEIL, sichtbareKategorien, type Kategorie } from './kategorien'
@@ -34,6 +35,7 @@ const INHALT: Record<Kategorie, () => JSX.Element | null> = {
   verlauf: VerlaufDaten,
   passwoerter: Passwoerter,
   downloads: Downloads,
+  erweiterungen: Erweiterungen,
   design: Design,
   leistung: Leistung,
   dienste: Dienste,

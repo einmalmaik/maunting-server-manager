@@ -252,6 +252,11 @@ describe('Privacy page', () => {
     // 3.39: unter Windows fragt der Browser beim Start GitHub nach Updates.
     expect(i18n.t('privacyPolicy.sections.browser.items.updates')).toMatch(/fragt der Browser bei GitHub/);
     expect(i18n.t('privacyPolicy.sections.browser.items.updates')).toMatch(/erst auf Ihren Klick/);
+    // Erweiterungen (noch 3.39): Pakete von Google, Rechte vorher, nicht privat und nicht mit Jugendschutz.
+    expect(i18n.t('privacyPolicy.sections.browser.items.erweiterungen')).toMatch(/clients2\.google\.com/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.erweiterungen')).toMatch(/kontrolliert der Browser\s+nicht/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.erweiterungen')).toMatch(/nicht in privaten Tabs und nicht, solange der Jugend- und Suchtschutz an ist/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.verbindungen')).toMatch(/Erweiterungen lädt er nur auf Ihren Wunsch von Google/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

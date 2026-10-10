@@ -11,6 +11,7 @@ pub mod browserdaten;
 pub mod cookies;
 pub mod datei;
 pub mod downloads;
+pub mod erweiterungen;
 pub mod fenster;
 pub mod konfig;
 pub mod kurzinfo;
@@ -90,6 +91,8 @@ pub fn run() {
             schild::listen::starten(handle);
             schild::gesamt::starten(handle);
             downloads::quarantaene::beim_start(handle);
+            #[cfg(windows)]
+            erweiterungen::beim_start(handle);
             schild::schutz_dienst::starten(handle);
             tabs::ruhe::starten(handle.clone());
             #[cfg(desktop)]
@@ -155,6 +158,17 @@ pub fn run() {
             widget::standardbrowser_einstellungen,
             aktualisieren::update_pruefen,
             aktualisieren::update_installieren,
+            erweiterungen::erweiterungen_liste,
+            erweiterungen::erweiterung_pruefen,
+            erweiterungen::erweiterung_installieren,
+            erweiterungen::erweiterung_verwerfen,
+            erweiterungen::erweiterung_schalten,
+            erweiterungen::erweiterung_anheften,
+            erweiterungen::erweiterung_entfernen,
+            erweiterungen::erweiterungen_entwicklermodus,
+            erweiterungen::erweiterung_popup,
+            erweiterungen::erweiterung_popup_schliessen,
+            erweiterungen::erweiterung_optionen,
         ])
         .on_window_event(|fenster, ereignis| {
             // „Beim Schließen vergessen“: erst die Seitendaten löschen, dann

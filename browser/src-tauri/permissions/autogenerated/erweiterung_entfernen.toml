@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-erweiterung-entfernen"
+description = "Enables the erweiterung_entfernen command without any pre-configured scope."
+commands.allow = ["erweiterung_entfernen"]
+
+[[permission]]
+identifier = "deny-erweiterung-entfernen"
+description = "Denies the erweiterung_entfernen command without any pre-configured scope."
+commands.deny = ["erweiterung_entfernen"]

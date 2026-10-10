@@ -65,6 +65,11 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 windows-core = "0.62"
+# Erweiterungen aus dem Web Store (`erweiterungen/`): ring prüft die
+# Signaturen des CRX3-Pakets, zip entpackt es. Beide liegen über rustls und
+# den Updater schon im Baum.
+ring = "0.17"
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 tauri-plugin-biometric = "2"

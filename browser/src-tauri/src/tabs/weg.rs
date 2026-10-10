@@ -19,12 +19,23 @@ pub fn id_pruefen(id: &str) -> Result<(), String> {
 /// Oberfläche.
 const APP_HOSTS: [&str; 3] = ["tauri.localhost", "ipc.localhost", "asset.localhost"];
 
+/// Kennungen der Erweiterungen, die gerade laufen (nur Windows,
+/// `crate::erweiterungen`). Ihre Seiten (Optionen) darf ein Tab öffnen.
+static ERWEITERUNGEN: std::sync::RwLock<Vec<String>> = std::sync::RwLock::new(Vec::new());
+
+pub fn erweiterungen_setzen(laufen: Vec<String>) {
+    *ERWEITERUNGEN.write().unwrap() = laufen;
+}
+
 /// Darf ein Tab diese Adresse als Seite öffnen?
 pub fn navigation_erlaubt(url: &url::Url) -> bool {
     match url.scheme() {
         "http" | "https" => !url.host_str().is_some_and(|h| APP_HOSTS.contains(&h.trim_end_matches('.'))),
         // Leere Seite, Blob- und Data-Adressen, die eine Seite selbst erzeugt.
         "about" | "blob" | "data" => true,
+        // Nie die einer Erweiterung, die aus ist oder fehlt: sonst öffnete ein
+        // Link eine abgeschaltete Erweiterung, auch bei aktivem Jugendschutz.
+        "chrome-extension" => url.host_str().is_some_and(|h| ERWEITERUNGEN.read().unwrap().iter().any(|e| e == h)),
         _ => false,
     }
 }
@@ -66,10 +77,11 @@ pub fn weg(url: &str, weiterleitung: bool) -> Weg {
     }
 }
 
-/// Adressen, die die Oberfläche zum Öffnen schickt: nur Webseiten.
+/// Adressen, die die Oberfläche zum Öffnen schickt: Webseiten und die
+/// Seiten laufender Erweiterungen (Optionen).
 pub fn ziel_pruefen(url: &str) -> Result<url::Url, String> {
     let geparst = url::Url::parse(url).map_err(|_| "Ungültige Adresse".to_string())?;
-    if !matches!(geparst.scheme(), "http" | "https") || !navigation_erlaubt(&geparst) {
+    if !matches!(geparst.scheme(), "http" | "https" | "chrome-extension") || !navigation_erlaubt(&geparst) {
         return Err("Diese Adresse kann der Browser nicht öffnen.".into());
     }
     Ok(geparst)
@@ -128,6 +140,20 @@ mod tests {
         // Nachgeladenes darf andere Schemata haben (WebSocket), die Seite selbst nicht.
         assert_eq!(vorab("wss://example.com/live", false), Vorab::Schild { youtube: false });
         assert_eq!(vorab("wss://example.com/live", true), Vorab::Blocken(None));
+    }
+
+    #[test]
+    fn nur_laufende_erweiterungen_haben_seiten() {
+        const AN: &str = "ddkjiahejlhfcafbddmgiahcphecmpfh";
+        erweiterungen_setzen(vec![AN.into()]);
+        assert!(ziel_pruefen(&format!("chrome-extension://{AN}/options.html")).is_ok());
+        assert_eq!(weg(&format!("chrome-extension://{AN}/options.html"), false), Weg::Laden);
+        let fremd = "chrome-extension://eimadpbcbfnmbkopoojfekhnkhdbieeh/options.html";
+        assert!(ziel_pruefen(fremd).is_err());
+        assert_eq!(weg(fremd, false), Weg::Verboten);
+        assert_eq!(vorab(fremd, true), Vorab::Blocken(None));
+        erweiterungen_setzen(vec![]);
+        assert!(ziel_pruefen(&format!("chrome-extension://{AN}/options.html")).is_err());
     }
 
     #[test]

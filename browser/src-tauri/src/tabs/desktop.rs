@@ -32,10 +32,12 @@ use super::{melden, TabEreignis, Tabs};
 mod absturz;
 mod cookies;
 mod entwickler;
+mod erweiterungen;
 mod formulare;
 mod grundereignisse;
 mod herunterladen;
 mod ohne_edge;
+mod popup;
 mod rueckfragen;
 mod schlaf;
 mod standbild;
@@ -43,6 +45,7 @@ mod webview2;
 
 pub(crate) use rueckfragen::{recht_art, recht_name};
 pub use cookies::erneuern as cookies_erneuern;
+pub use popup::{oeffnen as erweiterung_popup, schliessen as erweiterung_popup_schliessen};
 pub use schlaf::{ruhen, stumm};
 
 pub(crate) struct Nativ {
@@ -113,6 +116,9 @@ fn umgebung(app: &AppHandle) -> Result<ICoreWebView2Environment, String> {
         optionen.set_additional_browser_arguments(BROWSER_ARGUMENTE.to_string());
         // Absturzberichte der Tabs bleiben auf dem Rechner (Datenschutzerklärung 3.30).
         optionen.set_is_custom_crash_reporting_enabled(true);
+        // Gilt je Umgebung und lässt sich später nicht umschalten. Ohne
+        // installierte Erweiterung ändert es nichts (`crate::erweiterungen`).
+        optionen.set_are_browser_extensions_enabled(true);
         CreateCoreWebView2EnvironmentWithOptions(
             PCWSTR::null(),
             &HSTRING::from(profil.as_os_str()),
@@ -194,6 +200,15 @@ fn anlegen(app: &AppHandle, id: &str, privat: bool) -> Result<ICoreWebView2, Str
         formulare::anbinden(app, id, &core).map_err(fehler)?;
         schlaf::anbinden(app, id, &core).map_err(fehler)?;
         webview2::einrichten(app, id, controller.clone(), umgebung.clone()).map_err(fehler)?;
+        // Der erste normale Tab gleicht die Erweiterungen an, bevor er lädt:
+        // was ohne offenen Tab geändert wurde (Jugendschutz), gilt sonst erst
+        // auf der zweiten Seite. Private Tabs haben keine.
+        if !privat && !NATIV.with(|n| n.borrow().values().any(|t| !t.privat)) {
+            match erweiterungen::abgleichen(&core, &crate::erweiterungen::soll(app)) {
+                Ok(laufen) => super::erweiterungen_setzen(laufen),
+                Err(e) => eprintln!("[MSB] Erweiterungen nicht abgeglichen: {e}"),
+            }
+        }
     }
     NATIV.with(|n| n.borrow_mut().insert(id.to_string(), Nativ { controller, core: core.clone(), umgebung, privat }));
     Ok(core)
@@ -375,7 +390,10 @@ pub fn oberflaeche_fokussieren(app: &AppHandle) {
 /// Ein Kern im Profil der Seiten, für Arbeit ohne Tab (Browserdaten löschen):
 /// ein offener Tab oder ein unsichtbarer Helfer, der bis zum nächsten Aufruf
 /// bleibt. `f` startet die Arbeit nur; warten muss der Aufrufer.
-pub(crate) fn im_profil(app: &AppHandle, f: impl FnOnce(&ICoreWebView2) -> Result<(), String> + Send + 'static) -> Result<(), String> {
+pub(crate) fn im_profil<T: Send + 'static>(
+    app: &AppHandle,
+    f: impl FnOnce(&ICoreWebView2) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
     let app2 = app.clone();
     auf_ui(app, move || {
         if let Some(core) = NATIV.with(|n| n.borrow().values().find(|t| !t.privat).map(|t| t.core.clone())) {
@@ -393,4 +411,26 @@ pub(crate) fn im_profil(app: &AppHandle, f: impl FnOnce(&ICoreWebView2) -> Resul
         });
         ergebnis
     })
+}
+
+/// Gleicht die Erweiterungen im Profil der Seiten an und gibt die laufenden
+/// Kennungen zurück. `nur_offen`: nur, wenn ein normaler Tab offen ist (sonst
+/// holt `anlegen` es nach); dann `None`.
+pub fn erweiterungen_abgleichen(
+    app: &AppHandle,
+    soll: Vec<crate::erweiterungen::liste::Soll>,
+    nur_offen: bool,
+) -> Result<Option<Vec<String>>, String> {
+    if nur_offen {
+        return auf_ui(app, move || match NATIV.with(|n| n.borrow().values().find(|t| !t.privat).map(|t| t.core.clone())) {
+            Some(core) => unsafe { erweiterungen::abgleichen(&core, &soll) }.map(Some),
+            None => Ok(None),
+        });
+    }
+    im_profil(app, move |core| unsafe { erweiterungen::abgleichen(core, &soll) }).map(Some)
+}
+
+/// Lädt einen entpackten Ordner ins Profil der Seiten; die Kennung vergibt WebView2.
+pub fn erweiterung_laden(app: &AppHandle, ordner: std::path::PathBuf) -> Result<String, String> {
+    im_profil(app, move |core| unsafe { erweiterungen::laden(core, &ordner) })
 }

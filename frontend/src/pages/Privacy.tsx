@@ -213,6 +213,7 @@ export function Privacy({ zurueck, zurueckAktion }: { zurueck?: string; zurueckA
           t('privacyPolicy.sections.browser.items.android'),
           t('privacyPolicy.sections.browser.items.widget'),
           t('privacyPolicy.sections.browser.items.uebersetzung'),
+          t('privacyPolicy.sections.browser.items.erweiterungen'),
         ],
       },
       {
