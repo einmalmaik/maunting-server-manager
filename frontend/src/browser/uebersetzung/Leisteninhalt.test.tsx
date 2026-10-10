@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { useUebersetzung, type Eintrag } from './ablauf'
 import { Leisteninhalt } from './Leisteninhalt'
 
+// Die Klicksperre neuer Leisten prüft `FormularLeiste.test.tsx`; hier wird sofort geklickt.
+vi.mock('../seite/klickSperre', () => ({ useKlickSperre: () => () => {} }))
+
 const eintrag = (stand: Eintrag['stand'], von = 'fr'): Eintrag => ({ url: 'https://example.org/', von, nach: 'de', stand, lauf: 1 })
 
 describe('Übersetzungsleiste', () => {

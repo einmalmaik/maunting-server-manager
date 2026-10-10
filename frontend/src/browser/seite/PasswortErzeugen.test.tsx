@@ -7,6 +7,8 @@ const { gerufen, gesperrt } = vi.hoisted(() => ({
   gesperrt: { eingerichtet: true, gespeichert: [] as unknown[][] },
 }))
 
+// Die Klicksperre neuer Leisten prüft `FormularLeiste.test.tsx`; hier wird sofort geklickt.
+vi.mock('./klickSperre', () => ({ useKlickSperre: () => () => {} }))
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (befehl: string, args: Record<string, unknown>) => {
     gerufen.push({ befehl, args })

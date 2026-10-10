@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.net.Uri
 import android.print.PrintManager
 import android.util.Base64
 import android.view.View
@@ -14,6 +15,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
@@ -332,8 +334,15 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  fun vollbildZeigen(ansicht: View, rueckruf: WebChromeClient.CustomViewCallback) {
+  /**
+   * Eine Seite im Vollbild kann die Leisten des Browsers nachbauen. Wer gerade
+   * den ganzen Bildschirm hat, steht deshalb jedes Mal in einem Hinweis, wie in
+   * Chrome; Zurück beendet das Vollbild immer (`zurueck`).
+   */
+  fun vollbildZeigen(ansicht: View, rueckruf: WebChromeClient.CustomViewCallback, adresse: String?) {
     vollbild?.let { vollbildBeenden() }
+    val host = adresse?.let { Uri.parse(it).host }.orEmpty()
+    Toast.makeText(activity, activity.getString(R.string.vollbild_hinweis, host), Toast.LENGTH_LONG).show()
     vollbild = ansicht to rueckruf
     inhalt.addView(ansicht, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
     val leisten = WindowCompat.getInsetsController(activity.window, inhalt)

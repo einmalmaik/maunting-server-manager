@@ -24,6 +24,8 @@ pub enum Grund {
     Eigene,
     /// Eine öffentliche IP-Adresse statt eines Namens.
     Adresse,
+    /// Eine Suche, an die der Browser die sichere Suche nicht hängen kann.
+    Suche,
 }
 
 impl Grund {
@@ -32,6 +34,7 @@ impl Grund {
             Grund::Kategorie(k) => k.name(),
             Grund::Eigene => "eigene",
             Grund::Adresse => "adresse",
+            Grund::Suche => "suche",
         }
     }
 }
@@ -96,6 +99,9 @@ fn mit_eltern(host: &str) -> impl Iterator<Item = &str> {
 
 impl Sperre {
     pub fn einstufen(&self, url: &str) -> Option<Grund> {
+        if self.sichere_suche && suche_ohne_parameter(url) {
+            return Some(Grund::Suche);
+        }
         if self.listen.is_empty() && self.eigene.is_empty() {
             return None;
         }
@@ -139,7 +145,7 @@ pub fn sicher_umschreiben(url: &str) -> Option<String> {
     let suche = u.query_pairs().any(|(k, _)| k == "q");
     let (name, wert) = if (host.starts_with("google.") || host.contains(".google.")) && (pfad == "/search" || pfad.starts_with("/images")) {
         ("safe", "active")
-    } else if host == "bing.com" && pfad.ends_with("/search") {
+    } else if (host == "bing.com" || host.ends_with(".bing.com")) && pfad.ends_with("/search") {
         ("adlt", "strict")
     } else if matches!(host, "duckduckgo.com" | "html.duckduckgo.com" | "lite.duckduckgo.com") && suche {
         ("kp", "1")
@@ -154,6 +160,17 @@ pub fn sicher_umschreiben(url: &str) -> Option<String> {
     let rest: Vec<(String, String)> = u.query_pairs().filter(|(k, _)| k != name).map(|(k, v)| (k.into_owned(), v.into_owned())).collect();
     u.query_pairs_mut().clear().extend_pairs(rest).append_pair(name, wert);
     Some(u.into())
+}
+
+/// DuckDuckGo HTML und Lite schicken die Suche per POST, `q` steht im Körper.
+/// An die Adresse lässt sich `kp` dort nicht hängen; solange die sichere
+/// Suche gilt, sind diese Seiten ohne `q` in der Adresse gesperrt. Eine
+/// Suche per GET schreibt [`sicher_umschreiben`] um.
+fn suche_ohne_parameter(url: &str) -> bool {
+    let Ok(u) = url::Url::parse(url) else { return false };
+    let Some(host) = u.host_str().map(|h| h.trim_end_matches('.').to_ascii_lowercase()) else { return false };
+    let ddg = matches!(host.trim_start_matches("www."), "duckduckgo.com" | "html.duckduckgo.com" | "lite.duckduckgo.com");
+    ddg && (u.path().starts_with("/html") || u.path().starts_with("/lite")) && !u.query_pairs().any(|(k, _)| k == "q")
 }
 
 /// Navigation zu einer Suche ohne sichere Suche: hierhin stattdessen.
@@ -259,6 +276,25 @@ mod tests {
 
     /// Bugjagd 08.10.2026: ein Punkt am Host und DuckDuckGo ohne JavaScript
     /// umgingen die sichere Suche.
+    #[test]
+    fn sichere_suche_auch_auf_anderen_bing_hosts() {
+        assert_eq!(sicher_umschreiben("https://cn.bing.com/images/search?q=x&adlt=off").unwrap(), "https://cn.bing.com/images/search?q=x&adlt=strict");
+        assert_eq!(sicher_umschreiben("https://bing.com/search?q=x").unwrap(), "https://bing.com/search?q=x&adlt=strict");
+        assert_eq!(sicher_umschreiben("https://nichtbing.com/search?q=x"), None);
+    }
+
+    // DuckDuckGo HTML und Lite schicken `q` per POST im Körper (bis 10.10.2026 ungeprüft).
+    #[test]
+    fn duckduckgo_per_post_ist_bei_sicherer_suche_gesperrt() {
+        let s = sperre();
+        for url in ["https://html.duckduckgo.com/html/", "https://lite.duckduckgo.com/lite/", "https://duckduckgo.com/html", "https://duckduckgo.com./lite/?kp=-2"] {
+            assert_eq!(s.einstufen(url), Some(Grund::Suche), "{url}");
+        }
+        assert_eq!(s.einstufen("https://html.duckduckgo.com/html/?q=x&kp=1"), None, "per GET schreibt sicher_umschreiben um");
+        assert_eq!(s.einstufen("https://duckduckgo.com/?q=x"), None);
+        assert_eq!(Sperre { sichere_suche: false, ..sperre() }.einstufen("https://html.duckduckgo.com/html/"), None);
+    }
+
     #[test]
     fn sichere_suche_auch_mit_punkt_am_host_und_ohne_javascript() {
         for url in [

@@ -11,6 +11,7 @@ import { PasswordInput } from '@/components/ui/PasswordInput'
 
 import { herkunftsName, useFrageDesTabs, useRueckfragen, type Rueckfrage } from '../services/rueckfragen'
 import { useAktiverTab } from '../services/tabsStore'
+import { useKlickSperre } from './klickSperre'
 
 /** Längere Texte einer Seite werden gekürzt; ein Dialog ist kein Leseort. */
 const TEXT_MAX = 2000
@@ -32,6 +33,7 @@ function Frage({ frage }: { frage: Exclude<Rueckfrage, { art: 'kontextmenue' }> 
   const herkunft = herkunftsName(frage.herkunft)
   const titelId = useId()
   const textId = useId()
+  const sperre = useKlickSperre()
 
   // Was nur bestätigt, schließt ohne Eingabe; Escape und Zurück heißen „nein“.
   const nein = () => {
@@ -69,6 +71,7 @@ function Frage({ frage }: { frage: Exclude<Rueckfrage, { art: 'kontextmenue' }> 
     <Dialog open onOpenChange={(offen) => !offen && nein()}>
       <DialogContent className="max-w-md" aria-labelledby={titelId} aria-describedby={textId}>
         <form
+          onClickCapture={sperre}
           onSubmit={(e) => {
             e.preventDefault()
             ja()
@@ -90,12 +93,13 @@ function Frage({ frage }: { frage: Exclude<Rueckfrage, { art: 'kontextmenue' }> 
             </div>
           )}
           <DialogFooter>
+            {/* Bei Rechten liegt der Fokus auf „Blockieren“: ein Enter, das der Seite galt, erlaubt nichts. */}
             {neinText && (
-              <Button type="button" variant="ghost" onClick={nein}>
+              <Button type="button" variant="ghost" onClick={nein} autoFocus={frage.art === 'recht'}>
                 {neinText}
               </Button>
             )}
-            <Button type="submit" autoFocus={frage.art !== 'anmeldung' && !(frage.art === 'dialog' && frage.dialog === 'prompt')}>
+            <Button type="submit" autoFocus={frage.art === 'dialog' && frage.dialog !== 'prompt'}>
               {jaText}
             </Button>
           </DialogFooter>

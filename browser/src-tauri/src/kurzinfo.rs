@@ -25,6 +25,9 @@ pub enum Richtung {
     Rechts,
     /// `x` ist die rechte Kante, `y` die senkrechte Mitte.
     Links,
+    /// Oben in der Mitte des Bildschirms, größer; `x` und `y` zählen nicht.
+    /// Der Hinweis beim Vollbild einer Seite (`vollbildHinweis.ts`).
+    Oben,
 }
 
 /// Eine Blase: Text, Ankerpunkt in CSS-Pixeln der Oberfläche, Farben als RGB
@@ -65,6 +68,7 @@ fn linke_kante(x: i32, breite: i32, richtung: Richtung) -> i32 {
     match richtung {
         Richtung::Rechts => x,
         Richtung::Links => x - breite,
+        Richtung::Oben => x - breite / 2,
     }
 }
 
@@ -150,7 +154,8 @@ mod fenster {
     unsafe fn anzeigen(besitzer: HWND, faktor: f64, b: Blase) {
         let Some(f) = FENSTER.get().or_else(|| anlegen(besitzer)) else { return };
         let px = |v: f64| (v * faktor).round() as i32;
-        let hoehe = px(12.0);
+        let oben = b.richtung == super::Richtung::Oben;
+        let hoehe = px(if oben { 16.0 } else { 12.0 });
         let text: Vec<u16> = gekuerzt(&b.text).encode_utf16().collect();
 
         BILD.with(|bild| {
@@ -175,11 +180,19 @@ mod fenster {
         SelectObject(dc, alt);
         ReleaseDC(Some(f), dc);
 
-        // px-2 py-1 wie die Kurzinfo der Oberfläche.
-        let breite = groesse.cx + px(16.0);
-        let hoch = groesse.cy + px(8.0);
+        // px-2 py-1 wie die Kurzinfo der Oberfläche, der Hinweis px-4 py-2.
+        let breite = groesse.cx + px(if oben { 32.0 } else { 16.0 });
+        let hoch = groesse.cy + px(if oben { 16.0 } else { 8.0 });
         let mut punkt = POINT { x: px(b.x), y: px(b.y) };
-        let _ = ClientToScreen(besitzer, &mut punkt);
+        if oben {
+            // Am Bildschirm, nicht am Fenster: das stellt gerade erst auf Vollbild um.
+            let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+            let _ = GetMonitorInfoW(MonitorFromWindow(besitzer, MONITOR_DEFAULTTONEAREST), &mut info);
+            let m = info.rcMonitor;
+            punkt = POINT { x: (m.left + m.right) / 2, y: m.top + px(24.0) + hoch / 2 };
+        } else {
+            let _ = ClientToScreen(besitzer, &mut punkt);
+        }
         let links = super::linke_kante(punkt.x, breite, b.richtung);
         let _ = SetWindowPos(f, Some(HWND_TOP), links, punkt.y - hoch / 2, breite, hoch, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         let _ = InvalidateRect(Some(f), None, true);
@@ -243,6 +256,7 @@ mod tests {
     fn eine_blase_links_endet_am_punkt() {
         assert_eq!(linke_kante(500, 80, Richtung::Rechts), 500);
         assert_eq!(linke_kante(500, 80, Richtung::Links), 420);
+        assert_eq!(linke_kante(500, 80, Richtung::Oben), 460);
         let ohne: Blase = serde_json::from_str(r#"{"text":"a","x":1,"y":2,"hintergrund":[0,0,0],"schrift":[0,0,0],"rand":[0,0,0]}"#).unwrap();
         assert_eq!(ohne.richtung, Richtung::Rechts);
     }

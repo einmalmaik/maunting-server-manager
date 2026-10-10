@@ -10,4 +10,5 @@
     <string name="widget_kamera">Search with a photo</string>
     <string name="widget_keine_sprache">This phone has no speech recognition. Type your search instead.</string>
     <string name="widget_keine_kamera">This phone has no camera app.</string>
+    <string name="vollbild_hinweis">%1$s is now full screen. Go back to exit.</string>
 </resources>

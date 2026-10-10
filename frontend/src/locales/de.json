@@ -9534,6 +9534,10 @@
         "gespeichert": "Neues Passwort für {{host}} im Tresor gespeichert"
       }
     },
+    "vollbild": {
+      "hinweis": "{{host}} ist jetzt im Vollbild. Esc beendet es.",
+      "hinweisOhneHost": "Die Seite ist jetzt im Vollbild. Esc beendet es."
+    },
     "schutz": {
       "an": "Schutz an",
       "anHinweis": "Sperrt die gewählten Seiten in allen Tabs, auch in privaten.",
@@ -9573,6 +9577,7 @@
       "gesperrtTitel": "Diese Seite ist gesperrt",
       "gesperrtText": "{{host}} gehört zu „{{kategorie}}“. So ist es im Jugend- und Suchtschutz eingestellt.",
       "gesperrtEigene": "{{host}} steht in deinen eigenen Sperren.",
+      "gesperrtSuche": "{{host}} schickt Suchen so ab, dass der Browser die sichere Suche nicht erzwingen kann. Solange Inhalte für Erwachsene gesperrt sind, suchst du bei DuckDuckGo über duckduckgo.com.",
       "gesperrtAdresse": "{{host}} ist eine IP-Adresse. Solange der Jugend- und Suchtschutz Kategorien sperrt, öffnet der Browser Seiten im Internet nur über ihren Namen.",
       "zurStartseite": "Zur Startseite",
       "einstellungen": "Schutz-Einstellungen",

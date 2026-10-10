@@ -8,4 +8,5 @@
     <string name="widget_kamera">Mit einem Foto suchen</string>
     <string name="widget_keine_sprache">Auf diesem Telefon gibt es keine Spracherkennung. Tippe die Suche stattdessen ein.</string>
     <string name="widget_keine_kamera">Auf diesem Telefon gibt es keine Kamera-App.</string>
+    <string name="vollbild_hinweis">%1$s ist jetzt im Vollbild. Zurück beendet es.</string>
 </resources>

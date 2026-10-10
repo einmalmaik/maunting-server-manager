@@ -52,6 +52,7 @@ import { useWidget } from './services/widget'
 import { useUeberdeckungBeobachten } from './services/ueberdeckung'
 import { useVerlaufFrist } from './services/verlaufStore'
 import { Uebersetzungsleiste } from './uebersetzung/Uebersetzungsleiste'
+import { vollbildHinweis } from './seite/vollbildHinweis'
 
 export function BrowserApp() {
   return (
@@ -69,8 +70,9 @@ function useTabEreignisse(ziele: KuerzelZiele) {
     let abmelden: (() => void) | null = null
     let aktiv = true
     void tabEreignisse((e) => {
-      if (e.art === 'taste') kuerzelAusfuehren(e.taste, aktuell.current)
-      else useTabsStore.getState().ereignis(e)
+      if (e.art === 'taste') return kuerzelAusfuehren(e.taste, aktuell.current)
+      if (e.art === 'vollbild') vollbildHinweis(e.an, useTabsStore.getState().tabs.find((t) => t.id === e.id)?.url)
+      useTabsStore.getState().ereignis(e)
     }).then((weg) => {
       if (aktiv) abmelden = weg
       else weg()

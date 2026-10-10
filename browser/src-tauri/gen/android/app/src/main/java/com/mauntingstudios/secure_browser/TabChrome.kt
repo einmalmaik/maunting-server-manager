@@ -27,6 +27,11 @@ import java.io.ByteArrayOutputStream
  * (ehrliche Lücke gegenüber Windows).
  */
 class TabChrome(private val plugin: TabsPlugin, private val tab: Tab) : WebChromeClient() {
+  private companion object {
+    /** Länger lebt ein Fenster nie, das keine Adresse nennt. */
+    const val HILFE_HOECHSTENS_MS = 10_000L
+  }
+
   override fun onReceivedTitle(view: WebView, titel: String?) {
     tab.melden("titel", "titel" to titel.orEmpty())
   }
@@ -40,23 +45,31 @@ class TabChrome(private val plugin: TabsPlugin, private val tab: Tab) : WebChrom
   /**
    * Ein neues Fenster wird ein Tab; geöffnet nur nach einem Tippen, wie im
    * Popup-Blocker von Chrome. Die Hilfs-WebView liegt im Profil des Tabs und
-   * lädt nichts: ihre erste Navigation nennt nur die Adresse.
+   * lädt nichts: ihre erste Navigation nennt nur die Adresse. Öffnet die Seite
+   * ein leeres Fenster (`window.open()`), kommt keine Navigation; die
+   * Hilfs-WebView fällt dann nach `HILFE_HOECHSTENS_MS`, statt für immer zu
+   * bleiben. Was die Seite hineinschreibt, lädt über die Prüfung des Tabs
+   * (`Tab.shouldInterceptRequest`, im Emulator gemessen), nicht an ihr vorbei.
    */
   override fun onCreateWindow(view: WebView, dialog: Boolean, tippen: Boolean, ergebnis: Message): Boolean {
     if (!tippen) return false
     val hilfe = WebView(view.context)
     WebViewCompat.setProfile(hilfe, tab.profil)
+    // Nicht `post` an der View: eine nie angehängte View führt das nie aus.
+    val haupt = Handler(Looper.getMainLooper())
+    var weg = false
+    val entsorgen = { if (!weg) { weg = true; hilfe.destroy() } }
     hilfe.webViewClient = object : WebViewClient() {
       override fun shouldOverrideUrlLoading(v: WebView, anfrage: WebResourceRequest): Boolean {
         val url = anfrage.url.toString()
         if (url.startsWith("https://") || url.startsWith("http://")) tab.melden("neuer_tab", "url" to url)
-        // Nicht `v.post`: eine nie angehängte View führt das nie aus.
-        Handler(Looper.getMainLooper()).post { v.destroy() }
+        haupt.post(entsorgen)
         return true
       }
     }
     (ergebnis.obj as WebView.WebViewTransport).webView = hilfe
     ergebnis.sendToTarget()
+    haupt.postDelayed(entsorgen, HILFE_HOECHSTENS_MS)
     return true
   }
 
@@ -93,7 +106,7 @@ class TabChrome(private val plugin: TabsPlugin, private val tab: Tab) : WebChrom
   }
 
   override fun onShowCustomView(ansicht: View, rueckruf: CustomViewCallback) {
-    plugin.vollbildZeigen(ansicht, rueckruf)
+    plugin.vollbildZeigen(ansicht, rueckruf, tab.webView.url)
   }
 
   override fun onHideCustomView() {

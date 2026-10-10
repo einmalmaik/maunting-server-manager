@@ -23,7 +23,7 @@ use webview2_com::{
     SourceChangedEventHandler, WebResourceRequestedEventHandler,
 };
 use windows::core::{Interface, BOOL, HSTRING, PWSTR};
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_ESCAPE, VK_SHIFT};
 
 use crate::schild::{self, AnfrageArt};
 use crate::tabs::{melden, vorab, TabEreignis, Vorab};
@@ -216,7 +216,7 @@ pub(super) unsafe fn einrichten(
     }
 
     {
-        let (app, id) = (app.clone(), id.to_string());
+        let (app, id, seite) = (app.clone(), id.to_string(), core.clone());
         controller.add_AcceleratorKeyPressed(
             &AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
                 let Some(args) = args else { return Ok(()) };
@@ -226,6 +226,17 @@ pub(super) unsafe fn einrichten(
                 args.VirtualKey(&mut taste)?;
                 let alt = art == COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN;
                 if art != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN && !alt {
+                    return Ok(());
+                }
+                if taste == VK_ESCAPE.0 as u32 && !alt && im_vollbild(&app, &id) {
+                    // Escape beendet das Vollbild immer, auch wenn die Seite
+                    // die Taste für sich will (`navigator.keyboard.lock`): eine
+                    // Seite im Vollbild kann sonst die Leisten des Browsers
+                    // nachbauen. `seite.js` nimmt das Element heraus, damit die
+                    // Seite es weiß; das Fenster geht auch ohne `seite.js` zurück.
+                    args.SetHandled(true)?;
+                    let _ = seite.PostWebMessageAsString(&HSTRING::from(VOLLBILD_AUS));
+                    super::vollbild(&app, &id, false);
                     return Ok(());
                 }
                 let strg = GetKeyState(VK_CONTROL.0 as i32) < 0;
@@ -244,6 +255,14 @@ pub(super) unsafe fn einrichten(
     super::rueckfragen::anbinden(app, id, &core)?;
     super::entwickler::anbinden(app, id, &core)?;
     Ok(())
+}
+
+/// Die Nachricht an `seite.js`, die das Vollbild der Seite beendet.
+const VOLLBILD_AUS: &str = r#"{"t":"vollbild_aus"}"#;
+
+fn im_vollbild(app: &AppHandle, id: &str) -> bool {
+    use tauri::Manager;
+    app.state::<crate::tabs::Tabs>().0.lock().unwrap().vollbild.as_deref() == Some(id)
 }
 
 fn anfrage_art(kontext: COREWEBVIEW2_WEB_RESOURCE_CONTEXT) -> AnfrageArt {

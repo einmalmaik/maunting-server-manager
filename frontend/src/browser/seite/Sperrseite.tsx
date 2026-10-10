@@ -23,6 +23,8 @@ export function Sperrseite({ tab }: { tab: Tab }) {
       ? t('browser.schutz.gesperrtEigene', { host })
       : tab.gesperrt === 'adresse'
         ? t('browser.schutz.gesperrtAdresse', { host })
+        : tab.gesperrt === 'suche'
+          ? t('browser.schutz.gesperrtSuche', { host })
         : t('browser.schutz.gesperrtText', { host, kategorie: t(`browser.schutz.kategorie.${tab.gesperrt}`, { defaultValue: '' }) })
 
   return (

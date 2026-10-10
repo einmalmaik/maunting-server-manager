@@ -9534,6 +9534,10 @@
         "gespeichert": "New password for {{host}} saved in the vault"
       }
     },
+    "vollbild": {
+      "hinweis": "{{host}} is now full screen. Press Esc to exit.",
+      "hinweisOhneHost": "The page is now full screen. Press Esc to exit."
+    },
     "schutz": {
       "an": "Protection on",
       "anHinweis": "Blocks the chosen sites in every tab, private tabs included.",
@@ -9573,6 +9577,7 @@
       "gesperrtTitel": "This site is blocked",
       "gesperrtText": "{{host}} is in “{{kategorie}}”. That is how youth and habit protection is set up.",
       "gesperrtEigene": "{{host}} is on your own block list.",
+      "gesperrtSuche": "{{host}} sends searches in a way that keeps the browser from enforcing safe search. While adult content is blocked, search DuckDuckGo at duckduckgo.com.",
       "gesperrtAdresse": "{{host}} is an IP address. While youth and habit protection blocks categories, the browser opens internet sites only by their name.",
       "zurStartseite": "Go to start page",
       "einstellungen": "Protection settings",

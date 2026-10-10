@@ -52,6 +52,9 @@
   const rollX = getter(window, 'scrollX')
   const rollY = getter(window, 'scrollY')
   const daten = getter(MessageEvent.prototype, 'data')
+  const imVollbild = getter(Document.prototype, 'fullscreenElement')
+  const vollbildVerlassen = Document.prototype.exitFullscreen
+  const dokument = document
   const aktivierung = navigator.userActivation
   const aktivLesen = getter(aktivierung && Object.getPrototypeOf(aktivierung), 'isActive')
   // Hat der Nutzer gerade geklickt oder getippt? Ein Fokus oder Absenden per
@@ -469,6 +472,12 @@
     const d = nachricht(e)
     if (d && d.t === 'datei' && android) return void dateiGeben(d.nr, d.url)
     if (d && d.t === 'uebersetzen') return void uebersetzen(d)
+    // Escape beendet das Vollbild im Browser, auch wenn die Seite die Taste
+    // abfängt (`webview2.rs`); hier erfährt es die Seite.
+    if (d && d.t === 'vollbild_aus') {
+      if (imVollbild && anwenden(imVollbild, dokument, [])) anwenden(vollbildVerlassen, dokument, [])
+      return
+    }
     if (d && d.t === 'weiter' && quittungen.has(d.nr)) {
       const weiter = quittungen.get(d.nr)
       quittungen.delete(d.nr)

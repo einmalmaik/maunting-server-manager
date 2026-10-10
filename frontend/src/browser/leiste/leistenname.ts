@@ -51,6 +51,11 @@ function senden(blase: Record<string, unknown> | null): void {
   kette = kette.then(() => nativ.kurzinfo(blase)).catch(() => undefined)
 }
 
+/** Eine Blase in den Farben der Kurzinfo; `null` verbirgt sie. Für Hinweise außerhalb der Leiste. */
+export function blaseSenden(blase: Record<string, unknown> | null): void {
+  senden(blase && { ...blase, ...farbenLesen() })
+}
+
 let sichtbar = false
 let wartet: ReturnType<typeof setTimeout> | undefined
 

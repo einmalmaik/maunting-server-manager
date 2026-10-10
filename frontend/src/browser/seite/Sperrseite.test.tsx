@@ -18,6 +18,11 @@ describe('Sperrseite', () => {
     expect(screen.queryByText(/gehört zu/)).not.toBeInTheDocument()
   })
 
+  it('verweist bei DuckDuckGo per POST auf die Suche mit sicherer Suche', () => {
+    render(<Sperrseite tab={gesperrt('https://html.duckduckgo.com/html/', 'suche')} />)
+    expect(screen.getByText(/sichere Suche nicht erzwingen.*duckduckgo\.com\./)).toBeInTheDocument()
+  })
+
   it('nennt bei einer Kategorie die Kategorie', () => {
     render(<Sperrseite tab={gesperrt('https://casino.example/', 'gluecksspiel')} />)
     expect(screen.getByText(/casino\.example gehört zu/)).toBeInTheDocument()
