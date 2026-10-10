@@ -54,6 +54,7 @@ function stand(teil: Partial<SchutzStand> = {}): SchutzStand {
     regeln: regeln(),
     antrag: null,
     gebunden_sekunden: 0,
+    ungebunden: false,
     abkuehlen_sekunden: 0,
     serie: { tage: 0, rekord: 0 },
     beschaedigt: false,
@@ -160,6 +161,16 @@ describe('Jugend- und Suchtschutz in den Einstellungen', () => {
     expect(aufgerufen('schutz_binden')).toHaveLength(0)
     fireEvent.click(within(frage).getByRole('button', { name: 'Verlängern' }))
     await waitFor(() => expect(aufgerufen('schutz_binden')[0]?.args).toEqual({ tage: 7 }))
+  })
+
+  it('sagt ohne Bindung, dass Ausschalten sofort gilt, und nach einer Bindung, dass es ein Antrag ist', async () => {
+    rust.stand = stand({ ungebunden: true })
+    const { unmount } = render(<Jugendschutz />)
+    expect(await screen.findByText(/^Nicht gebunden: Lockern und Ausschalten gelten sofort\./)).toBeInTheDocument()
+    unmount()
+    rust.stand = stand({ ungebunden: false })
+    render(<Jugendschutz />)
+    expect(await screen.findByText(/^Nicht gebunden\. Lockern geht per Antrag\./)).toBeInTheDocument()
   })
 
   it('bietet keine Hürde zum Abtippen mehr an, nur Wartezeiten', async () => {

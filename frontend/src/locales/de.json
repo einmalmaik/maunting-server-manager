@@ -9579,7 +9579,7 @@
       "dauerTage_one": "{{count}} Tag, {{zeit}}",
       "dauerTage_other": "{{count}} Tage, {{zeit}}",
       "wartezeit": "Wartezeit vor dem Lockern",
-      "wartezeitHinweis": "Verschärfen gilt sofort. Wer lockert, stellt einen Antrag und kann ihn erst nach dieser Zeit bestätigen.",
+      "wartezeitHinweis": "Verschärfen gilt sofort. Nach einer Bindung ist Lockern ein Antrag, den du erst nach dieser Zeit bestätigen kannst.",
       "wartezeitStunden_one": "{{count}} Stunde",
       "wartezeitStunden_other": "{{count}} Stunden",
       "wartezeitTage_one": "{{count}} Tag",
@@ -9609,7 +9609,8 @@
       "binden": "Binden",
       "verlaengern": "Verlängern",
       "gebundenNoch": "Gebunden noch {{zeit}}. So lange lässt sich nichts lockern.",
-      "nichtGebunden": "Nicht gebunden. Bindest du dich, lässt sich der Schutz in dieser Zeit nicht lockern, nicht einmal beantragen.",
+      "nieGebunden": "Nicht gebunden: Lockern und Ausschalten gelten sofort. Bindest du dich, lässt sich der Schutz in dieser Zeit nicht lockern, nicht einmal beantragen, und danach nur per Antrag.",
+      "nichtGebunden": "Nicht gebunden. Lockern geht per Antrag. Bindest du dich, lässt sich der Schutz in dieser Zeit nicht lockern, nicht einmal beantragen.",
       "abkuehlen": "Ein neuer Antrag geht erst in {{zeit}}."
     },
     "widget": {

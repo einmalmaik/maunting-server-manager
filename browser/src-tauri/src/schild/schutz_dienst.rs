@@ -40,9 +40,14 @@ fn pfad(app: &AppHandle) -> Option<PathBuf> {
 /// `None`, wenn es keine Datei gibt; ein strenger Schutz, wenn sie nicht zu lesen ist.
 pub fn lesen(text: Option<&str>) -> (Schutz, bool) {
     let Some(text) = text else { return (Schutz::default(), false) };
-    let gelesen = serde_json::from_str::<Schutz>(text)
-        .ok()
-        .and_then(|s| Some(Schutz { regeln: s.regeln.clone().pruefen().ok()?, ..s }));
+    let gelesen = serde_json::from_str::<serde_json::Value>(text).ok().and_then(|wert| {
+        // Dateien von vor dem 10.10.2026 kennen `ungebunden` nicht. `gebunden_bis`
+        // fällt nie zurück, 0 heißt dort: nie gebunden.
+        let ohne_marke = wert.get("ungebunden").is_none();
+        let s = serde_json::from_value::<Schutz>(wert).ok()?;
+        let ungebunden = s.ungebunden || (ohne_marke && s.gebunden_bis == 0);
+        Some(Schutz { regeln: s.regeln.clone().pruefen().ok()?, ungebunden, ..s })
+    });
     match gelesen {
         Some(s) => (s, false),
         None => (Schutz { regeln: Regeln::streng(), ..Schutz::default() }, true),
@@ -185,6 +190,8 @@ pub struct Stand {
     pub regeln: Regeln,
     pub antrag: Option<AntragStand>,
     pub gebunden_sekunden: u64,
+    /// Seit dem Einschalten nie gebunden: Lockern gilt sofort.
+    pub ungebunden: bool,
     pub abkuehlen_sekunden: u64,
     pub serie: SerieStand,
     pub beschaedigt: bool,
@@ -200,6 +207,7 @@ pub fn stand_von(s: &Schutz, lokal: u64, zeit: u64) -> Stand {
             fenster_sekunden: (a.faellig + FENSTER).saturating_sub(zeit.max(a.faellig)),
         }),
         gebunden_sekunden: s.gebunden_bis.saturating_sub(zeit),
+        ungebunden: s.ungebunden,
         abkuehlen_sekunden: s.naechster_antrag_ab.saturating_sub(zeit),
         serie: SerieStand { tage: s.serie.tage(lokal), rekord: s.serie.rekord(lokal) },
         beschaedigt: BESCHAEDIGT.load(Ordering::Relaxed),
@@ -242,7 +250,11 @@ pub async fn schutz_stand(app: AppHandle) -> Result<Stand, String> {
 #[tauri::command]
 pub async fn schutz_aendern(app: AppHandle, regeln: Regeln) -> Result<Stand, String> {
     let regeln = regeln.pruefen()?;
-    let braucht_netz = lockert(&app.state::<SchutzZustand>().0.lock().unwrap().regeln, &regeln);
+    let braucht_netz = {
+        let zustand = app.state::<SchutzZustand>();
+        let s = zustand.0.lock().unwrap();
+        !s.ungebunden && lockert(&s.regeln, &regeln)
+    };
     let netz = if braucht_netz { netzzeit::holen(jetzt()).await } else { None };
     aendern_mit(&app, |s| s.aendern(regeln, jetzt(), netz))
 }

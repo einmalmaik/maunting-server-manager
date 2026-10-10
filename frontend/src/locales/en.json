@@ -9579,7 +9579,7 @@
       "dauerTage_one": "{{count}} day, {{zeit}}",
       "dauerTage_other": "{{count}} days, {{zeit}}",
       "wartezeit": "Waiting time before loosening",
-      "wartezeitHinweis": "Tightening applies at once. Loosening is a request you can only confirm after this time.",
+      "wartezeitHinweis": "Tightening applies at once. After a commitment, loosening is a request you can only confirm after this time.",
       "wartezeitStunden_one": "{{count}} hour",
       "wartezeitStunden_other": "{{count}} hours",
       "wartezeitTage_one": "{{count}} day",
@@ -9609,7 +9609,8 @@
       "binden": "Commit",
       "verlaengern": "Extend",
       "gebundenNoch": "Committed for {{zeit}}. Until then nothing can be loosened.",
-      "nichtGebunden": "Not committed. If you commit, the protection cannot be loosened during that time, not even by request.",
+      "nieGebunden": "Not committed: loosening and switching off apply at once. If you commit, the protection cannot be loosened during that time, not even by request, and afterwards only by request.",
+      "nichtGebunden": "Not committed. Loosening is a request. If you commit, the protection cannot be loosened during that time, not even by request.",
       "abkuehlen": "A new request is possible in {{zeit}}."
     },
     "widget": {

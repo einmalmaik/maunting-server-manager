@@ -3,9 +3,11 @@
 //! liegen in `schutz_dienst.rs`.
 //!
 //! - Verschärfen gilt sofort.
+//! - Solange seit dem Einschalten nicht gebunden wurde, gilt auch Lockern
+//!   sofort: ohne Bindung hat sich niemand auf etwas festgelegt.
 //! - Beim Einschalten bindet man sich (1 bis 90 Tage): in der Zeit lässt sich
 //!   nichts lockern, nicht einmal beantragen. Verlängern geht jederzeit.
-//! - Wer danach lockert (Schutz aus, Kategorie oder eigene Sperre weg,
+//! - Wer nach einer Bindung lockert (Schutz aus, Kategorie oder eigene Sperre weg,
 //!   Ausnahme dazu, kürzere Wartezeit), stellt einen Antrag. Er wird nach der
 //!   Wartezeit (24 h bis 7 Tage) für eine Stunde bestätigbar und verfällt
 //!   danach. Wer abbricht oder verfallen lässt, kann einen Tag lang keinen
@@ -167,11 +169,16 @@ pub struct Schutz {
     pub gebunden_bis: u64,
     /// Vorher kein neuer Antrag (nach Abbruch oder Verfall).
     pub naechster_antrag_ab: u64,
+    /// Seit dem Einschalten nie gebunden: Lockern gilt sofort. Eine kaputte
+    /// Datei gilt als gebunden gewesen; alte Dateien ohne das Feld liest
+    /// `schutz_dienst::lesen` an `gebunden_bis`.
+    pub ungebunden: bool,
     pub serie: Serie,
 }
 
 impl Schutz {
-    /// Übernimmt den Wunsch `neu`: Strengeres sofort, Lockeres als Antrag.
+    /// Übernimmt den Wunsch `neu`: Strengeres sofort, Lockeres als Antrag,
+    /// ohne vorige Bindung ebenfalls sofort.
     /// Bleibt ein Antrag offen, der nicht lockerer wird, behält er seine
     /// Fälligkeit; ein lockererer beginnt von vorn und braucht die Netzzeit
     /// `netz`. Fehler als Code für die Oberfläche: `ohne_netz`, `gebunden`,
@@ -180,7 +187,13 @@ impl Schutz {
         if !lockert(&self.regeln, &neu) {
             if neu.aktiv && !self.regeln.aktiv {
                 self.serie.seit = jetzt;
+                self.ungebunden = true;
             }
+            self.regeln = neu;
+            self.antrag = None;
+            return Ok(());
+        }
+        if self.ungebunden {
             self.regeln = neu;
             self.antrag = None;
             return Ok(());
@@ -212,6 +225,7 @@ impl Schutz {
             return Err("Der Schutz ist aus".into());
         }
         self.gebunden_bis = self.gebunden_bis.max(zeit + u64::from(tage) * TAG);
+        self.ungebunden = false;
         self.antrag = None;
         Ok(())
     }

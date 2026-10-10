@@ -154,6 +154,54 @@ fn waehrend_der_bindung_laesst_sich_nichts_beantragen() {
 }
 
 #[test]
+fn ohne_bindung_laesst_sich_der_schutz_sofort_wieder_ausschalten() {
+    let mut s = Schutz::default();
+    s.aendern(an(&[Kategorie::Erwachsene, Kategorie::Sozial]), T, None).unwrap();
+    // Weniger Kategorien und aus, auch ohne Netz und ohne Antrag.
+    s.aendern(an(&[Kategorie::Erwachsene]), T, None).unwrap();
+    assert_eq!(s.regeln, an(&[Kategorie::Erwachsene]));
+    s.aendern(Regeln { aktiv: false, ..an(&[Kategorie::Erwachsene]) }, T, None).unwrap();
+    assert!(!s.regeln.aktiv);
+    assert!(s.antrag.is_none());
+
+    // Nach einer Bindung wird wieder beantragt, auch wenn sie abgelaufen ist.
+    s.aendern(an(&[Kategorie::Erwachsene]), T, None).unwrap();
+    s.binden(1, T).unwrap();
+    let danach = T + 24 * H;
+    s.aendern(Regeln { aktiv: false, ..an(&[Kategorie::Erwachsene]) }, danach, Some(danach)).unwrap();
+    assert!(s.regeln.aktiv);
+    assert!(s.antrag.is_some());
+    s.bestaetigen(Some(danach + 24 * H)).unwrap();
+    assert!(!s.regeln.aktiv);
+
+    // Wieder eingeschaltet, ist man wieder frei, bis man bindet.
+    s.aendern(an(&[Kategorie::Sozial]), danach, None).unwrap();
+    s.aendern(an(&[]), danach, None).unwrap();
+    assert_eq!(s.regeln, an(&[]));
+}
+
+#[test]
+fn eine_alte_datei_ist_frei_nur_wenn_nie_gebunden_wurde() {
+    let (mut nie, _) = lesen(Some(r#"{"regeln":{"aktiv":true,"kategorien":["sozial"]},"gebunden_bis":0}"#));
+    nie.aendern(an(&[]), T, None).unwrap();
+    assert_eq!(nie.regeln, an(&[]));
+
+    let (mut einmal, _) = lesen(Some(r#"{"regeln":{"aktiv":true,"kategorien":["sozial"]},"gebunden_bis":5}"#));
+    einmal.aendern(an(&[]), T, Some(T)).unwrap();
+    assert_eq!(einmal.regeln, an(&[Kategorie::Sozial]));
+    assert!(einmal.antrag.is_some());
+
+    // Steht die Marke da, gilt sie, auch bei 0.
+    let (mut markiert, _) = lesen(Some(r#"{"regeln":{"aktiv":true,"kategorien":["sozial"]},"ungebunden":false}"#));
+    markiert.aendern(an(&[]), T, Some(T)).unwrap();
+    assert!(markiert.antrag.is_some());
+    // Kaputt heißt alles gesperrt und nicht frei.
+    let (mut kaputt, _) = lesen(Some("{"));
+    kaputt.aendern(Regeln::default(), T, Some(T)).unwrap();
+    assert!(kaputt.regeln.aktiv);
+}
+
+#[test]
 fn binden_nur_mit_schutz_und_bekannter_dauer() {
     assert!(Schutz::default().binden(7, T).is_err());
     assert!(schutz(an(&[])).binden(2, T).is_err());
@@ -187,8 +235,7 @@ fn die_serie_zaehlt_tage_ohne_treffer_und_behaelt_den_rekord() {
     // Eine längere Serie wird der neue Rekord.
     assert_eq!(s.serie.rekord(T + 10 * 24 * H), 6);
     // Wieder einschalten beginnt von vorn, der Rekord bleibt.
-    s.aendern(Regeln { aktiv: false, ..an(&[Kategorie::Erwachsene]) }, T, Some(T)).unwrap();
-    s.bestaetigen(Some(T + 24 * H)).unwrap();
+    s.aendern(Regeln { aktiv: false, ..an(&[Kategorie::Erwachsene]) }, T, None).unwrap();
     s.aendern(an(&[Kategorie::Erwachsene]), T + 40 * 24 * H, None).unwrap();
     assert_eq!((s.serie.tage(T + 40 * 24 * H), s.serie.rekord_tage), (0, 3));
 }

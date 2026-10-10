@@ -1,7 +1,8 @@
 /**
  * Die Selbstbindung des Jugend- und Suchtschutzes: für die gewählte Zeit
- * lässt sich nichts lockern, nicht einmal beantragen. Verlängern geht
- * jederzeit, verkürzen nie. Durchgesetzt in Rust (`Schutz::binden`).
+ * lässt sich nichts lockern, nicht einmal beantragen, danach nur per Antrag.
+ * Ohne Bindung gilt Lockern sofort. Verlängern geht jederzeit, verkürzen nie.
+ * Durchgesetzt in Rust (`Schutz::binden`).
  */
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -17,7 +18,15 @@ import { fehlerText } from './Lockerung'
 /** Wie `BINDUNGEN` in `schutz.rs`. */
 const TAGE = ['1', '7', '30', '90'] as const
 
-export function Bindung({ gebunden, binden }: { gebunden: number; binden: (tage: number) => Promise<unknown> }) {
+export function Bindung({
+  gebunden,
+  ungebunden,
+  binden,
+}: {
+  gebunden: number
+  ungebunden: boolean
+  binden: (tage: number) => Promise<unknown>
+}) {
   const { t } = useTranslation()
   const [tage, setTage] = useState<string>('7')
   const name = (w: string) => t('browser.schutz.bindungTage', { count: Number(w) })
@@ -34,7 +43,11 @@ export function Bindung({ gebunden, binden }: { gebunden: number; binden: (tage:
   return (
     <Aktionszeile
       name={t('browser.schutz.bindung')}
-      hinweis={gebunden > 0 ? t('browser.schutz.gebundenNoch', { zeit: dauerText(t, gebunden) }) : t('browser.schutz.nichtGebunden')}
+      hinweis={
+        gebunden > 0
+          ? t('browser.schutz.gebundenNoch', { zeit: dauerText(t, gebunden) })
+          : t(ungebunden ? 'browser.schutz.nieGebunden' : 'browser.schutz.nichtGebunden')
+      }
     >
       <Dropdown
         aria-label={t('browser.schutz.bindungDauer')}

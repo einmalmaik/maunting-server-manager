@@ -56,7 +56,7 @@ export function Jugendschutz() {
       </Abschnitt>
       {stand.regeln.aktiv && (
         <Abschnitt titel={t('browser.schutz.huerdeTitel')}>
-          <Bindung gebunden={uebrig(stand.gebunden_sekunden, vergangen)} binden={binden} />
+          <Bindung gebunden={uebrig(stand.gebunden_sekunden, vergangen)} ungebunden={stand.ungebunden} binden={binden} />
           <Auswahlzeile<string>
             name={t('browser.schutz.wartezeit')}
             hinweis={t('browser.schutz.wartezeitHinweis')}

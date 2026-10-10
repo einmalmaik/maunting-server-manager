@@ -244,6 +244,8 @@ export interface SchutzStand {
   antrag: { ziel: SchutzRegeln; rest_sekunden: number; fenster_sekunden: number } | null
   /** So lange lässt sich nichts lockern. */
   gebunden_sekunden: number
+  /** Seit dem Einschalten nie gebunden: Lockern und Ausschalten gelten sofort. */
+  ungebunden: boolean
   /** So lange kein neuer Antrag (nach Abbruch oder Verfall). */
   abkuehlen_sekunden: number
   /** Tage ohne gesperrte Seite; bleibt auf dem Gerät. */
