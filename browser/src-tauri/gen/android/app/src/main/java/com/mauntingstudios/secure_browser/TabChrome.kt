@@ -116,7 +116,7 @@ class TabChrome(private val plugin: TabsPlugin, private val tab: Tab) : WebChrom
 
     val nr = Rueckfragen.neu(tab.id) { a ->
       if (a?.optBoolean("erlauben") == true) {
-        val akt = plugin.activity
+        val akt = plugin.aktivitaet()
         val benoetigt = mutableListOf<String>()
         if (ressourcen.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE) &&
           ContextCompat.checkSelfPermission(akt, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED

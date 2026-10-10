@@ -371,6 +371,8 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  fun aktivitaet(): Activity = activity
+
   companion object {
     const val SEITEN = "seiten"
     const val PRIVAT = "privat-"
