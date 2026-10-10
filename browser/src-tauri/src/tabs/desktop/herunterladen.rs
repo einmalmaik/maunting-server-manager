@@ -9,7 +9,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -49,7 +48,6 @@ thread_local! {
 
 pub(super) unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -> windows::core::Result<()> {
     let Ok(core4) = core.cast::<ICoreWebView2_4>() else { return Ok(()) };
-    static NR: AtomicU64 = AtomicU64::new(1);
     let (app, id) = (app.clone(), id.to_string());
     let mut token = 0i64;
     core4.add_DownloadStarting(
@@ -61,7 +59,7 @@ pub(super) unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -
             let vorschlag = PathBuf::from(text(|p| args.ResultFilePath(p)));
             let lauf = Lauf {
                 tab: id.clone(),
-                nr: NR.fetch_add(1, Ordering::Relaxed),
+                nr: downloads::naechste_nr(),
                 name: downloads::name_fuer(&url, &vorschlag),
                 url,
                 gewaehlt: None,

@@ -39,6 +39,8 @@ import java.util.UUID
 @InvokeArg class AntwortArgs { var nr = 0L; lateinit var antwort: String }
 @InvokeArg class SuchenArgs { lateinit var id: String; lateinit var richtung: String; var begriff = "" }
 @InvokeArg class FuellenArgs { lateinit var id: String; lateinit var fuer: String; var rahmen: String? = null; lateinit var nachricht: String }
+@InvokeArg class StandbildArgs { lateinit var id: String; var png = false }
+@InvokeArg class BildSpeichernArgs { lateinit var id: String; lateinit var name: String; var url = ""; lateinit var png: String }
 @InvokeArg class BildsucheArgs { lateinit var id: String; var privat = false; lateinit var url: String; lateinit var feld: String; var base64 = false }
 
 /**
@@ -221,14 +223,28 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
 
   @Command
   fun standbild(invoke: Invoke) {
-    val a = invoke.parseArgs(TabArgs::class.java)
+    val a = invoke.parseArgs(StandbildArgs::class.java)
     aufUi(activity, invoke) {
       val ansicht = tab(a.id).webView
-      val bild = Bitmap.createBitmap(ansicht.width.coerceAtLeast(1), ansicht.height.coerceAtLeast(1), Bitmap.Config.RGB_565)
+      // Das Standbild beim Verdecken als JPEG, der Screenshot verlustfrei als PNG.
+      val bild = Bitmap.createBitmap(ansicht.width.coerceAtLeast(1), ansicht.height.coerceAtLeast(1), if (a.png) Bitmap.Config.ARGB_8888 else Bitmap.Config.RGB_565)
       ansicht.draw(Canvas(bild))
-      val bytes = ByteArrayOutputStream().also { bild.compress(Bitmap.CompressFormat.JPEG, 80, it) }.toByteArray()
+      val bytes = ByteArrayOutputStream().also {
+        if (a.png) bild.compress(Bitmap.CompressFormat.PNG, 100, it) else bild.compress(Bitmap.CompressFormat.JPEG, 80, it)
+      }.toByteArray()
       bild.recycle()
-      JSObject().put("jpeg", Base64.encodeToString(bytes, Base64.NO_WRAP))
+      JSObject().put("bild", Base64.encodeToString(bytes, Base64.NO_WRAP))
+    }
+  }
+
+  /** Ein Screenshot nach `Download/`; den Namen hat Rust bereinigt (`tabs/aufnahme.rs`). */
+  @Command
+  fun bildSpeichern(invoke: Invoke) {
+    val a = invoke.parseArgs(BildSpeichernArgs::class.java)
+    aufUi(activity, invoke) {
+      val datei = herunterladen.bild(a.id, a.name, a.url, Base64.decode(a.png, Base64.DEFAULT))
+        ?: throw IllegalStateException("Das Bild ließ sich nicht speichern")
+      JSObject().put("datei", datei)
     }
   }
 

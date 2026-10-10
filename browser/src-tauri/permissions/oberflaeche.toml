@@ -30,6 +30,8 @@ permissions = [
   "allow-tab-drucken",
   "allow-tab-fuellen",
   "allow-tab-uebersetzen",
+  "allow-tab-aufnahme",
+  "allow-aufnahme-speichern",
   "allow-sprachdaten-laden",
   "allow-tabs-zuruecksetzen",
   "allow-oberflaeche-fokussieren",

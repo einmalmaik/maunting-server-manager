@@ -327,6 +327,16 @@ pub fn standbild(app: &AppHandle, tabs: &Tabs) -> Result<Vec<u8>, String> {
     standbild::aufnehmen(app, &aktiv)
 }
 
+pub fn aufnahme(app: &AppHandle, id: &str, ganz: bool) -> Result<super::aufnahme::Aufnahme, String> {
+    use base64::Engine as _;
+    if ganz {
+        let (png, abgeschnitten) = standbild::ganz(app, id)?;
+        return Ok(super::aufnahme::Aufnahme { png, abgeschnitten });
+    }
+    let png = base64::engine::general_purpose::STANDARD.encode(standbild::sichtbar(app, id)?);
+    Ok(super::aufnahme::Aufnahme { png, abgeschnitten: false })
+}
+
 pub fn antworten(app: &AppHandle, nr: u64, antwort: super::Antwort) -> Result<(), String> {
     app.run_on_main_thread(move || rueckfragen::erledigen(nr, antwort)).map_err(fehler)
 }

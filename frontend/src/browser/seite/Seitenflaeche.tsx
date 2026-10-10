@@ -23,6 +23,7 @@ import { Sperrseite } from './Sperrseite'
 import { MsmSuche, useZurueckZurSuche } from './MsmSuche'
 import { Startseite } from './Startseite'
 import { useEigenesMenue } from './EigenesMenue'
+import { Aufnahmen } from '../aufnahme/Aufnahmen'
 
 const EinstellungenSeite = lazy(() => import('../einstellungen/EinstellungenSeite').then((m) => ({ default: m.EinstellungenSeite })))
 
@@ -105,6 +106,7 @@ export function Seitenflaeche() {
       <SeitenMenue flaeche={flaeche} />
       {eigenes.ansicht}
       <SeitenDialoge />
+      <Aufnahmen />
     </main>
   )
 }

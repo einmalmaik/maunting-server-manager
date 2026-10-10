@@ -11,6 +11,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 
 use tauri::{AppHandle, Manager};
@@ -24,6 +25,12 @@ pub mod quarantaene;
 /// Dateien, die in dieser Sitzung fertig wurden; nur sie und der
 /// Download-Ordner lassen sich im Explorer zeigen.
 static FERTIG: LazyLock<Mutex<HashSet<PathBuf>>> = LazyLock::new(Default::default);
+
+/// Die Nummer, unter der ein Download in allen Meldungen steht (`TabEreignis::Download`).
+pub fn naechste_nr() -> u64 {
+    static NR: AtomicU64 = AtomicU64::new(1);
+    NR.fetch_add(1, Ordering::Relaxed)
+}
 
 /// Soll vor jedem Download der Speicherdialog kommen?
 pub fn fragen(app: &AppHandle) -> bool {
@@ -163,6 +170,16 @@ pub fn ablegen(app: &AppHandle, datei: &Path, name: &str, gewaehlt: Option<PathB
     quarantaene::verschieben(datei, &ziel)?;
     FERTIG.lock().unwrap().insert(ziel.canonicalize().unwrap_or_else(|_| ziel.clone()));
     Ok(ziel)
+}
+
+/// Legt eine Datei ab, die der Browser selbst erzeugt hat (Screenshot): erst
+/// in die Quarantäne, dann wie jeder Download an den nächsten freien Namen.
+/// So liegt am Ziel nie eine halbe Datei (AGENTS.md Punkt 83).
+pub fn erzeugt_ablegen(app: &AppHandle, name: &str, daten: &[u8]) -> std::io::Result<PathBuf> {
+    let platz = quarantaene::neuer_platz(app, name).ok_or_else(|| std::io::Error::other("Kein Platz in der Quarantäne"))?;
+    let ergebnis = std::fs::write(&platz, daten).and_then(|()| ablegen(app, &platz, name, None));
+    quarantaene::wegraeumen(&platz);
+    ergebnis
 }
 
 /// Zeigt eine heruntergeladene Datei im Explorer. Nur Dateien im

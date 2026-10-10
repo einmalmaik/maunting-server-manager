@@ -8840,7 +8840,8 @@
         "neuLaden": "Neu laden",
         "schild": "Werbe- und Trackerschutz",
         "stern": "Lesezeichen-Stern",
-        "privaterTab": "Privater Tab"
+        "privaterTab": "Privater Tab",
+        "screenshot": "Screenshot"
       },
       "nachObenName": "{{name}} nach oben",
       "nachUntenName": "{{name}} nach unten",
@@ -8915,6 +8916,27 @@
       "untersuchen": "Untersuchen",
       "anSingra": "An Singra übergeben",
       "uebersetzen": "Übersetzen"
+    },
+    "aufnahme": {
+      "knopf": "Screenshot",
+      "sichtbar": "Sichtbarer Bereich",
+      "auswahl": "Bereich auswählen",
+      "ganz": "Ganze Seite",
+      "auswahlName": "Bereich für den Screenshot wählen",
+      "auswahlHinweis": "Zieh einen Rahmen um den Bereich.",
+      "alles": "Alles",
+      "abbrechen": "Abbrechen",
+      "titel": "Screenshot",
+      "vorschau": "Vorschau des Screenshots",
+      "abgeschnitten": "Die Seite ist länger, als sich auf einmal aufnehmen lässt. Das Bild zeigt ihren oberen Teil.",
+      "kopieren": "In Zwischenablage kopieren",
+      "speichern": "Als PNG speichern",
+      "kopiert": "Screenshot in die Zwischenablage kopiert",
+      "gespeichert": "Gespeichert als {{name}}",
+      "zeigen": "Zeigen",
+      "fehler": "Der Screenshot ließ sich nicht aufnehmen.",
+      "kopierFehler": "Das Bild ließ sich nicht kopieren.",
+      "speicherFehler": "Das Bild ließ sich nicht speichern."
     },
     "uebersetzung": {
       "name": "Übersetzung",

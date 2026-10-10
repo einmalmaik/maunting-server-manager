@@ -8840,7 +8840,8 @@
         "neuLaden": "Reload",
         "schild": "Ad and tracker shield",
         "stern": "Bookmark star",
-        "privaterTab": "Private tab"
+        "privaterTab": "Private tab",
+        "screenshot": "Screenshot"
       },
       "nachObenName": "Move {{name}} up",
       "nachUntenName": "Move {{name}} down",
@@ -8915,6 +8916,27 @@
       "untersuchen": "Inspect",
       "anSingra": "Hand over to Singra",
       "uebersetzen": "Translate"
+    },
+    "aufnahme": {
+      "knopf": "Screenshot",
+      "sichtbar": "Visible area",
+      "auswahl": "Select area",
+      "ganz": "Full page",
+      "auswahlName": "Choose the area for the screenshot",
+      "auswahlHinweis": "Drag a frame around the area.",
+      "alles": "Everything",
+      "abbrechen": "Cancel",
+      "titel": "Screenshot",
+      "vorschau": "Screenshot preview",
+      "abgeschnitten": "The page is longer than can be captured at once. The image shows its upper part.",
+      "kopieren": "Copy to clipboard",
+      "speichern": "Save as PNG",
+      "kopiert": "Screenshot copied to the clipboard",
+      "gespeichert": "Saved as {{name}}",
+      "zeigen": "Show",
+      "fehler": "The screenshot could not be taken.",
+      "kopierFehler": "The image could not be copied.",
+      "speicherFehler": "The image could not be saved."
     },
     "uebersetzung": {
       "name": "Translation",

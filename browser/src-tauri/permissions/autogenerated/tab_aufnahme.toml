@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tab-aufnahme"
+description = "Enables the tab_aufnahme command without any pre-configured scope."
+commands.allow = ["tab_aufnahme"]
+
+[[permission]]
+identifier = "deny-tab-aufnahme"
+description = "Denies the tab_aufnahme command without any pre-configured scope."
+commands.deny = ["tab_aufnahme"]

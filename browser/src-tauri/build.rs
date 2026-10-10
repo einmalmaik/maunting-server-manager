@@ -33,6 +33,8 @@ const BEFEHLE: &[&str] = &[
     "tab_drucken",
     "tab_fuellen",
     "tab_uebersetzen",
+    "tab_aufnahme",
+    "aufnahme_speichern",
     "sprachdaten_laden",
     "tabs_zuruecksetzen",
     "oberflaeche_fokussieren",

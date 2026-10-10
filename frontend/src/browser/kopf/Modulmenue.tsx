@@ -7,7 +7,7 @@
  * Neu laden, Lesezeichen und die Suche in der Seite, wie im Menü von Chrome.
  */
 import { useRef, useState } from 'react'
-import { ArrowRight, Bot, Languages, Menu, RotateCw, Search, Star, X } from 'lucide-react'
+import { ArrowRight, Bot, Camera, Languages, Menu, RotateCw, Search, Star, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Ankerfenster } from '@/Singra/UI'
@@ -21,6 +21,9 @@ import { useSuche } from '../services/suche'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 import { useVerlaufStore } from '../services/verlaufStore'
 import { useUebersetzen } from '../uebersetzung/ablauf'
+import { useAufnahme } from '../aufnahme/ablauf'
+import { aufnahmeMoeglich } from '../aufnahme/AufnahmeKnopf'
+import { useEinstellungenStore } from '../services/einstellungenStore'
 import { Knopf, Zahl } from './knopf'
 
 interface Ziel {
@@ -74,6 +77,8 @@ function HandyAktionen({ schliessen }: { schliessen: () => void }) {
   const suchen = useSuche((s) => s.oeffnen)
   const anSingra = useAnSingra(tab)
   const uebersetzen = useUebersetzen(tab)
+  const aufnehmen = useAufnahme((s) => s.aufnehmen)
+  const screenshot = !useEinstellungenStore((s) => s.ausgeblendet).includes('screenshot') && aufnahmeMoeglich(tab)
   const webseite = !!tab && istWebseite(tab.url)
   const gemerkt = webseite && lesezeichen.some((l) => l.url === tab!.url)
   const und = (tun: () => void) => () => {
@@ -96,6 +101,11 @@ function HandyAktionen({ schliessen }: { schliessen: () => void }) {
       <Knopf name={t('browser.suche.feld')} onClick={und(suchen)} disabled={!webseite}>
         <Search className="h-5 w-5" aria-hidden="true" />
       </Knopf>
+      {screenshot && (
+        <Knopf name={t('browser.aufnahme.knopf')} onClick={und(() => void aufnehmen(tab, 'auswahl'))}>
+          <Camera className="h-5 w-5" aria-hidden="true" />
+        </Knopf>
+      )}
       {uebersetzen && (
         <Knopf name={t('browser.menue.uebersetzen')} onClick={und(uebersetzen)}>
           <Languages className="h-5 w-5" aria-hidden="true" />

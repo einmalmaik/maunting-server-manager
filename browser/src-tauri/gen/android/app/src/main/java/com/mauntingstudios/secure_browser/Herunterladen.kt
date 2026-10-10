@@ -66,6 +66,24 @@ class Herunterladen(private val activity: Activity) {
     melden(tab, nr, stand, url, datei)
   }
 
+  /**
+   * Ein Bild, das der Browser selbst erzeugt hat (Screenshot), nach
+   * `Download/`. Meldet sich wie ein Download und gibt den Namen zurück.
+   */
+  fun bild(tab: String, name: String, url: String, bytes: ByteArray): String? {
+    val nr = naechste++
+    melden(tab, nr, "start", url, name)
+    val ablage = Ablage(name, "image/png", HOECHSTENS)
+    val (stand, datei) = try {
+      if (ablage.schreiben(bytes, bytes.size)) ablage.fertig()?.let { "fertig" to it } ?: ("fehler" to null) else ("fehler" to null)
+    } catch (_: KeinPlatz) {
+      "speicher" to null
+    }
+    if (datei == null) ablage.verwerfen()
+    melden(tab, nr, stand, url, datei)
+    return datei
+  }
+
   /** `DownloadListener` eines Tabs. */
   fun start(tab: Tab, url: String, userAgent: String, disposition: String?, mime: String?) {
     val nr = naechste++

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-aufnahme-speichern"
+description = "Enables the aufnahme_speichern command without any pre-configured scope."
+commands.allow = ["aufnahme_speichern"]
+
+[[permission]]
+identifier = "deny-aufnahme-speichern"
+description = "Denies the aufnahme_speichern command without any pre-configured scope."
+commands.deny = ["aufnahme_speichern"]

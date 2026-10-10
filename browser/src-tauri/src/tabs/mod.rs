@@ -21,6 +21,7 @@ use std::time::Instant;
 
 use tauri::{AppHandle, Manager, State};
 
+pub mod aufnahme;
 pub mod ereignis;
 pub mod formular;
 pub mod https;

@@ -123,6 +123,8 @@ pub fn run() {
             tabs::tab_drucken,
             tabs::formular::tab_fuellen,
             tabs::uebersetzung::tab_uebersetzen,
+            tabs::aufnahme::tab_aufnahme,
+            tabs::aufnahme::aufnahme_speichern,
             sprachdaten::sprachdaten_laden,
             tabs::tabs_zuruecksetzen,
             tabs::oberflaeche_fokussieren,

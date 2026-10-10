@@ -138,6 +138,10 @@ export const nativ = {
   /** JPEG des vorderen Tabs. */
   tabStandbild: () => nacheinander<ArrayBuffer>('tab_standbild'),
   tabsZuruecksetzen: () => nacheinander('tabs_zuruecksetzen'),
+  /** Screenshot des vorderen Tabs als PNG (Base64); `ganz` nur unter Windows (`tabs/aufnahme.rs`). */
+  tabAufnahme: (id: string, ganz: boolean) => rufen<{ png: string; abgeschnitten: boolean }>('tab_aufnahme', { id, ganz }),
+  /** Legt ein PNG im Download-Ordner ab; zurück kommt der Name, unter Windows mit Pfad. */
+  aufnahmeSpeichern: (id: string, name: string, url: string, png: string) => rufen<string>('aufnahme_speichern', { id, name, url, png }),
   tabAntworten: (nr: number, antwort: Antwort) => rufen('tab_antworten', { nr, antwort }),
   /** Eine Methode des DevTools-Protokolls; was erlaubt ist, entscheidet Rust. */
   tabProtokoll: (id: string, methode: string, parameter: Record<string, unknown>) =>

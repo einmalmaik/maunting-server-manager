@@ -184,6 +184,16 @@ pub fn rufen(app: &AppHandle, id: &str, methode: String, parameter: Value) -> Re
     if parameter.len() > PARAMETER_MAX {
         return Err("Parameter zu groß".into());
     }
+    let json = aufrufen(app, id, methode, parameter)?;
+    if json.len() > ANTWORT_MAX {
+        return Err("Antwort zu groß".into());
+    }
+    serde_json::from_str(&json).map_err(|e| e.to_string())
+}
+
+/// Der Aufruf selbst, ohne Freigabeliste und Größengrenze: nur für Wege des
+/// Browsers, die ihre Methode selbst festlegen (Ganzseitenaufnahme).
+pub(crate) fn aufrufen(app: &AppHandle, id: &str, methode: String, parameter: String) -> Result<String, String> {
     let rx = super::mit_tab(app, id, move |tab| {
         let (tx, rx) = mpsc::channel::<Result<String, String>>();
         unsafe {
@@ -201,11 +211,7 @@ pub fn rufen(app: &AppHandle, id: &str, methode: String, parameter: Value) -> Re
         }
         Ok(rx)
     })?;
-    let json = rx.recv_timeout(Duration::from_secs(30)).map_err(|_| "Keine Antwort von der Seite".to_string())??;
-    if json.len() > ANTWORT_MAX {
-        return Err("Antwort zu groß".into());
-    }
-    serde_json::from_str(&json).map_err(|e| e.to_string())
+    rx.recv_timeout(Duration::from_secs(30)).map_err(|_| "Keine Antwort von der Seite".to_string())?
 }
 
 #[cfg(test)]

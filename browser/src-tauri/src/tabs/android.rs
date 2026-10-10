@@ -92,14 +92,36 @@ pub fn aktion(app: &AppHandle, id: &str, aktion: &str) -> Result<(), String> {
 
 #[derive(serde::Deserialize)]
 struct Bild {
-    jpeg: String,
+    bild: String,
 }
 
 /// Bild des vorderen Tabs für die Oberfläche, solange sie etwas darüberlegt.
 pub fn standbild(app: &AppHandle, tabs: &Tabs) -> Result<Vec<u8>, String> {
     let id = tabs.0.lock().unwrap().aktiv.clone().ok_or("Kein Tab vorne")?;
-    let bild: Bild = rufen(app, "standbild", json!({ "id": id }))?;
-    base64::engine::general_purpose::STANDARD.decode(bild.jpeg).map_err(|e| e.to_string())
+    let bild: Bild = rufen(app, "standbild", json!({ "id": id, "png": false }))?;
+    base64::engine::general_purpose::STANDARD.decode(bild.bild).map_err(|e| e.to_string())
+}
+
+/// Der sichtbare Teil als PNG. Die ganze Seite gibt es unter Android nicht:
+/// `enableSlowWholeDocumentDraw` gälte für jede WebView und kostet Speicher und Tempo.
+pub fn aufnahme(app: &AppHandle, id: &str, ganz: bool) -> Result<super::aufnahme::Aufnahme, String> {
+    if ganz {
+        return Err("Die ganze Seite gibt es unter Android nicht".into());
+    }
+    let bild: Bild = rufen(app, "standbild", json!({ "id": id, "png": true }))?;
+    Ok(super::aufnahme::Aufnahme { png: bild.bild, abgeschnitten: false })
+}
+
+#[derive(serde::Deserialize)]
+struct Gespeichert {
+    datei: String,
+}
+
+/// Legt ein PNG per MediaStore in `Download/`; Kotlin meldet es als Download.
+pub fn bild_speichern(app: &AppHandle, id: &str, name: &str, url: &str, daten: &[u8]) -> Result<String, String> {
+    let png = base64::engine::general_purpose::STANDARD.encode(daten);
+    let g: Gespeichert = rufen(app, "bildSpeichern", json!({ "id": id, "name": name, "url": url, "png": png }))?;
+    Ok(g.datei)
 }
 
 pub fn antworten(app: &AppHandle, nr: u64, antwort: Antwort) -> Result<(), String> {

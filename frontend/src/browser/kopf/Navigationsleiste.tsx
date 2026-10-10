@@ -1,7 +1,8 @@
 /**
- * Zurück, Vor, Neu laden, die Adresszeile, das Schild und der Stern, dahinter
- * je nach Einstellung das Menü oder die Symbole der Module (`Modulmenue.tsx`).
- * Neu laden, Schild und Stern lassen sich ausblenden.
+ * Zurück, Vor, Neu laden, die Adresszeile, das Schild, der Stern und der
+ * Screenshot, dahinter je nach Einstellung das Menü oder die Symbole der
+ * Module (`Modulmenue.tsx`). Neu laden, Schild, Stern und Screenshot lassen
+ * sich ausblenden.
  *
  * Kurzinfos stehen hier über den Knöpfen (`lage="oben"`): darunter beginnt die
  * Seite, und eine Webview liegt immer über der Oberfläche.
@@ -20,6 +21,7 @@ import { nativ } from '../services/nativ'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 import { useVerlaufStore } from '../services/verlaufStore'
 import { Adresszeile, type AdresszeileGriff } from './Adresszeile'
+import { AufnahmeKnopf } from '../aufnahme/AufnahmeKnopf'
 import { Knopf, KNOPF } from './knopf'
 import { Modulmenue, ModuleOben } from './Modulmenue'
 
@@ -146,6 +148,7 @@ export const Navigationsleiste = forwardRef<AdresszeileGriff>(function Navigatio
         <Star className={`h-4 w-4 ${gemerkt ? 'fill-primary text-primary' : ''}`} aria-hidden="true" />
       </Knopf>
       )}
+      {!ausgeblendet.includes('screenshot') && <AufnahmeKnopf />}
       {leiste === 'oben' && <ModuleOben />}
       {leiste === 'menue' && <Modulmenue />}
     </div>

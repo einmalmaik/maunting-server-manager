@@ -82,6 +82,23 @@ function abgleichen(): void {
   void nachziehen()
 }
 
+/**
+ * Wartet, bis nichts mehr über der Seite liegt und der Tab wieder vorne ist,
+ * etwa nach dem Schließen eines Menüs. Ein verdeckter Tab gibt kein Bild her.
+ */
+export async function seiteFrei(frist = 2000): Promise<boolean> {
+  const ende = performance.now() + frist
+  while (performance.now() < ende) {
+    abgleichen()
+    if (!gewuenscht && !angewandt && !laeuft) {
+      await naechstesBild()
+      return true
+    }
+    await naechstesBild()
+  }
+  return false
+}
+
 /** Einmal in der Wurzel. */
 export function useUeberdeckungBeobachten(): void {
   useEffect(() => {
