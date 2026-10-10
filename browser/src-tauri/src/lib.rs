@@ -77,6 +77,7 @@ pub fn run() {
         builder = builder
             .plugin(tauri_plugin_biometric::init())
             .plugin(schluesselfach::biometrie::init_android_schluesselfach())
+            .plugin(aktualisieren::init_android_installer())
             .plugin(tabs::android::init())
             .plugin(widget::init());
     }

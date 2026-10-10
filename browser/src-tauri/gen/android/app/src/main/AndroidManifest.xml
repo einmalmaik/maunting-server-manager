@@ -4,6 +4,8 @@
     <!-- Ohne sie meldet Android dem WebView keine Netzwechsel: navigator.onLine
          bliebe immer true (AGENTS.md Punkt 74). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
     <!-- Keine Datensicherung und kein Umzug aufs neue Gerät: Cookies der Seiten,
          Verlauf und das Fach mit dem Token gehören diesem Gerät. allowBackup
@@ -72,6 +74,15 @@
             android:excludeFromRecents="true"
             android:taskAffinity=""
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode" />
+
+        <!-- Status-Receiver für geräuschlose Hintergrund-Installationen via PackageInstaller -->
+        <receiver
+            android:name=".InstallStatusReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.mauntingstudios.secure_browser.INSTALL_STATUS" />
+            </intent-filter>
+        </receiver>
 
         <provider
           android:name="androidx.core.content.FileProvider"

@@ -1,8 +1,7 @@
 /**
- * Updates unter Windows (`aktualisieren.rs`): kurz nach dem Start fragt der
- * Browser einmal bei GitHub, ob es eine neue Version gibt, und sagt es per
- * Meldung. Installiert wird nur auf Klick, denn der Installer beendet den
- * Browser. Unter Android kommt ein Update als APK; dort fragt nichts.
+ * Updates unter Windows und Android (`aktualisieren.rs`): kurz nach dem Start
+ * fragt der Browser einmal bei GitHub, ob es eine neue Version gibt, und sagt
+ * es per Meldung. Installiert wird nur auf Klick.
  */
 import { useEffect } from 'react'
 
@@ -11,13 +10,12 @@ import { toast } from '@/stores/toastStore'
 
 import { useEinstellungenStore } from './einstellungenStore'
 import { istTauri, nativ } from './nativ'
-import { istAndroid } from './plattform'
 
 /** Erst nach dem Start fragen, damit der Kaltstart ungestört bleibt. */
 export const NACH_DEM_START_MS = 20_000
 
 export function updatesMoeglich(): boolean {
-  return istTauri() && !istAndroid()
+  return istTauri()
 }
 
 export async function installieren(): Promise<void> {
