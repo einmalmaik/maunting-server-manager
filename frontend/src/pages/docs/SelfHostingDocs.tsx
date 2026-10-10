@@ -539,10 +539,12 @@ export function SelfHostingDocs() {
             </div>
           ))}
         </dl>
-        <div className="mt-4 flex gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 p-4 text-status-warning">
-          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-          <p className="text-sm leading-6">{t('docsSelfHosting.secureBrowser.unsigned')}</p>
-        </div>
+        {(['unsigned', 'androidProzess'] as const).map(hinweis => (
+          <div key={hinweis} className="mt-4 flex gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 p-4 text-status-warning">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+            <p className="text-sm leading-6">{t(`docsSelfHosting.secureBrowser.${hinweis}`)}</p>
+          </div>
+        ))}
       </section>
 
       <aside className="mb-8 flex gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 p-4 text-status-warning" aria-labelledby="database-compatibility">

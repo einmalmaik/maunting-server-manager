@@ -4389,7 +4389,8 @@
         "title": "Default browser",
         "body": "The installer registers the browser with Windows for http and https (ProgID MSBURL). Only the user can make it the default, in the Windows settings; uninstalling removes the entries again."
       },
-      "unsigned": "The browser installer has no code signature either. SmartScreen reports an unknown publisher; compare the checksum from SHA256SUMS before installing."
+      "unsigned": "The browser installer has no code signature either. SmartScreen reports an unknown publisher; compare the checksum from SHA256SUMS before installing.",
+      "androidProzess": "On Android, all WebViews of an app share one renderer without separating sites. Web pages therefore run in the same process as the browser interface; a flaw in the WebView itself could let a page reach the interface, including an unlocked vault. On Windows, pages run separately. Keep “Android System WebView” up to date on Android devices."
     },
     "compatibility": {
       "title": "PostgreSQL only for new installations",

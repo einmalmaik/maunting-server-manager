@@ -282,6 +282,13 @@ Kopplung spricht der Browser mit keinem Server von Maunting Studios. Auch
 dieser Installer ist nicht signiert; vor der Installation die Prüfsumme aus
 `SHA256SUMS` vergleichen.
 
+**Grenze unter Android.** Alle WebViews einer Android-App teilen sich einen
+Renderer ohne Trennung nach Website. Webseiten laufen deshalb im selben
+Prozess wie die Oberfläche des Browsers; eine Lücke in der WebView selbst
+könnte von einer Seite bis zur Oberfläche reichen, auch zu einem entsperrten
+Tresor. Unter Windows laufen die Seiten getrennt. Auf Android-Geräten die
+„Android System WebView“ aktuell halten.
+
 ## Was die Oberfläche im Browser nachlädt
 
 **Keine Schriften von Dritten.** Die vier Familien der Oberfläche — Inter,
