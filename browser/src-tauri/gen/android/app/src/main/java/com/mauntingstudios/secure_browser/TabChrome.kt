@@ -1,5 +1,7 @@
 package com.mauntingstudios.secure_browser
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Handler
@@ -16,15 +18,16 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewCompat
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 
 /**
  * Was die Seite vom Browser will: Titel, Symbol, neue Fenster, Dialoge,
- * Vollbild, Dateiauswahl. Kamera, Mikrofon und Standort lehnt der Tab ab:
- * die App deklariert diese Rechte nicht, und eine Seite bekommt sie nie
- * (ehrliche Lücke gegenüber Windows).
+ * Vollbild, Dateiauswahl, Kamera und Mikrofon. Standort lehnt der Tab ab:
+ * die App deklariert dieses Recht nicht (Datenschutz).
  */
 class TabChrome(private val plugin: TabsPlugin, private val tab: Tab) : WebChromeClient() {
   private companion object {
@@ -98,7 +101,42 @@ class TabChrome(private val plugin: TabsPlugin, private val tab: Tab) : WebChrom
     }
 
   override fun onPermissionRequest(anfrage: PermissionRequest) {
-    anfrage.deny()
+    val ressourcen = anfrage.resources
+    if (ressourcen == null || ressourcen.isEmpty()) {
+      anfrage.deny()
+      return
+    }
+    val herkunft = anfrage.origin?.toString().orEmpty()
+    val recht = when {
+      ressourcen.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE) -> "kamera"
+      ressourcen.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE) -> "mikrofon"
+      ressourcen.contains(PermissionRequest.RESOURCE_MIDI_SYSEX) -> "midi"
+      else -> "sonstiges"
+    }
+
+    val nr = Rueckfragen.neu(tab.id) { a ->
+      if (a?.optBoolean("erlauben") == true) {
+        val akt = plugin.activity
+        val benoetigt = mutableListOf<String>()
+        if (ressourcen.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE) &&
+          ContextCompat.checkSelfPermission(akt, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
+        ) {
+          benoetigt.add(Manifest.permission.CAMERA)
+        }
+        if (ressourcen.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE) &&
+          ContextCompat.checkSelfPermission(akt, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+        ) {
+          benoetigt.add(Manifest.permission.RECORD_AUDIO)
+        }
+        if (benoetigt.isNotEmpty()) {
+          ActivityCompat.requestPermissions(akt, benoetigt.toTypedArray(), 1001)
+        }
+        anfrage.grant(ressourcen)
+      } else {
+        anfrage.deny()
+      }
+    }
+    tab.melden("recht", "nr" to nr, "recht" to recht, "herkunft" to herkunft)
   }
 
   override fun onGeolocationPermissionsShowPrompt(herkunft: String?, rueckruf: GeolocationPermissions.Callback) {

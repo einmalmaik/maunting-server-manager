@@ -159,7 +159,7 @@ pub fn von_kotlin(json: &str) -> Option<TabEreignis> {
     let erlaubt = matches!(
         ereignis,
         Laedt { .. } | Geladen { .. } | Adresse { .. } | Titel { .. } | Favicon { .. } | NeuerTab { .. }
-            | Absturz { .. } | Kontextmenue { .. } | Dialog { .. } | Anmeldung { .. } | Fehlerseite { .. }
+            | Absturz { .. } | Kontextmenue { .. } | Dialog { .. } | Recht { .. } | Anmeldung { .. } | Fehlerseite { .. }
             | Treffer { .. } | Download { .. }
     );
     (erlaubt && super::id_pruefen(ereignis.tab()).is_ok()).then_some(ereignis)
@@ -182,6 +182,8 @@ mod tests {
         assert!(matches!(von_kotlin(adresse), Some(TabEreignis::Adresse { zurueck: true, .. })));
         let download = r#"{"art":"download","id":"tab-a1","nr":7,"stand":"speicher","url":"https://x.example/a","datei":null}"#;
         assert!(von_kotlin(download).is_some());
+        let recht = r#"{"art":"recht","id":"tab-a1","nr":10,"recht":"kamera","herkunft":"https://example.com/"}"#;
+        assert!(von_kotlin(recht).is_some());
         // Falscher Typ, fehlendes Feld, unbekannter Stand: bis 09.10.2026 ging das an die Oberfläche.
         assert!(von_kotlin(r#"{"art":"adresse","id":"tab-a1","url":"https://example.com/","zurueck":"ja","vor":false}"#).is_none());
         assert!(von_kotlin(r#"{"art":"titel","id":"tab-a1"}"#).is_none());
