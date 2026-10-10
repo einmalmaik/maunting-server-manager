@@ -14,8 +14,16 @@ use windows::Win32::UI::Shell::{AttachmentServices, IAttachmentExecute};
 /// Woran Windows den Browser bei der Prüfung erkennt (eigene Einstellungen je Anwendung).
 const MSB: GUID = GUID::from_u128(0x6d1c2a4e_8f3b_4c71_9a52_3e0b7d94f1c6);
 
+/// Herkunft eines Downloads aus einem privaten Tab: die Internetzone, ohne
+/// Adresse. So macht es Chrome im Inkognito-Modus; bis 10.10.2026 stand die
+/// volle Adresse als `HostUrl` an der Datei.
+const PRIVAT: &str = "about:internet";
+
 /// Die Adresse für die Herkunftsmarke: nur http(s), ohne Zugangsdaten.
-fn quelle(url: &str) -> Option<String> {
+fn quelle(url: &str, privat: bool) -> Option<String> {
+    if privat {
+        return Some(PRIVAT.into());
+    }
     let mut u = url::Url::parse(url).ok()?;
     if !matches!(u.scheme(), "http" | "https") {
         return None;
@@ -26,14 +34,14 @@ fn quelle(url: &str) -> Option<String> {
 }
 
 /// `true`, wenn der Virenschutz die Datei durchlässt und sie danach noch da ist.
-pub fn pruefen(datei: &Path, url: &str) -> bool {
+pub fn pruefen(datei: &Path, url: &str, privat: bool) -> bool {
     unsafe {
         let com = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let ergebnis = (|| -> windows::core::Result<()> {
             let pruefer: IAttachmentExecute = CoCreateInstance(&AttachmentServices, None, CLSCTX_INPROC_SERVER)?;
             pruefer.SetClientGuid(&MSB)?;
             pruefer.SetLocalPath(&HSTRING::from(datei.as_os_str()))?;
-            if let Some(q) = quelle(url) {
+            if let Some(q) = quelle(url, privat) {
                 pruefer.SetSource(&HSTRING::from(q))?;
             }
             pruefer.Save()
@@ -54,9 +62,22 @@ mod tests {
 
     #[test]
     fn herkunft_ohne_zugangsdaten() {
-        assert_eq!(quelle("https://nutzer:geheim@example.com/a.zip").as_deref(), Some("https://example.com/a.zip"));
-        assert_eq!(quelle("blob:https://example.com/123"), None);
-        assert_eq!(quelle("data:text/plain,x"), None);
+        assert_eq!(quelle("https://nutzer:geheim@example.com/a.zip", false).as_deref(), Some("https://example.com/a.zip"));
+        assert_eq!(quelle("blob:https://example.com/123", false), None);
+        assert_eq!(quelle("data:text/plain,x", false), None);
+    }
+
+    /// Probe am echten NTFS: ein Download aus einem privaten Tab trägt die
+    /// Internetzone, aber keine Adresse.
+    #[test]
+    fn ein_privater_download_nennt_keine_adresse() {
+        let datei = std::env::temp_dir().join(format!("msb-privat-{}.txt", std::process::id()));
+        std::fs::write(&datei, b"harmlos").unwrap();
+        assert!(pruefen(&datei, "https://geheim.example/pfad?token=1", true));
+        let marke = std::fs::read_to_string(format!("{}:Zone.Identifier", datei.display())).unwrap_or_default();
+        std::fs::remove_file(&datei).unwrap();
+        assert!(marke.contains("ZoneId=3"), "{marke:?}");
+        assert!(!marke.contains("geheim.example"), "{marke:?}");
     }
 
     /// Probe am echten NTFS: auch eine Datei, die eine Seite im Skript baut
@@ -67,7 +88,7 @@ mod tests {
         for (nr, url) in ["data:text/plain,harmlos", "blob:https://example.com/123", "https://example.com/a.txt"].into_iter().enumerate() {
             let datei = std::env::temp_dir().join(format!("msb-marke-{}-{nr}.txt", std::process::id()));
             std::fs::write(&datei, b"harmlos").unwrap();
-            assert!(pruefen(&datei, url));
+            assert!(pruefen(&datei, url, false));
             let marke = std::fs::read_to_string(format!("{}:Zone.Identifier", datei.display())).unwrap_or_default();
             std::fs::remove_file(&datei).unwrap();
             assert!(marke.contains("ZoneId=3") || marke.contains("ZoneId=4"), "{url}: {marke:?}");
@@ -85,7 +106,7 @@ mod tests {
         if std::fs::write(&datei, teile.concat()).is_err() {
             return; // Schon beim Schreiben verhindert: auch das ist ein Fund.
         }
-        assert!(!pruefen(&datei, "https://example.com/eicar.com"));
+        assert!(!pruefen(&datei, "https://example.com/eicar.com", false));
         assert!(!datei.exists());
     }
 
@@ -93,7 +114,7 @@ mod tests {
     fn eine_harmlose_datei_kommt_durch() {
         let datei = std::env::temp_dir().join(format!("msb-pruefung-{}.txt", std::process::id()));
         std::fs::write(&datei, b"harmlos").unwrap();
-        assert!(pruefen(&datei, "https://example.com/harmlos.txt"));
+        assert!(pruefen(&datei, "https://example.com/harmlos.txt", false));
         std::fs::remove_file(&datei).unwrap();
     }
 }

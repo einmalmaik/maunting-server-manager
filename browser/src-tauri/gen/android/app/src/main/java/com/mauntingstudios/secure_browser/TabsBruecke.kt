@@ -44,6 +44,12 @@ object TabsBruecke {
   /** Der bereinigte Dateiname eines Downloads, leer, wenn die Adresse gesperrt ist. */
   @JvmStatic external fun dateiname(url: String, vorschlag: String): String
 
+  /** Adresse eines Downloads aus dem Netz, `http://` aus dem Internet wird `https://`; leer heißt: nicht laden. */
+  @JvmStatic external fun downloadAdresse(url: String): String
+
+  /** Gehen Cookies an diesen Download? Nur auf der Site der Seite, die ihn auslöst. */
+  @JvmStatic external fun gleicheSite(url: String, seite: String): Boolean
+
   /** Das Such-Widget hat etwas angestoßen; die Oberfläche holt es ab. */
   @JvmStatic external fun widget()
 

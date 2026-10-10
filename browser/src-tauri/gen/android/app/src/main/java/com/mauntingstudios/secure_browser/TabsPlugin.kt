@@ -57,7 +57,9 @@ import java.util.UUID
  * Ein Profil, das in diesem Prozess eine WebView hatte, lässt Android nicht
  * löschen („Cannot delete in-use profile“, auch nach `destroy`). Schließt der
  * letzte private Tab, leert der Browser deshalb Cookies, Speicher und Cache
- * des privaten Profils sofort; den Ordner löscht der nächste Start.
+ * des privaten Profils sofort, und die nächste private Sitzung bekommt ein
+ * neues: was das Leeren nicht erreicht (HTTP-Anmeldungen, HSTS), verband bis
+ * 10.10.2026 zwei Sitzungen. Die Ordner löscht der nächste Start.
  */
 @TauriPlugin
 class TabsPlugin(private val activity: Activity) : Plugin(activity) {
@@ -65,7 +67,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   private var vorne: String? = null
   private var rahmen = RahmenArgs()
   private var vollbild: Pair<View, WebChromeClient.CustomViewCallback>? = null
-  private val privatProfil = PRIVAT + UUID.randomUUID()
+  private var privatProfil = PRIVAT + UUID.randomUUID()
   private val inhalt: ViewGroup get() = activity.findViewById(android.R.id.content)
   val herunterladen by lazy { Herunterladen(activity) }
 
@@ -188,7 +190,10 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     Rueckfragen.tabWeg(tab.id)
     herunterladen.seiteWeg(tab.id)
     inhalt.removeView(tab.webView)
-    if (tab.privat && tabs.values.none { it.privat }) profilLeeren(tab.profil, tab.webView)
+    if (tab.privat && tabs.values.none { it.privat }) {
+      profilLeeren(tab.profil, tab.webView)
+      privatProfil = PRIVAT + UUID.randomUUID()
+    }
     tab.webView.destroy()
   }
 

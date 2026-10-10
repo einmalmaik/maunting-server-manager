@@ -24,6 +24,12 @@ export interface TabZugriff {
 }
 
 export function ereignisAnwenden(e: TabEreignis, z: TabZugriff): void {
+  // Downloads gehören keinem Tab: auch das Popup einer Erweiterung lädt
+  // herunter, und ein geschlossener Tab lädt zu Ende.
+  if (e.art === 'download') {
+    useDownloadsStore.getState().ereignis(e)
+    return
+  }
   const tab = z.finden(e.id)
   if (!tab) return
   switch (e.art) {
@@ -92,9 +98,6 @@ export function ereignisAnwenden(e: TabEreignis, z: TabZugriff): void {
     case 'absturz':
       z.aendern(e.id, { abgestuerzt: true, laedt: false })
       z.zeigen(e.id)
-      break
-    case 'download':
-      useDownloadsStore.getState().ereignis(e)
       break
     case 'ton':
       z.aendern(e.id, { ton: e.spielt, stumm: e.stumm })

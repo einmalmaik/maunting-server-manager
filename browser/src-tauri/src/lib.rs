@@ -244,6 +244,16 @@ mod tests {
         let quelle = |name: &str| csp.split(';').map(str::trim).find(|d| d.starts_with(name)).unwrap().to_string();
         assert_eq!(quelle("img-src"), "img-src 'self' data: blob:");
         assert!(!quelle("script-src").contains("'unsafe-eval'"));
+        // Unverschlüsselt nur zum eigenen Rechner, wie `konfig::backend_url_verboten`
+        // (eine IPv6-Adresse kennt die CSP-Syntax nicht). Bis 10.10.2026 stand
+        // dort `http: ws:` für jeden Host.
+        assert_eq!(
+            quelle("connect-src"),
+            "connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*"
+        );
+        for d in ["object-src 'none'", "base-uri 'self'", "form-action 'none'"] {
+            assert_eq!(quelle(d.split(' ').next().unwrap()), d);
+        }
     }
 
     /// Das Token der Kopplung liegt unter Android verschlüsselt im Schlüsselfach,

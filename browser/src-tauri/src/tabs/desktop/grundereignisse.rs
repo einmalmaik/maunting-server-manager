@@ -93,6 +93,5 @@ pub(super) unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -
             &mut token,
         )?;
     }
-    super::herunterladen::anbinden(app, id, core)?;
     Ok(())
 }

@@ -199,6 +199,7 @@ fn anlegen(app: &AppHandle, id: &str, privat: bool) -> Result<ICoreWebView2, Str
         grundereignisse::anbinden(app, id, &core).map_err(fehler)?;
         formulare::anbinden(app, id, &core).map_err(fehler)?;
         schlaf::anbinden(app, id, &core).map_err(fehler)?;
+        herunterladen::anbinden(app, id, &core, privat).map_err(fehler)?;
         webview2::einrichten(app, id, controller.clone(), umgebung.clone()).map_err(fehler)?;
         // Der erste normale Tab gleicht die Erweiterungen an, bevor er lädt:
         // was ohne offenen Tab geändert wurde (Jugendschutz), gilt sonst erst

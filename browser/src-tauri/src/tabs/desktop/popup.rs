@@ -77,6 +77,9 @@ unsafe fn anpassen(app: &AppHandle, anker: Anker) {
     );
 }
 
+/// Unter dieser Kennung meldet das Popup seine Downloads; einen Tab gibt es dazu nicht.
+const POPUP_ID: &str = "erweiterung-popup";
+
 pub fn oeffnen(app: &AppHandle, url: String, rechts: f64, oben: f64) -> Result<(), String> {
     let anker = Anker { rechts, oben };
     let app2 = app.clone();
@@ -85,6 +88,11 @@ pub fn oeffnen(app: &AppHandle, url: String, rechts: f64, oben: f64) -> Result<(
         let umgebung = umgebung(&app2)?;
         let c = controller(&app2, &umgebung, false)?;
         let core = c.CoreWebView2().map_err(fehler)?;
+        // Wie ein Tab: ohne Edge-Oberfläche, Downloads über Quarantäne und
+        // Virenschutz. Ein Kontextmenü braucht das Popup nicht.
+        super::ohne_edge::einstellungen(&core).map_err(fehler)?;
+        core.Settings().and_then(|e| e.SetAreDefaultContextMenusEnabled(false)).map_err(fehler)?;
+        super::herunterladen::anbinden(&app2, POPUP_ID, &core, false).map_err(fehler)?;
         let start = url::Url::parse(&url).map_err(fehler)?;
         let mut token = 0i64;
         // Der Wechsel von about:blank auf die Seite der Erweiterung nimmt dem

@@ -22,6 +22,17 @@ fn zufall() -> u64 {
     h.finish()
 }
 
+/// Freie Bytes auf dem Laufwerk von `pfad`, für den aufrufenden Nutzer.
+#[cfg(windows)]
+pub fn frei(pfad: &Path) -> Option<u64> {
+    use windows::core::HSTRING;
+    use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let ordner = pfad.parent()?;
+    let mut frei = 0u64;
+    unsafe { GetDiskFreeSpaceExW(&HSTRING::from(ordner.as_os_str()), Some(&mut frei), None, None) }.ok()?;
+    Some(frei)
+}
+
 /// Ein neuer, leerer Platz für einen Download mit diesem Namen.
 pub fn neuer_platz(app: &AppHandle, name: &str) -> Option<PathBuf> {
     let unterordner = ordner(app)?.join(format!("{:016x}", zufall()));

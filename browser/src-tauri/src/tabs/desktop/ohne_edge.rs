@@ -19,7 +19,9 @@ use windows::core::{Interface, BOOL, HSTRING};
 use super::webview2::text;
 use crate::tabs::{melden, TabEreignis};
 
-pub unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -> windows::core::Result<()> {
+/// Die Schalter ohne Ereignisse; auch für das Popup einer Erweiterung
+/// (`popup.rs`), das bis 10.10.2026 Entwicklerwerkzeuge und Dialoge von Edge hatte.
+pub unsafe fn einstellungen(core: &ICoreWebView2) -> windows::core::Result<()> {
     let einstellungen = core.Settings()?;
     einstellungen.SetAreDevToolsEnabled(false)?;
     einstellungen.SetIsStatusBarEnabled(false)?;
@@ -30,6 +32,11 @@ pub unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -> windo
         e4.SetIsPasswordAutosaveEnabled(false)?;
         e4.SetIsGeneralAutofillEnabled(false)?;
     }
+    Ok(())
+}
+
+pub unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -> windows::core::Result<()> {
+    einstellungen(core)?;
     let mut token = 0i64;
 
     {

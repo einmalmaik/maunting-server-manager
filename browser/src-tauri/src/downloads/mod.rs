@@ -235,9 +235,69 @@ pub fn download_ordner(app: AppHandle) -> String {
     ordner(&app).to_string_lossy().into_owned()
 }
 
+/// Die Adresse, unter der ein Download aus dem Netz lädt; `None` für alles
+/// außer http(s). `http://` aus dem Internet wird `https://`, ohne Rückfall:
+/// wer mitliest, könnte eine unverschlüsselte Datei tauschen (ein APK). Im
+/// eigenen Netz bleibt sie, wie sie ist (`tabs::https::im_eigenen_netz`). Unter
+/// Android lud ein Download bis 10.10.2026 auch von einer HTTPS-Seite
+/// unverschlüsselt.
+pub fn netzadresse(url: &str) -> Option<String> {
+    let mut u = url::Url::parse(url).ok()?;
+    match u.scheme() {
+        "https" => {}
+        "http" if crate::tabs::https::im_eigenen_netz(&u) => {}
+        "http" => u.set_scheme("https").ok()?,
+        _ => return None,
+    }
+    Some(u.into())
+}
+
+/// Gehört `a` zur selben Site wie `b` (Schema und registrierbare Domain, wie
+/// `SameSite`)? Unter Android gehen Cookies nur dann an einen Download: der
+/// CookieManager sagt nicht, welche `Strict` sind, und eine fremde Seite
+/// konnte bis 10.10.2026 per Download eine Anfrage mit allen Cookies einer
+/// anderen Site auslösen.
+pub fn gleiche_site(a: &str, b: &str) -> bool {
+    let (Ok(a), Ok(b)) = (url::Url::parse(a), url::Url::parse(b)) else { return false };
+    if a.scheme() != b.scheme() || !matches!(a.scheme(), "http" | "https") {
+        return false;
+    }
+    match (a.host(), b.host()) {
+        (Some(url::Host::Domain(x)), Some(url::Host::Domain(y))) => {
+            let (x, y) = (x.trim_end_matches('.').to_ascii_lowercase(), y.trim_end_matches('.').to_ascii_lowercase());
+            let site = |h: &str| psl::domain_str(h).map(str::to_string).unwrap_or_else(|| h.to_string());
+            site(&x) == site(&y)
+        }
+        (Some(x), Some(y)) => x == y,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn downloads_aus_dem_internet_laden_verschluesselt() {
+        assert_eq!(netzadresse("http://dl.example.com/app.apk").as_deref(), Some("https://dl.example.com/app.apk"));
+        assert_eq!(netzadresse("https://dl.example.com/a").as_deref(), Some("https://dl.example.com/a"));
+        assert_eq!(netzadresse("http://dl.example.com:8080/a").as_deref(), Some("https://dl.example.com:8080/a"));
+        assert_eq!(netzadresse("http://192.168.1.5/a.zip").as_deref(), Some("http://192.168.1.5/a.zip"));
+        assert_eq!(netzadresse("http://fritz.box/a.zip").as_deref(), Some("http://fritz.box/a.zip"));
+        assert_eq!(netzadresse("ftp://x.example/a"), None);
+        assert_eq!(netzadresse("javascript:alert(1)"), None);
+    }
+
+    #[test]
+    fn cookies_nur_fuer_dieselbe_site() {
+        assert!(gleiche_site("https://dl.example.co.uk/a", "https://www.example.co.uk/"));
+        assert!(!gleiche_site("https://a.co.uk/", "https://b.co.uk/"), "öffentliches Suffix ist keine Site");
+        assert!(!gleiche_site("https://bank.example/konto", "https://boese.example/"));
+        assert!(!gleiche_site("http://example.com/", "https://example.com/"), "anderes Schema");
+        assert!(!gleiche_site("https://nutzer.github.io/", "https://anderer.github.io/"));
+        assert!(gleiche_site("http://192.168.1.5/a", "http://192.168.1.5/"));
+        assert!(!gleiche_site("https://example.com/", "about:blank"));
+    }
 
     #[test]
     fn namen_zeigen_was_sie_sind() {

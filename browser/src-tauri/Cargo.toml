@@ -31,6 +31,9 @@ adblock = { version = "0.13", default-features = false, features = [
 ] }
 # Filterlisten holen. rustls statt OpenSSL, damit Windows und Android gleich bauen.
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+# Gleiche Site für Download-Cookies unter Android (`downloads::gleiche_site`).
+# Die Public-Suffix-Liste liegt über adblock schon im Baum.
+psl = "2"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 keyring = "4"
@@ -57,6 +60,8 @@ windows = { version = "0.62", features = [
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Diagnostics_ToolHelp",
+    # Freier Platz für die Download-Reserve (`downloads/quarantaene.rs`).
+    "Win32_Storage_FileSystem",
     "Win32_UI_Input_KeyboardAndMouse",
     # IAttachmentExecute: Downloads durch den Virenschutz von Windows prüfen.
     "Win32_UI_Shell",

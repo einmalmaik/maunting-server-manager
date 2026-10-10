@@ -37,9 +37,12 @@ static STAND: LazyLock<Mutex<Stand>> = LazyLock::new(Default::default);
 
 /// Bleibt diese Adresse, wie sie ist?
 fn ausgenommen(url: &url::Url) -> bool {
-    if url.port().is_some() {
-        return true;
-    }
+    url.port().is_some() || im_eigenen_netz(url)
+}
+
+/// Liegt die Adresse offensichtlich nicht im Internet? Ein eigener Port zählt
+/// hier nicht; Downloads (`downloads::netzadresse`) stufen auch ihn hoch.
+pub(crate) fn im_eigenen_netz(url: &url::Url) -> bool {
     match url.host() {
         Some(url::Host::Domain(name)) => {
             let name = name.trim_end_matches('.').to_ascii_lowercase();

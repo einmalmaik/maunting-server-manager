@@ -23,7 +23,10 @@ import java.util.concurrent.Executors
  * Downloads unter Android, alle per MediaStore nach `Download/` (AGENTS.md
  * Punkt 69). Adressen über http(s) lädt die App selbst: sie folgt
  * Weiterleitungen selbst, prüft jede an der Sperre und schickt Cookies aus dem
- * Profil des Tabs nur an den Host, dem sie gehören. Der Download-Dienst des
+ * Profil des Tabs nur an den Host, dem sie gehören, und nur auf der Site der
+ * Seite (`TabsBruecke.gleicheSite`): welche `SameSite=Strict` sind, sagt der
+ * CookieManager nicht. `http://` aus dem Internet lädt als `https://`
+ * (`TabsBruecke.downloadAdresse`). Der Download-Dienst des
  * Systems tat das bis 09.10.2026: er schickte die Cookies der ersten Adresse
  * bei jeder Weiterleitung mit, auch an fremde Server, und folgte
  * Weiterleitungen an der Sperre vorbei. `blob:` und `data:` kennt nur die
@@ -98,8 +101,9 @@ class Herunterladen(private val activity: Activity) {
       url.startsWith("https://") || url.startsWith("http://") -> {
         // Das Profil gibt es nur auf dem UI-Faden; seine Cookies lassen sich von überall lesen.
         val cookies = ProfileStore.getInstance().getProfile(tab.profil)?.cookieManager
+        val seite = tab.webView.url.orEmpty()
         netz.execute {
-          val ergebnis = runCatching { ausDemNetz(url, userAgent, cookies, name, mime) }
+          val ergebnis = runCatching { ausDemNetz(url, seite, userAgent, cookies, name, mime) }
           val datei = ergebnis.getOrNull()
           val stand = if (datei != null) "fertig" else if (ergebnis.exceptionOrNull() is KeinPlatz) "speicher" else "fehler"
           ui.post { beenden(tab.id, nr, stand, anzeige, datei) }
@@ -118,9 +122,10 @@ class Herunterladen(private val activity: Activity) {
    * Lädt [start] nach `Download/` und gibt den angelegten Namen zurück, `null`
    * bei Sperre, Fehler oder zu vielen Weiterleitungen. Auf [netz].
    */
-  private fun ausDemNetz(start: String, userAgent: String, cookies: CookieManager?, name: String, mime: String?): String? {
+  private fun ausDemNetz(start: String, seite: String, userAgent: String, cookies: CookieManager?, name: String, mime: String?): String? {
     var url = start
     repeat(WEITERLEITUNGEN + 1) {
+      url = TabsBruecke.downloadAdresse(url).ifEmpty { return null }
       if (TabsBruecke.dateiname(url, name).isEmpty()) return null
       val verbindung = URL(url).openConnection() as HttpURLConnection
       try {
@@ -128,7 +133,7 @@ class Herunterladen(private val activity: Activity) {
         verbindung.connectTimeout = 15_000
         verbindung.readTimeout = 60_000
         verbindung.setRequestProperty("User-Agent", userAgent)
-        cookies?.getCookie(url)?.let { verbindung.setRequestProperty("Cookie", it) }
+        if (TabsBruecke.gleicheSite(url, seite)) cookies?.getCookie(url)?.let { verbindung.setRequestProperty("Cookie", it) }
         val code = verbindung.responseCode
         if (code in 300..399) {
           url = URL(URL(url), verbindung.getHeaderField("Location") ?: return null).toString()

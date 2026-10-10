@@ -2428,6 +2428,7 @@ dependencies = [
  "base64 0.22.1",
  "jni 0.21.1",
  "keyring",
+ "psl",
  "reqwest",
  "ring",
  "rustls",

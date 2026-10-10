@@ -219,6 +219,32 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_date
     zurueck(&mut env, &name)
 }
 
+/// Die Adresse für einen Download aus dem Netz (`downloads::netzadresse`),
+/// leer, wenn er nicht geladen wird. Vor jeder Weiterleitung.
+#[no_mangle]
+pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_downloadAdresse<'l>(
+    mut env: JNIEnv<'l>,
+    _: JClass<'l>,
+    url: JString<'l>,
+) -> jstring {
+    let url = text(&mut env, &url);
+    let adresse = crate::downloads::netzadresse(&url).unwrap_or_default();
+    zurueck(&mut env, &adresse)
+}
+
+/// Bekommt ein Download von `url` die Cookies seiner Adresse? Nur auf der
+/// Site der Seite, die ihn auslöst (`downloads::gleiche_site`).
+#[no_mangle]
+pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_gleicheSite<'l>(
+    mut env: JNIEnv<'l>,
+    _: JClass<'l>,
+    url: JString<'l>,
+    seite: JString<'l>,
+) -> jboolean {
+    let (url, seite) = (text(&mut env, &url), text(&mut env, &seite));
+    ja(crate::downloads::gleiche_site(&url, &seite))
+}
+
 /// Das Such-Widget hat etwas angestoßen; die Oberfläche holt es per `widget_start`.
 #[no_mangle]
 pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_widget<'l>(_: JNIEnv<'l>, _: JClass<'l>) {
