@@ -9126,7 +9126,9 @@
       "zertifikatTitel": "Connection not secure",
       "zertifikatText": "The certificate of {{host}} is invalid, so the browser does not load the page.",
       "unbekanntTitel": "Page unavailable",
-      "unbekanntText": "{{host}} could not be loaded."
+      "unbekanntText": "{{host}} could not be loaded.",
+      "schutzTitel": "Content protection isn’t ready yet",
+      "schutzText": "The browser is still reading the block lists. Reload the page in a moment."
     },
     "suche": {
       "feld": "Find in page",

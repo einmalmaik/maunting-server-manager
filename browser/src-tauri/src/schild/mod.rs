@@ -233,11 +233,21 @@ pub struct Kosmetik {
     pub ausnahmen: HashSet<String>,
 }
 
+/// Ein Selektor aus einer Filterliste darf nur Selektor sein. Mit `{` oder `}`
+/// schrieb er eigene Regeln in das Stylesheet der Seite, mit `@` am Anfang
+/// (`@import url(…);a`) lud er als erste Regel fremdes CSS, ein `\` am Ende
+/// oder ein Kommentar schluckte den Block dahinter (bis 10.10.2026).
+fn nur_selektor(s: &str) -> bool {
+    let s = s.trim();
+    !s.is_empty() && !s.contains(['{', '}']) && !s.starts_with('@') && !s.contains("/*") && !s.ends_with('\\')
+}
+
 fn verstecken(selektoren: impl IntoIterator<Item = String>) -> String {
     // Je Regel ein eigener Block: ein ungültiger Selektor würde sonst den
     // ganzen Block ungültig machen.
     selektoren
         .into_iter()
+        .filter(|s| nur_selektor(s))
         .map(|s| format!("{s}{{display:none!important}}"))
         .collect::<Vec<_>>()
         .join("\n")
@@ -317,6 +327,27 @@ pub fn schild_stand(app: AppHandle) -> SchildStand {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ein_selektor_schreibt_keine_eigenen_regeln() {
+        let css = verstecken(
+            [
+                ".werbung",
+                "div[style=\"position: fixed; top: 0\"]",
+                "a{} body{background:url(https://x.example/)}",
+                "@import url(https://x.example/a.css);a",
+                " @media all",
+                ".a /* rest",
+                ".a\\",
+                "",
+            ]
+            .map(String::from),
+        );
+        assert_eq!(
+            css,
+            ".werbung{display:none!important}\ndiv[style=\"position: fixed; top: 0\"]{display:none!important}"
+        );
+    }
 
     #[test]
     fn ein_geblockter_ping_bekommt_204() {

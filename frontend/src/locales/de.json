@@ -9126,7 +9126,9 @@
       "zertifikatTitel": "Verbindung nicht sicher",
       "zertifikatText": "Das Zertifikat von {{host}} ist ungültig. Der Browser lädt die Seite deshalb nicht.",
       "unbekanntTitel": "Seite nicht erreichbar",
-      "unbekanntText": "{{host}} ließ sich nicht laden."
+      "unbekanntText": "{{host}} ließ sich nicht laden.",
+      "schutzTitel": "Der Jugendschutz ist noch nicht bereit",
+      "schutzText": "Der Browser liest noch die Sperrlisten. Lade die Seite gleich noch einmal."
     },
     "suche": {
       "feld": "In der Seite suchen",

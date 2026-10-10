@@ -1,5 +1,6 @@
 use super::*;
-use crate::schild::schutz_dienst::{lesen, stand_von};
+use crate::schild::schutz_dienst::{lesen, stand_von, warten, NICHT_BEREIT};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Netzzeit des Antrags.
 const T: u64 = 1_800_000_000;
@@ -127,6 +128,21 @@ fn den_wunsch_zuruecknehmen_raeumt_den_antrag_ab() {
     s.aendern(alt.clone(), T + 10, None).unwrap();
     assert!(s.antrag.is_none());
     assert_eq!(s.regeln, alt);
+    // Zurücknehmen ist Abbrechen: kein neuer Antrag am selben Tag.
+    assert_eq!(s.aendern(Regeln { aktiv: false, ..alt.clone() }, T + 20, Some(T + 20)).unwrap_err(), "abkuehlen");
+    s.aendern(Regeln { aktiv: false, ..alt.clone() }, T + 10 + ABKUEHLEN, Some(T + 10 + ABKUEHLEN)).unwrap();
+    assert!(s.antrag.is_some());
+}
+
+#[test]
+fn verschaerfen_mit_offenem_antrag_kuehlt_ab() {
+    let alt = an(&[Kategorie::Gluecksspiel]);
+    let mut s = schutz(alt.clone());
+    s.aendern(an(&[]), T, Some(T)).unwrap();
+    // Strenger als der Stand, mit der Netzzeit gemessen, wenn sie später ist.
+    s.aendern(an(&[Kategorie::Gluecksspiel, Kategorie::Sozial]), T, Some(T + H)).unwrap();
+    assert!(s.antrag.is_none());
+    assert_eq!(s.naechster_antrag_ab, T + H + ABKUEHLEN);
 }
 
 #[test]
@@ -326,4 +342,12 @@ fn die_oberflaeche_bietet_dieselben_grenzen_an() {
     let wartezeiten = WARTEZEITEN.map(|w| format!("'{w}'")).join(", ");
     assert!(oberflaeche.contains(&format!("const WARTEZEITEN = [{wartezeiten}] as const")), "WARTEZEITEN in Jugendschutz.tsx");
     assert!(oberflaeche.contains(&format!("const HOSTS_MAX = {HOSTS_MAX}\n")), "HOSTS_MAX in Jugendschutz.tsx");
+}
+
+#[test]
+fn ohne_fertige_sperre_laedt_kein_tab() {
+    let marke = AtomicBool::new(false);
+    assert_eq!(warten(&marke, 2).unwrap_err(), NICHT_BEREIT);
+    marke.store(true, Ordering::Release);
+    warten(&marke, 2).unwrap();
 }

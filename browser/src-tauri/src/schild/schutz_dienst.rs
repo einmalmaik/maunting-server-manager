@@ -100,15 +100,29 @@ fn neu_bauen(app: &AppHandle) -> Regeln {
     regeln
 }
 
+/// Fehlercode, wenn die Sperre noch nicht steht; die Oberfläche zeigt dafür
+/// eine eigene Fehlerseite (`browser.fehlerseite.schutz*`).
+pub const NICHT_BEREIT: &str = "schutz";
+
 /// Wartet beim Start höchstens zehn Sekunden auf die Sperre. Wiederhergestellte
 /// Tabs luden sonst, bevor die Listen gelesen waren, auch gesperrte Seiten.
+/// Steht sie dann noch nicht, lädt nichts (bis 10.10.2026 lud es ungeschützt).
 /// Nie auf dem UI-Faden (Regel 122): nur aus `async`-Befehlen.
-pub fn bereit() {
-    for _ in 0..200 {
-        if BEREIT.load(Ordering::Acquire) {
-            return;
+pub fn bereit() -> Result<(), String> {
+    warten(&BEREIT, 200)
+}
+
+pub(super) fn warten(marke: &AtomicBool, mal: u32) -> Result<(), String> {
+    for _ in 0..mal {
+        if marke.load(Ordering::Acquire) {
+            return Ok(());
         }
         std::thread::sleep(Duration::from_millis(50));
+    }
+    if marke.load(Ordering::Acquire) {
+        Ok(())
+    } else {
+        Err(NICHT_BEREIT.into())
     }
 }
 

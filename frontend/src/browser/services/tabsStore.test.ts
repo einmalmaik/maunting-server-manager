@@ -1,12 +1,15 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { gerufen } = vi.hoisted(() => ({ gerufen: [] as { befehl: string; args: unknown }[] }))
+const { gerufen, abweisen } = vi.hoisted(() => ({
+  gerufen: [] as { befehl: string; args: unknown }[],
+  abweisen: {} as Record<string, unknown>,
+}))
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (befehl: string, args: unknown) => {
     gerufen.push({ befehl, args })
-    return Promise.resolve(null)
+    return befehl in abweisen ? Promise.reject(abweisen[befehl]) : Promise.resolve(null)
   },
 }))
 
@@ -225,5 +228,32 @@ describe('Verlauf und Lesezeichen', () => {
     expect(useVerlaufStore.getState().lesezeichen.map((e) => e.titel)).toEqual(['Drei', 'Eins', 'Zweites'])
     lesezeichenUmbenennen('https://3.example/', '   ')
     expect(useVerlaufStore.getState().lesezeichen[0].titel).toBe('https://3.example/')
+  })
+})
+
+describe('Jugendschutz beim Start', () => {
+  beforeEach(() => {
+    ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+    useTabsStore.setState({ tabs: [{ ...useTabsStore.getState().tabs[0], id: 'tab-start', url: '', nativDa: false }], aktivId: 'tab-start', geschlossen: [] })
+  })
+
+  it('zeigt eine Fehlerseite, wenn die Sperre noch nicht steht', async () => {
+    abweisen.tab_laden = 'schutz'
+    try {
+      useTabsStore.getState().oeffnen('https://example.com/')
+      await warten()
+      await warten()
+      expect(aktiv()).toMatchObject({ url: 'https://example.com/', laedt: false, fehler: 'schutz' })
+    } finally {
+      delete abweisen.tab_laden
+    }
+  })
+
+  it('NICHT_BEREIT in Rust ist derselbe Code', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    const { SCHUTZ_NICHT_BEREIT } = await import('./nativ')
+    const rust = readFileSync(resolve(process.cwd(), '../browser/src-tauri/src/schild/schutz_dienst.rs'), 'utf-8')
+    expect(rust).toContain(`pub const NICHT_BEREIT: &str = "${SCHUTZ_NICHT_BEREIT}";`)
   })
 })

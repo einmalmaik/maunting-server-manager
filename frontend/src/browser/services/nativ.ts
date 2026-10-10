@@ -36,6 +36,10 @@ function nacheinander<T = void>(befehl: string, args?: Record<string, unknown>):
   return lauf
 }
 
+/** Fehler von `tab_laden` und `bildsuche`, solange die Sperre des Jugendschutzes
+ * nach dem Start noch nicht steht (`NICHT_BEREIT` in `schild/schutz_dienst.rs`). */
+export const SCHUTZ_NICHT_BEREIT = 'schutz'
+
 /** `pruefung`: geladen, der Virenschutz prüft; `blockiert`: er hat die Datei abgelehnt, sie ist gelöscht. */
 export type DownloadStand = 'start' | 'pruefung' | 'fertig' | 'blockiert' | 'fehler' | 'speicher'
 

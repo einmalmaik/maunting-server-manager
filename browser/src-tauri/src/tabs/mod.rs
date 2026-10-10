@@ -117,7 +117,7 @@ pub fn tab_laden(
 ) -> Result<(), String> {
     id_pruefen(&id)?;
     let ziel = ziel_pruefen(&url)?;
-    crate::schild::schutz_dienst::bereit();
+    crate::schild::schutz_dienst::bereit()?;
     eintragen(&tabs, &id, privat);
     plattform::laden(&app, &tabs, &id, ziel, privat)
 }

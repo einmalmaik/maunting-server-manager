@@ -19,7 +19,7 @@ use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
     take_pwstr, AcceleratorKeyPressedEventHandler, CallDevToolsProtocolMethodCompletedHandler,
     ContainsFullScreenElementChangedEventHandler, DOMContentLoadedEventHandler, FaviconChangedEventHandler, GetFaviconCompletedHandler,
-    HistoryChangedEventHandler, NavigationStartingEventHandler, ProcessFailedEventHandler,
+    HistoryChangedEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler, ProcessFailedEventHandler,
     SourceChangedEventHandler, WebResourceRequestedEventHandler,
 };
 use windows::core::{Interface, BOOL, HSTRING, PWSTR};
@@ -48,6 +48,39 @@ unsafe fn verlauf(core: &ICoreWebView2) -> (bool, bool) {
     (zurueck.as_bool(), vor.as_bool())
 }
 
+/// Die Adresse, zu der der Tab gerade als Ganzes navigiert. Die erste
+/// Dokument-Anfrage dorthin ist die Seite selbst und wird nie geblockt; ein
+/// Iframe mit einer Werbeadresse dagegen schon. Danach und mit dem Ende ihrer
+/// Navigation gilt sie nicht mehr: nach einer abgebrochenen Navigation (204,
+/// `window.stop()`) blieb sie bis 10.10.2026 stehen, und ein Iframe mit genau
+/// dieser Adresse kam am Schild vorbei.
+#[derive(Default)]
+struct Hauptadresse(RefCell<Option<(u64, String)>>);
+
+impl Hauptadresse {
+    fn setzen(&self, navigation: u64, url: String) {
+        *self.0.borrow_mut() = Some((navigation, url));
+    }
+
+    /// Endet eine ältere Navigation erst nach dem Start der neuen, bleibt die neue.
+    fn beendet(&self, navigation: u64) {
+        let mut a = self.0.borrow_mut();
+        if a.as_ref().is_some_and(|(n, _)| *n == navigation) {
+            *a = None;
+        }
+    }
+
+    /// Ist `url` die Seite selbst? Nur einmal je Navigation.
+    fn nehmen(&self, url: &str) -> bool {
+        let mut a = self.0.borrow_mut();
+        let treffer = a.as_ref().is_some_and(|(_, u)| u == url);
+        if treffer {
+            *a = None;
+        }
+        treffer
+    }
+}
+
 pub(super) unsafe fn einrichten(
     app: &AppHandle,
     id: &str,
@@ -57,19 +90,32 @@ pub(super) unsafe fn einrichten(
     let core = controller.CoreWebView2()?;
     let mut token = 0i64;
 
-    // Die Adresse, zu der der Tab gerade als Ganzes navigiert. Diese eine
-    // Anfrage ist die Seite selbst und wird nie geblockt; ein Iframe mit einer
-    // Werbeadresse dagegen schon.
-    let hauptadresse = Rc::new(RefCell::new(String::new()));
+    let hauptadresse = Rc::new(Hauptadresse::default());
 
     {
         let (app, id, hauptadresse) = (app.clone(), id.to_string(), hauptadresse.clone());
         core.add_NavigationStarting(
             &NavigationStartingEventHandler::create(Box::new(move |_, args| {
                 if let Some(args) = args {
-                    *hauptadresse.borrow_mut() = text(|p| args.Uri(p));
+                    let mut navigation = 0u64;
+                    args.NavigationId(&mut navigation)?;
+                    hauptadresse.setzen(navigation, text(|p| args.Uri(p)));
                     schild::seitenwechsel(&app, &id);
                     crate::tabs::seite_vergessen(&id);
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
+    {
+        let hauptadresse = hauptadresse.clone();
+        core.add_NavigationCompleted(
+            &NavigationCompletedEventHandler::create(Box::new(move |_, args| {
+                if let Some(args) = args {
+                    let mut navigation = 0u64;
+                    args.NavigationId(&mut navigation)?;
+                    hauptadresse.beendet(navigation);
                 }
                 Ok(())
             })),
@@ -148,7 +194,7 @@ pub(super) unsafe fn einrichten(
                 // Was der Jugend- und Suchtschutz sperrt, kommt auch nicht als
                 // Iframe, Bild oder Skript einer anderen Seite. Die Seite selbst
                 // meldet `NavigationStarting` als gesperrt (`grundereignisse.rs`).
-                let hauptdokument = kontext == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT && *hauptadresse.borrow() == url;
+                let hauptdokument = kontext == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT && hauptadresse.nehmen(&url);
                 let entscheid = vorab(&url, hauptdokument);
                 if matches!(entscheid, Vorab::Laden { youtube: true } | Vorab::Schild { youtube: true }) {
                     anfrage.Headers()?.SetHeader(&HSTRING::from("YouTube-Restrict"), &HSTRING::from("Strict"))?;
@@ -383,7 +429,25 @@ unsafe fn favicon_lesen(strom: &windows::Win32::System::Com::IStream) -> Option<
 
 #[cfg(test)]
 mod tests {
-    use super::kuerzel;
+    use super::{kuerzel, Hauptadresse};
+
+    #[test]
+    fn die_hauptadresse_gilt_einmal_und_nur_fuer_ihre_navigation() {
+        let a = Hauptadresse::default();
+        a.setzen(1, "https://werbung.example/".into());
+        assert!(a.nehmen("https://werbung.example/"));
+        assert!(!a.nehmen("https://werbung.example/"), "ein Iframe danach ist keine Seite");
+
+        // Abgebrochen, ohne dass das Dokument angefragt wurde.
+        a.setzen(2, "https://werbung.example/".into());
+        a.beendet(2);
+        assert!(!a.nehmen("https://werbung.example/"));
+
+        // Die vorige Navigation endet erst nach dem Start der neuen.
+        a.setzen(3, "https://neu.example/".into());
+        a.beendet(2);
+        assert!(a.nehmen("https://neu.example/"));
+    }
 
     /// `ExecuteScript` läuft wie ein Klick und gab jeder Seite nach dem Laden
     /// eine Aktivierung (bis 10.10.2026). In Tabs laufen Skripte des Browsers

@@ -10,6 +10,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
@@ -125,13 +126,22 @@ pub fn laden(app: &AppHandle, k: Kategorie) -> HashSet<Box<str>> {
     hosts
 }
 
+/// Muss die Liste neu geholt werden? Eine kaputte, geleerte oder unlesbare
+/// Datei zählt wie eine fehlende. Bis 10.10.2026 galt sie bis zu vier Tage
+/// lang, und gesperrt war nur die eingebaute Liste.
+fn neu_holen(alter: Option<Duration>, text: Option<&str>) -> bool {
+    let brauchbar = text.is_some_and(|t| ist_hostliste(t) && !hosts_aus(t).is_empty());
+    !brauchbar || alter.is_none_or(|a| a >= ERNEUERN_NACH)
+}
+
 /// Holt die Listen der Kategorien, die fehlen oder älter als vier Tage sind.
 /// `true`, wenn eine neu da ist.
 pub async fn erneuern(app: &AppHandle, kategorien: &[Kategorie]) -> bool {
     let mut neu = false;
     for &k in kategorien {
         let (Some(url), Some(pfad)) = (k.quelle(), datei(app, k)) else { continue };
-        if alter(&pfad).is_some_and(|a| a < ERNEUERN_NACH) {
+        let text = std::fs::read_to_string(&pfad).ok();
+        if !neu_holen(alter(&pfad), text.as_deref()) {
             continue;
         }
         match holen(&url, ist_hostliste).await {
@@ -179,6 +189,23 @@ mod tests {
         assert_eq!(hosts.len(), 1, "{hosts:?}");
         assert!(hosts.contains("casino.example"));
         assert!(!ist_hostliste("<!doctype html><title>Fehler</title>"));
+    }
+
+    #[test]
+    fn eine_kaputte_liste_wird_gleich_neu_geholt() {
+        let gut = "# Title: StevenBlack/hosts extension porn
+0.0.0.0 a.example
+";
+        let jung = Some(Duration::from_secs(60));
+        assert!(!neu_holen(jung, Some(gut)));
+        assert!(neu_holen(Some(ERNEUERN_NACH), Some(gut)));
+        assert!(neu_holen(None, Some(gut)), "Uhr verstellt oder keine Datei");
+        assert!(neu_holen(jung, None), "fehlt oder nicht lesbar");
+        assert!(neu_holen(jung, Some("")), "geleert");
+        assert!(neu_holen(jung, Some("<!doctype html>")), "kaputt");
+        assert!(neu_holen(jung, Some("# Title: x
+0.0.0.0 0.0.0.0
+")), "ohne einen Host");
     }
 
     #[test]

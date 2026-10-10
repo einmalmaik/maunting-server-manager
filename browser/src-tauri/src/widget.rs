@@ -96,7 +96,7 @@ pub fn bildsuche(
     id_pruefen(&id)?;
     feld_pruefen(&feld)?;
     let ziel = ziel_pruefen(&url)?;
-    crate::schild::schutz_dienst::bereit();
+    crate::schild::schutz_dienst::bereit()?;
     if ziel.scheme() != "https" || weg(&url, false) != Weg::Laden {
         return Err("Diese Bildsuche kann der Browser nicht öffnen.".into());
     }

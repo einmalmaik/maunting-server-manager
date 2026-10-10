@@ -17,7 +17,7 @@ import { persist } from 'zustand/middleware'
 import { useEinstellungenStore, wirksameSucheJetzt } from './einstellungenStore'
 import { useFormulare } from './formulare'
 import { interneAdresse, interneSeite, istIntern, istWebseite } from './intern'
-import { nativ, type TabEreignis } from './nativ'
+import { nativ, SCHUTZ_NICHT_BEREIT, type TabEreignis } from './nativ'
 import { useRueckfragen } from './rueckfragen'
 import { baueZielUrl, type Suchmaschine } from './searchEngines'
 import { leererTab, neueTabId, webviewZeigen, type Tab } from './tab'
@@ -114,7 +114,8 @@ export const useTabsStore = create<TabsZustand>()(
         void nativ
           .tabLaden(id, url, tab.privat)
           .then(() => zeigen(id))
-          .catch(() => aendern(id, { laedt: false }))
+          // Steht der Jugendschutz noch nicht, lädt Rust nichts und sagt es.
+          .catch((e) => aendern(id, { laedt: false, ...(e === SCHUTZ_NICHT_BEREIT ? { fehler: e } : {}) }))
       }
 
       return {
@@ -128,7 +129,7 @@ export const useTabsStore = create<TabsZustand>()(
           void nativ
             .bildsuche(id, false, bild)
             .then(() => zeigen(id))
-            .catch(() => aendern(id, { laedt: false, url: '' }))
+            .catch((e) => aendern(id, e === SCHUTZ_NICHT_BEREIT ? { laedt: false, fehler: e } : { laedt: false, url: '' }))
           return id
         },
 

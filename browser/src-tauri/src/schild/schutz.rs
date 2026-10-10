@@ -190,12 +190,14 @@ impl Schutz {
                 self.ungebunden = true;
             }
             self.regeln = neu;
-            self.antrag = None;
+            // Ein offener Antrag fällt wie beim Abbrechen, sonst ließe er
+            // sich per Leer-Änderung ohne Abkühlzeit neu stellen.
+            self.abbrechen(netz.unwrap_or(jetzt).max(jetzt));
             return Ok(());
         }
         if self.ungebunden {
             self.regeln = neu;
-            self.antrag = None;
+            self.abbrechen(netz.unwrap_or(jetzt).max(jetzt));
             return Ok(());
         }
         let sofort = strenger(&self.regeln, &neu);
