@@ -1,7 +1,8 @@
 /**
- * Ein starkes Passwort für eine Registrierung oder einen Passwortwechsel. Hat
- * ein eindeutig neues Passwortfeld den Fokus, erzeugt der Browser eines und
- * setzt es ein; nach dem Absenden speichert er es ohne Rückfrage.
+ * Ein starkes Passwort für eine Registrierung oder einen Passwortwechsel. Setzt
+ * der Nutzer den Fokus in ein eindeutig neues Passwortfeld, erzeugt der Browser
+ * eines und setzt es ein; schickt er ab, speichert der Browser es einmal ohne
+ * Rückfrage. Fokus oder Absenden per Skript der Seite lösen nichts davon aus.
  *
  * Bei gesperrtem Tresor geht es über den Posteingang (`tresorGesperrt.ts`):
  * dafür braucht der Browser weder das Master-Passwort noch einen Schlüssel des

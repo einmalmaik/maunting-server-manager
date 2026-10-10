@@ -5,17 +5,20 @@
  */
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const skript = readFileSync(resolve(process.cwd(), '../browser/src-tauri/src/seite.js'), 'utf-8')
 const gesendet: unknown[] = []
 let empfangen: (e: { data: unknown }) => void = () => {}
+const verlassen = vi.fn()
+const angehalten = vi.fn()
 
 beforeAll(() => {
   ;(window as unknown as { chrome?: unknown }).chrome = {
     webview: {
       postMessage: (m: string) => gesendet.push(JSON.parse(m)),
-      addEventListener: (_: string, rueckruf: typeof empfangen) => (empfangen = rueckruf),
+      // Die WebView2 schickt Text (`PostWebMessageAsString` in `formulare.rs`).
+      addEventListener: (_: string, rueckruf: typeof empfangen) => (empfangen = (e) => rueckruf({ data: JSON.stringify(e.data) })),
     },
   }
   HTMLElement.prototype.getClientRects = function () {
@@ -28,6 +31,8 @@ beforeAll(() => {
   const rahmen = new Proxy(window, {
     get: (ziel, name) => {
       if (name === 'top') return {}
+      if (name === 'location') return { replace: verlassen, origin: window.location.origin }
+      if (name === 'stop') return angehalten
       const wert = Reflect.get(ziel, name, ziel)
       return typeof wert === 'function' ? wert.bind(ziel) : wert
     },
@@ -49,6 +54,12 @@ beforeEach(() => {
 })
 
 describe('seite.js in einem Rahmen', () => {
+  it('leert sich, wenn der Browser sagt, dass er auf einer gesperrten Seite steht', () => {
+    empfangen({ data: { t: 'gesperrt' } })
+    expect(angehalten).toHaveBeenCalledOnce()
+    expect(verlassen).toHaveBeenCalledWith('about:blank')
+  })
+
   it('meldet nur Zahlungsfelder, keine Anmeldung', () => {
     fokus(document.querySelector('#email')!)
     fokus(document.querySelector('#pw')!)

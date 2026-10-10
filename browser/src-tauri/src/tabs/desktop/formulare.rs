@@ -121,7 +121,7 @@ pub fn fuellen(app: &AppHandle, id: &str, fuer: &str, nachricht: String) -> Resu
         if !gleiche_herkunft(&jetzt, &fuer) {
             return Err("Die Seite hat inzwischen gewechselt".into());
         }
-        tab.core.PostWebMessageAsJson(&HSTRING::from(nachricht)).map_err(|e| e.to_string())
+        tab.core.PostWebMessageAsString(&HSTRING::from(nachricht)).map_err(|e| e.to_string())
     })
 }
 
@@ -144,7 +144,7 @@ pub fn fuellen_rahmen(app: &AppHandle, id: &str, fuer: &str, rahmen: &str, nachr
         }
         let nachricht = HSTRING::from(nachricht);
         for ziel in ziele {
-            ziel.PostWebMessageAsJson(&nachricht).map_err(|e| e.to_string())?;
+            ziel.PostWebMessageAsString(&nachricht).map_err(|e| e.to_string())?;
         }
         Ok(())
     })

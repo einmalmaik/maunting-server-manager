@@ -17,8 +17,8 @@ use std::rc::Rc;
 use tauri::AppHandle;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
-    take_pwstr, AcceleratorKeyPressedEventHandler, ContainsFullScreenElementChangedEventHandler,
-    DOMContentLoadedEventHandler, ExecuteScriptCompletedHandler, FaviconChangedEventHandler, GetFaviconCompletedHandler,
+    take_pwstr, AcceleratorKeyPressedEventHandler, CallDevToolsProtocolMethodCompletedHandler,
+    ContainsFullScreenElementChangedEventHandler, DOMContentLoadedEventHandler, FaviconChangedEventHandler, GetFaviconCompletedHandler,
     HistoryChangedEventHandler, NavigationStartingEventHandler, ProcessFailedEventHandler,
     SourceChangedEventHandler, WebResourceRequestedEventHandler,
 };
@@ -306,26 +306,41 @@ unsafe fn kosmetik_anwenden(core: &ICoreWebView2) {
     let url = quelle(core);
     let Some(kosmetik) = schild::kosmetik(&url) else { return };
     if !kosmetik.css.is_empty() {
-        let _ = core.ExecuteScript(&HSTRING::from(schild::stil_skript(&kosmetik.css)), OHNE_ANTWORT);
+        ohne_geste(core, &schild::stil_skript(&kosmetik.css), |_| {});
     }
     if kosmetik.generichide {
         return;
     }
     let ausnahmen = kosmetik.ausnahmen;
     let core_spaeter = core.clone();
-    let _ = core.ExecuteScript(
-        &HSTRING::from(schild::KLASSEN_SAMMELN),
-        &ExecuteScriptCompletedHandler::create(Box::new(move |fehler, json| {
-            fehler?;
-            if let Some(css) = schild::allgemeine_kosmetik(&url, &json, &ausnahmen) {
-                let _ = core_spaeter.ExecuteScript(&HSTRING::from(schild::stil_skript(&css)), OHNE_ANTWORT);
+    ohne_geste(core, schild::KLASSEN_SAMMELN, move |json| {
+        if let Some(css) = schild::allgemeine_kosmetik(&url, json, &ausnahmen) {
+            ohne_geste(&core_spaeter, &schild::stil_skript(&css), |_| {});
+        }
+    });
+}
+
+/// Ein Skript des Browsers in der Seite, ohne Nutzergeste; `danach` bekommt
+/// den Rückgabewert als JSON. `ExecuteScript` läuft in der WebView2 wie ein
+/// Klick: jede Seite bekam nach dem Laden 5 s Aktivierung (Popups, Ton,
+/// Vollbild, Zwischenablage) und danach `hasBeenActive` (Laufzeitprobe
+/// 10.10.2026). Ein dauerhaftes `Runtime.enable` braucht es dafür nicht.
+pub(super) unsafe fn ohne_geste(core: &ICoreWebView2, skript: &str, danach: impl FnOnce(&str) + 'static) {
+    let parameter = serde_json::json!({ "expression": skript, "returnByValue": true, "userGesture": false });
+    let mut danach = Some(danach);
+    let _ = core.CallDevToolsProtocolMethod(
+        &HSTRING::from("Runtime.evaluate"),
+        &HSTRING::from(parameter.to_string()),
+        &CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |ergebnis, json| {
+            ergebnis?;
+            let wert = serde_json::from_str::<serde_json::Value>(&json).ok().and_then(|w| w.pointer("/result/value").map(|v| v.to_string()));
+            if let (Some(wert), Some(danach)) = (wert, danach.take()) {
+                danach(&wert);
             }
             Ok(())
         })),
     );
 }
-
-const OHNE_ANTWORT: Option<&ICoreWebView2ExecuteScriptCompletedHandler> = None;
 
 /// Ein Favicon als `data:image/png;base64,…`; `None`, wenn leer oder größer als 32 KiB.
 unsafe fn favicon_lesen(strom: &windows::Win32::System::Com::IStream) -> Option<String> {
@@ -350,6 +365,31 @@ unsafe fn favicon_lesen(strom: &windows::Win32::System::Com::IStream) -> Option<
 #[cfg(test)]
 mod tests {
     use super::kuerzel;
+
+    /// `ExecuteScript` läuft wie ein Klick und gab jeder Seite nach dem Laden
+    /// eine Aktivierung (bis 10.10.2026). In Tabs laufen Skripte des Browsers
+    /// nur über `ohne_geste`; das Popup einer Erweiterung öffnet der Nutzer selbst.
+    #[test]
+    fn skripte_in_seiten_laufen_ohne_nutzergeste() {
+        let verboten = concat!(".Execute", "Script(");
+        for (datei, quelltext) in [
+            ("desktop.rs", include_str!("../desktop.rs")),
+            ("absturz.rs", include_str!("absturz.rs")),
+            ("cookies.rs", include_str!("cookies.rs")),
+            ("entwickler.rs", include_str!("entwickler.rs")),
+            ("erweiterungen.rs", include_str!("erweiterungen.rs")),
+            ("formulare.rs", include_str!("formulare.rs")),
+            ("grundereignisse.rs", include_str!("grundereignisse.rs")),
+            ("herunterladen.rs", include_str!("herunterladen.rs")),
+            ("ohne_edge.rs", include_str!("ohne_edge.rs")),
+            ("rueckfragen.rs", include_str!("rueckfragen.rs")),
+            ("schlaf.rs", include_str!("schlaf.rs")),
+            ("standbild.rs", include_str!("standbild.rs")),
+            ("webview2.rs", include_str!("webview2.rs")),
+        ] {
+            assert!(!quelltext.contains(verboten), "{datei}");
+        }
+    }
 
     #[test]
     fn kuerzel_des_browsers() {

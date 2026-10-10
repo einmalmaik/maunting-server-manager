@@ -99,6 +99,13 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
       // `view.url` ist nach `loadUrl` schon die neue Adresse, während noch das
       // alte Dokument spricht. Zählt nur, wenn beide dieselbe Herkunft haben.
       val herkunft = quelle.toString()
+      // Weiterleitungen eines Rahmens sieht `shouldInterceptRequest` nicht: ein
+      // iframe auf einen Kurzlink lud die gesperrte Seite dahinter. Der Rahmen
+      // meldet sich aber mit seiner echten Herkunft und wird geleert.
+      if (!hauptrahmen && TabsBruecke.rahmenGesperrt(herkunft)) {
+        antwort.postMessage("{\"t\":\"gesperrt\"}")
+        return@addWebMessageListener
+      }
       if (!hauptrahmen && text != null) {
         // Ein Rahmen, der woanders hin lädt, meldet sich mit der neuen Herkunft.
         val h = TabsBruecke.rahmen(id, view.url.orEmpty(), herkunft, text)

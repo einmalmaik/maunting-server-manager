@@ -16,7 +16,8 @@ beforeAll(() => {
   ;(window as unknown as { chrome?: unknown }).chrome = {
     webview: {
       postMessage: (m: string) => gesendet.push(JSON.parse(m)),
-      addEventListener: (_: string, rueckruf: typeof empfangen) => (empfangen = rueckruf),
+      // Die WebView2 schickt Text (`PostWebMessageAsString` in `formulare.rs`).
+      addEventListener: (_: string, rueckruf: typeof empfangen) => (empfangen = (e) => rueckruf({ data: JSON.stringify(e.data) })),
     },
   }
   new Function(skript)()

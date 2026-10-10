@@ -125,6 +125,16 @@ pub fn vorab(url: &str, hauptdokument: bool) -> Vorab {
     }
 }
 
+/// Ein Rahmen, dessen Dokument auf einer gesperrten Herkunft steht. Unter
+/// Android sehen `shouldOverrideUrlLoading` und `shouldInterceptRequest` die
+/// Weiterleitung eines Rahmens nicht: ein iframe auf einen Kurzlink lud die
+/// gesperrte Seite dahinter. `seite.js` meldet sich aber aus jedem Rahmen,
+/// und `sourceOrigin` nennt die Herkunft, auf der er wirklich steht.
+#[cfg(any(target_os = "android", test))]
+pub fn rahmen_gesperrt(herkunft: &str) -> bool {
+    matches!(vorab(herkunft, false), Vorab::Blocken(_))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,6 +150,23 @@ mod tests {
         // Nachgeladenes darf andere Schemata haben (WebSocket), die Seite selbst nicht.
         assert_eq!(vorab("wss://example.com/live", false), Vorab::Schild { youtube: false });
         assert_eq!(vorab("wss://example.com/live", true), Vorab::Blocken(None));
+    }
+
+    #[test]
+    fn ein_rahmen_auf_einer_gesperrten_herkunft_faellt() {
+        // Die Sperre ist global; kein anderer Test fragt nach diesem Host.
+        use crate::schild::sperre::{setzen, Sperre};
+        setzen(Sperre { eigene: ["gesperrt.example".to_string()].into_iter().collect(), ..Sperre::default() });
+        let ergebnis = [
+            rahmen_gesperrt("https://gesperrt.example"),
+            rahmen_gesperrt("https://www.gesperrt.example:8443"),
+            rahmen_gesperrt("https://example.com"),
+            // Ein Rahmen ohne Herkunft (sandbox) hat nichts, woran er fallen könnte.
+            rahmen_gesperrt("null"),
+            rahmen_gesperrt("http://tauri.localhost"),
+        ];
+        setzen(Sperre::default());
+        assert_eq!(ergebnis, [true, true, false, false, true]);
     }
 
     #[test]

@@ -28,6 +28,8 @@ export interface Feld {
   passwort?: boolean
   /** Eindeutig ein neues Passwort: hier erzeugt der Browser eines von selbst. */
   sicher?: boolean
+  /** Den Fokus hat der Nutzer gesetzt, nicht ein Skript der Seite. */
+  aktiv?: boolean
 }
 
 /**
@@ -95,7 +97,7 @@ export const useFormulare = create<FormulareZustand>()((set, get) => ({
   erzeugt: {},
   ereignis: ({ id, url, meldung, rahmen }) => {
     if (meldung.t === 'feld') {
-      set((s) => ({ feld: { ...s.feld, [id]: { url, neu: meldung.neu, passwort: meldung.passwort, sicher: !!meldung.sicher } } }))
+      set((s) => ({ feld: { ...s.feld, [id]: { url, neu: meldung.neu, passwort: meldung.passwort, sicher: !!meldung.sicher, aktiv: !!meldung.aktiv } } }))
     } else if (meldung.t === 'zahlung') {
       set((s) => ({ feld: { ...s.feld, [id]: { url, neu: false, zahlung: meldung.art, ...(rahmen && { rahmen }) } } }))
     } else if (meldung.t === 'benutzer') {
@@ -104,7 +106,9 @@ export const useFormulare = create<FormulareZustand>()((set, get) => ({
       const schritt = get().schritt[id]
       const frueher = schritt && schritt.host === hostVon(url) && Date.now() - schritt.seit < SCHRITT_MS ? schritt.wert : ''
       const e = get().erzeugtFuer(id, url)
-      const erzeugt = !!e && !e.verbraucht && e.passwort === meldung.passwort
+      // Ohne Rückfrage nur, wenn der Nutzer selbst abgeschickt hat: per Skript
+      // könnte die Seite es mit immer neuen Namen abschicken.
+      const erzeugt = !!meldung.aktiv && !!e && !e.verbraucht && e.passwort === meldung.passwort
       set((s) => ({
         abgeschickt: { ...s.abgeschickt, [id]: { url, benutzer: meldung.benutzer || frueher, passwort: meldung.passwort, ...(erzeugt && { erzeugt }) } },
         feld: ohne(s.feld, id),
@@ -114,7 +118,12 @@ export const useFormulare = create<FormulareZustand>()((set, get) => ({
     }
   },
   erzeugtMerken: (tab, url, passwort) =>
-    set((s) => ({ erzeugt: { ...s.erzeugt, [tab]: { host: hostVon(url), passwort, eingesetzt: true, seit: Date.now() } } })),
+    set((s) => {
+      const vorher = s.erzeugt[tab]
+      // Nach einem Neuladen kommt dasselbe Passwort wieder hinein; gespeichert war es dann schon.
+      const verbraucht = !!vorher?.verbraucht && vorher.host === hostVon(url) && vorher.passwort === passwort
+      return { erzeugt: { ...s.erzeugt, [tab]: { host: hostVon(url), passwort, eingesetzt: true, seit: Date.now(), ...(verbraucht && { verbraucht }) } } }
+    }),
   erzeugtFuer: (tab, url) => {
     const e = get().erzeugt[tab]
     return e && e.host === hostVon(url) && Date.now() - e.seit < SCHRITT_MS ? e : null

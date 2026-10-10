@@ -36,6 +36,9 @@ object TabsBruecke {
   /** Eine Meldung von `seite.js` aus einem Unterrahmen; gibt dessen Herkunft zurück, wenn er fürs Füllen in Frage kommt, sonst "". */
   @JvmStatic external fun rahmen(tab: String, url: String, absender: String, roh: String): String
 
+  /** Steht ein Rahmen mit dieser Herkunft (`sourceOrigin`) auf einer gesperrten Seite? */
+  @JvmStatic external fun rahmenGesperrt(herkunft: String): Boolean
+
   @JvmStatic external fun gleicheHerkunft(a: String, b: String): Boolean
 
   /** Der bereinigte Dateiname eines Downloads, leer, wenn die Adresse gesperrt ist. */

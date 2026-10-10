@@ -46,7 +46,7 @@ export function FormularLeiste() {
     return zahlungen ? <ZahlungEinfuegen key={schluessel} tab={tab.id} url={feld.url} rahmen={feld.rahmen} art={feld.zahlung} /> : null
   }
   const einfuegen = feld && ausfuellen ? <Einfuegen key={`e-${tab.id}-${feld.url}`} tab={tab.id} feld={feld} /> : null
-  if (feld?.sicher && feld.passwort && erzeugen) {
+  if (feld?.sicher && feld.aktiv && feld.passwort && erzeugen) {
     return <PasswortErzeugen key={`p-${tab.id}-${feld.url}`} tab={tab.id} url={feld.url} ersatz={einfuegen} />
   }
   return einfuegen

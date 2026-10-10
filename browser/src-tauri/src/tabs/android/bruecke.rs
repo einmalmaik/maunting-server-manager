@@ -18,6 +18,7 @@ use tauri::{AppHandle, Emitter};
 use crate::schild::{self, AnfrageArt};
 use crate::tabs::ereignis::von_kotlin;
 use crate::tabs::formular::{self, gleiche_herkunft};
+use crate::tabs::weg::rahmen_gesperrt;
 use crate::tabs::{id_pruefen, melden, vorab, weg, TabEreignis, Vorab, Weg};
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
@@ -174,6 +175,18 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_rahm
         _ => None,
     };
     zurueck(&mut env, &herkunft.unwrap_or_default())
+}
+
+/// Steht ein Rahmen auf einer gesperrten Herkunft? Seine Weiterleitungen
+/// sieht `anfrage` nicht ([`rahmen_gesperrt`]).
+#[no_mangle]
+pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_rahmenGesperrt<'l>(
+    mut env: JNIEnv<'l>,
+    _: JClass<'l>,
+    herkunft: JString<'l>,
+) -> jboolean {
+    let herkunft = text(&mut env, &herkunft);
+    ja(rahmen_gesperrt(&herkunft))
 }
 
 #[no_mangle]

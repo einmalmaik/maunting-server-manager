@@ -25,13 +25,81 @@
   const wert = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
   const auswahlWert = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')
   const json = JSON.stringify
+
+  // Was die Seite später überschreiben könnte, wird hier eingefangen, bevor
+  // eines ihrer Skripte läuft. Sonst meldet sie ein verstecktes Feld als
+  // sichtbar, liest die Nachricht des Browsers samt Zahlungsdaten mit oder
+  // täuscht einen Klick vor. Aufgerufen wird nur über `anwenden`, nie über
+  // `.call` (`Function.prototype.call` gehört der Seite).
+  const anwenden = Reflect.apply
+  const beschreibung = Object.getOwnPropertyDescriptor
+  const getter = (vorlage, name) => {
+    const d = vorlage && beschreibung(vorlage, name)
+    return d && d.get
+  }
+  const lesenAls = JSON.parse
+  const ohneVorlage = Object.setPrototypeOf
+  const istListe = Array.isArray
+  const zahl = Number
+  const rechtecke = HTMLElement.prototype.getClientRects
+  const rechteck = HTMLElement.prototype.getBoundingClientRect
+  const sichtPruefen = HTMLElement.prototype.checkVisibility
+  const stilVon = window.getComputedStyle
+  const stilWert = CSSStyleDeclaration.prototype.getPropertyValue
+  const anzahl = getter(window.DOMRectList && DOMRectList.prototype, 'length')
+  const MASSE = ['width', 'height', 'right', 'bottom']
+  const massGetter = MASSE.map((n) => getter(window.DOMRectReadOnly && DOMRectReadOnly.prototype, n))
+  const rollX = getter(window, 'scrollX')
+  const rollY = getter(window, 'scrollY')
+  const daten = getter(MessageEvent.prototype, 'data')
+  const aktivierung = navigator.userActivation
+  const aktivLesen = getter(aktivierung && Object.getPrototypeOf(aktivierung), 'isActive')
+  // Hat der Nutzer gerade geklickt oder getippt? Ein Fokus oder Absenden per
+  // Skript zählt nicht. Skripte des Browsers laufen deshalb ohne Nutzergeste
+  // (`ohne_geste` in `tabs/desktop/webview2.rs`).
+  const nutzerAktiv = () => !!aktivLesen && anwenden(aktivLesen, aktivierung, []) === true
+  // Echte Rechtecke über die eingefangenen Getter; die Attrappen der Tests
+  // sind schlichte Objekte. Keine Methoden von `Array.prototype`: auch die
+  // gehören der Seite.
+  const ueber = (g, o, name) => {
+    try {
+      return anwenden(g, o, [])
+    } catch (_) {
+      return o[name]
+    }
+  }
+  const mass = (r, i) => (massGetter[i] ? ueber(massGetter[i], r, MASSE[i]) : r[MASSE[i]])
+  const lage = (g) => (g ? anwenden(g, window, []) : 0)
+
+  // Beide Plattformen schicken Text (`PostWebMessageAsString`, Android
+  // `postMessage`). Gelesen wird über die eingefangenen Funktionen in Objekte
+  // ohne Prototyp: fragt der Code nach einem Feld, das fehlt, fände er sonst
+  // einen Getter, den die Seite auf `Object.prototype` gelegt hat, und der
+  // sähe die ganze Nachricht.
+  function nachricht(e) {
+    let d
+    try {
+      d = anwenden(daten, e, [])
+    } catch (_) {
+      d = e && e.data
+    }
+    if (typeof d !== 'string') return null
+    try {
+      return lesenAls(d, (_, v) => (v !== null && typeof v === 'object' && !istListe(v) ? ohneVorlage(v, null) : v))
+    } catch (_) {
+      return null
+    }
+  }
   const NEU = /regist|signup|sign-up|sign_up|join|create|erstell|confirm|repeat|wiederhol|bestätig|bestaetig/i
   const BENUTZER = /user|login|e-?mail|benutzer|konto|account|anmelde|identifier/i
   const BISHER = /current|old.?pass|altes|bisherig|aktuelles/i
   const REGISTRIEREN = /regist|sign ?up|(konto|account) (erstellen|anlegen)|create (an |your )?account|jetzt beitreten|join now/i
   const SENDEN = /anmeld|einlog|log ?in|sign ?in|sign ?up|weiter|next|continue|regist|erstell|create|submit|senden|bestätig/i
 
-  const sichtbar = (el) => el.getClientRects().length > 0 && !el.disabled && !el.readOnly
+  const sichtbar = (el) => {
+    const liste = anwenden(rechtecke, el, [])
+    return (anzahl ? ueber(anzahl, liste, 'length') : liste.length) > 0 && !el.disabled && !el.readOnly
+  }
   const merkmale = (el) => [el.name, el.id, el.getAttribute('autocomplete'), el.getAttribute('placeholder'), el.getAttribute('aria-label')].join(' ')
   const bereich = (el) => el.form || el.closest('form') || document
   // Eine Prüfnummer im Passwortfeld ist kein Passwort.
@@ -71,16 +139,6 @@
   }
   const zahlArt = (rolle) => (KONTO_ROLLEN.includes(rolle) ? 'konto' : 'karte')
 
-  // Android liefert Nachrichten nur als Text.
-  function nachricht(d) {
-    if (typeof d !== 'string') return d
-    try {
-      return JSON.parse(d)
-    } catch (_) {
-      return null
-    }
-  }
-
   if (!oben) {
     let gemeldetHier = ''
     document.addEventListener(
@@ -100,7 +158,13 @@
     // hier ist aber "null". Gefüllt wird der ganze Rahmen: bei Adyen liegt
     // jedes Feld in einem eigenen.
     bruecke.addEventListener('message', (e) => {
-      const d = nachricht(e.data)
+      const d = nachricht(e)
+      // Unter Android: der Rahmen steht nach einer Weiterleitung auf einer
+      // gesperrten Seite (`rahmen_gesperrt`), die Anfrage hat das nicht gesehen.
+      if (d && d.t === 'gesperrt') {
+        window.stop()
+        return window.location.replace('about:blank')
+      }
       if (d && d.t === 'fuellen' && (d.karte || d.konto) && d.herkunft === location.origin) zahlungFuellen(d, document)
     })
     return
@@ -197,7 +261,7 @@
       if (!passwort && !istBenutzer(el)) return
       zuletzt = el
       const pws = passwoerter(bereich(el))
-      const meldung = json({ t: 'feld', passwort, neu: pws.some(istNeu), sicher: pws.some(istSicherNeu) })
+      const meldung = json({ t: 'feld', passwort, neu: pws.some(istNeu), sicher: pws.some(istSicherNeu), aktiv: nutzerAktiv() })
       if (meldung === gemeldet) return
       gemeldet = meldung
       senden(meldung)
@@ -213,7 +277,7 @@
     const feld = benutzerfeld(b, pw)
     const name = feld ? wert.get.call(feld).trim() : ''
     let meldung = ''
-    if (pw) meldung = json({ t: 'absenden', benutzer: name, passwort: wert.get.call(pw), neu: istNeu(pw) })
+    if (pw) meldung = json({ t: 'absenden', benutzer: name, passwort: wert.get.call(pw), neu: istNeu(pw), aktiv: nutzerAktiv() })
     else if (name) meldung = json({ t: 'benutzer', wert: name })
     if (!meldung || meldung === abgeschickt) return
     abgeschickt = meldung
@@ -243,7 +307,7 @@
 
   function setzen(el, text) {
     el.focus()
-    wert.set.call(el, text)
+    anwenden(wert.set, el, [text])
     el.dispatchEvent(new Event('input', { bubbles: true }))
     el.dispatchEvent(new Event('change', { bubbles: true }))
   }
@@ -253,7 +317,7 @@
     const option = [...el.options].find((o) => kandidaten.includes(o.value.trim()) || kandidaten.includes(o.text.trim()))
     if (!option) return
     el.focus()
-    auswahlWert.set.call(el, option.value)
+    anwenden(auswahlWert.set, el, [option.value])
     el.dispatchEvent(new Event('input', { bubbles: true }))
     el.dispatchEvent(new Event('change', { bubbles: true }))
   }
@@ -262,12 +326,12 @@
   // neben dem sichtbaren würde sie sonst still mitnehmen.
   function wirklichSichtbar(el) {
     if (!sichtbar(el)) return false
-    const r = el.getBoundingClientRect()
+    const r = anwenden(rechteck, el, [])
     // Echte Eingabefelder sind größer; ein 10 × 8 px kleines Feld sieht niemand als solches.
-    if (r.width < 20 || r.height < 12 || r.right + scrollX <= 0 || r.bottom + scrollY <= 0) return false
-    if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false
-    const stil = getComputedStyle(el)
-    return stil.visibility === 'visible' && Number(stil.opacity) >= 0.1
+    if (!(mass(r, 0) >= 20 && mass(r, 1) >= 12 && mass(r, 2) + lage(rollX) > 0 && mass(r, 3) + lage(rollY) > 0)) return false
+    if (sichtPruefen && !anwenden(sichtPruefen, el, [{ opacityProperty: true, visibilityProperty: true }])) return false
+    const stil = anwenden(stilVon, window, [el])
+    return anwenden(stilWert, stil, ['visibility']) === 'visible' && zahl(anwenden(stilWert, stil, ['opacity'])) >= 0.1
   }
 
   // `b`: das Formular des Zahlungsfeldes mit dem Fokus, im Rahmen einer Kasse der ganze Rahmen.
@@ -290,8 +354,8 @@
       else if (rolle === 'jahr' && z.jahr) text = [String(z.jahr), zwei(z.jahr % 100)]
       else if (rolle === 'ablauf' && z.monat && z.jahr) text = zwei(z.monat) + '/' + (vierstellig ? z.jahr : zwei(z.jahr % 100))
       if (text == null) continue
-      if (el instanceof HTMLSelectElement) waehlen(el, Array.isArray(text) ? text : [text])
-      else if (Array.isArray(text)) setzen(el, rolle === 'jahr' && !vierstellig ? text[1] : text[0])
+      if (el instanceof HTMLSelectElement) waehlen(el, istListe(text) ? text : [text])
+      else if (istListe(text)) setzen(el, rolle === 'jahr' && !vierstellig ? text[1] : text[0])
       else setzen(el, text)
     }
   }
@@ -356,7 +420,7 @@
       zurueck()
       arbeit = { ziele: textSammeln(), pos: 0, stueck: [] }
     } else if (d.schritt === 'weiter') {
-      if (!arbeit || !Array.isArray(d.texte) || d.texte.length !== arbeit.stueck.length) return
+      if (!arbeit || !istListe(d.texte) || d.texte.length !== arbeit.stueck.length) return
       arbeit.stueck.forEach((z, i) => {
         const u = d.texte[i]
         if (typeof u === 'string' && jetzt(z) === z[2]) {
@@ -402,7 +466,7 @@
 
   // Gefüllt und übersetzt wird nur auf Anweisung des Browsers, nach einem Klick in seiner Leiste.
   bruecke.addEventListener('message', (e) => {
-    const d = nachricht(e.data)
+    const d = nachricht(e)
     if (d && d.t === 'datei' && android) return void dateiGeben(d.nr, d.url)
     if (d && d.t === 'uebersetzen') return void uebersetzen(d)
     if (d && d.t === 'weiter' && quittungen.has(d.nr)) {

@@ -26,15 +26,25 @@ pub enum Meldung {
     /// Ein Benutzer- oder Passwortfeld hat den Fokus. `neu`: ein neues
     /// Passwort (Registrierung, Wechsel). `sicher`: eindeutig ein neues
     /// Passwort (`new-password` oder Passwort samt Wiederholung); nur dann
-    /// erzeugt der Browser eines von selbst.
+    /// erzeugt der Browser eines von selbst. `aktiv`: der Fokus kam von einem
+    /// Klick oder einer Taste des Nutzers (`navigator.userActivation`), nicht
+    /// von einem Skript der Seite.
     Feld {
         passwort: bool,
         neu: bool,
         #[serde(default)]
         sicher: bool,
+        #[serde(default)]
+        aktiv: bool,
     },
-    /// Abgeschickt mit Passwort.
-    Absenden { benutzer: String, passwort: String, neu: bool },
+    /// Abgeschickt mit Passwort; `aktiv` wie bei [`Meldung::Feld`].
+    Absenden {
+        benutzer: String,
+        passwort: String,
+        neu: bool,
+        #[serde(default)]
+        aktiv: bool,
+    },
     /// Abgeschickt ohne Passwort: erster Schritt einer mehrstufigen Anmeldung.
     Benutzer { wert: String },
     /// Ein Feld für eine Zahlungskarte oder ein Bankkonto hat den Fokus.
@@ -55,8 +65,10 @@ pub enum ZahlArt {
 impl std::fmt::Debug for Meldung {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Meldung::Feld { passwort, neu, sicher } => write!(f, "Feld {{ passwort: {passwort}, neu: {neu}, sicher: {sicher} }}"),
-            Meldung::Absenden { neu, .. } => write!(f, "Absenden {{ neu: {neu}, .. }}"),
+            Meldung::Feld { passwort, neu, sicher, aktiv } => {
+                write!(f, "Feld {{ passwort: {passwort}, neu: {neu}, sicher: {sicher}, aktiv: {aktiv} }}")
+            }
+            Meldung::Absenden { neu, aktiv, .. } => write!(f, "Absenden {{ neu: {neu}, aktiv: {aktiv}, .. }}"),
             Meldung::Benutzer { .. } => write!(f, "Benutzer {{ .. }}"),
             Meldung::Zahlung { art } => write!(f, "Zahlung {{ art: {art:?} }}"),
             Meldung::Rahmen { herkunft } => write!(f, "Rahmen {{ herkunft: {herkunft:?} }}"),
@@ -326,7 +338,12 @@ mod tests {
 
     #[test]
     fn nimmt_nur_bekannte_und_knappe_meldungen() {
-        assert!(matches!(lesen(r#"{"t":"feld","passwort":true,"neu":false}"#), Some(Meldung::Feld { passwort: true, neu: false, sicher: false })));
+        assert!(matches!(lesen(r#"{"t":"feld","passwort":true,"neu":false}"#), Some(Meldung::Feld { passwort: true, neu: false, sicher: false, aktiv: false })));
+        assert!(matches!(lesen(r#"{"t":"feld","passwort":true,"neu":true,"sicher":true,"aktiv":true}"#), Some(Meldung::Feld { aktiv: true, .. })));
+        assert!(matches!(
+            lesen(r#"{"t":"absenden","benutzer":"a","passwort":"b","neu":true,"aktiv":true}"#),
+            Some(Meldung::Absenden { aktiv: true, .. })
+        ));
         assert!(matches!(lesen(r#"{"t":"feld","passwort":true,"neu":true,"sicher":true}"#), Some(Meldung::Feld { sicher: true, .. })));
         assert!(lesen(r#"{"t":"absenden","benutzer":"a","passwort":"","neu":false}"#).is_none());
         assert!(lesen(r#"{"t":"feld","passwort":true,"neu":false,"url":"https://bank.example"}"#).is_none());

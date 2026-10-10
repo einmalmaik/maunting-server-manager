@@ -12,15 +12,31 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 const skript = readFileSync(resolve(process.cwd(), '../browser/src-tauri/src/seite.js'), 'utf-8')
 const gesendet: unknown[] = []
 let empfangen: (e: { data: unknown }) => void = () => {}
+/** Was die Brücke wirklich übergibt, ohne den Umweg über `empfangen`. */
+let empfangenRoh: (e: unknown) => void = () => {}
+// `navigator.userActivation`: hat der Nutzer gerade geklickt oder getippt?
+let nutzer = true
+const lesen = JSON.parse
+class Aktivierung {
+  get isActive() {
+    return nutzer
+  }
+}
 
 beforeAll(() => {
   const fenster = window as unknown as { chrome?: unknown }
   fenster.chrome = {
     webview: {
-      postMessage: (m: string) => gesendet.push(JSON.parse(m)),
-      addEventListener: (_: string, rueckruf: typeof empfangen) => (empfangen = rueckruf),
+      // Eingefangen: ein Test überschreibt `JSON.parse` wie eine Seite.
+      postMessage: (m: string) => gesendet.push(lesen(m)),
+      // Die WebView2 schickt Text (`PostWebMessageAsString` in `formulare.rs`).
+      addEventListener: (_: string, rueckruf: (e: unknown) => void) => {
+        empfangenRoh = rueckruf
+        empfangen = (e) => rueckruf({ data: JSON.stringify(e.data) })
+      },
     },
   }
+  Object.defineProperty(navigator, 'userActivation', { value: new Aktivierung(), configurable: true })
   HTMLElement.prototype.getClientRects = function () {
     return (this.hasAttribute('data-flach') ? [] : [{}]) as unknown as DOMRectList
   }
@@ -56,6 +72,7 @@ describe('Zahlungsfelder in der Seite', () => {
     document.body.innerHTML = KASSE
     gesendet.length = 0
   })
+
 
   it('meldet ein Kartenfeld als Zahlung, nie als Anmeldung', () => {
     fokus(document.querySelector('#cvc')!)
@@ -101,6 +118,55 @@ describe('Zahlungsfelder in der Seite', () => {
     empfangen({ data: { t: 'fuellen', karte: KARTE } })
     expect(wert('#nummer')).toBe('')
   })
+
+  // Bis 10.10.2026 maß `seite.js` mit Funktionen, die die Seite später
+  // überschreiben kann, und las die Nachricht über `e.data` und `JSON.parse`.
+  it('lässt sich von der Seite weder ein verstecktes Feld als sichtbar zeigen noch die Nachricht mitlesen', () => {
+    const mitgelesen: unknown[] = []
+    const vorher = {
+      rechteck: HTMLElement.prototype.getBoundingClientRect,
+      rechtecke: HTMLElement.prototype.getClientRects,
+      stil: window.getComputedStyle,
+      parse: JSON.parse,
+      daten: Object.getOwnPropertyDescriptor(MessageEvent.prototype, 'data')!,
+    }
+    try {
+      // Die Seite überschreibt alles, womit gemessen und gelesen wird.
+      HTMLElement.prototype.getBoundingClientRect = () => ({ width: 300, height: 40, right: 310, bottom: 50 }) as DOMRect
+      HTMLElement.prototype.getClientRects = () => [{}] as unknown as DOMRectList
+      window.getComputedStyle = () => ({ visibility: 'visible', opacity: '1', getPropertyValue: () => '1' }) as unknown as CSSStyleDeclaration
+      JSON.parse = (text: string, ...rest: unknown[]) => (mitgelesen.push(text), vorher.parse(text, ...(rest as [])))
+      Object.defineProperty(MessageEvent.prototype, 'data', {
+        configurable: true,
+        get() {
+          const d = vorher.daten.get!.call(this)
+          mitgelesen.push(d)
+          return d
+        },
+      })
+      Object.defineProperty(Object.prototype, 'konto', {
+        configurable: true,
+        get() {
+          mitgelesen.push(JSON.stringify(this))
+          return undefined
+        },
+      })
+      fokus(document.querySelector('#nummer')!)
+      empfangenRoh(new MessageEvent('message', { data: JSON.stringify({ t: 'fuellen', karte: KARTE }) }))
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = vorher.rechteck
+      HTMLElement.prototype.getClientRects = vorher.rechtecke
+      window.getComputedStyle = vorher.stil
+      JSON.parse = vorher.parse
+      Object.defineProperty(MessageEvent.prototype, 'data', vorher.daten)
+      delete (Object.prototype as Record<string, unknown>).konto
+    }
+    expect(wert('#nummer')).toBe('4111111111111111')
+    expect(wert('#cvc')).toBe('123')
+    // Unsichtbar (Deckkraft 0, 0 × 0, 10 × 8) bleibt leer, was die Seite auch behauptet.
+    expect([wert('#falle'), wert('#flach'), wert('#winzig')]).toEqual(['', '', ''])
+    expect(mitgelesen).toEqual([])
+  })
 })
 
 describe('Neue Passwörter in der Seite', () => {
@@ -121,7 +187,7 @@ describe('Neue Passwörter in der Seite', () => {
       <form><input id="alt" type="password" autocomplete="current-password" value="Bisher-1">
       <input id="neu1" type="password"><input id="neu2" type="password"></form>
       <form><input id="alt3" type="password" value="Bisher-2"><input id="n3a" type="password"><input id="n3b" type="password"></form>`
-    expect(feldMeldung('#neu1')).toEqual({ t: 'feld', passwort: true, neu: true, sicher: true })
+    expect(feldMeldung('#neu1')).toEqual({ t: 'feld', passwort: true, neu: true, sicher: true, aktiv: true })
     empfangen({ data: { t: 'fuellen', benutzer: null, passwort: null, neu: 'Erzeugt-1' } })
     expect([wert('#alt'), wert('#neu1'), wert('#neu2')]).toEqual(['Bisher-1', 'Erzeugt-1', 'Erzeugt-1'])
     expect(document.activeElement?.id).toBe('neu1')
@@ -136,8 +202,8 @@ describe('Neue Passwörter in der Seite', () => {
     document.body.innerHTML = `
       <form action="/session/create"><input id="login" type="password"></form>
       <form><input id="reg" type="password" autocomplete="new-password"></form>`
-    expect(feldMeldung('#login')).toEqual({ t: 'feld', passwort: true, neu: true, sicher: false })
-    expect(feldMeldung('#reg')).toEqual({ t: 'feld', passwort: true, neu: true, sicher: true })
+    expect(feldMeldung('#login')).toEqual({ t: 'feld', passwort: true, neu: true, sicher: false, aktiv: true })
+    expect(feldMeldung('#reg')).toEqual({ t: 'feld', passwort: true, neu: true, sicher: true, aktiv: true })
   })
 
   it('erkennt eine Registrierung an ihrem Hauptknopf, nicht an einem zweiten Knopf', () => {
@@ -146,8 +212,30 @@ describe('Neue Passwörter in der Seite', () => {
       <form><input type="email" name="email"><input id="einzeln" type="password" name="password"><button type="submit">Registrieren</button></form>
       <form><input type="email" name="email"><input id="anmelden" type="password" name="password"><button>Anmelden</button><button>Registrieren</button></form>`
     // Gleiche Meldungen hintereinander schickt die Seite nur einmal: erst die andere.
-    expect(feldMeldung('#anmelden')).toEqual({ t: 'feld', passwort: true, neu: false, sicher: false })
-    expect(feldMeldung('#einzeln')).toEqual({ t: 'feld', passwort: true, neu: true, sicher: true })
+    expect(feldMeldung('#anmelden')).toEqual({ t: 'feld', passwort: true, neu: false, sicher: false, aktiv: true })
+    expect(feldMeldung('#einzeln')).toEqual({ t: 'feld', passwort: true, neu: true, sicher: true, aktiv: true })
+  })
+
+  // Ein erzeugtes Passwort entsteht und wird gespeichert nur auf einen Klick
+  // oder eine Taste des Nutzers. Bis 10.10.2026 reichte ein Skript der Seite.
+  it('meldet, ob Fokus und Absenden vom Nutzer kamen, auch wenn die Seite die Abfrage überschreibt', () => {
+    document.body.innerHTML = `<form id="reg"><input type="email" name="email" value="ada@example.com"><input id="pw" type="password" autocomplete="new-password" value="Erzeugt-1"></form>`
+    const vorher = Object.getOwnPropertyDescriptor(Aktivierung.prototype, 'isActive')!
+    nutzer = false
+    try {
+      Object.defineProperty(Aktivierung.prototype, 'isActive', { configurable: true, get: () => true })
+      expect(feldMeldung('#pw')).toMatchObject({ t: 'feld', sicher: true, aktiv: false })
+      gesendet.length = 0
+      document.querySelector('#reg')!.dispatchEvent(new Event('submit', { bubbles: true }))
+      expect(gesendet).toEqual([{ t: 'absenden', benutzer: 'ada@example.com', passwort: 'Erzeugt-1', neu: true, aktiv: false }])
+    } finally {
+      Object.defineProperty(Aktivierung.prototype, 'isActive', vorher)
+      nutzer = true
+    }
+    gesendet.length = 0
+    ;(document.querySelector('#pw') as HTMLInputElement).value = 'Erzeugt-2'
+    document.querySelector('#reg')!.dispatchEvent(new Event('submit', { bubbles: true }))
+    expect(gesendet).toEqual([{ t: 'absenden', benutzer: 'ada@example.com', passwort: 'Erzeugt-2', neu: true, aktiv: true }])
   })
 })
 

@@ -36,9 +36,11 @@ const leiste = () =>
   )
 const warten = () => act(() => new Promise((fertig) => setTimeout(fertig, 0)))
 const fuellungen = () => gerufen.filter((g) => g.befehl === 'tab_fuellen').map((g) => (g.args.werte as { neu: string | null }).neu)
-const fokus = () => act(() => useFormulare.getState().ereignis({ art: 'formular', id: tab, url: URL_, meldung: { t: 'feld', passwort: true, neu: true, sicher: true } }))
-const absenden = (passwort: string, benutzer = 'ada@neu.example') =>
-  act(() => useFormulare.getState().ereignis({ art: 'formular', id: tab, url: URL_, meldung: { t: 'absenden', benutzer, passwort, neu: true } }))
+// `aktiv`: der Nutzer hat geklickt oder getippt; `false`: ein Skript der Seite.
+const fokus = (aktiv = true) =>
+  act(() => useFormulare.getState().ereignis({ art: 'formular', id: tab, url: URL_, meldung: { t: 'feld', passwort: true, neu: true, sicher: true, aktiv } }))
+const absenden = (passwort: string, benutzer = 'ada@neu.example', aktiv = true) =>
+  act(() => useFormulare.getState().ereignis({ art: 'formular', id: tab, url: URL_, meldung: { t: 'absenden', benutzer, passwort, neu: true, aktiv } }))
 
 describe('Passwort erzeugen und nach der Registrierung speichern', () => {
   const saveItem = vi.fn(async () => undefined)
@@ -109,6 +111,42 @@ describe('Passwort erzeugen und nach der Registrierung speichern', () => {
     absenden(passwort!, 'dritter@neu.example')
     await warten()
     expect(saveItem).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Speichern' })).toBeInTheDocument()
+  })
+
+  // Bis 10.10.2026 setzte der Browser nach einem Neuladen dasselbe Passwort
+  // wieder ein und vergaß dabei, dass es schon gespeichert war. Die Seite
+  // konnte per Skript fokussieren, abschicken und neu laden, ohne einen Klick.
+  it('speichert nach einem Neuladen nicht noch einmal ohne Rückfrage', async () => {
+    fokus()
+    leiste()
+    await warten()
+    const [passwort] = fuellungen()
+    absenden(passwort!)
+    await warten()
+    act(() => useFormulare.getState().laedt(tab))
+    fokus()
+    await warten()
+    expect(fuellungen()).toEqual([passwort, passwort])
+    absenden(passwort!, 'zweiter@neu.example')
+    await warten()
+    expect(saveItem).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Speichern' })).toBeInTheDocument()
+  })
+
+  it('erzeugt und speichert nichts von selbst, wenn die Seite Fokus und Absenden per Skript auslöst', async () => {
+    fokus(false)
+    leiste()
+    await warten()
+    expect(fuellungen()).toEqual([])
+    expect(screen.getByRole('button', { name: 'Starkes Passwort vorschlagen' })).toBeInTheDocument()
+
+    fokus()
+    await warten()
+    const [passwort] = fuellungen()
+    absenden(passwort!, 'ada@neu.example', false)
+    await warten()
+    expect(saveItem).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Speichern' })).toBeInTheDocument()
   })
 
