@@ -30,6 +30,8 @@ const i18n = (await import('@/i18n')).default
 
 const tab = useTabsStore.getState().aktivId!
 const URL_ = 'https://neu.example/register'
+/** In den Tresor kommt nur die Herkunft (`herkunft` in `formulare.ts`). */
+const HERKUNFT = 'https://neu.example'
 const leiste = () =>
   render(
     <MemoryRouter>
@@ -70,7 +72,7 @@ describe('Passwort erzeugen und nach der Registrierung speichern', () => {
 
     absenden(passwort!)
     await warten()
-    expect(saveItem).toHaveBeenCalledWith({ service: 'neu.example', category: 'login', url: URL_, username: 'ada@neu.example', password: passwort })
+    expect(saveItem).toHaveBeenCalledWith({ service: 'neu.example', category: 'login', url: HERKUNFT, username: 'ada@neu.example', password: passwort })
     expect(screen.queryByRole('button', { name: 'Speichern' })).not.toBeInTheDocument()
   })
 
@@ -84,7 +86,7 @@ describe('Passwort erzeugen und nach der Registrierung speichern', () => {
 
     absenden(passwort!)
     await warten()
-    expect(gesperrt.gespeichert).toEqual([[URL_, 'ada@neu.example', passwort]])
+    expect(gesperrt.gespeichert).toEqual([[HERKUNFT, 'ada@neu.example', passwort]])
     expect(unlock).not.toHaveBeenCalled()
     expect(saveItem).not.toHaveBeenCalled()
   })

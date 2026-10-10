@@ -483,7 +483,9 @@
       quittungen.delete(d.nr)
       return weiter(d.ok === true)
     }
-    if (!d || d.t !== 'fuellen') return
+    // Nur für die Herkunft, für die der Browser gefüllt hat: zwischen seiner
+    // Prüfung und der Ankunft hier kann ein neues Dokument geladen sein.
+    if (!d || d.t !== 'fuellen' || d.herkunft !== location.origin) return
     if (d.karte || d.konto) {
       if (zahlZuletzt && zahlZuletzt.isConnected) zahlungFuellen(d, bereich(zahlZuletzt))
       return

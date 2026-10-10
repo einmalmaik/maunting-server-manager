@@ -8,8 +8,9 @@
  */
 import { create } from 'zustand'
 
-import { hostVon } from '@/desktop/vault/hostVon'
+import { hostVon, portVon } from '@/desktop/vault/hostVon'
 import type { VaultItem } from '@/desktop/vault/vaultEintrag'
+import { beiKontowechsel } from '@/lib/angemeldetesKonto'
 
 import type { TabEreignis } from './nativ'
 
@@ -53,6 +54,7 @@ export interface Erzeugt {
 
 /** Abgeschickt; wartet auf „Speichern“ oder „Nicht jetzt“. */
 export interface Abgeschickt {
+  /** Nur die Herkunft der Seite (`herkunft`): so kommt sie in den Tresor. */
   url: string
   benutzer: string
   passwort: string
@@ -83,6 +85,21 @@ interface FormulareZustand {
   tabWeg: (tab: string) => void
 }
 
+/**
+ * Was von einer Adresse in den Tresor kommt: Schema, Host und Port. Pfad und
+ * Abfrage tragen oft Einmal-Token, Sitzungen oder E-Mail-Adressen
+ * (`/reset/<token>`, `?session=…`), und zum Wiedererkennen braucht der
+ * Tresor sie nicht (`anmeldungenFuer`).
+ */
+export function herkunft(url: string): string {
+  try {
+    const u = new URL(url)
+    return /^https?:$/.test(u.protocol) ? u.origin : url
+  } catch {
+    return url
+  }
+}
+
 function ohne<T>(liste: Record<string, T>, tab: string): Record<string, T> {
   if (!(tab in liste)) return liste
   const rest = { ...liste }
@@ -110,7 +127,7 @@ export const useFormulare = create<FormulareZustand>()((set, get) => ({
       // könnte die Seite es mit immer neuen Namen abschicken.
       const erzeugt = !!meldung.aktiv && !!e && !e.verbraucht && e.passwort === meldung.passwort
       set((s) => ({
-        abgeschickt: { ...s.abgeschickt, [id]: { url, benutzer: meldung.benutzer || frueher, passwort: meldung.passwort, ...(erzeugt && { erzeugt }) } },
+        abgeschickt: { ...s.abgeschickt, [id]: { url: herkunft(url), benutzer: meldung.benutzer || frueher, passwort: meldung.passwort, ...(erzeugt && { erzeugt }) } },
         feld: ohne(s.feld, id),
         schritt: ohne(s.schritt, id),
         ...(erzeugt && e && { erzeugt: { ...s.erzeugt, [id]: { ...e, verbraucht: true } } }),
@@ -144,10 +161,15 @@ export const useFormulare = create<FormulareZustand>()((set, get) => ({
     set((s) => ({ feld: ohne(s.feld, tab), abgeschickt: ohne(s.abgeschickt, tab), schritt: ohne(s.schritt, tab), erzeugt: ohne(s.erzeugt, tab) })),
 }))
 
-/** Anmeldungen im Tresor für die Seite: gleicher Host, ohne `www.`, und auf http nur http-Einträge. */
+// Abgeschickte und erzeugte Passwörter gehören dem Konto, das angemeldet war:
+// nach einem Wechsel böte die Leiste sie sonst an, im Tresor des neuen zu speichern.
+beiKontowechsel(() => useFormulare.setState({ feld: {}, abgeschickt: {}, schritt: {}, erzeugt: {} }))
+
+/** Anmeldungen im Tresor für die Seite: gleicher Host, ohne `www.`, gleicher Port, und auf http nur http-Einträge. */
 export function anmeldungenFuer(items: VaultItem[], url: string): VaultItem[] {
   const host = hostVon(url)
   if (!host) return []
+  const port = portVon(url)
   // Eine Seite ohne HTTPS bekommt nur, was ausdrücklich für http gespeichert
   // wurde; sonst liefert jemand im Netz die http-Seite aus und liest mit.
   const unsicher = /^http:/i.test(url)
@@ -158,6 +180,7 @@ export function anmeldungenFuer(items: VaultItem[], url: string): VaultItem[] {
         !i.trashedAt &&
         !i.archivedAt &&
         hostVon(i.url) === host &&
+        portVon(i.url) === port &&
         (!unsicher || /^http:/i.test(i.url ?? '')) &&
         i.password,
     )

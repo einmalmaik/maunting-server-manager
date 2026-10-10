@@ -89,7 +89,7 @@ describe('Zahlungsfelder in der Seite', () => {
 
   it('füllt nur sichtbare Felder der Art, nach der Anweisung des Browsers', () => {
     fokus(document.querySelector('#nummer')!)
-    empfangen({ data: { t: 'fuellen', karte: KARTE } })
+    empfangen({ data: { t: 'fuellen', karte: KARTE, herkunft: location.origin } })
     expect(wert('#nummer')).toBe('4111111111111111')
     expect(wert('#name')).toBe('Ada')
     expect(wert('#monat')).toBe('12')
@@ -106,7 +106,7 @@ describe('Zahlungsfelder in der Seite', () => {
 
   it('ein Konto füllt keine Kartenfelder', () => {
     fokus(document.querySelector('#iban')!)
-    empfangen({ data: { t: 'fuellen', konto: { iban: 'DE89370400440532013000', inhaber: null, bic: null } } })
+    empfangen({ data: { t: 'fuellen', konto: { iban: 'DE89370400440532013000', inhaber: null, bic: null }, herkunft: location.origin } })
     expect(wert('#iban')).toBe('DE89370400440532013000')
     expect(wert('#nummer')).toBe('')
   })
@@ -115,7 +115,7 @@ describe('Zahlungsfelder in der Seite', () => {
     document.body.innerHTML = KASSE
     fokus(document.querySelector('#email')!)
     // Das zuletzt fokussierte Zahlungsfeld stammt aus der alten Seite.
-    empfangen({ data: { t: 'fuellen', karte: KARTE } })
+    empfangen({ data: { t: 'fuellen', karte: KARTE, herkunft: location.origin } })
     expect(wert('#nummer')).toBe('')
   })
 
@@ -152,7 +152,7 @@ describe('Zahlungsfelder in der Seite', () => {
         },
       })
       fokus(document.querySelector('#nummer')!)
-      empfangenRoh(new MessageEvent('message', { data: JSON.stringify({ t: 'fuellen', karte: KARTE }) }))
+      empfangenRoh(new MessageEvent('message', { data: JSON.stringify({ t: 'fuellen', karte: KARTE, herkunft: location.origin }) }))
     } finally {
       HTMLElement.prototype.getBoundingClientRect = vorher.rechteck
       HTMLElement.prototype.getClientRects = vorher.rechtecke
@@ -188,14 +188,26 @@ describe('Neue Passwörter in der Seite', () => {
       <input id="neu1" type="password"><input id="neu2" type="password"></form>
       <form><input id="alt3" type="password" value="Bisher-2"><input id="n3a" type="password"><input id="n3b" type="password"></form>`
     expect(feldMeldung('#neu1')).toEqual({ t: 'feld', passwort: true, neu: true, sicher: true, aktiv: true })
-    empfangen({ data: { t: 'fuellen', benutzer: null, passwort: null, neu: 'Erzeugt-1' } })
+    empfangen({ data: { t: 'fuellen', benutzer: null, passwort: null, neu: 'Erzeugt-1', herkunft: location.origin } })
     expect([wert('#alt'), wert('#neu1'), wert('#neu2')]).toEqual(['Bisher-1', 'Erzeugt-1', 'Erzeugt-1'])
     expect(document.activeElement?.id).toBe('neu1')
 
     // Ohne Auszeichnung: von drei Feldern ist das erste das bisherige.
     feldMeldung('#n3a')
-    empfangen({ data: { t: 'fuellen', benutzer: null, passwort: null, neu: 'Erzeugt-2' } })
+    empfangen({ data: { t: 'fuellen', benutzer: null, passwort: null, neu: 'Erzeugt-2', herkunft: location.origin } })
     expect([wert('#alt3'), wert('#n3a'), wert('#n3b')]).toEqual(['Bisher-2', 'Erzeugt-2', 'Erzeugt-2'])
+  })
+
+  // Bis 10.10.2026 füllte die oberste Seite jede Nachricht, auch wenn inzwischen
+  // ein anderes Dokument geladen war als das, für das der Browser gefüllt hat.
+  it('füllt nur für die eigene Herkunft', () => {
+    document.body.innerHTML = '<form><input id="name" name="user"><input id="pw" type="password"></form>'
+    feldMeldung('#pw')
+    empfangen({ data: { t: 'fuellen', benutzer: 'ada', passwort: 'Geheim-1', neu: null, herkunft: 'https://fremd.example' } })
+    empfangen({ data: { t: 'fuellen', benutzer: 'ada', passwort: 'Geheim-1', neu: null } })
+    expect([wert('#name'), wert('#pw')]).toEqual(['', ''])
+    empfangen({ data: { t: 'fuellen', benutzer: 'ada', passwort: 'Geheim-1', neu: null, herkunft: location.origin } })
+    expect([wert('#name'), wert('#pw')]).toEqual(['ada', 'Geheim-1'])
   })
 
   it('erzeugt nur bei eindeutigen Formularen von selbst', () => {

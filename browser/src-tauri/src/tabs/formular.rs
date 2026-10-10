@@ -321,6 +321,9 @@ pub fn tab_fuellen(app: AppHandle, id: String, fuer: String, rahmen: Option<Stri
     let mut nachricht = serde_json::to_value(&werte).map_err(|e| e.to_string())?;
     nachricht["t"] = "fuellen".into();
     let Some(rahmen) = rahmen else {
+        // `seite.js` füllt nur, wenn es selbst noch auf dieser Herkunft steht:
+        // zwischen der Prüfung hier und der Ankunft kann die Seite wechseln.
+        nachricht["herkunft"] = herkunft(&fuer).into();
         return plattform::fuellen(&app, &id, &fuer, nachricht.to_string());
     };
     let gilt = ZAHLRAHMEN.lock().unwrap().get(&id).is_some_and(|z| z.gilt(&herkunft(&fuer), &rahmen));

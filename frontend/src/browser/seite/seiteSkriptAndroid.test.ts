@@ -54,7 +54,7 @@ describe('seite.js unter Android', () => {
     pw.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
     expect(gesendet).toContainEqual(expect.objectContaining({ t: 'feld', passwort: true }))
 
-    empfangen({ data: JSON.stringify({ t: 'fuellen', benutzer: 'ada@example.com', passwort: 'Geheim-1' }) })
+    empfangen({ data: JSON.stringify({ t: 'fuellen', benutzer: 'ada@example.com', passwort: 'Geheim-1', herkunft: location.origin }) })
     expect((document.querySelector('#name') as HTMLInputElement).value).toBe('ada@example.com')
     expect(pw.value).toBe('Geheim-1')
 
