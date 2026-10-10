@@ -40,12 +40,14 @@ let horcht = false
 const NACHSCHAU_MS = 300
 
 function tiefeJetzt(): number {
+  if (typeof window === 'undefined' || !window.history) return 0
   const zustand = window.history.state as { msmTiefe?: unknown } | null
   return typeof zustand?.msmTiefe === 'number' ? zustand.msmTiefe : 0
 }
 
 function abgleichen() {
   geplant = false
+  if (typeof window === 'undefined' || !window.history) return
   if (eigenerSprung) return
   // Hat inzwischen jemand anderes navigiert (Router), stehen wir nicht mehr auf
   // unserem Eintrag. Dann zählt, wo wir sind; zurückgesprungen wird nie über
@@ -70,6 +72,7 @@ function planen() {
 }
 
 function beiZurueck() {
+  if (typeof window === 'undefined' || !window.history) return
   if (eigenerSprung) {
     eigenerSprung = false
     planen()
@@ -94,7 +97,7 @@ export function useZurueckSchliesst(offen: boolean, schliessen: () => void): voi
   aktuell.current = schliessen
 
   useEffect(() => {
-    if (!offen || typeof window === 'undefined') return
+    if (!offen || typeof window === 'undefined' || !window.history) return
     if (!horcht) {
       window.addEventListener('popstate', beiZurueck)
       horcht = true
