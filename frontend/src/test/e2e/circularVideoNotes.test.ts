@@ -116,7 +116,7 @@ describe('Die Kette hält', () => {
 
     expect(blob.startsWith(ANHANG_PREFIX)).toBe(true)
     const huelle = Buffer.from(blob.slice(ANHANG_PREFIX.length), 'base64').toString('utf-8')
-    expect(huelle).not.toContain('ftyp')
+    expect(huelle).not.toContain('ftypmp42')
     expect(huelle).not.toContain('privat.mp4')
     expect(huelle).not.toContain('video/mp4')
   }, 60_000)

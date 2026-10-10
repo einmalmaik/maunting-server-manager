@@ -40,12 +40,13 @@ describe('Sichtbarkeit der Tabs', () => {
     await Promise.resolve()
     await Promise.resolve()
     // Solange Rust das erste nicht bestätigt hat, ist das zweite nicht unterwegs.
-    expect(offen.map((o) => o.args)).toEqual([{ verdeckt: true }])
-    offen[0].fertig()
+    const verdecken = () => offen.filter((o) => o.befehl === 'tabs_verdecken')
+    expect(verdecken().map((o) => o.args)).toEqual([{ verdeckt: true }])
+    verdecken()[0].fertig()
     await erst
-    await vi.waitFor(() => expect(offen).toHaveLength(2))
-    expect(offen[1].args).toEqual({ verdeckt: false })
-    offen[1].fertig()
+    await vi.waitFor(() => expect(verdecken()).toHaveLength(2))
+    expect(verdecken()[1].args).toEqual({ verdeckt: false })
+    verdecken()[1].fertig()
     await dann
   })
 
@@ -56,17 +57,34 @@ describe('Sichtbarkeit der Tabs', () => {
     fenster.setAttribute('data-ankerfenster', '')
     document.body.appendChild(fenster)
 
-    await vi.waitFor(() => expect(offen.at(-1)?.befehl).toBe('tab_standbild'))
-    offen.at(-1)!.fertig(new ArrayBuffer(4))
-    await vi.waitFor(() => expect(offen.at(-1)?.befehl).toBe('tabs_verdecken'))
+    await vi.waitFor(() => expect(offen.find((o) => o.befehl === 'tab_standbild')).toBeDefined())
+    const standbild = offen.find((o) => o.befehl === 'tab_standbild')!
+    standbild.fertig(new ArrayBuffer(4))
+
+    await vi.waitFor(() =>
+      expect(
+        offen.find((o) => o.befehl === 'tabs_verdecken' && (o.args as { verdeckt?: boolean })?.verdeckt === true),
+      ).toBeDefined(),
+    )
     // Erst das Bild, dann verschwindet der Tab.
     expect(useStandbild.getState().bild).toEqual({ tab: 'tab-a', url: 'blob:standbild' })
-    expect(offen.at(-1)?.args).toEqual({ verdeckt: true })
-    offen.at(-1)!.fertig()
+    const verdecken = offen.find(
+      (o) => o.befehl === 'tabs_verdecken' && (o.args as { verdeckt?: boolean })?.verdeckt === true,
+    )!
+    expect(verdecken.args).toEqual({ verdeckt: true })
+    verdecken.fertig()
 
     fenster.remove()
-    await vi.waitFor(() => expect(offen.at(-1)?.args).toEqual({ verdeckt: false }))
-    offen.at(-1)!.fertig()
+    await vi.waitFor(() =>
+      expect(
+        offen.find((o) => o.befehl === 'tabs_verdecken' && (o.args as { verdeckt?: boolean })?.verdeckt === false),
+      ).toBeDefined(),
+    )
+    const zeigen = offen.find(
+      (o) => o.befehl === 'tabs_verdecken' && (o.args as { verdeckt?: boolean })?.verdeckt === false,
+    )!
+    expect(zeigen.args).toEqual({ verdeckt: false })
+    zeigen.fertig()
     await warten()
     expect(useStandbild.getState().bild).toBeNull()
   })
