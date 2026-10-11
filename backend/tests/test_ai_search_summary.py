@@ -18,11 +18,7 @@ from models.ai_provider import AiProvider
 from models.user import User
 from routers import browser_suche
 from services import ai_search_summary_service
-from services.dis_client import DisClient
 from services.openai_compatible_adapter import StreamChunk, StreamUsage
-
-DisClient.encrypt = staticmethod(lambda plaintext, aad=None: f"mock-enc:{plaintext}")
-DisClient.decrypt = staticmethod(lambda ciphertext, aad=None: ciphertext.removeprefix("mock-enc:"))
 
 
 def test_baue_suchkontext_leere_treffer() -> None:
