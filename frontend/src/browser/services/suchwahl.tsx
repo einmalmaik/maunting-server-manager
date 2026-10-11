@@ -15,7 +15,8 @@ export const STANDARD = 'standard'
 
 /** Fremde Suchen heißen wie ihre Marke, die eigene in der App-Sprache. */
 export function suchName(maschine: Suchmaschine, t: TFunction): string {
-  return maschine.id === 'msm' ? t('browser.einstellungen.msmSuche') : maschine.name
+  if (maschine.id === 'msm') return t('browser.einstellungen.msmSuche')
+  return maschine.name
 }
 
 export function useSuchwahl() {
@@ -24,13 +25,14 @@ export function useSuchwahl() {
   const setzen = useEinstellungenStore((s) => s.setzen)
   const gekoppelt = useSitzung((s) => istGekoppelt(s.stand))
   const standard = suchmaschine(wirksameSuche(null, gekoppelt))
-  const angeboten = SUCHMASCHINEN.filter((s) => s.id !== 'msm' || gekoppelt)
+  const angeboten = SUCHMASCHINEN
   const optionen = [
     { value: STANDARD, label: t('browser.einstellungen.suchStandard', { name: suchName(standard, t) }), icon: <SuchSymbol maschine={standard} /> },
     ...angeboten.map((s) => ({ value: s.id as string, label: suchName(s, t), icon: <SuchSymbol maschine={s} /> })),
   ]
+  const normiert = gewaehlt === 'msm' ? 'searxng' : gewaehlt
   return {
-    wert: angeboten.some((s) => s.id === gewaehlt) ? (gewaehlt as string) : STANDARD,
+    wert: angeboten.some((s) => s.id === normiert) ? (normiert as string) : STANDARD,
     optionen,
     aendern: (wert: string) => setzen({ suchmaschine: wert === STANDARD ? null : (wert as SuchmaschinenId) }),
   }

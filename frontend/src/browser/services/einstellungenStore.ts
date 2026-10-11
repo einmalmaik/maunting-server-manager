@@ -174,8 +174,15 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       // Browser über den eigenen Server sucht.
       migrate: (gespeichert, version) => {
         const g = gespeichert as Record<string, unknown> | null
-        if (version < 2 && g && g.suchmaschine === 'duckduckgo') return { ...g, suchmaschine: null }
-        return g
+        if (!g) return g
+        let updated = g
+        if (version < 2 && updated.suchmaschine === 'duckduckgo') {
+          updated = { ...updated, suchmaschine: null }
+        }
+        if (updated.suchmaschine === 'msm') {
+          updated = { ...updated, suchmaschine: 'searxng' }
+        }
+        return updated
       },
       merge: (gespeichert, aktuell) => {
         const g = passend(aktuell, gespeichert)

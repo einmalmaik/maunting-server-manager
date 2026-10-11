@@ -25,7 +25,7 @@ describe('istAdresse', () => {
 
 describe('baueZielUrl', () => {
   it('baut für jede Suchmaschine eine Suchadresse', () => {
-    for (const s of SUCHMASCHINEN.filter((s) => s.id !== 'searxng' && s.id !== 'msm')) {
+    for (const s of SUCHMASCHINEN.filter((s) => s.id !== 'searxng')) {
       const ziel = baueZielUrl('hauptstadt deutschland', s.id)!
       expect(new URL(ziel).protocol).toBe('https:')
       expect(ziel).toContain('hauptstadt%20deutschland')
@@ -55,12 +55,13 @@ describe('baueZielUrl', () => {
     expect(baueZielUrl('   ', 'google')).toBeNull()
   })
 
-  it('sucht über das eigene SearXNG und fällt ohne Adresse auf DuckDuckGo zurück', () => {
+  it('sucht über das eigene SearXNG und fällt ungekoppelt ohne Adresse auf DuckDuckGo zurück', () => {
     expect(baueZielUrl('privatsphäre test', 'searxng', 'https://search.example.org/')).toBe(
       'https://search.example.org/search?q=privatsph%C3%A4re%20test',
     )
-    expect(baueZielUrl('test', 'searxng', null)).toBe('https://duckduckgo.com/?q=test')
-    expect(baueZielUrl('test', 'searxng', 'http://fremd.example')).toBe('https://duckduckgo.com/?q=test')
+    expect(baueZielUrl('test', 'searxng', null, false)).toBe('https://duckduckgo.com/?q=test')
+    expect(baueZielUrl('test', 'searxng', 'http://fremd.example', false)).toBe('https://duckduckgo.com/?q=test')
+    expect(baueZielUrl('test', 'searxng', null, true)).toBe(msmSucheAdresse('test'))
   })
 })
 
@@ -75,8 +76,8 @@ describe('searxngBasis', () => {
 })
 
 describe('wirksameSuche', () => {
-  it('nimmt ohne eigene Wahl gekoppelt die MSM-Suche, sonst DuckDuckGo', () => {
-    expect(wirksameSuche(null, true)).toBe('msm')
+  it('nimmt ohne eigene Wahl gekoppelt SearXNG, sonst DuckDuckGo', () => {
+    expect(wirksameSuche(null, true)).toBe('searxng')
     expect(wirksameSuche(null, false)).toBe('duckduckgo')
   })
 
@@ -84,15 +85,17 @@ describe('wirksameSuche', () => {
     expect(wirksameSuche('brave', true)).toBe('brave')
     expect(wirksameSuche('brave', false)).toBe('brave')
     expect(wirksameSuche('duckduckgo', true)).toBe('duckduckgo')
+    expect(wirksameSuche('searxng', true)).toBe('searxng')
+    expect(wirksameSuche('searxng', false)).toBe('searxng')
   })
 
-  it('fällt nach dem Entkoppeln von der MSM-Suche auf DuckDuckGo zurück', () => {
-    expect(wirksameSuche('msm', true)).toBe('msm')
-    expect(wirksameSuche('msm', false)).toBe('duckduckgo')
+  it('wandelt alte msm-Einstellung in searxng um', () => {
+    expect(wirksameSuche('msm', true)).toBe('searxng')
+    expect(wirksameSuche('msm', false)).toBe('searxng')
   })
 
   it('liest einen unbekannten Wert wie keine Wahl', () => {
-    expect(wirksameSuche('altavista', true)).toBe('msm')
+    expect(wirksameSuche('altavista', true)).toBe('searxng')
     expect(wirksameSuche('altavista', false)).toBe('duckduckgo')
     expect(suchmaschine('altavista').id).toBe('duckduckgo')
   })
