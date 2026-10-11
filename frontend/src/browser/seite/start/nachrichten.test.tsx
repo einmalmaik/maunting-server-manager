@@ -53,6 +53,35 @@ describe('Auswahl der Nachrichten', () => {
     expect(auswahl(stand, NACHRICHTEN_THEMEN, 'pokal, chip').map((m) => m.titel)).toEqual(['Pokalspiel', 'Chip-Mangel'])
   })
 
+  it('grenzt kurze Schlagworte wie KI ab und matcht Synonyme', () => {
+    const testStand = {
+      sprache: 'de',
+      themen: {
+        technik: [
+          meldung('https://a.example/1', 'Neues KI-Modell vorgestellt'),
+          meldung('https://a.example/2', 'Fortschritte bei künstlicher Intelligenz'),
+          meldung('https://a.example/3', 'Lage in Kiew spitzt sich zu'),
+          meldung('https://a.example/4', 'Neuer Blockbuster im Kino'),
+          meldung('https://a.example/5', 'OpenAI stellt neues Feature vor'),
+          meldung('https://a.example/6', 'Google aktualisiert Suche'),
+        ],
+      },
+    }
+    const ergebnis = auswahl(testStand, ['technik'], 'KI, Google, OpenAI')
+    expect(ergebnis.map((m) => m.titel)).toEqual([
+      'Neues KI-Modell vorgestellt',
+      'Fortschritte bei künstlicher Intelligenz',
+      'OpenAI stellt neues Feature vor',
+      'Google aktualisiert Suche',
+    ])
+    // Kiew und Kino dürfen NICHT fälschlich von "KI" gematcht werden
+    expect(ergebnis.some((m) => m.titel.includes('Kiew') || m.titel.includes('Kino'))).toBe(false)
+  })
+
+  it('trennt Schlagworte auch bei Eingabe mit Leerzeichen', () => {
+    expect(auswahl(stand, NACHRICHTEN_THEMEN, 'chip pokal').map((m) => m.titel)).toEqual(['Pokalspiel', 'Chip-Mangel'])
+  })
+
   it('übernimmt aus Antwort und Spiegel nur Meldungen mit https-Adresse und passenden Typen', () => {
     const gelesen = standLesen(
       {
@@ -100,10 +129,19 @@ describe('Nachrichten-Widget', () => {
     expect(api).toHaveBeenCalledTimes(1)
   })
 
-  it('fragt ungekoppelt nicht und zeigt sich nicht', () => {
+  it('fragt ungekoppelt nicht nach und zeigt den Kopplungshinweis', () => {
     useSitzung.setState({ stand: 'aus' })
     zeigen()
-    expect(screen.queryByText('Nachrichten')).not.toBeInTheDocument()
+    expect(screen.getByText('Nachrichten')).toBeInTheDocument()
+    expect(screen.getByText('Um aktuelle Nachrichten zu laden, verbinde diesen Browser mit Singra.')).toBeInTheDocument()
+    expect(api).not.toHaveBeenCalled()
+  })
+
+  it('zeigt ungekoppelt vorhandene Meldungen aus dem lokalen Spiegel', () => {
+    useSitzung.setState({ stand: 'aus' })
+    localStorage.setItem(SPIEGEL, JSON.stringify({ sprache: 'de', themen: STAND.themen }))
+    zeigen()
+    expect(screen.getByText('Haushalt')).toBeInTheDocument()
     expect(api).not.toHaveBeenCalled()
   })
 

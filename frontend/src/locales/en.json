@@ -8677,7 +8677,9 @@
         "keine": "No news right now",
         "keineZuWorten": "Nothing for your keywords today",
         "fehler": "News are not available right now",
-        "nichtEingerichtet": "Your MSM server has no SearXNG instance running."
+        "nichtEingerichtet": "Your MSM server has no SearXNG instance running.",
+        "ungekoppelt": "Connect this browser with Singra to load current news.",
+        "koppeln": "Connect now"
       },
       "statistik": {
         "titel": "What the shield blocked for you",

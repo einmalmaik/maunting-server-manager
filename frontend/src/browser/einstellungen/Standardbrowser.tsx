@@ -31,15 +31,23 @@ export function Standardbrowser() {
   useEffect(() => {
     lesen()
     // Zurück aus den Einstellungen des Systems: der Stand kann sich geändert
-    // haben. Android meldet das per Sichtbarkeit, Windows per Fokus.
+    // haben. Android meldet das per Sichtbarkeit, Windows per Fokus oder Klick.
     const sichtbar = () => {
       if (document.visibilityState === 'visible') lesen()
     }
     document.addEventListener('visibilitychange', sichtbar)
     window.addEventListener('focus', lesen)
+    window.addEventListener('pointerdown', lesen)
+    // Regelmäßig prüfen, damit ein Festlegen in den Windows-Einstellungen sofort
+    // ohne Neuladen der Ansicht erkannt wird.
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') lesen()
+    }, 1500)
     return () => {
+      clearInterval(timer)
       document.removeEventListener('visibilitychange', sichtbar)
       window.removeEventListener('focus', lesen)
+      window.removeEventListener('pointerdown', lesen)
     }
   }, [lesen])
 

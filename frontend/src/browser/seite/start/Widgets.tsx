@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 
 import { useSichtbareModule } from '../../leiste/eintraege'
+import { Button } from '@/Singra/UI'
 import { WIDGETS, useEinstellungenStore, type Widget } from '../../services/einstellungenStore'
 import { seitenHost } from '../../services/geraetKonfig'
 import { istGekoppelt, useSitzung } from '../../services/sitzung'
@@ -176,14 +177,28 @@ export function alter(zeit: string | null, jetzt: number, sprache: string): stri
 
 function Nachrichten({ jetzt }: { jetzt: number }) {
   const { t, i18n } = useTranslation()
+  const navigate = useNavigate()
   const themen = useEinstellungenStore((s) => s.nachrichtenThemen)
   const worte = useEinstellungenStore((s) => s.nachrichtenWorte)
+  const gekoppelt = istGekoppelt(useSitzung((s) => s.stand))
   const { stand, fehler } = useNachrichten()
   const meldungen = stand ? auswahl(stand, themen, worte) : null
   return (
     <Karte titel={t('browser.start.widget.nachrichten')} symbol={Newspaper} breit>
-      {!stand && fehler && <Leer text={t(fehler === 'nichtEingerichtet' ? 'browser.start.nachrichten.nichtEingerichtet' : 'browser.start.nachrichten.fehler')} />}
-      {meldungen?.length === 0 && <Leer text={t(worte.trim() ? 'browser.start.nachrichten.keineZuWorten' : 'browser.start.nachrichten.keine')} />}
+      {!gekoppelt && !stand && (
+        <div className="flex flex-col items-start gap-2 px-2">
+          <p className="text-body-sm text-on-surface-variant">{t('browser.start.nachrichten.ungekoppelt')}</p>
+          <Button type="button" size="sm" variant="secondary" onClick={() => navigate('/kopplung')}>
+            {t('browser.start.nachrichten.koppeln')}
+          </Button>
+        </div>
+      )}
+      {gekoppelt && !stand && fehler && (
+        <Leer text={t(fehler === 'nichtEingerichtet' ? 'browser.start.nachrichten.nichtEingerichtet' : 'browser.start.nachrichten.fehler')} />
+      )}
+      {stand && meldungen?.length === 0 && (
+        <Leer text={t(worte.trim() ? 'browser.start.nachrichten.keineZuWorten' : 'browser.start.nachrichten.keine')} />
+      )}
       {meldungen && meldungen.length > 0 && (
         <ul className="grid sm:grid-cols-2 sm:gap-x-3">
           {meldungen.map((m) => {
@@ -217,7 +232,6 @@ export function Widgets({ privat }: { privat: boolean }) {
     if (privat) return w === 'uhr'
     if (w === 'termine') return gekoppelt && module.has('kalender')
     if (w === 'notizen') return gekoppelt && module.has('notizen')
-    if (w === 'nachrichten') return gekoppelt
     return true
   }
   const gezeigt = widgetsGeordnet(ordnung).filter(da)

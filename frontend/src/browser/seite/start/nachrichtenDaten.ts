@@ -78,11 +78,54 @@ function spiegelSchreiben(stand: NachrichtenStand) {
   }
 }
 
-function worteAus(text: string): string[] {
-  return text
-    .split(',')
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+export function worteAus(text: string): string[] {
+  if (!text.trim()) return []
+  const teile = text.includes(',') || text.includes(';') || text.includes('\n')
+    ? text.split(/[,;\n]+/)
+    : text.split(/\s+/)
+  return teile
     .map((w) => w.trim().toLocaleLowerCase())
     .filter(Boolean)
+}
+
+export function wortPasst(text: string, wort: string): boolean {
+  if (!wort) return false
+  const w = wort.trim().toLocaleLowerCase()
+  if (!w) return false
+
+  // Spezifische Synonyme für KI / AI
+  if (w === 'ki' || w === 'ai') {
+    if (
+      (text.includes('intelligenz') && (text.includes('künstlich') || text.includes('kuenstlich'))) ||
+      text.includes('artificial intelligence') ||
+      text.includes('genai') ||
+      text.includes('deep learning')
+    ) {
+      return true
+    }
+    const muster = new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegex(w)}([^\\p{L}\\p{N}]|$)`, 'iu')
+    return muster.test(text)
+  }
+
+  // Für kurze Kürzel (bis 3 Zeichen wie VR, AR, PC, GPU) auf Wortgrenzen prüfen,
+  // damit Substrings in normalen Wörtern (wie "Kino", "Kiew", "türkisch" bei "ki") nicht fälschlich anschlagen.
+  if (w.length <= 3) {
+    const muster = new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegex(w)}([^\\p{L}\\p{N}]|$)`, 'iu')
+    return muster.test(text)
+  }
+
+  // Für normale Begriffe (z. B. "google", "openai", "linux", "raumfahrt")
+  if (text.includes(w)) return true
+
+  // Wenn der Begriff getrennt/zusammen vorkommt, z. B. "open ai" für "openai"
+  if (w === 'openai' && text.includes('open ai')) return true
+  if (w === 'open ai' && text.includes('openai')) return true
+
+  return false
 }
 
 /** Die neuesten Meldungen aus den gewählten Themen, ohne doppelte, auf die Schlagworte beschränkt. */
@@ -96,7 +139,7 @@ export function auswahl(stand: NachrichtenStand, themen: NachrichtenThema[], wor
       if (gesehen.has(m.url)) continue
       gesehen.add(m.url)
       const text = `${m.titel} ${m.inhalt}`.toLocaleLowerCase()
-      if (gesucht.length === 0 || gesucht.some((w) => text.includes(w))) alle.push(m)
+      if (gesucht.length === 0 || gesucht.some((w) => wortPasst(text, w))) alle.push(m)
     }
   }
   const zeit = (m: Meldung) => (m.zeit ? Date.parse(m.zeit) || 0 : 0)

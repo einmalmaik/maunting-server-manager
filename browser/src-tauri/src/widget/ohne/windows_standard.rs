@@ -13,36 +13,45 @@ pub const PROGID: &str = "MSBURL";
 /// Der Name unter `RegisteredApplications`, ebenfalls aus `hooks.nsh`.
 const NAME: &str = "Maunting Secure Browser";
 
-/// Die ProgID, die Windows für https gewählt hat. Neuere Windows-11-Fassungen
+/// Die ProgID, die Windows für https oder http gewählt hat. Neuere Windows-11-Fassungen
 /// schreiben `UserChoiceLatest` und lassen `UserChoice` veraltet stehen.
 fn gewaehlt() -> Option<String> {
-    ["UserChoiceLatest", "UserChoice"].iter().find_map(|zweig| {
-        let pfad = HSTRING::from(format!(
-            r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\{zweig}"
-        ));
-        let mut puffer = [0u16; 256];
-        let mut groesse = std::mem::size_of_val(&puffer) as u32;
-        // SAFETY: Puffer und Größe gehören zusammen; RegGetValueW schreibt höchstens `groesse` Bytes.
-        unsafe {
-            RegGetValueW(
-                HKEY_CURRENT_USER,
-                &pfad,
-                w!("ProgId"),
-                RRF_RT_REG_SZ,
-                None,
-                Some(puffer.as_mut_ptr().cast()),
-                Some(&mut groesse),
-            )
+    for protokoll in ["https", "http"] {
+        for zweig in ["UserChoiceLatest", "UserChoice"] {
+            let pfad = HSTRING::from(format!(
+                r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\{protokoll}\{zweig}"
+            ));
+            let mut puffer = [0u16; 256];
+            let mut groesse = std::mem::size_of_val(&puffer) as u32;
+            // SAFETY: Puffer und Größe gehören zusammen; RegGetValueW schreibt höchstens `groesse` Bytes.
+            let status = unsafe {
+                RegGetValueW(
+                    HKEY_CURRENT_USER,
+                    &pfad,
+                    w!("ProgId"),
+                    RRF_RT_REG_SZ,
+                    None,
+                    Some(puffer.as_mut_ptr().cast()),
+                    Some(&mut groesse),
+                )
+            };
+            if status.is_ok() && groesse > 2 {
+                let zeichen = (groesse as usize / 2).saturating_sub(1).min(puffer.len());
+                let progid = String::from_utf16_lossy(&puffer[..zeichen]);
+                let bereinigt = progid.trim();
+                if !bereinigt.is_empty() {
+                    return Some(bereinigt.to_string());
+                }
+            }
         }
-        .ok()
-        .ok()?;
-        let zeichen = (groesse as usize / 2).saturating_sub(1).min(puffer.len());
-        Some(String::from_utf16_lossy(&puffer[..zeichen]))
-    })
+    }
+    None
 }
 
 pub fn ist_standard() -> bool {
-    gewaehlt().as_deref() == Some(PROGID)
+    gewaehlt()
+        .map(|g| g.eq_ignore_ascii_case(PROGID))
+        .unwrap_or(false)
 }
 
 /// Öffnet „Standard-Apps“ direkt beim Browser.
@@ -66,5 +75,12 @@ mod tests {
         let hooks = include_str!("../../../windows/hooks.nsh");
         assert!(hooks.contains(&format!("!define MSB_PROGID \"{}\"", super::PROGID)));
         assert!(hooks.contains(&format!("!define MSB_NAME \"{}\"", super::NAME)));
+    }
+
+    #[test]
+    fn gewaehlt_liefert_aktuellen_browser() {
+        let g = super::gewaehlt();
+        println!("gewaehlt: {:?}", g);
+        assert!(g.is_some(), "Ein Standardbrowser sollte unter Windows gewählt sein");
     }
 }

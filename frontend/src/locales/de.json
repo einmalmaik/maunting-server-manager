@@ -8677,7 +8677,9 @@
         "keine": "Gerade keine Nachrichten",
         "keineZuWorten": "Heute nichts zu deinen Schlagworten",
         "fehler": "Nachrichten gerade nicht erreichbar",
-        "nichtEingerichtet": "Auf dem MSM-Server läuft keine SearXNG-Instanz."
+        "nichtEingerichtet": "Auf dem MSM-Server läuft keine SearXNG-Instanz.",
+        "ungekoppelt": "Um aktuelle Nachrichten zu laden, verbinde diesen Browser mit Singra.",
+        "koppeln": "Jetzt koppeln"
       },
       "statistik": {
         "titel": "Was das Schild für dich geblockt hat",
