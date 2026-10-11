@@ -4,7 +4,7 @@
  * Datenschutzerklärung nannte GitHub als einzige Ausnahme.
  */
 
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -61,4 +61,106 @@ describe('Tresor-Sicherheit: Leck-Prüfung', () => {
     expect(screen.getByRole('switch', { name: i18n.t('mss.vault.beiFensterwechsel') })).toBeInTheDocument()
     expect(screen.getByRole('switch', { name: i18n.t('mss.vault.biometrieSchalter') })).toBeInTheDocument()
   })
+
+  it('öffnet den Biometrie-Aktivierungsdialog mit Dialog und PasswordInput, unterstützt Bestätigung und Abbruch', async () => {
+    const enableBiometrics = vi.fn().mockResolvedValue(true)
+    useVaultStore.setState({
+      isInitialized: true,
+      isUnlocked: true,
+      isBiometricsSupported: true,
+      isBiometricsEnabled: false,
+      enableBiometrics,
+    })
+
+    render(
+      <MemoryRouter>
+        <TresorSicherheitTab />
+      </MemoryRouter>,
+    )
+
+    const bioSchalter = screen.getByRole('switch', { name: i18n.t('mss.vault.biometrieSchalter') })
+    await act(async () => {
+      fireEvent.click(bioSchalter)
+    })
+
+    // Dialog ist offen
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('mss.vault.biometrieEinrichten'))).toBeInTheDocument()
+
+    // PasswordInput existiert (hat das Auge-Symbol und placeholder)
+    const pwInput = screen.getByPlaceholderText(i18n.t('mss.vault.masterPasswort'))
+    expect(pwInput).toBeInTheDocument()
+    expect(pwInput).toHaveAttribute('type', 'password')
+
+    // Abbrechen schließt den Dialog und leert das Passwort
+    await act(async () => {
+      fireEvent.change(pwInput, { target: { value: 'geheimes-passwort' } })
+    })
+    const abbrechenKnopf = screen.getByRole('button', { name: i18n.t('common.cancel') })
+    await act(async () => {
+      fireEvent.click(abbrechenKnopf)
+    })
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(enableBiometrics).not.toHaveBeenCalled()
+
+    // Erneut öffnen: Passwortfeld ist leer
+    await act(async () => {
+      fireEvent.click(bioSchalter)
+    })
+    const pwInputNeu = await screen.findByPlaceholderText(i18n.t('mss.vault.masterPasswort'))
+    expect(pwInputNeu).toHaveValue('')
+
+    // Absenden ruft enableBiometrics auf
+    await act(async () => {
+      fireEvent.change(pwInputNeu, { target: { value: 'richtiges-passwort' } })
+    })
+    const aktivierenKnopf = screen.getByRole('button', { name: i18n.t('mss.vault.biometrieAktivieren') })
+    await act(async () => {
+      fireEvent.click(aktivierenKnopf)
+    })
+
+    expect(enableBiometrics).toHaveBeenCalledWith('richtiges-passwort')
+  })
+
+  it('Schließen über Schließen-Symbol (X) schließt den Dialog und leert den Entwurf', async () => {
+    useVaultStore.setState({
+      isInitialized: true,
+      isUnlocked: true,
+      isBiometricsSupported: true,
+      isBiometricsEnabled: false,
+    })
+
+    render(
+      <MemoryRouter>
+        <TresorSicherheitTab />
+      </MemoryRouter>,
+    )
+
+    const bioSchalter = screen.getByRole('switch', { name: i18n.t('mss.vault.biometrieSchalter') })
+    await act(async () => {
+      fireEvent.click(bioSchalter)
+    })
+
+    const pwInput = await screen.findByPlaceholderText(i18n.t('mss.vault.masterPasswort'))
+    await act(async () => {
+      fireEvent.change(pwInput, { target: { value: 'nicht-abgesendet' } })
+    })
+
+    const xKnopf = screen.getByRole('button', { name: i18n.t('common.close') })
+    await act(async () => {
+      fireEvent.click(xKnopf)
+    })
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    // Erneut öffnen: Passwort ist leer
+    await act(async () => {
+      fireEvent.click(bioSchalter)
+    })
+    const pwInputNeu = await screen.findByPlaceholderText(i18n.t('mss.vault.masterPasswort'))
+    expect(pwInputNeu).toHaveValue('')
+  })
 })
+

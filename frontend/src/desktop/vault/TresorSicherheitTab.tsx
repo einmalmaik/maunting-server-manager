@@ -17,7 +17,7 @@ import { useNavigate } from 'react-router-dom'
 import { Fingerprint, ShieldCheck } from 'lucide-react'
 
 import { sperrfristOptionen } from '@/services/autoSperre'
-import { Button, Dropdown, type DropdownOption, Switch } from '@/Singra/UI'
+import { Button, Dialog, DialogContent, Dropdown, type DropdownOption, PasswordInput, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 
 import { useShallow } from 'zustand/react/shallow'
@@ -206,48 +206,63 @@ export function TresorSicherheitTab({ offline = false }: { offline?: boolean }) 
       {istAndroid && <KameraSicherungKarte offline={offline} />}
 
       {/* Biometrie Aktivierungs-Modal */}
-      {biometricsModalOpen && (
-        <div className="msm-modal-overlay">
-          <div className="w-full max-w-sm rounded-2xl bg-surface-container border border-outline-variant/30 p-5 shadow-2xl space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <Fingerprint className="h-4 w-4" />
-              </div>
-              <h3 className="text-sm font-semibold text-on-surface">{t('mss.vault.biometrieEinrichten')}</h3>
+      <Dialog
+        open={biometricsModalOpen}
+        onOpenChange={(open) => {
+          setBiometricsModalOpen(open)
+          if (!open) {
+            setMasterPasswordInput('')
+          }
+        }}
+      >
+        <DialogContent
+          className="max-w-sm p-5 space-y-4"
+          aria-labelledby="biometrie-einrichten-titel"
+          aria-describedby="biometrie-einrichten-beschr"
+        >
+          <div className="flex items-center gap-3 pr-8">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Fingerprint className="h-4 w-4" />
             </div>
-            <p className="text-xs text-on-surface-variant">
-              {t('mss.vault.biometrieBestaetigen')}
-            </p>
-            <form onSubmit={handleConfirmBiometrics} className="space-y-3">
-              <input
-                type="password"
-                value={masterPasswordInput}
-                onChange={(e) => setMasterPasswordInput(e.target.value)}
-                placeholder={t('mss.vault.masterPasswort')}
-                className="msm-input"
-                autoFocus
-                required
-              />
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setBiometricsModalOpen(false)}
-                  disabled={biometricsLoading}
-                >
-                  {t('common.cancel')}
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={biometricsLoading || !masterPasswordInput}
-                >
-                  {biometricsLoading ? t('mss.vault.biometriePruefe') : t('mss.vault.biometrieAktivieren')}
-                </Button>
-              </div>
-            </form>
+            <h3 id="biometrie-einrichten-titel" className="text-sm font-semibold text-on-surface">
+              {t('mss.vault.biometrieEinrichten')}
+            </h3>
           </div>
-        </div>
-      )}
+          <p id="biometrie-einrichten-beschr" className="text-xs text-on-surface-variant">
+            {t('mss.vault.biometrieBestaetigen')}
+          </p>
+          <form onSubmit={handleConfirmBiometrics} className="space-y-3">
+            <PasswordInput
+              value={masterPasswordInput}
+              onChange={(e) => setMasterPasswordInput(e.target.value)}
+              placeholder={t('mss.vault.masterPasswort')}
+              autoFocus
+              required
+              disabled={biometricsLoading}
+            />
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setBiometricsModalOpen(false)
+                  setMasterPasswordInput('')
+                }}
+                disabled={biometricsLoading}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button
+                type="submit"
+                disabled={biometricsLoading || !masterPasswordInput}
+              >
+                {biometricsLoading ? t('mss.vault.biometriePruefe') : t('mss.vault.biometrieAktivieren')}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
+

@@ -47,6 +47,7 @@ import { useLeistung } from './services/leistung'
 import { istAndroid } from './services/plattform'
 import { istGekoppelt, useSitzung, useSitzungsLauf } from './services/sitzung'
 import { useTabsStore } from './services/tabsStore'
+import { useTabWechselSperre } from './services/useTabWechselSperre'
 import { einrichten as gesperrtEinrichten } from './services/tresorGesperrt'
 import { useWidget } from './services/widget'
 import { useUeberdeckungBeobachten } from './services/ueberdeckung'
@@ -109,6 +110,7 @@ function Wurzel() {
   // Dieselben Schlösser wie in MSS: Tresor und Messenger sperren sich selbst.
   useAutoSperre(tresorAutoSperrQuelle, tresorOffen)
   useMessengerSperreBereitschaft()
+  useTabWechselSperre()
   usePresenceAndActivity(angemeldet && social, angemeldet && social)
   useEffect(() => (gekoppelt ? eingangBeobachten() : undefined), [gekoppelt])
   // Offen einmal eingerichtet, kann der Browser auch bei gesperrtem Tresor

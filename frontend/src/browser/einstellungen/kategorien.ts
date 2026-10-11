@@ -1,6 +1,19 @@
-/** Die Kategorien der Einstellungsseite, in der Reihenfolge der Liste. */
 import type { LucideIcon } from 'lucide-react'
-import { Blocks, Download, Gauge, History, Info, KeyRound, Palette, Puzzle, Search, ShieldBan, ShieldCheck, SlidersHorizontal } from 'lucide-react'
+import {
+  Blocks,
+  Download,
+  Gauge,
+  History,
+  Info,
+  KeyRound,
+  Palette,
+  Puzzle,
+  Search,
+  Shield,
+  ShieldBan,
+  ShieldCheck,
+  SlidersHorizontal,
+} from 'lucide-react'
 
 export type Kategorie =
   | 'allgemein'
@@ -14,9 +27,10 @@ export type Kategorie =
   | 'design'
   | 'leistung'
   | 'dienste'
+  | 'sicherheit'
   | 'ueber'
 
-export const KATEGORIEN: { id: Kategorie; symbol: LucideIcon }[] = [
+export const KATEGORIEN: { id: Kategorie; symbol: LucideIcon; unterpunkt?: boolean }[] = [
   { id: 'allgemein', symbol: SlidersHorizontal },
   { id: 'suche', symbol: Search },
   { id: 'schutz', symbol: ShieldCheck },
@@ -28,12 +42,17 @@ export const KATEGORIEN: { id: Kategorie; symbol: LucideIcon }[] = [
   { id: 'design', symbol: Palette },
   { id: 'leistung', symbol: Gauge },
   { id: 'dienste', symbol: Blocks },
+  { id: 'sicherheit', symbol: Shield, unterpunkt: true },
   { id: 'ueber', symbol: Info },
 ]
 
 /** Was das Gerät kann: auf Android schlafen Tabs nicht nach Regeln des Browsers, und Erweiterungen kennt die WebView nicht. */
-export function sichtbareKategorien(android: boolean) {
-  return android ? KATEGORIEN.filter((k) => k.id !== 'leistung' && k.id !== 'erweiterungen') : KATEGORIEN
+export function sichtbareKategorien(android: boolean, gekoppelt = false) {
+  return KATEGORIEN.filter((k) => {
+    if (android && (k.id === 'leistung' || k.id === 'erweiterungen')) return false
+    if (k.id === 'sicherheit' && !gekoppelt) return false
+    return true
+  })
 }
 
 /** Unterseite mit der Datenschutzerklärung, erreichbar aus „Über“. */

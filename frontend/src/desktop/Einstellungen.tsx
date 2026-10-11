@@ -33,9 +33,7 @@ import { useTranslation } from 'react-i18next'
 
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { Zustandsflaeche } from '@/Singra/UI'
-import { MessengerSicherheitTab } from '@/pages/profile/MessengerSicherheitTab'
 import { DatenexportKarte } from '@/pages/profile/DatenexportKarte'
-import { TresorSicherheitTab } from './vault/TresorSicherheitTab'
 import { SYSTEM_KATEGORIE } from './vault/vaultEintrag'
 import { useVaultStore } from './vault/vaultStore'
 import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
@@ -46,6 +44,7 @@ import {
   DesktopIntegration,
   KontoEinstellungen,
   RechtlichesEinstellungen,
+  SicherheitEinstellungen,
   SocialEinstellungen,
 } from './einstellungsreiter'
 
@@ -61,8 +60,6 @@ const FRUEHERE_REITER: Record<string, EinstellungsTab> = {
   tresor: 'sicherheit',
   wakeword: 'audio',
 }
-
-const GRUPPENTITEL = 'font-headline text-title-md font-semibold text-on-surface'
 
 const isAndroidClient = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
@@ -144,22 +141,7 @@ export function Einstellungen({
         </>
       )}
       {tab === 'sicherheit' && (
-        <>
-          {/* Zwei Gruppen mit eigener Überschrift: sonst beginnt beim
-              Scrollen mitten in den Messenger-Karten plötzlich der Tresor. */}
-          {social && (
-            <section aria-labelledby="sicherheit-messenger" className="flex flex-col gap-3">
-              <h2 id="sicherheit-messenger" className={GRUPPENTITEL}>{t('mss.einstellungen.sicherheit.messenger')}</h2>
-              <MessengerSicherheitTab />
-            </section>
-          )}
-          {tresorAn && (
-            <section aria-labelledby="sicherheit-tresor" className="flex flex-col gap-3 pt-2">
-              <h2 id="sicherheit-tresor" className={GRUPPENTITEL}>{t('mss.einstellungen.sicherheit.tresor')}</h2>
-              <TresorSicherheitTab offline={offline} />
-            </section>
-          )}
-        </>
+        <SicherheitEinstellungen offline={offline} social={social} tresorAn={tresorAn} />
       )}
       {tab === 'social' && !offline && <SocialEinstellungen />}
       {tab === 'desktop' && <DesktopIntegration onKonfigAenderung={onKonfigAenderung} offline={offline} />}

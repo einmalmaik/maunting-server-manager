@@ -128,3 +128,17 @@ export interface AutoSperrQuelle {
   pruefeFrist: () => void
   sperre: () => void
 }
+
+/**
+ * Führt die Sperre beim Verlassen (Fenster-, Sicht- oder Tabwechsel) aus,
+ * wenn der jeweilige Schalter aktiv ist, die Quelle entsperrt ist und kein
+ * Entsperrvorgang läuft.
+ */
+export function sperreBeiVerlassen(quelle: AutoSperrQuelle): boolean {
+  if (quelle.sperrtBeiFensterwechsel() && quelle.istEntsperrt() && !quelle.istBeschaeftigt()) {
+    quelle.sperre()
+    return true
+  }
+  return false
+}
+

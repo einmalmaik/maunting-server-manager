@@ -13,7 +13,7 @@
 
 import { useEffect } from 'react'
 
-import { PRUEFTAKT_MS, type AutoSperrQuelle } from '@/services/autoSperre'
+import { PRUEFTAKT_MS, sperreBeiVerlassen, type AutoSperrQuelle } from '@/services/autoSperre'
 
 /** Womit ein Mensch zeigt, dass er noch da ist. */
 const AKTIVITAETS_EREIGNISSE = [
@@ -38,9 +38,7 @@ export function useAutoSperre(quelle: AutoSperrQuelle, aktiv: boolean): void {
     const takt = setInterval(() => quelle.pruefeFrist(), PRUEFTAKT_MS)
 
     const beiFensterwechsel = () => {
-      if (quelle.sperrtBeiFensterwechsel() && quelle.istEntsperrt() && !quelle.istBeschaeftigt()) {
-        quelle.sperre()
-      }
+      sperreBeiVerlassen(quelle)
     }
 
     const beiSichtwechsel = () => {
