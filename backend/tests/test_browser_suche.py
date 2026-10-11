@@ -98,7 +98,7 @@ def test_nur_oeffentliche_http_adressen_und_keine_gekuerzten(searxng: dict) -> N
     assert antwort.json() == {
         "treffer": [
             {"titel": "A", "url": "https://example.com/a", "inhalt": "Text A"},
-            {"titel": "G", "url": "http://example.org/b", "inhalt": ""},
+            {"titel": "G", "url": "http://example.org/b", "inhalt": "", "bild": "https://tracker.example/bild.png"},
         ],
         "vorschlaege": [],
     }
