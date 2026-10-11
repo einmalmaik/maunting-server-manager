@@ -23,6 +23,7 @@ const BEFEHLE: &[&str] = &[
     "tab_laden",
     "tab_aktivieren",
     "tab_schliessen",
+    "tab_auslagern",
     "tab_aktion",
     "tabs_rahmen",
     "tabs_verdecken",

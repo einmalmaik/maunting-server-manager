@@ -12,7 +12,23 @@ import { Kurzinfo } from '@/Singra/UI'
 import { useEinstellungenStore } from '../services/einstellungenStore'
 import { interneSeite, msmSucheBegriff } from '../services/intern'
 import { nativ } from '../services/nativ'
+import { istAndroid } from '../services/plattform'
 import { useTabsStore, type Tab } from '../services/tabsStore'
+
+interface TabDragZustand {
+  id: string
+  startX: number
+  startY: number
+  letzteScreenX: number
+  letzteScreenY: number
+  letzteClientX: number
+  letzteClientY: number
+  imBalkenAbgelegt: boolean
+  abgebrochen: boolean
+  aufraeumenEscape?: () => void
+}
+
+let aktiverTabDrag: TabDragZustand | null = null
 
 /** `namen`: wie die Tabs ohne eigene Seite heißen (neuer Tab, Einstellungen). Die MSM-Suche heißt wie ihr Begriff. */
 export function tabTitel(tab: Tab, namen: { neu: string; einstellungen: string }): string {
@@ -79,8 +95,120 @@ function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: num
   const titel = tabTitel(tab, { neu: t('browser.tabs.neu'), einstellungen: t('browser.einstellungen.titel') })
 
   const ablegen = (e: DragEvent) => {
+    if (aktiverTabDrag) {
+      aktiverTabDrag.imBalkenAbgelegt = true
+    }
     const id = e.dataTransfer.getData('text/msb-tab')
     if (id && id !== tab.id) verschieben(id, index)
+  }
+
+  const dragStart = (e: DragEvent) => {
+    try {
+      e.dataTransfer?.setData('text/msb-tab', tab.id)
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+    } catch {
+      // In manchen Umgebungen ohne volles DragEvent ignorieren
+    }
+
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape' && aktiverTabDrag) {
+        aktiverTabDrag.abgebrochen = true
+      }
+    }
+    window.addEventListener('keydown', onKey, { capture: true })
+
+    const sx = typeof e.screenX === 'number' ? e.screenX : 0
+    const sy = typeof e.screenY === 'number' ? e.screenY : 0
+    const cx = typeof e.clientX === 'number' ? e.clientX : 0
+    const cy = typeof e.clientY === 'number' ? e.clientY : 0
+
+    aktiverTabDrag = {
+      id: tab.id,
+      startX: sx,
+      startY: sy,
+      letzteScreenX: sx,
+      letzteScreenY: sy,
+      letzteClientX: cx,
+      letzteClientY: cy,
+      imBalkenAbgelegt: false,
+      abgebrochen: false,
+      aufraeumenEscape: () => window.removeEventListener('keydown', onKey, { capture: true }),
+    }
+  }
+
+  const beimZiehen = (e: DragEvent) => {
+    if (!aktiverTabDrag) return
+    const sx = typeof e.screenX === 'number' ? e.screenX : 0
+    const sy = typeof e.screenY === 'number' ? e.screenY : 0
+    const cx = typeof e.clientX === 'number' ? e.clientX : 0
+    const cy = typeof e.clientY === 'number' ? e.clientY : 0
+
+    if (sx !== 0 || sy !== 0) {
+      aktiverTabDrag.letzteScreenX = sx
+      aktiverTabDrag.letzteScreenY = sy
+    }
+    if (cx !== 0 || cy !== 0) {
+      aktiverTabDrag.letzteClientX = cx
+      aktiverTabDrag.letzteClientY = cy
+    }
+  }
+
+  const dragEnde = (e: DragEvent) => {
+    const drag = aktiverTabDrag
+    aktiverTabDrag = null
+    drag?.aufraeumenEscape?.()
+
+    if (!drag) return
+    if (istAndroid()) return
+    if (drag.abgebrochen) return
+    if (drag.imBalkenAbgelegt) return
+
+    const tabs = useTabsStore.getState().tabs
+    if (tabs.length <= 1) return
+
+    const posScreenX = typeof e.screenX === 'number' ? e.screenX : 0
+    const posScreenY = typeof e.screenY === 'number' ? e.screenY : 0
+    const posClientX = typeof e.clientX === 'number' ? e.clientX : 0
+    const posClientY = typeof e.clientY === 'number' ? e.clientY : 0
+
+    const hatScreen = posScreenX !== 0 || posScreenY !== 0
+    const screenX = hatScreen ? posScreenX : drag.letzteScreenX
+    const screenY = hatScreen ? posScreenY : drag.letzteScreenY
+
+    const distanz = Math.hypot(screenX - drag.startX, screenY - drag.startY)
+
+    const hatClient = posClientX !== 0 || posClientY !== 0
+    const clientX = hatClient ? posClientX : drag.letzteClientX
+    const clientY = hatClient ? posClientY : drag.letzteClientY
+
+    // Nur wenn der Zeiger nachweislich in der Kopfleiste geblieben ist und sich kaum bewegt hat
+    const imTabBereich =
+      hatClient &&
+      clientX >= 0 &&
+      clientX <= window.innerWidth &&
+      clientY >= 0 &&
+      clientY <= 48 &&
+      distanz < 50
+
+    if (imTabBereich) return
+
+    const ausserhalb =
+      distanz >= 50 ||
+      clientY < 0 ||
+      clientY > 48 ||
+      clientX < 0 ||
+      clientX > window.innerWidth
+
+    if (!ausserhalb) return
+
+    void nativ
+      .tabAuslagern(tab.url, screenX, screenY, tab.privat)
+      .then(() => {
+        schliessen(tab.id)
+      })
+      .catch((err) => {
+        console.error('[MSB] Tab konnte nicht ausgelagert werden:', err)
+      })
   }
 
   return (
@@ -89,7 +217,9 @@ function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: num
       aria-selected={aktiv}
       tabIndex={aktiv ? 0 : -1}
       draggable
-      onDragStart={(e) => e.dataTransfer.setData('text/msb-tab', tab.id)}
+      onDragStart={dragStart}
+      onDrag={beimZiehen}
+      onDragEnd={dragEnde}
       onDragOver={(e) => e.preventDefault()}
       onDrop={ablegen}
       onClick={() => aktivieren(tab.id)}
@@ -140,10 +270,22 @@ export function Kopfleiste() {
     <div
       data-tauri-drag-region
       onDoubleClick={(e) => e.target === e.currentTarget && void nativ.fensterAktion('maximieren')}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={() => {
+        if (aktiverTabDrag) aktiverTabDrag.imBalkenAbgelegt = true
+      }}
       className="flex h-10 shrink-0 select-none items-end gap-1 bg-surface-container-low pl-2"
     >
       <img src="/msp.png" alt="" className="mb-2 h-5 w-5 shrink-0" data-tauri-drag-region />
-      <div role="tablist" aria-label={t('browser.tabs.liste')} className="flex min-w-0 items-end gap-0.5 overflow-hidden">
+      <div
+        role="tablist"
+        aria-label={t('browser.tabs.liste')}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={() => {
+          if (aktiverTabDrag) aktiverTabDrag.imBalkenAbgelegt = true
+        }}
+        className="flex min-w-0 items-end gap-0.5 overflow-hidden"
+      >
         {tabs.map((tab, i) => (
           <TabReiter key={tab.id} tab={tab} aktiv={tab.id === aktivId} index={i} />
         ))}

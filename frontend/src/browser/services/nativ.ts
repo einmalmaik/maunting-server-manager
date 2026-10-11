@@ -145,6 +145,9 @@ export const nativ = {
   tabLaden: (id: string, url: string, privat: boolean) => nacheinander('tab_laden', { id, url, privat }),
   tabAktivieren: (id: string | null) => nacheinander('tab_aktivieren', { id }),
   tabSchliessen: (id: string) => nacheinander('tab_schliessen', { id }),
+  /** Lagert einen Tab in ein neues, separates Browserfenster aus (Desktop). */
+  tabAuslagern: (url: string, x: number, y: number, privat = false) =>
+    rufen('tab_auslagern', { url, x: Math.round(x), y: Math.round(y), privat }),
   tabAktion: (id: string, aktion: 'zurueck' | 'vor' | 'neu_laden' | 'anhalten') =>
     rufen('tab_aktion', { id, aktion }),
   tabsRahmen: (rahmen: { x: number; y: number; breite: number; hoehe: number }) =>
@@ -237,7 +240,7 @@ export type WidgetStart =
   | { art: 'text'; text: string }
   | { art: 'bild' }
   /** Ein Link aus einer anderen App (`WidgetPlugin.linkAufnehmen`). */
-  | { art: 'link'; url: string }
+  | { art: 'link'; url: string; privat?: boolean }
 
 /** Ein neuer Anstoß des Such-Widgets, während der Browser läuft. */
 export async function widgetAnstoesse(rueckruf: () => void): Promise<() => void> {

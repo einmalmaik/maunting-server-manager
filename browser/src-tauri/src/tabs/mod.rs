@@ -290,6 +290,42 @@ pub fn oberflaeche_fokussieren(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Lagert einen Tab in ein neues, separates Browserfenster aus (Desktop/Windows).
+#[cfg(desktop)]
+#[tauri::command(async)]
+pub fn tab_auslagern(url: String, x: i32, y: i32, privat: Option<bool>) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| format!("Executable nicht ermittelbar: {e}"))?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("--neues-fenster");
+    if !url.is_empty() {
+        cmd.arg(&url);
+    }
+    #[cfg(windows)]
+    let (x, y) = {
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        let mut pt = POINT::default();
+        if unsafe { GetCursorPos(&mut pt) }.is_ok() {
+            (pt.x, pt.y)
+        } else {
+            (x, y)
+        }
+    };
+    cmd.arg("--x").arg(x.to_string());
+    cmd.arg("--y").arg(y.to_string());
+    if privat.unwrap_or(false) {
+        cmd.arg("--privat");
+    }
+    cmd.spawn().map_err(|e| format!("Fehler beim Starten des neuen Fensters: {e}"))?;
+    Ok(())
+}
+
+#[cfg(not(desktop))]
+#[tauri::command(async)]
+pub fn tab_auslagern(_url: String, _x: i32, _y: i32, _privat: Option<bool>) -> Result<(), String> {
+    Err("Tabs auslagern gibt es nur auf dem Desktop".into())
+}
+
 /// Der Ordner mit Cookies, Cache und Speicher der Seiten.
 pub fn seitenprofil(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     app.path()

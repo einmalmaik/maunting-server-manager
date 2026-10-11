@@ -16,13 +16,24 @@ mod windows_standard;
 /// Länger ist keine Adresse, die der Browser speichert (`ADRESSE_MAX`).
 const LINK_MAX: usize = 8192;
 
-static LINK: Mutex<Option<String>> = Mutex::new(None);
+#[derive(Clone, Debug, PartialEq)]
+struct LinkStart {
+    url: String,
+    privat: bool,
+}
+
+static LINK: Mutex<Option<LinkStart>> = Mutex::new(None);
 
 /// Nimmt den ersten http(s)-Link aus den Argumenten eines Aufrufs; alles
 /// andere fällt weg. Ob ein Tab die Adresse laden darf, prüft `tabs::weg`.
 pub fn link_aufnehmen(app: &AppHandle, argumente: &[String]) {
-    if let Some(link) = argumente.iter().skip(1).find_map(|a| link_aus(a)) {
-        *LINK.lock().unwrap() = Some(link);
+    let link = argumente.iter().skip(1).find_map(|a| link_aus(a));
+    let privat = argumente.iter().any(|a| a == "--privat");
+    if link.is_some() || privat {
+        *LINK.lock().unwrap() = Some(LinkStart {
+            url: link.unwrap_or_default(),
+            privat,
+        });
         let _ = app.emit(super::EREIGNIS, ());
     }
 }
@@ -32,11 +43,17 @@ fn link_aus(argument: &str) -> Option<String> {
         return None;
     }
     let url = url::Url::parse(argument).ok()?;
-    matches!(url.scheme(), "http" | "https").then(|| url.to_string())
+    matches!(url.scheme(), "http" | "https" | "msb").then(|| url.to_string())
 }
 
 pub fn start(_: &AppHandle) -> Result<Option<Value>, String> {
-    Ok(LINK.lock().unwrap().take().map(|url| json!({ "art": "link", "url": url })))
+    Ok(LINK.lock().unwrap().take().map(|info| {
+        json!({
+            "art": "link",
+            "url": info.url,
+            "privat": info.privat,
+        })
+    }))
 }
 
 pub fn stand(_: &AppHandle, _: bool) -> Result<(), String> {

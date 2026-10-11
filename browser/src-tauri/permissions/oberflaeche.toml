@@ -20,6 +20,7 @@ permissions = [
   "allow-tab-laden",
   "allow-tab-aktivieren",
   "allow-tab-schliessen",
+  "allow-tab-auslagern",
   "allow-tab-aktion",
   "allow-tabs-rahmen",
   "allow-tabs-verdecken",

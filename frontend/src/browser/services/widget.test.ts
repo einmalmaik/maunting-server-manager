@@ -36,12 +36,38 @@ describe('Such-Widget', () => {
     ])
   })
 
-  it('öffnet einen Link aus einer anderen App in einem neuen Tab, nur Webseiten', () => {
+  it('öffnet einen Link aus einer anderen App in einem neuen Tab, nur Webseiten und interne Seiten', () => {
     widgetAusfuehren({ art: 'link', url: 'https://example.com/artikel?id=3' }, adresszeile)
     widgetAusfuehren({ art: 'link', url: 'javascript:alert(1)' }, adresszeile)
     widgetAusfuehren({ art: 'link', url: 'file:///sdcard/Download/a.html' }, adresszeile)
-    expect(useTabsStore.getState().tabs.map((t) => t.url)).toEqual(['https://example.com/artikel?id=3'])
+    widgetAusfuehren({ art: 'link', url: 'msb://einstellungen' }, adresszeile)
+    expect(useTabsStore.getState().tabs.map((t) => t.url)).toEqual([
+      'https://example.com/artikel?id=3',
+      'msb://einstellungen',
+    ])
     expect(adresszeile).not.toHaveBeenCalled()
+  })
+
+  it('öffnet Link im vorhandenen einzelnen leeren Tab oder erzeugt privaten Tab', () => {
+    // Wenn nur ein einzelner leerer Tab offen ist
+    useTabsStore.setState({
+      tabs: [{ id: 't-init', url: '', titel: 'Neu', privat: false, laedt: false, ton: false, stumm: false, ruhe: null, nativDa: false, letzterAufruf: 0, erstellerId: null, favicon: null }],
+      aktivId: 't-init',
+    })
+    widgetAusfuehren({ art: 'link', url: 'https://youtube.com/' }, adresszeile)
+    expect(useTabsStore.getState().tabs).toHaveLength(1)
+    expect(useTabsStore.getState().tabs[0].url).toBe('https://youtube.com/')
+    expect(useTabsStore.getState().tabs[0].id).toBe('t-init')
+
+    // Wenn ein privater Link ankommt, wird ein privater Tab erzeugt und der leere entfernt
+    useTabsStore.setState({
+      tabs: [{ id: 't-init2', url: '', titel: 'Neu', privat: false, laedt: false, ton: false, stumm: false, ruhe: null, nativDa: false, letzterAufruf: 0, erstellerId: null, favicon: null }],
+      aktivId: 't-init2',
+    })
+    widgetAusfuehren({ art: 'link', url: 'https://geheim.example/', privat: true }, adresszeile)
+    expect(useTabsStore.getState().tabs).toHaveLength(1)
+    expect(useTabsStore.getState().tabs[0].url).toBe('https://geheim.example/')
+    expect(useTabsStore.getState().tabs[0].privat).toBe(true)
   })
 
   it('öffnet für die Suche einen leeren Tab mit der Adresszeile', () => {

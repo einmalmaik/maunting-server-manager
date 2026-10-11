@@ -15,7 +15,7 @@ import i18n from '@/i18n'
 
 import { useEinstellungenStore, useWirksameSuche, wirksameSucheJetzt } from './einstellungenStore'
 import { istTauri, nativ, widgetAnstoesse, type WidgetStart } from './nativ'
-import { istWebseite } from './intern'
+import { istIntern, istWebseite } from './intern'
 import { istAndroid } from './plattform'
 import { baueZielUrl, suchmaschine } from './searchEngines'
 import { useTabsStore } from './tabsStore'
@@ -26,7 +26,18 @@ export function widgetAusfuehren(start: WidgetStart, adresszeile: () => void): v
   const id = wirksameSucheJetzt()
   if (start.art === 'link') {
     // Ob ein Tab die Adresse laden darf, prüft Rust beim Laden (`tabs::weg`).
-    if (istWebseite(start.url)) tabs.neuerTab(start.url)
+    const privat = Boolean(start.privat)
+    const hatUrl = Boolean(start.url && (istWebseite(start.url) || istIntern(start.url)))
+    if (hatUrl || privat) {
+      const einzigerLeer = tabs.tabs.length === 1 && !tabs.tabs[0].url
+      if (einzigerLeer && !privat && hatUrl) {
+        tabs.oeffnen(start.url, tabs.tabs[0].id)
+      } else {
+        const altId = einzigerLeer ? tabs.tabs[0].id : null
+        tabs.neuerTab(hatUrl ? start.url : undefined, { privat })
+        if (altId) tabs.schliessen(altId)
+      }
+    }
     return
   }
   if (start.art === 'text') {

@@ -52,20 +52,28 @@ pub fn run() {
         kontext.package_info_mut().name = name.into();
     }
 
+    #[cfg(desktop)]
+    let argumente: Vec<String> = std::env::args().collect();
+    #[cfg(desktop)]
+    let ist_neues_fenster = argumente.iter().any(|a| a == "--neues-fenster");
+
     let builder = tauri::Builder::default();
 
     // Das Single-Instance-Plugin kommt als erstes: ein zweiter Aufruf (Link
     // von außen) endet sofort, sein Link öffnet hier als Tab.
     #[cfg(desktop)]
-    let builder = builder
-        .plugin(tauri_plugin_single_instance::init(|app, argumente, _| {
+    let builder = if ist_neues_fenster {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, argumente, _| {
             widget::link_aufnehmen(app, &argumente);
             if let Some(fenster) = app.get_webview_window("main") {
                 let _ = fenster.unminimize();
                 let _ = fenster.set_focus();
             }
         }))
-        .plugin(tauri_plugin_updater::Builder::new().build());
+    }
+    .plugin(tauri_plugin_updater::Builder::new().build());
 
     #[allow(unused_mut)]
     let mut builder = builder
@@ -98,7 +106,22 @@ pub fn run() {
             schild::schutz_dienst::starten(handle);
             tabs::ruhe::starten(handle.clone());
             #[cfg(desktop)]
-            widget::link_aufnehmen(handle, &std::env::args().collect::<Vec<_>>());
+            {
+                let args: Vec<String> = std::env::args().collect();
+                if let (Some(x_pos), Some(y_pos)) = (args.iter().position(|a| a == "--x"), args.iter().position(|a| a == "--y")) {
+                    if let (Some(x_str), Some(y_str)) = (args.get(x_pos + 1), args.get(y_pos + 1)) {
+                        if let (Ok(x), Ok(y)) = (x_str.parse::<i32>(), y_str.parse::<i32>()) {
+                            if let Some(fenster) = app.get_webview_window("main") {
+                                let _ = fenster.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                                    x: x - 120,
+                                    y: y - 16,
+                                }));
+                            }
+                        }
+                    }
+                }
+                widget::link_aufnehmen(handle, &args);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -118,6 +141,7 @@ pub fn run() {
             tabs::tab_laden,
             tabs::tab_aktivieren,
             tabs::tab_schliessen,
+            tabs::tab_auslagern,
             tabs::tab_aktion,
             tabs::tabs_rahmen,
             tabs::tabs_verdecken,
@@ -174,18 +198,23 @@ pub fn run() {
             erweiterungen::erweiterung_popup_schliessen,
             erweiterungen::erweiterung_optionen,
         ])
-        .on_window_event(|fenster, ereignis| {
+        .on_window_event(move |fenster, ereignis| {
             // „Beim Schließen vergessen“: erst die Seitendaten löschen, dann
             // beenden. Das Fenster bleibt dafür einen Moment stehen.
             if let tauri::WindowEvent::CloseRequested { api, .. } = ereignis {
                 let app = fenster.app_handle().clone();
-                if fenster.label() == "main" {
+                #[cfg(desktop)]
+                let ist_unterfenster = ist_neues_fenster;
+                #[cfg(not(desktop))]
+                let ist_unterfenster = false;
+
+                if fenster.label() == "main" && !ist_unterfenster {
                     schild::gesamt::speichern(&app);
                 }
                 let vergessen = app
                     .try_state::<konfig::KonfigZustand>()
                     .is_some_and(|k| k.0.lock().unwrap().vergessen_beim_schliessen);
-                if fenster.label() == "main" && vergessen {
+                if fenster.label() == "main" && vergessen && !ist_unterfenster {
                     api.prevent_close();
                     std::thread::spawn(move || {
                         if let Err(fehler) = browserdaten::loeschen(&app) {
