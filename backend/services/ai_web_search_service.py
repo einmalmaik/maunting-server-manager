@@ -324,7 +324,7 @@ def is_configured() -> bool:
         return False
 
 
-def searxng_treffer(
+def searxng_ergebnis(
     query: str,
     *,
     limit: int = MAX_RESULTS,
@@ -334,8 +334,8 @@ def searxng_treffer(
     kategorie: str | None = None,
     zeitraum: str | None = None,
     s_url: str | None = None,
-) -> list[dict]:
-    """Treffer der SearXNG-Instanz, fuer die KI und den Browser (Suche, Nachrichten).
+) -> dict:
+    """Treffer und Suchvorschlaege der SearXNG-Instanz.
 
     Nur oeffentliche http(s)-Adressen; eine Adresse ueber ``MAX_URL_CHARS``
     faellt weg, statt gekuerzt auf eine andere Seite zu zeigen. ``sicher``
@@ -385,11 +385,46 @@ def searxng_treffer(
                 "url": u,
                 "snippet": redact_sensitive_text(str(r.get("content") or ""))[:MAX_SNIPPET_CHARS],
             }
+            img = str(r.get("thumbnail") or r.get("img_src") or "")
+            if img and len(img) <= MAX_URL_CHARS and _is_safe_public_url(img):
+                hit["bild"] = img
             published = _zeitpunkt(r.get("publishedDate"))
             if published:
                 hit["published"] = published
             hits.append(hit)
-    return hits
+
+    raw_sug = data.get("suggestions") if isinstance(data, dict) else []
+    suggestions = [
+        str(s).strip()
+        for s in raw_sug
+        if isinstance(s, str) and s.strip() and len(s) <= MAX_QUERY_CHARS
+    ][:8] if isinstance(raw_sug, list) else []
+
+    return {"treffer": hits, "vorschlaege": suggestions}
+
+
+def searxng_treffer(
+    query: str,
+    *,
+    limit: int = MAX_RESULTS,
+    seite: int = 1,
+    sicher: bool = False,
+    sprache: str | None = None,
+    kategorie: str | None = None,
+    zeitraum: str | None = None,
+    s_url: str | None = None,
+) -> list[dict]:
+    """Treffer der SearXNG-Instanz, fuer die KI und den Browser (Suche, Nachrichten)."""
+    return searxng_ergebnis(
+        query,
+        limit=limit,
+        seite=seite,
+        sicher=sicher,
+        sprache=sprache,
+        kategorie=kategorie,
+        zeitraum=zeitraum,
+        s_url=s_url,
+    )["treffer"]
 
 
 def _zeitpunkt(wert: object) -> str | None:

@@ -7,9 +7,10 @@
  * - Minimaler Prompt-Overhead, schneller SSE-Stream.
  * - Klickbare Quellenverweise [1], [2], die zu den Treffern darunter scrollen.
  * - Nachfragen im selben Reiter möglich (Verlauf verbleibt rein im Speicher).
+ * - Unterstützt konfigurierbare Denkstufen, beschränkt durch die Benutzerrolle.
  */
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, ChevronUp, Loader2, Send, Sparkles, X } from 'lucide-react'
+import { Brain, Check, ChevronDown, ChevronUp, Copy, Loader2, Send, Sparkles, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -27,9 +28,21 @@ interface SuchNachricht {
 interface SuchzusammenfassungKachelProps {
   begriff: string
   treffer: Treffer[]
+  onNeueTreffer?: (neue: Treffer[]) => void
 }
 
-export function SuchzusammenfassungKachel({ begriff, treffer }: SuchzusammenfassungKachelProps) {
+interface SuchKonfig {
+  aktiviert: boolean
+  modell: string | null
+  denkstufen: string[]
+  max_denkstufe: string | null
+}
+
+export function SuchzusammenfassungKachel({
+  begriff,
+  treffer,
+  onNeueTreffer,
+}: SuchzusammenfassungKachelProps) {
   const { t } = useTranslation()
   const [geschlossen, setGeschlossen] = useState(false)
   const [eingeklappt, setEingeklappt] = useState(false)
@@ -37,11 +50,17 @@ export function SuchzusammenfassungKachel({ begriff, treffer }: Suchzusammenfass
   const [laedt, setLaedt] = useState(false)
   const [modellName, setModellName] = useState<string | null>(null)
   const [hauptText, setHauptText] = useState('')
+  const [gedankenText, setGedankenText] = useState('')
   const [verlauf, setVerlauf] = useState<SuchNachricht[]>([])
   const [nachfrage, setNachfrage] = useState('')
+  const [denkstufe, setDenkstufe] = useState<string>('fast')
+  const [kopiert, setKopiert] = useState(false)
+  const [konfig, setKonfig] = useState<SuchKonfig | null>(null)
 
   const abbruchRef = useRef<AbortController | null>(null)
   const begonneneSucheRef = useRef<string | null>(null)
+
+
 
   const scrollToTreffer = (index: number) => {
     const el = document.getElementById(`treffer-${index}`)
@@ -52,7 +71,18 @@ export function SuchzusammenfassungKachel({ begriff, treffer }: Suchzusammenfass
     }
   }
 
-  const starteStream = async (frage: string, dialogVerlauf: SuchNachricht[] = []) => {
+  const kopieren = async () => {
+    if (!hauptText) return
+    try {
+      await navigator.clipboard.writeText(hauptText)
+      setKopiert(true)
+      setTimeout(() => setKopiert(false), 2000)
+    } catch {
+      // Ignorieren falls Clipboard blockiert ist
+    }
+  }
+
+  const starteStream = async (frage: string, dialogVerlauf: SuchNachricht[] = [], gewaehlteStufe: string = denkstufe) => {
     if (abbruchRef.current) {
       abbruchRef.current.abort()
     }
@@ -60,8 +90,9 @@ export function SuchzusammenfassungKachel({ begriff, treffer }: Suchzusammenfass
     abbruchRef.current = controller
 
     setLaedt(true)
+    setGedankenText('')
 
-    const trefferPayload = treffer.slice(0, 10).map((item, idx) => ({
+    const trefferPayload = treffer.slice(0, 15).map((item, idx) => ({
       index: idx + 1,
       titel: item.titel,
       url: item.url,
@@ -81,6 +112,7 @@ export function SuchzusammenfassungKachel({ begriff, treffer }: Suchzusammenfass
           q: frage,
           treffer: trefferPayload,
           verlauf: verlaufPayload,
+          denkstufe: gewaehlteStufe === 'fast' ? undefined : gewaehlteStufe,
         }),
       })
 
@@ -124,12 +156,23 @@ export function SuchzusammenfassungKachel({ begriff, treffer }: Suchzusammenfass
             }
             if (data.type === 'start') {
               if (data.model) setModellName(data.model)
+              if (Array.isArray(data.denkstufen)) {
+                setKonfig({
+                  aktiviert: true,
+                  modell: data.model ?? null,
+                  denkstufen: data.denkstufen,
+                  max_denkstufe: data.max_denkstufe ?? null,
+                })
+              }
+            } else if (data.type === 'thought' && typeof data.text === 'string') {
+              setGedankenText((prev) => prev + data.text)
+            } else if (data.type === 'neue_treffer' && Array.isArray(data.treffer)) {
+              onNeueTreffer?.(data.treffer as Treffer[])
             } else if (data.type === 'content' && typeof data.text === 'string') {
               akkumulierterText += data.text
               if (dialogVerlauf.length === 0) {
                 setHauptText(akkumulierterText)
               } else {
-                // Bei Nachfragen den letzten Assistenten-Eintrag aktualisieren
                 setVerlauf((prev) => {
                   const kopie = [...prev]
                   if (kopie.length > 0 && kopie[kopie.length - 1].role === 'assistant') {
@@ -139,9 +182,7 @@ export function SuchzusammenfassungKachel({ begriff, treffer }: Suchzusammenfass
                   return [...kopie, { role: 'assistant', content: akkumulierterText }]
                 })
               }
-            } else if (data.type === 'done') {
-              setLaedt(false)
-            } else if (data.type === 'error') {
+            } else if (data.type === 'done' || data.type === 'error') {
               setLaedt(false)
             }
           } catch {
@@ -167,6 +208,7 @@ export function SuchzusammenfassungKachel({ begriff, treffer }: Suchzusammenfass
     setGeschlossen(false)
     setDeaktiviert(false)
     setHauptText('')
+    setGedankenText('')
     setVerlauf([])
     setNachfrage('')
 
@@ -195,7 +237,7 @@ export function SuchzusammenfassungKachel({ begriff, treffer }: Suchzusammenfass
 
     setVerlauf(neuerVerlauf)
     setNachfrage('')
-    void starteStream(text, neuerVerlauf.slice(0, -1))
+    void starteStream(text, neuerVerlauf.slice(0, -1), denkstufe)
   }
 
   const renderMarkdown = (text: string) => {
@@ -241,10 +283,12 @@ export function SuchzusammenfassungKachel({ begriff, treffer }: Suchzusammenfass
     )
   }
 
+  const stufenOptionen = konfig?.denkstufen ?? []
+
   return (
     <section
       aria-label={t('browser.msmSuche.zusammenfassungTitel')}
-      className="mb-3 rounded-2xl border border-outline-variant/50 bg-surface-container-low/80 p-4 text-on-surface shadow-sm backdrop-blur-md"
+      className="mb-4 rounded-2xl border border-outline-variant/50 bg-surface-container-low/90 p-4 text-on-surface shadow-sm backdrop-blur-md"
     >
       {/* Kopfbereich */}
       <div className="flex items-center justify-between gap-2 border-b border-outline-variant/30 pb-2.5">
@@ -262,6 +306,18 @@ export function SuchzusammenfassungKachel({ begriff, treffer }: Suchzusammenfass
           )}
         </div>
         <div className="flex items-center gap-1">
+          {hauptText && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={kopieren}
+              aria-label={t('browser.msmSuche.zusammenfassungKopieren')}
+              title={t(kopiert ? 'browser.msmSuche.zusammenfassungKopiert' : 'browser.msmSuche.zusammenfassungKopieren')}
+              className="h-7 w-7 p-0 text-on-surface-variant hover:text-on-surface"
+            >
+              {kopiert ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -295,6 +351,19 @@ export function SuchzusammenfassungKachel({ begriff, treffer }: Suchzusammenfass
               <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
               <span>{t('browser.msmSuche.zusammenfassungLaedt')}</span>
             </div>
+          )}
+
+          {/* Optionaler Denkprozess */}
+          {gedankenText && (
+            <details className="mb-3 rounded-xl border border-outline-variant/30 bg-surface-container/60 p-2.5 text-label-sm">
+              <summary className="flex cursor-pointer select-none items-center gap-1.5 font-medium text-on-surface-variant hover:text-on-surface">
+                <Brain className="h-3.5 w-3.5 text-primary" />
+                <span>{t('browser.msmSuche.zusammenfassungDenkprozess')}</span>
+              </summary>
+              <div className="mt-2 whitespace-pre-wrap font-mono text-label-sm text-on-surface-variant/90 border-t border-outline-variant/20 pt-2">
+                {gedankenText}
+              </div>
+            </details>
           )}
 
           {/* Hauptantwort */}
@@ -333,7 +402,7 @@ export function SuchzusammenfassungKachel({ begriff, treffer }: Suchzusammenfass
 
           {/* Nachfrage-Eingabezeile */}
           {hauptText && (
-            <div className="mt-4 pt-2">
+            <div className="mt-4 border-t border-outline-variant/20 pt-3">
               <form
                 onSubmit={(ev) => {
                   ev.preventDefault()
@@ -346,23 +415,44 @@ export function SuchzusammenfassungKachel({ begriff, treffer }: Suchzusammenfass
                   onChange={(ev) => setNachfrage(ev.target.value)}
                   placeholder={t('browser.msmSuche.zusammenfassungNachfragePlaceholder')}
                   disabled={laedt}
-                  className="h-9 text-body-sm"
+                  className="h-9 flex-1 text-body-sm"
                   aria-label={t('browser.msmSuche.zusammenfassungNachfragePlaceholder')}
                 />
+
+                {/* Denkstufe-Auswahl, falls der Betreiber und die Rolle Stufen zulässt */}
+                {stufenOptionen.length > 0 && (
+                  <select
+                    value={denkstufe}
+                    onChange={(e) => setDenkstufe(e.target.value)}
+                    aria-label={t('browser.msmSuche.zusammenfassungDenkstufe')}
+                    disabled={laedt}
+                    className="h-9 rounded-lg border border-outline-variant/50 bg-surface-container px-2 text-label-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="fast">{t('browser.msmSuche.zusammenfassungDenkstufeFast')}</option>
+                    {stufenOptionen.map((st) => (
+                      <option key={st} value={st}>
+                        {t(`browser.msmSuche.zusammenfassungDenkstufe${st.charAt(0).toUpperCase() + st.slice(1)}`, { defaultValue: st })}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
                 <Button
                   type="submit"
                   variant="primary"
                   size="sm"
                   disabled={!nachfrage.trim() || laedt}
-                  className="h-9 px-3"
+                  className="h-9 px-3 shrink-0"
                   aria-label={t('browser.msmSuche.zusammenfassungSenden')}
                 >
                   <Send className="h-3.5 w-3.5" />
                 </Button>
               </form>
-              <p className="mt-1.5 text-label-sm text-on-surface-variant/80">
-                {t('browser.msmSuche.zusammenfassungEphemerHinweis')}
-              </p>
+
+              <div className="mt-2 flex items-center justify-between text-label-sm text-on-surface-variant/70">
+                <span>{t('browser.msmSuche.zusammenfassungDisclaimer')}</span>
+                <span>{t('browser.msmSuche.zusammenfassungEphemerHinweis')}</span>
+              </div>
             </div>
           )}
         </div>

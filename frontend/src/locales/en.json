@@ -9721,6 +9721,22 @@
       "zusammenfassungNachfragePlaceholder": "Ask a follow-up …",
       "zusammenfassungSenden": "Send",
       "zusammenfassungEphemerHinweis": "Active in this tab only. No persistence.",
+      "zusammenfassungKopieren": "Copy overview",
+      "zusammenfassungKopiert": "Copied",
+      "zusammenfassungDisclaimer": "AI overview • Verify facts with listed sources",
+      "zusammenfassungDenkprozess": "Thinking process",
+      "zusammenfassungDenkstufe": "Reasoning level",
+      "zusammenfassungDenkstufeFast": "Fast",
+      "zusammenfassungDenkstufeMinimal": "Minimal",
+      "zusammenfassungDenkstufeLow": "Low",
+      "zusammenfassungDenkstufeMedium": "Medium",
+      "zusammenfassungDenkstufeHigh": "High",
+      "zusammenfassungDenkstufeXhigh": "Very high",
+      "zusammenfassungDenkstufeMax": "Max",
+      "weitereFragen": "People also ask",
+      "weitereFragenHinweis": "Answer in AI overview",
+      "oftGesucht": "Related searches",
+      "aktuelleNews": "Top stories",
       "quelle": "Source {{nr}}"
     }
   }

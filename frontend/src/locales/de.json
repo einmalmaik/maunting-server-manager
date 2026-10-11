@@ -9721,6 +9721,22 @@
       "zusammenfassungNachfragePlaceholder": "Folgefrage stellen …",
       "zusammenfassungSenden": "Senden",
       "zusammenfassungEphemerHinweis": "Nur in diesem Tab aktiv. Keine Speicherung.",
+      "zusammenfassungKopieren": "Antwort kopieren",
+      "zusammenfassungKopiert": "Kopiert",
+      "zusammenfassungDisclaimer": "KI-generierte Übersicht • Bitte Angaben anhand der Quellen prüfen",
+      "zusammenfassungDenkprozess": "Denkprozess",
+      "zusammenfassungDenkstufe": "Denkstufe",
+      "zusammenfassungDenkstufeFast": "Schnell",
+      "zusammenfassungDenkstufeMinimal": "Minimal",
+      "zusammenfassungDenkstufeLow": "Niedrig",
+      "zusammenfassungDenkstufeMedium": "Mittel",
+      "zusammenfassungDenkstufeHigh": "Hoch",
+      "zusammenfassungDenkstufeXhigh": "Sehr hoch",
+      "zusammenfassungDenkstufeMax": "Maximal",
+      "weitereFragen": "Weitere Fragen zum Thema",
+      "weitereFragenHinweis": "In KI-Übersicht beantworten",
+      "oftGesucht": "Wird auch oft gesucht",
+      "aktuelleNews": "Aktuelle Schlagzeilen",
       "quelle": "Quelle {{nr}}"
     }
   }

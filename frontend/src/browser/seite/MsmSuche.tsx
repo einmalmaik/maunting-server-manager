@@ -1,15 +1,17 @@
 /**
  * Die Trefferseite der MSM-Suche (`msb://suche?q=…`). Die Treffer kommen vom
  * eigenen Server (`POST /api/browser/suche`), der über seine SearXNG-Instanz
- * sucht. Gezeigt werden nur Titel, Host und Text, keine Bilder und keine
- * Favicons: die Seite lädt nichts von fremden Servern. Ein Treffer öffnet sich
- * im selben Tab, Zurück führt hierher (`vorher` am Tab).
+ * sucht.
  *
- * Ist der Jugend- und Suchtschutz für Erwachsenen-Inhalte an oder nicht zu
- * lesen, verlangt die Seite die strenge sichere Suche.
+ * Die Seite bietet ein modernes Suchergebnis-Erlebnis im Google-Stil:
+ * - KI-Überblick oben mit Quellen-Verweisen, Disclaimer und Kopierfunktion
+ * - Strukturierte Ergebnis-Karten mit Favicon-Symbol, Host, Breadcrumbs und Auszug
+ * - Aufklappbare Anschlussfragen („Weitere Fragen zum Thema“)
+ * - Suchvorschläge („Wird auch oft gesucht“) aus SearXNG
+ * - Optionale News-Sidebar mit aktuellen Schlagzeilen
  */
 import { useEffect, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { ChevronDown, Loader2, Newspaper, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { api, isNetworkOrOfflineError } from '@/api/client'
@@ -17,21 +19,25 @@ import { Button } from '@/Singra/UI'
 import { useZurueckSchliesst } from '@/Singra/UI/useZurueckSchliesst'
 import { Zustandsflaeche } from '@/Singra/UI/Zustandsflaeche'
 
-import { msmSucheBegriff } from '../services/intern'
+import { NACHRICHTEN_THEMEN } from '../services/einstellungenStore'
+import { msmSucheAdresse, msmSucheBegriff } from '../services/intern'
 import { nativ, type SchutzStand } from '../services/nativ'
 import { suchAdresse } from '../services/searchEngines'
 import { useTabsStore, type Tab } from '../services/tabsStore'
+import { KachelSymbol } from './start/KachelSymbol'
+import { auswahl, useNachrichten } from './start/nachrichtenDaten'
 import { SuchzusammenfassungKachel } from './suchzusammenfassung/SuchzusammenfassungKachel'
 
 export interface Treffer {
   titel: string
   url: string
   inhalt: string
+  bild?: string
 }
 
 type Stand =
   | { art: 'laedt' }
-  | { art: 'da'; treffer: Treffer[]; seite: number; mehr: boolean; weitereLaedt: boolean }
+  | { art: 'da'; treffer: Treffer[]; vorschlaege: string[]; seite: number; mehr: boolean; weitereLaedt: boolean }
   | { art: 'fehler'; zuViele: boolean }
   | { art: 'offline' }
   | { art: 'nichtEingerichtet' }
@@ -65,13 +71,39 @@ function host(url: string): string {
   }
 }
 
-async function holen(begriff: string, seite: number, sprache: string): Promise<Treffer[]> {
+function pfad(url: string): string {
+  try {
+    const u = new URL(url)
+    const teile = u.pathname.split('/').filter(Boolean)
+    if (teile.length === 0) return ''
+    return ' > ' + teile.slice(0, 3).join(' > ')
+  } catch {
+    return ''
+  }
+}
+
+function baueWeitereFragen(begriff: string, sprache: string): string[] {
+  if (sprache === 'de') {
+    return [
+      `Was sind die wichtigsten Details zu „${begriff}“?`,
+      `Welche aktuellen Entwicklungen gibt es zu „${begriff}“?`,
+      `Was sollte man über „${begriff}“ wissen?`,
+    ]
+  }
+  return [
+    `What are the key details about “${begriff}”?`,
+    `What are current developments regarding “${begriff}”?`,
+    `What should you know about “${begriff}”?`,
+  ]
+}
+
+async function holen(begriff: string, seite: number, sprache: string): Promise<{ treffer: Treffer[]; vorschlaege: string[] }> {
   const sicher = sichereSuche(await nativ.schutzStand().catch(() => null))
-  const antwort = await api<{ treffer: Treffer[] }>('/browser/suche', {
+  const antwort = await api<{ treffer: Treffer[]; vorschlaege?: string[] }>('/browser/suche', {
     method: 'POST',
     body: JSON.stringify({ q: begriff, seite, sicher, sprache }),
   })
-  return antwort.treffer
+  return { treffer: antwort.treffer, vorschlaege: antwort.vorschlaege ?? [] }
 }
 
 export function MsmSuche({ tab }: { tab: Tab }) {
@@ -83,6 +115,10 @@ export function MsmSuche({ tab }: { tab: Tab }) {
   const [stand, setStand] = useState<Stand>(() => gemerkt.get(tab.url) ?? { art: 'laedt' })
   const [versuch, setVersuch] = useState(0)
 
+  // Aktuelle News aus dem lokalen Nachrichten-Spiegel/Cache
+  const { stand: nachrichtenStand } = useNachrichten()
+  const news = nachrichtenStand ? auswahl(nachrichtenStand, NACHRICHTEN_THEMEN, begriff, 4) : []
+
   useEffect(() => {
     const schon = gemerkt.get(tab.url)
     if (schon && versuch === 0) {
@@ -92,9 +128,9 @@ export function MsmSuche({ tab }: { tab: Tab }) {
     let aktiv = true
     setStand({ art: 'laedt' })
     holen(begriff, 1, sprache).then(
-      (treffer) => {
+      ({ treffer, vorschlaege }) => {
         if (!aktiv) return
-        const neu = { art: 'da' as const, treffer, seite: 1, mehr: treffer.length > 0, weitereLaedt: false }
+        const neu = { art: 'da' as const, treffer, vorschlaege, seite: 1, mehr: treffer.length > 0, weitereLaedt: false }
         merken(tab.url, neu)
         setStand(neu)
       },
@@ -125,15 +161,35 @@ export function MsmSuche({ tab }: { tab: Tab }) {
     const bisher = stand
     setStand({ ...bisher, weitereLaedt: true })
     holen(begriff, bisher.seite + 1, sprache).then(
-      (neu) => {
+      ({ treffer: neu, vorschlaege: neueVorschlaege }) => {
         const bekannt = new Set(bisher.treffer.map((x) => x.url))
         const dazu = neu.filter((x) => !bekannt.has(x.url))
-        const naechster = { ...bisher, treffer: [...bisher.treffer, ...dazu], seite: bisher.seite + 1, mehr: dazu.length > 0, weitereLaedt: false }
+        const kombiniertVorschlaege = Array.from(new Set([...bisher.vorschlaege, ...neueVorschlaege]))
+        const naechster = {
+          ...bisher,
+          treffer: [...bisher.treffer, ...dazu],
+          vorschlaege: kombiniertVorschlaege,
+          seite: bisher.seite + 1,
+          mehr: dazu.length > 0,
+          weitereLaedt: false,
+        }
         merken(tab.url, naechster)
         setStand(naechster)
       },
       () => setStand({ ...bisher, weitereLaedt: false, mehr: true }),
     )
+  }
+
+  const onNeueTreffer = (neue: Treffer[]) => {
+    setStand((prev) => {
+      if (prev.art !== 'da') return prev
+      const bekannte = new Set(prev.treffer.map((x) => x.url))
+      const dazu = neue.filter((x) => !bekannte.has(x.url))
+      if (dazu.length === 0) return prev
+      const aktualisiert = { ...prev, treffer: [...prev.treffer, ...dazu] }
+      merken(tab.url, aktualisiert)
+      return aktualisiert
+    })
   }
 
   const mitDuckDuckGo = () => {
@@ -175,39 +231,162 @@ export function MsmSuche({ tab }: { tab: Tab }) {
     inhalt = <Zustandsflaeche art="leer" ansagen titel={t('browser.msmSuche.keineTreffer', { begriff })} />
   } else {
     inhalt = (
-      <>
-        <SuchzusammenfassungKachel begriff={begriff} treffer={stand.treffer} />
-        <ol className="flex flex-col gap-1" aria-label={t('browser.msmSuche.trefferListe', { begriff })}>
-          {stand.treffer.map((x, idx) => (
-            <li key={x.url} id={`treffer-${idx + 1}`}>
-              <button
-                type="button"
-                onClick={(ev) => (ev.ctrlKey || ev.metaKey ? neuerTab(x.url, { nach: tab.id, privat: tab.privat, hintergrund: true }) : oeffnen(x.url, tab.id))}
-                onAuxClick={(ev) => ev.button === 1 && neuerTab(x.url, { nach: tab.id, privat: tab.privat, hintergrund: true })}
-                className="flex w-full min-w-0 flex-col gap-0.5 rounded-lg px-3 py-2.5 text-left hover:bg-surface-container-high focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-              >
-                <span className="max-w-full truncate text-label-sm text-on-surface-variant">{host(x.url)}</span>
-                <span className="max-w-full truncate text-title-sm text-primary">{x.titel || host(x.url)}</span>
-                {x.inhalt && <span className="line-clamp-2 max-w-full text-body-sm text-on-surface-variant">{x.inhalt}</span>}
-              </button>
-            </li>
-          ))}
-        </ol>
-        {stand.mehr && (
-          <Button variant="secondary" className="self-center" onClick={weitere} disabled={stand.weitereLaedt}>
-            {stand.weitereLaedt && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-            {t('browser.msmSuche.weitere')}
-          </Button>
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
+        {/* Hauptspalte */}
+        <div className="col-span-12 lg:col-span-8 flex flex-col gap-5">
+          {/* KI-Zusammenfassung oben */}
+          <SuchzusammenfassungKachel begriff={begriff} treffer={stand.treffer} onNeueTreffer={onNeueTreffer} />
+
+          {/* Weitere Fragen (People Also Ask) */}
+          <section className="rounded-2xl border border-outline-variant/30 bg-surface-container-low/70 p-4" aria-label={t('browser.msmSuche.weitereFragen')}>
+            <h2 className="mb-3 text-title-sm font-semibold text-on-surface">
+              {t('browser.msmSuche.weitereFragen')}
+            </h2>
+            <div className="space-y-2">
+              {baueWeitereFragen(begriff, sprache).map((frage, fIdx) => (
+                <details
+                  key={fIdx}
+                  name="weitere-fragen"
+                  className="group rounded-xl border border-outline-variant/40 bg-surface-container-low/80 p-3 transition-colors hover:bg-surface-container"
+                >
+                  <summary className="flex cursor-pointer list-none items-center justify-between font-medium text-body-sm text-on-surface">
+                    <span>{frage}</span>
+                    <ChevronDown className="h-4 w-4 text-on-surface-variant transition-transform duration-200 group-open:rotate-180" />
+                  </summary>
+                  <div className="mt-2.5 border-t border-outline-variant/20 pt-2.5 text-body-sm text-on-surface-variant">
+                    <p className="mb-2 leading-relaxed">
+                      {t('browser.msmSuche.weitereFragenHinweis')}
+                    </p>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => oeffnen(msmSucheAdresse(frage), tab.id)}
+                    >
+                      {frage}
+                    </Button>
+                  </div>
+                </details>
+              ))}
+            </div>
+          </section>
+
+          {/* Organische Treffer (Google-Style Cards) */}
+          <ol className="flex flex-col gap-3" aria-label={t('browser.msmSuche.trefferListe', { begriff })}>
+            {stand.treffer.map((x, idx) => (
+              <li key={x.url} id={`treffer-${idx + 1}`} className="group">
+                <button
+                  type="button"
+                  onClick={(ev) => (ev.ctrlKey || ev.metaKey ? neuerTab(x.url, { nach: tab.id, privat: tab.privat, hintergrund: true }) : oeffnen(x.url, tab.id))}
+                  onAuxClick={(ev) => ev.button === 1 && neuerTab(x.url, { nach: tab.id, privat: tab.privat, hintergrund: true })}
+                  className="flex w-full min-w-0 flex-col gap-1.5 rounded-2xl border border-outline-variant/30 bg-surface-container-low/60 p-4 text-left transition-all hover:border-outline-variant hover:bg-surface-container hover:shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                >
+                  {/* Kopfzeile: Favicon, Domain & Breadcrumbs */}
+                  <div className="flex items-center gap-2 text-label-sm text-on-surface-variant">
+                    <div className="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-container-high text-label-sm font-semibold text-primary">
+                      <KachelSymbol url={x.url} host={host(x.url)} />
+                    </div>
+                    <span className="font-medium text-on-surface truncate">{host(x.url)}</span>
+                    <span className="truncate text-on-surface-variant/70 text-label-sm">{pfad(x.url)}</span>
+                  </div>
+
+                  {/* Titel */}
+                  <span className="text-title-md font-semibold text-primary group-hover:underline line-clamp-2">
+                    {x.titel || host(x.url)}
+                  </span>
+
+                  {/* Inhalt & optionales Thumbnail */}
+                  <div className="flex items-start justify-between gap-3">
+                    {x.inhalt && (
+                      <span className="line-clamp-3 text-body-sm text-on-surface-variant leading-relaxed flex-1">
+                        {x.inhalt}
+                      </span>
+                    )}
+                    {x.bild && (
+                      <img
+                        src={x.bild}
+                        alt=""
+                        loading="lazy"
+                        className="h-16 w-20 shrink-0 rounded-lg border border-outline-variant/20 object-cover bg-surface-container-high"
+                      />
+                    )}
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ol>
+
+          {/* Wird oft gesucht (Related Searches) */}
+          {stand.vorschlaege.length > 0 && (
+            <section className="mt-2 rounded-2xl border border-outline-variant/30 bg-surface-container-low/70 p-4" aria-label={t('browser.msmSuche.oftGesucht')}>
+              <div className="flex items-center gap-2 mb-3">
+                <Search className="h-4 w-4 text-primary" aria-hidden="true" />
+                <h2 className="text-title-sm font-semibold text-on-surface">
+                  {t('browser.msmSuche.oftGesucht')}
+                </h2>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {stand.vorschlaege.map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => oeffnen(msmSucheAdresse(v), tab.id)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-outline-variant/40 bg-surface-container px-3.5 py-1.5 text-label-sm font-medium text-on-surface transition-colors hover:bg-surface-container-high hover:border-primary/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                  >
+                    <Search className="h-3 w-3 text-on-surface-variant" aria-hidden="true" />
+                    <span>{v}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Mehr Ergebnisse laden */}
+          {stand.mehr && (
+            <Button variant="secondary" className="self-center mt-2" onClick={weitere} disabled={stand.weitereLaedt}>
+              {stand.weitereLaedt && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+              {t('browser.msmSuche.weitere')}
+            </Button>
+          )}
+        </div>
+
+        {/* Rechte Sidebar (News / Schlagzeilen) */}
+        {news.length > 0 && (
+          <aside className="col-span-12 lg:col-span-4" aria-label={t('browser.msmSuche.aktuelleNews')}>
+            <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low/80 p-4 sticky top-4">
+              <div className="flex items-center gap-2 mb-3 border-b border-outline-variant/20 pb-2">
+                <Newspaper className="h-4 w-4 text-primary" aria-hidden="true" />
+                <h2 className="text-title-sm font-semibold text-on-surface">
+                  {t('browser.msmSuche.aktuelleNews')}
+                </h2>
+              </div>
+              <div className="space-y-3">
+                {news.map((item, idx) => (
+                  <div key={idx} className="border-b border-outline-variant/20 pb-2.5 last:border-b-0 last:pb-0">
+                    <button
+                      type="button"
+                      onClick={(ev) => (ev.ctrlKey || ev.metaKey ? neuerTab(item.url, { nach: tab.id, privat: tab.privat, hintergrund: true }) : oeffnen(item.url, tab.id))}
+                      className="text-left w-full group"
+                    >
+                      <span className="block text-label-sm text-on-surface-variant mb-0.5 truncate">{host(item.url)}</span>
+                      <span className="block text-body-sm font-medium text-on-surface group-hover:text-primary group-hover:underline line-clamp-2 leading-snug">
+                        {item.titel}
+                      </span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </aside>
         )}
-      </>
+      </div>
     )
   }
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-6">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-6">
         <h1 className="sr-only">{t('browser.msmSuche.titel', { begriff })}</h1>
-        <p className="px-3 text-label-sm text-on-surface-variant">{t('browser.msmSuche.herkunft')}</p>
+        <p className="px-1 text-label-sm text-on-surface-variant">{t('browser.msmSuche.herkunft')}</p>
         {inhalt}
       </div>
     </div>

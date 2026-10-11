@@ -60,13 +60,22 @@ class SuchVerlaufEintrag(BaseModel):
 class SucheZusammenfassungAnfrage(BaseModel):
     model_config = ConfigDict(extra="forbid")
     q: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
-    treffer: list[SuchTrefferInhalt] = Field(default_factory=list, max_length=20)
-    verlauf: list[SuchVerlaufEintrag] = Field(default_factory=list, max_length=20)
+    treffer: list[SuchTrefferInhalt] = Field(default_factory=list, max_length=50)
+    verlauf: list[SuchVerlaufEintrag] = Field(default_factory=list, max_length=50)
     provider_id: StrictInt | None = None
+    denkstufe: Annotated[str, StringConstraints(strip_whitespace=True, max_length=20)] | None = None
 
 
 def _mit_code(status_code: int, code: str) -> HTTPException:
     return HTTPException(status_code=status_code, detail={"code": code})
+
+
+@router.get("/suche/konfig")
+def suchkonfig(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    return ai_search_summary_service.suchzusammenfassung_konfig(db=db, user=user)
 
 
 @router.post("/suche")
@@ -78,7 +87,7 @@ def suchen(
     if not limiter.limiter.hit(_grenze, f"browser-suche:{user.id}"):
         raise _mit_code(429, "BROWSER_SUCHE_ZU_VIELE")
     try:
-        treffer = ai_web_search_service.searxng_treffer(
+        ergebnis = ai_web_search_service.searxng_ergebnis(
             req.q,
             limit=TREFFER_JE_SEITE,
             seite=req.seite,
@@ -90,7 +99,16 @@ def suchen(
             raise _mit_code(503, "BROWSER_SUCHE_NICHT_EINGERICHTET") from exc
         raise _mit_code(502, "BROWSER_SUCHE_NICHT_ERREICHBAR") from exc
     return {
-        "treffer": [{"titel": t["title"], "url": t["url"], "inhalt": t["snippet"]} for t in treffer],
+        "treffer": [
+            {
+                "titel": t["title"],
+                "url": t["url"],
+                "inhalt": t["snippet"],
+                **({"bild": t["bild"]} if "bild" in t else {}),
+            }
+            for t in ergebnis.get("treffer", [])
+        ],
+        "vorschlaege": ergebnis.get("vorschlaege", []),
     }
 
 
@@ -115,6 +133,7 @@ async def suchzusammenfassung_stream(
             treffer=treffer_dict,
             verlauf=verlauf_dict,
             bevorzugte_id=req.provider_id,
+            denkstufe=req.denkstufe,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},

@@ -124,4 +124,41 @@ describe('SuchzusammenfassungKachel', () => {
     // Kachel ist ausgeblendet
     expect(container.firstChild).toBeNull()
   })
+
+  it('zeigt Denkprozess und erlaubt Denkstufe bei Nachfragen wenn erlaubt', async () => {
+    apiStream.mockResolvedValueOnce({
+      ok: true,
+      body: {
+        getReader: () => {
+          let gesendet = false
+          return {
+            read: () => {
+              if (gesendet) return Promise.resolve({ done: true, value: undefined })
+              gesendet = true
+              const chunk = new TextEncoder().encode(
+                'data: {"type": "start", "model": "o3-mini", "denkstufen": ["low", "medium", "high"], "max_denkstufe": "high"}\n\n' +
+                'data: {"type": "thought", "text": "Ich analysiere die Quellen..."}\n\n' +
+                'data: {"type": "content", "text": "Ergebnis mit Denkstufe"}\n\n' +
+                'data: {"type": "done"}\n\n',
+              )
+              return Promise.resolve({ done: false, value: chunk })
+            },
+          }
+        },
+      },
+    })
+
+    render(<SuchzusammenfassungKachel begriff="Testsuche" treffer={TREFFER} />)
+
+    expect(await screen.findByText('Ergebnis mit Denkstufe')).toBeInTheDocument()
+    expect(screen.getByText('o3-mini')).toBeInTheDocument()
+    // Denkprozess ist in details vorhanden
+    expect(screen.getByText('Ich analysiere die Quellen...')).toBeInTheDocument()
+
+    // Denkstufe-Select ist gerendert
+    const select = screen.getByRole('combobox')
+    expect(select).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Schnell|Fast/i })).toBeInTheDocument()
+  })
 })
+

@@ -15,6 +15,16 @@
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
+    <!-- Paket-Sichtbarkeit ab Android 11: Spracherkennung und Kamera-App aus dem Widget aufrufen -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
+
     <!-- Keine Datensicherung und kein Umzug aufs neue Gerät: Cookies der Seiten,
          Verlauf und das Fach mit dem Token gehören diesem Gerät. allowBackup
          reicht ab Android 12 nicht für den Umzug, deshalb dataExtractionRules. -->

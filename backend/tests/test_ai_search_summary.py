@@ -258,3 +258,36 @@ def test_browser_suche_zusammenfassung_route(db, monkeypatch) -> None:
     body = resp.text
     assert 'data: {"type": "content", "text": "Antwort"}' in body
     assert 'data: {"type": "done"}' in body
+
+
+def test_browser_suche_konfig_route(db, monkeypatch) -> None:
+    app = FastAPI()
+    app.include_router(browser_suche.router)
+
+    user = User(
+        username="konfig_user",
+        password_hash="pw",
+        is_active=True,
+        is_owner=True,
+    )
+    db.add(user)
+    db.flush()
+
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_db] = lambda: db
+
+    monkeypatch.setattr(
+        ai_search_summary_service,
+        "suchzusammenfassung_konfig",
+        lambda db, user: {"aktiviert": True, "modell": "test-model", "denkstufen": ["minimal", "low"], "max_denkstufe": "low"},
+    )
+
+    client = TestClient(app)
+    resp = client.get("/api/browser/suche/konfig")
+    assert resp.status_code == 200
+    daten = resp.json()
+    assert daten["aktiviert"] is True
+    assert daten["modell"] == "test-model"
+    assert daten["denkstufen"] == ["minimal", "low"]
+    assert daten["max_denkstufe"] == "low"
+
