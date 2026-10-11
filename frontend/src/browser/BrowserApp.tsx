@@ -10,7 +10,7 @@
  * eigene Seite im Tab (`einstellungen/`). Welches Panel
  * offen ist, sagt die Route des MemoryRouters (`leiste/module.ts`).
  */
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 
 import { BrowserBestaetigungDialog } from '@/components/BrowserBestaetigungDialog'
@@ -72,7 +72,7 @@ export function BrowserApp() {
 }
 
 /** Ereignisse aus den Tabs: Tastenkürzel an die Kürzel, alles andere an den Store. */
-function useTabEreignisse(ziele: KuerzelZiele) {
+function useTabEreignisse(ziele: KuerzelZiele, onVollbild?: (an: boolean) => void) {
   const aktuell = useRef(ziele)
   aktuell.current = ziele
   useEffect(() => {
@@ -80,7 +80,10 @@ function useTabEreignisse(ziele: KuerzelZiele) {
     let aktiv = true
     void tabEreignisse((e) => {
       if (e.art === 'taste') return kuerzelAusfuehren(e.taste, aktuell.current)
-      if (e.art === 'vollbild') vollbildHinweis(e.an, useTabsStore.getState().tabs.find((t) => t.id === e.id)?.url)
+      if (e.art === 'vollbild') {
+        onVollbild?.(e.an)
+        vollbildHinweis(e.an, useTabsStore.getState().tabs.find((t) => t.id === e.id)?.url)
+      }
       useTabsStore.getState().ereignis(e)
     }).then((weg) => {
       if (aktiv) abmelden = weg
@@ -90,7 +93,7 @@ function useTabEreignisse(ziele: KuerzelZiele) {
       aktiv = false
       abmelden?.()
     }
-  }, [])
+  }, [onVollbild])
 }
 
 function Wurzel() {
@@ -110,6 +113,7 @@ function Wurzel() {
   const leiste = useEinstellungenStore((s) => s.leiste)
   const panelSeite = useEinstellungenStore((s) => s.panelSeite)
   const handy = istAndroid()
+  const [imVollbild, setImVollbild] = useState(false)
 
   useSitzungsLauf()
   useUeberdeckungBeobachten()
@@ -154,7 +158,7 @@ function Wurzel() {
     [navigate],
   )
   useKuerzel(ziele)
-  useTabEreignisse(ziele)
+  useTabEreignisse(ziele, setImVollbild)
   const startseite = useCallback(() => navigate('/'), [navigate])
   useWidget(ziele.adresszeile, startseite)
   useAktualisierung()
@@ -180,7 +184,7 @@ function Wurzel() {
     let letzterAufruf = 0
     const handler = (): boolean => {
       const jetzt = Date.now()
-      if (jetzt - letzterAufruf < 350) return true
+      if (jetzt - letzterAufruf < 180) return true
       letzterAufruf = jetzt
       return zurueckNavigieren()
     }
@@ -197,7 +201,9 @@ function Wurzel() {
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 1) return
       const t = e.touches[0]
-      if (t.clientX <= 36) {
+      const amLinkenRand = t.clientX <= 48
+      const amRechtenRand = t.clientX >= window.innerWidth - 48
+      if (amLinkenRand || amRechtenRand) {
         touchStart = { x: t.clientX, y: t.clientY, time: Date.now() }
       } else {
         touchStart = null
@@ -210,9 +216,13 @@ function Wurzel() {
       const dx = t.clientX - touchStart.x
       const dy = t.clientY - touchStart.y
       const dt = Date.now() - touchStart.time
+      const startX = touchStart.x
       touchStart = null
 
-      if (dx >= 50 && Math.abs(dx) > Math.abs(dy) * 1.5 && dt < 450) {
+      const vomLinkenRand = startX <= 48 && dx >= 40
+      const vomRechtenRand = startX >= window.innerWidth - 48 && dx <= -40
+
+      if ((vomLinkenRand || vomRechtenRand) && Math.abs(dx) > Math.abs(dy) * 1.5 && dt < 500) {
         window.__msbZurueck?.()
       }
     }
@@ -227,31 +237,33 @@ function Wurzel() {
 
   return (
     <div
-      className={`flex h-dvh flex-col overflow-hidden bg-background text-on-surface ${handy ? 'pl-[var(--msm-links-sicher)] pr-[var(--msm-rechts-sicher)]' : ''}`}
+      className={`flex h-dvh flex-col overflow-hidden bg-background text-on-surface ${handy && !imVollbild ? 'pl-[var(--msm-links-sicher)] pr-[var(--msm-rechts-sicher)]' : ''}`}
     >
       {handy ? (
         // Unter Statusleiste und Kamera liegt nichts, was man antippen muss.
-        <div aria-hidden="true" className="h-[var(--msm-oben-sicher)] shrink-0 bg-surface-container" />
+        !imVollbild && <div aria-hidden="true" className="h-[var(--msm-oben-sicher)] shrink-0 bg-surface-container" />
       ) : (
-        <>
-          <Kopfleiste />
-          <Navigationsleiste ref={adresszeile} />
-        </>
+        !imVollbild && (
+          <>
+            <Kopfleiste />
+            <Navigationsleiste ref={adresszeile} />
+          </>
+        )
       )}
-      <Suchleiste />
+      {!imVollbild && <Suchleiste />}
       <div className="flex min-h-0 flex-1 bg-surface-container">
-        {!handy && leiste === 'links' && <Seitenleiste seite="links" />}
-        {!handy && panelSeite === 'links' && <Panel seite="links" />}
+        {!imVollbild && !handy && leiste === 'links' && <Seitenleiste seite="links" />}
+        {!imVollbild && !handy && panelSeite === 'links' && <Panel seite="links" />}
         <div className="flex min-w-0 flex-1 flex-col">
-          <Meldungsleiste />
-          <FormularLeiste />
-          <Uebersetzungsleiste />
+          {!imVollbild && <Meldungsleiste />}
+          {!imVollbild && <FormularLeiste />}
+          {!imVollbild && <Uebersetzungsleiste />}
           <Seitenflaeche />
         </div>
-        {!handy && panelSeite === 'rechts' && <Panel seite="rechts" />}
-        {!handy && leiste === 'rechts' && <Seitenleiste seite="rechts" />}
+        {!imVollbild && !handy && panelSeite === 'rechts' && <Panel seite="rechts" />}
+        {!imVollbild && !handy && leiste === 'rechts' && <Seitenleiste seite="rechts" />}
       </div>
-      {handy && (
+      {handy && !imVollbild && (
         <>
           <HandyLeiste ref={adresszeile} />
           <Panel seite="voll" />

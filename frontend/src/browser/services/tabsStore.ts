@@ -300,6 +300,10 @@ export const useTabsStore = create<TabsZustand>()(
             get().startseite(aktivId)
             return true
           }
+          if (tab && tab.url) {
+            get().startseite(aktivId)
+            return true
+          }
           return false
         },
 

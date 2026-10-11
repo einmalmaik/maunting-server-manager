@@ -51,7 +51,7 @@ function Kachel({ symbol: Symbol, name, wert, nr, da }: { symbol: LucideIcon; na
         da ? 'translate-y-0 opacity-100' : 'translate-y-6 opacity-0 motion-reduce:translate-y-0 motion-reduce:opacity-100'
       }`}
     >
-      <dt className="flex items-center gap-2 text-label-md text-on-surface-variant">
+      <dt className="flex min-w-0 items-center gap-2 text-label-md text-on-surface-variant">
         <Symbol className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
         <span className="truncate">{name}</span>
       </dt>

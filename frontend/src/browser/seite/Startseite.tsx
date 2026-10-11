@@ -77,7 +77,7 @@ export function Startseite({ privat }: { privat: boolean }) {
     document.getElementById('msb-statistik')?.scrollIntoView({ behavior: bewegungReduziert() ? 'auto' : 'smooth', block: 'start' })
 
   return (
-    <div ref={huelle} className="relative h-full w-full overflow-hidden [--msb-rollen:0]">
+    <div ref={huelle} className="relative h-full w-full overflow-hidden overscroll-x-none [--msb-rollen:0]">
       <div className="pointer-events-none absolute inset-0" style={hintergrundStil(hintergrund, eigenesBild)} />
       {hintergrund === 'eigen' && eigenesBild && <div className="pointer-events-none absolute inset-0 bg-surface/50" />}
       <div
@@ -86,7 +86,7 @@ export function Startseite({ privat }: { privat: boolean }) {
         className="pointer-events-none absolute inset-0 bg-surface/60 backdrop-blur-xl"
         style={{ opacity: 'var(--msb-rollen)' }}
       />
-      <div ref={rolle} onScroll={gerollt} className="relative h-full w-full overflow-x-hidden overflow-y-auto">
+      <div ref={rolle} onScroll={gerollt} className="relative h-full w-full overflow-x-hidden overflow-y-auto overscroll-x-none touch-pan-y">
         <div className="relative flex min-h-full w-full min-w-0 flex-col items-center px-4 sm:px-6 pb-6 pt-[14vh] overflow-x-hidden">
           <div className="flex w-full max-w-2xl min-w-0 flex-col items-center gap-8">
             <div className="flex items-center gap-3">

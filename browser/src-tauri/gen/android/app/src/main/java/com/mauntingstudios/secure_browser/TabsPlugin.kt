@@ -73,21 +73,21 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
 
   private var hauptWebView: WebView? = null
 
-  /** Zurück gehört dem Tab, solange er vorne liegt und zurück kann; sonst der Oberfläche (z. B. vorheriger Tab). */
+  /** Zurück gehört der Oberfläche (Dialoge, Suche, Chronik, Tabs) oder der WebView, falls sie zurück kann. */
   private val zurueck = object : OnBackPressedCallback(true) {
     override fun handleOnBackPressed() {
       if (vollbild != null) return vollbildBeenden()
-      val tab = vorne?.let { tabs[it] }
-      if (tab?.webView?.canGoBack() == true) {
-        tab.webView.goBack()
-        return
-      }
       val web = hauptWebView
       if (web != null) {
         web.evaluateJavascript("window.__msbZurueck ? window.__msbZurueck() : false") { ergebnis ->
           val behandelt = ergebnis == "true" || ergebnis == "\"true\""
           if (!behandelt) {
             activity.runOnUiThread {
+              val tab = vorne?.let { tabs[it] }
+              if (tab?.webView?.canGoBack() == true) {
+                tab.webView.goBack()
+                return@runOnUiThread
+              }
               isEnabled = false
               val dispatcher = (activity as? AppCompatActivity)?.onBackPressedDispatcher
               if (dispatcher != null && dispatcher.hasEnabledCallbacks()) {
@@ -100,6 +100,11 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
           }
         }
       } else {
+        val tab = vorne?.let { tabs[it] }
+        if (tab?.webView?.canGoBack() == true) {
+          tab.webView.goBack()
+          return
+        }
         activity.runOnUiThread {
           isEnabled = false
           val dispatcher = (activity as? AppCompatActivity)?.onBackPressedDispatcher

@@ -291,9 +291,13 @@ describe('zurueckGehen und Verlauf', () => {
     expect(gehandelt).toBe(true)
     expect(useTabsStore.getState().aktivId).toBe('tab-1')
 
-    // Nochmals zurückgehen: tab-1 hat keinen Verlauf mehr -> gibt false zurück (App kann schließen)
+    // Nochmals zurückgehen: tab-1 hat eine URL aber keinen Verlauf -> setzt auf Startseite zurück
     const nochmals = useTabsStore.getState().zurueckGehen()
-    expect(nochmals).toBe(false)
+    expect(nochmals).toBe(true)
+    expect(useTabsStore.getState().tabs.find((t) => t.id === 'tab-1')?.url).toBe('')
+
+    // Auf der leeren Startseite nochmals zurückgehen -> gibt false zurück (App kann schließen)
+    expect(useTabsStore.getState().zurueckGehen()).toBe(false)
   })
 
   it('schließt den Einstellungs-Tab beim Zurückgehen und aktiviert den vorherigen Tab', () => {
@@ -312,6 +316,22 @@ describe('zurueckGehen und Verlauf', () => {
   it('setzt die Startseite wenn Einstellungen im einzigen Tab offen war', () => {
     useTabsStore.setState({
       tabs: [{ ...useTabsStore.getState().tabs[0], id: 'tab-1', url: 'msb://einstellungen', nativDa: false }],
+      aktivId: 'tab-1',
+      verlaufIds: [],
+    })
+
+    const gehandelt = useTabsStore.getState().zurueckGehen()
+    expect(gehandelt).toBe(true)
+    expect(useTabsStore.getState().aktivId).toBe('tab-1')
+    expect(useTabsStore.getState().tabs[0].url).toBe('')
+
+    // Erneutes Zurückgehen auf der leeren Startseite ohne Verlauf liefert false
+    expect(useTabsStore.getState().zurueckGehen()).toBe(false)
+  })
+
+  it('setzt die Startseite wenn ein einzelner Tab eine URL hat aber keine Chronik mehr', () => {
+    useTabsStore.setState({
+      tabs: [{ ...useTabsStore.getState().tabs[0], id: 'tab-1', url: 'https://youtube.example/', nativDa: true, zurueck: false, vorher: null }],
       aktivId: 'tab-1',
       verlaufIds: [],
     })

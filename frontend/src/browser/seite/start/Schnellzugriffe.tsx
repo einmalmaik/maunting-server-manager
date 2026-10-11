@@ -27,7 +27,7 @@ import { KachelSymbol } from './KachelSymbol'
 
 const ZIEHEN = 'text/msb-kachel'
 
-const KACHEL = 'group flex flex-col items-center gap-2 rounded-lg p-2 outline-none hover:bg-surface-container/80 focus-visible:ring-2 focus-visible:ring-primary'
+const KACHEL = 'group flex min-w-0 flex-col items-center gap-2 rounded-lg p-2 outline-none hover:bg-surface-container/80 focus-visible:ring-2 focus-visible:ring-primary'
 const RUND = 'flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-surface-container-high text-on-surface group-hover:bg-surface-container-highest'
 
 type Bearbeiten = { art: 'neu' } | { art: 'aendern'; index: number }
@@ -136,7 +136,7 @@ export function Schnellzugriffe() {
               }}
               onDragLeave={() => setZiel(null)}
               onDrop={(ev) => ablegen(ev, i)}
-              className={`rounded-lg ${ziel === i ? 'ring-2 ring-primary/50' : ''}`}
+              className={`min-w-0 overflow-hidden rounded-lg ${ziel === i ? 'ring-2 ring-primary/50' : ''}`}
             >
               <button
                 type="button"
@@ -152,7 +152,7 @@ export function Schnellzugriffe() {
                 <span className={RUND}>
                   <KachelSymbol url={s.url} host={host} />
                 </span>
-                <span className="w-full truncate text-center text-label-sm text-on-surface-variant">{s.titel || host}</span>
+                <span className="block min-w-0 w-full truncate text-center text-label-sm text-on-surface-variant">{s.titel || host}</span>
               </button>
             </li>
           )
