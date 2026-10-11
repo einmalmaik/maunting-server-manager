@@ -311,8 +311,7 @@ export function SuchzusammenfassungKachel({
               variant="ghost"
               size="sm"
               onClick={kopieren}
-              aria-label={t('browser.msmSuche.zusammenfassungKopieren')}
-              title={t(kopiert ? 'browser.msmSuche.zusammenfassungKopiert' : 'browser.msmSuche.zusammenfassungKopieren')}
+              aria-label={t(kopiert ? 'browser.msmSuche.zusammenfassungKopiert' : 'browser.msmSuche.zusammenfassungKopieren')}
               className="h-7 w-7 p-0 text-on-surface-variant hover:text-on-surface"
             >
               {kopiert ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}

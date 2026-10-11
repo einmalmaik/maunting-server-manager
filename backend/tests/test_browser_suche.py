@@ -95,10 +95,13 @@ def test_nur_oeffentliche_http_adressen_und_keine_gekuerzten(searxng: dict) -> N
     ]})
     antwort = _app(konto=13).post("/api/browser/suche", json={"q": "x"})
     assert antwort.status_code == 200
-    assert antwort.json() == {"treffer": [
-        {"titel": "A", "url": "https://example.com/a", "inhalt": "Text A"},
-        {"titel": "G", "url": "http://example.org/b", "inhalt": ""},
-    ]}
+    assert antwort.json() == {
+        "treffer": [
+            {"titel": "A", "url": "https://example.com/a", "inhalt": "Text A"},
+            {"titel": "G", "url": "http://example.org/b", "inhalt": ""},
+        ],
+        "vorschlaege": [],
+    }
 
 
 def test_eine_seite_hat_hoechstens_zehn_treffer(searxng: dict) -> None:

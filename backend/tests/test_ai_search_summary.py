@@ -82,19 +82,23 @@ def db():
                     return it
             return None
 
-        def query(self, model):
+        def query(self, *entities):
             class Query:
                 def __init__(self, pool):
                     self.pool = pool
 
                 def filter(self, *conds):
-                    res = [
-                        x
-                        for x in self.pool
-                        if isinstance(x, model)
-                        and getattr(x, "enabled", False) is True
-                        and getattr(x, "search_summary_enabled", False) is True
-                    ]
+                    if len(entities) == 1 and isinstance(entities[0], type):
+                        model = entities[0]
+                        res = [
+                            x
+                            for x in self.pool
+                            if isinstance(x, model)
+                            and getattr(x, "enabled", False) is True
+                            and getattr(x, "search_summary_enabled", False) is True
+                        ]
+                    else:
+                        res = []
                     return Query(res)
 
                 def order_by(self, *args):
@@ -106,7 +110,9 @@ def db():
                 def first(self):
                     return self.pool[0] if self.pool else None
 
-            return Query(self.items)
+            if len(entities) == 1 and isinstance(entities[0], type):
+                return Query([x for x in self.items if isinstance(x, entities[0])])
+            return Query([])
 
     return MockDb()
 
