@@ -15,19 +15,22 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from limits import parse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StringConstraints
+from sqlalchemy.orm import Session
 
-from dependencies import get_current_user, verify_csrf
+from dependencies import get_current_user, get_db, verify_csrf
 from middleware.rate_limit import limiter
 from models.user import User
-from services import ai_web_search_service, browser_nachrichten_service
+from services import ai_search_summary_service, ai_web_search_service, browser_nachrichten_service
 from services.ai_web_search_service import WebSearchUnavailable
 
 router = APIRouter(prefix="/api/browser", tags=["browser"])
 
 TREFFER_JE_SEITE = 10
 _grenze = parse("60/minute")
+_zusammenfassung_grenze = parse("30/minute")
 _nachrichten_grenze = parse("30/minute")
 
 
@@ -38,6 +41,28 @@ class SucheAnfrage(BaseModel):
     seite: StrictInt = Field(default=1, ge=1, le=20)
     sicher: StrictBool = False
     sprache: Annotated[str, StringConstraints(pattern=r"^[a-z]{2}$")] | None = None
+
+
+class SuchTrefferInhalt(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    index: StrictInt = Field(default=1, ge=1, le=50)
+    titel: Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] = ""
+    url: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)] = ""
+    inhalt: Annotated[str, StringConstraints(strip_whitespace=True, max_length=4000)] = ""
+
+
+class SuchVerlaufEintrag(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    role: Annotated[str, StringConstraints(pattern=r"^(user|assistant)$")]
+    content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
+
+
+class SucheZusammenfassungAnfrage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    q: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    treffer: list[SuchTrefferInhalt] = Field(default_factory=list, max_length=20)
+    verlauf: list[SuchVerlaufEintrag] = Field(default_factory=list, max_length=20)
+    provider_id: StrictInt | None = None
 
 
 def _mit_code(status_code: int, code: str) -> HTTPException:
@@ -67,6 +92,33 @@ def suchen(
     return {
         "treffer": [{"titel": t["title"], "url": t["url"], "inhalt": t["snippet"]} for t in treffer],
     }
+
+
+@router.post("/suche/zusammenfassung")
+async def suchzusammenfassung_stream(
+    req: SucheZusammenfassungAnfrage,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    __=Depends(verify_csrf),
+) -> StreamingResponse:
+    if not limiter.limiter.hit(_zusammenfassung_grenze, f"browser-suche-zusammenfassung:{user.id}"):
+        raise _mit_code(429, "BROWSER_SUCHE_ZU_VIELE")
+
+    treffer_dict = [t.model_dump() for t in req.treffer]
+    verlauf_dict = [v.model_dump() for v in req.verlauf]
+
+    return StreamingResponse(
+        ai_search_summary_service.stream_suchzusammenfassung(
+            db=db,
+            user=user,
+            q=req.q,
+            treffer=treffer_dict,
+            verlauf=verlauf_dict,
+            bevorzugte_id=req.provider_id,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/nachrichten")

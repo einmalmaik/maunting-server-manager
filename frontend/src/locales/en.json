@@ -433,6 +433,11 @@
       "memoryModel": "Memory model",
       "memoryOff": "No separate memory model",
       "memoryEnabled": "Memory role enabled",
+      "searchSummarySection": "Search summary (SearXNG)",
+      "searchSummaryHint": "Generates neutral AI overviews of web search results in Secure Browser. Completely isolated, 0 bytes database storage.",
+      "searchSummaryModel": "Search summary model",
+      "searchSummaryOff": "Disabled (no search summary)",
+      "searchSummaryEnabled": "Search summary active",
       "recommendationHint": "MSM is verified with {{model}} (balanced response speed and reasoning depth). Other models may also be used.",
       "caps": {
         "none": "This model does not reason.",
@@ -8778,7 +8783,7 @@
     "einstellungen": {
       "searxngAdresse": "Address of your SearXNG instance",
       "searxngUngueltig": "Only https:// addresses without credentials; http:// only for localhost.",
-      "searxngSidecarPlatzhalter": "Default: Server SearXNG sidecar",
+      "searxngSidecarPlatzhalter": "Default: server SearXNG sidecar",
       "searxngSidecarHinweis": "Without a custom address, searches use the SearXNG instance on your paired server.",
       "schild": "Block ads and trackers",
       "schildHinweis": "Also rejects cookie notices where possible and hides known notices that cannot be rejected. Tracking parameters such as “utm_source” are removed from links. Applies to every site except the exceptions below.",
@@ -9705,7 +9710,16 @@
       "mitDuckDuckGo": "Search with DuckDuckGo",
       "keineTreffer": "No results for “{{begriff}}”",
       "trefferListe": "Results for “{{begriff}}”",
-      "weitere": "More results"
+      "weitere": "More results",
+      "zusammenfassungTitel": "AI overview",
+      "zusammenfassungLaedt": "Generating response …",
+      "zusammenfassungSchliessen": "Dismiss",
+      "zusammenfassungEinklappen": "Collapse",
+      "zusammenfassungAusklappen": "Expand",
+      "zusammenfassungNachfragePlaceholder": "Ask a follow-up …",
+      "zusammenfassungSenden": "Send",
+      "zusammenfassungEphemerHinweis": "Active in this tab only. No persistence.",
+      "quelle": "Source {{nr}}"
     }
   }
 }

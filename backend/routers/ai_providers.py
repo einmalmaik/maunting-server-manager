@@ -107,6 +107,7 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         worker_enabled=bool(getattr(provider, "worker_enabled", bool(provider.worker_model))),
         ethics_enabled=bool(getattr(provider, "ethics_enabled", bool(provider.ethics_model))),
         memory_enabled=bool(getattr(provider, "memory_enabled", False)),
+        search_summary_enabled=bool(getattr(provider, "search_summary_enabled", False)),
         transcription_enabled=bool(getattr(provider, "transcription_enabled", bool(provider.transcription_model))),
         realtime_enabled=bool(getattr(provider, "realtime_enabled", provider.realtime_default)),
         worker_model=provider.worker_model,
@@ -115,6 +116,7 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         ethics_reasoning_effort=provider.ethics_reasoning_effort,
         ethics_mode=provider.ethics_mode or "auto",
         memory_model=provider.memory_model,
+        search_summary_model=provider.search_summary_model,
         azure_resource_name=provider.azure_resource_name,
         disable_safety=bool(getattr(provider, "disable_safety", False)),
         enabled=provider.enabled,
@@ -134,6 +136,9 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         memory_input_price_micro_usd_per_million=provider.memory_input_price_micro_usd_per_million,
         memory_output_price_micro_usd_per_million=provider.memory_output_price_micro_usd_per_million,
         memory_cache_price_micro_usd_per_million=provider.memory_cache_price_micro_usd_per_million,
+        search_summary_input_price_micro_usd_per_million=provider.search_summary_input_price_micro_usd_per_million,
+        search_summary_output_price_micro_usd_per_million=provider.search_summary_output_price_micro_usd_per_million,
+        search_summary_cache_price_micro_usd_per_million=getattr(provider, "search_summary_cache_price_micro_usd_per_million", None),
         updated_at=provider.updated_at,
     )
 

@@ -176,6 +176,13 @@ class AiProvider(Base):
     memory_input_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     memory_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     memory_cache_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Das Modell fuer die neutrale Suchzusammenfassung (SearXNG AI Overviews im Browser).
+    # ``None`` oder `search_summary_enabled=False` heisst: keine Zusammenfassung (deaktiviert).
+    search_summary_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    search_summary_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
+    search_summary_input_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    search_summary_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    search_summary_cache_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Der Name der Azure-Ressource dieses Zugangs — das eine Stück Adresse, das
     # MSM nicht selbst weiß.
     #

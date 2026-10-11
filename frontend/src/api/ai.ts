@@ -88,6 +88,7 @@ export interface AiProviderAdmin {
    */
   ethics_mode: 'off' | 'auto' | 'always' | 'critical'
   memory_model?: string | null
+  search_summary_model?: string | null
   /**
    * Der Name der Azure-Ressource dieses Zugangs — das eine Stueck Adresse, das
    * MSM nicht selbst weiss. Nur Anbieter mit `ressource_noetig` brauchen ihn;
@@ -124,10 +125,14 @@ export interface AiProviderAdmin {
   memory_input_price_micro_usd_per_million?: number | null
   memory_output_price_micro_usd_per_million?: number | null
   memory_cache_price_micro_usd_per_million?: number | null
+  search_summary_input_price_micro_usd_per_million?: number | null
+  search_summary_output_price_micro_usd_per_million?: number | null
+  search_summary_cache_price_micro_usd_per_million?: number | null
   standard_enabled?: boolean
   worker_enabled?: boolean
   ethics_enabled?: boolean
   memory_enabled?: boolean
+  search_summary_enabled?: boolean
   transcription_enabled?: boolean
   realtime_enabled?: boolean
   updated_at: string
@@ -1349,10 +1354,14 @@ export interface AiProviderWrite {
   memory_input_price_micro_usd_per_million?: number | null
   memory_output_price_micro_usd_per_million?: number | null
   memory_cache_price_micro_usd_per_million?: number | null
+  search_summary_input_price_micro_usd_per_million?: number | null
+  search_summary_output_price_micro_usd_per_million?: number | null
+  search_summary_cache_price_micro_usd_per_million?: number | null
   standard_enabled?: boolean
   worker_enabled?: boolean
   ethics_enabled?: boolean
   memory_enabled?: boolean
+  search_summary_enabled?: boolean
   transcription_enabled?: boolean
   realtime_enabled?: boolean
   /**
@@ -1385,6 +1394,7 @@ export interface AiProviderWrite {
   ethics_reasoning_effort?: string | null
   ethics_mode?: 'off' | 'auto' | 'always' | 'critical'
   memory_model?: string | null
+  search_summary_model?: string | null
   /**
    * Wie `default_voice`: „nicht genannt" laesst den Namen stehen,
    * ausdrueckliches `null` nimmt ihn zurueck. Der Unterschied zaehlt hier

@@ -21,6 +21,7 @@ import { msmSucheBegriff } from '../services/intern'
 import { nativ, type SchutzStand } from '../services/nativ'
 import { suchAdresse } from '../services/searchEngines'
 import { useTabsStore, type Tab } from '../services/tabsStore'
+import { SuchzusammenfassungKachel } from './suchzusammenfassung/SuchzusammenfassungKachel'
 
 export interface Treffer {
   titel: string
@@ -175,9 +176,10 @@ export function MsmSuche({ tab }: { tab: Tab }) {
   } else {
     inhalt = (
       <>
+        <SuchzusammenfassungKachel begriff={begriff} treffer={stand.treffer} />
         <ol className="flex flex-col gap-1" aria-label={t('browser.msmSuche.trefferListe', { begriff })}>
-          {stand.treffer.map((x) => (
-            <li key={x.url}>
+          {stand.treffer.map((x, idx) => (
+            <li key={x.url} id={`treffer-${idx + 1}`}>
               <button
                 type="button"
                 onClick={(ev) => (ev.ctrlKey || ev.metaKey ? neuerTab(x.url, { nach: tab.id, privat: tab.privat, hintergrund: true }) : oeffnen(x.url, tab.id))}

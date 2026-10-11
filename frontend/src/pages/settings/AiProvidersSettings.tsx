@@ -37,6 +37,7 @@ interface ProviderDraft extends AiProviderWrite {
 const KEIN_WORKER = '__aus__'
 const KEINE_ETHICS = '__aus__'
 const KEIN_GEDAECHTNIS = '__aus__'
+const KEINE_SUCHZUSAMMENFASSUNG = '__aus__'
 const KEINE_TRANSKRIPTION = '__aus__'
 /** Keine Denkstufe des Sprachwegs — die Vorgabe des Modells gilt. */
 const KEINE_SPRACHSTUFE = '__aus__'
@@ -303,6 +304,11 @@ const EMPTY_PROVIDER: ProviderDraft = {
   // Ohne eigenes Modell liest das Gedächtnis mit dem eines anderen Zugangs,
   // sonst mit dem Standardmodell (`gedaechtnis_anbieter`).
   memory_model: null,
+  search_summary_model: null,
+  search_summary_enabled: false,
+  search_summary_input_price_micro_usd_per_million: null,
+  search_summary_output_price_micro_usd_per_million: null,
+  search_summary_cache_price_micro_usd_per_million: null,
   // Nur Anbieter mit `ressource_noetig` brauchen ihn; ohne Vorbelegung, weil
   // MSM die Ressourcen des fremden Kontos nicht kennt.
   azure_resource_name: null,
@@ -330,10 +336,14 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     memory_input_price_micro_usd_per_million: provider.memory_input_price_micro_usd_per_million ?? null,
     memory_output_price_micro_usd_per_million: provider.memory_output_price_micro_usd_per_million ?? null,
     memory_cache_price_micro_usd_per_million: provider.memory_cache_price_micro_usd_per_million ?? null,
+    search_summary_input_price_micro_usd_per_million: provider.search_summary_input_price_micro_usd_per_million ?? null,
+    search_summary_output_price_micro_usd_per_million: provider.search_summary_output_price_micro_usd_per_million ?? null,
+    search_summary_cache_price_micro_usd_per_million: provider.search_summary_cache_price_micro_usd_per_million ?? null,
     standard_enabled: provider.standard_enabled ?? Boolean(provider.default_model),
     worker_enabled: provider.worker_enabled ?? Boolean(provider.worker_model),
     ethics_enabled: provider.ethics_enabled ?? Boolean(provider.ethics_model),
     memory_enabled: provider.memory_enabled ?? false,
+    search_summary_enabled: provider.search_summary_enabled ?? false,
     transcription_enabled: provider.transcription_enabled ?? Boolean(provider.transcription_model),
     realtime_enabled: provider.realtime_enabled ?? provider.realtime_default ?? false,
     default_voice: provider.default_voice,
@@ -356,6 +366,7 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     ethics_reasoning_effort: provider.ethics_reasoning_effort,
     ethics_mode: provider.ethics_mode || 'auto',
     memory_model: provider.memory_model ?? null,
+    search_summary_model: provider.search_summary_model ?? null,
     azure_resource_name: provider.azure_resource_name,
     disable_safety: provider.disable_safety ?? false,
     operator_api_key: '',
@@ -450,10 +461,14 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
       memory_input_price_micro_usd_per_million: draft.memory_input_price_micro_usd_per_million ?? null,
       memory_output_price_micro_usd_per_million: draft.memory_output_price_micro_usd_per_million ?? null,
       memory_cache_price_micro_usd_per_million: draft.memory_cache_price_micro_usd_per_million ?? null,
+      search_summary_input_price_micro_usd_per_million: draft.search_summary_input_price_micro_usd_per_million ?? null,
+      search_summary_output_price_micro_usd_per_million: draft.search_summary_output_price_micro_usd_per_million ?? null,
+      search_summary_cache_price_micro_usd_per_million: draft.search_summary_cache_price_micro_usd_per_million ?? null,
       standard_enabled: draft.id ? Boolean(draft.standard_enabled && draft.default_model?.trim()) : Boolean(draft.default_model?.trim()),
       worker_enabled: draft.id ? Boolean(draft.worker_enabled && draft.worker_model?.trim()) : Boolean(draft.worker_model?.trim()),
       ethics_enabled: draft.id ? Boolean(draft.ethics_enabled && draft.ethics_model?.trim()) : Boolean(draft.ethics_model?.trim()),
       memory_enabled: draft.id ? Boolean(draft.memory_enabled && draft.memory_model?.trim()) : Boolean(draft.memory_model?.trim()),
+      search_summary_enabled: draft.id ? Boolean(draft.search_summary_enabled && draft.search_summary_model?.trim()) : Boolean(draft.search_summary_model?.trim()),
       transcription_enabled: draft.id ? Boolean(draft.transcription_enabled && draft.transcription_model?.trim()) : Boolean(draft.transcription_model?.trim()),
       realtime_enabled: draft.id ? Boolean((draft.realtime_enabled || draft.realtime_default) && draft.realtime_model?.trim()) : Boolean(draft.realtime_model?.trim()),
       ...(protokoll === 'tts' ? { default_voice: draft.default_voice?.trim() || null } : {}),
@@ -472,6 +487,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
               : null,
             ethics_mode: draft.ethics_mode || 'auto',
             memory_model: draft.memory_model?.trim() || null,
+            search_summary_model: draft.search_summary_model?.trim() || null,
             ...(sprachwege.length > 0 ? {
               realtime_default: Boolean(draft.realtime_default || draft.realtime_enabled),
               realtime_enabled: Boolean(draft.realtime_enabled || draft.realtime_default),
@@ -791,6 +807,9 @@ function ProviderForm({
   // Das Modell des Gedächtnisses — ebenfalls aus demselben Katalog.
   const gedaechtnisModell = models?.find((item) => item.model_id === draft.memory_model)
     ?? nachgeschlagen(draft.memory_model)
+  // Das Modell der Suchzusammenfassung — ebenfalls aus demselben Katalog.
+  const suchzusammenfassungsModell = models?.find((item) => item.model_id === draft.search_summary_model)
+    ?? nachgeschlagen(draft.search_summary_model)
   // Kommt aus dem Katalog, nicht aus der Oberflaeche: fuehrt der Anbieter die
   // empfohlene Kennung nicht mehr, gibt es hier `null` und die Empfehlung
   // verschwindet von selbst — statt auf ein Modell zu zeigen, das es nicht gibt.
@@ -827,6 +846,7 @@ function ProviderForm({
   const ethicsStufeId = useId()
   const ethicsModusId = useId()
   const gedaechtnisModellId = useId()
+  const suchzusammenfassungsModellId = useId()
   const ttsModellId = useId()
   const ressourceId = useId()
   const realtimeModelId = useId()
@@ -1698,6 +1718,81 @@ function ProviderForm({
                     onInputChange={(value) => change({ memory_input_price_micro_usd_per_million: value })}
                     onOutputChange={(value) => change({ memory_output_price_micro_usd_per_million: value })}
                     onCacheChange={(value) => change({ memory_cache_price_micro_usd_per_million: value })}
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Suchzusammenfassung (SearXNG) */}
+        {spec?.protokoll === 'chat_completions' && (
+          <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                  ✨ {t('ai.providers.searchSummarySection')}
+                </h4>
+                <p className="msm-field-help mt-1">{t('ai.providers.searchSummaryHint')}</p>
+              </div>
+              <Switch
+                checked={Boolean(draft.search_summary_enabled)}
+                onCheckedChange={(search_summary_enabled) => change({ search_summary_enabled })}
+                disabled={!draft.search_summary_model?.trim()}
+                aria-label={t('ai.providers.searchSummaryEnabled')}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                {models && models.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <label htmlFor={suchzusammenfassungsModellId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                      {t('ai.providers.searchSummaryModel')}
+                    </label>
+                    <Dropdown
+                      id={suchzusammenfassungsModellId}
+                      value={draft.search_summary_model || KEINE_SUCHZUSAMMENFASSUNG}
+                      onChange={(search_summary_model) => change({
+                        search_summary_model: search_summary_model === KEINE_SUCHZUSAMMENFASSUNG ? null : search_summary_model,
+                        search_summary_enabled: search_summary_model !== KEINE_SUCHZUSAMMENFASSUNG,
+                      })}
+                      searchable
+                      options={[
+                        { value: KEINE_SUCHZUSAMMENFASSUNG, label: t('ai.providers.searchSummaryOff') },
+                        ...(draft.search_summary_model && !models.some((m) => m.model_id === draft.search_summary_model)
+                          ? [{ value: draft.search_summary_model, label: draft.search_summary_model }]
+                          : []),
+                        ...[...models]
+                          .sort(sortiereModelleAlphabetisch)
+                          .map((item) => ({
+                            value: item.model_id,
+                            label: item.model_id,
+                            hint: modellHinweis(item, t),
+                          })),
+                      ]}
+                      aria-label={t('ai.providers.searchSummaryModel')}
+                    />
+                  </div>
+                ) : (
+                  <ProviderInput
+                    label={t('ai.providers.searchSummaryModel')}
+                    value={draft.search_summary_model ?? ''}
+                    onChange={(search_summary_model) => change({
+                      search_summary_model: search_summary_model || null,
+                      search_summary_enabled: Boolean(search_summary_model.trim()),
+                    })}
+                  />
+                )}
+                {suchzusammenfassungsModell && <ModelCapabilities model={suchzusammenfassungsModell} />}
+                {draft.search_summary_model && (
+                  <ModellPreisPaar
+                    policy={waehrung}
+                    inputValue={draft.search_summary_input_price_micro_usd_per_million ?? null}
+                    outputValue={draft.search_summary_output_price_micro_usd_per_million ?? null}
+                    cacheValue={draft.search_summary_cache_price_micro_usd_per_million ?? null}
+                    onInputChange={(value) => change({ search_summary_input_price_micro_usd_per_million: value })}
+                    onOutputChange={(value) => change({ search_summary_output_price_micro_usd_per_million: value })}
+                    onCacheChange={(value) => change({ search_summary_cache_price_micro_usd_per_million: value })}
                   />
                 )}
               </div>

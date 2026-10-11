@@ -433,6 +433,11 @@
       "memoryModel": "Gedächtnis-Modell",
       "memoryOff": "Kein eigenes Gedächtnis-Modell",
       "memoryEnabled": "Gedächtnis-Rolle aktiv",
+      "searchSummarySection": "Suchzusammenfassung (SearXNG)",
+      "searchSummaryHint": "Erstellt neutrale KI-Überblicke über Websuchergebnisse im Secure Browser. Völlig isoliert, 0 Bytes Datenbank-Speicherung.",
+      "searchSummaryModel": "Suchzusammenfassungs-Modell",
+      "searchSummaryOff": "Deaktiviert (keine Suchzusammenfassung)",
+      "searchSummaryEnabled": "Suchzusammenfassung aktiv",
       "recommendationHint": "MSM ist mit {{model}} erprobt (schnelle Antwortzeiten und Denkstufen). Andere Modelle sind ebenfalls möglich.",
       "caps": {
         "none": "Dieses Modell denkt nicht nach.",
@@ -9705,7 +9710,16 @@
       "mitDuckDuckGo": "Mit DuckDuckGo suchen",
       "keineTreffer": "Keine Treffer für „{{begriff}}“",
       "trefferListe": "Treffer für „{{begriff}}“",
-      "weitere": "Weitere Ergebnisse"
+      "weitere": "Weitere Ergebnisse",
+      "zusammenfassungTitel": "KI-Überblick",
+      "zusammenfassungLaedt": "Antwort wird generiert …",
+      "zusammenfassungSchliessen": "Ausblenden",
+      "zusammenfassungEinklappen": "Einklappen",
+      "zusammenfassungAusklappen": "Ausklappen",
+      "zusammenfassungNachfragePlaceholder": "Folgefrage stellen …",
+      "zusammenfassungSenden": "Senden",
+      "zusammenfassungEphemerHinweis": "Nur in diesem Tab aktiv. Keine Speicherung.",
+      "quelle": "Quelle {{nr}}"
     }
   }
 }
