@@ -32,7 +32,36 @@ export interface Standbild {
 
 export const useStandbild = create<{ bild: Standbild | null }>(() => ({ bild: null }))
 
-function bildSetzen(neu: Standbild | null): void {
+export function bytesZuBlob(daten: unknown): Blob | null {
+  if (!daten) return null
+  let bytes: Uint8Array | null = null
+  if (daten instanceof Uint8Array) {
+    bytes = daten
+  } else if (daten instanceof ArrayBuffer) {
+    bytes = new Uint8Array(daten)
+  } else if (ArrayBuffer.isView(daten)) {
+    bytes = new Uint8Array(daten.buffer, daten.byteOffset, daten.byteLength)
+  } else if (Array.isArray(daten)) {
+    bytes = new Uint8Array(daten)
+  } else if (typeof daten === 'string') {
+    try {
+      const roh = atob(daten)
+      bytes = new Uint8Array(roh.length)
+      for (let i = 0; i < roh.length; i++) bytes[i] = roh.charCodeAt(i)
+    } catch {
+      return null
+    }
+  } else if (typeof daten === 'object' && daten !== null) {
+    const o = daten as Record<string, unknown>
+    if ('data' in o && Array.isArray(o.data)) bytes = new Uint8Array(o.data)
+    else if ('body' in o && Array.isArray(o.body)) bytes = new Uint8Array(o.body)
+  }
+  if (!bytes || bytes.length === 0) return null
+  const istPng = bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47
+  return new Blob([bytes as unknown as BlobPart], { type: istPng ? 'image/png' : 'image/jpeg' })
+}
+
+export function bildSetzen(neu: Standbild | null): void {
   const alt = useStandbild.getState().bild
   if (alt) URL.revokeObjectURL(alt.url)
   useStandbild.setState({ bild: neu })
@@ -45,8 +74,9 @@ async function standbildAufnehmen(): Promise<void> {
   if (!tab) return
   try {
     const daten = await nativ.tabStandbild()
-    if (!daten) return
-    bildSetzen({ tab, url: URL.createObjectURL(new Blob([daten], { type: 'image/jpeg' })) })
+    const blob = bytesZuBlob(daten)
+    if (!blob) return
+    bildSetzen({ tab, url: URL.createObjectURL(blob) })
     // Erst wenn das Bild gezeichnet ist, darf der Tab weg.
     await naechstesBild()
   } catch {

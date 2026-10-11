@@ -11,7 +11,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 const { nativ } = await import('./nativ')
-const { useUeberdeckungBeobachten, useStandbild } = await import('./ueberdeckung')
+const { useUeberdeckungBeobachten, useStandbild, bytesZuBlob } = await import('./ueberdeckung')
 const { useTabsStore } = await import('./tabsStore')
 
 const warten = () => act(() => new Promise((r) => setTimeout(r, 40)))
@@ -87,5 +87,20 @@ describe('Sichtbarkeit der Tabs', () => {
     zeigen.fertig()
     await warten()
     expect(useStandbild.getState().bild).toBeNull()
+  })
+
+  it('wandelt rohe Zahlen-Arrays aus der IPC korrekt in Blob um', async () => {
+    const blobAusArray = bytesZuBlob([255, 216, 255, 224])
+    expect(blobAusArray).not.toBeNull()
+    expect(blobAusArray?.type).toBe('image/jpeg')
+    const bufferAusArray = await blobAusArray!.arrayBuffer()
+    expect(Array.from(new Uint8Array(bufferAusArray))).toEqual([255, 216, 255, 224])
+
+    const blobAusBuffer = bytesZuBlob(new Uint8Array([255, 216, 255, 224]).buffer)
+    expect(blobAusBuffer).not.toBeNull()
+    expect(blobAusBuffer?.type).toBe('image/jpeg')
+
+    expect(bytesZuBlob(null)).toBeNull()
+    expect(bytesZuBlob([])).toBeNull()
   })
 })

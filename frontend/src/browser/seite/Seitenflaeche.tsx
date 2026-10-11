@@ -16,7 +16,7 @@ import { seitenHost } from '../services/geraetKonfig'
 import { interneSeite } from '../services/intern'
 import { nativ } from '../services/nativ'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
-import { useStandbild } from '../services/ueberdeckung'
+import { bildSetzen, useStandbild } from '../services/ueberdeckung'
 import { SeitenDialoge } from './SeitenDialoge'
 import { SeitenMenue } from './SeitenMenue'
 import { Sperrseite } from './Sperrseite'
@@ -101,7 +101,14 @@ export function Seitenflaeche() {
           />
         </div>
       ) : standbild?.tab === tab.id ? (
-        <img src={standbild.url} alt="" aria-hidden="true" draggable={false} className="h-full w-full select-none" />
+        <img
+          src={standbild.url}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          className="h-full w-full select-none object-cover"
+          onError={() => bildSetzen(null)}
+        />
       ) : null}
       <SeitenMenue flaeche={flaeche} />
       {eigenes.ansicht}

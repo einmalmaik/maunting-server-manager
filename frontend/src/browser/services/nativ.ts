@@ -151,7 +151,7 @@ export const nativ = {
     nacheinander('tabs_rahmen', { rahmen }),
   tabsVerdecken: (verdeckt: boolean) => nacheinander('tabs_verdecken', { verdeckt }),
   /** JPEG des vorderen Tabs. */
-  tabStandbild: () => nacheinander<ArrayBuffer>('tab_standbild'),
+  tabStandbild: () => nacheinander<ArrayBuffer | Uint8Array | number[]>('tab_standbild'),
   tabsZuruecksetzen: () => nacheinander('tabs_zuruecksetzen'),
   /** Screenshot des vorderen Tabs als PNG (Base64); `ganz` nur unter Windows (`tabs/aufnahme.rs`). */
   tabAufnahme: (id: string, ganz: boolean) => rufen<{ png: string; abgeschnitten: boolean }>('tab_aufnahme', { id, ganz }),

@@ -95,3 +95,22 @@ unsafe fn auslesen(strom: &IStream) -> windows::core::Result<Vec<u8>> {
         alles.extend_from_slice(&puffer[..gelesen as usize]);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_schreiben_und_auslesen() {
+        unsafe {
+            let strom = CreateStreamOnHGlobal(HGLOBAL::default(), true).unwrap();
+            let daten = b"HELLO WORLD TEST JPEG BYTES";
+            let mut geschrieben = 0u32;
+            strom.Write(daten.as_ptr().cast(), daten.len() as u32, Some(&mut geschrieben)).unwrap();
+            assert_eq!(geschrieben as usize, daten.len());
+
+            let gelesen = auslesen(&strom).unwrap();
+            assert_eq!(gelesen, daten);
+        }
+    }
+}
