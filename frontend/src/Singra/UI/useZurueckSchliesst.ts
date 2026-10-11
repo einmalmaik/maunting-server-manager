@@ -30,6 +30,19 @@ interface Offen {
 
 /** Offene Ansichten in der Reihenfolge, in der sie aufgingen. */
 const stapel: Offen[] = []
+
+/**
+ * Schließt die oberste Ansicht, falls eine über diesen Mechanismus offen ist.
+ * Gibt wahr zurück, wenn eine Ansicht geschlossen wurde.
+ */
+export function zurueckSchliessenOffen(): boolean {
+  if (stapel.length > 0) {
+    const oberste = stapel[stapel.length - 1]
+    oberste?.schliessen()
+    return true
+  }
+  return false
+}
 /** Wie viele unserer Einträge über dem Ausgangspunkt liegen. */
 let gesetzt = 0
 /** Ein eigener Sprung zurück läuft; sein `popstate` gehört uns. */

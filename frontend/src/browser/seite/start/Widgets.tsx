@@ -28,10 +28,10 @@ export function widgetsGeordnet(ordnung: Widget[]): Widget[] {
 
 function Karte({ titel, symbol: Symbol, breit, children }: { titel: string; symbol: LucideIcon; breit?: boolean; children: ReactNode }) {
   return (
-    <section className={`flex min-w-0 flex-col gap-3 rounded-xl bg-surface-container/80 p-4 backdrop-blur ${breit ? 'sm:col-span-2' : ''}`}>
-      <h2 className="flex items-center gap-2 text-label-md text-on-surface-variant">
-        <Symbol className="h-4 w-4" aria-hidden="true" />
-        {titel}
+    <section className={`flex min-w-0 w-full flex-col gap-3 overflow-hidden rounded-xl bg-surface-container/80 p-4 backdrop-blur ${breit ? 'sm:col-span-2' : ''}`}>
+      <h2 className="flex min-w-0 items-center gap-2 text-label-md text-on-surface-variant">
+        <Symbol className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span className="truncate">{titel}</span>
       </h2>
       {children}
     </section>
@@ -40,16 +40,16 @@ function Karte({ titel, symbol: Symbol, breit, children }: { titel: string; symb
 
 function Zeile({ oben, unten, onClick, onAuxClick }: { oben: string; unten: string; onClick: (ctrl: boolean) => void; onAuxClick?: () => void }) {
   return (
-    <li>
+    <li className="min-w-0 w-full overflow-hidden">
       <button
         type="button"
         onClick={(ev) => onClick(ev.ctrlKey || ev.metaKey)}
         onAuxClick={(ev) => ev.button === 1 && onAuxClick?.()}
-        className="flex w-full min-w-0 flex-col rounded-md px-2 py-1.5 text-left hover:bg-surface-container-high"
+        className="flex w-full min-w-0 flex-col overflow-hidden rounded-md px-2 py-1.5 text-left hover:bg-surface-container-high"
       >
-        {/* Ohne max-w-full ragt langer Text unter Android (WebView 124) aus dem Knopf. */}
-        <span className="max-w-full truncate text-body-sm text-on-surface">{oben}</span>
-        <span className="max-w-full truncate text-label-sm text-on-surface-variant">{unten}</span>
+        {/* max-w-full und truncate schneiden lange Titel und Adressen strikt innerhalb der Box ab. */}
+        <span className="block max-w-full min-w-0 truncate text-body-sm text-on-surface">{oben}</span>
+        <span className="block max-w-full min-w-0 truncate text-label-sm text-on-surface-variant">{unten}</span>
       </button>
     </li>
   )
@@ -102,7 +102,7 @@ function Termine({ jetzt }: { jetzt: number }) {
       {termine && termine.length === 0 && <Leer text={t('browser.start.keineTermine')} />}
       {termine && termine.length > 0 && termine.every((e) => !e.titel) && <Unlesbar ziel="kalender" />}
       {termine && termine.some((e) => e.titel) && (
-        <ul className="flex flex-col">
+        <ul className="flex min-w-0 w-full flex-col">
           {termine.map((e) => (
             <Zeile key={e.schluessel} oben={e.titel ?? t('browser.start.nichtLesbar')} unten={terminZeit(e, jetzt, i18n.language, t)} onClick={() => navigate('/kalender')} />
           ))}
@@ -121,7 +121,7 @@ function Notizen({ jetzt }: { jetzt: number }) {
       {notizen && notizen.length === 0 && <Leer text={t('browser.start.keineNotizen')} />}
       {notizen && notizen.length > 0 && notizen.every((n) => !n.titel) && <Unlesbar ziel="notizen" />}
       {notizen && notizen.some((n) => n.titel) && (
-        <ul className="flex flex-col">
+        <ul className="flex min-w-0 w-full flex-col">
           {notizen.map((n) => (
             <Zeile
               key={n.schluessel}
@@ -148,7 +148,7 @@ function Zuletzt() {
     <Karte titel={t('browser.start.widget.zuletzt')} symbol={History}>
       {gezeigt.length === 0 && <Leer text={t('browser.verlauf.leer')} />}
       {gezeigt.length > 0 && (
-        <ul className="flex flex-col">
+        <ul className="flex min-w-0 w-full flex-col">
           {gezeigt.map((e) => (
             <Zeile
               key={`${e.url}-${e.zeit}`}
@@ -200,7 +200,7 @@ function Nachrichten({ jetzt }: { jetzt: number }) {
         <Leer text={t(worte.trim() ? 'browser.start.nachrichten.keineZuWorten' : 'browser.start.nachrichten.keine')} />
       )}
       {meldungen && meldungen.length > 0 && (
-        <ul className="grid sm:grid-cols-2 sm:gap-x-3">
+        <ul className="grid min-w-0 w-full gap-1 sm:grid-cols-2 sm:gap-x-3">
           {meldungen.map((m) => {
             const host = seitenHost(m.url) ?? m.url
             const wann = alter(m.zeit, jetzt, i18n.language)
@@ -238,7 +238,7 @@ export function Widgets({ privat }: { privat: boolean }) {
   if (gezeigt.length === 0) return null
 
   return (
-    <div className="grid w-full gap-3 sm:grid-cols-2">
+    <div className="grid min-w-0 w-full gap-3 sm:grid-cols-2">
       {gezeigt.map((w) =>
         w === 'uhr' ? (
           <Uhr key={w} jetzt={jetzt} />

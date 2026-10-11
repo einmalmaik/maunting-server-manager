@@ -52,8 +52,16 @@ import { einrichten as gesperrtEinrichten } from './services/tresorGesperrt'
 import { useWidget } from './services/widget'
 import { useUeberdeckungBeobachten } from './services/ueberdeckung'
 import { useVerlaufFrist } from './services/verlaufStore'
+import { zurueckSchliessenOffen } from '@/Singra/UI/useZurueckSchliesst'
 import { Uebersetzungsleiste } from './uebersetzung/Uebersetzungsleiste'
 import { vollbildHinweis } from './seite/vollbildHinweis'
+import { useSuche } from './services/suche'
+
+declare global {
+  interface Window {
+    __msbZurueck?: () => boolean
+  }
+}
 
 export function BrowserApp() {
   return (
@@ -150,6 +158,72 @@ function Wurzel() {
   const startseite = useCallback(() => navigate('/'), [navigate])
   useWidget(ziele.adresszeile, startseite)
   useAktualisierung()
+
+  const zurueckNavigieren = useCallback((): boolean => {
+    // 1. Offenes Modal / Dialog über useZurueckSchliesst schließen
+    if (zurueckSchliessenOffen()) return true
+    // 2. Offene Suche schließen
+    if (useSuche.getState().offen) {
+      useSuche.getState().schliessen()
+      return true
+    }
+    // 3. Offenes Panel schließen (zurück zur Hauptansicht)
+    if (pfad.current !== '/') {
+      navigate('/')
+      return true
+    }
+    // 4. In der Tab-Chronik oder zum vorherigen Tab zurückgehen
+    return useTabsStore.getState().zurueckGehen()
+  }, [navigate])
+
+  useEffect(() => {
+    let letzterAufruf = 0
+    const handler = (): boolean => {
+      const jetzt = Date.now()
+      if (jetzt - letzterAufruf < 350) return true
+      letzterAufruf = jetzt
+      return zurueckNavigieren()
+    }
+    window.__msbZurueck = handler
+    return () => {
+      delete window.__msbZurueck
+    }
+  }, [zurueckNavigieren])
+
+  useEffect(() => {
+    if (!handy) return
+    let touchStart: { x: number; y: number; time: number } | null = null
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return
+      const t = e.touches[0]
+      if (t.clientX <= 36) {
+        touchStart = { x: t.clientX, y: t.clientY, time: Date.now() }
+      } else {
+        touchStart = null
+      }
+    }
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (!touchStart || e.changedTouches.length !== 1) return
+      const t = e.changedTouches[0]
+      const dx = t.clientX - touchStart.x
+      const dy = t.clientY - touchStart.y
+      const dt = Date.now() - touchStart.time
+      touchStart = null
+
+      if (dx >= 50 && Math.abs(dx) > Math.abs(dy) * 1.5 && dt < 450) {
+        window.__msbZurueck?.()
+      }
+    }
+
+    window.addEventListener('touchstart', onTouchStart, { passive: true })
+    window.addEventListener('touchend', onTouchEnd, { passive: true })
+    return () => {
+      window.removeEventListener('touchstart', onTouchStart)
+      window.removeEventListener('touchend', onTouchEnd)
+    }
+  }, [handy])
 
   return (
     <div

@@ -257,3 +257,71 @@ describe('Jugendschutz beim Start', () => {
     expect(rust).toContain(`pub const NICHT_BEREIT: &str = "${SCHUTZ_NICHT_BEREIT}";`)
   })
 })
+
+describe('zurueckGehen und Verlauf', () => {
+  beforeEach(() => {
+    ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+    const id = 'tab-1'
+    useTabsStore.setState({
+      tabs: [{ ...useTabsStore.getState().tabs[0], id, url: 'https://1.example/', nativDa: true, zurueck: false, vorher: null }],
+      aktivId: id,
+      verlaufIds: [],
+      geschlossen: [],
+    })
+    gerufen.length = 0
+  })
+
+  it('nutzt die Webview-Chronik wenn der Tab zurückgehen kann', () => {
+    useTabsStore.setState((s) => ({
+      tabs: s.tabs.map((t) => (t.id === 'tab-1' ? { ...t, zurueck: true } : t)),
+    }))
+    const gehandelt = useTabsStore.getState().zurueckGehen()
+    expect(gehandelt).toBe(true)
+    expect(befehle()).toContain('tab_aktion')
+    expect(gerufen).toContainEqual({ befehl: 'tab_aktion', args: { id: 'tab-1', aktion: 'zurueck' } })
+  })
+
+  it('kehrt zum vorherigen Tab zurück wenn der aktuelle Tab keine eigene Chronik hat', () => {
+    const id2 = useTabsStore.getState().neuerTab('https://2.example/')
+    expect(useTabsStore.getState().aktivId).toBe(id2)
+    expect(useTabsStore.getState().verlaufIds).toContain('tab-1')
+
+    // Auf tab-2 zurückgehen: schaltet zurück zu tab-1
+    const gehandelt = useTabsStore.getState().zurueckGehen()
+    expect(gehandelt).toBe(true)
+    expect(useTabsStore.getState().aktivId).toBe('tab-1')
+
+    // Nochmals zurückgehen: tab-1 hat keinen Verlauf mehr -> gibt false zurück (App kann schließen)
+    const nochmals = useTabsStore.getState().zurueckGehen()
+    expect(nochmals).toBe(false)
+  })
+
+  it('schließt den Einstellungs-Tab beim Zurückgehen und aktiviert den vorherigen Tab', () => {
+    useTabsStore.getState().einstellungen()
+    expect(useTabsStore.getState().tabs).toHaveLength(2)
+    const einstellungenTab = useTabsStore.getState().tabs.find((t) => t.url.startsWith('msb://einstellungen'))!
+    expect(useTabsStore.getState().aktivId).toBe(einstellungenTab.id)
+
+    const gehandelt = useTabsStore.getState().zurueckGehen()
+    expect(gehandelt).toBe(true)
+    // Einstellungs-Tab wurde geschlossen
+    expect(useTabsStore.getState().tabs.some((t) => t.id === einstellungenTab.id)).toBe(false)
+    expect(useTabsStore.getState().aktivId).toBe('tab-1')
+  })
+
+  it('setzt die Startseite wenn Einstellungen im einzigen Tab offen war', () => {
+    useTabsStore.setState({
+      tabs: [{ ...useTabsStore.getState().tabs[0], id: 'tab-1', url: 'msb://einstellungen', nativDa: false }],
+      aktivId: 'tab-1',
+      verlaufIds: [],
+    })
+
+    const gehandelt = useTabsStore.getState().zurueckGehen()
+    expect(gehandelt).toBe(true)
+    expect(useTabsStore.getState().aktivId).toBe('tab-1')
+    expect(useTabsStore.getState().tabs[0].url).toBe('')
+
+    // Erneutes Zurückgehen auf der leeren Startseite ohne Verlauf liefert false
+    expect(useTabsStore.getState().zurueckGehen()).toBe(false)
+  })
+})

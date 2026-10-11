@@ -71,15 +71,51 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   private val inhalt: ViewGroup get() = activity.findViewById(android.R.id.content)
   val herunterladen by lazy { Herunterladen(activity) }
 
-  /** Zurück gehört dem Tab, solange er vorne liegt und zurück kann; sonst der Oberfläche. */
-  private val zurueck = object : OnBackPressedCallback(false) {
+  private var hauptWebView: WebView? = null
+
+  /** Zurück gehört dem Tab, solange er vorne liegt und zurück kann; sonst der Oberfläche (z. B. vorheriger Tab). */
+  private val zurueck = object : OnBackPressedCallback(true) {
     override fun handleOnBackPressed() {
       if (vollbild != null) return vollbildBeenden()
-      vorne?.let { tabs[it] }?.webView?.goBack()
+      val tab = vorne?.let { tabs[it] }
+      if (tab?.webView?.canGoBack() == true) {
+        tab.webView.goBack()
+        return
+      }
+      val web = hauptWebView
+      if (web != null) {
+        web.evaluateJavascript("window.__msbZurueck ? window.__msbZurueck() : false") { ergebnis ->
+          val behandelt = ergebnis == "true" || ergebnis == "\"true\""
+          if (!behandelt) {
+            activity.runOnUiThread {
+              isEnabled = false
+              val dispatcher = (activity as? AppCompatActivity)?.onBackPressedDispatcher
+              if (dispatcher != null && dispatcher.hasEnabledCallbacks()) {
+                dispatcher.onBackPressed()
+              } else {
+                activity.finish()
+              }
+              isEnabled = true
+            }
+          }
+        }
+      } else {
+        activity.runOnUiThread {
+          isEnabled = false
+          val dispatcher = (activity as? AppCompatActivity)?.onBackPressedDispatcher
+          if (dispatcher != null && dispatcher.hasEnabledCallbacks()) {
+            dispatcher.onBackPressed()
+          } else {
+            activity.finish()
+          }
+          isEnabled = true
+        }
+      }
     }
   }
 
   override fun load(webView: WebView) {
+    hauptWebView = webView
     activity.runOnUiThread {
       // Nach dem Rückweg von Tauri angemeldet und damit vor ihm gefragt.
       (activity as AppCompatActivity).onBackPressedDispatcher.addCallback(activity, zurueck)
@@ -92,8 +128,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   private fun tab(id: String): Tab = tabs[id] ?: throw IllegalStateException("Kein Tab $id")
 
   fun zurueckPruefen() {
-    val tab = vorne?.let { tabs[it] }
-    zurueck.isEnabled = vollbild != null || tab?.webView?.canGoBack() == true
+    zurueck.isEnabled = true
   }
 
   @Command

@@ -36,6 +36,7 @@ export type { Tab }
 export interface TabsZustand {
   tabs: Tab[]
   aktivId: string
+  verlaufIds: string[]
   geschlossen: Geschlossen[]
 
   neuerTab: (url?: string, optionen?: { privat?: boolean; hintergrund?: boolean; nach?: string }) => string
@@ -50,6 +51,8 @@ export interface TabsZustand {
   /** Ein neuer Tab, der das Foto des Such-Widgets an die Bildsuche schickt (`widget.rs`). */
   bildsuche: (bild: NonNullable<Suchmaschine['bild']>) => string
   aktion: (aktion: 'zurueck' | 'vor' | 'neu_laden' | 'anhalten', id?: string) => void
+  /** Geht in der Seitenchronik zurück oder kehrt zum vorherigen Tab zurück. Wahr, wenn gehandelt wurde. */
+  zurueckGehen: () => boolean
   /** Schaltet den Ton des Tabs stumm oder wieder an. */
   stummSchalten: (id: string) => void
   wiederherstellen: () => void
@@ -121,6 +124,7 @@ export const useTabsStore = create<TabsZustand>()(
       return {
         tabs: [leererTab(START_ID)],
         aktivId: START_ID,
+        verlaufIds: [],
         geschlossen: [],
 
         bildsuche: (bild) => {
@@ -140,7 +144,10 @@ export const useTabsStore = create<TabsZustand>()(
             const nachIndex = optionen.nach ? s.tabs.findIndex((t) => t.id === optionen.nach) : -1
             const tabs = [...s.tabs]
             tabs.splice(nachIndex >= 0 ? nachIndex + 1 : tabs.length, 0, tab)
-            return { tabs, aktivId: optionen.hintergrund ? s.aktivId : id }
+            const verlaufIds = optionen.hintergrund
+              ? s.verlaufIds
+              : [...s.verlaufIds.filter((v) => v !== s.aktivId), s.aktivId]
+            return { tabs, aktivId: optionen.hintergrund ? s.aktivId : id, verlaufIds }
           })
           if (!optionen.hintergrund) zeigen(id)
           if (url) {
@@ -155,7 +162,7 @@ export const useTabsStore = create<TabsZustand>()(
         },
 
         schliessen: (id) => {
-          const { tabs, aktivId } = get()
+          const { tabs, aktivId, verlaufIds } = get()
           const index = tabs.findIndex((t) => t.id === id)
           if (index < 0) return
           const tab = tabs[index]
@@ -165,21 +172,25 @@ export const useTabsStore = create<TabsZustand>()(
           useFormulare.getState().tabWeg(id)
           useUebersetzung.getState().seiteWeg(id)
           const rest = tabs.filter((t) => t.id !== id)
+          const restVerlauf = verlaufIds.filter((v) => v !== id)
           if (tab.privat && !rest.some((t) => t.privat)) {
             // Die private Sitzung ist zu (Android leert ihr Profil): keine ihrer Seiten lässt sich zurückholen.
-            set((s) => ({ geschlossen: s.geschlossen.filter((g) => !g.privat) }))
+            set((s) => ({ geschlossen: s.geschlossen.filter((g) => !g.privat), verlaufIds: restVerlauf }))
           } else if (tab.url) {
-            set((s) => ({ geschlossen: [{ url: tab.url, privat: tab.privat }, ...s.geschlossen].slice(0, 20) }))
+            set((s) => ({ geschlossen: [{ url: tab.url, privat: tab.privat }, ...s.geschlossen].slice(0, 20), verlaufIds: restVerlauf }))
+          } else {
+            set({ verlaufIds: restVerlauf })
           }
           if (rest.length === 0) {
             const neu = leererTab(neueTabId())
-            set({ tabs: [neu], aktivId: neu.id })
+            set({ tabs: [neu], aktivId: neu.id, verlaufIds: [] })
             zeigen(neu.id)
             return
           }
           if (aktivId === id) {
-            const naechster = rest[Math.min(index, rest.length - 1)]
-            set({ tabs: rest })
+            const vorherigerId = [...restVerlauf].reverse().find((vid) => rest.some((t) => t.id === vid))
+            const naechster = vorherigerId ? rest.find((t) => t.id === vorherigerId)! : rest[Math.min(index, rest.length - 1)]
+            set({ tabs: rest, aktivId: naechster.id, verlaufIds: restVerlauf.filter((v) => v !== naechster.id) })
             get().aktivieren(naechster.id)
           } else {
             set({ tabs: rest })
@@ -189,7 +200,12 @@ export const useTabsStore = create<TabsZustand>()(
         aktivieren: (id) => {
           const tab = finden(id)
           if (!tab) return
-          set({ aktivId: id })
+          const { aktivId, verlaufIds } = get()
+          if (aktivId !== id) {
+            set({ aktivId: id, verlaufIds: [...verlaufIds.filter((v) => v !== aktivId), aktivId] })
+          } else {
+            set({ aktivId: id })
+          }
           const seite = !!tab.url && !istIntern(tab.url)
           if (seite && !tab.nativDa) {
             // Wiederhergestellter oder im Hintergrund geöffneter Tab.
@@ -248,6 +264,43 @@ export const useTabsStore = create<TabsZustand>()(
             return
           }
           void nativ.tabAktion(id, aktion)
+        },
+
+        zurueckGehen: () => {
+          const { tabs, aktivId, verlaufIds } = get()
+          const tab = finden(aktivId)
+          if (tab && (tab.zurueck || tab.vorher)) {
+            get().aktion('zurueck')
+            return true
+          }
+          const vorherige = [...verlaufIds].reverse().find((vid) => vid !== aktivId && tabs.some((t) => t.id === vid))
+          if (vorherige) {
+            const neueVerlauf = verlaufIds.filter((v) => v !== vorherige && v !== aktivId)
+            if (tab && interneSeite(tab.url)?.seite === 'einstellungen') {
+              get().schliessen(aktivId)
+              return true
+            }
+            set({ aktivId: vorherige, verlaufIds: neueVerlauf })
+            const zielTab = finden(vorherige)
+            if (zielTab) {
+              const seite = !!zielTab.url && !istIntern(zielTab.url)
+              if (seite && !zielTab.nativDa) {
+                laden(vorherige, zielTab.url)
+              } else {
+                zeigen(vorherige)
+              }
+            }
+            return true
+          }
+          if (tab && interneSeite(tab.url)?.seite === 'einstellungen') {
+            if (tabs.length > 1) {
+              get().schliessen(aktivId)
+              return true
+            }
+            get().startseite(aktivId)
+            return true
+          }
+          return false
         },
 
         wiederherstellen: () => {

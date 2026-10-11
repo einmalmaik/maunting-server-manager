@@ -176,4 +176,28 @@ describe('Nachrichten-Widget', () => {
     expect(screen.getByText('Pokalspiel')).toBeInTheDocument()
     expect(screen.queryByText('Nachrichten gerade nicht erreichbar')).not.toBeInTheDocument()
   })
+
+  it('schneidet überlange Titel und Adressen mit truncate und overflow-hidden ab', async () => {
+    useSitzung.setState({ stand: 'aus' })
+    const langerTitel = 'Sehr langer Schlagzeilentext '.repeat(10)
+    const langerStand = {
+      stand: '2026-10-09T10:00:00+00:00',
+      themen: {
+        technik: [meldung('https://very-long-subdomain.example.org/path/to/very/long/article', langerTitel, '2026-10-09T09:00:00+00:00')],
+      },
+    }
+    localStorage.setItem(SPIEGEL, JSON.stringify({ sprache: 'de', themen: langerStand.themen }))
+    zeigen()
+    const element = screen.getByText(langerTitel.trim())
+    expect(element).toBeInTheDocument()
+    expect(element.className).toContain('truncate')
+    expect(element.className).toContain('max-w-full')
+    // Übergeordneter Button und li sind gegen Überlauf gesichert
+    const knopf = element.closest('button')
+    expect(knopf?.className).toContain('overflow-hidden')
+    expect(knopf?.className).toContain('min-w-0')
+    const li = element.closest('li')
+    expect(li?.className).toContain('overflow-hidden')
+    expect(li?.className).toContain('min-w-0')
+  })
 })
