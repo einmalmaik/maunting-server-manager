@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Outlet } from 'react-router-dom';
 import { Privacy } from './Privacy';
-import { DATENSCHUTZ_VERSION } from './datenschutzStand';
+import { DATENSCHUTZ_VERSION, DATENSCHUTZ_STAND } from './datenschutzStand';
 import { RechtlichesEinstellungen } from '@/desktop/einstellungsreiter/RechtlichesEinstellungen';
 import App from '@/App';
 import { useAuthStore } from '@/stores/authStore';
@@ -149,11 +149,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.39 vom 2026-10-10 aus (Updates fragen GitHub)', () => {
+  it('weist die Fassung 3.40 vom 2026-10-11 aus (KI-Suchzusammenfassung flüchtig)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.39`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.40`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -249,6 +249,8 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.browser.items.android')).toMatch(/Private Tabs teilen sich ein Profil auf dem Telefon/);
     expect(i18n.t('privacyPolicy.sections.browser.items.widget')).toMatch(/Spracherkennungsdienst des Telefons/);
     expect(i18n.t('privacyPolicy.sections.browser.items.msmSuche')).toMatch(/gehen Suchbegriffe .* an Ihre MSM-Instanz/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.suchzusammenfassung')).toMatch(/nicht in der Datenbank gespeichert/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.suchzusammenfassung')).toMatch(/0 Bytes Persistenz/);
     expect(i18n.t('privacyPolicy.sections.browser.items.nachrichten')).toMatch(/bleibt im Browser; gefiltert wird auf dem Gerät/);
     expect(i18n.t('privacyPolicy.sections.browser.items.widget')).toMatch(/Bildsuche der gewählten Suchmaschine/);
     // 3.34: das Token liegt unter Android im Keystore-Fach, Sicherung und Umzug sind ausgeschlossen.
@@ -283,8 +285,8 @@ describe('Privacy page', () => {
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-10-10');
-    expect(stand).toHaveTextContent('2026-10-10');
+    expect(stand).toHaveAttribute('datetime', DATENSCHUTZ_STAND);
+    expect(stand).toHaveTextContent(DATENSCHUTZ_STAND);
   });
 
   it('nennt in den Einstellungen der App dieselbe Fassung wie die Erklärung selbst', () => {
