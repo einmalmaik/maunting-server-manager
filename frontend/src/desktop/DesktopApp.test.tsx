@@ -361,7 +361,7 @@ describe('DesktopApp', () => {
 
     render(<DesktopApp />)
     await waitFor(() => {
-      expect(screen.getByText(i18n.t('mss.app.tresor'))).toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 1, name: i18n.t('mss.app.tresor') })).toBeInTheDocument()
     })
     await act(async () => {
       await abmelden()
@@ -430,7 +430,7 @@ describe('DesktopApp', () => {
     render(<DesktopApp />)
     // Landet direkt in der Hauptansicht (bereit), nicht im Wizard, und öffnet den Tresor
     await waitFor(() => {
-      expect(screen.getByText(i18n.t('mss.app.tresor'))).toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 1, name: i18n.t('mss.app.tresor') })).toBeInTheDocument()
       expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
       expect(screen.queryByText(i18n.t('mss.wizard.codeLabel'))).not.toBeInTheDocument()
     })
@@ -462,7 +462,7 @@ describe('DesktopApp', () => {
     render(<DesktopApp />)
     // Bleibt in bereit (Offline-Modus), keine Kopplungs-Maske, landet im Tresor
     await waitFor(() => {
-      expect(screen.getByText(i18n.t('mss.app.tresor'))).toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 1, name: i18n.t('mss.app.tresor') })).toBeInTheDocument()
       expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
       expect(screen.queryByText(i18n.t('mss.wizard.codeLabel'))).not.toBeInTheDocument()
     })
