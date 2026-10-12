@@ -16,7 +16,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 import { apiStream } from '@/api/client'
-import { Button, Dropdown, Input, type DropdownOption } from '@/Singra/UI'
+import { Button, Dropdown, Input, Kurzinfo, type DropdownOption } from '@/Singra/UI'
 
 import type { Treffer } from '../MsmSuche'
 
@@ -312,27 +312,29 @@ export function SuchzusammenfassungKachel({
         </div>
         <div className="flex items-center gap-1">
           {hauptText && (
+            <Kurzinfo text={t(kopiert ? 'browser.msmSuche.zusammenfassungKopiert' : 'browser.msmSuche.zusammenfassungKopieren')}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={kopieren}
+                aria-label={t(kopiert ? 'browser.msmSuche.zusammenfassungKopiert' : 'browser.msmSuche.zusammenfassungKopieren')}
+                className="h-7 w-7 p-0 text-on-surface-variant hover:text-on-surface"
+              >
+                {kopiert ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+              </Button>
+            </Kurzinfo>
+          )}
+          <Kurzinfo text={t(eingeklappt ? 'browser.msmSuche.zusammenfassungAusklappen' : 'browser.msmSuche.zusammenfassungEinklappen')}>
             <Button
               variant="ghost"
               size="sm"
-              onClick={kopieren}
-              aria-label={t(kopiert ? 'browser.msmSuche.zusammenfassungKopiert' : 'browser.msmSuche.zusammenfassungKopieren')}
-              title={t(kopiert ? 'browser.msmSuche.zusammenfassungKopiert' : 'browser.msmSuche.zusammenfassungKopieren')}
+              onClick={() => setEingeklappt((v) => !v)}
+              aria-label={t(eingeklappt ? 'browser.msmSuche.zusammenfassungAusklappen' : 'browser.msmSuche.zusammenfassungEinklappen')}
               className="h-7 w-7 p-0 text-on-surface-variant hover:text-on-surface"
             >
-              {kopiert ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+              {eingeklappt ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
             </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setEingeklappt((v) => !v)}
-            aria-label={t(eingeklappt ? 'browser.msmSuche.zusammenfassungAusklappen' : 'browser.msmSuche.zusammenfassungEinklappen')}
-            title={t(eingeklappt ? 'browser.msmSuche.zusammenfassungAusklappen' : 'browser.msmSuche.zusammenfassungEinklappen')}
-            className="h-7 w-7 p-0 text-on-surface-variant hover:text-on-surface"
-          >
-            {eingeklappt ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-          </Button>
+          </Kurzinfo>
         </div>
       </div>
 
