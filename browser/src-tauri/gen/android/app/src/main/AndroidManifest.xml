@@ -21,6 +21,9 @@
             <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>
         <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
             <action android:name="android.media.action.IMAGE_CAPTURE" />
         </intent>
     </queries>
