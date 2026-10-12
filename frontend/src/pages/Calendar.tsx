@@ -24,7 +24,7 @@ import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
-import { DateTimePicker, Dropdown, Kurzinfo, NumberStepper } from '@/Singra/UI'
+import { DateTimePicker, Dropdown, Kurzinfo, NumberStepper, useZurueckSchliesst } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
 import {
@@ -129,6 +129,8 @@ export function Calendar() {
   const [events, setEvents] = useState<KalenderVorkommen[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isFeedModalOpen, setIsFeedModalOpen] = useState(false)
+  useZurueckSchliesst(isModalOpen, () => setIsModalOpen(false))
+  useZurueckSchliesst(isFeedModalOpen, () => setIsFeedModalOpen(false))
 
   const [teamsList, setTeamsList] = useState<{ id: number; name: string }[]>([])
   const [serversList, setServersList] = useState<{ id: number; name: string }[]>([])
@@ -1309,8 +1311,17 @@ export function Calendar() {
 
       {/* MODAL: Termin anlegen / bearbeiten */}
       {isModalOpen && (
-        <div className="msm-modal-overlay animate-fade-in">
-          <div className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in max-h-[90vh] overflow-y-auto">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={formEventId ? t('calendar.editEvent') : t('calendar.createEvent')}
+          className="msm-modal-overlay animate-fade-in"
+          onClick={() => setIsModalOpen(false)}
+        >
+          <div
+            className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-outline-variant/30 pb-3">
               <h3 className="font-headline text-title-lg font-bold text-on-surface">
                 {formEventId ? t('calendar.editEvent') : t('calendar.createEvent')}
@@ -1778,8 +1789,17 @@ export function Calendar() {
 
       {/* MODAL: Kalender-Abonnement & Feed */}
       {isFeedModalOpen && (
-        <div className="msm-modal-overlay animate-fade-in">
-          <div className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('calendar.feedModalTitle')}
+          className="msm-modal-overlay animate-fade-in"
+          onClick={() => setIsFeedModalOpen(false)}
+        >
+          <div
+            className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-outline-variant/30 pb-3">
               <h3 className="font-headline text-title-lg font-bold text-on-surface">
                 {t('calendar.feedModalTitle')}

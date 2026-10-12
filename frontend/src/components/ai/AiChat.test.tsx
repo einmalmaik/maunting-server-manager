@@ -1382,4 +1382,18 @@ describe('AiChat', () => {
     // Namen und Hinweise stehen in Kurzinfo und aria-label, nie im nativen title.
     expect(document.body.querySelectorAll('[title]')).toHaveLength(0)
   })
+
+  it('zeigt den Aktualisieren-Knopf und das Blattmenü stets in der Kopfzeile', async () => {
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
+    await screen.findByText('synthetic-note.txt')
+
+    const refreshButton = screen.getByRole('button', { name: 'Aktualisieren' })
+    expect(refreshButton).toBeInTheDocument()
+
+    const menuButton = screen.getByRole('button', { name: /Weitere Einstellungen/ })
+    expect(menuButton).toBeInTheDocument()
+
+    fireEvent.click(refreshButton)
+    expect(aiApi.getConversation).toHaveBeenCalled()
+  })
 })

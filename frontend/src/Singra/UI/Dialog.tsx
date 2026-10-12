@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useZurueckSchliesst } from './useZurueckSchliesst'
+import { useModalContainer } from './ModalContainerContext'
 
 interface DialogContextValue {
   open: boolean
@@ -33,6 +34,7 @@ export interface DialogContentProps extends React.HTMLAttributes<HTMLDivElement>
   className?: string
   overlayClassName?: string
   showCloseButton?: boolean
+  container?: HTMLElement | null
 }
 
 const FOCUSSABLE =
@@ -65,6 +67,7 @@ export function DialogContent({
   className = '',
   overlayClassName = '',
   showCloseButton = true,
+  container,
   // Der Name gehört an das Element mit `role="dialog"`, nicht an die Karte darin.
   'aria-labelledby': labelledBy,
   'aria-describedby': describedBy,
@@ -72,6 +75,7 @@ export function DialogContent({
   ...props
 }: DialogContentProps) {
   const { t } = useTranslation()
+  const panelContainer = useModalContainer()
 
   const ctx = useContext(DialogContext)
   if (!ctx) {
@@ -121,6 +125,9 @@ export function DialogContent({
     }
   }, [])
 
+  const ziel = container ?? panelContainer ?? (typeof document !== 'undefined' ? document.body : null)
+  if (!ziel) return null
+
   return createPortal(
     <div
       className={`msm-modal-overlay animate-fade-in ${overlayClassName}`}
@@ -150,7 +157,7 @@ export function DialogContent({
         )}
       </div>
     </div>,
-    document.body,
+    ziel,
   )
 }
 

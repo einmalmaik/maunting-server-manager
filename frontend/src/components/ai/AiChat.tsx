@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { AudioLines, CalendarClock, Check, Image as ImageIcon, ListPlus, Loader2, Mic, Paperclip, Pencil, Send, ShieldAlert, Sparkles, Square, Trash2, X, Zap } from 'lucide-react'
+import { AudioLines, CalendarClock, Check, Image as ImageIcon, ListPlus, Loader2, Mic, Paperclip, Pencil, RotateCw, Send, ShieldAlert, Sparkles, Square, Trash2, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
@@ -1031,6 +1031,28 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
     }
   }, [setEntries, streaming])
 
+  const [reloading, setReloading] = useState(false)
+  const manuellNachladen = useCallback(async () => {
+    if (streaming || reloading) return
+    setReloading(true)
+    try {
+      const [conversation, actions] = await Promise.all([
+        aiApi.getConversation(),
+        aiApi.listActions(),
+        ladeKontext(),
+      ])
+      if (mountedRef.current && !streaming) {
+        setEntries(mergeEntries(conversation.messages, actions))
+      }
+    } catch {
+      // Fehler still abfangen
+    } finally {
+      if (mountedRef.current) {
+        setReloading(false)
+      }
+    }
+  }, [streaming, reloading, ladeKontext, setEntries])
+
   /**
    * Das Tipp-Signal: gedrosselt, ohne Inhalt, ohne Fehlerbehandlung nach aussen.
    *
@@ -1110,57 +1132,57 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
       {/* ── Kopfzeile: Provider, Denkschritte, Autonomie, Skills ─────────
           `sticky` ist eine Position und liegt damit von selbst über der
           Schicht; ihr undurchsichtiger Grund deckt sie dort ab. */}
-      <header className="flex flex-nowrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/30 bg-surface-container-low px-2.5 py-2 sm:px-4 sm:py-2.5 shrink-0 sticky top-0 z-20 overflow-x-auto msm-ohne-rollbalken">
-        {/* Schrumpft im schmalen Browser-Panel, damit die Knöpfe daneben Platz haben. */}
-        <div className="min-w-24 flex-1 max-w-56 sm:w-56 sm:flex-none">
-          <Dropdown
-            value={providerId ? String(providerId) : null}
-            onChange={waehleProvider}
-            options={availableProviders.map((provider) => ({
-              value: String(provider.id),
-              label: provider.name,
-              hint: provider.default_model,
-            }))}
-            placeholder={t('ai.chat.selectProvider')}
-            disabled={busy}
-            aria-label={t('ai.chat.selectProvider')}
-          />
-        </div>
-
-        <div className="shrink-0">
-          <ReasoningPicker
-            provider={aktiverProvider}
-            wahl={denken}
-            onChange={waehleDenken}
-            disabled={busy}
-          />
-        </div>
-
-        {canUseAutonomy && (
-          <div className="shrink-0">
-            <AiAutonomyButton servers={servers} disabled={busy} />
+      <header className="flex items-center justify-between border-b border-outline-variant/30 bg-surface-container-low px-2 py-1.5 sm:px-4 sm:py-2.5 shrink-0 sticky top-0 z-20 gap-1 min-w-0">
+        <div className="flex min-w-0 flex-1 items-center gap-1 sm:gap-1.5 overflow-x-auto msm-ohne-rollbalken py-0.5">
+          {/* Schrumpft im schmalen Browser-Panel, damit die Knöpfe daneben Platz haben. */}
+          <div className="min-w-24 flex-1 max-w-56 sm:w-56 sm:flex-none shrink-0">
+            <Dropdown
+              value={providerId ? String(providerId) : null}
+              onChange={waehleProvider}
+              options={availableProviders.map((provider) => ({
+                value: String(provider.id),
+                label: provider.name,
+                hint: provider.default_model,
+              }))}
+              placeholder={t('ai.chat.selectProvider')}
+              disabled={busy}
+              aria-label={t('ai.chat.selectProvider')}
+            />
           </div>
-        )}
 
-        {canUseSkills && (
-          <Kurzinfo text={t('ai.skills.directoryTitle')} className="xl:!hidden" aussen="shrink-0">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setSkillsModalOpen(true)}
-              className="h-8 px-2 text-xs flex items-center gap-1.5 border border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 rounded-lg transition-colors"
-              aria-label={t('ai.skills.directoryTitle')}
-            >
-              <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
-              <span className="hidden xl:inline">{t('ai.skills.directoryTitle')}</span>
-            </Button>
-          </Kurzinfo>
-        )}
+          <div className="shrink-0">
+            <ReasoningPicker
+              provider={aktiverProvider}
+              wahl={denken}
+              onChange={waehleDenken}
+              disabled={busy}
+            />
+          </div>
 
-        <div className="ml-auto flex items-center gap-1 sm:gap-1.5 shrink-0">
+          {canUseAutonomy && (
+            <div className="shrink-0">
+              <AiAutonomyButton servers={servers} disabled={busy} />
+            </div>
+          )}
+
+          {canUseSkills && (
+            <Kurzinfo text={t('ai.skills.directoryTitle')} className="xl:!hidden" aussen="shrink-0">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setSkillsModalOpen(true)}
+                className="h-8 px-2 text-xs flex items-center gap-1.5 border border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 rounded-lg transition-colors"
+                aria-label={t('ai.skills.directoryTitle')}
+              >
+                <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
+                <span className="hidden xl:inline">{t('ai.skills.directoryTitle')}</span>
+              </Button>
+            </Kurzinfo>
+          )}
+
           {(canTasks || onSwitchMode) && (
-            <div className="flex items-center rounded-lg border border-outline-variant/30 bg-surface-container/50 p-0.5">
+            <div className="flex items-center rounded-lg border border-outline-variant/30 bg-surface-container/50 p-0.5 shrink-0">
               {canTasks && onSwitchMode && (
                 <Kurzinfo text={t('ai.tasks.toTasks')} className="xl:!hidden">
                   <button
@@ -1204,18 +1226,34 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
               </button>
             </Kurzinfo>
           )}
+        </div>
 
-          {/* Was selten gebraucht wird, steht im Blattmenü — dasselbe Bauteil,
-              das der Messenger über seinem Chat trägt. Eine Zeile darin ist
-              48 px hoch und beschriftet; die beiden 32-px-Quadrate, die hier
-              vorher standen, waren für den Daumen zu klein und für jeden, der
-              das Zeichen nicht kennt, stumm.
+        {/* Feststehende Aktionen rechts: Neuladen und Blattmenü bleiben immer sichtbar, auch auf schmalen Bildschirmen */}
+        <div className="flex items-center gap-1 shrink-0 ml-1">
+          <Kurzinfo text={t('common.refresh', 'Aktualisieren')}>
+            <button
+              type="button"
+              onClick={() => void manuellNachladen()}
+              disabled={busy || streaming}
+              className="flex h-8 w-8 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 shrink-0 items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface disabled:opacity-40 transition-colors"
+              aria-label={t('common.refresh', 'Aktualisieren')}
+            >
+              <RotateCw className={`h-4 w-4 shrink-0 ${reloading ? 'animate-spin' : ''}`} aria-hidden="true" />
+            </button>
+          </Kurzinfo>
 
-              Der Hintergrund gilt dabei für den ganzen KI-Bereich: Guardian-,
-              Worker- und Aufgabenfenster sehen dieselbe Wahl. */}
           <Blattknopf label={t('ai.chat.moreSettings')} titel={t('ai.chat.title')}>
             {(schliessen) => (
               <>
+                <Blatteintrag
+                  icon={<RotateCw className="h-4 w-4" aria-hidden="true" />}
+                  label={t('common.refresh', 'Aktualisieren')}
+                  disabled={busy || streaming}
+                  onClick={() => {
+                    schliessen()
+                    void manuellNachladen()
+                  }}
+                />
                 <Blatteintrag
                   icon={<ImageIcon className="h-4 w-4" aria-hidden="true" />}
                   label={t('social.wallpaper.title')}

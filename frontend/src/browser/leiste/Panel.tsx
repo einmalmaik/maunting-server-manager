@@ -7,12 +7,12 @@
  * Die MSM-Seiten sind dieselben wie in MSS und werden erst geladen, wenn ihr
  * Panel zum ersten Mal aufgeht: das Startbündel des Browsers trägt sie nicht.
  */
-import { lazy, Suspense, useRef, type ReactNode } from 'react'
+import { lazy, Suspense, useRef, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 
-import { Kurzinfo } from '@/Singra/UI'
+import { Kurzinfo, ModalContainerContext } from '@/Singra/UI'
 import { useZurueckSchliesst } from '@/Singra/UI/useZurueckSchliesst'
 import { Spinner } from '@/components/ui/Spinner'
 import { Zustandsflaeche } from '@/Singra/UI/Zustandsflaeche'
@@ -145,6 +145,7 @@ function Kopf({ titel, schliessen }: { titel: string; schliessen: () => void }) 
 /** Das Panel am Handy: ein Dialog über allem, die Seite weicht (`ueberdeckung.ts`). */
 function Vollbild({ id, titel, pfad }: { id: PanelId; titel: string; pfad: string }) {
   const navigate = useNavigate()
+  const [modalContainer, setModalContainer] = useState<HTMLElement | null>(null)
   useZurueckSchliesst(true, () => navigate('/'))
   return (
     <aside
@@ -154,10 +155,12 @@ function Vollbild({ id, titel, pfad }: { id: PanelId; titel: string; pfad: strin
       className="fixed inset-0 z-40 flex flex-col bg-surface-container-low pb-[var(--msm-unten-sicher)] pl-[var(--msm-links-sicher)] pr-[var(--msm-rechts-sicher)] pt-[var(--msm-oben-sicher)]"
     >
       <Kopf titel={titel} schliessen={() => navigate('/')} />
-      <div className="msb-bereich min-h-0 flex-1 overflow-hidden">
-        <Suspense fallback={<Laedt />}>
-          <Inhalt id={id} pfad={pfad} />
-        </Suspense>
+      <div ref={setModalContainer} className="msb-bereich relative min-h-0 flex-1 overflow-hidden">
+        <ModalContainerContext.Provider value={modalContainer}>
+          <Suspense fallback={<Laedt />}>
+            <Inhalt id={id} pfad={pfad} />
+          </Suspense>
+        </ModalContainerContext.Provider>
       </div>
     </aside>
   )
@@ -167,6 +170,7 @@ export function Panel({ seite }: { seite: 'links' | 'rechts' | 'voll' }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  const [modalContainer, setModalContainer] = useState<HTMLElement | null>(null)
   const breite = useEinstellungenStore((s) => s.panelBreite)
   const sichtbar = useSichtbareModule()
   const ziehen = useBreiteZiehen(seite === 'rechts' ? 1 : -1)
@@ -198,10 +202,12 @@ export function Panel({ seite }: { seite: 'links' | 'rechts' | 'voll' }) {
         <span aria-hidden="true" className="h-10 w-1 rounded-full bg-outline transition-colors group-hover/griff:bg-primary group-focus-visible/griff:bg-primary group-active/griff:bg-primary" />
       </div>
       <Kopf titel={titel} schliessen={() => navigate('/')} />
-      <div className="msb-bereich min-h-0 flex-1 overflow-hidden">
-        <Suspense fallback={<Laedt />}>
-          <Inhalt id={id} pfad={pathname} />
-        </Suspense>
+      <div ref={setModalContainer} className="msb-bereich relative min-h-0 flex-1 overflow-hidden">
+        <ModalContainerContext.Provider value={modalContainer}>
+          <Suspense fallback={<Laedt />}>
+            <Inhalt id={id} pfad={pathname} />
+          </Suspense>
+        </ModalContainerContext.Provider>
       </div>
     </aside>
   )

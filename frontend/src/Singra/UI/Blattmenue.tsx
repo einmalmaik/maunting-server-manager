@@ -18,6 +18,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreVertical } from 'lucide-react'
 import { useZurueckSchliesst } from './useZurueckSchliesst'
+import { useModalContainer } from './ModalContainerContext'
 import { Kurzinfo } from './Kurzinfo'
 
 const FOKUSSIERBAR =
@@ -31,9 +32,10 @@ export interface BlattmenueProps {
   children: React.ReactNode
   /** Zusätzliche Klassen für das Blatt selbst. */
   className?: string
+  container?: HTMLElement | null
 }
 
-export function Blattmenue({ offen, onSchliessen, titel, children, className = '' }: BlattmenueProps) {
+export function Blattmenue({ offen, onSchliessen, titel, children, className = '', container }: BlattmenueProps) {
   const blatt = useRef<HTMLDivElement>(null)
   const vorherigerFokus = useRef<HTMLElement | null>(null)
   useZurueckSchliesst(offen, onSchliessen)
@@ -81,10 +83,13 @@ export function Blattmenue({ offen, onSchliessen, titel, children, className = '
     }
   }, [offen, onSchliessen])
 
-  if (!offen || typeof document === 'undefined') return null
+  const panelContainer = useModalContainer()
+  const ziel = container ?? panelContainer ?? (typeof document !== 'undefined' ? document.body : null)
+  if (!offen || !ziel) return null
 
   return createPortal(
     <div
+      data-msb-modal=""
       className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm animate-[fadeIn_.12s_ease-out]"
       onClick={onSchliessen}
       role="dialog"

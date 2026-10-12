@@ -95,6 +95,7 @@ export { Auswahlleiste, type AuswahlAktion, type AuswahlleisteProps } from './Au
 export { Tabellenansicht, type TabellenansichtProps } from './Tabellenansicht'
 export { useMehrfachauswahl, type Mehrfachauswahl, type Auswahltasten } from './useMehrfachauswahl'
 export { useZurueckSchliesst } from './useZurueckSchliesst'
+export { ModalContainerContext, useModalContainer } from './ModalContainerContext'
 export { Zustandsflaeche, type ZustandsflaecheProps } from './Zustandsflaeche'
 export { Ablageflaeche, ABLAGEZIEL, type AblageflaecheProps } from './Ablageflaeche'
 // Markdownansicht und PdfAnsicht ziehen große Bibliotheken nach sich und stehen

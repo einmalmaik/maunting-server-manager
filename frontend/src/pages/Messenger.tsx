@@ -11,6 +11,7 @@ import {
   Kurzinfo,
   Ablageflaeche,
   useMehrfachauswahl,
+  useZurueckSchliesst,
   type ChatInputBarRef,
 } from '@/Singra/UI'
 import {
@@ -507,6 +508,7 @@ function MessengerSeite() {
 
   const [selectedImage, setSelectedImage] = useState<ImageAttachment | null>(null)
   const [viewingImage, setViewingImage] = useState<string | null>(null)
+  useZurueckSchliesst(Boolean(viewingImage), () => setViewingImage(null))
 
   // Stickers / Emojis
   const [isStickerPickerOpen, setIsStickerPickerOpen] = useState(false)
@@ -5119,10 +5121,13 @@ function MessengerSeite() {
       {/* Full-size Image Viewer */}
       {viewingImage && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('messenger.fullView')}
           className="msm-modal-overlay bg-black/80"
           onClick={() => setViewingImage(null)}
         >
-          <div className="relative max-w-4xl max-h-[90vh]">
+          <div className="relative max-w-4xl max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
             <img
               src={viewingImage}
               alt={t('messenger.fullView')}

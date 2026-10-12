@@ -6,10 +6,12 @@
  * (`--msm-unten-sicher`), die die Leiste freilässt.
  */
 import { forwardRef, useState } from 'react'
+import { RotateCw, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { useEinstellungenStore } from '../services/einstellungenStore'
-import { useTabsStore } from '../services/tabsStore'
+import { istIntern } from '../services/intern'
+import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 import { Adresszeile, type AdresszeileGriff } from './Adresszeile'
 import { Knopf } from './knopf'
 import { Modulmenue } from './Modulmenue'
@@ -18,6 +20,8 @@ import { TabUebersicht } from './TabUebersicht'
 
 export const HandyLeiste = forwardRef<AdresszeileGriff>(function HandyLeiste(_, adresszeile) {
   const { t } = useTranslation()
+  const tab = useAktiverTab()
+  const aktion = useTabsStore((s) => s.aktion)
   const anzahl = useTabsStore((s) => s.tabs.length)
   const schildAus = useEinstellungenStore((s) => s.ausgeblendet.includes('schild'))
   const [uebersicht, setUebersicht] = useState(false)
@@ -32,6 +36,15 @@ export const HandyLeiste = forwardRef<AdresszeileGriff>(function HandyLeiste(_, 
             {anzahl > 99 ? '99+' : anzahl}
           </span>
         </Knopf>
+        {tab?.laedt ? (
+          <Knopf name={t('browser.nav.anhalten')} onClick={() => aktion('anhalten')}>
+            <X className="h-4 w-4" aria-hidden="true" />
+          </Knopf>
+        ) : (
+          <Knopf name={t('browser.nav.neuLaden')} onClick={() => aktion('neu_laden')} disabled={!tab?.url || istIntern(tab.url)}>
+            <RotateCw className="h-4 w-4" aria-hidden="true" />
+          </Knopf>
+        )}
         <Modulmenue handy />
       </div>
       <TabUebersicht offen={uebersicht} onSchliessen={() => setUebersicht(false)} />

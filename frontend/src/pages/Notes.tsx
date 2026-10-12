@@ -21,7 +21,7 @@ import { MarkdownBild, MarkdownLink } from '@/Singra/UI/Markdownansicht'
 import { toast } from '@/stores/toastStore'
 import { FARB_PALETTE, farbwahl } from '@/config/farbpalette'
 import { confirm } from '@/stores/confirmStore'
-import { Dropdown, Kurzinfo, type DropdownOption } from '@/Singra/UI'
+import { Dropdown, Kurzinfo, useZurueckSchliesst, type DropdownOption } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { Switch } from '@/components/ui/Switch'
 import { teamsApi, type Team } from '@/api/teams'
@@ -93,6 +93,7 @@ export function Notes() {
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false)
+  useZurueckSchliesst(isModalOpen, () => setIsModalOpen(false))
   const [editingNote, setEditingNote] = useState<NoteItem | null>(null)
   const [formTitle, setFormTitle] = useState('')
   const [formContent, setFormContent] = useState('')
@@ -596,7 +597,13 @@ export function Notes() {
 
       {/* Create / Edit Modal */}
       {isModalOpen && (
-        <div className="msm-modal-overlay animate-fade-in">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={editingNote ? t('notes.editNote') : t('notes.createNote')}
+          className="msm-modal-overlay animate-fade-in"
+          onClick={() => setIsModalOpen(false)}
+        >
           <div
             className="w-full max-w-xl bg-surface-container-low border border-outline-variant/30 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
             onClick={(e) => e.stopPropagation()}

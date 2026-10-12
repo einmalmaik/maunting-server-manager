@@ -7,3 +7,31 @@ body,
 .msb-bereich {
   container: msb / size;
 }
+
+/*
+ * Modale Dialoge und Overlays innerhalb des Seitenpanels (.msb-bereich)
+ * werden zwingend auf diesen Bereich beschränkt. Dadurch verdecken sie
+ * weder das native WebView-Fenster (z. B. YouTube) noch fangen sie Klicks
+ * über dem Rest des Browsers ab.
+ */
+.msb-bereich {
+  position: relative;
+}
+
+.msb-bereich .msm-modal-overlay,
+.msb-bereich [data-msb-modal],
+.msb-bereich > [role="dialog"].fixed {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 50 !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  overflow-y: auto;
+}
+
+.msb-bereich .msm-modal-overlay > .msm-card,
+.msb-bereich .msm-modal-overlay > [class*="max-w-"],
+.msb-bereich [data-msb-modal] > [class*="max-w-"] {
+  max-width: calc(100% - 1rem) !important;
+  max-height: calc(100% - 1rem) !important;
+}

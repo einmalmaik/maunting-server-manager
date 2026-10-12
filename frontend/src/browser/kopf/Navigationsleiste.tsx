@@ -127,21 +127,24 @@ export const Navigationsleiste = forwardRef<AdresszeileGriff>(function Navigatio
         </Knopf>
       )}
       <Adresszeile ref={adresszeile} />
-      {!ausgeblendet.includes('schild') && <Schild />}
+      {!ausgeblendet.includes('schild') && <div className="hidden sm:flex shrink-0"><Schild /></div>}
       {!ausgeblendet.includes('stern') && (
-      <Knopf
-        name={gemerkt ? t('browser.nav.lesezeichenEntfernen') : t('browser.nav.lesezeichenSetzen')}
-        onClick={() => tab && umschalten(tab.url, tab.titel)}
-        disabled={!webseite}
-        aktiv={gemerkt}
-      >
-        <Star className={`h-4 w-4 ${gemerkt ? 'fill-primary text-primary' : ''}`} aria-hidden="true" />
-      </Knopf>
+        <div className="hidden md:flex shrink-0">
+          <Knopf
+            name={gemerkt ? t('browser.nav.lesezeichenEntfernen') : t('browser.nav.lesezeichenSetzen')}
+            onClick={() => tab && umschalten(tab.url, tab.titel)}
+            disabled={!webseite}
+            aktiv={gemerkt}
+          >
+            <Star className={`h-4 w-4 ${gemerkt ? 'fill-primary text-primary' : ''}`} aria-hidden="true" />
+          </Knopf>
+        </div>
       )}
-      {!ausgeblendet.includes('screenshot') && <AufnahmeKnopf />}
-      {erweiterungenMoeglich() && !ausgeblendet.includes('erweiterungen') && <ErweiterungenKnopf />}
-      {leiste === 'oben' && <ModuleOben />}
-      {leiste === 'menue' && <Modulmenue />}
+      {!ausgeblendet.includes('screenshot') && <div className="hidden lg:flex shrink-0"><AufnahmeKnopf /></div>}
+      {erweiterungenMoeglich() && !ausgeblendet.includes('erweiterungen') && <div className="hidden lg:flex shrink-0"><ErweiterungenKnopf /></div>}
+      {leiste === 'oben' && <div className="hidden sm:flex shrink-0"><ModuleOben /></div>}
+      {leiste === 'oben' && <div className="flex sm:hidden shrink-0"><Modulmenue /></div>}
+      {leiste === 'menue' && <div className="shrink-0"><Modulmenue /></div>}
     </div>
   )
 })
