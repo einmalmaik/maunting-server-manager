@@ -1,8 +1,12 @@
 /*
- * Bereiche, nach deren Breite sich die Seiten richten (siehe
- * `vite.breitenAlsContainer.ts`): die ganze Oberfläche und der Inhalt des
- * Seitenpanels. `size`, damit auch Höhen in `cqh` am Bereich hängen.
+ * Browser-Fenster hat feste Abmessungen; Scrollbalken am Dokumentfenster
+ * sind ausgeschlossen, damit sich das Layout bei Dropdowns/Popovers nie verschiebt.
  */
+html,
+body {
+  overflow: hidden;
+}
+
 body,
 .msb-bereich {
   container: msb / size;

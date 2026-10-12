@@ -26,7 +26,7 @@ import { usePresenceAndActivity } from '@/hooks/usePresenceAndActivity'
 import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 import { useCallStore } from '@/stores/useCallStore'
 
-import type { AdresszeileGriff } from './kopf/Adresszeile'
+import { Adresszeile, type AdresszeileGriff } from './kopf/Adresszeile'
 import { HandyLeiste } from './kopf/HandyLeiste'
 import { Kopfleiste } from './kopf/Kopfleiste'
 import { Navigationsleiste } from './kopf/Navigationsleiste'
@@ -240,8 +240,11 @@ function Wurzel() {
       className={`flex h-dvh flex-col overflow-hidden bg-background text-on-surface ${handy && !imVollbild ? 'pl-[var(--msm-links-sicher)] pr-[var(--msm-rechts-sicher)]' : ''}`}
     >
       {handy ? (
-        // Unter Statusleiste und Kamera liegt nichts, was man antippen muss.
-        !imVollbild && <div aria-hidden="true" className="h-[var(--msm-oben-sicher)] shrink-0 bg-surface-container" />
+        !imVollbild && (
+          <div className="shrink-0 bg-surface-container px-2 py-1.5 pt-[calc(var(--msm-oben-sicher)+0.375rem)]">
+            <Adresszeile ref={adresszeile} />
+          </div>
+        )
       ) : (
         !imVollbild && (
           <>

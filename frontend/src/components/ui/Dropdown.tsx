@@ -179,18 +179,20 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
         const platzUnten = window.innerHeight - rect.bottom - RAND * 2
         const platzOben = rect.top - RAND * 2
         const nachOben = platzUnten < MIN_MENUE_HOEHE && platzOben > platzUnten
-        const maxHeight = Math.max(
-          MIN_MENUE_HOEHE,
-          Math.min(MAX_MENUE_HOEHE, nachOben ? platzOben : platzUnten),
-        )
+        const verfuegbar = nachOben ? Math.max(60, platzOben) : Math.max(60, platzUnten)
+        const maxHeight = Math.min(MAX_MENUE_HOEHE, verfuegbar)
+        const breite = Math.min(rect.width, window.innerWidth - RAND * 2)
+        const links = align === 'end' ? undefined : Math.max(RAND, Math.min(rect.left, window.innerWidth - breite - RAND))
+        const rechts = align === 'end' ? Math.max(RAND, Math.min(window.innerWidth - rect.right, window.innerWidth - breite - RAND)) : undefined
+
         setMenuStyle({
           position: 'fixed',
           ...(nachOben
             ? { bottom: Math.max(RAND, window.innerHeight - rect.top + RAND) }
             : { top: rect.bottom + RAND }),
-          left: align === 'end' ? undefined : rect.left,
-          right: align === 'end' ? Math.max(0, window.innerWidth - rect.right) : undefined,
-          width: rect.width,
+          left: links,
+          right: rechts,
+          width: breite,
           maxHeight,
           zIndex: 100,
         })
@@ -204,8 +206,9 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
       }
     }, [align, open])
 
+    const hatEigeneBreite = className?.includes('w-')
     return (
-      <div ref={ref} className={cx('relative min-w-0 w-full max-w-full', className)}>
+      <div ref={ref} className={cx('relative min-w-0', hatEigeneBreite ? '' : 'w-full max-w-full', className)}>
         <div ref={rootRef}>
           <button
             id={id}
@@ -255,6 +258,7 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
                   // baut, prueft zusaetzlich auf
                   // `closest('[data-msm-dropdown-menu]')`.
                   data-msm-dropdown-menu=""
+                  {...(rootRef.current?.closest('.msb-bereich, aside:not([role="dialog"])') ? { 'data-msm-in-panel': '' } : {})}
                   className="flex flex-col overflow-hidden rounded-lg border border-outline-variant bg-surface-container-high shadow-panel"
                 >
                   {searchable && (

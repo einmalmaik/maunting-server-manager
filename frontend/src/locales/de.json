@@ -8626,6 +8626,16 @@
       "vorschlaege": "Vorschläge",
       "suchenMit": "„{{begriff}}“ mit {{suchmaschine}} suchen"
     },
+    "sprachsuche": {
+      "starten": "Sprachsuche starten",
+      "beenden": "Sprachsuche beenden",
+      "zuhoeren": "Ich höre zu …",
+      "nichtUnterstuetzt": "Sprachsuche wird auf diesem Browser nicht unterstützt.",
+      "fehler": "Spracheingabe fehlgeschlagen.",
+      "keineBerechtigung": "Mikrofonzugriff verweigert.",
+      "laedtModell": "Lokales KI-Sprachmodell wird geladen …",
+      "transkribiert": "Wird lokal auf dem Gerät transkribiert …"
+    },
     "schild": {
       "titel": "Werbe- und Trackerschutz",
       "knopf": "Schutz an, {{anzahl}} blockiert",

@@ -8626,6 +8626,16 @@
       "vorschlaege": "Suggestions",
       "suchenMit": "Search {{suchmaschine}} for “{{begriff}}”"
     },
+    "sprachsuche": {
+      "starten": "Start voice search",
+      "beenden": "Stop voice search",
+      "zuhoeren": "Listening …",
+      "nichtUnterstuetzt": "Voice search is not supported on this browser.",
+      "fehler": "Speech recognition failed.",
+      "keineBerechtigung": "Microphone access denied.",
+      "laedtModell": "Loading local on-device AI model …",
+      "transkribiert": "Transcribing on device …"
+    },
     "schild": {
       "titel": "Ad and tracker protection",
       "knopf": "Protection on, {{anzahl}} blocked",

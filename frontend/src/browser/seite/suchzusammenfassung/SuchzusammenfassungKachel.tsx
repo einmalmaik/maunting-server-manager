@@ -406,14 +406,16 @@ export function SuchzusammenfassungKachel({
                 }}
                 className="flex items-center gap-2"
               >
-                <Input
-                  value={nachfrage}
-                  onChange={(ev) => setNachfrage(ev.target.value)}
-                  placeholder={t('browser.msmSuche.zusammenfassungNachfragePlaceholder')}
-                  disabled={laedt}
-                  className="h-9 flex-1 text-body-sm"
-                  aria-label={t('browser.msmSuche.zusammenfassungNachfragePlaceholder')}
-                />
+                <div className="min-w-0 flex-1">
+                  <Input
+                    value={nachfrage}
+                    onChange={(ev) => setNachfrage(ev.target.value)}
+                    placeholder={t('browser.msmSuche.zusammenfassungNachfragePlaceholder')}
+                    disabled={laedt}
+                    className="h-9 text-body-sm"
+                    aria-label={t('browser.msmSuche.zusammenfassungNachfragePlaceholder')}
+                  />
+                </div>
 
                 {/* Denkstufe-Auswahl, falls der Betreiber und die Rolle Stufen zulässt */}
                 {stufenOptionen.length > 0 && (
@@ -422,8 +424,8 @@ export function SuchzusammenfassungKachel({
                     onChange={(st) => setDenkstufe(st)}
                     options={stufenDropdownOptionen}
                     disabled={laedt}
-                    className="w-auto shrink-0"
-                    buttonClassName="h-9 min-w-[130px] text-label-sm"
+                    className="w-auto shrink-0 max-w-[140px]"
+                    buttonClassName="h-9 min-w-0 px-2.5 text-label-sm whitespace-nowrap"
                     aria-label={t('browser.msmSuche.zusammenfassungDenkstufe')}
                   />
                 )}

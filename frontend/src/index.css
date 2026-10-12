@@ -349,6 +349,29 @@
   .msm-ohne-rollbalken::-webkit-scrollbar {
     display: none;
   }
+
+  /* Design-DNA Rollbalken für abgerundete Such- und Eingabeleisten:
+     Transparentes Gleis, schlanker 6px abgerundeter Daumen (#284147),
+     mit vertikalem Randabstand für perfekte Einbettung in gerundete Container. */
+  .msm-suchleiste-rollbalken {
+    scrollbar-width: thin;
+    scrollbar-color: #284147 transparent;
+  }
+  .msm-suchleiste-rollbalken::-webkit-scrollbar {
+    width: 6px;
+  }
+  .msm-suchleiste-rollbalken::-webkit-scrollbar-track {
+    background: transparent !important;
+    margin: 8px 0;
+  }
+  .msm-suchleiste-rollbalken::-webkit-scrollbar-thumb {
+    background: #284147;
+    border: none !important;
+    border-radius: 9999px;
+  }
+  .msm-suchleiste-rollbalken::-webkit-scrollbar-thumb:hover {
+    background: #3a5a63;
+  }
 }
 
 /* MSS-Keyframes — ausserhalb der Layer, Keyframes gehoeren in keinen. */

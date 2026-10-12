@@ -39,17 +39,19 @@ beforeEach(() => {
 afterEach(() => alsAndroid(false))
 
 describe('Suche auf der Startseite', () => {
-  it('am Handy nur die Wahl der Suchmaschine, gesucht wird in der Leiste unten', () => {
+  it('am Handy integrierte Suchleiste mit Suchmaschinen-Logo und Mikrofon', () => {
     alsAndroid(true)
-    zeigen()
-    expect(screen.queryByRole('textbox', { name: 'Suchen' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Suchmaschine' })).toBeInTheDocument()
-  })
-
-  it('am Rechner Suchmaschine und Suchfeld nebeneinander', () => {
     zeigen()
     expect(screen.getByRole('textbox', { name: 'Suchen' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Suchmaschine' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Sprachsuche/i })).toBeInTheDocument()
+  })
+
+  it('am Rechner integrierte Suchleiste mit Suchmaschinen-Logo und Mikrofon', () => {
+    zeigen()
+    expect(screen.getByRole('textbox', { name: 'Suchen' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Suchmaschine' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Sprachsuche/i })).toBeInTheDocument()
   })
 })
 

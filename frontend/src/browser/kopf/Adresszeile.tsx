@@ -15,7 +15,8 @@ import { useEinstellungenStore, useWirksameSuche } from '../services/einstellung
 import { msmSucheBegriff } from '../services/intern'
 import { nativ } from '../services/nativ'
 import { baueZielUrl, istAdresse, suchmaschine } from '../services/searchEngines'
-import { suchName } from '../services/suchwahl'
+import { suchName, SuchwahlKnopf } from '../services/suchwahl'
+import { SprachsucheKnopf } from './SprachsucheKnopf'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 import { useVerlaufStore, vorschlaege, type Eintrag } from '../services/verlaufStore'
 
@@ -91,24 +92,29 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
 
   const sicher = adresse.startsWith('https://')
   const unsicher = adresse.startsWith('http://')
+  const istSucheModus = tippt || !adresse || begriff
 
   return (
     <div ref={huelle} className="relative min-w-0 flex-1">
-      <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-on-surface-variant">
-        {tippt || !adresse || begriff ? (
-          <Search className="h-4 w-4" aria-hidden="true" />
-        ) : sicher ? (
-          <Lock className="h-4 w-4 text-status-success" aria-label={t('browser.adresse.sicher')} role="img" />
-        ) : unsicher ? (
-          <LockOpen className="h-4 w-4 text-status-warning" aria-label={t('browser.adresse.unsicher')} role="img" />
-        ) : (
-          <Globe className="h-4 w-4" aria-hidden="true" />
-        )}
-      </span>
+      {istSucheModus ? (
+        <div className="absolute left-1.5 top-1/2 z-20 -translate-y-1/2 flex items-center">
+          <SuchwahlKnopf kompakt />
+        </div>
+      ) : (
+        <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-on-surface-variant">
+          {sicher ? (
+            <Lock className="h-4 w-4 text-status-success" aria-label={t('browser.adresse.sicher')} role="img" />
+          ) : unsicher ? (
+            <LockOpen className="h-4 w-4 text-status-warning" aria-label={t('browser.adresse.unsicher')} role="img" />
+          ) : (
+            <Globe className="h-4 w-4" aria-hidden="true" />
+          )}
+        </span>
+      )}
       {/* Ziel des Links unter dem Zeiger: die Statusblase von Edge ist aus,
           und über der Seite kann die Oberfläche nichts zeichnen. */}
       {!tippt && tab?.status && (
-        <span className="pointer-events-none absolute right-3 top-1/2 z-10 max-w-[45%] -translate-y-1/2 truncate rounded-full bg-surface-container-high px-2 py-0.5 text-label-sm text-on-surface-variant">
+        <span className="pointer-events-none absolute right-10 top-1/2 z-10 max-w-[40%] -translate-y-1/2 truncate rounded-full bg-surface-container-high px-2 py-0.5 text-label-sm text-on-surface-variant">
           {tab.status}
         </span>
       )}
@@ -123,8 +129,11 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
         aria-expanded={offen}
         aria-controls={listenId}
         aria-activedescendant={offen ? `${listenId}-${markiert}` : undefined}
-        className="h-9 rounded-full bg-surface-container-low pl-9 text-body-sm [@media(pointer:coarse)]:h-11"
-        onFocus={(e) => e.currentTarget.select()}
+        className={`h-9 rounded-full bg-surface-container-low ${istSucheModus ? 'pl-11' : 'pl-9'} pr-9 text-body-sm [@media(pointer:coarse)]:h-11`}
+        onFocus={(e) => {
+          e.currentTarget.select()
+          setTippt(true)
+        }}
         onBlur={() => setTimeout(beenden, 120)}
         onChange={(e) => {
           setText(e.target.value)
@@ -150,6 +159,15 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
           }
         }}
       />
+      <div className="absolute right-1.5 top-1/2 -translate-y-1/2 z-10 flex items-center">
+        <SprachsucheKnopf
+          onErgebnis={(sttText) => {
+            setText((alt) => (alt ? `${alt.trim()} ${sttText}` : sttText))
+            setTippt(true)
+            feld.current?.focus()
+          }}
+        />
+      </div>
       {offen &&
         createPortal(
           <ul

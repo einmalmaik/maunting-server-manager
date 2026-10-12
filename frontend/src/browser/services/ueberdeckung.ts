@@ -107,8 +107,44 @@ async function nachziehen(): Promise<void> {
   }
 }
 
+function istUeberdeckung(el: Element, mainRect: DOMRect | null): boolean {
+  if (el.hasAttribute('data-msb-verdeckt')) return true
+
+  // Dialoge/Menüs innerhalb von Seitenpanels (.msb-bereich oder aside ohne Dialog)
+  // oder Dropdown-Menüs aus solchen Panels liegen neben der Seite und verdecken sie nicht.
+  if (el.closest('.msb-bereich, aside:not([role="dialog"])')) return false
+  if (el.hasAttribute('data-msm-in-panel')) return false
+
+  // Wenn eine Haupt-Seitenfläche im DOM existiert und reale Abmessungen hat:
+  // Nur verdecken, wenn das Overlay tatsächlich in den Seitenbereich ragt.
+  if (mainRect && mainRect.width > 0 && mainRect.height > 0) {
+    const r = el.getBoundingClientRect()
+    if (r.width > 0 && r.height > 0) {
+      const schneidet = !(
+        r.right <= mainRect.left ||
+        r.left >= mainRect.right ||
+        r.bottom <= mainRect.top ||
+        r.top >= mainRect.bottom
+      )
+      if (!schneidet) return false
+    }
+  }
+
+  return true
+}
+
 function abgleichen(): void {
-  gewuenscht = document.querySelector(UEBERLAGERUNG) !== null
+  const main = document.querySelector('main')
+  const mainRect = main ? main.getBoundingClientRect() : null
+  const kandidaten = document.querySelectorAll(UEBERLAGERUNG)
+  let gefunden = false
+  for (let i = 0; i < kandidaten.length; i++) {
+    if (istUeberdeckung(kandidaten[i], mainRect)) {
+      gefunden = true
+      break
+    }
+  }
+  gewuenscht = gefunden
   void nachziehen()
 }
 
@@ -144,7 +180,7 @@ export function useUeberdeckungBeobachten(): void {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['aria-modal', 'role', 'data-ankerfenster', 'data-msb-verdeckt'],
+      attributeFilter: ['aria-modal', 'role', 'data-ankerfenster', 'data-msb-verdeckt', 'data-msm-in-panel'],
     })
     abgleichen()
     return () => {

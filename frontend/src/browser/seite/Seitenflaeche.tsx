@@ -106,7 +106,7 @@ export function Seitenflaeche() {
           alt=""
           aria-hidden="true"
           draggable={false}
-          className="h-full w-full select-none object-cover"
+          className="h-full w-full select-none object-contain"
           onError={() => bildSetzen(null)}
         />
       ) : null}

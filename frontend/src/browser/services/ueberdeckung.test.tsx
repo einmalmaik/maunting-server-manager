@@ -103,4 +103,27 @@ describe('Sichtbarkeit der Tabs', () => {
     expect(bytesZuBlob(null)).toBeNull()
     expect(bytesZuBlob([])).toBeNull()
   })
+
+  it('ignoriert Dropdowns und Menüs innerhalb von Seitenpanels (.msb-bereich oder aside)', async () => {
+    useTabsStore.setState({ aktivId: 'tab-a' })
+    render(<Wurzel />)
+
+    const panel = document.createElement('aside')
+    const listbox = document.createElement('div')
+    listbox.setAttribute('role', 'listbox')
+    panel.appendChild(listbox)
+    document.body.appendChild(panel)
+
+    const portaledMenu = document.createElement('div')
+    portaledMenu.setAttribute('role', 'listbox')
+    portaledMenu.setAttribute('data-msm-in-panel', '')
+    document.body.appendChild(portaledMenu)
+
+    await warten()
+    // Kein tabs_verdecken aufgerufen
+    expect(offen.filter((o) => o.befehl === 'tabs_verdecken')).toHaveLength(0)
+
+    panel.remove()
+    portaledMenu.remove()
+  })
 })

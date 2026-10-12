@@ -12,13 +12,13 @@ import { useTranslation } from 'react-i18next'
 import { useEinstellungenStore } from '../services/einstellungenStore'
 import { istIntern } from '../services/intern'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
-import { Adresszeile, type AdresszeileGriff } from './Adresszeile'
+import type { AdresszeileGriff } from './Adresszeile'
 import { Knopf } from './knopf'
 import { Modulmenue } from './Modulmenue'
 import { Schild } from './Navigationsleiste'
 import { TabUebersicht } from './TabUebersicht'
 
-export const HandyLeiste = forwardRef<AdresszeileGriff>(function HandyLeiste(_, adresszeile) {
+export const HandyLeiste = forwardRef<AdresszeileGriff>(function HandyLeiste(_, _adresszeile) {
   const { t } = useTranslation()
   const tab = useAktiverTab()
   const aktion = useTabsStore((s) => s.aktion)
@@ -27,15 +27,9 @@ export const HandyLeiste = forwardRef<AdresszeileGriff>(function HandyLeiste(_, 
   const [uebersicht, setUebersicht] = useState(false)
 
   return (
-    <div className="shrink-0 bg-surface-container pb-[var(--msm-unten-sicher)]">
-      <div className="flex h-14 items-center gap-1 px-2">
-        <Adresszeile ref={adresszeile} />
+    <div className="shrink-0 border-t border-outline-variant/30 bg-surface-container pb-[var(--msm-unten-sicher)]">
+      <div className="flex h-14 items-center justify-around px-2">
         {!schildAus && <Schild />}
-        <Knopf name={t('browser.tabs.anzahl', { anzahl })} onClick={() => setUebersicht(true)} aria-haspopup="dialog" seite="ende">
-          <span aria-hidden="true" className="flex h-5 min-w-5 items-center justify-center rounded-md border-2 border-current px-0.5 text-label-sm font-semibold tabular-nums">
-            {anzahl > 99 ? '99+' : anzahl}
-          </span>
-        </Knopf>
         {tab?.laedt ? (
           <Knopf name={t('browser.nav.anhalten')} onClick={() => aktion('anhalten')}>
             <X className="h-4 w-4" aria-hidden="true" />
@@ -45,6 +39,11 @@ export const HandyLeiste = forwardRef<AdresszeileGriff>(function HandyLeiste(_, 
             <RotateCw className="h-4 w-4" aria-hidden="true" />
           </Knopf>
         )}
+        <Knopf name={t('browser.tabs.anzahl', { anzahl })} onClick={() => setUebersicht(true)} aria-haspopup="dialog" seite="ende">
+          <span aria-hidden="true" className="flex h-5 min-w-5 items-center justify-center rounded-md border-2 border-current px-0.5 text-label-sm font-semibold tabular-nums">
+            {anzahl > 99 ? '99+' : anzahl}
+          </span>
+        </Knopf>
         <Modulmenue handy />
       </div>
       <TabUebersicht offen={uebersicht} onSchliessen={() => setUebersicht(false)} />
