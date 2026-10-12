@@ -141,6 +141,7 @@ export const Navigationsleiste = forwardRef<AdresszeileGriff>(function Navigatio
         </div>
       )}
       {!ausgeblendet.includes('screenshot') && <div className="hidden lg:flex shrink-0"><AufnahmeKnopf /></div>}
+      {erweiterungenMoeglich() && !ausgeblendet.includes('erweiterungen') && <div className="hidden lg:flex shrink-0"><ErweiterungenKnopf /></div>}
       {leiste === 'oben' && <ModuleOben />}
       {leiste === 'menue' && <Modulmenue />}
     </div>
