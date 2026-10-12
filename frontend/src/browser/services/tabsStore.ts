@@ -39,7 +39,7 @@ export interface TabsZustand {
   verlaufIds: string[]
   geschlossen: Geschlossen[]
 
-  neuerTab: (url?: string, optionen?: { privat?: boolean; hintergrund?: boolean; nach?: string }) => string
+  neuerTab: (url?: string, optionen?: { privat?: boolean; hintergrund?: boolean; nach?: string; id?: string; nativDa?: boolean }) => string
   schliessen: (id: string) => void
   aktivieren: (id: string) => void
   /** Eingabe aus Adresszeile oder Startseite: Adresse oder Suchbegriff. */
@@ -138,8 +138,14 @@ export const useTabsStore = create<TabsZustand>()(
         },
 
         neuerTab: (url, optionen = {}) => {
-          const id = neueTabId()
-          const tab = leererTab(id, optionen.privat ?? false)
+          const id = optionen.id ?? neueTabId()
+          const effektiveUrl = url || (optionen.nativDa ? 'about:blank' : '')
+          const tab: Tab = {
+            ...leererTab(id, optionen.privat ?? false),
+            url: effektiveUrl,
+            laedt: Boolean(optionen.nativDa && effektiveUrl),
+            nativDa: optionen.nativDa ?? false,
+          }
           set((s) => {
             const nachIndex = optionen.nach ? s.tabs.findIndex((t) => t.id === optionen.nach) : -1
             const tabs = [...s.tabs]
@@ -149,13 +155,20 @@ export const useTabsStore = create<TabsZustand>()(
               : [...s.verlaufIds.filter((v) => v !== s.aktivId), s.aktivId]
             return { tabs, aktivId: optionen.hintergrund ? s.aktivId : id, verlaufIds }
           })
-          if (!optionen.hintergrund) zeigen(id)
-          if (url) {
-            if (optionen.hintergrund) {
-              // Erst laden, wenn er nach vorne kommt: spart Speicher und Netz.
-              aendern(id, { url, titel: url })
-            } else {
-              laden(id, url)
+          if (optionen.nativDa) {
+            // Die Webview existiert bereits in Rust und navigiert.
+            if (!optionen.hintergrund) {
+              get().aktivieren(id)
+            }
+          } else {
+            if (!optionen.hintergrund) zeigen(id)
+            if (url) {
+              if (optionen.hintergrund) {
+                // Erst laden, wenn er nach vorne kommt: spart Speicher und Netz.
+                aendern(id, { url, titel: url })
+              } else {
+                laden(id, url)
+              }
             }
           }
           return id
@@ -337,7 +350,14 @@ export const useTabsStore = create<TabsZustand>()(
           })
         },
 
-        ereignis: (e) => ereignisAnwenden(e, { finden, aendern, zeigen, neuerTab: get().neuerTab }),
+        ereignis: (e) =>
+          ereignisAnwenden(e, {
+            finden,
+            aendern,
+            zeigen,
+            neuerTab: get().neuerTab,
+            schliessen: get().schliessen,
+          }),
 
         hochfahren: async () => {
           // Webviews aus einem früheren Lauf der Oberfläche (Neuladen nach

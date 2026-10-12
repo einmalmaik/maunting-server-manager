@@ -20,7 +20,8 @@ export interface TabZugriff {
   aendern: (id: string, teil: Partial<Tab>) => void
   /** Webview des vorderen Tabs zeigen oder verbergen (`webviewZeigen`). */
   zeigen: (id: string) => void
-  neuerTab: (url: string, optionen: { privat: boolean; nach: string }) => string
+  neuerTab: (url?: string, optionen?: { privat?: boolean; nach?: string; id?: string; nativDa?: boolean; hintergrund?: boolean }) => string
+  schliessen: (id: string) => void
 }
 
 export function ereignisAnwenden(e: TabEreignis, z: TabZugriff): void {
@@ -37,8 +38,8 @@ export function ereignisAnwenden(e: TabEreignis, z: TabZugriff): void {
       z.aendern(e.id, { laedt: true, url: e.url, abgestuerzt: false, fehler: null, status: '' })
       useFormulare.getState().laedt(e.id)
       useUebersetzung.getState().seiteWeg(e.id)
-      // Zurück aus einer Fehlerseite: die Webview wieder nach vorn.
-      if (tab.fehler) z.zeigen(e.id)
+      // Erstes Laden oder Zurück aus einer Fehlerseite: die Webview wieder nach vorn.
+      if (!tab.url || tab.fehler) z.zeigen(e.id)
       break
     case 'fehlerseite':
       z.aendern(e.id, { laedt: false, fehler: e.grund, url: e.url || tab.url })
@@ -90,7 +91,15 @@ export function ereignisAnwenden(e: TabEreignis, z: TabZugriff): void {
     case 'neuer_tab':
       // Eigene Seiten öffnet nur die Oberfläche, nie eine Webseite.
       if (istIntern(e.url)) break
-      z.neuerTab(e.url, { privat: tab.privat, nach: e.id })
+      z.neuerTab(e.url, {
+        privat: tab.privat,
+        nach: e.id,
+        id: e.neue_id,
+        nativDa: !!e.neue_id,
+      })
+      break
+    case 'schliessen':
+      z.schliessen(e.id)
       break
     case 'schild':
       z.aendern(e.id, { werbung: e.werbung, tracker: e.tracker })

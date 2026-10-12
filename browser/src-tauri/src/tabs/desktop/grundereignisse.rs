@@ -7,7 +7,7 @@ use tauri::AppHandle;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
     DocumentTitleChangedEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler,
-    NewWindowRequestedEventHandler,
+    NewWindowRequestedEventHandler, WindowCloseRequestedEventHandler,
 };
 use windows::core::HSTRING;
 
@@ -77,17 +77,55 @@ pub(super) unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -
         core.add_NewWindowRequested(
             &NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
                 let Some(args) = args else { return Ok(()) };
-                // Nie ein Fenster: die Oberfläche öffnet einen Tab, wenn sie will.
-                args.SetHandled(true)?;
                 // Nur nach einem Klick oder einer Taste. Den Popup-Blocker von
                 // Chromium gibt es in der WebView2 nicht; ohne diese Prüfung
                 // machte jedes `window.open` einer Seite einen Tab auf (bis 09.10.2026).
                 let mut geste = windows::core::BOOL::default();
                 args.IsUserInitiated(&mut geste)?;
                 let url = super::webview2::text(|p| args.Uri(p));
-                if geste.as_bool() && url::Url::parse(&url).is_ok_and(|u| navigation_erlaubt(&u) && matches!(u.scheme(), "http" | "https")) {
-                    melden(&app, TabEreignis::NeuerTab { id: id.clone(), url });
+                let ziel_erlaubt = if url.is_empty() || url == "about:blank" {
+                    true
+                } else if let Ok(u) = url::Url::parse(&url) {
+                    navigation_erlaubt(&u) && matches!(u.scheme(), "http" | "https" | "about")
+                } else {
+                    false
+                };
+                if !geste.as_bool() || !ziel_erlaubt {
+                    args.SetHandled(true)?;
+                    return Ok(());
                 }
+
+                let deferral = args.GetDeferral()?;
+                match super::neuer_tab_fenster(&app, &id) {
+                    Ok((neue_id, neue_core)) => {
+                        args.SetNewWindow(&neue_core)?;
+                        args.SetHandled(true)?;
+                        let _ = deferral.Complete();
+                        melden(
+                            &app,
+                            TabEreignis::NeuerTab {
+                                id: id.clone(),
+                                neue_id: Some(neue_id),
+                                url,
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("[MSB] Neuer Tab für Fenster fehlgeschlagen: {e}");
+                        let _ = args.SetHandled(true);
+                        let _ = deferral.Complete();
+                    }
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
+    {
+        let (app, id) = (app.clone(), id.to_string());
+        core.add_WindowCloseRequested(
+            &WindowCloseRequestedEventHandler::create(Box::new(move |_sender, _| {
+                melden(&app, TabEreignis::Schliessen { id: id.clone() });
                 Ok(())
             })),
             &mut token,

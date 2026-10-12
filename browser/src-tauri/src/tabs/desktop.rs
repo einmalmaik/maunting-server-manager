@@ -215,6 +215,23 @@ fn anlegen(app: &AppHandle, id: &str, privat: bool) -> Result<ICoreWebView2, Str
     Ok(core)
 }
 
+/// Legt den Controller für einen durch ein Fenster (window.open, NewWindowRequested)
+/// geöffneten Tab an. Läuft auf dem UI-Faden.
+pub(super) fn neuer_tab_fenster(app: &AppHandle, eltern_id: &str) -> Result<(String, ICoreWebView2), String> {
+    static NAECHSTE_TAB_NR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let privat = NATIV.with(|n| n.borrow().get(eltern_id).map(|t| t.privat).unwrap_or(false));
+    let jetzt = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let nr = NAECHSTE_TAB_NR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let neue_id = format!("tab-p{}-{}", jetzt, nr);
+
+    let tabs = app.state::<Tabs>();
+    crate::tabs::eintragen(&tabs, &neue_id, privat);
+
+    let core = anlegen(app, &neue_id, privat)?;
+    rahmen_anwenden(app, &tabs);
+    Ok((neue_id, core))
+}
+
 /// Zeigt den vorderen Tab, versteckt alle anderen. Der vordere wacht auf,
 /// auch wenn ein Dialog ihn gerade verdeckt (`schlaf.rs`).
 pub fn sichtbarkeit(app: &AppHandle, tabs: &Tabs) {

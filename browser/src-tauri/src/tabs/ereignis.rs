@@ -26,7 +26,12 @@ pub enum TabEreignis {
     Favicon { id: String, url: Option<String> },
     /// Die Seite will ein neues Fenster öffnen (Link mit `target=_blank`,
     /// `window.open`). Der Browser öffnet stattdessen einen Tab.
-    NeuerTab { id: String, url: String },
+    NeuerTab {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        neue_id: Option<String>,
+        url: String,
+    },
     /// Ein Tastenkürzel, das im Tab gedrückt wurde und dem Browser gehört
     /// (Strg+T, Strg+L, …).
     Taste { id: String, taste: String },
@@ -97,6 +102,8 @@ pub enum TabEreignis {
     /// Ein Stück Text der Seite zum Übersetzen, als Antwort auf eine Anfrage
     /// der Oberfläche (`uebersetzung.rs`). Leere `texte`: fertig.
     Texte { id: String, nr: u32, sprache: String, texte: Vec<String> },
+    /// Die Seite hat `window.close()` aufgerufen und will sich schließen.
+    Schliessen { id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,7 +149,7 @@ impl TabEreignis {
             | Vollbild { id, .. } | Formular { id, .. } | Kontextmenue { id, .. } | Dialog { id, .. }
             | Recht { id, .. } | Anmeldung { id, .. } | Fehlerseite { id, .. } | Gesperrt { id, .. }
             | Status { id, .. } | Treffer { id, .. } | Ton { id, .. } | Schlaf { id, .. } | Verworfen { id }
-            | Protokoll { id, .. } | Texte { id, .. } => id,
+            | Protokoll { id, .. } | Texte { id, .. } | Schliessen { id } => id,
         }
     }
 }
@@ -160,7 +167,7 @@ pub fn von_kotlin(json: &str) -> Option<TabEreignis> {
         ereignis,
         Laedt { .. } | Geladen { .. } | Adresse { .. } | Titel { .. } | Favicon { .. } | NeuerTab { .. }
             | Absturz { .. } | Kontextmenue { .. } | Dialog { .. } | Recht { .. } | Anmeldung { .. } | Fehlerseite { .. }
-            | Treffer { .. } | Download { .. }
+            | Treffer { .. } | Download { .. } | Schliessen { .. }
     );
     (erlaubt && super::id_pruefen(ereignis.tab()).is_ok()).then_some(ereignis)
 }
@@ -184,6 +191,10 @@ mod tests {
         assert!(von_kotlin(download).is_some());
         let recht = r#"{"art":"recht","id":"tab-a1","nr":10,"recht":"kamera","herkunft":"https://example.com/"}"#;
         assert!(von_kotlin(recht).is_some());
+        let schliessen = r#"{"art":"schliessen","id":"tab-a1"}"#;
+        assert!(matches!(von_kotlin(schliessen), Some(TabEreignis::Schliessen { .. })));
+        let neuer_tab = r#"{"art":"neuer_tab","id":"tab-a1","url":"https://example.com"}"#;
+        assert!(matches!(von_kotlin(neuer_tab), Some(TabEreignis::NeuerTab { neue_id: None, .. })));
         // Falscher Typ, fehlendes Feld, unbekannter Stand: bis 09.10.2026 ging das an die Oberfläche.
         assert!(von_kotlin(r#"{"art":"adresse","id":"tab-a1","url":"https://example.com/","zurueck":"ja","vor":false}"#).is_none());
         assert!(von_kotlin(r#"{"art":"titel","id":"tab-a1"}"#).is_none());

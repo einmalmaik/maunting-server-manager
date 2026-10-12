@@ -60,7 +60,8 @@ export type TabEreignis =
   | { art: 'adresse'; id: string; url: string; zurueck: boolean; vor: boolean }
   | { art: 'titel'; id: string; titel: string }
   | { art: 'favicon'; id: string; url: string | null }
-  | { art: 'neuer_tab'; id: string; url: string }
+  | { art: 'neuer_tab'; id: string; neue_id?: string; url: string }
+  | { art: 'schliessen'; id: string }
   | { art: 'taste'; id: string; taste: string }
   /** `datei`: der Name, bei `fertig` der volle Pfad. `nr` kennzeichnet den Download über alle Meldungen. */
   | { art: 'download'; id: string; nr: number; stand: DownloadStand; url: string; datei: string | null }
