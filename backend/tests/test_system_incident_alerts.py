@@ -12,18 +12,25 @@ zeigt niemandem einen fremden Server, und ein Admin sieht alles — auch wenn
 seine Rolle noch an der Legacy-Spalte `users.role_id` hängt.
 """
 
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
 
 from models import Incident, Role, Server, ServerPermission, User, UserRole
 
 
-def _vorfall(db: Session, server: Server, titel: str) -> Incident:
+def _vorfall(
+    db: Session,
+    server: Server,
+    titel: str,
+    *,
+    incident_type: str = "container_down",
+) -> Incident:
     incident = Incident(
         server_id=server.id,
         title=titel,
         description="Ausgedachter Vorfall für den Test.",
-        type="container_down",
+        type=incident_type,
         status="open",
         fingerprint=f"fp-{titel}",
     )
@@ -171,3 +178,78 @@ def test_abgeschaltete_geraetemeldungen_bleiben_still(
 
     assert antwort.status_code == 200
     assert antwort.json() == []
+
+
+def test_process_not_running_auf_gestopptem_server_wird_unterdrueckt(
+    db: Session,
+    client: TestClient,
+    regular_user: User,
+    test_server: Server,
+    user_cookies: dict,
+):
+    """process_not_running auf einem gestoppten Server ist kein Fehlalarm."""
+    db.add(
+        ServerPermission(
+            user_id=regular_user.id,
+            server_id=test_server.id,
+            permission_key="server.view",
+        )
+    )
+    test_server.status = "stopped"
+    test_server.desired_power_state = "stopped"
+    db.commit()
+    _vorfall(db, test_server, "Autopilot: process_not_running", incident_type="process_not_running")
+
+    antwort = client.get("/api/system/incident-alerts", cookies=user_cookies)
+
+    assert antwort.status_code == 200
+    assert antwort.json() == []
+
+
+def test_veraltete_vorfaelle_aelter_als_24h_werden_nicht_gemeldet(
+    db: Session,
+    client: TestClient,
+    regular_user: User,
+    test_server: Server,
+    user_cookies: dict,
+):
+    """Vorfälle älter als 24 Stunden poppen nicht mehr als Alert auf."""
+    db.add(
+        ServerPermission(
+            user_id=regular_user.id,
+            server_id=test_server.id,
+            permission_key="server.view",
+        )
+    )
+    test_server.status = "running"
+    test_server.desired_power_state = "running"
+    db.commit()
+    vorfall = _vorfall(db, test_server, "Alter Vorfall", incident_type="custom_error")
+    vorfall.created_at = datetime.now(timezone.utc) - timedelta(hours=26)
+    db.commit()
+
+    antwort = client.get("/api/system/incident-alerts", cookies=user_cookies)
+
+    assert antwort.status_code == 200
+    assert antwort.json() == []
+
+
+def test_auto_resolve_stopped_server_incidents_schliesst_offene_vorfaelle(
+    db: Session,
+    test_server: Server,
+):
+    """Beim Stoppen werden process_not_running und ähnliche Vorfälle auf resolved gesetzt."""
+    from services.server_lifecycle_service import _auto_resolve_stopped_server_incidents
+
+    inc = _vorfall(db, test_server, "Autopilot: process_not_running", incident_type="process_not_running")
+    test_server.guardian_active_incident_uuid = inc.uuid
+    db.commit()
+
+    _auto_resolve_stopped_server_incidents(db, test_server)
+    db.commit()
+
+    db.refresh(inc)
+    assert inc.status == "resolved"
+    assert inc.resolved_at is not None
+    assert test_server.guardian_active_incident_uuid is None
+

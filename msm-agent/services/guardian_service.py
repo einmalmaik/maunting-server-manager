@@ -332,6 +332,18 @@ def _accept_desired_state_locked(
             _transition(runtime, "starting", "desired_power_running")
         else:
             _transition(runtime, "stopped", "desired_power_stopped")
+            if runtime.get("active_incident_uuid") is not None and runtime.get("active_incident_type") in {
+                "process_not_running",
+                "container_missing",
+                "CrashLoop",
+                "probe_failed",
+                "startup_timeout",
+            }:
+                _clear_and_resolve_incident(
+                    desired,
+                    runtime,
+                    "Server was stopped by desired power state",
+                )
 
     # Persist the validated contract first.  If the following runtime write is
     # interrupted, the next loop deterministically repairs accepted_generation.
@@ -669,6 +681,29 @@ def _upsert_active_incident(
     return incident_uuid
 
 
+def _clear_and_resolve_incident(
+    desired: DesiredState,
+    runtime: dict[str, Any],
+    reason: str,
+) -> None:
+    if runtime.get("active_incident_uuid") is not None:
+        inc_type = runtime.get("active_incident_type") or "recovered"
+        diagnostic = {
+            "type": inc_type,
+            "confidence": "high",
+            "evidence": reason,
+        }
+        _upsert_active_incident(desired, runtime, inc_type, "resolved", diagnostic)
+    runtime["active_incident_uuid"] = None
+    runtime["active_incident_type"] = None
+    runtime["attempts"] = []
+    runtime["recovery_stage"] = 0
+    runtime["last_recovery_at"] = None
+    runtime["verification_started_at"] = None
+    runtime["verification_healthy_since"] = None
+    runtime["verification_successes"] = 0
+
+
 def _quarantine(
     desired: DesiredState,
     runtime: dict[str, Any],
@@ -882,6 +917,18 @@ async def _reconcile_server_locked(server_id: int) -> None:
                 container_name,
             )
         _transition(runtime, "stopped", "desired_power_stopped")
+        if runtime.get("active_incident_uuid") is not None and runtime.get("active_incident_type") in {
+            "process_not_running",
+            "container_missing",
+            "CrashLoop",
+            "probe_failed",
+            "startup_timeout",
+        }:
+            _clear_and_resolve_incident(
+                desired,
+                runtime,
+                "Server was stopped by desired power state",
+            )
         _save_runtime(server_id, runtime)
         _write_observed(desired, runtime, container)
         return

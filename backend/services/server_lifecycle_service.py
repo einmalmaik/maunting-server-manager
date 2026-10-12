@@ -382,6 +382,38 @@ def _set_status(db: Session, server: Server, status: str, message: str | None = 
             )
 
 
+def _auto_resolve_stopped_server_incidents(db: Session, server: Server) -> None:
+    """Schließt offene Vorfälle für einen bewusst gestoppten Server.
+
+    Verhindert, dass 'process_not_running', 'container_missing' etc.
+    nach dem regulären oder erzwungenen Stoppen ungelöst in der Datenbank
+    verbleiben und dauerhaft Alert-Popups erzeugen.
+    """
+    from models import Incident
+    now = datetime.now(timezone.utc)
+    resolvable_types = {
+        "process_not_running",
+        "container_missing",
+        "CrashLoop",
+        "probe_failed",
+        "startup_timeout",
+    }
+    open_incidents = (
+        db.query(Incident)
+        .filter(
+            Incident.server_id == server.id,
+            Incident.status != "resolved",
+            Incident.type.in_(resolvable_types),
+        )
+        .all()
+    )
+    for inc in open_incidents:
+        inc.status = "resolved"
+        inc.resolved_at = now
+    if server.guardian_active_incident_uuid:
+        server.guardian_active_incident_uuid = None
+
+
 def queue_lifecycle_operation(
     db: Session,
     server: Server,
@@ -432,6 +464,7 @@ def queue_lifecycle_operation(
         server.status = "stopped"
         server.status_message = "Erzwungen beendet (Kill)"
         server.last_started_at = None
+        _auto_resolve_stopped_server_incidents(db, server)
         db.commit()
 
         from services.change_timeline_service import log_change_event
@@ -468,6 +501,8 @@ def queue_lifecycle_operation(
 
             desired = "running" if operation in {"start", "restart"} else "stopped"
             set_desired_power_state(db, server, desired)
+            if desired == "stopped":
+                _auto_resolve_stopped_server_incidents(db, server)
             # Commit happened inside set_desired_power_state. Sync is best
             # effort; periodic reconciliation retries network failures.
             sync_desired_state_to_agent(db, server)
@@ -970,6 +1005,7 @@ def _run_stop(db: Session, server: Server, plugin) -> None:
     server.status = "stopped"
     server.status_message = None
     server.last_started_at = None
+    _auto_resolve_stopped_server_incidents(db, server)
     db.commit()
     from services.change_timeline_service import log_change_event
     log_change_event(db, server.id, "stop", "Server gestoppt.")
@@ -987,6 +1023,7 @@ def _run_kill(db: Session, server: Server) -> None:
     server.status = "stopped"
     server.status_message = "Erzwungen beendet"
     server.last_started_at = None
+    _auto_resolve_stopped_server_incidents(db, server)
     db.commit()
     from services.change_timeline_service import log_change_event
     log_change_event(db, server.id, "stop", "Server erzwungen beendet.")

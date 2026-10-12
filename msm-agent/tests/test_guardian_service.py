@@ -702,3 +702,57 @@ def test_spontaneous_healing_resolves_incident_and_resets_recovery_budget(
     incidents = guardian_service.list_incidents(42)
     assert len(incidents) == 1
     assert incidents[0]["status"] == "resolved"
+
+
+def test_active_process_not_running_incident_resolved_when_server_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+    guardian_paths: Path,
+) -> None:
+    payload = _payload(generation=1, desired_power_state="running")
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "inspect_container_state",
+        lambda _name: {"status": "running", "running": True},
+    )
+    guardian_service.accept_desired_state(42, payload)
+    desired = guardian_service._load_desired(42)
+    assert desired is not None
+
+    runtime = guardian_service._load_runtime(42, desired)
+    runtime["state"] = "unhealthy"
+    runtime["active_incident_uuid"] = str(uuid.uuid4())
+    runtime["active_incident_type"] = "process_not_running"
+    diagnostic = {
+        "type": "process_not_running",
+        "confidence": "high",
+        "evidence": "process died",
+    }
+    guardian_service._upsert_active_incident(desired, runtime, "process_not_running", "open", diagnostic)
+    guardian_service._save_runtime(42, runtime)
+
+    incidents_before = guardian_service.list_incidents(42)
+    assert len(incidents_before) == 1
+    assert incidents_before[0]["status"] == "open"
+
+    # Server wird gestoppt (desired_power_state="stopped")
+    stop_payload = _payload(generation=2, desired_power_state="stopped")
+    monkeypatch.setattr(
+        guardian_service.docker_service,
+        "inspect_container_state",
+        lambda _name: {"status": "exited", "running": False},
+    )
+    guardian_service.accept_desired_state(42, stop_payload)
+
+    # Runtime prüfen
+    desired_stop = guardian_service._load_desired(42)
+    assert desired_stop is not None
+    runtime_after = guardian_service._load_runtime(42, desired_stop)
+    assert runtime_after["state"] == "stopped"
+    assert runtime_after["active_incident_uuid"] is None
+    assert runtime_after["active_incident_type"] is None
+
+    # Vorfall im Store muss nun auf "resolved" stehen
+    incidents_after = guardian_service.list_incidents(42)
+    assert len(incidents_after) == 1
+    assert incidents_after[0]["status"] == "resolved"
+

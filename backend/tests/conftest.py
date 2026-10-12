@@ -492,11 +492,21 @@ def _eine_verbindung_kein_nebenlauf(request, monkeypatch):
     monkeypatch.setattr(realtime_session, "_werkzeug_nebenlaeufigkeit", lambda: 1)
 
 
+def _safe_close_all_sessions() -> None:
+    """Schließt alle Sessions defensiv gegen GC-Races in WeakValueDictionary."""
+    from sqlalchemy.orm import close_all_sessions
+    for _ in range(5):
+        try:
+            close_all_sessions()
+            return
+        except RuntimeError:
+            pass
+
+
 @pytest.fixture(scope="function", autouse=True)
 def clean_db():
     """Clean all tables and rate limit store before each test."""
-    from sqlalchemy.orm import close_all_sessions
-    close_all_sessions()
+    _safe_close_all_sessions()
     # Alle Tabellen leeren und die Sequenzen zuruecksetzen, damit jeder Test
     # bei denselben IDs beginnt, egal was vor ihm lief (`msm_test_leeren`
     # oben). Das `rollback()` davor raeumt eine Transaktion ab, die ein
@@ -539,7 +549,8 @@ def clean_db():
     finally:
         session.close()
     yield
-    close_all_sessions()
+    _safe_close_all_sessions()
+
 
 
 @pytest.fixture

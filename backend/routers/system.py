@@ -384,6 +384,7 @@ def incident_alerts(
     if not user.device_notifications:
         return []
 
+    from datetime import datetime, timedelta, timezone
     from models import Incident, Role, Server, ServerPermission
 
     # Server ermitteln, auf die der User Zugriff hat.
@@ -404,27 +405,57 @@ def incident_alerts(
         )
 
     if user.is_owner or ist_admin():
-        server_rows = db.query(Server.id, Server.name).all()
+        server_rows = (
+            db.query(Server.id, Server.name, Server.desired_power_state, Server.status).all()
+        )
         server_map = {s[0]: s[1] for s in server_rows}
+        server_state_map = {s[0]: (s[2], s[3]) for s in server_rows}
     else:
         perms = (
-            db.query(ServerPermission.server_id, Server.name)
+            db.query(
+                ServerPermission.server_id,
+                Server.name,
+                Server.desired_power_state,
+                Server.status,
+            )
             .join(Server, ServerPermission.server_id == Server.id)
             .filter(ServerPermission.user_id == user.id)
             .all()
         )
         server_map = {p[0]: p[1] for p in perms}
+        server_state_map = {p[0]: (p[2], p[3]) for p in perms}
 
     if not server_map:
         return []
 
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+
+    # Veraltete Vorfälle (> 24h) ignorieren, da Alert-Popups nur für akute
+    # Vorfälle bestimmt sind.
     incidents = (
         db.query(Incident)
-        .filter(Incident.server_id.in_(list(server_map.keys())), Incident.status != "resolved")
+        .filter(
+            Incident.server_id.in_(list(server_map.keys())),
+            Incident.status != "resolved",
+            Incident.created_at >= cutoff,
+        )
         .order_by(Incident.created_at.desc())
-        .limit(10)
+        .limit(20)
         .all()
     )
+
+    OFFLINE_INCIDENT_TYPES = {"process_not_running", "container_missing"}
+
+    filtered_incidents = []
+    for inc in incidents:
+        desired_power, current_status = server_state_map.get(inc.server_id, ("stopped", "stopped"))
+        # Wenn der Server gewollt gestoppt oder aus ist, dürfen keine
+        # "process_not_running" / "container_missing" Fehlalarme aufpoppen.
+        if (desired_power == "stopped" or current_status == "stopped") and inc.type in OFFLINE_INCIDENT_TYPES:
+            continue
+        filtered_incidents.append(inc)
+        if len(filtered_incidents) >= 10:
+            break
 
     return [
         {
@@ -438,6 +469,7 @@ def incident_alerts(
             "status": inc.status,
             "created_at": inc.created_at.isoformat() if inc.created_at else None,
         }
-        for inc in incidents
+        for inc in filtered_incidents
     ]
+
 

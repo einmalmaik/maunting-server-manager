@@ -123,12 +123,16 @@ async function erinnerungenUebergeben(liste: GeplanteErinnerung[]): Promise<void
 }
 
 const POLL_INTERVAL_MS = 20_000
-const SESSION_INCIDENTS_KEY = 'msm_alerted_incidents'
-const SESSION_REMINDERS_KEY = 'msm_alerted_reminders'
+const BASE_INCIDENTS_KEY = 'msm_alerted_incidents'
+const BASE_REMINDERS_KEY = 'msm_alerted_reminders'
+
+function getAccountStorageKey(baseKey: string, userId?: number): string {
+  return userId ? `${baseKey}_user_${userId}` : baseKey
+}
 
 function loadSeenSet(storageKey: string): Set<string> {
   try {
-    const raw = sessionStorage.getItem(storageKey)
+    const raw = localStorage.getItem(storageKey) || sessionStorage.getItem(storageKey)
     if (raw) {
       const arr = JSON.parse(raw)
       if (Array.isArray(arr)) return new Set(arr)
@@ -139,19 +143,37 @@ function loadSeenSet(storageKey: string): Set<string> {
 
 function saveSeenSet(storageKey: string, set: Set<string>) {
   try {
-    const arr = Array.from(set).slice(-100) // Maximal 100 Einträge im Session-Speicher
-    sessionStorage.setItem(storageKey, JSON.stringify(arr))
-  } catch {}
+    const arr = Array.from(set).slice(-200) // Maximal 200 Einträge
+    const val = JSON.stringify(arr)
+    localStorage.setItem(storageKey, val)
+    sessionStorage.setItem(storageKey, val)
+  } catch {
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify(Array.from(set).slice(-100)))
+    } catch {}
+  }
 }
 
 export function ServerIncidentNotifier() {
   const { t, i18n } = useTranslation()
   const { user, isAuthenticated } = useAuthStore()
-  const seenIncidentsRef = useRef<Set<string>>(loadSeenSet(SESSION_INCIDENTS_KEY))
-  const seenRemindersRef = useRef<Set<string>>(loadSeenSet(SESSION_REMINDERS_KEY))
+  const incidentsKey = getAccountStorageKey(BASE_INCIDENTS_KEY, user?.id)
+  const remindersKey = getAccountStorageKey(BASE_REMINDERS_KEY, user?.id)
+
+  const seenIncidentsRef = useRef<Set<string>>(loadSeenSet(incidentsKey))
+  const seenRemindersRef = useRef<Set<string>>(loadSeenSet(remindersKey))
   const isPollingRef = useRef(false)
   // Was zuletzt an Android ging; ohne Änderung wird nicht neu geplant.
   const planRef = useRef<string | null>(null)
+  const currentUserIdRef = useRef<number | undefined>(user?.id)
+
+  useEffect(() => {
+    if (currentUserIdRef.current !== user?.id) {
+      currentUserIdRef.current = user?.id
+      seenIncidentsRef.current = loadSeenSet(incidentsKey)
+      seenRemindersRef.current = loadSeenSet(remindersKey)
+    }
+  }, [user?.id, incidentsKey, remindersKey])
 
   useEffect(() => {
     if (!isAuthenticated || !user) {
@@ -244,7 +266,7 @@ export function ServerIncidentNotifier() {
             }
           }
           if (updatedIncidents) {
-            saveSeenSet(SESSION_INCIDENTS_KEY, seenIncidentsRef.current)
+            saveSeenSet(incidentsKey, seenIncidentsRef.current)
           }
         }
 
@@ -284,7 +306,7 @@ export function ServerIncidentNotifier() {
             }
           }
           if (updatedReminders) {
-            saveSeenSet(SESSION_REMINDERS_KEY, seenRemindersRef.current)
+            saveSeenSet(remindersKey, seenRemindersRef.current)
           }
         }
       } catch {
