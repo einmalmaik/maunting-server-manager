@@ -459,4 +459,120 @@ describe('Kopfleiste Tab-Auslagern (Tear-off)', () => {
       privat: false,
     })
   })
+
+  it('zeigt eine Einfügemarkierung beim Überfahren der Tabs an', async () => {
+    render(<Kopfleiste />)
+    const tab2 = screen.getByRole('tab', { name: /Example/ })
+
+    expect(screen.queryByTestId('tab-drop-indikator')).toBeNull()
+
+    // Dragover über Tab 2
+    fireEvent(
+      tab2,
+      ziehEreignis('dragover', {
+        clientX: 150,
+        clientY: 20,
+        dataTransfer: { dropEffect: 'none' },
+      }),
+    )
+
+    expect(screen.getByTestId('tab-drop-indikator')).toBeInTheDocument()
+  })
+
+  it('führt einen Tab aus einem anderen Fenster per Drop zusammen (Re-docking)', async () => {
+    render(<Kopfleiste />)
+    const tabliste = screen.getByRole('tablist', { name: /Tabs/ })
+
+    const fremdeTabDaten = {
+      ursprungFensterId: 'anderes-fenster-123',
+      tabId: 'fremder-tab-999',
+      url: 'https://portal.azure.com/',
+      titel: 'Microsoft Azure',
+      favicon: null,
+      privat: false,
+    }
+
+    const dataTransfer = {
+      data: {
+        'application/x-msb-tab': JSON.stringify(fremdeTabDaten),
+        'text/msb-tab': fremdeTabDaten.tabId,
+      } as Record<string, string>,
+      getData(format: string) {
+        return this.data[format] || ''
+      },
+    }
+
+    fireEvent(
+      tabliste,
+      ziehEreignis('drop', {
+        clientX: 300,
+        clientY: 20,
+        dataTransfer,
+      }),
+    )
+
+    await warten()
+
+    const tabs = useTabsStore.getState().tabs
+    expect(tabs.length).toBe(3)
+    const importierterTab = tabs.find((t) => t.url === 'https://portal.azure.com/')
+    expect(importierterTab).toBeDefined()
+    expect(importierterTab?.titel).toBe('Microsoft Azure')
+    expect(useTabsStore.getState().aktivId).toBe(importierterTab?.id)
+
+    // Prüfen, ob die Übernahme im localStorage vermerkt wurde
+    const uebernommen = JSON.parse(localStorage.getItem('msb:tab-uebernommen') || '{}')
+    expect(uebernommen.ursprungFensterId).toBe('anderes-fenster-123')
+    expect(uebernommen.tabId).toBe('fremder-tab-999')
+  })
+
+  it('enthält keine unsichtbare Lücke vor dem Neuer-Tab-Knopf und schließt ihn direkt an', async () => {
+    render(<Kopfleiste />)
+    expect(screen.queryByTestId('tab-freie-flaeche')).toBeNull()
+    const neuerTabKnopf = screen.getByRole('button', { name: /Neuer Tab/ })
+    expect(neuerTabKnopf).toBeInTheDocument()
+  })
+
+  it('führt einen Tab auch beim Ablegen auf der freien Titelleisten-Fläche zusammen', async () => {
+    const { container } = render(<Kopfleiste />)
+    const titelleiste = container.firstChild as HTMLElement
+
+    // Fremder Tab im localStorage registriert (wie bei separatem Fenster-Prozess)
+    localStorage.setItem(
+      'msb:aktiver-tab-drag',
+      JSON.stringify({
+        ursprungFensterId: 'extern-win-777',
+        tabId: 'tab-extern-777',
+        url: 'https://github.com/',
+        titel: 'GitHub',
+        favicon: null,
+        privat: false,
+        zeit: Date.now(),
+      }),
+    )
+
+    const dataTransfer = {
+      data: {} as Record<string, string>,
+      getData(format: string) {
+        return this.data[format] || ''
+      },
+    }
+
+    fireEvent(
+      titelleiste,
+      ziehEreignis('drop', {
+        clientX: 800,
+        clientY: 10,
+        dataTransfer,
+      }),
+    )
+
+    await warten()
+
+    const tabs = useTabsStore.getState().tabs
+    expect(tabs.length).toBe(3)
+    const githubTab = tabs[tabs.length - 1]
+    expect(githubTab.url).toBe('https://github.com/')
+    expect(githubTab.titel).toBe('GitHub')
+  })
 })

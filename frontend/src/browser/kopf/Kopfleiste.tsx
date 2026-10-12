@@ -3,7 +3,7 @@
  * hat keinen Rahmen des Systems; gezogen wird an der freien Fläche
  * (`data-tauri-drag-region`), ein Doppelklick maximiert.
  */
-import { useState, type DragEvent } from 'react'
+import { Fragment, useEffect, useState, type DragEvent } from 'react'
 import { EyeOff, Globe, Loader2, Minus, Moon, Plus, Search, Settings, Square, Volume2, VolumeX, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -13,6 +13,18 @@ import { useEinstellungenStore } from '../services/einstellungenStore'
 import { interneSeite, msmSucheBegriff } from '../services/intern'
 import { nativ } from '../services/nativ'
 import { istAndroid } from '../services/plattform'
+import {
+  beendeTabDrag,
+  entpackeTabTransfer,
+  FENSTER_ID,
+  istTabUebernommen,
+  lauscheTabTransfer,
+  packeTabTransfer,
+  registriereTabDrag,
+  sendeTabUebernommen,
+  TAB_MIME_TYP,
+  type TabTransferDaten,
+} from '../services/tabTransfer'
 import { useTabsStore, type Tab } from '../services/tabsStore'
 
 interface TabDragZustand {
@@ -128,16 +140,6 @@ function erstelleTabPhantom(titel: string, favicon: string | null): HTMLElement 
     'gap: 8px',
   ].join(';')
 
-  // Fenstertasten
-  const tasten = document.createElement('div')
-  tasten.style.cssText = 'display: flex; gap: 4px; align-items: center;'
-  ;['#ef4444', '#eab308', '#22c55e'].forEach((farbe) => {
-    const punkt = document.createElement('span')
-    punkt.style.cssText = `width: 7px; height: 7px; border-radius: 50%; background: ${farbe}; opacity: 0.85;`
-    tasten.appendChild(punkt)
-  })
-  kopf.appendChild(tasten)
-
   // Tab-Reiter
   const tabPill = document.createElement('div')
   tabPill.style.cssText = [
@@ -149,7 +151,7 @@ function erstelleTabPhantom(titel: string, favicon: string | null): HTMLElement 
     'border-radius: 6px',
     'font-size: 11px',
     'font-weight: 500',
-    'max-width: 170px',
+    'max-width: 150px',
     'border: 1px solid rgba(255, 255, 255, 0.12)',
   ].join(';')
 
@@ -171,56 +173,83 @@ function erstelleTabPhantom(titel: string, favicon: string | null): HTMLElement 
     'white-space: nowrap',
     'overflow: hidden',
     'text-overflow: ellipsis',
-    'max-width: 130px',
+    'max-width: 110px',
     'color: #f4f4f5',
   ].join(';')
   tabPill.appendChild(titelSpan)
   kopf.appendChild(tabPill)
+
+  // Fenstertasten (Windows-Stil)
+  const tasten = document.createElement('div')
+  tasten.style.cssText = 'margin-left: auto; display: flex; gap: 8px; align-items: center; color: rgba(255, 255, 255, 0.45); font-size: 10px; font-family: monospace;'
+  const minBtn = document.createElement('span')
+  minBtn.textContent = '—'
+  const maxBtn = document.createElement('span')
+  maxBtn.textContent = '□'
+  const closeBtn = document.createElement('span')
+  closeBtn.textContent = '✕'
+  tasten.appendChild(minBtn)
+  tasten.appendChild(maxBtn)
+  tasten.appendChild(closeBtn)
+  kopf.appendChild(tasten)
+
   container.appendChild(kopf)
 
-  // Vorschau-Fläche (Webseiten-Simulation)
+  // Vorschau-Fläche (Webseiten-Simulation / Code-Linien)
   const inhalt = document.createElement('div')
   inhalt.style.cssText = [
     'flex: 1',
     'display: flex',
     'flex-direction: column',
-    'align-items: center',
     'justify-content: center',
-    'padding: 12px',
-    'background: linear-gradient(180deg, rgba(24, 24, 27, 0.6) 0%, rgba(15, 15, 18, 0.9) 100%)',
-    'gap: 8px',
+    'padding: 14px 16px',
+    'background: linear-gradient(180deg, rgba(24, 24, 27, 0.7) 0%, rgba(15, 15, 18, 0.95) 100%)',
+    'gap: 7px',
   ].join(';')
 
+  // Adressleiste
   const adressMini = document.createElement('div')
-  adressMini.style.cssText = 'width: 80%; height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.12);'
+  adressMini.style.cssText = 'width: 75%; height: 9px; border-radius: 4px; background: rgba(255, 255, 255, 0.12); margin-bottom: 4px;'
   inhalt.appendChild(adressMini)
 
-  const linie1 = document.createElement('div')
-  linie1.style.cssText = 'width: 90%; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.06);'
-  const linie2 = document.createElement('div')
-  linie2.style.cssText = 'width: 70%; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.05);'
-  inhalt.appendChild(linie1)
-  inhalt.appendChild(linie2)
+  // Simulation von Code / Inhalts-Zeilen
+  const zeilenBreiten = ['85%', '92%', '65%', '78%']
+  zeilenBreiten.forEach((breite, idx) => {
+    const linie = document.createElement('div')
+    linie.style.cssText = `width: ${breite}; height: 5px; border-radius: 2px; background: rgba(255, 255, 255, ${0.08 - idx * 0.015});`
+    inhalt.appendChild(linie)
+  })
 
   container.appendChild(inhalt)
   return container
 }
 
-function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: number }) {
+function EinfuegeIndikator() {
+  return (
+    <div
+      data-testid="tab-drop-indikator"
+      aria-hidden="true"
+      className="relative flex h-8 w-2.5 shrink-0 items-center justify-center transition-all duration-150 ease-out animate-in fade-in zoom-in-50"
+    >
+      <div className="h-6 w-1 rounded-full bg-primary shadow-[0_0_8px_rgba(99,102,241,0.9)] ring-2 ring-primary/40 animate-pulse" />
+    </div>
+  )
+}
+
+interface TabReiterProps {
+  tab: Tab
+  aktiv: boolean
+  index: number
+  onHoverZieh?: (e: DragEvent<HTMLDivElement>) => void
+  onDropTab?: (e: DragEvent<HTMLDivElement>) => void
+}
+
+function TabReiter({ tab, aktiv, index, onHoverZieh, onDropTab }: TabReiterProps) {
   const { t } = useTranslation()
-  const { aktivieren, schliessen, verschieben } = useTabsStore.getState()
+  const { aktivieren, schliessen } = useTabsStore.getState()
   const titel = tabTitel(tab, { neu: t('browser.tabs.neu'), einstellungen: t('browser.einstellungen.titel') })
 
-  const ablegen = (e: DragEvent) => {
-    if (aktiverTabDrag) {
-      aktiverTabDrag.imBalkenAbgelegt = true
-      aktiverTabDrag.aufraeumen?.()
-    }
-    const id = e.dataTransfer.getData('text/msb-tab')
-    if (id && id !== tab.id) verschieben(id, index)
-  }
-
-  const dragStart = (e: DragEvent) => {
+  const dragStart = (e: DragEvent<HTMLDivElement>) => {
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape' && aktiverTabDrag) {
         aktiverTabDrag.abgebrochen = true
@@ -229,7 +258,7 @@ function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: num
     window.addEventListener('keydown', onKey, { capture: true })
 
     // Verhindert das Stop-Zeichen (🚫) beim Überqueren des Fensters
-    const onWindowDragOver = (ev: DragEvent) => {
+    const onWindowDragOver = (ev: globalThis.DragEvent) => {
       ev.preventDefault()
       if (ev.dataTransfer) {
         ev.dataTransfer.dropEffect = 'move'
@@ -238,9 +267,24 @@ function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: num
     window.addEventListener('dragover', onWindowDragOver, { capture: true })
 
     let phantom: HTMLElement | null = null
+    const transferPayload: TabTransferDaten = {
+      ursprungFensterId: FENSTER_ID,
+      tabId: tab.id,
+      url: tab.url,
+      titel,
+      favicon: tab.favicon,
+      privat: tab.privat,
+    }
+
+    registriereTabDrag(transferPayload)
+
     try {
       if (e.dataTransfer) {
+        const payloadJson = packeTabTransfer(transferPayload)
+        e.dataTransfer.setData(TAB_MIME_TYP, payloadJson)
+        e.dataTransfer.setData('text/plain', payloadJson)
         e.dataTransfer.setData('text/msb-tab', tab.id)
+        if (tab.url) e.dataTransfer.setData('text/uri-list', tab.url)
         e.dataTransfer.effectAllowed = 'move'
         if (typeof e.dataTransfer.setDragImage === 'function' && typeof document !== 'undefined') {
           phantom = erstelleTabPhantom(titel, tab.favicon)
@@ -260,6 +304,7 @@ function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: num
     const aufraeumen = () => {
       window.removeEventListener('keydown', onKey, { capture: true })
       window.removeEventListener('dragover', onWindowDragOver, { capture: true })
+      beendeTabDrag()
       if (phantom) {
         phantom.remove()
         phantom = null
@@ -281,7 +326,7 @@ function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: num
     }
   }
 
-  const beimZiehen = (e: DragEvent) => {
+  const beimZiehen = (e: DragEvent<HTMLDivElement>) => {
     if (!aktiverTabDrag) return
     const sx = typeof e.screenX === 'number' ? e.screenX : 0
     const sy = typeof e.screenY === 'number' ? e.screenY : 0
@@ -298,9 +343,10 @@ function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: num
     }
   }
 
-  const dragEnde = (e: DragEvent) => {
+  const dragEnde = (e: DragEvent<HTMLDivElement>) => {
     const drag = aktiverTabDrag
     aktiverTabDrag = null
+    beendeTabDrag()
     drag?.aufraeumen?.()
     drag?.aufraeumenEscape?.()
 
@@ -308,6 +354,12 @@ function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: num
     if (istAndroid()) return
     if (drag.abgebrochen) return
     if (drag.imBalkenAbgelegt) return
+
+    // Prüfen, ob der Tab in einem anderen Fenster übernommen wurde
+    if (istTabUebernommen(drag.id)) {
+      schliessen(drag.id)
+      return
+    }
 
     const tabs = useTabsStore.getState().tabs
     if (tabs.length <= 1) return
@@ -366,14 +418,20 @@ function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: num
       onDragStart={dragStart}
       onDrag={beimZiehen}
       onDragEnd={dragEnde}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={ablegen}
+      onDragOver={(e) => {
+        e.preventDefault()
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+        onHoverZieh?.(e)
+      }}
+      onDrop={(e) => {
+        onDropTab?.(e)
+      }}
       onClick={() => aktivieren(tab.id)}
       onAuxClick={(e) => e.button === 1 && schliessen(tab.id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') aktivieren(tab.id)
       }}
-      className={`group flex h-8 min-w-[7.5rem] max-w-[14rem] flex-1 cursor-default items-center gap-2 rounded-t-lg px-2.5 text-label-md ${
+      className={`group flex h-8 min-w-[7.5rem] max-w-[14rem] flex-1 cursor-default items-center gap-2 rounded-t-lg px-2.5 text-label-md transition-all duration-150 ease-out ${
         aktiv ? 'bg-surface-container text-on-surface' : 'text-on-surface-variant hover:bg-surface-container/60'
       }`}
     >
@@ -409,16 +467,70 @@ export function Kopfleiste() {
   const tabs = useTabsStore((s) => s.tabs)
   const aktivId = useTabsStore((s) => s.aktivId)
   const neuerTab = useTabsStore((s) => s.neuerTab)
-  // Ausgeblendet ist nur der Knopf; Strg+Umschalt+N öffnet weiter einen privaten Tab.
   const privatAus = useEinstellungenStore((s) => s.ausgeblendet.includes('privaterTab'))
+  const [dropZielIndex, setDropZielIndex] = useState<number | null>(null)
+
+  useEffect(() => {
+    const abmelden = lauscheTabTransfer(({ tabId }) => {
+      if (aktiverTabDrag && aktiverTabDrag.id === tabId) {
+        aktiverTabDrag.imBalkenAbgelegt = true
+        aktiverTabDrag.aufraeumen?.()
+      }
+      useTabsStore.getState().schliessen(tabId)
+    })
+    return abmelden
+  }, [])
+
+  const behandleDrop = (e: DragEvent, zielIndex: number) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDropZielIndex(null)
+
+    const transfer = entpackeTabTransfer(e.dataTransfer)
+    if (!transfer) return
+
+    // 1. Aus einem anderen Fenster zusammenführen (Re-docking)
+    if (transfer.ursprungFensterId !== FENSTER_ID) {
+      neuerTab(transfer.url, {
+        anIndex: zielIndex,
+        titel: transfer.titel,
+        favicon: transfer.favicon,
+        privat: transfer.privat,
+      })
+      sendeTabUebernommen(transfer.ursprungFensterId, transfer.tabId)
+      beendeTabDrag()
+      return
+    }
+
+    // 2. Innerhalb dieses Fensters verschieben
+    if (aktiverTabDrag) {
+      aktiverTabDrag.imBalkenAbgelegt = true
+      aktiverTabDrag.aufraeumen?.()
+    }
+    const von = tabs.findIndex((t) => t.id === transfer.tabId)
+    if (von >= 0) {
+      const korrigiert = von < zielIndex ? zielIndex - 1 : zielIndex
+      if (korrigiert !== von) {
+        useTabsStore.getState().verschieben(transfer.tabId, korrigiert)
+      }
+    }
+  }
 
   return (
     <div
       data-tauri-drag-region
       onDoubleClick={(e) => e.target === e.currentTarget && void nativ.fensterAktion('maximieren')}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={() => {
-        if (aktiverTabDrag) aktiverTabDrag.imBalkenAbgelegt = true
+      onDragOver={(e) => {
+        e.preventDefault()
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+          setDropZielIndex(null)
+        }
+      }}
+      onDrop={(e) => {
+        behandleDrop(e, dropZielIndex ?? tabs.length)
       }}
       className="flex h-10 shrink-0 select-none items-end gap-1 bg-surface-container-low pl-2"
     >
@@ -426,17 +538,58 @@ export function Kopfleiste() {
       <div
         role="tablist"
         aria-label={t('browser.tabs.liste')}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={() => {
-          if (aktiverTabDrag) aktiverTabDrag.imBalkenAbgelegt = true
+        onDragOver={(e) => {
+          e.preventDefault()
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+            setDropZielIndex(null)
+          }
+        }}
+        onDrop={(e) => {
+          e.stopPropagation()
+          behandleDrop(e, dropZielIndex ?? tabs.length)
         }}
         className="flex min-w-0 items-end gap-0.5 overflow-hidden"
       >
         {tabs.map((tab, i) => (
-          <TabReiter key={tab.id} tab={tab} aktiv={tab.id === aktivId} index={i} />
+          <Fragment key={tab.id}>
+            {dropZielIndex === i && <EinfuegeIndikator />}
+            <TabReiter
+              tab={tab}
+              aktiv={tab.id === aktivId}
+              index={i}
+              onHoverZieh={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect()
+                const mitte = rect.left + rect.width / 2
+                const ziel = e.clientX < mitte ? i : i + 1
+                setDropZielIndex(ziel)
+              }}
+              onDropTab={(e) => {
+                e.stopPropagation()
+                const rect = e.currentTarget.getBoundingClientRect()
+                const mitte = rect.left + rect.width / 2
+                const ziel = e.clientX < mitte ? i : i + 1
+                behandleDrop(e, ziel)
+              }}
+            />
+          </Fragment>
         ))}
+        {dropZielIndex === tabs.length && <EinfuegeIndikator />}
       </div>
-      <div className="mb-1 flex shrink-0 items-center">
+      <div
+        className="mb-1 flex shrink-0 items-center"
+        onDragOver={(e) => {
+          e.preventDefault()
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+          setDropZielIndex(tabs.length)
+        }}
+        onDrop={(e) => {
+          e.stopPropagation()
+          behandleDrop(e, tabs.length)
+        }}
+      >
         <Kurzinfo text={t('browser.tabs.neuKuerzel')} seite="anfang">
           <button
             type="button"
@@ -460,7 +613,19 @@ export function Kopfleiste() {
           </Kurzinfo>
         )}
       </div>
-      <div className="h-full min-w-6 flex-1" data-tauri-drag-region />
+      <div
+        className="h-full min-w-6 flex-1"
+        data-tauri-drag-region
+        onDragOver={(e) => {
+          e.preventDefault()
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+          setDropZielIndex(tabs.length)
+        }}
+        onDrop={(e) => {
+          e.stopPropagation()
+          behandleDrop(e, tabs.length)
+        }}
+      />
       <div className="flex h-full shrink-0 items-stretch">
         {(
           [

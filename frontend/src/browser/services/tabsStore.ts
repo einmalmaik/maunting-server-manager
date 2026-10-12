@@ -22,7 +22,7 @@ import { useRueckfragen } from './rueckfragen'
 import { baueZielUrl, type Suchmaschine } from './searchEngines'
 import { leererTab, neueTabId, webviewZeigen, type Tab } from './tab'
 import { ereignisAnwenden } from './tabEreignis'
-import { setzeUnterfenster, tabsSpeichern } from './tabsAblage'
+import { istUnterfenster, setzeUnterfenster, tabsSpeichern } from './tabsAblage'
 import { tabWeg as entwicklerTabWeg } from '../entwickler/werkzeuge'
 import { useUebersetzung } from '../uebersetzung/ablauf'
 
@@ -33,13 +33,24 @@ interface Geschlossen {
 
 export type { Tab }
 
+export interface NeuerTabOptionen {
+  privat?: boolean
+  hintergrund?: boolean
+  nach?: string
+  id?: string
+  nativDa?: boolean
+  anIndex?: number
+  titel?: string
+  favicon?: string | null
+}
+
 export interface TabsZustand {
   tabs: Tab[]
   aktivId: string
   verlaufIds: string[]
   geschlossen: Geschlossen[]
 
-  neuerTab: (url?: string, optionen?: { privat?: boolean; hintergrund?: boolean; nach?: string; id?: string; nativDa?: boolean }) => string
+  neuerTab: (url?: string, optionen?: NeuerTabOptionen) => string
   schliessen: (id: string) => void
   aktivieren: (id: string) => void
   /** Eingabe aus Adresszeile oder Startseite: Adresse oder Suchbegriff. */
@@ -143,13 +154,21 @@ export const useTabsStore = create<TabsZustand>()(
           const tab: Tab = {
             ...leererTab(id, optionen.privat ?? false),
             url: effektiveUrl,
+            titel: optionen.titel || (effektiveUrl ? (interneSeite(effektiveUrl) ? '' : effektiveUrl) : ''),
+            favicon: optionen.favicon ?? null,
             laedt: Boolean(optionen.nativDa && effektiveUrl),
             nativDa: optionen.nativDa ?? false,
           }
           set((s) => {
-            const nachIndex = optionen.nach ? s.tabs.findIndex((t) => t.id === optionen.nach) : -1
+            let einfuegeIndex = s.tabs.length
+            if (typeof optionen.anIndex === 'number') {
+              einfuegeIndex = Math.max(0, Math.min(optionen.anIndex, s.tabs.length))
+            } else if (optionen.nach) {
+              const nachIndex = s.tabs.findIndex((t) => t.id === optionen.nach)
+              if (nachIndex >= 0) einfuegeIndex = nachIndex + 1
+            }
             const tabs = [...s.tabs]
-            tabs.splice(nachIndex >= 0 ? nachIndex + 1 : tabs.length, 0, tab)
+            tabs.splice(einfuegeIndex, 0, tab)
             const verlaufIds = optionen.hintergrund
               ? s.verlaufIds
               : [...s.verlaufIds.filter((v) => v !== s.aktivId), s.aktivId]
@@ -165,7 +184,7 @@ export const useTabsStore = create<TabsZustand>()(
             if (url) {
               if (optionen.hintergrund) {
                 // Erst laden, wenn er nach vorne kommt: spart Speicher und Netz.
-                aendern(id, { url, titel: url })
+                aendern(id, { url, titel: optionen.titel || url })
               } else {
                 laden(id, url)
               }
@@ -195,6 +214,10 @@ export const useTabsStore = create<TabsZustand>()(
             set({ verlaufIds: restVerlauf })
           }
           if (rest.length === 0) {
+            if (istUnterfenster()) {
+              void nativ.fensterAktion('schliessen')
+              return
+            }
             const neu = leererTab(neueTabId())
             set({ tabs: [neu], aktivId: neu.id, verlaufIds: [] })
             zeigen(neu.id)
