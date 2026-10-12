@@ -26,6 +26,7 @@ interface TabDragZustand {
   imBalkenAbgelegt: boolean
   abgebrochen: boolean
   aufraeumenEscape?: () => void
+  aufraeumen?: () => void
 }
 
 let aktiverTabDrag: TabDragZustand | null = null
@@ -89,6 +90,122 @@ function TonKnopf({ tab, titel }: { tab: Tab; titel: string }) {
   )
 }
 
+/**
+ * Erstellt ein optisches Phantom (Vorschau-Miniatur) des Browserfensters
+ * für das Auslagern per Drag-and-Drop (wie bei Chromium/Chrome).
+ */
+function erstelleTabPhantom(titel: string, favicon: string | null): HTMLElement {
+  const container = document.createElement('div')
+  container.setAttribute('aria-hidden', 'true')
+  container.style.cssText = [
+    'position: fixed',
+    'left: -9999px',
+    'top: -9999px',
+    'width: 260px',
+    'height: 160px',
+    'background: rgba(24, 24, 27, 0.94)',
+    'color: #f4f4f5',
+    'border-radius: 12px',
+    'border: 1px solid rgba(255, 255, 255, 0.18)',
+    'box-shadow: 0 20px 35px -5px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(99, 102, 241, 0.35)',
+    'overflow: hidden',
+    'font-family: system-ui, -apple-system, sans-serif',
+    'pointer-events: none',
+    'z-index: 999999',
+    'display: flex',
+    'flex-direction: column',
+  ].join(';')
+
+  // Mini-Kopfleiste
+  const kopf = document.createElement('div')
+  kopf.style.cssText = [
+    'height: 32px',
+    'background: rgba(39, 39, 42, 0.95)',
+    'border-bottom: 1px solid rgba(255, 255, 255, 0.1)',
+    'display: flex',
+    'align-items: center',
+    'padding: 0 10px',
+    'gap: 8px',
+  ].join(';')
+
+  // Fenstertasten
+  const tasten = document.createElement('div')
+  tasten.style.cssText = 'display: flex; gap: 4px; align-items: center;'
+  ;['#ef4444', '#eab308', '#22c55e'].forEach((farbe) => {
+    const punkt = document.createElement('span')
+    punkt.style.cssText = `width: 7px; height: 7px; border-radius: 50%; background: ${farbe}; opacity: 0.85;`
+    tasten.appendChild(punkt)
+  })
+  kopf.appendChild(tasten)
+
+  // Tab-Reiter
+  const tabPill = document.createElement('div')
+  tabPill.style.cssText = [
+    'display: flex',
+    'align-items: center',
+    'gap: 6px',
+    'background: rgba(24, 24, 27, 0.95)',
+    'padding: 3px 8px',
+    'border-radius: 6px',
+    'font-size: 11px',
+    'font-weight: 500',
+    'max-width: 170px',
+    'border: 1px solid rgba(255, 255, 255, 0.12)',
+  ].join(';')
+
+  if (favicon) {
+    const img = document.createElement('img')
+    img.src = favicon
+    img.alt = ''
+    img.style.cssText = 'width: 12px; height: 12px; border-radius: 2px;'
+    tabPill.appendChild(img)
+  } else {
+    const dot = document.createElement('span')
+    dot.style.cssText = 'width: 8px; height: 8px; border-radius: 50%; background: #6366f1;'
+    tabPill.appendChild(dot)
+  }
+
+  const titelSpan = document.createElement('span')
+  titelSpan.textContent = titel || 'Tab'
+  titelSpan.style.cssText = [
+    'white-space: nowrap',
+    'overflow: hidden',
+    'text-overflow: ellipsis',
+    'max-width: 130px',
+    'color: #f4f4f5',
+  ].join(';')
+  tabPill.appendChild(titelSpan)
+  kopf.appendChild(tabPill)
+  container.appendChild(kopf)
+
+  // Vorschau-Fläche (Webseiten-Simulation)
+  const inhalt = document.createElement('div')
+  inhalt.style.cssText = [
+    'flex: 1',
+    'display: flex',
+    'flex-direction: column',
+    'align-items: center',
+    'justify-content: center',
+    'padding: 12px',
+    'background: linear-gradient(180deg, rgba(24, 24, 27, 0.6) 0%, rgba(15, 15, 18, 0.9) 100%)',
+    'gap: 8px',
+  ].join(';')
+
+  const adressMini = document.createElement('div')
+  adressMini.style.cssText = 'width: 80%; height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.12);'
+  inhalt.appendChild(adressMini)
+
+  const linie1 = document.createElement('div')
+  linie1.style.cssText = 'width: 90%; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.06);'
+  const linie2 = document.createElement('div')
+  linie2.style.cssText = 'width: 70%; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.05);'
+  inhalt.appendChild(linie1)
+  inhalt.appendChild(linie2)
+
+  container.appendChild(inhalt)
+  return container
+}
+
 function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: number }) {
   const { t } = useTranslation()
   const { aktivieren, schliessen, verschieben } = useTabsStore.getState()
@@ -97,19 +214,13 @@ function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: num
   const ablegen = (e: DragEvent) => {
     if (aktiverTabDrag) {
       aktiverTabDrag.imBalkenAbgelegt = true
+      aktiverTabDrag.aufraeumen?.()
     }
     const id = e.dataTransfer.getData('text/msb-tab')
     if (id && id !== tab.id) verschieben(id, index)
   }
 
   const dragStart = (e: DragEvent) => {
-    try {
-      e.dataTransfer?.setData('text/msb-tab', tab.id)
-      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
-    } catch {
-      // In manchen Umgebungen ohne volles DragEvent ignorieren
-    }
-
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape' && aktiverTabDrag) {
         aktiverTabDrag.abgebrochen = true
@@ -117,10 +228,43 @@ function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: num
     }
     window.addEventListener('keydown', onKey, { capture: true })
 
+    // Verhindert das Stop-Zeichen (🚫) beim Überqueren des Fensters
+    const onWindowDragOver = (ev: DragEvent) => {
+      ev.preventDefault()
+      if (ev.dataTransfer) {
+        ev.dataTransfer.dropEffect = 'move'
+      }
+    }
+    window.addEventListener('dragover', onWindowDragOver, { capture: true })
+
+    let phantom: HTMLElement | null = null
+    try {
+      if (e.dataTransfer) {
+        e.dataTransfer.setData('text/msb-tab', tab.id)
+        e.dataTransfer.effectAllowed = 'move'
+        if (typeof e.dataTransfer.setDragImage === 'function' && typeof document !== 'undefined') {
+          phantom = erstelleTabPhantom(titel, tab.favicon)
+          document.body.appendChild(phantom)
+          e.dataTransfer.setDragImage(phantom, 60, 16)
+        }
+      }
+    } catch {
+      // In manchen Umgebungen ohne volles DragEvent ignorieren
+    }
+
     const sx = typeof e.screenX === 'number' ? e.screenX : 0
     const sy = typeof e.screenY === 'number' ? e.screenY : 0
     const cx = typeof e.clientX === 'number' ? e.clientX : 0
     const cy = typeof e.clientY === 'number' ? e.clientY : 0
+
+    const aufraeumen = () => {
+      window.removeEventListener('keydown', onKey, { capture: true })
+      window.removeEventListener('dragover', onWindowDragOver, { capture: true })
+      if (phantom) {
+        phantom.remove()
+        phantom = null
+      }
+    }
 
     aktiverTabDrag = {
       id: tab.id,
@@ -132,7 +276,8 @@ function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: num
       letzteClientY: cy,
       imBalkenAbgelegt: false,
       abgebrochen: false,
-      aufraeumenEscape: () => window.removeEventListener('keydown', onKey, { capture: true }),
+      aufraeumenEscape: aufraeumen,
+      aufraeumen,
     }
   }
 
@@ -156,6 +301,7 @@ function TabReiter({ tab, aktiv, index }: { tab: Tab; aktiv: boolean; index: num
   const dragEnde = (e: DragEvent) => {
     const drag = aktiverTabDrag
     aktiverTabDrag = null
+    drag?.aufraeumen?.()
     drag?.aufraeumenEscape?.()
 
     if (!drag) return

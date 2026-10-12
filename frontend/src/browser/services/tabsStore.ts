@@ -360,9 +360,6 @@ export const useTabsStore = create<TabsZustand>()(
           }),
 
         hochfahren: async () => {
-          // Webviews aus einem früheren Lauf der Oberfläche (Neuladen nach
-          // der Kopplung) gehören zu keinem Tab mehr.
-          await nativ.tabsZuruecksetzen().catch(() => null)
           const startInfo = await nativ.fensterStartInfo().catch(() => null)
           if (startInfo?.ist_neues_fenster) {
             setzeUnterfenster(true)
@@ -387,6 +384,10 @@ export const useTabsStore = create<TabsZustand>()(
             }
             return
           }
+
+          // Webviews aus einem früheren Lauf der Oberfläche (Neuladen nach
+          // der Kopplung) gehören zu keinem Tab mehr.
+          await nativ.tabsZuruecksetzen().catch(() => null)
 
           if (ersterStart() && useEinstellungenStore.getState().beimStart === 'startseite') {
             // Die Tabs vom letzten Mal bleiben über „Tab wiederherstellen“ erreichbar.

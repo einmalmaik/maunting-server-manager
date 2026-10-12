@@ -131,7 +131,9 @@ pub fn run() {
                 if let Some(fenster) = app.get_webview_window("main") {
                     fenster::fenster_nach_vorn(&fenster);
                 }
-                widget::link_aufnehmen(handle, &args);
+                if !ist_neues_fenster {
+                    widget::link_aufnehmen(handle, &args);
+                }
             }
             Ok(())
         })

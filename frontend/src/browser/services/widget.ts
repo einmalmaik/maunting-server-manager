@@ -18,9 +18,11 @@ import { istTauri, nativ, widgetAnstoesse, type WidgetStart } from './nativ'
 import { istIntern, istWebseite } from './intern'
 import { istAndroid } from './plattform'
 import { baueZielUrl, suchmaschine } from './searchEngines'
+import { istUnterfenster } from './tabsAblage'
 import { useTabsStore } from './tabsStore'
 
 export function widgetAusfuehren(start: WidgetStart, adresszeile: () => void): void {
+  if (istUnterfenster()) return
   const tabs = useTabsStore.getState()
   const { searxngUrl } = useEinstellungenStore.getState()
   const id = wirksameSucheJetzt()
@@ -75,7 +77,7 @@ export function useWidget(adresszeile: () => void, startseite: () => void): void
 
   // Unter Windows kommen nur Links von außen (`widget/ohne.rs`).
   useEffect(() => {
-    if (!istTauri()) return
+    if (!istTauri() || istUnterfenster()) return
     const abholen = () =>
       void nativ
         .widgetStart()

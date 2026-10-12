@@ -9,7 +9,8 @@ import { gestenleisteUebernehmen } from '@/lib/gestenleiste'
 import { randomUuidNachruesten } from '@/lib/uuidNachruesten'
 
 // Nur die Brücke zu Rust: `nativ.ts` importiert nichts aus der App.
-import { konfig as geraetKonfig } from './services/nativ'
+import { nativ, konfig as geraetKonfig } from './services/nativ'
+import { setzeUnterfenster } from './services/tabsAblage'
 
 async function hochfahren(): Promise<void> {
   try {
@@ -19,6 +20,14 @@ async function hochfahren(): Promise<void> {
     }
   } catch {
     // Ohne Konfiguration startet der Browser ungekoppelt.
+  }
+  try {
+    const startInfo = await nativ.fensterStartInfo()
+    if (startInfo?.ist_neues_fenster) {
+      setzeUnterfenster(true)
+    }
+  } catch {
+    // Ohne Start-Info oder außerhalb Tauri normal starten.
   }
   await import('./start')
 }
