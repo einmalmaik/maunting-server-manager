@@ -10,13 +10,13 @@
  * - Unterstützt konfigurierbare Denkstufen, beschränkt durch die Benutzerrolle.
  */
 import { useEffect, useRef, useState } from 'react'
-import { Brain, Check, ChevronDown, ChevronUp, Copy, Loader2, Send, Sparkles, X } from 'lucide-react'
+import { Brain, Check, ChevronDown, ChevronUp, Copy, Loader2, Send, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 import { apiStream } from '@/api/client'
-import { Button, Input } from '@/Singra/UI'
+import { Button, Dropdown, Input, type DropdownOption } from '@/Singra/UI'
 
 import type { Treffer } from '../MsmSuche'
 
@@ -44,7 +44,6 @@ export function SuchzusammenfassungKachel({
   onNeueTreffer,
 }: SuchzusammenfassungKachelProps) {
   const { t } = useTranslation()
-  const [geschlossen, setGeschlossen] = useState(false)
   const [eingeklappt, setEingeklappt] = useState(false)
   const [deaktiviert, setDeaktiviert] = useState(false)
   const [laedt, setLaedt] = useState(false)
@@ -205,7 +204,6 @@ export function SuchzusammenfassungKachel({
     if (begonneneSucheRef.current === begriff) return
 
     begonneneSucheRef.current = begriff
-    setGeschlossen(false)
     setDeaktiviert(false)
     setHauptText('')
     setGedankenText('')
@@ -221,7 +219,7 @@ export function SuchzusammenfassungKachel({
     }
   }, [begriff, treffer])
 
-  if (geschlossen || deaktiviert || (!laedt && !hauptText)) {
+  if (deaktiviert || (!laedt && !hauptText)) {
     return null
   }
 
@@ -284,6 +282,13 @@ export function SuchzusammenfassungKachel({
   }
 
   const stufenOptionen = konfig?.denkstufen ?? []
+  const stufenDropdownOptionen: DropdownOption[] = [
+    { value: 'fast', label: t('browser.msmSuche.zusammenfassungDenkstufeFast') },
+    ...stufenOptionen.map((st) => ({
+      value: st,
+      label: t(`browser.msmSuche.zusammenfassungDenkstufe${st.charAt(0).toUpperCase() + st.slice(1)}`, { defaultValue: st }),
+    })),
+  ]
 
   return (
     <section
@@ -312,6 +317,7 @@ export function SuchzusammenfassungKachel({
               size="sm"
               onClick={kopieren}
               aria-label={t(kopiert ? 'browser.msmSuche.zusammenfassungKopiert' : 'browser.msmSuche.zusammenfassungKopieren')}
+              title={t(kopiert ? 'browser.msmSuche.zusammenfassungKopiert' : 'browser.msmSuche.zusammenfassungKopieren')}
               className="h-7 w-7 p-0 text-on-surface-variant hover:text-on-surface"
             >
               {kopiert ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
@@ -322,21 +328,10 @@ export function SuchzusammenfassungKachel({
             size="sm"
             onClick={() => setEingeklappt((v) => !v)}
             aria-label={t(eingeklappt ? 'browser.msmSuche.zusammenfassungAusklappen' : 'browser.msmSuche.zusammenfassungEinklappen')}
+            title={t(eingeklappt ? 'browser.msmSuche.zusammenfassungAusklappen' : 'browser.msmSuche.zusammenfassungEinklappen')}
             className="h-7 w-7 p-0 text-on-surface-variant hover:text-on-surface"
           >
             {eingeklappt ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              if (abbruchRef.current) abbruchRef.current.abort()
-              setGeschlossen(true)
-            }}
-            aria-label={t('browser.msmSuche.zusammenfassungSchliessen')}
-            className="h-7 w-7 p-0 text-on-surface-variant hover:text-on-surface"
-          >
-            <X className="h-4 w-4" />
           </Button>
         </div>
       </div>
@@ -420,20 +415,15 @@ export function SuchzusammenfassungKachel({
 
                 {/* Denkstufe-Auswahl, falls der Betreiber und die Rolle Stufen zulässt */}
                 {stufenOptionen.length > 0 && (
-                  <select
+                  <Dropdown
                     value={denkstufe}
-                    onChange={(e) => setDenkstufe(e.target.value)}
-                    aria-label={t('browser.msmSuche.zusammenfassungDenkstufe')}
+                    onChange={(st) => setDenkstufe(st)}
+                    options={stufenDropdownOptionen}
                     disabled={laedt}
-                    className="h-9 rounded-lg border border-outline-variant/50 bg-surface-container px-2 text-label-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
-                  >
-                    <option value="fast">{t('browser.msmSuche.zusammenfassungDenkstufeFast')}</option>
-                    {stufenOptionen.map((st) => (
-                      <option key={st} value={st}>
-                        {t(`browser.msmSuche.zusammenfassungDenkstufe${st.charAt(0).toUpperCase() + st.slice(1)}`, { defaultValue: st })}
-                      </option>
-                    ))}
-                  </select>
+                    className="w-auto shrink-0"
+                    buttonClassName="h-9 min-w-[130px] text-label-sm"
+                    aria-label={t('browser.msmSuche.zusammenfassungDenkstufe')}
+                  />
                 )}
 
                 <Button

@@ -93,7 +93,7 @@ describe('SuchzusammenfassungKachel', () => {
     document.body.removeChild(zielTreffer)
   })
 
-  it('erlaubt das Einklappen und Schließen der Kachel', async () => {
+  it('erlaubt das Einklappen und Ausklappen der Kachel', async () => {
     apiStream.mockResolvedValueOnce({
       ok: true,
       body: {
@@ -113,16 +113,23 @@ describe('SuchzusammenfassungKachel', () => {
       },
     })
 
-    const { container } = render(<SuchzusammenfassungKachel begriff="Testsuche" treffer={TREFFER} />)
+    render(<SuchzusammenfassungKachel begriff="Testsuche" treffer={TREFFER} />)
 
     expect(await screen.findByText('Fertige Zusammenfassung')).toBeInTheDocument()
 
-    // Schließen-Button anklicken
-    const schliessenBtn = screen.getByRole('button', { name: /Ausblenden|Dismiss/i })
-    fireEvent.click(schliessenBtn)
+    // Einklappen-Button anklicken
+    const einklappenBtn = screen.getByRole('button', { name: /Einklappen|Collapse/i })
+    fireEvent.click(einklappenBtn)
 
-    // Kachel ist ausgeblendet
-    expect(container.firstChild).toBeNull()
+    // Inhalt ist eingeklappt
+    expect(screen.queryByText('Fertige Zusammenfassung')).not.toBeInTheDocument()
+
+    // Ausklappen-Button anklicken
+    const ausklappenBtn = screen.getByRole('button', { name: /Ausklappen|Expand/i })
+    fireEvent.click(ausklappenBtn)
+
+    // Inhalt ist wieder da
+    expect(screen.getByText('Fertige Zusammenfassung')).toBeInTheDocument()
   })
 
   it('zeigt Denkprozess und erlaubt Denkstufe bei Nachfragen wenn erlaubt', async () => {
@@ -155,10 +162,10 @@ describe('SuchzusammenfassungKachel', () => {
     // Denkprozess ist in details vorhanden
     expect(screen.getByText('Ich analysiere die Quellen...')).toBeInTheDocument()
 
-    // Denkstufe-Select ist gerendert
-    const select = screen.getByRole('combobox')
-    expect(select).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: /Schnell|Fast/i })).toBeInTheDocument()
+    // DNA Dropdown-Button ist gerendert
+    const dropdownBtn = screen.getByRole('button', { name: /Denkstufe/i })
+    expect(dropdownBtn).toBeInTheDocument()
+    expect(screen.getByText(/Schnell|Fast/i)).toBeInTheDocument()
   })
 })
 
