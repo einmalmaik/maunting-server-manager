@@ -4,8 +4,10 @@ import {
   FENSTER_ID,
   istTabUebernommen,
   lauscheTabTransfer,
+  lauscheTabZiehNachrichten,
   packeTabTransfer,
   sendeTabUebernommen,
+  sendeTabZiehNachricht,
   TAB_MIME_TYP,
   type TabTransferDaten,
 } from './tabTransfer'
@@ -62,6 +64,31 @@ describe('tabTransfer Service', () => {
 
     expect(istTabUebernommen(tabId)).toBe(true)
 
+    abmelden()
+  })
+
+  it('überträgt Live-Zieh-Nachrichten zwischen Fenstern', async () => {
+    let empfangeneNachricht: unknown = null
+    const abmelden = lauscheTabZiehNachrichten((msg: unknown) => {
+      empfangeneNachricht = msg
+    })
+
+    const testMsg = {
+      art: 'ziehen',
+      ursprungFensterId: 'anderes-fenster-456',
+      tabId: 'tab-999',
+      url: 'https://youtube.com',
+      titel: 'YouTube',
+      favicon: null,
+      privat: false,
+      screenX: 400,
+      screenY: 20,
+    }
+
+    sendeTabZiehNachricht(testMsg)
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(empfangeneNachricht).toEqual(testMsg)
     abmelden()
   })
 })

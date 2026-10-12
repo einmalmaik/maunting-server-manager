@@ -575,4 +575,56 @@ describe('Kopfleiste Tab-Auslagern (Tear-off)', () => {
     expect(githubTab.url).toBe('https://github.com/')
     expect(githubTab.titel).toBe('GitHub')
   })
+
+  it('zeigt Phantom-Tab-Vorschau bei Live-Zieh-Nachricht aus anderem Fenster an und fügt ihn bei Ablegen ein', async () => {
+    const { sendeTabZiehNachricht } = await import('../services/tabTransfer')
+    render(<Kopfleiste />)
+
+    // Prüfen: Zu Beginn keine Vorschau
+    expect(screen.queryByTestId('phantom-tab-vorschau')).toBeNull()
+
+    // 1. Anderes Fenster zieht einen Tab über die Leiste dieses Fensters (Y = 20)
+    act(() => {
+      sendeTabZiehNachricht({
+        art: 'ziehen',
+        ursprungFensterId: 'fenster-b-888',
+        tabId: 'tab-foreign-888',
+        url: 'https://azure.microsoft.com/',
+        titel: 'Microsoft Azure Portal',
+        favicon: null,
+        privat: false,
+        screenX: 100,
+        screenY: 20,
+      })
+    })
+
+    await warten()
+
+    // Phantom-Vorschau und Indikator sind sichtbar
+    const phantom = screen.getByTestId('phantom-tab-vorschau')
+    expect(phantom).toBeInTheDocument()
+    expect(phantom).toHaveTextContent('Microsoft Azure Portal')
+
+    // 2. Ablegen
+    act(() => {
+      sendeTabZiehNachricht({
+        art: 'ablegen',
+        ursprungFensterId: 'fenster-b-888',
+        tabId: 'tab-foreign-888',
+        url: 'https://azure.microsoft.com/',
+        titel: 'Microsoft Azure Portal',
+        favicon: null,
+        privat: false,
+        screenX: 100,
+        screenY: 20,
+      })
+    })
+
+    await warten()
+
+    // Phantom ist wieder weg und der Tab ist integriert
+    expect(screen.queryByTestId('phantom-tab-vorschau')).toBeNull()
+    const tabs = useTabsStore.getState().tabs
+    expect(tabs.some((t) => t.url === 'https://azure.microsoft.com/')).toBe(true)
+  })
 })

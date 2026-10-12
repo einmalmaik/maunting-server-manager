@@ -193,3 +193,97 @@ export function lauscheTabTransfer(onUebernommen: (info: { ursprungFensterId: st
     for (const stop of abmelder) stop()
   }
 }
+
+export interface TabZiehNachricht {
+  art: 'ziehen' | 'ablegen' | 'abbrechen'
+  ursprungFensterId: string
+  tabId: string
+  url: string
+  titel: string
+  favicon: string | null
+  privat: boolean
+  screenX: number
+  screenY: number
+}
+
+const LIVE_KANAL_NAME = 'msb:tab-drag-live'
+const LIVE_SPEICHER_SCHLUESSEL = 'msb:tab-drag-live-speicher'
+
+let liveSenderKanal: BroadcastChannel | null = null
+function holeLiveSenderKanal(): BroadcastChannel | null {
+  if (typeof BroadcastChannel === 'undefined') return null
+  if (!liveSenderKanal) {
+    try {
+      liveSenderKanal = new BroadcastChannel(LIVE_KANAL_NAME)
+    } catch {}
+  }
+  return liveSenderKanal
+}
+
+export function sendeTabZiehNachricht(nachricht: TabZiehNachricht): void {
+  try {
+    const kanal = holeLiveSenderKanal()
+    kanal?.postMessage(nachricht)
+  } catch {}
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      if (nachricht.art === 'ziehen') {
+        localStorage.setItem(LIVE_SPEICHER_SCHLUESSEL, JSON.stringify({ ...nachricht, zeit: Date.now() }))
+      } else {
+        localStorage.removeItem(LIVE_SPEICHER_SCHLUESSEL)
+      }
+    }
+  } catch {}
+}
+
+export function lauscheTabZiehNachrichten(onNachricht: (msg: TabZiehNachricht) => void): () => void {
+  const abmelder: (() => void)[] = []
+
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      const kanal = new BroadcastChannel(LIVE_KANAL_NAME)
+      kanal.onmessage = (e: MessageEvent) => {
+        const msg = e.data as TabZiehNachricht
+        if (msg && typeof msg.ursprungFensterId === 'string' && typeof msg.art === 'string') {
+          onNachricht(msg)
+        }
+      }
+      abmelder.push(() => kanal.close())
+    } catch {}
+  }
+
+  if (typeof window !== 'undefined') {
+    const storageHandler = (e: StorageEvent) => {
+      if (e.key === LIVE_SPEICHER_SCHLUESSEL) {
+        if (e.newValue) {
+          try {
+            const parsed = JSON.parse(e.newValue) as TabZiehNachricht
+            if (parsed && typeof parsed.ursprungFensterId === 'string') {
+              onNachricht(parsed)
+            }
+          } catch {}
+        } else {
+          onNachricht({
+            art: 'abbrechen',
+            ursprungFensterId: '',
+            tabId: '',
+            url: '',
+            titel: '',
+            favicon: null,
+            privat: false,
+            screenX: 0,
+            screenY: 0,
+          })
+        }
+      }
+    }
+    window.addEventListener('storage', storageHandler)
+    abmelder.push(() => window.removeEventListener('storage', storageHandler))
+  }
+
+  return () => {
+    for (const stop of abmelder) stop()
+  }
+}
+
