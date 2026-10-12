@@ -232,7 +232,7 @@ function EinfuegeIndikator() {
     <div
       data-testid="tab-drop-indikator"
       aria-hidden="true"
-      className="relative flex h-8 w-2.5 shrink-0 items-center justify-center transition-all duration-150 ease-out animate-in fade-in zoom-in-50"
+      className="relative flex h-8 w-2.5 shrink-0 items-center justify-center transition-all duration-150 ease-out animate-scale-in"
     >
       <div className="h-6 w-1 rounded-full bg-primary shadow-[0_0_8px_rgba(99,102,241,0.9)] ring-2 ring-primary/40 animate-pulse" />
     </div>
@@ -244,7 +244,7 @@ function PhantomTabVorschau({ tab }: { tab: { titel: string; favicon: string | n
     <div
       data-testid="phantom-tab-vorschau"
       aria-hidden="true"
-      className="flex h-8 min-w-[7.5rem] max-w-[14rem] flex-1 select-none items-center gap-2 rounded-t-lg px-2.5 text-label-md bg-surface-container-high/80 text-primary border border-dashed border-primary/60 shadow-[0_0_12px_rgba(99,102,241,0.25)] transition-all duration-150 ease-out animate-in fade-in"
+      className="flex h-8 min-w-[7.5rem] max-w-[14rem] flex-1 select-none items-center gap-2 rounded-t-lg px-2.5 text-label-md bg-surface-container-high/80 text-primary border border-dashed border-primary/60 shadow-[0_0_12px_rgba(99,102,241,0.25)] transition-all duration-150 ease-out animate-fade-in"
     >
       <span className="flex h-4 w-4 shrink-0 items-center justify-center">
         {tab.favicon ? (
@@ -270,7 +270,7 @@ interface TabReiterProps {
   onDropTabLokal?: (tabId: string) => void
 }
 
-function TabReiter({ tab, aktiv, index, onHoverZieh, onDropTab, onZielBerechnen, onDropTabLokal }: TabReiterProps) {
+function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBerechnen, onDropTabLokal }: TabReiterProps) {
   const { t } = useTranslation()
   const { aktivieren, schliessen } = useTabsStore.getState()
   const titel = tabTitel(tab, { neu: t('browser.tabs.neu'), einstellungen: t('browser.einstellungen.titel') })
