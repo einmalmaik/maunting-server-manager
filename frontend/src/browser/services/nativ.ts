@@ -189,10 +189,15 @@ export const nativ = {
   tabsLeistung: (schlafenMinuten: number | null, verwerfen: boolean, ausnahmen: string[]) =>
     rufen('tabs_leistung', { schlafenMinuten, verwerfen, ausnahmen }),
   fensterAktion: (aktion: 'minimieren' | 'maximieren' | 'schliessen') => rufen('fenster_aktion', { aktion }),
+  /** Startinformationen dieses Browserfenster-Prozesses (z. B. ausgelagertes Einzelfenster). */
+  fensterStartInfo: () => rufen<FensterStartInfo>('fenster_start_info'),
   /** Namensblase über der Seite (`kurzinfo.rs`); `null` verbirgt sie. */
   kurzinfo: (blase: Record<string, unknown> | null) => rufen('kurzinfo', { blase }),
   downloadZeigen: (pfad: string) => rufen('download_zeigen', { pfad }),
+  downloadOeffnen: (pfad: string) => rufen('download_oeffnen', { pfad }),
+  downloadLoeschen: (pfad?: string | null) => rufen('download_loeschen', { pfad: pfad ?? null }),
   downloadOrdner: () => rufen<string>('download_ordner'),
+  downloadOrdnerOeffnen: () => rufen('download_ordner_oeffnen'),
   /** `seit` in Millisekunden seit 1970; ohne: alles. */
   seitendatenLoeschen: (seit?: number) => rufen('seitendaten_loeschen', { seit: seit ?? null }),
   seitenrechte: () => rufen<Seitenrecht[]>('seitenrechte'),
@@ -233,6 +238,12 @@ export const nativ = {
   updatePruefen: () => rufen<string | null>('update_pruefen'),
   /** Lädt, prüft die Signatur und startet den Installer; der Browser endet dabei. */
   updateInstallieren: () => rufen('update_installieren'),
+}
+
+export interface FensterStartInfo {
+  ist_neues_fenster: boolean
+  start_url: string | null
+  privat: boolean
 }
 
 export type WidgetStart =

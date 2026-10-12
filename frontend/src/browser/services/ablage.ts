@@ -18,7 +18,7 @@ export const TITEL_MAX = 300
 
 let zuletztGesagt = 0
 
-export const ablage = createJSONStorage(() => ({
+export const lokalerSpeicher = {
   getItem: (name: string) => localStorage.getItem(name),
   setItem: (name: string, wert: string) => {
     try {
@@ -30,7 +30,9 @@ export const ablage = createJSONStorage(() => ({
     }
   },
   removeItem: (name: string) => localStorage.removeItem(name),
-}))
+}
+
+export const ablage = createJSONStorage(() => lokalerSpeicher)
 
 /**
  * Aus einem gespeicherten Stand nur die Werte, die den Typ der Vorgabe haben.

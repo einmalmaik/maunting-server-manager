@@ -3,17 +3,40 @@
  * und Favicon, nie private. Gelesen wird nur, was `partialize` schreibt, mit
  * dem richtigen Typ (`merge`).
  */
-import type { PersistOptions } from 'zustand/middleware'
+import { createJSONStorage, type PersistOptions } from 'zustand/middleware'
 
-import { ablage, ADRESSE_MAX, kurzerTitel, passend } from './ablage'
+import { ADRESSE_MAX, kurzerTitel, lokalerSpeicher, passend } from './ablage'
 import { leererTab } from './tab'
 import type { TabsZustand } from './tabsStore'
+
+let unterfensterAktiv = false
+
+export function setzeUnterfenster(aktiv: boolean): void {
+  unterfensterAktiv = aktiv
+}
+
+export function istUnterfenster(): boolean {
+  return unterfensterAktiv
+}
 
 export const tabsSpeichern: PersistOptions<TabsZustand, unknown> = {
   name: 'msb:tabs',
   version: 1,
-  storage: ablage,
+  storage: createJSONStorage(() => ({
+    getItem: (name: string) => (unterfensterAktiv ? null : lokalerSpeicher.getItem(name)),
+    setItem: (name: string, wert: string) => {
+      if (unterfensterAktiv) return
+      lokalerSpeicher.setItem(name, wert)
+    },
+    removeItem: (name: string) => {
+      if (unterfensterAktiv) return
+      lokalerSpeicher.removeItem(name)
+    },
+  })),
   partialize: (s) => {
+    if (unterfensterAktiv) {
+      return {}
+    }
     const tabs = s.tabs
       .filter((t) => !t.privat)
       .map((t) => ({
@@ -27,6 +50,9 @@ export const tabsSpeichern: PersistOptions<TabsZustand, unknown> = {
     return { tabs, aktivId }
   },
   merge: (gespeichert, aktuell) => {
+    if (unterfensterAktiv) {
+      return aktuell
+    }
     const g = (gespeichert ?? {}) as { tabs?: unknown; aktivId?: unknown }
     // Nur Tabs mit gültiger Kennung und von ihnen nur, was `partialize`
     // schreibt, mit dem richtigen Typ; der Rest kommt aus dem leeren Tab.

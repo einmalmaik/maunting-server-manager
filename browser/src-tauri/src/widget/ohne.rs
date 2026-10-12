@@ -38,7 +38,7 @@ pub fn link_aufnehmen(app: &AppHandle, argumente: &[String]) {
     }
 }
 
-fn link_aus(argument: &str) -> Option<String> {
+pub fn link_aus(argument: &str) -> Option<String> {
     if argument.len() > LINK_MAX {
         return None;
     }

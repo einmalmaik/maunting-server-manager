@@ -29,6 +29,9 @@ export function widgetAusfuehren(start: WidgetStart, adresszeile: () => void): v
     const privat = Boolean(start.privat)
     const hatUrl = Boolean(start.url && (istWebseite(start.url) || istIntern(start.url)))
     if (hatUrl || privat) {
+      if (tabs.tabs.length === 1 && tabs.tabs[0].url === start.url) {
+        return
+      }
       const einzigerLeer = tabs.tabs.length === 1 && !tabs.tabs[0].url
       if (einzigerLeer && !privat && hatUrl) {
         tabs.oeffnen(start.url, tabs.tabs[0].id)

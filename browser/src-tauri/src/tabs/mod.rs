@@ -316,6 +316,11 @@ pub fn tab_auslagern(url: String, x: i32, y: i32, privat: Option<bool>) -> Resul
     if privat.unwrap_or(false) {
         cmd.arg("--privat");
     }
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
+        let _ = AllowSetForegroundWindow(ASFW_ANY);
+    }
     cmd.spawn().map_err(|e| format!("Fehler beim Starten des neuen Fensters: {e}"))?;
     Ok(())
 }

@@ -1,14 +1,16 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { gerufen, abweisen } = vi.hoisted(() => ({
+const { gerufen, abweisen, antworten } = vi.hoisted(() => ({
   gerufen: [] as { befehl: string; args: unknown }[],
   abweisen: {} as Record<string, unknown>,
+  antworten: {} as Record<string, unknown>,
 }))
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (befehl: string, args: unknown) => {
     gerufen.push({ befehl, args })
+    if (befehl in antworten) return Promise.resolve(antworten[befehl])
     return befehl in abweisen ? Promise.reject(abweisen[befehl]) : Promise.resolve(null)
   },
 }))
@@ -344,4 +346,63 @@ describe('zurueckGehen und Verlauf', () => {
     // Erneutes Zurückgehen auf der leeren Startseite ohne Verlauf liefert false
     expect(useTabsStore.getState().zurueckGehen()).toBe(false)
   })
+
+  it('hochfahren in neuem Einzelfenster initialisiert genau einen Tab und lädt die Start-URL', async () => {
+    // Vorher mehrere Tabs im Zustand
+    useTabsStore.setState({
+      tabs: [
+        { ...useTabsStore.getState().tabs[0], id: 'alt-1', url: 'https://alte-seite-1.example/' },
+        { ...useTabsStore.getState().tabs[0], id: 'alt-2', url: 'https://alte-seite-2.example/' },
+      ],
+      aktivId: 'alt-1',
+    })
+
+    // Rust meldet, dass dieses Fenster als neues Einzelfenster (Tear-off) gestartet wurde
+    antworten.fenster_start_info = {
+      ist_neues_fenster: true,
+      start_url: 'https://youtube.com/watch?v=standalone',
+      privat: false,
+    }
+
+    await useTabsStore.getState().hochfahren()
+
+    const zustand = useTabsStore.getState()
+    // Es darf AUSSCHLIESSLICH der eine ausgelagerte Tab existieren!
+    expect(zustand.tabs).toHaveLength(1)
+    expect(zustand.tabs[0].url).toBe('https://youtube.com/watch?v=standalone')
+    expect(zustand.tabs[0].nativDa).toBe(true)
+    expect(zustand.aktivId).toBe(zustand.tabs[0].id)
+
+    // tab_laden wurde für die URL aufgerufen
+    const ladeAufruf = gerufen.find((g) => g.befehl === 'tab_laden' && (g.args as { url: string }).url === 'https://youtube.com/watch?v=standalone')
+    expect(ladeAufruf).toBeDefined()
+
+    delete antworten.fenster_start_info
+  })
+
+  it('hochfahren in neuem Einzelfenster ohne URL öffnet eine saubere Startseite mit genau einem Tab', async () => {
+    useTabsStore.setState({
+      tabs: [
+        { ...useTabsStore.getState().tabs[0], id: 'alt-1', url: 'https://alte-seite-1.example/' },
+        { ...useTabsStore.getState().tabs[0], id: 'alt-2', url: 'https://alte-seite-2.example/' },
+      ],
+      aktivId: 'alt-1',
+    })
+
+    antworten.fenster_start_info = {
+      ist_neues_fenster: true,
+      start_url: null,
+      privat: true,
+    }
+
+    await useTabsStore.getState().hochfahren()
+
+    const zustand = useTabsStore.getState()
+    expect(zustand.tabs).toHaveLength(1)
+    expect(zustand.tabs[0].url).toBe('')
+    expect(zustand.tabs[0].privat).toBe(true)
+
+    delete antworten.fenster_start_info
+  })
 })
+

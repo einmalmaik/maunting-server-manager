@@ -68,8 +68,7 @@ pub fn run() {
         builder.plugin(tauri_plugin_single_instance::init(|app, argumente, _| {
             widget::link_aufnehmen(app, &argumente);
             if let Some(fenster) = app.get_webview_window("main") {
-                let _ = fenster.unminimize();
-                let _ = fenster.set_focus();
+                fenster::fenster_nach_vorn(&fenster);
             }
         }))
     }
@@ -108,6 +107,15 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 let args: Vec<String> = std::env::args().collect();
+                let ist_neues_fenster = args.iter().any(|a| a == "--neues-fenster");
+                let privat = args.iter().any(|a| a == "--privat");
+                let start_url = args.iter().skip(1).find_map(|a| widget::link_aus(a));
+                app.manage(fenster::StartArgumente {
+                    ist_neues_fenster,
+                    start_url,
+                    privat,
+                });
+
                 if let (Some(x_pos), Some(y_pos)) = (args.iter().position(|a| a == "--x"), args.iter().position(|a| a == "--y")) {
                     if let (Some(x_str), Some(y_str)) = (args.get(x_pos + 1), args.get(y_pos + 1)) {
                         if let (Ok(x), Ok(y)) = (x_str.parse::<i32>(), y_str.parse::<i32>()) {
@@ -119,6 +127,9 @@ pub fn run() {
                             }
                         }
                     }
+                }
+                if let Some(fenster) = app.get_webview_window("main") {
+                    fenster::fenster_nach_vorn(&fenster);
                 }
                 widget::link_aufnehmen(handle, &args);
             }
@@ -170,7 +181,11 @@ pub fn run() {
             schild::schutz_dienst::schutz_bestaetigen,
             downloads::download_zeigen,
             downloads::download_ordner,
+            downloads::download_oeffnen,
+            downloads::download_loeschen,
+            downloads::download_ordner_oeffnen,
             fenster::fenster_aktion,
+            fenster::fenster_start_info,
             kurzinfo::kurzinfo,
             browserdaten::seitendaten_loeschen,
             browserdaten::seitenrechte,

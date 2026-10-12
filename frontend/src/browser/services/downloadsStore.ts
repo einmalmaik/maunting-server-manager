@@ -23,6 +23,7 @@ interface DownloadsZustand {
   ereignis: (e: Extract<TabEreignis, { art: 'download' }>) => void
   gesehen: () => void
   leeren: () => void
+  loeschen: (nr: number) => void
 }
 
 export const useDownloadsStore = create<DownloadsZustand>()((set) => ({
@@ -45,4 +46,5 @@ export const useDownloadsStore = create<DownloadsZustand>()((set) => ({
 
   gesehen: () => set({ neu: 0 }),
   leeren: () => set((s) => ({ downloads: s.downloads.filter((d) => d.stand === 'start' || d.stand === 'pruefung') })),
+  loeschen: (nr: number) => set((s) => ({ downloads: s.downloads.filter((d) => d.nr !== nr) })),
 }))

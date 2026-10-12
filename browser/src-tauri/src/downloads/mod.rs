@@ -182,6 +182,19 @@ pub fn erzeugt_ablegen(app: &AppHandle, name: &str, daten: &[u8]) -> std::io::Re
     ergebnis
 }
 
+/// Entfernt das Windows-Verbatim-Präfix (`\\?\` bzw. `\\?\UNC\`), damit Shell-APIs
+/// wie `ILCreateFromPathW` und `ShellExecuteW` den Pfad verarbeiten können.
+pub fn strip_verbatim(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// Zeigt eine heruntergeladene Datei im Explorer. Nur Dateien im
 /// Download-Ordner und solche, die diese Sitzung woanders abgelegt hat: der
 /// Befehl ist kein allgemeiner Dateiöffner. Unter Android legt der
@@ -200,7 +213,106 @@ pub fn download_zeigen(app: AppHandle, pfad: String) -> Result<(), String> {
         if !datei.starts_with(&erlaubt) && !FERTIG.lock().unwrap().contains(&datei) {
             return Err("Die Datei liegt nicht im Download-Ordner.".into());
         }
-        im_explorer_zeigen(&datei)
+        let sauber = strip_verbatim(&datei);
+        im_explorer_zeigen(&sauber)
+    }
+}
+
+/// Öffnet die heruntergeladene Datei mit der im System registrierten Standardanwendung.
+#[tauri::command(async)]
+pub fn download_oeffnen(app: AppHandle, pfad: String) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = (app, pfad);
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        let datei = PathBuf::from(&pfad).canonicalize().map_err(|_| "Die Datei gibt es nicht mehr.".to_string())?;
+        let erlaubt = ordner(&app).canonicalize().map_err(|e| e.to_string())?;
+        if !datei.starts_with(&erlaubt) && !FERTIG.lock().unwrap().contains(&datei) {
+            return Err("Die Datei liegt nicht im Download-Ordner.".into());
+        }
+        let sauber = strip_verbatim(&datei);
+        use windows::core::HSTRING;
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        unsafe {
+            let res = ShellExecuteW(
+                None,
+                windows::core::w!("open"),
+                &HSTRING::from(sauber.as_os_str()),
+                None,
+                None,
+                SW_SHOWNORMAL,
+            );
+            if (res.0 as isize) <= 32 {
+                return Err(format!("Datei konnte nicht geöffnet werden (Code {})", res.0 as isize));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Löscht eine heruntergeladene Datei vom Datenträger (sofern sie im Download-Ordner liegt
+/// oder in dieser Sitzung erzeugt wurde).
+#[tauri::command(async)]
+pub fn download_loeschen(app: AppHandle, pfad: Option<String>) -> Result<(), String> {
+    let Some(pfad) = pfad else {
+        return Ok(());
+    };
+    #[cfg(target_os = "android")]
+    {
+        let _ = (app, pfad);
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        let datei = PathBuf::from(&pfad);
+        let Ok(echte_datei) = datei.canonicalize() else {
+            return Ok(());
+        };
+        let erlaubt = ordner(&app).canonicalize().map_err(|e| e.to_string())?;
+        if !echte_datei.starts_with(&erlaubt) && !FERTIG.lock().unwrap().contains(&echte_datei) {
+            return Err("Die Datei liegt nicht im Download-Ordner.".into());
+        }
+        FERTIG.lock().unwrap().remove(&echte_datei);
+        let sauber = strip_verbatim(&echte_datei);
+        if sauber.exists() {
+            std::fs::remove_file(&sauber).map_err(|e| format!("Datei konnte nicht gelöscht werden: {e}"))?;
+        }
+        Ok(())
+    }
+}
+
+/// Öffnet den Download-Ordner direkt im Explorer.
+#[tauri::command(async)]
+pub fn download_ordner_oeffnen(app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::tabs::android::downloads_zeigen(&app)
+    }
+    #[cfg(windows)]
+    {
+        let ordner = ordner(&app);
+        let ordner = strip_verbatim(&ordner.canonicalize().unwrap_or(ordner));
+        use windows::core::HSTRING;
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        unsafe {
+            let res = ShellExecuteW(
+                None,
+                windows::core::w!("open"),
+                &HSTRING::from(ordner.as_os_str()),
+                None,
+                None,
+                SW_SHOWNORMAL,
+            );
+            if (res.0 as isize) <= 32 {
+                return Err(format!("Ordner konnte nicht geöffnet werden (Code {})", res.0 as isize));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -216,10 +328,28 @@ fn im_explorer_zeigen(datei: &Path) -> Result<(), String> {
         let com = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let eintrag = ILCreateFromPathW(&HSTRING::from(datei.as_os_str()));
         let ergebnis = if eintrag.is_null() {
-            Err("Die Datei gibt es nicht mehr.".to_string())
+            if let Some(parent) = datei.parent() {
+                use windows::Win32::UI::Shell::ShellExecuteW;
+                use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+                let res = ShellExecuteW(None, windows::core::w!("open"), &HSTRING::from(parent.as_os_str()), None, None, SW_SHOWNORMAL);
+                if (res.0 as isize) <= 32 {
+                    Err("Die Datei gibt es nicht mehr.".to_string())
+                } else {
+                    Ok(())
+                }
+            } else {
+                Err("Die Datei gibt es nicht mehr.".to_string())
+            }
         } else {
             let ergebnis = SHOpenFolderAndSelectItems(eintrag, None, 0).map_err(|e| e.to_string());
             ILFree(Some(eintrag));
+            if ergebnis.is_err() {
+                if let Some(parent) = datei.parent() {
+                    use windows::Win32::UI::Shell::ShellExecuteW;
+                    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+                    let _ = ShellExecuteW(None, windows::core::w!("open"), &HSTRING::from(parent.as_os_str()), None, None, SW_SHOWNORMAL);
+                }
+            }
             ergebnis
         };
         if com.is_ok() {
@@ -367,5 +497,12 @@ mod tests {
         assert_eq!(freier_pfad(&ordner, "bericht.pdf"), ordner.join("bericht (2).pdf"));
         assert_eq!(freier_pfad(&ordner, "neu.pdf"), ordner.join("neu.pdf"));
         std::fs::remove_dir_all(&ordner).unwrap();
+    }
+
+    #[test]
+    fn strip_verbatim_entfernt_praefixe() {
+        assert_eq!(strip_verbatim(Path::new(r"\\?\C:\a\b.txt")), PathBuf::from(r"C:\a\b.txt"));
+        assert_eq!(strip_verbatim(Path::new(r"\\?\UNC\server\share\b.txt")), PathBuf::from(r"\\server\share\b.txt"));
+        assert_eq!(strip_verbatim(Path::new(r"C:\a\b.txt")), PathBuf::from(r"C:\a\b.txt"));
     }
 }

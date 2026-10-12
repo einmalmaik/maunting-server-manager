@@ -35,4 +35,11 @@ describe('Downloads', () => {
     useDownloadsStore.getState().leeren()
     expect(useDownloadsStore.getState().downloads.map((d) => d.nr)).toEqual([3, 2])
   })
+
+  it('löscht einen einzelnen Download anhand seiner Nummer', () => {
+    melden(1, 'fertig', 'a')
+    melden(2, 'start')
+    useDownloadsStore.getState().loeschen(1)
+    expect(useDownloadsStore.getState().downloads.map((d) => d.nr)).toEqual([2])
+  })
 })

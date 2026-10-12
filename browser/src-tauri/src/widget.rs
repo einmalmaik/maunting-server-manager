@@ -19,7 +19,7 @@ mod ohne;
 #[cfg(not(target_os = "android"))]
 use ohne as plattform;
 #[cfg(not(target_os = "android"))]
-pub use ohne::link_aufnehmen;
+pub use ohne::{link_aufnehmen, link_aus};
 
 use crate::tabs::{id_pruefen, weg, ziel_pruefen, Tabs, Weg};
 

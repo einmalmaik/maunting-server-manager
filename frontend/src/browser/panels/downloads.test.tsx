@@ -63,6 +63,40 @@ describe('Downloads mit Virenschutz', () => {
     expect(within(zeile).getByText('Abgebrochen: zu wenig Speicher auf dem Gerät')).toBeInTheDocument()
   })
 
+  it('öffnet eine fertige Datei, zeigt sie im Ordner und öffnet den Download-Ordner', async () => {
+    melde(1, 'fertig', 'C:\\Downloads\\test.pdf')
+    render(<DownloadsPanel />)
+    const zeile = screen.getByText('test.pdf').closest('li')!
+    // Klick auf Dateinamen öffnet die Datei
+    fireEvent.click(within(zeile).getByRole('button', { name: 'test.pdf' }))
+    expect(gerufen).toContainEqual({ befehl: 'download_oeffnen', args: { pfad: 'C:\\Downloads\\test.pdf' } })
+
+    // Klick auf Öffnen-Icon-Button öffnet ebenfalls
+    fireEvent.click(within(zeile).getByRole('button', { name: 'test.pdf öffnen' }))
+    expect(gerufen.filter((g) => g.befehl === 'download_oeffnen')).toHaveLength(2)
+
+    // Klick auf Ordner-Button zeigt im Explorer
+    fireEvent.click(within(zeile).getByRole('button', { name: 'test.pdf im Ordner zeigen' }))
+    expect(gerufen).toContainEqual({ befehl: 'download_zeigen', args: { pfad: 'C:\\Downloads\\test.pdf' } })
+
+    // Kopfzeilen-Button öffnet Download-Ordner
+    fireEvent.click(screen.getByRole('button', { name: 'Ordner öffnen' }))
+    expect(gerufen).toContainEqual({ befehl: 'download_ordner_oeffnen', args: undefined })
+  })
+
+  it('löscht eine Datei und entfernt sie aus der Liste', async () => {
+    melde(1, 'fertig', 'C:\\Downloads\\test.pdf')
+    render(<DownloadsPanel />)
+    expect(screen.getByText('test.pdf')).toBeInTheDocument()
+
+    // Klick auf Lösch-Button
+    fireEvent.click(screen.getByRole('button', { name: 'test.pdf von der Festplatte löschen' }))
+    await waitFor(() => {
+      expect(gerufen).toContainEqual({ befehl: 'download_loeschen', args: { pfad: 'C:\\Downloads\\test.pdf' } })
+      expect(screen.queryByText('test.pdf')).toBeNull()
+    })
+  })
+
   it('schaltet „Bei jedem Download fragen“ in der Gerätekonfiguration', async () => {
     render(<Downloads />)
     fireEvent.click(screen.getByRole('switch', { name: 'Bei jedem Download fragen' }))

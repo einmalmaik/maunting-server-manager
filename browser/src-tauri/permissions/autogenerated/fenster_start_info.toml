@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-fenster-start-info"
+description = "Enables the fenster_start_info command without any pre-configured scope."
+commands.allow = ["fenster_start_info"]
+
+[[permission]]
+identifier = "deny-fenster-start-info"
+description = "Denies the fenster_start_info command without any pre-configured scope."
+commands.deny = ["fenster_start_info"]

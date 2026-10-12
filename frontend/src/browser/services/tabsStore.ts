@@ -22,7 +22,7 @@ import { useRueckfragen } from './rueckfragen'
 import { baueZielUrl, type Suchmaschine } from './searchEngines'
 import { leererTab, neueTabId, webviewZeigen, type Tab } from './tab'
 import { ereignisAnwenden } from './tabEreignis'
-import { tabsSpeichern } from './tabsAblage'
+import { setzeUnterfenster, tabsSpeichern } from './tabsAblage'
 import { tabWeg as entwicklerTabWeg } from '../entwickler/werkzeuge'
 import { useUebersetzung } from '../uebersetzung/ablauf'
 
@@ -343,6 +343,31 @@ export const useTabsStore = create<TabsZustand>()(
           // Webviews aus einem früheren Lauf der Oberfläche (Neuladen nach
           // der Kopplung) gehören zu keinem Tab mehr.
           await nativ.tabsZuruecksetzen().catch(() => null)
+          const startInfo = await nativ.fensterStartInfo().catch(() => null)
+          if (startInfo?.ist_neues_fenster) {
+            setzeUnterfenster(true)
+            const neuId = neueTabId()
+            const hatUrl = Boolean(startInfo.start_url && (istWebseite(startInfo.start_url) || istIntern(startInfo.start_url)))
+            const zielUrl = hatUrl ? startInfo.start_url! : ''
+            const tab: Tab = {
+              ...leererTab(neuId, startInfo.privat),
+              url: zielUrl,
+              titel: zielUrl || '',
+            }
+            set({
+              tabs: [tab],
+              aktivId: neuId,
+              geschlossen: [],
+              verlaufIds: [],
+            })
+            if (hatUrl) {
+              laden(neuId, zielUrl)
+            } else {
+              zeigen(neuId)
+            }
+            return
+          }
+
           if (ersterStart() && useEinstellungenStore.getState().beimStart === 'startseite') {
             // Die Tabs vom letzten Mal bleiben über „Tab wiederherstellen“ erreichbar.
             const neu = leererTab(neueTabId())
