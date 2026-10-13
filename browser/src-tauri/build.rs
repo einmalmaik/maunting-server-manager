@@ -61,6 +61,7 @@ const BEFEHLE: &[&str] = &[
     "schutz_binden",
     "schutz_abbrechen",
     "schutz_bestaetigen",
+    "download_abbrechen",
     "download_zeigen",
     "download_ordner",
     "download_oeffnen",

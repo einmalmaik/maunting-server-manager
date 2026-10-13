@@ -26,8 +26,9 @@ export interface TabZugriff {
 
 export function ereignisAnwenden(e: TabEreignis, z: TabZugriff): void {
   // Downloads gehören keinem Tab: auch das Popup einer Erweiterung lädt
-  // herunter, und ein geschlossener Tab lädt zu Ende.
-  if (e.art === 'download') {
+  // herunter, und ein geschlossener Tab lädt zu Ende. Fortschritt zählt nie
+  // als neuer Download.
+  if (e.art === 'download' || e.art === 'download_fortschritt') {
     useDownloadsStore.getState().ereignis(e)
     return
   }

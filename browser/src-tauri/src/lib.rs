@@ -181,6 +181,7 @@ pub fn run() {
             schild::schutz_dienst::schutz_binden,
             schild::schutz_dienst::schutz_abbrechen,
             schild::schutz_dienst::schutz_bestaetigen,
+            tabs::download_abbrechen,
             downloads::download_zeigen,
             downloads::download_ordner,
             downloads::download_oeffnen,

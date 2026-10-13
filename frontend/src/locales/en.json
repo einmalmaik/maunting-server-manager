@@ -8777,8 +8777,17 @@
         "fertig": "Done",
         "blockiert": "Blocked by the antivirus and deleted",
         "fehler": "Failed",
-        "speicher": "Stopped: not enough storage on the device"
-      }
+        "speicher": "Stopped: not enough storage on the device",
+        "abgebrochen": "Cancelled"
+      },
+      "von": "{{empfangen}} of {{gesamt}}",
+      "nurEmpfangen": "{{empfangen}} received",
+      "rate": "{{rate}}/s",
+      "eta": "about {{zeit}} left",
+      "wartet": "Waiting for {{zeit}} — the transfer is stalled but still running",
+      "abbrechen": "Cancel download",
+      "abbrechenName": "Cancel {{name}}",
+      "fortschrittName": "Progress of {{name}}"
     },
     "hintergrund": {
       "schlicht": "Plain",

@@ -39,6 +39,33 @@ pub(super) unsafe fn anmelden(id: &str, core: &ICoreWebView2) -> windows::core::
     Ok(rx)
 }
 
+/// Wie [`anmelden`], setzt aber danach auf demselben Faden fort, ohne dass der
+/// Aufrufer wartet: für den Popup-Aufbau, der in keinem `wait_with_pump` stehen
+/// darf (Rückruf-Kontext). UI-Faden.
+pub(crate) unsafe fn anmelden_ohne_warten(
+    id: &str,
+    core: &ICoreWebView2,
+    weiter: impl FnOnce(windows::core::Result<()>) + 'static,
+) -> windows::core::Result<()> {
+    let (id, fassung, core_spaeter) = (id.to_string(), FASSUNG.get(), core.clone());
+    core.AddScriptToExecuteOnDocumentCreated(
+        &HSTRING::from(crate::cookies::skript()),
+        &AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(move |fehler, kennung| {
+            let ergebnis = fehler.clone();
+            if ergebnis.is_ok() {
+                if fassung == FASSUNG.get() {
+                    KENNUNGEN.with(|k| k.borrow_mut().insert(id, kennung));
+                } else {
+                    let _ = core_spaeter.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(kennung));
+                }
+            }
+            weiter(ergebnis);
+            Ok(())
+        })),
+    )?;
+    Ok(())
+}
+
 /// Ersetzt das Skript in allen Tabs; gilt ab dem nächsten Dokument.
 pub fn erneuern(app: &AppHandle) {
     let _ = super::auf_ui(app, || {

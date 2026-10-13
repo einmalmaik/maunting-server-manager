@@ -215,21 +215,53 @@ fn anlegen(app: &AppHandle, id: &str, privat: bool) -> Result<ICoreWebView2, Str
     Ok(core)
 }
 
-/// Legt den Controller für einen durch ein Fenster (window.open, NewWindowRequested)
-/// geöffneten Tab an. Läuft auf dem UI-Faden.
-pub(super) fn neuer_tab_fenster(app: &AppHandle, eltern_id: &str) -> Result<(String, ICoreWebView2), String> {
+/// Kennung für einen Popup-Tab (`tab-p…`). Vergeben schon beim Einplanen des
+/// Fenster-Rückrufs, damit der stufenweise Aufbau sie ab dem ersten Schritt
+/// kennt (der Rückruf kehrt zurück, bevor der Controller steht).
+pub(super) fn popup_id() -> String {
     static NAECHSTE_TAB_NR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    let privat = NATIV.with(|n| n.borrow().get(eltern_id).map(|t| t.privat).unwrap_or(false));
     let jetzt = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     let nr = NAECHSTE_TAB_NR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let neue_id = format!("tab-p{}-{}", jetzt, nr);
+    format!("tab-p{}-{}", jetzt, nr)
+}
 
-    let tabs = app.state::<Tabs>();
-    crate::tabs::eintragen(&tabs, &neue_id, privat);
+/// Hängt alles an den Kern eines Popup-Tabs: die Skripte gelten schon (der
+/// stufenweise Aufbau in `grundereignisse` hat ihre Rückrufe abgewartet), hier
+/// kommen nur die Anbindungen dazu, ohne jedes Warten. UI-Faden.
+pub(super) fn popup_einrichten(
+    app: &AppHandle,
+    id: &str,
+    controller: ICoreWebView2Controller,
+    core: &ICoreWebView2,
+    umgebung: ICoreWebView2Environment,
+    privat: bool,
+) -> Result<(), String> {
+    unsafe {
+        // Wie in `anlegen`: `seite.js` braucht die Nachrichten, die Seite
+        // bekommt keine Host-Objekte.
+        let einstellungen = core.Settings().map_err(fehler)?;
+        einstellungen.SetIsWebMessageEnabled(true).map_err(fehler)?;
+        einstellungen.SetAreHostObjectsAllowed(false).map_err(fehler)?;
+        grundereignisse::anbinden(app, id, core).map_err(fehler)?;
+        formulare::anbinden(app, id, core).map_err(fehler)?;
+        schlaf::anbinden(app, id, core).map_err(fehler)?;
+        herunterladen::anbinden(app, id, core, privat).map_err(fehler)?;
+        webview2::einrichten(app, id, controller.clone(), umgebung.clone()).map_err(fehler)?;
+    }
+    NATIV.with(|n| n.borrow_mut().insert(id.to_string(), Nativ { controller, core: core.clone(), umgebung, privat }));
+    Ok(())
+}
 
-    let core = anlegen(app, &neue_id, privat)?;
-    rahmen_anwenden(app, &tabs);
-    Ok((neue_id, core))
+/// Liest das Profil eines Tabs auf dem UI-Faden (für den Popup-Aufbau, bevor
+/// der Rückruf zurückkehrt).
+pub(super) fn tab_privat(eltern_id: &str) -> bool {
+    NATIV.with(|n| n.borrow().get(eltern_id).map(|t| t.privat).unwrap_or(false))
+}
+
+/// Stößt den Abbruch eines laufenden Downloads an (`nr` aus
+/// `TabEreignis::Download`). Der Abbruch selbst läuft auf dem UI-Faden.
+pub fn download_abbrechen(app: &AppHandle, nr: u64) -> Result<bool, String> {
+    auf_ui(app, move || Ok(herunterladen::abbrechen(nr)))
 }
 
 /// Zeigt den vorderen Tab, versteckt alle anderen. Der vordere wacht auf,

@@ -129,6 +129,35 @@ pub(crate) fn eintragen(tabs: &Tabs, id: &str, privat: bool) {
     z.tabs.entry(id.to_string()).or_insert(TabDaten { privat, verborgen_seit: (!vorne).then(Instant::now) });
 }
 
+/// Vergisst einen Tab, dessen Webview nie entstanden ist (etwa nach einem
+/// fehlgeschlagenen Popup-Aufbau). Die Oberfläche hat von ihm nie erfahren.
+pub(crate) fn austragen(tabs: &Tabs, id: &str) {
+    let mut z = tabs.0.lock().unwrap();
+    z.tabs.remove(id);
+    if z.aktiv.as_deref() == Some(id) {
+        z.aktiv = None;
+    }
+    if z.vollbild.as_deref() == Some(id) {
+        z.vollbild = None;
+    }
+}
+
+/// Bricht einen laufenden Download ab (`nr` aus `TabEreignis::Download`).
+/// Gibt an, ob der Abbruch angestoßen wurde. Unter Android lädt der
+/// Systemdienst (`Herunterladen.kt`); dort gibt es nichts abzubrechen.
+#[tauri::command(async)]
+pub fn download_abbrechen(app: AppHandle, nr: u64) -> Result<bool, String> {
+    #[cfg(windows)]
+    {
+        plattform::download_abbrechen(&app, nr)
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = (app, nr);
+        Ok(false)
+    }
+}
+
 /// Legt einen Tab nach vorne. `None` heißt: kein Tab mit Webview vorne (etwa
 /// die Startseite eines neuen Tabs).
 #[tauri::command(async)]

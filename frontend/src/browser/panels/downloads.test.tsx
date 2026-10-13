@@ -103,3 +103,70 @@ describe('Downloads mit Virenschutz', () => {
     await waitFor(() => expect(gerufen.find((g) => g.befehl === 'konfig_aendern')?.args).toEqual({ felder: { download_fragen: true } }))
   })
 })
+
+describe('Download-Fortschritt', () => {
+  const fortschritt = (nr: number, empfangen: number, gesamt: number | null, rest = 12) =>
+    useDownloadsStore.getState().ereignis({
+      art: 'download_fortschritt',
+      id: 'tab-a',
+      nr,
+      empfangen,
+      gesamt,
+      bytes_pro_sekunde: 102400,
+      rest_sekunden: gesamt == null ? null : rest,
+      ohne_daten_sekunden: 0,
+    })
+
+  it('zeigt Balken, Bytes, Rate und „ca.“-Restzeit statt eines blinden Ladens', () => {
+    melde(1, 'start', 'gross.iso')
+    fortschritt(1, 512 * 1024, 2 * 1024 * 1024)
+    render(<DownloadsPanel />)
+    const zeile = screen.getByText('gross.iso').closest('li')!
+    expect(within(zeile).getByRole('progressbar', { name: 'Fortschritt von gross.iso' })).toBeInTheDocument()
+    expect(within(zeile).getByText(/512.*von 2.*MB/)).toBeInTheDocument()
+    expect(within(zeile).getByText(/100.*KB\/s/)).toBeInTheDocument()
+    expect(within(zeile).getByText(/ca\. 12 s/)).toBeInTheDocument()
+  })
+
+  it('bricht laufende Downloads wirklich ab, statt sie nur auszublenden', async () => {
+    melde(1, 'start', 'gross.iso')
+    fortschritt(1, 100, 1000)
+    render(<DownloadsPanel />)
+    const zeile = screen.getByText('gross.iso').closest('li')!
+    // Kein Datei-Löschen am laufenden Download.
+    expect(within(zeile).queryByRole('button', { name: 'gross.iso von der Festplatte löschen' })).toBeNull()
+    fireEvent.click(within(zeile).getByRole('button', { name: 'gross.iso abbrechen' }))
+    await waitFor(() => {
+      expect(gerufen).toContainEqual({ befehl: 'download_abbrechen', args: { nr: 1 } })
+    })
+  })
+
+  it('zeigt bei unbekannter Länge nur Bytes und Rate, keine vorgetäuschte ETA', () => {
+    melde(1, 'start', 'strom.bin')
+    fortschritt(1, 2048, null)
+    render(<DownloadsPanel />)
+    const zeile = screen.getByText('strom.bin').closest('li')!
+    expect(within(zeile).getByText(/2.*KB empfangen/)).toBeInTheDocument()
+    expect(within(zeile).queryByText(/ca\./)).toBeNull()
+  })
+
+  it('meldet Stillstand ab 15 Sekunden ohne neue Bytes, ohne abzubrechen', () => {
+    melde(1, 'start', 'lahm.iso')
+    fortschritt(1, 100, 1000)
+    useDownloadsStore.setState((s) => ({
+      downloads: s.downloads.map((d) => ({ ...d, letzteBytesZeit: Date.now() - 20000 })),
+    }))
+    render(<DownloadsPanel />)
+    const zeile = screen.getByText('lahm.iso').closest('li')!
+    expect(within(zeile).getByText(/Wartet seit 20 s/)).toBeInTheDocument()
+    expect(gerufen.filter((g) => g.befehl === 'download_abbrechen')).toHaveLength(0)
+  })
+
+  it('sagt, wenn der Nutzer abgebrochen hat', () => {
+    melde(1, 'start', 'doch-nicht.zip')
+    melde(1, 'abgebrochen', 'doch-nicht.zip')
+    render(<DownloadsPanel />)
+    const zeile = screen.getByText('doch-nicht.zip').closest('li')!
+    expect(within(zeile).getByText('Abgebrochen')).toBeInTheDocument()
+  })
+})

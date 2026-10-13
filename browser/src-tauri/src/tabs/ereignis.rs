@@ -43,6 +43,20 @@ pub enum TabEreignis {
         url: String,
         datei: Option<String>,
     },
+    /// Fortschritt eines Downloads (`nr` wie in `Download`). Zählt nie als
+    /// neuer Download und überschreibt keinen abgeschlossenen Stand: die
+    /// Oberfläche wendet ihn nur auf einen bekannten, noch laufenden
+    /// Eintrag an. `gesamt`: `None` bei unbekannter Länge
+    /// (`TotalBytesToReceive == -1`); eine Nullbyte-Datei meldet `Some(0)`.
+    DownloadFortschritt {
+        id: String,
+        nr: u64,
+        empfangen: i64,
+        gesamt: Option<i64>,
+        bytes_pro_sekunde: Option<f64>,
+        rest_sekunden: Option<f64>,
+        ohne_daten_sekunden: u64,
+    },
     /// Zahl der in diesem Tab seit dem letzten Seitenwechsel geblockten
     /// Anfragen.
     Schild { id: String, werbung: u32, tracker: u32 },
@@ -137,6 +151,8 @@ pub enum DownloadStand {
     Fehler,
     /// Auf dem Gerät war kein Platz mehr (Android).
     Speicher,
+    /// Der Nutzer hat den Download abgebrochen (`download_abbrechen`).
+    Abgebrochen,
 }
 
 impl TabEreignis {
@@ -145,7 +161,7 @@ impl TabEreignis {
         use TabEreignis::*;
         match self {
             Laedt { id, .. } | Geladen { id, .. } | Adresse { id, .. } | Titel { id, .. } | Favicon { id, .. }
-            | NeuerTab { id, .. } | Taste { id, .. } | Download { id, .. } | Schild { id, .. } | Absturz { id }
+            | NeuerTab { id, .. } | Taste { id, .. } | Download { id, .. } | DownloadFortschritt { id, .. } | Schild { id, .. } | Absturz { id }
             | Vollbild { id, .. } | Formular { id, .. } | Kontextmenue { id, .. } | Dialog { id, .. }
             | Recht { id, .. } | Anmeldung { id, .. } | Fehlerseite { id, .. } | Gesperrt { id, .. }
             | Status { id, .. } | Treffer { id, .. } | Ton { id, .. } | Schlaf { id, .. } | Verworfen { id }

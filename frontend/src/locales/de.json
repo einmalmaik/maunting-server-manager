@@ -8777,8 +8777,17 @@
         "fertig": "Fertig",
         "blockiert": "Vom Virenschutz blockiert und gelöscht",
         "fehler": "Fehlgeschlagen",
-        "speicher": "Abgebrochen: zu wenig Speicher auf dem Gerät"
-      }
+        "speicher": "Abgebrochen: zu wenig Speicher auf dem Gerät",
+        "abgebrochen": "Abgebrochen"
+      },
+      "von": "{{empfangen}} von {{gesamt}}",
+      "nurEmpfangen": "{{empfangen}} empfangen",
+      "rate": "{{rate}}/s",
+      "eta": "ca. {{zeit}} übrig",
+      "wartet": "Wartet seit {{zeit}} — der Transfer steht, läuft aber weiter",
+      "abbrechen": "Download abbrechen",
+      "abbrechenName": "{{name}} abbrechen",
+      "fortschrittName": "Fortschritt von {{name}}"
     },
     "hintergrund": {
       "schlicht": "Schlicht",

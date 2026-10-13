@@ -51,7 +51,7 @@ function nacheinander<T = void>(befehl: string, args?: Record<string, unknown>):
 export const SCHUTZ_NICHT_BEREIT = 'schutz'
 
 /** `pruefung`: geladen, der Virenschutz prüft; `blockiert`: er hat die Datei abgelehnt, sie ist gelöscht. */
-export type DownloadStand = 'start' | 'pruefung' | 'fertig' | 'blockiert' | 'fehler' | 'speicher'
+export type DownloadStand = 'start' | 'pruefung' | 'fertig' | 'blockiert' | 'fehler' | 'speicher' | 'abgebrochen'
 
 /** Was Rust aus einem Tab meldet (`TabEreignis` in `tabs/mod.rs`). */
 export type TabEreignis =
@@ -65,6 +65,21 @@ export type TabEreignis =
   | { art: 'taste'; id: string; taste: string }
   /** `datei`: der Name, bei `fertig` der volle Pfad. `nr` kennzeichnet den Download über alle Meldungen. */
   | { art: 'download'; id: string; nr: number; stand: DownloadStand; url: string; datei: string | null }
+  /**
+   * Fortschritt eines Downloads (`nr` wie in `download`). Zählt nie als neuer Download:
+   * die Oberfläche wendet ihn nur auf einen bekannten, noch laufenden Eintrag an.
+   * `gesamt`: null bei unbekannter Länge; `rest_sekunden`: null ohne brauchbare Rate.
+   */
+  | {
+      art: 'download_fortschritt'
+      id: string
+      nr: number
+      empfangen: number
+      gesamt: number | null
+      bytes_pro_sekunde: number | null
+      rest_sekunden: number | null
+      ohne_daten_sekunden: number
+    }
   | { art: 'schild'; id: string; werbung: number; tracker: number }
   | { art: 'absturz'; id: string }
   | { art: 'vollbild'; id: string; an: boolean }
@@ -194,6 +209,8 @@ export const nativ = {
   fensterStartInfo: () => rufen<FensterStartInfo>('fenster_start_info'),
   /** Namensblase über der Seite (`kurzinfo.rs`); `null` verbirgt sie. */
   kurzinfo: (blase: Record<string, unknown> | null) => rufen('kurzinfo', { blase }),
+  /** Bricht einen laufenden Download ab; wahr, wenn der Abbruch angestoßen wurde. */
+  downloadAbbrechen: (nr: number) => rufen<boolean>('download_abbrechen', { nr }),
   downloadZeigen: (pfad: string) => rufen('download_zeigen', { pfad }),
   downloadOeffnen: (pfad: string) => rufen('download_oeffnen', { pfad }),
   downloadLoeschen: (pfad?: string | null) => rufen('download_loeschen', { pfad: pfad ?? null }),

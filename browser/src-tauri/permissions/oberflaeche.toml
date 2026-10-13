@@ -58,6 +58,7 @@ permissions = [
   "allow-schutz-binden",
   "allow-schutz-abbrechen",
   "allow-schutz-bestaetigen",
+  "allow-download-abbrechen",
   "allow-download-zeigen",
   "allow-download-ordner",
   "allow-download-oeffnen",
