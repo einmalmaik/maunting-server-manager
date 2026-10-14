@@ -38,7 +38,7 @@ pub(crate) use desktop::{
 pub mod android;
 
 pub use ereignis::{melden, Antwort, DownloadStand, MenueEintrag, TabEreignis, EREIGNIS};
-pub use weg::{erweiterungen_setzen, id_pruefen, navigation_erlaubt, vorab, weg, ziel_pruefen, Vorab, Weg};
+pub use weg::{erweiterungen_setzen, extern_oeffnen, externes_protokoll, id_pruefen, navigation_erlaubt, vorab, weg, ziel_pruefen, Vorab, Weg};
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
 pub struct Rahmen {

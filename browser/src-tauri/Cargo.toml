@@ -16,6 +16,9 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["image-png"] }
 tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
+# Fremdprotokolle (OAuth-Rücksprung an Desktop-Apps wie `vscode://`) öffnet das
+# System (`tabs::weg::extern_oeffnen`); derselbe offizielle Weg wie im Smart System.
+tauri-plugin-opener = "2"
 schluesselfach = { path = "../../crates/schluesselfach" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

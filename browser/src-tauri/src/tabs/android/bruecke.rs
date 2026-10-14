@@ -66,6 +66,14 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_weg<
     let antwort = match weg(&url, weiterleitung != JNI_FALSE) {
         Weg::Laden => String::new(),
         Weg::Verboten => "-".into(),
+        // OAuth-Rücksprung an eine App: über einen Intent des Systems öffnen;
+        // `Tab.kt` lädt bei `"-"` nichts nach.
+        Weg::Extern(fremd) => {
+            if let Some(app) = APP.get() {
+                crate::tabs::weg::extern_oeffnen(app, &fremd);
+            }
+            "-".into()
+        }
         Weg::Gesperrt(grund) => {
             if let (Some(app), Ok(())) = (APP.get(), id_pruefen(&tab)) {
                 melden(app, TabEreignis::Gesperrt { id: tab, url, grund: grund.into() });
@@ -108,6 +116,14 @@ pub extern "system" fn Java_com_mauntingstudios_secure_1browser_TabsBruecke_anfr
         (text(&mut env, &tab), text(&mut env, &url), text(&mut env, &seite), text(&mut env, &accept));
     let Some(app) = APP.get() else { return JNI_FALSE };
     let hauptrahmen = hauptframe == JNI_TRUE;
+    // OAuth-Rücksprung im Hauptrahmen, der nicht als Navigation ankommt (etwa
+    // per POST): ans System, statt ihn mit 403 abzuweisen.
+    if hauptrahmen {
+        if let Some(fremd) = crate::tabs::weg::externes_protokoll(&url) {
+            crate::tabs::weg::extern_oeffnen(app, &fremd);
+            return JNI_TRUE;
+        }
+    }
     match vorab(&url, hauptrahmen) {
         Vorab::Blocken(grund) => {
             if let (Some(grund), true, Ok(())) = (grund, hauptrahmen, id_pruefen(&tab)) {

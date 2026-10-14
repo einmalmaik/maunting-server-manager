@@ -16,7 +16,7 @@ use webview2_com::{
 use windows::Win32::Foundation::HWND;
 use windows::core::{HSTRING, Interface};
 
-use crate::tabs::{melden, navigation_erlaubt, weg, TabEreignis, Weg};
+use crate::tabs::{extern_oeffnen, externes_protokoll, melden, navigation_erlaubt, weg, TabEreignis, Weg};
 
 /// Ein Popup-Fenster, dessen Aufbau stufenweise auf dem UI-Faden weiterläuft:
 /// Der Rückruf kehrt sofort zurück (Deferral), jede Stufe startet die nächste
@@ -238,6 +238,12 @@ pub(super) unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -
                 args.IsRedirected(&mut weiterleitung)?;
                 match weg(&url, weiterleitung.as_bool()) {
                     Weg::Verboten => args.SetCancel(true),
+                    // OAuth-Rücksprung an eine Desktop-App (`vscode://…`): die
+                    // Navigation lädt nicht, die Adresse öffnet das System.
+                    Weg::Extern(fremd) => {
+                        extern_oeffnen(&app, &fremd);
+                        args.SetCancel(true)
+                    }
                     Weg::Gesperrt(grund) => {
                         melden(&app, TabEreignis::Gesperrt { id: id.clone(), url, grund: grund.into() });
                         args.SetCancel(true)
@@ -295,6 +301,14 @@ pub(super) unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -
                 let mut geste = windows::core::BOOL::default();
                 args.IsUserInitiated(&mut geste)?;
                 let url = super::webview2::text(|p| args.Uri(p));
+                // OAuth-Rücksprung per Popup (`window.open("vscode://…")`): kein
+                // leerer Tab, sondern direkt ans System — auch ohne Geste, weil
+                // der Aufruf aus Skript nach der Anmeldung kommt.
+                if let Some(fremd) = externes_protokoll(&url) {
+                    extern_oeffnen(&app, &fremd);
+                    args.SetHandled(true)?;
+                    return Ok(());
+                }
                 let ziel_erlaubt = if url.is_empty() || url == "about:blank" {
                     true
                 } else if let Ok(u) = url::Url::parse(&url) {

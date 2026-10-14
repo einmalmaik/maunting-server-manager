@@ -77,7 +77,11 @@ pub fn run() {
     #[allow(unused_mut)]
     let mut builder = builder
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        // Fremdprotokolle aus den Tabs (OAuth-Rücksprung an Desktop-Apps) öffnet
+        // das System; aufgerufen nur aus Rust (`tabs::weg::extern_oeffnen`), nie
+        // aus der Oberfläche — die bekommt dafür kein Recht.
+        .plugin(tauri_plugin_opener::init());
 
     #[cfg(target_os = "android")]
     {

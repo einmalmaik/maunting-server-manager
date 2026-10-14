@@ -40,6 +40,40 @@ pub fn navigation_erlaubt(url: &url::Url) -> bool {
     }
 }
 
+/// Schemes, die ein Tab nie lädt und die trotzdem nie ans System gehen: die
+/// eigenen und die von Tauri, Quelltext statt Ziele, lokale Dateien (der
+/// Browser startet keine Programme von außen) sowie bekannte Angriffswege
+/// unter Windows (Follina über `ms-msdt`, Suchfenster-Phishing über `search-ms`).
+const NIE_EXTERN: &[&str] = &[
+    "http", "https", "about", "blob", "data", "chrome-extension", "msb", "tauri", "ipc", "asset", "javascript",
+    "vbscript", "view-source", "file", "intent", "ms-msdt", "search-ms", "ms-search",
+];
+
+/// Ein Fremdprotokoll (OAuth-Rücksprung an eine Desktop-App wie `vscode://`,
+/// `discord://`, `x-github-client://`): die normalisierte Adresse mit allem,
+/// was der Token-Tausch braucht (`code`, `state`). `None`, wenn ein Tab die
+/// Adresse selbst lädt, sie verboten ist oder nie ans System darf.
+/// Dieselbe Entscheidung für WebView2 und Android.
+pub fn externes_protokoll(url: &str) -> Option<String> {
+    let geparst = url::Url::parse(url.trim()).ok()?;
+    if NIE_EXTERN.contains(&geparst.scheme()) {
+        return None;
+    }
+    Some(geparst.to_string())
+}
+
+/// Gibt eine Fremdadresse ans System: die zugehörige App öffnet sich
+/// (OAuth-Rücksprung nach Anmeldung im Browser). Der Tab bleibt stehen, weil
+/// seine Navigation abgebrochen wurde. Ohne registrierte App scheitert das:
+/// dann steht der Fehler im Protokoll, ohne Abfrage (sie trägt das Geheimnis).
+pub fn extern_oeffnen(app: &tauri::AppHandle, url: &str) {
+    use tauri_plugin_opener::OpenerExt;
+    let gekuerzt = url.split(['?', '#']).next().unwrap_or(url);
+    if let Err(fehler) = app.opener().open_url(url, None::<&str>) {
+        eprintln!("[MSB] Externe Adresse nicht geöffnet ({gekuerzt}): {fehler}");
+    }
+}
+
 /// Was mit einer Navigation im Tab geschieht. Dieselbe Entscheidung für
 /// WebView2 (`desktop/grundereignisse.rs`) und Android (`android/bruecke.rs`),
 /// auch für Weiterleitungen, nicht nur für die erste Adresse.
@@ -54,10 +88,18 @@ pub enum Weg {
     /// Tracking-Parameter (`schild/verfolgung.rs`) oder mit erzwungener
     /// sicherer Suche (`schild/sperre.rs`).
     Umleiten(String),
+    /// Fremdprotokoll (OAuth-Rücksprung an eine Desktop-App): die Navigation
+    /// wird abgebrochen, die Adresse geht ans System (`extern_oeffnen`).
+    Extern(String),
 }
 
 /// `weiterleitung`: der Server hat hierher umgeleitet (`https::hochstufen`).
 pub fn weg(url: &str, weiterleitung: bool) -> Weg {
+    // Zuerst: ein Fremdprotokoll lädt nie, auch nicht verschlüsselt oder ohne
+    // Tracking-Parameter — es geht im Ganzen ans System.
+    if let Some(fremd) = externes_protokoll(url) {
+        return Weg::Extern(fremd);
+    }
     let Some(geparst) = url::Url::parse(url).ok().filter(navigation_erlaubt) else {
         return Weg::Verboten;
     };
@@ -225,6 +267,60 @@ mod tests {
         assert_eq!(weg("https://weg2.example.com/", false), Weg::Laden);
         // Der Entwicklungsserver bleibt bei http; Tracking-Parameter fallen auch dort.
         assert_eq!(weg("http://localhost:3000/?utm_source=x", false), Weg::Umleiten("http://localhost:3000/".into()));
+    }
+
+    #[test]
+    fn oauth_rueckspruenge_gehen_ans_system_statt_ins_leere() {
+        // GitHub Desktop, VS Code, Discord: der IdP leitet nach der Anmeldung auf ein
+        // Fremdprotokoll um. Die Abfrage (state, code) muss unbeschädigt mitkommen.
+        for ziel in [
+            "x-github-client://oauth?code=abc123&state=xyz",
+            "vscode://vscode.github-authentication/did-authenticate?code=abc123&state=xyz",
+            "discord://callback?code=abc123&state=xyz",
+        ] {
+            let fremd = externes_protokoll(ziel);
+            assert!(fremd.is_some(), "{ziel}");
+            // Die Abfrage bleibt erhalten: ohne sie ist der Token-Tausch tot.
+            assert!(fremd.unwrap().contains("code=abc123"), "{ziel}");
+            assert!(matches!(weg(ziel, false), Weg::Extern(_)), "{ziel}");
+        }
+        // Ohne Abfrage, aber ebenfalls extern: E-Mail und Telefon.
+        for ziel in ["mailto:hilfe@example.org", "tel:+4930123456"] {
+            assert!(externes_protokoll(ziel).is_some(), "{ziel}");
+            assert!(matches!(weg(ziel, false), Weg::Extern(_)), "{ziel}");
+        }
+        // Großschreibung ändert nichts am Scheme.
+        assert!(externes_protokoll("VSCode://a/b?code=1").is_some());
+    }
+
+    #[test]
+    fn gefaehrliche_und_eigene_schemata_gehen_nie_ans_system() {
+        for behalten in [
+            "https://example.org/",
+            "http://127.0.0.1:5173/callback?code=1",
+            "about:blank",
+            "data:text/html,hallo",
+            "blob:https://example.org/x",
+            "chrome-extension://ddkjiahejlhfcafbddmgiahcphecmpfh/popup.html",
+            "tauri://localhost/",
+            "msb://einstellungen",
+            "file:///C:/Windows/win.ini",
+            "javascript:alert(1)",
+            "vbscript:msgbox(1)",
+            "view-source:https://example.org/",
+            "intent://scan/#Intent;scheme=zxing;end",
+            // Follina und Suchfenster-Phishing: nie starten.
+            "ms-msdt:/id%20PCWDiagnostic",
+            "search-ms:query=Rechnung",
+            "ms-search:query=x",
+            "kaputt",
+            "",
+        ] {
+            assert_eq!(externes_protokoll(behalten), None, "{behalten}");
+        }
+        // Was kein Fremdprotokoll ist, entscheidet wie bisher.
+        assert_eq!(weg("intent://scan/#Intent;scheme=zxing;end", false), Weg::Verboten);
+        assert_eq!(weg("http://127.0.0.1:5173/callback?code=1", false), Weg::Laden);
     }
 
     #[test]

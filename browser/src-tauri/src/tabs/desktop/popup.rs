@@ -21,7 +21,7 @@ use webview2_com::{
 use windows::core::HSTRING;
 
 use super::{auf_ui, controller, fehler, rechteck, umgebung};
-use crate::tabs::navigation_erlaubt;
+use crate::tabs::{extern_oeffnen, externes_protokoll, navigation_erlaubt};
 
 /// Die Oberfläche: das Popup ist zu (`null`) oder will einen Tab öffnen.
 pub const EREIGNIS: &str = "msb:erweiterung-popup";
@@ -110,6 +110,11 @@ pub fn oeffnen(app: &AppHandle, url: String, rechts: f64, oben: f64) -> Result<(
                     if gleiche_erweiterung(&start, &ziel) {
                         return Ok(());
                     }
+                    // OAuth-Rücksprung aus dem Popup einer Erweiterung: ans System.
+                    if let Some(fremd) = externes_protokoll(&ziel) {
+                        extern_oeffnen(&app, &fremd);
+                        return args.SetCancel(true);
+                    }
                     args.SetCancel(true)?;
                     if url::Url::parse(&ziel).is_ok_and(|u| navigation_erlaubt(&u) && u.scheme() != "about") {
                         let _ = app.emit_to("main", EREIGNIS, serde_json::json!({ "tab": ziel }));
@@ -129,6 +134,10 @@ pub fn oeffnen(app: &AppHandle, url: String, rechts: f64, oben: f64) -> Result<(
                     let mut geste = windows::core::BOOL::default();
                     args.IsUserInitiated(&mut geste)?;
                     let ziel = super::webview2::text(|p| args.Uri(p));
+                    if let Some(fremd) = externes_protokoll(&ziel) {
+                        extern_oeffnen(&app, &fremd);
+                        return Ok(());
+                    }
                     if geste.as_bool() && url::Url::parse(&ziel).is_ok_and(|u| navigation_erlaubt(&u) && u.scheme() != "about") {
                         let _ = app.emit_to("main", EREIGNIS, serde_json::json!({ "tab": ziel }));
                     }
