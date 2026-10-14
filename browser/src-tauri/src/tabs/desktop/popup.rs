@@ -50,7 +50,7 @@ fn gleiche_erweiterung(start: &url::Url, ziel: &str) -> bool {
 
 unsafe fn zu(app: &AppHandle) {
     if let Some(alt) = POPUP.with(|p| p.borrow_mut().take()) {
-        let _ = alt.Close();
+        super::herunterladen::schliessen(POPUP_ID, alt);
         let _ = app.emit_to("main", EREIGNIS, serde_json::json!({ "zu": true }));
     }
 }

@@ -95,7 +95,9 @@ pub fn ruhen(app: &AppHandle, faellig: Vec<(String, Ruhe)>, ausnahmen: Vec<Strin
                 let n = n.borrow();
                 let Some(tab) = n.get(id) else { continue };
                 unsafe {
-                    if ton(&tab.core).is_some_and(|(spielt, _)| spielt) || ausgenommen(&super::webview2::quelle(&tab.core), &ausnahmen) {
+                    if super::herunterladen::laeuft(id)
+                        || ton(&tab.core).is_some_and(|(spielt, _)| spielt)
+                        || ausgenommen(&super::webview2::quelle(&tab.core), &ausnahmen) {
                         continue;
                     }
                     match ruhe {
@@ -130,7 +132,7 @@ fn verwerfen(app: &AppHandle, id: &str) {
     super::rueckfragen::vergessen(id);
     if let Some(tab) = NATIV.with(|n| n.borrow_mut().remove(id)) {
         unsafe {
-            let _ = tab.controller.Close();
+            super::herunterladen::schliessen(id, tab.controller);
         }
     }
     melden(app, TabEreignis::Verworfen { id: id.to_string() });

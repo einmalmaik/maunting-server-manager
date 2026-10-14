@@ -19,7 +19,10 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
-use webview2_com::{BytesReceivedChangedEventHandler, DownloadStartingEventHandler, StateChangedEventHandler};
+use webview2_com::{
+    BytesReceivedChangedEventHandler, DownloadStartingEventHandler,
+    IsDefaultDownloadDialogOpenChangedEventHandler, SaveFileSecurityCheckStartingEventHandler, StateChangedEventHandler,
+};
 use windows::core::{Interface, HSTRING};
 
 use super::webview2::text;
@@ -70,14 +73,62 @@ thread_local! {
     /// gehören der Umgebung, nicht dem Tab: ein geschlossener Tab bricht
     /// seinen Download nicht ab. Nur auf dem UI-Faden.
     static VORGAENGE: RefCell<HashMap<u64, ICoreWebView2DownloadOperation>> = RefCell::new(HashMap::new());
+    /// Ein geschlossener Tab bleibt unsichtbar am Leben, bis auch sein letzter
+    /// Download endet. Nur die DownloadOperation zu halten reicht nicht:
+    /// Controller.Close() kappt deren Rückrufe, obwohl die Datei weiterlädt.
+    static VERBORGEN: RefCell<HashMap<String, Vec<ICoreWebView2Controller>>> = RefCell::new(HashMap::new());
     /// Downloads, deren Abbruch der Nutzer angestoßen hat (`abbrechen`).
     static NUTZER_ABBRUCH: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
 }
 
-fn zu_viele(tab: &str) -> bool {
+fn anzahl(tab: &str) -> usize {
     let laufend = LAUFEND.with(|l| l.borrow().get(tab).copied().unwrap_or(0));
     let wartend = OFFEN.with(|o| o.borrow().values().filter(|x| x.lauf.tab == tab).count());
-    laufend + wartend >= JE_TAB
+    laufend + wartend
+}
+
+pub(super) fn laeuft(tab: &str) -> bool {
+    anzahl(tab) > 0
+}
+
+fn zu_viele(tab: &str) -> bool {
+    anzahl(tab) >= JE_TAB
+}
+
+/// UI-Faden: ein Tab darf verschwinden, sein Controller während eines Downloads nicht.
+/// Gilt auch für das Popup einer Erweiterung und offene Speicherdialoge.
+pub(super) unsafe fn schliessen(tab: &str, controller: ICoreWebView2Controller) {
+    if laeuft(tab) {
+        if let Err(e) = controller.SetIsVisible(false) {
+            eprintln!("[MSB] Download-Tab nicht verborgen: {e}");
+        }
+        VERBORGEN.with(|v| v.borrow_mut().entry(tab.to_string()).or_default().push(controller));
+    } else if let Err(e) = controller.Close() {
+        eprintln!("[MSB] Download-Tab nicht geschlossen: {e}");
+    }
+}
+
+/// Nicht im eigenen WebView2-Rückruf schließen. Von einem anderen Faden
+/// eingereiht läuft dies erst nach dessen Rückkehr; auf dem UI-Faden würde
+/// run_on_main_thread die Arbeit sofort verschachtelt ausführen (Regel 161).
+fn freigeben(app: &AppHandle, tab: &str) {
+    let (app, tab) = (app.clone(), tab.to_string());
+    std::thread::spawn(move || {
+        if let Err(e) = app.run_on_main_thread(move || {
+            if !laeuft(&tab) {
+                let controller = VERBORGEN.with(|v| v.borrow_mut().remove(&tab)).unwrap_or_default();
+                for controller in controller {
+                    unsafe {
+                        if let Err(e) = controller.Close() {
+                            eprintln!("[MSB] Download-Tab nicht freigegeben: {e}");
+                        }
+                    }
+                }
+            }
+        }) {
+            eprintln!("[MSB] Download-Tab nicht zur Freigabe eingereiht: {e}");
+        }
+    });
 }
 
 fn zaehlen(tab: &str, plus: bool) {
@@ -91,8 +142,62 @@ fn zaehlen(tab: &str, plus: bool) {
     });
 }
 
+/// Die Laufzeit prüft vor dem Speichern ihre eigene **Dateityp-Richtlinie**,
+/// sobald die Endung auf ihrer Liste gefährlicher Endungen steht (`.exe`,
+/// `.msi`, `.bat` …). Diese Prüfung geht an den Einbetter (`SaveFileSecurityCheckStarting`).
+///
+/// Blieb sie unbeantwortet, kam kein Download zustande: `SetHandled(true)`
+/// unterdrückt die Downloadleiste, in der die Standardwarnung erschiene.
+/// Entweder stand die Datei bei 0 B und es floss kein einziges Byte, oder sie
+/// lag vollständig in der Quarantäne und die Fertigmeldung kam nie — dann wurde
+/// sie nie geprüft und nie abgelegt. In beiden Fällen erfuhr die Oberfläche
+/// nichts, und der Eintrag hing, bis die App endete (bis 13.10.2026, belegt an
+/// jedem `.exe`-Klick des Nutzers (`History`: `danger_type=1`, 0 Byte) und in
+/// der Laufzeitprobe mit und ohne Antwort auf diese Frage).
+///
+/// Die Standardrichtlinie wird deshalb übersprungen; geprüft wird danach hier,
+/// in der Quarantäne (`crate::downloads::pruefung`), bevor die Datei an ihr
+/// Ziel wandert. Ohne `ICoreWebView2_26` (Laufzeit vor 130) bleibt es beim
+/// bisherigen Verhalten.
+unsafe fn dateityp_richtlinie(core: &ICoreWebView2) -> windows::core::Result<()> {
+    let Ok(core26) = core.cast::<ICoreWebView2_26>() else { return Ok(()) };
+    let mut token = 0i64;
+    core26.add_SaveFileSecurityCheckStarting(
+        &SaveFileSecurityCheckStartingEventHandler::create(Box::new(|_, args| {
+            let Some(args) = args else { return Ok(()) };
+            args.SetCancelSave(false)?;
+            args.SetSuppressDefaultPolicy(true)?;
+            Ok(())
+        })),
+        &mut token,
+    )
+}
+
+/// Handled unterdrückt das normale Downloadfenster. Falls die Laufzeit es
+/// dennoch öffnet (etwa per Browser-Kürzel), bleibt nur unsere Downloadliste.
+unsafe fn ohne_downloadfenster(core: &ICoreWebView2) -> windows::core::Result<()> {
+    let Ok(core9) = core.cast::<ICoreWebView2_9>() else { return Ok(()) };
+    core9.CloseDefaultDownloadDialog()?;
+    let mut token = 0i64;
+    core9.add_IsDefaultDownloadDialogOpenChanged(
+        &IsDefaultDownloadDialogOpenChangedEventHandler::create(Box::new(|sender, _| {
+            let Some(core) = sender else { return Ok(()) };
+            let core9 = core.cast::<ICoreWebView2_9>()?;
+            let mut offen = windows::core::BOOL::default();
+            core9.IsDefaultDownloadDialogOpen(&mut offen)?;
+            if offen.as_bool() {
+                core9.CloseDefaultDownloadDialog()?;
+            }
+            Ok(())
+        })),
+        &mut token,
+    )
+}
+
 pub(super) unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2, privat: bool) -> windows::core::Result<()> {
     let Ok(core4) = core.cast::<ICoreWebView2_4>() else { return Ok(()) };
+    ohne_downloadfenster(core)?;
+    dateityp_richtlinie(core)?;
     let (app, id) = (app.clone(), id.to_string());
     let mut token = 0i64;
     core4.add_DownloadStarting(
@@ -143,6 +248,7 @@ fn fragen(app: &AppHandle, nr: u64, name: String) {
 /// UI-Faden: der Speicherdialog ist zu. Ohne Ziel fällt der Download weg.
 fn entschieden(app: &AppHandle, nr: u64, ziel: Option<PathBuf>) {
     let Some(offen) = OFFEN.with(|o| o.borrow_mut().remove(&nr)) else { return };
+    let tab = offen.lauf.tab.clone();
     unsafe {
         let _ = match ziel {
             Some(ziel) => starten(app, &offen.args, Lauf { gewaehlt: Some(ziel), ..offen.lauf }),
@@ -150,6 +256,7 @@ fn entschieden(app: &AppHandle, nr: u64, ziel: Option<PathBuf>) {
         };
         let _ = offen.deferral.Complete();
     }
+    freigeben(app, &tab);
 }
 
 fn blockiert(grund: COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON) -> bool {
@@ -310,6 +417,7 @@ fn beenden(
     }
     VORGAENGE.with(|v| v.borrow_mut().remove(&lauf.nr));
     zaehlen(&lauf.tab, false);
+    freigeben(app, &lauf.tab);
     if geladen {
         lauf.melden(app, DownloadStand::Pruefung, Some(lauf.name.clone()));
         let (app, lauf, platz) = (app.clone(), lauf.clone(), platz.clone());
@@ -507,6 +615,68 @@ mod tests {
             interrupt_stand(false, false, COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED),
             DownloadStand::Fehler
         ));
+    }
+
+    /// Für gefährliche Endungen (`.exe`, `.msi` …) fragt die Laufzeit ihre
+    /// Dateityp-Richtlinie beim Einbetter ab. Wer darauf nicht antwortet,
+    /// bekommt keinen Download: die Standardwarnung liegt in der
+    /// Downloadleiste, die `SetHandled(true)` unterdrückt, und es fließt kein
+    /// Byte — der Eintrag stand ewig auf 0 B (bis 13.10.2026, jeder echte
+    /// `.exe`-Klick des Nutzers). Die Richtlinie wird deshalb übersprungen und
+    /// geprüft wird danach in der Quarantäne.
+    #[test]
+    fn der_gefaehrliche_dateityp_haengt_nicht_mehr() {
+        // Auskommentiertes zählt nicht: nur gelesen wird, was auch läuft.
+        let aktiv = include_str!("herunterladen.rs")
+            .lines()
+            .filter(|z| !z.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let anmelden = concat!("add_SaveFileSecurity", "CheckStarting");
+        let ueberspringen = concat!("SetSuppressDefaultPolicy(", "true)");
+        let behalten = concat!("SetCancelSave(", "false)");
+        let aufruf = concat!("dateityp_richtlinie", "(core)?");
+        assert!(aktiv.contains(anmelden), "die Dateityp-Richtlinie wird nicht beantwortet");
+        assert!(aktiv.contains(ueberspringen), "die Standardrichtlinie bleibt an");
+        assert!(aktiv.contains(behalten), "das Speichern darf nicht abgebrochen werden");
+        assert!(aktiv.contains(aufruf), "die Dateityp-Richtlinie wird nicht angemeldet");
+    }
+
+    /// Die Laufzeitprobe deckt den tatsächlichen Rückrufverlust ab. Dieser
+    /// Vertrag verhindert, dass einer der Schließwege ihn wieder einführt.
+    #[test]
+    fn jeder_schliessweg_erhaelt_den_download_controller() {
+        for quelle in [include_str!("../desktop.rs"), include_str!("popup.rs"), include_str!("schlaf.rs")] {
+            let aktiv = quelle.lines().filter(|z| !z.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
+            assert!(!aktiv.contains(".controller.Close()"), "ein Schließweg kappt Download-Rückrufe");
+            assert!(aktiv.contains("herunterladen::schliessen("), "der Controller gehört während des Ladens dem Download");
+        }
+    }
+
+    #[test]
+    fn edge_downloadfenster_wird_auch_beim_oeffnen_geschlossen() {
+        let quelle = include_str!("herunterladen.rs");
+        let funktion = quelle.split("unsafe fn ohne_downloadfenster(").nth(1).unwrap().split("pub(super) unsafe fn anbinden").next().unwrap();
+        assert!(funktion.contains("add_IsDefaultDownloadDialogOpenChanged("));
+        assert!(funktion.contains("IsDefaultDownloadDialogOpen(&mut offen)"));
+        assert!(funktion.contains("if offen.as_bool()"));
+        assert!(funktion.contains("CloseDefaultDownloadDialog()?"));
+        let anbinden = quelle.split("pub(super) unsafe fn anbinden").nth(1).unwrap().split("fn fragen(").next().unwrap();
+        assert!(anbinden.contains("ohne_downloadfenster(core)?"));
+        assert!(anbinden.contains("args.SetHandled(true)?"));
+    }
+
+    #[test]
+    fn controller_bleibt_bis_zum_letzten_download_noetig() {
+        let tab = "tab-controller-bleibt";
+        assert!(!laeuft(tab));
+        zaehlen(tab, true);
+        zaehlen(tab, true);
+        assert!(laeuft(tab));
+        zaehlen(tab, false);
+        assert!(laeuft(tab), "der zweite Download braucht den Controller noch");
+        zaehlen(tab, false);
+        assert!(!laeuft(tab));
     }
 
     #[test]

@@ -338,7 +338,7 @@ pub fn schliessen(app: &AppHandle, id: &str) {
         formulare::vergessen(&id);
         if let Some(tab) = NATIV.with(|n| n.borrow_mut().remove(&id)) {
             unsafe {
-                let _ = tab.controller.Close();
+                herunterladen::schliessen(&id, tab.controller);
             }
         }
     });

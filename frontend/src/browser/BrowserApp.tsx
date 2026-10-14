@@ -39,6 +39,7 @@ import { Meldungsleiste } from './seite/Meldungsleiste'
 import { Seitenflaeche } from './seite/Seitenflaeche'
 import { useAktualisierung } from './services/aktualisierung'
 import { useEinstellungenStore } from './services/einstellungenStore'
+import { useDownloadHinweis } from './services/useDownloadHinweis'
 import { useGeraetKonfig } from './services/geraetKonfig'
 import { kuerzelAusfuehren, useKuerzel, type KuerzelZiele } from './services/kuerzel'
 import { tabEreignisse } from './services/nativ'
@@ -116,6 +117,7 @@ function Wurzel() {
   const [imVollbild, setImVollbild] = useState(false)
 
   useSitzungsLauf()
+  useDownloadHinweis()
   useUeberdeckungBeobachten()
   useVerlaufFrist()
   useLeistung()

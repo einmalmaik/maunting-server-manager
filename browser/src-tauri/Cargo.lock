@@ -2422,7 +2422,7 @@ dependencies = [
 
 [[package]]
 name = "maunting-secure-browser"
-version = "5.3.11"
+version = "5.3.12"
 dependencies = [
  "adblock",
  "base64 0.22.1",
