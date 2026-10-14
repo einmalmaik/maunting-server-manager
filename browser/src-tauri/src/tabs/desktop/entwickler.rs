@@ -229,7 +229,17 @@ pub fn oberflaeche_aufrufen(app: &AppHandle, methode: String, parameter: Value) 
         // Nur auf dem UI-Faden; jeder Aufruf läuft darüber.
         static ANGEBUNDEN: AtomicBool = AtomicBool::new(false);
         fenster.with_webview(move |w| unsafe {
-            let core = match w.controller().CoreWebView2() {
+            // Die Kulisse der Geräteansicht: Auch die Oberfläche (Startseite)
+            // malt bei verkleinertem Gerät nicht die ganze Fläche; ohne
+            // diese Grundierung bliebe dort deckendes Weiß (10/2026). Einmal
+            // gesetzt gilt sie für die Lebensdauer der Webview, jeder weitere
+            // Aufruf bestätigt sie nur.
+            let steuerung = w.controller();
+            if let Err(fehler) = super::grundieren(&steuerung) {
+                let _ = tx.send(Err(fehler));
+                return;
+            }
+            let core = match steuerung.CoreWebView2() {
                 Ok(core) => core,
                 Err(fehler) => {
                     let _ = tx.send(Err(super::fehler(fehler)));

@@ -69,6 +69,21 @@ const BROWSER_ARGUMENTE: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartS
 /// Länger wartet ein Befehl nicht auf den UI-Faden.
 const FRIST: Duration = Duration::from_secs(20);
 
+/// Die Kulisse, wo eine Seite nichts malt: deckendes dunkles Neutralgrau.
+/// WebView2 füllt jede unbemalte Fläche mit `DefaultBackgroundColor`, dessen
+/// Vorgabe deckendes Weiß ist. Das Weiß lag in der Geräteansicht der
+/// Entwicklerwerkzeuge neben der verkleinerten Seite (10/2026). Deckend,
+/// damit kein Fenster darunter durchscheint; dunkel wie die Kulisse von
+/// Chrome, in beiden Farbschemen gleich.
+const KULISSE: COREWEBVIEW2_COLOR = COREWEBVIEW2_COLOR { A: 0xFF, R: 0x20, G: 0x20, B: 0x20 };
+
+/// Legt die Kulisse auf einen Controller. Nur auf dem UI-Faden.
+pub(super) fn grundieren(controller: &ICoreWebView2Controller) -> Result<(), String> {
+    unsafe {
+        controller.cast::<ICoreWebView2Controller2>().map_err(fehler)?.SetDefaultBackgroundColor(KULISSE).map_err(fehler)
+    }
+}
+
 fn fehler(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
@@ -152,6 +167,7 @@ fn controller(app: &AppHandle, umgebung: &ICoreWebView2Environment, privat: bool
     }
     let controller = webview2_com::wait_with_pump(rx).map_err(fehler)?.map_err(fehler)?;
     unsafe { controller.SetIsVisible(false).map_err(fehler)? };
+    grundieren(&controller)?;
     Ok(controller)
 }
 
@@ -489,4 +505,19 @@ pub fn erweiterungen_abgleichen(
 /// Lädt einen entpackten Ordner ins Profil der Seiten; die Kennung vergibt WebView2.
 pub fn erweiterung_laden(app: &AppHandle, ordner: std::path::PathBuf) -> Result<String, String> {
     im_profil(app, move |core| unsafe { erweiterungen::laden(core, &ordner) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Die Kulisse bleibt deckend und dunkel: Transparent ließ das Fenster
+    /// durchscheinen, Hellgrau oder Weiß brachte das Weiß der Geräteansicht
+    /// zurück (10/2026).
+    #[test]
+    fn die_kulisse_bleibt_dunkel_und_undurchsichtig() {
+        assert_eq!(KULISSE.A, 0xFF, "die Kulisse deckt, sie scheint nicht durch");
+        let helligkeit = (u16::from(KULISSE.R) + u16::from(KULISSE.G) + u16::from(KULISSE.B)) / 3;
+        assert!(helligkeit <= 64, "die Kulisse bleibt dunkel, Helligkeit {helligkeit}");
+    }
 }

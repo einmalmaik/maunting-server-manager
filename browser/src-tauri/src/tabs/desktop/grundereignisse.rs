@@ -109,6 +109,11 @@ fn popup_controller_fertig(schluessel: u64, controller: windows::core::Result<IC
         Ok(c) => c,
         Err(e) => return popup_scheitern(schluessel, super::fehler(e)),
     };
+    // Die Kulisse aus `super::grundieren`, damit auch ein Popup ohne
+    // bemalte Fläche dunkel bleibt statt weiß.
+    if let Err(e) = super::grundieren(&controller) {
+        return popup_scheitern(schluessel, e);
+    }
     let core = ANSTEHEND.with(|m| {
         let mut m = m.borrow_mut();
         let a = m.get_mut(&schluessel)?;
