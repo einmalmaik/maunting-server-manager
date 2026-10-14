@@ -70,6 +70,8 @@ GitHub-Token und Steam-Konten hinterlegst du für das ganze Panel, für einen Be
 ### 11. KI-Assistent, Recherche und Organisation
 Der KI-Assistent im Chat und per Sprache arbeitet mit einem festen Satz Werkzeuge, den der Server kontrolliert. Je nachdem, was du ihm erlaubst, liest er Serverstatus, Logs, Dateien und Backups, nutzt Erinnerungen und deinen Kalender, sucht im Web und bereitet Aufgaben vor. Ändern darf er nur mit deiner Bestätigung, außer du schaltest bewusst die Autonomie ein.
 
+**Maunting Search** ist die eigene Suchseite des Secure Browsers: KI-Überblick, Top-Quellen, Treffer, ähnliche Suchanfragen und ein Wikipedia-Wissens-Panel, gesucht über die SearXNG-Instanz deines Servers (AGPLv3). Aufbau, Endpunkte und Betreiberhinweise stehen in [`docs/maunting-search.md`](docs/maunting-search.md).
+
 Fragst du nach einem Ort, holt er Koordinaten, Wetter, ein Bild der Gegend (mit Copernicus-Zugang das neueste Sentinel-2-Satellitenbild, sonst ein Kartenbild) und verfügbare Verkehrs-, Nachrichten- und öffentliche Social-Media-Signale. Das Ergebnis siehst du auf einer Karte oder einem Globus. Zugangsdaten und Rohdaten bleiben verschlüsselt im Backend und erreichen den Browser nie.
 
 Mehr zu Datenflüssen, Rechten und Werkzeugen steht in [`docs/ai-system-architecture.md`](docs/ai-system-architecture.md).

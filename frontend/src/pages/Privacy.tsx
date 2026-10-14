@@ -219,6 +219,8 @@ export function Privacy({ zurueck, zurueckAktion }: { zurueck?: string; zurueckA
           t('privacyPolicy.sections.browser.items.updates'),
           t('privacyPolicy.sections.browser.items.kopplung'),
           t('privacyPolicy.sections.browser.items.msmSuche'),
+          t('privacyPolicy.sections.browser.items.mauntingSearch'),
+          t('privacyPolicy.sections.browser.items.mauntingSearchMedien'),
           t('privacyPolicy.sections.browser.items.suchzusammenfassung'),
           t('privacyPolicy.sections.browser.items.nachrichten'),
           t('privacyPolicy.sections.browser.items.android'),

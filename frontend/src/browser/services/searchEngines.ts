@@ -27,7 +27,10 @@ export interface Suchmaschine {
 
 export const SUCHMASCHINEN: Suchmaschine[] = [
   { id: 'duckduckgo', name: 'DuckDuckGo', marke: 'duckduckgo', vorlage: 'https://duckduckgo.com/?q=%s' },
-  { id: 'searxng', name: 'SearXNG', marke: 'searxng', vorlage: '' },
+  // Die eigene Suche trägt den Namen des Produkts und das Logo des Browsers.
+  // Das Symbol einer fremden Seite liegt nicht im Code (`Marke` hat dafür keinen
+  // Eintrag; `SuchSymbol` nimmt dann `/msp.png`).
+  { id: 'searxng', name: 'Maunting Search', vorlage: '' },
   { id: 'brave', name: 'Brave Search', marke: 'brave', vorlage: 'https://search.brave.com/search?q=%s' },
   { id: 'ecosia', name: 'Ecosia', marke: 'ecosia', vorlage: 'https://www.ecosia.org/search?q=%s' },
   {

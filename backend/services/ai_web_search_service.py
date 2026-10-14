@@ -55,6 +55,11 @@ MAX_SNIPPET_CHARS = 400
 MAX_URL_CHARS = 300
 _TIMEOUT = 8.0
 _CACHE_TTL_SECONDS = 15.0
+_BILD_CACHE_MAX = 64
+_BILD_MAX_BYTES = 2 * 1024 * 1024
+_BILD_TYPEN = {"image/jpeg": b"\xff\xd8\xff", "image/png": b"\x89PNG\r\n\x1a\n", "image/webp": b"RIFF", "image/gif": b"GIF8"}
+#: So viel Wikitext wird höchstens gelesen — die Infobox steht am Anfang.
+_WIKITEXT_MAX = 20000
 _client: httpx.Client | None = None
 _client_lock = threading.Lock()
 _cache: dict[tuple[str, str, int], tuple[float, list[dict]]] = {}
@@ -62,6 +67,9 @@ _inflight: dict[tuple[str, str, int], threading.Event] = {}
 _cache_lock = threading.Lock()
 _sidecar_status_cache: dict[str, tuple[float, bool]] = {}
 _sidecar_cache_lock = threading.Lock()
+_bild_urls: dict[str, tuple[float, str]] = {}
+_bild_daten_cache: dict[str, tuple[float, bytes, str]] = {}
+_bild_lock = threading.Lock()
 
 
 class WebSearchUnavailable(RuntimeError):
@@ -324,6 +332,379 @@ def is_configured() -> bool:
         return False
 
 
+def _merke_bild_url(url: str) -> None:
+    if not url or not _is_safe_public_url(url):
+        return
+    jetzt = time.monotonic()
+    with _bild_lock:
+        _bild_urls[url] = (jetzt + 900.0, url)
+        if len(_bild_urls) > 256:
+            aelteste = sorted(_bild_urls.items(), key=lambda kv: kv[1][0])[:64]
+            for k, _ in aelteste:
+                _bild_urls.pop(k, None)
+
+
+def hole_such_bild(url: str) -> tuple[bytes, str] | None:
+    """Lädt ein bereits durch eine Suche oder ein Wissens-Panel freigegebenes Bild über den Server-Proxy."""
+    clean = (url or "").strip()
+    if not clean or len(clean) > MAX_URL_CHARS or not _is_safe_public_url(clean):
+        return None
+    jetzt = time.monotonic()
+    with _bild_lock:
+        erlaubt = _bild_urls.get(clean)
+        if not erlaubt or erlaubt[0] <= jetzt:
+            return None
+        cached = _bild_daten_cache.get(clean)
+        if cached and cached[0] > jetzt:
+            return cached[1], cached[2]
+
+    try:
+        resp = _http_client().get(
+            clean,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            },
+        )
+        if resp.status_code != 200 or len(resp.content) > _BILD_MAX_BYTES:
+            return None
+        data = resp.content
+        media_type = None
+        for mime, magic in _BILD_TYPEN.items():
+            if data.startswith(magic):
+                media_type = mime
+                break
+        if not media_type:
+            return None
+        with _bild_lock:
+            _bild_daten_cache[clean] = (jetzt + 900.0, data, media_type)
+            if len(_bild_daten_cache) > _BILD_CACHE_MAX:
+                aelteste = sorted(_bild_daten_cache.items(), key=lambda kv: kv[1][0])[:16]
+                for k, _ in aelteste:
+                    _bild_daten_cache.pop(k, None)
+        return data, media_type
+    except Exception:
+        return None
+
+
+def _infobox_titel(box: dict, id_url: str) -> str:
+    """Der Titel einer SearXNG-Infobox.
+
+    SearXNG nennt im Feld ``infobox`` nur die Herkunft („wikipedia“), keinen
+    Titel. Der Artikelname steckt stattdessen in der Adresse des Eintrags —
+    ``…/wiki/Grand_Theft_Auto_VI`` wird zu „Grand Theft Auto VI“.
+    """
+    if id_url:
+        slug = urllib.parse.unquote(id_url.rstrip("/").split("/")[-1]).replace("_", " ").strip()
+        worte = slug.split()
+        # Ein echter Artikelname ist kurz — höchstens acht Wörter. Längeres ist
+        # ein Pfad oder ein Kodierungsrest und taugt nicht als Überschrift.
+        if 1 <= len(worte) <= 8 and len(slug) >= 2:
+            return slug[:MAX_TITLE_CHARS]
+    urls = box.get("urls")
+    if isinstance(urls, list):
+        for eintrag in urls:
+            if not isinstance(eintrag, dict):
+                continue
+            name = redact_sensitive_text(str(eintrag.get("title") or "")).strip()
+            if name:
+                return name[:MAX_TITLE_CHARS]
+    return ""
+
+
+def _parse_infobox(raw_boxes: object) -> dict | None:
+    if not isinstance(raw_boxes, list) or not raw_boxes:
+        return None
+    for box in raw_boxes:
+        if not isinstance(box, dict):
+            continue
+        inhalt = redact_sensitive_text(str(box.get("content") or "")).strip()[:1200]
+        id_url = str(box.get("id") or "").strip()
+        if id_url and (len(id_url) > MAX_URL_CHARS or not _is_safe_public_url(id_url)):
+            id_url = ""
+        if not inhalt and not id_url:
+            continue
+        titel = _infobox_titel(box, id_url)
+        bild = str(box.get("img_src") or "").strip()
+        sicheres_bild = bild if (bild and len(bild) <= MAX_URL_CHARS and _is_safe_public_url(bild)) else None
+        if sicheres_bild:
+            _merke_bild_url(sicheres_bild)
+        attribute = []
+        raw_attrs = box.get("attributes")
+        if isinstance(raw_attrs, list):
+            for attr in raw_attrs[:10]:
+                if not isinstance(attr, dict):
+                    continue
+                lbl = redact_sensitive_text(str(attr.get("label") or "")).strip()[:80]
+                val = redact_sensitive_text(str(attr.get("value") or "")).strip()[:200]
+                if lbl and val:
+                    attribute.append({"label": lbl, "value": val})
+        urls = []
+        raw_urls = box.get("urls")
+        if isinstance(raw_urls, list):
+            for u_obj in raw_urls[:6]:
+                if not isinstance(u_obj, dict):
+                    continue
+                u_str = str(u_obj.get("url") or "").strip()
+                u_lbl = redact_sensitive_text(str(u_obj.get("title") or "")).strip()[:80]
+                if u_str and len(u_str) <= MAX_URL_CHARS and _is_safe_public_url(u_str):
+                    urls.append({"title": u_lbl or u_str, "url": u_str})
+        # Die Wikipedia-Adresse selbst steht immer zuerst; ihr Name kommt vom
+        # Host, nicht aus einer Liste, die der Betreiber nicht pflegen müsste.
+        if id_url:
+            host = (urllib.parse.urlsplit(id_url).hostname or "").replace("www.", "")
+            name = "Wikipedia" if "wikipedia.org" in host else host
+            if not any(u["url"] == id_url for u in urls):
+                urls.insert(0, {"title": name, "url": id_url})
+            else:
+                urls[0] = {"title": name, "url": id_url}
+        return {
+            "titel": titel,
+            "inhalt": inhalt,
+            **({"bild": sicheres_bild} if sicheres_bild else {}),
+            "attribute": attribute,
+            "urls": urls,
+        }
+    return None
+
+
+def _wiki_markup_sauber(wert: str) -> str:
+    """Wikitext-Auszeichnung zu lesbarem Text; was bleibt, ist geprüfter Text."""
+    text = re.sub(r"<ref[^>/]*/>", "", wert)
+    text = re.sub(r"<ref[^>]*>.*?</ref>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    # [[Ziel|Anzeige]] -> Anzeige, [[Ziel]] -> Ziel
+    text = re.sub(r"\[\[[^\]|]*\|([^\]]*)\]\]", r"\1", text)
+    text = re.sub(r"\[\[([^\]]*)\]\]", r"\1", text)
+    # [https://ziel.example Anzeige] -> Anzeige, [https://ziel.example] -> Adresse
+    text = re.sub(r"\[(?:https?)://\S+\s+([^\]]*)\]", r"\1", text)
+    text = re.sub(r"\[((?:https?)://\S+)\]", r"\1", text)
+    text = re.sub(r"'''|''", "", text)
+    text = text.replace("&nbsp;", " ").replace("<br>", " ").replace("<br />", " ")
+    text = re.sub(r"<[^>]+>", "", text)
+    return re.sub(r"\s+", " ", text).strip(" ,;")
+
+
+def _wiki_wert_ende(block: str, start: int) -> int:
+    """Bis zum nächsten Feldzeichen auf oberster Klammer-Ebene.
+
+    Ein schließendes `}}` auf Ebene null endet die ganze Vorlage — dort ist der
+    Wert zu Ende, auch wenn danach noch Zeilen folgen.
+    """
+    tiefe = 0
+    i = start
+    while i < len(block):
+        if block.startswith("{{", i) or block.startswith("[[", i):
+            tiefe += 1
+            i += 2
+            continue
+        if block.startswith("}}", i) or block.startswith("]]", i):
+            if tiefe == 0:
+                return i
+            tiefe -= 1
+            i += 2
+            continue
+        if block[i] == "|" and tiefe == 0:
+            return i
+        i += 1
+    return len(block)
+
+
+def _wiki_infobox_felder(wikitext: str) -> list[dict]:
+    """Eckdaten aus der Infobox-Vorlage einer Wikipedia-Seite.
+
+    Absichtlich konservativ: nur Felder, deren Wert ohne verschachtelte Vorlage
+    lesbar ist, kommen durch. Ein `{{Geburtsdatum|1971|6|28}}` ist drei
+    Zahlen ohne Datumsformat — das zeigt das Panel nicht, statt es zu einem
+    Datum zu erfinden. Höchstens zehn Felder, damit die Kachel nicht wächst.
+    """
+    text = wikitext or ""
+    anfang = text.lower().find("{{infobox")
+    if anfang < 0:
+        return []
+    tiefe = 0
+    i = anfang
+    ende = len(text)
+    while i < len(text):
+        if text.startswith("{{", i):
+            tiefe += 1
+            i += 2
+            continue
+        if text.startswith("}}", i):
+            tiefe -= 1
+            i += 2
+            if tiefe == 0:
+                ende = i
+                break
+            continue
+        i += 1
+    block = text[anfang:ende]
+    felder: list[dict] = []
+    for treffer in re.finditer(r"\n\s*\|\s*([^=|{}\[\]]{2,60}?)\s*=\s*", block):
+        name = _wiki_markup_sauber(treffer.group(1))
+        if not name or len(felder) >= 10:
+            continue
+        wert_roh = block[treffer.end() : _wiki_wert_ende(block, treffer.end())]
+        if "{{" in wert_roh:
+            continue
+        wert = _wiki_markup_sauber(wert_roh)
+        if not wert or len(wert) > 200:
+            continue
+        felder.append({"label": name[:80], "value": wert})
+    return felder
+
+
+def _wiki_wikitext(lang: str, page_title: str) -> str:
+    """Der Wikitext der Seite, höchstens eine Anfrage und nur für die Infobox."""
+    try:
+        resp = _http_client().get(
+            f"https://{lang}.wikipedia.org/w/api.php",
+            params={
+                "action": "query",
+                "prop": "revisions",
+                "titles": page_title,
+                "rvslots": "main",
+                "rvprop": "content",
+                "format": "json",
+            },
+            headers={
+                "User-Agent": "MauntingSearch/1.0 (https://mauntingstudios.com; privacy-proxy)",
+                "Accept": "application/json",
+            },
+        )
+        if resp.status_code != 200:
+            return ""
+        daten = resp.json()
+        pages = daten.get("query", {}).get("pages", {}) if isinstance(daten, dict) else {}
+        if not isinstance(pages, dict):
+            return ""
+        for seite in pages.values():
+            if not isinstance(seite, dict):
+                continue
+            revisionen = seite.get("revisions")
+            if isinstance(revisionen, list) and revisionen and isinstance(revisionen[0], dict):
+                slots = revisionen[0].get("slots")
+                if isinstance(slots, dict) and isinstance(slots.get("main"), dict):
+                    text = str(slots["main"].get("*") or "")
+                    # Nur der Kopf der Seite: die Infobox steht oben, und mehr
+                    # Wikitext brächte nichts als Ladezeit.
+                    return text[:_WIKITEXT_MAX]
+        return ""
+    except Exception:
+        return ""
+
+
+def wikipedia_wissen(query: str, sprache: str = "de") -> dict | None:
+    """Holt eine kompakte Wikipedia-Zusammenfassung über das Backend, falls keine SearXNG-Infobox vorlag."""
+    q = (query or "").strip()
+    if not q or len(q) > 120:
+        return None
+    lang = sprache if sprache in ("de", "en", "fr", "es", "it", "nl", "pl", "pt") else "de"
+    try:
+        # 1. Suche den besten Wikipedia-Artikeltitel
+        search_resp = _http_client().get(
+            f"https://{lang}.wikipedia.org/w/api.php",
+            params={
+                "action": "query",
+                "list": "search",
+                "srsearch": q,
+                "srlimit": 1,
+                "format": "json",
+            },
+            headers={
+                "User-Agent": "MauntingSearch/1.0 (https://mauntingstudios.com; privacy-proxy)",
+                "Accept": "application/json",
+            },
+        )
+        if search_resp.status_code != 200:
+            return None
+        s_data = search_resp.json()
+        search_hits = s_data.get("query", {}).get("search", []) if isinstance(s_data, dict) else []
+        if not search_hits or not isinstance(search_hits[0], dict):
+            return None
+        page_title = str(search_hits[0].get("title") or "").strip()
+        if not page_title:
+            return None
+
+        # 2. Lade REST-Summary zu diesem Titel
+        encoded_title = urllib.parse.quote(page_title.replace(" ", "_"), safe="")
+        sum_resp = _http_client().get(
+            f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{encoded_title}",
+            headers={
+                "User-Agent": "MauntingSearch/1.0 (https://mauntingstudios.com; privacy-proxy)",
+                "Accept": "application/json",
+            },
+        )
+        if sum_resp.status_code != 200:
+            return None
+        w = sum_resp.json()
+        if not isinstance(w, dict):
+            return None
+        titel = redact_sensitive_text(str(w.get("title") or page_title)).strip()[:MAX_TITLE_CHARS]
+        untertitel = redact_sensitive_text(str(w.get("description") or "")).strip()[:200]
+        inhalt = redact_sensitive_text(str(w.get("extract") or "")).strip()[:1200]
+        if not inhalt:
+            return None
+        page_url = (
+            str(w.get("content_urls", {}).get("desktop", {}).get("page") or "")
+            if isinstance(w.get("content_urls"), dict)
+            else ""
+        )
+        if not page_url or not _is_safe_public_url(page_url):
+            page_url = f"https://{lang}.wikipedia.org/wiki/{encoded_title}"
+        thumb = w.get("thumbnail")
+        bild = str(thumb.get("source") or "").strip() if isinstance(thumb, dict) else ""
+        sicheres_bild = bild if (bild and len(bild) <= MAX_URL_CHARS and _is_safe_public_url(bild)) else None
+        if sicheres_bild:
+            _merke_bild_url(sicheres_bild)
+        wikitext = _wiki_wikitext(lang, page_title)
+        attribute = []
+        if untertitel:
+            label = "Beschreibung" if lang == "de" else "Description"
+            attribute.append({"label": label, "value": untertitel})
+        attribute.extend(_wiki_infobox_felder(wikitext))
+        return {
+            "titel": titel,
+            "untertitel": untertitel,
+            "inhalt": inhalt,
+            **({"bild": sicheres_bild} if sicheres_bild else {}),
+            "attribute": attribute,
+            "urls": [{"title": "Wikipedia", "url": page_url}],
+        }
+    except Exception as exc:
+        logger.debug("Wikipedia-Wissensabruf fehlgeschlagen: %s", type(exc).__name__)
+        return None
+
+
+def searxng_autocomplete(query: str, sprache: str = "de", s_url: str | None = None) -> list[str]:
+    """Holt Live-Suchvorschläge über SearXNG (/autocompleter) ohne Direktkontakt des Browsers zu Dritten."""
+    q = (query or "").strip()[:MAX_QUERY_CHARS]
+    if not q:
+        return []
+    target_url = s_url or searxng_url()
+    if not target_url:
+        return []
+    try:
+        resp = _http_client().get(
+            f"{target_url.rstrip('/')}/autocompleter",
+            params={"q": q, "language": sprache},
+            headers={"Accept": "application/json"},
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list):
+                # SearXNG returns either ["s1", "s2"] or ["query", ["s1", "s2"]]
+                items = data[1] if (len(data) >= 2 and isinstance(data[1], list)) else data
+                return [
+                    redact_sensitive_text(str(s).strip())[:MAX_QUERY_CHARS]
+                    for s in items
+                    if isinstance(s, str) and s.strip()
+                ][:8]
+    except Exception:
+        pass
+    return []
+
+
 def searxng_ergebnis(
     query: str,
     *,
@@ -388,6 +769,7 @@ def searxng_ergebnis(
             img = str(r.get("thumbnail") or r.get("img_src") or "")
             if img and len(img) <= MAX_URL_CHARS and _is_safe_public_url(img):
                 hit["bild"] = img
+                _merke_bild_url(img)
             published = _zeitpunkt(r.get("publishedDate"))
             if published:
                 hit["published"] = published
@@ -400,7 +782,11 @@ def searxng_ergebnis(
         if isinstance(s, str) and s.strip() and len(s) <= MAX_QUERY_CHARS
     ][:8] if isinstance(raw_sug, list) else []
 
-    return {"treffer": hits, "vorschlaege": suggestions}
+    infobox = _parse_infobox(data.get("infoboxes") if isinstance(data, dict) else None)
+    ergebnis_dict: dict = {"treffer": hits, "vorschlaege": suggestions}
+    if infobox:
+        ergebnis_dict["infobox"] = infobox
+    return ergebnis_dict
 
 
 def searxng_treffer(

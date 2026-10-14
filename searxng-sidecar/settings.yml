@@ -10,7 +10,14 @@ server:
   image_proxy: false
 search:
   safe_search: 0
-  autocomplete: ""
+  autocomplete: "duckduckgo"
   formats:
     - html
     - json
+  # Die Kategorien-Tabs von Maunting Search (Web, Bilder, Videos, News) laufen
+  # über `categories`; ohne diese Freigabe wirft SearXNG die Anfrage aus.
+  default_categories:
+    - general
+    - images
+    - videos
+    - news

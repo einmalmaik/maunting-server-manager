@@ -149,11 +149,29 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.41 vom 2026-10-14 aus (Nachrecherche der Suchzusammenfassung)', () => {
+  it('weist die Fassung 3.42 vom 2026-10-15 aus (Maunting Search)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.41`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.42`)),
+    ).toBeInTheDocument();
+    expect(
+      i18n.t('privacyPolicy.sections.browser.items.mauntingSearch'),
+    ).toMatch(/Maunting Search/);
+    expect(
+      i18n.t('privacyPolicy.sections.browser.items.mauntingSearch'),
+    ).toMatch(/GNU Affero General Public License \(AGPLv3\)/);
+    expect(
+      i18n.t('privacyPolicy.sections.browser.items.mauntingSearchMedien'),
+    ).toMatch(/\/api\/browser\/suche\/bild/);
+    expect(
+      i18n.t('privacyPolicy.sections.browser.items.mauntingSearchMedien'),
+    ).toMatch(/nie ein kaputtes Bildsymbol/);
+    expect(
+      screen.getByText(i18n.t('privacyPolicy.sections.browser.items.mauntingSearch')),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(i18n.t('privacyPolicy.sections.browser.items.mauntingSearchMedien')),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
