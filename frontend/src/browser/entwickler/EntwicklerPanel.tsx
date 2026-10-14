@@ -3,6 +3,11 @@
  * Netzwerk, Anwendung, Leistung und Gerät. Solange das Panel offen ist, laufen
  * die Bereiche des Protokolls für genau diesen Tab (`einschalten`); beim
  * Schließen oder Wechseln fällt alles wieder weg (`ausschalten`).
+ *
+ * Ohne offenen Tab untersuchen sie die Oberfläche selbst (Startseite): deren
+ * Webview spricht dasselbe Protokoll unter `OBERFLAECHE_TAB`, das Rust an
+ * seine eigene Webview statt an einen Tab reicht. Unter Android gibt es das
+ * nicht, dort bleibt der Leerzustand.
  */
 import { useEffect } from 'react'
 import { Code2, Database, FileCode, Gauge, MousePointerClick, Network, Smartphone, SquareTerminal } from 'lucide-react'
@@ -10,6 +15,7 @@ import { useTranslation } from 'react-i18next'
 
 import { TabBar, Zustandsflaeche, type TabDef } from '@/Singra/UI'
 
+import { istAndroid } from '../services/plattform'
 import { useAktiverTab } from '../services/tabsStore'
 import { Anwendung } from './Anwendung'
 import { Elemente } from './Elemente'
@@ -32,13 +38,19 @@ const ANSICHTEN: TabDef<Ansicht>[] = [
   { id: 'geraet', labelKey: 'browser.entwickler.geraet.titel', icon: Smartphone },
 ]
 
+/**
+ * Pseudo-Tab der Oberfläche selbst. Muss `id_pruefen` in Rust bestehen und
+ * darf nie ein echter Tab sein — Tabs entstehen nur aus der Oberfläche heraus.
+ */
+export const OBERFLAECHE_TAB = 'tab-oberflaeche'
+
 export function EntwicklerPanel() {
   const { t } = useTranslation()
   const tab = useAktiverTab()
   const ansicht = useAnsicht((s) => s.ansicht)
   const waehlen = useAnsicht((s) => s.waehlen)
   const untersuchen = useAnsicht((s) => s.untersuchen)
-  const id = tab?.nativDa ? tab.id : null
+  const id = tab?.nativDa ? tab.id : !istAndroid() ? OBERFLAECHE_TAB : null
 
   useEffect(() => {
     if (!id) return
@@ -62,7 +74,7 @@ export function EntwicklerPanel() {
       .catch(() => null)
   }, [id, untersuchen])
 
-  if (!id || !tab) {
+  if (!id) {
     return (
       <div className="flex h-full items-center justify-center p-6">
         <Zustandsflaeche art="leer" titel={t('browser.entwickler.ohneSeiteTitel')} text={t('browser.entwickler.ohneSeiteText')} />
@@ -82,7 +94,7 @@ export function EntwicklerPanel() {
       {ansicht === 'konsole' && <Konsole tab={id} />}
       {ansicht === 'quellen' && <Quellen tab={id} />}
       {ansicht === 'netz' && <Netzwerk tab={id} />}
-      {ansicht === 'anwendung' && <Anwendung tab={id} url={tab.url} />}
+      {ansicht === 'anwendung' && <Anwendung tab={id} url={tab?.url ?? window.location.origin} />}
       {ansicht === 'leistung' && <Leistung tab={id} />}
       {ansicht === 'geraet' && <Geraet tab={id} />}
     </div>

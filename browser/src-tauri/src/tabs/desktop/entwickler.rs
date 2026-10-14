@@ -10,12 +10,18 @@
 //! Durch kommt nur, was die Werkzeuge brauchen ([`erlaubt`]). Nichts davon
 //! navigiert am Filter vorbei, legt Skripte für spätere Seiten an, reicht
 //! Dateien in die Seite oder schaltet Zertifikatsprüfungen ab.
+//!
+//! Dasselbe Protokoll spricht die Oberfläche für sich selbst ([`OBERFLAECHE`]):
+//! die Startseite ist kein Tab und hätte sonst keine Werkzeuge. Die
+//! Freigabeliste gilt dort gleich; was die Oberfläche damit über sich erfährt,
+//! konnte sie ohnehin schon (es ist ihre eigene Seite).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
 use serde_json::Value;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2;
 use webview2_com::{CallDevToolsProtocolMethodCompletedHandler, DevToolsProtocolEventReceivedEventHandler};
 use windows::core::HSTRING;
@@ -56,6 +62,12 @@ const GESPERRT: [&str; 5] = [
     "DOM.setFileInputFiles",
     "DOM.getFileInfo",
 ];
+
+/// Die Kennung, unter der die Oberfläche ihr eigenes Protokoll anspricht.
+/// Besteht `id_pruefen` (`tab-` plus Name) und ist nie ein echter Tab: Tabs
+/// entstehen nur aus der Oberfläche heraus und heißen nie so. Die
+/// Rufnummern der Popups (`tab-p…`) sieht anders aus.
+pub const OBERFLAECHE: &str = "tab-oberflaeche";
 
 /// Ereignisse, die an die Oberfläche gehen. Sie kommen nur, solange ihr
 /// Bereich eingeschaltet ist.
@@ -173,8 +185,9 @@ fn fehlertext(json: &str) -> Option<String> {
     Some(kuerzen(meldung.as_deref().unwrap_or(json), 500))
 }
 
-pub fn rufen(app: &AppHandle, id: &str, methode: String, parameter: Value) -> Result<Value, String> {
-    if !erlaubt(&methode) {
+/// Freigabeliste, Form und Größe vor jedem Aufruf, egal in welcher Webview.
+fn geprueft(methode: &str, parameter: &Value) -> Result<String, String> {
+    if !erlaubt(methode) {
         return Err(format!("{methode} ist in den Entwicklerwerkzeugen nicht erlaubt"));
     }
     if !parameter.is_object() {
@@ -184,33 +197,84 @@ pub fn rufen(app: &AppHandle, id: &str, methode: String, parameter: Value) -> Re
     if parameter.len() > PARAMETER_MAX {
         return Err("Parameter zu groß".into());
     }
-    let json = aufrufen(app, id, methode, parameter)?;
+    Ok(parameter)
+}
+
+/// Die Antwort im Ganzen, oder der Fehler des Protokolls.
+fn antwort(json: &str) -> Result<Value, String> {
     if json.len() > ANTWORT_MAX {
         return Err("Antwort zu groß".into());
     }
-    serde_json::from_str(&json).map_err(|e| e.to_string())
+    serde_json::from_str(json).map_err(|e| e.to_string())
+}
+
+pub fn rufen(app: &AppHandle, id: &str, methode: String, parameter: Value) -> Result<Value, String> {
+    let parameter = geprueft(&methode, &parameter)?;
+    let json = aufrufen(app, id, methode, parameter)?;
+    antwort(&json)
+}
+
+/// Das Protokoll der Oberfläche selbst (Startseite, Adresszeile): die Webview
+/// `main` gehört Tauri, kein Tab. Ereignisse werden beim ersten Aufruf
+/// angebunden; davor gäbe es niemanden, der sie abnimmt.
+pub fn oberflaeche_aufrufen(app: &AppHandle, methode: String, parameter: Value) -> Result<Value, String> {
+    let parameter = geprueft(&methode, &parameter)?;
+    let app2 = app.clone();
+    // Der Rückweg aus der Webview; `with_webview` gibt ihn nicht zurück.
+    let (tx, rx) = mpsc::channel::<Result<mpsc::Receiver<Result<String, String>>, String>>();
+    super::auf_ui(app, move || {
+        let Some(fenster) = app2.get_webview_window("main") else {
+            return Err("Hauptfenster fehlt".to_string());
+        };
+        // Nur auf dem UI-Faden; jeder Aufruf läuft darüber.
+        static ANGEBUNDEN: AtomicBool = AtomicBool::new(false);
+        fenster.with_webview(move |w| unsafe {
+            let core = match w.controller().CoreWebView2() {
+                Ok(core) => core,
+                Err(fehler) => {
+                    let _ = tx.send(Err(super::fehler(fehler)));
+                    return;
+                }
+            };
+            if !ANGEBUNDEN.load(Ordering::SeqCst) {
+                if let Err(fehler) = anbinden(&app2, OBERFLAECHE, &core) {
+                    let _ = tx.send(Err(super::fehler(fehler)));
+                    return;
+                }
+                ANGEBUNDEN.store(true, Ordering::SeqCst);
+            }
+            let _ = tx.send(senden(&core, methode, parameter));
+        })
+        .map_err(super::fehler)
+    })?;
+    let rx = rx.recv().map_err(|_| "Die Oberfläche hat keine Seite".to_string())??;
+    let json = rx.recv_timeout(Duration::from_secs(30)).map_err(|_| "Keine Antwort von der Oberfläche".to_string())?;
+    antwort(&json?)
+}
+
+/// Schickt die Methode an den Kern und gibt den Rückweg zurück. Der Aufrufer
+/// wartet darauf; der UI-Faden bleibt frei, die Antwort kommt als Rückruf.
+fn senden(core: &ICoreWebView2, methode: String, parameter: String) -> Result<mpsc::Receiver<Result<String, String>>, String> {
+    let (tx, rx) = mpsc::channel::<Result<String, String>>();
+    unsafe {
+        core.CallDevToolsProtocolMethod(
+            &HSTRING::from(methode),
+            &HSTRING::from(parameter),
+            &CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |ergebnis, json| {
+                // Bei einem Fehler steht die Meldung des Protokolls im JSON, das HRESULT sagt nur E_INVALIDARG.
+                let _ = tx.send(ergebnis.map(|()| json.clone()).map_err(|e| fehlertext(&json).unwrap_or_else(|| e.to_string())));
+                Ok(())
+            })),
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(rx)
 }
 
 /// Der Aufruf selbst, ohne Freigabeliste und Größengrenze: nur für Wege des
 /// Browsers, die ihre Methode selbst festlegen (Ganzseitenaufnahme).
 pub(crate) fn aufrufen(app: &AppHandle, id: &str, methode: String, parameter: String) -> Result<String, String> {
-    let rx = super::mit_tab(app, id, move |tab| {
-        let (tx, rx) = mpsc::channel::<Result<String, String>>();
-        unsafe {
-            tab.core
-                .CallDevToolsProtocolMethod(
-                    &HSTRING::from(methode),
-                    &HSTRING::from(parameter),
-                    &CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |ergebnis, json| {
-                        // Bei einem Fehler steht die Meldung des Protokolls im JSON, das HRESULT sagt nur E_INVALIDARG.
-                        let _ = tx.send(ergebnis.map(|()| json.clone()).map_err(|e| fehlertext(&json).unwrap_or_else(|| e.to_string())));
-                        Ok(())
-                    })),
-                )
-                .map_err(|e| e.to_string())?;
-        }
-        Ok(rx)
-    })?;
+    let rx = super::mit_tab(app, id, move |tab| senden(&tab.core, methode, parameter))?;
     rx.recv_timeout(Duration::from_secs(30)).map_err(|_| "Keine Antwort von der Seite".to_string())?
 }
 
@@ -223,6 +287,15 @@ mod tests {
         let antwort = r#"{"error":{"code":-32000,"message":"Agent is not enabled."},"id":30}"#;
         assert_eq!(fehlertext(antwort).as_deref(), Some("Agent is not enabled."));
         assert_eq!(fehlertext(""), None);
+    }
+
+    /// Die Oberfläche spricht ihr eigenes Protokoll unter einer Kennung an,
+    /// die `tab_protokoll` durchlässt, aber nie ein echter Tab trägt.
+    #[test]
+    fn die_oberflaeche_hat_ihre_eigene_kennung() {
+        assert!(crate::tabs::id_pruefen(super::OBERFLAECHE).is_ok());
+        assert!(super::OBERFLAECHE.starts_with("tab-"));
+        assert!(!super::OBERFLAECHE.starts_with("tab-p"));
     }
 
     #[test]

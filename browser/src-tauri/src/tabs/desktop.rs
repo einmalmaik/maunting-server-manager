@@ -406,8 +406,14 @@ pub fn antworten(app: &AppHandle, nr: u64, antwort: super::Antwort) -> Result<()
     app.run_on_main_thread(move || rueckfragen::erledigen(nr, antwort)).map_err(fehler)
 }
 
+/// Eine Methode des DevTools-Protokolls. `tab-oberflaeche` meint die Webview
+/// der Oberfläche selbst (Startseite ohne offenen Tab); alles andere einen Tab.
 pub fn protokoll(app: &AppHandle, id: &str, methode: String, parameter: serde_json::Value) -> Result<serde_json::Value, String> {
-    entwickler::rufen(app, id, methode, parameter)
+    if id == entwickler::OBERFLAECHE {
+        entwickler::oberflaeche_aufrufen(app, methode, parameter)
+    } else {
+        entwickler::rufen(app, id, methode, parameter)
+    }
 }
 
 pub fn suchen(app: &AppHandle, id: &str, richtung: String, begriff: String) -> Result<(), String> {
