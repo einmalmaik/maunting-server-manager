@@ -8632,6 +8632,7 @@
       "zuhoeren": "Ich höre zu …",
       "nichtUnterstuetzt": "Sprachsuche wird auf diesem Browser nicht unterstützt.",
       "fehler": "Spracheingabe fehlgeschlagen.",
+      "offline": "Kein Internet – das Sprachmodell kann nicht geladen werden.",
       "keineBerechtigung": "Mikrofonzugriff verweigert.",
       "laedtModell": "Lokales KI-Sprachmodell wird geladen …",
       "transkribiert": "Wird lokal auf dem Gerät transkribiert …"

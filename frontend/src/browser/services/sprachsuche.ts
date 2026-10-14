@@ -31,6 +31,21 @@ export interface SprachsucheOptionen {
   sprache?: string
 }
 
+/**
+ * Kurztext eines Transkriptionsfehlers für die Anzeige: Name plus gekürzte
+ * Meldung in einer Zeile. Die Startseite hat keine Konsole, deshalb muss der
+ * Toast die Ursache nennen — ein generisches „fehlgeschlagen“ lässt den
+ * Fehler (etwa blockierter Modell-Download) nicht eingrenzen.
+ */
+export function fehlerKurztext(fehler: unknown, hoechstens = 160): string {
+  const name = fehler instanceof Error && fehler.name ? fehler.name : 'Fehler'
+  const meldung = (fehler instanceof Error ? fehler.message : String(fehler ?? ''))
+    .replace(/\s+/g, ' ')
+    .trim()
+  const text = meldung ? `${name}: ${meldung}` : name
+  return text.length > hoechstens ? `${text.slice(0, hoechstens - 1)}…` : text
+}
+
 interface IRecognitionResultItem {
   transcript: string
 }
@@ -106,7 +121,14 @@ export function useSprachsuche({ onErgebnis, onZwischenergebnis, sprache }: Spra
         }
       } catch (err) {
         console.warn('[Sprachsuche] Whisper-Transkription fehlgeschlagen:', err)
-        toast.error(t('browser.sprachsuche.fehler'))
+        // Ohne Netz kann das Modell nicht geladen werden — eigene Ansage statt
+        // technischem Fetch-Fehler. Sonst steht die Ursache im Toast, weil die
+        // Startseite keine Konsole zum Nachsehen hat.
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          toast.error(t('browser.sprachsuche.offline'))
+        } else {
+          toast.error(`${t('browser.sprachsuche.fehler')} ${fehlerKurztext(err)}`)
+        }
       } finally {
         setZustand('bereit')
       }

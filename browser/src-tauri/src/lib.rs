@@ -299,6 +299,11 @@ mod tests {
         let quelle = |name: &str| csp.split(';').map(str::trim).find(|d| d.starts_with(name)).unwrap().to_string();
         assert_eq!(quelle("img-src"), "img-src 'self' data: blob:");
         assert!(!quelle("script-src").contains("'unsafe-eval'"));
+        // `blob:` braucht die lokale Spracherkennung: onnxruntime-web lädt sein
+        // WebGPU/JSEP-Backend per dynamischem `import()` einer Blob-Adresse.
+        // Ohne steht nach dem Sprechen „Spracheingabe fehlgeschlagen“ mit
+        // „Failed to fetch dynamically imported module: blob:…“ (10/2026).
+        assert!(quelle("script-src").split_whitespace().any(|q| q == "blob:"));
         // Unverschlüsselt nur zum eigenen Rechner, wie `konfig::backend_url_verboten`
         // (eine IPv6-Adresse kennt die CSP-Syntax nicht). Bis 10.10.2026 stand
         // dort `http: ws:` für jeden Host.

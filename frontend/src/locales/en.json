@@ -8632,6 +8632,7 @@
       "zuhoeren": "Listening …",
       "nichtUnterstuetzt": "Voice search is not supported on this browser.",
       "fehler": "Speech recognition failed.",
+      "offline": "No internet connection – the speech model cannot be loaded.",
       "keineBerechtigung": "Microphone access denied.",
       "laedtModell": "Loading local on-device AI model …",
       "transkribiert": "Transcribing on device …"
