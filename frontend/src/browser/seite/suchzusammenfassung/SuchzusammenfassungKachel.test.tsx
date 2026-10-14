@@ -132,6 +132,38 @@ describe('SuchzusammenfassungKachel', () => {
     expect(screen.getByText('Fertige Zusammenfassung')).toBeInTheDocument()
   })
 
+  it('zeigt die selbständige Nachrecherche mit den Suchanfragen', async () => {
+    apiStream.mockResolvedValueOnce({
+      ok: true,
+      body: {
+        getReader: () => {
+          let gesendet = false
+          return {
+            read: () => {
+              if (gesendet) return Promise.resolve({ done: true, value: undefined })
+              gesendet = true
+              const chunk = new TextEncoder().encode(
+                'data: {"type": "start", "model": "gpt-4o"}\n\n' +
+                  'data: {"type": "recherche", "anfrage": "Grafikkarte einbauen Anleitung"}\n\n' +
+                  'data: {"type": "recherche", "anfrage": "Grafikkarte Stromanschluss"}\n\n' +
+                  'data: {"type": "content", "text": "So geht der Einbau [1]."}\n\n' +
+                  'data: {"type": "done"}\n\n',
+              )
+              return Promise.resolve({ done: false, value: chunk })
+            },
+          }
+        },
+      },
+    })
+
+    render(<SuchzusammenfassungKachel begriff="Testsuche" treffer={TREFFER} />)
+
+    expect(await screen.findByText(/Sucht weiter|Researching further/)).toBeInTheDocument()
+    expect(screen.getByText(/Grafikkarte einbauen Anleitung/)).toBeInTheDocument()
+    expect(screen.getByText(/Grafikkarte Stromanschluss/)).toBeInTheDocument()
+    expect(await screen.findByText(/So geht der Einbau/)).toBeInTheDocument()
+  })
+
   it('zeigt Denkprozess und erlaubt Denkstufe bei Nachfragen wenn erlaubt', async () => {
     apiStream.mockResolvedValueOnce({
       ok: true,

@@ -2,15 +2,23 @@
 
 Eigenschaften:
 - 0 Bytes Speicherung in der Datenbank (kein Chat, keine Nachricht, keine Persistenz).
-- Streng isolierter, neutraler One-Shot-Completion-Stream (kein Gedächtnis, keine Ethik-Engine).
+- Streng isolierter, neutraler Completion-Stream (kein Gedächtnis, keine Ethik-Engine).
 - Günstig & schnell: Minimaler Token-Overhead, fast-streaming.
 - Quellenangaben mit [1], [2], verknüpft mit den organischen Suchergebnissen.
+- Folgefragen recherchieren selbständig weiter: Die Nachfrage wird mit Blick auf
+  den Verlauf in eigenständige Suchanfragen umgeschrieben (Koreferenzen wie
+  „das" werden aufgelöst), danach laufen höchstens zwei gezielte Nachsuchen.
+  Bei einem Themenwechsel ersetzen die frischen Treffer den alten Kontext, bei
+  einer Vertiefung ergänzen sie ihn. Reicht kein Treffer, antwortet die KI aus
+  eigenem Wissen — unmissverständlich als unbelegt gekennzeichnet.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import re
 from typing import Any, AsyncIterator
 import httpx
 from sqlalchemy.orm import Session
@@ -32,12 +40,30 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """Du bist ein neutraler, sachlicher Suchassistent. Beantworte die Anfrage des Nutzers auf Basis der Suchergebnisse objektiv, präzise und direkt.
 
+Die Suchergebnisse sind in Abschnitte gegliedert („Treffer zur Ausgangssuche",
+„Frische Treffer zur Nachfrage“). Beziehe dich bei einer Nachfrage vorrangig
+auf die frischen Treffer.
+
 Regeln:
-1. Nutze ausschließlich die gegebenen Suchergebnisse als Informationsquelle. Erfinde keine Fakten.
-2. Wenn die Suchergebnisse die Frage nicht beantworten, erkläre dies kurz und sachlich.
-3. Belege Aussagen mit Quellennummern in eckigen Klammern, z. B. [1] oder [2].
+1. Nutze vorrangig die gegebenen Suchergebnisse als Informationsquelle. Erfinde keine Fakten.
+2. Reichen die Suchergebnisse für die Frage nicht aus, darfst du aus eigenem Wissen antworten. Kennzeichne das unmissverständlich mit dem einleitenden Hinweis „Ohne Quellenbeleg:“ und setze in diesem Fall keine [n]-Quellenangaben.
+3. Belege Aussagen aus den Suchergebnissen mit Quellennummern in eckigen Klammern, z. B. [1] oder [2].
 4. Strukturiere übersichtlich mit Markdown (Absätze oder kurze Aufzählungspunkte).
 5. Keine Floskeln, keine Begrüßungen, keine formelhaften Schlusssätze. Beginne direkt mit der Information."""
+
+
+UMSCHREIBEN_SYSTEM = """Du formulierst Nachfragen für eine Metasuche um. Lese den bisherigen Dialog und die aktuelle Nachfrage und liefere eigenständige Suchanfragen, die ohne den Dialog verständlich sind. Löse dabei Bezüge auf („das“, „dort“, „die Zutaten“ → der gemeinte Gegenstand).
+
+Antworte ausschließlich mit JSON in genau dieser Form: {"suchanfragen": ["...", "..."], "themenwechsel": true/false}.
+- Höchstens 3 kurze Suchanfragen, die erste deckt die Nachfrage am besten ab.
+- "themenwechsel": true, wenn die Nachfrage ein neues Thema beginnt und die bisherigen Treffer dafür nichts mehr taugen; false, wenn sie das bisherige Thema vertieft."""
+
+#: Mehr Nachsuchen löst eine Folgefrage nie aus (Kosten- und Latenzgrenze).
+NACHSUCHE_MAX_RUNDEN = 2
+#: Höchstens so viele Suchanfragen liefert das Umschreiben.
+UMSCHREIBEN_MAX_ANFRAGEN = 3
+#: So viele frische Trefferseiten werden höchstens geöffnet, wenn Snippets dünn sind.
+SEITEN_MAX = 2
 
 
 def suchzusammenfassung_anbieter(
@@ -131,13 +157,92 @@ def baue_suchkontext(treffer: list[dict[str, Any]]) -> str:
     return "\n".join(zeilen)
 
 
+def _deute_umschreibung(text: str, rueckfall: str) -> dict[str, Any]:
+    """Liest das JSON des Umschreibe-Schritts; bei jeder Abweichung gilt der
+    Rückfall: eine wörtliche Nachsuche ohne Themenwechsel (bisheriges Verhalten)."""
+    rueckfall_wert: dict[str, Any] = {"suchanfragen": [rueckfall], "themenwechsel": False}
+    bereinigt = (text or "").strip()
+    if bereinigt.startswith("```"):
+        bereinigt = re.sub(r"^```[a-zA-Z]*\n?|\n?```$", "", bereinigt).strip()
+    try:
+        daten = json.loads(bereinigt)
+    except (json.JSONDecodeError, ValueError):
+        return rueckfall_wert
+    if not isinstance(daten, dict):
+        return rueckfall_wert
+    roh = daten.get("suchanfragen")
+    if not isinstance(roh, list):
+        return rueckfall_wert
+    anfragen = [str(a).strip()[:200] for a in roh if str(a).strip()][:UMSCHREIBEN_MAX_ANFRAGEN]
+    if not anfragen:
+        return rueckfall_wert
+    return {"suchanfragen": anfragen, "themenwechsel": bool(daten.get("themenwechsel", False))}
+
+
+async def suchanfragen_umschreiben(
+    client: httpx.AsyncClient,
+    *,
+    provider: AiProvider,
+    api_key: str | None,
+    model: str,
+    frage: str,
+    verlauf: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Formuliert eine Nachfrage mit Blick auf den Verlauf in eigenständige
+    Suchanfragen um. Scheitert der Schritt, gilt der Rückfall aus
+    `_deute_umschreibung` — nie ein Abbruch der Zusammenfassung."""
+    auszug: list[str] = []
+    for eintrag in (verlauf or [])[-6:]:
+        text = (eintrag.get("content") or "").strip()
+        if eintrag.get("role") in ("user", "assistant") and text:
+            auszug.append(f"{eintrag['role']}: {text[:1000]}")
+    messages = [
+        {"role": "system", "content": UMSCHREIBEN_SYSTEM},
+        {
+            "role": "user",
+            "content": "Bisheriger Dialog:\n" + ("\n".join(auszug) or "(leer)") + f"\n\nAktuelle Nachfrage:\n{frage}",
+        },
+    ]
+    try:
+        teile: list[str] = []
+        verwendung = StreamUsage()
+        async for chunk in stream_chat_completion(
+            client,
+            provider=provider,
+            api_key=api_key,
+            messages=messages,
+            usage=verwendung,
+            model=model,
+        ):
+            if chunk.kind == "content" and chunk.text:
+                teile.append(chunk.text)
+        return _deute_umschreibung("".join(teile), frage)
+    except Exception as exc:
+        logger.debug("Umschreiben der Nachfrage fehlgeschlagen: %s", exc)
+        return {"suchanfragen": [frage], "themenwechsel": False}
+
+
 def baue_nachrichten(
     q: str,
     treffer: list[dict[str, Any]],
     verlauf: list[dict[str, Any]] | None = None,
+    frische_ab: int | None = None,
 ) -> list[dict[str, str]]:
-    """Erstellt den minimalen Prompt-Verlauf (System + Kontext + Frage/Verlauf)."""
-    kontext = baue_suchkontext(treffer)
+    """Erstellt den minimalen Prompt-Verlauf (System + Kontext + Frage/Verlauf).
+
+    `frische_ab` trennt alte Treffer von frischen Nachsuchen in zwei beschriftete
+    Abschnitte, damit das Modell bei einer Nachfrage weiß, was gerade gesucht
+    wurde. Ohne Angabe bleibt es bei einer einzigen Liste (bisheriges Verhalten).
+    """
+    if frische_ab is None or frische_ab <= 0 or frische_ab >= len(treffer):
+        kontext = baue_suchkontext(treffer)
+    else:
+        kontext = (
+            "Treffer zur Ausgangssuche:\n"
+            + baue_suchkontext(treffer[:frische_ab])
+            + "\n\nFrische Treffer zur Nachfrage:\n"
+            + baue_suchkontext(treffer[frische_ab:])
+        )
     erster_nutzer_text = f"{kontext}\n\nNutzeranfrage:\n{q}"
 
     messages: list[dict[str, str]] = [
@@ -191,49 +296,72 @@ async def stream_suchzusammenfassung(
         yield f"data: {json.dumps({'type': 'disabled', 'reason': 'no_key'})}\n\n"
         return
 
-    # 3. Automatische Ergänzungs-Suche bei Folgefragen
+    # 3. Selbständige Nachrecherche bei Folgefragen: Umschreiben (Koreferenzen
+    #    auflösen), höchstens zwei gezielte Nachsuchen, danach bei Bedarf die
+    #    besten frischen Seiten öffnen. Synchrone Arbeit läuft nie auf der
+    #    Ereignisschleife (`asyncio.to_thread`). Die Kennziffern laufen immer
+    #    weiter, damit [n]-Verweise in der Kachel auf die Treffer darunter zeigen.
+    #    Ein Client für Nachrecherche und Antwortstrom gemeinsam.
     gesamt_treffer = list(treffer)
-    if verlauf and neue_suche and q.strip():
-        try:
-            frische = ai_web_search_service.searxng_treffer(q.strip(), limit=5)
-            bekannte_urls = {t.get("url") for t in gesamt_treffer}
-            frische_eintraege: list[dict[str, Any]] = []
-            for t in frische:
-                u = t.get("url")
-                if u and u not in bekannte_urls:
-                    bekannte_urls.add(u)
-                    idx = len(gesamt_treffer) + 1
-                    eintrag = {
-                        "index": idx,
-                        "titel": t.get("title", ""),
-                        "url": u,
-                        "inhalt": t.get("snippet", ""),
-                        "bild": t.get("bild"),
-                    }
-                    gesamt_treffer.append(eintrag)
-                    frische_eintraege.append(eintrag)
-            if frische_eintraege:
-                yield f"data: {json.dumps({'type': 'neue_treffer', 'treffer': frische_eintraege})}\n\n"
-        except Exception as exc:
-            logger.debug("Automatische Ergänzungssuche für Folgefrage fehlgeschlagen: %s", exc)
-
-    # 4. Denkstufe auflösen und prüfen
-    aktiv_denken = bool(denkstufe and denkstufe.lower() not in ("fast", "schnell", "aus", "none"))
-    wunsch_stufe = denkstufe.lower().strip() if aktiv_denken and denkstufe else None
-
-    konfig_daten = suchzusammenfassung_konfig(db, user)
-    erlaubte_stufen = konfig_daten.get("denkstufen", [])
-    max_stufe = konfig_daten.get("max_denkstufe")
-
-    # 5. Nachrichten zusammenstellen
-    messages = baue_nachrichten(q, gesamt_treffer, verlauf)
-
-    # 6. Streamen
-    usage = StreamUsage()
-    yield f"data: {json.dumps({'type': 'start', 'model': model, 'provider': provider.name, 'denkstufen': erlaubte_stufen, 'max_denkstufe': max_stufe})}\n\n"
-
+    frische_ab: int | None = None
     try:
         async with httpx.AsyncClient(timeout=45.0) as client:
+            if verlauf and neue_suche and q.strip():
+                umschrieben = await suchanfragen_umschreiben(
+                    client,
+                provider=provider,
+                api_key=api_key,
+                model=model,
+                frage=q.strip(),
+                verlauf=verlauf,
+            )
+                if umschrieben["themenwechsel"]:
+                    gesamt_treffer = []
+                frische_ab = len(gesamt_treffer)
+                bekannte_urls = {t.get("url") for t in gesamt_treffer}
+                frische_eintraege: list[dict[str, Any]] = []
+                for anfrage in umschrieben["suchanfragen"][:NACHSUCHE_MAX_RUNDEN]:
+                    yield f"data: {json.dumps({'type': 'recherche', 'anfrage': anfrage})}\n\n"
+                    frische = await asyncio.to_thread(ai_web_search_service.searxng_treffer, anfrage, limit=5)
+                    for t in frische:
+                        u = t.get("url")
+                        if u and u not in bekannte_urls:
+                            bekannte_urls.add(u)
+                            eintrag = {
+                                "index": len(gesamt_treffer) + 1,
+                                "titel": t.get("title", ""),
+                                "url": u,
+                                "inhalt": t.get("snippet", ""),
+                                "bild": t.get("bild"),
+                            }
+                            gesamt_treffer.append(eintrag)
+                            frische_eintraege.append(eintrag)
+                for eintrag in frische_eintraege[:SEITEN_MAX]:
+                    seite = await asyncio.to_thread(ai_web_search_service.scrape_url, eintrag.get("url", ""))
+                    inhalt = (seite.get("content") or "").strip()
+                    if inhalt:
+                        seiten_text = (eintrag.get("inhalt") or "").strip()
+                        if seiten_text:
+                            seiten_text += "\n\n"
+                        eintrag["inhalt"] = seiten_text + "Seiteninhalt: " + inhalt[:1500]
+                if frische_eintraege:
+                    yield f"data: {json.dumps({'type': 'neue_treffer', 'treffer': frische_eintraege})}\n\n"
+
+            # 4. Denkstufe auflösen und prüfen
+            aktiv_denken = bool(denkstufe and denkstufe.lower() not in ("fast", "schnell", "aus", "none"))
+            wunsch_stufe = denkstufe.lower().strip() if aktiv_denken and denkstufe else None
+
+            konfig_daten = suchzusammenfassung_konfig(db, user)
+            erlaubte_stufen = konfig_daten.get("denkstufen", [])
+            max_stufe = konfig_daten.get("max_denkstufe")
+
+            # 5. Nachrichten zusammenstellen
+            messages = baue_nachrichten(q, gesamt_treffer, verlauf, frische_ab)
+
+            # 6. Streamen
+            usage = StreamUsage()
+            yield f"data: {json.dumps({'type': 'start', 'model': model, 'provider': provider.name, 'denkstufen': erlaubte_stufen, 'max_denkstufe': max_stufe})}\n\n"
+
             denken, stufe = await ai_reasoning.vorgabe(
                 client,
                 db,
@@ -258,6 +386,6 @@ async def stream_suchzusammenfassung(
                 elif chunk.kind == "content" and chunk.text:
                     yield f"data: {json.dumps({'type': 'content', 'text': chunk.text})}\n\n"
 
-        yield f"data: {json.dumps({'type': 'done', 'model': model})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'model': model})}\n\n"
     except Exception as exc:
         yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"

@@ -227,6 +227,199 @@ async def test_stream_suchzusammenfassung_erfolg(db, monkeypatch) -> None:
     assert '"type": "done"' in events[3]
 
 
+def test_deute_umschreibung_gueltig_und_rueckfall() -> None:
+    gut = ai_search_summary_service._deute_umschreibung(
+        '{"suchanfragen": ["GTA 6 Release Datum", "GTA 6 Preis"], "themenwechsel": true}',
+        "Wann kommt das raus?",
+    )
+    assert gut == {"suchanfragen": ["GTA 6 Release Datum", "GTA 6 Preis"], "themenwechsel": True}
+
+    # Markdown-Zaun wird abgestreift
+    zaun = ai_search_summary_service._deute_umschreibung(
+        '```json\n{"suchanfragen": ["Gulasch Rezept"], "themenwechsel": true}\n```',
+        "Gulaschrezept?",
+    )
+    assert zaun["suchanfragen"] == ["Gulasch Rezept"]
+    assert zaun["themenwechsel"] is True
+
+    # Mehr als drei Anfragen werden beschnitten
+    viele = ai_search_summary_service._deute_umschreibung(
+        json.dumps({"suchanfragen": ["a", "b", "c", "d", "e"], "themenwechsel": False}),
+        "q",
+    )
+    assert viele["suchanfragen"] == ["a", "b", "c"]
+
+    # Jede Abweichung fällt auf die wörtliche Nachsuche ohne Themenwechsel zurück
+    for kaputt in ["", "kein json", "[1, 2]", '{"anders": 1}', '{"suchanfragen": []}']:
+        assert ai_search_summary_service._deute_umschreibung(kaputt, "Originalfrage") == {
+            "suchanfragen": ["Originalfrage"],
+            "themenwechsel": False,
+        }
+
+
+def _nutzer_mit_anbieter(db) -> tuple:
+    user = User(username="recherche_user", password_hash="pw", is_active=True, is_owner=True)
+    p = AiProvider(
+        name="Search Provider",
+        provider_kind="openai",
+        default_model="gpt-4o",
+        enabled=True,
+        requires_api_key=False,
+        search_summary_enabled=True,
+        search_summary_model="gpt-4o-mini",
+    )
+    db.add(user)
+    db.add(p)
+    db.flush()
+    return user, p
+
+
+async def _ereignisse_sammeln(service, **kwargs) -> list[str]:
+    return [event async for event in service.stream_suchzusammenfassung(**kwargs)]
+
+
+def _ereignis_typen(events: list[str]) -> list[str]:
+    return [json.loads(e.split("data:", 1)[1])["type"] for e in events]
+
+
+@pytest.mark.asyncio
+async def test_folgefrage_schreibt_um_sucht_zweimal_und_oeffnet_zwei_seiten(db, monkeypatch) -> None:
+    user, _ = _nutzer_mit_anbieter(db)
+    monkeypatch.setattr("services.permission_service.has_global_permission", lambda _db, _u, _k: True)
+
+    anfragen: list[str] = []
+
+    def fake_treffer(query: str, limit: int = 5):
+        anfragen.append(query)
+        return [{"title": f"Treffer zu {query}", "url": f"https://example.com/{query}", "snippet": "Auszug"}]
+
+    monkeypatch.setattr(ai_search_summary_service.ai_web_search_service, "searxng_treffer", fake_treffer)
+
+    ge_scrapet: list[str] = []
+
+    def fake_scrape(url: str, max_chars: int = 3500):
+        ge_scrapet.append(url)
+        return {"title": "Seite", "url": url, "content": "Voller Seiteninhalt"}
+
+    monkeypatch.setattr(ai_search_summary_service.ai_web_search_service, "scrape_url", fake_scrape)
+
+    async def fake_stream(*args, **kwargs) -> AsyncIterator[StreamChunk]:
+        messages = kwargs.get("messages", [])
+        if messages and messages[0].get("role") == "system" and "Metasuche" in messages[0].get("content", ""):
+            yield StreamChunk(
+                kind="content",
+                text='{"suchanfragen": ["Grafikkarte einbauen Anleitung", "Grafikkarte Stromanschluss", "dritte Anfrage"], "themenwechsel": true}',
+            )
+        else:
+            yield StreamChunk(kind="content", text="Antwort [3].")
+
+    monkeypatch.setattr(ai_search_summary_service, "stream_chat_completion", fake_stream)
+
+    events = await _ereignisse_sammeln(
+        ai_search_summary_service,
+        db=db,
+        user=user,
+        q="Und wie baue ich eine Grafikkarte ein?",
+        treffer=[{"index": 1, "titel": "GTA 6", "url": "https://example.com/gta", "inhalt": "Release"}],
+        verlauf=[{"role": "user", "content": "Wann kommt GTA 6?"}],
+    )
+    typen = _ereignis_typen(events)
+
+    # Zwei Nachsuchen (nicht drei), danach neue Treffer, dann Antwort
+    assert anfragen == ["Grafikkarte einbauen Anleitung", "Grafikkarte Stromanschluss"]
+    assert typen.count("recherche") == 2
+    assert "neue_treffer" in typen
+    assert "done" in typen
+    # Höchstens zwei Seiten geöffnet
+    assert len(ge_scrapet) == 2
+    # Themenwechsel: alte GTA-Treffer sind raus, Kennziffern beginnen frisch
+    treffer_event = json.loads([e for e in events if '"neue_treffer"' in e][0].split("data:", 1)[1])
+    assert [t["index"] for t in treffer_event["treffer"]] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_vertiefung_behaelt_alte_treffer_und_trennt_abschnitte(db, monkeypatch) -> None:
+    user, _ = _nutzer_mit_anbieter(db)
+    monkeypatch.setattr("services.permission_service.has_global_permission", lambda _db, _u, _k: True)
+    monkeypatch.setattr(
+        ai_search_summary_service.ai_web_search_service,
+        "searxng_treffer",
+        lambda query, limit=5: [{"title": "Neu", "url": "https://example.com/neu", "snippet": "Frisch"}],
+    )
+    monkeypatch.setattr(
+        ai_search_summary_service.ai_web_search_service,
+        "scrape_url",
+        lambda url, max_chars=3500: {"title": "S", "url": url, "content": ""},
+    )
+
+    gesehen: dict = {}
+
+    async def fake_stream(*args, **kwargs) -> AsyncIterator[StreamChunk]:
+        messages = kwargs.get("messages", [])
+        if messages and messages[0].get("role") == "system" and "Metasuche" in messages[0].get("content", ""):
+            yield StreamChunk(kind="content", text='{"suchanfragen": ["Brot Wasser Menge"], "themenwechsel": false}')
+        else:
+            gesehen["messages"] = messages
+            yield StreamChunk(kind="content", text="Antwort [1] [2].")
+
+    monkeypatch.setattr(ai_search_summary_service, "stream_chat_completion", fake_stream)
+
+    alter = [{"index": 1, "titel": "Brot", "url": "https://example.com/brot", "inhalt": "Mehl und Hefe"}]
+    events = await _ereignisse_sammeln(
+        ai_search_summary_service,
+        db=db,
+        user=user,
+        q="Und wie viel Wasser?",
+        treffer=alter,
+        verlauf=[{"role": "user", "content": "Wie backe ich Brot?"}],
+    )
+    assert "done" in _ereignis_typen(events)
+    nutzer_text = [m for m in gesehen["messages"] if m["role"] == "user"][0]["content"]
+    assert "Treffer zur Ausgangssuche:" in nutzer_text
+    assert "Frische Treffer zur Nachfrage:" in nutzer_text
+    assert "Mehl und Hefe" in nutzer_text
+    assert "Frisch" in nutzer_text
+
+
+@pytest.mark.asyncio
+async def test_kaputtes_umschreiben_faellt_auf_woertliche_suche_zurueck(db, monkeypatch) -> None:
+    user, _ = _nutzer_mit_anbieter(db)
+    monkeypatch.setattr("services.permission_service.has_global_permission", lambda _db, _u, _k: True)
+    monkeypatch.setattr(
+        ai_search_summary_service.ai_web_search_service,
+        "searxng_treffer",
+        lambda query, limit=5: [],
+    )
+    monkeypatch.setattr(
+        ai_search_summary_service.ai_web_search_service,
+        "scrape_url",
+        lambda url, max_chars=3500: {"title": "S", "url": url, "content": ""},
+    )
+
+    # Umschreiben liefert kein JSON, die Antwort danach läuft normal
+    aufrufe = {"n": 0}
+
+    async def zaehlender_stream(*args, **kwargs) -> AsyncIterator[StreamChunk]:
+        aufrufe["n"] += 1
+        if aufrufe["n"] == 1:
+            yield StreamChunk(kind="content", text="kein json, nur text")
+        else:
+            yield StreamChunk(kind="content", text="Antwort")
+
+    monkeypatch.setattr(ai_search_summary_service, "stream_chat_completion", zaehlender_stream)
+
+    events = await _ereignisse_sammeln(
+        ai_search_summary_service,
+        db=db,
+        user=user,
+        q="Irgendwas?",
+        treffer=[],
+        verlauf=[{"role": "user", "content": "Hallo"}],
+    )
+    assert "done" in _ereignis_typen(events)
+    assert aufrufe["n"] == 2  # Umschreiben + Antwort, kein Abbruch
+
+
 def test_browser_suche_zusammenfassung_route(db, monkeypatch) -> None:
     app = FastAPI()
     app.include_router(browser_suche.router)

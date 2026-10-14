@@ -149,11 +149,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.40 vom 2026-10-11 aus (KI-Suchzusammenfassung flüchtig)', () => {
+  it('weist die Fassung 3.41 vom 2026-10-14 aus (Nachrecherche der Suchzusammenfassung)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.40`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.41`)),
     ).toBeInTheDocument();
     expect(i18n.t('privacyPolicy.sections.messenger.items.pushMetadata')).toMatch(/Gerät entfernst/);
     // Die Zusage und ihre Grenze stehen zusammen: verschluesselt ist die
@@ -251,6 +251,12 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.browser.items.msmSuche')).toMatch(/gehen Suchbegriffe .* an Ihre MSM-Instanz/);
     expect(i18n.t('privacyPolicy.sections.browser.items.suchzusammenfassung')).toMatch(/nicht in der Datenbank gespeichert/);
     expect(i18n.t('privacyPolicy.sections.browser.items.suchzusammenfassung')).toMatch(/0 Bytes Persistenz/);
+    // 3.41: Folgefragen recherchieren selbständig weiter — Umformulierung mit
+    // Dialogauszug, gezielte Nachsuche, bis zu zwei geöffnete Trefferseiten;
+    // reicht kein Treffer, antwortet die KI gekennzeichnet aus eigenem Wissen.
+    expect(i18n.t('privacyPolicy.sections.browser.items.suchzusammenfassung')).toMatch(/deren Umformulierung mit kurzem Dialogauszug/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.suchzusammenfassung')).toMatch(/bis zu zwei Trefferseiten/);
+    expect(i18n.t('privacyPolicy.sections.browser.items.suchzusammenfassung')).toMatch(/Ohne Quellenbeleg/);
     expect(i18n.t('privacyPolicy.sections.browser.items.nachrichten')).toMatch(/bleibt im Browser; gefiltert wird auf dem Gerät/);
     expect(i18n.t('privacyPolicy.sections.browser.items.widget')).toMatch(/Bildsuche der gewählten Suchmaschine/);
     // 3.34: das Token liegt unter Android im Keystore-Fach, Sicherung und Umzug sind ausgeschlossen.

@@ -50,6 +50,7 @@ export function SuchzusammenfassungKachel({
   const [modellName, setModellName] = useState<string | null>(null)
   const [hauptText, setHauptText] = useState('')
   const [gedankenText, setGedankenText] = useState('')
+  const [recherche, setRecherche] = useState<string[]>([])
   const [verlauf, setVerlauf] = useState<SuchNachricht[]>([])
   const [nachfrage, setNachfrage] = useState('')
   const [denkstufe, setDenkstufe] = useState<string>('fast')
@@ -90,6 +91,7 @@ export function SuchzusammenfassungKachel({
 
     setLaedt(true)
     setGedankenText('')
+    setRecherche([])
 
     const trefferPayload = treffer.slice(0, 15).map((item, idx) => ({
       index: idx + 1,
@@ -165,6 +167,8 @@ export function SuchzusammenfassungKachel({
               }
             } else if (data.type === 'thought' && typeof data.text === 'string') {
               setGedankenText((prev) => prev + data.text)
+            } else if (data.type === 'recherche' && typeof data.anfrage === 'string') {
+              setRecherche((prev) => (prev.includes(data.anfrage) ? prev : [...prev, data.anfrage]))
             } else if (data.type === 'neue_treffer' && Array.isArray(data.treffer)) {
               onNeueTreffer?.(data.treffer as Treffer[])
             } else if (data.type === 'content' && typeof data.text === 'string') {
@@ -360,6 +364,16 @@ export function SuchzusammenfassungKachel({
                 {gedankenText}
               </div>
             </details>
+          )}
+
+          {/* Nachrecherche: welche Suchanfragen die KI von sich aus gestellt hat */}
+          {recherche.length > 0 && (
+            <div className="mb-2 flex items-center gap-2 text-body-sm text-on-surface-variant">
+              {laedt && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden="true" />}
+              <span>
+                {t('browser.msmSuche.zusammenfassungRecherche')}: {recherche.join(' · ')}
+              </span>
+            </div>
           )}
 
           {/* Hauptantwort */}
