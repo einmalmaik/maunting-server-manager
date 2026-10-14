@@ -302,11 +302,14 @@ werden. Aufbau, Endpunkte, Medien-Proxy und Betreiberhinweise:
 
 Damit die Suchseite vollständig funktioniert, braucht der Sidecar:
 
-- die JSON-API (`search.formats: json`),
-- Autocomplete (`search.autocomplete`, z. B. `"duckduckgo"`) und
-- die Kategorien General, Bilder, Videos und News
-  (`search.default_categories`) — sonst wirft SearXNG die Anfrage eines
-  Kategorie-Tabs aus und der Tab bleibt leer.
+- die JSON-API (`search.formats: json`) und
+- Autocomplete (`search.autocomplete`, z. B. `"duckduckgo"`) für die
+  Suchvorschläge und die kontextbezogenen Fragen.
+
+Die Kategorie-Tabs brauchen **keine** eigene Freigabe in der Instanz: Die Tabs
+schicken `categories=images` (bzw. `videos`, `news`) als Suchparameter, und
+SearXNG filtert danach selbst. Leere Tabs bedeuten, dass keine Engine der
+Kategorie gerade etwas liefert — nicht, dass etwas fehlt.
 
 Ohne Autocomplete-Eintrag bleiben die Suchvorschläge leer, Treffer und
 Wissens-Panel laufen weiter. `image_proxy` bleibt aus: Bilder holt das Panel

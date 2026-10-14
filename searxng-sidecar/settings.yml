@@ -2,22 +2,24 @@ use_default_settings: true
 general:
   debug: false
   instance_name: "MSM Search Sidecar"
+search:
+  safe_search: 0
+  autocomplete: "duckduckgo"
+  # POST statt GET: der Suchbegriff steht dann in keinem Zugriffslog.
+  method: "POST"
+  formats:
+    - html
+    - json
 server:
   bind_address: "0.0.0.0"
   port: 8080
   secret_key: ""
   limiter: false
   image_proxy: false
-search:
-  safe_search: 0
-  autocomplete: "duckduckgo"
-  formats:
-    - html
-    - json
-  # Die Kategorien-Tabs von Maunting Search (Web, Bilder, Videos, News) laufen
-  # über `categories`; ohne diese Freigabe wirft SearXNG die Anfrage aus.
-  default_categories:
-    - general
-    - images
-    - videos
-    - news
+
+# Anmerkung zu Kategorien: Es gibt KEIN `search.default_categories`. Welche
+# Engine in welcher Kategorie sucht, bestimmt pro Engine ihr `categories:`
+# (z. B. `videos`) bzw. `engines: remove:`/`keep_only:`. Die Tabs von Maunting
+# Search schicken `categories=images` als Parameter — SearXNG filtert danach
+# selbst. Früher stand hier ein ungültiger Schlüssel; die Kategorien laufen
+# allein über den Parameter und brauchen keine eigene Freigabe.

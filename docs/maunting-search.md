@@ -99,9 +99,12 @@ Favicon-API.
 | Videos | `categories: videos` | Karten mit Wiedergabe-Symbol und Domain |
 | News | `categories: news` | Chronologische Meldungen, lokal gefiltert |
 
-Die Instanz muss alle vier Kategorieren anbieten (`search.default_categories` in
-`searxng-sidecar/settings.yml`). Bietet sie eine nicht, bleibt der Tab leer —
-die Suche selbst läuft weiter.
+Kategorien brauchen **keine** eigene Freigabe in der Instanz: Die Tabs schicken
+`categories=…` als Suchparameter, SearXNG filtert danach selbst. Leere Tabs
+bedeuten, dass keine Engine der Kategorie gerade etwas liefert. Was MAUNTING
+SEARCH tun kann: Zusätzliche Engine-Gruppen (z. B. wissenschaftliche Suche)
+über `engines:` in `settings.yml` definieren und in der Tabelle oben
+nachtragen — dazu mehr unter „Instanz anpassen“.
 
 Die Suche bleibt immer auf dem eigenen Server. „Mit DuckDuckGo suchen“ gibt es
 nur als Rückfall, wenn der eigene Suchdienst nicht eingerichtet ist (`503`).
@@ -152,18 +155,132 @@ Web zeigt die Seiten 1–4 plus „Weitere Ergebnisse“. Seite 1..3 lädt jewei
 frische Trefferseite; „Weitere“ hängt die nächste Seite an, ohne Doppelte.
 Bilder, Videos und News zeigen keine Seitennavigation.
 
-## Betreiberhinweise
+## Instanz anpassen
 
-- Die Instanz muss JSON **und** Autocomplete können (`searxng-sidecar/settings.yml`:
-  `search.formats: [html, json]`, `search.autocomplete: "duckduckgo"`). Ohne
-  Autocomplete-Eintrag bleiben Vorschläge leer, die Suche läuft weiter.
-- `image_proxy` des Sidecars bleibt aus: Bilder holt das Backend selbst über
-  `/suche/bild`, sonst gingen Direktadressen der gefundenen Seiten an den
-  Browser.
-- Die Wikipedia-Abfragen gehen vom **Server** aus und mit einem eigenen
-  User-Agent (`MauntingSearch/1.0`), damit Wikipedia sie nicht abweist.
-- Ein eigener SearXNG-Endpunkt wird im Backend gesetzt
-  (`ai_web_search_service.store_searxng_url`), nicht im Browser.
+SearXNG ist stark konfigurierbar, und alles davon wirkt sich direkt auf die
+Treffer von Maunting Search aus. Zwei Ebenen, die sauber getrennt sind:
+
+| Ebene | Was hier eingestellt wird | Wo |
+|---|---|---|
+| **Daten** (SearXNG) | Welche Engines, in welcher Kategorie, mit welchem Gewicht, Timeout, Sprache, SafeSearch | `searxng-sidecar/settings.yml` |
+| **Darstellung** (Maunting Search) | Layout, KI-Box, Wissens-Panel, Medien-Proxy, DNA | eigenes Frontend/Backend |
+
+Die SearXNG-eigene Oberfläche spielt bei uns **keine** Rolle (`ui:`-Optionen,
+Themes, Plugins für die HTML-UI): Der Nutzer sieht nie SearXNG, sondern Maunting
+Search. Nützlich ist deshalb vor allem der Datenteil.
+
+### Engines zusammenstellen
+
+```yaml
+use_default_settings: true
+engines:
+  # Nur diese Engines behalten (alles andere fällt weg)
+  keep_only: [duckduckgo, wikipedia, wikidata, brave]
+  # Oder gezielt einzelne entfernen
+  # remove: [google, qwant]
+```
+
+Reihenfolge und Dichte der Treffer steuert `weight` — ein größerer Wert hebt
+die Ergebnisse dieser Engine in der Liste an:
+
+```yaml
+engines:
+  - name: duckduckgo
+    weight: 2.0
+  - name: wikipedia
+    weight: 1.0
+```
+
+### Kategorien je Engine
+
+Welche Engine im Bilder-, Video- oder News-Tab sucht, steht pro Engine:
+
+```yaml
+engines:
+  - name: duckduckgo
+    categories: [general, images, videos, news]
+  - name: wikidata
+    categories: [general]
+```
+
+Leere Tabs bedeuten: keine Engine dieser Kategorie liefert gerade etwas.
+
+### Sprache, SafeSearch, Zeitverhalten
+
+```yaml
+search:
+  default_lang: "de"          # ohne Region-Auswahl
+  # languages: [de, en]      # nur diese Sprachen anbieten
+  safe_search: 0              # 0/1/2; 2 = streng, nutzt der Jugendschutz
+  method: "POST"              # Suchbegriff steht in keinem Zugriffslog
+  # max_page: 10             # wie viele Seiten die API annimmt
+  ban_timeout: 15             # Sekunden, die eine traurige Engine pausiert
+outgoing:
+  request_timeout: 3.0        # globaler Timeout je Engine-Anfrage
+  retries: 1                  # erneuter Versuch bei Fehlern
+```
+
+Maunting Search schickt die Sprache aus seinem Regions-Dropdown (derzeit
+`de`, `en`, `at`, `ch`, `fr`, `es`, `it`, `nl`); `default_lang` greift nur, wenn
+der Browser keine eigene Region mitgibt.
+
+### Eigene Engines und Datenschutz-Plugins
+
+Was unser Backend nicht abbildet, lässt sich über SearXNG nachbauen:
+
+```yaml
+engines:
+  - name: meine-interne-suche
+    engine: xpath
+    search_url: https://wiki.example.de/index.php?search={query}
+    url_xpath: //div[@class="result"]/a/@href
+    title_xpath: //div[@class="result"]/a
+    categories: [general]
+    shortcut: my
+```
+
+Plugins arbeiten auf den Ergebnissen, bevor das Backend sie sieht:
+
+```yaml
+plugins:
+  - tracker_url_remover     # utm_*, fbclid … aus Links entfernen
+  - hash_finder             # MD5/SHA ansehen, ohne den Tab zu wechseln
+  - unit_converter          # 10 kg in lb
+  - tor_check
+```
+
+`tracker_url_remover` ist für unsere Suchseite der wertvollste: die Links in den
+Treffern werden sauber, bevor sie beim Nutzer ankommen.
+
+### Was SearXNG **nicht** kann
+
+Das sollte man vor dem Umbau wissen, damit keine falsche Erwartung entsteht:
+
+- **Ranking wie Google.** SearXNG aggregiert und gewichtet grob (`weight`), aber
+  es kennt die Signale einer kommerziellen Suche nicht. Die Trefferqualität
+  hängt an den Quellen-Engines.
+- **Wartung.** Engines brechen regelmäßig, wenn eine Seite ihr HTML oder ihre
+  API ändert. `display_error_messages: true` zeigt das im Instanz-Log; ein
+  Update von SearXNG bringt meist Reparaturen mit.
+- **KI und Zusammenfassung.** SearXNG tut das nicht — die KI-Box, die
+  Folgefragen und die selbständige Weiterrecherche sind unsere Schicht
+  (`ai_search_summary_service.py`).
+- **Bilder für jedes Ergebnis.** Vorschaubilder kommen aus den Engines
+  (`img_src`, `thumbnail`). Wo keine sind, zeigt Maunting Search die Karte ohne
+  Bild — das ist normal, kein Fehler.
+- **Eigene Anmeldung, Personalisierung, Vorschläge für einzelne Nutzer.** Nicht
+  vorgesehen und aus Datenschutzgründen nicht gewollt.
+- **Das UI.** Jede Suchmaschinen-Optik, die nicht der eigenen gleicht, müsste in
+  Maunting Search gebaut werden — nicht in SearXNG.
+
+### Was bei uns schon eingestellt ist
+
+`searxng-sidecar/settings.yml` im Repository: JSON und HTML als Formate,
+`autocomplete: duckduckgo`, `method: POST`, `limiter: false` (wir begrenzen im
+Backend je Konto), `image_proxy: false` (Bilder laufen über `/suche/bild`),
+`debug: false`, Instanzname `MSM Search Sidecar`. Der Port liegt auf `127.0.0.1`
+des Servers (`docker-compose.yml`: `127.0.0.1:8888`), das Netz ist also nicht im
+Internet erreichbar. `secret_key` kommt aus `searxng-sidecar/.env`.
 
 ## Lizenzen
 
@@ -173,6 +290,15 @@ basiert technisch auf SearXNG. Der Quellcode der Instanz wird vom Betreiber
 vorgehalten und kann Nutzern auf Anfrage angeboten werden — genau dieses
 Versprechen verlangt die AGPLv3. Der Fußzeilen-Hinweis der Suchseite weist darauf
 hin, damit die Zuschreibung nicht verloren geht.
+
+Drei Dinge bleiben bei jeder Anpassung der InstanzPflicht:
+
+- Die Wikipedia-Abfragen gehen vom **Server** aus und mit einem eigenen
+  User-Agent (`MauntingSearch/1.0`), damit Wikipedia sie nicht abweist.
+- Ein eigener SearXNG-Endpunkt wird im Backend gesetzt
+  (`ai_web_search_service.store_searxng_url`), nicht im Browser.
+- Wird die Instanz umbenannt oder ihr Erscheinungsbild geändert, ändert sich am
+  Namen **Maunting Search** im UI nichts.
 
 ---
 
