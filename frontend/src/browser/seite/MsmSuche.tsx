@@ -19,12 +19,25 @@ import {
   Newspaper,
   Play,
   Search,
+  Sparkles,
   Video,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { api, isNetworkOrOfflineError } from '@/api/client'
-import { Badge, Button, Dropdown, TabBar, type DropdownOption, type TabDef } from '@/Singra/UI'
+import {
+  Badge,
+  Button,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Dropdown,
+  TabBar,
+  type DropdownOption,
+  type TabDef,
+} from '@/Singra/UI'
 import { useZurueckSchliesst } from '@/Singra/UI/useZurueckSchliesst'
 import { Zustandsflaeche } from '@/Singra/UI/Zustandsflaeche'
 
@@ -75,6 +88,7 @@ type Stand =
       treffer: Treffer[]
       vorschlaege: string[]
       infobox?: WissensPanelDaten | null
+      antworten?: string[]
       seite: number
       mehr: boolean
       weitereLaedt: boolean
@@ -186,7 +200,13 @@ async function holen(
   seite: number,
   sprache: string,
   kategorie: SuchKategorie,
-): Promise<{ treffer: Treffer[]; vorschlaege: string[]; infobox?: WissensPanelDaten | null; dauerSek: number }> {
+): Promise<{
+  treffer: Treffer[]
+  vorschlaege: string[]
+  infobox?: WissensPanelDaten | null
+  antworten: string[]
+  dauerSek: number
+}> {
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now()
   const sicher = sichereSuche(await nativ.schutzStand().catch(() => null))
   const katParam = kategorie === 'web' ? undefined : kategorie
@@ -194,6 +214,7 @@ async function holen(
     treffer: Treffer[]
     vorschlaege?: string[]
     infobox?: WissensPanelDaten | null
+    antworten?: string[]
   }>('/browser/suche', {
     method: 'POST',
     body: JSON.stringify({
@@ -210,6 +231,7 @@ async function holen(
     treffer: antwort.treffer,
     vorschlaege: antwort.vorschlaege ?? [],
     infobox: antwort.infobox ?? null,
+    antworten: antwort.antworten ?? [],
     dauerSek,
   }
 }
@@ -230,6 +252,7 @@ export function MsmSuche({ tab }: { tab: Tab }) {
   const [kategorie, setKategorie] = useState<SuchKategorie>('web')
   const [wissenFallback, setWissenFallback] = useState<WissensPanelDaten | null>(null)
   const [wissenMobilOffen, setWissenMobilOffen] = useState(false)
+  const [medienVorschau, setMedienVorschau] = useState<{ treffer: Treffer; art: 'bild' | 'video' } | null>(null)
 
   const speicherSchluessel = `${tab.url}::${region}::${kategorie}`
   const [stand, setStand] = useState<Stand>(() => gemerkt.get(speicherSchluessel) ?? { art: 'laedt' })
@@ -249,13 +272,14 @@ export function MsmSuche({ tab }: { tab: Tab }) {
     let aktiv = true
     setStand({ art: 'laedt' })
     holen(begriff, 1, region, kategorie).then(
-      ({ treffer, vorschlaege, infobox, dauerSek }) => {
+      ({ treffer, vorschlaege, infobox, antworten, dauerSek }) => {
         if (!aktiv) return
         const neu: Extract<Stand, { art: 'da' }> = {
           art: 'da',
           treffer,
           vorschlaege,
           infobox,
+          antworten,
           seite: 1,
           mehr: treffer.length > 0,
           weitereLaedt: false,
@@ -284,6 +308,7 @@ export function MsmSuche({ tab }: { tab: Tab }) {
     kategorie === 'web' && begriff.length > 1 && stand.art === 'da' && !stand.infobox
 
   useEffect(() => {
+    setWissenFallback(null)
     if (!wissenNötig) return
     let aktiv = true
     api<{ wissen?: WissensPanelDaten | null }>('/browser/suche/wissen', {
@@ -393,15 +418,16 @@ export function MsmSuche({ tab }: { tab: Tab }) {
     regionSetzen({ suchRegion: wert })
   }
 
-  const kategorieTabs: TabDef<SuchKategorie>[] = useMemo(
-    () => [
-      { id: 'web', labelKey: 'browser.msmSuche.tabWeb', icon: Globe },
-      { id: 'images', labelKey: 'browser.msmSuche.tabBilder', icon: ImageIcon },
-      { id: 'videos', labelKey: 'browser.msmSuche.tabVideos', icon: Video },
-      { id: 'news', labelKey: 'browser.msmSuche.tabNews', icon: Newspaper },
-    ],
-    [],
-  )
+  // Kategorie-Zähler: der aktive Tab nennt seine Trefferzahl als Badge (Design-DNA TabBar).
+  const kategorieTabs: TabDef<SuchKategorie>[] = useMemo(() => {
+    const anzahl = stand.art === 'da' ? stand.treffer.length : undefined
+    return [
+      { id: 'web', labelKey: 'browser.msmSuche.tabWeb', icon: Globe, badge: kategorie === 'web' ? anzahl : undefined },
+      { id: 'images', labelKey: 'browser.msmSuche.tabBilder', icon: ImageIcon, badge: kategorie === 'images' ? anzahl : undefined },
+      { id: 'videos', labelKey: 'browser.msmSuche.tabVideos', icon: Video, badge: kategorie === 'videos' ? anzahl : undefined },
+      { id: 'news', labelKey: 'browser.msmSuche.tabNews', icon: Newspaper, badge: kategorie === 'news' ? anzahl : undefined },
+    ]
+  }, [kategorie, stand])
 
   const regionOptionen: DropdownOption[] = useMemo(
     () => [
@@ -587,7 +613,7 @@ export function MsmSuche({ tab }: { tab: Tab }) {
             <button
               key={`${x.url}-${idx}`}
               type="button"
-              onClick={(ev) => zielOeffnen(x.url, ev.ctrlKey || ev.metaKey)}
+              onClick={() => setMedienVorschau({ treffer: x, art: 'bild' })}
               onAuxClick={(ev) => ev.button === 1 && zielOeffnen(x.url, true)}
               className="msm-card group flex flex-col overflow-hidden text-left transition-all hover:border-primary/60"
             >
@@ -633,7 +659,7 @@ export function MsmSuche({ tab }: { tab: Tab }) {
             <button
               key={`${x.url}-${idx}`}
               type="button"
-              onClick={(ev) => zielOeffnen(x.url, ev.ctrlKey || ev.metaKey)}
+              onClick={() => setMedienVorschau({ treffer: x, art: 'video' })}
               onAuxClick={(ev) => ev.button === 1 && zielOeffnen(x.url, true)}
               className="msm-card group flex flex-col overflow-hidden text-left transition-all hover:border-primary/60"
             >
@@ -715,6 +741,27 @@ export function MsmSuche({ tab }: { tab: Tab }) {
             onNeueTreffer={onNeueTreffer}
             onOeffnen={zielOeffnen}
           />
+
+          {/* A2. DIREKTANTWORTEN AUS SEARXNG ANSWERER-PLUGINS (Rechner, Einheiten, Hashes) */}
+          {stand.antworten && stand.antworten.length > 0 && (
+            <section
+              data-testid="searxng-direktantwort"
+              aria-label={t('browser.msmSuche.direktAntwortBadge')}
+              className="msm-card border-primary/35 bg-gradient-to-br from-primary-container/25 via-surface-container to-surface-container-low p-4 sm:p-5"
+            >
+              <div className="mb-2 flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
+                <Badge variant="info">{t('browser.msmSuche.direktAntwortBadge')}</Badge>
+              </div>
+              <div className="space-y-1.5">
+                {stand.antworten.map((antw, aIdx) => (
+                  <p key={aIdx} className="font-mono text-title-md font-semibold text-on-surface">
+                    {antw}
+                  </p>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* Auf Mobilgeräten / Tablets reiht sich das Wikipedia-Knowledge-Panel kompakt unter der KI-Box ein */}
           {wissensPanel && <div className="lg:hidden">{renderWissensPanel(true)}</div>}
@@ -1048,6 +1095,13 @@ export function MsmSuche({ tab }: { tab: Tab }) {
         {inhalt}
       </div>
 
+      {/* Medien-Vorschau-Dialog (Design-DNA): Bilder/Videos zuerst prüfen, dann öffnen. Zurück schließt. */}
+      <MedienVorschauDialog
+        vorschau={medienVorschau}
+        onSchliessen={() => setMedienVorschau(null)}
+        onOeffnen={zielOeffnen}
+      />
+
       {/* 3. TRANSPARENTER ENTERPRISE FOOTER (AGPLv3-Hinweis) */}
       <footer className="mt-auto border-t border-outline-variant/30 bg-surface-container-lowest px-4 py-4 text-label-sm text-on-surface-variant sm:px-6">
         <div className="mx-auto flex max-w-[1360px] flex-col items-center justify-between gap-2 sm:flex-row md:pl-[187px]">
@@ -1073,6 +1127,54 @@ export function MsmSuche({ tab }: { tab: Tab }) {
  * dann in der Oberfläche; ein Verlaufseintrag dort geht diesen Weg, statt die
  * App zu beenden.
  */
+function MedienVorschauDialog({
+  vorschau,
+  onSchliessen,
+  onOeffnen,
+}: {
+  vorschau: { treffer: Treffer; art: 'bild' | 'video' } | null
+  onSchliessen: () => void
+  onOeffnen: (url: string, imNeuenTab?: boolean) => void
+}) {
+  const { t } = useTranslation()
+  useZurueckSchliesst(!!vorschau, onSchliessen)
+  return (
+    <Dialog open={!!vorschau} onOpenChange={(offen) => !offen && onSchliessen()}>
+      <DialogContent aria-label={t('browser.msmSuche.medienVorschauTitel')}>
+        <DialogHeader>
+          <DialogTitle>{vorschau?.treffer.titel || t('browser.msmSuche.medienVorschauTitel')}</DialogTitle>
+        </DialogHeader>
+        {vorschau && (
+          <div className="space-y-3">
+            {vorschau.treffer.bild && (
+              <SuchBild
+                url={vorschau.treffer.bild}
+                alt={vorschau.treffer.titel}
+                className="max-h-[50vh] w-full rounded-xl border border-outline-variant/40 bg-surface-container object-contain"
+              />
+            )}
+            {vorschau.treffer.inhalt && (
+              <p className="line-clamp-4 text-body-sm text-on-surface-variant">{vorschau.treffer.inhalt}</p>
+            )}
+            <p className="truncate text-label-sm text-on-surface-variant">{vorschau.treffer.url}</p>
+          </div>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={onSchliessen}>
+            {t('browser.msmSuche.medienVorschauSchliessen')}
+          </Button>
+          {vorschau && (
+            <Button type="button" variant="primary" onClick={() => onOeffnen(vorschau.treffer.url)}>
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>{t('browser.msmSuche.medienVorschauOeffnen')}</span>
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function useZurueckZurSuche(tab: Tab | undefined) {
   const aktion = useTabsStore((s) => s.aktion)
   const id = tab?.id

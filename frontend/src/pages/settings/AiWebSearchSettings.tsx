@@ -1,62 +1,68 @@
 import { useEffect, useState } from 'react'
-import { Globe, Save, Trash2 } from 'lucide-react'
+import { ExternalLink, Globe, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { aiApi } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
-import { Button, Kurzinfo } from '@/Singra/UI'
-import { confirm } from '@/stores/confirmStore'
+import { Badge, Button, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 
 /**
- * Suchschlüssel für die KI-Websuche.
+ * Websuche-Schalter für Singra (KI-Einstellungen -> Funktionen).
  *
- * Der Schlüssel verlässt das Backend nie — die API meldet ausschließlich, *ob*
- * einer hinterlegt ist. Deshalb gibt es hier auch keinen Hinweis auf die
- * letzten Zeichen wie bei den Provider-Keys: bei einem Suchdienst hilft das
- * beim Wiedererkennen nicht, und jedes Fragment ist ein Fragment zu viel.
+ * Die Suchmaschine selbst (SearXNG-Sidecar, eigene Instanz, Brave-API,
+ * Google-CSE-API) wird zentral im Einstellungen-Tab „Suchmaschine“ (Maunting
+ * Search) eingerichtet. Hier legt der Betreiber nur fest, ob Singra das
+ * Werkzeug `web_search` nutzen darf — ohne doppelte Schlüssel- oder
+ * Adressfelder.
  */
-export function AiWebSearchSettings({ canWrite }: { canWrite: boolean }) {
+export function AiWebSearchSettings({
+  canWrite,
+  onOpenSearchEngineTab,
+}: {
+  canWrite: boolean
+  onOpenSearchEngineTab?: () => void
+}) {
   const { t } = useTranslation()
-  const [hasApiKey, setHasApiKey] = useState(false)
-  const [currentSearxngUrl, setCurrentSearxngUrl] = useState('')
-  const [defaultSearxngUrl, setDefaultSearxngUrl] = useState('http://127.0.0.1:8888')
-  const [isDefaultSearxng, setIsDefaultSearxng] = useState(true)
+  const [aiEnabled, setAiEnabled] = useState(true)
+  const [searchEngineConfigured, setSearchEngineConfigured] = useState(false)
   const [sidecarRunning, setSidecarRunning] = useState(false)
-  const [apiKey, setApiKey] = useState('')
-  const [searxngUrl, setSearxngUrl] = useState('')
+  const [hasBrave, setHasBrave] = useState(false)
+  const [hasGoogle, setHasGoogle] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     let active = true
-    aiApi.getWebSearchStatus()
+    aiApi
+      .getWebSearchStatus()
       .then((status) => {
         if (active) {
-          setHasApiKey(Boolean(status.has_api_key))
-          const customUrl = status.custom_searxng_url || ''
-          setCurrentSearxngUrl(customUrl)
-          setSearxngUrl(customUrl)
-          if (status.default_searxng_url) {
-            setDefaultSearxngUrl(status.default_searxng_url)
-          }
-          setIsDefaultSearxng(status.is_default_searxng ?? !customUrl)
+          setAiEnabled(status.ai_enabled ?? true)
+          setSearchEngineConfigured(Boolean(status.search_engine_configured ?? status.configured))
           setSidecarRunning(Boolean(status.sidecar_running))
+          setHasBrave(Boolean(status.has_api_key))
+          setHasGoogle(Boolean(status.has_google_cse))
         }
       })
-      .catch(() => { if (active) toast.error(t('ai.webSearch.errors.load')) })
-      .finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
+      .catch(() => {
+        if (active) toast.error(t('ai.webSearch.errors.load'))
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
   }, [t])
 
-  const saveBraveKey = async (event: React.FormEvent) => {
-    event.preventDefault()
-    if (!canWrite || busy || !apiKey.trim()) return
+  const toggleAiWebSearch = async (next: boolean) => {
+    if (!canWrite || busy) return
     setBusy(true)
     try {
-      const status = await aiApi.setWebSearchConfig({ apiKey: apiKey.trim() })
-      setHasApiKey(Boolean(status.has_api_key))
-      setApiKey('')
+      const status = await aiApi.setWebSearchConfig({ aiEnabled: next })
+      setAiEnabled(status.ai_enabled ?? next)
+      setSearchEngineConfigured(Boolean(status.search_engine_configured ?? status.configured))
       toast.success(t('ai.webSearch.saved'))
     } catch (error: unknown) {
       toast.error(error instanceof SanitizedApiError ? error.message : t('ai.webSearch.errors.save'))
@@ -65,205 +71,66 @@ export function AiWebSearchSettings({ canWrite }: { canWrite: boolean }) {
     }
   }
 
-  const removeBraveKey = async () => {
-    if (!canWrite || busy) return
-    if (!await confirm({
-      message: t('ai.webSearch.remove'),
-      confirmText: t('common.delete'),
-      danger: true,
-    })) return
-    setBusy(true)
-    try {
-      const status = await aiApi.setWebSearchConfig({ apiKey: '' })
-      setHasApiKey(Boolean(status.has_api_key))
-      toast.success(t('ai.webSearch.removed'))
-    } catch (error: unknown) {
-      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.webSearch.errors.save'))
-    } finally {
-      setBusy(false)
+  const openSearchTab = () => {
+    if (onOpenSearchEngineTab) {
+      onOpenSearchEngineTab()
+      return
     }
-  }
-
-  const saveSearxng = async (event: React.FormEvent) => {
-    event.preventDefault()
-    if (!canWrite || busy) return
-    setBusy(true)
-    try {
-      const status = await aiApi.setWebSearchConfig({ searxngUrl: searxngUrl.trim() })
-      const customUrl = status.custom_searxng_url || ''
-      setCurrentSearxngUrl(customUrl)
-      setSearxngUrl(customUrl)
-      if (status.default_searxng_url) {
-        setDefaultSearxngUrl(status.default_searxng_url)
-      }
-      setIsDefaultSearxng(status.is_default_searxng ?? !customUrl)
-      setSidecarRunning(Boolean(status.sidecar_running))
-      toast.success(t('ai.webSearch.saved'))
-    } catch (error: unknown) {
-      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.webSearch.errors.save'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const removeSearxng = async () => {
-    if (!canWrite || busy) return
-    if (!await confirm({
-      message: t('ai.webSearch.removeSearxng'),
-      confirmText: t('common.delete'),
-      danger: true,
-    })) return
-    setBusy(true)
-    try {
-      const status = await aiApi.setWebSearchConfig({ searxngUrl: '' })
-      const customUrl = status.custom_searxng_url || ''
-      setCurrentSearxngUrl(customUrl)
-      setSearxngUrl(customUrl)
-      if (status.default_searxng_url) {
-        setDefaultSearxngUrl(status.default_searxng_url)
-      }
-      setIsDefaultSearxng(status.is_default_searxng ?? true)
-      setSidecarRunning(Boolean(status.sidecar_running))
-      toast.success(t('ai.webSearch.removed'))
-    } catch (error: unknown) {
-      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.webSearch.errors.save'))
-    } finally {
-      setBusy(false)
-    }
+    window.dispatchEvent(new CustomEvent('msm:open-settings-tab', { detail: { tab: 'searchEngine' } }))
   }
 
   if (loading) return null
 
   return (
-    <section className="msm-card space-y-5 p-6" aria-labelledby="ai-web-search-title">
-      <div className="flex items-center gap-2">
-        <Globe className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h3 id="ai-web-search-title" className="font-headline text-title-lg font-semibold text-on-surface">
-          {t('ai.webSearch.title')}
-        </h3>
+    <section className="msm-card space-y-4 p-6" aria-labelledby="ai-web-search-title">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Globe className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h3 id="ai-web-search-title" className="font-headline text-title-lg font-semibold text-on-surface">
+            {t('ai.webSearch.title')}
+          </h3>
+        </div>
+        <Badge variant={aiEnabled && searchEngineConfigured ? 'success' : 'default'}>
+          {aiEnabled ? t('ai.webSearch.aiAccessActive') : t('ai.webSearch.aiAccessDisabled')}
+        </Badge>
       </div>
-      <p className="max-w-3xl text-sm text-on-surface-variant">{t('ai.webSearch.description')}</p>
 
-      {/* 1. Brave Search API Key */}
-      <form className="flex flex-wrap items-end gap-3" onSubmit={saveBraveKey}>
-        <label className="min-w-[16rem] flex-1 space-y-1.5">
-          <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-            {t('ai.webSearch.apiKey')}
+      <p className="max-w-3xl text-sm text-on-surface-variant">{t('ai.webSearch.aiToggleDescription')}</p>
+
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
+        <div className="space-y-1">
+          <div className="text-sm font-semibold text-on-surface">{t('ai.webSearch.aiToggleLabel')}</div>
+          <p className="text-xs text-on-surface-variant">{t('ai.webSearch.aiToggleHint')}</p>
+        </div>
+        <Switch
+          checked={aiEnabled}
+          disabled={!canWrite || busy}
+          onCheckedChange={(next) => void toggleAiWebSearch(next)}
+          aria-label={t('ai.webSearch.aiToggleLabel')}
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-on-surface-variant">
+          <Search className="h-4 w-4 text-primary" aria-hidden="true" />
+          <span>
+            {t('ai.webSearch.centralConfigInfo', {
+              sources: [
+                sidecarRunning ? 'SearXNG' : null,
+                hasBrave ? 'Brave API' : null,
+                hasGoogle ? 'Google CSE' : null,
+              ]
+                .filter(Boolean)
+                .join(' · ') || 'Maunting Search',
+            })}
           </span>
-          <input
-            className="msm-input"
-            type="password"
-            autoComplete="new-password"
-            maxLength={512}
-            value={apiKey}
-            disabled={!canWrite || busy}
-            placeholder={hasApiKey ? t('ai.webSearch.configured') : t('ai.webSearch.placeholder')}
-            onChange={(event) => setApiKey(event.target.value)}
-            aria-label={t('ai.webSearch.apiKey')}
-          />
-        </label>
-        {canWrite && (
-          <>
-            <Button type="submit" disabled={busy || !apiKey.trim()}>
-              <Save className="h-4 w-4" aria-hidden="true" />
-              {t('settings.save')}
-            </Button>
-            {hasApiKey && (
-              <Button type="button" variant="destructive" disabled={busy} onClick={() => void removeBraveKey()}>
-                <Trash2 className="h-4 w-4" aria-hidden="true" />
-                {t('common.delete')}
-              </Button>
-            )}
-          </>
-        )}
-      </form>
+        </div>
 
-      {/* 2. SearXNG URL (Self-Hosted / Sidecar) */}
-      <div className="space-y-3 border-t border-outline-variant/30 pt-4">
-        {isDefaultSearxng ? (
-          sidecarRunning ? (
-            <div
-              data-testid="searxng-sidecar-status"
-              className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs text-success"
-            >
-              <span className="h-2 w-2 rounded-full bg-success animate-pulse" aria-hidden="true" />
-              <span>{t('ai.webSearch.sidecarActive', { url: defaultSearxngUrl })}</span>
-            </div>
-          ) : (
-            <div
-              data-testid="searxng-sidecar-status"
-              className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
-            >
-              <span className="h-2 w-2 rounded-full bg-warning" aria-hidden="true" />
-              <span>{t('ai.webSearch.sidecarInactive', { url: defaultSearxngUrl })}</span>
-            </div>
-          )
-        ) : (
-          <div
-            data-testid="searxng-sidecar-status"
-            className="flex items-center gap-2 rounded-lg border border-secondary/30 bg-secondary/10 px-3 py-2 text-xs text-secondary"
-          >
-            <span className="h-2 w-2 rounded-full bg-secondary" aria-hidden="true" />
-            <span>
-              {t('ai.webSearch.customEndpointActive', {
-                url: currentSearxngUrl,
-                defaultUrl: defaultSearxngUrl,
-              })}
-            </span>
-          </div>
-        )}
-
-        <form className="flex flex-wrap items-end gap-3" onSubmit={saveSearxng}>
-          <label className="min-w-[16rem] flex-1 space-y-1.5">
-            <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-              {t('ai.webSearch.searxngUrl')}
-            </span>
-            <input
-              className="msm-input"
-              type="text"
-              maxLength={512}
-              value={searxngUrl}
-              disabled={!canWrite || busy}
-              placeholder={t('ai.webSearch.searxngDefaultPlaceholder', { url: defaultSearxngUrl })}
-              onChange={(event) => setSearxngUrl(event.target.value)}
-              aria-label={t('ai.webSearch.searxngUrl')}
-            />
-          </label>
-          {canWrite && (
-            <>
-              <Button type="submit" disabled={busy || searxngUrl.trim() === currentSearxngUrl}>
-                <Save className="h-4 w-4" aria-hidden="true" />
-                {t('settings.save')}
-              </Button>
-              {Boolean(currentSearxngUrl) && (
-                <Kurzinfo text={t('ai.webSearch.resetToDefault')}>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    disabled={busy}
-                    onClick={() => void removeSearxng()}
-                    aria-description={t('ai.webSearch.resetToDefault')}
-                  >
-                    <Trash2 className="h-4 w-4" aria-hidden="true" />
-                    {t('common.delete')}
-                  </Button>
-                </Kurzinfo>
-              )}
-            </>
-          )}
-        </form>
-
-        <p className="text-xs text-on-surface-variant">
-          {isDefaultSearxng
-            ? t('ai.webSearch.searxngDefaultHint')
-            : t('ai.webSearch.customEndpointActive', {
-                url: currentSearxngUrl,
-                defaultUrl: defaultSearxngUrl,
-              })}
-        </p>
+        <Button type="button" variant="secondary" size="sm" onClick={openSearchTab}>
+          <span>{t('ai.webSearch.openSearchEngineSettings')}</span>
+          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+        </Button>
       </div>
-
-      <p className="text-xs text-on-surface-variant">{t('ai.webSearch.hint')}</p>
     </section>
   )
 }

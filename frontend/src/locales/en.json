@@ -1494,7 +1494,14 @@
       "errors": {
         "load": "Could not load web search status.",
         "save": "Could not save web search settings."
-      }
+      },
+      "aiToggleDescription": "Singra uses Maunting Search (your central meta-search engine and configured search APIs) for web research. Enable or disable Singra’s internet search access globally here.",
+      "aiToggleLabel": "Allow Maunting Search for Singra (AI)",
+      "aiToggleHint": "When turned off, Singra has no access to web search (in addition to the ai.web_search.use role permission). Manage API keys and the SearXNG endpoint centrally in the “Search engine” tab.",
+      "aiAccessActive": "AI search active",
+      "aiAccessDisabled": "AI search disabled",
+      "centralConfigInfo": "Active sources in Maunting Search: {{sources}}",
+      "openSearchEngineSettings": "Configure search engine & APIs"
     },
     "satellite": {
       "title": "Satellite data (Copernicus / Sentinel)",
@@ -3299,7 +3306,8 @@
       "ai": "AI",
       "messenger": "Messenger",
       "hoster": "Hoster",
-      "vaultStorage": "Vault storage"
+      "vaultStorage": "Vault storage",
+      "searchEngine": "Search engine"
     },
     "messenger": {
       "title": "Calls",
@@ -9796,7 +9804,39 @@
       "weitereFragenHinweis": "Answer in AI overview",
       "oftGesucht": "Related searches",
       "aktuelleNews": "Top stories",
-      "quelle": "Source {{nr}}"
+      "quelle": "Source {{nr}}",
+      "direktAntwortBadge": "Direct answer",
+      "imKiChatWeiter": "Continue in Singra Chat",
+      "vorschauBadge": "Preview",
+      "zurQuelle": "Open original",
+      "schliessen": "Close",
+      "imChatWeiterfuehren": "Continue in Singra chat",
+      "imChatWeiterKopiert": "Copied – paste into Singra chat",
+      "medienVorschauTitel": "Media preview",
+      "medienVorschauOeffnen": "Open page",
+      "medienVorschauSchliessen": "Close"
     }
+  },
+  "searchEngineSettings": {
+    "title": "Maunting Search (Own Search Engine)",
+    "badge": "Meta Search & API Aggregator",
+    "description": "Central configuration for your privacy-friendly search engine powering the Maunting Secure Browser and Singra (AI). All queries run through your server; tracking parameters are stripped automatically and images load exclusively through your server proxy.",
+    "customInstanceGuardTitle": "Also use stored API keys when a custom SearXNG URL is set",
+    "customInstanceGuardHint": "You configured an external SearXNG URL. A third-party instance cannot use the API keys stored here. By default, your Brave/Google keys are paused so no API quota is consumed unintentionally. Enable this only if your backend should query those APIs directly in addition.",
+    "apisTitle": "Official Search APIs (Brave & Google)",
+    "apisDescription": "Store optional API keys for maximum result coverage (web, images, videos, news) without rate limits or captchas. Both Maunting Search in the browser and the AI benefit automatically.",
+    "apisPausedNotice": "Note: Because a custom SearXNG URL is active and the override switch above is off, the API keys below are currently paused.",
+    "encryptedHint": "Stored AES-GCM encrypted in the backend",
+    "statusConfigured": "Active & stored",
+    "statusOptional": "Optional",
+    "braveTitle": "Brave Search API",
+    "braveDescription": "Independent web, image, video, and news index with low latency.",
+    "googleTitle": "Google Programmable Search (Custom Search JSON API)",
+    "googleDescription": "Official Google search results (web & images) via API key and Search Engine ID (cx) without scraping blocks.",
+    "googleApiKey": "Google API key",
+    "googleApiKeyPlaceholder": "AIzaSy...",
+    "googleCx": "Search Engine ID (cx)",
+    "googleCxPlaceholder": "e.g. a1b2c3d4e5f6g7h8i",
+    "googleRemoveConfirm": "Do you really want to remove the stored Google search credentials?"
   }
 }

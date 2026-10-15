@@ -67,17 +67,26 @@ class EffectiveAiLimitsResponse(AiLimitsBase):
 
 
 class AiWebSearchKeyUpdate(BaseModel):
-    """Suchschluessel und optionale SearXNG-URL setzen oder entfernen."""
+    """Suchschluessel, SearXNG-URL und KI-Schalter setzen oder entfernen."""
 
     api_key: SecretStr | None = Field(default=None, max_length=512)
     searxng_url: str | None = Field(default=None, max_length=512)
+    google_cse_api_key: SecretStr | None = Field(default=None, max_length=512)
+    google_cse_cx: str | None = Field(default=None, max_length=256)
+    ai_enabled: bool | None = None
+    external_apis_on_custom: bool | None = None
 
 
 class AiWebSearchStatus(BaseModel):
-    """Zustand der Websuch-Konfiguration."""
+    """Zustand der zentralen Maunting-Search- und KI-Websuch-Konfiguration."""
 
     configured: bool
+    search_engine_configured: bool = False
+    ai_enabled: bool = True
     has_api_key: bool = False
+    has_google_cse: bool = False
+    google_cse_cx: str | None = None
+    external_apis_on_custom: bool = False
     searxng_url: str | None = None
     default_searxng_url: str = "http://127.0.0.1:8888"
     is_default_searxng: bool = True

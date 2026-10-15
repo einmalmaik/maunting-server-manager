@@ -36,7 +36,7 @@ from services.ai_web_search_service import WebSearchUnavailable
 
 router = APIRouter(prefix="/api/browser", tags=["browser"])
 
-TREFFER_JE_SEITE = 10
+TREFFER_JE_SEITE = 15
 _grenze = parse("60/minute")
 _zusammenfassung_grenze = parse("30/minute")
 _nachrichten_grenze = parse("30/minute")
@@ -137,6 +137,8 @@ def suchen(
     }
     if "infobox" in ergebnis:
         antwort["infobox"] = ergebnis["infobox"]
+    if "antworten" in ergebnis:
+        antwort["antworten"] = ergebnis["antworten"]
     return antwort
 
 

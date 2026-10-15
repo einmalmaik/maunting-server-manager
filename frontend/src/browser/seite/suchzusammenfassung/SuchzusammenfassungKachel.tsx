@@ -11,7 +11,7 @@
  * - Unterstützt konfigurierbare Denkstufen, beschränkt durch die Benutzerrolle.
  */
 import { useEffect, useRef, useState } from 'react'
-import { Brain, Check, ChevronDown, ChevronUp, Copy, Layers, Loader2, Send, Sparkles } from 'lucide-react'
+import { Brain, Check, ChevronDown, ChevronUp, Copy, Layers, Loader2, MessageCircle, Send, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -102,6 +102,19 @@ export function SuchzusammenfassungKachel({
     } catch {
       // Ignorieren falls Clipboard blockiert ist
     }
+  }
+
+  const imChatWeiterfuehren = async () => {
+    if (!hauptText) return
+    const text = `Frage: ${begriff}\n\nSingra-Überblick:\n${hauptText}\n\nTop-Quellen:\n${topQuellen.map((q, i) => `[${i + 1}] ${q.titel} – ${q.url}`).join('\n')}`
+    try {
+      await navigator.clipboard.writeText(text)
+      setKopiert(true)
+      setTimeout(() => setKopiert(false), 2000)
+    } catch {
+      // Ignorieren falls Clipboard blockiert ist
+    }
+    window.dispatchEvent(new CustomEvent('msm:singra-weiter', { detail: { frage: begriff, zusammenfassung: hauptText } }))
   }
 
   const starteStream = async (frage: string, dialogVerlauf: SuchNachricht[] = [], gewaehlteStufe: string = denkstufe) => {
@@ -634,6 +647,20 @@ export function SuchzusammenfassungKachel({
                 </Button>
               </form>
 
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={imChatWeiterfuehren}
+                  disabled={!hauptText}
+                  className="h-8 px-2.5 text-label-sm"
+                  aria-label={t('browser.msmSuche.imChatWeiterfuehren')}
+                >
+                  <MessageCircle className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+                  <span>{t(kopiert ? 'browser.msmSuche.imChatWeiterKopiert' : 'browser.msmSuche.imChatWeiterfuehren')}</span>
+                </Button>
+              </div>
               <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-label-sm text-on-surface-variant/80">
                 <span>{t('browser.msmSuche.zusammenfassungDisclaimer')}</span>
                 <span className="flex items-center gap-1.5">

@@ -1494,7 +1494,14 @@
       "errors": {
         "load": "Zustand der Websuche konnte nicht geladen werden.",
         "save": "Websuch-Einstellungen konnten nicht gespeichert werden."
-      }
+      },
+      "aiToggleDescription": "Singra nutzt für die Web-Recherche direkt Maunting Search (deine zentrale Metasuchmaschine samt hinterlegten Such-APIs). Hier schaltest du den Internet-Suchzugriff für Singra global ein oder aus.",
+      "aiToggleLabel": "Maunting Search für Singra (KI) freigeben",
+      "aiToggleHint": "Ist der Schalter aus, hat Singra keinen Zugriff auf die Websuche (zusätzlich zum Rollenrecht ai.web_search.use). API-Schlüssel und SearXNG-Adresse verwaltest du zentral im Tab „Suchmaschine“.",
+      "aiAccessActive": "KI-Suche aktiv",
+      "aiAccessDisabled": "KI-Suche deaktiviert",
+      "centralConfigInfo": "Aktive Quellen in Maunting Search: {{sources}}",
+      "openSearchEngineSettings": "Suchmaschine & APIs konfigurieren"
     },
     "satellite": {
       "title": "Satellitendaten (Copernicus / Sentinel)",
@@ -3299,7 +3306,8 @@
       "messenger": "Messenger",
       "popup": "Pop-up",
       "hoster": "Hoster",
-      "vaultStorage": "Tresorspeicher"
+      "vaultStorage": "Tresorspeicher",
+      "searchEngine": "Suchmaschine"
     },
     "messenger": {
       "title": "Anrufe",
@@ -9796,7 +9804,39 @@
       "weitereFragenHinweis": "In KI-Übersicht beantworten",
       "oftGesucht": "Wird auch oft gesucht",
       "aktuelleNews": "Aktuelle Schlagzeilen",
-      "quelle": "Quelle {{nr}}"
+      "quelle": "Quelle {{nr}}",
+      "direktAntwortBadge": "Direktantwort",
+      "imKiChatWeiter": "Im Singra-Chat vertiefen",
+      "vorschauBadge": "Vorschau",
+      "zurQuelle": "Original öffnen",
+      "schliessen": "Schließen",
+      "imChatWeiterfuehren": "Im Singra-Chat weiterführen",
+      "imChatWeiterKopiert": "Kopiert – im Singra-Chat einfügen",
+      "medienVorschauTitel": "Medien-Vorschau",
+      "medienVorschauOeffnen": "Seite öffnen",
+      "medienVorschauSchliessen": "Schließen"
     }
+  },
+  "searchEngineSettings": {
+    "title": "Maunting Search (Eigene Suchmaschine)",
+    "badge": "Metasuche & API-Aggregator",
+    "description": "Zentrale Steuerung deiner eigenen, datenschutzfreundlichen Suchmaschine für den Maunting Secure Browser und für Singra (KI). Alle Suchanfragen laufen über deinen Server; Tracker-Parameter werden automatisch entfernt und Bilder ausschließlich über den eigenen Medien-Proxy geladen.",
+    "customInstanceGuardTitle": "Eigene API-Schlüssel trotz fremder SearXNG-Adresse mitbenutzen",
+    "customInstanceGuardHint": "Du hast eine externe SearXNG-Adresse eingetragen. Eine fremde Instanz kann mit deinen hier hinterlegten API-Schlüsseln nichts anfangen. Standardmäßig werden deine Brave-/Google-Schlüssel deshalb pausiert, um kein API-Guthaben zu verbrauchen. Schalte dies nur ein, wenn dein Backend die APIs zusätzlich direkt abfragen soll.",
+    "apisTitle": "Offizielle Such-APIs (Brave & Google)",
+    "apisDescription": "Hinterlege optionale API-Schlüssel für maximale Trefferdichte (Web, Bilder, Videos, News) ohne Rate-Limits oder Captchas. Sowohl Maunting Search im Browser als auch die KI profitieren automatisch davon.",
+    "apisPausedNotice": "Hinweis: Da aktuell eine benutzerdefinierte SearXNG-Adresse aktiv ist und der Zusatz-Schalter oben ausgeschaltet ist, werden die folgenden API-Schlüssel derzeit nicht abgefragt.",
+    "encryptedHint": "AES-GCM verschlüsselt im Backend gespeichert",
+    "statusConfigured": "Aktiv & hinterlegt",
+    "statusOptional": "Optional",
+    "braveTitle": "Brave Search API",
+    "braveDescription": "Unabhängiger Web-, Bilder-, Video- und News-Index mit sehr hoher Geschwindigkeit.",
+    "googleTitle": "Google Programmable Search (Custom Search JSON API)",
+    "googleDescription": "Offizielle Google-Suchergebnisse (Web & Bilder) über API-Schlüssel und Suchmaschinen-ID (cx) ohne Scraping-Sperren.",
+    "googleApiKey": "Google API-Schlüssel",
+    "googleApiKeyPlaceholder": "AIzaSy...",
+    "googleCx": "Suchmaschinen-ID (cx)",
+    "googleCxPlaceholder": "z. B. a1b2c3d4e5f6g7h8i",
+    "googleRemoveConfirm": "Möchtest du die hinterlegten Google-Suchzugangsdaten wirklich entfernen?"
   }
 }
