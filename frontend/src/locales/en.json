@@ -9819,11 +9819,11 @@
   },
   "searchEngineSettings": {
     "title": "Maunting Search (Own Search Engine)",
-    "badge": "Meta Search & API Aggregator",
+    "badge": "Meta search & API aggregator",
     "description": "Central configuration for your privacy-friendly search engine powering the Maunting Secure Browser and Singra (AI). All queries run through your server; tracking parameters are stripped automatically and images load exclusively through your server proxy.",
     "customInstanceGuardTitle": "Also use stored API keys when a custom SearXNG URL is set",
     "customInstanceGuardHint": "You configured an external SearXNG URL. A third-party instance cannot use the API keys stored here. By default, your Brave/Google keys are paused so no API quota is consumed unintentionally. Enable this only if your backend should query those APIs directly in addition.",
-    "apisTitle": "Official Search APIs (Brave & Google)",
+    "apisTitle": "Official search APIs (Brave & Google)",
     "apisDescription": "Store optional API keys for maximum result coverage (web, images, videos, news) without rate limits or captchas. Both Maunting Search in the browser and the AI benefit automatically.",
     "apisPausedNotice": "Note: Because a custom SearXNG URL is active and the override switch above is off, the API keys below are currently paused.",
     "encryptedHint": "Stored AES-GCM encrypted in the backend",
@@ -9834,8 +9834,8 @@
     "googleTitle": "Google Programmable Search (Custom Search JSON API)",
     "googleDescription": "Official Google search results (web & images) via API key and Search Engine ID (cx) without scraping blocks.",
     "googleApiKey": "Google API key",
-    "googleApiKeyPlaceholder": "AIzaSy...",
-    "googleCx": "Search Engine ID (cx)",
+    "googleApiKeyPlaceholder": "AIzaSy …",
+    "googleCx": "Search engine ID (cx)",
     "googleCxPlaceholder": "e.g. a1b2c3d4e5f6g7h8i",
     "googleRemoveConfirm": "Do you really want to remove the stored Google search credentials?"
   }

@@ -247,7 +247,7 @@ def test_bild_liefert_nur_adressen_die_die_suche_freigegeben_hat(monkeypatch: py
         {"q": "x", "seite": 0},
         {"q": "x", "seite": "2"},
         {"q": "x", "sicher": "ja"},
-        {"q": "x", "sprache": "de-DE"},
+        {"q": "x", "sprache": "de_DE"},
         {"q": "x", "ziel": "http://evil.example"},
     ],
 )
