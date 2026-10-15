@@ -112,6 +112,131 @@ def test_eine_seite_hat_hoechstens_zehn_treffer(searxng: dict) -> None:
     assert len(antwort.json()["treffer"]) == browser_suche.TREFFER_JE_SEITE
 
 
+# --- Kategorien, Vorschläge, Wissen und Bilder ------------------------------
+
+
+def test_kategorie_geht_als_categories_an_searxng(searxng: dict) -> None:
+    _app(konto=21).post("/api/browser/suche", json={"q": "sterne", "kategorie": "images"})
+    assert searxng["anfragen"][0]["params"]["categories"] == "images"
+
+
+def test_infobox_wird_zum_wissenspanel(searxng: dict) -> None:
+    searxng["antwort"] = _Antwort({
+        "results": [],
+        "infoboxes": [{
+            "infobox": "wikipedia",
+            "id": "https://de.wikipedia.org/wiki/SpaceX",
+            "content": "SpaceX ist ein US-amerikanisches Raumfahrtunternehmen.",
+            "img_src": "https://upload.wikimedia.org/wikipedia/commons/2/2e/SpaceX_logo.png",
+            "attributes": [{"label": "Gründung", "value": "14. März 2002"}],
+            "urls": [{"title": "Website", "url": "https://spacex.com"}],
+        }],
+    })
+    antwort = _app(konto=22).post("/api/browser/suche", json={"q": "spacex"})
+    infobox = antwort.json()["infobox"]
+    # Der Titel kommt aus der Adresse des Eintrags, nicht aus dem Feld `infobox`
+    # — dort nennt SearXNG nur die Herkunft.
+    assert infobox["titel"] == "SpaceX"
+    assert infobox["inhalt"] == "SpaceX ist ein US-amerikanisches Raumfahrtunternehmen."
+    assert infobox["attribute"] == [{"label": "Gründung", "value": "14. März 2002"}]
+    assert {"title": "Wikipedia", "url": "https://de.wikipedia.org/wiki/SpaceX"} in infobox["urls"]
+    assert {"title": "Website", "url": "https://spacex.com"} in infobox["urls"]
+
+
+def test_autocomplete_fragt_den_autocompleter_der_instanz(monkeypatch: pytest.MonkeyPatch, searxng: dict) -> None:
+    class Antwort:
+        status_code = 200
+
+        @staticmethod
+        def json() -> list:
+            return ["wetter", ["wetter berlin", "wetter hamburg"]]
+
+    class Client:
+        def get(self, url, params=None, headers=None):
+            searxng["anfragen"].append({"url": url, "params": dict(params or {})})
+            return Antwort()
+
+    monkeypatch.setattr(ai_web_search_service, "_http_client", lambda: Client())
+    antwort = _app(konto=23).post("/api/browser/suche/autocomplete", json={"q": "wetter", "sprache": "de"})
+    assert antwort.status_code == 200
+    assert antwort.json()["vorschlaege"] == ["wetter berlin", "wetter hamburg"]
+    assert searxng["anfragen"][-1]["url"] == "http://127.0.0.1:8888/autocompleter"
+    assert searxng["anfragen"][-1]["params"]["q"] == "wetter"
+
+
+def test_wissen_holt_zusammenfassung_und_eckdaten(monkeypatch: pytest.MonkeyPatch) -> None:
+    gesehen: dict = {}
+
+    class Antwort:
+        def __init__(self, daten: dict) -> None:
+            self.status_code = 200
+            self._daten = daten
+
+        def json(self) -> dict:
+            return self._daten
+
+    class Client:
+        def get(self, url, params=None, headers=None):
+            gesehen[url] = {"params": dict(params or {}), "headers": dict(headers or {})}
+            if url.endswith("/w/api.php") and params.get("action") == "query" and "list" in params:
+                return Antwort({"query": {"search": [{"title": "SpaceX"}]}})
+            if url.endswith("/w/api.php"):
+                return Antwort({"query": {"pages": {"1": {"revisions": [{"slots": {"main": {"*":
+                    "{{Infobox Unternehmen\n| Gruendung = 14. März 2002\n"
+                    "| Sitz = Starbase (Boca Chica), Texas\n"
+                    "| Umsatz = {{USD|4.6e9}}\n}}\nText"
+                }}}]}}}})
+            if "/page/summary/" in url:
+                return Antwort({
+                    "title": "SpaceX",
+                    "description": "Raumfahrtunternehmen",
+                    "extract": "SpaceX ist ein US-amerikanisches Raumfahrtunternehmen.",
+                    "content_urls": {"desktop": {"page": "https://de.wikipedia.org/wiki/SpaceX"}},
+                    "thumbnail": {"source": "https://upload.wikimedia.org/wikipedia/commons/2/2e/SpaceX_logo.png"},
+                })
+            raise AssertionError(f"unerwartete Adresse: {url}")
+
+    monkeypatch.setattr(ai_web_search_service, "_http_client", lambda: Client())
+    antwort = _app(konto=24).post("/api/browser/suche/wissen", json={"q": "spacex", "sprache": "de"})
+    wissen = antwort.json()["wissen"]
+    assert wissen["titel"] == "SpaceX"
+    assert wissen["untertitel"] == "Raumfahrtunternehmen"
+    assert {"label": "Gruendung", "value": "14. März 2002"} in wissen["attribute"]
+    assert {"label": "Sitz", "value": "Starbase (Boca Chica), Texas"} in wissen["attribute"]
+    # Ein Wert mit verschachtelter Vorlage ist nicht lesbar und wird nicht gezeigt.
+    assert all(f["label"] != "Umsatz" for f in wissen["attribute"])
+    assert wissen["urls"] == [{"title": "Wikipedia", "url": "https://de.wikipedia.org/wiki/SpaceX"}]
+    # Ein eigener User-Agent, damit Wikipedia den Proxy nicht abweist.
+    assert "MauntingSearch" in next(iter(gesehen.values()))["headers"]["User-Agent"]
+
+
+def test_bild_liefert_nur_adressen_die_die_suche_freigegeben_hat(monkeypatch: pytest.MonkeyPatch) -> None:
+    fremd = "https://example.org/freigegeben.png"
+
+    class Antwort:
+        status_code = 200
+        content = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+
+    class Client:
+        def get(self, url, params=None, headers=None):
+            return Antwort()
+
+    monkeypatch.setattr(ai_web_search_service, "_http_client", lambda: Client())
+
+    # Ohne eine Suche ist die Adresse für den Proxy unbekannt.
+    antwort = _app(konto=25).get("/api/browser/suche/bild", params={"u": fremd})
+    assert antwort.status_code == 404
+
+    ai_web_search_service._merke_bild_url(fremd)
+    antwort = _app(konto=26).get("/api/browser/suche/bild", params={"u": fremd})
+    assert antwort.status_code == 200
+    assert antwort.headers["content-type"] == "image/png"
+
+    # Eine private Adresse geht nie durch.
+    antwort = _app(konto=27).get("/api/browser/suche/bild", params={"u": "http://127.0.0.1/x.png"})
+    assert antwort.status_code == 404
+
+
 @pytest.mark.parametrize(
     "koerper",
     [

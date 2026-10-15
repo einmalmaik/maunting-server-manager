@@ -85,8 +85,9 @@ describe('SuchzusammenfassungKachel', () => {
     expect(await screen.findByText('gpt-6-luna')).toBeInTheDocument()
     expect(await screen.findByText(/Hier ist die Antwort/)).toBeInTheDocument()
 
-    // Quellenbutton [1] existiert und scrollt beim Klick zum Treffer
-    const quelleBtn = screen.getByRole('button', { name: /1/ })
+    // Quellenbutton [1] existiert und scrollt beim Klick zum Treffer. Der Name
+    // nennt die Nummer, damit die Kachel mehrere Quellknöpfe zeigen kann.
+    const quelleBtn = screen.getByRole('button', { name: 'Quelle 1' })
     fireEvent.click(quelleBtn)
     expect(zielTreffer.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
 
@@ -198,6 +199,40 @@ describe('SuchzusammenfassungKachel', () => {
     const dropdownBtn = screen.getByRole('button', { name: /Denkstufe/i })
     expect(dropdownBtn).toBeInTheDocument()
     expect(screen.getByText(/Schnell|Fast/i)).toBeInTheDocument()
+  })
+
+  it('klappt die Quellen als Logo-Leiste und nur auf Wunsch als Karten', async () => {
+    let readCount = 0
+    apiStream.mockResolvedValueOnce({
+      ok: true,
+      body: {
+        getReader: () => ({
+          read: () => {
+            readCount += 1
+            if (readCount === 1) {
+              return Promise.resolve({
+                done: false,
+                value: new TextEncoder().encode(
+                  'data: {"type": "start", "model": "m"}\n\ndata: {"type": "content", "text": "Text"}\n\ndata: {"type": "done"}\n\n',
+                ),
+              })
+            }
+            return Promise.resolve({ done: true, value: undefined })
+          },
+        }),
+      },
+    })
+
+    render(<SuchzusammenfassungKachel begriff="Testsuche" treffer={TREFFER} />)
+    expect(await screen.findByText('Text')).toBeInTheDocument()
+
+    // Eingeklappt: genau ein Symbol je Quelle, kein Titeltext der Karte.
+    expect(screen.getAllByRole('button', { name: 'example.com' })).toHaveLength(2)
+    expect(screen.queryByText('Zweiter Treffer')).not.toBeInTheDocument()
+
+    // Ein Klick klappt die Vorschaukarten mit Titel auf.
+    fireEvent.click(screen.getByRole('button', { name: /Top-Quellen 2 ein- oder ausblenden/ }))
+    expect(await screen.findByText('Zweiter Treffer')).toBeInTheDocument()
   })
 })
 

@@ -165,7 +165,7 @@ describe('Nachrichten-Widget', () => {
   it('sagt ohne Stand, dass keine Suche eingerichtet ist', async () => {
     api.mockRejectedValueOnce(new SanitizedApiError('x', { status: 503, code: 'BROWSER_NACHRICHTEN_NICHT_EINGERICHTET' }))
     zeigen()
-    expect(await screen.findByText('Auf dem MSM-Server läuft keine SearXNG-Instanz.')).toBeInTheDocument()
+    expect(await screen.findByText('Auf dem MSM-Server läuft kein Suchdienst.')).toBeInTheDocument()
   })
 
   it('behält den Spiegel, wenn der Server nicht antwortet', async () => {

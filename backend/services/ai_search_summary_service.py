@@ -38,7 +38,7 @@ from services.openai_compatible_adapter import StreamUsage, stream_chat_completi
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """Du bist ein neutraler, sachlicher Suchassistent. Beantworte die Anfrage des Nutzers auf Basis der Suchergebnisse objektiv, präzise und direkt.
+SYSTEM_PROMPT = """Du bist ein neutraler, sachlicher Suchassistent für Maunting Search. Beantworte die Anfrage des Nutzers auf Basis der Suchergebnisse objektiv, präzise, vollständig und direkt.
 
 Die Suchergebnisse sind in Abschnitte gegliedert („Treffer zur Ausgangssuche",
 „Frische Treffer zur Nachfrage“). Beziehe dich bei einer Nachfrage vorrangig
@@ -46,17 +46,18 @@ auf die frischen Treffer.
 
 Regeln:
 1. Nutze vorrangig die gegebenen Suchergebnisse als Informationsquelle. Erfinde keine Fakten.
-2. Reichen die Suchergebnisse für die Frage nicht aus, darfst du aus eigenem Wissen antworten. Kennzeichne das unmissverständlich mit dem einleitenden Hinweis „Ohne Quellenbeleg:“ und setze in diesem Fall keine [n]-Quellenangaben.
-3. Belege Aussagen aus den Suchergebnissen mit Quellennummern in eckigen Klammern, z. B. [1] oder [2].
-4. Strukturiere übersichtlich mit Markdown (Absätze oder kurze Aufzählungspunkte).
-5. Keine Floskeln, keine Begrüßungen, keine formelhaften Schlusssätze. Beginne direkt mit der Information."""
+2. Enthält die Nutzeranfrage mehrere Teilfragen oder verschiedene Themen zugleich (z. B. „Was ist Eisen und wofür braucht man das und wie koche ich Gulasch?“), beantworte **jede einzelne Teilfrage** vollständig in einem klar gegliederten Abschnitt mit eigener Zwischenüberschrift.
+3. Bei Rezept- oder Kochanfragen („Wie koche ich ...?“) liefere direkt eine strukturierte Übersicht mit **Zutaten** und **Zubereitungsschritten**. Bei naturwissenschaftlichen, technischen oder lexikalischen Fragen („Was ist ...?“) liefere eine klare Definition, Kerneigenschaften und Verwendungszwecke.
+4. Reichen die Suchergebnisse für die Frage oder eine Teilfrage nicht aus, darfst du aus eigenem Wissen antworten. Kennzeichne unbelegte Teile unmissverständlich mit dem Hinweis „Ohne Quellenbeleg:“ und setze dort keine [n]-Quellenangaben.
+5. Belege Aussagen aus den Suchergebnissen mit Quellennummern in eckigen Klammern, z. B. [1] oder [2].
+6. Strukturiere übersichtlich mit Markdown (Fettdruck, kurze Absätze, Aufzählungspunkte). Keine Floskeln, keine Begrüßungen, keine formelhaften Schlusssätze."""
 
 
-UMSCHREIBEN_SYSTEM = """Du formulierst Nachfragen für eine Metasuche um. Lese den bisherigen Dialog und die aktuelle Nachfrage und liefere eigenständige Suchanfragen, die ohne den Dialog verständlich sind. Löse dabei Bezüge auf („das“, „dort“, „die Zutaten“ → der gemeinte Gegenstand).
+UMSCHREIBEN_SYSTEM = """Du formulierst Nachfragen oder zusammengesetzte Fragen für eine Metasuche um. Lese den bisherigen Dialog und die aktuelle Anfrage und liefere eigenständige Suchanfragen, die ohne den Dialog verständlich sind. Löse dabei Bezüge auf („das“, „dort“, „die Zutaten“ → der gemeinte Gegenstand) und teile Mehrfachfragen („Was ist X und wie koche ich Y?“) in getrennte, präzise Suchanfragen für jedes Teilthema auf.
 
 Antworte ausschließlich mit JSON in genau dieser Form: {"suchanfragen": ["...", "..."], "themenwechsel": true/false}.
-- Höchstens 3 kurze Suchanfragen, die erste deckt die Nachfrage am besten ab.
-- "themenwechsel": true, wenn die Nachfrage ein neues Thema beginnt und die bisherigen Treffer dafür nichts mehr taugen; false, wenn sie das bisherige Thema vertieft."""
+- Höchstens 3 kurze Suchanfragen, die alle Teilfragen der Anfrage abdecken.
+- "themenwechsel": true, wenn die Nachfrage ein neues Thema beginnt und die bisherigen Treffer dafür nichts mehr taugen; false, wenn sie das bisherige Thema vertieft oder ergänzt."""
 
 #: Mehr Nachsuchen löst eine Folgefrage nie aus (Kosten- und Latenzgrenze).
 NACHSUCHE_MAX_RUNDEN = 2
@@ -64,6 +65,20 @@ NACHSUCHE_MAX_RUNDEN = 2
 UMSCHREIBEN_MAX_ANFRAGEN = 3
 #: So viele frische Trefferseiten werden höchstens geöffnet, wenn Snippets dünn sind.
 SEITEN_MAX = 2
+
+_MEHRFACH_FRAGE_MUSTER = re.compile(
+    r"\b(?:und|sowie|außerdem|ausserdem)\s+(?:wie|was|wofür|wofuer|warum|wann|wer|wo|welche|welcher|welches)\b|\?.+\?",
+    re.IGNORECASE,
+)
+
+
+def ist_zusammengesetzte_anfrage(frage: str) -> bool:
+    """Erkennt, ob schon die erste Suchanfrage aus mehreren Teilfragen besteht
+    (z. B. „Was ist Eisen und wofür braucht man das und wie koche ich Gulasch?“)."""
+    text = (frage or "").strip()
+    if len(text.split()) < 6:
+        return False
+    return bool(_MEHRFACH_FRAGE_MUSTER.search(text))
 
 
 def suchzusammenfassung_anbieter(
@@ -306,16 +321,21 @@ async def stream_suchzusammenfassung(
     frische_ab: int | None = None
     try:
         async with httpx.AsyncClient(timeout=45.0) as client:
-            if verlauf and neue_suche and q.strip():
+            braucht_nachrecherche = bool(
+                neue_suche
+                and q.strip()
+                and (verlauf or ist_zusammengesetzte_anfrage(q))
+            )
+            if braucht_nachrecherche:
                 umschrieben = await suchanfragen_umschreiben(
                     client,
-                provider=provider,
-                api_key=api_key,
-                model=model,
-                frage=q.strip(),
-                verlauf=verlauf,
-            )
-                if umschrieben["themenwechsel"]:
+                    provider=provider,
+                    api_key=api_key,
+                    model=model,
+                    frage=q.strip(),
+                    verlauf=verlauf or [],
+                )
+                if verlauf and umschrieben["themenwechsel"]:
                     gesamt_treffer = []
                 frische_ab = len(gesamt_treffer)
                 bekannte_urls = {t.get("url") for t in gesamt_treffer}

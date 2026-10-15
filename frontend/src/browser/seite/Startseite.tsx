@@ -10,19 +10,17 @@
  * Am Handy gibt es ein Suchfeld, die Leiste unten; hier steht dann nur die
  * Wahl der Suchmaschine. Ein zweites Feld daneben war schmal und tat dasselbe.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ChevronDown, EyeOff, Search, SlidersHorizontal, X } from 'lucide-react'
+import { useEffect, useRef } from 'react'
+import { ChevronDown, EyeOff, SlidersHorizontal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/Singra/UI'
 
 import { istAndroid } from '../services/plattform'
-import { useEinstellungenStore, useWirksameSuche, type Hintergrund } from '../services/einstellungenStore'
-import { suchmaschine } from '../services/searchEngines'
-import { suchName, SuchwahlKnopf } from '../services/suchwahl'
+import { useEinstellungenStore, type Hintergrund } from '../services/einstellungenStore'
 import { useTabsStore } from '../services/tabsStore'
 import { vorwaermenWhisperModell } from '../services/lokalesWhisper'
-import { SprachsucheKnopf } from '../kopf/SprachsucheKnopf'
+import { SuchEingabeLeiste } from '../kopf/SuchEingabeLeiste'
 import { Schnellzugriffe } from './start/Schnellzugriffe'
 import { bewegungReduziert, Statistik } from './start/SchildStatistik'
 import { WidgetAngebot } from './start/WidgetAngebot'
@@ -51,25 +49,10 @@ export function Startseite({ privat }: { privat: boolean }) {
   const eigenesBild = useEinstellungenStore((s) => s.eigenesBild)
   // Private Tabs zählen nicht mit; dort gibt es auch keine Statistik.
   const statistik = useEinstellungenStore((s) => s.statistikZeigen) && !privat
-  const [text, setText] = useState('')
-  const [istMehrzeilig, setIstMehrzeilig] = useState(false)
   const huelle = useRef<HTMLDivElement>(null)
   const rolle = useRef<HTMLDivElement>(null)
-  const feldRef = useRef<HTMLTextAreaElement>(null)
   const bild = useRef(0)
-  const suche = suchmaschine(useWirksameSuche())
   const handy = istAndroid()
-
-  useLayoutEffect(() => {
-    const el = feldRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    const scrollH = el.scrollHeight
-    const minH = handy ? 52 : 48
-    const neuH = Math.min(192, Math.max(minH, scrollH))
-    el.style.height = `${neuH}px`
-    setIstMehrzeilig(neuH > minH + 6)
-  }, [text, handy])
 
   useEffect(() => {
     vorwaermenWhisperModell()
@@ -114,75 +97,11 @@ export function Startseite({ privat }: { privat: boolean }) {
               </div>
             )}
 
-            <form
-              className="w-full max-w-xl"
-              onSubmit={(e) => {
-                e.preventDefault()
-                if (text.trim()) eingeben(text)
-              }}
-            >
-              <div
-                className={`relative flex w-full items-start border border-outline-variant/30 bg-surface-container-low shadow-sm transition-all duration-200 focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/20 hover:bg-surface-container overflow-hidden ${
-                  istMehrzeilig ? 'rounded-2xl' : 'rounded-full'
-                }`}
-              >
-                <div className="absolute left-2.5 top-2 z-10 flex items-center [@media(pointer:coarse)]:top-2.5">
-                  <SuchwahlKnopf />
-                </div>
-                <textarea
-                  ref={feldRef}
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      if (text.trim()) eingeben(text)
-                    }
-                  }}
-                  rows={1}
-                  aria-label={t('browser.start.suchen')}
-                  placeholder={t('browser.adresse.platzhalter', { suchmaschine: suchName(suche, t) })}
-                  className={`w-full resize-none bg-transparent pl-[3.875rem] py-3 text-body-sm sm:text-body-md text-on-surface placeholder:text-on-surface-variant outline-none min-h-[3rem] max-h-48 overflow-y-auto leading-6 msm-suchleiste-rollbalken transition-[padding] duration-150 [@media(pointer:coarse)]:min-h-[3.25rem] [@media(pointer:coarse)]:py-3.5 ${
-                    text.length > 0 ? 'pr-28 [@media(pointer:coarse)]:pr-36' : 'pr-12 [@media(pointer:coarse)]:pr-14'
-                  }`}
-                  autoComplete="off"
-                  spellCheck={false}
-                  autoFocus={!handy}
-                  style={{ fieldSizing: 'content' }}
-                />
-                <div className="absolute right-2 top-2 z-10 flex items-center gap-1 [@media(pointer:coarse)]:top-2.5">
-                  {text.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setText('')
-                        feldRef.current?.focus()
-                      }}
-                      aria-label={t('common.clear')}
-                      className="flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-colors [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10 animate-fade-in"
-                    >
-                      <X className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                  )}
-                  <SprachsucheKnopf
-                    groesse="md"
-                    onErgebnis={(sttText) => {
-                      setText((alt) => (alt ? `${alt.trim()} ${sttText}` : sttText))
-                      feldRef.current?.focus()
-                    }}
-                  />
-                  {text.length > 0 && (
-                    <button
-                      type="submit"
-                      aria-label={t('browser.start.suchen')}
-                      className="flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-colors [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10 animate-fade-in"
-                    >
-                      <Search className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            </form>
+            <SuchEingabeLeiste
+              className="max-w-xl"
+              onSuchen={(begriff) => eingeben(begriff)}
+              autocomplete={!privat}
+            />
 
             {handy && !privat && <WidgetAngebot />}
             <Schnellzugriffe />

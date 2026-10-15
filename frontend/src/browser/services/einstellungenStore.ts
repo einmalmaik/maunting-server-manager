@@ -66,6 +66,8 @@ export type VerlaufFrist = 'immer' | 'woche' | 'monat' | 'halbjahr' | 'jahr'
 interface EinstellungenZustand {
   /** `null`: keine eigene Wahl; welche Suche dann gilt, sagt `wirksameSuche`. */
   suchmaschine: SuchmaschinenId | null
+  /** Region/Sprache der eigenen Suchseite (Maunting Search); `null` heißt automatisch. */
+  suchRegion: string | null
   searxngUrl: string | null
   hintergrund: Hintergrund
   eigenesBild: string | null
@@ -132,6 +134,7 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
   persist(
     (set) => ({
       suchmaschine: null,
+      suchRegion: null,
       searxngUrl: null,
       hintergrund: 'schlicht',
       eigenesBild: null,

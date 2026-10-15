@@ -34,20 +34,20 @@ export function Suche() {
       {searxngAktiv && (
         <div className="flex flex-col gap-1.5">
           <Input
-            label={t('browser.einstellungen.searxngAdresse')}
+            label={t('browser.einstellungen.eigeneInstanzAdresse')}
             placeholder={
               gekoppelt
-                ? t('browser.einstellungen.searxngSidecarPlatzhalter')
+                ? t('browser.einstellungen.eigeneInstanzPlatzhalter')
                 : 'https://search.example.org'
             }
             value={adresse}
-            error={gueltig ? undefined : t('browser.einstellungen.searxngUngueltig')}
+            error={gueltig ? undefined : t('browser.einstellungen.eigeneInstanzUngueltig')}
             onChange={(e) => setAdresse(e.target.value)}
             onBlur={() => gueltig && setzen({ searxngUrl: searxngBasis(adresse) })}
           />
           {gekoppelt && !adresse.trim() && (
             <p className="text-body-sm text-on-surface-variant">
-              {t('browser.einstellungen.searxngSidecarHinweis')}
+              {t('browser.einstellungen.eigeneInstanzHinweis')}
             </p>
           )}
         </div>

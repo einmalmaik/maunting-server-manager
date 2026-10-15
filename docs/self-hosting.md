@@ -289,6 +289,38 @@ könnte von einer Seite bis zur Oberfläche reichen, auch zu einem entsperrten
 Tresor. Unter Windows laufen die Seiten getrennt. Auf Android-Geräten die
 „Android System WebView“ aktuell halten.
 
+### Maunting Search — die Suchseite des Browsers
+
+Maunting Search ist die eigene Suchseite im Maunting Secure Browser
+(`msb://suche?q=…`). Sie zeigt KI-Überblick, Quellen, Treffer, ähnliche
+Suchanfragen und ein Wikipedia-Wissens-Panel. Technisch sucht sie über die
+SearXNG-Instanz deines Servers — dieselbe, die auch Singra benutzt. SearXNG ist
+freie Software unter der GNU Affero General Public License (AGPLv3); der
+Quellcode wird vom Betreiber vorgehalten und kann Nutzern auf Anfrage angeboten
+werden. Aufbau, Endpunkte, Medien-Proxy und Betreiberhinweise:
+[`docs/maunting-search.md`](maunting-search.md).
+
+Damit die Suchseite vollständig funktioniert, braucht der Sidecar:
+
+- die JSON-API (`search.formats: json`) und
+- Autocomplete (`search.autocomplete`, z. B. `"duckduckgo"`) für die
+  Suchvorschläge und die kontextbezogenen Fragen.
+
+Die Kategorie-Tabs brauchen **keine** eigene Freigabe in der Instanz: Die Tabs
+schicken `categories=images` (bzw. `videos`, `news`) als Suchparameter, und
+SearXNG filtert danach selbst. Leere Tabs bedeuten, dass keine Engine der
+Kategorie gerade etwas liefert — nicht, dass etwas fehlt.
+
+Ohne Autocomplete-Eintrag bleiben die Suchvorschläge leer, Treffer und
+Wissens-Panel laufen weiter. `image_proxy` bleibt aus: Bilder holt das Panel
+über `/api/browser/suche/bild`, damit der Browser nie mit einer gefundenen
+Seite direkt spricht.
+
+**Nach einem Update des Panels muss das Backend neu starten**, sonst kennt es
+die neuen Routen (`/suche/autocomplete`, `/suche/wissen`, `/suche/bild`) nicht:
+Suchergebnisse zeigen dann kein Wissens-Panel, keine Vorschläge und keine
+Vorschaubilder. `sudo systemctl restart msm-panel` genügt.
+
 ## Was die Oberfläche im Browser nachlädt
 
 **Keine Schriften von Dritten.** Die vier Familien der Oberfläche — Inter,

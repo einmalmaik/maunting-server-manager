@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Globe, Mail, Gamepad2, Flame, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert, Bot, Plug, Megaphone, CloudCog, MessageSquare, HardDrive } from 'lucide-react'
+import { Globe, Mail, Gamepad2, Flame, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert, Bot, Plug, Megaphone, CloudCog, MessageSquare, HardDrive, Search } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { GeneralTab } from './settings/GeneralTab'
@@ -16,6 +16,7 @@ import { CaptchaTab } from './settings/CaptchaTab'
 import { CloudflareTab } from './settings/CloudflareTab'
 import { SecurityTab } from './settings/SecurityTab'
 import { AiTab } from './settings/AiTab'
+import { SearchEngineTab } from './settings/SearchEngineTab'
 import { MessengerTab } from './settings/MessengerTab'
 import { HosterTab } from './settings/HosterTab'
 import { PopupTab } from './settings/PopupTab'
@@ -35,6 +36,7 @@ type TabId =
   | 'supportWidget'
   | 'backup'
   | 'security'
+  | 'searchEngine'
   | 'ai'
   | 'vaultStorage'
   | 'messenger'
@@ -49,6 +51,17 @@ export function Settings() {
   const canReadHoster = useHasPermission('panel.hoster.read')
   const canWriteHoster = useHasPermission('panel.hoster.write')
   const [activeTab, setActiveTab] = useState<TabId>('general')
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ tab?: TabId }>).detail
+      if (detail?.tab) {
+        setActiveTab(detail.tab)
+      }
+    }
+    window.addEventListener('msm:open-settings-tab', handler)
+    return () => window.removeEventListener('msm:open-settings-tab', handler)
+  }, [])
 
   // Backup-Tab: panel.settings.write.
   // Security-Tab: immer sichtbar (Rate-Limits für panel.settings.*;
@@ -67,6 +80,7 @@ export function Settings() {
     { id: 'popup', labelKey: 'settings.tabs.popup', icon: Megaphone },
     ...(canManageBackup ? [{ id: 'backup' as TabId, labelKey: 'settings.tabs.backup', icon: Cloud }] : []),
     { id: 'security', labelKey: 'settings.tabs.security', icon: ShieldAlert },
+    { id: 'searchEngine', labelKey: 'settings.tabs.searchEngine', icon: Search },
     { id: 'ai', labelKey: 'settings.tabs.ai', icon: Bot },
     { id: 'vaultStorage', labelKey: 'settings.tabs.vaultStorage', icon: HardDrive },
     { id: 'messenger', labelKey: 'settings.tabs.messenger', icon: MessageSquare },
@@ -97,6 +111,7 @@ export function Settings() {
       {activeTab === 'popup' && <PopupTab />}
       {activeTab === 'backup' && <BackupTab />}
       {activeTab === 'security' && <SecurityTab />}
+      {activeTab === 'searchEngine' && <SearchEngineTab />}
       {activeTab === 'ai' && <AiTab />}
       {activeTab === 'vaultStorage' && <VaultStorageTab />}
       {activeTab === 'messenger' && <MessengerTab />}

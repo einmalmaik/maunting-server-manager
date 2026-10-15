@@ -2,15 +2,202 @@ use_default_settings: true
 general:
   debug: false
   instance_name: "MSM Search Sidecar"
+search:
+  safe_search: 0
+  autocomplete: "duckduckgo"
+  default_lang: "de"
+  # POST statt GET: der Suchbegriff steht dann in keinem Zugriffslog.
+  method: "POST"
+  max_page: 20
+  ban_time_on_fail: 5
+  max_ban_time_on_fail: 60
+  formats:
+    - html
+    - json
+outgoing:
+  request_timeout: 3.5
+  max_request_timeout: 6.0
+  retries: 1
 server:
   bind_address: "0.0.0.0"
   port: 8080
   secret_key: ""
   limiter: false
   image_proxy: false
-search:
-  safe_search: 0
-  autocomplete: ""
-  formats:
-    - html
-    - json
+
+# Datenschutz- und Direktantwort-Plugins:
+# - tracker_url_remover bereinigt utm_*, fbclid, gclid usw. vor Auslieferung.
+# - unit_converter, calculator und hash_plugin liefern Direktantworten (answers)
+#   für Einheiten, Rechenausdrücke und Prüfsummen.
+enabled_plugins:
+  - 'Tracker URL remover'
+  - 'Unit converter plugin'
+  - 'Basic Calculator'
+  - 'Hash plugin'
+  - 'Open Access DOI rewrite'
+  - 'Self Informations'
+
+# Gezielte Engine-Gewichtung und Kategorien für Maunting Search (Web, Bilder,
+# Videos, News). Starke, zuverlässige Quellen erhalten höheres Gewicht (`weight`),
+# damit Trefferqualität und Antwortzeit hoch bleiben.
+engines:
+  # --- WEB & WISSEN ---
+  - name: brave
+    engine: brave
+    shortcut: br
+    categories: [general]
+    weight: 2.2
+    disabled: false
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    categories: [general]
+    weight: 2.0
+    disabled: false
+
+  - name: startpage
+    engine: startpage
+    shortcut: sp
+    categories: [general]
+    weight: 1.8
+    disabled: false
+
+  - name: google
+    engine: google
+    shortcut: go
+    categories: [general]
+    weight: 2.0
+    disabled: false
+
+  - name: bing
+    engine: bing
+    shortcut: bi
+    categories: [general]
+    weight: 1.4
+    disabled: false
+
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    categories: [general]
+    weight: 1.8
+    disabled: false
+
+  - name: wikidata
+    engine: wikidata
+    shortcut: wd
+    categories: [general]
+    weight: 1.5
+    disabled: false
+
+  # --- BILDER (categories: images) ---
+  - name: duckduckgo images
+    engine: duckduckgo_images
+    shortcut: ddgi
+    categories: [images]
+    weight: 2.0
+    disabled: false
+
+  - name: bing images
+    engine: bing_images
+    shortcut: bii
+    categories: [images]
+    weight: 1.8
+    disabled: false
+
+  - name: brave.images
+    engine: brave
+    network: brave
+    shortcut: bri
+    categories: [images]
+    weight: 2.0
+    disabled: false
+
+  - name: google images
+    engine: google_images
+    shortcut: goi
+    categories: [images]
+    weight: 1.8
+    disabled: false
+
+  - name: unsplash
+    engine: unsplash
+    shortcut: us
+    categories: [images]
+    weight: 1.2
+    disabled: false
+
+  # --- VIDEOS (categories: videos) ---
+  - name: youtube
+    engine: youtube_noapi
+    shortcut: yt
+    categories: [videos]
+    weight: 2.2
+    disabled: false
+
+  - name: duckduckgo videos
+    engine: duckduckgo_videos
+    shortcut: ddgv
+    categories: [videos]
+    weight: 1.8
+    disabled: false
+
+  - name: brave.videos
+    engine: brave
+    network: brave
+    shortcut: brv
+    categories: [videos]
+    weight: 1.8
+    disabled: false
+
+  - name: google videos
+    engine: google_videos
+    shortcut: gov
+    categories: [videos]
+    weight: 1.6
+    disabled: false
+
+  - name: dailymotion
+    engine: dailymotion
+    shortcut: dm
+    categories: [videos]
+    weight: 1.1
+    disabled: false
+
+  - name: sepiasearch
+    engine: sepiasearch
+    shortcut: sep
+    categories: [videos]
+    weight: 1.0
+    disabled: false
+
+  # --- NEWS (categories: news) ---
+  - name: duckduckgo news
+    engine: duckduckgo_news
+    shortcut: ddgn
+    categories: [news]
+    weight: 2.0
+    disabled: false
+
+  - name: brave.news
+    engine: brave
+    network: brave
+    shortcut: brn
+    categories: [news]
+    weight: 2.0
+    disabled: false
+
+  - name: google news
+    engine: google_news
+    shortcut: gon
+    categories: [news]
+    weight: 1.8
+    disabled: false
+
+  - name: bing news
+    engine: bing_news
+    shortcut: bin
+    categories: [news]
+    weight: 1.6
+    disabled: false
