@@ -184,8 +184,10 @@ def set_web_search_key(
     """Hinterlegt oder entfernt die Such-API-Schluessel, die SearXNG-URL und den KI-Schalter."""
     from services import ai_web_search_service
 
-    if payload.api_key is not None:
-        secret = payload.api_key.get_secret_value()
+    feldfreigabe = payload.model_fields_set
+
+    if "api_key" in feldfreigabe:
+        secret = payload.api_key.get_secret_value() if payload.api_key is not None else ""
         try:
             ai_web_search_service.store_api_key(secret)
         except DisSidecarError as exc:
@@ -193,7 +195,7 @@ def set_web_search_key(
                 status_code=503, detail="Suchschluessel konnte nicht sicher gespeichert werden"
             ) from exc
 
-    if payload.google_cse_api_key is not None or payload.google_cse_cx is not None:
+    if "google_cse_api_key" in feldfreigabe or "google_cse_cx" in feldfreigabe:
         g_key = payload.google_cse_api_key.get_secret_value() if payload.google_cse_api_key is not None else None
         try:
             ai_web_search_service.store_google_cse_credentials(g_key, payload.google_cse_cx)
@@ -202,8 +204,8 @@ def set_web_search_key(
                 status_code=503, detail="Google-Suchschluessel konnte nicht sicher gespeichert werden"
             ) from exc
 
-    if payload.searxng_url is not None:
-        ai_web_search_service.store_searxng_url(payload.searxng_url)
+    if "searxng_url" in feldfreigabe:
+        ai_web_search_service.store_searxng_url(payload.searxng_url or "")
 
     if payload.ai_enabled is not None:
         ai_web_search_service.store_ai_web_search_enabled(payload.ai_enabled)
