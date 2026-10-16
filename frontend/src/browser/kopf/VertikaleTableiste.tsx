@@ -4,27 +4,25 @@
  * Zeigt geöffnete Tabs und Unterseiten (z. B. GitHub-Dateien, Unterseiten,
  * geöffnete Links) hierarchisch eingerückt an.
  *
- * - Ausgeklappt: Nahtlose Frame-Integration (bg-surface-container), prominenter
- *   „Neuer Tab“-Eintrag mit Tastenkürzel Strg+T, Pfeil-Schaltfläche zum Einklappen,
- *   Favicons, Schließen-Knöpfe, Umsortieren und Fenster-Auslagerung.
- * - Eingeklappt: Schmale Icon-Leiste mit Favicons. Tooltips werden sowohl via DOM
- *   als auch nativ über das Betriebssystem gerendert, damit sie nicht von der
- *   Seitenfläche (WebView2) verdeckt werden.
+ * - Ausgeklappt: Nahtlose Frame-Integration (bg-surface-container), Einklappen-Pfeil
+ *   (ArrowLeftToLine) rechts oben, Privater-Tab-Knopf links, prominenter „Neuer Tab“-Knopf
+ *   ganz unten mit Strg+T, Favicons, Schließen-Knöpfe, Umsortieren und Fenster-Auslagerung.
+ * - Eingeklappt: Schmale Icon-Leiste mit Favicons, Ausklappen-Pfeil (ArrowRightToLine)
+ *   oben, einzelner Plus-Knopf ganz unten, Tooltips einheitlich und nativ über useLeistenname
+ *   (ohne doppelte DOM-Kurzinfos).
  */
 import { Fragment, useEffect, useMemo, useState, type DragEvent } from 'react'
 import {
   ArrowLeftToLine,
+  ArrowRightToLine,
   ChevronDown,
   ChevronRight,
   EyeOff,
   Moon,
-  PanelLeftOpen,
   Plus,
   X,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-
-import { Kurzinfo } from '@/Singra/UI'
 
 import { useLeistenname, useLeistennameAufraeumen } from '../leiste/leistenname'
 import { useEinstellungenStore } from '../services/einstellungenStore'
@@ -138,8 +136,8 @@ interface VertikalerTabKnotenProps {
 /**
  * Einzelner Knoten im vertikalen Tab-Baum.
  *
- * Verwendet `useLeistenname(titel, 'rechts')`, damit Tooltips auch auf Windows
- * nativ über die WebView2-Fläche gerendert werden.
+ * Verwendet ausschließlich `useLeistenname(titel, 'rechts')`, damit Tooltips
+ * nativ über Windows WebView2 gerendert werden und keine doppelten DOM-Tooltips entstehen.
  */
 function VertikalerTabKnoten({
   knoten,
@@ -163,34 +161,32 @@ function VertikalerTabKnoten({
   const leistenname = useLeistenname(titel, 'rechts')
 
   if (vertikaleTabsEingeklappt) {
-    // EINGEKLAPPTER MODUS: Nur Favicon, Tooltip nativ und via Kurzinfo
+    // EINGEKLAPPTER MODUS: Nur Favicon, nativer Tooltip rechts über dem Fenster
     return (
-      <Kurzinfo text={titel} lage="rechts">
-        <button
-          type="button"
-          role="treeitem"
-          aria-selected={aktiv}
-          onClick={() => aktivieren(tab.id)}
-          onAuxClick={(e) => e.button === 1 && schliessen(tab.id)}
-          {...leistenname}
-          className={`group relative flex h-9 w-full items-center justify-center rounded-lg transition-colors ${
-            aktiv
-              ? 'bg-surface-container-highest text-primary shadow-sm'
-              : 'text-on-surface-variant hover:bg-surface-container-high/80 hover:text-on-surface'
-          }`}
-          aria-label={titel}
-        >
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-            <TabSymbol tab={tab} />
-          </span>
-          {knoten.hatKinder && (
-            <span
-              className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-primary/80"
-              aria-hidden="true"
-            />
-          )}
-        </button>
-      </Kurzinfo>
+      <button
+        type="button"
+        role="treeitem"
+        aria-selected={aktiv}
+        onClick={() => aktivieren(tab.id)}
+        onAuxClick={(e) => e.button === 1 && schliessen(tab.id)}
+        {...leistenname}
+        className={`group relative flex h-9 w-full items-center justify-center rounded-lg transition-colors ${
+          aktiv
+            ? 'bg-surface-container-highest text-primary shadow-sm'
+            : 'text-on-surface-variant hover:bg-surface-container-high/80 hover:text-on-surface'
+        }`}
+        aria-label={titel}
+      >
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+          <TabSymbol tab={tab} />
+        </span>
+        {knoten.hatKinder && (
+          <span
+            className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-primary/80"
+            aria-hidden="true"
+          />
+        )}
+      </button>
     )
   }
 
@@ -337,6 +333,7 @@ export function VertikaleTableiste() {
 
   const einklappenNamen = useLeistenname(t('browser.tabs.leisteEinklappen'), 'rechts')
   const ausklappenNamen = useLeistenname(t('browser.tabs.leisteAusklappen'), 'rechts')
+  const privatNamen = useLeistenname(t('browser.tabs.privatKuerzel'), 'rechts')
   const neuTabNamen = useLeistenname(t('browser.tabs.neuKuerzel'), 'rechts')
 
   useEffect(() => {
@@ -501,63 +498,47 @@ export function VertikaleTableiste() {
       }`}
     >
       {/* Kopfbereich der vertikalen Leiste im Edge-Stil */}
-      <div className="flex h-10 shrink-0 items-center justify-between px-2">
+      <div className="flex h-10 shrink-0 items-center px-2">
         {vertikaleTabsEingeklappt ? (
-          <Kurzinfo text={t('browser.tabs.leisteAusklappen')} lage="rechts">
-            <button
-              type="button"
-              onClick={() => setzen({ vertikaleTabsEingeklappt: false })}
-              className="flex h-8 w-8 mx-auto items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors"
-              aria-label={t('browser.tabs.leisteAusklappen')}
-              {...ausklappenNamen}
-            >
-              <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
-            </button>
-          </Kurzinfo>
+          <button
+            type="button"
+            onClick={() => setzen({ vertikaleTabsEingeklappt: false })}
+            className="flex h-7 w-7 mx-auto items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors"
+            aria-label={t('browser.tabs.leisteAusklappen')}
+            {...ausklappenNamen}
+          >
+            <ArrowRightToLine className="h-4 w-4" aria-hidden="true" />
+          </button>
         ) : (
           <div className="flex w-full items-center justify-between">
-            <Kurzinfo text={t('browser.tabs.leisteEinklappen')} lage="unten">
-              <button
-                type="button"
-                onClick={() => setzen({ vertikaleTabsEingeklappt: true })}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors"
-                aria-label={t('browser.tabs.leisteEinklappen')}
-                {...einklappenNamen}
-              >
-                <ArrowLeftToLine className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </Kurzinfo>
-            {!privatAus && (
-              <Kurzinfo text={t('browser.tabs.privatKuerzel')} lage="unten">
+            {/* Privater Tab links */}
+            <div>
+              {!privatAus && (
                 <button
                   type="button"
                   onClick={() => neuerTab(undefined, { privat: true })}
                   className="flex h-7 w-7 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors"
                   aria-label={t('browser.tabs.neuPrivat')}
+                  {...privatNamen}
                 >
                   <EyeOff className="h-4 w-4" aria-hidden="true" />
                 </button>
-              </Kurzinfo>
-            )}
+              )}
+            </div>
+
+            {/* Einklappen-Pfeil rechts */}
+            <button
+              type="button"
+              onClick={() => setzen({ vertikaleTabsEingeklappt: true })}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors"
+              aria-label={t('browser.tabs.leisteEinklappen')}
+              {...einklappenNamen}
+            >
+              <ArrowLeftToLine className="h-4 w-4" aria-hidden="true" />
+            </button>
           </div>
         )}
       </div>
-
-      {/* Prominenter "Neuer Tab" Button im ausgeklappten Zustand (Edge-Stil) */}
-      {!vertikaleTabsEingeklappt && (
-        <div className="px-2 pb-1">
-          <button
-            type="button"
-            onClick={() => neuerTab()}
-            className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-label-sm font-medium text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors"
-            aria-label={t('browser.tabs.neu')}
-          >
-            <Plus className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-            <span className="flex-1 text-left truncate">{t('browser.tabs.neu')}</span>
-            <kbd className="text-label-sm text-on-surface-variant/70 tracking-wider">Strg+T</kbd>
-          </button>
-        </div>
-      )}
 
       {/* Liste der Baumstruktur-Tabs */}
       <div
@@ -600,22 +581,32 @@ export function VertikaleTableiste() {
             />
           )
         })}
+      </div>
 
-        {/* Plus-Knopf unterhalb im eingeklappten Zustand */}
-        {vertikaleTabsEingeklappt && (
-          <div className="mt-1 flex flex-col items-center border-t border-outline-variant/20 pt-1.5">
-            <Kurzinfo text={t('browser.tabs.neuKuerzel')} lage="rechts">
-              <button
-                type="button"
-                onClick={() => neuerTab()}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors"
-                aria-label={t('browser.tabs.neu')}
-                {...neuTabNamen}
-              >
-                <Plus className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </Kurzinfo>
-          </div>
+      {/* Fußbereich: Neuer-Tab-Knopf immer ganz unten mit Trennlinie */}
+      <div className="shrink-0 border-t border-outline-variant/20 p-1.5">
+        {vertikaleTabsEingeklappt ? (
+          <button
+            type="button"
+            onClick={() => neuerTab()}
+            className="group flex h-8 w-8 mx-auto items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors"
+            aria-label={t('browser.tabs.neu')}
+            {...neuTabNamen}
+          >
+            <Plus className="h-4 w-4 text-on-surface-variant group-hover:text-on-surface transition-colors" aria-hidden="true" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => neuerTab()}
+            className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-label-sm font-medium text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors"
+            aria-label={t('browser.tabs.neu')}
+            {...neuTabNamen}
+          >
+            <Plus className="h-4 w-4 shrink-0 text-on-surface-variant group-hover:text-on-surface transition-colors" aria-hidden="true" />
+            <span className="flex-1 text-left truncate">{t('browser.tabs.neu')}</span>
+            <kbd className="text-label-sm text-on-surface-variant/70 tracking-wider">Strg+T</kbd>
+          </button>
         )}
       </div>
     </aside>
