@@ -98,7 +98,7 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
   return (
     <div
       ref={huelle}
-      className="relative flex h-9 items-center rounded-full bg-surface-container-low px-2 min-w-0 flex-1 border border-transparent focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/20 transition-all duration-150 [@media(pointer:coarse)]:h-11"
+      className="msm-omnibox h-9 px-2 min-w-0 flex-1 [@media(pointer:coarse)]:h-11"
     >
       {/* Linker Bereich: Suchwahl-Knopf und Sicherheitsindikator */}
       <div className="flex shrink-0 items-center gap-1.5 mr-2">
