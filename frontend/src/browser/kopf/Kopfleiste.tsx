@@ -701,6 +701,7 @@ export function Kopfleiste() {
   const tabs = useTabsStore((s) => s.tabs)
   const aktivId = useTabsStore((s) => s.aktivId)
   const neuerTab = useTabsStore((s) => s.neuerTab)
+  const startseite = useTabsStore((s) => s.startseite)
   const privatAus = useEinstellungenStore((s) => s.ausgeblendet.includes('privaterTab'))
   const tabAusrichtung = useEinstellungenStore((s) => s.tabAusrichtung)
   const [dropZielIndex, setDropZielIndex] = useState<number | null>(null)
@@ -742,8 +743,6 @@ export function Kopfleiste() {
       e.currentTarget.scrollLeft += e.deltaY
     }
   }
-
-  const aktiverTab = tabs.find((t) => t.id === aktivId)
 
   useEffect(() => {
     const abmeldenTransfer = lauscheTabTransfer(({ tabId }) => {
@@ -876,22 +875,39 @@ export function Kopfleiste() {
       onDrop={(e) => {
         behandleDrop(e, dropZielIndex ?? tabs.length)
       }}
-      className="flex h-10 shrink-0 select-none items-end gap-1 bg-surface-container-low pl-2"
+      className={`relative flex h-10 shrink-0 select-none gap-1 bg-surface-container-low pl-2 ${
+        tabAusrichtung === 'vertikal' ? 'items-center' : 'items-end'
+      }`}
     >
-      <img src="/msp.png" alt="" className="mb-2 h-5 w-5 shrink-0" data-tauri-drag-region />
       {tabAusrichtung === 'vertikal' ? (
-        <div
-          data-tauri-drag-region
-          className="flex h-full min-w-0 flex-1 items-center gap-2 pl-2 text-label-md text-on-surface-variant select-none"
-        >
-          <span className="truncate font-medium text-on-surface text-label-sm opacity-80" data-tauri-drag-region>
-            {aktiverTab
-              ? tabTitel(aktiverTab, { neu: t('browser.tabs.neu'), einstellungen: t('browser.start.anpassen') })
-              : 'Maunting Secure Browser'}
-          </span>
-        </div>
+        <>
+          {/* Frei ziehbare Fensterfläche */}
+          <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
+
+          {/* Mittig platziertes Logo: Klick führt zur Startseite */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
+            <Kurzinfo text={t('browser.start.titel')} lage="unten">
+              <button
+                type="button"
+                onClick={() => startseite()}
+                className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors"
+                aria-label={t('browser.start.titel')}
+              >
+                <img src="/msp.png" alt="" className="h-5 w-5 pointer-events-none" />
+              </button>
+            </Kurzinfo>
+          </div>
+        </>
       ) : (
         <>
+          <button
+            type="button"
+            onClick={() => startseite()}
+            className="mb-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg hover:bg-surface-container-high transition-colors"
+            aria-label={t('browser.start.titel')}
+          >
+            <img src="/msp.png" alt="" className="h-5 w-5 pointer-events-none" />
+          </button>
           {kannScrollenLinks && (
             <button
               type="button"

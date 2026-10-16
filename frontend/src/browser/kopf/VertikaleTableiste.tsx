@@ -297,7 +297,7 @@ export function VertikaleTableiste() {
       {/* Kopfbereich der vertikalen Leiste */}
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-outline-variant/30 px-2">
         {vertikaleTabsEingeklappt ? (
-          <Kurzinfo text={t('browser.tabs.leisteAusklappen')} lage="unten" seite="ende">
+          <Kurzinfo text={t('browser.tabs.leisteAusklappen')} lage="rechts">
             <button
               type="button"
               onClick={() => setzen({ vertikaleTabsEingeklappt: false })}
@@ -378,7 +378,7 @@ export function VertikaleTableiste() {
           if (vertikaleTabsEingeklappt) {
             // EINGEKLAPPTER MODUS: Nur Favicon, Tooltip beim Hovern, kein Schließen-Knopf
             return (
-              <Kurzinfo key={tab.id} text={titel} lage="unten" seite="ende">
+              <Kurzinfo key={tab.id} text={titel} lage="rechts">
                 <button
                   type="button"
                   role="treeitem"
@@ -489,7 +489,7 @@ export function VertikaleTableiste() {
                 </span>
 
                 {/* Titel */}
-                <span className={`min-w-0 flex-1 truncate ${tab.ruhe ? 'opacity-60' : ''}`} title={titel}>
+                <span className={`min-w-0 flex-1 truncate ${tab.ruhe ? 'opacity-60' : ''}`}>
                   {tab.privat && <span className="sr-only">{t('browser.tabs.privat')}: </span>}
                   {titel}
                   {tab.ruhe && <span className="sr-only">, {t(`browser.tabs.ruhe.${tab.ruhe}`)}</span>}
@@ -528,7 +528,7 @@ export function VertikaleTableiste() {
         {/* Plus-Knopf unterhalb im eingeklappten Zustand */}
         {vertikaleTabsEingeklappt && (
           <div className="mt-1 flex flex-col items-center border-t border-outline-variant/30 pt-1.5">
-            <Kurzinfo text={t('browser.tabs.neuKuerzel')} lage="unten" seite="ende">
+            <Kurzinfo text={t('browser.tabs.neuKuerzel')} lage="rechts">
               <button
                 type="button"
                 onClick={() => neuerTab()}

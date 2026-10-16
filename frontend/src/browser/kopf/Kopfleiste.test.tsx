@@ -627,4 +627,19 @@ describe('Kopfleiste Tab-Auslagern (Tear-off)', () => {
     const tabs = useTabsStore.getState().tabs
     expect(tabs.some((t) => t.url === 'https://azure.microsoft.com/')).toBe(true)
   })
+
+  it('zeigt im vertikalen Modus das zentrierte Logo und navigiert beim Klick zur Startseite', () => {
+    useEinstellungenStore.setState({ tabAusrichtung: 'vertikal' })
+    const startseiteSpy = vi.spyOn(useTabsStore.getState(), 'startseite')
+    render(<Kopfleiste />)
+
+    // Horizontale Tabliste ist nicht vorhanden
+    expect(screen.queryByRole('tablist')).toBeNull()
+
+    // Logo-Knopf ist vorhanden und mittig platziert
+    const logoKnopf = screen.getByRole('button', { name: /Maunting Secure Browser/i })
+    expect(logoKnopf).toBeDefined()
+    fireEvent.click(logoKnopf)
+    expect(startseiteSpy).toHaveBeenCalled()
+  })
 })

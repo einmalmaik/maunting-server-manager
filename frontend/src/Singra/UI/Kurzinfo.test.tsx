@@ -50,4 +50,14 @@ describe('Kurzinfo', () => {
     expect(frei).not.toHaveClass('relative')
     expect(imFluss).toHaveClass('relative', 'md:absolute')
   })
+
+  it('steht bei senkrechten Leisten rechts neben dem Knopf', () => {
+    render(
+      <Kurzinfo text="GitHub Profil" lage="rechts">
+        <button type="button">Tab</button>
+      </Kurzinfo>,
+    )
+    const blase = screen.getByRole('button').parentElement!.querySelector('[data-kurzinfo]')!
+    expect(blase).toHaveClass('left-full', 'ml-2', 'top-1/2', '-translate-y-1/2')
+  })
 })
