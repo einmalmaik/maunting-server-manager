@@ -30,16 +30,17 @@ export function registriereTabDrag(daten: TabTransferDaten): void {
   } catch {}
 }
 
-let splitVerwendetTabId: string | null = null
-let splitVerwendetZeit = 0
+const splitVerwendetTabs = new Set<string>()
 
 export function markiereTabFuerSplitVerwendet(tabId: string): void {
-  splitVerwendetTabId = tabId
-  splitVerwendetZeit = Date.now()
+  splitVerwendetTabs.add(tabId)
+  setTimeout(() => {
+    splitVerwendetTabs.delete(tabId)
+  }, 4000)
 }
 
 export function istTabFuerSplitVerwendet(tabId: string): boolean {
-  return splitVerwendetTabId === tabId && Date.now() - splitVerwendetZeit < 3000
+  return splitVerwendetTabs.has(tabId)
 }
 
 export function beendeTabDrag(): void {

@@ -432,8 +432,12 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
         beendeTabDrag()
         onZielBerechnen?.(null)
 
-        if (istTabUebernommen(tab.id) || istTabFuerSplitVerwendet(tab.id)) {
+        if (istTabUebernommen(tab.id)) {
           schliessen(tab.id)
+          return
+        }
+
+        if (istTabFuerSplitVerwendet(tab.id)) {
           return
         }
 

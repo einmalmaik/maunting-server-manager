@@ -571,8 +571,12 @@ export function VertikaleTableiste() {
       setTimeout(() => {
         beendeTabDrag()
 
-        if (istTabUebernommen(tab.id) || istTabFuerSplitVerwendet(tab.id)) {
+        if (istTabUebernommen(tab.id)) {
           schliessen(tab.id)
+          return
+        }
+
+        if (istTabFuerSplitVerwendet(tab.id)) {
           return
         }
 

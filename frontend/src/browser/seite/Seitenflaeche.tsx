@@ -138,16 +138,23 @@ export function Seitenflaeche() {
     const aktuellerSekundaerId = split?.sekundaerId
 
     let partnerId = aktuellerPrimaerId
-    if (effektiveTabId === aktuellerPrimaerId && aktuellerSekundaerId) {
-      partnerId = aktuellerSekundaerId
+    if (effektiveTabId === aktuellerPrimaerId) {
+      if (aktuellerSekundaerId) {
+        partnerId = aktuellerSekundaerId
+      } else {
+        const andererTab = tabs.find((t) => t.id !== effektiveTabId)
+        if (andererTab) {
+          partnerId = andererTab.id
+        } else {
+          return
+        }
+      }
     }
 
     if (docktLinksOderOben) {
-      useTabsStore.getState().aktivieren(effektiveTabId)
-      useTabsStore.getState().splitAktivieren(partnerId, richtung, 0.5)
+      useTabsStore.getState().splitPositionSetzen(effektiveTabId, partnerId, richtung, 0.5)
     } else {
-      useTabsStore.getState().aktivieren(partnerId)
-      useTabsStore.getState().splitAktivieren(effektiveTabId, richtung, 0.5)
+      useTabsStore.getState().splitPositionSetzen(partnerId, effektiveTabId, richtung, 0.5)
     }
     markiereTabFuerSplitVerwendet(effektiveTabId)
     markiereTabFuerSplitVerwendet(partnerId)
@@ -320,7 +327,7 @@ export function Seitenflaeche() {
     }
   }, [vertikaleTabsEingeklappt])
 
-  // Stellt sicher, dass keine Geister-Vorschau aktiv bleibt, wenn die Maus ohne Klick bewegt wird
+  // Stellt sicher, dass keine Geister-Vorschau aktiv bleibt, wenn die Maus ohne Klick bewegt wird oder Drag endet
   useEffect(() => {
     const onGlobalPointerMove = (e: PointerEvent) => {
       if (e.buttons === 0) {
@@ -328,8 +335,16 @@ export function Seitenflaeche() {
         if (tabWirdGezogen) setTabWirdGezogen(false)
       }
     }
+    const onGlobalDragEnd = () => {
+      setTabWirdGezogen(false)
+      setSnapVorschau(null)
+    }
     window.addEventListener('pointermove', onGlobalPointerMove)
-    return () => window.removeEventListener('pointermove', onGlobalPointerMove)
+    window.addEventListener('dragend', onGlobalDragEnd)
+    return () => {
+      window.removeEventListener('pointermove', onGlobalPointerMove)
+      window.removeEventListener('dragend', onGlobalDragEnd)
+    }
   }, [snapVorschau, tabWirdGezogen])
 
   const onContainerDragOver = (e: React.DragEvent) => {
@@ -398,7 +413,8 @@ export function Seitenflaeche() {
   const onContainerDragLeave = (e: React.DragEvent) => {
     if (!flaeche.current?.contains(e.relatedTarget as Node)) {
       setSnapVorschau(null)
-      setTabWirdGezogen(false)
+      // tabWirdGezogen bleibt aktiv solange der Drag läuft; wird erst bei Drop, Dragend oder Abbrechen beendet,
+      // um Flackerschleifen zwischen Seitenbereich und vertikaler Tableiste zu verhindern.
     }
   }
 

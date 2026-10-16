@@ -94,6 +94,8 @@ export interface TabsZustand {
   splitRichtungUmschalten: () => void
   /** Tauscht primären und sekundären Tab. */
   splitTauschen: () => void
+  /** Setzt Primär- und Sekundär-Tab sowie Richtung und Anteil direkt und deterministisch. */
+  splitPositionSetzen: (primaerId: string, sekundaerId: string, richtung: SplitRichtung, anteil?: number) => void
   /** Setzt den Tastatur- und Omnibox-Fokus auf eine Hälfte der geteilten Ansicht. */
   splitFokusSetzen: (haelfte: 'primaer' | 'sekundaer') => void
   ereignis: (e: TabEreignis) => void
@@ -543,6 +545,35 @@ export const useTabsStore = create<TabsZustand>()(
           if (neuerAktiv && neuerAktiv.url && !istIntern(neuerAktiv.url) && !neuerAktiv.nativDa) {
             void nativ.tabLaden(neuerAktiv.id, neuerAktiv.url, neuerAktiv.privat).catch(() => null)
             aendern(neuerAktiv.id, { nativDa: true })
+          }
+        },
+
+        splitPositionSetzen: (primaerId, sekundaerId, richtung, anteil = 0.5) => {
+          const { tabs } = get()
+          if (!primaerId || !sekundaerId || primaerId === sekundaerId) return
+          const prim = tabs.find((t) => t.id === primaerId)
+          const sek = tabs.find((t) => t.id === sekundaerId)
+          if (!prim || !sek) return
+
+          const clampedAnteil = Math.max(0.2, Math.min(0.8, anteil))
+          set((s) => ({
+            aktivId: primaerId,
+            verlaufIds: [...s.verlaufIds.filter((v) => v !== primaerId), primaerId],
+            split: {
+              sekundaerId,
+              richtung,
+              anteil: clampedAnteil,
+              aktiveHaelfte: 'primaer',
+            },
+          }))
+
+          if (prim.url && !istIntern(prim.url) && !prim.nativDa) {
+            void nativ.tabLaden(prim.id, prim.url, prim.privat).catch(() => null)
+            aendern(prim.id, { nativDa: true })
+          }
+          if (sek.url && !istIntern(sek.url) && !sek.nativDa) {
+            void nativ.tabLaden(sek.id, sek.url, sek.privat).catch(() => null)
+            aendern(sek.id, { nativDa: true })
           }
         },
 
