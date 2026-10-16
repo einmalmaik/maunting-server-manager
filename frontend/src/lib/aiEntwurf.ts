@@ -1,6 +1,6 @@
 /**
  * Ein Entwurf für das Eingabefeld des KI-Chats, etwa „Seite an Singra
- * übergeben“ aus dem Secure Browser. Der Chat nimmt ihn beim Öffnen oder,
+ * übergeben“ aus Maunting Pontis. Der Chat nimmt ihn beim Öffnen oder,
  * wenn er schon offen ist, auf das Ereignis hin; abgeschickt wird erst, wenn
  * der Nutzer selbst sendet.
  *

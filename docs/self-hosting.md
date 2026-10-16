@@ -257,7 +257,7 @@ stehen lässt: Einstellungen, die Stimmaufnahmen des Wake-Words, den Eintrag im
 Anmeldeinformations-Manager und den Autostart. Der Sandbox-Ordner bleibt — er
 gehört dem Benutzer.
 
-### MSB — Maunting Secure Browser (optional)
+### Maunting Pontis (optional)
 
 Den Browser für Windows und Android baut `.github/workflows/browser-build.yml`,
 aufgerufen von `release-artifacts.yml` auf denselben **`v*`-Tags** und mit
@@ -291,7 +291,7 @@ Tresor. Unter Windows laufen die Seiten getrennt. Auf Android-Geräten die
 
 ### Maunting Search — die Suchseite des Browsers
 
-Maunting Search ist die eigene Suchseite im Maunting Secure Browser
+Maunting Search ist die eigene Suchseite in Maunting Pontis
 (`msb://suche?q=…`). Sie zeigt KI-Überblick, Quellen, Treffer, ähnliche
 Suchanfragen und ein Wikipedia-Wissens-Panel. Technisch sucht sie über die
 SearXNG-Instanz deines Servers — dieselbe, die auch Singra benutzt. SearXNG ist

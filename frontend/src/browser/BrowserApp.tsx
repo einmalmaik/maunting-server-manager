@@ -1,5 +1,5 @@
 /**
- * Die Oberfläche des Maunting Secure Browsers.
+ * Die Oberfläche von Maunting Pontis.
  *
  * Oben Tabs und Navigation, in der Mitte die Seite (eine Webview von Rust),
  * am Handy statt oben eine Leiste unten (`HandyLeiste`, wie Chrome mit

@@ -434,7 +434,7 @@
       "memoryOff": "No separate memory model",
       "memoryEnabled": "Memory role enabled",
       "searchSummarySection": "Search summary (SearXNG)",
-      "searchSummaryHint": "Generates neutral AI overviews of web search results in Secure Browser. Completely isolated, 0 bytes database storage.",
+      "searchSummaryHint": "Generates neutral AI overviews of web search results in Maunting Pontis. Completely isolated, 0 bytes database storage.",
       "searchSummaryModel": "Search summary model",
       "searchSummaryOff": "Disabled (no search summary)",
       "searchSummaryEnabled": "Search summary active",
@@ -3517,8 +3517,8 @@
       "passwordSaved": "Backup password saved"
     },
     "loadFailed": "Loading failed",
-    "browserPromo": "Show MSB Browser notice",
-    "browserPromoHint": "Displays a notice about Maunting Secure Browser above the MSS download in the sidebar."
+    "browserPromo": "Show Maunting Pontis notice",
+    "browserPromoHint": "Displays a notice about Maunting Pontis above the MSS download in the sidebar."
   },
   "profile": {
     "title": "Profile",
@@ -4421,7 +4421,7 @@
       "unsigned": "The installer is not signed. Windows SmartScreen may show an unknown publisher warning; proceed via “More info”. Verify the SHA256 sum from the release to confirm integrity."
     },
     "secureBrowser": {
-      "title": "MSB — Maunting Secure Browser",
+      "title": "Maunting Pontis",
       "intro": "Optional browser for Windows and Android with an ad and tracker filter, parental controls and autofill from the vault. Without pairing it talks to no Maunting Studios server; once paired it shows the instance's Singra, messenger, notes, calendar and vault in its sidebar.",
       "artifact": {
         "title": "Installer",
@@ -4785,7 +4785,7 @@
   },
   "privacyPolicy": {
     "title": "Privacy policy",
-    "intro": "In a time of increasing digital surveillance and dwindling privacy, Maunting Studios stands for the counter-model: protection requires trust. This policy describes transparently and comprehensively all data flows of the Maunting Service Manager, the Desktop App and the Maunting Secure Browser. We never track or surveil anyone covertly: all actions are transparent, auditable, self-hosted, and remain under the complete control of the user.",
+    "intro": "In a time of increasing digital surveillance and dwindling privacy, Maunting Studios stands for the counter-model: protection requires trust. This policy describes transparently and comprehensively all data flows of the Maunting Service Manager, the Desktop App and Maunting Pontis. We never track or surveil anyone covertly: all actions are transparent, auditable, self-hosted, and remain under the complete control of the user.",
     "callout": "Summary: Maunting Studios – Security requires trust. Full data sovereignty, no hidden tracking, sensitive features (such as Computer-Use) are disabled by default, and every AI action remains transparently controllable.",
     "documentLabel": "MSM privacy",
     "summaryLabel": "Data protection",
@@ -4918,8 +4918,8 @@
         }
       },
       "browser": {
-        "heading": "Maunting Secure Browser",
-        "body": "The Maunting Secure Browser is a standalone browser for Windows and Android. On Windows it shows web pages with the Microsoft Edge WebView2 runtime, which Windows provides and updates; on Android with the Android System WebView, which Google updates through the Play Store. Unless it is paired with an MSM instance, it talks to no Maunting Studios server. There is no telemetry.",
+        "heading": "Maunting Pontis",
+        "body": "Maunting Pontis is a standalone browser for Windows and Android. On Windows it shows web pages with the Microsoft Edge WebView2 runtime, which Windows provides and updates; on Android with the Android System WebView, which Google updates through the Play Store. Unless it is paired with an MSM instance, it talks to no Maunting Studios server. There is no telemetry.",
         "items": {
           "lokal": "On the computer: history, bookmarks, open tabs (address, title, site icon), settings, the icons of your tiles and the shield statistics stay in the app folder and go to no server, not even your instance. The statistics are numbers without addresses: blocked ad and tracker requests, declined cookie notices, page loads with blocks and the day counting started; private tabs are not counted. Cookies, cache and site storage live in a separate profile, apart from Microsoft Edge.",
           "privat": "Private tabs add nothing to the history and show no site icon. On Windows, their cookies and site storage live only in memory and disappear once the last private tab is closed; until then all private tabs share this session. “Forget on close” (off by default) deletes the cookies, cache and site storage of normal tabs when you quit; history and bookmarks stay.",
@@ -6171,8 +6171,8 @@
       "keinChatrecht": "Your account lacks permission for AI chat (ai.chat.use). Contact your administrator to grant access.",
       "gedaechtnis": "Memory",
       "tresor": "Vault",
-      "browserInstallieren": "Install MSB Browser",
-      "browserLadenAndroid": "Get MSB Browser",
+      "browserInstallieren": "Install Maunting Pontis",
+      "browserLadenAndroid": "Download Maunting Pontis",
       "browserDownloadSubtext": "Hardened, private web browser for Windows",
       "browserDownloadSubtextAndroid": "Hardened, private web browser for Android"
     },
@@ -7047,9 +7047,9 @@
     "androidLabel": "App for Android (.apk)"
   },
   "browserBadge": {
-    "tooltip": "Download Maunting Secure Browser for Windows",
+    "tooltip": "Download Maunting Pontis for Windows",
     "label": "Secure web browser",
-    "androidTooltip": "Download Maunting Secure Browser for Android",
+    "androidTooltip": "Download Maunting Pontis for Android",
     "androidLabel": "Browser for Android (.apk)"
   },
   "calls": {
@@ -8683,11 +8683,11 @@
       "abgestuerztText": "The page's process was terminated. Your other tabs keep running."
     },
     "start": {
-      "titel": "Maunting Secure Browser",
+      "titel": "Maunting Pontis",
       "suchen": "Search",
       "suchmaschine": "Search engine",
       "widgetTitel": "Search from your home screen",
-      "widgetText": "The search widget opens Secure Browser straight from the home screen, to type, speak or search with a photo.",
+      "widgetText": "The search widget opens Maunting Pontis straight from the home screen, to type, speak or search with a photo.",
       "widgetAnheften": "Add widget",
       "widgetSpaeter": "Not now",
       "schnellzugriff": "Shortcuts",
@@ -8865,7 +8865,7 @@
         "istWindows": "Links from other programs open here.",
         "nichtWindows": "Links from mail, Teams and other programs open in another browser.",
         "festlegenWindows": "Set in Windows",
-        "gefragtWindows": "In the Windows settings, click “Set default” for “Maunting Secure Browser”.",
+        "gefragtWindows": "In the Windows settings, click “Set default” for “Maunting Pontis”.",
         "fehlerWindows": "Windows did not open the settings."
       },
       "listeEingebaut": "{{name}}: not downloaded yet, built-in base rules active",
@@ -9813,7 +9813,7 @@
       "dazuSuchenNutzer": "People also search for",
       "kontextGeneriert": "Generated from context",
       "kontextVorschlaege": "Context suggestions",
-      "footerDienst": "A service by Maunting Studios for the Maunting Secure Browser",
+      "footerDienst": "A service by Maunting Studios for Maunting Pontis",
       "footerKi": "AI synthesis: Singra AI • Please verify facts against the listed sources",
       "footerLizenz": "Meta search built on free software (AGPLv3)",
       "zusammenfassungTitel": "Singra AI overview",
@@ -9859,7 +9859,7 @@
   "searchEngineSettings": {
     "title": "Maunting Search (Own Search Engine)",
     "badge": "Meta search & API aggregator",
-    "description": "Central configuration for your privacy-friendly search engine powering the Maunting Secure Browser and Singra (AI). All queries run through your server; tracking parameters are stripped automatically and images load exclusively through your server proxy.",
+    "description": "Central configuration for your privacy-friendly search engine powering Maunting Pontis and Singra (AI). All queries run through your server; tracking parameters are stripped automatically and images load exclusively through your server proxy.",
     "customInstanceGuardTitle": "Also use stored API keys when a custom SearXNG URL is set",
     "customInstanceGuardHint": "You configured an external SearXNG URL. A third-party instance cannot use the API keys stored here. By default, your Brave/Google keys are paused so no API quota is consumed unintentionally. Enable this only if your backend should query those APIs directly in addition.",
     "apisTitle": "Official search APIs (Brave & Google)",

@@ -16,7 +16,7 @@ import { toast } from '@/stores/toastStore'
  * 1. Den SearXNG-Metasuch-Endpunkt (lokaler Sidecar `127.0.0.1:8888` oder
  *    eigene Instanz-URL).
  * 2. Offizielle Such-API-Schlüssel (Brave Search API, Google Programmable
- *    Search / CSE), von denen sowohl Maunting Search im Secure Browser als
+ *    Search / CSE), von denen sowohl Maunting Search in Maunting Pontis als
  *    auch Singra (KI-Websuche) profitieren.
  * 3. Den Schutzschalter für fremde SearXNG-Instanzen, damit bei einer externen
  *    Instanz nicht ungewollt eigenes API-Guthaben verbraucht wird.

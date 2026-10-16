@@ -202,7 +202,7 @@ export function Privacy({ zurueck, zurueckAktion }: { zurueck?: string; zurueckA
         ],
       },
       {
-        // Der Maunting Secure Browser (MSB).
+        // Maunting Pontis.
         heading: t('privacyPolicy.sections.browser.heading'),
         body: t('privacyPolicy.sections.browser.body'),
         items: [

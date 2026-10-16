@@ -46,7 +46,7 @@ pub fn run() {
     let mut kontext = tauri::generate_context!();
     #[cfg(all(debug_assertions, desktop))]
     {
-        let name = "Maunting Secure Browser Dev";
+        let name = "Maunting Pontis Dev";
         kontext.config_mut().identifier = "com.mauntingstudios.secure-browser.dev".into();
         kontext.config_mut().product_name = Some(name.into());
         kontext.package_info_mut().name = name.into();

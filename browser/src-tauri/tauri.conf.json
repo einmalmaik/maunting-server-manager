@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Maunting Secure Browser",
+  "productName": "Maunting Pontis",
   "mainBinaryName": "MauntingSecureBrowser",
   "version": "5.4.0",
   "identifier": "com.mauntingstudios.secure-browser",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "MSB — Maunting Secure Browser",
+        "title": "Maunting Pontis",
         "url": "browser.html",
         "width": 1280,
         "height": 820,

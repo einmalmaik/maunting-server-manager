@@ -26,7 +26,7 @@ export function Ueber() {
       <div className="flex items-center gap-3">
         <img src="/msp.png" alt="" aria-hidden="true" className="h-12 w-12 rounded-full" />
         <div>
-          <p className="font-headline text-title-md text-on-surface">Maunting Secure Browser</p>
+          <p className="font-headline text-title-md text-on-surface">Maunting Pontis</p>
           {version && <p className="text-label-sm text-on-surface-variant">{t('browser.einstellungen.version', { version })}</p>}
         </div>
       </div>

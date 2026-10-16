@@ -11,7 +11,7 @@ use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 /// Muss mit `MSB_PROGID` in `windows/hooks.nsh` übereinstimmen.
 pub const PROGID: &str = "MSBURL";
 /// Der Name unter `RegisteredApplications`, ebenfalls aus `hooks.nsh`.
-const NAME: &str = "Maunting Secure Browser";
+const NAME: &str = "Maunting Pontis";
 
 /// Die ProgID, die Windows für https oder http gewählt hat. Neuere Windows-11-Fassungen
 /// schreiben `UserChoiceLatest` und lassen `UserChoice` veraltet stehen.

@@ -4,7 +4,7 @@ import { Button } from '@/Singra/UI'
 import { oeffneBrowser } from '../tauri'
 
 /**
- * Einstellungskachel in MSS (Desktop & Android) zur Installation des Maunting Secure Browsers.
+ * Einstellungskachel in MSS (Desktop & Android) zur Installation von Maunting Pontis.
  *
  * Öffnet unter Windows direkt das Setup-Paket und unter Android den APK-Download
  * über den Standard-Download-Mechanismus des Betriebssystems.
@@ -25,7 +25,7 @@ export function BrowserInstallationSektion() {
             <Globe className="w-4 h-4" />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-medium text-on-surface">Maunting Secure Browser</p>
+            <p className="text-sm font-medium text-on-surface">Maunting Pontis</p>
             <p className="text-xs text-on-surface-variant truncate">
               {isAndroid
                 ? t('mss.app.browserDownloadSubtextAndroid')

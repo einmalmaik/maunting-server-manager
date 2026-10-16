@@ -637,7 +637,7 @@ describe('Kopfleiste Tab-Auslagern (Tear-off)', () => {
     expect(screen.queryByRole('tablist')).toBeNull()
 
     // Logo-Knopf ist vorhanden und mittig platziert
-    const logoKnopf = screen.getByRole('button', { name: /Maunting Secure Browser/i })
+    const logoKnopf = screen.getByRole('button', { name: /Maunting Pontis/i })
     expect(logoKnopf).toBeDefined()
     fireEvent.click(logoKnopf)
     expect(startseiteSpy).toHaveBeenCalled()
