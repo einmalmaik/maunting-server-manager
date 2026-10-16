@@ -86,7 +86,7 @@ pub fn oeffnen(app: &AppHandle, url: String, rechts: f64, oben: f64) -> Result<(
     auf_ui(app, move || unsafe {
         zu(&app2);
         let umgebung = umgebung(&app2)?;
-        let c = controller(&app2, &umgebung, false)?;
+        let c = controller(&app2, &umgebung, false, None)?;
         let core = c.CoreWebView2().map_err(fehler)?;
         // Wie ein Tab: ohne Edge-Oberfläche, Downloads über Quarantäne und
         // Virenschutz. Ein Kontextmenü braucht das Popup nicht.

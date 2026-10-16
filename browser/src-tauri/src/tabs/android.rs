@@ -53,8 +53,12 @@ fn senden(app: &AppHandle, befehl: &str, daten: Value) {
     }
 }
 
-pub fn laden(app: &AppHandle, tabs: &Tabs, id: &str, ziel: url::Url, privat: bool) -> Result<(), String> {
-    rufen::<Leer>(app, "laden", json!({ "id": id, "url": ziel.as_str(), "privat": privat }))?;
+pub fn laden(app: &AppHandle, tabs: &Tabs, id: &str, ziel: url::Url, privat: bool, workspace: Option<&str>) -> Result<(), String> {
+    let mut payload = json!({ "id": id, "url": ziel.as_str(), "privat": privat });
+    if let Some(ws) = workspace {
+        payload["workspace"] = json!(ws);
+    }
+    rufen::<Leer>(app, "laden", payload)?;
     rahmen_anwenden(app, tabs);
     sichtbarkeit(app, tabs);
     Ok(())

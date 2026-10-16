@@ -158,9 +158,11 @@ export interface Seitenrecht {
 }
 
 export const nativ = {
-  tabLaden: (id: string, url: string, privat: boolean) => nacheinander('tab_laden', { id, url, privat }),
+  tabLaden: (id: string, url: string, privat: boolean, workspace?: string) =>
+    nacheinander('tab_laden', { id, url, privat, workspace }),
   tabAktivieren: (id: string | null) => nacheinander('tab_aktivieren', { id }),
   tabSchliessen: (id: string) => nacheinander('tab_schliessen', { id }),
+  tabVerwerfen: (id: string) => nacheinander('tab_verwerfen', { id }),
   /** Lagert einen Tab in ein neues, separates Browserfenster aus (Desktop). */
   tabAuslagern: (url: string, x: number, y: number, privat = false) =>
     rufen('tab_auslagern', { url, x: Math.round(x), y: Math.round(y), privat }),

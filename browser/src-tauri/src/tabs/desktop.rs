@@ -159,7 +159,7 @@ fn umgebung(app: &AppHandle) -> Result<ICoreWebView2Environment, String> {
 }
 
 /// Ein unsichtbarer Controller im Hauptfenster. Nur auf dem UI-Faden.
-fn controller(app: &AppHandle, umgebung: &ICoreWebView2Environment, privat: bool) -> Result<ICoreWebView2Controller, String> {
+pub(super) fn controller(app: &AppHandle, umgebung: &ICoreWebView2Environment, privat: bool, workspace: Option<&str>) -> Result<ICoreWebView2Controller, String> {
     let fenster = app.get_webview_window("main").ok_or("Hauptfenster fehlt")?;
     let hwnd = HWND(fenster.hwnd().map_err(fehler)?.0);
     let (tx, rx) = mpsc::channel();
@@ -171,6 +171,14 @@ fn controller(app: &AppHandle, umgebung: &ICoreWebView2Environment, privat: bool
         let u10 = umgebung.cast::<ICoreWebView2Environment10>().map_err(fehler)?;
         let optionen = u10.CreateCoreWebView2ControllerOptions().map_err(fehler)?;
         optionen.SetIsInPrivateModeEnabled(privat).map_err(fehler)?;
+        if !privat {
+            if let Some(ws) = workspace {
+                let saubere_id: String = ws.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').collect();
+                if !saubere_id.is_empty() && saubere_id != "standard" && saubere_id != "default" {
+                    optionen.SetProfileName(&HSTRING::from(format!("ws_{saubere_id}"))).map_err(fehler)?;
+                }
+            }
+        }
         u10.CreateCoreWebView2ControllerWithOptions(hwnd, &optionen, &fertig).map_err(fehler)?;
     }
     let controller = webview2_com::wait_with_pump(rx).map_err(fehler)?.map_err(fehler)?;
@@ -179,13 +187,14 @@ fn controller(app: &AppHandle, umgebung: &ICoreWebView2Environment, privat: bool
     Ok(controller)
 }
 
-pub fn laden(app: &AppHandle, tabs: &Tabs, id: &str, ziel: url::Url, privat: bool) -> Result<(), String> {
+pub fn laden(app: &AppHandle, tabs: &Tabs, id: &str, ziel: url::Url, privat: bool, workspace: Option<&str>) -> Result<(), String> {
     let (app2, id2) = (app.clone(), id.to_string());
+    let ws = workspace.map(|s| s.to_string());
     auf_ui(app, move || {
         let da = NATIV.with(|n| n.borrow().get(&id2).map(|t| t.core.clone()));
         let core = match da {
             Some(core) => core,
-            None => anlegen(&app2, &id2, privat)?,
+            None => anlegen(&app2, &id2, privat, ws.as_deref())?,
         };
         unsafe { core.Navigate(&HSTRING::from(ziel.as_str())).map_err(fehler) }
     })?;
@@ -194,10 +203,17 @@ pub fn laden(app: &AppHandle, tabs: &Tabs, id: &str, ziel: url::Url, privat: boo
     Ok(())
 }
 
+pub fn tab_verwerfen(app: &AppHandle, id: &str) {
+    let (app2, id2) = (app.clone(), id.to_string());
+    let _ = app.run_on_main_thread(move || {
+        schlaf::verwerfen(&app2, &id2);
+    });
+}
+
 /// Legt den Controller eines Tabs an und hängt alles daran. UI-Faden.
-fn anlegen(app: &AppHandle, id: &str, privat: bool) -> Result<ICoreWebView2, String> {
+fn anlegen(app: &AppHandle, id: &str, privat: bool, workspace: Option<&str>) -> Result<ICoreWebView2, String> {
     let umgebung = umgebung(app)?;
-    let controller = controller(app, &umgebung, privat)?;
+    let controller = controller(app, &umgebung, privat, workspace)?;
     let core = unsafe { controller.CoreWebView2().map_err(fehler)? };
     unsafe {
         let einstellungen = core.Settings().map_err(fehler)?;
@@ -511,7 +527,7 @@ pub(crate) fn im_profil<T: Send + 'static>(
             return f(&core);
         }
         let umgebung = umgebung(&app2)?;
-        let helfer = controller(&app2, &umgebung, false)?;
+        let helfer = controller(&app2, &umgebung, false, None)?;
         let ergebnis = unsafe { helfer.CoreWebView2().map_err(fehler) }.and_then(|core| f(&core));
         HELFER.with(|h| {
             if let Some(alt) = h.borrow_mut().replace(helfer) {

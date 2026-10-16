@@ -171,6 +171,7 @@ pub fn run() {
             tabs::tab_aktivieren,
             tabs::tab_schliessen,
             tabs::tab_auslagern,
+            tabs::tab_verwerfen,
             tabs::tab_aktion,
             tabs::tabs_rahmen,
             tabs::tabs_split_setzen,

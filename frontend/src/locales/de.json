@@ -8621,6 +8621,26 @@
       "scrollLinks": "Tabs nach links scrollen",
       "scrollRechts": "Tabs nach rechts scrollen"
     },
+    "workspaces": {
+      "titel": "Arbeitsbereiche",
+      "neu": "Neuer Arbeitsbereich",
+      "name": "Name des Bereichs",
+      "namePlatzhalter": "z. B. Dev, Recherche, Gaming",
+      "farbe": "Farbe",
+      "symbol": "Symbol",
+      "anlegen": "Erstellen",
+      "speichern": "Speichern",
+      "abbrechen": "Abbrechen",
+      "bearbeiten": "Bereich bearbeiten",
+      "loeschen": "Bereich löschen",
+      "loeschenBestaetigen": "Möchtest du den Arbeitsbereich „{{name}}“ wirklich löschen? Die enthaltenen Tabs werden in den Standardbereich verschoben.",
+      "verschiebenNach": "In Arbeitsbereich verschieben",
+      "verschiebenZiel": "Nach „{{name}}“ verschieben",
+      "kuerzel": "Alt+{{index}}",
+      "tabsAnzahl": "{{count}} Tab",
+      "tabsAnzahl_other": "{{count}} Tabs",
+      "dropHinweis": "Hier ablegen zum Verschieben"
+    },
     "split": {
       "trennerLabel": "Trenner für geteilte Ansicht ({{prozent}} %)",
       "tauschen": "Seiten tauschen",
@@ -8634,6 +8654,8 @@
       "snapUnten": "Unten andocken",
       "oeffnen": "In geteilter Ansicht öffnen",
       "aktivBadge": "In geteilter Ansicht",
+      "primaerBadge": "Geteilte Ansicht: Links",
+      "sekundaerBadge": "Geteilte Ansicht: Rechts",
       "snapDropHinweis": "In geteilter Ansicht andocken"
     },
     "fenster": {

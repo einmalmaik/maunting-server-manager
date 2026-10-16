@@ -132,12 +132,28 @@ pub fn tab_laden(
     id: String,
     url: String,
     privat: bool,
+    workspace: Option<String>,
 ) -> Result<(), String> {
     id_pruefen(&id)?;
     let ziel = ziel_pruefen(&url)?;
     crate::schild::schutz_dienst::bereit()?;
     eintragen(&tabs, &id, privat);
-    plattform::laden(&app, &tabs, &id, ziel, privat)
+    plattform::laden(&app, &tabs, &id, ziel, privat, workspace.as_deref())
+}
+
+#[tauri::command(async)]
+pub fn tab_verwerfen(app: AppHandle, id: String) -> Result<(), String> {
+    id_pruefen(&id)?;
+    #[cfg(windows)]
+    {
+        desktop::tab_verwerfen(&app, &id);
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        let _ = id;
+    }
+    Ok(())
 }
 
 /// Merkt sich einen Tab, bevor seine Webview entsteht.

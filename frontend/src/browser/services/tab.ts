@@ -43,6 +43,8 @@ export interface Tab {
   elternId: string | null
   /** Ob Unterseiten im Baum eingeklappt sind */
   baumEingeklappt?: boolean
+  /** Arbeitsbereich, zu dem der Tab gehört */
+  workspaceId?: string
 }
 
 /**
@@ -57,9 +59,10 @@ export function neueTabId(): string {
   return `tab-${crypto.randomUUID()}`
 }
 
-export function leererTab(id: string, privat = false): Tab {
+export function leererTab(id: string, privat = false, workspaceId?: string): Tab {
   return {
     id,
+    workspaceId: workspaceId ?? 'standard',
     url: '',
     titel: '',
     favicon: null,

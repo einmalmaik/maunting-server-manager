@@ -3,8 +3,9 @@
  * hat keinen Rahmen des Systems; gezogen wird an der freien Fläche
  * (`data-tauri-drag-region`), ein Doppelklick maximiert.
  */
-import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent, type WheelEvent } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type WheelEvent } from 'react'
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Columns2,
@@ -22,6 +23,12 @@ import {
   X,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
+import { WorkspaceIcon } from './WorkspaceLeiste'
+import { STANDARD_WORKSPACE_ID, useWorkspacesStore } from '../services/workspacesStore'
+import { farbwahl } from '@/config/farbpalette'
+import { useAnkerLage } from '@/Singra/UI/Ankerlage'
+import { createPortal } from 'react-dom'
 
 import { Kurzinfo } from '@/Singra/UI'
 
@@ -567,7 +574,7 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab }: TabRei
       </span>
       {istImSplit && (
         <span
-          className={`flex h-4 items-center gap-0.5 rounded px-1 text-label-xs font-semibold ${
+          className={`flex h-4 items-center gap-0.5 rounded px-1 text-label-sm font-semibold ${
             aktiv ? 'bg-primary/20 text-primary' : 'bg-surface-container-highest/60 text-on-surface-variant'
           }`}
           aria-label={
@@ -577,7 +584,7 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab }: TabRei
           }
         >
           <Columns2 className="h-3 w-3" aria-hidden="true" />
-          <span className="text-[10px]">{tab.id === aktivId ? 'L' : 'R'}</span>
+          <span className="text-label-sm">{tab.id === aktivId ? 'L' : 'R'}</span>
         </span>
       )}
       {tab.ruhe && <Moon className="h-3 w-3 shrink-0 text-on-surface-variant" aria-hidden="true" />}
@@ -599,9 +606,120 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab }: TabRei
   )
 }
 
+function WorkspaceKopfDropdown() {
+  const { t } = useTranslation()
+  const workspaces = useWorkspacesStore((s) => s.workspaces)
+  const aktiverWorkspaceId = useWorkspacesStore((s) => s.aktiverWorkspaceId)
+  const wechselnWorkspace = useWorkspacesStore((s) => s.wechselnWorkspace)
+  const [offen, setOffen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menueRef = useRef<HTMLDivElement>(null)
+  const lage = useAnkerLage(offen, triggerRef, menueRef, {
+    seite: 'unten',
+    ausrichtung: 'start',
+    abstand: 4,
+  })
+
+  const aktiver = workspaces.find((w) => w.id === aktiverWorkspaceId) ?? workspaces[0]
+  const aktiverFarbe = farbwahl(aktiver?.farbe)
+
+  useEffect(() => {
+    if (!offen) return
+    const daneben = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (!triggerRef.current?.contains(target) && !menueRef.current?.contains(target)) {
+        setOffen(false)
+      }
+    }
+    const taste = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOffen(false)
+        triggerRef.current?.focus()
+      }
+    }
+    document.addEventListener('mousedown', daneben)
+    document.addEventListener('keydown', taste)
+    return () => {
+      document.removeEventListener('mousedown', daneben)
+      document.removeEventListener('keydown', taste)
+    }
+  }, [offen])
+
+  return (
+    <div className="relative mb-1 shrink-0">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={offen}
+        onClick={(e) => {
+          e.stopPropagation()
+          setOffen(!offen)
+        }}
+        className="flex h-7 items-center gap-1.5 rounded-lg border border-outline-variant bg-surface-container px-2 text-label-sm font-medium text-on-surface hover:bg-surface-container-high transition-colors"
+        aria-label={t('browser.workspaces.titel')}
+      >
+        <span className={`h-2 w-2 rounded-full ${aktiverFarbe.flaecheStark} border ${aktiverFarbe.rand}`} />
+        <WorkspaceIcon icon={aktiver?.icon ?? 'globe'} className="h-3.5 w-3.5 opacity-80" />
+        <span className="max-w-24 truncate">{aktiver?.name}</span>
+        <ChevronDown className="h-3 w-3 text-on-surface-variant opacity-70" aria-hidden="true" />
+      </button>
+
+      {offen &&
+        createPortal(
+          <div
+            ref={menueRef}
+            role="menu"
+            data-msb-verdeckt="true"
+            style={lage}
+            className="fixed z-50 flex flex-col min-w-48 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-lg border border-outline-variant bg-surface-container-high p-1.5 shadow-panel backdrop-blur-sm text-label-sm select-none"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-2.5 py-1 text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant/70">
+              {t('browser.workspaces.titel')}
+            </div>
+            {workspaces.map((ws, index) => {
+              const aktiv = ws.id === aktiverWorkspaceId
+              const wsFarbe = farbwahl(ws.farbe)
+              return (
+                <button
+                  key={ws.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    wechselnWorkspace(ws.id)
+                    setOffen(false)
+                  }}
+                  className={`flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 transition-colors text-left ${
+                    aktiv
+                      ? 'bg-primary/15 text-primary font-semibold'
+                      : 'text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className={`h-2 w-2 rounded-full shrink-0 ${wsFarbe.flaecheStark} border ${wsFarbe.rand}`} />
+                    <WorkspaceIcon icon={ws.icon} className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                    <span className="truncate">{ws.name}</span>
+                  </div>
+                  {index < 9 && (
+                    <span className="text-label-sm text-on-surface-variant/50 ml-2">
+                      Alt+{index + 1}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>,
+          document.body
+        )}
+    </div>
+  )
+}
+
 export function Kopfleiste() {
   const { t } = useTranslation()
   const tabs = useTabsStore((s) => s.tabs)
+  const aktiverWorkspaceId = useWorkspacesStore((s) => s.aktiverWorkspaceId)
   const aktivId = useTabsStore((s) => s.aktivId)
   const split = useTabsStore((s) => s.split)
   const wirksamAktivId = split && split.aktiveHaelfte === 'sekundaer' ? split.sekundaerId : aktivId
@@ -611,6 +729,11 @@ export function Kopfleiste() {
   const tabAusrichtung = useEinstellungenStore((s) => s.tabAusrichtung)
   const [dropZielIndex, setDropZielIndex] = useState<number | null>(null)
   const [fremderDragTab, setFremderDragTab] = useState<TabZiehNachricht | null>(null)
+
+  const sichtbareTabs = useMemo(
+    () => tabs.filter((t) => (t.workspaceId ?? STANDARD_WORKSPACE_ID) === aktiverWorkspaceId),
+    [tabs, aktiverWorkspaceId]
+  )
 
   const tabListRef = useRef<HTMLDivElement>(null)
   const [kannScrollenLinks, setKannScrollenLinks] = useState(false)
@@ -633,7 +756,7 @@ export function Kopfleiste() {
       el.removeEventListener('scroll', pruefeScroll)
       window.removeEventListener('resize', pruefeScroll)
     }
-  }, [tabs, pruefeScroll])
+  }, [sichtbareTabs, pruefeScroll])
 
   useEffect(() => {
     if (tabAusrichtung !== 'horizontal') return
@@ -683,7 +806,7 @@ export function Kopfleiste() {
         setFremderDragTab(msg)
 
         const tabEls = document.querySelectorAll<HTMLElement>('[role="tab"]')
-        let ziel = tabs.length
+        let ziel = sichtbareTabs.length
         for (let i = 0; i < tabEls.length; i++) {
           const rect = tabEls[i].getBoundingClientRect()
           const mitte = rect.left + rect.width / 2
@@ -699,20 +822,31 @@ export function Kopfleiste() {
       if (msg.art === 'ablegen') {
         if (imBalken) {
           const tabEls = document.querySelectorAll<HTMLElement>('[role="tab"]')
-          let ziel = tabs.length
+          let sichtbaresZiel = sichtbareTabs.length
           for (let i = 0; i < tabEls.length; i++) {
             const rect = tabEls[i].getBoundingClientRect()
             const mitte = rect.left + rect.width / 2
             if (relX < mitte) {
-              ziel = i
+              sichtbaresZiel = i
               break
             }
           }
+          let globalerZielIndex = tabs.length
+          if (sichtbaresZiel < sichtbareTabs.length) {
+            const zielTab = sichtbareTabs[sichtbaresZiel]
+            const idx = tabs.findIndex((t) => t.id === zielTab.id)
+            if (idx >= 0) globalerZielIndex = idx
+          } else if (sichtbareTabs.length > 0) {
+            const letzterTab = sichtbareTabs[sichtbareTabs.length - 1]
+            const idx = tabs.findIndex((t) => t.id === letzterTab.id)
+            if (idx >= 0) globalerZielIndex = idx + 1
+          }
           neuerTab(msg.url, {
-            anIndex: ziel,
+            anIndex: globalerZielIndex,
             titel: msg.titel,
             favicon: msg.favicon,
             privat: msg.privat,
+            workspaceId: aktiverWorkspaceId,
           })
           sendeTabUebernommen(msg.ursprungFensterId, msg.tabId)
         }
@@ -725,7 +859,7 @@ export function Kopfleiste() {
       abmeldenTransfer()
       abmeldenLive()
     }
-  }, [tabs])
+  }, [tabs, sichtbareTabs, aktiverWorkspaceId, neuerTab])
 
   const behandleDrop = (e: DragEvent, zielIndex: number) => {
     e.preventDefault()
@@ -736,13 +870,25 @@ export function Kopfleiste() {
     const transfer = entpackeTabTransfer(e.dataTransfer)
     if (!transfer) return
 
+    let globalerZielIndex = tabs.length
+    if (zielIndex < sichtbareTabs.length) {
+      const zielTab = sichtbareTabs[zielIndex]
+      const idx = tabs.findIndex((t) => t.id === zielTab.id)
+      if (idx >= 0) globalerZielIndex = idx
+    } else if (sichtbareTabs.length > 0) {
+      const letzterTab = sichtbareTabs[sichtbareTabs.length - 1]
+      const idx = tabs.findIndex((t) => t.id === letzterTab.id)
+      if (idx >= 0) globalerZielIndex = idx + 1
+    }
+
     // 1. Aus einem anderen Fenster zusammenführen (Re-docking)
     if (transfer.ursprungFensterId !== FENSTER_ID) {
       neuerTab(transfer.url, {
-        anIndex: zielIndex,
+        anIndex: globalerZielIndex,
         titel: transfer.titel,
         favicon: transfer.favicon,
         privat: transfer.privat,
+        workspaceId: aktiverWorkspaceId,
       })
       sendeTabUebernommen(transfer.ursprungFensterId, transfer.tabId)
       beendeTabDrag()
@@ -756,7 +902,7 @@ export function Kopfleiste() {
     }
     const von = tabs.findIndex((t) => t.id === transfer.tabId)
     if (von >= 0) {
-      const korrigiert = von < zielIndex ? zielIndex - 1 : zielIndex
+      const korrigiert = von < globalerZielIndex ? globalerZielIndex - 1 : globalerZielIndex
       if (korrigiert !== von) {
         useTabsStore.getState().verschieben(transfer.tabId, korrigiert)
       }
@@ -778,7 +924,7 @@ export function Kopfleiste() {
         }
       }}
       onDrop={(e) => {
-        behandleDrop(e, dropZielIndex ?? tabs.length)
+        behandleDrop(e, dropZielIndex ?? sichtbareTabs.length)
       }}
       className={`relative flex h-10 shrink-0 select-none gap-1 bg-surface-container-low pl-2 ${
         tabAusrichtung === 'vertikal' ? 'items-center' : 'items-end'
@@ -813,6 +959,7 @@ export function Kopfleiste() {
           >
             <img src="/msp.png" alt="" className="h-5 w-5 pointer-events-none" />
           </button>
+          <WorkspaceKopfDropdown />
           {kannScrollenLinks && (
             <button
               type="button"
@@ -840,11 +987,11 @@ export function Kopfleiste() {
             }}
             onDrop={(e) => {
               e.stopPropagation()
-              behandleDrop(e, dropZielIndex ?? tabs.length)
+              behandleDrop(e, dropZielIndex ?? sichtbareTabs.length)
             }}
             className="flex min-w-0 items-end gap-0.5 overflow-x-auto scroll-smooth [overscroll-behavior:contain] msm-ohne-rollbalken"
           >
-            {tabs.map((tab, i) => (
+            {sichtbareTabs.map((tab, i) => (
               <Fragment key={tab.id}>
                 {dropZielIndex === i && (
                   <>
@@ -872,7 +1019,7 @@ export function Kopfleiste() {
                 />
               </Fragment>
             ))}
-            {dropZielIndex === tabs.length && (
+            {dropZielIndex === sichtbareTabs.length && (
               <>
                 <EinfuegeIndikator />
                 {fremderDragTab && <PhantomTabVorschau tab={fremderDragTab} />}
@@ -894,11 +1041,11 @@ export function Kopfleiste() {
             onDragOver={(e) => {
               e.preventDefault()
               if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-              setDropZielIndex(tabs.length)
+              setDropZielIndex(sichtbareTabs.length)
             }}
             onDrop={(e) => {
               e.stopPropagation()
-              behandleDrop(e, tabs.length)
+              behandleDrop(e, sichtbareTabs.length)
             }}
           >
             <Kurzinfo text={t('browser.tabs.neuKuerzel')} seite="anfang">

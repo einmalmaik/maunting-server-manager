@@ -11,6 +11,7 @@ import { nativ } from './nativ'
 import { useSuche } from './suche'
 import { useTabsStore } from './tabsStore'
 import { useVerlaufStore } from './verlaufStore'
+import { useWorkspacesStore } from './workspacesStore'
 
 export type Kuerzel =
   | 'neuer_tab'
@@ -24,6 +25,15 @@ export type Kuerzel =
   | 'verlauf'
   | 'downloads'
   | 'singra'
+  | 'workspace_1'
+  | 'workspace_2'
+  | 'workspace_3'
+  | 'workspace_4'
+  | 'workspace_5'
+  | 'workspace_6'
+  | 'workspace_7'
+  | 'workspace_8'
+  | 'workspace_9'
   | 'neu_laden'
   | 'suchen'
   | 'weitersuchen'
@@ -41,6 +51,13 @@ export interface KuerzelZiele {
 
 export function kuerzelAusfuehren(taste: string, ziele: KuerzelZiele): void {
   const tabs = useTabsStore.getState()
+  if (taste.startsWith('workspace_')) {
+    const nr = parseInt(taste.slice('workspace_'.length), 10)
+    if (!Number.isNaN(nr) && nr >= 1 && nr <= 9) {
+      useWorkspacesStore.getState().wechselnNachIndex(nr - 1)
+    }
+    return
+  }
   switch (taste as Kuerzel) {
     case 'neuer_tab':
       tabs.neuerTab()
@@ -131,6 +148,9 @@ export function kuerzelAusTaste(e: KeyboardEvent): Kuerzel | null {
     return null
   }
   if (e.altKey && !strg && taste === 's') return 'singra'
+  if (e.altKey && !strg && !e.shiftKey && /^[1-9]$/.test(e.key)) {
+    return `workspace_${e.key}` as Kuerzel
+  }
   if (!strg && !e.altKey && e.key === 'F6') return 'adresszeile'
   if (!strg && !e.altKey && e.key === 'F5') return 'neu_laden'
   if (!strg && !e.altKey && e.key === 'F12') return 'entwickler'

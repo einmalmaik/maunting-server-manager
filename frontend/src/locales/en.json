@@ -8621,6 +8621,26 @@
       "scrollLinks": "Scroll tabs left",
       "scrollRechts": "Scroll tabs right"
     },
+    "workspaces": {
+      "titel": "Workspaces",
+      "neu": "New workspace",
+      "name": "Workspace name",
+      "namePlatzhalter": "e.g. Dev, Research, Gaming",
+      "farbe": "Color",
+      "symbol": "Icon",
+      "anlegen": "Create",
+      "speichern": "Save",
+      "abbrechen": "Cancel",
+      "bearbeiten": "Edit workspace",
+      "loeschen": "Delete workspace",
+      "loeschenBestaetigen": "Do you really want to delete workspace \"{{name}}\"? Its tabs will be moved to the default workspace.",
+      "verschiebenNach": "Move to workspace",
+      "verschiebenZiel": "Move to \"{{name}}\"",
+      "kuerzel": "Alt+{{index}}",
+      "tabsAnzahl": "{{count}} tab",
+      "tabsAnzahl_other": "{{count}} tabs",
+      "dropHinweis": "Drop here to move"
+    },
     "split": {
       "trennerLabel": "Split view divider ({{prozent}}%)",
       "tauschen": "Swap sides",
@@ -8634,6 +8654,8 @@
       "snapUnten": "Snap to bottom",
       "oeffnen": "Open in split view",
       "aktivBadge": "In split view",
+      "primaerBadge": "Split view: Left",
+      "sekundaerBadge": "Split view: Right",
       "snapDropHinweis": "Snap in split view"
     },
     "fenster": {

@@ -21,6 +21,7 @@ permissions = [
   "allow-tab-aktivieren",
   "allow-tab-schliessen",
   "allow-tab-auslagern",
+  "allow-tab-verwerfen",
   "allow-tab-aktion",
   "allow-tabs-rahmen",
   "allow-tabs-split-setzen",

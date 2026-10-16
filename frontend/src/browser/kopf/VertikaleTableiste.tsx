@@ -12,6 +12,7 @@
  *   (ohne doppelte DOM-Kurzinfos).
  */
 import { Fragment, useEffect, useMemo, useState, type DragEvent } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ArrowLeftToLine,
   ArrowRightToLine,
@@ -25,6 +26,8 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { WorkspaceIcon, WorkspaceLeiste } from './WorkspaceLeiste'
+import { STANDARD_WORKSPACE_ID, useWorkspacesStore } from '../services/workspacesStore'
 import { useLeistenname, useLeistennameAufraeumen } from '../leiste/leistenname'
 import { useEinstellungenStore } from '../services/einstellungenStore'
 import { nativ } from '../services/nativ'
@@ -166,45 +169,129 @@ function VertikalerTabKnoten({
   const aktivId = useTabsStore((s) => s.aktivId)
   const istImSplit = split ? (tab.id === split.sekundaerId || tab.id === aktivId) : false
 
+  const workspaces = useWorkspacesStore((s) => s.workspaces)
+  const verschiebeTabInWorkspace = useTabsStore((s) => s.verschiebeTabInWorkspace)
+  const andereWorkspaces = workspaces.filter(
+    (w) => w.id !== (tab.workspaceId ?? STANDARD_WORKSPACE_ID)
+  )
+  const [kontextMenue, setKontextMenue] = useState<{ x: number; y: number } | null>(null)
+
+  useEffect(() => {
+    if (!kontextMenue) return
+    const schliessenMenue = () => setKontextMenue(null)
+    const onTaste = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setKontextMenue(null)
+    }
+    window.addEventListener('click', schliessenMenue)
+    window.addEventListener('contextmenu', schliessenMenue)
+    window.addEventListener('keydown', onTaste)
+    return () => {
+      window.removeEventListener('click', schliessenMenue)
+      window.removeEventListener('contextmenu', schliessenMenue)
+      window.removeEventListener('keydown', onTaste)
+    }
+  }, [kontextMenue])
+
+  const kontextMenueJSX = kontextMenue && createPortal(
+    <div
+      role="menu"
+      data-msb-verdeckt="true"
+      style={{
+        position: 'fixed',
+        top: Math.min(kontextMenue.y, window.innerHeight - 200),
+        left: Math.min(kontextMenue.x, window.innerWidth - 220),
+        zIndex: 60,
+      }}
+      className="fixed z-60 flex flex-col rounded-lg border border-outline-variant bg-surface-container-high p-1.5 shadow-panel backdrop-blur-sm text-label-sm min-w-48 select-none"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {andereWorkspaces.length > 0 && (
+        <>
+          <div className="px-2.5 py-1 text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant/70">
+            {t('browser.workspaces.verschiebenNach')}
+          </div>
+          {andereWorkspaces.map((ws) => (
+            <button
+              key={ws.id}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                verschiebeTabInWorkspace(tab.id, ws.id)
+                setKontextMenue(null)
+              }}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-colors text-left"
+            >
+              <WorkspaceIcon icon={ws.icon} className="h-3.5 w-3.5 text-on-surface-variant shrink-0" />
+              <span className="truncate flex-1">{ws.name}</span>
+            </button>
+          ))}
+          <div className="my-1 border-t border-outline-variant" />
+        </>
+      )}
+
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          schliessen(tab.id)
+          setKontextMenue(null)
+        }}
+        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-status-destructive hover:bg-status-destructive/10 transition-colors text-left"
+      >
+        <X className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>{t('browser.tabs.schliessen', { titel })}</span>
+      </button>
+    </div>,
+    document.body
+  )
+
   if (vertikaleTabsEingeklappt) {
     // EINGEKLAPPTER MODUS: Nur Favicon, nativer Tooltip rechts über dem Fenster
     return (
-      <button
-        type="button"
-        role="treeitem"
-        aria-selected={aktiv}
-        draggable
-        onDragStart={(e) => dragStart(e, tab, titel)}
-        onDragEnd={(e) => dragEnde(e, tab, titel)}
-        onPointerDown={pDown}
-        onClick={() => aktivieren(tab.id)}
-        onAuxClick={(e) => e.button === 1 && schliessen(tab.id)}
-        {...leistennameRest}
-        className={`group relative flex h-9 w-full items-center justify-center rounded-lg transition-colors ${
-          aktiv
-            ? 'bg-surface-container-highest text-primary shadow-sm'
-            : istImSplit
-            ? 'bg-surface-container-high/60 text-primary'
-            : 'text-on-surface-variant hover:bg-surface-container-high/80 hover:text-on-surface'
-        }`}
-        aria-label={titel}
-      >
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-          <TabSymbol tab={tab} />
-        </span>
-        {knoten.hatKinder && (
-          <span
-            className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-primary/80"
-            aria-hidden="true"
-          />
-        )}
-        {istImSplit && (
-          <span
-            className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary ring-1 ring-background"
-            aria-hidden="true"
-          />
-        )}
-      </button>
+      <Fragment>
+        <button
+          type="button"
+          role="treeitem"
+          aria-selected={aktiv}
+          draggable
+          onDragStart={(e) => dragStart(e, tab, titel)}
+          onDragEnd={(e) => dragEnde(e, tab, titel)}
+          onPointerDown={pDown}
+          onClick={() => aktivieren(tab.id)}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setKontextMenue({ x: e.clientX, y: e.clientY })
+          }}
+          onAuxClick={(e) => e.button === 1 && schliessen(tab.id)}
+          {...leistennameRest}
+          className={`group relative flex h-9 w-full items-center justify-center rounded-lg transition-colors ${
+            aktiv
+              ? 'bg-surface-container-highest text-primary shadow-sm'
+              : istImSplit
+              ? 'bg-surface-container-high/60 text-primary'
+              : 'text-on-surface-variant hover:bg-surface-container-high/80 hover:text-on-surface'
+          }`}
+          aria-label={titel}
+        >
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+            <TabSymbol tab={tab} />
+          </span>
+          {knoten.hatKinder && (
+            <span
+              className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-primary/80"
+              aria-hidden="true"
+            />
+          )}
+          {istImSplit && (
+            <span
+              className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary ring-1 ring-background"
+              aria-hidden="true"
+            />
+          )}
+        </button>
+        {kontextMenueJSX}
+      </Fragment>
     )
   }
 
@@ -246,6 +333,11 @@ function VertikalerTabKnoten({
           behandleDrop(e, dropZielIndex ?? i + 1, dropAlsKindVon)
         }}
         onClick={() => aktivieren(tab.id)}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setKontextMenue({ x: e.clientX, y: e.clientY })
+        }}
         onAuxClick={(e) => e.button === 1 && schliessen(tab.id)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') aktivieren(tab.id)
@@ -311,7 +403,7 @@ function VertikalerTabKnoten({
         {/* In geteilter Ansicht */}
         {istImSplit && (
           <span
-            className={`flex h-4 items-center gap-0.5 rounded px-1 text-label-xs font-semibold ${
+            className={`flex h-4 items-center gap-0.5 rounded px-1 text-label-sm font-semibold ${
               aktiv ? 'bg-primary/20 text-primary' : 'bg-surface-container-highest/60 text-on-surface-variant'
             }`}
             aria-label={
@@ -321,7 +413,7 @@ function VertikalerTabKnoten({
             }
           >
             <Columns2 className="h-3 w-3" aria-hidden="true" />
-            <span className="text-[10px]">{tab.id === aktivId ? 'L' : 'R'}</span>
+            <span className="text-label-sm">{tab.id === aktivId ? 'L' : 'R'}</span>
           </span>
         )}
 
@@ -344,6 +436,7 @@ function VertikalerTabKnoten({
           <X className="h-3 w-3" aria-hidden="true" />
         </button>
       </div>
+      {kontextMenueJSX}
     </Fragment>
   )
 }
@@ -353,6 +446,7 @@ export function VertikaleTableiste() {
   useLeistennameAufraeumen()
 
   const tabs = useTabsStore((s) => s.tabs)
+  const aktiverWorkspaceId = useWorkspacesStore((s) => s.aktiverWorkspaceId)
   const aktivId = useTabsStore((s) => s.aktivId)
   const split = useTabsStore((s) => s.split)
   const wirksamAktivId = split && split.aktiveHaelfte === 'sekundaer' ? split.sekundaerId : aktivId
@@ -369,7 +463,11 @@ export function VertikaleTableiste() {
   const [dropZielIndex, setDropZielIndex] = useState<number | null>(null)
   const [dropAlsKindVon, setDropAlsKindVon] = useState<string | null>(null)
 
-  const baumKnoten = useMemo(() => baueTabBaum(tabs), [tabs])
+  const sichtbareTabs = useMemo(
+    () => tabs.filter((t) => (t.workspaceId ?? STANDARD_WORKSPACE_ID) === aktiverWorkspaceId),
+    [tabs, aktiverWorkspaceId]
+  )
+  const baumKnoten = useMemo(() => baueTabBaum(sichtbareTabs), [sichtbareTabs])
 
   const einklappenNamen = useLeistenname(t('browser.tabs.leisteEinklappen'), 'rechts')
   const ausklappenNamen = useLeistenname(t('browser.tabs.leisteAusklappen'), 'rechts')
@@ -411,12 +509,23 @@ export function VertikaleTableiste() {
 
     // 1. Aus einem anderen Fenster zusammenführen (Re-docking)
     if (transfer.ursprungFensterId !== FENSTER_ID) {
+      let globalerZielIndex = tabs.length
+      if (zielIndex < baumKnoten.length) {
+        const zielTab = baumKnoten[zielIndex]?.tab
+        const idx = tabs.findIndex((t) => t.id === zielTab?.id)
+        if (idx >= 0) globalerZielIndex = idx
+      } else if (baumKnoten.length > 0) {
+        const letzterKnoten = baumKnoten[baumKnoten.length - 1]
+        const idx = tabs.findIndex((t) => t.id === letzterKnoten.tab.id)
+        if (idx >= 0) globalerZielIndex = idx + 1
+      }
       neuerTab(transfer.url, {
-        anIndex: zielIndex,
+        anIndex: globalerZielIndex,
         elternId,
         titel: transfer.titel,
         favicon: transfer.favicon,
         privat: transfer.privat,
+        workspaceId: aktiverWorkspaceId,
       })
       sendeTabUebernommen(transfer.ursprungFensterId, transfer.tabId)
       beendeTabDrag()
@@ -447,6 +556,16 @@ export function VertikaleTableiste() {
             nach++
           }
           ziel = nach
+        }
+      } else {
+        if (zielIndex < baumKnoten.length) {
+          const zielTab = baumKnoten[zielIndex]?.tab
+          const idx = tabs.findIndex((t) => t.id === zielTab?.id)
+          if (idx >= 0) ziel = idx
+        } else if (baumKnoten.length > 0) {
+          const letzterKnoten = baumKnoten[baumKnoten.length - 1]
+          const idx = tabs.findIndex((t) => t.id === letzterKnoten.tab.id)
+          if (idx >= 0) ziel = idx + 1
         }
       }
       const korrigiert = von < ziel ? ziel - 1 : ziel
@@ -686,7 +805,7 @@ export function VertikaleTableiste() {
           e.preventDefault()
           if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
         }}
-        onDrop={(e) => behandleDrop(e, tabs.length)}
+        onDrop={(e) => behandleDrop(e, baumKnoten.length)}
         className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1.5 py-1 scrollbar-none [overscroll-behavior:contain]"
       >
         {baumKnoten.map((knoten, i) => {
@@ -720,6 +839,9 @@ export function VertikaleTableiste() {
           )
         })}
       </div>
+
+      {/* Workspace-Leiste (Arbeitsbereiche) */}
+      <WorkspaceLeiste eingeklappt={vertikaleTabsEingeklappt} />
 
       {/* Fußbereich: Neuer-Tab-Knopf immer ganz unten mit Trennlinie */}
       <div className="shrink-0 border-t border-outline-variant/20 p-1.5">

@@ -353,6 +353,15 @@ pub(crate) fn kuerzel(taste: u32, strg: bool, umschalt: bool, alt: bool) -> Opti
         (true, false, false, None, TAB) => Some("naechster_tab"),
         (true, true, false, None, TAB) => Some("voriger_tab"),
         (false, false, true, Some('S'), _) => Some("singra"),
+        (false, false, true, _, 0x31) => Some("workspace_1"),
+        (false, false, true, _, 0x32) => Some("workspace_2"),
+        (false, false, true, _, 0x33) => Some("workspace_3"),
+        (false, false, true, _, 0x34) => Some("workspace_4"),
+        (false, false, true, _, 0x35) => Some("workspace_5"),
+        (false, false, true, _, 0x36) => Some("workspace_6"),
+        (false, false, true, _, 0x37) => Some("workspace_7"),
+        (false, false, true, _, 0x38) => Some("workspace_8"),
+        (false, false, true, _, 0x39) => Some("workspace_9"),
         (true, false, false, Some('F'), _) => Some("suchen"),
         (true, false, false, Some('G'), _) | (false, false, false, None, F3) => Some("weitersuchen"),
         (true, true, false, Some('G'), _) | (false, true, false, None, F3) => Some("zuruecksuchen"),
@@ -482,6 +491,9 @@ mod tests {
         assert_eq!(kuerzel(0x09, true, false, false), Some("naechster_tab"));
         assert_eq!(kuerzel(0x09, true, true, false), Some("voriger_tab"));
         assert_eq!(kuerzel('S' as u32, false, false, true), Some("singra"));
+        assert_eq!(kuerzel(0x31, false, false, true), Some("workspace_1"));
+        assert_eq!(kuerzel(0x32, false, false, true), Some("workspace_2"));
+        assert_eq!(kuerzel(0x39, false, false, true), Some("workspace_9"));
         // Was der Seite gehört, bleibt bei ihr.
         assert_eq!(kuerzel('C' as u32, true, false, false), None);
         assert_eq!(kuerzel('F' as u32, true, false, false), Some("suchen"));

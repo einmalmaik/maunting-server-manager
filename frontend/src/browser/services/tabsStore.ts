@@ -25,6 +25,7 @@ import { ereignisAnwenden } from './tabEreignis'
 import { istUnterfenster, setzeUnterfenster, tabsSpeichern } from './tabsAblage'
 import { tabWeg as entwicklerTabWeg } from '../entwickler/werkzeuge'
 import { useUebersetzung } from '../uebersetzung/ablauf'
+import { useWorkspacesStore } from './workspacesStore'
 
 interface Geschlossen {
   url: string
@@ -43,6 +44,7 @@ export interface NeuerTabOptionen {
   anIndex?: number
   titel?: string
   favicon?: string | null
+  workspaceId?: string
 }
 
 export type SplitRichtung = 'horizontal' | 'vertikal'
@@ -80,6 +82,8 @@ export interface TabsZustand {
   wiederherstellen: () => void
   wechseln: (richtung: 1 | -1) => void
   verschieben: (id: string, nachIndex: number, neueElternId?: string | null) => void
+  /** Verschiebt einen Tab (und optional Kind-Tabs) in einen anderen Arbeitsbereich. */
+  verschiebeTabInWorkspace: (tabId: string, zielWorkspaceId: string) => void
   /** Schaltet das Ein-/Ausklappen eines Eltern-Tabs in der Baumstruktur um. */
   baumUmschalten: (id: string) => void
   /** Setzt oder löst die Eltern-Kind-Beziehung eines Tabs in der Baumstruktur. */
@@ -146,7 +150,7 @@ export const useTabsStore = create<TabsZustand>()(
           if (tab.nativDa) void nativ.tabSchliessen(id)
           // Von einer Webseite in die MSM-Suche führt Zurück auf die Seite.
           const vorher = !rueck && interneSeite(url)?.seite === 'suche' && istWebseite(tab.url) ? tab.url : null
-          aendern(id, { ...leererTab(id, tab.privat), url, vorher })
+          aendern(id, { ...leererTab(id, tab.privat, tab.workspaceId), url, vorher })
           zeigen(id)
           return
         }
@@ -155,7 +159,7 @@ export const useTabsStore = create<TabsZustand>()(
         const vorher = rueck ? null : interneSeite(tab.url)?.seite === 'suche' ? tab.url : tab.nativDa ? tab.vorher : null
         aendern(id, { url, laedt: true, abgestuerzt: false, fehler: null, nativDa: true, ruhe: null, vorher })
         void nativ
-          .tabLaden(id, url, tab.privat)
+          .tabLaden(id, url, tab.privat, tab.workspaceId)
           .then(() => zeigen(id))
           // Steht der Jugendschutz noch nicht, lädt Rust nichts und sagt es.
           .catch((e) => aendern(id, { laedt: false, ...(e === SCHUTZ_NICHT_BEREIT ? { fehler: e } : {}) }))
@@ -182,14 +186,19 @@ export const useTabsStore = create<TabsZustand>()(
           const id = optionen.id ?? neueTabId()
           const effektiveUrl = url || (optionen.nativDa ? 'about:blank' : '')
           const elternId = optionen.elternId !== undefined ? optionen.elternId : (optionen.nach ?? null)
+          const workspaceId =
+            optionen.workspaceId ??
+            (typeof window !== 'undefined' ? useWorkspacesStore.getState()?.aktiverWorkspaceId : undefined) ??
+            'standard'
           const tab: Tab = {
-            ...leererTab(id, optionen.privat ?? false),
+            ...leererTab(id, optionen.privat ?? false, workspaceId),
             url: effektiveUrl,
             titel: optionen.titel || (effektiveUrl ? (interneSeite(effektiveUrl) ? '' : effektiveUrl) : ''),
             favicon: optionen.favicon ?? null,
             laedt: Boolean(optionen.nativDa && effektiveUrl),
             nativDa: optionen.nativDa ?? false,
             elternId,
+            workspaceId,
           }
           set((s) => {
             let einfuegeIndex = s.tabs.length
@@ -296,7 +305,7 @@ export const useTabsStore = create<TabsZustand>()(
                 }))
                 const seite = !!tab.url && !istIntern(tab.url)
                 if (seite && !tab.nativDa) {
-                  void nativ.tabLaden(tab.id, tab.url, tab.privat).catch(() => null)
+                  void nativ.tabLaden(tab.id, tab.url, tab.privat, tab.workspaceId).catch(() => null)
                   aendern(tab.id, { nativDa: true })
                 }
                 return
@@ -464,6 +473,36 @@ export const useTabsStore = create<TabsZustand>()(
           })
         },
 
+        verschiebeTabInWorkspace: (tabId, zielWorkspaceId) => {
+          const tab = finden(tabId)
+          if (!tab || (tab.workspaceId ?? 'standard') === zielWorkspaceId) return
+
+          set((s) => ({
+            tabs: s.tabs.map((t) =>
+              t.id === tabId || t.elternId === tabId ? { ...t, workspaceId: zielWorkspaceId } : t
+            ),
+          }))
+
+          const aktiverWs =
+            (typeof window !== 'undefined' ? useWorkspacesStore.getState()?.aktiverWorkspaceId : undefined) ??
+            'standard'
+
+          if (zielWorkspaceId !== aktiverWs) {
+            if (tab.nativDa && !tab.ton) {
+              void nativ.tabVerwerfen(tab.id)
+              aendern(tab.id, { nativDa: false, ruhe: 'verworfen' })
+            }
+            if (get().aktivId === tabId) {
+              const uebrige = get().tabs.filter((t) => (t.workspaceId ?? 'standard') === aktiverWs && t.id !== tabId)
+              if (uebrige.length > 0) {
+                get().aktivieren(uebrige[0].id)
+              } else {
+                get().neuerTab('', { workspaceId: aktiverWs })
+              }
+            }
+          }
+        },
+
         baumUmschalten: (id) =>
           set((s) => ({
             tabs: s.tabs.map((t) => (t.id === id ? { ...t, baumEingeklappt: !t.baumEingeklappt } : t)),
@@ -500,12 +539,12 @@ export const useTabsStore = create<TabsZustand>()(
           })
 
           if (sek.url && !istIntern(sek.url) && !sek.nativDa) {
-            void nativ.tabLaden(sek.id, sek.url, sek.privat).catch(() => null)
+            void nativ.tabLaden(sek.id, sek.url, sek.privat, sek.workspaceId).catch(() => null)
             aendern(sek.id, { nativDa: true })
           }
           const prim = tabs.find((t) => t.id === aktivId)
           if (prim && prim.url && !istIntern(prim.url) && !prim.nativDa) {
-            void nativ.tabLaden(prim.id, prim.url, prim.privat).catch(() => null)
+            void nativ.tabLaden(prim.id, prim.url, prim.privat, prim.workspaceId).catch(() => null)
             aendern(prim.id, { nativDa: true })
           }
         },
@@ -543,7 +582,7 @@ export const useTabsStore = create<TabsZustand>()(
           })
           const neuerAktiv = tabs.find((t) => t.id === neueAktivId)
           if (neuerAktiv && neuerAktiv.url && !istIntern(neuerAktiv.url) && !neuerAktiv.nativDa) {
-            void nativ.tabLaden(neuerAktiv.id, neuerAktiv.url, neuerAktiv.privat).catch(() => null)
+            void nativ.tabLaden(neuerAktiv.id, neuerAktiv.url, neuerAktiv.privat, neuerAktiv.workspaceId).catch(() => null)
             aendern(neuerAktiv.id, { nativDa: true })
           }
         },
@@ -568,11 +607,11 @@ export const useTabsStore = create<TabsZustand>()(
           }))
 
           if (prim.url && !istIntern(prim.url) && !prim.nativDa) {
-            void nativ.tabLaden(prim.id, prim.url, prim.privat).catch(() => null)
+            void nativ.tabLaden(prim.id, prim.url, prim.privat, prim.workspaceId).catch(() => null)
             aendern(prim.id, { nativDa: true })
           }
           if (sek.url && !istIntern(sek.url) && !sek.nativDa) {
-            void nativ.tabLaden(sek.id, sek.url, sek.privat).catch(() => null)
+            void nativ.tabLaden(sek.id, sek.url, sek.privat, sek.workspaceId).catch(() => null)
             aendern(sek.id, { nativDa: true })
           }
         },
@@ -630,7 +669,22 @@ export const useTabsStore = create<TabsZustand>()(
           } else {
             set((s) => ({ tabs: s.tabs.map((t) => ({ ...t, nativDa: false, laedt: false })) }))
           }
-          get().aktivieren(get().aktivId)
+          const aktiverWs =
+            (typeof window !== 'undefined' ? useWorkspacesStore.getState()?.aktiverWorkspaceId : undefined) ??
+            'standard'
+          const tabsDesAktiven = get().tabs.filter((t) => (t.workspaceId ?? 'standard') === aktiverWs)
+          const gemerkt =
+            typeof window !== 'undefined'
+              ? useWorkspacesStore.getState()?.letzterTabJeWorkspace?.[aktiverWs]
+              : undefined
+          const zielAktiv =
+            tabsDesAktiven.find((t) => t.id === gemerkt)?.id ??
+            tabsDesAktiven.find((t) => t.id === get().aktivId)?.id ??
+            tabsDesAktiven[0]?.id ??
+            get().aktivId
+          if (zielAktiv) {
+            get().aktivieren(zielAktiv)
+          }
         },
       }
     },
