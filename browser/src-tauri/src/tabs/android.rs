@@ -79,7 +79,8 @@ pub fn rahmen_anwenden(app: &AppHandle, tabs: &Tabs) {
         let z = tabs.0.lock().unwrap();
         (z.rahmen, z.split.clone(), z.aktiv.clone())
     };
-    if let (Some(s), Some(primaer_id)) = (split, aktiv) {
+    if let Some(s) = split {
+        let primaer_id = aktiv.unwrap_or_default();
         senden(
             app,
             "splitRahmen",

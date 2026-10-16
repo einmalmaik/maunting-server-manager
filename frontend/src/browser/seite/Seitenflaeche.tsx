@@ -17,6 +17,7 @@ import { seitenHost } from '../services/geraetKonfig'
 import { interneSeite } from '../services/intern'
 import { nativ } from '../services/nativ'
 import { useTabsStore, useSplitZustand, type Tab, type SplitRichtung } from '../services/tabsStore'
+import { useEinstellungenStore } from '../services/einstellungenStore'
 import { holeAktivenTabDrag, lauscheTabZiehNachrichten, type TabZiehNachricht } from '../services/tabTransfer'
 import { bildSetzen, useStandbild } from '../services/ueberdeckung'
 import { SeitenDialoge } from './SeitenDialoge'
@@ -102,6 +103,7 @@ export function Seitenflaeche() {
   const flaecheSekundaer = useRef<HTMLDivElement>(null)
 
   const { split, primaerTab, sekundaerTab } = useSplitZustand()
+  const vertikaleTabsEingeklappt = useEinstellungenStore((s) => s.vertikaleTabsEingeklappt)
   const aktion = useTabsStore((s) => s.aktion)
   const splitAktivieren = useTabsStore((s) => s.splitAktivieren)
   const splitAnteilAendern = useTabsStore((s) => s.splitAnteilAendern)
@@ -126,19 +128,20 @@ export function Seitenflaeche() {
         return
       }
 
-      if (nachricht.art === 'ziehen') {
-        const el = flaeche.current
-        if (!el) return
-        const rect = el.getBoundingClientRect()
-        const clientX = typeof nachricht.clientX === 'number' ? nachricht.clientX : nachricht.screenX - window.screenX
-        const clientY = typeof nachricht.clientY === 'number' ? nachricht.clientY : nachricht.screenY - window.screenY
+      const el = flaeche.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const clientX = typeof nachricht.clientX === 'number' ? nachricht.clientX : nachricht.screenX - window.screenX
+      const clientY = typeof nachricht.clientY === 'number' ? nachricht.clientY : nachricht.screenY - window.screenY
 
-        if (
-          clientX < rect.left ||
-          clientX > rect.right ||
-          clientY < rect.top ||
-          clientY > rect.bottom
-        ) {
+      const imBereich =
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom
+
+      if (nachricht.art === 'ziehen') {
+        if (!imBereich) {
           setSnapVorschau(null)
           return
         }
@@ -171,9 +174,21 @@ export function Seitenflaeche() {
           }
         })
       } else if (nachricht.art === 'ablegen') {
-        if (snapVorschau) {
-          const sekId = snapVorschau.tabId
-          const kante = snapVorschau.kante
+        const sekId = snapVorschau?.tabId ?? nachricht.tabId
+        if (sekId && sekId !== primaerTab.id && imBereich) {
+          let kante = snapVorschau?.kante
+          if (!kante) {
+            const x = clientX - rect.left
+            const y = clientY - rect.top
+            const w = rect.width
+            const h = rect.height
+            if (x < w * 0.35) kante = 'links'
+            else if (x > w * 0.65) kante = 'rechts'
+            else if (y < h * 0.35) kante = 'oben'
+            else if (y > h * 0.65) kante = 'unten'
+            else kante = x < w / 2 ? 'links' : 'rechts'
+          }
+
           const richtung: SplitRichtung = kante === 'oben' || kante === 'unten' ? 'vertikal' : 'horizontal'
           const droppedAufLinksOderOben = kante === 'links' || kante === 'oben'
 
@@ -182,7 +197,9 @@ export function Seitenflaeche() {
           if (droppedAufLinksOderOben) {
             splitTauschen()
           }
+          return
         }
+        setSnapVorschau(null)
       } else if (nachricht.art === 'abbrechen') {
         setSnapVorschau(null)
       }
@@ -237,12 +254,30 @@ export function Seitenflaeche() {
     if (flaechePrimaer.current) beobachter.observe(flaechePrimaer.current)
     if (flaecheSekundaer.current) beobachter.observe(flaecheSekundaer.current)
     window.addEventListener('resize', melden)
+    window.addEventListener('transitionend', melden)
 
     return () => {
       beobachter.disconnect()
       window.removeEventListener('resize', melden)
+      window.removeEventListener('transitionend', melden)
     }
-  }, [split, primaerTab, sekundaerTab, snapVorschau])
+  }, [split, primaerTab, sekundaerTab, vertikaleTabsEingeklappt])
+
+  // Wenn die vertikale Tableiste ein- oder ausgeklappt wird,
+  // animiert Tailwind die Breite. Wir triggern die Neupositionierung während und nach der Transition.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      window.dispatchEvent(new Event('resize'))
+    }, 40)
+    const timeout = setTimeout(() => {
+      clearInterval(interval)
+      window.dispatchEvent(new Event('resize'))
+    }, 260)
+    return () => {
+      clearInterval(interval)
+      clearTimeout(timeout)
+    }
+  }, [vertikaleTabsEingeklappt])
 
   // Stellt sicher, dass keine Geister-Vorschau aktiv bleibt, wenn die Maus ohne Klick bewegt wird
   useEffect(() => {
@@ -289,18 +324,36 @@ export function Seitenflaeche() {
 
   const onContainerDrop = (e: React.DragEvent) => {
     e.preventDefault()
-    if (snapVorschau) {
-      const sekId = snapVorschau.tabId
-      const kante = snapVorschau.kante
-      const richtung: SplitRichtung = kante === 'oben' || kante === 'unten' ? 'vertikal' : 'horizontal'
-      const droppedAufLinksOderOben = kante === 'links' || kante === 'oben'
+    const aktiverDrag = holeAktivenTabDrag()
+    const zielTabId = snapVorschau?.tabId ?? aktiverDrag?.tabId
+    if (zielTabId && primaerTab && zielTabId !== primaerTab.id) {
+      const el = flaeche.current
+      const rect = el?.getBoundingClientRect()
+      let kante = snapVorschau?.kante
+      if (!kante && rect) {
+        const x = e.clientX - rect.left
+        const y = e.clientY - rect.top
+        const w = rect.width
+        const h = rect.height
+        if (x < w * 0.35) kante = 'links'
+        else if (x > w * 0.65) kante = 'rechts'
+        else if (y < h * 0.35) kante = 'oben'
+        else if (y > h * 0.65) kante = 'unten'
+        else kante = x < w / 2 ? 'links' : 'rechts'
+      }
+      if (kante) {
+        const richtung: SplitRichtung = kante === 'oben' || kante === 'unten' ? 'vertikal' : 'horizontal'
+        const droppedAufLinksOderOben = kante === 'links' || kante === 'oben'
 
-      setSnapVorschau(null)
-      splitAktivieren(sekId, richtung, 0.5)
-      if (droppedAufLinksOderOben) {
-        splitTauschen()
+        setSnapVorschau(null)
+        splitAktivieren(zielTabId, richtung, 0.5)
+        if (droppedAufLinksOderOben) {
+          splitTauschen()
+        }
+        return
       }
     }
+    setSnapVorschau(null)
   }
 
   const onContainerDragLeave = (e: React.DragEvent) => {
@@ -366,23 +419,15 @@ export function Seitenflaeche() {
         </div>
       ) : (
         <div className="relative h-full w-full overflow-hidden">
-          {/* Primärer Tab (z. B. GitHub): schiebt sich fließend zur Seite bei Snap-Hover */}
+          {/* Primärer Tab: bleibt während des Schwebens bei 100%, um native Flackerschleifen zu verhindern */}
           <div
             ref={flaechePrimaer}
-            style={{
-              position: 'absolute',
-              left: snapVorschau?.kante === 'links' ? '50%' : 0,
-              top: snapVorschau?.kante === 'oben' ? '50%' : 0,
-              width: snapVorschau?.kante === 'links' || snapVorschau?.kante === 'rechts' ? '50%' : '100%',
-              height: snapVorschau?.kante === 'oben' || snapVorschau?.kante === 'unten' ? '50%' : '100%',
-              transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-            }}
-            className="overflow-hidden"
+            className="relative h-full w-full overflow-hidden"
           >
             <EinzelInhalt tab={primaerTab} aktion={aktion} />
           </div>
 
-          {/* Phantom-Drop-Vorschaufläche in der frei gewordenen Hälfte */}
+          {/* Windows Snap-Assist Vorschau-Overlay (pointer-events-none, überlagert die Zielhälfte) */}
           {snapVorschau && (
             <div
               style={{
@@ -393,9 +438,8 @@ export function Seitenflaeche() {
                 bottom: snapVorschau.kante === 'oben' ? '50%' : 0,
                 width: snapVorschau.kante === 'links' || snapVorschau.kante === 'rechts' ? '50%' : '100%',
                 height: snapVorschau.kante === 'oben' || snapVorschau.kante === 'unten' ? '50%' : '100%',
-                transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
               }}
-              className="z-30 flex flex-col items-center justify-center gap-3 p-6 select-none bg-surface-container/85 border-2 border-dashed border-primary/70 backdrop-blur-md animate-scale-in"
+              className="pointer-events-none z-50 flex flex-col items-center justify-center gap-3 p-6 select-none bg-surface-container/85 border-2 border-dashed border-primary/70 backdrop-blur-md animate-scale-in"
             >
               <div className="flex items-center gap-2.5 rounded-xl border border-primary/40 bg-surface/90 px-4 py-2.5 shadow-xl">
                 {snapVorschau.favicon ? (

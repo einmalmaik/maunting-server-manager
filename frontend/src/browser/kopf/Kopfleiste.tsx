@@ -454,14 +454,8 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
           return
         }
 
-        const imFenster =
-          endClientX >= 0 &&
-          endClientX <= (window.innerWidth || 1920) &&
-          endClientY >= 0 &&
-          endClientY <= (window.innerHeight || 1080)
-
         const distanz = Math.hypot(endScreenX - sx, endScreenY - sy)
-        if (tabs.length > 1 && !istAndroid() && !imFenster && distanz >= 50) {
+        if (tabs.length > 1 && !istAndroid() && (distanz >= 50 || endClientY < 0 || endClientY > 48)) {
           void nativ
             .tabAuslagern(tab.url, endScreenX, endScreenY, tab.privat)
             .then(() => schliessen(tab.id))
@@ -673,15 +667,12 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
 
     if (imTabBereich) return
 
-    const imFenster =
-      clientX >= 0 &&
-      clientX <= (window.innerWidth || 1920) &&
-      clientY >= 0 &&
-      clientY <= (window.innerHeight || 1080)
-
-    if (imFenster) return
-
-    const ausserhalb = distanz >= 50 && !imFenster
+    const ausserhalb =
+      distanz >= 50 ||
+      clientY < 0 ||
+      clientY > 48 ||
+      clientX < 0 ||
+      clientX > window.innerWidth
 
     if (!ausserhalb) return
 

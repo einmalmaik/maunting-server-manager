@@ -341,14 +341,15 @@ pub fn rahmen_anwenden(app: &AppHandle, tabs: &Tabs) {
     if vollbild.is_some() {
         return;
     }
-    if let (Some(s), Some(primaer_id)) = (split, aktiv) {
+    if let Some(s) = split {
         let rect_primaer = rechteck(app, s.primaer_rahmen.x, s.primaer_rahmen.y, s.primaer_rahmen.breite, s.primaer_rahmen.hoehe);
         let rect_sekundaer = rechteck(app, s.sekundaer_rahmen.x, s.sekundaer_rahmen.y, s.sekundaer_rahmen.breite, s.sekundaer_rahmen.hoehe);
         let default_rect = rechteck(app, r.x, r.y, r.breite, r.hoehe);
+        let primaer_id = aktiv.unwrap_or_default();
         let _ = app.run_on_main_thread(move || {
             NATIV.with(|n| {
                 for (id, tab) in n.borrow().iter() {
-                    let ziel_rect = if id == &primaer_id {
+                    let ziel_rect = if !primaer_id.is_empty() && id == &primaer_id {
                         rect_primaer
                     } else if id == &s.sekundaer_id {
                         rect_sekundaer

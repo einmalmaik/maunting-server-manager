@@ -234,11 +234,6 @@ pub fn tab_schliessen(app: AppHandle, tabs: State<'_, Tabs>, id: String) -> Resu
         if z.vollbild.as_deref() == Some(&id) {
             z.vollbild = None;
         }
-        if let Some(s) = &z.split {
-            if s.sekundaer_id == id || z.aktiv.as_deref() == Some(&id) {
-                z.split = None;
-            }
-        }
     }
     crate::schild::tab_vergessen(&id);
     seite_vergessen(&id);
@@ -281,7 +276,9 @@ pub fn tabs_split_setzen(
     id_pruefen(&sekundaer_id)?;
     {
         let mut z = tabs.0.lock().unwrap();
-        z.aktiv = Some(primaer_id);
+        z.aktiv = Some(primaer_id.clone());
+        z.tabs.entry(primaer_id.clone()).or_insert(TabDaten { privat: false, verborgen_seit: None });
+        z.tabs.entry(sekundaer_id.clone()).or_insert(TabDaten { privat: false, verborgen_seit: None });
         z.split = Some(SplitZustand {
             sekundaer_id,
             primaer_rahmen,

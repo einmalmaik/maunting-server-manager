@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tabs-split-setzen"
+description = "Enables the tabs_split_setzen command without any pre-configured scope."
+commands.allow = ["tabs_split_setzen"]
+
+[[permission]]
+identifier = "deny-tabs-split-setzen"
+description = "Denies the tabs_split_setzen command without any pre-configured scope."
+commands.deny = ["tabs_split_setzen"]

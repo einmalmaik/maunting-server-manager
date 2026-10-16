@@ -286,8 +286,31 @@ export const useTabsStore = create<TabsZustand>()(
               set((s) => ({ split: s.split ? { ...s.split, aktiveHaelfte: 'primaer' } : null }))
               return
             } else {
-              void nativ.tabsSplitAufheben().catch(() => null)
-              set({ split: null })
+              // Ein dritter Tab wurde angeklickt: Ersetze die aktuell fokussierte Hälfte des Splits
+              if (split.aktiveHaelfte === 'sekundaer') {
+                set((s) => ({
+                  split: s.split ? { ...s.split, sekundaerId: id } : null,
+                  verlaufIds: [...verlaufIds.filter((v) => v !== id), id],
+                }))
+                const seite = !!tab.url && !istIntern(tab.url)
+                if (seite && !tab.nativDa) {
+                  void nativ.tabLaden(tab.id, tab.url, tab.privat).catch(() => null)
+                  aendern(tab.id, { nativDa: true })
+                }
+                return
+              } else {
+                set({
+                  aktivId: id,
+                  verlaufIds: [...verlaufIds.filter((v) => v !== aktivId), aktivId],
+                })
+                const seite = !!tab.url && !istIntern(tab.url)
+                if (seite && !tab.nativDa) {
+                  laden(id, tab.url)
+                  return
+                }
+                zeigen(id)
+                return
+              }
             }
           }
           if (aktivId !== id) {
@@ -478,6 +501,11 @@ export const useTabsStore = create<TabsZustand>()(
             void nativ.tabLaden(sek.id, sek.url, sek.privat).catch(() => null)
             aendern(sek.id, { nativDa: true })
           }
+          const prim = tabs.find((t) => t.id === aktivId)
+          if (prim && prim.url && !istIntern(prim.url) && !prim.nativDa) {
+            void nativ.tabLaden(prim.id, prim.url, prim.privat).catch(() => null)
+            aendern(prim.id, { nativDa: true })
+          }
         },
 
         splitBeenden: () => {
@@ -499,7 +527,7 @@ export const useTabsStore = create<TabsZustand>()(
         },
 
         splitTauschen: () => {
-          const { split, aktivId } = get()
+          const { split, aktivId, tabs } = get()
           if (!split) return
           const neueAktivId = split.sekundaerId
           const neueSekundaerId = aktivId
@@ -511,6 +539,11 @@ export const useTabsStore = create<TabsZustand>()(
               aktiveHaelfte: split.aktiveHaelfte === 'primaer' ? 'sekundaer' : 'primaer',
             },
           })
+          const neuerAktiv = tabs.find((t) => t.id === neueAktivId)
+          if (neuerAktiv && neuerAktiv.url && !istIntern(neuerAktiv.url) && !neuerAktiv.nativDa) {
+            void nativ.tabLaden(neuerAktiv.id, neuerAktiv.url, neuerAktiv.privat).catch(() => null)
+            aendern(neuerAktiv.id, { nativDa: true })
+          }
         },
 
         splitFokusSetzen: (haelfte) => {
