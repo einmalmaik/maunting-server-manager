@@ -9,7 +9,6 @@ import { Bookmark, Clock, Globe, Lock, LockOpen, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { useAnkerLage } from '@/Singra/UI/Ankerlage'
-import { Input } from '@/Singra/UI'
 
 import { useEinstellungenStore, useWirksameSuche } from '../services/einstellungenStore'
 import { msmSucheBegriff } from '../services/intern'
@@ -97,8 +96,12 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
   const zeigeSicherheit = Boolean(adresse && !tippt && !begriff)
 
   return (
-    <div ref={huelle} className="relative min-w-0 flex-1">
-      <div className="absolute left-1.5 top-1/2 z-20 -translate-y-1/2 flex items-center gap-1">
+    <div
+      ref={huelle}
+      className="relative flex h-9 items-center rounded-full bg-surface-container-low px-2 min-w-0 flex-1 border border-transparent focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/20 transition-all duration-150 [@media(pointer:coarse)]:h-11"
+    >
+      {/* Linker Bereich: Suchwahl-Knopf und Sicherheitsindikator */}
+      <div className="flex shrink-0 items-center gap-1.5 mr-2">
         <SuchwahlKnopf kompakt beiOffenAenderung={setSuchwahlOffen} />
         {zeigeSicherheit && (
           <span className="pointer-events-none flex items-center text-on-surface-variant">
@@ -112,14 +115,9 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
           </span>
         )}
       </div>
-      {/* Ziel des Links unter dem Zeiger: die Statusblase von Edge ist aus,
-          und über der Seite kann die Oberfläche nichts zeichnen. */}
-      {!tippt && tab?.status && (
-        <span className="pointer-events-none absolute right-10 top-1/2 z-10 max-w-[40%] -translate-y-1/2 truncate rounded-full bg-surface-container-high px-2 py-0.5 text-label-sm text-on-surface-variant">
-          {tab.status}
-        </span>
-      )}
-      <Input
+
+      {/* Eingabefeld im flexiblen Raum */}
+      <input
         ref={feld}
         value={text}
         aria-label={t('browser.adresse.label')}
@@ -130,7 +128,7 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
         aria-expanded={offen}
         aria-controls={listenId}
         aria-activedescendant={offen ? `${listenId}-${markiert}` : undefined}
-        className={`h-9 rounded-full bg-surface-container-low ${zeigeSicherheit ? 'pl-16' : 'pl-11'} pr-9 text-body-sm [@media(pointer:coarse)]:h-11`}
+        className="h-full min-w-0 flex-1 bg-transparent text-body-sm text-on-surface placeholder:text-on-surface-variant outline-none p-0"
         onFocus={(e) => {
           e.currentTarget.select()
           setTippt(true)
@@ -170,7 +168,14 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
           }
         }}
       />
-      <div className="absolute right-1.5 top-1/2 -translate-y-1/2 z-10 flex items-center">
+
+      {/* Rechter Bereich: Status und Sprachsuche */}
+      <div className="flex shrink-0 items-center gap-1.5 ml-2">
+        {!tippt && tab?.status && (
+          <span className="pointer-events-none max-w-[200px] truncate rounded-full bg-surface-container-high px-2 py-0.5 text-label-sm text-on-surface-variant">
+            {tab.status}
+          </span>
+        )}
         <SprachsucheKnopf
           onErgebnis={(sttText) => {
             setText((alt) => (alt ? `${alt.trim()} ${sttText}` : sttText))
