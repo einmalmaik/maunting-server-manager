@@ -60,19 +60,46 @@ pub fn laden(app: &AppHandle, tabs: &Tabs, id: &str, ziel: url::Url, privat: boo
     Ok(())
 }
 
-/// Vorne liegt der aktive Tab, außer die Oberfläche legt gerade etwas darüber.
+/// Vorne liegt der aktive Tab (oder bei Split beide Tabs), außer die Oberfläche legt gerade etwas darüber.
 pub fn sichtbarkeit(app: &AppHandle, tabs: &Tabs) {
-    let vorne = {
+    let (vorne, sekundaer) = {
         let z = tabs.0.lock().unwrap();
-        if z.verdeckt { None } else { z.aktiv.clone() }
+        if z.verdeckt {
+            (None, None)
+        } else {
+            (z.aktiv.clone(), z.split.as_ref().map(|s| s.sekundaer_id.clone()))
+        }
     };
-    senden(app, "sichtbarkeit", json!({ "vorne": vorne }));
+    senden(app, "sichtbarkeit", json!({ "vorne": vorne, "sekundaer": sekundaer }));
 }
 
 /// Der Inhaltsbereich in CSS-Pixeln der Oberfläche; Kotlin rechnet um.
 pub fn rahmen_anwenden(app: &AppHandle, tabs: &Tabs) {
-    let r = tabs.0.lock().unwrap().rahmen;
-    senden(app, "rahmen", json!({ "x": r.x, "y": r.y, "breite": r.breite, "hoehe": r.hoehe }));
+    let (r, split, aktiv) = {
+        let z = tabs.0.lock().unwrap();
+        (z.rahmen, z.split.clone(), z.aktiv.clone())
+    };
+    if let (Some(s), Some(primaer_id)) = (split, aktiv) {
+        senden(
+            app,
+            "splitRahmen",
+            json!({
+                "primaerId": primaer_id,
+                "primaerX": s.primaer_rahmen.x,
+                "primaerY": s.primaer_rahmen.y,
+                "primaerBreite": s.primaer_rahmen.breite,
+                "primaerHoehe": s.primaer_rahmen.hoehe,
+                "sekundaerId": s.sekundaer_id,
+                "sekundaerX": s.sekundaer_rahmen.x,
+                "sekundaerY": s.sekundaer_rahmen.y,
+                "sekundaerBreite": s.sekundaer_rahmen.breite,
+                "sekundaerHoehe": s.sekundaer_rahmen.hoehe,
+            }),
+        );
+    } else {
+        senden(app, "splitAufheben", json!({}));
+        senden(app, "rahmen", json!({ "x": r.x, "y": r.y, "breite": r.breite, "hoehe": r.hoehe }));
+    }
 }
 
 pub fn schliessen(app: &AppHandle, id: &str) {

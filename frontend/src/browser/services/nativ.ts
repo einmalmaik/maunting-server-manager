@@ -168,6 +168,19 @@ export const nativ = {
     rufen('tab_aktion', { id, aktion }),
   tabsRahmen: (rahmen: { x: number; y: number; breite: number; hoehe: number }) =>
     nacheinander('tabs_rahmen', { rahmen }),
+  tabsSplitSetzen: (
+    primaerId: string,
+    primaerRahmen: { x: number; y: number; breite: number; hoehe: number },
+    sekundaerId: string,
+    sekundaerRahmen: { x: number; y: number; breite: number; hoehe: number }
+  ) =>
+    nacheinander('tabs_split_setzen', {
+      primaerId,
+      primaerRahmen,
+      sekundaerId,
+      sekundaerRahmen,
+    }),
+  tabsSplitAufheben: () => nacheinander('tabs_split_aufheben'),
   tabsVerdecken: (verdeckt: boolean) => nacheinander('tabs_verdecken', { verdeckt }),
   /** JPEG des vorderen Tabs. */
   tabStandbild: () => nacheinander<ArrayBuffer | Uint8Array | number[]>('tab_standbild'),

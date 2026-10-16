@@ -46,11 +46,16 @@ export function holeAktivenTabDrag(): TabTransferDaten | null {
       const raw = localStorage.getItem(AKTIVER_DRAG_SCHLUESSEL)
       if (raw) {
         const parsed = JSON.parse(raw) as TabTransferDaten & { zeit: number }
+        // Eigene Fenster-Drags gelten NUR wenn lokalerAktiverDrag gesetzt ist
+        if (parsed.ursprungFensterId === FENSTER_ID) {
+          localStorage.removeItem(AKTIVER_DRAG_SCHLUESSEL)
+          return null
+        }
         if (
           parsed &&
           typeof parsed.ursprungFensterId === 'string' &&
           typeof parsed.tabId === 'string' &&
-          Date.now() - (parsed.zeit || 0) < 60000
+          Date.now() - (parsed.zeit || 0) < 5000
         ) {
           return {
             ursprungFensterId: parsed.ursprungFensterId,
@@ -204,10 +209,15 @@ export interface TabZiehNachricht {
   privat: boolean
   screenX: number
   screenY: number
+  clientX?: number
+  clientY?: number
 }
 
 const LIVE_KANAL_NAME = 'msb:tab-drag-live'
 const LIVE_SPEICHER_SCHLUESSEL = 'msb:tab-drag-live-speicher'
+
+/** Lokale In-Memory-Lauscher für synchrone Zustellung im selben Fenster */
+const lokaleLauscher = new Set<(msg: TabZiehNachricht) => void>()
 
 let liveSenderKanal: BroadcastChannel | null = null
 function holeLiveSenderKanal(): BroadcastChannel | null {
@@ -221,11 +231,20 @@ function holeLiveSenderKanal(): BroadcastChannel | null {
 }
 
 export function sendeTabZiehNachricht(nachricht: TabZiehNachricht): void {
+  // 1. Lokale Abonnenten im selben Fenster sofort und synchron bedienen
+  for (const lauscher of lokaleLauscher) {
+    try {
+      lauscher(nachricht)
+    } catch {}
+  }
+
+  // 2. BroadcastChannel für andere Fenster
   try {
     const kanal = holeLiveSenderKanal()
     kanal?.postMessage(nachricht)
   } catch {}
 
+  // 3. Storage für andere Prozesse/Fenster
   try {
     if (typeof localStorage !== 'undefined') {
       if (nachricht.art === 'ziehen') {
@@ -240,13 +259,22 @@ export function sendeTabZiehNachricht(nachricht: TabZiehNachricht): void {
 export function lauscheTabZiehNachrichten(onNachricht: (msg: TabZiehNachricht) => void): () => void {
   const abmelder: (() => void)[] = []
 
+  // Lokalen Lauscher registrieren
+  lokaleLauscher.add(onNachricht)
+  abmelder.push(() => {
+    lokaleLauscher.delete(onNachricht)
+  })
+
   if (typeof BroadcastChannel !== 'undefined') {
     try {
       const kanal = new BroadcastChannel(LIVE_KANAL_NAME)
       kanal.onmessage = (e: MessageEvent) => {
         const msg = e.data as TabZiehNachricht
         if (msg && typeof msg.ursprungFensterId === 'string' && typeof msg.art === 'string') {
-          onNachricht(msg)
+          // Eigene Broadcast-Nachrichten nicht doppelt ausführen
+          if (msg.ursprungFensterId !== FENSTER_ID) {
+            onNachricht(msg)
+          }
         }
       }
       abmelder.push(() => kanal.close())

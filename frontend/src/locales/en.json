@@ -8621,6 +8621,21 @@
       "scrollLinks": "Scroll tabs left",
       "scrollRechts": "Scroll tabs right"
     },
+    "split": {
+      "trennerLabel": "Split view divider ({{prozent}}%)",
+      "tauschen": "Swap sides",
+      "drehen": "Switch orientation",
+      "horizontalDrehen": "Arrange side by side",
+      "vertikalDrehen": "Arrange stacked",
+      "schliessen": "Close split view",
+      "snapLinks": "Snap to left",
+      "snapRechts": "Snap to right",
+      "snapOben": "Snap to top",
+      "snapUnten": "Snap to bottom",
+      "oeffnen": "Open in split view",
+      "aktivBadge": "In split view",
+      "snapDropHinweis": "Snap in split view"
+    },
     "fenster": {
       "minimieren": "Minimize",
       "maximieren": "Maximize",

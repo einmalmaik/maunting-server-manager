@@ -285,7 +285,15 @@ pub fn download_abbrechen(app: &AppHandle, nr: u64) -> Result<bool, String> {
 pub fn sichtbarkeit(app: &AppHandle, tabs: &Tabs) {
     let stand: HashMap<String, (bool, bool)> = {
         let z = tabs.0.lock().unwrap();
-        let vorne = |id: &str| z.vollbild.as_deref().or(z.aktiv.as_deref()) == Some(id);
+        let vorne = |id: &str| {
+            if let Some(v) = &z.vollbild {
+                v == id
+            } else if let Some(s) = &z.split {
+                z.aktiv.as_deref() == Some(id) || s.sekundaer_id == id
+            } else {
+                z.aktiv.as_deref() == Some(id)
+            }
+        };
         z.tabs.keys().map(|id| (id.clone(), (z.sichtbar(id), vorne(id)))).collect()
     };
     let app2 = app.clone();
@@ -326,23 +334,45 @@ fn rechteck(app: &AppHandle, x: f64, y: f64, breite: f64, hoehe: f64) -> RECT {
 }
 
 pub fn rahmen_anwenden(app: &AppHandle, tabs: &Tabs) {
-    let (r, vollbild) = {
+    let (r, split, aktiv, vollbild) = {
         let z = tabs.0.lock().unwrap();
-        (z.rahmen, z.vollbild.clone())
+        (z.rahmen, z.split.clone(), z.aktiv.clone(), z.vollbild.clone())
     };
     if vollbild.is_some() {
         return;
     }
-    let rechteck = rechteck(app, r.x, r.y, r.breite, r.hoehe);
-    let _ = app.run_on_main_thread(move || {
-        NATIV.with(|n| {
-            for tab in n.borrow().values() {
-                unsafe {
-                    let _ = tab.controller.SetBounds(rechteck);
+    if let (Some(s), Some(primaer_id)) = (split, aktiv) {
+        let rect_primaer = rechteck(app, s.primaer_rahmen.x, s.primaer_rahmen.y, s.primaer_rahmen.breite, s.primaer_rahmen.hoehe);
+        let rect_sekundaer = rechteck(app, s.sekundaer_rahmen.x, s.sekundaer_rahmen.y, s.sekundaer_rahmen.breite, s.sekundaer_rahmen.hoehe);
+        let default_rect = rechteck(app, r.x, r.y, r.breite, r.hoehe);
+        let _ = app.run_on_main_thread(move || {
+            NATIV.with(|n| {
+                for (id, tab) in n.borrow().iter() {
+                    let ziel_rect = if id == &primaer_id {
+                        rect_primaer
+                    } else if id == &s.sekundaer_id {
+                        rect_sekundaer
+                    } else {
+                        default_rect
+                    };
+                    unsafe {
+                        let _ = tab.controller.SetBounds(ziel_rect);
+                    }
                 }
-            }
-        })
-    });
+            })
+        });
+    } else {
+        let rechteck = rechteck(app, r.x, r.y, r.breite, r.hoehe);
+        let _ = app.run_on_main_thread(move || {
+            NATIV.with(|n| {
+                for tab in n.borrow().values() {
+                    unsafe {
+                        let _ = tab.controller.SetBounds(rechteck);
+                    }
+                }
+            })
+        });
+    }
     oberflaeche_nach_unten(app);
 }
 

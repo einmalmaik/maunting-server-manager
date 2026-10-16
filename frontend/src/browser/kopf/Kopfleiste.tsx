@@ -7,6 +7,7 @@ import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent, typ
 import {
   ChevronLeft,
   ChevronRight,
+  Columns2,
   EyeOff,
   Globe,
   Loader2,
@@ -344,6 +345,8 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
           privat: tab.privat,
           screenX: ev.screenX,
           screenY: ev.screenY,
+          clientX: ev.clientX,
+          clientY: ev.clientY,
         })
 
         const imLokalenBalken =
@@ -420,6 +423,8 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
         privat: tab.privat,
         screenX: endScreenX,
         screenY: endScreenY,
+        clientX: endClientX,
+        clientY: endClientY,
       })
 
       setTimeout(() => {
@@ -442,9 +447,21 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
           return
         }
 
-        const distanz = Math.hypot(endScreenX - sx, endScreenY - sy)
         const tabs = useTabsStore.getState().tabs
-        if (tabs.length > 1 && !istAndroid() && (distanz >= 50 || endClientY < 0 || endClientY > 48)) {
+        const split = useTabsStore.getState().split
+        const istImSplit = split && (split.sekundaerId === tab.id || useTabsStore.getState().aktivId === tab.id)
+        if (istImSplit) {
+          return
+        }
+
+        const imFenster =
+          endClientX >= 0 &&
+          endClientX <= (window.innerWidth || 1920) &&
+          endClientY >= 0 &&
+          endClientY <= (window.innerHeight || 1080)
+
+        const distanz = Math.hypot(endScreenX - sx, endScreenY - sy)
+        if (tabs.length > 1 && !istAndroid() && !imFenster && distanz >= 50) {
           void nativ
             .tabAuslagern(tab.url, endScreenX, endScreenY, tab.privat)
             .then(() => schliessen(tab.id))
@@ -466,12 +483,37 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
     }
     window.addEventListener('keydown', onKey, { capture: true })
 
-    // Verhindert das Stop-Zeichen (🚫) beim Überqueren des Fensters
+    // Verhindert das Stop-Zeichen (🚫) beim Überqueren des Fensters und meldet Position für Snap
     const onWindowDragOver = (ev: globalThis.DragEvent) => {
       ev.preventDefault()
       if (ev.dataTransfer) {
         ev.dataTransfer.dropEffect = 'move'
       }
+      const cx = typeof ev.clientX === 'number' ? ev.clientX : 0
+      const cy = typeof ev.clientY === 'number' ? ev.clientY : 0
+      const sx = typeof ev.screenX === 'number' ? ev.screenX : 0
+      const sy = typeof ev.screenY === 'number' ? ev.screenY : 0
+
+      if (aktiverTabDrag) {
+        aktiverTabDrag.letzteClientX = cx
+        aktiverTabDrag.letzteClientY = cy
+        aktiverTabDrag.letzteScreenX = sx
+        aktiverTabDrag.letzteScreenY = sy
+      }
+
+      sendeTabZiehNachricht({
+        art: 'ziehen',
+        ursprungFensterId: FENSTER_ID,
+        tabId: tab.id,
+        url: tab.url,
+        titel,
+        favicon: tab.favicon,
+        privat: tab.privat,
+        screenX: sx,
+        screenY: sy,
+        clientX: cx,
+        clientY: cy,
+      })
     }
     window.addEventListener('dragover', onWindowDragOver, { capture: true })
 
@@ -542,9 +584,11 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
     const cx = typeof e.clientX === 'number' ? e.clientX : 0
     const cy = typeof e.clientY === 'number' ? e.clientY : 0
 
-    if (sx !== 0 || sy !== 0) {
+    if (sx !== 0 || sy !== 0 || cx !== 0 || cy !== 0) {
       aktiverTabDrag.letzteScreenX = sx
       aktiverTabDrag.letzteScreenY = sy
+      aktiverTabDrag.letzteClientX = cx
+      aktiverTabDrag.letzteClientY = cy
 
       sendeTabZiehNachricht({
         art: 'ziehen',
@@ -556,11 +600,9 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
         privat: tab.privat,
         screenX: sx,
         screenY: sy,
+        clientX: cx,
+        clientY: cy,
       })
-    }
-    if (cx !== 0 || cy !== 0) {
-      aktiverTabDrag.letzteClientX = cx
-      aktiverTabDrag.letzteClientY = cy
     }
   }
 
@@ -610,7 +652,15 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
       privat: tab.privat,
       screenX,
       screenY,
+      clientX,
+      clientY,
     })
+
+    const split = useTabsStore.getState().split
+    const istImSplit = split && (split.sekundaerId === drag.id || useTabsStore.getState().aktivId === drag.id)
+    if (istImSplit) {
+      return
+    }
 
     // Nur wenn der Zeiger nachweislich in der Kopfleiste geblieben ist und sich kaum bewegt hat
     const imTabBereich =
@@ -623,12 +673,15 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
 
     if (imTabBereich) return
 
-    const ausserhalb =
-      distanz >= 50 ||
-      clientY < 0 ||
-      clientY > 48 ||
-      clientX < 0 ||
-      clientX > window.innerWidth
+    const imFenster =
+      clientX >= 0 &&
+      clientX <= (window.innerWidth || 1920) &&
+      clientY >= 0 &&
+      clientY <= (window.innerHeight || 1080)
+
+    if (imFenster) return
+
+    const ausserhalb = distanz >= 50 && !imFenster
 
     if (!ausserhalb) return
 
@@ -641,6 +694,10 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
         console.error('[MSB] Tab konnte nicht ausgelagert werden:', err)
       })
   }
+
+  const split = useTabsStore((s) => s.split)
+  const aktivId = useTabsStore((s) => s.aktivId)
+  const istImSplit = split ? (tab.id === split.sekundaerId || tab.id === aktivId) : false
 
   return (
     <div
@@ -666,7 +723,11 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
         if (e.key === 'Enter' || e.key === ' ') aktivieren(tab.id)
       }}
       className={`group flex h-8 min-w-[7.5rem] max-w-[14rem] flex-1 cursor-default items-center gap-2 rounded-t-lg px-2.5 text-label-md transition-all duration-150 ease-out ${
-        aktiv ? 'bg-surface-container text-on-surface' : 'text-on-surface-variant hover:bg-surface-container/60'
+        aktiv
+          ? 'bg-surface-container text-on-surface'
+          : istImSplit
+          ? 'bg-surface-container/80 text-on-surface'
+          : 'text-on-surface-variant hover:bg-surface-container/60'
       }`}
     >
       <span className={`flex h-4 w-4 shrink-0 items-center justify-center ${tab.ruhe ? 'opacity-50' : ''}`}>
@@ -677,6 +738,14 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
         {titel}
         {tab.ruhe && <span className="sr-only">, {t(`browser.tabs.ruhe.${tab.ruhe}`)}</span>}
       </span>
+      {istImSplit && (
+        <span
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-primary"
+          title={t('browser.split.aktivBadge', { defaultValue: 'In geteilter Ansicht' })}
+        >
+          <Columns2 className="h-3 w-3" aria-hidden="true" />
+        </span>
+      )}
       {tab.ruhe && <Moon className="h-3 w-3 shrink-0 text-on-surface-variant" aria-hidden="true" />}
       <TonKnopf tab={tab} titel={titel} />
       <button

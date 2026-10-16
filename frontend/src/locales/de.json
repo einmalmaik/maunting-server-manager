@@ -8621,6 +8621,21 @@
       "scrollLinks": "Tabs nach links scrollen",
       "scrollRechts": "Tabs nach rechts scrollen"
     },
+    "split": {
+      "trennerLabel": "Trenner für geteilte Ansicht ({{prozent}} %)",
+      "tauschen": "Seiten tauschen",
+      "drehen": "Orientierung wechseln",
+      "horizontalDrehen": "Nebeneinander anordnen",
+      "vertikalDrehen": "Übereinander anordnen",
+      "schliessen": "Geteilte Ansicht beenden",
+      "snapLinks": "Links andocken",
+      "snapRechts": "Rechts andocken",
+      "snapOben": "Oben andocken",
+      "snapUnten": "Unten andocken",
+      "oeffnen": "In geteilter Ansicht öffnen",
+      "aktivBadge": "In geteilter Ansicht",
+      "snapDropHinweis": "In geteilter Ansicht andocken"
+    },
     "fenster": {
       "minimieren": "Minimieren",
       "maximieren": "Maximieren",

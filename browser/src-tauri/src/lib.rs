@@ -161,6 +161,8 @@ pub fn run() {
             tabs::tab_auslagern,
             tabs::tab_aktion,
             tabs::tabs_rahmen,
+            tabs::tabs_split_setzen,
+            tabs::tabs_split_aufheben,
             tabs::tabs_verdecken,
             tabs::tab_standbild,
             tabs::tab_antworten,

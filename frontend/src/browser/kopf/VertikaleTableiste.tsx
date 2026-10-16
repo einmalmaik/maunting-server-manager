@@ -17,6 +17,7 @@ import {
   ArrowRightToLine,
   ChevronDown,
   ChevronRight,
+  Columns2,
   EyeOff,
   Moon,
   Plus,
@@ -159,6 +160,9 @@ function VertikalerTabKnoten({
   const { t } = useTranslation()
   const tab = knoten.tab
   const leistenname = useLeistenname(titel, 'rechts')
+  const split = useTabsStore((s) => s.split)
+  const aktivId = useTabsStore((s) => s.aktivId)
+  const istImSplit = split ? (tab.id === split.sekundaerId || tab.id === aktivId) : false
 
   if (vertikaleTabsEingeklappt) {
     // EINGEKLAPPTER MODUS: Nur Favicon, nativer Tooltip rechts über dem Fenster
@@ -173,6 +177,8 @@ function VertikalerTabKnoten({
         className={`group relative flex h-9 w-full items-center justify-center rounded-lg transition-colors ${
           aktiv
             ? 'bg-surface-container-highest text-primary shadow-sm'
+            : istImSplit
+            ? 'bg-surface-container-high/60 text-primary'
             : 'text-on-surface-variant hover:bg-surface-container-high/80 hover:text-on-surface'
         }`}
         aria-label={titel}
@@ -183,6 +189,12 @@ function VertikalerTabKnoten({
         {knoten.hatKinder && (
           <span
             className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-primary/80"
+            aria-hidden="true"
+          />
+        )}
+        {istImSplit && (
+          <span
+            className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary ring-1 ring-background"
             aria-hidden="true"
           />
         )}
@@ -284,6 +296,16 @@ function VertikalerTabKnoten({
         {knoten.hatKinder && tab.baumEingeklappt && (
           <span className="rounded bg-surface-container-high px-1 text-label-sm font-medium text-on-surface-variant">
             +{knoten.kinderCount}
+          </span>
+        )}
+
+        {/* In geteilter Ansicht */}
+        {istImSplit && (
+          <span
+            className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-primary"
+            title={t('browser.split.aktivBadge', { defaultValue: 'In geteilter Ansicht' })}
+          >
+            <Columns2 className="h-3.5 w-3.5" aria-hidden="true" />
           </span>
         )}
 
@@ -437,11 +459,46 @@ export function VertikaleTableiste() {
     aktiverVertikalerDrag = drag
     registriereTabDrag(transferPayload)
 
+    // Überwacht Ziehen über das gesamte Browserfenster für Snap-Assist
+    const onWindowDragOver = (ev: globalThis.DragEvent) => {
+      ev.preventDefault()
+      if (ev.dataTransfer) {
+        ev.dataTransfer.dropEffect = 'move'
+      }
+      const cx = typeof ev.clientX === 'number' ? ev.clientX : 0
+      const cy = typeof ev.clientY === 'number' ? ev.clientY : 0
+      const sx = typeof ev.screenX === 'number' ? ev.screenX : 0
+      const sy = typeof ev.screenY === 'number' ? ev.screenY : 0
+
+      if (aktiverVertikalerDrag) {
+        aktiverVertikalerDrag.letzteClientX = cx
+        aktiverVertikalerDrag.letzteClientY = cy
+        aktiverVertikalerDrag.letzteScreenX = sx
+        aktiverVertikalerDrag.letzteScreenY = sy
+      }
+
+      sendeTabZiehNachricht({
+        art: 'ziehen',
+        ursprungFensterId: FENSTER_ID,
+        tabId: tab.id,
+        url: tab.url,
+        titel,
+        favicon: tab.favicon,
+        privat: tab.privat,
+        screenX: sx,
+        screenY: sy,
+        clientX: cx,
+        clientY: cy,
+      })
+    }
+    window.addEventListener('dragover', onWindowDragOver, { capture: true })
+
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') {
         drag.abgebrochen = true
         phantom.remove()
         window.removeEventListener('keydown', onKey)
+        window.removeEventListener('dragover', onWindowDragOver, { capture: true })
         sendeTabZiehNachricht({
           art: 'abbrechen',
           ursprungFensterId: FENSTER_ID,
@@ -455,11 +512,14 @@ export function VertikaleTableiste() {
         })
       }
     }
-    drag.aufraeumenEscape = () => window.removeEventListener('keydown', onKey)
+    drag.aufraeumenEscape = () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('dragover', onWindowDragOver, { capture: true })
+    }
     window.addEventListener('keydown', onKey)
   }
 
-  const dragEnde = (e: DragEvent<HTMLDivElement>, tab: Tab, _titel: string) => {
+  const dragEnde = (e: DragEvent<HTMLDivElement>, tab: Tab, titel: string) => {
     const drag = aktiverVertikalerDrag
     aktiverVertikalerDrag = null
     beendeTabDrag()
@@ -473,16 +533,52 @@ export function VertikaleTableiste() {
       return
     }
 
-    if (tabs.length <= 1) return
-
     const posScreenX = typeof e.screenX === 'number' ? e.screenX : 0
     const posScreenY = typeof e.screenY === 'number' ? e.screenY : 0
+    const posClientX = typeof e.clientX === 'number' ? e.clientX : 0
+    const posClientY = typeof e.clientY === 'number' ? e.clientY : 0
+
     const hatScreen = posScreenX !== 0 || posScreenY !== 0
     const screenX = hatScreen ? posScreenX : drag.letzteScreenX
     const screenY = hatScreen ? posScreenY : drag.letzteScreenY
-    const distanz = Math.hypot(screenX - drag.startX, screenY - drag.startY)
 
-    if (distanz >= 50) {
+    const hatClient = posClientX !== 0 || posClientY !== 0
+    const clientX = hatClient ? posClientX : drag.letzteClientX
+    const clientY = hatClient ? posClientY : drag.letzteClientY
+
+    sendeTabZiehNachricht({
+      art: 'ablegen',
+      ursprungFensterId: FENSTER_ID,
+      tabId: tab.id,
+      url: tab.url,
+      titel,
+      favicon: tab.favicon,
+      privat: tab.privat,
+      screenX,
+      screenY,
+      clientX,
+      clientY,
+    })
+
+    const split = useTabsStore.getState().split
+    const istImSplit = split && (split.sekundaerId === drag.id || useTabsStore.getState().aktivId === drag.id)
+    if (istImSplit) {
+      return
+    }
+
+    if (tabs.length <= 1) return
+
+    // Prüfen, ob der Zeiger noch innerhalb des Fensters ist
+    const imFenster =
+      clientX >= 0 &&
+      clientX <= (window.innerWidth || 1920) &&
+      clientY >= 0 &&
+      clientY <= (window.innerHeight || 1080)
+
+    if (imFenster) return
+
+    const distanz = Math.hypot(screenX - drag.startX, screenY - drag.startY)
+    if (distanz >= 50 && !imFenster) {
       void nativ
         .tabAuslagern(tab.url, screenX, screenY, tab.privat)
         .then(() => schliessen(tab.id))

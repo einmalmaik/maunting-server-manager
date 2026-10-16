@@ -40,12 +40,19 @@ pub mod android;
 pub use ereignis::{melden, Antwort, DownloadStand, MenueEintrag, TabEreignis, EREIGNIS};
 pub use weg::{erweiterungen_setzen, extern_oeffnen, externes_protokoll, id_pruefen, navigation_erlaubt, vorab, weg, ziel_pruefen, Vorab, Weg};
 
-#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Rahmen {
     pub x: f64,
     pub y: f64,
     pub breite: f64,
     pub hoehe: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct SplitZustand {
+    pub sekundaer_id: String,
+    pub primaer_rahmen: Rahmen,
+    pub sekundaer_rahmen: Rahmen,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +65,7 @@ pub struct TabDaten {
 pub struct Zustand {
     pub tabs: HashMap<String, TabDaten>,
     pub aktiv: Option<String>,
+    pub split: Option<SplitZustand>,
     pub rahmen: Rahmen,
     /// Die Oberfläche legt gerade etwas über den Inhaltsbereich (Dialog,
     /// Vorschlagsliste). Native Webviews liegen immer oben, deshalb muss der
@@ -76,6 +84,7 @@ impl Default for Zustand {
         Self {
             tabs: HashMap::new(),
             aktiv: None,
+            split: None,
             rahmen: Rahmen { x: 0.0, y: 0.0, breite: 800.0, hoehe: 600.0 },
             verdeckt: false,
             vollbild: None,
@@ -90,7 +99,16 @@ impl Zustand {
         if let Some(v) = &self.vollbild {
             return v == id;
         }
-        !self.verdeckt && self.aktiv.as_deref() == Some(id)
+        if self.verdeckt {
+            return false;
+        }
+        if self.aktiv.as_deref() == Some(id) {
+            return true;
+        }
+        if let Some(s) = &self.split {
+            return s.sekundaer_id == id;
+        }
+        false
     }
 
     /// Legt `id` nach vorne; der bisherige vordere Tab gilt ab `jetzt` als verborgen.
@@ -216,6 +234,11 @@ pub fn tab_schliessen(app: AppHandle, tabs: State<'_, Tabs>, id: String) -> Resu
         if z.vollbild.as_deref() == Some(&id) {
             z.vollbild = None;
         }
+        if let Some(s) = &z.split {
+            if s.sekundaer_id == id || z.aktiv.as_deref() == Some(&id) {
+                z.split = None;
+            }
+        }
     }
     crate::schild::tab_vergessen(&id);
     seite_vergessen(&id);
@@ -241,6 +264,44 @@ pub fn tab_aktion(app: AppHandle, id: String, aktion: String) -> Result<(), Stri
 pub fn tabs_rahmen(app: AppHandle, tabs: State<'_, Tabs>, rahmen: Rahmen) -> Result<(), String> {
     tabs.0.lock().unwrap().rahmen = rahmen;
     plattform::rahmen_anwenden(&app, &tabs);
+    Ok(())
+}
+
+/// Teilt den Anzeigebereich für zwei Webviews gleichzeitig (Desktop & Mobile).
+#[tauri::command(async)]
+pub fn tabs_split_setzen(
+    app: AppHandle,
+    tabs: State<'_, Tabs>,
+    primaer_id: String,
+    primaer_rahmen: Rahmen,
+    sekundaer_id: String,
+    sekundaer_rahmen: Rahmen,
+) -> Result<(), String> {
+    id_pruefen(&primaer_id)?;
+    id_pruefen(&sekundaer_id)?;
+    {
+        let mut z = tabs.0.lock().unwrap();
+        z.aktiv = Some(primaer_id);
+        z.split = Some(SplitZustand {
+            sekundaer_id,
+            primaer_rahmen,
+            sekundaer_rahmen,
+        });
+    }
+    plattform::rahmen_anwenden(&app, &tabs);
+    plattform::sichtbarkeit(&app, &tabs);
+    Ok(())
+}
+
+/// Hebt die geteilte Ansicht auf und stellt den Vollmodus für den aktiven Tab wieder her.
+#[tauri::command(async)]
+pub fn tabs_split_aufheben(app: AppHandle, tabs: State<'_, Tabs>) -> Result<(), String> {
+    {
+        let mut z = tabs.0.lock().unwrap();
+        z.split = None;
+    }
+    plattform::rahmen_anwenden(&app, &tabs);
+    plattform::sichtbarkeit(&app, &tabs);
     Ok(())
 }
 
