@@ -23,6 +23,7 @@ und das Werkzeug `web_search` der KI:
 
 from __future__ import annotations
 
+import concurrent.futures
 from datetime import datetime, timezone
 import html
 import ipaddress
@@ -30,6 +31,7 @@ import json
 import logging
 import os
 import re
+import socket
 import threading
 import time
 import urllib.parse
@@ -57,7 +59,8 @@ _BRAVE_VIDEOS_ENDPOINT = "https://api.search.brave.com/res/v1/videos/search"
 _BRAVE_NEWS_ENDPOINT = "https://api.search.brave.com/res/v1/news/search"
 _GOOGLE_CSE_ENDPOINT = "https://customsearch.googleapis.com/customsearch/v1"
 
-MAX_RESULTS = 5
+MAX_RESULTS = 15
+DEFAULT_SEARCH_COUNT = 10
 MAX_BROWSER_RESULTS = 20
 MAX_QUERY_CHARS = 200
 MAX_TITLE_CHARS = 160
@@ -138,27 +141,510 @@ def _is_safe_public_url(url: str) -> bool:
         hostname = parsed.hostname
         if not hostname:
             return False
-        if hostname.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        host_lower = hostname.lower()
+        if host_lower in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+            return False
+        if host_lower.endswith((".local", ".localhost", ".internal", ".lan", ".home")):
             return False
         try:
             ip = ipaddress.ip_address(hostname)
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_unspecified:
                 return False
+            return True
         except ValueError:
+            pass
+
+        try:
+            addr_info = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            for _, _, _, _, sockaddr in addr_info:
+                ip = ipaddress.ip_address(sockaddr[0])
+                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_unspecified:
+                    return False
+        except socket.gaierror:
             pass
         return True
     except Exception:
         return False
 
 
+def _clean_table_cell(cell_html: str) -> str:
+    """Bereinigt den Inhalt einer Tabellenzelle fuer Markdown."""
+    s = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", cell_html, flags=re.DOTALL | re.IGNORECASE)
+    s = re.sub(r"<br\s*/?>", " ", s, flags=re.IGNORECASE)
+    s = re.sub(r"<[^>]+>", " ", s)
+    s = html.unescape(s)
+    s = re.sub(r"\s+", " ", s).strip()
+    s = s.replace("|", r"\|")
+    return s
+
+
+def _parse_single_table_to_markdown(table_html: str, max_rows: int = 50) -> str:
+    """Wandelt ein einzelnes <table>...</table> HTML-Fragment in eine GitHub-Flavored Markdown-Tabelle um."""
+    # Zeilen finden: sowohl geschlossene <tr>...</tr> als auch ungeschlossene <tr>...(?=<tr|$)
+    raw_rows = re.findall(r"<tr[^>]*>(.*?)(?:</tr>|(?=<tr[^>]*>)|$)", table_html, re.DOTALL | re.IGNORECASE)
+    raw_rows = [r for r in raw_rows if r.strip()]
+    if not raw_rows:
+        return ""
+
+    table_data: list[list[tuple[str, str]]] = []
+    for r in raw_rows:
+        cells = re.findall(r"<(th|td)[^>]*>(.*?)(?:</\1>|(?=<(?:th|td)[^>]*>)|$)", r, re.DOTALL | re.IGNORECASE)
+        row_cells = [(tag.lower(), _clean_table_cell(c)) for tag, c in cells]
+        if any(txt for _, txt in row_cells):
+            table_data.append(row_cells)
+
+    if not table_data:
+        return ""
+
+    first_row_is_th = any(tag == "th" for tag, _ in table_data[0])
+    has_header = first_row_is_th or (len(table_data) > 1 and not all(tag == "td" for tag, _ in table_data[0]))
+
+    if has_header or len(table_data) >= 2:
+        header_cells = [txt or f"Spalte {i+1}" for i, (_, txt) in enumerate(table_data[0])]
+        body_rows = [[txt for _, txt in row] for row in table_data[1:]]
+    else:
+        header_cells = [f"Spalte {i+1}" for i in range(len(table_data[0]))]
+        body_rows = [[txt for _, txt in row] for row in table_data]
+
+    num_cols = max(len(header_cells), max((len(r) for r in body_rows), default=0))
+    if num_cols == 0:
+        return ""
+
+    while len(header_cells) < num_cols:
+        header_cells.append(f"Spalte {len(header_cells)+1}")
+
+    md_lines: list[str] = [
+        "| " + " | ".join(header_cells) + " |",
+        "| " + " | ".join(["---"] * num_cols) + " |",
+    ]
+
+    gekuerzt = 0
+    if len(body_rows) > max_rows:
+        gekuerzt = len(body_rows) - max_rows
+        body_rows = body_rows[:max_rows]
+
+    for row in body_rows:
+        while len(row) < num_cols:
+            row.append("")
+        if len(row) > num_cols:
+            row = row[:num_cols]
+        md_lines.append("| " + " | ".join(row) + " |")
+
+    if gekuerzt > 0:
+        placeholder_row = ["..."] * num_cols
+        placeholder_row[0] = f"... ({gekuerzt} weitere Zeilen gekürzt)"
+        md_lines.append("| " + " | ".join(placeholder_row) + " |")
+
+    return "\n\n" + "\n".join(md_lines) + "\n\n"
+
+
+def _convert_tables_to_markdown(html_content: str) -> str:
+    """Ersetzt alle HTML-Tabellen (auch verschachtelte) durch saubere Markdown-Tabellen."""
+    if "<table" not in html_content.lower():
+        return html_content
+
+    pattern = re.compile(r"<table[^>]*>((?:(?!<table).)*?)</table>", re.DOTALL | re.IGNORECASE)
+    res = html_content
+    for _ in range(25):
+        match = pattern.search(res)
+        if not match:
+            break
+        full_table = match.group(0)
+        md_table = _parse_single_table_to_markdown(full_table)
+        res = res[:match.start()] + md_table + res[match.end():]
+
+    return res
+
+
+def _convert_definition_lists(html_content: str) -> str:
+    """Konvertiert <dl><dt>Schluessel</dt><dd>Wert</dd></dl> in Markdown-Listen."""
+    if "<dl" not in html_content.lower():
+        return html_content
+
+    def _replace_dl(match: re.Match) -> str:
+        dl_body = match.group(1)
+        items: list[tuple[str, str]] = []
+        current_dt = ""
+        for tag, val in re.findall(
+            r"<(dt|dd)[^>]*>(.*?)(?:</\1>|(?=<(?:dt|dd)[^>]*>|$))",
+            dl_body,
+            re.DOTALL | re.IGNORECASE,
+        ):
+            clean_val = re.sub(r"<[^>]+>", " ", val)
+            clean_val = html.unescape(clean_val)
+            clean_val = re.sub(r"\s+", " ", clean_val).strip()
+            if tag.lower() == "dt":
+                current_dt = clean_val
+            elif tag.lower() == "dd":
+                if current_dt:
+                    items.append((current_dt, clean_val))
+                    current_dt = ""
+                elif clean_val:
+                    items.append(("Eigenschaft", clean_val))
+        if not items:
+            return ""
+        lines = [f"- **{k}**: {v}" for k, v in items if k and v]
+        return "\n\n" + "\n".join(lines) + "\n\n"
+
+    return re.sub(r"<dl[^>]*>(.*?)(?:</dl>|(?=<dl[^>]*>)|$)", _replace_dl, html_content, flags=re.DOTALL | re.IGNORECASE)
+
+
+def _extract_json_ld_and_meta(html_content: str) -> str:
+    """Liest strukturierte Daten (<script type="application/ld+json">) vor der Bereinigung aus."""
+    if "application/ld+json" not in html_content:
+        return ""
+
+    script_blocks = re.findall(
+        r"""<script[^>]*type=["']application/ld\+json["'][^>]*>(.*?)</script>""",
+        html_content,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not script_blocks:
+        return ""
+
+    structured_items: list[str] = []
+
+    def _parse_entity(entity: dict[str, Any]) -> None:
+        if not isinstance(entity, dict):
+            return
+        etype = entity.get("@type")
+        if isinstance(etype, list):
+            etype = "/".join(str(x) for x in etype)
+        name = entity.get("name") or entity.get("headline") or entity.get("title")
+        desc = entity.get("description")
+        lines: list[str] = []
+        if name:
+            label = f"{etype}: " if etype else ""
+            lines.append(f"**{label}{html.unescape(str(name)).strip()}**")
+        if desc and len(str(desc).strip()) > 10:
+            clean_desc = re.sub(r"\s+", " ", html.unescape(str(desc))).strip()
+            lines.append(f"- Beschreibung: {clean_desc[:300]}")
+
+        rating = entity.get("aggregateRating")
+        if isinstance(rating, dict):
+            val = rating.get("ratingValue")
+            best = rating.get("bestRating", 5)
+            count = rating.get("reviewCount") or rating.get("ratingCount")
+            if val is not None:
+                lines.append(f"- Wertung: {val}/{best}" + (f" ({count} Bewertungen)" if count else ""))
+
+        offers = entity.get("offers")
+        if isinstance(offers, dict):
+            price = offers.get("price")
+            curr = offers.get("priceCurrency", "")
+            if price:
+                lines.append(f"- Preis: {price} {curr}".strip())
+        elif isinstance(offers, list) and offers and isinstance(offers[0], dict):
+            price = offers[0].get("price")
+            curr = offers[0].get("priceCurrency", "")
+            if price:
+                lines.append(f"- Preis: {price} {curr}".strip())
+
+        props = entity.get("additionalProperty")
+        if isinstance(props, list):
+            for p in props[:15]:
+                if isinstance(p, dict) and p.get("name") and p.get("value"):
+                    pname = html.unescape(str(p["name"])).strip()
+                    pval = html.unescape(str(p["value"])).strip()
+                    lines.append(f"- **{pname}**: {pval}")
+
+        if lines:
+            structured_items.append("\n".join(lines))
+
+    for block in script_blocks:
+        block_clean = block.strip()
+        if not block_clean:
+            continue
+        try:
+            data = json.loads(block_clean)
+        except Exception:
+            continue
+        if isinstance(data, list):
+            for item in data[:5]:
+                _parse_entity(item)
+        elif isinstance(data, dict):
+            if "@graph" in data and isinstance(data["@graph"], list):
+                for item in data["@graph"][:5]:
+                    _parse_entity(item)
+            else:
+                _parse_entity(data)
+
+    if not structured_items:
+        return ""
+
+    return "### Strukturdaten & Spezifikationen:\n" + "\n\n".join(structured_items[:6]) + "\n\n"
+
+
+def _parse_xml_content(raw_text: str, max_chars: int = 8000) -> dict[str, str]:
+    """Wandelt XML-Inhalte (RSS, Atom, Feeds, XML-Schnittstellen) in lesbaren Markdown-Text um."""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(raw_text)
+    except Exception:
+        cleaned = re.sub(r"<[^>]+>", " ", raw_text)
+        cleaned = re.sub(r"\s+", " ", html.unescape(cleaned)).strip()
+        return {
+            "title": "XML-Dokument",
+            "content": cleaned[:max_chars],
+        }
+
+    tag_lower = root.tag.lower()
+    title = ""
+    lines: list[str] = []
+
+    if "rss" in tag_lower:
+        channel = root.find("channel")
+        if channel is not None:
+            c_title = channel.findtext("title") or ""
+            title = c_title.strip()
+            c_desc = channel.findtext("description") or ""
+            if c_desc:
+                lines.append(f"Feed-Beschreibung: {c_desc.strip()}\n")
+            for item in channel.findall("item")[:20]:
+                i_title = item.findtext("title") or ""
+                i_link = item.findtext("link") or ""
+                i_desc = item.findtext("description") or ""
+                clean_desc = re.sub(r"<[^>]+>", " ", i_desc)
+                clean_desc = re.sub(r"\s+", " ", html.unescape(clean_desc)).strip()
+                lines.append(f"### {i_title.strip()}\nLink: {i_link.strip()}\n{clean_desc[:500]}\n")
+    elif "feed" in tag_lower:
+        title = (root.findtext("{http://www.w3.org/2005/Atom}title") or root.findtext("title") or "").strip()
+        entries = root.findall("{http://www.w3.org/2005/Atom}entry") or root.findall("entry")
+        for entry in entries[:20]:
+            e_title = (entry.findtext("{http://www.w3.org/2005/Atom}title") or entry.findtext("title") or "").strip()
+            summary = (entry.findtext("{http://www.w3.org/2005/Atom}summary") or entry.findtext("summary") or entry.findtext("content") or "").strip()
+            clean_sum = re.sub(r"<[^>]+>", " ", summary)
+            clean_sum = re.sub(r"\s+", " ", html.unescape(clean_sum)).strip()
+            lines.append(f"### {e_title}\n{clean_sum[:500]}\n")
+    else:
+        title = root.tag.split("}")[-1] if "}" in root.tag else root.tag
+        for elem in root.iter():
+            text = (elem.text or "").strip()
+            if text and len(text) > 1 and elem != root:
+                tag_name = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                lines.append(f"- **{tag_name}**: {text}")
+
+    content = "\n".join(lines).strip()
+    return {
+        "title": title or "XML-Dokument",
+        "content": content[:max_chars],
+    }
+
+
+def _extract_youtube_video_id(url: str) -> str | None:
+    try:
+        parsed = urllib.parse.urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if "youtu.be" in host:
+            path = parsed.path.strip("/").split("/")[0]
+            return path if path else None
+        if "youtube.com" in host or "youtube-nocookie.com" in host:
+            if parsed.path.startswith("/watch"):
+                qs = urllib.parse.parse_qs(parsed.query)
+                v = qs.get("v")
+                return v[0] if v else None
+            for prefix in ("/shorts/", "/embed/", "/v/", "/live/"):
+                if parsed.path.startswith(prefix):
+                    parts = parsed.path[len(prefix):].strip("/").split("/")
+                    return parts[0] if parts and parts[0] else None
+    except Exception:
+        pass
+    return None
+
+
+def _format_seconds(seconds_val: str | int | float) -> str:
+    try:
+        sec = int(float(seconds_val))
+        m, s = divmod(sec, 60)
+        h, m = divmod(m, 60)
+        if h > 0:
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
+    except Exception:
+        return str(seconds_val)
+
+
+def _extract_youtube_content(url: str, max_chars: int = 8000) -> dict:
+    """Extrahiert Titel, Metadaten, Beschreibung, Kapitel und Untertitel/Transkripte eines YouTube-Videos."""
+    video_id = _extract_youtube_video_id(url)
+    canonical_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else url
+
+    client = _http_client()
+    title = ""
+    author = ""
+    duration_str = ""
+    description = ""
+    transcript_blocks: list[str] = []
+
+    # 1. HTML der YouTube-Watch-Seite abrufen
+    try:
+        resp = client.get(
+            canonical_url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
+            },
+        )
+        raw_html = resp.text if resp.status_code == 200 else ""
+    except Exception as exc:
+        logger.info("YouTube Watch-Seite nicht erreichbar url=%s error=%s", url, exc)
+        raw_html = ""
+
+    player_data: dict[str, Any] | None = None
+    if raw_html:
+        idx = raw_html.find("ytInitialPlayerResponse")
+        if idx != -1:
+            eq_idx = raw_html.find("=", idx)
+            if eq_idx != -1:
+                brace_idx = raw_html.find("{", eq_idx)
+                if brace_idx != -1:
+                    try:
+                        player_data, _ = json.JSONDecoder().raw_decode(raw_html[brace_idx:])
+                    except Exception:
+                        player_data = None
+
+    if isinstance(player_data, dict):
+        details = player_data.get("videoDetails", {})
+        title = str(details.get("title") or "").strip()
+        author = str(details.get("author") or "").strip()
+        length_sec = details.get("lengthSeconds")
+        if length_sec:
+            duration_str = _format_seconds(length_sec)
+        description = str(details.get("shortDescription") or "").strip()
+
+        # Untertitel / Captions auslesen
+        captions_obj = player_data.get("captions", {}).get("playerCaptionsTracklistRenderer", {})
+        caption_tracks = captions_obj.get("captionTracks", [])
+        chosen_track = None
+        for t in caption_tracks:
+            lang = t.get("languageCode", "").lower()
+            if lang in ("de", "de-de"):
+                chosen_track = t
+                break
+        if not chosen_track:
+            for t in caption_tracks:
+                lang = t.get("languageCode", "").lower()
+                if lang in ("en", "en-us", "en-gb"):
+                    chosen_track = t
+                    break
+        if not chosen_track and caption_tracks:
+            chosen_track = caption_tracks[0]
+
+        if chosen_track and chosen_track.get("baseUrl"):
+            try:
+                cap_resp = client.get(chosen_track["baseUrl"], headers={"Accept": "text/xml,application/xml"})
+                if cap_resp.status_code == 200 and cap_resp.text:
+                    import xml.etree.ElementTree as ET
+                    parsed_captions = False
+                    current_bucket_min = -1
+                    bucket_text: list[str] = []
+
+                    try:
+                        root = ET.fromstring(cap_resp.text)
+                        for elem in root.findall(".//text"):
+                            start_str = elem.attrib.get("start", "0")
+                            try:
+                                start_float = float(start_str)
+                            except Exception:
+                                start_float = 0.0
+                            minute = int(start_float // 60)
+                            txt = "".join(elem.itertext())
+                            clean_line = html.unescape(re.sub(r"\s+", " ", txt)).strip()
+                            if not clean_line:
+                                continue
+                            if minute != current_bucket_min:
+                                if bucket_text:
+                                    transcript_blocks.append(f"[{_format_seconds(int(current_bucket_min * 60))}] {' '.join(bucket_text)}")
+                                    bucket_text = []
+                                current_bucket_min = minute
+                            bucket_text.append(clean_line)
+                        parsed_captions = True
+                    except Exception:
+                        parsed_captions = False
+
+                    if not parsed_captions:
+                        matches = re.finditer(
+                            r"""<text\b[^>]*?\bstart=["'](?P<start>[^"']+)["'][^>]*>(?P<txt>.*?)</text>""",
+                            cap_resp.text,
+                            re.DOTALL | re.IGNORECASE,
+                        )
+                        current_bucket_min = -1
+                        bucket_text = []
+                        for m in matches:
+                            try:
+                                start_float = float(m.group("start"))
+                            except Exception:
+                                start_float = 0.0
+                            minute = int(start_float // 60)
+                            clean_line = html.unescape(re.sub(r"<[^>]+>", " ", m.group("txt")))
+                            clean_line = re.sub(r"\s+", " ", clean_line).strip()
+                            if not clean_line:
+                                continue
+                            if minute != current_bucket_min:
+                                if bucket_text:
+                                    transcript_blocks.append(f"[{_format_seconds(int(current_bucket_min * 60))}] {' '.join(bucket_text)}")
+                                    bucket_text = []
+                                current_bucket_min = minute
+                            bucket_text.append(clean_line)
+
+                    if bucket_text:
+                        transcript_blocks.append(f"[{_format_seconds(int(current_bucket_min * 60))}] {' '.join(bucket_text)}")
+            except Exception as cap_exc:
+                logger.debug("YouTube Captions Abruf fehlgeschlagen: %s", cap_exc)
+
+    # Fallback via oEmbed, falls Titel oder Autor noch fehlen
+    if not title or not author:
+        try:
+            oembed_url = f"https://www.youtube.com/oembed?url={urllib.parse.quote(canonical_url)}&format=json"
+            oembed_resp = client.get(oembed_url)
+            if oembed_resp.status_code == 200:
+                oe_data = oembed_resp.json()
+                if not title:
+                    title = oe_data.get("title", "")
+                if not author:
+                    author = oe_data.get("author_name", "")
+        except Exception:
+            pass
+
+    if not title:
+        title = f"YouTube Video ({video_id})" if video_id else "YouTube Video"
+
+    sections: list[str] = [
+        f"# [YouTube-Video & Transkript]: {title}",
+        f"- **Kanal / Ersteller**: {author or 'Unbekannt'}",
+    ]
+    if duration_str:
+        sections.append(f"- **Dauer**: {duration_str}")
+    sections.append(f"- **Video-URL**: {canonical_url}\n")
+
+    if description:
+        sections.append("### Beschreibung & Kapitel:\n" + description.strip() + "\n")
+
+    if transcript_blocks:
+        sections.append("### Video-Transkript / Gesprochener Inhalt:\n" + "\n".join(transcript_blocks) + "\n")
+
+    final_content = "\n".join(sections).strip()[:max_chars]
+
+    return {
+        "title": redact_sensitive_text(title)[:MAX_TITLE_CHARS],
+        "url": canonical_url[:MAX_URL_CHARS],
+        "content": redact_sensitive_text(final_content),
+    }
+
+
 def html_to_clean_text(html_content: str, max_len: int = 3000) -> str:
-    """Extrahiert sauberen Text/Markdown aus HTML ohne Bloat."""
+    """Extrahiert sauberen Text/Markdown aus HTML ohne Bloat, inklusive Tabellen und Listen."""
     if not html_content:
         return ""
+    # 1. Definition-Lists in Markdown-Listen wandeln
+    content = _convert_definition_lists(html_content)
+    # 2. HTML-Tabellen in GitHub-Flavored-Markdown Tabellen wandeln
+    content = _convert_tables_to_markdown(content)
+    # 3. Skripte, Styles, Navigation etc. entfernen
     cleaned = re.sub(
         r"<(script|style|svg|noscript|header|footer|nav)[^>]*>.*?</\1>",
         " ",
-        html_content,
+        content,
         flags=re.DOTALL | re.IGNORECASE,
     )
     cleaned = re.sub(r"<(h[1-6]|p|div|li|tr|br)[^>]*>", "\n", cleaned, flags=re.IGNORECASE)
@@ -169,32 +655,130 @@ def html_to_clean_text(html_content: str, max_len: int = 3000) -> str:
     return cleaned.strip()[:max_len]
 
 
-def scrape_url(url: str, max_chars: int = 3500) -> dict:
-    """Liest eine URL direkt per HTTP ein und liefert bereinigten Inhalt."""
+def scrape_url(url: str, max_chars: int = 3500, deep: bool = False) -> dict:
+    """Liest eine URL direkt per HTTP ein und liefert bereinigten Inhalt.
+
+    Unterstuetzt HTML-Tabellen (GitHub-Flavored-Markdown), Definitionslisten,
+    JSON-LD Strukturdaten, XML/Feeds sowie YouTube-Videos samt Transkripten.
+    Bei `deep=True` wird das Leselimit auf bis zu 25.000 Zeichen erweitert.
+    """
     clean_url = str(url or "").strip()
     if not _is_safe_public_url(clean_url):
         return {"error": "invalid_or_private_url", "url": clean_url}
+
+    effective_max = max(max_chars, 25000) if deep else max_chars
+
+    # 1. YouTube-Erkennung
+    if _extract_youtube_video_id(clean_url):
+        return _extract_youtube_content(clean_url, max_chars=effective_max)
+
     try:
-        resp = _http_client().get(
-            clean_url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,text/plain",
-            },
-        )
+        current_url = clean_url
+        client = _http_client()
+        resp = None
+        for _ in range(4):
+            if not _is_safe_public_url(current_url):
+                return {"error": "invalid_or_private_url", "url": current_url}
+            resp = client.get(
+                current_url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml,text/plain",
+                },
+                follow_redirects=False,
+            )
+            if resp.is_redirect:
+                location = resp.headers.get("location")
+                if not location:
+                    break
+                current_url = urllib.parse.urljoin(current_url, location)
+                continue
+            break
+
+        if resp is None:
+            return {"error": "redirect_loop", "url": clean_url}
         if resp.status_code >= 400:
-            return {"error": f"http_status_{resp.status_code}", "url": clean_url}
-        title_m = re.search(r"<title[^>]*>(.*?)</title>", resp.text, re.IGNORECASE | re.DOTALL)
-        title = html.unescape(title_m.group(1)).strip() if title_m else clean_url
-        content = html_to_clean_text(resp.text, max_len=max_chars)
+            return {"error": f"http_status_{resp.status_code}", "url": current_url}
+
+        content_type = (resp.headers.get("content-type") or "").lower()
+        if content_type and not any(t in content_type for t in ("text/", "html", "xml", "json")):
+            return {"error": "unsupported_content_type", "url": current_url}
+
+        raw_text = resp.text
+        max_download_len = 1_000_000 if deep else 500_000
+        if len(raw_text) > max_download_len:
+            raw_text = raw_text[:max_download_len]
+
+        # 2. XML / Feed Erkennung
+        if "xml" in content_type or raw_text.lstrip().startswith("<?xml"):
+            parsed_xml = _parse_xml_content(raw_text, max_chars=effective_max)
+            return {
+                "title": redact_sensitive_text(parsed_xml["title"])[:MAX_TITLE_CHARS],
+                "url": current_url[:MAX_URL_CHARS],
+                "content": redact_sensitive_text(parsed_xml["content"]),
+            }
+
+        # 3. HTML-Verarbeitung: JSON-LD vorab sichern, Tabellen & Definition-Lists wandeln
+        json_ld_header = _extract_json_ld_and_meta(raw_text)
+        title_m = re.search(r"<title[^>]*>(.*?)</title>", raw_text, re.IGNORECASE | re.DOTALL)
+        title = html.unescape(title_m.group(1)).strip() if title_m else current_url
+
+        clean_body = html_to_clean_text(raw_text, max_len=effective_max)
+        full_content = (json_ld_header + clean_body).strip()[:effective_max]
+
         return {
             "title": redact_sensitive_text(title)[:MAX_TITLE_CHARS],
-            "url": clean_url[:MAX_URL_CHARS],
-            "content": redact_sensitive_text(content),
+            "url": current_url[:MAX_URL_CHARS],
+            "content": redact_sensitive_text(full_content),
         }
     except Exception as exc:
         logger.info("Scrape URL fehlgeschlagen url=%s error=%s", clean_url, exc)
         return {"error": str(exc), "url": clean_url}
+
+
+def scrape_top_urls_parallel(
+    urls: list[str],
+    max_chars: int = 3500,
+    limit: int = 8,
+    deep: bool = False,
+) -> dict[str, str]:
+    """Liest mehrere Webseiten parallel im Thread-Pool ein und liefert bereinigten Text."""
+    gueltige_urls: list[str] = []
+    gesehen: set[str] = set()
+    for u in urls:
+        if len(gueltige_urls) >= limit:
+            break
+        u_clean = str(u or "").strip()
+        if u_clean and u_clean not in gesehen and _is_safe_public_url(u_clean):
+            gesehen.add(u_clean)
+            gueltige_urls.append(u_clean)
+
+    if not gueltige_urls:
+        return {}
+
+    ergebnisse: dict[str, str] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(limit, len(gueltige_urls))) as executor:
+        if deep:
+            future_zu_url = {
+                executor.submit(scrape_url, u, max_chars, deep=True): u
+                for u in gueltige_urls
+            }
+        else:
+            future_zu_url = {
+                executor.submit(scrape_url, u, max_chars): u
+                for u in gueltige_urls
+            }
+        for future in concurrent.futures.as_completed(future_zu_url):
+            u = future_zu_url[future]
+            try:
+                scraped = future.result()
+                if isinstance(scraped, dict) and "error" not in scraped:
+                    text = (scraped.get("content") or "").strip()
+                    if text:
+                        ergebnisse[u] = text
+            except Exception as exc:
+                logger.debug("Paralleles Scraping fehlgeschlagen url=%s: %s", u, exc)
+    return ergebnisse
 
 
 def _panel_api_key() -> str | None:
@@ -338,9 +922,7 @@ def _apis_aktiv_fuer_instanz(s_url: str | None = None) -> bool:
     nichts anfangen — deshalb werden sie dort standardmäßig nicht verbraucht,
     außer der Betreiber schaltet `external_apis_on_custom_searxng` explizit ein.
     """
-    if is_default_searxng() and s_url is None:
-        return True
-    eff = s_url or _panel_searxng_url()
+    eff = s_url or searxng_url()
     if not eff or eff == default_searxng_url():
         return True
     try:
@@ -1128,31 +1710,91 @@ def _google_cse_treffer(
     return hits
 
 
-def _mische_treffer(primaer: list[dict], zusatz: list[dict], limit: int) -> list[dict]:
+def _normalisiere_url(url: str) -> str:
+    """Normalisiert eine Web-Adresse fuer die Deduplizierung.
+
+    Entfernt ueberfluessige Schlussslashs, Tracking-Parameter und vereinheitlicht Scheme/Host.
+    """
+    url_str = (url or "").strip()
+    if not url_str:
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(url_str)
+        scheme = parsed.scheme.lower()
+        netloc = parsed.netloc.lower()
+        path = parsed.path.rstrip("/")
+        query_parts = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        filtered_query = [
+            (k, v) for k, v in query_parts
+            if not k.lower().startswith("utm_") and k.lower() not in ("ref", "fbclid", "gclid")
+        ]
+        query = urllib.parse.urlencode(filtered_query)
+        return urllib.parse.urlunsplit((scheme, netloc, path, query, ""))
+    except Exception:
+        return url_str.rstrip("/").lower()
+
+
+def _mische_treffer(
+    primaer_oder_listen: list[dict] | list[list[dict]],
+    zusatz: list[dict] | None = None,
+    limit: int = MAX_RESULTS,
+) -> list[dict]:
     """Vereint und dedupliziert Treffer aus SearXNG und offiziellen Such-APIs.
 
-    Finden beide Quellen dieselbe URL, wird ein fehlendes Vorschaubild oder
-    Datum ergänzt, ohne dass ein doppelter Eintrag entsteht.
+    Nutzt gewichtetes Round-Robin-Interleaving, damit Treffer aus allen aktiven
+    Suchquellen (Brave, SearXNG, Google CSE) im Ergebnis vertreten sind und keine
+    Quelle verhungert. Brave erhält dabei hohe Priorität für erstklassige Trefferqualität.
+    Finden mehrere Quellen dieselbe URL, wird ein fehlendes Vorschaubild,
+    Snippet oder Datum ergänzt, ohne dass ein doppelter Eintrag entsteht.
     """
-    nach_url: dict[str, dict] = {}
+    if (
+        isinstance(primaer_oder_listen, list)
+        and primaer_oder_listen
+        and isinstance(primaer_oder_listen[0], list)
+    ):
+        listen = [l for l in primaer_oder_listen if isinstance(l, list)]
+    else:
+        listen = [primaer_oder_listen, zusatz or []]
+
+    listen_kopien = [[dict(x) for x in l if isinstance(x, dict)] for l in listen]
+    gewichte = [2 if i == 0 and len(listen_kopien) > 1 else 1 for i in range(len(listen_kopien))]
+
+    nach_norm_url: dict[str, dict] = {}
     reihenfolge: list[str] = []
-    for liste in (primaer, zusatz):
-        for eintrag in liste:
-            u = str(eintrag.get("url") or "").strip()
-            if not u:
-                continue
-            if u not in nach_url:
-                nach_url[u] = dict(eintrag)
-                reihenfolge.append(u)
-            else:
-                vorhanden = nach_url[u]
-                if not vorhanden.get("bild") and eintrag.get("bild"):
-                    vorhanden["bild"] = eintrag["bild"]
-                if not vorhanden.get("snippet") and eintrag.get("snippet"):
-                    vorhanden["snippet"] = eintrag["snippet"]
-                if not vorhanden.get("published") and eintrag.get("published"):
-                    vorhanden["published"] = eintrag["published"]
-    return [nach_url[u] for u in reihenfolge[:limit]]
+    pos = [0] * len(listen_kopien)
+
+    while len(reihenfolge) < limit:
+        fortschritt = False
+        for idx, (liste, w) in enumerate(zip(listen_kopien, gewichte)):
+            entnommen = 0
+            while entnommen < w and pos[idx] < len(liste) and len(reihenfolge) < limit:
+                eintrag = liste[pos[idx]]
+                pos[idx] += 1
+                u = str(eintrag.get("url") or "").strip()
+                if not u:
+                    continue
+                norm_u = _normalisiere_url(u)
+                if not norm_u:
+                    continue
+                fortschritt = True
+                if norm_u not in nach_norm_url:
+                    nach_norm_url[norm_u] = dict(eintrag)
+                    reihenfolge.append(norm_u)
+                    entnommen += 1
+                else:
+                    vorhanden = nach_norm_url[norm_u]
+                    if not vorhanden.get("bild") and eintrag.get("bild"):
+                        vorhanden["bild"] = eintrag["bild"]
+                    if not vorhanden.get("snippet") and eintrag.get("snippet"):
+                        vorhanden["snippet"] = eintrag["snippet"]
+                    if not vorhanden.get("published") and eintrag.get("published"):
+                        vorhanden["published"] = eintrag["published"]
+                    if not vorhanden.get("title") and eintrag.get("title"):
+                        vorhanden["title"] = eintrag["title"]
+        if not fortschritt:
+            break
+
+    return [nach_norm_url[norm_u] for norm_u in reihenfolge[:limit]]
 
 
 def searxng_ergebnis(
@@ -1168,10 +1810,10 @@ def searxng_ergebnis(
 ) -> dict:
     """Treffer, Vorschläge, Infobox und Direktantworten von Maunting Search.
 
-    Fragt die konfigurierte SearXNG-Instanz ab und ergänzt (oder übernimmt bei
-    nicht laufendem Sidecar) die hinterlegten offiziellen Such-APIs (Brave,
-    Google CSE), sofern keine fremde Instanz mit abgeschalteten Zusatz-APIs
-    aktiv ist.
+    Fragt die konfigurierte SearXNG-Instanz ab und fusioniert additiv
+    parallel die hinterlegten offiziellen Such-APIs (Brave, Google CSE),
+    sofern konfiguriert und erlaubt. Treffer werden dedupliziert und
+    nach Qualität gemischt.
     """
     target_url = s_url or searxng_url()
     apis_erlaubt = _apis_aktiv_fuer_instanz(target_url)
@@ -1181,13 +1823,21 @@ def searxng_ergebnis(
     if not target_url and not brave_key and not google_creds:
         raise WebSearchUnavailable("AI_WEB_SEARCH_NOT_CONFIGURED")
 
-    hits: list[dict] = []
+    searxng_hits: list[dict] = []
     suggestions: list[str] = []
     infobox: dict | None = None
     antworten: list[str] = []
     searxng_fehler: WebSearchUnavailable | None = None
 
-    if target_url:
+    brave_hits: list[dict] = []
+    brave_fehler: WebSearchUnavailable | None = None
+
+    google_hits: list[dict] = []
+
+    def _abfrage_searxng() -> None:
+        nonlocal searxng_hits, suggestions, infobox, antworten, searxng_fehler
+        if not target_url:
+            return
         params: dict[str, str | int] = {"q": query, "format": "json", "pageno": seite}
         if sicher:
             params["safesearch"] = 2
@@ -1208,7 +1858,7 @@ def searxng_ergebnis(
             data = resp.json()
             raw = data.get("results") if isinstance(data, dict) else None
             for r in raw if isinstance(raw, list) else []:
-                if len(hits) >= limit:
+                if len(searxng_hits) >= limit:
                     break
                 if not isinstance(r, dict):
                     continue
@@ -1226,7 +1876,7 @@ def searxng_ergebnis(
                     published = _zeitpunkt(r.get("publishedDate"))
                     if published:
                         hit["published"] = published
-                    hits.append(hit)
+                    searxng_hits.append(hit)
 
             raw_sug = data.get("suggestions") if isinstance(data, dict) else []
             suggestions = (
@@ -1246,47 +1896,63 @@ def searxng_ergebnis(
             logger.debug("SearXNG nicht erreichbar error=%s", type(exc).__name__)
             searxng_fehler = WebSearchUnavailable("AI_WEB_SEARCH_UNAVAILABLE")
 
-    # Offizielle APIs abfragen, wenn noch Platz bis zum Limit ist oder SearXNG ausfiel
-    zusatz_treffer: list[dict] = []
-    api_erfolgreich = False
-    if len(hits) < limit and (brave_key or google_creds):
-        rest = max(5, limit - len(hits))
-        if google_creds:
-            g_hits = _google_cse_treffer(
+    def _abfrage_brave() -> None:
+        nonlocal brave_hits, brave_fehler
+        if not (brave_key and seite == 1):
+            return
+        try:
+            brave_hits = _brave_kategorie_treffer(
                 query,
-                api_key_val=google_creds[0],
-                cx_val=google_creds[1],
-                limit=min(10, rest),
-                seite=seite,
+                key=brave_key,
+                limit=limit,
                 sicher=sicher,
                 sprache=sprache,
                 kategorie=kategorie,
             )
-            if g_hits:
-                api_erfolgreich = True
-                zusatz_treffer.extend(g_hits)
-        if brave_key and seite == 1 and len(hits) + len(zusatz_treffer) < limit:
-            try:
-                b_hits = _brave_kategorie_treffer(
-                    query,
-                    key=brave_key,
-                    limit=rest,
-                    sicher=sicher,
-                    sprache=sprache,
-                    kategorie=kategorie,
-                )
-                api_erfolgreich = True
-                zusatz_treffer.extend(b_hits)
-            except Exception as exc:
-                logger.debug("Brave Zusatzabfrage fehlgeschlagen: %s", type(exc).__name__)
-                if not target_url and not google_creds and isinstance(exc, WebSearchUnavailable):
-                    raise
+        except WebSearchUnavailable as exc:
+            brave_fehler = exc
+        except Exception as exc:
+            logger.debug("Brave Zusatzabfrage fehlgeschlagen: %s", type(exc).__name__)
+            brave_fehler = WebSearchUnavailable("AI_WEB_SEARCH_UNAVAILABLE")
 
-    if searxng_fehler is not None and not hits and not zusatz_treffer and not api_erfolgreich:
-        raise searxng_fehler
+    def _abfrage_google() -> None:
+        nonlocal google_hits
+        if not google_creds:
+            return
+        google_hits = _google_cse_treffer(
+            query,
+            api_key_val=google_creds[0],
+            cx_val=google_creds[1],
+            limit=min(10, limit),
+            seite=seite,
+            sicher=sicher,
+            sprache=sprache,
+            kategorie=kategorie,
+        )
 
-    if zusatz_treffer:
-        hits = _mische_treffer(hits, zusatz_treffer, limit)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        f_s = executor.submit(_abfrage_searxng) if target_url else None
+        f_b = executor.submit(_abfrage_brave) if (brave_key and seite == 1) else None
+        f_g = executor.submit(_abfrage_google) if google_creds else None
+        for f in (f_s, f_b, f_g):
+            if f:
+                f.result()
+
+    if not searxng_hits and not brave_hits and not google_hits:
+        if not target_url and not google_creds and brave_fehler is not None:
+            raise brave_fehler
+        if searxng_fehler is not None:
+            raise searxng_fehler
+
+    listen: list[list[dict]] = []
+    if brave_hits:
+        listen.append(brave_hits)
+    if searxng_hits:
+        listen.append(searxng_hits)
+    if google_hits:
+        listen.append(google_hits)
+
+    hits = _mische_treffer(listen, limit=limit) if listen else []
 
     ergebnis_dict: dict = {"treffer": hits, "vorschlaege": suggestions}
     if infobox:
@@ -1377,12 +2043,12 @@ def _search_duckduckgo(query: str, limit: int = MAX_RESULTS) -> list[dict]:
         return []
 
 
-def search(query: str, count: int = MAX_RESULTS, *, cache_scope: str | None = None) -> list[dict]:
-    """Fuehrt eine Websuche ueber Maunting Search oder direktes Web-Scraping fuer Singra aus."""
+def search(query: str, count: int = DEFAULT_SEARCH_COUNT, *, cache_scope: str | None = None) -> list[dict]:
+    """Fuehrt eine Websuche ueber Maunting Search (SearXNG + Brave + Google CSE additiv) fuer Singra aus."""
     safe_query = (query or "").strip()[:MAX_QUERY_CHARS]
     if not safe_query:
         raise WebSearchUnavailable("AI_WEB_SEARCH_QUERY_EMPTY")
-    limit = max(1, min(int(count or MAX_RESULTS), MAX_RESULTS))
+    limit = max(1, min(int(count or DEFAULT_SEARCH_COUNT), MAX_RESULTS))
 
     if not ai_web_search_enabled():
         raise WebSearchUnavailable("AI_WEB_SEARCH_NOT_CONFIGURED")
@@ -1422,14 +2088,20 @@ def search(query: str, count: int = MAX_RESULTS, *, cache_scope: str | None = No
                 cached = _cache.get(cache_key)
                 return cached[1] if cached and cached[0] > time.monotonic() else []
 
-    results: list[dict] = []
+    searxng_res: list[dict] = []
+    brave_res: list[dict] = []
+    brave_err: WebSearchUnavailable | None = None
+    google_res: list[dict] = []
 
-    # 1. SearXNG / Maunting Search Abfrage, falls konfiguriert
-    if s_url:
-        results = _search_searxng(safe_query, limit, s_url=s_url)
+    def _search_searxng_thread() -> None:
+        nonlocal searxng_res
+        if s_url:
+            searxng_res = _search_searxng(safe_query, limit, s_url=s_url)
 
-    # 2. Brave Search API Abfrage, falls Key hinterlegt und noch keine Treffer
-    if not results and key and _apis_aktiv_fuer_instanz(s_url):
+    def _search_brave_thread() -> None:
+        nonlocal brave_res, brave_err
+        if not (key and _apis_aktiv_fuer_instanz(s_url)):
+            return
         try:
             with measure("web_search", "provider_request"):
                 response = _http_client().get(
@@ -1442,12 +2114,12 @@ def search(query: str, count: int = MAX_RESULTS, *, cache_scope: str | None = No
                 )
             if response.status_code in {401, 403}:
                 logger.warning("Websuche Authentifizierung fehlgeschlagen status=%s", response.status_code)
-                _finish_inflight(cache_key, pending)
-                raise WebSearchUnavailable("AI_WEB_SEARCH_AUTH_FAILED")
+                brave_err = WebSearchUnavailable("AI_WEB_SEARCH_AUTH_FAILED")
+                return
             if response.status_code == 429:
                 logger.warning("Websuche Rate-Limit erreicht (429)")
-                _finish_inflight(cache_key, pending)
-                raise WebSearchUnavailable("AI_WEB_SEARCH_RATE_LIMITED")
+                brave_err = WebSearchUnavailable("AI_WEB_SEARCH_RATE_LIMITED")
+                return
             if response.status_code == 200:
                 payload = response.json()
                 web = payload.get("web") if isinstance(payload, dict) else None
@@ -1459,34 +2131,54 @@ def search(query: str, count: int = MAX_RESULTS, *, cache_scope: str | None = No
                         url = str(entry.get("url") or "")[:MAX_URL_CHARS]
                         if not url.startswith(("http://", "https://")):
                             continue
-                        results.append({
+                        brave_res.append({
                             "title": redact_sensitive_text(str(entry.get("title") or ""))[:MAX_TITLE_CHARS],
                             "url": url,
                             "snippet": redact_sensitive_text(str(entry.get("description") or ""))[:MAX_SNIPPET_CHARS],
                         })
-            elif response.status_code != 200:
+            else:
                 logger.warning("Websuche abgelehnt status=%s text=%s", response.status_code, response.text[:200])
-                _finish_inflight(cache_key, pending)
-                raise WebSearchUnavailable("AI_WEB_SEARCH_REJECTED")
-        except WebSearchUnavailable:
-            raise
+                brave_err = WebSearchUnavailable("AI_WEB_SEARCH_REJECTED")
+        except WebSearchUnavailable as exc:
+            brave_err = exc
         except Exception as exc:
             logger.info("Brave API nicht erreichbar error=%s", type(exc).__name__)
+            brave_err = WebSearchUnavailable("AI_WEB_SEARCH_UNAVAILABLE")
+
+    def _search_google_thread() -> None:
+        nonlocal google_res
+        if g_creds and _apis_aktiv_fuer_instanz(s_url):
+            google_res = _google_cse_treffer(
+                safe_query,
+                api_key_val=g_creds[0],
+                cx_val=g_creds[1],
+                limit=limit,
+            )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        f_s = executor.submit(_search_searxng_thread) if s_url else None
+        f_b = executor.submit(_search_brave_thread) if (key and _apis_aktiv_fuer_instanz(s_url)) else None
+        f_g = executor.submit(_search_google_thread) if (g_creds and _apis_aktiv_fuer_instanz(s_url)) else None
+        for f in (f_s, f_b, f_g):
+            if f:
+                f.result()
+
+    if not searxng_res and not brave_res and not google_res:
+        if not key and not g_creds and s_url:
+            searxng_res = _search_duckduckgo(safe_query, limit)
+        if not searxng_res and brave_err is not None:
             _finish_inflight(cache_key, pending)
-            raise WebSearchUnavailable("AI_WEB_SEARCH_UNAVAILABLE") from exc
+            raise brave_err
 
-    # 3. Google CSE Abfrage, falls konfiguriert und noch keine Treffer
-    if not results and g_creds and _apis_aktiv_fuer_instanz(s_url):
-        results = _google_cse_treffer(
-            safe_query,
-            api_key_val=g_creds[0],
-            cx_val=g_creds[1],
-            limit=limit,
-        )
+    quellen: list[list[dict]] = []
+    if brave_res:
+        quellen.append(brave_res)
+    if searxng_res:
+        quellen.append(searxng_res)
+    if google_res:
+        quellen.append(google_res)
 
-    # 4. DuckDuckGo Fallback, falls SearXNG konfiguriert aber kein Ergebnis
-    if not results and not key and not g_creds and s_url:
-        results = _search_duckduckgo(safe_query, limit)
+    results = _mische_treffer(quellen, limit=limit) if quellen else []
 
     if cache_key and pending:
         with _cache_lock:

@@ -115,6 +115,7 @@ from services.ai_tools.system_tools import (
     _execute_read_skill,
     _execute_learn_skill,
     _execute_web_search,
+    _execute_read_web_page,
 )
 
 from services.ai_tools.user_tools import (
@@ -138,12 +139,21 @@ def _global_tool_definitions() -> list[dict]:
     if is_configured():
         optional.append(_function(
             "web_search",
-            "Sucht im Web nach aktuellen Informationen, Fehlermeldungen, Modkompatibilitaet oder Spielversionen. Liefert Titel, Adresse und Kurztext.",
+            "Sucht im Web nach aktuellen Informationen, Fehlermeldungen, Modkompatibilitaet oder Spielversionen. Liefert Titel, Adresse und Kurztext von bis zu 15 Treffern.",
             {
                 "query": {"type": "string", "maxLength": 200, "description": "Suchbegriff oder Frage."},
-                "count": {"type": "integer", "minimum": 1, "maximum": MAX_RESULTS, "description": "Anzahl der Treffer (Standard: 5)."},
+                "count": {"type": "integer", "minimum": 1, "maximum": MAX_RESULTS, "description": "Anzahl der Treffer (Standard: 10, maximal 15)."},
             },
             ["query"],
+        ))
+        optional.append(_function(
+            "read_web_page",
+            "Liest den vollständigen Textinhalt einer Webseite oder das Transkript eines YouTube-Videos ein (inklusive formatierter Tabellen, Spezifikationen und Benchmarks). Nutze dies, um gefundene Suchtreffer oder Artikel im Detail zu studieren.",
+            {
+                "url": {"type": "string", "maxLength": 2000, "description": "Die vollständige HTTP-, HTTPS- oder YouTube-Adresse der zu lesenden Seite."},
+                "deep": {"type": "boolean", "description": "Liest bei true ausführliche Berichte, vollständige Tabellen und lange Artikel mit bis zu 25.000 Zeichen ein (Standard: false für 8.000 Zeichen)."},
+            },
+            ["url"],
         ))
 
     # Die Regionsanalyse steht immer im Katalog: ohne Copernicus-Zugang zeigt
@@ -1532,6 +1542,9 @@ def _execute_global_read_tool(
         return _execute_web_search(
             db, user=user, arguments=arguments, prefetch_session_id=prefetch_session_id
         )
+
+    if tool_name == "read_web_page":
+        return _execute_read_web_page(db, user=user, arguments=arguments)
 
     if tool_name == "analyze_region":
         if fast_region:

@@ -172,6 +172,7 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # Suchschluessel steht `web_search` gar nicht erst im Katalog
     # (`ai_action_service._global_tool_definitions`).
     "web_search": Werkzeug("global_read", angebot=("ai.web_search.use",)),
+    "read_web_page": Werkzeug("global_read", angebot=("ai.web_search.use",)),
     "search_curseforge_modpacks": Werkzeug("global_read", gruppe="mods", angebot=("server.mods.read",)),
     "search_curseforge_mods": Werkzeug("global_read", gruppe="mods", angebot=("server.mods.read",)),
     "advise_node_placement": Werkzeug("global_read", gruppe="nodes", angebot=("servers.create",)),
@@ -1299,6 +1300,7 @@ AUFGABEN_LESEN = frozenset({
     "search_docs",
     "read_docs",
     "web_search",
+    "read_web_page",
     "analyze_region",
     "email_search",
     "email_read",

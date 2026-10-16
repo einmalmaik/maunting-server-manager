@@ -20,6 +20,7 @@ import json
 import logging
 import re
 from typing import Any, AsyncIterator
+import urllib.parse
 import httpx
 from sqlalchemy.orm import Session
 
@@ -38,19 +39,20 @@ from services.openai_compatible_adapter import StreamUsage, stream_chat_completi
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """Du bist ein neutraler, sachlicher Suchassistent für Maunting Search. Beantworte die Anfrage des Nutzers auf Basis der Suchergebnisse objektiv, präzise, vollständig und direkt.
+SYSTEM_PROMPT = """Du bist ein neutraler, sachlicher Suchassistent für Maunting Search. Beantworte die Anfrage des Nutzers auf Basis der Suchergebnisse und der darin enthaltenen Volltext-Auszüge objektiv, präzise, vollständig und direkt.
 
 Die Suchergebnisse sind in Abschnitte gegliedert („Treffer zur Ausgangssuche",
 „Frische Treffer zur Nachfrage“). Beziehe dich bei einer Nachfrage vorrangig
 auf die frischen Treffer.
 
 Regeln:
-1. Nutze vorrangig die gegebenen Suchergebnisse als Informationsquelle. Erfinde keine Fakten.
+1. Nutze vorrangig die gegebenen Suchergebnisse und deren Volltext-Auszüge als Informationsquelle. Lies die Artikel, Tabellen und Spezifikationen gründlich und extrahiere konkrete Fakten (z. B. Veröffentlichungszeiträume, Versionsstände, Benchmark-Werte, FPS, Testergebnisse, Zitate, technische Details), um direkte Fragen sofort auf den Punkt zu beantworten. Erfinde keine Fakten.
 2. Enthält die Nutzeranfrage mehrere Teilfragen oder verschiedene Themen zugleich (z. B. „Was ist Eisen und wofür braucht man das und wie koche ich Gulasch?“), beantworte **jede einzelne Teilfrage** vollständig in einem klar gegliederten Abschnitt mit eigener Zwischenüberschrift.
 3. Bei Rezept- oder Kochanfragen („Wie koche ich ...?“) liefere direkt eine strukturierte Übersicht mit **Zutaten** und **Zubereitungsschritten**. Bei naturwissenschaftlichen, technischen oder lexikalischen Fragen („Was ist ...?“) liefere eine klare Definition, Kerneigenschaften und Verwendungszwecke.
 4. Reichen die Suchergebnisse für die Frage oder eine Teilfrage nicht aus, darfst du aus eigenem Wissen antworten. Kennzeichne unbelegte Teile unmissverständlich mit dem Hinweis „Ohne Quellenbeleg:“ und setze dort keine [n]-Quellenangaben.
 5. Belege Aussagen aus den Suchergebnissen mit Quellennummern in eckigen Klammern, z. B. [1] oder [2].
-6. Strukturiere übersichtlich mit Markdown (Fettdruck, kurze Absätze, Aufzählungspunkte). Keine Floskeln, keine Begrüßungen, keine formelhaften Schlusssätze."""
+6. Strukturiere übersichtlich mit Markdown (Fettdruck, kurze Absätze, Aufzählungspunkte). Keine Floskeln, keine Begrüßungen, keine formelhaften Schlusssätze.
+7. Wenn in den Quellen Markdown-Tabellen, Spezifikationen, Benchmark-Scores (z. B. FPS, Punkte, Latenzen) oder strukturierte Vergleiche vorliegen, werte die exakten Zahlenwerte direkt aus und stelle sie in deiner Antwort übersichtlich gegenüber (z. B. als eigene Vergleichstabelle oder strukturierte Gegenüberstellung)."""
 
 
 UMSCHREIBEN_SYSTEM = """Du formulierst Nachfragen oder zusammengesetzte Fragen für eine Metasuche um. Lese den bisherigen Dialog und die aktuelle Anfrage und liefere eigenständige Suchanfragen, die ohne den Dialog verständlich sind. Löse dabei Bezüge auf („das“, „dort“, „die Zutaten“ → der gemeinte Gegenstand) und teile Mehrfachfragen („Was ist X und wie koche ich Y?“) in getrennte, präzise Suchanfragen für jedes Teilthema auf.
@@ -164,12 +166,78 @@ def baue_suchkontext(treffer: list[dict[str, Any]]) -> str:
         titel = (t.get("titel") or "").strip()
         url = (t.get("url") or "").strip()
         inhalt = (t.get("inhalt") or "").strip()
+        volltext = (t.get("volltext") or "").strip()
         # Kürze den Auszug pro Treffer sinnvoll, um Token-Budget sparsam zu halten
         if len(inhalt) > 600:
             inhalt = inhalt[:597] + "..."
-        zeilen.append(f"[{idx}] {titel}\nURL: {url}\nAuszug: {inhalt}\n")
+        if volltext:
+            max_volltext = 15000 if t.get("deep") else 2500
+            if len(volltext) > max_volltext:
+                volltext = volltext[:max_volltext - 3] + "..."
+            label = "Volltext-Auszug (Deep-Dive)" if t.get("deep") else "Volltext-Auszug"
+            zeilen.append(f"[{idx}] {titel}\nURL: {url}\nAuszug: {inhalt}\n{label}: {volltext}\n")
+        else:
+            zeilen.append(f"[{idx}] {titel}\nURL: {url}\nAuszug: {inhalt}\n")
 
     return "\n".join(zeilen)
+
+
+def erkenne_deep_dive_quellen(
+    q: str,
+    treffer: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Erkennt, ob eine Nutzeranfrage tiefe Details aus bestimmten oder allen Quellen verlangt."""
+    text = (q or "").lower()
+    if not text or not treffer:
+        return []
+
+    ziel_indices: set[int] = set()
+    for m in re.findall(r"\[(\d+)\]", text):
+        try:
+            ziel_indices.add(int(m))
+        except ValueError:
+            pass
+
+    for m in re.findall(r"\bquelle\s+(\d+)\b", text):
+        try:
+            ziel_indices.add(int(m))
+        except ValueError:
+            pass
+
+    ordnung_map = {
+        "erste": 1, "ersten": 1, "1.": 1,
+        "zweite": 2, "zweiten": 2, "2.": 2,
+        "dritte": 3, "dritten": 3, "3.": 3,
+        "vierte": 4, "vierten": 4, "4.": 4,
+    }
+    for wort, idx in ordnung_map.items():
+        if f"{wort} quelle" in text:
+            ziel_indices.add(idx)
+
+    for t in treffer:
+        url = t.get("url", "")
+        if url:
+            try:
+                domain = urllib.parse.urlparse(url).netloc.lower()
+                domain_core = domain.replace("www.", "").split(".")[0]
+                if len(domain_core) >= 4 and domain_core in text:
+                    ziel_indices.add(t.get("index", 1))
+            except Exception:
+                pass
+
+    if ziel_indices:
+        return [t for t in treffer if t.get("index") in ziel_indices]
+
+    detail_begriffe = (
+        "genauer", "detail", "details", "benchmark", "benchmarks",
+        "tabelle", "tabellen", "spezifikation", "spezifikationen",
+        "deep-dive", "deep dive", "volltext", "ausführlich",
+        "fps", "score", "punkte", "metriken", "vergleichstabelle",
+    )
+    if any(b in text for b in detail_begriffe):
+        return treffer[:2]
+
+    return []
 
 
 def _deute_umschreibung(text: str, rueckfall: str) -> dict[str, Any]:
@@ -360,12 +428,49 @@ async def stream_suchzusammenfassung(
                     seite = await asyncio.to_thread(ai_web_search_service.scrape_url, eintrag.get("url", ""))
                     inhalt = (seite.get("content") or "").strip()
                     if inhalt:
-                        seiten_text = (eintrag.get("inhalt") or "").strip()
-                        if seiten_text:
-                            seiten_text += "\n\n"
-                        eintrag["inhalt"] = seiten_text + "Seiteninhalt: " + inhalt[:1500]
+                        eintrag["volltext"] = inhalt[:2500]
                 if frische_eintraege:
                     yield f"data: {json.dumps({'type': 'neue_treffer', 'treffer': frische_eintraege})}\n\n"
+
+            # Top-Webseiten im Volltext einlesen (bis zu 8 Seiten parallel im Thread-Pool)
+            seiten_kandidaten = [
+                t for t in gesamt_treffer[:8]
+                if t.get("url") and not t.get("volltext")
+            ]
+            if seiten_kandidaten:
+                urls_zum_scrapen = [t["url"] for t in seiten_kandidaten]
+                scraped_texte = await asyncio.to_thread(
+                    ai_web_search_service.scrape_top_urls_parallel,
+                    urls_zum_scrapen,
+                    2500,
+                    len(urls_zum_scrapen),
+                )
+                for t in seiten_kandidaten:
+                    u = t.get("url")
+                    if u in scraped_texte:
+                        t["volltext"] = scraped_texte[u]
+
+            # Deep-Dive Erkennung bei Folgefragen oder Detailanfragen:
+            # Falls gezielt Quellen referenziert werden (z. B. [1], Domain oder Detailfragen),
+            # bis zu 15.000 Zeichen Volltext nachladen.
+            if verlauf:
+                deep_kandidaten = erkenne_deep_dive_quellen(q, gesamt_treffer)
+                for ziel in deep_kandidaten:
+                    u = ziel.get("url")
+                    if u and not ziel.get("deep"):
+                        titel_kurz = ziel.get("titel") or u
+                        yield f"data: {json.dumps({'type': 'recherche', 'anfrage': f'Deep Dive: {titel_kurz}'})}\n\n"
+                        deep_res = await asyncio.to_thread(
+                            ai_web_search_service.scrape_url,
+                            u,
+                            15000,
+                            deep=True,
+                        )
+                        if isinstance(deep_res, dict) and "error" not in deep_res:
+                            inhalt = (deep_res.get("content") or "").strip()
+                            if inhalt:
+                                ziel["volltext"] = inhalt
+                                ziel["deep"] = True
 
             # 4. Denkstufe auflösen und prüfen
             aktiv_denken = bool(denkstufe and denkstufe.lower() not in ("fast", "schnell", "aus", "none"))

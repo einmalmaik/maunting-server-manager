@@ -784,7 +784,7 @@ def _execute_web_search(
     query = arguments.get("query")
     if not isinstance(query, str) or not query.strip():
         raise AiActionValidationError("Suchanfrage ist leer")
-    count = arguments.get("count", ai_web_search_service.MAX_RESULTS)
+    count = arguments.get("count", ai_web_search_service.DEFAULT_SEARCH_COUNT)
     if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= ai_web_search_service.MAX_RESULTS:
         raise AiActionValidationError("Ungueltige Trefferanzahl")
 
@@ -813,3 +813,39 @@ def _execute_web_search(
         # gefunden" waere eine falsche Aussage ueber das Web.
         return {"available": False, "reason": exc.code, "results": []}
     return {"available": True, "query": sichere_anfrage[:200], "results": results}
+
+
+def _execute_read_web_page(
+    db: Session, *, user: User, arguments: dict
+) -> dict:
+    """Liest eine Webseite oder ein YouTube-Transkript im Volltext ein (fuer Singra)."""
+    from services import ai_web_search_service
+
+    if not permission_service.has_global_permission(db, user, "ai.web_search.use"):
+        raise AiActionValidationError("Websuche ist fuer diesen Benutzer nicht freigegeben")
+    if set(arguments) - {"url", "server_id", "deep"}:
+        raise AiActionValidationError("read_web_page hat ungueltige Argumente")
+    if not ai_web_search_service.ai_web_search_enabled():
+        return {"success": False, "url": "", "error": "AI_WEB_SEARCH_NOT_CONFIGURED"}
+
+    url = arguments.get("url")
+    if not isinstance(url, str) or not url.strip():
+        raise AiActionValidationError("URL ist leer")
+
+    raw_deep = arguments.get("deep", False)
+    if isinstance(raw_deep, str):
+        deep = raw_deep.strip().lower() in ("true", "1", "yes")
+    else:
+        deep = bool(raw_deep)
+
+    sichere_url = url.strip()
+    max_chars = 25000 if deep else 8000
+    scraped = ai_web_search_service.scrape_url(sichere_url, max_chars=max_chars, deep=deep)
+    if "error" in scraped:
+        return {"success": False, "url": sichere_url, "error": scraped["error"]}
+    return {
+        "success": True,
+        "url": scraped.get("url", sichere_url),
+        "title": scraped.get("title", ""),
+        "content": scraped.get("content", ""),
+    }
