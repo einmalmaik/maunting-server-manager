@@ -217,7 +217,8 @@ export const nativ = {
   /** `schlafenMinuten: null`: Tabs schlafen nie (`tabs/ruhe.rs`). */
   tabsLeistung: (schlafenMinuten: number | null, verwerfen: boolean, ausnahmen: string[]) =>
     rufen('tabs_leistung', { schlafenMinuten, verwerfen, ausnahmen }),
-  fensterAktion: (aktion: 'minimieren' | 'maximieren' | 'schliessen') => rufen('fenster_aktion', { aktion }),
+  fensterAktion: (aktion: 'minimieren' | 'maximieren' | 'schliessen' | 'neustarten') => rufen('fenster_aktion', { aktion }),
+  neustarten: () => rufen('fenster_aktion', { aktion: 'neustarten' }),
   /** Startinformationen dieses Browserfenster-Prozesses (z. B. ausgelagertes Einzelfenster). */
   fensterStartInfo: () => rufen<FensterStartInfo>('fenster_start_info'),
   /** Namensblase über der Seite (`kurzinfo.rs`); `null` verbirgt sie. */
@@ -334,6 +335,7 @@ export interface BrowserKonfig {
   download_ordner: string | null
   download_fragen: boolean
   vergessen_beim_schliessen: boolean
+  hardwarebeschleunigung?: boolean
 }
 
 export const konfig = {

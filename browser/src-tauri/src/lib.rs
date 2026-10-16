@@ -98,6 +98,18 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle();
             let konfig = konfig::laden(handle);
+            #[cfg(windows)]
+            if !konfig.hardwarebeschleunigung {
+                let curr = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
+                if !curr.contains("--disable-gpu") {
+                    let neu = if curr.is_empty() {
+                        "--disable-gpu".to_string()
+                    } else {
+                        format!("{curr} --disable-gpu")
+                    };
+                    std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", neu);
+                }
+            }
             browserdaten::beim_start(handle, konfig.vergessen_beim_schliessen);
             schild::konfig_uebernehmen(&konfig);
             app.manage(konfig::KonfigZustand(std::sync::Mutex::new(konfig)));

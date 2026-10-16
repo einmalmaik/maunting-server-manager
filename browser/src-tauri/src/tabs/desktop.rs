@@ -127,8 +127,16 @@ fn umgebung(app: &AppHandle) -> Result<ICoreWebView2Environment, String> {
     let profil = super::seitenprofil(app)?;
     let (tx, rx) = mpsc::channel();
     let optionen = webview2_com::CoreWebView2EnvironmentOptions::default();
+    let mut args = BROWSER_ARGUMENTE.to_string();
+    let gpu_an = app
+        .try_state::<crate::konfig::KonfigZustand>()
+        .and_then(|z| z.0.lock().ok().map(|k| k.hardwarebeschleunigung))
+        .unwrap_or(true);
+    if !gpu_an {
+        args.push_str(" --disable-gpu");
+    }
     unsafe {
-        optionen.set_additional_browser_arguments(BROWSER_ARGUMENTE.to_string());
+        optionen.set_additional_browser_arguments(args);
         // Absturzberichte der Tabs bleiben auf dem Rechner (Datenschutzerklärung 3.30).
         optionen.set_is_custom_crash_reporting_enabled(true);
         // Gilt je Umgebung und lässt sich später nicht umschalten. Ohne
