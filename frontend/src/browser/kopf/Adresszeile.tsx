@@ -90,27 +90,28 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
     feld.current?.blur()
   }
 
+  const [suchwahlOffen, setSuchwahlOffen] = useState(false)
+
   const sicher = adresse.startsWith('https://')
   const unsicher = adresse.startsWith('http://')
-  const istSucheModus = tippt || !adresse || begriff
+  const zeigeSicherheit = Boolean(adresse && !tippt && !begriff)
 
   return (
     <div ref={huelle} className="relative min-w-0 flex-1">
-      {istSucheModus ? (
-        <div className="absolute left-1.5 top-1/2 z-20 -translate-y-1/2 flex items-center">
-          <SuchwahlKnopf kompakt />
-        </div>
-      ) : (
-        <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-on-surface-variant">
-          {sicher ? (
-            <Lock className="h-4 w-4 text-status-success" aria-label={t('browser.adresse.sicher')} role="img" />
-          ) : unsicher ? (
-            <LockOpen className="h-4 w-4 text-status-warning" aria-label={t('browser.adresse.unsicher')} role="img" />
-          ) : (
-            <Globe className="h-4 w-4" aria-hidden="true" />
-          )}
-        </span>
-      )}
+      <div className="absolute left-1.5 top-1/2 z-20 -translate-y-1/2 flex items-center gap-1">
+        <SuchwahlKnopf kompakt beiOffenAenderung={setSuchwahlOffen} />
+        {zeigeSicherheit && (
+          <span className="pointer-events-none flex items-center text-on-surface-variant">
+            {sicher ? (
+              <Lock className="h-3.5 w-3.5 text-status-success" aria-label={t('browser.adresse.sicher')} role="img" />
+            ) : unsicher ? (
+              <LockOpen className="h-3.5 w-3.5 text-status-warning" aria-label={t('browser.adresse.unsicher')} role="img" />
+            ) : (
+              <Globe className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+          </span>
+        )}
+      </div>
       {/* Ziel des Links unter dem Zeiger: die Statusblase von Edge ist aus,
           und über der Seite kann die Oberfläche nichts zeichnen. */}
       {!tippt && tab?.status && (
@@ -129,12 +130,22 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
         aria-expanded={offen}
         aria-controls={listenId}
         aria-activedescendant={offen ? `${listenId}-${markiert}` : undefined}
-        className={`h-9 rounded-full bg-surface-container-low ${istSucheModus ? 'pl-11' : 'pl-9'} pr-9 text-body-sm [@media(pointer:coarse)]:h-11`}
+        className={`h-9 rounded-full bg-surface-container-low ${zeigeSicherheit ? 'pl-16' : 'pl-11'} pr-9 text-body-sm [@media(pointer:coarse)]:h-11`}
         onFocus={(e) => {
           e.currentTarget.select()
           setTippt(true)
         }}
-        onBlur={() => setTimeout(beenden, 120)}
+        onBlur={(e) => {
+          const naechstes = e.relatedTarget as Node | null
+          if (huelle.current?.contains(naechstes) || suchwahlOffen) {
+            return
+          }
+          setTimeout(() => {
+            if (!suchwahlOffen && document.activeElement !== feld.current) {
+              beenden()
+            }
+          }, 120)
+        }}
         onChange={(e) => {
           setText(e.target.value)
           setTippt(true)

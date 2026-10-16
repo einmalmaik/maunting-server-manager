@@ -50,10 +50,12 @@ export function SuchwahlKnopf({
   ariaLabel,
   kompakt = false,
   className = '',
+  beiOffenAenderung,
 }: {
   ariaLabel?: string
   kompakt?: boolean
   className?: string
+  beiOffenAenderung?: (offen: boolean) => void
 }) {
   const { t } = useTranslation()
   const suchwahl = useSuchwahl()
@@ -62,6 +64,10 @@ export function SuchwahlKnopf({
   const ankerRef = useRef<HTMLButtonElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
   const lage = useAnkerLage(offen, ankerRef, popupRef, { abstand: 4, seite: 'unten', ausrichtung: 'start' })
+
+  useEffect(() => {
+    beiOffenAenderung?.(offen)
+  }, [offen, beiOffenAenderung])
 
   useEffect(() => {
     if (!offen) return
@@ -94,6 +100,10 @@ export function SuchwahlKnopf({
       <button
         ref={ankerRef}
         type="button"
+        onMouseDown={(e) => {
+          // Verhindert das unabsichtliche Verlieren des Eingabefokus beim Anklicken
+          e.preventDefault()
+        }}
         onClick={() => setOffen((o) => !o)}
         aria-label={ariaLabel ?? t('browser.start.suchmaschine')}
         aria-haspopup="listbox"
@@ -119,7 +129,12 @@ export function SuchwahlKnopf({
             <div className="px-3 py-1.5 text-label-sm font-semibold text-on-surface-variant border-b border-outline-variant/40">
               {t('browser.start.suchmaschine')}
             </div>
-            <ul role="listbox" aria-label={t('browser.start.suchmaschine')} className="max-h-64 overflow-y-auto p-1">
+            <ul
+              role="listbox"
+              aria-label={t('browser.start.suchmaschine')}
+              className="max-h-64 overflow-y-auto p-1"
+              onMouseDown={(e) => e.preventDefault()}
+            >
               {suchwahl.optionen.map((opt) => {
                 const aktiv = opt.value === suchwahl.wert
                 return (
