@@ -126,42 +126,4 @@ describe('Sichtbarkeit der Tabs', () => {
     panel.remove()
     portaledMenu.remove()
   })
-
-  it('maskiert den Tab mit Standbild wenn ein Element mit data-msb-verdeckt existiert (z. B. Erweiterungs-Popup)', async () => {
-    useTabsStore.setState({ aktivId: 'tab-a' })
-    render(<Wurzel />)
-
-    const overlay = document.createElement('div')
-    overlay.setAttribute('data-msb-verdeckt', '')
-    document.body.appendChild(overlay)
-
-    await vi.waitFor(() => expect(offen.find((o) => o.befehl === 'tab_standbild')).toBeDefined())
-    const standbild = offen.find((o) => o.befehl === 'tab_standbild')!
-    standbild.fertig(new ArrayBuffer(4))
-
-    await vi.waitFor(() =>
-      expect(
-        offen.find((o) => o.befehl === 'tabs_verdecken' && (o.args as { verdeckt?: boolean })?.verdeckt === true),
-      ).toBeDefined(),
-    )
-    expect(useStandbild.getState().bild).toEqual({ tab: 'tab-a', url: 'blob:standbild' })
-    const verdecken = offen.find(
-      (o) => o.befehl === 'tabs_verdecken' && (o.args as { verdeckt?: boolean })?.verdeckt === true,
-    )!
-    verdecken.fertig()
-
-    overlay.remove()
-    await vi.waitFor(() =>
-      expect(
-        offen.find((o) => o.befehl === 'tabs_verdecken' && (o.args as { verdeckt?: boolean })?.verdeckt === false),
-      ).toBeDefined(),
-    )
-    const zeigen = offen.find(
-      (o) => o.befehl === 'tabs_verdecken' && (o.args as { verdeckt?: boolean })?.verdeckt === false,
-    )!
-    zeigen.fertig()
-    await warten()
-    expect(useStandbild.getState().bild).toBeNull()
-  })
 })
-

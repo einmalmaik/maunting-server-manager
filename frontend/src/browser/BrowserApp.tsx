@@ -44,7 +44,7 @@ import { useDownloadHinweis } from './services/useDownloadHinweis'
 import { useGeraetKonfig } from './services/geraetKonfig'
 import { kuerzelAusfuehren, useKuerzel, type KuerzelZiele } from './services/kuerzel'
 import { tabEreignisse } from './services/nativ'
-import { erweiterungen, erweiterungenStarten, useErweiterungen } from './erweiterungen/erweiterungen'
+import { erweiterungenStarten } from './erweiterungen/erweiterungen'
 import { useLeistung } from './services/leistung'
 import { istAndroid } from './services/plattform'
 import { istGekoppelt, useSitzung, useSitzungsLauf } from './services/sitzung'
@@ -117,7 +117,6 @@ function Wurzel() {
   const tabAusrichtung = useEinstellungenStore((s) => s.tabAusrichtung)
   const handy = istAndroid()
   const [imVollbild, setImVollbild] = useState(false)
-  const erweiterungPopupOffen = useErweiterungen((s) => Boolean(s.popup))
 
   useSitzungsLauf()
   useDownloadHinweis()
@@ -286,18 +285,6 @@ function Wurzel() {
         <div data-msb-verdeckt={anruf ? '' : undefined}>
           <AnrufEbene />
         </div>
-      )}
-      {/* Erweiterungs-Popup (z. B. Volume Master): da das Popup ein natives
-          WebView2-Fenster ist, muss der aktive Tab dahinter als Standbild maskiert
-          werden (`ueberdeckung.ts`), damit er das Popup nicht überlagert. Ein
-          Klick daneben schließt das Popup. */}
-      {erweiterungPopupOffen && (
-        <div
-          data-msb-verdeckt=""
-          aria-hidden="true"
-          className="fixed inset-0 z-20 bg-transparent"
-          onPointerDown={() => void erweiterungen.popupSchliessen()}
-        />
       )}
       <ConfirmDialog />
       <PromptDialog />
