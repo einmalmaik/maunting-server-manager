@@ -18,7 +18,7 @@ import { interneSeite } from '../services/intern'
 import { nativ } from '../services/nativ'
 import { useTabsStore, useSplitZustand, type Tab, type SplitRichtung } from '../services/tabsStore'
 import { useEinstellungenStore } from '../services/einstellungenStore'
-import { holeAktivenTabDrag, lauscheTabZiehNachrichten, type TabZiehNachricht } from '../services/tabTransfer'
+import { entpackeTabTransfer, holeAktivenTabDrag, lauscheTabZiehNachrichten, markiereTabFuerSplitVerwendet, type TabZiehNachricht } from '../services/tabTransfer'
 import { bildSetzen, useStandbild } from '../services/ueberdeckung'
 import { SeitenDialoge } from './SeitenDialoge'
 import { SeitenMenue } from './SeitenMenue'
@@ -105,11 +105,10 @@ export function Seitenflaeche() {
   const { split, primaerTab, sekundaerTab } = useSplitZustand()
   const vertikaleTabsEingeklappt = useEinstellungenStore((s) => s.vertikaleTabsEingeklappt)
   const aktion = useTabsStore((s) => s.aktion)
-  const splitAktivieren = useTabsStore((s) => s.splitAktivieren)
   const splitAnteilAendern = useTabsStore((s) => s.splitAnteilAendern)
   const splitFokusSetzen = useTabsStore((s) => s.splitFokusSetzen)
-  const splitTauschen = useTabsStore((s) => s.splitTauschen)
 
+  const [tabWirdGezogen, setTabWirdGezogen] = useState(false)
   const [snapVorschau, setSnapVorschau] = useState<{
     kante: 'links' | 'rechts' | 'oben' | 'unten'
     tabId: string
@@ -120,27 +119,58 @@ export function Seitenflaeche() {
   useZurueckZurSuche(primaerTab)
   const eigenes = useEigenesMenue(primaerTab)
 
+  const wendeSplitPositionAn = (
+    zielTabId: string,
+    kante: 'links' | 'rechts' | 'oben' | 'unten',
+    url?: string
+  ) => {
+    const tabs = useTabsStore.getState().tabs
+    let effektiveTabId = zielTabId
+    const existiert = tabs.some((t) => t.id === zielTabId)
+    if (!existiert && url) {
+      effektiveTabId = useTabsStore.getState().neuerTab(url, { hintergrund: true })
+    }
+
+    const richtung: SplitRichtung = kante === 'oben' || kante === 'unten' ? 'vertikal' : 'horizontal'
+    const docktLinksOderOben = kante === 'links' || kante === 'oben'
+
+    const aktuellerPrimaerId = primaerTab?.id || useTabsStore.getState().aktivId
+    const aktuellerSekundaerId = split?.sekundaerId
+
+    let partnerId = aktuellerPrimaerId
+    if (effektiveTabId === aktuellerPrimaerId && aktuellerSekundaerId) {
+      partnerId = aktuellerSekundaerId
+    }
+
+    if (docktLinksOderOben) {
+      useTabsStore.getState().aktivieren(effektiveTabId)
+      useTabsStore.getState().splitAktivieren(partnerId, richtung, 0.5)
+    } else {
+      useTabsStore.getState().aktivieren(partnerId)
+      useTabsStore.getState().splitAktivieren(effektiveTabId, richtung, 0.5)
+    }
+    markiereTabFuerSplitVerwendet(effektiveTabId)
+    markiereTabFuerSplitVerwendet(partnerId)
+  }
+
   // Lauschen auf plattformübergreifenden Tab-Drag für Windows Snap-Vorschau
   useEffect(() => {
     return lauscheTabZiehNachrichten((nachricht: TabZiehNachricht) => {
-      if (split || !primaerTab || nachricht.tabId === primaerTab.id) {
-        if (snapVorschau) setSnapVorschau(null)
-        return
-      }
-
-      const el = flaeche.current
-      if (!el) return
-      const rect = el.getBoundingClientRect()
-      const clientX = typeof nachricht.clientX === 'number' ? nachricht.clientX : nachricht.screenX - window.screenX
-      const clientY = typeof nachricht.clientY === 'number' ? nachricht.clientY : nachricht.screenY - window.screenY
-
-      const imBereich =
-        clientX >= rect.left &&
-        clientX <= rect.right &&
-        clientY >= rect.top &&
-        clientY <= rect.bottom
-
       if (nachricht.art === 'ziehen') {
+        setTabWirdGezogen(true)
+
+        const el = flaeche.current
+        if (!el) return
+        const rect = el.getBoundingClientRect()
+        const clientX = typeof nachricht.clientX === 'number' ? nachricht.clientX : nachricht.screenX - window.screenX
+        const clientY = typeof nachricht.clientY === 'number' ? nachricht.clientY : nachricht.screenY - window.screenY
+
+        const imBereich =
+          clientX >= rect.left &&
+          clientX <= rect.right &&
+          clientY >= rect.top &&
+          clientY <= rect.bottom
+
         if (!imBereich) {
           setSnapVorschau(null)
           return
@@ -174,8 +204,24 @@ export function Seitenflaeche() {
           }
         })
       } else if (nachricht.art === 'ablegen') {
+        setTabWirdGezogen(false)
+        const el = flaeche.current
+        if (!el) {
+          setSnapVorschau(null)
+          return
+        }
+        const rect = el.getBoundingClientRect()
+        const clientX = typeof nachricht.clientX === 'number' ? nachricht.clientX : nachricht.screenX - window.screenX
+        const clientY = typeof nachricht.clientY === 'number' ? nachricht.clientY : nachricht.screenY - window.screenY
+
+        const imBereich =
+          clientX >= rect.left &&
+          clientX <= rect.right &&
+          clientY >= rect.top &&
+          clientY <= rect.bottom
+
         const sekId = snapVorschau?.tabId ?? nachricht.tabId
-        if (sekId && sekId !== primaerTab.id && imBereich) {
+        if (sekId && imBereich) {
           let kante = snapVorschau?.kante
           if (!kante) {
             const x = clientX - rect.left
@@ -189,22 +235,17 @@ export function Seitenflaeche() {
             else kante = x < w / 2 ? 'links' : 'rechts'
           }
 
-          const richtung: SplitRichtung = kante === 'oben' || kante === 'unten' ? 'vertikal' : 'horizontal'
-          const droppedAufLinksOderOben = kante === 'links' || kante === 'oben'
-
           setSnapVorschau(null)
-          splitAktivieren(sekId, richtung, 0.5)
-          if (droppedAufLinksOderOben) {
-            splitTauschen()
-          }
+          wendeSplitPositionAn(sekId, kante, nachricht.url)
           return
         }
         setSnapVorschau(null)
       } else if (nachricht.art === 'abbrechen') {
+        setTabWirdGezogen(false)
         setSnapVorschau(null)
       }
     })
-  }, [split, primaerTab, snapVorschau, splitAktivieren, splitTauschen])
+  }, [split, primaerTab, snapVorschau])
 
   // Bounds-Meldung an Rust (Single-View oder Split-View)
   useLayoutEffect(() => {
@@ -282,19 +323,22 @@ export function Seitenflaeche() {
   // Stellt sicher, dass keine Geister-Vorschau aktiv bleibt, wenn die Maus ohne Klick bewegt wird
   useEffect(() => {
     const onGlobalPointerMove = (e: PointerEvent) => {
-      if (e.buttons === 0 && snapVorschau) {
-        setSnapVorschau(null)
+      if (e.buttons === 0) {
+        if (snapVorschau) setSnapVorschau(null)
+        if (tabWirdGezogen) setTabWirdGezogen(false)
       }
     }
     window.addEventListener('pointermove', onGlobalPointerMove)
     return () => window.removeEventListener('pointermove', onGlobalPointerMove)
-  }, [snapVorschau])
+  }, [snapVorschau, tabWirdGezogen])
 
   const onContainerDragOver = (e: React.DragEvent) => {
     e.preventDefault()
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-    const aktiverDrag = holeAktivenTabDrag()
-    if (!aktiverDrag || aktiverDrag.tabId === primaerTab?.id || split) return
+    const transfer = entpackeTabTransfer(e.dataTransfer) || holeAktivenTabDrag()
+    if (!transfer) return
+
+    setTabWirdGezogen(true)
 
     const el = flaeche.current
     if (!el) return
@@ -312,21 +356,22 @@ export function Seitenflaeche() {
     else kante = x < w / 2 ? 'links' : 'rechts'
 
     setSnapVorschau((prev) => {
-      if (prev?.kante === kante && prev?.tabId === aktiverDrag.tabId) return prev
+      if (prev?.kante === kante && prev?.tabId === transfer.tabId) return prev
       return {
         kante,
-        tabId: aktiverDrag.tabId,
-        titel: aktiverDrag.titel,
-        favicon: aktiverDrag.favicon,
+        tabId: transfer.tabId,
+        titel: transfer.titel,
+        favicon: transfer.favicon,
       }
     })
   }
 
   const onContainerDrop = (e: React.DragEvent) => {
     e.preventDefault()
-    const aktiverDrag = holeAktivenTabDrag()
-    const zielTabId = snapVorschau?.tabId ?? aktiverDrag?.tabId
-    if (zielTabId && primaerTab && zielTabId !== primaerTab.id) {
+    setTabWirdGezogen(false)
+    const transfer = entpackeTabTransfer(e.dataTransfer) || holeAktivenTabDrag()
+    const zielTabId = snapVorschau?.tabId ?? transfer?.tabId
+    if (zielTabId) {
       const el = flaeche.current
       const rect = el?.getBoundingClientRect()
       let kante = snapVorschau?.kante
@@ -342,14 +387,8 @@ export function Seitenflaeche() {
         else kante = x < w / 2 ? 'links' : 'rechts'
       }
       if (kante) {
-        const richtung: SplitRichtung = kante === 'oben' || kante === 'unten' ? 'vertikal' : 'horizontal'
-        const droppedAufLinksOderOben = kante === 'links' || kante === 'oben'
-
         setSnapVorschau(null)
-        splitAktivieren(zielTabId, richtung, 0.5)
-        if (droppedAufLinksOderOben) {
-          splitTauschen()
-        }
+        wendeSplitPositionAn(zielTabId, kante, transfer?.url)
         return
       }
     }
@@ -359,6 +398,7 @@ export function Seitenflaeche() {
   const onContainerDragLeave = (e: React.DragEvent) => {
     if (!flaeche.current?.contains(e.relatedTarget as Node)) {
       setSnapVorschau(null)
+      setTabWirdGezogen(false)
     }
   }
 
@@ -426,39 +466,56 @@ export function Seitenflaeche() {
           >
             <EinzelInhalt tab={primaerTab} aktion={aktion} />
           </div>
+        </div>
+      )}
 
-          {/* Windows Snap-Assist Vorschau-Overlay (überlagert die Zielhälfte und verdeckt temporär den nativen HWND für butterweiche Darstellung) */}
-          {snapVorschau && (
-            <div
-              data-msb-verdeckt="true"
-              style={{
-                position: 'absolute',
-                left: snapVorschau.kante === 'rechts' ? '50%' : 0,
-                right: snapVorschau.kante === 'links' ? '50%' : 0,
-                top: snapVorschau.kante === 'unten' ? '50%' : 0,
-                bottom: snapVorschau.kante === 'oben' ? '50%' : 0,
-                width: snapVorschau.kante === 'links' || snapVorschau.kante === 'rechts' ? '50%' : '100%',
-                height: snapVorschau.kante === 'oben' || snapVorschau.kante === 'unten' ? '50%' : '100%',
-                transition: 'all 200ms cubic-bezier(0.16, 1, 0.3, 1)',
-              }}
-              className="pointer-events-none z-50 flex flex-col items-center justify-center gap-3 p-6 select-none bg-primary/20 border-2 border-primary/80 backdrop-blur-md rounded-xl shadow-[0_0_30px_rgba(99,102,241,0.3)] animate-scale-in"
-            >
-              <div className="flex items-center gap-2.5 rounded-xl border border-primary/40 bg-surface/95 px-4 py-2.5 shadow-2xl">
-                {snapVorschau.favicon ? (
-                  <img src={snapVorschau.favicon} alt="" className="h-4 w-4 rounded shrink-0" />
-                ) : (
-                  <Columns2 className="h-4 w-4 text-primary shrink-0" />
-                )}
-                <span className="text-label-md font-semibold text-on-surface max-w-[200px] truncate">
-                  {snapVorschau.titel}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-label-sm font-medium text-primary">
-                <Columns2 className="h-4 w-4 animate-pulse" />
-                <span>{t('browser.split.snapDropHinweis', { defaultValue: 'In geteilter Ansicht andocken' })}</span>
-              </div>
-            </div>
-          )}
+      {/* Unsichtbare Abdeckung für sofortige Verdeckung des nativen WebViews während Tab-Drags */}
+      {tabWirdGezogen && (
+        <div
+          data-msb-verdeckt="true"
+          className="pointer-events-none absolute inset-0 z-40 bg-transparent"
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Windows Snap-Assist Vorschau-Overlay (vollständig im Vordergrund, egal ob Single oder bereits Split) */}
+      {snapVorschau && (
+        <div
+          data-msb-verdeckt="true"
+          style={{
+            position: 'absolute',
+            left: snapVorschau.kante === 'rechts' ? '50%' : 0,
+            right: snapVorschau.kante === 'links' ? '50%' : 0,
+            top: snapVorschau.kante === 'unten' ? '50%' : 0,
+            bottom: snapVorschau.kante === 'oben' ? '50%' : 0,
+            width: snapVorschau.kante === 'links' || snapVorschau.kante === 'rechts' ? '50%' : '100%',
+            height: snapVorschau.kante === 'oben' || snapVorschau.kante === 'unten' ? '50%' : '100%',
+            transition: 'all 200ms cubic-bezier(0.16, 1, 0.3, 1)',
+          }}
+          className="pointer-events-none z-50 flex flex-col items-center justify-center gap-3 p-6 select-none bg-primary/20 border-2 border-primary/80 backdrop-blur-md rounded-xl shadow-[0_0_35px_rgba(99,102,241,0.35)] animate-scale-in"
+        >
+          <div className="flex items-center gap-2.5 rounded-xl border border-primary/40 bg-surface/95 px-4 py-2.5 shadow-2xl">
+            {snapVorschau.favicon ? (
+              <img src={snapVorschau.favicon} alt="" className="h-4 w-4 rounded shrink-0" />
+            ) : (
+              <Columns2 className="h-4 w-4 text-primary shrink-0" />
+            )}
+            <span className="text-label-md font-semibold text-on-surface max-w-[200px] truncate">
+              {snapVorschau.titel}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 rounded-full bg-surface/90 px-3 py-1 text-label-sm font-semibold text-primary shadow-sm">
+            <Columns2 className="h-4 w-4 animate-pulse" />
+            <span>
+              {snapVorschau.kante === 'links'
+                ? t('browser.split.snapLinks', { defaultValue: 'Links andocken' })
+                : snapVorschau.kante === 'rechts'
+                ? t('browser.split.snapRechts', { defaultValue: 'Rechts andocken' })
+                : snapVorschau.kante === 'oben'
+                ? t('browser.split.snapOben', { defaultValue: 'Oben andocken' })
+                : t('browser.split.snapUnten', { defaultValue: 'Unten andocken' })}
+            </span>
+          </div>
         </div>
       )}
 

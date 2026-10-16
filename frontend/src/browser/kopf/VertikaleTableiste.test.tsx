@@ -376,4 +376,66 @@ describe('VertikaleTableiste Komponente', () => {
       privat: false,
     })
   })
+
+  it('verschachtelt beliebig viele Kind-Tabs unter einem Eltern-Tab', () => {
+    const kinder = Array.from({ length: 5 }, (_, idx) => ({
+      id: `kind-${idx + 1}`,
+      url: `https://example.com/${idx + 1}`,
+      titel: `Kind ${idx + 1}`,
+      favicon: null,
+      laedt: false,
+      zurueck: false,
+      vor: false,
+      privat: false,
+      werbung: 0,
+      tracker: 0,
+      abgestuerzt: false,
+      fehler: null,
+      gesperrt: null,
+      status: '',
+      treffer: null,
+      nativDa: true,
+      ton: false,
+      stumm: false,
+      ruhe: null,
+      vorher: null,
+      elternId: 'root-eltern',
+      baumEingeklappt: false,
+    }))
+
+    const alleTabs = [
+      {
+        id: 'root-eltern',
+        url: 'https://example.com/root',
+        titel: 'Hauptseite',
+        favicon: null,
+        laedt: false,
+        zurueck: false,
+        vor: false,
+        privat: false,
+        werbung: 0,
+        tracker: 0,
+        abgestuerzt: false,
+        fehler: null,
+        gesperrt: null,
+        status: '',
+        treffer: null,
+        nativDa: true,
+        ton: false,
+        stumm: false,
+        ruhe: null,
+        vorher: null,
+        elternId: null,
+        baumEingeklappt: true,
+      },
+      ...kinder,
+    ]
+
+    const baum = baueTabBaum(alleTabs)
+    expect(baum).toHaveLength(6)
+    expect(baum[0].hatKinder).toBe(true)
+    expect(baum[0].kinderCount).toBe(5)
+    // Da eingeklappt, sind alle 5 Kinder unsichtbar
+    expect(baum.slice(1).every((k) => !k.sichtbar)).toBe(true)
+  })
 })

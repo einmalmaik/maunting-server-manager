@@ -30,6 +30,18 @@ export function registriereTabDrag(daten: TabTransferDaten): void {
   } catch {}
 }
 
+let splitVerwendetTabId: string | null = null
+let splitVerwendetZeit = 0
+
+export function markiereTabFuerSplitVerwendet(tabId: string): void {
+  splitVerwendetTabId = tabId
+  splitVerwendetZeit = Date.now()
+}
+
+export function istTabFuerSplitVerwendet(tabId: string): boolean {
+  return splitVerwendetTabId === tabId && Date.now() - splitVerwendetZeit < 3000
+}
+
 export function beendeTabDrag(): void {
   lokalerAktiverDrag = null
   try {

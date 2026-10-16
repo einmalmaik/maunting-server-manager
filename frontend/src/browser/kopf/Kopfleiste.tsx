@@ -33,6 +33,7 @@ import {
   beendeTabDrag,
   entpackeTabTransfer,
   FENSTER_ID,
+  istTabFuerSplitVerwendet,
   istTabUebernommen,
   lauscheTabTransfer,
   lauscheTabZiehNachrichten,
@@ -431,7 +432,7 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
         beendeTabDrag()
         onZielBerechnen?.(null)
 
-        if (istTabUebernommen(tab.id)) {
+        if (istTabUebernommen(tab.id) || istTabFuerSplitVerwendet(tab.id)) {
           schliessen(tab.id)
           return
         }
@@ -450,7 +451,7 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
         const tabs = useTabsStore.getState().tabs
         const split = useTabsStore.getState().split
         const istImSplit = split && (split.sekundaerId === tab.id || useTabsStore.getState().aktivId === tab.id)
-        if (istImSplit) {
+        if (istImSplit || istTabFuerSplitVerwendet(tab.id)) {
           return
         }
 
@@ -545,6 +546,20 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
     const sy = typeof e.screenY === 'number' ? e.screenY : 0
     const cx = typeof e.clientX === 'number' ? e.clientX : 0
     const cy = typeof e.clientY === 'number' ? e.clientY : 0
+
+    sendeTabZiehNachricht({
+      art: 'ziehen',
+      ursprungFensterId: FENSTER_ID,
+      tabId: tab.id,
+      url: tab.url,
+      titel,
+      favicon: tab.favicon,
+      privat: tab.privat,
+      screenX: sx,
+      screenY: sy,
+      clientX: cx,
+      clientY: cy,
+    })
 
     const aufraeumen = () => {
       window.removeEventListener('keydown', onKey, { capture: true })
@@ -652,9 +667,11 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
 
     const split = useTabsStore.getState().split
     const istImSplit = split && (split.sekundaerId === drag.id || useTabsStore.getState().aktivId === drag.id)
-    if (istImSplit) {
+    if (istImSplit || istTabFuerSplitVerwendet(drag.id)) {
       return
     }
+
+    if (tabs.length <= 1) return
 
     // Nur wenn der Zeiger nachweislich in der Kopfleiste geblieben ist und sich kaum bewegt hat
     const imTabBereich =

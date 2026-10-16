@@ -33,6 +33,7 @@ import {
   beendeTabDrag,
   entpackeTabTransfer,
   FENSTER_ID,
+  istTabFuerSplitVerwendet,
   istTabUebernommen,
   lauscheTabTransfer,
   lauscheTabZiehNachrichten,
@@ -234,14 +235,14 @@ function VertikalerTabKnoten({
           if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
           const rect = e.currentTarget.getBoundingClientRect()
           const relY = e.clientY - rect.top
-          if (relY < rect.height * 0.3) {
+          if (relY < rect.height * 0.25) {
             setDropZielIndex(i)
             setDropAlsKindVon(null)
-          } else if (relY > rect.height * 0.7) {
+          } else if (relY > rect.height * 0.75) {
             setDropZielIndex(i + 1)
             setDropAlsKindVon(null)
           } else {
-            setDropZielIndex(i + 1)
+            setDropZielIndex(null)
             setDropAlsKindVon(tab.id)
           }
         }}
@@ -257,7 +258,9 @@ function VertikalerTabKnoten({
         {...leistennameRest}
         style={{ paddingLeft: `${knoten.ebene * 14 + 8}px` }}
         className={`group flex h-8 items-center gap-1.5 rounded-lg pr-1.5 text-label-sm cursor-default transition-all duration-150 ${
-          aktiv
+          dropAlsKindVon === tab.id
+            ? 'ring-2 ring-primary/80 bg-primary/20 text-on-surface shadow-sm'
+            : aktiv
             ? 'bg-surface-container-highest text-on-surface font-medium shadow-sm'
             : 'text-on-surface-variant hover:bg-surface-container-high/60 hover:text-on-surface'
         }`}
@@ -432,8 +435,27 @@ export function VertikaleTableiste() {
     }
     const von = tabs.findIndex((t) => t.id === transfer.tabId)
     if (von >= 0) {
-      const korrigiert = von < zielIndex ? zielIndex - 1 : zielIndex
-      verschieben(transfer.tabId, korrigiert, elternId)
+      let effektiveElternId = elternId
+      if (effektiveElternId === transfer.tabId) {
+        effektiveElternId = null
+      }
+      let ziel = zielIndex
+      if (effektiveElternId) {
+        const eltern = tabs.find((t) => t.id === effektiveElternId)
+        if (eltern?.baumEingeklappt) {
+          useTabsStore.getState().baumUmschalten(effektiveElternId)
+        }
+        const elternIndex = tabs.findIndex((t) => t.id === effektiveElternId)
+        if (elternIndex >= 0) {
+          let nach = elternIndex + 1
+          while (nach < tabs.length && tabs[nach].elternId === effektiveElternId) {
+            nach++
+          }
+          ziel = nach
+        }
+      }
+      const korrigiert = von < ziel ? ziel - 1 : ziel
+      verschieben(transfer.tabId, Math.max(0, korrigiert), effektiveElternId)
     }
   }
 
@@ -549,7 +571,7 @@ export function VertikaleTableiste() {
       setTimeout(() => {
         beendeTabDrag()
 
-        if (istTabUebernommen(tab.id)) {
+        if (istTabUebernommen(tab.id) || istTabFuerSplitVerwendet(tab.id)) {
           schliessen(tab.id)
           return
         }
@@ -557,7 +579,7 @@ export function VertikaleTableiste() {
         const tabs = useTabsStore.getState().tabs
         const split = useTabsStore.getState().split
         const istImSplit = split && (split.sekundaerId === tab.id || useTabsStore.getState().aktivId === tab.id)
-        if (istImSplit) {
+        if (istImSplit || istTabFuerSplitVerwendet(tab.id)) {
           return
         }
 
@@ -631,6 +653,20 @@ export function VertikaleTableiste() {
     }
     aktiverVertikalerDrag = drag
     registriereTabDrag(transferPayload)
+
+    sendeTabZiehNachricht({
+      art: 'ziehen',
+      ursprungFensterId: FENSTER_ID,
+      tabId: tab.id,
+      url: tab.url,
+      titel,
+      favicon: tab.favicon,
+      privat: tab.privat,
+      screenX: typeof e.screenX === 'number' ? e.screenX : 0,
+      screenY: typeof e.screenY === 'number' ? e.screenY : 0,
+      clientX: typeof e.clientX === 'number' ? e.clientX : 0,
+      clientY: typeof e.clientY === 'number' ? e.clientY : 0,
+    })
 
     // Überwacht Ziehen über das gesamte Browserfenster für Snap-Assist
     const onWindowDragOver = (ev: globalThis.DragEvent) => {
@@ -735,7 +771,7 @@ export function VertikaleTableiste() {
 
     const split = useTabsStore.getState().split
     const istImSplit = split && (split.sekundaerId === drag.id || useTabsStore.getState().aktivId === drag.id)
-    if (istImSplit) {
+    if (istImSplit || istTabFuerSplitVerwendet(drag.id)) {
       return
     }
 
