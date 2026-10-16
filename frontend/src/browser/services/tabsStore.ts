@@ -37,6 +37,7 @@ export interface NeuerTabOptionen {
   privat?: boolean
   hintergrund?: boolean
   nach?: string
+  elternId?: string | null
   id?: string
   nativDa?: boolean
   anIndex?: number
@@ -68,7 +69,11 @@ export interface TabsZustand {
   stummSchalten: (id: string) => void
   wiederherstellen: () => void
   wechseln: (richtung: 1 | -1) => void
-  verschieben: (id: string, nachIndex: number) => void
+  verschieben: (id: string, nachIndex: number, neueElternId?: string | null) => void
+  /** Schaltet das Ein-/Ausklappen eines Eltern-Tabs in der Baumstruktur um. */
+  baumUmschalten: (id: string) => void
+  /** Setzt oder löst die Eltern-Kind-Beziehung eines Tabs in der Baumstruktur. */
+  setzeElternTab: (id: string, elternId: string | null) => void
   ereignis: (e: TabEreignis) => void
   /** Nach dem Start: Rust kennt noch keine Webview, die Oberfläche schon Tabs. */
   hochfahren: () => Promise<void>
@@ -151,6 +156,7 @@ export const useTabsStore = create<TabsZustand>()(
         neuerTab: (url, optionen = {}) => {
           const id = optionen.id ?? neueTabId()
           const effektiveUrl = url || (optionen.nativDa ? 'about:blank' : '')
+          const elternId = optionen.elternId !== undefined ? optionen.elternId : (optionen.nach ?? null)
           const tab: Tab = {
             ...leererTab(id, optionen.privat ?? false),
             url: effektiveUrl,
@@ -158,6 +164,7 @@ export const useTabsStore = create<TabsZustand>()(
             favicon: optionen.favicon ?? null,
             laedt: Boolean(optionen.nativDa && effektiveUrl),
             nativDa: optionen.nativDa ?? false,
+            elternId,
           }
           set((s) => {
             let einfuegeIndex = s.tabs.length
@@ -165,7 +172,13 @@ export const useTabsStore = create<TabsZustand>()(
               einfuegeIndex = Math.max(0, Math.min(optionen.anIndex, s.tabs.length))
             } else if (optionen.nach) {
               const nachIndex = s.tabs.findIndex((t) => t.id === optionen.nach)
-              if (nachIndex >= 0) einfuegeIndex = nachIndex + 1
+              if (nachIndex >= 0) {
+                let letzterIndex = nachIndex
+                while (letzterIndex + 1 < s.tabs.length && s.tabs[letzterIndex + 1].elternId === optionen.nach) {
+                  letzterIndex++
+                }
+                einfuegeIndex = letzterIndex + 1
+              }
             }
             const tabs = [...s.tabs]
             tabs.splice(einfuegeIndex, 0, tab)
@@ -203,7 +216,8 @@ export const useTabsStore = create<TabsZustand>()(
           entwicklerTabWeg(id)
           useFormulare.getState().tabWeg(id)
           useUebersetzung.getState().seiteWeg(id)
-          const rest = tabs.filter((t) => t.id !== id)
+          // Kind-Tabs an den übergeordneten Eltern-Tab vererben
+          const rest = tabs.filter((t) => t.id !== id).map((t) => (t.elternId === id ? { ...t, elternId: tab.elternId } : t))
           const restVerlauf = verlaufIds.filter((v) => v !== id)
           if (tab.privat && !rest.some((t) => t.privat)) {
             // Die private Sitzung ist zu (Android leert ihr Profil): keine ihrer Seiten lässt sich zurückholen.
@@ -362,15 +376,30 @@ export const useTabsStore = create<TabsZustand>()(
           if (ziel) get().aktivieren(ziel.id)
         },
 
-        verschieben: (id, nachIndex) => {
+        verschieben: (id, nachIndex, neueElternId) => {
           set((s) => {
             const tabs = [...s.tabs]
             const von = tabs.findIndex((t) => t.id === id)
             if (von < 0) return s
             const [tab] = tabs.splice(von, 1)
+            if (neueElternId !== undefined) {
+              tab.elternId = neueElternId
+            }
             tabs.splice(Math.max(0, Math.min(nachIndex, tabs.length)), 0, tab)
             return { tabs }
           })
+        },
+
+        baumUmschalten: (id) =>
+          set((s) => ({
+            tabs: s.tabs.map((t) => (t.id === id ? { ...t, baumEingeklappt: !t.baumEingeklappt } : t)),
+          })),
+
+        setzeElternTab: (id, elternId) => {
+          if (id === elternId) return
+          set((s) => ({
+            tabs: s.tabs.map((t) => (t.id === id ? { ...t, elternId } : t)),
+          }))
         },
 
         ereignis: (e) =>

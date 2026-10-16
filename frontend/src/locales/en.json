@@ -8613,7 +8613,13 @@
         "schlaf": "sleeping",
         "verworfen": "memory released"
       },
-      "anzahl": "All tabs ({{anzahl}})"
+      "anzahl": "All tabs ({{anzahl}})",
+      "baumEinklappen": "Collapse child tabs",
+      "baumAusklappen": "Expand child tabs",
+      "leisteEinklappen": "Collapse tab bar",
+      "leisteAusklappen": "Expand tab bar",
+      "scrollLinks": "Scroll tabs left",
+      "scrollRechts": "Scroll tabs right"
     },
     "fenster": {
       "minimieren": "Minimize",
@@ -8942,6 +8948,13 @@
       "datenschutz": "Privacy policy",
       "datenschutzStand": "Version {{version}}",
       "oeffnen": "Open",
+      "tabLeiste": "Tab bar",
+      "tabAusrichtung": "Tab orientation",
+      "tabAusrichtungHinweis": "Vertical tabs organize related pages cleanly into a tree structure.",
+      "tabAusrichtungOption": {
+        "vertikal": "Vertical with tree structure (left)",
+        "horizontal": "Horizontal (top)"
+      },
       "aufbau": "Layout",
       "leisteOrt": "Modules and lists",
       "ort": {

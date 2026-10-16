@@ -39,7 +39,7 @@ beforeEach(() => {
   alsAndroid(false)
   ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
   gerufen.length = 0
-  useEinstellungenStore.setState({ ausgeblendet: [] })
+  useEinstellungenStore.setState({ ausgeblendet: [], tabAusrichtung: 'horizontal' })
   useTabsStore.setState({
     tabs: [
       {

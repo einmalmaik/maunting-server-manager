@@ -18,6 +18,7 @@ import {
   type Hintergrund,
   type Leistenort,
   type NachrichtenThema,
+  type TabAusrichtung,
   type Widget,
 } from '../services/einstellungenStore'
 import { Anordnung } from './Anordnung'
@@ -167,11 +168,35 @@ function Hintergrundwahl() {
   )
 }
 
+function TabLeisteWahl() {
+  const { t } = useTranslation()
+  const tabAusrichtung = useEinstellungenStore((s) => s.tabAusrichtung)
+  const setzen = useEinstellungenStore((s) => s.setzen)
+
+  if (istAndroid()) return null
+
+  return (
+    <Abschnitt titel={t('browser.einstellungen.tabLeiste')}>
+      <Auswahlzeile<TabAusrichtung>
+        name={t('browser.einstellungen.tabAusrichtung')}
+        hinweis={t('browser.einstellungen.tabAusrichtungHinweis')}
+        wert={tabAusrichtung}
+        optionen={[
+          { value: 'vertikal', label: t('browser.einstellungen.tabAusrichtungOption.vertikal') },
+          { value: 'horizontal', label: t('browser.einstellungen.tabAusrichtungOption.horizontal') },
+        ]}
+        aendern={(v) => setzen({ tabAusrichtung: v })}
+      />
+    </Abschnitt>
+  )
+}
+
 export function Design() {
   return (
     <>
       <Aufbau />
       <Startwidgets />
+      <TabLeisteWahl />
       <Hintergrundwahl />
     </>
   )

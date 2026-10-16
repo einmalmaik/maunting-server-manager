@@ -8613,7 +8613,13 @@
         "schlaf": "schläft",
         "verworfen": "Speicher freigegeben"
       },
-      "anzahl": "Alle Tabs ({{anzahl}})"
+      "anzahl": "Alle Tabs ({{anzahl}})",
+      "baumEinklappen": "Untergeordnete Tabs einklappen",
+      "baumAusklappen": "Untergeordnete Tabs ausklappen",
+      "leisteEinklappen": "Tableiste einklappen",
+      "leisteAusklappen": "Tableiste ausklappen",
+      "scrollLinks": "Tabs nach links scrollen",
+      "scrollRechts": "Tabs nach rechts scrollen"
     },
     "fenster": {
       "minimieren": "Minimieren",
@@ -8942,6 +8948,13 @@
       "datenschutz": "Datenschutzerklärung",
       "datenschutzStand": "Fassung {{version}}",
       "oeffnen": "Öffnen",
+      "tabLeiste": "Tab-Leiste",
+      "tabAusrichtung": "Ausrichtung der Tabs",
+      "tabAusrichtungHinweis": "Vertikale Tabs zeigen zusammenhängende Seiten übersichtlich in einer Baumstruktur an.",
+      "tabAusrichtungOption": {
+        "vertikal": "Vertikal mit Baumstruktur (links)",
+        "horizontal": "Horizontal (oben)"
+      },
       "aufbau": "Aufbau",
       "leisteOrt": "Module und Listen",
       "ort": {

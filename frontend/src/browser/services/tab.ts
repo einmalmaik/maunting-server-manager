@@ -39,6 +39,10 @@ export interface Tab {
    * nicht mehr zurück kann.
    */
   vorher: string | null
+  /** Übergeordneter Tab, aus dem dieser geöffnet wurde (Baumstruktur) */
+  elternId: string | null
+  /** Ob Unterseiten im Baum eingeklappt sind */
+  baumEingeklappt?: boolean
 }
 
 /**
@@ -75,5 +79,7 @@ export function leererTab(id: string, privat = false): Tab {
     stumm: false,
     ruhe: null,
     vorher: null,
+    elternId: null,
+    baumEingeklappt: false,
   }
 }

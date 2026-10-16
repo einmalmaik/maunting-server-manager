@@ -32,6 +32,9 @@ export type Ausblendbar = Leistenziel | Knopf
  */
 export type Leistenort = 'menue' | 'links' | 'rechts' | 'oben'
 
+/** Ausrichtung der Tabs: standardmäßig vertikal mit Baumstruktur, oder klassisch horizontal oben. */
+export type TabAusrichtung = 'vertikal' | 'horizontal'
+
 /** Eine Kachel der Startseite. */
 export interface Schnellzugriff {
   url: string
@@ -108,6 +111,8 @@ interface EinstellungenZustand {
   widgetAngeboten: boolean
   /** Unter Windows kurz nach dem Start bei GitHub nach einer neuen Version fragen. */
   updatesSuchen: boolean
+  tabAusrichtung: TabAusrichtung
+  vertikaleTabsEingeklappt: boolean
 
   setzen: (teil: Partial<Omit<EinstellungenZustand, 'setzen' | 'umschalten'>>) => void
   umschalten: (was: Ausblendbar) => void
@@ -159,6 +164,8 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       schlafAusnahmen: [],
       widgetAngeboten: false,
       updatesSuchen: true,
+      tabAusrichtung: 'vertikal',
+      vertikaleTabsEingeklappt: false,
 
       setzen: (teil) => set(teil),
       umschalten: (was) =>

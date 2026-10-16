@@ -3,8 +3,23 @@
  * hat keinen Rahmen des Systems; gezogen wird an der freien Fläche
  * (`data-tauri-drag-region`), ein Doppelklick maximiert.
  */
-import { Fragment, useEffect, useState, type DragEvent } from 'react'
-import { EyeOff, Globe, Loader2, Minus, Moon, Plus, Search, Settings, Square, Volume2, VolumeX, X } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent, type WheelEvent } from 'react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  EyeOff,
+  Globe,
+  Loader2,
+  Minus,
+  Moon,
+  Plus,
+  Search,
+  Settings,
+  Square,
+  Volume2,
+  VolumeX,
+  X,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Kurzinfo } from '@/Singra/UI'
@@ -83,7 +98,7 @@ export function TabSymbol({ tab }: { tab: Tab }) {
 }
 
 /** Lautsprecher am Tab, solange die Seite Ton spielt oder stumm ist; ein Klick schaltet um. */
-function TonKnopf({ tab, titel }: { tab: Tab; titel: string }) {
+export function TonKnopf({ tab, titel }: { tab: Tab; titel: string }) {
   const { t } = useTranslation()
   if (!tab.ton && !tab.stumm) return null
   const name = tab.stumm ? t('browser.tabs.tonAn', { titel }) : t('browser.tabs.stumm', { titel })
@@ -109,7 +124,7 @@ function TonKnopf({ tab, titel }: { tab: Tab; titel: string }) {
  * Erstellt ein optisches Phantom (Vorschau-Miniatur) des Browserfensters
  * für das Auslagern per Drag-and-Drop (wie bei Chromium/Chrome).
  */
-function erstelleTabPhantom(titel: string, favicon: string | null): HTMLElement {
+export function erstelleTabPhantom(titel: string, favicon: string | null): HTMLElement {
   const container = document.createElement('div')
   container.setAttribute('aria-hidden', 'true')
   container.style.cssText = [
@@ -687,8 +702,48 @@ export function Kopfleiste() {
   const aktivId = useTabsStore((s) => s.aktivId)
   const neuerTab = useTabsStore((s) => s.neuerTab)
   const privatAus = useEinstellungenStore((s) => s.ausgeblendet.includes('privaterTab'))
+  const tabAusrichtung = useEinstellungenStore((s) => s.tabAusrichtung)
   const [dropZielIndex, setDropZielIndex] = useState<number | null>(null)
   const [fremderDragTab, setFremderDragTab] = useState<TabZiehNachricht | null>(null)
+
+  const tabListRef = useRef<HTMLDivElement>(null)
+  const [kannScrollenLinks, setKannScrollenLinks] = useState(false)
+  const [kannScrollenRechts, setKannScrollenRechts] = useState(false)
+
+  const pruefeScroll = useCallback(() => {
+    const el = tabListRef.current
+    if (!el) return
+    setKannScrollenLinks(el.scrollLeft > 2)
+    setKannScrollenRechts(el.scrollLeft + el.clientWidth < el.scrollWidth - 2)
+  }, [])
+
+  useEffect(() => {
+    pruefeScroll()
+    const el = tabListRef.current
+    if (!el) return
+    el.addEventListener('scroll', pruefeScroll, { passive: true })
+    window.addEventListener('resize', pruefeScroll)
+    return () => {
+      el.removeEventListener('scroll', pruefeScroll)
+      window.removeEventListener('resize', pruefeScroll)
+    }
+  }, [tabs, pruefeScroll])
+
+  useEffect(() => {
+    if (tabAusrichtung !== 'horizontal') return
+    const aktivEl = tabListRef.current?.querySelector('[role="tab"][aria-selected="true"]') as HTMLElement | null
+    if (typeof aktivEl?.scrollIntoView === 'function') {
+      aktivEl.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' })
+    }
+  }, [aktivId, tabAusrichtung])
+
+  const behandleMausrad = (e: WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY !== 0) {
+      e.currentTarget.scrollLeft += e.deltaY
+    }
+  }
+
+  const aktiverTab = tabs.find((t) => t.id === aktivId)
 
   useEffect(() => {
     const abmeldenTransfer = lauscheTabTransfer(({ tabId }) => {
@@ -824,107 +879,144 @@ export function Kopfleiste() {
       className="flex h-10 shrink-0 select-none items-end gap-1 bg-surface-container-low pl-2"
     >
       <img src="/msp.png" alt="" className="mb-2 h-5 w-5 shrink-0" data-tauri-drag-region />
-      <div
-        role="tablist"
-        aria-label={t('browser.tabs.liste')}
-        onDragOver={(e) => {
-          e.preventDefault()
-          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-        }}
-        onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-            setDropZielIndex(null)
-            setFremderDragTab(null)
-          }
-        }}
-        onDrop={(e) => {
-          e.stopPropagation()
-          behandleDrop(e, dropZielIndex ?? tabs.length)
-        }}
-        className="flex min-w-0 items-end gap-0.5 overflow-hidden"
-      >
-        {tabs.map((tab, i) => (
-          <Fragment key={tab.id}>
-            {dropZielIndex === i && (
+      {tabAusrichtung === 'vertikal' ? (
+        <div
+          data-tauri-drag-region
+          className="flex h-full min-w-0 flex-1 items-center gap-2 pl-2 text-label-md text-on-surface-variant select-none"
+        >
+          <span className="truncate font-medium text-on-surface text-label-sm opacity-80" data-tauri-drag-region>
+            {aktiverTab
+              ? tabTitel(aktiverTab, { neu: t('browser.tabs.neu'), einstellungen: t('browser.start.anpassen') })
+              : 'Maunting Secure Browser'}
+          </span>
+        </div>
+      ) : (
+        <>
+          {kannScrollenLinks && (
+            <button
+              type="button"
+              onClick={() => tabListRef.current?.scrollBy({ left: -220, behavior: 'smooth' })}
+              className="mb-1 flex h-7 w-5 shrink-0 items-center justify-center rounded text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
+              aria-label={t('browser.tabs.scrollLinks')}
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
+          <div
+            ref={tabListRef}
+            role="tablist"
+            aria-label={t('browser.tabs.liste')}
+            onWheel={behandleMausrad}
+            onDragOver={(e) => {
+              e.preventDefault()
+              if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                setDropZielIndex(null)
+                setFremderDragTab(null)
+              }
+            }}
+            onDrop={(e) => {
+              e.stopPropagation()
+              behandleDrop(e, dropZielIndex ?? tabs.length)
+            }}
+            className="flex min-w-0 items-end gap-0.5 overflow-x-auto scroll-smooth [overscroll-behavior:contain] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {tabs.map((tab, i) => (
+              <Fragment key={tab.id}>
+                {dropZielIndex === i && (
+                  <>
+                    <EinfuegeIndikator />
+                    {fremderDragTab && <PhantomTabVorschau tab={fremderDragTab} />}
+                  </>
+                )}
+                <TabReiter
+                  tab={tab}
+                  aktiv={tab.id === aktivId}
+                  index={i}
+                  onHoverZieh={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const mitte = rect.left + rect.width / 2
+                    const ziel = e.clientX < mitte ? i : i + 1
+                    setDropZielIndex(ziel)
+                  }}
+                  onDropTab={(e) => {
+                    e.stopPropagation()
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const mitte = rect.left + rect.width / 2
+                    const ziel = e.clientX < mitte ? i : i + 1
+                    behandleDrop(e, ziel)
+                  }}
+                  onZielBerechnen={(ziel) => setDropZielIndex(ziel)}
+                  onDropTabLokal={(tabId) => {
+                    if (dropZielIndex !== null) {
+                      const von = tabs.findIndex((t) => t.id === tabId)
+                      if (von >= 0) {
+                        const korrigiert = von < dropZielIndex ? dropZielIndex - 1 : dropZielIndex
+                        if (korrigiert !== von) {
+                          useTabsStore.getState().verschieben(tabId, korrigiert)
+                        }
+                      }
+                    }
+                  }}
+                />
+              </Fragment>
+            ))}
+            {dropZielIndex === tabs.length && (
               <>
                 <EinfuegeIndikator />
                 {fremderDragTab && <PhantomTabVorschau tab={fremderDragTab} />}
               </>
             )}
-            <TabReiter
-              tab={tab}
-              aktiv={tab.id === aktivId}
-              index={i}
-              onHoverZieh={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect()
-                const mitte = rect.left + rect.width / 2
-                const ziel = e.clientX < mitte ? i : i + 1
-                setDropZielIndex(ziel)
-              }}
-              onDropTab={(e) => {
-                e.stopPropagation()
-                const rect = e.currentTarget.getBoundingClientRect()
-                const mitte = rect.left + rect.width / 2
-                const ziel = e.clientX < mitte ? i : i + 1
-                behandleDrop(e, ziel)
-              }}
-              onZielBerechnen={(ziel) => setDropZielIndex(ziel)}
-              onDropTabLokal={(tabId) => {
-                if (dropZielIndex !== null) {
-                  const von = tabs.findIndex((t) => t.id === tabId)
-                  if (von >= 0) {
-                    const korrigiert = von < dropZielIndex ? dropZielIndex - 1 : dropZielIndex
-                    if (korrigiert !== von) {
-                      useTabsStore.getState().verschieben(tabId, korrigiert)
-                    }
-                  }
-                }
-              }}
-            />
-          </Fragment>
-        ))}
-        {dropZielIndex === tabs.length && (
-          <>
-            <EinfuegeIndikator />
-            {fremderDragTab && <PhantomTabVorschau tab={fremderDragTab} />}
-          </>
-        )}
-      </div>
-      <div
-        className="mb-1 flex shrink-0 items-center"
-        onDragOver={(e) => {
-          e.preventDefault()
-          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-          setDropZielIndex(tabs.length)
-        }}
-        onDrop={(e) => {
-          e.stopPropagation()
-          behandleDrop(e, tabs.length)
-        }}
-      >
-        <Kurzinfo text={t('browser.tabs.neuKuerzel')} seite="anfang">
-          <button
-            type="button"
-            onClick={() => neuerTab()}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
-            aria-label={t('browser.tabs.neu')}
-          >
-            <Plus className="h-4 w-4" aria-hidden="true" />
-          </button>
-        </Kurzinfo>
-        {!privatAus && (
-          <Kurzinfo text={t('browser.tabs.privatKuerzel')} seite="anfang">
+          </div>
+          {kannScrollenRechts && (
             <button
               type="button"
-              onClick={() => neuerTab(undefined, { privat: true })}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-primary"
-              aria-label={t('browser.tabs.neuPrivat')}
+              onClick={() => tabListRef.current?.scrollBy({ left: 220, behavior: 'smooth' })}
+              className="mb-1 flex h-7 w-5 shrink-0 items-center justify-center rounded text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
+              aria-label={t('browser.tabs.scrollRechts')}
             >
-              <EyeOff className="h-4 w-4" aria-hidden="true" />
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
             </button>
-          </Kurzinfo>
-        )}
-      </div>
+          )}
+          <div
+            className="mb-1 flex shrink-0 items-center"
+            onDragOver={(e) => {
+              e.preventDefault()
+              if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+              setDropZielIndex(tabs.length)
+            }}
+            onDrop={(e) => {
+              e.stopPropagation()
+              behandleDrop(e, tabs.length)
+            }}
+          >
+            <Kurzinfo text={t('browser.tabs.neuKuerzel')} seite="anfang">
+              <button
+                type="button"
+                onClick={() => neuerTab()}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
+                aria-label={t('browser.tabs.neu')}
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </Kurzinfo>
+            {!privatAus && (
+              <Kurzinfo text={t('browser.tabs.privatKuerzel')} seite="anfang">
+                <button
+                  type="button"
+                  onClick={() => neuerTab(undefined, { privat: true })}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-primary"
+                  aria-label={t('browser.tabs.neuPrivat')}
+                >
+                  <EyeOff className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </Kurzinfo>
+            )}
+          </div>
+        </>
+      )}
       <div
         className="h-full min-w-6 flex-1"
         data-tauri-drag-region
