@@ -19,6 +19,8 @@ use webview2_com::{
     NavigationStartingEventHandler, NewWindowRequestedEventHandler,
 };
 use windows::core::HSTRING;
+use windows::Win32::Foundation::HWND;
+use windows::Win32::UI::WindowsAndMessaging::{GetWindow, SetWindowPos, GW_CHILD, GW_HWNDNEXT, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE};
 
 use super::{auf_ui, controller, fehler, rechteck, umgebung};
 use crate::tabs::{extern_oeffnen, externes_protokoll, navigation_erlaubt};
@@ -28,6 +30,23 @@ pub const EREIGNIS: &str = "msb:erweiterung-popup";
 
 thread_local! {
     static POPUP: RefCell<Option<ICoreWebView2Controller>> = const { RefCell::new(None) };
+    static POPUP_HWND: RefCell<Option<HWND>> = const { RefCell::new(None) };
+}
+
+unsafe fn kind_fenster(eltern: HWND) -> Vec<HWND> {
+    let mut kinder = Vec::new();
+    let mut k = GetWindow(eltern, GW_CHILD).unwrap_or_default();
+    while !k.is_invalid() {
+        kinder.push(k);
+        k = GetWindow(k, GW_HWNDNEXT).unwrap_or_default();
+    }
+    kinder
+}
+
+unsafe fn nach_vorne() {
+    if let Some(h) = POPUP_HWND.with(|s| *s.borrow()) {
+        let _ = SetWindowPos(h, Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
 }
 
 /// Rechte obere Ecke unter dem Knopf, in CSS-Pixeln der Oberfläche.
@@ -49,6 +68,7 @@ fn gleiche_erweiterung(start: &url::Url, ziel: &str) -> bool {
 }
 
 unsafe fn zu(app: &AppHandle) {
+    POPUP_HWND.with(|h| *h.borrow_mut() = None);
     if let Some(alt) = POPUP.with(|p| p.borrow_mut().take()) {
         super::herunterladen::schliessen(POPUP_ID, alt);
         let _ = app.emit_to("main", EREIGNIS, serde_json::json!({ "zu": true }));
@@ -72,6 +92,7 @@ unsafe fn anpassen(app: &AppHandle, anker: Anker) {
             let hoehe = hoehe.clamp(25.0, 600.0).min(fh - anker.oben - 8.0).max(25.0);
             let links = (anker.rechts - breite).clamp(0.0, (fb - breite).max(0.0));
             let _ = c.SetBounds(rechteck(&app, links, anker.oben, breite, hoehe));
+            nach_vorne();
             Ok(())
         })),
     );
@@ -85,8 +106,17 @@ pub fn oeffnen(app: &AppHandle, url: String, rechts: f64, oben: f64) -> Result<(
     let app2 = app.clone();
     auf_ui(app, move || unsafe {
         zu(&app2);
+        let fenster = app2.get_webview_window("main").ok_or("Hauptfenster fehlt")?;
+        let hwnd = HWND(fenster.hwnd().map_err(fehler)?.0);
+        let vorher = kind_fenster(hwnd);
+
         let umgebung = umgebung(&app2)?;
         let c = controller(&app2, &umgebung, false, None)?;
+        let nachher = kind_fenster(hwnd);
+        let popup_hwnd = nachher.into_iter().find(|k| !vorher.contains(k));
+        POPUP_HWND.with(|h| *h.borrow_mut() = popup_hwnd);
+        nach_vorne();
+
         let core = c.CoreWebView2().map_err(fehler)?;
         // Wie ein Tab: ohne Edge-Oberfläche, Downloads über Quarantäne und
         // Virenschutz. Ein Kontextmenü braucht das Popup nicht.
@@ -157,13 +187,17 @@ pub fn oeffnen(app: &AppHandle, url: String, rechts: f64, oben: f64) -> Result<(
                     if !geladen.swap(true, Ordering::SeqCst) {
                         let _ = fokus.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
                     }
+                    nach_vorne();
                     anpassen(&app, anker);
                     let app = app.clone();
                     std::thread::spawn(move || {
                         for warten in [300, 700] {
                             std::thread::sleep(Duration::from_millis(warten));
                             let a = app.clone();
-                            let _ = app.run_on_main_thread(move || anpassen(&a, anker));
+                            let _ = app.run_on_main_thread(move || {
+                                anpassen(&a, anker);
+                                nach_vorne();
+                            });
                         }
                     });
                     Ok(())
@@ -211,8 +245,10 @@ pub fn oeffnen(app: &AppHandle, url: String, rechts: f64, oben: f64) -> Result<(
         }
         c.SetBounds(rechteck(&app2, (rechts - 320.0).max(0.0), oben, 320.0, 120.0)).map_err(fehler)?;
         c.SetIsVisible(true).map_err(fehler)?;
+        nach_vorne();
         core.Navigate(&HSTRING::from(url.as_str())).map_err(fehler)?;
         POPUP.with(|p| *p.borrow_mut() = Some(c));
+        nach_vorne();
         Ok(())
     })
 }
