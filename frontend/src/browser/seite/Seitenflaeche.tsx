@@ -18,7 +18,7 @@ import { interneSeite } from '../services/intern'
 import { nativ } from '../services/nativ'
 import { useTabsStore, useSplitZustand, type Tab, type SplitRichtung } from '../services/tabsStore'
 import { useEinstellungenStore } from '../services/einstellungenStore'
-import { entpackeTabTransfer, holeAktivenTabDrag, lauscheTabZiehNachrichten, markiereTabFuerSplitVerwendet, type TabZiehNachricht } from '../services/tabTransfer'
+import { beendeTabDrag, entpackeTabTransfer, FENSTER_ID, holeAktivenTabDrag, lauscheTabZiehNachrichten, markiereTabFuerSplitVerwendet, type TabZiehNachricht } from '../services/tabTransfer'
 import { bildSetzen, useStandbild } from '../services/ueberdeckung'
 import { SeitenDialoge } from './SeitenDialoge'
 import { SeitenMenue } from './SeitenMenue'
@@ -217,6 +217,12 @@ export function Seitenflaeche() {
           setSnapVorschau(null)
           return
         }
+        // Lokale Drops im selben Fenster werden direkt von onContainerDrop verarbeitet.
+        if (nachricht.ursprungFensterId === FENSTER_ID) {
+          setSnapVorschau(null)
+          return
+        }
+
         const rect = el.getBoundingClientRect()
         const clientX = typeof nachricht.clientX === 'number' ? nachricht.clientX : nachricht.screenX - window.screenX
         const clientY = typeof nachricht.clientY === 'number' ? nachricht.clientY : nachricht.screenY - window.screenY
@@ -403,11 +409,13 @@ export function Seitenflaeche() {
       }
       if (kante) {
         setSnapVorschau(null)
+        beendeTabDrag()
         wendeSplitPositionAn(zielTabId, kante, transfer?.url)
         return
       }
     }
     setSnapVorschau(null)
+    beendeTabDrag()
   }
 
   const onContainerDragLeave = (e: React.DragEvent) => {

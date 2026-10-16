@@ -44,12 +44,31 @@ export function istTabFuerSplitVerwendet(tabId: string): boolean {
 }
 
 export function beendeTabDrag(): void {
+  const warAktiv = !!lokalerAktiverDrag
   lokalerAktiverDrag = null
   try {
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(AKTIVER_DRAG_SCHLUESSEL)
+      localStorage.removeItem(LIVE_SPEICHER_SCHLUESSEL)
     }
   } catch {}
+  if (warAktiv) {
+    for (const lauscher of lokaleLauscher) {
+      try {
+        lauscher({
+          art: 'abbrechen',
+          ursprungFensterId: FENSTER_ID,
+          tabId: '',
+          url: '',
+          titel: '',
+          favicon: null,
+          privat: false,
+          screenX: 0,
+          screenY: 0,
+        })
+      } catch {}
+    }
+  }
 }
 
 export function holeAktivenTabDrag(): TabTransferDaten | null {
@@ -244,6 +263,14 @@ function holeLiveSenderKanal(): BroadcastChannel | null {
 }
 
 export function sendeTabZiehNachricht(nachricht: TabZiehNachricht): void {
+  // Wenn aus diesem Fenster gesendet wird, aber kein lokaler Drag aktiv ist,
+  // verwerfen wir Zombie-'ziehen'- und 'ablegen'-Nachrichten!
+  if (nachricht.ursprungFensterId === FENSTER_ID && !lokalerAktiverDrag) {
+    if (nachricht.art === 'ziehen' || nachricht.art === 'ablegen') {
+      return
+    }
+  }
+
   // 1. Lokale Abonnenten im selben Fenster sofort und synchron bedienen
   for (const lauscher of lokaleLauscher) {
     try {

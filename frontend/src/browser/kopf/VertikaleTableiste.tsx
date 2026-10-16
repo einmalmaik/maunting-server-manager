@@ -125,9 +125,8 @@ interface VertikalerTabKnotenProps {
   i: number
   dropZielIndex: number | null
   dropAlsKindVon: string | null
-  pointerDown: (e: React.PointerEvent<HTMLElement>, tab: Tab, titel: string) => void
-  dragStart: (e: DragEvent<HTMLDivElement>, tab: Tab, titel: string) => void
-  dragEnde: (e: DragEvent<HTMLDivElement>, tab: Tab, titel: string) => void
+  dragStart: (e: DragEvent<HTMLElement>, tab: Tab, titel: string) => void
+  dragEnde: (e: DragEvent<HTMLElement>, tab: Tab, titel: string) => void
   behandleDrop: (e: DragEvent, zielIndex: number, elternId?: string | null) => void
   setDropZielIndex: (val: number | null) => void
   setDropAlsKindVon: (val: string | null) => void
@@ -150,7 +149,6 @@ function VertikalerTabKnoten({
   i,
   dropZielIndex,
   dropAlsKindVon,
-  pointerDown,
   dragStart,
   dragEnde,
   behandleDrop,
@@ -175,10 +173,10 @@ function VertikalerTabKnoten({
         type="button"
         role="treeitem"
         aria-selected={aktiv}
-        onPointerDown={(e) => {
-          pDown()
-          pointerDown(e, tab, titel)
-        }}
+        draggable
+        onDragStart={(e) => dragStart(e, tab, titel)}
+        onDragEnd={(e) => dragEnde(e, tab, titel)}
+        onPointerDown={pDown}
         onClick={() => aktivieren(tab.id)}
         onAuxClick={(e) => e.button === 1 && schliessen(tab.id)}
         {...leistennameRest}
@@ -224,10 +222,7 @@ function VertikalerTabKnoten({
         aria-selected={aktiv}
         tabIndex={aktiv ? 0 : -1}
         draggable
-        onPointerDown={(e) => {
-          pDown()
-          pointerDown(e, tab, titel)
-        }}
+        onPointerDown={pDown}
         onDragStart={(e) => dragStart(e, tab, titel)}
         onDragEnd={(e) => dragEnde(e, tab, titel)}
         onDragOver={(e) => {
@@ -459,164 +454,7 @@ export function VertikaleTableiste() {
     }
   }
 
-  const pointerDown = (e: React.PointerEvent<HTMLElement>, tab: Tab, titel: string) => {
-    if (e.button !== 0) return
-    const sx = e.screenX
-    const sy = e.screenY
-    const cx = e.clientX
-    const cy = e.clientY
-    let gezogen = false
-    let abgebrochen = false
-    const zielElement = e.currentTarget
-
-    const transferPayload: TabTransferDaten = {
-      ursprungFensterId: FENSTER_ID,
-      tabId: tab.id,
-      url: tab.url,
-      titel,
-      favicon: tab.favicon,
-      privat: tab.privat,
-    }
-
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') {
-        abgebrochen = true
-        aufloesen(true)
-      }
-    }
-
-    const onMove = (ev: PointerEvent) => {
-      if (abgebrochen) return
-      const distanz = Math.hypot(ev.screenX - sx, ev.screenY - sy)
-      if (!gezogen && distanz >= 5) {
-        gezogen = true
-        registriereTabDrag(transferPayload)
-        try {
-          zielElement.setPointerCapture?.(ev.pointerId)
-        } catch {}
-      }
-
-      if (gezogen) {
-        document.body.style.cursor = 'default'
-
-        sendeTabZiehNachricht({
-          art: 'ziehen',
-          ursprungFensterId: FENSTER_ID,
-          tabId: tab.id,
-          url: tab.url,
-          titel,
-          favicon: tab.favicon,
-          privat: tab.privat,
-          screenX: ev.screenX,
-          screenY: ev.screenY,
-          clientX: ev.clientX,
-          clientY: ev.clientY,
-        })
-      }
-    }
-
-    const onUp = (ev: PointerEvent) => {
-      aufloesen(false, ev)
-    }
-
-    const aufloesen = (abbrechen: boolean, ev?: PointerEvent) => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('keydown', onKey, { capture: true })
-      document.body.style.cursor = ''
-      try {
-        zielElement.releasePointerCapture?.(e.pointerId)
-      } catch {}
-
-      if (abbrechen) {
-        sendeTabZiehNachricht({
-          art: 'abbrechen',
-          ursprungFensterId: FENSTER_ID,
-          tabId: tab.id,
-          url: tab.url,
-          titel,
-          favicon: tab.favicon,
-          privat: tab.privat,
-          screenX: 0,
-          screenY: 0,
-        })
-        beendeTabDrag()
-        return
-      }
-
-      if (!gezogen) {
-        aktivieren(tab.id)
-        return
-      }
-
-      const endScreenX = ev ? ev.screenX : sx
-      const endScreenY = ev ? ev.screenY : sy
-      const endClientX = ev ? ev.clientX : cx
-      const endClientY = ev ? ev.clientY : cy
-
-      sendeTabZiehNachricht({
-        art: 'ablegen',
-        ursprungFensterId: FENSTER_ID,
-        tabId: tab.id,
-        url: tab.url,
-        titel,
-        favicon: tab.favicon,
-        privat: tab.privat,
-        screenX: endScreenX,
-        screenY: endScreenY,
-        clientX: endClientX,
-        clientY: endClientY,
-      })
-
-      setTimeout(() => {
-        beendeTabDrag()
-
-        if (istTabUebernommen(tab.id)) {
-          schliessen(tab.id)
-          return
-        }
-
-        if (istTabFuerSplitVerwendet(tab.id)) {
-          return
-        }
-
-        const tabs = useTabsStore.getState().tabs
-        const split = useTabsStore.getState().split
-        const istImSplit = split && (split.sekundaerId === tab.id || useTabsStore.getState().aktivId === tab.id)
-        if (istImSplit || istTabFuerSplitVerwendet(tab.id)) {
-          return
-        }
-
-        const balkenBreite = vertikaleTabsEingeklappt ? 48 : 240
-        const imBalken =
-          endClientX >= 0 &&
-          endClientX <= balkenBreite &&
-          endClientY >= 0 &&
-          endClientY <= (window.innerHeight || 1080)
-
-        if (imBalken) return
-
-        const distanz = Math.hypot(endScreenX - sx, endScreenY - sy)
-        if (
-          tabs.length > 1 &&
-          !istAndroid() &&
-          distanz >= 50 &&
-          (endClientX < 0 || endClientX > (window.innerWidth || 1920) || endClientY < 0 || endClientY > (window.innerHeight || 1080))
-        ) {
-          void nativ
-            .tabAuslagern(tab.url, endScreenX, endScreenY, tab.privat)
-            .then(() => schliessen(tab.id))
-            .catch((err) => console.error('[MSB] Tab konnte nicht ausgelagert werden:', err))
-        }
-      }, 70)
-    }
-
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('keydown', onKey, { capture: true })
-  }
-
-  const dragStart = (e: DragEvent<HTMLDivElement>, tab: Tab, titel: string) => {
+  const dragStart = (e: DragEvent<HTMLElement>, tab: Tab, titel: string) => {
     if (e.button !== undefined && e.button !== 0) return
     const rect = e.currentTarget.getBoundingClientRect()
     const offsetRelX = e.clientX - rect.left
@@ -732,7 +570,7 @@ export function VertikaleTableiste() {
     window.addEventListener('keydown', onKey)
   }
 
-  const dragEnde = (e: DragEvent<HTMLDivElement>, tab: Tab, titel: string) => {
+  const dragEnde = (e: DragEvent<HTMLElement>, tab: Tab, titel: string) => {
     const drag = aktiverVertikalerDrag
     aktiverVertikalerDrag = null
     beendeTabDrag()
@@ -870,7 +708,6 @@ export function VertikaleTableiste() {
               i={i}
               dropZielIndex={dropZielIndex}
               dropAlsKindVon={dropAlsKindVon}
-              pointerDown={pointerDown}
               dragStart={dragStart}
               dragEnde={dragEnde}
               behandleDrop={behandleDrop}

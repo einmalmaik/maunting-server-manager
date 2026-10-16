@@ -283,196 +283,12 @@ interface TabReiterProps {
   index: number
   onHoverZieh?: (e: DragEvent<HTMLDivElement>) => void
   onDropTab?: (e: DragEvent<HTMLDivElement>) => void
-  onZielBerechnen?: (ziel: number | null) => void
-  onDropTabLokal?: (tabId: string) => void
 }
 
-function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBerechnen, onDropTabLokal }: TabReiterProps) {
+function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab }: TabReiterProps) {
   const { t } = useTranslation()
   const { aktivieren, schliessen } = useTabsStore.getState()
   const titel = tabTitel(tab, { neu: t('browser.tabs.neu'), einstellungen: t('browser.einstellungen.titel') })
-
-  const pointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return
-    if ((e.target as HTMLElement).closest('button')) return
-
-    const sx = typeof e.screenX === 'number' ? e.screenX : 0
-    const sy = typeof e.screenY === 'number' ? e.screenY : 0
-    const cx = typeof e.clientX === 'number' ? e.clientX : 0
-    const cy = typeof e.clientY === 'number' ? e.clientY : 0
-
-    let gezogen = false
-    let abgebrochen = false
-    const zielElement = e.currentTarget
-
-    const transferPayload: TabTransferDaten = {
-      ursprungFensterId: FENSTER_ID,
-      tabId: tab.id,
-      url: tab.url,
-      titel,
-      favicon: tab.favicon,
-      privat: tab.privat,
-    }
-
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') {
-        abgebrochen = true
-        aufloesen(true)
-      }
-    }
-
-    const onMove = (ev: PointerEvent) => {
-      if (abgebrochen) return
-      const distanz = Math.hypot(ev.screenX - sx, ev.screenY - sy)
-      if (!gezogen && distanz >= 5) {
-        gezogen = true
-        registriereTabDrag(transferPayload)
-        try {
-          zielElement.setPointerCapture?.(ev.pointerId)
-        } catch {}
-      }
-
-      if (gezogen) {
-        // Normaler Mauszeiger statt Verbotszeichen (🚫)
-        document.body.style.cursor = 'default'
-
-        sendeTabZiehNachricht({
-          art: 'ziehen',
-          ursprungFensterId: FENSTER_ID,
-          tabId: tab.id,
-          url: tab.url,
-          titel,
-          favicon: tab.favicon,
-          privat: tab.privat,
-          screenX: ev.screenX,
-          screenY: ev.screenY,
-          clientX: ev.clientX,
-          clientY: ev.clientY,
-        })
-
-        const imLokalenBalken =
-          ev.clientY >= 0 &&
-          ev.clientY <= 48 &&
-          ev.clientX >= 0 &&
-          ev.clientX <= (window.innerWidth || 1920)
-
-        if (imLokalenBalken) {
-          const tabEls = document.querySelectorAll<HTMLElement>('[role="tab"]')
-          let ziel = tabEls.length
-          for (let i = 0; i < tabEls.length; i++) {
-            const rect = tabEls[i].getBoundingClientRect()
-            const mitte = rect.left + rect.width / 2
-            if (ev.clientX < mitte) {
-              ziel = i
-              break
-            }
-          }
-          onZielBerechnen?.(ziel)
-        } else {
-          onZielBerechnen?.(null)
-        }
-      }
-    }
-
-    const onUp = (ev: PointerEvent) => {
-      aufloesen(false, ev)
-    }
-
-    const aufloesen = (abbrechen: boolean, ev?: PointerEvent) => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('keydown', onKey, { capture: true })
-      document.body.style.cursor = ''
-      try {
-        zielElement.releasePointerCapture?.(e.pointerId)
-      } catch {}
-
-      if (abbrechen) {
-        sendeTabZiehNachricht({
-          art: 'abbrechen',
-          ursprungFensterId: FENSTER_ID,
-          tabId: tab.id,
-          url: tab.url,
-          titel,
-          favicon: tab.favicon,
-          privat: tab.privat,
-          screenX: 0,
-          screenY: 0,
-        })
-        beendeTabDrag()
-        onZielBerechnen?.(null)
-        return
-      }
-
-      if (!gezogen) {
-        aktivieren(tab.id)
-        return
-      }
-
-      const endScreenX = ev ? ev.screenX : sx
-      const endScreenY = ev ? ev.screenY : sy
-      const endClientX = ev ? ev.clientX : cx
-      const endClientY = ev ? ev.clientY : cy
-
-      sendeTabZiehNachricht({
-        art: 'ablegen',
-        ursprungFensterId: FENSTER_ID,
-        tabId: tab.id,
-        url: tab.url,
-        titel,
-        favicon: tab.favicon,
-        privat: tab.privat,
-        screenX: endScreenX,
-        screenY: endScreenY,
-        clientX: endClientX,
-        clientY: endClientY,
-      })
-
-      setTimeout(() => {
-        beendeTabDrag()
-        onZielBerechnen?.(null)
-
-        if (istTabUebernommen(tab.id)) {
-          schliessen(tab.id)
-          return
-        }
-
-        if (istTabFuerSplitVerwendet(tab.id)) {
-          return
-        }
-
-        const imLokalenBalken =
-          endClientY >= 0 &&
-          endClientY <= 48 &&
-          endClientX >= 0 &&
-          endClientX <= (window.innerWidth || 1920)
-
-        if (imLokalenBalken) {
-          onDropTabLokal?.(tab.id)
-          return
-        }
-
-        const tabs = useTabsStore.getState().tabs
-        const split = useTabsStore.getState().split
-        const istImSplit = split && (split.sekundaerId === tab.id || useTabsStore.getState().aktivId === tab.id)
-        if (istImSplit || istTabFuerSplitVerwendet(tab.id)) {
-          return
-        }
-
-        const distanz = Math.hypot(endScreenX - sx, endScreenY - sy)
-        if (tabs.length > 1 && !istAndroid() && (distanz >= 50 || endClientY < 0 || endClientY > 48)) {
-          void nativ
-            .tabAuslagern(tab.url, endScreenX, endScreenY, tab.privat)
-            .then(() => schliessen(tab.id))
-            .catch((err) => console.error('[MSB] Tab konnte nicht ausgelagert werden:', err))
-        }
-      }, 70)
-    }
-
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('keydown', onKey, { capture: true })
-  }
 
   const dragStart = (e: DragEvent<HTMLDivElement>) => {
     const onKey = (ev: KeyboardEvent) => {
@@ -717,7 +533,6 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
       aria-selected={aktiv}
       tabIndex={aktiv ? 0 : -1}
       draggable
-      onPointerDown={pointerDown}
       onDragStart={dragStart}
       onDrag={beimZiehen}
       onDragEnd={dragEnde}
@@ -1053,18 +868,6 @@ export function Kopfleiste() {
                     const mitte = rect.left + rect.width / 2
                     const ziel = e.clientX < mitte ? i : i + 1
                     behandleDrop(e, ziel)
-                  }}
-                  onZielBerechnen={(ziel) => setDropZielIndex(ziel)}
-                  onDropTabLokal={(tabId) => {
-                    if (dropZielIndex !== null) {
-                      const von = tabs.findIndex((t) => t.id === tabId)
-                      if (von >= 0) {
-                        const korrigiert = von < dropZielIndex ? dropZielIndex - 1 : dropZielIndex
-                        if (korrigiert !== von) {
-                          useTabsStore.getState().verschieben(tabId, korrigiert)
-                        }
-                      }
-                    }
                   }}
                 />
               </Fragment>
