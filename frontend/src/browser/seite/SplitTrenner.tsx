@@ -188,7 +188,6 @@ export function SplitTrenner({ richtung, anteil, onAnteilAendern, containerRef }
         <button
           type="button"
           onClick={splitTauschen}
-          title={t('browser.split.tauschen', { defaultValue: 'Seiten tauschen' })}
           aria-label={t('browser.split.tauschen', { defaultValue: 'Seiten tauschen' })}
           className="flex h-6 w-6 items-center justify-center rounded-full text-on-surface hover:bg-surface-container-highest transition-colors"
         >
@@ -197,12 +196,11 @@ export function SplitTrenner({ richtung, anteil, onAnteilAendern, containerRef }
         <button
           type="button"
           onClick={splitRichtungUmschalten}
-          title={
+          aria-label={
             istHorizontal
               ? t('browser.split.vertikalDrehen', { defaultValue: 'Übereinander anordnen' })
               : t('browser.split.horizontalDrehen', { defaultValue: 'Nebeneinander anordnen' })
           }
-          aria-label={t('browser.split.drehen', { defaultValue: 'Orientierung wechseln' })}
           className="flex h-6 w-6 items-center justify-center rounded-full text-on-surface hover:bg-surface-container-highest transition-colors"
         >
           {istHorizontal ? <ArrowUpDown className="h-3.5 w-3.5" /> : <ArrowLeftRight className="h-3.5 w-3.5" />}
@@ -210,7 +208,6 @@ export function SplitTrenner({ richtung, anteil, onAnteilAendern, containerRef }
         <button
           type="button"
           onClick={splitBeenden}
-          title={t('browser.split.schliessen', { defaultValue: 'Geteilte Ansicht beenden' })}
           aria-label={t('browser.split.schliessen', { defaultValue: 'Geteilte Ansicht beenden' })}
           className="flex h-6 w-6 items-center justify-center rounded-full text-on-surface hover:bg-error/20 hover:text-error transition-colors"
         >

@@ -319,7 +319,7 @@ function VertikalerTabKnoten({
             className={`flex h-4 items-center gap-0.5 rounded px-1 text-label-xs font-semibold ${
               aktiv ? 'bg-primary/20 text-primary' : 'bg-surface-container-highest/60 text-on-surface-variant'
             }`}
-            title={
+            aria-label={
               tab.id === aktivId
                 ? t('browser.split.primaerBadge', { defaultValue: 'Geteilte Ansicht: Links' })
                 : t('browser.split.sekundaerBadge', { defaultValue: 'Geteilte Ansicht: Rechts' })

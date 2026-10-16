@@ -241,7 +241,6 @@ export function TabUebersicht({ offen, onSchliessen }: { offen: boolean; onSchli
                     data-aktion="split"
                     tabIndex={-1}
                     onClick={(e) => oeffneGeteilt(tab.id, e)}
-                    title={t('browser.split.oeffnen', { defaultValue: 'In geteilter Ansicht öffnen' })}
                     aria-label={t('browser.split.oeffnen', { defaultValue: 'In geteilter Ansicht öffnen' })}
                     className="absolute right-10 top-0 flex h-11 w-11 items-center justify-center rounded-full text-on-surface-variant hover:text-primary transition-colors"
                   >

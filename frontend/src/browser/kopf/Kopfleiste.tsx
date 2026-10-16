@@ -755,7 +755,7 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
           className={`flex h-4 items-center gap-0.5 rounded px-1 text-label-xs font-semibold ${
             aktiv ? 'bg-primary/20 text-primary' : 'bg-surface-container-highest/60 text-on-surface-variant'
           }`}
-          title={
+          aria-label={
             tab.id === aktivId
               ? t('browser.split.primaerBadge', { defaultValue: 'Geteilte Ansicht: Links' })
               : t('browser.split.sekundaerBadge', { defaultValue: 'Geteilte Ansicht: Rechts' })
@@ -1027,7 +1027,7 @@ export function Kopfleiste() {
               e.stopPropagation()
               behandleDrop(e, dropZielIndex ?? tabs.length)
             }}
-            className="flex min-w-0 items-end gap-0.5 overflow-x-auto scroll-smooth [overscroll-behavior:contain] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+            className="flex min-w-0 items-end gap-0.5 overflow-x-auto scroll-smooth [overscroll-behavior:contain] msm-ohne-rollbalken"
           >
             {tabs.map((tab, i) => (
               <Fragment key={tab.id}>
