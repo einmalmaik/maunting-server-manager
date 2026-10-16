@@ -98,5 +98,7 @@ export { useZurueckSchliesst } from './useZurueckSchliesst'
 export { ModalContainerContext, useModalContainer } from './ModalContainerContext'
 export { Zustandsflaeche, type ZustandsflaecheProps } from './Zustandsflaeche'
 export { Ablageflaeche, ABLAGEZIEL, type AblageflaecheProps } from './Ablageflaeche'
+export { Omnibox, type OmniboxProps } from './Omnibox'
 // Markdownansicht und PdfAnsicht ziehen große Bibliotheken nach sich und stehen
 // deshalb nicht hier: direkt aus ihrer Datei importieren, am besten per lazy().
+

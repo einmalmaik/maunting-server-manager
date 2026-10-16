@@ -9,6 +9,7 @@ import { Bookmark, Clock, Globe, Lock, LockOpen, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { useAnkerLage } from '@/Singra/UI/Ankerlage'
+import { Omnibox } from '@/Singra/UI'
 
 import { useEinstellungenStore, useWirksameSuche } from '../services/einstellungenStore'
 import { msmSucheBegriff } from '../services/intern'
@@ -96,26 +97,41 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
   const zeigeSicherheit = Boolean(adresse && !tippt && !begriff)
 
   return (
-    <div
+    <Omnibox
       ref={huelle}
-      className="msm-omnibox h-9 px-2 min-w-0 flex-1 [@media(pointer:coarse)]:h-11"
+      links={
+        <>
+          <SuchwahlKnopf kompakt beiOffenAenderung={setSuchwahlOffen} />
+          {zeigeSicherheit && (
+            <span className="pointer-events-none flex items-center text-on-surface-variant">
+              {sicher ? (
+                <Lock className="h-3.5 w-3.5 text-status-success" aria-label={t('browser.adresse.sicher')} role="img" />
+              ) : unsicher ? (
+                <LockOpen className="h-3.5 w-3.5 text-status-warning" aria-label={t('browser.adresse.unsicher')} role="img" />
+              ) : (
+                <Globe className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+            </span>
+          )}
+        </>
+      }
+      rechts={
+        <>
+          {!tippt && tab?.status && (
+            <span className="pointer-events-none max-w-[200px] truncate rounded-full bg-surface-container-high px-2 py-0.5 text-label-sm text-on-surface-variant">
+              {tab.status}
+            </span>
+          )}
+          <SprachsucheKnopf
+            onErgebnis={(sttText) => {
+              setText((alt) => (alt ? `${alt.trim()} ${sttText}` : sttText))
+              setTippt(true)
+              feld.current?.focus()
+            }}
+          />
+        </>
+      }
     >
-      {/* Linker Bereich: Suchwahl-Knopf und Sicherheitsindikator */}
-      <div className="flex shrink-0 items-center gap-1.5 mr-2">
-        <SuchwahlKnopf kompakt beiOffenAenderung={setSuchwahlOffen} />
-        {zeigeSicherheit && (
-          <span className="pointer-events-none flex items-center text-on-surface-variant">
-            {sicher ? (
-              <Lock className="h-3.5 w-3.5 text-status-success" aria-label={t('browser.adresse.sicher')} role="img" />
-            ) : unsicher ? (
-              <LockOpen className="h-3.5 w-3.5 text-status-warning" aria-label={t('browser.adresse.unsicher')} role="img" />
-            ) : (
-              <Globe className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
-          </span>
-        )}
-      </div>
-
       {/* Eingabefeld im flexiblen Raum */}
       <input
         ref={feld}
@@ -168,23 +184,8 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
           }
         }}
       />
-
-      {/* Rechter Bereich: Status und Sprachsuche */}
-      <div className="flex shrink-0 items-center gap-1.5 ml-2">
-        {!tippt && tab?.status && (
-          <span className="pointer-events-none max-w-[200px] truncate rounded-full bg-surface-container-high px-2 py-0.5 text-label-sm text-on-surface-variant">
-            {tab.status}
-          </span>
-        )}
-        <SprachsucheKnopf
-          onErgebnis={(sttText) => {
-            setText((alt) => (alt ? `${alt.trim()} ${sttText}` : sttText))
-            setTippt(true)
-            feld.current?.focus()
-          }}
-        />
-      </div>
       {offen &&
+
         createPortal(
           <ul
             ref={liste}
@@ -229,6 +230,7 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
           </ul>,
           document.body,
         )}
-    </div>
+    </Omnibox>
   )
 })
+

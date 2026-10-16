@@ -27,6 +27,7 @@
   --dna-danger: 0 70% 55%;
   --dna-radius-control: .65rem;
   --dna-radius-panel: 1rem;
+  --dna-radius-omnibox: 9999px;
   --dna-shadow-panel: 0 20px 48px hsl(0 0% 0% / .38);
 
   /* Der Sprachschwarm (`@maunting/design-dna/swarm`). Leuchten und Eis sind
