@@ -124,6 +124,7 @@ interface VertikalerTabKnotenProps {
   i: number
   dropZielIndex: number | null
   dropAlsKindVon: string | null
+  pointerDown: (e: React.PointerEvent<HTMLElement>, tab: Tab, titel: string) => void
   dragStart: (e: DragEvent<HTMLDivElement>, tab: Tab, titel: string) => void
   dragEnde: (e: DragEvent<HTMLDivElement>, tab: Tab, titel: string) => void
   behandleDrop: (e: DragEvent, zielIndex: number, elternId?: string | null) => void
@@ -148,6 +149,7 @@ function VertikalerTabKnoten({
   i,
   dropZielIndex,
   dropAlsKindVon,
+  pointerDown,
   dragStart,
   dragEnde,
   behandleDrop,
@@ -160,6 +162,7 @@ function VertikalerTabKnoten({
   const { t } = useTranslation()
   const tab = knoten.tab
   const leistenname = useLeistenname(titel, 'rechts')
+  const { onPointerDown: pDown, ...leistennameRest } = leistenname
   const split = useTabsStore((s) => s.split)
   const aktivId = useTabsStore((s) => s.aktivId)
   const istImSplit = split ? (tab.id === split.sekundaerId || tab.id === aktivId) : false
@@ -171,10 +174,13 @@ function VertikalerTabKnoten({
         type="button"
         role="treeitem"
         aria-selected={aktiv}
-        onPointerDown={(e) => pointerDown(e, tab, titel)}
+        onPointerDown={(e) => {
+          pDown()
+          pointerDown(e, tab, titel)
+        }}
         onClick={() => aktivieren(tab.id)}
         onAuxClick={(e) => e.button === 1 && schliessen(tab.id)}
-        {...leistenname}
+        {...leistennameRest}
         className={`group relative flex h-9 w-full items-center justify-center rounded-lg transition-colors ${
           aktiv
             ? 'bg-surface-container-highest text-primary shadow-sm'
@@ -217,7 +223,10 @@ function VertikalerTabKnoten({
         aria-selected={aktiv}
         tabIndex={aktiv ? 0 : -1}
         draggable
-        onPointerDown={(e) => pointerDown(e, tab, titel)}
+        onPointerDown={(e) => {
+          pDown()
+          pointerDown(e, tab, titel)
+        }}
         onDragStart={(e) => dragStart(e, tab, titel)}
         onDragEnd={(e) => dragEnde(e, tab, titel)}
         onDragOver={(e) => {
@@ -245,7 +254,7 @@ function VertikalerTabKnoten({
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') aktivieren(tab.id)
         }}
-        {...leistenname}
+        {...leistennameRest}
         style={{ paddingLeft: `${knoten.ebene * 14 + 8}px` }}
         className={`group flex h-8 items-center gap-1.5 rounded-lg pr-1.5 text-label-sm cursor-default transition-all duration-150 ${
           aktiv
@@ -304,10 +313,17 @@ function VertikalerTabKnoten({
         {/* In geteilter Ansicht */}
         {istImSplit && (
           <span
-            className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-primary"
-            title={t('browser.split.aktivBadge', { defaultValue: 'In geteilter Ansicht' })}
+            className={`flex h-4 items-center gap-0.5 rounded px-1 text-label-xs font-semibold ${
+              aktiv ? 'bg-primary/20 text-primary' : 'bg-surface-container-highest/60 text-on-surface-variant'
+            }`}
+            title={
+              tab.id === aktivId
+                ? t('browser.split.primaerBadge', { defaultValue: 'Geteilte Ansicht: Links' })
+                : t('browser.split.sekundaerBadge', { defaultValue: 'Geteilte Ansicht: Rechts' })
+            }
           >
-            <Columns2 className="h-3.5 w-3.5" aria-hidden="true" />
+            <Columns2 className="h-3 w-3" aria-hidden="true" />
+            <span className="text-[10px]">{tab.id === aktivId ? 'L' : 'R'}</span>
           </span>
         )}
 
@@ -340,6 +356,8 @@ export function VertikaleTableiste() {
 
   const tabs = useTabsStore((s) => s.tabs)
   const aktivId = useTabsStore((s) => s.aktivId)
+  const split = useTabsStore((s) => s.split)
+  const wirksamAktivId = split && split.aktiveHaelfte === 'sekundaer' ? split.sekundaerId : aktivId
   const neuerTab = useTabsStore((s) => s.neuerTab)
   const schliessen = useTabsStore((s) => s.schliessen)
   const aktivieren = useTabsStore((s) => s.aktivieren)
@@ -796,7 +814,7 @@ export function VertikaleTableiste() {
         {baumKnoten.map((knoten, i) => {
           if (!knoten.sichtbar) return null
           const tab = knoten.tab
-          const aktiv = tab.id === aktivId
+          const aktiv = tab.id === wirksamAktivId
           const titel = tabTitel(tab, {
             neu: t('browser.tabs.neu'),
             einstellungen: t('browser.start.anpassen'),
@@ -812,6 +830,7 @@ export function VertikaleTableiste() {
               i={i}
               dropZielIndex={dropZielIndex}
               dropAlsKindVon={dropAlsKindVon}
+              pointerDown={pointerDown}
               dragStart={dragStart}
               dragEnde={dragEnde}
               behandleDrop={behandleDrop}

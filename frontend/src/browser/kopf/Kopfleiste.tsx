@@ -731,10 +731,17 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
       </span>
       {istImSplit && (
         <span
-          className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-primary"
-          title={t('browser.split.aktivBadge', { defaultValue: 'In geteilter Ansicht' })}
+          className={`flex h-4 items-center gap-0.5 rounded px-1 text-label-xs font-semibold ${
+            aktiv ? 'bg-primary/20 text-primary' : 'bg-surface-container-highest/60 text-on-surface-variant'
+          }`}
+          title={
+            tab.id === aktivId
+              ? t('browser.split.primaerBadge', { defaultValue: 'Geteilte Ansicht: Links' })
+              : t('browser.split.sekundaerBadge', { defaultValue: 'Geteilte Ansicht: Rechts' })
+          }
         >
           <Columns2 className="h-3 w-3" aria-hidden="true" />
+          <span className="text-[10px]">{tab.id === aktivId ? 'L' : 'R'}</span>
         </span>
       )}
       {tab.ruhe && <Moon className="h-3 w-3 shrink-0 text-on-surface-variant" aria-hidden="true" />}
@@ -760,6 +767,8 @@ export function Kopfleiste() {
   const { t } = useTranslation()
   const tabs = useTabsStore((s) => s.tabs)
   const aktivId = useTabsStore((s) => s.aktivId)
+  const split = useTabsStore((s) => s.split)
+  const wirksamAktivId = split && split.aktiveHaelfte === 'sekundaer' ? split.sekundaerId : aktivId
   const neuerTab = useTabsStore((s) => s.neuerTab)
   const startseite = useTabsStore((s) => s.startseite)
   const privatAus = useEinstellungenStore((s) => s.ausgeblendet.includes('privaterTab'))
@@ -796,7 +805,7 @@ export function Kopfleiste() {
     if (typeof aktivEl?.scrollIntoView === 'function') {
       aktivEl.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' })
     }
-  }, [aktivId, tabAusrichtung])
+  }, [wirksamAktivId, tabAusrichtung])
 
   const behandleMausrad = (e: WheelEvent<HTMLDivElement>) => {
     if (e.deltaY !== 0) {
@@ -1009,7 +1018,7 @@ export function Kopfleiste() {
                 )}
                 <TabReiter
                   tab={tab}
-                  aktiv={tab.id === aktivId}
+                  aktiv={tab.id === wirksamAktivId}
                   index={i}
                   onHoverZieh={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect()

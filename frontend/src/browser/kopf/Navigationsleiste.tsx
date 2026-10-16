@@ -8,7 +8,7 @@
  * Seite, und eine Webview liegt immer über der Oberfläche.
  */
 import { forwardRef, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, RotateCw, ShieldCheck, ShieldOff, Star, X } from 'lucide-react'
+import { ArrowLeft, ArrowLeftRight, ArrowRight, Columns2, RotateCw, ShieldCheck, ShieldOff, Star, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Ankerfenster, Kurzinfo, Switch } from '@/Singra/UI'
@@ -17,7 +17,7 @@ import { useEinstellungenStore } from '../services/einstellungenStore'
 
 import { schildPausiert, seitenHost, useGeraetKonfig } from '../services/geraetKonfig'
 import { istIntern, istWebseite } from '../services/intern'
-import { useAktiverTab, useTabsStore } from '../services/tabsStore'
+import { useAktiverTab, useSplitZustand, useTabsStore } from '../services/tabsStore'
 import { useVerlaufStore } from '../services/verlaufStore'
 import { Adresszeile, type AdresszeileGriff } from './Adresszeile'
 import { AufnahmeKnopf } from '../aufnahme/AufnahmeKnopf'
@@ -109,6 +109,11 @@ export const Navigationsleiste = forwardRef<AdresszeileGriff>(function Navigatio
   const webseite = !!tab && istWebseite(tab.url)
   const gemerkt = webseite && lesezeichen.some((l) => l.url === tab!.url)
 
+  const { split, primaerTab, sekundaerTab } = useSplitZustand()
+  const splitFokusSetzen = useTabsStore((s) => s.splitFokusSetzen)
+  const splitTauschen = useTabsStore((s) => s.splitTauschen)
+  const splitBeenden = useTabsStore((s) => s.splitBeenden)
+
   return (
     <div className="flex h-12 shrink-0 items-center gap-1 bg-surface-container px-2">
       <Knopf name={t('browser.nav.zurueck')} onClick={() => aktion('zurueck')} disabled={!tab?.zurueck && !tab?.vorher}>
@@ -127,6 +132,54 @@ export const Navigationsleiste = forwardRef<AdresszeileGriff>(function Navigatio
         </Knopf>
       )}
       <Adresszeile ref={adresszeile} />
+      {split && (
+        <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-outline-variant/40 bg-surface-container-high/70 p-0.5">
+          <button
+            type="button"
+            onClick={() => splitFokusSetzen('primaer')}
+            title={t('browser.split.fokusPrimaer', { defaultValue: 'Linke Hälfte steuern' })}
+            className={`flex items-center gap-1 rounded px-2 py-1 text-label-xs font-medium transition-colors ${
+              split.aktiveHaelfte === 'primaer'
+                ? 'bg-primary text-on-primary shadow-sm'
+                : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest/60'
+            }`}
+          >
+            <Columns2 className="h-3 w-3" />
+            <span className="hidden xl:inline max-w-[80px] truncate">{primaerTab?.titel || 'Links'}</span>
+            <span className="xl:hidden">1</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => splitFokusSetzen('sekundaer')}
+            title={t('browser.split.fokusSekundaer', { defaultValue: 'Rechte Hälfte steuern' })}
+            className={`flex items-center gap-1 rounded px-2 py-1 text-label-xs font-medium transition-colors ${
+              split.aktiveHaelfte === 'sekundaer'
+                ? 'bg-primary text-on-primary shadow-sm'
+                : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest/60'
+            }`}
+          >
+            <Columns2 className="h-3 w-3" />
+            <span className="hidden xl:inline max-w-[80px] truncate">{sekundaerTab?.titel || 'Rechts'}</span>
+            <span className="xl:hidden">2</span>
+          </button>
+          <button
+            type="button"
+            onClick={splitTauschen}
+            title={t('browser.split.tauschen', { defaultValue: 'Seiten tauschen' })}
+            className="flex h-6 w-6 items-center justify-center rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest transition-colors"
+          >
+            <ArrowLeftRight className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={splitBeenden}
+            title={t('browser.split.schliessen', { defaultValue: 'Geteilte Ansicht beenden' })}
+            className="flex h-6 w-6 items-center justify-center rounded text-on-surface-variant hover:text-error hover:bg-error/10 transition-colors"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
       {!ausgeblendet.includes('schild') && <div className="hidden sm:flex shrink-0"><Schild /></div>}
       {!ausgeblendet.includes('stern') && (
         <div className="hidden md:flex shrink-0">

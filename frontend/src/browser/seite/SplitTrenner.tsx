@@ -155,10 +155,10 @@ export function SplitTrenner({ richtung, anteil, onAnteilAendern, containerRef }
       onKeyDown={onKeyDown}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className={`group relative z-30 flex shrink-0 items-center justify-center select-none outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+      className={`group relative z-30 flex shrink-0 items-center justify-center select-none outline-none focus-visible:ring-2 focus-visible:ring-primary bg-surface-container ${
         istHorizontal
-          ? 'h-full w-4 -mx-2 cursor-col-resize touch-none'
-          : 'w-full h-4 -my-2 cursor-row-resize touch-none'
+          ? 'h-full w-2 cursor-col-resize touch-none'
+          : 'w-full h-2 cursor-row-resize touch-none'
       }`}
       style={{
         WebkitUserSelect: 'none',

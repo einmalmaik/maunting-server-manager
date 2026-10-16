@@ -427,9 +427,10 @@ export function Seitenflaeche() {
             <EinzelInhalt tab={primaerTab} aktion={aktion} />
           </div>
 
-          {/* Windows Snap-Assist Vorschau-Overlay (pointer-events-none, überlagert die Zielhälfte) */}
+          {/* Windows Snap-Assist Vorschau-Overlay (überlagert die Zielhälfte und verdeckt temporär den nativen HWND für butterweiche Darstellung) */}
           {snapVorschau && (
             <div
+              data-msb-verdeckt="true"
               style={{
                 position: 'absolute',
                 left: snapVorschau.kante === 'rechts' ? '50%' : 0,
@@ -438,10 +439,11 @@ export function Seitenflaeche() {
                 bottom: snapVorschau.kante === 'oben' ? '50%' : 0,
                 width: snapVorschau.kante === 'links' || snapVorschau.kante === 'rechts' ? '50%' : '100%',
                 height: snapVorschau.kante === 'oben' || snapVorschau.kante === 'unten' ? '50%' : '100%',
+                transition: 'all 200ms cubic-bezier(0.16, 1, 0.3, 1)',
               }}
-              className="pointer-events-none z-50 flex flex-col items-center justify-center gap-3 p-6 select-none bg-surface-container/85 border-2 border-dashed border-primary/70 backdrop-blur-md animate-scale-in"
+              className="pointer-events-none z-50 flex flex-col items-center justify-center gap-3 p-6 select-none bg-primary/20 border-2 border-primary/80 backdrop-blur-md rounded-xl shadow-[0_0_30px_rgba(99,102,241,0.3)] animate-scale-in"
             >
-              <div className="flex items-center gap-2.5 rounded-xl border border-primary/40 bg-surface/90 px-4 py-2.5 shadow-xl">
+              <div className="flex items-center gap-2.5 rounded-xl border border-primary/40 bg-surface/95 px-4 py-2.5 shadow-2xl">
                 {snapVorschau.favicon ? (
                   <img src={snapVorschau.favicon} alt="" className="h-4 w-4 rounded shrink-0" />
                 ) : (
