@@ -10,14 +10,14 @@
  * Am Handy gibt es ein Suchfeld, die Leiste unten; hier steht dann nur die
  * Wahl der Suchmaschine. Ein zweites Feld daneben war schmal und tat dasselbe.
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, EyeOff, SlidersHorizontal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/Singra/UI'
 
 import { istAndroid } from '../services/plattform'
-import { useEinstellungenStore, type Hintergrund } from '../services/einstellungenStore'
+import { useEinstellungenStore } from '../services/einstellungenStore'
 import { useTabsStore } from '../services/tabsStore'
 import { vorwaermenWhisperModell } from '../services/lokalesWhisper'
 import { SuchEingabeLeiste } from '../kopf/SuchEingabeLeiste'
@@ -25,28 +25,29 @@ import { Schnellzugriffe } from './start/Schnellzugriffe'
 import { bewegungReduziert, Statistik } from './start/SchildStatistik'
 import { WidgetAngebot } from './start/WidgetAngebot'
 import { Widgets } from './start/Widgets'
+import { BILD_HINTERGRUENDE, HINTERGRUENDE, hintergrundStil } from './hintergruende'
 
-export const HINTERGRUENDE: Record<Exclude<Hintergrund, 'eigen'>, string> = {
-  schlicht: 'none',
-  nacht: 'linear-gradient(135deg, #090a1a 0%, #17153b 50%, #0c0d1b 100%)',
-  wald: 'linear-gradient(135deg, #021a14 0%, #063c2c 50%, #03120e 100%)',
-  tiefsee: 'linear-gradient(135deg, #050b14 0%, #0d2137 50%, #030712 100%)',
-}
+export { HINTERGRUENDE, hintergrundStil }
 
-export function hintergrundStil(hintergrund: Hintergrund, eigenesBild: string | null): React.CSSProperties {
-  if (hintergrund === 'eigen' && eigenesBild) {
-    return { backgroundImage: `url("${eigenesBild}")`, backgroundSize: 'cover', backgroundPosition: 'center' }
-  }
-  const verlauf = HINTERGRUENDE[hintergrund === 'eigen' ? 'schlicht' : hintergrund]
-  return verlauf === 'none' ? {} : { background: verlauf }
-}
 
 export function Startseite({ privat }: { privat: boolean }) {
   const { t } = useTranslation()
   const eingeben = useTabsStore((s) => s.eingeben)
   const einstellungen = useTabsStore((s) => s.einstellungen)
   const hintergrund = useEinstellungenStore((s) => s.hintergrund)
+  const hintergrundBlur = useEinstellungenStore((s) => s.hintergrundBlur)
   const eigenesBild = useEinstellungenStore((s) => s.eigenesBild)
+  const [jetzt, setJetzt] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (hintergrund !== 'wechsel') return
+    const timer = setInterval(() => setJetzt(Date.now()), 60_000)
+    return () => clearInterval(timer)
+  }, [hintergrund])
+
+  const istBild = hintergrund === 'eigen' || hintergrund === 'wechsel' || BILD_HINTERGRUENDE.some((b) => b.id === hintergrund)
+  const blurPx = hintergrundBlur > 0 ? (hintergrundBlur / 100) * 24 : 0
+
   // Private Tabs zählen nicht mit; dort gibt es auch keine Statistik.
   const statistik = useEinstellungenStore((s) => s.statistikZeigen) && !privat
   const huelle = useRef<HTMLDivElement>(null)
@@ -71,8 +72,16 @@ export function Startseite({ privat }: { privat: boolean }) {
 
   return (
     <div ref={huelle} className="relative h-full w-full overflow-hidden overscroll-x-none [--msb-rollen:0]">
-      <div className="pointer-events-none absolute inset-0" style={hintergrundStil(hintergrund, eigenesBild)} />
-      {hintergrund === 'eigen' && eigenesBild && <div className="pointer-events-none absolute inset-0 bg-surface/50" />}
+      <div
+        className="pointer-events-none absolute -inset-6 bg-cover bg-center transition-all duration-300"
+        style={{
+          ...hintergrundStil(hintergrund, eigenesBild, jetzt),
+          filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined,
+          transform: blurPx > 0 ? 'scale(1.05)' : undefined,
+        }}
+      />
+      {istBild && <div className="pointer-events-none absolute inset-0 bg-surface/50" />}
+
       <div
         aria-hidden="true"
         data-msb-schleier=""

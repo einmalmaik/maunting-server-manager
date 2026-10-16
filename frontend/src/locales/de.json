@@ -8811,8 +8811,15 @@
       "nacht": "Nacht",
       "wald": "Wald",
       "tiefsee": "Tiefsee",
+      "wechsel": "Wechselnde Bilder",
+      "erde": "Erde aus dem Orbit",
+      "sonnensystem": "Sonnensystem",
+      "bergwald": "Bergwald",
+      "ozean": "Ozean",
+      "feld": "Sommerfeld",
       "eigen": "Eigenes Bild"
     },
+
     "update": {
       "name": "Updates",
       "hinweis": "Fragt bei GitHub nach einer neuen Version. Installiert wird erst auf deinen Klick.",
@@ -8861,8 +8868,12 @@
       "ordnerWaehlen": "Ordner wählen",
       "ordnerStandard": "Standardordner",
       "hintergrund": "Hintergrund der Startseite",
+      "hintergrundBlur": "Hintergrund-Unschärfe",
+      "kiBilderHinweis": "Standard-Bilder sind KI-generiert und urheberrechtlich unbedenklich.",
       "bildWaehlen": "Eigenes Bild wählen",
       "bildZuGross": "Bitte ein Bild unter 3 MB wählen.",
+      "bildFehler": "Das Bild konnte nicht verarbeitet werden.",
+
       "kopplung": "MSM-Kopplung",
       "gekoppeltMit": "Gekoppelt mit {{adresse}}",
       "gekoppeltOffline": "Gekoppelt mit {{adresse}}, gerade nicht erreichbar",

@@ -10,7 +10,18 @@ import { ablage, passend } from './ablage'
 import { wirksameSuche, type SuchmaschinenId } from './searchEngines'
 import { istGekoppelt, useSitzung } from './sitzung'
 
-export type Hintergrund = 'schlicht' | 'nacht' | 'wald' | 'tiefsee' | 'eigen'
+export type Hintergrund =
+  | 'schlicht'
+  | 'nacht'
+  | 'wald'
+  | 'tiefsee'
+  | 'wechsel'
+  | 'erde'
+  | 'sonnensystem'
+  | 'bergwald'
+  | 'ozean'
+  | 'feld'
+  | 'eigen'
 
 /** Ein eigenes Bild liegt als data:-URI im localStorage; größer passt dort nicht sicher hinein. */
 export const EIGENES_BILD_MAX_BYTES = 3 * 1024 * 1024
@@ -73,6 +84,7 @@ interface EinstellungenZustand {
   suchRegion: string | null
   searxngUrl: string | null
   hintergrund: Hintergrund
+  hintergrundBlur: number
   eigenesBild: string | null
   /** Was der Nutzer ausgeblendet hat: Einträge und Knöpfe. */
   ausgeblendet: Ausblendbar[]
@@ -141,7 +153,8 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       suchmaschine: null,
       suchRegion: null,
       searxngUrl: null,
-      hintergrund: 'schlicht',
+      hintergrund: 'wechsel',
+      hintergrundBlur: 30,
       eigenesBild: null,
       ausgeblendet: [],
       leiste: 'menue',

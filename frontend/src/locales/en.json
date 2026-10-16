@@ -8811,8 +8811,15 @@
       "nacht": "Night",
       "wald": "Forest",
       "tiefsee": "Deep sea",
+      "wechsel": "Rotating images",
+      "erde": "Earth from orbit",
+      "sonnensystem": "Solar system",
+      "bergwald": "Mountain forest",
+      "ozean": "Ocean",
+      "feld": "Summer field",
       "eigen": "Your image"
     },
+
     "update": {
       "name": "Updates",
       "hinweis": "Asks GitHub for a new version. Nothing is installed until you click.",
@@ -8861,8 +8868,12 @@
       "ordnerWaehlen": "Choose folder",
       "ordnerStandard": "Default folder",
       "hintergrund": "Start page background",
+      "hintergrundBlur": "Background blur",
+      "kiBilderHinweis": "Default images are AI-generated and free of copyright concerns.",
       "bildWaehlen": "Choose your own image",
       "bildZuGross": "Please choose an image under 3 MB.",
+      "bildFehler": "The image could not be processed.",
+
       "kopplung": "MSM pairing",
       "gekoppeltMit": "Paired with {{adresse}}",
       "gekoppeltOffline": "Paired with {{adresse}}, currently unreachable",
