@@ -173,6 +173,7 @@ pub fn run() {
             tabs::tab_auslagern,
             tabs::tab_verwerfen,
             tabs::tab_aktion,
+            tabs::tab_seite_zuruecksetzen,
             tabs::tabs_rahmen,
             tabs::tabs_split_setzen,
             tabs::tabs_split_aufheben,

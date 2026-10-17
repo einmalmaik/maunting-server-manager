@@ -8678,7 +8678,13 @@
       "unsicher": "Verbindung nicht verschlüsselt",
       "vorschlaege": "Vorschläge",
       "suchenMit": "„{{begriff}}“ mit {{suchmaschine}} suchen",
-      "linkBereinigtKopiert": "Link ohne Tracking-Parameter kopiert"
+      "linkBereinigtKopiert": "Link ohne Tracking-Parameter kopiert",
+      "sicherheitTitel": "Seiteninformationen & Sicherheit",
+      "sicherHinweis": "Deine Verbindung zu dieser Seite ist geschützt. Daten wie Passwörter oder Cookies bleiben privat.",
+      "unsicherHinweis": "Die Verbindung zu dieser Seite ist nicht verschlüsselt. Sensible Daten sollten hier nicht eingegeben werden.",
+      "seiteZuruecksetzen": "Seite zurücksetzen",
+      "seiteZuruecksetzenHinweis": "Löscht Cookies, Cache und lokalen Speicher dieser Domain und lädt die Seite neu.",
+      "seiteZurueckgesetzt": "Spuren der Seite gelöscht"
     },
     "sprachsuche": {
       "starten": "Sprachsuche starten",

@@ -168,6 +168,8 @@ export const nativ = {
     rufen('tab_auslagern', { url, x: Math.round(x), y: Math.round(y), privat }),
   tabAktion: (id: string, aktion: 'zurueck' | 'vor' | 'neu_laden' | 'anhalten') =>
     rufen('tab_aktion', { id, aktion }),
+  /** Löscht alle Spuren der aktuellen Seite (Cookies, LocalStorage, Cache) und lädt sie neu. */
+  tabSeiteZuruecksetzen: (id: string) => rufen('tab_seite_zuruecksetzen', { id }),
   tabsRahmen: (rahmen: { x: number; y: number; breite: number; hoehe: number }) =>
     nacheinander('tabs_rahmen', { rahmen }),
   tabsSplitSetzen: (

@@ -26,6 +26,7 @@ const BEFEHLE: &[&str] = &[
     "tab_auslagern",
     "tab_verwerfen",
     "tab_aktion",
+    "tab_seite_zuruecksetzen",
     "tabs_rahmen",
     "tabs_split_setzen",
     "tabs_split_aufheben",

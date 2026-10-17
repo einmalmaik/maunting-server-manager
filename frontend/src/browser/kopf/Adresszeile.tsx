@@ -18,6 +18,7 @@ import { bereinigeUrl } from '../services/linkReiniger'
 import { nativ } from '../services/nativ'
 import { baueZielUrl, istAdresse, suchmaschine } from '../services/searchEngines'
 import { suchName, SuchwahlKnopf } from '../services/suchwahl'
+import { SeitenSicherheitPopover } from './SeitenSicherheitPopover'
 import { SprachsucheKnopf } from './SprachsucheKnopf'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 import { useVerlaufStore, vorschlaege, type Eintrag } from '../services/verlaufStore'
@@ -45,11 +46,13 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
 
   const feld = useRef<HTMLInputElement>(null)
   const huelle = useRef<HTMLDivElement>(null)
+  const schlossKnopf = useRef<HTMLButtonElement>(null)
   const liste = useRef<HTMLUListElement>(null)
   const listenId = useId()
   const [text, setText] = useState('')
   const [tippt, setTippt] = useState(false)
   const [markiert, setMarkiert] = useState(0)
+  const [sicherheitOffen, setSicherheitOffen] = useState(false)
 
   // Bei der MSM-Suche steht der Begriff da, nicht `msb://suche?q=…`.
   const begriff = tab ? msmSucheBegriff(tab.url) : null
@@ -106,15 +109,29 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
         <>
           <SuchwahlKnopf kompakt beiOffenAenderung={setSuchwahlOffen} />
           {zeigeSicherheit && (
-            <span className="pointer-events-none flex items-center text-on-surface-variant">
-              {sicher ? (
-                <Lock className="h-3.5 w-3.5 text-status-success" aria-label={t('browser.adresse.sicher')} role="img" />
-              ) : unsicher ? (
-                <LockOpen className="h-3.5 w-3.5 text-status-warning" aria-label={t('browser.adresse.unsicher')} role="img" />
-              ) : (
-                <Globe className="h-3.5 w-3.5" aria-hidden="true" />
-              )}
-            </span>
+            <>
+              <button
+                ref={schlossKnopf}
+                type="button"
+                onClick={() => setSicherheitOffen((o) => !o)}
+                aria-label={t(sicher ? 'browser.adresse.sicher' : 'browser.adresse.unsicher')}
+                className="flex h-5 w-5 items-center justify-center rounded hover:bg-surface-container-highest transition-colors text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                {sicher ? (
+                  <Lock className="h-3.5 w-3.5 text-status-success" role="img" aria-label={t('browser.adresse.sicher')} />
+                ) : unsicher ? (
+                  <LockOpen className="h-3.5 w-3.5 text-status-warning" role="img" aria-label={t('browser.adresse.unsicher')} />
+                ) : (
+                  <Globe className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+              </button>
+              <SeitenSicherheitPopover
+                offen={sicherheitOffen}
+                onSchliessen={() => setSicherheitOffen(false)}
+                anker={schlossKnopf}
+                tab={tab}
+              />
+            </>
           )}
         </>
       }

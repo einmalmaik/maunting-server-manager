@@ -23,6 +23,7 @@ permissions = [
   "allow-tab-auslagern",
   "allow-tab-verwerfen",
   "allow-tab-aktion",
+  "allow-tab-seite-zuruecksetzen",
   "allow-tabs-rahmen",
   "allow-tabs-split-setzen",
   "allow-tabs-split-aufheben",

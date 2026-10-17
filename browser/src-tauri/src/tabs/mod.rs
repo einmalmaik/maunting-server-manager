@@ -270,6 +270,20 @@ pub fn tab_aktion(app: AppHandle, id: String, aktion: String) -> Result<(), Stri
     plattform::aktion(&app, &id, &aktion)
 }
 
+/// Löscht alle Spuren der aktuellen Seite (Cookies, LocalStorage, Cache) und lädt sie neu.
+#[tauri::command(async)]
+pub fn tab_seite_zuruecksetzen(app: AppHandle, id: String) -> Result<(), String> {
+    id_pruefen(&id)?;
+    #[cfg(windows)]
+    {
+        desktop::seite_zuruecksetzen(&app, &id)
+    }
+    #[cfg(not(windows))]
+    {
+        plattform::aktion(&app, &id, "neu_laden")
+    }
+}
+
 /// Wo der Inhaltsbereich im Fenster liegt (logische Pixel).
 #[tauri::command(async)]
 pub fn tabs_rahmen(app: AppHandle, tabs: State<'_, Tabs>, rahmen: Rahmen) -> Result<(), String> {

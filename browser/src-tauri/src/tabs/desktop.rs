@@ -429,6 +429,55 @@ pub fn aktion(app: &AppHandle, id: &str, aktion: &str) -> Result<(), String> {
     })
 }
 
+/// Löscht Cookies, lokalen Speicher und Cache gezielt für die aktuelle Herkunft (Origin)
+/// dieses Tabs und lädt die Seite anschließend neu.
+pub fn seite_zuruecksetzen(app: &AppHandle, id: &str) -> Result<(), String> {
+    mit_tab(app, id, move |tab| unsafe {
+        let url_str = webview2::quelle(&tab.core);
+        if url_str.is_empty() {
+            return Ok(());
+        }
+        if let Ok(parsed) = url::Url::parse(&url_str) {
+            let origin = parsed.origin().ascii_serialization();
+            let host = parsed.host_str().unwrap_or("").to_string();
+
+            // 1. CDP Storage.clearDataForOrigin: leert Cookies, LocalStorage, IndexedDB, Cache etc.
+            let param_storage = serde_json::json!({
+                "origin": origin,
+                "storageTypes": "cookies,storage,local_storage,indexeddb,websql,service_workers,cache_storage"
+            });
+            let _ = tab.core.CallDevToolsProtocolMethod(
+                &windows::core::HSTRING::from("Storage.clearDataForOrigin"),
+                &windows::core::HSTRING::from(param_storage.to_string()),
+                None,
+            );
+
+            // 2. CDP Network.deleteCookies für den spezifischen Host
+            if !host.is_empty() {
+                let param_network = serde_json::json!({
+                    "domain": host
+                });
+                let _ = tab.core.CallDevToolsProtocolMethod(
+                    &windows::core::HSTRING::from("Network.deleteCookies"),
+                    &windows::core::HSTRING::from(param_network.to_string()),
+                    None,
+                );
+            }
+
+            // 3. LocalStorage & SessionStorage via Runtime.evaluate (ohne Nutzergeste) leeren
+            webview2::ohne_geste(
+                &tab.core,
+                "try { localStorage.clear(); sessionStorage.clear(); } catch(e) {}",
+                |_| {},
+            );
+
+            // 4. Frisches Neuladen der Seite
+            let _ = tab.core.Reload();
+        }
+        Ok(())
+    })
+}
+
 /// Ein Tab will den ganzen Bildschirm (Video) oder gibt ihn zurück. Läuft als
 /// Rückruf der WebView2 schon auf dem UI-Faden.
 pub fn vollbild(app: &AppHandle, id: &str, an: bool) {

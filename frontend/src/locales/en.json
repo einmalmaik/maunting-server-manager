@@ -8678,7 +8678,13 @@
       "unsicher": "Connection not encrypted",
       "vorschlaege": "Suggestions",
       "suchenMit": "Search {{suchmaschine}} for “{{begriff}}”",
-      "linkBereinigtKopiert": "Link copied without tracking parameters"
+      "linkBereinigtKopiert": "Link copied without tracking parameters",
+      "sicherheitTitel": "Site information & security",
+      "sicherHinweis": "Your connection to this site is encrypted. Information such as passwords or cookies remains private.",
+      "unsicherHinweis": "The connection to this site is not encrypted. Sensitive data should not be entered here.",
+      "seiteZuruecksetzen": "Reset site",
+      "seiteZuruecksetzenHinweis": "Clears cookies, cache, and local storage for this domain and reloads the page.",
+      "seiteZurueckgesetzt": "Site data cleared"
     },
     "sprachsuche": {
       "starten": "Start voice search",
