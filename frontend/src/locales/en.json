@@ -8677,7 +8677,8 @@
       "sicher": "Connection encrypted",
       "unsicher": "Connection not encrypted",
       "vorschlaege": "Suggestions",
-      "suchenMit": "Search {{suchmaschine}} for “{{begriff}}”"
+      "suchenMit": "Search {{suchmaschine}} for “{{begriff}}”",
+      "linkBereinigtKopiert": "Link copied without tracking parameters"
     },
     "sprachsuche": {
       "starten": "Start voice search",
@@ -8876,6 +8877,8 @@
       "eigeneInstanzHinweis": "Ohne eigene Adresse sucht der Browser über die Such-Instanz deines gekoppelten Servers.",
       "schild": "Block ads and trackers",
       "schildHinweis": "Also rejects cookie notices where possible and hides known notices that cannot be rejected. Tracking parameters such as “utm_source” are removed from links. Applies to every site except the exceptions below.",
+      "cleanCopy": "Clean links when copying",
+      "cleanCopyHinweis": "Automatically removes tracking and campaign parameters (e.g. utm_*, fbclid, si) when copying web addresses.",
       "standard": {
         "name": "Default browser",
         "ist": "Links from other apps open here.",

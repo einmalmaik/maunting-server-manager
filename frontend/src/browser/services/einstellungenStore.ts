@@ -125,6 +125,8 @@ interface EinstellungenZustand {
   updatesSuchen: boolean
   tabAusrichtung: TabAusrichtung
   vertikaleTabsEingeklappt: boolean
+  /** Beim Kopieren von URLs Tracking-Parameter automatisch entfernen. */
+  cleanCopy: boolean
 
   setzen: (teil: Partial<Omit<EinstellungenZustand, 'setzen' | 'umschalten'>>) => void
   umschalten: (was: Ausblendbar) => void
@@ -179,6 +181,7 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       updatesSuchen: true,
       tabAusrichtung: 'vertikal',
       vertikaleTabsEingeklappt: false,
+      cleanCopy: true,
 
       setzen: (teil) => set(teil),
       umschalten: (was) =>

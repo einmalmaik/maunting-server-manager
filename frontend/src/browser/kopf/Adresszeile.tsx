@@ -8,11 +8,13 @@ import { createPortal } from 'react-dom'
 import { Bookmark, Clock, Globe, Lock, LockOpen, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { toast } from '@/stores/toastStore'
 import { useAnkerLage } from '@/Singra/UI/Ankerlage'
 import { Omnibox } from '@/Singra/UI'
 
 import { useEinstellungenStore, useWirksameSuche } from '../services/einstellungenStore'
 import { msmSucheBegriff } from '../services/intern'
+import { bereinigeUrl } from '../services/linkReiniger'
 import { nativ } from '../services/nativ'
 import { baueZielUrl, istAdresse, suchmaschine } from '../services/searchEngines'
 import { suchName, SuchwahlKnopf } from '../services/suchwahl'
@@ -37,6 +39,7 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
   const oeffnen = useTabsStore((s) => s.oeffnen)
   const suche = suchmaschine(useWirksameSuche())
   const searxngUrl = useEinstellungenStore((s) => s.searxngUrl)
+  const cleanCopy = useEinstellungenStore((s) => s.cleanCopy)
   const verlauf = useVerlaufStore((s) => s.verlauf)
   const lesezeichen = useVerlaufStore((s) => s.lesezeichen)
 
@@ -164,6 +167,17 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
           setText(e.target.value)
           setTippt(true)
           setMarkiert(0)
+        }}
+        onCopy={(e) => {
+          if (!cleanCopy) return
+          const selection = window.getSelection()?.toString() || text
+          if (!selection) return
+          const ergebnis = bereinigeUrl(selection)
+          if (ergebnis.bereinigt) {
+            e.preventDefault()
+            e.clipboardData.setData('text/plain', ergebnis.url)
+            toast.success(t('browser.adresse.linkBereinigtKopiert'))
+          }
         }}
         onKeyDown={(e) => {
           if (e.key === 'ArrowDown' && offen) {

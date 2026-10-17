@@ -8677,7 +8677,8 @@
       "sicher": "Verbindung verschlüsselt",
       "unsicher": "Verbindung nicht verschlüsselt",
       "vorschlaege": "Vorschläge",
-      "suchenMit": "„{{begriff}}“ mit {{suchmaschine}} suchen"
+      "suchenMit": "„{{begriff}}“ mit {{suchmaschine}} suchen",
+      "linkBereinigtKopiert": "Link ohne Tracking-Parameter kopiert"
     },
     "sprachsuche": {
       "starten": "Sprachsuche starten",
@@ -8876,6 +8877,8 @@
       "eigeneInstanzHinweis": "Ohne eigene Adresse sucht der Browser über die Such-Instanz deines gekoppelten Servers.",
       "schild": "Werbung und Tracker blockieren",
       "schildHinweis": "Lehnt außerdem Cookie-Hinweise ab, wo das geht, und blendet bekannte Hinweise aus, die sich nicht ablehnen lassen. Tracking-Parameter wie „utm_source“ nimmt es aus Links. Gilt für alle Seiten außer den Ausnahmen darunter.",
+      "cleanCopy": "Links beim Kopieren bereinigen",
+      "cleanCopyHinweis": "Entfernt beim Kopieren von Internetadressen automatisch Tracking- und Kampagnenparameter (z. B. utm_*, fbclid, si).",
       "standard": {
         "name": "Standardbrowser",
         "ist": "Links aus anderen Apps öffnen hier.",
